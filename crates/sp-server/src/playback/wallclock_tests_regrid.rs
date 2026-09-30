@@ -145,6 +145,161 @@ fn a_wall_two_epochs_behind_adopts_both_and_a_wall_built_after_them_starts_at_th
 }
 
 #[test]
+fn a_wall_built_between_a_step_and_its_registration_follows_the_step_itself() {
+    // Review r1: a wall built right after a date step, before any wall
+    // registered it, JOINS the line the busy wall published at its last tick
+    // (the pre-step line), so it reads the step itself at its first tick and
+    // adopts the one N, on the one timeline. Anchored on the stepped UTC at
+    // K = 0 instead, it would sit S − r off every other wall for good.
+    for (step, n) in [(2_603_000, 7), (-15_000_000, -45)] {
+        let clk = VirtualClock::new(0);
+        let fleet = Arc::new(FleetShift::default());
+        let mut busy = wall_on(&clk, &fleet);
+        for _ in 0..5 {
+            frame(&clk, &mut [&mut busy]);
+        }
+        clk.step_utc(step);
+        let mut late = wall_on(&clk, &fleet);
+        frame(&clk, &mut [&mut busy, &mut late]);
+        assert_eq!((fleet.slots(), fleet.epochs()), (n, 1), "{step}: one epoch");
+        assert_eq!(late.shift().slots, n, "{step}");
+        assert_eq!(late.now_100ns(), busy.now_100ns(), "{step}: one timeline");
+    }
+}
+
+#[test]
+fn a_wall_idle_for_20_min_rejoins_the_fleets_line_and_registers_nothing() {
+    // Review r1 🔴 C: the legacy submit wall ticks only per submitted frame.
+    // Idle 20 min at ±30 ppm its line drifted ±36 ms from UTC; read as a
+    // date step, registering it would relabel every paced sender, whose
+    // timelines never moved. It rejoins the busy wall's line instead: a jump
+    // ahead, or ONE hold, no epoch. With a +260.3 ms step during the gap it
+    // lands on K = 7 too. (step, ppm, the rejoin's movement: pins from a
+    // scratch Python model of the walls + the registry.)
+    for (step, ppm, jump, k) in [
+        (0, 30, 359_999, 0),
+        (0, -30, -360_000, 0),
+        (2_603_000, 30, 629_685, 7),
+        (2_603_000, -30, -90_354, 7),
+    ] {
+        let clk = VirtualClock::new(ppm);
+        let fleet = Arc::new(FleetShift::default());
+        let mut busy = wall_on(&clk, &fleet);
+        let mut idle = wall_on(&clk, &fleet);
+        frame(&clk, &mut [&mut busy, &mut idle]);
+        for i in 0..36_000 {
+            if i == 18_000 {
+                clk.step_utc(step);
+            }
+            frame(&clk, &mut [&mut busy]);
+        }
+        frame(&clk, &mut [&mut busy, &mut idle]);
+        let epochs = usize::from(step != 0);
+        assert_eq!(
+            (fleet.slots(), fleet.epochs()),
+            (k, epochs),
+            "{step} {ppm}: only the busy wall's step is an epoch"
+        );
+        let shift = idle.shift();
+        assert_eq!(
+            (
+                shift.slots,
+                shift.epochs,
+                shift.regrids,
+                shift.last_jump_100ns
+            ),
+            (k, epochs, 1, jump),
+            "{step} {ppm}"
+        );
+        assert_eq!(idle.anchor_stats().steps_followed, 0, "{step} {ppm}");
+        // Past the hold (up to 36 ms): on the busy wall's line.
+        clk.advance_ns(40_000_000);
+        assert_eq!(idle.now_100ns(), busy.now_100ns(), "{step} {ppm}");
+    }
+    // Alone (no wall kept ticking): it rejoins the realtime clock itself.
+    let clk = VirtualClock::new(30);
+    let fleet = Arc::new(FleetShift::default());
+    let mut alone = wall_on(&clk, &fleet);
+    frame(&clk, &mut [&mut alone]);
+    clk.advance_ns(1_200_000_000_000);
+    alone.tick();
+    assert_eq!((fleet.slots(), fleet.epochs()), (0, 0));
+    assert_eq!(alone.now_100ns(), clk.truth_100ns());
+}
+
+#[test]
+fn a_wall_rejoins_only_after_more_than_10_s_without_a_tick() {
+    let clk = VirtualClock::new(0);
+    let fleet = Arc::new(FleetShift::default());
+    let mut wall = wall_on(&clk, &fleet);
+    frame(&clk, &mut [&mut wall]);
+    clk.advance_ns(10_000_000_000);
+    wall.tick();
+    assert_eq!(wall.shift().regrids, 0, "exactly 10 s: a normal tick");
+    clk.advance_ns(10_000_000_100);
+    wall.tick();
+    assert_eq!(wall.shift().regrids, 1, "10 s + 100 ns: a rejoin");
+    assert_eq!(wall.shift().last_jump_100ns, 0, "no drift, nothing moved");
+    assert_eq!(wall.now_100ns(), clk.truth_100ns());
+}
+
+#[test]
+fn a_wall_reading_a_registered_step_1_3_ms_smaller_adopts_its_n_and_registers_nothing() {
+    // Review r1 🟡 D: a wall whose line is 1.3 ms off (a lone-outlier
+    // resample shortly before the step) reads the step 1.3 ms smaller than
+    // the wall that registered it. Within the 2 ms step threshold that is
+    // its own line's error: it adopts N = 7, its timeline moves r − 1.3 ms
+    // ahead. It never registers a −1.3 ms epoch (N = −1), which would leave
+    // every other wall's stamps a slot stale for good.
+    let clk = VirtualClock::new(0);
+    let fleet = Arc::new(FleetShift::default());
+    let mut wall = wall_on(&clk, &fleet);
+    frame(&clk, &mut [&mut wall]);
+    // Another wall registered +260.3 ms.
+    let _ = fleet.follow(0, 2_603_000);
+    clk.step_utc(2_590_000);
+    clk.advance_ns(FRAME_NS);
+    let before = wall.now_100ns();
+    wall.tick();
+    assert_eq!((fleet.slots(), fleet.epochs()), (7, 1));
+    assert_eq!(wall.shift().slots, 7);
+    assert_eq!(wall.now_100ns() - before, 256_666, "r less the 1.3 ms");
+    assert_eq!(wall.shift().last_remainder_100ns, 256_666);
+}
+
+#[test]
+fn the_line_runs_on_through_a_residue_hold_the_wall_reading_freezes() {
+    // The wall reads the step 1 ms smaller than the wall that registered it
+    // (D(7) − 500 µs vs D(7) + 500 µs): it adopts N = 7 and holds 500 µs.
+    // The reading freezes; the LINE (VBAN's clock reads it) sits 500 µs
+    // below it and runs on, and they meet when the hold ends.
+    let clk = VirtualClock::new(0);
+    let fleet = Arc::new(FleetShift::default());
+    let mut wall = wall_on(&clk, &fleet);
+    frame(&clk, &mut [&mut wall]);
+    assert_eq!(wall.line_100ns(), wall.now_100ns(), "no hold: one value");
+    let _ = fleet.follow(0, shift_100ns(7) + 5_000);
+    clk.step_utc(shift_100ns(7) - 5_000);
+    clk.advance_ns(FRAME_NS);
+    let before = wall.now_100ns();
+    wall.tick();
+    assert_eq!(wall.shift().slots, 7);
+    assert_eq!(wall.shift().last_jump_100ns, -5_000, "ONE hold of 500 µs");
+    assert_eq!(wall.now_100ns(), before, "the reading froze");
+    assert_eq!(wall.line_100ns(), before - 5_000, "the line moved back");
+    clk.advance_ns(200_000);
+    assert_eq!(wall.now_100ns(), before);
+    assert_eq!(wall.line_100ns(), before - 3_000, "and runs on");
+    clk.advance_ns(800_000);
+    assert_eq!(
+        wall.line_100ns(),
+        wall.now_100ns(),
+        "past the hold: one value"
+    );
+    assert_eq!(wall.now_100ns(), before + 5_000);
+}
+
+#[test]
 fn a_wall_on_its_own_registry_never_moves_another_registry() {
     // Tests build their own registry: a step followed on one never reaches
     // another (and never the process-wide one a production wall reads).

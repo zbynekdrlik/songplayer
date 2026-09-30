@@ -109,6 +109,29 @@ fn wire_stamps_are_floored_and_never_above_the_fleet_clock_for_a_followed_and_a_
 }
 
 #[test]
+fn a_forwarded_audio_stamp_keeps_its_offset_from_the_video_under_the_relabel() {
+    // Review r1 🔴 A: `ProgramOutput::submit` forwards a source's OWN audio
+    // stamp. The wire edge moves it by the video's relabel (K_F read once),
+    // so its offset from the video survives — at K = 0 the stamp is
+    // unchanged, never floored onto the grid (0 on every paced path, where
+    // audio = video).
+    for (step, k) in [(0i64, 0i64), (2_603_000, 7), (-198_000, -1)] {
+        let clk = VirtualClock::new(0);
+        let fleet = Arc::new(FleetShift::default());
+        if step != 0 {
+            let _ = fleet.follow(0, step);
+        }
+        assert_eq!(fleet.slots(), k, "{step}");
+        let (mut sub, backend) = submitter(&clk, &fleet);
+        let b = floor_boundary_100ns(clk.truth_100ns(), GENLOCK_GRID_FPS);
+        sub.submit_frame_at_boundary(4, 2, 4, &[0u8; 12], &block(), b, b + 20_077);
+        let (v, a) = last_pair(&backend);
+        assert_eq!(v, wire_stamp_100ns(b, k), "{step}: the video relabelled");
+        assert_eq!(a - v, 20_077, "{step}: the source's own offset");
+    }
+}
+
+#[test]
 fn the_sdk_clocked_submit_puts_its_own_timeline_reading_back_on_the_fleet_labels() {
     for step in [2_603_000i64, -198_000] {
         // Its own wall follows the step at the submit's tick: the reading is

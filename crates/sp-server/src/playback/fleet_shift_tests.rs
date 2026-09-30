@@ -4,9 +4,10 @@
 //! Wired via `#[cfg(test)] #[path = "fleet_shift_tests.rs"] mod tests;`.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use super::*;
-use crate::playback::wallclock::utc_now_100ns;
+use crate::playback::wallclock::{Anchor, AnchorSample, WALL_REJOIN_IDLE, utc_now_100ns};
 use sp_core::genlock::{grid_boundary_100ns, grid_index_100ns};
 
 /// 1 ms in 100-ns units.
@@ -170,12 +171,21 @@ fn a_step_no_epoch_covers_is_registered_with_its_own_split() {
 }
 
 #[test]
-fn a_wall_reading_the_same_step_within_1_ms_adopts_its_n_even_across_a_slot_multiple() {
+fn a_wall_reading_the_same_step_within_2_ms_adopts_its_n_even_across_a_slot_multiple() {
     // The first wall read 2 333 334 (N = 7, r = 0); a second wall reads the
     // same step one unit smaller, on the other side of the 7-slot multiple:
-    // alone it would split N = 6, but it adopts 7.
+    // alone it would split N = 6, but it adopts 7. Up to the probe's 2 ms
+    // step threshold the difference is the reader's own line error (review
+    // r1 🟡 D: a lone-outlier resample leaves a line ~1.3 ms off).
     let first = [epoch(2_333_334, 7)];
-    for step in [2_333_333, 2_333_334 - MS, 2_333_334 + MS] {
+    for step in [
+        2_333_333,
+        2_333_334 - MS,
+        2_333_334 + MS,
+        2_333_334 - 13_000,
+        2_333_334 - 2 * MS,
+        2_333_334 + 2 * MS,
+    ] {
         assert_eq!(
             adopt(&first, step),
             Adoption {
@@ -186,23 +196,76 @@ fn a_wall_reading_the_same_step_within_1_ms_adopts_its_n_even_across_a_slot_mult
             "S = {step}"
         );
     }
-    // Just over 1 ms away: another step, registered on top.
+    // Just over 2 ms away: another step, registered on top.
     assert_eq!(
-        adopt(&first, 2_333_334 + MS + 1),
+        adopt(&first, 2_333_334 + 2 * MS + 1),
         Adoption {
             slots: 7,
             consumed: 1,
-            new_epoch: Some(epoch(MS + 1, 0))
+            new_epoch: Some(epoch(2 * MS + 1, 0))
         }
     );
     assert_eq!(
-        adopt(&first, 2_333_334 - MS - 1),
+        adopt(&first, 2_333_334 - 2 * MS - 1),
         Adoption {
             slots: 6,
             consumed: 1,
-            new_epoch: Some(epoch(-MS - 1, -1))
+            new_epoch: Some(epoch(-2 * MS - 1, -1))
         }
     );
+}
+
+#[test]
+fn a_step_within_2_ms_of_the_closest_run_is_a_walls_own_residue_never_an_epoch() {
+    let none = Adoption {
+        slots: 0,
+        consumed: 0,
+        new_epoch: None,
+    };
+    // Nothing registered: a step of at most 2 ms (only the resample confirms
+    // one over 1 ms) is applied by the wall alone. Registered, −2 ms would
+    // be N = −1 and move every wall's labels a slot back.
+    assert_eq!(adopt(&[], 2 * MS), none);
+    assert_eq!(adopt(&[], -2 * MS), none);
+    assert_eq!(adopt(&[], 15_000), none);
+    assert_eq!(
+        adopt(&[], 2 * MS + 1),
+        Adoption {
+            slots: 0,
+            consumed: 0,
+            new_epoch: Some(epoch(2 * MS + 1, 0))
+        }
+    );
+    assert_eq!(
+        adopt(&[], -2 * MS - 1),
+        Adoption {
+            slots: -1,
+            consumed: 0,
+            new_epoch: Some(epoch(-2 * MS - 1, -1))
+        }
+    );
+    // Behind two epochs, the CLOSEST run wins: 1.3 ms under the first.
+    let epochs = [epoch(500_000, 1), epoch(-198_000, -1)];
+    assert_eq!(
+        adopt(&epochs, 487_000),
+        Adoption {
+            slots: 1,
+            consumed: 1,
+            new_epoch: None
+        }
+    );
+    // 1.5 ms over both: ΣN = 0, both consumed.
+    assert_eq!(
+        adopt(&epochs, 317_000),
+        Adoption {
+            slots: 0,
+            consumed: 2,
+            new_epoch: None
+        }
+    );
+    // A tie between two runs: the shorter wins (no epoch is ever that
+    // small; the rule is total all the same).
+    assert_eq!(adopt(&[epoch(30_000, 0)], 15_000), none);
 }
 
 #[test]
@@ -269,6 +332,15 @@ fn the_registry_registers_once_and_every_other_wall_adopts_the_same_n() {
         }
     );
     assert_eq!((fleet.slots(), fleet.epochs()), (7, 1));
+    // Wall C reads it 1.3 ms smaller (its line ~1.3 ms off): it adopts too.
+    assert_eq!(
+        fleet.follow(0, 2_590_000),
+        Relabel {
+            slots: 7,
+            epochs: 1
+        }
+    );
+    assert_eq!((fleet.slots(), fleet.epochs()), (7, 1));
     // A wall built now starts at K = 7 with the epoch applied.
     assert_eq!(
         fleet.current(),
@@ -304,6 +376,74 @@ fn the_registry_registers_once_and_every_other_wall_adopts_the_same_n() {
         }
     );
     assert_eq!((fleet.slots(), fleet.epochs()), (7, 3));
+}
+
+#[test]
+fn a_joining_wall_copies_the_line_published_within_10_s_else_starts_on_its_sample() {
+    let fleet = FleetShift::default();
+    let t0 = Instant::now();
+    let sample = |instant| AnchorSample {
+        instant,
+        utc_100ns: 5_000,
+        bracket: Duration::ZERO,
+    };
+    let _ = fleet.follow(0, 2_603_000); // K = 7, one epoch
+    // Nothing published: the sample itself, at the current K.
+    let (anchor, shift) = fleet.join(&sample(t0));
+    assert_eq!(
+        anchor,
+        Anchor {
+            instant: t0,
+            utc_100ns: 5_000
+        }
+    );
+    assert_eq!(
+        shift,
+        WallShift {
+            slots: 7,
+            epochs: 1,
+            ..WallShift::default()
+        }
+    );
+    // A wall published its line: a pre-step one (K = 0, no epoch applied).
+    let line = FleetLine {
+        at: t0,
+        anchor: Anchor {
+            instant: t0,
+            utc_100ns: 1_000,
+        },
+        slots: 0,
+        epochs: 0,
+    };
+    fleet.publish(line);
+    for after in [Duration::ZERO, WALL_REJOIN_IDLE] {
+        let (anchor, shift) = fleet.join(&sample(t0 + after));
+        assert_eq!(anchor, line.anchor, "{after:?}: its line");
+        assert_eq!(shift, WallShift::default(), "{after:?}: its K and epochs");
+    }
+    // Over 10 s after it: stale, the sample at the current K.
+    let late = t0 + WALL_REJOIN_IDLE + Duration::from_nanos(100);
+    let (anchor, shift) = fleet.join(&sample(late));
+    assert_eq!(
+        anchor,
+        Anchor {
+            instant: late,
+            utc_100ns: 5_000
+        }
+    );
+    assert_eq!((shift.slots, shift.epochs), (7, 1));
+    // The newest publish wins.
+    let newer = FleetLine {
+        at: late,
+        anchor: Anchor {
+            instant: late,
+            utc_100ns: 9_000,
+        },
+        slots: 7,
+        epochs: 1,
+    };
+    fleet.publish(newer);
+    assert_eq!(fleet.join(&sample(late)).0, newer.anchor);
 }
 
 #[test]

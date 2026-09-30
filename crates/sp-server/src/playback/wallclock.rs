@@ -31,22 +31,24 @@
 //! wire stamps get the labels back at the submit edge (`FrameSubmitter`).
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tracing::{debug, info, warn};
 
 use sp_core::genlock::should_resample_mono_to_real_offset;
 
-use crate::playback::fleet_shift::{FleetShift, WallShift, global, relabel_100ns, shift_100ns};
+use crate::playback::fleet_shift::{
+    FleetLine, FleetShift, WallShift, global, relabel_100ns, shift_100ns,
+};
 
 #[path = "wallclock_anchor.rs"]
 mod wallclock_anchor;
 pub use wallclock_anchor::{
     ANCHOR_MAX_ATTEMPTS, ANCHOR_MAX_STEP_100NS, ANCHOR_TIGHT_BRACKET, ANCHOR_WIDE_BRACKET, Anchor,
     AnchorDecision, AnchorSample, AnchorStep, BracketedRead, FollowedStep, PendingStep,
-    ProbeDecision, ProbeFollow, STEP_DETECT_100NS, StepDirection, StepProbeStats, WallAnchorStats,
-    apply_anchor_step, bounded_anchor_update, choose_bracketed_sample, decide_anchor_step,
-    decide_step_probe, same_step, to_us, wall_at,
+    ProbeDecision, ProbeFollow, STEP_DETECT_100NS, StepDirection, StepProbeStats, WALL_REJOIN_IDLE,
+    WallAnchorStats, apply_anchor_step, bounded_anchor_update, choose_bracketed_sample,
+    decide_anchor_step, decide_step_probe, to_us, wall_at,
 };
 
 /// Source of paired `(monotonic instant, utc_100ns)` samples. Production reads
@@ -157,6 +159,10 @@ pub struct WallClock {
     fleet: Arc<FleetShift>,
     /// This wall's relabel K_w and its last regrid (#224 part 2).
     shift: WallShift,
+    /// The monotonic instant of the last tick (the construction sample's
+    /// before the first): a tick more than [`WALL_REJOIN_IDLE`] later
+    /// rejoins the fleet's line (#224 part 2).
+    last_tick: Instant,
 }
 
 /// One anchor sample from `source`: the narrowest of up to
@@ -174,26 +180,27 @@ impl WallClock {
     }
 
     /// Build a wall clock over `source` that follows date steps through the
-    /// relabel registry `fleet` (#224 part 2). It starts at the registry's
-    /// current K: a wall built after a step is on the same timeline as the
-    /// walls that followed it.
+    /// relabel registry `fleet` (#224 part 2). It JOINS the fleet
+    /// ([`FleetShift::join`]): the line a wall published at its last tick,
+    /// with that wall's K — so a wall built between a date step and its
+    /// registration reads the step itself at its first tick — else its own
+    /// sample at the current K.
     pub fn with_fleet(source: Box<dyn ClockSource>, fleet: Arc<FleetShift>) -> Self {
         let sample = anchor_sample(&*source);
         let mut stats = WallAnchorStats::default();
         stats.record_sample(&sample);
+        let (anchor, shift) = fleet.join(&sample);
         Self {
             source,
-            anchor: Anchor {
-                instant: sample.instant,
-                utc_100ns: sample.utc_100ns,
-            },
+            anchor,
             frames_since_resample: 0,
             stats,
             pending: None,
             probe_stats: StepProbeStats::default(),
             suspect_since: None,
-            shift: fleet.current(),
+            shift,
             fleet,
+            last_tick: sample.instant,
         }
     }
 
@@ -216,17 +223,83 @@ impl WallClock {
         self.source.read_100ns(self.anchor.instant, timeline_utc)
     }
 
+    /// The internal TIMELINE's line now (#224 part 2): [`now_100ns`] without
+    /// a hold in progress — through a hold it reads below the frozen value by
+    /// the hold still to go ([`Anchor::line_at`]). VBAN's clock slews every
+    /// regrid's movement off it, a hold's too, so a residue hold never stops
+    /// its packets. Reads the monotonic clock only; a synthetic test clock's
+    /// `read_100ns` override does not apply.
+    ///
+    /// [`now_100ns`]: Self::now_100ns
+    pub fn line_100ns(&self) -> i64 {
+        let line = self.anchor.line_at(self.source.now_monotonic());
+        line - shift_100ns(self.shift.slots)
+    }
+
     /// Advance the frame counter, re-anchor the monotonic-to-UTC mapping every
     /// `OFFSET_RESAMPLE_INTERVAL_FRAMES` frames, then probe for a UTC step
     /// (#224). The probe runs after the resample, so a step the resample saw
-    /// first (1 ms applied and armed) is followed in this same tick.
+    /// first (1 ms applied and armed) is followed in this same tick. A tick
+    /// more than [`WALL_REJOIN_IDLE`] after the last one first rejoins the
+    /// fleet's line ([`rejoin`](Self::rejoin)); every tick then publishes
+    /// this wall's line for the next wall to join (#224 part 2).
     pub fn tick(&mut self) {
+        let now = self.source.now_monotonic();
+        self.last_tick = now;
+        let idle = now.saturating_duration_since(self.last_tick);
+        if idle > WALL_REJOIN_IDLE {
+            self.rejoin(idle);
+        }
         self.frames_since_resample = self.frames_since_resample.saturating_add(1);
         if should_resample_mono_to_real_offset(self.frames_since_resample) {
             self.reanchor();
             self.frames_since_resample = 0;
         }
         self.probe_step();
+        self.fleet.publish(FleetLine {
+            at: now,
+            anchor: self.anchor,
+            slots: self.shift.slots,
+            epochs: self.shift.epochs,
+        });
+    }
+
+    /// Rejoin the fleet after `idle` without a tick (#224 part 2): this wall
+    /// was not watching the clock, so its line's drift over the gap (±36 ms
+    /// after 20 min at ±30 ppm) cannot be told from a date step, and
+    /// registering it would relabel every other wall. It takes a fresh
+    /// sample and moves its timeline onto the line [`FleetShift::join`]
+    /// gives (a fresh wall's, else the realtime clock at the current K), a
+    /// jump ahead or ONE hold — never a step back — and registers nothing.
+    /// VBAN's clock owes the movement like a regrid's.
+    fn rejoin(&mut self, idle: Duration) {
+        let sample = anchor_sample(&*self.source);
+        self.stats.record_sample(&sample);
+        let (line, joined) = self.fleet.join(&sample);
+        let current = self.anchor.wall_at(sample.instant) - shift_100ns(self.shift.slots);
+        let target = line.line_at(sample.instant) - shift_100ns(joined.slots);
+        let moved = target - current;
+        let (instant, t) = apply_anchor_step(sample.instant, current, moved);
+        self.anchor = Anchor {
+            instant,
+            utc_100ns: t + shift_100ns(joined.slots),
+        };
+        self.shift = WallShift {
+            slots: joined.slots,
+            epochs: joined.epochs,
+            regrids: self.shift.regrids + 1,
+            last_remainder_100ns: self.shift.last_remainder_100ns,
+            last_jump_100ns: moved,
+        };
+        self.pending = None; // armed before the gap: nothing left to confirm
+        self.suspect_since = None;
+        info!(
+            idle_ms = u64::try_from(idle.as_millis()).unwrap_or(u64::MAX),
+            moved_us = to_us(moved),
+            shift_slots = self.shift.slots,
+            bracket_us = sample.bracket.as_micros() as u64,
+            "wallclock: ticked again after over 10 s idle — rejoined the fleet's line; its own drift is never read as a date step (#224)"
+        );
     }
 
     /// The per-boundary step probe (#224, `decide_step_probe`): one bracketed
@@ -322,10 +395,11 @@ impl WallClock {
     /// anchor takes the whole step (`applied_utc` against `wall_utc`, what
     /// the wall reads at `at`); the registry says how many whole slots N the
     /// labels move; the timeline moves only by the rest. That is a step ahead
-    /// of the remainder r, or ONE hold of a ≤ 1 ms residue: when a resample's
-    /// armed 1 ms already moved the wall further than r, or when the wall
-    /// adopted another wall's N for a step it read a little smaller. Never a
-    /// step back. Returns the timeline's movement (100 ns).
+    /// of the remainder r, or ONE hold of a residue under 3 ms: when a
+    /// resample's armed 1 ms already moved the wall further than r, when the
+    /// wall adopted another wall's N for a step it read up to 2 ms smaller,
+    /// or when it applied a backward step under 2 ms on its own (no epoch).
+    /// Never a step back. Returns the timeline's movement (100 ns).
     fn regrid(
         &mut self,
         at: Instant,
@@ -343,7 +417,7 @@ impl WallClock {
             epochs: relabel.epochs,
             regrids: self.shift.regrids + 1,
             last_remainder_100ns: followed.total_100ns - moved,
-            last_jump_100ns: timeline.max(0),
+            last_jump_100ns: timeline,
         };
         self.anchor = Anchor {
             instant,

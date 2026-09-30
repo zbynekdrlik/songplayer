@@ -27,10 +27,19 @@
 //! and the NDI input's, must move by the SAME N, or two outputs' stamps would
 //! differ by a slot. [`FleetShift`] is that one process-wide registry: the
 //! first wall to confirm a step registers an EPOCH {S, N}; a later wall whose
-//! own reading of the step matches its unapplied epochs within ±1 ms
-//! (`same_step`, the wall's confirm rule) adopts their N ([`adopt`]); a wall
-//! built after a step starts at the current K. The production walls share
+//! own reading of the step lies within the probe's 2 ms step threshold of
+//! its unapplied epochs adopts their N ([`adopt`]) — the difference is its
+//! own line's error, never a new epoch. The production walls share
 //! [`global`]; a test builds its own registry, never the global one.
+//!
+//! A wall that was not watching the clock cannot tell its own drift from a
+//! date step, so it never registers one. Every tick publishes the wall's
+//! line ([`FleetLine`]); a wall built now, or one ticking again after more
+//! than 10 s idle (the legacy per-frame submit wall), JOINS the freshest
+//! published line and its relabel ([`FleetShift::join`]). So a wall built
+//! between a step and its registration starts on the pre-step line and
+//! follows the step itself, like every other wall; with no fresh line it
+//! starts on the realtime clock at the current K.
 //!
 //! Everything here but the registry lock is pure integer arithmetic.
 //!
@@ -38,11 +47,14 @@
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::time::Instant;
 
 use sp_core::genlock::{GENLOCK_GRID_FPS, UNITS_PER_SECOND, floor_boundary_100ns};
 use tracing::info;
 
-use crate::playback::wallclock::{same_step, to_us, utc_now_100ns};
+use crate::playback::wallclock::{
+    ANCHOR_MAX_STEP_100NS, Anchor, AnchorSample, WALL_REJOIN_IDLE, to_us, utc_now_100ns,
+};
 
 /// D(K) = ⌈K·P⌉ in 100 ns: how far a timeline K slots behind its labels sits
 /// behind them (P = 10⁷/30, one grid slot). Rounded UP, so an on-grid boundary
@@ -115,24 +127,36 @@ pub struct Adoption {
 /// The pure registry rule for a wall that confirmed a step `step_100ns` and
 /// has not applied `unapplied` yet (oldest first).
 ///
-/// - The shortest run of its unapplied epochs whose summed step matches
-///   `step_100ns` within ±1 ms (`same_step`) is the step it saw: it adopts
-///   their summed N. So two walls reading one step either side of a slot
-///   multiple still move by ONE N, and a wall two epochs behind adopts both.
+/// - The run of its unapplied epochs (the first j, none included) whose
+///   summed step lies CLOSEST to `step_100ns` is the step it saw, when it
+///   lies within the probe's 2 ms step threshold (`STEP_DETECT_100NS`): it
+///   adopts their summed N, and the difference is its own line's error (a
+///   lone-outlier resample, slewing lag) that only its own timeline takes.
+///   On a tie the shorter run wins. So two walls reading one step either
+///   side of a slot multiple still move by ONE N, a wall two epochs behind
+///   adopts both, and a step within 2 ms of nothing registered (a 1–2 ms
+///   step only the resample confirms) is never an epoch.
 /// - Otherwise the step is new (beyond every unapplied epoch): the wall
-///   adopts them all and registers the rest as a new epoch.
+///   adopts them all and registers the rest as a new epoch. A registered
+///   epoch is therefore always over 2 ms.
 pub fn adopt(unapplied: &[Epoch], step_100ns: i64) -> Adoption {
     let (mut step_sum, mut slots) = (0, 0);
+    // (distance, consumed, slots) of the closest run so far: none adopted.
+    let mut closest = (step_100ns.abs(), 0, 0);
     for (i, epoch) in unapplied.iter().enumerate() {
         step_sum += epoch.step_100ns;
         slots += epoch.slots;
-        if same_step(step_sum, 0, step_100ns) {
-            return Adoption {
-                slots,
-                consumed: i + 1,
-                new_epoch: None,
-            };
+        let distance = (step_100ns - step_sum).abs();
+        if distance < closest.0 {
+            closest = (distance, i + 1, slots);
         }
+    }
+    if closest.0 <= ANCHOR_MAX_STEP_100NS {
+        return Adoption {
+            slots: closest.2,
+            consumed: closest.1,
+            new_epoch: None,
+        };
     }
     let rest = step_100ns - step_sum;
     let epoch = Epoch {
@@ -155,20 +179,42 @@ pub struct Relabel {
     pub epochs: usize,
 }
 
+/// One wall's line as it last ticked (module doc): what a wall built now, or
+/// one rejoining after an idle gap, copies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FleetLine {
+    /// When that wall ticked (monotonic).
+    pub at: Instant,
+    /// Its monotonic→UTC anchor, a hold in progress included.
+    pub anchor: Anchor,
+    /// Its K_w.
+    pub slots: i64,
+    /// The registry epochs it had applied.
+    pub epochs: usize,
+}
+
+/// What the registry lock guards.
+#[derive(Debug, Default)]
+struct Registry {
+    epochs: Vec<Epoch>,
+    /// The line the last wall to tick published.
+    line: Option<FleetLine>,
+}
+
 /// The process-wide fleet relabel registry (module doc). Its K is the sum of
 /// every registered epoch's N: the shift the wire stamps are put on with.
 /// A few epochs a day (16 bytes each) are kept for the process lifetime.
 /// `FleetShift::default()` is an empty registry: K = 0.
 #[derive(Debug, Default)]
 pub struct FleetShift {
-    epochs: Mutex<Vec<Epoch>>,
+    registry: Mutex<Registry>,
     /// K_F, read lock-free on every submitted pair.
     slots: AtomicI64,
 }
 
 impl FleetShift {
-    fn lock(&self) -> MutexGuard<'_, Vec<Epoch>> {
-        self.epochs.lock().unwrap_or_else(|p| p.into_inner())
+    fn lock(&self) -> MutexGuard<'_, Registry> {
+        self.registry.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     /// K_F: the fleet shift in whole slots, the sum of every epoch's N.
@@ -178,17 +224,56 @@ impl FleetShift {
 
     /// Epochs registered so far (a wall built now has applied them all).
     pub fn epochs(&self) -> usize {
-        self.lock().len()
+        self.lock().epochs.len()
     }
 
-    /// Where a wall built now starts: K_F with every epoch applied, read
-    /// together under the lock (only a registration moves K_F).
+    /// K_F with every epoch applied, read together under the lock (only a
+    /// registration moves K_F): where a wall with no fresh line to join
+    /// starts ([`join`](Self::join)).
     pub fn current(&self) -> WallShift {
-        let epochs = self.lock();
+        let registry = self.lock();
         WallShift {
             slots: self.slots(),
-            epochs: epochs.len(),
+            epochs: registry.epochs.len(),
             ..WallShift::default()
+        }
+    }
+
+    /// A wall ticked: its line is the one a joining wall copies next.
+    pub fn publish(&self, line: FleetLine) {
+        self.lock().line = Some(line);
+    }
+
+    /// Where a wall joining at `sample` starts (module doc): the line a wall
+    /// published at most [`WALL_REJOIN_IDLE`] before it, with that wall's
+    /// relabel; else `sample` itself at the current K. The pre-step line of a
+    /// wall that has not followed a step yet is as good as a followed one:
+    /// the joining wall reads that step itself at its first tick.
+    pub fn join(&self, sample: &AnchorSample) -> (Anchor, WallShift) {
+        let registry = self.lock();
+        let fresh = registry
+            .line
+            .filter(|line| sample.instant.saturating_duration_since(line.at) > WALL_REJOIN_IDLE);
+        match fresh {
+            Some(line) => (
+                line.anchor,
+                WallShift {
+                    slots: line.slots,
+                    epochs: line.epochs,
+                    ..WallShift::default()
+                },
+            ),
+            None => (
+                Anchor {
+                    instant: sample.instant,
+                    utc_100ns: sample.utc_100ns,
+                },
+                WallShift {
+                    slots: self.slots(),
+                    epochs: registry.epochs.len(),
+                    ..WallShift::default()
+                },
+            ),
         }
     }
 
@@ -200,7 +285,8 @@ impl FleetShift {
     /// than the timeline it was taken on, which after a backward step would
     /// future-date it; a newer K_F only leaves it up to r stale.
     pub fn follow(&self, applied: usize, step_100ns: i64) -> Relabel {
-        let mut epochs = self.lock();
+        let mut registry = self.lock();
+        let epochs = &mut registry.epochs;
         let from = applied.min(epochs.len());
         let adoption = adopt(&epochs[from..], step_100ns);
         let mut applied = from + adoption.consumed;
@@ -252,12 +338,18 @@ pub struct WallShift {
     pub slots: i64,
     /// The registry epochs this wall has applied.
     pub epochs: usize,
-    /// Steps this wall regridded (followed with the relabel split).
+    /// Steps this wall regridded (followed with the relabel split), and
+    /// rejoins after an idle gap.
     pub regrids: u64,
-    /// r of the last regrid: the step minus its relabel (100 ns).
+    /// r of the last regrid: the step minus its relabel (100 ns). For the
+    /// wall that registered the step 0 ≤ r ≤ one slot; a wall that adopted
+    /// another wall's N for a reading up to 2 ms off, or applied a step
+    /// under 2 ms on its own, shows that residue too (−2 ms … one slot +
+    /// 2 ms).
     pub last_remainder_100ns: i64,
-    /// How far the last regrid moved the timeline FORWARD at once (100 ns);
-    /// 0 when it held it (a ≤ 1 ms residue, never a whole step).
+    /// How far the last regrid (or rejoin) moved the timeline's LINE at once
+    /// (100 ns, signed): a jump ahead, or a hold of that size when negative.
+    /// VBAN's clock owes it ([`crate::playback::vban_clock::RemainderSlew`]).
     pub last_jump_100ns: i64,
 }
 

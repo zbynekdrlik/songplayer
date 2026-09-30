@@ -55,6 +55,15 @@ pub const ANCHOR_MAX_STEP_100NS: i64 = 10_000;
 /// 100-frame resample, far below it, and stays on the ±1 ms resample bound.
 pub const STEP_DETECT_100NS: i64 = 20_000;
 
+/// A wall that ticks again after more than this REJOINS the fleet's line
+/// instead of probing (#224 part 2, `fleet_shift.rs`). At dantesync's ≤ 94 ppm
+/// a wall that ticked within it drifted under 1 ms, below the 2 ms step
+/// threshold; after a longer gap (the legacy submit wall ticks only per
+/// submitted frame) its drift may read as a date step, and registering that
+/// would relabel every other wall. Every wall that runs its loop ticks at
+/// least every ~100 ms.
+pub const WALL_REJOIN_IDLE: Duration = Duration::from_secs(10);
+
 /// One bracketed read of the realtime clock: `m1` is the monotonic clock read
 /// just before the UTC read, `m2` the one just after.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -276,9 +285,8 @@ pub fn decide_anchor_step(
 /// earlier reading. ONE rule for the resample's confirmation
 /// ([`decide_anchor_step`]) and the probe's ([`decide_step_probe`]). Within the
 /// tolerance two readings of a step over 1 ms have the same sign, so the rule
-/// never compares directions. The fleet relabel registry reuses it to match
-/// one wall's reading of a date step against another's (#224 part 2).
-pub fn same_step(armed_delta_100ns: i64, applied_100ns: i64, delta_100ns: i64) -> bool {
+/// never compares directions.
+fn same_step(armed_delta_100ns: i64, applied_100ns: i64, delta_100ns: i64) -> bool {
     (delta_100ns + applied_100ns - armed_delta_100ns).abs() <= ANCHOR_MAX_STEP_100NS
 }
 
