@@ -658,14 +658,21 @@ async fn a_title_correction_applies_to_every_row_of_the_video() {
 
     // An artist-only correction of the OTHER row: every row takes that row's
     // whole title (its song, the new artist), and the files follow again.
-    let status = patch(state, 32, serde_json::json!({ "artist": "Planetboom" })).await;
+    // The new artist differs in more than letter case: on NTFS (the Windows
+    // test job) a case-only rename keeps the old spelling resolving.
+    let status = patch(
+        state,
+        32,
+        serde_json::json!({ "artist": "planetboom band" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let renamed = song_files(dir.path(), "SHARED0001", "Break!", "Planetboom", false);
+    let renamed = song_files(dir.path(), "SHARED0001", "Break!", "planetboom band", false);
     for id in [31, 32, 33] {
         let (song, artist, ..) = video_row(&pool, id).await;
         assert_eq!(
             (song.as_str(), artist.as_deref()),
-            ("Break!", Some("Planetboom"))
+            ("Break!", Some("planetboom band"))
         );
     }
     let (.., files) = video_row(&pool, 31).await;
