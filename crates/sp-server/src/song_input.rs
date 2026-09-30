@@ -15,9 +15,13 @@
 //!   half-done;
 //! - no audio on disk after that read is a re-pick with NO penalty: no
 //!   attempt is counted and the status stays. The row is only rechecked
-//!   [`INPUT_MISSING_RECHECK`] later, so a song whose audio is gone for good
-//!   is not re-picked every tick ahead of the rest of the queue (both
-//!   selectors order by id / request time).
+//!   [`INPUT_MISSING_RECHECK`] later: both selectors would otherwise pick the
+//!   same row again first on every tick (the stem queue is in-use-first, then
+//!   by id; the dub queue newest request first), ahead of the rest of the
+//!   queue. Read under the lock, a missing file is a real loss, not the
+//!   rename race, so the WARN names the recorded path and a dub also records
+//!   it in `dub_error` (what the Dabing section shows; a finished dub clears
+//!   it).
 
 use std::path::Path;
 
@@ -36,16 +40,6 @@ pub(crate) const INPUT_MISSING_RECHECK: std::time::Duration = std::time::Duratio
 pub(crate) enum HeavyJob {
     Stems,
     Dub,
-}
-
-impl HeavyJob {
-    /// The column its worker's selector waits on.
-    fn next_attempt_column(self) -> &'static str {
-        match self {
-            Self::Stems => "stem_next_attempt_at",
-            Self::Dub => "dub_next_attempt_at",
-        }
-    }
 }
 
 /// A job's input as the song's row records it now.
@@ -93,7 +87,7 @@ pub(crate) async fn job_input(
         current_input(pool, video_id).await
     };
     match read {
-        Ok(Some(input)) => {
+        Ok(Found::Input(input)) => {
             tracing::info!(
                 video_id,
                 ?job,
@@ -103,16 +97,18 @@ pub(crate) async fn job_input(
             );
             Some(input)
         }
-        Ok(None) => {
+        Ok(Found::NoAudio(recorded)) => {
+            let recorded = recorded.unwrap_or_default();
             tracing::warn!(
                 video_id,
                 ?job,
                 picked = picked_audio,
+                recorded = %recorded,
                 recheck_secs = INPUT_MISSING_RECHECK.as_secs(),
                 "heavy job: the song has no audio on disk after the re-read — \
                  re-picked later, no attempt counted"
             );
-            if let Err(e) = recheck_later(pool, video_id, job).await {
+            if let Err(e) = recheck_later(pool, video_id, job, &recorded).await {
                 tracing::warn!(video_id, ?job, %e, "heavy job: scheduling the recheck failed");
             }
             None
@@ -124,9 +120,16 @@ pub(crate) async fn job_input(
     }
 }
 
-/// The row's input, or `None` when the row is gone, records no audio, or its
-/// audio file does not exist.
-async fn current_input(pool: &SqlitePool, video_id: i64) -> Result<Option<SongInput>, sqlx::Error> {
+/// What the re-read found.
+enum Found {
+    Input(SongInput),
+    /// No audio on disk; the path the row records, if any.
+    NoAudio(Option<String>),
+}
+
+/// The row's input, or [`Found::NoAudio`] when the row is gone, records no
+/// audio, or its audio file does not exist.
+async fn current_input(pool: &SqlitePool, video_id: i64) -> Result<Found, sqlx::Error> {
     let row: Option<(Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT audio_file_path, vocals_file_path, stem_status FROM videos WHERE id = ?",
     )
@@ -134,12 +137,12 @@ async fn current_input(pool: &SqlitePool, video_id: i64) -> Result<Option<SongIn
     .fetch_optional(pool)
     .await?;
     let Some((Some(audio_file_path), vocals_file_path, stem_status)) = row else {
-        return Ok(None);
+        return Ok(Found::NoAudio(None));
     };
     if !Path::new(&audio_file_path).exists() {
-        return Ok(None);
+        return Ok(Found::NoAudio(Some(audio_file_path)));
     }
-    Ok(Some(SongInput {
+    Ok(Found::Input(SongInput {
         audio_file_path,
         vocals_file_path,
         stem_status,
@@ -147,18 +150,34 @@ async fn current_input(pool: &SqlitePool, video_id: i64) -> Result<Option<SongIn
 }
 
 /// Schedule the job's next pick [`INPUT_MISSING_RECHECK`] ahead, touching no
-/// attempt count and no status. Same `strftime` format the selectors compare.
-async fn recheck_later(pool: &SqlitePool, video_id: i64, job: HeavyJob) -> Result<(), sqlx::Error> {
-    let sql = format!(
-        "UPDATE videos SET {} = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) \
-         WHERE id = ?",
-        job.next_attempt_column()
-    );
-    sqlx::query(&sql)
-        .bind(INPUT_MISSING_RECHECK.as_secs() as i64)
-        .bind(video_id)
-        .execute(pool)
-        .await?;
+/// attempt count and no status (same `strftime` format the selectors
+/// compare). A dub also records why in `dub_error`, naming `recorded`.
+async fn recheck_later(
+    pool: &SqlitePool,
+    video_id: i64,
+    job: HeavyJob,
+    recorded: &str,
+) -> Result<(), sqlx::Error> {
+    let secs = INPUT_MISSING_RECHECK.as_secs() as i64;
+    let query = match job {
+        HeavyJob::Stems => sqlx::query(
+            "UPDATE videos SET stem_next_attempt_at = \
+                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) \
+             WHERE id = ?",
+        )
+        .bind(secs),
+        HeavyJob::Dub => sqlx::query(
+            "UPDATE videos SET dub_next_attempt_at = \
+                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)), \
+                 dub_error = ? \
+             WHERE id = ?",
+        )
+        .bind(secs)
+        .bind(format!(
+            "the song's audio file is missing: {recorded} (the dub waits, re-checked later)"
+        )),
+    };
+    query.bind(video_id).execute(pool).await?;
     Ok(())
 }
 
