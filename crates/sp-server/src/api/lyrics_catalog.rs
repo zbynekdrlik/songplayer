@@ -11,7 +11,10 @@
 //!      returned zero candidates; the cleanup pass purges those.
 //!   3. Sets `lyrics_manual_priority = 1` on every row whose
 //!      `pipeline_version < current` AND `lyrics_source` is not a parked
-//!      sentinel (`asr_gap` / `unsupported_source`).
+//!      sentinel (`asr_gap` / `unsupported_source`), with a fresh attempt
+//!      budget and no backoff left (`lyrics_attempts = 0`,
+//!      `lyrics_next_attempt_at = NULL`, #144 review round 2), as the
+//!      reprocess routes queue a song.
 //!   4. Returns `{ "restamped": N, "dangling_cleared": K, "queued": M }`.
 //!
 //! Idempotent — calling twice produces zeros on the second call (the WHERE
@@ -88,7 +91,8 @@ pub async fn reprocess_catalog_with_new_gate(State(state): State<AppState>) -> i
 
     // Step 3: queue all candidate rows.
     let queued = match sqlx::query(
-        "UPDATE videos SET lyrics_manual_priority = 1 \
+        "UPDATE videos SET lyrics_manual_priority = 1, \
+             lyrics_attempts = 0, lyrics_next_attempt_at = NULL \
          WHERE lyrics_pipeline_version < ? \
            AND lyrics_manual_priority = 0 \
            AND (lyrics_source IS NULL \
@@ -216,7 +220,8 @@ mod tests {
         .rows_affected();
 
         let queued = sqlx::query(
-            "UPDATE videos SET lyrics_manual_priority = 1 \
+            "UPDATE videos SET lyrics_manual_priority = 1, \
+                 lyrics_attempts = 0, lyrics_next_attempt_at = NULL \
              WHERE lyrics_pipeline_version < ? \
                AND lyrics_manual_priority = 0 \
                AND (lyrics_source IS NULL \
