@@ -80,3 +80,16 @@ One terse line per issue/round: decisions, key commits, verification.
 - Decisions: K_F = the registry's K; no min() clamp at the wire; holds by the timeline's movement; timeline anchor to `read_100ns`; adoption = closest run within 3 ms (twice a wall's worst line error), a step within 3 ms of nothing registered is local (N = 0); a wall idle > 10 s or built now JOINS the fleet's published line (never registers its drift); VBAN 40 ppm (≤ 47 keeps ±100 ppm), owes the line's net per-tick movement; NDI input follows its wall (one boundary ≤ r early).
 - Residuals (documented): a tick's net movement over the cap taken whole; an armed 1 ms whose follow lands a tick later; a wide own-sample anchor registers its error (adopted fleet-wide); test system walls share the global registry.
 - Not local-verifiable (Tier-0): the build, the tests, the mutation gate, the box behaviour (a controlled camera-box step of each sign).
+
+## #144 fix — ONE per-song reprocess path; the per-video route that blanked the wall's lyrics is deleted (0.69.0-dev.14, lane worktree-agent-a8369167e4a677b16)
+
+- Cause: `POST /api/v1/videos/{id}/lyrics/reprocess` → `reset_video_lyrics` set `has_lyrics = 0, lyrics_source = NULL`, and the loader serves nothing for `has_lyrics = 0`. The #144 rollout queued 280 songs through it, and 211 songs showed no lyrics on the wall for ~6 h (comment 5905405307).
+- Fix: route, handler `reprocess_video_lyrics`, `reset_video_lyrics` and its own test deleted. `POST /api/v1/lyrics/reprocess {video_ids}` (manual priority, keeps the served lyrics while the song waits) is the one per-song path.
+- Commits: bump 62c92a2c; RED 7c7c094d (`a_per_video_reprocess_request_never_blanks_the_served_lyrics` fails: has_lyrics 0, by code walk; pin `the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority`) → GREEN 38711fdc; docs c4400c8a.
+- Review r1 (0🔴 2🟡 3🔵): docs 99e08626 (one PER-SONG path; the bulk sweeps `reprocess-all-stale` / `reprocess-catalog-with-new-gate` share its queue; the rule also loads on `lyrics/worker.rs` + `playback/lyrics_loader.rs`); 534969cb drops the tautological `reprocess_video_ids_sets_manual_priority`.
+- Review r2 (0🔴 0🟡 4🔵): 8aaea84e (per-song wording in the pins; drops the all-stale SQL-copy twin `reprocess_all_stale_only_flags_stale_rows`); docs (the quarantine path added to the gap, the real "Spracovať všetky zastarané" label).
+- Known gap, not in this lane (follow-up candidate for the supervisor): a re-run that fails still blanks a served song, on two paths.
+  - An error: `lyrics/worker.rs`'s `Err` arm calls `mark_video_lyrics(false, Some("no_source"), …)`, and the buckets skip `no_source` at the current version.
+  - An empty transcript: the base tier quarantines the song and deletes `<yt>_lyrics.json`.
+  - The choice between deferring and keeping the served lyrics is a design decision.
+- Not local-verifiable (Tier-0): the build and the tests (CI).

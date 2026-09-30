@@ -86,57 +86,6 @@ async fn queue_counts_are_correct_across_buckets() {
 }
 
 #[tokio::test]
-async fn reprocess_video_ids_sets_manual_priority() {
-    let pool = setup_pool().await;
-    sqlx::query(
-        "INSERT INTO videos (id, playlist_id, youtube_id, normalized) \
-             VALUES (10, 1, 'a', 1), (11, 1, 'b', 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    // Simulate the UPDATE call directly (mirrors the handler's SQL)
-    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1 WHERE id IN (?, ?)")
-        .bind(10_i64)
-        .bind(11_i64)
-        .execute(&pool)
-        .await
-        .unwrap();
-    let total_mp: i64 = sqlx::query_scalar("SELECT SUM(lyrics_manual_priority) FROM videos")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(total_mp, 2);
-}
-
-#[tokio::test]
-async fn reprocess_all_stale_only_flags_stale_rows() {
-    let pool = setup_pool().await;
-    sqlx::query(
-        "INSERT INTO videos (playlist_id, youtube_id, normalized, has_lyrics, \
-             lyrics_pipeline_version) VALUES \
-             (1, 'fresh', 1, 1, 2), \
-             (1, 'stale1', 1, 1, 1), \
-             (1, 'stale2', 1, 1, 0), \
-             (1, 'null',   1, 0, 0)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    // Mirror the handler's SQL
-    let res = sqlx::query(
-        "UPDATE videos SET lyrics_manual_priority = 1 \
-             WHERE has_lyrics = 1 AND lyrics_pipeline_version < ? \
-             AND lyrics_manual_priority = 0",
-    )
-    .bind(2_i64)
-    .execute(&pool)
-    .await
-    .unwrap();
-    assert_eq!(res.rows_affected(), 2, "only 2 stale rows should flip");
-}
-
-#[tokio::test]
 async fn reprocess_clears_lyrics_source_for_terminal_no_lyrics_states() {
     let (state, _temp) = test_state_with_cache_dir().await;
     sqlx::query(
@@ -528,5 +477,145 @@ async fn reprocess_clears_lyrics_retry_backoff() {
     assert!(
         next_attempt_at.is_none(),
         "reprocess must clear lyrics_next_attempt_at so the manual retry is immediate"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #144: ONE per-song reprocess path, and it never blanks the lyrics the wall
+// serves. `POST /api/v1/videos/{id}/lyrics/reprocess` used to call
+// `reset_video_lyrics` (`has_lyrics = 0, lyrics_source = NULL`), so every
+// queued song showed NO lyrics on the wall until the worker reached it —
+// 211 songs for ~6 h on 30.9.2026. `POST /api/v1/lyrics/reprocess` is the one
+// per-song path: manual priority, the served lyrics stay while the song waits
+// in the queue.
+// ---------------------------------------------------------------------------
+
+const SERVED_SOURCE: &str = "description+mtl@rev1/g35t-ok";
+const SERVED_TRACK: &str = r#"{"version":22,"source":"description+mtl@rev1/g35t-ok","language_source":"en","language_translation":"sk","lines":[{"start_ms":1000,"end_ms":4000,"en":"Holy is the Lord","sk":"Svätý je Pán"}]}"#;
+
+/// Seed video 49 as a song the wall is serving: `has_lyrics = 1`, a ★
+/// source, and its `<youtube_id>_lyrics.json` on disk.
+async fn seed_served_song(state: &crate::AppState) {
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized, \
+             has_lyrics, lyrics_source, lyrics_pipeline_version, lyrics_manual_priority) \
+             VALUES (49, 1, 'y49', 's', 'a', 1, 1, ?, 22, 0)",
+    )
+    .bind(SERVED_SOURCE)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    tokio::fs::write(state.cache_dir.join("y49_lyrics.json"), SERVED_TRACK)
+        .await
+        .unwrap();
+}
+
+/// Send one request through the real router; return its status and body.
+async fn send(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: &str,
+) -> (axum::http::StatusCode, Vec<u8>) {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+    let req = Request::builder()
+        .uri(uri)
+        .method(method)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_owned()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    (status, bytes.to_vec())
+}
+
+/// `(has_lyrics, lyrics_source, lyrics_manual_priority)` of video 49.
+async fn served_row(pool: &sqlx::SqlitePool) -> (i64, Option<String>, i64) {
+    sqlx::query_as(
+        "SELECT has_lyrics, lyrics_source, lyrics_manual_priority FROM videos WHERE id = 49",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_per_video_reprocess_request_never_blanks_the_served_lyrics() {
+    use axum::http::StatusCode;
+    let (state, _temp) = test_state_with_cache_dir().await;
+    seed_served_song(&state).await;
+    let app = crate::api::router(state.clone(), None);
+    let (status, served_before) = send(&app, "GET", "/api/v1/videos/49/lyrics", "").await;
+    assert_eq!(status, StatusCode::OK, "the seeded song serves its lyrics");
+
+    let (reprocess_status, _) = send(&app, "POST", "/api/v1/videos/49/lyrics/reprocess", "").await;
+
+    let (has_lyrics, source, _) = served_row(&state.pool).await;
+    assert_eq!(
+        has_lyrics, 1,
+        "a reprocess request must never set has_lyrics = 0: the wall would show no \
+         lyrics for the song until the worker reaches it"
+    );
+    assert_eq!(
+        source.as_deref(),
+        Some(SERVED_SOURCE),
+        "a reprocess request must keep lyrics_source"
+    );
+    let (status, served_after) = send(&app, "GET", "/api/v1/videos/49/lyrics", "").await;
+    assert_eq!(status, StatusCode::OK, "the song still serves its lyrics");
+    assert_eq!(
+        served_after, served_before,
+        "the served lyrics are unchanged"
+    );
+    assert_eq!(
+        reprocess_status,
+        StatusCode::NOT_FOUND,
+        "the per-video path is deleted: POST /api/v1/lyrics/reprocess is the one per-song path"
+    );
+}
+
+#[tokio::test]
+async fn the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority() {
+    use axum::http::StatusCode;
+    let (state, _temp) = test_state_with_cache_dir().await;
+    seed_served_song(&state).await;
+    let app = crate::api::router(state.clone(), None);
+    let (status, served_before) = send(&app, "GET", "/api/v1/videos/49/lyrics", "").await;
+    assert_eq!(status, StatusCode::OK, "the seeded song serves its lyrics");
+
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/api/v1/lyrics/reprocess",
+        r#"{"video_ids":[49]}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(parsed["queued"].as_i64(), Some(1));
+
+    assert_eq!(
+        served_row(&state.pool).await,
+        (1, Some(SERVED_SOURCE.to_owned()), 1),
+        "the one path queues the song through manual priority and keeps has_lyrics \
+         and lyrics_source"
+    );
+    let (status, served_after) = send(&app, "GET", "/api/v1/videos/49/lyrics", "").await;
+    assert_eq!(status, StatusCode::OK, "the song still serves its lyrics");
+    assert_eq!(
+        served_after, served_before,
+        "the wall keeps the served lyrics while the song waits in the queue"
     );
 }

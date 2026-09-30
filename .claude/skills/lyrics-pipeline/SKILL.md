@@ -326,6 +326,19 @@ Catalog-wide reprocess is expensive and can break songs that somehow worked.
 Use `manual_priority` for targeted per-song reprocessing until the user says
 "bump it".
 
+**The ONE per-song reprocess path (#144):** `POST /api/v1/lyrics/reprocess`
+with `{"video_ids":[…]}` (or `{"playlist_id":N}`), the dashboard's Reprocess.
+It sets `lyrics_manual_priority = 1` and keeps `has_lyrics` and the served
+`<yt>_lyrics.json`, so the wall shows the old lyrics while the song waits in
+the queue. The bulk sweeps (`reprocess-all-stale`,
+`reprocess-catalog-with-new-gate`) use the same queue. No reprocess route may
+blank served lyrics: the per-video `POST /api/v1/videos/{id}/lyrics/reprocess`
+set `has_lyrics = 0` and blanked 211 songs on the wall for ~6 h on 30.9.2026,
+so it is deleted. Known gap: a re-run that fails still blanks a served song
+(an error: the worker's `Err` arm marks it `no_source`; an empty transcript:
+the base tier quarantines it and deletes the lyrics file). Detail:
+`.claude/rules/lyrics-reference-text.md` ("Reprocess: ONE per-song path").
+
 Also: never suggest, ask about, or include "bump pipeline version" as an option
 in AskUserQuestion. Wait for the user to initiate.
 

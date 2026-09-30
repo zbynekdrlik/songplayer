@@ -916,22 +916,6 @@ pub async fn get_video_lyrics(
     }
 }
 
-/// POST /api/v1/videos/:id/lyrics/reprocess
-///
-/// Re-queues a video for lyrics processing.
-pub async fn reprocess_video_lyrics(
-    State(state): State<AppState>,
-    Path(video_id): Path<i64>,
-) -> impl IntoResponse {
-    match crate::db::models::reset_video_lyrics(&state.pool, video_id).await {
-        Ok(()) => Json(serde_json::json!({"status": "queued"})).into_response(),
-        Err(e) => {
-            warn!("reprocess_video_lyrics error for video {video_id}: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
-    }
-}
-
 /// GET /api/v1/lyrics/status
 ///
 /// Returns the lyrics processing queue status across all active playlists.

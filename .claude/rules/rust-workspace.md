@@ -717,6 +717,12 @@ new `mod` AFTER the test module, or move the `#[cfg(test)]` explicitly back onto
 the test `mod` — and grep the insertion point for a `#[cfg(test)]` line directly
 above your `old_string` anchor before an Edit that adds a sibling `mod`.
 
+## An HTTP handler test goes through the real router, never a copy of its SQL (#144)
+
+- Drive a handler with `crate::api::router(state, None)` + `tower::ServiceExt::oneshot`, as in `api/lyrics_tests.rs::send`, and assert the row / response afterwards.
+- A test that runs its OWN copy of the handler's UPDATE ("mirror the handler's SQL") can never fail on a change to the handler. #144 deleted two of these: `reprocess_video_ids_sets_manual_priority` and `reprocess_all_stale_only_flags_stale_rows`.
+- A test for a DELETED route stays useful as a regression guard. `router(state, None)` has no SPA fallback (that needs a `dist_dir`), so a removed path answers 404. Assert the harmful effect is absent FIRST, so the RED fails for the right reason, and the 404 last.
+
 ## A cross-crate test-only helper must be `#[doc(hidden)] pub`, NOT `#[cfg(test)]` (#203 2b)
 
 `#[cfg(test)]` is per-crate: an item gated `#[cfg(test)]` in crate A is NOT

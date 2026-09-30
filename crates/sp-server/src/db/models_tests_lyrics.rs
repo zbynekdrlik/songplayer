@@ -1,8 +1,7 @@
 //! Lyrics-state tests for `db::models` — `mark_video_lyrics`/`_complete`
-//! writes, quarantine sentinel handling, `mark_unsupported_source`, and
-//! `reset_video_lyrics`. Split out of the former monolithic
-//! `models_tests.rs` (#137) to keep every file under the 1000-line
-//! airuleset cap. Included as a sibling file via
+//! writes, quarantine sentinel handling, and `mark_unsupported_source`.
+//! Split out of the former monolithic `models_tests.rs` (#137) to keep
+//! every file under the 1000-line airuleset cap. Included as a sibling file via
 //! `#[path = "models_tests_lyrics.rs"] #[cfg(test)] mod tests_lyrics;`
 //! from `models.rs`.
 
@@ -271,36 +270,6 @@ async fn mark_video_lyrics_complete_writes_processed_at_and_explicit_model() {
         model.as_deref(),
         Some("lyrics-alignment-mtl@rev1"),
         "alignment_model must round-trip the literal"
-    );
-}
-
-#[tokio::test]
-async fn reset_video_lyrics_clears_processed_at_and_model() {
-    let (pool, video_id) = setup_with_video().await;
-    // Seed with non-NULL values first.
-    mark_video_lyrics_complete(
-        &pool,
-        video_id,
-        "yt_subs",
-        20,
-        Some(0.9),
-        Some(crate::lyrics::ALIGNMENT_MODEL_NONE),
-    )
-    .await
-    .unwrap();
-    // Now reset.
-    reset_video_lyrics(&pool, video_id).await.unwrap();
-    let row =
-        sqlx::query("SELECT lyrics_processed_at, lyrics_alignment_model FROM videos WHERE id = ?")
-            .bind(video_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    let processed_at: Option<String> = row.try_get("lyrics_processed_at").ok().flatten();
-    let model: Option<String> = row.try_get("lyrics_alignment_model").ok().flatten();
-    assert!(
-        processed_at.is_none() && model.is_none(),
-        "reset must NULL both new columns"
     );
 }
 
