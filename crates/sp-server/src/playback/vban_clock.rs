@@ -27,18 +27,20 @@ use crate::playback::vban_out::VbanClock;
 use crate::playback::wallclock::{WallClock, to_us};
 
 /// How fast VBAN's clock pays back a date step's movement (#224 part 2):
-/// 50 ppm of its timeline, 100 ns per 2 ms, so a whole slot (33.3 ms) is paid
-/// in ~11 min. Below 100 ppm with a margin for the grid's own 41 666 /
-/// 41 667 / 41 668 × 100 ns packet spacing and the 100-ns rounding of each
-/// wait, so every packet interval stays within 4.1667 ms ± 100 ppm (VB-Matrix
-/// at FOH runs an ASRC that follows the arrival rate).
+/// 40 ppm of its timeline, 100 ns per 2.5 ms, so a whole slot (33.3 ms) is
+/// paid in ~14 min. The grid's own packet spacing is 41 666 / 41 667 /
+/// 41 668 × 100 ns and each wait rounds to 100 ns, so one interval can pay
+/// up to ⌈41 668 × ppm / 10⁶⌉ × 100 ns: at most 2 × 100 ns up to 47 ppm, and
+/// every interval stays within 4.1667 ms ± 100 ppm (at 50 ppm a 41 668
+/// interval could pay 3 and reach +104 ppm, review round 3). VB-Matrix at
+/// FOH runs an ASRC that follows the arrival rate.
 pub const VBAN_SLEW_PPM: i64 = 40;
 
 /// The largest line movement VBAN's clock owes (100 ns): one slot (a single
 /// epoch's remainder) plus the 3 ms residue
 /// ([`STEP_RESIDUE_100NS`](crate::playback::fleet_shift::STEP_RESIDUE_100NS)). A
 /// larger one — only a rejoin after the VBAN thread stalled over 10 s, or a
-/// wall catching up two epochs at once — is taken at once: slewed at 50 ppm
+/// wall catching up two epochs at once — is taken at once: slewed at 40 ppm
 /// it would keep VBAN's clock off the program for hours (the queue would
 /// drop), and VBAN already missed that gap.
 pub const VBAN_SLEW_MAX_100NS: i64 = 363_334;

@@ -1623,8 +1623,9 @@ submit consumer, `SP-program`, NDI input, VBAN).
   step itself — else its own sample at the current K (`FleetShift::current`).
   A wall that ticks again more than 10 s after its last tick REJOINS the
   same way (`WallClock::rejoin`: a jump ahead or ONE hold onto the joined
-  line, `regrids` +1 and `moved_100ns` += it so VBAN owes it, the resample
-  count restarted like a follow's, nothing registered, INFO `wallclock:
+  line, `regrids` +1 so its tick's net line movement lands in `moved_100ns`
+  and VBAN owes it, the resample count restarted like a follow's, nothing
+  registered, INFO `wallclock:
   ticked again after over 10 s idle — rejoined the fleet's line`). That is
   the legacy per-frame submit wall between songs: idle 20 min at ±30 ppm it
   drifted ±36 ms, and registering that relabelled every paced sender (33 ms

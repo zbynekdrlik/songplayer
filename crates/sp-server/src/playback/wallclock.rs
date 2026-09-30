@@ -28,10 +28,9 @@
 //! takes the whole step S, but [`WallClock::now_100ns`] reads the internal
 //! TIMELINE `UTC − D(K_w)`, and the follow moves K_w by the fleet's N = ⌊S/P⌋
 //! whole slots. So the timeline moves only by the remainder r (0 ≤ r ≤ one
-//! slot per epoch applied, forward; a residue hold of at most ~4 ms): a
-//! date step never
-//! holds it by S and never jumps it by S. The wire stamps get the labels back
-//! at the submit edge (`FrameSubmitter`). A wall built now, or ticking again
+//! slot per epoch applied, forward; a residue hold of at most ~4 ms): a date
+//! step never holds it by S and never jumps it by S. The wire stamps get the
+//! labels back at the submit edge (`FrameSubmitter`). A wall built now, or ticking again
 //! after more than 10 s idle, JOINS the fleet's line instead of reading its
 //! own drift as a step (`WALL_REJOIN_IDLE`, `FleetShift::join`).
 
@@ -575,9 +574,12 @@ impl WallClock {
     /// lateness includes decode time (#147). The anchor, the resample and the
     /// step probe (#224) read the set value on ONE synthetic line (see
     /// [`SettableClock`]), so a set forward never looks like a UTC step. A set
-    /// BACK across a resample still reads as a backward delta against the
-    /// frozen wall (a phantom hold in `wall_anchor_*` only; the reads return
-    /// the set value): never pin the anchor telemetry after a set back.
+    /// BACK moves the synthetic instant back too: a resample due then reads
+    /// the anchor as a hold in progress and waits (#224 part 2) until the
+    /// value passes it again; a resample that does run after a set back reads
+    /// a backward delta against the frozen wall (a phantom hold in
+    /// `wall_anchor_*` only; the reads return the set value). Never pin the
+    /// anchor telemetry or the resample count after a set back.
     pub fn settable(initial_100ns: i64) -> (Self, SettableClock) {
         let handle = SettableClock::new(initial_100ns);
         (WallClock::new(Box::new(handle.clone())), handle)
