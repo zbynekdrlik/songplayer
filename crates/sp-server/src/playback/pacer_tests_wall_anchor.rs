@@ -22,12 +22,14 @@
 //! Nested under `pacer_tests_av_align.rs` so it reuses its media-encoded frame
 //! helper.
 //!
-//! A BACKWARD fleet date step (dantesync 1.12.0: once a night, up to ~−1.5 s)
-//! is followed as ONE hold of the pacer's wall (#147, design record
-//! 5850063723). The pacer then waits through the frozen wall and resumes on
-//! the very next slot. Since #224 the wall's per-boundary step probe follows a
-//! step (either way) at the boundary it lands, and a forward step's catch-up
-//! burst stamps every audio block on its own boundary.
+//! A fleet date step RELABELS time, it does not move content (#224 part 2,
+//! design record 5899388193). The wall's step probe follows a step of either
+//! sign at the boundary it lands; the whole slots N move only the labels, so
+//! the pacer's timeline moves by the remainder r (0 ≤ r ≤ one slot, forward):
+//! no catch-up burst after a forward step, no pause after a backward one, the
+//! content one frame per boundary throughout. A REAL stall still advances the
+//! timeline by the real gap and is still caught up. Every pin was derived with
+//! a scratch Python model of this harness (the wall, the split, the pacer).
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -44,8 +46,12 @@ use crate::playback::wallclock::{ClockSource, VirtualClock, WallClock};
 const PREEMPT_40MS_NS: u64 = 40_000_000;
 /// A dantesync 1.12.0 nightly date step backward: −1.5 s in 100-ns units.
 const STEP_BACK_1_5_S: i64 = -15_000_000;
+/// The 20:58Z controlled step (+260.3 ms): 7 whole slots + r = 26.97 ms.
+const STEP_PLUS_260_3_MS: i64 = 2_603_000;
 /// One 30-fps grid slot in ns: 333 333 or 333 334 × 100 ns (exact-rational grid).
 const SLOT_NS: std::ops::RangeInclusive<u128> = 33_333_300..=33_333_400;
+/// A real 200 ms stall of the paced thread (6 whole slots, no clock step).
+const STALL_200MS_NS: u64 = 200_000_000;
 
 /// Counts emits and any video stamp that fails to advance (a re-served slot)
 /// or skips a slot. It also keeps the longest virtual-monotonic gap between
@@ -67,6 +73,13 @@ struct StampSink {
     /// The emit count (= serviced boundaries) of every boundary serviced at
     /// the same virtual instant as the one before it: a catch-up burst.
     burst_services: Vec<u64>,
+    /// `(emit count, gap)` of every gap between two serviced boundaries that
+    /// is not exactly one grid slot (#224 part 2).
+    odd_gaps: Vec<(u64, Duration)>,
+    /// Emitted frames whose pts is not the NEXT 30-fps frame after the
+    /// previous one's: content skipped or repeated (#224 part 2).
+    non_contiguous_frames: u64,
+    last_pts_100ns: Option<i64>,
 }
 
 /// A gap between two serviced boundaries this long is a real output pause
@@ -85,6 +98,9 @@ impl StampSink {
             if gap.is_zero() {
                 self.burst_services.push(self.emits);
             }
+            if !SLOT_NS.contains(&gap.as_nanos()) {
+                self.odd_gaps.push((self.emits, gap));
+            }
         }
         self.last_service_at = Some(at);
     }
@@ -93,7 +109,7 @@ impl StampSink {
 impl PacedSink for StampSink {
     fn emit(
         &mut self,
-        _video: &PacedFrame,
+        video: &PacedFrame,
         _audio: &[AudioFrame],
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
@@ -111,6 +127,14 @@ impl PacedSink for StampSink {
         if !contiguous {
             self.non_contiguous_stamps += 1;
         }
+        let pts = video.pts_ns / 100;
+        if self
+            .last_pts_100ns
+            .is_some_and(|prev| pts != strict_next_boundary_100ns(prev, 30))
+        {
+            self.non_contiguous_frames += 1;
+        }
+        self.last_pts_100ns = Some(pts);
         self.last_video_tc = Some(video_tc_100ns);
         self.emits += 1;
     }
@@ -179,6 +203,19 @@ fn run_paced_with(
         }
     }
     (pacer, sink)
+}
+
+/// The step `step_100ns` lands after the 150th boundary (with a real stall of
+/// `stall_ns` first, 0 for none), 400 boundaries in all.
+fn run_step(step_100ns: i64, stall_ns: u64) -> (Pacer, StampSink, Arc<VirtualClock>) {
+    let clk = VirtualClock::new(0);
+    let (pacer, sink) = run_paced_with(&clk, 400, |ticks| {
+        if ticks == 150 {
+            clk.advance_ns(stall_ns);
+            clk.step_utc(step_100ns);
+        }
+    });
+    (pacer, sink, clk)
 }
 
 #[test]
@@ -261,38 +298,33 @@ fn pacing_stats_carry_a_followed_utc_step() {
 }
 
 #[test]
-fn a_followed_minus_1_5_s_step_pauses_the_output_once_with_no_relatch_or_av_correction() {
-    // #224: the step lands at tick 150, and the step probe of that very tick
-    // follows it as ONE 1.5 s hold of the pacer's wall (#147, design record
-    // 5850063723) — no longer a 1 ms arming hold at tick 200 and the rest at
-    // tick 300.
-    let clk = VirtualClock::new(0);
-    let (pacer, sink) = run_paced_with(&clk, 400, |ticks| {
-        if ticks == 150 {
-            clk.step_utc(STEP_BACK_1_5_S);
-        }
-    });
+fn a_minus_1_5_s_step_never_pauses_the_output_and_keeps_one_frame_per_boundary() {
+    // #224 part 2 (design record 5899388193): the nightly −1.5 s step lands at
+    // tick 150. It is exactly −45 whole slots, r = 0: the probe of that tick
+    // relabels it, and the pacer's timeline does not move at all. Before, the
+    // wall froze for the whole 1.5 s — ONE output pause of 1.5 s + one slot.
+    let (pacer, sink, clk) = run_step(STEP_BACK_1_5_S, 0);
     let s = pacer.stats();
     assert_eq!(sink.emits, 400);
-    assert_eq!(s.relatches, 0, "the wall froze, it never stepped back");
-    assert_eq!(s.av_corrections, 0, "the audio never leaves the picture");
-    assert_eq!(s.av_corrected_samples, 0);
-    assert_eq!(sink.non_advancing_stamps, 0, "no slot is ever re-served");
-    // The frozen wall resumes from the value it froze at, so the next boundary
-    // is the next slot: no slot is skipped, and the pacer never lags, so it
-    // never resyncs either.
-    assert_eq!(sink.non_contiguous_stamps, 0, "no slot is skipped");
-    assert_eq!(s.resyncs, 0);
-    assert_eq!(pacer.audio_stats().underruns, 0);
-    // The output paused ONCE, for the followed hold plus the next slot.
-    assert_eq!(sink.long_pauses, 1, "exactly one output pause");
-    let pause_ns = sink.max_service_gap.as_nanos();
+    assert_eq!(sink.long_pauses, 0, "no output pause");
     assert!(
-        pause_ns
-            .checked_sub(1_500_000_000)
-            .is_some_and(|slot| SLOT_NS.contains(&slot)),
-        "the longest gap between two boundaries must be the 1.5 s hold + one slot, got {pause_ns} ns"
+        SLOT_NS.contains(&sink.max_service_gap.as_nanos()),
+        "every gap is one slot, got {:?}",
+        sink.max_service_gap
     );
+    assert!(
+        sink.odd_gaps.is_empty(),
+        "r = 0: not even one short interval: {:?}",
+        sink.odd_gaps
+    );
+    assert!(sink.burst_services.is_empty(), "no catch-up burst");
+    assert_eq!(s.relatches, 0, "the timeline never went back");
+    assert_eq!(sink.non_advancing_stamps, 0, "no slot is ever re-served");
+    assert_eq!(sink.non_contiguous_stamps, 0, "no slot is skipped");
+    assert_eq!(sink.non_contiguous_frames, 0, "one frame per boundary");
+    assert_eq!((s.resyncs, s.dropped, s.repeats), (0, 0, 0));
+    assert_eq!(s.av_corrections, 0, "the audio never leaves the picture");
+    assert_eq!(pacer.audio_stats().underruns, 0);
     assert_eq!(
         sink.audio_off_boundary, 0,
         "every audio block on its boundary"
@@ -304,34 +336,32 @@ fn a_followed_minus_1_5_s_step_pauses_the_output_once_with_no_relatch_or_av_corr
             s.wall_anchor_last_step_us,
             s.wall_anchor_last_hold_us
         ),
-        (1, 1, -1_500_000, 1_500_000),
-        "one followed step, and it was one hold of the whole step"
+        (1, 0, -1_500_000, 0),
+        "one followed step, and no hold"
     );
-    assert_eq!(s.wall_anchor_max_step_us, 1_500_000);
     assert_eq!(s.wall_anchor_slewed_us, 0, "nothing slewed");
-    assert_eq!(pacer.now_100ns(), clk.truth_100ns(), "on the UTC line");
+    assert_eq!(
+        pacer.now_100ns(),
+        clk.truth_100ns() - STEP_BACK_1_5_S,
+        "the timeline runs 1.5 s ahead of the new labels"
+    );
 }
 
 #[test]
-fn a_plus_90_ms_step_is_followed_at_its_boundary_and_the_catch_up_audio_stays_on_its_boundaries() {
-    // #224: the 02:00Z nightly step (~+90 ms) lands at tick 150. The step
-    // probe of that tick follows it whole, so the very next boundaries are
-    // due at once: the pacer catches up the two slots the step skipped with
-    // back-to-back emits (ticks 151 and 152), then runs on time again. Every
-    // catch-up block is stamped on its OWN boundary, never on the emit
-    // instant, so a receiver places it where it belongs.
-    let clk = VirtualClock::new(0);
-    let (pacer, sink) = run_paced_with(&clk, 400, |ticks| {
-        if ticks == 150 {
-            clk.step_utc(900_000);
-        }
-    });
+fn a_plus_90_ms_step_is_relabelled_at_its_boundary_with_no_catch_up_burst() {
+    // #224: the 02:00Z nightly step (~+90 ms) lands at tick 150, and the step
+    // probe of that tick follows it. #224 part 2: 2 whole slots relabelled,
+    // the timeline moves r = 23.3 ms, so the next boundary comes 23.3 ms
+    // early — never the two back-to-back catch-up emits (ticks 151 and 152)
+    // it used to take.
+    let (pacer, sink, _clk) = run_step(900_000, 0);
     let s = pacer.stats();
     assert_eq!(sink.emits, 400);
+    assert_eq!(sink.burst_services, Vec::<u64>::new(), "no catch-up burst");
     assert_eq!(
-        sink.burst_services,
-        vec![151, 152],
-        "the catch-up comes right after the step's own boundary"
+        sink.odd_gaps,
+        vec![(151, Duration::from_nanos(10_000_000))],
+        "ONE interval shrinks by r: 33.33 − 23.33 ms"
     );
     assert_eq!(
         sink.audio_off_boundary, 0,
@@ -339,7 +369,8 @@ fn a_plus_90_ms_step_is_followed_at_its_boundary_and_the_catch_up_audio_stays_on
     );
     assert_eq!(sink.non_advancing_stamps, 0);
     assert_eq!(sink.non_contiguous_stamps, 0, "no slot is skipped");
-    assert_eq!((s.relatches, s.resyncs), (0, 0));
+    assert_eq!(sink.non_contiguous_frames, 0, "one frame per boundary");
+    assert_eq!((s.relatches, s.resyncs, s.dropped), (0, 0, 0));
     assert_eq!(
         (
             s.wall_anchor_steps_followed,
@@ -350,7 +381,88 @@ fn a_plus_90_ms_step_is_followed_at_its_boundary_and_the_catch_up_audio_stays_on
         (1, 90_000, 0, 0),
         "one forward step, followed whole"
     );
-    assert_eq!(pacer.now_100ns(), clk.truth_100ns(), "on the stepped UTC");
+}
+
+#[test]
+fn a_plus_260_3_ms_step_relabels_the_wire_and_keeps_content_one_frame_per_boundary() {
+    // The 20:58Z controlled step (FINDING 5898834252): +260.3 ms = 7 slots +
+    // r = 26.97 ms. The internal stamps stay contiguous, the content goes out
+    // one frame per boundary, no boundary is serviced in a burst and no gap is
+    // over one slot; only the WIRE jumps: 8 slots once (1 + the 7 relabelled).
+    // Before, the pacer caught the 7 slots up back to back (the relock camera-
+    // box traced, and the VBAN burst).
+    let (pacer, sink, clk) = run_step(STEP_PLUS_260_3_MS, 0);
+    let s = pacer.stats();
+    assert_eq!(sink.emits, 400);
+    assert!(sink.burst_services.is_empty(), "no catch-up burst");
+    assert!(
+        sink.max_service_gap.as_nanos() <= *SLOT_NS.end(),
+        "no service gap over one slot: {:?}",
+        sink.max_service_gap
+    );
+    assert_eq!(
+        sink.odd_gaps,
+        vec![(151, Duration::from_nanos(6_366_700))],
+        "ONE interval shrinks by r: 33.33 − 26.97 ms"
+    );
+    assert_eq!(sink.non_contiguous_stamps, 0, "internal stamps contiguous");
+    assert_eq!(sink.non_contiguous_frames, 0, "one frame per boundary");
+    assert_eq!((s.relatches, s.resyncs, s.dropped, s.repeats), (0, 0, 0, 0));
+    assert_eq!(
+        pacer.now_100ns(),
+        clk.truth_100ns() - 2_333_334,
+        "the timeline runs 7 slots (D(7)) behind the new labels"
+    );
+}
+
+#[test]
+fn a_minus_19_8_ms_step_sends_the_same_wire_stamp_twice_and_never_pauses() {
+    // −19.8 ms = −1 slot + r = 13.53 ms (the mid-day date-master restart):
+    // the next boundary comes 13.53 ms early and the wire goes back ONE slot,
+    // so that boundary's stamp repeats the previous one (camera-box: STEADY
+    // presents both, `stamp_dup` +1, no relock). No pause.
+    let (pacer, sink, _clk) = run_step(-198_000, 0);
+    let s = pacer.stats();
+    assert!(sink.burst_services.is_empty());
+    assert_eq!(sink.long_pauses, 0);
+    assert_eq!(sink.odd_gaps, vec![(151, Duration::from_nanos(19_800_000))]);
+    assert_eq!(sink.non_contiguous_frames, 0, "one frame per boundary");
+    assert_eq!(s.wall_anchor_holds_followed, 0);
+}
+
+#[test]
+fn a_real_200_ms_stall_still_catches_up_6_boundaries() {
+    // Stall vs step is told apart by structure (design record 5899388193):
+    // the timeline carries the REAL gap, so the #147 catch-up still services
+    // the 6 boundaries the stall skipped (151..156) at once.
+    let (pacer, sink, _clk) = run_step(0, STALL_200MS_NS);
+    let s = pacer.stats();
+    assert_eq!(sink.burst_services, vec![152, 153, 154, 155, 156]);
+    assert_eq!(
+        sink.odd_gaps.first(),
+        Some(&(151, Duration::from_nanos(STALL_200MS_NS))),
+        "the stall itself"
+    );
+    assert_eq!(sink.non_contiguous_stamps, 0, "caught up, never skipped");
+    assert_eq!((s.resyncs, s.wall_anchor_steps_followed), (0, 0));
+}
+
+#[test]
+fn a_stall_and_a_step_in_the_same_tick_catch_up_only_the_stall() {
+    // A 200 ms stall AND the +260.3 ms step before the same tick: the stall's
+    // 6 boundaries are caught up, the step's 7 slots are relabelled, and only
+    // r = 26.97 ms of it reaches the timeline (the boundary after the
+    // catch-up comes that much early), never 13 back-to-back emits.
+    let (pacer, sink, _clk) = run_step(STEP_PLUS_260_3_MS, STALL_200MS_NS);
+    let s = pacer.stats();
+    assert_eq!(sink.burst_services, vec![152, 153, 154, 155, 156]);
+    assert_eq!(
+        sink.odd_gaps.last(),
+        Some(&(157, Duration::from_nanos(6_366_700)))
+    );
+    assert_eq!(sink.non_contiguous_stamps, 0);
+    assert_eq!(sink.non_contiguous_frames, 0);
+    assert_eq!(s.resyncs, 0);
 }
 
 #[test]
