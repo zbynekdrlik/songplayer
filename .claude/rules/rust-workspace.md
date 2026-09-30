@@ -469,6 +469,17 @@ this:
 - **List only the tests that really fail on the old logic in the RED
   message.** Walk each one by hand.
 
+**A fix that moves a threshold which existing tests pin, or adds a field
+to a status struct that tests compare as a literal (#210 part 2).** Re-pin
+those EXISTING tests to the new contract in the RED commit, next to the new
+tests. The RED ships the new field and constant with the one wrong value,
+so the re-pinned tests compile there and fail on it. GREEN then changes
+only the constant and edits no test. A struct-literal test missing the new
+field is E0063 for the whole test target, so it cannot wait for GREEN. The
+RED message lists the re-pinned tests that fail with the new ones (#210:
+the 10 ms → L WARN, `vban_feed_late_over_budget`; 4 tests, one of them the
+old real-loop pin that expected `warned: 1`).
+
 **When the fix makes a parameter DEAD (it removes, not adds, an input) —
 RED → GREEN → refactor (#224).** `ProgramOutput::submit(job, audio_now)`
 lost its reason to take the emit instant. The RED tests keep the OLD
@@ -778,6 +789,25 @@ and then `heavy_slot_tests.rs` + `worker_tests_idle_gate.rs` + the
 `static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());`
 and take it with `let _g = SERIAL.lock().await;`. Keep the `std::sync::Mutex`
 form only for a PLAIN `#[test]` with no await (e.g. `frame_pool`'s serial).
+
+## Which windows-sys feature a Win32 call needs: read the crate source (#210 part 2)
+
+A symbol's windows-sys module is often not the one its header suggests. In
+0.59, avrt's `AvSetMmThreadCharacteristicsW` / `AvSetMmThreadPriority` /
+`AvRevertMmThreadCharacteristics` / `AVRT_PRIORITY_HIGH` live in
+`Win32::System::Threading` (already enabled in sp-server), NOT
+`Win32::Media`. Grep
+`~/.cargo/registry/src/index.crates.io-*/windows-sys-0.59.0/src/Windows/Win32/`
+for the name before touching `Cargo.toml`:
+
+- its directory is the feature (`System/Threading` → `Win32_System_Threading`);
+- a `#[cfg(feature = "…")]` line right above its `link!` needs that feature
+  too;
+- the same file gives the exact FFI types (`HANDLE = *mut c_void`,
+  `BOOL = i32`, `PCWSTR = *const u16`, `WIN32_ERROR = u32`).
+
+A feature change never touches `Cargo.lock`: features are not recorded
+there.
 
 ## Adding a path dependency between workspace crates on the Tier-0 box (#184 G4)
 
