@@ -430,25 +430,16 @@ impl LyricsWorker {
             }
             // #144: stems sidecar not ready — no-penalty recheck, selector moves on.
             Ok(SongOutcome::WaitingForStems) => self.defer_for_stems(video_id).await,
-            Err(e) => {
-                debug!("worker: processing failed for {youtube_id}: {e}");
-                let _ = crate::db::models::mark_video_lyrics(
-                    &self.pool,
-                    video_id,
-                    false,
-                    Some("no_source"),
-                    crate::lyrics::LYRICS_PIPELINE_VERSION,
-                )
-                .await;
-                self.clear_processing().await;
-            }
+            Err(e) => self.fail_song(video_id, &youtube_id, &e).await,
         }
     }
 
     /// Gather every available text + timing source for a song.
     /// Returns a `SongContext` ready for orchestrator. Never bails on a single
-    /// source failure — collects what it can and returns; if zero text candidates
-    /// were gathered, bails.
+    /// source failure — collects what it can and returns; zero text candidates
+    /// is an empty list (the title search, else the g35t base tier, takes the
+    /// song). It bails only when a scraped text's Claude cleanup fails
+    /// (`gather.rs`).
     #[cfg_attr(test, mutants::skip)] // orchestrates N I/O calls; covered by worker structural test `gather_sources_call_order_preserves_yt_subs_then_lrclib`
     async fn gather_sources(
         &self,

@@ -428,7 +428,8 @@ pub struct PatchVideoReq {
 
 /// Update mutable per-video flags. Supports `suppress_resolume_en`,
 /// `lyrics_override_text`, and the `song` / `artist` metadata correction
-/// levers (#136 T1). Returns 204 on success, 404 if the video id doesn't
+/// levers (#136 T1; a correction is final: `metadata_source = 'manual'`,
+/// `gemini_failed = 0`). Returns 204 on success, 404 if the video id doesn't
 /// exist, 400 if the request body has no actionable fields or carries a
 /// whitespace-only `song`.
 pub async fn patch_video(
@@ -487,6 +488,12 @@ pub async fn patch_video(
     if artist.is_some() {
         sets.push("artist = ?");
     }
+    // #136: a title correction is final — the row leaves the metadata repair
+    // queue (`metadata::health::REPAIR_QUEUE_WHERE`), which would write over it.
+    let corrects_title = song.is_some() || artist.is_some();
+    if corrects_title {
+        sets.push("gemini_failed = 0, metadata_source = 'manual'");
+    }
     let sql = format!("UPDATE videos SET {} WHERE id = ?", sets.join(", "));
 
     let mut q = sqlx::query(&sql);
@@ -516,6 +523,13 @@ pub async fn patch_video(
     }
     q = q.bind(video_id);
 
+    // #136: a repair in flight re-checks the queue and writes under the
+    // song-files lock, so a correction waits for it and is never overwritten.
+    let _files = if corrects_title {
+        Some(crate::downloader::cache::SONG_FILES.lock().await)
+    } else {
+        None
+    };
     match q.execute(&state.pool).await {
         Ok(res) if res.rows_affected() == 0 => (
             StatusCode::NOT_FOUND,

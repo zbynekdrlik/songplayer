@@ -312,6 +312,21 @@ impl DubWorker {
                 Err(_) => return,
             };
 
+        // #136: synthesize on the input the row records NOW (the audio, and the
+        // vocals stem `dub_input_audio` may pick) — a rename (the metadata
+        // repair) while this job waited for the slot moved them. No audio on
+        // disk = a no-penalty re-pick later (`song_input::job_input`).
+        let Some(input) = crate::song_input::job_input(
+            &self.pool,
+            job.video_id,
+            &job.audio_file_path,
+            crate::song_input::HeavyJob::Dub,
+        )
+        .await
+        else {
+            return;
+        };
+        let job = input.dub_job(job);
         let outcome = self.synthesize(&python, &script_path, &key, &job).await;
         match outcome {
             Ok(out_path) => self.record_dub_ready(&job, &out_path).await,

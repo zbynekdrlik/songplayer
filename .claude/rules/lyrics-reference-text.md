@@ -18,6 +18,7 @@ paths:
   - "crates/sp-server/src/lyrics/reprocess*.rs"
   - "crates/sp-server/src/api/lyrics*.rs"
   - "crates/sp-server/src/lyrics/worker.rs"
+  - "crates/sp-server/src/lyrics/worker_outcome*.rs"
   - "crates/sp-server/src/playback/lyrics_loader.rs"
 ---
 
@@ -76,15 +77,33 @@ paths:
 - **No reprocess route may blank served lyrics.** `playback/lyrics_loader.rs` and `GET /api/v1/videos/{id}/lyrics` serve nothing for `has_lyrics = 0`, even with the file on disk.
 - The deleted per-video `POST /api/v1/videos/{id}/lyrics/reprocess` (`reset_video_lyrics`: `has_lyrics = 0, lyrics_source = NULL`) did exactly that. Queueing the #144 rollout through it blanked 211 songs on the wall for ~6 h on 30.9.2026 (comment 5905405307).
 - Never add a second per-song reprocess route, and never re-queue a row by resetting it.
-- Known gap, NOT fixed by that deletion: a re-run that fails still blanks a served song, on two paths.
-  - **An error.** `lyrics/worker.rs`'s `Err` arm calls `mark_video_lyrics(false, Some("no_source"), …)` for a row that had lyrics too, and the manual and null buckets skip `no_source` at the current version. A failed Claude cleanup in `gather.rs` is one such error.
-  - **An empty transcript.** The base tier quarantines the song (`worker_g35t.rs` → `quarantine_video_lyrics`: `has_lyrics = 0`, `asr_gap`) and DELETES `<yt>_lyrics.json`.
-  - The song stays dark until it is re-queued AND a later run succeeds. A `no_source` row is re-queued by a manual reprocess or a version bump. An `asr_gap` row is re-queued only by a version bump: a manual reprocess reports it under `blocked_by_asr_gap` and the buckets skip it.
-  - Both are recorded on #144 (comment 5905749132 and its follow-up) as a follow-up candidate: defer, or keep the served lyrics.
 - Pinned by `api/lyrics_tests.rs`:
   - `a_per_video_reprocess_request_never_blanks_the_served_lyrics`;
   - `the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority`.
 - A bulk re-queue on the box, such as the post-deploy set of a lane, goes through `POST /api/v1/lyrics/reprocess` with `video_ids`.
+- **This targeted reprocess is how an output change reaches the catalog without a pipeline bump.** A `LYRICS_PIPELINE_VERSION` bump needs the owner's explicit approval (the `lyrics-pipeline` skill). The #144 rollout was exactly that: 211 + 42 songs queued through `{video_ids}` on 30.9.2026, with no bump.
+
+## A failed or empty re-run never darkens a served song (release 0.69.0 blockers, ROZHODNUTÉ 5905945274)
+
+- A row **serves lyrics** when `has_lyrics = 1` AND its `<yt>_lyrics.json` exists (`worker_outcome.rs::serves_lyrics`, what `playback/lyrics_loader.rs` loads).
+- The worker's two failure exits ask it first (`keep_served_lyrics`):
+  - **an error** — `fail_song`, the `Err` arm of `process_next` (e.g. a failed Claude cleanup in `gather.rs`);
+  - **an empty transcript** — `quarantine_empty_transcript`, the g35t base tier.
+- A served row records ONLY the attempt (`db::models::record_served_lyrics_failure`):
+  - `lyrics_attempts` + the `lyrics_next_attempt_at` backoff, through the existing `record_lyrics_deferral` and `downloader::retry_backoff` (shared with `defer_song` via `next_backoff`);
+  - `lyrics_manual_priority = 0`, so a manual re-queue does not loop.
+- It keeps `has_lyrics`, `lyrics_source` and the file until a successful run replaces them. It WARNs `re-run failed — the served lyrics are kept` with the reason.
+- An unserved row still takes today's terminal state: `no_source` for an error, and `asr_gap` plus the file removed for an empty transcript.
+- The operator's `POST /api/v1/lyrics/quarantine` is unchanged: it parks a song on purpose.
+- The failed pass ends like every other: `lyrics_processed_at = now` (review round 1). The #171 full-mix upgrade bucket re-attempts a row at most once a day by it, and a served full-mix row whose upgrade failed keeps that gate (`a_failed_upgrade_of_a_served_full_mix_row_waits_a_day`).
+- What a served row whose re-run failed does next (the ROZHODNUTÉ's trade-off — it shows only in the DB and the WARN, never as a dark wall):
+  - **Current version, re-queued by hand** (the #144 rollout): the manual flag is cleared, so it leaves the queue after ONE failed attempt, a transient one included (e.g. CLIProxy down during the rollout). Re-queue it through `POST /api/v1/lyrics/reprocess {video_ids}` once the cause is fixed. The recorded backoff is not read by any bucket for such a row.
+  - **Stale version** (after a pipeline bump): the stale bucket picks it again after each backoff (5 min · 2^(n-1), cap 24 h), so a song that always fails is retried about daily.
+  - **Full-mix row** (`gemini-3-5-transcribe/fullmix`): once a day, as above.
+  - The failures count in `lyrics_attempts`, the same counter `worker_g35t.rs` reads for the #171 full-mix fallback (`FULLMIX_MIN_ATTEMPTS` = 3): after 3 failed passes a song whose isolation yields no vocal is transcribed from the full mix, which replaces its served lyrics on success. Before this rule the error path reset the counter and darkened the song instead.
+- **Not a failed re-run: the 30-min cap.** `mark_over_cap` stamps a > 30-min video `unsupported_source` with `has_lyrics = 0` even if it served lyrics: that is the #144 policy (a live set / mix is not a song), not a failure. On the box (read 30.9.2026) the only served row over 30 min is 344, a dub subtitle track (`gemini-live-translate`), which the lyrics worker never picks (`dub_requested`).
+- Pinned by `lyrics/worker_outcome_tests.rs` (both served paths, the unserved `no_source` / `asr_gap` pins, and `has_lyrics = 1` with the file gone = not served).
+- Never "fix" a failing re-run by resetting the row: that is the darkening this rule removed.
 
 ## Mutation-safe loops (a hang fails the gate)
 

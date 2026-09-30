@@ -45,19 +45,26 @@ fn reached_step(chain_state: &str, with_stems: bool) -> Option<usize> {
 }
 
 /// The dabing chain as one Slovak tooltip string for the dub chip: the full step
-/// path, marking how far it has reached, or the failure text.
+/// path, marking how far it has reached, or the failure text. A step that waits
+/// on a problem it recorded (#136: the song's audio file is missing, the dub
+/// is re-checked with no penalty) says it after the path.
 fn chain_detail(chain_state: &str, dub_error: Option<&str>, with_stems: bool) -> String {
+    let dub_error = dub_error.filter(|e| !e.is_empty());
     if chain_state == "failed" {
         return match dub_error {
-            Some(e) if !e.is_empty() => format!("chyba: {e}"),
-            _ => "chyba".to_string(),
+            Some(e) => format!("chyba: {e}"),
+            None => "chyba".to_string(),
         };
     }
     let labels = chain_labels(with_stems);
     let path = labels.join(" → ");
-    match reached_step(chain_state, with_stems).and_then(|r| labels.get(r)) {
+    let chain = match reached_step(chain_state, with_stems).and_then(|r| labels.get(r)) {
         Some(step) => format!("{path} (teraz: {step})"),
         None => path,
+    };
+    match dub_error {
+        Some(e) => format!("{chain} — {e}"),
+        None => chain,
     }
 }
 

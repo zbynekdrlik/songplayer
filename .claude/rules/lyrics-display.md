@@ -48,9 +48,14 @@ loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).
   EN/SK pair from the SAME plan line (SK punctuation-stripped like the EN,
   "" with no translation). `presenter::payload_for` sends them as
   `currentText`/`nextText` + `currentTranslation`/`nextTranslation` (all
-  through `wrap_for_presenter`) and dedups on the pair (current EN, current
-  SK) — `PlaylistPipeline.last_presenter_text` holds that `PushedLine`, so
-  a Slovak line arriving later under the same English one is pushed.
+  through `wrap_for_presenter`) and dedups on the WHOLE payload (current +
+  next, EN + SK) — `PlaylistPipeline.last_presenter_text` holds that
+  `PushedLine` (= the `PresenterLines` last pushed). So a Slovak line arriving
+  later under the same English one is pushed, and so is a sentence sung
+  several times in a row whose NEXT line changed ("What a God, what a God."
+  ×4: the 4th repeat carries the line after the repeats; release 0.69.0
+  review, `a_repeated_line_is_pushed_again_when_its_next_line_changes`). A
+  dedup on the current line alone left the stage display's "next" stale.
   Presenter (its issue 799) picks per stage layout what to show; SongPlayer
   has no language setting for it. Read back on the box with Presenter's
   `GET /stage/snapshot?layout=api` (`current.main` = the EN,
@@ -102,8 +107,10 @@ one only together with the design record on #217.
      brackets (`" ' ” ’ “ ‘ » « ) ]`; `“`, `‘` and `«` close the Slovak
      „…“, ‚…‘ and »…«).
    - A line's text is its EN, or its SK when the EN is empty (dub lines).
-     SK is not checked against `MAX_CHARS`: a translation must not re-split
-     a sentence the EN keeps whole.
+     `fits` checks the joined text AND the joined SK against `MAX_CHARS`
+     (`display_plan.rs::fits`), so a Slovak translation longer than one wall
+     line does split a sentence the EN alone would keep whole (the 29.9.2026
+     ruling below: one wall line in BOTH languages).
    - The display line closes EARLIER when the next line would not `fits`:
      the joined text would pass `MAX_CHARS`, or the next line starts over
      `GROUP_MAX_SPAN_MS` after the first. It then closes after its LAST line
@@ -213,12 +220,17 @@ one only together with the design record on #217.
   boundary (`x − 1` → old line, `x` → new line) for the mutation gate.
 - **The fixtures are real songs**, loaded via `include_str!` +
   `CARGO_MANIFEST_DIR` (`crates/sp-server/tests/fixtures/`):
-  - `lyrics_6KuPjo1diLg.json` (What A God, 191 lines): 123 wall lines,
-    19 600 ms blank (3 breaks), shortest up 1200 ms, 41 full leads / 65
+  - `lyrics_6KuPjo1diLg.json` (What A God, 191 lines): 137 wall lines,
+    19 600 ms blank (3 breaks), shortest up 1200 ms, 41 full leads / 79
     exact / 1 late.
-  - `lyrics_335.json` (105 lines): 59 wall lines; "Now his will be done." and
+  - `lyrics_335.json` (105 lines): 68 wall lines, 28 400 ms blank (2
+    breaks), shortest up 1682 ms, 13 / 53 / 0; "Now his will be done." and
     "Lift up your banners and practice your praise." are whole.
-  - `lyrics_221.json` (75 lines): 51 wall lines.
+  - `lyrics_221.json` (75 lines): 53 wall lines, 31 700 ms blank (4
+    breaks), shortest up 1253 ms, 9 / 40 / 0.
+  - The pins: `fixture_no_wall_line_is_up_for_less_than_1200_ms` (wall
+    lines, shortest), `fixture_lead_counts` (full / exact / late),
+    `fixture_the_wall_blanks_only_in_instrumental_breaks` (breaks, blank).
   - The fixture tests (`display_plan_fixture_tests.rs`) check on all three:
     no line runs past a sentence end, every split inside a sentence is
     forced by the char/span/gap rule (their own oracle), every lead is
@@ -228,8 +240,8 @@ one only together with the design record on #217.
   model that mirrors `build_plan` step by step. The Tier-0 box cannot run the
   tests.
 - **The design record's counts (56/49/122 display lines on 335/221/What A
-  God) are not the pins (59/51/123).** The record's simulation skipped the
-  72-char check for a line that ends a sentence, so such a line could push
-  its display line past 72 chars. A reference model with only that change
-  gives 56/49/122 exactly. The code checks every line, as the record's text
-  says (review round 2).
+  God) are not the pins.** They were simulated at the old 72-char width, and
+  that simulation skipped the char check for a line that ends a sentence (so
+  such a line could push its display line past 72 chars); at 72 the code gave
+  59/51/123 (review round 2). Since `MAX_CHARS` = 52 in BOTH languages
+  (29.9.2026) the pins are 68/53/137.

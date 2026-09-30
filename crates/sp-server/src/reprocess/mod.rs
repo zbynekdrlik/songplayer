@@ -83,6 +83,9 @@ enum ReprocessOutcome {
     /// The video was skipped because it's in per-video backoff or the
     /// global cooldown window is still active.
     Skipped,
+    /// The row left the repair queue while the batch ran (#136: the operator
+    /// corrected its title): nothing was renamed or written.
+    LeftQueue,
 }
 
 impl ReprocessWorker {
@@ -116,7 +119,7 @@ impl ReprocessWorker {
     /// Run the reprocess loop until shutdown is signalled.
     ///
     /// Waits 5 seconds on startup, then loops every 30 minutes:
-    /// query videos with `gemini_failed = 1 AND normalized = 1`,
+    /// query the repair queue (`REPAIR_QUEUE_WHERE`),
     /// retry metadata extraction, rename files and update the DB on success.
     pub async fn run(mut self, mut shutdown: broadcast::Receiver<()>) {
         info!("reprocess worker started");
@@ -157,8 +160,8 @@ impl ReprocessWorker {
         info!("reprocess worker stopped");
     }
 
-    /// Process all videos with `gemini_failed = 1`. Returns count of
-    /// successfully reprocessed videos.
+    /// Process every row of the repair queue (`REPAIR_QUEUE_WHERE`). Returns
+    /// the count of successfully reprocessed videos.
     ///
     /// Aborts the current batch on the first rate-limit response, setting
     /// the global cooldown so subsequent calls within the cooldown window
@@ -209,6 +212,12 @@ impl ReprocessWorker {
                 }
                 Ok(ReprocessOutcome::Skipped) => {
                     debug!(video_id = %row.youtube_id, "in per-video backoff, skipped");
+                }
+                Ok(ReprocessOutcome::LeftQueue) => {
+                    info!(
+                        video_id = %row.youtube_id,
+                        "left the repair queue during the batch (a title correction), not repaired"
+                    );
                 }
                 Err(e) => {
                     warn!(video_id = %row.youtube_id, "reprocess error: {e}");
@@ -284,14 +293,21 @@ impl ReprocessWorker {
         // fails, the set stays under the old name and the rows record that. The
         // set is read NOW, not from the batch snapshot: an earlier row of this
         // batch may have moved the same files (the video in another playlist).
-        // The song-files lock keeps a post-job re-link out until it is recorded.
+        // The song-files lock keeps a post-job re-link out until it is recorded,
+        // and a title PATCH (`patch_video` takes it too) out until the metadata
+        // is written. The row is re-checked against the queue under it: a
+        // correction made while the providers answered took it out (#136).
         let _files = crate::downloader::cache::SONG_FILES.lock().await;
-        let (file_path, audio_file_path): (String, Option<String>) = sqlx::query_as(
-            "SELECT COALESCE(file_path, ''), audio_file_path FROM videos WHERE id = ?",
-        )
+        let queued: Option<(String, Option<String>)> = sqlx::query_as(&format!(
+            "SELECT COALESCE(file_path, ''), audio_file_path FROM videos \
+             WHERE id = ? AND {REPAIR_QUEUE_WHERE}"
+        ))
         .bind(row.id)
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
+        let Some((file_path, audio_file_path)) = queued else {
+            return Ok(ReprocessOutcome::LeftQueue);
+        };
         let old =
             crate::downloader::cache::SongFiles::recorded(&file_path, audio_file_path.as_deref());
         let new = old.named(

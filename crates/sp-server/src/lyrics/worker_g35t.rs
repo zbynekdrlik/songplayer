@@ -47,7 +47,9 @@ pub(crate) enum G35tOutcome {
     /// Transient failure (no vocals / no keys / g35t transport error) — the
     /// selector backs the row off and retries later.
     Deferred(&'static str),
-    /// No usable transcript — quarantined as `asr_gap` (already written here).
+    /// No usable transcript (already written here, by
+    /// `quarantine_empty_transcript`): quarantined as `asr_gap`, or for a song
+    /// the wall serves only the attempt recorded, its lyrics kept (#144).
     Quarantined,
 }
 
@@ -124,21 +126,7 @@ impl LyricsWorker {
                 Ok(G35tOutcome::Track(track))
             }
             None => {
-                warn!(
-                    youtube_id = %youtube_id,
-                    "g35t base tier: empty transcript — quarantining as asr_gap"
-                );
-                if let Err(e) = crate::db::models::quarantine_video_lyrics(
-                    &self.pool,
-                    video_id,
-                    &self.cache_dir,
-                    "empty_transcript",
-                    LYRICS_PIPELINE_VERSION,
-                )
-                .await
-                {
-                    warn!(youtube_id = %youtube_id, %e, "g35t base tier: quarantine failed");
-                }
+                self.quarantine_empty_transcript(video_id, youtube_id).await;
                 Ok(G35tOutcome::Quarantined)
             }
         }

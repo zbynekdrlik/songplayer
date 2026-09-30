@@ -4,12 +4,15 @@ paths:
   - "crates/sp-server/src/reprocess/**"
   - "crates/sp-server/src/startup.rs"
   - "crates/sp-server/src/song_relink*.rs"
+  - "crates/sp-server/src/song_input*.rs"
   - "crates/sp-server/src/stems/mod.rs"
   - "crates/sp-server/src/stems/worker.rs"
   - "crates/sp-server/src/dabing/worker.rs"
   - "crates/sp-server/src/lyrics/idle_gate_abort.rs"
   - "crates/sp-server/src/db/models_stems*.rs"
   - "crates/sp-server/tests/startup_migration.rs"
+  - "e2e/cache-layout*.ts"
+  - "e2e/post-deploy-flac.spec.ts"
 ---
 
 # A song's files are ONE set, named after its audio (#136)
@@ -88,6 +91,32 @@ Design record: #136 comment 5894034820.
     DB record. The re-link holds it from reading its rows to its last record,
     so a rename and a re-link never interleave on the same song. Tests prove it
     with two tasks: hold the lock, spawn the other side, show it waits.
+- **A stem / dub job reads its input AFTER it holds the heavy slot
+  (`song_input::job_input`, release 0.69.0 blockers).** A job is picked, then
+  queues for the slot for minutes; a rename in between used to leave it on a
+  path that no longer existed, and it took a penalised failure. Right after
+  the slot, both workers re-read the row's audio (and, for the dub, the vocals
+  stem + the stems status) under `cache::SONG_FILES`, then run on it
+  (`SongInput::stem_job` / `dub_job`): the stem paths, the work dir and the
+  re-link below follow the current audio.
+  - No audio on disk after that read = a re-pick with NO penalty: no attempt,
+    the status untouched, only `stem_next_attempt_at` / `dub_next_attempt_at`
+    set `INPUT_MISSING_RECHECK` (10 min) ahead. Without that wait a song whose
+    audio is gone for good would be picked again first on every tick, ahead of
+    the rest of the queue (the stem queue is in-use-first, then by id; the dub
+    queue newest request first).
+  - Read under the lock, a missing file is a real loss, not the rename race.
+    The WARN names the recorded path, and a dub also records it in
+    `dub_error`: the Dabing tooltip (sp-ui `dabing_list.rs::chain_detail`)
+    shows a non-empty `dub_error` after the chain path for a chain that is
+    not failed too (e2e/dabing.spec.ts). The next re-read that finds the audio
+    clears the note (`clear_missing_note`), and a (re-)request starts with
+    `dub_error = NULL` (`set_dub_requested`).
+    Nothing re-downloads a lost audio file (a row stays `normalized = 1`).
+  - A rename can still land WHILE the job runs; the re-link below covers it.
+  - Pinned by `song_input_tests.rs` (structural: slot → re-read → job →
+    separation / synthesis in each `process_next`; the rename and the
+    missing-audio cases on a real DB).
 - **A job that writes derived files re-links its song when it finishes.** The
   stem worker runs `song_relink::relink_song` after `mark_stems_done`
   (`record_stem_result`), and the dub worker after `mark_dub_ready`
@@ -115,7 +144,11 @@ Design record: #136 comment 5894034820.
     nothing re-runs it.
 - **`startup::self_heal_cache` never deletes an orphan half-sidecar a row
   records.** That half belongs to a song split across two names (a move-back
-  that failed); it is kept and WARNed.
+  that failed); it is kept and WARNed. The post-deploy FLAC check accepts
+  exactly that shape (`e2e/cache-layout.ts`, unit-tested by
+  `e2e/cache-layout.spec.ts`): one youtube id with no complete pair, one lone
+  video half and one lone audio half. The videos API has no file paths, so it
+  reads the shape from disk; any other lone half still fails it.
 - **Re-link (`song_relink`: `relink_derived_files` at startup, `relink_song`
   after a job)** runs after the pair re-link and the duplicate removal. It
   skips a row whose audio is missing.

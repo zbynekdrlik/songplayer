@@ -127,8 +127,8 @@ impl super::PlaybackEngine {
         }
 
         // Presenter — fire-and-forget. `maybe_push_line` is idempotent on an
-        // identical current line in BOTH languages (#222: compares its EN and
-        // SK against the `last_seen` arg we pass, the pre-call snapshot).
+        // identical payload (#222: compares the current + next lines, EN + SK,
+        // against the `last_seen` arg we pass, the pre-call snapshot).
         let pp = match self.pipelines.get_mut(&playlist_id) {
             Some(pp) => pp,
             None => return,

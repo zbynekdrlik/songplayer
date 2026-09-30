@@ -56,6 +56,15 @@ Rules for every post-deploy spec:
   it into the main checkout and refuses); `.gitignore` ignores
   `e2e/node_modules` without a trailing slash, so the link is never
   committed and goes with the worktree.
+- **A post-deploy check's decision logic is a pure helper with a mock-suite
+  unit spec** (`e2e/cache-layout.ts` for the FLAC layout, #136;
+  `av-sync-gate.ts`, `obs-scene-wait.ts`). The post-deploy spec only reads
+  the box and calls it, so the rule is tested in CI without a box. On the
+  Tier-0 box a pure helper (interfaces / type annotations only, no enums)
+  also runs with plain node and no install: a scratch `check.mts` that
+  imports the helper by its absolute `.ts` path and mirrors the spec's cases
+  with `node:assert/strict`, run as `node --experimental-strip-types
+  check.mts`.
 - **#221 L3: the scene driver is SongPlayer's facade** (`FACADE_WS_URL`,
   :4456). **#221 L4b:** `/api/v1/status.active_scene` /
   `active_playlist_ids` are SongPlayer's own program (the resolver, and the

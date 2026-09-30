@@ -534,6 +534,16 @@ the test that kills each one BEFORE CI's mutation gate runs.
   each anchor's count before replacing. It also refuses a `cat >> file
   <<'EOF'` append, a `$VAR`-computed script path, and any command whose text
   contains `github.com` (a curl User-Agent tripped it, #144): same remedy.
+  A `gh … --jq` filter with `\(.x)` string interpolation and a `for n in …;
+  do gh issue comment $n --body-file $D/…` loop are refused too: write each
+  body with the Write tool and run one plain `gh issue comment <N> -R <repo>
+  --body-file <abs path>` per issue (release 0.69.0 lane B).
+- **A recursive grep over the repo's `.claude` dir trips the credential-store
+  hook** (`block-vault-store-read.sh` reads the command TEXT: a recursive
+  read of that dir counts as a vault read, even inside an edit script's
+  heredoc). Search the rules with the Grep tool and a `path` or `glob`, and
+  put such text in a script file written with the Write tool (release 0.69.0
+  lane B).
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N

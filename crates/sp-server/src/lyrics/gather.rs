@@ -317,16 +317,17 @@ pub(crate) async fn gather_sources_impl(
     }
 
     // #120 follow-up: zero text candidates is NOT a terminal state. Bailing
-    // here made `process_song` return Err BEFORE its source gate, so
-    // `process_next` stamped the row `no_source` at the current pipeline
-    // version and froze it until the next version bump. Instead return an
-    // empty candidate list: the gate then routes the song to asr_path BLIND
-    // (empty keyterms) — AAI transcribes unbiased and the empty-transcript
+    // here made `process_song` return Err, so `process_next` stamped the row
+    // `no_source` at the current pipeline version and froze it until the next
+    // version bump. Instead return an empty candidate list: the text tiers
+    // (`worker_text_tiers::run_text_tiers`) then look the text up by title
+    // (#144), and a song still without one takes the g35t base tier (its one
+    // Gemini transcript grouped into lines, #159). The empty-transcript
     // quarantine (`asr_gap`) stays the instrumental safety net.
     if candidate_texts.is_empty() {
         info!(
             %youtube_id,
-            "gather: no text sources found — leaving candidates empty for the blind asr_path route (#120)"
+            "gather: no text sources — the title search, else the g35t base tier, takes the song"
         );
     }
 

@@ -7,6 +7,8 @@ paths:
   - "crates/sp-server/src/lyrics/g35t_client.rs"
   - "e2e/post-deploy-metadata.spec.ts"
   - "e2e/post-deploy-flac.spec.ts"
+  - "crates/sp-server/src/api/routes.rs"
+  - "crates/sp-server/src/api/routes_tests_patch_metadata.rs"
 ---
 
 # Metadata providers: ONE chain, the Gemini key LIST, a live gate (#136)
@@ -75,6 +77,39 @@ answered correctly), and nothing ever ran the real providers.
   last_ok_at_ms, last_error}]}`. `failed_videos` counts
   `health::REPAIR_QUEUE_WHERE` — the SAME predicate the reprocess worker
   selects by (one constant), `null` (never a false 0) if unreadable.
+- **An operator's title correction is final (#136, release 0.69.0 blockers).**
+  `PATCH /api/v1/videos/{id}` with `song` or `artist` also sets
+  `gemini_failed = 0, metadata_source = 'manual'`. `REPAIR_QUEUE_WHERE`
+  excludes `metadata_source = 'manual'` (`IS NOT`, so a NULL source stays in),
+  so the repair never writes over a correction or renames its files. A PATCH
+  of the other fields only leaves both alone.
+  - **A correction made WHILE a batch runs** (review round 2): `process_all`
+    reads the queue once, then each row waits for the providers. So
+    `reprocess_one` re-reads the row under `cache::SONG_FILES` with
+    `WHERE id = ? AND REPAIR_QUEUE_WHERE` and returns `LeftQueue` (nothing
+    renamed or written) when it left the queue; `patch_video` runs a title
+    UPDATE under the same lock, so the PATCH and that re-check + write
+    serialize. Never add a repair write outside that locked re-check.
+  - Pinned by `api/routes_tests_patch_metadata.rs`:
+    `a_patched_title_survives_the_metadata_repair` (the real router, then
+    `ReprocessWorker::process_all`) and
+    `a_correction_made_while_the_repair_batch_runs_survives` (the provider
+    mock makes the real PATCH during its call),
+    `a_title_patch_waits_for_the_song_files_lock` and
+    `a_patch_of_other_fields_does_not_wait_for_the_song_files_lock` (the
+    lock and its `corrects_title` gate); and
+    `health_tests.rs::a_manual_row_is_not_in_the_repair_queue`. Nothing reads
+  `metadata_source` back into `MetadataSource`, so `'manual'` needs no enum
+  variant. Its limits (review round 1):
+  - The correction is on ONE row. The same YouTube video in another playlist
+    is another row (14 ids have 2+ rows on the box, 30.9.2026). If that row
+    is still parser-named, the repair names it and renames the SHARED files,
+    and every row recording them follows (`reprocess/mod.rs`). The corrected
+    row keeps its song / artist, but not the file names.
+  - A RE-DOWNLOAD writes over it: a row reset to `normalized = 0` (only the
+    startup 48 kHz reset does that, `startup.rs`) goes back through the
+    download worker, which asks the provider chain again
+    (`downloader::process_one` → `mark_video_processed_pair`).
 - `POST /api/v1/metadata/probe {youtube_id, title}` runs EACH provider on its
   own (concurrently, each bounded by `PROBE_TIMEOUT` = 180 s, below the spec's
   220 s so a hung provider fails the gate WITH its name), returns each
