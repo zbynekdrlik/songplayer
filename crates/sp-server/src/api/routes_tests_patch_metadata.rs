@@ -12,7 +12,7 @@
 
 #![allow(unused_imports)]
 
-use super::tests::{app, test_state};
+use super::tests::{app, test_state, test_state_with_cache_dir};
 use super::*;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -247,6 +247,17 @@ async fn seed_parser_row(state: &crate::AppState, id: i64, dir: &std::path::Path
     files
 }
 
+/// The video + audio of row `id`'s video named after `song` / `artist` in
+/// `dir` (the names a title correction renames them to: no `_gf`).
+fn corrected_files(dir: &std::path::Path, id: i64, song: &str, artist: &str) -> [String; 2] {
+    let youtube_id = format!("PATCHED{id:04}");
+    [
+        crate::downloader::cache::video_filename(song, artist, &youtube_id, false),
+        crate::downloader::cache::audio_filename(song, artist, &youtube_id, false),
+    ]
+    .map(|name| dir.join(name).to_string_lossy().into_owned())
+}
+
 /// `(song, artist, gemini_failed, metadata_source, file_path, audio_file_path)`.
 async fn metadata_row(
     pool: &sqlx::SqlitePool,
@@ -265,11 +276,12 @@ async fn metadata_row(
 /// #136 (release 0.69.0 review 🟡 3): the operator corrects a parser title
 /// on the dashboard, then the metadata repair runs (5 s after start, then
 /// every 30 min). The correction, and the files it names, must survive: the
-/// row left the repair queue when it was patched.
+/// row left the repair queue when it was patched. ROZHODNUTÉ 5908227964: the
+/// correction renames the video's files after the corrected title.
 #[tokio::test]
 async fn a_patched_title_survives_the_metadata_repair() {
     let dir = tempfile::tempdir().unwrap();
-    let state = test_state().await;
+    let state = test_state_with_cache_dir(dir.path().to_path_buf()).await;
     let files = seed_parser_row(&state, 21, dir.path()).await;
     let pool = state.pool.clone();
 
@@ -300,14 +312,13 @@ async fn a_patched_title_survives_the_metadata_repair() {
         "a corrected row is no longer parser-named"
     );
     assert_eq!(source.as_deref(), Some("manual"));
+    let corrected = corrected_files(dir.path(), 21, "Break!", "planetboom");
     assert_eq!(
         [file_path, audio_file_path],
-        files,
-        "the files keep their names"
+        corrected,
+        "the files are named after the correction, and the repair keeps them"
     );
-    for f in &files {
-        assert!(std::path::Path::new(f).exists(), "{f} must not be moved");
-    }
+    assert_files_moved(&files, &corrected);
     assert_eq!(
         crate::metadata::health::failed_videos(&pool).await.unwrap(),
         0,
@@ -319,7 +330,7 @@ async fn a_patched_title_survives_the_metadata_repair() {
 #[tokio::test]
 async fn an_artist_only_patch_marks_the_metadata_manual() {
     let dir = tempfile::tempdir().unwrap();
-    let state = test_state().await;
+    let state = test_state_with_cache_dir(dir.path().to_path_buf()).await;
     seed_parser_row(&state, 22, dir.path()).await;
     let pool = state.pool.clone();
 
@@ -336,7 +347,7 @@ async fn an_artist_only_patch_marks_the_metadata_manual() {
 #[tokio::test]
 async fn a_patch_without_song_or_artist_leaves_the_repair_queue_alone() {
     let dir = tempfile::tempdir().unwrap();
-    let state = test_state().await;
+    let state = test_state_with_cache_dir(dir.path().to_path_buf()).await;
     seed_parser_row(&state, 23, dir.path()).await;
     let pool = state.pool.clone();
 
@@ -394,7 +405,7 @@ impl crate::metadata::MetadataProvider for OperatorCorrectsDuringTheCall {
 #[tokio::test]
 async fn a_correction_made_while_the_repair_batch_runs_survives() {
     let dir = tempfile::tempdir().unwrap();
-    let state = test_state().await;
+    let state = test_state_with_cache_dir(dir.path().to_path_buf()).await;
     let files = seed_parser_row(&state, 24, dir.path()).await;
     let pool = state.pool.clone();
 
@@ -413,13 +424,22 @@ async fn a_correction_made_while_the_repair_batch_runs_survives() {
         metadata_row(&pool, 24).await;
     assert_eq!((song.as_str(), artist.as_str()), ("Break!", "planetboom"));
     assert_eq!((gemini_failed, source.as_deref()), (0, Some("manual")));
+    let corrected = corrected_files(dir.path(), 24, "Break!", "planetboom");
     assert_eq!(
         [file_path, audio_file_path],
-        files,
-        "the files keep their names"
+        corrected,
+        "the correction's names, never the repair's"
     );
-    for f in &files {
-        assert!(std::path::Path::new(f).exists(), "{f} must not be moved");
+    assert_files_moved(&files, &corrected);
+}
+
+/// Every `old` file is gone and every `new` one exists.
+fn assert_files_moved(old: &[String], new: &[String]) {
+    for f in old {
+        assert!(!std::path::Path::new(f).exists(), "{f} was renamed");
+    }
+    for f in new {
+        assert!(std::path::Path::new(f).exists(), "{f} exists");
     }
 }
 
@@ -430,7 +450,7 @@ async fn a_correction_made_while_the_repair_batch_runs_survives() {
 #[tokio::test]
 async fn a_title_patch_waits_for_the_song_files_lock() {
     let dir = tempfile::tempdir().unwrap();
-    let state = test_state().await;
+    let state = test_state_with_cache_dir(dir.path().to_path_buf()).await;
     seed_parser_row(&state, 25, dir.path()).await;
     let pool = state.pool.clone();
 
@@ -463,7 +483,7 @@ async fn a_title_patch_waits_for_the_song_files_lock() {
 #[tokio::test]
 async fn a_patch_of_other_fields_does_not_wait_for_the_song_files_lock() {
     let dir = tempfile::tempdir().unwrap();
-    let state = test_state().await;
+    let state = test_state_with_cache_dir(dir.path().to_path_buf()).await;
     seed_parser_row(&state, 26, dir.path()).await;
 
     let held = crate::downloader::cache::SONG_FILES.lock().await;
@@ -479,4 +499,176 @@ async fn a_patch_of_other_fields_does_not_wait_for_the_song_files_lock() {
     .expect("a PATCH of the other fields finishes while the lock is held");
     drop(held);
     assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+// ── ROZHODNUTÉ 5908227964: a title correction belongs to the VIDEO ─────────
+
+/// Row `id` of `youtube_id` in playlist `playlist` (a parser title), its
+/// files as given.
+async fn seed_row(
+    state: &crate::AppState,
+    id: i64,
+    playlist: i64,
+    youtube_id: &str,
+    files: Option<&[String; 3]>,
+) {
+    sqlx::query("INSERT OR IGNORE INTO playlists (id, name, youtube_url) VALUES (?, 'p', 'u')")
+        .bind(playlist)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, title, song, artist, gemini_failed, \
+                             normalized, metadata_source, file_path, audio_file_path, \
+                             vocals_file_path) \
+         VALUES (?, ?, ?, 'Break! - planetboom (Live)', 'Old Song', 'Old Artist', 1, ?, \
+                 'regex', ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(playlist)
+    .bind(youtube_id)
+    .bind(i64::from(files.is_some()))
+    .bind(files.map(|f| f[0].clone()))
+    .bind(files.map(|f| f[1].clone()))
+    .bind(files.map(|f| f[2].clone()))
+    .execute(&state.pool)
+    .await
+    .unwrap();
+}
+
+/// A video's video + audio + vocals stem (named after the audio) in `dir`,
+/// named after `song` / `artist` (`gf`: the parser's `_gf` names).
+fn song_files(
+    dir: &std::path::Path,
+    youtube_id: &str,
+    song: &str,
+    artist: &str,
+    gf: bool,
+) -> [String; 3] {
+    let video = dir.join(crate::downloader::cache::video_filename(
+        song, artist, youtube_id, gf,
+    ));
+    let audio = dir.join(crate::downloader::cache::audio_filename(
+        song, artist, youtube_id, gf,
+    ));
+    let (vocals, _) = crate::stems::stem_paths(&audio);
+    [video, audio, vocals].map(|path| path.to_string_lossy().into_owned())
+}
+
+/// A `videos` row's title and file columns, as `video_row` reads them.
+type TitleAndFiles = (
+    String,
+    Option<String>,
+    i64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+/// `(song, artist, gemini_failed, metadata_source, [file_path, audio_file_path,
+/// vocals_file_path])` of row `id`.
+async fn video_row(
+    pool: &sqlx::SqlitePool,
+    id: i64,
+) -> (
+    String,
+    Option<String>,
+    i64,
+    Option<String>,
+    [Option<String>; 3],
+) {
+    let (song, artist, gf, source, video, audio, vocals): TitleAndFiles = sqlx::query_as(
+        "SELECT song, artist, gemini_failed, metadata_source, file_path, audio_file_path, \
+                vocals_file_path FROM videos WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (song, artist, gf, source, [video, audio, vocals])
+}
+
+/// One YouTube video is one song with one title (owner rule: one app, one
+/// behaviour; 14 ids have 2+ rows on the box). A title PATCH of ONE row
+/// applies to every row of its `youtube_id` (song, artist, `manual`,
+/// `gemini_failed = 0`), and each row's files are renamed after the
+/// correction through `rename_song_files` (the stem follows the audio). A row
+/// not downloaded yet takes the title and keeps no files; another video is
+/// untouched.
+#[tokio::test]
+async fn a_title_correction_applies_to_every_row_of_the_video() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state_with_cache_dir(dir.path().to_path_buf()).await;
+    let old = song_files(dir.path(), "SHARED0001", "Old Song", "Old Artist", true);
+    for f in &old {
+        std::fs::write(f, b"x").unwrap();
+    }
+    seed_row(&state, 31, 1, "SHARED0001", Some(&old)).await; // ytfast
+    seed_row(&state, 32, 2, "SHARED0001", Some(&old)).await; // ytworship, same files
+    seed_row(&state, 33, 3, "SHARED0001", None).await; // not downloaded yet
+    let other = song_files(dir.path(), "OTHER00001", "Old Song", "Old Artist", true);
+    for f in &other {
+        std::fs::write(f, b"x").unwrap();
+    }
+    seed_row(&state, 34, 1, "OTHER00001", Some(&other)).await;
+    let pool = state.pool.clone();
+
+    let status = patch(
+        state.clone(),
+        31,
+        serde_json::json!({ "song": "Break!", "artist": "planetboom" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let new = song_files(dir.path(), "SHARED0001", "Break!", "planetboom", false);
+    for id in [31, 32] {
+        let (song, artist, gf, source, files) = video_row(&pool, id).await;
+        assert_eq!(
+            (song.as_str(), artist.as_deref(), gf, source.as_deref()),
+            ("Break!", Some("planetboom"), 0, Some("manual")),
+            "row {id} carries the video's corrected title"
+        );
+        assert_eq!(
+            files,
+            new.clone().map(Some),
+            "row {id} records the renamed files"
+        );
+    }
+    assert_files_moved(&old, &new);
+    let (song, _, gf, source, files) = video_row(&pool, 33).await;
+    assert_eq!(
+        (song.as_str(), gf, source.as_deref(), files),
+        ("Break!", 0, Some("manual"), [None, None, None]),
+        "a row not downloaded yet takes the title and records no files"
+    );
+    let (song, _, gf, source, files) = video_row(&pool, 34).await;
+    assert_eq!(
+        (song.as_str(), gf, source.as_deref(), files),
+        ("Old Song", 1, Some("regex"), other.clone().map(Some)),
+        "another video is untouched"
+    );
+    assert!(std::path::Path::new(&other[0]).exists());
+    assert_eq!(
+        crate::metadata::health::failed_videos(&pool).await.unwrap(),
+        1,
+        "only the other video is still in the repair queue"
+    );
+
+    // An artist-only correction of the OTHER row: every row takes that row's
+    // whole title (its song, the new artist), and the files follow again.
+    let status = patch(state, 32, serde_json::json!({ "artist": "Planetboom" })).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let renamed = song_files(dir.path(), "SHARED0001", "Break!", "Planetboom", false);
+    for id in [31, 32, 33] {
+        let (song, artist, ..) = video_row(&pool, id).await;
+        assert_eq!(
+            (song.as_str(), artist.as_deref()),
+            ("Break!", Some("Planetboom"))
+        );
+    }
+    let (.., files) = video_row(&pool, 31).await;
+    assert_eq!(files, renamed.clone().map(Some));
+    assert_files_moved(&new, &renamed);
 }

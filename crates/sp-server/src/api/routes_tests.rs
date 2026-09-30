@@ -19,7 +19,7 @@ pub(crate) async fn test_state() -> AppState {
     test_state_with_cache_dir(std::path::PathBuf::from("/tmp/cache")).await
 }
 
-async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> AppState {
+pub(crate) async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> AppState {
     let pool = db::create_memory_pool().await.unwrap();
     db::run_migrations(&pool).await.unwrap();
     let (event_tx, _) = broadcast::channel(16);
