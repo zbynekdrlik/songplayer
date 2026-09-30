@@ -56,11 +56,13 @@ use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use crate::playback::loop_stats::percentile_ceil;
+use crate::playback::program_output_timing::utc_label;
 use crate::playback::vban_packet::{
     VBAN_BLOCK_SAMPLES, VBAN_CHANNELS, VBAN_SAMPLE_RATE_HZ, VBAN_SEND_LATENCY_100NS,
     VBAN_STREAM_NAME_LEN, VbanBlockPackets, VbanEncoder, empty_block_packets, packet_send_at_100ns,
     stream_name_bytes,
 };
+use crate::playback::vban_stall::{VbanLateEvent, VbanStallLog, VbanStallWarn};
 // #224 part 2: VBAN's (and the NDI input's) wall clock and VBAN's slew live
 // in `vban_clock.rs` (review round 1: this file neared the 1000-line cap).
 pub use crate::playback::vban_clock::{RemainderSlew, VBAN_SLEW_PPM, WallVbanClock};
@@ -352,6 +354,12 @@ pub struct VbanStatus {
     pub blocks_substituted: u64,
     /// Packets sent more than 2 ms after their due time.
     pub late_sends: u64,
+    /// #210 part 2: the worst packet's lateness over the last 60–120 s of
+    /// sending (µs, `vban_stall.rs`).
+    pub late_max_us: u64,
+    /// #210 part 2: the last 32 packets sent more than 5 ms late, oldest
+    /// first: `{utc_ms, late_us}`.
+    pub late_events: Vec<VbanLateEvent>,
     /// p99 of the last [`VBAN_INTERVAL_WINDOW`] packet-to-packet intervals.
     pub send_interval_p99_us: u64,
     /// `nuFrame` of the last packet sent.
@@ -401,6 +409,9 @@ pub struct VbanOut {
     ready: Condvar,
     config: Mutex<Arc<VbanConfig>>,
     stats: Mutex<VbanCounters>,
+    /// #210 part 2: every sent packet's lateness (the ring, the window, the
+    /// WARN's rate limit).
+    stalls: Mutex<VbanStallLog>,
     /// Set while [`run_vban_loop`] runs.
     running: AtomicBool,
 }
@@ -422,6 +433,7 @@ impl VbanOut {
             ready: Condvar::new(),
             config: Mutex::new(Arc::new(VbanConfig::default())),
             stats: Mutex::new(VbanCounters::default()),
+            stalls: Mutex::new(VbanStallLog::default()),
             running: AtomicBool::new(false),
         }
     }
@@ -528,9 +540,24 @@ impl VbanOut {
         lock(&self.stats).slew_owed_us = owed_100ns / 10;
     }
 
+    /// Fold one sent packet's lateness into the stall log (#210 part 2);
+    /// returns the WARN to write, if any.
+    fn record_lateness(
+        &self,
+        planned_100ns: i64,
+        sent_100ns: i64,
+        sent_label_100ns: i64,
+    ) -> Option<VbanStallWarn> {
+        lock(&self.stalls).observe(planned_100ns, sent_100ns, sent_label_100ns)
+    }
+
     /// The telemetry for the API.
     pub fn status(&self) -> VbanStatus {
         let cfg = self.config();
+        let (late_max_us, late_events) = {
+            let stalls = lock(&self.stalls);
+            (stalls.late_max_us(), stalls.late_events())
+        };
         let s = lock(&self.stats);
         VbanStatus {
             enabled: cfg.enabled,
@@ -541,6 +568,8 @@ impl VbanOut {
             blocks_dropped: s.blocks_dropped,
             blocks_substituted: s.blocks_substituted,
             late_sends: s.late_sends,
+            late_max_us,
+            late_events,
             send_interval_p99_us: percentile_ceil(&s.intervals_us, 99),
             frame_counter: s.frame_counter,
             slew_owed_us: s.slew_owed_us,
@@ -574,6 +603,12 @@ pub trait VbanClock {
     /// What the clock still owes of a date step's remainder (100 ns, #224
     /// part 2; 0 for a clock that follows its wall).
     fn slew_owed_100ns(&self) -> i64;
+    /// The fleet label of this clock's reading `t_100ns` (`t + D(K_F)`,
+    /// i.e. UTC), for the instant of a late packet (#210 part 2). A clock
+    /// with no fleet shift (the tests') is its own label.
+    fn label_100ns(&self, t_100ns: i64) -> i64 {
+        t_100ns
+    }
 }
 
 /// Where packets go (a UDP socket in production).
@@ -677,9 +712,30 @@ impl VbanSender {
             {
                 warn!(%e, %addr, send_errors = total_errors, "vban output: UDP send failed");
             }
+            if let Some(stall) = out.record_lateness(at, sent_at, clock.label_100ns(sent_at)) {
+                warn_late_packet(&stall, k, wait);
+            }
         }
         self.packets.len()
     }
+}
+
+/// #210 part 2: the WARN of a packet sent more than 10 ms after its planned
+/// instant: when (UTC, to line up with a dev1 capture), how late, which
+/// packet of its block, the wait before it (> 0: the thread overslept its
+/// wait; 0: it reached the packet already late) and how many such packets
+/// the rate limit skipped since the WARN before it. The decision is
+/// `VbanStallLog::observe`'s (tested); logging only.
+#[cfg_attr(test, mutants::skip)]
+fn warn_late_packet(stall: &VbanStallWarn, packet: usize, wait_100ns: i64) {
+    warn!(
+        utc = %utc_label(stall.event.utc_ms * 10_000),
+        late_us = stall.event.late_us,
+        packet,
+        waited_us = crate::playback::wallclock::to_us(wait_100ns),
+        suppressed = stall.suppressed,
+        "vban output: a packet went out more than 10 ms after its planned instant"
+    );
 }
 
 /// The VBAN thread body: send every queued block on its schedule until the
