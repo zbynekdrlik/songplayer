@@ -122,8 +122,8 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   `program_output_tests_order.rs` with a held NDI send). It returns the
   boundary's `BoundaryMarks`, which the loop records
   (`ProgramBus::record_timing` → `health.timing`, the rate-limited WARN of a
-  VBAN hand-off over 10 ms late; `vban-out.md` "The program boundary's
-  timing"). `ProgramOutput::submit` is only the tests' shorthand
+  VBAN hand-off after its block's first packet was due, over VBAN's send
+  latency L, #210 part 2; `vban-out.md` "The program boundary's timing"). `ProgramOutput::submit` is only the tests' shorthand
   (`#[cfg(test)]`, no clock, returns the stamp).
 - `start_program` runs in `lib.rs::start` AFTER the #196 startup senders, so
   `SP-program` is created after every playlist sender and the per-playlist
