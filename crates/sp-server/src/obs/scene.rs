@@ -3,21 +3,21 @@
 //! #218: a scene's playlist lookup that FAILED (no answer, the connection
 //! closed, or an answer without a `sceneItems` list) is not a scene that
 //! shows no playlist. [`check_scene_items`] returns it as a [`LookupError`];
-//! [`apply_scene_change`] then keeps the previous playlists, records the
-//! failure in `ObsState::lookup_failed` and broadcasts nothing, and the ~2 s
-//! scene poll (`scene_poll.rs`) looks the scene up again until it answers.
+//! [`apply_scene_change`] then keeps the previous playlists and records the
+//! failure in `ObsState::lookup_failed` (so the published snapshot is not
+//! acted on), and the ~2 s scene poll (`scene_poll.rs`) looks the scene up
+//! again until it answers.
 
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
-use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
 
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
 use crate::obs::snapshot::ObsShared;
 use crate::obs::text::get_scene_items_request;
-use crate::obs::{NdiSourceMap, ObsEvent, SharedWrite};
+use crate::obs::{NdiSourceMap, SharedWrite};
 
 /// Why a scene's playlist lookup failed: its playlists are UNKNOWN, never
 /// "none" (#218).
@@ -54,34 +54,34 @@ impl From<DispatcherError> for LookupError {
 }
 
 /// Apply a program-scene change: query which NDI sources are on program for
-/// `scene_name`, write `current_scene` + `active_playlist_ids` into shared
-/// state, and emit `ObsEvent::SceneChanged` (#221 L4b: no engine bridge reads
-/// it any more; L6 deletes the scene detection).
+/// `scene_name` and write `current_scene` + `active_playlist_ids` into the
+/// shared state, which publishes them as an `ObsSnapshot` (#219: the program
+/// follow reads it; the unread `ObsEvent::SceneChanged` is deleted, release
+/// 0.69.0 review 🔵 10).
 ///
 /// Shared by BOTH the `CurrentProgramSceneChanged` reader path and the ~2 s
 /// poll-reconcile path (#170) so a dropped OBS event feeds the exact same
-/// downstream handling. A duplicate emit for the already-current scene is
-/// harmless — `(Playing, SceneOn)` is a no-op in the playback state machine.
+/// downstream handling. A duplicate apply for the already-current scene
+/// publishes nothing (`ObsShared` publishes only a real change).
 ///
 /// #218: when the lookup FAILS, the scene's name is stored but its playlists
-/// are not: `active_playlist_ids` keeps the previous set, `lookup_failed`
-/// names the scene, and nothing is broadcast (an empty set would scene-off
-/// the playlist on program). The scene poll looks it up again; a success
-/// clears `lookup_failed` and broadcasts as usual.
+/// are not: `active_playlist_ids` keeps the previous set and `lookup_failed`
+/// names the scene, so a consumer does not act on it (an empty set would read
+/// as a scene showing no playlist). The scene poll looks it up again; a
+/// success clears `lookup_failed` and publishes the real set.
 ///
 /// `ticket` ([`ObsShared::scene_ticket`], taken before `scene_name` was read:
 /// the event's, or the poll's / the initial `GetCurrentProgramScene`): an
 /// answer that arrives after a later apply's answer was written is dropped —
 /// cg OBS may answer lookups out of order, the poll's relookups can overlap
-/// an event's lookup, and an event can overtake a poll's read. The
-/// `SceneChanged` goes out under the same write lock, so the engine gets the
-/// scene changes in the order they were written.
+/// an event's lookup, and an event can overtake a poll's read. The snapshot
+/// is published under the same write lock, so a consumer gets the scene
+/// changes in the order they were written.
 pub(crate) async fn apply_scene_change(
     write: &SharedWrite,
     dispatcher: &Dispatcher,
     ndi_sources: &NdiSourceMap,
     obs: &ObsShared,
-    event_tx: &broadcast::Sender<ObsEvent>,
     scene_name: String,
     ticket: u64,
 ) {
@@ -124,10 +124,6 @@ pub(crate) async fn apply_scene_change(
             let repaired = s.lookup_failed.take().as_deref() == Some(scene_name.as_str());
             s.current_scene = Some(scene_name.clone());
             s.active_playlist_ids = active_ids.clone();
-            let _ = event_tx.send(ObsEvent::SceneChanged {
-                scene_name: scene_name.clone(),
-                active_playlist_ids: active_ids.clone(),
-            });
             repaired
         })
         .await;
