@@ -354,11 +354,15 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         self.frames_submitted_total += 1;
         self.frames_in_window += 1;
         self.last_submit_ts = Some(std::time::Instant::now());
-        // #224 part 2: the ONE edge where the fleet labels go on. The stamps
-        // are internal boundaries; K_F is read once, so audio and video share
-        // it, and each is floored onto the fleet grid — never future-dated.
-        let k = self.wall.fleet().slots();
-        let (video_tc_100ns, audio_tc_100ns) = (wire(video_tc_100ns, k), wire(audio_tc_100ns, k));
+        // #224 part 2: the ONE edge where the fleet labels go on. The video
+        // stamp is an internal boundary b: on the wire it is b's boundary
+        // K_F slots later, floored — never future-dated. K_F is read once and
+        // the audio stamp moves by the SAME relabel, so a source's own audio
+        // offset survives (0 on the paced paths; the program forwards a
+        // source's stamps).
+        let video_wire = wire(video_tc_100ns, self.wall.fleet().slots());
+        let audio_tc_100ns = audio_tc_100ns + (video_wire - video_tc_100ns);
+        let video_tc_100ns = video_wire;
 
         // 1. Audio first — the boundary's chunks go into NDI's queue before
         //    the video frame (the audio-first invariant, submitter.rs top).

@@ -58,7 +58,8 @@ impl RemainderSlew {
     pub fn owed_at(&self, t_100ns: i64) -> i64 {
         let elapsed = (t_100ns - self.since_100ns).max(0);
         let paid = elapsed.saturating_mul(VBAN_SLEW_PPM) / 1_000_000;
-        (self.owed_100ns - paid).max(0)
+        let left = (self.owed_100ns.abs() - paid).max(0);
+        self.owed_100ns.signum() * left
     }
 
     /// The line moved by `jump_100ns` (signed), reading `t_100ns` after the

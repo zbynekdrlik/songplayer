@@ -245,8 +245,8 @@ impl WallClock {
     /// this wall's line for the next wall to join (#224 part 2).
     pub fn tick(&mut self) {
         let now = self.source.now_monotonic();
-        self.last_tick = now;
         let idle = now.saturating_duration_since(self.last_tick);
+        self.last_tick = now;
         if idle > WALL_REJOIN_IDLE {
             self.rejoin(idle);
         }

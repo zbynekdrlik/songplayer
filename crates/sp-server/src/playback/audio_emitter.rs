@@ -768,7 +768,7 @@ pub fn emit_one_block<B: NdiBackend>(
             data: interleaved,
             channels,
             sample_rate: EMIT_RATE_HZ,
-            timecode_100ns: Some(emitted.timecode_100ns),
+            timecode_100ns: Some(shared.fleet.label_100ns(emitted.timecode_100ns)),
         };
         sink.send_audio(&frame);
     }

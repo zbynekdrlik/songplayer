@@ -53,7 +53,7 @@ use sp_core::genlock::{GENLOCK_GRID_FPS, UNITS_PER_SECOND, floor_boundary_100ns}
 use tracing::info;
 
 use crate::playback::wallclock::{
-    ANCHOR_MAX_STEP_100NS, Anchor, AnchorSample, WALL_REJOIN_IDLE, to_us, utc_now_100ns,
+    Anchor, AnchorSample, STEP_DETECT_100NS, WALL_REJOIN_IDLE, to_us, utc_now_100ns,
 };
 
 /// D(K) = ⌈K·P⌉ in 100 ns: how far a timeline K slots behind its labels sits
@@ -151,7 +151,7 @@ pub fn adopt(unapplied: &[Epoch], step_100ns: i64) -> Adoption {
             closest = (distance, i + 1, slots);
         }
     }
-    if closest.0 <= ANCHOR_MAX_STEP_100NS {
+    if closest.0 <= STEP_DETECT_100NS {
         return Adoption {
             slots: closest.2,
             consumed: closest.1,
@@ -253,7 +253,7 @@ impl FleetShift {
         let registry = self.lock();
         let fresh = registry
             .line
-            .filter(|line| sample.instant.saturating_duration_since(line.at) > WALL_REJOIN_IDLE);
+            .filter(|line| sample.instant.saturating_duration_since(line.at) <= WALL_REJOIN_IDLE);
         match fresh {
             Some(line) => (
                 line.anchor,
