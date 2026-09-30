@@ -150,15 +150,19 @@ What makes a FOH block late is named on the box, per boundary, by the
 - Reading it: a late `vban_feed` with a late `ready_late` is upstream of the
   sender (a late source or release, or the sender still busy with the
   boundary before); `submit_us` alone high is the NDI SDK and, since the fix,
-  no longer delays its own boundary's FOH block — only a submit longer than
-  a slot still delays the next boundary's take (its `ready_late_us`).
+  no longer delays its own boundary's FOH block. The sender is one thread,
+  so the next boundary's take (its `ready_late_us`) still slips whenever the
+  boundary before ends past that job's arrival: a late take plus its video
+  side — the NDI submit (`submit_us`) or a fade's mixed picture, which no
+  figure times (it sits between the hand-off and the submit start; the
+  fade's INFO line has it as `max_picture_us`).
 - A fleet date step is not a stall. The figures compare the sender's wall
   with the sources' stamps, and at a step the two walls can sit up to r
   (< one slot) apart for about one boundary (`program-bus.md`, "One clock
   domain"). So a step that the program wall follows first can add ~one
-  counted boundary (and one WARN) with no real stall. Check a WARN's
-  `boundary_utc` against the step (the relabel log line, `vban.slew_owed_us`
-  ≠ 0) before calling it one.
+  counted boundary with no real stall — a WARN too only when r > 10 ms.
+  Match it to the step (the relabel log line, `vban.slew_owed_us` ≠ 0; a
+  WARN's `boundary_utc`) before calling it one.
 - Tests: `program_output_timing_tests.rs` (exact pins, the two buckets, the
   5 ms / 10 ms / 5 s edges), `program_output_tests_order.rs` (an NDI send
   that advances a settable wall shows in `submit_us` only; the real loop
@@ -188,8 +192,9 @@ bursts, and `health.timing` read right before and right after the capture:
 `vban_feed_late_us_max` < 5 ms (design record 5911744233). The `*_max`
 figures cover only the last 60–120 s, so a stall early in a 15 min capture
 shows only in the counter diff. A fleet date step inside the capture may
-add about one counted boundary with no real stall (see "Reading it"): match
-its WARN's `boundary_utc` to the step before failing the run. If a late
+add about one counted boundary with no real stall (a WARN too only when
+r > 10 ms, see "Reading it"): match it to the step's relabel log line (or
+the WARN's `boundary_utc`) before failing the run. If a late
 `ready_late` remains, the next step targets that source by the measured
 cause.
 
