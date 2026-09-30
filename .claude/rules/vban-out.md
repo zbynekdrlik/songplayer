@@ -15,10 +15,22 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
 
 ## Data path
 
-- `ProgramOutput::submit` (`program_output.rs`) hands each submitted pair's
-  audio to `VbanOut::push` right AFTER the NDI submit:
-  - a forwarded block is MOVED in (`VbanBlock::from_frames`, no copy);
-  - a standby pair becomes `VbanBlock::silence`.
+- `ProgramOutput::serve` (`program_output.rs`) hands each pair's audio to
+  `VbanOut::push` BEFORE the pair's `SP-program` NDI submit (#210 stall fix,
+  design record 5911744233). Same stamp, same samples:
+  - a forwarded or mixed block is COPIED (`VbanBlock::copied`, 12.8 KB): the
+    NDI submit still borrows the pair after the push;
+  - a standby pair becomes `VbanBlock::silence`;
+  - a mixed boundary computes its crossfaded block and pushes it FIRST, then
+    paints the picture (`paint_mix`) and submits.
+
+  So no video-side cost — a slow NDI send, a mixed picture — ever delays the
+  FOH block. Before the fix the push came after the NDI submit, and a late
+  submit showed on dev1 as a 20–35 ms gap followed by a 6–8 packet burst
+  (#210 findings 5907620763 / 5907883948). Pinned by
+  `program_output_tests_order.rs`: the NDI backend holds its first send
+  behind a gate, and VBAN must already have the block (all three kinds).
+  Keep that order in any new submit path.
   A pair whose audio is not exactly one 48 kHz stereo 1600-frame frame is sent
   as silence and counted in `blocks_substituted`.
 - The queue never blocks. Over `VBAN_QUEUE_BOUND` (10 = the program queue's
@@ -29,8 +41,9 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   0, 41 666, 83 333, …, 291 666). L is TWO slots (`VBAN_SEND_LATENCY_100NS` =
   666 666). It was one slot at first; the 26.9.2026 FOH capture (VB-Matrix stream 6,
   5 min) showed 0.5 % late sends and Overload +11 / Underrun +14 against cg's +3 / +7,
-  because a program block arrives only after the source submit AND the `SP-program`
-  NDI submit (each up to ~20 ms p99). An on-time packet gets exactly one wait, so they go out evenly.
+  because a program block arrived only after the source submit AND the `SP-program`
+  NDI submit (each up to ~20 ms p99; since the #210 fix the program's NDI submit
+  no longer precedes the push). An on-time packet gets exactly one wait, so they go out evenly.
   A block that arrives AFTER its first packet is due sends its past-due packets
   back-to-back, each counted in `late_sends`. That happens after a program fill
   past the 3-slot grace or a real stall — never at a fleet date step since
@@ -101,6 +114,43 @@ The payload is 1200 B of interleaved 3-byte LE samples, within the spec's
   before it clicks: the vban defaults equal the fixture, so only a field whose
   fixture value differs from the form default proves the load landed.
 
+## The program boundary's timing (`health.timing`, #210)
+
+What makes a FOH block late is named on the box, per boundary, by the
+`SP-program` sender (`playback/program_output_timing.rs`, pure):
+
+- `ProgramOutput::serve(job, now)` returns `BoundaryMarks`, four instants
+  off the sender's own wall (the stamps' timeline): the job taken, the VBAN
+  hand-off, the NDI submit started and returned. `BoundarySample::of` →
+  `ready_late_us` (taken − boundary), `vban_feed_late_us` (hand-off −
+  boundary) and `submit_us` (the NDI call alone); an instant before its
+  reference is 0 late.
+- `BoundaryTiming` (in `ProgramCore`, fed through
+  `ProgramBus::record_timing` by `run_program_loop`) keeps each figure's
+  worst over the last 60–120 s (two 1800-boundary buckets), counts the
+  boundaries over 5 ms per figure since start, and counts
+  `vban_feed_late_over_10ms`.
+- ONE WARN `program output: a boundary's VBAN audio was handed over more
+  than 10 ms late` per such boundary, at most one per 5 s of timeline; the
+  next WARN carries `suppressed` (how many it skipped). It names
+  `boundary_100ns` (the wire stamp), `boundary_utc` (to line up with a dev1
+  capture) and the three figures. The decision is `observe`'s return value
+  (tested, `warned` counts it); the log call is `mutants::skip`.
+- `GET /api/v1/program` → `health.timing`: `{boundaries,
+  ready_late_us_max, vban_feed_late_us_max, submit_us_max,
+  ready_late_over_5ms, vban_feed_late_over_5ms, submit_over_5ms,
+  vban_feed_late_over_10ms, warned}`. The counts only grow: read them twice
+  and diff over the capture window.
+- Reading it: a late `vban_feed` with a late `ready_late` is upstream of the
+  sender (a late source or release, or the sender still busy with the
+  boundary before); `submit_us` alone high is the NDI SDK and, since the fix,
+  no longer reaches FOH.
+- Tests: `program_output_timing_tests.rs` (exact pins, the two buckets, the
+  5 ms / 10 ms / 5 s edges), `program_output_tests_order.rs` (an NDI send
+  that advances a settable wall shows in `submit_us` only; the real loop
+  puts one boundary's figures on the bus), `api/program_tests.rs` (the JSON
+  names).
+
 ## Tests
 
 The helpers in `vban_packet_tests.rs` (`parse_packet`, `ramp_block`) and
@@ -117,7 +167,11 @@ assertions. The loopback test sends through a real `UdpSocket` to
 Box acceptance is the supervisor's job: point `vban_targets` at a dev1 LAN
 receiver and never at FOH, capture 60 s with tcpdump and check 0 counter gaps,
 an interval p99 < 7 ms, and PCM that cross-correlates with `SP-program`.
-Routing fohabl/lv1 in VB-Matrix is B4, with the owner's go.
+Routing fohabl/lv1 in VB-Matrix is B4, with the owner's go. The #210 stall
+fix adds: a 15 min dev1 capture with 0 inter-arrival gaps over 15 ms and 0
+bursts, and `health.timing.vban_feed_late_us_max` < 5 ms (design record
+5911744233); if a late `ready_late` remains, the next step targets that
+source by the measured cause.
 
 ## FOH routing on fohabl (VB-Matrix over VBAN-TEXT)
 
