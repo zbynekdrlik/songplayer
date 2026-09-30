@@ -6,11 +6,17 @@
 //! cg OBS's program, and SongPlayer drives it: a playlist switch is mirrored
 //! to cg OBS, a manual scene is forwarded to it first. This is SongPlayer's
 //! record of its OWN commands, never cg OBS tracking (the owner's ruling: no
-//! more work goes into following cg OBS):
+//! more work goes into following cg OBS), with one exception, the OBS follow
+//! (last bullet), which already follows cg OBS:
 //!
 //! - cg OBS answered a playlist mirror OK → `shown = Some(pid)`;
 //! - cg OBS answered a manual scene OK → `shown = None` (no playlist);
-//! - a refusal, no answer, or a command never sent → unchanged.
+//! - a refusal, no answer, or a command never sent → unchanged;
+//! - the OBS follow (`program_follow_obs`: the facade rollback, or the
+//!   settings checkbox) saw cg OBS's program scene → its catalog playlist,
+//!   or `None` for a manual scene (release 0.69.0 review 🟡 1). In that mode
+//!   cg OBS is the authority: what it shows is observed, not told, and it is
+//!   recorded through the same ticket.
 //!
 //! Every command takes a [`Ticket`] under the bus's `switch_order` (so
 //! tickets are in switch order); an answer applies only when its ticket is
