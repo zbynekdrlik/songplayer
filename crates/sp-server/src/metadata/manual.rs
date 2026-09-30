@@ -21,7 +21,7 @@
 use std::path::Path;
 
 use sqlx::SqlitePool;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use super::ProviderChain;
 use crate::downloader::cache::{SongFiles, rename_song_files};
@@ -88,6 +88,14 @@ pub async fn download_title(
 /// video `youtube_id` — the `title` it was named after and its fresh pair
 /// `video` / `audio` in `cache_dir` — through `mark_video_processed_pair`,
 /// under `cache::SONG_FILES` (no rename or re-link interleaves).
+///
+/// `title` was read (`download_title`) before the download and the loudnorm,
+/// about a minute earlier. A correction of the video made in between (a PATCH
+/// of this row or of another row of it) is final, so the video's correction
+/// is read again under the lock: when there is one, the fresh pair is
+/// renamed after it (`rename_song_files`; a no-op when it already carries
+/// those names) and the correction is recorded — never the chain's title
+/// over `'manual'`.
 pub async fn record_download(
     pool: &SqlitePool,
     cache_dir: &Path,
@@ -102,13 +110,30 @@ pub async fn record_download(
         video: Some(video.to_path_buf()),
         audio: Some(audio.to_path_buf()),
     };
-    debug!(
-        video_db_id,
-        youtube_id,
-        cache_dir = %cache_dir.display(),
-        "metadata: recording a download under the title it was named after"
-    );
-    let (title, files) = (title.clone(), fresh);
+    let (title, files) = match manual_title(pool, youtube_id).await {
+        Ok(Some((song, artist))) => {
+            let named = fresh.named(cache_dir, &song, &artist, youtube_id, false);
+            log_corrected_download(youtube_id, &fresh, &named);
+            let files = rename_song_files(youtube_id, &fresh, &named);
+            let corrected = DownloadTitle {
+                song,
+                artist,
+                source: MANUAL_SOURCE,
+                gemini_failed: false,
+            };
+            (corrected, files)
+        }
+        Ok(None) => (title.clone(), fresh),
+        Err(e) => {
+            warn!(
+                video_db_id,
+                youtube_id,
+                %e,
+                "metadata: reading the video's correction failed — the download keeps its title"
+            );
+            (title.clone(), fresh)
+        }
+    };
     let columns = files.columns();
     crate::db::models::mark_video_processed_pair(
         pool,
@@ -121,6 +146,20 @@ pub async fn record_download(
         columns.audio.as_deref().unwrap_or_default(),
     )
     .await
+}
+
+/// The INFO of a download whose fresh pair is renamed after a correction
+/// made while it ran (`record_download`). Logging only.
+#[cfg_attr(test, mutants::skip)]
+fn log_corrected_download(youtube_id: &str, fresh: &SongFiles, named: &SongFiles) {
+    if named != fresh {
+        info!(
+            youtube_id,
+            from = ?fresh.audio,
+            to = ?named.audio,
+            "metadata: the video was corrected during its download — its files are named after the correction"
+        );
+    }
 }
 
 /// Video `youtube_id`'s `(song, artist)` when a row of it is an operator's
