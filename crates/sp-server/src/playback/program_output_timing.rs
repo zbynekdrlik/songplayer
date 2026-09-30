@@ -30,6 +30,8 @@
 use serde::Serialize;
 use sp_core::genlock::UNITS_PER_SECOND;
 
+use crate::playback::stat_window::{TwoBucketWorst, WarnLimiter, Worst};
+
 /// A figure over this (µs) is counted in its `*_over_5ms` total.
 pub const STAGE_SLOW_US: u64 = 5_000;
 
@@ -85,9 +87,11 @@ impl BoundarySample {
             submit_us: us_after(m.submit_start_100ns, m.submitted_100ns),
         }
     }
+}
 
+impl Worst for BoundarySample {
     /// Each figure's worst of `self` and `other`.
-    pub fn worst(self, other: Self) -> Self {
+    fn worst(self, other: Self) -> Self {
         Self {
             ready_late_us: self.ready_late_us.max(other.ready_late_us),
             vban_feed_late_us: self.vban_feed_late_us.max(other.vban_feed_late_us),
@@ -139,22 +143,17 @@ pub struct BoundaryTimingStatus {
 #[derive(Debug, Default)]
 pub struct BoundaryTiming {
     boundaries: u64,
-    /// The worst of the bucket being filled and of the last full one.
-    current: BoundarySample,
-    previous: BoundarySample,
-    /// Boundaries in `current`.
-    in_current: u32,
+    /// Each figure's worst over the last one to two buckets of
+    /// [`TIMING_BUCKET_BOUNDARIES`].
+    window: TwoBucketWorst<BoundarySample>,
     ready_late_over_5ms: u64,
     vban_feed_late_over_5ms: u64,
     submit_over_5ms: u64,
     vban_feed_late_over_10ms: u64,
     vban_feed_late_over_budget: u64,
     warned: u64,
-    /// The boundary of the last WARN; `None` before the first.
-    last_warn_100ns: Option<i64>,
-    /// Boundaries over the budget skipped by the rate limit since the last
-    /// WARN.
-    suppressed: u64,
+    /// At most one WARN per [`TIMING_WARN_EVERY_100NS`] of timeline.
+    limiter: WarnLimiter,
 }
 
 impl BoundaryTiming {
@@ -165,12 +164,7 @@ impl BoundaryTiming {
     pub fn observe(&mut self, marks: &BoundaryMarks) -> Option<LateBoundary> {
         let sample = BoundarySample::of(marks);
         self.boundaries += 1;
-        self.current = self.current.worst(sample);
-        self.in_current += 1;
-        if self.in_current == TIMING_BUCKET_BOUNDARIES {
-            self.previous = std::mem::take(&mut self.current);
-            self.in_current = 0;
-        }
+        self.window.push(sample, TIMING_BUCKET_BOUNDARIES);
         self.ready_late_over_5ms += u64::from(sample.ready_late_us > STAGE_SLOW_US);
         self.vban_feed_late_over_5ms += u64::from(sample.vban_feed_late_us > STAGE_SLOW_US);
         self.submit_over_5ms += u64::from(sample.submit_us > STAGE_SLOW_US);
@@ -180,25 +174,18 @@ impl BoundaryTiming {
         }
         self.vban_feed_late_over_budget += 1;
         let stamp_100ns = marks.stamp_100ns;
-        let quiet = self
-            .last_warn_100ns
-            .is_none_or(|last| stamp_100ns >= last + TIMING_WARN_EVERY_100NS);
-        if !quiet {
-            self.suppressed += 1;
-            return None;
-        }
+        let suppressed = self.limiter.admit(stamp_100ns, TIMING_WARN_EVERY_100NS)?;
         self.warned += 1;
-        self.last_warn_100ns = Some(stamp_100ns);
         Some(LateBoundary {
             stamp_100ns,
             sample,
-            suppressed: std::mem::take(&mut self.suppressed),
+            suppressed,
         })
     }
 
     /// The telemetry for the API.
     pub fn status(&self) -> BoundaryTimingStatus {
-        let worst = self.current.worst(self.previous);
+        let worst = self.window.worst();
         BoundaryTimingStatus {
             boundaries: self.boundaries,
             ready_late_us_max: worst.ready_late_us,

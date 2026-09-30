@@ -59,6 +59,7 @@ mod runtime_pipeline;
 pub mod scene_catalog; // #221: which scene is a playlist's, from its NDI output name (no cg OBS lookup)
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
 pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
+pub mod stat_window; // #210 part 2: shared pure two-bucket worst + WARN rate limit
 pub mod state;
 pub mod submit_handoff; // #168 output-side split: pure emit->submit handoff decisions
 pub mod submitter;

@@ -2,6 +2,7 @@
 //! Wired via `#[cfg(test)] #[path = "program_output_timing_tests.rs"] mod tests;`.
 
 use super::*;
+use crate::playback::stat_window::Worst;
 use crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS;
 use sp_core::genlock::{GENLOCK_GRID_FPS, UNITS_PER_SECOND};
 
@@ -207,11 +208,12 @@ fn a_figure_is_slow_strictly_over_5_ms_and_counts_on_its_own() {
 
 #[test]
 fn a_hand_off_inside_vbans_send_latency_is_counted_but_never_warned() {
-    // #210 part 2, box 30.9.2026 (finding 5915907311, the lane's live read):
-    // hand-offs 10–33 ms late are the program's normal state (65 % of the
-    // boundaries over 10 ms), and each one still reaches VBAN before its
-    // block's first packet is due, L = 66.7 ms after the boundary. The part 1
-    // WARN over 10 ms fired every 5 s for nothing.
+    // #210 part 2, box 30.9.2026: hand-offs 10–33 ms late are the program's
+    // normal state (41 % of the boundaries over 10 ms in the 15 min capture of
+    // finding 5915907311, 67 834 of 105 105 since start in the lane's read,
+    // comment 5916271682), and each one still reaches VBAN before its block's
+    // first packet is due, L = 66.7 ms after the boundary. The part 1 WARN
+    // over 10 ms fired every 5 s for nothing.
     let mut t = BoundaryTiming::default();
     for (k, feed_us) in [10_000, 10_001, 27_578, 66_666].into_iter().enumerate() {
         // 6 s apart: the rate limit never holds one back.

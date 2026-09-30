@@ -5,8 +5,9 @@
 //! the next one on time (finding 5915907311), visible only in a dev1
 //! capture. So the `vban-output` thread times every packet it sends against
 //! its planned instant, `due + L + k/240 s` (`VbanSender::send_block`), and
-//! folds it into a [`VbanStallLog`] (pure, Linux-tested, the
-//! `BoundaryTiming` pattern of `program_output_timing.rs`):
+//! folds it into a [`VbanStallLog`] (pure, Linux-tested; its window and
+//! its WARN rate limit are `stat_window.rs`'s, shared with the program
+//! sender's `BoundaryTiming`):
 //!
 //! - a packet sent more than [`VBAN_STALL_EVENT_US`] after its planned
 //!   instant is an event, `(utc_ms, late_us)` ([`VbanLateEvent`]), kept in a
@@ -21,7 +22,9 @@
 //!
 //! `utc_ms` is the fleet label of the send reading (`t + D(K_F)`,
 //! `VbanClock::label_100ns`): UTC, the instant a dev1 capture lines up
-//! with. Every packet the thread sends counts, so a block that reached the
+//! with. In the ~14 min after a fleet date step VBAN's clock still owes up
+//! to one slot (`vban.slew_owed_us`), and `utc_ms` reads that much before
+//! UTC. Every packet the thread sends counts, so a block that reached the
 //! thread after its first packet was due (see `health.timing`'s
 //! `vban_feed_late_over_budget`) shows here too, as a run of events.
 
@@ -30,6 +33,7 @@ use std::collections::VecDeque;
 use serde::Serialize;
 
 use crate::playback::program_output_timing::us_after;
+use crate::playback::stat_window::{TwoBucketWorst, WarnLimiter};
 
 /// A packet more than this late (µs) is an event in the ring.
 pub const VBAN_STALL_EVENT_US: u64 = 5_000;
@@ -71,15 +75,12 @@ pub struct VbanStallWarn {
 pub struct VbanStallLog {
     /// The last [`VBAN_STALL_RING`] events, oldest first.
     events: VecDeque<VbanLateEvent>,
-    /// The worst packet of the bucket being filled and of the last full one.
-    current_max_us: u64,
-    previous_max_us: u64,
-    /// Packets in the bucket being filled.
-    in_current: u32,
-    /// VBAN's timeline at the last WARN; `None` before the first.
-    last_warn_100ns: Option<i64>,
-    /// Packets over the WARN limit skipped since the last WARN.
-    suppressed: u64,
+    /// The worst packet of the last one to two buckets of
+    /// [`VBAN_STALL_BUCKET_PACKETS`].
+    window: TwoBucketWorst<u64>,
+    /// At most one WARN per [`VBAN_STALL_WARN_EVERY_100NS`] of VBAN's
+    /// timeline.
+    limiter: WarnLimiter,
 }
 
 impl VbanStallLog {
@@ -95,12 +96,7 @@ impl VbanStallLog {
         sent_label_100ns: i64,
     ) -> Option<VbanStallWarn> {
         let late_us = us_after(planned_100ns, sent_100ns);
-        self.current_max_us = self.current_max_us.max(late_us);
-        self.in_current += 1;
-        if self.in_current == VBAN_STALL_BUCKET_PACKETS {
-            self.previous_max_us = std::mem::take(&mut self.current_max_us);
-            self.in_current = 0;
-        }
+        self.window.push(late_us, VBAN_STALL_BUCKET_PACKETS);
         if late_us <= VBAN_STALL_EVENT_US {
             return None;
         }
@@ -115,18 +111,10 @@ impl VbanStallLog {
         if late_us <= VBAN_STALL_WARN_US {
             return None;
         }
-        let quiet = self
-            .last_warn_100ns
-            .is_none_or(|last| sent_100ns >= last + VBAN_STALL_WARN_EVERY_100NS);
-        if !quiet {
-            self.suppressed += 1;
-            return None;
-        }
-        self.last_warn_100ns = Some(sent_100ns);
-        Some(VbanStallWarn {
-            event,
-            suppressed: std::mem::take(&mut self.suppressed),
-        })
+        let suppressed = self
+            .limiter
+            .admit(sent_100ns, VBAN_STALL_WARN_EVERY_100NS)?;
+        Some(VbanStallWarn { event, suppressed })
     }
 
     /// The ring, oldest first (`vban.late_events`).
@@ -137,7 +125,7 @@ impl VbanStallLog {
     /// The worst packet of the last 60–120 s of sending, µs
     /// (`vban.late_max_us`).
     pub fn late_max_us(&self) -> u64 {
-        self.current_max_us.max(self.previous_max_us)
+        self.window.worst()
     }
 }
 

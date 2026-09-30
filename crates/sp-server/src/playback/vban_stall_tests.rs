@@ -202,6 +202,44 @@ fn a_late_packet_of_the_sender_reaches_the_status_at_its_send_instant() {
     assert_eq!(sink.sent[3].0, P + l + 125_000, "packet 3 waited: on time");
 }
 
+/// A [`FakeClock`] whose readings are labelled 10 s later (a fleet shift):
+/// a late packet's `utc_ms` must come off the clock's label, not off its
+/// reading (review round 1).
+struct ShiftedClock(FakeClock);
+
+impl VbanClock for ShiftedClock {
+    fn now_100ns(&mut self) -> i64 {
+        self.0.now_100ns()
+    }
+    fn sleep_100ns(&mut self, d_100ns: i64) {
+        self.0.sleep_100ns(d_100ns);
+    }
+    fn slew_owed_100ns(&self) -> i64 {
+        self.0.slew_owed_100ns()
+    }
+    fn label_100ns(&self, t_100ns: i64) -> i64 {
+        t_100ns + 100_000_000
+    }
+}
+
+#[test]
+fn a_late_packet_of_the_sender_is_stamped_with_its_clocks_label() {
+    let out = VbanOut::new();
+    out.set_config(active_config(&["10.0.0.1:6980"]));
+    let sent = P + VBAN_SEND_LATENCY_100NS + 120_000;
+    let mut clock = ShiftedClock(FakeClock::at(sent));
+    let mut sink = RecordingSink::on(&clock.0);
+    VbanSender::default().send_block(&out, &VbanBlock::silence(P), &mut sink, &mut clock);
+    assert_eq!(
+        out.status().late_events[0],
+        VbanLateEvent {
+            utc_ms: 1_790_777_141_278,
+            late_us: 12_000,
+        },
+        "the send reading + 10 s"
+    );
+}
+
 #[test]
 fn vbans_wall_clock_labels_a_reading_with_its_fleet_shift() {
     let fleet = Arc::new(FleetShift::default());

@@ -2,6 +2,7 @@
 paths:
   - "crates/sp-server/src/playback/vban_*.rs"
   - "crates/sp-server/src/playback/mmcss*.rs"
+  - "crates/sp-server/src/playback/stat_window*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/api/program*.rs"
   - "sp-ui/src/components/settings_form.rs"
@@ -137,7 +138,10 @@ What makes a FOH block late is named on the box, per boundary, by the
   reference is 0 late.
 - `BoundaryTiming` (in `ProgramCore`, fed through
   `ProgramBus::record_timing` by `run_program_loop`) keeps each figure's
-  worst over the last 60–120 s (two 1800-boundary buckets), counts the
+  worst over the last 60–120 s (two 1800-boundary buckets,
+  `stat_window::TwoBucketWorst`; its WARN rate limit is
+  `stat_window::WarnLimiter`, both shared with the VBAN thread's
+  `VbanStallLog`), counts the
   boundaries over 5 ms per figure since start, and counts
   `vban_feed_late_over_10ms` (`VBAN_FEED_SLOW_US`, a trend figure) and
   `vban_feed_late_over_budget` (below).
@@ -148,8 +152,9 @@ What makes a FOH block late is named on the box, per boundary, by the
   back. That is `vban_feed_late_over_budget`, and it is the ONLY thing
   WARNed (#210 part 2, design record 5916097259). Part 1 WARNed over 10 ms
   and fired every 5 s: hand-offs 10–33 ms late are the program's normal
-  state on the box (65 % of the boundaries over 10 ms), and each one is
-  still inside L.
+  state on the box (41 % of the boundaries over 10 ms in the 15 min capture
+  of finding 5915907311; 67 834 of 105 105 since start in the lane's read,
+  comment 5916271682), and each one is still inside L.
 - ONE WARN `program output: a boundary's VBAN audio was handed over after
   its first packet was due (over VBAN's send latency) — its packets go out
   late, back to back` per such boundary, at most one per 5 s of timeline;
@@ -209,8 +214,11 @@ time (finding 5915907311, the stem worker ruled out). That is the
   guard lives for the thread's life, `let _mmcss = …`). Off Windows `join`
   is a stub that is always refused. The avrt calls are in windows-sys 0.59
   `Win32::System::Threading` (NOT `Win32::Media`), feature already on.
-  Any real-time sender thread can take the same call (the NDI input, the
-  program output); only `vban-output` does so far.
+  avrt.dll is a load-time import: it ships with every Windows since Vista
+  (desktop, and Server with the Desktop Experience), so the process never
+  starts without it; a missing DLL would stop the start, not take the
+  fallback. Any real-time sender thread can take the same call (the NDI
+  input, the program output); only `vban-output` does so far.
 - **Why it helps** (anchors comment 5916282660). TIME_CRITICAL is 15 in a
   NORMAL_PRIORITY_CLASS process: the top of the normal band, the same
   level the NDI runtime's own threads can set. NDI 6.3.2 imports
@@ -234,22 +242,27 @@ time (finding 5915907311, the stem worker ruled out). That is the
     THREAD_PRIORITY_TIME_CRITICAL` (`error`, `error_name`), then
     `paced thread: priority = TIME_CRITICAL`.
 - **Its own late packets** (`playback/vban_stall.rs`, pure `VbanStallLog`,
-  held by `VbanOut`). `send_block` times every packet it sends against its
+  inside `VbanOut`'s counters: ONE lock per packet on the real-time thread,
+  review round 1). `send_block` times every packet it sends against its
   planned instant, `due + L + k/240 s`:
   - over 5 ms late = an event `{utc_ms, late_us}` in a ring of the last
     32, served oldest first as `vban.late_events`. `utc_ms` is the fleet
     label of the send reading (`VbanClock::label_100ns`, defaulted to the
     reading itself; `WallVbanClock` answers `t + D(K_F)`): UTC, to line up
-    with a capture;
+    with a capture. In the ~14 min after a date step VBAN's clock still
+    owes up to one slot (`vban.slew_owed_us`), and `utc_ms` reads that much
+    before UTC;
   - `vban.late_max_us`: the worst packet over the last 60–120 s of sending
     (two buckets of 14 400 packets; it does not age while nothing is sent);
   - over 10 ms = ONE WARN `vban output: a packet went out more than 10 ms
     after its planned instant` (`utc`, `late_us`, `packet` = k,
     `waited_us`, `suppressed`), at most one per 5 s of VBAN's timeline.
-    `waited_us` > 0 means the thread overslept its wait (a scheduling
-    stall); 0 means it reached the packet already late (a late block, or
-    the packet before it went out late). The decision is `observe`'s
-    return value; the log call is `mutants::skip`.
+    `waited_us` > 0 means the thread overslept that wait (a scheduling
+    stall inside the sleep). 0 means it came to the packet already late:
+    a stall before it (taking the block, or right after the packet
+    before), a block handed over late, or the packet before sent late.
+    The decision is `observe`'s return value; the log call is
+    `mutants::skip`.
 
   Every packet counts, so a block that reached the thread after its first
   packet was due (`health.timing.vban_feed_late_over_budget`) shows as a
@@ -258,8 +271,9 @@ time (finding 5915907311, the stem worker ruled out). That is the
   UTF-16 task name, the Linux stub; on the Windows job the real call for an
   unknown task), `vban_stall_tests.rs` (exact pins from a scratch Python
   model: the 5 ms / 10 ms / 5 s edges, the ring, the two buckets, a late
-  packet through `send_block` into `status()`, the wall clock's label),
-  `api/program_tests.rs` (the JSON names).
+  packet through `send_block` into `status()`, a clock whose label is not
+  its reading, the wall clock's label), `stat_window_tests.rs` (the shared
+  window and rate limit), `api/program_tests.rs` (the JSON names).
 
 ## Tests
 
@@ -279,15 +293,19 @@ receiver and never at FOH, capture 60 s with tcpdump and check 0 counter gaps,
 an interval p99 < 7 ms, and PCM that cross-correlates with `SP-program`.
 Routing fohabl/lv1 in VB-Matrix is B4, with the owner's go. The #210 stall
 fix adds: a 15 min dev1 capture with 0 inter-arrival gaps over 15 ms and 0
-bursts, and `health.timing` read right before and right after the capture:
-`vban_feed_late_over_5ms` and `vban_feed_late_over_10ms` must not grow, and
-`vban_feed_late_us_max` < 5 ms (design record 5911744233). The `*_max`
-figures cover only the last 60–120 s, so a stall early in a 15 min capture
-shows only in the counter diff. A fleet date step inside the capture may
-add about one counted boundary with no real stall (never a WARN, see
-"Reading it"): match it to the step's relabel log line before failing
-the run. If a late `ready_late` remains, the next step targets that source
-by the measured cause.
+bursts, and `health.timing` read right before and right after the capture.
+Part 1's design record (5911744233) also asked that
+`vban_feed_late_over_5ms` / `_over_10ms` do not grow and
+`vban_feed_late_us_max` < 5 ms. Part 2 SUPERSEDES those three: the box
+showed hand-offs 10–33 ms late to be the program's normal state, all
+inside L. They are trend figures only now; the hand-off criterion is
+`vban_feed_late_over_budget` +0 (below). The `*_max` figures cover only
+the last 60–120 s, so a stall early in a 15 min capture shows only in the
+counter diff. A fleet date step inside the capture may add about one
+counted boundary with no real stall (never a WARN, see "Reading it"):
+match it to the step's relabel log line before failing the run. If a late
+`ready_late` remains, the next step targets that source by the measured
+cause.
 
 Part 2 (design record 5916097259) adds, over the same kind of 15 min dev1
 capture:
