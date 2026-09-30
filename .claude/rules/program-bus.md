@@ -292,6 +292,13 @@ nothing).
     owner's line at its last position, recorded as its Presenter dedup
     key, or `presenter::push_empty`). Nothing of the old owner stays
     frozen on the title clip, `#sp-subs` or the stage display;
+  - the owner can also change through an OFF alone (a cut to "OBS
+    manuál" while cg OBS still shows another playlist: the owner goes
+    from 4 to 7 with only OFF(4)). `wall_after_scene_off` re-syncs the
+    title and the line to the playlists still on program (the owner's)
+    and ends with `resync_presenter(owner)` (review round 3); after the
+    OFF of a member that did not own the wall that repeats the owner's
+    current line, which is harmless;
   - with NO owner (nothing on air, or before the authority's first value:
     the engine's unit tests) nothing is restricted, as before: a playlist
     whose OFF is still queued writes until its OFF re-syncs the wall, and a
@@ -303,9 +310,10 @@ nothing).
   `program_authority_tests.rs::the_authority_publishes_the_wall_owner_with_the_set`
   and `tests_wall_owner.rs` (a child of `tests_scene_change.rs`: the line +
   Presenter, a playlist that comes to own the wall, the song-end clear, both
-  title timers, the new owner's ON — `the_new_owner_s_on_re_syncs_the_wall_s_line`,
-  `a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down` — and
-  the recovery). A test that only `replace`s the diffed set
+  title timers, the new owner's ON (`the_new_owner_s_on_re_syncs_the_wall_s_line`,
+  `a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down`), an
+  owner change by an OFF (`an_owner_change_by_an_off_re_syncs_the_stage_display`)
+  and the recovery). A test that only `replace`s the diffed set
   (`#[cfg(test)]`) publishes no owner.
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
