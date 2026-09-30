@@ -166,10 +166,6 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             axum::routing::get(routes::get_video_lyrics),
         )
         .route(
-            "/api/v1/videos/{id}/lyrics/reprocess",
-            axum::routing::post(routes::reprocess_video_lyrics),
-        )
-        .route(
             "/api/v1/lyrics/status",
             axum::routing::get(routes::get_lyrics_status),
         )
