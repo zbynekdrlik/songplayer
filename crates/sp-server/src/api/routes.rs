@@ -11,6 +11,7 @@ use tracing::warn;
 
 use sp_core::playback::PlaybackMode;
 
+use crate::metadata::manual::refused_title;
 use crate::{AppState, EngineCommand, SyncRequest};
 
 // ---------------------------------------------------------------------------
@@ -431,7 +432,8 @@ pub struct PatchVideoReq {
 /// levers (#136 T1; a correction is final and belongs to the video: every row
 /// of it, files renamed, `metadata::manual::apply_to_video`). Returns 204 on
 /// success, 404 if the video id doesn't exist, 400 if the request body has no
-/// actionable fields or carries a whitespace-only `song`.
+/// actionable fields, a whitespace-only `song`, or an `artist` alone for a
+/// video with no song yet (`metadata::manual::refused_title`).
 pub async fn patch_video(
     State(state): State<AppState>,
     Path(video_id): Path<i64>,
@@ -452,12 +454,12 @@ pub async fn patch_video(
         .as_ref()
         .map(|a| crate::metadata::sanitize::strip_emoji(a));
 
-    // A whitespace-only (empty-after-sanitize) song is a clear operator
-    // error — a blank title has nothing to show on the wall.
-    if let Some(s) = &song {
-        if s.is_empty() {
-            return (StatusCode::BAD_REQUEST, "song must not be whitespace-only").into_response();
-        }
+    // A blank song; an artist alone for a video with no song (#136 review 2).
+    let refused = refused_title(&state.pool, video_id, song.as_deref(), artist.is_some());
+    match refused.await {
+        Ok(None) => {}
+        Ok(Some(why)) => return (StatusCode::BAD_REQUEST, why).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 
     // Require at least one field so empty-body PATCHes are a clear error.

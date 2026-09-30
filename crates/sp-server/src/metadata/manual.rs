@@ -162,6 +162,43 @@ fn log_corrected_download(youtube_id: &str, fresh: &SongFiles, named: &SongFiles
     }
 }
 
+/// Why a title PATCH of row `video_db_id` is refused (its 400), or `None`
+/// (`api/routes.rs::patch_video`): `song` is the sanitized song it sets
+/// (`""` = whitespace only), `sets_artist` whether it sets the artist.
+///
+/// - A blank song has nothing to show on the wall.
+/// - Review round 2: an artist ALONE for a video no row of which has a song
+///   (none downloaded yet). A correction is final, but a download keeps one
+///   only with its song ([`download_title`], [`record_download`]) and names
+///   such a video after the provider chain, over the artist. The dashboard
+///   sends the song with the artist; only the API sends an artist alone.
+///
+/// A row that does not exist is no refusal: the PATCH answers 404.
+pub async fn refused_title(
+    pool: &SqlitePool,
+    video_db_id: i64,
+    song: Option<&str>,
+    sets_artist: bool,
+) -> Result<Option<&'static str>, sqlx::Error> {
+    match song {
+        Some("") => return Ok(Some("song must not be whitespace-only")),
+        Some(_) => return Ok(None),
+        None if !sets_artist => return Ok(None),
+        None => {}
+    }
+    let songless: Option<bool> = sqlx::query_scalar(
+        "SELECT NOT EXISTS (SELECT 1 FROM videos w WHERE w.youtube_id = v.youtube_id \
+                AND TRIM(COALESCE(w.song, '')) != '') \
+         FROM videos v WHERE v.id = ?",
+    )
+    .bind(video_db_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(songless
+        .unwrap_or(false)
+        .then_some("the video has no song yet: send the song with the artist"))
+}
+
 /// Video `youtube_id`'s `(song, artist)` when a row of it is an operator's
 /// correction with a song (`mark_video_processed_pair` refuses an empty one;
 /// the lowest row id when several are); `artist` `""` when it has none.
