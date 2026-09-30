@@ -679,3 +679,50 @@ async fn a_title_correction_applies_to_every_row_of_the_video() {
     assert_eq!(files, renamed.clone().map(Some));
     assert_files_moved(&new, &renamed);
 }
+
+/// Review round 1: an artist-only correction (the API allows it; the
+/// dashboard sends both) of a row not downloaded yet, whose `song` is NULL,
+/// never spreads an empty song: every other row of the video keeps its song
+/// and takes the artist, and its files are named after that song — never
+/// `_{artist}_…`, which `mark_video_processed_pair` refuses to write.
+#[tokio::test]
+async fn an_artist_only_correction_of_a_row_with_no_song_keeps_the_songs() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state_with_cache_dir(dir.path().to_path_buf()).await;
+    let old = song_files(dir.path(), "SHARED0002", "Old Song", "Old Artist", true);
+    for f in &old {
+        std::fs::write(f, b"x").unwrap();
+    }
+    seed_row(&state, 41, 1, "SHARED0002", Some(&old)).await;
+    sqlx::query("INSERT OR IGNORE INTO playlists (id, name, youtube_url) VALUES (2, 'q', 'v')")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, title, normalized) \
+         VALUES (42, 2, 'SHARED0002', 'Break! - planetboom (Live)', 0)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let pool = state.pool.clone();
+
+    let status = patch(state, 42, serde_json::json!({ "artist": "planetboom" })).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (song, artist, gf, source, files) = video_row(&pool, 41).await;
+    let new = song_files(dir.path(), "SHARED0002", "Old Song", "planetboom", false);
+    assert_eq!(
+        (song.as_str(), artist.as_deref(), gf, source.as_deref()),
+        ("Old Song", Some("planetboom"), 0, Some("manual")),
+        "the downloaded row keeps its song and takes the artist"
+    );
+    assert_eq!(files, new.clone().map(Some));
+    assert_files_moved(&old, &new);
+    let row42: (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT song, artist FROM videos WHERE id = 42")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(row42, (None, Some("planetboom".to_string())));
+}
