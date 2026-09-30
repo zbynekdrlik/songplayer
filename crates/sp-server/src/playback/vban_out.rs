@@ -619,7 +619,7 @@ impl RemainderSlew {
     /// same instant as right before it.
     pub fn owe(&mut self, jump_100ns: i64, t_100ns: i64) {
         let before = self.owed_at(t_100ns - jump_100ns);
-        self.owed_100ns = before;
+        self.owed_100ns = before + jump_100ns;
         self.since_100ns = t_100ns;
     }
 

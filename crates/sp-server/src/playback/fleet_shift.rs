@@ -137,7 +137,7 @@ pub fn adopt(unapplied: &[Epoch], step_100ns: i64) -> Adoption {
     let rest = step_100ns - step_sum;
     let epoch = Epoch {
         step_100ns: rest,
-        slots: 0,
+        slots: whole_slots(rest),
     };
     Adoption {
         slots: slots + epoch.slots,
