@@ -716,7 +716,9 @@ pub fn run_vban_loop(
 }
 
 /// Windows: bind one UDP socket and run [`run_vban_loop`] on its own thread
-/// (`vban-output`), paced on a [`WallVbanClock`].
+/// (`vban-output`), paced on a [`WallVbanClock`]. #210 part 2: the thread is
+/// an MMCSS "Pro Audio" thread at `AVRT_PRIORITY_HIGH` for its whole life
+/// (`mmcss::join_pro_audio`; `THREAD_PRIORITY_TIME_CRITICAL` if refused).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 pub fn spawn_vban_thread(out: Arc<VbanOut>) {
@@ -724,7 +726,7 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>) {
         .name("vban-output".into())
         .spawn(move || {
             crate::playback::pipeline_paced::request_high_res_timer();
-            crate::playback::pipeline::pipeline_audio::raise_thread_priority("vban-output");
+            let _mmcss = crate::playback::mmcss::join_pro_audio("vban-output");
             let mut socket = match UdpSocket::bind(("0.0.0.0", 0)) {
                 Ok(s) => s,
                 Err(e) => {

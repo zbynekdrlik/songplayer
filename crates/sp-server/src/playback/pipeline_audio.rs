@@ -350,8 +350,9 @@ fn sleep_until(clock: &WallClock, target_100ns: i64, margin_100ns: i64) -> i64 {
 
 /// Raise the calling thread to `THREAD_PRIORITY_TIME_CRITICAL` so a heavy
 /// child's CPU/memory burst cannot delay a grid slot. `ndi_name` labels the log
-/// line (the audio emit thread's NDI name, or `vban-output` for the #210 VBAN
-/// sender thread, which shares this helper).
+/// line (the audio emit thread's NDI name, `ndi-input`, or `vban-output` when
+/// MMCSS refuses the #210 VBAN sender thread: `mmcss::join_pro_audio`'s
+/// fallback).
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn raise_thread_priority(ndi_name: &str) {
     use windows_sys::Win32::System::Threading::{

@@ -19,6 +19,7 @@ pub mod lock_state;
 pub mod loop_stats; // #192 round 3: pipeline-loop stage timing + submit-call histogram (pure)
 mod lyrics_loader;
 mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
+pub mod mmcss; // #210 part 2: a real-time sender thread as an MMCSS "Pro Audio" thread
 pub mod ndi_burn;
 pub mod ndi_health;
 mod ndi_health_expect; // #221 L4a: whether a receiver is expected on an output (pure)
