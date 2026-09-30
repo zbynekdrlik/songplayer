@@ -271,3 +271,57 @@ fn a_failed_probe_keeps_the_end_of_its_stderr() {
     assert_eq!(stderr_tail("abc", 10), "abc");
     assert_eq!(stderr_tail("abc", 0), "");
 }
+
+// ---- the post-install check (release 0.69.0 review 🔵 9) -----------------------
+
+/// The post-install check applies the same #221 policy as the fast path:
+/// `decide` over the freshly installed venv, then `install_worked`. A probe
+/// that keeps TIMING OUT is a slow GPU / driver, never a failed install (five
+/// cold CUDA timeouts used to fail it and disabled isolation for the whole
+/// process). A proven import failure, or a failure that outlives the
+/// retries, is a failed install.
+#[tokio::test(start_paused = true)]
+async fn after_the_install_a_timeout_is_never_a_failed_install() {
+    let (verdict, _) = run(always(Readiness::Timeout), RETRY_PLAN).await;
+    assert_eq!(verdict.path, FastPath::UseAsIs);
+    assert!(install_worked(verdict.path), "a probe that kept timing out");
+
+    let probe = scripted(vec![
+        Readiness::Timeout,
+        cuda_unavailable(),
+        Readiness::Ready,
+    ]);
+    let (verdict, _) = run(probe, RETRY_PLAN).await;
+    assert_eq!(verdict, decision(FastPath::Ready, 3));
+    assert!(install_worked(verdict.path), "slow, then ready");
+
+    let (verdict, _) = run(scripted(vec![qwen_asr_missing()]), RETRY_PLAN).await;
+    assert!(!install_worked(verdict.path), "a proven import failure");
+    let (verdict, _) = run(always(cuda_unavailable()), RETRY_PLAN).await;
+    assert!(
+        !install_worked(verdict.path),
+        "CUDA still unavailable after the retries"
+    );
+    assert!(install_worked(FastPath::Ready));
+    assert!(install_worked(FastPath::UseAsIs));
+    assert!(!install_worked(FastPath::Install));
+}
+
+/// `ensure_ready` is Windows-only (no Linux test reaches it), so its
+/// post-install check is pinned by its source: it runs `decide` with the
+/// retry plan and judges the verdict with `install_worked`, never the old
+/// five-probe loop that counted a timeout as a failure and logged the
+/// reason at debug.
+#[test]
+fn the_post_install_check_is_decide_and_install_worked() {
+    let src = include_str!("bootstrap.rs");
+    assert!(
+        src.contains("let verified = decide(|| is_ready(&venv_python), RETRY_PLAN).await;"),
+        "the post-install check runs decide with the retry plan"
+    );
+    assert!(src.contains("if !install_worked(verified.path)"));
+    assert!(
+        !src.contains("for attempt in 0..5"),
+        "the old five-probe loop is gone"
+    );
+}

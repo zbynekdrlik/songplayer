@@ -143,7 +143,6 @@ pub(crate) async fn run(stream: TcpStream, peer: SocketAddr, facade: Arc<Facade>
                         break;
                     }
                 }
-                Ok(_) => {}
                 Err(RecvError::Lagged(n)) => warn!(%peer, n, "remote: the client missed cg OBS events"),
                 Err(RecvError::Closed) => break,
             },

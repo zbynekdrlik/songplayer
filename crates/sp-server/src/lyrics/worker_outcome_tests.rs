@@ -6,14 +6,17 @@
 //!
 //! A row serves lyrics when `has_lyrics = 1` AND its `<yt>_lyrics.json`
 //! exists (what `playback/lyrics_loader.rs` loads). Such a row records only
-//! the attempt: attempts + the `lyrics_next_attempt_at` backoff, and the manual
-//! priority cleared so it does not loop. Its `has_lyrics`, `lyrics_source` and
-//! file stay. A row with no served lyrics takes the terminal states as before.
+//! the attempt: attempts + the `lyrics_next_attempt_at` backoff, which the
+//! manual bucket waits out (no loop). ROZHODNUTÉ 5908227646: it stays in the
+//! manual queue until its 3rd failed attempt clears the manual priority. Its
+//! `has_lyrics`, `lyrics_source` and file stay. A row with no served lyrics
+//! takes the terminal states as before.
 
 use std::path::PathBuf;
 
 use sqlx::SqlitePool;
 
+use crate::db::models::SERVED_RERUN_MAX_ATTEMPTS;
 use crate::lyrics::LYRICS_PIPELINE_VERSION;
 use crate::lyrics::worker::LyricsWorker;
 
@@ -116,16 +119,76 @@ async fn assert_served_kept(rig: &Rig, id: i64, youtube_id: &str, attempts: i64,
         (backoff - 10..=backoff).contains(&secs),
         "the next attempt is {secs} s ahead, expected ~{backoff} s"
     );
+    // ROZHODNUTÉ 5908227646: a failed attempt below the cap keeps the song
+    // in the manual rollout; it waits out its backoff (no loop).
+    assert_eq!(manual, 1, "the song stays queued for its next attempt");
+    assert_eq!(
+        next_pick(rig).await,
+        None,
+        "not before its backoff: no loop"
+    );
+    make_due(rig, id).await;
+    assert_eq!(
+        next_pick(rig).await,
+        Some(id),
+        "due after its backoff, the manual bucket picks it again"
+    );
+}
+
+/// The row the lyrics worker would process next.
+async fn next_pick(rig: &Rig) -> Option<i64> {
+    crate::lyrics::reprocess::get_next_video_for_lyrics(&rig.pool, LYRICS_PIPELINE_VERSION)
+        .await
+        .unwrap()
+        .map(|r| r.id)
+}
+
+/// Its backoff has run out.
+async fn make_due(rig: &Rig, id: i64) {
+    sqlx::query(
+        "UPDATE videos SET lyrics_next_attempt_at = '2000-01-01T00:00:00.000Z' WHERE id = ?",
+    )
+    .bind(id)
+    .execute(&rig.pool)
+    .await
+    .unwrap();
+}
+
+/// ROZHODNUTÉ 5908227646 (#144, lane A): a transient Claude / Gemini error
+/// must not drop a served song out of the manual rollout. Its failed
+/// re-runs keep `lyrics_manual_priority = 1` and wait out the backoff; only
+/// the 3rd failed attempt clears it (WARN). The served lyrics stay
+/// throughout.
+#[tokio::test]
+async fn a_served_song_stays_queued_until_its_third_failed_attempt() {
+    let rig = rig().await;
+    queued_song(&rig, 7, "yt_served07", 1, 0).await;
+    std::fs::write(rig.lyrics_file("yt_served07"), SERVED_BYTES).unwrap();
+    let error = anyhow::anyhow!("gather: lrclib-plain cleanup failed for yt_served07: 502");
+
+    rig.worker.fail_song(7, "yt_served07", &error).await;
+    rig.worker.fail_song(7, "yt_served07", &error).await;
+    // Two attempts: `retry_backoff(2)` = 10 min; still queued, due after it.
+    assert_served_kept(&rig, 7, "yt_served07", 2, 600).await;
+
+    rig.worker.fail_song(7, "yt_served07", &error).await;
+    let (has_lyrics, source, manual, attempts) = row(&rig.pool, 7).await;
+    assert_eq!(
+        (has_lyrics, source.as_deref(), attempts),
+        (1, Some(SERVED_SOURCE), 3),
+        "the served lyrics stay"
+    );
     assert_eq!(
         manual, 0,
-        "the manual priority is cleared, so it does not loop"
+        "the 3rd failed attempt clears the manual priority"
     );
-    // Nothing re-picks it now: it is current and serves lyrics.
-    let next =
-        crate::lyrics::reprocess::get_next_video_for_lyrics(&rig.pool, LYRICS_PIPELINE_VERSION)
-            .await
-            .unwrap();
-    assert!(next.is_none(), "the row must not loop: {next:?}");
+    make_due(&rig, 7).await;
+    assert_eq!(
+        next_pick(&rig).await,
+        None,
+        "it left the rollout: current, served"
+    );
+    assert_eq!(SERVED_RERUN_MAX_ATTEMPTS, 3);
 }
 
 #[tokio::test]

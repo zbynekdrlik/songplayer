@@ -321,29 +321,15 @@ impl ReprocessWorker {
             crate::downloader::cache::rename_song_files(&row.youtube_id, &old, &new).columns();
 
         // Every row that recorded these files (this video in another playlist
-        // too) records them where they now are. The stem / dub columns follow
-        // the audio's name; one never recorded (NULL) stays NULL.
-        sqlx::query(
-            "UPDATE videos
-             SET file_path = ?, audio_file_path = ?,
-                 vocals_file_path = CASE WHEN vocals_file_path IS NULL
-                     THEN NULL ELSE COALESCE(?, vocals_file_path) END,
-                 instrumental_file_path = CASE WHEN instrumental_file_path IS NULL
-                     THEN NULL ELSE COALESCE(?, instrumental_file_path) END,
-                 dub_file_path = CASE WHEN dub_file_path IS NULL
-                     THEN NULL ELSE COALESCE(?, dub_file_path) END
-             WHERE youtube_id = ? AND COALESCE(file_path, '') = ? AND audio_file_path IS ?",
-        )
-        .bind(&files.video)
-        .bind(&files.audio)
-        .bind(&files.vocals)
-        .bind(&files.instrumental)
-        .bind(&files.dub)
-        .bind(&row.youtube_id)
-        .bind(&file_path)
-        .bind(&audio_file_path)
-        .execute(&self.pool)
-        .await?;
+        // too) records them where they now are.
+        files
+            .record(
+                &self.pool,
+                &row.youtube_id,
+                &file_path,
+                audio_file_path.as_deref(),
+            )
+            .await?;
         sqlx::query(
             "UPDATE videos
              SET song = ?, artist = ?, metadata_source = ?, gemini_failed = 0

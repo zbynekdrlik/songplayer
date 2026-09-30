@@ -33,6 +33,13 @@
 //!     scene is followed whether it changed or not (the catch-up).
 //!   - A snapshot that changes only the transition applies the spec and cuts
 //!     nothing.
+//!   - #221 (release 0.69.0 review 🟡 1): a followed scene is a switch like
+//!     any other. It runs under the bus's `switch_order`, takes a
+//!     `legacy_cg` ticket before its cut, and records what cg OBS shows: the
+//!     scene catalog's playlist of that scene, or none for a manual scene,
+//!     on every known scene. With the follow on, cg OBS is the authority, so
+//!     its scene IS what it shows, and a playlist SongPlayer told it to show
+//!     earlier leaves the air.
 //!
 //!   This replaces the event-night watcher script `%TEMP%\sp_follow.ps1`,
 //!   which polled the scene.
@@ -54,10 +61,12 @@ use tokio::sync::{broadcast, watch};
 use tracing::{debug, info, warn};
 
 use crate::obs::ObsSnapshot;
+use crate::playback::legacy_cg::Ticket;
 use crate::playback::program_bus::{ProgramBus, persist_and_cut};
 use crate::playback::program_transition::{
     ObsTransition, TransitionMode, TransitionSpec, effective_spec,
 };
+use crate::playback::scene_catalog::{SceneKind, load_catalog};
 use crate::remote::map::{SceneAction, scene_action};
 use crate::remote::{RemoteCut, clip};
 
@@ -212,7 +221,43 @@ impl Follow {
     /// Follow one cg OBS program scene: map it with the #213 rule
     /// (`scene_action`) and cut `SP-program` through `persist_and_cut`, unless
     /// it already shows that source. Records the outcome as `last_follow_cut`.
+    ///
+    /// #221 (release 0.69.0 review 🟡 1): like a switch, under the bus's
+    /// `switch_order` and with a `legacy_cg` ticket taken before the cut, and
+    /// then recorded as what cg OBS shows ([`Self::record_shown`]).
     pub async fn follow_scene(&self, scene: &str, playlists: &HashSet<i64>) -> SceneAction {
+        let _order = self.bus.switch_order().lock().await;
+        let ticket = self.bus.legacy_cg().ticket();
+        let action = self.cut_to_scene(scene, playlists).await;
+        self.record_shown(ticket, scene).await;
+        action
+    }
+
+    /// #221 (release 0.69.0 review 🟡 1): with the follow on, cg OBS's
+    /// program scene IS what cg OBS shows, so it is recorded in `legacy_cg`
+    /// by `ticket`, the switch path's record: a playlist scene of the scene
+    /// catalog → that playlist, any other (manual) scene → none. On every
+    /// known scene, the one SP-program already shows included. Before, the
+    /// record kept the last mirrored playlist, and it stayed on air next to
+    /// the followed one. When the playlists cannot be read, nothing is
+    /// recorded (WARN).
+    async fn record_shown(&self, ticket: Ticket, scene: &str) {
+        let catalog = match load_catalog(&self.pool).await {
+            Ok(catalog) => catalog,
+            Err(e) => {
+                warn!(scene = %clip(scene), %e, "program follow: reading the playlists failed — what cg OBS shows is not recorded");
+                return;
+            }
+        };
+        let shown = match catalog.kind(scene) {
+            SceneKind::Playlist(pid) => Some(pid),
+            SceneKind::Manual => None,
+        };
+        self.bus.legacy_cg().confirmed(ticket, shown);
+    }
+
+    /// The cut of [`Self::follow_scene`] (its record aside).
+    async fn cut_to_scene(&self, scene: &str, playlists: &HashSet<i64>) -> SceneAction {
         let input_active = crate::playback::ndi_input::load_input_settings(&self.pool)
             .await
             .is_ok_and(|s| s.active());

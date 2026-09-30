@@ -11,7 +11,10 @@
 //!      returned zero candidates; the cleanup pass purges those.
 //!   3. Sets `lyrics_manual_priority = 1` on every row whose
 //!      `pipeline_version < current` AND `lyrics_source` is not a parked
-//!      sentinel (`asr_gap` / `unsupported_source`).
+//!      sentinel (`asr_gap` / `unsupported_source`), with a fresh attempt
+//!      budget and no backoff left (`lyrics_attempts = 0`,
+//!      `lyrics_next_attempt_at = NULL`, #144 review round 2), as the
+//!      reprocess routes queue a song.
 //!   4. Returns `{ "restamped": N, "dangling_cleared": K, "queued": M }`.
 //!
 //! Idempotent — calling twice produces zeros on the second call (the WHERE
@@ -88,7 +91,8 @@ pub async fn reprocess_catalog_with_new_gate(State(state): State<AppState>) -> i
 
     // Step 3: queue all candidate rows.
     let queued = match sqlx::query(
-        "UPDATE videos SET lyrics_manual_priority = 1 \
+        "UPDATE videos SET lyrics_manual_priority = 1, \
+             lyrics_attempts = 0, lyrics_next_attempt_at = NULL \
          WHERE lyrics_pipeline_version < ? \
            AND lyrics_manual_priority = 0 \
            AND (lyrics_source IS NULL \
@@ -216,7 +220,8 @@ mod tests {
         .rows_affected();
 
         let queued = sqlx::query(
-            "UPDATE videos SET lyrics_manual_priority = 1 \
+            "UPDATE videos SET lyrics_manual_priority = 1, \
+                 lyrics_attempts = 0, lyrics_next_attempt_at = NULL \
              WHERE lyrics_pipeline_version < ? \
                AND lyrics_manual_priority = 0 \
                AND (lyrics_source IS NULL \
@@ -518,6 +523,69 @@ mod tests {
                 ("r-ns".into(), LYRICS_PIPELINE_VERSION as i64, 0),
                 ("r-v15".into(), 15, 1),
                 ("r-v21".into(), 19, 1),
+            ]
+        );
+    }
+
+    /// #144 review round 2: step 3 queues a row like the reprocess routes do
+    /// — a fresh attempt budget and no backoff left (`lyrics_attempts = 0`,
+    /// `lyrics_next_attempt_at = NULL`), so a song the wall serves gets its
+    /// `SERVED_RERUN_MAX_ATTEMPTS` failed attempts in the manual queue. A row
+    /// it does not queue keeps both.
+    #[tokio::test]
+    async fn endpoint_router_queues_each_row_with_a_fresh_attempt_budget() {
+        use crate::lyrics::LYRICS_PIPELINE_VERSION;
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (state, _tmp) = router_test_state().await;
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (1, 'p', 'u', 1)",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(&format!(
+            "INSERT INTO videos (playlist_id, youtube_id, title, lyrics_source, \
+                                 lyrics_pipeline_version, lyrics_manual_priority, \
+                                 lyrics_attempts, lyrics_next_attempt_at) VALUES \
+             (1, 'r-kept', 't', 'yt_subs', {current}, 0, 2, '2999-01-01T00:00:00.000Z'), \
+             (1, 'r-queued', 't', 'lrclib', 15, 0, 2, '2999-01-01T00:00:00.000Z')",
+            current = LYRICS_PIPELINE_VERSION
+        ))
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let req = Request::builder()
+            .uri("/api/v1/lyrics/reprocess-catalog-with-new-gate")
+            .method("POST")
+            .body(Body::empty())
+            .unwrap();
+        let resp = crate::api::router(state.clone(), None)
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let rows: Vec<(String, i64, i64, Option<String>)> = sqlx::query_as(
+            "SELECT youtube_id, lyrics_manual_priority, lyrics_attempts, \
+                    lyrics_next_attempt_at FROM videos ORDER BY youtube_id",
+        )
+        .fetch_all(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "r-kept".into(),
+                    0,
+                    2,
+                    Some("2999-01-01T00:00:00.000Z".into())
+                ),
+                ("r-queued".into(), 1, 0, None),
             ]
         );
     }

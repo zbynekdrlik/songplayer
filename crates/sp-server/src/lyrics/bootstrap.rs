@@ -230,7 +230,7 @@ pub async fn ensure_ready(
 
     #[cfg(target_os = "windows")]
     {
-        use crate::lyrics::bootstrap_probe::{FastPath, RETRY_PLAN, decide};
+        use crate::lyrics::bootstrap_probe::{FastPath, RETRY_PLAN, decide, install_worked};
         use anyhow::Context;
         use tokio::process::Command;
 
@@ -437,27 +437,27 @@ pub async fn ensure_ready(
             );
         }
 
-        // Verify the install actually worked regardless of pip's exit codes.
-        // Retry up to 5× with backoff: immediately after `pip install
-        // --force-reinstall torch`, Windows sometimes fails to import the
-        // freshly-written ~300 `.pyd` files for a brief window (file system
-        // cache / antivirus scan). Retrying gives the OS time to settle.
-        let mut ok = false;
-        for attempt in 0..5 {
-            let readiness = is_ready(&venv_python).await;
-            if readiness.is_ready() {
-                ok = true;
-                break;
-            }
-            tracing::debug!(
-                ?readiness,
-                "lyrics bootstrap: is_ready check failed (attempt {attempt}), retrying"
-            );
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        }
-        if !ok {
+        // Verify the install actually worked regardless of pip's exit codes,
+        // with the #221 Readiness policy of the fast path (release 0.69.0
+        // review 🔵 9): `decide` logs every probe's reason (WARN) and retries a
+        // timeout or an init failure (~3 min — also the time Windows needs to
+        // load the freshly written `.pyd` files past an antivirus scan, which
+        // fails as `DLL load failed`, a retry). A probe that keeps timing out
+        // is a slow GPU / driver, never a failed install (five cold CUDA
+        // timeouts used to fail it and disable isolation for the whole
+        // process); a proven import failure, or a failure that outlives the
+        // retries, is.
+        let verified = decide(|| is_ready(&venv_python), RETRY_PLAN).await;
+        if !install_worked(verified.path) {
             anyhow::bail!(
-                "lyrics bootstrap: post-install is_ready check failed after 5 attempts — qwen_asr or CUDA torch not available"
+                "lyrics bootstrap: the post-install venv check failed after {} probe(s) — qwen_asr, the numeric stack or CUDA torch is not available (each probe's reason is in its WARN above)",
+                verified.probes
+            );
+        }
+        if verified.path == FastPath::UseAsIs {
+            tracing::warn!(
+                probes = verified.probes,
+                "lyrics bootstrap: the post-install venv probe kept timing out — going on with the installed venv (a timeout is never a failed install)"
             );
         }
 

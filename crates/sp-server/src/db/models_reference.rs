@@ -46,8 +46,10 @@ pub async fn set_video_lyrics_reference(
 /// `lyrics_reference`, stamps `lyrics_reference_rejected_at` (RFC3339 UTC),
 /// stores the note, and sets `lyrics_manual_priority` so the lyrics worker
 /// re-queues the song for reprocessing — the same mechanism
-/// `post_reprocess` uses. Returns rows_affected (0 = no such video; the
-/// HTTP handler maps that to 404).
+/// `post_reprocess` uses, with a fresh attempt budget and no backoff left
+/// (#144 review round 2: `lyrics_attempts = 0`, `lyrics_next_attempt_at =
+/// NULL`). Returns rows_affected (0 = no such video; the HTTP handler maps
+/// that to 404).
 pub async fn record_reference_feedback(
     pool: &SqlitePool,
     video_id: i64,
@@ -56,7 +58,8 @@ pub async fn record_reference_feedback(
     let res = sqlx::query(
         "UPDATE videos SET lyrics_reference = 0, \
          lyrics_reference_rejected_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-         lyrics_reference_note = ?1, lyrics_manual_priority = 1 \
+         lyrics_reference_note = ?1, lyrics_manual_priority = 1, \
+         lyrics_attempts = 0, lyrics_next_attempt_at = NULL \
          WHERE id = ?2",
     )
     .bind(note)

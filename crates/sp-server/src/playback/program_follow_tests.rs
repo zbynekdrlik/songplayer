@@ -369,3 +369,104 @@ async fn a_scene_already_on_program_cuts_nothing_and_a_failed_persist_cuts_nothi
         ("sp-slow", Some(8), Some("persist_failed"))
     );
 }
+
+// ── #221 🟡 1: the follow records what cg OBS shows ────────────────────────
+
+/// An active playlist `pid` whose NDI output is `ndi_name` (the scene catalog
+/// names its scene by that, lowercased).
+async fn playlist(pool: &SqlitePool, pid: i64, ndi_name: &str) {
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (?, ?, 'u', ?, 1)",
+    )
+    .bind(pid)
+    .bind(format!("playlist {pid}"))
+    .bind(ndi_name)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// SongPlayer's record says cg OBS shows `shown` (an answered command).
+fn record_shown(bus: &ProgramBus, shown: Option<i64>) {
+    let legacy = bus.legacy_cg();
+    let ticket = legacy.ticket();
+    assert!(legacy.confirmed(ticket, shown));
+}
+
+/// The playlists on air now (`program_on_air::on_air_set`), ascending.
+fn on_air(bus: &ProgramBus) -> Vec<i64> {
+    let shown = bus.legacy_cg().shown_now();
+    crate::playback::program_on_air::on_air_set(&bus.on_air_now(), shown)
+        .into_iter()
+        .collect()
+}
+
+/// Release 0.69.0 review 🟡 1: with the follow on (the facade rollback, or
+/// the settings checkbox), cg OBS's program scene IS what cg OBS shows. The
+/// follow records it in `legacy_cg` like the switch path records a mirror:
+/// a playlist scene of the catalog → that playlist, a manual scene → none,
+/// on every known scene. Before, `shown` kept the last mirrored playlist,
+/// and it stayed on air next to the followed one for good.
+#[tokio::test]
+async fn the_follow_records_what_cg_obs_shows() {
+    let pool = pool().await;
+    playlist(&pool, 3, "SP-three").await;
+    playlist(&pool, 7, "SP-seven").await;
+    let bus = Arc::new(ProgramBus::new());
+    bus.select_initial(7, Some("sp-seven"));
+    record_shown(&bus, Some(7));
+    let follow = Follow::new(pool.clone(), bus.clone());
+
+    follow.follow_scene("sp-three", &set(&[3])).await;
+    assert_eq!(bus.status().source, Some(3));
+    assert_eq!(bus.legacy_cg().shown_now(), Some(3), "cg OBS shows 3");
+    assert_eq!(on_air(&bus), vec![3], "7 left the air");
+
+    // A manual scene: cg OBS shows no playlist. The input is off, so the
+    // program keeps 3, and 3 alone is on air.
+    follow.follow_scene("Slido", &set(&[])).await;
+    assert_eq!(bus.status().source, Some(3));
+    assert_eq!(bus.legacy_cg().shown_now(), None, "a manual scene");
+    assert_eq!(on_air(&bus), vec![3]);
+
+    // A scene the program already shows is recorded too (the catalog's
+    // scene, whatever ASCII case cg OBS names it in).
+    record_shown(&bus, Some(7));
+    follow.follow_scene("SP-Three", &set(&[3])).await;
+    assert_eq!(bus.status().health.cuts, 1, "3 was on program already");
+    assert_eq!(bus.legacy_cg().shown_now(), Some(3));
+    assert_eq!(on_air(&bus), vec![3]);
+}
+
+/// The follow's record is ticketed under the switch order, like the switch
+/// path's: it waits for a switch in progress, and a late answer to a
+/// command sent before it never overwrites what it recorded.
+#[tokio::test]
+async fn the_follow_waits_for_the_switch_order_and_outranks_an_older_command() {
+    let pool = pool().await;
+    playlist(&pool, 3, "SP-three").await;
+    playlist(&pool, 7, "SP-seven").await;
+    let bus = Arc::new(ProgramBus::new());
+    bus.select_initial(7, Some("sp-seven"));
+    // A switch is in progress; its mirror (to 7) is not answered yet.
+    let order = bus.switch_order().lock().await;
+    let older = bus.legacy_cg().ticket();
+    let follow = Follow::new(pool.clone(), bus.clone());
+    let task = tokio::spawn(async move { follow.follow_scene("sp-three", &set(&[3])).await });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        bus.status().source,
+        Some(7),
+        "the follow waits for the switch"
+    );
+    assert_eq!(bus.legacy_cg().shown_now(), None);
+    drop(order);
+    assert_eq!(task.await.unwrap(), SceneAction::Playlist(3));
+    assert_eq!(bus.legacy_cg().shown_now(), Some(3));
+    assert!(
+        !bus.legacy_cg().confirmed(older, Some(7)),
+        "the older command's late answer is dropped"
+    );
+    assert_eq!(bus.legacy_cg().shown_now(), Some(3));
+}

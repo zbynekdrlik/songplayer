@@ -228,6 +228,18 @@ fn after_retries(outcome: &Readiness) -> FastPath {
     }
 }
 
+/// Whether the install path worked, from `decide`'s verdict over the freshly
+/// installed venv (the post-install check in `bootstrap::ensure_ready`,
+/// release 0.69.0 review 🔵 9 — the same policy as the fast path): `Ready`
+/// did; `UseAsIs` means the probe kept TIMING OUT, a slow GPU / driver,
+/// never a failed install (five cold CUDA timeouts used to disable isolation
+/// for the whole process); `Install` — a proven import failure, or a
+/// failure that outlived the retries — did not. Each probe's reason is in
+/// its WARN (`log_probe`).
+pub fn install_worked(path: FastPath) -> bool {
+    path != FastPath::Install
+}
+
 /// One probe's log line. Logging only.
 #[cfg_attr(test, mutants::skip)]
 fn log_probe(outcome: &Readiness, probe: u32) {

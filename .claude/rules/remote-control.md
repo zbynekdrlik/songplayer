@@ -268,9 +268,10 @@ come from `SP-program`, never from cg OBS.
   while cg OBS was away must never switch cg OBS seconds after the press was
   answered "not ready".
 - **Startup:** `PlaybackEngine::start_program` calls `remote::start_remote`
-  with the engine's `obs_cmd_tx` + `obs_event_tx`. `lib.rs` is at 1000/1000:
-  its `pub mod remote;` line replaced a redundant comment, and it gained no
-  line.
+  with the engine's `obs_cmd_tx` + `obs_event_tx`. (`lib.rs` was at the
+  1000-line cap then; its `pub mod remote;` replaced a comment. It is at
+  917 lines since the #219 / #221 splits — read `wc -l`, never a count
+  written here.)
 
 ## Studio mode (#221 L2): what the page-13 buttons get
 
@@ -370,7 +371,20 @@ mirror drives. `ProgramBus::legacy_cg()` keeps `shown: watch<Option<i64>>`
 - a manual scene cg OBS answered OK → `None` (recorded in `switch_manual`
   before the NDI-input check: cg OBS switched even when SP-program keeps);
 - a refusal, no answer, a superseded mirror, a command never sent →
-  unchanged; "OBS manuál" itself and a dashboard -1 send nothing.
+  unchanged; "OBS manuál" itself and a dashboard -1 send nothing;
+- **the OBS follow's observation** (release 0.69.0 review 🟡 1,
+  `program_follow.rs::Follow::follow_scene`): with `program_follow_obs` on
+  (the rollback below, or the settings checkbox) cg OBS is the authority, so
+  its program scene IS what it shows. A followed scene is a switch like any
+  other: under the `switch_order`, a ticket taken before its cut, then
+  `confirmed(ticket, observed)` — the catalog playlist of that scene, `None`
+  for a manual one, on EVERY known scene (the one SP-program already shows
+  too). Before, the follow recorded nothing: after the rollback a playlist
+  mirrored earlier stayed on air next to the followed one for good (both
+  playing and writing the wall, the dark-wall check on the stale one). A
+  playlist read that fails records nothing (WARN). Pinned by
+  `program_follow_tests.rs::the_follow_records_what_cg_obs_shows` and
+  `…_waits_for_the_switch_order_and_outranks_an_older_command`.
 
 Every command takes a `Ticket` UNDER the `switch_order` (the mirror in
 `mirror`, the manual forward before its request), so tickets follow the
@@ -701,6 +715,10 @@ with the mirror and the link.
   playlist at once; the previous playlist stays on air until cg OBS answers
   the mirror (the union with `legacy_cg.shown`). A failed mirror leaves BOTH
   playing (the legacy consumers keep cg OBS's playlist) until the next press.
+  Only ONE of them writes the shared wall outputs — the lines, the title,
+  the Presenter: the wall owner, SP-program's playlist (release 0.69.0
+  review 🟡 2, `program-bus.md` "One wall owner"). Before, both wrote the
+  one wall, which alternated between the two songs.
 - Hand switches in cg OBS's own UI are invisible to the facade (no cg
   tracking, by the owner's ruling): the next press decides. Since L4b the
   playlist cg OBS was switched to by hand is not on air, so the consumers on

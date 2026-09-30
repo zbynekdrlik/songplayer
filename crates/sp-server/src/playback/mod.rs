@@ -515,6 +515,12 @@ impl PlaybackEngine {
             if let Some(video_id) = video_id {
                 self.push_title_for_playing(playlist_id, video_id).await;
             }
+            // #221 (review rounds 1-2): the wall owner's ON re-syncs the
+            // whole wall (`scene_off::wall_after_owner_on`).
+            if self.on_air.owner() == Some(playlist_id) {
+                self.wall_after_owner_on(playlist_id, video_id.is_some())
+                    .await;
+            }
         } else {
             self.scene_off(playlist_id).await; // #215: held through a transition
         }

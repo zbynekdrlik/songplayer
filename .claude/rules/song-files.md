@@ -10,6 +10,7 @@ paths:
   - "crates/sp-server/src/dabing/worker.rs"
   - "crates/sp-server/src/lyrics/idle_gate_abort.rs"
   - "crates/sp-server/src/db/models_stems*.rs"
+  - "crates/sp-server/src/metadata/manual*.rs"
   - "crates/sp-server/tests/startup_migration.rs"
   - "e2e/cache-layout*.ts"
   - "e2e/post-deploy-flac.spec.ts"
@@ -84,7 +85,16 @@ Design record: #136 comment 5894034820.
     a double failure.
   - Record `SongFiles::columns()` of the set it RETURNS, on EVERY row that
     recorded the old set: the same video in another playlist is a second row
-    pointing at the same files.
+    pointing at the same files. The ONE statement for that is
+    `SongColumns::record(pool, youtube_id, old_video, old_audio)`.
+  - Three renamers today, all under `cache::SONG_FILES`: the metadata repair
+    (`reprocess/mod.rs`); an operator's title correction
+    (`metadata::manual::apply_to_video`, ROZHODNUTÉ 5908227964: every row of
+    the video, each row's set read right before its move and named after
+    that row's title; a row with no files, `SongFiles::is_empty`, is
+    skipped); and a finished download whose video was corrected while it
+    ran (`metadata::manual::record_download`, review round 1: the fresh
+    pair is renamed after the correction before it is recorded).
   - Read the old set from the DB right before the move, never from a batch
     snapshot (an earlier row may have moved it).
   - Hold `cache::SONG_FILES` (a process-wide async lock) from that read to the

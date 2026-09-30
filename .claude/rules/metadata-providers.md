@@ -100,16 +100,50 @@ answered correctly), and nothing ever ran the real providers.
     lock and its `corrects_title` gate); and
     `health_tests.rs::a_manual_row_is_not_in_the_repair_queue`. Nothing reads
   `metadata_source` back into `MetadataSource`, so `'manual'` needs no enum
-  variant. Its limits (review round 1):
-  - The correction is on ONE row. The same YouTube video in another playlist
-    is another row (14 ids have 2+ rows on the box, 30.9.2026). If that row
-    is still parser-named, the repair names it and renames the SHARED files,
-    and every row recording them follows (`reprocess/mod.rs`). The corrected
-    row keeps its song / artist, but not the file names.
-  - A RE-DOWNLOAD writes over it: a row reset to `normalized = 0` (only the
-    startup 48 kHz reset does that, `startup.rs`) goes back through the
-    download worker, which asks the provider chain again
-    (`downloader::process_one` → `mark_video_processed_pair`).
+  variant (`metadata::manual::MANUAL_SOURCE`).
+  - **The correction belongs to the VIDEO** (ROZHODNUTÉ 5908227964 item 1,
+    lane A; lane B's review round 1 listed it as a limit). The same YouTube
+    video in another playlist is another row (14 ids had 2+ rows on the box,
+    30.9.2026), and one video is one song with one title. So after its own
+    UPDATE, still under `cache::SONG_FILES`, a title PATCH runs
+    `metadata::manual::apply_to_video`: every row of the `youtube_id` takes
+    the patched row's song / artist with `'manual'` + `gemini_failed = 0`,
+    and each row's files are renamed after the correction (no `_gf`) in the
+    cache dir through `cache::rename_song_files`, the set read right before
+    its move and recorded on every row that recorded it
+    (`SongColumns::record`, the repair's statement). A row not downloaded
+    yet takes the title and records no files. A song-only or artist-only
+    PATCH spreads the patched row's WHOLE title — but never an EMPTY song
+    (review round 1: `song = COALESCE(NULLIF(?, ''), song)`): an
+    artist-only PATCH of a row not downloaded yet leaves every row's song,
+    and each row's files are named after that row's own title. Pinned by
+    `a_title_correction_applies_to_every_row_of_the_video` (the real
+    router: two rows sharing files, a row not downloaded, another video
+    untouched, the stem following the audio) and
+    `an_artist_only_correction_of_a_row_with_no_song_keeps_the_songs`.
+  - **An artist ALONE for a video with no song is refused** (review round
+    2): a download keeps a correction only with its song (below), so an
+    artist-only PATCH of a video no row of which has a song yet (none
+    downloaded) answers 400 and writes nothing
+    (`metadata::manual::refused_title`, which also refuses a
+    whitespace-only song; a missing row stays 404). The dashboard sends
+    the song with the artist. Pinned by
+    `an_artist_alone_for_a_video_with_no_song_is_refused`.
+  - **A download keeps it** (item 2): `DownloadWorker::process_next` takes
+    the title from `metadata::manual::download_title`, which keeps a
+    corrected video's title (a row of that `youtube_id` with `'manual'` and
+    a song; the lowest id) and never asks the provider chain over it; the
+    row records `'manual'` again. That covers a re-download (a row reset to
+    `normalized = 0` by the startup 48 kHz reset, `startup.rs`) and the
+    first download of the same video added to another playlist later.
+    The title is read before the download and the loudnorm (about a
+    minute), so a correction can land in between (review round 1): the
+    worker records through `metadata::manual::record_download`, which
+    reads the video's correction again under `cache::SONG_FILES` and, when
+    there is one, renames the fresh pair after it and records it
+    (`a_correction_made_during_the_download_names_the_fresh_pair`).
+    `process_next` needs yt-dlp, so its calls are pinned by its source
+    (`manual_tests.rs::the_download_worker_takes_the_title_from_download_title`).
 - `POST /api/v1/metadata/probe {youtube_id, title}` runs EACH provider on its
   own (concurrently, each bounded by `PROBE_TIMEOUT` = 180 s, below the spec's
   220 s so a hung provider fails the gate WITH its name), returns each
@@ -141,8 +175,11 @@ answered correctly), and nothing ever ran the real providers.
   commas: a request carrying `k1,k2` does NOT match `header("x-goog-api-key",
   "k1")`. Assert the raw header through `received_keys` when the test is
   about what was sent.
-- A Claude mock that fails must answer a 4xx: `AiClient` retries 429/5xx
-  with 1 s / 2 s sleeps. A Gemini 5xx test sets millisecond pauses with
+- A Claude mock that fails should answer a 4xx: `AiClient` retries 429 / 5xx
+  (#145: after the `Retry-After`, else 5 / 20 / 60 s). A test that must
+  drive a 5xx through the client injects `RetryPolicy::NO_WAIT`
+  (`AiClient::with_retry_policy`, `ai/retry.rs`): the same 3 retries, no
+  real wait. A Gemini 5xx test sets millisecond pauses with
   `GeminiProvider::with_retry_backoffs` (test-only).
 - `.cargo/mutants.toml` no longer excludes `reprocess/` (only its timer loop
   `ReprocessWorker::run`): a changed line there needs its killing test.

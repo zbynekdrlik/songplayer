@@ -3,12 +3,15 @@
 //! The real `ObsClient` against a `FakeObsServer` whose next scene lookup
 //! either gets no answer (the client's 2 s response timeout) or is answered
 //! without a `sceneItems` list. Before the fix the client read either as
-//! "this scene shows no playlist": it broadcast `SceneChanged { {} }` (the
-//! engine bridge scene-offs, i.e. pauses, every playlist that was on
-//! program) and the ~2 s poll, which compared scene names only, never
+//! "this scene shows no playlist": it published the scene with an empty set
+//! (then the engine bridge scene-offed, i.e. paused, every playlist that was
+//! on program) and the ~2 s poll, which compared scene names only, never
 //! repaired the set. Now the failed lookup keeps the previous playlists and
-//! broadcasts nothing, and the next poll looks the scene up again: the FIRST
-//! `SceneChanged` after the failure already carries the right playlists.
+//! flags `lookup_failed`, and the next poll looks the scene up again: the
+//! FIRST published snapshot that knows the scene (`ObsClient::snapshots`,
+//! #219 — what the follow reads; the unread `ObsEvent::SceneChanged` is
+//! deleted, release 0.69.0 review 🔵 10) already carries the right
+//! playlists.
 //!
 //! Every wait is bounded (20 s); nothing sleeps for synchronisation.
 
@@ -21,7 +24,7 @@ use std::time::Duration;
 use common::{FakeObsServer, FakeObsState};
 use serde_json::json;
 use sp_server::{db, obs};
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{RwLock, broadcast, watch};
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -35,7 +38,7 @@ const HELD_MAX: Duration = Duration::from_millis(1500);
 struct Rig {
     fake: FakeObsServer,
     state: Arc<RwLock<obs::ObsState>>,
-    events: broadcast::Receiver<obs::ObsEvent>,
+    snapshots: watch::Receiver<obs::ObsSnapshot>,
     _rebuild: broadcast::Sender<()>,
     shutdown: broadcast::Sender<()>,
     _client: obs::ObsClient,
@@ -80,8 +83,8 @@ impl Rig {
         rig
     }
 
-    /// Spawn the client against `cg` without waiting for anything; `events`
-    /// holds every event from the very start.
+    /// Spawn the client against `cg` without waiting for anything;
+    /// `snapshots` sees every snapshot the client publishes from the start.
     async fn connect(cg: FakeObsState) -> Self {
         let pool = db::create_memory_pool().await.unwrap();
         db::run_migrations(&pool).await.unwrap();
@@ -96,7 +99,7 @@ impl Rig {
         let fake = FakeObsServer::spawn_with_state(cg).await;
         let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
         let state = Arc::new(RwLock::new(obs::ObsState::default()));
-        let (event_tx, events) = broadcast::channel::<obs::ObsEvent>(64);
+        let (event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
         let (rebuild, rebuild_rx) = broadcast::channel::<()>(4);
         let (shutdown, shutdown_rx) = broadcast::channel::<()>(1);
         let client = obs::ObsClient::spawn(
@@ -114,7 +117,7 @@ impl Rig {
         Self {
             fake,
             state,
-            events,
+            snapshots: client.snapshots(),
             _rebuild: rebuild,
             shutdown,
             _client: client,
@@ -140,7 +143,7 @@ impl Rig {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        while self.events.try_recv().is_ok() {}
+        self.snapshots.mark_unchanged(); // what is published now is seen
     }
 
     /// Wait (at most 20 s) until the client's state satisfies `done`. Checks
@@ -178,17 +181,18 @@ impl Rig {
     }
 
     /// cg OBS puts `scene` on program (event included) while `fault` makes
-    /// the next scene lookup fail. The FIRST `SceneChanged` the client
-    /// broadcasts afterwards must already carry `playlists` (never an empty
-    /// set in between, which the engine would read as "scene off"), and it
-    /// must come from a second lookup: the poll's retry.
+    /// the next scene lookup fail. The FIRST snapshot the client publishes
+    /// afterwards that knows `scene` (connected, no failed lookup) must
+    /// already carry `playlists` (never an empty set in between, which the
+    /// follow would read as a scene showing no playlist), and it must come
+    /// from a second lookup: the poll's retry.
     async fn switch_with_a_failed_lookup(
         &mut self,
         scene: &str,
         fault: fn(&mut FakeObsState),
         playlists: &[i64],
     ) {
-        while self.events.try_recv().is_ok() {}
+        self.snapshots.mark_unchanged(); // what is published now is seen
         let before = self.lookups_of(scene).await;
         let program = scene.to_string();
         self.fake
@@ -201,14 +205,14 @@ impl Rig {
         let deadline = tokio::time::Instant::now() + TIMEOUT;
         let first = loop {
             let left = deadline.saturating_duration_since(tokio::time::Instant::now());
-            match tokio::time::timeout(left, self.events.recv()).await {
-                Ok(Ok(obs::ObsEvent::SceneChanged {
-                    scene_name,
-                    active_playlist_ids,
-                })) => break (scene_name, active_playlist_ids),
-                Ok(Ok(_)) => continue,
-                Ok(Err(e)) => panic!("event channel error: {e}"),
-                Err(_) => panic!("no SceneChanged within {TIMEOUT:?} after the switch to {scene}"),
+            match tokio::time::timeout(left, self.snapshots.changed()).await {
+                Ok(Ok(())) => {
+                    if let Some(program) = known(&self.snapshots.borrow_and_update()) {
+                        break program;
+                    }
+                }
+                Ok(Err(e)) => panic!("the OBS client's snapshots closed: {e}"),
+                Err(_) => panic!("no known scene within {TIMEOUT:?} after the switch to {scene}"),
             }
         };
         assert_eq!(
@@ -226,6 +230,15 @@ impl Rig {
     async fn stop(self) {
         let _ = self.shutdown.send(());
         self.fake.shutdown().await;
+    }
+}
+
+/// A snapshot's program scene and its playlists, when the client knows them
+/// (connected, named, and looked up: the only scene the follow acts on).
+fn known(s: &obs::ObsSnapshot) -> Option<(String, HashSet<i64>)> {
+    match (&s.current_scene, s.connected, &s.lookup_failed) {
+        (Some(scene), true, None) => Some((scene.clone(), s.active_playlist_ids.clone())),
+        _ => None,
     }
 }
 
@@ -379,27 +392,29 @@ async fn a_poll_read_an_event_overtook_never_rolls_the_scene_back() {
 /// Review round 3: an event cg OBS sent while the client was still
 /// connecting (read during its NDI map rebuild, queued until the connection
 /// loop runs) is OLDER than the client's initial program read. It must never
-/// override that read: cg OBS shows sp-fast, so the only `SceneChanged` is
-/// sp-fast's — no sp-slow after it (the engine would scene-off sp-fast and the
-/// follow would cut to sp-slow).
+/// override that read: cg OBS shows sp-fast, so the only scene the client
+/// ever publishes as known is sp-fast — no sp-slow after it (the follow would
+/// cut to sp-slow).
 #[tokio::test]
 async fn an_event_queued_during_the_connect_never_overrides_the_initial_read() {
     let mut cg = cg_obs(); // cg OBS shows sp-fast
     cg.event_on_input_list = Some("sp-slow".to_string());
     let mut rig = Rig::connect(cg).await;
     let deadline = tokio::time::Instant::now() + TIMEOUT;
-    let mut changes = Vec::new();
+    let mut changes: Vec<(String, HashSet<i64>)> = Vec::new();
+    // Every known scene the client publishes, a repeat once (another field of
+    // the snapshot changed).
+    let mut see = |snapshots: &mut watch::Receiver<obs::ObsSnapshot>| {
+        if snapshots.has_changed().unwrap_or(false)
+            && let Some(program) = known(&snapshots.borrow_and_update())
+            && changes.last() != Some(&program)
+        {
+            changes.push(program);
+        }
+    };
     // The initial read and two polls (the first poll runs right after it).
     loop {
-        while let Ok(event) = rig.events.try_recv() {
-            if let obs::ObsEvent::SceneChanged {
-                scene_name,
-                active_playlist_ids,
-            } = event
-            {
-                changes.push((scene_name, active_playlist_ids));
-            }
-        }
+        see(&mut rig.snapshots);
         let reads = rig
             .fake
             .state()
@@ -417,15 +432,7 @@ async fn an_event_queued_during_the_connect_never_overrides_the_initial_read() {
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    while let Ok(event) = rig.events.try_recv() {
-        if let obs::ObsEvent::SceneChanged {
-            scene_name,
-            active_playlist_ids,
-        } = event
-        {
-            changes.push((scene_name, active_playlist_ids));
-        }
-    }
+    see(&mut rig.snapshots);
     assert_eq!(
         changes,
         vec![("sp-fast".to_string(), set(&[7]))],

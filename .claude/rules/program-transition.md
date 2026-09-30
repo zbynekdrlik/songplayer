@@ -6,6 +6,7 @@ paths:
   - "crates/sp-server/src/playback/scene_off*.rs"
   - "crates/sp-server/src/playback/tests_hold.rs"
   - "crates/sp-server/src/playback/tests_scene_off_wall.rs"
+  - "crates/sp-server/src/playback/tests_wall_owner.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event.rs"
   - "crates/sp-server/src/playback/clear_lyrics.rs"
   - "crates/sp-server/src/playback/engine_play.rs"
@@ -122,10 +123,14 @@ cut boundary mixed the outgoing song against silence.
   on the cut boundary, 15 = timed out; more only if a > 8-slot resync jumped
   past the deadline); `cue_timeouts` counts the timeouts. A frozen window
   never opens and never touches them. NOT every timeout is a fault: a
-  dashboard cut to a playlist whose scene is not on program (it stays paused,
-  no new song) or to the NDI input with no source offers only standby pairs,
-  so it waits the full 15 boundaries, WARNs and counts one. Read the box's
-  `cue_timeouts` +0 check on the cg OBS scene-change path only.
+  dashboard cut to the NDI input with no source offers only standby pairs,
+  so it waits the full 15 boundaries, WARNs and counts one. A dashboard cut
+  to a playlist that was off program is NOT that case any more (release
+  0.69.0 review 🔵 11): since #221 L4b the cut puts it on air, the playback
+  authority's ON (`SceneOn` → `SelectAndPlay`) starts a new song, and the
+  fade opens on that song's first live pair — a timeout there means the song
+  took longer than 15 boundaries to start. Read the box's `cue_timeouts` +0
+  check on the cg OBS scene-change path only.
 - A WAITING cue opens only on its own window's live pair: once a later cut
   froze it, a live pair of its incoming source inside it is held like any
   other (review round 1). `cut` reads `on_air(boundary)` BEFORE
@@ -300,11 +305,29 @@ OFF first). The wall step runs before the pause/hold:
   shared with the Resolume recovery, filtered to the diffed set), and ONE
   `HideSubtitles` goes only when none has a line: one playlist never clears
   another's line (the recovery's rule, `resolume-driver.md`).
-- Residual: the title candidates are `scene_active` only
-  (`title_candidates`), so a due title of a playlist whose OFF is queued can
-  be re-synced until its own OFF re-syncs the wall.
+- The title candidates and the re-sent lines are those of the wall owner
+  only while there is one (release 0.69.0 review 🟡 2, `program-bus.md`
+  "One wall owner"). Residual, with no owner only: the candidates are
+  `scene_active` ones (`title_candidates`), so a due title of a playlist
+  whose OFF is queued can be re-synced until its own OFF re-syncs the wall.
+- The stage display (#221 review round 3): with another playlist on
+  program, the OFF ends with `resync_presenter(owner)` — the wall owner's
+  line at its last position, or a cleared display — because the owner can
+  change by this OFF alone (a cut to "OBS manuál" while cg OBS still
+  shows another playlist). After the OFF of a member that did not own the
+  wall it repeats the owner's line, or clears the display while the owner
+  is in a blank stretch (review round 4: blank like the wall until the
+  owner's next line).
+- The other half, an ON: the wall owner's ON re-syncs the title, the line
+  and the stage display to it (`scene_off::wall_after_owner_on`, review
+  rounds 1-2), since the old owner writes nothing any more; details in
+  `program-bus.md` "One wall owner".
 - Pinned in `tests_scene_off_wall.rs` (`going_off_program_*`, a child
-  module of `tests_scene_change.rs` that reuses its rig).
+  module of `tests_scene_change.rs` that reuses its rig) and, for the
+  wall owner, `tests_wall_owner.rs`
+  (`an_owner_change_by_an_off_re_syncs_the_stage_display`,
+  `the_new_owner_s_on_re_syncs_the_wall_s_line`,
+  `a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down`).
 
 ### A held playlist has no side effects (release 0.68.0 blockers)
 
@@ -379,7 +402,9 @@ faded out the on-program title.
   liveness gates a window). A side that sends nothing is MISSED and mixed
   against the program standby, so the window never stalls.
 - **Both title timers fire only on program** (`title_timers.rs`): the hide
-  timer reads `scene_active` when it fires, like the show timer. A pause
+  timer reads `scene_active` when it fires, like the show timer — and, while
+  another playlist owns the wall, neither fires (`WallGate`, release 0.69.0
+  review 🟡 2: one on-air member's hide timer took the other's title down). A pause
   cancels them, and on program it clears the line
   (`clear_lyrics_display`) and re-syncs the title (`resync_after_play`): a
   paused song's title and line are not due, so they go down at the pause,
@@ -498,6 +523,13 @@ unanswered-catch-up gap it had is gone by construction.
   the program already shows that source (`Follow::follow_scene`, which also
   records `last_follow_cut`). This replaces the event-night watcher
   `%TEMP%\sp_follow.ps1`, which polled the scene every 200 ms.
+- **A followed scene is a switch like any other** (release 0.69.0 review
+  🟡 1): `follow_scene` holds the bus's `switch_order`, takes a `legacy_cg`
+  ticket before its cut, and records what cg OBS shows —
+  `legacy_cg.confirmed(ticket, observed)`, the scene catalog's playlist or
+  `None` for a manual scene, on every known scene (`remote-control.md`,
+  "SongPlayer's record of what it told cg OBS"). With the follow on, cg OBS
+  is the authority, so a playlist mirrored earlier leaves the air.
 - Order vs the engine (#221 L4b): the engine no longer follows cg OBS's
   scene at all; a follow cut is a program cut like any other, and the
   playback authority plays what it put on air.

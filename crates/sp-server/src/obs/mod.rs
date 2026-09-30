@@ -185,15 +185,13 @@ pub enum ObsCommand {
     Remote(remote_call::RemoteCall),
 }
 
-/// Events emitted by the OBS WebSocket connection loop.
+/// cg OBS's events, as the connection loop's reader receives them. The
+/// client's own view of cg OBS (connected, the program scene and its
+/// playlists) is published as an `ObsSnapshot` (#219) instead: the
+/// `Connected` / `Disconnected` / `SceneChanged` events nothing read are
+/// deleted (release 0.69.0 review 🔵 10).
 #[derive(Debug, Clone)]
 pub enum ObsEvent {
-    Connected,
-    Disconnected,
-    SceneChanged {
-        scene_name: String,
-        active_playlist_ids: HashSet<i64>,
-    },
     /// #213: every op=5 event cg OBS sent, verbatim (`eventType` + `eventData`).
     /// The remote-control facade re-emits the scene ones to its clients.
     Raw {
@@ -205,8 +203,8 @@ pub enum ObsEvent {
 /// Internal messages from the reader task to the main loop.
 enum ReaderMessage {
     /// `CurrentProgramSceneChanged` arrived. Main loop must issue
-    /// follow-up GetSceneItemList queries (via dispatcher) and emit
-    /// the upstream `ObsEvent::SceneChanged`. `ticket`: its scene ticket,
+    /// follow-up GetSceneItemList queries (via dispatcher) and publish
+    /// the scene (`scene::apply_scene_change`). `ticket`: its scene ticket,
     /// taken when the reader READ the event (#218 review round 3: during the
     /// connect the main loop is not running yet, so the dequeue order is not
     /// cg OBS's order relative to the initial program read).
@@ -292,12 +290,11 @@ impl ObsClient {
                     }
                 }
 
-                // Mark disconnected (published) and notify. A fresh scene
-                // ticket: an apply of the old connection that still writes
-                // after this reset is dropped (#218 review round 3).
+                // Mark disconnected (published). A fresh scene ticket: an
+                // apply of the old connection that still writes after this
+                // reset is dropped (#218 review round 3).
                 obs.update_scene(obs.scene_ticket(), ObsState::reset_disconnected)
                     .await;
-                let _ = loop_event_tx.send(ObsEvent::Disconnected);
 
                 info!("Reconnecting to OBS in {backoff:?}");
                 tokio::time::sleep(backoff).await;
@@ -515,7 +512,6 @@ async fn connect_and_run(
     info!("connected to OBS WebSocket");
 
     obs.update(|s| s.connected = true).await;
-    let _ = event_tx.send(ObsEvent::Connected);
 
     // Step 4: build dispatcher + spawn reader task.
     // Wrap the write half in Arc<Mutex<>> so tasks spawned from the
@@ -604,7 +600,6 @@ async fn connect_and_run(
                     &dispatcher,
                     ndi_sources,
                     obs,
-                    event_tx,
                     scene_name.to_string(),
                     initial_ticket,
                 )
@@ -661,14 +656,12 @@ async fn connect_and_run(
                         let dispatcher = dispatcher.clone();
                         let ndi_sources = std::sync::Arc::clone(ndi_sources);
                         let obs = obs.clone();
-                        let event_tx = event_tx.clone();
                         spawn_helper(&mut spawned_tasks, async move {
                             scene::apply_scene_change(
                                 &write,
                                 &dispatcher,
                                 &ndi_sources,
                                 &obs,
-                                &event_tx,
                                 scene_name,
                                 ticket,
                             )
@@ -806,7 +799,6 @@ async fn connect_and_run(
                 let dispatcher = dispatcher.clone();
                 let ndi_sources = std::sync::Arc::clone(ndi_sources);
                 let obs = obs.clone();
-                let event_tx = event_tx.clone();
                 let scene_pending = std::sync::Arc::clone(&scene_pending);
                 spawn_helper(&mut spawned_tasks, async move {
                     scene_poll::reconcile_program_scene(
@@ -814,7 +806,6 @@ async fn connect_and_run(
                         &dispatcher,
                         &ndi_sources,
                         &obs,
-                        &event_tx,
                         &scene_pending,
                     )
                     .await;

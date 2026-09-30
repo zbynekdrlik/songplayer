@@ -39,6 +39,13 @@
 //! shared subtitle clips never happen. The program bus then mixes the rest
 //! of the window out of the paused side's standby (its frozen frame or idle
 //! black, and silence).
+//!
+//! The file also holds the wall re-syncs around a program change (#221):
+//! after an OFF, `wall_after_scene_off` (the title, `resync_wall_lines`, and
+//! the owner's stage display), and on the wall owner's ON,
+//! `wall_after_owner_on` (the same three, `resync_presenter` for the stage
+//! display), since only the wall owner writes the wall
+//! (`OnAirPlaylists::may_write_wall`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -85,7 +92,16 @@ impl PlaybackEngine {
     /// authority's diffed set: a playlist whose OFF is queued too is leaving.
     /// Its title is still a candidate (`title_candidates`), so a due one can
     /// be re-synced for the moment until its own OFF re-syncs the wall.
-    pub(super) async fn wall_after_scene_off(&self) {
+    ///
+    /// #221 review round 3: the wall owner can change by this OFF alone (a
+    /// cut to "OBS manuál" while cg OBS still shows another playlist), so the
+    /// stage display is re-synced to the owner too (`resync_presenter`), as
+    /// at an owner's ON. After the OFF of a member that did not own the wall,
+    /// that repeats the owner's current line, or (review round 4) clears the
+    /// stage display while the owner is in a blank stretch, where its
+    /// dispatch holds its last line: the display goes blank like the wall
+    /// until the owner's next line.
+    pub(super) async fn wall_after_scene_off(&mut self) {
         let others_on_program = self
             .pipelines
             .iter()
@@ -106,6 +122,20 @@ impl PlaybackEngine {
             }
             None => {} // the due title's read failed: nothing is sent
         }
+        self.resync_wall_lines();
+        if let Some(owner) = self.on_air.owner() {
+            self.resync_presenter(owner);
+        }
+    }
+
+    /// Re-send the wall's line now: the line of every playlist on program in
+    /// the authority's diffed set that may write the wall (`on_program_lines`,
+    /// so only the owner's while there is one), or ONE `HideSubtitles` when
+    /// none has a line. Used after an OFF (`wall_after_scene_off`) and on the
+    /// wall owner's ON (`handle_scene_change`, #221 review round 1: an owner
+    /// that changed by its ON alone must replace the old owner's line at
+    /// once, since the old owner no longer writes).
+    pub(super) fn resync_wall_lines(&self) {
         let lines: Vec<_> = self
             .on_program_lines()
             .into_iter()
@@ -115,12 +145,53 @@ impl PlaybackEngine {
             let _ = self.resolume_tx.try_send(ResolumeCommand::HideSubtitles);
         }
         for (playlist_id, video_id, cmd) in lines {
-            debug!(
-                playlist_id,
-                video_id, "scene off program — the line still on program re-sent"
-            );
+            debug!(playlist_id, video_id, "the wall's line re-sent");
             let _ = self.resolume_tx.try_send(cmd);
         }
+    }
+
+    /// The wall after its owner's ON (#221, review rounds 1-2). The owner can
+    /// change by this ON alone (SP-program cut to it while cg OBS still shows
+    /// the old owner), and the old owner writes nothing any more — its hide
+    /// timer, song-end clear and Presenter pushes included — so the whole
+    /// wall is re-synced to the new owner at once: its title (a `playing`
+    /// owner's scene-on already sent the `Resync`, `push_title_for_playing`;
+    /// one that plays nothing takes the old title down), its line
+    /// (`resync_wall_lines`) and the stage display (`resync_presenter`).
+    pub(super) async fn wall_after_owner_on(&mut self, playlist_id: i64, playing: bool) {
+        if !playing {
+            self.resync_wall_title().await;
+        }
+        self.resync_wall_lines();
+        self.resync_presenter(playlist_id);
+    }
+
+    /// The Presenter's stage display once `playlist_id` owns the wall: its
+    /// line at its last reported position, or cleared when it has none (no
+    /// lyrics, a blank position, nothing playing), so the old owner's last
+    /// line never stays there.
+    fn resync_presenter(&mut self, playlist_id: i64) {
+        let client = self.presenter_client.as_ref();
+        let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
+            return;
+        };
+        let lines = match pp.state {
+            PlayState::Playing { .. } => pp
+                .lyrics_state
+                .as_ref()
+                .and_then(|lyrics| lyrics.presenter_lines(pp.cached_position_ms)),
+            _ => None,
+        };
+        pp.last_presenter_text = match lines {
+            Some(lines) => {
+                let (song, artist) = (&pp.cached_song, &pp.cached_artist);
+                crate::presenter::maybe_push_line(client, None, lines, song, artist)
+            }
+            None => {
+                crate::presenter::push_empty(client, "a new wall owner with no line");
+                None
+            }
+        };
     }
 
     /// The scene-go-off half of `handle_scene_change`: pause, unless the

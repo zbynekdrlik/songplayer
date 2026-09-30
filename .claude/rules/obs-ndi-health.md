@@ -250,11 +250,15 @@ log lines. Add new per-snapshot logging to `health_log`, not to the handler.
   `remote-control.md`.
 - `ObsCommand` is no longer `Clone`: it holds a oneshot sender.
 - The reader broadcasts EVERY op=5 event as `ObsEvent::Raw { event_type,
-  event_data }` on `obs_event_tx`. Any exhaustive `match` on `ObsEvent` needs
-  a `Raw` arm. A test that waits for `SceneChanged` must skip other events.
-  #221 L4b deleted the engine bridge: `SceneChanged` / `Disconnected` start
-  or pause nothing any more (SongPlayer's own program drives playback,
-  `program-bus.md` "The playback authority"); L6 deletes the scene detection.
+  event_data }` on `obs_event_tx` — `Raw` is `ObsEvent`'s ONLY variant.
+  #221 L4b deleted the engine bridge, and with it the last reader of
+  `ObsEvent::SceneChanged` / `Connected` / `Disconnected`; release 0.69.0
+  (review 🔵 10) deleted those variants and their sends. The client's own
+  view of cg OBS (connected, the program scene, its playlists) is the
+  published `ObsSnapshot` (below): a test or a consumer that needs a scene
+  change waits for a snapshot that KNOWS the scene (connected, looked up),
+  never for an event (`tests/scene_detection.rs::program_snapshot`,
+  `tests/scene_lookup_failure.rs::known`). L6 deletes the scene detection.
 - The obs-websocket SERVER side (the facade) lives in `crate::remote`; see
   `remote-control.md`.
 
@@ -281,7 +285,7 @@ event-derived `ObsState::current_scene`
 (`scene_poll::scene_poll_detects_change(last, polled) -> Option<scene>`) it feeds
 the SAME `scene::apply_scene_change` path the event does — so the reader arm and
 the poll arm share one scene-apply body (keeps `obs/mod.rs` ≤1000). A duplicate
-same-scene emit is harmless: `(Playing, SceneOn)` is a no-op in `state.rs`. The
+same-scene apply publishes nothing (`ObsShared` publishes only a real change). The
 pure `scene_poll_detects_change` is Linux-unit-tested; `reconcile_program_scene`
 (I/O) is not (`obs/**` is excluded from the mutation gate). INFO log on a
 poll-caught switch: `obs: program scene changed without an event — reconciled by
@@ -321,9 +325,9 @@ only) never repaired it.
 
   It writes through `ObsShared::update_scene(ticket, …)`, which DROPS an
   answer that arrives after a later ticket's answer was written (debug `a
-  newer scene lookup already answered`). The `SceneChanged` is sent inside
-  that closure, under the write lock, so the engine gets the scene changes in
-  write order. A dropped relookup costs one poll tick (the next one asks
+  newer scene lookup already answered`). The snapshot is published under
+  that write lock, so a consumer gets the scene changes in write order. A
+  dropped relookup costs one poll tick (the next one asks
   again). The limit: tickets follow the order the READER sees things, not
   the order cg OBS did them — an event cg OBS sent before answering a read
   but that the reader reads after the read's ticket still outranks the read
@@ -365,8 +369,9 @@ only) never repaired it.
   `"dropped": true`), `omit_scene_items` (success, no list) and
   `refuse_scene_item_lists` (600), each for the next N lookups, plus `groups`
   (a name listed there is refused with 602 like a real group). The first
-  `SceneChanged` after the failure must already carry the right set and come
-  from a second lookup; a group on the program scene must not fail it.
+  published snapshot that knows the scene after the failure must already
+  carry the right set and come from a second lookup; a group on the program
+  scene must not fail it.
 - **Not mutation-scored:** `.cargo/mutants.toml` excludes all of
   `sp-server/src/obs/`, so the pure `scene_items_from_reply`,
   `scene_poll_verdict`, `obs_transition_from_reply`, `is_transition_event`

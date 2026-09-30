@@ -144,6 +144,45 @@ async fn obs_manual_keeps_on_air_what_cg_obs_shows() {
     nothing_more(&mut a.events).await;
 }
 
+/// Release 0.69.0 review 🟡 2: with every set the task publishes the ONE
+/// wall owner (SP-program's playlist, else the one cg OBS was told to show),
+/// before that value's events; while it owns the wall, the other member of
+/// a two-member set may not write it.
+#[tokio::test]
+async fn the_authority_publishes_the_wall_owner_with_the_set() {
+    let bus = Arc::new(ProgramBus::new());
+    bus.select_initial(7, Some("sp-fast"));
+    bus.legacy_cg().restored(7);
+    let mut a = authority(&bus);
+    assert_eq!(a.diffed.owner(), None, "nothing before its first value");
+    assert!(a.diffed.may_write_wall(4), "no owner restricts nothing");
+    assert_eq!(next(&mut a.events, 1).await, [(7, true)]);
+    assert_eq!(a.diffed.owner(), Some(7));
+
+    // A press of sp-slow: both on air until the mirror is answered, and the
+    // program's playlist owns the wall.
+    bus.cut(4, utc_now_100ns(), Some("sp-slow"));
+    assert_eq!(next(&mut a.events, 1).await, [(4, true)]);
+    assert_eq!(members(&a.diffed, &[4, 7]), [true, true]);
+    assert_eq!(a.diffed.owner(), Some(4));
+    assert!(a.diffed.may_write_wall(4));
+    assert!(!a.diffed.may_write_wall(7), "7 is on air, 4 owns the wall");
+
+    // A dashboard cut to "OBS manuál": the input carries cg OBS's sp-fast,
+    // which owns the wall again.
+    bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), None);
+    assert_eq!(next(&mut a.events, 1).await, [(4, false)]);
+    assert_eq!(a.diffed.owner(), Some(7));
+    assert!(a.diffed.may_write_wall(7));
+    assert!(!a.diffed.may_write_wall(4));
+
+    // cg OBS shows a manual scene: nothing on air, no owner.
+    cg_shows(&bus, None);
+    assert_eq!(next(&mut a.events, 1).await, [(7, false)]);
+    assert_eq!(a.diffed.owner(), None);
+    nothing_more(&mut a.events).await;
+}
+
 /// It ends on shutdown, and when the engine's channel is gone.
 #[tokio::test]
 async fn the_authority_ends_on_shutdown_or_without_an_engine() {

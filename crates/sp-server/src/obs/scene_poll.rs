@@ -18,7 +18,6 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info};
 
@@ -26,7 +25,7 @@ use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
 use crate::obs::scene::apply_scene_change;
 use crate::obs::snapshot::ObsShared;
 use crate::obs::text::get_current_scene_request;
-use crate::obs::{NdiSourceMap, ObsEvent, SharedWrite};
+use crate::obs::{NdiSourceMap, SharedWrite};
 
 /// One poll pass: read `GetCurrentProgramScene` over the existing WS and, when
 /// it differs from the last event-derived scene (a dropped
@@ -41,7 +40,6 @@ pub(crate) async fn reconcile_program_scene(
     dispatcher: &Dispatcher,
     ndi_sources: &NdiSourceMap,
     obs: &ObsShared,
-    event_tx: &broadcast::Sender<ObsEvent>,
     pending: &Mutex<Option<(String, Instant)>>,
 ) {
     // The ticket is taken BEFORE cg OBS is asked (review round 2): an event
@@ -107,7 +105,7 @@ pub(crate) async fn reconcile_program_scene(
         }
         PollVerdict::InSync | PollVerdict::Pending => return,
     };
-    apply_scene_change(write, dispatcher, ndi_sources, obs, event_tx, scene, ticket).await;
+    apply_scene_change(write, dispatcher, ndi_sources, obs, scene, ticket).await;
 }
 
 /// Decide whether a polled program scene reflects a change the event stream

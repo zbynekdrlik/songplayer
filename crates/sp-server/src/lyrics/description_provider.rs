@@ -769,12 +769,14 @@ mod tests {
             .mount(&mock)
             .await;
 
+        // #145: the refused call is retried; no test waits for real.
         let ai = AiClient::new(AiSettings {
             api_url: format!("{}/v1", mock.uri()),
             api_key: Some("test".into()),
             model: "stub".into(),
             system_prompt_extra: None,
-        });
+        })
+        .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT);
 
         let out = clean_lyrics_via_claude(
             &ai,
