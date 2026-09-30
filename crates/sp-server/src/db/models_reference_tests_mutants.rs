@@ -72,3 +72,38 @@ async fn get_video_lyrics_reference_missing_row_is_false() {
         "a non-existent video id must read false"
     );
 }
+
+/// #144 review round 2: the "Nesedí" feedback queues the song like the
+/// reprocess routes do — a fresh attempt budget and no backoff left
+/// (`lyrics_attempts = 0`, `lyrics_next_attempt_at = NULL`), so a song the
+/// wall serves gets its `SERVED_RERUN_MAX_ATTEMPTS` failed attempts before
+/// it leaves the manual queue, and is picked at once.
+#[tokio::test]
+async fn reference_feedback_queues_the_song_with_a_fresh_attempt_budget() {
+    let (pool, id_ref, _id_plain) = setup_two_videos().await;
+    sqlx::query(
+        "UPDATE videos SET lyrics_attempts = 2, \
+         lyrics_next_attempt_at = '2999-01-01T00:00:00.000Z' WHERE id = ?",
+    )
+    .bind(id_ref)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        record_reference_feedback(&pool, id_ref, "off")
+            .await
+            .unwrap(),
+        1
+    );
+
+    let row: (i64, i64, Option<String>) = sqlx::query_as(
+        "SELECT lyrics_manual_priority, lyrics_attempts, lyrics_next_attempt_at \
+         FROM videos WHERE id = ?",
+    )
+    .bind(id_ref)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row, (1, 0, None));
+}

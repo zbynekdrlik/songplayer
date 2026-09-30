@@ -521,4 +521,67 @@ mod tests {
             ]
         );
     }
+
+    /// #144 review round 2: step 3 queues a row like the reprocess routes do
+    /// — a fresh attempt budget and no backoff left (`lyrics_attempts = 0`,
+    /// `lyrics_next_attempt_at = NULL`), so a song the wall serves gets its
+    /// `SERVED_RERUN_MAX_ATTEMPTS` failed attempts in the manual queue. A row
+    /// it does not queue keeps both.
+    #[tokio::test]
+    async fn endpoint_router_queues_each_row_with_a_fresh_attempt_budget() {
+        use crate::lyrics::LYRICS_PIPELINE_VERSION;
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let (state, _tmp) = router_test_state().await;
+        sqlx::query(
+            "INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (1, 'p', 'u', 1)",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(&format!(
+            "INSERT INTO videos (playlist_id, youtube_id, title, lyrics_source, \
+                                 lyrics_pipeline_version, lyrics_manual_priority, \
+                                 lyrics_attempts, lyrics_next_attempt_at) VALUES \
+             (1, 'r-kept', 't', 'yt_subs', {current}, 0, 2, '2999-01-01T00:00:00.000Z'), \
+             (1, 'r-queued', 't', 'lrclib', 15, 0, 2, '2999-01-01T00:00:00.000Z')",
+            current = LYRICS_PIPELINE_VERSION
+        ))
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let req = Request::builder()
+            .uri("/api/v1/lyrics/reprocess-catalog-with-new-gate")
+            .method("POST")
+            .body(Body::empty())
+            .unwrap();
+        let resp = crate::api::router(state.clone(), None)
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let rows: Vec<(String, i64, i64, Option<String>)> = sqlx::query_as(
+            "SELECT youtube_id, lyrics_manual_priority, lyrics_attempts, \
+                    lyrics_next_attempt_at FROM videos ORDER BY youtube_id",
+        )
+        .fetch_all(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "r-kept".into(),
+                    0,
+                    2,
+                    Some("2999-01-01T00:00:00.000Z".into())
+                ),
+                ("r-queued".into(), 1, 0, None),
+            ]
+        );
+    }
 }
