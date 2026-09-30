@@ -829,6 +829,14 @@ sees that. What held up across five review rounds:
   dropped receiver makes the send fail at once, so the test passes
   vacuously), the call under `tokio::time::timeout(5 s)`, then assert the
   important command arrived.
+- **A held call proves only what happened BEFORE it** (#210 review round
+  1). Holding one call (the NDI send) and reading state while it waits
+  shows that step X already ran; it cannot order two steps that BOTH run
+  before the held call (the mix picture was painted before the NDI submit
+  in either order, so "VBAN before the picture" was an unfalsifiable
+  claim). Make such an order structural instead (`serve` = `split` → feed
+  → `submit_video`: the early function cannot reach the later work) and
+  let the test's name and messages claim only the held point.
 - **Use "must NOT happen yet" windows only in the safe direction.** For
   example, `recv_timeout(200 ms).is_err()` while the gate is held. Correct
   code can never fail it; a slow runner only makes it pass vacuously.

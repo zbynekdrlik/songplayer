@@ -396,6 +396,12 @@ each boundary. Keep that pattern for any new case. Its rig helpers (`b`,
 `job`, `frame`, `program`, `drain`, `video_dims`, …) are `pub(super)` and
 reused by the #215 sibling `program_bus_tests_transition.rs`.
 
+- **A held or slow `SP-program` NDI submit (#210):** `program_output_tests_order.rs`
+  `HookedNdi` wraps `MockNdiBackend` and runs a hook inside every `send_audio`
+  (the pair's first NDI call): a gate that holds the submit, or
+  `SettableClock::advance` for a submit that costs N on a wall the test holds.
+  Reuse it rather than adding a hold to sp-ndi's mock (a new `test_util`
+  accessor needs its own sp-ndi test, `rust-workspace.md`).
 - **Mock call-log gotcha (CI fail 26.9.):** a test that asserts the mock sender's LAST
   call (e.g. `send_video_flush`) must keep the owning output alive past the assertion —
   a thread closure that drops it appends `send_destroy` after the flush. Return the output
