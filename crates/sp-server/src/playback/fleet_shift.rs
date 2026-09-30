@@ -359,14 +359,18 @@ pub struct WallShift {
     /// epochs at once keeps up to one slot of each: −3 ms … (epochs applied)
     /// slots + 3 ms.
     pub last_remainder_100ns: i64,
-    /// How far the last regrid (or rejoin) moved the timeline's LINE at once
-    /// (100 ns, signed): a jump ahead, or a hold of that size when negative.
+    /// How far the last regrid (or rejoin) moved the wall READING
+    /// (`now_100ns`) at once (100 ns, signed): a jump ahead, or a hold of that
+    /// size when negative. For a follow it is measured from the frozen wall,
+    /// so it leaves out a resample's 1 ms armed in the same tick and a rejoin
+    /// hold the follow re-anchors through (the line's movement is
+    /// `moved_100ns`).
     pub last_jump_100ns: i64,
     /// The timeline LINE's net movement in every tick that regridded or
     /// rejoined, summed (100 ns, signed; measured before and after the tick
-    /// at its instant, so a resample's armed 1 ms and a rejoin hold a follow
-    /// re-anchors through count as the line really moved). VBAN's clock owes
-    /// its change since it last looked
+    /// at its instant, so a resample's 1 ms armed in the SAME tick and a
+    /// rejoin hold a follow re-anchors through count as the line really
+    /// moved). VBAN's clock owes its change since it last looked
     /// ([`crate::playback::vban_clock::RemainderSlew`]).
     pub moved_100ns: i64,
 }

@@ -168,9 +168,14 @@ packets back to back before part 2).
 - A residue hold IS owed (review round 1 🟡 G): read off the frozen wall,
   one packet interval stretched by the hold (4.67 ms for 500 µs;
   `a_residue_hold_at_a_follow_is_slewed_too_never_a_gap`). A bounded
-  resample's ≤ 1 ms correction in a tick that followed nothing is NOT owed
-  (VBAN follows it as before: tens of µs of slewing, or up to 1 ms when a
-  resample arms a 1–2 ms step that only the NEXT resample confirms).
+  resample's ≤ 1 ms correction in a tick that followed nothing is NOT owed:
+  VBAN follows it at once, as before #224 (#210). That is the drift since
+  the last resample (~100 µs at ±30 ppm, up to ~313 µs at 94 ppm: one
+  interval of ~4.07 / 4.27 ms), or up to 1 ms when a resample arms a step
+  whose follow comes in a LATER tick: a 1–2 ms step only the next resample
+  confirms, or a step over 2 ms landing on the resample tick whose probe is
+  rejected (a wide or unconfirmed read; 1 tick in 100 plus a preempted
+  read). The ±100 ppm guarantee covers date steps only.
 - Telemetry: `vban.slew_owed_us` on `GET /api/v1/program`, signed — r
   right after a follow (negative after a residue hold), then toward 0; 0 in
   steady state. `run_vban_loop` publishes it every pass.

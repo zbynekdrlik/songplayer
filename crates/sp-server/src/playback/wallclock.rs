@@ -576,10 +576,7 @@ impl WallClock {
     /// [`SettableClock`]), so a set forward never looks like a UTC step. A set
     /// BACK moves the synthetic instant back too: a resample due then reads
     /// the anchor as a hold in progress and waits (#224 part 2) until the
-    /// value passes it again; a resample that does run after a set back reads
-    /// a backward delta against the frozen wall (a phantom hold in
-    /// `wall_anchor_*` only; the reads return the set value). Never pin the
-    /// anchor telemetry or the resample count after a set back.
+    /// value passes it again. Never pin the resample count after a set back.
     pub fn settable(initial_100ns: i64) -> (Self, SettableClock) {
         let handle = SettableClock::new(initial_100ns);
         (WallClock::new(Box::new(handle.clone())), handle)

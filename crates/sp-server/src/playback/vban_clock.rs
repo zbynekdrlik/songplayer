@@ -123,8 +123,9 @@ impl WallVbanClock {
         }
     }
 
-    /// Movements over [`VBAN_SLEW_MAX_100NS`] this clock took at once (each
-    /// with one WARN) instead of owing them.
+    /// Movements over [`VBAN_SLEW_MAX_100NS`] this clock took at once instead
+    /// of owing them. Test-facing: in production each one shows as its WARN
+    /// (`vban clock: the timeline moved more than a slot at once`).
     pub fn taken_at_once(&self) -> u64 {
         self.taken_at_once
     }
