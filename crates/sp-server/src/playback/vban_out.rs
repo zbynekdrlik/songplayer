@@ -372,7 +372,7 @@ pub struct VbanStatus {
     pub targets: Vec<VbanTargetStatus>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct VbanCounters {
     packets_sent: u64,
     send_errors: u64,
@@ -546,10 +546,14 @@ impl VbanOut {
         lock(&self.stats).slew_owed_us = owed_100ns / 10;
     }
 
-    /// The telemetry for the API.
+    /// The telemetry for the API. #210 part 2 (review round 2): the
+    /// counters are COPIED under the lock and everything else (the p99's
+    /// sort, the ring, the targets) is computed after it: the real-time VBAN
+    /// thread takes that lock on every packet, and a normal-priority API
+    /// worker preempted while holding it would stall the thread.
     pub fn status(&self) -> VbanStatus {
         let cfg = self.config();
-        let s = lock(&self.stats);
+        let s = lock(&self.stats).clone();
         VbanStatus {
             enabled: cfg.enabled,
             running: self.is_running(),
@@ -601,8 +605,9 @@ pub trait VbanClock {
     /// The fleet label of this clock's reading `t_100ns` (`t + D(K_F)`,
     /// i.e. UTC), for the instant of a late packet (#210 part 2). A clock
     /// with no fleet shift (the tests') is its own label. VBAN's slewing
-    /// clock reads up to `slew_owed` behind its line, so for ~14 min after a
-    /// date step the label reads that much (≤ one slot) before UTC.
+    /// clock reads `slew_owed` off its line, so for ~14 min after a date
+    /// step the label is off UTC by that much: before it after a forward
+    /// follow (≤ one slot), after it after a residue hold (≤ ~4 ms).
     fn label_100ns(&self, t_100ns: i64) -> i64 {
         t_100ns
     }

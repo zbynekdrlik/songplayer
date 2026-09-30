@@ -4,8 +4,9 @@
 //! copy:
 //!
 //! - [`TwoBucketWorst`]: the worst sample of the bucket being filled and of
-//!   the last full one, `len` samples per bucket, so a figure covers the
-//!   last one to two buckets (60–120 s for a 60 s bucket);
+//!   the last full one, `LEN` samples per bucket (a const parameter, so one
+//!   window never mixes lengths), so a figure covers the last one to two
+//!   buckets (60–120 s for a 60 s bucket);
 //! - [`WarnLimiter`]: at most one WARN per period of a timeline, counting
 //!   the ones it held back for the next WARN to report.
 
@@ -20,9 +21,9 @@ impl Worst for u64 {
     }
 }
 
-/// The worst sample of the last one to two buckets of samples.
+/// The worst sample of the last one to two buckets of `LEN` samples.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TwoBucketWorst<T> {
+pub struct TwoBucketWorst<T, const LEN: u32> {
     /// The worst of the bucket being filled, and of the last full one.
     current: T,
     previous: T,
@@ -30,13 +31,13 @@ pub struct TwoBucketWorst<T> {
     in_current: u32,
 }
 
-impl<T: Worst> TwoBucketWorst<T> {
-    /// Fold in one sample; a bucket holds `len` samples, then becomes the
+impl<T: Worst, const LEN: u32> TwoBucketWorst<T, LEN> {
+    /// Fold in one sample; a bucket holds `LEN` samples, then becomes the
     /// last full one.
-    pub fn push(&mut self, sample: T, len: u32) {
+    pub fn push(&mut self, sample: T) {
         self.current = self.current.worst(sample);
         self.in_current += 1;
-        if self.in_current == len {
+        if self.in_current == LEN {
             self.previous = std::mem::take(&mut self.current);
             self.in_current = 0;
         }

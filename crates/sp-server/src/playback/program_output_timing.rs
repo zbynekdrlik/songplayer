@@ -14,7 +14,8 @@
 //!   after its boundary);
 //! - `submit_us`: the NDI submit call alone.
 //!
-//! [`BoundaryTiming`] (pure, Linux-tested, the `loop_stats.rs` pattern)
+//! [`BoundaryTiming`] (pure, Linux-tested; its window and WARN rate limit
+//! are `stat_window.rs`'s, shared with the VBAN thread's `VbanStallLog`)
 //! keeps each figure's worst over the last 60–120 s (two buckets of
 //! [`TIMING_BUCKET_BOUNDARIES`]), counts per figure the boundaries over
 //! [`STAGE_SLOW_US`] since start (and the hand-offs over
@@ -145,7 +146,7 @@ pub struct BoundaryTiming {
     boundaries: u64,
     /// Each figure's worst over the last one to two buckets of
     /// [`TIMING_BUCKET_BOUNDARIES`].
-    window: TwoBucketWorst<BoundarySample>,
+    window: TwoBucketWorst<BoundarySample, TIMING_BUCKET_BOUNDARIES>,
     ready_late_over_5ms: u64,
     vban_feed_late_over_5ms: u64,
     submit_over_5ms: u64,
@@ -164,7 +165,7 @@ impl BoundaryTiming {
     pub fn observe(&mut self, marks: &BoundaryMarks) -> Option<LateBoundary> {
         let sample = BoundarySample::of(marks);
         self.boundaries += 1;
-        self.window.push(sample, TIMING_BUCKET_BOUNDARIES);
+        self.window.push(sample);
         self.ready_late_over_5ms += u64::from(sample.ready_late_us > STAGE_SLOW_US);
         self.vban_feed_late_over_5ms += u64::from(sample.vban_feed_late_us > STAGE_SLOW_US);
         self.submit_over_5ms += u64::from(sample.submit_us > STAGE_SLOW_US);

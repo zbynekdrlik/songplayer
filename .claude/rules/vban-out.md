@@ -243,15 +243,19 @@ time (finding 5915907311, the stem worker ruled out). That is the
     `paced thread: priority = TIME_CRITICAL`.
 - **Its own late packets** (`playback/vban_stall.rs`, pure `VbanStallLog`,
   inside `VbanOut`'s counters: ONE lock per packet on the real-time thread,
-  review round 1). `send_block` times every packet it sends against its
+  review round 1; `status()` only COPIES the counters under that lock and
+  sorts / builds after it, so an API poll never holds the thread's lock
+  for more than a memcpy, review round 2). `send_block` times every packet
+  it sends against its
   planned instant, `due + L + k/240 s`:
   - over 5 ms late = an event `{utc_ms, late_us}` in a ring of the last
     32, served oldest first as `vban.late_events`. `utc_ms` is the fleet
     label of the send reading (`VbanClock::label_100ns`, defaulted to the
     reading itself; `WallVbanClock` answers `t + D(K_F)`): UTC, to line up
     with a capture. In the ~14 min after a date step VBAN's clock still
-    owes up to one slot (`vban.slew_owed_us`), and `utc_ms` reads that much
-    before UTC;
+    owes the step's movement (`vban.slew_owed_us`), and `utc_ms` is off UTC
+    by that much: before it after a forward follow (≤ one slot), after it
+    after a residue hold (≤ ~4 ms);
   - `vban.late_max_us`: the worst packet over the last 60–120 s of sending
     (two buckets of 14 400 packets; it does not age while nothing is sent);
   - over 10 ms = ONE WARN `vban output: a packet went out more than 10 ms

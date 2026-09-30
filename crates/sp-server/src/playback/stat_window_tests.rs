@@ -11,17 +11,17 @@ fn a_u64_s_worst_is_its_max() {
 
 #[test]
 fn two_buckets_keep_the_worst_of_the_bucket_being_filled_and_the_last_full_one() {
-    let mut w = TwoBucketWorst::<u64>::default();
+    let mut w = TwoBucketWorst::<u64, 3>::default();
     assert_eq!(w.worst(), 0, "nothing yet");
-    w.push(9, 3);
-    w.push(1, 3);
+    w.push(9);
+    w.push(1);
     assert_eq!(w.worst(), 9, "2 of 3: one bucket");
-    w.push(1, 3);
+    w.push(1);
     assert_eq!(w.worst(), 9, "3: the full bucket is the last one");
-    w.push(2, 3);
-    w.push(2, 3);
+    w.push(2);
+    w.push(2);
     assert_eq!(w.worst(), 9, "5: still the last full bucket");
-    w.push(2, 3);
+    w.push(2);
     assert_eq!(w.worst(), 2, "6: the 9 is two buckets back — gone");
 }
 

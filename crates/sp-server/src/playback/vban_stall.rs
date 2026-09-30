@@ -22,11 +22,13 @@
 //!
 //! `utc_ms` is the fleet label of the send reading (`t + D(K_F)`,
 //! `VbanClock::label_100ns`): UTC, the instant a dev1 capture lines up
-//! with. In the ~14 min after a fleet date step VBAN's clock still owes up
-//! to one slot (`vban.slew_owed_us`), and `utc_ms` reads that much before
-//! UTC. Every packet the thread sends counts, so a block that reached the
-//! thread after its first packet was due (see `health.timing`'s
-//! `vban_feed_late_over_budget`) shows here too, as a run of events.
+//! with. In the ~14 min after a fleet date step VBAN's clock still owes
+//! the step's movement (`vban.slew_owed_us`), and `utc_ms` is off UTC by
+//! that much: before it after a forward follow (≤ one slot), after it
+//! after a residue hold (≤ ~4 ms). Every packet the thread sends counts,
+//! so a block that reached the thread after its first packet was due (see
+//! `health.timing`'s `vban_feed_late_over_budget`) shows here too, as a run
+//! of events.
 
 use std::collections::VecDeque;
 
@@ -71,13 +73,13 @@ pub struct VbanStallWarn {
 }
 
 /// The VBAN thread's per-packet lateness window.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct VbanStallLog {
     /// The last [`VBAN_STALL_RING`] events, oldest first.
     events: VecDeque<VbanLateEvent>,
     /// The worst packet of the last one to two buckets of
     /// [`VBAN_STALL_BUCKET_PACKETS`].
-    window: TwoBucketWorst<u64>,
+    window: TwoBucketWorst<u64, VBAN_STALL_BUCKET_PACKETS>,
     /// At most one WARN per [`VBAN_STALL_WARN_EVERY_100NS`] of VBAN's
     /// timeline.
     limiter: WarnLimiter,
@@ -96,7 +98,7 @@ impl VbanStallLog {
         sent_label_100ns: i64,
     ) -> Option<VbanStallWarn> {
         let late_us = us_after(planned_100ns, sent_100ns);
-        self.window.push(late_us, VBAN_STALL_BUCKET_PACKETS);
+        self.window.push(late_us);
         if late_us <= VBAN_STALL_EVENT_US {
             return None;
         }
