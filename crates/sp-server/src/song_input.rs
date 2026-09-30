@@ -20,8 +20,8 @@
 //!   by id; the dub queue newest request first), ahead of the rest of the
 //!   queue. Read under the lock, a missing file is a real loss, not the
 //!   rename race, so the WARN names the recorded path and a dub also records
-//!   it in `dub_error` (what the Dabing section shows; a finished dub clears
-//!   it).
+//!   it in `dub_error` (the Dabing tooltip shows it). The next re-read that
+//!   finds the audio clears it again.
 
 use std::path::Path;
 
@@ -95,6 +95,9 @@ pub(crate) async fn job_input(
                 current = %input.audio_file_path,
                 "heavy job: input re-read after the slot (a rename while it waited moves it)"
             );
+            if let Err(e) = clear_missing_note(pool, video_id, job).await {
+                tracing::warn!(video_id, ?job, %e, "heavy job: clearing the missing-audio note failed");
+            }
             Some(input)
         }
         Ok(Found::NoAudio(recorded)) => {
@@ -147,6 +150,27 @@ async fn current_input(pool: &SqlitePool, video_id: i64) -> Result<Found, sqlx::
         vocals_file_path,
         stem_status,
     }))
+}
+
+/// The input is there, so a dub's "audio file is missing" note
+/// ([`recheck_later`]) no longer holds. It is the only `dub_error` a `synth`
+/// row carries (`mark_dub_synth` cleared any other on the way there), and
+/// the Dabing tooltip shows it on a chain that is not failed.
+async fn clear_missing_note(
+    pool: &SqlitePool,
+    video_id: i64,
+    job: HeavyJob,
+) -> Result<(), sqlx::Error> {
+    match job {
+        HeavyJob::Stems => Ok(()),
+        HeavyJob::Dub => {
+            sqlx::query("UPDATE videos SET dub_error = NULL WHERE id = ?")
+                .bind(video_id)
+                .execute(pool)
+                .await?;
+            Ok(())
+        }
+    }
 }
 
 /// Schedule the job's next pick [`INPUT_MISSING_RECHECK`] ahead, touching no
