@@ -203,6 +203,45 @@ impl SongFiles {
     }
 }
 
+impl SongColumns {
+    /// Record this set on EVERY row that recorded the old one (`old_video` =
+    /// `file_path` as the row stores it, `""` for none; `old_audio` =
+    /// `audio_file_path`): the same video in another playlist is a second row
+    /// pointing at the same files. The stem / dub columns follow the audio's
+    /// name; one never recorded (NULL) stays NULL. The caller holds
+    /// [`SONG_FILES`] from reading the old set to here.
+    pub async fn record(
+        &self,
+        pool: &sqlx::SqlitePool,
+        youtube_id: &str,
+        old_video: &str,
+        old_audio: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE videos
+             SET file_path = ?, audio_file_path = ?,
+                 vocals_file_path = CASE WHEN vocals_file_path IS NULL
+                     THEN NULL ELSE COALESCE(?, vocals_file_path) END,
+                 instrumental_file_path = CASE WHEN instrumental_file_path IS NULL
+                     THEN NULL ELSE COALESCE(?, instrumental_file_path) END,
+                 dub_file_path = CASE WHEN dub_file_path IS NULL
+                     THEN NULL ELSE COALESCE(?, dub_file_path) END
+             WHERE youtube_id = ? AND COALESCE(file_path, '') = ? AND audio_file_path IS ?",
+        )
+        .bind(&self.video)
+        .bind(&self.audio)
+        .bind(&self.vocals)
+        .bind(&self.instrumental)
+        .bind(&self.dub)
+        .bind(youtube_id)
+        .bind(old_video)
+        .bind(old_audio)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+}
+
 /// A path as the `videos` row stores it.
 fn path_column(path: &Path) -> String {
     path.to_string_lossy().into_owned()
