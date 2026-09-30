@@ -12,10 +12,11 @@
 //! of the metadata repair's queue (`health::REPAIR_QUEUE_WHERE`), so nothing
 //! renames it back.
 //!
-//! A re-download keeps it too ([`download_title`], item 2): the download
-//! worker names a `'manual'` row's files after its corrected title and never
-//! asks the provider chain over it (a row goes back to `normalized = 0` on
-//! the startup 48 kHz reset, `startup.rs`).
+//! A download keeps it too ([`download_title`], item 2): the download worker
+//! names a corrected video's files after its corrected title and never asks
+//! the provider chain over it — a re-download (a row goes back to
+//! `normalized = 0` on the startup 48 kHz reset, `startup.rs`), and the
+//! first download of the same video added to another playlist later.
 
 use std::path::Path;
 
@@ -39,23 +40,22 @@ pub struct DownloadTitle {
     pub gemini_failed: bool,
 }
 
-/// #136 (ROZHODNUTÉ 5908227964 item 2): the title a download of row
-/// `video_db_id` names the video after. An operator's correction
-/// (`metadata_source = 'manual'` with a song) is final: it is kept, and the
-/// provider chain is never asked over it. Any other row asks the chain
-/// (`get_metadata`: the first provider that answers, else the title parser).
-/// A row whose title cannot be read asks the chain too (WARN).
+/// #136 (ROZHODNUTÉ 5908227964 item 2): the title a download of YouTube video
+/// `youtube_id` (YouTube title `title`) names it after. An operator's
+/// correction of the video (a row with `metadata_source = 'manual'` and a
+/// song; `apply_to_video` gives every row of it the same one) is final: it
+/// is kept, and the provider chain is never asked over it. Any other video
+/// asks the chain (`get_metadata`: the first provider that answers, else the
+/// title parser). A title that cannot be read asks the chain too (WARN).
 pub async fn download_title(
     pool: &SqlitePool,
     chain: &ProviderChain,
-    video_db_id: i64,
     youtube_id: &str,
     title: &str,
 ) -> DownloadTitle {
-    match manual_title(pool, video_db_id).await {
+    match manual_title(pool, youtube_id).await {
         Ok(Some((song, artist))) => {
             info!(
-                video_db_id,
                 youtube_id,
                 song = %song,
                 artist = %artist,
@@ -70,10 +70,9 @@ pub async fn download_title(
         }
         Ok(None) => {}
         Err(e) => warn!(
-            video_db_id,
             youtube_id,
             %e,
-            "metadata: reading the row's title failed — asking the providers"
+            "metadata: reading the video's title failed — asking the providers"
         ),
     }
     let meta = super::get_metadata(chain.providers(), youtube_id, title).await;
@@ -85,18 +84,19 @@ pub async fn download_title(
     }
 }
 
-/// Row `video_db_id`'s `(song, artist)` when it is an operator's correction
-/// with a song (`mark_video_processed_pair` refuses an empty one); `artist`
-/// `""` when it has none.
+/// Video `youtube_id`'s `(song, artist)` when a row of it is an operator's
+/// correction with a song (`mark_video_processed_pair` refuses an empty one;
+/// the lowest row id when several are); `artist` `""` when it has none.
 async fn manual_title(
     pool: &SqlitePool,
-    video_db_id: i64,
+    youtube_id: &str,
 ) -> Result<Option<(String, String)>, sqlx::Error> {
     sqlx::query_as(
         "SELECT song, COALESCE(artist, '') FROM videos \
-         WHERE id = ? AND metadata_source = ? AND TRIM(COALESCE(song, '')) != ''",
+         WHERE youtube_id = ? AND metadata_source = ? AND TRIM(COALESCE(song, '')) != '' \
+         ORDER BY id LIMIT 1",
     )
-    .bind(video_db_id)
+    .bind(youtube_id)
     .bind(MANUAL_SOURCE)
     .fetch_optional(pool)
     .await

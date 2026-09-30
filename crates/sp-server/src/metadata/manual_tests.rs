@@ -1,5 +1,5 @@
-//! #136 (ROZHODNUTÉ 5908227964 item 2): a re-download keeps an operator's
-//! title correction and never asks the provider chain over it. The title
+//! #136 (ROZHODNUTÉ 5908227964 item 2): a download of a corrected video keeps
+//! the operator's title and never asks the provider chain over it. The title
 //! spread of item 1 (`apply_to_video`) is driven through the real router in
 //! `api/routes_tests_patch_metadata.rs`.
 //! Wired via `#[cfg(test)] #[path = "manual_tests.rs"] mod tests;`.
@@ -48,10 +48,12 @@ fn chain() -> (ProviderChain, Arc<AtomicUsize>) {
 async fn pool() -> SqlitePool {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
-    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u'), (2, 'q', 'v')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     pool
 }
 
@@ -72,9 +74,10 @@ async fn row(pool: &SqlitePool, id: i64, song: Option<&str>, artist: Option<&str
     .unwrap();
 }
 
+/// The title a download of row `id`'s video names it after.
 async fn title_of(pool: &SqlitePool, chain: &ProviderChain, id: i64) -> DownloadTitle {
     let youtube_id = format!("DOWNLOAD{id:03}");
-    download_title(pool, chain, id, &youtube_id, "Break! - planetboom (Live)").await
+    download_title(pool, chain, &youtube_id, "Break! - planetboom (Live)").await
 }
 
 #[tokio::test]
@@ -107,6 +110,29 @@ async fn a_re_download_keeps_the_operators_title_and_never_asks_the_chain() {
     assert_eq!(MANUAL_SOURCE, "manual");
 }
 
+/// The correction belongs to the VIDEO: the same video added to another
+/// playlist after it was corrected is downloaded under the corrected title.
+#[tokio::test]
+async fn a_new_row_of_a_corrected_video_takes_its_title() {
+    let pool = pool().await;
+    row(&pool, 6, Some("Break!"), Some("planetboom"), "manual").await;
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, title, song, artist, normalized) \
+         VALUES (7, 2, 'DOWNLOAD006', 'Break! - planetboom (Live)', NULL, NULL, 0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (chain, calls) = chain();
+
+    let title = download_title(&pool, &chain, "DOWNLOAD006", "Break! - planetboom (Live)").await;
+    assert_eq!(
+        (title.song.as_str(), title.artist.as_str(), title.source),
+        ("Break!", "planetboom", MANUAL_SOURCE)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
 #[tokio::test]
 async fn any_other_row_asks_the_chain() {
     let pool = pool().await;
@@ -130,23 +156,21 @@ async fn any_other_row_asks_the_chain() {
     assert_eq!(
         title_of(&pool, &chain, 99).await.song,
         "Another Song",
-        "no row"
+        "no row of that video"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 4);
 }
 
 /// `DownloadWorker::process_next` downloads with yt-dlp, so no Linux test
-/// drives it; its title step is pinned by its source: it takes the row's
+/// drives it; its title step is pinned by its source: it takes the video's
 /// title from `download_title` (never the chain directly) and records that
 /// title's own `source`.
 #[test]
 fn the_download_worker_takes_the_title_from_download_title() {
     let src = include_str!("../downloader/mod.rs");
     assert!(
-        src.contains(
-            "download_title(&self.pool, &self.metadata, row.id, &row.youtube_id, &row.title)"
-        ),
-        "process_next asks download_title for the row's title"
+        src.contains("download_title(&self.pool, &self.metadata, &row.youtube_id, &row.title)"),
+        "process_next asks download_title for the video's title"
     );
     assert!(
         !src.contains("crate::metadata::get_metadata("),
