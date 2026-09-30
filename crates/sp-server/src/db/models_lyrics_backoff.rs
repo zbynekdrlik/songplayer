@@ -79,9 +79,11 @@ pub async fn record_lyrics_wait(
 
 /// #144 (ROZHODNUTÉ 5905945274): a failed or empty re-run of a song the wall
 /// already serves records ONLY the attempt: [`record_lyrics_deferral`]
-/// (`lyrics_attempts` + the `lyrics_next_attempt_at` backoff) and
+/// (`lyrics_attempts` + the `lyrics_next_attempt_at` backoff),
 /// `lyrics_manual_priority = 0`, so a manual re-queue is not re-picked every
-/// tick. `has_lyrics`, `lyrics_source`, `lyrics_pipeline_version` and the
+/// tick, and `lyrics_processed_at = now`, as every other ended pass stamps it
+/// (the #171 full-mix upgrade bucket re-attempts a row at most once a day by
+/// it). `has_lyrics`, `lyrics_source`, `lyrics_pipeline_version` and the
 /// served `<yt>_lyrics.json` are left as they are: the wall keeps the lyrics
 /// until a successful run replaces them. Returns the new attempt count.
 pub async fn record_served_lyrics_failure(
@@ -90,9 +92,13 @@ pub async fn record_served_lyrics_failure(
     backoff: std::time::Duration,
 ) -> Result<u32, sqlx::Error> {
     let attempts = record_lyrics_deferral(pool, video_id, backoff).await?;
-    sqlx::query("UPDATE videos SET lyrics_manual_priority = 0 WHERE id = ?")
-        .bind(video_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE videos SET lyrics_manual_priority = 0, \
+         lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = ?",
+    )
+    .bind(video_id)
+    .execute(pool)
+    .await?;
     Ok(attempts)
 }
