@@ -309,6 +309,10 @@ OFF first). The wall step runs before the pause/hold:
   "One wall owner"). Residual, with no owner only: the candidates are
   `scene_active` ones (`title_candidates`), so a due title of a playlist
   whose OFF is queued can be re-synced until its own OFF re-syncs the wall.
+- The other half, an ON: the wall owner's ON re-syncs the title, the line
+  and the stage display to it (`scene_off::wall_after_owner_on`, review
+  rounds 1-2), since the old owner writes nothing any more; details in
+  `program-bus.md` "One wall owner".
 - Pinned in `tests_scene_off_wall.rs` (`going_off_program_*`, a child
   module of `tests_scene_change.rs` that reuses its rig).
 

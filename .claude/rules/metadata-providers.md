@@ -121,6 +121,14 @@ answered correctly), and nothing ever ran the real providers.
     router: two rows sharing files, a row not downloaded, another video
     untouched, the stem following the audio) and
     `an_artist_only_correction_of_a_row_with_no_song_keeps_the_songs`.
+  - **An artist ALONE for a video with no song is refused** (review round
+    2): a download keeps a correction only with its song (below), so an
+    artist-only PATCH of a video no row of which has a song yet (none
+    downloaded) answers 400 and writes nothing
+    (`metadata::manual::refused_title`, which also refuses a
+    whitespace-only song; a missing row stays 404). The dashboard sends
+    the song with the artist. Pinned by
+    `an_artist_alone_for_a_video_with_no_song_is_refused`.
   - **A download keeps it** (item 2): `DownloadWorker::process_next` takes
     the title from `metadata::manual::download_title`, which keeps a
     corrected video's title (a row of that `youtube_id` with `'manual'` and

@@ -74,6 +74,7 @@ paths:
 - The bulk sweeps use the same manual-priority queue and never reset `has_lyrics` either:
   - `POST /api/v1/lyrics/reprocess-all-stale` (the dashboard's "Spracovať všetky zastarané");
   - `POST /api/v1/lyrics/reprocess-catalog-with-new-gate` (`api/lyrics_catalog.rs`).
+- EVERY path that sets `lyrics_manual_priority = 1` also sets `lyrics_attempts = 0, lyrics_next_attempt_at = NULL` (#144 review round 2): the routes above and the "Nesedí" feedback (`db/models_reference.rs::record_reference_feedback`). The served-failure cap below counts from that 0, and a queued song never waits out an older backoff. A new queue path does the same. Pinned by `lyrics_catalog.rs::endpoint_router_queues_each_row_with_a_fresh_attempt_budget` and `models_reference_tests_mutants.rs::reference_feedback_queues_the_song_with_a_fresh_attempt_budget`.
 - **No reprocess route may blank served lyrics.** `playback/lyrics_loader.rs` and `GET /api/v1/videos/{id}/lyrics` serve nothing for `has_lyrics = 0`, even with the file on disk.
 - The deleted per-video `POST /api/v1/videos/{id}/lyrics/reprocess` (`reset_video_lyrics`: `has_lyrics = 0, lyrics_source = NULL`) did exactly that. Queueing the #144 rollout through it blanked 211 songs on the wall for ~6 h on 30.9.2026 (comment 5905405307).
 - Never add a second per-song reprocess route, and never re-queue a row by resetting it.

@@ -39,8 +39,11 @@ playlist has no side effects". #221 (release 0.69.0 review 🟡 2): while a
 playlist OWNS the wall (`program-bus.md` "One wall owner": SP-program's
 playlist, else the one cg OBS was told to show), only it writes the wall
 lines, their clears and the Presenter; another playlist, on air or played
-off program by hand, keeps only its own karaoke WS. With no owner (nothing
-on air) the rules above hold unchanged.
+off program by hand, keeps only its own karaoke WS. The new owner's ON
+pushes its line to the Presenter at once, or clears it when it has none
+(`scene_off::resync_presenter`, review round 2), so the old owner's last
+line never stays on the stage display. With no owner (nothing on air) the
+rules above hold unchanged.
 
 The plan is **display-only**. `lyrics/display_plan.rs` builds it once per
 loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).

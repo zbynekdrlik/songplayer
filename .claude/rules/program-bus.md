@@ -280,11 +280,18 @@ nothing).
     of them; its dispatch forgets what it last sent, so the moment it owns
     the wall its current line goes out;
   - the owner can change through the new owner's ON alone (a cut to B
-    while cg OBS still shows A): the ON of the playlist that owns the wall
-    (`OnAirPlaylists::owner`) re-syncs the wall's line at once
-    (`scene_off::resync_wall_lines`, the line step `wall_after_scene_off`
-    also runs: the owner's line, or one `HideSubtitles`), so the old owner's
-    last line never stays frozen (review round 1);
+    while cg OBS still shows A), and the old owner then writes nothing —
+    its hide timer, song-end clear and Presenter pushes included. So the
+    ON of the playlist that owns the wall (`OnAirPlaylists::owner`)
+    re-syncs the WHOLE wall at once (`scene_off::wall_after_owner_on`,
+    review rounds 1-2): the title (a playing owner's scene-on already
+    sends its `Resync`; an owner that plays nothing sends one naming no
+    title), the line (`resync_wall_lines`, the line step
+    `wall_after_scene_off` also runs: the owner's line, or one
+    `HideSubtitles`) and the stage display (`resync_presenter`: the
+    owner's line at its last position, recorded as its Presenter dedup
+    key, or `presenter::push_empty`). Nothing of the old owner stays
+    frozen on the title clip, `#sp-subs` or the stage display;
   - with NO owner (nothing on air, or before the authority's first value:
     the engine's unit tests) nothing is restricted, as before: a playlist
     whose OFF is still queued writes until its OFF re-syncs the wall, and a
@@ -296,7 +303,9 @@ nothing).
   `program_authority_tests.rs::the_authority_publishes_the_wall_owner_with_the_set`
   and `tests_wall_owner.rs` (a child of `tests_scene_change.rs`: the line +
   Presenter, a playlist that comes to own the wall, the song-end clear, both
-  title timers, the recovery). A test that only `replace`s the diffed set
+  title timers, the new owner's ON — `the_new_owner_s_on_re_syncs_the_wall_s_line`,
+  `a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down` — and
+  the recovery). A test that only `replace`s the diffed set
   (`#[cfg(test)]`) publishes no owner.
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
