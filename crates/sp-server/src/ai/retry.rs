@@ -41,11 +41,15 @@ pub struct RetryPolicy {
 }
 
 impl RetryPolicy {
-    /// Production: 3 retries after 1 s, 2 s (the old schedule); a
-    /// `Retry-After` is not waited for.
+    /// Production: 3 retries after 5 s, 20 s, 60 s, or after the proxy's
+    /// `Retry-After` up to 120 s (the module doc).
     pub const SPANNING: Self = Self {
-        fallback: &[Duration::from_secs(1), Duration::from_secs(2)],
-        retry_after_cap: Duration::ZERO,
+        fallback: &[
+            Duration::from_secs(5),
+            Duration::from_secs(20),
+            Duration::from_secs(60),
+        ],
+        retry_after_cap: Duration::from_secs(120),
     };
 
     /// Tests: the production budget with no waits at all.
