@@ -436,7 +436,8 @@ fn a_slow_ndi_submit_is_timed_and_never_in_the_vban_hand_off() {
     assert_eq!(
         out.serve(ProgramJob::Mix(mix), now),
         marks(at(2), 30_000),
-        "a mixed boundary: the NDI call is timed alone"
+        "a mixed boundary: VBAN had its block at the take and its 20 ms NDI call is submit_us \
+         (the picture costs nothing on this wall, so this cannot see where it is painted)"
     );
     assert_eq!(vban.queued(), 3, "one block per boundary");
 }
