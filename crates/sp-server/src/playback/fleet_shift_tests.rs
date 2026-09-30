@@ -449,7 +449,18 @@ fn a_joining_wall_copies_the_line_published_within_10_s_else_starts_on_its_sampl
         epochs: 1,
     };
     fleet.publish(newer);
-    assert_eq!(fleet.join(&sample(late)).0, newer.anchor);
+    assert_eq!(
+        fleet.join(&sample(late)),
+        (
+            newer.anchor,
+            WallShift {
+                slots: 7,
+                epochs: 1,
+                ..WallShift::default()
+            }
+        ),
+        "its line WITH its K and epochs"
+    );
 }
 
 #[test]

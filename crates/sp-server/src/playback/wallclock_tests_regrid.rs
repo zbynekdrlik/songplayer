@@ -228,6 +228,44 @@ fn a_wall_idle_for_20_min_rejoins_the_fleets_line_and_registers_nothing() {
 }
 
 #[test]
+fn a_relabelled_wall_idle_for_20_min_rejoins_on_the_same_k() {
+    // Both walls followed +260.3 ms (K = 7) before one went idle: the rejoin
+    // moves its timeline by its drift only (its own and the joined line both
+    // sit D(7) behind their labels), K stays 7, nothing registered.
+    for (ppm, jump) in [(30, 360_000), (-30, -360_000)] {
+        let clk = VirtualClock::new(ppm);
+        let fleet = Arc::new(FleetShift::default());
+        let mut busy = wall_on(&clk, &fleet);
+        let mut idle = wall_on(&clk, &fleet);
+        for f in 0..10 {
+            if f == 5 {
+                clk.step_utc(2_603_000);
+            }
+            frame(&clk, &mut [&mut busy, &mut idle]);
+        }
+        assert_eq!((idle.shift().slots, idle.shift().regrids), (7, 1), "{ppm}");
+        for _ in 0..36_000 {
+            frame(&clk, &mut [&mut busy]);
+        }
+        frame(&clk, &mut [&mut busy, &mut idle]);
+        assert_eq!((fleet.slots(), fleet.epochs()), (7, 1), "{ppm}");
+        let shift = idle.shift();
+        assert_eq!(
+            (
+                shift.slots,
+                shift.epochs,
+                shift.regrids,
+                shift.last_jump_100ns
+            ),
+            (7, 1, 2, jump),
+            "{ppm}"
+        );
+        clk.advance_ns(40_000_000);
+        assert_eq!(idle.now_100ns(), busy.now_100ns(), "{ppm}");
+    }
+}
+
+#[test]
 fn a_wall_rejoins_only_after_more_than_10_s_without_a_tick() {
     let clk = VirtualClock::new(0);
     let fleet = Arc::new(FleetShift::default());
