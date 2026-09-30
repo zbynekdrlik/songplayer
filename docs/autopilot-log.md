@@ -107,3 +107,12 @@ One terse line per issue/round: decisions, key commits, verification.
 - Kept per ROZHODNUTÉ, documented (lyrics-reference-text.md): a current-version manual row leaves the queue after one failed attempt; stale rows retried ≤ daily; attempts feed the #171 full-mix fallback; the 30-min cap stays policy.
 - Follow-up candidates (supervisor): a title correction applies to ONE row (the same video in another playlist, and a re-download, still overwrite it; metadata-providers.md).
 - Not local-verifiable (Tier-0): the build, the Rust tests, clippy, the mutation gate, the Playwright suites (the cache-layout rule was run in a node model, 7/7).
+
+## #210 — the FOH VBAN feed never waits for its boundary's video side; the program boundary's timing (0.69.0-dev.17, lane worktree-agent-a8f38ede150873ea0)
+
+- Design 5911744233 (main), findings 5907620763 / 5907883948. STEP 0 c5912914057, Anchors-confirmed c5912922321.
+- RED d569c00a (`program_output_tests_order.rs`, `HookedNdi` holds the pair's first NDI send behind a gate: the VBAN queue must already have the block — forwarded / standby / mix) → GREEN a9b9aae2 (feed before the NDI submit; `VbanBlock::copied`; the mix's crossfaded block before its picture) → refactor d06de3cc (`from_frames` deleted).
+- Telemetry 9f9a365e: pure `program_output_timing.rs` (`BoundaryMarks` → `ready_late_us` / `vban_feed_late_us` / `submit_us`; two 1800-boundary buckets; strictly-over-5-ms counts; one WARN per 5 s over 10 ms with `suppressed`), `ProgramOutput::serve(job, now)`, `health.timing` on `/api/v1/program`, e2e mock mirrored.
+- Reviews (fresh-context, read-only): r1 0🔴2🟡4🔵 (fixed 9177cd49 + e2d1bf18: `serve` = `split` → `feed_vban` → `submit_video`, the order test claims only the held point, the acceptance diffs the counters, `end_mix_run` after the submit, a neither-side test), r2 0🔴0🟡2🔵 (b5172508), r3 0🔴0🟡2🔵 (7507058c: the date-step caveat), r4 0🔴0🟡2🔵 (d793b8ed, docs only).
+- Integration note: origin/dev moved to `chore: release 0.69.0` during the lane; VERSION 0.69.0-dev.17 (as dispatched) needs the re-bump at integration.
+- Not local-verifiable (Tier-0): the build, the Rust tests, clippy, the mutation gate (69 mutants listed, each mapped to a killer or unviable by four review rounds); the box acceptance (15 min dev1 capture, `health.timing` counter diff) is the main session's.
