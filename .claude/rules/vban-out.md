@@ -33,8 +33,8 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   NDI submit (each up to ~20 ms p99). An on-time packet gets exactly one wait, so they go out evenly.
   A block that arrives AFTER its first packet is due sends its past-due packets
   back-to-back, each counted in `late_sends`. That happens after a program fill
-  past the 3-slot grace, or for ≤ ~one boundary after a fleet date step (the
-  walls follow it at their own next tick since #224, see program-bus.md). If the box capture shows
+  past the 3-slot grace or a real stall — never at a fleet date step since
+  #224 part 2 (below). If the box capture shows
   `late_sends` climbing there, re-measure the block arrival lead before raising L again.
 - Residual: a program RESYNC (> 8 missed slots) skips stamps. VBAN then has a
   time gap while its counter stays contiguous, and the receiver sees an
@@ -43,7 +43,8 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   (`pipeline_audio::raise_thread_priority`, shared with the NDI audio emitter)
   with the 1 ms multimedia timer.
 - Clock: its own `WallClock`, ticked through `program_output::BoundaryTicker`
-  once per boundary passed (`WallVbanClock`). `run_vban_loop` reads the clock on
+  once per boundary passed (`WallVbanClock::slewing`; the NDI input uses
+  `WallVbanClock::new`, which follows its wall). `run_vban_loop` reads the clock on
   EVERY pass, also for a block it does not send (disabled, no target) and on an
   idle wake every 100 ms (`VBAN_IDLE_WAIT`, under the 8-tick cap). If it did
   not, the wall would go stale while the output is off, and the first packets
@@ -127,3 +128,31 @@ On 28.9.2026 FOH "CG L/R" (`VASIO32.OUT[27..28]`) was switched back to the cg OB
   - cg → FOH: the same four points with the Mute values swapped.
 - **Read back every point after each write.** Record the prior values first (fohabl is critical production).
 - **FOH follows cg now.** Before a SongPlayer deploy or restart, or an Arena kill/relaunch, on win-resolume, message the camera-box session: it watches the cg audio path.
+
+## A fleet date step: SlewRemainder (#224 part 2)
+
+The walls relabel a date step (`genlock.md` "A date step relabels"): the whole
+slots N never reach any timeline, the timeline moves only by the remainder r
+(< one slot). VBAN has no timecode and VB-Matrix paces by arrival, so even a
+jump of r would send r of audio at once (the 20:58Z +260 ms step sent ~80
+packets back to back before part 2).
+
+- `WallVbanClock::slewing` (the VBAN thread's clock) reads
+  `timeline − owed` (`RemainderSlew`, pure): at a follow of its wall
+  (`WallClock::shift().regrids` moved) it OWES the timeline's forward jump
+  (`last_jump_100ns`), so its own reading does not jump; the owed amount then
+  shrinks at `VBAN_SLEW_PPM` = 50 ppm of the elapsed timeline (100 ns per
+  2 ms: a whole slot is paid in ~11 min). The queue holds up to r more
+  meanwhile (under one block, far under the bound).
+- 50, not 100: the packet spacing is already 41 666 / 41 667 / 41 668 × 100 ns
+  and each wait rounds to 100 ns, so 50 ppm keeps EVERY packet interval
+  within 4.1667 ms ± 100 ppm (pinned for +260.3 ms and −19.8 ms, `late_sends`
+  0, none under 1 ms: `vban_out_tests_regrid.rs`).
+- A ≤ 1 ms residue hold of a follow is not owed (the timeline only paused,
+  as at a bounded resample).
+- Telemetry: `vban.slew_owed_us` on `GET /api/v1/program` — r right after a
+  follow, then down; 0 in steady state. `run_vban_loop` publishes it every
+  pass.
+- Box acceptance at a controlled step: a dev1 capture with 0 bursts and 0
+  gaps over ~5.2 ms across the step, `late_sends` +0, `slew_owed_us` ≈ r
+  after it.

@@ -3,6 +3,7 @@ paths:
   - "crates/sp-core/src/genlock*.rs"
   - "crates/sp-core/src/clock_health*.rs"
   - "crates/sp-server/src/playback/wallclock*.rs"
+  - "crates/sp-server/src/playback/fleet_shift*.rs"
   - "crates/sp-server/src/playback/clock_health*.rs"
   - "crates/sp-server/src/playback/pacer*.rs"
   - "crates/sp-server/src/playback/audio_grid*.rs"
@@ -955,12 +956,12 @@ Now:
     (`run_paced_with`: a followed −1.5 s step in the paced loop).
   - Every `WallClock` follows (the pacer walls, the submit consumer's, the
     #209 `SP-program` sender's, the NDI input's, VBAN's). Since #224 each
-    follows at its own next tick, so two walls sit one step apart for at most
-    ~one boundary (before: one resample period, ~3.3 s). For +50 ms (~1.5 slots) the program bus's 3-slot fill grace absorbs
-    it (`program-bus.md`). For the 04:00 ±1.5 s step (~45 slots) it does not.
-    Expect ONE discontinuity there (accepted on #210): a submit consumer whose
-    wall has not followed yet counts `late_frames` against a pacer that already
-    held; the program bus fills.
+    follows at its own next tick, so two walls sit apart for at most ~one
+    boundary (before: one resample period, ~3.3 s). Since #224 part 2 they
+    sit apart by at most the REMAINDER r (< one slot, see "A date step
+    relabels" below), inside the program bus's 3-slot fill grace for ANY
+    step: the old ±1.5 s discontinuity (a consumer counting `late_frames`
+    against a held pacer, the program filling) is gone.
 - **The step probe follows a date step at the boundary it lands (#224,
   design record 5890605448).** The 2-resample follow above kept every stamp
   3.3–6.7 s behind the fleet after a dantesync step (the receivers see it at
@@ -980,10 +981,11 @@ Now:
     fake 2 ms), nothing armed;
   - over 2 ms from a narrow probe → a full anchor sample (best of 8) in the
     SAME tick; narrow and within ±1 ms (`same_step`, the one rule shared with
-    `decide_anchor_step`) → FOLLOW in ONE event, applied against the frozen
-    wall with `apply_anchor_step` (a step ahead, or ONE hold of the whole
-    step; a forward step inside a hold only shortens it). Else rejected,
-    nothing armed, so the next boundary follows a real step at once;
+    `decide_anchor_step`) → FOLLOW in ONE event through
+    `WallClock::regrid` (#224 part 2: the UTC anchor takes the whole step,
+    the timeline only the remainder r — see "A date step relabels" below).
+    Else rejected, nothing armed, so the next boundary follows a real step
+    at once;
   - a step the resample saw first in the same tick (1 ms applied + armed) is
     followed by the probe right after it: the armed 1 ms counts toward the
     2 ms (a 2.5 ms step reads 1.5 ms after the resample) and into the total;
@@ -1029,13 +1031,18 @@ Now:
 - **Never backward.** A negative applied correction is a HOLD: the new anchor is
   `(instant + |applied|, wall(instant))`. The saturating read path freezes the
   wall for `|applied|`, then it runs exactly on the corrected line. That is
-  ≤ 1 ms for a bounded resample, or the whole rest of a confirmed backward step
-  (~1.5 s) in ONE hold. Never "simplify" it back to `(instant, wall − |applied|)`:
+  ≤ 1 ms for a bounded resample. Since #224 part 2 a followed DATE step is
+  never a hold (a relabel + a forward remainder); a follow holds only a ≤ 1 ms
+  residue (a resample's armed 1 ms that already moved the wall further than
+  r, or a wall adopting another wall's N for a step it read a little
+  smaller). Never "simplify" a hold back to `(instant, wall − |applied|)`:
   that is a backward step, and right after an emit it relatches
   (`pacer_tests_wall_anchor.rs` asserts 0 relatches and 0 A/V corrections over
   10 000 boundaries with a preempted resample every other time, and across a
   followed −1.5 s step).
-  - **What a followed hold does to the paced output:** the pacer's wall
+  - **What a hold does to the paced output** (a bounded resample's ≤ 1 ms, or
+    a follow's ≤ 1 ms residue; the whole-step hold below is the pre-part-2
+    behaviour, kept for the mechanism): the pacer's wall
     resumes from the value it froze at. So the next boundary is simply the
     NEXT slot, serviced `|hold|` + one slot later: consecutive stamps, 0
     resyncs, 0 relatches, 0 A/V corrections. Only the real-time pause is
@@ -1131,14 +1138,13 @@ Now:
   - `wall_anchor_last_step_us` — the whole step of the last one followed,
     SIGNED (≈ ±1 500 000 for a 04:00 dantesync 1.12.0 step, negative =
     backward);
-  - `wall_anchor_holds_followed` — the backward ones among them, each
-    followed as ONE hold;
-  - `wall_anchor_last_hold_us` — how long the last followed hold froze the
-    wall and paused the output (the whole step when the probe followed it at
-    the boundary it landed, also in the tick a resample armed it with a 1 ms
-    hold; the step minus the elapsed arming 1 ms when the follow comes a
-    boundary or more after that resample — the next resample, or a probe
-    after a rejected same-tick probe);
+  - `wall_anchor_holds_followed` — follows whose TIMELINE movement was a
+    hold. Since #224 part 2 a followed date step moves the timeline forward
+    by its remainder r (a backward step too), so this counts only the ≤ 1 ms
+    residue holds (a resample's armed 1 ms past r, a knife-edge adoption);
+    it is NOT "the backward steps" any more;
+  - `wall_anchor_last_hold_us` — how long the last such hold froze the
+    timeline (≤ 1 ms);
   - `wall_anchor_probes_rejected` (#224) — probes over 2 ms that were rejected
     (a wide probe, or a confirming sample that was wide or read another step);
   - `wall_anchor_detect_to_follow_us` (#224) — from the FIRST over-2 ms probe
@@ -1150,8 +1156,10 @@ Now:
   is dantesync slewing. Tens of ms with `wall_anchor_wide_brackets` climbing
   means preemption at anchor time, now outvoted or bounded. `steps_followed`
   +1 once a night (~04:00 local, dantesync 1.12.0) with `last_step_us` ≈ the
-  announced step is the fleet date step, followed. A backward one also bumps
-  `holds_followed`, and the INFO log shows `direction=backward`. Each wall
+  announced step is the fleet date step, followed; the INFO log shows
+  `direction=`, and since #224 part 2 `shift_slots` / `remainder_us` /
+  `timeline_us` (every wall of the box logs the SAME `shift_slots` and a
+  `remainder_us` within ~1 ms of the others). Each wall
   anchors and follows independently, so every pacer and consumer logs its
   own follow — since #224 the `followed at once by the boundary probe` line,
   within one boundary of the step, `detect_to_follow_us` ≈ 0.
@@ -1483,10 +1491,10 @@ submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
   producer's MF + stems teardown, then the next scope's setup — the next
   decoder's open itself runs in the producer during the ATTACHED pre-roll),
   a steady climb while a song plays is not (nothing fills while attached).
-- Watch `dropped` at each `wall_anchor_steps_followed` increment: after a
-  followed +50 ms step a pacer wall catches up ~1.5 slots with back-to-back
-  emits, and the 2-deep handoff could coalesce one if the consumer is mid-submit
-  with a job already queued. Not seen yet; the box log is the check.
+- `dropped` at a `wall_anchor_steps_followed` increment must stay +0: since
+  #224 part 2 a date step never makes a pacer emit back to back (its timeline
+  moves by r < one slot), so the 2-deep handoff has nothing to coalesce. A
+  REAL stall still catches up (up to 8 back to back) and may.
 
 **Tests** (`paced_output_tests.rs`, single-threaded over `MockNdiBackend` on ONE
 settable clock; 8×2 / 12×2 song frames and a 4×2 black name each boundary's
@@ -1525,7 +1533,7 @@ it happens to be sent:
 
 The camera-box contract §6 says "raw wall clock at submission": for an
 on-time emit that IS the boundary (the paced emit spins to it). A catch-up
-burst after a stall or a date step used to stamp every block with ~the same
+burst after a stall (or, before #224 part 2, a date step) used to stamp every block with ~the same
 emit instant, so cg OBS (timecode audio mode) placed the burst on top of
 itself — `audio_place_err_ms` / the placement sawtooth on camera-box issue
 1381. VBAN has no timecode (packets are scheduled from the pair's video
@@ -1541,3 +1549,99 @@ merges only with `e2e/post-deploy-av-sync.spec.ts` green. That spec records the
 OBS program and requires |A/V| ≤ 40 ms and zero 50 ms dropout blocks against
 the original sidecars. Method, thresholds and how to read the `AV-SYNC …`
 output: `.claude/rules/obs-ndi-health.md` "Post-deploy A/V gate (#147)".
+
+## A date step RELABELS time, it does not move content (#224 part 2)
+
+Design record 5899388193; camera-box confirmed the receiver side
+(5900288123); the trigger was the 20:58Z +260 ms step (5898834252: a VBAN
+burst of ~80 packets, a 270 ms hole + relock in the cg OBS recording). The
+root cause was `pacer.rs` `present = wall_start + pts`: content was mapped
+onto the LABEL clock, so a forward step became a catch-up burst of up to 8
+slots and a backward step a pause of |S|, on every paced sender (pacer,
+submit consumer, `SP-program`, NDI input, VBAN).
+
+- **One continuous internal TIMELINE; fleet labels only at the NDI wire.**
+  P = 10⁷/30 (one slot, 100 ns), D(K) = ⌈K·P⌉ (`fleet_shift::shift_100ns`).
+  A confirmed step S (probe or resample path, either sign, any armed 1 ms
+  included) splits into N = ⌊S/P⌋ whole slots (a RELABEL) and the remainder
+  r = S − (D(K+N) − D(K)), 0 ≤ r ≤ one slot (`fleet_shift::split`). Table at
+  K = 0: +260.3 ms → 7 / 26.97 ms, +219.03 → 6 / 19.03, +90 → 2 / 23.3, +50 →
+  1 / 16.7, −19.8 → −1 / 13.53, −51.039 → −2 / 15.63, −1.5 s → −45 / 0.
+- **`WallClock`** keeps its UTC anchor/probe/resample/confirm logic; the UTC
+  anchor takes the whole S (`WallClock::regrid`). `now_100ns()` returns the
+  timeline `UTC − D(K_w)` (it passes the timeline anchor to
+  `ClockSource::read_100ns`, so the settable test clock, which ignores the
+  anchor, never sees a relabel). The timeline moves by `applied − ΔD` through
+  `apply_anchor_step`: r forward, or a ≤ 1 ms residue HOLD — never backward,
+  never S. Every existing call site keeps working unchanged.
+- **The registry** `fleet_shift::FleetShift` (process-wide `global()`, a
+  `OnceLock`; `WallClock::system()` uses it, `WallClock::new` builds a
+  private one, `WallClock::with_fleet` injects one — tests NEVER use the
+  global one). The first wall to confirm a step registers an epoch {S, N}
+  (ONE INFO line `fleet shift: a date step registered`); a later wall whose
+  S matches the shortest run of its unapplied epochs within ±1 ms
+  (`same_step`) adopts their ΣN (`fleet_shift::adopt`) — two walls either
+  side of a slot multiple still move by ONE N; a wall two epochs behind
+  adopts both; a wall built after a step starts at the current K
+  (`FleetShift::current`). An adopter's r can leave [0, P] by ≤ 1 ms (a
+  100 µs hold, or a jump a hair over one slot); a wall that missed a whole
+  epoch and sees two steps as one can jump more than a slot (never in
+  practice: walls follow within a boundary, steps are hours apart).
+- **The wire edge** is `FrameSubmitter::submit_frame_at_boundary_owned`: the
+  pair's internal boundary b becomes `floor_boundary(b + D(K_F))`
+  (`fleet_shift::wire_stamp_100ns`), K_F read ONCE per pair from the
+  submitter wall's registry, so audio = video. D rounds up so an on-grid b
+  lands EXACTLY K slots later; N rounds down, so a stamp is never
+  future-dated: a pacer wall that has not followed yet stamps at most r
+  stale (it used to be S stale). The legacy `submit_nv12` puts its own
+  timeline reading back with `+ D(K_F)`. The burn overlay's `gen_ts` is the
+  wire stamp. `SubmitJob`, the bus keys and VBAN's `due` stay internal.
+- **What each output does** (pinned in virtual time):
+  - pacer: the boundary after the step comes r early (ONE interval shrinks
+    by r), content one frame per boundary, internal stamps contiguous, the
+    wire jumps N+1 slots once (+260.3 ms: 8; −19.8 ms: 0 = the same wire
+    stamp twice, camera-box: `stamp_dup` +1, no relock); a REAL stall still
+    advances the timeline by the real gap and is caught up (+200 ms → 6
+    back to back): stall vs step is told apart by structure, there is no
+    "just stepped" flag, and `pacer.rs` catch-up / resync / 1 s re-anchor are
+    untouched (`pacer_tests_wall_anchor.rs`);
+  - paced output + program bus with walls following at different ticks:
+    filled / late_dropped / coalesced / resyncs / handoff `dropped` all 0
+    (`program_bus_tests_regrid.rs`);
+  - NDI input: its `WallVbanClock::new` follows the wall, so its next
+    boundary comes at most ONE early, never a burst
+    (`ndi_input_tests_regrid.rs`);
+  - VBAN: `WallVbanClock::slewing` (policy SlewRemainder, `vban-out.md`).
+- **Readers that compare realtime with stamps read the timeline**:
+  `fleet_shift::timeline_now_100ns()` (UTC − D(K_F)) in
+  `program_bus::persist_and_cut` (the cut fallback) and
+  `scene_off.rs` (`scene_off` / `scene_off_due`).
+- **Logs and API fields that SHOW a stamp show the WIRE stamp**
+  (`fleet_shift::wire_100ns` / `label_100ns`): `ProgramBus::status()` / the
+  cut answer (`cut_boundary_100ns`, `health.last_stamp_100ns`,
+  `transition.active.start_boundary_100ns`, via `ProgramStatus::on_wire`),
+  the paced output's fill / resync lines, the NDI input's relatch / resync
+  WARNs, VBAN's substitution WARN. `ProgramCore::status()` itself stays
+  internal. The per-minute `av_frame_offset` window keys on the pacer's
+  timeline minute, which sits D(K) off the UTC minute after a step.
+- **Telemetry**: `PacingStats.fleet_shift_slots` (the pacer wall's K) and
+  `last_regrid_remainder_us` (its last r), also on the `ndi: genlock` line;
+  every follow's INFO line carries `shift_slots`, `remainder_us`,
+  `timeline_us` (the timeline's own movement); VBAN `slew_owed_us`.
+- **K accumulates** over the process lifetime (the net of every step; a
+  restart = a deploy resets it to 0). The timeline then sits D(K) off UTC —
+  harmless, every internal comparison is timeline against timeline.
+- **Tests**: `fleet_shift_tests.rs` (the table, the knife-edges, a sweep of
+  0 ≤ r ≤ one slot, the wire mapping, the registry),
+  `wallclock_tests_regrid.rs` (walls on one registry),
+  `wallclock_tests_probe.rs` / `_confirm*.rs` / `_anchor.rs` (the relabel
+  at the wall), `submitter_tests_regrid.rs` (floored, never above the
+  virtual fleet clock, for a followed and a lagging wall; audio = video),
+  and the output tests above. Pins come from a scratch Python model of the
+  wall + the split + each harness.
+- **Box acceptance** at a controlled camera-box step of each sign: every
+  wall logs the same `shift_slots` and ~the same `remainder_us`; the resync /
+  relatch / dropped / filled / late_dropped deltas are 0; a dev1 VBAN capture
+  has 0 bursts and 0 gaps over ~5.2 ms; camera-box reports
+  `released=followed` with a residual ≈ r and relocks unchanged; an A/V gate
+  take spanning the step passes with 0 dropouts.

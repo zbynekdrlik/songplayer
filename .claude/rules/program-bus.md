@@ -61,8 +61,15 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   unconfirmed step slews in at ≤ 1 ms per resample, and a step over 2 ms
   (the dantesync fleet date step) is followed in one event by each wall's
   step probe at its own next tick (#224; before, at each wall's second
-  resample, #147) — so for ≤ ~one boundary two walls sit up to one step
-  apart; a step up to ~3 slots stays inside the 3-slot fill grace below.
+  resample, #147). Since #224 part 2 a follow RELABELS (`genlock.md` "A date
+  step relabels"): the whole slots move only the wire labels, every wall's
+  timeline moves by the remainder r (< one slot), so for ≤ ~one boundary two
+  walls sit at most r apart — inside the 3-slot fill grace for ANY step
+  (`program_bus_tests_regrid.rs`: 0 fills / late drops / coalesces /
+  resyncs with the program wall following a boundary before the source).
+  The stamps the bus keys on are internal (timeline) boundaries; a reader
+  without a wall uses `fleet_shift::timeline_now_100ns()`: the cut fallback
+  in `persist_and_cut`, the scene-go-off re-check.
   So: a cut is placed from the newest stamp of the program's segment sources,
   the source cut to, or the program itself (`from`; the caller's clock only
   when nothing was seen); a boundary is declared missed BY TIME only in
@@ -142,6 +149,12 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   cg OBS to show (`playback/legacy_cg.rs`, `remote-control.md`), served as
   `legacy_cg {shown}` on both program answers; `restore_selected_source`
   records the restored playlist there. Until B4 step 6.
+- The stamps `ProgramBus::status()` and the cut answer show
+  (`cut_boundary_100ns`, `health.last_stamp_100ns`,
+  `transition.active.start_boundary_100ns`) are WIRE stamps
+  (`ProgramStatus::on_wire`, #224 part 2): what a receiver sees, the
+  internal boundary + D(K_F), floored. `ProgramCore::status()` stays
+  internal.
 - `/api/v1/ndi/health` is unchanged (an array of per-pipeline snapshots
   consumed by sp-ui + e2e); where the program's health also belongs there is
   an open question on #209.
