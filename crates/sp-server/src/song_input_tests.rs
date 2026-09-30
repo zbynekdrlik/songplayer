@@ -289,3 +289,43 @@ async fn a_row_without_audio_has_no_input() {
         None
     );
 }
+
+/// Review round 1: read under the lock, a missing audio file is a real loss,
+/// not the rename race. The dub worker records why on the row (`dub_error`,
+/// what the Dabing section shows), still with no attempt counted and the
+/// `synth` status kept; a finished dub clears it (`mark_dub_ready`).
+#[tokio::test]
+async fn a_dub_job_whose_audio_is_gone_says_why_on_the_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let gone = dir
+        .path()
+        .join("Talk_Speaker_IYAOosrh7HY_normalized_audio.flac");
+    let pool = pool().await;
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, audio_file_path, \
+                             dub_requested, dub_status, dub_attempts) \
+         VALUES (11, 1, 'IYAOosrh7HY', 1, ?, 1, 'synth', 1)",
+    )
+    .bind(text(&gone))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        job_input(&pool, 11, &text(&gone), HeavyJob::Dub).await,
+        None
+    );
+
+    let (status, attempts, error): (String, i64, Option<String>) =
+        sqlx::query_as("SELECT dub_status, dub_attempts, dub_error FROM videos WHERE id = 11")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((status.as_str(), attempts), ("synth", 1), "no penalty");
+    let error = error.expect("dub_error says why the dub waits");
+    assert!(error.contains("audio file is missing"), "{error}");
+    assert!(
+        error.contains(&text(&gone)),
+        "names the recorded path: {error}"
+    );
+}
