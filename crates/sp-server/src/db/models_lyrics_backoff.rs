@@ -82,7 +82,7 @@ pub async fn record_lyrics_wait(
 /// (`lyrics_attempts`, reset to 0 when the song is queued) clears its
 /// `lyrics_manual_priority`; fewer keep it queued for the next attempt after
 /// its backoff.
-pub const SERVED_RERUN_MAX_ATTEMPTS: u32 = 1;
+pub const SERVED_RERUN_MAX_ATTEMPTS: u32 = 3;
 
 /// #144 (ROZHODNUTÉ 5905945274, refined by 5908227646): a failed or empty
 /// re-run of a song the wall already serves records ONLY the attempt:
