@@ -227,6 +227,13 @@ time (finding 5915907311, the stem worker ruled out). That is the
   at HIGH (a PowerShell P/Invoke probe on Windows 11 IoT 22631), above
   every normal-band thread. OBS registers its audio threads the same way,
   with task "Audio" at default priority (`libobs/media-io/audio-io.c:205`).
+  VB-Audio's own VBAN senders (Voicemeeter, VB-Matrix) are closed source.
+  The VBAN Protocol Specifications rev. 13 (Sep 2025) says nothing on
+  sender scheduling, priority or MMCSS. It asks only that the RECEIVE
+  thread never wait (p. 11). It also notes (p. 12) that Voicemeeter
+  receivers keep a stack of at least 6 × 256 samples and "might consider
+  receiving burst of 2, 3 or 4 VBAN packets", because its own senders
+  follow the audio buffer size.
   The box's MMCSS profile:
   - `NetworkThrottlingIndex` 0xFFFFFFFF: MMCSS's network throttling is off,
     so an MMCSS thread cannot slow the NDI traffic;
@@ -269,9 +276,13 @@ time (finding 5915907311, the stem worker ruled out). That is the
     The decision is `observe`'s return value; the log call is
     `mutants::skip`.
 
-  Every packet counts, so a block that reached the thread after its first
-  packet was due (`health.timing.vban_feed_late_over_budget`) shows as a
-  run of events (packet 0, 1, … of that block) with `waited_us` 0.
+  Every packet counts, so a block that reached the thread more than 5 ms
+  after its first packet was due shows as a run of events: its packets
+  still over 5 ms late, packet k about X − 4.167·k ms for a block X ms past
+  due. A block 0–5 ms past due counts in
+  `health.timing.vban_feed_late_over_budget` and `late_sends` but adds no
+  event. The packet WARN of such a block, if one fires, carries
+  `waited_us` 0.
 - Tests: `mmcss_tests.rs` (the outcome table, the fallback, the names, the
   UTF-16 task name, the Linux stub; on the Windows job the real call for an
   unknown task), `vban_stall_tests.rs` (exact pins from a scratch Python

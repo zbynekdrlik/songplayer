@@ -26,9 +26,11 @@
 //! the step's movement (`vban.slew_owed_us`), and `utc_ms` is off UTC by
 //! that much: before it after a forward follow (≤ one slot), after it
 //! after a residue hold (≤ ~4 ms). Every packet the thread sends counts,
-//! so a block that reached the thread after its first packet was due (see
-//! `health.timing`'s `vban_feed_late_over_budget`) shows here too, as a run
-//! of events.
+//! so a block that reached the thread more than 5 ms after its first packet
+//! was due shows here too, as a run of events: its packets still over 5 ms
+//! late, packet k about X − 4.167·k ms for a block X ms past due. (A block
+//! 0–5 ms past due is counted only by `health.timing`'s
+//! `vban_feed_late_over_budget` and by `late_sends`.)
 
 use std::collections::VecDeque;
 
