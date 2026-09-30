@@ -83,6 +83,7 @@ use sqlx::SqlitePool;
 use tokio::sync::watch;
 use tracing::{info, warn};
 
+use crate::playback::fleet_shift::{self, FleetShift, timeline_now_100ns};
 use crate::playback::legacy_cg::LegacyCg;
 use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::program_follow::FollowShared;
@@ -93,7 +94,6 @@ use crate::playback::program_transition::{
 };
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 use crate::playback::vban_out::VbanOut;
-use crate::playback::wallclock::utc_now_100ns;
 use crate::remote::RemoteShared;
 
 /// The program output's NDI source name.
@@ -209,6 +209,23 @@ pub struct ProgramStatus {
     /// #215: the transition the next cut uses, the running window and the
     /// transition counters.
     pub transition: TransitionStatus,
+}
+
+impl ProgramStatus {
+    /// The same status with every stamp it shows on the NDI wire under
+    /// `fleet`'s K (#224 part 2: the bus decides on internal stamps; an API
+    /// field or a log line shows the stamp a receiver sees). 0 = none stays 0.
+    pub fn on_wire(mut self, fleet: &FleetShift) -> Self {
+        self.cut_boundary_100ns = self.cut_boundary_100ns.map(|b| fleet.wire_100ns(b));
+        let last = &mut self.health.last_stamp_100ns;
+        if *last != 0 {
+            *last = fleet.wire_100ns(*last);
+        }
+        if let Some(w) = self.transition.active.as_mut() {
+            w.start_boundary_100ns = fleet.wire_100ns(w.start_boundary_100ns);
+        }
+        self
+    }
 }
 
 /// #215: why the engine keeps a playlist that left program playing
@@ -760,7 +777,7 @@ impl ProgramBus {
         let mut st = self.lock();
         st.core.cut(pid, now_100ns);
         self.publish(pid, scene);
-        st.core.status()
+        st.core.status().on_wire(fleet_shift::global())
     }
 
     /// See [`ProgramCore::select_initial`]; published as on air for `scene`.
@@ -794,7 +811,7 @@ impl ProgramBus {
     }
 
     pub fn status(&self) -> ProgramStatus {
-        self.lock().core.status()
+        self.lock().core.status().on_wire(fleet_shift::global())
     }
 
     /// Sender thread: the next queued boundary, waiting at most `wait` for one.
@@ -869,7 +886,7 @@ pub async fn persist_and_cut(
 ) -> Result<ProgramStatus, sqlx::Error> {
     let _serial = bus.cut_serial.lock().await;
     persist_selected_source(pool, pid).await?;
-    Ok(bus.cut(pid, utc_now_100ns(), scene))
+    Ok(bus.cut(pid, timeline_now_100ns(), scene)) // #224 part 2: the stamps' timeline
 }
 
 /// Restore the persisted program source into `bus` (startup). Returns the
@@ -922,6 +939,9 @@ mod tests;
 #[cfg(test)]
 #[path = "program_bus_tests_cue.rs"]
 mod tests_cue;
+#[cfg(test)]
+#[path = "program_bus_tests_regrid.rs"]
+mod tests_regrid;
 #[cfg(test)]
 #[path = "program_bus_tests_transition.rs"]
 mod tests_transition;

@@ -276,6 +276,11 @@ failed on them (`36438006665`):
   `#[cfg(test)] mod tests` after a blank line) →
   `clippy::empty_line_after_doc_comments` under `-D warnings`. Delete the
   doc with the fn; re-read the cut site.
+- **A new field on a struct that a TEST builds by literal is E0063 for the
+  whole test target** (#224 part 2 review round 2: `SharedEmitterInner`
+  gained `fleet`, `audio_emitter_tests.rs` still built one without it).
+  Before adding a field, grep the crate for `TypeName {` in every file,
+  tests included, and add it (or `..Default::default()`) at each site.
 
 ## Spawn order is not execution order — never order work by spawning it (#221)
 
@@ -548,6 +553,18 @@ the test that kills each one BEFORE CI's mutation gate runs.
   (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
   effect with a behaviour test (#217 addendum 2,
   `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+- **A branch whose ONLY effect is a log line survives the gate** (#224
+  part 2 review round 3: `if … && !slew.owe(..) { warn!(..) }` — the
+  delete-`!` mutant only moves the WARN). Give such a branch an observable
+  effect a test reads (a counter: `WallVbanClock::taken_at_once`). Likewise
+  never compute a log-only value inline (`jump_us = jump / 10`): its `/`→`%`
+  / `*` mutants are invisible; log through a tested helper (`to_us(jump)`).
+- **A timing pin at ONE phase can be phase-lucky** (#224 part 2 review
+  round 3: VBAN's ±100 ppm bound held with the step on block 100 and broke
+  on block 101 at 50 ppm). When a result depends on where an event lands
+  on a grid (packet spacing 41 666/41 667/41 668, the 100-tick resample),
+  sweep the event over ≥ 3 consecutive phases in the test, and fuzz the
+  scratch model over all of them before pinning.
 - A match GUARD that is always true where it sits (`ShowTitle { .. } if
   self.recovery_sent_this_step` when the step has always fired an event by
   then) makes the guard→`true` mutant EQUIVALENT: it survives the gate. Drop

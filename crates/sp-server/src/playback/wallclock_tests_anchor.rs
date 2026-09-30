@@ -10,6 +10,7 @@
 //! `wallclock.rs`.
 
 use super::*;
+use crate::playback::fleet_shift::shift_100ns;
 use std::time::{Duration, Instant};
 
 /// One 30-fps frame of virtual monotonic time (a multiple of 100 ns).
@@ -360,8 +361,14 @@ fn a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_at_the_next_boundary()
         0,
         "the follow restarts the count"
     );
-    assert_eq!(after - before, 50 * MS, "the whole step in one event");
-    assert_eq!(after, clk.truth_100ns(), "on the stepped UTC at once");
+    // #224 part 2: 1 whole slot relabelled, the timeline moves r = 16.67 ms.
+    assert_eq!(after - before, 166_666, "r of the step, in one event");
+    let relabelled = || clk.truth_100ns() - shift_100ns(1);
+    assert_eq!(
+        after,
+        relabelled(),
+        "on the stepped UTC less 1 slot at once"
+    );
     // The next resample, 100 ticks after the follow, is normal again.
     for _ in 0..99 {
         tick_once(&mut wall, &clk);
@@ -369,7 +376,7 @@ fn a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_at_the_next_boundary()
     let (before, after) = tick_once(&mut wall, &clk);
     assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resampled");
     assert_eq!(after, before);
-    assert_eq!(after, clk.truth_100ns());
+    assert_eq!(after, relabelled());
     assert_eq!(
         wall.anchor_stats(),
         WallAnchorStats {
@@ -385,30 +392,21 @@ fn a_genuine_plus_50_ms_utc_step_is_followed_in_one_event_at_the_next_boundary()
 }
 
 #[test]
-fn a_genuine_minus_50_ms_utc_step_is_one_hold_at_the_next_boundary_never_stepped_back() {
-    // #224: a backward date step is followed at the boundary the probe first
-    // sees it, as ONE hold of the whole step (#147: the wall freezes, then
-    // runs on the UTC line; it is never stepped back).
+fn a_genuine_minus_50_ms_utc_step_is_relabelled_at_the_next_boundary_never_held() {
+    // #224 part 2: a backward date step is followed at the boundary the probe
+    // first sees it: −2 whole slots relabelled (D(−2) = −66.67 ms), and the
+    // timeline moves FORWARD by r = 16.67 ms — no hold, never a step back.
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
     clk.step_utc(-50 * MS);
     let (before, after) = tick_once(&mut wall, &clk);
-    assert_eq!(after, before, "ONE hold, never a step back");
+    assert_eq!(after - before, 166_666, "r forward, never a hold");
+    let relabelled = || clk.truth_100ns() - shift_100ns(-2);
+    assert_eq!(after, relabelled(), "on the relabelled line at once");
     clk.advance_ns(25_000_000);
-    assert_eq!(wall.now_100ns(), before, "still holding half-way");
-    clk.advance_ns(25_000_000);
-    assert_eq!(wall.now_100ns(), before, "held for exactly 50 ms");
-    assert_eq!(
-        wall.now_100ns(),
-        clk.truth_100ns(),
-        "the UTC line reached it"
-    );
+    assert_eq!(wall.now_100ns(), after + 25 * MS, "running, not held");
     clk.advance_ns(1_000_000);
-    assert_eq!(
-        wall.now_100ns(),
-        clk.truth_100ns(),
-        "then it runs on the line"
-    );
+    assert_eq!(wall.now_100ns(), relabelled(), "on the line");
     // The next resample, 100 ticks after the follow, is normal again.
     for _ in 0..99 {
         tick_once(&mut wall, &clk);
@@ -416,7 +414,7 @@ fn a_genuine_minus_50_ms_utc_step_is_one_hold_at_the_next_boundary_never_stepped
     let (before, after) = tick_once(&mut wall, &clk);
     assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resampled");
     assert_eq!(after, before);
-    assert_eq!(after, clk.truth_100ns());
+    assert_eq!(after, relabelled());
     assert_eq!(
         wall.anchor_stats(),
         WallAnchorStats {
@@ -425,8 +423,8 @@ fn a_genuine_minus_50_ms_utc_step_is_one_hold_at_the_next_boundary_never_stepped
             slewed_us: 0,
             steps_followed: 1,
             last_step_us: -50_000,
-            holds_followed: 1,
-            last_hold_us: 50_000,
+            holds_followed: 0,
+            last_hold_us: 0,
         }
     );
 }

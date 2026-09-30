@@ -57,6 +57,7 @@ use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+use crate::playback::fleet_shift;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::ProgramBus;
 use crate::playback::submit_handoff::SubmitJob;
@@ -722,9 +723,10 @@ pub fn run_input_loop(input: &mut NdiInput, bus: &ProgramBus, clock: &mut dyn Vb
             InputGridStep::Wait(d) => clock.sleep_100ns(d),
             InputGridStep::Relatch => {
                 shared.counters().relatches += 1;
+                // #224 part 2: a log shows the fleet labels (wire stamps).
                 warn!(
-                    now_100ns = now,
-                    last_100ns = from,
+                    now_100ns = fleet_shift::label_100ns(now),
+                    last_100ns = fleet_shift::wire_100ns(from),
                     "ndi input: clock stepped back — re-latching the grid"
                 );
                 last = None;
@@ -733,8 +735,8 @@ pub fn run_input_loop(input: &mut NdiInput, bus: &ProgramBus, clock: &mut dyn Vb
                 if resync {
                     shared.counters().resyncs += 1;
                     warn!(
-                        from_100ns = from,
-                        boundary_100ns = boundary,
+                        from_100ns = fleet_shift::wire_100ns(from),
+                        boundary_100ns = fleet_shift::wire_100ns(boundary),
                         "ndi input: > 8 boundaries missed — resync"
                     );
                 }

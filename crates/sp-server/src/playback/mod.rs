@@ -10,6 +10,7 @@ pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
 mod engine_play;
+pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub(crate) mod frame_alloc; // #207: map a decoder FrameAlloc error to a dropped frame (pure classify + rate-limit)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
@@ -63,6 +64,7 @@ mod test_helpers;
 mod title;
 mod title_timers; // #217 addendum 3: title timers armed from the song's TitleClock
 mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-tested)
+pub mod vban_clock; // #224 part 2: VBAN's + the NDI input's wall clock, VBAN's date-step slew
 pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
 pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
 pub mod wallclock;

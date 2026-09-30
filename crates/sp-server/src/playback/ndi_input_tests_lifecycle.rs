@@ -504,6 +504,10 @@ impl VbanClock for PacedClock {
         thread::sleep(Duration::from_nanos(d * 100));
         self.now += d_100ns;
     }
+
+    fn slew_owed_100ns(&self) -> i64 {
+        0
+    }
 }
 
 /// `(value, run length)` of each run of equal values.

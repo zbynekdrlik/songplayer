@@ -46,10 +46,10 @@ use std::time::Duration;
 use tracing::{debug, info};
 
 use super::PlaybackEngine;
+use super::fleet_shift::timeline_now_100ns;
 use super::pipeline::PipelineEvent;
 use super::program_bus::Hold;
 use super::state::{PlayEvent, PlayState};
-use super::wallclock::utc_now_100ns;
 use crate::resolume::ResolumeCommand;
 
 /// The id of each hold's re-check (`SceneOffDue`), unique in the process.
@@ -126,7 +126,7 @@ impl PlaybackEngine {
     /// The scene-go-off half of `handle_scene_change`: pause, unless the
     /// program bus holds the playlist through a transition.
     pub(super) async fn scene_off(&mut self, playlist_id: i64) {
-        self.scene_off_step(playlist_id, utc_now_100ns()).await;
+        self.scene_off_step(playlist_id, timeline_now_100ns()).await;
     }
 
     /// `PipelineEvent::SceneOffDue` of the hold re-check `due`:
@@ -147,7 +147,8 @@ impl PlaybackEngine {
             debug!(playlist_id, "a stale hold re-check — ignored");
             return;
         }
-        self.scene_off_recheck(playlist_id, utc_now_100ns()).await;
+        self.scene_off_recheck(playlist_id, timeline_now_100ns())
+            .await;
     }
 
     /// [`Self::scene_off_due`] at `now_100ns` (the stamps' wall clock). A

@@ -3,8 +3,9 @@
 //! every 47 min) in ONE re-anchor, like every camera-box sender follows
 //! `CLOCK_REALTIME` at once. A lone outlier stays bounded at 1 ms. Pure rule +
 //! a WallClock over the [`VirtualClock`]; exact values, so every comparison in
-//! the rule is pinned. The backward direction (design record 5850063723, ONE
-//! hold) is in `wallclock_tests_confirm_backward.rs`. Since #224 the
+//! the rule is pinned. The backward direction (design record 5850063723) is in
+//! `wallclock_tests_confirm_backward.rs`; since #224 part 2 a followed step of
+//! either sign relabels (`WallClock::regrid`). Since #224 the
 //! per-boundary step probe follows a real step at the boundary it lands
 //! (`wallclock_tests_probe.rs`), so the resample's own confirm path is driven
 //! here with a realtime outlier scripted on the resample's read.
@@ -215,8 +216,12 @@ fn a_step_whose_first_probe_is_preempted_is_followed_at_the_next_boundary() {
     let (before, after) = tick_once(&mut wall, &clk);
     assert_eq!(after, before, "a wide probe moves nothing");
     let (before, after) = tick_once(&mut wall, &clk);
-    assert_eq!(after - before, 50 * MS, "followed at the next boundary");
-    assert_eq!(after, clk.truth_100ns());
+    // #224 part 2: +50 ms = 1 slot relabelled + r = 16.67 ms on the timeline.
+    assert_eq!(after - before, 166_666, "followed at the next boundary: r");
+    assert_eq!(
+        after,
+        clk.truth_100ns() - crate::playback::fleet_shift::shift_100ns(1)
+    );
     let st = wall.anchor_stats();
     assert_eq!(st.steps_followed, 1);
     assert_eq!(st.last_step_us, 50_000);

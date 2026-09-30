@@ -43,6 +43,13 @@ impl ClockSource for Arc<ScriptClock> {
             self.base_utc_100ns + (off / 100) as i64,
         )
     }
+
+    // The monotonic read touches no realtime counter, like `SystemClock`'s:
+    // `sample_count` counts realtime samples, and since #224 part 2 every
+    // tick reads the monotonic clock once (the idle-gap check).
+    fn now_monotonic(&self) -> Instant {
+        self.base + Duration::from_nanos(self.offset_ns.load(Ordering::SeqCst))
+    }
 }
 
 #[test]

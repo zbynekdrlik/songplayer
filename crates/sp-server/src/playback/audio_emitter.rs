@@ -46,6 +46,8 @@ use sp_ndi::{AudioFrame, AudioSink, NdiBackend};
 
 use audio_edge_fade::EdgeFade;
 
+use crate::playback::fleet_shift::{FleetShift, global};
+
 /// Nominal NDI audio rate — the FLAC pipeline is always 48 kHz.
 pub const EMIT_RATE_HZ: u32 = 48_000;
 /// Samples per channel in one grid block: 1600 @ 48 kHz = 33.333 ms = one
@@ -516,17 +518,29 @@ pub struct SharedEmitterInner {
     /// Set by the pipeline on teardown so a blocked push returns instead of
     /// waiting forever, and the emit loop exits.
     pub shutdown: AtomicBool,
+    /// The relabel registry the emit thread's wall follows (#224 part 2):
+    /// the grid runs on that wall's internal timeline, and each block's
+    /// stamp goes on the fleet labels at the send ([`emit_one_block`]).
+    pub fleet: Arc<FleetShift>,
 }
 
 pub type SharedEmitter = Arc<SharedEmitterInner>;
 
-/// Build a shared production emitter with its telemetry marked enabled.
+/// Build a shared production emitter with its telemetry marked enabled, on
+/// the process-wide relabel registry the emit thread's
+/// `WallClock::system()` follows.
 pub fn new_shared_emitter() -> SharedEmitter {
+    new_shared_emitter_on(global().clone())
+}
+
+/// [`new_shared_emitter`] on the relabel registry `fleet` (a test's own).
+pub fn new_shared_emitter_on(fleet: Arc<FleetShift>) -> SharedEmitter {
     let inner = SharedEmitterInner {
         emitter: Mutex::new(AudioEmitter::production()),
         space: Condvar::new(),
         telemetry: EmitterTelemetry::default(),
         shutdown: AtomicBool::new(false),
+        fleet,
     };
     inner.telemetry.enabled.store(true, Ordering::Relaxed);
     Arc::new(inner)
@@ -754,7 +768,7 @@ pub fn emit_one_block<B: NdiBackend>(
             data: interleaved,
             channels,
             sample_rate: EMIT_RATE_HZ,
-            timecode_100ns: Some(emitted.timecode_100ns),
+            timecode_100ns: Some(shared.fleet.label_100ns(emitted.timecode_100ns)),
         };
         sink.send_audio(&frame);
     }
@@ -823,3 +837,7 @@ mod audio_edge_fade;
 #[cfg(test)]
 #[path = "audio_emitter_tests.rs"]
 mod audio_emitter_tests;
+
+#[cfg(test)]
+#[path = "audio_emitter_tests_regrid.rs"]
+mod audio_emitter_tests_regrid;

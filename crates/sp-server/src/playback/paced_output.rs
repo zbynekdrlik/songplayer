@@ -36,6 +36,7 @@ use sp_core::genlock::GENLOCK_GRID_FPS;
 use sp_core::genlock::audio::samples_per_boundary;
 use sp_ndi::{AudioFrame, NdiBackend};
 
+use crate::playback::fleet_shift;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::paced_grid::{GridStep, PacedGrid};
 use crate::playback::pacer::{PacedFrame, PacedSink};
@@ -567,23 +568,29 @@ pub fn run_paced_consumer<B: NdiBackend>(mut consumer: PacedConsumer<B>, handoff
                 stamp_100ns,
                 skipped,
             } => {
+                // #224 part 2: a log shows the WIRE stamp, the one receivers see.
+                let wire_stamp_100ns = fleet_shift::wire_100ns(*stamp_100ns);
                 if *skipped > 0 {
                     warn!(
                         playlist_id = pid,
                         skipped,
-                        stamp_100ns,
+                        stamp_100ns = wire_stamp_100ns,
                         "paced output: > 8 boundaries went unserviced between two scopes (grid resync)"
                     );
                 }
                 if window_fills == 0 {
                     info!(
                         playlist_id = pid,
-                        stamp_100ns,
+                        stamp_100ns = wire_stamp_100ns,
                         held = consumer.held.is_some(),
                         "paced output: no pacer attached — servicing boundaries (held picture + silence)"
                     );
                 } else {
-                    tracing::debug!(playlist_id = pid, stamp_100ns, "paced output: fill");
+                    tracing::debug!(
+                        playlist_id = pid,
+                        stamp_100ns = wire_stamp_100ns,
+                        "paced output: fill"
+                    );
                 }
                 window_fills += 1;
             }
@@ -592,7 +599,7 @@ pub fn run_paced_consumer<B: NdiBackend>(mut consumer: PacedConsumer<B>, handoff
                     info!(
                         playlist_id = pid,
                         fills = window_fills,
-                        next_stamp_100ns = job.video_tc_100ns,
+                        next_stamp_100ns = fleet_shift::wire_100ns(job.video_tc_100ns),
                         "paced output: a pacer feeds again after the consumer's fills"
                     );
                     window_fills = 0;

@@ -17,7 +17,10 @@
 //!   confirmed by two narrow resamples: then it is followed in ONE event, in
 //!   either direction.
 //!   [`apply_anchor_step`] applies a BACKWARD correction as a hold, never as a
-//!   backward step. A followed backward step is ONE hold of its remaining size.
+//!   backward step. Since #224 part 2 a followed step RELABELS (the wall's
+//!   `regrid`, `fleet_shift.rs`): its whole slots move the labels, and the
+//!   timeline moves only by the remainder — a step ahead, or a hold of a
+//!   residue of at most ~4 ms — never by the step itself, in either direction.
 //!
 //! A dantesync date step is followed at the boundary it lands (#224, design
 //! record 5890605448): [`decide_step_probe`] judges one cheap bracketed read
@@ -54,6 +57,16 @@ pub const ANCHOR_MAX_STEP_100NS: i64 = 10_000;
 /// contract, issue 1294). dantesync slewing (≤ 94 ppm) moves ≤ ~313 µs per
 /// 100-frame resample, far below it, and stays on the ±1 ms resample bound.
 pub const STEP_DETECT_100NS: i64 = 20_000;
+
+/// A wall that ticks again after more than this first REJOINS the fleet's
+/// line (#224 part 2, `fleet_shift.rs`; its probe then runs against the
+/// joined line). At dantesync's ≤ 94 ppm
+/// a wall that ticked within it drifted under 1 ms, below the 2 ms step
+/// threshold; after a longer gap (the legacy submit wall ticks only per
+/// submitted frame) its drift may read as a date step, and registering that
+/// would relabel every other wall. Every wall that runs its loop ticks at
+/// least every ~100 ms.
+pub const WALL_REJOIN_IDLE: Duration = Duration::from_secs(10);
 
 /// One bracketed read of the realtime clock: `m1` is the monotonic clock read
 /// just before the UTC read, `m2` the one just after.
@@ -152,9 +165,10 @@ pub fn bounded_anchor_update(delta_100ns: i64) -> AnchorStep {
     }
 }
 
-/// Which way a UTC step moves the wall (#147). A FORWARD step (UTC ahead of
-/// the wall) is followed as one step ahead; a BACKWARD step (UTC behind the
-/// wall) is followed as one HOLD, because the wall never goes backward.
+/// Which way a UTC step goes (#147): FORWARD when UTC is ahead of the wall,
+/// BACKWARD when it is behind. Since #224 part 2 the direction only names
+/// the step in the follow log: a followed step of either sign relabels, and
+/// the timeline moves by its remainder (`WallClock::regrid`), never back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StepDirection {
     Forward,
@@ -198,15 +212,16 @@ pub struct FollowedStep {
     /// The whole step: the arming resample's applied part plus the rest
     /// applied now. Signed, 100-ns units (negative = backward).
     pub total_100ns: i64,
-    /// Forward (one step ahead) or backward (one hold).
+    /// Forward or backward: the step's sign, for the log (#224 part 2: the
+    /// timeline's own movement is the regrid's, not this).
     pub direction: StepDirection,
 }
 
 /// What one resample does to the wall under the confirm-then-follow rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AnchorDecision {
-    /// The correction applied now. For a followed step it is the whole rest:
-    /// a step ahead, or ONE hold of `|applied|` when backward.
+    /// The correction applied now. For a followed step it is the whole rest
+    /// of the UTC step; the wall's regrid relabels it (#224 part 2).
     pub step: AnchorStep,
     /// `Some` when this resample FOLLOWED a confirmed step.
     pub followed: Option<FollowedStep>,
@@ -227,9 +242,9 @@ pub struct AnchorDecision {
 ///   1 ms (a step ahead, or a 1 ms hold) and ARMS the step ([`PendingStep`]).
 /// - The NEXT resample follows the rest of it in ONE event when it is narrow
 ///   too, still over 1 ms, and `delta + applied₁` lies within ±1 ms of the
-///   armed `delta₁`: the same step, seen twice. Forward, the wall steps ahead
-///   by the rest. Backward, [`apply_anchor_step`] turns the rest into ONE hold:
-///   the wall freezes for `|delta|`, then runs on the corrected UTC line.
+///   armed `delta₁`: the same step, seen twice. The UTC anchor takes the
+///   rest; the wall's regrid (#224 part 2) relabels the whole slots, so the
+///   timeline moves only by the remainder, in either direction.
 ///   The tolerance alone already implies the same direction: an armed step
 ///   is over 1 ms, so a reading within ±1 ms of it that is itself over 1 ms
 ///   has the same sign.
@@ -331,8 +346,8 @@ pub struct ProbeFollow {
     pub delta_100ns: i64,
     /// What the wall reads at `sample.instant` (frozen during a hold).
     pub wall_100ns: i64,
-    /// Applied now, whole (`sample.utc − wall`): a step ahead, or ONE hold
-    /// ([`apply_anchor_step`]).
+    /// Applied now to the UTC anchor, whole (`sample.utc − wall`); the
+    /// wall's regrid relabels it (#224 part 2).
     pub step: AnchorStep,
     /// The step followed. Its total includes the 1 ms a resample already
     /// applied when that resample armed this same step.
@@ -373,8 +388,8 @@ pub enum ProbeDecision {
 /// - Over 2 ms from a narrow probe, `confirm` takes a full anchor sample (the
 ///   best-of-N bracketed read) in the same tick. It confirms when it is narrow
 ///   too and within ±1 ms of the probe (`same_step`): the step is then
-///   followed in ONE event at that sample, a step ahead when forward and ONE
-///   hold when backward, like the resample's confirmed follow. A `pending`
+///   followed in ONE event at that sample, like the resample's confirmed
+///   follow (#224 part 2: a relabel plus the remainder). A `pending`
 ///   step the resample armed with its bounded 1 ms counts into the total.
 ///
 /// `confirm` runs only on that path, so a quiet boundary costs one read.
@@ -443,13 +458,14 @@ pub fn wall_at(anchor_instant: Instant, anchor_utc_100ns: i64, at: Instant) -> i
 /// The new `(anchor_instant, anchor_utc_100ns)` after applying `applied_100ns`
 /// at monotonic instant `at`, where the current wall reads `wall_100ns`.
 ///
-/// * Forward (`applied ≥ 0`): the wall steps ahead by `applied` (≤ 1 ms, or a
-///   whole confirmed step).
+/// * Forward (`applied ≥ 0`): the wall steps ahead by `applied` (≤ 1 ms for a
+///   bounded resample; a followed step's remainder r, #224 part 2).
 /// * Backward (`applied < 0`): the anchor instant moves `|applied|` into the
 ///   future at the CURRENT wall value. The saturating read then holds the wall
-///   for `|applied|` — ≤ 1 ms, or the whole rest of a confirmed backward step
-///   (~1.5 s for a dantesync nightly date step), in ONE hold — after which it
-///   runs exactly on the corrected line. The wall never goes backward, so the
+///   for `|applied|` — ≤ 1 ms for a bounded resample, at most ~4 ms for a
+///   followed step's residue (#224 part 2: a date step itself is never held),
+///   or the idle drift of a wall rejoining the fleet — after which it runs
+///   exactly on the corrected line. The wall never goes backward, so the
 ///   pacer can never re-serve a boundary it already emitted (the relatch the
 ///   box showed).
 pub fn apply_anchor_step(at: Instant, wall_100ns: i64, applied_100ns: i64) -> (Instant, i64) {
@@ -482,15 +498,16 @@ pub struct WallAnchorStats {
     /// The total step (µs) of the last followed step, signed (negative =
     /// backward); 0 before any.
     pub last_step_us: i64,
-    /// Confirmed BACKWARD steps followed as ONE hold (#147), a subset of
-    /// `steps_followed`.
+    /// Followed steps that HELD the wall's timeline (a subset of
+    /// `steps_followed`). Since #224 part 2 a followed step relabels: the
+    /// timeline moves only by the remainder r ≥ 0 left after the whole slots,
+    /// so a backward step is no hold. A hold is only a residue of at most
+    /// ~4 ms (the 3 ms residue plus an armed 1 ms, and 100 ns of rounding): a
+    /// resample's armed 1 ms that already moved the wall further than r, a
+    /// wall adopting another wall's slot count for a step it read up to 3 ms
+    /// smaller, or a backward step under 3 ms applied on its own (no epoch).
     pub holds_followed: u64,
-    /// How long (µs) the last followed hold froze the wall from the follow:
-    /// the whole step when the probe follows it at the boundary it lands (also
-    /// in the tick a resample armed it with a 1 ms hold, which the follow's
-    /// hold covers); the step minus the elapsed arming 1 ms when the follow
-    /// comes a boundary or more after that resample (the next resample, or a
-    /// probe after a rejected same-tick probe); 0 before any.
+    /// How long (µs) the last such hold froze the timeline; 0 before any.
     pub last_hold_us: u64,
 }
 
@@ -518,12 +535,15 @@ impl WallAnchorStats {
         }
     }
 
-    /// Record a `followed` step whose rest was applied now as `step`: a step
-    /// ahead, or (backward) one hold of `|step.applied_100ns|`.
+    /// Record a `followed` step that moved the wall's timeline by
+    /// `step.applied_100ns` now: a step ahead, or ONE hold of
+    /// `|step.applied_100ns|` when negative (#224 part 2: the timeline's
+    /// movement, never the step's direction — a relabelled backward step
+    /// moves the timeline forward by its remainder).
     pub fn record_follow(&mut self, followed: &FollowedStep, step: &AnchorStep) {
         self.steps_followed += 1;
         self.last_step_us = to_us(followed.total_100ns);
-        if followed.direction == StepDirection::Backward {
+        if step.applied_100ns < 0 {
             self.holds_followed += 1;
             self.last_hold_us = step.applied_100ns.unsigned_abs() / 10;
         }

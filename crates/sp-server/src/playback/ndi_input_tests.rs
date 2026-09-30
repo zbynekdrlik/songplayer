@@ -26,6 +26,8 @@ use sp_ndi::test_util::{MockNdiReceiveBackend, MockVideoFrame};
 mod lifecycle;
 #[path = "ndi_input_tests_pool.rs"]
 mod pool;
+#[path = "ndi_input_tests_regrid.rs"]
+mod regrid;
 
 /// 2026-09 in 100 ns since the epoch.
 const T0: i64 = 17_900_000_000_000_000;
@@ -822,6 +824,10 @@ struct FakeClock {
 impl VbanClock for FakeClock {
     fn now_100ns(&mut self) -> i64 {
         self.now
+    }
+
+    fn slew_owed_100ns(&self) -> i64 {
+        0
     }
 
     fn sleep_100ns(&mut self, d_100ns: i64) {
