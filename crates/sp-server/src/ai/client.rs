@@ -75,9 +75,9 @@ impl AiClient {
 
         // #145: a 429 / 5xx is retried after its `Retry-After`, else after
         // the policy's spanning waits (`ai/retry.rs`); `attempt` counts the
-        // retries (0 = the first request).
-        let mut attempt: u32 = 0;
-        loop {
+        // retries (0 = the first request). The loop is bounded by the
+        // policy's `attempts()` on its own, never only by `after_response`.
+        for attempt in 0..self.retry.attempts() {
             debug!(attempt, url = %url, "sending chat completion request");
 
             let mut req = self.http.post(&url).json(&body);
@@ -106,17 +106,21 @@ impl AiClient {
                 return Ok(content);
             }
 
-            attempt += 1;
-            let delay = self.retry.after_response(status, resp.headers(), attempt);
+            let retry = attempt + 1;
+            let delay = self.retry.after_response(status, resp.headers(), retry);
             let body_text = resp.text().await.unwrap_or_default();
             if is_retried(status.as_u16()) {
-                log_refusal(status, attempt, delay, &body_text);
+                log_refusal(status, retry, delay, &body_text);
             }
             let Some(delay) = delay else {
                 anyhow::bail!("chat completion failed (HTTP {status}): {body_text}");
             };
             tokio::time::sleep(delay).await;
         }
+        anyhow::bail!(
+            "chat completion failed: all {} attempts refused",
+            self.retry.attempts()
+        )
     }
 
     /// Send a chat completion and parse the response as JSON.

@@ -81,6 +81,13 @@ impl RetryPolicy {
         }))
     }
 
+    /// The most requests one call makes: the first plus one per fallback
+    /// wait. The client's loop is bounded by this on its own, so no answer
+    /// of [`Self::retry_delay`] can make a call retry forever.
+    pub fn attempts(&self) -> u32 {
+        self.fallback.len() as u32 + 1
+    }
+
     /// [`Self::retry_delay`] for a response's status and headers.
     pub fn after_response(
         &self,
