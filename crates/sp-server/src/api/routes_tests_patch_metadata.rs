@@ -355,3 +355,70 @@ async fn a_patch_without_song_or_artist_leaves_the_repair_queue_alone() {
         1
     );
 }
+
+/// A provider that is slow enough for the operator: while the repair batch
+/// waits for its answer, the operator corrects the row on the dashboard (the
+/// real `PATCH` through the router), then the provider names it differently.
+struct OperatorCorrectsDuringTheCall {
+    state: crate::AppState,
+    id: i64,
+}
+
+#[async_trait::async_trait]
+impl crate::metadata::MetadataProvider for OperatorCorrectsDuringTheCall {
+    async fn extract(
+        &self,
+        video_id: &str,
+        title: &str,
+    ) -> Result<sp_core::metadata::VideoMetadata, crate::metadata::MetadataError> {
+        let status = patch(
+            self.state.clone(),
+            self.id,
+            serde_json::json!({ "song": "Break!", "artist": "planetboom" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "the operator's PATCH");
+        crate::metadata::MetadataProvider::extract(&NamesAnotherSong, video_id, title).await
+    }
+
+    fn name(&self) -> &str {
+        "claude"
+    }
+}
+
+/// #136 review round 2: `process_all` reads the repair queue once, then each
+/// row waits for the providers. A correction that lands while the batch runs
+/// (the batch starts 5 s after every deploy, when the operator looks at the
+/// `_gf` titles) must survive too: the row left the queue, so the repair
+/// neither renames its files nor writes its metadata.
+#[tokio::test]
+async fn a_correction_made_while_the_repair_batch_runs_survives() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = test_state().await;
+    let files = seed_parser_row(&state, 24, dir.path()).await;
+    let pool = state.pool.clone();
+
+    let chain = std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![Box::new(
+        OperatorCorrectsDuringTheCall { state, id: 24 },
+    )]));
+    let mut repair =
+        crate::reprocess::ReprocessWorker::new(pool.clone(), chain, dir.path().to_path_buf());
+    assert_eq!(
+        repair.process_all().await.unwrap(),
+        0,
+        "the row left the queue during the call: not repaired"
+    );
+
+    let (song, artist, gemini_failed, source, file_path, audio_file_path) =
+        metadata_row(&pool, 24).await;
+    assert_eq!((song.as_str(), artist.as_str()), ("Break!", "planetboom"));
+    assert_eq!((gemini_failed, source.as_deref()), (0, Some("manual")));
+    assert_eq!(
+        [file_path, audio_file_path],
+        files,
+        "the files keep their names"
+    );
+    for f in &files {
+        assert!(std::path::Path::new(f).exists(), "{f} must not be moved");
+    }
+}
