@@ -213,3 +213,60 @@ async fn a_row_whose_lyrics_file_is_gone_is_not_served() {
         "no file on disk = nothing served = the terminal state"
     );
 }
+
+/// Review round 1: a served base-tier full-mix row is re-attempted for the ★
+/// tier at most once a day (#171, `fetch_bucket_fullmix_upgrade`, gated on
+/// `lyrics_processed_at`). A failed upgrade that keeps the served lyrics must
+/// end the pass like every other ended pass (success, `no_source`, `asr_gap`
+/// all stamp `lyrics_processed_at`), or the row would come back after the
+/// 5-minute backoff instead of a day later.
+#[tokio::test]
+async fn a_failed_upgrade_of_a_served_full_mix_row_waits_a_day() {
+    let rig = rig().await;
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+         lyrics_source, lyrics_pipeline_version, lyrics_manual_priority, lyrics_processed_at) \
+         VALUES (6, 1, 'yt_fullmix6', 1, 1, ?, ?, 0, '2000-01-01T00:00:00.000Z')",
+    )
+    .bind(crate::lyrics::g35t_transcript::SOURCE_G35T_FULLMIX)
+    .bind(LYRICS_PIPELINE_VERSION as i64)
+    .execute(&rig.pool)
+    .await
+    .unwrap();
+    std::fs::write(rig.lyrics_file("yt_fullmix6"), SERVED_BYTES).unwrap();
+    // The upgrade bucket picks it now (processed a day+ ago).
+    let picked =
+        crate::lyrics::reprocess::get_next_video_for_lyrics(&rig.pool, LYRICS_PIPELINE_VERSION)
+            .await
+            .unwrap();
+    assert_eq!(picked.map(|r| r.id), Some(6));
+
+    let error = anyhow::anyhow!("gather: genius fallback cleanup failed");
+    rig.worker.fail_song(6, "yt_fullmix6", &error).await;
+
+    let (has_lyrics, source, _, attempts) = row(&rig.pool, 6).await;
+    assert_eq!(
+        (has_lyrics, source.as_deref(), attempts),
+        (
+            1,
+            Some(crate::lyrics::g35t_transcript::SOURCE_G35T_FULLMIX),
+            1
+        ),
+        "the served full-mix lyrics are kept, the attempt recorded"
+    );
+    // Even once the backoff has run out, the next upgrade waits a day.
+    sqlx::query(
+        "UPDATE videos SET lyrics_next_attempt_at = '2000-01-01T00:00:00.000Z' WHERE id = 6",
+    )
+    .execute(&rig.pool)
+    .await
+    .unwrap();
+    let next =
+        crate::lyrics::reprocess::get_next_video_for_lyrics(&rig.pool, LYRICS_PIPELINE_VERSION)
+            .await
+            .unwrap();
+    assert!(
+        next.is_none(),
+        "a failed upgrade must wait out the once-a-day gate: {next:?}"
+    );
+}
