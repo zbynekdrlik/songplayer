@@ -20,6 +20,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use super::{Window, play, resyncs, sent, test_engine};
 use crate::lyrics::renderer::LyricsState;
 use crate::playback::PlaybackEngine;
+use crate::playback::state::PlayState;
 use crate::playback::title::TitleClock;
 use crate::presenter::PresenterClient;
 use crate::resolume::ResolumeCommand;
@@ -243,16 +244,26 @@ async fn only_the_wall_owner_s_title_timers_show_or_hide_the_title() {
     assert_eq!(count(&cmds, is_show_title), 1, "9's show timer: {cmds:?}");
 }
 
-/// Review round 1: the owner can change through the new owner's ON alone —
-/// SP-program cut to 9 while cg OBS still shows 7 ({7, 9}, 9 owns). 7 writes
-/// nothing any more, so 9's ON re-syncs the wall's line at once: one
-/// `HideSubtitles` when 9 has no line (it was played off program by hand,
-/// with no lyrics), or 9's line — never 7's line frozen on `#sp-subs`.
+/// Whether a stage-display push body is the cleared display (the six empty
+/// strings of `PresenterPayload::empty`).
+fn is_cleared(body: &str) -> bool {
+    body.contains(r#""currentText":"""#) && body.contains(r#""currentSong":"""#)
+}
+
+/// Review rounds 1-2: the owner can change through the new owner's ON alone
+/// — SP-program cut to 9 while cg OBS still shows 7 ({7, 9}, 9 owns). 7
+/// writes nothing any more, so 9's ON re-syncs the whole wall at once: its
+/// title (the scene-on's ONE `Resync`), its line — one `HideSubtitles` when
+/// 9 has none (it was played off program by hand, with no lyrics) — and the
+/// Presenter — cleared when 9 has no line. Never 7's line frozen on
+/// `#sp-subs` or on the stage display.
 #[tokio::test]
 async fn the_new_owner_s_on_re_syncs_the_wall_s_line() {
     let (mut engine, mut rx) = two_on_air(7).await;
+    let stage = presenter(&mut engine).await;
     engine.dispatch_lyrics_if_changed(7, 60_000);
     assert_eq!(subtitle_lines(&sent(&mut rx)), ["gamma"], "7's line is up");
+    assert!(pushes(&stage, 1).await[0].contains("gamma"));
     let nine = engine.pipelines.get_mut(&9).unwrap();
     nine.lyrics_state = None;
     nine.scene_active
@@ -267,6 +278,14 @@ async fn the_new_owner_s_on_re_syncs_the_wall_s_line() {
         "7's line leaves: {cmds:?}"
     );
     assert!(subtitle_lines(&cmds).is_empty(), "{cmds:?}");
+    let later = Some("Later - Artist".to_string());
+    assert_eq!(resyncs(&cmds), [later.clone()], "9's title: {cmds:?}");
+    let bodies = pushes(&stage, 2).await;
+    assert!(
+        is_cleared(&bodies[1]),
+        "7's line leaves the stage: {bodies:?}"
+    );
+    assert!(engine.pipelines[&9].last_presenter_text.is_none());
 
     // The same ON with a line (a re-kick of 9): 9's line goes up at once.
     engine.pipelines.get_mut(&9).unwrap().lyrics_state = Some(one_line("delta."));
@@ -274,12 +293,51 @@ async fn the_new_owner_s_on_re_syncs_the_wall_s_line() {
     let cmds = sent(&mut rx);
     assert_eq!(subtitle_lines(&cmds), ["delta"], "{cmds:?}");
     assert_eq!(count(&cmds, is_hide_subtitles), 0, "{cmds:?}");
+    assert_eq!(resyncs(&cmds), [later], "one title Resync: {cmds:?}");
+    let bodies = pushes(&stage, 3).await;
+    assert!(bodies[2].contains("delta"), "{bodies:?}");
+    assert!(engine.pipelines[&9].last_presenter_text.is_some());
 
     // An ON of a member that does not own the wall touches no line.
     engine.handle_scene_change(7, true).await;
     let cmds = sent(&mut rx);
     assert!(subtitle_lines(&cmds).is_empty(), "{cmds:?}");
     assert_eq!(count(&cmds, is_hide_subtitles), 0, "{cmds:?}");
+}
+
+/// Review round 2: a new owner that plays nothing (no playable song, so its
+/// `SelectAndPlay` finds none and it stays `WaitingForScene`) takes the old
+/// owner's title down (a `Resync` naming none), its line and its stage-
+/// display line: the old owner's hide timer, song-end clear and Presenter
+/// pushes no longer reach the wall.
+#[tokio::test]
+async fn a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down() {
+    let (mut engine, mut rx) = two_on_air(7).await;
+    let stage = presenter(&mut engine).await;
+    engine.dispatch_lyrics_if_changed(7, 60_000);
+    assert!(pushes(&stage, 1).await[0].contains("gamma"));
+    sqlx::query("UPDATE videos SET normalized = 0 WHERE id = 44")
+        .execute(&engine.pool)
+        .await
+        .unwrap();
+    let nine = engine.pipelines.get_mut(&9).unwrap();
+    nine.state = PlayState::WaitingForScene;
+    nine.current_video_id = None;
+    nine.lyrics_state = None;
+    nine.scene_active
+        .store(false, std::sync::atomic::Ordering::Release);
+    engine.on_air.publish(on_air(&[7, 9]), Some(9));
+    sent(&mut rx);
+
+    engine.handle_scene_change(9, true).await;
+
+    assert_eq!(engine.pipelines[&9].state, PlayState::WaitingForScene);
+    let cmds = sent(&mut rx);
+    assert_eq!(resyncs(&cmds), [None], "7's title leaves: {cmds:?}");
+    assert_eq!(count(&cmds, is_hide_subtitles), 1, "{cmds:?}");
+    assert!(subtitle_lines(&cmds).is_empty(), "{cmds:?}");
+    let bodies = pushes(&stage, 2).await;
+    assert!(is_cleared(&bodies[1]), "{bodies:?}");
 }
 
 /// A Resolume recovery re-syncs the owner's title and re-sends only its
