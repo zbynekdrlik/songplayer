@@ -5,18 +5,22 @@
 //! Every tick takes ONE bracketed read (the step probe) and measures it
 //! against the line the wall runs on. Over 2 ms from a narrow bracket, a full
 //! anchor sample is taken in the same tick; when both agree within 1 ms the
-//! step is followed in ONE event, a step ahead when forward and ONE hold when
-//! backward. A wide probe, or a confirmation that is wide or reads another
-//! step, is rejected, and nothing is armed, so the next boundary still follows
-//! a real step at once. The 100-frame resample keeps slewing everything
-//! within 2 ms.
+//! step is followed in ONE event. Since #224 part 2 that event RELABELS: the
+//! UTC anchor takes the whole step S, the wall's timeline moves N = ⌊S/slot⌋
+//! whole slots behind its labels, and the timeline itself moves only by the
+//! remainder r (0 ≤ r ≤ one slot, forward) — never a hold of the step. A wide
+//! probe, or a confirmation that is wide or reads another step, is rejected,
+//! and nothing is armed, so the next boundary still follows a real step at
+//! once. The 100-frame resample keeps slewing everything within 2 ms.
 //!
-//! A WallClock over the [`VirtualClock`], exact values. The pure rule
-//! (`decide_step_probe`) is pinned in `wallclock_tests_probe_rule.rs`.
+//! A WallClock over the [`VirtualClock`], exact values (derived with a scratch
+//! Python model of the wall + the split). The pure rule (`decide_step_probe`)
+//! is pinned in `wallclock_tests_probe_rule.rs`.
 
 use std::sync::Arc;
 
 use super::*;
+use crate::playback::fleet_shift::shift_100ns;
 
 /// One 30-fps frame of virtual monotonic time (a multiple of 100 ns).
 const FRAME_NS: u64 = 33_333_300;
@@ -49,9 +53,10 @@ fn settled() -> (Arc<VirtualClock>, WallClock) {
 }
 
 #[test]
-fn a_plus_90_ms_and_a_plus_700_ms_step_are_followed_whole_at_the_boundary_they_land() {
-    // The 02:00Z nightly step (89.7 ms) and a full-day step (~0.7 s).
-    for step in [90 * MS, 700 * MS] {
+fn a_plus_90_ms_and_a_plus_700_ms_step_are_relabelled_at_the_boundary_they_land() {
+    // The 02:00Z nightly step (89.7 ms) and a full-day step (~0.7 s): 2 and
+    // 21 whole slots; the timeline moves only the remainder (23.3 ms / 0).
+    for (step, slots, remainder) in [(90 * MS, 2, 233_333), (700 * MS, 21, 0)] {
         let (clk, mut wall) = settled();
         clk.step_utc(step);
         let (before, after) = tick_once(&mut wall, &clk);
@@ -60,11 +65,21 @@ fn a_plus_90_ms_and_a_plus_700_ms_step_are_followed_whole_at_the_boundary_they_l
             0,
             "{step}: the follow re-anchored, so the resample counter restarts"
         );
-        assert_eq!(after - before, step, "{step}: the whole step in ONE event");
+        assert_eq!(after - before, remainder, "{step}: only r, in ONE event");
         assert_eq!(
             after,
-            clk.truth_100ns(),
-            "{step}: on the stepped UTC at once"
+            clk.truth_100ns() - shift_100ns(slots),
+            "{step}: the stepped UTC less the relabel, at once"
+        );
+        let shift = wall.shift();
+        assert_eq!(
+            (
+                shift.slots,
+                shift.last_remainder_100ns,
+                shift.last_jump_100ns
+            ),
+            (slots, remainder, remainder),
+            "{step}: N and r"
         );
         let st = wall.anchor_stats();
         assert_eq!(
@@ -82,24 +97,28 @@ fn a_plus_90_ms_and_a_plus_700_ms_step_are_followed_whole_at_the_boundary_they_l
 }
 
 #[test]
-fn a_minus_90_ms_step_is_one_hold_at_the_boundary_it_lands_and_the_wall_never_goes_back() {
+fn a_minus_90_ms_step_moves_the_timeline_forward_by_its_remainder_and_never_holds() {
+    // #224 part 2: −90 ms = −3 whole slots (D(−3) = −100 ms) + r = 10 ms. The
+    // timeline jumps 10 ms FORWARD at the follow and runs on at once; before,
+    // the wall froze for the whole 90 ms (and so did every paced output).
     let (clk, mut wall) = settled();
     clk.step_utc(-90 * MS);
     let (before, after) = tick_once(&mut wall, &clk);
-    assert_eq!(after, before, "a hold starts at the reading the wall shows");
+    assert_eq!(after - before, 10 * MS, "r = 10 ms, forward");
     let mut prev = after;
     for ms in 1..=95i64 {
         clk.advance_ns(1_000_000);
         let w = wall.now_100ns();
-        assert!(w >= prev, "ms {ms}: the wall went back");
+        assert!(w > prev, "ms {ms}: the timeline stood still or went back");
         assert_eq!(
             w,
-            before.max(clk.truth_100ns()),
-            "ms {ms}: frozen until the UTC line reaches it, then on it"
+            clk.truth_100ns() - shift_100ns(-3),
+            "ms {ms}: on the relabelled line"
         );
         prev = w;
     }
-    assert_eq!(wall.now_100ns(), before + 5 * MS, "held exactly 90 ms");
+    assert_eq!(wall.now_100ns(), before + 105 * MS, "95 ms run + r");
+    assert_eq!(wall.shift().slots, -3);
     let st = wall.anchor_stats();
     assert_eq!(
         (
@@ -109,8 +128,8 @@ fn a_minus_90_ms_step_is_one_hold_at_the_boundary_it_lands_and_the_wall_never_go
             st.last_hold_us,
             st.slewed_us
         ),
-        (1, 1, -90_000, 90_000, 0),
-        "ONE hold of the whole step"
+        (1, 0, -90_000, 0, 0),
+        "one followed step, no hold"
     );
 }
 
@@ -126,8 +145,8 @@ fn a_wide_probe_is_rejected_and_the_next_boundary_follows_the_step_at_once() {
     assert_eq!(wall.anchor_stats().steps_followed, 0);
     // Nothing was armed: the very next boundary follows the step.
     let (before, after) = tick_once(&mut wall, &clk);
-    assert_eq!(after - before, 90 * MS, "followed at the next boundary");
-    assert_eq!(after, clk.truth_100ns());
+    assert_eq!(after - before, 233_333, "followed at the next boundary: r");
+    assert_eq!(after, clk.truth_100ns() - shift_100ns(2));
     let st = wall.anchor_stats();
     assert_eq!((st.steps_followed, st.last_step_us), (1, 90_000));
     assert_eq!(st.wide_brackets, 0, "a probe read is not an anchor sample");
@@ -149,7 +168,7 @@ fn a_wide_confirmation_is_rejected_and_the_next_boundary_follows_the_step_at_onc
         "the wide confirmation"
     );
     let (before, after) = tick_once(&mut wall, &clk);
-    assert_eq!(after - before, 90 * MS, "followed at the next boundary");
+    assert_eq!(after - before, 233_333, "followed at the next boundary: r");
     assert_eq!(wall.anchor_stats().steps_followed, 1);
     assert_eq!(clk.reads(), 1 + 10 + (1 + 8) + (1 + 1));
 }
@@ -185,40 +204,49 @@ fn a_step_the_resample_sees_first_is_followed_whole_in_the_same_tick() {
     clk.step_utc(50 * MS);
     let (before, after) = tick_once(&mut wall, &clk);
     assert_eq!(wall.frames_since_resample(), 0, "the 100th tick");
-    assert_eq!(after - before, 50 * MS, "the whole step in this tick");
-    assert_eq!(after, clk.truth_100ns());
+    // +50 ms = 1 slot + r = 16.67 ms: over the tick the timeline moves r —
+    // the resample's armed 1 ms, then 15.67 ms at the regrid.
+    assert_eq!(after - before, 166_666, "r of the whole step in this tick");
+    assert_eq!(after, clk.truth_100ns() - shift_100ns(1));
+    let shift = wall.shift();
+    assert_eq!(
+        (
+            shift.slots,
+            shift.last_remainder_100ns,
+            shift.last_jump_100ns
+        ),
+        (1, 166_666, 156_666),
+        "the regrid's own jump is r less the armed 1 ms"
+    );
     let st = wall.anchor_stats();
     assert_eq!(
         (
             st.steps_followed,
             st.last_step_us,
             st.slewed_us,
-            st.max_step_us
+            st.max_step_us,
+            st.holds_followed
         ),
-        (1, 50_000, 1_000, 50_000),
+        (1, 50_000, 1_000, 50_000, 0),
         "the whole 50 ms, of which the resample's 1 ms was slewed"
     );
 }
 
 #[test]
-fn a_backward_step_the_resample_sees_first_is_one_hold_of_the_whole_step_in_the_same_tick() {
+fn a_backward_step_the_resample_sees_first_is_relabelled_whole_in_the_same_tick() {
+    // −50 ms = −2 slots (D(−2) = −66.67 ms) + r = 16.67 ms. The resample's
+    // armed 1 ms hold starts, the probe of the same tick relabels the whole
+    // step: the timeline jumps r forward from where the hold froze it.
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
     ticks(&mut wall, &clk, 99);
     clk.step_utc(-50 * MS);
     let (before, after) = tick_once(&mut wall, &clk);
-    assert_eq!(after, before, "a hold, never a step back");
+    assert_eq!(after - before, 166_666, "r forward, never a hold");
     clk.advance_ns(49_000_000);
-    assert_eq!(wall.now_100ns(), before, "still frozen at 49 ms");
+    assert_eq!(wall.now_100ns(), before + 166_666 + 49 * MS, "running");
     clk.advance_ns(1_000_000);
-    assert_eq!(
-        wall.now_100ns(),
-        before,
-        "frozen 50 ms: the resample's 1 ms is inside it"
-    );
-    clk.advance_ns(1_000_000);
-    assert_eq!(wall.now_100ns(), before + MS, "then on the UTC line");
-    assert_eq!(wall.now_100ns(), clk.truth_100ns());
+    assert_eq!(wall.now_100ns(), clk.truth_100ns() - shift_100ns(-2));
     let st = wall.anchor_stats();
     assert_eq!(
         (
@@ -227,31 +255,28 @@ fn a_backward_step_the_resample_sees_first_is_one_hold_of_the_whole_step_in_the_
             st.last_step_us,
             st.last_hold_us
         ),
-        (1, 1, -50_000, 50_000)
+        (1, 0, -50_000, 0)
     );
+    assert_eq!(wall.shift().slots, -2);
 }
 
 #[test]
-fn a_probe_inside_a_followed_hold_sees_no_new_step() {
+fn the_probes_after_a_relabelled_backward_step_see_no_new_step() {
+    // The UTC anchor took the whole −90 ms: the probes of the next boundaries
+    // (e.g. a submit consumer that ticks per job) measure the labels' line,
+    // not the relabelled timeline, so they read 0.
     let (clk, mut wall) = settled();
     clk.step_utc(-90 * MS);
-    let (before, _) = tick_once(&mut wall, &clk);
-    // Two more boundaries tick INSIDE the 90 ms hold (e.g. a submit consumer
-    // that ticks per job), then one after it.
-    ticks(&mut wall, &clk, 2);
-    assert_eq!(wall.now_100ns(), before, "still the one hold");
-    ticks(&mut wall, &clk, 1);
-    assert_eq!(
-        wall.now_100ns(),
-        clk.truth_100ns(),
-        "on the UTC line after it"
-    );
+    tick_once(&mut wall, &clk);
+    ticks(&mut wall, &clk, 3);
+    assert_eq!(wall.now_100ns(), clk.truth_100ns() - shift_100ns(-3));
     let st = wall.anchor_stats();
     assert_eq!(
         (st.steps_followed, st.holds_followed, st.last_hold_us),
-        (1, 1, 90_000),
-        "a hold in progress is never read as a new step"
+        (1, 0, 0),
+        "one follow, never read again as a new step"
     );
+    assert_eq!(wall.probe_stats(), StepProbeStats::default());
 }
 
 #[test]
@@ -263,12 +288,15 @@ fn a_second_step_after_a_resample_armed_follow_reports_its_own_size() {
     tick_once(&mut wall, &clk);
     assert_eq!(wall.anchor_stats().last_step_us, 50_000);
     // A second step, as large as the first one's rest: its own 49 ms, not
-    // the first step's arming 1 ms again.
+    // the first step's arming 1 ms again. It is a second epoch: 1 more slot
+    // (K = 2), r = 49 ms − (D(2) − D(1)) = 15.6667 ms.
     clk.step_utc(49 * MS);
     let (before, after) = tick_once(&mut wall, &clk);
-    assert_eq!(after - before, 49 * MS);
+    assert_eq!(after - before, 156_667);
     let st = wall.anchor_stats();
     assert_eq!((st.steps_followed, st.last_step_us), (2, 49_000));
+    assert_eq!((wall.shift().slots, wall.shift().epochs), (2, 2));
+    assert_eq!(wall.fleet().slots(), 2);
 }
 
 #[test]
@@ -298,26 +326,26 @@ fn a_2_ms_step_is_slewed_by_the_resample_and_one_just_over_it_is_followed_at_onc
 }
 
 #[test]
-fn a_resample_never_lands_inside_a_hold_the_probe_just_followed() {
+fn a_follow_on_the_99th_tick_restarts_the_resample_count() {
     // Review round 1: a follow on the 99th tick used to leave the resample
-    // due on the very next tick, and a wall that ticks INSIDE its own hold
+    // due on the very next tick, and a wall that ticked INSIDE its own hold
     // (the submit consumer ticks per job) then resampled there: it read the
     // rest of the hold as a new −57 ms step, cut the hold to 1 ms, re-armed
     // and "followed" it a second time. A follow is a fresh anchor, so it
-    // restarts the resample count.
+    // restarts the resample count (#224 part 2: no hold any more, but a
+    // ≤ 1 ms residue hold still can be, and the anchor is fresh either way).
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
     ticks(&mut wall, &clk, 98);
     clk.step_utc(-90 * MS);
     let (before, after) = tick_once(&mut wall, &clk);
-    assert_eq!(after, before, "the 99th tick follows the step: ONE hold");
+    assert_eq!(after - before, 10 * MS, "the 99th tick relabels: r forward");
     assert_eq!(wall.frames_since_resample(), 0, "a fresh anchor");
-    // One boundary later, still inside the 90 ms hold.
-    let (_, inside) = tick_once(&mut wall, &clk);
-    assert_eq!(inside, before, "still the one hold");
-    assert_eq!(wall.frames_since_resample(), 1, "no resample inside it");
+    let (_, next) = tick_once(&mut wall, &clk);
+    assert_eq!(next, before + 10 * MS + 333_333, "one frame later");
+    assert_eq!(wall.frames_since_resample(), 1, "no resample there");
     ticks(&mut wall, &clk, 2);
-    assert_eq!(wall.now_100ns(), clk.truth_100ns(), "then on the UTC line");
+    assert_eq!(wall.now_100ns(), clk.truth_100ns() - shift_100ns(-3));
     assert_eq!(
         wall.anchor_stats(),
         WallAnchorStats {
@@ -326,10 +354,10 @@ fn a_resample_never_lands_inside_a_hold_the_probe_just_followed() {
             slewed_us: 0,
             steps_followed: 1,
             last_step_us: -90_000,
-            holds_followed: 1,
-            last_hold_us: 90_000,
+            holds_followed: 0,
+            last_hold_us: 0,
         },
-        "one follow, one hold, nothing slewed"
+        "one follow, no hold, nothing slewed"
     );
 }
 

@@ -433,7 +433,12 @@ fn a_resample_that_follows_after_every_probe_was_rejected_reports_the_time_since
     for _ in 0..200 {
         tick(&mut wall, &clk);
     }
-    assert_eq!(wall.now_100ns(), clk.truth_100ns(), "followed");
+    // #224 part 2: followed, and relabelled by 2 whole slots.
+    assert_eq!(
+        wall.now_100ns(),
+        clk.truth_100ns() - crate::playback::fleet_shift::shift_100ns(2),
+        "followed"
+    );
     let st = wall.anchor_stats();
     assert_eq!(
         (st.steps_followed, st.last_step_us, st.slewed_us),

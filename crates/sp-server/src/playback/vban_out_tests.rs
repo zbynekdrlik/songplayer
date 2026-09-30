@@ -32,6 +32,8 @@ pub(crate) struct FakeClock {
     pub sleeps: Vec<i64>,
     /// `now_100ns` calls (the production clock ticks on each).
     pub reads: usize,
+    /// What the clock reports it still owes of a date step (#224 part 2).
+    pub owed: i64,
 }
 
 impl FakeClock {
@@ -40,6 +42,7 @@ impl FakeClock {
             now: Arc::new(AtomicI64::new(t)),
             sleeps: Vec::new(),
             reads: 0,
+            owed: 0,
         }
     }
 }
@@ -52,6 +55,9 @@ impl VbanClock for FakeClock {
     fn sleep_100ns(&mut self, d_100ns: i64) {
         self.sleeps.push(d_100ns);
         self.now.fetch_add(d_100ns, Ordering::SeqCst);
+    }
+    fn slew_owed_100ns(&self) -> i64 {
+        self.owed
     }
 }
 
@@ -795,3 +801,7 @@ fn resolve_and_log_cadences() {
     assert!(!should_log(1001));
     assert!(should_log(2000));
 }
+
+// #224 part 2: VBAN at a fleet date step (SlewRemainder).
+#[path = "vban_out_tests_regrid.rs"]
+mod regrid;

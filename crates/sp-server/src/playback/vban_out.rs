@@ -14,9 +14,18 @@
 //! while nothing is sent, so its anchor never goes stale — and the
 //! on-time packets go out one every 4.1667 ms, one wait each, never as a burst.
 //! A block that arrives after its first packet is due (a program fill after
-//! the 3-slot grace, a fleet date step before the walls re-converge) sends its
-//! past-due packets back-to-back and counts each as a late send. The frame
-//! counter grows by exactly 1 per packet across cuts and standby.
+//! the 3-slot grace, a real stall) sends its past-due packets back-to-back and
+//! counts each as a late send. The frame counter grows by exactly 1 per packet
+//! across cuts and standby.
+//!
+//! A fleet date step (#224 part 2): the walls relabel, so the program's
+//! timeline moves only by the remainder r (≤ one slot) and VBAN never sees the
+//! whole slots N. VBAN has no timecode: its receiver paces by arrival, so a
+//! jump of r would still send r of audio at once. Its clock
+//! ([`WallVbanClock::slewing`], policy [`RemainderSlew`]) therefore does not
+//! jump at the follow: it owes r and pays it back at [`VBAN_SLEW_PPM`], so
+//! every packet interval stays within 4.1667 ms ± 100 ppm — no burst, no gap,
+//! no drop, no crossfade (`slew_owed_us` on the status).
 //!
 //! One UDP socket sends to every resolved target. The settings (`vban_enabled`,
 //! `vban_stream_name`, `vban_targets`) are re-read every
@@ -87,6 +96,14 @@ pub const VBAN_LOG_EVERY: u64 = 1000;
 /// At most this many targets are sent to (each costs ~2.4 Mbit/s and one
 /// `send_to` per packet on the paced thread); the rest are ignored + logged.
 pub const VBAN_MAX_TARGETS: usize = 8;
+
+/// How fast VBAN's clock pays back a date step's remainder (#224 part 2):
+/// 50 ppm of its timeline, 100 ns per 2 ms, so a whole slot (33.3 ms) is paid
+/// in ~11 min. Below 100 ppm with a margin for the grid's own 41 666 /
+/// 41 667 / 41 668 × 100 ns packet spacing and the 100-ns rounding of each
+/// wait, so every packet interval stays within 4.1667 ms ± 100 ppm (VB-Matrix
+/// at FOH runs an ASRC that follows the arrival rate).
+pub const VBAN_SLEW_PPM: i64 = 50;
 
 /// One program boundary's audio for VBAN.
 #[derive(Clone, Debug, PartialEq)]
@@ -341,6 +358,9 @@ pub struct VbanStatus {
     pub send_interval_p99_us: u64,
     /// `nuFrame` of the last packet sent.
     pub frame_counter: u32,
+    /// #224 part 2: the date-step remainder VBAN's clock still owes (µs):
+    /// r right after a follow, then down at [`VBAN_SLEW_PPM`]; 0 otherwise.
+    pub slew_owed_us: u64,
     pub targets: Vec<VbanTargetStatus>,
 }
 
@@ -353,6 +373,7 @@ struct VbanCounters {
     late_sends: u64,
     frame_counter: u32,
     intervals_us: VecDeque<u64>,
+    slew_owed_us: u64,
 }
 
 struct VbanQueue {
@@ -502,6 +523,12 @@ impl VbanOut {
         s.send_errors
     }
 
+    /// Record what VBAN's clock still owes of a date step (100 ns, #224
+    /// part 2), for `slew_owed_us`.
+    fn record_slew(&self, owed_100ns: i64) {
+        lock(&self.stats).slew_owed_us = (owed_100ns / 10).unsigned_abs();
+    }
+
     /// The telemetry for the API.
     pub fn status(&self) -> VbanStatus {
         let cfg = self.config();
@@ -517,6 +544,7 @@ impl VbanOut {
             late_sends: s.late_sends,
             send_interval_p99_us: percentile_ceil(&s.intervals_us, 99),
             frame_counter: s.frame_counter,
+            slew_owed_us: s.slew_owed_us,
             targets: cfg
                 .targets
                 .iter()
@@ -540,10 +568,13 @@ struct SentPacket {
 
 /// The clock the VBAN thread paces on (the program's wall domain).
 pub trait VbanClock {
-    /// Now, 100 ns since the Unix epoch.
+    /// Now, 100 ns (the internal timeline, #224 part 2).
     fn now_100ns(&mut self) -> i64;
     /// Sleep `d_100ns`.
     fn sleep_100ns(&mut self, d_100ns: i64);
+    /// What the clock still owes of a date step's remainder (100 ns, #224
+    /// part 2; 0 for a clock that follows its wall).
+    fn slew_owed_100ns(&self) -> i64;
 }
 
 /// Where packets go (a UDP socket in production).
@@ -557,19 +588,92 @@ impl VbanSink for UdpSocket {
     }
 }
 
+/// VBAN's clock policy at a fleet date step (#224 part 2): SlewRemainder.
+///
+/// A follow relabels the wall (the whole slots N never reach the timeline) and
+/// jumps its timeline forward by the remainder r. VBAN reads
+/// `timeline − owed`, where `owed` takes that jump at the follow, so VBAN's
+/// clock does NOT jump, and then shrinks at [`VBAN_SLEW_PPM`] of the elapsed
+/// timeline: every packet goes out on its cadence, r ends up paid over minutes
+/// (the queue holds up to r more meanwhile, under one block). Pure: the
+/// caller passes the timeline readings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RemainderSlew {
+    /// What was owed at `since_100ns` (100 ns).
+    owed_100ns: i64,
+    /// The timeline reading of the last jump.
+    since_100ns: i64,
+}
+
+impl RemainderSlew {
+    /// What is still owed at timeline reading `t_100ns`: the owed jump minus
+    /// [`VBAN_SLEW_PPM`] of the timeline since it, never below 0.
+    pub fn owed_at(&self, t_100ns: i64) -> i64 {
+        let elapsed = (t_100ns - self.since_100ns).max(0);
+        let paid = elapsed.saturating_mul(VBAN_SLEW_PPM) / 1_000_000;
+        (self.owed_100ns - paid).max(0)
+    }
+
+    /// The timeline jumped forward by `jump_100ns`, reading `t_100ns` after
+    /// the jump: owe it on top of what is still owed, so the clock reads the
+    /// same instant as right before it.
+    pub fn owe(&mut self, jump_100ns: i64, t_100ns: i64) {
+        let before = self.owed_at(t_100ns - jump_100ns);
+        self.owed_100ns = before;
+        self.since_100ns = t_100ns;
+    }
+
+    /// VBAN's clock at timeline reading `t_100ns`.
+    pub fn clock_100ns(&self, t_100ns: i64) -> i64 {
+        t_100ns - self.owed_at(t_100ns)
+    }
+}
+
 /// Production clock: a [`WallClock`] ticked once per grid boundary passed
 /// ([`BoundaryTicker`], the program wall's cadence), so it slews a UTC step in
 /// at the same rate as the program and the source walls — one clock domain.
+/// [`new`](Self::new) follows the wall (the NDI input: at a date step its
+/// boundaries come at most r, under one slot, early, #224 part 2);
+/// [`slewing`](Self::slewing) is VBAN's, which pays r back
+/// ([`RemainderSlew`]).
 pub struct WallVbanClock {
     wall: WallClock,
     ticker: BoundaryTicker,
+    /// `Some` = SlewRemainder (VBAN).
+    slew: Option<RemainderSlew>,
+    /// The wall's regrid count already owed.
+    regrids_seen: u64,
 }
 
 impl WallVbanClock {
     pub fn new(wall: WallClock) -> Self {
         Self {
+            regrids_seen: wall.shift().regrids,
             wall,
             ticker: BoundaryTicker::default(),
+            slew: None,
+        }
+    }
+
+    /// VBAN's clock: `wall`'s timeline minus the date-step remainder it still
+    /// owes ([`RemainderSlew`], #224 part 2).
+    pub fn slewing(wall: WallClock) -> Self {
+        Self {
+            slew: Some(RemainderSlew::default()),
+            ..Self::new(wall)
+        }
+    }
+
+    /// After a wall tick: a regrid jumped the timeline — owe the jump.
+    fn owe_regrid(&mut self) {
+        let shift = self.wall.shift();
+        if shift.regrids == self.regrids_seen {
+            return;
+        }
+        self.regrids_seen = shift.regrids;
+        let now = self.wall.now_100ns();
+        if let Some(slew) = self.slew.as_mut() {
+            slew.owe(shift.last_jump_100ns, now);
         }
     }
 }
@@ -579,12 +683,19 @@ impl VbanClock for WallVbanClock {
         let now = self.wall.now_100ns();
         for _ in 0..self.ticker.advance(now) {
             self.wall.tick();
+            self.owe_regrid();
         }
-        self.wall.now_100ns()
+        let t = self.wall.now_100ns();
+        self.slew.map_or(t, |slew| slew.clock_100ns(t))
     }
 
     fn sleep_100ns(&mut self, d_100ns: i64) {
         std::thread::sleep(Duration::from_nanos(d_100ns.max(0) as u64 * 100));
+    }
+
+    fn slew_owed_100ns(&self) -> i64 {
+        let t = self.wall.now_100ns();
+        self.slew.map_or(0, |slew| slew.owed_at(t))
     }
 }
 
@@ -638,7 +749,7 @@ impl VbanSender {
             if should_log(n) {
                 warn!(
                     blocks_substituted = n,
-                    due_100ns = block.due_100ns,
+                    due_100ns = crate::playback::fleet_shift::wire_100ns(block.due_100ns),
                     "vban output: a program pair's audio was not one 48 kHz stereo 1600-frame block — sent silence"
                 );
             }
@@ -698,6 +809,7 @@ pub fn run_vban_loop(
         // (disabled, no target, idle), so its anchor follows UTC like the
         // program wall and the first packets after enabling are on schedule.
         clock.now_100ns();
+        out.record_slew(clock.slew_owed_100ns());
         match take {
             VbanTake::Block(block) => {
                 sender.send_block(out, &block, sink, clock);
@@ -733,7 +845,8 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>) {
                 }
             };
             info!(local = ?socket.local_addr().ok(), "vban output thread started");
-            let mut clock = WallVbanClock::new(WallClock::system());
+            // #224 part 2: SlewRemainder — a date step never bursts VBAN.
+            let mut clock = WallVbanClock::slewing(WallClock::system());
             run_vban_loop(&out, &mut socket, &mut clock);
         });
     if let Err(e) = spawned {

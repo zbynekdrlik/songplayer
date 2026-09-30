@@ -99,6 +99,14 @@ pub struct PacingStats {
     /// its follow; ≈ 0 when the step is followed at the boundary it is first
     /// seen, one boundary (~33 333) per rejected probe before it.
     pub wall_anchor_detect_to_follow_us: u64,
+    /// #224 part 2: whole slots the pacer wall's timeline sits behind the
+    /// fleet labels (K_w, signed; the sum of every followed date step's
+    /// N = ⌊S/slot⌋). Every wall reads the same value once it followed.
+    pub fleet_shift_slots: i64,
+    /// #224 part 2: the remainder r (µs) of the last date step the pacer
+    /// wall followed, the step minus its whole slots: the only part its
+    /// timeline moved (0 ≤ r ≤ one slot, forward).
+    pub last_regrid_remainder_us: i64,
     /// #147: grid slots nobody serviced across a song change / stop / idle
     /// transition (the pipeline-lifetime submit consumer). Must read 0.
     pub song_change_unserviced_slots: u64,

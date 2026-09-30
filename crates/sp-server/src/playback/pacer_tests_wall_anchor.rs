@@ -39,6 +39,7 @@ use sp_core::genlock::strict_next_boundary_100ns;
 use sp_ndi::AudioFrame;
 
 use super::ahead_frame;
+use crate::playback::fleet_shift::{FleetShift, shift_100ns, wire_stamp_100ns};
 use crate::playback::pacer::{PacedFrame, PacedSink, Pacer, ServiceOutcome, plan_sleep_100ns};
 use crate::playback::wallclock::{ClockSource, VirtualClock, WallClock};
 
@@ -80,6 +81,12 @@ struct StampSink {
     /// previous one's: content skipped or repeated (#224 part 2).
     non_contiguous_frames: u64,
     last_pts_100ns: Option<i64>,
+    /// When set, the relabel registry the pacer's wall follows: each emit's
+    /// WIRE stamp is `floor(stamp + D(K_F))` as the submit edge puts it on.
+    fleet: Option<Arc<FleetShift>>,
+    last_wire: Option<i64>,
+    /// `(emit count, Δ)` of every wire stamp that is not the next slot.
+    wire_jumps: Vec<(u64, i64)>,
 }
 
 /// A gap between two serviced boundaries this long is a real output pause
@@ -135,6 +142,15 @@ impl PacedSink for StampSink {
             self.non_contiguous_frames += 1;
         }
         self.last_pts_100ns = Some(pts);
+        if let Some(fleet) = &self.fleet {
+            let wire = wire_stamp_100ns(video_tc_100ns, fleet.slots());
+            if let Some(prev) = self.last_wire
+                && wire != strict_next_boundary_100ns(prev, 30)
+            {
+                self.wire_jumps.push((self.emits + 1, wire - prev));
+            }
+            self.last_wire = Some(wire);
+        }
         self.last_video_tc = Some(video_tc_100ns);
         self.emits += 1;
     }
@@ -163,16 +179,32 @@ fn run_paced(clk: &Arc<VirtualClock>, boundaries: u64, preempt: bool) -> (Pacer,
 
 /// Service `boundaries` paced boundaries in virtual time, calling
 /// `before_tick(ticks)` after each serviced boundary, right before the wall
-/// tick (so a UTC step or a preempted read lands on a chosen resample).
+/// tick (so a UTC step or a preempted read lands on a chosen resample). The
+/// wall follows date steps through a registry of its own.
 fn run_paced_with(
     clk: &Arc<VirtualClock>,
     boundaries: u64,
+    before_tick: impl FnMut(u64),
+) -> (Pacer, StampSink) {
+    run_paced_on(clk, Arc::default(), boundaries, before_tick)
+}
+
+/// [`run_paced_with`] on the relabel registry `fleet`; the sink records each
+/// emit's wire stamp under it (#224 part 2).
+fn run_paced_on(
+    clk: &Arc<VirtualClock>,
+    fleet: Arc<FleetShift>,
+    boundaries: u64,
     mut before_tick: impl FnMut(u64),
 ) -> (Pacer, StampSink) {
-    let mut pacer = Pacer::with_wallclock(30, true, WallClock::new(Box::new(clk.clone())));
+    let wall = WallClock::with_fleet(Box::new(clk.clone()), fleet.clone());
+    let mut pacer = Pacer::with_wallclock(30, true, wall);
     pacer.anchor();
     let next = Cell::new(0i64);
-    let mut sink = StampSink::default();
+    let mut sink = StampSink {
+        fleet: Some(fleet),
+        ..StampSink::default()
+    };
     let mut ticks = 0u64;
     let mut iterations = 0u64;
     while ticks < boundaries {
@@ -206,10 +238,11 @@ fn run_paced_with(
 }
 
 /// The step `step_100ns` lands after the 150th boundary (with a real stall of
-/// `stall_ns` first, 0 for none), 400 boundaries in all.
+/// `stall_ns` first, 0 for none), 400 boundaries in all, on a registry of its
+/// own.
 fn run_step(step_100ns: i64, stall_ns: u64) -> (Pacer, StampSink, Arc<VirtualClock>) {
     let clk = VirtualClock::new(0);
-    let (pacer, sink) = run_paced_with(&clk, 400, |ticks| {
+    let (pacer, sink) = run_paced_on(&clk, Arc::default(), 400, |ticks| {
         if ticks == 150 {
             clk.advance_ns(stall_ns);
             clk.step_utc(step_100ns);
@@ -276,12 +309,18 @@ fn pacing_stats_carry_the_pacer_wall_anchor_telemetry() {
         ),
         (4_800, 1, 0, 1, 4_800)
     );
+    // Under one slot: nothing relabelled, the whole 4.8 ms is the remainder.
+    assert_eq!(
+        (s.fleet_shift_slots, s.last_regrid_remainder_us),
+        (0, 4_800)
+    );
 }
 
 #[test]
 fn pacing_stats_carry_a_followed_utc_step() {
     // #224: a +50 ms fleet date step is followed in one event by the step
     // probe of the first boundary and reported through the pacer's own stats.
+    // #224 part 2: 1 whole slot relabelled, r = 16.67 ms.
     let clk = VirtualClock::new(0);
     let mut pacer = Pacer::with_wallclock(30, true, WallClock::new(Box::new(clk.clone())));
     clk.step_utc(500_000);
@@ -294,7 +333,16 @@ fn pacing_stats_carry_a_followed_utc_step() {
     assert_eq!(s.wall_anchor_last_step_us, 50_000);
     assert_eq!(s.wall_anchor_holds_followed, 0, "a forward step is no hold");
     assert_eq!(s.wall_anchor_slewed_us, 0, "nothing slewed: followed whole");
-    assert_eq!(pacer.now_100ns(), clk.truth_100ns(), "on the stepped UTC");
+    assert_eq!(
+        (s.fleet_shift_slots, s.last_regrid_remainder_us),
+        (1, 16_666),
+        "N = 1, r = 16.67 ms"
+    );
+    assert_eq!(
+        pacer.now_100ns(),
+        clk.truth_100ns() - shift_100ns(1),
+        "on the stepped UTC less the relabel"
+    );
 }
 
 #[test]
@@ -381,6 +429,11 @@ fn a_plus_90_ms_step_is_relabelled_at_its_boundary_with_no_catch_up_burst() {
         (1, 90_000, 0, 0),
         "one forward step, followed whole"
     );
+    assert_eq!(
+        sink.wire_jumps,
+        vec![(151, 1_000_000)],
+        "the wire stamps jump 3 slots once: 1 + the 2 relabelled"
+    );
 }
 
 #[test]
@@ -409,10 +462,15 @@ fn a_plus_260_3_ms_step_relabels_the_wire_and_keeps_content_one_frame_per_bounda
     assert_eq!(sink.non_contiguous_frames, 0, "one frame per boundary");
     assert_eq!((s.relatches, s.resyncs, s.dropped, s.repeats), (0, 0, 0, 0));
     assert_eq!(
-        pacer.now_100ns(),
-        clk.truth_100ns() - 2_333_334,
-        "the timeline runs 7 slots (D(7)) behind the new labels"
+        sink.wire_jumps,
+        vec![(151, 2_666_666)],
+        "the wire jumps 8 slots once"
     );
+    assert_eq!(
+        (s.fleet_shift_slots, s.last_regrid_remainder_us),
+        (7, 26_966)
+    );
+    assert_eq!(pacer.now_100ns(), clk.truth_100ns() - shift_100ns(7));
 }
 
 #[test]
@@ -427,6 +485,11 @@ fn a_minus_19_8_ms_step_sends_the_same_wire_stamp_twice_and_never_pauses() {
     assert_eq!(sink.long_pauses, 0);
     assert_eq!(sink.odd_gaps, vec![(151, Duration::from_nanos(19_800_000))]);
     assert_eq!(sink.non_contiguous_frames, 0, "one frame per boundary");
+    assert_eq!(sink.wire_jumps, vec![(151, 0)], "the same wire stamp twice");
+    assert_eq!(
+        (s.fleet_shift_slots, s.last_regrid_remainder_us),
+        (-1, 13_533)
+    );
     assert_eq!(s.wall_anchor_holds_followed, 0);
 }
 
@@ -445,6 +508,7 @@ fn a_real_200_ms_stall_still_catches_up_6_boundaries() {
     );
     assert_eq!(sink.non_contiguous_stamps, 0, "caught up, never skipped");
     assert_eq!((s.resyncs, s.wall_anchor_steps_followed), (0, 0));
+    assert_eq!(s.fleet_shift_slots, 0);
 }
 
 #[test]
@@ -463,6 +527,8 @@ fn a_stall_and_a_step_in_the_same_tick_catch_up_only_the_stall() {
     assert_eq!(sink.non_contiguous_stamps, 0);
     assert_eq!(sink.non_contiguous_frames, 0);
     assert_eq!(s.resyncs, 0);
+    assert_eq!(s.fleet_shift_slots, 7);
+    assert_eq!(sink.wire_jumps, vec![(151, 2_666_666)]);
 }
 
 #[test]

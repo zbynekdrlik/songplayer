@@ -328,6 +328,8 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             wall_anchor_last_step_us: -1_500_000,
             wall_anchor_holds_followed: 1,
             wall_anchor_last_hold_us: 1_499_000,
+            fleet_shift_slots: -45,
+            last_regrid_remainder_us: 26_966,
             song_change_unserviced_slots: 6,
             consumer_fill_pairs: 17,
             ..Default::default()
@@ -383,6 +385,9 @@ fn format_genlock_line_contains_every_key_token() {
         "wall_anchor_last_step_us=-1500000",
         "wall_anchor_holds_followed=1",
         "wall_anchor_last_hold_us=1499000",
+        // #224 part 2: the relabel of the date steps followed + the last r.
+        "fleet_shift_slots=-45",
+        "last_regrid_remainder_us=26966",
         "song_change_unserviced_slots=6",
         "consumer_fill_pairs=17",
         "underruns=9",

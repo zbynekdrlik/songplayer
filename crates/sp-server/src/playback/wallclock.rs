@@ -22,12 +22,22 @@
 //! tick by a full anchor sample within 1 ms, is followed in that ONE event, so
 //! a dantesync date step reaches the stamps the boundary it lands, as it
 //! reaches every fleet receiver, instead of two resamples (3.3–6.7 s) later.
+//!
+//! A followed step RELABELS (#224 part 2, `fleet_shift.rs`): the UTC anchor
+//! takes the whole step S, but [`WallClock::now_100ns`] reads the internal
+//! TIMELINE `UTC − D(K_w)`, and the follow moves K_w by the fleet's N = ⌊S/P⌋
+//! whole slots. So the timeline moves only by the remainder r (0 ≤ r ≤ one
+//! slot, forward): a date step never holds it and never jumps it by S. The
+//! wire stamps get the labels back at the submit edge (`FrameSubmitter`).
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use tracing::{debug, info, warn};
 
 use sp_core::genlock::should_resample_mono_to_real_offset;
+
+use crate::playback::fleet_shift::{FleetShift, WallShift, global, relabel_100ns, shift_100ns};
 
 #[path = "wallclock_anchor.rs"]
 mod wallclock_anchor;
@@ -36,7 +46,7 @@ pub use wallclock_anchor::{
     AnchorDecision, AnchorSample, AnchorStep, BracketedRead, FollowedStep, PendingStep,
     ProbeDecision, ProbeFollow, STEP_DETECT_100NS, StepDirection, StepProbeStats, WallAnchorStats,
     apply_anchor_step, bounded_anchor_update, choose_bracketed_sample, decide_anchor_step,
-    decide_step_probe, to_us, wall_at,
+    decide_step_probe, same_step, to_us, wall_at,
 };
 
 /// Source of paired `(monotonic instant, utc_100ns)` samples. Production reads
@@ -72,13 +82,15 @@ pub trait ClockSource: Send + Sync {
         self.sample().0
     }
 
-    /// Current wall time in 100-ns units since the Unix epoch, for the hot read
-    /// path. The default derives it from the monotonic clock: elapsed since the
+    /// Current wall time in 100-ns units, for the hot read path. The default
+    /// derives it from the monotonic clock: elapsed since the
     /// `anchor_instant` plus `anchor_utc_100ns` — exactly the production formula,
-    /// so [`SystemClock`] keeps its `Utc::now()`-free read path. A fully
-    /// synthetic test clock (e.g. the boundary-paced `Pacer` fake) overrides
-    /// this to return a directly controllable value, so a test can advance the
-    /// wall clock between the scheduling read and the emit read (#147).
+    /// so [`SystemClock`] keeps its `Utc::now()`-free read path. The wall
+    /// passes its TIMELINE anchor (the UTC anchor minus D(K_w), #224 part 2).
+    /// A fully synthetic test clock (e.g. the boundary-paced `Pacer` fake)
+    /// overrides this to return a directly controllable value, so a test can
+    /// advance the wall clock between the scheduling read and the emit read
+    /// (#147); it ignores the anchor, so it never sees a relabel.
     fn read_100ns(&self, anchor_instant: Instant, anchor_utc_100ns: i64) -> i64 {
         wall_at(anchor_instant, anchor_utc_100ns, self.now_monotonic())
     }
@@ -140,6 +152,11 @@ pub struct WallClock {
     /// (#224): the detection instant of `last_detect_to_follow_us`. Cleared by
     /// a quiet probe and by the follow.
     suspect_since: Option<Instant>,
+    /// The fleet relabel registry this wall follows (#224 part 2): the
+    /// process-wide one for a production wall, a test's own otherwise.
+    fleet: Arc<FleetShift>,
+    /// This wall's relabel K_w and its last regrid (#224 part 2).
+    shift: WallShift,
 }
 
 /// One anchor sample from `source`: the narrowest of up to
@@ -149,9 +166,18 @@ fn anchor_sample(source: &dyn ClockSource) -> AnchorSample {
 }
 
 impl WallClock {
-    /// Build a wall clock over `source`, seeding the anchor from one bracketed
-    /// sample.
+    /// Build a wall clock over `source` with a relabel registry of its own (a
+    /// test's wall never shares the process-wide one), seeding the anchor
+    /// from one bracketed sample.
     pub fn new(source: Box<dyn ClockSource>) -> Self {
+        Self::with_fleet(source, Arc::default())
+    }
+
+    /// Build a wall clock over `source` that follows date steps through the
+    /// relabel registry `fleet` (#224 part 2). It starts at the registry's
+    /// current K: a wall built after a step is on the same timeline as the
+    /// walls that followed it.
+    pub fn with_fleet(source: Box<dyn ClockSource>, fleet: Arc<FleetShift>) -> Self {
         let sample = anchor_sample(&*source);
         let mut stats = WallAnchorStats::default();
         stats.record_sample(&sample);
@@ -166,24 +192,28 @@ impl WallClock {
             pending: None,
             probe_stats: StepProbeStats::default(),
             suspect_since: None,
+            shift: fleet.current(),
+            fleet,
         }
     }
 
-    /// Production constructor over [`SystemClock`].
+    /// Production constructor over [`SystemClock`], on the process-wide
+    /// relabel registry every production wall shares (#224 part 2).
     pub fn system() -> Self {
-        Self::new(Box::new(SystemClock))
+        Self::with_fleet(Box::new(SystemClock), global().clone())
     }
 
-    /// Current wall time: `anchor_utc + elapsed_monotonic`, in 100-ns units
-    /// since the Unix epoch.
+    /// The internal TIMELINE now (#224 part 2): `anchor_utc +
+    /// elapsed_monotonic − D(K_w)`, in 100-ns units. Every paced sender runs
+    /// on it; the NDI wire stamps get the labels back at the submit edge.
     ///
     /// Hot read path: it reads the MONOTONIC clock only (`now_monotonic`) —
     /// never `Utc::now()` (#146 follow-up). The realtime clock is sampled only
     /// in [`tick`](Self::tick) (every resample and the step probe, #224) and
     /// at construction.
     pub fn now_100ns(&self) -> i64 {
-        self.source
-            .read_100ns(self.anchor.instant, self.anchor.utc_100ns)
+        let timeline_utc = self.anchor.utc_100ns - shift_100ns(self.shift.slots);
+        self.source.read_100ns(self.anchor.instant, timeline_utc)
     }
 
     /// Advance the frame counter, re-anchor the monotonic-to-UTC mapping every
@@ -258,38 +288,73 @@ impl WallClock {
         latency_us
     }
 
-    /// Apply a step the probe confirmed (#224): the telemetry, one INFO line,
-    /// then the new anchor — a step ahead, or ONE hold, never a step back.
+    /// Apply a step the probe confirmed (#224): the telemetry, the regrid
+    /// (the relabel + the timeline's remainder, never a step back), one INFO
+    /// line.
     fn follow_probed_step(&mut self, probe: BracketedRead, follow: &ProbeFollow) {
         self.stats.record_sample(&follow.sample);
         self.stats.record_step(follow.delta_100ns, &follow.step);
-        self.stats.record_follow(&follow.followed, &follow.step);
         self.pending = None; // the whole step is followed: nothing left to confirm
         // A fresh anchor: the next resample is 100 ticks away, so it never lands
-        // inside the hold this follow may start (a submit consumer ticks per
-        // job, also inside its own hold) and re-measures it as a new step.
+        // inside a hold this follow may start (a submit consumer ticks per job,
+        // also inside its own hold) and re-measures it as a new step.
         self.frames_since_resample = 0;
         let latency_us = self.record_detect_to_follow(probe.midpoint(), follow.sample.instant);
+        let (at, applied) = (follow.sample.instant, follow.step.applied_100ns);
+        let timeline = self.regrid(at, follow.wall_100ns, applied, &follow.followed);
         info!(
             delta_us = to_us(follow.delta_100ns),
             step_us = to_us(follow.followed.total_100ns),
             applied_us = to_us(follow.step.applied_100ns),
             direction = follow.followed.direction.as_str(),
+            shift_slots = self.shift.slots,
+            remainder_us = to_us(self.shift.last_remainder_100ns),
+            timeline_us = to_us(timeline),
             probe_delta_us = to_us(follow.probe_delta_100ns),
             probe_bracket_us = probe.width().as_micros() as u64,
             bracket_us = follow.sample.bracket.as_micros() as u64,
             detect_to_follow_us = latency_us,
             "wallclock: UTC step followed at once by the boundary probe (#224)"
         );
-        let (instant, utc) = apply_anchor_step(
-            follow.sample.instant,
-            follow.wall_100ns,
-            follow.step.applied_100ns,
-        );
+    }
+
+    /// Follow a confirmed step (#224 part 2, `fleet_shift.rs`). The UTC
+    /// anchor takes the whole step (`applied_utc` against `wall_utc`, what
+    /// the wall reads at `at`); the registry says how many whole slots N the
+    /// labels move; the timeline moves only by the rest. That is a step ahead
+    /// of the remainder r, or ONE hold of a ≤ 1 ms residue: when a resample's
+    /// armed 1 ms already moved the wall further than r, or when the wall
+    /// adopted another wall's N for a step it read a little smaller. Never a
+    /// step back. Returns the timeline's movement (100 ns).
+    fn regrid(
+        &mut self,
+        at: Instant,
+        wall_utc: i64,
+        applied_utc: i64,
+        followed: &FollowedStep,
+    ) -> i64 {
+        let relabel = self.fleet.follow(self.shift.epochs, followed.total_100ns);
+        let k = self.shift.slots;
+        let moved = relabel_100ns(k, relabel.slots);
+        let timeline = applied_utc - moved;
+        let (instant, t) = apply_anchor_step(at, wall_utc - shift_100ns(k), timeline);
+        self.shift = WallShift {
+            slots: k + relabel.slots,
+            epochs: relabel.epochs,
+            regrids: self.shift.regrids + 1,
+            last_remainder_100ns: followed.total_100ns - moved,
+            last_jump_100ns: timeline.max(0),
+        };
         self.anchor = Anchor {
             instant,
-            utc_100ns: utc,
+            utc_100ns: t + shift_100ns(self.shift.slots),
         };
+        let step = AnchorStep {
+            applied_100ns: timeline,
+            carry_100ns: 0,
+        };
+        self.stats.record_follow(followed, &step);
+        timeline
     }
 
     /// Re-anchor from a fresh bracketed sample (#147). `delta` is what an
@@ -298,9 +363,12 @@ impl WallClock {
     /// applies now, UNLESS this resample confirms the previous one's step
     /// (`decide_anchor_step`: both brackets narrow, the same delta ±1 ms): then
     /// the rest of the step is followed in this ONE event, as every other fleet
-    /// sender follows a dantesync date step — a step ahead when forward, ONE
-    /// hold when backward. A lone outlier stays bounded at 1 ms; a backward
-    /// correction is a hold, never a step back.
+    /// sender follows a dantesync date step, through the same [`regrid`]
+    /// as the probe (#224 part 2: a relabel plus the remainder). A lone outlier
+    /// stays bounded at 1 ms; a backward correction is a hold, never a step
+    /// back.
+    ///
+    /// [`regrid`]: Self::regrid
     fn reanchor(&mut self) {
         let sample = anchor_sample(&*self.source);
         self.stats.record_sample(&sample);
@@ -311,19 +379,24 @@ impl WallClock {
         let step = decision.step;
         self.stats.record_step(delta, &step);
         if let Some(followed) = decision.followed {
-            self.stats.record_follow(&followed, &step);
             // #224: the resample follows only a step no probe followed (every
             // probe of it rejected); the follow ends that detection.
             let latency_us = self.record_detect_to_follow(sample.instant, sample.instant);
+            let timeline = self.regrid(sample.instant, wall, step.applied_100ns, &followed);
             info!(
                 delta_us = to_us(delta),
                 step_us = to_us(followed.total_100ns),
                 direction = followed.direction.as_str(),
+                shift_slots = self.shift.slots,
+                remainder_us = to_us(self.shift.last_remainder_100ns),
+                timeline_us = to_us(timeline),
                 bracket_us = sample.bracket.as_micros() as u64,
                 detect_to_follow_us = latency_us,
                 "wallclock: confirmed UTC step followed in one re-anchor (#147)"
             );
-        } else if step.is_clamped() {
+            return;
+        }
+        if step.is_clamped() {
             warn!(
                 delta_us = to_us(delta),
                 bracket_us = sample.bracket.as_micros() as u64,
@@ -350,6 +423,18 @@ impl WallClock {
     /// follow's detect-to-follow time. Surfaced on `PacingStats`.
     pub fn probe_stats(&self) -> StepProbeStats {
         self.probe_stats
+    }
+
+    /// This wall's relabel K_w and its last regrid (#224 part 2). Surfaced
+    /// on `PacingStats`; VBAN's clock reads the timeline's jump off it.
+    pub fn shift(&self) -> WallShift {
+        self.shift
+    }
+
+    /// The relabel registry this wall follows (#224 part 2). Its K is the
+    /// fleet shift K_F every wire stamp is put on with.
+    pub fn fleet(&self) -> &Arc<FleetShift> {
+        &self.fleet
     }
 
     /// Frames elapsed since the last anchor re-sample (0 immediately after a
@@ -501,3 +586,7 @@ mod wallclock_tests_probe;
 #[cfg(test)]
 #[path = "wallclock_tests_probe_rule.rs"]
 mod wallclock_tests_probe_rule;
+
+#[cfg(test)]
+#[path = "wallclock_tests_regrid.rs"]
+mod wallclock_tests_regrid;

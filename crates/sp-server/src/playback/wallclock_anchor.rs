@@ -276,8 +276,9 @@ pub fn decide_anchor_step(
 /// earlier reading. ONE rule for the resample's confirmation
 /// ([`decide_anchor_step`]) and the probe's ([`decide_step_probe`]). Within the
 /// tolerance two readings of a step over 1 ms have the same sign, so the rule
-/// never compares directions.
-fn same_step(armed_delta_100ns: i64, applied_100ns: i64, delta_100ns: i64) -> bool {
+/// never compares directions. The fleet relabel registry reuses it to match
+/// one wall's reading of a date step against another's (#224 part 2).
+pub fn same_step(armed_delta_100ns: i64, applied_100ns: i64, delta_100ns: i64) -> bool {
     (delta_100ns + applied_100ns - armed_delta_100ns).abs() <= ANCHOR_MAX_STEP_100NS
 }
 
@@ -482,15 +483,15 @@ pub struct WallAnchorStats {
     /// The total step (µs) of the last followed step, signed (negative =
     /// backward); 0 before any.
     pub last_step_us: i64,
-    /// Confirmed BACKWARD steps followed as ONE hold (#147), a subset of
-    /// `steps_followed`.
+    /// Followed steps that HELD the wall's timeline (a subset of
+    /// `steps_followed`). Since #224 part 2 a followed step relabels: the
+    /// timeline moves only by the remainder r ≥ 0 left after the whole slots,
+    /// so a backward step is no hold. A hold is only the ≤ 1 ms residue left
+    /// when a resample's armed 1 ms already moved the wall further than r, or
+    /// a wall adopting another wall's slot count for a step it read a little
+    /// smaller.
     pub holds_followed: u64,
-    /// How long (µs) the last followed hold froze the wall from the follow:
-    /// the whole step when the probe follows it at the boundary it lands (also
-    /// in the tick a resample armed it with a 1 ms hold, which the follow's
-    /// hold covers); the step minus the elapsed arming 1 ms when the follow
-    /// comes a boundary or more after that resample (the next resample, or a
-    /// probe after a rejected same-tick probe); 0 before any.
+    /// How long (µs) the last such hold froze the timeline; 0 before any.
     pub last_hold_us: u64,
 }
 
@@ -518,12 +519,15 @@ impl WallAnchorStats {
         }
     }
 
-    /// Record a `followed` step whose rest was applied now as `step`: a step
-    /// ahead, or (backward) one hold of `|step.applied_100ns|`.
+    /// Record a `followed` step that moved the wall's timeline by
+    /// `step.applied_100ns` now: a step ahead, or ONE hold of
+    /// `|step.applied_100ns|` when negative (#224 part 2: the timeline's
+    /// movement, never the step's direction — a relabelled backward step
+    /// moves the timeline forward by its remainder).
     pub fn record_follow(&mut self, followed: &FollowedStep, step: &AnchorStep) {
         self.steps_followed += 1;
         self.last_step_us = to_us(followed.total_100ns);
-        if followed.direction == StepDirection::Backward {
+        if step.applied_100ns < 0 {
             self.holds_followed += 1;
             self.last_hold_us = step.applied_100ns.unsigned_abs() / 10;
         }

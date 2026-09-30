@@ -260,47 +260,51 @@ fn a_followed_hold_is_recorded_with_its_signed_step_and_its_hold_length() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_minus_1_5_s_step_is_one_hold_from_the_next_boundary_and_the_wall_never_goes_back() {
-    // #224: the probe of the first boundary after the step follows it as ONE
-    // hold of the whole 1.5 s; no 1 ms arming hold first (#147).
+fn a_minus_1_5_s_step_keeps_the_timeline_monotonic_and_never_holds() {
+    // #224 part 2 (design record 5899388193): the nightly −1.5 s step is
+    // exactly −45 whole slots, r = 0. The probe of the first boundary after
+    // it relabels it: the labels move 45 slots back, the timeline does not
+    // move at all — no 1.5 s hold (#147/#224 part 1 froze it, and paused
+    // every paced output for the whole step).
     let clk = VirtualClock::new(0);
     let mut wall = WallClock::new(Box::new(clk.clone()));
     clk.step_utc(STEP);
     clk.advance_ns(FRAME_NS);
-    let frozen = wall.now_100ns();
+    let before = wall.now_100ns();
     wall.tick();
+    assert_eq!(wall.now_100ns(), before, "r = 0: the timeline did not move");
     assert_eq!(
-        wall.now_100ns(),
-        frozen,
-        "a hold starts at the reading shown"
-    );
-    assert_eq!(
-        frozen - clk.truth_100ns(),
+        wall.now_100ns() - clk.truth_100ns(),
         -STEP,
-        "1.5 s ahead of the new UTC"
+        "1.5 s ahead of the new UTC labels: 45 slots relabelled"
     );
-    let st = wall.anchor_stats();
-    assert_eq!(st.steps_followed, 1, "followed at the first boundary");
-    assert_eq!(st.holds_followed, 1, "exactly one hold event");
-    // The wall freezes for the whole step, then runs on the UTC line. The
-    // boundaries keep ticking through the hold (every ~33 ms, as a submit
-    // consumer does): each probe inside it sees no new step.
-    let mut prev = frozen;
+    let shift = wall.shift();
+    assert_eq!(
+        (
+            shift.slots,
+            shift.last_remainder_100ns,
+            shift.last_jump_100ns
+        ),
+        (-45, 0, 0)
+    );
+    // It runs on at once, one timeline tick per 100 ns of the monotonic
+    // clock, and the boundaries keep ticking (every ~33 ms): no probe reads
+    // a new step.
+    let mut prev = before;
     for ms in 1..=1_600i64 {
         clk.advance_ns(1_000_000);
         if ms % 33 == 0 {
             wall.tick();
         }
         let w = wall.now_100ns();
-        assert!(w >= prev, "ms {ms}: the wall went back");
+        assert_eq!(w - prev, MS, "ms {ms}: exactly 1 ms on, never held");
         assert_eq!(
             w,
-            frozen.max(clk.truth_100ns()),
-            "ms {ms}: frozen until the UTC line reaches it, then on it"
+            clk.truth_100ns() - STEP,
+            "ms {ms}: on the relabelled line"
         );
         prev = w;
     }
-    assert_eq!(wall.now_100ns(), clk.truth_100ns(), "on the UTC line");
     // The next resample is normal again (48 ticks since the follow restarted
     // the count).
     while wall.frames_since_resample() < 99 {
@@ -312,7 +316,6 @@ fn a_minus_1_5_s_step_is_one_hold_from_the_next_boundary_and_the_wall_never_goes
     wall.tick();
     assert_eq!(wall.frames_since_resample(), 0, "the 100th tick resampled");
     assert_eq!(wall.now_100ns(), before);
-    assert_eq!(wall.now_100ns(), clk.truth_100ns());
     assert_eq!(
         wall.anchor_stats(),
         WallAnchorStats {
@@ -321,8 +324,8 @@ fn a_minus_1_5_s_step_is_one_hold_from_the_next_boundary_and_the_wall_never_goes
             slewed_us: 0,
             steps_followed: 1,
             last_step_us: -1_500_000,
-            holds_followed: 1,
-            last_hold_us: 1_500_000,
+            holds_followed: 0,
+            last_hold_us: 0,
         }
     );
 }

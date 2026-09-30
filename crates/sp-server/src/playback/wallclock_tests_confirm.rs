@@ -215,8 +215,12 @@ fn a_step_whose_first_probe_is_preempted_is_followed_at_the_next_boundary() {
     let (before, after) = tick_once(&mut wall, &clk);
     assert_eq!(after, before, "a wide probe moves nothing");
     let (before, after) = tick_once(&mut wall, &clk);
-    assert_eq!(after - before, 50 * MS, "followed at the next boundary");
-    assert_eq!(after, clk.truth_100ns());
+    // #224 part 2: +50 ms = 1 slot relabelled + r = 16.67 ms on the timeline.
+    assert_eq!(after - before, 166_666, "followed at the next boundary: r");
+    assert_eq!(
+        after,
+        clk.truth_100ns() - crate::playback::fleet_shift::shift_100ns(1)
+    );
     let st = wall.anchor_stats();
     assert_eq!(st.steps_followed, 1);
     assert_eq!(st.last_step_us, 50_000);
