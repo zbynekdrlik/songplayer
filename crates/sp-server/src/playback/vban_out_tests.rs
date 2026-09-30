@@ -134,39 +134,6 @@ fn out_with(cfg: VbanConfig) -> VbanOut {
 // --- the block hand-off ---------------------------------------------------
 
 #[test]
-fn a_program_frame_moves_in_and_anything_else_is_substituted_silence() {
-    let data = vec![0.5f32; 3200];
-    let ptr = data.as_ptr();
-    let b = VbanBlock::from_frames(7, vec![frame(data, 2, 48_000)]);
-    assert_eq!(b.due_100ns, 7);
-    assert!(!b.substituted);
-    let samples = b.samples.expect("one program block is kept");
-    assert_eq!(samples.as_ptr(), ptr, "moved, not copied");
-
-    let cases = [
-        (vec![], "no frame"),
-        (
-            vec![
-                frame(vec![0.5; 3200], 2, 48_000),
-                frame(vec![0.5; 3200], 2, 48_000),
-            ],
-            "two frames",
-        ),
-        (vec![frame(vec![0.5; 3200], 1, 48_000)], "mono"),
-        (vec![frame(vec![0.5; 3200], 2, 44_100)], "44.1 kHz"),
-        (vec![frame(vec![0.5; 3198], 2, 48_000)], "short"),
-    ];
-    for (frames, what) in cases {
-        let b = VbanBlock::from_frames(9, frames);
-        assert_eq!(b.samples, None, "{what}");
-        assert!(b.substituted, "{what}");
-        assert_eq!(b.due_100ns, 9);
-    }
-    let s = VbanBlock::silence(11);
-    assert_eq!((s.due_100ns, s.samples, s.substituted), (11, None, false));
-}
-
-#[test]
 fn a_program_frame_is_copied_for_vban_and_anything_else_is_substituted_silence() {
     // #210: the block goes to VBAN before the pair's NDI submit, which still
     // borrows the frames, so VBAN gets a copy of the same samples.
@@ -212,6 +179,8 @@ fn a_program_frame_is_copied_for_vban_and_anything_else_is_substituted_silence()
             "{what}"
         );
     }
+    let s = VbanBlock::silence(11);
+    assert_eq!((s.due_100ns, s.samples, s.substituted), (11, None, false));
 }
 
 #[test]
@@ -468,7 +437,7 @@ fn a_substituted_block_is_counted_even_while_disabled() {
     let out = VbanOut::new();
     let mut clock = FakeClock::at(D);
     let mut sink = RecordingSink::on(&clock);
-    let b = VbanBlock::from_frames(D, Vec::new());
+    let b = VbanBlock::copied(D, &[]);
     VbanSender::default().send_block(&out, &b, &mut sink, &mut clock);
     VbanSender::default().send_block(&out, &VbanBlock::silence(D), &mut sink, &mut clock);
     assert_eq!(out.status().blocks_substituted, 1);
