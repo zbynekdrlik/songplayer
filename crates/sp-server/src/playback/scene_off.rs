@@ -39,6 +39,13 @@
 //! shared subtitle clips never happen. The program bus then mixes the rest
 //! of the window out of the paused side's standby (its frozen frame or idle
 //! black, and silence).
+//!
+//! The file also holds the wall re-syncs around a program change (#221):
+//! after an OFF, `wall_after_scene_off` (the title, `resync_wall_lines`, and
+//! the owner's stage display), and on the wall owner's ON,
+//! `wall_after_owner_on` (the same three, `resync_presenter` for the stage
+//! display), since only the wall owner writes the wall
+//! (`OnAirPlaylists::may_write_wall`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -85,7 +92,13 @@ impl PlaybackEngine {
     /// authority's diffed set: a playlist whose OFF is queued too is leaving.
     /// Its title is still a candidate (`title_candidates`), so a due one can
     /// be re-synced for the moment until its own OFF re-syncs the wall.
-    pub(super) async fn wall_after_scene_off(&self) {
+    ///
+    /// #221 review round 3: the wall owner can change by this OFF alone (a
+    /// cut to "OBS manuál" while cg OBS still shows another playlist), so the
+    /// stage display is re-synced to the owner too (`resync_presenter`), as
+    /// at an owner's ON. After the OFF of a member that did not own the wall,
+    /// that repeats the owner's current line: harmless.
+    pub(super) async fn wall_after_scene_off(&mut self) {
         let others_on_program = self
             .pipelines
             .iter()
@@ -107,6 +120,9 @@ impl PlaybackEngine {
             None => {} // the due title's read failed: nothing is sent
         }
         self.resync_wall_lines();
+        if let Some(owner) = self.on_air.owner() {
+            self.resync_presenter(owner);
+        }
     }
 
     /// Re-send the wall's line now: the line of every playlist on program in
