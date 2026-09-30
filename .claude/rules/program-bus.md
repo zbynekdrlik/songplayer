@@ -298,7 +298,11 @@ nothing).
     title and the line to the playlists still on program (the owner's)
     and ends with `resync_presenter(owner)` (review round 3); after the
     OFF of a member that did not own the wall that repeats the owner's
-    current line, which is harmless;
+    current line, or clears the stage display while the owner is in a
+    blank stretch (its dispatch would hold its last line there): the
+    display goes blank like the wall until the owner's next line (review
+    round 4; rare: a failed mirror, then cg OBS put on the program's own
+    scene);
   - with NO owner (nothing on air, or before the authority's first value:
     the engine's unit tests) nothing is restricted, as before: a playlist
     whose OFF is still queued writes until its OFF re-syncs the wall, and a

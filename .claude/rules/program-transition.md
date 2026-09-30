@@ -6,6 +6,7 @@ paths:
   - "crates/sp-server/src/playback/scene_off*.rs"
   - "crates/sp-server/src/playback/tests_hold.rs"
   - "crates/sp-server/src/playback/tests_scene_off_wall.rs"
+  - "crates/sp-server/src/playback/tests_wall_owner.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event.rs"
   - "crates/sp-server/src/playback/clear_lyrics.rs"
   - "crates/sp-server/src/playback/engine_play.rs"
@@ -309,12 +310,24 @@ OFF first). The wall step runs before the pause/hold:
   "One wall owner"). Residual, with no owner only: the candidates are
   `scene_active` ones (`title_candidates`), so a due title of a playlist
   whose OFF is queued can be re-synced until its own OFF re-syncs the wall.
+- The stage display (#221 review round 3): with another playlist on
+  program, the OFF ends with `resync_presenter(owner)` — the wall owner's
+  line at its last position, or a cleared display — because the owner can
+  change by this OFF alone (a cut to "OBS manuál" while cg OBS still
+  shows another playlist). After the OFF of a member that did not own the
+  wall it repeats the owner's line, or clears the display while the owner
+  is in a blank stretch (review round 4: blank like the wall until the
+  owner's next line).
 - The other half, an ON: the wall owner's ON re-syncs the title, the line
   and the stage display to it (`scene_off::wall_after_owner_on`, review
   rounds 1-2), since the old owner writes nothing any more; details in
   `program-bus.md` "One wall owner".
 - Pinned in `tests_scene_off_wall.rs` (`going_off_program_*`, a child
-  module of `tests_scene_change.rs` that reuses its rig).
+  module of `tests_scene_change.rs` that reuses its rig) and, for the
+  wall owner, `tests_wall_owner.rs`
+  (`an_owner_change_by_an_off_re_syncs_the_stage_display`,
+  `the_new_owner_s_on_re_syncs_the_wall_s_line`,
+  `a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down`).
 
 ### A held playlist has no side effects (release 0.68.0 blockers)
 

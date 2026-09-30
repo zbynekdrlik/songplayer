@@ -97,7 +97,10 @@ impl PlaybackEngine {
     /// cut to "OBS manuál" while cg OBS still shows another playlist), so the
     /// stage display is re-synced to the owner too (`resync_presenter`), as
     /// at an owner's ON. After the OFF of a member that did not own the wall,
-    /// that repeats the owner's current line: harmless.
+    /// that repeats the owner's current line, or (review round 4) clears the
+    /// stage display while the owner is in a blank stretch, where its
+    /// dispatch holds its last line: the display goes blank like the wall
+    /// until the owner's next line.
     pub(super) async fn wall_after_scene_off(&mut self) {
         let others_on_program = self
             .pipelines
