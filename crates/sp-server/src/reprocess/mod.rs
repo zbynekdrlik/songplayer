@@ -157,8 +157,8 @@ impl ReprocessWorker {
         info!("reprocess worker stopped");
     }
 
-    /// Process all videos with `gemini_failed = 1`. Returns count of
-    /// successfully reprocessed videos.
+    /// Process every row of the repair queue (`REPAIR_QUEUE_WHERE`). Returns
+    /// the count of successfully reprocessed videos.
     ///
     /// Aborts the current batch on the first rate-limit response, setting
     /// the global cooldown so subsequent calls within the cooldown window

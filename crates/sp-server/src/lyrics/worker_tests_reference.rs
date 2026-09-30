@@ -337,7 +337,9 @@ async fn run_mtl_reference_stage_skips_when_candidate_too_short() {
 
 /// #144: an empty transcript can never pass the gate (no line matches), so
 /// the stage skips before spending an mtl run on it; the base tier then
-/// quarantines the song as `asr_gap` from the same empty transcript.
+/// quarantines the song as `asr_gap` from the same empty transcript (or, for
+/// a song the wall already serves, records only the attempt and keeps its
+/// lyrics — `worker_outcome::quarantine_empty_transcript`).
 #[tokio::test]
 async fn run_mtl_reference_stage_skips_when_the_transcript_is_empty() {
     let pool = crate::db::create_memory_pool().await.unwrap();

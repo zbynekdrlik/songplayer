@@ -102,8 +102,13 @@ Design record: #136 comment 5894034820.
   - No audio on disk after that read = a re-pick with NO penalty: no attempt,
     the status untouched, only `stem_next_attempt_at` / `dub_next_attempt_at`
     set `INPUT_MISSING_RECHECK` (10 min) ahead. Without that wait a song whose
-    audio is gone for good would be re-picked every tick ahead of the rest of
-    the queue (the selectors order by id / request time).
+    audio is gone for good would be picked again first on every tick, ahead of
+    the rest of the queue (the stem queue is in-use-first, then by id; the dub
+    queue newest request first).
+  - Read under the lock, a missing file is a real loss, not the rename race.
+    The WARN names the recorded path, and a dub also records it in
+    `dub_error` (what the Dabing section shows; `mark_dub_ready` clears it).
+    Nothing re-downloads a lost audio file (a row stays `normalized = 1`).
   - A rename can still land WHILE the job runs; the re-link below covers it.
   - Pinned by `song_input_tests.rs` (structural: slot → re-read → job →
     separation / synthesis in each `process_next`; the rename and the
