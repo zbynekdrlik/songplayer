@@ -107,7 +107,9 @@ Design record: #136 comment 5894034820.
     queue newest request first).
   - Read under the lock, a missing file is a real loss, not the rename race.
     The WARN names the recorded path, and a dub also records it in
-    `dub_error` (what the Dabing section shows; `mark_dub_ready` clears it).
+    `dub_error`: the Dabing tooltip (sp-ui `dabing_list.rs::chain_detail`)
+    shows a non-empty `dub_error` after the chain path for a chain that is
+    not failed too (e2e/dabing.spec.ts), and `mark_dub_ready` clears it.
     Nothing re-downloads a lost audio file (a row stays `normalized = 1`).
   - A rename can still land WHILE the job runs; the re-link below covers it.
   - Pinned by `song_input_tests.rs` (structural: slot → re-read → job →

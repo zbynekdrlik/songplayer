@@ -82,10 +82,20 @@ answered correctly), and nothing ever ran the real providers.
   `gemini_failed = 0, metadata_source = 'manual'`. `REPAIR_QUEUE_WHERE`
   excludes `metadata_source = 'manual'` (`IS NOT`, so a NULL source stays in),
   so the repair never writes over a correction or renames its files. A PATCH
-  of the other fields only leaves both alone. Pinned by
-  `api/routes_tests_patch_metadata.rs::a_patched_title_survives_the_metadata_repair`
-  (the real router, then `ReprocessWorker::process_all`) and
-  `health_tests.rs::a_manual_row_is_not_in_the_repair_queue`. Nothing reads
+  of the other fields only leaves both alone.
+  - **A correction made WHILE a batch runs** (review round 2): `process_all`
+    reads the queue once, then each row waits for the providers. So
+    `reprocess_one` re-reads the row under `cache::SONG_FILES` with
+    `WHERE id = ? AND REPAIR_QUEUE_WHERE` and returns `LeftQueue` (nothing
+    renamed or written) when it left the queue; `patch_video` runs a title
+    UPDATE under the same lock, so the PATCH and that re-check + write
+    serialize. Never add a repair write outside that locked re-check.
+  - Pinned by `api/routes_tests_patch_metadata.rs`:
+    `a_patched_title_survives_the_metadata_repair` (the real router, then
+    `ReprocessWorker::process_all`) and
+    `a_correction_made_while_the_repair_batch_runs_survives` (the provider
+    mock makes the real PATCH during its call); and
+    `health_tests.rs::a_manual_row_is_not_in_the_repair_queue`. Nothing reads
   `metadata_source` back into `MetadataSource`, so `'manual'` needs no enum
   variant. Its limits (review round 1):
   - The correction is on ONE row. The same YouTube video in another playlist
