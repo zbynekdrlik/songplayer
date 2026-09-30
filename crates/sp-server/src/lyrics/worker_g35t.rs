@@ -124,21 +124,7 @@ impl LyricsWorker {
                 Ok(G35tOutcome::Track(track))
             }
             None => {
-                warn!(
-                    youtube_id = %youtube_id,
-                    "g35t base tier: empty transcript — quarantining as asr_gap"
-                );
-                if let Err(e) = crate::db::models::quarantine_video_lyrics(
-                    &self.pool,
-                    video_id,
-                    &self.cache_dir,
-                    "empty_transcript",
-                    LYRICS_PIPELINE_VERSION,
-                )
-                .await
-                {
-                    warn!(youtube_id = %youtube_id, %e, "g35t base tier: quarantine failed");
-                }
+                self.quarantine_empty_transcript(video_id, youtube_id).await;
                 Ok(G35tOutcome::Quarantined)
             }
         }

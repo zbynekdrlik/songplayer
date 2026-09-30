@@ -430,18 +430,7 @@ impl LyricsWorker {
             }
             // #144: stems sidecar not ready — no-penalty recheck, selector moves on.
             Ok(SongOutcome::WaitingForStems) => self.defer_for_stems(video_id).await,
-            Err(e) => {
-                debug!("worker: processing failed for {youtube_id}: {e}");
-                let _ = crate::db::models::mark_video_lyrics(
-                    &self.pool,
-                    video_id,
-                    false,
-                    Some("no_source"),
-                    crate::lyrics::LYRICS_PIPELINE_VERSION,
-                )
-                .await;
-                self.clear_processing().await;
-            }
+            Err(e) => self.fail_song(video_id, &youtube_id, &e).await,
         }
     }
 

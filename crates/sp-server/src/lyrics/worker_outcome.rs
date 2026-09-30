@@ -10,7 +10,7 @@
 //! row with an exponential backoff (mirroring the downloader, #140) so the
 //! selector skips it until due.
 
-use tracing::warn;
+use tracing::{debug, warn};
 
 use super::worker::LyricsWorker;
 
@@ -98,6 +98,43 @@ impl LyricsWorker {
             crate::db::models::record_lyrics_wait(&self.pool, video_id, STEMS_WAIT_RECHECK).await
         {
             warn!("worker: record_lyrics_wait failed for {video_id}: {e}");
+        }
+    }
+
+    /// The `Err` exit of `process_next`: `process_song` failed for this row
+    /// (e.g. a failed Claude cleanup in `gather.rs`). Marks it `no_source` at
+    /// the current pipeline version and clears the in-flight marker.
+    pub(crate) async fn fail_song(&self, video_id: i64, youtube_id: &str, error: &anyhow::Error) {
+        debug!("worker: processing failed for {youtube_id}: {error}");
+        let _ = crate::db::models::mark_video_lyrics(
+            &self.pool,
+            video_id,
+            false,
+            Some("no_source"),
+            crate::lyrics::LYRICS_PIPELINE_VERSION,
+        )
+        .await;
+        self.clear_processing().await;
+    }
+
+    /// The g35t base tier's empty-transcript exit: quarantines the row as
+    /// `asr_gap` (`quarantine_video_lyrics`, which also removes its
+    /// `<yt>_lyrics.json`).
+    pub(crate) async fn quarantine_empty_transcript(&self, video_id: i64, youtube_id: &str) {
+        warn!(
+            youtube_id = %youtube_id,
+            "g35t base tier: empty transcript — quarantining as asr_gap"
+        );
+        if let Err(e) = crate::db::models::quarantine_video_lyrics(
+            &self.pool,
+            video_id,
+            &self.cache_dir,
+            "empty_transcript",
+            crate::lyrics::LYRICS_PIPELINE_VERSION,
+        )
+        .await
+        {
+            warn!(youtube_id = %youtube_id, %e, "g35t base tier: quarantine failed");
         }
     }
 
