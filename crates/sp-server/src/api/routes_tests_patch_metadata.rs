@@ -726,3 +726,61 @@ async fn an_artist_only_correction_of_a_row_with_no_song_keeps_the_songs() {
             .unwrap();
     assert_eq!(row42, (None, Some("planetboom".to_string())));
 }
+
+/// Review round 2: an artist ALONE never corrects a video with no song yet
+/// (no row of it downloaded). A download names such a video after the
+/// provider chain and would write over the artist, so the PATCH is refused
+/// (400) and nothing is written; the dashboard sends the song with the
+/// artist. A PATCH of the other fields of that row still works, a row that
+/// does not exist stays 404, and the song with the artist is taken.
+#[tokio::test]
+async fn an_artist_alone_for_a_video_with_no_song_is_refused() {
+    let state = test_state().await;
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, title, normalized) \
+         VALUES (43, 1, 'NOSONG0001', 'Break! - planetboom (Live)', 0)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let pool = state.pool.clone();
+
+    let artist_alone = serde_json::json!({ "artist": "planetboom" });
+    let status = patch(state.clone(), 43, artist_alone.clone()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        title_row(&pool, 43).await,
+        (None, None, None),
+        "nothing is written"
+    );
+
+    let flag = serde_json::json!({ "suppress_resolume_en": true });
+    assert_eq!(patch(state.clone(), 43, flag).await, StatusCode::NO_CONTENT);
+    let status = patch(state.clone(), 999, artist_alone).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let title = serde_json::json!({ "song": "Break!", "artist": "planetboom" });
+    assert_eq!(patch(state, 43, title).await, StatusCode::NO_CONTENT);
+    let taken = (
+        Some("Break!".to_string()),
+        Some("planetboom".to_string()),
+        Some("manual".to_string()),
+    );
+    assert_eq!(title_row(&pool, 43).await, taken);
+}
+
+/// Row `id`'s `(song, artist, metadata_source)`.
+async fn title_row(
+    pool: &sqlx::SqlitePool,
+    id: i64,
+) -> (Option<String>, Option<String>, Option<String>) {
+    sqlx::query_as("SELECT song, artist, metadata_source FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
