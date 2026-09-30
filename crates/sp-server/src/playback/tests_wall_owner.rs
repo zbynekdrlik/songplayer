@@ -340,6 +340,31 @@ async fn a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down() {
     assert!(is_cleared(&bodies[1]), "{bodies:?}");
 }
 
+/// Review round 3: the owner can change through an OFF alone too — a cut to
+/// "OBS manuál" while cg OBS still shows another playlist ({7, 9} with 9
+/// owning → {7} with 7 owning, and only 9's OFF is sent). The OFF re-syncs
+/// the stage display to the new owner, as its ON would: cleared here, 7
+/// having no line — never 9's line left there, nor re-pushed.
+#[tokio::test]
+async fn an_owner_change_by_an_off_re_syncs_the_stage_display() {
+    let (mut engine, mut rx) = two_on_air(9).await;
+    let stage = presenter(&mut engine).await;
+    engine.dispatch_lyrics_if_changed(9, 60_000);
+    assert!(pushes(&stage, 1).await[0].contains("delta"));
+    engine.pipelines.get_mut(&7).unwrap().lyrics_state = None;
+    engine.on_air.publish(on_air(&[7]), Some(7));
+    sent(&mut rx);
+
+    engine.handle_scene_change(9, false).await;
+
+    let bodies = pushes(&stage, 2).await;
+    assert!(
+        is_cleared(&bodies[1]),
+        "9's line leaves the stage: {bodies:?}"
+    );
+    assert!(engine.pipelines[&7].last_presenter_text.is_none());
+}
+
 /// A Resolume recovery re-syncs the owner's title and re-sends only its
 /// line, whatever the playlist ids (before: the highest id's title, both
 /// lines).
