@@ -19,6 +19,9 @@ use crate::playback::program_bus::ProgramBus;
 use crate::playback::vban_out::{VbanClock, WallVbanClock};
 use crate::playback::wallclock::{ClockSource, VirtualClock, WallClock};
 
+/// Far more clock reads than 40 boundaries take (about three each).
+const MAX_READS: u64 = 10_000;
+
 /// The input's grid clock over a virtual wall (see the module doc).
 struct SteppedClock {
     clock: WallVbanClock,
@@ -29,6 +32,9 @@ struct SteppedClock {
     step: Option<(i64, i64)>,
     /// Stop the loop once this many boundaries were serviced.
     stop_after: usize,
+    /// Clock reads so far: the loop is stopped after [`MAX_READS`] too, so a
+    /// clock that never advances (a mutant) fails the test, never hangs it.
+    reads: u64,
     /// `(virtual instant, stamp)` of every serviced boundary.
     services: Vec<(Instant, i64)>,
 }
@@ -39,7 +45,8 @@ impl VbanClock for SteppedClock {
         for job in drain(&self.bus) {
             self.services.push((at, job.video_tc_100ns));
         }
-        if self.services.len() >= self.stop_after {
+        self.reads += 1;
+        if self.services.len() >= self.stop_after || self.reads > MAX_READS {
             self.shared.stop();
         }
         self.clock.now_100ns()
@@ -80,6 +87,7 @@ fn run(step_100ns: i64) -> (Vec<(Instant, i64)>, NdiInputStatus) {
         shared: shared.clone(),
         step: Some((b(20), step_100ns)),
         stop_after: 40,
+        reads: 0,
         services: Vec::new(),
     };
     let loop_bus = bus.clone();
