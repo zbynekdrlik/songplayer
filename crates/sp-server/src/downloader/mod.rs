@@ -14,6 +14,7 @@ pub mod tools;
 pub mod ytdlp_cmd;
 
 use crate::metadata::ProviderChain;
+use crate::metadata::manual::download_title;
 use sqlx::SqlitePool;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -280,9 +281,8 @@ impl DownloadWorker {
             }
         };
 
-        let meta =
-            crate::metadata::get_metadata(self.metadata.providers(), &row.youtube_id, &row.title)
-                .await;
+        // #136: a corrected video keeps its operator's title.
+        let meta = download_title(&self.pool, &self.metadata, &row.youtube_id, &row.title).await;
 
         let video_final = self.cache_dir.join(cache::video_filename(
             &meta.song,
@@ -327,7 +327,7 @@ impl DownloadWorker {
             row.id,
             &meta.song,
             &meta.artist,
-            meta.source.as_str(),
+            meta.source,
             meta.gemini_failed,
             video_final.to_string_lossy().as_ref(),
             audio_final.to_string_lossy().as_ref(),
