@@ -17,6 +17,8 @@ paths:
   - "crates/sp-server/src/lyrics/description_provider*.rs"
   - "crates/sp-server/src/lyrics/reprocess*.rs"
   - "crates/sp-server/src/api/lyrics*.rs"
+  - "crates/sp-server/src/lyrics/worker.rs"
+  - "crates/sp-server/src/playback/lyrics_loader.rs"
 ---
 
 # Lyrics reference text: the two-way gate, the title search, one transcript (#144)
@@ -61,20 +63,24 @@ paths:
 - The scraped-lyrics Claude cleanup (`CleanupMode::ScrapedLyrics`) KEEPS every repeat, because mtl times exactly the lines it is given. When its prompt semantics change, bump the cleanup cache names (`_cleaned_v3.json` today), or the reprocess reuses stale decisions.
 - Turn a fetched timed track or a scraped plain lyric into a candidate only through `text_candidate::{timed_candidate, cleaned_text_candidate}`. `gather.rs` and the title search share them, and `gather_uses_lyrics_ovh_primary_with_genius_fallback` reads both files. The override, description, lyrics.ovh and Spotify candidates are built directly.
 
-## Reprocess: ONE path, and it never blanks what the wall serves
+## Reprocess: ONE per-song path, and no route blanks what the wall serves
 
-- The one reprocess path is `POST /api/v1/lyrics/reprocess` with `{"video_ids":[…]}` or `{"playlist_id":N}` (`api/lyrics.rs::post_reprocess`, the dashboard's Reprocess). It:
+- The one per-song reprocess path is `POST /api/v1/lyrics/reprocess` with `{"video_ids":[…]}` or `{"playlist_id":N}` (`api/lyrics.rs::post_reprocess`, the dashboard's Reprocess). It:
   - sets `lyrics_manual_priority = 1` (bucket 0);
   - resets `lyrics_attempts` / `lyrics_next_attempt_at`;
   - NULLs `lyrics_source` only for the no-lyrics sentinels (`failed`, `empty`, `no_source`, `unsupported_source`).
-- It never touches `has_lyrics` or the `<yt>_lyrics.json`. The wall keeps the old lyrics until the worker's new result replaces them.
-- **A reprocess must never blank served lyrics.** `playback/lyrics_loader.rs` and `GET /api/v1/videos/{id}/lyrics` serve nothing for `has_lyrics = 0`, even with the file on disk.
+- It never touches `has_lyrics` or the `<yt>_lyrics.json`. The wall keeps the old lyrics while the song waits in the queue, and a successful run replaces them.
+- The bulk sweeps use the same manual-priority queue and never reset `has_lyrics` either:
+  - `POST /api/v1/lyrics/reprocess-all-stale` (the dashboard's "Reprocess all stale");
+  - `POST /api/v1/lyrics/reprocess-catalog-with-new-gate` (`api/lyrics_catalog.rs`).
+- **No reprocess route may blank served lyrics.** `playback/lyrics_loader.rs` and `GET /api/v1/videos/{id}/lyrics` serve nothing for `has_lyrics = 0`, even with the file on disk.
 - The deleted per-video `POST /api/v1/videos/{id}/lyrics/reprocess` (`reset_video_lyrics`: `has_lyrics = 0, lyrics_source = NULL`) did exactly that. Queueing the #144 rollout through it blanked 211 songs on the wall for ~6 h on 30.9.2026 (comment 5905405307).
-- Never add a second reprocess route, and never re-queue a row by resetting it.
+- Never add a second per-song reprocess route, and never re-queue a row by resetting it.
+- Known gap, NOT fixed by that deletion: a re-run that ERRORS still blanks the song. `lyrics/worker.rs`'s `Err` arm calls `mark_video_lyrics(false, Some("no_source"), …)`, and it does so for a row that had lyrics too. The manual and null buckets then skip `no_source` at the current version. A served song whose re-run hits, for example, a failed Claude cleanup goes dark until the next manual reprocess or version bump. It is recorded on #144 as a follow-up candidate.
 - Pinned by `api/lyrics_tests.rs`:
   - `a_per_video_reprocess_request_never_blanks_the_served_lyrics`;
   - `the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority`.
-- A bulk re-queue on the box, such as the post-deploy set of a lane, goes through the same endpoint with `video_ids`.
+- A bulk re-queue on the box, such as the post-deploy set of a lane, goes through `POST /api/v1/lyrics/reprocess` with `video_ids`.
 
 ## Mutation-safe loops (a hang fails the gate)
 
