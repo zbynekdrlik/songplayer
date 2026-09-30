@@ -61,7 +61,7 @@ use crate::playback::wallclock::{Anchor, AnchorSample, WALL_REJOIN_IDLE, to_us, 
 /// that run ([`adopt`]); a step within it of nothing registered is never an
 /// epoch (the fuzz after review round 1: at the probe's 2 ms two walls with
 /// opposite outliers split K).
-pub const STEP_RESIDUE_100NS: i64 = 20_000;
+pub const STEP_RESIDUE_100NS: i64 = 30_000;
 
 /// D(K) = ⌈K·P⌉ in 100 ns: how far a timeline K slots behind its labels sits
 /// behind them (P = 10⁷/30, one grid slot). Rounded UP, so an on-grid boundary
