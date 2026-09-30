@@ -490,7 +490,8 @@ pub async fn patch_video(
     }
     // #136: a title correction is final — the row leaves the metadata repair
     // queue (`metadata::health::REPAIR_QUEUE_WHERE`), which would write over it.
-    if song.is_some() || artist.is_some() {
+    let corrects_title = song.is_some() || artist.is_some();
+    if corrects_title {
         sets.push("gemini_failed = 0, metadata_source = 'manual'");
     }
     let sql = format!("UPDATE videos SET {} WHERE id = ?", sets.join(", "));
@@ -522,6 +523,13 @@ pub async fn patch_video(
     }
     q = q.bind(video_id);
 
+    // #136: a repair in flight re-checks the queue and writes under the
+    // song-files lock, so a correction waits for it and is never overwritten.
+    let _files = if corrects_title {
+        Some(crate::downloader::cache::SONG_FILES.lock().await)
+    } else {
+        None
+    };
     match q.execute(&state.pool).await {
         Ok(res) if res.rows_affected() == 0 => (
             StatusCode::NOT_FOUND,
