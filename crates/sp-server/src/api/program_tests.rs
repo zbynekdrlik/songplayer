@@ -682,3 +682,39 @@ async fn the_remote_block_names_sp_programs_scene_after_a_dashboard_cut() {
     let (_, json) = call(state, "GET", "/api/v1/program", None).await;
     assert_eq!(json["remote"]["program_scene"], "OBS manuál");
 }
+
+/// #210: `health.timing` carries the `SP-program` sender's per-boundary
+/// stage timing, under these names, so the box can read which stage made a
+/// VBAN hand-off late.
+#[tokio::test]
+async fn get_program_reports_the_senders_boundary_timing() {
+    let state = test_state().await;
+    let b = 17_907_771_311_333_333;
+    let late =
+        state
+            .program_bus
+            .record_timing(&crate::playback::program_output_timing::BoundaryMarks {
+                stamp_100ns: b,
+                taken_100ns: b + 60_000,
+                fed_100ns: b + 120_000,
+                submit_start_100ns: b + 120_000,
+                submitted_100ns: b + 190_000,
+            });
+    assert!(late.is_some(), "12 ms late: WARNed");
+    let (status, json) = call(state, "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json["health"]["timing"],
+        serde_json::json!({
+            "boundaries": 1,
+            "ready_late_us_max": 6000,
+            "vban_feed_late_us_max": 12000,
+            "submit_us_max": 7000,
+            "ready_late_over_5ms": 1,
+            "vban_feed_late_over_5ms": 1,
+            "submit_over_5ms": 1,
+            "vban_feed_late_over_10ms": 1,
+            "warned": 1
+        })
+    );
+}

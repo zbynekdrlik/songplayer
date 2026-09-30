@@ -926,6 +926,19 @@ function programBody() {
       submitted: 0,
       connections: 0,
       last_stamp_100ns: 0,
+      // #210: the sender's per-boundary timing (mirrors
+      // `BoundaryTimingStatus`); the mock sends no boundary.
+      timing: {
+        boundaries: 0,
+        ready_late_us_max: 0,
+        vban_feed_late_us_max: 0,
+        submit_us_max: 0,
+        ready_late_over_5ms: 0,
+        vban_feed_late_over_5ms: 0,
+        submit_over_5ms: 0,
+        vban_feed_late_over_10ms: 0,
+        warned: 0,
+      },
     },
     // #215: the transition the next cut uses; the mock applies a cut at once,
     // so each cut counts as done and a window runs only when a spec injects one.

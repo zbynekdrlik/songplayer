@@ -49,6 +49,7 @@ use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
+use crate::playback::program_output_timing::{BoundaryMarks, LateBoundary, utc_label};
 use crate::playback::program_transition::{
     AudioFormat, FitPlan, Layout, MixJob, Outgoing, black_nv12_into, mix_audio_block, mix_bands,
     mix_nv12_into,
@@ -169,67 +170,95 @@ impl<B: NdiBackend> ProgramOutput<B> {
         self
     }
 
-    /// #210: hand one pair's audio block to the VBAN output (never blocks).
-    fn feed_vban(&self, block: VbanBlock) {
+    /// #210: hand one pair's audio block to the VBAN output (never blocks);
+    /// returns the instant it was handed over, read off `now`.
+    fn feed_vban(&self, block: VbanBlock, now: &impl Fn() -> i64) -> i64 {
         if let Some(vban) = &self.vban {
             vban.push(block);
         }
+        now()
     }
 
-    /// Submit one program boundary and return its stamp. Its audio block goes
-    /// to VBAN FIRST, then the NDI pair (#210): FOH audio never waits for
-    /// the video side (the NDI submit, a mixed picture). A forwarded source
-    /// job keeps its own stamps. What the program makes itself (a standby
-    /// pair, a mixed block) is stamped on its boundary, the audio too: the
-    /// block belongs to that boundary's timeline instant, never the submit
-    /// instant — a standby pair for a missed boundary goes out up to the
-    /// fill grace (3 slots) late (#224).
-    pub fn submit(&mut self, job: ProgramJob) -> i64 {
+    /// Serve one program boundary. Its audio block goes to VBAN FIRST, then
+    /// the NDI pair (#210): FOH audio never waits for the video side (the
+    /// NDI submit, a mixed picture). A forwarded source job keeps its own
+    /// stamps. What the program makes itself (a standby pair, a mixed block)
+    /// is stamped on its boundary, the audio too: the block belongs to that
+    /// boundary's timeline instant, never the submit instant — a standby
+    /// pair for a missed boundary goes out up to the fill grace (3 slots)
+    /// late (#224). Returns the instants the boundary was served at, read
+    /// off `now` (the sender's wall: the stamps' timeline), for
+    /// `health.timing` (`program_output_timing.rs`).
+    pub fn serve(&mut self, job: ProgramJob, now: impl Fn() -> i64) -> BoundaryMarks {
+        let taken_100ns = now();
+        let stamp_100ns = job.stamp_100ns();
         if !matches!(job, ProgramJob::Mix(_)) {
             self.end_mix_run();
         }
-        match job {
-            ProgramJob::Mix(mix) => self.submit_mix(mix),
+        let (fed_100ns, submit_start_100ns) = match job {
+            ProgramJob::Mix(mix) => self.serve_mix(mix, &now),
             ProgramJob::Source(job) => {
-                let stamp = job.video_tc_100ns;
-                self.feed_vban(VbanBlock::copied(stamp, &job.audio));
+                let fed = self.feed_vban(VbanBlock::copied(stamp_100ns, &job.audio), &now);
+                let start = now();
                 self.submitter.submit_frame_at_boundary_owned(
                     job.width,
                     job.height,
                     job.stride,
                     job.video,
                     &job.audio,
-                    stamp,
+                    stamp_100ns,
                     job.audio_tc_100ns,
                 );
-                stamp
+                (fed, start)
             }
-            ProgramJob::Standby { stamp_100ns } => {
-                self.feed_vban(VbanBlock::silence(stamp_100ns));
-                let (w, h) = (self.standby_w, self.standby_h);
-                let black = self.submitter.standby_black_nv12(w, h);
-                self.submitter.submit_frame_at_boundary_owned(
-                    w,
-                    h,
-                    w,
-                    black,
-                    &self.silence,
-                    stamp_100ns,
-                    stamp_100ns,
-                );
-                stamp_100ns
-            }
+            ProgramJob::Standby { .. } => self.serve_standby(stamp_100ns, &now),
+        };
+        BoundaryMarks {
+            stamp_100ns,
+            taken_100ns,
+            fed_100ns,
+            submit_start_100ns,
+            submitted_100ns: now(),
         }
+    }
+
+    /// The tests' shorthand: [`serve`](Self::serve) with no clock; the stamp.
+    #[cfg(test)]
+    pub fn submit(&mut self, job: ProgramJob) -> i64 {
+        self.serve(job, || 0).stamp_100ns
+    }
+
+    /// The program's standby pair on `stamp_100ns`: the silence to VBAN,
+    /// then the NDI black + silence. Returns when VBAN got it and when the
+    /// NDI submit started.
+    fn serve_standby(&mut self, stamp_100ns: i64, now: &impl Fn() -> i64) -> (i64, i64) {
+        let fed = self.feed_vban(VbanBlock::silence(stamp_100ns), now);
+        let (w, h) = (self.standby_w, self.standby_h);
+        let black = self.submitter.standby_black_nv12(w, h);
+        let start = now();
+        self.submitter.submit_frame_at_boundary_owned(
+            w,
+            h,
+            w,
+            black,
+            &self.silence,
+            stamp_100ns,
+            stamp_100ns,
+        );
+        (fed, start)
     }
 
     /// #215: one window boundary: the crossfaded audio block, to VBAN first
     /// (#210), then the mixed picture and the NDI pair, both stamped on the
     /// window boundary (#224: the program's own block). A mix with neither
-    /// side (the bus never queues one) goes out as the standby pair.
-    fn submit_mix(&mut self, mix: MixJob) -> i64 {
+    /// side (the bus never queues one) goes out as the standby pair, ending
+    /// the run of mixed boundaries like any unmixed one. Returns when VBAN
+    /// got the block and when the NDI submit started.
+    fn serve_mix(&mut self, mix: MixJob, now: &impl Fn() -> i64) -> (i64, i64) {
         let stamp = mix.stamp_100ns;
         let Some(present) = present_layout(&mix) else {
-            return self.submit(ProgramJob::Standby { stamp_100ns: stamp });
+            self.end_mix_run();
+            return self.serve_standby(stamp, now);
         };
         let (first, total) = mix.sample_span(self.spc);
         let format = AudioFormat {
@@ -244,12 +273,13 @@ impl<B: NdiBackend> ProgramOutput<B> {
             total,
             format,
         )];
-        self.feed_vban(VbanBlock::copied(stamp, &audio));
+        let fed = self.feed_vban(VbanBlock::copied(stamp, &audio), now);
         let started = Instant::now();
         let (layout, video) = self.paint_mix(&mix, present);
         let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         self.mix_run.boundaries += 1;
         self.mix_run.max_picture_us = self.mix_run.max_picture_us.max(picture_us);
+        let start = now();
         self.submitter.submit_frame_at_boundary_owned(
             layout.width,
             layout.height,
@@ -259,7 +289,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             stamp,
             stamp,
         );
-        stamp
+        (fed, start)
     }
 
     /// #215: the picture of a window boundary ([`paint_mix`](Self::paint_mix)),
@@ -335,6 +365,25 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 }
 
+/// #210: the WARN of a boundary whose VBAN hand-off came over 10 ms late:
+/// its three figures, the boundary as its wire stamp and in UTC (to line up
+/// with a dev1 capture), and how many such boundaries the rate limit skipped
+/// since the WARN before it. The decision is `BoundaryTiming::observe`'s
+/// (tested); logging only.
+#[cfg_attr(test, mutants::skip)]
+fn warn_late_boundary(late: &LateBoundary) {
+    let wire = crate::playback::fleet_shift::wire_100ns(late.stamp_100ns);
+    warn!(
+        boundary_100ns = wire,
+        boundary_utc = %utc_label(wire),
+        ready_late_us = late.sample.ready_late_us,
+        vban_feed_late_us = late.sample.vban_feed_late_us,
+        submit_us = late.sample.submit_us,
+        suppressed = late.suppressed,
+        "program output: a boundary's VBAN audio was handed over more than 10 ms late"
+    );
+}
+
 /// Most wall ticks one wake may owe: the pacer's own catch-up bound, beyond
 /// which a pacer resyncs without ticking — so a long stall costs the program
 /// wall no more re-anchor progress than it costs the stamp walls.
@@ -379,7 +428,9 @@ pub fn next_check_wait(now_100ns: i64) -> Duration {
 
 /// The `SP-program` sender thread: release missed boundaries once per
 /// boundary, submit every queued boundary, poll the receiver count ~1/s. Exits
-/// (after a flush) once the bus is stopped and drained.
+/// (after a flush) once the bus is stopped and drained. #210: every boundary's
+/// timing goes to the bus (`health.timing`), and a VBAN hand-off over 10 ms
+/// late is WARNed (rate-limited by `BoundaryTiming::observe`).
 #[cfg_attr(test, mutants::skip)]
 pub fn run_program_loop<B: NdiBackend>(
     out: &mut ProgramOutput<B>,
@@ -396,8 +447,11 @@ pub fn run_program_loop<B: NdiBackend>(
         bus.release_due(now);
         match bus.take_timeout(next_check_wait(now)) {
             Take::Job(job) => {
-                let stamp = out.submit(job);
-                bus.record_submitted(stamp);
+                let marks = out.serve(job, || wall.now_100ns());
+                bus.record_submitted(marks.stamp_100ns);
+                if let Some(late) = bus.record_timing(&marks) {
+                    warn_late_boundary(&late);
+                }
                 since_conn_poll += 1;
                 if since_conn_poll >= CONN_POLL_EVERY {
                     bus.set_connections(out.connections());

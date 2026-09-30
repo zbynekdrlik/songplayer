@@ -5,22 +5,27 @@
 //! a gate, and each test reads the VBAN queue while that send is still held:
 //! a forwarded pair, the standby pair and a mixed boundary. No sleeps: the
 //! held send tells the test it is waiting, and every wait is bounded.
+//! The timing half: an NDI send that advances a settable wall by a fixed
+//! cost shows as `submit_us`, never in the VBAN hand-off, on `serve`'s
+//! marks and on the bus's `health.timing` through the sender thread.
 //! Wired via `#[cfg(test)] #[path = "program_output_tests_order.rs"] mod tests_order;`.
 
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, FourCCVideoType, NdiBackend, NdiError, NdiSender};
 
-use super::ProgramOutput;
+use super::{ProgramOutput, run_program_loop};
 use crate::playback::frame_buf::SharedFrame;
-use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramJob};
+use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramBus, ProgramJob};
+use crate::playback::program_output_timing::{BoundaryMarks, BoundarySample, BoundaryTimingStatus};
 use crate::playback::program_transition::{MixJob, crossfade_gains};
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::vban_out::{VbanBlock, VbanOut, VbanTake};
+use crate::playback::wallclock::{SettableClock, WallClock};
 
 const T0: i64 = 17_900_000_000_000_000;
 
@@ -369,5 +374,113 @@ fn a_mixed_boundarys_block_reaches_vban_before_its_picture_and_ndi_submit() {
     assert_eq!(
         (seen.stamp, seen.video_timecodes, seen.audio_timecodes),
         (stamp, vec![stamp], vec![stamp])
+    );
+}
+
+/// A program output whose every NDI audio send (one per pair) moves the
+/// settable wall `cost_100ns` on: a slow NDI submit on a clock the test
+/// holds.
+fn slow_output(clock: &SettableClock, cost_100ns: i64) -> ProgramOutput<HookedNdi> {
+    let slow = clock.clone();
+    let backend = Arc::new(HookedNdi {
+        inner: MockNdiBackend::new(),
+        on_audio: Box::new(move || slow.advance(cost_100ns)),
+    });
+    let sender =
+        NdiSender::new_with_clocking(backend, PROGRAM_NDI_NAME, false, false).expect("mock sender");
+    ProgramOutput::new(sender, 2, 2)
+}
+
+#[test]
+fn a_slow_ndi_submit_is_timed_and_never_in_the_vban_hand_off() {
+    let (wall, clock) = WallClock::settable(at(0) + 10_000);
+    let vban = Arc::new(VbanOut::new());
+    // Every NDI submit takes 20 ms.
+    let mut out = slow_output(&clock, 200_000).with_vban(vban.clone());
+    let now = || wall.now_100ns();
+    let marks = |b: i64, taken: i64| BoundaryMarks {
+        stamp_100ns: b,
+        taken_100ns: b + taken,
+        fed_100ns: b + taken,
+        submit_start_100ns: b + taken,
+        submitted_100ns: b + taken + 200_000,
+    };
+
+    // Taken 1 ms after its boundary: handed to VBAN at once, 1 ms late.
+    let standby = out.serve(ProgramJob::Standby { stamp_100ns: at(0) }, now);
+    assert_eq!(standby, marks(at(0), 10_000));
+    assert_eq!(
+        BoundarySample::of(&standby),
+        BoundarySample {
+            ready_late_us: 1_000,
+            vban_feed_late_us: 1_000,
+            submit_us: 20_000,
+        },
+        "the 20 ms NDI submit is timed on its own; VBAN got the block 1 ms late, not 21"
+    );
+
+    clock.set(at(1) + 20_000);
+    let source = ProgramJob::Source(pair(4, at(1), at(1), samples(0.25, 0.0)));
+    assert_eq!(out.serve(source, now), marks(at(1), 20_000));
+
+    clock.set(at(2) + 30_000);
+    let mix = MixJob {
+        stamp_100ns: at(2),
+        from: Some(pair(4, at(2), at(2), samples(0.25, 0.0))),
+        to: Some(pair(8, at(2), at(2), samples(0.5, 0.0))),
+        slot: 4,
+        n_slots: 9,
+    };
+    assert_eq!(
+        out.serve(ProgramJob::Mix(mix), now),
+        marks(at(2), 30_000),
+        "a mixed boundary: VBAN before the picture, the NDI call timed alone"
+    );
+    assert_eq!(vban.queued(), 3, "one block per boundary");
+}
+
+#[test]
+fn the_sender_thread_puts_each_boundarys_timing_on_the_bus() {
+    let b0 = at(0);
+    // The sourceless program's boundary is reached 15 ms late, and its NDI
+    // submit takes 10 ms (it ends before the next boundary, so the sender
+    // serves exactly one).
+    let (wall, clock) = WallClock::settable(b0 + 150_000);
+    let bus = Arc::new(ProgramBus::new());
+    let out = slow_output(&clock, 100_000).with_vban(bus.vban().clone());
+    let (done_tx, done_rx) = mpsc::channel();
+    let thread = {
+        let bus = bus.clone();
+        std::thread::spawn(move || {
+            let (mut out, mut wall) = (out, wall);
+            run_program_loop(&mut out, &bus, &mut wall);
+            let _ = done_tx.send(());
+            out
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while bus.status().health.submitted < 1 && Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    bus.stop();
+    done_rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the sender thread exits once the bus is stopped");
+    let _out = thread.join().unwrap();
+    assert_eq!(clock.get(), b0 + 250_000, "one NDI submit moved the wall");
+    assert_eq!(
+        bus.status().health.timing,
+        BoundaryTimingStatus {
+            boundaries: 1,
+            ready_late_us_max: 15_000,
+            vban_feed_late_us_max: 15_000,
+            submit_us_max: 10_000,
+            ready_late_over_5ms: 1,
+            vban_feed_late_over_5ms: 1,
+            submit_over_5ms: 1,
+            vban_feed_late_over_10ms: 1,
+            warned: 1,
+        },
+        "15 ms late: counted and WARNed once"
     );
 }
