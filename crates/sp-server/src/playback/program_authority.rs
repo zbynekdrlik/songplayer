@@ -106,8 +106,7 @@ impl OnAirPlaylists {
     /// restricts nothing: a playlist whose OFF is still queued writes as
     /// before, and its OFF re-syncs the wall (`wall_after_scene_off`).
     pub fn may_write_wall(&self, playlist_id: i64) -> bool {
-        let diffed = self.diffed();
-        diffed.owner.is_none() || diffed.playlists.contains(&playlist_id)
+        self.diffed().owner.is_none_or(|owner| owner == playlist_id)
     }
 }
 
