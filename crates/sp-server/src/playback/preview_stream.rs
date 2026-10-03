@@ -541,11 +541,18 @@ impl ViewerGuard {
 impl Drop for ViewerGuard {
     fn drop(&mut self) {
         // Saturating decrement — never wrap below zero (`checked_sub` refuses at
-        // 0, so there is no comparison to get subtly wrong).
-        let _ = self
-            .shared
-            .viewers
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| v.checked_sub(1));
+        // 0, so there is no comparison to get subtly wrong). The explicit
+        // compare-exchange is what `fetch_update` did; Rust 1.99 deprecates
+        // `fetch_update` (renamed `try_update`), which MSRV 1.85 lacks.
+        let viewers = &self.shared.viewers;
+        let mut current = viewers.load(Ordering::Acquire);
+        while let Some(next) = current.checked_sub(1) {
+            match viewers.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
+        }
     }
 }
 
