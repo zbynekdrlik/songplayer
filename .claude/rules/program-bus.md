@@ -172,7 +172,7 @@ included, is comment 5872871751).
   `Outgoing::Fitted`) at weight 0 — every byte the fitted picture's, no
   blend — in the sender's `mix_bands` row bands, into a `frame_pool` buffer.
   A larger picture is scaled down, a smaller one up (the 720p dabing songs),
-  a 16:9 one fills the canvas; 2560×1080 sits on rows 134..944. A padded
+  a 16:9 one fills the canvas; 2560×1080 sits on rows 134 to 943. A padded
   stride at 1920×1080 is a repack (a fit at scale 1 copies every visible
   byte). A buffer short of the canvas's bytes is not whole NV12: it is drawn
   as the canvas black, never read past its end.
@@ -186,14 +186,32 @@ included, is comment 5872871751).
   `feed_vban` → `submit_video`, so VBAN gets the boundary's block before any
   fit. `submit_video` reads `submit_start` BEFORE the picture work, so
   `health.timing.submit_us` (`vban-out.md`) is the fit (or the fade's
-  picture) + the NDI submit. A fitted boundary spawns `mix_bands` − 1 scoped
-  `program-mix` threads (5 on the box) like a fade's picture always did — now
-  on EVERY boundary of a source that is not 1920×1080 (most of the catalog is
-  1440p). Read `submit_us_max` and `submit_over_5ms` on the box with a 1440p
-  song on program; if `submit_us_max` passes one slot (33 333), the next
-  lever is persistent band workers (`program-transition.md`: time the spawns
-  first), before anything else. SpeedHQ now encodes FHD, not 1440p (44 %
-  fewer pixels), which pays part of the fit back.
+  picture) + the NDI submit.
+  - **Row bands from the first deploy.** The lane's dispatch said to reuse
+    the kernel's row bands; the slice's design record named them as the
+    first lever only AFTER a box measurement (main session to confirm). A
+    single band is likely over budget: box run 3 measured a fitted 1440p
+    fade picture at 12.9–20 ms on 6 bands.
+  - **What it costs.** Each fitted pass spawns `mix_bands` − 1 scoped
+    `program-mix` threads (5 on the 24-thread box): on EVERY forwarded
+    boundary of a source that is not 1920×1080 (most of the catalog is
+    1440p), ~150 thread starts a second, and 2·(K−1) on a fade boundary
+    whose incoming side is not a canvas picture (two passes,
+    `program-transition.md`). A plain fit also reads the 3.1 MB canvas black
+    as the kernel's `to` (weight 0). SpeedHQ now encodes FHD, not 1440p (44 %
+    fewer pixels), which pays part of it back.
+  - **Box check, a 1440p song on program, then a 1920×1080 one:** the
+    program's `submit_us_max` / `submit_over_5ms`, a fade's `max_picture_us`,
+    AND the collateral on the other threads (on Windows every thread start
+    runs each loaded DLL's thread attach under the loader lock): the
+    on-program source's paced `pipeline: loop-stats … submit_call_us_max`
+    and its `ndi: genlock … late=` line, against the same reads before this
+    deploy.
+  - **Levers, in order**, if `submit_us_max` passes one slot (33 333) or the
+    collateral moves: persistent band workers (no spawn per boundary; time
+    the spawns first, `program-transition.md`); a one-pass "fitted incoming"
+    kernel variant for fades; one band for a plain fit if the spawns
+    dominate.
 - **Out of this slice** (later #223 slices, comment 5872871751): the
   `SP-program-MAX` output for the LED walls (max(FHD, native)), its
   `MaxSide`, Spout, the zero-receiver gate, downloads above 1440p.

@@ -206,8 +206,9 @@ fn the_window_audio_is_the_equal_power_crossfade_and_never_dips_below_the_quiete
         36,
         "exactly one audio block + one picture per boundary"
     );
-    // A (4×2) and B (8×2) differ in size: every window boundary is a blend in
-    // B's 8×2 layout (A fitted into it, #215 addendum A), never a midpoint cut.
+    // A (4×2) and B (8×2) differ in size: every window boundary is a blend
+    // (#215 addendum A; #223: both fitted into the rig's 2×2 canvas), never a
+    // midpoint cut. `shown_dims` names a mixed boundary by B, its incoming side.
     assert_eq!(shown_dims(&out), dims(&[("4x2", 6), ("8x2", 12)]));
     assert_eq!(blocks.len(), 18);
     let total = 9 * 1600u64;

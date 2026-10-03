@@ -7,13 +7,16 @@
 //! the canvas, its aspect kept, with studio-black bars (Y 16, UV 128) where
 //! the aspect differs.
 //!
-//! These tests run the PRODUCTION canvas (`PROGRAM_STANDBY_W/H`), so every
-//! fit is a whole FHD picture: keep their number small. The wire picture's
-//! bytes are read through the submitter's async holdover
-//! (`FrameSubmitter::held_frame`), the buffer the SDK still points at. #210's
-//! order (the VBAN hand-off before any video work, so before the fit) is
-//! pinned in `program_output_tests_order.rs`, whose forwarded pictures are
-//! fitted into its 2×2 canvas.
+//! These tests run the PRODUCTION canvas (`ProgramOutput::fhd`, the
+//! constructor `spawn_program_thread` uses), so every fit is a whole FHD
+//! picture: keep their number small. The wire picture's bytes are read
+//! through the submitter's async holdover (`FrameSubmitter::held_frame`), the
+//! buffer the SDK still points at. #210's order (the VBAN hand-off before any
+//! video work, so before the fit) is pinned in
+//! `program_output_tests_order.rs`, whose forwarded pictures are fitted into
+//! its 2×2 canvas. That the fit sits inside the `submit_us` span is
+//! structural: `submit_video` reads `submit_start` before any picture work
+//! (no test clock moves during a fit, so no test can see it).
 //! Wired via `#[cfg(test)] #[path = "program_output_tests_fhd.rs"] mod tests_fhd;`.
 
 use std::sync::Arc;
@@ -22,7 +25,7 @@ use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_bound
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, NdiSender};
 
-use super::{PROGRAM_STANDBY_H, PROGRAM_STANDBY_W, ProgramOutput};
+use super::ProgramOutput;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramJob};
 use crate::playback::program_transition::MixJob;
@@ -43,8 +46,7 @@ fn fhd_output() -> (Arc<MockNdiBackend>, ProgramOutput<MockNdiBackend>) {
     let backend = Arc::new(MockNdiBackend::new());
     let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
         .expect("mock sender");
-    let out = ProgramOutput::new(sender, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H);
-    (backend, out)
+    (backend, ProgramOutput::fhd(sender))
 }
 
 /// A `w`×`h` NV12 picture of row stride `stride` (the padding bytes [`PAD`]):

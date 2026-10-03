@@ -246,9 +246,15 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     (review round 1: a hand-advanced cursor hung on a `%`→`+` mutant, which
     is a cargo-mutants TIMEOUT and a red gate).
   - The only large buffer is the pooled output, `resize`d once (a memset:
-    the bands need disjoint `&mut` slices in safe code). Per boundary there
-    are also K−1 scoped thread spawns (a name `String` and a stack each) and
-    a few small `Vec`s (the band offsets, runs and slots).
+    the bands need disjoint `&mut` slices in safe code). Per painted pass
+    there are also K−1 scoped thread spawns (a name `String` and a stack
+    each) and a few small `Vec`s (the band offsets, runs and slots). Since
+    #223 a fade boundary whose incoming picture is not a canvas picture
+    paints TWO passes (the incoming side's fit, then the outgoing side's fit
+    + blend): 2·(K−1) spawns and two bilinear passes, where a fade between
+    two 1440p songs used to be one blend. Every forwarded boundary of a
+    source that is not 1920×1080 paints one pass too (`program-bus.md`,
+    "SP-program is ALWAYS 1920×1080").
   - A helper that fails to start WARNs once per failed band. That is at most
     K−1 = 5 per boundary and 300 boundaries per window, and it only happens
     when the OS cannot create a thread at all, so each failed band gets its
@@ -619,7 +625,9 @@ Two playing playlists, a scene change via Companion/remote with a 300 ms OBS
 fade: `mixed_boundaries` +9, audio RMS never more than 3 dB below the quieter
 source, a dev1 VBAN capture with no zero-run ≥ 5 ms across the change, and the
 owner confirms on the PA and the wall. Addendum (run 2): no `differ in size`
-WARN (only the DEBUG fit line), the incoming song's FLAC block 0 inside the
+WARN (since #223 the fit logs only the canvas's INFO line `a picture of a new
+size — fitted into the SP-program canvas`, once per new layout), the
+incoming song's FLAC block 0 inside the
 window, no true-zero run between the outgoing fade and the incoming song, and
 `cue_wait_boundaries` ≤ 15 with `cue_timeouts` +0 — about 10–11 for a paused
 playlist that starts a new song (the fills + the pre-roll, B1 above), 0 for an

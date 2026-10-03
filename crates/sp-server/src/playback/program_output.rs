@@ -3,8 +3,9 @@
 //! [`ProgramOutput`] owns the program's own paced [`FrameSubmitter`] (NDI
 //! sender [`PROGRAM_NDI_NAME`], `clock_video = false` like every paced output)
 //! and submits each [`ProgramJob`] the [`ProgramBus`] queued: a forwarded source
-//! boundary unchanged (the same `Arc` frame, the same audio block, the same
-//! stamps), or the program's own #147 standby pair (the cached NV12 black + one
+//! boundary (the same audio block, the same stamps, and its picture as a
+//! 1920×1080 canvas picture, #223 below: the same `Arc` frame when it already
+//! is one), or the program's own #147 standby pair (the cached NV12 black + one
 //! 1600-sample silent block) for a missed boundary — audio first, then the async
 //! video, exactly like a source boundary.
 //!
@@ -217,6 +218,12 @@ impl<B: NdiBackend> ProgramOutput<B> {
             mix_bands: mix_bands(crate::lyrics::heavy_slot::logical_cores()),
             mix_run: MixRun::default(),
         }
+    }
+
+    /// The `SP-program` output as production builds it (#223): the 1920×1080
+    /// canvas ([`PROGRAM_STANDBY_W`] × [`PROGRAM_STANDBY_H`]).
+    pub fn fhd(sender: NdiSender<B>) -> Self {
+        Self::new(sender, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H)
     }
 
     /// #210: also hand every submitted pair's audio block to `vban`.
@@ -637,8 +644,7 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
                     return;
                 }
             };
-            let mut out = ProgramOutput::new(sender, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H)
-                .with_vban(bus.vban().clone());
+            let mut out = ProgramOutput::fhd(sender).with_vban(bus.vban().clone());
             // #215 addendum 3: how many threads paint a mixed or fitted picture.
             let mix_bands = out.mix_bands;
             info!(

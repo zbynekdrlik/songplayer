@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramJob};
-use crate::playback::program_output::{PROGRAM_STANDBY_H, PROGRAM_STANDBY_W, ProgramOutput};
+use crate::playback::program_output::ProgramOutput;
 use sp_ndi::NdiSender;
 use sp_ndi::test_util::MockNdiBackend;
 
@@ -27,7 +27,7 @@ fn the_inputs_picture_reaches_sp_program_as_the_1920x1080_canvas() {
     let backend = Arc::new(MockNdiBackend::new());
     let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
         .expect("mock sender");
-    let mut out = ProgramOutput::new(sender, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H);
+    let mut out = ProgramOutput::fhd(sender);
     out.submit(ProgramJob::Source(job));
     let sends: Vec<String> = backend
         .calls()

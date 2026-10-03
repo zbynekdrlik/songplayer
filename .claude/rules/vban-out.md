@@ -27,8 +27,9 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
     paints the picture (`paint_mix`) and submits.
 
   The order is structural: `serve` = `split` (the audio side, no video work)
-  → `feed_vban` → `submit_video` (a mix's picture, the standby black, the NDI
-  submit), and the run of mixed boundaries ends only after the unmixed
+  → `feed_vban` → `submit_video` (#223: a source picture's canvas fit, a
+  mix's picture, the standby black, then the NDI submit), and the run of
+  mixed boundaries ends only after the unmixed
   boundary went out. So no video-side cost of a boundary — a slow NDI send,
   a mixed picture — delays that boundary's FOH block. The sender is one
   thread: a video side longer than a slot still delays the NEXT boundary's
@@ -132,7 +133,9 @@ What makes a FOH block late is named on the box, per boundary, by the
 
 - `ProgramOutput::serve(job, now)` returns `BoundaryMarks`, four instants
   off the sender's own wall (the stamps' timeline): the job taken, the VBAN
-  hand-off, the NDI submit started and returned. `BoundarySample::of` →
+  hand-off, the video side started (#223: the canvas fit or a fade's
+  picture, then the NDI submit) and the NDI submit returned.
+  `BoundarySample::of` →
   `ready_late_us` (taken − boundary), `vban_feed_late_us` (hand-off −
   boundary) and `submit_us` (the video side after the hand-off: since #223
   the picture made a 1920×1080 canvas picture — a fit, or a fade's picture —
