@@ -10,7 +10,7 @@
 //! Wired via `#[cfg(test)] #[path = "program_bus_tests_transition.rs"] mod tests_transition;`.
 
 use super::tests::{
-    MS, SRC_A, SRC_B, SRC_C, b, dims, drain, frame, grace, job, program, sends, stamps, video_dims,
+    MS, SRC_A, SRC_B, SRC_C, b, dims, drain, frame, grace, job, program, sends, shown_dims, stamps,
 };
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
@@ -208,7 +208,7 @@ fn the_window_audio_is_the_equal_power_crossfade_and_never_dips_below_the_quiete
     );
     // A (4×2) and B (8×2) differ in size: every window boundary is a blend in
     // B's 8×2 layout (A fitted into it, #215 addendum A), never a midpoint cut.
-    assert_eq!(video_dims(&backend), dims(&[("4x2", 6), ("8x2", 12)]));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 6), ("8x2", 12)]));
     assert_eq!(blocks.len(), 18);
     let total = 9 * 1600u64;
     for (k, (stamp, planar)) in (1..=18usize).zip(&blocks) {
@@ -485,7 +485,7 @@ fn a_cut_is_the_zero_length_window_the_209_cut_unchanged() {
         drain(&mut core, &mut out);
     }
     assert_eq!(backend.video_timecodes(), stamps(1..=12));
-    assert_eq!(video_dims(&backend), dims(&[("4x2", 6), ("8x2", 6)]));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 6), ("8x2", 6)]));
     let st = core.status();
     assert_eq!(
         st.transition.counters,

@@ -11,7 +11,7 @@
 //! Wired via `#[cfg(test)] #[path = "program_bus_tests_cue.rs"] mod tests_cue;`.
 
 use super::tests::{
-    MS, SRC_A, SRC_B, SRC_C, b, dims, drain, frame, grace, job, program, video_dims,
+    MS, SRC_A, SRC_B, SRC_C, b, dims, drain, frame, grace, job, program, shown_dims,
 };
 use super::tests_transition::{LEVEL_A, LEVEL_B, fade_core, offer_both, one, run, take_all};
 use super::*;
@@ -134,7 +134,7 @@ fn a_held_boundary_is_the_outgoing_sources_own_pair_at_full_level() {
             "b({k}): A at full level, nothing of B"
         );
     }
-    assert_eq!(video_dims(&backend), dims(&[("4x2", 10)]));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 10)]));
 }
 
 #[test]
