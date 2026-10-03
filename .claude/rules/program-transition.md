@@ -55,9 +55,8 @@ song's first real pair.
   A missed side is left `None` and mixed against the standby (#223: the
   `SP-program` canvas black, the program's standby picture — 1920×1080 in
   production, `program-bus.md` — + silence, `side_fills`). With NEITHER side
-  here, the
-  boundary is filled like any other (`ProgramJob::Standby`). Either reorder
-  buffer over 16 forces the boundary.
+  here, the boundary is filled like any other (`ProgramJob::Standby`). Either
+  reorder buffer over 16 forces the boundary.
 - **A Cut is a zero-length window**: no boundary is mixed, the output is the
   #209 cut byte for byte. `ProgramCore::new()` starts with a Cut
   (`SpecSource::Fallback`), so every #209 test still runs a Cut.
@@ -158,7 +157,10 @@ cut boundary mixed the outgoing song against silence.
   cut froze the fade still waiting for its cue`, and from the sender one INFO
   `the fade's mixed boundaries went out` per run of mixed boundaries
   (`boundaries`, `fitted`, `max_picture_us` = the worst fit + blend time on
-  the `SP-program` thread).
+  the `SP-program` thread). `fitted` counts the boundaries with a side that
+  is not a 1920×1080 canvas picture (#223; before, the boundaries whose two
+  layouts differed), so a fade between two 1440p songs now logs
+  `fitted = boundaries` where it used to log 0.
   The dashboard "Prechod" line shows no counters, so it is unchanged; a
   waiting window shows as `active` with 0 %.
 - `hold_for` reports a waiting window's LATEST end, so `scene_off.rs` keeps

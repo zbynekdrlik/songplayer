@@ -133,8 +133,8 @@ pub(super) fn drain(core: &mut ProgramCore, out: &mut Program) {
 }
 
 /// The `WxH` each boundary the program sent showed ([`shown`]), in order,
-/// once every picture the sender put on the wire is checked to be its 2×2
-/// canvas (#223).
+/// once the wire is checked: one picture per boundary handed to the sender,
+/// each its 2×2 canvas (#223).
 pub(super) fn shown_dims(out: &Program) -> Vec<String> {
     let wire: Vec<String> = out
         .backend
@@ -142,6 +142,11 @@ pub(super) fn shown_dims(out: &Program) -> Vec<String> {
         .into_iter()
         .filter(|c| c.starts_with("send_video_async("))
         .collect();
+    assert_eq!(
+        wire.len(),
+        out.shown.len(),
+        "one picture on the wire per boundary handed to the sender"
+    );
     assert!(
         wire.iter()
             .all(|c| c == "send_video_async(42,NV12,2x2,stride=2,30/1)"),

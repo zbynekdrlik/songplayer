@@ -279,6 +279,11 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
     its owner;
   - `drain()` panics on a program fill, because the input must own every
     boundary.
+- #223: the input offers its capture at the SOURCE's own size; the
+  `SP-program` sender fits it into the 1920×1080 canvas like any source pair
+  (`program-bus.md` "SP-program is ALWAYS 1920×1080").
+  `ndi_input_tests_fhd.rs` (a child module) takes one captured 4×2 job
+  through `ProgramOutput::fhd` and asserts the 1920×1080 stride-1920 send.
 - The loop tests run `run_input_loop` on its own thread with a virtual
   `FakeClock`: a sleep advances it, it never goes past `limit`, and it can do
   one jump. They wait with bounded polls and `recv_timeout`, so a no-op stop
