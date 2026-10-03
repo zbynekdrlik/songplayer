@@ -134,7 +134,9 @@ What makes a FOH block late is named on the box, per boundary, by the
   off the sender's own wall (the stamps' timeline): the job taken, the VBAN
   hand-off, the NDI submit started and returned. `BoundarySample::of` →
   `ready_late_us` (taken − boundary), `vban_feed_late_us` (hand-off −
-  boundary) and `submit_us` (the NDI call alone); an instant before its
+  boundary) and `submit_us` (the video side after the hand-off: since #223
+  the picture made a 1920×1080 canvas picture — a fit, or a fade's picture —
+  then the NDI call; before, the NDI call alone); an instant before its
   reference is 0 late.
 - `BoundaryTiming` (in `ProgramCore`, fed through
   `ProgramBus::record_timing` by `run_program_loop`) keeps each figure's
@@ -169,13 +171,14 @@ What makes a FOH block late is named on the box, per boundary, by the
   counts only grow: read them twice and diff over the capture window.
 - Reading it: a late `vban_feed` with a late `ready_late` is upstream of the
   sender (a late source or release, or the sender still busy with the
-  boundary before); `submit_us` alone high is the NDI SDK and, since the fix,
-  no longer delays its own boundary's FOH block. The sender is one thread,
+  boundary before); `submit_us` alone high is the video side — the canvas
+  fit of a source that is not 1920×1080 (#223), a fade's picture, the NDI
+  SDK — and, since the fix, no longer delays its own boundary's FOH block. The sender is one thread,
   so the next boundary's take (its `ready_late_us`) still slips whenever the
   boundary before ends past that job's arrival: a late take plus its video
-  side — the NDI submit (`submit_us`) or a fade's mixed picture, which no
-  figure times (it sits between the hand-off and the submit start; the
-  fade's INFO line has it as `max_picture_us`).
+  side, which `submit_us` times whole since #223: the canvas fit or a
+  fade's mixed picture (the fade's INFO line also has it as
+  `max_picture_us`), then the NDI submit.
 - A fleet date step is not a stall. The figures compare the sender's wall
   with the sources' stamps, and at a step the two walls can sit up to r
   (< one slot) apart for about one boundary (`program-bus.md`, "One clock

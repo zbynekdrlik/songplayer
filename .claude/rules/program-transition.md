@@ -12,6 +12,7 @@ paths:
   - "crates/sp-server/src/playback/engine_play.rs"
   - "crates/sp-server/src/playback/program_bus*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
+  - "crates/sp-server/src/playback/program_canvas*.rs"
   - "crates/sp-server/src/playback/pacer_tests_live.rs"
   - "crates/sp-server/src/playback/nv12_fit.rs"
   - "crates/sp-server/src/playback/nv12_mix*.rs"
@@ -51,9 +52,10 @@ song's first real pair.
   `ProgramJob::Mix` once each side is here or MISSED. "Missed" uses the #209
   per-source rules (`source_missed`): the source passed the boundary, it is
   absent for 1 s, or its 3-slot grace ran out (on the sender's wall only).
-  A missed side is left `None` and mixed against the standby (studio black in
-  the present side's EXACT layout, stride padding included —
-  `black_nv12_into` — + silence, `side_fills`). With NEITHER side here, the
+  A missed side is left `None` and mixed against the standby (#223: the
+  `SP-program` canvas black, the program's standby picture — 1920×1080 in
+  production, `program-bus.md` — + silence, `side_fills`). With NEITHER side
+  here, the
   boundary is filled like any other (`ProgramJob::Standby`). Either reorder
   buffer over 16 forces the boundary.
 - **A Cut is a zero-length window**: no boundary is mixed, the output is the
@@ -185,10 +187,12 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
   side is silence. The audio stamp is `to`'s, else `from`'s.
 - Picture: Q8 weight `w = round(256 · (k + ½)/n)`, blended
   `(f·(256 − w) + t·w + 128) >> 8` on Y and UV alike into a `frame_pool`
-  buffer, always in the INCOMING side's layout. When the two layouts (width,
-  height, stride, length) differ, the outgoing picture is fitted into the
-  incoming one as it is blended (#215 addendum A; one pass since addendum 3)
-  — there is no midpoint cut any more:
+  buffer, always in the `SP-program` canvas (#223: 1920×1080, `program-bus.md`
+  "SP-program is ALWAYS 1920×1080"; before, the INCOMING side's layout). The
+  incoming picture is made a canvas picture first (as it is, or fitted onto
+  the canvas black at weight 0); the outgoing one is fitted into the canvas
+  as it is blended when it is not a canvas picture (#215 addendum A; one
+  pass since addendum 3) — there is no midpoint cut any more:
   - `FitPlan` (test-only `fit_nv12_into` is its one-shot form) places the picture with
     `nv12_fit::aspect_fit` — the SAME placement the #178 preview letterbox
     (`preview_stream::placement_for`) uses: each axis the destination capped by
@@ -196,13 +200,16 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     chroma sample covers its 2×2 luma block; 2560×1080 into 1920×1080 → rows
     134..943), studio-black bars Y 16 / UV 128. Only the pixel paths differ:
     the preview copies nearest-neighbour on the decode thread (cheap by rule),
-    the program fit is bilinear and runs only on mixed boundaries;
+    the program fit is bilinear and, since #223, runs on every boundary whose
+    picture is not a canvas picture;
   - bilinear in Q8 at the pixel CENTRES (`HALF_PIXEL_Q8`), luma and the
     half-resolution chroma each on their own grid, clamped at the edges;
-  - the column taps are built once per pair of layouts: `ProgramOutput` keeps
-    the plan (`fit`, `fit_plans` counts builds) while the pair stays the same,
-    and logs one DEBUG line per plan naming both layouts. The plan is ALL it
-    keeps: there is no fitted scratch buffer any more (addendum 3);
+  - the column taps are built once per source layout: the canvas
+    (`program_canvas.rs`) keeps the two plans used last, so both sides of a
+    fade fit every boundary with no rebuild (`Canvas::built` counts builds,
+    the tests read it as `fit_plans()`), and logs one INFO line per new plan.
+    The plans are ALL it keeps: there is no fitted scratch buffer (addendum
+    3);
   - a source or destination that is not whole NV12 for its layout gives the
     black canvas alone, never a panic (a zero-size one simply draws nothing,
     and a zero-stride destination is the canvas too).
@@ -251,9 +258,10 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     under the loader lock (NDI, Media Foundation, WebView2). If the target is
     missed, time the spawns separately before touching the kernel (review
     round 2).
-  - `max_picture_us` is unchanged: the wall time of `paint_mix` (all
-    bands) on the `SP-program` thread (#210: `mix_picture` is only the
-    tests' `Option` view of it now). Box run 3 target: ≤ 15 000 at
+  - `max_picture_us` is the wall time of `paint_mix` (all bands) on the
+    `SP-program` thread (#210: `mix_picture` is only the tests' `Option` view
+    of it now); since #223 it includes the incoming side's canvas fit, and
+    `health.timing.submit_us` includes the whole picture too. Box run 3 target: ≤ 15 000 at
     2560×1440 with `fitted=9` and 0 late drops, for a 300 ms fade and a 1 s
     fade (30 boundaries).
 - `mix_audio_block` collects its samples instead of pre-sizing the `Vec`: a
@@ -565,7 +573,9 @@ unanswered-catch-up gap it had is gone by construction.
   `pacer_tests_live.rs` (which pacer pairs are `emit` vs `emit_standby`, and
   the B1 pin), `program_output_tests.rs` (the mixed
   boundary on the mock sender, the fitted blend, the plan reuse at every
-  band count), `nv12_mix_tests.rs` (addendum 3: the fused kernel against
+  band count, on small canvases), `program_output_tests_fhd.rs` (#223: a
+  fade between two sizes drawn in the 1920×1080 canvas),
+  `nv12_mix_tests.rs` (addendum 3: the fused kernel against
   the two-pass reference on fixed-seed SplitMix64 frames at every weight
   and K = 1..=6, odd and short row counts, a sweep of small and broken
   layouts, arbitrary run cuts, the exact `band_bounds`, K threads for K
