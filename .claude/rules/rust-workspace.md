@@ -243,6 +243,24 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
   the same table.
 
+## Toolchain drift: CI's stable Rust moves under an unchanged tree (Rust 1.99, 3.10.2026)
+
+CI pins `dtolnay/rust-toolchain@stable`, so a new stable release can redden the
+Lint job on code that passed a day earlier. The 1.99 drift that broke run
+37145344169, and the fixes:
+
+- **`clippy::double_must_use` inside `#[async_trait]`:** bump the crate,
+  `cargo update -p async-trait --precise 0.1.92` (Tier-0-allowed, it compiles
+  nothing; dtolnay/async-trait#303). Never paper over it with allows on the
+  traits.
+- **`Atomic*::fetch_update` deprecated (renamed `try_update`):** `try_update`
+  is newer than the workspace MSRV 1.85 (`clippy::incompatible_msrv`), so write
+  the explicit `load` + `compare_exchange_weak` loop (`preview_stream.rs`
+  `ViewerGuard::drop`).
+
+When the Lint job fails on files the diff never touched, check the toolchain
+version in the job log first (`rust-1.99.0` in the clippy help URLs).
+
 ## Two compile errors a no-compile review round cannot see (#218/#219 integration)
 
 Six fresh-context review rounds passed both of these, and the first CI run
