@@ -7,8 +7,9 @@
 //!   nearest-neighbour into its fixed 640×360 canvas, on the decode thread, per
 //!   watched frame — cheap on purpose (`preview.md` iron rule 2);
 //! - the #215 program fit (`program_transition::FitPlan`): bilinear into the
-//!   incoming picture's layout, on the `SP-program` sender, only on the mixed
-//!   boundaries of a transition window.
+//!   `SP-program` canvas (#223: 1920×1080, `program_canvas.rs`), on the
+//!   `SP-program` sender, for every picture that is not already a canvas
+//!   picture.
 //!
 //! One placement for both keeps a picture where the owner expects it on every
 //! surface ("one app, one behaviour").

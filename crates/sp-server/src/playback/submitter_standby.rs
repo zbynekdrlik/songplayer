@@ -55,4 +55,11 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         self.black_nv12 = Some((width, height, frame.clone()));
         frame
     }
+
+    /// The picture the async holdover keeps alive for the SDK: the last one
+    /// sent. A test seam (#223): the tests read the wire picture's bytes.
+    #[cfg(test)]
+    pub(crate) fn held_frame(&self) -> Option<&SharedFrame> {
+        self.prev_frame.as_ref()
+    }
 }

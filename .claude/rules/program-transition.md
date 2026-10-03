@@ -12,6 +12,7 @@ paths:
   - "crates/sp-server/src/playback/engine_play.rs"
   - "crates/sp-server/src/playback/program_bus*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
+  - "crates/sp-server/src/playback/program_canvas*.rs"
   - "crates/sp-server/src/playback/pacer_tests_live.rs"
   - "crates/sp-server/src/playback/nv12_fit.rs"
   - "crates/sp-server/src/playback/nv12_mix*.rs"
@@ -51,11 +52,11 @@ song's first real pair.
   `ProgramJob::Mix` once each side is here or MISSED. "Missed" uses the #209
   per-source rules (`source_missed`): the source passed the boundary, it is
   absent for 1 s, or its 3-slot grace ran out (on the sender's wall only).
-  A missed side is left `None` and mixed against the standby (studio black in
-  the present side's EXACT layout, stride padding included —
-  `black_nv12_into` — + silence, `side_fills`). With NEITHER side here, the
-  boundary is filled like any other (`ProgramJob::Standby`). Either reorder
-  buffer over 16 forces the boundary.
+  A missed side is left `None` and mixed against the standby (#223: the
+  `SP-program` canvas black, the program's standby picture — 1920×1080 in
+  production, `program-bus.md` — + silence, `side_fills`). With NEITHER side
+  here, the boundary is filled like any other (`ProgramJob::Standby`). Either
+  reorder buffer over 16 forces the boundary.
 - **A Cut is a zero-length window**: no boundary is mixed, the output is the
   #209 cut byte for byte. `ProgramCore::new()` starts with a Cut
   (`SpecSource::Fallback`), so every #209 test still runs a Cut.
@@ -156,7 +157,10 @@ cut boundary mixed the outgoing song against silence.
   cut froze the fade still waiting for its cue`, and from the sender one INFO
   `the fade's mixed boundaries went out` per run of mixed boundaries
   (`boundaries`, `fitted`, `max_picture_us` = the worst fit + blend time on
-  the `SP-program` thread).
+  the `SP-program` thread). `fitted` counts the boundaries with a side that
+  is not a 1920×1080 canvas picture (#223; before, the boundaries whose two
+  layouts differed), so a fade between two 1440p songs now logs
+  `fitted = boundaries` where it used to log 0.
   The dashboard "Prechod" line shows no counters, so it is unchanged; a
   waiting window shows as `active` with 0 %.
 - `hold_for` reports a waiting window's LATEST end, so `scene_off.rs` keeps
@@ -185,24 +189,29 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
   side is silence. The audio stamp is `to`'s, else `from`'s.
 - Picture: Q8 weight `w = round(256 · (k + ½)/n)`, blended
   `(f·(256 − w) + t·w + 128) >> 8` on Y and UV alike into a `frame_pool`
-  buffer, always in the INCOMING side's layout. When the two layouts (width,
-  height, stride, length) differ, the outgoing picture is fitted into the
-  incoming one as it is blended (#215 addendum A; one pass since addendum 3)
-  — there is no midpoint cut any more:
+  buffer, always in the `SP-program` canvas (#223: 1920×1080, `program-bus.md`
+  "SP-program is ALWAYS 1920×1080"; before, the INCOMING side's layout). The
+  incoming picture is made a canvas picture first (as it is, or fitted onto
+  the canvas black at weight 0); the outgoing one is fitted into the canvas
+  as it is blended when it is not a canvas picture (#215 addendum A; one
+  pass since addendum 3) — there is no midpoint cut any more:
   - `FitPlan` (test-only `fit_nv12_into` is its one-shot form) places the picture with
     `nv12_fit::aspect_fit` — the SAME placement the #178 preview letterbox
     (`preview_stream::placement_for`) uses: each axis the destination capped by
     the aspect-scaled other axis, floored to even, centred on even offsets (a
     chroma sample covers its 2×2 luma block; 2560×1080 into 1920×1080 → rows
-    134..943), studio-black bars Y 16 / UV 128. Only the pixel paths differ:
+    134 to 943), studio-black bars Y 16 / UV 128. Only the pixel paths differ:
     the preview copies nearest-neighbour on the decode thread (cheap by rule),
-    the program fit is bilinear and runs only on mixed boundaries;
+    the program fit is bilinear and, since #223, runs on every boundary whose
+    picture is not a canvas picture;
   - bilinear in Q8 at the pixel CENTRES (`HALF_PIXEL_Q8`), luma and the
     half-resolution chroma each on their own grid, clamped at the edges;
-  - the column taps are built once per pair of layouts: `ProgramOutput` keeps
-    the plan (`fit`, `fit_plans` counts builds) while the pair stays the same,
-    and logs one DEBUG line per plan naming both layouts. The plan is ALL it
-    keeps: there is no fitted scratch buffer any more (addendum 3);
+  - the column taps are built once per source layout: the canvas
+    (`program_canvas.rs`) keeps the two plans used last, so both sides of a
+    fade fit every boundary with no rebuild (`Canvas::built` counts builds,
+    the tests read it as `fit_plans()`), and logs one INFO line per new plan.
+    The plans are ALL it keeps: there is no fitted scratch buffer (addendum
+    3);
   - a source or destination that is not whole NV12 for its layout gives the
     black canvas alone, never a panic (a zero-size one simply draws nothing,
     and a zero-stride destination is the canvas too).
@@ -223,7 +232,8 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     The last band also gets the bytes past the chroma plane, and every offset
     is capped at the mixed length. Band 0 runs on the `SP-program` thread;
     bands 1..K run on named `program-mix` scoped threads
-    (`std::thread::scope`, spawned per mixed boundary, no pool, no new
+    (`std::thread::scope`, spawned per painted pass — a mixed boundary,
+    or since #223 a plain fit into the canvas — no pool, no new
     dependency). A helper that cannot start has its band painted inline,
     with a WARN. The return value is the number of threads that painted; the
     tests use it as the proof of parallelism.
@@ -239,9 +249,16 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     (review round 1: a hand-advanced cursor hung on a `%`→`+` mutant, which
     is a cargo-mutants TIMEOUT and a red gate).
   - The only large buffer is the pooled output, `resize`d once (a memset:
-    the bands need disjoint `&mut` slices in safe code). Per boundary there
-    are also K−1 scoped thread spawns (a name `String` and a stack each) and
-    a few small `Vec`s (the band offsets, runs and slots).
+    the bands need disjoint `&mut` slices in safe code). Per painted pass
+    there are also K−1 scoped thread spawns (a name `String` and a stack
+    each) and a few small `Vec`s (the band offsets, runs and slots). Since
+    #223 a fade boundary whose incoming picture is not a canvas picture
+    paints TWO passes (the incoming side's bilinear fit, then the blend,
+    bilinear too when the outgoing side is not a canvas picture either):
+    2·(K−1) spawns, where a fade between two 1440p songs used to be one
+    byte-for-byte blend. Every forwarded boundary of a
+    source that is not 1920×1080 paints one pass too (`program-bus.md`,
+    "SP-program is ALWAYS 1920×1080").
   - A helper that fails to start WARNs once per failed band. That is at most
     K−1 = 5 per boundary and 300 boundaries per window, and it only happens
     when the OS cannot create a thread at all, so each failed band gets its
@@ -251,11 +268,15 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     under the loader lock (NDI, Media Foundation, WebView2). If the target is
     missed, time the spawns separately before touching the kernel (review
     round 2).
-  - `max_picture_us` is unchanged: the wall time of `paint_mix` (all
-    bands) on the `SP-program` thread (#210: `mix_picture` is only the
-    tests' `Option` view of it now). Box run 3 target: ≤ 15 000 at
+  - `max_picture_us` is the wall time of `paint_mix` (all bands) on the
+    `SP-program` thread (#210: `mix_picture` is only the tests' `Option` view
+    of it now); since #223 it includes the incoming side's canvas fit, and
+    `health.timing.submit_us` includes the whole picture too. Box run 3's
+    target (historical: ONE pass into a 2560×1440 output) was ≤ 15 000 at
     2560×1440 with `fitted=9` and 0 late drops, for a 300 ms fade and a 1 s
-    fade (30 boundaries).
+    fade (30 boundaries). Since #223 the target is one slot for the whole
+    video side (`program-bus.md` "SP-program is ALWAYS 1920×1080", its box
+    check).
 - `mix_audio_block` collects its samples instead of pre-sizing the `Vec`: a
   capacity formula is an equivalent mutant.
 
@@ -565,7 +586,9 @@ unanswered-catch-up gap it had is gone by construction.
   `pacer_tests_live.rs` (which pacer pairs are `emit` vs `emit_standby`, and
   the B1 pin), `program_output_tests.rs` (the mixed
   boundary on the mock sender, the fitted blend, the plan reuse at every
-  band count), `nv12_mix_tests.rs` (addendum 3: the fused kernel against
+  band count, on small canvases), `program_output_tests_fhd.rs` (#223: a
+  fade between two sizes drawn in the 1920×1080 canvas),
+  `nv12_mix_tests.rs` (addendum 3: the fused kernel against
   the two-pass reference on fixed-seed SplitMix64 frames at every weight
   and K = 1..=6, odd and short row counts, a sweep of small and broken
   layouts, arbitrary run cuts, the exact `band_bounds`, K threads for K
@@ -609,7 +632,9 @@ Two playing playlists, a scene change via Companion/remote with a 300 ms OBS
 fade: `mixed_boundaries` +9, audio RMS never more than 3 dB below the quieter
 source, a dev1 VBAN capture with no zero-run ≥ 5 ms across the change, and the
 owner confirms on the PA and the wall. Addendum (run 2): no `differ in size`
-WARN (only the DEBUG fit line), the incoming song's FLAC block 0 inside the
+WARN (since #223 the fit logs only the canvas's INFO line `a picture of a new
+size — fitted into the SP-program canvas`, once per new layout), the
+incoming song's FLAC block 0 inside the
 window, no true-zero run between the outgoing fade and the incoming song, and
 `cue_wait_boundaries` ≤ 15 with `cue_timeouts` +0 — about 10–11 for a paused
 playlist that starts a new song (the fills + the pre-roll, B1 above), 0 for an
@@ -626,6 +651,8 @@ HOLDS those boundaries (the outgoing song on program at full level) and the
 fade starts on the first live pair. The wait shows up as
 `cue_wait_boundaries` (~10–11, see B1) and must stay under the 15-boundary
 bound (`cue_timeouts` +0). During a 2560×1440 ↔ 1920×1080 fade also read the
-sender's `max_picture_us` line (≤ 15 000 since addendum 3; run 2 read ~56 000
-before it) and `health.coalesced` +0, for a 300 ms AND a 1 s fade, with 0
-late drops.
+sender's `max_picture_us` line (≤ 15 000 since addendum 3, one pass into a
+1440p output; run 2 read ~56 000 before it; since #223 a fade is drawn in the
+1920×1080 canvas and the bound is one slot for the whole video side, see
+`program-bus.md`) and `health.coalesced` +0, for a 300 ms AND a 1 s fade,
+with 0 late drops.

@@ -48,6 +48,7 @@ pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
 mod program_authority; // #221 L4b: SP-program (∪ SongPlayer's cg OBS record) drives playback
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
+pub mod program_canvas; // #223: SP-program's ONE picture layout (FHD) + the fit into it
 pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
 pub mod program_on_air; // #221: what is on air (the bus's watch value) + the one scene-name resolver
 pub mod program_output; // #209: the SP-program sender + its thread

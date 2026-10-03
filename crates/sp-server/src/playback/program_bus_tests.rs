@@ -2,8 +2,10 @@
 //! through the pure [`ProgramCore`] and a real [`ProgramOutput`] over
 //! `MockNdiBackend`, so every assertion reads what the `SP-program` sender
 //! actually sent. Source A's frames are 4×2 NV12, source B's 8×2, and the
-//! program's own standby black is 2×2 — the `send_video_async(…,WxH,…)` call
-//! strings name who owned each boundary.
+//! program's own standby black is 2×2, so the size a boundary showed names
+//! who owned it (`shown_dims`). The rig reads it from the job it handed the
+//! sender (`Program::submit`), not from the wire: #223 puts every picture
+//! the sender sends in its 2×2 canvas, which `shown_dims` also checks.
 //! Wired via `#[cfg(test)] #[path = "program_bus_tests.rs"] mod tests;`.
 
 use super::*;
@@ -68,29 +70,89 @@ pub(super) fn job(w: u32, video: &SharedFrame, stamp: i64, level: f32) -> Submit
     }
 }
 
-pub(super) fn program() -> (Arc<MockNdiBackend>, ProgramOutput<MockNdiBackend>) {
+/// The program's own standby black in this rig: `ProgramOutput::new(_, 2, 2)`,
+/// the canvas every picture the sender sends is in (#223).
+pub(super) const STANDBY: &str = "2x2";
+
+/// The `SP-program` sender as the bus tests drive it: the real
+/// [`ProgramOutput`] over `MockNdiBackend`, plus what each boundary handed to
+/// it showed ([`shown`]), in order.
+pub(super) struct Program {
+    out: ProgramOutput<MockNdiBackend>,
+    backend: Arc<MockNdiBackend>,
+    shown: Vec<String>,
+}
+
+impl Program {
+    /// Hand one queued boundary to the sender (`ProgramOutput::submit`),
+    /// recording what it shows; the stamp it went out on.
+    pub(super) fn submit(&mut self, job: ProgramJob) -> i64 {
+        self.shown.push(shown(&job));
+        self.out.submit(job)
+    }
+}
+
+/// The `WxH` of the picture a boundary shows, which names its owner: a
+/// source's own picture (A 4×2, B 8×2, C 6×2), the program's standby black
+/// ([`STANDBY`]), and for a mixed boundary its incoming side, else its
+/// outgoing side (a mix with neither side goes out as the standby pair).
+fn shown(job: &ProgramJob) -> String {
+    let size = |j: &SubmitJob| format!("{}x{}", j.width, j.height);
+    match job {
+        ProgramJob::Source(j) => size(j),
+        ProgramJob::Mix(mix) => mix
+            .to
+            .as_ref()
+            .or(mix.from.as_ref())
+            .map_or_else(|| STANDBY.to_string(), size),
+        ProgramJob::Standby { .. } => STANDBY.to_string(),
+    }
+}
+
+pub(super) fn program() -> (Arc<MockNdiBackend>, Program) {
     let backend = Arc::new(MockNdiBackend::new());
     let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
         .expect("mock sender");
-    (backend, ProgramOutput::new(sender, 2, 2))
+    let out = ProgramOutput::new(sender, 2, 2);
+    (
+        backend.clone(),
+        Program {
+            out,
+            backend,
+            shown: Vec::new(),
+        },
+    )
 }
 
 /// Send every queued program boundary through the mock `SP-program` sender.
-pub(super) fn drain(core: &mut ProgramCore, out: &mut ProgramOutput<MockNdiBackend>) {
+pub(super) fn drain(core: &mut ProgramCore, out: &mut Program) {
     while let Some(job) = core.take() {
         let stamp = out.submit(job);
         core.record_submitted(stamp);
     }
 }
 
-/// The `WxH` of every video the program sent, in order.
-pub(super) fn video_dims(backend: &MockNdiBackend) -> Vec<String> {
-    backend
+/// The `WxH` each boundary the program sent showed ([`shown`]), in order,
+/// once the wire is checked: one picture per boundary handed to the sender,
+/// each its 2×2 canvas (#223).
+pub(super) fn shown_dims(out: &Program) -> Vec<String> {
+    let wire: Vec<String> = out
+        .backend
         .calls()
-        .iter()
+        .into_iter()
         .filter(|c| c.starts_with("send_video_async("))
-        .map(|c| c.split(',').nth(2).unwrap_or_default().to_string())
-        .collect()
+        .collect();
+    assert_eq!(
+        wire.len(),
+        out.shown.len(),
+        "one picture on the wire per boundary handed to the sender"
+    );
+    assert!(
+        wire.iter()
+            .all(|c| c == "send_video_async(42,NV12,2x2,stride=2,30/1)"),
+        "#223: every picture on the wire is the 2×2 canvas: {wire:?}"
+    );
+    out.shown.clone()
 }
 
 /// The send calls (audio + video) after the sender's creation, in order.
@@ -155,7 +217,7 @@ fn a_cut_is_contiguous_with_one_pair_per_boundary() {
         stamps(1..=12),
         "one frame per boundary, contiguous across the cut"
     );
-    assert_eq!(video_dims(&backend), dims(&[("4x2", 6), ("8x2", 6)]));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 6), ("8x2", 6)]));
     let sends = sends(&backend);
     assert_eq!(
         sends.len(),
@@ -211,7 +273,7 @@ fn the_new_source_waits_for_the_old_sources_last_boundary() {
     assert_eq!(late_a, OfferOutcome::Accepted);
     drain(&mut core, &mut out);
     assert_eq!(backend.video_timecodes(), stamps(1..=7));
-    assert_eq!(video_dims(&backend), dims(&[("4x2", 6), ("8x2", 1)]));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 6), ("8x2", 1)]));
     assert_eq!(
         core.offer(SRC_A, job(4, &fa, b(7), 0.1)),
         OfferOutcome::NotOwner
@@ -224,22 +286,24 @@ fn a_cut_to_an_idle_source_carries_its_standby_pair() {
     // B is idle: its paced output emits its own #147 standby pair (B's NV12
     // black + one silent block) every boundary. After the cut the program
     // carries exactly that pair — B's own allocation, not the program's fill.
+    // #223: B's black is a canvas picture (the paced idle black is 1920×1080,
+    // the canvas, in production), so it goes out as it is.
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
     let (backend, mut out) = program();
     let fa = frame(4, 2);
-    let b_black = frame(6, 2);
+    let b_black = frame(2, 2);
     for k in 1..=10 {
         let now = b(k) + 5 * MS;
         core.offer(SRC_A, job(4, &fa, b(k), 0.1));
-        core.offer(SRC_B, job(6, &b_black, b(k), 0.0));
+        core.offer(SRC_B, job(2, &b_black, b(k), 0.0));
         if k == 5 {
             core.cut(SRC_B, now);
         }
         drain(&mut core, &mut out);
     }
     assert_eq!(backend.video_timecodes(), stamps(1..=10));
-    assert_eq!(video_dims(&backend), dims(&[("4x2", 6), ("6x2", 4)]));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 6), ("2x2", 4)]));
     let last = backend.last_async_video_slice().expect("a video was sent");
     assert_eq!(
         last,
@@ -292,7 +356,7 @@ fn a_source_that_stalls_at_the_cut_boundary_is_covered_by_the_standby_fill() {
         "b(6) filled, B on"
     );
     assert_eq!(
-        video_dims(&backend),
+        shown_dims(&out),
         dims(&[("4x2", 5), ("2x2", 1), ("8x2", 2)]),
         "b(6) is the program's own standby black"
     );
@@ -419,7 +483,7 @@ fn an_offer_never_decides_a_missed_boundary_on_the_sources_own_clock() {
         drain(&mut core, &mut out);
     }
     assert_eq!(backend.video_timecodes(), stamps(1..=5));
-    assert_eq!(video_dims(&backend), dims(&[("4x2", 5)]));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 5)]));
     let h = core.status().health;
     assert_eq!((h.filled, h.late_dropped, h.resyncs), (0, 0, 0));
 }
@@ -465,7 +529,7 @@ fn with_no_source_every_boundary_is_filled_on_time() {
     core.release(b(3) + MS);
     drain(&mut core, &mut out);
     assert_eq!(backend.video_timecodes(), stamps(1..=3));
-    assert_eq!(video_dims(&backend), dims(&[("2x2", 3)]));
+    assert_eq!(shown_dims(&out), dims(&[("2x2", 3)]));
     assert_eq!(sends(&backend).len(), 6);
     let st = core.status();
     assert_eq!(
@@ -539,7 +603,7 @@ fn a_gap_in_the_owners_own_stream_is_filled_at_once() {
     drain(&mut core, &mut out);
     assert_eq!(backend.video_timecodes(), stamps(1..=4));
     assert_eq!(
-        video_dims(&backend),
+        shown_dims(&out),
         dims(&[("4x2", 1), ("2x2", 2), ("4x2", 1)])
     );
     assert_eq!(core.status().health.filled, 2);
@@ -563,7 +627,7 @@ fn the_sender_fills_at_once_a_boundary_its_owner_is_already_past() {
     core.release(b(2) + MS);
     drain(&mut core, &mut out);
     assert_eq!(backend.video_timecodes(), stamps(1..=2));
-    assert_eq!(video_dims(&backend), dims(&[("4x2", 1), ("2x2", 1)]));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 1), ("2x2", 1)]));
     assert!(core.owner_passed(b(2)));
     assert!(!core.owner_passed(b(3)), "b(3) itself is still coming");
 }

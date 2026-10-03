@@ -3,16 +3,18 @@
 //!
 //! The sender (`program_output::ProgramOutput::serve`) reads four instants
 //! per boundary off its own wall, the stamps' timeline ([`BoundaryMarks`]):
-//! the job taken from the bus, its audio block handed to VBAN, and the NDI
-//! submit started and returned. [`BoundarySample::of`] turns them into three
-//! µs figures:
+//! the job taken from the bus, its audio block handed to VBAN, and its video
+//! side started (#223: the picture made a 1920×1080 canvas picture, then the
+//! NDI submit) and returned. [`BoundarySample::of`] turns them into three µs
+//! figures:
 //!
 //! - `ready_late_us`: the job taken vs the boundary instant (a late source, a
 //!   late release, or the sender still busy with the boundary before);
 //! - `vban_feed_late_us`: the VBAN hand-off vs the boundary instant (what
 //!   FOH hears — the VBAN thread sends a block's first packet two slots
 //!   after its boundary);
-//! - `submit_us`: the NDI submit call alone.
+//! - `submit_us`: the video side — the canvas fit or a fade's picture
+//!   (#223), then the NDI submit call.
 //!
 //! [`BoundaryTiming`] (pure, Linux-tested; its window and WARN rate limit
 //! are `stat_window.rs`'s, shared with the VBAN thread's `VbanStallLog`)
@@ -65,7 +67,8 @@ pub struct BoundaryMarks {
     pub taken_100ns: i64,
     /// Its audio block was handed to VBAN.
     pub fed_100ns: i64,
-    /// Its NDI submit started.
+    /// Its video side started (#223: the canvas fit or a fade's picture,
+    /// then the NDI submit).
     pub submit_start_100ns: i64,
     /// Its NDI submit returned.
     pub submitted_100ns: i64,

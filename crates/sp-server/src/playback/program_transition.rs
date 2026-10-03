@@ -12,14 +12,15 @@
 //!   ([`crossfade_gains`]), so the gain never steps at a boundary edge;
 //! - **video**: a per-pixel linear blend of the two NV12 frames at the
 //!   boundary's midpoint fraction α = (k + ½)/n, in integer Q8 math
-//!   ([`weight_q8`]). When the two pictures differ in size or stride, the
-//!   outgoing picture is FITTED into the incoming layout ([`FitPlan`]:
-//!   bilinear, aspect kept, centred, studio-black bars), so the picture
-//!   dissolves whatever the catalog's resolutions (#215 addendum A). The fit
-//!   and the blend are ONE pass, split into row bands across threads
-//!   ([`mix_nv12_into`], the child module `nv12_mix.rs`, #215 addendum 3);
-//!   the two-pass form (`FitPlan::apply` then `blend_nv12_into`) is kept as
-//!   the test-only reference it is pinned against;
+//!   ([`weight_q8`]). #223: the blend is drawn in the `SP-program` canvas
+//!   (FHD, `program_canvas.rs`). A picture that is not a canvas picture is
+//!   FITTED into it ([`FitPlan`]: bilinear, aspect kept, centred,
+//!   studio-black bars), so the picture dissolves whatever the catalog's
+//!   resolutions (#215 addendum A). The outgoing side's fit and the blend
+//!   are ONE pass, split into row bands across threads ([`mix_nv12_into`],
+//!   the child module `nv12_mix.rs`, #215 addendum 3); the two-pass form
+//!   (`FitPlan::apply` then `blend_nv12_into`) is kept as the test-only
+//!   reference it is pinned against;
 //! - a side that is missing on a boundary (its source stalled past the fill
 //!   grace) is the standby: the black picture and silence. There is never a
 //!   hole.
@@ -379,7 +380,7 @@ pub fn blend_nv12_into(from: &[u8], to: &[u8], weight: u32, out: &mut Vec<u8>) {
 }
 
 /// A picture's memory layout; two pictures blend byte for byte only when these
-/// are equal (otherwise the outgoing one is fitted first, [`FitPlan`]).
+/// are equal (otherwise one is fitted into the other's layout, [`FitPlan`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Layout {
     pub width: u32,
@@ -402,10 +403,11 @@ impl Layout {
 
 /// The NV12 studio black of `layout`, appended to `out`: Y 16 over the
 /// `stride × height` luma plane, then 128 (neutral chroma) for the rest of the
-/// buffer. A missing side of a mixed boundary is this black in the PRESENT
-/// side's exact layout (a decoder's stride padding and buffer length
-/// included), so the two blend byte for byte; it is also the canvas a
-/// [`FitPlan`] draws the fitted picture on (the bars).
+/// buffer: the canvas a [`FitPlan`] draws the fitted picture on (the bars).
+/// Test-only since #223: `FitPlan::apply`'s canvas in the two-pass reference.
+/// The sender's missing side is the program's own standby black, which is
+/// the `SP-program` canvas (`program_canvas.rs`).
+#[cfg(test)]
 pub fn black_nv12_into(layout: Layout, out: &mut Vec<u8>) {
     let luma = (layout.stride as usize * layout.height as usize).min(layout.len);
     out.extend(std::iter::repeat_n(16u8, luma));
@@ -465,15 +467,16 @@ fn nv12_whole(layout: Layout, len: usize) -> bool {
     stride >= 2 * w.div_ceil(2) && len >= stride * (h + h.div_ceil(2))
 }
 
-/// How the outgoing picture is fitted into the incoming layout (#215
-/// addendum A): its aspect kept, scaled until it fills one axis, centred, with
-/// studio-black bars (Y 16, UV 128) on the other. Bilinear in Q8 fixed point,
-/// the luma plane and the half-resolution chroma plane each on their own grid.
-/// The rectangle is even in every coordinate (unless the destination is under
-/// 2×2), so each chroma sample covers exactly its 2×2 luma block. Built ONCE
-/// per pair of layouts (the column taps are precomputed, the row taps are one
-/// per row) and drawn by [`mix_nv12_into`] on every mixed boundary of the
-/// window that needs it, blended as it is fitted (#215 addendum 3).
+/// How a picture is fitted into another layout (#215 addendum A; since #223
+/// always the `SP-program` canvas, `program_canvas.rs`): its aspect kept,
+/// scaled until it fills one axis, centred, with studio-black bars (Y 16,
+/// UV 128) on the other. Bilinear in Q8 fixed point, the luma plane and the
+/// half-resolution chroma plane each on their own grid. The rectangle is
+/// even in every coordinate (unless the destination is under 2×2), so each
+/// chroma sample covers exactly its 2×2 luma block. Built ONCE per pair of
+/// layouts (the column taps are precomputed, the row taps are one per row)
+/// and drawn by [`mix_nv12_into`], blended as it is fitted (#215 addendum 3),
+/// at weight 0 for a plain fit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FitPlan {
     src: Layout,
@@ -512,8 +515,9 @@ impl FitPlan {
         }
     }
 
-    /// Whether this plan fits a `src` picture into `dst` (the sender keeps
-    /// one plan per window and rebuilds it for another pair of layouts).
+    /// Whether this plan fits a `src` picture into `dst` (#223: the canvas
+    /// keeps the plans used last, `program_canvas.rs`, and builds one for
+    /// another layout).
     pub fn fits(&self, src: Layout, dst: Layout) -> bool {
         self.src == src && self.dst == dst
     }
@@ -566,8 +570,8 @@ impl FitPlan {
 
 /// Fit the NV12 picture `src` of `src_layout` into `dst_layout` (appended to
 /// `out`, [`FitPlan::apply`]), building the plan every call. Test-only (#215
-/// addendum 3): the sender keeps its plan across a window's boundaries and
-/// draws it with [`mix_nv12_into`].
+/// addendum 3): the sender keeps its plans (`program_canvas.rs`) and draws
+/// them with [`mix_nv12_into`].
 #[cfg(test)]
 pub fn fit_nv12_into(src: &[u8], src_layout: Layout, dst_layout: Layout, out: &mut Vec<u8>) {
     FitPlan::new(src_layout, dst_layout).apply(src, out);
