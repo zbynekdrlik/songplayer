@@ -6,6 +6,7 @@
 
 pub mod audio_grid;
 pub mod av_catchup; // #192 round 4: pure video-follows-audio catch-up decision (Linux-tested)
+pub mod band_pool; // #223: the SP-program sender's persistent row-band workers (no thread per picture)
 pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;

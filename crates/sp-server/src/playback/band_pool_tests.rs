@@ -1,0 +1,276 @@
+//! #223 follow-up (design record 5973498519): the `SP-program` sender's
+//! persistent band workers. WHERE each band ran is read from the thread
+//! itself (`thread::current().id()` / `.name()`, the "prove where a call
+//! ran" pattern), never from a wall time: band 0 on the calling thread, band
+//! `i` on the worker `<name>-<i>`, the SAME threads picture after picture,
+//! and none of them left once the pool is dropped. The waits are gates the
+//! test holds; a "must not have returned yet" window is used only in the
+//! safe direction (correct code can never fail it).
+//! Wired via `#[cfg(test)] #[path = "band_pool_tests.rs"] mod tests;`.
+
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::Mutex;
+use std::sync::mpsc;
+use std::thread::{self, ThreadId};
+use std::time::Duration;
+
+use super::BandPool;
+
+/// Where one band was painted: the band, its thread, the thread's name.
+type Painted = (usize, ThreadId, Option<String>);
+
+/// A painter that records where each band ran.
+fn recorder(log: &Mutex<Vec<Painted>>) -> impl Fn(usize) + Sync + '_ {
+    move |band| {
+        let me = thread::current();
+        let name = me.name().map(str::to_owned);
+        log.lock().unwrap().push((band, me.id(), name));
+    }
+}
+
+#[test]
+fn a_pool_starts_one_worker_per_band_past_the_first() {
+    for (asked, bands, workers) in [(0, 1, 0), (1, 1, 0), (2, 2, 1), (6, 6, 5)] {
+        let pool = BandPool::new("pool-size", asked);
+        assert_eq!(
+            (pool.bands(), pool.workers()),
+            (bands, workers),
+            "{asked} bands asked: band 0 is the caller's, one worker per further band"
+        );
+    }
+}
+
+#[test]
+fn every_band_past_the_first_runs_on_its_own_worker_picture_after_picture() {
+    // The fix itself: before, every picture started K − 1 scoped threads, a
+    // new ThreadId each time. Now band i runs on the worker `<name>-<i>`,
+    // the same thread on every run.
+    let pool = BandPool::new("band-test", 4);
+    let caller = thread::current().id();
+    let mut workers: Option<Vec<ThreadId>> = None;
+    for picture in 0..5 {
+        let log = Mutex::new(Vec::new());
+        assert_eq!(
+            pool.run(&recorder(&log)),
+            4,
+            "picture {picture}: four threads painted"
+        );
+        let mut painted = log.into_inner().unwrap();
+        painted.sort_by_key(|&(band, ..)| band);
+        assert_eq!(
+            painted.iter().map(|&(band, ..)| band).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3],
+            "picture {picture}: every band painted exactly once"
+        );
+        assert_eq!(
+            painted[0].1, caller,
+            "picture {picture}: band 0 on the calling thread"
+        );
+        for (band, _, name) in &painted[1..] {
+            assert_eq!(
+                name.as_deref(),
+                Some(format!("band-test-{band}").as_str()),
+                "picture {picture}: band {band} on its own worker"
+            );
+        }
+        let ids: Vec<ThreadId> = painted[1..].iter().map(|&(_, id, _)| id).collect();
+        assert!(
+            ids.iter().all(|&id| id != caller),
+            "picture {picture}: no worker band on the calling thread"
+        );
+        match &workers {
+            None => workers = Some(ids),
+            Some(first) => assert_eq!(
+                &ids, first,
+                "picture {picture}: the same worker threads as the first picture"
+            ),
+        }
+    }
+    let ids = workers.unwrap();
+    assert!(
+        ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2],
+        "a thread of its own per band: {ids:?}"
+    );
+}
+
+#[test]
+fn a_pool_of_one_band_paints_on_the_calling_thread_alone() {
+    let pool = BandPool::new("one-band", 1);
+    let log = Mutex::new(Vec::new());
+    assert_eq!(pool.run(&recorder(&log)), 1, "one thread painted");
+    let painted = log.into_inner().unwrap();
+    assert_eq!(painted.len(), 1);
+    assert_eq!(
+        (painted[0].0, painted[0].1),
+        (0, thread::current().id()),
+        "band 0, on the calling thread"
+    );
+}
+
+#[test]
+fn a_run_returns_only_once_every_band_is_painted() {
+    // Band 1 is held on a gate the test opens; the run must not return
+    // before it (the window below can only pass vacuously on a slow runner,
+    // never fail correct code), and once it returns band 1 is done.
+    let pool = BandPool::new("wait-test", 2);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let release_rx = Mutex::new(release_rx);
+    let events = Mutex::new(Vec::new());
+    let paint = |band: usize| {
+        if band == 1 {
+            started_tx.send(()).unwrap();
+            release_rx.lock().unwrap().recv().unwrap();
+            events.lock().unwrap().push("band 1 painted");
+        }
+    };
+    let (returned_tx, returned_rx) = mpsc::channel();
+    thread::scope(|s| {
+        // Owned here: a failed check below drops it as it unwinds, so the
+        // held band's `recv` fails instead of hanging the scope's join.
+        let release_tx = release_tx;
+        s.spawn(|| {
+            let threads = pool.run(&paint);
+            events.lock().unwrap().push("run returned");
+            returned_tx.send(threads).unwrap();
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(20))
+            .expect("band 1 started on its worker");
+        assert!(
+            returned_rx
+                .recv_timeout(Duration::from_millis(200))
+                .is_err(),
+            "the run is still waiting for band 1"
+        );
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            returned_rx.recv_timeout(Duration::from_secs(20)),
+            Ok(2),
+            "the run returned once band 1 was painted: two threads"
+        );
+    });
+    assert_eq!(
+        events.into_inner().unwrap(),
+        vec!["band 1 painted", "run returned"]
+    );
+}
+
+#[test]
+fn a_band_that_panics_on_a_worker_panics_the_run_and_the_worker_lives_on() {
+    // As `std::thread::scope` did: the panic reaches the caller, once every
+    // band is done. The worker caught it, so the next picture runs on the
+    // same threads.
+    let pool = BandPool::new("panic-test", 3);
+    let log = Mutex::new(Vec::new());
+    let record = recorder(&log);
+    let paint = |band: usize| {
+        record(band);
+        if band == 1 {
+            panic!("band 1 broke");
+        }
+    };
+    let caught = panic::catch_unwind(AssertUnwindSafe(|| pool.run(&paint)));
+    let payload = caught.expect_err("the band's panic reaches the caller");
+    assert_eq!(
+        payload.downcast_ref::<&str>(),
+        Some(&"band 1 broke"),
+        "the band's own panic, resumed"
+    );
+    let mut first = log.into_inner().unwrap();
+    first.sort_by_key(|&(band, ..)| band);
+    assert_eq!(
+        first.iter().map(|&(band, ..)| band).collect::<Vec<_>>(),
+        vec![0, 1, 2],
+        "every band ran before the panic reached the caller"
+    );
+
+    let log = Mutex::new(Vec::new());
+    assert_eq!(
+        pool.run(&recorder(&log)),
+        3,
+        "the next picture: three threads"
+    );
+    let mut next = log.into_inner().unwrap();
+    next.sort_by_key(|&(band, ..)| band);
+    assert_eq!(
+        next.iter().map(|&(_, id, _)| id).collect::<Vec<_>>(),
+        first.iter().map(|&(_, id, _)| id).collect::<Vec<_>>(),
+        "the same threads, the panicked band's worker included"
+    );
+}
+
+#[test]
+fn a_panic_on_the_calling_thread_waits_for_the_workers_bands() {
+    // Band 0 (the caller's) panics while band 1 still paints on its worker.
+    // The unwinding run must not leave before band 1 is done: band 1 still
+    // uses the caller's painter and buffers.
+    let pool = BandPool::new("unwind-test", 2);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let release_rx = Mutex::new(release_rx);
+    let events = Mutex::new(Vec::new());
+    let paint = |band: usize| {
+        if band == 1 {
+            started_tx.send(()).unwrap();
+            release_rx.lock().unwrap().recv().unwrap();
+            events.lock().unwrap().push("band 1 painted");
+        } else {
+            panic!("band 0 broke");
+        }
+    };
+    let (returned_tx, returned_rx) = mpsc::channel();
+    thread::scope(|s| {
+        // Owned here: a failed check below drops it as it unwinds, so the
+        // held band's `recv` fails instead of hanging the scope's join.
+        let release_tx = release_tx;
+        s.spawn(|| {
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| pool.run(&paint)));
+            events.lock().unwrap().push("run unwound");
+            returned_tx.send(caught.is_err()).unwrap();
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(20))
+            .expect("band 1 started on its worker");
+        assert!(
+            returned_rx
+                .recv_timeout(Duration::from_millis(200))
+                .is_err(),
+            "the unwinding run is still waiting for band 1"
+        );
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            returned_rx.recv_timeout(Duration::from_secs(20)),
+            Ok(true),
+            "band 0's panic reached the caller"
+        );
+    });
+    assert_eq!(
+        events.into_inner().unwrap(),
+        vec!["band 1 painted", "run unwound"]
+    );
+}
+
+#[test]
+fn the_pool_shuts_its_workers_down_when_it_is_dropped() {
+    // Every worker holds the pool's token for its thread's life; dropping
+    // the pool closes the queues and JOINS the threads, so none is left the
+    // moment the drop returns.
+    let pool = BandPool::new("drop-test", 6);
+    let alive = pool.alive();
+    assert_eq!(alive.strong_count(), 5, "five workers running");
+    let log = Mutex::new(Vec::new());
+    assert_eq!(pool.run(&recorder(&log)), 6);
+    drop(pool);
+    assert_eq!(
+        alive.strong_count(),
+        0,
+        "every worker thread ended before the drop returned"
+    );
+
+    let single = BandPool::new("drop-test-one", 1);
+    let alive = single.alive();
+    assert_eq!(alive.strong_count(), 0, "one band: no worker at all");
+    drop(single);
+    assert_eq!(alive.strong_count(), 0);
+}
