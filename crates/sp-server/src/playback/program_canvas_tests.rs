@@ -117,3 +117,26 @@ fn a_fit_sends_a_canvas_picture_as_it_is_and_fits_any_other() {
         assert_eq!(fitted.to_vec(), vec![24, 82, 164, 118, 109, 184]);
     }
 }
+
+#[test]
+fn a_fit_is_exactly_the_canvas_bytes_whatever_the_black_it_is_drawn_on() {
+    // Round 4: the kernel paints min(canvas, black) bytes, and the sender
+    // labels the result with the canvas's size for the SDK. A longer black
+    // is cut to the canvas.
+    let mut canvas = Canvas::new(8, 2);
+    let small = SharedFrame::new(FROM_4X2.to_vec());
+    let fitted = canvas.fit(tight(4, 2), &small, &[16u8; 30], 1);
+    assert_eq!(
+        fitted.len(),
+        24,
+        "the 8×2 canvas's bytes, not the black's 30"
+    );
+}
+
+#[test]
+#[should_panic]
+fn a_fit_onto_a_black_shorter_than_the_canvas_panics_rather_than_send_a_short_picture() {
+    let mut canvas = Canvas::new(8, 2);
+    let small = SharedFrame::new(FROM_4X2.to_vec());
+    canvas.fit(tight(4, 2), &small, &[16u8; 23], 1);
+}

@@ -110,7 +110,10 @@ impl Canvas {
 
     /// `video`, a `layout` picture, as a canvas picture: `video` itself (the
     /// same allocation) when the canvas holds it, else fitted onto `black`
-    /// (the canvas's studio black) in `bands` row bands, into a pooled buffer.
+    /// (the canvas's studio black) in `bands` row bands, into a pooled buffer
+    /// of exactly the canvas's bytes. `black` is read for its length only (at
+    /// weight 0 none of its bytes shows); one shorter than the canvas panics
+    /// here, never a short picture labelled as the canvas for the SDK.
     pub fn fit(
         &mut self,
         layout: Layout,
@@ -121,7 +124,9 @@ impl Canvas {
         if self.holds(layout) {
             return video.clone();
         }
-        let mut out = sp_decoder::frame_pool::take(self.layout.len);
+        let len = self.layout.len;
+        let black = &black[..len];
+        let mut out = sp_decoder::frame_pool::take(len);
         let plan = self.plan(layout);
         mix_nv12_into(
             Outgoing::Fitted(plan, video),
