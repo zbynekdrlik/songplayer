@@ -480,6 +480,22 @@ RED message lists the re-pinned tests that fail with the new ones (#210:
 the 10 ms → L WARN, `vban_feed_late_over_budget`; 4 tests, one of them the
 old real-loop pin that expected `warned: 1`).
 
+**A fix that replaces a field the tests read (#223).** The RED tests must
+compile against both trees, but GREEN deletes the field (`out.fit_plans`
+moved into the new `Canvas`). Add a `#[cfg(test)]` seam METHOD with the
+GREEN name in RED, returning the old field (`fn fit_plans(&self) -> u64 {
+self.fit_plans }`; a field and a method may share a name), write every test
+against the method, and let GREEN change only its body (`self.canvas.built()`).
+To read the bytes a sender put on the wire, use a `#[cfg(test)]` accessor of
+the async holdover the SDK still points at (`FrameSubmitter::held_frame`); the
+mock records only the last slice's pointer and length.
+
+**When a production output's picture size becomes fixed, tests that named a
+boundary's owner by the wire size go blind (#223).** Record what each job
+showed in the rig (`program_bus_tests.rs::Program`), and check the wire
+separately (one picture per job, each the fixed size) instead of dropping the
+owner checks.
+
 **When the fix makes a parameter DEAD (it removes, not adds, an input) —
 RED → GREEN → refactor (#224).** `ProgramOutput::submit(job, audio_now)`
 lost its reason to take the emit instant. The RED tests keep the OLD
