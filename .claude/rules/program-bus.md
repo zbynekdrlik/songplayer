@@ -12,6 +12,7 @@ paths:
   - "crates/sp-server/src/playback/legacy_cg*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/playback/program_canvas*.rs"
+  - "crates/sp-server/src/playback/band_pool*.rs"
   - "crates/sp-server/src/playback/paced_output*.rs"
   - "crates/sp-server/src/api/program*.rs"
   - "sp-ui/src/components/program_control.rs"
@@ -160,19 +161,23 @@ included, is comment 5872871751).
   - a forwarded source pair's picture (a paced source's, the NDI input
     "OBS manuál"'s, a paced standby/fill pair's);
   - the program's standby black (the canvas black itself);
-  - a fade's picture: the incoming side is made a canvas picture first, the
-    outgoing side is blended over it and fitted into the canvas in the same
-    pass when it is not one (`program-transition.md`, "The mix"); a missing
-    side is the canvas black. The mix is exactly the canvas's bytes.
+  - a fade's picture, in ONE pass from both sides (`Canvas::fade`, #223
+    follow-up, design record 5973498519): each side as it is when it is a
+    canvas picture, fitted into the canvas as it is read when it is not, the
+    canvas black when it is missing, the incoming side blended over the
+    outgoing one (`program-transition.md`, "The mix"). The mix is exactly the
+    canvas's bytes.
 - **Pass-through.** A picture with the canvas's size and stride and AT LEAST
   its bytes (a decoder buffer may carry slack) goes out as the SAME
   allocation: no copy. The paced idle black, the program standby and a
   1920×1080 song decoded on a 1920 stride are all canvas pictures.
-- **The fit.** Any other picture is fitted onto the canvas black: placed by
+- **The fit.** Any other picture is fitted into the canvas: placed by
   `nv12_fit::aspect_fit` (aspect kept, centred on even offsets, bars Y 16 /
-  UV 128), scaled bilinear by the #215 fused kernel (`mix_nv12_into` with
-  `Outgoing::Fitted`) at weight 0 — every byte the fitted picture's, no
-  blend — in the sender's `mix_bands` row bands, into a `frame_pool` buffer.
+  UV 128), scaled bilinear by the #215 fused kernel as a plain fit
+  (`mix_nv12_into` with `Paint::Fit(Side::Fitted)`: ONE side, every byte the
+  fitted picture's, nothing else read — #223 follow-up; before, it also
+  read the 3.1 MB canvas black as an unused second side) — in the sender's
+  `mix_bands` row bands on its band pool, into a `frame_pool` buffer.
   A larger picture is scaled down, a smaller one up (the 720p dabing songs),
   a 16:9 one fills the canvas; 2560×1080 sits on rows 134 to 943. A padded
   stride at 1920×1080 is a repack (a fit at scale 1 copies every visible
@@ -183,7 +188,8 @@ included, is comment 5872871751).
   rebuild nothing) and logs ONE INFO line per new plan: `program output: a
   picture of a new size — fitted into the SP-program canvas` (`width`,
   `height`, `stride`, `canvas_width`, `canvas_height`, `plans_built`). The
-  thread-start INFO line names the canvas (`width`, `height`, `mix_bands`).
+  thread-start INFO line names the canvas (`width`, `height`, `mix_bands`,
+  `mix_workers`).
 - **Cost, on the box.** The fit is video-side work: `serve` = `split` →
   `feed_vban` → `submit_video`, so VBAN gets the boundary's block before any
   fit. `submit_video` reads `submit_start` BEFORE the picture work, so
@@ -194,14 +200,17 @@ included, is comment 5872871751).
     first lever only AFTER a box measurement (main session to confirm). A
     single band is likely over budget: box run 3 measured a fitted 1440p
     fade picture at 13.2–20.0 ms on 6 bands (#215 comment 5860381820).
-  - **What it costs.** Each fitted pass spawns `mix_bands` − 1 scoped
-    `program-mix` threads (5 on the 24-thread box): on EVERY forwarded
-    boundary of a source that is not 1920×1080 (most of the catalog is
-    1440p), ~150 thread starts a second, and 2·(K−1) on a fade boundary
-    whose incoming side is not a canvas picture (two passes,
-    `program-transition.md`). A plain fit also reads the 3.1 MB canvas black
-    as the kernel's `to` (weight 0). SpeedHQ now encodes FHD, not 1440p (44 %
-    fewer pixels), which pays part of it back.
+  - **What it costs.** One pass per picture on EVERY forwarded boundary of
+    a source that is not 1920×1080 (most of the catalog is 1440p), and one
+    pass per fade boundary whatever its sides. The bands run on the
+    sender's persistent band pool (`band_pool.rs`, #223 follow-up): band 0
+    on the `SP-program` thread, band i on `program-mix-<i>`, the K − 1 = 5
+    workers started once with the output and joined when it is dropped —
+    no thread start per picture. Before the follow-up each painted pass
+    spawned K − 1 scoped threads (~150 thread starts a second with a 1440p
+    song on program), a fade with a non-canvas incoming side took two
+    passes, and a plain fit also read the canvas black. SpeedHQ now encodes
+    FHD, not 1440p (44 % fewer pixels), which pays part of it back.
   - **Box check, a 1440p song on program, then a 1920×1080 one:**
     - the program's `submit_us_max` / `submit_over_5ms`;
     - the size a receiver gets: any NDI receiver of `SP-program` (NDI Studio
@@ -215,15 +224,17 @@ included, is comment 5872871751).
       this deploy;
     - a 300 ms AND a 1 s fade between two 1440p songs, the regression case:
       a fade between two same-size non-FHD songs was one byte-for-byte
-      blend before #223 and is now two passes (the incoming fit, then the
-      outgoing fit + blend) with 2·(K−1) thread starts. `max_picture_us` and
-      `submit_us_max` stay under one slot (33 333), and `health.late_dropped`,
-      `health.coalesced` and `cue_timeouts` move by 0.
+      blend before #223, two passes after it (10.7–30.7 ms per boundary,
+      `submit_us_max` up to 86 ms in the E2E's fades, #223 comment
+      5973492929), and is ONE pass on the band pool since the follow-up
+      (design record 5973498519). Its acceptance: `max_picture_us` under
+      ~12 000 for a 9-boundary fade, steady `submit_us_max` near the
+      pre-#223 15 ms, and `health.filled` / `late_dropped` / `coalesced`
+      (and `cue_timeouts`) +0 over the fades.
   - **Levers, in order**, if `submit_us_max` passes one slot (33 333) or the
-    collateral moves: persistent band workers (no spawn per boundary; time
-    the spawns first, `program-transition.md`); a one-pass "fitted incoming"
-    kernel variant for fades; one band for a plain fit if the spawns
-    dominate.
+    collateral moves: the first two are built (#223 follow-up: persistent
+    band workers, a one-pass fade); next, one band for a plain fit if the
+    band hand-off (K − 1 worker wakes per picture) ever dominates.
 - **Out of this slice** (later #223 slices, comment 5872871751): the
   `SP-program-MAX` output for the LED walls (max(FHD, native)), its
   `MaxSide`, Spout, the zero-receiver gate, downloads above 1440p.
@@ -231,9 +242,13 @@ included, is comment 5872871751).
   1280×720 and 2560×1080 sources → 1920×1080 stride 1920, the quadrants
   scaled not cropped, the 21:9 bars; pass-through as the same allocation,
   with slack; a padded stride repacked, a short buffer drawn black; a fade
-  between two sizes drawn in the canvas), `program_canvas_tests.rs` (the
-  layout, the pass-through rule, the two kept plans, the fit at every band
-  count), `program_output_tests.rs` (small canvases), and
+  between two sizes drawn in the canvas; a 1440p↔1440p fade, one plan, both
+  sides scaled), `program_canvas_tests.rs` (the layout, the pass-through
+  rule, the two kept plans, the fit at every band count reading its picture
+  alone, `Canvas::fade`'s one-pass pins and its plan order),
+  `band_pool_tests.rs` (the persistent workers: where each band runs, the
+  waits, a panic, the shutdown), `program_output_tests.rs` (small
+  canvases), and
   `ndi_input_tests_fhd.rs` (the input's 4×2 picture goes out 1920×1080). The
   wire picture's bytes are read through `FrameSubmitter::held_frame`, the
   async holdover the SDK still points at.
