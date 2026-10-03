@@ -234,7 +234,11 @@ included, is comment 5872871751).
   - **Levers, in order**, if `submit_us_max` passes one slot (33 333) or the
     collateral moves: the first two are built (#223 follow-up: persistent
     band workers, a one-pass fade); next, one band for a plain fit if the
-    band hand-off (K − 1 worker wakes per picture) ever dominates.
+    band hand-off (K − 1 worker wakes per picture) ever dominates; then the
+    output buffer's memset (`out.resize` in `mix_nv12_into`: one serial
+    3.1 MB write on the `SP-program` thread before the bands start, ~0.3 ms
+    at FHD, ~4× that on a 4K canvas) — the bands could initialise their own
+    part instead (it needs `MaybeUninit` slices, i.e. `unsafe`).
 - **Out of this slice** (later #223 slices, comment 5872871751): the
   `SP-program-MAX` output for the LED walls (max(FHD, native)), its
   `MaxSide`, Spout, the zero-receiver gate, downloads above 1440p.

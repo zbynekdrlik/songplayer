@@ -20,7 +20,10 @@
 //! cannot hold by type. So `run` hands each worker a pointer to the painter
 //! and does not return, nor unwind, before every worker has dropped it (the
 //! SAFETY notes on [`Job`] and [`Bands`]). This is the scoped-pool pattern,
-//! in the few lines below.
+//! in the few lines below. Its off-the-shelf form is rayon's
+//! `ThreadPool::scope` (persistent workers, no caller-side `unsafe`); rayon is
+//! not a dependency (not in `Cargo.lock`), and the design record asks for std
+//! threads + channels, no new dependency.
 //!
 //! A band that panics on a worker is caught there, so the worker lives on
 //! for the next picture. Once every band is done the calling thread panics

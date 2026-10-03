@@ -45,7 +45,8 @@ use std::sync::{Mutex, PoisonError};
 use super::{FitPlan, Layout, Q8_ONE, bilinear, nv12_whole, tap};
 use crate::playback::band_pool::BandPool;
 
-/// The most row bands (threads) one picture is painted in.
+/// The most row bands (threads) [`mix_bands`] gives the `SP-program`
+/// sender's pool (a pool paints in the band count it was built with).
 pub const MAX_MIX_BANDS: usize = 6;
 
 /// One band per this many logical processors, so a picture never takes more

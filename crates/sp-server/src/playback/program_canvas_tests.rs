@@ -186,6 +186,23 @@ fn a_fade_paints_both_sides_in_the_canvas() {
 }
 
 #[test]
+fn a_fade_side_is_judged_by_its_pictures_own_length() {
+    // A side whose layout claims the canvas's 24 bytes but whose picture has
+    // 23 is not a canvas picture: it is fitted (not whole NV12, so the
+    // canvas black), and the fade is still exactly the canvas's bytes —
+    // never a 23-byte picture labelled 8×2 for the SDK.
+    let pool = BandPool::new("canvas-test", 2);
+    let mut canvas = Canvas::new(8, 2);
+    let bytes: Vec<u8> = (0..24).collect();
+    let claimed = Some((tight(8, 2), &bytes[..23]));
+    let picture = canvas.fade(claimed, None, 0, &pool);
+    let mut black = vec![16u8; 16];
+    black.resize(24, 128);
+    assert_eq!(picture.to_vec(), black, "the canvas black, 24 bytes");
+    assert_eq!(canvas.built(), 1, "a plan for the 23-byte layout");
+}
+
+#[test]
 fn a_fade_between_two_sizes_keeps_both_plans() {
     // Both sides fitted on every boundary: two plans, built once each and
     // kept for the whole window (the scratch model's bytes: a 4×2 picture

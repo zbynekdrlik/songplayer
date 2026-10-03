@@ -45,8 +45,18 @@ pub const FIT_PLANS_KEPT: usize = 2;
 const _: () = assert!(FIT_PLANS_KEPT >= 2);
 
 /// One side of a fade boundary: a picture of its layout, or `None` when the
-/// side is missing (the canvas black).
+/// side is missing (the canvas black). The picture's own length counts,
+/// whatever the layout's `len` says ([`Canvas::fade`]).
 pub type FadeSide<'a> = Option<(Layout, &'a [u8])>;
+
+/// A fade side with its layout's `len` set to its picture's own length: what
+/// the canvas holds or fits is the bytes that are there.
+fn measured(side: FadeSide<'_>) -> FadeSide<'_> {
+    side.map(|(layout, picture)| {
+        let len = picture.len();
+        (Layout { len, ..layout }, picture)
+    })
+}
 
 /// The program's picture layout and the fit plans into it.
 #[derive(Debug)]
@@ -149,7 +159,9 @@ impl Canvas {
     /// the outgoing side `from` at the Q8 `weight`, each side as it is when
     /// the canvas holds it, fitted into the canvas when it does not, and the
     /// canvas black when it is missing. Both sides' plans are kept (the
-    /// outgoing one used last).
+    /// outgoing one used last). A side is judged by its picture's own
+    /// length, so one shorter than its layout claims is never sent as a
+    /// short canvas picture: it is fitted (and drawn black, not being whole).
     pub fn fade(
         &mut self,
         from: FadeSide<'_>,
@@ -157,6 +169,7 @@ impl Canvas {
         weight: u32,
         pool: &BandPool,
     ) -> SharedFrame {
+        let (from, to) = (measured(from), measured(to));
         for (layout, _) in [to, from].into_iter().flatten() {
             if !self.holds(layout) {
                 self.keep(layout);
