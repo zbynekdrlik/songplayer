@@ -16,10 +16,11 @@
 //!   (FHD, `program_canvas.rs`). A picture that is not a canvas picture is
 //!   FITTED into it ([`FitPlan`]: bilinear, aspect kept, centred,
 //!   studio-black bars), so the picture dissolves whatever the catalog's
-//!   resolutions (#215 addendum A). The outgoing side's fit and the blend
-//!   are ONE pass, split into row bands across threads ([`mix_nv12_into`],
-//!   the child module `nv12_mix.rs`, #215 addendum 3); the two-pass form
-//!   (`FitPlan::apply` then `blend_nv12_into`) is kept as the test-only
+//!   resolutions (#215 addendum A). Both sides' fits and the blend are ONE
+//!   pass, split into row bands on the sender's persistent band workers
+//!   ([`mix_nv12_into`], the child module `nv12_mix.rs`, #215 addendum 3 and
+//!   the #223 follow-up, `band_pool.rs`); the two-pass form (each side
+//!   `FitPlan::apply`'d, then `blend_nv12_into`) is kept as the test-only
 //!   reference it is pinned against;
 //! - a side that is missing on a boundary (its source stalled past the fill
 //!   grace) is the standby: the black picture and silence. There is never a
@@ -59,11 +60,12 @@ use sp_ndi::AudioFrame;
 use crate::playback::nv12_fit::aspect_fit;
 use crate::playback::submit_handoff::SubmitJob;
 
-// #215 addendum 3: the fused, row-banded fit + blend — a child module, so it
-// reads `FitPlan`'s private rectangle and taps (1000-line cap).
+// #215 addendum 3 + #223: the fused, row-banded fit of both sides + blend —
+// a child module, so it reads `FitPlan`'s private rectangle and taps
+// (1000-line cap).
 #[path = "nv12_mix.rs"]
 mod nv12_mix;
-pub use nv12_mix::{MAX_MIX_BANDS, Outgoing, mix_bands, mix_nv12_into};
+pub use nv12_mix::{MAX_MIX_BANDS, MIX_THREAD_NAME, Paint, Side, mix_bands, mix_nv12_into};
 
 /// The longest window a transition may take: 300 slots (10 s at 30 fps). A
 /// longer OBS or configured duration is clamped to it.
@@ -404,9 +406,10 @@ impl Layout {
 /// The NV12 studio black of `layout`, appended to `out`: Y 16 over the
 /// `stride × height` luma plane, then 128 (neutral chroma) for the rest of the
 /// buffer: the canvas a [`FitPlan`] draws the fitted picture on (the bars).
-/// Test-only since #223: `FitPlan::apply`'s canvas in the two-pass reference.
-/// The sender's missing side is the program's own standby black, which is
-/// the `SP-program` canvas (`program_canvas.rs`).
+/// Test-only since #223: `FitPlan::apply`'s canvas, and a missing side, in
+/// the two-pass reference. The kernel draws the same bytes as
+/// [`Side::Black`] without a buffer (a fade's missing side, the
+/// `SP-program` canvas black).
 #[cfg(test)]
 pub fn black_nv12_into(layout: Layout, out: &mut Vec<u8>) {
     let luma = (layout.stride as usize * layout.height as usize).min(layout.len);
@@ -475,8 +478,9 @@ fn nv12_whole(layout: Layout, len: usize) -> bool {
 /// even in every coordinate (unless the destination is under 2×2), so each
 /// chroma sample covers exactly its 2×2 luma block. Built ONCE per pair of
 /// layouts (the column taps are precomputed, the row taps are one per row)
-/// and drawn by [`mix_nv12_into`], blended as it is fitted (#215 addendum 3),
-/// at weight 0 for a plain fit.
+/// and drawn by [`mix_nv12_into`] as one [`Side::Fitted`] of a picture: alone
+/// for a plain fit, or blended with the fade's other side as it is fitted
+/// (#215 addendum 3; both sides in the one pass since the #223 follow-up).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FitPlan {
     src: Layout,
