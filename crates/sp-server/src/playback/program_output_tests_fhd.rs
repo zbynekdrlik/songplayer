@@ -1,11 +1,13 @@
 //! #223: `SP-program` is ALWAYS 1920×1080 (the owner's rule, ROZHODNUTÉ
 //! 28.9.2026). Every picture the sender submits reaches the NDI backend as
-//! the canvas — 1920×1080 NV12, stride 1920, 3 110 400 B — whatever its
-//! source's size: a forwarded pair (the NDI input's capture is one too,
+//! the canvas — 1920×1080 NV12, stride 1920 — whatever its source's size: a
+//! forwarded pair (the NDI input's capture is one too,
 //! `ndi_input_tests_fhd.rs`), a fade's picture and the standby. A canvas
-//! picture passes through as the same allocation; any other is fitted into
-//! the canvas, its aspect kept, with studio-black bars (Y 16, UV 128) where
-//! the aspect differs.
+//! picture passes through as the same allocation (a decoder buffer with
+//! slack past the picture goes out as it is); every picture the sender
+//! MAKES — a fit, a fade's picture, the standby — is exactly 3 110 400 B. Any
+//! other picture is fitted into the canvas, its aspect kept, with
+//! studio-black bars (Y 16, UV 128) where the aspect differs.
 //!
 //! These tests run the PRODUCTION canvas (`ProgramOutput::fhd`, the
 //! constructor `spawn_program_thread` uses), so every fit is a whole FHD

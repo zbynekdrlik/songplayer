@@ -198,7 +198,7 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     (`preview_stream::placement_for`) uses: each axis the destination capped by
     the aspect-scaled other axis, floored to even, centred on even offsets (a
     chroma sample covers its 2×2 luma block; 2560×1080 into 1920×1080 → rows
-    134..943), studio-black bars Y 16 / UV 128. Only the pixel paths differ:
+    134 to 943), studio-black bars Y 16 / UV 128. Only the pixel paths differ:
     the preview copies nearest-neighbour on the decode thread (cheap by rule),
     the program fit is bilinear and, since #223, runs on every boundary whose
     picture is not a canvas picture;
@@ -230,7 +230,8 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     The last band also gets the bytes past the chroma plane, and every offset
     is capped at the mixed length. Band 0 runs on the `SP-program` thread;
     bands 1..K run on named `program-mix` scoped threads
-    (`std::thread::scope`, spawned per mixed boundary, no pool, no new
+    (`std::thread::scope`, spawned per painted pass — a mixed boundary,
+    or since #223 a plain fit into the canvas — no pool, no new
     dependency). A helper that cannot start has its band painted inline,
     with a WARN. The return value is the number of threads that painted; the
     tests use it as the proof of parallelism.
@@ -250,9 +251,10 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     there are also K−1 scoped thread spawns (a name `String` and a stack
     each) and a few small `Vec`s (the band offsets, runs and slots). Since
     #223 a fade boundary whose incoming picture is not a canvas picture
-    paints TWO passes (the incoming side's fit, then the outgoing side's fit
-    + blend): 2·(K−1) spawns and two bilinear passes, where a fade between
-    two 1440p songs used to be one blend. Every forwarded boundary of a
+    paints TWO passes (the incoming side's bilinear fit, then the blend,
+    bilinear too when the outgoing side is not a canvas picture either):
+    2·(K−1) spawns, where a fade between two 1440p songs used to be one
+    byte-for-byte blend. Every forwarded boundary of a
     source that is not 1920×1080 paints one pass too (`program-bus.md`,
     "SP-program is ALWAYS 1920×1080").
   - A helper that fails to start WARNs once per failed band. That is at most
@@ -267,9 +269,12 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
   - `max_picture_us` is the wall time of `paint_mix` (all bands) on the
     `SP-program` thread (#210: `mix_picture` is only the tests' `Option` view
     of it now); since #223 it includes the incoming side's canvas fit, and
-    `health.timing.submit_us` includes the whole picture too. Box run 3 target: ≤ 15 000 at
+    `health.timing.submit_us` includes the whole picture too. Box run 3's
+    target (historical: ONE pass into a 2560×1440 output) was ≤ 15 000 at
     2560×1440 with `fitted=9` and 0 late drops, for a 300 ms fade and a 1 s
-    fade (30 boundaries).
+    fade (30 boundaries). Since #223 the target is one slot for the whole
+    video side (`program-bus.md` "SP-program is ALWAYS 1920×1080", its box
+    check).
 - `mix_audio_block` collects its samples instead of pre-sizing the `Vec`: a
   capacity formula is an equivalent mutant.
 
@@ -644,6 +649,8 @@ HOLDS those boundaries (the outgoing song on program at full level) and the
 fade starts on the first live pair. The wait shows up as
 `cue_wait_boundaries` (~10–11, see B1) and must stay under the 15-boundary
 bound (`cue_timeouts` +0). During a 2560×1440 ↔ 1920×1080 fade also read the
-sender's `max_picture_us` line (≤ 15 000 since addendum 3; run 2 read ~56 000
-before it) and `health.coalesced` +0, for a 300 ms AND a 1 s fade, with 0
-late drops.
+sender's `max_picture_us` line (≤ 15 000 since addendum 3, one pass into a
+1440p output; run 2 read ~56 000 before it; since #223 a fade is drawn in the
+1920×1080 canvas and the bound is one slot for the whole video side, see
+`program-bus.md`) and `health.coalesced` +0, for a 300 ms AND a 1 s fade,
+with 0 late drops.

@@ -150,10 +150,11 @@ fade. Before, it carried the on-air source's own size (2560×1440, 2560×1080,
 included, is comment 5872871751).
 
 - **The canvas** (`playback/program_canvas.rs`, `Canvas`): the program's ONE
-  picture layout, w×h NV12, stride w, w·h·3/2 bytes. Its size is what
-  `ProgramOutput::new` gets: `PROGRAM_STANDBY_W/H` = 1920×1080, 3 110 400 B,
-  in production (the standby's own constant); the unit tests use small
-  canvases, so they stay fast.
+  picture layout, w×h NV12, stride w, w·h·3/2 bytes. Production builds the
+  sender with `ProgramOutput::fhd(sender)`: `PROGRAM_STANDBY_W/H` =
+  1920×1080, 3 110 400 B (the standby's own constant; the FHD tests use the
+  same constructor). `ProgramOutput::new(sender, w, h)` takes any size: the
+  unit tests use small canvases, so they stay fast.
 - **Every picture** `ProgramOutput::submit_video` sends is a canvas picture:
   - a forwarded source pair's picture (a paced source's, the NDI input
     "OBS manuál"'s, a paced standby/fill pair's);
@@ -191,7 +192,7 @@ included, is comment 5872871751).
     the kernel's row bands; the slice's design record named them as the
     first lever only AFTER a box measurement (main session to confirm). A
     single band is likely over budget: box run 3 measured a fitted 1440p
-    fade picture at 12.9–20 ms on 6 bands.
+    fade picture at 13.2–20.0 ms on 6 bands (#215 comment 5860381820).
   - **What it costs.** Each fitted pass spawns `mix_bands` − 1 scoped
     `program-mix` threads (5 on the 24-thread box): on EVERY forwarded
     boundary of a source that is not 1920×1080 (most of the catalog is
@@ -200,13 +201,23 @@ included, is comment 5872871751).
     `program-transition.md`). A plain fit also reads the 3.1 MB canvas black
     as the kernel's `to` (weight 0). SpeedHQ now encodes FHD, not 1440p (44 %
     fewer pixels), which pays part of it back.
-  - **Box check, a 1440p song on program, then a 1920×1080 one:** the
-    program's `submit_us_max` / `submit_over_5ms`, a fade's `max_picture_us`,
-    AND the collateral on the other threads (on Windows every thread start
-    runs each loaded DLL's thread attach under the loader lock): the
-    on-program source's paced `pipeline: loop-stats … submit_call_us_max`
-    and its `ndi: genlock … late=` line, against the same reads before this
-    deploy.
+  - **Box check, a 1440p song on program, then a 1920×1080 one:**
+    - the program's `submit_us_max` / `submit_over_5ms`;
+    - the size a receiver gets: any NDI receiver of `SP-program` (NDI Studio
+      Monitor on the box) reads 1920×1080 with a 1440p and with a 2560×1080
+      song on program (the thread-start INFO line prints only the configured
+      canvas; #223's planned plain-receiver probe, slice S2, automates it);
+    - the collateral on the other threads (on Windows every thread start
+      runs each loaded DLL's thread attach under the loader lock): the
+      on-program source's paced `pipeline: loop-stats … submit_call_us_max`
+      and its `ndi: genlock … late=` line, against the same reads before
+      this deploy;
+    - a 300 ms AND a 1 s fade between two 1440p songs, the regression case:
+      a fade between two same-size non-FHD songs was one byte-for-byte
+      blend before #223 and is now two passes (the incoming fit, then the
+      outgoing fit + blend) with 2·(K−1) thread starts. `max_picture_us` and
+      `submit_us_max` stay under one slot (33 333), and `health.late_dropped`,
+      `health.coalesced` and `cue_timeouts` move by 0.
   - **Levers, in order**, if `submit_us_max` passes one slot (33 333) or the
     collateral moves: persistent band workers (no spawn per boundary; time
     the spawns first, `program-transition.md`); a one-pass "fitted incoming"
