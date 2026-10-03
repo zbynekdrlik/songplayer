@@ -10,8 +10,10 @@
 //! [`mix_nv12_into`] computes every destination byte ONCE, as
 //! `blend(fit(from)[p], to[p], w)`: the fitted outgoing byte (a bar's studio
 //! black outside the fitted rectangle) is never stored, it is blended with the
-//! incoming byte on the spot. An outgoing picture already in the incoming
-//! layout is blended byte for byte ([`Outgoing::Same`]). The result is
+//! incoming byte on the spot. An outgoing picture already in the destination
+//! layout (#223: the `SP-program` canvas) is blended byte for byte
+//! ([`Outgoing::Same`]). At weight 0 every byte is the fitted outgoing one:
+//! the sender's plain fit of a picture into the canvas. The result is
 //! bit-identical to the two-pass reference, `FitPlan::apply` then
 //! `blend_nv12_into` (the same taps, the same Q8 rounding); `nv12_mix_tests.rs`
 //! pins that.
@@ -59,11 +61,11 @@ pub fn mix_bands(logical_cpus: usize) -> usize {
 /// The outgoing picture of a mixed boundary, as [`mix_nv12_into`] reads it.
 #[derive(Clone, Copy, Debug)]
 pub enum Outgoing<'a> {
-    /// A picture already in the destination layout (the incoming side's, or
-    /// the standby black made in it): blended byte for byte.
+    /// A picture already in the destination layout (#223: a canvas picture,
+    /// or the canvas black): blended byte for byte.
     Same(Layout, &'a [u8]),
     /// A picture of the plan's source layout, fitted into its destination
-    /// (the incoming layout) as it is blended.
+    /// (#223: the canvas) as it is blended.
     Fitted(&'a FitPlan, &'a [u8]),
 }
 

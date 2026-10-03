@@ -27,13 +27,21 @@
 //!
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
 //! crossfaded here, on the sender thread: the audio per sample with the
-//! equal-power curve, the picture blended into a `frame_pool` buffer. When the
-//! two layouts differ, the outgoing picture is fitted into the incoming
-//! layout (`program_transition::FitPlan`, one plan per window), so it always
-//! dissolves. The fit and the blend are one pass, painted in row bands on
-//! helper threads (`program_transition::mix_nv12_into`, #215 addendum 3).
-//! `start_program` also starts the OBS-follow task (`program_follow.rs`) and
-//! hands the bus to the engine for the deferred scene-go-off pause.
+//! equal-power curve, the picture blended into a `frame_pool` buffer, painted
+//! in row bands on helper threads (`program_transition::mix_nv12_into`, #215
+//! addendum 3). `start_program` also starts the OBS-follow task
+//! (`program_follow.rs`) and hands the bus to the engine for the deferred
+//! scene-go-off pause.
+//!
+//! #223: `SP-program` is ALWAYS 1920×1080 (the owner's rule). Every picture
+//! the sender submits is in its canvas (`program_canvas.rs`, the standby's own
+//! 1920×1080 in production): a forwarded source's (the NDI input's included)
+//! is passed through when it already is one, else fitted into it; a fade's
+//! incoming picture is made a canvas picture and the outgoing one is blended
+//! over it, fitted into the canvas in the same pass when it is not one; a
+//! missing side is the canvas black. The fit is video-side work in
+//! `submit_video`, after the VBAN hand-off, and inside the `submit_us` span
+//! (`health.timing`), so the box shows its cost.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -45,23 +53,25 @@ use sp_core::genlock::{
 };
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
 use tokio::sync::broadcast;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
+use crate::playback::program_canvas::Canvas;
 use crate::playback::program_output_timing::{BoundaryMarks, LateBoundary, utc_label};
 use crate::playback::program_transition::{
-    AudioFormat, FitPlan, Layout, MixJob, Outgoing, black_nv12_into, mix_audio_block, mix_bands,
-    mix_nv12_into,
+    AudioFormat, Layout, MixJob, Outgoing, mix_audio_block, mix_bands, mix_nv12_into,
 };
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::submitter::FrameSubmitter;
 use crate::playback::vban_out::{VbanBlock, VbanOut, run_vban_config_task};
 use crate::playback::wallclock::WallClock;
 
-/// The program standby black resolution (1080p, the paced idle size).
+/// The program's picture size, 1080p (the paced idle size): #223, every
+/// picture `SP-program` sends is this canvas, its standby black included
+/// (`program_canvas.rs`). The NDI input's standby black is this size too.
 pub const PROGRAM_STANDBY_W: u32 = 1920;
 pub const PROGRAM_STANDBY_H: u32 = 1080;
 
@@ -88,19 +98,15 @@ pub struct ProgramOutput<B: NdiBackend> {
     submitter: FrameSubmitter<B>,
     /// The ONE silent block every standby pair carries (built once).
     silence: Vec<AudioFrame>,
-    standby_w: u32,
-    standby_h: u32,
+    /// #223: the program's ONE picture layout, every picture it sends (the
+    /// standby black included), with the fit plans into it.
+    canvas: Canvas,
     /// #210: the VBAN output each submitted pair's audio block goes to.
     vban: Option<Arc<VbanOut>>,
     /// #215: audio frames per boundary (1600).
     spc: usize,
-    /// #215: the plan that fits the outgoing picture into the incoming
-    /// layout, kept while the pair of layouts stays the same (a window).
-    fit: Option<FitPlan>,
-    /// Plans built so far (one per window whose pictures differ in size).
-    fit_plans: u64,
-    /// #215 addendum 3: the row bands (threads) a mixed picture is painted in
-    /// (`mix_bands` of the box's logical processors).
+    /// #215 addendum 3: the row bands (threads) a mixed or fitted picture is
+    /// painted in (`mix_bands` of the box's logical processors).
     mix_bands: usize,
     /// The run of mixed boundaries being sent (a window), logged once when
     /// the next unmixed boundary ends it.
@@ -108,10 +114,10 @@ pub struct ProgramOutput<B: NdiBackend> {
 }
 
 /// #215: one run of mixed boundaries as the `SP-program` sender saw it: how
-/// many, how many fitted a differently sized outgoing picture, and the worst
-/// time the picture (the fit + blend, all its row bands) took, measured on
-/// this thread — the cost the review asked to see on the box, next to
-/// `health.coalesced`.
+/// many, how many had a side fitted into the canvas (#223: a side not already
+/// a canvas picture), and the worst time the picture (the fits + blend, all
+/// their row bands) took, measured on this thread — the cost the review asked
+/// to see on the box, next to `health.coalesced`.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct MixRun {
     pub(crate) boundaries: u64,
@@ -133,10 +139,11 @@ fn log_mix_run(run: &MixRun) {
     }
 }
 
-/// #215: the layout a window boundary's picture is painted in: the incoming
-/// side's, else the outgoing side's; `None` when neither side is here.
-fn present_layout(mix: &MixJob) -> Option<Layout> {
-    Some(Layout::of(mix.to.as_ref().or(mix.from.as_ref())?))
+/// #215: whether a window boundary has a picture to mix: either side is
+/// here. A mix with neither side (the bus never queues one) is the standby
+/// pair.
+fn has_picture(mix: &MixJob) -> bool {
+    mix.from.is_some() || mix.to.is_some()
 }
 
 /// #210: one program boundary split at the VBAN hand-off
@@ -148,12 +155,29 @@ enum Pair {
     /// The program's own standby pair (the black + one silent block).
     Standby,
     /// #215: a window boundary: its crossfaded block, and the mix whose
-    /// picture is painted in `present`.
-    Mix {
-        mix: MixJob,
-        present: Layout,
-        audio: Vec<AudioFrame>,
-    },
+    /// picture is painted in the canvas.
+    Mix { mix: MixJob, audio: Vec<AudioFrame> },
+}
+
+/// Submit one pair on the program's sender: `video`, a `canvas` picture,
+/// stamped on `stamp_100ns`, and `audio` on `audio_tc_100ns`.
+fn send<B: NdiBackend>(
+    submitter: &mut FrameSubmitter<B>,
+    canvas: Layout,
+    video: SharedFrame,
+    audio: &[AudioFrame],
+    stamp_100ns: i64,
+    audio_tc_100ns: i64,
+) {
+    submitter.submit_frame_at_boundary_owned(
+        canvas.width,
+        canvas.height,
+        canvas.stride,
+        video,
+        audio,
+        stamp_100ns,
+        audio_tc_100ns,
+    );
 }
 
 impl Pair {
@@ -170,10 +194,11 @@ impl Pair {
 }
 
 impl<B: NdiBackend> ProgramOutput<B> {
-    /// Wrap the program's NDI sender. The standby black is `standby_w` ×
-    /// `standby_h` NV12 ([`PROGRAM_STANDBY_W`] × [`PROGRAM_STANDBY_H`] in
-    /// production).
-    pub fn new(sender: NdiSender<B>, standby_w: u32, standby_h: u32) -> Self {
+    /// Wrap the program's NDI sender. #223: every picture it sends, the
+    /// standby black included, is a `width`×`height` NV12 canvas picture,
+    /// stride `width` ([`PROGRAM_STANDBY_W`] × [`PROGRAM_STANDBY_H`] =
+    /// 1920×1080 in production; the tests use small canvases).
+    pub fn new(sender: NdiSender<B>, width: u32, height: u32) -> Self {
         let mut submitter = FrameSubmitter::new(sender, GENLOCK_GRID_FPS as i32, 1);
         submitter.set_paced(true);
         let spc = samples_per_boundary(PROGRAM_AUDIO_RATE_HZ as i64, GENLOCK_GRID_FPS);
@@ -186,12 +211,9 @@ impl<B: NdiBackend> ProgramOutput<B> {
         Self {
             submitter,
             silence,
-            standby_w,
-            standby_h,
+            canvas: Canvas::new(width, height),
             vban: None,
             spc,
-            fit: None,
-            fit_plans: 0,
             mix_bands: mix_bands(crate::lyrics::heavy_slot::logical_cores()),
             mix_run: MixRun::default(),
         }
@@ -258,153 +280,141 @@ impl<B: NdiBackend> ProgramOutput<B> {
         match job {
             ProgramJob::Source(job) => Pair::Source(job),
             ProgramJob::Standby { .. } => Pair::Standby,
-            ProgramJob::Mix(mix) => match present_layout(&mix) {
-                None => Pair::Standby,
-                Some(present) => {
-                    let (first, total) = mix.sample_span(self.spc);
-                    let format = AudioFormat {
-                        frames: self.spc,
-                        channels: PROGRAM_AUDIO_CHANNELS,
-                        sample_rate: PROGRAM_AUDIO_RATE_HZ,
-                    };
-                    let audio = vec![mix_audio_block(
-                        mix.from.as_ref().and_then(|j| j.audio.first()),
-                        mix.to.as_ref().and_then(|j| j.audio.first()),
-                        first,
-                        total,
-                        format,
-                    )];
-                    Pair::Mix {
-                        mix,
-                        present,
-                        audio,
-                    }
-                }
-            },
+            ProgramJob::Mix(mix) if !has_picture(&mix) => Pair::Standby,
+            ProgramJob::Mix(mix) => {
+                let (first, total) = mix.sample_span(self.spc);
+                let format = AudioFormat {
+                    frames: self.spc,
+                    channels: PROGRAM_AUDIO_CHANNELS,
+                    sample_rate: PROGRAM_AUDIO_RATE_HZ,
+                };
+                let audio = vec![mix_audio_block(
+                    mix.from.as_ref().and_then(|j| j.audio.first()),
+                    mix.to.as_ref().and_then(|j| j.audio.first()),
+                    first,
+                    total,
+                    format,
+                )];
+                Pair::Mix { mix, audio }
+            }
         }
     }
 
     /// #210: the video side of a boundary VBAN already has, then its NDI
-    /// pair: a forwarded pair as it is, the standby black + silence, or a
-    /// window boundary's mixed picture (#215) + its crossfaded block, both
-    /// stamped on the window boundary (#224: the program's own block).
-    /// Returns when the NDI submit started, read off `now`.
+    /// pair: a forwarded pair's picture made a canvas picture (#223: as it is
+    /// when it already is one, else fitted into the canvas), the standby
+    /// black + silence, or a window boundary's mixed picture (#215) + its
+    /// crossfaded block, both stamped on the window boundary (#224: the
+    /// program's own block). Returns when the video side started, read off
+    /// `now` BEFORE the picture is made (#223), so `health.timing.submit_us`
+    /// is the fit or the fade's picture plus the NDI submit.
     fn submit_video(&mut self, pair: Pair, stamp_100ns: i64, now: &impl Fn() -> i64) -> i64 {
+        let start = now();
+        let canvas = self.canvas.layout();
+        let black = self.canvas_black();
         match pair {
             Pair::Source(job) => {
-                let start = now();
-                self.submitter.submit_frame_at_boundary_owned(
-                    job.width,
-                    job.height,
-                    job.stride,
-                    job.video,
+                let layout = Layout::of(&job);
+                let video = self.canvas.fit(layout, &job.video, &black, self.mix_bands);
+                let audio_tc = job.audio_tc_100ns;
+                send(
+                    &mut self.submitter,
+                    canvas,
+                    video,
                     &job.audio,
                     stamp_100ns,
-                    job.audio_tc_100ns,
+                    audio_tc,
                 );
-                start
             }
-            Pair::Standby => {
-                let (w, h) = (self.standby_w, self.standby_h);
-                let black = self.submitter.standby_black_nv12(w, h);
-                let start = now();
-                self.submitter.submit_frame_at_boundary_owned(
-                    w,
-                    h,
-                    w,
-                    black,
-                    &self.silence,
-                    stamp_100ns,
-                    stamp_100ns,
-                );
-                start
-            }
-            Pair::Mix {
-                mix,
-                present,
-                audio,
-            } => {
+            Pair::Standby => send(
+                &mut self.submitter,
+                canvas,
+                black,
+                &self.silence,
+                stamp_100ns,
+                stamp_100ns,
+            ),
+            Pair::Mix { mix, audio } => {
                 let started = Instant::now();
-                let (layout, video) = self.paint_mix(&mix, present);
+                let video = self.paint_mix(&mix, &black);
                 let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
                 self.mix_run.boundaries += 1;
                 self.mix_run.max_picture_us = self.mix_run.max_picture_us.max(picture_us);
-                let start = now();
-                self.submitter.submit_frame_at_boundary_owned(
-                    layout.width,
-                    layout.height,
-                    layout.stride,
+                send(
+                    &mut self.submitter,
+                    canvas,
                     video,
                     &audio,
                     stamp_100ns,
                     stamp_100ns,
                 );
-                start
             }
         }
+        start
     }
 
-    /// #215: the picture of a window boundary ([`paint_mix`](Self::paint_mix)),
-    /// `None` when neither side is here — the tests' view of it.
+    /// #223: the canvas's studio black — the standby picture, and what a fit
+    /// is drawn on (`FrameSubmitter::standby_black_nv12`: built once, then an
+    /// `Arc` clone).
+    fn canvas_black(&mut self) -> SharedFrame {
+        let canvas = self.canvas.layout();
+        self.submitter
+            .standby_black_nv12(canvas.width, canvas.height)
+    }
+
+    /// #215: the picture of a window boundary ([`paint_mix`](Self::paint_mix))
+    /// in the canvas layout, `None` when neither side is here — the tests'
+    /// view of it.
     #[cfg(test)]
     pub(crate) fn mix_picture(&mut self, mix: &MixJob) -> Option<(Layout, SharedFrame)> {
-        let present = present_layout(mix)?;
-        Some(self.paint_mix(mix, present))
+        if !has_picture(mix) {
+            return None;
+        }
+        let black = self.canvas_black();
+        Some((self.canvas.layout(), self.paint_mix(mix, &black)))
     }
 
-    /// #223: how many fit plans the sender built so far — the tests' view.
+    /// #223: how many canvas fit plans the sender built so far — the tests'
+    /// view of `Canvas::built`.
     #[cfg(test)]
     pub(crate) fn fit_plans(&self) -> u64 {
-        self.fit_plans
+        self.canvas.built()
     }
 
-    /// #215: the picture of a window boundary, in the incoming side's layout
-    /// (`present`, [`present_layout`]): both pictures blended into a pooled
-    /// buffer, the outgoing one fitted into that layout as it is blended
-    /// when the two differ ([`FitPlan`]). One pass, in `mix_bands` row
-    /// bands, straight into the pooled buffer (`mix_nv12_into`, #215
-    /// addendum 3: no fitted scratch). A missing side is the NV12 black in
-    /// the present side's exact layout (`black_nv12_into`).
-    fn paint_mix(&mut self, mix: &MixJob, present: Layout) -> (Layout, SharedFrame) {
-        let standby = || {
-            let mut black = sp_decoder::frame_pool::take(present.len);
-            black_nv12_into(present, &mut black);
-            (present, SharedFrame::new(black))
+    /// #215 + #223: the picture of a window boundary, in the canvas, exactly
+    /// its bytes. The incoming picture is made a canvas picture first (as it
+    /// is, or fitted onto `black`); the outgoing one is blended over it at the
+    /// boundary's weight, fitted into the canvas in the same pass when it is
+    /// not a canvas picture (`Outgoing::Fitted`, #215 addendum 3: no fitted
+    /// scratch). A missing side is `black`, the canvas's studio black. Each
+    /// pass runs in `mix_bands` row bands, into a pooled buffer.
+    fn paint_mix(&mut self, mix: &MixJob, black: &SharedFrame) -> SharedFrame {
+        let (canvas, bands, weight) = (self.canvas.layout(), self.mix_bands, mix.weight_q8());
+        let fitted = [&mix.from, &mix.to]
+            .into_iter()
+            .flatten()
+            .any(|job| !self.canvas.holds(Layout::of(job)));
+        let to = match &mix.to {
+            Some(job) => self.canvas.fit(Layout::of(job), &job.video, black, bands),
+            None => black.clone(),
         };
-        let side =
-            |job: &crate::playback::submit_handoff::SubmitJob| (Layout::of(job), job.video.clone());
-        let from = mix.from.as_ref().map_or_else(standby, side);
-        let to = mix.to.as_ref().map_or_else(standby, side);
-        let (weight, bands) = (mix.weight_q8(), self.mix_bands);
-        let mut out = sp_decoder::frame_pool::take(to.0.len);
-        if from.0 == to.0 {
-            mix_nv12_into(
-                Outgoing::Same(to.0, &from.1),
-                &to.1,
-                weight,
-                bands,
-                &mut out,
-            );
-        } else {
-            let plan = match self.fit.take() {
-                Some(plan) if plan.fits(from.0, to.0) => plan,
-                _ => {
-                    self.fit_plans += 1;
-                    debug!(
-                        from = ?from.0,
-                        to = ?to.0,
-                        plans = self.fit_plans,
-                        "program transition: the two pictures differ in size — the outgoing one is fitted into the incoming layout"
-                    );
-                    FitPlan::new(from.0, to.0)
-                }
-            };
-            let outgoing = Outgoing::Fitted(&plan, &from.1);
-            mix_nv12_into(outgoing, &to.1, weight, bands, &mut out);
-            self.fit = Some(plan);
-            self.mix_run.fitted += 1;
+        let mut out = sp_decoder::frame_pool::take(canvas.len);
+        match &mix.from {
+            Some(job) if !self.canvas.holds(Layout::of(job)) => {
+                let plan = self.canvas.plan(Layout::of(job));
+                let outgoing = Outgoing::Fitted(plan, &job.video);
+                mix_nv12_into(outgoing, &to, weight, bands, &mut out);
+            }
+            from => {
+                // A canvas picture (or the black), cut to the canvas's bytes:
+                // the mix is exactly the canvas, slack past a picture or not.
+                let picture = from.as_ref().map_or(black, |job| &job.video);
+                let outgoing = Outgoing::Same(canvas, &picture[..canvas.len]);
+                mix_nv12_into(outgoing, &to, weight, bands, &mut out);
+            }
         }
-        (to.0, SharedFrame::new(out))
+        self.mix_run.fitted += u64::from(fitted);
+        SharedFrame::new(out)
     }
 
     /// End a run of mixed boundaries: log it once and start the next.
@@ -629,11 +639,14 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
             };
             let mut out = ProgramOutput::new(sender, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H)
                 .with_vban(bus.vban().clone());
-            // #215 addendum 3: how many threads paint a mixed picture.
+            // #215 addendum 3: how many threads paint a mixed or fitted picture.
             let mix_bands = out.mix_bands;
             info!(
                 ndi_name = PROGRAM_NDI_NAME,
-                mix_bands, "program output thread started"
+                width = PROGRAM_STANDBY_W,
+                height = PROGRAM_STANDBY_H,
+                mix_bands,
+                "program output thread started (#223: every picture is this canvas)"
             );
             let mut wall = WallClock::system();
             run_program_loop(&mut out, &bus, &mut wall);
