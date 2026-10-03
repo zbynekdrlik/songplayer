@@ -5,7 +5,7 @@
 //! program's own standby black is 2×2, so the size a boundary showed names
 //! who owned it (`shown_dims`). The rig reads it from the job it handed the
 //! sender (`Program::submit`), not from the wire: #223 puts every picture
-//! the sender sends in its canvas.
+//! the sender sends in its 2×2 canvas, which `shown_dims` also checks.
 //! Wired via `#[cfg(test)] #[path = "program_bus_tests.rs"] mod tests;`.
 
 use super::*;
@@ -70,7 +70,8 @@ pub(super) fn job(w: u32, video: &SharedFrame, stamp: i64, level: f32) -> Submit
     }
 }
 
-/// The program's own standby black in this rig: `ProgramOutput::new(_, 2, 2)`.
+/// The program's own standby black in this rig: `ProgramOutput::new(_, 2, 2)`,
+/// the canvas every picture the sender sends is in (#223).
 pub(super) const STANDBY: &str = "2x2";
 
 /// The `SP-program` sender as the bus tests drive it: the real
@@ -78,6 +79,7 @@ pub(super) const STANDBY: &str = "2x2";
 /// it showed ([`shown`]), in order.
 pub(super) struct Program {
     out: ProgramOutput<MockNdiBackend>,
+    backend: Arc<MockNdiBackend>,
     shown: Vec<String>,
 }
 
@@ -113,9 +115,10 @@ pub(super) fn program() -> (Arc<MockNdiBackend>, Program) {
         .expect("mock sender");
     let out = ProgramOutput::new(sender, 2, 2);
     (
-        backend,
+        backend.clone(),
         Program {
             out,
+            backend,
             shown: Vec::new(),
         },
     )
@@ -129,8 +132,21 @@ pub(super) fn drain(core: &mut ProgramCore, out: &mut Program) {
     }
 }
 
-/// The `WxH` each boundary the program sent showed ([`shown`]), in order.
+/// The `WxH` each boundary the program sent showed ([`shown`]), in order,
+/// once every picture the sender put on the wire is checked to be its 2×2
+/// canvas (#223).
 pub(super) fn shown_dims(out: &Program) -> Vec<String> {
+    let wire: Vec<String> = out
+        .backend
+        .calls()
+        .into_iter()
+        .filter(|c| c.starts_with("send_video_async("))
+        .collect();
+    assert!(
+        wire.iter()
+            .all(|c| c == "send_video_async(42,NV12,2x2,stride=2,30/1)"),
+        "#223: every picture on the wire is the 2×2 canvas: {wire:?}"
+    );
     out.shown.clone()
 }
 
@@ -265,22 +281,24 @@ fn a_cut_to_an_idle_source_carries_its_standby_pair() {
     // B is idle: its paced output emits its own #147 standby pair (B's NV12
     // black + one silent block) every boundary. After the cut the program
     // carries exactly that pair — B's own allocation, not the program's fill.
+    // #223: B's black is a canvas picture (the paced idle black is 1920×1080,
+    // the canvas, in production), so it goes out as it is.
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
     let (backend, mut out) = program();
     let fa = frame(4, 2);
-    let b_black = frame(6, 2);
+    let b_black = frame(2, 2);
     for k in 1..=10 {
         let now = b(k) + 5 * MS;
         core.offer(SRC_A, job(4, &fa, b(k), 0.1));
-        core.offer(SRC_B, job(6, &b_black, b(k), 0.0));
+        core.offer(SRC_B, job(2, &b_black, b(k), 0.0));
         if k == 5 {
             core.cut(SRC_B, now);
         }
         drain(&mut core, &mut out);
     }
     assert_eq!(backend.video_timecodes(), stamps(1..=10));
-    assert_eq!(shown_dims(&out), dims(&[("4x2", 6), ("6x2", 4)]));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 6), ("2x2", 4)]));
     let last = backend.last_async_video_slice().expect("a video was sent");
     assert_eq!(
         last,

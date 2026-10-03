@@ -352,6 +352,12 @@ impl<B: NdiBackend> ProgramOutput<B> {
         Some(self.paint_mix(mix, present))
     }
 
+    /// #223: how many fit plans the sender built so far — the tests' view.
+    #[cfg(test)]
+    pub(crate) fn fit_plans(&self) -> u64 {
+        self.fit_plans
+    }
+
     /// #215: the picture of a window boundary, in the incoming side's layout
     /// (`present`, [`present_layout`]): both pictures blended into a pooled
     /// buffer, the outgoing one fitted into that layout as it is blended
@@ -640,6 +646,9 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
 #[cfg(test)]
 #[path = "program_output_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_output_tests_fhd.rs"]
+mod tests_fhd;
 #[cfg(test)]
 #[path = "program_output_tests_order.rs"]
 mod tests_order;

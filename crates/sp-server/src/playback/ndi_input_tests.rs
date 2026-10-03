@@ -22,6 +22,8 @@ use sp_ndi::NdiReceiveBackend;
 use sp_ndi::receive::{FOURCC_UYVA, FOURCC_UYVY, FRAME_FORMAT_TYPE_PROGRESSIVE};
 use sp_ndi::test_util::{MockNdiReceiveBackend, MockVideoFrame};
 
+#[path = "ndi_input_tests_fhd.rs"]
+mod fhd;
 #[path = "ndi_input_tests_lifecycle.rs"]
 mod lifecycle;
 #[path = "ndi_input_tests_pool.rs"]
