@@ -235,8 +235,10 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     from the plane, Y 16 / UV 128, never read), `Same(bytes)` (already in the
     layout, byte for byte; a paint is never longer than it) or
     `Fitted(&plan, src)` (its plan must fit into `dst`, else a panic). Every
-    byte is computed ONCE: `blend(from[p], to[p], w)`, each side sampled on
-    the spot; no fitted byte is stored. It is BIT-IDENTICAL to the two-pass
+    byte is `blend(from[p], to[p], w)`, each side sampled on the spot: the
+    outgoing byte written, the incoming one blended over it in place while
+    its row is in cache — no fitted scratch buffer, no second pass over the
+    picture. It is BIT-IDENTICAL to the two-pass
     reference — each side made a whole picture (`FitPlan::apply`, its bytes,
     `black_nv12_into`), then `blend_nv12_into` (the same `tap` / `bilinear`,
     the same Q8 rounding). Those are `#[cfg(test)]` now: the reference the
@@ -274,9 +276,10 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     every band is painted — on the normal path `Bands::wait`, on an unwind
     of the calling thread `Drop for Bands` — so no worker outlives the
     buffers it paints into. A band's panic is caught on its worker (the
-    worker lives on) and resumed on the caller once every band is done
-    (`std::thread::scope` also panicked the caller once every thread was
-    joined, with its own payload; here it is the band's). These paths are
+    worker lives on); once every band is done the caller panics in turn,
+    naming the band's message (`band pool: a band panicked on its worker:
+    …`), as `std::thread::scope` did — a new panic, not `resume_unwind`, so
+    the panic hook records the `SP-program` thread too. These paths are
     LIVE in production: the shipped `SongPlayer.exe` (built from
     `src-tauri`) unwinds, `panic = "unwind"` (`crash-diagnostics.md`). A
     worker that cannot start is WARNed once at construction and its band is
@@ -628,7 +631,7 @@ unanswered-catch-up gap it had is gone by construction.
   pin pins it), `program_canvas_tests.rs` (`Canvas::fade`'s pins and its
   plan order), `band_pool_tests.rs` (#223 follow-up: where each band runs
   picture after picture — `ThreadId` + name — a run that waits for a held
-  band, a worker's panic resumed on the caller with the worker alive, an
+  band, a worker's panic named in the caller's own with the worker alive, an
   unwinding caller that waits, no worker left after the drop),
   `scene_off_tests.rs`, `program_follow_tests.rs` (pure + `Follow` +
   `program_scene`; the snapshot helpers `on_program` / `lookup_failed` /

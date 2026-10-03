@@ -17,10 +17,11 @@
 //! blended at the boundary's Q8 weight. Each side is read in the destination
 //! layout as it is painted ([`Side`]): the studio black, a picture already
 //! in that layout (byte for byte), or a picture fitted into it by its own
-//! [`FitPlan`]. Every destination byte is written in ONE pass, a row at a
-//! time: the outgoing side's bytes first, then the incoming side's blended
-//! over them while the row is still in cache,
-//! `(f·(256 − w) + t·w + 128) >> 8`. The fitted bytes are never stored.
+//! [`FitPlan`]. The picture is painted in ONE pass, a row at a time: the
+//! outgoing side's bytes written, then the incoming side's blended over them
+//! in place while the row is still in cache,
+//! `(f·(256 − w) + t·w + 128) >> 8`. There is no fitted scratch buffer and no
+//! second pass over the picture.
 //!
 //! The result is bit-identical to the two-pass reference: each side made a
 //! whole destination picture first (`FitPlan::apply`, its own bytes, or
@@ -92,7 +93,7 @@ pub enum Paint<'a> {
 }
 
 /// Paint `paint` into `out` (appended) as a `dst` picture, in the `pool`'s
-/// row bands: every byte computed once. Bit-identical to the two-pass
+/// row bands, in one pass. Bit-identical to the two-pass
 /// reference (each side made a whole `dst` picture, then
 /// `blend_nv12_into`), and to any other band count. As long as `dst`, or as
 /// a [`Side::Same`] picture when that is shorter (the bytes every side
@@ -107,7 +108,7 @@ pub fn mix_nv12_into(dst: Layout, paint: Paint<'_>, pool: &BandPool, out: &mut V
     let k = pool.bands();
     let base = out.len();
     // A memset of the pooled buffer: the bands then need disjoint `&mut`
-    // slices of it (safe code), and every byte is overwritten once.
+    // slices of it (safe code); the outgoing side then writes every byte.
     out.resize(base + len, 0);
     let slots: Vec<Mutex<Option<Band<'_>>>> =
         split_bands(&mut out[base..], &band_bounds(dst, len, k), k)

@@ -7,17 +7,18 @@
 //! test holds; a "must not have returned yet" window is used only in the
 //! safe direction (correct code can never fail it). Every gate is opened
 //! when a check fails (its sender or opener is dropped as the test unwinds),
-//! and every pool is declared after what its painter borrows, so its drop
-//! joins the workers before those are freed.
+//! and the gated tests declare their pool after what its painter borrows, so
+//! its drop joins the workers before those are freed.
 //! Wired via `#[cfg(test)] #[path = "band_pool_tests.rs"] mod tests;`.
 
+use std::any::Any;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc;
 use std::sync::{Condvar, Mutex};
 use std::thread::{self, ThreadId};
 use std::time::Duration;
 
-use super::BandPool;
+use super::{BandPool, panic_text};
 
 /// Where one band was painted: the band, its thread, the thread's name.
 type Painted = (usize, ThreadId, Option<String>);
@@ -195,9 +196,10 @@ fn a_run_returns_only_once_every_band_is_painted() {
 
 #[test]
 fn a_band_that_panics_on_a_worker_panics_the_run_and_the_worker_lives_on() {
-    // As with `std::thread::scope`, the panic reaches the caller once every
-    // band is done (here with the band's own payload). The worker caught it,
-    // so the next picture runs on the same threads.
+    // As with `std::thread::scope`, the caller panics once every band is
+    // done (naming the band's message, so the panic hook records the caller
+    // too). The worker caught it, so the next picture runs on the same
+    // threads.
     let pool = BandPool::new("panic-test", 3);
     let log = Mutex::new(Vec::new());
     {
@@ -211,9 +213,9 @@ fn a_band_that_panics_on_a_worker_panics_the_run_and_the_worker_lives_on() {
         let caught = panic::catch_unwind(AssertUnwindSafe(|| pool.run(&paint)));
         let payload = caught.expect_err("the band's panic reaches the caller");
         assert_eq!(
-            payload.downcast_ref::<&str>(),
-            Some(&"band 1 broke"),
-            "the band's own panic, resumed"
+            payload.downcast_ref::<String>().map(String::as_str),
+            Some("band pool: a band panicked on its worker: band 1 broke"),
+            "a panic of the caller's own, naming the band's"
         );
     }
     let mut first = log.into_inner().unwrap();
@@ -237,6 +239,18 @@ fn a_band_that_panics_on_a_worker_panics_the_run_and_the_worker_lives_on() {
         first.iter().map(|&(_, id, _)| id).collect::<Vec<_>>(),
         "the same threads, the panicked band's worker included"
     );
+}
+
+#[test]
+fn the_callers_panic_names_the_bands_message_whatever_its_payload() {
+    // `panic!("literal")` makes a `&str`, `panic!("{x}")` a `String`; any
+    // other payload (`panic_any`) has no text to name.
+    let text: Box<dyn Any + Send> = Box::new("band 2 broke");
+    let owned: Box<dyn Any + Send> = Box::new(format!("band {} broke", 3));
+    let number: Box<dyn Any + Send> = Box::new(42_u32);
+    assert_eq!(panic_text(&*text), "band 2 broke");
+    assert_eq!(panic_text(&*owned), "band 3 broke");
+    assert_eq!(panic_text(&*number), "a payload that is not text");
 }
 
 #[test]
@@ -298,15 +312,16 @@ fn the_pool_shuts_its_workers_down_when_it_is_dropped() {
     // waiting (a safe-direction window), and once they may end it returns
     // with none of them left — every worker holds the pool's token to its
     // last step.
+    let log = Mutex::new(Vec::new());
     let pool = BandPool::new(HELD, 6);
+    // Declared after the pool: a failed check below drops it first, so the
+    // held workers may end before the pool's drop joins them.
+    let opener = ExitOpener;
     let alive = pool.alive();
     assert_eq!(alive.strong_count(), 5, "five workers running");
-    let log = Mutex::new(Vec::new());
     assert_eq!(pool.run(&recorder(&log)), 6);
     let (dropped_tx, dropped_rx) = mpsc::channel();
     thread::scope(|s| {
-        // Opens the gate however this scope ends, so the drop can finish.
-        let opener = ExitOpener;
         s.spawn(move || {
             drop(pool);
             dropped_tx.send(()).unwrap();

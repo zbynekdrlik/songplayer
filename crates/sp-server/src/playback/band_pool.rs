@@ -23,12 +23,13 @@
 //! in the few lines below.
 //!
 //! A band that panics on a worker is caught there, so the worker lives on
-//! for the next picture, and its panic is resumed on the calling thread once
-//! every band is done (`std::thread::scope` also panicked the caller once
-//! every thread was joined, with its own payload; here it is the band's).
-//! These paths are live in production: the shipped `SongPlayer.exe` is built
-//! from `src-tauri` with cargo's default `panic = "unwind"`
-//! (`crash-diagnostics.md`); only standalone `sp-server` builds abort.
+//! for the next picture. Once every band is done the calling thread panics
+//! in turn, naming the band's message, as `std::thread::scope` did: the
+//! process panic hook (`panic_hook.rs`) records the worker's panic AND the
+//! calling thread's (the `SP-program` sender dying). These paths are live in
+//! production: the shipped `SongPlayer.exe` is built from `src-tauri` with
+//! cargo's default `panic = "unwind"` (`crash-diagnostics.md`); only
+//! standalone `sp-server` builds abort.
 
 use std::any::Any;
 use std::panic::{self, AssertUnwindSafe};
@@ -89,6 +90,17 @@ impl Job {
 
 /// A worker's report of one band: the panic it caught, if any.
 type Report = Option<Box<dyn Any + Send>>;
+
+/// The message of a panic payload: the `&str` or `String` a `panic!` makes,
+/// else a placeholder.
+fn panic_text(payload: &(dyn Any + Send)) -> &str {
+    if let Some(&text) = payload.downcast_ref::<&str>() {
+        return text;
+    }
+    payload
+        .downcast_ref::<String>()
+        .map_or("a payload that is not text", String::as_str)
+}
 
 /// One band handed to a worker, and where to report it.
 struct Task {
@@ -156,8 +168,10 @@ struct Worker {
 }
 
 /// A worker's loop: paint every band it is handed and report it, until its
-/// queue closes (the pool was dropped). `alive` is the pool's token, held to
-/// the thread's last step (read by the tests).
+/// queue closes (the pool was dropped). `alive` is the pool's liveness
+/// token, held to the thread's last step: the tests read it to prove the
+/// drop joined every worker (in production it costs one allocation per
+/// pool and a reference count per worker, at construction).
 fn work(tasks: Receiver<Task>, alive: Arc<()>) {
     for task in tasks {
         // SAFETY: `run` waits for this task's report sender, which this
@@ -243,8 +257,8 @@ impl BandPool {
     /// Paint bands `0 .. bands()` with `paint`: band 0 on the calling
     /// thread, band `i` on worker `i` (on the calling thread when it did not
     /// start), all at once. Returns once EVERY band is painted: how many
-    /// threads painted. A band that panicked on a worker panics here, once
-    /// every band is done.
+    /// threads painted. When a band panicked on a worker, this panics in turn
+    /// once every band is done, naming the band's message.
     pub fn run<F: Fn(usize) + Sync>(&self, paint: &F) -> usize {
         let job = Job::new(paint);
         let mut bands = Bands::new();
@@ -261,7 +275,12 @@ impl BandPool {
         paint(0);
         let (helpers, caught) = bands.wait();
         if let Some(payload) = caught {
-            panic::resume_unwind(payload);
+            // A new panic, not `resume_unwind`: the panic hook records this
+            // thread too, as `std::thread::scope`'s own panic did.
+            panic!(
+                "band pool: a band panicked on its worker: {}",
+                panic_text(&*payload)
+            );
         }
         1 + helpers
     }
