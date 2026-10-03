@@ -593,8 +593,9 @@ fn a_smaller_picture_is_fitted_into_the_canvas_as_it_is_blended() {
     );
     assert_eq!(backend.video_timecodes(), vec![at(0), at(1)]);
 
-    // The other way round: the incoming 4×2 picture is fitted into the
-    // canvas first, then the outgoing 8×2 canvas picture blends over it.
+    // The other way round: the outgoing 8×2 canvas picture as it is, the
+    // incoming 4×2 picture fitted into the canvas as it is blended over it
+    // (#223 follow-up: both sides in one pass).
     let reverse = mix_at(at(2), Some(wide.clone()), Some(from.clone()), 3, 9);
     let (layout, picture) = out.mix_picture(&reverse).expect("a picture");
     assert_eq!(layout, layout_8x2, "the canvas, not the incoming 4×2");

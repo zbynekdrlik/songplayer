@@ -337,12 +337,13 @@ fn a_fade_between_two_sizes_is_drawn_in_the_canvas() {
 }
 
 #[test]
-fn a_fade_between_two_1440p_songs_scales_both_sides_in_one_pass() {
+fn a_fade_between_two_1440p_songs_scales_both_sides_by_one_plan() {
     // The box's regression case (#223 comment 5973492929): two 2560×1440
-    // songs. Both sides are fitted into the canvas as they are read (#223
-    // follow-up: one pass, no incoming canvas buffer first), by the ONE plan
-    // their layout shares. The outgoing quadrants stay where they are,
-    // scaled, under the incoming flat picture at weight ½.
+    // songs, both fitted into the canvas by the ONE plan their layout
+    // shares. The outgoing quadrants stay where they are, scaled, under the
+    // incoming flat picture at weight ½. (That this is ONE pass, both sides
+    // read as each row is painted, is structural — `Mix::row` — and the
+    // box's `max_picture_us` measures it; the bytes are the same either way.)
     let (backend, mut out) = fhd_output();
     let (w, h) = (2560, 1440);
     let quadrants = SharedFrame::new(picture(w, h, w, |x, row| quadrant(w, h, x, row), (90, 170)));

@@ -5,12 +5,15 @@
 //! `i` on the worker `<name>-<i>`, the SAME threads picture after picture,
 //! and none of them left once the pool is dropped. The waits are gates the
 //! test holds; a "must not have returned yet" window is used only in the
-//! safe direction (correct code can never fail it).
+//! safe direction (correct code can never fail it). Every gate is opened
+//! when a check fails (its sender or opener is dropped as the test unwinds),
+//! and every pool is declared after what its painter borrows, so its drop
+//! joins the workers before those are freed.
 //! Wired via `#[cfg(test)] #[path = "band_pool_tests.rs"] mod tests;`.
 
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::Mutex;
 use std::sync::mpsc;
+use std::sync::{Condvar, Mutex};
 use std::thread::{self, ThreadId};
 use std::time::Duration;
 
@@ -25,6 +28,39 @@ fn recorder(log: &Mutex<Vec<Painted>>) -> impl Fn(usize) + Sync + '_ {
         let me = thread::current();
         let name = me.name().map(str::to_owned);
         log.lock().unwrap().push((band, me.id(), name));
+    }
+}
+
+/// The pool whose workers [`exit_hold`] holds at their end: only the drop
+/// test's (every other pool's workers end at once).
+const HELD: &str = "exit-held";
+
+/// Whether the held workers may end (the drop test opens it).
+static EXIT_OPEN: Mutex<bool> = Mutex::new(false);
+static EXIT_OPENED: Condvar = Condvar::new();
+
+/// The last step of a worker (`work`, test builds only): a worker of the
+/// [`HELD`] pool waits until the drop test opens the gate.
+pub(super) fn exit_hold() {
+    if thread::current()
+        .name()
+        .is_some_and(|name| name.starts_with(HELD))
+    {
+        let mut open = EXIT_OPEN.lock().unwrap();
+        while !*open {
+            open = EXIT_OPENED.wait(open).unwrap();
+        }
+    }
+}
+
+/// Opens the exit gate when dropped: at the end of the drop test, or as it
+/// unwinds from a failed check (so no held worker is left waiting).
+struct ExitOpener;
+
+impl Drop for ExitOpener {
+    fn drop(&mut self) {
+        *EXIT_OPEN.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        EXIT_OPENED.notify_all();
     }
 }
 
@@ -112,7 +148,6 @@ fn a_run_returns_only_once_every_band_is_painted() {
     // Band 1 is held on a gate the test opens; the run must not return
     // before it (the window below can only pass vacuously on a slow runner,
     // never fail correct code), and once it returns band 1 is done.
-    let pool = BandPool::new("wait-test", 2);
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let release_rx = Mutex::new(release_rx);
@@ -125,6 +160,7 @@ fn a_run_returns_only_once_every_band_is_painted() {
         }
     };
     let (returned_tx, returned_rx) = mpsc::channel();
+    let pool = BandPool::new("wait-test", 2);
     thread::scope(|s| {
         // Owned here: a failed check below drops it as it unwinds, so the
         // held band's `recv` fails instead of hanging the scope's join.
@@ -150,6 +186,7 @@ fn a_run_returns_only_once_every_band_is_painted() {
             "the run returned once band 1 was painted: two threads"
         );
     });
+    drop(pool);
     assert_eq!(
         events.into_inner().unwrap(),
         vec!["band 1 painted", "run returned"]
@@ -158,25 +195,27 @@ fn a_run_returns_only_once_every_band_is_painted() {
 
 #[test]
 fn a_band_that_panics_on_a_worker_panics_the_run_and_the_worker_lives_on() {
-    // As `std::thread::scope` did: the panic reaches the caller, once every
-    // band is done. The worker caught it, so the next picture runs on the
-    // same threads.
+    // As with `std::thread::scope`, the panic reaches the caller once every
+    // band is done (here with the band's own payload). The worker caught it,
+    // so the next picture runs on the same threads.
     let pool = BandPool::new("panic-test", 3);
     let log = Mutex::new(Vec::new());
-    let record = recorder(&log);
-    let paint = |band: usize| {
-        record(band);
-        if band == 1 {
-            panic!("band 1 broke");
-        }
-    };
-    let caught = panic::catch_unwind(AssertUnwindSafe(|| pool.run(&paint)));
-    let payload = caught.expect_err("the band's panic reaches the caller");
-    assert_eq!(
-        payload.downcast_ref::<&str>(),
-        Some(&"band 1 broke"),
-        "the band's own panic, resumed"
-    );
+    {
+        let record = recorder(&log);
+        let paint = |band: usize| {
+            record(band);
+            if band == 1 {
+                panic!("band 1 broke");
+            }
+        };
+        let caught = panic::catch_unwind(AssertUnwindSafe(|| pool.run(&paint)));
+        let payload = caught.expect_err("the band's panic reaches the caller");
+        assert_eq!(
+            payload.downcast_ref::<&str>(),
+            Some(&"band 1 broke"),
+            "the band's own panic, resumed"
+        );
+    }
     let mut first = log.into_inner().unwrap();
     first.sort_by_key(|&(band, ..)| band);
     assert_eq!(
@@ -205,7 +244,6 @@ fn a_panic_on_the_calling_thread_waits_for_the_workers_bands() {
     // Band 0 (the caller's) panics while band 1 still paints on its worker.
     // The unwinding run must not leave before band 1 is done: band 1 still
     // uses the caller's painter and buffers.
-    let pool = BandPool::new("unwind-test", 2);
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let release_rx = Mutex::new(release_rx);
@@ -220,6 +258,7 @@ fn a_panic_on_the_calling_thread_waits_for_the_workers_bands() {
         }
     };
     let (returned_tx, returned_rx) = mpsc::channel();
+    let pool = BandPool::new("unwind-test", 2);
     thread::scope(|s| {
         // Owned here: a failed check below drops it as it unwinds, so the
         // held band's `recv` fails instead of hanging the scope's join.
@@ -245,6 +284,7 @@ fn a_panic_on_the_calling_thread_waits_for_the_workers_bands() {
             "band 0's panic reached the caller"
         );
     });
+    drop(pool);
     assert_eq!(
         events.into_inner().unwrap(),
         vec!["band 1 painted", "run unwound"]
@@ -253,20 +293,39 @@ fn a_panic_on_the_calling_thread_waits_for_the_workers_bands() {
 
 #[test]
 fn the_pool_shuts_its_workers_down_when_it_is_dropped() {
-    // Every worker holds the pool's token for its thread's life; dropping
-    // the pool closes the queues and JOINS the threads, so none is left the
-    // moment the drop returns.
-    let pool = BandPool::new("drop-test", 6);
+    // Dropping the pool closes the queues and JOINS the workers: with the
+    // workers held at their last step (`exit_hold`), the drop must still be
+    // waiting (a safe-direction window), and once they may end it returns
+    // with none of them left — every worker holds the pool's token to its
+    // last step.
+    let pool = BandPool::new(HELD, 6);
     let alive = pool.alive();
     assert_eq!(alive.strong_count(), 5, "five workers running");
     let log = Mutex::new(Vec::new());
     assert_eq!(pool.run(&recorder(&log)), 6);
-    drop(pool);
-    assert_eq!(
-        alive.strong_count(),
-        0,
-        "every worker thread ended before the drop returned"
-    );
+    let (dropped_tx, dropped_rx) = mpsc::channel();
+    thread::scope(|s| {
+        // Opens the gate however this scope ends, so the drop can finish.
+        let opener = ExitOpener;
+        s.spawn(move || {
+            drop(pool);
+            dropped_tx.send(()).unwrap();
+        });
+        assert!(
+            dropped_rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "the drop is waiting for its held workers"
+        );
+        assert_eq!(alive.strong_count(), 5, "the held workers are all there");
+        drop(opener);
+        dropped_rx
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the drop returned once its workers could end");
+        assert_eq!(
+            alive.strong_count(),
+            0,
+            "every worker thread ended before the drop returned"
+        );
+    });
 
     let single = BandPool::new("drop-test-one", 1);
     let alive = single.alive();

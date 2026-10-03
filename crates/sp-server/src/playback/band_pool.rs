@@ -24,8 +24,11 @@
 //!
 //! A band that panics on a worker is caught there, so the worker lives on
 //! for the next picture, and its panic is resumed on the calling thread once
-//! every band is done, as `std::thread::scope` did. (A release build aborts
-//! on any panic: `panic = "abort"`.)
+//! every band is done (`std::thread::scope` also panicked the caller once
+//! every thread was joined, with its own payload; here it is the band's).
+//! These paths are live in production: the shipped `SongPlayer.exe` is built
+//! from `src-tauri` with cargo's default `panic = "unwind"`
+//! (`crash-diagnostics.md`); only standalone `sp-server` builds abort.
 
 use std::any::Any;
 use std::panic::{self, AssertUnwindSafe};
@@ -153,9 +156,9 @@ struct Worker {
 }
 
 /// A worker's loop: paint every band it is handed and report it, until its
-/// queue closes (the pool was dropped). `_alive` lives as long as the
-/// thread's loop (the pool's token, read by the tests).
-fn work(tasks: Receiver<Task>, _alive: Arc<()>) {
+/// queue closes (the pool was dropped). `alive` is the pool's token, held to
+/// the thread's last step (read by the tests).
+fn work(tasks: Receiver<Task>, alive: Arc<()>) {
     for task in tasks {
         // SAFETY: `run` waits for this task's report sender, which this
         // iteration drops after the job's last use (`Job`).
@@ -164,6 +167,11 @@ fn work(tasks: Receiver<Task>, _alive: Arc<()>) {
         // it until every task is dropped: nothing to do about it here.
         let _ = task.report.send(caught.err());
     }
+    // The tests hold one pool's workers here, so its drop can be seen
+    // waiting for them (`tests::exit_hold`).
+    #[cfg(test)]
+    tests::exit_hold();
+    drop(alive);
 }
 
 /// Start the worker of `band`, the thread `<name>-<band>`. One that cannot

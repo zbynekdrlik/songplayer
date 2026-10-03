@@ -274,11 +274,16 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     every band is painted — on the normal path `Bands::wait`, on an unwind
     of the calling thread `Drop for Bands` — so no worker outlives the
     buffers it paints into. A band's panic is caught on its worker (the
-    worker lives on) and resumed on the caller once every band is done, as
-    `std::thread::scope` did; a release build aborts on any panic anyway. A
+    worker lives on) and resumed on the caller once every band is done
+    (`std::thread::scope` also panicked the caller once every thread was
+    joined, with its own payload; here it is the band's). These paths are
+    LIVE in production: the shipped `SongPlayer.exe` (built from
+    `src-tauri`) unwinds, `panic = "unwind"` (`crash-diagnostics.md`). A
     worker that cannot start is WARNed once at construction and its band is
     painted on the calling thread. std threads + `mpsc` only, no new
-    dependency.
+    dependency. The pool tests (`band_pool_tests.rs`) hold one pool's workers
+    at their last step (`tests::exit_hold`, test builds only, keyed on the
+    thread name) to see its drop wait for them.
   - K = `mix_bands(heavy_slot::logical_cores())` = clamp(cpus / 4, 1, 6):
     6 on the 24-thread box, 1 on a 4-vCPU CI runner (tests replace
     `out.bands` with their own `BandPool`). The `program output thread

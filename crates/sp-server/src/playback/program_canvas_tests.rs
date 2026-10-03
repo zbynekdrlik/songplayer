@@ -1,7 +1,8 @@
 //! #223: the `SP-program` canvas — its layout, which pictures already are
 //! canvas pictures, the plans it keeps, the fit, and (#223 follow-up) a fade
-//! boundary's picture painted in one pass from both sides (exact pins from a
-//! scratch Python model of `FitPlan` + the Q8 blend).
+//! boundary's picture painted from both sides (exact pins from a scratch
+//! Python model of `FitPlan` + the Q8 blend; that it is ONE pass is
+//! structural, `Mix::row`, and measured on the box).
 //! Wired via `#[cfg(test)] #[path = "program_canvas_tests.rs"] mod tests;`.
 
 use super::{Canvas, FIT_PLANS_KEPT};
@@ -136,7 +137,7 @@ fn a_fit_reads_its_picture_alone_and_is_exactly_the_canvas_bytes() {
 }
 
 #[test]
-fn a_fade_paints_both_sides_in_the_canvas_in_one_pass() {
+fn a_fade_paints_both_sides_in_the_canvas() {
     // The outgoing and the incoming side, each as it is when the canvas
     // holds it (slack bytes past it never painted), fitted into the canvas
     // as it is read when not, the canvas black when missing — blended at the
