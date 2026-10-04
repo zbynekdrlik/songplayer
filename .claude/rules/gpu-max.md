@@ -15,7 +15,9 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
 ## What one boundary draws (`composition.rs`)
 
 - `Composition::{Black, Picture, Fade { from, to, weight_q8 }}`. The weight
-  is `SP-program`'s Q8 weight (0..=256, capped), incoming side.
+  is `SP-program`'s Q8 weight (0..=256, capped), incoming side, in the one
+  unit `sp_core::blend::Q8_ONE` (sp-server's `program_transition::Q8_ONE`
+  re-exports it).
 - `layers()` gives the quads in draw order: the outgoing side (slot
   `Outgoing`) at `(256 − w)/256`, then the incoming one (slot `Incoming`) at
   `w/256`. A plain picture is one `Outgoing` quad at 1. A side of weight 0 is
@@ -80,7 +82,8 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
   A refused picture leaves the last frame. "Whole NV12" is
   `sp_core::nv12::{nv12_chroma_row, nv12_len}`, the two sizes sp-server's
   `program_transition::nv12_whole` checks too: one rule for the CPU and the
-  GPU path.
+  GPU path. Both saturate at `usize::MAX`, so the check that guards the
+  `unsafe` upload reads can never pass on a wrapped product.
 - The slot is per side, as dispatched. At a fade's end the incoming picture
   is drawn as a plain picture from the `Outgoing` slot, so a held incoming
   picture is uploaded once more (one upload; a live song brings a new id
@@ -94,7 +97,10 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
   back to WARP: no candidate means `GpuError::NoAdapter`. `new_warp()` is for
   tests and CI. `new_on_listed_adapter(i)` (doc-hidden) runs `new`'s
   explicit-adapter path on DXGI's adapter `i`, so CI (whose only adapter is
-  the Basic Render Driver) exercises it.
+  the Basic Render Driver) exercises it. The compositor's `adapter()` is
+  read back from the DEVICE (`IDXGIDevice::GetAdapter`), never copied from
+  the list, so a test comparing it with the list proves where the device
+  landed.
 - The render target is `B8G8R8A8_UNORM`, `BIND_RENDER_TARGET |
   BIND_SHADER_RESOURCE`, `D3D11_RESOURCE_MISC_SHARED`, NOT keyed.
 - **Spout2 2.007.017 facts** (SpoutDX source, read for S1a):

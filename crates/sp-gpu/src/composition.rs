@@ -22,9 +22,9 @@ pub const CANVAS_WIDTH: u32 = 3840;
 /// The canvas height of `SP-program-MAX`.
 pub const CANVAS_HEIGHT: u32 = 2160;
 
-/// A Q8 weight of 1: all of the incoming side (`SP-program`'s fade weight
-/// unit).
-pub const Q8_ONE: u32 = 256;
+// A Q8 weight of 1, all of the incoming side: `SP-program`'s fade weight
+// unit, the one `sp_core::blend` constant both outputs use.
+pub use sp_core::blend::Q8_ONE;
 
 /// What one boundary of `SP-program-MAX` shows.
 #[derive(Debug, Clone, Copy)]

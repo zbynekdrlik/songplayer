@@ -21,3 +21,11 @@ fn a_picture_is_its_luma_rows_and_half_as_many_chroma_rows() {
     assert_eq!(nv12_len(2624, 1440), 5_667_840);
     assert_eq!(nv12_len(0, 1080), 0);
 }
+
+#[test]
+fn the_sizes_saturate_instead_of_wrapping() {
+    // u32::MAX rows of u32::MAX bytes: past a 64-bit usize as well.
+    assert_eq!(nv12_len(u32::MAX, u32::MAX), usize::MAX);
+    // Exactly representable: no saturation.
+    assert_eq!(nv12_chroma_row(u32::MAX), (u32::MAX as usize) + 1);
+}

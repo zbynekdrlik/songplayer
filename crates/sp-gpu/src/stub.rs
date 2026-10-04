@@ -2,7 +2,8 @@
 //! built. It has the portable part of the Windows API (`new`, `new_warp`,
 //! `compose`, `read_back`, `adapter`), so a cross-platform caller compiles
 //! everywhere. The Direct3D accessors (`device`, `render_target`,
-//! `shared_handle`) and `adapters()` are Windows-only.
+//! `shared_handle`), the test constructor `new_on_listed_adapter` and
+//! `adapters()` are Windows-only.
 
 use crate::adapter::AdapterInfo;
 use crate::composition::Composition;

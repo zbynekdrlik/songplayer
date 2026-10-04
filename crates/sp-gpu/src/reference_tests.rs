@@ -184,8 +184,10 @@ fn two_layers_add_at_their_weights_stored_in_8_bits_between() {
     assert_eq!(pixel(&layers, 7, 3), [191, 147, 80, 255], "both");
     assert_eq!(pixel(&layers, 3, 3), [0, 11, 45, 255], "from only");
     assert_eq!(pixel(&layers, 9, 5), [126, 28, 0, 255], "from only");
-    // The outgoing side is stored first (blue 37), then the incoming one is
-    // added to the stored value: one rounding of the sum would give 38.
+    // The outgoing side alone is stored first (blue 4); the incoming one is
+    // added to that stored value, giving 37. One rounding of the exact sum
+    // would give 38.
+    assert_eq!(pixel(&[from], 4, 2), [4, 27, 43, 255]);
     assert_eq!(pixel(&layers, 4, 2), [37, 77, 107, 255]);
 }
 

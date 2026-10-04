@@ -72,8 +72,9 @@ pub use nv12_mix::{MAX_MIX_BANDS, MIX_THREAD_NAME, Paint, Side, mix_bands, mix_n
 /// longer OBS or configured duration is clamped to it.
 pub const MAX_TRANSITION_SLOTS: u32 = 300;
 
-/// The Q8 weight of the `to` picture: 0 = all `from`, 256 = all `to`.
-pub const Q8_ONE: u32 = 256;
+// The Q8 weight of the `to` picture: 0 = all `from`, 256 = all `to`. #223
+// S1a: one unit with the `SP-program-MAX` compositor (`sp_core::blend`).
+pub use sp_core::blend::Q8_ONE;
 
 /// The cue gate's bound (`CUE_WAIT_MAX` = 500 ms): a fade waits at most this
 /// many boundaries (15 at 30 fps) for the incoming source's first live pair,

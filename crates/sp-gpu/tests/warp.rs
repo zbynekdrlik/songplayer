@@ -194,11 +194,11 @@ fn warp_builds_a_shared_bgra_4k_render_target() {
         .shared_handle()
         .unwrap_or_else(|e| panic!("WARP must give the render target a shared handle: {e}"));
     assert!(!handle.is_invalid(), "shared handle {handle:?}");
-    assert!(
-        compositor.adapter().is_software(),
-        "WARP is the Basic Render Driver: {:?}",
-        compositor.adapter()
-    );
+    // WARP's device runs on the Basic Render Driver, which DXGI flags
+    // software (`DXGI_ADAPTER_FLAG_SOFTWARE`, decoded by `info_of`).
+    let adapter = compositor.adapter();
+    assert!(adapter.software_flag, "WARP's adapter: {adapter:?}");
+    assert_eq!((adapter.vendor_id, adapter.device_id), (0x1414, 0x8c));
 }
 
 #[test]
@@ -207,8 +207,8 @@ fn the_adapter_list_has_the_basic_render_driver_and_never_picks_it() {
     assert!(
         adapters
             .iter()
-            .any(|a| a.vendor_id == 0x1414 && a.device_id == 0x8c && a.is_software()),
-        "DXGI always lists the Basic Render Driver: {adapters:?}"
+            .any(|a| a.vendor_id == 0x1414 && a.device_id == 0x8c && a.software_flag),
+        "DXGI always lists the Basic Render Driver, flagged software: {adapters:?}"
     );
     if let Some(picked) = pick_adapter(&adapters) {
         assert!(!adapters[picked].is_software(), "{adapters:?}");

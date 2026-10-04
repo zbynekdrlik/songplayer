@@ -89,7 +89,8 @@ pub(super) fn create_on_listed(index: usize) -> Result<(Device, AdapterInfo), Gp
 }
 
 /// The device on adapter `index` of `adapters` (`D3D_DRIVER_TYPE_UNKNOWN`:
-/// the adapter decides the driver).
+/// the adapter decides the driver), and the adapter the DEVICE reports it
+/// runs on (read back from it, not copied from the list).
 fn create_on(
     mut adapters: Vec<(IDXGIAdapter1, AdapterInfo)>,
     index: usize,
@@ -97,9 +98,10 @@ fn create_on(
     if index >= adapters.len() {
         return Err(GpuError::NoAdapter);
     }
-    let (hardware, info) = adapters.swap_remove(index);
+    let (hardware, _) = adapters.swap_remove(index);
     let adapter: &IDXGIAdapter = &hardware;
     let device = create(Some(adapter), D3D_DRIVER_TYPE_UNKNOWN)?;
+    let info = adapter_of(&device.0)?;
     Ok((device, info))
 }
 

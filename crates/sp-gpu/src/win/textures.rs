@@ -223,7 +223,7 @@ pub(super) fn read_back(
         Ok(out)
     } else {
         Err(GpuError::NoObject {
-            call: "Map (no readable rows)",
+            call: "Map (the mapped staging rows)",
         })
     }
 }
