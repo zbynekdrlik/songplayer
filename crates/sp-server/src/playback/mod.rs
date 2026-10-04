@@ -45,6 +45,7 @@ pub(crate) mod pipeline_paced_idle;
 pub(crate) mod pipeline_paced_submit; // #168 output-side split: submit thread + handoff glue
 #[cfg(not(windows))]
 pub(crate) mod pipeline_stub;
+mod playlist_mode; // #225 unit 2: a mode the playlist's row holds — applied + told
 mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line

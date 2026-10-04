@@ -8,11 +8,11 @@
 //! nothing gets an explicit `Idle` state and no `NowPlaying`, so the Player
 //! can tell "nothing plays" from "not known yet".
 //!
-//! The mode told is the ENGINE's (review round 1): the engine never reads
-//! the DB's `playlists.playback_mode` (every pipeline starts at
-//! `PlaybackMode::default()`) and a mode change is not written back, so the
-//! DB value is not what plays. A mode change is told to the dashboards at
-//! once, and so to the next one that connects.
+//! The mode told is the one the engine plays (review round 1): the one it
+//! last told the dashboards, else the playlist row's, which its pipeline
+//! starts in (#225 unit 2: the row is the mode's one persisted truth). A
+//! mode change is told to the dashboards at once, and so to the next one
+//! that connects.
 
 use std::path::PathBuf;
 
@@ -73,7 +73,9 @@ fn engine_on(state: &crate::AppState) -> Rig {
 #[tokio::test]
 async fn a_new_dashboard_is_told_the_playing_song_before_its_state_and_an_idle_playlist_is_idle() {
     let state = crate::api::routes::tests::test_state().await;
-    // The DB's modes are NOT what the engine plays (it never reads them).
+    // PLAYING's row says `single`, but the test drives its engine straight to
+    // Loop below (the API would write the row first). IDLE's row says `loop`:
+    // its pipeline starts in it (#225 unit 2).
     sqlx::query(
         "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, playback_mode) \
          VALUES (?, 'P225 playing', 'url-225a', 'SP-225a', 'single'), \
@@ -96,7 +98,7 @@ async fn a_new_dashboard_is_told_the_playing_song_before_its_state_and_an_idle_p
 
     let (mut engine, _ws_rx, _resolume_rx) = engine_on(&state);
     engine.ensure_pipeline(PLAYING, "SP-225a");
-    engine.ensure_pipeline(IDLE, "SP-225b");
+    engine.ensure_pipeline_for_playlist(IDLE).await;
 
     // PLAYING plays SONG on program in Loop mode, as a dashboard already
     // connected saw it: the mode change, its state, the song's start
@@ -164,11 +166,11 @@ async fn a_new_dashboard_is_told_the_playing_song_before_its_state_and_an_idle_p
                 transport: TransportState::Playing,
             },
             // A playlist that plays nothing: an explicit Idle, no NowPlaying,
-            // in the mode its pipeline starts with (not the DB's `loop`).
+            // in its row's `loop`, the mode its pipeline started in.
             ServerMsg::PlaybackStateChanged {
                 playlist_id: IDLE,
                 state: PlaybackState::Idle,
-                mode: PlaybackMode::Continuous,
+                mode: PlaybackMode::Loop,
                 transport: TransportState::Idle,
             },
         ],

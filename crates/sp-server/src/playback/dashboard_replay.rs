@@ -90,20 +90,21 @@ impl DashboardReplay {
         map.remove(&playlist_id);
     }
 
-    /// The on-connect replay (module doc). `playlist_ids` = every playlist in
-    /// the DB, in order. A recorded playlist the list does not name (the DB
-    /// read failed) follows, by id.
-    pub fn replay(&self, playlist_ids: &[i64]) -> Vec<ServerMsg> {
+    /// The on-connect replay (module doc). `playlists` = every playlist in
+    /// the DB with its row's mode, in order. A recorded playlist the list
+    /// does not name (the DB read failed) follows, by id.
+    pub fn replay(&self, playlists: &[(i64, PlaybackMode)]) -> Vec<ServerMsg> {
         let map = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         let mut unlisted: Vec<i64> = map
             .keys()
             .copied()
-            .filter(|id| !playlist_ids.contains(id))
+            .filter(|id| !playlists.iter().any(|(listed, _)| listed == id))
             .collect();
         unlisted.sort_unstable();
 
         let mut out = Vec::new();
-        for playlist_id in playlist_ids.iter().copied().chain(unlisted) {
+        let listed = playlists.iter().map(|&(id, _row_mode)| id);
+        for playlist_id in listed.chain(unlisted) {
             let entry = map.get(&playlist_id);
             let recorded = entry.and_then(|e| e.state);
             match recorded {

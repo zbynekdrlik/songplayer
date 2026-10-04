@@ -241,14 +241,14 @@ async fn send_replay(write: &mut SplitSink<WebSocket, Message>, state: &AppState
 /// this, so nothing the engine sends in between is lost. A failed DB read
 /// still replays every playlist the engine has told the dashboard about.
 pub(crate) async fn on_connect_replay(state: &AppState) -> Vec<ServerMsg> {
-    let ids = match crate::db::models_playlists::all_playlist_ids(&state.pool).await {
-        Ok(ids) => ids,
+    let playlists = match crate::db::models_playlists::all_playlist_modes(&state.pool).await {
+        Ok(playlists) => playlists,
         Err(e) => {
             warn!("on-connect replay: failed to load the playlists: {e}");
             Vec::new()
         }
     };
-    crate::playback::dashboard_replay::global().replay(&ids)
+    crate::playback::dashboard_replay::global().replay(&playlists)
 }
 
 // ---------------------------------------------------------------------------
@@ -280,5 +280,45 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("test error"));
+    }
+
+    /// #225 unit 2: the WS `SetMode` takes the REST mode route's path — the
+    /// playlist's row first, then the engine; a mode not saved is told back.
+    #[tokio::test]
+    async fn a_ws_set_mode_saves_the_row_then_tells_the_engine() {
+        use sp_core::playback::PlaybackMode;
+
+        let (state, mut engine_rx) = crate::api::routes::tests::test_state_with_engine_rx().await;
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (22538, 'ws', 'u-ws')")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        let mut told = state.event_tx.subscribe();
+
+        let set_mode = |playlist_id| ClientMsg::SetMode {
+            playlist_id,
+            mode: PlaybackMode::Loop,
+        };
+        dispatch_client_msg(set_mode(22_538), &state).await;
+
+        let stored: String =
+            sqlx::query_scalar("SELECT playback_mode FROM playlists WHERE id = 22538")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, "loop", "the row holds the mode");
+        assert!(matches!(
+            engine_rx.try_recv(),
+            Ok(EngineCommand::SetMode {
+                playlist_id: 22_538,
+                mode: PlaybackMode::Loop
+            })
+        ));
+        assert!(told.try_recv().is_err(), "a saved mode is no error");
+
+        // No such playlist: nothing saved, the engine not told, the client is.
+        dispatch_client_msg(set_mode(22_539), &state).await;
+        assert!(engine_rx.try_recv().is_err());
+        assert!(matches!(told.try_recv(), Ok(ServerMsg::Error { .. })));
     }
 }

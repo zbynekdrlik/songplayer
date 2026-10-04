@@ -41,6 +41,14 @@ fn idle(playlist_id: i64, mode: PlaybackMode) -> ServerMsg {
     state(playlist_id, PlaybackState::Idle, mode, TransportState::Idle)
 }
 
+/// The DB's playlists, each row in the default mode (#225 unit 2: the
+/// replay is given every row's mode).
+fn listed(ids: &[i64]) -> Vec<(i64, PlaybackMode)> {
+    ids.iter()
+        .map(|&id| (id, PlaybackMode::Continuous))
+        .collect()
+}
+
 #[test]
 fn a_playing_playlist_replays_its_last_song_then_its_state_and_an_idle_one_only_idle() {
     let r = DashboardReplay::default();
@@ -55,7 +63,7 @@ fn a_playing_playlist_replays_its_last_song_then_its_state_and_an_idle_one_only_
     r.record(&song(1, 10, 42_000));
 
     assert_eq!(
-        r.replay(&[1, 2]),
+        r.replay(&listed(&[1, 2])),
         vec![
             song(1, 10, 42_000),
             // The mode the engine plays (the recorded one).
@@ -65,10 +73,23 @@ fn a_playing_playlist_replays_its_last_song_then_its_state_and_an_idle_one_only_
                 PlaybackMode::Loop,
                 TransportState::Playing
             ),
-            // Never recorded: an explicit Idle, no song, the mode every
-            // pipeline starts with.
+            // Never recorded: an explicit Idle, no song, in its row's mode.
             idle(2, PlaybackMode::Continuous),
         ]
+    );
+}
+
+/// #225 unit 2: a playlist the engine never told about replays its ROW's
+/// mode, the one its pipeline starts in; a recorded one keeps the mode the
+/// engine told.
+#[test]
+fn a_playlist_never_told_replays_idle_in_its_rows_mode() {
+    let r = DashboardReplay::default();
+    r.record(&idle(14, PlaybackMode::Loop));
+
+    assert_eq!(
+        r.replay(&[(13, PlaybackMode::Single), (14, PlaybackMode::Single)]),
+        vec![idle(13, PlaybackMode::Single), idle(14, PlaybackMode::Loop)]
     );
 }
 
@@ -84,7 +105,7 @@ fn a_playlist_that_went_idle_replays_idle_and_not_its_old_song() {
     r.record(&song(3, 30, 5_000));
     r.record(&idle(3, PlaybackMode::Single));
 
-    assert_eq!(r.replay(&[3]), vec![idle(3, PlaybackMode::Single)]);
+    assert_eq!(r.replay(&listed(&[3])), vec![idle(3, PlaybackMode::Single)]);
 }
 
 #[test]
@@ -108,7 +129,7 @@ fn an_off_program_or_paused_playlist_replays_its_song_and_its_raw_transport() {
     r.record(&song(5, 50, 9_000));
 
     assert_eq!(
-        r.replay(&[4, 5]),
+        r.replay(&listed(&[4, 5])),
         vec![
             song(4, 40, 1_000),
             state(
@@ -140,7 +161,7 @@ fn a_state_without_a_song_replays_only_the_state() {
     ));
 
     assert_eq!(
-        r.replay(&[6]),
+        r.replay(&listed(&[6])),
         vec![state(
             6,
             PlaybackState::WaitingForScene,
@@ -162,8 +183,11 @@ fn a_forgotten_playlist_replays_idle_while_listed_and_nothing_once_unlisted() {
     r.record(&song(7, 70, 3_000));
     r.forget(7);
 
-    // Nothing recorded any more: Idle in the mode a new pipeline starts with.
-    assert_eq!(r.replay(&[7]), vec![idle(7, PlaybackMode::Continuous)]);
+    // Nothing recorded any more: Idle in its row's mode.
+    assert_eq!(
+        r.replay(&listed(&[7])),
+        vec![idle(7, PlaybackMode::Continuous)]
+    );
     assert_eq!(r.replay(&[]), Vec::<ServerMsg>::new());
 }
 
@@ -184,7 +208,7 @@ fn a_recorded_playlist_the_list_does_not_name_follows_by_id() {
     r.record(&idle(1, PlaybackMode::Loop));
 
     assert_eq!(
-        r.replay(&[1]),
+        r.replay(&listed(&[1])),
         vec![
             idle(1, PlaybackMode::Loop),
             idle(8, PlaybackMode::Single),
@@ -230,7 +254,7 @@ const REMOVED: i64 = 22_512;
 /// record into it too).
 fn global_replay_of(playlist_id: i64) -> Vec<ServerMsg> {
     global()
-        .replay(&[playlist_id])
+        .replay(&listed(&[playlist_id]))
         .into_iter()
         .filter(|m| match m {
             ServerMsg::NowPlaying { playlist_id: p, .. }
@@ -288,8 +312,9 @@ async fn the_engine_records_what_it_tells_the_dashboard_and_still_broadcasts_it(
 
 /// Review rounds 2 + 4: the open dashboards are told the removed playlist
 /// is idle (in the mode it had), and its record goes: the next dashboard is
-/// told an Idle in the mode a NEW pipeline starts with. A record kept in
-/// Loop would replay Loop for a re-activated pipeline that plays Continuous.
+/// told an Idle in its row's mode (the default here), the mode a NEW
+/// pipeline starts in. A record kept in Loop would replay Loop for a
+/// re-activated pipeline that plays its row's mode.
 #[tokio::test]
 async fn a_removed_pipeline_is_told_idle_and_forgotten() {
     let (mut engine, mut ws_rx) = engine().await;
