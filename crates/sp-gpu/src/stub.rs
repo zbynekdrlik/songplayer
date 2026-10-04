@@ -1,14 +1,16 @@
-//! The compositor off Windows: there is no Direct3D 11, so it is never
-//! built. It has the portable part of the Windows API (`new`, `new_warp`,
-//! `compose`, `read_back`, `adapter`), so a cross-platform caller compiles
-//! everywhere. The Direct3D accessors (`device`, `render_target`,
-//! `shared_handle`), the test constructor `new_on_listed_adapter` and
-//! `adapters()` are Windows-only.
+//! The compositor and the Spout sender off Windows: there is no Direct3D 11
+//! and no Spout, so neither is ever built. They have the portable part of
+//! the Windows API (`new`, `new_warp`, `compose`, `read_back`, `adapter`;
+//! the sender's `new`, `send`, `size`, `name`; the registry readers), so a
+//! cross-platform caller compiles everywhere. The Direct3D accessors
+//! (`device`, `render_target`, `shared_handle`), the test constructors
+//! `new_on_listed_adapter` / `with_name` and `adapters()` are Windows-only.
 
 use crate::adapter::AdapterInfo;
 use crate::composition::Composition;
 use crate::error::GpuError;
-use crate::stats::ComposeStats;
+use crate::spout::SharedTextureInfo;
+use crate::stats::{ComposeStats, SpoutSendStats};
 
 /// Off Windows the compositor cannot be built: [`Compositor::new`] and
 /// [`Compositor::new_warp`] report [`GpuError::Unsupported`]. The type has
@@ -47,14 +49,65 @@ impl Compositor {
     }
 }
 
+/// Off Windows there is no Spout sender: it needs a [`Compositor`], which
+/// cannot be built. The type has no values, so its methods can never run.
+#[derive(Debug)]
+pub enum SpoutSender {}
+
+impl SpoutSender {
+    /// Never runs: no [`Compositor`] exists to pass. `mutants::skip`: an
+    /// uninhabited argument, so no test can call it.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn new(compositor: &Compositor) -> Result<Self, GpuError> {
+        match *compositor {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `new`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn send(&mut self) -> Result<SpoutSendStats, GpuError> {
+        match *self {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `new`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn size(&self) -> (u32, u32) {
+        match *self {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `new`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn name(&self) -> &str {
+        match *self {}
+    }
+}
+
+/// [`GpuError::Unsupported`]: no Spout off Windows.
+pub fn spout_sender_names() -> Result<Vec<String>, GpuError> {
+    Err(GpuError::Unsupported)
+}
+
+/// [`GpuError::Unsupported`]: no Spout off Windows.
+pub fn spout_sender_info(_name: &str) -> Result<Option<SharedTextureInfo>, GpuError> {
+    Err(GpuError::Unsupported)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Compositor;
+    use super::{Compositor, spout_sender_info, spout_sender_names};
     use crate::error::GpuError;
 
     #[test]
     fn off_windows_no_compositor_can_be_built() {
         assert_eq!(Compositor::new().unwrap_err(), GpuError::Unsupported);
         assert_eq!(Compositor::new_warp().unwrap_err(), GpuError::Unsupported);
+    }
+
+    #[test]
+    fn off_windows_spout_s_registry_is_unsupported() {
+        assert_eq!(spout_sender_names(), Err(GpuError::Unsupported));
+        assert_eq!(
+            spout_sender_info(crate::SPOUT_SENDER_NAME),
+            Err(GpuError::Unsupported)
+        );
     }
 }

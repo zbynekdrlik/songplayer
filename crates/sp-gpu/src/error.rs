@@ -1,5 +1,5 @@
-//! What can go wrong in the compositor, and which failures mean the device
-//! must be rebuilt (pure).
+//! What can go wrong in the compositor and its Spout sender, and which
+//! failures mean the device must be rebuilt (pure).
 //!
 //! #223 R3-2: "Device lost: the device is rebuilt on the next boundary, and
 //! the rebuild is counted" — that is S2's `program-max` thread. The
@@ -29,7 +29,7 @@ pub fn is_device_lost(hresult: u32) -> bool {
     )
 }
 
-/// A compositor failure.
+/// A compositor or Spout sender failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GpuError {
     /// Not Windows: there is no Direct3D 11.
@@ -62,6 +62,28 @@ pub enum GpuError {
     /// The GPU did not finish a frame in time.
     #[error("the GPU did not finish the frame within {0} ms")]
     Timeout(u64),
+    /// A Spout sender name Spout cannot carry (`check_sender_name`):
+    /// nothing reached Spout.
+    #[error("invalid Spout sender name {name:?}: {reason}")]
+    SpoutName { name: String, reason: &'static str },
+    /// A live sender holds the name. Spout would rename this one
+    /// (`<name>_1`), which Arena's `SPOUT_<name>` layer would never show,
+    /// so it is refused.
+    #[error("the Spout sender name {name:?} is held by another sender")]
+    SpoutNameTaken { name: String },
+    /// At its first send Spout registered the sender under another name (a
+    /// sender took the name in between) or did not list it (its sender list
+    /// is full). The registration is released and the sender never sends
+    /// again: drop it.
+    #[error(
+        "Spout did not register the sender as {name:?} (another sender took the name, or Spout's sender list is full)"
+    )]
+    SpoutNotRegistered { name: String },
+    /// A Spout call failed. `code` is the shim's status (3 = the SDK
+    /// reported failure, 4 = a C++ exception, 5 = a bad argument) or, for a
+    /// registry read, the mutex wait's result.
+    #[error("{call} failed in Spout (code {code:#x})")]
+    Spout { call: &'static str, code: u32 },
 }
 
 impl GpuError {

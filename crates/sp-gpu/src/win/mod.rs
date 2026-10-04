@@ -7,6 +7,8 @@
 
 mod device;
 mod pipeline;
+mod spout_registry;
+mod spout_sender;
 mod textures;
 
 use std::time::Instant;
@@ -18,6 +20,8 @@ use windows::Win32::Graphics::Dxgi::IDXGIResource;
 use windows::core::Interface;
 
 pub use device::adapters;
+pub use spout_registry::{spout_sender_info, spout_sender_names};
+pub use spout_sender::SpoutSender;
 
 use crate::adapter::AdapterInfo;
 use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition};
@@ -121,12 +125,12 @@ impl Compositor {
         &self.adapter
     }
 
-    /// The Direct3D 11 device (S1b's Spout sender opens on it).
+    /// The Direct3D 11 device (the [`SpoutSender`] opens on it).
     pub fn device(&self) -> &ID3D11Device {
         &self.device
     }
 
-    /// The 3840×2160 BGRA render target (what S1b sends).
+    /// The 3840×2160 BGRA render target (what the [`SpoutSender`] sends).
     pub fn render_target(&self) -> &ID3D11Texture2D {
         &self.target.texture
     }
