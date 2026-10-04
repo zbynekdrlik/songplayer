@@ -20,16 +20,6 @@ impl HostDriver {
         self.endpoint_cache = None;
     }
 
-    /// RED (#217): a write still reads the endpoint cache and re-checks its
-    /// TTL, whatever endpoint its batch was handed.
-    pub(super) fn cached_endpoint_or_err(&self) -> Result<super::ResolvedEndpoint, anyhow::Error> {
-        self.endpoint_cache
-            .as_ref()
-            .filter(|ep| !ep.is_expired())
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("endpoint cache empty - call ensure_endpoint first"))
-    }
-
     /// Record a push answered `404 Not Found`: the param or clip id is gone.
     /// Arena gives every clip and text param a new id on each relaunch
     /// (`#sp-subs` 1790510617970 → 1790518489097 on the box), so the clip map

@@ -836,11 +836,10 @@ impl HostDriver {
     /// Takes `&self` so a batch drives many in parallel (`FuturesUnordered`).
     pub(crate) async fn set_text(
         &self,
-        _ep: &ResolvedEndpoint,
+        ep: &ResolvedEndpoint,
         param_id: i64,
         text: &str,
     ) -> Result<(), anyhow::Error> {
-        let ep = &self.cached_endpoint_or_err()?;
         let url = format!("{}/api/v1/parameter/by-id/{param_id}", ep.base_url);
         let req = self
             .client
@@ -857,11 +856,10 @@ impl HostDriver {
     /// Takes `&self` so a batch drives many in parallel (`FuturesUnordered`).
     pub(crate) async fn set_clip_opacity(
         &self,
-        _ep: &ResolvedEndpoint,
+        ep: &ResolvedEndpoint,
         clip_id: i64,
         opacity: f64,
     ) -> Result<(), anyhow::Error> {
-        let ep = &self.cached_endpoint_or_err()?;
         let url = format!("{}/api/v1/composition/clips/by-id/{clip_id}", ep.base_url);
         let req = self
             .client

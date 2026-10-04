@@ -303,6 +303,32 @@ shutdown only, and no RecoveryEvent reached the engine again.
   a send right after the build, with no await between, reaches the engine
   channel (the `#[cfg(test)]` `ResolumeRegistry::recovery_sender`).
 
+## A write batch goes out on the endpoint its handler resolved (#217, `endpoint cache empty`)
+
+Box 27.9 / 28.9 (finding 5873261862): `parallel Resolume request failed
+error=endpoint cache empty - call ensure_endpoint first`, in bursts of
+several lines in the same millisecond. The cache was never cold: every
+handler calls `ensure_endpoint` first. But each parallel write
+(`set_text`, `set_clip_opacity`) read the cache AGAIN, through the 300 s
+`RESOLUTION_TTL` check. A title fade runs about 1.1 s after the handler's
+resolve, so when the TTL ran out inside it, every write of the next batch
+failed at once, and the handler's `?` dropped the rest of the fade and
+the text clear.
+
+- **`ensure_endpoint` returns the `ResolvedEndpoint`.** The handler resolves
+  once, before its first batch, and hands the same `&ep` to every
+  `set_text_all` / `set_opacity_all`, and each of those to every write. No
+  write reads the cache; `cached_endpoint` and the "endpoint cache empty"
+  error are gone. An endpoint about 1 s past its DNS TTL is harmless: the
+  TTL only decides when the NEXT handler re-resolves.
+- **Never add a write that reads `endpoint_cache` itself.** Take the
+  endpoint as a parameter (the batch's), or resolve through `endpoint()` in
+  a `&mut self` step (the composition fetch, the probe).
+- **Test:** `HostDriver::forget_endpoint` (`#[cfg(test)]`, in
+  `driver_push.rs`) empties the cache after the test resolved the endpoint,
+  as the TTL running out does. `handlers::tests::a_text_batch_goes_out_after_the_endpoint_cache_empties`
+  and its opacity twin pin it.
+
 ## Subtitle clips: blank, never skip (#217 addendum 2)
 
 - `clear_subtitles` clears `#sp-subs`, `#sp-subs-next` AND `#sp-subssk`. The
