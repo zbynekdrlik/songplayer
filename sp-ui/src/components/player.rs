@@ -395,10 +395,13 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                     type="button"
                     class="player-btn player-btn-primary"
                     data-testid="player-playpause"
-                    title=move || if is_playing.get() { "Pauza" } else { "Prehrať" }
+                    title=move || player_view::play_pause(state_known.get(), is_playing.get()).1
+                    prop:disabled=move || !state_known.get()
                     on:click=do_play_pause
                 >
-                    {move || if is_playing.get() { "⏸ Pauza" } else { "▶ Prehrať" }}
+                    // #225 review round 4: "⏯", disabled, until the state is
+                    // known — no "▶ Prehrať" for a playlist that plays.
+                    {move || player_view::play_pause(state_known.get(), is_playing.get()).0}
                 </button>
                 <button
                     type="button"
@@ -413,9 +416,13 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                     class="player-mode"
                     data-testid="player-mode"
                     title="Režim prehrávania"
-                    prop:value=move || mode().as_str().to_string()
+                    // #225 review round 4: "—", disabled, until the mode is
+                    // told — never the default "Plynulo" as if it were known.
+                    prop:value=move || player_view::mode_value(state_known.get(), mode()).to_string()
+                    prop:disabled=move || !state_known.get()
                     on:change=on_mode
                 >
+                    <option value="" disabled hidden>"—"</option>
                     <option value="continuous">"Plynulo"</option>
                     <option value="single">"Jedna skladba"</option>
                     <option value="loop">"Opakovať"</option>

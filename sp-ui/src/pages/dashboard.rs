@@ -36,15 +36,10 @@ pub fn DashboardPage() -> impl IntoView {
         if pinned && valid {
             return;
         }
-        // #225 review rounds 2-3: a reconnect forgets what plays until the new
-        // socket's replay has told EVERY playlist's state (its messages land
-        // one by one, a playing one's song before its state). Keep a valid
-        // selection until then: a partial replay never flips the work area to
-        // the first by name.
-        let all_known = pls
-            .iter()
-            .all(|p| np.get(&p.id).is_some_and(|i| i.state_known));
-        if valid && !all_known {
+        // #225 review rounds 2-4: keep a valid selection until the replay has
+        // told EVERY playlist's state (`selection::states_known`): a partial
+        // replay never flips the work area to the first by name.
+        if valid && !selection::states_known(&pls, &np) {
             return;
         }
         if let Some(target) = selection::choose_default(&pls, &np)

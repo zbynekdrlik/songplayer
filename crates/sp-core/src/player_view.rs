@@ -15,7 +15,7 @@
 //! These rules live here (WASM-safe, so the workspace tests and the mutation
 //! gate cover them; sp-ui has no unit-test job).
 
-use crate::playback::{PlaybackState, TransportState};
+use crate::playback::{PlaybackMode, PlaybackState, TransportState};
 
 /// The title while the song is not known yet.
 pub const PENDING_TITLE: &str = "Načítavam…";
@@ -123,6 +123,26 @@ pub fn program_badge(state_known: bool, state: PlaybackState) -> ProgramBadge {
     } else {
         ProgramBadge::OffProgram
     }
+}
+
+/// The play/pause toggle's `(label, title)` (review round 4). `playing` = the
+/// pipeline's own transport plays (#201). Until the state is known the toggle
+/// claims neither: the Player disables it too.
+pub fn play_pause(state_known: bool, playing: bool) -> (&'static str, &'static str) {
+    if !state_known {
+        ("⏯", "Načítavam…")
+    } else if playing {
+        ("⏸ Pauza", "Pauza")
+    } else {
+        ("▶ Prehrať", "Prehrať")
+    }
+}
+
+/// The mode select's value (review round 4): the mode the server told, or
+/// `""` (the select's "—" option) until the state is known. The Player
+/// disables the select then.
+pub fn mode_value(state_known: bool, mode: PlaybackMode) -> &'static str {
+    if state_known { mode.as_str() } else { "" }
 }
 
 #[cfg(test)]
@@ -239,5 +259,21 @@ mod tests {
         assert_eq!(ProgramBadge::Unknown.label(), "◌ —");
         assert_eq!(ProgramBadge::OnProgram.label(), "● Na programe");
         assert_eq!(ProgramBadge::OffProgram.label(), "○ Mimo programu");
+    }
+
+    #[test]
+    fn the_toggle_claims_neither_until_the_state_is_known() {
+        assert_eq!(play_pause(false, true), ("⏯", "Načítavam…"));
+        assert_eq!(play_pause(false, false), ("⏯", "Načítavam…"));
+        assert_eq!(play_pause(true, true), ("⏸ Pauza", "Pauza"));
+        assert_eq!(play_pause(true, false), ("▶ Prehrať", "Prehrať"));
+    }
+
+    #[test]
+    fn the_mode_select_shows_the_told_mode_only() {
+        assert_eq!(mode_value(false, PlaybackMode::Loop), "");
+        assert_eq!(mode_value(true, PlaybackMode::Loop), "loop");
+        assert_eq!(mode_value(true, PlaybackMode::Single), "single");
+        assert_eq!(mode_value(true, PlaybackMode::Continuous), "continuous");
     }
 }

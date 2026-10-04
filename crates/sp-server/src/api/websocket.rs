@@ -117,7 +117,11 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         // #225: a dropped state change would leave the client on
                         // a stale state until the next one, so re-tell the truth.
+                        // Review round 4: resubscribe FIRST (the buffered tail is
+                        // older than the replay and would roll the client back),
+                        // then the replay, as on connect.
                         warn!(n, "WebSocket client lagged, dropped messages; re-sending the replay");
+                        event_rx = event_rx.resubscribe();
                         send_replay(&mut write, &state).await;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
