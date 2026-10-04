@@ -5,6 +5,7 @@
 pub mod audio_level;
 pub mod clock_health;
 pub mod config;
+pub mod fit;
 pub mod genlock;
 pub mod health;
 pub mod lyrics;
