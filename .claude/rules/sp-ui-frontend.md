@@ -859,6 +859,20 @@ the scratch mock by PID (`ss -ltnp | grep :<port>`), never `pkill -f <name>` —
 the pattern also matches the invoking shell's own command line and kills it.
 To prove a JS test really guards a line, patch a MUTANT of the shim into the
 scratch `dist/` snippet (+ recomputed SRI), watch the test go red, restore.
+Several spec files with one project: `--project=chromium a.spec.ts b.spec.ts`
+(with a space, `--project chromium a.spec.ts …` reads the files as project
+names).
+
+**An old-dist run proves only the RED when the lane changes Rust UI
+semantics (#225 review round 3).** The downloaded dist is the OLD wasm: a
+full green run there says nothing about how existing specs meet the NEW
+store / Player logic. #225's store rule "a live `Idle` drops the song" was
+invisible on the old dist, while the mock's replay (+100 ms) arrived AFTER
+the dub specs' `/__mock/now-playing` (posted ~60-150 ms after connect) and
+wiped it on the new UI — a review round caught it by tracing. So when the
+Rust UI changes how the store reacts to a message, trace every existing
+spec that posts a mock message right after `page.goto` against the new
+logic, message by message, before calling the suite green.
 
 ## A Nastavenia spec must wait for the LOADED settings before it clicks (#210)
 
