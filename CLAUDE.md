@@ -15,6 +15,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 - sp-ui / e2e mock gotchas (#225: the Player claims only what it was told — `state_known`, `sp_core::player_view`, "Načítavam…" until the replay, the badge = the WS state, the store forgets on every socket open/close) → `.claude/rules/sp-ui-frontend.md` (auto-loads on `sp-ui/**`, `e2e/mock-api.mjs`, `e2e/player-known-state.spec.ts`, `sp-core player_view.rs`)
 - dashboard WebSocket on-connect replay (#225: every engine `PlaybackStateChanged` / `NowPlaying` goes through `send_dashboard`, recorded in `dashboard_replay::global()` then broadcast; a new client gets EVERY playlist's state — a non-Idle one's last NowPlaying first, the rest an explicit Idle — in the mode that plays (the recorded one, else the row's), never the 5 s NDI-health sample; a removed pipeline is told Idle; a lagged client is re-sent the replay; unit 2: a playlist's mode has ONE persisted truth, its row — a pipeline starts in it, every change writes the row FIRST then tells the engine, `api/routes_mode.rs` + `playlist_mode.rs`) → `.claude/rules/dashboard-ws.md` (auto-loads on `api/websocket.rs`, `api/routes_mode.rs`, `api/routes.rs`, `playback/dashboard_replay*.rs`, `playback/playlist_mode*.rs`, `tests_ws_replay.rs`, `engine_play.rs`, `position_update.rs`, `runtime_pipeline.rs`, `startup_senders.rs`, `db/models_playlists.rs`, `sp-core ws.rs`, `sp-ui` `store.rs`/`ws.rs`/`pages/dashboard.rs`, `e2e/player-known-state.spec.ts`)
 - pipeline.rs testability → `.claude/rules/pipeline-testability.md` (auto-loads on `playback/pipeline*.rs`, `submitter.rs`)
+- `SP-program-MAX` GPU compositor (#223 S1a, `crates/sp-gpu`: a fixed 3840×2160 BGRA render target, `MISC_SHARED` not keyed, for Spout; D3D11 on the largest non-software adapter (`pick_adapter`), or WARP in tests; Y as R8 and UV as R8G8 at the stride, the upload skipped for a resident id (ids from a counter, never an address); clear to black, then one additive quad per picture at its `sp_core::fit::aspect_fit` place, outgoing at 1 − w, then incoming at w; BT.709 limited → full rows shared by the shader and the CPU `reference`; the WARP pins in `tests/warp.rs` allow one code per quad covering the pixel (`reference::tolerance`: bars exact, a picture ±1, a fade's overlap ±2) on smooth pictures only; "whole NV12" is `sp_core::nv12`, shared with sp-server's `nv12_whole`; `src/win/` is out of the mutation gate, so its logic lives in pure modules) → `.claude/rules/gpu-max.md` (auto-loads on `crates/sp-gpu/**`)
 - diagnostic benches (#223 S0: `POST /api/v1/diag/decode-bench {"file","seconds":1..=15}` decodes `<data dir>/bench/<file>` = `C:\ProgramData\SongPlayer\bench\` through the real MF reader on a thread started like the paced producer's (`playback::decode_thread`), unpaced; reports `codec`, `decode_us {mean,p50,p99,max}` and D2's gate `budget.mean_over_half_period`; 409 while a run holds the bench, 501 off Windows) → `.claude/rules/diag-bench.md` (auto-loads on `diag/**`, `api/diag*.rs`, `playback/decode_thread.rs`, `sp-decoder subtype.rs`)
 - YouTube cookie file / bot-check → `.claude/rules/youtube-cookies.md` (auto-loads on `downloader/**`, `playlist/**`)
 - yt-dlp spawn env (UTF-8 titles + hide console) → `.claude/rules/yt-dlp-spawn-env.md` (auto-loads on `downloader/**`, `playlist/**`)
@@ -56,11 +57,11 @@ SongPlayer is a standalone Windows desktop application that plays YouTube playli
 
 ## Workspace Structure
 
-The Cargo workspace root manages 4 crates. Two additional crates are excluded from the workspace because they have different build toolchains.
+The Cargo workspace root manages 5 crates. Two additional crates are excluded from the workspace because they have different build toolchains.
 
 ```
 songplayer/
-├── Cargo.toml              # Workspace root (members: sp-core, sp-ndi, sp-decoder, sp-server)
+├── Cargo.toml              # Workspace root (members: sp-core, sp-ndi, sp-decoder, sp-gpu, sp-server)
 ├── VERSION                 # Single source of truth for version (e.g. 0.1.0-dev.1)
 ├── scripts/
 │   └── sync-version.sh    # Reads VERSION, updates all Cargo.toml + tauri.conf.json + both Cargo.lock files
@@ -68,6 +69,7 @@ songplayer/
 │   ├── sp-core/          # Shared types, database (SQLite/sqlx), domain logic — WASM-safe
 │   ├── sp-ndi/           # NDI output via libloading (runtime-linked, no compile-time dep)
 │   ├── sp-decoder/       # Windows Media Foundation decoder (cfg(windows) only)
+│   ├── sp-gpu/           # SP-program-MAX D3D11 compositor (Windows; Linux stub)
 │   └── sp-server/        # Axum HTTP + WebSocket server, yt-dlp/FFmpeg orchestration
 ├── sp-ui/                # Leptos 0.7 WASM frontend (excluded from workspace, built with Trunk)
 └── src-tauri/             # Tauri 2 shell (excluded from workspace, built with cargo tauri)
@@ -80,6 +82,7 @@ songplayer/
 | `sp-core` | Shared types, SQLite database via sqlx, domain models. Must be WASM-safe (no tokio, no std-only I/O). |
 | `sp-ndi` | NDI SDK integration via `libloading`. Loads the NDI shared library at runtime to avoid compile-time dependency. |
 | `sp-decoder` | Windows Media Foundation video decoder. Entire crate is `cfg(windows)` — will not compile on Linux. |
+| `sp-gpu` | The `SP-program-MAX` compositor (#223): Direct3D 11 on Windows (WARP in tests), a stub reporting "unsupported" elsewhere. Pure decisions (adapter, layers, colour, CPU reference) are Linux-tested. |
 | `sp-server` | Axum 0.8 server with HTTP REST + WebSocket. Runs yt-dlp and FFmpeg as subprocesses. Main async binary. |
 | `sp-ui` | Leptos 0.7 CSR frontend compiled to WASM via Trunk. Communicates with sp-server via HTTP/WebSocket. |
 | `src-tauri` | Tauri 2 application shell. Embeds `dist/` from sp-ui build and spawns sp-server in background. |
@@ -145,7 +148,7 @@ Two branches: `dev` + `main`. After merge: recreate `dev` with next `-dev.N` ver
 3. Before PR merge: change VERSION to `0.1.0`, run sync-version.sh
 4. After merge: recreate dev with `0.2.0-dev.1`
 
-Note: The 4 workspace crates use `version.workspace = true` — only the root `Cargo.toml`, `src-tauri/Cargo.toml`, `sp-ui/Cargo.toml`, and `src-tauri/tauri.conf.json` need updating.
+Note: The 5 workspace crates use `version.workspace = true` — only the root `Cargo.toml`, `src-tauri/Cargo.toml`, `sp-ui/Cargo.toml`, and `src-tauri/tauri.conf.json` need updating.
 
 ## Database
 
