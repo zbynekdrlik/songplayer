@@ -4,6 +4,8 @@ paths:
   - "e2e/mock-api.mjs"
   - "e2e/lyrics-follow.spec.ts"
   - "crates/sp-core/src/lyrics_follow.rs"
+  - "e2e/player-known-state.spec.ts"
+  - "crates/sp-core/src/player_view.rs"
 ---
 
 # sp-ui / e2e mock gotchas
@@ -299,10 +301,12 @@ empty/error/loading text. The only exceptions are the fleet genlock vocabulary
 (`LOCKED`/`DEGRADED`/`UNLOCKED`/`GENLOCK OFF`) and proper names (OBS, NDI,
 Resolume, SongPlayer). Mixed English/Slovak in one surface is a review reject.
 
-**On/off-program is derived from `store.ndi_health`** (the health snapshot maps a
-Playing-but-off-program pipeline to `Paused`, so `state == "Playing"` means the
-wall shows this output) — no server change, no new field. A dub prepared on the
-Dabing playlist plays OFF-program and reads "○ Mimo programu".
+**On/off-program is the playlist's WS state** (#225: `state == Playing` =
+on program, the scene-aware wire state, #170), the SAME signal as the state
+label. It is no longer `store.ndi_health`: that is the 1 Hz poll of the
+server's 5 s health sample, and it lagged a cut by up to ~5 s. A dub prepared
+on the Dabing playlist plays OFF-program and reads "○ Mimo programu". See "The
+Player never claims a state it was not told (#225)" below.
 
 ### The shared row / chips / import contracts (#194 round 2)
 
@@ -658,7 +662,7 @@ A box spec must prove playback by the BACKEND effect (`/api/v1/ndi/health`
 was ALSO unreliable off program — the #201 fix below made the label honest, but
 frames-on-the-output stays the ground truth for "is it decoding".)
 
-## Transport vs program: the Player label follows the pipeline, the badge follows health (#201)
+## Transport vs program: the toggle follows the pipeline, the badge follows the program (#201, #225)
 
 Two orthogonal facts, two sources — never conflate them:
 
@@ -668,9 +672,11 @@ Two orthogonal facts, two sources — never conflate them:
   program on the Dabing page (scene-aware `state` = `WaitingForScene`) reads
   `⏸ Pauza` while it decodes, and a click posts `/pause`. `is_decoding`
   (preview/mixer enablement) still reads `state` — unchanged.
-- **The on/off-program badge (`player-program-badge`) still reads
-  `store.ndi_health`** (`state == "Playing"` = the wall shows this output) →
-  `● Na programe` / `○ Mimo programu`. NEVER derive the badge from `transport`.
+- **The on/off-program badge (`player-program-badge`) reads the WS `state`**
+  (#225; `Playing` = the wall shows this output) → `● Na programe` /
+  `○ Mimo programu`, and `◌ —` until the state is known. NEVER derive the
+  badge from `transport`. (#201 read `store.ndi_health` here, which lagged a
+  cut by up to ~5 s.)
 
 Server: `ServerMsg::PlaybackStateChanged` carries `transport: TransportState`
 (`#[serde(default)]` = `Idle`), filled by the engine from the RAW `PlayState` via
@@ -689,8 +695,10 @@ TransportState` field (`#[serde(default)]` = `Idle`, also on `GET
 transport_from_reported` (`Playing`→Playing, `Paused`→Paused,
 `WaitingForScene`→Paused, `Idle`→Idle — `ndi_health.rs` is at the 1000-line cap,
 so ONE assignment there + everything else in the sibling). The fresh-connect
-replay (`websocket.rs::playback_state_replay`) reads `s.transport` directly; the
-old `transport_from_label` second mapping was DELETED (one source of truth). Note
+replay read `s.transport` directly (#225 replaced that builder: the replay now
+re-sends what the engine last broadcast, `.claude/rules/dashboard-ws.md`, which
+carries the same raw transport); the old `transport_from_label` second mapping
+was DELETED (one source of truth). Note
 `state` stays scene-reconciled (`WaitingForScene` off program) while `transport`
 carries `Playing` — the two diverge for an off-program decoding pipeline, which
 is the whole point.
@@ -699,14 +707,57 @@ Mock: a tick item carries `transport` (defaults to `Playing` when `state ==
 "Playing"`, else `Paused`); an off-program decoding item is
 `{state:"WaitingForScene", transport:"Playing"}`. The playlist-1 WS-open
 broadcast carries `transport:"Playing"` so the Dashboard toggle reads `⏸ Pauza`.
-The ndiHealth fixture rows and the on-connect replay (round 2: the WS handler
-replays the current tick items' `state`+`transport` on every (re)connect) both
-carry `transport`, so a page reload while an off-program dub decodes reads
+The ndiHealth fixture rows and the on-connect replay (#225: `sendReplay`, every
+playlist's state on every (re)connect, the tick items' `state`+`transport`+song
+among them) both carry `transport`, so a page reload while an off-program dub
+decodes reads
 `⏸ Pauza` with NO live message. `e2e/player-transport.spec.ts` pins the live
 cases AND the reload case; `e2e/post-deploy-dabing.spec.ts` proves the reload on
 the box. A NEW required field on the WS message must be reflected in every mock
 `PlaybackStateChanged` a spec relies on.
 
+
+## The Player never claims a state it was not told (#225)
+
+Right after a page load the Player showed "Nič nehrá" / "Mixér — nič nehrá"
+(and "Nehrá") for a playlist that plays, until its first NowPlaying arrived:
+`None` (not told yet) rendered exactly like "nothing plays". Now:
+
+- **The store knows what it was told.** `NowPlayingInfo.state_known` is set by
+  a `PlaybackStateChanged` (an entry a `NowPlaying` created keeps it `false`).
+  The server's on-connect replay sends EVERY playlist's state (a playing one's
+  NowPlaying first, an idle one an explicit `Idle`, `dashboard-ws.md`), so a
+  playlist is known as soon as the replay lands.
+- **The rules are pure, in `sp_core::player_view`** (workspace-tested +
+  mutation-gated; sp-ui has no unit tests):
+  - `now_playing_view(state_known, has_song, transport)` → `Song` |
+    `Idle` (told, and not decoding) | `Pending` (not told yet, OR the transport
+    plays and the song has not arrived: a live ▶ before `Started`);
+  - `player_title(view, song, artist)` → "Song — Artist" / "Načítavam…" /
+    "Nič nehrá"; a song without a name is "Bez názvu", never "Nič nehrá";
+  - `state_label(state_known, state, transport)` → "—" until known, else the
+    #201/#221 labels;
+  - `program_badge(state_known, state)` → `◌ —` until known, else
+    `state == Playing` → `● Na programe` / `○ Mimo programu`. The badge and the
+    label read the SAME WS state, so a cut flips both in one render.
+- **The mixer slot** matches the view `Memo` (Rule 1): `Song` → the
+  `LiveMixer`, `Idle` → `player-mixer-idle` "Mixér — nič nehrá", `Pending` →
+  `player-mixer-pending` "Mixér — načítavam…" (the idle line's CSS box, so the
+  slot keeps its height).
+- **Specs:** `e2e/player-known-state.spec.ts`. A MutationObserver installed by
+  `page.addInitScript` records every distinct Player read-out from the FIRST DOM
+  change, so a false "nič nehrá" that lasted one render is caught, not only
+  what an `expect` happens to poll. Mock knob `POST /__mock/ws-replay
+  {delay_ms, now_playing_delay_ms}` (reset with `{}` in `beforeEach`/
+  `afterEach`): hold the whole replay back, or send a playing playlist's song
+  AFTER its state. The badge test times the label's and the badge's flips
+  in-page (`performance.now()`, |Δ| < 100 ms) and each flip within 1 s.
+- **Box specs: "a song arrived" = the title is neither "Nič nehrá" nor
+  "Načítavam…"** (`post-deploy.spec.ts` `NOT_A_SONG`). `not.toHaveText("Nič
+  nehrá")` alone passes on the placeholder right after `page.goto`.
+- **Mock E2E against the old dist proves the RED** (the "Running the mock E2E
+  locally" section below): the new spec failed for the right reasons, and the
+  whole chromium suite stayed green with the new mock replay.
 
 ## The Player mixer slot renders from `mixer_controls`, and `store.dabing` is app-wide (#184)
 
