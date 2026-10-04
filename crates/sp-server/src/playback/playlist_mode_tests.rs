@@ -8,9 +8,10 @@
 //! engine fed the API's commands through `engine_dispatch::dispatch`, as
 //! `lib.rs` does. What the engine tells the dashboard lives in a
 //! process-global record, so these tests use playlist ids no other test uses
-//! (22 530-22 539) and read back only their own.
+//! (22 530-22 549) and read back only their own.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -33,6 +34,9 @@ const NO_PIPELINE: i64 = 22_534;
 const REFUSED: i64 = 22_535;
 const NOT_WRITTEN: i64 = 22_536;
 const NO_SUCH_PLAYLIST: i64 = 22_537;
+const ORDERED: i64 = 22_540;
+const DELETED_IN_ORDER: i64 = 22_541;
+const CANONICAL: i64 = 22_543;
 
 /// The engine under test, the channel it tells the dashboard on, and the
 /// Resolume channel's receiver (kept alive by the test).
@@ -86,6 +90,17 @@ async fn stored(pool: &SqlitePool, id: i64) -> String {
         .unwrap()
 }
 
+/// A JSON request (no body: an empty one).
+fn request(method: &str, uri: &str, body: Option<serde_json::Value>) -> Request<Body> {
+    let body = body.map_or_else(Body::empty, |b| Body::from(b.to_string()));
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .body(body)
+        .unwrap()
+}
+
 /// One request through the real router; its status.
 async fn send(
     state: &AppState,
@@ -93,16 +108,32 @@ async fn send(
     uri: &str,
     body: Option<serde_json::Value>,
 ) -> StatusCode {
-    let request = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("content-type", "application/json");
-    let body = body.map_or_else(Body::empty, |b| Body::from(b.to_string()));
     crate::api::router(state.clone(), None)
-        .oneshot(request.body(body).unwrap())
+        .oneshot(request(method, uri, body))
         .await
         .unwrap()
         .status()
+}
+
+/// The request, run through the real router on its own task, as a client
+/// whose change waits behind another.
+fn spawn_request(
+    state: &AppState,
+    method: &str,
+    uri: &str,
+    body: Option<serde_json::Value>,
+) -> tokio::task::JoinHandle<StatusCode> {
+    let call = crate::api::router(state.clone(), None).oneshot(request(method, uri, body));
+    tokio::spawn(async move { call.await.unwrap().status() })
+}
+
+/// How many rows the playlist `id` has (0 or 1).
+async fn rows(pool: &SqlitePool, id: i64) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM playlists WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 /// Feed the engine every command the API sent, as `lib.rs`'s bridge does.
@@ -352,6 +383,7 @@ async fn an_unknown_mode_is_refused_and_nothing_changes() {
     assert_eq!(patch, StatusCode::BAD_REQUEST);
     assert_eq!(stored(&state.pool, REFUSED).await, "single");
     assert!(engine_rx.try_recv().is_err(), "the engine is told nothing");
+    deliver(&mut engine, &mut engine_rx).await;
     assert_eq!(mode_of(&engine, REFUSED), Some(PlaybackMode::Single));
     assert_eq!(states_told(&mut ws_rx, REFUSED), Vec::<ServerMsg>::new());
 }
@@ -389,6 +421,7 @@ async fn a_mode_the_row_could_not_take_leaves_the_engines_mode() {
         engine_rx.try_recv().is_err(),
         "the engine is never told a mode the row does not hold"
     );
+    deliver(&mut engine, &mut engine_rx).await;
     assert_eq!(mode_of(&engine, NOT_WRITTEN), Some(PlaybackMode::Loop));
     assert_eq!(
         states_told(&mut ws_rx, NOT_WRITTEN),
@@ -410,4 +443,162 @@ async fn a_mode_for_a_playlist_that_does_not_exist_is_404_and_tells_nobody() {
 
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(engine_rx.try_recv().is_err());
+}
+
+/// Review round 1: a new playlist's mode is a known one, stored by its
+/// canonical name, like a changed one (`routes_mode::requested_mode`).
+#[tokio::test]
+async fn a_new_playlist_takes_a_known_mode_only_by_its_canonical_name() {
+    let (state, _engine_rx) = test_state_with_engine_rx().await;
+    let created = |name: &str, mode: &str| {
+        serde_json::json!({
+            "name": name,
+            "youtube_url": format!("url-{name}"),
+            "playback_mode": mode,
+        })
+    };
+
+    let refused = send(
+        &state,
+        "POST",
+        "/api/v1/playlists",
+        Some(created("P225 odd", "shuffle")),
+    )
+    .await;
+    let added = send(
+        &state,
+        "POST",
+        "/api/v1/playlists",
+        Some(created("P225 loop", "Loop")),
+    )
+    .await;
+
+    assert_eq!(
+        refused,
+        StatusCode::BAD_REQUEST,
+        "an unknown mode is refused"
+    );
+    assert_eq!(added, StatusCode::CREATED);
+    let modes: Vec<(String, String)> = sqlx::query_as(
+        "SELECT name, playback_mode FROM playlists WHERE name LIKE 'P225 %' ORDER BY name",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        modes,
+        vec![("P225 loop".to_string(), "loop".to_string())],
+        "no row for the refused one, the canonical name for the other"
+    );
+}
+
+/// Review round 1: a changed mode is stored by its canonical name too.
+#[tokio::test]
+async fn a_changed_mode_is_stored_by_its_canonical_name() {
+    let (state, _engine_rx) = test_state_with_engine_rx().await;
+    insert(&state.pool, CANONICAL, "continuous", true).await;
+
+    let put = send(
+        &state,
+        "PUT",
+        &format!("/api/v1/playback/{CANONICAL}/mode"),
+        Some(serde_json::json!({ "mode": "Single" })),
+    )
+    .await;
+    assert_eq!(put, StatusCode::NO_CONTENT);
+    assert_eq!(stored(&state.pool, CANONICAL).await, "single");
+
+    let patch = send(
+        &state,
+        "PATCH",
+        &format!("/api/v1/playlists/{CANONICAL}"),
+        Some(serde_json::json!({ "playback_mode": "LOOP" })),
+    )
+    .await;
+    assert_eq!(patch, StatusCode::NO_CONTENT);
+    assert_eq!(stored(&state.pool, CANONICAL).await, "loop");
+}
+
+/// Review round 1: `MODE_ORDER` — a mode change (the PUT, the PATCH) waits
+/// while another is between writing its row and telling the engine, so the
+/// engine is told the changes in the order the row took them. "Must not
+/// finish yet" is the safe direction: correct code can never finish while
+/// the order is held; a slow runner only makes it pass vacuously.
+#[tokio::test]
+async fn a_mode_change_waits_while_another_is_written_and_told() {
+    let (state, mut engine_rx) = test_state_with_engine_rx().await;
+    insert(&state.pool, ORDERED, "continuous", true).await;
+
+    for (method, uri, body, row) in [
+        (
+            "PUT",
+            format!("/api/v1/playback/{ORDERED}/mode"),
+            serde_json::json!({ "mode": "single" }),
+            "single",
+        ),
+        (
+            "PATCH",
+            format!("/api/v1/playlists/{ORDERED}"),
+            serde_json::json!({ "playback_mode": "loop" }),
+            "loop",
+        ),
+    ] {
+        let before = stored(&state.pool, ORDERED).await;
+        let in_flight = crate::api::routes_mode::MODE_ORDER.lock().await;
+        let mut change = spawn_request(&state, method, &uri, Some(body));
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), &mut change)
+                .await
+                .is_err(),
+            "the {method} waits for the change in flight"
+        );
+        assert_eq!(stored(&state.pool, ORDERED).await, before, "{method}");
+        assert!(engine_rx.try_recv().is_err(), "{method}: nothing told yet");
+
+        drop(in_flight);
+        assert_eq!(change.await.unwrap(), StatusCode::NO_CONTENT, "{method}");
+        assert_eq!(stored(&state.pool, ORDERED).await, row, "{method}");
+        assert!(
+            matches!(
+                engine_rx.try_recv(),
+                Ok(EngineCommand::SetMode {
+                    playlist_id: ORDERED,
+                    ..
+                })
+            ),
+            "{method}: then the engine is told"
+        );
+        // The PATCH's EnsurePipeline.
+        while engine_rx.try_recv().is_ok() {}
+    }
+}
+
+/// Review round 1: a DELETE waits for a mode change in flight too, so the
+/// engine never applies a mode (and records it for the replay) after it
+/// forgot the deleted playlist.
+#[tokio::test]
+async fn a_delete_waits_while_a_mode_change_is_written_and_told() {
+    let (state, _engine_rx) = test_state_with_engine_rx().await;
+    insert(&state.pool, DELETED_IN_ORDER, "continuous", false).await;
+
+    let in_flight = crate::api::routes_mode::MODE_ORDER.lock().await;
+    let mut delete = spawn_request(
+        &state,
+        "DELETE",
+        &format!("/api/v1/playlists/{DELETED_IN_ORDER}"),
+        None,
+    );
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut delete)
+            .await
+            .is_err(),
+        "the delete waits for the change in flight"
+    );
+    assert_eq!(rows(&state.pool, DELETED_IN_ORDER).await, 1);
+
+    drop(in_flight);
+    assert_eq!(delete.await.unwrap(), StatusCode::NO_CONTENT);
+    assert_eq!(rows(&state.pool, DELETED_IN_ORDER).await, 0);
 }

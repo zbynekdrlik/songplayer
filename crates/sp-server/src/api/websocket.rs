@@ -331,6 +331,12 @@ mod tests {
         // No such playlist: nothing saved, the engine not told, the client is.
         dispatch_client_msg(set_mode(22_539), &state).await;
         assert!(engine_rx.try_recv().is_err());
-        assert!(matches!(told.try_recv(), Ok(ServerMsg::Error { .. })));
+        // In Slovak, like every text the dashboard shows (review round 1).
+        match told.try_recv() {
+            Ok(ServerMsg::Error { message }) => {
+                assert!(message.contains("sa neuložil"), "{message}");
+            }
+            other => panic!("expected the not-saved Error, got {other:?}"),
+        }
     }
 }
