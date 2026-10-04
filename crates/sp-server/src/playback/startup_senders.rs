@@ -18,6 +18,7 @@
 use std::time::Duration;
 
 use sp_core::models::Playlist;
+use sp_core::playback::PlaybackMode;
 use tracing::{info, warn};
 
 use super::PlaybackEngine;
@@ -254,8 +255,14 @@ impl PlaybackEngine {
 
         // Serialized, id-ordered creation: create sender i, wait for it to
         // report ready (so its port is assigned) before creating sender i+1.
+        // #225 unit 2: each pipeline starts in its row's playback mode.
         for (id, name) in &ordered {
-            self.create_and_record_sender(*id, name).await;
+            let mode = playlists
+                .iter()
+                .find(|p| p.id == *id)
+                .map(|p| crate::db::models_playlists::row_mode(p.id, &p.name, &p.playback_mode))
+                .unwrap_or_default();
+            self.create_and_record_sender(*id, name, mode).await;
         }
 
         // #196 item 4: the senders are ready — start the +30 s post-restart
@@ -286,15 +293,22 @@ impl PlaybackEngine {
     /// reports ready, record the advertised URL in the health registry so it
     /// shows on `/api/v1/ndi/health`. Bounded wait — a stuck/absent sender never
     /// blocks past [`SENDER_READY_TIMEOUT`]. Used by the startup serializer (in
-    /// id order) and by the runtime activate path. Returns the URL (if any).
+    /// id order) and by the runtime activate path, each passing the playlist
+    /// row's `mode` the pipeline starts in (#225 unit 2; an existing pipeline
+    /// keeps its own). Returns the URL (if any).
     ///
     /// mutants::skip — I/O orchestration (oneshot + timeout + registry write);
     /// the pure ordering/port pieces are unit-tested and the box acceptance
     /// proves the recorded map end-to-end.
     #[cfg_attr(test, mutants::skip)]
-    pub(crate) async fn create_and_record_sender(&mut self, id: i64, name: &str) -> Option<String> {
+    pub(crate) async fn create_and_record_sender(
+        &mut self,
+        id: i64,
+        name: &str,
+        mode: PlaybackMode,
+    ) -> Option<String> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.ensure_pipeline_inner(id, name, Some(tx));
+        self.ensure_pipeline_inner(id, name, mode, Some(tx));
         let url = match tokio::time::timeout(SENDER_READY_TIMEOUT, rx).await {
             Ok(Ok(u)) => u,
             Ok(Err(_)) => {

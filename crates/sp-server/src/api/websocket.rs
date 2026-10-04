@@ -163,10 +163,20 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
                 .await;
         }
         ClientMsg::SetMode { playlist_id, mode } => {
-            let _ = state
-                .engine_tx
-                .send(EngineCommand::SetMode { playlist_id, mode })
-                .await;
+            // #225 unit 2: the row first, then the engine, the same path as
+            // the REST mode route (`routes_mode`); a mode not saved is told.
+            let saved = super::routes_mode::persist_then_tell(
+                &state.pool,
+                &state.engine_tx,
+                playlist_id,
+                mode,
+            )
+            .await;
+            if !matches!(saved, Ok(true)) {
+                let _ = state.event_tx.send(ServerMsg::Error {
+                    message: format!("the playback mode of playlist {playlist_id} was not saved"),
+                });
+            }
         }
         ClientMsg::Seek {
             playlist_id,
@@ -236,10 +246,12 @@ async fn send_replay(write: &mut SplitSink<WebSocket, Message>, state: &AppState
 /// tools status (#225): for EVERY playlist in the DB, the engine's last
 /// dashboard message about it (`playback/dashboard_replay.rs`): a playing
 /// one's song, then its state; any other an explicit `Idle`; each in the mode
-/// the engine plays. So the Player knows from the first batch what plays and
-/// what does not. `handle_ws` subscribes to the event bus before it calls
-/// this, so nothing the engine sends in between is lost. A failed DB read
-/// still replays every playlist the engine has told the dashboard about.
+/// the engine plays (one it has not told about: its row's mode, the one its
+/// pipeline starts in, #225 unit 2). So the Player knows from the first
+/// batch what plays and what does not. `handle_ws` subscribes to the event
+/// bus before it calls this, so nothing the engine sends in between is lost.
+/// A failed DB read still replays every playlist the engine has told the
+/// dashboard about.
 pub(crate) async fn on_connect_replay(state: &AppState) -> Vec<ServerMsg> {
     let playlists = match crate::db::models_playlists::all_playlist_modes(&state.pool).await {
         Ok(playlists) => playlists,

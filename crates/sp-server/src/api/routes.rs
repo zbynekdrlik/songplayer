@@ -39,11 +39,6 @@ pub struct UpdatePlaylistRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct SetModeRequest {
-    pub mode: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct UpdateSettingsRequest {
     #[serde(flatten)]
     pub settings: std::collections::HashMap<String, String>,
@@ -279,9 +274,15 @@ pub async fn update_playlist(
         sets.push("ndi_output_name = ?");
         binds.push(ndi.clone());
     }
-    if let Some(ref mode) = body.playback_mode {
+    // #225 unit 2: the row is the mode's one truth — a known mode only, by
+    // its canonical name, and the engine is told it (`routes_mode`).
+    let mode = match body.playback_mode.as_deref().map(PlaybackMode::parse) {
+        Some(None) => return StatusCode::BAD_REQUEST.into_response(),
+        parsed => parsed.flatten(),
+    };
+    if let Some(mode) = mode {
         sets.push("playback_mode = ?");
-        binds.push(mode.clone());
+        binds.push(mode.as_str().to_string());
     }
     if let Some(active) = body.is_active {
         sets.push("is_active = ?");
@@ -305,11 +306,15 @@ pub async fn update_playlist(
     }
     query = query.bind(id);
 
+    let _order = super::routes_mode::MODE_ORDER.lock().await; // the row, then the engine (#225)
     match query.execute(&state.pool).await {
         Ok(result) => {
             if result.rows_affected() == 0 {
                 StatusCode::NOT_FOUND.into_response()
             } else {
+                if let Some(mode) = mode {
+                    super::routes_mode::tell_engine(&state.engine_tx, id, mode).await;
+                }
                 let _ = state.obs_rebuild_tx.send(());
                 // #132: reconcile the playback pipeline with the update.
                 // Deactivation tears the pipeline down; every other update
@@ -633,21 +638,10 @@ pub async fn previous(
     StatusCode::NO_CONTENT
 }
 
-pub async fn set_mode(
-    State(state): State<AppState>,
-    Path(playlist_id): Path<i64>,
-    Json(body): Json<SetModeRequest>,
-) -> impl IntoResponse {
-    let mode = PlaybackMode::from_str_lossy(&body.mode);
-    let _ = state
-        .engine_tx
-        .send(EngineCommand::SetMode { playlist_id, mode })
-        .await;
-    StatusCode::NO_CONTENT
-}
-
-// #194: the seek route moved to `api/routes_seek.rs` (unified onto the
-// `/api/v1/playback/{id}/…` family, with clamp / 404 / 409 hardening).
+// #225 unit 2: the mode route moved to `api/routes_mode.rs` (the row first,
+// then the engine). #194: the seek route moved to `api/routes_seek.rs`
+// (unified onto the `/api/v1/playback/{id}/…` family, with clamp / 404 / 409
+// hardening).
 
 // ---------------------------------------------------------------------------
 // Settings endpoints
