@@ -216,6 +216,10 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     side's last, so a third size drops the incoming one. Two songs of one
     size share ONE plan. The plans are ALL it keeps: there is no fitted
     scratch buffer (addendum 3);
+  - a picture is judged by its OWN length (`Canvas::fit`, and each side in
+    `Canvas::fade` via `measured`): a buffer shorter than its layout claims
+    is not a canvas picture, it is fitted — and, not being whole, drawn as
+    the canvas black — never a short picture labelled as the canvas;
   - a source or destination that is not whole NV12 for its layout gives the
     black canvas alone, never a panic (a zero-size one simply draws nothing,
     and a zero-stride destination is the canvas too).
@@ -278,8 +282,14 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
     buffers it paints into. A band's panic is caught on its worker (the
     worker lives on); once every band is done the caller panics in turn,
     naming the band's message (`band pool: a band panicked on its worker:
-    …`), as `std::thread::scope` did — a new panic, not `resume_unwind`, so
-    the panic hook records the `SP-program` thread too. These paths are
+    …`; `std::thread::scope` panicked the caller too, with its own fixed
+    message) — a new panic, not `resume_unwind`, so the panic hook records
+    the `SP-program` thread too. A painter must never `run` the same pool
+    (its worker would wait on its own queue). `Bands::wait`'s constant
+    mutants skip the wait, so a worker paints into freed memory by
+    construction: the tests kill them by count and by the gated waits, and
+    every test declares what a painter borrows before its pool, so the
+    pool's drop joins the workers first. These paths are
     LIVE in production: the shipped `SongPlayer.exe` (built from
     `src-tauri`) unwinds, `panic = "unwind"` (`crash-diagnostics.md`). A
     worker that cannot start is WARNed once at construction and its band is

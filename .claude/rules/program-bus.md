@@ -168,8 +168,9 @@ included, is comment 5872871751).
     outgoing one (`program-transition.md`, "The mix"). The mix is exactly the
     canvas's bytes.
 - **Pass-through.** A picture with the canvas's size and stride and AT LEAST
-  its bytes (a decoder buffer may carry slack) goes out as the SAME
-  allocation: no copy. The paced idle black, the program standby and a
+  its bytes (a decoder buffer may carry slack; the buffer's OWN length
+  counts, not what its layout claims) goes out as the SAME allocation: no
+  copy. The paced idle black, the program standby and a
   1920×1080 song decoded on a 1920 stride are all canvas pictures.
 - **The fit.** Any other picture is fitted into the canvas: placed by
   `nv12_fit::aspect_fit` (aspect kept, centred on even offsets, bars Y 16 /

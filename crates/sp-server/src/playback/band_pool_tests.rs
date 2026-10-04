@@ -7,8 +7,9 @@
 //! test holds; a "must not have returned yet" window is used only in the
 //! safe direction (correct code can never fail it). Every gate is opened
 //! when a check fails (its sender or opener is dropped as the test unwinds),
-//! and the gated tests declare their pool after what its painter borrows, so
-//! its drop joins the workers before those are freed.
+//! and every test that keeps what a painter borrows declares it before the
+//! pool, so the pool's drop joins the workers before those are freed (under
+//! a mutant that skips the wait, too).
 //! Wired via `#[cfg(test)] #[path = "band_pool_tests.rs"] mod tests;`.
 
 use std::any::Any;
@@ -82,17 +83,17 @@ fn every_band_past_the_first_runs_on_its_own_worker_picture_after_picture() {
     // The fix itself: before, every picture started K − 1 scoped threads, a
     // new ThreadId each time. Now band i runs on the worker `<name>-<i>`,
     // the same thread on every run.
+    let log = Mutex::new(Vec::new());
     let pool = BandPool::new("band-test", 4);
     let caller = thread::current().id();
     let mut workers: Option<Vec<ThreadId>> = None;
     for picture in 0..5 {
-        let log = Mutex::new(Vec::new());
         assert_eq!(
             pool.run(&recorder(&log)),
             4,
             "picture {picture}: four threads painted"
         );
-        let mut painted = log.into_inner().unwrap();
+        let mut painted = std::mem::take(&mut *log.lock().unwrap());
         painted.sort_by_key(|&(band, ..)| band);
         assert_eq!(
             painted.iter().map(|&(band, ..)| band).collect::<Vec<_>>(),
@@ -200,8 +201,8 @@ fn a_band_that_panics_on_a_worker_panics_the_run_and_the_worker_lives_on() {
     // done (naming the band's message, so the panic hook records the caller
     // too). The worker caught it, so the next picture runs on the same
     // threads.
+    let (log, next_log) = (Mutex::new(Vec::new()), Mutex::new(Vec::new()));
     let pool = BandPool::new("panic-test", 3);
-    let log = Mutex::new(Vec::new());
     {
         let record = recorder(&log);
         let paint = |band: usize| {
@@ -218,7 +219,7 @@ fn a_band_that_panics_on_a_worker_panics_the_run_and_the_worker_lives_on() {
             "a panic of the caller's own, naming the band's"
         );
     }
-    let mut first = log.into_inner().unwrap();
+    let mut first = std::mem::take(&mut *log.lock().unwrap());
     first.sort_by_key(|&(band, ..)| band);
     assert_eq!(
         first.iter().map(|&(band, ..)| band).collect::<Vec<_>>(),
@@ -226,13 +227,12 @@ fn a_band_that_panics_on_a_worker_panics_the_run_and_the_worker_lives_on() {
         "every band ran before the panic reached the caller"
     );
 
-    let log = Mutex::new(Vec::new());
     assert_eq!(
-        pool.run(&recorder(&log)),
+        pool.run(&recorder(&next_log)),
         3,
         "the next picture: three threads"
     );
-    let mut next = log.into_inner().unwrap();
+    let mut next = std::mem::take(&mut *next_log.lock().unwrap());
     next.sort_by_key(|&(band, ..)| band);
     assert_eq!(
         next.iter().map(|&(_, id, _)| id).collect::<Vec<_>>(),

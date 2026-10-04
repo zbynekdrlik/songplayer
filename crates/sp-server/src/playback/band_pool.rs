@@ -27,9 +27,10 @@
 //!
 //! A band that panics on a worker is caught there, so the worker lives on
 //! for the next picture. Once every band is done the calling thread panics
-//! in turn, naming the band's message, as `std::thread::scope` did: the
-//! process panic hook (`panic_hook.rs`) records the worker's panic AND the
-//! calling thread's (the `SP-program` sender dying). These paths are live in
+//! in turn, naming the band's message (`std::thread::scope` panicked the
+//! caller too, with its own fixed message): the process panic hook
+//! (`panic_hook.rs`) records the worker's panic AND the calling thread's
+//! (the `SP-program` sender dying). These paths are live in
 //! production: the shipped `SongPlayer.exe` is built from `src-tauri` with
 //! cargo's default `panic = "unwind"` (`crash-diagnostics.md`); only
 //! standalone `sp-server` builds abort.
@@ -261,7 +262,8 @@ impl BandPool {
     /// thread, band `i` on worker `i` (on the calling thread when it did not
     /// start), all at once. Returns once EVERY band is painted: how many
     /// threads painted. When a band panicked on a worker, this panics in turn
-    /// once every band is done, naming the band's message.
+    /// once every band is done, naming the band's message. A painter must
+    /// never `run` the same pool: its worker would wait on its own queue.
     pub fn run<F: Fn(usize) + Sync>(&self, paint: &F) -> usize {
         let job = Job::new(paint);
         let mut bands = Bands::new();
@@ -279,7 +281,7 @@ impl BandPool {
         let (helpers, caught) = bands.wait();
         if let Some(payload) = caught {
             // A new panic, not `resume_unwind`: the panic hook records this
-            // thread too, as `std::thread::scope`'s own panic did.
+            // thread too, as it did `std::thread::scope`'s own panic.
             panic!(
                 "band pool: a band panicked on its worker: {}",
                 panic_text(&*payload)

@@ -96,8 +96,8 @@ pub enum Paint<'a> {
 /// Paint `paint` into `out` (appended) as a `dst` picture, in the `pool`'s
 /// row bands, in one pass. Bit-identical to the two-pass
 /// reference (each side made a whole `dst` picture, then
-/// `blend_nv12_into`), and to any other band count. As long as `dst`, or as
-/// a [`Side::Same`] picture when that is shorter (the bytes every side
+/// `blend_nv12_into`), and to any other band count. It is `dst.len` bytes,
+/// or a shorter [`Side::Same`] picture's length (the bytes every side
 /// holds). Panics when a [`Side::Fitted`] plan does not fit into `dst`.
 ///
 /// Returns how many threads painted it: the calling one and every worker

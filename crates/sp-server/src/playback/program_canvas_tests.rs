@@ -134,6 +134,13 @@ fn a_fit_reads_its_picture_alone_and_is_exactly_the_canvas_bytes() {
     let mut black = vec![16u8; 16];
     black.resize(24, 128);
     assert_eq!(fitted.to_vec(), black, "the 8×2 canvas's 24 black bytes");
+    // A buffer one byte short of the canvas that CLAIMS the canvas's layout
+    // is judged by its own length: fitted (black), never passed through as
+    // a 23-byte picture labelled 8×2.
+    let claimed = SharedFrame::new((0..23).collect());
+    let fitted = canvas.fit(tight(8, 2), &claimed, &pool);
+    assert!(!fitted.ptr_eq(&claimed), "not the short buffer");
+    assert_eq!(fitted.to_vec(), black, "the canvas black, 24 bytes");
 }
 
 #[test]

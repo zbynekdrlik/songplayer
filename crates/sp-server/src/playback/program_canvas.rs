@@ -137,8 +137,14 @@ impl Canvas {
     /// `video`, a `layout` picture, as a canvas picture: `video` itself (the
     /// same allocation) when the canvas holds it, else fitted into the
     /// canvas — one side, nothing else read — in the `pool`'s row bands,
-    /// into a pooled buffer of exactly the canvas's bytes.
+    /// into a pooled buffer of exactly the canvas's bytes. Judged by
+    /// `video`'s own length, as [`Canvas::fade`] judges a side: a buffer
+    /// shorter than its layout claims is never sent as a canvas picture.
     pub fn fit(&mut self, layout: Layout, video: &SharedFrame, pool: &BandPool) -> SharedFrame {
+        let layout = Layout {
+            len: video.len(),
+            ..layout
+        };
         if self.holds(layout) {
             return video.clone();
         }
