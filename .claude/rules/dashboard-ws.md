@@ -4,6 +4,10 @@ paths:
   - "crates/sp-server/src/playback/dashboard_replay*.rs"
   - "crates/sp-server/src/playback/tests_ws_replay.rs"
   - "crates/sp-server/src/db/models_playlists.rs"
+  - "crates/sp-server/src/api/routes_mode.rs"
+  - "crates/sp-server/src/api/routes.rs"
+  - "crates/sp-server/src/playback/playlist_mode*.rs"
+  - "crates/sp-server/src/playback/startup_senders.rs"
   - "crates/sp-server/src/playback/runtime_pipeline.rs"
   - "sp-ui/src/pages/dashboard.rs"
   - "crates/sp-server/src/playback/engine_play.rs"
@@ -31,14 +35,20 @@ record: #225 comment 5917562242 (Approach 1), adapted in the
   (`dashboard_replay::global()`, like `now_playing::global()`, #177; no engine
   field, `playback/mod.rs` is near the cap) and THEN broadcasts it. The send
   sites are `engine_play.rs::broadcast_state` (the one `PlaybackStateChanged`
-  sender; its callers include `mod.rs::handle_command` for a `SetMode` and
-  `runtime_pipeline.rs::remove_pipeline`), `mod.rs::broadcast_now_playing_on_start`
-  and `position_update.rs::maybe_broadcast_position_update`. A new sender of
-  either message calls `send_dashboard` (a state: `broadcast_state`), never
+  sender; its callers include `playlist_mode.rs::apply_mode` for a `SetMode`
+  and `runtime_pipeline.rs::remove_pipeline`), `mod.rs::broadcast_now_playing_on_start`
+  and `position_update.rs::maybe_broadcast_position_update`. A playlist with
+  NO pipeline has its state told by the sibling `engine_play.rs::broadcast_idle`
+  (`Idle` in its new mode, #225 unit 2: `broadcast_state` needs a pipeline;
+  `apply_mode` calls it). A new sender of either message calls
+  `send_dashboard` (a state: `broadcast_state` / `broadcast_idle`), never
   `ws_event_tx.send` directly, or a new client is not told it.
 - `runtime_pipeline.rs::remove_pipeline` sets the pipeline `Idle` and tells
   the open dashboards through `broadcast_state`, then forgets the playlist
   (`forget`), so an open dashboard and a reload agree (review rounds 2-3).
+  It forgets with or without a pipeline (unit 2): a pipeline-less playlist
+  has a record once its mode changed, and a deleted one must not be
+  replayed.
 - A client that LAGS (the broadcast channel dropped messages for it)
   resubscribes (`event_rx.resubscribe()`) and is sent the replay again
   (`websocket.rs::send_replay`), so a dropped state change does not leave it
@@ -54,8 +64,8 @@ record: #225 comment 5917562242 (Approach 1), adapted in the
 
 ## The replay
 
-`DashboardReplay::replay(&playlist_ids)`, the ids of EVERY row of the
-`playlists` table (`db/models_playlists.rs::all_playlist_ids`, ascending,
+`DashboardReplay::replay(&[(id, row mode)])`, EVERY row of the `playlists`
+table with its mode (`db/models_playlists.rs::all_playlist_modes`, ascending,
 inactive ones too: the UI lists them all; a failed read replays only the
 recorded playlists):
 
@@ -64,7 +74,9 @@ recorded playlists):
 - any other playlist: an explicit `Idle` (transport `Idle`), no `NowPlaying`;
 - a recorded playlist the list does not name (the DB read failed) follows, by
   id;
-- the mode is the ENGINE's: the recorded one, else `PlaybackMode::default()`.
+- the mode is the one the engine plays: the recorded one, else the ROW's
+  (`row_mode`, the mode its pipeline starts in; the default for an unlisted
+  one, which has no row to read).
 
 Why each rule:
 
@@ -74,22 +86,79 @@ Why each rule:
   Before #225 Idle playlists were skipped as "noise".
 - **The song before the state**: each WS message is its own browser task, so
   a state that lands first renders a "known, no song" Player for a moment.
-- **The mode is the engine's, never the DB's** (review round 1): the engine
-  never reads `playlists.playback_mode` (every pipeline starts at
-  `PlaybackMode::default()`, `runtime_pipeline.rs`) and `SetMode` is not
-  written back, so the DB value is not what plays (idle ytlive, seeded
-  `single`, read "Jedna skladba" while the engine played Continuous). A mode
-  change broadcasts the playlist's state (`handle_command` → `broadcast_state`),
-  so the open dashboards learn it at once and the record is never stale.
-  The engine ignoring the DB mode (and never persisting `SetMode`) is a
-  separate, older gap, handed to the supervisor as a follow-up candidate
-  (#225 lane return); cite its ticket here once it is filed.
+- **The mode is the one that plays** (review round 1, then unit 2). Round 1
+  found the engine ignored the DB (idle ytlive, seeded `single`, read "Jedna
+  skladba" while the engine played Continuous) and told the engine's mode.
+  Unit 2 made the row the one truth (next section), so the recorded mode and
+  the row agree and an unrecorded playlist replays its row's. A mode change
+  is told at once (`apply_mode`), so the record is never stale.
 - **Never the NDI-health sample again.** The old builder
   (`playback_state_replay`, deleted) read `ndi_health_registry.snapshots()`,
   refreshed on the 5 s health tick. Once the Player's badge reads the WS state,
   a reload right after a cut would show the old program state, in the label
   AND the badge, until the playlist's next state change. The recorded message
   is exactly what a live client last got, including the raw transport (#201).
+
+## A playlist's mode: ONE persisted truth, its row (#225 unit 2)
+
+Main's ROZHODNUTÉ: #225 comment 5975832356; how it is built: the
+`Anchors-confirmed` comment 5976091780.
+
+- **A pipeline starts in its row's `playback_mode`.**
+  `db/models_playlists.rs::row_mode(id, name, stored)` parses it with
+  `PlaybackMode::parse` (sp-core, the one parser; `from_str_lossy` delegates
+  to it); an unknown value plays the default with a WARN naming the
+  playlist. Both production creators pass it into `ensure_pipeline_inner`:
+  `startup_senders.rs` (each `Playlist` of `get_active_playlists`) and
+  `ensure_pipeline_for_playlist` (from the SELECT that decides the creation,
+  so no second read). An existing pipeline keeps its mode. The sync
+  `ensure_pipeline` (default mode) is `#[cfg(test)]`: no production path
+  creates a pipeline without its row.
+- **The row first, then the engine** (`api/routes_mode.rs`):
+  - `PUT /api/v1/playback/{id}/mode` (the Player's mode select) and the WS
+    `ClientMsg::SetMode` go through `persist_then_tell`: the UPDATE first;
+    0 rows → 404; a failed write → an ERROR log + 500 (the Player's "Zmena
+    režimu zlyhala" toast), and the engine is NEVER told, so it keeps the
+    mode the row still holds. Only a written row sends
+    `EngineCommand::SetMode`. The WS path tells either failure (an unknown
+    playlist or a failed write) as a Slovak `ServerMsg::Error` broadcast to
+    every open dashboard's error banner. An engine that is gone when told
+    (shutdown) is an ERROR log; the row holds the mode for the next start.
+  - The playlist update (`PUT /api/v1/playlists/{id}`,
+    `routes::update_playlist`; there is NO PATCH route — axum answers 405)
+    writes the row with its other fields, then calls `tell_engine` (before
+    `EnsurePipeline` / `RemovePipeline`). A failed write logs ERROR too.
+  - `requested_mode` is the one check of a requested mode — the mode
+    route's body, the playlist update's and the playlist POST's field: an
+    unknown one is 400 (a WARN naming the playlist, with at most 32 of its
+    characters, escaped), a known one is stored by its canonical name
+    (`as_str`; the POST's default when none is given), so every row the API
+    writes parses.
+  - `MODE_ORDER` (a `tokio::sync::Mutex`, like `cache::SONG_FILES`) is held
+    across "write the row, tell the engine", across the playlist update and
+    across the playlist DELETE, so the engine receives concurrent changes in
+    the order the row took them (its command channel is FIFO), and no mode
+    reaches it after it forgot a deleted playlist (the record would be
+    replayed).
+- **An unknown stored value** is the default everywhere; `row_mode` WARNs
+  at a pipeline's start, `all_playlist_modes` (every dashboard connect)
+  maps it quietly.
+- **Every change is told.** `handle_command(SetMode)` →
+  `playlist_mode.rs::apply_mode`: the pipeline's mode + `broadcast_state`;
+  with no pipeline, `broadcast_idle` (`Idle` in that mode). Then it
+  returns: `SetMode` is a no-op transition, and `apply_event` would WARN
+  "no pipeline" for an inactive playlist.
+- **Startup:** `startup_senders::startup_mode(playlists, id)` (pure,
+  unit-tested) picks each output's row mode for `create_startup_senders`.
+- **On the box:** a deploy of this changes what plays only where a row is
+  not `continuous` (main's check 4.10.2026: all 10 rows `continuous`). A
+  fresh DB seeds ytlive `single` (`startup.rs::ensure_live_playlist_exists`),
+  which it now plays. The integration check (main session, at the
+  deploy; recorded on the ticket's LANE-RETURN): the replayed mode of
+  every playlist equals its `GET /api/v1/playlists` `playback_mode`.
+- **Never** send `EngineCommand::SetMode` / `PlayEvent::SetMode` for a mode
+  the row does not hold (tests drive the engine directly; production never
+  does).
 
 ## The client forgets on every socket (sp-ui)
 
@@ -129,17 +198,45 @@ Two consequences, both review round 3:
 ## Tests
 
 - `playback/tests_ws_replay.rs` (the #225 RED): an engine on a `test_state()`
-  DB plays a song in Loop (`SetMode`, state, `Started`, a position tick past
-  the throttle); `on_connect_replay` must return its NowPlaying, then its
-  state in Loop (the DB says `single`), then the idle playlist's `Idle` in
-  Continuous (the DB says `loop`). A second test: `SetMode` on an idle
-  playlist is broadcast at once and replayed to the next client. They read
-  the GLOBAL registry, so they use playlist ids no other test uses
+  DB plays a song in Loop (`SetMode` driven straight into the engine, state,
+  `Started`, a position tick past the throttle); `on_connect_replay` must
+  return its NowPlaying, then its state in Loop (the recorded one; its row
+  says `single`), then the idle playlist's `Idle` in its row's `loop` (its
+  pipeline created from the row, unit 2). A second test: `SetMode` on an
+  idle playlist is broadcast at once and replayed to the next client. They
+  read the GLOBAL registry, so they use playlist ids no other test uses
   (22 501-22 504) and filter the replay to them (other tests record into the
   same global).
-- `db/models_playlists.rs`: `all_playlist_ids` returns every id ascending,
-  inactive ones too. `tests_ws_replay.rs::a_failed_playlist_read_still_replays_what_the_engine_told`
+- `db/models_playlists.rs`: `all_playlist_modes` returns every id ascending
+  with its row mode, inactive ones too; `row_mode` maps the stored names and
+  an unknown one to the default.
+  `tests_ws_replay.rs::a_failed_playlist_read_still_replays_what_the_engine_told`
   closes the pool and checks the fallback (websocket.rs is mutation-excluded).
+- `playback/playlist_mode_tests.rs` (unit 2; ids 22 530-22 549 are this
+  unit's, the WS test below takes 22 538 / 22 539): the real
+  router + the engine fed the API's commands through
+  `engine_dispatch::dispatch`: a row's `single` starts the pipeline in
+  Single; the PUT writes the row, reaches the running engine and is told,
+  and a fresh engine built as `lib.rs` builds it (`get_active_playlists` →
+  `create_startup_senders`, real port probe) starts in it; a playlist
+  update reaches the engine and the replay; an unknown row value plays
+  Continuous; a pipeline-less playlist is told its new mode and forgotten on
+  DELETE; an unknown mode is 400 for the mode route and the playlist update;
+  a `RAISE(ABORT)` trigger (the row refuses the write) → 500, the engine
+  untold; an unknown playlist → 404. Review round 1: a POST takes a known
+  mode only, by its canonical name, and so do a mode route `Single` / a
+  playlist update `LOOP`; `MODE_ORDER` is pinned in the safe direction: two
+  tests hold it (the mode route and the playlist update, then a DELETE,
+  must not finish within 200 ms, then finish once it is released), and
+  review round 2's `the_order_is_held_until_the_engine_is_told` fills the
+  engine's channel so each of the three blocks in its tell after its
+  write: the order must still be held (`try_lock` fails). Every playlist
+  update in these tests is a `PUT /api/v1/playlists/{id}` (review round 3:
+  five tests had sent PATCH, a 405, and never reached the handler).
+  `api/websocket.rs::a_ws_set_mode_saves_the_row_then_tells_the_engine`
+  covers the WS path (its error text Slovak), and
+  `startup_senders.rs::a_startup_output_starts_in_its_own_rows_mode` the
+  startup choice.
 - `e2e/player-known-state.spec.ts` (review round 2): `/__mock/ws-replay
   {no_song: [{playlist_id, state, transport}]}` + `/__mock/ws-drop` (closes
   every dashboard socket): after the reconnect a playlist waiting with no song
@@ -154,7 +251,7 @@ Two consequences, both review round 3:
 - The mock (`e2e/mock-api.mjs` `sendReplay`) models the same replay: every
   active playlist + the Dabing playlist (500), playlist 1 playing "Never Gonna
   Give You Up" on program, a running tick's items on top, every mode
-  `Continuous` (what the engine plays unless told). A spec that needs a late
+  `Continuous` (every mock row is `continuous`). A spec that needs a late
   replay or a late first song uses `POST /__mock/ws-replay {delay_ms,
   now_playing_delay_ms}` and resets it with `{}` (it also holds the mock's 2 s
   playlist-1 song interval). Every live message goes through `sendLive`

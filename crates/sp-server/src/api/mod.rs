@@ -12,6 +12,7 @@ pub mod preview;
 pub mod program; // #209 program bus: GET /api/v1/program + POST /api/v1/program/cut
 pub mod routes;
 pub mod routes_import; // #180 shared bare-URL import core
+pub mod routes_mode; // #225 unit 2: a playlist's mode — the row first, then the engine
 pub mod routes_ndi_recover;
 pub mod routes_seek; // #194 unified seek route
 pub mod routes_status; // #221 L4b: /api/v1/status's program fields from SongPlayer's own program
@@ -88,7 +89,7 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         )
         .route(
             "/api/v1/playback/{playlist_id}/mode",
-            axum::routing::put(routes::set_mode),
+            axum::routing::put(routes_mode::set_mode),
         )
         // #194: unified seek — same playback family as play/pause/skip/mode.
         .route(

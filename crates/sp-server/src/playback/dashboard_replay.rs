@@ -18,11 +18,13 @@
 //!   had one) FIRST, then its state, so a state never lands without its song;
 //! - any other playlist: an explicit `Idle` state and no `NowPlaying`.
 //!
-//! The mode is the ENGINE's (review round 1): the recorded one, else
-//! `PlaybackMode::default()`, the mode every pipeline starts with. The engine
-//! never reads the DB's `playlists.playback_mode` and a mode change is not
-//! written back, so the DB value is not what plays. A mode change broadcasts
-//! the playlist's state (`handle_command`), so the record is never stale.
+//! The mode (#225 unit 2): a recorded playlist's is the one the engine last
+//! told; any other's is its ROW's (`playlists.playback_mode`,
+//! `db::models_playlists::row_mode`), the mode its pipeline starts in. The
+//! row is the mode's one persisted truth: a change writes it first, then
+//! tells the engine (`api/routes_mode.rs`), which tells the dashboards
+//! (`playlist_mode.rs::apply_mode`, a pipeline-less playlist included), so
+//! the record and the row agree.
 //!
 //! A process-global, like `now_playing::global()` (#177): written by the
 //! engine, read by the API without the engine's command channel, and no new
@@ -90,20 +92,22 @@ impl DashboardReplay {
         map.remove(&playlist_id);
     }
 
-    /// The on-connect replay (module doc). `playlist_ids` = every playlist in
-    /// the DB, in order. A recorded playlist the list does not name (the DB
-    /// read failed) follows, by id.
-    pub fn replay(&self, playlist_ids: &[i64]) -> Vec<ServerMsg> {
+    /// The on-connect replay (module doc). `playlists` = every playlist in
+    /// the DB with its row's mode, in order. A recorded playlist the list
+    /// does not name (the DB read failed) follows, by id; it has no row to
+    /// read, so a state it never had is told in the default mode.
+    pub fn replay(&self, playlists: &[(i64, PlaybackMode)]) -> Vec<ServerMsg> {
         let map = self.inner.read().unwrap_or_else(PoisonError::into_inner);
-        let mut unlisted: Vec<i64> = map
+        let mut unlisted: Vec<(i64, PlaybackMode)> = map
             .keys()
             .copied()
-            .filter(|id| !playlist_ids.contains(id))
+            .filter(|id| !playlists.iter().any(|(listed, _)| listed == id))
+            .map(|id| (id, PlaybackMode::default()))
             .collect();
-        unlisted.sort_unstable();
+        unlisted.sort_unstable_by_key(|(id, _)| *id);
 
         let mut out = Vec::new();
-        for playlist_id in playlist_ids.iter().copied().chain(unlisted) {
+        for (playlist_id, row_mode) in playlists.iter().copied().chain(unlisted) {
             let entry = map.get(&playlist_id);
             let recorded = entry.and_then(|e| e.state);
             match recorded {
@@ -119,7 +123,7 @@ impl DashboardReplay {
                 _ => out.push(ServerMsg::PlaybackStateChanged {
                     playlist_id,
                     state: PlaybackState::Idle,
-                    mode: recorded.map(|(_, mode, _)| mode).unwrap_or_default(),
+                    mode: recorded.map_or(row_mode, |(_, mode, _)| mode),
                     transport: TransportState::Idle,
                 }),
             }

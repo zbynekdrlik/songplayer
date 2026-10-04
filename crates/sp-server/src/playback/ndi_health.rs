@@ -405,7 +405,7 @@ impl NdiHealthRegistry {
     }
 
     /// #167: record that the engine created one more playback pipeline. Called
-    /// from `PlaybackEngine::ensure_pipeline` at creation (once per new
+    /// from `PlaybackEngine::ensure_pipeline_inner` at creation (once per new
     /// pipeline). Feeds `created_pipelines()` — the "how many outputs must
     /// report before the wall reading is trustworthy" count.
     pub fn register_pipeline(&self) {

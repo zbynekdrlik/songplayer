@@ -823,6 +823,7 @@ above your `old_string` anchor before an Edit that adds a sibling `mod`.
 - Drive a handler with `crate::api::router(state, None)` + `tower::ServiceExt::oneshot`, as in `api/lyrics_tests.rs::send`, and assert the row / response afterwards.
 - A test that runs its OWN copy of the handler's UPDATE ("mirror the handler's SQL") can never fail on a change to the handler. #144 deleted two of these: `reprocess_video_ids_sets_manual_priority` and `reprocess_all_stale_only_flags_stale_rows`.
 - A test for a DELETED route stays useful as a regression guard. `router(state, None)` has no SPA fallback (that needs a `dist_dir`), so a removed path answers 404. Assert the harmful effect is absent FIRST, so the RED fails for the right reason, and the 404 last.
+- **Use the route's REAL method, read from `api/mod.rs`, never from a ticket's wording** (#225 unit 2). axum answers 405 for an unrouted method before the handler runs. The playlist update is `PUT /api/v1/playlists/{id}`; the ticket called it "the PATCH", and five tests sent PATCH. On the no-compile box they were "RED" for the wrong reason and could never pass. Two fresh-context review rounds missed it; the third found it by reading the route table. Before writing a router test, `grep` the path in `api/mod.rs`.
 
 ## A cross-crate test-only helper must be `#[doc(hidden)] pub`, NOT `#[cfg(test)]` (#203 2b)
 

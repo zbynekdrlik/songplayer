@@ -47,7 +47,7 @@ fn playing_snapshot(playlist_id: i64, ndi_name: &str) -> PipelineHealthSnapshot 
 fn registry_with(snapshots: Vec<PipelineHealthSnapshot>) -> Arc<NdiHealthRegistry> {
     let reg = Arc::new(NdiHealthRegistry::new());
     for s in snapshots {
-        // Mirror production: `ensure_pipeline` registers a created pipeline (#167),
+        // Mirror production: `ensure_pipeline_inner` registers a created pipeline (#167),
         // then heartbeats report it. Registering here so `created == reported`
         // makes the wall reading KNOWN (activity_known), the state these gate
         // tests assume — an empty registry stays UNKNOWN (created 0), which is the

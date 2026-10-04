@@ -18,6 +18,7 @@
 use std::time::Duration;
 
 use sp_core::models::Playlist;
+use sp_core::playback::PlaybackMode;
 use tracing::{info, warn};
 
 use super::PlaybackEngine;
@@ -93,6 +94,18 @@ pub fn ordered_active_for_startup(playlists: &[Playlist]) -> Vec<(i64, String)> 
         .collect();
     out.sort_by_key(|(id, _)| *id);
     out
+}
+
+/// #225 unit 2: the mode output `id`'s pipeline starts in at startup — its
+/// playlist row's (`db::models_playlists::row_mode`); the default for an id
+/// the list does not name.
+pub fn startup_mode(playlists: &[Playlist], id: i64) -> PlaybackMode {
+    playlists
+        .iter()
+        .find(|p| p.id == id)
+        .map_or_else(PlaybackMode::default, |p| {
+            crate::db::models_playlists::row_mode(p.id, &p.name, &p.playback_mode)
+        })
 }
 
 /// Outcome of [`wait_for_ports_free`], surfaced in the startup log.
@@ -202,7 +215,7 @@ impl PlaybackEngine {
     /// threads and shuffled the ports.
     ///
     /// mutants::skip — orchestration (real ports, threads, timeouts); the pure
-    /// pieces (`ndi_port_range`, `ordered_active_for_startup`,
+    /// pieces (`ndi_port_range`, `ordered_active_for_startup`, `startup_mode`,
     /// `wait_for_ports_free`) are unit-tested, and the box acceptance proves
     /// the stable map end-to-end.
     #[cfg_attr(test, mutants::skip)]
@@ -254,8 +267,10 @@ impl PlaybackEngine {
 
         // Serialized, id-ordered creation: create sender i, wait for it to
         // report ready (so its port is assigned) before creating sender i+1.
+        // #225 unit 2: each pipeline starts in its row's playback mode.
         for (id, name) in &ordered {
-            self.create_and_record_sender(*id, name).await;
+            let mode = startup_mode(playlists, *id);
+            self.create_and_record_sender(*id, name, mode).await;
         }
 
         // #196 item 4: the senders are ready — start the +30 s post-restart
@@ -286,15 +301,22 @@ impl PlaybackEngine {
     /// reports ready, record the advertised URL in the health registry so it
     /// shows on `/api/v1/ndi/health`. Bounded wait — a stuck/absent sender never
     /// blocks past [`SENDER_READY_TIMEOUT`]. Used by the startup serializer (in
-    /// id order) and by the runtime activate path. Returns the URL (if any).
+    /// id order) and by the runtime activate path, each passing the playlist
+    /// row's `mode` the pipeline starts in (#225 unit 2; an existing pipeline
+    /// keeps its own). Returns the URL (if any).
     ///
     /// mutants::skip — I/O orchestration (oneshot + timeout + registry write);
     /// the pure ordering/port pieces are unit-tested and the box acceptance
     /// proves the recorded map end-to-end.
     #[cfg_attr(test, mutants::skip)]
-    pub(crate) async fn create_and_record_sender(&mut self, id: i64, name: &str) -> Option<String> {
+    pub(crate) async fn create_and_record_sender(
+        &mut self,
+        id: i64,
+        name: &str,
+        mode: PlaybackMode,
+    ) -> Option<String> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.ensure_pipeline_inner(id, name, Some(tx));
+        self.ensure_pipeline_inner(id, name, mode, Some(tx));
         let url = match tokio::time::timeout(SENDER_READY_TIMEOUT, rx).await {
             Ok(Ok(u)) => u,
             Ok(Err(_)) => {
@@ -327,6 +349,26 @@ mod tests {
             is_active: true,
             ..Default::default()
         }
+    }
+
+    /// #225 unit 2: each startup output starts in its OWN row's mode.
+    #[test]
+    fn a_startup_output_starts_in_its_own_rows_mode() {
+        let with_mode = |id: i64, mode: &str| Playlist {
+            playback_mode: mode.to_string(),
+            ..pl(id, &format!("SP-{id}"))
+        };
+        let playlists = vec![
+            with_mode(1, "loop"),
+            with_mode(2, "single"),
+            with_mode(3, "shuffle"),
+        ];
+
+        assert_eq!(startup_mode(&playlists, 2), PlaybackMode::Single);
+        assert_eq!(startup_mode(&playlists, 1), PlaybackMode::Loop);
+        // An unknown stored value, and an id the list does not name.
+        assert_eq!(startup_mode(&playlists, 3), PlaybackMode::Continuous);
+        assert_eq!(startup_mode(&playlists, 9), PlaybackMode::Continuous);
     }
 
     #[test]
