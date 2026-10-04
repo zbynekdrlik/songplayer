@@ -141,6 +141,11 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
             report("Ďalšia zlyhala", r);
         });
     };
+    // #225: a refused mode change is no state change, so nothing re-applies
+    // the select's `prop:value` and the DOM keeps the operator's unsaved pick.
+    // Bumping this on a refusal re-runs that closure, which writes the told
+    // mode back into the select.
+    let mode_refused = RwSignal::new(0_u32);
     let on_mode = move |ev: leptos::ev::Event| {
         let val = event_target_value(&ev);
         let mode = PlaybackMode::from_str_lossy(&val);
@@ -149,6 +154,9 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
         };
         leptos::task::spawn_local(async move {
             let r = api::put_json_empty(&format!("/api/v1/playback/{pid}/mode"), &body).await;
+            if r.is_err() {
+                mode_refused.update(|n| *n = n.wrapping_add(1));
+            }
             report("Zmena režimu zlyhala", r);
         });
     };
@@ -418,7 +426,10 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                     title="Režim prehrávania"
                     // #225 review round 4: "—", disabled, until the mode is
                     // told — never the default "Plynulo" as if it were known.
-                    prop:value=move || player_view::mode_value(state_known.get(), mode()).to_string()
+                    prop:value=move || {
+                        mode_refused.track();
+                        player_view::mode_value(state_known.get(), mode()).to_string()
+                    }
                     prop:disabled=move || !state_known.get()
                     on:change=on_mode
                 >
