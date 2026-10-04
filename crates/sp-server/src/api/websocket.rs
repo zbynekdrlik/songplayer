@@ -59,18 +59,7 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
     // mid-song sees the playing card immediately, instead of Idle until the
     // next transition (#15 live preview + karaoke panel key off this state).
     {
-        let modes: HashMap<i64, PlaybackMode> =
-            match crate::db::models::get_active_playlists(&state.pool).await {
-                Ok(playlists) => playlists
-                    .into_iter()
-                    .map(|p| (p.id, PlaybackMode::from_str_lossy(&p.playback_mode)))
-                    .collect(),
-                Err(e) => {
-                    warn!("playback-state replay: failed to load playlist modes: {e}");
-                    HashMap::new()
-                }
-            };
-        let msgs = playback_state_replay(&state.ndi_health_registry.snapshots(), &modes);
+        let msgs = on_connect_replay(&state).await;
         debug!(
             count = msgs.len(),
             "replaying playback state to new WS client"
@@ -233,6 +222,24 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
             let _ = state.event_tx.send(ServerMsg::Pong);
         }
     }
+}
+
+/// The messages a newly connected dashboard is sent first, after the OBS and
+/// tools status: the per-playlist playback state (#225: one function, so a
+/// test can read what a new client is told).
+pub(crate) async fn on_connect_replay(state: &AppState) -> Vec<ServerMsg> {
+    let modes: HashMap<i64, PlaybackMode> =
+        match crate::db::models::get_active_playlists(&state.pool).await {
+            Ok(playlists) => playlists
+                .into_iter()
+                .map(|p| (p.id, PlaybackMode::from_str_lossy(&p.playback_mode)))
+                .collect(),
+            Err(e) => {
+                warn!("playback-state replay: failed to load playlist modes: {e}");
+                HashMap::new()
+            }
+        };
+    playback_state_replay(&state.ndi_health_registry.snapshots(), &modes)
 }
 
 /// Map an NDI-health snapshot's [`PlaybackStateLabel`] to the wire
