@@ -463,7 +463,12 @@ pub enum BenchOutcome {
 /// Run one bench of `path` on its own decode thread and wait for the
 /// report. `slot` is moved to the thread and dropped there before the
 /// report is sent, so the bench is free by the time the caller answers.
+///
+/// mutants::skip: `cfg(windows)`, so the Linux mutation runner never
+/// compiles it and every mutant would build and survive. The Windows job's
+/// router tests (`api/diag_tests.rs`) run it on the real decoder.
 #[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
 pub async fn run(path: PathBuf, file: String, max_wall: Duration, slot: BenchSlot) -> BenchOutcome {
     use crate::playback::decode_thread::spawn_decode_thread;
 
