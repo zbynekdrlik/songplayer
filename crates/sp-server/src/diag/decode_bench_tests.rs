@@ -624,14 +624,15 @@ fn the_report_serializes_to_the_documented_json() {
 fn the_end_log_line_names_the_stats_and_the_gate() {
     assert_eq!(
         clean_report().summary(),
-        "file=av1_4k.mp4 3840x2176 codec=AV01 frames=2 wall_ms=15000 ended=TimeLimit \
+        "file=av1_4k.mp4 3840x2176 codec=AV01 fps=29.970 open_ms=120 frames=2 \
+         wall_ms=15000 ended=TimeLimit \
          mean_us=16683 p50_us=16366 p99_us=17000 max_us=17000 \
          frame_period_us=33367 mean_over_half_period=false"
     );
     let failed = BenchReport::open_failed("x.mp4", "open: no video".to_string(), 3, None);
     assert_eq!(
         failed.summary(),
-        "file=x.mp4 0x0 codec=? frames=0 wall_ms=0 ended=Error \
+        "file=x.mp4 0x0 codec=? fps=? open_ms=3 frames=0 wall_ms=0 ended=Error \
          mean_us=0 p50_us=0 p99_us=0 max_us=0 budget=unknown error=open: no video"
     );
 }

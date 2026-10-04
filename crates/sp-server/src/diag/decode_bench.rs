@@ -445,8 +445,13 @@ impl BenchReport {
         self.error.is_some()
     }
 
-    /// The text of the run's end log line.
+    /// The text of the run's end log line: the stream (size, codec, fps,
+    /// the open), the run and its stats, the gate, and the error if any.
     pub fn summary(&self) -> String {
+        let fps = match self.source_fps {
+            Some(fps) => format!("{fps:.3}"),
+            None => "?".to_string(),
+        };
         let budget = match self.budget {
             Some(b) => format!(
                 "frame_period_us={} mean_over_half_period={}",
@@ -459,12 +464,13 @@ impl BenchReport {
             None => String::new(),
         };
         format!(
-            "file={} {}x{} codec={} frames={} wall_ms={} ended={:?} \
+            "file={} {}x{} codec={} fps={fps} open_ms={} frames={} wall_ms={} ended={:?} \
              mean_us={} p50_us={} p99_us={} max_us={} {budget}{error}",
             self.file,
             self.width,
             self.height,
             self.codec.as_deref().unwrap_or("?"),
+            self.open_ms,
             self.frames,
             self.wall_ms,
             self.ended,

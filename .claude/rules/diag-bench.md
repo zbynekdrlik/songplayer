@@ -58,8 +58,10 @@ Answers:
 - **500:** the report of a run the decoder ended, at open or mid-run. It
   carries `error` and the pictures decoded so far.
 - **400:** a bad name, or `seconds` out of range.
-- **422:** a body that is not the two fields (one missing, a negative or a
-  fractional `seconds`): axum's JSON rejection.
+- From axum, before the handler runs (NOT logged): **400** for a body that is
+  not JSON, **422** for one that is not the two fields (one missing, a
+  negative or a fractional `seconds`), **415** without
+  `Content-Type: application/json`.
 - **404:** no such sample. The body names the path it looked at.
 - **409:** a run is in progress. One run at a time per process. A 409 that
   never clears means the decoder hangs inside `open` or `next_frame`: the
@@ -129,10 +131,13 @@ failed`).
 
 **Logs:**
 
-- one INFO `decode-bench: start` (file, bytes, size, codec, fps, open_ms,
-  priority);
-- at the end, one INFO `decode-bench: done: <summary>`, or a WARN when a
-  decoder error ended the run;
+- one INFO `decode-bench: start` (file, bytes, `max_wall_s`, priority),
+  logged BEFORE the open, so a run that wedges inside it still names its
+  file;
+- at the end, one INFO `decode-bench: done: <summary>` (size, codec, fps,
+  `open_ms`, the stats, the gate), or a WARN when a decoder error ended the
+  run (a file that does not open: WARN `decode-bench: the file did not
+  open`);
 - one INFO `decode-bench: no report` for every 400 / 404 / 409 / 501
   refusal, and one WARN `decode-bench: the run failed` for a 500 without a
   report.

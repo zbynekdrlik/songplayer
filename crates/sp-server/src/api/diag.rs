@@ -6,12 +6,16 @@
 //! and answers what one picture costs (`diag::decode_bench`):
 //!
 //! - 200: the report;
-//! - 500: the report of a run the decoder ended, with its error and the
-//!   pictures decoded so far;
+//! - 500 (JSON): the report of a run the decoder ended, with its error and
+//!   the pictures decoded so far;
+//! - 500 (text): a run with no report, its thread did not start or panicked;
 //! - 400: a `file` that is not a bare name, or `seconds` outside 1..=15;
 //! - 404: no such file in the sample dir;
 //! - 409: another run is in progress;
 //! - 501: a build without Media Foundation (Linux).
+//!
+//! axum answers a body that is not JSON (400), not the two fields (422) or
+//! not `application/json` (415) before this handler runs.
 
 use axum::Json;
 use axum::extract::State;

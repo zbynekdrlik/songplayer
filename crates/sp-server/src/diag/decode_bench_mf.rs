@@ -23,6 +23,15 @@ use super::decode_bench::{BenchReport, StreamFacts, measure};
 pub(crate) fn bench_file(path: &Path, file: &str, max_wall: Duration) -> BenchReport {
     let thread_priority = Some(current_thread_priority());
     let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    // Logged BEFORE the open, so a run that wedges inside it (a 409 that
+    // never clears) still names its file in the log.
+    info!(
+        file,
+        bytes,
+        max_wall_s = max_wall.as_secs(),
+        thread_priority = thread_priority.unwrap_or_default(),
+        "decode-bench: start"
+    );
     let opening = Instant::now();
     let opened = MediaFoundationVideoReader::open(path);
     let open_ms = u64::try_from(opening.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -44,18 +53,7 @@ pub(crate) fn bench_file(path: &Path, file: &str, max_wall: Duration) -> BenchRe
         },
         codec: reader.codec(),
     };
-    info!(
-        file,
-        bytes,
-        width = facts.width,
-        height = facts.height,
-        codec = facts.codec.as_deref().unwrap_or("?"),
-        frame_rate = ?facts.frame_rate,
-        open_ms,
-        max_wall_s = max_wall.as_secs(),
-        thread_priority = thread_priority.unwrap_or_default(),
-        "decode-bench: start"
-    );
+    // Size, codec, fps and the open's ms are on the end line (`summary`).
     let start = Instant::now();
     let run = measure(&mut reader, max_wall, || start.elapsed());
     // The reader is dropped on the thread that opened it (COM STA).
