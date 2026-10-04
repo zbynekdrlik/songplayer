@@ -1,7 +1,8 @@
 //! #225 unit 2: a playlist's playback mode has ONE persisted truth, its
 //! `playlists.playback_mode` row. A pipeline starts in its row's mode; a
 //! mode change from the dashboard (the REST mode route) or the playlist
-//! PATCH writes the row FIRST and then reaches the running engine, which
+//! update (`PUT /api/v1/playlists/{id}`) writes the row FIRST and then
+//! reaches the running engine, which
 //! tells the dashboards; a mode the row could not take changes nothing.
 //!
 //! Real in-memory SQLite, the real router (`crate::api::router`), and the
@@ -28,7 +29,7 @@ use crate::{AppState, EngineCommand};
 
 const ROW_SINGLE: i64 = 22_530;
 const SAVED: i64 = 22_531;
-const PATCHED: i64 = 22_532;
+const UPDATED: i64 = 22_532;
 const UNKNOWN_IN_ROW: i64 = 22_533;
 const NO_PIPELINE: i64 = 22_534;
 const REFUSED: i64 = 22_535;
@@ -259,36 +260,36 @@ async fn a_dashboard_mode_change_is_saved_and_a_fresh_engine_starts_in_it() {
 }
 
 #[tokio::test]
-async fn a_patch_of_the_mode_reaches_the_running_engine_and_is_broadcast() {
+async fn a_playlist_update_of_the_mode_reaches_the_running_engine_and_is_broadcast() {
     let (state, mut engine_rx) = test_state_with_engine_rx().await;
-    insert(&state.pool, PATCHED, "continuous", true).await;
+    insert(&state.pool, UPDATED, "continuous", true).await;
     let (mut engine, mut ws_rx, _resolume_rx) = engine_on(&state);
-    engine.ensure_pipeline_for_playlist(PATCHED).await;
+    engine.ensure_pipeline_for_playlist(UPDATED).await;
 
     let status = send(
         &state,
-        "PATCH",
-        &format!("/api/v1/playlists/{PATCHED}"),
+        "PUT",
+        &format!("/api/v1/playlists/{UPDATED}"),
         Some(serde_json::json!({ "playback_mode": "loop" })),
     )
     .await;
 
     assert_eq!(status, StatusCode::NO_CONTENT);
-    assert_eq!(stored(&state.pool, PATCHED).await, "loop");
+    assert_eq!(stored(&state.pool, UPDATED).await, "loop");
     deliver(&mut engine, &mut engine_rx).await;
     assert_eq!(
-        mode_of(&engine, PATCHED),
+        mode_of(&engine, UPDATED),
         Some(PlaybackMode::Loop),
-        "the running engine plays the patched mode"
+        "the running engine plays the updated mode"
     );
     assert_eq!(
-        states_told(&mut ws_rx, PATCHED),
-        vec![idle(PATCHED, PlaybackMode::Loop)],
+        states_told(&mut ws_rx, UPDATED),
+        vec![idle(UPDATED, PlaybackMode::Loop)],
         "the open dashboards are told it"
     );
     assert_eq!(
-        replay_of(&state, PATCHED).await,
-        vec![idle(PATCHED, PlaybackMode::Loop)],
+        replay_of(&state, UPDATED).await,
+        vec![idle(UPDATED, PlaybackMode::Loop)],
         "and so is the next dashboard that connects"
     );
 }
@@ -372,16 +373,16 @@ async fn an_unknown_mode_is_refused_and_nothing_changes() {
         Some(serde_json::json!({ "mode": "shuffle" })),
     )
     .await;
-    let patch = send(
+    let update = send(
         &state,
-        "PATCH",
+        "PUT",
         &format!("/api/v1/playlists/{REFUSED}"),
         Some(serde_json::json!({ "playback_mode": "shuffle" })),
     )
     .await;
 
     assert_eq!(put, StatusCode::BAD_REQUEST);
-    assert_eq!(patch, StatusCode::BAD_REQUEST);
+    assert_eq!(update, StatusCode::BAD_REQUEST);
     assert_eq!(stored(&state.pool, REFUSED).await, "single");
     assert!(engine_rx.try_recv().is_err(), "the engine is told nothing");
     deliver(&mut engine, &mut engine_rx).await;
@@ -509,22 +510,23 @@ async fn a_changed_mode_is_stored_by_its_canonical_name() {
     assert_eq!(put, StatusCode::NO_CONTENT);
     assert_eq!(stored(&state.pool, CANONICAL).await, "single");
 
-    let patch = send(
+    let update = send(
         &state,
-        "PATCH",
+        "PUT",
         &format!("/api/v1/playlists/{CANONICAL}"),
         Some(serde_json::json!({ "playback_mode": "LOOP" })),
     )
     .await;
-    assert_eq!(patch, StatusCode::NO_CONTENT);
+    assert_eq!(update, StatusCode::NO_CONTENT);
     assert_eq!(stored(&state.pool, CANONICAL).await, "loop");
 }
 
-/// Review round 1: `MODE_ORDER` — a mode change (the PUT, the PATCH) waits
-/// while another is between writing its row and telling the engine, so the
-/// engine is told the changes in the order the row took them. "Must not
-/// finish yet" is the safe direction: correct code can never finish while
-/// the order is held; a slow runner only makes it pass vacuously.
+/// Review round 1: `MODE_ORDER` — a mode change (the mode route, the
+/// playlist update) waits while another is between writing its row and
+/// telling the engine, so the engine is told the changes in the order the
+/// row took them. "Must not finish yet" is the safe direction: correct code
+/// can never finish while the order is held; a slow runner only makes it
+/// pass vacuously.
 #[tokio::test]
 async fn a_mode_change_waits_while_another_is_written_and_told() {
     let (state, mut engine_rx) = test_state_with_engine_rx().await;
@@ -538,7 +540,7 @@ async fn a_mode_change_waits_while_another_is_written_and_told() {
             "single",
         ),
         (
-            "PATCH",
+            "PUT",
             format!("/api/v1/playlists/{ORDERED}"),
             serde_json::json!({ "playback_mode": "loop" }),
             "loop",
@@ -552,14 +554,21 @@ async fn a_mode_change_waits_while_another_is_written_and_told() {
             tokio::time::timeout(Duration::from_millis(200), &mut change)
                 .await
                 .is_err(),
-            "the {method} waits for the change in flight"
+            "the {method} {uri} waits for the change in flight"
         );
-        assert_eq!(stored(&state.pool, ORDERED).await, before, "{method}");
-        assert!(engine_rx.try_recv().is_err(), "{method}: nothing told yet");
+        assert_eq!(stored(&state.pool, ORDERED).await, before, "{method} {uri}");
+        assert!(
+            engine_rx.try_recv().is_err(),
+            "{method} {uri}: nothing told yet"
+        );
 
         drop(in_flight);
-        assert_eq!(change.await.unwrap(), StatusCode::NO_CONTENT, "{method}");
-        assert_eq!(stored(&state.pool, ORDERED).await, row, "{method}");
+        assert_eq!(
+            change.await.unwrap(),
+            StatusCode::NO_CONTENT,
+            "{method} {uri}"
+        );
+        assert_eq!(stored(&state.pool, ORDERED).await, row, "{method} {uri}");
         assert!(
             matches!(
                 engine_rx.try_recv(),
@@ -568,9 +577,9 @@ async fn a_mode_change_waits_while_another_is_written_and_told() {
                     ..
                 })
             ),
-            "{method}: then the engine is told"
+            "{method} {uri}: then the engine is told"
         );
-        // The PATCH's EnsurePipeline.
+        // The playlist update's EnsurePipeline.
         while engine_rx.try_recv().is_ok() {}
     }
 }
@@ -608,10 +617,10 @@ async fn a_delete_waits_while_a_mode_change_is_written_and_told() {
 /// before the write. A guard dropped at once (`let _ = MODE_ORDER.lock()`)
 /// would let a DELETE's `RemovePipeline` overtake a mode's `SetMode`, and the
 /// engine would record the deleted playlist for the replay. The engine's
-/// channel is filled first, so each change (the PUT, the PATCH, the DELETE)
-/// blocks in its tell after its write; while it does, the order must still be
-/// held. Another test holding it only makes the check pass vacuously; correct
-/// code can never fail it.
+/// channel is filled first, so each change (the mode route, the playlist
+/// update, the DELETE) blocks in its tell after its write; while it does,
+/// the order must still be held. Another test holding it only makes the
+/// check pass vacuously; correct code can never fail it.
 #[tokio::test]
 async fn the_order_is_held_until_the_engine_is_told() {
     let (state, mut engine_rx) = test_state_with_engine_rx().await;
@@ -631,7 +640,7 @@ async fn the_order_is_held_until_the_engine_is_told() {
             Some(serde_json::json!({ "mode": "single" })),
         ),
         (
-            "PATCH",
+            "PUT",
             format!("/api/v1/playlists/{HELD_THROUGH}"),
             Some(serde_json::json!({ "playback_mode": "loop" })),
         ),
@@ -658,15 +667,19 @@ async fn the_order_is_held_until_the_engine_is_told() {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(written, "the {method} writes its row");
+        assert!(written, "the {method} {uri} writes its row");
         assert!(
             crate::api::routes_mode::MODE_ORDER.try_lock().is_err(),
-            "the {method} still holds the order while it tells the engine"
+            "the {method} {uri} still holds the order while it tells the engine"
         );
 
         // Free the channel: the tell goes out and the change finishes.
         while engine_rx.try_recv().is_ok() {}
-        assert_eq!(change.await.unwrap(), StatusCode::NO_CONTENT, "{method}");
+        assert_eq!(
+            change.await.unwrap(),
+            StatusCode::NO_CONTENT,
+            "{method} {uri}"
+        );
         while engine_rx.try_recv().is_ok() {}
     }
 }
