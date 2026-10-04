@@ -37,6 +37,7 @@ const NO_SUCH_PLAYLIST: i64 = 22_537;
 const ORDERED: i64 = 22_540;
 const DELETED_IN_ORDER: i64 = 22_541;
 const CANONICAL: i64 = 22_543;
+const HELD_THROUGH: i64 = 22_544;
 
 /// The engine under test, the channel it tells the dashboard on, and the
 /// Resolume channel's receiver (kept alive by the test).
@@ -601,4 +602,71 @@ async fn a_delete_waits_while_a_mode_change_is_written_and_told() {
     drop(in_flight);
     assert_eq!(delete.await.unwrap(), StatusCode::NO_CONTENT);
     assert_eq!(rows(&state.pool, DELETED_IN_ORDER).await, 0);
+}
+
+/// Review round 2: `MODE_ORDER` is held THROUGH the tell, not only taken
+/// before the write. A guard dropped at once (`let _ = MODE_ORDER.lock()`)
+/// would let a DELETE's `RemovePipeline` overtake a mode's `SetMode`, and the
+/// engine would record the deleted playlist for the replay. The engine's
+/// channel is filled first, so each change (the PUT, the PATCH, the DELETE)
+/// blocks in its tell after its write; while it does, the order must still be
+/// held. Another test holding it only makes the check pass vacuously; correct
+/// code can never fail it.
+#[tokio::test]
+async fn the_order_is_held_until_the_engine_is_told() {
+    let (state, mut engine_rx) = test_state_with_engine_rx().await;
+    insert(&state.pool, HELD_THROUGH, "continuous", false).await;
+    let row = |pool: SqlitePool| async move {
+        sqlx::query_scalar::<_, String>("SELECT playback_mode FROM playlists WHERE id = ?")
+            .bind(HELD_THROUGH)
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+    };
+
+    let changes = [
+        (
+            "PUT",
+            format!("/api/v1/playback/{HELD_THROUGH}/mode"),
+            Some(serde_json::json!({ "mode": "single" })),
+        ),
+        (
+            "PATCH",
+            format!("/api/v1/playlists/{HELD_THROUGH}"),
+            Some(serde_json::json!({ "playback_mode": "loop" })),
+        ),
+        ("DELETE", format!("/api/v1/playlists/{HELD_THROUGH}"), None),
+    ];
+    for (method, uri, body) in changes {
+        // A full engine channel: the change's tell waits for a free slot.
+        while state
+            .engine_tx
+            .try_send(EngineCommand::Skip {
+                playlist_id: HELD_THROUGH,
+            })
+            .is_ok()
+        {}
+        let before = row(state.pool.clone()).await;
+        let change = spawn_request(&state, method, &uri, body);
+
+        // Its write lands first (bounded: 10 s).
+        let mut written = false;
+        for _ in 0..1_000 {
+            if row(state.pool.clone()).await != before {
+                written = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(written, "the {method} writes its row");
+        assert!(
+            crate::api::routes_mode::MODE_ORDER.try_lock().is_err(),
+            "the {method} still holds the order while it tells the engine"
+        );
+
+        // Free the channel: the tell goes out and the change finishes.
+        while engine_rx.try_recv().is_ok() {}
+        assert_eq!(change.await.unwrap(), StatusCode::NO_CONTENT, "{method}");
+        while engine_rx.try_recv().is_ok() {}
+    }
 }
