@@ -50,12 +50,17 @@ sender path runs.
    read its `SpoutDX_SOURCES` / `SpoutDX_HEADERS`: if the list changed, change
    this folder and `build.rs` to match.
 2. Copy the files over these, unmodified, and the root `LICENSE`.
-3. `diff` the new `spoutDX::SendTexture`, `CheckSender`, `SetSenderName`,
-   `ReleaseSender`, `OpenDirectX11` / `CloseDirectX11`, and
+3. `diff` everything the shim (`src/win/spout_shim.cpp`) calls against the
+   facts in `.claude/rules/gpu-max.md`: `spoutDX::SendTexture`,
+   `CheckSender`, `SetSenderName`, `GetName`, `IsInitialized`,
+   `ReleaseSender`, `GetWidth` / `GetHeight`, `OpenDirectX11` /
+   `CloseDirectX11`, the public member `spoutDX::sendernames`, and
    `spoutSenderNames::CreateSender` / `RegisterSenderName` /
-   `ReleaseSenderName` / `CleanSenders` against the facts in
-   `.claude/rules/gpu-max.md` (the shim and `src/spout.rs` rely on them),
-   and the `SharedTextureInfo` layout and the `SpoutSenderNames` map format
+   `ReleaseSenderName` / `CleanSenders` / `GetSenderNames` /
+   `FindSenderName` / `FindSender(const char*)` (upstream marks the last
+   "Used for testing - may be removed"; its this-object-only meaning is what
+   keeps a refusal from releasing another sender's name). Also the
+   `SharedTextureInfo` layout and the `SpoutSenderNames` map format
    (`src/spout.rs` parses them).
 4. Update the version here and in `.claude/rules/gpu-max.md`; the WARP tests
    in `tests/spout.rs` are the gate (CI, `Build (Windows)`).

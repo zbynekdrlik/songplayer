@@ -4,9 +4,10 @@
 //! `SP-program-MAX` reaches Resolume Arena as a Spout sender: the vendored
 //! Spout2 SDK 2.007.017 (SpoutDX `SendTexture`, `vendor/spout2`) shares the
 //! compositor's render target. Arena lists it as `SPOUT_SP-program-MAX`
-//! (#223 M0). Everything decided about it lives here and is tested on Linux;
-//! `win/spout_sender.rs` and `win/spout_registry.rs` only call the shim and
-//! Win32.
+//! (#223 M0). Everything decided about it lives here and in
+//! [`spout_state`](crate::spout_state) (the sender's registration), tested on
+//! Linux; `win/spout_sender.rs` and `win/spout_registry.rs` only call the
+//! shim and Win32.
 //!
 //! The registry is what every Spout receiver reads:
 //!
@@ -58,14 +59,8 @@ const BACKSLASH: &str = "holds a backslash (no kernel object name may)";
 pub(crate) mod status {
     /// Done.
     pub const OK: i32 = 0;
-    /// A live sender holds the name.
-    pub const NAME_TAKEN: i32 = 1;
-    /// At the first send Spout registered another name.
-    pub const RENAMED: i32 = 2;
-    /// At the first send Spout did not list the sender.
-    pub const NOT_LISTED: i32 = 6;
-    /// The first send failed; Spout's half-made registration was released.
-    pub const FIRST_SEND_FAILED: i32 = 7;
+    /// `claim_name`: Spout renamed the sender, a live sender holds the name.
+    pub const RENAMED: i32 = 1;
 }
 
 /// `name` as the NUL-terminated string Spout takes, if Spout can carry it:
@@ -173,27 +168,17 @@ impl SharedTextureInfo {
     }
 }
 
-/// The result of a shim call that returned `code`: `Ok` for
-/// [`status::OK`], [`GpuError::SpoutNameTaken`] at create,
-/// [`GpuError::SpoutNotRegistered`] (with why) for the first send's three
-/// refusals (`name` is the name asked for), else [`GpuError::Spout`] with
-/// `call` and the code.
+/// The result of a shim call (`spout_sender_open`, `claim_name`, `refuse`)
+/// that returned `code`: `Ok` for [`status::OK`],
+/// [`GpuError::SpoutNameTaken`] for [`status::RENAMED`] (`name` is the name
+/// asked for), else [`GpuError::Spout`] with `call` and the code.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn status_result(code: i32, call: &'static str, name: &str) -> Result<(), GpuError> {
-    let not_registered = |why| GpuError::SpoutNotRegistered {
-        name: name.to_owned(),
-        why,
-    };
     match code {
         status::OK => Ok(()),
-        status::NAME_TAKEN => Err(GpuError::SpoutNameTaken {
+        status::RENAMED => Err(GpuError::SpoutNameTaken {
             name: name.to_owned(),
         }),
-        status::RENAMED => Err(not_registered(
-            "another sender took the name before its first send",
-        )),
-        status::NOT_LISTED => Err(not_registered("Spout's sender list is full")),
-        status::FIRST_SEND_FAILED => Err(not_registered("its first send failed")),
         _ => Err(GpuError::Spout {
             call,
             code: code as u32,

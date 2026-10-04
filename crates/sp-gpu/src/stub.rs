@@ -1,15 +1,17 @@
 //! The compositor and the Spout sender off Windows: there is no Direct3D 11
 //! and no Spout, so neither is ever built. They have the portable part of
 //! the Windows API (`new`, `new_warp`, `compose`, `read_back`, `adapter`;
-//! the sender's `new`, `send`, `size`, `name`; the registry readers), so a
-//! cross-platform caller compiles everywhere. The Direct3D accessors
-//! (`device`, `render_target`, `shared_handle`), the test constructors
-//! `new_on_listed_adapter` / `with_name` and `adapters()` are Windows-only.
+//! the sender's `new`, `send`, `size`, `name`, `registration`; the registry
+//! readers), so a cross-platform caller compiles everywhere. The Direct3D
+//! accessors (`device`, `render_target`, `shared_handle`), the test
+//! constructors `new_on_listed_adapter` / `with_name` and `adapters()` are
+//! Windows-only.
 
 use crate::adapter::AdapterInfo;
 use crate::composition::Composition;
 use crate::error::GpuError;
 use crate::spout::SharedTextureInfo;
+use crate::spout_state::Registration;
 use crate::stats::{ComposeStats, SpoutSendStats};
 
 /// Off Windows the compositor cannot be built: [`Compositor::new`] and
@@ -77,6 +79,12 @@ impl SpoutSender {
     /// Never runs (no value exists). `mutants::skip`: as `new`.
     #[cfg_attr(test, mutants::skip)]
     pub fn name(&self) -> &str {
+        match *self {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `new`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn registration(&self) -> Registration {
         match *self {}
     }
 }

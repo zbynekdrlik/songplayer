@@ -209,49 +209,24 @@ fn the_share_handle_is_sign_extended_as_spout_opens_it() {
 
 #[test]
 fn the_shim_s_codes_map_to_their_errors() {
-    assert_eq!(status_result(status::OK, "spout_sender_send", "n"), Ok(()));
+    assert_eq!(status_result(status::OK, "spout_sender_open", "n"), Ok(()));
     assert_eq!(
-        status_result(status::NAME_TAKEN, "spout_sender_create", "SP-program-MAX"),
+        status_result(status::RENAMED, "spout_sender_claim_name", "SP-program-MAX"),
         Err(GpuError::SpoutNameTaken {
             name: "SP-program-MAX".to_owned()
         })
     );
-    let not_registered = |code, why| {
+    for code in [2, 3, 4, 5, 99, -1] {
         assert_eq!(
-            status_result(code, "spout_sender_send", "SP-program-MAX"),
-            Err(GpuError::SpoutNotRegistered {
-                name: "SP-program-MAX".to_owned(),
-                why
-            }),
-            "code {code}"
-        );
-    };
-    not_registered(
-        status::RENAMED,
-        "another sender took the name before its first send",
-    );
-    not_registered(status::NOT_LISTED, "Spout's sender list is full");
-    not_registered(status::FIRST_SEND_FAILED, "its first send failed");
-    for code in [3, 4, 5, 99] {
-        assert_eq!(
-            status_result(code, "spout_sender_send", "n"),
+            status_result(code, "spout_sender_refuse", "n"),
             Err(GpuError::Spout {
-                call: "spout_sender_send",
+                call: "spout_sender_refuse",
                 code: code as u32
             })
         );
     }
     // The codes the shim (spout_shim.cpp) returns.
-    assert_eq!(
-        [
-            status::OK,
-            status::NAME_TAKEN,
-            status::RENAMED,
-            status::NOT_LISTED,
-            status::FIRST_SEND_FAILED
-        ],
-        [0, 1, 2, 6, 7]
-    );
+    assert_eq!([status::OK, status::RENAMED], [0, 1]);
 }
 
 #[test]

@@ -47,6 +47,7 @@ mod readback;
 pub mod reference;
 mod residency;
 mod spout;
+pub mod spout_state;
 mod stats;
 
 #[cfg(not(windows))]

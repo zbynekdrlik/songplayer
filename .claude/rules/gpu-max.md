@@ -169,10 +169,12 @@ anchors are on #223 (comment 5984577044).
   a Spout 2.007.017 sender as category "Spout Servers", idstring
   **`SPOUT_SP-program-MAX`** (M0, 5980720789).
 - `SpoutSender::new(&Compositor)` → `send()` after each `compose()`, on the
-  same thread (both use the device's immediate context) →
-  `SpoutSendStats { send_us }`. `with_name` is doc-hidden, for tests. The
-  sender is `Send` (an `unsafe impl` with its SAFETY note: spoutDX has no
-  thread affinity between calls), not `Sync`.
+  same thread → `SpoutSendStats { send_us }`. `with_name` is doc-hidden, for
+  tests. `registration()` says where it is (`spout_state::Registration`).
+- **Not `Send`.** It drives the compositor's immediate context (spoutDX
+  takes it with `GetImmediateContext`), which is not thread-safe, and the
+  `Compositor` is `Send`: a `Send` sender would let safe code send on one
+  thread while another composes. S2 builds both on `program-max`.
 - `SendTexture` copies the render target into Spout's OWN shared texture
   (`CreateSharedDX11Texture`: `MISC_SHARED`, not keyed, a legacy handle)
   under the named mutex `<name>_SpoutAccessMutex`, then `Flush`es. If a
@@ -182,30 +184,38 @@ anchors are on #223 (comment 5984577044).
   the texture's size and format). Before that `spout_sender_info` is `None`.
 - `spoutDX::OpenDirectX11(device)` keeps the device pointer WITHOUT AddRef
   (and AddRefs the immediate context). So `SpoutSender` holds its own clones
-  of the device and the render target and releases the shim first in
-  `Drop`. It may outlive the `Compositor` value; S2 drops both on a lost
-  device.
+  of the device and the render target, and its `Shim` field (declared
+  first) releases the spoutDX before them. It may outlive the `Compositor`
+  value; S2 drops both on a lost device.
+- **The shim is primitives; the decisions are `src/spout_state.rs`**, pure
+  and Linux-tested (the mutation gate sees them). `spout_shim.cpp` only does
+  one SpoutDX step per call: `open` (+ Spout's own `CleanSenders`), `listed`
+  (yes / no / unreadable), `claim_name` (`SetSenderName`: kept or renamed),
+  `send` (`SendTexture`), `state` (`IsInitialized`, the name kept),
+  `refuse` (release), `size`, `release`.
 - **A second sender with the same name is REFUSED** (Spout would rename it
-  `SP-program-MAX_1`, which Arena's layer never shows):
-  - `new` refuses a name that a live sender has listed
-    (`GpuError::SpoutNameTaken`), after Spout's own `CleanSenders` drops
-    names whose sender crashed (their info map is gone);
-  - the first `send` refuses when Spout registered another name (a sender
-    took ours in between), did not list it (Spout's list is full, 64 by
-    default), or failed: `GpuError::SpoutNotRegistered { why }`. The shim
-    releases what that send registered at once (`ReleaseSender`, plus a
-    half-made registration whose info map this sender made), and the sender
-    never sends again: drop it and make a new one. A failed FIRST send is
-    terminal because a retry would meet its own half-made registration and
-    be renamed `_1`; a later failed send (`GpuError::Spout`, code 3) is one
-    lost frame.
-  - A names list the shim cannot read at the first send (its 67 ms lock) is
-    checked again at the next send, never taken as "not listed".
-- Spout's own race: a sender registers its name, then creates its info map;
-  another program's `CleanSenders` in that window drops the name. Our first
-  send then reports `SpoutNotRegistered` (the shim checks the list), and S2
-  drops and recreates the sender. `tests/spout.rs` takes one lock so its
-  tests never race each other.
+  `SP-program-MAX_1`, which Arena's layer never shows), and a refusal is for
+  good (`Registration::Refused(why)`: every later send returns it):
+  - at create (`spout_state::claim`): a listed name, or one Spout renames
+    while claiming it → `GpuError::SpoutNameTaken`; Spout's `CleanSenders`
+    first drops names whose sender crashed (their info map is gone);
+  - before the first send (`before_send`): a name another sender listed
+    since → `SpoutNotRegistered { why: TAKEN }`, BEFORE Spout can register
+    `_1` (or, with a full list, take over that sender's map);
+  - after the first send (`after_send`): registered under another name →
+    `TAKEN`; not in the list → `NOT_LISTED` (its list is full, or another
+    program's `CleanSenders` dropped it mid-registration); not registered
+    at all (`SendTexture` failed or threw with no registration) →
+    `REGISTRATION_FAILED`. A failed first send is terminal because a retry
+    would meet its own half-made registration and be renamed `_1`.
+  - A refusal calls the shim's `refuse`: `ReleaseSender` (a completed
+    registration and its texture), plus a half-made registration whose info
+    map THIS sender made (`FindSender` looks only at this object's maps),
+    never another sender's listing. Drop it and make a new sender.
+- A list that cannot be read at the first send (its 67 ms lock) leaves the
+  sender `Unconfirmed`; the next send checks again. A confirmed sender's
+  send reads nothing (no lock per frame): it shares, or loses one frame
+  (`GpuError::Spout`, code 3 or 4).
 - Names: 1..=228 bytes of printable ASCII, no `\` (`check_sender_name`;
   the shim checks the length and the backslash again). A sender Spout
   renames to `<name>_<n>` (≤ 11 more bytes) gets `<name>_<n>_Count_Semaphore`
@@ -216,8 +226,8 @@ anchors are on #223 (comment 5984577044).
   context reference.
 - After every send, `GetDeviceRemovedReason`: a lost device is
   `GpuError::DeviceLost`, as in `compose`.
-- `create` and `send` catch every C++ exception (`GpuError::Spout`, code
-  4), `size` cannot throw, and `release` runs `~spoutDX` (a throw in a
+- Every shim call that can throw catches every C++ exception (code 4);
+  `size` / `state` cannot throw; `release` runs `~spoutDX` (a throw in a
   destructor terminates, it never unwinds): nothing unwinds into Rust.
 
 ### Spout's registry (`spout_sender_names`, `spout_sender_info`)
@@ -251,10 +261,15 @@ error. A map that is not committed memory, or a sender's map shorter than a
   copy, and the compositor's `read_back` `Map` waits for it, so the second
   device reads a finished copy;
 - a listed name is refused at create, and no `_1` sender appears;
-- a sender that loses its name before its first send is refused, twice,
-  with no `_1` left, and the winner stays listed;
-- the sender keeps sending after the `Compositor` is dropped, from
-  another thread (its own references; `Send`);
+- a sender whose name another sender listed before its first send is
+  refused before Spout registers it (`TAKEN`), twice, with no `_1` ever
+  listed, and the winner stays listed;
+- the sender keeps sending after the `Compositor` is dropped (its own
+  references);
+- with Spout's list made FULL (64 fake senders, each with its info map),
+  a new sender is created but its first send is refused `NOT_LISTED`, its
+  own info map released and the 64 entries untouched (this is the only way
+  to reach `NOT_LISTED` on CI; it assumes Spout's default `MaxSenders`, 64);
 - a name Spout cannot carry never reaches Spout; a missing map is `None`.
 - The helpers both WARP test binaries use (`warp()`, the smooth `pattern`,
   `assert_matches_reference`) live in `tests/common/mod.rs`.

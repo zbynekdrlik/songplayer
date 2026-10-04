@@ -17,16 +17,17 @@
 
 mod common;
 
-use std::ffi::c_void;
+use std::ffi::{CString, c_void};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use common::{BLACK, H, W, assert_matches_reference, pattern, picture, warp};
+use sp_gpu::spout_state::{NOT_LISTED, Registration, TAKEN};
 use sp_gpu::{
-    Composition, Compositor, GpuError, SPOUT_SENDER_NAME, SharedTextureInfo, SpoutSender,
-    mapped_len, spout_sender_info, spout_sender_names, unpad_rows,
+    Composition, Compositor, GpuError, NAME_SLOT_LEN, SENDER_NAMES_MAP, SPOUT_SENDER_NAME,
+    SharedTextureInfo, SpoutSender, mapped_len, spout_sender_info, spout_sender_names, unpad_rows,
 };
-use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
@@ -34,6 +35,11 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+use windows::Win32::System::Memory::{
+    CreateFileMappingA, FILE_MAP_ALL_ACCESS, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
+    PAGE_READWRITE, UnmapViewOfFile,
+};
+use windows::core::PCSTR;
 
 /// `DXGI_FORMAT_B8G8R8A8_UNORM` (87), as Spout's registry stores it.
 const BGRA: u32 = DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32;
@@ -148,6 +154,81 @@ fn read_on(
     packed
 }
 
+/// Spout's default sender list size, with no `MaxSenders` registry value
+/// (windows-latest has none).
+const SPOUT_MAX_SENDERS: usize = 64;
+
+/// A shared-memory map `name` of `size` bytes, as Spout makes its maps.
+fn new_map(name: &str, size: u32) -> HANDLE {
+    let c_name = CString::new(name).expect("a name without NUL");
+    unsafe {
+        CreateFileMappingA(
+            INVALID_HANDLE_VALUE,
+            None,
+            PAGE_READWRITE,
+            0,
+            size,
+            PCSTR(c_name.as_ptr().cast()),
+        )
+    }
+    .unwrap_or_else(|e| panic!("the map {name}: {e}"))
+}
+
+/// Spout's names list made FULL, as other programs would fill it: 64 names
+/// in `SpoutSenderNames`, each with its own info map so Spout's clean-up
+/// keeps them. Emptied and closed when dropped (on a failed assertion too).
+struct FullList {
+    names_map: HANDLE,
+    view: MEMORY_MAPPED_VIEW_ADDRESS,
+    infos: Vec<HANDLE>,
+    filled: Vec<String>,
+}
+
+impl FullList {
+    fn new() -> Self {
+        let size = SPOUT_MAX_SENDERS * NAME_SLOT_LEN;
+        let names_map = new_map(SENDER_NAMES_MAP, size as u32);
+        let view = unsafe { MapViewOfFile(names_map, FILE_MAP_ALL_ACCESS, 0, 0, size) };
+        assert!(!view.Value.is_null(), "map Spout's names list");
+        let filled: Vec<String> = (0..SPOUT_MAX_SENDERS)
+            .map(|i| format!("sp-gpu test filler {i:02}"))
+            .collect();
+        // SAFETY: the view maps `size` writable bytes until it is unmapped
+        // in Drop.
+        let slots = unsafe { std::slice::from_raw_parts_mut(view.Value.cast::<u8>(), size) };
+        slots.fill(0);
+        for (slot, name) in slots.chunks_exact_mut(NAME_SLOT_LEN).zip(&filled) {
+            slot[..name.len()].copy_from_slice(name.as_bytes());
+        }
+        let infos = filled.iter().map(|name| new_map(name, 4096)).collect();
+        Self {
+            names_map,
+            view,
+            infos,
+            filled,
+        }
+    }
+}
+
+impl Drop for FullList {
+    fn drop(&mut self) {
+        // Empty the list first, in case anything else keeps the map open.
+        // SAFETY: the view is still mapped for the whole list.
+        unsafe {
+            std::ptr::write_bytes(
+                self.view.Value.cast::<u8>(),
+                0,
+                SPOUT_MAX_SENDERS * NAME_SLOT_LEN,
+            );
+            let _ = UnmapViewOfFile(self.view);
+            let _ = CloseHandle(self.names_map);
+            for info in &self.infos {
+                let _ = CloseHandle(*info);
+            }
+        }
+    }
+}
+
 /// `got` is byte for byte the compositor's frame `drawn`.
 fn assert_same_frame(got: &[u8], drawn: &[u8], what: &str) {
     assert_eq!(got.len(), drawn.len(), "{what}: frame size");
@@ -165,6 +246,7 @@ fn a_sent_frame_registers_sp_program_max_at_4k_and_drop_unregisters_it() {
     let mut compositor = warp();
     let mut sender = SpoutSender::new(&compositor).expect("the SP-program-MAX sender");
     assert_eq!(sender.name(), SPOUT_SENDER_NAME);
+    assert_eq!(sender.registration(), Registration::Fresh);
     // Spout registers a sender at its first send, not before.
     assert_eq!(listed(SPOUT_SENDER_NAME), 0, "{:?}", names());
     assert_eq!(info(SPOUT_SENDER_NAME), None);
@@ -178,6 +260,7 @@ fn a_sent_frame_registers_sp_program_max_at_4k_and_drop_unregisters_it() {
     let stats = sender.send().expect("send on WARP");
     // The first send creates Spout's 4K shared texture: it takes time.
     assert!(stats.send_us > 0, "{stats:?}");
+    assert_eq!(sender.registration(), Registration::Confirmed);
 
     assert_eq!(listed(SPOUT_SENDER_NAME), 1, "{:?}", names());
     let entry = info(SPOUT_SENDER_NAME).expect("the sender's map exists");
@@ -297,13 +380,15 @@ fn a_sender_that_loses_its_name_before_its_first_send_is_refused() {
     );
     winner.send().expect("the winner registers the name");
 
-    // Spout registers the loser as `<name>_1`: refused, and released at once.
+    // The winner listed the name since the loser was created: the loser is
+    // refused before Spout can register it as `<name>_1`.
     let renamed = format!("{name}_1");
     for attempt in ["first", "second"] {
         match loser.send() {
             Err(GpuError::SpoutNotRegistered { name: asked, why }) => {
                 assert_eq!(asked, name);
-                assert_eq!(why, "another sender took the name before its first send");
+                assert_eq!(why, TAKEN);
+                assert_eq!(loser.registration(), Registration::Refused(TAKEN));
             }
             other => {
                 panic!("the {attempt} send of a renamed sender must be refused, got {other:?}")
@@ -327,7 +412,7 @@ fn a_sender_that_loses_its_name_before_its_first_send_is_refused() {
 }
 
 #[test]
-fn the_sender_outlives_the_compositor_and_moves_between_threads() {
+fn the_sender_outlives_the_compositor() {
     let _one = one_at_a_time();
     let name = "sp-gpu test outlives";
     let mut compositor = warp();
@@ -341,18 +426,47 @@ fn the_sender_outlives_the_compositor_and_moves_between_threads() {
 
     // The sender holds its own device and render-target references.
     drop(compositor);
-    let sender = std::thread::spawn(move || {
-        sender
-            .send()
-            .expect("send after the compositor is gone, on another thread");
-        sender
-    })
-    .join()
-    .expect("the sending thread");
+    sender.send().expect("send after the compositor is gone");
     assert_eq!(listed(name), 1);
     assert_eq!(sender.size(), (W, H));
     drop(sender);
     assert_eq!(listed(name), 0, "{:?}", names());
+}
+
+#[test]
+fn a_sender_spout_does_not_list_is_refused_and_leaves_the_list_alone() {
+    let _one = one_at_a_time();
+    let full = FullList::new();
+    assert_eq!(names(), full.filled, "Spout's list is full");
+    let name = "sp-gpu test full list";
+    let mut compositor = warp();
+    // Its name is free, so it is created; Spout skips the registration of a
+    // sender past its list's size, so its first send is not listed.
+    let mut sender = SpoutSender::with_name(&compositor, name).expect("a test sender");
+    let (stride, data) = pattern(1280, 720, 45);
+    compose(
+        &mut compositor,
+        &Composition::Picture(picture(1, 1280, 720, stride, &data)),
+    );
+    for attempt in ["first", "second"] {
+        match sender.send() {
+            Err(GpuError::SpoutNotRegistered { name: asked, why }) => {
+                assert_eq!(asked, name);
+                assert_eq!(why, NOT_LISTED);
+            }
+            other => {
+                panic!("the {attempt} send of an unlisted sender must be refused, got {other:?}")
+            }
+        }
+        assert_eq!(sender.registration(), Registration::Refused(NOT_LISTED));
+        // Its own info map is released; the other senders are untouched.
+        assert_eq!(info(name), None, "{attempt}: the sender's own map is gone");
+        assert_eq!(names(), full.filled, "{attempt}: the list is unchanged");
+        assert_eq!(sender.size(), (0, 0), "{attempt}: it shares nothing");
+    }
+    drop(sender);
+    assert_eq!(names(), full.filled, "dropping it leaves the list alone");
+    drop(full);
 }
 
 #[test]
