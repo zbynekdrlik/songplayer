@@ -147,8 +147,11 @@ fn instrumental_only_preset_plays_instrumental() {
     approx(&drain(&mut r), &[0.7, 0.7]);
 }
 
+/// #184: an over comes out at the limiter's ceiling (0.98, −0.18 dBFS), not
+/// clamped flat at full scale. The frame [2.7, −2.7] needs the gain 0.98/2.7,
+/// both channels take it (one stereo-linked gain), so ±2.7 → ±0.98.
 #[test]
-fn clamps_positive_and_negative_overshoot() {
+fn limits_positive_and_negative_overshoot_to_the_ceiling() {
     let mut r = reader3(
         vec![vec![0.9, -0.9]],
         vec![vec![0.9, -0.9]],
@@ -157,8 +160,7 @@ fn clamps_positive_and_negative_overshoot() {
         1.0,
         1.0,
     );
-    // 2.7 → 1.0 ; -2.7 → -1.0
-    approx(&drain(&mut r), &[1.0, -1.0]);
+    approx(&drain(&mut r), &[0.98, -0.98]);
 }
 
 #[test]
@@ -185,20 +187,216 @@ fn mixes_across_mismatched_packet_boundaries() {
     approx(&drain(&mut r), &[0.15, 0.15, 0.25, 0.25]);
 }
 
+// ── #184: the peak limiter after the sum (was a hard clamp at ±1.0) ─────────
+
+/// One mono stream at gain 1 and `sr` Hz playing `samples` as one packet.
+fn mono(samples: Vec<f32>, sr: u32) -> StemMixReader {
+    StemMixReader::new(
+        vec![mock(vec![samples], sr, 1, 1000)],
+        vec![shared_gain(1.0)],
+    )
+    .unwrap()
+}
+
+/// The release fixture: 1000 Hz mono (the release factor is then exactly
+/// 1 − 1/(0.050 s × 1000 Hz) = 0.98 per frame), three frames at 0.5, ONE over
+/// at 1.96 (it needs the gain 0.98/1.96 = 0.5), then 1000 frames at 0.5.
+fn release_fixture() -> Vec<f32> {
+    let mut s = vec![0.5_f32; 3];
+    s.push(1.96);
+    s.extend(std::iter::repeat_n(0.5_f32, 1000));
+    s
+}
+
+/// A 1.8× over (three streams of a 100 Hz sine at 0.6, gain 1 each): today
+/// 1208 of its 1920 samples are clamped flat at exactly ±1.0. Limited, no
+/// sample reaches full scale; every sample stays at or under the ceiling
+/// (0.98, plus one f32 rounding of the gain).
+#[test]
+fn an_over_never_reaches_full_scale() {
+    let sine: Vec<f32> = (0..960)
+        .flat_map(|i| {
+            let v = (0.6 * (2.0 * std::f64::consts::PI * 100.0 * i as f64 / 48_000.0).sin()) as f32;
+            [v, v]
+        })
+        .collect();
+    let mut r = reader3(
+        vec![sine.clone()],
+        vec![sine.clone()],
+        vec![sine],
+        1.0,
+        1.0,
+        1.0,
+    );
+    let out = drain(&mut r);
+    assert_eq!(out.len(), 1920);
+    let at_full_scale = out.iter().filter(|s| s.abs() >= 0.999).count();
+    assert_eq!(at_full_scale, 0, "no sample may sit at the clamp (±1.0)");
+    let peak = out.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+    assert!(
+        peak <= 0.98 + 1e-6,
+        "every sample at or under the ceiling, peak {peak}"
+    );
+}
+
+/// One gain for the whole frame: the left channel's over (1.96 → needs 0.5)
+/// scales the quiet right channel by the SAME 0.5 (stereo-linked), so the
+/// stereo image does not shift.
+#[test]
+fn both_channels_take_the_over_frames_gain() {
+    let mut r = StemMixReader::new(
+        vec![mock(vec![vec![1.96, 0.2]], 48_000, 2, 1000)],
+        vec![shared_gain(1.0)],
+    )
+    .unwrap();
+    approx(&drain(&mut r), &[0.98, 0.1]);
+}
+
+/// Instant attack, smooth release: the over frame comes out at the ceiling,
+/// then the gain recovers EXPONENTIALLY (reduction 0.5 × 0.98^k at frame
+/// 3 + k), never jumping back to unity. Today the clamp hands frame 4 its full
+/// 0.5 again, a gain jump of +0.49 in one frame. The stated bound: the gain
+/// rises by at most 1/release_frames = 1/50 per frame (the reduction ≤ 1 times
+/// 1 − 0.98), and never falls while the input stays quiet.
+#[test]
+fn the_gain_recovers_at_the_release_rate_after_an_over() {
+    let input = release_fixture();
+    let mut r = mono(input.clone(), 1_000);
+    let out = drain(&mut r);
+    assert_eq!(out.len(), input.len());
+    approx(&out[..3], &[0.5, 0.5, 0.5]);
+    assert!(
+        (out[3] - 0.98).abs() < 1e-6,
+        "the over sits at the ceiling: {}",
+        out[3]
+    );
+    for k in 1..=4 {
+        let want = 0.5 * (1.0 - 0.5 * 0.98_f64.powi(k as i32));
+        let got = out[3 + k] as f64;
+        assert!(
+            (got - want).abs() < 1e-6,
+            "frame {}: want {want}, got {got}",
+            3 + k
+        );
+    }
+    let gain: Vec<f32> = out.iter().zip(&input).map(|(o, i)| o / i).collect();
+    // Window k holds frames k and k + 1; from window 3 on, the input is quiet.
+    for (k, w) in gain.windows(2).enumerate().skip(3) {
+        let rise = w[1] - w[0];
+        assert!(
+            rise <= 0.02 + 1e-6,
+            "frame {}: the gain jumped by {rise}",
+            k + 1
+        );
+        assert!(
+            rise >= -1e-6,
+            "frame {}: the gain fell on a quiet frame by {rise}",
+            k + 1
+        );
+    }
+}
+
+/// Once the release has run out the mix is bit-identical again. In f32 the
+/// gain 1 − 0.5 × 0.98^k first rounds to exactly 1.0 at frame 827 (scratch
+/// model of the limiter); from there every frame is `x · 1.0 = x`, bit for
+/// bit. Frame 826 is the last one still (slightly) reduced. Today frame 826
+/// is already untouched.
+#[test]
+fn the_mix_is_bit_identical_again_once_the_release_ends() {
+    let input = release_fixture();
+    let mut r = mono(input.clone(), 1_000);
+    let out = drain(&mut r);
+    assert_eq!(out.len(), input.len());
+    assert!(
+        out[826] < input[826],
+        "frame 826 still carries the tail: {}",
+        out[826]
+    );
+    for (n, (o, i)) in out.iter().zip(&input).enumerate().skip(827) {
+        assert_eq!(o.to_bits(), i.to_bits(), "frame {n} must be untouched");
+    }
+}
+
+/// The sum is untouched, bit for bit, while it stays at or under the ceiling:
+/// partial gains on three streams, and a lone stream exactly at ±0.98.
+#[test]
+fn a_mix_at_or_under_the_ceiling_is_bit_identical() {
+    let a = vec![0.31_f32, -0.42, 0.05, 0.6];
+    let b = vec![0.2_f32, -0.3, 0.9, 0.1];
+    let c = vec![0.1_f32, -0.2, 0.0, 0.07];
+    let (ga, gb, gc) = (0.7_f32, 0.4_f32, 1.0_f32);
+    let mut r = reader3(
+        vec![a.clone()],
+        vec![b.clone()],
+        vec![c.clone()],
+        ga,
+        gb,
+        gc,
+    );
+    let out = drain(&mut r);
+    assert_eq!(out.len(), a.len());
+    for (i, o) in out.iter().enumerate() {
+        // The reader's own summation order: 0.0, then each stream × its gain.
+        let mut acc = 0.0_f32;
+        acc += a[i] * ga;
+        acc += b[i] * gb;
+        acc += c[i] * gc;
+        assert_eq!(o.to_bits(), acc.to_bits(), "sample {i}: {o} vs {acc}");
+    }
+
+    let mut lone = StemMixReader::new(
+        vec![mock(vec![vec![0.98, -0.98]], 48_000, 2, 1000)],
+        vec![shared_gain(1.0)],
+    )
+    .unwrap();
+    let out = drain(&mut lone);
+    assert_eq!(out[0].to_bits(), 0.98_f32.to_bits());
+    assert_eq!(out[1].to_bits(), (-0.98_f32).to_bits());
+}
+
+/// A seek starts unrelated audio, so it drops the release tail: right after
+/// the seek the quiet frames are untouched, not ducked by the earlier over.
+#[test]
+fn a_seek_drops_the_release_tail() {
+    let mut r = StemMixReader::new(
+        vec![mock(
+            vec![vec![1.96], vec![0.5, 0.5, 0.5]],
+            1_000,
+            1,
+            10_000,
+        )],
+        vec![shared_gain(1.0)],
+    )
+    .unwrap();
+    let over = r.next_samples().unwrap().unwrap();
+    approx(&over.data, &[0.98]);
+    r.seek(0).unwrap();
+    let after = r.next_samples().unwrap().unwrap();
+    for s in &after.data {
+        assert_eq!(
+            s.to_bits(),
+            0.5_f32.to_bits(),
+            "no tail after a seek: {:?}",
+            after.data
+        );
+    }
+}
+
 // ── ramps (the #186 fix) ────────────────────────────────────────────────────
 
 #[test]
 fn ramp_reaches_target_in_exactly_ramp_samples_no_overstep() {
     // sr=200 → ramp_samples = 200/20 = 10 frames, step = 0.1. Mono ⇒ 1 frame =
-    // 1 sample. A constant-1.0 stream makes out[i] == the applied gain at frame i.
+    // 1 sample. A constant-0.5 stream makes out[i] == half the applied gain at
+    // frame i (#184: a full-scale 1.0 would be an over the limiter scales).
     let target = shared_gain(0.0);
-    let stream = mock(vec![vec![1.0; 40]], 200, 1, 1000);
+    let stream = mock(vec![vec![0.5; 40]], 200, 1, 1000);
     let mut r = StemMixReader::new(vec![stream], vec![Arc::clone(&target)]).unwrap();
     assert_eq!(r.ramp_samples(), 10, "ramp_samples must be sample_rate/20");
 
     // Operator flips the preset: raise this stream's gain to 1.0.
     target.store(gain_to_bits(1.0), Ordering::Relaxed);
-    let out = drain(&mut r);
+    let out: Vec<f32> = drain(&mut r).iter().map(|s| s * 2.0).collect();
 
     // Reached the target at EXACTLY ramp_samples frames (index 9), not before.
     assert!(
@@ -273,13 +471,14 @@ fn ramp_snaps_to_a_partial_target_without_overshoot() {
 #[test]
 fn song_opens_at_preset_no_fade_in() {
     // current initialises to the target at construction, so the FIRST sample is
-    // already at full gain — no unwanted 50 ms fade-in at song start.
+    // already at full gain — no unwanted 50 ms fade-in at song start. (0.5, not
+    // 1.0: since #184 a full-scale sample is an over the limiter scales.)
     let mut r = StemMixReader::new(
-        vec![mock(vec![vec![1.0, 1.0]], 48_000, 2, 1000)],
+        vec![mock(vec![vec![0.5, 0.5]], 48_000, 2, 1000)],
         vec![shared_gain(1.0)],
     )
     .unwrap();
-    approx(&drain(&mut r), &[1.0, 1.0]);
+    approx(&drain(&mut r), &[0.5, 0.5]);
 }
 
 // ── EOS / silence / seek ────────────────────────────────────────────────────
@@ -446,8 +645,11 @@ fn probe_measures_the_post_gain_output_so_zero_gains_read_the_floor() {
     );
 }
 
+/// The probe measures what the reader EMITS: a full-scale input is an over
+/// since #184, so the output sits at the limiter's ceiling (0.98) and the probe
+/// reads 20·log10(0.98) ≈ −0.18 dBFS, not 0 dBFS.
 #[test]
-fn probe_reads_full_scale_output_as_zero_dbfs() {
+fn probe_reads_a_full_scale_input_at_the_limiter_ceiling() {
     let mut r = StemMixReader::new(
         vec![mock(
             vec![vec![1.0, -1.0], vec![-1.0, 1.0]],
@@ -461,9 +663,10 @@ fn probe_reads_full_scale_output_as_zero_dbfs() {
     r.hold_probe_window();
     drain(&mut r);
     let (db, n) = r.pending_level();
+    let ceiling_db = 20.0 * 0.98_f32.log10();
     assert!(
-        db.abs() < 1e-4,
-        "full-scale output must read 0 dBFS, got {db}"
+        (db - ceiling_db).abs() < 1e-4,
+        "a full-scale input must read the ceiling {ceiling_db} dBFS, got {db}"
     );
     assert_eq!(n, 4);
 }
