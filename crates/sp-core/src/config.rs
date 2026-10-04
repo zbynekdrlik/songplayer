@@ -96,7 +96,7 @@ pub const SETTING_GENLOCK_PACING: &str = "genlock_pacing";
 /// #147: pacing is ON by default, by the owner's rule (#147 comment
 /// 5812898277, 24.9.2026: pacing stays ON permanently). SP-program takes only
 /// paced sources, so a lost or unreadable setting must never turn it off.
-pub const DEFAULT_GENLOCK_PACING: bool = false;
+pub const DEFAULT_GENLOCK_PACING: bool = true;
 
 /// #147: the pacing flag a stored `genlock_pacing` means: OFF only for an
 /// explicit `"false"` (trimmed), else [`DEFAULT_GENLOCK_PACING`]. The ONE rule

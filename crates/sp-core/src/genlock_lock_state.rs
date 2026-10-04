@@ -257,9 +257,9 @@ pub fn summarize(outputs: &[OutputLock]) -> LockSummary {
 
 /// The dashboard's always-visible global genlock state (#176). Adds a fourth
 /// state `Off` to the LOCKED / DEGRADED / UNLOCKED lock vocabulary: `Off` means
-/// NO output has boundary pacing enabled (`genlock_pacing=false`, the production
-/// default #147) — the box free-runs on the NDI SDK clock, a deliberate
-/// configuration, not a fault. Rendered grey; the other three keep their
+/// NO output has boundary pacing enabled (`genlock_pacing=false`, set by hand:
+/// the default is ON since #147) — the box free-runs on the NDI SDK clock, a
+/// deliberate configuration, not a fault. Rendered grey; the other three keep their
 /// green / amber / red colours (camera-box#1298). This is the #176 revision of
 /// #164's "hide the badge entirely while pacing is off".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

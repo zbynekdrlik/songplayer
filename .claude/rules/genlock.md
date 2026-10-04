@@ -386,12 +386,24 @@ investigation is now a 10-minute read.
   5812898277, 24.9.2026): the residual stall is solved with guaranteed priority
   and residency, NEVER by switching pacing off — not as a "temporary state", not
   for a measurement. `genlock_pacing` is read ONLY at startup (`lib.rs::start` →
-  `engine.set_genlock_pacing`); a restart = `gh run rerun --job <LATEST Deploy
+  `genlock_pacing_setting` → `engine.set_genlock_pacing`); a restart = `gh run rerun --job <LATEST Deploy
   job id>` — look the id up each time (`gh run view <run> --json jobs`; a rerun
   mints a NEW job id). The dabing 12–16 kHz single-snapshot E2E assertion that
   used to fail on live content was reworked by #206 (post-deploy E2E: content/
   state-dependent audio assertions, closed — commit b41d06e) into a
   content-matched full-band RMS drop.
+- **The code default is ON too (#147, 4.10.2026 triage 5984521750).** ONE
+  truth, `sp_core::config`: `SETTING_GENLOCK_PACING`,
+  `DEFAULT_GENLOCK_PACING = true`, and `genlock_pacing(raw)`, which is OFF
+  only for an explicit `"false"` (trimmed). A missing row, a failed read
+  (`lib.rs::genlock_pacing_setting`) or a mangled value paces. A fresh
+  `PlaybackEngine` starts from the same const. Before, the read was
+  `== "true"` with `unwrap_or(false)`, so a lost setting meant a dark
+  SP-program (it takes only paced sources) and a silent FOH. The UI holds
+  no default: the dashboard renders each output's live `pacing.enabled`
+  telemetry (`PacingView`'s `#[serde(default)]` = "not reported"). The
+  SDK-clocked path stays selectable by an explicit `"false"` until its own
+  deletion unit.
 - **Change containment mid-session.** `heavy_cpu_cap_pct` /
   `heavy_cpu_affinity_mask` apply at the NEXT child spawn (`refresh_containment`
   per tick), NOT to the running child — so after a settings change, kill the venv
