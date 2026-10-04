@@ -4,6 +4,8 @@ paths:
   - "crates/sp-server/src/playback/dashboard_replay*.rs"
   - "crates/sp-server/src/playback/tests_ws_replay.rs"
   - "crates/sp-server/src/db/models_playlists.rs"
+  - "crates/sp-server/src/playback/runtime_pipeline.rs"
+  - "sp-ui/src/pages/dashboard.rs"
   - "crates/sp-server/src/playback/engine_play.rs"
   - "crates/sp-server/src/playback/position_update.rs"
   - "crates/sp-core/src/ws.rs"
@@ -29,13 +31,14 @@ record: #225 comment 5917562242 (Approach 1), adapted in the
   (`dashboard_replay::global()`, like `now_playing::global()`, #177; no engine
   field, `playback/mod.rs` is near the cap) and THEN broadcasts it. The send
   sites are `engine_play.rs::broadcast_state` (the one `PlaybackStateChanged`
-  sender), `mod.rs::broadcast_now_playing_on_start` and
-  `position_update.rs::maybe_broadcast_position_update`. A new sender of either
-  message calls `send_dashboard`, never `ws_event_tx.send` directly, or a new
-  client is not told it.
-- `runtime_pipeline.rs::remove_pipeline` tells the open dashboards the
-  playlist is `Idle` (through `send_dashboard`), then forgets it (`forget`),
-  so an open dashboard and a reload agree (review round 2).
+  sender; its callers include `mod.rs::handle_command` for a `SetMode` and
+  `runtime_pipeline.rs::remove_pipeline`), `mod.rs::broadcast_now_playing_on_start`
+  and `position_update.rs::maybe_broadcast_position_update`. A new sender of
+  either message calls `send_dashboard` (a state: `broadcast_state`), never
+  `ws_event_tx.send` directly, or a new client is not told it.
+- `runtime_pipeline.rs::remove_pipeline` sets the pipeline `Idle` and tells
+  the open dashboards through `broadcast_state`, then forgets the playlist
+  (`forget`), so an open dashboard and a reload agree (review rounds 2-3).
 - A client that LAGS (the broadcast channel dropped messages for it) is sent
   the replay again (`websocket.rs::send_replay`), so a dropped state change
   does not leave it stale until the playlist's next change.
@@ -92,10 +95,27 @@ and after a server restart (every deploy) the new replay tells a playlist
 `WaitingForScene` / `Idle` with no NowPlaying. Kept store entries would show
 the old socket's song as if still loaded (a phantom title, a mounted mixer, an
 enabled seek). Until the new replay lands the Player reads "Načítavam…". The
-store also drops an entry's song on a live `Idle` (a fresh entry), and the
-dashboard's auto-select keeps its selection while nothing is known
-(`pages/dashboard.rs`), so a reconnect does not flip the work area to the
-first playlist by name.
+store also drops an entry's song on a live `Idle` (a fresh entry).
+
+Two consequences, both review round 3:
+
+- **The replay lands message by message**, a playing playlist's song a
+  message BEFORE its state. So anything that decides from the store must not
+  decide on a half-told one:
+  - the Dashboard's auto-select (`pages/dashboard.rs`) keeps a valid
+    selection until EVERY listed playlist's state is known (`state_known`),
+    else a song-but-no-state entry reads "nothing plays" and the work area
+    flips to the first playlist by name;
+  - the Player's preview Effect turns the preview off only once the state is
+    known (`state_known && !is_decoding`), so a running preview survives a
+    reconnect and comes back by itself.
+- **The mock must keep the server's order.** `handle_ws` writes the replay
+  before it forwards anything from the bus, so a live message never
+  overtakes it. The mock's `sendLive(ws, msg)` queues a live message for a
+  socket that has not had its replay yet and flushes it right after the
+  replay. Without that, a spec's `/__mock/now-playing` posted right after
+  `page.goto` reached the client before the replay, whose `Idle` then wiped
+  its song (the dub mixer specs).
 
 ## Tests
 
@@ -106,7 +126,7 @@ first playlist by name.
   Continuous (the DB says `loop`). A second test: `SetMode` on an idle
   playlist is broadcast at once and replayed to the next client. They read
   the GLOBAL registry, so they use playlist ids no other test uses
-  (22 501-22 503) and filter the replay to them (other tests record into the
+  (22 501-22 504) and filter the replay to them (other tests record into the
   same global).
 - `db/models_playlists.rs`: `all_playlist_ids` returns every id ascending,
   inactive ones too. `tests_ws_replay.rs::a_failed_playlist_read_still_replays_what_the_engine_told`
@@ -115,20 +135,24 @@ first playlist by name.
   {no_song: [{playlist_id, state, transport}]}` + `/__mock/ws-drop` (closes
   every dashboard socket): after the reconnect a playlist waiting with no song
   reads "Nič nehrá", never the old socket's song; a live `Idle` clears the
-  song it had.
+  song it had. Review round 3: a running live preview comes back by itself
+  after a reconnect; an unpinned Dashboard keeps the playing playlist
+  selected through it (a MutationObserver log of `workspace-title`).
 - `playback/dashboard_replay_tests.rs`: the rules on a private
   `DashboardReplay::default()` (one test per rule, every listed mutant mapped),
   plus the engine glue on the global (ids 22 511 / 22 512): `send_dashboard`
-  records AND still broadcasts, `remove_pipeline` forgets.
+  records AND still broadcasts, `remove_pipeline` tells Idle and forgets.
 - The mock (`e2e/mock-api.mjs` `sendReplay`) models the same replay: every
   active playlist + the Dabing playlist (500), playlist 1 playing "Never Gonna
   Give You Up" on program, a running tick's items on top, every mode
   `Continuous` (what the engine plays unless told). A spec that needs a late
   replay or a late first song uses `POST /__mock/ws-replay {delay_ms,
   now_playing_delay_ms}` and resets it with `{}` (it also holds the mock's 2 s
-  playlist-1 song interval).
-- The mock's limits (no spec depends on them): playlist 1 is always replayed
-  playing, whatever `/__mock/set-playing` or the program last said, and an
-  off-air ▶ (`playingOffAir`) is not replayed. Modelling the server's
-  last-broadcast record in the mock would leak state across specs (one mock
-  process serves the whole serial run).
+  playlist-1 song interval). Every live message goes through `sendLive`
+  (above).
+- The mock's limits: playlist 1 is always replayed playing, whatever
+  `/__mock/set-playing` or the program last said, and an off-air ▶
+  (`playingOffAir`) is not replayed. A spec that needs another state after a
+  reconnect sets it with `no_song`. Modelling the server's last-broadcast
+  record in the mock would leak state across specs (one mock process serves
+  the whole serial run).

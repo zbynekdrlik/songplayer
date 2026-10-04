@@ -758,9 +758,14 @@ Right after a page load the Player showed "Nič nehrá" / "Mixér — nič nehr�
 - **What a socket told dies with it** (review round 2, `dashboard-ws.md`):
   `ws.rs` calls `store.forget_now_playing()` when a socket opens and when it
   closes; a live `PlaybackStateChanged` `Idle` replaces the entry (no song).
-  The Dashboard's auto-select (`pages/dashboard.rs`) keeps a valid selection
-  while `store.now_playing` is empty, so a reconnect never flips the work area.
-  Mock: `/__mock/ws-replay {no_song: […]}` + `/__mock/ws-drop`.
+  The replay lands message by message (a song before its state), so nothing
+  may decide on a half-told store (review round 3): the Dashboard's
+  auto-select (`pages/dashboard.rs`) keeps a valid selection until every
+  listed playlist's state is known, and the Player's preview Effect turns the
+  preview off only once the state is known (`state_known && !is_decoding`),
+  so a running preview comes back by itself after a reconnect. Mock:
+  `/__mock/ws-replay {no_song: […]}` + `/__mock/ws-drop`; live messages queue
+  behind a socket's replay (`sendLive`), as on the server.
 - **Mock E2E against the old dist proves the RED** (the "Running the mock E2E
   locally" section below): the new spec failed for the right reasons, and the
   rest of the chromium suite passed with the new mock replay (201 passed, 1
