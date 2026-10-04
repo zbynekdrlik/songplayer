@@ -19,8 +19,6 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use sp_core::playback::{PlaybackState, TransportState};
-use sp_core::ws::ServerMsg;
 use tracing::{debug, info, warn};
 
 use super::{
@@ -109,17 +107,16 @@ impl PlaybackEngine {
     /// playlist's genlock lock-state window and (#225) what the dashboard
     /// replay last recorded for it. No-op if no pipeline exists.
     pub fn remove_pipeline(&mut self, playlist_id: i64) {
+        // #225: it goes Idle first, told through the one state sender, so the
+        // open dashboards agree with a reload's replay (a no-op without a
+        // pipeline).
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.state = PlayState::Idle;
+        }
+        self.broadcast_state(playlist_id);
         match self.pipelines.remove(&playlist_id) {
             Some(_pp) => {
                 self.lock_windows.remove(&playlist_id);
-                // The open dashboards are told it is idle (a reload's replay
-                // says the same), then the record goes.
-                self.send_dashboard(ServerMsg::PlaybackStateChanged {
-                    playlist_id,
-                    state: PlaybackState::Idle,
-                    mode: PlaybackMode::default(),
-                    transport: TransportState::Idle,
-                });
                 super::dashboard_replay::global().forget(playlist_id);
                 info!(
                     playlist_id,

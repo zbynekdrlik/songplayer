@@ -234,8 +234,13 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
             None
         }
     });
+    // #225 review round 3: only once the server TOLD this playlist's state. A
+    // reconnect forgets every playlist until its replay lands (and the replay
+    // tells a playing one's song a message before its state), so a running
+    // preview is kept through it and comes back by itself, instead of the
+    // operator clicking "▶ Živý náhľad" again after every deploy.
     Effect::new(move |_| {
-        if !is_decoding.get() {
+        if state_known.get() && !is_decoding.get() {
             preview_on.set(false);
         }
     });
