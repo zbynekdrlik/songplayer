@@ -242,6 +242,14 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   workspace is 1.85. Write `opt.is_none_or(|x| x.id != id)`: negate the
   closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
   the same table.
+- **`clippy::type_complexity` on a test's known-value table** (#223 S1a, CI
+  Lint run 37223378573). A table typed inline as an array of tuples, e.g.
+  `[(&str, [u8; 3], [u8; 3], [u8; 3]); 9]`, is "very complex" under `-D
+  warnings` (tests count, since Lint runs `--all-targets`). Name the row
+  above the test's doc comment: `type ColourBar = (&'static str, [u8; 3],
+  [u8; 3], [u8; 3]);`, then `let table: [ColourBar; 9]`. The lint stopped
+  the Lint job, and every Windows job behind it (build, WARP tests, deploy)
+  was skipped, so one tuple cost a whole CI cycle.
 
 ## Toolchain drift: CI's stable Rust moves under an unchanged tree (Rust 1.99, 3.10.2026)
 

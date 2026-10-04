@@ -50,13 +50,17 @@ fn the_shader_rows_are_the_matrix_rounded_to_f32() {
     }
 }
 
+/// One colour bar: its name, its limited-range Y'CbCr codes, and the two RGB
+/// codes the table pins for it.
+type ColourBar = (&'static str, [u8; 3], [u8; 3], [u8; 3]);
+
 /// The known-value table: BT.709's 100 % colour bars in 8-bit limited range
 /// (each Y'CbCr rounded to the code, so each channel is the ideal value
 /// ±1), plus black, white and mid grey. The exact codes are pinned from a
 /// scratch model of the same arithmetic.
 #[test]
 fn the_bt709_colour_bars_convert_to_their_rgb() {
-    let table: [(&str, [u8; 3], [u8; 3], [u8; 3]); 9] = [
+    let table: [ColourBar; 9] = [
         ("black", [16, 128, 128], [0, 0, 0], [0, 0, 0]),
         ("white", [235, 128, 128], [255, 255, 255], [255, 255, 255]),
         ("grey", [126, 128, 128], [128, 128, 128], [128, 128, 128]),
