@@ -2084,6 +2084,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sp-gpu"
+version = "0.71.0-dev.3"
+dependencies = [
+ "mutants",
+ "sp-core",
+ "thiserror",
+ "tracing",
+ "windows",
+]
+
+[[package]]
 name = "sp-ndi"
 version = "0.71.0-dev.3"
 dependencies = [

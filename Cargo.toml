@@ -3,6 +3,7 @@ members = [
     "crates/sp-core",
     "crates/sp-ndi",
     "crates/sp-decoder",
+    "crates/sp-gpu",
     "crates/sp-server",
 ]
 exclude = [

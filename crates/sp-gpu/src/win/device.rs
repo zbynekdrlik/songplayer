@@ -1,0 +1,131 @@
+//! The Direct3D 11 device: DXGI's adapter list, the picked hardware
+//! adapter, or WARP.
+
+use tracing::info;
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_UNKNOWN, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL,
+    D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+};
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
+    ID3D11DeviceContext,
+};
+use windows::Win32::Graphics::Dxgi::{
+    CreateDXGIFactory1, DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_ERROR_NOT_FOUND,
+    IDXGIAdapter, IDXGIAdapter1, IDXGIDevice, IDXGIFactory1,
+};
+use windows::core::Interface;
+
+use super::failed;
+use crate::adapter::{AdapterInfo, adapter_name, pick_adapter};
+use crate::error::GpuError;
+
+/// The feature levels asked for: 11.1, else 11.0 (shader model 5).
+const FEATURE_LEVELS: [D3D_FEATURE_LEVEL; 2] = [D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0];
+
+/// The device and its immediate context.
+pub(super) type Device = (ID3D11Device, ID3D11DeviceContext);
+
+/// What `pick_adapter` reads from one DXGI adapter.
+fn info_of(desc: &DXGI_ADAPTER_DESC1) -> AdapterInfo {
+    let software = DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32;
+    AdapterInfo {
+        name: adapter_name(&desc.Description),
+        vendor_id: desc.VendorId,
+        device_id: desc.DeviceId,
+        dedicated_video_memory: desc.DedicatedVideoMemory as u64,
+        software_flag: (desc.Flags & software) != 0,
+    }
+}
+
+/// Every DXGI adapter, in DXGI's order, with what `pick_adapter` reads.
+fn list() -> Result<Vec<(IDXGIAdapter1, AdapterInfo)>, GpuError> {
+    let factory = unsafe { CreateDXGIFactory1::<IDXGIFactory1>() }
+        .map_err(|e| failed("CreateDXGIFactory1", &e))?;
+    let mut adapters = Vec::new();
+    for index in 0u32.. {
+        let adapter = match unsafe { factory.EnumAdapters1(index) } {
+            Ok(adapter) => adapter,
+            Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break,
+            Err(e) => return Err(failed("EnumAdapters1", &e)),
+        };
+        let desc = unsafe { adapter.GetDesc1() }.map_err(|e| failed("GetDesc1", &e))?;
+        adapters.push((adapter, info_of(&desc)));
+    }
+    Ok(adapters)
+}
+
+/// Every DXGI adapter of this machine, in DXGI's order (the Microsoft Basic
+/// Render Driver is always listed, last).
+pub fn adapters() -> Result<Vec<AdapterInfo>, GpuError> {
+    Ok(list()?.into_iter().map(|(_, info)| info).collect())
+}
+
+/// The device on the adapter `pick_adapter` chooses, and that adapter.
+/// Logs every adapter seen.
+pub(super) fn create_on_picked() -> Result<(Device, AdapterInfo), GpuError> {
+    let mut adapters = list()?;
+    let infos: Vec<AdapterInfo> = adapters.iter().map(|(_, info)| info.clone()).collect();
+    for (index, info) in infos.iter().enumerate() {
+        info!(
+            index,
+            name = %info.name,
+            vendor_id = info.vendor_id,
+            device_id = info.device_id,
+            vram_mb = info.dedicated_video_memory / (1024 * 1024),
+            software = info.is_software(),
+            "sp-gpu: DXGI adapter"
+        );
+    }
+    let Some(picked) = pick_adapter(&infos) else {
+        return Err(GpuError::NoAdapter);
+    };
+    let (hardware, info) = adapters.swap_remove(picked);
+    let adapter: &IDXGIAdapter = &hardware;
+    let device = create(Some(adapter), D3D_DRIVER_TYPE_UNKNOWN)?;
+    Ok((device, info))
+}
+
+/// A WARP device (the CPU rasterizer), and its adapter as DXGI describes it.
+pub(super) fn create_warp() -> Result<(Device, AdapterInfo), GpuError> {
+    let device = create(None, D3D_DRIVER_TYPE_WARP)?;
+    let info = adapter_of(&device.0)?;
+    Ok((device, info))
+}
+
+/// `D3D11CreateDevice` at feature level 11.1 or 11.0, with BGRA support (the
+/// render target's format, and Spout's).
+fn create(adapter: Option<&IDXGIAdapter>, driver: D3D_DRIVER_TYPE) -> Result<Device, GpuError> {
+    let mut device: Option<ID3D11Device> = None;
+    let mut context: Option<ID3D11DeviceContext> = None;
+    unsafe {
+        D3D11CreateDevice(
+            adapter,
+            driver,
+            None,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            Some(&FEATURE_LEVELS[..]),
+            D3D11_SDK_VERSION,
+            Some(&mut device),
+            None,
+            Some(&mut context),
+        )
+    }
+    .map_err(|e| failed("D3D11CreateDevice", &e))?;
+    match (device, context) {
+        (Some(device), Some(context)) => Ok((device, context)),
+        _ => Err(GpuError::Api {
+            call: "D3D11CreateDevice (no device returned)",
+            hresult: 0,
+        }),
+    }
+}
+
+/// The adapter a device runs on, as DXGI describes it.
+fn adapter_of(device: &ID3D11Device) -> Result<AdapterInfo, GpuError> {
+    let dxgi: IDXGIDevice = device.cast().map_err(|e| failed("IDXGIDevice", &e))?;
+    let adapter = unsafe { dxgi.GetAdapter() }.map_err(|e| failed("GetAdapter", &e))?;
+    let adapter: IDXGIAdapter1 = adapter.cast().map_err(|e| failed("IDXGIAdapter1", &e))?;
+    let desc = unsafe { adapter.GetDesc1() }.map_err(|e| failed("GetDesc1", &e))?;
+    Ok(info_of(&desc))
+}
