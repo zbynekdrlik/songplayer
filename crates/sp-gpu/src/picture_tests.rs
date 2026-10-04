@@ -88,7 +88,9 @@ fn a_picture_with_no_pixels_is_refused() {
 fn a_side_over_the_texture_limit_is_refused() {
     let side = MAX_PICTURE_SIDE;
     let data = vec![0u8; (side as usize + 2) * 3];
+    // Exactly the limit is taken, on either side.
     assert!(picture(side, 2, side, &data).planes().is_ok());
+    assert!(picture(2, side, 2, &data).planes().is_ok());
     assert_eq!(
         picture(side + 1, 2, side + 2, &data).planes(),
         Err(PictureError::TooLarge {
