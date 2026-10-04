@@ -29,6 +29,7 @@ use super::{PlaybackEngine, PlaybackEngineConfig};
 const PLAYING: i64 = 22_501;
 const IDLE: i64 = 22_502;
 const MODE_CHANGED: i64 = 22_503;
+const DB_DOWN: i64 = 22_504;
 const SONG: i64 = 22_542;
 
 /// The replay's messages about `ids`, in the order a new client gets them.
@@ -196,5 +197,30 @@ async fn a_mode_change_is_told_to_the_dashboards_at_once_and_to_the_next_one() {
         replay_of(replay, &[MODE_CHANGED]),
         vec![told],
         "and so is the next dashboard that connects"
+    );
+}
+
+/// Review round 2: a failed DB read (no playlist list) still tells a new
+/// dashboard every playlist the engine has told the open ones about.
+#[tokio::test]
+async fn a_failed_playlist_read_still_replays_what_the_engine_told() {
+    let state = crate::api::routes::tests::test_state().await;
+    let (mut engine, _ws_rx, _resolume_rx) = engine_on(&state);
+    engine.ensure_pipeline(DB_DOWN, "SP-225d");
+    engine.set_state_for_test(DB_DOWN, PlayState::Playing { video_id: 7 });
+    engine.broadcast_state(DB_DOWN);
+
+    // The playlist read fails from here on.
+    state.pool.close().await;
+
+    let replay = crate::api::websocket::on_connect_replay(&state).await;
+    assert_eq!(
+        replay_of(replay, &[DB_DOWN]),
+        vec![ServerMsg::PlaybackStateChanged {
+            playlist_id: DB_DOWN,
+            state: PlaybackState::WaitingForScene,
+            mode: PlaybackMode::Continuous,
+            transport: TransportState::Playing,
+        }]
     );
 }

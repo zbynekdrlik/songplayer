@@ -286,18 +286,27 @@ async fn the_engine_records_what_it_tells_the_dashboard_and_still_broadcasts_it(
     );
 }
 
+/// Review round 2: the open dashboards are told the removed playlist is
+/// idle, so they agree with a reload (whose replay says Idle).
 #[tokio::test]
-async fn a_removed_pipeline_is_forgotten() {
-    let (mut engine, _ws_rx) = engine().await;
+async fn a_removed_pipeline_is_told_idle_and_forgotten() {
+    let (mut engine, mut ws_rx) = engine().await;
     engine.ensure_pipeline(REMOVED, "SP-225-removed");
     engine.set_state_for_test(REMOVED, PlayState::Playing { video_id: 2 });
     engine.set_scene_active_for_test(REMOVED, true);
     engine.broadcast_state(REMOVED);
+    while ws_rx.try_recv().is_ok() {}
 
     engine.remove_pipeline(REMOVED);
 
     assert_eq!(
+        ws_rx.try_recv().ok(),
+        Some(idle(REMOVED, PlaybackMode::Continuous)),
+        "the open dashboards are told it is idle"
+    );
+    assert_eq!(
         global_replay_of(REMOVED),
-        vec![idle(REMOVED, PlaybackMode::Continuous)]
+        vec![idle(REMOVED, PlaybackMode::Continuous)],
+        "and the next one is told the same"
     );
 }

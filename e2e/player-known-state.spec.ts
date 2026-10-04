@@ -120,23 +120,14 @@ test.describe("the Player on page load (#225)", () => {
     // `?playlist=1` pins the work area to playlist 1 (Worship), which plays.
     await page.goto("/?playlist=1");
 
-    const title = page.getByTestId("player-title");
-    // The state is known: it plays, on program …
-    await expect(page.getByTestId("player-state")).toHaveText("Hrá", {
-      timeout: 15000,
+    // The end state, polled: the song, playing on program, its mixer.
+    await expect(page.getByTestId("player-title")).toContainText(SONG, {
+      timeout: 20000,
     });
+    await expect(page.getByTestId("player-state")).toHaveText("Hrá");
     await expect(page.getByTestId("player-program-badge")).toHaveText(
       "● Na programe",
     );
-    // … but its song is not, so the Player says it is loading, not that
-    // nothing plays.
-    await expect(title).toHaveText("Načítavam…");
-    await expect(page.getByTestId("player-mixer-pending")).toHaveText(
-      "Mixér — načítavam…",
-    );
-
-    // Then the song arrives.
-    await expect(title).toContainText(SONG, { timeout: 10000 });
     await expect(page.getByTestId("player-mixer-idle")).toHaveCount(0);
     await expect(page.getByTestId("player-mixer-pending")).toHaveCount(0);
 
@@ -145,8 +136,9 @@ test.describe("the Player on page load (#225)", () => {
       claimsNothingPlays(seen),
       `the Player claimed nothing plays: ${JSON.stringify(seen)}`,
     ).toEqual([]);
-    // The recorded read-outs hold the window whatever the polling saw: told
-    // it plays on program, its song not here yet.
+    // The window in between, from the recorded read-outs (a poll could miss
+    // it): told it plays on program, its song not here yet, so "Načítavam…"
+    // and the pending mixer line ("Mixér — načítavam…"), never "nič nehrá".
     expect(
       seen.some(
         (r) =>
@@ -169,15 +161,10 @@ test.describe("the Player on page load (#225)", () => {
     await recordPlayer(page);
     await page.goto("/?playlist=1");
 
-    // Nothing is known yet: no claim about the song, the state or the program.
-    const title = page.getByTestId("player-title");
-    await expect(title).toHaveText("Načítavam…", { timeout: 15000 });
-    await expect(page.getByTestId("player-state")).toHaveText("—");
-    await expect(page.getByTestId("player-program-badge")).toHaveText("◌ —");
-    await expect(page.getByTestId("player-mixer-pending")).toBeVisible();
-
-    // The replay: the song, its state, its program.
-    await expect(title).toContainText(SONG, { timeout: 10000 });
+    // The end state, polled: the replay's song, its state, its program.
+    await expect(page.getByTestId("player-title")).toContainText(SONG, {
+      timeout: 20000,
+    });
     await expect(page.getByTestId("player-state")).toHaveText("Hrá");
     await expect(page.getByTestId("player-program-badge")).toHaveText(
       "● Na programe",
@@ -196,8 +183,8 @@ test.describe("the Player on page load (#225)", () => {
       falseClaims,
       `the Player claimed a state it was not told: ${JSON.stringify(seen)}`,
     ).toEqual([]);
-    // The recorded read-outs hold the "nothing told yet" state whatever the
-    // polling saw.
+    // Before the replay, from the recorded read-outs (a poll could miss it):
+    // nothing told yet, so no claim about the song, the state or the program.
     expect(
       seen.some(
         (r) =>
@@ -208,6 +195,55 @@ test.describe("the Player on page load (#225)", () => {
       ),
       `no read-out of the Player before the replay: ${JSON.stringify(seen)}`,
     ).toBe(true);
+  });
+});
+
+test.describe("the Player once told a playlist has no song (#225 review round 2)", () => {
+  test("after a reconnect it forgets the old socket's song: a playlist waiting with no song reads 'Nič nehrá'", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/?playlist=1");
+    const title = page.getByTestId("player-title");
+    await expect(title).toContainText(SONG, { timeout: 15000 });
+
+    // A server restart: playlist 1 now waits for its scene with nothing
+    // loaded (no song), and every socket drops; the dashboard reconnects and
+    // gets the new replay (its state, no NowPlaying).
+    await request.post("/__mock/ws-replay", {
+      data: {
+        no_song: [
+          { playlist_id: 1, state: "WaitingForScene", transport: "Paused" },
+        ],
+      },
+    });
+    const dropped = await request.post("/__mock/ws-drop");
+    expect(dropped.ok()).toBe(true);
+
+    // The old socket's song is not kept as if it were still loaded.
+    await expect(title).toHaveText("Nič nehrá", { timeout: 15000 });
+    await expect(page.getByTestId("player-state")).toHaveText("Čaká na scénu");
+    await expect(page.getByTestId("player-mixer-idle")).toBeVisible();
+  });
+
+  test("a live Idle clears the song it had", async ({ page, request }) => {
+    await page.goto("/?playlist=1");
+    await socketOpen(page);
+    const title = page.getByTestId("player-title");
+    await expect(title).toContainText(SONG, { timeout: 15000 });
+
+    // Its pipeline is removed (a deactivate): the server tells the open
+    // dashboards it is Idle, and no song follows.
+    await request.post("/__mock/ws-replay", {
+      data: { no_song: [{ playlist_id: 1, state: "Idle", transport: "Idle" }] },
+    });
+    await request.post("/__mock/set-playing", {
+      data: { playlist_id: 1, state: "Idle", transport: "Idle" },
+    });
+
+    await expect(title).toHaveText("Nič nehrá", { timeout: 10000 });
+    await expect(page.getByTestId("player-state")).toHaveText("Nehrá");
+    await expect(page.getByTestId("player-mixer-idle")).toBeVisible();
   });
 });
 

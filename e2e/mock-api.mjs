@@ -1538,8 +1538,12 @@ setInterval(() => {
 //   delay_ms — when the replay lands after the socket opens (default 100);
 //   now_playing_delay_ms — send a playing playlist's NowPlaying this long AFTER
 //     its state instead of before it (default 0): a first NowPlaying that
-//     arrives late, as a live ▶ before its song's `Started`.
-const WS_REPLAY_DEFAULTS = { delay_ms: 100, now_playing_delay_ms: 0 };
+//     arrives late, as a live ▶ before its song's `Started`;
+//   no_song — `[{playlist_id, state, transport}]`: playlists that have NO song
+//     now (review round 2: a server restart, a removed pipeline). The replay
+//     tells each this state and no NowPlaying, and the 2 s playlist-1 song
+//     interval skips them (read at every tick).
+const WS_REPLAY_DEFAULTS = { delay_ms: 100, now_playing_delay_ms: 0, no_song: [] };
 let wsReplay = { ...WS_REPLAY_DEFAULTS };
 app.post("/__mock/ws-replay", (req, res) => {
   const b = req.body || {};
@@ -1550,9 +1554,27 @@ app.post("/__mock/ws-replay", (req, res) => {
       typeof b.now_playing_delay_ms === "number"
         ? b.now_playing_delay_ms
         : WS_REPLAY_DEFAULTS.now_playing_delay_ms,
+    no_song: Array.isArray(b.no_song) ? b.no_song : WS_REPLAY_DEFAULTS.no_song,
   };
   res.json(wsReplay);
 });
+
+// Review round 2: close every dashboard socket (as a server restart does); the
+// dashboard reconnects ~2 s later and gets a fresh replay.
+app.post("/__mock/ws-drop", (_req, res) => {
+  let closed = 0;
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) {
+      ws.close();
+      closed += 1;
+    }
+  }
+  res.json({ status: "closed", clients: closed });
+});
+
+function hasNoSong(pid) {
+  return wsReplay.no_song.some((n) => n.playlist_id === pid);
+}
 
 const PLAYLIST_1_NOW_PLAYING = {
   playlist_id: 1,
@@ -1584,6 +1606,13 @@ function replayPlaying() {
       });
     }
   }
+  for (const n of wsReplay.no_song) {
+    playing.set(n.playlist_id, {
+      state: n.state,
+      transport: n.transport,
+      now_playing: null,
+    });
+  }
   return playing;
 }
 
@@ -1605,7 +1634,9 @@ function sendReplay(ws, timers) {
   for (const pid of ids) {
     const p = playing.get(pid);
     if (p && p.state !== "Idle") {
-      if (wsReplay.now_playing_delay_ms > 0) late.push(p.now_playing);
+      if (p.now_playing === null) {
+        // no song: the state alone
+      } else if (wsReplay.now_playing_delay_ms > 0) late.push(p.now_playing);
       else send({ type: "NowPlaying", data: p.now_playing });
       send({
         type: "PlaybackStateChanged",
@@ -1908,7 +1939,7 @@ wss.on("connection", (ws) => {
   const songHoldUntil =
     Date.now() + wsReplay.delay_ms + wsReplay.now_playing_delay_ms;
   const interval = setInterval(() => {
-    if (Date.now() < songHoldUntil) return;
+    if (Date.now() < songHoldUntil || hasNoSong(1)) return;
     const msg = {
       type: "NowPlaying",
       data: {
