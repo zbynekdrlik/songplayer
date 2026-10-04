@@ -55,6 +55,7 @@ use std::f64::consts::FRAC_PI_2;
 
 use serde::Serialize;
 use sp_core::genlock::{GENLOCK_GRID_FPS, grid_boundary_100ns, grid_index_100ns};
+use sp_core::nv12::{nv12_chroma_row, nv12_len};
 use sp_ndi::AudioFrame;
 
 use crate::playback::nv12_fit::aspect_fit;
@@ -462,14 +463,12 @@ fn bilinear(p00: u8, p01: u8, p10: u8, p11: u8, wx: u32, wy: u32) -> u8 {
 /// Whether `layout` is an NV12 picture a buffer of `len` bytes holds whole:
 /// a stride that fits a row of chroma pairs, and a luma plane + a half-height
 /// chroma plane of `stride` bytes per row. (A zero-size picture passes, and
-/// draws nothing: its placement, or its capped destination, is empty.)
+/// draws nothing: its placement, or its capped destination, is empty.) The
+/// two sizes are `sp_core::nv12`'s, which the `SP-program-MAX` compositor
+/// checks its pictures by too (#223 S1a).
 fn nv12_whole(layout: Layout, len: usize) -> bool {
-    let (w, h, stride) = (
-        layout.width as usize,
-        layout.height as usize,
-        layout.stride as usize,
-    );
-    stride >= 2 * w.div_ceil(2) && len >= stride * (h + h.div_ceil(2))
+    let stride = layout.stride as usize;
+    stride >= nv12_chroma_row(layout.width) && len >= nv12_len(layout.stride, layout.height)
 }
 
 /// How a picture is fitted into another layout (#215 addendum A; since #223

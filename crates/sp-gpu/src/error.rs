@@ -49,6 +49,10 @@ pub enum GpuError {
     /// Any other Direct3D / DXGI failure.
     #[error("{call} failed (HRESULT {hresult:#010x})")]
     Api { call: &'static str, hresult: u32 },
+    /// A create call reported success but handed back no object (or a
+    /// texture slot the draw needs is empty): an API or compositor bug.
+    #[error("{call} gave no object")]
+    NoObject { call: &'static str },
     /// A shader did not compile; `log` is the compiler's message.
     #[error("the {stage} shader did not compile: {log}")]
     Shader { stage: &'static str, log: String },

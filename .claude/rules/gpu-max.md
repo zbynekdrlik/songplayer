@@ -26,7 +26,8 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
 - The draw:
   - clear to (0, 0, 0, 1);
   - each quad ADDS `saturate(rgb) · weight`: blend one/one, write mask RGB
-    only, so alpha stays 255 (Arena reads alpha);
+    only, so alpha stays the clear's 255 — an opaque frame, whatever a Spout
+    receiver does with alpha;
   - where a quad does not reach (its bars), it adds nothing.
 
   So a fade is `from·(1 − w) + to·w` with black bars, like the CPU fade.
@@ -48,12 +49,20 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
 - `reference.rs` is the CPU model of exactly that. It quantizes the render
   target between draws, `c = unorm8(c/255 + rgb·w)`. The WARP pins compare
   with it, not with `nv12_mix` (which outputs NV12 at canvas resolution).
-- **The ±1 tolerance and its precondition.** D3D11 guarantees only 8 bits of
-  sub-texel filter-weight precision, and float → UNORM rounding may differ by
-  0.6 ULP. So the test pictures must be SMOOTH: `tests/warp.rs` `pattern` =
-  triangle waves, ≤ 12 luma codes per texel and ≤ 8 chroma codes per chroma
-  texel. A sharp test edge (0 → 255 between texels) could miss by 2–3 codes
-  on correct code. Do not "fix" that by widening the tolerance.
+- **The tolerance: one code per quad covering the pixel**
+  (`reference::tolerance`).
+  - D3D11 guarantees only 8 bits of sub-texel filter-weight precision, and
+    float → UNORM rounding may differ by 0.6 ULP. Each stored draw rounds
+    once, so each layer may add one code.
+  - So the bars are exact, a plain picture is ±1, and a fade's overlap is ±2.
+    Review round 1 simulated 8-bit weights: 22 of the 50 % fade's pins were
+    2 codes off, so a flat ±1 would fail on correct code.
+  - The proof needs each layer's colour within 1 code of the model, so the
+    test pictures must be SMOOTH: `tests/warp.rs` `pattern` = triangle waves,
+    ≤ 12 luma codes per texel across, ≤ 5 down, ≤ 8 chroma codes per chroma
+    texel (≤ ~0.2 code of filter error).
+  - A sharp test edge (0 → 255 between texels) breaks it. Never widen the
+    tolerance; keep the pictures smooth.
 
 ## Uploads (`residency.rs`, `win/textures.rs`)
 
@@ -67,9 +76,15 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
 - The id is the caller's: S2 must take it from a COUNTER, never from an
   `Arc` address (a freed buffer's address comes back, and a stale texture
   would be shown).
-- `compose` checks every picture (`Nv12Picture::planes`, the rule of
-  sp-server's `nv12_whole`) BEFORE any upload. A refused picture leaves the
-  last frame.
+- `compose` checks every picture (`Nv12Picture::planes`) BEFORE any upload.
+  A refused picture leaves the last frame. "Whole NV12" is
+  `sp_core::nv12::{nv12_chroma_row, nv12_len}`, the two sizes sp-server's
+  `program_transition::nv12_whole` checks too: one rule for the CPU and the
+  GPU path.
+- The slot is per side, as dispatched. At a fade's end the incoming picture
+  is drawn as a plain picture from the `Outgoing` slot, so a held incoming
+  picture is uploaded once more (one upload; a live song brings a new id
+  every boundary anyway).
 
 ## Device, render target, Spout facts
 
@@ -77,7 +92,9 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
   never takes the Basic Render Driver (0x1414/0x8C) or any adapter with 0
   VRAM (the box's virtual display adapters). `Compositor::new` never falls
   back to WARP: no candidate means `GpuError::NoAdapter`. `new_warp()` is for
-  tests and CI.
+  tests and CI. `new_on_listed_adapter(i)` (doc-hidden) runs `new`'s
+  explicit-adapter path on DXGI's adapter `i`, so CI (whose only adapter is
+  the Basic Render Driver) exercises it.
 - The render target is `B8G8R8A8_UNORM`, `BIND_RENDER_TARGET |
   BIND_SHADER_RESOURCE`, `D3D11_RESOURCE_MISC_SHARED`, NOT keyed.
 - **Spout2 2.007.017 facts** (SpoutDX source, read for S1a):
@@ -92,6 +109,8 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
 - WARP supports shared resources since Windows 8 (D3D11_RESOURCE_MISC_FLAG
   docs). `tests/warp.rs` asserts the flag and a non-null `GetSharedHandle`,
   and it fails (never skips) if WARP refuses.
+- A create call that succeeds with no object, or an empty slot at draw
+  time, is `GpuError::NoObject` (never an `Api` error with HRESULT 0).
 - Device lost: `GpuError::from_hresult` maps DXGI's
   `DEVICE_REMOVED/HUNG/RESET/DRIVER_INTERNAL_ERROR` to
   `GpuError::DeviceLost`. `compose` checks `GetDeviceRemovedReason` after
@@ -102,8 +121,11 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
 - `upload_us`: the CPU time of this call's uploads, texture creation
   included.
 - `draw_us`: from the first draw command until an event query says the GPU
-  has finished the frame. The wait spins with `yield_now`, bounded at 10 s
-  (`GpuError::Timeout`).
+  has finished the frame. The wait spins with `yield_now` (SwitchToThread:
+  any ready thread runs first), bounded at 10 s (`GpuError::Timeout`). A 4K
+  quad on the RTX is well under a millisecond. If S2 measures the spin as a
+  cost, it can read the query a boundary later instead: Spout's copy is
+  ordered after the draw on the same context and needs no wait.
 - `uploads`: 0, 1 or 2 pictures uploaded.
 
 ## HLSL at runtime

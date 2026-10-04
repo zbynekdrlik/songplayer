@@ -1,5 +1,8 @@
 //! The compositor off Windows: there is no Direct3D 11, so it is never
-//! built. Its API matches the Windows one, so callers compile everywhere.
+//! built. It has the portable part of the Windows API (`new`, `new_warp`,
+//! `compose`, `read_back`, `adapter`), so a cross-platform caller compiles
+//! everywhere. The Direct3D accessors (`device`, `render_target`,
+//! `shared_handle`) and `adapters()` are Windows-only.
 
 use crate::adapter::AdapterInfo;
 use crate::composition::Composition;

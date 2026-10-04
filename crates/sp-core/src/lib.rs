@@ -13,6 +13,7 @@ pub mod lyrics_follow;
 pub mod metadata;
 pub mod mixer_model;
 pub mod models;
+pub mod nv12;
 pub mod playback;
 pub mod player_view;
 pub mod preview_lag;

@@ -21,12 +21,27 @@
 //!   ADDED at its weight, in order, and stored in 8 bits between the draws:
 //!   `c = unorm8(c/255 + rgb·w)`.
 //!
-//! What the GPU may do differently, and why the pins allow ±1 code value:
-//! Direct3D 11 requires only 8 bits of sub-texel precision in the filter
-//! weights (this model is exact), the float → UNORM rounding may differ by
-//! up to 0.6 ULP from round-half-away, and the GPU computes in f32. With the
-//! pins' smooth test pictures (≤ 12 codes per texel) the weights cost at
-//! most ~0.15 of a code, so every channel is within 1 code of this model.
+//! **How far a correct GPU may be from this model: [`tolerance`], one code
+//! per layer that covers the pixel.** What the GPU may do differently:
+//!
+//! - Direct3D 11 guarantees only 8 bits of sub-texel precision in the filter
+//!   weights (this model's are exact). On the pins' smooth pictures (≤ 12
+//!   luma codes per texel across, ≤ 5 down, ≤ 8 chroma codes per chroma
+//!   texel) that moves a layer's colour by at most ~0.2 of a code (the
+//!   largest row gain is B's 2.11 per chroma code);
+//! - its float → UNORM rounding may differ from round-half-away by up to
+//!   0.6 ULP, and it computes in f32.
+//!
+//! So each layer's value reaches the render target within δ < 1 code of
+//! the model's, and each stored draw rounds once. If the stored value after
+//! k − 1 layers is off by an integer n, |n| ≤ k − 1, the k-th store is
+//! `round(m + n + δ) = n + round(m + δ)`, and `round(m + δ)` is within 1 of
+//! `round(m)`: within k codes. The bars (no layer) are exactly the clear's
+//! black, a plain picture is within 1 code, and a pixel both sides of a fade
+//! cover is within 2 (review round 1: a simulation with 8-bit weights put 22
+//! of the 50 % fade's pins 2 codes off). A sharp test picture (0 → 255
+//! between texels) breaks the δ < 1 premise — keep the pins' pictures
+//! smooth.
 
 use crate::color::matrix_f32;
 use crate::composition::Layer;
@@ -52,12 +67,8 @@ pub fn pixel(layers: &[Layer<'_>], x: u32, y: u32) -> [u8; 4] {
 /// its weight, or `None` when the quad does not cover the pixel (or the
 /// picture is not whole NV12: the compositor refuses one before drawing).
 pub fn layer_rgb(layer: &Layer<'_>, x: u32, y: u32) -> Option<[f64; 3]> {
+    let (dx, dy) = offset_in(layer, x, y)?;
     let place = layer.place;
-    let dx = x.checked_sub(place.off_x)?;
-    let dy = y.checked_sub(place.off_y)?;
-    if dx >= place.w || dy >= place.h {
-        return None;
-    }
     let u = (f64::from(dx) + 0.5) / f64::from(place.w);
     let v = (f64::from(dy) + 0.5) / f64::from(place.h);
     let picture = &layer.picture;
@@ -67,6 +78,32 @@ pub fn layer_rgb(layer: &Layer<'_>, x: u32, y: u32) -> Option<[f64; 3]> {
     let cb = sample(data, planes.chroma, pitch, 2, 0, u, v);
     let cr = sample(data, planes.chroma, pitch, 2, 1, u, v);
     Some(yuv_to_rgb(luma, cb, cr))
+}
+
+/// Where canvas pixel (`x`, `y`) lies inside `layer`'s quad, or `None`
+/// when the quad does not cover it.
+fn offset_in(layer: &Layer<'_>, x: u32, y: u32) -> Option<(u32, u32)> {
+    let place = layer.place;
+    let dx = x.checked_sub(place.off_x)?;
+    let dy = y.checked_sub(place.off_y)?;
+    if dx >= place.w || dy >= place.h {
+        return None;
+    }
+    Some((dx, dy))
+}
+
+/// Whether `layer`'s quad covers canvas pixel (`x`, `y`): the pixel's centre
+/// is inside its `aspect_fit` rectangle.
+pub fn covers(layer: &Layer<'_>, x: u32, y: u32) -> bool {
+    offset_in(layer, x, y).is_some()
+}
+
+/// How many codes per colour channel a correct GPU frame may differ from
+/// [`pixel`] at (`x`, `y`): the number of `layers` that cover it (module
+/// doc). 0 means exact (the bars, the black); alpha is always exact.
+pub fn tolerance(layers: &[Layer<'_>], x: u32, y: u32) -> u8 {
+    let covering = layers.iter().filter(|layer| covers(layer, x, y)).count();
+    u8::try_from(covering).unwrap_or(u8::MAX)
 }
 
 /// Direct3D 11's bilinear sample of one channel of `plane` at normalized

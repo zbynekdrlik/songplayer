@@ -2,11 +2,13 @@
 //!
 //! Each test draws on WARP, Direct3D's CPU rasterizer (`windows-latest` has
 //! no GPU), reads the render target back, and compares it with the CPU model
-//! `sp_gpu::reference` within ±1 code value per channel (why ±1:
-//! `reference.rs`). The pictures are smooth triangle waves (≤ 12 luma codes
-//! per texel, ≤ 8 chroma codes per chroma texel), so the GPU's 8-bit filter
-//! weights stay far inside that bound, and every row carries padding bytes
-//! of 0xFF past its pixels: a stride bug would show them.
+//! `sp_gpu::reference`: every colour channel within
+//! `reference::tolerance` codes — one per quad covering the pixel, so the
+//! bars exactly, a plain picture ±1, a fade's overlap ±2 (the proof is in
+//! `reference.rs`) — and alpha exactly 255. That bound needs smooth pictures:
+//! triangle waves of ≤ 12 luma codes per texel across (≤ 5 down) and ≤ 8
+//! chroma codes per chroma texel. Every row carries 64 padding bytes of 0xFF
+//! past its pixels: a stride bug would show them.
 //!
 //! Windows only. A WARP capability the compositor needs (the shared render
 //! target included) that is missing FAILS here; nothing is skipped.
@@ -110,30 +112,36 @@ fn points(layers: &[Layer<'_>]) -> Vec<(u32, u32)> {
     points
 }
 
-/// Compare `frame` with the reference at `points(layers)`: every channel
-/// within ±1.
+/// Compare `frame` with the reference at `points(layers)`: each colour
+/// channel within `reference::tolerance` codes, alpha exact. The worst
+/// difference seen per tolerance (0, 1, 2) is printed (`--nocapture`).
 fn assert_matches_reference(frame: &[u8], layers: &[Layer<'_>], what: &str) {
     assert_eq!(frame.len(), (W * H * 4) as usize, "{what}: frame size");
     let checked = points(layers);
-    let mut worst = 0u8;
+    let mut worst = [0u8; 3];
     let mut over = Vec::new();
     for &(x, y) in &checked {
         let got = at(frame, x, y);
         let want = reference::pixel(layers, x, y);
-        let diff = got
+        let tolerance = reference::tolerance(layers, x, y);
+        let diff = got[..3]
             .iter()
-            .zip(want)
-            .map(|(g, w)| g.abs_diff(w))
+            .zip(&want[..3])
+            .map(|(g, w)| g.abs_diff(*w))
             .max()
             .unwrap_or(0);
-        worst = worst.max(diff);
-        if diff > 1 {
-            over.push(format!("({x}, {y}): got {got:?}, want {want:?}"));
+        let class = usize::from(tolerance.min(2));
+        worst[class] = worst[class].max(diff);
+        if diff > tolerance || got[3] != want[3] {
+            over.push(format!(
+                "({x}, {y}): got {got:?}, want {want:?} within {tolerance}"
+            ));
         }
     }
+    println!("{what}: worst difference by tolerance 0/1/2: {worst:?}");
     assert!(
         over.is_empty(),
-        "{what}: {} of {} points differ by more than 1 (worst {worst}), first: {:?}",
+        "{what}: {} of {} points outside the tolerance (worst by tolerance 0/1/2: {worst:?}), first: {:?}",
         over.len(),
         checked.len(),
         &over[..over.len().min(10)]
@@ -205,6 +213,57 @@ fn the_adapter_list_has_the_basic_render_driver_and_never_picks_it() {
     if let Some(picked) = pick_adapter(&adapters) {
         assert!(!adapters[picked].is_software(), "{adapters:?}");
     }
+}
+
+#[test]
+fn the_compositor_runs_on_a_listed_adapter_the_way_new_does() {
+    // windows-latest has no GPU, so Compositor::new's device path (an explicit
+    // DXGI adapter, D3D_DRIVER_TYPE_UNKNOWN) runs on the Basic Render Driver.
+    let adapters = sp_gpu::adapters().expect("DXGI lists its adapters");
+    let index = adapters
+        .iter()
+        .position(|a| a.vendor_id == 0x1414 && a.device_id == 0x8c)
+        .expect("DXGI always lists the Basic Render Driver");
+    let mut compositor = Compositor::new_on_listed_adapter(index)
+        .unwrap_or_else(|e| panic!("a device on the listed Basic Render Driver: {e}"));
+    assert_eq!(compositor.adapter(), &adapters[index]);
+    let (stride, data) = pattern(1280, 720, 5);
+    let composition = Composition::Picture(picture(1, 1280, 720, stride, &data));
+    compositor
+        .compose(&composition)
+        .expect("compose on the listed adapter");
+    let frame = compositor.read_back().expect("read back");
+    assert_matches_reference(&frame, &composition.layers(), "listed adapter");
+}
+
+#[test]
+fn new_takes_the_picked_adapter_or_reports_none() {
+    let adapters = sp_gpu::adapters().expect("DXGI lists its adapters");
+    match pick_adapter(&adapters) {
+        None => assert_eq!(
+            Compositor::new().err(),
+            Some(GpuError::NoAdapter),
+            "{adapters:?}"
+        ),
+        Some(index) => {
+            let compositor = Compositor::new().unwrap_or_else(|e| {
+                panic!(
+                    "the picked adapter {:?} must run the compositor: {e}",
+                    adapters[index]
+                )
+            });
+            assert_eq!(compositor.adapter(), &adapters[index]);
+        }
+    }
+}
+
+#[test]
+fn an_adapter_index_past_the_list_is_no_adapter() {
+    let count = sp_gpu::adapters().expect("DXGI lists its adapters").len();
+    assert_eq!(
+        Compositor::new_on_listed_adapter(count).err(),
+        Some(GpuError::NoAdapter)
+    );
 }
 
 #[test]

@@ -64,7 +64,7 @@ pub fn adapters() -> Result<Vec<AdapterInfo>, GpuError> {
 /// The device on the adapter `pick_adapter` chooses, and that adapter.
 /// Logs every adapter seen.
 pub(super) fn create_on_picked() -> Result<(Device, AdapterInfo), GpuError> {
-    let mut adapters = list()?;
+    let adapters = list()?;
     let infos: Vec<AdapterInfo> = adapters.iter().map(|(_, info)| info.clone()).collect();
     for (index, info) in infos.iter().enumerate() {
         info!(
@@ -77,10 +77,27 @@ pub(super) fn create_on_picked() -> Result<(Device, AdapterInfo), GpuError> {
             "sp-gpu: DXGI adapter"
         );
     }
-    let Some(picked) = pick_adapter(&infos) else {
+    let picked = pick_adapter(&infos).ok_or(GpuError::NoAdapter)?;
+    create_on(adapters, picked)
+}
+
+/// The device on DXGI's adapter `index` ([`adapters`]' order), whatever
+/// `pick_adapter` would say: the path `create_on_picked` takes, for a test
+/// on a box whose only adapter is software.
+pub(super) fn create_on_listed(index: usize) -> Result<(Device, AdapterInfo), GpuError> {
+    create_on(list()?, index)
+}
+
+/// The device on adapter `index` of `adapters` (`D3D_DRIVER_TYPE_UNKNOWN`:
+/// the adapter decides the driver).
+fn create_on(
+    mut adapters: Vec<(IDXGIAdapter1, AdapterInfo)>,
+    index: usize,
+) -> Result<(Device, AdapterInfo), GpuError> {
+    if index >= adapters.len() {
         return Err(GpuError::NoAdapter);
-    };
-    let (hardware, info) = adapters.swap_remove(picked);
+    }
+    let (hardware, info) = adapters.swap_remove(index);
     let adapter: &IDXGIAdapter = &hardware;
     let device = create(Some(adapter), D3D_DRIVER_TYPE_UNKNOWN)?;
     Ok((device, info))
@@ -114,9 +131,8 @@ fn create(adapter: Option<&IDXGIAdapter>, driver: D3D_DRIVER_TYPE) -> Result<Dev
     .map_err(|e| failed("D3D11CreateDevice", &e))?;
     match (device, context) {
         (Some(device), Some(context)) => Ok((device, context)),
-        _ => Err(GpuError::Api {
-            call: "D3D11CreateDevice (no device returned)",
-            hresult: 0,
+        _ => Err(GpuError::NoObject {
+            call: "D3D11CreateDevice",
         }),
     }
 }

@@ -107,7 +107,7 @@ fn compile(entry: PCSTR, target: PCSTR, stage: &'static str) -> Result<Vec<u8>, 
 
 /// Unwrap an out-parameter a successful create call must have set.
 fn created<T>(value: Option<T>, call: &'static str) -> Result<T, GpuError> {
-    value.ok_or(GpuError::Api { call, hresult: 0 })
+    value.ok_or(GpuError::NoObject { call })
 }
 
 impl Pipeline {

@@ -33,6 +33,12 @@ fn failed(call: &'static str, error: &windows::core::Error) -> GpuError {
     GpuError::from_hresult(call, error.code().0 as u32)
 }
 
+/// A layer's slot with no textures after its upload step: a compositor bug,
+/// reported instead of drawing the boundary without that layer.
+const NO_TEXTURES: GpuError = GpuError::NoObject {
+    call: "the slot's plane textures",
+};
+
 /// Whole microseconds since `start`.
 fn micros_since(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX)
@@ -67,6 +73,16 @@ impl Compositor {
     pub fn new_warp() -> Result<Self, GpuError> {
         let ((device, context), adapter) = device::create_warp()?;
         Self::build(device, context, adapter, "warp")
+    }
+
+    /// The compositor on DXGI's adapter `index` (the order of
+    /// [`adapters`](crate::adapters)), whatever `pick_adapter` would choose:
+    /// the device path [`Compositor::new`] takes, testable on a CI box whose
+    /// only adapter is the Basic Render Driver. Not for production.
+    #[doc(hidden)]
+    pub fn new_on_listed_adapter(index: usize) -> Result<Self, GpuError> {
+        let ((device, context), adapter) = device::create_on_listed(index)?;
+        Self::build(device, context, adapter, "listed")
     }
 
     fn build(
@@ -144,7 +160,7 @@ impl Compositor {
             if upload == Upload::Skip {
                 continue;
             }
-            if upload == Upload::Create || slot.is_none() {
+            if upload == Upload::Create {
                 debug!(
                     slot = layer.slot.index(),
                     width = layer.picture.width,
@@ -154,25 +170,21 @@ impl Compositor {
                 let resident = Resident::of(&layer.picture);
                 *slot = Some(PlaneTextures::new(&self.device, planes, resident)?);
             }
-            if let Some(textures) = slot.as_mut() {
-                textures.write(&self.context, &layer.picture, planes);
-            }
+            let textures = slot.as_mut().ok_or(NO_TEXTURES)?;
+            textures.write(&self.context, &layer.picture, planes);
             uploads += 1;
         }
         let upload_us = micros_since(upload_start);
 
         let draw_start = Instant::now();
-        let quads: Vec<Quad<'_>> = layers
-            .iter()
-            .filter_map(|layer| {
-                self.slots[layer.slot.index()]
-                    .as_ref()
-                    .map(|textures| Quad {
-                        constants: QuadConstants::new(layer.place, layer.weight),
-                        textures,
-                    })
-            })
-            .collect();
+        let mut quads = Vec::with_capacity(layers.len());
+        for layer in &layers {
+            let textures = self.slots[layer.slot.index()].as_ref().ok_or(NO_TEXTURES)?;
+            quads.push(Quad {
+                constants: QuadConstants::new(layer.place, layer.weight),
+                textures,
+            });
+        }
         self.pipeline.draw(&self.context, &self.target, &quads);
         self.pipeline.wait_until_done(&self.context)?;
         let draw_us = micros_since(draw_start);

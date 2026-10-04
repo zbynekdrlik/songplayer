@@ -4,7 +4,7 @@
 
 use sp_core::fit::Placement;
 
-use super::{layer_rgb, pixel, sample, taps, unorm8, yuv_to_rgb};
+use super::{covers, layer_rgb, pixel, sample, taps, tolerance, unorm8, yuv_to_rgb};
 use crate::composition::{Composition, Layer, Slot};
 use crate::picture::{Nv12Picture, Plane};
 
@@ -222,4 +222,36 @@ fn a_composed_fade_adds_each_side_where_its_quad_reaches() {
     assert_eq!(pixel(&layers, 2999, 2039), [210, 128, 64, 255], "both");
     assert_eq!(pixel(&layers, 3000, 1000), [191, 134, 26, 255], "from only");
     assert_eq!(pixel(&layers, 3839, 2159), [0, 0, 0, 255], "neither");
+}
+
+#[test]
+fn the_tolerance_is_one_code_per_layer_covering_the_pixel() {
+    // The same fade: A over rows 120..2040, B over columns 840..3000.
+    let layers = Composition::Fade {
+        from: Some(picture_a()),
+        to: Some(picture_b()),
+        weight_q8: 64,
+    }
+    .layers();
+    assert_eq!(tolerance(&layers, 100, 50), 0, "neither: exact");
+    assert_eq!(tolerance(&layers, 1000, 50), 1, "to only");
+    assert_eq!(tolerance(&layers, 100, 1000), 1, "from only");
+    assert_eq!(tolerance(&layers, 1000, 1000), 2, "both");
+    assert_eq!(
+        tolerance(&layers, 840, 120),
+        2,
+        "both, at their first pixel"
+    );
+    assert_eq!(tolerance(&layers, 839, 119), 0, "neither, just outside");
+    assert_eq!(tolerance(&[], 1000, 1000), 0, "the black");
+}
+
+#[test]
+fn a_quad_covers_exactly_its_rectangle() {
+    let quad = layer(picture_a(), (8, 4, 2, 2), 1.0);
+    assert!(covers(&quad, 2, 2));
+    assert!(covers(&quad, 9, 5));
+    assert!(!covers(&quad, 1, 2));
+    assert!(!covers(&quad, 10, 5));
+    assert!(!covers(&quad, 9, 6));
 }

@@ -55,9 +55,8 @@ fn texture(
     let mut texture: Option<ID3D11Texture2D> = None;
     unsafe { device.CreateTexture2D(desc, None, Some(&mut texture)) }
         .map_err(|e| failed("CreateTexture2D", &e))?;
-    texture.ok_or(GpuError::Api {
-        call: "CreateTexture2D (no texture returned)",
-        hresult: 0,
+    texture.ok_or(GpuError::NoObject {
+        call: "CreateTexture2D",
     })
 }
 
@@ -69,9 +68,8 @@ fn shader_view(
     let mut view: Option<ID3D11ShaderResourceView> = None;
     unsafe { device.CreateShaderResourceView(texture, None, Some(&mut view)) }
         .map_err(|e| failed("CreateShaderResourceView", &e))?;
-    view.ok_or(GpuError::Api {
-        call: "CreateShaderResourceView (no view returned)",
-        hresult: 0,
+    view.ok_or(GpuError::NoObject {
+        call: "CreateShaderResourceView",
     })
 }
 
@@ -102,9 +100,8 @@ impl RenderTarget {
         let mut view: Option<ID3D11RenderTargetView> = None;
         unsafe { device.CreateRenderTargetView(&texture, None, Some(&mut view)) }
             .map_err(|e| failed("CreateRenderTargetView", &e))?;
-        let view = view.ok_or(GpuError::Api {
-            call: "CreateRenderTargetView (no view returned)",
-            hresult: 0,
+        let view = view.ok_or(GpuError::NoObject {
+            call: "CreateRenderTargetView",
         })?;
         Ok(Self { texture, view })
     }
@@ -225,9 +222,8 @@ pub(super) fn read_back(
     if out.len() == row * rows {
         Ok(out)
     } else {
-        Err(GpuError::Api {
+        Err(GpuError::NoObject {
             call: "Map (no readable rows)",
-            hresult: 0,
         })
     }
 }
