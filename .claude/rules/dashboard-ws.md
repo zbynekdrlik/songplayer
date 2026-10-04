@@ -33,7 +33,12 @@ record: #225 comment 5917562242 (Approach 1), adapted in the
   `position_update.rs::maybe_broadcast_position_update`. A new sender of either
   message calls `send_dashboard`, never `ws_event_tx.send` directly, or a new
   client is not told it.
-- `runtime_pipeline.rs::remove_pipeline` forgets the playlist (`forget`).
+- `runtime_pipeline.rs::remove_pipeline` tells the open dashboards the
+  playlist is `Idle` (through `send_dashboard`), then forgets it (`forget`),
+  so an open dashboard and a reload agree (review round 2).
+- A client that LAGS (the broadcast channel dropped messages for it) is sent
+  the replay again (`websocket.rs::send_replay`), so a dropped state change
+  does not leave it stale until the playlist's next change.
 - **No gap between the replay and the live stream:** `handle_ws` subscribes to
   the event bus BEFORE it builds the replay, and the engine records BEFORE it
   broadcasts. A message is in the replay, arrives live, or both. A live message
@@ -79,6 +84,19 @@ Why each rule:
   AND the badge, until the playlist's next state change. The recorded message
   is exactly what a live client last got, including the raw transport (#201).
 
+## The client forgets on every socket (sp-ui)
+
+`sp-ui/src/ws.rs` calls `store.forget_now_playing()` when a socket OPENS and
+when it CLOSES (review round 2). The client reconnects without a page reload,
+and after a server restart (every deploy) the new replay tells a playlist
+`WaitingForScene` / `Idle` with no NowPlaying. Kept store entries would show
+the old socket's song as if still loaded (a phantom title, a mounted mixer, an
+enabled seek). Until the new replay lands the Player reads "Načítavam…". The
+store also drops an entry's song on a live `Idle` (a fresh entry), and the
+dashboard's auto-select keeps its selection while nothing is known
+(`pages/dashboard.rs`), so a reconnect does not flip the work area to the
+first playlist by name.
+
 ## Tests
 
 - `playback/tests_ws_replay.rs` (the #225 RED): an engine on a `test_state()`
@@ -91,7 +109,13 @@ Why each rule:
   (22 501-22 503) and filter the replay to them (other tests record into the
   same global).
 - `db/models_playlists.rs`: `all_playlist_ids` returns every id ascending,
-  inactive ones too.
+  inactive ones too. `tests_ws_replay.rs::a_failed_playlist_read_still_replays_what_the_engine_told`
+  closes the pool and checks the fallback (websocket.rs is mutation-excluded).
+- `e2e/player-known-state.spec.ts` (review round 2): `/__mock/ws-replay
+  {no_song: [{playlist_id, state, transport}]}` + `/__mock/ws-drop` (closes
+  every dashboard socket): after the reconnect a playlist waiting with no song
+  reads "Nič nehrá", never the old socket's song; a live `Idle` clears the
+  song it had.
 - `playback/dashboard_replay_tests.rs`: the rules on a private
   `DashboardReplay::default()` (one test per rule, every listed mutant mapped),
   plus the engine glue on the global (ids 22 511 / 22 512): `send_dashboard`
