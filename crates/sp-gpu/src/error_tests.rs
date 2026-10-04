@@ -49,6 +49,27 @@ fn any_other_failure_is_an_api_error() {
 }
 
 #[test]
+fn any_reason_the_device_reports_for_its_removal_is_a_lost_device() {
+    // DXGI_ERROR_INVALID_CALL: the app's own bad call removed the device.
+    const DXGI_ERROR_INVALID_CALL: u32 = 0x887A_0001;
+    for hresult in [
+        DXGI_ERROR_INVALID_CALL,
+        DXGI_ERROR_DEVICE_REMOVED,
+        E_INVALIDARG,
+    ] {
+        let error = GpuError::removed(hresult);
+        assert_eq!(
+            error,
+            GpuError::DeviceLost {
+                call: "GetDeviceRemovedReason",
+                hresult
+            }
+        );
+        assert!(error.is_device_lost());
+    }
+}
+
+#[test]
 fn the_dxgi_codes_are_the_sdk_values() {
     // dxgi.h / winerror.h: _FACILDXGI (0x87A), codes 5, 6, 7 and 0x20.
     assert_eq!(DXGI_ERROR_DEVICE_REMOVED, 0x887A_0005);

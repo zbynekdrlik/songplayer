@@ -120,7 +120,12 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
 - Device lost: `GpuError::from_hresult` maps DXGI's
   `DEVICE_REMOVED/HUNG/RESET/DRIVER_INTERNAL_ERROR` to
   `GpuError::DeviceLost`. `compose` checks `GetDeviceRemovedReason` after
-  every frame. S2 rebuilds the compositor on it and counts the rebuild.
+  every frame, and ANY reason it reports is `DeviceLost`
+  (`GpuError::removed`): `DXGI_ERROR_INVALID_CALL` there means the app's
+  own bad call removed the device. S2 rebuilds the compositor on it and
+  counts the rebuild.
+- `Nv12Picture`'s `Debug` prints its id, size and byte count, never its
+  bytes (a 1440p picture is 5.5 MB in a log line otherwise).
 
 ## Telemetry (`ComposeStats`, for S2's `max.*_p99`)
 

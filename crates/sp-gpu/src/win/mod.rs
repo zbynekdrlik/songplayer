@@ -189,7 +189,7 @@ impl Compositor {
         self.pipeline.wait_until_done(&self.context)?;
         let draw_us = micros_since(draw_start);
         unsafe { self.device.GetDeviceRemovedReason() }
-            .map_err(|e| failed("GetDeviceRemovedReason", &e))?;
+            .map_err(|e| GpuError::removed(e.code().0 as u32))?;
         Ok(ComposeStats {
             upload_us,
             draw_us,

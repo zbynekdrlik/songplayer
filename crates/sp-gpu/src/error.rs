@@ -72,6 +72,17 @@ impl GpuError {
         }
     }
 
+    /// The error of a non-OK `ID3D11Device::GetDeviceRemovedReason`: ANY
+    /// reason it reports means the device is gone — including
+    /// `DXGI_ERROR_INVALID_CALL` (the app's bad call removed it), which
+    /// [`GpuError::from_hresult`] would call an ordinary failure.
+    pub fn removed(hresult: u32) -> Self {
+        GpuError::DeviceLost {
+            call: "GetDeviceRemovedReason",
+            hresult,
+        }
+    }
+
     /// Whether the compositor must be rebuilt before the next frame.
     pub fn is_device_lost(&self) -> bool {
         matches!(self, GpuError::DeviceLost { .. })

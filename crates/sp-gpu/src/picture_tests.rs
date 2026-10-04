@@ -117,3 +117,12 @@ fn the_bytes_must_hold_both_planes() {
         Err(PictureError::Short { len: 17, need: 18 })
     );
 }
+
+#[test]
+fn a_picture_prints_its_size_never_its_bytes() {
+    let data = [7u8; 18];
+    assert_eq!(
+        format!("{:?}", picture(4, 2, 6, &data)),
+        "Nv12Picture { id: 1, width: 4, height: 2, stride: 6, bytes: 18 }"
+    );
+}

@@ -11,7 +11,7 @@ pub const MAX_PICTURE_SIDE: u32 = 16_384;
 /// `stride`-byte rows, then the interleaved UV plane, ⌈height/2⌉ rows of
 /// the same stride, each ⌈width/2⌉ U/V pairs. The bytes of a row past its
 /// pixels are never read.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Nv12Picture<'a> {
     /// The caller's identity of this picture's CONTENT: a picture with the
     /// id already uploaded on its side is not uploaded again. Never reuse an
@@ -22,6 +22,21 @@ pub struct Nv12Picture<'a> {
     pub height: u32,
     pub stride: u32,
     pub data: &'a [u8],
+}
+
+/// The picture's id, size and byte count — never its bytes (a 1440p picture
+/// is 5.5 MB; a derived `Debug` would print them into a log line or a test
+/// failure, and `Composition` / `Layer` print through this).
+impl std::fmt::Debug for Nv12Picture<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Nv12Picture")
+            .field("id", &self.id)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("stride", &self.stride)
+            .field("bytes", &self.data.len())
+            .finish()
+    }
 }
 
 /// Why a picture is refused (nothing is uploaded or drawn then).
