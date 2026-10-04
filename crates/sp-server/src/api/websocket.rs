@@ -8,7 +8,6 @@ use futures::{SinkExt, StreamExt};
 use sqlx::Row;
 use tracing::{debug, info, warn};
 
-use sp_core::playback::PlaybackMode;
 use sp_core::ws::{ClientMsg, ServerMsg};
 
 use crate::{AppState, EngineCommand, SyncRequest};
@@ -225,30 +224,20 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
 /// The messages a newly connected dashboard is sent first, after the OBS and
 /// tools status (#225): for EVERY playlist in the DB, the engine's last
 /// dashboard message about it (`playback/dashboard_replay.rs`): a playing
-/// one's song, then its state; any other an explicit `Idle`. So the Player
-/// knows from the first batch what plays and what does not. The mode is the
-/// DB's. `handle_ws` subscribes to the event bus before it calls this, so
-/// nothing the engine sends in between is lost.
+/// one's song, then its state; any other an explicit `Idle`; each in the mode
+/// the engine plays. So the Player knows from the first batch what plays and
+/// what does not. `handle_ws` subscribes to the event bus before it calls
+/// this, so nothing the engine sends in between is lost. A failed DB read
+/// still replays every playlist the engine has told the dashboard about.
 pub(crate) async fn on_connect_replay(state: &AppState) -> Vec<ServerMsg> {
-    let playlists: Vec<(i64, PlaybackMode)> =
-        match sqlx::query("SELECT id, playback_mode FROM playlists ORDER BY id")
-            .fetch_all(&state.pool)
-            .await
-        {
-            Ok(rows) => rows
-                .iter()
-                .map(|r| {
-                    let id: i64 = r.get("id");
-                    let mode: String = r.get("playback_mode");
-                    (id, PlaybackMode::from_str_lossy(&mode))
-                })
-                .collect(),
-            Err(e) => {
-                warn!("on-connect replay: failed to load the playlists: {e}");
-                Vec::new()
-            }
-        };
-    crate::playback::dashboard_replay::global().replay(&playlists)
+    let ids = match crate::db::models_playlists::all_playlist_ids(&state.pool).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            warn!("on-connect replay: failed to load the playlists: {e}");
+            Vec::new()
+        }
+    };
+    crate::playback::dashboard_replay::global().replay(&ids)
 }
 
 // ---------------------------------------------------------------------------

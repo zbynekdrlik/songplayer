@@ -47,7 +47,7 @@ fn a_playing_playlist_replays_its_last_song_then_its_state_and_an_idle_one_only_
     r.record(&state(
         1,
         PlaybackState::Playing,
-        PlaybackMode::Continuous,
+        PlaybackMode::Loop,
         TransportState::Playing,
     ));
     r.record(&song(1, 10, 0));
@@ -55,19 +55,19 @@ fn a_playing_playlist_replays_its_last_song_then_its_state_and_an_idle_one_only_
     r.record(&song(1, 10, 42_000));
 
     assert_eq!(
-        r.replay(&[(1, PlaybackMode::Loop), (2, PlaybackMode::Single)]),
+        r.replay(&[1, 2]),
         vec![
             song(1, 10, 42_000),
-            // The DB's mode, not the recorded one (a mode change broadcasts
-            // no state).
+            // The mode the engine plays (the recorded one).
             state(
                 1,
                 PlaybackState::Playing,
                 PlaybackMode::Loop,
                 TransportState::Playing
             ),
-            // Never recorded: an explicit Idle, no song.
-            idle(2, PlaybackMode::Single),
+            // Never recorded: an explicit Idle, no song, the mode every
+            // pipeline starts with.
+            idle(2, PlaybackMode::Continuous),
         ]
     );
 }
@@ -82,12 +82,9 @@ fn a_playlist_that_went_idle_replays_idle_and_not_its_old_song() {
         TransportState::Playing,
     ));
     r.record(&song(3, 30, 5_000));
-    r.record(&idle(3, PlaybackMode::Loop));
+    r.record(&idle(3, PlaybackMode::Single));
 
-    assert_eq!(
-        r.replay(&[(3, PlaybackMode::Single)]),
-        vec![idle(3, PlaybackMode::Single)]
-    );
+    assert_eq!(r.replay(&[3]), vec![idle(3, PlaybackMode::Single)]);
 }
 
 #[test]
@@ -111,7 +108,7 @@ fn an_off_program_or_paused_playlist_replays_its_song_and_its_raw_transport() {
     r.record(&song(5, 50, 9_000));
 
     assert_eq!(
-        r.replay(&[(4, PlaybackMode::Continuous), (5, PlaybackMode::Continuous)]),
+        r.replay(&[4, 5]),
         vec![
             song(4, 40, 1_000),
             state(
@@ -143,7 +140,7 @@ fn a_state_without_a_song_replays_only_the_state() {
     ));
 
     assert_eq!(
-        r.replay(&[(6, PlaybackMode::Continuous)]),
+        r.replay(&[6]),
         vec![state(
             6,
             PlaybackState::WaitingForScene,
@@ -159,21 +156,19 @@ fn a_forgotten_playlist_replays_idle_while_listed_and_nothing_once_unlisted() {
     r.record(&state(
         7,
         PlaybackState::Playing,
-        PlaybackMode::Continuous,
+        PlaybackMode::Loop,
         TransportState::Playing,
     ));
     r.record(&song(7, 70, 3_000));
     r.forget(7);
 
-    assert_eq!(
-        r.replay(&[(7, PlaybackMode::Continuous)]),
-        vec![idle(7, PlaybackMode::Continuous)]
-    );
+    // Nothing recorded any more: Idle in the mode a new pipeline starts with.
+    assert_eq!(r.replay(&[7]), vec![idle(7, PlaybackMode::Continuous)]);
     assert_eq!(r.replay(&[]), Vec::<ServerMsg>::new());
 }
 
 #[test]
-fn a_recorded_playlist_the_list_does_not_name_follows_by_id_with_its_recorded_mode() {
+fn a_recorded_playlist_the_list_does_not_name_follows_by_id() {
     let r = DashboardReplay::default();
     r.record(&song(9, 90, 2_000));
     r.record(&state(
@@ -189,9 +184,9 @@ fn a_recorded_playlist_the_list_does_not_name_follows_by_id_with_its_recorded_mo
     r.record(&idle(1, PlaybackMode::Loop));
 
     assert_eq!(
-        r.replay(&[(1, PlaybackMode::Continuous)]),
+        r.replay(&[1]),
         vec![
-            idle(1, PlaybackMode::Continuous),
+            idle(1, PlaybackMode::Loop),
             idle(8, PlaybackMode::Single),
             song(9, 90, 2_000),
             state(
@@ -235,7 +230,7 @@ const REMOVED: i64 = 22_512;
 /// record into it too).
 fn global_replay_of(playlist_id: i64) -> Vec<ServerMsg> {
     global()
-        .replay(&[(playlist_id, PlaybackMode::Continuous)])
+        .replay(&[playlist_id])
         .into_iter()
         .filter(|m| match m {
             ServerMsg::NowPlaying { playlist_id: p, .. }

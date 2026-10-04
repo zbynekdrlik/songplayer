@@ -604,6 +604,7 @@ impl PlaybackEngine {
             if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                 pp.mode = *new_mode;
             }
+            self.broadcast_state(playlist_id); // #225: dashboards learn the mode it plays
         }
         // #215: a skip of a playlist held off program starts no song there.
         if matches!(cmd, PlayEvent::Skip) && self.pause_if_held(playlist_id, "skipped").await {

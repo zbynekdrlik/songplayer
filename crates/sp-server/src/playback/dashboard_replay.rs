@@ -18,8 +18,11 @@
 //!   had one) FIRST, then its state, so a state never lands without its song;
 //! - any other playlist: an explicit `Idle` state and no `NowPlaying`.
 //!
-//! The mode is the DB's (the caller's list), as the replay always did: a mode
-//! change broadcasts no state, so the recorded one can be stale.
+//! The mode is the ENGINE's (review round 1): the recorded one, else
+//! `PlaybackMode::default()`, the mode every pipeline starts with. The engine
+//! never reads the DB's `playlists.playback_mode` and a mode change is not
+//! written back, so the DB value is not what plays. A mode change broadcasts
+//! the playlist's state (`handle_command`), so the record is never stale.
 //!
 //! A process-global, like `now_playing::global()` (#177): written by the
 //! engine, read by the API without the engine's command channel, and no new
@@ -29,7 +32,10 @@
 //! Nothing is lost between the replay and the live stream: the WS handler
 //! subscribes to the event bus BEFORE it reads the replay, and the engine
 //! records BEFORE it broadcasts, so a message is in the replay, or arrives
-//! live, or both (the same value twice, harmless).
+//! live, or both. A live message queued between the subscribe and the read
+//! is delivered AFTER the replay even when it is older than the replayed
+//! value, so a new client can briefly see the older value (a position a tick
+//! back, the state before) until the next live message, a few ms later.
 
 use std::collections::HashMap;
 use std::sync::{OnceLock, PoisonError, RwLock};
@@ -84,25 +90,20 @@ impl DashboardReplay {
         map.remove(&playlist_id);
     }
 
-    /// The on-connect replay (module doc). `playlists` = every playlist in the
-    /// DB, in order, with its configured mode. A recorded playlist the list
-    /// does not name (the DB read failed) follows, by id, with its recorded
-    /// mode.
-    pub fn replay(&self, playlists: &[(i64, PlaybackMode)]) -> Vec<ServerMsg> {
+    /// The on-connect replay (module doc). `playlist_ids` = every playlist in
+    /// the DB, in order. A recorded playlist the list does not name (the DB
+    /// read failed) follows, by id.
+    pub fn replay(&self, playlist_ids: &[i64]) -> Vec<ServerMsg> {
         let map = self.inner.read().unwrap_or_else(PoisonError::into_inner);
         let mut unlisted: Vec<i64> = map
             .keys()
             .copied()
-            .filter(|id| !playlists.iter().any(|(listed, _)| listed == id))
+            .filter(|id| !playlist_ids.contains(id))
             .collect();
         unlisted.sort_unstable();
-        let rows = playlists
-            .iter()
-            .map(|&(id, mode)| (id, Some(mode)))
-            .chain(unlisted.into_iter().map(|id| (id, None)));
 
         let mut out = Vec::new();
-        for (playlist_id, db_mode) in rows {
+        for playlist_id in playlist_ids.iter().copied().chain(unlisted) {
             let entry = map.get(&playlist_id);
             let recorded = entry.and_then(|e| e.state);
             match recorded {
@@ -111,19 +112,16 @@ impl DashboardReplay {
                     out.push(ServerMsg::PlaybackStateChanged {
                         playlist_id,
                         state,
-                        mode: db_mode.unwrap_or(mode),
+                        mode,
                         transport,
                     });
                 }
-                _ => {
-                    let recorded_mode = recorded.map(|(_, mode, _)| mode).unwrap_or_default();
-                    out.push(ServerMsg::PlaybackStateChanged {
-                        playlist_id,
-                        state: PlaybackState::Idle,
-                        mode: db_mode.unwrap_or(recorded_mode),
-                        transport: TransportState::Idle,
-                    });
-                }
+                _ => out.push(ServerMsg::PlaybackStateChanged {
+                    playlist_id,
+                    state: PlaybackState::Idle,
+                    mode: recorded.map(|(_, mode, _)| mode).unwrap_or_default(),
+                    transport: TransportState::Idle,
+                }),
             }
         }
         out
