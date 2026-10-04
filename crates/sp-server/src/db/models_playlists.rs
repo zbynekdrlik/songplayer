@@ -22,19 +22,22 @@ pub fn row_mode(playlist_id: i64, name: &str, stored: &str) -> PlaybackMode {
     })
 }
 
-/// Every playlist's id and row mode ([`row_mode`]), ascending — active or
-/// not, since the dashboard lists them all. The WS on-connect replay tells
-/// each one's state; one the engine has not told about, in its row's mode.
+/// Every playlist's id and row mode, ascending — active or not, since the
+/// dashboard lists them all. The WS on-connect replay tells each one's
+/// state; one the engine has not told about, in its row's mode. An unknown
+/// stored value is the default here too, but quietly: this runs on every
+/// dashboard connect, and the WARN belongs to the pipeline's start
+/// ([`row_mode`]).
 pub async fn all_playlist_modes(
     pool: &SqlitePool,
 ) -> Result<Vec<(i64, PlaybackMode)>, sqlx::Error> {
-    let rows: Vec<(i64, String, String)> =
-        sqlx::query_as("SELECT id, name, playback_mode FROM playlists ORDER BY id")
+    let rows: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, playback_mode FROM playlists ORDER BY id")
             .fetch_all(pool)
             .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, name, stored)| (id, row_mode(id, &name, &stored)))
+        .map(|(id, stored)| (id, PlaybackMode::from_str_lossy(&stored)))
         .collect())
 }
 

@@ -12,17 +12,18 @@
 //!   select;
 //! - the WS `ClientMsg::SetMode` (`api/websocket.rs`), through the same
 //!   [`persist_then_tell`];
-//! - the playlist PATCH (`routes::update_playlist`), which writes the row
-//!   with its other fields, then calls [`tell_engine`].
+//! - the playlist update (`PUT /api/v1/playlists/{id}`,
+//!   `routes::update_playlist`), which writes the row with its other fields,
+//!   then calls [`tell_engine`].
 //!
 //! A write that fails is logged and answered (500, or a WS `Error` to every
 //! open dashboard), and the engine is never told, so it keeps the mode the
-//! row still holds. An unknown requested mode is refused (400) by the PUT,
-//! the PATCH and the playlist POST ([`requested_mode`]), so every row the
-//! API writes parses.
+//! row still holds. An unknown requested mode is refused (400) by the mode
+//! route, the playlist update and the playlist POST ([`requested_mode`]), so
+//! every row the API writes parses.
 //!
 //! [`MODE_ORDER`] is held across "write the row, tell the engine" (and by
-//! the PATCH and the playlist DELETE), so the engine is told concurrent
+//! the playlist update and the playlist DELETE), so the engine is told concurrent
 //! changes in the order the row took them. Without it, the row's last write
 //! and the engine's last mode could differ, or a mode could reach the engine
 //! after it forgot a deleted playlist.
@@ -47,7 +48,7 @@ pub struct SetModeRequest {
 /// Held across "write the row, then tell the engine" (module doc).
 pub(crate) static MODE_ORDER: Mutex<()> = Mutex::const_new(());
 
-/// A requested mode (the PUT's body, the PATCH's or the POST's field) by
+/// A requested mode (the mode route's body, the playlist update's or POST's field) by
 /// its canonical name: `Ok(None)` when none is given, `Err(400)` for an
 /// unknown one, WARNed with the playlist (none yet for the POST) and at most
 /// 32 of its characters, escaped.
@@ -125,7 +126,9 @@ pub(crate) async fn persist_then_tell(
 }
 
 /// Tell the engine a mode its playlist's row now holds. The caller wrote the
-/// row first, holding [`MODE_ORDER`].
+/// row first, holding [`MODE_ORDER`]. An engine that is gone (the process
+/// shutting down) is an ERROR: the row holds the mode, which the next start
+/// plays.
 pub(crate) async fn tell_engine(
     engine_tx: &mpsc::Sender<EngineCommand>,
     playlist_id: i64,
@@ -136,7 +139,15 @@ pub(crate) async fn tell_engine(
         mode = mode.as_str(),
         "playback mode saved — telling the engine"
     );
-    let _ = engine_tx
+    let told = engine_tx
         .send(EngineCommand::SetMode { playlist_id, mode })
         .await;
+    if let Err(e) = told {
+        error!(
+            playlist_id,
+            mode = mode.as_str(),
+            %e,
+            "the engine is gone — the mode is saved, the next start plays it"
+        );
+    }
 }
