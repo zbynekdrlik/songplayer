@@ -118,23 +118,31 @@ Main's ROZHODNUTÉ: #225 comment 5975832356; how it is built: the
   - `PUT /api/v1/playback/{id}/mode` (the Player's mode select) and the WS
     `ClientMsg::SetMode` go through `persist_then_tell`: the UPDATE first;
     0 rows → 404; a failed write → an ERROR log + 500 (the Player's "Zmena
-    režimu zlyhala" toast; for the WS path a Slovak `ServerMsg::Error`
-    broadcast to every open dashboard's error banner), and the engine is
-    NEVER told, so it keeps the mode the row still holds. Only a written row
-    sends `EngineCommand::SetMode`.
-  - The playlist PATCH writes the row with its other fields, then calls
-    `tell_engine` (before `EnsurePipeline` / `RemovePipeline`). A failed
-    PATCH write logs ERROR too.
-  - `requested_mode` is the one check of a requested mode — the PUT's body,
-    the PATCH's and the playlist POST's field: an unknown one is 400 (a WARN
-    with at most 32 of its characters), a known one is stored by its
-    canonical name (`as_str`; the POST's default when none is given), so
-    every row the API writes parses.
+    režimu zlyhala" toast), and the engine is NEVER told, so it keeps the
+    mode the row still holds. Only a written row sends
+    `EngineCommand::SetMode`. The WS path tells either failure (an unknown
+    playlist or a failed write) as a Slovak `ServerMsg::Error` broadcast to
+    every open dashboard's error banner. An engine that is gone when told
+    (shutdown) is an ERROR log; the row holds the mode for the next start.
+  - The playlist update (`PUT /api/v1/playlists/{id}`,
+    `routes::update_playlist`; there is NO PATCH route — axum answers 405)
+    writes the row with its other fields, then calls `tell_engine` (before
+    `EnsurePipeline` / `RemovePipeline`). A failed write logs ERROR too.
+  - `requested_mode` is the one check of a requested mode — the mode
+    route's body, the playlist update's and the playlist POST's field: an
+    unknown one is 400 (a WARN naming the playlist, with at most 32 of its
+    characters, escaped), a known one is stored by its canonical name
+    (`as_str`; the POST's default when none is given), so every row the API
+    writes parses.
   - `MODE_ORDER` (a `tokio::sync::Mutex`, like `cache::SONG_FILES`) is held
-    across "write the row, tell the engine", across the PATCH and across the
-    playlist DELETE, so the engine receives concurrent changes in the order
-    the row took them (its command channel is FIFO), and no mode reaches it
-    after it forgot a deleted playlist (the record would be replayed).
+    across "write the row, tell the engine", across the playlist update and
+    across the playlist DELETE, so the engine receives concurrent changes in
+    the order the row took them (its command channel is FIFO), and no mode
+    reaches it after it forgot a deleted playlist (the record would be
+    replayed).
+- **An unknown stored value** is the default everywhere; `row_mode` WARNs
+  at a pipeline's start, `all_playlist_modes` (every dashboard connect)
+  maps it quietly.
 - **Every change is told.** `handle_command(SetMode)` →
   `playlist_mode.rs::apply_mode`: the pipeline's mode + `broadcast_state`;
   with no pipeline, `broadcast_idle` (`Idle` in that mode). Then it
@@ -210,18 +218,21 @@ Two consequences, both review round 3:
   `engine_dispatch::dispatch`: a row's `single` starts the pipeline in
   Single; the PUT writes the row, reaches the running engine and is told,
   and a fresh engine built as `lib.rs` builds it (`get_active_playlists` →
-  `create_startup_senders`, real port probe) starts in it; a PATCH reaches
-  the engine and the replay; an unknown row value plays Continuous; a
-  pipeline-less playlist is told its new mode and forgotten on DELETE; an
-  unknown mode is 400 for the PUT and the PATCH; a `RAISE(ABORT)` trigger
-  (the row refuses the write) → 500, the engine untold; an unknown playlist
-  → 404. Review round 1: a POST takes a known mode only, by its canonical
-  name, and so do a PUT `Single` / a PATCH `LOOP`; `MODE_ORDER` is pinned in
-  the safe direction: two tests hold it (a PUT and a PATCH, then a DELETE,
+  `create_startup_senders`, real port probe) starts in it; a playlist
+  update reaches the engine and the replay; an unknown row value plays
+  Continuous; a pipeline-less playlist is told its new mode and forgotten on
+  DELETE; an unknown mode is 400 for the mode route and the playlist update;
+  a `RAISE(ABORT)` trigger (the row refuses the write) → 500, the engine
+  untold; an unknown playlist → 404. Review round 1: a POST takes a known
+  mode only, by its canonical name, and so do a mode route `Single` / a
+  playlist update `LOOP`; `MODE_ORDER` is pinned in the safe direction: two
+  tests hold it (the mode route and the playlist update, then a DELETE,
   must not finish within 200 ms, then finish once it is released), and
   review round 2's `the_order_is_held_until_the_engine_is_told` fills the
-  engine's channel so a PUT, a PATCH and a DELETE each block in their tell
-  after their write: the order must still be held (`try_lock` fails).
+  engine's channel so each of the three blocks in its tell after its
+  write: the order must still be held (`try_lock` fails). Every playlist
+  update in these tests is a `PUT /api/v1/playlists/{id}` (review round 3:
+  five tests had sent PATCH, a 405, and never reached the handler).
   `api/websocket.rs::a_ws_set_mode_saves_the_row_then_tells_the_engine`
   covers the WS path (its error text Slovak), and
   `startup_senders.rs::a_startup_output_starts_in_its_own_rows_mode` the
