@@ -3,6 +3,9 @@
 //! tolerance needs (`reference.rs`), and the comparison with the CPU
 //! reference. Only the Windows test binaries include it.
 
+// Each test binary compiles its own copy and uses a different part of it.
+#![allow(dead_code)]
+
 use sp_gpu::{CANVAS_HEIGHT, CANVAS_WIDTH, Compositor, Layer, Nv12Picture, reference};
 
 pub const W: u32 = CANVAS_WIDTH;

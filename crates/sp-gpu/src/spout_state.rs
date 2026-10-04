@@ -7,7 +7,10 @@
 //! - at create, when its name is listed ([`claim`]);
 //! - before its first send, when another sender listed the name since
 //!   ([`before_send`]): with a full list Spout would not even rename it, it
-//!   would take over that sender's info map;
+//!   would take over that sender's info map. An unreadable list lets the
+//!   send go (as Spout's own `FindSenderName` does), and so does a name
+//!   another process lists between the check and the send: only a second
+//!   program sending under the same name meets either;
 //! - after its first send, when Spout registered another name, did not list
 //!   it, or could not register it ([`after_send`]).
 //!
@@ -22,9 +25,11 @@ use crate::spout::status_result;
 /// first send went through (Spout would rename this one `<name>_1`).
 pub const TAKEN: &str = "another sender took the name before its first send";
 /// Why a sender is refused: its first send went through, but Spout's list
-/// does not hold the name.
+/// does not hold the name (Spout skips the registration of a sender past a
+/// full list or when it cannot take the list's lock, and another program's
+/// clean-up can drop a name mid-registration).
 pub const NOT_LISTED: &str =
-    "Spout did not list it (its list is full, or another program's clean-up dropped it)";
+    "Spout did not list it (its list was full or locked, or another program's clean-up dropped it)";
 /// Why a sender is refused: Spout could not register it (its shared texture
 /// or its maps could not be made, or the SDK threw).
 pub const REGISTRATION_FAILED: &str = "Spout could not register it";
@@ -34,7 +39,7 @@ pub const UNREADABLE: &str = "Spout's list stayed unreadable, so its listing was
 
 /// How many sends in a row an unconfirmed sender reads an unreadable list
 /// before it is refused. Each read may wait up to 67 ms, so this bounds what
-/// a stuck list can cost (about 1 s of frames at 30 frames/s).
+/// a stuck list can cost: up to 30 sends × 67 ms, about 2 s.
 pub const MAX_UNREADABLE: u32 = 30;
 
 /// What Spout's names list says about a name.

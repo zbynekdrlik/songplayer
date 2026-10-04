@@ -41,14 +41,14 @@ fn the_reasons_say_what_happened() {
     assert_eq!(TAKEN, "another sender took the name before its first send");
     assert_eq!(
         NOT_LISTED,
-        "Spout did not list it (its list is full, or another program's clean-up dropped it)"
+        "Spout did not list it (its list was full or locked, or another program's clean-up dropped it)"
     );
     assert_eq!(REGISTRATION_FAILED, "Spout could not register it");
     assert_eq!(
         UNREADABLE,
         "Spout's list stayed unreadable, so its listing was never confirmed"
     );
-    // About 1 s of frames at 30 frames/s, each read waiting up to 67 ms.
+    // Up to 30 sends, each list read waiting up to 67 ms: about 2 s.
     assert_eq!(MAX_UNREADABLE, 30);
 }
 

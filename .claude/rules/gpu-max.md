@@ -144,9 +144,12 @@ anchors are on #223 (comment 5984577044).
   model for MSVC, and the SDK uses try/catch), `SPOUT_BUILD_STATIC`,
   `NDEBUG`, no `UNICODE` (upstream's own builds), and every system library
   named (`user32` has no `#pragma comment` in the SDK). Two libraries: the
-  shim (`sp_spout_shim`, `/W4`, its warnings shown; it wraps the SDK's
-  headers in `#pragma warning(push, 0)`) linked before the SDK
-  (`sp_spout_sdk`, its warnings hidden: not ours to fix).
+  shim (`sp_spout_shim`, cc's `warnings(true)` + `warnings_into_errors`:
+  `-W4 -WX`; it wraps the SDK's headers in `#pragma warning(push, 0)`)
+  linked before the SDK (`sp_spout_sdk`, `-W0`: not ours to fix). cl prints
+  warnings on STDOUT, which cargo shows only for a failed build, so `-WX`
+  is the only way a shim warning is ever seen; a `-W4` flag after cc's
+  `-W0` would only earn D9025.
 - **Bumping it:** read the new tag's `SpoutDX_SOURCES`, copy the files over
   unmodified, and re-read the facts below in the new source (they are what
   the shim and `src/spout.rs` rely on); the WARP tests are the gate.
@@ -212,9 +215,16 @@ anchors are on #223 (comment 5984577044).
     first drops names whose sender crashed (their info map is gone);
   - before the first send (`before_send`): a name another sender listed
     since → `SpoutNotRegistered { why: TAKEN }`, BEFORE Spout can register
-    `_1` (or, with a full list, take over that sender's map);
+    `_1` (or, with a full list, take over that sender's map). Residual: an
+    unreadable list lets the send go (as Spout's own `FindSenderName`
+    does), and another process can list the name between the check and the
+    send; with a full or locked list Spout would then write that sender's
+    map. Only a second program sending as `SP-program-MAX` (a second
+    SongPlayer) can meet it;
   - after the first send (`after_send`): registered under another name →
-    `TAKEN`; not in the list → `NOT_LISTED` (its list is full, or another
+    `TAKEN`; not in the list → `NOT_LISTED` (its list was full, or its
+    lock timed out during the registration: Spout's `RegisterSenderName`
+    then registers nothing and `CreateSender` ignores that; or another
     program's `CleanSenders` dropped it mid-registration); nothing
     registered (`SendTexture` failed or threw before the registration) →
     `REGISTRATION_FAILED`: a retry would meet its own half-made
@@ -232,8 +242,10 @@ anchors are on #223 (comment 5984577044).
 - A list that cannot be read at the first send (its 67 ms lock) leaves the
   sender `Unconfirmed(n)`; the next send checks again, up to
   `MAX_UNREADABLE` (30) unreadable checks in a row, then `UNREADABLE`
-  refuses it (each read may wait 67 ms, so a stuck list costs about 1 s,
-  not forever). A confirmed sender's send reads nothing (no lock per
+  refuses it (each read may wait 67 ms, so a stuck list costs up to 30
+  sends × 67 ms, about 2 s, not forever; its own info map may then stay
+  until Drop, since Spout takes the list's lock before releasing it). A
+  confirmed sender's send reads nothing (no lock per
   frame): it shares, or loses one frame (`GpuError::Spout`, code 3 or 4).
 - Names: 1..=228 bytes of printable ASCII, no `\` (`check_sender_name`;
   the shim checks the length and the backslash again). A sender Spout
@@ -284,8 +296,9 @@ error. A map that is not committed memory, or a sender's map shorter than a
   before Spout registers it (`TAKEN`), twice. The test runs on a list of
   63 fake senders, so the winner fills it: without the pre-send check
   Spout would not rename the loser but open the WINNER's info map and
-  write its own texture there (the test then fails on the winner's
-  unchanged map). No `_1` ever appears, and the winner stays listed;
+  write its own texture there, and the loser would end `Confirmed` (the
+  test fails at its refusal match, and the winner's map would no longer be
+  the winner's). No `_1` ever appears, and the winner stays listed;
 - the sender keeps sending after the `Compositor` is dropped (its own
   references);
 - with Spout's list made FULL (64 fake senders, each with its info map),
@@ -350,11 +363,13 @@ build step, and WARP and the RTX run the same source. A compile error is
   sender name rule, the registry parsers, the shim's codes), `spout_state`
   (the sender's registration: every refuse / confirm decision). Keep it that
   way: logic added inside `win/` is untested by the gate.
-- The off-Windows `Compositor` (`stub.rs`) is an uninhabited enum. `new` /
-  `new_warp` return `Unsupported`; its methods are `mutants::skip`, since no
-  value exists to call them on. The off-Windows `SpoutSender` is one too
-  (its `new` takes a `&Compositor`, which cannot exist); the registry
-  readers return `Unsupported`.
+- The off-Windows `Compositor` (`stub.rs`) is an uninhabited struct (it
+  holds an `Infallible`) with a `PhantomData<*const ()>`, so it is neither
+  `Send` nor `Sync`, like the Windows type: code moving it across threads
+  fails the Linux build too. `new` / `new_warp` return `Unsupported`; its
+  methods are `mutants::skip`, since no value exists to call them on. The
+  off-Windows `SpoutSender` is the same (its `new` takes a `&Compositor`,
+  which cannot exist); the registry readers return `Unsupported`.
 - The C++ (`vendor/spout2`, `src/win/spout_shim.cpp`) is compiled only by
   the `Build (Windows)` job: `build.rs` returns at once for a non-Windows
   `CARGO_CFG_TARGET_OS`. cargo-mutants never mutates `build.rs` (it

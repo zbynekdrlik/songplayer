@@ -7,6 +7,9 @@
 //! constructors `new_on_listed_adapter` / `with_name` and `adapters()` are
 //! Windows-only.
 
+use std::convert::Infallible;
+use std::marker::PhantomData;
+
 use crate::adapter::AdapterInfo;
 use crate::composition::Composition;
 use crate::error::GpuError;
@@ -16,9 +19,11 @@ use crate::stats::{ComposeStats, SpoutSendStats};
 
 /// Off Windows the compositor cannot be built: [`Compositor::new`] and
 /// [`Compositor::new_warp`] report [`GpuError::Unsupported`]. The type has
-/// no values, so its methods can never run.
+/// no values (it holds an `Infallible`), so its methods can never run. Like
+/// the Windows type it is neither `Send` nor `Sync`, so code that would
+/// move it across threads fails on Linux too, not only on Windows.
 #[derive(Debug)]
-pub enum Compositor {}
+pub struct Compositor(Infallible, PhantomData<*const ()>);
 
 impl Compositor {
     /// [`GpuError::Unsupported`]: no Direct3D 11 off Windows.
@@ -35,57 +40,58 @@ impl Compositor {
     /// receiver, so no test can call it.
     #[cfg_attr(test, mutants::skip)]
     pub fn compose(&mut self, _composition: &Composition<'_>) -> Result<ComposeStats, GpuError> {
-        match *self {}
+        match self.0 {}
     }
 
     /// Never runs (no value exists). `mutants::skip`: as `compose`.
     #[cfg_attr(test, mutants::skip)]
     pub fn read_back(&mut self) -> Result<Vec<u8>, GpuError> {
-        match *self {}
+        match self.0 {}
     }
 
     /// Never runs (no value exists). `mutants::skip`: as `compose`.
     #[cfg_attr(test, mutants::skip)]
     pub fn adapter(&self) -> &AdapterInfo {
-        match *self {}
+        match self.0 {}
     }
 }
 
 /// Off Windows there is no Spout sender: it needs a [`Compositor`], which
-/// cannot be built. The type has no values, so its methods can never run.
+/// cannot be built. The type has no values, so its methods can never run;
+/// like the Windows type it is neither `Send` nor `Sync`.
 #[derive(Debug)]
-pub enum SpoutSender {}
+pub struct SpoutSender(Infallible, PhantomData<*const ()>);
 
 impl SpoutSender {
     /// Never runs: no [`Compositor`] exists to pass. `mutants::skip`: an
     /// uninhabited argument, so no test can call it.
     #[cfg_attr(test, mutants::skip)]
     pub fn new(compositor: &Compositor) -> Result<Self, GpuError> {
-        match *compositor {}
+        match compositor.0 {}
     }
 
     /// Never runs (no value exists). `mutants::skip`: as `new`.
     #[cfg_attr(test, mutants::skip)]
     pub fn send(&mut self) -> Result<SpoutSendStats, GpuError> {
-        match *self {}
+        match self.0 {}
     }
 
     /// Never runs (no value exists). `mutants::skip`: as `new`.
     #[cfg_attr(test, mutants::skip)]
     pub fn size(&self) -> (u32, u32) {
-        match *self {}
+        match self.0 {}
     }
 
     /// Never runs (no value exists). `mutants::skip`: as `new`.
     #[cfg_attr(test, mutants::skip)]
     pub fn name(&self) -> &str {
-        match *self {}
+        match self.0 {}
     }
 
     /// Never runs (no value exists). `mutants::skip`: as `new`.
     #[cfg_attr(test, mutants::skip)]
     pub fn registration(&self) -> Registration {
-        match *self {}
+        match self.0 {}
     }
 }
 

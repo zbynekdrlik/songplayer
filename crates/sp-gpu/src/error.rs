@@ -73,10 +73,11 @@ pub enum GpuError {
     SpoutNameTaken { name: String },
     /// The sender is refused for good (`spout_state`): another sender took
     /// the name before its first send, Spout did not list it, could not
-    /// register it, or its list stayed unreadable. Whatever it registered is
-    /// released and it never sends again: drop it, and make a new sender
-    /// after a backoff (a full list or a taken name refuses an immediate
-    /// retry the same way).
+    /// register it, or its list stayed unreadable. What it registered is
+    /// released (after an unreadable list its own info map may stay until
+    /// Drop: Spout takes the list's lock before it releases one), and it
+    /// never sends again: drop it, and make a new sender after a backoff (a
+    /// full list or a taken name refuses an immediate retry the same way).
     #[error("Spout did not register the sender as {name:?}: {why}; drop it")]
     SpoutNotRegistered { name: String, why: &'static str },
     /// A Spout call failed. `code` is the shim's status (3 = the SDK
