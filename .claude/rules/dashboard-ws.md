@@ -145,8 +145,9 @@ Main's ROZHODNUTÉ: #225 comment 5975832356; how it is built: the
 - **On the box:** a deploy of this changes what plays only where a row is
   not `continuous` (main's check 4.10.2026: all 10 rows `continuous`). A
   fresh DB seeds ytlive `single` (`startup.rs::ensure_live_playlist_exists`),
-  which it now plays. A post-deploy check: the replayed mode of every
-  playlist equals its `GET /api/v1/playlists` `playback_mode`.
+  which it now plays. The integration check (main session, at the
+  deploy; recorded on the ticket's LANE-RETURN): the replayed mode of
+  every playlist equals its `GET /api/v1/playlists` `playback_mode`.
 - **Never** send `EngineCommand::SetMode` / `PlayEvent::SetMode` for a mode
   the row does not hold (tests drive the engine directly; production never
   does).
@@ -203,7 +204,8 @@ Two consequences, both review round 3:
   an unknown one to the default.
   `tests_ws_replay.rs::a_failed_playlist_read_still_replays_what_the_engine_told`
   closes the pool and checks the fallback (websocket.rs is mutation-excluded).
-- `playback/playlist_mode_tests.rs` (unit 2, ids 22 530-22 543): the real
+- `playback/playlist_mode_tests.rs` (unit 2; ids 22 530-22 549 are this
+  unit's, the WS test below takes 22 538 / 22 539): the real
   router + the engine fed the API's commands through
   `engine_dispatch::dispatch`: a row's `single` starts the pipeline in
   Single; the PUT writes the row, reaches the running engine and is told,
@@ -215,8 +217,11 @@ Two consequences, both review round 3:
   (the row refuses the write) → 500, the engine untold; an unknown playlist
   → 404. Review round 1: a POST takes a known mode only, by its canonical
   name, and so do a PUT `Single` / a PATCH `LOOP`; `MODE_ORDER` is pinned in
-  the safe direction (the test holds it: a PUT, a PATCH and a DELETE must not
-  finish within 200 ms, then finish once it is released).
+  the safe direction: two tests hold it (a PUT and a PATCH, then a DELETE,
+  must not finish within 200 ms, then finish once it is released), and
+  review round 2's `the_order_is_held_until_the_engine_is_told` fills the
+  engine's channel so a PUT, a PATCH and a DELETE each block in their tell
+  after their write: the order must still be held (`try_lock` fails).
   `api/websocket.rs::a_ws_set_mode_saves_the_row_then_tells_the_engine`
   covers the WS path (its error text Slovak), and
   `startup_senders.rs::a_startup_output_starts_in_its_own_rows_mode` the
