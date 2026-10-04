@@ -299,6 +299,45 @@ failed on them (`36438006665`):
   gained `fleet`, `audio_emitter_tests.rs` still built one without it).
   Before adding a field, grep the crate for `TypeName {` in every file,
   tests included, and add it (or `..Default::default()`) at each site.
+- **An opaque `impl Fn` bound to a local keeps its borrow to the end of
+  the scope → E0505 on a later move** (#223 follow-up review round 1).
+  `let record = recorder(&log);` (a helper returning `impl Fn(usize) +
+  '_`), then `log.into_inner()` later in the same scope: the compiler
+  cannot see inside the opaque type, so it assumes its drop uses the
+  borrow. A closure literal capturing `&log` would be fine (no drop glue);
+  the opaque one is not. Use the helper as a temporary
+  (`pool.run(&recorder(&log))`), bind it in a block, or take the data out
+  without moving (`std::mem::take(&mut *log.lock().unwrap())`).
+
+## A persistent worker pool with borrowed jobs (#223 follow-up, `playback/band_pool.rs`)
+
+The kernel's row bands run on persistent workers (no thread per picture).
+A job borrows the caller's buffers, so the pool erases the painter's
+lifetime (a thin `*const ()` + a monomorphic `unsafe fn` shim, `unsafe impl
+Send` on a `Sync` painter) and `run` must not return NOR unwind before
+every worker is done with it. The pieces that made that hold, and testable:
+
+- Wait on disconnect, not on a count: each task carries a clone of a
+  report `Sender`; the guard owns the original in an `Option`, drops it
+  first, then drains to disconnect — on the normal path AND in its `Drop`
+  (the caller's own band may panic). A guard declared after a plain local
+  `Sender` deadlocks on unwind (it drops first, while the sender lives).
+- A worker catches a band's panic (`catch_unwind`, the worker lives on)
+  and the caller panics anew once all are done. Not `resume_unwind`: it
+  skips the panic hook, so `songplayer-panic.log` would not record the
+  caller's thread dying. The shipped exe unwinds (`crash-diagnostics.md`),
+  so these paths are live.
+- Tests: prove reuse with `ThreadId` + name per band over several runs.
+  A `Drop`-joins test is deterministic only with the workers HELD at their
+  last step (a `#[cfg(test)]` exit hold keyed on the thread-name prefix, so
+  no other test's pool is held) and the drop run on a helper thread inside
+  a safe-direction window. Declare the gate opener AFTER the pool (it
+  drops first on a failed check, before the pool's drop joins the held
+  workers) and everything a painter borrows BEFORE the pool (its drop
+  joins the workers before those are freed, even under a mutant that
+  skips the wait).
+- A painter must never `run` its own pool (the worker waits on its own
+  queue).
 
 ## Spawn order is not execution order — never order work by spawning it (#221)
 
@@ -650,6 +689,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   A mutant that only a mid-row / off-edge input can reveal (`a - c0` with
   `c0` always 0 on row-aligned runs) needs a test that cuts the input
   arbitrarily.
+- **Two levels that both chunk the same run make the inner index always 0**
+  (#223 follow-up). `Mix::paint` cut each band into stride-sized pieces
+  for cache locality, and each side's painter then walked rows again
+  (`for (i, run) in rest.chunks_mut(ds).enumerate()` → `row + 1 + i`): with
+  pieces ≤ one stride, `i` was always 0, so `+ i` → `- i` was equivalent
+  and survived the model harness. Walk the rows ONCE, at one level (the
+  mixer), and give the lower level one row segment.
 - **A new early return in front of pinned comparisons can silently orphan
   their killers** (#217 addendum 3, review rounds 4-5). Round 4 added
   `TitleClock::shows` as a guard ahead of `arm_title_timers`'s `>`
