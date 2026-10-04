@@ -111,10 +111,10 @@ test.describe("the Player on page load (#225)", () => {
     page,
     request,
   }) => {
-    // The replay tells the state first and the song ~2 s later (the mock's
-    // 2 s NowPlaying interval is the other source of it, at the same time).
+    // The replay tells the state first and the song 3 s later (the knob
+    // holds the mock's 2 s NowPlaying interval back too).
     await request.post("/__mock/ws-replay", {
-      data: { now_playing_delay_ms: 2000 },
+      data: { now_playing_delay_ms: 3000 },
     });
     await recordPlayer(page);
     // `?playlist=1` pins the work area to playlist 1 (Worship), which plays.
@@ -145,14 +145,27 @@ test.describe("the Player on page load (#225)", () => {
       claimsNothingPlays(seen),
       `the Player claimed nothing plays: ${JSON.stringify(seen)}`,
     ).toEqual([]);
+    // The recorded read-outs hold the window whatever the polling saw: told
+    // it plays on program, its song not here yet.
+    expect(
+      seen.some(
+        (r) =>
+          r.state === "Hrá" &&
+          r.badge === "● Na programe" &&
+          r.title === "Načítavam…" &&
+          r.mixerPending,
+      ),
+      `no read-out of a playing playlist waiting for its song: ${JSON.stringify(seen)}`,
+    ).toBe(true);
   });
 
   test("before the replay arrives the Player shows a neutral placeholder, then the playing song", async ({
     page,
     request,
   }) => {
-    // Hold the whole replay back for 2 s after the socket opens.
-    await request.post("/__mock/ws-replay", { data: { delay_ms: 2000 } });
+    // Hold the whole replay (and the mock's 2 s song interval) back for 3 s
+    // after the socket opens.
+    await request.post("/__mock/ws-replay", { data: { delay_ms: 3000 } });
     await recordPlayer(page);
     await page.goto("/?playlist=1");
 
@@ -183,6 +196,18 @@ test.describe("the Player on page load (#225)", () => {
       falseClaims,
       `the Player claimed a state it was not told: ${JSON.stringify(seen)}`,
     ).toEqual([]);
+    // The recorded read-outs hold the "nothing told yet" state whatever the
+    // polling saw.
+    expect(
+      seen.some(
+        (r) =>
+          r.title === "Načítavam…" &&
+          r.state === "—" &&
+          r.badge === "◌ —" &&
+          r.mixerPending,
+      ),
+      `no read-out of the Player before the replay: ${JSON.stringify(seen)}`,
+    ).toBe(true);
   });
 });
 

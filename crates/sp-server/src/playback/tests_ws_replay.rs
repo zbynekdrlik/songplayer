@@ -7,6 +7,12 @@
 //! "nič nehrá" for a song it was not told about yet. A playlist that plays
 //! nothing gets an explicit `Idle` state and no `NowPlaying`, so the Player
 //! can tell "nothing plays" from "not known yet".
+//!
+//! The mode told is the ENGINE's (review round 1): the engine never reads
+//! the DB's `playlists.playback_mode` (every pipeline starts at
+//! `PlaybackMode::default()`) and a mode change is not written back, so the
+//! DB value is not what plays. A mode change is told to the dashboards at
+//! once, and so to the next one that connects.
 
 use std::path::PathBuf;
 
@@ -15,13 +21,14 @@ use sp_core::ws::ServerMsg;
 use tokio::sync::{broadcast, mpsc};
 
 use super::pipeline::PipelineEvent;
-use super::state::PlayState;
+use super::state::{PlayEvent, PlayState};
 use super::{PlaybackEngine, PlaybackEngineConfig};
 
 // Playlist and video ids no other test uses: what the engine tells the
-// dashboard may live process-wide, so this test reads back only its own.
+// dashboard may live process-wide, so these tests read back only their own.
 const PLAYING: i64 = 22_501;
 const IDLE: i64 = 22_502;
+const MODE_CHANGED: i64 = 22_503;
 const SONG: i64 = 22_542;
 
 /// The replay's messages about `ids`, in the order a new client gets them.
@@ -36,13 +43,40 @@ fn replay_of(replay: Vec<ServerMsg>, ids: &[i64]) -> Vec<ServerMsg> {
         .collect()
 }
 
+/// The engine under test, the channel it tells the dashboard on, and the
+/// Resolume channel's receiver (kept alive by the test).
+type Rig = (
+    PlaybackEngine,
+    broadcast::Receiver<ServerMsg>,
+    mpsc::Receiver<crate::resolume::ResolumeCommand>,
+);
+
+/// An engine on the API state's DB and NDI-health registry.
+fn engine_on(state: &crate::AppState) -> Rig {
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, resolume_rx) = mpsc::channel(16);
+    let (ws_tx, ws_rx) = broadcast::channel::<ServerMsg>(64);
+    let engine = PlaybackEngine::new(PlaybackEngineConfig {
+        pool: state.pool.clone(),
+        cache_dir: PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
+        resolume_tx,
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: state.ndi_health_registry.clone(),
+    });
+    (engine, ws_rx, resolume_rx)
+}
+
 #[tokio::test]
 async fn a_new_dashboard_is_told_the_playing_song_before_its_state_and_an_idle_playlist_is_idle() {
     let state = crate::api::routes::tests::test_state().await;
+    // The DB's modes are NOT what the engine plays (it never reads them).
     sqlx::query(
         "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, playback_mode) \
-         VALUES (?, 'P225 playing', 'url-225a', 'SP-225a', 'loop'), \
-                (?, 'P225 idle', 'url-225b', 'SP-225b', 'continuous')",
+         VALUES (?, 'P225 playing', 'url-225a', 'SP-225a', 'single'), \
+                (?, 'P225 idle', 'url-225b', 'SP-225b', 'loop')",
     )
     .bind(PLAYING)
     .bind(IDLE)
@@ -59,30 +93,22 @@ async fn a_new_dashboard_is_told_the_playing_song_before_its_state_and_an_idle_p
     .await
     .unwrap();
 
-    let (obs_tx, _) = broadcast::channel(16);
-    let (resolume_tx, _resolume_rx) = mpsc::channel(16);
-    let (ws_tx, _ws_rx) = broadcast::channel::<ServerMsg>(64);
-    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
-        pool: state.pool.clone(),
-        cache_dir: PathBuf::from("/tmp/test-cache"),
-        obs_event_tx: obs_tx,
-        obs_cmd_tx: None,
-        resolume_tx,
-        ws_event_tx: ws_tx,
-        presenter_client: None,
-        ndi_health_registry: state.ndi_health_registry.clone(),
-    });
+    let (mut engine, _ws_rx, _resolume_rx) = engine_on(&state);
     engine.ensure_pipeline(PLAYING, "SP-225a");
     engine.ensure_pipeline(IDLE, "SP-225b");
 
-    // PLAYING plays SONG on program, as a dashboard already connected saw it:
-    // its state, the song's start (`Started` → NowPlaying at 0:00), then a
-    // position tick at 0:42. IDLE never plays.
+    // PLAYING plays SONG on program in Loop mode, as a dashboard already
+    // connected saw it: the mode change, its state, the song's start
+    // (`Started` → NowPlaying at 0:00), then a position tick at 0:42. IDLE
+    // never plays.
     if let Some(pp) = engine.pipelines.get_mut(&PLAYING) {
         pp.current_video_id = Some(SONG);
     }
     engine.set_state_for_test(PLAYING, PlayState::Playing { video_id: SONG });
     engine.set_scene_active_for_test(PLAYING, true);
+    engine
+        .handle_command(PLAYING, PlayEvent::SetMode(PlaybackMode::Loop))
+        .await;
     engine.broadcast_state(PLAYING);
     engine
         .handle_pipeline_event(
@@ -113,14 +139,16 @@ async fn a_new_dashboard_is_told_the_playing_song_before_its_state_and_an_idle_p
                 position_ms: 42_000,
                 duration_ms: 180_000,
             },
-            // … then its state: on program, the raw transport, the DB's mode.
+            // … then its state: on program, the raw transport, the mode the
+            // engine plays (Loop), not the DB's `single`.
             ServerMsg::PlaybackStateChanged {
                 playlist_id: PLAYING,
                 state: PlaybackState::Playing,
                 mode: PlaybackMode::Loop,
                 transport: TransportState::Playing,
             },
-            // A playlist that plays nothing: an explicit Idle, no NowPlaying.
+            // A playlist that plays nothing: an explicit Idle, no NowPlaying,
+            // in the mode its pipeline starts with (not the DB's `loop`).
             ServerMsg::PlaybackStateChanged {
                 playlist_id: IDLE,
                 state: PlaybackState::Idle,
@@ -129,6 +157,44 @@ async fn a_new_dashboard_is_told_the_playing_song_before_its_state_and_an_idle_p
             },
         ],
         "a new dashboard must be told the playing song before its state, and that the idle \
-         playlist is idle"
+         playlist is idle, each in the mode the engine plays"
+    );
+}
+
+#[tokio::test]
+async fn a_mode_change_is_told_to_the_dashboards_at_once_and_to_the_next_one() {
+    let state = crate::api::routes::tests::test_state().await;
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, playback_mode) \
+         VALUES (?, 'P225 mode', 'url-225c', 'SP-225c', 'single')",
+    )
+    .bind(MODE_CHANGED)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    let (mut engine, mut ws_rx, _resolume_rx) = engine_on(&state);
+    engine.ensure_pipeline(MODE_CHANGED, "SP-225c");
+
+    // The operator picks "Opakovať" (Loop) on an idle playlist.
+    engine
+        .handle_command(MODE_CHANGED, PlayEvent::SetMode(PlaybackMode::Loop))
+        .await;
+
+    let told = ServerMsg::PlaybackStateChanged {
+        playlist_id: MODE_CHANGED,
+        state: PlaybackState::Idle,
+        mode: PlaybackMode::Loop,
+        transport: TransportState::Idle,
+    };
+    assert_eq!(
+        ws_rx.try_recv().ok(),
+        Some(told.clone()),
+        "the connected dashboards are told the new mode at once"
+    );
+    let replay = crate::api::websocket::on_connect_replay(&state).await;
+    assert_eq!(
+        replay_of(replay, &[MODE_CHANGED]),
+        vec![told],
+        "and so is the next dashboard that connects"
     );
 }

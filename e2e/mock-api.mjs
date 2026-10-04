@@ -1901,8 +1901,14 @@ wss.on("connection", (ws) => {
     }
   }, 500);
 
-  // Send a NowPlaying event periodically
+  // Send a NowPlaying event periodically. #225: a held-back replay
+  // (`/__mock/ws-replay`) holds this song too, so a spec's "song not here
+  // yet" window is the knob's, not this timer's (the defaults change nothing:
+  // the first tick comes at 2 s).
+  const songHoldUntil =
+    Date.now() + wsReplay.delay_ms + wsReplay.now_playing_delay_ms;
   const interval = setInterval(() => {
+    if (Date.now() < songHoldUntil) return;
     const msg = {
       type: "NowPlaying",
       data: {
