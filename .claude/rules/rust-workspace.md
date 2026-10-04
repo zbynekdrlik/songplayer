@@ -803,6 +803,18 @@ mutation-tested. Name it outside every excluded prefix: `pacer_spin.rs`, with
 `pub mod` in `playback/mod.rs`. Then `grep` the exclude list for your new path
 before committing.
 
+**A `#[cfg(windows)]` fn in a NON-excluded file is still LISTED, and its mutants
+survive (#223 S0).** cargo-mutants reads the source without evaluating `cfg`,
+so `cargo mutants --in-diff … --list` lists e.g. `replace run -> BenchOutcome
+with Default::default()` for the `#[cfg(windows)]` twin of a fn. On the Linux
+runner that body is never compiled, so even a mutant that could not type-check
+(no `Default` on the type) builds and every test passes: MISSED. Keep such a
+fn a one-line wrapper with `#[cfg_attr(test, mutants::skip)]` and a doc line
+naming why, and move its logic into a cross-platform fn with Linux tests
+(`diag::decode_bench::run_on_decode_thread`: the thread, the slot dropped
+before the send, a panic caught as `Failed`). Re-list after the change: only
+the Linux twin should remain, and it should be unviable.
+
 ## Inserting a `mod` before a `#[cfg(test)]` test module STEALS the gate (#192 r5)
 
 Attributes attach to the NEXT item. A `#[path] mod audio_emitter_tests;` at the
@@ -889,6 +901,17 @@ for the name before touching `Cargo.toml`:
 
 A feature change never touches `Cargo.lock`: features are not recorded
 there.
+
+**The `windows` crate (sp-decoder's MF bindings, 0.58) is NOT in the box's
+registry** (#223 S0): nothing on Tier-0 compiles a Windows target, so only
+windows-sys was ever downloaded. To check a signature, fetch the crate itself
+into the scratchpad (a download, not a build):
+`curl -sSL -o w.crate https://crates.io/api/v1/crates/windows/0.58.0/download`,
+then `tar xzf w.crate windows-0.58.0/src/Windows/Win32/Media/MediaFoundation/mod.rs`
+and grep it (`pub unsafe fn GetNativeMediaType(&self, dwstreamindex: u32,
+dwmediatypeindex: u32) -> windows_core::Result<IMFMediaType>`). `GUID`'s
+public `data1..data4` fields are in `windows-core-0.58.0/src/guid.rs`, from
+the same URL with `windows-core`.
 
 ## Adding a path dependency between workspace crates on the Tier-0 box (#184 G4)
 

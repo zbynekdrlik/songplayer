@@ -2,6 +2,7 @@
 
 pub mod ai;
 pub mod dabing; // #180 dubbing D1
+pub mod diag; // #223 S0: POST /api/v1/diag/decode-bench
 pub mod live;
 pub mod lyrics;
 pub mod lyrics_catalog;
@@ -128,6 +129,12 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/metadata/probe",
             axum::routing::post(metadata::probe),
+        )
+        // #223 S0: what one picture costs the real video decoder, on a sample
+        // in `<data dir>/bench/`.
+        .route(
+            "/api/v1/diag/decode-bench",
+            axum::routing::post(diag::post_decode_bench),
         )
         // Resolume hosts
         .route(

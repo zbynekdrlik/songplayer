@@ -30,6 +30,9 @@ pub struct MediaFoundationVideoReader {
     height: u32,
     frame_rate_num: u32,
     frame_rate_den: u32,
+    /// The negotiated type carried `MF_MT_FRAME_RATE`; `false` = the
+    /// 29.97 fps fallback.
+    frame_rate_known: bool,
 }
 
 // SAFETY: IMFSourceReader is a COM interface that windows-rs marks as !Send.
@@ -97,14 +100,14 @@ impl MediaFoundationVideoReader {
             let size = negotiated_video.GetUINT64(&MF_MT_FRAME_SIZE).unwrap_or(0);
             ((size >> 32) as u32, size as u32)
         };
-        let (frame_rate_num, frame_rate_den) = unsafe {
+        let (frame_rate_num, frame_rate_den, frame_rate_known) = unsafe {
             match negotiated_video.GetUINT64(&MF_MT_FRAME_RATE) {
-                Ok(packed) => ((packed >> 32) as u32, packed as u32),
+                Ok(packed) => ((packed >> 32) as u32, packed as u32, true),
                 Err(e) => {
                     tracing::warn!(
                         "MF_MT_FRAME_RATE unavailable: {e}; falling back to 30000/1001 (29.97 fps)"
                     );
-                    (30000, 1001)
+                    (30000, 1001, false)
                 }
             }
         };
@@ -125,7 +128,30 @@ impl MediaFoundationVideoReader {
             height,
             frame_rate_num,
             frame_rate_den,
+            frame_rate_known,
         })
+    }
+
+    /// The codec the file's video stream is compressed with, as the native
+    /// media type's subtype text (`AV01`, `VP90`, `H264`, `HEVC`;
+    /// [`crate::subtype::subtype_name`]). `None` when MF does not answer.
+    /// The decode bench reports it (#223 S0), so a measured sample is known to
+    /// be the codec it is named after.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn codec(&self) -> Option<String> {
+        let native: IMFMediaType =
+            unsafe { self.reader.GetNativeMediaType(VIDEO_STREAM, 0) }.ok()?;
+        let guid = unsafe { native.GetGUID(&MF_MT_SUBTYPE) }.ok()?;
+        Some(crate::subtype::subtype_name(
+            guid.data1, guid.data2, guid.data3, guid.data4,
+        ))
+    }
+
+    /// Whether [`VideoStream::frame_rate`] is the stream's own rate, not the
+    /// 29.97 fps fallback `open` takes when MF reports none. The decode bench
+    /// (#223 S0) judges D2's budget only against a known rate.
+    pub fn frame_rate_known(&self) -> bool {
+        self.frame_rate_known
     }
 
     fn make_video_output_type() -> Result<IMFMediaType, DecoderError> {
