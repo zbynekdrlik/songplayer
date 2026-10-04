@@ -8,7 +8,7 @@ use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
 use sp_core::ws::ServerMsg;
 use tokio::sync::{broadcast, mpsc};
 
-use super::super::state::PlayState;
+use super::super::state::{PlayEvent, PlayState};
 use super::super::{PlaybackEngine, PlaybackEngineConfig};
 use super::{DashboardReplay, global};
 
@@ -286,27 +286,31 @@ async fn the_engine_records_what_it_tells_the_dashboard_and_still_broadcasts_it(
     );
 }
 
-/// Review round 2: the open dashboards are told the removed playlist is
-/// idle, so they agree with a reload (whose replay says Idle).
+/// Review rounds 2 + 4: the open dashboards are told the removed playlist
+/// is idle (in the mode it had), and its record goes: the next dashboard is
+/// told an Idle in the mode a NEW pipeline starts with. A record kept in
+/// Loop would replay Loop for a re-activated pipeline that plays Continuous.
 #[tokio::test]
 async fn a_removed_pipeline_is_told_idle_and_forgotten() {
     let (mut engine, mut ws_rx) = engine().await;
     engine.ensure_pipeline(REMOVED, "SP-225-removed");
     engine.set_state_for_test(REMOVED, PlayState::Playing { video_id: 2 });
     engine.set_scene_active_for_test(REMOVED, true);
-    engine.broadcast_state(REMOVED);
+    engine
+        .handle_command(REMOVED, PlayEvent::SetMode(PlaybackMode::Loop))
+        .await;
     while ws_rx.try_recv().is_ok() {}
 
     engine.remove_pipeline(REMOVED);
 
     assert_eq!(
         ws_rx.try_recv().ok(),
-        Some(idle(REMOVED, PlaybackMode::Continuous)),
+        Some(idle(REMOVED, PlaybackMode::Loop)),
         "the open dashboards are told it is idle"
     );
     assert_eq!(
         global_replay_of(REMOVED),
         vec![idle(REMOVED, PlaybackMode::Continuous)],
-        "and the next one is told the same"
+        "and its record is gone: the next one is told a new pipeline's Idle"
     );
 }

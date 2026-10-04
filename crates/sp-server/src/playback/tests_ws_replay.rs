@@ -119,6 +119,21 @@ async fn a_new_dashboard_is_told_the_playing_song_before_its_state_and_an_idle_p
             },
         )
         .await;
+    // Review round 4: a dashboard connecting right after the song's start is
+    // told it at 0:00 (the `Started` NowPlaying goes through the record too).
+    let at_start = crate::api::websocket::on_connect_replay(&state).await;
+    assert_eq!(
+        replay_of(at_start, &[PLAYING]).first(),
+        Some(&ServerMsg::NowPlaying {
+            playlist_id: PLAYING,
+            video_id: SONG,
+            song: "Test Song".into(),
+            artist: "Test Artist".into(),
+            position_ms: 0,
+            duration_ms: 180_000,
+        }),
+        "the song's start is told to a new dashboard"
+    );
     // Past the 500 ms position throttle, so the tick goes out.
     if let Some(pp) = engine.pipelines.get_mut(&PLAYING) {
         pp.last_now_playing_broadcast = None;

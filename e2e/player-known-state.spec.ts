@@ -256,7 +256,18 @@ test.describe("a reconnect while a playlist plays (#225 review round 3)", () => 
     expect(dropped.ok()).toBe(true);
     const title = page.getByTestId("player-title");
     await expect(title).toHaveText("Načítavam…", { timeout: 10000 });
+    // Review round 4: while it reconnects (the client waits 2 s), nothing it
+    // was told counts: the toggle and the mode select claim nothing either —
+    // no "▶ Prehrať" / "Plynulo" for a playlist that plays.
+    const toggle = page.getByTestId("player-playpause");
+    await expect(toggle).toHaveText("⏯");
+    await expect(toggle).toBeDisabled();
+    await expect(page.getByTestId("player-mode")).toBeDisabled();
+    await expect(page.getByTestId("player-mode")).toHaveValue("");
     await expect(title).toContainText(SONG, { timeout: 15000 });
+    await expect(toggle).toHaveText("⏸ Pauza");
+    await expect(toggle).toBeEnabled();
+    await expect(page.getByTestId("player-mode")).toHaveValue("continuous");
   }
 
   test("a running live preview comes back by itself after the reconnect", async ({
