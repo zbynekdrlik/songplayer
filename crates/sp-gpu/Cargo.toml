@@ -12,6 +12,8 @@ tracing = { workspace = true }
 
 # #223 S1a: Direct3D 11 + DXGI + the runtime HLSL compiler (d3dcompiler_47,
 # shipped with Windows) — the same `windows` 0.58 sp-decoder and sp-ndi use.
+# #223 S1b: Memory + Threading + Security read Spout's shared-memory registry
+# (`OpenFileMappingA`, `MapViewOfFile`, `VirtualQuery`, `CreateMutexA`).
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Foundation",
@@ -20,9 +22,22 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
+    "Win32_Security",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
 ] }
+
+# #223 S1b: builds the vendored Spout2 SDK (vendor/spout2) and the shim with
+# MSVC on a Windows target (build.rs); does nothing elsewhere.
+[build-dependencies]
+cc = "1"
 
 [dev-dependencies]
 # Placeholder crate that defines the `mutants::skip` attribute as a no-op,
 # letting cargo-mutants exclude specific functions from mutation testing.
 mutants = "0.0.4"
+
+# #223 S1b: tests/spout.rs reads Spout's `MaxSenders` registry value before
+# it fills Spout's list (the same `windows` 0.58, one more feature).
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.58", features = ["Win32_System_Registry"] }

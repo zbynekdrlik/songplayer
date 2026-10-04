@@ -19,15 +19,24 @@
 //!   blending at the picture's weight — the outgoing side at 1 − w first, then
 //!   the incoming one at w ([`Composition::layers`]);
 //! - the render target is `B8G8R8A8_UNORM`, created `D3D11_RESOURCE_MISC_SHARED`
-//!   (not keyed: the desc Spout2's own sender texture has), for S1b's Spout
-//!   send.
+//!   (not keyed: the desc Spout2's own sender texture has).
+//!
+//! [`SpoutSender`] (#223 S1b) shares that render target with Resolume Arena
+//! under the name [`SPOUT_SENDER_NAME`] (`SP-program-MAX`; Arena lists it as
+//! `SPOUT_SP-program-MAX`), through the vendored Spout2 SDK 2.007.017
+//! (`vendor/spout2`, SpoutDX `SendTexture`, built by `build.rs`).
+//! [`spout_sender_names`] and [`spout_sender_info`] read Spout's registry the
+//! way a receiver does.
 //!
 //! Every decision is a pure function here, tested on Linux (adapter choice,
 //! picture validation, layers, quad constants, upload residency, the colour
-//! matrix). The Windows module (`win/`) only calls Direct3D. [`reference`] is
+//! matrix, Spout's name rule and registry formats, the sender's
+//! registration in [`spout_state`]). The Windows module
+//! (`win/`) only calls Direct3D, Win32 and the Spout shim. [`reference`] is
 //! the CPU model of the GPU's output that the WARP pixel pins
-//! (`tests/warp.rs`) compare against. Off Windows, [`Compositor`] cannot be
-//! built: it reports [`GpuError::Unsupported`].
+//! (`tests/warp.rs`) compare against; `tests/spout.rs` proves the sender on
+//! WARP. Off Windows, [`Compositor`] cannot be built: it reports
+//! [`GpuError::Unsupported`].
 
 mod adapter;
 mod color;
@@ -38,6 +47,8 @@ mod quad;
 mod readback;
 pub mod reference;
 mod residency;
+mod spout;
+pub mod spout_state;
 mod stats;
 
 #[cfg(not(windows))]
@@ -58,9 +69,13 @@ pub use picture::{MAX_PICTURE_SIDE, Nv12Picture, PictureError, Plane, Planes};
 pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect};
 pub use readback::{mapped_len, unpad_rows};
 pub use residency::{Resident, Upload, upload_for};
-pub use stats::ComposeStats;
+pub use spout::{
+    NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN, SPOUT_NAME_MAX_LEN,
+    SPOUT_SENDER_NAME, SharedTextureInfo, check_sender_name, parse_sender_names,
+};
+pub use stats::{ComposeStats, SpoutSendStats};
 
 #[cfg(not(windows))]
-pub use stub::Compositor;
+pub use stub::{Compositor, SpoutSender, spout_sender_info, spout_sender_names};
 #[cfg(windows)]
-pub use win::{Compositor, adapters};
+pub use win::{Compositor, SpoutSender, adapters, spout_sender_info, spout_sender_names};

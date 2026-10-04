@@ -86,3 +86,47 @@ fn a_lost_device_names_the_call_and_the_code() {
         "Present: the GPU device was lost (HRESULT 0x887a0005)"
     );
 }
+
+#[test]
+fn a_spout_refusal_is_not_a_lost_device_and_names_the_sender() {
+    let cases = [
+        (
+            GpuError::SpoutName {
+                name: String::new(),
+                reason: "empty",
+            },
+            "invalid Spout sender name \"\": empty",
+        ),
+        (
+            GpuError::SpoutNameTaken {
+                name: "SP-program-MAX".to_owned(),
+            },
+            "the Spout sender name \"SP-program-MAX\" is held by another sender",
+        ),
+        (
+            GpuError::SpoutNotRegistered {
+                name: "SP-program-MAX".to_owned(),
+                why: "Spout's sender list is full",
+            },
+            "Spout did not register the sender as \"SP-program-MAX\": Spout's sender list is full; drop it",
+        ),
+        (
+            GpuError::Spout {
+                call: "spout_sender_send",
+                code: 3,
+            },
+            "spout_sender_send failed in Spout (code 0x3)",
+        ),
+        (
+            GpuError::SpoutMap {
+                map: "SP-program-MAX".to_owned(),
+                why: "its memory is not committed",
+            },
+            "the map \"SP-program-MAX\" is not one Spout wrote: its memory is not committed",
+        ),
+    ];
+    for (error, text) in cases {
+        assert!(!error.is_device_lost(), "{error:?}");
+        assert_eq!(error.to_string(), text);
+    }
+}

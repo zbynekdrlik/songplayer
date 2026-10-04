@@ -1,14 +1,20 @@
-//! The Direct3D 11 compositor (Windows). Every decision it takes is a pure,
-//! Linux-tested function of the crate (the adapter, the picture check, the
-//! layers, the quad constants, the upload residency); this module only
-//! calls Direct3D. It is out of the Linux mutation gate (`.cargo/mutants.toml`,
-//! like `sp-decoder/src/video/`) and is proven by the WARP pixel pins
-//! (`tests/warp.rs`) on `windows-latest`.
+//! The Direct3D 11 compositor and its Spout sender (Windows). Every decision
+//! they take is a pure, Linux-tested function of the crate (the adapter, the
+//! picture check, the layers, the quad constants, the upload residency, the
+//! Spout name rule, registry formats and shim codes, the sender's
+//! registration in `spout_state`); this module only calls
+//! Direct3D, Win32 and the Spout shim (`spout_shim.cpp`). It is out of the
+//! Linux mutation gate (`.cargo/mutants.toml`, like `sp-decoder/src/video/`)
+//! and is proven on WARP on `windows-latest`: the compositor by the pixel pins
+//! (`tests/warp.rs`), the sender by `tests/spout.rs`.
 
 mod device;
 mod pipeline;
+mod spout_registry;
+mod spout_sender;
 mod textures;
 
+use std::marker::PhantomData;
 use std::time::Instant;
 
 use tracing::{debug, info};
@@ -18,6 +24,8 @@ use windows::Win32::Graphics::Dxgi::IDXGIResource;
 use windows::core::Interface;
 
 pub use device::adapters;
+pub use spout_registry::{spout_sender_info, spout_sender_names};
+pub use spout_sender::SpoutSender;
 
 use crate::adapter::AdapterInfo;
 use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition};
@@ -46,8 +54,10 @@ fn micros_since(start: Instant) -> u64 {
 
 /// The `SP-program-MAX` compositor: one Direct3D 11 device, the fixed
 /// 3840×2160 BGRA render target, and two texture slots (a fade's outgoing
-/// and incoming side). Not thread-safe by design: S2's `program-max` thread
-/// owns it.
+/// and incoming side). Neither `Send` nor `Sync`: its immediate context is
+/// not thread-safe, and a [`SpoutSender`] made on it drives the same context
+/// (#223 S1b), so both stay on the thread that made them (S2's
+/// `program-max`).
 pub struct Compositor {
     device: ID3D11Device,
     context: ID3D11DeviceContext,
@@ -56,6 +66,9 @@ pub struct Compositor {
     target: RenderTarget,
     slots: [Option<PlaneTextures>; 2],
     staging: Option<ID3D11Texture2D>,
+    /// Ties the compositor to its thread (a raw pointer is neither `Send`
+    /// nor `Sync`).
+    thread_bound: PhantomData<*const ()>,
 }
 
 impl Compositor {
@@ -113,6 +126,7 @@ impl Compositor {
             target,
             slots: [None, None],
             staging: None,
+            thread_bound: PhantomData,
         })
     }
 
@@ -121,12 +135,12 @@ impl Compositor {
         &self.adapter
     }
 
-    /// The Direct3D 11 device (S1b's Spout sender opens on it).
+    /// The Direct3D 11 device (the [`SpoutSender`] opens on it).
     pub fn device(&self) -> &ID3D11Device {
         &self.device
     }
 
-    /// The 3840×2160 BGRA render target (what S1b sends).
+    /// The 3840×2160 BGRA render target (what the [`SpoutSender`] sends).
     pub fn render_target(&self) -> &ID3D11Texture2D {
         &self.target.texture
     }

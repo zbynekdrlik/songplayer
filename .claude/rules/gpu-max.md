@@ -3,13 +3,13 @@ paths:
   - "crates/sp-gpu/**"
 ---
 
-# The `SP-program-MAX` GPU compositor: `crates/sp-gpu` (#223 S1a)
+# The `SP-program-MAX` GPU compositor and Spout sender: `crates/sp-gpu` (#223 S1a, S1b)
 
 Design: #223 revision 3, R3-2 (comment 5979609879). `SP-program-MAX` is a
 FIXED 3840×2160 canvas (owner, 3.10.2026: "4k", "both outputs static"). A 4K
 fade costs ~40–45 ms on the CPU, over the 33.3 ms slot, so MAX is composed on
-the GPU. This crate is the compositor: device, upload, draw, readback. S1b
-adds the Spout send (to this crate), S2 the `program-max` thread and the
+the GPU. This crate is the compositor (device, upload, draw, readback) and,
+since S1b, its Spout sender (below); S2 adds the `program-max` thread and the
 `MaxJob` hand-off (sp-server).
 
 ## What one boundary draws (`composition.rs`)
@@ -110,8 +110,10 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
   - access is synced by the named sender mutex (`IsKeyedMutex` is false);
   - so Spout needs no keyed mutex, and `SendTexture` does not even need our
     target to be shared;
-  - it is shared anyway, with Spout's own description, so S1b may register
-    its handle directly instead of copying.
+  - it is shared anyway, with Spout's own description. S1b SENDS it
+    (`SendTexture`, a GPU copy) rather than registering its handle: Spout's
+    own texture is guarded by the sender mutex a receiver takes, so Arena
+    never reads a frame the compositor is drawing.
 - WARP supports shared resources since Windows 8 (D3D11_RESOURCE_MISC_FLAG
   docs). `tests/warp.rs` asserts the flag and a non-null `GetSharedHandle`,
   and it fails (never skips) if WARP refuses.
@@ -127,6 +129,208 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
 - `Nv12Picture`'s `Debug` prints its id, size and byte count, never its
   bytes (a 1440p picture is 5.5 MB in a log line otherwise).
 
+## The Spout sender (#223 S1b)
+
+Design: R3-2 "Transport" and revision 2's D7 "Build" (5872871751); the S1b
+anchors are on #223 (comment 5984577044).
+
+### The vendored SDK (`vendor/spout2`)
+
+- Spout2 **2.007.017** (BSD-2, https://github.com/leadedge/Spout2, tag
+  `2.007.017`), exactly upstream's `SpoutDX_static` source list, flat and
+  UNMODIFIED, with its `LICENSE`. `vendor/spout2/README.md` lists the files,
+  the flags and the bump steps.
+- `build.rs` (`cc`, MSVC): `/std:c++17`, `/EHsc` (cc sets no exception
+  model for MSVC, and the SDK uses try/catch), `SPOUT_BUILD_STATIC`,
+  `NDEBUG`, no `UNICODE` (upstream's own builds), and every system library
+  named (`user32` has no `#pragma comment` in the SDK). Two libraries: the
+  shim (`sp_spout_shim`, cc's `warnings(true)` + `warnings_into_errors`:
+  `-W4 -WX`; it wraps the SDK's headers in `#pragma warning(push, 0)`)
+  linked before the SDK (`sp_spout_sdk`, `-W0`: not ours to fix). cl prints
+  warnings on STDOUT, which cargo shows only for a failed build, so `-WX`
+  is the only way a shim warning is ever seen; a `-W4` flag after cc's
+  `-W0` would only earn D9025.
+- **Bumping it:** read the new tag's `SpoutDX_SOURCES`, copy the files over
+  unmodified, and re-read the facts below in the new source (they are what
+  the shim and `src/spout.rs` rely on); the WARP tests are the gate.
+- **Common-Controls 6.0 is a hard requirement.** `SpoutUtils.cpp` imports
+  `TaskDialogIndirect` from COMCTL32 statically. Only comctl32 v6 exports
+  it, and Windows binds v6 only for an exe whose manifest asks for it;
+  otherwise the exe does not start (STATUS_ENTRYPOINT_NOT_FOUND,
+  0xC0000139). Every SDK object carries `#pragma comment(linker,
+  "/manifestdependency:…Common-Controls 6.0…")` (`SpoutUtils.h`). rustc
+  passes no `/MANIFEST` flag, so link.exe's default writes a side-by-side
+  `<exe>.manifest` FILE with that dependency: that is what lets the test
+  exes start. It never embeds a second manifest. The Tauri app embeds its
+  own (tauri-build's declares Common-Controls 6.0), which wins over the side
+  file. S2 checks the shipped exe's EMBEDDED manifest declares
+  Common-Controls 6.0 (if it ever did not, the app would not start).
+- BSD-2 asks for the notice in the documentation of a binary distribution:
+  when S2 links sp-gpu into the app, the installer/about must carry
+  `vendor/spout2/LICENSE`.
+
+### The sender
+
+- Name: `SPOUT_SENDER_NAME` = **`SP-program-MAX`**. Resolume Arena 7.28 lists
+  a Spout 2.007.017 sender as category "Spout Servers", idstring
+  **`SPOUT_SP-program-MAX`** (M0, 5980720789).
+- `SpoutSender::new(&Compositor)` → `send()` after each `compose()`, on the
+  same thread → `SpoutSendStats { send_us }`. `with_name` is doc-hidden, for
+  tests. `registration()` says where it is (`spout_state::Registration`).
+- **Neither the sender nor the `Compositor` is `Send` (nor `Sync`).** The
+  sender drives the compositor's immediate context (spoutDX takes it with
+  `GetImmediateContext`), which is not thread-safe; if either could cross
+  threads, safe code could send on one thread while another composes. So
+  `Compositor` carries a `PhantomData<*const ()>` (#223 S1b round 3) and
+  the sender's shim handle is a raw pointer: both stay on the thread that
+  made them. S2 builds both on `program-max`.
+- **One SDK call at a time per process** (`win/spout_sender.rs` `SDK`
+  mutex, around every shim call, never nested): the SDK keeps
+  process-global state (its log buffer, written by every log of level
+  Notice or higher even with logging off), so senders on two threads must
+  not run it at once.
+- `SendTexture` copies the render target into Spout's OWN shared texture
+  (`CreateSharedDX11Texture`: `MISC_SHARED`, not keyed, a legacy handle)
+  under the named mutex `<name>_SpoutAccessMutex`, then `Flush`es. If a
+  receiver holds that mutex over 67 ms Spout SKIPS the copy and still
+  returns true: nothing tells the caller, `send_us` shows the wait.
+- Registration is lazy: Spout lists the sender at its FIRST send (it needs
+  the texture's size and format). Before that `spout_sender_info` is `None`.
+- `spoutDX::OpenDirectX11(device)` keeps the device pointer WITHOUT AddRef
+  (and AddRefs the immediate context). So `SpoutSender` holds its own clones
+  of the device and the render target, and its `Shim` field (declared
+  first) releases the spoutDX before them. It may outlive the `Compositor`
+  value; S2 drops both on a lost device.
+- **The shim is primitives; the decisions are `src/spout_state.rs`**, pure
+  and Linux-tested (the mutation gate sees them). `spout_shim.cpp` only does
+  one SpoutDX step per call: `open` (+ Spout's own `CleanSenders`), `listed`
+  (yes / no / unreadable), `claim_name` (`SetSenderName`: kept or renamed),
+  `send` (`SendTexture`), `state` (`IsInitialized`, the name kept),
+  `refuse` (release), `size`, `release`.
+- **A second sender with the same name is REFUSED** (Spout would rename it
+  `SP-program-MAX_1`, which Arena's layer never shows), and a refusal is for
+  good (`Registration::Refused(why)`: every later send returns it):
+  - at create (`spout_state::claim`): a listed name, or one Spout renames
+    while claiming it → `GpuError::SpoutNameTaken`; Spout's `CleanSenders`
+    first drops names whose sender crashed (their info map is gone);
+  - before the first send (`before_send`): a name another sender listed
+    since → `SpoutNotRegistered { why: TAKEN }`, BEFORE Spout can register
+    `_1` (or, with a full list, take over that sender's map). Residual: an
+    unreadable list lets the send go (as Spout's own `FindSenderName`
+    does), and another process can list the name between the check and the
+    send; with a full or locked list Spout would then write that sender's
+    map. Only a second program sending as `SP-program-MAX` (a second
+    SongPlayer) can meet it;
+  - after the first send (`after_send`): registered under another name →
+    `TAKEN`; not in the list → `NOT_LISTED` (its list was full, or its
+    lock timed out during the registration: Spout's `RegisterSenderName`
+    then registers nothing and `CreateSender` ignores that; or another
+    program's `CleanSenders` dropped it mid-registration); nothing
+    registered (`SendTexture` failed or threw before the registration) →
+    `REGISTRATION_FAILED`: a retry would meet its own half-made
+    registration and be renamed `_1`. A send that fails AFTER the
+    registration loses one frame and leaves the sender `Unconfirmed` (never
+    `Fresh`: its next pre-send check would find its own name and refuse
+    it).
+  - A refusal calls the shim's `refuse`: `ReleaseSender` (a completed
+    registration and its texture), plus a half-made registration whose info
+    map THIS sender made (`FindSender` looks only at this object's maps),
+    never another sender's listing. Drop it and make a new sender, after
+    a BACKOFF (S2: a few seconds): a full list or a taken name refuses an
+    immediate retry the same way, and each retry makes a new 4K shared
+    texture.
+- A list that cannot be read at the first send (its 67 ms lock) leaves the
+  sender `Unconfirmed(n)`; the next send checks again, up to
+  `MAX_UNREADABLE` (30) unreadable checks in a row, then `UNREADABLE`
+  refuses it (each read may wait 67 ms, so a stuck list costs up to 30
+  sends × 67 ms, about 2 s, not forever; its own info map may then stay
+  until Drop, since Spout takes the list's lock before releasing it). A
+  confirmed sender's send reads nothing (no lock per
+  frame): it shares, or loses one frame (`GpuError::Spout`, code 3 or 4).
+- Names: 1..=228 bytes of printable ASCII, no `\` (`check_sender_name`;
+  the shim checks the length and the backslash again). A sender Spout
+  renames to `<name>_<n>` (≤ 11 more bytes) gets `<name>_<n>_Count_Semaphore`
+  (16 more) built in 256 bytes with `sprintf_s`, which ABORTS the process
+  on overflow: 255 − 27 = 228. No kernel object name may hold a backslash.
+- `Drop` deletes the `spoutDX`: `ReleaseSender` takes the name off the list
+  and closes its info map, `CloseDirectX11` flushes and releases its
+  context reference.
+- After every send, `GetDeviceRemovedReason`: a lost device is
+  `GpuError::DeviceLost`, as in `compose`.
+- Every shim call that can throw catches every C++ exception (code 4);
+  `size` / `state` cannot throw; `release` runs `~spoutDX` (a throw in a
+  destructor terminates, it never unwinds): nothing unwinds into Rust.
+
+### Spout's registry (`spout_sender_names`, `spout_sender_info`)
+
+Read as a receiver does: open the named map, take its named mutex
+`<map>_mutex` (`WaitForSingleObject`, 67 ms, as `SpoutSharedMemory::Lock`),
+copy, release. A missing map (`HRESULT 0x80070002`) is "absent", never an
+error. A map that is not committed memory, or a sender's map shorter than a
+`SharedTextureInfo`, is `GpuError::SpoutMap`.
+
+- `SpoutSenderNames`: MaxSenders × 256 bytes (64 by default, registry
+  `MaxSenders`). One NUL-terminated name per slot. The list ends at a slot
+  whose first byte is 0 or ≥ 0x80 (Spout tests a signed `char` `> 0`), or a
+  slot with no NUL (there Spout's `strncpy_s` would hit MSVC's
+  invalid-parameter handler, which ends the process).
+- A sender's own map, named after it: `SharedTextureInfo`, 280 bytes LE:
+  `shareHandle, width, height, format, usage` (u32 each), `description[256]`
+  (the sending exe's path), `partnerId`. On x64 a receiver opens
+  `LongToHandle((long)shareHandle)`: the 32 bits SIGN-EXTENDED
+  (`share_handle_value`).
+
+### WARP proof (`tests/spout.rs`, Windows only)
+
+- the first send lists `SP-program-MAX`, its map says 3840×2160, format 87
+  (`B8G8R8A8_UNORM`), usage 0, a non-zero handle and this test's exe;
+  `size()` agrees; `Drop` unlists it and its map is gone;
+- the handle opens on a SECOND WARP device (`OpenSharedResource`, as Arena
+  opens it) and reads back byte for byte the compositor's own readback, for
+  two frames, plus S1a's reference tolerance at sample points (two blank
+  frames cannot pass). Sync: `compose` waits for the GPU, `send` queues the
+  copy, and the compositor's `read_back` `Map` waits for it, so the second
+  device reads a finished copy;
+- a listed name is refused at create, and no `_1` sender appears;
+- a sender whose name another sender listed since it was made is refused
+  before Spout registers it (`TAKEN`), twice. The test runs on a list of
+  63 fake senders, so the winner fills it: without the pre-send check
+  Spout would not rename the loser but open the WINNER's info map and
+  write its own texture there, and the loser would end `Confirmed` (the
+  test fails at its refusal match, and the winner's map would no longer be
+  the winner's). No `_1` ever appears, and the winner stays listed;
+- the sender keeps sending after the `Compositor` is dropped (its own
+  references);
+- with Spout's list made FULL (64 fake senders, each with its info map),
+  a new sender is created but its first send is refused `NOT_LISTED`, its
+  own info map released and the 64 entries untouched (this is the only way
+  to reach `NOT_LISTED` on CI).
+- `FakeSenders` writes Spout's MACHINE-WIDE list, so it refuses to run
+  where any sender is listed or `HKCU\Software\Leading Edge\Spout`
+  `MaxSenders` is not the default 64 (Spout would read past the 16 KiB
+  map): windows-latest, never a box where Spout is in use.
+- a name Spout cannot carry never reaches Spout; a missing map is `None`.
+- The helpers both WARP test binaries use (`warp()`, the smooth `pattern`,
+  `assert_matches_reference`) live in `tests/common/mod.rs`.
+
+WARP has supported shared resources since Windows 8 (the
+D3D11_RESOURCE_MISC_FLAG docs); the second-device test FAILS with the
+HRESULT if it ever refuses, it never skips.
+
+### The box checks S2 runs (win-resolume)
+
+- `spout_sender_info("SP-program-MAX")` after the first send: 3840×2160,
+  format 87, the host path = the installed `songplayer.exe`;
+- Arena `GET /api/v1/sources` lists `SPOUT_SP-program-MAX` (category "Spout
+  Servers"); on a scratch layer (Bridge.avc saved and restored) it shows the
+  program at 30 frames/s, with Arena's FPS held and its CPU change measured
+  (R3-2 S2 gate; M0 moved this measurement to S2);
+- `max.send_us_p99` and `SP-program` / VBAN timing unchanged (health deltas
+  0);
+- the exe's EMBEDDED manifest declares Common-Controls 6.0 (the SDK's
+  `TaskDialogIndirect` import), and the installer carries the Spout2 BSD-2
+  notice.
+
 ## Telemetry (`ComposeStats`, for S2's `max.*_p99`)
 
 - `upload_us`: the CPU time of this call's uploads, texture creation
@@ -138,6 +342,9 @@ adds the Spout send (to this crate), S2 the `program-max` thread and the
   cost, it can read the query a boundary later instead: Spout's copy is
   ordered after the draw on the same context and needs no wait.
 - `uploads`: 0, 1 or 2 pictures uploaded.
+- `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): the CPU time of
+  `SendTexture`: the sender-mutex wait, the queued copy and the flush (at
+  the first send also the shared texture's creation and the registration).
 
 ## HLSL at runtime
 
@@ -152,11 +359,21 @@ build step, and WARP and the RTX run the same source. A compile error is
 - `src/win/` is `#[cfg(windows)]` and excluded from the Linux mutation gate
   (`.cargo/mutants.toml`). Every decision lives in a pure, Linux-tested module:
   `adapter`, `picture`, `composition`, `quad`, `residency`, `color`,
-  `reference`, `error`, `readback` (the mapped rows packed). Keep it that
+  `reference`, `error`, `readback` (the mapped rows packed), `spout` (the
+  sender name rule, the registry parsers, the shim's codes), `spout_state`
+  (the sender's registration: every refuse / confirm decision). Keep it that
   way: logic added inside `win/` is untested by the gate.
-- The off-Windows `Compositor` (`stub.rs`) is an uninhabited enum. `new` /
-  `new_warp` return `Unsupported`; its methods are `mutants::skip`, since no
-  value exists to call them on.
+- The off-Windows `Compositor` (`stub.rs`) is an uninhabited struct (it
+  holds an `Infallible`) with a `PhantomData<*const ()>`, so it is neither
+  `Send` nor `Sync`, like the Windows type: code moving it across threads
+  fails the Linux build too. `new` / `new_warp` return `Unsupported`; its
+  methods are `mutants::skip`, since no value exists to call them on. The
+  off-Windows `SpoutSender` is the same (its `new` takes a `&Compositor`,
+  which cannot exist); the registry readers return `Unsupported`.
+- The C++ (`vendor/spout2`, `src/win/spout_shim.cpp`) is compiled only by
+  the `Build (Windows)` job: `build.rs` returns at once for a non-Windows
+  `CARGO_CFG_TARGET_OS`. cargo-mutants never mutates `build.rs` (it
+  mutates lib/bin targets only).
 - `windows` 0.58 signatures are read from the crate source (download it into
   the scratchpad, `rust-workspace.md`). The traps this crate met:
   - `D3D11_TEXTURE2D_DESC.BindFlags` / `CPUAccessFlags` / `MiscFlags`, and
