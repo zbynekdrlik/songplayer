@@ -29,17 +29,19 @@
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
 //! crossfaded here, on the sender thread: the audio per sample with the
 //! equal-power curve, the picture blended into a `frame_pool` buffer, painted
-//! in row bands on helper threads (`program_transition::mix_nv12_into`, #215
-//! addendum 3). `start_program` also starts the OBS-follow task
-//! (`program_follow.rs`) and hands the bus to the engine for the deferred
-//! scene-go-off pause.
+//! in row bands (`program_transition::mix_nv12_into`, #215 addendum 3) on the
+//! sender's persistent band workers (`band_pool.rs`, #223 follow-up: started
+//! once with the output, never per picture). `start_program` also starts the
+//! OBS-follow task (`program_follow.rs`) and hands the bus to the engine for
+//! the deferred scene-go-off pause.
 //!
 //! #223: `SP-program` is ALWAYS 1920×1080 (the owner's rule). Every picture
 //! the sender submits is in its canvas (`program_canvas.rs`, the standby's own
 //! 1920×1080 in production): a forwarded source's (the NDI input's included)
 //! is passed through when it already is one, else fitted into it; a fade's
-//! incoming picture is made a canvas picture and the outgoing one is blended
-//! over it, fitted into the canvas in the same pass when it is not one; a
+//! picture is painted in ONE pass from both sides (#223 follow-up, design
+//! record 5973498519), each fitted into the canvas as it is read when it is
+//! not a canvas picture, the incoming one blended over the outgoing one; a
 //! missing side is the canvas black. The fit is video-side work in
 //! `submit_video`, after the VBAN hand-off, and inside the `submit_us` span
 //! (`health.timing`), so the box shows its cost.
@@ -56,14 +58,15 @@ use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+use crate::playback::band_pool::BandPool;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
-use crate::playback::program_canvas::Canvas;
+use crate::playback::program_canvas::{Canvas, FadeSide};
 use crate::playback::program_output_timing::{BoundaryMarks, LateBoundary, utc_label};
 use crate::playback::program_transition::{
-    AudioFormat, Layout, MixJob, Outgoing, mix_audio_block, mix_bands, mix_nv12_into,
+    AudioFormat, Layout, MIX_THREAD_NAME, MixJob, mix_audio_block, mix_bands,
 };
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::submitter::FrameSubmitter;
@@ -106,9 +109,11 @@ pub struct ProgramOutput<B: NdiBackend> {
     vban: Option<Arc<VbanOut>>,
     /// #215: audio frames per boundary (1600).
     spc: usize,
-    /// #215 addendum 3: the row bands (threads) a mixed or fitted picture is
-    /// painted in (`mix_bands` of the box's logical processors).
-    mix_bands: usize,
+    /// #215 addendum 3 + #223 follow-up: the row bands a mixed or fitted
+    /// picture is painted in (`mix_bands` of the box's logical processors):
+    /// this thread and the persistent `program-mix-<i>` workers, started
+    /// with the output and joined when it is dropped.
+    bands: BandPool,
     /// The run of mixed boundaries being sent (a window), logged once when
     /// the next unmixed boundary ends it.
     mix_run: MixRun,
@@ -145,6 +150,12 @@ fn log_mix_run(run: &MixRun) {
 /// pair.
 fn has_picture(mix: &MixJob) -> bool {
     mix.from.is_some() || mix.to.is_some()
+}
+
+/// #223 follow-up: a window boundary's side as `Canvas::fade` reads it: its
+/// picture's layout and bytes, or `None` when the side is missing.
+fn fade_side(job: &Option<SubmitJob>) -> FadeSide<'_> {
+    job.as_ref().map(|job| (Layout::of(job), &job.video[..]))
 }
 
 /// #210: one program boundary split at the VBAN hand-off
@@ -215,7 +226,10 @@ impl<B: NdiBackend> ProgramOutput<B> {
             canvas: Canvas::new(width, height),
             vban: None,
             spc,
-            mix_bands: mix_bands(crate::lyrics::heavy_slot::logical_cores()),
+            bands: BandPool::new(
+                MIX_THREAD_NAME,
+                mix_bands(crate::lyrics::heavy_slot::logical_cores()),
+            ),
             mix_run: MixRun::default(),
         }
     }
@@ -318,11 +332,10 @@ impl<B: NdiBackend> ProgramOutput<B> {
     fn submit_video(&mut self, pair: Pair, stamp_100ns: i64, now: &impl Fn() -> i64) -> i64 {
         let start = now();
         let canvas = self.canvas.layout();
-        let black = self.canvas_black();
         match pair {
             Pair::Source(job) => {
                 let layout = Layout::of(&job);
-                let video = self.canvas.fit(layout, &job.video, &black, self.mix_bands);
+                let video = self.canvas.fit(layout, &job.video, &self.bands);
                 let audio_tc = job.audio_tc_100ns;
                 send(
                     &mut self.submitter,
@@ -333,17 +346,20 @@ impl<B: NdiBackend> ProgramOutput<B> {
                     audio_tc,
                 );
             }
-            Pair::Standby => send(
-                &mut self.submitter,
-                canvas,
-                black,
-                &self.silence,
-                stamp_100ns,
-                stamp_100ns,
-            ),
+            Pair::Standby => {
+                let black = self.canvas_black();
+                send(
+                    &mut self.submitter,
+                    canvas,
+                    black,
+                    &self.silence,
+                    stamp_100ns,
+                    stamp_100ns,
+                );
+            }
             Pair::Mix { mix, audio } => {
                 let started = Instant::now();
-                let video = self.paint_mix(&mix, &black);
+                let video = self.paint_mix(&mix);
                 let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
                 self.mix_run.boundaries += 1;
                 self.mix_run.max_picture_us = self.mix_run.max_picture_us.max(picture_us);
@@ -360,9 +376,9 @@ impl<B: NdiBackend> ProgramOutput<B> {
         start
     }
 
-    /// #223: the canvas's studio black — the standby picture, and what a fit
-    /// is drawn on (`FrameSubmitter::standby_black_nv12`: built once, then an
-    /// `Arc` clone).
+    /// #223: the canvas's studio black — the standby picture
+    /// (`FrameSubmitter::standby_black_nv12`: built once, then an `Arc`
+    /// clone).
     fn canvas_black(&mut self) -> SharedFrame {
         let canvas = self.canvas.layout();
         self.submitter
@@ -377,8 +393,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
         if !has_picture(mix) {
             return None;
         }
-        let black = self.canvas_black();
-        Some((self.canvas.layout(), self.paint_mix(mix, &black)))
+        Some((self.canvas.layout(), self.paint_mix(mix)))
     }
 
     /// #223: how many canvas fit plans the sender built so far — the tests'
@@ -389,39 +404,20 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 
     /// #215 + #223: the picture of a window boundary, in the canvas, exactly
-    /// its bytes. The incoming picture is made a canvas picture first (as it
-    /// is, or fitted onto `black`); the outgoing one is blended over it at the
-    /// boundary's weight, fitted into the canvas in the same pass when it is
-    /// not a canvas picture (`Outgoing::Fitted`, #215 addendum 3: no fitted
-    /// scratch). A missing side is `black`, the canvas's studio black. Each
-    /// pass runs in `mix_bands` row bands, into a pooled buffer.
-    fn paint_mix(&mut self, mix: &MixJob, black: &SharedFrame) -> SharedFrame {
-        let (canvas, bands, weight) = (self.canvas.layout(), self.mix_bands, mix.weight_q8());
-        let fitted = [&mix.from, &mix.to]
+    /// its bytes, painted in ONE pass (`Canvas::fade`, #223 follow-up): the
+    /// incoming picture blended over the outgoing one at the boundary's
+    /// weight, each one fitted into the canvas as it is read when it is not a
+    /// canvas picture (no fitted scratch, no second pass), a missing side the
+    /// canvas's studio black, in the sender's row bands into a pooled buffer.
+    fn paint_mix(&mut self, mix: &MixJob) -> SharedFrame {
+        let (from, to) = (fade_side(&mix.from), fade_side(&mix.to));
+        let fitted = [from, to]
             .into_iter()
             .flatten()
-            .any(|job| !self.canvas.holds(Layout::of(job)));
-        let to = match &mix.to {
-            Some(job) => self.canvas.fit(Layout::of(job), &job.video, black, bands),
-            None => black.clone(),
-        };
-        let mut out = sp_decoder::frame_pool::take(canvas.len);
-        match &mix.from {
-            Some(job) if !self.canvas.holds(Layout::of(job)) => {
-                let plan = self.canvas.plan(Layout::of(job));
-                let outgoing = Outgoing::Fitted(plan, &job.video);
-                mix_nv12_into(outgoing, &to, weight, bands, &mut out);
-            }
-            from => {
-                // A canvas picture (or the black), cut to the canvas's bytes:
-                // the mix is exactly the canvas, slack past a picture or not.
-                let picture = from.as_ref().map_or(black, |job| &job.video);
-                let outgoing = Outgoing::Same(canvas, &picture[..canvas.len]);
-                mix_nv12_into(outgoing, &to, weight, bands, &mut out);
-            }
-        }
+            .any(|(layout, _)| !self.canvas.holds(layout));
+        let video = self.canvas.fade(from, to, mix.weight_q8(), &self.bands);
         self.mix_run.fitted += u64::from(fitted);
-        SharedFrame::new(out)
+        video
     }
 
     /// End a run of mixed boundaries: log it once and start the next.
@@ -645,13 +641,14 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
                 }
             };
             let mut out = ProgramOutput::fhd(sender).with_vban(bus.vban().clone());
-            // #215 addendum 3: how many threads paint a mixed or fitted picture.
-            let mix_bands = out.mix_bands;
+            // #215 addendum 3 + #223 follow-up: how many threads paint a mixed
+            // or fitted picture (this one + the persistent band workers).
             info!(
                 ndi_name = PROGRAM_NDI_NAME,
                 width = PROGRAM_STANDBY_W,
                 height = PROGRAM_STANDBY_H,
-                mix_bands,
+                mix_bands = out.bands.bands(),
+                mix_workers = out.bands.workers(),
                 "program output thread started (#223: every picture is this canvas)"
             );
             let mut wall = WallClock::system();

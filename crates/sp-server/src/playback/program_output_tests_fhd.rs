@@ -335,3 +335,59 @@ fn a_fade_between_two_sizes_is_drawn_in_the_canvas() {
         "two mixed boundaries, each with a side fitted"
     );
 }
+
+#[test]
+fn a_fade_between_two_1440p_songs_scales_both_sides_by_one_plan() {
+    // The box's regression case (#223 comment 5973492929): two 2560×1440
+    // songs, both fitted into the canvas by the ONE plan their layout
+    // shares. The outgoing quadrants stay where they are, scaled, under the
+    // incoming flat picture at weight ½. (That this is ONE pass, both sides
+    // read as each row is painted, is structural — `Mix::row` — and the
+    // box's `max_picture_us` measures it; the bytes are the same either way.)
+    let (backend, mut out) = fhd_output();
+    let (w, h) = (2560, 1440);
+    let quadrants = SharedFrame::new(picture(w, h, w, |x, row| quadrant(w, h, x, row), (90, 170)));
+    out.submit(ProgramJob::Mix(MixJob {
+        stamp_100ns: floor_boundary_100ns(T0, GENLOCK_GRID_FPS),
+        from: Some(source(w, h, w, &quadrants)),
+        to: Some(flat(w, h, 40, (160, 100))),
+        slot: 4,
+        n_slots: 9,
+    }));
+    let mixed = wire(&backend, &out);
+    assert_eq!(mixed.len(), FHD_LEN);
+    for row in 0..H {
+        if row == H / 2 - 1 || row == H / 2 {
+            continue;
+        }
+        for (x, &y) in luma_row(&mixed, row).iter().enumerate() {
+            if x == W / 2 - 1 || x == W / 2 {
+                continue;
+            }
+            let want = match quadrant(W, H, x, row) {
+                50 => 45,
+                200 => 120,
+                100 => 70,
+                _ => 95,
+            };
+            assert_eq!(
+                y, want,
+                "luma ({x}, {row}): (q · 128 + 40 · 128 + 128) >> 8"
+            );
+        }
+    }
+    for row in 0..H / 2 {
+        assert!(
+            chroma_row(&mixed, row)
+                .chunks_exact(2)
+                .all(|uv| uv == [125u8, 135]),
+            "chroma row {row}: U (90, 160) → 125, V (170, 100) → 135"
+        );
+    }
+    assert_eq!(out.fit_plans(), 1, "one plan for both 1440p sides");
+    assert_eq!(
+        (out.mix_run.boundaries, out.mix_run.fitted),
+        (1, 1),
+        "one mixed boundary, fitted"
+    );
+}

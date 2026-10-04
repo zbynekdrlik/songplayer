@@ -9,9 +9,12 @@
 //! Wired via `#[cfg(test)] #[path = "program_output_tests.rs"] mod tests;`.
 
 use super::*;
+use crate::playback::band_pool::BandPool;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramBus, ProgramJob};
-use crate::playback::program_transition::{Layout, MAX_MIX_BANDS, MixJob, crossfade_gains};
+use crate::playback::program_transition::{
+    Layout, MAX_MIX_BANDS, MIX_THREAD_NAME, MixJob, crossfade_gains,
+};
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::wallclock::WallClock;
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
@@ -590,8 +593,9 @@ fn a_smaller_picture_is_fitted_into_the_canvas_as_it_is_blended() {
     );
     assert_eq!(backend.video_timecodes(), vec![at(0), at(1)]);
 
-    // The other way round: the incoming 4×2 picture is fitted into the
-    // canvas first, then the outgoing 8×2 canvas picture blends over it.
+    // The other way round: the outgoing 8×2 canvas picture as it is, the
+    // incoming 4×2 picture fitted into the canvas as it is blended over it
+    // (#223 follow-up: both sides in one pass).
     let reverse = mix_at(at(2), Some(wide.clone()), Some(from.clone()), 3, 9);
     let (layout, picture) = out.mix_picture(&reverse).expect("a picture");
     assert_eq!(layout, layout_8x2, "the canvas, not the incoming 4×2");
@@ -616,7 +620,7 @@ fn a_window_builds_its_fit_plan_once_and_another_pair_of_layouts_builds_its_own(
     // in every band count the sender may run.
     for bands in 1..=MAX_MIX_BANDS {
         let (_backend, mut out) = output(8, 2);
-        out.mix_bands = bands;
+        out.bands = BandPool::new(MIX_THREAD_NAME, bands);
         let from = pair(4, &FROM_4X2, at(0), at(0), 0.25);
         let wide = pair(8, &[7u8; 24], at(0), at(0), 0.5);
         for slot in 0..9u32 {

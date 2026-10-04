@@ -13,13 +13,19 @@
 //!
 //! - a picture already in it (the canvas's size and stride, and at least its
 //!   bytes) goes out as it is, the same allocation, no copy;
-//! - any other picture is fitted onto the canvas's studio black. It is placed
-//!   by `nv12_fit::aspect_fit` (aspect kept, centred on even offsets, bars
-//!   Y 16 / UV 128) and scaled bilinear by the #215 fused kernel
-//!   (`mix_nv12_into` with `Outgoing::Fitted`) at weight 0: every byte is the
-//!   fitted picture's, a plain fit with no blend. It runs in the sender's row
+//! - any other picture is fitted into it ([`Canvas::fit`]). It is placed by
+//!   `nv12_fit::aspect_fit` (aspect kept, centred on even offsets, bars
+//!   Y 16 / UV 128) and scaled bilinear by the fused kernel
+//!   (`mix_nv12_into` with `Paint::Fit(Side::Fitted)`): one side, every byte
+//!   the fitted picture's, nothing else read. It runs in the sender's row
 //!   bands into a `frame_pool` buffer. A larger picture is scaled down, a
-//!   smaller one up, and a 16:9 one fills the canvas.
+//!   smaller one up, and a 16:9 one fills the canvas;
+//! - a fade boundary's picture ([`Canvas::fade`], #223 follow-up, design
+//!   record 5973498519) is painted in ONE pass from both sides: each one
+//!   read as it is when it is a canvas picture, fitted when it is not, the
+//!   canvas black when it is missing, and the incoming one blended over the
+//!   outgoing one at the boundary's weight. Before, the incoming side was
+//!   fitted into a canvas buffer first and blended in a second pass.
 //!
 //! A fit's plan (its column taps) is built once per source layout. The canvas
 //! keeps the [`FIT_PLANS_KEPT`] plans used last, so a fade between two sizes,
@@ -28,15 +34,29 @@
 
 use tracing::info;
 
+use crate::playback::band_pool::BandPool;
 use crate::playback::frame_buf::SharedFrame;
-use crate::playback::program_transition::{FitPlan, Layout, Outgoing, mix_nv12_into};
+use crate::playback::program_transition::{FitPlan, Layout, Paint, Side, mix_nv12_into};
 
 /// How many fit plans the canvas keeps: both sides of a fade.
 pub const FIT_PLANS_KEPT: usize = 2;
 
-/// The Q8 weight of the black canvas when a picture is only fitted onto it:
-/// none, so every byte is the fitted picture's (`(f·256 + 128) >> 8 = f`).
-const FIT_ONLY_Q8: u32 = 0;
+// A fade's picture reads both sides' plans at once (`Canvas::fade`).
+const _: () = assert!(FIT_PLANS_KEPT >= 2);
+
+/// One side of a fade boundary: a picture of its layout, or `None` when the
+/// side is missing (the canvas black). The picture's own length counts,
+/// whatever the layout's `len` says ([`Canvas::fade`]).
+pub type FadeSide<'a> = Option<(Layout, &'a [u8])>;
+
+/// A fade side with its layout's `len` set to its picture's own length: what
+/// the canvas holds or fits is the bytes that are there.
+fn measured(side: FadeSide<'_>) -> FadeSide<'_> {
+    side.map(|(layout, picture)| {
+        let len = picture.len();
+        (Layout { len, ..layout }, picture)
+    })
+}
 
 /// The program's picture layout and the fit plans into it.
 #[derive(Debug)]
@@ -83,10 +103,17 @@ impl Canvas {
             && layout.len >= canvas.len
     }
 
-    /// The plan that fits a `src` picture into the canvas. A kept one becomes
-    /// the one used last; otherwise a new one is built (logged), and the plan
-    /// used longest ago is dropped past [`FIT_PLANS_KEPT`].
+    /// The plan that fits a `src` picture into the canvas ([`Canvas::keep`]).
     pub fn plan(&mut self, src: Layout) -> &FitPlan {
+        self.keep(src);
+        &self.plans[0]
+    }
+
+    /// Keep a plan that fits a `src` picture into the canvas, as the one used
+    /// last: a kept one moves to the front; otherwise a new one is built
+    /// (logged), and the plan used longest ago is dropped past
+    /// [`FIT_PLANS_KEPT`].
+    fn keep(&mut self, src: Layout) {
         let canvas = self.layout;
         match self.plans.iter().position(|plan| plan.fits(src, canvas)) {
             Some(kept) => self.plans[..=kept].rotate_right(1),
@@ -105,37 +132,82 @@ impl Canvas {
                 self.plans.truncate(FIT_PLANS_KEPT);
             }
         }
-        &self.plans[0]
     }
 
     /// `video`, a `layout` picture, as a canvas picture: `video` itself (the
-    /// same allocation) when the canvas holds it, else fitted onto `black`
-    /// (the canvas's studio black) in `bands` row bands, into a pooled buffer
-    /// of exactly the canvas's bytes. `black` is read for its length only (at
-    /// weight 0 none of its bytes shows); one shorter than the canvas panics
-    /// here, never a short picture labelled as the canvas for the SDK.
-    pub fn fit(
-        &mut self,
-        layout: Layout,
-        video: &SharedFrame,
-        black: &[u8],
-        bands: usize,
-    ) -> SharedFrame {
+    /// same allocation) when the canvas holds it, else fitted into the
+    /// canvas — one side, nothing else read — in the `pool`'s row bands,
+    /// into a pooled buffer of exactly the canvas's bytes. Judged by
+    /// `video`'s own length, as [`Canvas::fade`] judges a side: a buffer
+    /// shorter than its layout claims is never sent as a canvas picture.
+    pub fn fit(&mut self, layout: Layout, video: &SharedFrame, pool: &BandPool) -> SharedFrame {
+        let layout = Layout {
+            len: video.len(),
+            ..layout
+        };
         if self.holds(layout) {
             return video.clone();
         }
-        let len = self.layout.len;
-        let black = &black[..len];
-        let mut out = sp_decoder::frame_pool::take(len);
+        let canvas = self.layout;
+        let mut out = sp_decoder::frame_pool::take(canvas.len);
         let plan = self.plan(layout);
         mix_nv12_into(
-            Outgoing::Fitted(plan, video),
-            black,
-            FIT_ONLY_Q8,
-            bands,
+            canvas,
+            Paint::Fit(Side::Fitted(plan, video)),
+            pool,
             &mut out,
         );
         SharedFrame::new(out)
+    }
+
+    /// A fade boundary's picture, exactly the canvas's bytes, painted in ONE
+    /// pass in the `pool`'s row bands: the incoming side `to` blended over
+    /// the outgoing side `from` at the Q8 `weight`, each side as it is when
+    /// the canvas holds it, fitted into the canvas when it does not, and the
+    /// canvas black when it is missing. Both sides' plans are kept (the
+    /// outgoing one used last). A side is judged by its picture's own
+    /// length, so one shorter than its layout claims is never sent as a
+    /// short canvas picture: it is fitted (and drawn black, not being whole).
+    pub fn fade(
+        &mut self,
+        from: FadeSide<'_>,
+        to: FadeSide<'_>,
+        weight: u32,
+        pool: &BandPool,
+    ) -> SharedFrame {
+        let (from, to) = (measured(from), measured(to));
+        for (layout, _) in [to, from].into_iter().flatten() {
+            if !self.holds(layout) {
+                self.keep(layout);
+            }
+        }
+        let mut out = sp_decoder::frame_pool::take(self.layout.len);
+        let paint = Paint::Fade {
+            from: self.side(from),
+            to: self.side(to),
+            weight,
+        };
+        mix_nv12_into(self.layout, paint, pool, &mut out);
+        SharedFrame::new(out)
+    }
+
+    /// One fade side as the kernel reads it: the canvas black when missing,
+    /// the picture as it is when the canvas holds it, else fitted by its
+    /// kept plan ([`Canvas::fade`] keeps one for every side it fits).
+    fn side<'a>(&'a self, side: FadeSide<'a>) -> Side<'a> {
+        match side {
+            None => Side::Black,
+            Some((layout, picture)) if self.holds(layout) => Side::Same(picture),
+            Some((layout, picture)) => {
+                let canvas = self.layout;
+                let plan = self
+                    .plans
+                    .iter()
+                    .find(|plan| plan.fits(layout, canvas))
+                    .expect("Canvas::fade keeps a plan for every side it fits");
+                Side::Fitted(plan, picture)
+            }
+        }
     }
 }
 
