@@ -10,6 +10,7 @@ pub mod band_pool; // #223: the SP-program sender's persistent row-band workers 
 pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
+pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 mod engine_play;
 pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub(crate) mod frame_alloc; // #207: map a decoder FrameAlloc error to a dropped frame (pure classify + rate-limit)
@@ -776,7 +777,7 @@ impl PlaybackEngine {
             pp.last_now_playing_broadcast = Some(Instant::now());
         }
 
-        let _ = self.ws_event_tx.send(ServerMsg::NowPlaying {
+        self.send_dashboard(ServerMsg::NowPlaying {
             playlist_id,
             video_id,
             song,

@@ -13,6 +13,7 @@
 use leptos::prelude::*;
 use serde::Serialize;
 use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
+use sp_core::player_view::{self, NowPlayingView, ProgramBadge};
 use sp_core::preview_lag::preview_lag_display;
 use sp_core::seek_model::{PendingSeek, format_position, seek_display_ms, seek_target_ms};
 
@@ -53,11 +54,11 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // twice a second — resetting a mid-drag fader. A `Memo` only propagates when
     // the boolean actually flips, so a position tick no longer touches the slot.
     let has_content = Memo::new(move |_| np().map(|i| i.has_now_playing_content()).unwrap_or(false));
-    let song = move || {
-        np().map(|i| i.song)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "Nič nehrá".to_string())
-    };
+    // #225: the server told this playlist's state since the page loaded (its
+    // on-connect replay tells every playlist's). Until then the Player claims
+    // nothing — no "Nič nehrá", no "Nehrá", no program badge.
+    let state_known = Memo::new(move |_| np().is_some_and(|i| i.state_known));
+    let song = move || np().map(|i| i.song).unwrap_or_default();
     let artist = move || np().map(|i| i.artist).unwrap_or_default();
     let position = move || np().map(|i| i.position_ms).unwrap_or(0);
     // #184: the currently-playing video id — a song change abandons a pending
@@ -68,10 +69,18 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     let transport = move || np().map(|i| i.transport).unwrap_or_default();
     let mode = move || np().map(|i| i.mode).unwrap_or_default();
 
+    // #225: what the now-playing area may show — a song, "Nič nehrá" only once
+    // told nothing plays, else "Načítavam…" (not told yet, or it plays and its
+    // song has not arrived). A Memo, so a position tick never re-runs the
+    // mixer slot (Rule 1).
+    let np_view = Memo::new(move |_| {
+        player_view::now_playing_view(state_known.get(), has_content.get(), transport())
+    });
+
     // #201: the play/pause label follows the pipeline's own TRANSPORT state, not
     // the scene-aware `state` — a dub decoding OFF program (state
     // WaitingForScene, transport Playing) reads `⏸ Pauza` and a click posts
-    // /pause. On/off-program shows only in the badge (from `ndi_health`).
+    // /pause. On/off-program shows only in the badge (the WS state, #225).
     let is_playing = Memo::new(move |_| matches!(transport(), TransportState::Playing));
 
     // The pipeline is DECODING when it is Playing OR waiting off-program for its
@@ -89,29 +98,16 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // here as Slovak text and clear on the next successful command.
     let player_error = RwSignal::new(None::<String>);
 
-    // #221 L4b: a ▶ claims no program, so a playlist that is not on air plays
-    // OFF program — the scene-aware `state` is WaitingForScene while the
-    // pipeline's own transport is Playing.
-    let state_label = move || match (state(), transport()) {
-        (PlaybackState::Playing, _) => "Hrá",
-        (PlaybackState::Idle, _) => "Nehrá",
-        (PlaybackState::WaitingForScene, TransportState::Playing) => "Hrá mimo programu",
-        (PlaybackState::WaitingForScene, _) => "Čaká na scénu",
-    };
+    // #221 L4b: "Hrá mimo programu" for a playlist playing off program
+    // (`sp_core::player_view::state_label`); "—" until the state is known.
+    let state_label = move || player_view::state_label(state_known.get(), state(), transport());
 
-    // On-program: the honest signal the store already has — the NDI-health
-    // registry maps a Playing-but-off-program pipeline to `Paused`, so
-    // `state == "Playing"` means the wall shows this output. #194 hotfix: a
-    // `Memo` so the 1 Hz health poll only re-renders the badge when it flips.
-    let on_program = Memo::new(move |_| {
-        store
-            .ndi_health
-            .get()
-            .iter()
-            .find(|o| o.playlist_id == pid)
-            .map(|o| o.state == "Playing")
-            .unwrap_or(false)
-    });
+    // #225: the badge reads the SAME live WS state as the state label (`Playing`
+    // = on program, #170), so a cut flips both in one render. It used to read
+    // `store.ndi_health` — the 1 Hz poll of the server's 5 s health sample —
+    // and lagged the cut by up to ~5 s. A `Memo`, so a position tick never
+    // re-renders it.
+    let badge = Memo::new(move |_| player_view::program_badge(state_known.get(), state()));
 
     // --- transport (each command reports failure into `player_error`) ---
     let report = move |ctx: &'static str, r: Result<(), String>| match r {
@@ -254,14 +250,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
             <div class="player-head">
                 <div class="player-titles">
                     <span class="player-title" data-testid="player-title">
-                        {move || {
-                            let a = artist();
-                            if a.is_empty() {
-                                song()
-                            } else {
-                                format!("{} — {}", song(), a)
-                            }
-                        }}
+                        {move || player_view::player_title(np_view.get(), &song(), &artist())}
                     </span>
                     <span class="player-state" data-testid="player-state">
                         {state_label}
@@ -269,10 +258,10 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                 </div>
                 <span
                     class="player-program-badge"
-                    class:on=move || on_program.get()
+                    class:on=move || badge.get() == ProgramBadge::OnProgram
                     data-testid="player-program-badge"
                 >
-                    {move || if on_program.get() { "● Na programe" } else { "○ Mimo programu" }}
+                    {move || badge.get().label()}
                 </span>
             </div>
 
@@ -484,22 +473,32 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                 }}
             </div>
 
-            // --- mixer slot: collapses to one line when nothing plays; the
+            // --- mixer slot: collapses to one line when nothing plays (or,
+            // #225, while the playlist's state / song is not known yet); the
             // faders/presets appear only with a playing item, and the adapter
             // follows that item (dub row → dub mixer, else stems mixer) ---
             <div class="player-mixer">
-                {move || {
-                    if !has_content.get() {
+                {move || match np_view.get() {
+                    NowPlayingView::Song => {
+                        // #184 round G: the ONE LiveMixer follows the playing item
+                        // (song stems / dub) itself — one strip, every page.
+                        view! { <LiveMixer playlist_id=pid /> }.into_any()
+                    }
+                    NowPlayingView::Idle => {
                         view! {
                             <div class="player-mixer-idle" data-testid="player-mixer-idle">
                                 "Mixér — nič nehrá"
                             </div>
                         }
                             .into_any()
-                    } else {
-                        // #184 round G: the ONE LiveMixer follows the playing item
-                        // (song stems / dub) itself — one strip, every page.
-                        view! { <LiveMixer playlist_id=pid /> }.into_any()
+                    }
+                    NowPlayingView::Pending => {
+                        view! {
+                            <div class="player-mixer-pending" data-testid="player-mixer-pending">
+                                "Mixér — načítavam…"
+                            </div>
+                        }
+                            .into_any()
                     }
                 }}
             </div>

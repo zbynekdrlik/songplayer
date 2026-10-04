@@ -1,8 +1,6 @@
 //! Dashboard WebSocket handler — bidirectional message relay between
 //! the UI and the server event bus.
 
-use std::collections::HashMap;
-
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
@@ -10,10 +8,9 @@ use futures::{SinkExt, StreamExt};
 use sqlx::Row;
 use tracing::{debug, info, warn};
 
-use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
+use sp_core::playback::PlaybackMode;
 use sp_core::ws::{ClientMsg, ServerMsg};
 
-use crate::playback::ndi_health::{PipelineHealthSnapshot, PlaybackStateLabel};
 use crate::{AppState, EngineCommand, SyncRequest};
 
 /// Axum handler that upgrades an HTTP request to a WebSocket connection.
@@ -55,9 +52,10 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
             let _ = write.send(Message::Text(json.into())).await;
         }
     }
-    // Replay the current per-playlist playback state so a dashboard opened
-    // mid-song sees the playing card immediately, instead of Idle until the
-    // next transition (#15 live preview + karaoke panel key off this state).
+    // Replay every playlist's playback state and a playing one's song so a
+    // dashboard opened mid-song shows what plays at once, instead of Idle or
+    // "Nič nehrá" until the next broadcast (#15 live preview + karaoke panel
+    // key off this state; #225 the song + an explicit Idle per playlist).
     {
         let msgs = on_connect_replay(&state).await;
         debug!(
@@ -225,64 +223,32 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
 }
 
 /// The messages a newly connected dashboard is sent first, after the OBS and
-/// tools status: the per-playlist playback state (#225: one function, so a
-/// test can read what a new client is told).
+/// tools status (#225): for EVERY playlist in the DB, the engine's last
+/// dashboard message about it (`playback/dashboard_replay.rs`): a playing
+/// one's song, then its state; any other an explicit `Idle`. So the Player
+/// knows from the first batch what plays and what does not. The mode is the
+/// DB's. `handle_ws` subscribes to the event bus before it calls this, so
+/// nothing the engine sends in between is lost.
 pub(crate) async fn on_connect_replay(state: &AppState) -> Vec<ServerMsg> {
-    let modes: HashMap<i64, PlaybackMode> =
-        match crate::db::models::get_active_playlists(&state.pool).await {
-            Ok(playlists) => playlists
-                .into_iter()
-                .map(|p| (p.id, PlaybackMode::from_str_lossy(&p.playback_mode)))
+    let playlists: Vec<(i64, PlaybackMode)> =
+        match sqlx::query("SELECT id, playback_mode FROM playlists ORDER BY id")
+            .fetch_all(&state.pool)
+            .await
+        {
+            Ok(rows) => rows
+                .iter()
+                .map(|r| {
+                    let id: i64 = r.get("id");
+                    let mode: String = r.get("playback_mode");
+                    (id, PlaybackMode::from_str_lossy(&mode))
+                })
                 .collect(),
             Err(e) => {
-                warn!("playback-state replay: failed to load playlist modes: {e}");
-                HashMap::new()
+                warn!("on-connect replay: failed to load the playlists: {e}");
+                Vec::new()
             }
         };
-    playback_state_replay(&state.ndi_health_registry.snapshots(), &modes)
-}
-
-/// Map an NDI-health snapshot's [`PlaybackStateLabel`] to the wire
-/// [`WsPlaybackState`] used by [`ServerMsg::PlaybackStateChanged`]. The WS
-/// protocol has no `Paused` variant, so a paused pipeline (including a
-/// Playing-off-program pipeline, which `handle_health_snapshot` reconciles to
-/// `Paused`) maps to the closest active-but-not-playing state,
-/// `WaitingForScene`.
-fn label_to_ws_state(label: &PlaybackStateLabel) -> WsPlaybackState {
-    match label {
-        PlaybackStateLabel::Idle => WsPlaybackState::Idle,
-        PlaybackStateLabel::WaitingForScene => WsPlaybackState::WaitingForScene,
-        PlaybackStateLabel::Playing => WsPlaybackState::Playing,
-        PlaybackStateLabel::Paused => WsPlaybackState::WaitingForScene,
-    }
-}
-
-/// Build the initial `PlaybackStateChanged` replay for a freshly connected
-/// dashboard: one message per pipeline snapshot whose state is NOT `Idle`
-/// (Idle is the dashboard default, so replaying it is pure noise). `modes` maps
-/// `playlist_id` → configured [`PlaybackMode`]; a snapshot for a playlist not
-/// in the map falls back to `PlaybackMode::default()`.
-///
-/// #201 round 2: `state` is the scene-reconciled label (a Playing-off-program
-/// pipeline reads `WaitingForScene`), while `transport` is read DIRECTLY from
-/// the snapshot's raw `transport` field (`handle_health_snapshot` derives it
-/// from the pipeline's own `reported_state`). So a dashboard that connects while
-/// an off-program dub decodes replays `transport: Playing` (`⏸ Pauza`) at once,
-/// instead of the paused label — no second label→transport mapping here.
-fn playback_state_replay(
-    snapshots: &[PipelineHealthSnapshot],
-    modes: &HashMap<i64, PlaybackMode>,
-) -> Vec<ServerMsg> {
-    snapshots
-        .iter()
-        .filter(|s| s.state != PlaybackStateLabel::Idle)
-        .map(|s| ServerMsg::PlaybackStateChanged {
-            playlist_id: s.playlist_id,
-            state: label_to_ws_state(&s.state),
-            mode: modes.get(&s.playlist_id).copied().unwrap_or_default(),
-            transport: s.transport,
-        })
-        .collect()
+    crate::playback::dashboard_replay::global().replay(&playlists)
 }
 
 // ---------------------------------------------------------------------------

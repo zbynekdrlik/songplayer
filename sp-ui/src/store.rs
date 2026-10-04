@@ -107,6 +107,12 @@ pub struct NowPlayingInfo {
     /// on/off-program folding. The Player's play/pause label reads this.
     pub transport: TransportState,
     pub mode: PlaybackMode,
+    /// #225: a `PlaybackStateChanged` reached this playlist since the page
+    /// loaded, so `state` / `transport` / `mode` are what the server said, not
+    /// the defaults of an entry a `NowPlaying` created. The server's
+    /// on-connect replay tells every playlist's state, so until it lands the
+    /// Player shows "Načítavam…" and a neutral badge, never "Nič nehrá".
+    pub state_known: bool,
     pub line_en: Option<String>,
     pub line_sk: Option<String>,
     pub prev_line_en: Option<String>,
@@ -120,7 +126,8 @@ impl NowPlayingInfo {
     /// `PlaybackStateChanged`-only shape (a live state with no preceding
     /// `NowPlaying`) inserts a zero entry — empty song, zero duration — which
     /// the card must render as idle, not as a "0:00 / 0:00" now-playing block
-    /// (#170).
+    /// (#170). #225: as "Načítavam…" instead while its transport plays (the
+    /// song has not arrived yet) — `sp_core::player_view::now_playing_view`.
     pub fn has_now_playing_content(&self) -> bool {
         !self.song.is_empty() || self.duration_ms > 0
     }
@@ -239,6 +246,7 @@ impl DashboardStore {
                         state: PlaybackState::default(),
                         transport: TransportState::default(),
                         mode: PlaybackMode::default(),
+                        state_known: false,
                         line_en: None,
                         line_sk: None,
                         prev_line_en: None,
@@ -264,6 +272,7 @@ impl DashboardStore {
                         entry.state = state;
                         entry.transport = transport;
                         entry.mode = mode;
+                        entry.state_known = true;
                     } else {
                         map.insert(
                             playlist_id,
@@ -276,6 +285,7 @@ impl DashboardStore {
                                 state,
                                 transport,
                                 mode,
+                                state_known: true,
                                 line_en: None,
                                 line_sk: None,
                                 prev_line_en: None,
