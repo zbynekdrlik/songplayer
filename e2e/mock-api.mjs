@@ -69,6 +69,19 @@ app.use(express.json());
 // in the `wss.on("connection")` handler at the bottom of this file.
 const wsClients = new Set();
 
+// #225 review round 3: a socket gets its on-connect replay BEFORE any live
+// message, as the server's `handle_ws` sends them (it writes the replay, then
+// forwards the event bus). A live message for a socket whose replay has not
+// gone out yet waits in that socket's queue and follows the replay, in order
+// (a live NowPlaying that overtook the replay would be wiped by the replay's
+// Idle for that playlist). Returns whether the socket is open.
+function sendLive(ws, msg) {
+  if (ws.readyState !== ws.OPEN) return false;
+  if (ws.replayed) ws.send(msg);
+  else ws.liveQueue.push(msg);
+  return true;
+}
+
 // Serve the built WASM frontend from dist/
 const distPath = join(__dirname, "..", "dist");
 app.use(express.static(distPath));
@@ -398,9 +411,7 @@ function broadcastPlaybackState(pid, state, transport) {
     type: "PlaybackStateChanged",
     data: { playlist_id: pid, state, mode: "Continuous", transport },
   });
-  for (const ws of wsClients) {
-    if (ws.readyState === ws.OPEN) ws.send(msg);
-  }
+  for (const ws of wsClients) sendLive(ws, msg);
 }
 
 app.post("/api/v1/playback/:id/pause", (req, res) => {
@@ -1344,10 +1355,7 @@ app.post("/__mock/lyrics-update", (req, res) => {
   const msg = JSON.stringify({ type: "LyricsUpdate", data });
   let sent = 0;
   for (const ws of wsClients) {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(msg);
-      sent += 1;
-    }
+    if (sendLive(ws, msg)) sent += 1;
   }
   res.json({ status: "sent", clients: sent });
 });
@@ -1378,10 +1386,7 @@ app.post("/__mock/set-playing", (req, res) => {
   });
   let sent = 0;
   for (const ws of wsClients) {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(msg);
-      sent += 1;
-    }
+    if (sendLive(ws, msg)) sent += 1;
   }
   res.json({ status: "sent", clients: sent });
 });
@@ -1412,10 +1417,7 @@ app.post("/__mock/now-playing", (req, res) => {
   });
   let sent = 0;
   for (const ws of wsClients) {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(msg);
-      sent += 1;
-    }
+    if (sendLive(ws, msg)) sent += 1;
   }
   res.json({ status: "sent", clients: sent });
 });
@@ -1438,9 +1440,7 @@ let pendingSeek = null;
 
 function tickBroadcast(obj) {
   const msg = JSON.stringify(obj);
-  for (const ws of wsClients) {
-    if (ws.readyState === ws.OPEN) ws.send(msg);
-  }
+  for (const ws of wsClients) sendLive(ws, msg);
 }
 
 function tickNowPlaying(it) {
@@ -1850,6 +1850,9 @@ previewWss.on("connection", (ws, req) => {
 
 wss.on("connection", (ws) => {
   console.log("[mock-api] WebSocket client connected");
+  // #225 review round 3: live messages wait for this socket's replay.
+  ws.replayed = false;
+  ws.liveQueue = [];
   wsClients.add(ws);
 
   // #194 r3b: seed the shared HealthBar's OBS + tools segments so the strip
@@ -1900,6 +1903,10 @@ wss.on("connection", (ws) => {
           },
         }),
       );
+      // Then every live message that waited for the replay, in order.
+      ws.replayed = true;
+      for (const msg of ws.liveQueue) ws.send(msg);
+      ws.liveQueue = [];
     }
   }, wsReplay.delay_ms);
 
@@ -1909,7 +1916,8 @@ wss.on("connection", (ws) => {
   // bucket-count test is unaffected. Drives the idle-gate badge render.
   const badgeTimer = setTimeout(() => {
     if (ws.readyState === ws.OPEN) {
-      ws.send(
+      sendLive(
+        ws,
         JSON.stringify({
           type: "LyricsQueueUpdate",
           data: {
@@ -1951,9 +1959,7 @@ wss.on("connection", (ws) => {
         duration_ms: 213000,
       },
     };
-    if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify(msg));
-    }
+    sendLive(ws, JSON.stringify(msg));
   }, 2000);
 
   ws.on("message", (data) => {

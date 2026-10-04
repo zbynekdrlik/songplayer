@@ -1,4 +1,4 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, APIRequestContext, Page } from "@playwright/test";
 
 // #225: the shared Player never claims a state it was not told.
 //
@@ -244,6 +244,72 @@ test.describe("the Player once told a playlist has no song (#225 review round 2)
     await expect(title).toHaveText("Nič nehrá", { timeout: 10000 });
     await expect(page.getByTestId("player-state")).toHaveText("Nehrá");
     await expect(page.getByTestId("player-mixer-idle")).toBeVisible();
+  });
+});
+
+test.describe("a reconnect while a playlist plays (#225 review round 3)", () => {
+  // Drop every dashboard socket and wait until the dashboard knows again: the
+  // Player reads "Načítavam…" while it reconnects (the client waits 2 s), then
+  // the replay's song.
+  async function reconnect(page: Page, request: APIRequestContext) {
+    const dropped = await request.post("/__mock/ws-drop");
+    expect(dropped.ok()).toBe(true);
+    const title = page.getByTestId("player-title");
+    await expect(title).toHaveText("Načítavam…", { timeout: 10000 });
+    await expect(title).toContainText(SONG, { timeout: 15000 });
+  }
+
+  test("a running live preview comes back by itself after the reconnect", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/?playlist=1");
+    await expect(page.getByTestId("player-title")).toContainText(SONG, {
+      timeout: 15000,
+    });
+    await page.getByTestId("preview-start").click();
+    await expect(page.getByTestId("preview-video")).toBeVisible({
+      timeout: 10000,
+    });
+
+    await reconnect(page, request);
+
+    // Still decoding after the reconnect: the operator's preview is back
+    // without a second click.
+    await expect(page.getByTestId("preview-video")).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.getByTestId("preview-start")).toHaveCount(0);
+  });
+
+  test("the auto-selected playing playlist stays selected through the reconnect", async ({
+    page,
+    request,
+  }) => {
+    // No `?playlist`: the work area follows the playing playlist (Worship).
+    await page.goto("/");
+    const workspace = page.getByTestId("workspace-title");
+    await expect(workspace).toHaveText("Worship", { timeout: 15000 });
+    await page.evaluate(() => {
+      const w = window as unknown as { __workspace: string[] };
+      w.__workspace = [];
+      new MutationObserver(() => {
+        const t =
+          document
+            .querySelector('[data-testid="workspace-title"]')
+            ?.textContent?.trim() ?? "";
+        if (w.__workspace[w.__workspace.length - 1] !== t) w.__workspace.push(t);
+      }).observe(document, { subtree: true, childList: true, characterData: true });
+    });
+
+    await reconnect(page, request);
+
+    await expect(workspace).toHaveText("Worship");
+    const seen = await page.evaluate(
+      () => (window as unknown as { __workspace: string[] }).__workspace,
+    );
+    // Never the first playlist by name ("Background") while nothing was known.
+    expect(seen.filter((t) => t !== "Worship"), JSON.stringify(seen)).toEqual([]);
   });
 });
 
