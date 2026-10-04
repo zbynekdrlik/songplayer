@@ -24,10 +24,12 @@ use crate::error::GpuError;
 /// sender as `SPOUT_SP-program-MAX` (category "Spout Servers", #223 M0).
 pub const SPOUT_SENDER_NAME: &str = "SP-program-MAX";
 
-/// The longest sender name Spout can carry, in bytes. Spout builds
-/// `<name>_Count_Semaphore` in 256 bytes with `sprintf_s`, which aborts the
-/// process on overflow. The shim checks the same limit.
-pub const SPOUT_NAME_MAX_LEN: usize = 239;
+/// The longest sender name Spout can carry, in bytes. A sender Spout
+/// renames to `<name>_<n>` (up to 11 more bytes) gets
+/// `<name>_<n>_Count_Semaphore` (16 more) built in 256 bytes with
+/// `sprintf_s`, which aborts the process on overflow: 255 − 27 = 228. The
+/// shim checks the same limit.
+pub const SPOUT_NAME_MAX_LEN: usize = 228;
 
 /// The shared-memory map listing every sender's name.
 pub const SENDER_NAMES_MAP: &str = "SpoutSenderNames";
@@ -46,19 +48,30 @@ const DESCRIPTION: std::ops::Range<usize> = 20..276;
 /// 0x80 or more ends Spout's list).
 const NOT_PRINTABLE: &str = "not printable ASCII";
 
+/// Why a name is refused: it holds a backslash, which no Windows kernel
+/// object name (Spout's maps, mutexes, semaphores) may hold.
+const BACKSLASH: &str = "holds a backslash (no kernel object name may)";
+
 /// The shim's status codes (`src/win/spout_shim.cpp`, which must match).
+/// The others (3 = the SDK reported failure, 4 = a C++ exception, 5 = a bad
+/// argument) are [`GpuError::Spout`].
 pub(crate) mod status {
     /// Done.
     pub const OK: i32 = 0;
     /// A live sender holds the name.
     pub const NAME_TAKEN: i32 = 1;
-    /// Spout registered another name, or none.
-    pub const NOT_REGISTERED: i32 = 2;
+    /// At the first send Spout registered another name.
+    pub const RENAMED: i32 = 2;
+    /// At the first send Spout did not list the sender.
+    pub const NOT_LISTED: i32 = 6;
+    /// The first send failed; Spout's half-made registration was released.
+    pub const FIRST_SEND_FAILED: i32 = 7;
 }
 
 /// `name` as the NUL-terminated string Spout takes, if Spout can carry it:
-/// 1 to [`SPOUT_NAME_MAX_LEN`] bytes of printable ASCII (space included).
-/// Anything else is [`GpuError::SpoutName`]: nothing reaches Spout.
+/// 1 to [`SPOUT_NAME_MAX_LEN`] bytes of printable ASCII (space included), no
+/// backslash. Anything else is [`GpuError::SpoutName`]: nothing reaches
+/// Spout.
 pub fn check_sender_name(name: &str) -> Result<CString, GpuError> {
     let refuse = |reason| GpuError::SpoutName {
         name: name.to_owned(),
@@ -68,10 +81,13 @@ pub fn check_sender_name(name: &str) -> Result<CString, GpuError> {
         return Err(refuse("empty"));
     }
     if name.len() > SPOUT_NAME_MAX_LEN {
-        return Err(refuse("longer than 239 bytes"));
+        return Err(refuse("longer than 228 bytes"));
     }
     if !name.bytes().all(|b| (b' '..=b'~').contains(&b)) {
         return Err(refuse(NOT_PRINTABLE));
+    }
+    if name.contains('\\') {
+        return Err(refuse(BACKSLASH));
     }
     CString::new(name).map_err(|_| refuse(NOT_PRINTABLE))
 }
@@ -86,8 +102,9 @@ pub(crate) fn map_mutex_name(map: &str) -> String {
 /// reads it (`spoutSenderNames::readSenderSetFromBuffer`): one name per
 /// [`NAME_SLOT_LEN`]-byte slot, up to its first NUL. The list ends at a slot
 /// whose first byte is 0, or 0x80 or more (Spout tests a signed `char`
-/// `> 0`), at a slot with no NUL in it (Spout's `strncpy_s` refuses it), or
-/// at the end of the map.
+/// `> 0`), at a slot with no NUL in it (Spout's `strncpy_s` would hit MSVC's
+/// invalid-parameter handler there, which ends the process), or at the end of
+/// the map.
 pub fn parse_sender_names(map: &[u8]) -> Vec<String> {
     let mut names = Vec::new();
     for slot in map.chunks_exact(NAME_SLOT_LEN) {
@@ -157,20 +174,26 @@ impl SharedTextureInfo {
 }
 
 /// The result of a shim call that returned `code`: `Ok` for
-/// [`status::OK`], [`GpuError::SpoutNameTaken`] /
-/// [`GpuError::SpoutNotRegistered`] for the two refusals (`name` is the
-/// name asked for), else [`GpuError::Spout`] with `call` and the code
-/// (3 = the SDK reported failure, 4 = a C++ exception, 5 = a bad argument).
+/// [`status::OK`], [`GpuError::SpoutNameTaken`] at create,
+/// [`GpuError::SpoutNotRegistered`] (with why) for the first send's three
+/// refusals (`name` is the name asked for), else [`GpuError::Spout`] with
+/// `call` and the code.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn status_result(code: i32, call: &'static str, name: &str) -> Result<(), GpuError> {
+    let not_registered = |why| GpuError::SpoutNotRegistered {
+        name: name.to_owned(),
+        why,
+    };
     match code {
         status::OK => Ok(()),
         status::NAME_TAKEN => Err(GpuError::SpoutNameTaken {
             name: name.to_owned(),
         }),
-        status::NOT_REGISTERED => Err(GpuError::SpoutNotRegistered {
-            name: name.to_owned(),
-        }),
+        status::RENAMED => Err(not_registered(
+            "another sender took the name before its first send",
+        )),
+        status::NOT_LISTED => Err(not_registered("Spout's sender list is full")),
+        status::FIRST_SEND_FAILED => Err(not_registered("its first send failed")),
         _ => Err(GpuError::Spout {
             call,
             code: code as u32,

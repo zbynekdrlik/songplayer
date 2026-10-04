@@ -34,15 +34,24 @@ unsafe extern "C" {
 /// references to the compositor's device and render target (Spout does not
 /// AddRef the device), so it may outlive the `Compositor` value; S2 drops it
 /// with the compositor when the device is lost. Registered at its first
-/// [`send`](SpoutSender::send), unregistered when dropped. Not thread-safe:
-/// it uses the device's immediate context, like the compositor, on the same
-/// thread.
+/// [`send`](SpoutSender::send), unregistered when dropped. `Send` but not
+/// `Sync`: it uses the device's immediate context, so it sends on the
+/// thread that composes (S2's `program-max`).
 pub struct SpoutSender {
     handle: NonNull<c_void>,
     name: String,
     device: ID3D11Device,
     texture: ID3D11Texture2D,
 }
+
+// SAFETY: the shim's `spoutDX` has no thread affinity between calls: each
+// call takes and releases its named mutex itself (SendTexture's
+// CheckTextureAccess/AllowTextureAccess, SpoutSharedMemory Lock/Unlock), the
+// frame-count semaphore has no owner, and it keeps no thread-local state. The
+// D3D11 device, texture and context it uses are `Send` (windows 0.58). So
+// moving the sender to another thread is sound; `&mut self` on every call
+// keeps two threads from using it at once (it is not `Sync`).
+unsafe impl Send for SpoutSender {}
 
 impl SpoutSender {
     /// The sender `SP-program-MAX` ([`SPOUT_SENDER_NAME`]) on `compositor`'s
@@ -92,7 +101,9 @@ impl SpoutSender {
     /// own shared texture on the GPU (`SendTexture`); the first call
     /// registers the sender. [`GpuError::DeviceLost`] means the device must
     /// be rebuilt (and the sender with it); [`GpuError::SpoutNotRegistered`]
-    /// means Spout registered another name, so this sender is done.
+    /// (the first send: Spout registered another name, did not list it, or
+    /// the send failed) means this sender is done: drop it and make a new
+    /// one. A later [`GpuError::Spout`] is one failed frame.
     ///
     /// Spout skips the copy, and still reports success, when a receiver
     /// holds the sender's mutex for over 67 ms: `send_us` then shows the

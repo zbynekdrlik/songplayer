@@ -93,11 +93,12 @@ exclude_re = [
   'sp-decoder/src/audio/',                # Symphonia wrapper — external-lib glue, fixture-tested
   'sp-decoder/src/video/',                # Windows-only MF wrapper — fixture-tested
   # sp-gpu/src/win/: the Direct3D 11 calls of the SP-program-MAX compositor
-  #   (#223 S1a), a #[cfg(windows)] module: dead on the Linux runner, so every
+  #   (#223 S1a) and its Spout sender + registry reader (S1b, over the C++
+  #   shim), a #[cfg(windows)] module: dead on the Linux runner, so every
   #   mutant builds and survives. Its decisions live in the crate's pure,
   #   Linux-tested modules (adapter, picture, composition, quad, residency,
-  #   color, error, reference, readback); the module is proven by
-  #   tests/warp.rs on WARP (windows-latest).
+  #   color, error, reference, readback, spout); the module is proven on WARP
+  #   (windows-latest) by tests/warp.rs and tests/spout.rs.
   'sp-gpu/src/win/',
   # -- genlock #146–#151: Windows-only paced pipeline + Python MTL shell-out --
   # playback/pipeline_paced.rs + pipeline_paced_idle.rs: whole modules are

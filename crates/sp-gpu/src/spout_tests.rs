@@ -38,30 +38,38 @@ fn the_sender_is_sp_program_max_and_spout_can_carry_it() {
 }
 
 #[test]
-fn a_name_is_one_to_239_bytes_of_printable_ascii() {
+fn a_name_is_one_to_228_bytes_of_printable_ascii() {
     // The demo sender's name has a space (#223 M0); ' ' and '~' are the ends
     // of the printable range.
     for name in ["Spout Sender", " ", "~", "a"] {
         let c_name = check_sender_name(name).unwrap_or_else(|e| panic!("{name:?}: {e}"));
         assert_eq!(c_name.as_bytes(), name.as_bytes());
     }
+    // 255 bytes, less `_<n>` (11) and `_Count_Semaphore` (16).
+    assert_eq!(SPOUT_NAME_MAX_LEN, 228);
     let longest = "x".repeat(SPOUT_NAME_MAX_LEN);
-    assert_eq!(SPOUT_NAME_MAX_LEN, 239);
     assert_eq!(
         check_sender_name(&longest)
-            .expect("239 bytes")
+            .expect("228 bytes")
             .as_bytes()
             .len(),
-        239
+        228
     );
 }
 
 #[test]
 fn a_name_spout_cannot_carry_is_refused_with_its_reason() {
     assert_eq!(refused(""), "empty");
-    assert_eq!(refused(&"x".repeat(240)), "longer than 239 bytes");
+    assert_eq!(refused(&"x".repeat(229)), "longer than 228 bytes");
     for name in ["tab\there", "\u{1f}", "del\u{7f}", "é", "a\0b"] {
         assert_eq!(refused(name), "not printable ASCII", "{name:?}");
+    }
+    for name in ["Local\\SP-program-MAX", "\\", "end\\"] {
+        assert_eq!(
+            refused(name),
+            "holds a backslash (no kernel object name may)",
+            "{name:?}"
+        );
     }
 }
 
@@ -208,16 +216,22 @@ fn the_shim_s_codes_map_to_their_errors() {
             name: "SP-program-MAX".to_owned()
         })
     );
-    assert_eq!(
-        status_result(
-            status::NOT_REGISTERED,
-            "spout_sender_send",
-            "SP-program-MAX"
-        ),
-        Err(GpuError::SpoutNotRegistered {
-            name: "SP-program-MAX".to_owned()
-        })
+    let not_registered = |code, why| {
+        assert_eq!(
+            status_result(code, "spout_sender_send", "SP-program-MAX"),
+            Err(GpuError::SpoutNotRegistered {
+                name: "SP-program-MAX".to_owned(),
+                why
+            }),
+            "code {code}"
+        );
+    };
+    not_registered(
+        status::RENAMED,
+        "another sender took the name before its first send",
     );
+    not_registered(status::NOT_LISTED, "Spout's sender list is full");
+    not_registered(status::FIRST_SEND_FAILED, "its first send failed");
     for code in [3, 4, 5, 99] {
         assert_eq!(
             status_result(code, "spout_sender_send", "n"),
@@ -229,8 +243,14 @@ fn the_shim_s_codes_map_to_their_errors() {
     }
     // The codes the shim (spout_shim.cpp) returns.
     assert_eq!(
-        (status::OK, status::NAME_TAKEN, status::NOT_REGISTERED),
-        (0, 1, 2)
+        [
+            status::OK,
+            status::NAME_TAKEN,
+            status::RENAMED,
+            status::NOT_LISTED,
+            status::FIRST_SEND_FAILED
+        ],
+        [0, 1, 2, 6, 7]
     );
 }
 

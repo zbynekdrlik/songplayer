@@ -1,30 +1,39 @@
-// The `extern "C"` shim between sp-gpu's `SpoutSender` (src/win/spout_sender.rs) and
-// the vendored Spout2 SDK 2.007.017 sender, SpoutDX (vendor/spout2) — #223 S1b.
+// The `extern "C"` shim between sp-gpu's `SpoutSender`
+// (src/win/spout_sender.rs) and the vendored Spout2 SDK 2.007.017 sender,
+// SpoutDX (vendor/spout2) — #223 S1b.
 //
 // It refuses a second sender under a name another sender holds. Spout itself
 // would rename it (`SP-program-MAX_1`), but Resolume Arena binds its layer to
 // `SPOUT_SP-program-MAX`, so a renamed sender would feed a layer nobody shows.
 //
-// Every entry point catches every C++ exception: nothing unwinds into Rust.
-// The status codes must match `sp_gpu::spout::status` (src/spout.rs).
+// `create` and `send` catch every C++ exception, `size` cannot throw, and
+// `release` runs ~spoutDX (a destructor: a throw there terminates, it never
+// unwinds), so nothing unwinds into Rust. The status codes must match
+// `sp_gpu::spout::status` (src/spout.rs).
 
 #include "SpoutDX.h"
 
+#include <cstddef>
 #include <cstring>
+#include <set>
+#include <string>
 
 namespace {
 
 constexpr int kOk = 0;
 constexpr int kNameTaken = 1;
-constexpr int kNotRegistered = 2;
+constexpr int kRenamed = 2;
 constexpr int kFailed = 3;
 constexpr int kException = 4;
 constexpr int kBadArgument = 5;
+constexpr int kNotListed = 6;
+constexpr int kFirstSendFailed = 7;
 
-// The longest name Spout can carry: it builds `<name>_Count_Semaphore` in 256
-// bytes with sprintf_s, which aborts the process on overflow. Must match
-// `sp_gpu::SPOUT_NAME_MAX_LEN`.
-constexpr size_t kMaxNameLen = 239;
+// The longest name Spout can carry: a renamed sender `<name>_<n>` (up to 11
+// more bytes) gets `<name>_<n>_Count_Semaphore` (16 more) built in 256 bytes
+// with sprintf_s, which aborts the process on overflow: 255 - 27 = 228. Must
+// match `sp_gpu::SPOUT_NAME_MAX_LEN`.
+constexpr std::size_t kMaxNameLen = 228;
 
 struct Sender {
     spoutDX dx;
@@ -32,9 +41,26 @@ struct Sender {
     char name[256] = {};
     // The first SendTexture registered `name` and Spout lists it.
     bool registered = false;
-    // Spout registered another name, or none: this sender never sends again.
-    bool refused = false;
+    // Once refused, the code every later send returns (kOk = not refused).
+    int refused = kOk;
 };
+
+// Refuse `sender` for good with `code`: release its shared texture and any
+// registration its first send made. spoutDX::ReleaseSender releases a
+// completed registration; a half-made one (the name listed and its info map
+// made by this object, then a later step failed) is this object's own too, so
+// it is released here. A name listed with no info map is dropped by the next
+// CleanSenders of any Spout program.
+int Refuse(Sender* sender, int code) {
+    // The name spoutDX tried: ours, or `<ours>_<n>` after a rename.
+    const std::string attempted = sender->dx.GetName();
+    sender->dx.ReleaseSender();
+    if (!attempted.empty() && sender->dx.sendernames.FindSender(attempted.c_str())) {
+        sender->dx.sendernames.ReleaseSenderName(attempted.c_str());
+    }
+    sender->refused = code;
+    return code;
+}
 
 }  // namespace
 
@@ -50,7 +76,7 @@ void* spout_sender_create(ID3D11Device* device, const char* name, int* status) {
         return nullptr;
     }
     if (device == nullptr || name == nullptr || name[0] == '\0' ||
-        strnlen(name, kMaxNameLen + 1) > kMaxNameLen) {
+        strnlen(name, kMaxNameLen + 1) > kMaxNameLen || std::strchr(name, '\\') != nullptr) {
         *status = kBadArgument;
         return nullptr;
     }
@@ -86,27 +112,34 @@ void* spout_sender_create(ID3D11Device* device, const char* name, int* status) {
 
 // Send `texture` (on the sender's device): spoutDX::SendTexture copies it
 // into Spout's own shared texture under the sender's named mutex. The first
-// send registers the sender; if Spout registered another name (a sender took
-// ours in between) or did not list it (its sender list is full), that
-// registration is released at once and the sender is refused for good.
+// send registers the sender. It is refused for good, its registration
+// released at once, when Spout registered another name (a sender took ours
+// in between: kRenamed), did not list it (its sender list is full:
+// kNotListed), or the first send failed (kFirstSendFailed: a retry would
+// meet its own half-made registration and be renamed). A list that cannot be
+// read now (its 67 ms lock) is checked again at the next send.
 int spout_sender_send(void* handle, ID3D11Texture2D* texture) {
     Sender* sender = static_cast<Sender*>(handle);
     if (sender == nullptr || texture == nullptr) {
         return kBadArgument;
     }
-    if (sender->refused) {
-        return kNotRegistered;
+    if (sender->refused != kOk) {
+        return sender->refused;
     }
     try {
         if (!sender->dx.SendTexture(texture)) {
-            return kFailed;
+            return sender->registered ? kFailed : Refuse(sender, kFirstSendFailed);
         }
         if (!sender->registered) {
-            if (std::strcmp(sender->dx.GetName(), sender->name) != 0 ||
-                !sender->dx.sendernames.FindSenderName(sender->name)) {
-                sender->dx.ReleaseSender();
-                sender->refused = true;
-                return kNotRegistered;
+            if (std::strcmp(sender->dx.GetName(), sender->name) != 0) {
+                return Refuse(sender, kRenamed);
+            }
+            std::set<std::string> listed;
+            if (!sender->dx.sendernames.GetSenderNames(&listed)) {
+                return kOk;
+            }
+            if (listed.count(sender->name) == 0) {
+                return Refuse(sender, kNotListed);
             }
             sender->registered = true;
         }
@@ -116,7 +149,8 @@ int spout_sender_send(void* handle, ID3D11Texture2D* texture) {
     }
 }
 
-// The size Spout's sender shares (0 x 0 before the first send).
+// The size Spout's sender shares (0 x 0 before the first send and once
+// refused). Two plain reads: nothing here can throw.
 void spout_sender_size(void* handle, unsigned int* width, unsigned int* height) {
     Sender* sender = static_cast<Sender*>(handle);
     if (sender == nullptr || width == nullptr || height == nullptr) {

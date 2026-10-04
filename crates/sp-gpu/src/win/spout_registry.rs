@@ -7,7 +7,7 @@ use std::ffi::{CStr, CString};
 
 use windows::Win32::Foundation::{CloseHandle, FALSE, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
 use windows::Win32::System::Memory::{
-    FILE_MAP_READ, MEMORY_BASIC_INFORMATION, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
+    FILE_MAP_READ, MEM_COMMIT, MEMORY_BASIC_INFORMATION, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
     OpenFileMappingA, UnmapViewOfFile, VirtualQuery,
 };
 use windows::Win32::System::Threading::{CreateMutexA, ReleaseMutex, WaitForSingleObject};
@@ -58,14 +58,15 @@ pub fn spout_sender_names() -> Result<Vec<String>, GpuError> {
 /// name exists (its map is gone). A name Spout cannot carry is
 /// [`GpuError::SpoutName`].
 pub fn spout_sender_info(name: &str) -> Result<Option<SharedTextureInfo>, GpuError> {
-    let name = check_sender_name(name)?;
-    let Some(map) = read_map(&name)? else {
+    let c_name = check_sender_name(name)?;
+    let Some(map) = read_map(&c_name)? else {
         return Ok(None);
     };
     SharedTextureInfo::parse(&map)
         .map(Some)
-        .ok_or(GpuError::NoObject {
-            call: "a sender's map shorter than SharedTextureInfo",
+        .ok_or(GpuError::SpoutMap {
+            map: name.to_owned(),
+            why: "shorter than a SharedTextureInfo (280 bytes)",
         })
 }
 
@@ -96,6 +97,14 @@ fn read_map(name: &CStr) -> Result<Option<Vec<u8>>, GpuError> {
     };
     if got == 0 {
         return Err(failed("VirtualQuery", &Error::from_win32()));
+    }
+    // Spout's maps are committed (CreateFileMappingA, PAGE_READWRITE); a map
+    // made SEC_RESERVE under the same name would fault on the read below.
+    if region.State != MEM_COMMIT {
+        return Err(GpuError::SpoutMap {
+            map: name.to_string_lossy().into_owned(),
+            why: "its memory is not committed",
+        });
     }
     let mutex_name =
         CString::new(map_mutex_name(&name.to_string_lossy())).expect("a name without NUL");

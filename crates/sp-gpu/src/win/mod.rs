@@ -1,9 +1,11 @@
-//! The Direct3D 11 compositor (Windows). Every decision it takes is a pure,
-//! Linux-tested function of the crate (the adapter, the picture check, the
-//! layers, the quad constants, the upload residency); this module only
-//! calls Direct3D. It is out of the Linux mutation gate (`.cargo/mutants.toml`,
-//! like `sp-decoder/src/video/`) and is proven by the WARP pixel pins
-//! (`tests/warp.rs`) on `windows-latest`.
+//! The Direct3D 11 compositor and its Spout sender (Windows). Every decision
+//! they take is a pure, Linux-tested function of the crate (the adapter, the
+//! picture check, the layers, the quad constants, the upload residency, the
+//! Spout name rule, registry formats and shim codes); this module only calls
+//! Direct3D, Win32 and the Spout shim (`spout_shim.cpp`). It is out of the
+//! Linux mutation gate (`.cargo/mutants.toml`, like `sp-decoder/src/video/`)
+//! and is proven on WARP on `windows-latest`: the compositor by the pixel pins
+//! (`tests/warp.rs`), the sender by `tests/spout.rs`.
 
 mod device;
 mod pipeline;

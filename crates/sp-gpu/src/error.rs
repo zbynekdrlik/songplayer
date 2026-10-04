@@ -71,19 +71,23 @@ pub enum GpuError {
     /// so it is refused.
     #[error("the Spout sender name {name:?} is held by another sender")]
     SpoutNameTaken { name: String },
-    /// At its first send Spout registered the sender under another name (a
-    /// sender took the name in between) or did not list it (its sender list
-    /// is full). The registration is released and the sender never sends
-    /// again: drop it.
-    #[error(
-        "Spout did not register the sender as {name:?} (another sender took the name, or Spout's sender list is full)"
-    )]
-    SpoutNotRegistered { name: String },
+    /// At its first send Spout did not register the sender as `name`: it
+    /// registered another name (a sender took ours in between), did not list
+    /// it (its sender list is full), or the send failed. Whatever it
+    /// registered is released and the sender never sends again: drop it (a
+    /// new sender starts clean).
+    #[error("Spout did not register the sender as {name:?}: {why}; drop it")]
+    SpoutNotRegistered { name: String, why: &'static str },
     /// A Spout call failed. `code` is the shim's status (3 = the SDK
     /// reported failure, 4 = a C++ exception, 5 = a bad argument) or, for a
     /// registry read, the mutex wait's result.
     #[error("{call} failed in Spout (code {code:#x})")]
     Spout { call: &'static str, code: u32 },
+    /// A shared-memory map under a Spout name that is not what Spout writes
+    /// there (its memory not committed, or a sender's map shorter than a
+    /// `SharedTextureInfo`).
+    #[error("the map {map:?} is not one Spout wrote: {why}")]
+    SpoutMap { map: String, why: &'static str },
 }
 
 impl GpuError {

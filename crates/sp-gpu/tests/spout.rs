@@ -15,14 +15,16 @@
 
 #![cfg(windows)]
 
+mod common;
+
 use std::ffi::c_void;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
+use common::{BLACK, H, W, assert_matches_reference, pattern, picture, warp};
 use sp_gpu::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Compositor, GpuError, Nv12Picture, SPOUT_SENDER_NAME,
-    SharedTextureInfo, SpoutSender, mapped_len, reference, spout_sender_info, spout_sender_names,
-    unpad_rows,
+    Composition, Compositor, GpuError, SPOUT_SENDER_NAME, SharedTextureInfo, SpoutSender,
+    mapped_len, spout_sender_info, spout_sender_names, unpad_rows,
 };
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0};
@@ -33,11 +35,8 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 
-const W: u32 = CANVAS_WIDTH;
-const H: u32 = CANVAS_HEIGHT;
 /// `DXGI_FORMAT_B8G8R8A8_UNORM` (87), as Spout's registry stores it.
 const BGRA: u32 = DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32;
-const BLACK: [u8; 4] = [0, 0, 0, 255];
 
 /// One Spout test at a time (see the module doc).
 static SPOUT: Mutex<()> = Mutex::new(());
@@ -46,54 +45,6 @@ fn one_at_a_time() -> MutexGuard<'static, ()> {
     SPOUT
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn warp() -> Compositor {
-    Compositor::new_warp().unwrap_or_else(|e| panic!("WARP must build the compositor: {e}"))
-}
-
-/// `lo..=hi` up and down: 1 per step of `t`, continuous (`tests/warp.rs`).
-fn triangle(t: u32, lo: u8, hi: u8) -> u8 {
-    let span = u32::from(hi - lo);
-    let phase = t % (2 * span);
-    let up = if phase <= span {
-        phase
-    } else {
-        2 * span - phase
-    };
-    lo + up as u8
-}
-
-/// A smooth NV12 picture of an even `width` (stride = width): S1a's
-/// tolerance needs ≤ 12 luma codes per texel across, ≤ 5 down and ≤ 8
-/// chroma codes per chroma texel.
-fn smooth(width: u32, height: u32, seed: u32) -> Vec<u8> {
-    let chroma_rows = height.div_ceil(2);
-    let mut data = vec![0u8; (width * (height + chroma_rows)) as usize];
-    for y in 0..height {
-        for x in 0..width {
-            data[(y * width + x) as usize] = triangle(12 * x + 5 * y + seed, 16, 235);
-        }
-    }
-    let chroma = (width * height) as usize;
-    for y in 0..chroma_rows {
-        for x in 0..width / 2 {
-            let at = chroma + (y * width + 2 * x) as usize;
-            data[at] = triangle(8 * x + 3 * y + 2 * seed + 40, 16, 240);
-            data[at + 1] = triangle(6 * x + 7 * y + 3 * seed + 90, 16, 240);
-        }
-    }
-    data
-}
-
-fn picture(id: u64, width: u32, height: u32, data: &[u8]) -> Nv12Picture<'_> {
-    Nv12Picture {
-        id,
-        width,
-        height,
-        stride: width,
-        data,
-    }
 }
 
 /// Compose `composition` and read the render target back. The readback's
@@ -208,34 +159,6 @@ fn assert_same_frame(got: &[u8], drawn: &[u8], what: &str) {
     );
 }
 
-/// `frame` matches the CPU reference of `composition` (S1a's tolerance) on
-/// a coarse grid, the canvas corners included: it holds the picture, not
-/// a blank or stale texture.
-fn assert_shows(frame: &[u8], composition: &Composition<'_>, what: &str) {
-    let layers = composition.layers();
-    let mut points: Vec<(u32, u32)> = (0..H)
-        .step_by(61)
-        .flat_map(|y| (0..W).step_by(97).map(move |x| (x, y)))
-        .collect();
-    points.extend([(0, 0), (W - 1, 0), (0, H - 1), (W - 1, H - 1)]);
-    for (x, y) in points {
-        let i = ((y * W + x) * 4) as usize;
-        let got = [frame[i], frame[i + 1], frame[i + 2], frame[i + 3]];
-        let want = reference::pixel(&layers, x, y);
-        let tolerance = reference::tolerance(&layers, x, y);
-        let off = got[..3]
-            .iter()
-            .zip(&want[..3])
-            .map(|(g, w)| g.abs_diff(*w))
-            .max()
-            .unwrap_or(0);
-        assert!(
-            off <= tolerance && got[3] == want[3],
-            "{what}: ({x}, {y}) got {got:?}, want {want:?} within {tolerance}"
-        );
-    }
-}
-
 #[test]
 fn a_sent_frame_registers_sp_program_max_at_4k_and_drop_unregisters_it() {
     let _one = one_at_a_time();
@@ -247,10 +170,10 @@ fn a_sent_frame_registers_sp_program_max_at_4k_and_drop_unregisters_it() {
     assert_eq!(info(SPOUT_SENDER_NAME), None);
     assert_eq!(sender.size(), (0, 0));
 
-    let data = smooth(1920, 1080, 3);
+    let (stride, data) = pattern(1920, 1080, 3);
     compose(
         &mut compositor,
-        &Composition::Picture(picture(1, 1920, 1080, &data)),
+        &Composition::Picture(picture(1, 1920, 1080, stride, &data)),
     );
     let stats = sender.send().expect("send on WARP");
     // The first send creates Spout's 4K shared texture: it takes time.
@@ -291,8 +214,8 @@ fn the_shared_texture_opens_on_a_second_device_and_holds_each_frame() {
     let mut sender = SpoutSender::with_name(&compositor, name).expect("a test sender");
 
     // A 4:3 picture: black bars left and right, the picture between.
-    let data = smooth(1440, 1080, 51);
-    let first = Composition::Picture(picture(1, 1440, 1080, &data));
+    let (stride, data) = pattern(1440, 1080, 51);
+    let first = Composition::Picture(picture(1, 1440, 1080, stride, &data));
     compose(&mut compositor, &first);
     sender.send().expect("send the first frame");
     // The readback's Map waits for Spout's copy, queued on the same context.
@@ -313,18 +236,22 @@ fn the_shared_texture_opens_on_a_second_device_and_holds_each_frame() {
 
     let received = read_on(&device, &context, &shared);
     assert_same_frame(&received, &drawn, "the first frame through Spout");
-    assert_shows(&received, &first, "the first frame through Spout");
+    assert_matches_reference(&received, &first.layers(), "the first frame through Spout");
     assert_eq!(&received[..4], &BLACK, "the bar at (0, 0)");
 
     // The next frame, a 16:9 picture filling the canvas, replaces it.
-    let data = smooth(1280, 720, 17);
-    let second = Composition::Picture(picture(2, 1280, 720, &data));
+    let (stride, data) = pattern(1280, 720, 17);
+    let second = Composition::Picture(picture(2, 1280, 720, stride, &data));
     compose(&mut compositor, &second);
     sender.send().expect("send the second frame");
     let drawn = compositor.read_back().expect("read back the second frame");
     let received = read_on(&device, &context, &shared);
     assert_same_frame(&received, &drawn, "the second frame through Spout");
-    assert_shows(&received, &second, "the second frame through Spout");
+    assert_matches_reference(
+        &received,
+        &second.layers(),
+        "the second frame through Spout",
+    );
 }
 
 #[test]
@@ -333,10 +260,10 @@ fn a_second_sender_with_a_listed_name_is_refused() {
     let name = "sp-gpu test refused";
     let mut compositor = warp();
     let mut first = SpoutSender::with_name(&compositor, name).expect("the first sender");
-    let data = smooth(1280, 720, 9);
+    let (stride, data) = pattern(1280, 720, 9);
     compose(
         &mut compositor,
-        &Composition::Picture(picture(1, 1280, 720, &data)),
+        &Composition::Picture(picture(1, 1280, 720, stride, &data)),
     );
     first.send().expect("the first sender registers");
     assert_eq!(listed(name), 1);
@@ -363,10 +290,10 @@ fn a_sender_that_loses_its_name_before_its_first_send_is_refused() {
     // Neither is registered yet, so both are created.
     let mut winner = SpoutSender::with_name(&compositor, name).expect("the winner");
     let mut loser = SpoutSender::with_name(&compositor, name).expect("the loser");
-    let data = smooth(1280, 720, 21);
+    let (stride, data) = pattern(1280, 720, 21);
     compose(
         &mut compositor,
-        &Composition::Picture(picture(1, 1280, 720, &data)),
+        &Composition::Picture(picture(1, 1280, 720, stride, &data)),
     );
     winner.send().expect("the winner registers the name");
 
@@ -374,7 +301,10 @@ fn a_sender_that_loses_its_name_before_its_first_send_is_refused() {
     let renamed = format!("{name}_1");
     for attempt in ["first", "second"] {
         match loser.send() {
-            Err(GpuError::SpoutNotRegistered { name: asked }) => assert_eq!(asked, name),
+            Err(GpuError::SpoutNotRegistered { name: asked, why }) => {
+                assert_eq!(asked, name);
+                assert_eq!(why, "another sender took the name before its first send");
+            }
             other => {
                 panic!("the {attempt} send of a renamed sender must be refused, got {other:?}")
             }
@@ -397,11 +327,40 @@ fn a_sender_that_loses_its_name_before_its_first_send_is_refused() {
 }
 
 #[test]
+fn the_sender_outlives_the_compositor_and_moves_between_threads() {
+    let _one = one_at_a_time();
+    let name = "sp-gpu test outlives";
+    let mut compositor = warp();
+    let mut sender = SpoutSender::with_name(&compositor, name).expect("a test sender");
+    let (stride, data) = pattern(1280, 720, 33);
+    compose(
+        &mut compositor,
+        &Composition::Picture(picture(1, 1280, 720, stride, &data)),
+    );
+    sender.send().expect("send while the compositor lives");
+
+    // The sender holds its own device and render-target references.
+    drop(compositor);
+    let sender = std::thread::spawn(move || {
+        sender
+            .send()
+            .expect("send after the compositor is gone, on another thread");
+        sender
+    })
+    .join()
+    .expect("the sending thread");
+    assert_eq!(listed(name), 1);
+    assert_eq!(sender.size(), (W, H));
+    drop(sender);
+    assert_eq!(listed(name), 0, "{:?}", names());
+}
+
+#[test]
 fn a_name_spout_cannot_carry_never_reaches_spout() {
     let _one = one_at_a_time();
     let compositor = warp();
-    let too_long = "x".repeat(240);
-    for name in ["", too_long.as_str(), "naïve"] {
+    let too_long = "x".repeat(229);
+    for name in ["", too_long.as_str(), "naïve", "Local\\SP-program-MAX"] {
         match SpoutSender::with_name(&compositor, name) {
             Err(GpuError::SpoutName { name: refused, .. }) => assert_eq!(refused, name),
             other => panic!("{name:?} must be refused, got {other:?}"),
