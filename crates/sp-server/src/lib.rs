@@ -677,14 +677,9 @@ pub async fn start(
     // Inject the shared dantesync clock-health handle into every NDI health snapshot (#146).
     engine.set_clock_health(clock_health);
 
-    // Boundary-paced emission staging flag (#147): DB setting `genlock_pacing`
-    // ("true"/"false"), default OFF. Read once before pipelines are spawned.
-    let genlock_pacing = db::models::get_setting(&pool, "genlock_pacing")
-        .await
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    // Boundary-paced emission (#147): ON unless the setting says "false" (the
+    // owner's rule). Read once before pipelines are spawned.
+    let genlock_pacing = genlock_pacing_setting(&pool).await;
     info!(genlock_pacing, "genlock boundary-paced emission flag");
     engine.set_genlock_pacing(genlock_pacing);
     // #151: share the burn-id toggle registry BEFORE pipelines spawn (registered at spawn).
@@ -800,6 +795,14 @@ const DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS: u64 = 600;
 /// (#140) — used whenever `YTDLP_UPDATE_INTERVAL_SECS` is absent,
 /// unparseable, or zero.
 const DEFAULT_YTDLP_UPDATE_INTERVAL_SECS: u64 = 86400;
+
+/// #147: the boundary-paced emission flag at startup, through the one rule
+/// `sp_core::config::genlock_pacing`: a missing row or a failed read is ON.
+async fn genlock_pacing_setting(pool: &SqlitePool) -> bool {
+    let key = sp_core::config::SETTING_GENLOCK_PACING;
+    let raw = db::models::get_setting(pool, key).await.ok().flatten();
+    sp_core::config::genlock_pacing(raw.as_deref())
+}
 
 /// Pure parser shared by every periodic-interval env override in this
 /// module: falls back to `default` on `None`, on a value that doesn't

@@ -258,10 +258,10 @@ pub struct PlaybackEngine {
     /// poller (spawned in `lib.rs::start`); read when building each NDI health
     /// snapshot. Defaults to `no dantesync` until a handle is injected.
     clock_health: std::sync::Arc<std::sync::RwLock<crate::playback::clock_health::ClockHealth>>,
-    /// Boundary-paced emission staging flag (#147, DB setting `genlock_pacing`,
-    /// default OFF). Read once at startup (`lib.rs::start`) and passed to each
-    /// pipeline thread at spawn. OFF = today's SDK-clocked path; ON = the
-    /// wall-clock grid `Pacer`.
+    /// Boundary-paced emission flag (#147, DB setting `genlock_pacing`, default
+    /// ON by the owner's rule: `sp_core::config::DEFAULT_GENLOCK_PACING`). Read
+    /// once at startup (`lib.rs::start`), passed to each pipeline at spawn. ON =
+    /// the wall-clock grid `Pacer`; OFF = the SDK-clocked legacy path.
     genlock_pacing: bool,
     /// Per-pipeline genlock lock-state event windows (#149, Lane 1). One 60 s
     /// ring of cumulative pacing counters per playlist, pushed at each
@@ -361,7 +361,7 @@ impl PlaybackEngine {
             clock_health: std::sync::Arc::new(std::sync::RwLock::new(
                 crate::playback::clock_health::ClockHealth::default(),
             )),
-            genlock_pacing: false,
+            genlock_pacing: sp_core::config::DEFAULT_GENLOCK_PACING,
             lock_windows: HashMap::new(),
             ndi_burn_registry: std::sync::Arc::new(
                 crate::playback::ndi_burn::NdiBurnRegistry::new(),

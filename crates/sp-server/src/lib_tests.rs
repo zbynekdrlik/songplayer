@@ -168,4 +168,44 @@ mod tests {
     fn sync_interval_from_defaults_on_zero() {
         assert_eq!(sync_interval_from(Some("0")), 600);
     }
+
+    // -----------------------------------------------------------------
+    // The genlock pacing flag at startup (#147)
+    // -----------------------------------------------------------------
+
+    /// A fresh database has no `genlock_pacing` row: pacing is ON, the
+    /// owner's rule. SP-program takes only paced sources.
+    #[tokio::test]
+    async fn genlock_pacing_is_on_for_a_fresh_database() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        assert!(genlock_pacing_setting(&pool).await);
+    }
+
+    /// A read that fails (here a closed pool) is not "off" either.
+    #[tokio::test]
+    async fn genlock_pacing_is_on_when_the_setting_cannot_be_read() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        pool.close().await;
+        assert!(genlock_pacing_setting(&pool).await);
+    }
+
+    /// Only an explicit "false" selects the SDK-clocked legacy path.
+    #[tokio::test]
+    async fn genlock_pacing_is_off_only_for_an_explicit_false() {
+        let pool = db::create_memory_pool().await.unwrap();
+        db::run_migrations(&pool).await.unwrap();
+        for (value, want) in [
+            ("false", false),
+            ("true", true),
+            ("garbage", true),
+            ("", true),
+        ] {
+            db::models::set_setting(&pool, "genlock_pacing", value)
+                .await
+                .unwrap();
+            assert_eq!(genlock_pacing_setting(&pool).await, want, "{value:?}");
+        }
+    }
 }

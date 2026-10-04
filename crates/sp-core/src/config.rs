@@ -90,6 +90,21 @@ pub fn program_transition_ms(raw: Option<&str>) -> u32 {
         .unwrap_or(DEFAULT_PROGRAM_TRANSITION_MS)
 }
 
+/// #147: boundary-paced emission on the genlock grid. `"false"` selects the
+/// SDK-clocked legacy path; anything else (or absent) paces.
+pub const SETTING_GENLOCK_PACING: &str = "genlock_pacing";
+/// #147: pacing is ON by default, by the owner's rule (#147 comment
+/// 5812898277, 24.9.2026: pacing stays ON permanently). SP-program takes only
+/// paced sources, so a lost or unreadable setting must never turn it off.
+pub const DEFAULT_GENLOCK_PACING: bool = false;
+
+/// #147: the pacing flag a stored `genlock_pacing` means: OFF only for an
+/// explicit `"false"` (trimmed), else [`DEFAULT_GENLOCK_PACING`]. The ONE rule
+/// the startup read and the engine's initial state share.
+pub fn genlock_pacing(raw: Option<&str>) -> bool {
+    raw.map_or(DEFAULT_GENLOCK_PACING, |v| v.trim() != "false")
+}
+
 /// #212: the program-bus source id of the NDI input (playlists are positive
 /// row ids, so a negative id can never collide with one).
 pub const PROGRAM_INPUT_ID: i64 = -1;
@@ -233,6 +248,20 @@ mod tests {
         assert_eq!(program_transition_ms(Some("abc")), 300);
         assert_eq!(program_transition_ms(Some("")), 300);
         assert_eq!(program_transition_ms(None), 300);
+    }
+
+    /// #147: pacing is ON unless the setting says exactly "false" — the
+    /// owner's rule. A missing or mangled value never turns SP-program dark.
+    #[test]
+    fn genlock_pacing_is_on_unless_the_setting_says_false() {
+        assert_eq!(SETTING_GENLOCK_PACING, "genlock_pacing");
+        assert!(genlock_pacing(None), "no setting = ON, the owner's rule");
+        assert!(genlock_pacing(Some("true")));
+        assert!(genlock_pacing(Some("")), "an empty value = ON");
+        assert!(genlock_pacing(Some("TRUE")));
+        assert!(genlock_pacing(Some("off?")), "a mangled value = ON");
+        assert!(!genlock_pacing(Some("false")), "only an explicit false");
+        assert!(!genlock_pacing(Some(" false\n")), "trimmed");
     }
 
     #[test]
