@@ -64,7 +64,7 @@ pub struct PipelineHealthSnapshot {
     pub ndi_name: String,
     pub state: PlaybackStateLabel,
     /// #201 round 2: the pipeline's OWN transport, from the RAW `reported_state`
-    /// (before reconciliation), for the fresh-connect replay. Additive (= Idle).
+    /// (before reconciliation), for `/api/v1/ndi/health`. Additive (= Idle).
     #[serde(default)]
     pub transport: sp_core::playback::TransportState,
     /// Connection count from `NDIlib_send_get_no_connections`. `-1` means
@@ -739,7 +739,7 @@ impl crate::playback::PlaybackEngine {
             playlist_id,
             ndi_name: ndi_name.clone(),
             state: canonical_state.clone(),
-            // #201 round 2: raw transport (pre-reconciliation) for the replay.
+            // #201 round 2: raw transport (pre-reconciliation), for the API.
             transport: transport_from_reported(&reported_state),
             connections,
             frames_submitted_total,

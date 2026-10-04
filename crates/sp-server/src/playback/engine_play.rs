@@ -129,7 +129,7 @@ impl PlaybackEngine {
             }
 
             // #170: a PlayVideo on an off-program playlist shows
-            // WaitingForScene, matching the health-label replay; #201: the
+            // WaitingForScene (the WS replay re-tells it, #225); #201: the
             // transport is the raw decoding state (Playing here), so an
             // off-program dub reads `⏸ Pauza` while it plays.
             self.broadcast_state(playlist_id);

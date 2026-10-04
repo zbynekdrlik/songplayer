@@ -4,6 +4,7 @@
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
+use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 use sqlx::Row;
 use tracing::{debug, info, warn};
@@ -56,16 +57,8 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
     // "Nič nehrá" until the next broadcast (#15 live preview + karaoke panel
     // key off this state; #225 the song + an explicit Idle per playlist).
     {
-        let msgs = on_connect_replay(&state).await;
-        debug!(
-            count = msgs.len(),
-            "replaying playback state to new WS client"
-        );
-        for msg in &msgs {
-            if let Ok(json) = serde_json::to_string(msg) {
-                let _ = write.send(Message::Text(json.into())).await;
-            }
-        }
+        let count = send_replay(&mut write, &state).await;
+        debug!(count, "replaying playback state to new WS client");
     }
 
     loop {
@@ -122,7 +115,10 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(n, "WebSocket client lagged, dropped messages");
+                        // #225: a dropped state change would leave the client on
+                        // a stale state until the next one, so re-tell the truth.
+                        warn!(n, "WebSocket client lagged, dropped messages; re-sending the replay");
+                        send_replay(&mut write, &state).await;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         info!("event channel closed, closing WebSocket");
@@ -219,6 +215,17 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
             let _ = state.event_tx.send(ServerMsg::Pong);
         }
     }
+}
+
+/// Send [`on_connect_replay`] to one client; returns how many messages.
+async fn send_replay(write: &mut SplitSink<WebSocket, Message>, state: &AppState) -> usize {
+    let msgs = on_connect_replay(state).await;
+    for msg in &msgs {
+        if let Ok(json) = serde_json::to_string(msg) {
+            let _ = write.send(Message::Text(json.into())).await;
+        }
+    }
+    msgs.len()
 }
 
 /// The messages a newly connected dashboard is sent first, after the OBS and

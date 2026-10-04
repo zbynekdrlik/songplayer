@@ -225,6 +225,15 @@ impl DashboardStore {
         }
     }
 
+    /// #225 review round 2: forget everything a socket told about the
+    /// playlists. Called when a socket opens and when it closes: the next
+    /// socket's on-connect replay re-tells every playlist, and until then the
+    /// Player shows "Načítavam…", never the last socket's song as if it were
+    /// still loaded (a server restart — every deploy — drops them all).
+    pub fn forget_now_playing(&self) {
+        self.now_playing.set(HashMap::new());
+    }
+
     /// Dispatch a [`ServerMsg`] to the appropriate signal.
     pub fn dispatch(&self, msg: ServerMsg) {
         match msg {
@@ -267,8 +276,13 @@ impl DashboardStore {
                 mode,
                 transport,
             } => {
+                // #225 review round 2: `Idle` = no video loaded (a pipeline
+                // never returns to Idle after a song; a removed one is told
+                // Idle), so the old song goes with it, as a reload's replay
+                // says: a fresh entry, not the old one with a new state.
+                let keeps_song = state != PlaybackState::Idle;
                 self.now_playing.update(|map| {
-                    if let Some(entry) = map.get_mut(&playlist_id) {
+                    if let Some(entry) = map.get_mut(&playlist_id).filter(|_| keeps_song) {
                         entry.state = state;
                         entry.transport = transport;
                         entry.mode = mode;
