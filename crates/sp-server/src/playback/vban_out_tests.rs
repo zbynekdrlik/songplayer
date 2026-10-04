@@ -134,14 +134,26 @@ fn out_with(cfg: VbanConfig) -> VbanOut {
 // --- the block hand-off ---------------------------------------------------
 
 #[test]
-fn a_program_frame_moves_in_and_anything_else_is_substituted_silence() {
-    let data = vec![0.5f32; 3200];
-    let ptr = data.as_ptr();
-    let b = VbanBlock::from_frames(7, vec![frame(data, 2, 48_000)]);
-    assert_eq!(b.due_100ns, 7);
-    assert!(!b.substituted);
-    let samples = b.samples.expect("one program block is kept");
-    assert_eq!(samples.as_ptr(), ptr, "moved, not copied");
+fn a_program_frame_is_copied_for_vban_and_anything_else_is_substituted_silence() {
+    // #210: the block goes to VBAN before the pair's NDI submit, which still
+    // borrows the frames, so VBAN gets a copy of the same samples.
+    let data: Vec<f32> = (0..3200).map(|i| i as f32 / 3200.0).collect();
+    let frames = vec![frame(data.clone(), 2, 48_000)];
+    let b = VbanBlock::copied(7, &frames);
+    assert_eq!(
+        b,
+        VbanBlock {
+            due_100ns: 7,
+            samples: Some(data),
+            substituted: false,
+        },
+        "one program block is kept, on its boundary"
+    );
+    assert_ne!(
+        b.samples.as_ref().map(|s| s.as_ptr()),
+        Some(frames[0].data.as_ptr()),
+        "a copy: the pair keeps its own block for the NDI submit"
+    );
 
     let cases = [
         (vec![], "no frame"),
@@ -157,10 +169,15 @@ fn a_program_frame_moves_in_and_anything_else_is_substituted_silence() {
         (vec![frame(vec![0.5; 3198], 2, 48_000)], "short"),
     ];
     for (frames, what) in cases {
-        let b = VbanBlock::from_frames(9, frames);
-        assert_eq!(b.samples, None, "{what}");
-        assert!(b.substituted, "{what}");
-        assert_eq!(b.due_100ns, 9);
+        assert_eq!(
+            VbanBlock::copied(9, &frames),
+            VbanBlock {
+                due_100ns: 9,
+                samples: None,
+                substituted: true,
+            },
+            "{what}"
+        );
     }
     let s = VbanBlock::silence(11);
     assert_eq!((s.due_100ns, s.samples, s.substituted), (11, None, false));
@@ -420,7 +437,7 @@ fn a_substituted_block_is_counted_even_while_disabled() {
     let out = VbanOut::new();
     let mut clock = FakeClock::at(D);
     let mut sink = RecordingSink::on(&clock);
-    let b = VbanBlock::from_frames(D, Vec::new());
+    let b = VbanBlock::copied(D, &[]);
     VbanSender::default().send_block(&out, &b, &mut sink, &mut clock);
     VbanSender::default().send_block(&out, &VbanBlock::silence(D), &mut sink, &mut clock);
     assert_eq!(out.status().blocks_substituted, 1);
@@ -431,7 +448,9 @@ fn the_p99_covers_the_last_1200_intervals() {
     let out = VbanOut::new();
     let record = |us| {
         out.record_packet(SentPacket {
-            late: false,
+            planned_100ns: 0,
+            sent_100ns: 0,
+            sent_label_100ns: 0,
             interval_us: Some(us),
             errors: 0,
             counter: 0,

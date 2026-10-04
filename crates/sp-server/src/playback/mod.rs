@@ -6,9 +6,11 @@
 
 pub mod audio_grid;
 pub mod av_catchup; // #192 round 4: pure video-follows-audio catch-up decision (Linux-tested)
+pub mod band_pool; // #223: the SP-program sender's persistent row-band workers (no thread per picture)
 pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
+pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 mod engine_play;
 pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub(crate) mod frame_alloc; // #207: map a decoder FrameAlloc error to a dropped frame (pure classify + rate-limit)
@@ -19,6 +21,7 @@ pub mod lock_state;
 pub mod loop_stats; // #192 round 3: pipeline-loop stage timing + submit-call histogram (pure)
 mod lyrics_loader;
 mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
+pub mod mmcss; // #210 part 2: a real-time sender thread as an MMCSS "Pro Audio" thread
 pub mod ndi_burn;
 pub mod ndi_health;
 mod ndi_health_expect; // #221 L4a: whether a receiver is expected on an output (pure)
@@ -42,14 +45,17 @@ pub(crate) mod pipeline_paced_idle;
 pub(crate) mod pipeline_paced_submit; // #168 output-side split: submit thread + handoff glue
 #[cfg(not(windows))]
 pub(crate) mod pipeline_stub;
+mod playlist_mode; // #225 unit 2: a mode the playlist's row holds — applied + told
 mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
 mod program_authority; // #221 L4b: SP-program (∪ SongPlayer's cg OBS record) drives playback
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
+pub mod program_canvas; // #223: SP-program's ONE picture layout (FHD) + the fit into it
 pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
 pub mod program_on_air; // #221: what is on air (the bus's watch value) + the one scene-name resolver
 pub mod program_output; // #209: the SP-program sender + its thread
+pub mod program_output_timing; // #210: the sender's per-boundary timing window (pure, health.timing)
 pub mod program_switch; // #221: the ONE switch path of a scene press (catalog, cut, cg OBS forward/mirror)
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
@@ -57,6 +63,7 @@ mod runtime_pipeline;
 pub mod scene_catalog; // #221: which scene is a playlist's, from its NDI output name (no cg OBS lookup)
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
 pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
+pub mod stat_window; // #210 part 2: shared pure two-bucket worst + WARN rate limit
 pub mod state;
 pub mod submit_handoff; // #168 output-side split: pure emit->submit handoff decisions
 pub mod submitter;
@@ -67,6 +74,7 @@ mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-teste
 pub mod vban_clock; // #224 part 2: VBAN's + the NDI input's wall clock, VBAN's date-step slew
 pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
 pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
+pub mod vban_stall; // #210 part 2: the VBAN thread's late packets (ring, window max, WARN)
 pub mod wallclock;
 
 use std::collections::{HashMap, VecDeque};
@@ -114,8 +122,8 @@ fn should_send_position_update(elapsed_ms: u64) -> bool {
 /// [`WsPlaybackState`]. #170: a pipeline the engine holds as `Playing` but
 /// whose scene is OFF program (a hold, or #221 L4b a ▶ off air; the Player
 /// tells both from a paused pipeline by the transport) must map to
-/// `WaitingForScene`, matching the WS replay built from `handle_health_snapshot`'s
-/// `(Playing, Playing, scene_active = false) → Paused` reconciliation. A live
+/// `WaitingForScene`, as `handle_health_snapshot` reconciles the health label
+/// `(Playing, Playing, scene_active = false) → Paused`. A live
 /// `Playing` for such a pipeline flips a paused selector row to Playing, the
 /// selector re-orders it to the top, and a click races the moving row.
 fn play_state_to_ws(state: &PlayState, scene_active: bool) -> WsPlaybackState {
@@ -123,7 +131,7 @@ fn play_state_to_ws(state: &PlayState, scene_active: bool) -> WsPlaybackState {
         PlayState::Idle => WsPlaybackState::Idle,
         PlayState::WaitingForScene => WsPlaybackState::WaitingForScene,
         // #170: Playing but scene off program == paused (dark wall) -> the
-        // dashboard's "waiting for scene", matching the health-label replay.
+        // dashboard's "waiting for scene" (the WS replay re-tells it, #225).
         PlayState::Playing { .. } if !scene_active => WsPlaybackState::WaitingForScene,
         PlayState::Playing { .. } => WsPlaybackState::Playing,
     }
@@ -592,11 +600,11 @@ impl PlaybackEngine {
 
     /// Handle a user command (skip, mode change, etc.).
     pub async fn handle_command(&mut self, playlist_id: i64, cmd: PlayEvent) {
-        // If it's a mode change, update the stored mode.
-        if let PlayEvent::SetMode(new_mode) = &cmd {
-            if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-                pp.mode = *new_mode;
-            }
+        // #225 unit 2: a mode the playlist's row now holds (`playlist_mode.rs`);
+        // the state machine ignores it, so that is all a SetMode does.
+        if let PlayEvent::SetMode(mode) = &cmd {
+            self.apply_mode(playlist_id, *mode);
+            return;
         }
         // #215: a skip of a playlist held off program starts no song there.
         if matches!(cmd, PlayEvent::Skip) && self.pause_if_held(playlist_id, "skipped").await {
@@ -770,7 +778,7 @@ impl PlaybackEngine {
             pp.last_now_playing_broadcast = Some(Instant::now());
         }
 
-        let _ = self.ws_event_tx.send(ServerMsg::NowPlaying {
+        self.send_dashboard(ServerMsg::NowPlaying {
             playlist_id,
             video_id,
             song,
@@ -970,3 +978,6 @@ mod tests_scene_change;
 #[cfg(test)]
 #[path = "tests_song_end.rs"]
 mod tests_song_end;
+#[cfg(test)]
+#[path = "tests_ws_replay.rs"]
+mod tests_ws_replay;

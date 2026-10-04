@@ -682,3 +682,77 @@ async fn the_remote_block_names_sp_programs_scene_after_a_dashboard_cut() {
     let (_, json) = call(state, "GET", "/api/v1/program", None).await;
     assert_eq!(json["remote"]["program_scene"], "OBS manuál");
 }
+
+/// #210: `health.timing` carries the `SP-program` sender's per-boundary
+/// stage timing, under these names, so the box can read which stage made a
+/// VBAN hand-off late.
+#[tokio::test]
+async fn get_program_reports_the_senders_boundary_timing() {
+    let state = test_state().await;
+    let b = 17_907_771_311_333_333;
+    let late =
+        state
+            .program_bus
+            .record_timing(&crate::playback::program_output_timing::BoundaryMarks {
+                stamp_100ns: b,
+                taken_100ns: b + 60_000,
+                fed_100ns: b + 700_000,
+                submit_start_100ns: b + 700_000,
+                submitted_100ns: b + 770_000,
+            });
+    assert!(
+        late.is_some(),
+        "70 ms late: after its first packet was due (L = 66.7 ms), WARNed"
+    );
+    let (status, json) = call(state, "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json["health"]["timing"],
+        serde_json::json!({
+            "boundaries": 1,
+            "ready_late_us_max": 6000,
+            "vban_feed_late_us_max": 70000,
+            "submit_us_max": 7000,
+            "ready_late_over_5ms": 1,
+            "vban_feed_late_over_5ms": 1,
+            "submit_over_5ms": 1,
+            "vban_feed_late_over_10ms": 1,
+            "vban_feed_late_over_budget": 1,
+            "warned": 1
+        })
+    );
+}
+
+/// #210 part 2: `vban.late_max_us` + `vban.late_events` carry the VBAN
+/// thread's late packets under these names, each event `{utc_ms, late_us}`,
+/// so the box names every stall by its instant without a dev1 capture.
+#[tokio::test]
+async fn get_program_reports_the_vban_threads_late_packets() {
+    use crate::playback::vban_out::tests::{FakeClock, RecordingSink, active_config};
+    use crate::playback::vban_out::{VbanBlock, VbanSender};
+    use crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS;
+    let state = test_state().await;
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(json["vban"]["late_max_us"], 0);
+    assert_eq!(json["vban"]["late_events"], serde_json::json!([]));
+
+    let vban = state.program_bus.vban();
+    vban.set_config(active_config(&["127.0.0.1:6980"]));
+    let due: i64 = 17_907_771_311_333_333;
+    // The thread reaches the block's packet 0 12 ms after it was due.
+    let sent = due + VBAN_SEND_LATENCY_100NS + 120_000;
+    let mut clock = FakeClock::at(sent);
+    let mut sink = RecordingSink::on(&clock);
+    VbanSender::default().send_block(vban, &VbanBlock::silence(due), &mut sink, &mut clock);
+    let (status, json) = call(state, "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let utc_ms = sent.div_euclid(10_000);
+    assert_eq!(json["vban"]["late_max_us"], 12_000);
+    assert_eq!(
+        json["vban"]["late_events"],
+        serde_json::json!([
+            {"utc_ms": utc_ms, "late_us": 12_000},
+            {"utc_ms": utc_ms, "late_us": 7_833}
+        ])
+    );
+}

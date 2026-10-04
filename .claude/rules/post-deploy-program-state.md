@@ -23,10 +23,16 @@ Rules for every post-deploy spec:
   use `test.skip` on a precondition (skips are banned).
 - **Badge vs toggle (#201).** `player-playpause` follows the pipeline's own
   `transport`, so it reads `⏸ Pauza` while the dub decodes, on OR off program.
-  `player-program-badge` and the health row `state` follow the program:
+  `player-program-badge` and the health row `state` follow the program
+  (#225: the badge reads the playlist's WS state, the same signal as the
+  state label; the health row is the backend check):
   - on program: `state == "Playing"` and "● Na programe";
   - off program while decoding: `Paused` (the ndi_health reconcile) or
     `WaitingForScene`, and "○ Mimo programu".
+  - Right after `page.goto` the Player reads "Načítavam…" / "—" / "◌ —"
+    until the WS replay lands: prove "a song arrived" with
+    `not.toHaveText(NOT_A_SONG)` (`post-deploy.spec.ts`), never
+    `not.toHaveText("Nič nehrá")` alone.
 - **Select a dashboard card explicitly.** Click
   `playlist-picker-item[data-playlist-id=<id>]` and check that the card's
   `.playlist-id` equals the playlist's NDI name. Never take "the first

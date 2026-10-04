@@ -243,6 +243,24 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
   the same table.
 
+## Toolchain drift: CI's stable Rust moves under an unchanged tree (Rust 1.99, 3.10.2026)
+
+CI pins `dtolnay/rust-toolchain@stable`, so a new stable release can redden the
+Lint job on code that passed a day earlier. The 1.99 drift that broke run
+37145344169, and the fixes:
+
+- **`clippy::double_must_use` inside `#[async_trait]`:** bump the crate,
+  `cargo update -p async-trait --precise 0.1.92` (Tier-0-allowed, it compiles
+  nothing; dtolnay/async-trait#303). Never paper over it with allows on the
+  traits.
+- **`Atomic*::fetch_update` deprecated (renamed `try_update`):** `try_update`
+  is newer than the workspace MSRV 1.85 (`clippy::incompatible_msrv`), so write
+  the explicit `load` + `compare_exchange_weak` loop (`preview_stream.rs`
+  `ViewerGuard::drop`).
+
+When the Lint job fails on files the diff never touched, check the toolchain
+version in the job log first (`rust-1.99.0` in the clippy help URLs).
+
 ## Two compile errors a no-compile review round cannot see (#218/#219 integration)
 
 Six fresh-context review rounds passed both of these, and the first CI run
@@ -281,6 +299,45 @@ failed on them (`36438006665`):
   gained `fleet`, `audio_emitter_tests.rs` still built one without it).
   Before adding a field, grep the crate for `TypeName {` in every file,
   tests included, and add it (or `..Default::default()`) at each site.
+- **An opaque `impl Fn` bound to a local keeps its borrow to the end of
+  the scope → E0505 on a later move** (#223 follow-up review round 1).
+  `let record = recorder(&log);` (a helper returning `impl Fn(usize) +
+  '_`), then `log.into_inner()` later in the same scope: the compiler
+  cannot see inside the opaque type, so it assumes its drop uses the
+  borrow. A closure literal capturing `&log` would be fine (no drop glue);
+  the opaque one is not. Use the helper as a temporary
+  (`pool.run(&recorder(&log))`), bind it in a block, or take the data out
+  without moving (`std::mem::take(&mut *log.lock().unwrap())`).
+
+## A persistent worker pool with borrowed jobs (#223 follow-up, `playback/band_pool.rs`)
+
+The kernel's row bands run on persistent workers (no thread per picture).
+A job borrows the caller's buffers, so the pool erases the painter's
+lifetime (a thin `*const ()` + a monomorphic `unsafe fn` shim, `unsafe impl
+Send` on a `Sync` painter) and `run` must not return NOR unwind before
+every worker is done with it. The pieces that made that hold, and testable:
+
+- Wait on disconnect, not on a count: each task carries a clone of a
+  report `Sender`; the guard owns the original in an `Option`, drops it
+  first, then drains to disconnect — on the normal path AND in its `Drop`
+  (the caller's own band may panic). A guard declared after a plain local
+  `Sender` deadlocks on unwind (it drops first, while the sender lives).
+- A worker catches a band's panic (`catch_unwind`, the worker lives on)
+  and the caller panics anew once all are done. Not `resume_unwind`: it
+  skips the panic hook, so `songplayer-panic.log` would not record the
+  caller's thread dying. The shipped exe unwinds (`crash-diagnostics.md`),
+  so these paths are live.
+- Tests: prove reuse with `ThreadId` + name per band over several runs.
+  A `Drop`-joins test is deterministic only with the workers HELD at their
+  last step (a `#[cfg(test)]` exit hold keyed on the thread-name prefix, so
+  no other test's pool is held) and the drop run on a helper thread inside
+  a safe-direction window. Declare the gate opener AFTER the pool (it
+  drops first on a failed check, before the pool's drop joins the held
+  workers) and everything a painter borrows BEFORE the pool (its drop
+  joins the workers before those are freed, even under a mutant that
+  skips the wait).
+- A painter must never `run` its own pool (the worker waits on its own
+  queue).
 
 ## Spawn order is not execution order — never order work by spawning it (#221)
 
@@ -469,6 +526,33 @@ this:
 - **List only the tests that really fail on the old logic in the RED
   message.** Walk each one by hand.
 
+**A fix that moves a threshold which existing tests pin, or adds a field
+to a status struct that tests compare as a literal (#210 part 2).** Re-pin
+those EXISTING tests to the new contract in the RED commit, next to the new
+tests. The RED ships the new field and constant with the one wrong value,
+so the re-pinned tests compile there and fail on it. GREEN then changes
+only the constant and edits no test. A struct-literal test missing the new
+field is E0063 for the whole test target, so it cannot wait for GREEN. The
+RED message lists the re-pinned tests that fail with the new ones (#210:
+the 10 ms → L WARN, `vban_feed_late_over_budget`; 4 tests, one of them the
+old real-loop pin that expected `warned: 1`).
+
+**A fix that replaces a field the tests read (#223).** The RED tests must
+compile against both trees, but GREEN deletes the field (`out.fit_plans`
+moved into the new `Canvas`). Add a `#[cfg(test)]` seam METHOD with the
+GREEN name in RED, returning the old field (`fn fit_plans(&self) -> u64 {
+self.fit_plans }`; a field and a method may share a name), write every test
+against the method, and let GREEN change only its body (`self.canvas.built()`).
+To read the bytes a sender put on the wire, use a `#[cfg(test)]` accessor of
+the async holdover the SDK still points at (`FrameSubmitter::held_frame`); the
+mock records only the last slice's pointer and length.
+
+**When a production output's picture size becomes fixed, tests that named a
+boundary's owner by the wire size go blind (#223).** Record what each job
+showed in the rig (`program_bus_tests.rs::Program`), and check the wire
+separately (one picture per job, each the fixed size) instead of dropping the
+owner checks.
+
 **When the fix makes a parameter DEAD (it removes, not adds, an input) —
 RED → GREEN → refactor (#224).** `ProgramOutput::submit(job, audio_now)`
 lost its reason to take the emit instant. The RED tests keep the OLD
@@ -605,6 +689,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   A mutant that only a mid-row / off-edge input can reveal (`a - c0` with
   `c0` always 0 on row-aligned runs) needs a test that cuts the input
   arbitrarily.
+- **Two levels that both chunk the same run make the inner index always 0**
+  (#223 follow-up). `Mix::paint` cut each band into stride-sized pieces
+  for cache locality, and each side's painter then walked rows again
+  (`for (i, run) in rest.chunks_mut(ds).enumerate()` → `row + 1 + i`): with
+  pieces ≤ one stride, `i` was always 0, so `+ i` → `- i` was equivalent
+  and survived the model harness. Walk the rows ONCE, at one level (the
+  mixer), and give the lower level one row segment.
 - **A new early return in front of pinned comparisons can silently orphan
   their killers** (#217 addendum 3, review rounds 4-5). Round 4 added
   `TitleClock::shows` as a guard ahead of `arm_title_timers`'s `>`
@@ -732,6 +823,7 @@ above your `old_string` anchor before an Edit that adds a sibling `mod`.
 - Drive a handler with `crate::api::router(state, None)` + `tower::ServiceExt::oneshot`, as in `api/lyrics_tests.rs::send`, and assert the row / response afterwards.
 - A test that runs its OWN copy of the handler's UPDATE ("mirror the handler's SQL") can never fail on a change to the handler. #144 deleted two of these: `reprocess_video_ids_sets_manual_priority` and `reprocess_all_stale_only_flags_stale_rows`.
 - A test for a DELETED route stays useful as a regression guard. `router(state, None)` has no SPA fallback (that needs a `dist_dir`), so a removed path answers 404. Assert the harmful effect is absent FIRST, so the RED fails for the right reason, and the 404 last.
+- **Use the route's REAL method, read from `api/mod.rs`, never from a ticket's wording** (#225 unit 2). axum answers 405 for an unrouted method before the handler runs. The playlist update is `PUT /api/v1/playlists/{id}`; the ticket called it "the PATCH", and five tests sent PATCH. On the no-compile box they were "RED" for the wrong reason and could never pass. Two fresh-context review rounds missed it; the third found it by reading the route table. Before writing a router test, `grep` the path in `api/mod.rs`.
 
 ## A cross-crate test-only helper must be `#[doc(hidden)] pub`, NOT `#[cfg(test)]` (#203 2b)
 
@@ -778,6 +870,25 @@ and then `heavy_slot_tests.rs` + `worker_tests_idle_gate.rs` + the
 `static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());`
 and take it with `let _g = SERIAL.lock().await;`. Keep the `std::sync::Mutex`
 form only for a PLAIN `#[test]` with no await (e.g. `frame_pool`'s serial).
+
+## Which windows-sys feature a Win32 call needs: read the crate source (#210 part 2)
+
+A symbol's windows-sys module is often not the one its header suggests. In
+0.59, avrt's `AvSetMmThreadCharacteristicsW` / `AvSetMmThreadPriority` /
+`AvRevertMmThreadCharacteristics` / `AVRT_PRIORITY_HIGH` live in
+`Win32::System::Threading` (already enabled in sp-server), NOT
+`Win32::Media`. Grep
+`~/.cargo/registry/src/index.crates.io-*/windows-sys-0.59.0/src/Windows/Win32/`
+for the name before touching `Cargo.toml`:
+
+- its directory is the feature (`System/Threading` → `Win32_System_Threading`);
+- a `#[cfg(feature = "…")]` line right above its `link!` needs that feature
+  too;
+- the same file gives the exact FFI types (`HANDLE = *mut c_void`,
+  `BOOL = i32`, `PCWSTR = *const u16`, `WIN32_ERROR = u32`).
+
+A feature change never touches `Cargo.lock`: features are not recorded
+there.
 
 ## Adding a path dependency between workspace crates on the Tier-0 box (#184 G4)
 
@@ -829,6 +940,14 @@ sees that. What held up across five review rounds:
   dropped receiver makes the send fail at once, so the test passes
   vacuously), the call under `tokio::time::timeout(5 s)`, then assert the
   important command arrived.
+- **A held call proves only what happened BEFORE it** (#210 review round
+  1). Holding one call (the NDI send) and reading state while it waits
+  shows that step X already ran; it cannot order two steps that BOTH run
+  before the held call (the mix picture was painted before the NDI submit
+  in either order, so "VBAN before the picture" was an unfalsifiable
+  claim). Make such an order structural instead (`serve` = `split` → feed
+  → `submit_video`: the early function cannot reach the later work) and
+  let the test's name and messages claim only the held point.
 - **Use "must NOT happen yet" windows only in the safe direction.** For
   example, `recv_timeout(200 ms).is_err()` while the gate is held. Correct
   code can never fail it; a slow runner only makes it pass vacuously.

@@ -11,6 +11,8 @@ paths:
   - "crates/sp-server/src/playback/scene_catalog*.rs"
   - "crates/sp-server/src/playback/legacy_cg*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
+  - "crates/sp-server/src/playback/program_canvas*.rs"
+  - "crates/sp-server/src/playback/band_pool*.rs"
   - "crates/sp-server/src/playback/paced_output*.rs"
   - "crates/sp-server/src/api/program*.rs"
   - "sp-ui/src/components/program_control.rs"
@@ -115,6 +117,17 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 - `program_output.rs::run_program_loop` (Windows thread `program-output`,
   `mutants::skip`) wakes 1 ms after every grid boundary (`next_check_wait`) to
   release missed boundaries, and submits every queued job at once.
+- #210: `ProgramOutput::serve` hands each boundary's audio block to VBAN
+  FIRST, then does the video side (#223: a source picture's canvas fit, a
+  mixed boundary's picture, the NDI submit), for every job kind — by
+  structure: `split` (the audio side, no
+  video work) → `feed_vban` → `submit_video` (`vban-out.md` "Data path"; pinned by
+  `program_output_tests_order.rs` with a held NDI send). It returns the
+  boundary's `BoundaryMarks`, which the loop records
+  (`ProgramBus::record_timing` → `health.timing`, the rate-limited WARN of a
+  VBAN hand-off after its block's first packet was due, over VBAN's send
+  latency L, #210 part 2; `vban-out.md` "The program boundary's timing"). `ProgramOutput::submit` is only the tests' shorthand
+  (`#[cfg(test)]`, no clock, returns the stamp).
 - `start_program` runs in `lib.rs::start` AFTER the #196 startup senders, so
   `SP-program` is created after every playlist sender and the per-playlist
   name→port order does not change across restarts. Exception: when the
@@ -128,11 +141,129 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   the cut; a failed write cuts nothing) and is restored with
   `select_initial` (owns every boundary, `cut_boundary_100ns: null`).
 
+## `SP-program` is ALWAYS 1920×1080 (#223)
+
+The owner's rule (ROZHODNUTÉ 28.9.2026 on #223): `SP-program` is always
+1920×1080. cg OBS, the Presenter, the stage displays and the stream never get
+a 1440p or a 4K picture, and its size never changes at a cut, a fill or a
+fade. Before, it carried the on-air source's own size (2560×1440, 2560×1080,
+2560×1280, 2048×858, 1920×960 in one evening on the box). Design record:
+#223 comment 5972302641 (this slice; the full design, `SP-program-MAX`
+included, is comment 5872871751).
+
+- **The canvas** (`playback/program_canvas.rs`, `Canvas`): the program's ONE
+  picture layout, w×h NV12, stride w, w·h·3/2 bytes. Production builds the
+  sender with `ProgramOutput::fhd(sender)`: `PROGRAM_STANDBY_W/H` =
+  1920×1080, 3 110 400 B (the standby's own constant; the FHD tests use the
+  same constructor). `ProgramOutput::new(sender, w, h)` takes any size: the
+  unit tests use small canvases, so they stay fast.
+- **Every picture** `ProgramOutput::submit_video` sends is a canvas picture:
+  - a forwarded source pair's picture (a paced source's, the NDI input
+    "OBS manuál"'s, a paced standby/fill pair's);
+  - the program's standby black (the canvas black itself);
+  - a fade's picture, in ONE pass from both sides (`Canvas::fade`, #223
+    follow-up, design record 5973498519): each side as it is when it is a
+    canvas picture, fitted into the canvas as it is read when it is not, the
+    canvas black when it is missing, the incoming side blended over the
+    outgoing one (`program-transition.md`, "The mix"). The mix is exactly the
+    canvas's bytes.
+- **Pass-through.** A picture with the canvas's size and stride and AT LEAST
+  its bytes (a decoder buffer may carry slack; the buffer's OWN length
+  counts, not what its layout claims) goes out as the SAME allocation: no
+  copy. The paced idle black, the program standby and a
+  1920×1080 song decoded on a 1920 stride are all canvas pictures.
+- **The fit.** Any other picture is fitted into the canvas: placed by
+  `nv12_fit::aspect_fit` (aspect kept, centred on even offsets, bars Y 16 /
+  UV 128), scaled bilinear by the #215 fused kernel as a plain fit
+  (`mix_nv12_into` with `Paint::Fit(Side::Fitted)`: ONE side, every byte the
+  fitted picture's, nothing else read — #223 follow-up; before, it also
+  read the 3.1 MB canvas black as an unused second side) — in the sender's
+  `mix_bands` row bands on its band pool, into a `frame_pool` buffer.
+  A larger picture is scaled down, a smaller one up (the 720p dabing songs),
+  a 16:9 one fills the canvas; 2560×1080 sits on rows 134 to 943. A padded
+  stride at 1920×1080 is a repack (a fit at scale 1 copies every visible
+  byte). A buffer short of the canvas's bytes is not whole NV12: it is drawn
+  as the canvas black, never read past its end.
+- **Plans.** One `FitPlan` per source layout; the canvas keeps the
+  `FIT_PLANS_KEPT` = 2 used last (both sides of a fade fit every boundary and
+  rebuild nothing) and logs ONE INFO line per new plan: `program output: a
+  picture of a new size — fitted into the SP-program canvas` (`width`,
+  `height`, `stride`, `canvas_width`, `canvas_height`, `plans_built`). The
+  thread-start INFO line names the canvas (`width`, `height`, `mix_bands`,
+  `mix_workers`).
+- **Cost, on the box.** The fit is video-side work: `serve` = `split` →
+  `feed_vban` → `submit_video`, so VBAN gets the boundary's block before any
+  fit. `submit_video` reads `submit_start` BEFORE the picture work, so
+  `health.timing.submit_us` (`vban-out.md`) is the fit (or the fade's
+  picture) + the NDI submit.
+  - **Row bands from the first deploy.** The lane's dispatch said to reuse
+    the kernel's row bands; the slice's design record named them as the
+    first lever only AFTER a box measurement (main session to confirm). A
+    single band is likely over budget: box run 3 measured a fitted 1440p
+    fade picture at 13.2–20.0 ms on 6 bands (#215 comment 5860381820).
+  - **What it costs.** One pass per picture on EVERY forwarded boundary of
+    a source that is not 1920×1080 (most of the catalog is 1440p), and one
+    pass per fade boundary whatever its sides. The bands run on the
+    sender's persistent band pool (`band_pool.rs`, #223 follow-up): band 0
+    on the `SP-program` thread, band i on `program-mix-<i>`, the K − 1 = 5
+    workers started once with the output and joined when it is dropped —
+    no thread start per picture. Before the follow-up each painted pass
+    spawned K − 1 scoped threads (~150 thread starts a second with a 1440p
+    song on program), a fade with a non-canvas incoming side took two
+    passes, and a plain fit also read the canvas black. SpeedHQ now encodes
+    FHD, not 1440p (44 % fewer pixels), which pays part of it back.
+  - **Box check, a 1440p song on program, then a 1920×1080 one:**
+    - the program's `submit_us_max` / `submit_over_5ms`;
+    - the size a receiver gets: any NDI receiver of `SP-program` (NDI Studio
+      Monitor on the box) reads 1920×1080 with a 1440p and with a 2560×1080
+      song on program (the thread-start INFO line prints only the configured
+      canvas; #223's planned plain-receiver probe, slice S2, automates it);
+    - the collateral on the other threads (on Windows every thread start
+      runs each loaded DLL's thread attach under the loader lock): the
+      on-program source's paced `pipeline: loop-stats … submit_call_us_max`
+      and its `ndi: genlock … late=` line, against the same reads before
+      this deploy;
+    - a 300 ms AND a 1 s fade between two 1440p songs, the regression case:
+      a fade between two same-size non-FHD songs was one byte-for-byte
+      blend before #223, two passes after it (10.7–30.7 ms per boundary,
+      `submit_us_max` up to 86 ms in the E2E's fades, #223 comment
+      5973492929), and is ONE pass on the band pool since the follow-up
+      (design record 5973498519). Its acceptance: `max_picture_us` under
+      ~12 000 for a 9-boundary fade, steady `submit_us_max` near the
+      pre-#223 15 ms, and `health.filled` / `late_dropped` / `coalesced`
+      (and `cue_timeouts`) +0 over the fades.
+  - **Levers, in order**, if `submit_us_max` passes one slot (33 333) or the
+    collateral moves: the first two are built (#223 follow-up: persistent
+    band workers, a one-pass fade); next, one band for a plain fit if the
+    band hand-off (K − 1 worker wakes per picture) ever dominates; then the
+    output buffer's memset (`out.resize` in `mix_nv12_into`: one serial
+    3.1 MB write on the `SP-program` thread before the bands start, ~0.3 ms
+    at FHD, ~4× that on a 4K canvas) — the bands could initialise their own
+    part instead (it needs `MaybeUninit` slices, i.e. `unsafe`).
+- **Out of this slice** (later #223 slices, comment 5872871751): the
+  `SP-program-MAX` output for the LED walls (max(FHD, native)), its
+  `MaxSide`, Spout, the zero-receiver gate, downloads above 1440p.
+- Tests: `program_output_tests_fhd.rs` (the production canvas: 2560×1440,
+  1280×720 and 2560×1080 sources → 1920×1080 stride 1920, the quadrants
+  scaled not cropped, the 21:9 bars; pass-through as the same allocation,
+  with slack; a padded stride repacked, a short buffer drawn black; a fade
+  between two sizes drawn in the canvas; a 1440p↔1440p fade, one plan, both
+  sides scaled), `program_canvas_tests.rs` (the layout, the pass-through
+  rule, the two kept plans, the fit at every band count reading its picture
+  alone, `Canvas::fade`'s one-pass pins and its plan order),
+  `band_pool_tests.rs` (the persistent workers: where each band runs, the
+  waits, a panic, the shutdown), `program_output_tests.rs` (small
+  canvases), and
+  `ndi_input_tests_fhd.rs` (the input's 4×2 picture goes out 1920×1080). The
+  wire picture's bytes are read through `FrameSubmitter::held_frame`, the
+  async holdover the SDK still points at.
+
 ## API + UI
 
 - `GET /api/v1/program` → `{ndi_name, source, previous, cut_boundary_100ns,
   health{forwarded, filled, late_dropped, resyncs, coalesced, cuts,
-  submitted, connections, last_stamp_100ns}, vban{…} (#210), input{…}
+  submitted, connections, last_stamp_100ns, timing{…} (#210, the sender's
+  per-boundary stage timing, `vban-out.md`)}, vban{…} (#210), input{…}
   (#212), remote{…} (#213), transition{…} + follow{…} (#215),
   legacy_cg{shown} (#221 L4a)}`;
   `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404
@@ -347,8 +478,13 @@ nothing).
   playlist its `/play` started off air broadcasts `Playing`. Every engine
   `PlaybackStateChanged` goes through `engine_play.rs::broadcast_state`
   (review round 7): a new broadcast site calls it, never builds the
-  message inline (the WS on-connect replay in `api/websocket.rs` is the
-  one separate builder).
+  message inline (#225 unit 2: a playlist with NO pipeline goes through
+  its sibling `broadcast_idle`, `dashboard-ws.md`). #225: it sends through
+  `send_dashboard`, which records
+  it for the WS on-connect replay (`dashboard-ws.md`), so a new dashboard
+  is told the same state. The replay (`DashboardReplay::replay`) rebuilds
+  the message from that record, and makes up an `Idle` for a playlist the
+  engine never told; it no longer reads the NDI-health sample.
 - **`/api/v1/status`**: `active_scene` = the one resolver,
   `active_playlist_ids` = the on-air set, ascending
   (`api/routes_status.rs::on_air_fields`; `routes.rs` is at the cap). A
@@ -380,11 +516,24 @@ nothing).
 
 `program_bus_tests.rs` drives `ProgramCore` + a real `ProgramOutput` over
 `MockNdiBackend`: source A frames are 4×2 NV12, B 8×2, the program's standby
-black 2×2, so the `send_video_async(…,WxH,…)` call strings name the owner of
-each boundary. Keep that pattern for any new case. Its rig helpers (`b`,
-`job`, `frame`, `program`, `drain`, `video_dims`, …) are `pub(super)` and
-reused by the #215 sibling `program_bus_tests_transition.rs`.
+black 2×2. Since #223 the sender puts every picture on the wire in its 2×2
+canvas, so the wire size no longer names a boundary's owner: the rig's
+`Program` records the size of the job each boundary handed the sender
+(`shown_dims`: a source's own size, the standby's 2×2, a mix's incoming side
+else its outgoing side), and `shown_dims` also asserts that every wire
+picture IS the 2×2 canvas. Keep that pattern for any new case. Its rig
+helpers (`b`, `job`, `frame`, `program`, `drain`, `shown_dims`, …) are
+`pub(super)` and reused by the #215 siblings `program_bus_tests_transition.rs`
+and `program_bus_tests_cue.rs`. A source whose own allocation must reach the
+wire (`a_cut_to_an_idle_source_carries_its_standby_pair`) uses a canvas-sized
+picture, as the paced idle black is FHD in production.
 
+- **A held or slow `SP-program` NDI submit (#210):** `program_output_tests_order.rs`
+  `HookedNdi` wraps `MockNdiBackend` and runs a hook inside every `send_audio`
+  (the pair's first NDI call): a gate that holds the submit, or
+  `SettableClock::advance` for a submit that costs N on a wall the test holds.
+  Reuse it rather than adding a hold to sp-ndi's mock (a new `test_util`
+  accessor needs its own sp-ndi test, `rust-workspace.md`).
 - **Mock call-log gotcha (CI fail 26.9.):** a test that asserts the mock sender's LAST
   call (e.g. `send_video_flush`) must keep the owning output alive past the assertion —
   a thread closure that drops it appends `send_destroy` after the flush. Return the output

@@ -152,7 +152,7 @@ media time, not from +lead, so `AudioHold` can place it up to the lead late. The
 G3 ±300 ms band then keeps or trims that, the same class as the SDK path's
 start burst. Box-check it with `scripts/preview_latency_repro.py` across a song
 change or seek. `lead_ms_for` / `StreamShared::lead_ms()`, threaded
-`ensure_pipeline → register_taps → StreamTap::new`). Because the video feeder
+`ensure_pipeline_inner → register_taps → StreamTap::new`). Because the video feeder
 starts on-connect BEFORE the audio input connects, the audio feeder measures how
 far the video wall-clock timeline is already ahead and PREPENDS silence to match:
 `audio_preroll_samples(connect_gap_ms, lead_ms) = (min(gap,5000)+lead_ms)*48*2`

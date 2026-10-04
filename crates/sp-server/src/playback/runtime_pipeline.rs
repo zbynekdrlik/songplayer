@@ -32,19 +32,20 @@ impl PlaybackEngine {
     /// already on air goes on program at once (#221 L4b). Reconciles from the
     /// DB — a pipeline is (idempotently) created only when the playlist is
     /// active and has a non-empty NDI output name, mirroring the startup
-    /// pre-create loop in `lib.rs::start`. Delegates
-    /// to the idempotent [`ensure_pipeline`], so a runtime pipeline picks up the
-    /// same engine-level `genlock_pacing` / `clock_health` / burn-registry
+    /// pre-create loop in `lib.rs::start`, and it starts in its row's
+    /// playback mode (#225 unit 2). Delegates to the idempotent
+    /// `create_and_record_sender`, so a runtime pipeline picks up the same
+    /// engine-level `genlock_pacing` / `clock_health` / burn-registry
     /// configuration as a boot pipeline. No-op for a missing row, an inactive
     /// playlist, or an empty NDI name.
-    ///
-    /// [`ensure_pipeline`]: PlaybackEngine::ensure_pipeline
     pub async fn ensure_pipeline_for_playlist(&mut self, playlist_id: i64) {
         use sqlx::Row;
-        let row = match sqlx::query("SELECT ndi_output_name, is_active FROM playlists WHERE id = ?")
-            .bind(playlist_id)
-            .fetch_optional(&self.pool)
-            .await
+        let row = match sqlx::query(
+            "SELECT name, ndi_output_name, is_active, playback_mode FROM playlists WHERE id = ?",
+        )
+        .bind(playlist_id)
+        .fetch_optional(&self.pool)
+        .await
         {
             Ok(Some(r)) => r,
             Ok(None) => {
@@ -78,13 +79,20 @@ impl PlaybackEngine {
             return;
         }
 
+        // #225 unit 2: the pipeline starts in its row's mode.
+        let mode = crate::db::models_playlists::row_mode(
+            playlist_id,
+            &row.get::<String, _>("name"),
+            &row.get::<String, _>("playback_mode"),
+        );
         info!(
             playlist_id,
             ndi_name, "ensuring pipeline for runtime-created/activated playlist"
         );
         // #196: record the sender's advertised URL for `/api/v1/ndi/health`
         // (idempotent; a no-op if the pipeline already exists).
-        self.create_and_record_sender(playlist_id, &ndi_name).await;
+        self.create_and_record_sender(playlist_id, &ndi_name, mode)
+            .await;
         // #221 L4b: the playback authority's ON for a playlist already on air
         // may have come before its pipeline existed; it goes on program now.
         let on_program = self
@@ -104,8 +112,19 @@ impl PlaybackEngine {
     /// Removing it from the map drops the `PlaybackPipeline`, whose `Drop`
     /// sends `Shutdown` to its thread (destroying the NDI sender) — the same
     /// contract `run()`'s `pipelines.clear()` relies on. Also drops the
-    /// playlist's genlock lock-state window. No-op if no pipeline exists.
+    /// playlist's genlock lock-state window. What the dashboard replay last
+    /// recorded for it goes too (#225), with or without a pipeline.
     pub fn remove_pipeline(&mut self, playlist_id: i64) {
+        // #225: it goes Idle first, told through the one state sender, so the
+        // open dashboards agree with a reload's replay (a no-op without a
+        // pipeline).
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.state = PlayState::Idle;
+        }
+        self.broadcast_state(playlist_id);
+        // #225 unit 2: a pipeline-less playlist has a record too once its
+        // mode changed (`apply_mode`), and it must not outlive the playlist.
+        super::dashboard_replay::global().forget(playlist_id);
         match self.pipelines.remove(&playlist_id) {
             Some(_pp) => {
                 self.lock_windows.remove(&playlist_id);
@@ -125,24 +144,29 @@ impl PlaybackEngine {
         }
     }
 
-    /// Ensure a pipeline exists for the given playlist, creating one if needed.
-    /// (Moved from `mod.rs` to keep that file under the 1000-line cap, #196.)
+    /// Ensure a pipeline exists for the given playlist, creating one in the
+    /// DEFAULT mode if needed: the engine tests' shortcut. Production creates
+    /// every pipeline through `create_and_record_sender`, in its row's mode
+    /// (#225 unit 2), so this one is test-only.
+    #[cfg(test)]
     pub fn ensure_pipeline(&mut self, playlist_id: i64, ndi_name: &str) {
-        self.ensure_pipeline_inner(playlist_id, ndi_name, None);
+        self.ensure_pipeline_inner(playlist_id, ndi_name, PlaybackMode::default(), None);
     }
 
-    /// #196: like [`ensure_pipeline`], but with an optional one-shot the newly
-    /// spawned pipeline thread fires (carrying the sender's advertised URL) the
-    /// moment its NDI sender is created. `create_startup_senders` passes
-    /// `Some(tx)` and awaits it before creating the next output, which
-    /// serializes `send_create` in `playlist.id` order for a stable name→port
-    /// map. The lazy/runtime path passes `None`. If the pipeline already exists
-    /// (closure not run), the sender is dropped and the receiver sees a closed
-    /// channel — the caller treats that as "already ready".
+    /// Create the playlist's pipeline (idempotent), starting in `mode` (its
+    /// row's, #225 unit 2), with an optional one-shot the newly spawned
+    /// pipeline thread fires (carrying the sender's advertised URL) the moment
+    /// its NDI sender is created (#196). `create_and_record_sender` passes
+    /// `Some(tx)` and awaits it, which serializes `send_create` in
+    /// `playlist.id` order at startup for a stable name→port map. If the
+    /// pipeline already exists (closure not run), its mode is kept, the sender
+    /// is dropped and the receiver sees a closed channel — the caller treats
+    /// that as "already ready".
     pub(crate) fn ensure_pipeline_inner(
         &mut self,
         playlist_id: i64,
         ndi_name: &str,
+        mode: PlaybackMode,
         ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
     ) {
         let event_tx = self.event_tx.clone();
@@ -184,7 +208,7 @@ impl PlaybackEngine {
             PlaylistPipeline {
                 pipeline,
                 state: PlayState::Idle,
-                mode: PlaybackMode::default(),
+                mode,
                 current_video_id: None,
                 scene_active: Arc::new(AtomicBool::new(false)),
                 title_show_abort: None,

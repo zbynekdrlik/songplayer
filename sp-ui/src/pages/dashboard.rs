@@ -36,6 +36,12 @@ pub fn DashboardPage() -> impl IntoView {
         if pinned && valid {
             return;
         }
+        // #225 review rounds 2-4: keep a valid selection until the replay has
+        // told EVERY playlist's state (`selection::states_known`): a partial
+        // replay never flips the work area to the first by name.
+        if valid && !selection::states_known(&pls, &np) {
+            return;
+        }
         if let Some(target) = selection::choose_default(&pls, &np)
             && sel != Some(target)
         {

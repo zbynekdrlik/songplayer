@@ -7,10 +7,9 @@ use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use tokio::fs;
-use tracing::warn;
+use tracing::{error, warn};
 
-use sp_core::playback::PlaybackMode;
-
+use super::routes_mode::{MODE_ORDER, requested_mode};
 use crate::metadata::manual::refused_title;
 use crate::{AppState, EngineCommand, SyncRequest};
 
@@ -36,11 +35,6 @@ pub struct UpdatePlaylistRequest {
     pub playback_mode: Option<String>,
     pub is_active: Option<bool>,
     pub karaoke_enabled: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SetModeRequest {
-    pub mode: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,7 +162,11 @@ pub async fn create_playlist(
     Json(body): Json<CreatePlaylistRequest>,
 ) -> impl IntoResponse {
     let ndi = body.ndi_output_name.as_deref().unwrap_or("");
-    let mode = body.playback_mode.as_deref().unwrap_or("continuous");
+    // #225 unit 2: a known mode only, by its canonical name (`routes_mode`).
+    let mode = match requested_mode(None, body.playback_mode.as_deref()) {
+        Ok(mode) => mode.unwrap_or_default(),
+        Err(refused) => return refused.into_response(),
+    };
 
     let result = sqlx::query(
         "INSERT INTO playlists (name, youtube_url, ndi_output_name, playback_mode)
@@ -178,7 +176,7 @@ pub async fn create_playlist(
     .bind(&body.name)
     .bind(&body.youtube_url)
     .bind(ndi)
-    .bind(mode)
+    .bind(mode.as_str())
     .fetch_one(&state.pool)
     .await;
 
@@ -202,8 +200,8 @@ pub async fn create_playlist(
             // reconciles from the DB (creates only when active + non-empty NDI).
             // GUARANTEED delivery (`.send().await`, not `try_send`): a dropped
             // command would leave the playlist unplayable until a restart — the
-            // exact bug this fixes — since no other path calls `ensure_pipeline`
-            // at runtime (`apply_event` only warns "no pipeline"). The engine
+            // exact bug this fixes — since nothing else creates it until it goes
+            // on air (the authority's ON; `apply_event` only warns). The engine
             // drains `engine_rx` on an independent task, so this never deadlocks.
             let _ = state
                 .engine_tx
@@ -279,9 +277,15 @@ pub async fn update_playlist(
         sets.push("ndi_output_name = ?");
         binds.push(ndi.clone());
     }
-    if let Some(ref mode) = body.playback_mode {
+    // #225 unit 2: the row is the mode's one truth — a known mode only, by
+    // its canonical name, and the engine is told it (`routes_mode`).
+    let mode = match requested_mode(Some(id), body.playback_mode.as_deref()) {
+        Ok(mode) => mode,
+        Err(refused) => return refused.into_response(),
+    };
+    if let Some(mode) = mode {
         sets.push("playback_mode = ?");
-        binds.push(mode.clone());
+        binds.push(mode.as_str().to_string());
     }
     if let Some(active) = body.is_active {
         sets.push("is_active = ?");
@@ -305,11 +309,15 @@ pub async fn update_playlist(
     }
     query = query.bind(id);
 
+    let _order = MODE_ORDER.lock().await; // the row, then the engine (#225)
     match query.execute(&state.pool).await {
         Ok(result) => {
             if result.rows_affected() == 0 {
                 StatusCode::NOT_FOUND.into_response()
             } else {
+                if let Some(mode) = mode {
+                    super::routes_mode::tell_engine(&state.engine_tx, id, mode).await;
+                }
                 let _ = state.obs_rebuild_tx.send(());
                 // #132: reconcile the playback pipeline with the update.
                 // Deactivation tears the pipeline down; every other update
@@ -327,7 +335,7 @@ pub async fn update_playlist(
             }
         }
         Err(e) => {
-            warn!("update_playlist error: {e}");
+            error!(id, %e, "update_playlist: the row was not written");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -337,6 +345,8 @@ pub async fn delete_playlist(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
+    // #225 unit 2: never between a mode change's write and its tell.
+    let _order = MODE_ORDER.lock().await;
     match sqlx::query("DELETE FROM playlists WHERE id = ?")
         .bind(id)
         .execute(&state.pool)
@@ -633,21 +643,8 @@ pub async fn previous(
     StatusCode::NO_CONTENT
 }
 
-pub async fn set_mode(
-    State(state): State<AppState>,
-    Path(playlist_id): Path<i64>,
-    Json(body): Json<SetModeRequest>,
-) -> impl IntoResponse {
-    let mode = PlaybackMode::from_str_lossy(&body.mode);
-    let _ = state
-        .engine_tx
-        .send(EngineCommand::SetMode { playlist_id, mode })
-        .await;
-    StatusCode::NO_CONTENT
-}
-
-// #194: the seek route moved to `api/routes_seek.rs` (unified onto the
-// `/api/v1/playback/{id}/…` family, with clamp / 404 / 409 hardening).
+// #225 unit 2: the mode route is in `api/routes_mode.rs`; #194: the seek
+// route in `api/routes_seek.rs` (the `/api/v1/playback/{id}/…` family).
 
 // ---------------------------------------------------------------------------
 // Settings endpoints

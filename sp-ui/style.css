@@ -1331,7 +1331,10 @@ body {
 
 .player-preview { display: flex; flex-direction: column; }
 .player-mixer { display: flex; flex-direction: column; }
-.player-mixer-idle {
+/* #225: the pending line ("Mixér — načítavam…") has the idle line's box, so
+   the slot keeps its height until the replay tells the playlist's state. */
+.player-mixer-idle,
+.player-mixer-pending {
     padding: 10px 12px;
     color: var(--text-dim);
     font-size: 0.9em;

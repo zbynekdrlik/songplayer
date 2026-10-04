@@ -21,6 +21,9 @@ pub fn connect(store: DashboardStore) {
                 }
             }
             store.ws_connected.set(false);
+            // #225 review round 2: nothing the closed socket told is known any
+            // more (the server may be restarting): "Načítavam…", not its songs.
+            store.forget_now_playing();
             gloo_timers::future::TimeoutFuture::new(2_000).await;
         }
     });
@@ -38,6 +41,9 @@ async fn try_connect(store: &DashboardStore) -> Result<(), String> {
 
     let ws = WebSocket::open(&ws_url).map_err(|e| e.to_string())?;
     store.ws_connected.set(true);
+    // #225 review round 2: this socket's on-connect replay re-tells every
+    // playlist; what an earlier socket told is not carried over.
+    store.forget_now_playing();
 
     let (_write, mut read) = ws.split();
 

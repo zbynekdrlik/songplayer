@@ -69,6 +69,19 @@ app.use(express.json());
 // in the `wss.on("connection")` handler at the bottom of this file.
 const wsClients = new Set();
 
+// #225 review round 3: a socket gets its on-connect replay BEFORE any live
+// message, as the server's `handle_ws` sends them (it writes the replay, then
+// forwards the event bus). A live message for a socket whose replay has not
+// gone out yet waits in that socket's queue and follows the replay, in order
+// (a live NowPlaying that overtook the replay would be wiped by the replay's
+// Idle for that playlist). Returns whether the socket is open.
+function sendLive(ws, msg) {
+  if (ws.readyState !== ws.OPEN) return false;
+  if (ws.replayed) ws.send(msg);
+  else ws.liveQueue.push(msg);
+  return true;
+}
+
 // Serve the built WASM frontend from dist/
 const distPath = join(__dirname, "..", "dist");
 app.use(express.static(distPath));
@@ -398,9 +411,7 @@ function broadcastPlaybackState(pid, state, transport) {
     type: "PlaybackStateChanged",
     data: { playlist_id: pid, state, mode: "Continuous", transport },
   });
-  for (const ws of wsClients) {
-    if (ws.readyState === ws.OPEN) ws.send(msg);
-  }
+  for (const ws of wsClients) sendLive(ws, msg);
 }
 
 app.post("/api/v1/playback/:id/pause", (req, res) => {
@@ -926,6 +937,20 @@ function programBody() {
       submitted: 0,
       connections: 0,
       last_stamp_100ns: 0,
+      // #210: the sender's per-boundary timing (mirrors
+      // `BoundaryTimingStatus`); the mock sends no boundary.
+      timing: {
+        boundaries: 0,
+        ready_late_us_max: 0,
+        vban_feed_late_us_max: 0,
+        submit_us_max: 0,
+        ready_late_over_5ms: 0,
+        vban_feed_late_over_5ms: 0,
+        submit_over_5ms: 0,
+        vban_feed_late_over_10ms: 0,
+        vban_feed_late_over_budget: 0,
+        warned: 0,
+      },
     },
     // #215: the transition the next cut uses; the mock applies a cut at once,
     // so each cut counts as done and a window runs only when a spec injects one.
@@ -950,8 +975,13 @@ function programBody() {
       blocks_dropped: 0,
       blocks_substituted: 0,
       late_sends: 0,
+      // #210 part 2: the VBAN thread's late packets (`vban_stall.rs`); the
+      // mock sends nothing.
+      late_max_us: 0,
+      late_events: [],
       send_interval_p99_us: 0,
       frame_counter: 0,
+      slew_owed_us: 0, // #224 part 2 (was missing from the mock)
       targets: (settings.vban_targets || "")
         .split(",")
         .map((t) => t.trim())
@@ -1325,10 +1355,7 @@ app.post("/__mock/lyrics-update", (req, res) => {
   const msg = JSON.stringify({ type: "LyricsUpdate", data });
   let sent = 0;
   for (const ws of wsClients) {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(msg);
-      sent += 1;
-    }
+    if (sendLive(ws, msg)) sent += 1;
   }
   res.json({ status: "sent", clients: sent });
 });
@@ -1359,10 +1386,7 @@ app.post("/__mock/set-playing", (req, res) => {
   });
   let sent = 0;
   for (const ws of wsClients) {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(msg);
-      sent += 1;
-    }
+    if (sendLive(ws, msg)) sent += 1;
   }
   res.json({ status: "sent", clients: sent });
 });
@@ -1393,10 +1417,7 @@ app.post("/__mock/now-playing", (req, res) => {
   });
   let sent = 0;
   for (const ws of wsClients) {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(msg);
-      sent += 1;
-    }
+    if (sendLive(ws, msg)) sent += 1;
   }
   res.json({ status: "sent", clients: sent });
 });
@@ -1419,9 +1440,7 @@ let pendingSeek = null;
 
 function tickBroadcast(obj) {
   const msg = JSON.stringify(obj);
-  for (const ws of wsClients) {
-    if (ws.readyState === ws.OPEN) ws.send(msg);
-  }
+  for (const ws of wsClients) sendLive(ws, msg);
 }
 
 function tickNowPlaying(it) {
@@ -1507,6 +1526,137 @@ setInterval(() => {
     tickNowPlaying(it);
   }
 }, 500);
+
+// #225: the on-connect replay, as the server sends it
+// (`playback/dashboard_replay.rs`). EVERY playlist gets its state, so the
+// Player can tell "not known yet" from "nothing plays": a playlist that plays
+// gets its last NowPlaying FIRST, then its state; one that plays nothing gets
+// an explicit Idle. Playlist 1 plays "Never Gonna Give You Up" on program (the
+// mock's long-standing default); the items of a running tick add to and
+// override it, so a reload while a tick runs reads its state + transport + song
+// with NO later live message (#201 round 2). Knobs, reset with `{}`:
+//   delay_ms — when the replay lands after the socket opens (default 100);
+//   now_playing_delay_ms — send a playing playlist's NowPlaying this long AFTER
+//     its state instead of before it (default 0): a first NowPlaying that
+//     arrives late, as a live ▶ before its song's `Started`;
+//   no_song — `[{playlist_id, state, transport}]`: playlists that have NO song
+//     now (review round 2: a server restart, a removed pipeline). The replay
+//     tells each this state and no NowPlaying, and the 2 s playlist-1 song
+//     interval skips them (read at every tick).
+const WS_REPLAY_DEFAULTS = { delay_ms: 100, now_playing_delay_ms: 0, no_song: [] };
+let wsReplay = { ...WS_REPLAY_DEFAULTS };
+app.post("/__mock/ws-replay", (req, res) => {
+  const b = req.body || {};
+  wsReplay = {
+    delay_ms:
+      typeof b.delay_ms === "number" ? b.delay_ms : WS_REPLAY_DEFAULTS.delay_ms,
+    now_playing_delay_ms:
+      typeof b.now_playing_delay_ms === "number"
+        ? b.now_playing_delay_ms
+        : WS_REPLAY_DEFAULTS.now_playing_delay_ms,
+    no_song: Array.isArray(b.no_song) ? b.no_song : WS_REPLAY_DEFAULTS.no_song,
+  };
+  res.json(wsReplay);
+});
+
+// Review round 2: close every dashboard socket (as a server restart does); the
+// dashboard reconnects ~2 s later and gets a fresh replay.
+app.post("/__mock/ws-drop", (_req, res) => {
+  let closed = 0;
+  for (const ws of wsClients) {
+    if (ws.readyState === ws.OPEN) {
+      ws.close();
+      closed += 1;
+    }
+  }
+  res.json({ status: "closed", clients: closed });
+});
+
+function hasNoSong(pid) {
+  return wsReplay.no_song.some((n) => n.playlist_id === pid);
+}
+
+const PLAYLIST_1_NOW_PLAYING = {
+  playlist_id: 1,
+  video_id: 1,
+  song: "Never Gonna Give You Up",
+  artist: "Rick Astley",
+  position_ms: 42000,
+  duration_ms: 213000,
+};
+
+// playlist_id → { state, transport, now_playing } of what plays right now.
+function replayPlaying() {
+  const playing = new Map([
+    [1, { state: "Playing", transport: "Playing", now_playing: PLAYLIST_1_NOW_PLAYING }],
+  ]);
+  if (tickEnabled) {
+    for (const it of tickItems) {
+      playing.set(it.playlist_id, {
+        state: it.state,
+        transport: it.transport,
+        now_playing: {
+          playlist_id: it.playlist_id,
+          video_id: it.video_id,
+          song: it.song,
+          artist: it.artist,
+          position_ms: it.position_ms,
+          duration_ms: it.duration_ms,
+        },
+      });
+    }
+  }
+  for (const n of wsReplay.no_song) {
+    playing.set(n.playlist_id, {
+      state: n.state,
+      transport: n.transport,
+      now_playing: null,
+    });
+  }
+  return playing;
+}
+
+// Send the replay to one socket. A held-back NowPlaying's timer goes into
+// `timers`, so the socket's close clears it.
+function sendReplay(ws, timers) {
+  const send = (obj) => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
+  };
+  const playing = replayPlaying();
+  const ids = [
+    ...new Set([
+      ...activePlaylists().map((p) => p.id),
+      DABING_PLAYLIST_ID,
+      ...playing.keys(),
+    ]),
+  ];
+  const late = [];
+  for (const pid of ids) {
+    const p = playing.get(pid);
+    if (p && p.state !== "Idle") {
+      if (p.now_playing === null) {
+        // no song: the state alone
+      } else if (wsReplay.now_playing_delay_ms > 0) late.push(p.now_playing);
+      else send({ type: "NowPlaying", data: p.now_playing });
+      send({
+        type: "PlaybackStateChanged",
+        data: { playlist_id: pid, state: p.state, mode: "Continuous", transport: p.transport },
+      });
+    } else {
+      send({
+        type: "PlaybackStateChanged",
+        data: { playlist_id: pid, state: "Idle", mode: "Continuous", transport: "Idle" },
+      });
+    }
+  }
+  if (late.length > 0) {
+    timers.push(
+      setTimeout(() => {
+        for (const np of late) send({ type: "NowPlaying", data: np });
+      }, wsReplay.now_playing_delay_ms),
+    );
+  }
+}
 
 // SPA fallback — serve index.html for unmatched routes
 app.get("*", (_req, res) => {
@@ -1700,6 +1850,9 @@ previewWss.on("connection", (ws, req) => {
 
 wss.on("connection", (ws) => {
   console.log("[mock-api] WebSocket client connected");
+  // #225 review round 3: live messages wait for this socket's replay.
+  ws.replayed = false;
+  ws.liveQueue = [];
   wsClients.add(ws);
 
   // #194 r3b: seed the shared HealthBar's OBS + tools segments so the strip
@@ -1727,28 +1880,16 @@ wss.on("connection", (ws) => {
     // client vanished before the seed — ignore.
   }
 
-  // #15 part 2: mark playlist 1 as Playing so its card renders the live
-  // video preview <img> (playlist 1's preview.jpg serves a real JPEG above).
-  // `state`/`mode` are the serde-derived variant names (`ServerMsg` uses the
-  // derive, not the lowercase REST strings).
-  const playingTimer = setTimeout(() => {
+  // #225: the on-connect replay (`sendReplay` above): every playlist's state,
+  // a playing one's NowPlaying first. Playlist 1 plays on program, so its card
+  // renders the live preview and the Dashboard toggle reads `⏸ Pauza`.
+  const replayTimers = [];
+  const replayTimer = setTimeout(() => {
     if (ws.readyState === ws.OPEN) {
-      ws.send(
-        JSON.stringify({
-          type: "PlaybackStateChanged",
-          // #201: playlist 1 is on-program Playing → transport Playing so the
-          // shared Player toggle reads `⏸ Pauza` on the Dashboard (the label
-          // now follows transport, not the scene-aware `state`).
-          data: {
-            playlist_id: 1,
-            state: "Playing",
-            mode: "Continuous",
-            transport: "Playing",
-          },
-        }),
-      );
-      // Playlist 2 gets now-playing info but stays Idle (no PlaybackStateChanged)
-      // so its card renders the idle preview placeholder, not the <img>.
+      sendReplay(ws, replayTimers);
+      // Playlist 2 then gets now-playing info but stays Idle (no further
+      // PlaybackStateChanged), so its card renders the idle preview
+      // placeholder, not the <img>.
       ws.send(
         JSON.stringify({
           type: "NowPlaying",
@@ -1762,32 +1903,12 @@ wss.on("connection", (ws) => {
           },
         }),
       );
+      // Then every live message that waited for the replay, in order.
+      ws.replayed = true;
+      for (const msg of ws.liveQueue) ws.send(msg);
+      ws.liveQueue = [];
     }
-  }, 100);
-
-  // #201 round 2: the on-connect replay. The real server rebuilds a
-  // `PlaybackStateChanged` per pipeline snapshot on connect, now carrying the
-  // snapshot's RAW `transport`. Model it for the tick-driven off-program dub:
-  // if a spec has enabled the tick, replay each item's state + transport on
-  // (re)connect — with NO subsequent live message — so a page reload while an
-  // off-program dub decodes reads its honest transport at once.
-  const replayTimer = setTimeout(() => {
-    if (ws.readyState === ws.OPEN && tickEnabled) {
-      for (const it of tickItems) {
-        ws.send(
-          JSON.stringify({
-            type: "PlaybackStateChanged",
-            data: {
-              playlist_id: it.playlist_id,
-              state: it.state,
-              mode: "Continuous",
-              transport: it.transport,
-            },
-          }),
-        );
-      }
-    }
-  }, 120);
+  }, wsReplay.delay_ms);
 
   // #154: one-shot LyricsQueueUpdate carrying the "waiting — wall in use"
   // worker state (a song-less processing entry). Delayed so it lands after the
@@ -1795,7 +1916,8 @@ wss.on("connection", (ws) => {
   // bucket-count test is unaffected. Drives the idle-gate badge render.
   const badgeTimer = setTimeout(() => {
     if (ws.readyState === ws.OPEN) {
-      ws.send(
+      sendLive(
+        ws,
         JSON.stringify({
           type: "LyricsQueueUpdate",
           data: {
@@ -1818,8 +1940,14 @@ wss.on("connection", (ws) => {
     }
   }, 500);
 
-  // Send a NowPlaying event periodically
+  // Send a NowPlaying event periodically. #225: a held-back replay
+  // (`/__mock/ws-replay`) holds this song too, so a spec's "song not here
+  // yet" window is the knob's, not this timer's (the defaults change nothing:
+  // the first tick comes at 2 s).
+  const songHoldUntil =
+    Date.now() + wsReplay.delay_ms + wsReplay.now_playing_delay_ms;
   const interval = setInterval(() => {
+    if (Date.now() < songHoldUntil || hasNoSong(1)) return;
     const msg = {
       type: "NowPlaying",
       data: {
@@ -1831,9 +1959,7 @@ wss.on("connection", (ws) => {
         duration_ms: 213000,
       },
     };
-    if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify(msg));
-    }
+    sendLive(ws, JSON.stringify(msg));
   }, 2000);
 
   ws.on("message", (data) => {
@@ -1851,8 +1977,8 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     clearInterval(interval);
     clearTimeout(badgeTimer);
-    clearTimeout(playingTimer);
     clearTimeout(replayTimer);
+    for (const t of replayTimers) clearTimeout(t);
     wsClients.delete(ws);
     console.log("[mock-api] WebSocket client disconnected");
   });

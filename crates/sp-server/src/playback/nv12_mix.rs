@@ -1,106 +1,122 @@
-//! The fused, row-banded NV12 mix of one transition boundary (#215 addendum 3,
-//! design record 5858472395). A child of `program_transition`, so it reads
-//! [`FitPlan`]'s private rectangle and taps.
+//! The fused, row-banded NV12 paint of one `SP-program` picture (#215
+//! addendum 3, design record 5858472395; #223 follow-up, design record
+//! 5973498519). A child of `program_transition`, so it reads [`FitPlan`]'s
+//! private rectangle and taps.
 //!
 //! Box run 2 (#215 comment 5858465542) measured the fitted dissolve at ~56 ms
-//! per 2560×1440 boundary on the `SP-program` thread, against a 33.3 ms slot:
-//! the black canvas, the bilinear fit into a scratch buffer, then the blend —
-//! three full passes over the ~5.5 MB picture, on one core.
+//! per 2560×1440 boundary on the `SP-program` thread: the black canvas, the
+//! bilinear fit into a scratch buffer, then the blend — three full passes on
+//! one core. Addendum 3 fused the outgoing side's fit with the blend. #223
+//! then made every program picture the 1920×1080 canvas, and a fade became
+//! two passes again: the incoming side fitted into the canvas, then the
+//! outgoing side fitted and blended over it (10.7–30.7 ms per boundary on
+//! the box, #223 comment 5973492929).
 //!
-//! [`mix_nv12_into`] computes every destination byte ONCE, as
-//! `blend(fit(from)[p], to[p], w)`: the fitted outgoing byte (a bar's studio
-//! black outside the fitted rectangle) is never stored, it is blended with the
-//! incoming byte on the spot. An outgoing picture already in the incoming
-//! layout is blended byte for byte ([`Outgoing::Same`]). The result is
-//! bit-identical to the two-pass reference, `FitPlan::apply` then
-//! `blend_nv12_into` (the same taps, the same Q8 rounding); `nv12_mix_tests.rs`
-//! pins that.
+//! [`mix_nv12_into`] paints one destination picture (the canvas) from a
+//! [`Paint`]: a plain fit of ONE side, or a fade boundary of TWO sides
+//! blended at the boundary's Q8 weight. Each side is read in the destination
+//! layout as it is painted ([`Side`]): the studio black, a picture already
+//! in that layout (byte for byte), or a picture fitted into it by its own
+//! [`FitPlan`]. The picture is painted in ONE pass, a row at a time: the
+//! outgoing side's bytes written, then the incoming side's blended over them
+//! in place while the row is still in cache,
+//! `(f·(256 − w) + t·w + 128) >> 8`. There is no fitted scratch buffer and no
+//! second pass over the picture.
+//!
+//! The result is bit-identical to the two-pass reference: each side made a
+//! whole destination picture first (`FitPlan::apply`, its own bytes, or
+//! `black_nv12_into`), then `blend_nv12_into` (the same taps, the same Q8
+//! rounding); `nv12_mix_tests.rs` pins that. A plain fit is the outgoing
+//! side alone, which is what the blend gives at weight 0.
 //!
 //! The rows are shared out in K contiguous bands (`band_bounds`): band `i`
 //! paints the luma rows `dh · i / K .. dh · (i + 1) / K` and the chroma rows
 //! `ch · i / K .. ch · (i + 1) / K`, and the last band also paints every byte
-//! past the chroma plane. Band 0 runs on the calling thread and every other
-//! band on a scoped helper thread of its own (`std::thread::scope`, so no new
-//! dependency and no thread outlives the call). Each byte is written by
+//! past the chroma plane. K is the [`BandPool`]'s: band 0 runs on the calling
+//! thread, band `i` on the pool's persistent worker `i` (`band_pool.rs`, #223
+//! follow-up: no thread is started per picture). Each byte is written by
 //! exactly one band, and every band uses the same pure per-byte rule. So the
 //! picture does not depend on K, or on where a run starts. The `SP-program`
-//! sender uses K = [`mix_bands`] of the box's logical processors: a quarter of
-//! them, at most [`MAX_MIX_BANDS`].
+//! sender's pool has K = [`mix_bands`] of the box's logical processors: a
+//! quarter of them, at most [`MAX_MIX_BANDS`].
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
-use std::thread;
-
-use tracing::warn;
 
 use super::{FitPlan, Layout, Q8_ONE, bilinear, nv12_whole, tap};
+use crate::playback::band_pool::BandPool;
 
-/// The most row bands (threads) one mixed picture is painted in.
+/// The most row bands (threads) [`mix_bands`] gives the `SP-program`
+/// sender's pool (a pool paints in the band count it was built with).
 pub const MAX_MIX_BANDS: usize = 6;
 
-/// One band per this many logical processors, so a mix never takes more
+/// One band per this many logical processors, so a picture never takes more
 /// than a quarter of the box from the paced senders, OBS and Arena.
 pub const CPUS_PER_MIX_BAND: usize = 4;
 
-/// The name of a band's helper thread.
-const MIX_THREAD_NAME: &str = "program-mix";
+/// The name of the `SP-program` sender's band workers: `program-mix-1` …
+pub const MIX_THREAD_NAME: &str = "program-mix";
 
-/// Paints one run of one destination row ([`FitPlan::luma_run`] or
-/// [`FitPlan::chroma_run`]): `(plan, src, row, first column, out, to, w)`.
-type RowRun = fn(&FitPlan, &[u8], usize, usize, &mut [u8], &[u8], Weight);
-
-/// How many row bands the `SP-program` sender paints a mixed picture in on a
-/// box with `logical_cpus` logical processors: a quarter of them, at least 1,
-/// at most [`MAX_MIX_BANDS`] (the 24-thread box: 6).
+/// How many row bands the `SP-program` sender paints a picture in on a box
+/// with `logical_cpus` logical processors: a quarter of them, at least 1, at
+/// most [`MAX_MIX_BANDS`] (the 24-thread box: 6).
 pub fn mix_bands(logical_cpus: usize) -> usize {
     (logical_cpus / CPUS_PER_MIX_BAND).clamp(1, MAX_MIX_BANDS)
 }
 
-/// The outgoing picture of a mixed boundary, as [`mix_nv12_into`] reads it.
+/// One side of a picture [`mix_nv12_into`] paints, read in the destination
+/// layout as it is painted.
 #[derive(Clone, Copy, Debug)]
-pub enum Outgoing<'a> {
-    /// A picture already in the destination layout (the incoming side's, or
-    /// the standby black made in it): blended byte for byte.
-    Same(Layout, &'a [u8]),
-    /// A picture of the plan's source layout, fitted into its destination
-    /// (the incoming layout) as it is blended.
+pub enum Side<'a> {
+    /// The destination's studio black: Y 16 over the luma plane, UV 128
+    /// after it (`black_nv12_into`). Drawn, never read (#223: a fade's
+    /// missing side, the canvas black).
+    Black,
+    /// A picture already in the destination layout (#223: a canvas picture),
+    /// read byte for byte. A paint is never longer than it.
+    Same(&'a [u8]),
+    /// A picture of the plan's source layout, fitted into the destination as
+    /// it is read. The plan's destination must be the paint's.
     Fitted(&'a FitPlan, &'a [u8]),
 }
 
-/// Mix one boundary's pictures into `out` (appended): every byte
-/// `blend(fit(from)[p], to[p], weight)`, computed once, in `bands` row bands
-/// (1 to [`MAX_MIX_BANDS`]). Bit-identical to `FitPlan::apply` then `blend_nv12_into`
-/// (for [`Outgoing::Same`]: to `blend_nv12_into`), and to any other band
-/// count. As long as the two-pass result: the destination's bytes (the
-/// `Same` picture's, the plan's destination layout's) that `to` also holds.
+/// What one destination picture is painted from.
+#[derive(Clone, Copy, Debug)]
+pub enum Paint<'a> {
+    /// A plain fit: ONE side, every byte its own.
+    Fit(Side<'a>),
+    /// A fade boundary: every byte `blend(from, to, weight)`, `weight` the
+    /// incoming side's Q8 weight (capped at all-`to`).
+    Fade {
+        from: Side<'a>,
+        to: Side<'a>,
+        weight: u32,
+    },
+}
+
+/// Paint `paint` into `out` (appended) as a `dst` picture, in the `pool`'s
+/// row bands, in one pass. Bit-identical to the two-pass
+/// reference (each side made a whole `dst` picture, then
+/// `blend_nv12_into`), and to any other band count. It is `dst.len` bytes,
+/// or a shorter [`Side::Same`] picture's length (the bytes every side
+/// holds). Panics when a [`Side::Fitted`] plan does not fit into `dst`.
 ///
-/// Returns how many threads painted it: one per band (a band with no rows
-/// paints nothing), fewer only when a helper thread could not start and its
-/// band was painted on the calling thread.
-pub fn mix_nv12_into(
-    from: Outgoing<'_>,
-    to: &[u8],
-    weight: u32,
-    bands: usize,
-    out: &mut Vec<u8>,
-) -> usize {
-    let (dst, len) = match from {
-        Outgoing::Same(layout, picture) => (layout, picture.len()),
-        Outgoing::Fitted(plan, _) => (plan.dst, plan.dst.len),
-    };
-    let len = len.min(to.len());
-    let k = bands.clamp(1, MAX_MIX_BANDS);
+/// Returns how many threads painted it: the calling one and every worker
+/// that took its band — one per band, fewer only when a worker could not
+/// start and its band was painted on the calling thread.
+pub fn mix_nv12_into(dst: Layout, paint: Paint<'_>, pool: &BandPool, out: &mut Vec<u8>) -> usize {
+    let mix = Mix::new(dst, paint);
+    let len = mix.len();
+    let k = pool.bands();
     let base = out.len();
     // A memset of the pooled buffer: the bands then need disjoint `&mut`
-    // slices of it (safe code), and every byte is overwritten once.
+    // slices of it (safe code); the outgoing side then writes every byte.
     out.resize(base + len, 0);
-    let bands = split_bands(&mut out[base..], &band_bounds(dst, len, k), k);
-    let mix = Mix {
-        from,
-        to,
-        weight: Weight::new(weight),
-    };
-    paint_bands(&mix, bands)
+    let slots: Vec<Mutex<Option<Band<'_>>>> =
+        split_bands(&mut out[base..], &band_bounds(dst, len, k), k)
+            .into_iter()
+            .map(|band| Mutex::new(Some(band)))
+            .collect();
+    pool.run(&|band: usize| paint_slot(&mix, &slots[band]))
 }
 
 /// The `2k + 1` destination offsets of `k` bands over the first `len` bytes
@@ -153,40 +169,6 @@ fn split_bands<'o>(mut out: &'o mut [u8], bounds: &[usize], k: usize) -> Vec<Ban
         .collect()
 }
 
-/// Paint every band: the first on the calling thread, every other one on a
-/// scoped helper thread of its own, all at once. A helper that cannot start
-/// has its band painted on the calling thread instead (WARN). Returns how
-/// many threads painted.
-fn paint_bands(mix: &Mix<'_>, bands: Vec<Band<'_>>) -> usize {
-    let slots: Vec<Mutex<Option<Band<'_>>>> = bands
-        .into_iter()
-        .map(|band| Mutex::new(Some(band)))
-        .collect();
-    let helpers = AtomicUsize::new(0);
-    thread::scope(|scope| {
-        for slot in slots.iter().skip(1) {
-            let helped = &helpers;
-            let started = thread::Builder::new()
-                .name(MIX_THREAD_NAME.to_owned())
-                .spawn_scoped(scope, move || {
-                    paint_slot(mix, slot);
-                    helped.fetch_add(1, Ordering::Relaxed);
-                });
-            if let Err(e) = started {
-                warn!(
-                    %e,
-                    "program transition: a mix helper thread did not start — its band is painted on the SP-program thread"
-                );
-                paint_slot(mix, slot);
-            }
-        }
-        if let Some(first) = slots.first() {
-            paint_slot(mix, first);
-        }
-    });
-    1 + helpers.into_inner()
-}
-
 /// Paint the band a slot still holds (each slot is painted once).
 fn paint_slot(mix: &Mix<'_>, slot: &Mutex<Option<Band<'_>>>) {
     let band = slot.lock().unwrap_or_else(PoisonError::into_inner).take();
@@ -195,8 +177,38 @@ fn paint_slot(mix: &Mix<'_>, slot: &Mutex<Option<Band<'_>>>) {
     }
 }
 
+/// How a side's byte lands on the destination byte under it.
+trait Put: Copy {
+    /// One byte.
+    fn put(self, out: &mut u8, byte: u8);
+    /// One byte over a whole run (a bar, the black).
+    fn fill(self, out: &mut [u8], byte: u8);
+    /// A run of bytes (a picture already in the destination layout).
+    fn copy(self, out: &mut [u8], bytes: &[u8]);
+}
+
+/// The outgoing side, and a plain fit's one side: its bytes as they are.
+#[derive(Clone, Copy, Debug)]
+struct Write;
+
+impl Put for Write {
+    fn put(self, out: &mut u8, byte: u8) {
+        *out = byte;
+    }
+
+    fn fill(self, out: &mut [u8], byte: u8) {
+        out.fill(byte);
+    }
+
+    fn copy(self, out: &mut [u8], bytes: &[u8]) {
+        out.copy_from_slice(bytes);
+    }
+}
+
 /// The Q8 blend of one byte, `(f·(256 − w) + t·w + 128) >> 8`: the rounding
-/// of `blend_nv12_into`, the weight capped at all-`to`.
+/// of `blend_nv12_into`, the weight capped at all-`to`. As a [`Put`] it is
+/// the incoming side: its byte `t` blended over the outgoing byte `f`
+/// already painted under it.
 #[derive(Clone, Copy, Debug)]
 struct Weight {
     keep: u32,
@@ -215,34 +227,159 @@ impl Weight {
     fn mix(self, from: u8, to: u8) -> u8 {
         ((u32::from(from) * self.keep + u32::from(to) * self.to + 128) >> 8) as u8
     }
+}
 
-    /// One outgoing byte `from` (a bar's black) over a run of `to`.
-    fn fill(self, from: u8, out: &mut [u8], to: &[u8]) {
-        for (o, &t) in out.iter_mut().zip(to) {
-            *o = self.mix(from, t);
+impl Put for Weight {
+    fn put(self, out: &mut u8, byte: u8) {
+        *out = self.mix(*out, byte);
+    }
+
+    fn fill(self, out: &mut [u8], byte: u8) {
+        for o in out {
+            *o = self.mix(*o, byte);
+        }
+    }
+
+    fn copy(self, out: &mut [u8], bytes: &[u8]) {
+        for (o, &b) in out.iter_mut().zip(bytes) {
+            *o = self.mix(*o, b);
         }
     }
 }
 
-/// What every band reads: both pictures and the weight.
-struct Mix<'a> {
-    from: Outgoing<'a>,
-    to: &'a [u8],
-    weight: Weight,
+impl Side<'_> {
+    /// The bytes of a `len`-byte paint this side can give: all of them, or
+    /// a [`Side::Same`] picture's own when it is shorter.
+    fn holds(self, len: usize) -> usize {
+        match self {
+            Side::Same(picture) => len.min(picture.len()),
+            _ => len,
+        }
+    }
+
+    /// Paint one run of one destination row with this side's bytes,
+    /// landing as `put` says.
+    fn paint_row<P: Put>(self, span: RowSpan, out: &mut [u8], put: P) {
+        match self {
+            Side::Black => put.fill(out, span.plane.black()),
+            Side::Same(picture) => put.copy(out, &picture[span.at..span.at + out.len()]),
+            Side::Fitted(plan, src) => plan.paint_row(src, span, out, put),
+        }
+    }
 }
 
-impl Mix<'_> {
-    /// Paint the destination bytes `[at, at + out.len())`, wherever the run
-    /// starts.
-    fn paint(&self, at: usize, out: &mut [u8]) {
-        let to = &self.to[at..at + out.len()];
-        match self.from {
-            Outgoing::Same(_, from) => {
-                for ((o, &f), &t) in out.iter_mut().zip(&from[at..]).zip(to) {
-                    *o = self.weight.mix(f, t);
-                }
+/// A plane of the destination picture.
+#[derive(Clone, Copy, Debug)]
+enum Plane {
+    /// The luma plane.
+    Luma,
+    /// The interleaved chroma plane, and every byte past it.
+    Chroma,
+}
+
+impl Plane {
+    /// Its studio black: Y 16, UV 128 (`black_nv12_into`).
+    fn black(self) -> u8 {
+        match self {
+            Plane::Luma => 16,
+            Plane::Chroma => 128,
+        }
+    }
+}
+
+/// Where one run of one destination row is: its plane, its row in that
+/// plane, its first column, and its first byte in the picture.
+#[derive(Clone, Copy, Debug)]
+struct RowSpan {
+    plane: Plane,
+    row: usize,
+    c0: usize,
+    at: usize,
+}
+
+/// What every band reads: the destination layout, the outgoing side (a
+/// plain fit's only side), and the incoming side with its weight.
+struct Mix<'a> {
+    dst: Layout,
+    from: Side<'a>,
+    over: Option<(Side<'a>, Weight)>,
+}
+
+impl<'a> Mix<'a> {
+    /// The mix of `paint` into a `dst` picture. Panics when a fitted side's
+    /// plan fits into another layout: its rows would not be `dst`'s.
+    fn new(dst: Layout, paint: Paint<'a>) -> Self {
+        let (from, over) = match paint {
+            Paint::Fit(side) => (side, None),
+            Paint::Fade { from, to, weight } => (from, Some((to, Weight::new(weight)))),
+        };
+        for side in [Some(from), over.map(|(to, _)| to)].into_iter().flatten() {
+            if let Side::Fitted(plan, _) = side {
+                assert_eq!(
+                    plan.dst, dst,
+                    "a fitted side's plan fits into the paint's layout"
+                );
             }
-            Outgoing::Fitted(plan, src) => plan.mix_run(src, at, out, to, self.weight),
+        }
+        Self { dst, from, over }
+    }
+
+    /// The bytes it paints: the destination's, or fewer when a
+    /// [`Side::Same`] picture is shorter.
+    fn len(&self) -> usize {
+        let len = self.from.holds(self.dst.len);
+        self.over.map_or(len, |(to, _)| to.holds(len))
+    }
+
+    /// Paint the destination bytes `[at, at + out.len())`, wherever the run
+    /// starts: it is cut at the plane edge, and each part is walked row by
+    /// row ([`Mix::plane_run`]).
+    fn paint(&self, at: usize, out: &mut [u8]) {
+        let luma_end = self.dst.stride as usize * self.dst.height as usize;
+        let split = luma_end.saturating_sub(at).min(out.len());
+        let (luma, chroma) = out.split_at_mut(split);
+        self.plane_run(Plane::Luma, at, at, luma);
+        // The chroma part (it starts on the plane edge when the run crosses
+        // it) also holds the bytes past the chroma plane: rows below the
+        // picture, all bar.
+        let offset = at.max(luma_end) - luma_end;
+        self.plane_run(Plane::Chroma, offset, at + split, chroma);
+    }
+
+    /// The part of a run inside one plane, from `offset` bytes into the
+    /// plane (byte `at` of the picture): the rest of its first row, then
+    /// whole `stride`-byte rows (the last one maybe cut short), each painted
+    /// from both sides ([`Mix::row`]). The rows are chunks of the run, so
+    /// every step paints at least one byte. (A zero stride, a layout with no
+    /// rows to draw in, is walked a byte at a time; a fitted side paints it
+    /// black.)
+    fn plane_run(&self, plane: Plane, offset: usize, at: usize, out: &mut [u8]) {
+        let ds = (self.dst.stride as usize).max(1);
+        let (row, c0) = (offset / ds, offset % ds);
+        let head = (ds - c0).min(out.len());
+        let (first, rest) = out.split_at_mut(head);
+        self.row(RowSpan { plane, row, c0, at }, first);
+        for (i, run) in rest.chunks_mut(ds).enumerate() {
+            let at = at + head + i * ds;
+            let row = row + 1 + i;
+            self.row(
+                RowSpan {
+                    plane,
+                    row,
+                    c0: 0,
+                    at,
+                },
+                run,
+            );
+        }
+    }
+
+    /// One run of one row, while it is in cache: the outgoing side's bytes,
+    /// then the incoming side's blended over them.
+    fn row(&self, span: RowSpan, out: &mut [u8]) {
+        self.from.paint_row(span, out, Write);
+        if let Some((to, weight)) = self.over {
+            to.paint_row(span, out, weight);
         }
     }
 }
@@ -259,66 +396,30 @@ fn span(c0: usize, len: usize, x0: usize, width: usize) -> (usize, usize, usize)
 
 impl FitPlan {
     /// Whether the fit draws its picture: both layouts whole NV12 (`apply`'s
-    /// test) and a destination with rows to draw in; otherwise the outgoing
-    /// picture is the black canvas alone.
+    /// test) and a destination with rows to draw in; otherwise the fitted
+    /// picture is the studio black alone.
     fn draws(&self, src: &[u8]) -> bool {
         nv12_whole(self.src, src.len()) && nv12_whole(self.dst, self.dst.len) && self.dst.stride > 0
     }
 
-    /// Mix the destination bytes `[at, at + out.len())`: each one the fitted
-    /// outgoing byte, blended with `to`'s. Outside the fitted rectangle that
-    /// byte is the bar's studio black: Y 16 in the luma plane, UV 128 after
-    /// it (`black_nv12_into`). A picture that is not whole NV12 is the black
-    /// canvas alone. A run may start anywhere: it is cut at the plane edge,
-    /// and each part is walked row by row ([`FitPlan::plane_run`]).
-    fn mix_run(&self, src: &[u8], at: usize, out: &mut [u8], to: &[u8], w: Weight) {
-        let luma_end = self.dst.stride as usize * self.dst.height as usize;
+    /// Paint one run of one destination row of the fitted picture, landing
+    /// as `put` says: inside the fitted rectangle the bilinear sample,
+    /// outside it the bar's studio black (Y 16 in the luma plane, UV 128
+    /// after it). A picture that is not whole NV12 is the black alone.
+    fn paint_row<P: Put>(&self, src: &[u8], span: RowSpan, out: &mut [u8], put: P) {
         if !self.draws(src) {
-            let split = luma_end.min(self.dst.len).saturating_sub(at).min(out.len());
-            let (bars, rest) = out.split_at_mut(split);
-            w.fill(16, bars, &to[..split]);
-            w.fill(128, rest, &to[split..]);
+            put.fill(out, span.plane.black());
             return;
         }
-        let split = luma_end.saturating_sub(at).min(out.len());
-        let (luma, chroma) = out.split_at_mut(split);
-        let (luma_to, chroma_to) = to.split_at(split);
-        self.plane_run(src, Self::luma_run, at, luma, luma_to, w);
-        // The chroma part (it starts on the plane edge when the run crosses
-        // it) also holds the bytes past the chroma plane: rows below the
-        // picture, all bar.
-        let offset = at.max(luma_end) - luma_end;
-        self.plane_run(src, Self::chroma_run, offset, chroma, chroma_to, w);
-    }
-
-    /// The part of a run inside one plane, from `offset` bytes into the
-    /// plane: the rest of its first row, then whole `stride`-byte rows (the
-    /// last one maybe cut short), each painted by `row_run`. The rows are
-    /// chunks of the run, so every step paints at least one byte.
-    fn plane_run(
-        &self,
-        src: &[u8],
-        row_run: RowRun,
-        offset: usize,
-        out: &mut [u8],
-        to: &[u8],
-        w: Weight,
-    ) {
-        let ds = self.dst.stride as usize;
-        let (row, c0) = (offset / ds, offset % ds);
-        let head = (ds - c0).min(out.len());
-        let (first, rest) = out.split_at_mut(head);
-        let (first_to, rest_to) = to.split_at(head);
-        row_run(self, src, row, c0, first, first_to, w);
-        let rows = rest.chunks_mut(ds).zip(rest_to.chunks(ds));
-        for (i, (run, run_to)) in rows.enumerate() {
-            row_run(self, src, row + 1 + i, 0, run, run_to, w);
+        match span.plane {
+            Plane::Luma => self.luma_run(src, span.row, span.c0, out, put),
+            Plane::Chroma => self.chroma_run(src, span.row, span.c0, out, put),
         }
     }
 
     /// One run of luma row `row` from column `c0`: the bar's Y 16, the
     /// bilinear sample inside the fitted rectangle (`apply`'s luma loop).
-    fn luma_run(&self, src: &[u8], row: usize, c0: usize, out: &mut [u8], to: &[u8], w: Weight) {
+    fn luma_run<P: Put>(&self, src: &[u8], row: usize, c0: usize, out: &mut [u8], put: P) {
         let y = row
             .checked_sub(self.y0)
             .filter(|&y| y < self.height as usize);
@@ -326,25 +427,26 @@ impl FitPlan {
             Some(_) => span(c0, out.len(), self.x0, self.width as usize),
             None => (0, 0, 0),
         };
-        w.fill(16, &mut out[..a], &to[..a]);
+        put.fill(&mut out[..a], 16);
         if let Some(y) = y {
             let ty = tap(y as u32, self.height, self.src.height);
             let ss = self.src.stride as usize;
             let (r0, r1) = (&src[ty.i0 * ss..], &src[ty.i1 * ss..]);
-            let taps = self.luma.iter().skip(x);
-            for ((o, &t), c) in out[a..b].iter_mut().zip(&to[a..b]).zip(taps) {
-                let f = bilinear(r0[c.i0], r0[c.i1], r1[c.i0], r1[c.i1], c.w, ty.w);
-                *o = w.mix(f, t);
+            for (o, c) in out[a..b].iter_mut().zip(self.luma.iter().skip(x)) {
+                put.put(
+                    o,
+                    bilinear(r0[c.i0], r0[c.i1], r1[c.i0], r1[c.i1], c.w, ty.w),
+                );
             }
         }
-        w.fill(16, &mut out[b..], &to[b..]);
+        put.fill(&mut out[b..], 16);
     }
 
     /// One run of chroma row `row` (from the chroma plane's start) from byte
     /// column `c0`: the bar's UV 128, the bilinear sample of each interleaved
     /// U and V byte inside the fitted rectangle (`apply`'s chroma loop: its
     /// whole pairs of bytes, half its rows).
-    fn chroma_run(&self, src: &[u8], row: usize, c0: usize, out: &mut [u8], to: &[u8], w: Weight) {
+    fn chroma_run<P: Put>(&self, src: &[u8], row: usize, c0: usize, out: &mut [u8], put: P) {
         let y = row
             .checked_sub(self.y0 / 2)
             .filter(|&y| y < self.height as usize / 2);
@@ -352,21 +454,20 @@ impl FitPlan {
             Some(_) => span(c0, out.len(), self.x0, 2 * (self.width as usize / 2)),
             None => (0, 0, 0),
         };
-        w.fill(128, &mut out[..a], &to[..a]);
+        put.fill(&mut out[..a], 128);
         if let Some(y) = y {
             let ty = tap(y as u32, self.height / 2, self.src.height.div_ceil(2));
             let ss = self.src.stride as usize;
             let s_uv = ss * self.src.height as usize;
             let (r0, r1) = (&src[s_uv + ty.i0 * ss..], &src[s_uv + ty.i1 * ss..]);
-            for (i, (o, &t)) in out[a..b].iter_mut().zip(&to[a..b]).enumerate() {
+            for (i, o) in out[a..b].iter_mut().enumerate() {
                 let j = x + i;
                 let c = &self.chroma[j / 2];
                 let (p, q) = (2 * c.i0 + j % 2, 2 * c.i1 + j % 2);
-                let f = bilinear(r0[p], r0[q], r1[p], r1[q], c.w, ty.w);
-                *o = w.mix(f, t);
+                put.put(o, bilinear(r0[p], r0[q], r1[p], r1[q], c.w, ty.w));
             }
         }
-        w.fill(128, &mut out[b..], &to[b..]);
+        put.fill(&mut out[b..], 128);
     }
 }
 

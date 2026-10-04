@@ -10,9 +10,11 @@
 //! opened) replayed `▶ Prehrať` for a playing dub until the next live message.
 //!
 //! Round 2 stores the transport derived from the RAW `reported_state` on the
-//! snapshot, and the replay reads it directly — no second mapping in
-//! `websocket.rs`. `Playing` is the only decoding label; `WaitingForScene` and
-//! `Paused` are both not-decoding (paused), and `Idle` is no content.
+//! snapshot. #225: the on-connect replay no longer reads the health registry
+//! (it re-tells what the engine last broadcast, `dashboard_replay.rs`), so
+//! the snapshot's `transport` now feeds `GET /api/v1/ndi/health` only.
+//! `Playing` is the only decoding label; `WaitingForScene` and `Paused` are
+//! both not-decoding (paused), and `Idle` is no content.
 
 use sp_core::playback::TransportState;
 
@@ -23,8 +25,8 @@ use super::ndi_health::PlaybackStateLabel;
 pub(crate) fn transport_from_reported(state: &PlaybackStateLabel) -> TransportState {
     match state {
         // A decoding pipeline is Playing regardless of whether its scene is on
-        // OBS program — so an off-program decoding dub replays `transport:
-        // Playing` and a reloaded dashboard reads `⏸ Pauza`.
+        // OBS program — an off-program decoding dub reads `transport: Playing`
+        // on `/api/v1/ndi/health`.
         PlaybackStateLabel::Playing => TransportState::Playing,
         // A Playing-off-program pipeline the registry reconciled to `Paused`,
         // and `WaitingForScene` (black-framed / awaiting its scene), are both

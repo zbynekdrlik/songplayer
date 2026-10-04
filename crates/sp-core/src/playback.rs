@@ -21,15 +21,23 @@ impl PlaybackMode {
         }
     }
 
+    /// Parses a stored or requested mode (case-insensitive): `None` for
+    /// anything but the three names [`as_str`](Self::as_str) writes. The one
+    /// parser, so a caller that must not take an unknown value as the default
+    /// (#225: the playlist row, the mode routes) can tell it apart.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "continuous" => Some(Self::Continuous),
+            "single" => Some(Self::Single),
+            "loop" => Some(Self::Loop),
+            _ => None,
+        }
+    }
+
     /// Parses a string into a `PlaybackMode`, falling back to `Continuous`
     /// for any unrecognised input.
     pub fn from_str_lossy(s: &str) -> Self {
-        match s.to_ascii_lowercase().as_str() {
-            "continuous" => Self::Continuous,
-            "single" => Self::Single,
-            "loop" => Self::Loop,
-            _ => Self::Continuous,
-        }
+        Self::parse(s).unwrap_or_default()
     }
 }
 
@@ -50,8 +58,9 @@ pub enum PlaybackState {
 ///
 /// The shared Player reads `transport == Playing` for its play/pause label so a
 /// dub prepared OFF program on the Dabing page reads `⏸ Pauza` while it plays,
-/// and shows on/off-program only in the badge (from `ndi_health`). `serde(default)`
-/// (=`Idle`) so older/mock payloads that omit it still decode.
+/// and shows on/off-program only in the badge (from the scene-aware `state`,
+/// #225). `serde(default)` (=`Idle`) so older/mock payloads that omit it still
+/// decode.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransportState {
     /// The pipeline is actively decoding a video (on OR off program).

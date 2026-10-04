@@ -14,12 +14,14 @@
 //! setlist row after pause doesn't keep the old snapshot. `handle_play_video`
 //! itself lives here too (moved out of `mod.rs` for the 1000-line cap, #215),
 //! and so does the dashboard state broadcast (`broadcast_state`, the one
-//! sender of `PlaybackStateChanged`) with its scene-flip half
+//! sender of `PlaybackStateChanged`; `broadcast_idle` for a playlist with no
+//! pipeline, #225 unit 2) with its scene-flip half
 //! (`scene_snapshot` + `broadcast_scene_flip`, the end of
 //! `handle_scene_change`, #221 L4b review round 6).
 
 use std::sync::atomic::Ordering;
 
+use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
 use sp_core::ws::ServerMsg;
 use tracing::{info, warn};
 
@@ -129,7 +131,7 @@ impl PlaybackEngine {
             }
 
             // #170: a PlayVideo on an off-program playlist shows
-            // WaitingForScene, matching the health-label replay; #201: the
+            // WaitingForScene (the WS replay re-tells it, #225); #201: the
             // transport is the raw decoding state (Playing here), so an
             // off-program dub reads `⏸ Pauza` while it plays.
             self.broadcast_state(playlist_id);
@@ -205,17 +207,31 @@ impl PlaybackEngine {
     /// Tell the dashboard `playlist_id`'s state (`PlaybackStateChanged`):
     /// the wire state folds in whether it is on program (#170: `Playing` off
     /// program is `WaitingForScene`), the transport is the raw decoding
-    /// state (#201). The engine's one sender of it (the WS on-connect replay
-    /// in `api/websocket.rs` builds its own from the health labels).
+    /// state (#201). The engine's one sender of it; #225: it goes through
+    /// `send_dashboard`, so the WS on-connect replay tells a new dashboard
+    /// the same state (`dashboard_replay.rs`).
     pub(super) fn broadcast_state(&self, playlist_id: i64) {
         let Some(pp) = self.pipelines.get(&playlist_id) else {
             return;
         };
-        let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+        self.send_dashboard(ServerMsg::PlaybackStateChanged {
             playlist_id,
             state: play_state_to_ws(&pp.state, pp.scene_active.load(Ordering::Acquire)),
             mode: pp.mode,
             transport: transport_from_play_state(&pp.state),
+        });
+    }
+
+    /// #225 unit 2: the state of a playlist with NO pipeline (inactive, or
+    /// no NDI name), which `broadcast_state` cannot tell: `Idle` in `mode`,
+    /// the mode its row now holds (`playlist_mode.rs::apply_mode`), what
+    /// the on-connect replay tells for it too.
+    pub(super) fn broadcast_idle(&self, playlist_id: i64, mode: PlaybackMode) {
+        self.send_dashboard(ServerMsg::PlaybackStateChanged {
+            playlist_id,
+            state: PlaybackState::Idle,
+            mode,
+            transport: TransportState::Idle,
         });
     }
 }

@@ -107,3 +107,62 @@ One terse line per issue/round: decisions, key commits, verification.
 - Kept per ROZHODNUTÉ, documented (lyrics-reference-text.md): a current-version manual row leaves the queue after one failed attempt; stale rows retried ≤ daily; attempts feed the #171 full-mix fallback; the 30-min cap stays policy.
 - Follow-up candidates (supervisor): a title correction applies to ONE row (the same video in another playlist, and a re-download, still overwrite it; metadata-providers.md).
 - Not local-verifiable (Tier-0): the build, the Rust tests, clippy, the mutation gate, the Playwright suites (the cache-layout rule was run in a node model, 7/7).
+
+## #210 — the FOH VBAN feed never waits for its boundary's video side; the program boundary's timing (0.69.0-dev.17, lane worktree-agent-a8f38ede150873ea0)
+
+- Design 5911744233 (main), findings 5907620763 / 5907883948. STEP 0 c5912914057, Anchors-confirmed c5912922321.
+- RED d569c00a (`program_output_tests_order.rs`, `HookedNdi` holds the pair's first NDI send behind a gate: the VBAN queue must already have the block — forwarded / standby / mix) → GREEN a9b9aae2 (feed before the NDI submit; `VbanBlock::copied`; the mix's crossfaded block before its picture) → refactor d06de3cc (`from_frames` deleted).
+- Telemetry 9f9a365e: pure `program_output_timing.rs` (`BoundaryMarks` → `ready_late_us` / `vban_feed_late_us` / `submit_us`; two 1800-boundary buckets; strictly-over-5-ms counts; one WARN per 5 s over 10 ms with `suppressed`), `ProgramOutput::serve(job, now)`, `health.timing` on `/api/v1/program`, e2e mock mirrored.
+- Reviews (fresh-context, read-only): r1 0🔴2🟡4🔵 (fixed 9177cd49 + e2d1bf18: `serve` = `split` → `feed_vban` → `submit_video`, the order test claims only the held point, the acceptance diffs the counters, `end_mix_run` after the submit, a neither-side test), r2 0🔴0🟡2🔵 (b5172508), r3 0🔴0🟡2🔵 (7507058c: the date-step caveat), r4 0🔴0🟡2🔵 (d793b8ed, docs only).
+- Integration note: origin/dev moved to `chore: release 0.69.0` during the lane; VERSION 0.69.0-dev.17 (as dispatched) needs the re-bump at integration.
+- Not local-verifiable (Tier-0): the build, the Rust tests, clippy, the mutation gate (69 mutants listed, each mapped to a killer or unviable by four review rounds); the box acceptance (15 min dev1 capture, `health.timing` counter diff) is the main session's.
+
+## #225 — the Player never claims a state it was not told; the badge reads the WS state (0.70.0-dev.5, lane worktree-agent-ad996fd54da6a9402)
+
+- Design 5917562242 (main, Approach 1). STEP 0 c5975001630; Anchors-confirmed c5975004341, adapted: the replay re-tells the engine's last broadcast, not the 5 s health sample; it tells every playlist; pure `sp_core::player_view`.
+- Server: `playback/dashboard_replay.rs`, a process-global record that the engine's one send point `send_dashboard` writes.
+  - The send sites: `broadcast_state` (incl. SetMode and `remove_pipeline`), Started, and the position ticks.
+  - `on_connect_replay` covers every DB id (`db/models_playlists.rs`): a non-Idle playlist gets its last NowPlaying first, then its state; the rest an explicit Idle; the engine's mode.
+  - A lagged client resubscribes, then gets the replay.
+- UI: `NowPlayingInfo.state_known`; `player_view` covers the view, title, label, badge, toggle and mode.
+  - The store forgets on every socket open/close; a live Idle drops the song.
+  - The auto-select waits for `selection::states_known`.
+  - The preview Effect waits for the state.
+- Commits: refactor bb3bc6b8 (the seam); RED d0f580e3 → GREEN f23fcfaf. Review rounds, each RED → GREEN:
+  - r1: f963fd2e → 24f37f5e;
+  - r2: 1d47116a → d17f9943;
+  - r3: 7ff74cd6 → 8b560c26;
+  - r4: 63448628 → 79e6ce1c.
+- Tests:
+  - `tests_ws_replay.rs` (3);
+  - `dashboard_replay_tests.rs` (10);
+  - `models_playlists.rs` (1);
+  - `player_view` (7);
+  - `e2e/player-known-state.spec.ts` (7, MutationObserver logs). The mock: `sendReplay`, `sendLive` (the replay-first order), `/__mock/ws-replay {delay_ms, now_playing_delay_ms, no_song}`, `/__mock/ws-drop`. Box specs use `NOT_A_SONG`.
+- Reviews (fresh-context, read-only):
+  - r1 0🔴 2🟡 9🔵: DB mode → engine mode + SetMode broadcast; E2E windows from the log.
+  - r2 0🔴 2🟡 7🔵: forget on reconnect; Idle drops the song; removed pipeline told Idle; lagged replay.
+  - r3 1🔴 1🟡 4🔵: the mock's live messages overtook the replay; preview + selection through a reconnect.
+  - r4 0🔴 2🟡 6🔵: toggle/mode neutral until known; forget + Started pinned; resubscribe; `states_known`.
+- Follow-up candidate (supervisor): the engine ignores `playlists.playback_mode` and `PUT …/mode` is never persisted. → Resolved by #225 unit 2 (below).
+- Not local-verifiable (Tier-0): the build, the Rust tests, clippy, the mutation gate (35+ mutants mapped by four review rounds), the new UI's E2E (the 7 new specs fail on the old dist; the rest of the suite passes with the new mock).
+
+## #225 unit 2 — a playlist's playback mode has ONE persisted truth, its row (0.70.0-dev.6, lane worktree-agent-ad396915f6142514a)
+
+- Main's ROZHODNUTÉ c5975832356; STEP 0 c5976089167; Anchors-confirmed c5976091780 (the dashboard's select is the REST PUT, the WS SetMode a second, unused entry point; both fixed).
+- Commits: bump 33106a6d; refactor c0661ac7 (`PlaybackMode::parse`); RED 71f2c430 → GREEN 161e0f7e.
+- A pipeline starts in its row's mode (`row_mode`, passed into `ensure_pipeline_inner` by the startup senders and `ensure_pipeline_for_playlist`); `api/routes_mode.rs`: the row first, then the engine (404 / 400 / 500, the engine untold on a failed write), `MODE_ORDER`; the playlist update (`PUT /api/v1/playlists/{id}`) tells the engine; `apply_mode` tells every change (a pipeline-less playlist: Idle in its mode); `remove_pipeline` always forgets; the replay's fallback is the row's mode.
+- Tests: `playlist_mode_tests.rs` (13), `websocket.rs` WS SetMode (1), `dashboard_replay_tests.rs` (+1, call sites re-pinned), `models_playlists.rs` (2, re-pinned), `startup_senders.rs` `startup_mode` (1), `tests_ws_replay.rs` (re-pinned: the idle playlist replays its row's `loop`), sp-core `parse` (1).
+- Review r1 0🔴 4🟡 6🔵 (26 listed mutants, each mapped to a killer), RED c7d995fe → GREEN 4afd89bf:
+  the POST validates the mode (`requested_mode`); `MODE_ORDER` pinned and taken by the DELETE;
+  the WS error in Slovak; `broadcast_idle`; `startup_mode`; the vacuous reads fed first.
+- Review r2 0🔴 0🟡 5🔵 (31 mutants, no survivor), pin f6426d12 + fix: `MODE_ORDER` held through the
+  tell pinned; the unknown-mode WARN names the playlist (escaped); a stale comment; doc counts.
+- Review r3 1🔴 0🟡 4🔵 (the last round; fixed, not re-reviewed): 🔴 five tests sent PATCH to the
+  playlist update, which is PUT (a 405 before the handler) — test 69e014fb switches them to PUT;
+  the earlier RED/pin claims for those PATCH steps were wrong. 🔵 a gone engine logged at ERROR;
+  the WS error for an unknown playlist documented; the replay maps an unknown row quietly; the
+  real-method lesson in `rust-workspace.md`.
+- On the box: rows all `continuous` (main 4.10.2026), so the deploy changes nothing that plays;
+  integration check (main): each replayed mode == its row's.
+- Not local-verifiable (Tier-0): the build, the Rust tests, clippy, the mutation gate.
