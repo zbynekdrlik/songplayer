@@ -1,6 +1,6 @@
 //! Sample-peak limiter on the summed stem mix (#184).
 //!
-//! [`StemMixReader`](super::StemMixReader) sums N streams (song stems, or the
+//! [`StemMixReader`](crate::audio::StemMixReader) sums N streams (song stems, or the
 //! original plus the dub voice). The dub sum goes over full scale when a voice
 //! peak lands on a loud bed, and the old `clamp(-1, 1)` cut every such sample
 //! flat, which is a hard clip that reaches FOH through VBAN. [`PeakLimiter`]
@@ -92,5 +92,5 @@ impl PeakLimiter {
 }
 
 #[cfg(test)]
-#[path = "limiter_tests.rs"]
+#[path = "peak_limiter_tests.rs"]
 mod tests;

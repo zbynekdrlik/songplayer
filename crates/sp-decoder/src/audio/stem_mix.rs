@@ -9,7 +9,7 @@
 //! out[i] = limit(Σ stream_k[i] * gain_k)
 //! ```
 //!
-//! `limit` is the sample-peak limiter in `audio/limiter.rs` (#184): stereo-linked,
+//! `limit` is the sample-peak limiter in `peak_limiter.rs` (#184): stereo-linked,
 //! instant attack, 50 ms release, ceiling 0.98. A sum at or under the ceiling
 //! passes bit for bit; an over is scaled down, never clamped flat at ±1.0.
 //!
@@ -55,9 +55,9 @@ use std::time::Instant;
 
 use tracing::info;
 
-use crate::audio::limiter::PeakLimiter;
 use crate::error::DecoderError;
 use crate::level_probe::{LevelProbe, LevelReading};
+use crate::peak_limiter::PeakLimiter;
 use crate::stream::{AudioStream, MediaStream};
 use crate::types::DecodedAudioFrame;
 

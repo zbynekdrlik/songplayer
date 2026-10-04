@@ -1,6 +1,5 @@
 //! Cross-platform audio decoder (Symphonia-backed).
 
-mod limiter;
 pub mod stem_mix;
 pub mod symphonia_reader;
 

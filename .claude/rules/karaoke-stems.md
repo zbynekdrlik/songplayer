@@ -2,7 +2,7 @@
 paths:
   - "crates/sp-server/src/stems/**"
   - "crates/sp-decoder/src/audio/stem_mix*.rs"
-  - "crates/sp-decoder/src/audio/limiter*.rs"
+  - "crates/sp-decoder/src/peak_limiter*.rs"
   - "crates/sp-decoder/src/audio/symphonia_reader*.rs"
   - "crates/sp-decoder/src/split_sync*.rs"
   - "crates/sp-server/src/playback/karaoke.rs"
@@ -59,7 +59,7 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   a 10 GiB per-process job cap. Read the mix one window at a time and stream
   each stem through `_StreamingStitchWriter`. See the #207 section at the end.
 
-## #184 — the peak limiter after the sum (`audio/limiter.rs`, was a clamp at ±1.0)
+## #184 — the peak limiter after the sum (`sp-decoder/src/peak_limiter.rs`, was a clamp at ±1.0)
 
 The dub readers sum the original (or its stems) with the dub voice, both at
 gain 1, so the sum goes over full scale when a voice peak lands on a loud bed.
@@ -87,6 +87,11 @@ through VBAN (2012 of 3.53M frames at 0 dBFS, finding 5847119155).
   resets it, and a new song opens a new reader.
 - **On the box:** the 1 Hz `stem-mix level` line ends with `limited=N`, the
   frames scaled since the song opened.
+
+**Why it is not under `audio/`.** `.cargo/mutants.toml` excludes all of
+`sp-decoder/src/audio/` (the Symphonia wrapper), so pure DSP placed there is
+never mutation-tested. The limiter lives at the crate root, next to
+`level_probe.rs`; put any new pure mix logic there too.
 
 **Tests.** A test that wants the reader's output to EQUAL its gain must use a
 signal under the ceiling (the ramp tests read it off 0.5 and double it). A
