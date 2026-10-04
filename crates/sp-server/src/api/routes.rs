@@ -163,7 +163,7 @@ pub async fn create_playlist(
 ) -> impl IntoResponse {
     let ndi = body.ndi_output_name.as_deref().unwrap_or("");
     // #225 unit 2: a known mode only, by its canonical name (`routes_mode`).
-    let mode = match requested_mode(body.playback_mode.as_deref()) {
+    let mode = match requested_mode(None, body.playback_mode.as_deref()) {
         Ok(mode) => mode.unwrap_or_default(),
         Err(refused) => return refused.into_response(),
     };
@@ -200,8 +200,8 @@ pub async fn create_playlist(
             // reconciles from the DB (creates only when active + non-empty NDI).
             // GUARANTEED delivery (`.send().await`, not `try_send`): a dropped
             // command would leave the playlist unplayable until a restart — the
-            // exact bug this fixes — since no other path creates a pipeline
-            // at runtime (`apply_event` only warns "no pipeline"). The engine
+            // exact bug this fixes — since nothing else creates it until it goes
+            // on air (the authority's ON; `apply_event` only warns). The engine
             // drains `engine_rx` on an independent task, so this never deadlocks.
             let _ = state
                 .engine_tx
@@ -279,7 +279,7 @@ pub async fn update_playlist(
     }
     // #225 unit 2: the row is the mode's one truth — a known mode only, by
     // its canonical name, and the engine is told it (`routes_mode`).
-    let mode = match requested_mode(body.playback_mode.as_deref()) {
+    let mode = match requested_mode(Some(id), body.playback_mode.as_deref()) {
         Ok(mode) => mode,
         Err(refused) => return refused.into_response(),
     };

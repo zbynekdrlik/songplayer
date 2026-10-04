@@ -49,8 +49,12 @@ pub(crate) static MODE_ORDER: Mutex<()> = Mutex::const_new(());
 
 /// A requested mode (the PUT's body, the PATCH's or the POST's field) by
 /// its canonical name: `Ok(None)` when none is given, `Err(400)` for an
-/// unknown one (WARNed with at most 32 of its characters).
-pub(crate) fn requested_mode(requested: Option<&str>) -> Result<Option<PlaybackMode>, StatusCode> {
+/// unknown one, WARNed with the playlist (none yet for the POST) and at most
+/// 32 of its characters, escaped.
+pub(crate) fn requested_mode(
+    playlist_id: Option<i64>,
+    requested: Option<&str>,
+) -> Result<Option<PlaybackMode>, StatusCode> {
     let Some(requested) = requested else {
         return Ok(None);
     };
@@ -58,7 +62,7 @@ pub(crate) fn requested_mode(requested: Option<&str>) -> Result<Option<PlaybackM
         Some(mode) => Ok(Some(mode)),
         None => {
             let shown: String = requested.chars().take(32).collect();
-            warn!(requested = %shown, "unknown playback mode refused");
+            warn!(?playlist_id, requested = ?shown, "unknown playback mode refused");
             Err(StatusCode::BAD_REQUEST)
         }
     }
@@ -73,7 +77,7 @@ pub async fn set_mode(
     Path(playlist_id): Path<i64>,
     Json(body): Json<SetModeRequest>,
 ) -> StatusCode {
-    let Ok(Some(mode)) = requested_mode(Some(&body.mode)) else {
+    let Ok(Some(mode)) = requested_mode(Some(playlist_id), Some(&body.mode)) else {
         return StatusCode::BAD_REQUEST;
     };
     match persist_then_tell(&state.pool, &state.engine_tx, playlist_id, mode).await {
