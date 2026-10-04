@@ -153,4 +153,9 @@ One terse line per issue/round: decisions, key commits, verification.
 - Commits: bump 33106a6d; refactor c0661ac7 (`PlaybackMode::parse`); RED 71f2c430 → GREEN 161e0f7e.
 - A pipeline starts in its row's mode (`row_mode`, passed into `ensure_pipeline_inner` by the startup senders and `ensure_pipeline_for_playlist`); `api/routes_mode.rs`: the row first, then the engine (404 / 400 / 500, the engine untold on a failed write), `MODE_ORDER`; the PATCH tells the engine; `apply_mode` tells every change (a pipeline-less playlist: Idle in its mode); `remove_pipeline` always forgets; the replay's fallback is the row's mode.
 - Tests: `playlist_mode_tests.rs` (8), `websocket.rs` WS SetMode (1), `dashboard_replay_tests.rs` (+1, call sites re-pinned), `models_playlists.rs` (2, re-pinned), `tests_ws_replay.rs` (re-pinned: the idle playlist replays its row's `loop`), sp-core `parse` (1).
+- Review r1 0🔴 4🟡 6🔵 (all 26 listed mutants mapped to a killer), RED c7d995fe → GREEN 4afd89bf:
+  the POST validates the mode (`requested_mode`); `MODE_ORDER` pinned and taken by the DELETE;
+  the WS error in Slovak; `broadcast_idle`; `startup_mode`; the vacuous reads fed first.
+- On the box: rows all `continuous` (main 4.10.2026), so the deploy changes nothing that plays;
+  post-deploy check: each replayed mode == its row's.
 - Not local-verifiable (Tier-0): the build, the Rust tests, clippy, the mutation gate.

@@ -478,7 +478,9 @@ nothing).
   playlist its `/play` started off air broadcasts `Playing`. Every engine
   `PlaybackStateChanged` goes through `engine_play.rs::broadcast_state`
   (review round 7): a new broadcast site calls it, never builds the
-  message inline. #225: it sends through `send_dashboard`, which records
+  message inline (#225 unit 2: a playlist with NO pipeline goes through
+  its sibling `broadcast_idle`, `dashboard-ws.md`). #225: it sends through
+  `send_dashboard`, which records
   it for the WS on-connect replay (`dashboard-ws.md`), so a new dashboard
   is told the same state. The replay (`DashboardReplay::replay`) rebuilds
   the message from that record, and makes up an `Idle` for a playlist the
