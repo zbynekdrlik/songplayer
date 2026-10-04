@@ -15,6 +15,21 @@ mod tests {
     }
 
     #[test]
+    fn the_data_dir_is_the_db_dir() {
+        let data = std::path::Path::new("data");
+        let cfg = ServerConfig {
+            db_path: data.join("songplayer.db"),
+            ..ServerConfig::default()
+        };
+        assert_eq!(cfg.data_dir(), data.to_path_buf());
+        // A bare DB file name keeps every join relative to the current dir.
+        assert_eq!(
+            ServerConfig::default().data_dir().join("bench"),
+            PathBuf::from("bench")
+        );
+    }
+
+    #[test]
     fn tools_status_default() {
         let ts = ToolsStatus::default();
         assert!(!ts.ytdlp_available);

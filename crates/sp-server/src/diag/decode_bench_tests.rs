@@ -124,10 +124,9 @@ fn seconds_run_from_one_to_fifteen() {
 }
 
 #[test]
-fn the_samples_sit_beside_the_db() {
-    let data = Path::new("data");
-    let bench = DecodeBench::beside_db(&data.join("songplayer.db"));
-    assert_eq!(bench.dir(), data.join("bench").as_path());
+fn the_bench_knows_its_sample_dir() {
+    let dir = Path::new("data").join("bench");
+    assert_eq!(DecodeBench::new(dir.clone()).dir(), dir.as_path());
 }
 
 #[test]
@@ -476,6 +475,7 @@ fn a_clean_run_reports_its_pictures_and_the_gate() {
     assert!((fps - 29.970).abs() < 0.001, "{fps}");
     assert_eq!(report.frames, 2);
     assert_eq!(report.first_us, Some(17_000));
+    assert_eq!(report.steady_mean_us, Some(16_366));
     assert_eq!(report.wall_ms, 15_000);
     assert_eq!(report.open_ms, 120);
     assert_eq!(report.ended, BenchEnd::TimeLimit);
@@ -495,6 +495,25 @@ fn a_clean_run_reports_its_pictures_and_the_gate() {
 }
 
 #[test]
+fn the_steady_mean_leaves_out_the_first_picture() {
+    let steady = |decode_us: Vec<u64>| {
+        let run = BenchRun {
+            decode_us,
+            first_picture: None,
+            wall_us: 0,
+            end: BenchEnd::EndOfStream,
+            error: None,
+        };
+        BenchReport::from_run("x.mp4", facts_4k(), run, 0, None).steady_mean_us
+    };
+    assert_eq!(steady(vec![]), None);
+    assert_eq!(steady(vec![500_000]), None);
+    // Floored: (3 + 4) / 2.
+    assert_eq!(steady(vec![500_000, 3, 4]), Some(3));
+    assert_eq!(steady(vec![500_000, 16_000, 17_000, 18_000]), Some(17_000));
+}
+
+#[test]
 fn a_run_with_no_picture_reports_the_stream_size_and_no_gate() {
     let run = BenchRun {
         decode_us: vec![],
@@ -510,6 +529,7 @@ fn a_run_with_no_picture_reports_the_stream_size_and_no_gate() {
     );
     assert_eq!(report.frames, 0);
     assert_eq!(report.first_us, None);
+    assert_eq!(report.steady_mean_us, None);
     assert_eq!(report.wall_ms, 2);
     assert_eq!(report.decode_us, DecodeUs::default());
     assert_eq!(report.budget, None);
@@ -566,6 +586,7 @@ fn a_file_that_does_not_open_is_a_500_with_no_picture() {
     assert_eq!(report.error.as_deref(), Some("open: no video"));
     assert_eq!(report.thread_priority, Some(0));
     assert_eq!(report.first_us, None);
+    assert_eq!(report.steady_mean_us, None);
     assert_eq!(report.budget, None);
     assert!(report.failed());
 }
@@ -580,6 +601,7 @@ fn the_report_serializes_to_the_documented_json() {
     assert_eq!(json["codec"], "AV01");
     assert_eq!(json["frames"], 2);
     assert_eq!(json["first_us"], 17_000);
+    assert_eq!(json["steady_mean_us"], 16_366);
     assert_eq!(json["wall_ms"], 15_000);
     assert_eq!(json["ended"], "time_limit");
     assert!(json["error"].is_null());
@@ -632,7 +654,7 @@ async fn a_run_answers_from_the_decode_thread_with_the_bench_already_free() {
         BenchOutcome::Report(report) => assert_eq!(report.file, "decode-bench"),
         other => panic!("expected a report, got {other:?}"),
     }
-    // The thread dropped the slot before it sent the report.
+    // The bench is free by the time the caller has the answer.
     assert!(bench.try_start().is_some());
 }
 

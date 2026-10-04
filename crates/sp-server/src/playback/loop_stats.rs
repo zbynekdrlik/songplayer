@@ -36,12 +36,13 @@ pub fn timed<T>(f: impl FnOnce() -> T) -> (T, u64) {
 }
 
 /// The `p`-th percentile (µs) of `samples` by the `ceil(n·p/100) − 1` index rule
-/// (the same rule the emitter's jitter p99 uses). Empty → 0. Pure.
-pub fn percentile_ceil(samples: &VecDeque<u64>, p: u64) -> u64 {
-    if samples.is_empty() {
+/// (the same rule the emitter's jitter p99 uses). Empty → 0. Pure. Any sample
+/// sequence: a window's `&VecDeque`, or a run's slice (the decode bench).
+pub fn percentile_ceil<'a>(samples: impl IntoIterator<Item = &'a u64>, p: u64) -> u64 {
+    let mut v: Vec<u64> = samples.into_iter().copied().collect();
+    if v.is_empty() {
         return 0;
     }
-    let mut v: Vec<u64> = samples.iter().copied().collect();
     v.sort_unstable();
     let n = v.len() as u64;
     // rank = ceil(n·p/100), clamped into [1, n]; index = rank − 1 in [0, n−1].

@@ -18,7 +18,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::AppState;
 use crate::diag::decode_bench::{self, BenchFileError, BenchOutcome, BenchReport};
@@ -38,7 +38,7 @@ pub async fn post_decode_bench(
     State(state): State<AppState>,
     Json(req): Json<DecodeBenchRequest>,
 ) -> Response {
-    // Every answer without a report says why, and logs it.
+    // Every refusal says why, and logs it (a failed run is a WARN below).
     let refuse = |status: StatusCode, why: String| {
         info!(file = ?req.file, seconds = req.seconds, %status, %why, "decode-bench: no report");
         (status, why).into_response()
@@ -67,7 +67,10 @@ pub async fn post_decode_bench(
             let why = "decode-bench needs Windows Media Foundation".to_string();
             refuse(StatusCode::NOT_IMPLEMENTED, why)
         }
-        BenchOutcome::Failed(why) => refuse(StatusCode::INTERNAL_SERVER_ERROR, why),
+        BenchOutcome::Failed(why) => {
+            warn!(file = ?req.file, %why, "decode-bench: the run failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, why).into_response()
+        }
     }
 }
 

@@ -124,6 +124,19 @@ pub struct ServerConfig {
     pub dist_dir: Option<PathBuf>,
 }
 
+impl ServerConfig {
+    /// The data dir: the DB's own dir (`C:\ProgramData\SongPlayer` on the
+    /// box). The crash log, `cookies.txt` and the decode bench's samples
+    /// (`bench\`) live there, outside the media cache. A bare DB file name
+    /// gives the current dir.
+    pub fn data_dir(&self) -> PathBuf {
+        self.db_path
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -169,12 +182,7 @@ pub async fn start(
     // is captured to a durable crash file before release `panic = "abort"`
     // kills the process (#156). Idempotent: the Tauri shell installs it earlier
     // when present, and the internal `Once` makes the double call safe.
-    let crash_log = config
-        .db_path
-        .parent()
-        .map(|d| d.join("songplayer-panic.log"))
-        .unwrap_or_else(|| PathBuf::from("songplayer-panic.log"));
-    crate::install_panic_hook(crash_log);
+    crate::install_panic_hook(config.data_dir().join("songplayer-panic.log"));
 
     // 1. Database
     let pool = db::create_pool(&format!("sqlite:{}", config.db_path.display())).await?;
@@ -337,7 +345,9 @@ pub async fn start(
         program_bus: program_bus.clone(),
         lan_status: lan_status.clone(),
         metadata_chain: metadata_chain.clone(),
-        decode_bench: Arc::new(diag::decode_bench::DecodeBench::beside_db(&config.db_path)),
+        decode_bench: Arc::new(diag::decode_bench::DecodeBench::new(
+            config.data_dir().join("bench"),
+        )),
     };
 
     // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
@@ -389,11 +399,7 @@ pub async fn start(
     let dl_cache_dir = config.cache_dir.clone();
     // Same directory as the SQLite DB — where a production operator drops
     // cookies.txt (Netscape format) to authenticate yt-dlp downloads (#141).
-    let dl_data_dir = config
-        .db_path
-        .parent()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let dl_data_dir = config.data_dir();
     let dl_shutdown_tx = shutdown_tx.clone();
     let dl_metadata_chain = metadata_chain.clone();
     let startup_sync_pool = pool.clone();

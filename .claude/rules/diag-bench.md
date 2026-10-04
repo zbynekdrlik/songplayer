@@ -18,8 +18,8 @@ them.
 
 - They live in `<data dir>/bench/`, which is `C:\ProgramData\SongPlayer\bench\`
   on win-resolume.
-- The dir sits beside `songplayer.db`, not under `cache\`, because the startup
-  self-heal owns the media cache.
+- The dir sits beside `songplayer.db` (`ServerConfig::data_dir`), not under
+  `cache\`, because the startup self-heal owns the media cache.
 - The main session puts the samples there itself (for S0, a 4K AV1 file and a
   4K VP9 file) and creates the dir if it is missing.
 
@@ -61,11 +61,15 @@ Answers:
 - **422:** a body that is not the two fields (one missing, a negative or a
   fractional `seconds`): axum's JSON rejection.
 - **404:** no such sample. The body names the path it looked at.
-- **409:** a run is in progress. One run at a time per process.
+- **409:** a run is in progress. One run at a time per process. A 409 that
+  never clears means the decoder hangs inside `open` or `next_frame`: the
+  run's thread holds the bench until SongPlayer restarts.
 - **501:** a non-Windows build.
 
-Every answer without a report is logged at INFO (`decode-bench: no report`,
-with the file, the status and why).
+Every refusal (400, 404, 409, 501) is logged at INFO (`decode-bench: no
+report`, with the file, the status and why). A run that ends with no report
+(its thread did not start or panicked, 500) is a WARN (`decode-bench: the run
+failed`).
 
 ### What it measures
 
@@ -73,7 +77,7 @@ with the file, the status and why).
   open, configure and NV12 path as the paced producer.
 - It runs on its own thread, `decode-bench`. That thread is started by
   `playback::decode_thread::spawn_decode_thread`, exactly like the producer's
-  `paced-decode-<pid>`, so both get `THREAD_PRIORITY_NORMAL` inside
+  `paced-decode-<playlist id>`, so both get `THREAD_PRIORITY_NORMAL` inside
   SongPlayer's `HIGH_PRIORITY_CLASS`. The report's `thread_priority` shows it
   (0 = NORMAL).
 - The run is unpaced: it decodes as fast as it can, for `seconds` of wall
@@ -94,8 +98,10 @@ with the file, the status and why).
   29.97 fps guess, and there is no `budget`.
 - `frames`.
 - `first_us`: the first picture's call. It carries Media Foundation's
-  start-up, so `decode_us.max` is often this one; `p99` is the steady-state
-  spike.
+  start-up, so `decode_us.max` is often this one. From 100 pictures on,
+  `decode_us.p99` is the steady-state spike; below 100 it is the max.
+- `steady_mean_us`: the mean of every picture after the first, so without
+  that start-up. `null` below two pictures.
 - `wall_ms`: the decode loop only.
 - `open_ms`.
 - `ended`: `end_of_stream`, `time_limit` or `error`.
@@ -113,6 +119,10 @@ with the file, the status and why).
 - WITH the stems child resident, D2's gate is 75 %. Check
   `decode_us.mean <= 0.75 * budget.frame_period_us` by hand; the flag does
   not encode it.
+- The flag judges the mean of EVERY picture, start-up included, as D2 states
+  it. Playback's pre-roll absorbs the start-up, so re-judge a borderline
+  verdict on `steady_mean_us` (for example a 500 ms first call over 450
+  pictures adds about 1.1 ms to the mean).
 - A failed gate means a hardware-decode slice comes before any 4K download
   (revision 3, R3-4).
 - Record the result on #223.
@@ -123,8 +133,9 @@ with the file, the status and why).
   priority);
 - at the end, one INFO `decode-bench: done: <summary>`, or a WARN when a
   decoder error ended the run;
-- one INFO `decode-bench: no report` for every 400 / 404 / 409 / 500 / 501
-  answer that carries no report.
+- one INFO `decode-bench: no report` for every 400 / 404 / 409 / 501
+  refusal, and one WARN `decode-bench: the run failed` for a 500 without a
+  report.
 
 ## Code map
 

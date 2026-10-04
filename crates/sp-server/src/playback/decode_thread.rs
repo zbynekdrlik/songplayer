@@ -1,12 +1,13 @@
 //! The one way a video DECODE thread is started (#223 S0).
 //!
-//! Two dedicated threads decode through `sp_decoder::MediaFoundationVideoReader`:
-//! the paced decode producer (`pipeline_paced.rs`, `paced-decode-<pid>`) and
-//! the decode bench (`diag::decode_bench`, `decode-bench`). The bench's
-//! numbers mean what playback sees only if both are scheduled alike, so both
-//! start here. (The dormant SDK-clocked path, `pipeline.rs`, decodes inline
-//! on its pipeline thread; pacing is permanently ON, so playback never runs
-//! it.)
+//! Two dedicated threads decode through
+//! `sp_decoder::MediaFoundationVideoReader`: the paced decode producer
+//! (`pipeline_paced.rs`, `paced-decode-<playlist id>`) and the decode bench
+//! (`diag::decode_bench`, `decode-bench`). The bench's numbers mean what
+//! playback sees only if both are scheduled alike, so both start here.
+//! (The SDK-clocked path, `pipeline.rs`, decodes inline on its pipeline
+//! thread. It runs only with the `genlock_pacing` setting OFF, its default
+//! in code; the box runs with it ON by the owner's rule.)
 //!
 //! The scheduling today is the platform default: `CreateThread` starts a
 //! thread at `THREAD_PRIORITY_NORMAL`, inside SongPlayer's

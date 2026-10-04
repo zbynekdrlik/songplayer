@@ -20,7 +20,6 @@
 //! The Windows half (open the reader, log, the thread body) is
 //! `decode_bench_mf.rs`.
 
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,20 +54,15 @@ pub enum BenchFileError {
 }
 
 impl DecodeBench {
-    /// A bench whose samples are in `dir`.
+    /// A bench whose samples are in `dir`: `<data dir>/bench`
+    /// (`ServerConfig::data_dir`), which on the box is
+    /// `C:\ProgramData\SongPlayer\bench`. It is outside the media cache, so
+    /// startup's cache self-heal never touches a sample.
     pub fn new(dir: PathBuf) -> Self {
         Self {
             dir,
             busy: Arc::new(AtomicBool::new(false)),
         }
-    }
-
-    /// The bench beside the DB: `<data dir>/bench`, which on the box is
-    /// `C:\ProgramData\SongPlayer\bench`. It is outside the media cache, so
-    /// startup's cache self-heal never touches a sample.
-    pub fn beside_db(db_path: &Path) -> Self {
-        let data_dir = db_path.parent().unwrap_or_else(|| Path::new("."));
-        Self::new(data_dir.join("bench"))
     }
 
     /// The sample dir.
@@ -293,11 +287,10 @@ impl DecodeUs {
         if samples.is_empty() {
             return Self::default();
         }
-        let ring: VecDeque<u64> = samples.iter().copied().collect();
         Self {
             mean: samples.iter().sum::<u64>() / samples.len() as u64,
-            p50: percentile_ceil(&ring, 50),
-            p99: percentile_ceil(&ring, 99),
+            p50: percentile_ceil(samples, 50),
+            p99: percentile_ceil(samples, 99),
             max: samples.iter().copied().max().unwrap_or(0),
         }
     }
@@ -364,8 +357,14 @@ pub struct BenchReport {
     pub frames: u64,
     /// The first picture's call, µs. It carries Media Foundation's start-up
     /// (the source starts, the decoder fills), so `decode_us.max` is often
-    /// this one and not a steady-state spike; `decode_us.p99` is the spike.
+    /// this one and not a steady-state spike. From 100 pictures on,
+    /// `decode_us.p99` is the steady-state spike; below that it is the max.
     pub first_us: Option<u64>,
+    /// The floored mean of every picture after the first: the decoder's
+    /// steady state, without that start-up. `None` below two pictures.
+    /// Playback's pre-roll absorbs the start-up, so a borderline gate
+    /// verdict is re-judged on this figure.
+    pub steady_mean_us: Option<u64>,
     /// The decode loop's wall time (opening excluded), floored ms.
     pub wall_ms: u64,
     /// The reader's open, ms.
@@ -403,6 +402,7 @@ impl BenchReport {
             source_fps: source_fps(frame_rate),
             frames: run.decode_us.len() as u64,
             first_us: run.decode_us.first().copied(),
+            steady_mean_us: steady_mean_us(&run.decode_us),
             wall_ms: run.wall_us / 1_000,
             open_ms,
             ended: run.end,
@@ -429,6 +429,7 @@ impl BenchReport {
             source_fps: None,
             frames: 0,
             first_us: None,
+            steady_mean_us: None,
             wall_ms: 0,
             open_ms,
             ended: BenchEnd::Error,
@@ -473,6 +474,15 @@ impl BenchReport {
             self.decode_us.max,
         )
     }
+}
+
+/// The floored mean of the samples after the first, `None` below two.
+fn steady_mean_us(samples: &[u64]) -> Option<u64> {
+    let steady = samples.get(1..)?;
+    if steady.is_empty() {
+        return None;
+    }
+    Some(steady.iter().sum::<u64>() / steady.len() as u64)
 }
 
 /// `num / den` frames per second, `None` when either is 0.
