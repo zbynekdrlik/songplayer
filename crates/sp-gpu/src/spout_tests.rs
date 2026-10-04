@@ -92,7 +92,7 @@ fn the_names_map_lists_each_slot_up_to_the_first_empty_one() {
 #[test]
 fn a_name_fills_its_slot_up_to_the_last_byte_but_one() {
     let longest = vec![b'n'; NAME_SLOT_LEN - 1];
-    let map = names_map(&[&longest, b"next"], 3);
+    let map = names_map(&[longest.as_slice(), b"next"], 3);
     let names = parse_sender_names(&map);
     assert_eq!(names.len(), 2);
     assert_eq!(names[0].len(), 255);
