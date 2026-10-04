@@ -15,13 +15,17 @@
 //! - the playlist PATCH (`routes::update_playlist`), which writes the row
 //!   with its other fields, then calls [`tell_engine`].
 //!
-//! A write that fails is logged and answered (500, or a WS `Error`), and the
-//! engine is never told, so it keeps the mode the row still holds. An
-//! unknown mode is refused (400), so every row the API writes parses.
+//! A write that fails is logged and answered (500, or a WS `Error` to every
+//! open dashboard), and the engine is never told, so it keeps the mode the
+//! row still holds. An unknown requested mode is refused (400) by the PUT,
+//! the PATCH and the playlist POST ([`requested_mode`]), so every row the
+//! API writes parses.
 //!
-//! [`MODE_ORDER`] is held across "write the row, tell the engine", so the
-//! engine is told concurrent changes in the order the row took them.
-//! Without it, the row's last write and the engine's last mode could differ.
+//! [`MODE_ORDER`] is held across "write the row, tell the engine" (and by
+//! the PATCH and the playlist DELETE), so the engine is told concurrent
+//! changes in the order the row took them. Without it, the row's last write
+//! and the engine's last mode could differ, or a mode could reach the engine
+//! after it forgot a deleted playlist.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -43,6 +47,23 @@ pub struct SetModeRequest {
 /// Held across "write the row, then tell the engine" (module doc).
 pub(crate) static MODE_ORDER: Mutex<()> = Mutex::const_new(());
 
+/// A requested mode (the PUT's body, the PATCH's or the POST's field) by
+/// its canonical name: `Ok(None)` when none is given, `Err(400)` for an
+/// unknown one (WARNed with at most 32 of its characters).
+pub(crate) fn requested_mode(requested: Option<&str>) -> Result<Option<PlaybackMode>, StatusCode> {
+    let Some(requested) = requested else {
+        return Ok(None);
+    };
+    match PlaybackMode::parse(requested) {
+        Some(mode) => Ok(Some(mode)),
+        None => {
+            let shown: String = requested.chars().take(32).collect();
+            warn!(requested = %shown, "unknown playback mode refused");
+            Err(StatusCode::BAD_REQUEST)
+        }
+    }
+}
+
 /// `PUT /api/v1/playback/{playlist_id}/mode` — the dashboard's mode select.
 /// 204 once the row holds the mode and the engine was told; 400 for an
 /// unknown mode; 404 for an unknown playlist; 500 when the row could not be
@@ -52,8 +73,7 @@ pub async fn set_mode(
     Path(playlist_id): Path<i64>,
     Json(body): Json<SetModeRequest>,
 ) -> StatusCode {
-    let Some(mode) = PlaybackMode::parse(&body.mode) else {
-        warn!(playlist_id, mode = %body.mode, "unknown playback mode refused");
+    let Ok(Some(mode)) = requested_mode(Some(&body.mode)) else {
         return StatusCode::BAD_REQUEST;
     };
     match persist_then_tell(&state.pool, &state.engine_tx, playlist_id, mode).await {

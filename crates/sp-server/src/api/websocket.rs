@@ -164,7 +164,8 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
         }
         ClientMsg::SetMode { playlist_id, mode } => {
             // #225 unit 2: the row first, then the engine, the same path as
-            // the REST mode route (`routes_mode`); a mode not saved is told.
+            // the REST mode route (`routes_mode`); a mode not saved is told
+            // to every open dashboard (the error banner, in Slovak).
             let saved = super::routes_mode::persist_then_tell(
                 &state.pool,
                 &state.engine_tx,
@@ -174,7 +175,7 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
             .await;
             if !matches!(saved, Ok(true)) {
                 let _ = state.event_tx.send(ServerMsg::Error {
-                    message: format!("the playback mode of playlist {playlist_id} was not saved"),
+                    message: format!("Režim prehrávania playlistu {playlist_id} sa neuložil"),
                 });
             }
         }

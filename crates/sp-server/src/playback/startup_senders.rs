@@ -96,6 +96,18 @@ pub fn ordered_active_for_startup(playlists: &[Playlist]) -> Vec<(i64, String)> 
     out
 }
 
+/// #225 unit 2: the mode output `id`'s pipeline starts in at startup — its
+/// playlist row's (`db::models_playlists::row_mode`); the default for an id
+/// the list does not name.
+pub fn startup_mode(playlists: &[Playlist], id: i64) -> PlaybackMode {
+    playlists
+        .iter()
+        .find(|p| p.id == id)
+        .map_or_else(PlaybackMode::default, |p| {
+            crate::db::models_playlists::row_mode(p.id, &p.name, &p.playback_mode)
+        })
+}
+
 /// Outcome of [`wait_for_ports_free`], surfaced in the startup log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortWaitOutcome {
@@ -203,7 +215,7 @@ impl PlaybackEngine {
     /// threads and shuffled the ports.
     ///
     /// mutants::skip — orchestration (real ports, threads, timeouts); the pure
-    /// pieces (`ndi_port_range`, `ordered_active_for_startup`,
+    /// pieces (`ndi_port_range`, `ordered_active_for_startup`, `startup_mode`,
     /// `wait_for_ports_free`) are unit-tested, and the box acceptance proves
     /// the stable map end-to-end.
     #[cfg_attr(test, mutants::skip)]
@@ -257,11 +269,7 @@ impl PlaybackEngine {
         // report ready (so its port is assigned) before creating sender i+1.
         // #225 unit 2: each pipeline starts in its row's playback mode.
         for (id, name) in &ordered {
-            let mode = playlists
-                .iter()
-                .find(|p| p.id == *id)
-                .map(|p| crate::db::models_playlists::row_mode(p.id, &p.name, &p.playback_mode))
-                .unwrap_or_default();
+            let mode = startup_mode(playlists, *id);
             self.create_and_record_sender(*id, name, mode).await;
         }
 
@@ -341,6 +349,26 @@ mod tests {
             is_active: true,
             ..Default::default()
         }
+    }
+
+    /// #225 unit 2: each startup output starts in its OWN row's mode.
+    #[test]
+    fn a_startup_output_starts_in_its_own_rows_mode() {
+        let with_mode = |id: i64, mode: &str| Playlist {
+            playback_mode: mode.to_string(),
+            ..pl(id, &format!("SP-{id}"))
+        };
+        let playlists = vec![
+            with_mode(1, "loop"),
+            with_mode(2, "single"),
+            with_mode(3, "shuffle"),
+        ];
+
+        assert_eq!(startup_mode(&playlists, 2), PlaybackMode::Single);
+        assert_eq!(startup_mode(&playlists, 1), PlaybackMode::Loop);
+        // An unknown stored value, and an id the list does not name.
+        assert_eq!(startup_mode(&playlists, 3), PlaybackMode::Continuous);
+        assert_eq!(startup_mode(&playlists, 9), PlaybackMode::Continuous);
     }
 
     #[test]
