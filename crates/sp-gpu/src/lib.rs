@@ -30,7 +30,8 @@
 //!
 //! Every decision is a pure function here, tested on Linux (adapter choice,
 //! picture validation, layers, quad constants, upload residency, the colour
-//! matrix, Spout's name rule and registry formats). The Windows module
+//! matrix, Spout's name rule and registry formats, the sender's
+//! registration in [`spout_state`]). The Windows module
 //! (`win/`) only calls Direct3D, Win32 and the Spout shim. [`reference`] is
 //! the CPU model of the GPU's output that the WARP pixel pins
 //! (`tests/warp.rs`) compare against; `tests/spout.rs` proves the sender on

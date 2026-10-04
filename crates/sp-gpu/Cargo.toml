@@ -36,3 +36,8 @@ cc = "1"
 # Placeholder crate that defines the `mutants::skip` attribute as a no-op,
 # letting cargo-mutants exclude specific functions from mutation testing.
 mutants = "0.0.4"
+
+# #223 S1b: tests/spout.rs reads Spout's `MaxSenders` registry value before
+# it fills Spout's list (the same `windows` 0.58, one more feature).
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.58", features = ["Win32_System_Registry"] }

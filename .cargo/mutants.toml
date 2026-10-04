@@ -97,7 +97,8 @@ exclude_re = [
   #   shim), a #[cfg(windows)] module: dead on the Linux runner, so every
   #   mutant builds and survives. Its decisions live in the crate's pure,
   #   Linux-tested modules (adapter, picture, composition, quad, residency,
-  #   color, error, reference, readback, spout); the module is proven on WARP
+  #   color, error, reference, readback, spout, spout_state); the module is
+  #   proven on WARP
   #   (windows-latest) by tests/warp.rs and tests/spout.rs.
   'sp-gpu/src/win/',
   # -- genlock #146–#151: Windows-only paced pipeline + Python MTL shell-out --

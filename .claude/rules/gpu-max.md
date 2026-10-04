@@ -142,8 +142,11 @@ anchors are on #223 (comment 5984577044).
   the flags and the bump steps.
 - `build.rs` (`cc`, MSVC): `/std:c++17`, `/EHsc` (cc sets no exception
   model for MSVC, and the SDK uses try/catch), `SPOUT_BUILD_STATIC`,
-  `NDEBUG`, no `UNICODE` (upstream's own builds), warnings off, and every
-  system library named (`user32` has no `#pragma comment` in the SDK).
+  `NDEBUG`, no `UNICODE` (upstream's own builds), and every system library
+  named (`user32` has no `#pragma comment` in the SDK). Two libraries: the
+  shim (`sp_spout_shim`, `/W4`, its warnings shown; it wraps the SDK's
+  headers in `#pragma warning(push, 0)`) linked before the SDK
+  (`sp_spout_sdk`, its warnings hidden: not ours to fix).
 - **Bumping it:** read the new tag's `SpoutDX_SOURCES`, copy the files over
   unmodified, and re-read the facts below in the new source (they are what
   the shim and `src/spout.rs` rely on); the WARP tests are the gate.
@@ -171,10 +174,18 @@ anchors are on #223 (comment 5984577044).
 - `SpoutSender::new(&Compositor)` → `send()` after each `compose()`, on the
   same thread → `SpoutSendStats { send_us }`. `with_name` is doc-hidden, for
   tests. `registration()` says where it is (`spout_state::Registration`).
-- **Not `Send`.** It drives the compositor's immediate context (spoutDX
-  takes it with `GetImmediateContext`), which is not thread-safe, and the
-  `Compositor` is `Send`: a `Send` sender would let safe code send on one
-  thread while another composes. S2 builds both on `program-max`.
+- **Neither the sender nor the `Compositor` is `Send` (nor `Sync`).** The
+  sender drives the compositor's immediate context (spoutDX takes it with
+  `GetImmediateContext`), which is not thread-safe; if either could cross
+  threads, safe code could send on one thread while another composes. So
+  `Compositor` carries a `PhantomData<*const ()>` (#223 S1b round 3) and
+  the sender's shim handle is a raw pointer: both stay on the thread that
+  made them. S2 builds both on `program-max`.
+- **One SDK call at a time per process** (`win/spout_sender.rs` `SDK`
+  mutex, around every shim call, never nested): the SDK keeps
+  process-global state (its log buffer, written by every log of level
+  Notice or higher even with logging off), so senders on two threads must
+  not run it at once.
 - `SendTexture` copies the render target into Spout's OWN shared texture
   (`CreateSharedDX11Texture`: `MISC_SHARED`, not keyed, a legacy handle)
   under the named mutex `<name>_SpoutAccessMutex`, then `Flush`es. If a
@@ -204,18 +215,26 @@ anchors are on #223 (comment 5984577044).
     `_1` (or, with a full list, take over that sender's map);
   - after the first send (`after_send`): registered under another name →
     `TAKEN`; not in the list → `NOT_LISTED` (its list is full, or another
-    program's `CleanSenders` dropped it mid-registration); not registered
-    at all (`SendTexture` failed or threw with no registration) →
-    `REGISTRATION_FAILED`. A failed first send is terminal because a retry
-    would meet its own half-made registration and be renamed `_1`.
+    program's `CleanSenders` dropped it mid-registration); nothing
+    registered (`SendTexture` failed or threw before the registration) →
+    `REGISTRATION_FAILED`: a retry would meet its own half-made
+    registration and be renamed `_1`. A send that fails AFTER the
+    registration loses one frame and leaves the sender `Unconfirmed` (never
+    `Fresh`: its next pre-send check would find its own name and refuse
+    it).
   - A refusal calls the shim's `refuse`: `ReleaseSender` (a completed
     registration and its texture), plus a half-made registration whose info
     map THIS sender made (`FindSender` looks only at this object's maps),
-    never another sender's listing. Drop it and make a new sender.
+    never another sender's listing. Drop it and make a new sender, after
+    a BACKOFF (S2: a few seconds): a full list or a taken name refuses an
+    immediate retry the same way, and each retry makes a new 4K shared
+    texture.
 - A list that cannot be read at the first send (its 67 ms lock) leaves the
-  sender `Unconfirmed`; the next send checks again. A confirmed sender's
-  send reads nothing (no lock per frame): it shares, or loses one frame
-  (`GpuError::Spout`, code 3 or 4).
+  sender `Unconfirmed(n)`; the next send checks again, up to
+  `MAX_UNREADABLE` (30) unreadable checks in a row, then `UNREADABLE`
+  refuses it (each read may wait 67 ms, so a stuck list costs about 1 s,
+  not forever). A confirmed sender's send reads nothing (no lock per
+  frame): it shares, or loses one frame (`GpuError::Spout`, code 3 or 4).
 - Names: 1..=228 bytes of printable ASCII, no `\` (`check_sender_name`;
   the shim checks the length and the backslash again). A sender Spout
   renames to `<name>_<n>` (≤ 11 more bytes) gets `<name>_<n>_Count_Semaphore`
@@ -261,15 +280,22 @@ error. A map that is not committed memory, or a sender's map shorter than a
   copy, and the compositor's `read_back` `Map` waits for it, so the second
   device reads a finished copy;
 - a listed name is refused at create, and no `_1` sender appears;
-- a sender whose name another sender listed before its first send is
-  refused before Spout registers it (`TAKEN`), twice, with no `_1` ever
-  listed, and the winner stays listed;
+- a sender whose name another sender listed since it was made is refused
+  before Spout registers it (`TAKEN`), twice. The test runs on a list of
+  63 fake senders, so the winner fills it: without the pre-send check
+  Spout would not rename the loser but open the WINNER's info map and
+  write its own texture there (the test then fails on the winner's
+  unchanged map). No `_1` ever appears, and the winner stays listed;
 - the sender keeps sending after the `Compositor` is dropped (its own
   references);
 - with Spout's list made FULL (64 fake senders, each with its info map),
   a new sender is created but its first send is refused `NOT_LISTED`, its
   own info map released and the 64 entries untouched (this is the only way
-  to reach `NOT_LISTED` on CI; it assumes Spout's default `MaxSenders`, 64);
+  to reach `NOT_LISTED` on CI).
+- `FakeSenders` writes Spout's MACHINE-WIDE list, so it refuses to run
+  where any sender is listed or `HKCU\Software\Leading Edge\Spout`
+  `MaxSenders` is not the default 64 (Spout would read past the 16 KiB
+  map): windows-latest, never a box where Spout is in use.
 - a name Spout cannot carry never reaches Spout; a missing map is `None`.
 - The helpers both WARP test binaries use (`warp()`, the smooth `pattern`,
   `assert_matches_reference`) live in `tests/common/mod.rs`.
@@ -321,7 +347,8 @@ build step, and WARP and the RTX run the same source. A compile error is
   (`.cargo/mutants.toml`). Every decision lives in a pure, Linux-tested module:
   `adapter`, `picture`, `composition`, `quad`, `residency`, `color`,
   `reference`, `error`, `readback` (the mapped rows packed), `spout` (the
-  sender name rule, the registry parsers, the shim's codes). Keep it that
+  sender name rule, the registry parsers, the shim's codes), `spout_state`
+  (the sender's registration: every refuse / confirm decision). Keep it that
   way: logic added inside `win/` is untested by the gate.
 - The off-Windows `Compositor` (`stub.rs`) is an uninhabited enum. `new` /
   `new_warp` return `Unsupported`; its methods are `mutants::skip`, since no

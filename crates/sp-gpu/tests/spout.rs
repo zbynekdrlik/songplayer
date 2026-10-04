@@ -27,7 +27,9 @@ use sp_gpu::{
     Composition, Compositor, GpuError, NAME_SLOT_LEN, SENDER_NAMES_MAP, SPOUT_SENDER_NAME,
     SharedTextureInfo, SpoutSender, mapped_len, spout_sender_info, spout_sender_names, unpad_rows,
 };
-use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE,
+};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
@@ -39,7 +41,8 @@ use windows::Win32::System::Memory::{
     CreateFileMappingA, FILE_MAP_ALL_ACCESS, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
     PAGE_READWRITE, UnmapViewOfFile,
 };
-use windows::core::PCSTR;
+use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueA};
+use windows::core::{PCSTR, s};
 
 /// `DXGI_FORMAT_B8G8R8A8_UNORM` (87), as Spout's registry stores it.
 const BGRA: u32 = DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32;
@@ -174,43 +177,82 @@ fn new_map(name: &str, size: u32) -> HANDLE {
     .unwrap_or_else(|e| panic!("the map {name}: {e}"))
 }
 
-/// Spout's names list made FULL, as other programs would fill it: 64 names
-/// in `SpoutSenderNames`, each with its own info map so Spout's clean-up
-/// keeps them. Emptied and closed when dropped (on a failed assertion too).
-struct FullList {
+/// Spout's `HKCU\Software\Leading Edge\Spout` value `MaxSenders`, if set.
+fn max_senders_setting() -> Option<u32> {
+    let mut value = 0u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let result = unsafe {
+        RegGetValueA(
+            HKEY_CURRENT_USER,
+            s!("Software\\Leading Edge\\Spout"),
+            s!("MaxSenders"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some((&mut value as *mut u32).cast()),
+            Some(&mut size),
+        )
+    };
+    if result == ERROR_SUCCESS {
+        Some(value)
+    } else {
+        assert_eq!(result, ERROR_FILE_NOT_FOUND, "read Spout's MaxSenders");
+        None
+    }
+}
+
+/// Fake senders in Spout's list, as other programs would put them there:
+/// `count` names in `SpoutSenderNames` (64 makes the list FULL), each with
+/// its own info map so Spout's clean-up keeps them. The list is emptied and
+/// every map closed on drop (on a failed assertion too).
+///
+/// It writes Spout's machine-wide list, so it refuses to run where any
+/// sender is listed or Spout's list size is not its default 64: CI's
+/// windows-latest, never a box where Spout is in use.
+struct FakeSenders {
     names_map: HANDLE,
     view: MEMORY_MAPPED_VIEW_ADDRESS,
     infos: Vec<HANDLE>,
-    filled: Vec<String>,
+    names: Vec<String>,
 }
 
-impl FullList {
-    fn new() -> Self {
+impl FakeSenders {
+    fn new(count: usize) -> Self {
+        assert!(
+            names().is_empty(),
+            "fake senders are only written where no Spout sender is listed: {:?}",
+            names()
+        );
+        let setting = max_senders_setting();
+        assert!(
+            setting.is_none_or(|max| max as usize == SPOUT_MAX_SENDERS),
+            "Spout's MaxSenders is {setting:?}, not its default {SPOUT_MAX_SENDERS}"
+        );
+        assert!(count <= SPOUT_MAX_SENDERS, "{count} fake senders");
         let size = SPOUT_MAX_SENDERS * NAME_SLOT_LEN;
         let names_map = new_map(SENDER_NAMES_MAP, size as u32);
         let view = unsafe { MapViewOfFile(names_map, FILE_MAP_ALL_ACCESS, 0, 0, size) };
         assert!(!view.Value.is_null(), "map Spout's names list");
-        let filled: Vec<String> = (0..SPOUT_MAX_SENDERS)
+        let names: Vec<String> = (0..count)
             .map(|i| format!("sp-gpu test filler {i:02}"))
             .collect();
         // SAFETY: the view maps `size` writable bytes until it is unmapped
         // in Drop.
         let slots = unsafe { std::slice::from_raw_parts_mut(view.Value.cast::<u8>(), size) };
         slots.fill(0);
-        for (slot, name) in slots.chunks_exact_mut(NAME_SLOT_LEN).zip(&filled) {
+        for (slot, name) in slots.chunks_exact_mut(NAME_SLOT_LEN).zip(&names) {
             slot[..name.len()].copy_from_slice(name.as_bytes());
         }
-        let infos = filled.iter().map(|name| new_map(name, 4096)).collect();
+        let infos = names.iter().map(|name| new_map(name, 4096)).collect();
         Self {
             names_map,
             view,
             infos,
-            filled,
+            names,
         }
     }
 }
 
-impl Drop for FullList {
+impl Drop for FakeSenders {
     fn drop(&mut self) {
         // Empty the list first, in case anything else keeps the map open.
         // SAFETY: the view is still mapped for the whole list.
@@ -366,8 +408,13 @@ fn a_second_sender_with_a_listed_name_is_refused() {
 }
 
 #[test]
-fn a_sender_that_loses_its_name_before_its_first_send_is_refused() {
+fn a_sender_whose_name_was_listed_since_it_was_made_is_refused_before_it_registers() {
     let _one = one_at_a_time();
+    // 63 fake senders: the winner's registration makes the list FULL. Spout
+    // would then not even rename the loser `<name>_1` at its first send: it
+    // would open the winner's info map and write its own texture there. Only
+    // the check before the first send stops that.
+    let fakes = FakeSenders::new(SPOUT_MAX_SENDERS - 1);
     let name = "sp-gpu test race";
     let mut compositor = warp();
     // Neither is registered yet, so both are created.
@@ -379,23 +426,27 @@ fn a_sender_that_loses_its_name_before_its_first_send_is_refused() {
         &Composition::Picture(picture(1, 1280, 720, stride, &data)),
     );
     winner.send().expect("the winner registers the name");
+    assert_eq!(winner.registration(), Registration::Confirmed);
+    assert_eq!(names().len(), SPOUT_MAX_SENDERS, "the list is full");
+    let winner_entry = info(name).expect("the winner's map");
 
-    // The winner listed the name since the loser was created: the loser is
-    // refused before Spout can register it as `<name>_1`.
     let renamed = format!("{name}_1");
     for attempt in ["first", "second"] {
         match loser.send() {
             Err(GpuError::SpoutNotRegistered { name: asked, why }) => {
                 assert_eq!(asked, name);
                 assert_eq!(why, TAKEN);
-                assert_eq!(loser.registration(), Registration::Refused(TAKEN));
             }
-            other => {
-                panic!("the {attempt} send of a renamed sender must be refused, got {other:?}")
-            }
+            other => panic!("the {attempt} send of the loser must be refused, got {other:?}"),
         }
+        assert_eq!(loser.registration(), Registration::Refused(TAKEN));
+        assert_eq!(
+            info(name),
+            Some(winner_entry.clone()),
+            "{attempt}: the winner's map is untouched"
+        );
         assert_eq!(listed(&renamed), 0, "{attempt}: {:?}", names());
-        assert_eq!(info(&renamed), None, "{attempt}: no `_1` map is left");
+        assert_eq!(info(&renamed), None, "{attempt}: no `_1` map");
         assert_eq!(loser.size(), (0, 0), "{attempt}: the loser shares nothing");
     }
     assert_eq!(listed(name), 1, "the winner keeps the name");
@@ -406,9 +457,10 @@ fn a_sender_that_loses_its_name_before_its_first_send_is_refused() {
         1,
         "dropping the loser leaves the winner listed"
     );
-    assert!(info(name).is_some());
+    assert_eq!(info(name), Some(winner_entry));
     drop(winner);
     assert_eq!(listed(name), 0, "{:?}", names());
+    drop(fakes);
 }
 
 #[test]
@@ -436,8 +488,8 @@ fn the_sender_outlives_the_compositor() {
 #[test]
 fn a_sender_spout_does_not_list_is_refused_and_leaves_the_list_alone() {
     let _one = one_at_a_time();
-    let full = FullList::new();
-    assert_eq!(names(), full.filled, "Spout's list is full");
+    let full = FakeSenders::new(SPOUT_MAX_SENDERS);
+    assert_eq!(names(), full.names, "Spout's list is full");
     let name = "sp-gpu test full list";
     let mut compositor = warp();
     // Its name is free, so it is created; Spout skips the registration of a
@@ -461,11 +513,11 @@ fn a_sender_spout_does_not_list_is_refused_and_leaves_the_list_alone() {
         assert_eq!(sender.registration(), Registration::Refused(NOT_LISTED));
         // Its own info map is released; the other senders are untouched.
         assert_eq!(info(name), None, "{attempt}: the sender's own map is gone");
-        assert_eq!(names(), full.filled, "{attempt}: the list is unchanged");
+        assert_eq!(names(), full.names, "{attempt}: the list is unchanged");
         assert_eq!(sender.size(), (0, 0), "{attempt}: it shares nothing");
     }
     drop(sender);
-    assert_eq!(names(), full.filled, "dropping it leaves the list alone");
+    assert_eq!(names(), full.names, "dropping it leaves the list alone");
     drop(full);
 }
 

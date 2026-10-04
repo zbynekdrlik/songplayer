@@ -11,7 +11,11 @@
 // unwinds). Nothing unwinds into Rust. The codes must match
 // `sp_gpu::spout::status` (src/spout.rs).
 
+// The SDK's headers (and the Windows headers they pull in) are not ours:
+// their warnings are silenced, so build.rs's /W4 shows only the shim's own.
+#pragma warning(push, 0)
 #include "SpoutDX.h"
+#pragma warning(pop)
 
 #include <cstddef>
 #include <cstring>

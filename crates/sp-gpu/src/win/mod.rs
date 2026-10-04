@@ -1,7 +1,8 @@
 //! The Direct3D 11 compositor and its Spout sender (Windows). Every decision
 //! they take is a pure, Linux-tested function of the crate (the adapter, the
 //! picture check, the layers, the quad constants, the upload residency, the
-//! Spout name rule, registry formats and shim codes); this module only calls
+//! Spout name rule, registry formats and shim codes, the sender's
+//! registration in `spout_state`); this module only calls
 //! Direct3D, Win32 and the Spout shim (`spout_shim.cpp`). It is out of the
 //! Linux mutation gate (`.cargo/mutants.toml`, like `sp-decoder/src/video/`)
 //! and is proven on WARP on `windows-latest`: the compositor by the pixel pins
@@ -13,6 +14,7 @@ mod spout_registry;
 mod spout_sender;
 mod textures;
 
+use std::marker::PhantomData;
 use std::time::Instant;
 
 use tracing::{debug, info};
@@ -52,8 +54,10 @@ fn micros_since(start: Instant) -> u64 {
 
 /// The `SP-program-MAX` compositor: one Direct3D 11 device, the fixed
 /// 3840×2160 BGRA render target, and two texture slots (a fade's outgoing
-/// and incoming side). Not thread-safe by design: S2's `program-max` thread
-/// owns it.
+/// and incoming side). Neither `Send` nor `Sync`: its immediate context is
+/// not thread-safe, and a [`SpoutSender`] made on it drives the same context
+/// (#223 S1b), so both stay on the thread that made them (S2's
+/// `program-max`).
 pub struct Compositor {
     device: ID3D11Device,
     context: ID3D11DeviceContext,
@@ -62,6 +66,9 @@ pub struct Compositor {
     target: RenderTarget,
     slots: [Option<PlaneTextures>; 2],
     staging: Option<ID3D11Texture2D>,
+    /// Ties the compositor to its thread (a raw pointer is neither `Send`
+    /// nor `Sync`).
+    thread_bound: PhantomData<*const ()>,
 }
 
 impl Compositor {
@@ -119,6 +126,7 @@ impl Compositor {
             target,
             slots: [None, None],
             staging: None,
+            thread_bound: PhantomData,
         })
     }
 
