@@ -73,6 +73,26 @@ mod tests {
     }
 
     #[test]
+    fn playback_mode_parse_knows_the_three_names_and_nothing_else() {
+        assert_eq!(
+            playback::PlaybackMode::parse("continuous"),
+            Some(playback::PlaybackMode::Continuous),
+        );
+        assert_eq!(
+            playback::PlaybackMode::parse("SINGLE"),
+            Some(playback::PlaybackMode::Single),
+        );
+        assert_eq!(
+            playback::PlaybackMode::parse("Loop"),
+            Some(playback::PlaybackMode::Loop),
+        );
+        // An unknown value is not the default: the caller decides (#225).
+        assert_eq!(playback::PlaybackMode::parse("garbage"), None);
+        assert_eq!(playback::PlaybackMode::parse(""), None);
+        assert_eq!(playback::PlaybackMode::parse("repeat"), None);
+    }
+
+    #[test]
     fn playback_mode_serde_roundtrip() {
         for mode in [
             playback::PlaybackMode::Continuous,
