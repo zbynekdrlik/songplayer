@@ -62,7 +62,7 @@ songplayer/
 ├── Cargo.toml              # Workspace root (members: sp-core, sp-ndi, sp-decoder, sp-server)
 ├── VERSION                 # Single source of truth for version (e.g. 0.1.0-dev.1)
 ├── scripts/
-│   └── sync-version.sh    # Reads VERSION, updates all Cargo.toml + tauri.conf.json
+│   └── sync-version.sh    # Reads VERSION, updates all Cargo.toml + tauri.conf.json + both Cargo.lock files
 ├── crates/
 │   ├── sp-core/          # Shared types, database (SQLite/sqlx), domain logic — WASM-safe
 │   ├── sp-ndi/           # NDI output via libloading (runtime-linked, no compile-time dep)

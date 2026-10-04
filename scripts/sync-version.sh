@@ -38,4 +38,12 @@ TAURI_CONF="$ROOT_DIR/src-tauri/tauri.conf.json"
 echo "  Updating $TAURI_CONF"
 sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$TAURI_CONF"
 
+# Refresh the lockfiles' own entries for the workspace crates (root) and sp-ui,
+# so a `--locked` build of this tree does not fail on a version the manifests
+# no longer say. `--workspace` touches only those entries; `--offline` because
+# nothing else is re-resolved. (Release 0.70.0 review: both locks lagged.)
+echo "  Updating $ROOT_DIR/Cargo.lock and $ROOT_DIR/sp-ui/Cargo.lock"
+cargo update --workspace --offline --quiet --manifest-path "$ROOT_DIR/Cargo.toml"
+cargo update --workspace --offline --quiet --manifest-path "$CARGO_UI"
+
 echo "Done. All version fields set to $VERSION"

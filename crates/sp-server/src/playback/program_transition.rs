@@ -382,7 +382,9 @@ pub fn blend_nv12_into(from: &[u8], to: &[u8], weight: u32, out: &mut Vec<u8>) {
 }
 
 /// A picture's memory layout; two pictures blend byte for byte only when these
-/// are equal (otherwise one is fitted into the other's layout, [`FitPlan`]).
+/// are equal. Since #223 a fade is drawn in the 1920×1080 `SP-program` canvas:
+/// every side that is not a canvas picture is fitted into the canvas as it is
+/// read ([`FitPlan`], `program_canvas.rs`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Layout {
     pub width: u32,

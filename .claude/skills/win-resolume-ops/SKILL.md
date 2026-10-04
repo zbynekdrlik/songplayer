@@ -399,7 +399,7 @@ The wall's clips were repointed from `RESOLUME-SNV (cg-obs)` to `RESOLUME-SNV (S
 
 - **Percent-encode the source URI.** `POST /api/v1/composition/clips/by-id/<id>/open` takes a text/plain body `source:///video/RESOLUME-SNV%20%28SP-program%29`. The unencoded form (with a space and parentheses) answers HTTP 200 and changes NOTHING. For a batch, use `POST /api/v1/composition/clips/open` with `[{"target": "/composition/clips/by-id/<id>", "source": "<uri>"}]` (HTTP 204). `GET /api/v1/sources` lists the idstrings. Names, effects and params are kept.
 - **Opening a source into a CONNECTED clip DISCONNECTS it** — the layer goes dark on the wall. Record which clips are connected first, then `POST /api/v1/composition/layers/<l>/clips/<c>/connect` for each of them straight after the open.
-- **`resize: Original` draws the source in native pixels.** A new source with a different resolution (SP-program 2560×1440 vs cg-obs 1920×1080) zooms the picture. Put the clip's pre-switch size back: `PUT /api/v1/composition/clips/by-id/<id>` `{"video":{"width":{"value":1920},"height":{"value":1080}}}`.
+- **`resize: Original` draws the source in native pixels.** A new source with a different resolution zooms the picture (on 29.9 SP-program still carried the song's 2560×1440 against cg-obs's 1920×1080; since #223, release 0.70.0, SP-program is always 1920×1080, so this bites only a source of another size, e.g. the 3840×2160 `SP-program-MAX`). Put the clip's pre-switch size back: `PUT /api/v1/composition/clips/by-id/<id>` `{"video":{"width":{"value":1920},"height":{"value":1080}}}`.
 
 Save the composition first (`GET /api/v1/composition` > file) so the rollback is exact.
 
