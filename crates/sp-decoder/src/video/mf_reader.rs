@@ -128,6 +128,21 @@ impl MediaFoundationVideoReader {
         })
     }
 
+    /// The codec the file's video stream is compressed with, as the native
+    /// media type's subtype text (`AV01`, `VP90`, `H264`, `HEVC`;
+    /// [`crate::subtype::subtype_name`]). `None` when MF does not answer.
+    /// The decode bench reports it (#223 S0), so a measured sample is known to
+    /// be the codec it is named after.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn codec(&self) -> Option<String> {
+        let native: IMFMediaType =
+            unsafe { self.reader.GetNativeMediaType(VIDEO_STREAM, 0) }.ok()?;
+        let guid = unsafe { native.GetGUID(&MF_MT_SUBTYPE) }.ok()?;
+        Some(crate::subtype::subtype_name(
+            guid.data1, guid.data2, guid.data3, guid.data4,
+        ))
+    }
+
     fn make_video_output_type() -> Result<IMFMediaType, DecoderError> {
         let media_type: IMFMediaType =
             unsafe { MFCreateMediaType().map_err(|e| DecoderError::NoStream(e.to_string()))? };

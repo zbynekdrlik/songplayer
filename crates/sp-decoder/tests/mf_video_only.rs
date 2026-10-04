@@ -25,6 +25,15 @@ fn opens_video_only_mp4_and_reports_metadata() {
     );
 }
 
+/// #223 S0: the reader names the file's codec from its native subtype, so the
+/// decode bench can show a sample really is the codec it is named after. The
+/// fixture is libx264 (`tests/fixtures/regen.sh`).
+#[test]
+fn reports_the_native_codec_of_the_file() {
+    let reader = MediaFoundationVideoReader::open(&fixture()).expect("open should succeed");
+    assert_eq!(reader.codec().as_deref(), Some("H264"));
+}
+
 #[test]
 fn decodes_first_nv12_frame() {
     let mut reader = MediaFoundationVideoReader::open(&fixture()).expect("open should succeed");
