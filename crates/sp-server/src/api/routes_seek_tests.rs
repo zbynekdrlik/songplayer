@@ -48,6 +48,7 @@ async fn state_with_engine() -> (AppState, mpsc::Receiver<crate::EngineCommand>)
         program_bus: Arc::new(crate::playback::program_bus::ProgramBus::new()),
         lan_status: crate::mdns::new_status_handle(),
         metadata_chain: std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![])),
+        decode_bench: Arc::new(crate::diag::decode_bench::DecodeBench::new("bench".into())),
     };
     (state, engine_rx)
 }

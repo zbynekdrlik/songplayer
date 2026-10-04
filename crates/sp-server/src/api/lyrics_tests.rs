@@ -58,6 +58,7 @@ async fn test_state_with_cache_dir() -> (crate::AppState, tempfile::TempDir) {
         program_bus: Arc::new(crate::playback::program_bus::ProgramBus::new()),
         lan_status: crate::mdns::new_status_handle(),
         metadata_chain: std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![])),
+        decode_bench: Arc::new(crate::diag::decode_bench::DecodeBench::new("bench".into())),
     };
     (state, tmp)
 }

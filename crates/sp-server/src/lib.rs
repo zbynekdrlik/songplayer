@@ -5,6 +5,7 @@ mod ai_proxy_watchdog;
 pub mod api;
 pub mod dabing;
 pub mod db;
+pub mod diag; // #223 S0: /api/v1/diag/* measurement benches
 pub mod downloader;
 mod engine_command;
 mod engine_dispatch;
@@ -94,6 +95,8 @@ pub struct AppState {
     /// #136: the ONE metadata provider chain — the same `Arc` the download and
     /// reprocess workers use; `status.metadata` + the probe route read it.
     pub metadata_chain: Arc<metadata::ProviderChain>,
+    /// #223 S0: `POST /api/v1/diag/decode-bench`'s sample dir and one-run gate.
+    pub decode_bench: Arc<diag::decode_bench::DecodeBench>,
 }
 
 /// Status of external tool availability.
@@ -334,6 +337,7 @@ pub async fn start(
         program_bus: program_bus.clone(),
         lan_status: lan_status.clone(),
         metadata_chain: metadata_chain.clone(),
+        decode_bench: Arc::new(diag::decode_bench::DecodeBench::beside_db(&config.db_path)),
     };
 
     // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
