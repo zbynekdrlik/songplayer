@@ -757,7 +757,16 @@ Right after a page load the Player showed "Nič nehrá" / "Mixér — nič nehr�
   nehrá")` alone passes on the placeholder right after `page.goto`.
 - **Mock E2E against the old dist proves the RED** (the "Running the mock E2E
   locally" section below): the new spec failed for the right reasons, and the
-  whole chromium suite stayed green with the new mock replay.
+  rest of the chromium suite passed with the new mock replay (201 passed, 1
+  failed: `frontend.spec.ts`'s version label, the downloaded dist's older
+  version).
+- **Assert a transient read-out from the recorded log, not by polling it.**
+  Playwright's `expect` polls at 100 / 250 / 500 / 1000 ms, so a window of
+  ~1-2 s can close between two polls. The specs read the MutationObserver
+  log for the in-between state (`seen.some(r => r.state === "Hrá" &&
+  r.title === "Načítavam…" && r.mixerPending)`) and widen the window with the
+  knob (3 s); `/__mock/ws-replay` also holds the mock's 2 s playlist-1 song
+  interval, so the knob alone sets the window.
 
 ## The Player mixer slot renders from `mixer_controls`, and `store.dabing` is app-wide (#184)
 

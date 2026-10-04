@@ -50,8 +50,9 @@ pub enum PlaybackState {
 ///
 /// The shared Player reads `transport == Playing` for its play/pause label so a
 /// dub prepared OFF program on the Dabing page reads `⏸ Pauza` while it plays,
-/// and shows on/off-program only in the badge (from `ndi_health`). `serde(default)`
-/// (=`Idle`) so older/mock payloads that omit it still decode.
+/// and shows on/off-program only in the badge (from the scene-aware `state`,
+/// #225). `serde(default)` (=`Idle`) so older/mock payloads that omit it still
+/// decode.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransportState {
     /// The pipeline is actively decoding a video (on OR off program).
