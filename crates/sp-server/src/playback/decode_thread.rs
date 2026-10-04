@@ -1,19 +1,22 @@
 //! The one way a video DECODE thread is started (#223 S0).
 //!
-//! Two threads decode through `sp_decoder::MediaFoundationVideoReader`: the
-//! paced decode producer (`pipeline_paced.rs`, `paced-decode-<pid>`) and the
-//! decode bench (`diag::decode_bench`, `decode-bench`). The bench's numbers
-//! mean what playback sees only if both threads are scheduled alike, so both
-//! start here.
+//! Two dedicated threads decode through `sp_decoder::MediaFoundationVideoReader`:
+//! the paced decode producer (`pipeline_paced.rs`, `paced-decode-<pid>`) and
+//! the decode bench (`diag::decode_bench`, `decode-bench`). The bench's
+//! numbers mean what playback sees only if both are scheduled alike, so both
+//! start here. (The dormant SDK-clocked path, `pipeline.rs`, decodes inline
+//! on its pipeline thread; pacing is permanently ON, so playback never runs
+//! it.)
 //!
 //! The scheduling today is the platform default: `CreateThread` starts a
 //! thread at `THREAD_PRIORITY_NORMAL`, inside SongPlayer's
 //! `HIGH_PRIORITY_CLASS` (#203, `process_start::set_high_priority_class`).
 //! The decode thread is deliberately NOT raised. Only the grid-paced emit,
-//! NDI input and VBAN threads are
-//! (`pipeline::pipeline_audio::raise_thread_priority`, `mmcss`). A future
-//! change to the decode thread's priority belongs in [`spawn_decode_thread`],
-//! so the bench follows it.
+//! NDI input and VBAN threads are, each from inside its own body
+//! (`pipeline::pipeline_audio::raise_thread_priority`, `mmcss`). A decode
+//! thread's priority must NOT be set that way: a change belongs in
+//! [`spawn_decode_thread`] (as the first step of the spawned closure), so the
+//! bench follows it.
 
 use std::thread::JoinHandle;
 

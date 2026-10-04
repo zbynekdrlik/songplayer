@@ -25,17 +25,31 @@ them.
 
 ### Running it
 
-Run it from the box (port 8920, `sp_core::config::DEFAULT_API_PORT`):
+Port 8920 (`sp_core::config::DEFAULT_API_PORT`). From a Linux box on the
+LAN:
+
+```bash
+curl -s -X POST http://10.77.9.201:8920/api/v1/diag/decode-bench \
+  -H 'content-type: application/json' -d '{"file":"av1_2160p.mp4","seconds":15}'
+```
+
+On the box, in PowerShell, keep the `catch`. `Invoke-RestMethod` throws on
+a 4xx/5xx, and a 500 still carries the report (`error` and the pictures
+decoded so far):
 
 ```powershell
-Invoke-RestMethod -Method Post http://127.0.0.1:8920/api/v1/diag/decode-bench `
-  -ContentType 'application/json' -Body '{"file":"av1_2160p.mp4","seconds":15}'
+$body = '{"file":"av1_2160p.mp4","seconds":15}'
+try {
+  Invoke-RestMethod -Method Post http://127.0.0.1:8920/api/v1/diag/decode-bench `
+    -ContentType 'application/json' -Body $body | ConvertTo-Json -Depth 4
+} catch { $_.ErrorDetails.Message }
 ```
 
 The body has two fields, both required:
 
 - `file`: a bare file name. No `/`, `\` or `:`, no `..`, no control
-  characters, at most 255 bytes, one plain path component.
+  characters, at most 255 bytes. No trailing `.` or space (Windows strips
+  them) and no Windows device name (`CON`, `NUL`, `COM1`, `lpt9.mp4`, …).
 - `seconds`: 1 to 15.
 
 Answers:
@@ -44,9 +58,14 @@ Answers:
 - **500:** the report of a run the decoder ended, at open or mid-run. It
   carries `error` and the pictures decoded so far.
 - **400:** a bad name, or `seconds` out of range.
+- **422:** a body that is not the two fields (one missing, a negative or a
+  fractional `seconds`): axum's JSON rejection.
 - **404:** no such sample. The body names the path it looked at.
 - **409:** a run is in progress. One run at a time per process.
 - **501:** a non-Windows build.
+
+Every answer without a report is logged at INFO (`decode-bench: no report`,
+with the file, the status and why).
 
 ### What it measures
 
@@ -62,8 +81,7 @@ Answers:
 - Each picture's buffer goes back to the frame pool at once, as playback's
   last owner returns it.
 - It competes with live playback for CPU, as a real decoder does. Measure in
-  the state you mean to judge. D2's gate is 50 % without the stems child and
-  75 % with it resident.
+  the state you mean to judge.
 
 ### The report
 
@@ -72,8 +90,12 @@ Answers:
   height to a multiple of 16.
 - `codec`: the native subtype's FourCC (`AV01`, `VP90`, `H264`, `HEVC`). Check
   that it is the codec the sample is named after.
-- `source_fps`.
+- `source_fps`: `null` when MF reports no rate. The reader then plays at a
+  29.97 fps guess, and there is no `budget`.
 - `frames`.
+- `first_us`: the first picture's call. It carries Media Foundation's
+  start-up, so `decode_us.max` is often this one; `p99` is the steady-state
+  spike.
 - `wall_ms`: the decode loop only.
 - `open_ms`.
 - `ended`: `end_of_stream`, `time_limit` or `error`.
@@ -85,10 +107,14 @@ Answers:
 
 **The gate is revision 2's D2.**
 
-- `budget.mean_over_half_period == false` means the mean is at most 50 % of
-  1/f: software decode keeps up.
-- `true` means a hardware-decode slice comes before any 4K download (revision
-  3, R3-4).
+- `budget.mean_over_half_period` is D2's gate WITHOUT the stems child: `true`
+  means the mean is over 50 % of 1/f. `false` means software decode keeps
+  up.
+- WITH the stems child resident, D2's gate is 75 %. Check
+  `decode_us.mean <= 0.75 * budget.frame_period_us` by hand; the flag does
+  not encode it.
+- A failed gate means a hardware-decode slice comes before any 4K download
+  (revision 3, R3-4).
 - Record the result on #223.
 
 **Logs:**
@@ -96,13 +122,18 @@ Answers:
 - one INFO `decode-bench: start` (file, bytes, size, codec, fps, open_ms,
   priority);
 - at the end, one INFO `decode-bench: done: <summary>`, or a WARN when a
-  decoder error ended the run.
+  decoder error ended the run;
+- one INFO `decode-bench: no report` for every 400 / 404 / 409 / 500 / 501
+  answer that carries no report.
 
 ## Code map
 
 - `diag/decode_bench.rs`: the cross-platform core.
   - It holds the gate, the name check, `measure` (generic over
-    `VideoStream`), `DecodeUs`, `Budget` and `BenchReport`.
+    `VideoStream`), `DecodeUs`, `Budget`, `BenchReport` and
+    `run_on_decode_thread`. That last one owns the thread: the slot is
+    dropped BEFORE the report is sent, so the bench is free when the route
+    answers, and a panicking body comes back as a 500 with the bench free.
   - Linux tests drive it with a scripted stream and a scripted clock, with no
     wall-time thresholds.
 - `diag/decode_bench_mf.rs`: the `cfg(windows)` thread body (open, facts,

@@ -26,12 +26,17 @@ fn opens_video_only_mp4_and_reports_metadata() {
 }
 
 /// #223 S0: the reader names the file's codec from its native subtype, so the
-/// decode bench can show a sample really is the codec it is named after. The
-/// fixture is libx264 (`tests/fixtures/regen.sh`).
+/// decode bench can show a sample really is the codec it is named after, and
+/// says whether its frame rate is the file's own (not the 29.97 fallback). The
+/// fixture is libx264 at 30 fps (`tests/fixtures/regen.sh`).
 #[test]
-fn reports_the_native_codec_of_the_file() {
+fn reports_the_codec_and_a_known_frame_rate() {
     let reader = MediaFoundationVideoReader::open(&fixture()).expect("open should succeed");
     assert_eq!(reader.codec().as_deref(), Some("H264"));
+    assert!(reader.frame_rate_known(), "the fixture carries its 30 fps");
+    let (num, den) = reader.frame_rate();
+    let fps = f64::from(num) / f64::from(den);
+    assert!((fps - 30.0).abs() < 0.01, "30 fps, got {num}/{den}");
 }
 
 #[test]

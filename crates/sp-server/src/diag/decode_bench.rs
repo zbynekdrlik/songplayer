@@ -21,15 +21,15 @@
 //! `decode_bench_mf.rs`.
 
 use std::collections::VecDeque;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use axum::http::StatusCode;
 use serde::Serialize;
 use sp_decoder::VideoStream;
 
+use crate::playback::decode_thread::spawn_decode_thread;
 use crate::playback::loop_stats::percentile_ceil;
 
 /// The longest run a request may ask for, in seconds.
@@ -114,8 +114,11 @@ impl Drop for BenchSlot {
 
 /// `name` if it is a bare file name, else which rule it breaks. A bare
 /// name is 1 to [`MAX_NAME_BYTES`] bytes, has no `/`, `\`, `:` (a drive or
-/// an NTFS stream) or control character, no `..`, and is one plain path
-/// component. Anything else could reach outside the sample dir.
+/// an NTFS stream) or control character, and no `..`, so it cannot reach
+/// outside the sample dir. It must also name a FILE on Windows: no device
+/// name ([`is_device_name`]) and no trailing `.` or space, which Windows
+/// strips (`x.mp4.` opens `x.mp4`; `.` is the dir itself). What passes is
+/// one plain path component on both platforms (the tests check it).
 pub fn bench_file_name(name: &str) -> Result<&str, &'static str> {
     if name.is_empty() || name.len() > MAX_NAME_BYTES {
         return Err("file must be a file name of 1 to 255 bytes");
@@ -129,13 +132,39 @@ pub fn bench_file_name(name: &str) -> Result<&str, &'static str> {
     {
         return Err("file must be a bare file name: no /, \\, : or control characters");
     }
-    let mut parts = Path::new(name).components();
-    let one_plain_part =
-        matches!(parts.next(), Some(Component::Normal(_))) && parts.next().is_none();
-    if !one_plain_part {
-        return Err("file must be a bare file name");
+    if name.ends_with('.') || name.ends_with(' ') {
+        return Err("file must not end with a dot or a space");
+    }
+    if is_device_name(name) {
+        return Err("file must not be a Windows device name (CON, NUL, COM1, …)");
     }
     Ok(name)
+}
+
+/// Whether Windows reads `name` as a device, not a file: `CON`, `PRN`,
+/// `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0`–`COM9` and `LPT0`–`LPT9`
+/// (with the superscript `¹²³` forms), in any case, also with an extension
+/// (`nul.mp4`) or spaces before it. `dir\NUL` is the null device wherever
+/// `dir` is.
+pub fn is_device_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or_default();
+    let stem = stem.trim_end_matches(' ').to_ascii_uppercase();
+    if matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) {
+        return true;
+    }
+    match stem
+        .strip_prefix("COM")
+        .or_else(|| stem.strip_prefix("LPT"))
+    {
+        Some(port) => matches!(
+            port,
+            "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+        ),
+        None => false,
+    }
 }
 
 /// A request's `seconds` as the run's wall-time bound: 1 to [`MAX_SECONDS`].
@@ -312,8 +341,10 @@ pub struct StreamFacts {
     /// The stream's size as negotiated at open.
     pub width: u32,
     pub height: u32,
-    /// The source rate, `(num, den)`.
-    pub frame_rate: (u32, u32),
+    /// The source rate, `(num, den)`. `None` when MF reports none: the
+    /// reader then plays at a 29.97 fps guess, and the gate is not judged
+    /// against a guess.
+    pub frame_rate: Option<(u32, u32)>,
     /// The native subtype's text (`AV01`, `VP90`, `H264`), if MF told it.
     pub codec: Option<String>,
 }
@@ -331,6 +362,10 @@ pub struct BenchReport {
     pub source_fps: Option<f64>,
     /// Pictures decoded: the samples behind `decode_us`.
     pub frames: u64,
+    /// The first picture's call, µs. It carries Media Foundation's start-up
+    /// (the source starts, the decoder fills), so `decode_us.max` is often
+    /// this one and not a steady-state spike; `decode_us.p99` is the spike.
+    pub first_us: Option<u64>,
     /// The decode loop's wall time (opening excluded), floored ms.
     pub wall_ms: u64,
     /// The reader's open, ms.
@@ -357,21 +392,24 @@ impl BenchReport {
             Some(p) => (p.width, p.height),
             None => (facts.width, facts.height),
         };
+        // An unknown rate reads as 0/0: no fps and no gate.
+        let frame_rate = facts.frame_rate.unwrap_or_default();
         Self {
             file: file.to_string(),
             width,
             height,
             stride: run.first_picture.map(|p| p.stride),
             codec: facts.codec,
-            source_fps: source_fps(facts.frame_rate),
+            source_fps: source_fps(frame_rate),
             frames: run.decode_us.len() as u64,
+            first_us: run.decode_us.first().copied(),
             wall_ms: run.wall_us / 1_000,
             open_ms,
             ended: run.end,
             error: run.error,
             thread_priority,
             decode_us: DecodeUs::of(&run.decode_us),
-            budget: Budget::check(facts.frame_rate, &run.decode_us),
+            budget: Budget::check(frame_rate, &run.decode_us),
         }
     }
 
@@ -390,6 +428,7 @@ impl BenchReport {
             codec: None,
             source_fps: None,
             frames: 0,
+            first_us: None,
             wall_ms: 0,
             open_ms,
             ended: BenchEnd::Error,
@@ -400,13 +439,9 @@ impl BenchReport {
         }
     }
 
-    /// 200 for a run that ended cleanly, 500 when the decoder failed.
-    pub fn status(&self) -> StatusCode {
-        if self.error.is_some() {
-            StatusCode::INTERNAL_SERVER_ERROR
-        } else {
-            StatusCode::OK
-        }
+    /// The decoder failed (at open or mid-run): the route answers 500.
+    pub fn failed(&self) -> bool {
+        self.error.is_some()
     }
 
     /// The text of the run's end log line.
@@ -456,25 +491,25 @@ pub enum BenchOutcome {
     Report(Box<BenchReport>),
     /// This build has no Media Foundation (501).
     Unsupported,
-    /// The run's thread did not start, or ended without a report (500).
+    /// The run's thread did not start, panicked, or ended without a report
+    /// (500).
     Failed(String),
 }
 
-/// Run one bench of `path` on its own decode thread and wait for the
-/// report. `slot` is moved to the thread and dropped there before the
-/// report is sent, so the bench is free by the time the caller answers.
+/// Run `body` on its own `decode-bench` thread, started like the paced
+/// decode producer's (`spawn_decode_thread`), and wait for its report.
 ///
-/// mutants::skip: `cfg(windows)`, so the Linux mutation runner never
-/// compiles it and every mutant would build and survive. The Windows job's
-/// router tests (`api/diag_tests.rs`) run it on the real decoder.
-#[cfg(windows)]
-#[cfg_attr(test, mutants::skip)]
-pub async fn run(path: PathBuf, file: String, max_wall: Duration, slot: BenchSlot) -> BenchOutcome {
-    use crate::playback::decode_thread::spawn_decode_thread;
-
+/// The thread holds `slot` and drops it BEFORE it sends the outcome, so
+/// the bench is free by the time the caller answers, also when `body`
+/// panics. A panic is caught there (the panic hook has already logged it)
+/// and comes back as `Failed`.
+pub async fn run_on_decode_thread<B>(slot: BenchSlot, body: B) -> BenchOutcome
+where
+    B: FnOnce() -> BenchReport + Send + 'static,
+{
     let (tx, rx) = tokio::sync::oneshot::channel();
     let spawned = spawn_decode_thread("decode-bench".to_string(), move || {
-        let report = super::decode_bench_mf::bench_file(&path, &file, max_wall);
+        let report = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
         drop(slot);
         let _ = tx.send(report);
     });
@@ -482,9 +517,26 @@ pub async fn run(path: PathBuf, file: String, max_wall: Duration, slot: BenchSlo
         return BenchOutcome::Failed(format!("the decode-bench thread did not start: {e}"));
     }
     match rx.await {
-        Ok(report) => BenchOutcome::Report(Box::new(report)),
+        Ok(Ok(report)) => BenchOutcome::Report(Box::new(report)),
+        Ok(Err(_)) => BenchOutcome::Failed("the decode-bench thread panicked".into()),
         Err(_) => BenchOutcome::Failed("the decode-bench thread ended without a report".into()),
     }
+}
+
+/// Run one bench of `path` with the real reader
+/// (`decode_bench_mf::bench_file`) on its own decode thread.
+///
+/// mutants::skip: a `cfg(windows)` one-liner the Linux mutation runner
+/// never compiles, so every mutant would build and survive. The thread
+/// handling is [`run_on_decode_thread`], Linux-tested; the Windows job's
+/// router tests (`api/diag_tests.rs`) run this on the real decoder.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+pub async fn run(path: PathBuf, file: String, max_wall: Duration, slot: BenchSlot) -> BenchOutcome {
+    run_on_decode_thread(slot, move || {
+        super::decode_bench_mf::bench_file(&path, &file, max_wall)
+    })
+    .await
 }
 
 /// Without Media Foundation there is no decoder to measure (501).

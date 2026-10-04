@@ -36,7 +36,12 @@ pub(crate) fn bench_file(path: &Path, file: &str, max_wall: Duration) -> BenchRe
     let facts = StreamFacts {
         width: reader.width(),
         height: reader.height(),
-        frame_rate: reader.frame_rate(),
+        // The reader plays an unknown rate at 29.97; the gate must not judge it.
+        frame_rate: if reader.frame_rate_known() {
+            Some(reader.frame_rate())
+        } else {
+            None
+        },
         codec: reader.codec(),
     };
     info!(
@@ -45,8 +50,7 @@ pub(crate) fn bench_file(path: &Path, file: &str, max_wall: Duration) -> BenchRe
         width = facts.width,
         height = facts.height,
         codec = facts.codec.as_deref().unwrap_or("?"),
-        fps_num = facts.frame_rate.0,
-        fps_den = facts.frame_rate.1,
+        frame_rate = ?facts.frame_rate,
         open_ms,
         max_wall_s = max_wall.as_secs(),
         thread_priority = thread_priority.unwrap_or_default(),

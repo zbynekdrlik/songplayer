@@ -12,7 +12,7 @@ use tower::ServiceExt;
 
 use crate::AppState;
 use crate::api::routes::tests::test_state_with_cache_dir;
-use crate::diag::decode_bench::DecodeBench;
+use crate::diag::decode_bench::{BenchEnd, BenchReport, BenchRun, DecodeBench, StreamFacts};
 
 /// A state whose bench dir is a fresh temp dir, which lives as long as the
 /// returned `TempDir`.
@@ -45,6 +45,24 @@ async fn post_bench(state: &AppState, body: &str) -> (StatusCode, String) {
         .await
         .unwrap();
     (status, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+#[test]
+fn a_report_is_a_500_only_when_the_decoder_failed() {
+    let failed = BenchReport::open_failed("x.mp4", "open: no video".to_string(), 1, None);
+    assert_eq!(
+        super::report_status(&failed),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    let run = BenchRun {
+        decode_us: vec![1_000],
+        first_picture: None,
+        wall_us: 1_000,
+        end: BenchEnd::EndOfStream,
+        error: None,
+    };
+    let clean = BenchReport::from_run("x.mp4", StreamFacts::default(), run, 1, None);
+    assert_eq!(super::report_status(&clean), StatusCode::OK);
 }
 
 #[tokio::test]

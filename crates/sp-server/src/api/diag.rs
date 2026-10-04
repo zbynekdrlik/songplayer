@@ -18,9 +18,10 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
+use tracing::info;
 
 use crate::AppState;
-use crate::diag::decode_bench::{self, BenchFileError, BenchOutcome};
+use crate::diag::decode_bench::{self, BenchFileError, BenchOutcome, BenchReport};
 
 /// The body of `POST /api/v1/diag/decode-bench`.
 #[derive(Debug, Deserialize)]
@@ -37,29 +38,46 @@ pub async fn post_decode_bench(
     State(state): State<AppState>,
     Json(req): Json<DecodeBenchRequest>,
 ) -> Response {
+    // Every answer without a report says why, and logs it.
+    let refuse = |status: StatusCode, why: String| {
+        info!(file = ?req.file, seconds = req.seconds, %status, %why, "decode-bench: no report");
+        (status, why).into_response()
+    };
     let max_wall = match decode_bench::bench_seconds(req.seconds) {
         Ok(max_wall) => max_wall,
-        Err(why) => return (StatusCode::BAD_REQUEST, why).into_response(),
+        Err(why) => return refuse(StatusCode::BAD_REQUEST, why.to_string()),
     };
     let path = match state.decode_bench.resolve(&req.file) {
         Ok(path) => path,
-        Err(BenchFileError::BadName(why)) => return (StatusCode::BAD_REQUEST, why).into_response(),
+        Err(BenchFileError::BadName(why)) => {
+            return refuse(StatusCode::BAD_REQUEST, why.to_string());
+        }
         Err(BenchFileError::Missing(path)) => {
             let why = format!("no bench file {}", path.display());
-            return (StatusCode::NOT_FOUND, why).into_response();
+            return refuse(StatusCode::NOT_FOUND, why);
         }
     };
     let Some(slot) = state.decode_bench.try_start() else {
-        return (StatusCode::CONFLICT, "a decode-bench run is in progress").into_response();
+        let why = "a decode-bench run is in progress".to_string();
+        return refuse(StatusCode::CONFLICT, why);
     };
-    match decode_bench::run(path, req.file, max_wall, slot).await {
-        BenchOutcome::Report(report) => (report.status(), Json(report)).into_response(),
-        BenchOutcome::Unsupported => (
-            StatusCode::NOT_IMPLEMENTED,
-            "decode-bench needs Windows Media Foundation",
-        )
-            .into_response(),
-        BenchOutcome::Failed(why) => (StatusCode::INTERNAL_SERVER_ERROR, why).into_response(),
+    match decode_bench::run(path, req.file.clone(), max_wall, slot).await {
+        BenchOutcome::Report(report) => (report_status(&report), Json(report)).into_response(),
+        BenchOutcome::Unsupported => {
+            let why = "decode-bench needs Windows Media Foundation".to_string();
+            refuse(StatusCode::NOT_IMPLEMENTED, why)
+        }
+        BenchOutcome::Failed(why) => refuse(StatusCode::INTERNAL_SERVER_ERROR, why),
+    }
+}
+
+/// A report's status: 500 when the decoder failed (the body still carries
+/// the report), else 200.
+fn report_status(report: &BenchReport) -> StatusCode {
+    if report.failed() {
+        StatusCode::INTERNAL_SERVER_ERROR
+    } else {
+        StatusCode::OK
     }
 }
 

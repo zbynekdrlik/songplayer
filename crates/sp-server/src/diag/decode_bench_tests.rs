@@ -7,12 +7,12 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use axum::http::StatusCode;
 use sp_decoder::{DecodedVideoFrame, DecoderError, MediaStream, PixelFormat, VideoStream};
 
 use super::{
-    BenchEnd, BenchFileError, BenchReport, BenchRun, Budget, DecodeBench, DecodeUs, MAX_NAME_BYTES,
-    PictureLayout, StreamFacts, bench_file_name, bench_seconds, measure,
+    BenchEnd, BenchFileError, BenchOutcome, BenchReport, BenchRun, Budget, DecodeBench, DecodeUs,
+    MAX_NAME_BYTES, PictureLayout, StreamFacts, bench_file_name, bench_seconds, is_device_name,
+    measure, run_on_decode_thread,
 };
 
 // ---------------------------------------------------------------------------
@@ -27,8 +27,18 @@ fn bare_file_names_are_accepted() {
         "ťažký.mp4",
         ".hidden.mp4",
         "a.b.c",
+        "COM10.mp4",
+        "console.mp4",
+        "null.mp4",
+        "lpt.mp4",
     ] {
         assert_eq!(bench_file_name(name), Ok(name), "{name:?}");
+        // What passes is one plain path component on this platform.
+        let parts: Vec<_> = Path::new(name).components().collect();
+        assert!(
+            matches!(parts.as_slice(), [std::path::Component::Normal(_)]),
+            "{name:?}: {parts:?}"
+        );
     }
     let longest = "a".repeat(MAX_NAME_BYTES);
     assert_eq!(bench_file_name(&longest), Ok(longest.as_str()));
@@ -53,8 +63,55 @@ fn names_that_could_leave_the_sample_dir_are_refused() {
         "a\u{1}b.mp4",
         "a\nb.mp4",
         too_long.as_str(),
+        // Windows strips a trailing dot or space: another file's name.
+        "x.mp4.",
+        "x.mp4 ",
+        // Windows devices, not files.
+        "nul",
+        "NUL.mp4",
+        "com1.mp4",
+        "Lpt9",
+        "conin$",
+        "aux .mp4",
     ] {
         assert!(bench_file_name(name).is_err(), "{name:?} must be refused");
+    }
+}
+
+#[test]
+fn windows_device_names_are_recognized() {
+    for name in [
+        "CON",
+        "prn",
+        "Aux",
+        "NUL",
+        "nul.mp4",
+        "nul .mp4",
+        "CONIN$",
+        "conout$.txt",
+        "COM0",
+        "COM1",
+        "com9.webm",
+        "LPT1",
+        "lpt9.mp4",
+        "COM\u{b9}",
+        "LPT\u{b3}.mp4",
+    ] {
+        assert!(is_device_name(name), "{name:?}");
+    }
+    for name in [
+        "COM10.mp4",
+        "COM",
+        "LPT",
+        "COMX",
+        "console.mp4",
+        "null.mp4",
+        "nul_x.mp4",
+        "av1_4k.mp4",
+        "x.nul",
+        ".nul",
+    ] {
+        assert!(!is_device_name(name), "{name:?}");
     }
 }
 
@@ -381,7 +438,7 @@ fn facts_4k() -> StreamFacts {
     StreamFacts {
         width: 3840,
         height: 2160,
-        frame_rate: (30_000, 1_001),
+        frame_rate: Some((30_000, 1_001)),
         codec: Some("AV01".to_string()),
     }
 }
@@ -393,9 +450,10 @@ const PADDED_4K: PictureLayout = PictureLayout {
     stride: 3840,
 };
 
+/// Two pictures at a mean of 16 683 µs, just inside 29.97 fps's half period.
 fn clean_report() -> BenchReport {
     let run = BenchRun {
-        decode_us: vec![16_683, 16_683],
+        decode_us: vec![17_000, 16_366],
         first_picture: Some(PADDED_4K),
         wall_us: 15_000_999,
         end: BenchEnd::TimeLimit,
@@ -417,6 +475,7 @@ fn a_clean_run_reports_its_pictures_and_the_gate() {
     let fps = report.source_fps.expect("a known rate");
     assert!((fps - 29.970).abs() < 0.001, "{fps}");
     assert_eq!(report.frames, 2);
+    assert_eq!(report.first_us, Some(17_000));
     assert_eq!(report.wall_ms, 15_000);
     assert_eq!(report.open_ms, 120);
     assert_eq!(report.ended, BenchEnd::TimeLimit);
@@ -426,13 +485,13 @@ fn a_clean_run_reports_its_pictures_and_the_gate() {
         report.decode_us,
         DecodeUs {
             mean: 16_683,
-            p50: 16_683,
-            p99: 16_683,
-            max: 16_683,
+            p50: 16_366,
+            p99: 17_000,
+            max: 17_000,
         }
     );
     assert_eq!(report.budget, gate(33_367, false));
-    assert_eq!(report.status(), StatusCode::OK);
+    assert!(!report.failed());
 }
 
 #[test]
@@ -450,15 +509,17 @@ fn a_run_with_no_picture_reports_the_stream_size_and_no_gate() {
         (3840, 2160, None)
     );
     assert_eq!(report.frames, 0);
+    assert_eq!(report.first_us, None);
     assert_eq!(report.wall_ms, 2);
     assert_eq!(report.decode_us, DecodeUs::default());
     assert_eq!(report.budget, None);
-    assert_eq!(report.status(), StatusCode::OK);
+    assert!(!report.failed());
 }
 
 #[test]
 fn an_unknown_source_rate_has_no_fps_and_no_gate() {
-    for frame_rate in [(0, 1), (30, 0)] {
+    // MF reported no rate (the reader plays at a 29.97 guess), or a zero.
+    for frame_rate in [None, Some((0, 1)), Some((30, 0))] {
         let facts = StreamFacts {
             frame_rate,
             ..facts_4k()
@@ -492,7 +553,7 @@ fn a_decoder_error_is_a_500_with_the_pictures_so_far() {
         report.error.as_deref(),
         Some("Decode failure: bad bitstream")
     );
-    assert_eq!(report.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(report.failed());
 }
 
 #[test]
@@ -504,8 +565,9 @@ fn a_file_that_does_not_open_is_a_500_with_no_picture() {
     assert_eq!(report.ended, BenchEnd::Error);
     assert_eq!(report.error.as_deref(), Some("open: no video"));
     assert_eq!(report.thread_priority, Some(0));
+    assert_eq!(report.first_us, None);
     assert_eq!(report.budget, None);
-    assert_eq!(report.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(report.failed());
 }
 
 #[test]
@@ -517,12 +579,13 @@ fn the_report_serializes_to_the_documented_json() {
     assert_eq!(json["stride"], 3840);
     assert_eq!(json["codec"], "AV01");
     assert_eq!(json["frames"], 2);
+    assert_eq!(json["first_us"], 17_000);
     assert_eq!(json["wall_ms"], 15_000);
     assert_eq!(json["ended"], "time_limit");
     assert!(json["error"].is_null());
     assert_eq!(json["thread_priority"], 0);
     assert_eq!(json["decode_us"]["mean"], 16_683);
-    assert_eq!(json["decode_us"]["p99"], 16_683);
+    assert_eq!(json["decode_us"]["p99"], 17_000);
     assert_eq!(json["budget"]["frame_period_us"], 33_367);
     assert_eq!(
         json["budget"]["mean_over_half_period"],
@@ -540,7 +603,7 @@ fn the_end_log_line_names_the_stats_and_the_gate() {
     assert_eq!(
         clean_report().summary(),
         "file=av1_4k.mp4 3840x2176 codec=AV01 frames=2 wall_ms=15000 ended=TimeLimit \
-         mean_us=16683 p50_us=16683 p99_us=16683 max_us=16683 \
+         mean_us=16683 p50_us=16366 p99_us=17000 max_us=17000 \
          frame_period_us=33367 mean_over_half_period=false"
     );
     let failed = BenchReport::open_failed("x.mp4", "open: no video".to_string(), 3, None);
@@ -549,4 +612,39 @@ fn the_end_log_line_names_the_stats_and_the_gate() {
         "file=x.mp4 0x0 codec=? frames=0 wall_ms=0 ended=Error \
          mean_us=0 p50_us=0 p99_us=0 max_us=0 budget=unknown error=open: no video"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The run's thread
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_run_answers_from_the_decode_thread_with_the_bench_already_free() {
+    let bench = DecodeBench::new(PathBuf::from("bench"));
+    let slot = bench.try_start().expect("a free bench");
+    let outcome = run_on_decode_thread(slot, || {
+        let thread = std::thread::current().name().unwrap_or("?").to_string();
+        BenchReport::open_failed(&thread, "x".to_string(), 0, None)
+    })
+    .await;
+    match outcome {
+        // The body ran on the decode thread, which carries the bench's name.
+        BenchOutcome::Report(report) => assert_eq!(report.file, "decode-bench"),
+        other => panic!("expected a report, got {other:?}"),
+    }
+    // The thread dropped the slot before it sent the report.
+    assert!(bench.try_start().is_some());
+}
+
+#[tokio::test]
+async fn a_body_that_panics_is_a_failed_run_with_the_bench_free() {
+    let bench = DecodeBench::new(PathBuf::from("bench"));
+    let slot = bench.try_start().expect("a free bench");
+    let outcome =
+        run_on_decode_thread(slot, || -> BenchReport { panic!("the decoder blew up") }).await;
+    match outcome {
+        BenchOutcome::Failed(why) => assert!(why.contains("panicked"), "{why}"),
+        other => panic!("expected a failed run, got {other:?}"),
+    }
+    assert!(bench.try_start().is_some());
 }
