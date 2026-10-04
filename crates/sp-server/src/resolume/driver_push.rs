@@ -13,6 +13,23 @@ use crate::resolume::title_state::{TitleAction, TitleIntent};
 use crate::resolume::{ResolumeCommand, handlers};
 
 impl HostDriver {
+    /// Test seam (#217): empty the endpoint cache, as its 5-minute TTL running
+    /// out does, AFTER a handler resolved the endpoint for its batches.
+    #[cfg(test)]
+    pub(crate) fn forget_endpoint(&mut self) {
+        self.endpoint_cache = None;
+    }
+
+    /// RED (#217): a write still reads the endpoint cache and re-checks its
+    /// TTL, whatever endpoint its batch was handed.
+    pub(super) fn cached_endpoint_or_err(&self) -> Result<super::ResolvedEndpoint, anyhow::Error> {
+        self.endpoint_cache
+            .as_ref()
+            .filter(|ep| !ep.is_expired())
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("endpoint cache empty - call ensure_endpoint first"))
+    }
+
     /// Record a push answered `404 Not Found`: the param or clip id is gone.
     /// Arena gives every clip and text param a new id on each relaunch
     /// (`#sp-subs` 1790510617970 → 1790518489097 on the box), so the clip map

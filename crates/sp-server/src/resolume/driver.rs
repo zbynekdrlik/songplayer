@@ -778,16 +778,11 @@ impl HostDriver {
         Ok(parse_composition(&body))
     }
 
-    /// Ensure the endpoint cache is populated. Call before parallel operations
-    /// that need to use `set_text`/`set_clip_opacity` concurrently via `&self`.
-    pub(crate) async fn ensure_endpoint(&mut self) -> Result<(), anyhow::Error> {
-        let _ = self.endpoint().await?;
-        Ok(())
-    }
-
-    /// Get the cached endpoint (must call `ensure_endpoint` first).
-    fn cached_endpoint(&self) -> Option<&ResolvedEndpoint> {
-        self.endpoint_cache.as_ref().filter(|ep| !ep.is_expired())
+    /// Resolve the endpoint and hand it to the caller. A handler resolves ONCE,
+    /// before its first batch, and passes it to every parallel write: no write
+    /// reads the cache, whose 5-minute TTL could run out mid-fade (#217).
+    pub(crate) async fn ensure_endpoint(&mut self) -> Result<ResolvedEndpoint, anyhow::Error> {
+        self.endpoint().await
     }
 
     /// Resolve the host to an endpoint, caching the result for 5 minutes.
@@ -836,49 +831,43 @@ impl HostDriver {
         }
     }
 
-    /// Set text on a clip parameter.
-    ///
-    /// `PUT /api/v1/parameter/by-id/{param_id}`
-    ///
-    /// Takes `&self` so multiple calls can be driven in parallel via
-    /// `FuturesUnordered`. Caller MUST have called `ensure_endpoint` first.
-    pub(crate) async fn set_text(&self, param_id: i64, text: &str) -> Result<(), anyhow::Error> {
-        let ep = self
-            .cached_endpoint()
-            .ok_or_else(|| anyhow::anyhow!("endpoint cache empty - call ensure_endpoint first"))?
-            .clone();
+    /// Set text on a clip parameter: `PUT /api/v1/parameter/by-id/{param_id}`
+    /// on `ep`, the endpoint the caller's batch resolved (`ensure_endpoint`).
+    /// Takes `&self` so a batch drives many in parallel (`FuturesUnordered`).
+    pub(crate) async fn set_text(
+        &self,
+        _ep: &ResolvedEndpoint,
+        param_id: i64,
+        text: &str,
+    ) -> Result<(), anyhow::Error> {
+        let ep = &self.cached_endpoint_or_err()?;
         let url = format!("{}/api/v1/parameter/by-id/{param_id}", ep.base_url);
         let req = self
             .client
             .put(&url)
             .json(&serde_json::json!({ "value": text }));
-        let resp = Self::apply_host_header(req, &ep).send().await?;
+        let resp = Self::apply_host_header(req, ep).send().await?;
         self.note_push_status(resp.status());
         resp.error_for_status()?;
         Ok(())
     }
 
-    /// Set the opacity of a clip.
-    ///
-    /// `PUT /api/v1/composition/clips/by-id/{clip_id}`
-    ///
-    /// Takes `&self` so multiple calls can be driven in parallel via
-    /// `FuturesUnordered`. Caller MUST have called `ensure_endpoint` first.
+    /// Set the opacity of a clip: `PUT /api/v1/composition/clips/by-id/{clip_id}`
+    /// on `ep`, the endpoint the caller's batch resolved (`ensure_endpoint`).
+    /// Takes `&self` so a batch drives many in parallel (`FuturesUnordered`).
     pub(crate) async fn set_clip_opacity(
         &self,
+        _ep: &ResolvedEndpoint,
         clip_id: i64,
         opacity: f64,
     ) -> Result<(), anyhow::Error> {
-        let ep = self
-            .cached_endpoint()
-            .ok_or_else(|| anyhow::anyhow!("endpoint cache empty - call ensure_endpoint first"))?
-            .clone();
+        let ep = &self.cached_endpoint_or_err()?;
         let url = format!("{}/api/v1/composition/clips/by-id/{clip_id}", ep.base_url);
         let req = self
             .client
             .put(&url)
             .json(&serde_json::json!({"video":{"opacity":{"value": opacity}}}));
-        let resp = Self::apply_host_header(req, &ep).send().await?;
+        let resp = Self::apply_host_header(req, ep).send().await?;
         self.note_push_status(resp.status());
         resp.error_for_status()?;
         Ok(())

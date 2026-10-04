@@ -317,25 +317,23 @@ fn resolved_endpoint_just_over_ttl_is_expired() {
     );
 }
 
+/// `ensure_endpoint` hands the resolved endpoint to the caller's batch (#217)
+/// and caches it for the next handler.
 #[tokio::test]
-async fn cached_endpoint_returns_none_until_ensure_endpoint_called() {
-    let driver = HostDriver::new("127.0.0.1".to_string(), 1);
-    assert!(
-        driver.cached_endpoint().is_none(),
-        "no endpoint cached before ensure_endpoint"
-    );
-}
-
-#[tokio::test]
-async fn ensure_endpoint_populates_cache_for_ip_literal() {
+async fn ensure_endpoint_returns_and_caches_the_endpoint_for_an_ip_literal() {
     let mut driver = HostDriver::new("127.0.0.1".to_string(), 8090);
-    driver.ensure_endpoint().await.unwrap();
-    let cached = driver.cached_endpoint().expect("endpoint should be cached");
-    assert_eq!(cached.base_url, "http://127.0.0.1:8090");
+    let ep = driver.ensure_endpoint().await.unwrap();
+    assert_eq!(ep.base_url, "http://127.0.0.1:8090");
     assert!(
-        cached.host_header.is_none(),
+        ep.host_header.is_none(),
         "IP literal should not need a Host header override"
     );
+    let cached = driver
+        .endpoint_cache
+        .as_ref()
+        .expect("endpoint should be cached");
+    assert_eq!(cached.base_url, ep.base_url);
+    assert_eq!(cached.resolved_at, ep.resolved_at, "the same resolution");
 }
 
 /// Wiremock test that exercises `refresh_mapping` against a real HTTP
