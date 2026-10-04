@@ -45,6 +45,12 @@ import {
   type UnhealthyOutput,
 } from "./ndi-health-gate";
 
+// #225: a Player title that names NO song — "Nič nehrá" (nothing plays) or
+// "Načítavam…" (the playlist's song is not known yet, e.g. right after
+// page.goto until the WS replay lands). "A song arrived" = the title is
+// neither, never only "left Nič nehrá".
+const NOT_A_SONG = /^(Nič nehrá|Načítavam…)$/;
+
 // #221 L3: SongPlayer's obs-websocket facade (the Companion remote control).
 const FACADE_WS_URL = process.env.FACADE_WS_URL || "ws://localhost:4456";
 const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
@@ -460,10 +466,11 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const card = await selectWorkspaceCard(page, pl.name);
 
     // #194: the shared Player always renders the position row, so "content
-    // arrived" is proven by the title leaving the idle text "Nič nehrá" (it
-    // becomes "Song — Artist" only when a real NowPlaying arrives).
+    // arrived" is proven by the title naming a song: neither the idle text
+    // "Nič nehrá" nor #225's "Načítavam…" (the song is not known yet). It
+    // becomes "Song — Artist" only when a real NowPlaying arrives.
     const title = card.getByTestId("player-title");
-    await expect(title).not.toHaveText("Nič nehrá", { timeout: 10_000 });
+    await expect(title).not.toHaveText(NOT_A_SONG, { timeout: 10_000 });
     const npText = await title.innerText();
     expect(
       npText.length,
@@ -611,9 +618,9 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     //  - Engine state machine advanced into Playing
     //  - Pipeline started decoding and emitted Started
     //  - NowPlaying reached the dashboard WebSocket
-    //  - Dashboard's shared Player left the idle title
+    //  - Dashboard's shared Player names the song (#225: not "Načítavam…")
     await expect(fastCard.getByTestId("player-title")).not.toHaveText(
-      "Nič nehrá",
+      NOT_A_SONG,
       { timeout: 15_000 },
     );
 
@@ -663,13 +670,13 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // #165: select ytfast in the work area (it is the on-program playlist).
     const card = await selectWorkspaceCard(page, FAST_PLAYLIST_NAME);
 
-    // 1. The shared Player must leave the idle title within 30 s. If the
-    //    engine is stuck in WaitingForScene (the original bug), the card
-    //    stays "Nič nehrá" and this times out.
+    // 1. The shared Player must name a song within 30 s. If the engine is
+    //    stuck in WaitingForScene (the original bug), the card stays
+    //    "Nič nehrá" (or "Načítavam…", #225) and this times out.
     await expect(
       card.getByTestId("player-title"),
       `card for ${FAST_PLAYLIST_NAME} must show a song after switching to ${FAST_SCENE_NAME}`,
-    ).not.toHaveText("Nič nehrá", { timeout: 30_000 });
+    ).not.toHaveText(NOT_A_SONG, { timeout: 30_000 });
 
     // 2. The position counter must advance. Read twice 2.5 s apart
     //    and assert strictly increasing — a frozen "0:00 / 4:44"
@@ -903,7 +910,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     await expect(
       card.getByTestId("player-title"),
       `card for ${FAST_PLAYLIST_NAME} must be Playing before the preset burst`,
-    ).not.toHaveText("Nič nehrá", { timeout: 30_000 });
+    ).not.toHaveText(NOT_A_SONG, { timeout: 30_000 });
 
     const readPosition = async () => {
       const text = (await card.getByTestId("player-pos").innerText()) ?? "";
@@ -1018,10 +1025,11 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // ("Stemy — <song>: <state>", testid karaoke-now-playing) is the #177
     // contract. The box may be idle during CI, so accept EITHER surface —
     // in ONE wait, each with its own text. Right after page.goto the Player
-    // shows the idle line until the first NowPlaying arrives (the WS replay
-    // carries no song), so "which surface is visible, then assert on it" is a
-    // race: run 36562133708 saw the idle line, then the playing header
-    // replaced it before the idle text was checked (element not found).
+    // shows "Mixér — načítavam…" (player-mixer-pending, #225) until the WS
+    // replay tells it the playlist's state and song, so "which surface is
+    // visible, then assert on it" would race (run 36562133708, before #225:
+    // the idle line, then the playing header replaced it before the idle text
+    // was checked).
     const header = page.locator('[data-testid="karaoke-now-playing"]', {
       hasText: /Stemy — /,
     });

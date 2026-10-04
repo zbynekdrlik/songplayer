@@ -976,3 +976,6 @@ mod tests_scene_change;
 #[cfg(test)]
 #[path = "tests_song_end.rs"]
 mod tests_song_end;
+#[cfg(test)]
+#[path = "tests_ws_replay.rs"]
+mod tests_ws_replay;

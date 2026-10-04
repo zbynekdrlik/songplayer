@@ -255,9 +255,10 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     await expect(page.getByTestId("player-playpause")).toContainText("⏸ Pauza", {
       timeout: 20000,
     });
-    // #184: the badge follows the program state, read from the health registry
-    // (`state == "Playing"` only when the wall shows this output). Assert the
-    // backend source AND the badge for the state the box is actually in.
+    // #184: the badge follows the program state. #225: it reads the live WS
+    // state (`Playing` = on program), the same signal as the state label; the
+    // health registry (`state == "Playing"` only when the wall shows this
+    // output) is the backend check. Assert both for the state the box is in.
     const dabingHealthState = async (): Promise<string> =>
       (await healthRow(request, dabingPid))?.state ?? "<no health row>";
     if (dabingOnProgram) {
