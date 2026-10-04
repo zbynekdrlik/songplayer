@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, TryRecvError};
 use tracing::{debug, error, info, warn};
 
+use crate::playback::decode_thread::spawn_decode_thread;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::{PacingStats, PlaybackStateLabel};
 use crate::playback::paced_output::{HandoffSink, PacedFeed, SharedHandoff};
@@ -417,20 +418,19 @@ pub(crate) fn decode_and_send_paced(
         let taps = taps.clone();
         let video_path = video_path.to_path_buf();
         let audio_path = audio_path.to_path_buf();
-        std::thread::Builder::new()
-            .name(format!("paced-decode-{playlist_id}"))
-            .spawn(move || {
-                run_decode_producer(
-                    video_path,
-                    audio_path,
-                    start_position_ms,
-                    shared,
-                    open_tx,
-                    taps,
-                    playlist_id,
-                );
-            })
-            .expect("spawn paced decode producer thread")
+        // The bench's decode thread starts the same way (#223 S0).
+        spawn_decode_thread(format!("paced-decode-{playlist_id}"), move || {
+            run_decode_producer(
+                video_path,
+                audio_path,
+                start_position_ms,
+                shared,
+                open_tx,
+                taps,
+                playlist_id,
+            );
+        })
+        .expect("spawn paced decode producer thread")
     };
 
     // The pre-roll's standby black (#147 song-start hole): the SAME cached NV12

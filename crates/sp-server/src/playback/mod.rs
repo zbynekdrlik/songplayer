@@ -11,6 +11,7 @@ pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
 pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
+pub mod decode_thread; // #223 S0: the one way a decode thread starts (producer + decode bench)
 mod engine_play;
 pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub(crate) mod frame_alloc; // #207: map a decoder FrameAlloc error to a dropped frame (pure classify + rate-limit)
