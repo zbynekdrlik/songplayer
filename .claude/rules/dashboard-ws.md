@@ -39,9 +39,11 @@ record: #225 comment 5917562242 (Approach 1), adapted in the
 - `runtime_pipeline.rs::remove_pipeline` sets the pipeline `Idle` and tells
   the open dashboards through `broadcast_state`, then forgets the playlist
   (`forget`), so an open dashboard and a reload agree (review rounds 2-3).
-- A client that LAGS (the broadcast channel dropped messages for it) is sent
-  the replay again (`websocket.rs::send_replay`), so a dropped state change
-  does not leave it stale until the playlist's next change.
+- A client that LAGS (the broadcast channel dropped messages for it)
+  resubscribes (`event_rx.resubscribe()`) and is sent the replay again
+  (`websocket.rs::send_replay`), so a dropped state change does not leave it
+  stale until the playlist's next change. Resubscribe FIRST (review round 4):
+  the buffered tail is older than the replay and would roll it back.
 - **No gap between the replay and the live stream:** `handle_ws` subscribes to
   the event bus BEFORE it builds the replay, and the engine records BEFORE it
   broadcasts. A message is in the replay, arrives live, or both. A live message
@@ -79,7 +81,9 @@ Why each rule:
   `single`, read "Jedna skladba" while the engine played Continuous). A mode
   change broadcasts the playlist's state (`handle_command` → `broadcast_state`),
   so the open dashboards learn it at once and the record is never stale.
-  The engine ignoring the DB mode is a separate, older gap.
+  The engine ignoring the DB mode (and never persisting `SetMode`) is a
+  separate, older gap, handed to the supervisor as a follow-up candidate
+  (#225 lane return); cite its ticket here once it is filed.
 - **Never the NDI-health sample again.** The old builder
   (`playback_state_replay`, deleted) read `ndi_health_registry.snapshots()`,
   refreshed on the 5 s health tick. Once the Player's badge reads the WS state,
@@ -103,12 +107,17 @@ Two consequences, both review round 3:
   message BEFORE its state. So anything that decides from the store must not
   decide on a half-told one:
   - the Dashboard's auto-select (`pages/dashboard.rs`) keeps a valid
-    selection until EVERY listed playlist's state is known (`state_known`),
-    else a song-but-no-state entry reads "nothing plays" and the work area
-    flips to the first playlist by name;
+    selection until EVERY listed playlist's state is known
+    (`selection::states_known`, the one predicate for such a reader, review
+    round 4), else a song-but-no-state entry reads "nothing plays" and the
+    work area flips to the first playlist by name;
   - the Player's preview Effect turns the preview off only once the state is
-    known (`state_known && !is_decoding`), so a running preview survives a
-    reconnect and comes back by itself.
+    known (`state_known && !is_decoding`). The `<video>` is unmounted while
+    the state is unknown (its socket closes), but `preview_on` survives, so
+    the preview is re-created by itself after the replay — no second click;
+  - the Player's toggle and mode select claim nothing until the state is
+    known (review round 4): a disabled "⏯" and a disabled "—" (value `""`,
+    `sp_core::player_view::{play_pause, mode_value}`).
 - **The mock must keep the server's order.** `handle_ws` writes the replay
   before it forwards anything from the bus, so a live message never
   overtakes it. The mock's `sendLive(ws, msg)` queues a live message for a

@@ -761,9 +761,13 @@ Right after a page load the Player showed "Nič nehrá" / "Mixér — nič nehr�
   The replay lands message by message (a song before its state), so nothing
   may decide on a half-told store (review round 3): the Dashboard's
   auto-select (`pages/dashboard.rs`) keeps a valid selection until every
-  listed playlist's state is known, and the Player's preview Effect turns the
-  preview off only once the state is known (`state_known && !is_decoding`),
-  so a running preview comes back by itself after a reconnect. Mock:
+  listed playlist's state is known (`selection::states_known`), and the
+  Player's preview Effect turns the preview off only once the state is known
+  (`state_known && !is_decoding`), so a running preview is re-created by
+  itself after a reconnect. Review round 4: the toggle and the mode select
+  claim nothing until known either — a disabled "⏯" and a disabled "—"
+  (`sp_core::player_view::{play_pause, mode_value}`; Playwright's click and
+  `selectOption` wait for enabled). Mock:
   `/__mock/ws-replay {no_song: […]}` + `/__mock/ws-drop`; live messages queue
   behind a socket's replay (`sendLive`), as on the server.
 - **Mock E2E against the old dist proves the RED** (the "Running the mock E2E
