@@ -78,7 +78,8 @@ impl Compositor {
     /// The compositor on DXGI's adapter `index` (the order of
     /// [`adapters`](crate::adapters)), whatever `pick_adapter` would choose:
     /// the device path [`Compositor::new`] takes, testable on a CI box whose
-    /// only adapter is the Basic Render Driver. Not for production.
+    /// only adapter is the Basic Render Driver. An index past the list is
+    /// [`GpuError::NoAdapter`]. Not for production.
     #[doc(hidden)]
     pub fn new_on_listed_adapter(index: usize) -> Result<Self, GpuError> {
         let ((device, context), adapter) = device::create_on_listed(index)?;
@@ -93,12 +94,13 @@ impl Compositor {
     ) -> Result<Self, GpuError> {
         let pipeline = Pipeline::new(&device)?;
         let target = RenderTarget::new(&device)?;
-        let feature_level = unsafe { device.GetFeatureLevel() }.0;
+        // D3D_FEATURE_LEVEL in hex, as the SDK writes it (0xb100 = 11.1).
+        let feature_level = format!("{:#x}", unsafe { device.GetFeatureLevel() }.0);
         info!(
             driver,
             adapter = %adapter.name,
             vram_mb = adapter.dedicated_video_memory / (1024 * 1024),
-            feature_level,
+            feature_level = %feature_level,
             width = CANVAS_WIDTH,
             height = CANVAS_HEIGHT,
             "sp-gpu: compositor ready (render target B8G8R8A8, shared)"

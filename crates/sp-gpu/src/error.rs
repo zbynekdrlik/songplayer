@@ -35,9 +35,12 @@ pub enum GpuError {
     /// Not Windows: there is no Direct3D 11.
     #[error("the GPU compositor runs on Windows only (Direct3D 11)")]
     Unsupported,
-    /// No adapter is a candidate (`pick_adapter`): every one is software or
-    /// has no dedicated video memory.
-    #[error("no hardware GPU adapter (every adapter is software or has no video memory)")]
+    /// No adapter to compose on: `pick_adapter` found no candidate (every
+    /// adapter is software or has no dedicated video memory), or the test
+    /// constructor's index is past DXGI's list.
+    #[error(
+        "no GPU adapter to compose on (none is a hardware adapter with video memory, or the index is past DXGI's list)"
+    )]
     NoAdapter,
     /// A picture that is not whole NV12: nothing was uploaded or drawn.
     #[error("invalid NV12 picture: {0}")]

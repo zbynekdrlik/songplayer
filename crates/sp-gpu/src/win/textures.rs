@@ -18,6 +18,7 @@ use super::failed;
 use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH};
 use crate::error::GpuError;
 use crate::picture::{Nv12Picture, Planes};
+use crate::readback::{mapped_len, unpad_rows};
 use crate::residency::Resident;
 
 /// A one-mip, one-sample 2D texture's description.
@@ -209,21 +210,20 @@ pub(super) fn read_back(
     }
     .map_err(|e| failed("Map", &e))?;
     let pitch = mapped.RowPitch as usize;
-    let mut out = Vec::with_capacity(row * rows);
-    if !mapped.pData.is_null() && pitch >= row {
-        let base = mapped.pData.cast::<u8>().cast_const();
-        for y in 0..rows {
-            // SAFETY: the mapped staging texture is `rows` rows of `pitch`
-            // bytes, each holding `row` bytes of pixels.
-            out.extend_from_slice(unsafe { std::slice::from_raw_parts(base.add(y * pitch), row) });
+    let packed = match mapped_len(pitch, row, rows) {
+        Some(len) if !mapped.pData.is_null() => {
+            // SAFETY: the mapped staging texture is `rows` rows `pitch` bytes
+            // apart (`pitch` ≥ `row`, `mapped_len`), so its first `len`
+            // bytes end with the last row's pixels, inside the mapping, which
+            // stays mapped until the Unmap below.
+            let bytes =
+                unsafe { std::slice::from_raw_parts(mapped.pData.cast::<u8>().cast_const(), len) };
+            unpad_rows(bytes, pitch, row, rows)
         }
-    }
+        _ => None,
+    };
     unsafe { context.Unmap(staging, 0) };
-    if out.len() == row * rows {
-        Ok(out)
-    } else {
-        Err(GpuError::NoObject {
-            call: "Map (the mapped staging rows)",
-        })
-    }
+    packed.ok_or(GpuError::NoObject {
+        call: "Map (the mapped staging rows)",
+    })
 }

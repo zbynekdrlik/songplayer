@@ -152,8 +152,8 @@ build step, and WARP and the RTX run the same source. A compile error is
 - `src/win/` is `#[cfg(windows)]` and excluded from the Linux mutation gate
   (`.cargo/mutants.toml`). Every decision lives in a pure, Linux-tested module:
   `adapter`, `picture`, `composition`, `quad`, `residency`, `color`,
-  `reference`, `error`. Keep it that way: logic added inside `win/` is
-  untested by the gate.
+  `reference`, `error`, `readback` (the mapped rows packed). Keep it that
+  way: logic added inside `win/` is untested by the gate.
 - The off-Windows `Compositor` (`stub.rs`) is an uninhabited enum. `new` /
   `new_warp` return `Unsupported`; its methods are `mutants::skip`, since no
   value exists to call them on.

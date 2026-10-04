@@ -35,6 +35,7 @@ mod composition;
 mod error;
 mod picture;
 mod quad;
+mod readback;
 pub mod reference;
 mod residency;
 mod stats;
@@ -55,6 +56,7 @@ pub use error::{
 };
 pub use picture::{MAX_PICTURE_SIDE, Nv12Picture, PictureError, Plane, Planes};
 pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect};
+pub use readback::{mapped_len, unpad_rows};
 pub use residency::{Resident, Upload, upload_for};
 pub use stats::ComposeStats;
 
