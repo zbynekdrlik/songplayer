@@ -134,7 +134,7 @@ One terse line per issue/round: decisions, key commits, verification.
   - r3: 7ff74cd6 → 8b560c26;
   - r4: 63448628 → 79e6ce1c.
 - Tests:
-  - `tests_ws_replay.rs` (4);
+  - `tests_ws_replay.rs` (3);
   - `dashboard_replay_tests.rs` (10);
   - `models_playlists.rs` (1);
   - `player_view` (7);
