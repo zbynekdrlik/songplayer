@@ -104,11 +104,20 @@ impl PlaybackEngine {
     /// Removing it from the map drops the `PlaybackPipeline`, whose `Drop`
     /// sends `Shutdown` to its thread (destroying the NDI sender) — the same
     /// contract `run()`'s `pipelines.clear()` relies on. Also drops the
-    /// playlist's genlock lock-state window. No-op if no pipeline exists.
+    /// playlist's genlock lock-state window and (#225) what the dashboard
+    /// replay last recorded for it. No-op if no pipeline exists.
     pub fn remove_pipeline(&mut self, playlist_id: i64) {
+        // #225: it goes Idle first, told through the one state sender, so the
+        // open dashboards agree with a reload's replay (a no-op without a
+        // pipeline).
+        if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
+            pp.state = PlayState::Idle;
+        }
+        self.broadcast_state(playlist_id);
         match self.pipelines.remove(&playlist_id) {
             Some(_pp) => {
                 self.lock_windows.remove(&playlist_id);
+                super::dashboard_replay::global().forget(playlist_id);
                 info!(
                     playlist_id,
                     "removed playback pipeline (runtime delete/deactivate)"

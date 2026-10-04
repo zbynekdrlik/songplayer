@@ -10,6 +10,7 @@ pub mod band_pool; // #223: the SP-program sender's persistent row-band workers 
 pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
+pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 mod engine_play;
 pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub(crate) mod frame_alloc; // #207: map a decoder FrameAlloc error to a dropped frame (pure classify + rate-limit)
@@ -120,8 +121,8 @@ fn should_send_position_update(elapsed_ms: u64) -> bool {
 /// [`WsPlaybackState`]. #170: a pipeline the engine holds as `Playing` but
 /// whose scene is OFF program (a hold, or #221 L4b a ▶ off air; the Player
 /// tells both from a paused pipeline by the transport) must map to
-/// `WaitingForScene`, matching the WS replay built from `handle_health_snapshot`'s
-/// `(Playing, Playing, scene_active = false) → Paused` reconciliation. A live
+/// `WaitingForScene`, as `handle_health_snapshot` reconciles the health label
+/// `(Playing, Playing, scene_active = false) → Paused`. A live
 /// `Playing` for such a pipeline flips a paused selector row to Playing, the
 /// selector re-orders it to the top, and a click races the moving row.
 fn play_state_to_ws(state: &PlayState, scene_active: bool) -> WsPlaybackState {
@@ -129,7 +130,7 @@ fn play_state_to_ws(state: &PlayState, scene_active: bool) -> WsPlaybackState {
         PlayState::Idle => WsPlaybackState::Idle,
         PlayState::WaitingForScene => WsPlaybackState::WaitingForScene,
         // #170: Playing but scene off program == paused (dark wall) -> the
-        // dashboard's "waiting for scene", matching the health-label replay.
+        // dashboard's "waiting for scene" (the WS replay re-tells it, #225).
         PlayState::Playing { .. } if !scene_active => WsPlaybackState::WaitingForScene,
         PlayState::Playing { .. } => WsPlaybackState::Playing,
     }
@@ -603,6 +604,7 @@ impl PlaybackEngine {
             if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                 pp.mode = *new_mode;
             }
+            self.broadcast_state(playlist_id); // #225: dashboards learn the mode it plays
         }
         // #215: a skip of a playlist held off program starts no song there.
         if matches!(cmd, PlayEvent::Skip) && self.pause_if_held(playlist_id, "skipped").await {
@@ -776,7 +778,7 @@ impl PlaybackEngine {
             pp.last_now_playing_broadcast = Some(Instant::now());
         }
 
-        let _ = self.ws_event_tx.send(ServerMsg::NowPlaying {
+        self.send_dashboard(ServerMsg::NowPlaying {
             playlist_id,
             video_id,
             song,
@@ -976,3 +978,6 @@ mod tests_scene_change;
 #[cfg(test)]
 #[path = "tests_song_end.rs"]
 mod tests_song_end;
+#[cfg(test)]
+#[path = "tests_ws_replay.rs"]
+mod tests_ws_replay;

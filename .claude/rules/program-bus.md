@@ -478,8 +478,11 @@ nothing).
   playlist its `/play` started off air broadcasts `Playing`. Every engine
   `PlaybackStateChanged` goes through `engine_play.rs::broadcast_state`
   (review round 7): a new broadcast site calls it, never builds the
-  message inline (the WS on-connect replay in `api/websocket.rs` is the
-  one separate builder).
+  message inline. #225: it sends through `send_dashboard`, which records
+  it for the WS on-connect replay (`dashboard-ws.md`), so a new dashboard
+  is told the same state. The replay (`DashboardReplay::replay`) rebuilds
+  the message from that record, and makes up an `Idle` for a playlist the
+  engine never told; it no longer reads the NDI-health sample.
 - **`/api/v1/status`**: `active_scene` = the one resolver,
   `active_playlist_ids` = the on-air set, ascending
   (`api/routes_status.rs::on_air_fields`; `routes.rs` is at the cap). A

@@ -116,3 +116,33 @@ One terse line per issue/round: decisions, key commits, verification.
 - Reviews (fresh-context, read-only): r1 0🔴2🟡4🔵 (fixed 9177cd49 + e2d1bf18: `serve` = `split` → `feed_vban` → `submit_video`, the order test claims only the held point, the acceptance diffs the counters, `end_mix_run` after the submit, a neither-side test), r2 0🔴0🟡2🔵 (b5172508), r3 0🔴0🟡2🔵 (7507058c: the date-step caveat), r4 0🔴0🟡2🔵 (d793b8ed, docs only).
 - Integration note: origin/dev moved to `chore: release 0.69.0` during the lane; VERSION 0.69.0-dev.17 (as dispatched) needs the re-bump at integration.
 - Not local-verifiable (Tier-0): the build, the Rust tests, clippy, the mutation gate (69 mutants listed, each mapped to a killer or unviable by four review rounds); the box acceptance (15 min dev1 capture, `health.timing` counter diff) is the main session's.
+
+## #225 — the Player never claims a state it was not told; the badge reads the WS state (0.70.0-dev.5, lane worktree-agent-ad996fd54da6a9402)
+
+- Design 5917562242 (main, Approach 1). STEP 0 c5975001630; Anchors-confirmed c5975004341, adapted: the replay re-tells the engine's last broadcast, not the 5 s health sample; it tells every playlist; pure `sp_core::player_view`.
+- Server: `playback/dashboard_replay.rs`, a process-global record that the engine's one send point `send_dashboard` writes.
+  - The send sites: `broadcast_state` (incl. SetMode and `remove_pipeline`), Started, and the position ticks.
+  - `on_connect_replay` covers every DB id (`db/models_playlists.rs`): a non-Idle playlist gets its last NowPlaying first, then its state; the rest an explicit Idle; the engine's mode.
+  - A lagged client resubscribes, then gets the replay.
+- UI: `NowPlayingInfo.state_known`; `player_view` covers the view, title, label, badge, toggle and mode.
+  - The store forgets on every socket open/close; a live Idle drops the song.
+  - The auto-select waits for `selection::states_known`.
+  - The preview Effect waits for the state.
+- Commits: refactor bb3bc6b8 (the seam); RED d0f580e3 → GREEN f23fcfaf. Review rounds, each RED → GREEN:
+  - r1: f963fd2e → 24f37f5e;
+  - r2: 1d47116a → d17f9943;
+  - r3: 7ff74cd6 → 8b560c26;
+  - r4: 63448628 → 79e6ce1c.
+- Tests:
+  - `tests_ws_replay.rs` (3);
+  - `dashboard_replay_tests.rs` (10);
+  - `models_playlists.rs` (1);
+  - `player_view` (7);
+  - `e2e/player-known-state.spec.ts` (7, MutationObserver logs). The mock: `sendReplay`, `sendLive` (the replay-first order), `/__mock/ws-replay {delay_ms, now_playing_delay_ms, no_song}`, `/__mock/ws-drop`. Box specs use `NOT_A_SONG`.
+- Reviews (fresh-context, read-only):
+  - r1 0🔴 2🟡 9🔵: DB mode → engine mode + SetMode broadcast; E2E windows from the log.
+  - r2 0🔴 2🟡 7🔵: forget on reconnect; Idle drops the song; removed pipeline told Idle; lagged replay.
+  - r3 1🔴 1🟡 4🔵: the mock's live messages overtook the replay; preview + selection through a reconnect.
+  - r4 0🔴 2🟡 6🔵: toggle/mode neutral until known; forget + Started pinned; resubscribe; `states_known`.
+- Follow-up candidate (supervisor): the engine ignores `playlists.playback_mode` and `PUT …/mode` is never persisted.
+- Not local-verifiable (Tier-0): the build, the Rust tests, clippy, the mutation gate (35+ mutants mapped by four review rounds), the new UI's E2E (the 7 new specs fail on the old dist; the rest of the suite passes with the new mock).

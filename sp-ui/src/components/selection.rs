@@ -23,6 +23,18 @@ pub fn playback_glyph(np: &HashMap<i64, NowPlayingInfo>, id: i64) -> &'static st
     }
 }
 
+/// #225 review rounds 2-4: has the server told EVERY listed playlist's state
+/// (`state_known`) since this socket connected? The on-connect replay lands
+/// message by message (a playing playlist's song a message before its
+/// state), and a reconnect forgets everything first, so a reader that decides
+/// from `store.now_playing` across playlists (the Dashboard's auto-select)
+/// must wait for this, never decide on a half-told store.
+pub fn states_known(playlists: &[Playlist], np: &HashMap<i64, NowPlayingInfo>) -> bool {
+    playlists
+        .iter()
+        .all(|p| np.get(&p.id).is_some_and(|i| i.state_known))
+}
+
 /// Is this playlist currently Playing?
 pub fn is_playing(np: &HashMap<i64, NowPlayingInfo>, id: i64) -> bool {
     matches!(np.get(&id).map(|i| i.state), Some(PlaybackState::Playing))

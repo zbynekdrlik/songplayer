@@ -107,6 +107,12 @@ pub struct NowPlayingInfo {
     /// on/off-program folding. The Player's play/pause label reads this.
     pub transport: TransportState,
     pub mode: PlaybackMode,
+    /// #225: a `PlaybackStateChanged` reached this playlist since the page
+    /// loaded, so `state` / `transport` / `mode` are what the server said, not
+    /// the defaults of an entry a `NowPlaying` created. The server's
+    /// on-connect replay tells every playlist's state, so until it lands the
+    /// Player shows "Načítavam…" and a neutral badge, never "Nič nehrá".
+    pub state_known: bool,
     pub line_en: Option<String>,
     pub line_sk: Option<String>,
     pub prev_line_en: Option<String>,
@@ -120,7 +126,8 @@ impl NowPlayingInfo {
     /// `PlaybackStateChanged`-only shape (a live state with no preceding
     /// `NowPlaying`) inserts a zero entry — empty song, zero duration — which
     /// the card must render as idle, not as a "0:00 / 0:00" now-playing block
-    /// (#170).
+    /// (#170). #225: as "Načítavam…" instead while its transport plays (the
+    /// song has not arrived yet) — `sp_core::player_view::now_playing_view`.
     pub fn has_now_playing_content(&self) -> bool {
         !self.song.is_empty() || self.duration_ms > 0
     }
@@ -218,6 +225,15 @@ impl DashboardStore {
         }
     }
 
+    /// #225 review round 2: forget everything a socket told about the
+    /// playlists. Called when a socket opens and when it closes: the next
+    /// socket's on-connect replay re-tells every playlist, and until then the
+    /// Player shows "Načítavam…", never the last socket's song as if it were
+    /// still loaded (a server restart — every deploy — drops them all).
+    pub fn forget_now_playing(&self) {
+        self.now_playing.set(HashMap::new());
+    }
+
     /// Dispatch a [`ServerMsg`] to the appropriate signal.
     pub fn dispatch(&self, msg: ServerMsg) {
         match msg {
@@ -239,6 +255,7 @@ impl DashboardStore {
                         state: PlaybackState::default(),
                         transport: TransportState::default(),
                         mode: PlaybackMode::default(),
+                        state_known: false,
                         line_en: None,
                         line_sk: None,
                         prev_line_en: None,
@@ -259,11 +276,17 @@ impl DashboardStore {
                 mode,
                 transport,
             } => {
+                // #225 review round 2: `Idle` = no video loaded (a pipeline
+                // never returns to Idle after a song; a removed one is told
+                // Idle), so the old song goes with it, as a reload's replay
+                // says: a fresh entry, not the old one with a new state.
+                let keeps_song = state != PlaybackState::Idle;
                 self.now_playing.update(|map| {
-                    if let Some(entry) = map.get_mut(&playlist_id) {
+                    if let Some(entry) = map.get_mut(&playlist_id).filter(|_| keeps_song) {
                         entry.state = state;
                         entry.transport = transport;
                         entry.mode = mode;
+                        entry.state_known = true;
                     } else {
                         map.insert(
                             playlist_id,
@@ -276,6 +299,7 @@ impl DashboardStore {
                                 state,
                                 transport,
                                 mode,
+                                state_known: true,
                                 line_en: None,
                                 line_sk: None,
                                 prev_line_en: None,

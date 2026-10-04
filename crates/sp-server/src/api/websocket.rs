@@ -1,19 +1,16 @@
 //! Dashboard WebSocket handler — bidirectional message relay between
 //! the UI and the server event bus.
 
-use std::collections::HashMap;
-
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
+use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 use sqlx::Row;
 use tracing::{debug, info, warn};
 
-use sp_core::playback::{PlaybackMode, PlaybackState as WsPlaybackState};
 use sp_core::ws::{ClientMsg, ServerMsg};
 
-use crate::playback::ndi_health::{PipelineHealthSnapshot, PlaybackStateLabel};
 use crate::{AppState, EngineCommand, SyncRequest};
 
 /// Axum handler that upgrades an HTTP request to a WebSocket connection.
@@ -55,31 +52,13 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
             let _ = write.send(Message::Text(json.into())).await;
         }
     }
-    // Replay the current per-playlist playback state so a dashboard opened
-    // mid-song sees the playing card immediately, instead of Idle until the
-    // next transition (#15 live preview + karaoke panel key off this state).
+    // Replay every playlist's playback state and a playing one's song so a
+    // dashboard opened mid-song shows what plays at once, instead of Idle or
+    // "Nič nehrá" until the next broadcast (#15 live preview + karaoke panel
+    // key off this state; #225 the song + an explicit Idle per playlist).
     {
-        let modes: HashMap<i64, PlaybackMode> =
-            match crate::db::models::get_active_playlists(&state.pool).await {
-                Ok(playlists) => playlists
-                    .into_iter()
-                    .map(|p| (p.id, PlaybackMode::from_str_lossy(&p.playback_mode)))
-                    .collect(),
-                Err(e) => {
-                    warn!("playback-state replay: failed to load playlist modes: {e}");
-                    HashMap::new()
-                }
-            };
-        let msgs = playback_state_replay(&state.ndi_health_registry.snapshots(), &modes);
-        debug!(
-            count = msgs.len(),
-            "replaying playback state to new WS client"
-        );
-        for msg in &msgs {
-            if let Ok(json) = serde_json::to_string(msg) {
-                let _ = write.send(Message::Text(json.into())).await;
-            }
-        }
+        let count = send_replay(&mut write, &state).await;
+        debug!(count, "replaying playback state to new WS client");
     }
 
     loop {
@@ -136,7 +115,14 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(n, "WebSocket client lagged, dropped messages");
+                        // #225: a dropped state change would leave the client on
+                        // a stale state until the next one, so re-tell the truth.
+                        // Review round 4: resubscribe FIRST (the buffered tail is
+                        // older than the replay and would roll the client back),
+                        // then the replay, as on connect.
+                        warn!(n, "WebSocket client lagged, dropped messages; re-sending the replay");
+                        event_rx = event_rx.resubscribe();
+                        send_replay(&mut write, &state).await;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         info!("event channel closed, closing WebSocket");
@@ -235,47 +221,34 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
     }
 }
 
-/// Map an NDI-health snapshot's [`PlaybackStateLabel`] to the wire
-/// [`WsPlaybackState`] used by [`ServerMsg::PlaybackStateChanged`]. The WS
-/// protocol has no `Paused` variant, so a paused pipeline (including a
-/// Playing-off-program pipeline, which `handle_health_snapshot` reconciles to
-/// `Paused`) maps to the closest active-but-not-playing state,
-/// `WaitingForScene`.
-fn label_to_ws_state(label: &PlaybackStateLabel) -> WsPlaybackState {
-    match label {
-        PlaybackStateLabel::Idle => WsPlaybackState::Idle,
-        PlaybackStateLabel::WaitingForScene => WsPlaybackState::WaitingForScene,
-        PlaybackStateLabel::Playing => WsPlaybackState::Playing,
-        PlaybackStateLabel::Paused => WsPlaybackState::WaitingForScene,
+/// Send [`on_connect_replay`] to one client; returns how many messages.
+async fn send_replay(write: &mut SplitSink<WebSocket, Message>, state: &AppState) -> usize {
+    let msgs = on_connect_replay(state).await;
+    for msg in &msgs {
+        if let Ok(json) = serde_json::to_string(msg) {
+            let _ = write.send(Message::Text(json.into())).await;
+        }
     }
+    msgs.len()
 }
 
-/// Build the initial `PlaybackStateChanged` replay for a freshly connected
-/// dashboard: one message per pipeline snapshot whose state is NOT `Idle`
-/// (Idle is the dashboard default, so replaying it is pure noise). `modes` maps
-/// `playlist_id` → configured [`PlaybackMode`]; a snapshot for a playlist not
-/// in the map falls back to `PlaybackMode::default()`.
-///
-/// #201 round 2: `state` is the scene-reconciled label (a Playing-off-program
-/// pipeline reads `WaitingForScene`), while `transport` is read DIRECTLY from
-/// the snapshot's raw `transport` field (`handle_health_snapshot` derives it
-/// from the pipeline's own `reported_state`). So a dashboard that connects while
-/// an off-program dub decodes replays `transport: Playing` (`⏸ Pauza`) at once,
-/// instead of the paused label — no second label→transport mapping here.
-fn playback_state_replay(
-    snapshots: &[PipelineHealthSnapshot],
-    modes: &HashMap<i64, PlaybackMode>,
-) -> Vec<ServerMsg> {
-    snapshots
-        .iter()
-        .filter(|s| s.state != PlaybackStateLabel::Idle)
-        .map(|s| ServerMsg::PlaybackStateChanged {
-            playlist_id: s.playlist_id,
-            state: label_to_ws_state(&s.state),
-            mode: modes.get(&s.playlist_id).copied().unwrap_or_default(),
-            transport: s.transport,
-        })
-        .collect()
+/// The messages a newly connected dashboard is sent first, after the OBS and
+/// tools status (#225): for EVERY playlist in the DB, the engine's last
+/// dashboard message about it (`playback/dashboard_replay.rs`): a playing
+/// one's song, then its state; any other an explicit `Idle`; each in the mode
+/// the engine plays. So the Player knows from the first batch what plays and
+/// what does not. `handle_ws` subscribes to the event bus before it calls
+/// this, so nothing the engine sends in between is lost. A failed DB read
+/// still replays every playlist the engine has told the dashboard about.
+pub(crate) async fn on_connect_replay(state: &AppState) -> Vec<ServerMsg> {
+    let ids = match crate::db::models_playlists::all_playlist_ids(&state.pool).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            warn!("on-connect replay: failed to load the playlists: {e}");
+            Vec::new()
+        }
+    };
+    crate::playback::dashboard_replay::global().replay(&ids)
 }
 
 // ---------------------------------------------------------------------------
@@ -285,124 +258,6 @@ fn playback_state_replay(
 #[cfg(test)]
 mod tests {
     use super::*;
-    // #201 round 2: `transport_from_label` was deleted (the replay reads the
-    // snapshot's raw `transport`), so `TransportState` is now only named in the
-    // tests — import it here to avoid an unused-import in the lib target.
-    use sp_core::playback::TransportState;
-
-    fn snapshot(
-        playlist_id: i64,
-        state: PlaybackStateLabel,
-        transport: TransportState,
-    ) -> PipelineHealthSnapshot {
-        use crate::playback::ndi_health::{AudioStats, PacingStats};
-        PipelineHealthSnapshot {
-            playlist_id,
-            ndi_name: format!("SP-{playlist_id}"),
-            state,
-            transport,
-            connections: 1,
-            frames_submitted_total: 0,
-            frames_submitted_last_5s: 0,
-            observed_fps: 24.0,
-            nominal_fps: 24.0,
-            source_fps: 24.0,
-            last_submit_ts: None,
-            last_heartbeat_ts: None,
-            consecutive_bad_polls: 0,
-            degraded_reason: None,
-            clock: crate::playback::clock_health::ClockHealth::default(),
-            pacing: PacingStats::default(),
-            audio: AudioStats::default(),
-            lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
-            lock_reason: String::new(),
-            burn_on: false,
-            recovery_step: None,
-            sender_url: None,
-        }
-    }
-
-    #[test]
-    fn replay_maps_playing_and_skips_idle() {
-        let snaps = vec![
-            snapshot(1, PlaybackStateLabel::Playing, TransportState::Playing),
-            snapshot(2, PlaybackStateLabel::Idle, TransportState::Idle),
-        ];
-        let mut modes = HashMap::new();
-        modes.insert(1, PlaybackMode::Loop);
-        let msgs = playback_state_replay(&snaps, &modes);
-        // Idle (playlist 2) skipped — only playlist 1 replayed.
-        assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            ServerMsg::PlaybackStateChanged {
-                playlist_id,
-                state,
-                mode,
-                transport,
-            } => {
-                assert_eq!(*playlist_id, 1);
-                assert_eq!(*state, WsPlaybackState::Playing);
-                assert_eq!(*mode, PlaybackMode::Loop);
-                // #201: an on-program Playing snapshot replays transport Playing.
-                assert_eq!(*transport, TransportState::Playing);
-            }
-            other => panic!("expected PlaybackStateChanged, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn replay_unknown_playlist_uses_default_mode_and_paused_maps_to_waiting() {
-        let snaps = vec![snapshot(
-            7,
-            PlaybackStateLabel::Paused,
-            TransportState::Paused,
-        )];
-        // No mode entry for playlist 7 → default mode.
-        let msgs = playback_state_replay(&snaps, &HashMap::new());
-        assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            ServerMsg::PlaybackStateChanged {
-                state,
-                mode,
-                transport,
-                ..
-            } => {
-                assert_eq!(*state, WsPlaybackState::WaitingForScene);
-                assert_eq!(*mode, PlaybackMode::default());
-                // #201: a Paused label (a Playing-off-program pipeline the health
-                // registry reconciled) replays transport Paused.
-                assert_eq!(*transport, TransportState::Paused);
-            }
-            other => panic!("expected PlaybackStateChanged, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn replay_reads_snapshot_transport_not_label() {
-        // #201 round 2: the on-connect replay must read the snapshot's RAW
-        // transport, NOT a second mapping from the scene-reconciled label. An
-        // off-program decoding pipeline is stored `state: Paused` (reconciled)
-        // but `transport: Playing` (raw) — the replay must carry
-        // `transport: Playing` so a reloaded dashboard reads `⏸ Pauza` at once.
-        let snaps = vec![snapshot(
-            9,
-            PlaybackStateLabel::Paused,
-            TransportState::Playing,
-        )];
-        let msgs = playback_state_replay(&snaps, &HashMap::new());
-        assert_eq!(msgs.len(), 1);
-        match &msgs[0] {
-            ServerMsg::PlaybackStateChanged {
-                state, transport, ..
-            } => {
-                // The scene-reconciled label still maps to WaitingForScene …
-                assert_eq!(*state, WsPlaybackState::WaitingForScene);
-                // … but the transport is the RAW decoding state on the snapshot.
-                assert_eq!(*transport, TransportState::Playing);
-            }
-            other => panic!("expected PlaybackStateChanged, got {other:?}"),
-        }
-    }
 
     #[test]
     fn client_msg_deserializes() {

@@ -196,7 +196,7 @@ impl super::PlaybackEngine {
             pp.cached_duration_ms
         };
 
-        let _ = self.ws_event_tx.send(ServerMsg::NowPlaying {
+        self.send_dashboard(ServerMsg::NowPlaying {
             playlist_id,
             video_id,
             song,

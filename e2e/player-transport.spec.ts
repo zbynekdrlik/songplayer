@@ -8,8 +8,8 @@ import { test, expect, APIRequestContext } from "@playwright/test";
 // (`○ Mimo programu`). A genuinely paused off-program pipeline (transport
 // Paused) reads `▶ Prehrať`. Driven with the mock tick's `transport` field.
 //
-// The mock's Dabing playlist is id 500; it is NOT in the ndiHealth fixture, so
-// `on_program` is false → the badge reads `○ Mimo programu`. Zero console
+// The mock's Dabing playlist is id 500. #225: the badge reads the WS state,
+// so `WaitingForScene` (off program) → `○ Mimo programu`. Zero console
 // errors, per browser-console-zero-errors.md.
 
 const ALLOWED_CONSOLE = [

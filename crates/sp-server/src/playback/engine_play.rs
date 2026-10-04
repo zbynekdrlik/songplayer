@@ -129,7 +129,7 @@ impl PlaybackEngine {
             }
 
             // #170: a PlayVideo on an off-program playlist shows
-            // WaitingForScene, matching the health-label replay; #201: the
+            // WaitingForScene (the WS replay re-tells it, #225); #201: the
             // transport is the raw decoding state (Playing here), so an
             // off-program dub reads `⏸ Pauza` while it plays.
             self.broadcast_state(playlist_id);
@@ -205,13 +205,14 @@ impl PlaybackEngine {
     /// Tell the dashboard `playlist_id`'s state (`PlaybackStateChanged`):
     /// the wire state folds in whether it is on program (#170: `Playing` off
     /// program is `WaitingForScene`), the transport is the raw decoding
-    /// state (#201). The engine's one sender of it (the WS on-connect replay
-    /// in `api/websocket.rs` builds its own from the health labels).
+    /// state (#201). The engine's one sender of it; #225: it goes through
+    /// `send_dashboard`, so the WS on-connect replay tells a new dashboard
+    /// the same state (`dashboard_replay.rs`).
     pub(super) fn broadcast_state(&self, playlist_id: i64) {
         let Some(pp) = self.pipelines.get(&playlist_id) else {
             return;
         };
-        let _ = self.ws_event_tx.send(ServerMsg::PlaybackStateChanged {
+        self.send_dashboard(ServerMsg::PlaybackStateChanged {
             playlist_id,
             state: play_state_to_ws(&pp.state, pp.scene_active.load(Ordering::Acquire)),
             mode: pp.mode,
