@@ -728,14 +728,19 @@ impl super::PlaybackEngine {
 }
 
 /// Windows: create the `SP-program` sender on the shared NDI backend and run
-/// [`run_program_loop`] on its own thread.
+/// [`run_program_loop`] on its own thread. #221 review round 2: when there is
+/// no sender (no NDI SDK, the sender or the thread could not be created),
+/// nothing will ever poll its receivers, so the bus reads a polled 0 at once
+/// (`degraded_reason` names it instead of waiting for a first poll).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus: Arc<ProgramBus>) {
     let Some(backend) = backend else {
         warn!("NDI SDK not available — no SP-program output");
+        bus.set_connections(0);
         return;
     };
+    let no_thread = bus.clone();
     let spawned = std::thread::Builder::new()
         .name("program-output".into())
         .spawn(move || {
@@ -745,6 +750,7 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
                 Ok(s) => s,
                 Err(e) => {
                     tracing::error!(%e, "failed to create the SP-program NDI sender");
+                    bus.set_connections(0);
                     return;
                 }
             };
@@ -766,6 +772,7 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
         });
     if let Err(e) = spawned {
         tracing::error!(%e, "failed to spawn the SP-program output thread");
+        no_thread.set_connections(0);
     }
 }
 
