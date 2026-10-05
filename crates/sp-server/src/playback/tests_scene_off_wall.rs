@@ -196,6 +196,7 @@ async fn going_off_program_alone_clears_the_obs_title_text_too() {
     let (obs_tx, mut obs_rx) = mpsc::channel(16);
     engine.obs_cmd_tx = Some(obs_tx);
     play(&mut engine, 7, 42, Window::Due);
+    engine.on_air.replace(Default::default()); // the cut to "OBS manuál"
     sent(&mut rx);
 
     engine.handle_scene_change(7, false).await;

@@ -5,12 +5,13 @@
 //! Covers:
 //! - Hello (op 0) → Identify (op 1) → Identified (op 2) handshake with no auth.
 //! - RequestResponse (op 7) replies to `GetInputList`, `GetInputSettings`,
-//!   `GetSceneItemList`, `GetSceneList` and `SetCurrentProgramScene`.
+//!   `GetSceneList` and `SetCurrentProgramScene` (anything else: an empty
+//!   success).
 //! - Pushing events (op 5) via a control channel.
 //!
 //! #221 L6 deleted the OBS client's scene detection and transition reader,
-//! and with them this harness's knobs for their tests (#218's failed / held
-//! lookups, #219's transition and client close).
+//! and with them this harness's knobs for their tests (the scene items and
+//! #218's failed / held lookups, #219's transition and client close).
 //!
 //! Rust convention: files under `tests/common/` are automatically excluded
 //! from the integration-test binary list, so each test file can `mod common;`
@@ -38,9 +39,6 @@ pub struct FakeObsState {
     /// Map of OBS input name → an `inputSettings` JSON object (for NDI inputs,
     /// this typically contains an `ndi_source_name` field).
     pub input_settings: HashMap<String, Value>,
-    /// Map of scene name → list of scene items, each tuple is
-    /// `(sourceName, isGroup, inputKind)`.
-    pub scene_items: HashMap<String, Vec<(String, bool, String)>>,
     /// When true, the fake server sends a WebSocket Close frame immediately
     /// after replying with `Identified`. This reproduces the 2026-05-03
     /// production failure mode behind #80: a clean server-side close
@@ -131,15 +129,6 @@ impl FakeObsServer {
     /// #213: a snapshot of the fake state (request log, program scene, …).
     pub async fn state(&self) -> FakeObsState {
         self.state.lock().await.clone()
-    }
-
-    /// Mutate the fake state (e.g. to simulate a new NDI input appearing).
-    pub async fn update_state<F>(&self, f: F)
-    where
-        F: FnOnce(&mut FakeObsState),
-    {
-        let mut s = self.state.lock().await;
-        f(&mut s);
     }
 
     /// Shut down the accept loop.
@@ -310,28 +299,6 @@ async fn handle_request(req: &Value, state: &Arc<Mutex<FakeObsState>>) -> Value 
                 .cloned()
                 .unwrap_or_else(|| "unknown".to_string());
             json!({ "inputSettings": settings, "inputKind": kind })
-        }
-        "GetSceneItemList" => {
-            let scene_name = req["d"]["requestData"]["sceneName"].as_str().unwrap_or("");
-            let s = state.lock().await;
-            let items: Vec<Value> = s
-                .scene_items
-                .get(scene_name)
-                .map(|list| {
-                    list.iter()
-                        .enumerate()
-                        .map(|(i, (name, is_group, kind))| {
-                            json!({
-                                "sourceName": name,
-                                "sceneItemId": i as i64 + 1,
-                                "isGroup": is_group,
-                                "inputKind": kind,
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            json!({ "sceneItems": items })
         }
         "GetSceneList" => {
             let s = state.lock().await;

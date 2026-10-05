@@ -362,7 +362,8 @@ async fn resolume_recovery_re_sends_hide_for_a_song_without_lyrics() {
 /// Review round 5: two playing, on-program playlists share the subtitle
 /// clips, one with a line and one without lyrics. The recovery must not let
 /// the blank one's HideSubtitles land after (HashMap order) and clear the
-/// other's line: the line goes out, and no Hide.
+/// other's line: the line goes out, and no Hide. (#221: only the wall owner
+/// writes the wall — 99, installed last — so 98 sends nothing at all.)
 #[tokio::test]
 async fn resolume_recovery_never_hides_another_on_program_playlist_s_line() {
     let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;

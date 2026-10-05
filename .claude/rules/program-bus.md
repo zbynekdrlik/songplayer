@@ -446,7 +446,13 @@ itself: the OBS client no longer reads cg OBS's program at all
     (`wall_after_owner_on`): no blank flash. An engine unit test that wants
     a wall write therefore puts its playlist on air as the owner first
     (`PlaybackEngine::put_on_air_for_test`), as production does before its
-    ON.
+    ON. Residual (review round 1 of lane 2): the blank is tied to the OFF
+    of a playlist whose scene WAS on program (`went_off_program`). A
+    playlist played off program by hand, cut to and away again before the
+    engine handled its ON (the stale ON is dropped), may push a Presenter
+    line while it owned the wall (the Presenter push is owner-gated, not
+    scene-gated); its OFF then finds its scene already off, and that line
+    stays on the stage display until the next owner.
 
   Pinned by `program_on_air_tests.rs` (the set and owner table),
   `program_authority_tests.rs` (the task over a real bus, its owner) and

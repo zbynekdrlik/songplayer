@@ -455,8 +455,8 @@ are the recovery's `on_program_lines`.
   1.5 s after the new `Started`. The old title stayed up over that gap, and
   a recovery inside it disagreed with the timers. Now the Play's `Resync`
   names no title for this playlist, so the old title goes down at the Play
-  (an instant hide), unless another on-program playlist's title is due (see
-  "Several due"). Off program nothing is sent. A scene-on that selects a
+  (an instant hide). Off program, or for a playlist that does not own the
+  wall, nothing is sent. A scene-on that selects a
   song sends two (the Play's, then the scene-on's): the driver does one
   action for them (`take_queued` drops the first when both are in one
   batch; else the second is a no-op, or retries a hide whose request
@@ -578,14 +578,14 @@ are the recovery's `on_program_lines`.
   The held playlist itself no longer starts a song
   (`.claude/rules/program-transition.md`, "A held playlist has no side
   effects").
-- **Several due** (a program scene with more than one SongPlayer playlist;
-  they share the one `#sp-title` clip): the highest playlist id, so the
-  answer never depends on HashMap order. Residual: the lower id's own show
-  timer still pushes its title, so the clip shows whichever of the two
-  pushed last until a Resync names the higher id's. A shared-clip corner
-  older than #217, left as is (review round 4). A Play of one of them then
-  names the OTHER playlist's due title: the wall swaps to it, and 1.5 s
-  after the new `Started` to the new song's (review round 5).
+- **One candidate at most** (#221 lane 2): a re-sync's title candidates
+  are the wall owner's alone (`recovery.rs::title_candidates`), and with
+  no owner ("OBS manuál" on program) there are none, so a Resync names no
+  title. (`due_title_video` still breaks a tie by the highest playlist id;
+  the over-general multi-member machinery is lane 3's to simplify, main
+  ROZHODNUTÉ 6002459249 (4). The "several due" residual of #217 — two
+  SongPlayer playlists sharing the clip on one cg OBS scene — cannot
+  happen any more.)
 - **The text** comes from `format_title_text` (one formatter, see above).
   The OBS text source follows the Resync: the title, or cleared, as the hide
   timer clears it. A failed read of the due title sends nothing: a transient

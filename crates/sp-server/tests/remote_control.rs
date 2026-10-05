@@ -187,7 +187,7 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     let studio = request(&mut ws, "GetStudioModeEnabled", None).await;
     assert_eq!(studio["responseData"]["studioModeEnabled"], true);
 
-    // The scene list is cg OBS's, 1:1.
+    // The scene list is cg OBS's, 1:1 (its program scene SongPlayer's).
     let list = request(&mut ws, "GetSceneList", None).await;
     assert_eq!(list["requestStatus"]["code"], 100);
     let names: Vec<&str> = list["responseData"]["scenes"]

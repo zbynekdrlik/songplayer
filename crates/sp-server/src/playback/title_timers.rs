@@ -99,14 +99,12 @@ impl PlaybackEngine {
     /// old song's title window and cancelled its hide timer, so on program
     /// the wall is re-synced at once. The old song's title goes down now
     /// (an instant hide), not when the new song's ShowTitle replaces it 1.5 s
-    /// after its `Started`; if another on-program playlist's title is due,
-    /// the Resync names that one. The timers and a `Resync` then never
-    /// disagree between the Play and the new `Started`. Off program, or
-    /// when it does not own the wall (#221 🟡 2: another one does, or none
-    /// does), the playlist's title is not on the wall: nothing is sent. A
-    /// pause calls it
-    /// too: a paused song's title is not due, and its timers are cancelled
-    /// (release 0.68.0 blockers, review round 1).
+    /// after its `Started`. The timers and a `Resync` then never disagree
+    /// between the Play and the new `Started`. Off program, or when it does
+    /// not own the wall (#221 🟡 2: another one does, or none does), the
+    /// playlist's title is not on the wall: nothing is sent. A pause calls
+    /// it too: a paused song's title is not due, and its timers are
+    /// cancelled (release 0.68.0 blockers, review round 1).
     pub(super) async fn resync_after_play(&self, playlist_id: i64) {
         let on_program = self
             .pipelines

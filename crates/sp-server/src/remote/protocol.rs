@@ -101,8 +101,10 @@ pub const EVENT_ALL: u64 = 0x7FF;
 pub const REASON_AUTH_MISSING: &str = "Your payload's data is missing an `authentication` string, however authentication is required.";
 pub const REASON_AUTH_FAILED: &str = "Authentication failed.";
 
-/// The requests forwarded to cg OBS verbatim (the scene/input list getters).
-/// #221 L3: `GetCurrentProgramScene` is no longer one — SP-program's scene is
+/// The requests forwarded to cg OBS (the scene/input list getters), their
+/// answer passed through — `GetSceneList`'s with SongPlayer's program and
+/// preview scene (#221 lane 2, [`with_songplayer_scenes`]). #221 L3:
+/// `GetCurrentProgramScene` is no longer one — SP-program's scene is
 /// SongPlayer's own.
 pub const FORWARDED_REQUESTS: [&str; 4] = [
     "GetSceneList",

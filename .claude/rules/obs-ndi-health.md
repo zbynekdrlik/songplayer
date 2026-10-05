@@ -339,7 +339,9 @@ fallback — do not bring any of it back:
 - `ObsState.{current_scene, active_playlist_ids, lookup_failed,
   transition}` and `text::get_current_scene_request`;
 - their tests (`tests/scene_detection.rs`, `tests/scene_lookup_failure.rs`,
-  `tests/obs_snapshot.rs`) and the `FakeObsServer` knobs only they used.
+  `tests/obs_snapshot.rs`) and the `FakeObsServer` pieces only they used
+  (`scene_items` + its `GetSceneItemList` answer, `update_state`, #218's
+  failed / held lookups, #219's transition answer and `close_client`).
 
 What the client still does (`obs/mod.rs` module doc): the facade's calls
 (`remote_call.rs`), the title text, the #127/#173 ladder + the NDI source
@@ -349,7 +351,10 @@ per-playlist senders), cg OBS's raw events, and `ObsState` = `connected`
 identify subscribes Scenes (4: `SceneListChanged` for the facade) |
 Outputs (64: #154) = `EVENT_SUBSCRIPTIONS` (68, pinned in `mod_tests.rs`).
 The dashboard's connect-time `ObsStatus.active_scene` is SP-program's scene
-(`program_scene_name`, like `/api/v1/status`), never cg OBS's.
+(`program_scene_name`, like `/api/v1/status`), never cg OBS's; so the health
+bar's `health-obs` segment reads "OBS: pripojené — <SP-program's scene>":
+cg OBS's connection next to SongPlayer's program (sent at WS connect only,
+as before).
 
 - **The connection's helper tasks are reaped** (#218 review round 4, still
   true): every helper goes through `spawn_helper(&mut spawned_tasks, …)`,
