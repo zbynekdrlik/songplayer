@@ -360,8 +360,8 @@ pub(crate) fn should_run_heartbeat(elapsed: std::time::Duration) -> bool {
 /// Used by the paced heartbeat to bump or reset `consecutive_bad_polls`.
 /// Branches (state guard, fps, staleness) are individually covered by
 /// `heartbeat_decision_tests::classify_bad_poll_*` so the mutation runner
-/// can validate every boundary. A bad poll is an underrun or a delivery stale
-/// > 10 s.
+/// can validate every boundary. A bad poll is an underrun or a delivery
+/// stale for over 10 s.
 #[cfg(any(windows, test))]
 pub(crate) fn classify_bad_poll(
     state: &crate::playback::ndi_health::PlaybackStateLabel,

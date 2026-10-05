@@ -20,7 +20,7 @@
 //! scope only ATTACHES a feeder ([`PacedFeed`]) for its lifetime. While nothing
 //! is attached, the consumer services every boundary itself once its deadline
 //! passes (`paced_grid.rs`): the last delivered picture (or the standby black)
-//! + one silent block, stamped exactly on that boundary, delivered like any
+//! and one silent block, stamped exactly on that boundary, delivered like any
 //! job. The next pacer continues right after the last serviced stamp, so the
 //! stamps are contiguous across every song change, pause and idle.
 //!
