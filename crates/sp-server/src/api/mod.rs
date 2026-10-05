@@ -6,6 +6,7 @@ pub mod diag; // #223 S0: POST /api/v1/diag/decode-bench
 pub mod live;
 pub mod lyrics;
 pub mod lyrics_catalog;
+pub mod lyrics_g35t; // #144: POST /api/v1/lyrics/g35t/probe (the live g35t gate)
 pub mod metadata; // #136: status.metadata + POST /api/v1/metadata/probe
 pub mod mix; // #184 round G — the ONE live mixer console
 pub mod mix_apply; // #184 live-first mix apply seam
@@ -224,6 +225,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/lyrics/probe-sources",
             axum::routing::post(lyrics::post_probe_sources),
+        )
+        // #144: one short real Gemini 3.5 Transcribe request (the post-deploy gate)
+        .route(
+            "/api/v1/lyrics/g35t/probe",
+            axum::routing::post(lyrics_g35t::probe),
         )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))

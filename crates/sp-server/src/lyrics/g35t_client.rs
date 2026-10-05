@@ -28,20 +28,28 @@
 //! moves to the NEXT key; a 5xx retries the SAME key with backoff (2/4/8/16s,
 //! up to 4 retries). Any other failure aborts immediately. Never log a header
 //! or a key value — only the key's INDEX; log word count + elapsed time at
-//! info on success.
+//! info on success. A failure's text names the key as `key i of n` and is
+//! redacted with every key (`gemini_api::redact_keys`; a refused body with
+//! its request's key BEFORE the 400-char cut), so it may go to a log or to
+//! the live probe (`g35t_probe`, #144) as is.
+//!
+//! [`transcribe_words`] is the worker's call on Google's API root;
+//! [`transcribe_at`] is the same call on any root (a mock server in tests)
+//! that also says which key answered — the post-deploy probe uses it.
 
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
 use tokio::time::sleep;
 
 use crate::gemini_api::{
-    GEMINI_API_ROOT as API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, send_on_key,
+    GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, redact_keys, send_on_key,
 };
 
-const MODEL_SLUG: &str = "gemini-3.5-transcribe";
+/// The model every request names (the probe reports it, #144).
+pub(crate) const MODEL_SLUG: &str = "gemini-3.5-transcribe";
 const AUDIO_MIME_TYPE: &str = "audio/wav";
 
 /// #144: the BCP-47 `transcription_config.language_codes` every request
@@ -55,8 +63,8 @@ const AUDIO_MIME_TYPE: &str = "audio/wav";
 /// supported-languages table lists; it has no `es-ES`. Auto-detection over
 /// 85+ locales was rejected: on sung vocals it can land on a neighbouring
 /// language and put that on the wall. Design record: issue #144 comment
-/// 5995867005.
-const LANGUAGE_CODES: &[&str] = &["en-US", "es-419"];
+/// 5995867005. The live probe reports this same constant (`g35t_probe`).
+pub(crate) const LANGUAGE_CODES: &[&str] = &["en-US", "es-419"];
 
 const FILE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const FILE_POLL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -76,12 +84,34 @@ pub struct AsrWord {
     pub end_ms: u64,
 }
 
+/// A transcription [`transcribe_at`] got: the words, and the index (0-based,
+/// in the `gemini_api_key` list, the `key_index` of the log line) of the key
+/// that answered.
+#[derive(Debug)]
+pub(crate) struct Transcription {
+    pub(crate) words: Vec<AsrWord>,
+    pub(crate) key_index: usize,
+}
+
+/// A transcription [`transcribe_at`] did not get.
+#[derive(Debug)]
+pub(crate) struct TranscribeFailure {
+    /// Index (0-based) of the key whose answer ended the call: the key a
+    /// fatal answer came on, or the last key when every key was refused.
+    /// `None` when no key was tried (none configured, or the audio could not
+    /// be read).
+    pub(crate) key_index: Option<usize>,
+    /// What went wrong: names the key as `key i of n` (1-based) and carries
+    /// the API's own answer, with every key redacted.
+    pub(crate) error: anyhow::Error,
+}
+
 /// Outcome of a single HTTP step against one API key.
 enum StepError {
     /// `KeyVerdict::NextKey` (a 429 or a key refusal) — the caller should try
     /// the NEXT key in `api_keys`.
     NextKey(anyhow::Error),
-    /// Any other failure — abort `transcribe_words` entirely.
+    /// Any other failure — abort the transcription entirely.
     Fatal(anyhow::Error),
 }
 
@@ -97,12 +127,16 @@ fn truncate(s: &str, max: usize) -> &str {
 /// map its reply: a 429 or a key refusal is `StepError::NextKey` (the same
 /// key would fail identically); anything else not answered is `Fatal`.
 /// `build` is invoked fresh on every attempt because a
-/// `reqwest::RequestBuilder` is consumed by `.send()`.
+/// `reqwest::RequestBuilder` is consumed by `.send()`. A refused body is
+/// redacted with `api_key` (the request's own key) before `step_error` cuts
+/// it, so no key prefix survives at the edge.
 // The loop itself is unit-tested in `gemini_api_tests.rs` against a mock
-// server; this mapping only wraps it (the API root here is a constant).
+// server; this mapping only wraps it. The probe tests (`g35t_probe_tests.rs`)
+// drive it end to end through `transcribe_at`.
 #[cfg_attr(test, mutants::skip)]
 async fn send_with_retry(
     what: &str,
+    api_key: &str,
     timeout: Option<Duration>,
     build: impl Fn() -> reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, StepError> {
@@ -118,7 +152,12 @@ async fn send_with_retry(
             verdict,
             status,
             body,
-        } => Err(step_error(what, verdict, status, &body)),
+        } => Err(step_error(
+            what,
+            verdict,
+            status,
+            &redact_keys(&body, &[api_key]),
+        )),
     }
 }
 
@@ -143,13 +182,14 @@ fn step_error(what: &str, verdict: KeyVerdict, status: u16, body: &str) -> StepE
 #[cfg_attr(test, mutants::skip)]
 async fn upload_audio(
     client: &reqwest::Client,
+    root: &str,
     api_key: &str,
     audio_bytes: &[u8],
     mime_type: &str,
 ) -> Result<Value, StepError> {
-    let resp = send_with_retry("upload", Some(UPLOAD_TIMEOUT), || {
+    let resp = send_with_retry("upload", api_key, Some(UPLOAD_TIMEOUT), || {
         client
-            .post(format!("{API_ROOT}/upload/v1beta/files"))
+            .post(format!("{root}/upload/v1beta/files"))
             .header("x-goog-api-key", api_key)
             .header("X-Goog-Upload-Protocol", "raw")
             .header("X-Goog-Upload-Header-Content-Type", mime_type)
@@ -178,14 +218,15 @@ async fn upload_audio(
 #[cfg_attr(test, mutants::skip)]
 async fn poll_file_ready(
     client: &reqwest::Client,
+    root: &str,
     api_key: &str,
     file_name: &str,
 ) -> Result<Value, StepError> {
     let started = std::time::Instant::now();
     loop {
-        let resp = send_with_retry("file poll", None, || {
+        let resp = send_with_retry("file poll", api_key, None, || {
             client
-                .get(format!("{API_ROOT}/v1beta/{file_name}"))
+                .get(format!("{root}/v1beta/{file_name}"))
                 .header("x-goog-api-key", api_key)
         })
         .await?;
@@ -237,15 +278,16 @@ fn interactions_body(file_uri: &str, mime_type: &str) -> Value {
 #[cfg_attr(test, mutants::skip)]
 async fn run_interactions(
     client: &reqwest::Client,
+    root: &str,
     api_key: &str,
     file_uri: &str,
     mime_type: &str,
 ) -> Result<Value, StepError> {
     let body = interactions_body(file_uri, mime_type);
 
-    let resp = send_with_retry("interactions", Some(INTERACTIONS_TIMEOUT), || {
+    let resp = send_with_retry("interactions", api_key, Some(INTERACTIONS_TIMEOUT), || {
         client
-            .post(format!("{API_ROOT}/v1beta/interactions"))
+            .post(format!("{root}/v1beta/interactions"))
             .header("x-goog-api-key", api_key)
             .json(&body)
     })
@@ -270,9 +312,14 @@ async fn run_interactions(
 /// Best-effort cleanup — never fatal, mirrors the Python prototype's
 /// `delete_file` (a cleanup failure must not fail the whole transcription).
 #[cfg_attr(test, mutants::skip)]
-async fn delete_file_best_effort(client: &reqwest::Client, api_key: &str, file_name: &str) {
+async fn delete_file_best_effort(
+    client: &reqwest::Client,
+    root: &str,
+    api_key: &str,
+    file_name: &str,
+) {
     match client
-        .delete(format!("{API_ROOT}/v1beta/{file_name}"))
+        .delete(format!("{root}/v1beta/{file_name}"))
         .header("x-goog-api-key", api_key)
         .send()
         .await
@@ -302,11 +349,12 @@ async fn delete_file_best_effort(client: &reqwest::Client, api_key: &str, file_n
 #[cfg_attr(test, mutants::skip)]
 async fn transcribe_after_upload(
     client: &reqwest::Client,
+    root: &str,
     api_key: &str,
     file: &Value,
     file_name: &str,
 ) -> Result<Vec<AsrWord>, StepError> {
-    let ready = poll_file_ready(client, api_key, file_name).await?;
+    let ready = poll_file_ready(client, root, api_key, file_name).await?;
     let file_uri = ready
         .get("uri")
         .and_then(|u| u.as_str())
@@ -320,27 +368,28 @@ async fn transcribe_after_upload(
         .unwrap_or(AUDIO_MIME_TYPE)
         .to_string();
 
-    let response = run_interactions(client, api_key, &file_uri, &mime_type).await?;
+    let response = run_interactions(client, root, api_key, &file_uri, &mime_type).await?;
     Ok(words_from_response(&response))
 }
 
 #[cfg_attr(test, mutants::skip)]
 async fn transcribe_with_key(
     client: &reqwest::Client,
+    root: &str,
     api_key: &str,
     audio_bytes: &[u8],
     mime_type: &str,
 ) -> Result<Vec<AsrWord>, StepError> {
-    let file = upload_audio(client, api_key, audio_bytes, mime_type).await?;
+    let file = upload_audio(client, root, api_key, audio_bytes, mime_type).await?;
     let file_name = file
         .get("name")
         .and_then(|n| n.as_str())
         .ok_or_else(|| StepError::Fatal(anyhow!("g35t_client: upload response missing file.name")))?
         .to_string();
 
-    let result = transcribe_after_upload(client, api_key, &file, &file_name).await;
+    let result = transcribe_after_upload(client, root, api_key, &file, &file_name).await;
 
-    delete_file_best_effort(client, api_key, &file_name).await;
+    delete_file_best_effort(client, root, api_key, &file_name).await;
     result
 }
 
@@ -361,54 +410,92 @@ fn audio_mime_for_path(path: &Path) -> &'static str {
     }
 }
 
-/// Transcribe an audio file with Gemini 3.5 Transcribe, returning word-level
-/// timings. The upload MIME is inferred from the extension (`.wav` → audio/wav,
-/// `.flac` → audio/flac, #171). Tries `api_keys` in order (see module docs for
-/// the key-rotation / retry contract). Every request hints the catalogue's
-/// languages ([`LANGUAGE_CODES`], #144); no caller picks them.
-#[cfg_attr(test, mutants::skip)]
+/// Transcribe an audio file with Gemini 3.5 Transcribe on Google's API root,
+/// returning word-level timings: the worker's call, [`transcribe_at`] on
+/// [`GEMINI_API_ROOT`]. The upload MIME is inferred from the extension
+/// (`.wav` → audio/wav, `.flac` → audio/flac, #171). Tries `api_keys` in
+/// order (see module docs for the key-rotation / retry contract). Every
+/// request hints the catalogue's languages ([`LANGUAGE_CODES`], #144); no
+/// caller picks them.
+#[cfg_attr(test, mutants::skip)] // Google's root; `transcribe_at` is tested on a mock
 pub async fn transcribe_words(
     client: &reqwest::Client,
     api_keys: &[String],
     wav_path: &Path,
 ) -> Result<Vec<AsrWord>> {
-    if api_keys.is_empty() {
-        bail!("g35t_client: no Gemini API keys configured");
-    }
-    let audio_bytes = tokio::fs::read(wav_path)
+    transcribe_at(client, GEMINI_API_ROOT, api_keys, wav_path)
         .await
-        .with_context(|| format!("g35t_client: reading {}", wav_path.display()))?;
-    let mime_type = audio_mime_for_path(wav_path);
+        .map(|t| t.words)
+        .map_err(|f| f.error)
+}
 
+/// [`transcribe_words`] on any API root (`api_root` without a trailing
+/// slash: Google's in production, a mock server in tests), telling which key
+/// answered, or on a failure which key's answer ended the call. The same
+/// upload, poll, request body ([`interactions_body`]) and key rotation as
+/// the worker's call, so the live probe (`g35t_probe`, #144) sends exactly
+/// what a song does.
+pub(crate) async fn transcribe_at(
+    client: &reqwest::Client,
+    api_root: &str,
+    api_keys: &[String],
+    audio_path: &Path,
+) -> Result<Transcription, TranscribeFailure> {
+    let fail = |key_index: Option<usize>, text: String| TranscribeFailure {
+        key_index,
+        error: anyhow!(redact_keys(&text, api_keys)),
+    };
+    if api_keys.is_empty() {
+        let text = "g35t_client: no Gemini API keys configured".to_string();
+        return Err(fail(None, text));
+    }
+    let audio_bytes = tokio::fs::read(audio_path).await.map_err(|e| {
+        let text = format!("g35t_client: reading {}: {e}", audio_path.display());
+        fail(None, text)
+    })?;
+    let mime_type = audio_mime_for_path(audio_path);
+
+    let total = api_keys.len();
     let started = std::time::Instant::now();
-    let mut last_err: Option<anyhow::Error> = None;
-    for (key_idx, api_key) in api_keys.iter().enumerate() {
-        match transcribe_with_key(client, api_key, &audio_bytes, mime_type).await {
+    let mut last_refusal: Option<anyhow::Error> = None;
+    for (key_index, api_key) in api_keys.iter().enumerate() {
+        match transcribe_with_key(client, api_root, api_key, &audio_bytes, mime_type).await {
             Ok(words) => {
                 tracing::info!(
-                    key_index = key_idx,
+                    key_index,
                     word_count = words.len(),
                     elapsed_s = started.elapsed().as_secs_f64(),
                     language_codes = ?LANGUAGE_CODES,
                     "g35t_client: transcription complete"
                 );
-                return Ok(words);
+                return Ok(Transcription { words, key_index });
             }
             Err(StepError::NextKey(e)) => {
                 tracing::warn!(
-                    key_index = key_idx,
+                    key_index,
                     error = %e,
                     "g35t_client: key refused (429 or a key refusal) — trying next key"
                 );
-                last_err = Some(e);
-                continue;
+                last_refusal = Some(e);
             }
             Err(StepError::Fatal(e)) => {
-                return Err(e);
+                return Err(fail(Some(key_index), on_key(key_index, total, &e)));
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow!("g35t_client: all API keys exhausted")))
+    // Every key was refused: the loop ran (the list is not empty) and set it.
+    let last = last_refusal.unwrap_or_else(|| anyhow!("no key answered"));
+    let text = format!(
+        "g35t_client: all {total} keys refused; {}",
+        on_key(total - 1, total, &last)
+    );
+    Err(fail(Some(total - 1), text))
+}
+
+/// `key i of n: <error>`: a key named by its 1-based place in the list
+/// (`key_index` + 1 of `total`), never by its value.
+fn on_key(key_index: usize, total: usize, error: &anyhow::Error) -> String {
+    format!("key {} of {total}: {error:#}", key_index + 1)
 }
 
 /// Parse a Gemini offset string like `"5.200s"` or `"9s"` into whole

@@ -30,7 +30,9 @@ use std::time::{Duration, Instant};
 use super::parser::shorten_artist;
 use super::sanitize::strip_emoji;
 use super::{MetadataError, MetadataProvider};
-use crate::gemini_api::{GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, send_on_key};
+use crate::gemini_api::{
+    GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, redact_keys, send_on_key,
+};
 
 static JSON_FENCE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"```(?:json)?\s*([\s\S]*?)\s*```").expect("compile"));
@@ -422,20 +424,10 @@ impl GeminiProvider {
         })
     }
 
-    /// `text` with every configured key replaced by `<key>`: an error text
-    /// or a log line must never carry a key, whatever the server echoes.
-    /// Longest key first, so a key that contains another one is replaced
-    /// whole.
+    /// `text` with every configured key replaced by `<key>` — the shared
+    /// `gemini_api::redact_keys` (one copy of the rule, #144).
     fn redact(&self, text: &str) -> String {
-        let mut keys: Vec<&str> = self
-            .keys
-            .iter()
-            .map(String::as_str)
-            .filter(|k| !k.is_empty())
-            .collect();
-        keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
-        keys.into_iter()
-            .fold(text.to_string(), |acc, k| acc.replace(k, "<key>"))
+        redact_keys(text, &self.keys)
     }
 
     /// `body` on one line, redacted, cut to [`BODY_EXCERPT_CHARS`] characters

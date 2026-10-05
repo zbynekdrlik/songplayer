@@ -40,6 +40,22 @@ pub fn gemini_keys_from_setting(csv: &str) -> Vec<String> {
         .collect()
 }
 
+/// `text` with every key in `keys` replaced by `<key>`: an error text, a log
+/// line or a probe answer must never carry a key, whatever the server echoes.
+/// Longest key first, so a key that contains another one is replaced whole;
+/// an empty key is skipped (it would match between every two characters).
+/// Redact BEFORE cutting a text, so no key prefix survives at the edge.
+pub fn redact_keys<K: AsRef<str>>(text: &str, keys: &[K]) -> String {
+    let mut keys: Vec<&str> = keys
+        .iter()
+        .map(AsRef::as_ref)
+        .filter(|k| !k.is_empty())
+        .collect();
+    keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
+    keys.into_iter()
+        .fold(text.to_string(), |acc, k| acc.replace(k, "<key>"))
+}
+
 /// What a non-2xx answer means for the key that got it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyVerdict {
