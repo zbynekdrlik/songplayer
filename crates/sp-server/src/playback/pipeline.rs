@@ -788,7 +788,6 @@ pub(crate) fn should_run_heartbeat(elapsed: std::time::Duration) -> bool {
 #[cfg(any(windows, test))]
 pub(crate) fn classify_bad_poll(
     state: &crate::playback::ndi_health::PlaybackStateLabel,
-    _connections: i32,
     observed_fps: f32,
     nominal_fps: f32,
     last_submit_ts: Option<std::time::Instant>,
@@ -931,7 +930,6 @@ pub(crate) fn emit_heartbeat<B: sp_ndi::NdiBackend>(
     let now = std::time::Instant::now();
     let bad = classify_bad_poll(
         &state,
-        connections,
         observed_fps,
         nominal_fps,
         submitter.last_submit_ts(),

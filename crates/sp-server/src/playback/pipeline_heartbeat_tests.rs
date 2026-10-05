@@ -21,15 +21,14 @@ fn should_run_heartbeat_returns_false_below_5_seconds() {
 }
 
 /// #221 B4 step 6 (review round 1): a playlist's own output expects no NDI
-/// receiver (`ndi_health_expect`), so 0 receivers is no bad poll: a full-rate
-/// grid with a fresh submit is good whatever the count. Before, every poll
-/// of an output cg OBS no longer showed counted as bad.
+/// receiver (`ndi_health_expect`), so the receiver count is no input of a bad
+/// poll any more: a full-rate grid with a fresh submit is good. Before, every
+/// poll at 0 receivers (an output cg OBS no longer showed) counted as bad.
 #[test]
 fn classify_bad_poll_ignores_the_receiver_count() {
     let now = Instant::now();
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        0,
         30.0,
         30.0,
         Some(now),
@@ -39,12 +38,11 @@ fn classify_bad_poll_ignores_the_receiver_count() {
 
 #[test]
 fn classify_bad_poll_paused_is_never_bad() {
-    // Even with connections=0, fps=0, and no recent submit, the Paused
+    // Even with fps=0 and no recent submit, the Paused
     // state must not bump consecutive_bad_polls. Same non-Playing guard
     // as Idle / WaitingForScene.
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Paused,
-        0,
         0.0,
         30.0,
         None,
@@ -56,7 +54,6 @@ fn classify_bad_poll_paused_is_never_bad() {
 fn classify_bad_poll_idle_is_never_bad() {
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Idle,
-        0,
         0.0,
         30.0,
         None,
@@ -69,7 +66,6 @@ fn classify_bad_poll_underrun_when_observed_below_half_nominal() {
     // 10 < 30/2=15 => bad
     assert!(classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         10.0,
         30.0,
         Some(Instant::now()),
@@ -78,7 +74,6 @@ fn classify_bad_poll_underrun_when_observed_below_half_nominal() {
     // 16 >= 15 => not bad
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         16.0,
         30.0,
         Some(Instant::now()),
@@ -89,10 +84,9 @@ fn classify_bad_poll_underrun_when_observed_below_half_nominal() {
 #[test]
 fn classify_bad_poll_stale_when_last_submit_more_than_10s_ago() {
     let now = Instant::now();
-    // 11s ago, fps healthy, connections healthy => stale bad-poll
+    // 11s ago, fps healthy => stale bad-poll
     assert!(classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         30.0,
         30.0,
         Some(now - Duration::from_secs(11)),
@@ -101,7 +95,6 @@ fn classify_bad_poll_stale_when_last_submit_more_than_10s_ago() {
     // 9s ago => not stale, all healthy => not bad
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         30.0,
         30.0,
         Some(now - Duration::from_secs(9)),
@@ -118,7 +111,6 @@ fn classify_bad_poll_does_not_trigger_underrun_when_nominal_fps_is_zero() {
     let now = Instant::now();
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         10.0, // observed
         0.0,  // nominal — guard should skip underrun
         Some(now),
@@ -134,7 +126,6 @@ fn classify_bad_poll_underrun_excludes_exact_half_nominal() {
     let now = Instant::now();
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         15.0, // exactly nominal/2 with nominal=30
         30.0,
         Some(now),
@@ -143,7 +134,6 @@ fn classify_bad_poll_underrun_excludes_exact_half_nominal() {
     // Just under should still be bad.
     assert!(classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         14.99,
         30.0,
         Some(now),
@@ -311,7 +301,6 @@ fn classify_bad_poll_stale_excludes_exact_10s() {
     let now = Instant::now();
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         30.0,
         30.0,
         Some(now - Duration::from_secs(10)),
@@ -320,7 +309,6 @@ fn classify_bad_poll_stale_excludes_exact_10s() {
     // 10s + 1ns should be stale.
     assert!(classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         30.0,
         30.0,
         Some(now - Duration::from_secs(10) - Duration::from_nanos(1)),
