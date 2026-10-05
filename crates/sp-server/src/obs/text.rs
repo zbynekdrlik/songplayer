@@ -15,17 +15,6 @@ pub fn set_text_request(request_id: &str, source_name: &str, text: &str) -> serd
     })
 }
 
-/// Build a `GetCurrentProgramScene` request.
-pub fn get_current_scene_request(request_id: &str) -> serde_json::Value {
-    serde_json::json!({
-        "op": 6,
-        "d": {
-            "requestType": "GetCurrentProgramScene",
-            "requestId": request_id
-        }
-    })
-}
-
 /// Build a `GetSceneItemList` request for a given scene.
 pub fn get_scene_items_request(request_id: &str, scene_name: &str) -> serde_json::Value {
     serde_json::json!({
@@ -410,17 +399,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_current_scene_request_structure() {
-        let req = get_current_scene_request("scene-req-1");
-
-        assert_eq!(req["op"], 6);
-        assert_eq!(req["d"]["requestType"], "GetCurrentProgramScene");
-        assert_eq!(req["d"]["requestId"], "scene-req-1");
-        // Should not have requestData.
-        assert!(req["d"]["requestData"].is_null());
-    }
-
-    #[test]
     fn test_get_scene_items_request_structure() {
         let req = get_scene_items_request("items-req-1", "Main Scene");
 
@@ -552,7 +530,7 @@ mod tests {
     #[test]
     fn test_all_requests_are_op_6() {
         let r1 = set_text_request("a", "b", "c");
-        let r2 = get_current_scene_request("a");
+        let r2 = get_scene_list_request("a");
         let r3 = get_scene_items_request("a", "b");
 
         assert_eq!(r1["op"], 6);
@@ -563,7 +541,7 @@ mod tests {
     #[test]
     fn test_requests_are_valid_json() {
         let r1 = set_text_request("a", "b", "c");
-        let r2 = get_current_scene_request("a");
+        let r2 = get_scene_list_request("a");
         let r3 = get_scene_items_request("a", "b");
 
         // All should serialize to valid JSON strings.

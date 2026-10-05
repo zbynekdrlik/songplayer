@@ -473,7 +473,10 @@ fn routes_of_the_companion_subset() {
         ]
         .as_slice()
     );
-    for t in FORWARDED_REQUESTS {
+    // #221 lane 2: the scene list is forwarded too, with SongPlayer's
+    // program and preview scene (`with_songplayer_scenes`).
+    assert_eq!(route("GetSceneList"), Route::SceneList);
+    for t in &FORWARDED_REQUESTS[1..] {
         assert_eq!(route(t), Route::Forward, "{t}");
     }
     // #221: the studio-mode requests of the page-13 buttons are served, and
@@ -648,4 +651,80 @@ fn get_current_program_scene_is_answered_from_sp_program() {
     assert_eq!(nothing.data, None);
     // `EventSubscription::Transitions` (bit 4).
     assert_eq!(EVENT_TRANSITIONS, 16);
+}
+
+// ---- #221 lane 2: GetSceneList with SongPlayer's program and preview -----
+
+/// cg OBS's `GetSceneList` answer: its program sp-slow, no preview.
+fn cg_scene_list() -> Value {
+    json!({
+        "currentProgramSceneName": "sp-slow",
+        "currentProgramSceneUuid": "u-sp-slow",
+        "currentPreviewSceneName": null,
+        "currentPreviewSceneUuid": null,
+        "scenes": [
+            { "sceneIndex": 0, "sceneName": "sp-fast", "sceneUuid": "u-sp-fast" },
+            { "sceneIndex": 1, "sceneName": "sp-slow", "sceneUuid": "u-sp-slow" },
+            { "sceneIndex": 2, "sceneName": "Slido", "sceneUuid": "u-Slido" },
+        ],
+    })
+}
+
+#[test]
+fn the_scene_list_names_sp_program_s_scene_and_the_preview_with_cg_obs_uuids() {
+    let mut data = cg_scene_list();
+    with_songplayer_scenes(&mut data, Some("sp-fast"), Some("Slido"));
+    let mut expected = cg_scene_list();
+    expected["currentProgramSceneName"] = json!("sp-fast");
+    expected["currentProgramSceneUuid"] = json!("u-sp-fast");
+    expected["currentPreviewSceneName"] = json!("Slido");
+    expected["currentPreviewSceneUuid"] = json!("u-Slido");
+    assert_eq!(data, expected, "only the four fields change");
+}
+
+#[test]
+fn a_scene_cg_obs_does_not_list_has_no_uuid_and_nothing_on_program_is_null() {
+    let mut data = cg_scene_list();
+    with_songplayer_scenes(&mut data, Some("OBS manuál"), None);
+    assert_eq!(data["currentProgramSceneName"], "OBS manuál");
+    assert_eq!(data["currentProgramSceneUuid"], Value::Null);
+    assert_eq!(data["currentPreviewSceneName"], Value::Null);
+    assert_eq!(data["currentPreviewSceneUuid"], Value::Null);
+
+    let mut data = cg_scene_list();
+    with_songplayer_scenes(&mut data, None, Some("sp-slow"));
+    assert_eq!(
+        (
+            &data["currentProgramSceneName"],
+            &data["currentProgramSceneUuid"],
+        ),
+        (&Value::Null, &Value::Null),
+        "never cg OBS's own program"
+    );
+    assert_eq!(data["currentPreviewSceneUuid"], "u-sp-slow");
+}
+
+#[test]
+fn a_scene_list_without_scenes_or_not_an_object_is_handled() {
+    // No `scenes` (or a malformed entry): the names, but no uuid.
+    let mut data = json!({ "currentProgramSceneName": "Slido", "scenes": [7] });
+    with_songplayer_scenes(&mut data, Some("sp-fast"), Some("sp-fast"));
+    assert_eq!(
+        data,
+        json!({
+            "currentProgramSceneName": "sp-fast",
+            "currentProgramSceneUuid": null,
+            "currentPreviewSceneName": "sp-fast",
+            "currentPreviewSceneUuid": null,
+            "scenes": [7],
+        })
+    );
+    // A scene without a uuid (an obs-websocket older than 5.3).
+    let mut data = json!({ "scenes": [{ "sceneName": "sp-fast" }] });
+    with_songplayer_scenes(&mut data, Some("sp-fast"), None);
+    assert_eq!(data["currentProgramSceneUuid"], Value::Null);
+    // Not an object: left as it is.
+    let mut data = json!(["sp-fast"]);
+    with_songplayer_scenes(&mut data, Some("sp-fast"), None);
+    assert_eq!(data, json!(["sp-fast"]));
 }

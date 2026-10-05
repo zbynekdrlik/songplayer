@@ -33,19 +33,20 @@ The stored lyrics lines are **sung-timing units**. The base tier
 `dispatch_lyrics_if_changed` sends nothing for a playlist HELD off program
 through a #215 transition (`scene_off_due` is set), and `clear_lyrics_display`
 follows the same gates. The wall (`#sp-subs*`) takes only on-program lines
-and clears; the karaoke WS and the Presenter also take a song played off
-program by hand. Details: `.claude/rules/program-transition.md`, "A held
-playlist has no side effects". #221 (release 0.69.0 review 🟡 2): while a
-playlist OWNS the wall (`program-bus.md` "One wall owner": SP-program's
+and clears. Details: `.claude/rules/program-transition.md`, "A held
+playlist has no side effects". #221 (release 0.69.0 review 🟡 2): only the
+playlist that OWNS the wall (`program-bus.md` "One wall owner": SP-program's
 playlist; #221 B4 step 6 deleted the fallback to the one cg OBS was told to
-show), only it writes the wall lines, their clears and the Presenter;
-another playlist (the outgoing one of a cut until its OFF, or one played
-off program by hand) keeps only its own karaoke WS. The new owner's ON,
-and an OFF that leaves another playlist on program, push the owner's line
-to the Presenter at once, or clear it when it has none
-(`scene_off::resync_presenter`, review rounds 2-3), so the old owner's
-last line never stays on the stage display. With no owner (nothing on air, or
-"OBS manuál" on program) the rules above hold unchanged.
+show) writes the wall lines, their clears and the Presenter; another
+playlist (the outgoing one of a cut until its OFF, or one played off
+program by hand) keeps only its own karaoke WS. The new owner's ON, and an
+OFF that leaves another playlist on program, push the owner's line to the
+Presenter at once, or clear it when it has none
+(`scene_off::resync_presenter`, review rounds 2-3), so the old owner's last
+line never stays on the stage display. With NO owner (nothing on air, or
+"OBS manuál" on program) nobody writes them — a song played off program by
+hand feeds no Presenter — and the last owner's OFF blanks the stage display
+with the wall (ROZHODNUTÉ 6002459249, #221 lane 2).
 
 The plan is **display-only**. `lyrics/display_plan.rs` builds it once per
 loaded track (in `LyricsState::with_lead_and_offset`; `new` delegates to it).

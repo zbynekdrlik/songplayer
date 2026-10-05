@@ -24,8 +24,10 @@
 //! Which request is answered how is [`route`]: a few natively (studio mode ON,
 //! the per-session preview and, #221 L3, `GetCurrentProgramScene` from
 //! SongPlayer's own program), the scene/input list getters forwarded to cg
-//! OBS, a scene press (`SetCurrentProgramScene`, `TriggerStudioModeTransition`)
-//! through the program switch, anything else a well-formed
+//! OBS (#221 lane 2: `GetSceneList`'s program and preview scene replaced by
+//! SongPlayer's, [`with_songplayer_scenes`]), a scene press
+//! (`SetCurrentProgramScene`, `TriggerStudioModeTransition`) through the
+//! program switch, anything else a well-formed
 //! [`STATUS_UNKNOWN_REQUEST_TYPE`] error (Companion treats a failed request as
 //! "no data" and stays connected — only `GetVersion` and
 //! `GetStudioModeEnabled` must succeed, which is why they are native).
@@ -99,8 +101,10 @@ pub const EVENT_ALL: u64 = 0x7FF;
 pub const REASON_AUTH_MISSING: &str = "Your payload's data is missing an `authentication` string, however authentication is required.";
 pub const REASON_AUTH_FAILED: &str = "Authentication failed.";
 
-/// The requests forwarded to cg OBS verbatim (the scene/input list getters).
-/// #221 L3: `GetCurrentProgramScene` is no longer one — SP-program's scene is
+/// The requests forwarded to cg OBS (the scene/input list getters), their
+/// answer passed through — `GetSceneList`'s with SongPlayer's program and
+/// preview scene (#221 lane 2, [`with_songplayer_scenes`]). #221 L3:
+/// `GetCurrentProgramScene` is no longer one — SP-program's scene is
 /// SongPlayer's own.
 pub const FORWARDED_REQUESTS: [&str; 4] = [
     "GetSceneList",
@@ -516,6 +520,9 @@ pub enum Route {
     Native(Reply),
     /// Forwarded to cg OBS, its answer passed through.
     Forward,
+    /// #221 lane 2: `GetSceneList`, forwarded to cg OBS, its program and
+    /// preview scene SongPlayer's ([`with_songplayer_scenes`]).
+    SceneList,
     /// A scene press: switch `SP-program` to `sceneName`.
     SetProgramScene,
     /// #221 L3: SP-program's scene (the one resolver), never cg OBS's.
@@ -549,9 +556,8 @@ pub fn route(request_type: &str) -> Route {
         "TriggerStudioModeTransition" => Route::TriggerTransition,
         "SetCurrentSceneTransitionDuration" => Route::SetTransitionDuration,
         // Keep in sync with FORWARDED_REQUESTS (pinned by a test).
-        "GetSceneList" | "GetInputList" | "GetSceneItemList" | "GetGroupSceneItemList" => {
-            Route::Forward
-        }
+        "GetSceneList" => Route::SceneList,
+        "GetInputList" | "GetSceneItemList" | "GetGroupSceneItemList" => Route::Forward,
         _ => Route::Unsupported,
     }
 }
@@ -612,6 +618,43 @@ pub fn preview_scene_data(scene: &str) -> Value {
 /// E2E driver reads).
 pub fn program_scene_data(scene: &str) -> Value {
     json!({ "sceneName": scene, "currentProgramSceneName": scene })
+}
+
+/// #221 lane 2 (ROZHODNUTÉ 6002459249): a forwarded `GetSceneList` answer's
+/// `responseData`, its program and preview scene made SongPlayer's.
+/// Companion's feedback at connect comes from it (v3.15.3 `buildSceneList`:
+/// `currentProgramSceneName` → `scene_active`, `currentPreviewSceneName` →
+/// `scene_preview`), and cg OBS's own program is not SP-program's whenever a
+/// playlist is on it. So `currentProgramSceneName` = SP-program's scene
+/// (`program`; `None` = nothing on it → null, never cg OBS's) and
+/// `currentPreviewSceneName` = this session's preview (`preview`), each
+/// `…Uuid` = cg OBS's uuid of the scene of that name in the answer's own
+/// `scenes` (null when it lists none, e.g. "OBS manuál"). The rest is cg
+/// OBS's, verbatim; data that is not an object is left as it is.
+pub fn with_songplayer_scenes(data: &mut Value, program: Option<&str>, preview: Option<&str>) {
+    let program_uuid = scene_uuid(data, program);
+    let preview_uuid = scene_uuid(data, preview);
+    let Some(fields) = data.as_object_mut() else {
+        return;
+    };
+    fields.insert("currentProgramSceneName".into(), json!(program));
+    fields.insert("currentProgramSceneUuid".into(), program_uuid);
+    fields.insert("currentPreviewSceneName".into(), json!(preview));
+    fields.insert("currentPreviewSceneUuid".into(), preview_uuid);
+}
+
+/// The `sceneUuid` of the scene named `name` in a `GetSceneList` answer's
+/// `scenes`, else null.
+fn scene_uuid(data: &Value, name: Option<&str>) -> Value {
+    let found = name.and_then(|name| {
+        data["scenes"]
+            .as_array()?
+            .iter()
+            .find(|scene| scene["sceneName"] == name)?
+            .get("sceneUuid")
+            .cloned()
+    });
+    found.unwrap_or(Value::Null)
 }
 
 /// #221 L3: the error of `GetCurrentProgramScene` while SP-program has no

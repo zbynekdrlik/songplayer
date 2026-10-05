@@ -1,7 +1,8 @@
 //! Smoke test that the shared `FakeObsServer` harness performs the OBS
 //! WebSocket 5.x Hello/Identify/Identified handshake correctly.
 //!
-//! This is the foundation for every other scene-detection integration test.
+//! This is the foundation for the OBS client's integration tests
+//! (`remote_control.rs`, `obs_reconnect.rs`).
 
 mod common;
 
@@ -110,7 +111,7 @@ async fn fake_obs_server_responds_to_get_input_list() {
 }
 
 #[tokio::test]
-async fn fake_obs_server_pushes_scene_change_events() {
+async fn fake_obs_server_pushes_events() {
     let server = FakeObsServer::spawn().await;
     let url = server.url();
 
@@ -129,8 +130,14 @@ async fn fake_obs_server_pushes_scene_change_events() {
         .unwrap();
     let _identified = read_next_json(&mut read).await.unwrap();
 
-    // Push a scene change from the server side.
-    server.push_program_scene_change("sp-fast").await;
+    // Push cg OBS's scene list from the server side (the one event the
+    // remote-control facade passes on).
+    server
+        .push_event(
+            "SceneListChanged",
+            json!({ "scenes": [{ "sceneName": "sp-fast" }] }),
+        )
+        .await;
 
     // Client should receive the event.
     let event = tokio::time::timeout(std::time::Duration::from_secs(1), read_next_json(&mut read))
@@ -138,8 +145,9 @@ async fn fake_obs_server_pushes_scene_change_events() {
         .expect("event within 1s")
         .expect("event text");
     assert_eq!(event["op"], 5);
-    assert_eq!(event["d"]["eventType"], "CurrentProgramSceneChanged");
-    assert_eq!(event["d"]["eventData"]["sceneName"], "sp-fast");
+    assert_eq!(event["d"]["eventType"], "SceneListChanged");
+    assert_eq!(event["d"]["eventIntent"], 4);
+    assert_eq!(event["d"]["eventData"]["scenes"][0]["sceneName"], "sp-fast");
 
     server.shutdown().await;
 }

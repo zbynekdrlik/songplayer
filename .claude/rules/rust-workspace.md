@@ -467,8 +467,10 @@ always can). Reflowing such a line costs nothing and ends the doubt
 
 A tokio `JoinSet` keeps a FINISHED task (its cell + output) until
 `join_next` / `try_join_next` takes it. A set that only ever sees `spawn` +
-`abort_all` — the OBS connection loop's helpers, one per ~2 s poll tick —
-grows for the whole life of the connection (~43 000 cells a day). Route every
+`abort_all` — the OBS connection loop's helpers, then one per ~2 s scene
+poll tick (deleted in #221 L6; still one per title text, ladder rung and
+rebuild) — grows for the whole life of the connection (~43 000 cells a day
+at the poll's rate). Route every
 spawn through a helper that first drains `try_join_next()` (and WARNs a
 `JoinError` that is not a cancellation): `obs/mod.rs::spawn_helper`. Test it
 on the current-thread `#[tokio::test]`: spawn finished tasks, `yield_now` a
@@ -648,6 +650,11 @@ behaviour, not a wrong spot. Keep them compiling on both sides:
   serves keeps compiling when GREEN deletes the other variants;
 - tests of functions that only GREEN adds (new pure helpers) go in the GREEN
   commit, as new tests; no RED test is edited there.
+- a NEW enum variant a route table returns (#221 lane 2: `Route::SceneList`)
+  breaks an existing pin like `assert_eq!(route(t), Route::Forward)`. Put
+  the new contract into the RED as an assertion that compiles on the old
+  tree (`assert_ne!(route("GetSceneList"), Route::Forward)`), so GREEN
+  edits no existing test (a GREEN that re-pinned it was flagged in review).
 
 **`cargo mutants --in-diff <range> --list` compiles nothing (#215).** It
 lists the diff's mutants (`file:line` + replacement) so a review can name
@@ -774,6 +781,21 @@ the test that kills each one BEFORE CI's mutation gate runs.
   any fix that adds a guard or adapts an existing test, re-list the FULL
   branch range (`cargo mutants --in-diff <base>..HEAD --list`) and re-map
   every mutant to a killer, not just the round's own diff.
+- **A tightened gate in FRONT of another one makes that one's test
+  vacuous** (#221 lane 2, review round 2). `may_write_wall` became
+  `owner == Some(pid)`, ahead of the `scene_active` gate in
+  `dispatch_lyrics_if_changed`; `dispatch_lyrics_resolume_gated_on_scene_active`
+  published no owner, so it returned at the NEW gate and still passed —
+  deleting the scene check would have passed every test (the fn is
+  `mutants::skip`, so no mutant shows it). When a gate is added or
+  tightened, re-read every test NAMED after a later gate and set it up so
+  the earlier gate passes (there: publish the owner, scene off). Likewise
+  an engine test that drives a wall write must model what production does
+  before it: put the playlist on air as the owner (`put_on_air_for_test`,
+  `program-bus.md` "One wall owner") — the harnesses of
+  `dispatch_lyrics_tests`, `tests_scene_change`, `tests_hold`,
+  `tests_scene_off_wall` and `tests_song_end` relied on "no owner
+  restricts nothing" until lane 2 made no owner mean nobody writes.
 - **A HANG fails the gate exactly like a survivor** (review round 1, same
   ticket). cargo-mutants kills a stalled test run at `--timeout` and reports
   TIMEOUT, which turns the shard red. The #215 harness first counted its

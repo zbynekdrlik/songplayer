@@ -186,11 +186,11 @@ pub async fn create_playlist(
             let is_active = row.get::<i32, _>("is_active") != 0;
             drop(row);
 
-            // Trigger a scene-detection rebuild so the new playlist can be
-            // matched against OBS NDI inputs immediately.
+            // Rebuild the NDI source map so the new playlist is matched
+            // against OBS NDI inputs immediately (the #196 self-check).
             let _ = state.obs_rebuild_tx.send(());
-            // #132: register a playback pipeline for the new playlist so scene
-            // detection can start it without a process restart. The engine
+            // #132: register a playback pipeline for the new playlist so the
+            // playback authority can start it without a restart. The engine
             // reconciles from the DB (creates only when active + non-empty NDI).
             // GUARANTEED delivery (`.send().await`, not `try_send`): a dropped
             // command would leave the playlist unplayable until a restart — the

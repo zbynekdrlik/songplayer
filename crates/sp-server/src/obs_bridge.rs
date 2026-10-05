@@ -3,10 +3,10 @@
 //! needs from it.
 //!
 //! #221 L4b deleted the OBS → engine scene bridge (`run_obs_engine_bridge`,
-//! `scene_change_commands`, `EngineCommand::SceneChanged`): cg OBS's scene
-//! detection starts and pauses nothing any more. SongPlayer's own program
-//! drives playback (`playback::program_authority`). #221 L5 deleted the OBS
-//! follow, the last consumer of the client's published snapshots.
+//! `scene_change_commands`, `EngineCommand::SceneChanged`): SongPlayer's own
+//! program drives playback (`playback::program_authority`). #221 L5 deleted
+//! the OBS follow, and L6 the scene detection and transition reader it
+//! read (`obs/mod.rs`).
 
 use std::collections::HashMap;
 use std::sync::Arc;

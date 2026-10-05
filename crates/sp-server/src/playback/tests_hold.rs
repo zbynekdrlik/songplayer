@@ -101,7 +101,8 @@ async fn rig() -> Rig {
 }
 
 /// OUT plays `SONG` on program, `AT_MS` in, with its title clock (due now,
-/// hiding an hour later) and no title timer armed.
+/// hiding an hour later) and no title timer armed. On program = on air as
+/// the wall owner (#221: the authority publishes SP-program's playlist).
 fn playing(engine: &mut PlaybackEngine) -> TitleClock {
     let now = tokio::time::Instant::now();
     let clock = TitleClock {
@@ -116,6 +117,7 @@ fn playing(engine: &mut PlaybackEngine) -> TitleClock {
     pp.cached_position_ms = AT_MS;
     pp.cached_duration_ms = SONG_MS;
     pp.scene_active.store(true, Ordering::Release);
+    engine.put_on_air_for_test(OUT);
     clock
 }
 
@@ -129,6 +131,7 @@ async fn hold(rig: &mut Rig) -> Arc<ProgramBus> {
     assert!(rig.engine.program.set(bus.clone()).is_ok());
     let status = bus.cut(IN, utc_now_100ns() + 60 * 10_000_000, None);
     assert!(status.cut_boundary_100ns.is_some(), "the cut is recorded");
+    rig.engine.put_on_air_for_test(IN); // the authority diffed the cut
     rig.engine.handle_scene_change(OUT, false).await;
     assert_eq!(
         out(&rig.engine).state,
@@ -490,8 +493,9 @@ async fn a_scene_back_on_inside_the_hold_keeps_the_lyrics_and_resumes_the_lines(
         "held off program: no karaoke line either, as before"
     );
 
+    rig.engine.put_on_air_for_test(OUT); // the cut back to OUT
     rig.engine.handle_scene_change(OUT, true).await;
-    sent(&mut rig.resolume); // the scene-on's title re-sync
+    sent(&mut rig.resolume); // the scene-on's title + line re-sync
     position(&mut rig.engine, 4600).await;
     assert_eq!(
         subtitle_lines(&sent(&mut rig.resolume)),
@@ -574,6 +578,7 @@ async fn a_scene_back_on_program_ends_the_hold() {
     );
     let (_, due) = re_check(&rig.engine);
 
+    rig.engine.put_on_air_for_test(OUT); // the cut back to OUT
     rig.engine.handle_scene_change(OUT, true).await;
 
     assert!(out(&rig.engine).scene_off_due.is_none(), "no longer held");

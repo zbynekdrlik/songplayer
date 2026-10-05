@@ -107,22 +107,15 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         .await
         .unwrap();
 
-    // cg OBS: a playlist scene with SongPlayer's SP-fast NDI source, a baseline
-    // scene, and a manual browser scene.
+    // cg OBS: SongPlayer's SP-fast NDI input (the client maps it once it is
+    // connected: the readiness witness below), a playlist scene, a baseline
+    // scene and a manual browser scene.
     let mut cg = FakeObsState::default();
     cg.inputs
         .insert("sp-fast_video".into(), "ndi_source".into());
     cg.input_settings.insert(
         "sp-fast_video".into(),
         json!({ "ndi_source_name": "RESOLUME-SNV (SP-fast)" }),
-    );
-    cg.scene_items.insert(
-        "sp-fast".into(),
-        vec![("sp-fast_video".into(), false, "ndi_source".into())],
-    );
-    cg.scene_items.insert(
-        "Slido".into(),
-        vec![("slido_browser".into(), false, "browser_source".into())],
     );
     cg.scene_list = vec!["sp-fast".into(), "sp-slow".into(), "Slido".into()];
     cg.program_scene = Some("sp-slow".into());
@@ -194,7 +187,7 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     let studio = request(&mut ws, "GetStudioModeEnabled", None).await;
     assert_eq!(studio["responseData"]["studioModeEnabled"], true);
 
-    // The scene list is cg OBS's, 1:1.
+    // The scene list is cg OBS's, 1:1 (its program scene SongPlayer's).
     let list = request(&mut ws, "GetSceneList", None).await;
     assert_eq!(list["requestStatus"]["code"], 100);
     let names: Vec<&str> = list["responseData"]["scenes"]
@@ -204,7 +197,12 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         .map(|s| s["sceneName"].as_str().unwrap())
         .collect();
     assert_eq!(names, vec!["sp-fast", "sp-slow", "Slido"]);
-    assert_eq!(list["responseData"]["currentProgramSceneName"], "sp-slow");
+    // #221 lane 2: its program scene is SP-program's, never cg OBS's own
+    // (sp-slow): nothing is on SP-program yet.
+    assert!(
+        list["responseData"]["currentProgramSceneName"].is_null(),
+        "{list}"
+    );
 
     // A page-13 playlist button: preview, then transition. SP-program cuts to
     // ytfast from SongPlayer's own playlists; #221 B4 step 6: cg OBS is told
@@ -292,6 +290,14 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     assert_eq!(
         program["responseData"]["currentProgramSceneName"],
         "sp-fast"
+    );
+    // #221 lane 2: Companion's connect-time feedback (`GetSceneList`) names
+    // it too, with cg OBS's uuid of that scene; cg OBS still shows sp-slow.
+    let list = request(&mut ws, "GetSceneList", None).await;
+    assert_eq!(list["responseData"]["currentProgramSceneName"], "sp-fast");
+    assert_eq!(
+        list["responseData"]["currentProgramSceneUuid"],
+        "uuid-sp-fast"
     );
 
     // A manual cg OBS scene: cg OBS switches, SP-program cuts to "OBS manuál".

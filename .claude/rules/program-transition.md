@@ -376,11 +376,20 @@ drops. The wall step runs before the pause/hold:
   shared with the Resolume recovery, filtered to the diffed set), and ONE
   `HideSubtitles` goes only when none has a line: one playlist never clears
   another's line (the recovery's rule, `resolume-driver.md`).
-- The title candidates and the re-sent lines are those of the wall owner
-  only while there is one (release 0.69.0 review 🟡 2, `program-bus.md`
-  "One wall owner"). Residual, with no owner only: the candidates are
-  `scene_active` ones (`title_candidates`), so a due title of a playlist
-  whose OFF is queued can be re-synced until its own OFF re-syncs the wall.
+- The title candidates and the re-sent lines are the wall owner's only
+  (release 0.69.0 review 🟡 2, `program-bus.md` "One wall owner"); with no
+  owner there are none (#221 lane 2, ROZHODNUTÉ 6002459249: no owner =
+  nobody writes), so a playlist whose OFF is queued too re-syncs nothing.
+- An OFF that leaves NO owner (a cut to "OBS manuál") also clears the
+  stage display (`presenter::push_empty`, in `scene_off`, the OFF half
+  every authority OFF goes through — so also for a playlist whose ON was
+  dropped as stale) — nobody writes it any more, so the old owner's last
+  line would stay for the whole manual scene. With an owner published
+  whose ON is still queued (a press's OFF) it is left to that ON's
+  `resync_presenter`: no blank flash
+  (`tests_wall_owner.rs::the_last_owner_s_off_blanks_the_stage_display`,
+  `an_off_with_the_next_owner_on_its_way_leaves_the_stage_display`,
+  `an_off_that_leaves_no_owner_blanks_the_stage_display_even_unflagged`).
 - The stage display (#221 review round 3): with another playlist on
   program, the OFF ends with `resync_presenter(owner)` — the wall owner's
   line at its last position, or a cleared display. It repeats the owner's
@@ -454,8 +463,9 @@ faded out the on-program title.
     (`begin_play`), so it never outlives the pause.
 - **`clear_lyrics_display` follows the dispatch gates.** A held playlist
   clears nothing. One merely off program leaves the shared subtitle clips
-  alone, as its lines do; its own karaoke WS clear and the Presenter clear
-  still go out (the off-program contract of `dispatch_lyrics_if_changed`).
+  alone, as its lines do; its own karaoke WS clear still goes out, and its
+  Presenter clear only while it owns the wall (#221: never for a playlist
+  played off program by hand, `program-bus.md` "One wall owner").
   Before, a held song's `Started` with no lyrics, and any off-program song
   end or PlayVideo, blanked the on-program playlist's `#sp-subs` line (its
   dedup key kept it blank until its next line).
@@ -484,20 +494,23 @@ faded out the on-program title.
   playlists on one program scene the clear also blanks the other's line,
   like the song-end and PlayVideo clears: the shared-clip corner, where the
   lines already overwrite each other at every line change (older, as is).
-- **Residual: the stage display at a scene change** (older than the
-  hold). A scene-off clears the wall, never the Presenter, and a scene-on
-  of a song without lyrics sends nothing. So a song without lyrics whose
-  `Started` came inside the hold (its clear skipped) and whose scene then
-  comes back on leaves the stage display and its karaoke view on their
-  last line for that song, as a scene-on of any song without lyrics does.
+- **The stage display at a scene change.** The wall owner's ON re-syncs
+  it (`resync_presenter`), an OFF with another playlist on program too,
+  and (#221 lane 2) the last owner's OFF with no owner left clears it.
+  Residual (older than the hold): the karaoke view of a song without
+  lyrics whose `Started` came inside the hold (its clear skipped) stays on
+  its last line for that song.
 - **The lyrics survive the hold.** The scene-off used to drop
   `lyrics_state`, so a scene back on inside the hold played on with no
   subtitles. Now:
   - While held, `dispatch_lyrics_if_changed` sends nothing to the wall, the
     Presenter or the karaoke WS, which is what `None` did. The gate is the
     MARKER, not `scene_active`: a song played off program by hand still
-    feeds the karaoke WS + Presenter
-    (`dispatch_lyrics_resolume_gated_on_scene_active`).
+    feeds its karaoke WS
+    (`tests_wall_owner.rs::with_no_wall_owner_a_playlist_played_off_program_feeds_no_presenter`);
+    the Presenter only ever takes the wall owner's line (#221), and the
+    owner's scene gate on the wall lines is
+    `dispatch_lyrics_resolume_gated_on_scene_active`.
   - The scene-off resets the wall and Presenter dedup keys (the wall was
     cleared), so a scene back on re-sends the line at the next Position.
   - The PAUSE drops the lyrics, where the scene-off used to: a Position
@@ -517,8 +530,9 @@ faded out the on-program title.
 The transition every cut uses comes from Nastavenia alone. #221 L5 (owner
 directive 5999795799: SongPlayer is the master switcher, cg OBS is only the
 NDI input "OBS manuál") DELETED the OBS follow: `program_follow.rs` and its
-three test files, the follow test of `tests/obs_snapshot_follow.rs` (the
-client tests that remain are `tests/obs_snapshot.rs`), `FollowShared`, the
+three test files, the follow test of `tests/obs_snapshot_follow.rs` (L6
+then deleted the client's snapshot, its transition reader and
+`tests/obs_snapshot.rs` too), `FollowShared`, the
 `program_follow_obs` setting, `TransitionMode::Obs`, `SpecSource::Obs`,
 `spec_from_obs`, the `ObsTransition` re-export, the `follow` block of `GET
 /api/v1/program` and the "podľa OBS" UI. Do not bring any of it back; the

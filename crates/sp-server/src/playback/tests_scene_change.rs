@@ -229,7 +229,9 @@ fn position_for(window: Window) -> u64 {
 }
 
 /// Playlist `playlist_id` plays `video_id` on program, at `window` of its
-/// `SONG_MS`, with no title timers armed.
+/// `SONG_MS`, with no title timers armed. On program = on air as the wall
+/// owner (#221: the authority publishes SP-program's playlist), so the
+/// playlist played last owns the wall.
 fn play(engine: &mut PlaybackEngine, playlist_id: i64, video_id: i64, window: Window) {
     let pp = engine.pipelines.get_mut(&playlist_id).expect("pipeline");
     pp.state = PlayState::Playing { video_id };
@@ -238,6 +240,7 @@ fn play(engine: &mut PlaybackEngine, playlist_id: i64, video_id: i64, window: Wi
     pp.cached_position_ms = position_for(window);
     pp.cached_duration_ms = SONG_MS;
     pp.scene_active.store(true, Ordering::Release);
+    engine.put_on_air_for_test(playlist_id);
 }
 
 /// Every command waiting on the Resolume channel.
@@ -342,6 +345,7 @@ async fn scene_go_on_outside_the_title_window_pushes_no_title() {
 #[tokio::test]
 async fn a_scene_on_that_selects_a_song_resyncs_no_title_twice() {
     let (mut engine, mut rx) = test_engine(&[(7, 42, "Song")]).await;
+    engine.put_on_air_for_test(7); // the authority's ON comes with it
     sent(&mut rx);
 
     engine.handle_scene_change(7, true).await;
@@ -654,29 +658,29 @@ async fn handle_resolume_recovery_between_songs_shows_no_title() {
     }
 }
 
-/// A program scene with two SongPlayer playlists: they share the one
-/// `#sp-title` clip, so the re-sync names one title, the highest playlist
-/// id's among those due, whatever the HashMap order.
+/// Two SongPlayer playlists playing with their scene on program share the
+/// one `#sp-title` clip, so the re-sync names one title: the wall owner's
+/// (#221), whatever the other one's clock says and the HashMap order.
 #[tokio::test]
 async fn a_recovery_with_two_playlists_on_program_resyncs_one_title() {
     let (mut engine, mut rx) = test_engine(&[(7, 42, "Song"), (9, 44, "Later")]).await;
     play(&mut engine, 7, 42, Window::Due);
-    play(&mut engine, 9, 44, Window::Due);
+    play(&mut engine, 9, 44, Window::Due); // 9 owns the wall
     sent(&mut rx);
 
     engine.handle_resolume_recovery("127.0.0.1").await;
     assert_eq!(
         resyncs(&sent(&mut rx)),
         [Some("Later - Artist".to_string())],
-        "both due: the highest playlist id's title"
+        "both due: the owner's title"
     );
 
-    play(&mut engine, 9, 44, Window::BeforeShow);
+    engine.put_on_air_for_test(7);
     engine.handle_resolume_recovery("127.0.0.1").await;
     assert_eq!(
         resyncs(&sent(&mut rx)),
         [Some("Song - Artist".to_string())],
-        "only playlist 7's title is due"
+        "7 owns the wall: its title, 9's due one is not"
     );
 }
 

@@ -33,4 +33,12 @@ impl PlaybackEngine {
     pub(crate) fn set_on_program_for_test(&mut self, playlist_id: i64) {
         self.set_scene_active_for_test(playlist_id, true);
     }
+
+    /// Test-only: `playlist_id` is on air and owns the wall, as the playback
+    /// authority publishes SP-program's playlist (`program_authority.rs`). A
+    /// test of the wall writes (the lines, the title, the Presenter) puts its
+    /// playlist on air first, as production does before its ON.
+    pub(crate) fn put_on_air_for_test(&self, playlist_id: i64) {
+        self.on_air.publish([playlist_id].into(), Some(playlist_id));
+    }
 }

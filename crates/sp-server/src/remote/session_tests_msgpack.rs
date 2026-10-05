@@ -202,9 +202,13 @@ async fn companion_over_msgpack_presses_a_page_13_button_and_gets_every_event_as
     assert!(d["responseData"]["supportedImageFormats"].is_array());
     let d = request_msgpack(&mut ws, "GetStudioModeEnabled", Value::Null).await;
     assert_eq!(d["responseData"], json!({ "studioModeEnabled": true }));
-    // The scene list is cg OBS's, forwarded (a nil `requestData` included).
+    // The scene list is cg OBS's, forwarded (a nil `requestData` included);
+    // its program scene is SP-program's (#221 lane 2): nothing on it yet.
     let d = request_msgpack(&mut ws, "GetSceneList", Value::Null).await;
-    assert_eq!(d["responseData"]["currentProgramSceneName"], "sp-slow");
+    assert!(
+        d["responseData"]["currentProgramSceneName"].is_null(),
+        "{d}"
+    );
     assert_eq!(d["responseData"]["scenes"].as_array().unwrap().len(), 4);
 
     // preview_scene(sp-slow): answered, then the preview event, as msgpack.

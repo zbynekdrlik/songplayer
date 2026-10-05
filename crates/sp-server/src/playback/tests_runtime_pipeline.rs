@@ -1,7 +1,8 @@
 //! Regression tests for #132: a playlist created / activated / deleted at
 //! runtime (via the API) must register / tear down its playback pipeline with
-//! the engine, so scene detection can start playback without a process
-//! restart. Before the fix, the API CRUD handlers fired only `obs_rebuild_tx`
+//! the engine, so the playback authority (#221 L4b; cg OBS's scene detection
+//! at the time) can start playback without a process restart. Before the
+//! fix, the API CRUD handlers fired only `obs_rebuild_tx`
 //! and nothing ever called `ensure_pipeline` at runtime, so a runtime-created
 //! playlist logged `no pipeline for playlist` forever until a restart.
 //!

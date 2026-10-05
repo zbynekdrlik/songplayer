@@ -402,7 +402,8 @@ current subtitle state of the playing, on-program pipelines:
 - ONE `HideSubtitles` only when none of them has a line (a blank plan
   position, or a song with no `lyrics_state`). The subtitle clips are shared
   by every on-program playlist, so a blank one must never clear another's
-  line (review round 5; `obs/scene.rs` can keep several active playlists);
+  line (review round 5; since #221 only the wall owner's line is re-sent,
+  `recovery.rs::on_program_lines`, and with no owner none is);
 - that same one `HideSubtitles` when NO SongPlayer playlist plays on program.
   The scene-off hide goes through the same `clear_subtitles` path, so an
   outage can have swallowed it too (review round 6).
@@ -455,8 +456,8 @@ are the recovery's `on_program_lines`.
   1.5 s after the new `Started`. The old title stayed up over that gap, and
   a recovery inside it disagreed with the timers. Now the Play's `Resync`
   names no title for this playlist, so the old title goes down at the Play
-  (an instant hide), unless another on-program playlist's title is due (see
-  "Several due"). Off program nothing is sent. A scene-on that selects a
+  (an instant hide). Off program, or for a playlist that does not own the
+  wall, nothing is sent. A scene-on that selects a
   song sends two (the Play's, then the scene-on's): the driver does one
   action for them (`take_queued` drops the first when both are in one
   batch; else the second is a no-op, or retries a hide whose request
@@ -552,11 +553,13 @@ are the recovery's `on_program_lines`.
 - **Both timers write the clip only on program, and a pause cancels them**
   (release 0.68.0 blockers 1a + 1c). The hide timer reads `scene_active`
   when it fires, like the show timer; since release 0.69.0 (review 🟡 2)
-  both also read whether their playlist may write the wall
+  both also read whether their playlist owns the wall
   (`title_timers.rs::WallGate`, `program-bus.md` "One wall owner"), so
   another playlist (the outgoing one of a cut until its OFF; before #221 B4
   step 6 also the other member of a two-member on-air set) never shows or
-  hides the owner's title, and a re-sync names only the owner's. So the new
+  hides the owner's title, and a re-sync names only the owner's. With no
+  owner ("OBS manuál" on program) no timer writes the title and a re-sync
+  names none (#221 lane 2: no owner = nobody writes). So the new
   owner's ON
   re-syncs the title even when it plays nothing (a `Resync` naming none,
   `scene_off::wall_after_owner_on`, review round 2): the old owner's hide
@@ -576,14 +579,14 @@ are the recovery's `on_program_lines`.
   The held playlist itself no longer starts a song
   (`.claude/rules/program-transition.md`, "A held playlist has no side
   effects").
-- **Several due** (a program scene with more than one SongPlayer playlist;
-  they share the one `#sp-title` clip): the highest playlist id, so the
-  answer never depends on HashMap order. Residual: the lower id's own show
-  timer still pushes its title, so the clip shows whichever of the two
-  pushed last until a Resync names the higher id's. A shared-clip corner
-  older than #217, left as is (review round 4). A Play of one of them then
-  names the OTHER playlist's due title: the wall swaps to it, and 1.5 s
-  after the new `Started` to the new song's (review round 5).
+- **One candidate at most** (#221 lane 2): a re-sync's title candidates
+  are the wall owner's alone (`recovery.rs::title_candidates`), and with
+  no owner ("OBS manuál" on program) there are none, so a Resync names no
+  title. (`due_title_video` still breaks a tie by the highest playlist id;
+  the over-general multi-member machinery is lane 3's to simplify, main
+  ROZHODNUTÉ 6002459249 (4). The "several due" residual of #217 — two
+  SongPlayer playlists sharing the clip on one cg OBS scene — cannot
+  happen any more.)
 - **The text** comes from `format_title_text` (one formatter, see above).
   The OBS text source follows the Resync: the title, or cleared, as the hide
   timer clears it. A failed read of the due title sends nothing: a transient

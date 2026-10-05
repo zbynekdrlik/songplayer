@@ -270,3 +270,57 @@ async fn get_current_program_scene_is_sp_programs_own_scene() {
         rig.calls()
     );
 }
+
+/// #221 lane 2 (ROZHODNUTÉ 6002459249): Companion's feedback at CONNECT
+/// comes from `GetSceneList` (`currentProgramSceneName` → `scene_active`,
+/// `currentPreviewSceneName` → `scene_preview`). cg OBS's own program
+/// (sp-slow in the fake) is wrong whenever a playlist is on SP-program, so
+/// the forwarded answer names SP-program's scene and this session's preview,
+/// each with cg OBS's uuid of that scene (null for a name cg OBS does not
+/// list); the scene list itself is cg OBS's.
+#[tokio::test]
+async fn get_scene_list_names_sp_program_s_scene_and_this_session_s_preview() {
+    let rig = rig().await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+
+    // A playlist on SP-program; no preview set: the preview is the program.
+    rig.bus.select_initial(7, Some("sp-fast"));
+    let d = request(&mut ws, "GetSceneList", None).await;
+    assert_eq!(d["requestStatus"], json!({ "result": true, "code": 100 }));
+    let data = &d["responseData"];
+    assert_eq!(data["currentProgramSceneName"], "sp-fast");
+    assert_eq!(data["currentProgramSceneUuid"], "u-sp-fast");
+    assert_eq!(data["currentPreviewSceneName"], "sp-fast");
+    assert_eq!(data["currentPreviewSceneUuid"], "u-sp-fast");
+    let names: Vec<&str> = data["scenes"]
+        .as_array()
+        .expect("cg OBS's scene list")
+        .iter()
+        .map(|s| s["sceneName"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["sp-fast", "sp-slow", "Slido", "Trailer"]);
+
+    // This session's own preview.
+    let set = request(
+        &mut ws,
+        "SetCurrentPreviewScene",
+        Some(json!({ "sceneName": "Slido" })),
+    )
+    .await;
+    assert_eq!(set["requestStatus"]["code"], 100);
+    let d = request(&mut ws, "GetSceneList", None).await;
+    assert_eq!(d["responseData"]["currentProgramSceneName"], "sp-fast");
+    assert_eq!(d["responseData"]["currentPreviewSceneName"], "Slido");
+    assert_eq!(d["responseData"]["currentPreviewSceneUuid"], "u-Slido");
+
+    // "OBS manuál" with no scene name: cg OBS lists no such scene.
+    rig.bus.select_initial(-1, None);
+    let d = request(&mut ws, "GetSceneList", None).await;
+    assert_eq!(d["responseData"]["currentProgramSceneName"], "OBS manuál");
+    assert!(
+        d["responseData"]["currentProgramSceneUuid"].is_null(),
+        "{d}"
+    );
+    assert_eq!(d["responseData"]["currentPreviewSceneName"], "Slido");
+}

@@ -1,10 +1,10 @@
 //! NDI source discovery — queries OBS for NDI inputs and matches against the
-//! DB's active playlists to build the scene-detection map.
+//! DB's active playlists to build the `NdiSourceMap`.
 //!
-//! This is the glue that was missing in the initial migration: `lib.rs`
-//! used to create the `NdiSourceMap` as `HashMap::new()` and never populate
-//! it, so [`scene::check_scene_items`] always returned an empty active set
-//! and scene-driven playback never fired (issue #11).
+//! Issue #11 added it (`lib.rs` created the map and never filled it, so the
+//! scene detection of the time never fired). #221 L6 deleted that scene
+//! detection; the map's reader now is the #196 self-check
+//! (`PlaybackEngine::output_has_obs_input`).
 
 use std::collections::HashMap;
 
@@ -22,17 +22,16 @@ use crate::obs::text::{
 /// `OBS input name → playlist_id` for the playlists whose `ndi_output_name`
 /// matches an input's `ndi_source_name` setting.
 ///
-/// The map is keyed by the OBS input name (e.g. `"sp-fast_video"`) — that is
-/// what [`scene::check_scene_items`] compares against. The playlist's
-/// `ndi_output_name` (e.g. `"SP-fast"`) is only used as the join key against
-/// the OBS input's `ndi_source_name` setting.
+/// The map is keyed by the OBS input name (e.g. `"sp-fast_video"`). The
+/// playlist's `ndi_output_name` (e.g. `"SP-fast"`) is only used as the join
+/// key against the OBS input's `ndi_source_name` setting.
 /// Rebuild the OBS-input-name → playlist-id map.
 ///
 /// Returns `None` when the rebuild **cannot be trusted** — typically a
 /// transient OBS query failure. Callers MUST preserve the previously-built
-/// map in that case, otherwise a single WebSocket hiccup wipes scene
-/// detection and every `CurrentProgramSceneChanged` becomes a no-op
-/// (silent playback stall; this is what broke the 2026-04-19 event).
+/// map in that case, otherwise a single WebSocket hiccup wipes it (this is
+/// what broke the 2026-04-19 event, when the scene detection deleted in
+/// #221 L6 still read it).
 ///
 /// Returns `Some(HashMap)` with the fresh mapping when the rebuild ran
 /// end-to-end. An empty map is still a valid `Some`: it means the DB
@@ -67,7 +66,7 @@ pub async fn rebuild_ndi_source_map(
         None => {
             warn!(
                 "rebuild_ndi_source_map: GetInputList returned nothing; \
-                 keeping previous map so scene detection stays alive"
+                 keeping the previous map"
             );
             return None;
         }

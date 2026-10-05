@@ -91,9 +91,9 @@ impl super::PlaylistPipeline {
 }
 
 /// The video whose title is due at `now` among `candidates` (`(playlist id,
-/// clock)`): an open clock. Several (on program with no wall owner — a
-/// playlist whose OFF is still queued; they share the one `#sp-title` clip):
-/// the highest playlist id, so the HashMap order never decides.
+/// clock)`): an open clock. The candidates are the wall owner's alone
+/// (`title_candidates`), so one at most; were there several, the highest
+/// playlist id would win, so the HashMap order never decides.
 fn due_title_video(candidates: &[(i64, TitleClock)], now: Instant) -> Option<i64> {
     candidates
         .iter()
@@ -105,8 +105,8 @@ fn due_title_video(candidates: &[(i64, TitleClock)], now: Instant) -> Option<i64
 impl super::PlaybackEngine {
     /// The songs whose title could be on the wall: `(playlist id, clock)` of
     /// every playing, on-program pipeline with its own song's clock that may
-    /// write the wall (#221, release 0.69.0 review 🟡 2: while a playlist
-    /// owns the wall, only it).
+    /// write the wall (#221, release 0.69.0 review 🟡 2: the wall owner only;
+    /// none without one).
     fn title_candidates(&self) -> Vec<(i64, TitleClock)> {
         self.pipelines
             .iter()
@@ -123,7 +123,8 @@ impl super::PlaybackEngine {
     /// Decide the wall's title (#217 addendum 3): the due title or none, and
     /// the instant it was decided at. `None` when the due song's title read
     /// failed: a transient error must not hide a title mid-song, so nothing
-    /// is sent. Another candidate's failed read is logged and does not matter.
+    /// is sent. A failed read of a candidate that is not due is logged and
+    /// does not matter (the candidates are the wall owner's alone, #221).
     ///
     /// The candidates' titles are read FIRST, one await per candidate. The
     /// due title is then decided at `Instant::now()`, and the callers send it
@@ -173,7 +174,7 @@ impl super::PlaybackEngine {
     }
 
     /// The wall's line of every playing, on-program pipeline that may write
-    /// the wall (#221 🟡 2: while a playlist owns the wall, only it), at its
+    /// the wall (#221 🟡 2: the wall owner only; none without one), at its
     /// last reported position: `(playlist id, video id, ShowSubtitles)`. A
     /// pipeline with no line there (no lyrics, a blank plan position) has
     /// none. Used by a Resolume recovery and when a playlist goes off program

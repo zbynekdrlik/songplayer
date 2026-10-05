@@ -1,6 +1,6 @@
 //! #221 L4b: SongPlayer's own program is the PLAYBACK authority (design
-//! record 5873773896 §1e). cg OBS's scene detection starts and pauses
-//! nothing any more.
+//! record 5873773896 §1e). cg OBS's scene detection started and paused
+//! nothing any more, and #221 L6 deleted it.
 //!
 //! - **What is on air** is `program_on_air::on_air_set`: `SP-program`'s
 //!   source when it is a playlist, alone (#221 B4 step 6 deleted the legacy
@@ -32,15 +32,16 @@
 //!   (`Hold::Until`, `scene_off.rs`).
 //! - **One wall owner** (release 0.69.0 review 🟡 2): with each set the task
 //!   publishes its `program_on_air::wall_owner`, SP-program's playlist (none
-//!   while "OBS manuál" is on program). While there is one, only it writes
-//!   the shared wall outputs ([`OnAirPlaylists::may_write_wall`]): the
-//!   `ShowSubtitles` dispatch and the Presenter push (`position_update.rs`),
-//!   the song-end clear (`clear_lyrics.rs`), the title timers
-//!   (`title_timers.rs`) and a re-sync's title and lines (`recovery.rs`). A
-//!   playlist played off program by hand then writes none of them. With no
-//!   owner ("OBS manuál" on program, nothing on air) nothing is restricted:
-//!   such a playlist feeds the Presenter as before the owner (a residual,
-//!   `program-bus.md` "One wall owner").
+//!   while "OBS manuál" is on program). Only it writes the shared wall
+//!   outputs ([`OnAirPlaylists::may_write_wall`]): the `ShowSubtitles`
+//!   dispatch and the Presenter push (`position_update.rs`), the song-end
+//!   clear (`clear_lyrics.rs`), the title timers (`title_timers.rs`) and a
+//!   re-sync's title and lines (`recovery.rs`). A playlist played off
+//!   program by hand writes none of them. With no owner ("OBS manuál" on
+//!   program, nothing on air, or before the task's first value) NOBODY
+//!   writes them (ROZHODNUTÉ 6002459249), and an OFF that leaves no owner
+//!   blanks the wall (`scene_off::wall_after_scene_off`) and the stage
+//!   display (`scene_off::scene_off`).
 //! - A pipeline created after its playlist went on air (a runtime
 //!   `EnsurePipeline`) goes on program itself (`runtime_pipeline.rs`). An ON
 //!   for a playlist with NO pipeline (the #196 startup senders ran out of
@@ -86,8 +87,9 @@ impl OnAirPlaylists {
         *self.diffed() = Diffed { playlists, owner };
     }
 
-    /// Test-only: the diffed set alone, with no owner (every playlist on
-    /// program writes the wall, as before the owner).
+    /// Test-only: the diffed set alone, with no owner (so nobody writes the
+    /// wall): for the tests of the stale check and the hold re-check, and
+    /// the no-owner wall tests (nothing on air, the cut to "OBS manuál").
     #[cfg(test)]
     pub fn replace(&self, playlists: BTreeSet<i64>) {
         self.publish(playlists, None);
@@ -105,12 +107,13 @@ impl OnAirPlaylists {
     }
 
     /// Whether `playlist_id` may write the shared wall outputs (the lines,
-    /// the title, the Presenter): while a playlist owns the wall, only that
-    /// one. With none (nothing on air, or before the task's first value) this
-    /// restricts nothing: a playlist whose OFF is still queued writes as
-    /// before, and its OFF re-syncs the wall (`wall_after_scene_off`).
+    /// the title, the Presenter): only the wall owner. With none ("OBS
+    /// manuál" on program, nothing on air, or before the task's first value)
+    /// nobody may (ROZHODNUTÉ 6002459249): a playlist played off program by
+    /// hand, or one whose OFF is still queued, writes nothing, and the last
+    /// owner's OFF blanks the wall (`wall_after_scene_off`, `scene_off`).
     pub fn may_write_wall(&self, playlist_id: i64) -> bool {
-        self.diffed().owner.is_none_or(|owner| owner == playlist_id)
+        self.diffed().owner == Some(playlist_id)
     }
 }
 
