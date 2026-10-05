@@ -2,17 +2,21 @@
 //! `VideoDevice`): created with the video API, multithread-protected, on the
 //! adapter `pick_adapter` chooses (never WARP on its own).
 //!
-//! Windows only. `windows-latest` has no GPU, and its WARP has no video API:
-//! `D3D11CreateDevice` on WARP with `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`
-//! returns DXGI_ERROR_UNSUPPORTED (CI run 37293259981), although Microsoft's
-//! `D3D11_CREATE_DEVICE_FLAG` page says a WARP device "succeeds to allow
-//! software fallback for video". That refusal is asserted here as a fact of
-//! the runner: a WARP that one day takes the flag fails this, and the tests
+//! Windows only. `windows-latest` has no GPU, and its WARP refuses the video
+//! device `VideoDevice` asks for: `D3D11CreateDevice` on WARP with BGRA +
+//! `D3D11_CREATE_DEVICE_VIDEO_SUPPORT` at feature level 11.1 / 11.0 returns
+//! DXGI_ERROR_UNSUPPORTED (CI run 37293259981). Microsoft's
+//! `D3D11_CREATE_DEVICE_FLAG` page says a WARP device with the flag
+//! "succeeds to allow software fallback for video"; the same entry limits
+//! video on a pre-WDDM-1.2 driver to feature levels 9.x, which may be why an
+//! 11.x request is refused. That refusal is asserted here as a fact of the
+//! runner: a WARP that one day makes this device fails this, and the tests
 //! built on the refusal (sp-decoder's `tests/mf_hw_decode.rs`) must then be
-//! written for the D3D path they reach. `VideoDevice::new` reports
-//! `NoAdapter` there. Nothing is skipped.
+//! written for the D3D path they reach. Nothing is skipped.
 
 #![cfg(windows)]
+
+use std::io::Write;
 
 use sp_gpu::{GpuError, VideoDevice, pick_adapter};
 use windows::Win32::Graphics::Direct3D::{
@@ -94,10 +98,11 @@ fn assert_ready_for_media_foundation(video: &VideoDevice, what: &str) {
 }
 
 /// WARP makes a device with the compositor's flags (BGRA) but refuses the
-/// video API, and `VideoDevice::new_warp` reports exactly that refusal:
-/// sp-decoder's `Hardware` reader on WARP falls back at open on it.
+/// same call with the video flag added, and `VideoDevice::new_warp` reports
+/// exactly that refusal: sp-decoder's `Hardware` reader on WARP falls back
+/// at open on it.
 #[test]
-fn warp_refuses_the_video_api_and_new_warp_reports_it() {
+fn warp_refuses_the_video_flag_and_new_warp_reports_it() {
     driver_answer(None, D3D11_CREATE_DEVICE_BGRA_SUPPORT)
         .unwrap_or_else(|hr| panic!("WARP makes a BGRA device (the compositor's): {hr:#010x}"));
     let unsupported = DXGI_ERROR_UNSUPPORTED.0 as u32;
@@ -116,15 +121,19 @@ fn warp_refuses_the_video_api_and_new_warp_reports_it() {
 }
 
 /// `VideoDevice::new`'s device path (an explicit DXGI adapter,
-/// `D3D_DRIVER_TYPE_UNKNOWN`) on the listed Basic Render Driver, the only
-/// adapter of `windows-latest`. Whether that driver takes the video API is
-/// NOT proven on CI: Microsoft says it does, in the same paragraph that
-/// says WARP does, which CI refuted. So the test asks the driver first,
-/// with the same call, and asserts that `new_on_listed_adapter` agrees: a
-/// device on that adapter, ready for Media Foundation, or the driver's own
-/// refusal as `GpuError::Api`. A device made without the video flag, or
-/// on another adapter, fails either way. The answer is printed; pin it here
-/// once a CI run has shown it.
+/// `D3D_DRIVER_TYPE_UNKNOWN`) on the listed Basic Render Driver (DXGI lists
+/// it on `windows-latest`, `tests/warp.rs`). Whether that driver makes the
+/// video device is NOT proven on CI: Microsoft says it does, in the entry
+/// whose WARP claim CI refuted. So the test asks the driver first, with the
+/// same call, and asserts that `new_on_listed_adapter` agrees: a device on
+/// that adapter with the video API and multithread protection, or the
+/// driver's own HRESULT as `GpuError::Api`. A missing video flag fails
+/// either way (a device where the driver refuses, or a device without the
+/// flag where it accepts). A device on another adapter fails only when the
+/// driver accepts; when it refuses there is no device to read the adapter
+/// from, and `create_on`'s adapter choice is the compositor's, which
+/// `tests/warp.rs` proves on the same listed adapter. The driver's answer is
+/// written to the CI log, passing or failing.
 #[test]
 fn a_video_device_on_a_listed_adapter_agrees_with_the_driver() {
     let adapters = sp_gpu::adapters().expect("DXGI lists its adapters");
@@ -137,10 +146,14 @@ fn a_video_device_on_a_listed_adapter_agrees_with_the_driver() {
         .unwrap_or_else(|e| panic!("DXGI adapter {index}: {e}"));
     let adapter: &IDXGIAdapter = &listed;
     let answer = driver_answer(Some(adapter), video_flags());
-    match answer {
-        Ok(()) => eprintln!("the listed Basic Render Driver takes the video API"),
-        Err(hr) => eprintln!("the listed Basic Render Driver refuses the video API: {hr:#010x}"),
-    }
+    let line = match answer {
+        Ok(()) => "the listed Basic Render Driver makes the video device".to_string(),
+        Err(hr) => format!("the listed Basic Render Driver refuses the video device: {hr:#010x}"),
+    };
+    // Straight to the process's stderr, not `eprintln!`: libtest captures the
+    // print macros of a passing test, and this runner fact belongs in the CI
+    // log either way.
+    writeln!(std::io::stderr(), "{line}").expect("stderr");
     match (answer, VideoDevice::new_on_listed_adapter(index)) {
         (Ok(()), Ok(video)) => {
             assert_eq!(video.adapter(), &adapters[index]);
@@ -153,9 +166,9 @@ fn a_video_device_on_a_listed_adapter_agrees_with_the_driver() {
                 hresult,
             }
         ),
-        (Ok(()), Err(e)) => panic!("the driver takes the video API, VideoDevice failed: {e}"),
+        (Ok(()), Err(e)) => panic!("the driver makes the video device, VideoDevice failed: {e}"),
         (Err(hresult), Ok(_)) => {
-            panic!("the driver refused the video API ({hresult:#010x}), VideoDevice made a device")
+            panic!("the driver refused the video device ({hresult:#010x}), VideoDevice made one")
         }
     }
 }

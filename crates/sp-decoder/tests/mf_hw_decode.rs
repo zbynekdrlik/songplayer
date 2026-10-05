@@ -1,35 +1,40 @@
 //! #223 S3b: the reader's opt-in hardware decode on the H.264 fixture.
 //!
-//! `windows-latest` has no GPU, and its WARP has no Direct3D 11 video API:
-//! `D3D11CreateDevice` on WARP with `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`
-//! returns DXGI_ERROR_UNSUPPORTED (0x887A0004, CI run 37293259981; Microsoft's
-//! `D3D11_CREATE_DEVICE_FLAG` page says it succeeds). So no `Hardware` reader
-//! reaches the D3D path on CI. On the picked adapter it finds no hardware
-//! adapter and falls back at open (on a GPU box it may run on the D3D path,
-//! `assert_reported`). On WARP (`open_hardware_on_warp`) the video device is
-//! refused, so it falls back at open with exactly that reason
+//! `windows-latest` has no GPU, and its WARP refuses the video device the
+//! reader asks for: `D3D11CreateDevice` on WARP with BGRA +
+//! `D3D11_CREATE_DEVICE_VIDEO_SUPPORT` at feature level 11.1 / 11.0 (the
+//! call `sp_gpu::VideoDevice` makes) returns DXGI_ERROR_UNSUPPORTED
+//! (0x887A0004, CI run 37293259981). Microsoft's `D3D11_CREATE_DEVICE_FLAG`
+//! page says a WARP device with the flag succeeds; the same entry limits
+//! video on a pre-WDDM-1.2 driver to feature levels 9.x, which may be why an
+//! 11.x request is refused. On WARP (`open_hardware_on_warp`) a `Hardware`
+//! open therefore falls back at open with exactly that reason
 //! (`assert_fell_back_at_open_on_warp`): the CI test of a refused video
-//! device. Either way every picture must be the SAME NV12 the software
-//! reader decodes (H.264 decoding is bit-exact), compared pixel by pixel
-//! over the fixture's visible 160×120. A failed open or decode FAILS here;
-//! nothing is skipped.
+//! device. On the picked adapter the reader reports `hardware` or
+//! `software` (`assert_reported`: whatever `pick_adapter` finds on the
+//! runner, not pinned; with no GPU, an open fall back). Either way every
+//! picture must be the SAME NV12 the software reader decodes (H.264 decoding
+//! is bit-exact), compared pixel by pixel over the fixture's visible
+//! 160×120. A failed open or decode FAILS here; nothing is skipped.
 //!
-//! The D3D path itself (DXVA pictures, a decode error on it, its mid-stream
-//! fall back) is proven only by the main session's box bench (`decode-bench`
-//! with `"hw": true` on the box's GPU: `decode_path: "hardware"`,
-//! `path_changes: 0`). CI proves its parts: the decisions in
-//! `hw_decode_tests.rs` (Linux), the software reopen through one injected
-//! decode failure (`fail_next_read_for_test`: the reader must go on where it
-//! stopped, no picture lost or handed over twice), and the readback below.
+//! So no WARP reader runs on the D3D path here. DXVA decode and the readback
+//! of a decoder's texture are left to the main session's box bench
+//! (`decode-bench` with `"hw": true` on the box's GPU: `decode_path:
+//! "hardware"`, `path_changes: 0`). A seek and a decode error (the
+//! mid-stream fall back) ON the D3D path are proven nowhere: the bench
+//! neither seeks nor forces a fall back. Their code is shared with what CI
+//! does run: the decisions in `hw_decode_tests.rs` (Linux), the seek parity
+//! and the software reopen through one injected decode failure
+//! (`fail_next_read_for_test`: the reader must go on where it stopped, no
+//! picture lost or handed over twice), and the readback below.
 //!
 //! The readback of a GPU picture never runs on CI through a decoder, so
 //! `a_dxgi_surface_is_read_back_into_the_software_layout` runs it on a real
 //! DXGI surface: a WARP NV12 texture TALLER than the picture (decoders align
 //! theirs), wrapped as a decoder wraps its output. The texture is made on a
-//! plain WARP device (`plain_warp_device`): `windows-latest`'s WARP refuses
-//! the video API (`D3D11_CREATE_DEVICE_VIDEO_SUPPORT`, DXGI_ERROR_UNSUPPORTED,
-//! CI run 37293259981), and neither making an NV12 texture nor mapping it
-//! needs that API.
+//! plain WARP device with the compositor's flags (`plain_warp_device`, no
+//! video flag): making an NV12 texture and mapping it should not need the
+//! video device, and this test is what proves it on CI.
 
 #![cfg(windows)]
 
@@ -37,18 +42,16 @@ use sp_decoder::{
     DecodeMode, DecodePath, DecodedVideoFrame, FallbackStage, MediaFoundationVideoReader,
     MediaStream, VideoStream, hw_counters, read_texture_as_decoded_sample,
 };
-use windows::Win32::Foundation::TRUE;
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
 };
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_DECODER, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_FORMAT_SUPPORT_TEXTURE2D,
     D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
-    D3D11CreateDevice, ID3D11Device, ID3D11Multithread,
+    D3D11CreateDevice, ID3D11Device,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_NV12, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::DXGI_ERROR_UNSUPPORTED;
-use windows::core::Interface;
 
 /// The fixture's own picture: 160×120 (MF may pad the height to 128).
 const W: usize = 160;
@@ -175,11 +178,12 @@ fn hardware_mode_opens_the_fixture_and_decodes_what_software_decodes() {
 }
 
 /// What a `Hardware` reader on WARP is on `windows-latest`: its video device
-/// was refused (`D3D11CreateDevice` with the video API, DXGI_ERROR_UNSUPPORTED,
-/// which the reader's session reports as `no video device: <sp_gpu error>`),
-/// so it has no device manager, never ran on the D3D path and fell back at
-/// open. A WARP that one day takes the video API fails this, and the WARP
-/// tests must then be written for the D3D path they reach.
+/// was refused (`D3D11CreateDevice` with the video flag at feature level 11.x,
+/// DXGI_ERROR_UNSUPPORTED, which the reader's session reports as
+/// `no video device: <sp_gpu error>`), so it has no device manager, never
+/// ran on the D3D path and fell back at open. A WARP that one day makes that
+/// device fails this, and the WARP tests must then be written for the D3D
+/// path they reach.
 fn assert_fell_back_at_open_on_warp(reader: &MediaFoundationVideoReader, what: &str) {
     assert_eq!(reader.decode_mode(), DecodeMode::Hardware, "{what}");
     assert_eq!(reader.hw_adapter(), None, "{what}: never on the D3D path");
@@ -189,7 +193,7 @@ fn assert_fell_back_at_open_on_warp(reader: &MediaFoundationVideoReader, what: &
     };
     let fallback = reader
         .hw_fallback()
-        .unwrap_or_else(|| panic!("{what}: WARP refuses the video API, so the open falls back"));
+        .unwrap_or_else(|| panic!("{what}: WARP refuses the video device, so the open falls back"));
     assert_eq!(fallback.stage, FallbackStage::Open, "{what}: {fallback:?}");
     assert_eq!(
         fallback.reason,
@@ -225,7 +229,8 @@ fn hardware_mode_on_warp_falls_back_at_open_and_decodes_what_software_decodes() 
 /// (~2 000 ms), a real one a picture at or before the target. On CI the
 /// `Hardware` reader fell back at open (asserted), so this pins the seek of a
 /// `Hardware` reader on the software path (`Resume::on_seek` +
-/// `SetCurrentPosition`); a seek on the D3D path is proven only on the box.
+/// `SetCurrentPosition`). A seek on the D3D path is proven nowhere: the box
+/// bench does not seek.
 #[test]
 fn a_hardware_reader_seeks_to_the_picture_software_seeks_to() {
     let first_after_seek = |mut reader: MediaFoundationVideoReader, what: &str| {
@@ -261,10 +266,10 @@ fn a_hardware_reader_seeks_to_the_picture_software_seeks_to() {
     );
 }
 
-/// A WARP device WITHOUT the video API: BGRA support at feature level 11.1
-/// or 11.0 (the compositor's WARP device, `sp_gpu`'s `DeviceUse::Compose`,
-/// which CI builds), multithread-protected like the reader's video device.
-/// It is the device of the readback test's texture, not a decode device.
+/// A WARP device WITHOUT the video flag: BGRA support at feature level 11.1
+/// or 11.0, the call CI already makes for the compositor's WARP device
+/// (`sp_gpu`'s `DeviceUse::Compose`). It is the device of the readback
+/// test's texture, not a decode device.
 fn plain_warp_device() -> ID3D11Device {
     let mut device = None;
     unsafe {
@@ -280,12 +285,8 @@ fn plain_warp_device() -> ID3D11Device {
             None,
         )
     }
-    .expect("a WARP device without the video API");
-    let device: ID3D11Device = device.expect("D3D11CreateDevice gave a device");
-    let multithread: ID3D11Multithread = device.cast().expect("ID3D11Multithread");
-    // Returns whether the protection was on before; it is on after.
-    let _was_on = unsafe { multithread.SetMultithreadProtected(TRUE) };
-    device
+    .expect("a WARP device without the video flag");
+    device.expect("D3D11CreateDevice gave a device")
 }
 
 /// A WARP NV12 texture of 160×128 (as a decoder aligns a 160×120 picture)
@@ -293,7 +294,7 @@ fn plain_warp_device() -> ID3D11Device {
 /// first 120 luma rows, then the first 60 UV rows of the UV plane that
 /// starts after ALL 128 luma rows, packed at a stride of 160. This is the
 /// layout `Lock2DSize` maps (Direct3D's NV12), which no decoder reaches on
-/// CI. The texture's device has no video API (`plain_warp_device`); if WARP
+/// CI. The texture's device has no video flag (`plain_warp_device`); if WARP
 /// cannot make NV12 textures, the test FAILS on that, it never skips.
 #[test]
 fn a_dxgi_surface_is_read_back_into_the_software_layout() {
@@ -403,17 +404,18 @@ fn a_software_reader_goes_on_where_it_stopped_after_a_mid_stream_fallback() {
 }
 
 /// The fall back the feature exists for, a decode error on the D3D path,
-/// cannot be reached on CI: WARP refuses the video API, so a `Hardware`
+/// cannot be reached on CI: WARP refuses the video device, so a `Hardware`
 /// reader on WARP falls back at OPEN (asserted first) and never runs on the
-/// D3D path. Its logic is covered without it: the gate, `Resume` and the
+/// D3D path. Nor does the box bench force one, so that path's fall back is
+/// proven nowhere; its code is what CI covers: the gate, `Resume` and the
 /// software reopen are the code the software-reader variant above runs, and
-/// `hw_decode_tests.rs` pins every decision on Linux; the D3D path itself is
-/// proven only by the main session's box bench. What this adds: a `Hardware`
-/// reader that fell back at open, given one injected decode error (the hook
-/// arms the once-per-file gate, which such a reader never arms itself), goes
-/// on exactly as software does, and its fall back is then the mid-stream one.
+/// `hw_decode_tests.rs` pins every decision on Linux. What this test adds: a
+/// `Hardware` reader that fell back at open, given one injected decode error
+/// (the hook arms the once-per-file gate, which such a reader never arms
+/// itself), goes on exactly as software does, and its fall back is then the
+/// mid-stream one.
 #[test]
-fn a_hardware_reader_goes_on_where_it_stopped_after_a_mid_stream_fallback() {
+fn a_hardware_reader_that_fell_back_at_open_goes_on_after_an_injected_decode_error() {
     let reader = MediaFoundationVideoReader::open_hardware_on_warp(&fixture())
         .expect("a Hardware open on WARP");
     assert_fell_back_at_open_on_warp(&reader, "hardware reader");
