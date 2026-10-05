@@ -14,7 +14,8 @@
  * `POST /api/v1/lyrics/g35t/probe` cuts 20 s of a cached song from its first
  * served line (its isolated vocal stem when on disk) and sends it through the
  * worker's call: the same upload, request body, language hint and key
- * rotation. One short paid call per deploy, like the metadata probe.
+ * rotation. One short paid call per deploy, like the metadata probe. It passes
+ * on any working key; the keys refused before it are logged (`refused_keys`).
  *
  * API-level on purpose: the probe has no dashboard surface. The decision is
  * the pure `g35t-gate.ts`, unit-tested in the mock suite.
@@ -26,13 +27,31 @@ import { G35tProbe, g35tGateFailures } from "./g35t-gate";
 test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
   test("the box transcribes a real clip under the worker's request", async ({ request }) => {
     // The probe bounds the transcription at 180 s (`g35t_probe::PROBE_TIMEOUT`);
-    // a 20 s clip answers in seconds.
-    test.setTimeout(240_000);
+    // a 20 s clip answers in seconds. The ffmpeg wait comes first.
+    test.setTimeout(300_000);
+
+    // The probe cuts the clip with the app's ffmpeg, which the tools manager
+    // makes ready after a (re)start: wait for it rather than depend on the
+    // specs that happen to run before this one.
+    await expect
+      .poll(
+        async () => {
+          const status = await request.get("/api/v1/status");
+          if (status.status() !== 200) return false;
+          const body = (await status.json()) as { tools?: { ffmpeg_available?: boolean } };
+          return body.tools?.ffmpeg_available === true;
+        },
+        { message: "the app's ffmpeg is ready (tools.ffmpeg_available)", timeout: 60_000 },
+      )
+      .toBe(true);
 
     const resp = await request.post("/api/v1/lyrics/g35t/probe", { timeout: 220_000 });
     expect(resp.status(), "POST /api/v1/lyrics/g35t/probe").toBe(200);
     const probe = (await resp.json()) as G35tProbe;
     console.log(`[#144 g35t probe] ${JSON.stringify(probe)}`);
+    for (const refused of probe.refused_keys) {
+      console.log(`[#144 g35t probe] key ${refused.key_index} refused: ${refused.error}`);
+    }
 
     expect(g35tGateFailures(probe), "the g35t probe must hear words").toEqual([]);
   });

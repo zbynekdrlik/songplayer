@@ -20,11 +20,16 @@
 //!   else the audio itself (the full mix);
 //! - the window: [`CLIP_MS`] from the first served line's start, so the clip
 //!   holds singing (an instrumental intro would answer 0 words, a false red);
-//! - cut by the app's ffmpeg into a 16 kHz mono PCM WAV ([`clip_args`]) in a
-//!   temp dir dropped after the call.
+//! - cut by the app's ffmpeg into a 16 kHz mono float WAV ([`clip_args`]),
+//!   the format of the worker's own isolated vocal, in a temp dir dropped
+//!   after the call.
 //!
 //! The answer never carries a key: the client's error texts name a key by
 //! its place in the list (`key 2 of 5`) and are redacted with every key.
+//! It lists every key refused before the one that decided the outcome
+//! (`refused_keys`), so a dead key shows even while a later one answers.
+//! The gate passes on ANY working key; keys after the answering one are not
+//! tried (that would cost a paid call per key).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -33,7 +38,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::lyrics::g35t_client::{self, LANGUAGE_CODES, MODEL_SLUG};
+use crate::lyrics::g35t_client::{self, KeyRefusal, LANGUAGE_CODES, MODEL_SLUG};
 
 /// Length of the clip sent (ms): long enough for a few sung lines, short
 /// enough to cost a fraction of a cent.
@@ -48,9 +53,6 @@ pub const PROBE_TIMEOUT: Duration = Duration::from_secs(180);
 /// Words of the transcript the answer quotes (`sample`): the read-back that
 /// the model really heard the clip.
 const SAMPLE_WORDS: usize = 8;
-
-/// Characters of ffmpeg's stderr an error keeps.
-const FFMPEG_ERROR_CHARS: usize = 300;
 
 /// Which file of the song the clip was cut from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,8 +111,12 @@ pub struct G35tProbeReport {
     pub word_count: usize,
     /// How long the transcription took (ms); 0 when none was sent.
     pub latency_ms: u64,
-    /// Why the probe failed (never a key); `None` when `ok`.
+    /// Why the probe failed (never a key); `None` when `ok`. An API error
+    /// carries the reply's 400-character excerpt (`g35t_client`).
     pub error: Option<String>,
+    /// The keys refused (a 429 or a key refusal) before the one that decided
+    /// the outcome, in order; every key when all were refused.
+    pub refused_keys: Vec<KeyRefusal>,
     /// The clip sent; `None` when the probe stopped before picking one.
     pub clip: Option<ClipInfo>,
     /// The first [`SAMPLE_WORDS`] words heard, space-separated.
@@ -128,6 +134,7 @@ impl G35tProbeReport {
             word_count: 0,
             latency_ms: 0,
             error: Some(error),
+            refused_keys: Vec::new(),
             clip,
             sample: String::new(),
         }
@@ -145,8 +152,9 @@ fn seconds(ms: u64) -> String {
 }
 
 /// ffmpeg's arguments for the clip: [`CLIP_MS`] of `input` from `start_ms`,
-/// audio only, as a 16 kHz mono 16-bit PCM WAV at `out` (the format of the
-/// worker's isolated vocal). `-ss` before `-i` seeks the input.
+/// audio only, as a 16 kHz mono 32-bit float WAV at `out`: the format of the
+/// worker's isolated vocal (`scripts/lyrics_worker.py` writes `FLOAT`).
+/// `-ss` before `-i` seeks the input.
 pub fn clip_args(input: &Path, start_ms: u64, out: &Path) -> Vec<OsString> {
     vec![
         "-hide_banner".into(),
@@ -165,7 +173,7 @@ pub fn clip_args(input: &Path, start_ms: u64, out: &Path) -> Vec<OsString> {
         "-ar".into(),
         "16000".into(),
         "-c:a".into(),
-        "pcm_s16le".into(),
+        "pcm_f32le".into(),
         "-y".into(),
         out.as_os_str().to_os_string(),
     ]
@@ -232,19 +240,13 @@ pub async fn cut_clip(ffmpeg: &Path, clip: &ProbeClip, out: &Path) -> Result<(),
         .map_err(|e| format!("ffmpeg did not start: {e}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr: String = one_line(&stderr).chars().take(FFMPEG_ERROR_CHARS).collect();
+        let stderr = crate::metadata::health::bounded_error(stderr.trim());
         return Err(format!(
             "ffmpeg could not cut the clip ({}): {stderr}",
             output.status
         ));
     }
     Ok(())
-}
-
-/// `text` on one line: every run of whitespace (an API body's newlines and
-/// indentation) as one space.
-fn one_line(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Send `clip_wav` through the worker's call on `api_root` with `keys`,
@@ -264,15 +266,15 @@ pub async fn probe_clip(
     let call = g35t_client::transcribe_at(client, api_root, keys, clip_wav);
     let result = tokio::time::timeout(limit, call).await;
     let latency_ms = started.elapsed().as_millis() as u64;
-    let (key_index, words, error) = match result {
-        Ok(Ok(heard)) => (Some(heard.key_index), heard.words, None),
+    let (key_index, words, refused_keys, error) = match result {
+        Ok(Ok(heard)) => (Some(heard.key_index), heard.words, heard.refused, None),
         Ok(Err(failure)) => {
-            let error = one_line(&format!("{:#}", failure.error));
-            (failure.key_index, Vec::new(), Some(error))
+            let error = format!("{:#}", failure.error);
+            (failure.key_index, Vec::new(), failure.refused, Some(error))
         }
         Err(_) => {
             let error = format!("no answer within {} s", limit.as_secs_f64());
-            (None, Vec::new(), Some(error))
+            (None, Vec::new(), Vec::new(), Some(error))
         }
     };
     let error = match error {
@@ -294,6 +296,7 @@ pub async fn probe_clip(
         word_count: words.len(),
         latency_ms,
         error,
+        refused_keys,
         clip,
         sample,
     }

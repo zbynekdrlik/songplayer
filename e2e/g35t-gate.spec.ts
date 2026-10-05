@@ -18,13 +18,14 @@ function answered(): G35tProbe {
     word_count: 37,
     latency_ms: 6_412,
     error: null,
+    refused_keys: [{ key_index: 0, error: "g35t_client upload: key refused status=400" }],
     clip: { youtube_id: "gq-4FVRr_ow", source: "vocals", start_ms: 12_345, duration_ms: 20_000 },
     sample: "Holy is the Lord God Almighty the earth",
   };
 }
 
 test.describe("g35t live gate (#144)", () => {
-  test("a probe that heard words under the production request passes", () => {
+  test("a probe that heard words under the production request passes, a refused spare key or not", () => {
     expect(g35tGateFailures(answered())).toEqual([]);
   });
 
@@ -34,11 +35,12 @@ test.describe("g35t live gate (#144)", () => {
       ok: false,
       key_index: 1,
       word_count: 0,
-      error: "g35t_client: all 2 keys refused; key 2 of 2: g35t_client upload: key refused status=403",
+      error:
+        "g35t_client: no key answered (2 tried); key 2 of 2: g35t_client upload: key refused status=403",
       sample: "",
     };
     expect(g35tGateFailures(probe)).toEqual([
-      "the probe failed: g35t_client: all 2 keys refused; key 2 of 2: g35t_client upload: key refused status=403",
+      "the probe failed: g35t_client: no key answered (2 tried); key 2 of 2: g35t_client upload: key refused status=403",
       "the model transcribed no words",
     ]);
   });
@@ -57,13 +59,13 @@ test.describe("g35t live gate (#144)", () => {
 
   test("another model or language hint than the worker's fails the gate", () => {
     expect(g35tGateFailures({ ...answered(), model: "gemini-3-transcribe" })).toEqual([
-      'the request named model "gemini-3-transcribe", not gemini-3.5-transcribe',
+      'the build sends model "gemini-3-transcribe", not gemini-3.5-transcribe',
     ]);
     expect(g35tGateFailures({ ...answered(), language_codes: ["en-US"] })).toEqual([
-      'the request hinted ["en-US"], not ["en-US","es-419"]',
+      'the build hints ["en-US"], not ["en-US","es-419"]',
     ]);
     expect(g35tGateFailures({ ...answered(), language_codes: ["es-419", "en-US"] })).toEqual([
-      'the request hinted ["es-419","en-US"], not ["en-US","es-419"]',
+      'the build hints ["es-419","en-US"], not ["en-US","es-419"]',
     ]);
   });
 });

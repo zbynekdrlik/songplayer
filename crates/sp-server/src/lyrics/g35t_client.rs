@@ -41,11 +41,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::time::sleep;
 
 use crate::gemini_api::{
-    GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, redact_keys, send_on_key,
+    GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, body_excerpt, redact_keys, send_on_key,
 };
 
 /// The model every request names (the probe reports it, #144).
@@ -72,6 +73,10 @@ const FILE_POLL_TIMEOUT: Duration = Duration::from_secs(60);
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 const INTERACTIONS_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// Characters of a refused reply's body an error text keeps
+/// (`gemini_api::body_excerpt`: one line, redacted, then cut).
+const BODY_EXCERPT_CHARS: usize = 400;
+
 /// One ASR word with millisecond timing. Deliberately separate from
 /// `sp_core::lyrics::LyricsWord` / `crate::lyrics::backend::AlignedWord` —
 /// this type only ever carries the INDEPENDENT verification source's real
@@ -84,6 +89,15 @@ pub struct AsrWord {
     pub end_ms: u64,
 }
 
+/// A key [`transcribe_at`] moved past (a 429 or a key refusal): its index
+/// (0-based) and why, redacted with every key. Reported by the live probe, so
+/// a dead key is visible even while a later key answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyRefusal {
+    pub key_index: usize,
+    pub error: String,
+}
+
 /// A transcription [`transcribe_at`] got: the words, and the index (0-based,
 /// in the `gemini_api_key` list, the `key_index` of the log line) of the key
 /// that answered.
@@ -91,6 +105,8 @@ pub struct AsrWord {
 pub(crate) struct Transcription {
     pub(crate) words: Vec<AsrWord>,
     pub(crate) key_index: usize,
+    /// The keys refused before the one that answered, in order.
+    pub(crate) refused: Vec<KeyRefusal>,
 }
 
 /// A transcription [`transcribe_at`] did not get.
@@ -104,6 +120,8 @@ pub(crate) struct TranscribeFailure {
     /// What went wrong: names the key as `key i of n` (1-based) and carries
     /// the API's own answer, with every key redacted.
     pub(crate) error: anyhow::Error,
+    /// The keys refused on the way, in order (every key when all were).
+    pub(crate) refused: Vec<KeyRefusal>,
 }
 
 /// Outcome of a single HTTP step against one API key.
@@ -115,21 +133,15 @@ enum StepError {
     Fatal(anyhow::Error),
 }
 
-fn truncate(s: &str, max: usize) -> &str {
-    match s.char_indices().nth(max) {
-        Some((idx, _)) => &s[..idx],
-        None => s,
-    }
-}
-
 /// Issue one HTTP call on one key through the shared `gemini_api::send_on_key`
 /// (a 5xx is retried on the same key after each `RETRY_BACKOFFS` pause) and
 /// map its reply: a 429 or a key refusal is `StepError::NextKey` (the same
 /// key would fail identically); anything else not answered is `Fatal`.
 /// `build` is invoked fresh on every attempt because a
-/// `reqwest::RequestBuilder` is consumed by `.send()`. A refused body is
-/// redacted with `api_key` (the request's own key) before `step_error` cuts
-/// it, so no key prefix survives at the edge.
+/// `reqwest::RequestBuilder` is consumed by `.send()`. A refused body goes
+/// to `step_error` as its `gemini_api::body_excerpt`: on one line, redacted
+/// with `api_key` (the request's own key) BEFORE the [`BODY_EXCERPT_CHARS`]
+/// cut, so no key prefix survives at the edge.
 // The loop itself is unit-tested in `gemini_api_tests.rs` against a mock
 // server; this mapping only wraps it. The probe tests (`g35t_probe_tests.rs`)
 // drive it end to end through `transcribe_at`.
@@ -156,16 +168,15 @@ async fn send_with_retry(
             what,
             verdict,
             status,
-            &redact_keys(&body, &[api_key]),
+            &body_excerpt(&body, &[api_key], BODY_EXCERPT_CHARS),
         )),
     }
 }
 
 /// A refused `send_on_key` reply as this client's `StepError`: a 429 or a
 /// key refusal → `NextKey` (try the next key); a 5xx after every pause or
-/// any other status → `Fatal`.
+/// any other status → `Fatal`. `body` is already the reply's excerpt.
 fn step_error(what: &str, verdict: KeyVerdict, status: u16, body: &str) -> StepError {
-    let body = truncate(body, 400);
     match verdict {
         KeyVerdict::NextKey { .. } => StepError::NextKey(anyhow!(
             "g35t_client {what}: key refused status={status} body={body}"
@@ -441,61 +452,81 @@ pub(crate) async fn transcribe_at(
     api_keys: &[String],
     audio_path: &Path,
 ) -> Result<Transcription, TranscribeFailure> {
-    let fail = |key_index: Option<usize>, text: String| TranscribeFailure {
-        key_index,
-        error: anyhow!(redact_keys(&text, api_keys)),
-    };
     if api_keys.is_empty() {
-        let text = "g35t_client: no Gemini API keys configured".to_string();
-        return Err(fail(None, text));
+        let text = "g35t_client: no Gemini API keys configured";
+        return Err(failure(api_keys, None, text, Vec::new()));
     }
-    let audio_bytes = tokio::fs::read(audio_path).await.map_err(|e| {
-        let text = format!("g35t_client: reading {}: {e}", audio_path.display());
-        fail(None, text)
-    })?;
+    let audio_bytes = match tokio::fs::read(audio_path).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            let text = format!("g35t_client: reading {}: {e}", audio_path.display());
+            return Err(failure(api_keys, None, &text, Vec::new()));
+        }
+    };
     let mime_type = audio_mime_for_path(audio_path);
 
     let total = api_keys.len();
     let started = std::time::Instant::now();
-    let mut last_refusal: Option<anyhow::Error> = None;
+    let mut refused: Vec<KeyRefusal> = Vec::new();
     for (key_index, api_key) in api_keys.iter().enumerate() {
         match transcribe_with_key(client, api_root, api_key, &audio_bytes, mime_type).await {
             Ok(words) => {
                 tracing::info!(
                     key_index,
                     word_count = words.len(),
+                    refused_keys = refused.len(),
                     elapsed_s = started.elapsed().as_secs_f64(),
                     language_codes = ?LANGUAGE_CODES,
                     "g35t_client: transcription complete"
                 );
-                return Ok(Transcription { words, key_index });
+                return Ok(Transcription {
+                    words,
+                    key_index,
+                    refused,
+                });
             }
             Err(StepError::NextKey(e)) => {
+                let error = redact_keys(&format!("{e:#}"), api_keys);
                 tracing::warn!(
                     key_index,
-                    error = %e,
+                    error = %error,
                     "g35t_client: key refused (429 or a key refusal) — trying next key"
                 );
-                last_refusal = Some(e);
+                refused.push(KeyRefusal { key_index, error });
             }
             Err(StepError::Fatal(e)) => {
-                return Err(fail(Some(key_index), on_key(key_index, total, &e)));
+                let text = on_key(key_index, total, &e);
+                return Err(failure(api_keys, Some(key_index), &text, refused));
             }
         }
     }
-    // Every key was refused: the loop ran (the list is not empty) and set it.
-    let last = last_refusal.unwrap_or_else(|| anyhow!("no key answered"));
+    // Every key was refused: the list is not empty, so `refused` holds them all.
+    let last = refused.last().map_or("", |r| r.error.as_str());
     let text = format!(
-        "g35t_client: all {total} keys refused; {}",
-        on_key(total - 1, total, &last)
+        "g35t_client: no key answered ({total} tried); {}",
+        on_key(total - 1, total, last)
     );
-    Err(fail(Some(total - 1), text))
+    Err(failure(api_keys, Some(total - 1), &text, refused))
 }
 
 /// `key i of n: <error>`: a key named by its 1-based place in the list
 /// (`key_index` + 1 of `total`), never by its value.
-fn on_key(key_index: usize, total: usize, error: &anyhow::Error) -> String {
+fn on_key(key_index: usize, total: usize, error: impl std::fmt::Display) -> String {
     format!("key {} of {total}: {error:#}", key_index + 1)
+}
+
+/// A [`TranscribeFailure`] whose error is `text` with every key redacted.
+fn failure(
+    api_keys: &[String],
+    key_index: Option<usize>,
+    text: &str,
+    refused: Vec<KeyRefusal>,
+) -> TranscribeFailure {
+    TranscribeFailure {
+        key_index,
+        error: anyhow!(redact_keys(text, api_keys)),
+        refused,
+    }
 }
 
 /// Parse a Gemini offset string like `"5.200s"` or `"9s"` into whole
@@ -572,7 +603,6 @@ mod tests {
             StepError::NextKey(e) => format!("next: {e}"),
             StepError::Fatal(e) => format!("fatal: {e}"),
         };
-        let long = "x".repeat(500);
         assert_eq!(
             text(step_error(
                 "upload",
@@ -586,12 +616,12 @@ mod tests {
             text(step_error("poll", KeyVerdict::RetrySameKey, 503, "down")),
             "fatal: g35t_client poll: exhausted retries status=503 body=down"
         );
+        // The body arrives as its excerpt (`body_excerpt`, which cuts it):
+        // nothing is cut here.
+        let long = "x".repeat(500);
         assert_eq!(
             text(step_error("interactions", KeyVerdict::Stop, 404, &long)),
-            format!(
-                "fatal: g35t_client interactions: unexpected status=404 body={}",
-                "x".repeat(400)
-            )
+            format!("fatal: g35t_client interactions: unexpected status=404 body={long}")
         );
     }
 

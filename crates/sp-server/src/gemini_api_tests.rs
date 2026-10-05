@@ -76,6 +76,29 @@ fn an_empty_key_never_redacts_between_characters() {
 }
 
 #[test]
+fn a_body_excerpt_is_one_line_then_redacted_then_cut() {
+    // Google answers errors pretty-printed: one line, so the cut keeps text.
+    assert_eq!(
+        body_excerpt(
+            "{\n  \"error\": {\n    \"code\": 400\n  }\n}\n",
+            &["k9"],
+            100
+        ),
+        "{ \"error\": { \"code\": 400 } }"
+    );
+    assert_eq!(
+        body_excerpt(&"a".repeat(500), &["k9"], 200),
+        "a".repeat(200)
+    );
+    // A key straddling the cut is redacted first, so no prefix survives.
+    let edge = format!("{}secret-one", "a".repeat(195));
+    assert_eq!(
+        body_excerpt(&edge, &["secret-one"], 200),
+        format!("{}<key>", "a".repeat(195))
+    );
+}
+
+#[test]
 fn the_same_key_retry_schedule_is_2_4_8_16_seconds() {
     let secs: Vec<u64> = RETRY_BACKOFFS.iter().map(|d| d.as_secs()).collect();
     assert_eq!(secs, [2, 4, 8, 16]);

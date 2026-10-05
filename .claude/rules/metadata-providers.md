@@ -65,11 +65,12 @@ answered correctly), and nothing ever ran the real providers.
   never retries (it is cosmetic).
 - An error text / log line carries the key INDEX (`key 2 of 5`), the status
   and a ≤ 200-char body excerpt redacted (longest key first) BEFORE the cut —
-  never a key. ONE redaction: `gemini_api::redact_keys` (#144), used by
-  `GeminiProvider::excerpt` and by every `g35t_client` failure text, which
-  the live g35t probe answers as is. A recorded / probed provider error is
-  cut to 300 chars (`health::bounded_error`): a Claude error carries the
-  proxy's whole reply.
+  never a key. ONE excerpt + redaction: `gemini_api::body_excerpt` (one
+  line, `redact_keys`, then the cut; #144) — `GeminiProvider::excerpt` cuts
+  at 200, `g35t_client` at 400 — and every `g35t_client` failure text is
+  redacted with every key, so the live g35t probe answers it as is. A
+  recorded / probed provider error is cut to 300 chars
+  (`health::bounded_error`): a Claude error carries the proxy's whole reply.
 - Request tools: `"tools": [{"google_search": {}}]` is still the grounding
   tool for `generateContent` on Gemini 3 Pro (ai.google.dev, checked
   29.9.2026). The answer text is every non-thought part joined.

@@ -138,6 +138,14 @@ async fn a_probe_reports_the_words_the_answering_key_the_model_and_the_hint() {
     assert_eq!(report.word_count, 4);
     assert_eq!(report.sample, "Holy is the Lord");
     assert_eq!(report.clip, Some(clip_info()));
+    assert_eq!(
+        report.refused_keys,
+        [KeyRefusal {
+            key_index: 0,
+            error: format!("g35t_client upload: key refused status=400 body={INVALID_KEY}"),
+        }],
+        "a dead key shows even though a later key answered"
+    );
 
     let requests = server.received_requests().await.unwrap();
     let interactions: Vec<_> = requests
@@ -180,13 +188,27 @@ async fn a_refused_key_fails_the_probe_with_the_api_message() {
     .await;
 
     assert!(!report.ok);
+    let second_redacted = second.replace("k-two-secret", "<key>");
     assert_eq!(
         report.error.as_deref(),
         Some(
-            "g35t_client: all 2 keys refused; key 2 of 2: g35t_client upload: key refused \
-             status=403 body={\"error\":{\"code\":403,\"message\":\"Requests from the API key \
-             <key> are blocked.\",\"status\":\"PERMISSION_DENIED\"}}"
+            "g35t_client: no key answered (2 tried); key 2 of 2: g35t_client upload: key \
+             refused status=403 body={\"error\":{\"code\":403,\"message\":\"Requests from \
+             the API key <key> are blocked.\",\"status\":\"PERMISSION_DENIED\"}}"
         )
+    );
+    assert_eq!(
+        report.refused_keys,
+        [
+            KeyRefusal {
+                key_index: 0,
+                error: format!("g35t_client upload: key refused status=403 body={first}"),
+            },
+            KeyRefusal {
+                key_index: 1,
+                error: format!("g35t_client upload: key refused status=403 body={second_redacted}"),
+            },
+        ]
     );
     assert_eq!(report.key_index, Some(1));
     assert_eq!(report.word_count, 0);
@@ -223,7 +245,7 @@ async fn a_refused_request_body_fails_the_probe_with_the_api_message() {
         &server.uri(),
         &keys(&["k-live", "k-spare"]),
         &clip_wav(dir.path()),
-        None,
+        Some(clip_info()),
         LIMIT,
     )
     .await;
@@ -239,7 +261,48 @@ async fn a_refused_request_body_fails_the_probe_with_the_api_message() {
     );
     assert_eq!(report.key_index, Some(0));
     assert_eq!(report.word_count, 0);
-    assert_eq!(report.clip, None);
+    assert!(report.refused_keys.is_empty(), "{:?}", report.refused_keys);
+    assert_eq!(report.clip, Some(clip_info()));
+}
+
+/// An echoed key that straddles the body excerpt's 400-character cut is
+/// redacted BEFORE the cut: no prefix of it survives in the answer (a
+/// redaction after the cut would leave `k-sec…`, which no later redaction
+/// of the whole key can find).
+#[tokio::test]
+async fn a_key_echoed_at_the_cut_never_leaks_a_prefix() {
+    let server = MockServer::start().await;
+    let key = "k-secret-key-value";
+    let body = format!("{}{key}", "a".repeat(395));
+    upload_answers(&server, key, 403, body).await;
+    let dir = tempfile::tempdir().unwrap();
+
+    let report = probe_clip(
+        &reqwest::Client::new(),
+        &server.uri(),
+        &keys(&[key]),
+        &clip_wav(dir.path()),
+        None,
+        LIMIT,
+    )
+    .await;
+
+    let excerpt = format!("{}<key>", "a".repeat(395));
+    assert_eq!(
+        report.error,
+        Some(format!(
+            "g35t_client: no key answered (1 tried); key 1 of 1: g35t_client upload: key \
+             refused status=403 body={excerpt}"
+        ))
+    );
+    assert_eq!(
+        report.refused_keys,
+        [KeyRefusal {
+            key_index: 0,
+            error: format!("g35t_client upload: key refused status=403 body={excerpt}"),
+        }]
+    );
+    assert!(!format!("{report:?}").contains("k-sec"), "{report:?}");
 }
 
 /// A completed answer with no words is a failed probe: the gate must not
@@ -278,7 +341,7 @@ async fn a_probe_with_no_answer_in_time_fails_naming_the_bound() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/upload/v1beta/files"))
-        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(3)))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(30)))
         .mount(&server)
         .await;
     let dir = tempfile::tempdir().unwrap();
@@ -308,9 +371,10 @@ fn seconds_keep_milliseconds() {
     assert_eq!(seconds(0), "0.000");
 }
 
-/// 20 s of the input from the window start, audio only, 16 kHz mono PCM.
+/// 20 s of the input from the window start, audio only, 16 kHz mono float
+/// (the worker's own isolated-vocal format).
 #[test]
-fn clip_args_cut_the_window_into_a_16khz_mono_wav() {
+fn clip_args_cut_the_window_into_a_16khz_mono_float_wav() {
     let args = clip_args(
         Path::new("/cache/S_A_fffffffffff_normalized_audio_vocals.flac"),
         61_234,
@@ -333,7 +397,7 @@ fn clip_args_cut_the_window_into_a_16khz_mono_wav() {
         "-ar",
         "16000",
         "-c:a",
-        "pcm_s16le",
+        "pcm_f32le",
         "-y",
         "/tmp/g35t_probe.wav",
     ]

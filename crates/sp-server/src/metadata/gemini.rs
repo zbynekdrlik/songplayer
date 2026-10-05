@@ -31,7 +31,7 @@ use super::parser::shorten_artist;
 use super::sanitize::strip_emoji;
 use super::{MetadataError, MetadataProvider};
 use crate::gemini_api::{
-    GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, redact_keys, send_on_key,
+    GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, body_excerpt, send_on_key,
 };
 
 static JSON_FENCE_RE: LazyLock<Regex> =
@@ -424,20 +424,11 @@ impl GeminiProvider {
         })
     }
 
-    /// `text` with every configured key replaced by `<key>` — the shared
-    /// `gemini_api::redact_keys` (one copy of the rule, #144).
-    fn redact(&self, text: &str) -> String {
-        redact_keys(text, &self.keys)
-    }
-
-    /// `body` on one line, redacted, cut to [`BODY_EXCERPT_CHARS`] characters
-    /// (redacted BEFORE the cut, so no key prefix survives at the edge).
+    /// `body` on one line, every configured key redacted, cut to
+    /// [`BODY_EXCERPT_CHARS`] characters: the shared `gemini_api::body_excerpt`
+    /// (one copy of the rule, #144; redacted BEFORE the cut).
     fn excerpt(&self, body: &str) -> String {
-        let one_line = body.split_whitespace().collect::<Vec<_>>().join(" ");
-        self.redact(&one_line)
-            .chars()
-            .take(BODY_EXCERPT_CHARS)
-            .collect()
+        body_excerpt(body, &self.keys, BODY_EXCERPT_CHARS)
     }
 }
 

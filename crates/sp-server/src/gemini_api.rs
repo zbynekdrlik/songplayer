@@ -56,6 +56,20 @@ pub fn redact_keys<K: AsRef<str>>(text: &str, keys: &[K]) -> String {
         .fold(text.to_string(), |acc, k| acc.replace(k, "<key>"))
 }
 
+/// A refused reply's `body` as an error text / log line keeps it: on one
+/// line (every run of whitespace, e.g. a pretty-printed body's newlines and
+/// indentation, as one space), every key in `keys` redacted, then cut to
+/// `max_chars` characters. Redacted BEFORE the cut, so no key prefix
+/// survives at the edge. The metadata provider (200 characters) and the
+/// transcription client (400) both cut a refused body with it.
+pub fn body_excerpt<K: AsRef<str>>(body: &str, keys: &[K], max_chars: usize) -> String {
+    let one_line = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    redact_keys(&one_line, keys)
+        .chars()
+        .take(max_chars)
+        .collect()
+}
+
 /// What a non-2xx answer means for the key that got it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyVerdict {

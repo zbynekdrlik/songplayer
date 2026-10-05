@@ -1,24 +1,11 @@
 //! Mutation-killing unit tests for `g35t_client.rs` PURE helpers
-//! (`truncate`, `parse_offset_ms`). The HTTP functions carry
-//! `#[cfg_attr(test, mutants::skip)]` and are deliberately not touched here.
+//! (`parse_offset_ms`, `audio_mime_for_path`). The HTTP functions carry
+//! `#[cfg_attr(test, mutants::skip)]` and are deliberately not touched here;
+//! a refused body's cut is the shared `gemini_api::body_excerpt` (#144).
 //!
 //! Wired into `g35t_client.rs` as a sibling `#[path]` test module.
 
 use super::*;
-
-// -------------------------------------------------------------------------
-// truncate — line 74: `fn truncate(s, max) -> &str`
-// -------------------------------------------------------------------------
-
-/// Kills both `74:5` body replacements (`-> ""` and `-> "xyzzy"`). The real
-/// helper returns the first `max` chars: `truncate("hello", 3)` == "hel",
-/// and a `max` past the end returns the whole string. Neither equals "" nor
-/// "xyzzy".
-#[test]
-fn truncate_returns_prefix_not_body_replacement() {
-    assert_eq!(truncate("hello", 3), "hel");
-    assert_eq!(truncate("hello", 10), "hello");
-}
 
 // -------------------------------------------------------------------------
 // parse_offset_ms — line 403: `seconds < 0.0`

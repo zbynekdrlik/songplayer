@@ -55,19 +55,22 @@ paths:
 Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or refused key, a renamed model or a request field the API refuses (the `language_codes` hint above) stayed invisible with CI green while every new transcript failed. Design: #144 comments 5996797762 (main) and 5996959706 (the clip).
 
 - `POST /api/v1/lyrics/g35t/probe` (`api/lyrics_g35t.rs` → `lyrics/g35t_probe.rs::run_probe`) sends ONE short real request from the box through `g35t_client::transcribe_at`: the worker's own upload, poll, `interactions_body` (`MODEL_SLUG`, `LANGUAGE_CODES`) and key rotation. `transcribe_words` is `transcribe_at` on `GEMINI_API_ROOT`. Never give a probe its own request body or its own copy of the hint.
-- The clip: the lowest `videos.id` with `normalized = 1`, `has_lyrics = 1`, its audio on disk and a `{yt}_lyrics.json` with a line. The input is its vocal stem (`stems::stem_paths`) when on disk, else the audio. The window is 20 s (`CLIP_MS`) from the EARLIEST served line: an intro would answer 0 words, a false red. The app's ffmpeg (`tool_paths.ffmpeg`) cuts it to a 16 kHz mono PCM WAV in a temp dir.
-- The answer is `{ok, model, key_index, language_codes, word_count, latency_ms, error, clip, sample}`, always with 200. `ok` needs at least one word.
+- The clip: the lowest `videos.id` with `normalized = 1`, `has_lyrics = 1`, its audio on disk and a `{yt}_lyrics.json` with a line. The input is its vocal stem (`stems::stem_paths`) when on disk, else the audio. The window is 20 s (`CLIP_MS`) from the EARLIEST served line: an intro would answer 0 words, a false red. The app's ffmpeg (`tool_paths.ffmpeg`) cuts it to a 16 kHz mono float WAV (`pcm_f32le`, the format `scripts/lyrics_worker.py` writes the isolated vocal in) in a temp dir.
+- The answer is `{ok, model, key_index, language_codes, word_count, latency_ms, error, refused_keys, clip, sample}`, always with 200. `ok` needs at least one word.
   - `key_index` is 0-based (the worker's log field); the error text names a key as `key i of n`, 1-based.
-  - Never a key: `transcribe_at` redacts every failure text with every key (`gemini_api::redact_keys`), and `send_with_retry` redacts a refused body with its request's key before the 400-char cut.
+  - Never a key: `transcribe_at` redacts every failure text with every key (`gemini_api::redact_keys`), and `send_with_retry` keeps a refused body as its `gemini_api::body_excerpt` (one line, redacted with its request's key, THEN cut to 400 characters; the metadata provider cuts with the same helper at 200).
+  - `refused_keys` lists every key refused (a 429 or a key refusal) before the one that decided the outcome, so a dead key shows even while a later key answers; the worker logs the same at WARN. The gate passes on ANY working key and does not gate on `refused_keys` (a 429 there is transient, and the box's key list has carried an invalid entry since 12.9.2026); keys after the answering one are never tried (a paid call each).
   - The key list is read from the setting on every call, as the worker reads it per song.
   - `PROBE_TIMEOUT` (180 s) bounds it below the spec's 220 s, so a hung call fails the gate with its own error.
 - `e2e/post-deploy-g35t.spec.ts` gates the deploy through the pure `e2e/g35t-gate.ts` (`g35tGateFailures`: not ok, 0 words, another model, another hint), unit-tested by the mock-suite `e2e/g35t-gate.spec.ts`. A change of the model or the hint updates `G35T_MODEL` / `G35T_LANGUAGE_CODES` in the same PR.
 - `g35t_probe_tests.rs` drives `transcribe_at` against wiremock (`api_root` = the mock):
   - a refused first key moves on (`key_index` 1);
-  - every key refused → the API's message under `key 2 of 2`, an echoed key redacted;
+  - every key refused → `no key answered (2 tried); key 2 of 2: …` with the API's message, every refusal in `refused_keys`, an echoed key redacted;
+  - a key echoed across the 400-character cut leaves no prefix (`a_key_echoed_at_the_cut_never_leaks_a_prefix`);
   - a 400 on the request body stops at once: the spare key is never tried, the uploaded file is still deleted;
   - an answer with no words fails, and so does the bound.
-- The HTTP helpers of `g35t_client.rs` stay `mutants::skip`; `transcribe_at`, `on_key` and the probe's own functions are gated.
+- The HTTP helpers of `g35t_client.rs` stay `mutants::skip`, and so do the probe's two shell-outs, `g35t_probe::cut_clip` (ffmpeg; its arguments are the tested `clip_args`) and the route handler `api/lyrics_g35t.rs::probe` (Google's root; the route is tested through the real router). `transcribe_at`, `on_key`, `failure` and every other probe function are gated.
+- `e2e/post-deploy-g35t.spec.ts` first polls `GET /api/v1/status` until `tools.ffmpeg_available`, so it never depends on the specs that run before it.
 
 ## The title search (covers)
 
