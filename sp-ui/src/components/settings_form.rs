@@ -1,6 +1,7 @@
 //! Settings form for OBS, Gemini, dub, VBAN (#210), the NDI input "OBS manuál"
-//! (#212), the Companion remote control (#213), the program transition + OBS
-//! follow (#215) and cache configuration.
+//! (#212), the Companion remote control (#213), the program transition (#215;
+//! #221 L5 deleted the OBS follow and the "podľa OBS" transition) and cache
+//! configuration.
 
 use std::collections::HashMap;
 
@@ -33,12 +34,22 @@ const DUB_VOICES: &[(&str, &str)] = &[
 ];
 
 /// #215: the `program_transition` choices (the stored value) with their Slovak
-/// labels. `obs` (the default) follows cg OBS's current scene transition.
-const PROGRAM_TRANSITIONS: &[(&str, &str)] = &[
-    ("obs", "Podľa OBS (odporúčané)"),
-    ("fade", "Vždy prelínanie"),
-    ("cut", "Vždy strih"),
-];
+/// labels. #221 L5: a fade is the default (the server fades when nothing, or
+/// the retired `obs`, is stored).
+const PROGRAM_TRANSITIONS: &[(&str, &str)] =
+    &[("fade", "Prelínanie (odporúčané)"), ("cut", "Strih")];
+
+/// #221 L5: the choice a stored `program_transition` means, as the server
+/// reads it (`TransitionMode::parse`): `cut` is a cut, anything else the
+/// default fade.
+fn transition_choice(stored: &str) -> String {
+    let choice = if stored.trim() == "cut" {
+        "cut"
+    } else {
+        "fade"
+    };
+    choice.to_string()
+}
 
 /// #215: the fade length the server uses for the stored `program_transition_ms`
 /// (`sp_core::config::program_transition_ms`, at most 10 s), so the field never
@@ -71,9 +82,8 @@ pub fn SettingsForm() -> impl IntoView {
     let remote_enabled = RwSignal::new(false);
     let remote_port = RwSignal::new(config::DEFAULT_REMOTE_WS_PORT.to_string());
     let remote_password = RwSignal::new(String::new());
-    // #215: SP-program follows cg OBS (off by default) + the transition.
-    let follow_obs = RwSignal::new(false);
-    let transition_mode = RwSignal::new("obs".to_string());
+    // #215: the program transition (a fade by default).
+    let transition_mode = RwSignal::new("fade".to_string());
     let transition_ms = RwSignal::new(config::DEFAULT_PROGRAM_TRANSITION_MS.to_string());
     let save_status = RwSignal::new(String::new());
 
@@ -137,13 +147,11 @@ pub fn SettingsForm() -> impl IntoView {
             config::SETTING_REMOTE_WS_PASSWORD,
             "",
         ));
-        follow_obs
-            .set(setting_value(&settings, config::SETTING_PROGRAM_FOLLOW_OBS, "false") == "true");
-        transition_mode.set(setting_value(
+        transition_mode.set(transition_choice(&setting_value(
             &settings,
             config::SETTING_PROGRAM_TRANSITION,
-            "obs",
-        ));
+            "",
+        )));
         transition_ms.set(effective_transition_ms(&setting_value(
             &settings,
             config::SETTING_PROGRAM_TRANSITION_MS,
@@ -201,10 +209,6 @@ pub fn SettingsForm() -> impl IntoView {
         settings.insert(
             config::SETTING_REMOTE_WS_PASSWORD.to_string(),
             remote_password.get(),
-        );
-        settings.insert(
-            config::SETTING_PROGRAM_FOLLOW_OBS.to_string(),
-            follow_obs.get().to_string(),
         );
         settings.insert(
             config::SETTING_PROGRAM_TRANSITION.to_string(),
@@ -396,15 +400,6 @@ pub fn SettingsForm() -> impl IntoView {
 
             <fieldset data-testid="settings-program-transition">
                 <legend>"Prechody programu (SP-program)"</legend>
-                <label>
-                    <input
-                        type="checkbox"
-                        data-testid="settings-program-follow-obs"
-                        prop:checked=move || follow_obs.get()
-                        on:change=move |ev| follow_obs.set(event_target_checked(&ev))
-                    />
-                    "Program sleduje scénu v OBS (bez skriptu)"
-                </label>
                 <label>
                     "Prechod"
                     <select

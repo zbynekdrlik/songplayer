@@ -2,9 +2,11 @@
 //!
 //! `ObsState` (`Arc<RwLock<…>>`, read by the API and the idle gates) is the
 //! OBS client's view of cg OBS. Its program part is ALSO published as an
-//! [`ObsSnapshot`] on a `tokio::sync::watch` channel, so a consumer (the #215
-//! program follow) reacts to each change instead of asking cg OBS again —
-//! there is ONE view of cg OBS, the OBS client's. The contract:
+//! [`ObsSnapshot`] on a `tokio::sync::watch` channel, so a consumer reacts to
+//! each change instead of asking cg OBS again — there is ONE view of cg OBS,
+//! the OBS client's. #221 L5 deleted its last production consumer (the #215
+//! program follow); the integration tests still read it, and L6 deletes the
+//! scene detection it publishes. The contract:
 //!
 //! - `connected`: the OBS connection is up (identified);
 //! - `current_scene` + `active_playlist_ids`: cg OBS's program scene and the

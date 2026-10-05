@@ -1,6 +1,6 @@
 //! #221 L4b: the playback authority — the task over a real `ProgramBus` (its
-//! on-air watch and `legacy_cg`), and the engine's stale check over an
-//! in-memory DB. Wired via `#[cfg(test)] #[path =
+//! on-air watch; B4 step 6: SP-program's playlist alone), and the engine's
+//! stale check over an in-memory DB. Wired via `#[cfg(test)] #[path =
 //! "program_authority_tests.rs"] mod tests;`.
 
 use std::collections::BTreeSet;
@@ -73,51 +73,40 @@ async fn nothing_more(events: &mut Events) {
     assert!(events.try_recv().is_err(), "no further event");
 }
 
-fn cg_shows(bus: &ProgramBus, shown: Option<i64>) {
-    let legacy = bus.legacy_cg();
-    let ticket = legacy.ticket();
-    assert!(legacy.confirmed(ticket, shown));
-}
-
 fn members(diffed: &OnAirPlaylists, pids: &[i64]) -> Vec<bool> {
     pids.iter().map(|&pid| diffed.contains(pid)).collect()
 }
 
-/// The first value plays the restored program; a press is ON for the new
-/// playlist while cg OBS still shows the old one (both on air until the
-/// mirror's OK, the old one NOT re-kicked), then OFF for the old one; a
-/// press of the same scene re-kicks it. The set it diffed is written before
-/// its events.
+/// The first value plays the program on the bus; a press is OFF for the old
+/// playlist, then ON for the new one; a press of the same scene re-kicks it.
+/// The set it diffed, and its owner, are written before its events, and
+/// before the first value nothing is on air and no owner restricts the wall.
 #[tokio::test]
-async fn the_authority_plays_the_restored_program_and_follows_every_change() {
+async fn the_authority_plays_the_program_and_follows_every_change() {
     let bus = Arc::new(ProgramBus::new());
     bus.select_initial(7, Some("sp-fast"));
-    bus.legacy_cg().restored(7);
     let mut a = authority(&bus);
     assert_eq!(
         members(&a.diffed, &[7]),
         [false],
         "nothing before its first value"
     );
+    assert_eq!(a.diffed.owner(), None, "nothing before its first value");
+    assert!(a.diffed.may_write_wall(4), "no owner restricts nothing");
     assert_eq!(
         next(&mut a.events, 1).await,
         [(7, true)],
-        "the restored program"
+        "the selected program"
     );
     assert_eq!(members(&a.diffed, &[4, 7]), [false, true]);
+    assert_eq!(a.diffed.owner(), Some(7));
+    assert!(!a.diffed.may_write_wall(4), "7 owns the wall");
     nothing_more(&mut a.events).await;
 
     bus.cut(4, utc_now_100ns(), Some("sp-slow"));
-    assert_eq!(next(&mut a.events, 1).await, [(4, true)]);
-    assert_eq!(
-        members(&a.diffed, &[4, 7]),
-        [true, true],
-        "cg OBS still shows sp-fast until the mirror is answered"
-    );
-    nothing_more(&mut a.events).await;
-    cg_shows(&bus, Some(4));
-    assert_eq!(next(&mut a.events, 1).await, [(7, false)]);
+    assert_eq!(next(&mut a.events, 2).await, [(7, false), (4, true)]);
     assert_eq!(members(&a.diffed, &[4, 7]), [true, false]);
+    assert_eq!(a.diffed.owner(), Some(4));
     nothing_more(&mut a.events).await;
 
     bus.cut(4, utc_now_100ns(), Some("sp-slow"));
@@ -125,61 +114,44 @@ async fn the_authority_plays_the_restored_program_and_follows_every_change() {
     nothing_more(&mut a.events).await;
 }
 
-/// A dashboard cut to "OBS manuál" while cg OBS shows sp-slow keeps sp-slow
-/// on air (the input carries it); a manual scene cg OBS accepted takes it off.
+/// #221 B4 step 6: on air is SP-program's playlist ONLY, and it alone owns
+/// the wall. The program restored at startup leaves the air at the cut away
+/// from it — OFF at once, then ON for the new playlist, with no cg OBS answer
+/// to wait for — and a cut to "OBS manuál" leaves nothing on air and nobody
+/// owning the wall.
 #[tokio::test]
-async fn obs_manual_keeps_on_air_what_cg_obs_shows() {
+async fn on_air_is_sp_program_s_playlist_only() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    crate::db::models::set_setting(
+        &pool,
+        crate::playback::program_bus::SETTING_PROGRAM_SOURCE,
+        "7",
+    )
+    .await
+    .unwrap();
     let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(4, Some("sp-slow"));
-    bus.legacy_cg().restored(4);
+    let restored = crate::playback::program_bus::restore_selected_source(&pool, &bus).await;
+    assert_eq!(restored, Some(7));
     let mut a = authority(&bus);
-    assert_eq!(next(&mut a.events, 1).await, [(4, true)]);
-
-    bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), None);
-    nothing_more(&mut a.events).await; // still on air, and not re-kicked
-    assert_eq!(members(&a.diffed, &[4]), [true]);
-    cg_shows(&bus, None);
-    assert_eq!(next(&mut a.events, 1).await, [(4, false)]);
-    assert_eq!(members(&a.diffed, &[4]), [false]);
-    nothing_more(&mut a.events).await;
-}
-
-/// Release 0.69.0 review 🟡 2: with every set the task publishes the ONE
-/// wall owner (SP-program's playlist, else the one cg OBS was told to show),
-/// before that value's events; while it owns the wall, the other member of
-/// a two-member set may not write it.
-#[tokio::test]
-async fn the_authority_publishes_the_wall_owner_with_the_set() {
-    let bus = Arc::new(ProgramBus::new());
-    bus.select_initial(7, Some("sp-fast"));
-    bus.legacy_cg().restored(7);
-    let mut a = authority(&bus);
-    assert_eq!(a.diffed.owner(), None, "nothing before its first value");
-    assert!(a.diffed.may_write_wall(4), "no owner restricts nothing");
-    assert_eq!(next(&mut a.events, 1).await, [(7, true)]);
+    assert_eq!(
+        next(&mut a.events, 1).await,
+        [(7, true)],
+        "the restored program"
+    );
     assert_eq!(a.diffed.owner(), Some(7));
 
-    // A press of sp-slow: both on air until the mirror is answered, and the
-    // program's playlist owns the wall.
     bus.cut(4, utc_now_100ns(), Some("sp-slow"));
-    assert_eq!(next(&mut a.events, 1).await, [(4, true)]);
-    assert_eq!(members(&a.diffed, &[4, 7]), [true, true]);
+    assert_eq!(next(&mut a.events, 2).await, [(7, false), (4, true)]);
+    assert_eq!(members(&a.diffed, &[4, 7]), [true, false]);
     assert_eq!(a.diffed.owner(), Some(4));
-    assert!(a.diffed.may_write_wall(4));
-    assert!(!a.diffed.may_write_wall(7), "7 is on air, 4 owns the wall");
+    assert!(!a.diffed.may_write_wall(7), "7 is off air");
+    nothing_more(&mut a.events).await;
 
-    // A dashboard cut to "OBS manuál": the input carries cg OBS's sp-fast,
-    // which owns the wall again.
     bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), None);
     assert_eq!(next(&mut a.events, 1).await, [(4, false)]);
-    assert_eq!(a.diffed.owner(), Some(7));
-    assert!(a.diffed.may_write_wall(7));
-    assert!(!a.diffed.may_write_wall(4));
-
-    // cg OBS shows a manual scene: nothing on air, no owner.
-    cg_shows(&bus, None);
-    assert_eq!(next(&mut a.events, 1).await, [(7, false)]);
-    assert_eq!(a.diffed.owner(), None);
+    assert_eq!(members(&a.diffed, &[4, 7]), [false, false]);
+    assert_eq!(a.diffed.owner(), None, "\"OBS manuál\" names no playlist");
     nothing_more(&mut a.events).await;
 }
 
@@ -299,9 +271,9 @@ async fn an_on_is_applied_only_while_the_playlist_is_on_air() {
     assert_eq!(state(&engine, OUT), PlayState::Idle, "nothing started");
 }
 
-/// An OFF is applied only while the playlist is off air. The program's own
-/// source is never taken off, and neither is a playlist cg OBS still shows
-/// (its mirror unanswered): a stale OFF is dropped.
+/// An OFF is applied only while the playlist is off air: the program's own
+/// source is never taken off (a stale OFF is dropped); once the task diffed
+/// the cut away from it, its OFF applies.
 #[tokio::test]
 async fn an_off_is_applied_only_while_the_playlist_is_off_air() {
     let mut engine = engine().await;
@@ -318,16 +290,8 @@ async fn an_off_is_applied_only_while_the_playlist_is_off_air() {
     assert!(on_program(&engine, OUT), "the program's source stays on");
     assert_eq!(state(&engine, OUT), PlayState::Playing { video_id: SONG });
 
-    // IN is cut to; cg OBS still shows OUT: OUT is on air, OFF is stale.
+    // IN is cut to, and the task diffed it: the OFF applies.
     bus.cut(IN, utc_now_100ns(), None);
-    diffed(&engine, &[IN, OUT]);
-    engine
-        .handle_pipeline_event(OUT, PipelineEvent::OnProgram(false))
-        .await;
-    assert!(on_program(&engine, OUT), "cg OBS still shows it");
-    assert_eq!(state(&engine, OUT), PlayState::Playing { video_id: SONG });
-
-    // cg OBS shows IN now: the OFF applies.
     diffed(&engine, &[IN]);
     engine
         .handle_pipeline_event(OUT, PipelineEvent::OnProgram(false))
@@ -404,14 +368,13 @@ async fn an_on_re_kicks_a_waiting_pipeline_already_on_program() {
 
 /// Review round 1 (F1), the task and the engine together: a playlist the
 /// operator PAUSED on the dashboard stays paused — its resume point kept, no
-/// new song — through a dashboard cut to "OBS manuál" (cg OBS still shows
-/// it), a Companion manual press (cg OBS accepts before the cut), and a
-/// press of another playlist (cg OBS shows it until the mirror's OK).
+/// new song — through cuts that did not press it: a press of another
+/// playlist (it leaves the air paused), then a dashboard cut to "OBS
+/// manuál" (it is not re-kicked).
 #[tokio::test]
 async fn a_paused_playlist_stays_paused_through_cuts_that_did_not_press_it() {
     let mut engine = engine().await;
     let bus = program(&engine, OUT);
-    bus.legacy_cg().restored(OUT);
     let (shutdown, _) = broadcast::channel(1);
     let _task = tokio::spawn(run_program_authority(
         Arc::clone(&bus),
@@ -421,44 +384,24 @@ async fn a_paused_playlist_stays_paused_through_cuts_that_did_not_press_it() {
     ));
     pump(&mut engine).await;
     assert_eq!(state(&engine, OUT), PlayState::Playing { video_id: SONG });
-    let pause = |engine: &mut PlaybackEngine| {
-        engine.set_state_for_test(OUT, PlayState::WaitingForScene);
-        engine.pipelines.get_mut(&OUT).unwrap().paused_at = Some((SONG, 60_000));
-    };
+    engine.set_state_for_test(OUT, PlayState::WaitingForScene);
+    engine.pipelines.get_mut(&OUT).unwrap().paused_at = Some((SONG, 60_000));
     let resume_point = |engine: &PlaybackEngine| engine.pipelines[&OUT].paused_at;
 
-    // (a) A dashboard cut to "OBS manuál"; cg OBS still shows OUT.
-    pause(&mut engine);
-    bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), None);
+    // (a) A press of IN: OUT leaves the air, still paused.
+    bus.cut(IN, utc_now_100ns(), Some("sp-8"));
     pump(&mut engine).await;
+    assert_eq!(state(&engine, IN), PlayState::Playing { video_id: 44 });
+    assert!(!on_program(&engine, OUT), "OUT left program");
     assert_eq!(resume_point(&engine), Some((SONG, 60_000)), "(a) kept");
     assert_eq!(state(&engine, OUT), PlayState::WaitingForScene);
 
-    // (b) A manual press: cg OBS accepts first (OUT stays SP-program's
-    // source a moment), then the cut to "OBS manuál".
-    bus.cut(OUT, utc_now_100ns(), Some("sp-7"));
-    pump(&mut engine).await; // the press of OUT itself re-kicks it
-    pause(&mut engine);
-    cg_shows(&bus, None);
+    // (b) A dashboard cut to "OBS manuál": IN leaves; OUT is not re-kicked.
+    bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), None);
     pump(&mut engine).await;
+    assert!(!on_program(&engine, IN), "IN left program");
     assert_eq!(resume_point(&engine), Some((SONG, 60_000)), "(b) kept");
-    bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), Some("Slido"));
-    pump(&mut engine).await;
-    assert_eq!(resume_point(&engine), Some((SONG, 60_000)), "(b) kept");
-
-    // (c) A press of IN while cg OBS still shows OUT, then cg OBS's OK.
-    bus.cut(OUT, utc_now_100ns(), Some("sp-7"));
-    cg_shows(&bus, Some(OUT));
-    pump(&mut engine).await;
-    pause(&mut engine);
-    bus.cut(IN, utc_now_100ns(), Some("sp-8"));
-    pump(&mut engine).await;
-    assert_eq!(resume_point(&engine), Some((SONG, 60_000)), "(c) kept");
-    assert_eq!(state(&engine, IN), PlayState::Playing { video_id: 44 });
-    cg_shows(&bus, Some(IN));
-    pump(&mut engine).await;
-    assert_eq!(resume_point(&engine), Some((SONG, 60_000)), "(c) kept");
-    assert!(!on_program(&engine, OUT), "OUT left program");
+    assert_eq!(state(&engine, OUT), PlayState::WaitingForScene);
 }
 
 /// Let the authority task run, then apply every `OnProgram` it queued (the

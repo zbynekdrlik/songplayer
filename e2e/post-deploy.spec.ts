@@ -40,9 +40,9 @@ import {
 import { ObsDriver } from "./obs-driver";
 import { pickBaselineScene } from "./obs-baseline-scene";
 import {
-  unhealthyOnProgramOutputs,
-  type HealthSnapshot,
-  type UnhealthyOutput,
+  programReceiverVerdict,
+  type ProgramReceiverVerdict,
+  type ProgramReceiverView,
 } from "./ndi-health-gate";
 
 // #225: a Player title that names NO song — "Nič nehrá" (nothing plays) or
@@ -58,10 +58,9 @@ const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
 // #170: read the ENGINE's view of the on-program scene to prove SongPlayer
 // actually followed a scene switch — not just that OBS reports it.
 // #221 L4b: `active_scene` is SongPlayer's own program (the one resolver) and
-// `active_playlist_ids` its on-air set: SP-program's playlist ∪ the one cg OBS
-// was told to show. Right after a switch BOTH are on air until cg OBS answers
-// the mirror, so the engine has settled on a scene only once at most one
-// playlist is on air; until then the read names the set (never a match).
+// `active_playlist_ids` its on-air set: SP-program's playlist alone (#221 B4
+// step 6: no cg OBS record joins it any more, so it never holds two). A read
+// that names two playlists is reported as not settled (never a match).
 async function readEngineActiveScene(
   ctx: APIRequestContext,
 ): Promise<string | null> {
@@ -210,18 +209,17 @@ test.describe("SongPlayer post-deploy feature verification", () => {
       const ctx = await apiRequest.newContext({ baseURL: SONGPLAYER_URL });
       try {
         // Restore (afterEach may already have; #221 L3: a press of the scene
-        // already on program is the facade's re-kick, which re-mirrors cg
-        // OBS) and PROVE the ENGINE ended on the start scene.
-        // The generous wait is the honest resilience: it covers the driver's
-        // own transition wait PLUS (#221 L4b) cg OBS answering the facade's
-        // mirror, which settles SongPlayer's on-air set. An active_scene that
-        // never converges fails loudly with the scene names — the wait, not a
-        // re-drive, is what tolerates a lagging engine.
+        // already on program is the facade's re-kick) and PROVE the ENGINE
+        // ended on the start scene. The generous wait is the honest
+        // resilience: it covers the driver's own transition wait and the
+        // playback authority's wake. An active_scene that never converges
+        // fails loudly with the scene names — the wait, not a re-drive, is
+        // what tolerates a lagging engine.
         await driver.switchScene(target);
         const engineScene = await waitEngineActiveScene(ctx, target, 8000);
         expect(
           engineScene,
-          `afterAll must restore the wall to "${target}" (the scene the suite started on); the engine reported active_scene="${engineScene}". SongPlayer's program did not settle on the start scene: the facade's switch, or cg OBS's answer to its mirror, did not land (#221 L4b; #170 for the driver's studio transition).`,
+          `afterAll must restore the wall to "${target}" (the scene the suite started on); the engine reported active_scene="${engineScene}". SongPlayer's program did not settle on the start scene: the facade's switch did not land (#221 L4b; #170 for the driver's studio transition).`,
         ).toBe(target);
       } finally {
         await ctx.dispose();
@@ -327,66 +325,46 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   });
 
   /**
-   * Issue #127 — on-program NDI output must have a live receiver.
+   * Issue #127 — the program output must have a live receiver; #221 B4
+   * step 6 moved the check to `SP-program`.
    *
    * The worst failure this project has: SongPlayer reports `state=Playing`
-   * at full fps while OBS's DistroAV receiver is stranded on a dead endpoint,
-   * so `connections=0` and the video plate is black — yet every other check
-   * passes green. This gate reads the on-program playlist(s) from
-   * `/api/v1/status.active_playlist_ids`, then polls `/api/v1/ndi/health`
-   * until each has `connections > 0` (`0` = dark wall; `-1` = never polled
-   * yet, so keep waiting), and FAILS if any stays dark.
+   * at full fps while the receiver is stranded on a dead endpoint, so
+   * `connections=0` and the picture is black — yet every other check passes
+   * green. Every consumer takes SongPlayer's PROGRAM now (the Presenter,
+   * strih and the stream `SP-program` over NDI; the LED wall `SP-program-MAX`
+   * over Spout, gated by `post-deploy-max.spec.ts`), and cg OBS never shows a
+   * playlist scene again, so a playlist's own NDI output has no consumer.
+   * This gate polls `GET /api/v1/program` until a source is on program,
+   * `SP-program` has `health.connections > 0` (`0` = dark, or not polled yet
+   * right after a start; `-1` = no valid reading; keep waiting either way)
+   * and the server names no `degraded_reason`, and
+   * FAILS if it stays dark. It switches no scene: whatever the program shows
+   * is what its receivers take.
    *
    * Note: SongPlayer does NOT silently self-heal this state (CLAUDE.md
-   * "Disabled subsystems" — per-sender recreate was removed). It now
-   * best-effort nudges OBS over its WebSocket to re-subscribe the stranded
-   * receiver (#127), but a wall that stays dark is a real failure this gate
-   * must catch, not paper over.
+   * "Disabled subsystems" — per-sender recreate was removed); a program that
+   * stays dark is a real failure this gate must catch, not paper over.
    */
-  test("on-program NDI output has a live receiver — wall is not dark (#127)", async ({
+  test("SP-program has a live NDI receiver — the program is not dark (#127, #221)", async ({
     request,
   }) => {
-    // Park on a baseline scene (sp-slow / another non-fast sp-*), per CLAUDE.md
-    // "E2E must not switch to disruptive OBS scenes". SongPlayer then registers
-    // that scene's playlist as on program.
-    if (obs) {
-      const scenes = await obs.listScenes();
-      await obs.switchScene(pickBaselineScene(scenes));
-    }
-
-    // Poll until every on-program output has a live receiver, giving the full
-    // detect → spawn → DistroAV-connect chain time to settle after the deploy's
+    // Poll until SP-program has a live receiver, giving its receivers (the
+    // Presenter, strih, the stream) time to re-attach after the deploy's
     // SongPlayer restart.
     const deadline = Date.now() + 60_000;
-    let active: number[] = [];
-    let unhealthy: UnhealthyOutput[] = [];
+    let verdict: ProgramReceiverVerdict | null = null;
     for (;;) {
-      const statusResp = await request.get("/api/v1/status");
-      expect(statusResp.status()).toBe(200);
-      const status = (await statusResp.json()) as {
-        active_playlist_ids: number[];
-      };
-      active = status.active_playlist_ids ?? [];
-
-      const healthResp = await request.get("/api/v1/ndi/health");
-      expect(healthResp.status()).toBe(200);
-      const health = (await healthResp.json()) as HealthSnapshot[];
-      expect(Array.isArray(health)).toBe(true);
-
-      unhealthy = unhealthyOnProgramOutputs(active, health);
-      if (active.length > 0 && unhealthy.length === 0) break;
-      if (Date.now() > deadline) break;
+      const resp = await request.get("/api/v1/program");
+      expect(resp.status()).toBe(200);
+      verdict = programReceiverVerdict((await resp.json()) as ProgramReceiverView);
+      if (verdict.ok || Date.now() > deadline) break;
       await new Promise((r) => setTimeout(r, 3000));
     }
-
     expect(
-      active.length,
-      "no playlist registered as on program after parking on the baseline sp-* scene — the playback authority saw nothing on air (active_playlist_ids stayed empty)",
-    ).toBeGreaterThan(0);
-    expect(
-      unhealthy,
-      `on-program NDI output(s) had no live receiver — dark wall (#127): ${JSON.stringify(unhealthy)}`,
-    ).toHaveLength(0);
+      verdict?.ok,
+      `SP-program had no live NDI receiver — the Presenter, strih and the stream get nothing (#127, #221): ${JSON.stringify(verdict)}`,
+    ).toBe(true);
   });
 
   /**
@@ -492,11 +470,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    *
    * Strong assertion: after the scene switch, `/api/v1/status` must
    * report `active_playlist_ids` CONTAINING the ytfast playlist's id.
-   * #221 L4b: that is SongPlayer's own on-air set (SP-program's playlist
-   * ∪ the one cg OBS was told to show), which the playback authority
-   * plays, and `active_scene` is SongPlayer's own program scene name —
-   * both from the facade's switch (the scene catalog), never cg OBS's
-   * scene detection.
+   * #221 L4b: that is SongPlayer's own on-air set (SP-program's playlist,
+   * B4 step 6), which the playback authority plays, and `active_scene` is
+   * SongPlayer's own program scene name — both from the facade's switch
+   * (the scene catalog), never cg OBS's scene detection.
    *
    * Required environment: the scene catalog must map `sp-fast` to the
    * ytfast playlist (its NDI output `SP-fast`), so the facade's switch
@@ -517,9 +494,9 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const baselineScene = pickBaselineScene(scenes);
     await obs!.switchScene(baselineScene);
     // #221 L3 (review round 2) + L4b: the driver returns on the facade's own
-    // transition end, while the engine's on-air set keeps the previous scene's
-    // playlist until cg OBS answers the mirror, so a single read here would
-    // race it. Wait for the engine to settle on the baseline first.
+    // transition end, which the playback authority's wake can lag, so a
+    // single read here would race it. Wait for the engine to settle on the
+    // baseline first.
     expect(
       await waitEngineActiveScene(request, baselineScene, 8000),
       `the engine's active_scene must reach the baseline scene "${baselineScene}"`,

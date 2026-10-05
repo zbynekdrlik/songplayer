@@ -736,3 +736,18 @@ fn a_mix_with_neither_side_ends_the_run_like_the_standby_pair_it_becomes() {
         "the program's standby black"
     );
 }
+
+/// #221 review round 2: with no NDI SDK there is no `SP-program` sender, so
+/// nothing ever polls its receivers. The bus then reads a polled 0 at once,
+/// so `GET /api/v1/program` names "no NDI receiver on SP-program" instead of
+/// waiting forever for a first poll (and the missing receiver is logged).
+/// Windows only: the thread start is Windows code.
+#[cfg(windows)]
+#[test]
+fn no_ndi_sdk_reads_as_a_polled_zero() {
+    let bus = Arc::new(ProgramBus::new());
+    spawn_program_thread(None, bus.clone());
+    let health = bus.status().health;
+    assert!(health.receivers_polled, "no sender: nothing will ever poll");
+    assert_eq!(health.connections, 0);
+}

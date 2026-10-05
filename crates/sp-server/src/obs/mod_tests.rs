@@ -69,7 +69,7 @@ fn test_obs_state_default() {
 #[test]
 fn a_disconnect_forgets_everything_of_cg_obs() {
     // #219: every published field back to the default (disconnected)
-    // snapshot — the program follow reads a disconnect from exactly this.
+    // snapshot — a consumer reads a disconnect from exactly this.
     let mut state = ObsState {
         connected: true,
         current_scene: Some("sp-fast".to_string()),

@@ -380,8 +380,8 @@ every worker is done with it. The pieces that made that hold, and testable:
 A multi-thread tokio worker runs the task it spawned LAST first (its LIFO
 slot) and other workers may steal the rest, so two tasks spawned back to
 back can start in either order. The OBS client once spawned a task per
-facade call, so a playlist press's mirror could reach cg OBS after a later
-press. Anything whose ORDER matters goes through ONE task that takes the
+facade call, so a press's switch could reach cg OBS after a later press's.
+Anything whose ORDER matters goes through ONE task that takes the
 items in order (`obs::remote_call::run_calls`: write each frame, then take
 the next; a scene switch's answer is awaited first because cg OBS runs its
 messages on a thread pool; only a getter's answer wait is spawned). A test
@@ -411,6 +411,13 @@ Microsoft's page reads as if WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`,
 `video-decode.md`). To put a runner fact in the CI log of a PASSING test, write
 `writeln!(std::io::stderr(), …)`: libtest captures `eprintln!` / `println!` of a
 passing test, not direct writes to the stderr handle.
+
+**A fix in `#[cfg(windows)]` code still gets its RED** (#221 review round 2):
+a `#[cfg(windows)] #[test]` next to the Linux tests runs on that job, e.g.
+`program_output_tests.rs::no_ndi_sdk_reads_as_a_polled_zero` calls the
+private `spawn_program_thread(None, bus)` and reads the bus. Put
+`#[cfg(windows)]` on the test fn itself and use only imports the Linux tests
+already use, so the Linux target has no unused import.
 
 **An engine test must not count the test pipeline's replies (release 0.68.0
 blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
@@ -709,6 +716,10 @@ the test that kills each one BEFORE CI's mutation gate runs.
   effect a test reads (a counter: `WallVbanClock::taken_at_once`). Likewise
   never compute a log-only value inline (`jump_us = jump / 10`): its `/`→`%`
   / `*` mutants are invisible; log through a tested helper (`to_us(jump)`).
+  When WHICH line to log is the logic (a WARN on a state edge), extract the
+  decision into a pure fn returning an enum + the new state and test its
+  table; the `mutants::skip` logger only maps it (#221 review round 4,
+  `ndi_health_expect::receiver_log`).
 - **A timing pin at ONE phase can be phase-lucky** (#224 part 2 review
   round 3: VBAN's ±100 ppm bound held with the step on block 100 and broke
   on block 101 at 50 ppm). When a result depends on where an event lands
@@ -728,8 +739,9 @@ the test that kills each one BEFORE CI's mutation gate runs.
   listed `*`→`+` and `*`→`/`; with the 2 s default the `+` mutant is
   EQUIVALENT (2 + 2 = 2 × 2) and would survive the gate. Write such a
   constant as a literal (`Duration::from_secs(4)`) and pin the relation in
-  a test (`MIRROR_EXTRA_WAIT == DEFAULT_RESPONSE_TIMEOUT * 2`; a runtime
-  `Duration * u32` is fine there, it is not `const`).
+  a test (`MIRROR_EXTRA_WAIT == DEFAULT_RESPONSE_TIMEOUT * 2`, a constant
+  since deleted with the #221 mirror; a runtime `Duration * u32` is fine
+  there, it is not `const`).
 - `(at - plane) % ds` where `plane` is a multiple of `ds` (a plane or row
   edge): the `-`→`+` mutant gives the SAME remainder, so it is equivalent
   and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,

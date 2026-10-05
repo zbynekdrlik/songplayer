@@ -50,14 +50,7 @@ pub(crate) fn emit_heartbeat_paced(
     let observed_fps = window_frames as f32 / window_secs;
     let nominal_fps = sp_core::genlock::GENLOCK_GRID_FPS as f32;
 
-    let bad = classify_bad_poll(
-        &state,
-        connections,
-        observed_fps,
-        nominal_fps,
-        last_submit_ts,
-        now,
-    );
+    let bad = classify_bad_poll(&state, observed_fps, nominal_fps, last_submit_ts, now);
     if bad {
         *consecutive_bad_polls = consecutive_bad_polls.saturating_add(1);
     } else {

@@ -9,9 +9,9 @@
 //! repaired the set. Now the failed lookup keeps the previous playlists and
 //! flags `lookup_failed`, and the next poll looks the scene up again: the
 //! FIRST published snapshot that knows the scene (`ObsClient::snapshots`,
-//! #219 — what the follow reads; the unread `ObsEvent::SceneChanged` is
-//! deleted, release 0.69.0 review 🔵 10) already carries the right
-//! playlists.
+//! #219 — what the OBS follow read until #221 L5 deleted it; the unread
+//! `ObsEvent::SceneChanged` is deleted, release 0.69.0 review 🔵 10) already
+//! carries the right playlists. L6 deletes the scene detection itself.
 //!
 //! Every wait is bounded (20 s); nothing sleeps for synchronisation.
 
@@ -183,8 +183,8 @@ impl Rig {
     /// cg OBS puts `scene` on program (event included) while `fault` makes
     /// the next scene lookup fail. The FIRST snapshot the client publishes
     /// afterwards that knows `scene` (connected, no failed lookup) must
-    /// already carry `playlists` (never an empty set in between, which the
-    /// follow would read as a scene showing no playlist), and it must come
+    /// already carry `playlists` (never an empty set in between, which a
+    /// consumer would read as a scene showing no playlist), and it must come
     /// from a second lookup: the poll's retry.
     async fn switch_with_a_failed_lookup(
         &mut self,
@@ -234,7 +234,7 @@ impl Rig {
 }
 
 /// A snapshot's program scene and its playlists, when the client knows them
-/// (connected, named, and looked up: the only scene the follow acts on).
+/// (connected, named, and looked up: the only scene a consumer may act on).
 fn known(s: &obs::ObsSnapshot) -> Option<(String, HashSet<i64>)> {
     match (&s.current_scene, s.connected, &s.lookup_failed) {
         (Some(scene), true, None) => Some((scene.clone(), s.active_playlist_ids.clone())),
@@ -393,8 +393,8 @@ async fn a_poll_read_an_event_overtook_never_rolls_the_scene_back() {
 /// connecting (read during its NDI map rebuild, queued until the connection
 /// loop runs) is OLDER than the client's initial program read. It must never
 /// override that read: cg OBS shows sp-fast, so the only scene the client
-/// ever publishes as known is sp-fast — no sp-slow after it (the follow would
-/// cut to sp-slow).
+/// ever publishes as known is sp-fast — no sp-slow after it (a consumer
+/// would act on sp-slow).
 #[tokio::test]
 async fn an_event_queued_during_the_connect_never_overrides_the_initial_read() {
     let mut cg = cg_obs(); // cg OBS shows sp-fast

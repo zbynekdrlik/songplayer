@@ -490,8 +490,8 @@ async fn get_status(state: AppState) -> StatusResponse {
 }
 
 /// #221 L4b: `/api/v1/status` reports SongPlayer's OWN program — the one
-/// scene-name resolver, and the playlists on air (SP-program's playlist ∪
-/// the one cg OBS was told to show) — never cg OBS's scene detection.
+/// scene-name resolver, and the playlists on air (SP-program's playlist,
+/// B4 step 6) — never cg OBS's scene detection.
 #[tokio::test]
 async fn status_reports_songplayers_own_program_not_cg_obs_detection() {
     let state = test_state().await;
@@ -501,27 +501,37 @@ async fn status_reports_songplayers_own_program_not_cg_obs_detection() {
         obs.active_playlist_ids = [9].into_iter().collect();
     }
     let bus = Arc::clone(&state.program_bus);
-    let told = |shown: Option<i64>| {
-        let ticket = bus.legacy_cg().ticket();
-        assert!(bus.legacy_cg().confirmed(ticket, shown));
-    };
     bus.select_initial(4, Some("sp-slow"));
-    told(Some(7));
     let json = get_status(state.clone()).await;
     assert_eq!(json.active_scene.as_deref(), Some("sp-slow"));
-    assert_eq!(json.active_playlist_ids, [4, 7], "cg OBS still shows 7");
+    assert_eq!(json.active_playlist_ids, [4]);
+}
+
+/// #221 B4 step 6: on air is SP-program's playlist ONLY. The program restored
+/// at startup is on air until a cut away from it; a cut to "OBS manuál"
+/// leaves no playlist on air (cg OBS shows a manual scene, not a playlist).
+#[tokio::test]
+async fn status_puts_only_sp_program_s_playlist_on_air() {
+    use crate::playback::program_bus::{SETTING_PROGRAM_SOURCE, restore_selected_source};
+    let state = test_state().await;
+    crate::db::models::set_setting(&state.pool, SETTING_PROGRAM_SOURCE, "7")
+        .await
+        .unwrap();
+    let bus = Arc::clone(&state.program_bus);
+    assert_eq!(restore_selected_source(&state.pool, &bus).await, Some(7));
+    assert_eq!(get_status(state.clone()).await.active_playlist_ids, [7]);
 
     let now = crate::playback::wallclock::utc_now_100ns();
     bus.cut(sp_core::config::PROGRAM_INPUT_ID, now, None);
     let json = get_status(state.clone()).await;
     assert_eq!(json.active_scene.as_deref(), Some("OBS manuál"));
-    assert_eq!(
-        json.active_playlist_ids,
-        [7],
-        "the input carries cg OBS's 7"
+    assert!(
+        json.active_playlist_ids.is_empty(),
+        "no playlist is on air with \"OBS manuál\": {:?}",
+        json.active_playlist_ids
     );
-    told(None);
-    assert!(get_status(state).await.active_playlist_ids.is_empty());
+    bus.cut(4, now, Some("sp-slow"));
+    assert_eq!(get_status(state).await.active_playlist_ids, [4]);
 }
 
 /// #51: `/api/v1/status` must surface the LAN `sp.local` URL + raw-IP

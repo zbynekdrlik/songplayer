@@ -42,8 +42,8 @@
 //! in row bands (`program_transition::mix_nv12_into`, #215 addendum 3) on the
 //! sender's persistent band workers (`band_pool.rs`, #223 follow-up: started
 //! once with the output, never per picture). `start_program` also starts the
-//! OBS-follow task (`program_follow.rs`) and hands the bus to the engine for
-//! the deferred scene-go-off pause.
+//! transition-settings task (`program_transition_settings.rs`, #221 L5) and
+//! hands the bus to the engine for the deferred scene-go-off pause.
 //!
 //! #223: `SP-program` is ALWAYS 1920×1080 (the owner's rule). Every picture
 //! the sender submits is in its canvas (`program_canvas.rs`, the standby's own
@@ -661,21 +661,15 @@ impl super::PlaybackEngine {
     /// #212: also start the NDI input "OBS manuál" (its settings task, and on
     /// Windows its grid thread on the engine's NDI SDK). #213: also start the
     /// Companion remote control's settings task (its listener cuts this bus and
-    /// reaches cg OBS through the engine's OBS client). #215: also start the
-    /// OBS-follow task and keep the bus for the deferred scene-go-off pause;
-    /// #219: the follow consumes the OBS client's snapshots (`obs`).
-    /// #221 L4b: also tell cg OBS once what the restored program shows (the
-    /// startup re-mirror) and start the playback authority
-    /// (`program_authority.rs`), whose first value plays the restored program.
-    /// #223 S2: also start `SP-program-MAX` (its setting, then its thread).
-    /// Call once, after the #196 startup senders.
+    /// reaches cg OBS through the engine's OBS client, for a manual scene).
+    /// #215: also keep the bus for the deferred scene-go-off pause; #221 L5:
+    /// start the transition-settings task (the OBS follow is deleted).
+    /// #221 L4b: also start the playback authority (`program_authority.rs`),
+    /// whose first value plays the restored program. #223 S2: also start
+    /// `SP-program-MAX` (its setting, then its thread). Call once, after the
+    /// #196 startup senders.
     #[cfg_attr(test, mutants::skip)]
-    pub async fn start_program(
-        &self,
-        bus: Arc<ProgramBus>,
-        shutdown: &broadcast::Sender<()>,
-        obs: tokio::sync::watch::Receiver<crate::obs::ObsSnapshot>,
-    ) {
+    pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
         let _ = self.program.set(bus.clone()); // #215: the deferred scene-go-off pause
         let vban = bus.vban().clone();
         tokio::spawn(run_vban_config_task(
@@ -711,19 +705,18 @@ impl super::PlaybackEngine {
         );
         let upstream =
             crate::remote::Upstream::new(self.obs_cmd_tx.clone(), self.obs_event_tx.clone());
-        // #221 L4a: the dashboard's cut mirrors to cg OBS through the same link.
-        bus.legacy_cg().attach(upstream.clone());
-        // #221 L4b decision 1: cg OBS is told once what the restored program shows.
-        crate::playback::program_switch::remirror_on_air(&bus, &upstream).await;
-        // #221 L4b: SP-program (∪ SongPlayer's cg OBS record) drives playback.
+        // #221 L4b: SP-program's playlist drives playback.
         tokio::spawn(super::program_authority::run_program_authority(
             bus.clone(),
             self.event_tx.clone(),
             self.on_air.clone(),
             shutdown.subscribe(),
         ));
-        let follow = crate::playback::program_follow::Follow::new(self.pool.clone(), bus.clone());
-        crate::playback::program_follow::start_follow(follow, obs, shutdown);
+        crate::playback::program_transition_settings::start_transition_settings(
+            self.pool.clone(),
+            bus.clone(),
+            shutdown,
+        );
         crate::remote::start_remote(self.pool.clone(), bus.clone(), upstream, shutdown);
         tokio::spawn(async move {
             let _ = shutdown_rx.recv().await;
@@ -735,14 +728,19 @@ impl super::PlaybackEngine {
 }
 
 /// Windows: create the `SP-program` sender on the shared NDI backend and run
-/// [`run_program_loop`] on its own thread.
+/// [`run_program_loop`] on its own thread. #221 review round 2: when there is
+/// no sender (no NDI SDK, the sender or the thread could not be created),
+/// nothing will ever poll its receivers, so the bus reads a polled 0 at once
+/// (`degraded_reason` names it instead of waiting for a first poll).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus: Arc<ProgramBus>) {
     let Some(backend) = backend else {
         warn!("NDI SDK not available — no SP-program output");
+        bus.set_connections(0);
         return;
     };
+    let no_thread = bus.clone();
     let spawned = std::thread::Builder::new()
         .name("program-output".into())
         .spawn(move || {
@@ -752,6 +750,7 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
                 Ok(s) => s,
                 Err(e) => {
                     tracing::error!(%e, "failed to create the SP-program NDI sender");
+                    bus.set_connections(0);
                     return;
                 }
             };
@@ -773,6 +772,7 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
         });
     if let Err(e) = spawned {
         tracing::error!(%e, "failed to spawn the SP-program output thread");
+        no_thread.set_connections(0);
     }
 }
 

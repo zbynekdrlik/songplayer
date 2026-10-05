@@ -125,7 +125,7 @@ fn playing(engine: &mut PlaybackEngine) -> TitleClock {
 async fn hold(rig: &mut Rig) -> Arc<ProgramBus> {
     let bus = Arc::new(ProgramBus::new());
     bus.select_initial(OUT, None);
-    assert!(bus.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
+    assert!(bus.set_transition(TransitionSpec::fade(300, SpecSource::Setting)));
     assert!(rig.engine.program.set(bus.clone()).is_ok());
     let status = bus.cut(IN, utc_now_100ns() + 60 * 10_000_000, None);
     assert!(status.cut_boundary_100ns.is_some(), "the cut is recorded");

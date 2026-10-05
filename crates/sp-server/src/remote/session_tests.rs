@@ -767,7 +767,7 @@ async fn a_press_without_a_scene_name_is_300_and_not_forwarded() {
 }
 
 #[tokio::test]
-async fn a_cut_that_cannot_be_persisted_is_205_cuts_nothing_and_mirrors_nothing() {
+async fn a_cut_that_cannot_be_persisted_is_205_cuts_nothing_and_tells_cg_obs_nothing() {
     let rig = rig().await;
     let mut ws = connect(rig.addr).await;
     hello_identify(&mut ws, 0).await;
@@ -786,7 +786,7 @@ async fn a_cut_that_cannot_be_persisted_is_205_cuts_nothing_and_mirrors_nothing(
     assert_eq!(cut.reason, Some("persist_failed"));
     assert!(
         rig.calls().is_empty(),
-        "cg OBS is not mirrored: {:?}",
+        "cg OBS is told nothing: {:?}",
         rig.calls()
     );
 }

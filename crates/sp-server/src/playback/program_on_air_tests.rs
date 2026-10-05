@@ -188,73 +188,20 @@ fn set(pids: &[i64]) -> BTreeSet<i64> {
     pids.iter().copied().collect()
 }
 
-/// #221 L4b §1e: on air = SP-program's playlist ∪ the playlist SongPlayer
-/// last told cg OBS to show. "OBS manuál" (-1) is no playlist.
+/// #221 B4 step 6: on air = SP-program's playlist alone, which also owns the
+/// wall. "OBS manuál" (-1) is no playlist, and nothing selected is none.
 #[test]
-fn on_air_is_the_program_s_playlist_and_what_cg_obs_was_told() {
+fn on_air_is_sp_program_s_playlist_alone_and_it_owns_the_wall() {
     let fast = on_air(2, Some(7), Some("sp-fast"));
-    assert_eq!(on_air_set(&fast, Some(7)), set(&[7]), "they agree");
-    assert_eq!(
-        on_air_set(&fast, Some(4)),
-        set(&[4, 7]),
-        "cg OBS still shows sp-slow (its mirror is unanswered or failed)"
-    );
-    assert_eq!(
-        on_air_set(&fast, None),
-        set(&[7]),
-        "cg OBS shows a manual scene"
-    );
+    assert_eq!(on_air_set(&fast), set(&[7]));
+    assert_eq!(wall_owner(&fast), Some(7));
     let manual = on_air(3, Some(PROGRAM_INPUT_ID), Some("Slido"));
-    assert_eq!(on_air_set(&manual, None), set(&[]));
-    assert_eq!(
-        on_air_set(&manual, Some(7)),
-        set(&[7]),
-        "a dashboard cut to OBS manuál while cg OBS shows sp-fast: the input carries it"
-    );
-    assert_eq!(on_air_set(&OnAir::default(), None), set(&[]), "nothing yet");
-    assert_eq!(on_air_set(&OnAir::default(), Some(4)), set(&[4]));
-}
-
-/// Release 0.69.0 review 🟡 2: ONE playlist of the on-air set owns the
-/// shared wall outputs — SP-program's playlist, else the one cg OBS was told
-/// to show, else none. It is always a member of the set, and none only when
-/// the set is empty.
-#[test]
-fn the_wall_owner_is_the_program_s_playlist_else_what_cg_obs_was_told() {
-    let fast = on_air(2, Some(7), Some("sp-fast"));
-    let manual = on_air(3, Some(PROGRAM_INPUT_ID), Some("Slido"));
-    let cases = [
-        (&fast, Some(7), Some(7), "they agree"),
-        (
-            &fast,
-            Some(4),
-            Some(7),
-            "a late mirror: the program's playlist",
-        ),
-        (&fast, None, Some(7), "cg OBS shows a manual scene"),
-        (
-            &manual,
-            Some(7),
-            Some(7),
-            "OBS manuál carries cg OBS's sp-fast",
-        ),
-        (&manual, None, None, "no playlist on air"),
-    ];
-    for (program, shown, owner, why) in cases {
-        assert_eq!(wall_owner(program, shown), owner, "{why}");
-        let members = on_air_set(program, shown);
-        assert_eq!(
-            owner.is_none(),
-            members.is_empty(),
-            "{why}: none only for an empty set"
-        );
-        assert!(
-            owner.is_none_or(|o| members.contains(&o)),
-            "{why}: a member"
-        );
-    }
-    assert_eq!(wall_owner(&OnAir::default(), None), None, "nothing yet");
-    assert_eq!(wall_owner(&OnAir::default(), Some(4)), Some(4));
+    assert_eq!(on_air_set(&manual), set(&[]), "OBS manuál");
+    assert_eq!(wall_owner(&manual), None);
+    let input = on_air(4, Some(PROGRAM_INPUT_ID), None);
+    assert_eq!((on_air_set(&input), wall_owner(&input)), (set(&[]), None));
+    assert_eq!(on_air_set(&OnAir::default()), set(&[]), "nothing yet");
+    assert_eq!(wall_owner(&OnAir::default()), None);
 }
 
 /// #221 L4b: OFF for every playlist that left, then ON for every playlist
@@ -269,9 +216,14 @@ fn a_change_is_off_for_what_left_then_on_for_what_entered_and_the_cut_source() {
         "the restored program"
     );
     assert_eq!(
+        on_air_changes(&set(&[7]), &set(&[4]), Some(4)),
+        vec![(7, false), (4, true)],
+        "a press p→q: p off first, then q"
+    );
+    assert_eq!(
         on_air_changes(&set(&[7]), &set(&[4, 7]), Some(4)),
         vec![(4, true)],
-        "a press p→q: q only; p (cg OBS still shows it) is not re-kicked"
+        "q only; a member nobody cut to is not re-kicked"
     );
     assert_eq!(
         on_air_changes(&set(&[7]), &set(&[4, 7]), None),
@@ -281,7 +233,7 @@ fn a_change_is_off_for_what_left_then_on_for_what_entered_and_the_cut_source() {
     assert_eq!(
         on_air_changes(&set(&[4, 7]), &set(&[4]), None),
         vec![(7, false)],
-        "cg OBS confirmed the press: off only"
+        "off only"
     );
     assert_eq!(
         on_air_changes(&set(&[4, 7]), &set(&[4]), Some(4)),
@@ -299,7 +251,7 @@ fn a_change_is_off_for_what_left_then_on_for_what_entered_and_the_cut_source() {
     );
     assert!(
         on_air_changes(&set(&[4]), &set(&[4]), Some(-1)).is_empty(),
-        "a cut to OBS manuál while cg OBS shows 4: 4 is not re-kicked"
+        "a cut source that is no member (OBS manuál) re-kicks nobody"
     );
     assert!(
         on_air_changes(&set(&[4]), &set(&[4]), Some(9)).is_empty(),

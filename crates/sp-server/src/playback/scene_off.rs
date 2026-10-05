@@ -79,11 +79,13 @@ impl PlaybackEngine {
     /// cg OBS's title text is cleared too (`title::push_hide`, review round
     /// 6: the OFF cancelled the song's hide timer, which clears it).
     ///
-    /// #221 L4b review rounds 3-4: the playback authority sends the incoming
-    /// ON at the press and the outgoing OFF only when cg OBS confirms the
-    /// mirror, so the incoming playlist can be on program already, its title
-    /// and line up (or overwritten by the outgoing ones on the shared clips).
-    /// Then the wall is re-synced to it: its due title (a `Resync`; with none
+    /// #221 L4b review rounds 3-4: another playlist can be on program
+    /// already when this OFF is handled, its title and line up (or
+    /// overwritten by the outgoing ones on the shared clips): after a quick
+    /// cut away and back, whose stale events the engine drops. (#221 B4 step
+    /// 6: the authority sends a cut's OFF and ON together, OFF first; the
+    /// outgoing OFF no longer waits for cg OBS's answer to a mirror.) Then
+    /// the wall is re-synced to it: its due title (a `Resync`; with none
     /// due the outgoing title fades and cg OBS's text is cleared,
     /// `title::push_hide`, where a `Resync(None)` would cut it; nothing when
     /// the due title's read failed, `decide_wall_title`), and its
@@ -93,14 +95,12 @@ impl PlaybackEngine {
     /// Its title is still a candidate (`title_candidates`), so a due one can
     /// be re-synced for the moment until its own OFF re-syncs the wall.
     ///
-    /// #221 review round 3: the wall owner can change by this OFF alone (a
-    /// cut to "OBS manuál" while cg OBS still shows another playlist), so the
-    /// stage display is re-synced to the owner too (`resync_presenter`), as
-    /// at an owner's ON. After the OFF of a member that did not own the wall,
-    /// that repeats the owner's current line, or (review round 4) clears the
-    /// stage display while the owner is in a blank stretch, where its
-    /// dispatch holds its last line: the display goes blank like the wall
-    /// until the owner's next line.
+    /// #221 review round 3: the stage display is re-synced to the wall owner
+    /// too (`resync_presenter`), as at an owner's ON: that repeats the
+    /// owner's current line, or (review round 4) clears the stage display
+    /// while the owner is in a blank stretch, where its dispatch holds its
+    /// last line: the display goes blank like the wall until the owner's
+    /// next line.
     pub(super) async fn wall_after_scene_off(&mut self) {
         let others_on_program = self
             .pipelines
@@ -150,11 +150,10 @@ impl PlaybackEngine {
         }
     }
 
-    /// The wall after its owner's ON (#221, review rounds 1-2). The owner can
-    /// change by this ON alone (SP-program cut to it while cg OBS still shows
-    /// the old owner), and the old owner writes nothing any more — its hide
-    /// timer, song-end clear and Presenter pushes included — so the whole
-    /// wall is re-synced to the new owner at once: its title (a `playing`
+    /// The wall after its owner's ON (#221, review rounds 1-2). The old
+    /// owner writes nothing once it is off the air — its hide timer,
+    /// song-end clear and Presenter pushes included — so the whole wall is
+    /// re-synced to the new owner at once: its title (a `playing`
     /// owner's scene-on already sent the `Resync`, `push_title_for_playing`;
     /// one that plays nothing takes the old title down), its line
     /// (`resync_wall_lines`) and the stage display (`resync_presenter`).

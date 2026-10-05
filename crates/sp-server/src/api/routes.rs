@@ -60,8 +60,8 @@ pub struct StatusResponse {
     pub version: String,
     pub obs_connected: bool,
     pub active_scene: Option<String>,
-    /// #221 L4b: the playlists on air — SP-program's playlist ∪ the one cg
-    /// OBS was told to show, ascending (`routes_status`). `active_scene` is
+    /// #221 L4b: the playlists on air — SP-program's playlist alone (B4 step
+    /// 6), none for "OBS manuál" (`routes_status`). `active_scene` is
     /// SongPlayer's own program scene name (the one resolver).
     pub active_playlist_ids: Vec<i64>,
     pub tools: ToolsStatusResponse,

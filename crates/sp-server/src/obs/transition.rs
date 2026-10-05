@@ -1,10 +1,11 @@
 //! #219: cg OBS's current scene transition, kept by the OBS client itself.
 //!
-//! Every program cut follows cg OBS's scene transition
-//! (`playback::program_transition::effective_spec`, #215). The OBS client
-//! reads it on its own connection and keeps it in `ObsState::transition`, so
-//! it reaches every consumer through the published `ObsSnapshot`
-//! (`snapshot.rs`) — the program follow never asks cg OBS itself.
+//! The OBS client reads it on its own connection and keeps it in
+//! `ObsState::transition`, published through the `ObsSnapshot`
+//! (`snapshot.rs`). #221 L5 deleted the program follow, which used it as the
+//! spec of every program cut: the spec is Nastavenia's alone now
+//! (`playback::program_transition::effective_spec`), and L6 deletes this
+//! reader with the scene detection.
 //!
 //! - One reader task per connection ([`run_transition_reader`], spawned at
 //!   connect): it reads `GetCurrentSceneTransition` at once, then again each
@@ -18,8 +19,7 @@
 //! - A read with no answer leaves the transition unknown (`None`) and is asked
 //!   again every [`TRANSITION_RETRY`] (the scene poll's cadence) until one is
 //!   answered. The first failure WARNs, the retries log at debug.
-//! - A disconnect forgets it (`ObsState` reset); the program follow keeps the
-//!   last one it saw.
+//! - A disconnect forgets it (`ObsState` reset).
 
 use std::sync::Arc;
 use std::time::Duration;

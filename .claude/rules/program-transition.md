@@ -1,8 +1,6 @@
 ---
 paths:
   - "crates/sp-server/src/playback/program_transition*.rs"
-  - "crates/sp-server/src/playback/program_follow*.rs"
-  - "crates/sp-server/tests/obs_snapshot_follow.rs"
   - "crates/sp-server/src/playback/scene_off*.rs"
   - "crates/sp-server/src/playback/tests_hold.rs"
   - "crates/sp-server/src/playback/tests_scene_off_wall.rs"
@@ -28,8 +26,9 @@ paths:
 
 The owner's rule: "žiadne trhané zvuky a obrazy sú neprípustné v produkcii".
 A program cut is no longer a hard switch on one boundary. It is a crossfade of
-audio AND picture that follows cg OBS's scene transition, and the outgoing
-playlist keeps playing until the fade is over. Design record: #215 comment
+audio AND picture with the Nastavenia transition (#221 L5: never cg OBS's
+any more), and the outgoing playlist keeps playing until the fade is over.
+Design record: #215 comment
 5853036223 (Approach 1); the implementation notes are in comment 5853106216.
 The addendum (design record 5855841198, after box run 1 in 5855833871): the
 picture dissolves across different sizes, and a fade waits for the incoming
@@ -132,7 +131,7 @@ cut boundary mixed the outgoing song against silence.
   authority's ON (`SceneOn` → `SelectAndPlay`) starts a new song, and the
   fade opens on that song's first live pair — a timeout there means the song
   took longer than 15 boundaries to start. Read the box's `cue_timeouts` +0
-  check on the cg OBS scene-change path only.
+  check on playlist cuts only (a Companion press or a dashboard cut).
 - A WAITING cue opens only on its own window's live pair: once a later cut
   froze it, a live pair of its incoming source inside it is held like any
   other (review round 1). `cut` reads `on_air(boundary)` BEFORE
@@ -350,10 +349,15 @@ them at chosen stamps; only the wrappers read `utc_now_100ns()`.
 
 ### The wall after an OFF (`wall_after_scene_off`, #221 L4b review rounds 3-4)
 
-The authority sends the incoming ON at the press and the outgoing OFF only
-at the mirror's OK, so on almost every playlist press another playlist is
-already on program when the OFF is handled (before L4b the bridge sent the
-OFF first). The wall step runs before the pause/hold:
+The authority turns one change of the on-air set into its OFFs first, then
+its ONs (`on_air_changes`). Since B4 step 6 (no mirror, the set is
+SP-program's playlist alone) a press's OFF and ON come from ONE change, so
+the outgoing playlist's OFF is handled before the incoming ON and usually NO
+playlist is on program at the OFF. (Under L4b the ON came at the press and
+the OFF only at cg OBS's answer to the mirror, so another playlist was
+almost always on program by then.) Another playlist can still be on program
+at an OFF after a quick cut away and back, whose stale events the engine
+drops. The wall step runs before the pause/hold:
 
 - "Another playlist on program" = `scene_active` AND in the authority's
   diffed set (`on_air_contains`). A flagged playlist out of the set has its
@@ -379,12 +383,12 @@ OFF first). The wall step runs before the pause/hold:
   whose OFF is queued can be re-synced until its own OFF re-syncs the wall.
 - The stage display (#221 review round 3): with another playlist on
   program, the OFF ends with `resync_presenter(owner)` — the wall owner's
-  line at its last position, or a cleared display — because the owner can
-  change by this OFF alone (a cut to "OBS manuál" while cg OBS still
-  shows another playlist). After the OFF of a member that did not own the
-  wall it repeats the owner's line, or clears the display while the owner
-  is in a blank stretch (review round 4: blank like the wall until the
-  owner's next line).
+  line at its last position, or a cleared display. It repeats the owner's
+  line, or clears the display while the owner is in a blank stretch
+  (review round 4: blank like the wall until the owner's next line). (The
+  round-3 case, an owner change by an OFF alone — a cut to "OBS manuál"
+  while cg OBS still showed another playlist — needed the deleted union of
+  `legacy_cg.shown`.)
 - The other half, an ON: the wall owner's ON re-syncs the title, the line
   and the stage display to it (`scene_off::wall_after_owner_on`, review
   rounds 1-2), since the old owner writes nothing any more; details in
@@ -508,19 +512,23 @@ faded out the on-program title.
   line: the same line is held back by the dedup keys anyway, so it proves
   nothing.
 
-## Following cg OBS (`program_follow.rs`)
+## The transition settings (`program_transition_settings.rs`, #221 L5)
 
-#219 (design record: #219 comment 5868318993, Approach 1) made the follow a
-PURE CONSUMER of the OBS client's state: it asks cg OBS nothing itself. The
-old parallel view (its own `GetCurrentProgramScene` / scene-lookup /
-transition reads through `remote::Upstream`, `drain`, `missed_scene`, the
-fallback to a dropped scene change, `obs_up`, `read_pending`,
-`MAX_CATCH_UP_REREADS`) is DELETED — do not bring any of it back; the
-unanswered-catch-up gap it had is gone by construction.
+The transition every cut uses comes from Nastavenia alone. #221 L5 (owner
+directive 5999795799: SongPlayer is the master switcher, cg OBS is only the
+NDI input "OBS manuál") DELETED the OBS follow: `program_follow.rs` and its
+three test files, the follow test of `tests/obs_snapshot_follow.rs` (the
+client tests that remain are `tests/obs_snapshot.rs`), `FollowShared`, the
+`program_follow_obs` setting, `TransitionMode::Obs`, `SpecSource::Obs`,
+`spec_from_obs`, the `ObsTransition` re-export, the `follow` block of `GET
+/api/v1/program` and the "podľa OBS" UI. Do not bring any of it back; the
+event-night watcher `%TEMP%\sp_follow.ps1` it replaced stays retired. A
+stale `program_follow_obs` row in a box's settings table is never read.
 
 - Settings (`sp_core::config`, re-read every 5 s):
-  - `program_follow_obs`: only `"true"` follows (default off);
-  - `program_transition`: `obs` (default) / `fade` / `cut`;
+  - `program_transition`: `fade` (the default) / `cut`, trimmed
+    (`TransitionMode::parse`); any other stored value (the retired `obs`
+    included) is no choice, i.e. the default fade;
   - `program_transition_ms`: a positive integer, default 300 (= 9 slots),
     rounded to whole slots, at least 1 slot, at most 300 slots (10 s). ONE
     parse for the server and the Nastavenia form:
@@ -528,96 +536,37 @@ unanswered-catch-up gap it had is gone by construction.
     10 000, pinned equal to 300 slots by a test). The form shows the value the
     server uses, so its `min` / `max` never refuse a save of a stored
     out-of-range value.
-- The spec every cut uses (`effective_spec`): the `fade` / `cut` override,
-  else cg OBS's transition (`cut_transition` → Cut, any other kind → a Fade of
-  its duration, a fixed-duration one → `program_transition_ms`), else a Fade
-  of `program_transition_ms` (`fallback`). `ProgramBus::set_transition` returns
-  whether it changed, and only a change is logged.
-- **The input is the OBS client's `ObsSnapshot`** (`obs::snapshot`, a
-  `tokio::sync::watch`; contract in `obs-ndi-health.md`): `connected`,
-  `current_scene`, `active_playlist_ids`, `lookup_failed`, `transition`.
-  `lib.rs` step 7 is `obs_bridge::start_obs` (the client spawns; #221 L4b
-  deleted the engine bridge that subscribed first); its `snapshots` go to
-  `PlaybackEngine::start_program(bus, shutdown, snapshots)` →
-  `start_follow`. Without OBS configured the follow gets a CLOSED channel
-  (the default, disconnected snapshot): `run_follow_task` stops selecting
-  on it (`obs_open`) and only the settings polls run.
-- cg OBS's transition is the snapshot's: the client reads
-  `GetCurrentSceneTransition` itself (`obs::transition`, at connect, on
-  `CurrentSceneTransitionChanged` / `…DurationChanged`, retried every 2 s
-  until answered). `FollowLoop::take_transition` stores a snapshot's
-  transition in `FollowShared` (the `follow.obs_transition` telemetry) and
-  keeps the LAST KNOWN one while a snapshot has none (unknown, or cg OBS
-  away), then applies the spec — BEFORE any cut of the same snapshot, so a
-  cut always uses the spec of the snapshot that caused it.
-- **What the follow acts on** (`FollowLoop::on_snapshot`, `program_scene`):
-  - a snapshot's program scene is `Known(SceneView {scene, playlists})` only
-    when connected, named and NOT `lookup_failed`; `Unknown` when
-    disconnected or not named yet; `LookupFailed` when the client's playlist
-    lookup failed (#218 — its `active_playlist_ids` then belong to an EARLIER
-    scene). The order of the checks: not connected → `Unknown` first, then
-    `lookup_failed` → `LookupFailed`, then the scene;
-  - a `Known` scene is followed (when `program_follow_obs` is on) only when
-    it differs from `seen`, the last known scene (name AND playlists). A
-    snapshot that changes only the transition cuts nothing, so a manual
-    dashboard cut is never undone by it;
-  - `LookupFailed` is ignored completely: no cut, no `last_follow_cut`,
-    `seen` kept. The client's repaired lookup is the next change. A failure
-    that ends back on the followed scene changes nothing;
-  - `Unknown` (not connected wins over a flagged failure) resets `seen`, so
-    the reconnect's scene is followed again (as the old `SceneChanged` of a
-    reconnect was) — when the follow SAW the disconnected snapshot: a
-    disconnect shorter than the follow's own step (it is inside
-    `follow_scene`) can be coalesced away, and a reconnect to the same scene
-    then changes nothing;
-  - a CATCH-UP — at start (`run_follow_task`'s first snapshot) and when
-    `program_follow_obs` flips false → true (`on_tick`, the snapshot read
-    with `borrow()`) — clears `seen` first, so the current scene is followed
-    whether it changed or not; on an unknown or failed snapshot the NEXT
-    known one is followed;
-  - the watch coalesces: only the newest snapshot is seen, so a scene cg OBS
-    showed only briefly between two wakes is never cut to (correct: the
-    program ends on cg OBS's final scene).
-  - **Behaviour change vs #215 (for the main session to confirm):** the old
-    follow acted on EVERY `SceneChanged`, so cg OBS re-taking the SAME scene
-    (a same-scene transition that fires `CurrentProgramSceneChanged`) cut
-    `SP-program` back to that scene's source after a manual dashboard cut.
-    Now only a CHANGED scene view acts (the design record's "reacts to every
-    change"; `send_if_modified` also drops an identical snapshot), so such a
-    re-take leaves the manual cut alone. The Companion path is unaffected:
-    the #213 facade cuts on every press itself.
-- Follow = `scene_action` (the #213 rule) → cut via `persist_and_cut`, unless
-  the program already shows that source (`Follow::follow_scene`, which also
-  records `last_follow_cut`). This replaces the event-night watcher
-  `%TEMP%\sp_follow.ps1`, which polled the scene every 200 ms.
-- **A followed scene is a switch like any other** (release 0.69.0 review
-  🟡 1): `follow_scene` holds the bus's `switch_order`, takes a `legacy_cg`
-  ticket before its cut, and records what cg OBS shows —
-  `legacy_cg.confirmed(ticket, observed)`, the scene catalog's playlist or
-  `None` for a manual scene, on every known scene (`remote-control.md`,
-  "SongPlayer's record of what it told cg OBS"). With the follow on, cg OBS
-  is the authority, so a playlist mirrored earlier leaves the air.
-- Order vs the engine (#221 L4b): the engine no longer follows cg OBS's
-  scene at all; a follow cut is a program cut like any other, and the
-  playback authority plays what it put on air.
+- The spec every cut uses (`program_transition::effective_spec(mode, ms)`):
+  `cut` → a Cut (`setting`), `fade` → a Fade of `program_transition_ms`
+  (`setting`), no choice → a Fade of `program_transition_ms` (`fallback`).
+  `ProgramBus::set_transition` returns whether it changed, and only a
+  change is logged (`log_spec`).
+- The task: `start_transition_settings(pool, bus, &shutdown)`, spawned by
+  `PlaybackEngine::start_program`, runs `run_transition_settings_task(pool,
+  bus, shutdown_rx, TRANSITION_SETTINGS_POLL)`: an interval whose first tick
+  is immediate (the stored spec is on the bus at start), a `biased` select
+  that ends on shutdown first. Each tick is one `apply_transition_settings`
+  (`load_transition_settings` → `TransitionSettings::spec` → the bus); an
+  unreadable store WARNs and keeps the spec in force. With no OBS
+  configured nothing changes: the task needs only the pool and the bus.
 
 ## API + UI
 
 - `GET /api/v1/program` (and the cut answer) → `transition {kind, duration_ms,
-  n_slots, source (obs|setting|fallback), active {from, to,
+  n_slots, source (setting|fallback), active {from, to,
   start_boundary_100ns, n_slots, served_slots, progress} | null,
   transitions_done, mixed_boundaries, side_fills, cue_wait_boundaries,
-  cue_timeouts}` and `follow {enabled, mode,
-  ms, obs_transition {name, kind, duration_ms} | null, last_follow_cut}`
-  (`last_follow_cut` has the #213 `RemoteCut` shape).
+  cue_timeouts}`. No `follow` block (#221 L5).
 - Dashboard `ProgramControl`: the `program-transition` line, e.g.
-  `Prechod: prelínanie 300 ms (podľa OBS)` / `(nastavenie)` / `(predvolené)`,
-  `Prechod: strih (…)`, plus `— prebieha N %` while a fade runs.
-- Nastavenia fieldset `settings-program-transition`: `…-follow-obs`
-  (checkbox), `…-kind` (select obs/fade/cut), `…-ms` (number).
-- The mock derives `transition` / `follow` from the stored settings. It runs no
-  cg OBS and no sender: `/__mock/program-obs-transition` injects cg OBS's
-  transition and `/__mock/program-transition-active` a running window; both are
+  `Prechod: prelínanie 300 ms (predvolené)` / `(nastavenie)`,
+  `Prechod: strih (nastavenie)`, plus `— prebieha N %` while a fade runs.
+- Nastavenia fieldset `settings-program-transition`: `…-kind` (select
+  fade "Prelínanie (odporúčané)" / cut "Strih"; a stored value that is
+  neither — the retired `obs` — shows and saves as fade, the server's
+  reading: `transition_choice` in `settings_form.rs`), `…-ms` (number).
+- The mock derives `transition` from the stored settings (`fade` / `cut`
+  → `setting`, anything else → a `fallback` fade). It runs no cg OBS and no
+  sender: `/__mock/program-transition-active` injects a running window,
   cleared by `/__mock/program-reset`.
 
 ## Tests
@@ -648,41 +597,25 @@ unanswered-catch-up gap it had is gone by construction.
   picture after picture — `ThreadId` + name — a run that waits for a held
   band, a worker's panic named in the caller's own with the worker alive, an
   unwinding caller that waits, no worker left after the drop),
-  `scene_off_tests.rs`, `program_follow_tests.rs` (pure + `Follow` +
-  `program_scene`; the snapshot helpers `on_program` / `lookup_failed` /
-  `with` / `fade` / `cut` are `pub(super)`), `program_follow_tests_loop.rs`
-  (`FollowLoop::on_snapshot` / `on_tick` awaited one by one — no task, so
-  every effect is complete when the step returns; a manual `persist_and_cut`
-  makes a wrong re-follow observable as an extra cut) and
-  `program_follow_tests_task.rs` (`run_follow_task` on a `watch` the test
-  publishes on, incl. a closed channel = no OBS client) — the follow is
-  driven ONLY by snapshots, there is no fake cg OBS any more.
-  `tests/obs_snapshot_follow.rs` runs the real `ObsClient` against the
-  `FakeObsServer` (its `scene_transition` knob): the transition read at
-  connect / on each transition event / retried, and the real follow task on
-  the client's snapshots through a failed lookup (#218) and its repair.
-  Then `api/program_tests.rs`, and the mock E2Es `program-control.spec.ts` +
+  `scene_off_tests.rs`, `program_transition_settings_tests.rs` (#221 L5:
+  the settings and their spec, one read onto a real bus, an unreadable
+  store keeps the spec, the task at start and on its poll). Then
+  `api/program_tests.rs`, and the mock E2Es `program-control.spec.ts` +
   `settings-program-transition.spec.ts`.
 - Pins were derived with scratch Python models of `ProgramCore` and the
   weight / blend math (rust-workspace.md, no-compile box). Re-derive them with
   your own model when the Rust changes.
-- A follow-task effect is proven by a LATER observable one (a spec, a cut),
-  never by a sleep: publish a scene change, then a snapshot with a new
-  transition, and `spec_becomes` the new one — the scene change before it
-  has been handled (the watch may coalesce the two, with the same result).
-  Wait for the start's catch-up to be DONE (a `last_follow_cut`, or the
-  spec it applied) before publishing a change that must take the change
-  path.
-- To prove a poll does NOT act (no re-follow while following), cut by hand,
-  then sync on a LATER poll's observable effect (store a setting,
-  `spec_becomes`) and assert the manual source stayed.
+- The settings task's effect is proven by the spec it puts on the bus
+  (`spec_becomes`, bounded at 20 s), never by a sleep; its start is proven
+  with a poll that never comes round again (`NO_POLL`), so only the
+  immediate first tick can have applied it.
 - The engine tests never assert a "not yet" against the wall clock: the bus
   runs on fixed stamps, the steps are driven at chosen instants, and the real
   re-check timer is only bounded from below.
 
 ## Box acceptance (the supervisor's job, after the event)
 
-Two playing playlists, a scene change via Companion/remote with a 300 ms OBS
+Two playing playlists, a press via Companion with a 300 ms Nastavenia
 fade: `mixed_boundaries` +9, audio RMS never more than 3 dB below the quieter
 source, a dev1 VBAN capture with no zero-run ≥ 5 ms across the change, and the
 owner confirms on the PA and the wall. Addendum (run 2): no `differ in size`
@@ -692,13 +625,11 @@ incoming song's FLAC block 0 inside the
 window, no true-zero run between the outgoing fade and the incoming song, and
 `cue_wait_boundaries` ≤ 15 with `cue_timeouts` +0 — about 10–11 for a paused
 playlist that starts a new song (the fills + the pre-roll, B1 above), 0 for an
-already playing one. `program_follow_obs` is the setting
-switched on for events (design record); the watcher script
-`%TEMP%\sp_follow.ps1` is retired once it is on.
+already playing one.
 
 **Also check the common production path: a PAUSED incoming playlist.** Every
-off-program playlist is paused when its scene leaves program; on its
-scene-go-on the engine starts a NEW song for it, at the same moment as the cut.
+off-program playlist is paused when it leaves the program; when it is cut
+back on, the engine starts a NEW song for it, at the same moment as the cut.
 Until that song's first decoded pair, its paced output offers fills, then
 pre-roll standby pairs (black + silence) — none of them live, so the cue gate
 HOLDS those boundaries (the outgoing song on program at full level) and the

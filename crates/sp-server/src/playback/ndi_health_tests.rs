@@ -75,149 +75,47 @@ pub(super) fn dark_wall_event(now: Instant, consecutive_bad_polls: u32) -> Pipel
     }
 }
 
-/// #127: a Playing-on-program pipeline dark past the nudge threshold must
-/// dispatch an OBS `NudgeNdiReceiver` for its stream. This is the RED test
-/// for the receiver-recovery trigger — before the fix, nothing acted on the
-/// dark-wall state SongPlayer already named.
+/// #221 B4 step 6: no NDI receiver is expected on a playlist's OWN output any
+/// more — SP-program takes the playlist off the program bus, and cg OBS never
+/// shows a playlist scene again — so a playlist on program with 0 receivers
+/// is NOT a dark wall: a run of bad polls (an underrun, as the pipeline now
+/// counts them) up to 100 is named as the underrun, never the dark-wall
+/// reason, and runs no #173 ladder rung against cg OBS's inputs (the
+/// receiver expectation is SP-program's, `GET /api/v1/program` →
+/// `degraded_reason`). The snapshot keeps the real count and the bad polls
+/// (visibility only). Before, a dark poll here nudged cg OBS
+/// (`NudgeNdiReceiver`, rung 0) and named the dark wall; the 2026-04-27
+/// production failure was v0.25.0's per-sender `RecreateSender` on prolonged
+/// `connections=0` (v0.26.0 ripped the whole trigger out).
 #[tokio::test]
-async fn handle_health_snapshot_nudges_obs_on_prolonged_dark_wall() {
+async fn a_playlist_output_on_program_with_no_receiver_is_never_dark_and_runs_no_ladder() {
     let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
     engine.ensure_pipeline(4, "SP-slow");
     engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
     engine.set_on_program_for_test(4);
 
     let now = Instant::now();
-    engine.handle_health_snapshot(
-        4,
-        dark_wall_event(now, crate::obs::ndi_recovery::NUDGE_THRESHOLD_BAD_POLLS),
-    );
-
-    // Rung 0 of the ladder (clear+restore) fires at the dark threshold.
-    match obs_rx.try_recv() {
-        Ok(crate::obs::ObsCommand::NudgeNdiReceiver { ndi_name, step }) => {
-            assert_eq!(ndi_name, "SP-slow");
-            assert_eq!(step, crate::obs::ndi_recovery::RecoveryStep::ClearRestore);
+    let threshold = crate::obs::ndi_recovery::NUDGE_THRESHOLD_BAD_POLLS;
+    for polls in [2, threshold, threshold + 2, threshold + 4, 100] {
+        let mut underrun = dark_wall_event(now, polls);
+        if let PipelineEvent::HealthSnapshot { observed_fps, .. } = &mut underrun {
+            *observed_fps = 10.0; // below half of the nominal 30
         }
-        Ok(other) => panic!("expected NudgeNdiReceiver, got a different ObsCommand: {other:?}"),
-        Err(e) => panic!("expected a NudgeNdiReceiver command, got none: {e:?}"),
+        engine.handle_health_snapshot(4, underrun);
     }
-    // The fired rung is surfaced on the health snapshot for the dashboard / E2E.
+    let snap = registry.snapshots()[0].clone();
+    assert_eq!(snap.state, PlaybackStateLabel::Playing, "it is on program");
+    assert_eq!(snap.connections, 0);
+    assert_eq!(snap.consecutive_bad_polls, 100);
     assert_eq!(
-        registry.snapshots()[0].recovery_step,
-        Some(crate::obs::ndi_recovery::RecoveryStep::ClearRestore),
-        "the snapshot must record the rung that fired this poll",
+        snap.degraded_reason.as_deref(),
+        Some("underrunning (10/30 fps)"),
+        "the underrun, never the dark wall"
     );
-}
-
-/// #173: a receiver that stays dark long enough for the ladder to walk
-/// clear+restore → toggle → recreate must ESCALATE past the earlier rungs, and
-/// the snapshot must record the fired rung. Rung 2 (`RecreateInput`) is enabled
-/// again in round 3 (the executor creates-first-then-removes), so the highest
-/// rung a sustained dark wall reaches is the recreate. Before the round-2 fix the
-/// nudge repeated clear+restore forever and the wall stayed dark for ~20 min.
-#[tokio::test]
-async fn handle_health_snapshot_escalates_to_recreate_on_sustained_dark_wall() {
-    let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
-    engine.ensure_pipeline(7, "SP-fast");
-    engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
-    engine.set_on_program_for_test(7);
-
-    let base = crate::obs::ndi_recovery::NUDGE_THRESHOLD_BAD_POLLS;
-    // Rung 0 (clear+restore) at the threshold, rung 1 (toggle) +2 dark polls
-    // later, rung 2 (recreate) +2 more. Each poll climbs consecutive_bad_polls.
-    let now = Instant::now();
-    engine.handle_health_snapshot(7, dark_wall_event(now, base)); // rung 0
-    engine.handle_health_snapshot(7, dark_wall_event(now, base + 2)); // rung 1
-    engine.handle_health_snapshot(7, dark_wall_event(now, base + 4)); // rung 2
-
-    // Drain the queued commands; the LAST one must be the recreate rung.
-    let mut last_step = None;
-    while let Ok(cmd) = obs_rx.try_recv() {
-        if let crate::obs::ObsCommand::NudgeNdiReceiver { ndi_name, step } = cmd {
-            assert_eq!(ndi_name, "SP-fast");
-            last_step = Some(step);
-        }
-    }
-    // #173 round 3: rung 2 (RecreateInput) is ENABLED — the executor now
-    // creates-first-then-removes (a failed CreateInput can no longer empty the
-    // scene), so a sustained dark wall escalates all the way to the recreate.
-    assert_eq!(
-        last_step,
-        Some(crate::obs::ndi_recovery::RecoveryStep::RecreateInput),
-        "a sustained dark wall must escalate the ladder to the recreate rung",
-    );
-    assert_eq!(
-        registry.snapshots()[0].recovery_step,
-        Some(crate::obs::ndi_recovery::RecoveryStep::RecreateInput),
-        "the snapshot must record the escalated rung",
-    );
-}
-
-/// A dark wall that recovers clears `recovery_step` back to `None` so the
-/// dashboard / E2E stops showing a stale recovery rung.
-#[tokio::test]
-async fn handle_health_snapshot_clears_recovery_step_on_recovery() {
-    let (mut engine, registry, _obs_rx) = fresh_engine_with_obs_cmd().await;
-    engine.ensure_pipeline(4, "SP-slow");
-    engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
-    engine.set_on_program_for_test(4);
-
-    let now = Instant::now();
-    // Dark past threshold → rung 0 fires, recovery_step is Some.
-    engine.handle_health_snapshot(
-        4,
-        dark_wall_event(now, crate::obs::ndi_recovery::NUDGE_THRESHOLD_BAD_POLLS),
-    );
-    assert!(registry.snapshots()[0].recovery_step.is_some());
-
-    // Clean poll: receiver re-attached → recovery_step clears to None.
-    engine.handle_health_snapshot(
-        4,
-        PipelineEvent::HealthSnapshot {
-            connections: 2,
-            frames_submitted_total: 12_100,
-            frames_submitted_last_5s: 120,
-            observed_fps: 30.0,
-            nominal_fps: 30.0,
-            source_fps: 30.0,
-            last_submit_ts: Some(now),
-            last_heartbeat_ts: now,
-            consecutive_bad_polls: 0,
-            reported_state: PlaybackStateLabel::Playing,
-            pacing: Default::default(),
-            audio: Default::default(),
-            loop_stats: Default::default(),
-        },
-    );
-    assert_eq!(
-        registry.snapshots()[0].recovery_step,
-        None,
-        "a recovered receiver must clear the recovery_step",
-    );
-}
-
-/// A dark wall below the nudge threshold (degraded, but only a couple of
-/// bad polls) must NOT nudge OBS yet — a receiver that simply needs a moment
-/// to connect is left alone.
-#[tokio::test]
-async fn handle_health_snapshot_does_not_nudge_below_threshold() {
-    let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
-    engine.ensure_pipeline(4, "SP-slow");
-    engine.set_state_for_test(4, PlayState::Playing { video_id: 1 });
-    engine.set_on_program_for_test(4);
-
-    let now = Instant::now();
-    // 2 bad polls: degraded_reason IS set, but below the nudge threshold.
-    engine.handle_health_snapshot(4, dark_wall_event(now, 2));
-
-    assert_eq!(
-        registry.snapshots()[0].degraded_reason.as_deref(),
-        Some(DARK_WALL_REASON),
-        "the dashboard degraded_reason must still fire below the nudge threshold",
-    );
+    assert_eq!(snap.recovery_step, None, "no ladder rung");
     assert!(
         obs_rx.try_recv().is_err(),
-        "no nudge should be queued below the consecutive-poll threshold",
+        "nothing was sent to cg OBS's inputs"
     );
 }
 
@@ -479,6 +377,8 @@ async fn engine_overrides_idle_to_waiting_for_scene_when_canonical_state_says_so
     );
 }
 
+/// The ≥ 2 consecutive bad polls gate still names a playlist output's own
+/// faults (#221 B4 step 6: an underrun; never a missing receiver).
 #[tokio::test]
 async fn handle_health_snapshot_fills_degraded_reason_at_2_consecutive_bad_polls() {
     let (mut engine, registry) = fresh_engine().await;
@@ -489,10 +389,10 @@ async fn handle_health_snapshot_fills_degraded_reason_at_2_consecutive_bad_polls
     engine.handle_health_snapshot(
         8,
         PipelineEvent::HealthSnapshot {
-            connections: 0,
+            connections: 1,
             frames_submitted_total: 100,
             frames_submitted_last_5s: 30,
-            observed_fps: 30.0,
+            observed_fps: 10.0,
             nominal_fps: 30.0,
             source_fps: 30.0,
             last_submit_ts: Some(now),
@@ -508,7 +408,7 @@ async fn handle_health_snapshot_fills_degraded_reason_at_2_consecutive_bad_polls
     assert_eq!(snapshots[0].consecutive_bad_polls, 2);
     assert_eq!(
         snapshots[0].degraded_reason.as_deref(),
-        Some("no NDI receiver — wall is dark"),
+        Some("underrunning (10/30 fps)"),
     );
 }
 
@@ -540,67 +440,9 @@ fn degraded_reason_emits_stale_when_fps_ok_and_connections_ok() {
     assert_eq!(r.as_deref(), Some("no frames in 10s"));
 }
 
-/// Regression test for the 2026-04-27 production failure.
-///
-/// v0.25.0 deployed PR #58's Tier-2 RecreateSender as the auto-recovery
-/// for prolonged `connections=0`. In production NDI's mDNS socket bound
-/// to a stale APIPA address (`169.254.144.214`); per-sender recreate
-/// could not fix that runtime-level binding, and `send_create` with the
-/// existing name failed on the same-name conflict. The wall stayed dark
-/// while the log spammed `RecreateSender mid-decode: failed; keeping existing`
-/// every 30 s for ~50 minutes until the process was restarted.
-///
-/// v0.26.0 ripped the entire trigger out (no `RecreateSender` variant,
-/// no `should_fire_recreate` predicate, no `recreate_attempts` snapshot
-/// field) and reverted to Tier-1 visibility only. This test asserts the
-/// remaining behaviour: prolonged `connections=0` while Playing fills
-/// `degraded_reason` for the dashboard/log without any other side effects.
-/// Re-introducing per-sender recreate machinery would have to redefine
-/// the snapshot shape and is structurally caught by `cargo check` — but
-/// this test is the documented contract.
-#[tokio::test]
-async fn handle_health_snapshot_visibility_only_on_prolonged_dark_wall() {
-    let (mut engine, registry) = fresh_engine().await;
-    engine.ensure_pipeline(7, "SP-fast");
-    engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
-    engine.set_on_program_for_test(7);
-
-    let now = Instant::now();
-    // Simulate 100 consecutive bad polls (8+ minutes of dark wall) —
-    // past every threshold the v0.25.0 PR #58 schedule fired at.
-    engine.handle_health_snapshot(
-        7,
-        PipelineEvent::HealthSnapshot {
-            connections: 0,
-            frames_submitted_total: 12_000,
-            frames_submitted_last_5s: 120,
-            observed_fps: 24.0,
-            nominal_fps: 24.0,
-            source_fps: 24.0,
-            last_submit_ts: Some(now),
-            last_heartbeat_ts: now,
-            consecutive_bad_polls: 100,
-            reported_state: PlaybackStateLabel::Playing,
-            pacing: Default::default(),
-            audio: Default::default(),
-            loop_stats: Default::default(),
-        },
-    );
-
-    let snap = &registry.snapshots()[0];
-    assert_eq!(snap.consecutive_bad_polls, 100);
-    assert_eq!(snap.connections, 0);
-    // Tier-1 visibility fires.
-    assert_eq!(
-        snap.degraded_reason.as_deref(),
-        Some("no NDI receiver — wall is dark"),
-    );
-}
-
-/// Tier-1 visibility must clear when the wall recovers (e.g. operator
-/// restarts SongPlayer after NDI APIPA binding made connections=0). A
-/// clean poll after a degraded run drops `degraded_reason` back to None
-/// so the dashboard / log "ndi: pipeline recovered" path fires.
+/// A degraded reason clears on a clean poll, so the "ndi: pipeline
+/// recovered" log fires (an underrun here: #221 B4 step 6, a playlist output
+/// is never a dark wall).
 #[tokio::test]
 async fn handle_health_snapshot_clears_degraded_reason_on_clean_poll() {
     let (mut engine, registry) = fresh_engine().await;
@@ -609,14 +451,14 @@ async fn handle_health_snapshot_clears_degraded_reason_on_clean_poll() {
     engine.set_on_program_for_test(7);
 
     let now = Instant::now();
-    // First: degraded.
+    // First: degraded (an underrun).
     engine.handle_health_snapshot(
         7,
         PipelineEvent::HealthSnapshot {
-            connections: 0,
+            connections: 1,
             frames_submitted_total: 240,
-            frames_submitted_last_5s: 120,
-            observed_fps: 24.0,
+            frames_submitted_last_5s: 50,
+            observed_fps: 10.0,
             nominal_fps: 24.0,
             source_fps: 24.0,
             last_submit_ts: Some(now),
@@ -630,10 +472,10 @@ async fn handle_health_snapshot_clears_degraded_reason_on_clean_poll() {
     );
     assert_eq!(
         registry.snapshots()[0].degraded_reason.as_deref(),
-        Some("no NDI receiver — wall is dark")
+        Some("underrunning (10/24 fps)")
     );
 
-    // Then: clean poll. Connections returned, no consecutive_bad_polls.
+    // Then: clean poll. Full rate, no consecutive_bad_polls.
     engine.handle_health_snapshot(
         7,
         PipelineEvent::HealthSnapshot {

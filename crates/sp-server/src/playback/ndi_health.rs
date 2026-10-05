@@ -8,7 +8,7 @@
 
 use crate::obs::ndi_recovery::{NdiRecoveryTracker, RecoveryStep};
 use crate::playback::clock_health::ClockHealth;
-use crate::playback::ndi_health_expect::{expected_reason, receiver_expected};
+use crate::playback::ndi_health_expect::{PLAYLIST_RECEIVER_EXPECTED, judged_connections};
 use crate::playback::ndi_health_transport::transport_from_reported;
 // `PacingStats` lives in its own file (1000-line cap); re-exported so every
 // `ndi_health::PacingStats` path stays valid.
@@ -585,20 +585,23 @@ impl crate::playback::PlaybackEngine {
         };
 
         let ndi_name = pp.pipeline.ndi_name().to_string();
-        // #221 L4a: a receiver is expected only while cg OBS was told to show
-        // this playlist (`ndi_health_expect`); else 0 receivers is normal: no
-        // dark-wall reason, no self-check, no ladder (an underrun still counts).
-        let cg_shown = self.program.get().and_then(|b| b.legacy_cg().shown_now());
-        let expected = receiver_expected(&canonical_state, cg_shown, playlist_id);
-        let base_degraded_reason = expected_reason(
-            compute_degraded_reason(
-                &canonical_state,
-                connections,
-                observed_fps,
-                nominal_fps,
-                consecutive_bad_polls,
-            ),
-            expected,
+        // #221 B4 step 6: no receiver is expected on a playlist's own output
+        // (`ndi_health_expect`: SP-program takes it off the bus, and cg OBS
+        // never shows a playlist scene again), so its health is judged on a
+        // satisfied count (`judged_connections`): no dark-wall reason and so no
+        // ladder rung against cg OBS's inputs, no #196 post-restart flag, no
+        // "no receiver" lock — an underrun or a stall still counts. The
+        // snapshot, the logs and the persisted count keep the real one.
+        // SP-program's own receiver is the expected one
+        // (`program_degraded_reason`).
+        let expected = PLAYLIST_RECEIVER_EXPECTED;
+        let judged = judged_connections(connections);
+        let base_degraded_reason = compute_degraded_reason(
+            &canonical_state,
+            judged,
+            observed_fps,
+            nominal_fps,
+            consecutive_bad_polls,
         );
         // #196 item 5: if this output is dark (Playing on program, connections=0)
         // but NO OBS NDI input advertises its stream, the receiver-side recovery
@@ -618,7 +621,7 @@ impl crate::playback::PlaybackEngine {
         // restart re-rolls it). This is a NON-dark-wall reason, so `is_dark`
         // below stays false. The whole decision is the pure, mutation-scored
         // `sp_core::health::no_receiver_after_restart`.
-        if connections >= 1 {
+        if judged >= 1 {
             self.ndi_health_registry.mark_reconnected(playlist_id);
             self.ndi_health_registry
                 .clear_warned_no_receiver(playlist_id);
@@ -636,7 +639,7 @@ impl crate::playback::PlaybackEngine {
             elapsed_since_ready,
             reconnected,
             expected,
-            connections,
+            judged,
         );
         let degraded_reason = if degraded_reason.as_deref() != Some(NO_OBS_INPUT_REASON)
             && sp_core::health::no_receiver_after_restart(
@@ -644,7 +647,7 @@ impl crate::playback::PlaybackEngine {
                 reconnected,
                 expected,
                 self.ndi_health_registry.pre_restart_count(playlist_id),
-                connections,
+                judged,
             ) {
             if self
                 .ndi_health_registry
@@ -688,8 +691,8 @@ impl crate::playback::PlaybackEngine {
         // 60 s window (a monotonic timestamp off the engine's `Instant` origin —
         // the window is purely relative, so no wall clock is needed), then
         // derive the three-state lock from clock_ok + pacing.enabled +
-        // connections + the differenced window counts. A `-1` "never polled"
-        // connection count maps to 0 receivers.
+        // the judged connections (at least 1: a playlist output expects no
+        // receiver) + the differenced window counts.
         let clock = match self.clock_health.read() {
             Ok(guard) => guard.clone(),
             Err(_) => ClockHealth::default(),
@@ -708,7 +711,7 @@ impl crate::playback::PlaybackEngine {
             heartbeat_100ns,
             &pacing,
             clock.clock_ok,
-            connections.max(0) as u32,
+            judged as u32,
             source_fps,
             sp_core::genlock::GENLOCK_GRID_FPS as u32,
             transport_from_reported(&reported_state),

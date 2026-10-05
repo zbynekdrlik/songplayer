@@ -635,8 +635,8 @@ pub async fn start(
         }
     });
 
-    // 7. OBS WebSocket client (#219: its snapshots feed the program follow,
-    // `start_program`; #221 L4b: its scene detection drives no playback).
+    // 7. OBS WebSocket client (#221 L4b: its scene detection drives no
+    // playback; it serves the facade's manual-scene forward and getters).
     let obs_side = obs_bridge::start_obs(&pool, &obs_state, &obs_rebuild_tx, &shutdown_tx).await?;
 
     // 8. Reprocess worker — on the SAME metadata chain as the download worker
@@ -720,9 +720,7 @@ pub async fn start(
             state.ndi_health_registry.mark_senders_ready();
         }
     }
-    engine
-        .start_program(program_bus, &shutdown_tx, obs_side.snapshots)
-        .await;
+    engine.start_program(program_bus, &shutdown_tx).await;
 
     // Engine subscribes to the download worker's broadcast so that
     // `processed:<youtube_id>` events can rewake pipelines stuck in

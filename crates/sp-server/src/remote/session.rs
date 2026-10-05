@@ -510,9 +510,6 @@ mod tests_cap;
 #[path = "session_tests_feedback.rs"]
 mod tests_feedback;
 #[cfg(test)]
-#[path = "session_tests_legacy.rs"]
-mod tests_legacy;
-#[cfg(test)]
 #[path = "session_tests_msgpack.rs"]
 mod tests_msgpack;
 #[cfg(test)]

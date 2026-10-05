@@ -27,7 +27,7 @@ pub(super) const LEVEL_B: f32 = 0.2;
 
 /// The 300 ms fade (9 slots at 30 fps) the rigs cut with.
 pub(super) fn fade_300() -> TransitionSpec {
-    TransitionSpec::fade(300, SpecSource::Obs)
+    TransitionSpec::fade(300, SpecSource::Setting)
 }
 
 /// A on program with the 300 ms fade in force.
@@ -461,7 +461,7 @@ fn a_cut_is_the_zero_length_window_the_209_cut_unchanged() {
             active: None,
             counters: TransitionCounters::default(),
         },
-        "until the follow task sets one, every cut is a hard cut"
+        "until the transition-settings task sets one, every cut is a hard cut"
     );
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
@@ -548,7 +548,7 @@ fn hold_for_keeps_the_outgoing_source_until_one_slot_after_its_window() {
             st.transition.n_slots,
             st.transition.source
         ),
-        (TransitionKind::Fade, 9, SpecSource::Obs)
+        (TransitionKind::Fade, 9, SpecSource::Setting)
     );
     assert_eq!(
         bus.hold_for(SRC_A),

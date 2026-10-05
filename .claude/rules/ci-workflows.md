@@ -342,13 +342,12 @@ and the driver's own doc:
   `SceneTransitionEnded`, not cg OBS's 2 s fade; the driver raises its
   transition flag BEFORE the trigger;
 - a switch to the scene already on program is ALWAYS sent (the facade's
-  re-kick re-mirrors cg OBS); the round-3 skip below is gone (review round
-  1 of the L3 lane);
+  re-kick); the round-3 skip below is gone (review round 1 of the L3 lane);
 - since L4b `active_scene` / `active_playlist_ids` are SongPlayer's own
-  program (the resolver + the on-air set); right after a switch the on-air
-  set holds BOTH playlists until cg OBS answers the mirror, a moment AFTER
-  the driver returns: wait for it to settle (`waitEngineActiveScene` treats
-  more than one playlist on air as not settled), never read once.
+  program (the resolver + the on-air set, SP-program's playlist alone since
+  B4 step 6); the playback authority applies a switch a moment AFTER the
+  driver returns: wait for the engine (`waitEngineActiveScene`), never read
+  once. Since B4 step 6 a playlist press never switches cg OBS (no mirror).
 
 The rest of this section is the #170 history of the cg OBS driver.
 

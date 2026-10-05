@@ -84,9 +84,7 @@ use tokio::sync::watch;
 use tracing::{info, warn};
 
 use crate::playback::fleet_shift::{self, FleetShift, timeline_now_100ns};
-use crate::playback::legacy_cg::LegacyCg;
 use crate::playback::ndi_input::NdiInputShared;
-use crate::playback::program_follow::FollowShared;
 use crate::playback::program_max::MaxOut;
 use crate::playback::program_on_air::OnAir;
 use crate::playback::program_output_timing::{
@@ -193,6 +191,10 @@ pub struct ProgramHealth {
     pub submitted: u64,
     /// `SP-program` receiver connections (polled ~1/s by the output thread).
     pub connections: i32,
+    /// #221: `connections` was polled at least once (before that its 0 is no
+    /// reading). Not served: the API's `degraded_reason` reads it.
+    #[serde(skip)]
+    pub receivers_polled: bool,
     /// Boundary of the last submitted pair (100 ns); 0 = none yet.
     pub last_stamp_100ns: i64,
     /// #210: how late the sender served its boundaries, per stage.
@@ -269,6 +271,9 @@ pub struct ProgramCore {
     last_offer: HashMap<i64, i64>,
     queue: SubmitQueue<ProgramJob>,
     health: ProgramHealth,
+    /// #221: the last receiver poll found `SP-program` dark (a source on
+    /// program, no receiver); its WARN is not repeated.
+    receivers_dark: bool,
     /// #210: the sender's per-boundary timing window (`health.timing`).
     timing: BoundaryTiming,
 }
@@ -294,6 +299,7 @@ impl ProgramCore {
             last_offer: HashMap::new(),
             queue: SubmitQueue::new(PROGRAM_QUEUE_BOUND),
             health: ProgramHealth::default(),
+            receivers_dark: false,
             timing: BoundaryTiming::default(),
         }
     }
@@ -315,8 +321,9 @@ impl ProgramCore {
             || self.windows.iter().any(|w| w.from == Some(pid))
     }
 
-    /// #215: the transition every later cut uses (the follow task keeps it in
-    /// step with cg OBS and the settings). Returns whether it changed.
+    /// #215: the transition every later cut uses (the transition-settings
+    /// task keeps it in step with Nastavenia, #221 L5). Returns whether it
+    /// changed.
     pub fn set_transition(&mut self, spec: TransitionSpec) -> bool {
         let changed = self.spec != spec;
         self.spec = spec;
@@ -613,8 +620,22 @@ impl ProgramCore {
         self.health.last_stamp_100ns = stamp_100ns;
     }
 
-    /// Latest `SP-program` receiver connection count.
+    /// Latest `SP-program` receiver connection count (#221: turning dark — a
+    /// source on program with no receiver — and the first receiver found or
+    /// back are logged).
     pub fn set_connections(&mut self, n: i32) {
+        let before = self
+            .health
+            .receivers_polled
+            .then_some(self.health.connections);
+        self.health.receivers_polled = true;
+        let source = self.selected();
+        self.receivers_dark = crate::playback::ndi_health_expect::log_program_receivers(
+            source,
+            before,
+            n,
+            self.receivers_dark,
+        );
         self.health.connections = n;
     }
 
@@ -684,13 +705,8 @@ pub struct ProgramBus {
     /// #213: the Companion remote control's telemetry (`remote` on
     /// `GET /api/v1/program`).
     remote: Arc<RemoteShared>,
-    /// #215: the OBS-follow telemetry (`follow` on `GET /api/v1/program`).
-    follow: Arc<FollowShared>,
     /// #223 S2: the `SP-program-MAX` hand-off + telemetry (`max`).
     max: Arc<MaxOut>,
-    /// #221 L4a: what SongPlayer told cg OBS to show (`legacy_cg.rs`, until
-    /// B4 step 6).
-    legacy_cg: Arc<LegacyCg>,
     /// #213: serializes [`persist_and_cut`] — the API and the remote control
     /// can cut concurrently, and the persisted source must be the one cut last.
     cut_serial: tokio::sync::Mutex<()>,
@@ -719,9 +735,7 @@ impl ProgramBus {
             vban: Arc::new(VbanOut::new()),
             input: Arc::new(NdiInputShared::default()),
             remote: Arc::new(RemoteShared::default()),
-            follow: Arc::new(FollowShared::default()),
             max: Arc::new(MaxOut::new()),
-            legacy_cg: Arc::new(LegacyCg::default()),
             cut_serial: tokio::sync::Mutex::new(()),
             on_air: watch::channel(OnAir::default()).0,
             switch_order: tokio::sync::Mutex::new(()),
@@ -743,19 +757,9 @@ impl ProgramBus {
         &self.remote
     }
 
-    /// #215: the OBS-follow telemetry.
-    pub fn follow(&self) -> &Arc<FollowShared> {
-        &self.follow
-    }
-
     /// #223 S2: the `SP-program-MAX` hand-off and its telemetry.
     pub fn max(&self) -> &Arc<MaxOut> {
         &self.max
-    }
-
-    /// #221 L4a: what SongPlayer told cg OBS to show.
-    pub fn legacy_cg(&self) -> &Arc<LegacyCg> {
-        &self.legacy_cg
     }
 
     /// See [`ProgramCore::set_transition`].
@@ -950,8 +954,6 @@ pub async fn restore_selected_source(pool: &SqlitePool, bus: &ProgramBus) -> Opt
     }
     let scene = crate::playback::scene_catalog::scene_of_source(pool, pid).await;
     bus.select_initial(pid, scene.as_deref());
-    // #221 L4a: what cg OBS was last told to show, when it is a playlist.
-    bus.legacy_cg().restored(pid);
     info!(source = pid, scene = ?scene, "program bus: restored the selected source");
     Some(pid)
 }

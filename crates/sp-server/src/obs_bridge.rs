@@ -5,13 +5,14 @@
 //! #221 L4b deleted the OBS → engine scene bridge (`run_obs_engine_bridge`,
 //! `scene_change_commands`, `EngineCommand::SceneChanged`): cg OBS's scene
 //! detection starts and pauses nothing any more. SongPlayer's own program
-//! drives playback (`playback::program_authority`).
+//! drives playback (`playback::program_authority`). #221 L5 deleted the OBS
+//! follow, the last consumer of the client's published snapshots.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
-use tokio::sync::{RwLock, broadcast, mpsc, watch};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing::info;
 
 use crate::obs;
@@ -24,9 +25,6 @@ pub(crate) struct ObsWiring {
     pub(crate) cmd_tx: Option<mpsc::Sender<obs::ObsCommand>>,
     /// #196: the OBS-input → playlist-id map; `None` when OBS is not configured.
     pub(crate) ndi_sources: Option<obs::NdiSourceMap>,
-    /// #219: the OBS client's published state (the program follow's input);
-    /// a closed channel (disconnected, for good) when OBS is not configured.
-    pub(crate) snapshots: watch::Receiver<obs::ObsSnapshot>,
 }
 
 /// Step 7 of `lib::start`: the OBS client, when OBS is configured.
@@ -39,12 +37,10 @@ pub(crate) async fn start_obs(
 ) -> Result<ObsWiring, sqlx::Error> {
     let (event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
     let Some(config) = obs::load_obs_config(pool).await? else {
-        let (_, snapshots) = watch::channel(obs::ObsSnapshot::default());
         return Ok(ObsWiring {
             event_tx,
             cmd_tx: None,
             ndi_sources: None,
-            snapshots,
         });
     };
     let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
@@ -62,6 +58,5 @@ pub(crate) async fn start_obs(
         event_tx,
         cmd_tx: Some(client.cmd_sender()),
         ndi_sources: Some(ndi_sources),
-        snapshots: client.snapshots(),
     })
 }

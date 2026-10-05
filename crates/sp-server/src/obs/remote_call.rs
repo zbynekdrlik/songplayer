@@ -5,15 +5,15 @@
 //! loop passes it to this connection's ONE forwarder, [`run_calls`], on its
 //! own write half + dispatcher: [`RemoteCall::Request`] forwards one
 //! obs-websocket request verbatim and replies with the op=7 `d` object
-//! (`requestStatus` + `responseData`) — the scene list and program scene
-//! reach Companion 1:1, a manual scene press and a playlist press's mirror
-//! switch cg OBS. #221 deleted the scene → playlists lookup: the switch
-//! decides from SongPlayer's own playlists (`playback::scene_catalog`).
+//! (`requestStatus` + `responseData`) — the scene list reaches Companion 1:1,
+//! and a manual scene press switches cg OBS. #221 deleted the scene →
+//! playlists lookup (the switch decides from SongPlayer's own playlists,
+//! `playback::scene_catalog`), and B4 step 6 the mirror of a playlist press
+//! to cg OBS (and with it the rule that a later mirror supersedes a queued
+//! switch): a playlist press sends cg OBS nothing.
 //!
 //! #221: the newest press reaches cg OBS last (for switches cg OBS answers
-//! within `DEFAULT_RESPONSE_TIMEOUT`). A playlist press's mirror is not
-//! awaited by the facade, so without these rules it could run after a later
-//! press's switch and leave cg OBS on the older scene:
+//! within `DEFAULT_RESPONSE_TIMEOUT`):
 //!
 //! - **In queue order.** The forwarder writes each request frame before it
 //!   takes the next call. A task per call (the #213 shape) could start the
@@ -24,31 +24,21 @@
 //!   waits for a scene switch's ANSWER ([`ORDERED_REQUESTS`], at most
 //!   `DEFAULT_RESPONSE_TIMEOUT`, 2 s) before it writes the next call. Every
 //!   other request's answer is awaited beside the later calls.
-//! - **A superseded switch is never sent.** A switch with a later, still
-//!   wanted MIRROR already queued behind it is answered with nothing and not
-//!   written: while cg OBS is slow, a burst of presses cannot hold the newest
-//!   mirror behind older switches (up to 2 s each) until its waiter gives up
-//!   (`Upstream::wait_mirror`; a given-up call is skipped). Only a mirror
-//!   supersedes (`supersedes`): its `SP-program` cut already happened.
-//!   A manual press's forward supersedes nothing: its cut depends on cg OBS's
-//!   answer, which may be a refusal (600) or come too late.
-//! - **An awaited switch keeps its requester's verdict.** A switch the
-//!   facade awaits (a manual press's forward) is written only while its
+//! - **An awaited switch keeps its requester's verdict.** A switch (a manual
+//!   press's forward, awaited by the facade) is written only while its
 //!   requester still has the whole answer timeout left (`deadline`);
 //!   otherwise it is answered with nothing and never written. So a switch
 //!   cg OBS answers within `DEFAULT_RESPONSE_TIMEOUT` never lands after its
 //!   requester was told "not ready". (One cg OBS answers later is given up
 //!   by the forwarder at 2 s, yet cg OBS may still carry it out: a frame
-//!   once written cannot be recalled.) A mirror goes out however late (its
-//!   cut already happened); a getter changes nothing in cg OBS, so it is
-//!   written while its requester still waits.
+//!   once written cannot be recalled.) A getter changes nothing in cg OBS,
+//!   so it is written while its requester still waits.
 //!
 //! The facade waits for a reply only for a bounded time. A call whose requester
 //! already gave up (`reply.is_closed()`, e.g. queued while cg OBS was away) is
 //! dropped unexecuted: a stale `SetCurrentProgramScene` must never switch cg OBS
 //! seconds after the button press was answered as "not ready".
 
-use std::collections::VecDeque;
 use std::future::Future;
 use std::time::Duration;
 
@@ -63,27 +53,21 @@ use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher};
 
 /// The requests whose effect depends on the order cg OBS runs them in: the
 /// forwarder waits for such a request's answer before it writes the next
-/// call, and a later mirror supersedes an earlier one still queued.
+/// call.
 pub const ORDERED_REQUESTS: [&str; 1] = ["SetCurrentProgramScene"];
 
 /// One call of the remote-control facade to cg OBS.
 #[derive(Debug)]
 pub enum RemoteCall {
     /// Forward `requestType` + `requestData` verbatim. The reply is the op=7
-    /// `d` object, `None` when cg OBS did not answer in time (or a later
-    /// mirror superseded this one, or too little of its requester's time was
-    /// left to write this switch).
+    /// `d` object, `None` when cg OBS did not answer in time (or too little
+    /// of its requester's time was left to write this switch).
     Request {
         request_type: String,
         request_data: Option<Value>,
-        /// #221: a fire-and-forget switch whose `SP-program` cut already
-        /// happened (a playlist press's mirror): it replaces an earlier switch
-        /// still queued. `false` for everything the facade awaits.
-        supersedes: bool,
-        /// #221: when an AWAITED call's requester stops waiting (`Upstream`'s
-        /// timeout after it enqueued the call; a mirror's waiter waits longer,
-        /// `Upstream::wait_mirror`). An awaited switch is written only while
-        /// the forwarder's whole answer timeout is left of it.
+        /// #221: when the requester stops waiting (`Upstream`'s timeout after
+        /// it enqueued the call). A switch is written only while the
+        /// forwarder's whole answer timeout is left of it.
         deadline: Instant,
         reply: oneshot::Sender<Option<Value>>,
     },
@@ -96,27 +80,12 @@ impl RemoteCall {
         ORDERED_REQUESTS.contains(&request_type.as_str())
     }
 
-    /// A mirror: it replaces an earlier switch still queued.
-    fn supersedes(&self) -> bool {
-        let RemoteCall::Request { supersedes, .. } = self;
-        *supersedes
-    }
-
-    /// Its requester still waits for the answer.
-    fn wanted(&self) -> bool {
-        let RemoteCall::Request { reply, .. } = self;
-        !reply.is_closed()
-    }
-
-    /// #221: an awaited switch whose requester has less than `answer_timeout`
-    /// left: cg OBS's answer could come after the requester was told "not
-    /// ready", so it is never written. Never a mirror (its cut already
-    /// happened) and never a getter (it changes nothing in cg OBS).
+    /// #221: a switch whose requester has less than `answer_timeout` left:
+    /// cg OBS's answer could come after the requester was told "not ready",
+    /// so it is never written. Never a getter (it changes nothing in cg OBS).
     fn too_late(&self, answer_timeout: Duration) -> bool {
         let RemoteCall::Request { deadline, .. } = self;
-        self.ordered()
-            && !self.supersedes()
-            && deadline.saturating_duration_since(Instant::now()) < answer_timeout
+        self.ordered() && deadline.saturating_duration_since(Instant::now()) < answer_timeout
     }
 }
 
@@ -148,49 +117,14 @@ pub async fn run_calls(
     mut calls: mpsc::UnboundedReceiver<RemoteCall>,
     answer_timeout: Duration,
 ) {
-    let mut queued = VecDeque::new();
-    loop {
-        let call = match queued.pop_front() {
-            Some(call) => call,
-            None => match calls.recv().await {
-                Some(call) => call,
-                None => return,
-            },
-        };
-        // Everything already queued, so a switch a later mirror supersedes
-        // is never written.
-        while let Ok(next) = calls.try_recv() {
-            queued.push_back(next);
-        }
-        if superseded(&call, &queued) {
-            let RemoteCall::Request {
-                request_type,
-                reply,
-                ..
-            } = call;
-            debug!(
-                request_type,
-                "remote: a later mirror is queued — this switch is not sent"
-            );
-            let _ = reply.send(None);
-            continue;
-        }
+    while let Some(call) = calls.recv().await {
         send_call(&write, &dispatcher, call, answer_timeout).await;
     }
 }
 
-/// `call` is a switch and a later mirror whose requester still waits is
-/// already queued behind it.
-fn superseded(call: &RemoteCall, queued: &VecDeque<RemoteCall>) -> bool {
-    call.ordered()
-        && queued
-            .iter()
-            .any(|later| later.ordered() && later.supersedes() && later.wanted())
-}
-
 /// Write one call's request frame (skipped when its requester gave up, or
-/// when it is an awaited switch with less than `answer_timeout` of its
-/// requester's time left). A scene switch ([`ORDERED_REQUESTS`]) is answered
+/// when it is a switch with less than `answer_timeout` of its requester's
+/// time left). A scene switch ([`ORDERED_REQUESTS`]) is answered
 /// before this returns; any other call's answer is awaited by a task of its
 /// own.
 async fn send_call(
@@ -373,7 +307,6 @@ mod tests {
         let call = RemoteCall::Request {
             request_type: request_type.to_string(),
             request_data: scene.map(|s| json!({ "sceneName": s })),
-            supersedes: false,
             deadline: Instant::now() + HELD * 2,
             reply,
         };
@@ -385,32 +318,17 @@ mod tests {
         call("SetCurrentProgramScene", Some(scene))
     }
 
-    /// A playlist press's mirror (fire-and-forget: it supersedes).
-    fn mirror_of(scene: &str) -> (RemoteCall, oneshot::Receiver<Option<Value>>) {
-        let (reply, rx) = oneshot::channel();
-        let call = RemoteCall::Request {
-            request_type: "SetCurrentProgramScene".to_string(),
-            request_data: Some(json!({ "sceneName": scene })),
-            supersedes: true,
-            deadline: Instant::now() + HELD * 2,
-            reply,
-        };
-        (call, rx)
-    }
-
     /// `call`, whose requester has only `left` of its time left.
     fn with_left(call: RemoteCall, left: Duration) -> RemoteCall {
         let RemoteCall::Request {
             request_type,
             request_data,
-            supersedes,
             reply,
             ..
         } = call;
         RemoteCall::Request {
             request_type,
             request_data,
-            supersedes,
             deadline: Instant::now() + left,
             reply,
         }
@@ -522,84 +440,11 @@ mod tests {
         forwarder.abort();
     }
 
-    /// #221 review round 3: a switch with a later, still wanted mirror queued
-    /// behind it is never sent — it is answered with nothing — so the newest
-    /// press goes out at once however slowly cg OBS answers. A getter between
-    /// them is still sent.
-    #[tokio::test]
-    async fn a_switch_a_later_mirror_supersedes_is_never_sent() {
-        let (addr, mut frames) = cg_obs(false).await;
-        let dispatcher = Dispatcher::new();
-        let write = connect(addr, &dispatcher).await;
-        let (tx, calls) = mpsc::unbounded_channel();
-        let (older, older_rx) = switch_to("sp-fast");
-        let (getter, _getter_rx) = call("GetSceneList", None);
-        let (middle, middle_rx) = mirror_of("sp-slow");
-        let (newest, _newest_rx) = mirror_of("Blank");
-        for queued in [older, getter, middle, newest] {
-            tx.send(queued).unwrap();
-        }
-        let forwarder = tokio::spawn(run_calls(write, dispatcher, calls, HELD));
-        assert_eq!(
-            next_frame(&mut frames).await["d"]["requestType"],
-            "GetSceneList"
-        );
-        let frame = next_frame(&mut frames).await;
-        assert_eq!(
-            frame["d"]["requestData"]["sceneName"], "Blank",
-            "only the newest switch goes out"
-        );
-        assert_eq!(older_rx.await.unwrap(), None, "superseded: no answer");
-        assert_eq!(middle_rx.await.unwrap(), None, "superseded: no answer");
-        drop(tx);
-        forwarder.abort();
-    }
-
-    /// #221 review round 4: a later MANUAL forward supersedes nothing: its
-    /// cut depends on cg OBS's answer, so the mirror queued before it still
-    /// goes out first.
-    #[tokio::test]
-    async fn a_later_manual_forward_supersedes_nothing() {
-        let (addr, mut frames) = cg_obs(false).await;
-        let dispatcher = Dispatcher::new();
-        let write = connect(addr, &dispatcher).await;
-        let (tx, calls) = mpsc::unbounded_channel();
-        let (mirror, _mirror_rx) = mirror_of("sp-fast");
-        let (manual, _manual_rx) = switch_to("Blank");
-        tx.send(mirror).unwrap();
-        tx.send(manual).unwrap();
-        let forwarder = tokio::spawn(run_calls(write, dispatcher, calls, HELD));
-        let frame = next_frame(&mut frames).await;
-        assert_eq!(frame["d"]["requestData"]["sceneName"], "sp-fast");
-        drop(tx);
-        forwarder.abort();
-    }
-
-    /// A later mirror whose requester already gave up supersedes nothing: the
-    /// earlier, still wanted switch goes out.
-    #[tokio::test]
-    async fn an_abandoned_later_switch_supersedes_nothing() {
-        let (addr, mut frames) = cg_obs(false).await;
-        let dispatcher = Dispatcher::new();
-        let write = connect(addr, &dispatcher).await;
-        let (tx, calls) = mpsc::unbounded_channel();
-        let (wanted, _wanted_rx) = switch_to("sp-fast");
-        let (abandoned, abandoned_rx) = mirror_of("sp-slow");
-        drop(abandoned_rx);
-        tx.send(wanted).unwrap();
-        tx.send(abandoned).unwrap();
-        let forwarder = tokio::spawn(run_calls(write, dispatcher, calls, HELD));
-        let frame = next_frame(&mut frames).await;
-        assert_eq!(frame["d"]["requestData"]["sceneName"], "sp-fast");
-        drop(tx);
-        forwarder.abort();
-    }
-
     /// #221 review round 5: an awaited switch with less than the answer
     /// timeout of its requester's time left is never written — it is answered
     /// with nothing, so its requester's "not ready" is never followed by a
-    /// switch in cg OBS. A mirror goes out however late (its cut already
-    /// happened), and so does a getter (it changes nothing in cg OBS).
+    /// switch in cg OBS. A getter goes out however late (it changes nothing
+    /// in cg OBS).
     #[tokio::test]
     async fn an_awaited_switch_with_too_little_time_left_is_never_sent() {
         let (addr, mut frames) = cg_obs(true).await;
@@ -607,20 +452,13 @@ mod tests {
         let write = connect(addr, &dispatcher).await;
         let (tx, calls) = mpsc::unbounded_channel();
         let left = Duration::from_secs(1); // far below HELD
-        let (late_mirror, late_mirror_rx) = mirror_of("sp-fast");
         let (late, late_rx) = switch_to("Blank");
         let (late_getter, late_getter_rx) = call("GetSceneList", None);
         let (in_time, in_time_rx) = call("GetInputList", None);
-        tx.send(with_left(late_mirror, left)).unwrap();
         tx.send(with_left(late, left)).unwrap();
         tx.send(with_left(late_getter, left)).unwrap();
         tx.send(in_time).unwrap();
         let forwarder = tokio::spawn(run_calls(write, dispatcher, calls, HELD));
-        let frame = next_frame(&mut frames).await;
-        assert_eq!(
-            frame["d"]["requestData"]["sceneName"], "sp-fast",
-            "the mirror goes out however little time is left"
-        );
         assert_eq!(
             next_frame(&mut frames).await["d"]["requestType"],
             "GetSceneList",
@@ -630,7 +468,6 @@ mod tests {
             next_frame(&mut frames).await["d"]["requestType"],
             "GetInputList"
         );
-        assert!(late_mirror_rx.await.unwrap().is_some());
         assert_eq!(late_rx.await.unwrap(), None, "not written: no answer");
         assert!(late_getter_rx.await.unwrap().is_some());
         assert!(in_time_rx.await.unwrap().is_some());

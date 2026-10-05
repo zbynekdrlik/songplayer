@@ -1,4 +1,4 @@
-//! #215: the pure transition layer — the spec (OBS / override / fallback), the
+//! #215: the pure transition layer — the spec (setting / fallback), the
 //! window's grid indices and its cue (the gate that waits for the incoming
 //! source's first live pair), the Q8 picture weight + NV12 blend, the NV12 fit
 //! of one layout into another, the equal-power gain curve and the audio mix.
@@ -29,14 +29,6 @@ fn b(k: usize) -> i64 {
     x
 }
 
-fn obs(kind: &str, duration_ms: Option<u32>) -> ObsTransition {
-    ObsTransition {
-        name: "Prechod".to_string(),
-        kind: kind.to_string(),
-        duration_ms,
-    }
-}
-
 #[test]
 fn a_duration_rounds_to_the_nearest_whole_slot_at_least_one_at_most_ten_seconds() {
     assert_eq!(slots_for_ms(300), 9, "the design example: 300 ms = 9 slots");
@@ -60,10 +52,10 @@ fn a_duration_rounds_to_the_nearest_whole_slot_at_least_one_at_most_ten_seconds(
 
 #[test]
 fn a_fade_carries_its_duration_and_slots_and_a_cut_has_none() {
-    let fade = TransitionSpec::fade(300, SpecSource::Obs);
+    let fade = TransitionSpec::fade(300, SpecSource::Fallback);
     assert_eq!(
         (fade.kind, fade.duration_ms, fade.n_slots, fade.source),
-        (TransitionKind::Fade, 300, 9, SpecSource::Obs)
+        (TransitionKind::Fade, 300, 9, SpecSource::Fallback)
     );
     let cut = TransitionSpec::cut(SpecSource::Setting);
     assert_eq!(
@@ -72,54 +64,47 @@ fn a_fade_carries_its_duration_and_slots_and_a_cut_has_none() {
     );
 }
 
+/// #221 L5: the operator's choice, else the default fade of the setting's
+/// length — never cg OBS's transition any more.
 #[test]
-fn the_duration_and_kind_come_from_obs() {
-    let fade = spec_from_obs(&obs("fade_transition", Some(300)), 500);
-    assert_eq!(fade, TransitionSpec::fade(300, SpecSource::Obs));
-    assert_eq!(fade.n_slots, 9, "fade 300 ms → 9 slots");
-    let cut = spec_from_obs(&obs("cut_transition", Some(300)), 500);
-    assert_eq!(cut, TransitionSpec::cut(SpecSource::Obs));
-    assert_eq!(cut.n_slots, 0, "cut → 0");
+fn the_setting_chooses_and_none_is_the_default_fade() {
     assert_eq!(
-        spec_from_obs(&obs("swipe_transition", Some(700)), 500),
-        TransitionSpec::fade(700, SpecSource::Obs),
-        "any other kind is a fade of its duration"
-    );
-    assert_eq!(
-        spec_from_obs(&obs("obs_stinger_transition", None), 500),
-        TransitionSpec::fade(500, SpecSource::Obs),
-        "a fixed-duration transition fades for the setting's length"
-    );
-}
-
-#[test]
-fn the_override_wins_and_an_unknown_obs_transition_falls_back_to_the_settings_fade() {
-    let cut = obs("cut_transition", None);
-    assert_eq!(
-        effective_spec(TransitionMode::Obs, 400, Some(&cut)),
-        TransitionSpec::cut(SpecSource::Obs)
-    );
-    assert_eq!(
-        effective_spec(TransitionMode::Obs, 400, None),
-        TransitionSpec::fade(400, SpecSource::Fallback)
-    );
-    assert_eq!(
-        effective_spec(TransitionMode::Fade, 400, Some(&cut)),
+        effective_spec(Some(TransitionMode::Fade), 400),
         TransitionSpec::fade(400, SpecSource::Setting)
     );
     assert_eq!(
-        effective_spec(TransitionMode::Cut, 400, None),
+        effective_spec(Some(TransitionMode::Cut), 400),
         TransitionSpec::cut(SpecSource::Setting)
     );
+    assert_eq!(
+        effective_spec(None, 400),
+        TransitionSpec::fade(400, SpecSource::Fallback)
+    );
+    assert_eq!(effective_spec(None, 400).n_slots, 12, "400 ms → 12 slots");
 }
 
 #[test]
-fn the_transition_setting_parses_with_obs_as_the_default() {
-    assert_eq!(TransitionMode::parse(Some("fade")), TransitionMode::Fade);
-    assert_eq!(TransitionMode::parse(Some(" cut ")), TransitionMode::Cut);
-    assert_eq!(TransitionMode::parse(Some("obs")), TransitionMode::Obs);
-    assert_eq!(TransitionMode::parse(Some("wipe")), TransitionMode::Obs);
-    assert_eq!(TransitionMode::parse(None), TransitionMode::Obs);
+fn the_transition_setting_parses_fade_and_cut_else_none() {
+    assert_eq!(
+        TransitionMode::parse(Some("fade")),
+        Some(TransitionMode::Fade)
+    );
+    assert_eq!(
+        TransitionMode::parse(Some(" cut ")),
+        Some(TransitionMode::Cut)
+    );
+    assert_eq!(
+        TransitionMode::parse(Some("obs")),
+        None,
+        "the retired follow"
+    );
+    assert_eq!(TransitionMode::parse(Some("wipe")), None);
+    assert_eq!(
+        TransitionMode::parse(Some("Fade")),
+        None,
+        "exact words only"
+    );
+    assert_eq!(TransitionMode::parse(None), None);
 }
 
 #[test]
@@ -128,7 +113,7 @@ fn a_window_spans_exactly_its_slots_and_is_served_boundary_by_boundary() {
         Some(1),
         2,
         b(3),
-        &TransitionSpec::fade(300, SpecSource::Obs),
+        &TransitionSpec::fade(300, SpecSource::Setting),
     );
     assert_eq!((w.from, w.to, w.kind), (Some(1), 2, TransitionKind::Fade));
     assert_eq!((w.start_100ns, w.n_slots, w.end_100ns), (b(3), 9, b(12)));
@@ -674,7 +659,7 @@ fn an_active_window_reports_its_progress_in_percent() {
         Some(1),
         2,
         b(3),
-        &TransitionSpec::fade(300, SpecSource::Obs),
+        &TransitionSpec::fade(300, SpecSource::Setting),
     );
     assert_eq!(
         ActiveWindow::of(&w, Some(b(6))),
@@ -689,7 +674,7 @@ fn an_active_window_reports_its_progress_in_percent() {
     );
     assert_eq!(ActiveWindow::of(&w, None).progress, 0);
     assert_eq!(ActiveWindow::of(&w, Some(b(11))).progress, 100);
-    let cut = Window::new(None, 2, b(3), &TransitionSpec::cut(SpecSource::Obs));
+    let cut = Window::new(None, 2, b(3), &TransitionSpec::cut(SpecSource::Setting));
     assert_eq!(ActiveWindow::of(&cut, Some(b(9))).progress, 0);
 }
 
@@ -699,12 +684,12 @@ fn a_window_covers_its_slots_until_a_later_cut_truncates_it() {
         Some(1),
         2,
         b(3),
-        &TransitionSpec::fade(300, SpecSource::Obs),
+        &TransitionSpec::fade(300, SpecSource::Setting),
     );
     assert_eq!(w.covered(), 9);
     w.truncate(b(6));
     assert_eq!(w.covered(), 3);
-    let cut = Window::new(Some(1), 2, b(3), &TransitionSpec::cut(SpecSource::Obs));
+    let cut = Window::new(Some(1), 2, b(3), &TransitionSpec::cut(SpecSource::Setting));
     assert_eq!(cut.covered(), 0);
 }
 
@@ -746,7 +731,7 @@ fn a_truncated_window_reports_its_progress_against_the_boundaries_it_covers() {
         Some(1),
         2,
         b(3),
-        &TransitionSpec::fade(300, SpecSource::Obs),
+        &TransitionSpec::fade(300, SpecSource::Setting),
     );
     w.truncate(b(6)); // a later cut: the window covers b(3)..=b(5)
     assert_eq!(ActiveWindow::of(&w, Some(b(4))).progress, 66, "2 of 3");
@@ -765,7 +750,7 @@ fn a_fade_waits_for_its_cue_at_most_fifteen_boundaries_and_a_cut_never_waits() {
         Some(1),
         2,
         b(3),
-        &TransitionSpec::fade(300, SpecSource::Obs),
+        &TransitionSpec::fade(300, SpecSource::Setting),
     );
     assert_eq!(
         w.cue,
@@ -785,7 +770,7 @@ fn a_fade_waits_for_its_cue_at_most_fifteen_boundaries_and_a_cut_never_waits() {
     assert_eq!((w.covered(), w.served(Some(b(20)))), (9, 0));
     assert_eq!(ActiveWindow::of(&w, Some(b(20))).progress, 0);
 
-    let cut = Window::cued(Some(1), 2, b(3), &TransitionSpec::cut(SpecSource::Obs));
+    let cut = Window::cued(Some(1), 2, b(3), &TransitionSpec::cut(SpecSource::Setting));
     assert_eq!(
         (cut.cue, cut.cut_100ns, cut.end_100ns),
         (Cue::Open, b(3), b(3)),
@@ -799,7 +784,7 @@ fn a_cue_opens_on_its_boundary_and_lays_the_fade_from_there() {
         Some(1),
         2,
         b(3),
-        &TransitionSpec::fade(300, SpecSource::Obs),
+        &TransitionSpec::fade(300, SpecSource::Setting),
     );
     let mut opened = w;
     assert_eq!(opened.open(b(8)), 5, "it waited b(3)..=b(7)");
@@ -843,7 +828,7 @@ fn a_later_cut_freezes_a_waiting_cue_but_only_truncates_an_open_one() {
         Some(1),
         2,
         b(3),
-        &TransitionSpec::fade(300, SpecSource::Obs),
+        &TransitionSpec::fade(300, SpecSource::Setting),
     );
     let mut frozen = w;
     frozen.truncate(b(6));
@@ -871,7 +856,7 @@ fn a_window_holds_its_outgoing_source_from_its_cut_to_its_end_while_its_cue_does
         Some(1),
         2,
         b(3),
-        &TransitionSpec::fade(300, SpecSource::Obs),
+        &TransitionSpec::fade(300, SpecSource::Setting),
     );
     assert!(!waiting.holds_on_air(b(2)), "a cut before it replaces it");
     assert!(waiting.holds_on_air(b(3)), "a same-slot re-cut");

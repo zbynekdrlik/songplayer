@@ -17,7 +17,6 @@ pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the rela
 pub(crate) mod frame_alloc; // #207: map a decoder FrameAlloc error to a dropped frame (pure classify + rate-limit)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
-pub mod legacy_cg; // #221 L4a: what SongPlayer told cg OBS to show (until B4 step 6)
 pub mod lock_state;
 pub mod loop_stats; // #192 round 3: pipeline-loop stage timing + submit-call histogram (pure)
 mod lyrics_loader;
@@ -25,7 +24,7 @@ mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
 pub mod mmcss; // #210 part 2: a real-time sender thread as an MMCSS "Pro Audio" thread
 pub mod ndi_burn;
 pub mod ndi_health;
-mod ndi_health_expect; // #221 L4a: whether a receiver is expected on an output (pure)
+pub(crate) mod ndi_health_expect; // #221: SP-program expects a receiver, a playlist output none
 mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState (Linux-tested)
 pub mod ndi_input; // #212: the NDI input "OBS manuál" on the genlock grid → the program bus
 mod ndi_recovery_trigger; // #173 operator recover trigger (impl PlaybackEngine, 1000-line cap split)
@@ -50,17 +49,17 @@ mod playlist_mode; // #225 unit 2: a mode the playlist's row holds — applied +
 mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
-mod program_authority; // #221 L4b: SP-program (∪ SongPlayer's cg OBS record) drives playback
+mod program_authority; // #221 L4b: SP-program's playlist drives playback
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
 pub mod program_canvas; // #223: SP-program's ONE picture layout (FHD) + the fit into it
-pub mod program_follow; // #215: SP-program follows cg OBS + the transition settings/spec task
 pub mod program_max; // #223 S2: SP-program-MAX hand-off, setting + telemetry
 pub mod program_max_worker; // #223 S2: the program-max thread (GPU compose + Spout send)
 pub mod program_on_air; // #221: what is on air (the bus's watch value) + the one scene-name resolver
 pub mod program_output; // #209: the SP-program sender + its thread
 pub mod program_output_timing; // #210: the sender's per-boundary timing window (pure, health.timing)
-pub mod program_switch; // #221: the ONE switch path of a scene press (catalog, cut, cg OBS forward/mirror)
+pub mod program_switch; // #221: the ONE switch path of a scene press (catalog, cut, manual forward)
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
+pub mod program_transition_settings; // #221 L5: the transition settings → the bus's spec (task)
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
 mod runtime_pipeline;
 pub mod scene_catalog; // #221: which scene is a playlist's, from its NDI output name (no cg OBS lookup)

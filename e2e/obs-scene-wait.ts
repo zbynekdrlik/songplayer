@@ -3,9 +3,9 @@
  * (#170).
  *
  * #221 L3: the driver now talks to SongPlayer's obs-websocket facade, so the
- * transition is SP-program's — cg OBS's own transition in the default
- * `program_transition = obs` mode, else the Settings fade, or a Cut that
- * ends at once — and its Started/Ended events are SongPlayer's. What follows is the #170
+ * transition is SP-program's — the Settings fade (#221 L5 deleted cg OBS's
+ * transition as a source), or a Cut that ends at once — and its
+ * Started/Ended events are SongPlayer's. What follows is the #170
  * history of the cg OBS driver, whose OBS ran **Studio Mode** with a
  * **`Fade` transition of 2000ms**. Two consequences the naive
  * "SetCurrentProgramScene then sleep" approach raced (round 3):
@@ -14,8 +14,8 @@
  *     leaving `preview == program == that scene`. From that state OBS then
  *     DROPS the next `SetCurrentProgramScene`'s `CurrentProgramSceneChanged`
  *     event (reproduced live). #221 L3: the driver now talks to SongPlayer's
- *     facade, where a same-scene transition is the designed re-kick (it
- *     re-mirrors cg OBS), so the old same-scene skip is gone.
+ *     facade, where a same-scene transition is the designed re-kick, so the
+ *     old same-scene skip is gone.
  *  2. `GetCurrentProgramScene` reports the target *during* the fade, so a
  *     name-only wait returns before the transition has actually ended and
  *     before SongPlayer's event has fired — the wait must require BOTH the

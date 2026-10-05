@@ -568,7 +568,7 @@ fn a_later_cut_can_land_before_a_frozen_windows_end_and_still_fades_out_of_the_s
     const SRC_X: i64 = 55;
     let mut core = ProgramCore::new();
     core.select_initial(SRC_X);
-    assert!(core.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
+    assert!(core.set_transition(TransitionSpec::fade(300, SpecSource::Setting)));
     let (fx, fa, fb, fc) = (frame(10, 2), frame(4, 2), frame(8, 2), frame(6, 2));
     let mut sent = Vec::new();
     for k in 1..=27 {
@@ -636,7 +636,7 @@ fn a_waiting_window_cut_after_the_new_boundary_does_not_decide_the_source_on_air
     const SRC_D: i64 = 44;
     let mut core = ProgramCore::new();
     core.select_initial(SRC_X);
-    assert!(core.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
+    assert!(core.set_transition(TransitionSpec::fade(300, SpecSource::Setting)));
     let (fx, fa, fb, fc, fd) = (
         frame(10, 2),
         frame(4, 2),
@@ -667,7 +667,7 @@ fn a_waiting_window_cut_after_the_new_boundary_does_not_decide_the_source_on_air
                 assert_eq!(core.status().cut_boundary_100ns, Some(b(17)));
             }
             12 => {
-                assert!(core.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
+                assert!(core.set_transition(TransitionSpec::fade(300, SpecSource::Setting)));
                 assert!(core.cut(SRC_C, b(12) + 5 * MS));
                 assert_eq!(core.status().cut_boundary_100ns, Some(b(18)));
                 assert_eq!(
@@ -717,7 +717,7 @@ fn a_waiting_window_that_ends_before_a_later_cut_still_opens_on_its_live_pair() 
     // on b(23)), and the fade to C goes out of B.
     let mut core = ProgramCore::new();
     core.select_initial(SRC_A);
-    assert!(core.set_transition(TransitionSpec::fade(30, SpecSource::Obs)));
+    assert!(core.set_transition(TransitionSpec::fade(30, SpecSource::Setting)));
     assert_eq!(core.status().transition.n_slots, 1, "30 ms = one slot");
     let (fa, fb, fc) = (frame(4, 2), frame(8, 2), frame(6, 2));
     let mut sent = Vec::new();

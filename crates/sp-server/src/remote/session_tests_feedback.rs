@@ -15,10 +15,9 @@ use serde_json::{Value, json};
 use super::tests::{
     Client, connect, enable_input, hello_identify, next_json, press, request, rig, send_json,
 };
-use crate::playback::program_switch::{SwitchCtx, Via, switch_source};
+use crate::playback::program_switch::{Via, switch_source};
 use crate::playback::program_transition::{SpecSource, TransitionSpec};
 use crate::playback::wallclock::utc_now_100ns;
-use crate::remote::Upstream;
 
 /// `EventSubscription::Scenes`.
 const SCENES: u64 = 4;
@@ -128,20 +127,18 @@ async fn a_dashboard_cut_is_fed_back_with_no_transition_events() {
     hello_identify(&mut ws, SCENES | TRANSITIONS).await;
     // The dashboard's cut path (`POST /api/v1/program/cut`, #221 L4a:
     // `switch_source`, via=dashboard), not the facade.
-    let upstream = Upstream::unlinked();
-    let ctx = SwitchCtx {
-        pool: &rig.pool,
-        bus: &rig.bus,
-        upstream: &upstream,
-    };
-    switch_source(&ctx, 3, Via::Dashboard).await.unwrap();
+    switch_source(&rig.pool, &rig.bus, 3, Via::Dashboard)
+        .await
+        .unwrap();
     assert_eq!(next_event(&mut ws).await, program_scene_changed("sp-slow"));
     // No transition event: the next message is a later request's response.
     let (_, before) = request_collecting(&mut ws, "GetStudioModeEnabled", None).await;
     assert!(before.is_empty(), "{before:?}");
     assert_eq!(rig.remote().program_scene.as_deref(), Some("sp-slow"));
     // "OBS manuál" with no scene is named by the resolver.
-    switch_source(&ctx, -1, Via::Dashboard).await.unwrap();
+    switch_source(&rig.pool, &rig.bus, -1, Via::Dashboard)
+        .await
+        .unwrap();
     assert_eq!(
         next_event(&mut ws).await,
         program_scene_changed("OBS manuál")

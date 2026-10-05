@@ -9,7 +9,7 @@ paths:
   - "sp-ui/src/components/player.rs"
   - "e2e/player-off-program.spec.ts"
   - "crates/sp-server/src/playback/scene_catalog*.rs"
-  - "crates/sp-server/src/playback/legacy_cg*.rs"
+  - "crates/sp-server/src/playback/ndi_health_expect*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/playback/program_canvas*.rs"
   - "crates/sp-server/src/playback/band_pool*.rs"
@@ -95,7 +95,8 @@ playlist output cut to it. Design record: #209 comment 5844972899.
 - #215: every cut ALSO opens a transition window (a crossfade of both
   sources over `n` boundaries, `ProgramJob::Mix`); a Cut is the zero-length
   window, i.e. exactly the rules above. The window, the mix, the deferred
-  scene-go-off pause and the OBS follow are in `program-transition.md`.
+  scene-go-off pause and the transition settings are in
+  `program-transition.md`.
 - A stamp-ordered reorder buffer releases strictly one boundary after the
   other: the new source's first frame waits for the old source's last one.
 - A missing boundary is filled with the program's own standby pair: on the
@@ -278,9 +279,10 @@ included, is comment 5872871751).
 - `GET /api/v1/program` → `{ndi_name, source, previous, cut_boundary_100ns,
   health{forwarded, filled, late_dropped, resyncs, coalesced, cuts,
   submitted, connections, last_stamp_100ns, timing{…} (#210, the sender's
-  per-boundary stage timing, `vban-out.md`)}, vban{…} (#210), input{…}
-  (#212), remote{…} (#213), transition{…} + follow{…} (#215),
-  legacy_cg{shown} (#221 L4a), max{…} (#223 S2, `gpu-max.md`)}`;
+  per-boundary stage timing, `vban-out.md`)}, degraded_reason (#221 B4
+  step 6, "SP-program's receiver" below), vban{…} (#210), input{…}
+  (#212), remote{…} (#213), transition{…} (#215), max{…} (#223 S2,
+  `gpu-max.md`)}`;
   `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404
   unknown playlist. Source `-1` is the #212 NDI input "OBS manuál" (404 unless
   it is enabled with a source) — see `ndi-input.md`.
@@ -288,13 +290,13 @@ included, is comment 5872871751).
   shared by the API and the #213 Companion remote control (`remote-control.md`).
   #221: it takes the scene name the cut is published with ("What is on air"
   below). #221 L4a: the API reaches it through the switch path
-  (`program_switch::switch_source`, `via=dashboard`, under `switch_order`,
-  recorded as `remote.last_remote_cut`, a playlist mirrored to cg OBS) —
-  `remote-control.md` "The dashboard cut on the same path".
-- #221 L4a: `ProgramBus::legacy_cg()` is SongPlayer's record of what it told
-  cg OBS to show (`playback/legacy_cg.rs`, `remote-control.md`), served as
-  `legacy_cg {shown}` on both program answers; `restore_selected_source`
-  records the restored playlist there. Until B4 step 6.
+  (`program_switch::switch_source(pool, bus, source, Via::Dashboard)`,
+  under `switch_order`, recorded as `remote.last_remote_cut`; since B4 step
+  6 cg OBS is told nothing) — `remote-control.md` "The dashboard cut on the
+  same path".
+- #221 B4 step 6 deleted `ProgramBus::legacy_cg()` (`playback/legacy_cg.rs`,
+  SongPlayer's record of what it told cg OBS, the `legacy_cg {shown}` answer)
+  with the mirror it recorded (`remote-control.md`, "Deleted at B4 step 6").
 - The stamps `ProgramBus::status()` and the cut answer show
   (`cut_boundary_100ns`, `health.last_stamp_100ns`,
   `transition.active.start_boundary_100ns`) are WIRE stamps
@@ -329,11 +331,8 @@ included, is comment 5872871751).
   press passes the scene pressed (a playlist's by its catalog name;
   "OBS manuál" itself passes none); the restore the playlist's catalog scene
   (`scene_catalog::scene_of_source`, `None` for -1), the dashboard cut the
-  same through `switch_source`'s catalog read (L4a); the OBS follow the cg
-  OBS scene it follows — only when it CUTS (`follow_scene` skips a source
-  already on program), so a followed manual → manual change publishes
-  nothing and the published scene stays the earlier one (matters for L3's
-  feedback while the follow still runs; L5 deletes the follow). Tests that
+  same through `switch_source`'s catalog read (L4a). (The OBS follow, which
+  published the cg OBS scene it followed, is deleted, #221 L5.) Tests that
   do not care pass `None`.
 - `program_on_air::program_scene_name(&OnAir)` is the ONE name resolver:
   the scene, else "OBS manuál" (`PROGRAM_INPUT_LABEL`) for -1, else none.
@@ -354,32 +353,27 @@ and pauses nothing (the OBS→engine bridge, `scene_change_commands` and
 `EngineCommand::SceneChanged` are deleted; a cg OBS disconnect pauses
 nothing).
 
-- **On air** = `program_on_air::on_air_set(&on_air, legacy_cg.shown)`:
-  SP-program's source when it is a playlist (-1 "OBS manuál" is none) ∪ the
-  playlist SongPlayer last told cg OBS to show. The union exists only until
-  B4 step 6 (the legacy consumers still take cg OBS): a dashboard cut to -1
-  while cg OBS shows sp-fast keeps sp-fast playing (the input carries it),
-  and so does a mirror that failed. Right after every playlist press BOTH
-  playlists are on air until cg OBS answers the mirror (tens of ms); the
-  outgoing one is then held by its window (`Hold::Until`) as before.
+- **On air** = `program_on_air::on_air_set(&on_air)`: SP-program's source
+  when it is a playlist, ALONE (-1 "OBS manuál" is none), so the set has at
+  most one member. #221 B4 step 6 (owner directive 5999795799: every
+  consumer takes SongPlayer's program; cg OBS is only the NDI input) deleted
+  the union with `legacy_cg.shown`, the playlist SongPlayer had last told cg
+  OBS to show: a dashboard cut to -1 no longer keeps cg OBS's playlist
+  playing, and a press no longer leaves BOTH playlists on air until cg OBS
+  answered the mirror. A playlist off the program plays for nobody; the
+  outgoing one of a cut is held only by its window (`Hold::Until`).
 - **The task** `program_authority::run_program_authority` (spawned in
-  `start_program`, after the restore and the startup re-mirror) watches
-  `ProgramBus::on_air()` and `legacy_cg().shown()`. Its first value (the
-  restored program) and every change of either become
+  `start_program`, after the restore) watches `ProgramBus::on_air()`. Its
+  first value (the restored program) and every change become
   `PipelineEvent::OnProgram(bool)` on the engine's OWN event channel
   (`on_air_changes(previous, current, cut_to)`: OFF for every playlist that
   left, then ON for every playlist that entered and for `cut_to`, the
   source of a NEW publication (the task tracks `seq`) = the re-kick, so a
   press of the scene already on air plays a playlist paused out of band).
-  **A member nobody cut to is never re-kicked** (review round 1, F1; it
-  amends the design record's "ON for every member", a main-session call):
-  with the union, the outgoing playlist cg OBS still shows, one a dashboard
-  cut to -1 keeps on air, and one a manual press keeps a moment would each
-  be re-kicked, and a playlist the operator PAUSED would start a new song
-  (its resume point lost). A shown-only change (the mirror's OK) re-kicks
-  nothing: OFFs, and an ON only for a playlist that entered (an older
-  press's OK landing after a newer cut). It ends on shutdown or when the
-  engine's channel is gone.
+  So a press's OFF and ON come from ONE change, the OFF first.
+  **A member nobody cut to is never re-kicked** (review round 1, F1): a
+  playlist the operator PAUSED must not start a new song (its resume point
+  lost). It ends on shutdown or when the engine's channel is gone.
 - **The engine drops a stale event** (`PlaybackEngine::on_program`): ON
   only while the playlist is on air, OFF only while it is not — "on air"
   being the set the task last DIFFED (`OnAirPlaylists`, the engine's
@@ -397,20 +391,17 @@ nothing).
   latency: an OFF or a re-check handled after a cut back but before the
   task diffed it pauses the playlist, and the ON then starts a new song.
 - **The wall after an OFF** (`scene_off::wall_after_scene_off`, review
-  rounds 3-4): the incoming ON comes at the press and the outgoing OFF only
-  at the mirror's OK, so another playlist may already be on program with
-  its title and line up. With one on program (in the diffed set) its due
+  rounds 3-4): with a playlist still on program (in the diffed set) its due
   title is re-synced, none due fades the outgoing title, and its line is
-  re-sent at once; details in `program-transition.md`, "The wall after an
-  OFF".
+  re-sent at once; with none (the usual press since B4 step 6: the OFF is
+  handled before the incoming ON) the title fades and the lines are hidden.
+  Details in `program-transition.md`, "The wall after an OFF".
 - **One wall owner** (release 0.69.0 review 🟡 2, design record 5908252887
-  item 2). The on-air set can hold two playlists (a failed or late mirror, a
-  dashboard cut to "OBS manuál"), and there is ONE LED wall, ONE title clip
-  and ONE stage display. So:
-  - `program_on_air::wall_owner(&on_air, shown)` (pure, next to
-    `on_air_set`) = SP-program's source when it is a playlist, else
-    `legacy_cg.shown`, else none — always a member of the set, none only
-    for an empty set;
+  item 2). There is ONE LED wall, ONE title clip and ONE stage display. So:
+  - `program_on_air::wall_owner(&on_air)` (pure, next to `on_air_set`) =
+    SP-program's source when it is a playlist, else none (-1 "OBS manuál",
+    or nothing selected). #221 B4 step 6 deleted its fallback to
+    `legacy_cg.shown`;
   - the authority publishes it with the set (`OnAirPlaylists::publish`,
     before that value's events; the log line carries `wall_owner`);
   - `OnAirPlaylists::may_write_wall(pid)`: while there is an owner, only it
@@ -421,50 +412,47 @@ nothing).
     (`resync_after_play`) and a re-sync's title candidates and lines
     (`recovery.rs::title_candidates` / `on_program_lines`, so also the
     Resolume recovery and `wall_after_scene_off`);
-  - the other member keeps playing for the consumers that still take cg OBS
-    (until B4 step 6) and keeps its per-playlist karaoke WS, but writes none
-    of them; its dispatch forgets what it last sent, so the moment it owns
-    the wall its current line goes out;
-  - the owner can change through the new owner's ON alone (a cut to B
-    while cg OBS still shows A), and the old owner then writes nothing —
-    its hide timer, song-end clear and Presenter pushes included. So the
-    ON of the playlist that owns the wall (`OnAirPlaylists::owner`)
-    re-syncs the WHOLE wall at once (`scene_off::wall_after_owner_on`,
-    review rounds 1-2): the title (a playing owner's scene-on already
-    sends its `Resync`; an owner that plays nothing sends one naming no
-    title), the line (`resync_wall_lines`, the line step
-    `wall_after_scene_off` also runs: the owner's line, or one
-    `HideSubtitles`) and the stage display (`resync_presenter`: the
-    owner's line at its last position, recorded as its Presenter dedup
-    key, or `presenter::push_empty`). Nothing of the old owner stays
-    frozen on the title clip, `#sp-subs` or the stage display;
-  - the owner can also change through an OFF alone (a cut to "OBS
-    manuál" while cg OBS still shows another playlist: the owner goes
-    from 4 to 7 with only OFF(4)). `wall_after_scene_off` re-syncs the
-    title and the line to the playlists still on program (the owner's)
-    and ends with `resync_presenter(owner)` (review round 3); after the
-    OFF of a member that did not own the wall that repeats the owner's
-    current line, or clears the stage display while the owner is in a
-    blank stretch (its dispatch would hold its last line there): the
-    display goes blank like the wall until the owner's next line (review
-    round 4; rare: a failed mirror, then cg OBS put on the program's own
-    scene);
-  - with NO owner (nothing on air, or before the authority's first value:
-    the engine's unit tests) nothing is restricted, as before: a playlist
-    whose OFF is still queued writes until its OFF re-syncs the wall, and a
-    song played off program by hand feeds the Presenter
-    (`lyrics-display.md` "Who may send a line"). While a playlist owns the
-    wall, a hand-played off-program song no longer does.
+  - the set has one member now, so the gate's work is the moment of a cut:
+    the authority publishes the new owner BEFORE it sends the outgoing
+    OFF, and until that OFF is handled the outgoing playlist (still flagged
+    on program) writes none of them; its dispatch forgets what it last
+    sent, so the moment it owns the wall again its current line goes out.
+    A playlist played off program by hand writes none of them either while
+    there is an owner (it keeps its own karaoke WS);
+  - the new owner's ON re-syncs the WHOLE wall at once
+    (`scene_off::wall_after_owner_on`, review rounds 1-2): the title (a
+    playing owner's scene-on already sends its `Resync`; an owner that
+    plays nothing sends one naming no title), the line
+    (`resync_wall_lines`, the line step `wall_after_scene_off` also runs:
+    the owner's line, or one `HideSubtitles`) and the stage display
+    (`resync_presenter`: the owner's line at its last position, recorded as
+    its Presenter dedup key, or `presenter::push_empty`). Nothing of the
+    old owner stays frozen on the title clip, `#sp-subs` or the stage
+    display;
+  - an OFF that leaves another playlist on program ends with
+    `resync_presenter(owner)` (review rounds 3-4): it repeats the owner's
+    line, or clears the stage display while the owner is in a blank
+    stretch;
+  - with NO owner (-1 "OBS manuál" on program, nothing on air, or before
+    the authority's first value: the engine's unit tests) nothing is
+    restricted, as before the owner: a song played off program by hand
+    feeds the Presenter (`lyrics-display.md` "Who may send a line"). So
+    while "OBS manuál" is on program, a song the operator plays off program
+    on the dashboard reaches the stage display (residual, for the main
+    session; it was the same while cg OBS's record named no playlist).
 
-  Pinned by `program_on_air_tests.rs` (the owner table),
-  `program_authority_tests.rs::the_authority_publishes_the_wall_owner_with_the_set`
-  and `tests_wall_owner.rs` (a child of `tests_scene_change.rs`: the line +
+  Pinned by `program_on_air_tests.rs` (the set and owner table),
+  `program_authority_tests.rs` (the task over a real bus, its owner) and
+  `tests_wall_owner.rs` (a child of `tests_scene_change.rs`: the line +
   Presenter, a playlist that comes to own the wall, the song-end clear, both
   title timers, the new owner's ON (`the_new_owner_s_on_re_syncs_the_wall_s_line`,
   `a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down`), an
   owner change by an OFF (`an_owner_change_by_an_off_re_syncs_the_stage_display`)
-  and the recovery). A test that only `replace`s the diffed set
-  (`#[cfg(test)]`) publishes no owner.
+  and the recovery). Those tests publish a two-member set with an owner
+  directly (`OnAirPlaylists::publish`): no production value has two members
+  any more, but the gate is the same, and it is what the cut moment above
+  relies on. A test that only `replace`s the diffed set (`#[cfg(test)]`)
+  publishes no owner.
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
   (its ON came before it existed). An ON for a playlist with NO pipeline
@@ -501,31 +489,58 @@ nothing).
   the message from that record, and makes up an `Idle` for a playlist the
   engine never told; it no longer reads the NDI-health sample.
 - **`/api/v1/status`**: `active_scene` = the one resolver,
-  `active_playlist_ids` = the on-air set, ascending
-  (`api/routes_status.rs::on_air_fields`; `routes.rs` is at the cap). A
-  post-deploy read right after a press must wait for the set to SETTLE (at
-  most one playlist on air): `readEngineActiveScene` /
-  `waitEngineActiveScene` in `post-deploy.spec.ts`, the A/V gate's baseline
-  poll (`length === 1`).
-- **The startup re-mirror** (main-session decision 1, comment 5884501960):
-  `program_switch::remirror_on_air`, in `start_program` once the OBS link
-  is attached, sends the restored playlist's catalog scene to cg OBS ONCE
-  through the ticketed mirror (a ticket under `switch_order`,
-  `Upstream::enqueue(…, supersedes = true)`, `startup_answer` +
-  `confirm_mirror`), so `legacy_cg.shown` (seeded by the restore) is what
-  cg OBS was told. A restored -1, nothing restored, or a playlist whose
-  catalog names no scene sends nothing; no `last_remote_cut` (nothing was
-  pressed). If cg OBS does not connect within the mirror's wait (3 + 4 s)
-  the call is dropped as abandoned and `shown` keeps the seeded value.
-- Tests: `program_on_air_tests.rs` (the set + changes tables),
-  `program_authority_tests.rs` (the task over a real bus: first value,
-  press + confirm, re-kick, -1 keeps cg's playlist, the diffed set,
-  shutdown / gone engine; the engine's stale check against the diffed set
-  on an in-memory DB, the lazy pipeline, and — task + engine together — a
-  paused playlist through cuts that did not press it),
-  `tests_runtime_pipeline.rs`,
-  `tests_play_video.rs` (the off-air ▶), `routes_tests.rs` (status),
-  `program_switch_tests.rs` (the re-mirror).
+  `active_playlist_ids` = the on-air set (at most one playlist;
+  `api/routes_status.rs::on_air_fields`; `routes.rs` is at the cap). A
+  post-deploy read right after a press still waits for the engine's view
+  to reach the scene (the authority's wake lags the facade's answer):
+  `readEngineActiveScene` / `waitEngineActiveScene` in
+  `post-deploy.spec.ts` (two playlists read as "not settled", which no
+  longer happens), the A/V gate's baseline poll (`length === 1`).
+- **No startup re-mirror any more.** L4b's `program_switch::remirror_on_air`
+  (main-session decision 1, comment 5884501960: send the restored
+  playlist's scene to cg OBS once, so `legacy_cg.shown` was what cg OBS was
+  told) is deleted with the mirror (B4 step 6): a restart never moves cg
+  OBS off whatever manual scene it shows.
+- Tests: `program_on_air_tests.rs` (the set + changes tables, SP-program's
+  playlist alone owns the wall), `program_authority_tests.rs` (the task over
+  a real bus: first value, every change, the re-kick, -1 takes the playlist
+  off air, the diffed set, shutdown / gone engine; the engine's stale check
+  against the diffed set on an in-memory DB, the lazy pipeline, and — task
+  + engine together — a paused playlist through cuts that did not press
+  it), `tests_runtime_pipeline.rs`, `tests_play_video.rs` (the off-air ▶),
+  `routes_tests.rs` (status: SP-program's playlist alone, none for -1).
+
+## SP-program's receiver (#221 B4 step 6, `ndi_health_expect.rs`)
+
+Every consumer takes `SP-program` (NDI: the Presenter, strih, the stream)
+or `SP-program-MAX` (Spout: the LED wall); a playlist's own NDI output has
+none any more (`obs-ndi-health.md`). So the receiver the box must have is
+SP-program's:
+
+- `health.connections` = the `SP-program` sender's receiver count, polled
+  about once a second by the program thread (`ProgramBus::set_connections`);
+  0 until the first poll, which `health.receivers_polled` (serde-skipped)
+  tells apart; with no sender at all (no NDI SDK, the sender or its thread
+  could not be created) `spawn_program_thread` sets a polled 0 at once
+  (review round 2), so the reason below is named instead of never;
+- `GET /api/v1/program` → top-level `degraded_reason` =
+  `program_degraded_reason(source, polled count)`: `"no NDI receiver on
+  SP-program"` while a source (a playlist or -1) is on program and the
+  polled count is `< 1`, else `null` — also before the first poll (review
+  round 1: it used to name the initial 0 for about a second after a start);
+- `ProgramCore::set_connections` logs `log_program_receivers`: a WARN when
+  SP-program turns dark (a source on program with no receiver: the first
+  poll, the last receiver gone, or a source come on program with none —
+  `receivers_dark` keeps the state between polls), an INFO when the first
+  poll finds a receiver or the first one comes back — decided by the pure
+  `ndi_health_expect::receiver_log` (tested; the logger is `mutants::skip`);
+  a start with a source on program logs the WARN, then the INFO when the
+  receivers re-attach (the first poll runs on the first served pair);
+- the post-deploy E2E gates it (`e2e/ndi-health-gate.ts::programReceiverVerdict`,
+  `post-deploy.spec.ts` "SP-program has a live NDI receiver",
+  `post-deploy-dabing.spec.ts`); the mock serves `degraded_reason` from
+  `/__mock/program-connections` (reset by `/__mock/program-reset`).
+
 
 ## Tests
 

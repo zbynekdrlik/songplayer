@@ -1,17 +1,17 @@
 import { test, expect, type Page } from "@playwright/test";
 
 // #215 (B5 of EPIC #174): the Nastavenia "Prechody programu (SP-program)"
-// fieldset — whether SP-program follows cg OBS's program scene natively (off by
-// default; it replaces the event-night watcher script) and the transition every
-// program cut uses: cg OBS's own scene transition (default), always a fade of
-// N ms, or always a hard cut. A real user opens the Settings page, clicks the
-// checkbox, picks the transition, types the fade length, clicks "Uložiť
-// nastavenia", reloads, and then sees the result on the dashboard's Program
-// control. Asserts the visible result AND the backend effect: exactly one
-// PATCH /api/v1/settings per save carrying the three keys, the values
-// surviving a reload, and the mock's GET /api/v1/program `follow` +
-// `transition` blocks following the stored settings. Zero console errors is
-// each test's last assertion.
+// fieldset — the transition every program cut uses: a fade of N ms (the
+// default) or a hard cut. #221 L5 deleted the OBS follow, its checkbox and
+// the "podľa OBS" choice: SongPlayer is the master switcher, Nastavenia alone
+// picks the transition. A real user opens the Settings page, picks the
+// transition, types the fade length, clicks "Uložiť nastavenia", reloads, and
+// then sees the result on the dashboard's Program control. Asserts the visible
+// result AND the backend effect: exactly one PATCH /api/v1/settings per save
+// carrying the two keys (never `program_follow_obs`), the values surviving a
+// reload, and the mock's GET /api/v1/program `transition` block following the
+// stored settings, with no `follow` block. Zero console errors is each test's
+// last assertion.
 
 const ALLOWED_CONSOLE = [
   /WebSocket connection/,
@@ -77,7 +77,7 @@ test.afterEach(async ({ request }) => {
   await request.post("/__mock/program-reset");
 });
 
-test("the transition defaults to cg OBS's with no follow; one save sends all three and the dashboard shows it (#215)", async ({
+test("the transition defaults to a 300 ms fade, there is no follow; one save sends both and the dashboard shows it (#215, #221 L5)", async ({
   page,
   request,
 }) => {
@@ -85,36 +85,29 @@ test("the transition defaults to cg OBS's with no follow; one save sends all thr
   const patches = settingsPatches(page);
   await openSettings(page);
 
-  const follow = page.locator('[data-testid="settings-program-follow-obs"]');
   const kind = page.locator('[data-testid="settings-program-transition-kind"]');
   const ms = page.locator('[data-testid="settings-program-transition-ms"]');
-  await expect(follow).not.toBeChecked();
-  await expect(kind).toHaveValue("obs");
+  await expect(page.locator('[data-testid="settings-program-follow-obs"]')).toHaveCount(0);
+  await expect(kind).toHaveValue("fade");
   await expect(kind.locator("option")).toHaveText([
-    "Podľa OBS (odporúčané)",
-    "Vždy prelínanie",
-    "Vždy strih",
+    "Prelínanie (odporúčané)",
+    "Strih",
   ]);
   await expect(ms).toHaveValue("300");
 
-  // Follow cg OBS, always fade, 500 ms — like the operator.
-  await follow.click();
-  await expect(follow).toBeChecked();
-  await kind.selectOption("fade");
+  // A 500 ms fade — like the operator.
   await ms.click();
   await ms.fill("500");
   await save(page);
 
   expect(patches).toHaveLength(1);
-  expect(patches[0]["program_follow_obs"]).toBe("true");
+  expect(patches[0]).not.toHaveProperty("program_follow_obs");
   expect(patches[0]["program_transition"]).toBe("fade");
   expect(patches[0]["program_transition_ms"]).toBe("500");
 
-  // Backend effect: the stored settings drive `follow` and the next cut's spec.
+  // Backend effect: the stored settings drive the next cut's spec.
   const program = await (await request.get("/api/v1/program")).json();
-  expect(program.follow.enabled).toBe(true);
-  expect(program.follow.mode).toBe("fade");
-  expect(program.follow.ms).toBe(500);
+  expect(program).not.toHaveProperty("follow");
   expect(program.transition.kind).toBe("fade");
   expect(program.transition.duration_ms).toBe(500);
   expect(program.transition.n_slots).toBe(15);
@@ -122,9 +115,6 @@ test("the transition defaults to cg OBS's with no follow; one save sends all thr
 
   // A fresh load shows what was saved.
   await openSettings(page);
-  await expect(
-    page.locator('[data-testid="settings-program-follow-obs"]'),
-  ).toBeChecked({ timeout: 10000 });
   await expect(
     page.locator('[data-testid="settings-program-transition-kind"]'),
   ).toHaveValue("fade");
@@ -142,13 +132,12 @@ test("the transition defaults to cg OBS's with no follow; one save sends all thr
   expect(realConsoleErrors()).toEqual([]);
 });
 
-test("turning the follow off and picking a hard cut saves both and keeps the fade length (#215)", async ({
+test("picking a hard cut saves it and keeps the fade length (#215)", async ({
   page,
   request,
 }) => {
   await request.patch("/api/v1/settings", {
     data: {
-      program_follow_obs: "true",
       program_transition: "fade",
       program_transition_ms: "700",
     },
@@ -156,27 +145,45 @@ test("turning the follow off and picking a hard cut saves both and keeps the fad
   const patches = settingsPatches(page);
   await openSettings(page);
 
-  const follow = page.locator('[data-testid="settings-program-follow-obs"]');
   const kind = page.locator('[data-testid="settings-program-transition-kind"]');
-  await expect(follow).toBeChecked();
   await expect(kind).toHaveValue("fade");
   await expect(
     page.locator('[data-testid="settings-program-transition-ms"]'),
   ).toHaveValue("700");
-  await follow.click();
-  await expect(follow).not.toBeChecked();
   await kind.selectOption("cut");
   await save(page);
 
   expect(patches).toHaveLength(1);
-  expect(patches[0]["program_follow_obs"]).toBe("false");
   expect(patches[0]["program_transition"]).toBe("cut");
   expect(patches[0]["program_transition_ms"], "the length is kept").toBe("700");
   const program = await (await request.get("/api/v1/program")).json();
-  expect(program.follow.enabled).toBe(false);
-  expect(program.follow.mode).toBe("cut");
   expect(program.transition.kind).toBe("cut");
   expect(program.transition.n_slots).toBe(0);
+  expect(program.transition.source).toBe("setting");
+
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+// #221 L5: a box that still stores the retired `obs` shows the default fade,
+// and saving the form writes an explicit `fade`.
+test("a stored retired `obs` reads as the default fade and saves as fade (#221 L5)", async ({
+  page,
+  request,
+}) => {
+  await request.patch("/api/v1/settings", {
+    data: { program_transition: "obs", program_follow_obs: "true" },
+  });
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  const kind = page.locator('[data-testid="settings-program-transition-kind"]');
+  await expect(kind).toHaveValue("fade");
+  let program = await (await request.get("/api/v1/program")).json();
+  expect(program.transition.source).toBe("fallback");
+  await save(page);
+  expect(patches).toHaveLength(1);
+  expect(patches[0]["program_transition"]).toBe("fade");
+  expect(patches[0]).not.toHaveProperty("program_follow_obs");
+  program = await (await request.get("/api/v1/program")).json();
   expect(program.transition.source).toBe("setting");
 
   expect(realConsoleErrors()).toEqual([]);
