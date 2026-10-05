@@ -254,7 +254,13 @@ inputs and a playlist's own output has 0 receivers normally.
   on program while none is connected (review round 4; the dark state is
   kept for the next poll, `receivers_dark`, so the WARN is not repeated) —
   and an INFO when the first poll finds a receiver or the first one comes
-  back.
+  back. The decision is the pure, mutation-scored
+  `ndi_health_expect::receiver_log` (pinned by `ndi_health_expect_tests.rs`);
+  the logger is `mutants::skip`, so change the decision there. The first
+  poll runs on the first served pair, before any receiver can re-attach, so
+  every start with a source on program logs the WARN, then the INFO once a
+  receiver attaches: the pair times the receivers' re-attach after a restart
+  (the #196 receiver-lottery concern), kept on purpose (review round 5).
 - **Lane 3 deletes the rest** (main comment 5999882988): the per-playlist
   senders, with the ladder (`obs/ndi_recovery*.rs`), the manual `POST
   /api/v1/ndi/recover/{id}`, `recovery_step`, the #196 self-check and the

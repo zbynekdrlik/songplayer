@@ -412,6 +412,13 @@ Microsoft's page reads as if WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`,
 `writeln!(std::io::stderr(), …)`: libtest captures `eprintln!` / `println!` of a
 passing test, not direct writes to the stderr handle.
 
+**A fix in `#[cfg(windows)]` code still gets its RED** (#221 review round 2):
+a `#[cfg(windows)] #[test]` next to the Linux tests runs on that job, e.g.
+`program_output_tests.rs::no_ndi_sdk_reads_as_a_polled_zero` calls the
+private `spawn_program_thread(None, bus)` and reads the bus. Put
+`#[cfg(windows)]` on the test fn itself and use only imports the Linux tests
+already use, so the Linux target has no unused import.
+
 **An engine test must not count the test pipeline's replies (release 0.68.0
 blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
 `PipelineCommand::Play` with a `PipelineEvent::Error`; on Windows the real
@@ -709,6 +716,10 @@ the test that kills each one BEFORE CI's mutation gate runs.
   effect a test reads (a counter: `WallVbanClock::taken_at_once`). Likewise
   never compute a log-only value inline (`jump_us = jump / 10`): its `/`→`%`
   / `*` mutants are invisible; log through a tested helper (`to_us(jump)`).
+  When WHICH line to log is the logic (a WARN on a state edge), extract the
+  decision into a pure fn returning an enum + the new state and test its
+  table; the `mutants::skip` logger only maps it (#221 review round 4,
+  `ndi_health_expect::receiver_log`).
 - **A timing pin at ONE phase can be phase-lucky** (#224 part 2 review
   round 3: VBAN's ±100 ppm bound held with the step on block 100 and broke
   on block 101 at 50 ppm). When a result depends on where an event lands
