@@ -35,10 +35,7 @@ test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
     // makes ready after a (re)start: wait for it rather than rely on the specs
     // that happen to run before this one for that. A refused or slow status
     // read (the app still starting) is "not yet", never a failure: expect.poll
-    // does not retry a generator that throws. Right after a restart the status
-    // itself can stall behind the startup task's `tools_status` guard (a
-    // pre-existing lib.rs issue, #144 comment 5998431231); the earlier specs
-    // absorb that window today.
+    // does not retry a generator that throws.
     await expect
       .poll(
         async () => {
