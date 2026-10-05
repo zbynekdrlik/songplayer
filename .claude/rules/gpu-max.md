@@ -108,6 +108,15 @@ wiring" below).
   read back from the DEVICE (`IDXGIDevice::GetAdapter`), never copied from
   the list, so a test comparing it with the list proves where the device
   landed.
+- #223 S3b: `VideoDevice` (`win/video_device.rs`) is the device Media
+  Foundation decodes video on (sp-decoder's hardware decode,
+  `video-decode.md`): the SAME `pick_adapter` rule, made by `device.rs` with
+  `DeviceUse::VideoDecode` (`BGRA | D3D11_CREATE_DEVICE_VIDEO_SUPPORT`; the
+  compositor's `DeviceUse::Compose` is BGRA only) and multithread-protected
+  (`ID3D11Multithread`). One per opened file, so its adapter list logs at
+  DEBUG. `new()` never falls back to WARP; `new_warp()` /
+  `new_on_listed_adapter(i)` are doc-hidden, for CI
+  (`tests/video_device.rs`).
 - The render target is `B8G8R8A8_UNORM`, `BIND_RENDER_TARGET |
   BIND_SHADER_RESOURCE`, `D3D11_RESOURCE_MISC_SHARED`, NOT keyed.
 - **Spout2 2.007.017 facts** (SpoutDX source, read for S1a):

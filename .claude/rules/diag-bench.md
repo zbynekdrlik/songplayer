@@ -6,7 +6,7 @@ paths:
   - "crates/sp-decoder/src/subtype.rs"
 ---
 
-# Diagnostic benches: `/api/v1/diag/*` (#223 S0)
+# Diagnostic benches: `/api/v1/diag/*` (#223 S0, S3b)
 
 These are measurement routes. The main session runs them on the box to decide
 a design gate. Playback never calls them, and the dashboard has no button for
@@ -45,12 +45,22 @@ try {
 } catch { $_.ErrorDetails.Message }
 ```
 
-The body has two fields, both required:
+The body has two required fields and one optional:
 
 - `file`: a bare file name. No `/`, `\` or `:`, no `..`, no control
   characters, at most 255 bytes. No trailing `.` or space (Windows strips
   them) and no Windows device name (`CON`, `NUL`, `COM1`, `lpt9.mp4`, …).
 - `seconds`: 1 to 15.
+- `hw` (#223 S3b, optional, default `false`): `true` opens the reader in
+  `Hardware` mode, Media Foundation's decoder on the GPU
+  (`.claude/rules/video-decode.md`). Run the same sample with and without
+  it to measure hardware against software:
+
+  ```bash
+  curl -s -X POST http://10.77.9.201:8920/api/v1/diag/decode-bench \
+    -H 'content-type: application/json' \
+    -d '{"file":"av1_2160p.mp4","seconds":15,"hw":true}'
+  ```
 
 Answers:
 
@@ -60,8 +70,8 @@ Answers:
 - **400:** a bad name, or `seconds` out of range.
 - From axum, before the handler runs (NOT logged): **400** for a body that is
   not JSON, **422** for one that is not the two fields (one missing, a
-  negative or a fractional `seconds`), **415** without
-  `Content-Type: application/json`.
+  negative or a fractional `seconds`) or whose `hw` is not a bool, **415**
+  without `Content-Type: application/json`.
 - **404:** no such sample. The body names the path it looked at.
 - **409:** a run is in progress. One run at a time per process. A 409 that
   never clears means the decoder hangs inside `open` or `next_frame`: the
@@ -76,7 +86,9 @@ failed`).
 ### What it measures
 
 - The file is opened with `sp_decoder::MediaFoundationVideoReader`: the same
-  open, configure and NV12 path as the paced producer.
+  open, configure and NV12 path as the paced producer, in the request's
+  mode (`hw`). The paced producer's mode is the setting `video_hw_decode`,
+  so a bench with `hw` set to that setting measures what playback runs.
 - It runs on its own thread, `decode-bench`. That thread is started by
   `playback::decode_thread::spawn_decode_thread`, exactly like the producer's
   `paced-decode-<playlist id>`, so both get `THREAD_PRIORITY_NORMAL` inside
@@ -110,8 +122,24 @@ failed`).
 - `error`.
 - `thread_priority`.
 - `decode_us {mean, p50, p99, max}`: one sample per `next_frame` call that
-  returned a picture.
+  returned a picture. On the hardware path it includes the GPU → CPU copy
+  of each picture (`Lock2DSize` read lock) and its packing: what playback
+  pays.
 - `budget {frame_period_us, mean_over_half_period}`.
+- #223 S3b, the decode path:
+  - `hw_requested`: the request's `hw`.
+  - `decode_path`: `"hardware"` (the pictures came out of the GPU decoder
+    as DXGI surfaces), `"software"`, or `null` (no picture). It is READ
+    from the pictures (the last one), never assumed: a `hw` run that reads
+    `"software"` either fell back at open (`hw_fallback` says why: no
+    hardware adapter, no device) or Media Foundation's decoder found no
+    decoder on the GPU for the stream (no `hw_fallback`; the reader's WARN
+    `the D3D11 path is set up, but Media Foundation decodes this file in
+    software` names it). A mid-stream fall back also reads `"software"`,
+    with `hw_fallback` `mid-stream: …`: its timings mix both paths.
+  - `adapter`: the GPU's name, only when `decode_path` is `"hardware"`
+    (the box: `NVIDIA GeForce RTX 3070 Ti`).
+  - `hw_fallback`: `open: <why>` / `mid-stream: <why>`, else `null`.
 
 **The gate is revision 2's D2.**
 
@@ -126,18 +154,23 @@ failed`).
   verdict on `steady_mean_us` (for example a 500 ms first call over 450
   pictures adds about 1.1 ms to the mean).
 - A failed gate means a hardware-decode slice comes before any 4K download
-  (revision 3, R3-4).
+  (revision 3, R3-4). S0 failed it (95 % AV1, 93 % VP9 at 4K, comment
+  5981771378), so S3b added `hw`. Its gate: a `hw` run with `decode_path`
+  `"hardware"` on each 4K sample passes D2 (mean ≤ 50 % of 1/f), and the
+  1440p baseline's `hw` mean is not above its software mean. Only then may
+  `video_hw_decode` default to on.
 - Record the result on #223.
 
 **Logs:**
 
-- one INFO `decode-bench: start` (file, bytes, `max_wall_s`, priority),
-  logged BEFORE the open, so a run that wedges inside it still names its
-  file;
+- one INFO `decode-bench: start` (file, bytes, `max_wall_s`, priority,
+  `hw`), logged BEFORE the open, so a run that wedges inside it still names
+  its file;
 - at the end, one INFO `decode-bench: done: <summary>` (size, codec, fps,
-  `open_ms`, the stats, the gate), or a WARN when a decoder error ended the
-  run (a file that does not open: WARN `decode-bench: the file did not
-  open`);
+  `open_ms`, the stats, the gate; a `hw` run adds `hw=requested
+  decode_path=… adapter=… hw_fallback=…`, a software run's line is S0's),
+  or a WARN when a decoder error ended the run (a file that does not open:
+  WARN `decode-bench: the file did not open`);
 - one INFO `decode-bench: no report` for every 400 / 404 / 409 / 501
   refusal, and one WARN `decode-bench: the run failed` for a 500 without a
   report.
@@ -152,11 +185,16 @@ failed`).
     answers, and a panicking body comes back as a 500 with the bench free.
   - Linux tests drive it with a scripted stream and a scripted clock, with no
     wall-time thresholds.
-- `diag/decode_bench_mf.rs`: the `cfg(windows)` thread body (open, facts,
-  log).
+- `diag/decode_bench_mf.rs`: the `cfg(windows)` thread body (open in the
+  mode, facts, the reader's `DecodeFacts` after the run, log).
   - The Windows job's router test covers it on the decoder crate's
     `tests/fixtures/black_3s.mp4`. It expects `codec` H264, `ended`
-    `end_of_stream` and `thread_priority` 0.
+    `end_of_stream` and `thread_priority` 0; a software run reads
+    `decode_path` `"software"`, a `hw` run `"hardware"` or `"software"`
+    (no GPU on `windows-latest`: an open fall back), with `adapter` only on
+    hardware.
+  - `BenchReport::with_decode` (Linux-tested) applies the decode facts;
+    the adapter rule (named only on a hardware path) lives there.
 - `api/diag.rs`: the handler.
   - `AppState.decode_bench` holds the dir and the gate.
   - Every test state builds its own, so the 409 test cannot race another
