@@ -231,6 +231,9 @@ async fn dispatch_lyrics_fires_on_line_change() {
     }
 }
 
+/// The scene gate itself: 99 owns the wall (#221: published on air, its ON
+/// not handled yet) but its scene is not on program, so the owner gate lets
+/// it through and only `scene_active` keeps Resolume silent.
 #[tokio::test]
 async fn dispatch_lyrics_resolume_gated_on_scene_active() {
     let (mut engine, mut resolume_rx, mut ws_rx) = build_engine().await;
@@ -240,6 +243,7 @@ async fn dispatch_lyrics_resolume_gated_on_scene_active() {
         false, // scene_active = false: Resolume must NOT fire
         Some(LyricsState::new(make_track())),
     );
+    engine.put_on_air_for_test(99);
 
     engine.dispatch_lyrics_if_changed(99, 1500);
 

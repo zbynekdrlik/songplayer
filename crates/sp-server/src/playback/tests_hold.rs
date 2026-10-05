@@ -578,6 +578,7 @@ async fn a_scene_back_on_program_ends_the_hold() {
     );
     let (_, due) = re_check(&rig.engine);
 
+    rig.engine.put_on_air_for_test(OUT); // the cut back to OUT
     rig.engine.handle_scene_change(OUT, true).await;
 
     assert!(out(&rig.engine).scene_off_due.is_none(), "no longer held");
