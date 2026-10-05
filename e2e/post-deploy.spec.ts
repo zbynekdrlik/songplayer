@@ -750,7 +750,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const enabled = health.filter((o) => o.pacing?.enabled === true);
 
     if (enabled.length === 0) {
-      // #176: pacing disabled everywhere (prod default) — the ALWAYS-visible
+      // #176: pacing disabled everywhere (set OFF by hand; the default is ON, #147) — the ALWAYS-visible
       // header badge shows the explicit grey `● GENLOCK OFF`, derived from the
       // live health (no pacing-enabled output), never hidden. The per-card badge
       // stays hidden (#164 "only where actionable").

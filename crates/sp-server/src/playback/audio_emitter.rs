@@ -1,6 +1,6 @@
 //! Wall-clock NDI audio emitter for the SDK-clocked path (#192).
 //!
-//! On the SDK-clocked production path (`genlock_pacing=false`,
+//! On the SDK-clocked legacy path (`genlock_pacing=false`,
 //! `pipeline.rs::decode_and_send`) audio was submitted ONLY alongside each
 //! video frame from `decoder.next_synced()`. At a natural song end the pipeline
 //! emitted NOTHING on the NDI audio stream from the last audio chunk of song N

@@ -146,8 +146,8 @@ paths:
   `recording-verdict` proves contiguity for SP-originated frames.
 - Dashboard genlock indicator (#150→#164→#176): the header `GlobalLockBadge`
   (`sp-ui/src/components/ndi_health.rs`) is **ALWAYS visible** — grey
-  `● GENLOCK OFF` when NO output has pacing enabled (the CODE default
-  `genlock_pacing=false`; production runs pacing ON per the #147 ruling), else
+  `● GENLOCK OFF` when NO output has pacing enabled (pacing set OFF by hand,
+  `genlock_pacing=false`; the code default is ON since #147), else
   `● LOCKED`/`● DEGRADED`/`● UNLOCKED` (green/amber/red, `n/m` live-locked
   count + worst reason). #176 revised #164's "hide the
   badge entirely while pacing is off" — the owner must always be able to tell at

@@ -39,7 +39,7 @@ fn unlocked_when_clock_not_ok() {
 
 #[test]
 fn unlocked_when_pacing_disabled() {
-    // clock ok but pacing OFF (today's flag-OFF steady state).
+    // clock ok but pacing OFF (set by hand; the default is ON since #147).
     let (s, r) = derive(&LockInputs {
         pacing_enabled: false,
         ..base()

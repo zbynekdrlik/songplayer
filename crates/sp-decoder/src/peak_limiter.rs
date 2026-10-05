@@ -28,11 +28,20 @@
 //! state is dropped to 0.
 
 /// The limiter's ceiling: 0.98 (−0.18 dBFS), just under full scale, so the
-/// VBAN INT24 encoder's ±1.0 clamp never engages.
+/// VBAN INT24 encoder's ±1.0 clamp never engages on this mix's own output (a
+/// program crossfade sums two sources after it).
 pub(crate) const LIMIT_CEILING: f32 = 0.98;
 
 /// Release time constant in ms (the reduction falls to 1/e in about 50 ms).
 const RELEASE_MS: f64 = 50.0;
+
+/// The per-frame release factor `1 − 1000/(RELEASE_MS · rate)`. A rate under
+/// 20 Hz (never real audio) would give a negative factor: `max(0)` makes it an
+/// instant release instead. Its own fn (not inline in `new`, which
+/// cargo-mutants never mutates) so the mutation gate covers the arithmetic.
+fn release_factor(sample_rate: u32) -> f32 {
+    (1.0 - 1000.0 / (RELEASE_MS * f64::from(sample_rate))).max(0.0) as f32
+}
 
 /// One mix's peak limiter. The reader owns one, so its state carries across
 /// blocks, a seek resets it, and a new song gets a new one.
@@ -49,11 +58,8 @@ pub(crate) struct PeakLimiter {
 impl PeakLimiter {
     /// A limiter at rest for audio at `sample_rate` Hz.
     pub(crate) fn new(sample_rate: u32) -> Self {
-        // A rate under 20 Hz (never real audio) would give a negative factor:
-        // `max(0)` makes it an instant release instead.
-        let release = (1.0 - 1000.0 / (RELEASE_MS * f64::from(sample_rate))).max(0.0);
         Self {
-            release: release as f32,
+            release: release_factor(sample_rate),
             reduction: 0.0,
             limited_frames: 0,
         }
