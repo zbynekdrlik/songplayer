@@ -30,7 +30,8 @@ held across a slow await stalls the writer and every status read behind it.
   frame under its lock and sends it after the lock is released (a slow client
   with a full buffer must not hold `obs_state` / `tools_status`).
   `ToolsStatus::message` is the one `ToolsStatus` → `ServerMsg` mapping, and
-  `send_json` the one place the socket serializes and sends a frame.
+  `send_json` the one sender of the snapshot, replay and error frames (the
+  forwarding loop keeps its own send: it breaks on a failed one).
 - **The status route shape now.** `api/routes.rs::status` copies the OBS
   flag and clones the tools and LAN status at its top, each guard a statement
   temporary, before its database waits (the playlist count, two settings, the
@@ -49,9 +50,18 @@ held across a slow await stalls the writer and every status read behind it.
   generous bound (60 s); on a regression the `try_write` assert fails first,
   so the test never blocks on the route. From INSIDE the step, read with
   `try_read()`: the same task holding the write guard would deadlock on
-  `.read().await`. For a handler, poll it ONCE by hand
-  (`futures::poll!(std::pin::pin!(fut).as_mut())`) while the test holds the
-  memory pool's only connection: it parks on the pool, `Pending`, and the
-  `try_write` checks run at that exact point. See the `tools_ready.rs`,
-  `websocket.rs` and `routes_tests.rs` (`the_status_route_holds_no_status_lock_…`)
-  tests.
+  `.read().await`.
+- **A handler: poll it ONCE by hand while the test holds the memory pool's
+  only connection** (`test_state()`'s pool has one). Two statements, so the
+  future stays alive through the checks:
+  `let mut fut = std::pin::pin!(status(State(state.clone())));` then
+  `assert!(futures::poll!(fut.as_mut()).is_pending());`. It parks on the
+  pool. Change every status there through `try_write()` (a held guard fails
+  it), drop the held connection, finish `fut` under a 60 s bound, and assert
+  the answer carries the values from BEFORE the wait: that also catches a
+  read moved back below the first query. Never
+  `poll!(std::pin::pin!(fut).as_mut())` in one expression: the pinned
+  temporary dies at the `;`, guards and all, and the checks after it pass on
+  the buggy code. See `routes_tests.rs`
+  (`the_status_route_holds_no_status_lock_while_it_waits_on_the_database`),
+  `tools_ready.rs` and `websocket.rs`.
