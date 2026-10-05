@@ -45,9 +45,15 @@ impl VideoDevice {
         Self::protected(device, adapter)
     }
 
-    /// The device on WARP: for tests and CI (`windows-latest` has no GPU).
-    /// WARP accepts `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`; it has no decoder
-    /// profiles, so Media Foundation's decoder decodes in software on it.
+    /// The device on WARP, for the CI tests of a refused video device. On
+    /// `windows-latest` WARP REFUSES this device (BGRA +
+    /// `D3D11_CREATE_DEVICE_VIDEO_SUPPORT` at feature level 11.1 / 11.0):
+    /// this returns [`GpuError::Api`] for `D3D11CreateDevice` with
+    /// DXGI_ERROR_UNSUPPORTED (0x887A0004, CI run 37293259981; Microsoft's
+    /// `D3D11_CREATE_DEVICE_FLAG` page says a WARP device with the flag
+    /// succeeds, but limits video on a pre-WDDM-1.2 driver to feature level
+    /// 9.x). `tests/video_device.rs` asserts that refusal, and sp-decoder's
+    /// `open_hardware_on_warp` falls back at open on it.
     #[doc(hidden)]
     pub fn new_warp() -> Result<Self, GpuError> {
         let ((device, _context), adapter) = device::create_warp(DeviceUse::VideoDecode)?;
