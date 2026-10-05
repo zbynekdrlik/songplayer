@@ -2,7 +2,7 @@
 paths:
   - "crates/sp-server/src/playback/nv12_fit.rs"
   - "crates/sp-server/src/playback/preview.rs"
-  - "crates/sp-server/src/playback/preview_stream.rs"
+  - "crates/sp-server/src/playback/preview_stream*.rs"
   - "crates/sp-server/src/playback/preview_encoder.rs"
   - "crates/sp-server/src/playback/preview_audio_hold*.rs"
   - "crates/sp-server/src/playback/preview_audio_probe*.rs"
@@ -107,6 +107,113 @@ equivalent, simpler, single-seam realization — see #178.)
   are Linux unit-tested. The child/TCP/feeder/monitor lifecycle is
   `mutants::skip` glue (box-verified) but compiles cross-platform.
 
+### #184 — the encoder stop never strands a viewer (lifecycle lock)
+
+The frozen-preview flake (#184 ROOT CAUSE 5989070744, box log 5.10.2026):
+
+1. `monitor_loop` saw no viewer past `VIEWER_TTL` → `ViewersGone`, a
+   lock-free 200 ms poll.
+2. `run_child` tore the child down. Its init stayed cached until the stop-time
+   reset.
+3. `supervise` returned, and only THEN did `EncoderReleaseGuard` release the
+   claim.
+
+A viewer that subscribed in that window got the stale init ("viewer connected,
+sent init segment" 23 ms before "child stopped"). Its `ensure_running` found
+the claim held and started nothing, so no child ever ran for it: a preview
+stuck at HAVE_METADATA, with pings still answered, so nothing reconnected. It
+is a TOCTOU race, not load (the throttled E2E only lands in it because it
+opens a preview right after the previous test closed one).
+
+The rule (do NOT regress):
+
+- **A run that ended with nobody watching is settled under ONE lock.** That
+  covers the TTL stop AND a child that exited while nobody watched.
+  - `StreamShared::lifecycle: Mutex<()>` is taken by
+    `ViewerGuard::subscribe` (around the count) and by
+    `StreamShared::settle_unwatched_run`. It is never taken on the offer
+    path: `has_viewer` stays one relaxed load (iron rule 1).
+  - The settle re-checks the viewers. With none it releases the claim
+    (`UnwatchedEnd::Released`, the supervisor exits). With one it KEEPS the
+    claim (`Restart`, the supervisor runs a new child for it). Which of the
+    two lets the supervisor exit is the pure, tested
+    `UnwatchedEnd::supervisor_exits`. The settle logs its outcome under the
+    lock: `run settled with nobody watching — encoder released`, or `a viewer
+    subscribed as the child stopped — keeping the encoder for a new child`
+    (with `viewers`).
+  - So a subscribe either lands before the settle (seen, encoder kept) or
+    after the release (its `ensure_running` claims a fresh one). Never put a
+    claim release back after the supervisor returns.
+- **The relay is never reset under a viewer that may hold its init.** Once
+  the child and its reader are joined, the stopped child's stream is ended:
+  the settle calls `StreamShared::end_stopped_stream`, `supervise` calls it
+  before a respawn or the libx264 fallback, and `give_up` closes the relay
+  unconditionally instead.
+  - The fallback's call is normally a no-op (that child produced no stdout).
+    It covers the case where the monitor saw the exit before the reader
+    marked output that it then ingests, an init included.
+  - With an init still cached, `end_stopped_stream` CLOSES the relay and logs
+    `stopped child's init closed` with `receivers`: 0 on an ordinary stop,
+    more when a viewer joined as the child stopped. A viewer holding that
+    init (and maybe the last fragments) sees `Closed`, its socket closes, and
+    the shim reconnects onto the next child's init. A viewer still in
+    `wait_for_init` does not read its (closed) receiver while it waits: its
+    socket closes when the wait ends. That is right after it sends the next
+    child's init, or at the latest at the ~10 s init timeout (`give_up`
+    alike).
+  - How fast the shim reconnects: a player that never reconnected does so at
+    its next 1 Hz health tick (`msSinceLastReconnect` is null). Later
+    reconnects wait `reconnectGapMs` (12 → 24 → 48 → 60 s), and an init alone
+    does not reset that backoff, only a media fragment does. So a viewer
+    closed twice in a row can take 12–60 s to recover.
+  - With no init cached, the child produced nothing a viewer could hold, so
+    the waiting viewers keep their stream.
+  - `run_child` no longer resets the relay at stop. The decision needs "the
+    relay still caches the init" to be true when it runs, so a stop-time reset
+    would hide the stale init a viewer holds. The START reset stays: no viewer
+    holds an init then.
+- **The stream is ended BEFORE the claim is released, never after.** The
+  settle (`end_stopped_stream`, then the release) and `give_up` (`close`, then
+  `release_encoder`) both keep that order inside pure code.
+  - It matters where the release is UNLOCKED (`give_up`, and the guard that
+    calls it). In the reverse order a NEW supervisor can claim, start its
+    child and cache its init, and the old supervisor's late close then wipes
+    it. The new viewers wait for an init that never comes until the next TTL
+    stop, and the review model also found two live supervisors.
+  - Inside the settle the lock makes the order moot: a new supervisor's
+    viewer must subscribe first, so it cannot claim before the lock is
+    dropped. The settle keeps the order anyway, as the one rule.
+- **`EncoderReleaseGuard` is the PANIC backstop only.** It calls `give_up` if
+  the supervisor thread unwinds. Every normal `supervise` return has released
+  the claim itself (settle or `give_up`), and the thread then sets
+  `armed = false`. A second, unconditional release could free a claim that a
+  NEW supervisor took in between, and two children would feed one relay.
+  `UnwatchedEnd` and `supervisor_exits` are `#[must_use]`: a supervisor that
+  ignored a `Restart` and returned would keep the claim with no child, and
+  every later viewer would get no encoder.
+- In the child-exited arm, `supervise` reads `has_viewer()` BEFORE any stream
+  close. The close makes the viewers leave, so a later read would race their
+  WS tasks and pick respawn-vs-settle at random. With nobody watching it logs
+  `child exited with nobody watching — settling` before the settle.
+- The `preview.ws` viewer lines carry `label` (`playlist-N`), so a viewer is
+  tied to its encoder's `preview-encoder` lines. That covers connected,
+  disconnected, no init, idle, init send failed, and lagged (DEBUG).
+  `ensure_running` logs (DEBUG) when a viewer joins an encoder that is
+  already claimed, the claim-vs-join branch this race hinged on.
+- Tests (`preview_stream_tests_lifecycle.rs`, pure, no sleeps):
+  - the window sequence: subscribe → stale init → settle = `Restart`, claim
+    held, viewer's stream `Closed` (the settle alone ends it);
+  - the no-init, no-viewer and released-settle-closes branches, `give_up`,
+    and `supervisor_exits`;
+  - two held-lock gates, each with a 200 ms safe-direction window: a
+    subscribe waits for a settle in progress, and a settle waits for a
+    subscribe in progress, then sees its viewer.
+
+  `cargo mutants --in-diff --list` gives five viable mutants, all killed:
+  `==` → `!=` on the settle's single `viewers` read, `end_stopped_stream →
+  ()`, `give_up → ()` and `supervisor_exits → true / false`. The `lifecycle_lock`, settle and
+  subscribe return-value mutants are unviable.
+
 ### Three earlier box findings — do NOT regress them (#178)
 
 1. **Sequential TCP inputs → feed video ON CONNECT.** ffmpeg (as TCP client)
@@ -193,19 +300,24 @@ behind the broadcast backlog is dropped (never blocks the reader).
   is accepted; 16 MiB + 1 poisons.
 - **`FragmentRelay::reset()` and `close()` (items 17, 12).** `tx` is now a
   `Mutex<broadcast::Sender>`. `reset()` clears the cached init and is called at
-  each child's START and STOP (so a late joiner after a reset waits for the NEW
-  init). `close()` clears the init AND drops the sender (replacing it with a
-  fresh channel), so every connected viewer's `recv()` returns `Closed` and its
-  WS handler closes the socket — the supervisor calls it when it gives up
-  restarting a dying child.
+  each child's START (so a late joiner after a reset waits for the NEW init).
+  The stop no longer resets: since #184 every stop goes through
+  `StreamShared::end_stopped_stream`, or `give_up`'s unconditional close (see
+  "#184 — the encoder stop never strands a viewer" above). `close()` clears the init AND drops the sender (replacing
+  it with a fresh channel), so every connected viewer's `recv()` returns
+  `Closed` and its WS handler closes the socket. It runs after every child run
+  that still caches an init (`end_stopped_stream`), and when the supervisor
+  gives up (`StreamShared::give_up`).
 - **Encoder-child restart budget + drop guards (`preview_encoder.rs`, items 11,
   12).** The feeder/reader thread spawns return `io::Result` (no more `.expect`
   panic); a `ChildGuard` kills+waits the ffmpeg child on every early return /
-  panic (std `Child::drop` does NOT), and an `EncoderReleaseGuard` releases the
-  `encoder_running` flag on every supervisor-thread exit incl. panic (so it can
-  never stick claimed and block future viewers). `supervise` respawns a child
-  that died with viewers connected, at most 3 restarts per rolling 60 s (pure
-  `RestartBudget`), else `relay.close()`.
+  panic (std `Child::drop` does NOT), and an `EncoderReleaseGuard` gives the
+  stream up (`StreamShared::give_up`: close, then release the claim) if the
+  supervisor thread PANICS, so the claim can never stick and block future
+  viewers. Since #184 the normal exits release the claim themselves and the
+  guard is disarmed (`armed = false`); see the #184 section above.
+  `supervise` respawns a child that died with viewers connected, at most 3
+  restarts per rolling 60 s (pure `RestartBudget`), else `give_up`.
 - **Preview audio continuity (item 15) — SUPERSEDED by #184 round G2.** The
   add-only `gap_fill_samples` is DELETED: it only ever prepended silence, so a
   late burst accumulated lag. See "#184 round G2" below for the two-way aligner.
@@ -396,14 +508,18 @@ a `buffered.end` that is itself stale, and the lag beacon rides the same backlog
   media timeline — a new encoder child starts at 0 — behind the old playhead);
   never while the clearing `remove()` is still pending (`sb.updating`), when
   `buffered` still shows the OLD range.
-- **Encoder respawn closes the relay** (`preview_encoder.rs::supervise`): a child
-  that had STREAMED and died with viewers present is respawned AND
-  `relay.close()`d — the viewers hold the old child's init and the new init is
-  only cached, never sent to them, so they would freeze on a restarted timeline
-  while their pings are still answered. Closing makes each socket close; the
-  shim's `socketLost` rule reconnects it onto the new init. A child that died
-  with NO init does not close (its viewers are still in `wait_for_init`).
-  Box-only glue (`mutants::skip`), not Linux-testable.
+- **Encoder respawn closes the relay.** A child that had STREAMED and died
+  with viewers present is respawned AND its relay closed. The viewers hold the
+  old child's init, and the new init is only cached, never sent to them, so
+  they would freeze on a restarted timeline while their pings are still
+  answered. Closing makes each socket close, and the shim's `socketLost` rule
+  reconnects it onto the new init. A child that died with NO init does not
+  close (its viewers are still in `wait_for_init`).
+  - Since #184 the rule lives in the pure, Linux-tested
+    `StreamShared::end_stopped_stream`, keyed on "the relay still caches an
+    init". It runs for every way a child stops (or `give_up`'s
+    unconditional close does, see the #184 section above), not only this
+    one.
 - **Server log (`api/preview.rs`)**: every viewer session logs INFO on connect
   (init sent) and on disconnect with `secs` + `pongs` answered — a viewer the
   shim keeps reconnecting on a slow link shows up in the box log as a stream of
