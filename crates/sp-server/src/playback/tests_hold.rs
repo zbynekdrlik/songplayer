@@ -636,6 +636,7 @@ async fn started(engine: &mut PlaybackEngine) {
             OUT,
             PipelineEvent::Started {
                 duration_ms: SONG_MS,
+                position_ms: 0,
             },
         )
         .await;

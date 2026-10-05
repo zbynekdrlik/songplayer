@@ -281,6 +281,7 @@ async fn pipeline_started_event_broadcasts_now_playing() {
             99,
             PipelineEvent::Started {
                 duration_ms: 180_000,
+                position_ms: 0,
             },
         )
         .await;
@@ -594,6 +595,7 @@ async fn position_events_are_throttled() {
             99,
             PipelineEvent::Started {
                 duration_ms: 180_000,
+                position_ms: 0,
             },
         )
         .await;

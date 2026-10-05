@@ -255,6 +255,18 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   `assert!(true)`, and `assert_eq!(CONST, true)` trips
   `bool_assert_comparison` instead. Pin a default through behaviour
   (`assert!(genlock_pacing(None))`), not by asserting the const itself.
+- **Moving Windows-only code into a shared helper can orphan a
+  `#[cfg(windows)] use`** (#217 review round 1). `pipeline.rs`'s
+  `#[cfg(windows)] use tracing::{debug, error, info, warn};` lost its last
+  bare `warn!` when the start-seek block moved into the cross-platform
+  `pipeline_types::real_start_ms`. Linux clippy never compiles that `use`,
+  so only the Windows build warns. After moving a block out of `#[cfg(windows)]`
+  code, grep the file for every name in its cfg-gated `use` lines.
+- **A helper called only from `#[cfg(windows)]` code: a `pub fn` re-exported
+  by `pub use` from the `pub mod` needs no allow** (#217). A `pub(crate)` fn
+  with no Linux caller is `dead_code` there, and a `pub(crate) use` of it is
+  `unused_imports`. `pub use pipeline_types::{…, real_start_ms}` makes it
+  crate API, so neither lint fires, and its Linux unit tests still gate it.
 
 ## Toolchain drift: CI's stable Rust moves under an unchanged tree (Rust 1.99, 3.10.2026)
 
@@ -824,6 +836,16 @@ into `pipeline_paced_spin.rs` would compile on Linux but never be
 mutation-tested. Name it outside every excluded prefix: `pacer_spin.rs`, with
 `pub mod` in `playback/mod.rs`. Then `grep` the exclude list for your new path
 before committing.
+
+**Exclude a type's glue, gate its file's pure helpers: a fn-scoped regex by
+TYPE name** (#210). A mutant's description names the type of a method
+(`replace SymphoniaAudioReader::open …`, `… in <impl AudioStream for
+SymphoniaAudioReader>::next_samples`), never a free fn's. So
+`'sp-decoder/src/audio/symphonia_reader\.rs:[0-9]+:[0-9]+:.*SymphoniaAudioReader'`
+excludes every method of the wrapper and leaves `ts_to_ms` / `seek_start` /
+… gated, with no line numbers to go stale. Check it with `cargo mutants
+--list --file <file>` (with the config) against `--no-config`: the two lists
+must split exactly into glue and helpers.
 
 **A `#[cfg(windows)]` fn in a NON-excluded file is still LISTED, and its mutants
 survive (#223 S0).** cargo-mutants reads the source without evaluating `cfg`,

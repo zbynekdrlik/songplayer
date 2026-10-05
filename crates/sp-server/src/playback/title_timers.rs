@@ -122,8 +122,10 @@ impl PlaybackEngine {
 impl super::PlaylistPipeline {
     /// A Play command starts a song (#217 addendum 3). The last song's title
     /// clock and timers go: a skipped song's pending show timer must not push
-    /// its title before the new `Started`, which fixes the new clock. That
-    /// clock counts from `start_ms`, 0 or a resume's position. The last
+    /// its title before the new `Started`, which fixes the new clock, counted
+    /// from where `Started` says the song really starts (#217). `start_ms` (0
+    /// or a resume's position) is kept as `play_start_ms` (logged next to it)
+    /// and is the pause position until the first report. The last
     /// song's lyrics and position go too (release 0.68.0 blockers, review
     /// round 1): a recovery before the new `Started` re-pushed the old song's
     /// line, and a pause there recorded the old song's position for the new.

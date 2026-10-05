@@ -190,8 +190,9 @@ fn log_song_summary(
 /// that opens the reader must be the one that decodes / seeks / drops it), pulls
 /// frames as fast as the bounded queue allows (blocking on backpressure), and
 /// pushes them for the emit thread to pop at grid boundaries. Reports the media
-/// duration (or an open error) back over `open_tx`. Preview sampling happens HERE
-/// — off the time-critical emit/submit path (`preview.md`). Exits on a Stop from
+/// duration, the source fps and where the song really starts (#217: 0 when the
+/// start seek failed), or an open error, back over `open_tx`. Preview sampling
+/// happens HERE — off the time-critical emit/submit path (`preview.md`). Exits on a Stop from
 /// the consumer, dropping the decoder on this thread.
 #[cfg_attr(test, mutants::skip)]
 fn run_decode_producer(
@@ -199,7 +200,7 @@ fn run_decode_producer(
     audio_path: std::path::PathBuf,
     start_position_ms: Option<u64>,
     shared: Arc<SharedQueue<QueuedFrame>>,
-    open_tx: crossbeam_channel::Sender<Result<(u64, f32), String>>,
+    open_tx: crossbeam_channel::Sender<Result<(u64, f32, u64), String>>,
     taps: crate::playback::preview::preview_stream::DecodeTaps,
     playlist_id: i64,
 ) {
@@ -239,25 +240,15 @@ fn run_decode_producer(
         }
     };
 
-    // PTS origin: the position we start/seek from, so decoded PTS is 0-based.
-    let mut pts_offset_ms = start_position_ms.unwrap_or(0);
-    if let Some(ms) = start_position_ms {
-        if let Err(e) = decoder.seek(ms) {
-            warn!(
-                playlist_id,
-                start_position_ms = ms,
-                ?e,
-                "paced producer: seek to start_position_ms failed — playing from 0"
-            );
-            pts_offset_ms = 0;
-        } else {
-            info!(
-                playlist_id,
-                start_position_ms = ms,
-                "paced producer: seeked to start"
-            );
-        }
-    }
+    // PTS origin: where the song really starts (#217: 0 when the start seek
+    // failed), so decoded PTS is 0-based. It goes to the emit thread with the
+    // open result, and `Started` reports it.
+    let mut pts_offset_ms = super::pipeline::real_start_ms(
+        start_position_ms,
+        |ms| decoder.seek(ms),
+        playlist_id,
+        "paced producer",
+    );
 
     let duration_ms = decoder.duration_ms();
     // #168 r6b: report the DECODER's source fps alongside the duration so the
@@ -271,7 +262,10 @@ fn run_decode_producer(
     } else {
         num as f32 / den as f32
     };
-    if open_tx.send(Ok((duration_ms, source_fps))).is_err() {
+    if open_tx
+        .send(Ok((duration_ms, source_fps, pts_offset_ms)))
+        .is_err()
+    {
         return; // the emit thread is already gone
     }
 
@@ -412,7 +406,7 @@ pub(crate) fn decode_and_send_paced(
     // Spawn the decode producer — it owns the decoder on its own STA thread and
     // fills the bounded look-ahead queue.
     let shared: Arc<SharedQueue<QueuedFrame>> = Arc::new(SharedQueue::new(DECODE_QUEUE_BOUND));
-    let (open_tx, open_rx) = crossbeam_channel::bounded::<Result<(u64, f32), String>>(1);
+    let (open_tx, open_rx) = crossbeam_channel::bounded::<Result<(u64, f32, u64), String>>(1);
     let producer = {
         let shared = shared.clone();
         let taps = taps.clone();
@@ -505,12 +499,16 @@ pub(crate) fn decode_and_send_paced(
                 gap_resyncs, "paced: song change left > 8 boundaries unserviced (grid resync)"
             );
         }
-        let (duration_ms, source_fps) = match opened {
-            Ok(pair) => pair,
+        let (duration_ms, source_fps, position_ms) = match opened {
+            Ok(opened) => opened,
             // The producer is stopped + joined after the block.
             Err(msg) => break 'song DecodeResult::Error(msg),
         };
-        let _ = event_tx.send((playlist_id, PipelineEvent::Started { duration_ms }));
+        let started = PipelineEvent::Started {
+            duration_ms,
+            position_ms,
+        };
+        let _ = event_tx.send((playlist_id, started));
 
         // Genlock path: NO `set_frame_rate` — emission is on the fixed integer
         // grid the submitter already carries (GENLOCK_GRID_FPS/1,
@@ -522,7 +520,7 @@ pub(crate) fn decode_and_send_paced(
         let summary_base = pacer.stats();
         let song_start = Instant::now();
 
-        let mut last_decoded_ms: u64 = start_position_ms.unwrap_or(0);
+        let mut last_decoded_ms: u64 = position_ms;
         let mut last_position_report = Instant::now();
 
         // The emit loop yields the song's outcome (the EOS audio tail already

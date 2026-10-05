@@ -118,4 +118,9 @@ pub struct PacingStats {
     /// #147: boundaries the submit consumer serviced itself (held picture +
     /// silence) between two scopes, cumulative.
     pub consumer_fill_pairs: u64,
+    /// #150: seeks, each counted when its first frame at the new position
+    /// went out, cumulative. The genlock lock window (`lock_state.rs`)
+    /// starts over when it moves, so a seek never reads DEGRADED off the
+    /// slots before it, nor off its own refill.
+    pub seeks: u64,
 }

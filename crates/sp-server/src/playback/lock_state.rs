@@ -44,6 +44,9 @@ struct Sample {
 #[derive(Clone, Debug, Default)]
 pub struct EventWindow {
     ring: VecDeque<Sample>,
+    /// #150: the output's timeline at the last
+    /// [`restart_on`](Self::restart_on): `(decoding, seeks)`.
+    timeline: Option<(bool, u64)>,
 }
 
 impl EventWindow {
@@ -51,6 +54,7 @@ impl EventWindow {
     pub fn new() -> Self {
         Self {
             ring: VecDeque::new(),
+            timeline: None,
         }
     }
 
@@ -62,6 +66,22 @@ impl EventWindow {
     /// Whether no samples are retained yet.
     pub fn is_empty(&self) -> bool {
         self.ring.is_empty()
+    }
+
+    /// #150 (ROZHODNUTÉ 5984539219): start the window over when the
+    /// output's timeline changed since the last heartbeat: `decoding`
+    /// flipped (Paused / Idle ↔ Playing: a standby slot is a repeat by
+    /// design, a decoded one is not, so the two never share a window), or
+    /// a seek re-anchored it (`seeks` moved; the pacer counts a seek at its
+    /// first new frame, so its refill is already in the sample pushed next).
+    /// A resume or a seek then never reads DEGRADED off the slots before
+    /// it. Call it before [`push`](Self::push).
+    pub fn restart_on(&mut self, decoding: bool, seeks: u64) {
+        let timeline = Some((decoding, seeks));
+        if self.timeline != timeline {
+            self.ring.clear();
+        }
+        self.timeline = timeline;
     }
 
     /// Record one cumulative sample at `ts_100ns`, then evict aged-out history.
@@ -153,7 +173,9 @@ impl EventWindow {
 /// file's nominal fps; `grid_fps` the pacer's fixed grid (`GENLOCK_GRID_FPS`).
 /// `transport` is the pipeline's RAW transport (#201, pre-scene-reconciliation):
 /// only `Playing` is decoding (#150) — a Paused / Idle output's standby repeats
-/// are by design and never read as starvation.
+/// are by design and never read as starvation. The window starts over first
+/// when `decoding` flipped or a seek moved `pacing.seeks`
+/// ([`EventWindow::restart_on`], ROZHODNUTÉ 5984539219).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn lock_for_heartbeat(
     window: &mut EventWindow,
@@ -165,6 +187,8 @@ pub(crate) fn lock_for_heartbeat(
     grid_fps: u32,
     transport: TransportState,
 ) -> (LockState, &'static str) {
+    let decoding = transport == TransportState::Playing;
+    window.restart_on(decoding, pacing.seeks);
     window.push(
         now_100ns,
         pacing.seq,
@@ -184,7 +208,7 @@ pub(crate) fn lock_for_heartbeat(
         slots_w,
         source_fps,
         grid_fps,
-        decoding: transport == TransportState::Playing,
+        decoding,
     })
 }
 

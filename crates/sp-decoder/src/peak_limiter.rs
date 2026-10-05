@@ -1,10 +1,14 @@
-//! Sample-peak limiter on the summed stem mix (#184).
+//! Sample-peak limiter on the summed stem mix (#184) and on the program's
+//! audio (#210).
 //!
 //! [`StemMixReader`](crate::audio::StemMixReader) sums N streams (song stems, or the
 //! original plus the dub voice). The dub sum goes over full scale when a voice
 //! peak lands on a loud bed, and the old `clamp(-1, 1)` cut every such sample
 //! flat, which is a hard clip that reaches FOH through VBAN. [`PeakLimiter`]
-//! replaces the clamp:
+//! replaces the clamp. The `SP-program` output runs its own instance over
+//! the program's audio (sp-server `program_output.rs`): a scene
+//! transition's equal-power crossfade sums two sources, each already
+//! under this ceiling, up to √2 above it. Both work the same way:
 //!
 //! - **Ceiling** [`LIMIT_CEILING`] = 0.98 (−0.18 dBFS). No sample leaves above
 //!   it (up to one f32 rounding of the gain).
@@ -28,9 +32,8 @@
 //! state is dropped to 0.
 
 /// The limiter's ceiling: 0.98 (−0.18 dBFS), just under full scale, so the
-/// VBAN INT24 encoder's ±1.0 clamp never engages on this mix's own output (a
-/// program crossfade sums two sources after it).
-pub(crate) const LIMIT_CEILING: f32 = 0.98;
+/// VBAN INT24 encoder's ±1.0 clamp never engages on a limited output.
+pub const LIMIT_CEILING: f32 = 0.98;
 
 /// Release time constant in ms (the reduction falls to 1/e in about 50 ms).
 const RELEASE_MS: f64 = 50.0;
@@ -43,10 +46,12 @@ fn release_factor(sample_rate: u32) -> f32 {
     (1.0 - 1000.0 / (RELEASE_MS * f64::from(sample_rate))).max(0.0) as f32
 }
 
-/// One mix's peak limiter. The reader owns one, so its state carries across
-/// blocks, a seek resets it, and a new song gets a new one.
+/// One audio stream's peak limiter. Its owner keeps it, so its state
+/// carries across blocks: the stem-mix reader (a seek resets it, a new song
+/// gets a new one) and the `SP-program` output (#210: reset where the
+/// program's timeline restarts).
 #[derive(Debug, Clone)]
-pub(crate) struct PeakLimiter {
+pub struct PeakLimiter {
     /// Per-frame factor the gain reduction decays by while no frame needs more.
     release: f32,
     /// Current gain reduction (`1 − gain`); 0.0 = at rest (unity gain).
@@ -57,7 +62,7 @@ pub(crate) struct PeakLimiter {
 
 impl PeakLimiter {
     /// A limiter at rest for audio at `sample_rate` Hz.
-    pub(crate) fn new(sample_rate: u32) -> Self {
+    pub fn new(sample_rate: u32) -> Self {
         Self {
             release: release_factor(sample_rate),
             reduction: 0.0,
@@ -67,18 +72,19 @@ impl PeakLimiter {
 
     /// Drop any release tail: the next frame starts at unity (a seek starts
     /// unrelated audio).
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.reduction = 0.0;
     }
 
-    /// Frames scaled so far (the reader logs it on its 1 Hz level line).
-    pub(crate) fn limited_frames(&self) -> u64 {
+    /// Frames scaled so far (the reader logs it on its 1 Hz level line, the
+    /// program output on its fade line).
+    pub fn limited_frames(&self) -> u64 {
         self.limited_frames
     }
 
     /// Limit an interleaved block in place, frame by frame (`channels`
-    /// samples per frame, one gain each).
-    pub(crate) fn process(&mut self, block: &mut [f32], channels: usize) {
+    /// samples per frame, one gain each; `channels` ≥ 1).
+    pub fn process(&mut self, block: &mut [f32], channels: usize) {
         for frame in block.chunks_exact_mut(channels) {
             let peak = frame.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
             // A silent frame gives `ceiling / 0 = inf`, so it needs nothing.

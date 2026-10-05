@@ -90,7 +90,20 @@ exclude_re = [
   # excluded — MockNdiBackend unit tests + FrameSubmitter cross-platform tests
   # cover them; the Windows-gated decoder in sp-decoder/reader.rs is skipped by
   # cargo-mutants on Linux automatically (cfg(windows) not compiled in).
-  'sp-decoder/src/audio/',                # Symphonia wrapper — external-lib glue, fixture-tested
+  # sp-decoder/src/audio/symphonia_reader.rs: the methods of the Symphonia
+  #   wrapper itself (every mutant naming `SymphoniaAudioReader`: `open`,
+  #   `decode_packet`, the MediaStream / AudioStream impls), a
+  #   line-number-free scope over external-lib glue. Symphonia's FLAC
+  #   decoder always yields i32 buffers, so `decode_packet`'s F32 / S16 arms
+  #   can never run for this FLAC-only reader; its S32 arm and the accessors
+  #   are pinned by the 24-bit ramp fixtures (tests/symphonia_audio.rs) and
+  #   could be gated after a `--no-config` /mutation-sweep of the file
+  #   proves them killed. Its pure helpers (`ts_to_ms`, `ms_to_ts`,
+  #   `seek_start`, `trim_leading_frames`) and the rest of audio/ are NOT
+  #   excluded any more (#210, finding 5986249387): they and `StemMixReader`
+  #   (stem_mix.rs: the ramps, the limiter call, the probe) are pure code
+  #   with exact unit pins (symphonia_reader_tests.rs, stem_mix_tests.rs).
+  'sp-decoder/src/audio/symphonia_reader\.rs:[0-9]+:[0-9]+:.*SymphoniaAudioReader',
   'sp-decoder/src/video/',                # Windows-only MF wrapper — fixture-tested
   # sp-gpu/src/win/: the Direct3D 11 calls of the SP-program-MAX compositor
   #   (#223 S1a) and its Spout sender + registry reader (S1b, over the C++

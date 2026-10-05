@@ -187,7 +187,12 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
 - Audio: equal power, `a = a_from·cos θ + a_to·sin θ`, θ = π/2 · (j + ½)/N over
   the WHOLE window (N = n · 1600 samples, j runs across boundaries), so the gain
   never steps at a boundary edge. A mono side feeds both channels; a missing
-  side is silence. The audio stamp is `to`'s, else `from`'s.
+  side is silence. The audio stamp is `to`'s, else `from`'s. Two correlated
+  sources sum to (cos θ + sin θ)·x, up to √2·x at mid-fade, so the sender
+  runs every program block through ONE peak limiter after the crossfade
+  (#210, `vban-out.md` "Data path"): a mixed block over 0.98 is scaled
+  down, never clamped flat at FOH; once a fade's release tail has decayed
+  (≤ ~24 boundaries) SongPlayer's own playlists pass bit for bit.
 - Picture: Q8 weight `w = round(256 · (k + ½)/n)`, blended
   `(f·(256 − w) + t·w + 128) >> 8` on Y and UV alike into a `frame_pool`
   buffer, always in the `SP-program` canvas (#223: 1920×1080, `program-bus.md`

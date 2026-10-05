@@ -511,3 +511,83 @@ fn a_new_song_after_a_seek_drops_the_held_picture() {
         "b(7): the new song's fill is black again"
     );
 }
+
+#[test]
+fn a_seek_is_counted_when_its_first_new_frame_goes_out() {
+    // #150: `PacingStats::seeks` moves when the seek's first frame at the
+    // new position goes out, never at the re-anchor, so the heartbeat that
+    // reads it already has everything the seek's refill did (the held
+    // picture's fills, a resync) in the counters the lock window restarts
+    // from. A later frame does not count it again; the next seek does.
+    let blk = black_frame();
+    let (mut pacer, clk, mut rec) = playing_after_preroll(&blk);
+    assert_eq!(pacer.stats().seeks, 0, "playing, no seek yet");
+    clk.set(b(5) + 1_000);
+    pacer.anchor_seek(); // the post-seek grid starts at b(6)
+    assert_eq!(pacer.stats().seeks, 0, "the re-anchor alone counts nothing");
+    clk.set(b(6));
+    assert_eq!(pacer.service(|| None, &mut rec), ServiceOutcome::Starved);
+    assert_eq!(pacer.stats().seeks, 0, "the refill counts nothing");
+    let mut first = Some(song_frame((b(7) - b(6)) * 100));
+    clk.set(b(7));
+    assert_eq!(
+        pacer.service(|| first.take(), &mut rec),
+        ServiceOutcome::Emitted
+    );
+    assert_eq!(
+        pacer.stats().seeks,
+        1,
+        "its first new frame counts the seek"
+    );
+    let mut next = Some(song_frame((b(8) - b(6)) * 100));
+    clk.set(b(8));
+    assert_eq!(
+        pacer.service(|| next.take(), &mut rec),
+        ServiceOutcome::Emitted
+    );
+    assert_eq!(
+        pacer.stats().seeks,
+        1,
+        "a later frame does not count it again"
+    );
+    clk.set(b(8) + 1_000);
+    pacer.anchor_seek(); // the second seek's grid starts at b(9)
+    let mut again = Some(song_frame(0));
+    clk.set(b(9));
+    assert_eq!(
+        pacer.service(|| again.take(), &mut rec),
+        ServiceOutcome::Emitted
+    );
+    assert_eq!(pacer.stats().seeks, 2, "the next seek counts once more");
+}
+
+#[test]
+fn a_seek_a_new_song_overtook_is_never_counted() {
+    // #150 review round 1: a seek whose first new frame never came (a Play
+    // overtook it, or it hit the song's end) is not counted at the NEXT
+    // song's first frame: that would restart the lock window at a song
+    // start and forget up to 60 s of real events.
+    let blk = black_frame();
+    let (mut pacer, clk, mut rec) = playing_after_preroll(&blk);
+    clk.set(b(5) + 1_000);
+    pacer.anchor_seek();
+    clk.set(b(6));
+    assert_eq!(pacer.service(|| None, &mut rec), ServiceOutcome::Starved);
+    pacer.preroll(
+        black(&blk),
+        &mut rec,
+        || Some(()),
+        |_, until| clk.set(until),
+    );
+    let mut first = Some(song_frame(0));
+    clk.set(b(7));
+    assert_eq!(
+        pacer.service(|| first.take(), &mut rec),
+        ServiceOutcome::Emitted
+    );
+    assert_eq!(
+        pacer.stats().seeks,
+        0,
+        "the new song's first frame is not the seek's"
+    );
+}

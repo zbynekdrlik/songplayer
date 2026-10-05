@@ -93,10 +93,27 @@ through VBAN (2012 of 3.53M frames at 0 dBFS, finding 5847119155).
   with the 0 dBFS frame count of a VBAN capture (finding 5847119155). Check
   the fix with such a capture: 0 samples at |x| ≥ 0.999.
 
-**Why it is not under `audio/`.** `.cargo/mutants.toml` excludes all of
-`sp-decoder/src/audio/` (the Symphonia wrapper), so pure DSP placed there is
-never mutation-tested. The limiter lives at the crate root, next to
-`level_probe.rs`; put any new pure mix logic there too.
+**Why it is not under `audio/`.** `.cargo/mutants.toml` excluded all of
+`sp-decoder/src/audio/`, so the limiter went to the crate root, next to
+`level_probe.rs`. Since #210 (finding 5986249387) the exclusion names only
+the `SymphoniaAudioReader` methods (`open`, `decode_packet`, the stream
+impls), a line-number-free scope over the Symphonia glue: symphonia's
+FLAC decoder always yields i32 buffers, so `decode_packet`'s F32 / S16
+arms can never run here, and its S32 arm and the accessors are pinned by
+the 24-bit ramp fixtures (a `--no-config` /mutation-sweep of the file
+could prove them killed and narrow the scope further).
+`StemMixReader` (`stem_mix.rs`, 51 listed mutants) and the reader's pure
+helpers (`ts_to_ms`, `ms_to_ts`, `seek_start`, `trim_leading_frames`, 30)
+are gated. Each of those mutants was mapped to a killing test by review,
+not run: the PR gate is diff-scoped, so they first run in an on-demand
+`/mutation-sweep` (#210 added `debug_prints_the_mixer_state` and
+`one_call_emits_exactly_the_overlapping_whole_frames`; `drain` and the
+integration test's `collect_frames` fail on an empty chunk instead of
+spinning to the mutation timeout). Pure mix logic may live in `audio/`
+again, but check `cargo mutants --list` first.
+The limiter is `pub` now (`sp_decoder::PeakLimiter`): the `SP-program`
+output runs its own instance after the transition crossfade
+(`vban-out.md`).
 
 **Tests.** A test that wants the reader's output to EQUAL its gain must use a
 signal under the ceiling (the ramp tests read it off 0.5 and double it). A

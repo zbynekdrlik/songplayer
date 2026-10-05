@@ -15,6 +15,8 @@ paths:
   - "crates/sp-server/src/playback/frame_buf.rs"
   - "crates/sp-decoder/src/frame_pool.rs"
   - "crates/sp-server/src/process_residency*.rs"
+  - "crates/sp-server/src/playback/lock_state*.rs"
+  - "crates/sp-server/src/playback/pacing_stats.rs"
   - "crates/sp-ndi/src/**"
 ---
 # Genlock (NDI outputs locked to the fleet clock) — #146–#151
@@ -475,6 +477,40 @@ UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections=
   fire on standby, which made every paused output flap DEGRADED and failed the
   release E2E `genlock badges agree` (run 36063649894). Never "fix" that by
   suppressing standby frames: receivers need the continuous grid.
+- **The window starts over on a resume or a seek (#150, ROZHODNUTÉ
+  5984539219).** `EventWindow::push` clears the ring only on a counter
+  DECREASE, and the pacer keeps its counters through pause, play and seek.
+  So `lock_for_heartbeat` first calls `EventWindow::restart_on(decoding,
+  pacing.seeks)`, which clears the ring when either changed since the last
+  heartbeat:
+  - `decoding` flipped: after Paused→Playing the window held the standby
+    minute (a repeat on every slot), and rule 7 read DEGRADED for up to
+    ~52 s (24 fps, a pause ≥ 7.5 s). Now Play reads LOCKED from its first
+    heartbeat;
+  - `PacingStats::seeks` moved: the pacer's seek count, the one seek signal
+    the heartbeat can see. `Pacer::anchor_seek` arms it and the seek's
+    FIRST FRESH FRAME counts it (`count_settled_seek`, one bool check in
+    `service`'s fresh-emit arm), never the re-anchor itself: whatever the
+    refill did before that frame (a resync while the queue was empty, the
+    held picture's fills) is already in the sample the window restarts
+    from, so a heartbeat that lands inside the refill cannot split the
+    seek's own events across the clear. A resync after that frame is a
+    real one again. Every anchor (`anchor_at`: a new song's pre-roll, a
+    Play) drops a seek still waiting, and `anchor_seek` arms it after its
+    own `anchor()`: a seek a new song overtook is never counted at that
+    song's first frame (review round 1), and a scrub of several seeks
+    before a new frame counts once.
+  - Rejected (main session): counting repeats only for decoding slots
+    inside the pacer (the paced hot path, the `PacingStats` shape).
+  - Box check: after a Pause→Play and after a dashboard seek of an output
+    on program, `/api/v1/ndi/health` `lock_state` stays `LOCKED` and
+    `pacing.seeks` grows by one per settled seek. The per-minute
+    `ndi: genlock` line carries it too (`seeks=`, review round 2), so a
+    DEGRADED → LOCKED flip at a seek reads from the log alone.
+  - Tests: `lock_state_tests.rs` (`a_resume_after_a_standby_minute_…`,
+    `a_seek_reads_locked_…`), `pacer_tests_preroll.rs`
+    (`a_seek_is_counted_when_its_first_new_frame_goes_out`,
+    `a_seek_a_new_song_overtook_is_never_counted`).
 
 **Reading the badge during a soak:** LOCKED with late ≤ 100/min on 24-fps content
 = the grid is HOLDING (the round-4/5 clean span). DEGRADED "late > 25 % of slots"

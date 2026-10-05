@@ -15,7 +15,7 @@ mod types;
 pub mod audio;
 pub mod frame_pool;
 pub mod level_probe;
-mod peak_limiter; // #184: the stem mix's peak limiter (pure, mutation-tested)
+mod peak_limiter; // #184: the stem mix's peak limiter (pure, mutation-tested), #210: the program's too
 pub mod split_sync;
 pub mod stream;
 pub mod subtype; // #223 S0: an MF video subtype GUID as codec text (AV01, VP90, H264)
@@ -30,6 +30,7 @@ pub use audio::{
 pub use error::DecoderError;
 pub use frame_pool::PooledBuf;
 pub use level_probe::{LevelProbe, LevelReading, PROBE_INTERVAL};
+pub use peak_limiter::{LIMIT_CEILING, PeakLimiter};
 pub use split_sync::SplitSyncedDecoder;
 pub use stream::{AudioStream, MediaStream, VideoStream};
 pub use types::{DecodedAudioFrame, DecodedVideoFrame, PixelFormat, VideoStreamInfo};

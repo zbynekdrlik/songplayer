@@ -6,6 +6,8 @@
 
 use std::path::PathBuf;
 
+use tracing::{info, warn};
+
 /// Commands sent from the async engine to the pipeline thread.
 #[derive(Debug)]
 pub enum PipelineCommand {
@@ -39,8 +41,12 @@ pub enum PipelineCommand {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum PipelineEvent {
-    /// Video playback started; duration is known.
-    Started { duration_ms: u64 },
+    /// Video playback started; duration is known. `position_ms` is where
+    /// the song really starts (#217): the Play's `start_position_ms` when
+    /// the decoder's seek there worked, 0 when it failed (the song plays
+    /// from its start) or none was asked. The song's title clock counts
+    /// from it.
+    Started { duration_ms: u64, position_ms: u64 },
     /// Periodic position update.
     Position { position_ms: u64, duration_ms: u64 },
     /// Video reached its natural end.
@@ -98,3 +104,42 @@ pub enum PipelineEvent {
     /// it (`false`). The engine drops it when it is stale.
     OnProgram(bool),
 }
+
+/// #217: where a Play really starts, the position its `Started` reports:
+/// `start_position_ms` when the decoder's `seek` there worked; 0 when it
+/// failed (the song then plays from its start) or no position was asked (no
+/// seek is made). `who` names the decode path in its log line. Both decode
+/// paths call it (`pipeline::decode_and_send`, the paced producer).
+pub fn real_start_ms<E: std::fmt::Debug>(
+    start_position_ms: Option<u64>,
+    seek: impl FnOnce(u64) -> Result<(), E>,
+    playlist_id: i64,
+    who: &str,
+) -> u64 {
+    let Some(ms) = start_position_ms else {
+        return 0;
+    };
+    match seek(ms) {
+        Ok(()) => {
+            info!(
+                playlist_id,
+                start_position_ms = ms,
+                "{who}: seeked to the start position"
+            );
+            ms
+        }
+        Err(e) => {
+            warn!(
+                playlist_id,
+                start_position_ms = ms,
+                ?e,
+                "{who}: seek to start_position_ms failed — playing from 0"
+            );
+            0
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "pipeline_types_tests.rs"]
+mod tests;

@@ -206,6 +206,7 @@ async fn started_event_unconditionally_resets_lyrics_state() {
             7,
             PipelineEvent::Started {
                 duration_ms: 60_000,
+                position_ms: 0,
             },
         )
         .await;
@@ -534,6 +535,7 @@ async fn started_event_with_malformed_lyrics_warns_and_clears_state() {
             7,
             PipelineEvent::Started {
                 duration_ms: 60_000,
+                position_ms: 0,
             },
         )
         .await;

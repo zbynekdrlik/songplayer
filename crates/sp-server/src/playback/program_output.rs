@@ -24,7 +24,17 @@
 //! never waits for the video side of its own boundary (a slow NDI send, a
 //! mixed picture; a video side longer than a slot still delays the NEXT
 //! boundary's take, which `health.timing` shows as `ready_late_us`), and
-//! `start_program` also starts the VBAN thread + its settings task.
+//! `start_program` also starts the VBAN thread + its settings task. Every
+//! block first goes through the program's ONE peak limiter (#210, after the
+//! crossfade, finding 5986249387): the same `sp_decoder::PeakLimiter` the
+//! stem mix uses, its state carried from one boundary to the next, reset
+//! where the program's timeline restarts. A fade sums two sources that are
+//! each at most 0.98 up to 0.98·√2 at mid-fade, which VBAN's INT24 encoder
+//! would clamp flat at FOH. SongPlayer's own playlists are at or under the
+//! ceiling, so once a fade's release tail has decayed (≤ ~24 boundaries)
+//! the limiter is at rest and their blocks pass bit for bit; a hotter block
+//! (the NDI input "OBS manuál" forwards cg OBS's audio as it comes) is
+//! limited too, where VBAN used to clamp it.
 //!
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
 //! crossfaded here, on the sender thread: the audio per sample with the
@@ -54,6 +64,7 @@ use sp_core::genlock::{
     GENLOCK_GRID_FPS, GENLOCK_MAX_CATCHUP_INTERVALS, floor_boundary_100ns, lag_slots_100ns,
     strict_next_boundary_100ns,
 };
+use sp_decoder::PeakLimiter;
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -70,7 +81,7 @@ use crate::playback::program_transition::{
 };
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::submitter::FrameSubmitter;
-use crate::playback::vban_out::{VbanBlock, VbanOut, run_vban_config_task};
+use crate::playback::vban_out::{VbanBlock, VbanOut, is_program_block, run_vban_config_task};
 use crate::playback::wallclock::WallClock;
 
 /// The program's picture size, 1080p (the paced idle size): #223, every
@@ -117,18 +128,28 @@ pub struct ProgramOutput<B: NdiBackend> {
     /// The run of mixed boundaries being sent (a window), logged once when
     /// the next unmixed boundary ends it.
     mix_run: MixRun,
+    /// #210: the program's peak limiter. Every program block goes through it
+    /// before VBAN and the NDI submit get it ([`limit`](Self::limit)).
+    limiter: PeakLimiter,
+    /// #210: the boundary the limiter last ran on. A stamp that is not the
+    /// grid boundary right after it is a restart of the program's timeline.
+    limited_through: Option<i64>,
 }
 
 /// #215: one run of mixed boundaries as the `SP-program` sender saw it: how
 /// many, how many had a side fitted into the canvas (#223: a side not already
 /// a canvas picture), and the worst time the picture (the fits + blend, all
 /// their row bands) took, measured on this thread — the cost the review asked
-/// to see on the box, next to `health.coalesced`.
+/// to see on the box, next to `health.coalesced`. #210: also how many frames
+/// the program's peak limiter scaled while the run went out: its mixed
+/// boundaries and the boundary that ended it (where the release tail
+/// starts), so the box shows the limiter working through a fade.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct MixRun {
     pub(crate) boundaries: u64,
     pub(crate) fitted: u64,
     pub(crate) max_picture_us: u64,
+    pub(crate) limited: u64,
 }
 
 /// The one INFO line of a finished run of mixed boundaries (none for an
@@ -140,6 +161,7 @@ fn log_mix_run(run: &MixRun) {
             boundaries = run.boundaries,
             fitted = run.fitted,
             max_picture_us = run.max_picture_us,
+            limited_frames = run.limited,
             "program transition: the fade's mixed boundaries went out"
         );
     }
@@ -193,6 +215,17 @@ fn send<B: NdiBackend>(
 }
 
 impl Pair {
+    /// #210: the audio this pair carries to VBAN and NDI: a forwarded
+    /// pair's own, a fade's crossfaded block, or the program's one silent
+    /// block for a standby pair (`silence`).
+    fn audio_mut<'a>(&'a mut self, silence: &'a mut [AudioFrame]) -> &'a mut [AudioFrame] {
+        match self {
+            Pair::Source(job) => &mut job.audio,
+            Pair::Standby => silence,
+            Pair::Mix { audio, .. } => audio,
+        }
+    }
+
     /// What VBAN gets for the boundary on `stamp_100ns`: the pair's own
     /// block, COPIED (its NDI submit still borrows it), or the standby
     /// silence.
@@ -231,6 +264,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
                 mix_bands(crate::lyrics::heavy_slot::logical_cores()),
             ),
             mix_run: MixRun::default(),
+            limiter: PeakLimiter::new(PROGRAM_AUDIO_RATE_HZ),
+            limited_through: None,
         }
     }
 
@@ -271,7 +306,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
     pub fn serve(&mut self, job: ProgramJob, now: impl Fn() -> i64) -> BoundaryMarks {
         let taken_100ns = now();
         let stamp_100ns = job.stamp_100ns();
-        let pair = self.split(job);
+        let mut pair = self.split(job);
+        self.limit(&mut pair, stamp_100ns);
         let fed_100ns = self.feed_vban(pair.vban_block(stamp_100ns), &now);
         let ends_run = !matches!(pair, Pair::Mix { .. });
         let submit_start_100ns = self.submit_video(pair, stamp_100ns, &now);
@@ -319,6 +355,35 @@ impl<B: NdiBackend> ProgramOutput<B> {
                 Pair::Mix { mix, audio }
             }
         }
+    }
+
+    /// #210: run the boundary's audio through the program's peak limiter,
+    /// in place, BEFORE VBAN's copy and the NDI submit: both then carry the
+    /// same limited block, VBAN first. Every program block goes through it
+    /// (a forwarded pair's, a fade's crossfaded block, the standby silence:
+    /// 0 × gain stays 0, and its tail decays in step with time), so its
+    /// state, and the gain, carry from one boundary to the next. A stamp that
+    /// is not the grid boundary right after the last one (the first boundary,
+    /// a resync that skipped stamps) restarts the program's timeline: the
+    /// audio after it is unrelated, so the release tail is dropped. A block
+    /// that is not one program block (48 kHz stereo, one boundary: what VBAN
+    /// carries; VBAN sends silence for anything else) passes as it came.
+    fn limit(&mut self, pair: &mut Pair, stamp_100ns: i64) {
+        let follows = self
+            .limited_through
+            .is_some_and(|last| strict_next_boundary_100ns(last, GENLOCK_GRID_FPS) == stamp_100ns);
+        if !follows {
+            self.limiter.reset();
+        }
+        self.limited_through = Some(stamp_100ns);
+        let before = self.limiter.limited_frames();
+        for frame in pair.audio_mut(&mut self.silence) {
+            if is_program_block(frame) {
+                let channels = frame.channels as usize;
+                self.limiter.process(&mut frame.data, channels);
+            }
+        }
+        self.mix_run.limited += self.limiter.limited_frames() - before;
     }
 
     /// #210: the video side of a boundary VBAN already has, then its NDI
@@ -665,6 +730,9 @@ mod tests;
 #[cfg(test)]
 #[path = "program_output_tests_fhd.rs"]
 mod tests_fhd;
+#[cfg(test)]
+#[path = "program_output_tests_limit.rs"]
+mod tests_limit;
 #[cfg(test)]
 #[path = "program_output_tests_order.rs"]
 mod tests_order;

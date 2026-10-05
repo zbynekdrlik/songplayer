@@ -55,6 +55,9 @@ fn collect_frames(reader: &mut dyn AudioStream, min_frames: usize) -> (u64, Vec<
             .expect("decode should succeed")
             .expect("stream ended before enough frames were collected");
         assert_eq!(chunk.channels, 2);
+        // Nothing to emit is `None`, never an empty chunk: a mutant that
+        // emits empty chunks fails here instead of spinning (#210).
+        assert!(!chunk.data.is_empty(), "an empty chunk");
         if first_ts.is_none() {
             first_ts = Some(chunk.timestamp_ms);
         }
