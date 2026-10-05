@@ -402,7 +402,8 @@ current subtitle state of the playing, on-program pipelines:
 - ONE `HideSubtitles` only when none of them has a line (a blank plan
   position, or a song with no `lyrics_state`). The subtitle clips are shared
   by every on-program playlist, so a blank one must never clear another's
-  line (review round 5; `obs/scene.rs` can keep several active playlists);
+  line (review round 5; since #221 only the wall owner's line is re-sent,
+  `recovery.rs::on_program_lines`, and with no owner none is);
 - that same one `HideSubtitles` when NO SongPlayer playlist plays on program.
   The scene-off hide goes through the same `clear_subtitles` path, so an
   outage can have swallowed it too (review round 6).

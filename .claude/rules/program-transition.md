@@ -380,14 +380,16 @@ drops. The wall step runs before the pause/hold:
   (release 0.69.0 review 🟡 2, `program-bus.md` "One wall owner"); with no
   owner there are none (#221 lane 2, ROZHODNUTÉ 6002459249: no owner =
   nobody writes), so a playlist whose OFF is queued too re-syncs nothing.
-- None on program AND no owner left (a cut to "OBS manuál"): the stage
-  display is cleared too (`presenter::push_empty`), next to the HideTitle +
-  HideSubtitles — nobody writes it any more, so the old owner's last line
-  would stay for the whole manual scene. With an owner published whose ON
-  is still queued (a press's OFF) it is left to that ON's
+- An OFF that leaves NO owner (a cut to "OBS manuál") also clears the
+  stage display (`presenter::push_empty`, in `scene_off`, the OFF half
+  every authority OFF goes through — so also for a playlist whose ON was
+  dropped as stale) — nobody writes it any more, so the old owner's last
+  line would stay for the whole manual scene. With an owner published
+  whose ON is still queued (a press's OFF) it is left to that ON's
   `resync_presenter`: no blank flash
   (`tests_wall_owner.rs::the_last_owner_s_off_blanks_the_stage_display`,
-  `an_off_with_the_next_owner_on_its_way_leaves_the_stage_display`).
+  `an_off_with_the_next_owner_on_its_way_leaves_the_stage_display`,
+  `an_off_that_leaves_no_owner_blanks_the_stage_display_even_unflagged`).
 - The stage display (#221 review round 3): with another playlist on
   program, the OFF ends with `resync_presenter(owner)` — the wall owner's
   line at its last position, or a cleared display. It repeats the owner's

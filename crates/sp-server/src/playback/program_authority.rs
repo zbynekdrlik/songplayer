@@ -39,8 +39,9 @@
 //!   re-sync's title and lines (`recovery.rs`). A playlist played off
 //!   program by hand writes none of them. With no owner ("OBS manuál" on
 //!   program, nothing on air, or before the task's first value) NOBODY
-//!   writes them (ROZHODNUTÉ 6002459249), and the last owner's OFF blanks
-//!   the wall and the stage display (`scene_off::wall_after_scene_off`).
+//!   writes them (ROZHODNUTÉ 6002459249), and an OFF that leaves no owner
+//!   blanks the wall (`scene_off::wall_after_scene_off`) and the stage
+//!   display (`scene_off::scene_off`).
 //! - A pipeline created after its playlist went on air (a runtime
 //!   `EnsurePipeline`) goes on program itself (`runtime_pipeline.rs`). An ON
 //!   for a playlist with NO pipeline (the #196 startup senders ran out of
@@ -87,7 +88,8 @@ impl OnAirPlaylists {
     }
 
     /// Test-only: the diffed set alone, with no owner (so nobody writes the
-    /// wall): for the tests of the stale check and the hold re-check.
+    /// wall): for the tests of the stale check and the hold re-check, and
+    /// the no-owner wall tests (nothing on air, the cut to "OBS manuál").
     #[cfg(test)]
     pub fn replace(&self, playlists: BTreeSet<i64>) {
         self.publish(playlists, None);
@@ -109,7 +111,7 @@ impl OnAirPlaylists {
     /// manuál" on program, nothing on air, or before the task's first value)
     /// nobody may (ROZHODNUTÉ 6002459249): a playlist played off program by
     /// hand, or one whose OFF is still queued, writes nothing, and the last
-    /// owner's OFF blanks the wall (`wall_after_scene_off`).
+    /// owner's OFF blanks the wall (`wall_after_scene_off`, `scene_off`).
     pub fn may_write_wall(&self, playlist_id: i64) -> bool {
         self.diffed().owner == Some(playlist_id)
     }

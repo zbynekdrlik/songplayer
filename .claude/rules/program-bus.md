@@ -437,22 +437,24 @@ itself: the OBS client no longer reads cg OBS's program at all
   - with NO owner (-1 "OBS manuál" on program, nothing on air, or before
     the authority's first value) NOBODY writes them (ROZHODNUTÉ 6002459249,
     #221 lane 2; before, no owner restricted nothing and a song played off
-    program by hand fed the Presenter under "OBS manuál"). And the last
-    owner's OFF with no owner left (a cut to "OBS manuál") blanks the stage
-    display too (`wall_after_scene_off`: `presenter::push_empty` next to
-    the HideTitle + HideSubtitles), or the old owner's last line would stay
-    there for the whole manual scene. A press's OFF (the next owner already
+    program by hand fed the Presenter under "OBS manuál"). And an OFF that
+    leaves no owner (a cut to "OBS manuál") blanks the stage display too
+    (`presenter::push_empty` in `scene_off`, the OFF half every authority
+    OFF goes through; `wall_after_scene_off` hides the title and the lines),
+    or the old owner's last line would stay there for the whole manual
+    scene. A press's OFF (the next owner already
     published, its ON queued) leaves the display to that ON
     (`wall_after_owner_on`): no blank flash. An engine unit test that wants
     a wall write therefore puts its playlist on air as the owner first
     (`PlaybackEngine::put_on_air_for_test`), as production does before its
-    ON. Residual (review round 1 of lane 2): the blank is tied to the OFF
-    of a playlist whose scene WAS on program (`went_off_program`). A
-    playlist played off program by hand, cut to and away again before the
-    engine handled its ON (the stale ON is dropped), may push a Presenter
-    line while it owned the wall (the Presenter push is owner-gated, not
-    scene-gated); its OFF then finds its scene already off, and that line
-    stays on the stage display until the next owner.
+    ON. Review round 2 of lane 2 moved the blank from `wall_after_scene_off`
+    (run only for a playlist whose scene WAS on program) to `scene_off`:
+    a press P → Q and a cut to "OBS manuál" before Q's ON was handled (Q's
+    ON is then dropped as stale) left P's line on the stage display — P's
+    OFF came while Q owned the wall, and Q's OFF found Q's scene never on
+    program (`an_off_that_leaves_no_owner_blanks_the_stage_display_even_unflagged`).
+    The authority sends an OFF only for a playlist that left the on-air
+    set, so no other OFF reaches it.
 
   Pinned by `program_on_air_tests.rs` (the set and owner table),
   `program_authority_tests.rs` (the task over a real bus, its owner) and

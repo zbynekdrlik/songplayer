@@ -17,14 +17,18 @@
 //!   (`obswebsocket.msgpack`, what Companion speaks), one per session.
 //! - **cg OBS** is reached through SongPlayer's EXISTING OBS client
 //!   ([`Upstream`]: its command channel + its event broadcast). The scene and
-//!   input list getters are forwarded verbatim, so the button names match cg
-//!   OBS 1:1; cg OBS's `SceneListChanged` is re-emitted to the clients.
+//!   input list getters are forwarded, so the button names match cg OBS 1:1
+//!   (#221 lane 2: `GetSceneList` with SP-program's scene and the session's
+//!   preview, `protocol::with_songplayer_scenes`); cg OBS's
+//!   `SceneListChanged` is re-emitted to the clients.
 //! - **Program feedback (#221 L3)** is SongPlayer's own (`studio_events`):
 //!   `CurrentProgramSceneChanged` whenever the scene name of what `SP-program`
 //!   has on air changes (a press, a dashboard cut, anything that cuts), and
 //!   `SceneTransitionStarted` / `SceneTransitionEnded` around every facade
-//!   switch that cut. `GetCurrentProgramScene` answers SP-program's scene.
-//!   cg OBS's own `CurrentProgramSceneChanged` is never passed through.
+//!   switch that cut. `GetCurrentProgramScene` answers SP-program's scene,
+//!   and so does `GetSceneList`'s `currentProgramSceneName` (lane 2: what
+//!   Companion reads at connect). cg OBS's own `CurrentProgramSceneChanged`
+//!   is never passed through.
 //! - **Studio mode (#221 L2).** Studio mode is reported ON, so Companion's
 //!   page-13 buttons (`preview_scene` + `do_transition`) reach SongPlayer:
 //!   `SetCurrentPreviewScene` / `GetCurrentPreviewScene` keep a preview PER
