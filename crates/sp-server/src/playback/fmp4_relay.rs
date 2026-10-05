@@ -284,8 +284,11 @@ impl FragmentRelay {
     }
 
     /// Clear the cached init segment (#178 item 17) — called at each child's
-    /// START and STOP so a stale init from a previous child is never served to a
-    /// new child's late joiner (which must wait for the NEW init).
+    /// START so a stale init from a previous child is never served to a new
+    /// child's late joiner (which must wait for the NEW init). NEVER at a
+    /// child's STOP (#184): a viewer may already hold that init, so a stopped
+    /// child's stream is ended with [`close`](Self::close) instead
+    /// (`StreamShared::end_stopped_stream`).
     pub fn reset(&self) {
         if let Ok(mut slot) = self.init.lock() {
             *slot = None;
@@ -300,9 +303,11 @@ impl FragmentRelay {
     /// End the stream (#178 item 12): clear the cached init and DROP the current
     /// broadcast sender so every connected viewer's `recv()` returns `Closed`
     /// (their WS handler then closes the socket). A fresh sender takes any later
-    /// subscribers. Called by the supervisor when it gives up restarting a
-    /// repeatedly-dying child, and (#184 round G) when it respawns a child that
-    /// had streamed, so its viewers reconnect and receive the NEW child's init.
+    /// subscribers. Called after EVERY child run that still caches an init
+    /// (#184, `StreamShared::end_stopped_stream`: the viewer TTL stop, an exit,
+    /// a respawn — round G — or the fallback), so its viewers reconnect and
+    /// receive the NEXT child's init; and when the supervisor gives up
+    /// (`StreamShared::give_up`: the restart budget is spent, or a panic).
     pub fn close(&self) {
         if let Ok(mut slot) = self.init.lock() {
             *slot = None;

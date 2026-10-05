@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
+use tracing::info;
 
 use super::fmp4_relay::FragmentRelay;
 use super::preview_audio_probe::{SharedLevelProbe, log_tap_level};
@@ -297,7 +298,10 @@ pub struct AudioBlock {
 }
 
 /// How [`StreamShared::settle_unwatched_run`] ends an encoder run that stopped
-/// with nobody watching (#184).
+/// with nobody watching (#184). `must_use`: a supervisor that ignored a
+/// `Restart` and returned would keep the claim with no child running, and every
+/// later viewer would find the claim held and get no encoder at all.
+#[must_use]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnwatchedEnd {
     /// No viewer at the settle: the encoder claim was released. The supervisor
@@ -500,10 +504,11 @@ impl StreamShared {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
     }
-    /// Release the claim unconditionally. A run that ended with nobody watching
-    /// releases it through [`settle_unwatched_run`](Self::settle_unwatched_run)
-    /// instead (#184); this bare release is for the supervisor's give-up path,
-    /// its panic guard and a failed thread spawn.
+    /// Release the claim unconditionally. A supervisor that ran a child never
+    /// calls it directly (#184): it releases through
+    /// [`settle_unwatched_run`](Self::settle_unwatched_run) or
+    /// [`give_up`](Self::give_up), which end the stopped child's stream FIRST.
+    /// The bare release is for a supervisor thread that failed to spawn.
     pub fn release_encoder(&self) {
         self.encoder_running.store(false, Ordering::Release);
     }
@@ -518,12 +523,16 @@ impl StreamShared {
 
     /// Settle an encoder run that ended with nobody watching (#184): the viewer
     /// TTL ran out, or the child exited on its own while nobody watched. The
-    /// supervisor calls it after the teardown and
-    /// [`end_stopped_stream`](Self::end_stopped_stream). It runs under the
-    /// lifecycle lock, which [`ViewerGuard::subscribe`] also takes, so every
-    /// viewer either subscribed before it (and is seen here) or subscribes after
-    /// the claim was released (its `ensure_running` then claims a fresh
-    /// encoder):
+    /// supervisor calls it once the child and its reader are gone. It first
+    /// ends the stopped child's stream
+    /// ([`end_stopped_stream`](Self::end_stopped_stream)) and only then may
+    /// release the claim: in the reverse order a new supervisor could claim
+    /// and cache its child's init, and this late close would wipe it (a viewer
+    /// stuck waiting for an init that never comes). It runs under the lifecycle
+    /// lock, which
+    /// [`ViewerGuard::subscribe`] also takes, so every viewer either subscribed
+    /// before it (and is seen here) or subscribes after the claim was released
+    /// (its `ensure_running` then claims a fresh encoder):
     ///
     /// - no viewer → release the claim: [`UnwatchedEnd::Released`], the
     ///   supervisor exits;
@@ -536,6 +545,7 @@ impl StreamShared {
     /// it (a frozen preview at HAVE_METADATA).
     pub fn settle_unwatched_run(&self) -> UnwatchedEnd {
         let _lifecycle = self.lifecycle_lock();
+        self.end_stopped_stream();
         if !self.has_viewer() {
             self.release_encoder();
             return UnwatchedEnd::Released;
@@ -544,19 +554,36 @@ impl StreamShared {
     }
 
     /// End a stopped child's stream for every viewer that may hold its init
-    /// (#184; generalises the round-G respawn close). The supervisor calls it
-    /// after EVERY child run, once the child and its reader are gone. With an
-    /// init cached, a viewer may already have sent it (and the child's last
-    /// fragments) to its browser: the relay is CLOSED, so that viewer's socket
-    /// closes and the shim reconnects onto the next child's init. A bare reset
-    /// would leave it holding the old init while the next child's restarted
-    /// timeline arrives (a frozen preview). With no init cached the child
-    /// produced nothing a viewer could hold, so viewers still waiting for an
-    /// init keep their stream and simply receive the next one.
+    /// (#184; generalises the round-G respawn close). Runs after EVERY child
+    /// run, once the child and its reader are gone: inside
+    /// [`settle_unwatched_run`](Self::settle_unwatched_run) and
+    /// [`give_up`](Self::give_up), and by the supervisor before a respawn or
+    /// the libx264 fallback. With an init cached, a viewer may already have
+    /// sent it (and the child's last fragments) to its browser: the relay is
+    /// CLOSED, so that viewer's socket closes and the shim reconnects onto the
+    /// next child's init. A bare reset would leave it holding the old init
+    /// while the next child's restarted timeline arrives (a frozen preview).
+    /// With no init cached the child produced nothing a viewer could hold, so
+    /// viewers still waiting for an init keep their stream and simply receive
+    /// the next one. A second call is a no-op.
     pub fn end_stopped_stream(&self) {
         if self.relay.init().is_some() {
             self.relay.close();
+            info!(
+                label = %self.label,
+                "preview-encoder: stopped child's stream closed — its viewers reconnect onto the next child's init"
+            );
         }
+    }
+
+    /// The supervisor gives the stream up (#178 item 12: the restart budget is
+    /// spent, or its thread panicked): close the relay so every viewer's
+    /// socket closes, THEN release the claim (#184). In the reverse order a new
+    /// supervisor could claim and cache its child's init before this late
+    /// close wiped it.
+    pub fn give_up(&self) {
+        self.relay.close();
+        self.release_encoder();
     }
 }
 

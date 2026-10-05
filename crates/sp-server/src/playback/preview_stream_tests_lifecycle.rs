@@ -1,11 +1,12 @@
 //! #184: the preview encoder's stop / claim-release lifecycle against a viewer
 //! that subscribes while the encoder stops (the frozen-preview race, ROOT
-//! CAUSE comment 5989070744). The pure `StreamShared` steps run in the
-//! supervisor's order after a child run: `end_stopped_stream`, then
-//! `settle_unwatched_run`. No sleeps and no wall-time thresholds: the lock
-//! tests hold the lifecycle lock as a gate and use only safe-direction
-//! windows (correct code can never finish inside the held window; a slow
-//! runner only makes the window pass vacuously).
+//! CAUSE comment 5989070744). The pure `StreamShared` steps the supervisor
+//! takes after a child run: `settle_unwatched_run` (which ends the stopped
+//! child's stream first), `end_stopped_stream`, `give_up`. No sleeps; the
+//! only timeouts are the lock tests' safe-direction windows: they hold the
+//! lifecycle lock as a gate, and correct code can never finish inside the
+//! held window (a slow runner only makes it pass vacuously), plus a generous
+//! bound on the step the released gate lets through.
 
 use super::*;
 
@@ -55,8 +56,8 @@ fn a_viewer_that_subscribes_while_the_encoder_stops_still_gets_an_encoder() {
         "it is sent the stopping child's init (the box log: init sent, 23 ms later child stopped)"
     );
 
-    // The supervisor's steps after the teardown.
-    shared.end_stopped_stream();
+    // The supervisor's step after the teardown: the settle alone (it ends the
+    // stopped child's stream itself, before it may release the claim).
     let end = shared.settle_unwatched_run();
 
     assert_eq!(
@@ -225,4 +226,49 @@ fn a_settle_waits_for_a_subscribe_in_progress() {
         "the settle sees the viewer counted under the lock and keeps the claim"
     );
     assert!(!shared.try_claim_encoder(), "the claim is still held");
+}
+
+/// A settle that releases the claim also ends the stopped child's stream: its
+/// cached init is closed (a straggling receiver sees `Closed`), so the
+/// supervisor that claims next starts on a clean relay.
+#[test]
+fn a_released_settle_also_ends_the_stopped_childs_stream() {
+    let tap = StreamTap::new("t".into(), 0);
+    let shared = tap.shared().clone();
+    assert!(shared.try_claim_encoder(), "the running supervisor's claim");
+    let relay = shared.relay();
+    relay.ingest(RelayChunk::Init(b"INIT_OLD".to_vec()));
+    let mut straggler = relay.subscribe();
+
+    assert_eq!(shared.settle_unwatched_run(), UnwatchedEnd::Released);
+
+    assert!(
+        matches!(straggler.try_recv(), Err(TryRecvError::Closed)),
+        "the stopped child's stream is closed"
+    );
+    assert!(relay.init().is_none(), "its init is gone");
+    assert!(shared.try_claim_encoder(), "and the claim is free");
+}
+
+/// Giving the stream up (the restart budget is spent, or the supervisor
+/// panicked) closes EVERY viewer's stream, even one still waiting for an init,
+/// so each WS socket closes, and frees the claim for the next viewer.
+#[test]
+fn give_up_closes_every_viewers_stream_and_frees_the_claim() {
+    let tap = StreamTap::new("t".into(), 0);
+    let shared = tap.shared().clone();
+    assert!(shared.try_claim_encoder(), "the running supervisor's claim");
+    let (_viewer, relay) = ViewerGuard::subscribe(&tap);
+    let mut waiting = relay.subscribe();
+
+    shared.give_up();
+
+    assert!(
+        matches!(waiting.try_recv(), Err(TryRecvError::Closed)),
+        "the viewer's stream is closed"
+    );
+    assert!(
+        shared.try_claim_encoder(),
+        "the claim is free for the next viewer"
+    );
 }

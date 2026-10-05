@@ -93,14 +93,16 @@ impl Drop for ChildGuard {
     }
 }
 
-/// Releases the per-pipeline encoder claim when the supervisor thread ends
-/// WITHOUT having released it itself — a panic in `supervise` — so a crashed
-/// supervisor never leaves the claim stuck (which would block every future
-/// viewer from starting a child, #178 item 11). Every normal `supervise` exit
-/// releases the claim itself (#184: under the lifecycle lock, in
-/// `StreamShared::settle_unwatched_run`), and the thread then disarms this
-/// guard: a second release could free a claim a NEW supervisor took in
-/// between, and two children would feed one relay.
+/// Gives the stream up (`StreamShared::give_up`: close the relay, then release
+/// the claim) when the supervisor thread ends WITHOUT having released the claim
+/// itself — a panic in `supervise` — so a crashed supervisor never leaves the
+/// claim stuck (which would block every future viewer from starting a child,
+/// #178 item 11), nor a viewer holding the dead child's init (#184). Every
+/// normal `supervise` exit releases the claim itself, through
+/// `StreamShared::settle_unwatched_run` (under the lifecycle lock) or
+/// `give_up`, and the thread then disarms this guard: a second release could
+/// free a claim a NEW supervisor took in between, and two children would feed
+/// one relay.
 struct EncoderReleaseGuard {
     shared: Arc<StreamShared>,
     armed: bool,
@@ -110,7 +112,7 @@ impl Drop for EncoderReleaseGuard {
     #[cfg_attr(test, mutants::skip)]
     fn drop(&mut self) {
         if self.armed {
-            self.shared.release_encoder();
+            self.shared.give_up();
         }
     }
 }
@@ -332,7 +334,9 @@ pub fn ensure_running(shared: Arc<StreamShared>, ffmpeg: std::path::PathBuf) {
 /// encoder child dies before producing the init segment. Every return has
 /// released the encoder claim (#184): a run that ended with nobody watching is
 /// settled under the lifecycle lock (a viewer that subscribed meanwhile keeps
-/// the claim and gets a new child), and the give-up path releases it itself.
+/// the claim and gets a new child), and a spent restart budget gives up. Both
+/// end the stopped child's stream before the release; a respawn and the
+/// fallback end it themselves.
 #[cfg_attr(test, mutants::skip)]
 fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
     let mut encoder = encoder.to_string();
@@ -341,12 +345,10 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
     let mut budget = RestartBudget::default();
     let budget_base = Instant::now();
     loop {
-        let outcome = run_child(&shared, ffmpeg, &encoder);
-        // #184: the child and its reader are gone. A viewer that may hold the
-        // stopped child's init is closed (it reconnects onto the next init),
-        // never left holding it — on every outcome.
-        shared.end_stopped_stream();
-        match outcome {
+        // #184: every arm below ends the stopped child's stream
+        // (`end_stopped_stream`, also inside the settle / give-up) before it
+        // releases the claim or starts another child.
+        match run_child(&shared, ffmpeg, &encoder) {
             RunOutcome::ViewersGone => {
                 info!(
                     label = shared.label(),
@@ -362,6 +364,7 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
                     encoder = %encoder,
                     "preview-encoder: child produced no stream, falling back to libx264"
                 );
+                shared.end_stopped_stream();
                 encoder = "libx264".to_string();
                 allow_fallback = false;
                 // Pin libx264 so every subsequent child (this pipeline or any
@@ -373,33 +376,38 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
             }
             RunOutcome::ChildExitedNoInit | RunOutcome::ChildExited => {
                 // Nobody watching: settle it like a TTL stop (#184) — a viewer
-                // that subscribes as the child exits gets a new child.
+                // that subscribes as the child exits gets a new child. Read
+                // before any stream close (closed viewers leave).
                 if !shared.has_viewer() {
                     if settle_released(&shared) {
+                        info!(
+                            label = shared.label(),
+                            "preview-encoder: child exited with nobody watching — encoder released"
+                        );
                         return;
                     }
                     continue;
                 }
                 // #178 item 12: a child that died while viewers are watching is
                 // respawned within the restart budget. (#184 round G: viewers
-                // holding a child that DID stream were closed by
-                // `end_stopped_stream` above, so they reconnect onto the new
-                // child's init instead of freezing on a restarted timeline.)
+                // holding a child that DID stream are closed by
+                // `end_stopped_stream`, so they reconnect onto the new child's
+                // init instead of freezing on a restarted timeline.)
                 if budget.allow(budget_base.elapsed().as_millis() as u64) {
                     warn!(
                         label = shared.label(),
                         "preview-encoder: child exited with viewers present — respawning"
                     );
+                    shared.end_stopped_stream();
                     continue;
                 }
                 // Budget spent: close the relay so viewers see `Closed` and
-                // their WS sockets close, and give the claim up.
+                // their WS sockets close, then give the claim up.
                 warn!(
                     label = shared.label(),
                     "preview-encoder: child exited, closing stream"
                 );
-                shared.relay().close();
-                shared.release_encoder();
+                shared.give_up();
                 return;
             }
         }
@@ -410,6 +418,8 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
 /// `StreamShared::settle_unwatched_run`) and log a restart. `true` = the claim
 /// was released and the supervisor exits; `false` = a viewer subscribed as the
 /// child stopped, the claim is kept and the supervisor runs a new child.
+/// `must_use`: ignoring `false` and returning would leak the claim.
+#[must_use]
 #[cfg_attr(test, mutants::skip)]
 fn settle_released(shared: &StreamShared) -> bool {
     match shared.settle_unwatched_run() {
@@ -578,12 +588,12 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
             return RunOutcome::ChildExited;
         }
     };
-    // Per-child "did THIS child produce any stdout" — the relay's cached init
-    // segment persists across children, so it cannot be the failed-child signal:
-    // a broken hardware child (nvenc that never opens its encoder) produces ZERO
-    // bytes yet the relay still holds a prior working child's init, which made
-    // the old `relay().init().is_some()` check misread it as a clean exit and
-    // skip the libx264 fallback (#178 box).
+    // Per-child "did THIS child produce any stdout" — the relay's cached init is
+    // relay state, not this child's, so it is not the failed-child signal: when
+    // the init used to persist across children, a broken hardware child (nvenc
+    // that never opens its encoder, ZERO bytes) still saw a prior working
+    // child's init, and the old `relay().init().is_some()` check misread it as
+    // a clean exit and skipped the libx264 fallback (#178 box).
     let produced = Arc::new(AtomicBool::new(false));
     let reader =
         match spawn_stdout_reader(shared.clone(), child.get().stdout.take(), produced.clone()) {

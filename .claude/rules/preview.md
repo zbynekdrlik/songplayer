@@ -140,34 +140,55 @@ The rule (do NOT regress):
     after the release (its `ensure_running` claims a fresh one). Never put a
     claim release back after the supervisor returns.
 - **The relay is never reset under a viewer that may hold its init.** After
-  EVERY child run (`supervise`, once the child and its reader are joined),
-  `StreamShared::end_stopped_stream` runs.
-  - With an init still cached it CLOSES the relay. A viewer may already have
-    sent that init and the last fragments to its browser, so its socket
-    closes and the shim's first reconnect is immediate (`msSinceLastReconnect`
-    is null), onto the next child's init.
+  every child run, once the child and its reader are joined,
+  `StreamShared::end_stopped_stream` runs. The settle and `give_up` call it
+  themselves; `supervise` calls it before a respawn or the libx264 fallback.
+  - With an init still cached it CLOSES the relay (and logs `stopped child's
+    stream closed`). A viewer may already have sent that init and the last
+    fragments to its browser, so its socket closes and the shim reconnects
+    onto the next child's init.
+  - How fast the shim reconnects: a player that never reconnected does so at
+    its next 1 Hz health tick (`msSinceLastReconnect` is null). Later
+    reconnects wait `reconnectGapMs` (12 → 24 → 48 → 60 s), and an init alone
+    does not reset that backoff, only a media fragment does. So a viewer
+    closed twice in a row can take 12–60 s to recover.
   - With no init cached, the child produced nothing a viewer could hold, so
     the waiting viewers keep their stream.
   - `run_child` no longer resets the relay at stop. The decision needs "the
     relay still caches the init" to be true when it runs, so a stop-time reset
     would hide the stale init a viewer holds. The START reset stays: no viewer
     holds an init then.
-- **`EncoderReleaseGuard` is the PANIC backstop only.** Every normal
-  `supervise` return has released the claim itself: through the settle, or
-  explicitly on the give-up path. The thread then sets `armed = false`. A
-  second, unconditional release from the guard could free a claim that a NEW
-  supervisor took in between, and two children would feed one relay.
+- **The stream is ended BEFORE the claim is released, never after.** The
+  settle (`end_stopped_stream`, then the release) and `give_up` (`close`, then
+  `release_encoder`) both keep that order inside pure code. In the reverse
+  order a NEW supervisor can claim, start its child and cache its init, and
+  the old supervisor's late close then wipes it: the new viewers wait for an
+  init that never comes while the claim stays held. The review's interleaving
+  model showed exactly that permanent freeze.
+- **`EncoderReleaseGuard` is the PANIC backstop only.** It calls `give_up` if
+  the supervisor thread unwinds. Every normal `supervise` return has released
+  the claim itself (settle or `give_up`), and the thread then sets
+  `armed = false`. A second, unconditional release could free a claim that a
+  NEW supervisor took in between, and two children would feed one relay.
+  `UnwatchedEnd` and `settle_released` are `#[must_use]`: a supervisor that
+  ignored a `Restart` and returned would keep the claim with no child, and
+  every later viewer would get no encoder.
+- In the child-exited arm, `supervise` reads `has_viewer()` BEFORE any stream
+  close. The close makes the viewers leave, so a later read would race their
+  WS tasks and pick respawn-vs-settle at random.
 - Tests (`preview_stream_tests_lifecycle.rs`, pure, no sleeps):
-  - the window sequence: subscribe → stale init → `end_stopped_stream` →
-    settle = `Restart`, claim held, viewer's stream `Closed`;
-  - the no-init and no-viewer branches;
+  - the window sequence: subscribe → stale init → settle = `Restart`, claim
+    held, viewer's stream `Closed` (the settle alone ends it);
+  - the no-init, no-viewer and released-settle-closes branches, and
+    `give_up`;
   - two held-lock gates, each with a 200 ms safe-direction window: a
     subscribe waits for a settle in progress, and a settle waits for a
     subscribe in progress, then sees its viewer.
 
-  `cargo mutants --in-diff --list` gives two viable mutants, both killed:
-  `delete !` in the settle, and `end_stopped_stream → ()`. The
-  `lifecycle_lock`, settle and subscribe return-value mutants are unviable.
+  `cargo mutants --in-diff --list` gives three viable mutants, all killed:
+  `delete !` in the settle, `end_stopped_stream → ()` and `give_up → ()`.
+  The `lifecycle_lock`, settle and subscribe return-value mutants are
+  unviable.
 
 ### Three earlier box findings — do NOT regress them (#178)
 
@@ -258,20 +279,21 @@ behind the broadcast backlog is dropped (never blocks the reader).
   each child's START (so a late joiner after a reset waits for the NEW init).
   The stop no longer resets: since #184 every stop goes through
   `StreamShared::end_stopped_stream` (see "#184 — the encoder stop never strands
-  a viewer" below). `close()` clears the init AND drops the sender (replacing
+  a viewer" above). `close()` clears the init AND drops the sender (replacing
   it with a fresh channel), so every connected viewer's `recv()` returns
-  `Closed` and its WS handler closes the socket. The supervisor calls it when
-  it gives up restarting a dying child.
+  `Closed` and its WS handler closes the socket. It runs after every child run
+  that still caches an init (`end_stopped_stream`), and when the supervisor
+  gives up (`StreamShared::give_up`).
 - **Encoder-child restart budget + drop guards (`preview_encoder.rs`, items 11,
   12).** The feeder/reader thread spawns return `io::Result` (no more `.expect`
   panic); a `ChildGuard` kills+waits the ffmpeg child on every early return /
-  panic (std `Child::drop` does NOT), and an `EncoderReleaseGuard` releases the
-  `encoder_running` claim if the supervisor thread PANICS (so it can never stick
-  claimed and block future viewers). Since #184 the normal exits release the
-  claim themselves and the guard is disarmed (`armed = false`), see below.
+  panic (std `Child::drop` does NOT), and an `EncoderReleaseGuard` gives the
+  stream up (`StreamShared::give_up`: close, then release the claim) if the
+  supervisor thread PANICS, so the claim can never stick and block future
+  viewers. Since #184 the normal exits release the claim themselves and the
+  guard is disarmed (`armed = false`); see the #184 section above.
   `supervise` respawns a child that died with viewers connected, at most 3
-  restarts per rolling 60 s (pure `RestartBudget`), else `relay.close()` plus
-  the release.
+  restarts per rolling 60 s (pure `RestartBudget`), else `give_up`.
 - **Preview audio continuity (item 15) — SUPERSEDED by #184 round G2.** The
   add-only `gap_fill_samples` is DELETED: it only ever prepended silence, so a
   late burst accumulated lag. See "#184 round G2" below for the two-way aligner.
