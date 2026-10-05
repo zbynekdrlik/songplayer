@@ -88,9 +88,11 @@ exclude_re = [
   # sp-server/src/resolume/ is NOT excluded — handlers/driver have wiremock tests.
   # sp-server/src/playback/mod.rs is NOT excluded — title timer logic is unit-tested.
   # sp-ndi/, sp-decoder/reader.rs, sp-server/src/playback/pipeline.rs are NOT
-  # excluded — MockNdiBackend unit tests + FrameSubmitter cross-platform tests
+  # excluded — MockNdiBackend unit tests + the pipeline's cross-platform tests
   # cover them; the Windows-gated decoder in sp-decoder/reader.rs is skipped by
-  # cargo-mutants on Linux automatically (cfg(windows) not compiled in).
+  # cargo-mutants on Linux automatically (cfg(windows) not compiled in). The
+  # #[cfg(windows)] run_loop / run_loop_windows of pipeline.rs carry
+  # `mutants::skip` (#221 lane 3 retired the stale line pin for them).
   # sp-decoder/src/audio/symphonia_reader.rs: the methods of the Symphonia
   #   wrapper itself (every mutant naming `SymphoniaAudioReader`: `open`,
   #   `decode_packet`, the MediaStream / AudioStream impls), a
@@ -121,9 +123,6 @@ exclude_re = [
   #   runner; every mutant lands in dead code, builds, and no test runs it ->
   #   MISSED. Same class as the sp-decoder/{audio,video} exclusions (target-only).
   'sp-server/src/playback/pipeline_paced',
-  # pipeline.rs:239:5 run_loop -> (): the #[cfg(windows)] run_loop twin (the
-  #   #[cfg(not(windows))] run_loop is compiled + covered). Windows dead code.
-  'pipeline\.rs:239:5: replace run_loop with \(\)',
   # lyrics/mtl_aligner.rs: the forced-alignment wrapper shells out to the Python
   #   LyricsAlignment-MTL tool (tokio::process::Command) not installed on the
   #   runner; run_once/align/write_text_json are subprocess/file glue and

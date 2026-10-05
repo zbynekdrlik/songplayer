@@ -13,7 +13,6 @@ import { expect, APIRequestContext } from "@playwright/test";
 export interface HealthRow {
   playlist_id: number;
   ndi_name: string;
-  connections: number;
   frames_submitted_last_5s: number;
   /** Program-reconciled label: "Playing" only when the wall shows this
    *  output (the Player badge's source, sp-ui `player.rs`). */

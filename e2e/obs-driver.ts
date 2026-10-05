@@ -9,10 +9,10 @@
  * mode is ON there, so `switchScene` takes Companion's exact path (preview,
  * then transition), and the program scene and the transition events are
  * SongPlayer's own. A second driver on cg OBS (`OBS_WS_URL`, :4455) is kept
- * for the A/V gate: its recording and profile requests, and (#221 B4 step 6:
- * SongPlayer no longer mirrors a press to cg OBS) putting cg OBS itself on
- * the baseline scene for the take and back, each switch only when cg OBS is
- * on another scene.
+ * for the A/V gate: its recording and profile requests, and (#221 lane 3) the
+ * gate's probe scene — provisioning it (`av-sync-probe.ts`: the scene, its one
+ * DistroAV receiver of `SP-program`) and putting cg OBS on it for the take and
+ * back, each switch only when cg OBS is on another scene.
  */
 
 // The bare import: in Node it resolves to the MSGPACK build, which offers
@@ -188,6 +188,98 @@ export class ObsDriver {
     return outputPath;
   }
 
+  // ---- #221 lane 3: the A/V gate's probe scene (cg OBS only) ----
+
+  /** The names of the inputs of `inputKind` (e.g. DistroAV's `ndi_source`). */
+  async listInputs(inputKind: string): Promise<string[]> {
+    const r = await this.obs.call("GetInputList", { inputKind });
+    return (r as { inputs: { inputName: string }[] }).inputs.map((i) => i.inputName);
+  }
+
+  /** An input's settings, or null when OBS has no input of that name. */
+  async inputSettings(inputName: string): Promise<Record<string, unknown> | null> {
+    try {
+      const r = await this.obs.call("GetInputSettings", { inputName });
+      return (r as { inputSettings: Record<string, unknown> }).inputSettings;
+    } catch (e) {
+      if (isNotFound(e)) return null;
+      throw e;
+    }
+  }
+
+  /** The id of `sourceName`'s item in `sceneName`, or null when it has none. */
+  async sceneItemId(sceneName: string, sourceName: string): Promise<number | null> {
+    try {
+      const r = await this.obs.call("GetSceneItemId", { sceneName, sourceName });
+      return (r as { sceneItemId: number }).sceneItemId;
+    } catch (e) {
+      if (isNotFound(e)) return null;
+      throw e;
+    }
+  }
+
+  async createScene(sceneName: string): Promise<void> {
+    await this.obs.call("CreateScene", { sceneName });
+  }
+
+  /** Create an input in `sceneName`; returns its scene item id. */
+  async createInput(
+    sceneName: string,
+    inputName: string,
+    inputKind: string,
+    inputSettings: Record<string, unknown>,
+  ): Promise<number> {
+    const r = await this.obs.call("CreateInput", {
+      sceneName,
+      inputName,
+      inputKind,
+      // obs-websocket-js types settings as a JSON object.
+      inputSettings: inputSettings as never,
+      sceneItemEnabled: true,
+    });
+    return (r as { sceneItemId: number }).sceneItemId;
+  }
+
+  /** Put an existing source into `sceneName`; returns its scene item id. */
+  async addSceneItem(sceneName: string, sourceName: string): Promise<number> {
+    const r = await this.obs.call("CreateSceneItem", {
+      sceneName,
+      sourceName,
+      sceneItemEnabled: true,
+    });
+    return (r as { sceneItemId: number }).sceneItemId;
+  }
+
+  /** Merge `inputSettings` into an input's settings. */
+  async setInputSettings(inputName: string, inputSettings: Record<string, unknown>): Promise<void> {
+    await this.obs.call("SetInputSettings", {
+      inputName,
+      inputSettings: inputSettings as never,
+      overlay: true,
+    });
+  }
+
+  /** Fit a scene item to the canvas, aspect kept (bounds = the base size). */
+  async fitToCanvas(sceneName: string, sceneItemId: number): Promise<void> {
+    const v = (await this.obs.call("GetVideoSettings")) as {
+      baseWidth: number;
+      baseHeight: number;
+    };
+    await this.obs.call("SetSceneItemTransform", {
+      sceneName,
+      sceneItemId,
+      sceneItemTransform: {
+        positionX: 0,
+        positionY: 0,
+        alignment: 5, // top left
+        boundsType: "OBS_BOUNDS_SCALE_INNER",
+        boundsAlignment: 0, // centred in the bounds
+        boundsWidth: v.baseWidth,
+        boundsHeight: v.baseHeight,
+      },
+    });
+  }
+
   async disconnect(): Promise<void> {
     try {
       await this.obs.disconnect();
@@ -195,4 +287,9 @@ export class ObsDriver {
       // Ignore errors during disconnect.
     }
   }
+}
+
+/** obs-websocket's "resource not found" (600): no input / scene item of that name. */
+function isNotFound(e: unknown): boolean {
+  return (e as { code?: number } | null)?.code === 600;
 }

@@ -194,14 +194,14 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
 
     // #221 B4 step 6: the Dabing output reaches its consumers only through
     // SongPlayer's program, so the receiver that must exist is SP-program's
-    // (a playlist's own NDI output has no consumer any more). The deploy
+    // (#221 lane 3: a playlist has no NDI output of its own). The deploy
     // restarts SongPlayer a couple of minutes before this suite and its
     // receivers re-attach, so poll (the post-deploy.spec.ts program gate uses
     // the same 60 s budget).
     await expect
       .poll(async () => (await healthRow(request, dabingPid))?.ndi_name, {
         timeout: 60000,
-        message: "the Dabing playlist's output SP-dabing must be up",
+        message: "the Dabing playlist's pipeline (SP-dabing) must be up",
       })
       .toBe("SP-dabing");
     // The poll returns the whole verdict, so a failure prints the last one

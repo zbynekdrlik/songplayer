@@ -25,13 +25,16 @@
  * is captured first and restored after. #221 L3: scenes are switched through
  * SongPlayer's obs-websocket facade (`FACADE_WS_URL`, Companion's exact
  * studio-mode path: preview + transition, SongPlayer's own program feedback);
- * the recording and the profile read stay on cg OBS (`OBS_WS_URL`). #221 B4
- * step 6: SongPlayer no longer mirrors a press to cg OBS, and the recording
- * is cg OBS's program, so the gate also puts cg OBS on the baseline scene for
- * the take (its sp-* input carries the playlist's own NDI output, the
- * pipeline the program bus takes too) and restores cg OBS's scene after.
- * The lane that retires the per-playlist senders moves the recording to an
- * `SP-program` receiver. Every
+ * the recording and the profile read stay on cg OBS (`OBS_WS_URL`). #221
+ * lane 3: a playlist has no NDI output of its own, so the take records
+ * SongPlayer's PROGRAM, `SP-program`, the output every consumer takes: cg OBS
+ * is put on the gate's own probe scene (`av-sync-probe.ts`: one DistroAV
+ * receiver of `SP-program`, provisioned by the gate, never an sp-* scene)
+ * once `SP-program` carries the baseline playlist (never "OBS manuál": cg OBS
+ * would record itself), and the take waits until that receiver is on
+ * `SP-program`. cg OBS's own scene is restored first in afterAll, before the
+ * program scene, so cg OBS never shows `SP-program` while the program shows
+ * cg OBS. Every
  * recording file (plus its auto-remux sibling) is deleted, and an operator's
  * own running recording is never touched (`startRecord` refuses). The SONG
  * mixer faders are set to unity for the measurement and restored after.
@@ -47,7 +50,7 @@
  * - kills the analysis;
  * - settles a pending start (at most 10 s);
  * - stops our recording;
- * - restores the faders, the program scene and cg OBS's scene;
+ * - restores the faders, cg OBS's scene and the program scene;
  * - then deletes every recording made.
  * Every step is attempted even if an earlier one fails.
  *
@@ -69,6 +72,16 @@ import * as fs from "fs";
 import * as path from "path";
 import { ObsDriver } from "./obs-driver";
 import { pickBaselineScene } from "./obs-baseline-scene";
+import {
+  AV_PROBE_INPUT,
+  AV_PROBE_SCENE,
+  NDI_INPUT_KIND,
+  probeInputSettings,
+  probeReceiverAttached,
+  probeSteps,
+  programCarriesBaseline,
+  programSourceName,
+} from "./av-sync-probe";
 import { keepRecording, keepText, type Evidence } from "./av-sync-evidence";
 import {
   classifyAvSyncRun,
@@ -126,6 +139,62 @@ async function pollUntil<T>(
     last = await read();
   }
   return last;
+}
+
+/** What the gate reads of `GET /api/v1/program`. */
+interface ProgramView {
+  source: number | null;
+  health: { connections: number };
+}
+
+/**
+ * #221 lane 3: make cg OBS's probe scene show `SP-program` (`av-sync-probe.ts`):
+ * the scene and its one DistroAV receiver, created when missing (the
+ * receiver's settings copied from an existing cg OBS NDI input), put in the
+ * scene and re-pointed when they differ, never removed. Returns the source
+ * name it shows.
+ */
+async function ensureProbeScene(rec: ObsDriver): Promise<string> {
+  const template = (await rec.listInputs(NDI_INPUT_KIND)).find((n) => n !== AV_PROBE_INPUT);
+  const templateSettings = template ? await rec.inputSettings(template) : null;
+  const templateSource =
+    typeof templateSettings?.ndi_source_name === "string" ? templateSettings.ndi_source_name : null;
+  const wanted = programSourceName(process.env.COMPUTERNAME, templateSource);
+  if (!wanted) {
+    throw new Error(
+      "A/V gate: cannot name SP-program's NDI source — no COMPUTERNAME and no cg OBS NDI input to read the host from",
+    );
+  }
+  const sceneExists = (await rec.listScenes()).includes(AV_PROBE_SCENE);
+  const current = await rec.inputSettings(AV_PROBE_INPUT);
+  const inputSource =
+    current === null
+      ? undefined
+      : typeof current.ndi_source_name === "string"
+        ? current.ndi_source_name
+        : null;
+  const inputInScene =
+    sceneExists && current !== null && (await rec.sceneItemId(AV_PROBE_SCENE, AV_PROBE_INPUT)) !== null;
+  for (const step of probeSteps({ sceneExists, inputSource, inputInScene }, wanted)) {
+    console.log(`A/V gate: probe scene — ${step} (${AV_PROBE_SCENE}: ${wanted})`);
+    if (step === "create_scene") {
+      await rec.createScene(AV_PROBE_SCENE);
+    } else if (step === "create_input") {
+      const id = await rec.createInput(
+        AV_PROBE_SCENE,
+        AV_PROBE_INPUT,
+        NDI_INPUT_KIND,
+        probeInputSettings(templateSettings, wanted),
+      );
+      await rec.fitToCanvas(AV_PROBE_SCENE, id);
+    } else if (step === "add_to_scene") {
+      const id = await rec.addSceneItem(AV_PROBE_SCENE, AV_PROBE_INPUT);
+      await rec.fitToCanvas(AV_PROBE_SCENE, id);
+    } else {
+      await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: wanted });
+    }
+  }
+  return wanted;
 }
 
 /** Kill a child AND its children (python -> ffmpeg), which keep the recording open. */
@@ -186,8 +255,8 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   let scenes: ObsDriver | null = null;
   let recorder: ObsDriver | null = null;
   let initialScene: string | null = null;
-  // #221 B4 step 6: cg OBS's own program scene before the gate, restored in
-  // afterAll once the gate switched it (`cgSwitched`).
+  // #221 lane 3: cg OBS's own program scene before the gate, restored in
+  // afterAll once the gate switched it to the probe scene (`cgSwitched`).
   let cgInitialScene: string | null = null;
   let cgSwitched = false;
   let autoRemux = false;
@@ -321,19 +390,13 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           await ctx.dispose();
         }
       });
-      await step("restore the program scene", async () => {
-        if (!initialScene) return;
-        await driver.switchScene(initialScene);
-        expect(
-          await driver.currentProgramScene(),
-          `the A/V gate must restore the program scene "${initialScene}"`,
-        ).toBe(initialScene);
-      });
+      // #221 lane 3: cg OBS's scene FIRST. Its probe scene shows SP-program,
+      // so restoring the program to "OBS manuál" (cg OBS) while cg OBS still
+      // shows the probe would loop the picture.
       await step("restore cg OBS's program scene", async () => {
         if (!cgSwitched || !cgInitialScene) return;
-        // A manual scene restored through the facade above already put cg
-        // OBS back on it: no same-scene studio transition on cg OBS (its
-        // 2 s self-fade, and the #170 dropped-next-event state).
+        // Guarded: no same-scene studio transition on cg OBS (its 2 s
+        // self-fade, and the #170 dropped-next-event state).
         if ((await rec.currentProgramScene()) !== cgInitialScene) {
           await rec.switchScene(cgInitialScene);
         }
@@ -341,6 +404,14 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           await rec.currentProgramScene(),
           `the A/V gate must restore cg OBS's program scene "${cgInitialScene}"`,
         ).toBe(cgInitialScene);
+      });
+      await step("restore the program scene", async () => {
+        if (!initialScene) return;
+        await driver.switchScene(initialScene);
+        expect(
+          await driver.currentProgramScene(),
+          `the A/V gate must restore the program scene "${initialScene}"`,
+        ).toBe(initialScene);
       });
       await step("delete the recordings", async () => {
         // A StopRecord whose inactive-poll timed out still left its path.
@@ -400,31 +471,31 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         ),
       (s) => s.active_scene === baseline && s.active_playlist_ids.length === 1,
     );
-    // #221 B4 step 6: the recording is cg OBS's program, which SongPlayer no
-    // longer moves; put cg OBS on the same scene for the take (the file doc).
-    if ((await rec.currentProgramScene()) !== baseline) {
-      assertNotTornDown("cg OBS's scene switch");
-      cgSwitched = true;
-      await rec.switchScene(baseline);
-    }
-    // The take records cg OBS's sp-* input of the baseline's own NDI output.
-    // No receiver is expected on that output any more (#221), so nothing
-    // watches or recovers it: wait until the output has a receiver (cg OBS's
-    // input, once cg OBS shows the scene), else fail naming it, never as an
-    // unmeasurable recording. The count cannot tell cg OBS's receiver from
-    // another one.
+    // #221 lane 3: the take records SP-program through cg OBS's probe scene
+    // (the file doc), and only while SP-program carries the baseline playlist
+    // (never "OBS manuál": cg OBS would record itself).
     const baselinePid = status.active_playlist_ids[0];
+    const program = await getJson<ProgramView>(request, "/api/v1/program");
+    expect(
+      programCarriesBaseline(program.source, baselinePid),
+      `SP-program must carry the baseline playlist ${baselinePid} (got source ${program.source})`,
+    ).toBe(true);
+    const probeSource = await ensureProbeScene(rec);
+    const receiversBefore = program.health.connections;
+    let switchedNow = false;
+    if ((await rec.currentProgramScene()) !== AV_PROBE_SCENE) {
+      assertNotTornDown("cg OBS's probe scene switch");
+      cgSwitched = true;
+      switchedNow = true;
+      await rec.switchScene(AV_PROBE_SCENE);
+    }
+    // Wait until cg OBS's probe receiver is on SP-program (its receivers
+    // rose), else fail naming it, never as an unmeasurable recording.
     await pollUntil(
-      `a receiver on ${baseline}'s own NDI output (cg OBS's input, connections >= 1)`,
+      `cg OBS's probe receiver on ${probeSource} (SP-program's receivers above ${receiversBefore})`,
       30_000,
-      async () =>
-        (
-          await getJson<{ playlist_id: number; ndi_name?: string; connections: number }[]>(
-            request,
-            "/api/v1/ndi/health",
-          )
-        ).find((r) => r.playlist_id === baselinePid) ?? null,
-      (row) => (row?.connections ?? 0) >= 1,
+      async () => (await getJson<ProgramView>(request, "/api/v1/program")).health.connections,
+      (now) => probeReceiverAttached(switchedNow, receiversBefore, now),
     );
     const active = status.active_playlist_ids;
     const first = await getJson<HealthRow[]>(request, "/api/v1/ndi/health");
@@ -443,7 +514,8 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     const playlistId = active.find((id) => isPlayingWithFrames(health, id))!;
     const out = health.find((h) => h.playlist_id === playlistId)!;
     console.log(
-      `A/V gate: scene=${baseline} playlist=${playlistId} ndi=${out.ndi_name} ` +
+      `A/V gate: scene=${baseline} playlist=${playlistId} pipeline=${out.ndi_name} ` +
+        `recorded=${AV_PROBE_SCENE} (${probeSource}) ` +
         `frames_5s=${out.frames_submitted_last_5s} autoRemux=${autoRemux}`,
     );
 

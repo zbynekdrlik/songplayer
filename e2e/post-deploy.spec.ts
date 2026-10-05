@@ -334,7 +334,8 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * green. Every consumer takes SongPlayer's PROGRAM now (the Presenter,
    * strih and the stream `SP-program` over NDI; the LED wall `SP-program-MAX`
    * over Spout, gated by `post-deploy-max.spec.ts`), and cg OBS never shows a
-   * playlist scene again, so a playlist's own NDI output has no consumer.
+   * playlist scene again (and since #221 lane 3 a playlist has no NDI output
+   * of its own).
    * This gate polls `GET /api/v1/program` until a source is on program,
    * `SP-program` has `health.connections > 0` (`0` = dark, or not polled yet
    * right after a start; `-1` = no valid reading; keep waiting either way)
@@ -388,9 +389,9 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     // Wait for the WASM bundle to mount, then select the playlist's card in the
     // work area (#165 selector + single work area).
 
-    // (The NDI dark-wall gate — `connections > 0` for the on-program output —
-    // lives in its own dedicated test above, "on-program NDI output has a live
-    // receiver (#127)", so this Play-button test stays focused on the button.)
+    // (The NDI dark-wall gate — SP-program's `health.connections > 0` — lives
+    // in its own dedicated test above, "SP-program has a live NDI receiver",
+    // so this Play-button test stays focused on the button.)
 
     const card = await selectWorkspaceCard(page, pl.name);
 
@@ -689,8 +690,8 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * The dashboard's genlock badges must AGREE with whatever
    * `GET /api/v1/ndi/health` reports — a consistency check, NOT a hard-coded
    * state. #176 revised #164's rendering rule: the whole-box HEADER badge is now
-   * ALWAYS visible — while `genlock_pacing` is OFF (`pacing.enabled == false`,
-   * set by hand; the default is ON since #147) it shows the explicit grey `● GENLOCK OFF`
+   * ALWAYS visible — while no output reports pacing (`pacing.enabled == false`;
+   * #221 lane 3: pacing is the only path) it shows the explicit grey `● GENLOCK OFF`
    * (never hidden), so the owner can always tell at a glance whether SongPlayer
    * is genlocked. The PER-CARD badge keeps #164's "only where actionable" rule:
    * hidden while pacing is off, shown only on live (Playing/Paused) pacing-
@@ -727,7 +728,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const enabled = health.filter((o) => o.pacing?.enabled === true);
 
     if (enabled.length === 0) {
-      // #176: pacing disabled everywhere (set OFF by hand; the default is ON, #147) — the ALWAYS-visible
+      // #176: no output reports pacing (#221 lane 3: pacing is the only path) — the ALWAYS-visible
       // header badge shows the explicit grey `● GENLOCK OFF`, derived from the
       // live health (no pacing-enabled output), never hidden. The per-card badge
       // stays hidden (#164 "only where actionable").

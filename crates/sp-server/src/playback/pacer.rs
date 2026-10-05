@@ -17,9 +17,8 @@
 //! I/O is kept thin: the pacer OWNS its [`WallClock`] (a scheduling read at
 //! entry, an emit read right before the send so lateness includes decode time);
 //! the caller supplies `pull` (the next decoded frame) and a [`PacedSink`]
-//! (audio-before-video submission) — the paced consumer's `HandoffSink`
-//! (`paced_output.rs`, to the program bus) + the MF decoder in production,
-//! a recording fake + a synthetic stream over a settable clock in
+//! (audio-before-video submission) — `HandoffSink` (to the program bus) + the
+//! MF decoder in production, a recording fake + a synthetic stream over a settable clock in
 //! tests, so every emit/repeat/drop/catch-up/resync/re-latch decision is
 //! Linux-testable.
 
@@ -81,9 +80,8 @@ impl PacedFrame {
 }
 
 /// The sink the pacer emits through. `paced_output::HandoffSink` implements it
-/// in production (the boundary's pair, handed to the pipeline's consumer,
-/// which delivers it to the program bus); tests use a recording fake, or the
-/// `FrameSubmitter` over `MockNdiBackend` for a real-wire rig.
+/// in production (its consumer delivers each pair to the program bus); tests
+/// use a recording fake, or `FrameSubmitter` over `MockNdiBackend`.
 pub trait PacedSink {
     /// Emit one boundary: submit each chunk in `audio` (stamped `audio_tc_100ns`,
     /// the timeline instant of its first sample — the pacer passes the boundary
@@ -122,7 +120,7 @@ pub trait PacedSink {
     /// a one-shot [`PacedFrame`] over the borrowed pixels and delegates to
     /// [`emit_standby`](Self::emit_standby), so an `emit`-only sink still works;
     /// `HandoffSink` (and the tests' `FrameSubmitter`) OVERRIDE it to move the
-    /// `SharedFrame` on by `Arc` (no pixel copy). The standby pair (idle / pre-roll black, a starve fill, a held
+    /// `SharedFrame` on by `Arc`. The standby pair (idle / pre-roll black, a starve fill, a held
     /// seek frame, #147) goes through it by SHARED reference (a refcount bump).
     #[allow(clippy::too_many_arguments)]
     fn submit_shared(
