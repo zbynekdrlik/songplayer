@@ -86,8 +86,9 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   a decoder that finds no configuration on the device "must fall back to
   software decoding" (the device manager is withdrawn, the type
   renegotiated). So a `Hardware` reader can decode in software without any
-  error: the box's GPU without a decoder for a codec. (Not WARP: it refuses
-  the video device outright, so a reader on it falls back at open.)
+  error: the box's GPU without a decoder for a codec. (Not `windows-latest`'s
+  WARP: it refuses the video device at feature level 11.x, so a reader on it
+  falls back at open.)
 - `decode_path()` = the last picture's path, `None` before the first;
   `path_changes()` = how often a picture's path differed from the one
   before it, a fall back's too (`PathTracker::changes`; the bench's
@@ -182,13 +183,19 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   over the visible 160×120 (H.264 decoding is bit-exact). On the picked
   adapter it reports `hardware` or `software` (`assert_reported`: whatever
   `pick_adapter` finds on the runner, not pinned; with no GPU an open fall
-  back). On WARP (`open_hardware_on_warp`, doc-hidden) it must fall back at
-  OPEN with exactly `no video device: D3D11CreateDevice failed (HRESULT
-  0x887a0004)` (`assert_fell_back_at_open_on_warp`: mode `Hardware`, no
-  adapter), `requested` and `open_fallbacks` counted, every picture
-  `software` with `path_changes` 0: the CI test of a refused video device.
-  A WARP that one day makes the device fails it; then write the WARP tests
-  for the D3D path they reach. Seek parity: each reader decodes 60 pictures
+  back; its line goes straight to stderr, past libtest's capture, so every
+  CI log shows what the runner did). On WARP (`open_hardware_on_warp`,
+  doc-hidden) it must fall back at OPEN with exactly `no video device:
+  D3D11CreateDevice failed (HRESULT 0x887a0004)`
+  (`assert_fell_back_at_open_on_warp`: mode `Hardware`, no adapter),
+  `requested` and `open_fallbacks` +1 and `last_fallback` this one, every
+  picture `software` with `path_changes` 0: the CI test of a refused video
+  device. A WARP that one day makes the device fails it; then write the
+  WARP tests for the D3D path they reach. The counters are process-wide and
+  a binary's tests run in parallel, so every test that opens a `Hardware`
+  reader or injects a fall back holds the file's `COUNTERS` lock and pins
+  its deltas exactly (`> before` would pass on another test's count). Seek
+  parity: each reader decodes 60 pictures
   (past 1 900 ms), then seeks BACK to the middle; the fixture's one
   keyframe is at 0, so a real seek hands over a picture at or before the
   target (a seek that did nothing would hand over the 61st, ~2 000 ms), and
