@@ -64,15 +64,6 @@ pub enum EngineCommand {
     RemovePipeline {
         playlist_id: i64,
     },
-    /// #173: Operator/verification trigger for a single NDI dark-wall recovery
-    /// rung on one playlist, over the healthy OBS WebSocket. Backs the admin
-    /// `POST /api/v1/ndi/recover/{playlist_id}?step=...` endpoint. The engine
-    /// resolves the playlist's `ndi_output_name` and forwards
-    /// `ObsCommand::NudgeNdiReceiver`. Does NOT touch the automatic ladder state.
-    TriggerNdiRecovery {
-        playlist_id: i64,
-        step: crate::obs::ndi_recovery::RecoveryStep,
-    },
     /// #184 round G/G2: set ONE memory of the live mixer console — the three fader
     /// positions `[vokály, podklad, dabing]` for `kind` (song or dub). The engine
     /// writes them to the process-global `MixControl`, which republishes ONLY that

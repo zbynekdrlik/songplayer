@@ -1,12 +1,11 @@
 //! Windows-only paced heartbeat glue (#168 output-side split).
 //!
-//! The submit side itself — the emit→submit [`SharedHandoff`], the
+//! The output side itself — the emit→output [`SharedHandoff`], the
 //! [`HandoffSink`](crate::playback::paced_output::HandoffSink) the pacer emits
-//! through and the submit consumer — is the cross-platform
-//! `paced_output.rs`, so Linux tests drive it over `MockNdiBackend`. What stays
-//! here is the paced health heartbeat, which reads the submit-side snapshot
-//! (the submit thread owns the submitter) and sends the Windows pipeline's
-//! `PipelineEvent`. Box-verified, `mutants::skip` glue.
+//! through and the pipeline-lifetime consumer — is the cross-platform
+//! `paced_output.rs`, so Linux tests drive it. What stays here is the paced
+//! health heartbeat, which reads the output's snapshot and sends the Windows
+//! pipeline's `PipelineEvent`. Box-verified, `mutants::skip` glue.
 
 use std::time::Instant;
 
@@ -15,16 +14,13 @@ use crate::playback::paced_output::SharedHandoff;
 use crate::playback::pipeline::{PipelineEvent, classify_bad_poll};
 use crate::playback::submit_handoff::merge_pacing_stats;
 
-/// Emit a health heartbeat on the PACED path (#168), reading the submit-thread
-/// snapshot instead of the `FrameSubmitter` (which the submit thread owns for
-/// the song). Same `HealthSnapshot` event + bad-poll classification as
-/// `pipeline::emit_heartbeat`, but `late_frames` / `max_late_us` / `iter_p99` /
-/// `dropped` come from the merged pacer+submit stats, and the frame / connection
-/// / last-submit fields come from the submit snapshot. `nominal_fps` is the fixed
-/// genlock grid (the paced submitter carries `GENLOCK_GRID_FPS/1`); `source_fps`
-/// is the DECODER's rate (#168 r6b), passed in by the caller because the submit
-/// thread owns the submitter here — the lock rule reads `source_fps`, not the
-/// grid-valued `nominal_fps`.
+/// Emit a health heartbeat on the PACED path (#168), reading the paced
+/// output's snapshot (its consumer delivers the boundaries). `late_frames` /
+/// `max_late_us` / `iter_p99` / `dropped` come from the merged pacer + output
+/// stats, and the frame / last-delivery fields from the output's snapshot.
+/// `nominal_fps` is the fixed genlock grid; `source_fps` is the DECODER's rate
+/// (#168 r6b), passed in by the caller — the lock rule reads `source_fps`, not
+/// the grid-valued `nominal_fps`.
 #[cfg_attr(test, mutants::skip)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_heartbeat_paced(
@@ -40,8 +36,8 @@ pub(crate) fn emit_heartbeat_paced(
     prev_total: &mut u64,
     prev_instant: &mut Instant,
 ) {
-    let (submit, connections, last_submit_ts, paced_submit) = handoff.snapshot();
-    let pacing = merge_pacing_stats(pacer_stats, &submit, paced_submit);
+    let (submit, last_submit_ts) = handoff.snapshot();
+    let pacing = merge_pacing_stats(pacer_stats, &submit);
 
     let total = submit.submitted;
     let now = Instant::now();
@@ -60,7 +56,6 @@ pub(crate) fn emit_heartbeat_paced(
     let _ = event_tx.send((
         playlist_id,
         PipelineEvent::HealthSnapshot {
-            connections,
             frames_submitted_total: total,
             frames_submitted_last_5s: window_frames as u32,
             observed_fps,
@@ -72,19 +67,11 @@ pub(crate) fn emit_heartbeat_paced(
             reported_state: state,
             pacing,
             audio,
-            // #168 r2: the paced path has no SDK-clocked decode loop, so its
-            // decode/submit/audio STAGE maxima stay 0 — but the per-call
-            // send_video_async gauge DOES apply, so carry it into the SAME
-            // `submit_call_us_max`/`_p99` fields the SDK-clocked `pipeline:
-            // loop-stats` line uses (identical naming), so a pacing-ON box test
-            // reads the per-frame SDK submit cost per minute from that line.
-            // #147 r9: + SongPlayer's own page faults/min + working set (MiB),
-            // sampled process-wide at most once a minute (`proc_mem::gauge`).
+            // #147 r9: SongPlayer's own page faults/min + working set (MiB),
+            // sampled process-wide at most once a minute (`proc_mem::gauge`),
+            // on the per-minute `pipeline: loop-stats` line.
             loop_stats: crate::playback::loop_stats::LoopStats {
-                submit_call_us_max: paced_submit.submit_call_us_max,
-                submit_call_us_p99: paced_submit.submit_call_us_p99,
                 proc_mem: crate::playback::proc_mem::gauge(),
-                ..Default::default()
             },
         },
     ));

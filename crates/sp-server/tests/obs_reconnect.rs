@@ -9,7 +9,6 @@
 
 mod common;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,10 +33,8 @@ async fn obs_client_reconnects_after_server_initiated_clean_close() {
     };
     let fake_obs = FakeObsServer::spawn_with_state(fake_state).await;
 
-    let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
     let (obs_event_tx, _obs_event_rx) = broadcast::channel::<obs::ObsEvent>(16);
-    let (_obs_rebuild_tx, obs_rebuild_rx) = broadcast::channel::<()>(4);
     let (_shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
 
     let _client = obs::ObsClient::spawn(
@@ -45,11 +42,8 @@ async fn obs_client_reconnects_after_server_initiated_clean_close() {
             url: fake_obs.url(),
             password: None,
         },
-        pool.clone(),
-        ndi_sources,
         obs_state,
         obs_event_tx,
-        obs_rebuild_rx,
         shutdown_rx,
     );
 

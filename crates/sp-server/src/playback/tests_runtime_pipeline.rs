@@ -199,3 +199,24 @@ async fn remove_noop_when_absent() {
     engine.remove_pipeline(123); // must not panic
     assert!(engine.pipelines.is_empty());
 }
+
+/// #221 lane 3: a pipeline has no NDI sender of its own, and its dashboard
+/// preview (#15/#178) stays: creating it registers both preview taps, the
+/// stream tap with the paced decode seam's A/V lead
+/// (`PACED_AUDIO_LEAD_MS − 40` = 210 ms), and labels it with the playlist's
+/// output name.
+#[tokio::test]
+async fn a_created_pipeline_registers_its_preview_taps_with_the_paced_lead() {
+    let (mut engine, _pool) = engine_with_migrated_pool().await;
+    engine.ensure_pipeline(515, "SP-young");
+    assert!(
+        engine.preview_registry.get(515).is_some(),
+        "the JPEG preview tap (#15)"
+    );
+    let stream = engine
+        .preview_registry
+        .stream(515)
+        .expect("the A/V stream tap (#178)");
+    assert_eq!(stream.shared().lead_ms(), 210);
+    assert_eq!(engine.pipelines[&515].pipeline.output_name(), "SP-young");
+}

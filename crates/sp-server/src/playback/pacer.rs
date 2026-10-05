@@ -852,8 +852,8 @@ impl Pacer {
             // #224 part 2: the same wall's relabel and its last remainder.
             fleet_shift_slots: self.wall.shift().slots,
             last_regrid_remainder_us: self.wall.shift().last_remainder_100ns / 10,
-            // #168 r2: the pacer does not submit — the paced submit thread fills
-            // `submit_call_us_max`/`_p99` via `merge_pacing_stats`; 0 here.
+            // The paced output's consumer fills its own counters via
+            // `merge_pacing_stats`.
             ..Default::default()
         }
     }

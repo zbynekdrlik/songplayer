@@ -165,22 +165,16 @@ pub fn to_stereo(samples: &[f32], channels: u32) -> Option<Vec<f32>> {
     }
 }
 
-/// The decode-seam A/V-sync lead (ms) for a pipeline's clocking path (#178
-/// round 2). On the SDK-clocked path (`genlock_pacing == false`, so the #192
-/// wall-clock emitter carries the audio) the decoder opens with a 1500 ms audio
-/// read-ahead, so at the decode seam the audio LEADS the video by that much; the
+/// The decode-seam A/V-sync lead (ms) (#178 round 2): the paced decoder reads
+/// `PACED_AUDIO_LEAD_MS` (250 ms) of audio ahead of each frame (#148 v4), so at
+/// the decode seam the audio LEADS the video by 250 − 40 = 210 ms, and the
 /// encoder's audio feeder re-syncs by HOLDING each block that long before
 /// writing it (#184 round G3, `preview_audio_hold::AudioHold` — round 3 folded
-/// it into a silence preroll, which parked the whole lead in the socket). The
-/// paced path has no emitter, but its decoder reads `PACED_AUDIO_LEAD_MS`
-/// (250 ms) ahead (#148 v4), so its seam audio leads by 250 − 40 = 210 ms.
-pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
-    let decoder_lead_ms = if genlock_pacing {
-        crate::playback::pacer::PACED_AUDIO_LEAD_MS
-    } else {
-        crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(true)
-    };
-    (decoder_lead_ms - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS) as u32
+/// it into a silence preroll, which parked the whole lead in the socket). #221
+/// lane 3 deleted the SDK-clocked path and its 1500 ms emitter read-ahead.
+pub fn decode_seam_lead_ms() -> u32 {
+    (crate::playback::pacer::PACED_AUDIO_LEAD_MS - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS)
+        as u32
 }
 
 /// How many interleaved-stereo f32 samples of SILENCE the audio feeder prepends
@@ -189,7 +183,7 @@ pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
 /// input had already been feeding when the audio input connected (feed-on-connect
 /// opens video first), capped at 5 s so a late-connecting audio input can never
 /// prepend an unbounded silence; `lead_ms` is the decode-seam A/V lead
-/// ([`lead_ms_for`]) that the SDK-clocked emitter's read-ahead introduces —
+/// ([`decode_seam_lead_ms`]) that the decoder's audio read-ahead introduces —
 /// since #184 round G3 the feeder passes 0 here and HOLDS the lead instead
 /// (`preview_audio_hold`), so the socket never carries it. At
 /// 48 kHz stereo each millisecond is `48 * 2` interleaved f32 samples. Replaces

@@ -67,9 +67,5 @@ pub(crate) async fn dispatch(engine: &mut PlaybackEngine, cmd: EngineCommand) {
         EngineCommand::SetMix { kind, faders } => {
             engine.set_mix(kind, faders).await; // #184 round G/G2
         }
-        EngineCommand::TriggerNdiRecovery { playlist_id, step } => {
-            // #173: operator/verification one-shot recovery rung.
-            engine.trigger_ndi_recovery(playlist_id, step).await;
-        }
     }
 }

@@ -1,29 +1,31 @@
-//! The paced NDI submit side: the emit→submit handoff and the submit
-//! consumer, cross-platform so Linux tests drive them over `MockNdiBackend`.
+//! The paced output of a playlist's pipeline: the emit→output handoff and the
+//! pipeline-lifetime consumer that delivers every boundary to the program bus,
+//! cross-platform so Linux tests drive them.
 //!
-//! **#168 output-side split.** The `genlock_pacing` emit thread used to perform
-//! the audio-before-video NDI submit (`send_audio` + `send_video_async`) INLINE
-//! at each grid boundary. Box test 5 (2026-09-15, stems child resident) proved
-//! that submit stalls 25 ms median / 90 ms p99 under the child's memory
-//! pressure, so a dedicated submit thread drains a bounded [`SharedHandoff`]:
-//! the emit thread only stamps a frame and hands it over in ~µs.
+//! **#221 lane 3: a playlist has no NDI output of its own.** Every consumer
+//! takes SongPlayer's PROGRAM (`SP-program`, `SP-program-MAX`, VBAN), so the
+//! consumer's last hop is the #209 program bus alone ([`BoundaryOut`]; in
+//! production [`InstalledBus`]). Before, it sent each boundary to the
+//! playlist's own NDI sender first and offered the same job to the bus after.
+//!
+//! **#168 output-side split.** The `genlock_pacing` emit thread used to
+//! perform the NDI submit INLINE at each grid boundary, and it stalled under a
+//! resident heavy child; so the emit thread only stamps a frame and hands it
+//! over in ~µs through a bounded [`SharedHandoff`], and a dedicated consumer
+//! thread takes it from there.
 //!
 //! **#147 pipeline-lifetime consumer (design record 5845527884, Approach 1
-//! (a)).** The submit thread used to be spawned and joined per song and per
-//! idle stretch, so nobody serviced the grid between the old scope's join and
-//! the next pre-roll (51–84 ms on the box, 1–3 skipped slots, each a
-//! camera-box `stamp_gap`). Now ONE [`PacedOutput`] thread lives for the whole
-//! pipeline (owned by the pipeline's `FrameSubmitter`, which drops it first).
-//! A song or idle scope only ATTACHES a feeder ([`PacedFeed`]) for its
-//! lifetime. While nothing is attached, the consumer services every boundary
-//! itself once its deadline passes (`paced_grid.rs`): the last submitted
-//! picture (or the standby black) + one silent block, stamped exactly on that
-//! boundary, through the same submit + #209 program-bus path as any job. The
-//! next pacer continues right after the last serviced stamp, so the stamps are
-//! contiguous across every song change, pause and idle.
+//! (a)).** ONE consumer thread lives for the whole pipeline
+//! ([`PipelineOutput`] spawns it on the first paced scope). A song or idle
+//! scope only ATTACHES a feeder ([`PacedFeed`]) for its lifetime. While nothing
+//! is attached, the consumer services every boundary itself once its deadline
+//! passes (`paced_grid.rs`): the last delivered picture (or the standby black)
+//! + one silent block, stamped exactly on that boundary, delivered like any
+//! job. The next pacer continues right after the last serviced stamp, so the
+//! stamps are contiguous across every song change, pause and idle.
 //!
 //! The DECISIONS are pure and Linux-tested (`submit_handoff.rs`,
-//! `paced_grid.rs`, the [`PacedConsumer`] methods over `MockNdiBackend`); the
+//! `paced_grid.rs`, the [`PacedConsumer`] methods over a recording output); the
 //! blocking waits and the thread lifecycle are `mutants::skip` glue.
 
 use std::sync::{Arc, Condvar, Mutex};
@@ -34,24 +36,17 @@ use tracing::{info, warn};
 
 use sp_core::genlock::GENLOCK_GRID_FPS;
 use sp_core::genlock::audio::samples_per_boundary;
-use sp_ndi::{AudioFrame, NdiBackend};
+use sp_ndi::AudioFrame;
 
 use crate::playback::fleet_shift;
-use crate::playback::frame_buf::SharedFrame;
+use crate::playback::frame_buf::{BlackNv12, SharedFrame};
 use crate::playback::paced_grid::{GridStep, PacedGrid};
 use crate::playback::pacer::{PacedFrame, PacedSink};
-use crate::playback::program_bus;
+use crate::playback::program_bus::{self, ProgramBus};
 use crate::playback::submit_handoff::{
-    HandoffOutcome, PacedSubmitStats, SUBMIT_HANDOFF_BOUND, SubmitCounters, SubmitJob, SubmitQueue,
-    paced_submit_snapshot, submit_late_100ns,
+    HandoffOutcome, SUBMIT_HANDOFF_BOUND, SubmitCounters, SubmitJob, SubmitQueue, submit_late_100ns,
 };
-use crate::playback::submitter::FrameSubmitter;
 use crate::playback::wallclock::WallClock;
-
-/// The submit thread polls the receiver connection count off the SDK once every
-/// this many submitted frames (~1 s at 30 fps) — a cheap cached `timeout=0` read,
-/// kept off the per-frame path just to bound its cost.
-const CONN_POLL_EVERY: u32 = 30;
 
 /// The audio rate of a fill's silent block (the paced grid's rate, #148).
 const FILL_AUDIO_RATE_HZ: u32 = 48_000;
@@ -60,9 +55,9 @@ const FILL_AUDIO_RATE_HZ: u32 = 48_000;
 /// pacer's standby silence (every playlist file decodes to stereo).
 const FILL_DEFAULT_CHANNELS: u32 = 2;
 
-/// What the submit consumer does next.
+/// What the consumer does next.
 pub enum ConsumerStep {
-    /// Submit this job a pacer handed over.
+    /// Deliver this job a pacer handed over.
     Submit(SubmitJob),
     /// Service this boundary itself (no pacer attached, its deadline passed).
     /// `skipped` > 0 only after a > 8-slot resync.
@@ -80,16 +75,10 @@ struct HandoffState {
     /// #147: the output's own boundary clock (last serviced stamp, attach
     /// state, fill telemetry).
     grid: PacedGrid,
-    /// #168 r2: the worst per-call `send_video_async` `(max, p99)` (µs) the submit
-    /// thread has drained from its `FrameSubmitter.submit_times` since the last
-    /// heartbeat — folded worst-of on the connection-poll cadence, drained +
-    /// reset by `snapshot()` so it is a per-heartbeat window.
-    paced_submit: PacedSubmitStats,
-    /// Latest receiver connection count (the submit thread polls it off the SDK).
-    connections: i32,
-    /// `Instant` of the last real submit, for the heartbeat's staleness check
-    /// (kept here, not in the pure counters, because `Instant` is not
-    /// deterministically constructible in the Linux unit tests).
+    /// `Instant` of the last delivered boundary, for the heartbeat's
+    /// staleness check (kept here, not in the pure counters, because
+    /// `Instant` is not deterministically constructible in the Linux unit
+    /// tests).
     last_submit_instant: Option<Instant>,
     /// The pipeline is ending: drain the queue, then exit.
     stop: bool,
@@ -122,7 +111,7 @@ impl HandoffState {
     /// A pacer starts feeding: the grid stops filling, and the pacer is told
     /// the newest stamp already on its way out — the last one the consumer
     /// serviced OR a job still queued (at a natural song end the previous
-    /// pacer's EOS-tail boundary can sit behind a slow submit when the idle
+    /// pacer's EOS-tail boundary can sit behind the consumer when the idle
     /// scope attaches). Continuing after anything less would re-emit a
     /// queued stamp: a stale drop, or a coalesce into a real stamp hole.
     fn attach(&mut self) -> Option<i64> {
@@ -130,7 +119,7 @@ impl HandoffState {
         self.grid.attach_with_queued(queued)
     }
 
-    /// The submit counters with the grid telemetry folded in.
+    /// The counters with the grid telemetry folded in.
     fn counters(&self) -> SubmitCounters {
         let mut counters = self.counters.clone();
         counters.consumer_fill_pairs = self.grid.fill_pairs();
@@ -146,10 +135,10 @@ pub fn wait_before_fill(deadline_100ns: i64, now_100ns: i64) -> Duration {
     Duration::from_nanos(ns as u64)
 }
 
-/// Thread-safe wrapper around the pure handoff queue, the submit counters and
-/// the #147 grid bookkeeping: one `Mutex` guarding all three, plus a
-/// `not_empty` `Condvar` so the consumer blocks (never spins) while nothing is
-/// queued and no fill is due.
+/// Thread-safe wrapper around the pure handoff queue, the counters and the
+/// #147 grid bookkeeping: one `Mutex` guarding all three, plus a `not_empty`
+/// `Condvar` so the consumer blocks (never spins) while nothing is queued and
+/// no fill is due.
 pub struct SharedHandoff {
     inner: Mutex<HandoffState>,
     not_empty: Condvar,
@@ -163,8 +152,6 @@ impl SharedHandoff {
                 queue: SubmitQueue::new(bound),
                 counters: SubmitCounters::new(),
                 grid: PacedGrid::new(GENLOCK_GRID_FPS),
-                paced_submit: PacedSubmitStats::default(),
-                connections: 0,
                 last_submit_instant: None,
                 stop: false,
             }),
@@ -172,9 +159,9 @@ impl SharedHandoff {
         }
     }
 
-    /// Emit thread: hand a stamped frame to the submit thread (~µs). A full
-    /// handoff coalesces to the freshest stamp and records one submit-side drop
-    /// (`handoff_policy`). Poison → no-op (the submit thread is gone).
+    /// Emit thread: hand a stamped frame to the consumer (~µs). A full handoff
+    /// coalesces to the freshest stamp and records one drop
+    /// (`handoff_policy`). Poison → no-op (the consumer is gone).
     #[cfg_attr(test, mutants::skip)]
     pub fn offer(&self, job: SubmitJob) {
         if let Ok(mut st) = self.inner.lock() {
@@ -194,7 +181,7 @@ impl SharedHandoff {
         }
     }
 
-    /// Submit thread: block until there is a job to submit, a boundary to
+    /// Consumer thread: block until there is a job to deliver, a boundary to
     /// fill, or stop + drained (`Exit`). A pending fill deadline bounds the
     /// wait (`wait_timeout`); `now` reads the consumer's wall clock. Never
     /// returns [`ConsumerStep::Wait`]. Poison → `Exit`.
@@ -243,7 +230,8 @@ impl SharedHandoff {
         }
     }
 
-    /// Frames submitted so far (jobs + fills), the heartbeat's fps baseline.
+    /// Boundaries delivered so far (jobs + fills), the heartbeat's fps
+    /// baseline.
     pub fn submitted(&self) -> u64 {
         self.inner
             .lock()
@@ -251,8 +239,8 @@ impl SharedHandoff {
             .unwrap_or(0)
     }
 
-    /// Submit thread: record one submitted frame's honest lateness + SDK cost and
-    /// stamp the last-submit instant. Poison → no-op.
+    /// Consumer thread: record one delivered boundary's honest lateness + its
+    /// delivery cost and stamp the last-delivery instant. Poison → no-op.
     #[cfg_attr(test, mutants::skip)]
     fn record_submit(&self, late_100ns: i64, cost_100ns: i64, submit_done_100ns: i64) {
         if let Ok(mut st) = self.inner.lock() {
@@ -262,44 +250,19 @@ impl SharedHandoff {
         }
     }
 
-    /// Submit thread: store the latest receiver connection count.
+    /// Emit thread (heartbeat): snapshot the counters (with the #147 grid
+    /// telemetry) and the last-delivery instant for the merged health doc.
+    /// Poison → defaults.
     #[cfg_attr(test, mutants::skip)]
-    fn set_connections(&self, n: i32) {
-        if let Ok(mut st) = self.inner.lock() {
-            st.connections = n;
-        }
-    }
-
-    /// Submit thread: fold one drained `(max, p99)` submit-call sub-window into
-    /// the per-heartbeat gauge (worst-of, `paced_submit_snapshot`). Called on the
-    /// connection-poll cadence right after draining `FrameSubmitter.submit_times`
-    /// (#168 r2). Poison → no-op.
-    #[cfg_attr(test, mutants::skip)]
-    fn observe_submit_call(&self, max: u64, p99: u64) {
-        if let Ok(mut st) = self.inner.lock() {
-            st.paced_submit = paced_submit_snapshot(st.paced_submit, max, p99);
-        }
-    }
-
-    /// Emit thread (heartbeat): snapshot the submit counters (with the #147
-    /// grid telemetry), connection count, last-submit instant, and the
-    /// per-window submit-call gauge for the merged health doc. The submit-call
-    /// gauge is DRAINED (reset to default) so each heartbeat sees the window
-    /// since the last one (#168 r2). Poison → defaults.
-    #[cfg_attr(test, mutants::skip)]
-    pub fn snapshot(&self) -> (SubmitCounters, i32, Option<Instant>, PacedSubmitStats) {
+    pub fn snapshot(&self) -> (SubmitCounters, Option<Instant>) {
         match self.inner.lock() {
-            Ok(mut st) => {
-                let paced = st.paced_submit;
-                st.paced_submit = PacedSubmitStats::default();
-                (st.counters(), st.connections, st.last_submit_instant, paced)
-            }
-            Err(_) => (SubmitCounters::new(), 0, None, PacedSubmitStats::default()),
+            Ok(st) => (st.counters(), st.last_submit_instant),
+            Err(_) => (SubmitCounters::new(), None),
         }
     }
 
-    /// The pipeline is ending: wake the consumer, which drains the queue,
-    /// flushes and exits. IDEMPOTENT (a second call only re-notifies).
+    /// The pipeline is ending: wake the consumer, which drains the queue and
+    /// exits. IDEMPOTENT (a second call only re-notifies).
     #[cfg_attr(test, mutants::skip)]
     pub fn stop(&self) {
         if let Ok(mut st) = self.inner.lock() {
@@ -346,14 +309,12 @@ impl Drop for PacedFeed<'_> {
     }
 }
 
-/// The [`PacedSink`] the pacer emits through on the paced path (#168). Instead of
-/// the inline blocking NDI submit, it packages the stamped frame + boundary audio
-/// into a [`SubmitJob`] and hands it to the [`SharedHandoff`] in ~µs — so the
-/// emit thread never blocks on `send_video_async`. The pacer keeps its own
-/// `last_frame` clone for the starvation repeat, so the job takes the frame by
-/// `Arc` clone (no pixel copy, #203 2b). A decoder pair ([`PacedSink::emit`])
-/// is marked `live`, a standby pair ([`PacedSink::emit_standby`]) is not
-/// (#215 cue gate).
+/// The [`PacedSink`] the pacer emits through on the paced path (#168): it
+/// packages the stamped frame + boundary audio into a [`SubmitJob`] and hands
+/// it to the [`SharedHandoff`] in ~µs. The pacer keeps its own `last_frame`
+/// clone for the starvation repeat, so the job takes the frame by `Arc` clone
+/// (no pixel copy, #203 2b). A decoder pair ([`PacedSink::emit`]) is marked
+/// `live`, a standby pair ([`PacedSink::emit_standby`]) is not (#215 cue gate).
 pub struct HandoffSink<'a> {
     handoff: &'a SharedHandoff,
 }
@@ -398,42 +359,76 @@ pub struct Picture {
     pub video: SharedFrame,
 }
 
-/// The pipeline-lifetime submit consumer (#147): owns the submit side's
-/// `FrameSubmitter` (built on a non-owning twin of the pipeline's NDI sender)
-/// and its own wall clock, and remembers the last submitted picture so a
-/// boundary it fills holds it.
-pub struct PacedConsumer<B: NdiBackend> {
-    submitter: FrameSubmitter<B>,
-    playlist_id: i64,
-    wall: WallClock,
-    /// The last submitted picture; a fill holds it.
-    held: Option<Picture>,
-    /// The standby black a fill shows when nothing was submitted yet.
-    black: Picture,
-    /// The channel layout of the last submitted audio block (the fill's
-    /// silence follows it).
-    channels: u32,
-    since_conn_poll: u32,
+/// Where the consumer delivers each serviced boundary (#221 lane 3): the
+/// program bus in production ([`InstalledBus`]), a recorder in the tests.
+pub trait BoundaryOut {
+    /// Deliver playlist `playlist_id`'s boundary `job`.
+    fn deliver(&mut self, playlist_id: i64, job: SubmitJob);
 }
 
-impl<B: NdiBackend> PacedConsumer<B> {
-    /// A consumer submitting through `submitter` on `wall`, filling with
-    /// `black` until the first job.
-    pub fn new(
-        submitter: FrameSubmitter<B>,
-        playlist_id: i64,
-        wall: WallClock,
-        black: Picture,
-    ) -> Self {
+/// Offer `job` to `bus` when playlist `playlist_id` can own a program
+/// boundary. Every paced source reports its progress on every boundary
+/// (`ProgramBus::touch`, program candidate or not, so a source that is cut to
+/// is already known to be live); a source that cannot own one pays that one
+/// lock and nothing else. Returns what the bus did, `None` when it was not
+/// offered.
+pub fn offer_to_bus(
+    bus: &ProgramBus,
+    playlist_id: i64,
+    job: SubmitJob,
+) -> Option<program_bus::OfferOutcome> {
+    if !bus.touch(playlist_id, job.video_tc_100ns) {
+        return None;
+    }
+    Some(bus.offer(playlist_id, job))
+}
+
+/// The production [`BoundaryOut`]: the process-wide program bus. It is
+/// installed by `start_program`, after the startup pipelines exist, so it is
+/// looked up on every boundary; before it is installed a boundary goes
+/// nowhere.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InstalledBus;
+
+impl BoundaryOut for InstalledBus {
+    /// mutants::skip — the process-wide bus is a `OnceLock` no unit test can
+    /// install for itself (one per test binary); the decision is
+    /// [`offer_to_bus`], tested on a bus of its own.
+    #[cfg_attr(test, mutants::skip)]
+    fn deliver(&mut self, playlist_id: i64, job: SubmitJob) {
+        if let Some(bus) = program_bus::installed() {
+            offer_to_bus(bus, playlist_id, job);
+        }
+    }
+}
+
+/// The pipeline-lifetime consumer (#147): delivers every job and every fill
+/// to its [`BoundaryOut`] on its own wall clock, and remembers the last
+/// delivered picture so a boundary it fills holds it.
+pub struct PacedConsumer<O: BoundaryOut> {
+    out: O,
+    playlist_id: i64,
+    wall: WallClock,
+    /// The last delivered picture; a fill holds it.
+    held: Option<Picture>,
+    /// The standby black a fill shows when nothing was delivered yet.
+    black: Picture,
+    /// The channel layout of the last delivered audio block (the fill's
+    /// silence follows it).
+    channels: u32,
+}
+
+impl<O: BoundaryOut> PacedConsumer<O> {
+    /// A consumer of playlist `playlist_id` delivering to `out` on `wall`,
+    /// filling with `black` until the first job.
+    pub fn new(out: O, playlist_id: i64, wall: WallClock, black: Picture) -> Self {
         Self {
-            submitter,
+            out,
             playlist_id,
             wall,
             held: None,
             black,
             channels: FILL_DEFAULT_CHANNELS,
-            // Poll the connection count on the very first submit.
-            since_conn_poll: CONN_POLL_EVERY,
         }
     }
 
@@ -442,8 +437,8 @@ impl<B: NdiBackend> PacedConsumer<B> {
         self.wall.now_100ns()
     }
 
-    /// Carry out one step: submit the job, or fill the boundary with the held
-    /// picture + one silent block. `Wait` / `Exit` do nothing.
+    /// Carry out one step: deliver the job, or fill the boundary with the
+    /// held picture + one silent block. `Wait` / `Exit` do nothing.
     pub fn serve(&mut self, handoff: &SharedHandoff, step: ConsumerStep) {
         match step {
             ConsumerStep::Submit(job) => self.submit(handoff, job),
@@ -458,12 +453,9 @@ impl<B: NdiBackend> PacedConsumer<B> {
     /// The fill for boundary `stamp_100ns`: the held picture (else the
     /// standby black) + one silent `samples_per_boundary` block in the last
     /// audio layout, BOTH stamped exactly on that boundary (design record
-    /// 5845527884). The fill leaves a grace after its boundary; a raw-wall
-    /// audio stamp (§6) would put that ~8 ms excursion into the receiver's
-    /// audio timeline and A/V pairing for every filled slot. Every paced
-    /// sender stamps its audio block on its boundary the same way (#224). The
-    /// fill is the boundary's own slot of silence, never a
-    /// live pair (#215 cue gate).
+    /// 5845527884): every paced source stamps its audio block on its boundary
+    /// (#224). The fill is the boundary's own slot of silence, never a live
+    /// pair (#215 cue gate).
     fn fill_job(&self, stamp_100ns: i64) -> SubmitJob {
         let picture = self.held.as_ref().unwrap_or(&self.black);
         let samples = samples_per_boundary(FILL_AUDIO_RATE_HZ as i64, GENLOCK_GRID_FPS);
@@ -497,67 +489,27 @@ impl<B: NdiBackend> PacedConsumer<B> {
         }
     }
 
-    /// Submit one job (audio first, then the async NV12 send at its stamp),
-    /// offer it to the #209 program bus, and record the honest submit-side
-    /// lateness + SDK cost.
+    /// Deliver one job to the output and record its honest lateness (stamp →
+    /// delivery start) + the delivery's cost.
     fn submit(&mut self, handoff: &SharedHandoff, job: SubmitJob) {
         let submit_start = self.wall.now_100ns();
         let late = submit_late_100ns(job.stamp_boundary_100ns(), submit_start);
-        // #209: the program bus gets the SAME boundary job (an Arc bump of the
-        // frame + the audio block, same stamps) — copied before the submit below
-        // moves the frame, offered right after it. A fill is offered like a
-        // standby pair. Only a source that can own a program boundary pays.
-        let pid = self.playlist_id;
-        let program = program_bus::installed()
-            .and_then(|bus| program_bus::program_copy(bus, pid, &job).map(|c| (bus, c)));
         self.hold(&job);
-        // `job.video` is the shared frame (#203 2b): moved straight into the
-        // submitter's async holdover, a refcount hold, no copy.
-        self.submitter.submit_frame_at_boundary_owned(
-            job.width,
-            job.height,
-            job.stride,
-            job.video,
-            &job.audio,
-            job.video_tc_100ns,
-            job.audio_tc_100ns,
-        );
+        self.out.deliver(self.playlist_id, job);
         let submit_done = self.wall.now_100ns();
         // `record_submit` floors a negative cost at 0.
         handoff.record_submit(late, submit_done - submit_start, submit_done);
-        if let Some((bus, copy)) = program {
-            bus.offer(pid, copy);
-        }
-        self.since_conn_poll += 1;
-        if self.since_conn_poll >= CONN_POLL_EVERY {
-            handoff.set_connections(self.submitter.sender().get_no_connections(0));
-            // #168 r2: drain this ~1 s window's per-call send_video_async gauge
-            // and fold it worst-of into the snapshot for the heartbeat.
-            let (call_max, call_p99) = self.submitter.drain_submit_call_us();
-            handoff.observe_submit_call(call_max, call_p99);
-            self.since_conn_poll = 0;
-        }
         self.wall.tick();
-    }
-
-    /// Release the async double-buffer (the pipeline is ending).
-    #[cfg_attr(test, mutants::skip)]
-    fn finish(mut self) {
-        self.submitter.flush();
-        info!(
-            playlist_id = self.playlist_id,
-            "paced submit consumer: drained + flushed"
-        );
     }
 }
 
-/// The pipeline-lifetime submit thread's loop (#147): submit every job, fill
-/// every detached boundary once its deadline passes, and on stop drain, flush
+/// The pipeline-lifetime consumer thread's loop (#147): deliver every job,
+/// fill every detached boundary once its deadline passes, and on stop drain
 /// and exit. Logging stays bounded however long a window lasts: ONE INFO line
 /// at a window's first fill, one when the next job ends it (with the count),
 /// DEBUG per fill in between, and a WARN on a > 8-slot resync.
 #[cfg_attr(test, mutants::skip)]
-pub fn run_paced_consumer<B: NdiBackend>(mut consumer: PacedConsumer<B>, handoff: &SharedHandoff) {
+pub fn run_paced_consumer<O: BoundaryOut>(mut consumer: PacedConsumer<O>, handoff: &SharedHandoff) {
     let pid = consumer.playlist_id;
     let mut window_fills: u64 = 0;
     loop {
@@ -609,27 +561,26 @@ pub fn run_paced_consumer<B: NdiBackend>(mut consumer: PacedConsumer<B>, handoff
         }
         consumer.serve(handoff, step);
     }
-    consumer.finish();
+    info!(playlist_id = pid, "paced output: consumer drained + stopped");
 }
 
-/// The pipeline-lifetime paced submit thread (#147), owned by the pipeline's
-/// `FrameSubmitter`. Dropping it stops the consumer (drain, flush) and joins
-/// it — the `FrameSubmitter` drops it BEFORE its owning NDI sender.
+/// The pipeline-lifetime consumer thread (#147). Dropping it stops the
+/// consumer (drain) and joins it.
 pub struct PacedOutput {
     handoff: Arc<SharedHandoff>,
     join: Option<JoinHandle<()>>,
 }
 
 impl PacedOutput {
-    /// Spawn the consumer thread `paced-submit-<playlist>`.
+    /// Spawn the consumer thread `paced-output-<playlist>`.
     #[cfg_attr(test, mutants::skip)]
-    pub fn spawn<B: NdiBackend + 'static>(consumer: PacedConsumer<B>) -> Self {
+    pub fn spawn<O: BoundaryOut + Send + 'static>(consumer: PacedConsumer<O>) -> Self {
         let handoff = Arc::new(SharedHandoff::new(SUBMIT_HANDOFF_BOUND));
         let thread_handoff = handoff.clone();
         let join = std::thread::Builder::new()
-            .name(format!("paced-submit-{}", consumer.playlist_id))
+            .name(format!("paced-output-{}", consumer.playlist_id))
             .spawn(move || run_paced_consumer(consumer, &thread_handoff))
-            .expect("spawn paced submit thread");
+            .expect("spawn paced output thread");
         Self {
             handoff,
             join: Some(join),
@@ -642,8 +593,8 @@ impl PacedOutput {
     }
 
     /// Whether the consumer thread has exited: it only does on stop — or on a
-    /// panic, which the pipeline's next scope then recovers from by respawning
-    /// (`FrameSubmitter::paced_handoff`).
+    /// panic, which the pipeline's next scope then recovers from by
+    /// respawning ([`PipelineOutput::handoff`]).
     pub fn is_finished(&self) -> bool {
         self.join.as_ref().is_none_or(JoinHandle::is_finished)
     }
@@ -657,12 +608,82 @@ impl Drop for PacedOutput {
             && join.join().is_err()
         {
             tracing::error!(
-                "paced submit thread panicked (#147) — its output was dark until respawn"
+                "paced output thread panicked (#147) — the playlist fed nothing until respawn"
             );
         }
+    }
+}
+
+/// A playlist pipeline's paced output (#147, #221 lane 3): the
+/// pipeline-lifetime consumer thread, spawned on the first paced scope and
+/// respawned when it is gone, plus the ONE standby black the idle fill, the
+/// pre-roll and the consumer's own fills show. Owned by the pipeline thread
+/// for its whole life; dropping it stops and joins the consumer.
+pub struct PipelineOutput<O: BoundaryOut + Clone + Send + 'static> {
+    playlist_id: i64,
+    out: O,
+    paced: Option<PacedOutput>,
+    black: BlackNv12,
+}
+
+impl<O: BoundaryOut + Clone + Send + 'static> PipelineOutput<O> {
+    /// Playlist `playlist_id`'s output, delivering to `out` (a fresh clone per
+    /// consumer thread).
+    pub fn new(playlist_id: i64, out: O) -> Self {
+        Self {
+            playlist_id,
+            out,
+            paced: None,
+            black: BlackNv12::default(),
+        }
+    }
+
+    /// The standby NV12 black for `width`×`height`, built once for the
+    /// pipeline's life (#147) and handed out by `Arc` clone.
+    pub fn standby_black_nv12(&mut self, width: u32, height: u32) -> SharedFrame {
+        self.black.get(width, height)
+    }
+
+    /// The handoff of this pipeline's consumer thread, spawning the thread on
+    /// the first call. Its fill black is the cached `black_w`×`black_h`
+    /// standby black; every later call returns the same handoff. A thread that
+    /// is gone (it only exits on stop, so: it panicked) is joined, logged and
+    /// respawned here, so a dead consumer costs at most the rest of one scope,
+    /// never the playlist.
+    pub fn handoff(&mut self, black_w: u32, black_h: u32) -> Arc<SharedHandoff> {
+        if let Some(output) = &self.paced {
+            if !output.is_finished() {
+                return output.handoff();
+            }
+            tracing::error!(
+                playlist_id = self.playlist_id,
+                "paced output thread is gone — respawning it for this scope (#147)"
+            );
+        }
+        // Dropping a finished output joins it (and logs its panic, if any).
+        self.paced = None;
+        let black = Picture {
+            width: black_w,
+            height: black_h,
+            stride: black_w,
+            video: self.standby_black_nv12(black_w, black_h),
+        };
+        let consumer = PacedConsumer::new(
+            self.out.clone(),
+            self.playlist_id,
+            WallClock::system(),
+            black,
+        );
+        let output = PacedOutput::spawn(consumer);
+        let handoff = output.handoff();
+        self.paced = Some(output);
+        handoff
     }
 }
 
 #[cfg(test)]
 #[path = "paced_output_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "paced_output_tests_bus.rs"]
+mod tests_bus;

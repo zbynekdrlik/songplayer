@@ -1,5 +1,5 @@
-//! #147 standby same-path (design comment 5841796900): the outer loop's standby
-//! black and the cached paced NV12 black on [`FrameSubmitter`]. Wired via
+//! #147 standby same-path (design comment 5841796900): the cached NV12 black
+//! on [`FrameSubmitter`] (`frame_buf::BlackNv12`). Wired via
 //! `#[cfg(test)] #[path = "submitter_tests_standby.rs"] mod submitter_tests_standby;`.
 
 use super::*;
@@ -13,41 +13,6 @@ fn mock(name: &str, clock_video: bool) -> (Arc<MockNdiBackend>, FrameSubmitter<M
     // Deliberately off-grid, so an on-grid stamp would differ from SYNTHESIZE.
     let sub = FrameSubmitter::new_with_wallclock(sender, 30, 1, WallClock::fixed(123_456_789));
     (backend, sub)
-}
-
-#[test]
-fn standby_black_is_the_legacy_sync_bgra_and_nothing_when_paced() {
-    // SDK-clocked (legacy): the outer loop's standby black is the unchanged
-    // synchronous BGRA frame, SYNTHESIZE-stamped, full 1920x1080x4 bytes.
-    let (legacy_backend, mut legacy) = mock("BL", true);
-    legacy.send_standby_black(1920, 1080);
-    let calls = legacy_backend.calls();
-    assert!(
-        calls
-            .iter()
-            .any(|c| c == "send_video(42,BGRA,1920x1080,stride=7680,30/1)"),
-        "legacy standby is the sync BGRA black: {calls:#?}"
-    );
-    assert_eq!(
-        legacy_backend.video_timecodes(),
-        vec![sp_ndi::NDI_SEND_TIMECODE_SYNTHESIZE],
-        "the legacy SDK-clocked standby black stays SYNTHESIZE"
-    );
-    assert_eq!(legacy_backend.last_sync_video_len(), Some(1920 * 1080 * 4));
-
-    // Paced: NOTHING leaves the sender — no sync `send_video`, no BGRA, not even
-    // a flush. The paced idle fill owns standby (NV12, async, on-grid, with a
-    // silent block), so the paced output never carries a sync BGRA frame (#147).
-    let (paced_backend, mut paced) = mock("BP", false);
-    paced.set_paced(true);
-    paced.send_standby_black(1920, 1080);
-    assert_eq!(
-        paced_backend.calls(),
-        vec!["send_create_with_clocking(BP,false,false)".to_string()],
-        "a paced standby black sends nothing"
-    );
-    assert!(paced_backend.video_timecodes().is_empty());
-    assert_eq!(paced_backend.last_sync_video_len(), None);
 }
 
 #[test]

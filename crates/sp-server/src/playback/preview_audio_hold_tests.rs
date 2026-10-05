@@ -4,7 +4,8 @@ use super::*;
 
 /// Stereo frames per millisecond (48 kHz).
 const F: u64 = 48;
-/// The SDK-clocked seam lead (`lead_ms_for(false)`).
+/// A seam lead well past the write-ahead (the deleted SDK-clocked path's
+/// 1500 ms): every hold rule is exercised at it.
 const LEAD: u32 = 1500;
 
 /// An interleaved-stereo block of `frames` frames, every sample `v`.

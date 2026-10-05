@@ -26,7 +26,6 @@ pub(crate) async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> 
     let (engine_tx, _) = mpsc::channel(16);
     let (sync_tx, _) = mpsc::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
-    let (obs_rebuild_tx, _) = broadcast::channel(4);
     AppState {
         pool,
         event_tx,
@@ -36,7 +35,6 @@ pub(crate) async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> 
         tool_paths: Arc::new(RwLock::new(None)),
         sync_tx,
         resolume_tx,
-        obs_rebuild_tx,
         cache_dir: cache_dir.clone(),
         ai_proxy: std::sync::Arc::new(crate::ai::proxy::ProxyManager::new(
             cache_dir,
@@ -48,7 +46,6 @@ pub(crate) async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> 
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-        ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
         preview_registry: Arc::new(crate::playback::preview::PreviewRegistry::new()),
         program_bus: Arc::new(crate::playback::program_bus::ProgramBus::new()),
         lan_status: crate::mdns::new_status_handle(),

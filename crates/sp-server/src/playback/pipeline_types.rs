@@ -35,9 +35,9 @@ pub enum PipelineCommand {
 }
 
 /// Events emitted by the pipeline thread back to the async engine.
-// `HealthSnapshot` carries the full NDI/genlock/audio telemetry (#192 added the
-// emitter stats) and is sent once per 5 s poll — its size is irrelevant on this
-// channel, so boxing it would only add an allocation per snapshot.
+// `HealthSnapshot` carries the full genlock/audio telemetry and is sent once
+// per 5 s poll — its size is irrelevant on this channel, so boxing it would
+// only add an allocation per snapshot.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum PipelineEvent {
@@ -53,25 +53,26 @@ pub enum PipelineEvent {
     Ended,
     /// An error occurred during playback.
     Error(String),
-    /// Per-pipeline NDI health heartbeat. Emitted every ~5 seconds by the
+    /// Per-pipeline health heartbeat. Emitted every ~5 seconds by the
     /// pipeline thread when running on Windows; consumed by
     /// `PlaybackEngine::handle_health_snapshot` (impl in
     /// `playback/ndi_health.rs`). The pipeline reports its locally-inferred
     /// state (Idle / Playing / Paused); the engine reconciles it against
-    /// canonical `PlayState` before publishing to the dashboard.
+    /// canonical `PlayState` before publishing to the dashboard. #221 lane 3:
+    /// a playlist has no NDI output of its own, so there is no receiver count;
+    /// the frame counts are the boundaries its paced output delivered to the
+    /// program bus.
     HealthSnapshot {
-        connections: i32,
         frames_submitted_total: u64,
         frames_submitted_last_5s: u32,
         observed_fps: f32,
         nominal_fps: f32,
         /// #168 round 6b: the decoder's SOURCE frame rate (`decoder.frame_rate()`
-        /// as fps), path-INDEPENDENT. Distinct from `nominal_fps`, which is the
-        /// OUTPUT nominal — the fixed genlock grid on the paced path, the decoder
-        /// rate on the SDK-clocked path. The lock rule needs the source rate to
-        /// know the structural fps-conversion repeat fraction, so it reads THIS,
-        /// never `nominal_fps` (which reads the grid 30 on the paced path and
-        /// falsely degraded a 24-fps output).
+        /// as fps). Distinct from `nominal_fps`, which is the OUTPUT nominal —
+        /// the fixed genlock grid. The lock rule needs the source rate to know
+        /// the structural fps-conversion repeat fraction, so it reads THIS,
+        /// never `nominal_fps` (which reads the grid 30 and falsely degraded a
+        /// 24-fps output).
         source_fps: f32,
         /// `Instant` is fine on the wire here because emitter and consumer
         /// are in the same process. The engine maps it to `DateTime<Utc>`
@@ -81,17 +82,14 @@ pub enum PipelineEvent {
         last_heartbeat_ts: std::time::Instant,
         consecutive_bad_polls: u32,
         reported_state: crate::playback::ndi_health::PlaybackStateLabel,
-        /// Boundary-paced emission telemetry (#147). Default (disabled, zeros)
-        /// from the SDK-clocked / idle heartbeat paths; the paced decode loop
-        /// fills it from the `Pacer`.
+        /// Boundary-paced emission telemetry (#147), from the `Pacer` merged
+        /// with the paced output's counters.
         pacing: crate::playback::ndi_health::PacingStats,
-        /// Audio clock-discipline telemetry (#148); default off the SDK-clocked /
-        /// idle paths, filled from the `Pacer`'s audio buffer when paced.
+        /// Audio clock-discipline telemetry (#148), from the `Pacer`'s audio
+        /// buffer.
         audio: crate::playback::ndi_health::AudioStats,
-        /// #192 round 3: per-call `send_video_async` max/p99 + the decode-loop
-        /// stage maxima (decode / submit / audio), so a producer stall names its
-        /// stage. Filled by the SDK-clocked decode loop; `Default` (all-zero) on
-        /// the idle / paused / paced heartbeat paths.
+        /// #147 round 9: SongPlayer's own memory residency for the per-minute
+        /// `pipeline: loop-stats` line.
         loop_stats: crate::playback::loop_stats::LoopStats,
     },
     /// #215: not from a pipeline thread — the engine's own deferred
@@ -108,8 +106,8 @@ pub enum PipelineEvent {
 /// #217: where a Play really starts, the position its `Started` reports:
 /// `start_position_ms` when the decoder's `seek` there worked; 0 when it
 /// failed (the song then plays from its start) or no position was asked (no
-/// seek is made). `who` names the decode path in its log line. Both decode
-/// paths call it (`pipeline::decode_and_send`, the paced producer).
+/// seek is made). `who` names the decode path in its log line (the paced
+/// producer).
 pub fn real_start_ms<E: std::fmt::Debug>(
     start_position_ms: Option<u64>,
     seek: impl FnOnce(u64) -> Result<(), E>,

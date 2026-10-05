@@ -241,7 +241,7 @@ async fn a_dashboard_mode_change_is_saved_and_a_fresh_engine_starts_in_it() {
     );
 
     // A restart: a fresh engine on the same DB, built the way `lib.rs`
-    // builds it (the active playlists → the startup senders).
+    // builds it (the active playlists → the startup pipelines).
     drop(engine);
     let (mut fresh, _fresh_ws_rx, _fresh_resolume_rx) = engine_on(&state);
     let active: Vec<Playlist> = crate::db::models::get_active_playlists(&state.pool)
@@ -250,7 +250,7 @@ async fn a_dashboard_mode_change_is_saved_and_a_fresh_engine_starts_in_it() {
         .into_iter()
         .filter(|p| p.id == SAVED)
         .collect();
-    fresh.create_startup_senders(&active).await;
+    fresh.create_startup_pipelines(&active);
 
     assert_eq!(
         mode_of(&fresh, SAVED),

@@ -67,9 +67,6 @@ pub struct AppState {
     pub tool_paths: Arc<RwLock<Option<ToolPaths>>>,
     pub sync_tx: mpsc::Sender<SyncRequest>,
     pub resolume_tx: mpsc::Sender<resolume::ResolumeCommand>,
-    /// Signal — sent by playlist CRUD handlers so the OBS client can rebuild
-    /// its NDI source map.
-    pub obs_rebuild_tx: broadcast::Sender<()>,
     /// Directory where cached media and lyrics JSON files are stored.
     pub cache_dir: PathBuf,
     pub ai_proxy: Arc<ai::proxy::ProxyManager>,
@@ -78,12 +75,8 @@ pub struct AppState {
     pub presenter_client: Option<Arc<presenter::PresenterClient>>,
     /// Resolume registry exposing per-host health snapshots.
     pub resolume_registry: Arc<resolume::ResolumeRegistry>,
-    /// NDI health registry exposing per-pipeline health snapshots.
+    /// Per-pipeline health snapshots (`/api/v1/ndi/health`).
     pub ndi_health_registry: Arc<playback::ndi_health::NdiHealthRegistry>,
-    /// Runtime burn-id overlay toggle registry (#151). `POST /api/v1/ndi/burn`
-    /// reads/writes it synchronously; the playback engine + pipeline threads
-    /// share the same registry (default OFF, never persisted).
-    pub ndi_burn_registry: Arc<playback::ndi_burn::NdiBurnRegistry>,
     /// Per-playlist live preview tap registry (#15 part 2).
     /// `GET /api/v1/playback/{id}/preview.jpg` reads it; the playback engine +
     /// pipeline decode loops share the same registry (an idle tap costs one
@@ -220,8 +213,6 @@ pub async fn start(
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let (event_tx, _) = broadcast::channel::<ServerMsg>(256);
     let (engine_tx, mut engine_rx) = mpsc::channel::<EngineCommand>(64);
-    // Rebuild signal from playlist CRUD → OBS client.
-    let (obs_rebuild_tx, _) = broadcast::channel::<()>(16);
 
     // 3. Shared state
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
@@ -250,9 +241,6 @@ pub async fn start(
     // 3b. NDI health registry — constructed before AppState so both the engine
     // (writer) and the AppState (reader) can hold an Arc to the same instance.
     let ndi_health_registry = Arc::new(playback::ndi_health::NdiHealthRegistry::new());
-    // #151: one burn-id toggle registry shared by AppState (API) + the engine
-    // (pipeline spawn + health). Default OFF, never persisted.
-    let ndi_burn_registry = Arc::new(playback::ndi_burn::NdiBurnRegistry::new());
     // #15 part 2: one live-preview tap registry shared by AppState (route) +
     // the engine (registers a tap per pipeline at spawn; the decode loops feed
     // it). Idle taps cost one atomic load per decoded frame.
@@ -332,7 +320,6 @@ pub async fn start(
         tool_paths: tool_paths.clone(),
         sync_tx: sync_tx.clone(),
         resolume_tx: resolume_cmd_tx.clone(),
-        obs_rebuild_tx: obs_rebuild_tx.clone(),
         cache_dir: config.cache_dir.clone(),
         ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
             config.cache_dir.clone(),
@@ -342,7 +329,6 @@ pub async fn start(
         presenter_client: presenter_client.clone(),
         resolume_registry: resolume_registry.clone(),
         ndi_health_registry: ndi_health_registry.clone(),
-        ndi_burn_registry: ndi_burn_registry.clone(),
         preview_registry: preview_registry.clone(),
         program_bus: program_bus.clone(),
         lan_status: lan_status.clone(),
@@ -636,8 +622,8 @@ pub async fn start(
     });
 
     // 7. OBS WebSocket client (#221 L6: no scene detection; it serves the
-    // facade's forwards and manual press, the title text, the NDI ladder).
-    let obs_side = obs_bridge::start_obs(&pool, &obs_state, &obs_rebuild_tx, &shutdown_tx).await?;
+    // facade's forwards and manual press, and the title text).
+    let obs_side = obs_bridge::start_obs(&pool, &obs_state, &shutdown_tx).await?;
 
     // 8. Reprocess worker — on the SAME metadata chain as the download worker
     // (#136: it used to get Gemini alone, so it could never repair a row).
@@ -676,50 +662,21 @@ pub async fn start(
         presenter_client,
         ndi_health_registry,
     });
-    // Inject the shared dantesync clock-health handle into every NDI health snapshot (#146).
+    // Inject the shared dantesync clock-health handle into every health snapshot (#146).
     engine.set_clock_health(clock_health);
-
-    // Boundary-paced emission (#147): ON unless the setting says "false" (the
-    // owner's rule). Read once before pipelines are spawned.
-    let genlock_pacing = genlock_pacing_setting(&pool).await;
-    info!(genlock_pacing, "genlock boundary-paced emission flag");
-    engine.set_genlock_pacing(genlock_pacing);
-    // #151: share the burn-id toggle registry BEFORE pipelines spawn (registered at spawn).
-    engine.set_ndi_burn_registry(ndi_burn_registry.clone());
     // #15 part 2: share the preview registry BEFORE pipelines spawn (each
     // pipeline registers a preview tap into it at spawn).
     engine.set_preview_registry(preview_registry.clone());
-    // #196: share the OBS-input → playlist-id map so the health handler can
-    // tell whether an OBS input advertises an output (skip the ladder + set a
-    // distinct reason when none does). Only when OBS is configured.
-    if let Some(map) = obs_side.ndi_sources {
-        engine.set_ndi_source_map(map);
-    }
 
-    // #196: pre-create pipelines (= NDI senders) for all active playlists
-    // deterministically in playlist.id order, after waiting for the previous
-    // instance's ports to be released, so a restart yields the SAME name→port
-    // map (the dark-wall-after-restart fix). Runs before `start_program` and the
-    // engine loop; one missing past the budget is created on its authority ON.
+    // A pipeline for every active playlist, in playlist.id order and its row's
+    // mode (#225 unit 2), before `start_program` and the engine loop. #221 lane
+    // 3: a pipeline has no NDI sender of its own (it feeds the program bus),
+    // so this waits for nothing; `start_program` then creates SP-program, the
+    // only NDI sender, after its #196 port wait.
     let active_playlists = db::models::get_active_playlists(&pool)
         .await
         .unwrap_or_default();
-    // Bounded (0.60.0 review): a stuck sender must never delay the HTTP bind.
-    let budget = playback::startup_senders::STARTUP_SENDERS_BUDGET;
-    match tokio::time::timeout(budget, engine.create_startup_senders(&active_playlists)).await {
-        Ok(()) => info!(
-            count = active_playlists.len(),
-            "playback pipelines created for active playlists"
-        ),
-        Err(_) => {
-            warn!(
-                budget_s = budget.as_secs(),
-                "startup senders exceeded their budget — binding the API now"
-            );
-            // The +30 s self-check clock must still start (shared registry).
-            state.ndi_health_registry.mark_senders_ready();
-        }
-    }
+    engine.create_startup_pipelines(&active_playlists);
     engine.start_program(program_bus, &shutdown_tx).await;
 
     // Engine subscribes to the download worker's broadcast so that
@@ -795,14 +752,6 @@ const DEFAULT_PLAYLIST_SYNC_INTERVAL_SECS: u64 = 600;
 /// (#140) — used whenever `YTDLP_UPDATE_INTERVAL_SECS` is absent,
 /// unparseable, or zero.
 const DEFAULT_YTDLP_UPDATE_INTERVAL_SECS: u64 = 86400;
-
-/// #147: the boundary-paced emission flag at startup, through the one rule
-/// `sp_core::config::genlock_pacing`: a missing row or a failed read is ON.
-async fn genlock_pacing_setting(pool: &SqlitePool) -> bool {
-    let key = sp_core::config::SETTING_GENLOCK_PACING;
-    let raw = db::models::get_setting(pool, key).await.ok().flatten();
-    sp_core::config::genlock_pacing(raw.as_deref())
-}
 
 /// Pure parser shared by every periodic-interval env override in this
 /// module: falls back to `default` on `None`, on a value that doesn't

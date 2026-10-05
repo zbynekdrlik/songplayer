@@ -273,8 +273,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// stride `width` ([`PROGRAM_STANDBY_W`] × [`PROGRAM_STANDBY_H`] =
     /// 1920×1080 in production; the tests use small canvases).
     pub fn new(sender: NdiSender<B>, width: u32, height: u32) -> Self {
-        let mut submitter = FrameSubmitter::new(sender, GENLOCK_GRID_FPS as i32, 1);
-        submitter.set_paced(true);
+        let submitter = FrameSubmitter::new(sender, GENLOCK_GRID_FPS as i32, 1);
         let spc = samples_per_boundary(PROGRAM_AUDIO_RATE_HZ as i64, GENLOCK_GRID_FPS);
         let silence = vec![AudioFrame {
             data: vec![0.0; spc * PROGRAM_AUDIO_CHANNELS as usize],

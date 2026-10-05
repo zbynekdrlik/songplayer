@@ -97,6 +97,37 @@ impl fmt::Debug for SharedFrame {
     }
 }
 
+/// Neutral-black NV12 pixel bytes: Y = studio black 16, interleaved UV = 128.
+fn black_nv12_bytes(width: u32, height: u32) -> Vec<u8> {
+    let y = (width as usize) * (height as usize);
+    let mut data = vec![16u8; y];
+    data.resize(y + y / 2, 128u8);
+    data
+}
+
+/// The standby NV12 black (#147 standby same-path), cached: built once for a
+/// size and handed out by `Arc` clone (a refcount bump, no pixel copy); a
+/// different size rebuilds it once. The `SP-program` sender's submitter and
+/// every playlist pipeline's paced output (`paced_output::PipelineOutput`,
+/// #221 lane 3) keep one each.
+#[derive(Debug, Default)]
+pub struct BlackNv12(Option<(u32, u32, SharedFrame)>);
+
+impl BlackNv12 {
+    /// The neutral NV12 black of `width`×`height`.
+    pub fn get(&mut self, width: u32, height: u32) -> SharedFrame {
+        if let Some((w, h, frame)) = &self.0
+            && *w == width
+            && *h == height
+        {
+            return frame.clone();
+        }
+        let frame = SharedFrame::new(black_nv12_bytes(width, height));
+        self.0 = Some((width, height, frame.clone()));
+        frame
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
