@@ -404,3 +404,26 @@ The wall's clips were repointed from `RESOLUME-SNV (cg-obs)` to `RESOLUME-SNV (S
 Save the composition first (`GET /api/v1/composition` > file) so the rollback is exact.
 
 - **A REST change lives only in Arena's MEMORY until the composition is saved (#221, 30.9.2026).** The 29.9 switch was never saved, so a Save & Quit + relaunch at 15:19Z brought back the file's cg-obs sources and the wall silently ran on cg OBS for a day. End EVERY Arena change with `POST /api/v1/composition/save` (Arena 7.28 REST, no body = the current file, 204 after ~4.6 s for the 36 MB `Bridge.avc`). Then check the file: its mtime, plus `Select-String -SimpleMatch 'SP-program'` count > 0. Back the `.avc` up to `C:\ProgramData\SongPlayer\backup\` first. The GUI path does not work over MCP: Arena will not take the foreground (SetForegroundWindow is refused even after an Alt press, and Ctrl+S never reached it), and the MCP screenshot of the desktop is black.
+
+## Arena: moving clips in EVERY deck to a new source (#221/#223, 5.10.2026)
+
+The REST deck-by-deck run failed. The safe path is an offline edit of the saved `.avc` plus a relaunch. Scripts are in `C:\ProgramData\SongPlayer\ops\223\`.
+
+- **Identify a clip's source exactly.** In REST it is the first line of `clip.video.description` (`RESOLUME-SNV (cg-obs)\nNDI · 1920x1080 …`, or `SP-program-MAX`). In the `.avc` it is the clip's `<PrimarySource><VideoSource type="NDIVideoSource"><NDIVideoInfo sourceName="…"/>` (or `type="SpoutVideoSource"><SpoutInfo serverName="…"/>`).
+  - NEVER match a name anywhere in the clip's video JSON. That hit clips by an effect's option list.
+- **REST deck switching is not a batch tool.**
+  - `POST /decks/by-id/<id>/select` lags. The deck's `selected` flag and the layers' clip ids update seconds apart: a first load takes ~18 s, a loaded deck ~1 s. Until then, `clips/by-id` of the new deck answers 404.
+  - A select re-ids params, so SongPlayer's map goes stale and refreshes (expected 404 WARNs).
+  - A save attempted during that churn answered **412**, and nothing was written.
+- **Offline edit (`avc_to_max.py`).**
+  - Write a COPY of `Bridge.avc`, replacing each matched clip's `VideoSource` with the exact form Arena itself saved for that source type.
+  - Set Width/Height `default` to the new source size and keep the clip's own `value`. A value still equal to the NDI 640×480 placeholder default means "follow the live 1920×1080 source".
+  - A clip named after its source (default = value = the source name) gets the new name, as Arena does on an open.
+  - Prove the diff with `avc_diff.py`: everything outside the matched clips must be byte-identical, and both files must parse as XML.
+- **Swap.**
+  - Snapshot `/composition` first, to know which clips are live.
+  - `Stop-Process Arena -Force` (no save), back up the live `.avc`, copy in the new one and check its hash, then `Start-ScheduledTask SP-ArenaLaunch`.
+- **Arena does NOT reconnect clips after a relaunch.** Only Blank/BG layers came back live. Reconnect every clip that was live in the pre-kill snapshot (`reconnect.py`), or the wall shows no SongPlayer video.
+- **Full `/composition` read (~15 MB):** PowerShell `Invoke-WebRequest` failed with "connection forcibly closed". Python `urllib` reads it in 0.4 s.
+- **Wall check from session 0:** the scheduled task `SP-WallShot` (interactive) runs `shot.ps1` and grabs the output displays to `shots\wall_after.png`. `wallmean.ps1` gives the video area's brightness: 0 = pure black.
+- **A black Spout clip:** re-triggering (`/connect`) does not bring the picture back. Re-open the source (`/open source:///video/SP-program-MAX`), then PUT the size back to 1920×1080 (#223 comment 5996266548).
