@@ -97,6 +97,42 @@ async fn status_returns_200() {
     assert_eq!(json["playlist_count"], 0);
 }
 
+/// #144: the status route reads the OBS, tools and LAN status, then waits on
+/// the database. It holds no status lock while it waits: a tokio `RwLock`
+/// queues every reader behind a waiting writer, so a read guard held across
+/// a slow query stalls the OBS client's writes and every status read behind
+/// them. The test holds the memory pool's only connection and polls the
+/// route once, so it parks on the pool.
+#[tokio::test]
+async fn the_status_route_holds_no_status_lock_while_it_waits_on_the_database() {
+    let state = test_state().await;
+    let held = state.pool.acquire().await.unwrap();
+    let mut answer = std::pin::pin!(status(State(state.clone())));
+    assert!(
+        futures::poll!(answer.as_mut()).is_pending(),
+        "the route waits for the held database connection"
+    );
+    assert!(
+        state.obs_state.try_write().is_ok(),
+        "the OBS status is locked while the route waits on the database"
+    );
+    assert!(
+        state.tools_status.try_write().is_ok(),
+        "the tools status is locked while the route waits on the database"
+    );
+    assert!(
+        state.lan_status.try_write().is_ok(),
+        "the LAN status is locked while the route waits on the database"
+    );
+
+    drop(held);
+    let response = tokio::time::timeout(std::time::Duration::from_secs(60), answer)
+        .await
+        .expect("the route answers once the connection is free")
+        .into_response();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
 #[tokio::test]
 async fn create_and_list_playlists() {
     let state = test_state().await;
