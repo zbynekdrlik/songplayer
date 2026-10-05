@@ -57,38 +57,37 @@ fn test_compute_auth_known_value() {
 fn test_obs_state_default() {
     let state = ObsState::default();
     assert!(!state.connected);
-    assert!(state.current_scene.is_none());
-    assert!(state.active_playlist_ids.is_empty());
-    assert!(state.lookup_failed.is_none(), "#218: no failed lookup");
     // #154: idle-gate signals default to "not busy".
     assert!(!state.streaming);
     assert!(!state.recording);
-    assert!(state.transition.is_none(), "#219: transition unknown");
 }
 
 #[test]
 fn a_disconnect_forgets_everything_of_cg_obs() {
-    // #219: every published field back to the default (disconnected)
-    // snapshot — a consumer reads a disconnect from exactly this.
     let mut state = ObsState {
         connected: true,
-        current_scene: Some("sp-fast".to_string()),
-        active_playlist_ids: std::collections::HashSet::from([7]),
-        lookup_failed: Some("sp-fast".to_string()),
         streaming: true,
         recording: true,
-        transition: Some(ObsTransition {
-            name: "Fade".to_string(),
-            kind: "fade_transition".to_string(),
-            duration_ms: Some(300),
-        }),
     };
     state.reset_disconnected();
-    assert_eq!(ObsSnapshot::of(&state), ObsSnapshot::default());
+    assert!(!state.connected);
     assert!(
         !state.streaming && !state.recording,
         "#154 idle-gate signals"
     );
+}
+
+/// #221 L6: the client subscribes to cg OBS's Scenes events (the facade
+/// passes `SceneListChanged` on) and its Outputs events (the #154 stream /
+/// record state); no Transitions any more (cg OBS's transition is no longer
+/// read).
+#[test]
+fn the_identify_subscribes_scenes_and_outputs_only() {
+    const SCENES: u64 = 1 << 2;
+    const TRANSITIONS: u64 = 1 << 4;
+    const OUTPUTS: u64 = 1 << 6;
+    assert_eq!(EVENT_SUBSCRIPTIONS, SCENES | OUTPUTS);
+    assert_eq!(EVENT_SUBSCRIPTIONS & TRANSITIONS, 0);
 }
 
 #[test]
@@ -125,82 +124,6 @@ fn test_parse_identified_message() {
 }
 
 #[test]
-fn test_parse_event_message() {
-    let event = serde_json::json!({
-        "op": 5,
-        "d": {
-            "eventType": "CurrentProgramSceneChanged",
-            "eventData": {
-                "sceneName": "Main Scene"
-            }
-        }
-    });
-
-    assert_eq!(event["op"].as_u64(), Some(5));
-    assert_eq!(
-        event["d"]["eventType"].as_str(),
-        Some("CurrentProgramSceneChanged")
-    );
-    assert_eq!(
-        event["d"]["eventData"]["sceneName"].as_str(),
-        Some("Main Scene")
-    );
-}
-
-#[test]
-fn test_parse_request_response() {
-    let response = serde_json::json!({
-        "op": 7,
-        "d": {
-            "requestType": "GetCurrentProgramScene",
-            "requestId": "abc-123",
-            "requestStatus": {
-                "result": true,
-                "code": 100
-            },
-            "responseData": {
-                "currentProgramSceneName": "Live Scene"
-            }
-        }
-    });
-
-    assert_eq!(response["op"].as_u64(), Some(7));
-    assert_eq!(
-        response["d"]["requestType"].as_str(),
-        Some("GetCurrentProgramScene")
-    );
-    assert_eq!(
-        response["d"]["responseData"]["currentProgramSceneName"].as_str(),
-        Some("Live Scene")
-    );
-}
-
-#[test]
-fn test_state_connected_transition() {
-    let mut state = ObsState::default();
-    assert!(!state.connected);
-
-    state.connected = true;
-    state.current_scene = Some("Scene 1".to_string());
-    state.active_playlist_ids.insert(1);
-    state.active_playlist_ids.insert(2);
-
-    assert!(state.connected);
-    assert_eq!(state.current_scene.as_deref(), Some("Scene 1"));
-    assert!(state.active_playlist_ids.contains(&1));
-    assert!(state.active_playlist_ids.contains(&2));
-
-    // Disconnect transition.
-    state.connected = false;
-    state.current_scene = None;
-    state.active_playlist_ids.clear();
-
-    assert!(!state.connected);
-    assert!(state.current_scene.is_none());
-    assert!(state.active_playlist_ids.is_empty());
-}
-
-#[test]
 fn test_parse_hello_without_auth() {
     let hello = serde_json::json!({
         "op": 0,
@@ -219,9 +142,8 @@ fn test_parse_hello_without_auth() {
 // These tests encode the fix for the 2026-04-19 event outage: the
 // NDI source map was built at startup, then a later rebuild returned
 // empty (OBS `GetInputList` responded with nothing), and the old
-// code overwrote the map. Every scene change after that matched
-// against the empty map and the engine received no commands.
-// Switching OBS scenes became a silent no-op for hours.
+// code overwrote the map. The scene detection that then read it is
+// deleted (#221 L6); the #196 self-check reads the map now.
 
 #[tokio::test]
 async fn apply_rebuild_result_writes_when_rebuild_succeeds() {
@@ -271,7 +193,7 @@ async fn apply_rebuild_result_replaces_map_with_empty_when_rebuild_legitimately_
     assert!(
         guard.is_empty(),
         "a legitimate empty rebuild (user removed all inputs) MUST \
-         wipe the map so scene detection reflects current reality"
+         wipe the map so its reader sees current reality"
     );
 }
 
@@ -309,8 +231,9 @@ async fn the_obs_config_reads_the_keys_the_dashboard_writes() {
 }
 
 /// Review round 4: a `JoinSet` keeps a finished task until it is joined, and
-/// the connection loop never joins — its ~2 s scene poll alone spawns ~43 000
-/// helper tasks a day. Every spawn first reaps the finished helpers.
+/// the connection loop never joins (one helper per title text, ladder rung
+/// and rebuild, for the life of the connection). Every spawn first reaps the
+/// finished helpers.
 #[tokio::test]
 async fn spawning_a_helper_reaps_the_finished_ones() {
     let mut tasks: JoinSet<()> = JoinSet::new();

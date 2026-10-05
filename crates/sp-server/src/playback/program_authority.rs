@@ -1,6 +1,6 @@
 //! #221 L4b: SongPlayer's own program is the PLAYBACK authority (design
-//! record 5873773896 §1e). cg OBS's scene detection starts and pauses
-//! nothing any more.
+//! record 5873773896 §1e). cg OBS's scene detection started and paused
+//! nothing any more, and #221 L6 deleted it.
 //!
 //! - **What is on air** is `program_on_air::on_air_set`: `SP-program`'s
 //!   source when it is a playlist, alone (#221 B4 step 6 deleted the legacy

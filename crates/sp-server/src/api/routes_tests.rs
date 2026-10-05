@@ -491,15 +491,10 @@ async fn get_status(state: AppState) -> StatusResponse {
 
 /// #221 L4b: `/api/v1/status` reports SongPlayer's OWN program — the one
 /// scene-name resolver, and the playlists on air (SP-program's playlist,
-/// B4 step 6) — never cg OBS's scene detection.
+/// B4 step 6). (L6 deleted cg OBS's scene detection it once read.)
 #[tokio::test]
-async fn status_reports_songplayers_own_program_not_cg_obs_detection() {
+async fn status_reports_songplayers_own_program() {
     let state = test_state().await;
-    {
-        let mut obs = state.obs_state.write().await;
-        obs.current_scene = Some("cg-scene".into());
-        obs.active_playlist_ids = [9].into_iter().collect();
-    }
     let bus = Arc::clone(&state.program_bus);
     bus.select_initial(4, Some("sp-slow"));
     let json = get_status(state.clone()).await;

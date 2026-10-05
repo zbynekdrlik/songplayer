@@ -635,8 +635,8 @@ pub async fn start(
         }
     });
 
-    // 7. OBS WebSocket client (#221 L4b: its scene detection drives no
-    // playback; it serves the facade's manual-scene forward and getters).
+    // 7. OBS WebSocket client (#221 L6: no scene detection; it serves the
+    // facade's forwards and manual press, the title text, the NDI ladder).
     let obs_side = obs_bridge::start_obs(&pool, &obs_state, &obs_rebuild_tx, &shutdown_tx).await?;
 
     // 8. Reprocess worker — on the SAME metadata chain as the download worker

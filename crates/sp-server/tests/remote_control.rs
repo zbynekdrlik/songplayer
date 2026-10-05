@@ -107,22 +107,15 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         .await
         .unwrap();
 
-    // cg OBS: a playlist scene with SongPlayer's SP-fast NDI source, a baseline
-    // scene, and a manual browser scene.
+    // cg OBS: SongPlayer's SP-fast NDI input (the client maps it once it is
+    // connected: the readiness witness below), a playlist scene, a baseline
+    // scene and a manual browser scene.
     let mut cg = FakeObsState::default();
     cg.inputs
         .insert("sp-fast_video".into(), "ndi_source".into());
     cg.input_settings.insert(
         "sp-fast_video".into(),
         json!({ "ndi_source_name": "RESOLUME-SNV (SP-fast)" }),
-    );
-    cg.scene_items.insert(
-        "sp-fast".into(),
-        vec![("sp-fast_video".into(), false, "ndi_source".into())],
-    );
-    cg.scene_items.insert(
-        "Slido".into(),
-        vec![("slido_browser".into(), false, "browser_source".into())],
     );
     cg.scene_list = vec!["sp-fast".into(), "sp-slow".into(), "Slido".into()];
     cg.program_scene = Some("sp-slow".into());

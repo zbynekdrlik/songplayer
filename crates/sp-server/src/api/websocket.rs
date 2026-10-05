@@ -10,6 +10,7 @@ use tracing::{debug, info, warn};
 
 use sp_core::ws::{ClientMsg, ServerMsg};
 
+use crate::playback::program_on_air::program_scene_name;
 use crate::{AppState, EngineCommand, SyncRequest};
 
 /// Axum handler that upgrades an HTTP request to a WebSocket connection.
@@ -211,16 +212,17 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
 /// Each message is built under its lock and sent once the lock is released:
 /// a client slow to take a frame must never hold a status lock (#144, a
 /// tokio `RwLock` queues every reader behind a waiting writer).
+///
+/// `active_scene` is SP-program's scene, from the one resolver
+/// (`program_scene_name`, as `/api/v1/status` and Companion get it; design
+/// record 5873773896 §1d): #221 L6 deleted cg OBS's scene detection.
 async fn send_status<S>(write: &mut S, state: &AppState)
 where
     S: Sink<Message> + Unpin,
 {
-    let obs_status = {
-        let obs = state.obs_state.read().await;
-        ServerMsg::ObsStatus {
-            connected: obs.connected,
-            active_scene: obs.current_scene.clone(),
-        }
+    let obs_status = ServerMsg::ObsStatus {
+        connected: state.obs_state.read().await.connected,
+        active_scene: program_scene_name(&state.program_bus.on_air_now()),
     };
     send_json(write, &obs_status).await;
     let tools_status = state.tools_status.read().await.message();
@@ -294,11 +296,9 @@ mod tests {
     #[tokio::test]
     async fn a_slow_client_holds_no_status_lock_while_it_takes_the_status() {
         let state = crate::api::routes::tests::test_state().await;
-        {
-            let mut obs = state.obs_state.write().await;
-            obs.connected = true;
-            obs.current_scene = Some("sp-fast".to_string());
-        }
+        state.obs_state.write().await.connected = true;
+        // #221 L6: the scene is SP-program's, never cg OBS's.
+        state.program_bus.select_initial(7, Some("sp-fast"));
         {
             let mut tools = state.tools_status.write().await;
             tools.ytdlp_available = true;
