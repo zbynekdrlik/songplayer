@@ -776,6 +776,10 @@ the same wall first (#184 round F2, `dabing.md`).
   `StemWorker::ensure_script` through the shared
   `embedded_scripts::materialise` (the dub worker uses the same helper).
   A missing `win_replace.py` would fail every separation at import.
+  `materialise` holds one process-wide async lock per pass: both workers
+  ship `win_replace.py` and call it right before spawning, so without the
+  lock one could rewrite the file after a deploy while the other's child
+  imports it.
 - **Tests.** `scripts/tests/test_stem_publish.py` emulates the Windows rule on
   Linux (`windows_rename` fixture: `os.replace` onto a held path raises the
   WinError 5 `PermissionError`, the POSIX rename succeeds and is recorded).

@@ -9,6 +9,14 @@
 
 use std::path::Path;
 
+/// One write pass at a time, process-wide. Two workers share a module
+/// (`win_replace.py` ships with both the stem and the dub worker), and each
+/// calls [`materialise`] right before spawning its child; without the lock,
+/// both could see the file stale after a deploy and one could rewrite it
+/// while the other's child imports it. Serialised, the second caller finds it
+/// up to date and writes nothing.
+static WRITE_PASS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Write every `(file name, content)` pair into `tools_dir` (created when
 /// missing), rewriting only a file whose on-disk content differs or cannot be
 /// read. Returns the names it wrote, in order; `who` names the worker in the
@@ -18,6 +26,7 @@ pub(crate) async fn materialise(
     scripts: &[(&'static str, &'static str)],
     who: &str,
 ) -> std::io::Result<Vec<&'static str>> {
+    let _pass = WRITE_PASS.lock().await;
     tokio::fs::create_dir_all(tools_dir).await?;
     let mut written = Vec::new();
     for &(name, content) in scripts {
@@ -72,6 +81,23 @@ mod tests {
         assert_eq!(written, vec!["helper.py"]);
         assert_eq!(read(tools.path(), "helper.py").await, "X = 1\n");
         assert_eq!(read(tools.path(), "worker.py").await, "import helper\n");
+    }
+
+    /// Two workers materialising the same stale set at once (both ship
+    /// `win_replace.py`): each stale script is written exactly once, so no
+    /// write can land after the other caller already found it up to date.
+    #[tokio::test]
+    async fn concurrent_callers_write_each_stale_script_once() {
+        let tools = tempfile::tempdir().unwrap();
+        let (a, b) = tokio::join!(
+            materialise(tools.path(), &SCRIPTS, "first"),
+            materialise(tools.path(), &SCRIPTS, "second"),
+        );
+        let mut written = a.unwrap();
+        written.extend(b.unwrap());
+        written.sort_unstable();
+
+        assert_eq!(written, vec!["helper.py", "worker.py"]);
     }
 
     #[tokio::test]
