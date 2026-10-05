@@ -204,7 +204,12 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         .map(|s| s["sceneName"].as_str().unwrap())
         .collect();
     assert_eq!(names, vec!["sp-fast", "sp-slow", "Slido"]);
-    assert_eq!(list["responseData"]["currentProgramSceneName"], "sp-slow");
+    // #221 lane 2: its program scene is SP-program's, never cg OBS's own
+    // (sp-slow): nothing is on SP-program yet.
+    assert!(
+        list["responseData"]["currentProgramSceneName"].is_null(),
+        "{list}"
+    );
 
     // A page-13 playlist button: preview, then transition. SP-program cuts to
     // ytfast from SongPlayer's own playlists; #221 B4 step 6: cg OBS is told
@@ -292,6 +297,14 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     assert_eq!(
         program["responseData"]["currentProgramSceneName"],
         "sp-fast"
+    );
+    // #221 lane 2: Companion's connect-time feedback (`GetSceneList`) names
+    // it too, with cg OBS's uuid of that scene; cg OBS still shows sp-slow.
+    let list = request(&mut ws, "GetSceneList", None).await;
+    assert_eq!(list["responseData"]["currentProgramSceneName"], "sp-fast");
+    assert_eq!(
+        list["responseData"]["currentProgramSceneUuid"],
+        "uuid-sp-fast"
     );
 
     // A manual cg OBS scene: cg OBS switches, SP-program cuts to "OBS manuál".
