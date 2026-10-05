@@ -396,7 +396,9 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   counter. A picture that is the same allocation (`SharedFrame::ptr_eq`) as
   one of the last composed boundary's keeps its id; those `Arc`s are held
   by `PictureIds`, so none can be freed and its address reused while
-  compared. A held / paused / repeated frame is not uploaded again. Never
+  compared. A held / paused / repeated frame is not uploaded again into its
+  slot (sp-gpu's residency is per slot: a fade's incoming picture moves to
+  the outgoing slot when the fade ends and is uploaded there once). Never
   key an id on an address or on address + stamp (the latter re-uploads
   every held picture).
 - **Failures** (`serve` → `recover`, never a panic):
@@ -476,7 +478,12 @@ suite by `max-gate.spec.ts`): the setting on, 3840×2160 under
 sends one per grid slot, standby pairs included), and `coalesced` (MAX
 kept up with the program), `failed` and `device_resets` +0 in between. The
 first read comes after the first boundary went out, so the build's own
-time never counts. The p99s are logged, not gated; the budget
+time never counts. A coalesce can also come from the PROGRAM: after a
+program-side stall its thread serves several boundaries back to back, and
+a burst of four or more overruns the 2-deep queue with MAX healthy. So the
+spec logs `health.coalesced` and `health.timing.ready_late_us_max` from the
+same two reads: a MAX coalesce next to a program coalesce or a late
+`ready_late_us_max` is the program's stall, not a MAX fault. The p99s are logged, not gated; the budget
 and Arena's side stay in the box gate below.
 
 ### The WARP proof (`program_max_tests_warp.rs`, Windows only)

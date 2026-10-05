@@ -9,7 +9,9 @@
 //!   context);
 //! - labels each native picture with an id ([`PictureIds`]), so a picture
 //!   the compositor already holds (a held, paused or repeated frame: the
-//!   same allocation as the last boundary's) is not uploaded again;
+//!   same allocation as the last boundary's) is not uploaded again into
+//!   its slot (a fade's incoming picture moves to the outgoing slot when the
+//!   fade ends, and is uploaded there once);
 //! - composes the boundary into the 3840×2160 render target and sends it.
 //!
 //! Failures never panic the thread and never reach the program:

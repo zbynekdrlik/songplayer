@@ -20,11 +20,31 @@
 import { test, expect, APIRequestContext } from "@playwright/test";
 import { MIN_BOUNDARIES, MaxStatus, maxGateFailures } from "./max-gate";
 
-async function readMax(request: APIRequestContext): Promise<MaxStatus> {
+/** The fields of `GET /api/v1/program` this spec reads: MAX, and the
+ *  program's own coalesces and late takes (a burst after a program-side
+ *  stall can coalesce MAX's 2-deep queue with MAX healthy). */
+interface ProgramRead {
+  max: MaxStatus;
+  health: { coalesced: number; timing: { ready_late_us_max: number } };
+}
+
+async function readProgram(request: APIRequestContext): Promise<ProgramRead> {
   const resp = await request.get("/api/v1/program");
   expect(resp.status(), "GET /api/v1/program").toBe(200);
-  const body = (await resp.json()) as { max: MaxStatus };
-  return body.max;
+  return (await resp.json()) as ProgramRead;
+}
+
+async function readMax(request: APIRequestContext): Promise<MaxStatus> {
+  return (await readProgram(request)).max;
+}
+
+/** One log line of a read: MAX, plus the program's side of a coalesce. */
+function logLine(what: string, read: ProgramRead): string {
+  const h = read.health;
+  return (
+    `[#223 max] ${what}: ${JSON.stringify(read.max)}; program coalesced=${h.coalesced} ` +
+    `ready_late_us_max=${h.timing.ready_late_us_max}`
+  );
 }
 
 test.describe("SP-program-MAX (#223 S2)", () => {
@@ -39,8 +59,9 @@ test.describe("SP-program-MAX (#223 S2)", () => {
         timeout: 30_000,
       })
       .toBeGreaterThan(0);
-    const first = await readMax(request);
-    console.log(`[#223 max] first: ${JSON.stringify(first)}`);
+    const firstRead = await readProgram(request);
+    const first = firstRead.max;
+    console.log(logLine("first", firstRead));
 
     await expect
       .poll(async () => (await readMax(request)).submitted - first.submitted, {
@@ -48,9 +69,10 @@ test.describe("SP-program-MAX (#223 S2)", () => {
         timeout: 20_000,
       })
       .toBeGreaterThanOrEqual(MIN_BOUNDARIES);
-    const second = await readMax(request);
+    const secondRead = await readProgram(request);
+    const second = secondRead.max;
     console.log(
-      `[#223 max] second: ${JSON.stringify(second)}; p99 upload+draw+send = ` +
+      `${logLine("second", secondRead)}; p99 upload+draw+send = ` +
         `${second.upload_us_p99 + second.draw_us_p99 + second.send_us_p99} us`,
     );
     expect(maxGateFailures(first, second), "the SP-program-MAX gate").toEqual([]);
