@@ -239,10 +239,7 @@ fn compose(upload_us: u64, draw_us: u64) -> ComposeStats {
 fn the_records_count_and_name_the_state() {
     let max = MaxOut::new();
     let _consumer = taking(&max);
-    assert!(
-        !max.record_sent(compose(10, 20), SpoutSendStats { send_us: 30 }),
-        "running already: no recovery"
-    );
+    max.record_sent(compose(10, 20), SpoutSendStats { send_us: 30 });
     let status = max.status();
     assert_eq!(status.submitted, 1);
     assert_eq!(
@@ -250,11 +247,11 @@ fn the_records_count_and_name_the_state() {
         (10, 20, 30)
     );
 
-    let no_adapter = GpuError::NoAdapter;
-    assert!(max.record_failed(&no_adapter), "a new failure");
-    assert!(!max.record_failed(&no_adapter), "the same one again");
+    let no_adapter = GpuError::NoAdapter.to_string();
+    max.record_failed(&no_adapter);
+    max.record_failed(&no_adapter);
     assert_eq!(max.status().state, format!("error: {no_adapter}"));
-    assert!(max.record_failed(&lost("compose")), "another failure");
+    max.record_failed(&lost("compose").to_string());
     max.record_skipped();
     let status = max.status();
     assert_eq!(status.failed, 4, "three failures and a skip");
@@ -275,10 +272,7 @@ fn the_records_count_and_name_the_state() {
         Some("NVIDIA GeForce RTX 3070 Ti")
     );
 
-    assert!(
-        max.record_sent(compose(1, 2), SpoutSendStats { send_us: 3 }),
-        "the first frame out after a failure is a recovery"
-    );
+    max.record_sent(compose(1, 2), SpoutSendStats { send_us: 3 });
     let status = max.status();
     assert_eq!((status.state.as_str(), status.submitted), ("running", 2));
 }

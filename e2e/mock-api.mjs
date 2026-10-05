@@ -992,7 +992,7 @@ function programBody() {
     // #223 S2: SP-program-MAX (mirrors `MaxStatus`). The setting is ON unless
     // it says "false"; the mock has no GPU, like the Linux server: unsupported.
     max: {
-      enabled: settings.program_max_enabled !== "false",
+      enabled: String(settings.program_max_enabled ?? "").trim() !== "false",
       state: "unsupported",
       width: 3840,
       height: 2160,

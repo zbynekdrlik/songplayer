@@ -41,8 +41,7 @@ use std::time::Duration;
 use serde::Serialize;
 use sp_core::config::{SETTING_PROGRAM_MAX_ENABLED, program_max_enabled};
 use sp_gpu::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, ComposeStats, GpuError, Nv12Picture, SPOUT_SENDER_NAME,
-    SpoutSendStats,
+    CANVAS_HEIGHT, CANVAS_WIDTH, ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, SpoutSendStats,
 };
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
@@ -189,8 +188,10 @@ pub struct MaxStatus {
     pub upload_us_p99: u64,
     pub draw_us_p99: u64,
     pub send_us_p99: u64,
-    /// Lost devices: each drops the compositor and the sender, rebuilt on
-    /// the next job.
+    /// Lost devices: each drops the compositor and the sender (a loss while
+    /// building drops what was built). They are rebuilt on the next job, or
+    /// after the backoff when the device is lost again before a boundary
+    /// went out or while building.
     pub device_resets: u64,
     /// Spout senders refused (the name taken, not listed, not registered):
     /// each waits a backoff before a new one.
@@ -250,8 +251,9 @@ impl Window {
     }
 }
 
-/// What the thread reports (its own lock: an API read never contends with
-/// the program thread's offer).
+/// What the thread reports, under its own lock: an API read takes the
+/// queue lock only to copy two fields, and sorts the windows outside every
+/// lock.
 struct Stats {
     phase: MaxPhase,
     submitted: u64,
@@ -439,29 +441,21 @@ impl MaxOut {
         self.ready.notify_all();
     }
 
-    /// A boundary went out: its costs, and `running`. Returns whether the
-    /// thread was not running before (it recovered).
-    pub fn record_sent(&self, compose: ComposeStats, send: SpoutSendStats) -> bool {
+    /// A boundary went out: its costs, and `running`.
+    pub fn record_sent(&self, compose: ComposeStats, send: SpoutSendStats) {
         let mut stats = self.lock_stats();
         stats.submitted += 1;
         stats.upload.push(compose.upload_us);
         stats.draw.push(compose.draw_us);
         stats.send.push(send.send_us);
-        let recovered = stats.phase != MaxPhase::Running;
         stats.phase = MaxPhase::Running;
-        recovered
     }
 
-    /// A boundary did not go out because of `error`. Returns whether the
-    /// state's text changed (a new failure, worth one WARN; the same failure
-    /// on every boundary is not).
-    pub fn record_failed(&self, error: &GpuError) -> bool {
+    /// A boundary did not go out because of `why`.
+    pub fn record_failed(&self, why: &str) {
         let mut stats = self.lock_stats();
         stats.failed += 1;
-        let phase = MaxPhase::Failed(error.to_string());
-        let changed = stats.phase != phase;
-        stats.phase = phase;
-        changed
+        stats.phase = MaxPhase::Failed(why.to_string());
     }
 
     /// A boundary was skipped while the thread waits out a backoff (the

@@ -28,10 +28,13 @@
 //! - any other failure (a picture that is not whole NV12, one frame Spout
 //!   lost) costs that boundary only.
 //!
-//! A failure is WARNed when it is new (another text than the state before),
-//! a recovery INFOed, each at most once per [`MAX_LOG_EVERY_100NS`] with the
-//! count held back (a failure that alternates with sent boundaries never
-//! floods the log).
+//! The log says what the thread does ([`LogGate`]): a WARN when boundaries
+//! stop going out or fail for another reason, an INFO when they go out
+//! again, at most one line per [`MAX_LOG_EVERY_100NS`]. A change inside that
+//! window is not lost: the first boundary after it writes the state as it
+//! is then, with how many boundaries were held back, so a failure that
+//! alternates with sent boundaries never floods the log and the log's last
+//! line always names the current state.
 //!
 //! The GPU is a trait ([`MaxGpu`]) so every decision here runs on Linux with
 //! a fake; the production one is [`SpoutGpu`] (`sp-gpu`'s `Compositor` on
@@ -62,6 +65,45 @@ pub const MAX_LOG_EVERY_100NS: i64 = 50_000_000;
 pub fn elapsed_100ns(since: Instant, now: Instant) -> i64 {
     let ns = now.saturating_duration_since(since).as_nanos();
     i64::try_from(ns / 100).unwrap_or(i64::MAX)
+}
+
+/// The line the log writes for one boundary ([`LogGate::observe`]).
+#[derive(Debug, PartialEq, Eq)]
+pub enum LogLine {
+    /// Boundaries do not go out (a WARN with the reason).
+    Failing { held_back: u64 },
+    /// Boundaries go out again (an INFO).
+    Recovered { held_back: u64 },
+}
+
+/// What the log last said about the thread, and its rate limit. Pure: the
+/// worker logs the line it returns.
+#[derive(Debug, Default)]
+pub struct LogGate {
+    limiter: WarnLimiter,
+    /// What the log last said: `None` = boundaries go out (also the start),
+    /// `Some(why)` = they do not, because of `why`.
+    logged: Option<String>,
+}
+
+impl LogGate {
+    /// The state after a boundary at `at_100ns` (`failing` = why boundaries
+    /// do not go out, `None` = they do). A line when the state differs from
+    /// what the log last said, at most one per [`MAX_LOG_EVERY_100NS`]; a
+    /// difference held back is written by the first boundary after the
+    /// window, as the state is then (`held_back` = the boundaries held
+    /// back since the last line).
+    pub fn observe(&mut self, at_100ns: i64, failing: Option<&str>) -> Option<LogLine> {
+        if self.logged.as_deref() == failing {
+            return None;
+        }
+        let held_back = self.limiter.admit(at_100ns, MAX_LOG_EVERY_100NS)?;
+        self.logged = failing.map(str::to_owned);
+        Some(match failing {
+            Some(_) => LogLine::Failing { held_back },
+            None => LogLine::Recovered { held_back },
+        })
+    }
 }
 
 /// The compositor half of the GPU: draw one boundary into the render target.
@@ -262,10 +304,11 @@ pub struct MaxWorker<'a, G: MaxGpu> {
     unsupported: bool,
     /// A device was lost and no boundary went out since.
     lost_unsent: bool,
-    /// Where the log limiters' time starts.
+    /// Why boundaries do not go out now (`None`: they do).
+    failing: Option<String>,
+    /// Where the log's time starts.
     started: Instant,
-    failures: WarnLimiter,
-    recoveries: WarnLimiter,
+    log: LogGate,
 }
 
 impl<'a, G: MaxGpu> MaxWorker<'a, G> {
@@ -279,9 +322,9 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             retry_at: None,
             unsupported: false,
             lost_unsent: false,
+            failing: None,
             started: Instant::now(),
-            failures: WarnLimiter::default(),
-            recoveries: WarnLimiter::default(),
+            log: LogGate::default(),
         }
     }
 
@@ -291,40 +334,45 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         self.compositor.is_some() || self.sender.is_some()
     }
 
-    /// Compose and send one boundary at `now`, and report it.
-    pub fn serve(&mut self, job: &MaxJob, now: Instant) {
-        let at = elapsed_100ns(self.started, now);
+    /// Compose and send one boundary at `now`, report it, and log what
+    /// changed ([`LogGate`]); returns the line it logged.
+    pub fn serve(&mut self, job: &MaxJob, now: Instant) -> Option<LogLine> {
         match self.attempt(job, now) {
             Ok((compose, send)) => {
                 self.lost_unsent = false;
-                if self.out.record_sent(compose, send)
-                    && let Some(held_back) = self.recoveries.admit(at, MAX_LOG_EVERY_100NS)
-                {
-                    info!(
-                        stamp_100ns = job.stamp_100ns(),
-                        held_back, "program max: boundaries go out"
-                    );
-                }
+                self.failing = None;
+                self.out.record_sent(compose, send);
             }
             Err(Skip::Backoff) => self.out.record_skipped(),
             Err(Skip::Unsupported) => {
                 self.unsupported = true;
                 self.out.record_unsupported();
+                return None;
             }
             Err(Skip::Failed(failure)) => {
-                if self.out.record_failed(failure.error())
-                    && let Some(held_back) = self.failures.admit(at, MAX_LOG_EVERY_100NS)
-                {
-                    warn!(
-                        error = %failure.error(),
-                        failure = ?failure,
-                        held_back,
-                        "program max: a boundary did not go out"
-                    );
-                }
+                let why = failure.error().to_string();
+                self.out.record_failed(&why);
+                self.failing = Some(why);
                 self.recover(&failure, now);
             }
         }
+        let at = elapsed_100ns(self.started, now);
+        let line = self.log.observe(at, self.failing.as_deref());
+        match &line {
+            Some(LogLine::Failing { held_back }) => warn!(
+                error = self.failing.as_deref().unwrap_or_default(),
+                held_back = *held_back,
+                stamp_100ns = job.stamp_100ns(),
+                "program max: boundaries do not go out"
+            ),
+            Some(LogLine::Recovered { held_back }) => info!(
+                held_back = *held_back,
+                stamp_100ns = job.stamp_100ns(),
+                "program max: boundaries go out"
+            ),
+            None => {}
+        }
+        line
     }
 
     /// Build what is missing (unless a backoff runs), then compose `job`
@@ -381,11 +429,11 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         }
     }
 
-    /// MAX is off: drop the sender (Spout unregisters the name), then the
-    /// compositor, and forget any backoff.
+    /// MAX is off, or the thread stops: drop the sender (Spout unregisters
+    /// the name), then the compositor, and forget any backoff.
     pub fn release(&mut self) {
         if self.holds_gpu() {
-            info!("program max: off — the Spout sender and the compositor are released");
+            info!("program max: the Spout sender and the compositor are released");
         }
         self.drop_gpu();
         self.retry_at = None;
@@ -405,7 +453,9 @@ pub fn run_max_loop<G: MaxGpu>(out: &MaxOut, gpu: G) {
     let mut worker = MaxWorker::new(out, gpu);
     loop {
         match out.next(worker.holds_gpu()) {
-            MaxNext::Job(job) => worker.serve(&job, Instant::now()),
+            MaxNext::Job(job) => {
+                worker.serve(&job, Instant::now());
+            }
             MaxNext::Release => worker.release(),
             MaxNext::Stop => break,
         }

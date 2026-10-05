@@ -375,9 +375,9 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   holds GPU objects; else the next job. `set_enabled(false)` drops the
   queued jobs and wakes it; `attach()` returns the guard whose drop stops
   the offers (a dead thread never leaves a stale "running").
-- The queue and the stats are two locks: an API read never contends with
-  the program thread's offer; the p99 windows are copied under the lock and
-  sorted after it.
+- The queue and the stats are two locks: an API read takes the queue lock
+  only to copy two fields (`enabled`, `coalesced`), copies the p99 windows
+  under the stats lock and sorts them after it.
 
 ### The `program-max` thread (`program_max_worker.rs`)
 
@@ -417,13 +417,20 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   - any other failure (a picture that is not whole NV12, one frame Spout
     lost) costs that boundary only;
   - `Unsupported` (off Windows) is final: never built again.
-  Every failure counts `failed`; a skipped boundary during a backoff too.
-  The WARN `program max: a boundary did not go out` fires for a new failure
-  text (`record_failed` returns whether the state changed), the INFO
-  `program max: boundaries go out` for a recovery, each at most once per
-  5 s of the thread's time (`MAX_LOG_EVERY_100NS`, a `WarnLimiter` each,
-  `held_back` = how many it skipped): a failure that alternates with sent
-  boundaries never floods the log.
+  Every failure counts `failed`, a boundary skipped during a backoff too;
+  `Unsupported` counts nothing.
+- **The log (`LogGate`, pure)** says what the thread does: the WARN
+  `program max: boundaries do not go out` (with the reason) when boundaries
+  stop going out or fail for another reason, the INFO `program max:
+  boundaries go out` when they go out again — a line whenever the state
+  differs from what the log last said, at most one per 5 s of the thread's
+  time (`MAX_LOG_EVERY_100NS`, a `WarnLimiter`). A change inside the window
+  is not lost: the first boundary after it writes the state as it is then
+  (`held_back` = the boundaries held back), so the log's last line always
+  names the current state (a lost device whose rebuild then finds no
+  adapter ends on the no-adapter WARN), and a failure that alternates with
+  sent boundaries never floods it. `serve` returns the line it logged, which
+  the tests read.
 - Dropping the GPU objects (a lost device, MAX off) also drops the held
   pictures (`PictureIds::forget`): no decoded frame stays pinned out of
   `frame_pool` while MAX is off.
@@ -445,7 +452,9 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   draw_us_p99, send_us_p99, device_resets, sender_backoffs, spout_name,
   adapter}` (`MaxStatus`; `adapter` = the adapter the last compositor was
   built on, `None` before the first build: R3-2 asks the box to name its
-  RTX). `state` (`state_label`): `unsupported` (off Windows: no
+  RTX). R3-2 sketched `spout {frames, adapter}`; S2 ships the flat shape
+  the S2 dispatch named, with `frames` = `submitted` and `adapter` at the
+  top level. `state` (`state_label`): `unsupported` (off Windows: no
   thread) wins, then `off` (the setting), then the thread: `running` (it
   takes jobs and its last boundary went out), `error: <why>` (its last
   boundary did not; `error: the program-max thread is not running` before
