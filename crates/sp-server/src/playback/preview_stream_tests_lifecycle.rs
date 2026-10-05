@@ -251,8 +251,9 @@ fn a_released_settle_also_ends_the_stopped_childs_stream() {
 }
 
 /// Giving the stream up (the restart budget is spent, or the supervisor
-/// panicked) closes EVERY viewer's stream, even one still waiting for an init,
-/// so each WS socket closes, and frees the claim for the next viewer.
+/// panicked) closes the relay unconditionally, so even a viewer still waiting
+/// for an init has its stream ended (its socket closes at the latest at its
+/// init timeout), and frees the claim for the next viewer.
 #[test]
 fn give_up_closes_every_viewers_stream_and_frees_the_claim() {
     let tap = StreamTap::new("t".into(), 0);
@@ -271,4 +272,13 @@ fn give_up_closes_every_viewers_stream_and_frees_the_claim() {
         shared.try_claim_encoder(),
         "the claim is free for the next viewer"
     );
+}
+
+/// The supervisor exits ONLY after a `Released` settle (the claim is free).
+/// After a `Restart` it still holds the claim and must run a new child: the
+/// reverse would stick the claim for good, or run a child it no longer owns.
+#[test]
+fn only_a_released_settle_lets_the_supervisor_exit() {
+    assert!(UnwatchedEnd::Released.supervisor_exits());
+    assert!(!UnwatchedEnd::Restart.supervisor_exits());
 }

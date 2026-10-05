@@ -90,7 +90,10 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
     let init = match wait_for_init(&relay).await {
         Some(i) => i,
         None => {
-            info!("preview.ws: encoder produced no init segment, closing");
+            info!(
+                label = tap.shared().label(),
+                "preview.ws: encoder produced no init segment, closing"
+            );
             return;
         }
     };
@@ -104,8 +107,10 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
     // #184 round G: viewer sessions are logged at INFO (open + close with the
     // session length and the pings answered), so a viewer on a slow link that
     // the shim keeps reconnecting (every ~10 s) is visible in the box log — the
-    // shim itself may not log (zero-console rule).
+    // shim itself may not log (zero-console rule). #184: each line names the
+    // playlist, so a viewer is tied to its encoder's `preview-encoder` lines.
     info!(
+        label = tap.shared().label(),
         bytes = init.len(),
         "preview.ws: viewer connected, sent init segment"
     );
@@ -169,7 +174,10 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
             _ = ping.tick() => {
                 let now_ms = start.elapsed().as_millis() as u64;
                 if is_idle(last_seen_ms, now_ms) {
-                    info!("preview.ws: client idle > 15s with no frames, closing");
+                    info!(
+                        label = tap.shared().label(),
+                        "preview.ws: client idle > 15s with no frames, closing"
+                    );
                     break;
                 }
                 if socket.send(Message::Ping(Vec::<u8>::new().into())).await.is_err() {
@@ -190,8 +198,10 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
         }
     }
     info!(
+        label = tap.shared().label(),
         secs = start.elapsed().as_secs(),
-        pongs, "preview.ws: viewer disconnected"
+        pongs,
+        "preview.ws: viewer disconnected"
     );
 }
 
