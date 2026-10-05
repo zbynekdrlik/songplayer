@@ -467,13 +467,15 @@ itself: the OBS client no longer reads cg OBS's program at all
   (`with_no_wall_owner_a_playlist_played_off_program_feeds_no_presenter`,
   `with_no_wall_owner_a_playlist_still_on_program_writes_nothing`,
   `the_last_owner_s_off_blanks_the_stage_display`,
-  `an_off_with_the_next_owner_on_its_way_leaves_the_stage_display`). Those
-  tests publish a two-member set with an owner directly
+  `an_off_with_the_next_owner_on_its_way_leaves_the_stage_display`,
+  `an_off_that_leaves_no_owner_blanks_the_stage_display_even_unflagged`).
+  The owner tests publish a two-member set with an owner directly
   (`OnAirPlaylists::publish`): no production value has two members any
   more, but the gate is the same, and it is what the cut moment above
-  relies on. A test that only `replace`s the diffed set (`#[cfg(test)]`)
-  publishes no owner, so nobody writes the wall there (the stale-check
-  and re-check tests).
+  relies on. The no-owner tests publish nothing on air with no owner
+  (`publish(∅, None)`), or one playlist (`put_on_air_for_test`). A test
+  that only `replace`s the diffed set (`#[cfg(test)]`) publishes no owner,
+  so nobody writes the wall there (the stale-check and re-check tests).
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
   (its ON came before it existed). An ON for a playlist with NO pipeline

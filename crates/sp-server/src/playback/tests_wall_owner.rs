@@ -3,9 +3,11 @@
 //! `OnAirPlaylists::may_write_wall`) writes the shared wall outputs: the
 //! `ShowSubtitles` line, the Presenter, the song-end clear, the title timers
 //! and a re-sync's title and lines. Since #221 B4 step 6 the authority
-//! publishes one playlist at most (SP-program's), so these tests publish a
-//! two-member set DIRECTLY: they pin the gate itself, which reads only the
-//! published owner, and the re-syncs at an owner change. A child module of
+//! publishes one playlist at most (SP-program's), so the owner tests publish
+//! a two-member set DIRECTLY: they pin the gate itself, which reads only the
+//! published owner, and the re-syncs at an owner change. The no-owner tests
+//! (#221 lane 2: no owner = nobody writes) publish nothing on air with no
+//! owner, or one playlist (`put_on_air_for_test`). A child module of
 //! `tests_scene_change.rs` (the 1000-line cap): it reuses that module's
 //! engine rig (`test_engine`, `play`, `sent`, `resyncs`, `Window`).
 
@@ -14,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sp_core::lyrics::{LyricsLine, LyricsTrack};
+use sp_core::ws::ServerMsg;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use wiremock::matchers::{method, path};
@@ -405,6 +408,7 @@ async fn with_no_wall_owner_a_playlist_played_off_program_feeds_no_presenter() {
     let (mut engine, mut rx) = nothing_on_air().await;
     let _stage = presenter(&mut engine).await;
     engine.set_scene_active_for_test(7, false); // played off program by hand
+    let mut ws = engine.ws_event_tx.subscribe();
 
     engine.dispatch_lyrics_if_changed(7, 60_000);
 
@@ -412,6 +416,19 @@ async fn with_no_wall_owner_a_playlist_played_off_program_feeds_no_presenter() {
     assert!(
         engine.pipelines[&7].last_presenter_text.is_none(),
         "7 pushed nothing to the Presenter"
+    );
+    let karaoke = std::iter::from_fn(|| ws.try_recv().ok()).find_map(|msg| match msg {
+        ServerMsg::LyricsUpdate {
+            playlist_id: 7,
+            line_en,
+            ..
+        } => Some(line_en),
+        _ => None,
+    });
+    assert_eq!(
+        karaoke,
+        Some(Some("gamma.".to_string())),
+        "its own karaoke WS still gets the line"
     );
 }
 

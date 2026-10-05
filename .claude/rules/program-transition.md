@@ -506,8 +506,11 @@ faded out the on-program title.
   - While held, `dispatch_lyrics_if_changed` sends nothing to the wall, the
     Presenter or the karaoke WS, which is what `None` did. The gate is the
     MARKER, not `scene_active`: a song played off program by hand still
-    feeds its karaoke WS (`dispatch_lyrics_resolume_gated_on_scene_active`);
-    the Presenter only ever takes the wall owner's line (#221).
+    feeds its karaoke WS
+    (`tests_wall_owner.rs::with_no_wall_owner_a_playlist_played_off_program_feeds_no_presenter`);
+    the Presenter only ever takes the wall owner's line (#221), and the
+    owner's scene gate on the wall lines is
+    `dispatch_lyrics_resolume_gated_on_scene_active`.
   - The scene-off resets the wall and Presenter dedup keys (the wall was
     cleared), so a scene back on re-sends the line at the next Position.
   - The PAUSE drops the lyrics, where the scene-off used to: a Position
