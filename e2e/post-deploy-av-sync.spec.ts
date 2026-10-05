@@ -409,11 +409,13 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     }
     // The take records cg OBS's sp-* input of the baseline's own NDI output.
     // No receiver is expected on that output any more (#221), so nothing
-    // watches or recovers it: wait until cg OBS's input is attached, else
-    // fail naming it, never as an unmeasurable recording.
+    // watches or recovers it: wait until the output has a receiver (cg OBS's
+    // input, once cg OBS shows the scene), else fail naming it, never as an
+    // unmeasurable recording. The count cannot tell cg OBS's receiver from
+    // another one.
     const baselinePid = status.active_playlist_ids[0];
     await pollUntil(
-      `cg OBS's ${baseline} input receiving the playlist's own NDI output (connections >= 1)`,
+      `a receiver on ${baseline}'s own NDI output (cg OBS's input, connections >= 1)`,
       30_000,
       async () =>
         (

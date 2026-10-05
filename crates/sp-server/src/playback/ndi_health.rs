@@ -691,8 +691,8 @@ impl crate::playback::PlaybackEngine {
         // 60 s window (a monotonic timestamp off the engine's `Instant` origin —
         // the window is purely relative, so no wall clock is needed), then
         // derive the three-state lock from clock_ok + pacing.enabled +
-        // the judged connections + the differenced window counts. A `-1`
-        // "never polled" count maps to 0 receivers where one is expected.
+        // the judged connections (at least 1: a playlist output expects no
+        // receiver) + the differenced window counts.
         let clock = match self.clock_health.read() {
             Ok(guard) => guard.clone(),
             Err(_) => ClockHealth::default(),
@@ -711,7 +711,7 @@ impl crate::playback::PlaybackEngine {
             heartbeat_100ns,
             &pacing,
             clock.clock_ok,
-            judged.max(0) as u32,
+            judged as u32,
             source_fps,
             sp_core::genlock::GENLOCK_GRID_FPS as u32,
             transport_from_reported(&reported_state),

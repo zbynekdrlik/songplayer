@@ -613,10 +613,17 @@ receiver.
   B4 step 6 deleted the mirror that moved cg OBS with a press — to put cg
   OBS itself on the baseline scene for the take (only when it is not there
   already; its `sp-*` input carries the playlist's own NDI output, the
-  pipeline the program bus takes too), restored in `afterAll`. Without it
-  the take recorded cg OBS's own manual scene and the audio correlation
-  failed (review round 1 🔴). The lane that retires the per-playlist
-  senders moves the recording to an `SP-program` receiver.
+  pipeline the program bus takes too), restored in `afterAll` (also only
+  when cg OBS is on another scene: a manual scene the facade restore put
+  back is no same-scene 2 s self-fade on cg OBS, no #170 dropped-event
+  state). Without it the take recorded cg OBS's own manual scene and the
+  audio correlation failed (review round 1 🔴). Then it waits (≤ 30 s)
+  until the baseline's own output has a receiver (`connections >= 1` on
+  `/api/v1/ndi/health`: cg OBS's input once it shows the scene; the count
+  cannot tell it from another receiver) and fails naming it, never as an
+  unmeasurable take — no receiver is expected on that output any more, so
+  nothing else watches it. The lane that retires the per-playlist senders
+  moves the recording to an `SP-program` receiver.
   **`obs-driver.ts` keeps the BARE `obs-websocket-js` import (#221 L2b).**
   In Node it resolves (package `exports` → `import` / `require`) to the
   MSGPACK build, which offers only `obswebsocket.msgpack` — exactly what
