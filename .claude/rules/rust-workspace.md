@@ -688,6 +688,11 @@ the test that kills each one BEFORE CI's mutation gate runs.
 - `a && b && c` parses as `(a && b) && c`, so its two `&&`→`||` mutants
   are `(a || b) && c` and `(a && b) || c` — never `a || (b && c)`. Model
   those two when you name the killing test (#215 round 4).
+- It generates NO mutant inside a macro's arguments (#144): `format!("key
+  {} of {total}", key_index + 1)` lists no `+` mutant, and neither does an
+  expression inside `assert!` / `json!` / `vec!`. A formula whose value
+  matters goes into a `let` or a helper fn outside the macro, or its test
+  pins it through the produced text.
 - It generates NO mutant for a plain assignment (`self.flag = false;`) or
   for an `if` condition that is a bare variable (`if breaker_just_closed {`).
   Deleting such a line survives the gate unseen, so give it its own
