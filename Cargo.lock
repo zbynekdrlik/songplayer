@@ -2077,6 +2077,7 @@ version = "0.71.0-dev.9"
 dependencies = [
  "mutants",
  "sp-core",
+ "sp-gpu",
  "symphonia",
  "thiserror",
  "tracing",

@@ -5,7 +5,8 @@
 //!
 //! * [`audio::SymphoniaAudioReader`] — pure-Rust FLAC decoder (cross-platform)
 //! * [`video::mf_reader::MediaFoundationVideoReader`] — Windows-only video
-//!   reader backed by Media Foundation.
+//!   reader backed by Media Foundation, in software or (#223 S3b, opt-in) on
+//!   the GPU ([`hw_decode`]).
 //!
 //! [`split_sync::SplitSyncedDecoder`] drives them with audio-as-master-clock.
 
@@ -14,6 +15,7 @@ mod types;
 
 pub mod audio;
 pub mod frame_pool;
+pub mod hw_decode; // #223 S3b: the hardware decode decisions (pure, Linux-tested)
 pub mod level_probe;
 mod peak_limiter; // #184: the stem mix's peak limiter (pure, mutation-tested), #210: the program's too
 pub mod split_sync;
@@ -29,6 +31,9 @@ pub use audio::{
 };
 pub use error::DecoderError;
 pub use frame_pool::PooledBuf;
+pub use hw_decode::{
+    DecodeMode, DecodePath, FallbackStage, HwDecodeStats, HwFallback, hw_counters,
+};
 pub use level_probe::{LevelProbe, LevelReading, PROBE_INTERVAL};
 pub use peak_limiter::{LIMIT_CEILING, PeakLimiter};
 pub use split_sync::SplitSyncedDecoder;
