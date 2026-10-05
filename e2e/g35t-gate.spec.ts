@@ -8,19 +8,18 @@
 import { test, expect } from "@playwright/test";
 import { G35tProbe, g35tGateFailures } from "./g35t-gate";
 
-/** A probe that answered: the shape the box sends on success. */
+/** A probe that answered: the shape the box sends on success (the live
+ * probe of 5.10.2026: the first key answered, none refused). */
 function answered(): G35tProbe {
   return {
     ok: true,
     model: "gemini-3.5-transcribe",
-    key_index: 1,
+    key_index: 0,
     language_codes: ["en-US", "es-419"],
     word_count: 37,
     latency_ms: 6_412,
     error: null,
-    refused_keys: [
-      { key_index: 0, rate_limited: false, error: "g35t_client upload: key refused status=400" },
-    ],
+    refused_keys: [],
     clip: {
       youtube_id: "gq-4FVRr_ow",
       source: "isolated_vocal",
@@ -32,8 +31,38 @@ function answered(): G35tProbe {
 }
 
 test.describe("g35t live gate (#144)", () => {
-  test("a probe that heard words under the production request passes, a refused spare key or not", () => {
+  test("a probe that heard words under the production request passes", () => {
     expect(g35tGateFailures(answered())).toEqual([]);
+  });
+
+  test("a rate-limited key before the answering one still passes: a 429 is quota, not a dead key", () => {
+    const probe: G35tProbe = {
+      ...answered(),
+      key_index: 1,
+      refused_keys: [
+        { key_index: 0, rate_limited: true, error: "g35t_client upload: key refused status=429 body=quota" },
+      ],
+    };
+    expect(g35tGateFailures(probe)).toEqual([]);
+  });
+
+  test("a dead or invalid key fails the gate even when a later key answered", () => {
+    const probe: G35tProbe = {
+      ...answered(),
+      key_index: 2,
+      refused_keys: [
+        { key_index: 0, rate_limited: true, error: "g35t_client upload: key refused status=429 body=quota" },
+        {
+          key_index: 1,
+          rate_limited: false,
+          error: "g35t_client upload: key refused status=400 body=API key not valid",
+        },
+      ],
+    };
+    expect(g35tGateFailures(probe)).toEqual([
+      "key 2 was refused, not rate-limited (a dead or invalid key): " +
+        "g35t_client upload: key refused status=400 body=API key not valid",
+    ]);
   });
 
   test("a refused key fails the gate with the API's message", () => {
@@ -44,11 +73,17 @@ test.describe("g35t live gate (#144)", () => {
       word_count: 0,
       error:
         "g35t_client: no key answered (2 tried); key 2 of 2: g35t_client upload: key refused status=403",
+      refused_keys: [
+        { key_index: 0, rate_limited: false, error: "g35t_client upload: key refused status=400" },
+        { key_index: 1, rate_limited: false, error: "g35t_client upload: key refused status=403" },
+      ],
       sample: "",
     };
     expect(g35tGateFailures(probe)).toEqual([
       "the probe failed: g35t_client: no key answered (2 tried); key 2 of 2: g35t_client upload: key refused status=403",
       "the model transcribed no words",
+      "key 1 was refused, not rate-limited (a dead or invalid key): g35t_client upload: key refused status=400",
+      "key 2 was refused, not rate-limited (a dead or invalid key): g35t_client upload: key refused status=403",
     ]);
   });
 

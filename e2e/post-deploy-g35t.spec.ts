@@ -15,8 +15,9 @@
  * served line (the isolated vocal the worker uploads when on disk, else its
  * vocal stem, else the mix) and sends it through the worker's call: the same
  * upload, request body, language hint and key rotation. One short paid call
- * per deploy, like the metadata probe. It passes on any working key; the keys
- * refused before it are logged (`refused_keys`).
+ * per deploy, like the metadata probe. The keys refused before the answering
+ * one are logged (`refused_keys`); one refused for any reason but a 429 (a
+ * dead or invalid key) fails the gate even when a later key answered.
  *
  * API-level on purpose: the probe has no dashboard surface. The decision is
  * the pure `g35t-gate.ts`, unit-tested in the mock suite.
@@ -35,10 +36,7 @@ test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
     // makes ready after a (re)start: wait for it rather than rely on the specs
     // that happen to run before this one for that. A refused or slow status
     // read (the app still starting) is "not yet", never a failure: expect.poll
-    // does not retry a generator that throws. Right after a restart the status
-    // itself can stall behind the startup task's `tools_status` guard (a
-    // pre-existing lib.rs issue, #144 comment 5998431231); the earlier specs
-    // absorb that window today.
+    // does not retry a generator that throws.
     await expect
       .poll(
         async () => {
@@ -59,10 +57,10 @@ test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
     expect(resp.status(), "POST /api/v1/lyrics/g35t/probe").toBe(200);
     const probe = (await resp.json()) as G35tProbe;
     console.log(`[#144 g35t probe] ${JSON.stringify(probe)}`);
-    // Logged, not gated: the gate passes on any working key (#144 comment
-    // 5998042988). A refusal that is not a 429 is a key refusal: the key is
-    // dead, invalid, or not allowed this model or API — the logged reason
-    // says which.
+    // Every refused key is logged. A 429 passes (quota, not a dead key); any
+    // other refusal fails the gate below (#144 comment 5999711400): the key
+    // is dead, invalid, or not allowed this model or API — the logged reason
+    // says which, so read it before pruning the key.
     for (const refused of probe.refused_keys) {
       const kind = refused.rate_limited
         ? "rate-limited (429)"
@@ -70,6 +68,9 @@ test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
       console.log(`[#144 g35t probe] key ${refused.key_index + 1} ${kind}: ${refused.error}`);
     }
 
-    expect(g35tGateFailures(probe), "the g35t probe must hear words").toEqual([]);
+    expect(
+      g35tGateFailures(probe),
+      "the g35t probe must hear words, with no dead or invalid key",
+    ).toEqual([]);
   });
 });

@@ -97,6 +97,73 @@ async fn status_returns_200() {
     assert_eq!(json["playlist_count"], 0);
 }
 
+/// #144: the status route reads the OBS, tools and LAN status, then waits on
+/// the database. It copies every status out BEFORE its first database wait
+/// and holds no status lock while it waits: a tokio `RwLock` queues every
+/// reader behind a waiting writer, so a read guard held across a slow query
+/// stalls the OBS client's writes and every status read behind them. The
+/// test holds the memory pool's only connection and polls the route once, so
+/// it parks on the pool; there it changes every status (a held guard fails
+/// the `try_write`), and the answer must carry the values from before.
+#[tokio::test]
+async fn the_status_route_holds_no_status_lock_while_it_waits_on_the_database() {
+    let state = test_state().await;
+    state.obs_state.write().await.connected = true;
+    state.tools_status.write().await.ytdlp_version = Some("before".to_string());
+    *state.lan_status.write().await = crate::mdns::LanStatus {
+        lan_url: Some("http://sp.local:8920".to_string()),
+        lan_ip: Some("10.77.9.201".to_string()),
+    };
+    let held = state.pool.acquire().await.unwrap();
+    let mut answer = std::pin::pin!(status(State(state.clone())));
+    assert!(
+        futures::poll!(answer.as_mut()).is_pending(),
+        "the route waits for the held database connection"
+    );
+    state
+        .obs_state
+        .try_write()
+        .expect("the OBS status is locked while the route waits on the database")
+        .connected = false;
+    state
+        .tools_status
+        .try_write()
+        .expect("the tools status is locked while the route waits on the database")
+        .ytdlp_version = Some("after".to_string());
+    *state
+        .lan_status
+        .try_write()
+        .expect("the LAN status is locked while the route waits on the database") =
+        crate::mdns::LanStatus::default();
+
+    drop(held);
+    let response = tokio::time::timeout(std::time::Duration::from_secs(60), answer)
+        .await
+        .expect("the route answers once the connection is free")
+        .into_response();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        json["obs_connected"], true,
+        "the OBS status from before the wait"
+    );
+    assert_eq!(
+        json["tools"]["ytdlp_version"], "before",
+        "the tools status from before the wait"
+    );
+    assert_eq!(
+        json["lan_url"], "http://sp.local:8920",
+        "the LAN status from before the wait"
+    );
+    assert_eq!(
+        json["lan_ip"], "10.77.9.201",
+        "the LAN status from before the wait"
+    );
+}
+
 #[tokio::test]
 async fn create_and_list_playlists() {
     let state = test_state().await;

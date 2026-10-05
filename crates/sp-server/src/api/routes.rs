@@ -684,9 +684,10 @@ pub async fn update_settings(
 // ---------------------------------------------------------------------------
 
 pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
-    let obs = state.obs_state.read().await;
-    let tools = state.tools_status.read().await;
-
+    // #144: each status copied out at once, no lock held across the awaits below.
+    let obs_connected = state.obs_state.read().await.connected;
+    let tools = state.tools_status.read().await.clone();
+    let lan = state.lan_status.read().await.clone();
     let playlist_count = sqlx::query("SELECT COUNT(*) AS c FROM playlists")
         .fetch_one(&state.pool)
         .await
@@ -695,8 +696,6 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
 
     let (active_scene, active_playlist_ids) =
         super::routes_status::on_air_fields(&state.program_bus);
-
-    let lan = state.lan_status.read().await;
 
     // #203/#207/#207r3c: resolve the live containment; purge delay/alloc mode/reserve_gib/max_ws (#147 r9) are internal-only, not surfaced here.
     let heavy_cap = crate::db::models::get_setting(&state.pool, "heavy_cpu_cap_pct")
@@ -719,19 +718,19 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
 
     Json(StatusResponse {
         version: sp_core::config::VERSION.to_string(),
-        obs_connected: obs.connected,
+        obs_connected,
         active_scene,
         active_playlist_ids,
         tools: ToolsStatusResponse {
             ytdlp_available: tools.ytdlp_available,
             ffmpeg_available: tools.ffmpeg_available,
-            ytdlp_version: tools.ytdlp_version.clone(),
+            ytdlp_version: tools.ytdlp_version,
             js_runtime_ok: tools.js_runtime_ok,
-            deno_version: tools.deno_version.clone(),
+            deno_version: tools.deno_version,
         },
         playlist_count,
-        lan_url: lan.lan_url.clone(),
-        lan_ip: lan.lan_ip.clone(),
+        lan_url: lan.lan_url,
+        lan_ip: lan.lan_ip,
         preview_encoder: crate::playback::preview::preview_encoder::chosen_encoder(),
         uptime_s: crate::process_start::uptime_secs(),
         heavy_containment: HeavyContainmentStatus {

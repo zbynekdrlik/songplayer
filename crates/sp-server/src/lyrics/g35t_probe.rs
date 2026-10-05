@@ -32,8 +32,9 @@
 //! its place in the list (`key 2 of 5`) and are redacted with every key.
 //! It lists every key refused before the one that decided the outcome
 //! (`refused_keys`), so a dead key shows even while a later one answers.
-//! The gate passes on ANY working key; keys after the answering one are not
-//! tried (that would cost a paid call per key).
+//! The post-deploy gate (`e2e/g35t-gate.ts`) fails on such a key unless it
+//! was a 429; keys after the answering one are not tried (that would cost a
+//! paid call per key).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

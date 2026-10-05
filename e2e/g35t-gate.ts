@@ -7,10 +7,12 @@
  * through the lyrics worker's own call (`lyrics::g35t_probe`): the same
  * upload, request body, language hint and Gemini key rotation as a song.
  * The deploy fails unless the model answered the clip with words, under the
- * model and the language hint the lyrics worker sends. It passes on ANY
- * working Gemini key: keys refused before the answering one are listed in
- * `refused_keys` (logged by the spec, not gated: a 429 there is transient),
- * keys after it are not tried.
+ * model and the language hint the lyrics worker sends. It also fails on any
+ * key in `refused_keys` refused for a reason other than a 429 (a dead or
+ * invalid key), even when a later key answered: a dead Gemini key must never
+ * go unnoticed with CI green (#144 comment 5999711400). A 429 there passes:
+ * it is a quota state, not a dead key. Keys after the answering one are not
+ * tried.
  */
 
 /** The model every transcription request names (`g35t_client::MODEL_SLUG`). */
@@ -80,6 +82,14 @@ export function g35tGateFailures(probe: G35tProbe): string[] {
       `the build hints ${JSON.stringify(probe.language_codes)}, ` +
         `not ${JSON.stringify(G35T_LANGUAGE_CODES)}`,
     );
+  }
+  for (const refusal of probe.refused_keys) {
+    if (!refusal.rate_limited) {
+      failures.push(
+        `key ${refusal.key_index + 1} was refused, not rate-limited ` +
+          `(a dead or invalid key): ${refusal.error}`,
+      );
+    }
   }
   return failures;
 }
