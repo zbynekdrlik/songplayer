@@ -50,7 +50,7 @@ test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
     const probe = (await resp.json()) as G35tProbe;
     console.log(`[#144 g35t probe] ${JSON.stringify(probe)}`);
     // Logged, not gated: the gate passes on any working key (#144 comment
-    // 5997623040). A refusal that is not a 429 is a dead or invalid key.
+    // 5998042988). A refusal that is not a 429 is a dead or invalid key.
     for (const refused of probe.refused_keys) {
       const kind = refused.rate_limited ? "rate-limited (429)" : "REFUSED (dead or invalid key)";
       console.log(`[#144 g35t probe] key ${refused.key_index + 1} ${kind}: ${refused.error}`);
