@@ -33,7 +33,7 @@ export interface ProgramState {
    *  #221 L4b: the scene catalog's name for SP-program's source). */
   activeScene: string | null;
   /** SongPlayer's on-air set (`/api/v1/status.active_playlist_ids`):
-   *  SP-program's playlist plus the one cg OBS was told to show. */
+   *  SP-program's playlist (#221 B4 step 6: none for "OBS manuál"). */
   activePlaylistIds: number[];
   /** True when the Dabing playlist (`kind == "dabing"`) is on program. */
   dabingOnProgram: boolean;

@@ -231,10 +231,9 @@ test("the Program control lists OBS manuál after the playlists and cuts to it a
 });
 
 // #215 (B5 of EPIC #174): every cut is a transition. The "Prechod" line shows
-// the one the next cut uses — cg OBS's scene transition by default, the
-// Nastavenia override, or the default 300 ms fade while cg OBS's is not known
-// (the mock runs no cg OBS; a spec injects its transition) — and the progress
-// of a running fade.
+// the one the next cut uses — the Nastavenia choice, else the default 300 ms
+// fade (#221 L5 deleted cg OBS's transition as a source, with the OBS
+// follow) — and the progress of a running fade.
 
 async function clickCut(page: Page, id: number) {
   const button = page.locator(`[data-testid="program-cut"][data-playlist-id="${id}"]`);
@@ -306,18 +305,20 @@ test("the Program control shows the transition a click cut uses and counts its m
   expect(realConsoleErrors(consoleMessages)).toEqual([]);
 });
 
-test("the Program control follows cg OBS's own scene transition", async ({
+// #221 L5: the fade length is Nastavenia's alone (no cg OBS transition,
+// no `follow` block, no "podľa OBS"); a retired `obs` reads as the default.
+test("the Program control cuts with the Nastavenia fade and names no cg OBS transition", async ({
   page,
   request,
 }) => {
   const consoleMessages = collectConsole(page);
   await page.setViewportSize({ width: 1600, height: 1000 });
-  await request.post("/__mock/program-obs-transition", {
-    data: { name: "Fade", kind: "fade_transition", duration_ms: 500 },
+  await request.patch("/api/v1/settings", {
+    data: { program_transition: "fade", program_transition_ms: "500" },
   });
   await page.goto("/");
   const line = page.getByTestId("program-transition");
-  await expect(line).toHaveText("Prechod: prelínanie 500 ms (podľa OBS)", {
+  await expect(line).toHaveText("Prechod: prelínanie 500 ms (nastavenie)", {
     timeout: 10000,
   });
   await clickCut(page, 184);
@@ -327,27 +328,21 @@ test("the Program control follows cg OBS's own scene transition", async ({
   let program = await (await request.get("/api/v1/program")).json();
   expect(program.transition.n_slots).toBe(15);
   expect(program.transition.mixed_boundaries).toBe(15);
-  expect(program.follow.obs_transition).toEqual({
-    name: "Fade",
-    kind: "fade_transition",
-    duration_ms: 500,
-  });
+  expect(program.transition.source).toBe("setting");
+  expect(program).not.toHaveProperty("follow");
+  expect(program).not.toHaveProperty("legacy_cg");
+  // A dashboard cut tells cg OBS nothing (#221 B4 step 6).
+  expect(program.remote.last_remote_cut.cg_forward).toBeNull();
 
-  // The operator switches cg OBS to its Cut transition: SP-program follows.
-  await request.post("/__mock/program-obs-transition", {
-    data: { name: "Cut", kind: "cut_transition", duration_ms: null },
+  // A stored `obs` (the retired follow mode) is the default fade.
+  await request.patch("/api/v1/settings", {
+    data: { program_transition: "obs" },
   });
-  await expect(line).toHaveText("Prechod: strih (podľa OBS)", {
+  await expect(line).toHaveText("Prechod: prelínanie 500 ms (predvolené)", {
     timeout: 5000,
   });
-  await clickCut(page, 1);
-  await expect(page.getByTestId("program-source")).toHaveText(
-    "Na programe: Worship",
-  );
   program = await (await request.get("/api/v1/program")).json();
-  expect(program.transition.kind).toBe("cut");
-  expect(program.transition.source).toBe("obs");
-  expect(program.transition.mixed_boundaries).toBe(15);
+  expect(program.transition.source).toBe("fallback");
 
   // Zero console errors — the last assertion.
   expect(realConsoleErrors(consoleMessages)).toEqual([]);

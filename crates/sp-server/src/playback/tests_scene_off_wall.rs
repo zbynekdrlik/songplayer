@@ -52,13 +52,13 @@ fn is_hide_subtitles(c: &ResolumeCommand) -> bool {
     matches!(c, ResolumeCommand::HideSubtitles)
 }
 
-/// #221 L4b review rounds 3-4: the playback authority sends the incoming
-/// playlist's ON at the press and the outgoing one's OFF only when cg OBS
-/// confirms the mirror, so another playlist can already be on program (and
-/// in the authority's diffed set), its title and line up, when a playlist
-/// goes off. The wall is then re-synced to it: its due title (a Resync, no
-/// HideTitle) and its current line re-sent at once (no HideSubtitles, which
-/// would blank it until its next position report).
+/// #221 L4b review rounds 3-4: another playlist can already be on program
+/// (and in the authority's diffed set), its title and line up, when a
+/// playlist goes off — after a quick cut away and back, the stale events of
+/// the cuts in between are dropped (#221 B4 step 6: the outgoing OFF no
+/// longer waits for cg OBS). The wall is then re-synced to it: its due title
+/// (a Resync, no HideTitle) and its current line re-sent at once (no
+/// HideSubtitles, which would blank it until its next position report).
 #[tokio::test]
 async fn going_off_program_resyncs_the_wall_to_a_playlist_still_on_program() {
     let (mut engine, mut rx) = test_engine(&[(7, 42, "Song"), (9, 44, "Later")]).await;

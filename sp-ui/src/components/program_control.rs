@@ -13,9 +13,10 @@
 //! (`PROGRAM_INPUT_ID`).
 //!
 //! #215: the "Prechod" line shows the transition every cut uses (a crossfade of
-//! N ms or a hard cut, and where it comes from: cg OBS, the Nastavenia
-//! override, or the default while cg OBS's transition is unknown), and the
-//! progress of a running fade (`transition` on `GET /api/v1/program`).
+//! N ms or a hard cut, and where it comes from: the Nastavenia choice, or the
+//! default fade when none is chosen — #221 L5 deleted cg OBS's transition as a
+//! source), and the progress of a running fade (`transition` on
+//! `GET /api/v1/program`).
 //!
 //! Testids (set here, never by a caller): `program-control`, `program-source`
 //! (the "Na programe: …" line), `program-transition` (the "Prechod: …" line),
@@ -53,7 +54,7 @@ pub struct ProgramTransition {
     pub kind: String,
     #[serde(default)]
     pub duration_ms: u32,
-    /// `obs`, `setting` or `fallback`.
+    /// `setting` or `fallback`.
     #[serde(default)]
     pub source: String,
     /// The running (or next) fade window.
@@ -70,7 +71,7 @@ pub struct ProgramWindow {
 }
 
 impl ProgramTransition {
-    /// The "Prechod: …" line, e.g. `Prechod: prelínanie 300 ms (podľa OBS)`,
+    /// The "Prechod: …" line, e.g. `Prechod: prelínanie 300 ms (predvolené)`,
     /// `Prechod: strih (nastavenie)`, or with a running fade
     /// `… — prebieha 44 %`.
     pub fn label(&self) -> String {
@@ -84,7 +85,6 @@ impl ProgramTransition {
             "strih".to_string()
         };
         let from = match self.source.as_str() {
-            "obs" => "podľa OBS",
             "setting" => "nastavenie",
             _ => "predvolené",
         };

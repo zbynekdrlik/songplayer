@@ -1,11 +1,13 @@
-//! #221, release 0.69.0 review 🟡 2: ONE wall owner. With two playlists on
-//! air (a failed or late cg OBS mirror, a dashboard cut to "OBS manuál"),
-//! only the owner the playback authority published
-//! (`program_on_air::wall_owner`, `OnAirPlaylists::may_write_wall`) writes
-//! the shared wall outputs: the `ShowSubtitles` line, the Presenter, the
-//! song-end clear, the title timers and a re-sync's title and lines. A child
-//! module of `tests_scene_change.rs` (the 1000-line cap): it reuses that
-//! module's engine rig (`test_engine`, `play`, `sent`, `resyncs`, `Window`).
+//! #221, release 0.69.0 review 🟡 2: ONE wall owner. Only the owner the
+//! playback authority published (`program_on_air::wall_owner`,
+//! `OnAirPlaylists::may_write_wall`) writes the shared wall outputs: the
+//! `ShowSubtitles` line, the Presenter, the song-end clear, the title timers
+//! and a re-sync's title and lines. Since #221 B4 step 6 the authority
+//! publishes one playlist at most (SP-program's), so these tests publish a
+//! two-member set DIRECTLY: they pin the gate itself, which reads only the
+//! published owner, and the re-syncs at an owner change. A child module of
+//! `tests_scene_change.rs` (the 1000-line cap): it reuses that module's
+//! engine rig (`test_engine`, `play`, `sent`, `resyncs`, `Window`).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -250,9 +252,9 @@ fn is_cleared(body: &str) -> bool {
     body.contains(r#""currentText":"""#) && body.contains(r#""currentSong":"""#)
 }
 
-/// Review rounds 1-2: the owner can change through the new owner's ON alone
-/// — SP-program cut to 9 while cg OBS still shows 7 ({7, 9}, 9 owns). 7
-/// writes nothing any more, so 9's ON re-syncs the whole wall at once: its
+/// Review rounds 1-2: a new owner's ON — 9 owns ({7, 9} published, 9
+/// owns). 7 writes nothing any more, so 9's ON re-syncs the whole wall at
+/// once: its
 /// title (the scene-on's ONE `Resync`), its line — one `HideSubtitles` when
 /// 9 has none (it was played off program by hand, with no lyrics) — and the
 /// Presenter — cleared when 9 has no line. Never 7's line frozen on
@@ -344,11 +346,10 @@ async fn a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down() {
     assert!(is_cleared(&bodies[1]), "{bodies:?}");
 }
 
-/// Review round 3: the owner can change through an OFF alone too — a cut to
-/// "OBS manuál" while cg OBS still shows another playlist ({7, 9} with 9
-/// owning → {7} with 7 owning, and only 9's OFF is sent). The OFF re-syncs
-/// the stage display to the new owner, as its ON would: cleared here, 7
-/// having no line — never 9's line left there, nor re-pushed.
+/// Review round 3: an OFF re-syncs the stage display to the wall owner
+/// still on program ({7, 9} with 9 owning → {7} with 7 owning, and only 9's
+/// OFF handled), as its ON would: cleared here, 7 having no line — never
+/// 9's line left there, nor re-pushed.
 #[tokio::test]
 async fn an_owner_change_by_an_off_re_syncs_the_stage_display() {
     let (mut engine, mut rx) = two_on_air(9).await;

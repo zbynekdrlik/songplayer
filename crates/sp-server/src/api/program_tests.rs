@@ -531,11 +531,11 @@ async fn the_remote_block_reports_the_stored_settings_and_the_live_state() {
     assert!(!json.to_string().contains("supersecretpassword"));
 }
 
-// ---- #215: the `transition` + `follow` blocks ------------------------------
+// ---- #215: the `transition` block -----------------------------------------
 
 #[tokio::test]
-async fn the_program_reports_the_transition_and_the_follow() {
-    use crate::playback::program_transition::{ObsTransition, SpecSource, TransitionSpec};
+async fn the_program_reports_the_transition() {
+    use crate::playback::program_transition::{SpecSource, TransitionSpec};
     let state = test_state().await;
     let (status, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -553,54 +553,7 @@ async fn the_program_reports_the_transition_and_the_follow() {
             "cue_wait_boundaries": 0,
             "cue_timeouts": 0,
         }),
-        "until the follow task sets one, a cut is a hard cut"
-    );
-    assert_eq!(
-        json["follow"],
-        serde_json::json!({
-            "enabled": false,
-            "mode": "obs",
-            "ms": 300,
-            "obs_transition": null,
-            "last_follow_cut": null,
-        })
-    );
-
-    // The stored settings show at once, cg OBS's transition once it answered.
-    let (status, _) = call(
-        state.clone(),
-        "PATCH",
-        "/api/v1/settings",
-        Some(serde_json::json!({
-            "program_follow_obs": "true",
-            "program_transition": "fade",
-            "program_transition_ms": "500",
-        })),
-    )
-    .await;
-    assert!(status.is_success(), "got {status}");
-    state
-        .program_bus
-        .follow()
-        .set_obs_transition(ObsTransition {
-            name: "Fade".to_string(),
-            kind: "fade_transition".to_string(),
-            duration_ms: Some(300),
-        });
-    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
-    assert_eq!(
-        json["follow"],
-        serde_json::json!({
-            "enabled": true,
-            "mode": "fade",
-            "ms": 500,
-            "obs_transition": {
-                "name": "Fade",
-                "kind": "fade_transition",
-                "duration_ms": 300,
-            },
-            "last_follow_cut": null,
-        })
+        "until the transition-settings task sets one, a cut is a hard cut"
     );
 
     // A cut with a 300 ms fade in force opens a 9-slot window from the
@@ -611,7 +564,7 @@ async fn the_program_reports_the_transition_and_the_follow() {
     assert!(
         state
             .program_bus
-            .set_transition(TransitionSpec::fade(300, SpecSource::Obs))
+            .set_transition(TransitionSpec::fade(300, SpecSource::Setting))
     );
     let (status, json) = call(
         state.clone(),
@@ -628,7 +581,7 @@ async fn the_program_reports_the_transition_and_the_follow() {
             "kind": "fade",
             "duration_ms": 300,
             "n_slots": 9,
-            "source": "obs",
+            "source": "setting",
             "active": {
                 "from": slow,
                 "to": fast,
@@ -644,7 +597,6 @@ async fn the_program_reports_the_transition_and_the_follow() {
             "cue_timeouts": 0,
         })
     );
-    assert_eq!(json["follow"]["enabled"], true, "the cut answer carries it");
     let (_, json) = call(state, "GET", "/api/v1/program", None).await;
     assert_eq!(json["transition"]["active"]["to"], fast);
 }

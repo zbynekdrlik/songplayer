@@ -196,8 +196,8 @@ fn the_status_reports_the_stored_settings_and_the_live_counters() {
         reason: None,
         cut_boundary_100ns: Some(42),
         at_ms: 1,
-        via: Some("transition"),
-        cg_forward: Some("pending".to_string()),
+        via: "transition",
+        cg_forward: None,
     };
     shared.record_cut(cut.clone());
     assert_eq!(
@@ -234,61 +234,6 @@ fn every_refusal_over_the_cap_is_counted_and_logged_at_most_once_per_interval() 
     assert_eq!(refused(&shared).refused_over_cap, 4);
     let json = serde_json::to_value(refused(&shared)).unwrap();
     assert_eq!(json["refused_over_cap"], 4);
-}
-
-fn cut_of(scene: &str) -> RemoteCut {
-    RemoteCut {
-        scene: scene.to_string(),
-        action: "playlist",
-        source: Some(7),
-        reason: None,
-        cut_boundary_100ns: None,
-        at_ms: 1,
-        via: Some("program"),
-        cg_forward: Some("pending".to_string()),
-    }
-}
-
-/// #221: the mirror's answer lands after the press was answered; it may only
-/// update ITS cut, never a later press's.
-#[test]
-fn a_late_mirror_answer_updates_only_its_own_cut() {
-    let shared = RemoteShared::default();
-    let last_forward = |shared: &RemoteShared| {
-        shared
-            .status(&RemoteSettings::disabled(), &OnAir::default())
-            .last_remote_cut
-            .and_then(|c| c.cg_forward)
-    };
-    assert!(
-        !shared.set_cg_forward(0, "ok".to_string()),
-        "no cut recorded yet"
-    );
-    assert_eq!(
-        shared
-            .status(&RemoteSettings::disabled(), &OnAir::default())
-            .last_remote_cut,
-        None
-    );
-    let first = shared.record_cut(cut_of("sp-fast"));
-    assert!(shared.set_cg_forward(first, "error 600".to_string()));
-    assert_eq!(last_forward(&shared).as_deref(), Some("error 600"));
-    let second = shared.record_cut(cut_of("sp-slow"));
-    assert_ne!(first, second);
-    assert!(
-        !shared.set_cg_forward(first, "ok".to_string()),
-        "a later press replaced it"
-    );
-    assert_eq!(last_forward(&shared).as_deref(), Some("pending"));
-    assert!(shared.set_cg_forward(second, "not_ready".to_string()));
-    let last = shared
-        .status(&RemoteSettings::disabled(), &OnAir::default())
-        .last_remote_cut
-        .unwrap();
-    assert_eq!(
-        (last.scene.as_str(), last.cg_forward.as_deref()),
-        ("sp-slow", Some("not_ready"))
-    );
 }
 
 /// #221: a transition duration is kept for the telemetry, never applied.
@@ -489,17 +434,6 @@ async fn an_unanswered_call_times_out_and_is_left_marked_abandoned() {
     }
 }
 
-/// #221: a mirror's waiter outwaits the forwarder's worst case — a switch
-/// in flight, then the mirror's own answer, each at most the OBS client's
-/// answer timeout.
-#[test]
-fn a_mirror_waits_for_two_answers_of_cg_obs_longer() {
-    assert_eq!(
-        MIRROR_EXTRA_WAIT,
-        crate::obs::dispatcher::DEFAULT_RESPONSE_TIMEOUT * 2
-    );
-}
-
 #[tokio::test(start_paused = true)]
 async fn a_full_obs_queue_is_not_ready_at_once_never_a_blocked_caller() {
     let (events, _) = broadcast::channel::<ObsEvent>(4);
@@ -512,7 +446,6 @@ async fn a_full_obs_queue_is_not_ready_at_once_never_a_blocked_caller() {
         .try_send(ObsCommand::Remote(RemoteCall::Request {
             request_type: "filler".to_string(),
             request_data: None,
-            supersedes: false,
             deadline: tokio::time::Instant::now(),
             reply,
         }))

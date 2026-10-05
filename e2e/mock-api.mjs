@@ -228,7 +228,7 @@ const settings = {
   // fieldset shows its defaults (off, `sp-program`, no targets).
   // #212: the ndi_input_* keys are absent too (the input is off, no source).
   // #213: the remote_ws_* keys are absent too (off, port 4456, no password).
-  // #215: the program_* transition keys are absent too (no follow, `obs`, 300 ms).
+  // #215: the program_* transition keys are absent too (the default 300 ms fade).
 };
 // #210: the fixture as loaded, restored by `/__mock/settings-reset`.
 const settingsInitial = { ...settings };
@@ -387,9 +387,9 @@ function maybeFail(kind, res) {
 }
 
 // #221 L4b: a ▶ claims no program. A playlist that is not on air (not
-// SP-program's source; the mock's cg OBS record is always empty) plays OFF
-// program: the server broadcasts `WaitingForScene` with transport `Playing`,
-// which the Player reads "Hrá mimo programu". On air it plays on program.
+// SP-program's source, #221 B4 step 6) plays OFF program: the server
+// broadcasts `WaitingForScene` with transport `Playing`, which the Player
+// reads "Hrá mimo programu". On air it plays on program.
 app.post("/api/v1/playback/:id/play", (req, res) => {
   if (maybeFail("play", res)) return;
   const pid = Number(req.params.id);
@@ -864,22 +864,22 @@ app.post("/__mock/ndi-health", (req, res) => {
 let programState = { source: 1, previous: null, cuts: 0, transitions: 0, mixed: 0 };
 let programLastCut = null;
 // #221 L4a: the dashboard cut is recorded as `remote.last_remote_cut` with
-// `via: "dashboard"`, like the server's switch path. The mock has no cg OBS,
-// so a playlist's mirror reads `not_ready` (the server with no OBS link).
+// `via: "dashboard"`, like the server's switch path. #221 B4 step 6: it tells
+// cg OBS nothing (`cg_forward` null).
 let programLastRemoteCut = null;
-// #215: the mock runs no cg OBS and no program sender, so a spec can inject
-// cg OBS's current scene transition (`/__mock/program-obs-transition`) and a
-// running fade window (`/__mock/program-transition-active`); both are cleared
-// by `/__mock/program-reset`.
-let programObsTransition = null;
+// #215: the mock runs no program sender, so a spec can inject a running fade
+// window (`/__mock/program-transition-active`); cleared by
+// `/__mock/program-reset`. A spec can also set SP-program's receiver count
+// (`/__mock/program-connections`, #221 B4 step 6).
 let programActiveWindow = null;
+let programConnections = 0;
 // #215: the program transition — mirrors the server's `effective_spec`:
-// `cut` → a Cut, `fade` → a Fade of `program_transition_ms`, `obs` (default)
-// → cg OBS's transition (`cut_transition` → a Cut, any other kind → a Fade of
-// its duration), or a Fade of `program_transition_ms` while it is unknown.
+// `cut` → a Cut, `fade` → a Fade of `program_transition_ms` (the operator's
+// choice); anything else (none, the retired `obs`) → the default Fade of
+// `program_transition_ms` (`fallback`).
 function transitionMode() {
   const mode = (settings.program_transition || "").trim();
-  return mode === "fade" || mode === "cut" ? mode : "obs";
+  return mode === "fade" || mode === "cut" ? mode : null;
 }
 function transitionMs() {
   const raw = (settings.program_transition_ms || "").trim();
@@ -902,29 +902,18 @@ function transitionSpec() {
   if (mode === "fade") {
     return fadeSpec(transitionMs(), "setting");
   }
-  const obs = programObsTransition;
-  if (obs === null) {
-    return fadeSpec(transitionMs(), "fallback");
-  }
-  if (obs.kind === "cut_transition") {
-    return { kind: "cut", duration_ms: 0, n_slots: 0, source: "obs" };
-  }
-  return fadeSpec(obs.duration_ms ?? transitionMs(), "obs");
-}
-// Mirrors `FollowStatus`, from the stored settings like the real API.
-function followBody() {
-  return {
-    enabled: settings.program_follow_obs === "true",
-    mode: transitionMode(),
-    ms: transitionMs(),
-    obs_transition: programObsTransition,
-    last_follow_cut: null,
-  };
+  return fadeSpec(transitionMs(), "fallback");
 }
 function programBody() {
   return {
     ndi_name: "SP-program",
     source: programState.source,
+    // #221 B4 step 6: SP-program's receiver expectation (mirrors
+    // `ndi_health_expect::program_degraded_reason`).
+    degraded_reason:
+      programState.source !== null && programConnections < 1
+        ? "no NDI receiver on SP-program"
+        : null,
     previous: programState.previous,
     cut_boundary_100ns: programState.cuts > 0 ? 17900000000000000 : null,
     health: {
@@ -935,7 +924,7 @@ function programBody() {
       coalesced: 0,
       cuts: programState.cuts,
       submitted: 0,
-      connections: 0,
+      connections: programConnections,
       last_stamp_100ns: 0,
       // #210: the sender's per-boundary timing (mirrors
       // `BoundaryTimingStatus`); the mock sends no boundary.
@@ -1069,13 +1058,8 @@ function remoteBody() {
     last_transition_duration: null,
   };
 }
-// #221 L4a: what SongPlayer told cg OBS to show — mirrors `LegacyCgStatus`.
-// The mock has no cg OBS, so a mirror is never accepted and nothing is shown.
-function legacyCgBody() {
-  return { shown: null };
-}
 app.get("/api/v1/program", (_req, res) => {
-  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody(), legacy_cg: legacyCgBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody() });
 });
 app.post("/api/v1/program/cut", (req, res) => {
   const source = Number(req.body?.source);
@@ -1102,10 +1086,10 @@ app.post("/api/v1/program/cut", (req, res) => {
     cut_boundary_100ns: null,
     at_ms: Date.now(),
     via: "dashboard",
-    // The input sends nothing to cg OBS (`cg_forward` null), like the
-    // server. The mock's playlists all name a scene; the server's other
-    // no-scene cases (inactive, empty or shared NDI name) are not modelled.
-    cg_forward: source === -1 || !playlist ? null : "not_ready",
+    // #221 B4 step 6: a dashboard cut tells cg OBS nothing. The mock's
+    // playlists all name a scene; the server's no-scene cases (inactive,
+    // empty or shared NDI name) are not modelled.
+    cg_forward: null,
   };
   if (programState.source !== source) {
     programState = {
@@ -1117,7 +1101,7 @@ app.post("/api/v1/program/cut", (req, res) => {
     };
     if (playingOffAir.delete(source)) broadcastPlaybackState(source, "Playing", "Playing");
   }
-  res.json({ ...programBody(), input: inputBody(), remote: remoteBody(), follow: followBody(), legacy_cg: legacyCgBody() });
+  res.json({ ...programBody(), input: inputBody(), remote: remoteBody() });
 });
 // Test-only: the last cut body the dashboard posted (backend-effect check).
 app.get("/__mock/program-last-cut", (_req, res) => {
@@ -1128,19 +1112,16 @@ app.post("/__mock/program-reset", (_req, res) => {
   playingOffAir.clear();
   programLastCut = null;
   programLastRemoteCut = null;
-  programObsTransition = null;
   programActiveWindow = null;
+  programConnections = 0;
   res.json({ status: "reset" });
 });
-// #215 test-only: cg OBS's current scene transition (`{name, kind,
-// duration_ms}`, mirrors `ObsTransition`), or `{}` for "not known yet".
-app.post("/__mock/program-obs-transition", (req, res) => {
-  const t = req.body || {};
-  programObsTransition =
-    typeof t.kind === "string"
-      ? { name: t.name || "", kind: t.kind, duration_ms: t.duration_ms ?? null }
-      : null;
-  res.json({ obs_transition: programObsTransition });
+// #221 B4 step 6 test-only: SP-program's NDI receiver count
+// (`health.connections`), `{connections: N}`.
+app.post("/__mock/program-connections", (req, res) => {
+  const n = Number(req.body?.connections);
+  programConnections = Number.isInteger(n) ? n : 0;
+  res.json({ connections: programConnections });
 });
 // #215 test-only: a running fade window of `progress` % (mirrors
 // `ActiveWindow`), or `{}` for none.

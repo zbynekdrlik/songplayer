@@ -111,7 +111,7 @@ fn paused_at(engine: &PlaybackEngine, pid: i64) -> Option<(i64, u64)> {
 fn program(engine: &PlaybackEngine, on_program: i64) -> Arc<ProgramBus> {
     let bus = Arc::new(ProgramBus::new());
     bus.select_initial(on_program, None);
-    assert!(bus.set_transition(TransitionSpec::fade(300, SpecSource::Obs)));
+    assert!(bus.set_transition(TransitionSpec::fade(300, SpecSource::Setting)));
     assert!(engine.program.set(bus.clone()).is_ok());
     bus
 }

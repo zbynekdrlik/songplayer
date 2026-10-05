@@ -68,13 +68,10 @@ export class ObsDriver {
    *
    *  - #221 L3: a switch to the scene already on program is ALWAYS sent. The
    *    driver talks to SongPlayer's facade, where a same-scene transition is
-   *    the designed re-kick: it re-mirrors the scene to cg OBS, whose program
-   *    can differ from SP-program until the cutover (e.g. cg OBS on a manual
-   *    scene while "OBS manual" is off keeps the last playlist on
-   *    SP-program). Skipping it left cg OBS, and so the engine's
-   *    `active_scene`, off the target (review round 1). The skip existed for
-   *    cg OBS's own same-scene 2 s fade, which dropped the next switch's
-   *    event (#170); the E2E no longer switches cg OBS directly.
+   *    the designed re-kick (it plays a playlist paused out of band). The skip
+   *    existed for cg OBS's own same-scene 2 s fade, which dropped the next
+   *    switch's event (#170); the E2E no longer switches cg OBS directly
+   *    (#221 B4 step 6: a playlist press tells cg OBS nothing at all).
    *  - In studio mode, drive the transition the studio way
    *    (`SetCurrentPreviewScene` + `TriggerStudioModeTransition`) so OBS emits
    *    the program-scene-changed event SongPlayer reacts to; fall back to

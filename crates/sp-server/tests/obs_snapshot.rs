@@ -1,11 +1,11 @@
-//! #219: the OBS client publishes its state (`ObsClient::snapshots`) and the
-//! program follow consumes only that.
+//! #219: the OBS client publishes its state (`ObsClient::snapshots`).
 //!
-//! The real `ObsClient` against a `FakeObsServer`:
-//! - the client reads cg OBS's scene transition at connect and again on cg
-//!   OBS's transition events, and asks again until a read is answered;
-//! - end to end with the real follow task on the client's snapshots: a scene
-//!   whose playlist lookup failed (#218) is not followed, its repair is.
+//! The real `ObsClient` against a `FakeObsServer`: the client reads cg OBS's
+//! scene transition at connect and again on cg OBS's transition events, asks
+//! again until a read is answered, and publishes a disconnect and the
+//! reconnect's program. (#221 L5 deleted the program follow, this file's
+//! other consumer, with its end-to-end test; L6 deletes the scene detection
+//! and the transition reader these tests pin.)
 //!
 //! Every wait is bounded (20 s); nothing sleeps for synchronisation.
 
@@ -17,8 +17,6 @@ use std::time::Duration;
 
 use common::{FakeObsServer, FakeObsState};
 use serde_json::{Value, json};
-use sp_server::playback::program_bus::{ProgramBus, persist_and_cut};
-use sp_server::playback::program_follow::{Follow, run_follow_task};
 use sp_server::{db, obs};
 use sqlx::SqlitePool;
 use tokio::sync::{RwLock, broadcast, watch};
@@ -72,12 +70,12 @@ fn cg_obs() -> FakeObsState {
 
 /// The real OBS client connected to a fake cg OBS.
 struct Rig {
-    pool: SqlitePool,
+    _pool: SqlitePool,
     fake: FakeObsServer,
     snapshots: watch::Receiver<obs::ObsSnapshot>,
     _rebuild: broadcast::Sender<()>,
     shutdown: broadcast::Sender<()>,
-    client: obs::ObsClient,
+    _client: obs::ObsClient,
 }
 
 impl Rig {
@@ -109,12 +107,12 @@ impl Rig {
             shutdown_rx,
         );
         Self {
-            pool,
+            _pool: pool,
             fake,
             snapshots: client.snapshots(),
             _rebuild: rebuild,
             shutdown,
-            client,
+            _client: client,
         }
     }
 
@@ -213,9 +211,8 @@ async fn the_client_reads_cg_obs_transition_at_connect_and_on_its_events() {
 }
 
 /// Review round 5: a real disconnect is PUBLISHED as the default
-/// (disconnected, nothing known) snapshot — the program follow reads a
-/// disconnect only from it — and the reconnect publishes cg OBS's program
-/// again.
+/// (disconnected, nothing known) snapshot — a consumer reads a disconnect
+/// only from it — and the reconnect publishes cg OBS's program again.
 #[tokio::test]
 async fn a_disconnect_is_published_and_the_reconnect_publishes_the_program_again() {
     let mut rig = Rig::start(cg_obs()).await;
@@ -260,68 +257,5 @@ async fn a_transition_read_with_no_answer_is_asked_again_until_answered() {
         s.transition == Some(transition("Fade", "fade_transition", Some(700)))
     })
     .await;
-    rig.stop().await;
-}
-
-#[tokio::test]
-async fn the_follow_ignores_a_failed_lookup_and_follows_its_repair() {
-    let mut rig = Rig::start(cg_obs()).await;
-    db::models::set_setting(&rig.pool, "program_follow_obs", "true")
-        .await
-        .unwrap();
-    let bus = Arc::new(ProgramBus::new());
-    let (stop_follow, stop_rx) = broadcast::channel::<()>(1);
-    let follow = tokio::spawn(run_follow_task(
-        Follow::new(rig.pool.clone(), bus.clone()),
-        rig.client.snapshots(),
-        stop_rx,
-        Duration::from_secs(3600),
-    ));
-    let source_becomes = |source: i64| {
-        let bus = bus.clone();
-        async move {
-            let deadline = tokio::time::Instant::now() + TIMEOUT;
-            while bus.status().source != Some(source) {
-                assert!(
-                    tokio::time::Instant::now() < deadline,
-                    "the program never cut to {source}"
-                );
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }
-    };
-    // cg OBS shows sp-fast: the program follows it.
-    source_becomes(7).await;
-    // The operator takes the program elsewhere by hand.
-    persist_and_cut(&rig.pool, &bus, 9, None).await.unwrap();
-    // cg OBS switches to sp-slow and that scene's lookup gets no answer.
-    rig.fake
-        .update_state(|s| {
-            s.drop_scene_item_lists = 1;
-            s.program_scene = Some("sp-slow".into());
-        })
-        .await;
-    rig.fake.push_program_scene_change("sp-slow").await;
-    let failed = rig
-        .snapshot_becomes("the failed lookup of sp-slow", |s| {
-            s.lookup_failed.as_deref() == Some("sp-slow")
-        })
-        .await;
-    assert!(
-        failed.active_playlist_ids.contains(&7),
-        "the client kept sp-fast's playlists: {failed:?}"
-    );
-    // The poll repairs the lookup; the follow cuts to sp-slow's playlist.
-    source_becomes(8).await;
-    let st = bus.status();
-    assert_eq!(
-        st.health.cuts, 3,
-        "7, the manual 9, then 8 — never back to 7 on the kept playlists"
-    );
-    let _ = stop_follow.send(());
-    tokio::time::timeout(TIMEOUT, follow)
-        .await
-        .expect("the follow task stops")
-        .expect("the follow task did not panic");
     rig.stop().await;
 }

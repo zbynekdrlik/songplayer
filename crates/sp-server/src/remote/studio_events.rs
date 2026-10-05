@@ -6,8 +6,8 @@
 //!   `remote::serve`) watches what the program bus publishes as on air, names
 //!   it with the one resolver (`program_scene_name`) and emits
 //!   `CurrentProgramSceneChanged {sceneName}` (intent Scenes) whenever the
-//!   NAME changes: after a Companion press, a dashboard cut, the OBS follow,
-//!   or anything else that cuts. A publication under the same name (a
+//!   NAME changes: after a Companion press, a dashboard cut, or anything
+//!   else that cuts. A publication under the same name (a
 //!   same-scene press, the re-kick) is no event, as in OBS.
 //! - A facade switch that cut `SP-program` ([`announce_transition`], called
 //!   by the session for `SetCurrentProgramScene` and

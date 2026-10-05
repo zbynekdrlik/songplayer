@@ -1,20 +1,24 @@
 /**
- * Unit tests for the pure NDI dark-wall gate logic (#127).
+ * Unit tests for the pure dark gate logic (#127), on `SP-program` (#221 B4
+ * step 6: a playlist's own NDI output has no consumer any more, so the
+ * receiver that must exist is `SP-program`'s).
  *
  * Runs in the ubuntu mock suite (playwright.config.ts) — no browser and no
  * deployed box needed; these `test()` blocks never touch the `page` fixture.
- * They pin the decision the post-deploy suite relies on: a Playing-on-program
- * output with zero receivers must be flagged, while an off-program dark output
- * must not.
+ * They pin the decision the post-deploy suite relies on: a program with a
+ * source and zero receivers fails, one with a live receiver passes.
  */
 
 import { test, expect } from "@playwright/test";
-import {
-  classifyConnections,
-  unhealthyOnProgramOutputs,
-} from "./ndi-health-gate";
+import { classifyConnections, programReceiverVerdict } from "./ndi-health-gate";
 
-test.describe("NDI dark-wall gate logic (#127)", () => {
+const program = (
+  source: number | null,
+  connections: number,
+  degraded_reason: string | null = null,
+) => ({ source, health: { connections }, degraded_reason });
+
+test.describe("SP-program dark gate logic (#127, #221)", () => {
   test("classifyConnections distinguishes live / dark / never-polled", () => {
     expect(classifyConnections(2)).toBe("live");
     expect(classifyConnections(1)).toBe("live");
@@ -22,45 +26,44 @@ test.describe("NDI dark-wall gate logic (#127)", () => {
     expect(classifyConnections(-1)).toBe("never_polled");
   });
 
-  test("flags an on-program output with zero receivers (the #127 dark wall)", () => {
-    const health = [
-      { playlist_id: 4, ndi_name: "SP-slow", connections: 0 },
-      { playlist_id: 7, ndi_name: "SP-fast", connections: 2 },
-    ];
-    const bad = unhealthyOnProgramOutputs([4], health);
-    expect(bad).toHaveLength(1);
-    expect(bad[0].ndi_name).toBe("SP-slow");
-    expect(bad[0].health).toBe("dark");
+  test("passes when a source is on program and SP-program has a live receiver", () => {
+    const verdict = programReceiverVerdict(program(7, 2));
+    expect(verdict).toEqual({
+      ok: true,
+      health: "live",
+      source: 7,
+      connections: 2,
+      degraded_reason: null,
+    });
+    expect(programReceiverVerdict(program(-1, 1)).ok, "OBS manuál on program").toBe(true);
   });
 
-  test("passes when the on-program output has a live receiver", () => {
-    const health = [
-      { playlist_id: 4, ndi_name: "SP-slow", connections: 0 },
-      { playlist_id: 7, ndi_name: "SP-fast", connections: 2 },
-    ];
-    expect(unhealthyOnProgramOutputs([7], health)).toHaveLength(0);
+  test("fails a program with zero receivers (the #127 dark output)", () => {
+    const verdict = programReceiverVerdict(
+      program(7, 0, "no NDI receiver on SP-program"),
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.health).toBe("dark");
+    expect(verdict.degraded_reason).toBe("no NDI receiver on SP-program");
   });
 
-  test("does not flag an off-program output that is dark (normal idle)", () => {
-    const health = [
-      { playlist_id: 4, ndi_name: "SP-slow", connections: 0 }, // off program, dark
-      { playlist_id: 7, ndi_name: "SP-fast", connections: 2 }, // on program, live
-    ];
-    // Only playlist 7 is on program (and live). Playlist 4 is dark but NOT on
-    // program → connections=0 is normal there; the gate must ignore it.
-    expect(unhealthyOnProgramOutputs([7], health)).toHaveLength(0);
+  test("fails a program not polled yet, or with nothing on it", () => {
+    expect(programReceiverVerdict(program(7, -1)).health).toBe("never_polled");
+    expect(programReceiverVerdict(program(7, -1)).ok).toBe(false);
+    const empty = programReceiverVerdict(program(null, 3));
+    expect(empty.health).toBe("nothing_on_program");
+    expect(empty.ok).toBe(false);
   });
 
-  test("flags an on-program output that has never been polled (connections -1)", () => {
-    const health = [{ playlist_id: 4, ndi_name: "SP-slow", connections: -1 }];
-    const bad = unhealthyOnProgramOutputs([4], health);
-    expect(bad).toHaveLength(1);
-    expect(bad[0].health).toBe("never_polled");
+  test("fails when the server names a degraded reason, whatever the count", () => {
+    expect(programReceiverVerdict(program(7, 2, "no NDI receiver on SP-program")).ok).toBe(
+      false,
+    );
   });
 
-  test("flags an on-program playlist that has no health snapshot at all", () => {
-    const bad = unhealthyOnProgramOutputs([9], []);
-    expect(bad).toHaveLength(1);
-    expect(bad[0].health).toBe("never_polled");
+  test("an absent degraded_reason reads as none", () => {
+    const verdict = programReceiverVerdict({ source: 4, health: { connections: 1 } });
+    expect(verdict.ok).toBe(true);
+    expect(verdict.degraded_reason).toBeNull();
   });
 });

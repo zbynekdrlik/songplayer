@@ -8,7 +8,7 @@
 
 use crate::obs::ndi_recovery::{NdiRecoveryTracker, RecoveryStep};
 use crate::playback::clock_health::ClockHealth;
-use crate::playback::ndi_health_expect::{expected_reason, receiver_expected};
+use crate::playback::ndi_health_expect::{PLAYLIST_RECEIVER_EXPECTED, expected_reason};
 use crate::playback::ndi_health_transport::transport_from_reported;
 // `PacingStats` lives in its own file (1000-line cap); re-exported so every
 // `ndi_health::PacingStats` path stays valid.
@@ -585,11 +585,14 @@ impl crate::playback::PlaybackEngine {
         };
 
         let ndi_name = pp.pipeline.ndi_name().to_string();
-        // #221 L4a: a receiver is expected only while cg OBS was told to show
-        // this playlist (`ndi_health_expect`); else 0 receivers is normal: no
-        // dark-wall reason, no self-check, no ladder (an underrun still counts).
-        let cg_shown = self.program.get().and_then(|b| b.legacy_cg().shown_now());
-        let expected = receiver_expected(&canonical_state, cg_shown, playlist_id);
+        // #221 B4 step 6: no receiver is expected on a playlist's own output
+        // (`ndi_health_expect`: SP-program takes it off the bus, and cg OBS
+        // never shows a playlist scene again), so 0 receivers is normal: no
+        // dark-wall reason, so no ladder rung against cg OBS's inputs, and the
+        // self-check only for an output that had a receiver before the restart
+        // (an underrun still counts). SP-program's own receiver is the
+        // expected one (`program_degraded_reason`).
+        let expected = PLAYLIST_RECEIVER_EXPECTED;
         let base_degraded_reason = expected_reason(
             compute_degraded_reason(
                 &canonical_state,

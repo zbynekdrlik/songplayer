@@ -34,14 +34,14 @@
 //!   value): `remote.last_transition_duration {ms, applied: false}`.
 //! - **A scene press** (`SetCurrentProgramScene`, or the transition) goes
 //!   through the ONE switch path, `playback::program_switch`: a playlist
-//!   scene (from SongPlayer's own catalog) is cut first and mirrored to cg
-//!   OBS, a manual scene goes to cg OBS first, then "OBS manuál" (#212).
-//!   Presses are applied one at a time, in arrival order, across every client.
+//!   scene (from SongPlayer's own catalog) is cut and cg OBS is told nothing
+//!   (#221 B4 step 6), a manual scene goes to cg OBS first, then "OBS
+//!   manuál" (#212). Presses are applied one at a time, in arrival order,
+//!   across every client.
 //! - **Telemetry** lives on the program bus ([`RemoteShared`],
 //!   `ProgramBus::remote()`) and is served as `remote` on `GET /api/v1/program`.
 
 pub mod codec;
-pub mod map;
 pub mod protocol;
 mod session;
 pub mod studio_events;
@@ -79,11 +79,6 @@ pub const REMOTE_SETTINGS_POLL: Duration = Duration::from_secs(5);
 /// the OBS client's 2 s of this left is answered "not ready" and never
 /// written.
 pub const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(3);
-/// #221: how much longer than [`UPSTREAM_TIMEOUT`] a mirror's waiter waits:
-/// the OBS client's forwarder may first wait for a switch in flight, then for
-/// the mirror's own answer, each at most the OBS client's answer timeout
-/// (`obs::dispatcher::DEFAULT_RESPONSE_TIMEOUT`, 2 s; pinned by a test).
-pub const MIRROR_EXTRA_WAIT: Duration = Duration::from_secs(4);
 /// The pause after a failed `accept` (never a hot loop on e.g. EMFILE).
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 /// A client that has not completed the WebSocket handshake AND identified
@@ -175,8 +170,7 @@ pub struct LastRequest {
 }
 
 /// The outcome of the last scene switch (`program_switch`: a facade press or,
-/// #221 L4a, a dashboard cut; the OBS follow records the same shape as
-/// `last_follow_cut`).
+/// #221 L4a, a dashboard cut).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RemoteCut {
     /// The scene pressed, clipped to 64 characters (a client-chosen string).
@@ -196,11 +190,12 @@ pub struct RemoteCut {
     pub at_ms: i64,
     /// #221: what triggered the switch, `program` (`SetCurrentProgramScene`),
     /// `transition` (`TriggerStudioModeTransition`) or (L4a) `dashboard`
-    /// (`POST /api/v1/program/cut`); `null` for the follow.
-    pub via: Option<&'static str>,
-    /// #221: cg OBS's answer to the forward (a manual scene) or the mirror (a
-    /// playlist scene): `ok`, `error <code>`, `not_ready`, or `pending` while
-    /// the mirror's answer is due; `null` when nothing went to cg OBS.
+    /// (`POST /api/v1/program/cut`).
+    pub via: &'static str,
+    /// #221: cg OBS's answer to a manual scene's forward: `ok`,
+    /// `error <code>` or `not_ready`; `null` when nothing went to cg OBS (a
+    /// playlist, "OBS manuál" itself, a dashboard cut — B4 step 6 deleted the
+    /// mirror).
     pub cg_forward: Option<String>,
 }
 
@@ -254,9 +249,6 @@ struct RemoteState {
     error: Option<String>,
     last_request: Option<LastRequest>,
     last_cut: Option<RemoteCut>,
-    /// The id of `last_cut` (`record_cut`), so a late mirror answer updates
-    /// only its own cut.
-    last_cut_id: u64,
     unsupported: BTreeSet<String>,
     last_transition_duration: Option<TransitionDuration>,
     /// #221: when a refusal over the session cap was last logged.
@@ -340,29 +332,9 @@ impl RemoteShared {
         st.unsupported.insert(clip(request_type))
     }
 
-    /// Remember the outcome of a remote scene press; returns its id (for
-    /// [`Self::set_cg_forward`]).
-    pub fn record_cut(&self, cut: RemoteCut) -> u64 {
-        let mut st = self.state();
-        st.last_cut_id += 1;
-        st.last_cut = Some(cut);
-        st.last_cut_id
-    }
-
-    /// #221: set cut `id`'s `cg_forward` (the mirror's answer) while it is
-    /// still the last cut; `false` when a later press replaced it.
-    pub fn set_cg_forward(&self, id: u64, cg_forward: String) -> bool {
-        let mut st = self.state();
-        if st.last_cut_id != id {
-            return false;
-        }
-        match st.last_cut.as_mut() {
-            Some(cut) => {
-                cut.cg_forward = Some(cg_forward);
-                true
-            }
-            None => false,
-        }
+    /// Remember the outcome of a scene switch (`last_remote_cut`).
+    pub fn record_cut(&self, cut: RemoteCut) {
+        self.state().last_cut = Some(cut);
     }
 
     /// #221: remember a client's transition duration (acknowledged, not
@@ -434,13 +406,6 @@ impl Upstream {
         }
     }
 
-    /// #221 L4a: a link to no cg OBS, whose calls are "not ready" at once —
-    /// the dashboard's link until `start_program` attaches the OBS client's
-    /// (`LegacyCg::link`).
-    pub fn unlinked() -> Self {
-        Self::new(None, broadcast::channel(1).0)
-    }
-
     /// This link with another call timeout (tests only, the integration
     /// tests included: production always uses [`UPSTREAM_TIMEOUT`]).
     #[doc(hidden)]
@@ -453,27 +418,23 @@ impl Upstream {
     /// is not configured, not connected or did not answer within the timeout
     /// ([`UPSTREAM_TIMEOUT`]).
     pub async fn request(&self, request_type: &str, request_data: Option<Value>) -> Option<Value> {
-        let rx = self.enqueue(request_type, request_data, false)?;
+        let rx = self.enqueue(request_type, request_data)?;
         self.wait(rx).await
     }
 
     /// Hand one request to the OBS client without ever blocking on its queue
     /// (FIFO: it goes out after every call queued before it); the receiver of
     /// its op=7 `d`, `None` when there is no OBS client or its queue is full.
-    /// `supersedes`: a fire-and-forget switch (the #221 mirror) that replaces
-    /// an earlier switch still queued (`obs::remote_call`).
-    pub fn enqueue(
+    fn enqueue(
         &self,
         request_type: &str,
         request_data: Option<Value>,
-        supersedes: bool,
     ) -> Option<oneshot::Receiver<Option<Value>>> {
         let tx = self.cmd_tx.as_ref()?;
         let (reply, rx) = oneshot::channel();
         let call = RemoteCall::Request {
             request_type: request_type.to_string(),
             request_data,
-            supersedes,
             deadline: tokio::time::Instant::now() + self.timeout,
             reply,
         };
@@ -490,17 +451,8 @@ impl Upstream {
     /// while its whole answer timeout is left of this wait (its `deadline`):
     /// a switch cg OBS answers within the OBS client's 2 s never lands after
     /// the requester was told "not ready".
-    pub async fn wait(&self, rx: oneshot::Receiver<Option<Value>>) -> Option<Value> {
+    async fn wait(&self, rx: oneshot::Receiver<Option<Value>>) -> Option<Value> {
         tokio::time::timeout(self.timeout, rx).await.ok()?.ok()?
-    }
-
-    /// #221: a mirror's wait for cg OBS's answer — the timeout plus
-    /// [`MIRROR_EXTRA_WAIT`], because the forwarder writes a mirror however
-    /// late (its cut already happened) and may first wait for a switch in
-    /// flight.
-    pub async fn wait_mirror(&self, rx: oneshot::Receiver<Option<Value>>) -> Option<Value> {
-        let wait = self.timeout + MIRROR_EXTRA_WAIT;
-        tokio::time::timeout(wait, rx).await.ok()?.ok()?
     }
 
     /// A new receiver of cg OBS's events (one per session).

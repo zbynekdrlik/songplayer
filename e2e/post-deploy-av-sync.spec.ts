@@ -364,8 +364,8 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       `baseline scene must be an sp-* output, got "${baseline}"`,
     ).toBe(true);
     await driver.switchScene(baseline);
-    // #221 L4b: the on-air set keeps the previous scene's playlist until cg
-    // OBS answers the mirror; the baseline's alone is on air once it did.
+    // #221 L4b: the playback authority puts the baseline's playlist on air
+    // a moment after the facade's switch; wait until it alone is on air.
     const status = await pollUntil(
       `engine active_scene=${baseline} with its playlist alone on air`,
       10_000,

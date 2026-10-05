@@ -46,10 +46,12 @@
 //! would drift off the grid.
 //!
 //! This file also holds the transition SPEC, meaning what the next cut does:
-//! cg OBS's current transition or the operator's override
+//! the operator's `program_transition` setting, else the default fade
 //! ([`effective_spec`]), plus the telemetry types. The window bookkeeping
 //! lives in `program_bus.rs`, the mixing call in `program_output.rs`, and the
-//! OBS follow task in `program_follow.rs`.
+//! task that keeps the spec in step with the settings in
+//! `program_transition_settings.rs` (#221 L5 deleted the OBS follow, and
+//! with it cg OBS's transition as a source of the spec).
 
 use std::f64::consts::FRAC_PI_2;
 
@@ -69,7 +71,7 @@ mod nv12_mix;
 pub use nv12_mix::{MAX_MIX_BANDS, MIX_THREAD_NAME, Paint, Side, mix_bands, mix_nv12_into};
 
 /// The longest window a transition may take: 300 slots (10 s at 30 fps). A
-/// longer OBS or configured duration is clamped to it.
+/// longer configured duration is clamped to it.
 pub const MAX_TRANSITION_SLOTS: u32 = 300;
 
 // The Q8 weight of the `to` picture: 0 = all `from`, 256 = all `to`. #223
@@ -99,12 +101,11 @@ pub enum TransitionKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SpecSource {
-    /// cg OBS's current scene transition (`program_transition = obs`).
-    Obs,
-    /// The operator's override (`program_transition = fade | cut`).
+    /// The operator's choice (`program_transition = fade | cut`).
     Setting,
-    /// `obs`, but cg OBS's transition is not known yet: a Fade of
-    /// `program_transition_ms`.
+    /// None chosen (no `program_transition`, or a value that is neither, the
+    /// retired `obs` included): the default Fade of `program_transition_ms`.
+    /// Also the bus's starting Cut, before the settings were read.
     Fallback,
 }
 
@@ -112,7 +113,7 @@ pub enum SpecSource {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct TransitionSpec {
     pub kind: TransitionKind,
-    /// The configured or OBS duration (0 for a Cut).
+    /// The configured duration (0 for a Cut).
     pub duration_ms: u32,
     /// The window length in grid slots (0 for a Cut).
     pub n_slots: u32,
@@ -149,11 +150,8 @@ pub fn slots_for_ms(duration_ms: u32) -> u32 {
 }
 
 /// The operator's `program_transition` setting.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransitionMode {
-    /// Follow cg OBS's current scene transition (the default).
-    Obs,
     /// Always a Fade of `program_transition_ms`.
     Fade,
     /// Always a hard Cut.
@@ -161,42 +159,25 @@ pub enum TransitionMode {
 }
 
 impl TransitionMode {
-    /// `fade` / `cut` (trimmed); anything else, or no value, is `obs`.
-    pub fn parse(raw: Option<&str>) -> Self {
+    /// `fade` / `cut` (trimmed); anything else, or no value, is none (the
+    /// default fade). #221 L5: the retired `obs` (follow cg OBS's scene
+    /// transition) is no choice any more and reads as none too.
+    pub fn parse(raw: Option<&str>) -> Option<Self> {
         match raw.map(str::trim) {
-            Some("fade") => Self::Fade,
-            Some("cut") => Self::Cut,
-            _ => Self::Obs,
+            Some("fade") => Some(Self::Fade),
+            Some("cut") => Some(Self::Cut),
+            _ => None,
         }
     }
 }
 
-/// cg OBS's current scene transition — read and kept by the OBS client
-/// (`obs::transition`, #219), re-exported here where the spec uses it.
-pub use crate::obs::ObsTransition;
-
-/// cg OBS's transition as a spec: `cut_transition` → Cut; every other kind
-/// (fade, swipe, stinger, …) → a Fade of its duration, or of `fallback_ms`
-/// when it has none.
-pub fn spec_from_obs(obs: &ObsTransition, fallback_ms: u32) -> TransitionSpec {
-    if obs.kind == "cut_transition" {
-        return TransitionSpec::cut(SpecSource::Obs);
-    }
-    TransitionSpec::fade(obs.duration_ms.unwrap_or(fallback_ms), SpecSource::Obs)
-}
-
-/// The spec every cut (dashboard, #213 remote, OBS follow) uses: the
-/// operator's override, else cg OBS's transition, else a Fade of `ms`.
-pub fn effective_spec(
-    mode: TransitionMode,
-    ms: u32,
-    obs: Option<&ObsTransition>,
-) -> TransitionSpec {
-    match (mode, obs) {
-        (TransitionMode::Cut, _) => TransitionSpec::cut(SpecSource::Setting),
-        (TransitionMode::Fade, _) => TransitionSpec::fade(ms, SpecSource::Setting),
-        (TransitionMode::Obs, Some(obs)) => spec_from_obs(obs, ms),
-        (TransitionMode::Obs, None) => TransitionSpec::fade(ms, SpecSource::Fallback),
+/// The spec every cut (the dashboard, the #213 remote control) uses: the
+/// operator's `mode`, else (none chosen) a Fade of `ms`, the default.
+pub fn effective_spec(mode: Option<TransitionMode>, ms: u32) -> TransitionSpec {
+    match mode {
+        Some(TransitionMode::Cut) => TransitionSpec::cut(SpecSource::Setting),
+        Some(TransitionMode::Fade) => TransitionSpec::fade(ms, SpecSource::Setting),
+        None => TransitionSpec::fade(ms, SpecSource::Fallback),
     }
 }
 

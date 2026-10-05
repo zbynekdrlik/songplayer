@@ -1,38 +1,37 @@
-//! Whether an NDI receiver is expected on a playlist's output (#221 L4a,
-//! design record 5873773896 §1f). Pure; a sibling of `ndi_health.rs` (its
-//! 1000-line cap).
+//! Where an NDI receiver is expected (#221, design record 5873773896 §1f;
+//! B4 step 6). Pure; a sibling of `ndi_health.rs` (its 1000-line cap).
 //!
-//! Until B4 step 6 a playlist's NDI output is received by cg OBS's scene
-//! input for it, and DistroAV disconnects an input whose scene is not on cg
-//! OBS's program: 0 receivers there is normal. Once "on air" no longer means
-//! "cg OBS shows it" (#221: SongPlayer's own program decides, L4b), a playlist
-//! on `SP-program` that cg OBS does not show would read as a dark wall, and
-//! the #173 ladder would churn cg OBS's inputs. So a receiver is expected
-//! only while the playlist is on air AND SongPlayer told cg OBS to show it
-//! (`legacy_cg.shown`, SongPlayer's record of its OWN commands — never cg
-//! OBS tracking).
+//! Every consumer takes SongPlayer's PROGRAM now: the LED wall `SP-program-MAX`
+//! (Spout), the Presenter, strih and the stream `SP-program` (NDI), FOH its
+//! VBAN. cg OBS is only the NDI input "OBS manuál", and SongPlayer never
+//! switches it to a playlist scene any more (the legacy mirror is deleted),
+//! so DistroAV disconnects cg OBS's sp-* inputs.
 //!
-//! The dark-wall reason ([`expected_reason`]), the #196 post-restart
-//! self-check and its ladder suppression key on [`receiver_expected`]. Every
-//! other degraded reason (an underrun, no frames) stays: those need a poll
-//! with a receiver that is bad on its own, and `SP-program` takes the output
-//! either way. The state label (the badge, the idle gates) stays keyed on
-//! on-air. At B4 step 6 the dark-wall check moves to SP-program's own
-//! receivers.
+//! - **A playlist's own NDI output expects NO receiver**
+//!   ([`PLAYLIST_RECEIVER_EXPECTED`]): `SP-program` takes the playlist off
+//!   the program bus, never over NDI. So the per-playlist dark-wall reason is
+//!   dropped ([`expected_reason`]), and the #173 ladder — whose targets are
+//!   cg OBS's sp-* inputs — never runs on its own (it fires only on that
+//!   reason). Every other degraded reason (an underrun, no frames) stays.
+//!   The per-playlist senders, with their ladder and their #196 self-check,
+//!   go in the lane that retires them (main session comment 5999882988,
+//!   lane 3).
+//! - **`SP-program` expects a receiver while a source is on program**
+//!   ([`program_degraded_reason`]): served as `degraded_reason` on
+//!   `GET /api/v1/program`, logged at the first poll, when its last receiver
+//!   goes and when the first comes back ([`log_program_receivers`]), and
+//!   gated by the post-deploy E2E.
 
-use crate::playback::ndi_health::{DARK_WALL_REASON, PlaybackStateLabel};
+use tracing::{info, warn};
 
-/// A receiver is expected on playlist `playlist_id`'s NDI output: it is on
-/// air (the reconciled `label` is `Playing`: playing, its scene on program)
-/// AND `cg_shown` — the playlist SongPlayer last told cg OBS to show, and cg
-/// OBS accepted — is this playlist.
-pub(crate) fn receiver_expected(
-    label: &PlaybackStateLabel,
-    cg_shown: Option<i64>,
-    playlist_id: i64,
-) -> bool {
-    matches!(label, PlaybackStateLabel::Playing) && cg_shown == Some(playlist_id)
-}
+use crate::playback::ndi_health::DARK_WALL_REASON;
+
+/// No receiver is expected on a playlist's own NDI output (the module doc).
+pub(crate) const PLAYLIST_RECEIVER_EXPECTED: bool = false;
+
+/// `GET /api/v1/program` → `degraded_reason` while a source is on program
+/// and `SP-program` has no NDI receiver.
+pub(crate) const PROGRAM_NO_RECEIVER_REASON: &str = "no NDI receiver on SP-program";
 
 /// The degraded reason with the dark-wall one dropped where no receiver is
 /// expected (0 receivers is normal there); any other reason passes through.
@@ -41,6 +40,39 @@ pub(crate) fn expected_reason(base: Option<String>, receiver_expected: bool) -> 
         None
     } else {
         base
+    }
+}
+
+/// `SP-program`'s degraded reason: [`PROGRAM_NO_RECEIVER_REASON`] while a
+/// `source` is on program (a playlist, or -1 "OBS manuál": the consumers take
+/// the program whatever it carries) and it has no receiver; none otherwise.
+pub(crate) fn program_degraded_reason(
+    source: Option<i64>,
+    connections: i32,
+) -> Option<&'static str> {
+    (source.is_some() && connections < 1).then_some(PROGRAM_NO_RECEIVER_REASON)
+}
+
+/// The log line of a new `SP-program` receiver count (`before` = `None` on
+/// the first poll): a WARN when a source is on program and the first poll
+/// finds no receiver or the last one went, an INFO when the first poll finds
+/// one or the first one came back. Logging only
+/// (`ProgramCore::set_connections`).
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn log_program_receivers(source: Option<i64>, before: Option<i32>, after: i32) {
+    let had = before.map(|n| n >= 1);
+    let has = after >= 1;
+    if !has && source.is_some() && had != Some(false) {
+        warn!(
+            ?source,
+            "SP-program: {PROGRAM_NO_RECEIVER_REASON} — the Presenter, strih and the stream get nothing over NDI"
+        );
+    } else if has && had != Some(true) {
+        info!(
+            receivers = after,
+            ?source,
+            "SP-program: a receiver is connected"
+        );
     }
 }
 

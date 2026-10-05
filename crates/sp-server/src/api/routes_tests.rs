@@ -490,8 +490,8 @@ async fn get_status(state: AppState) -> StatusResponse {
 }
 
 /// #221 L4b: `/api/v1/status` reports SongPlayer's OWN program — the one
-/// scene-name resolver, and the playlists on air (SP-program's playlist ∪
-/// the one cg OBS was told to show) — never cg OBS's scene detection.
+/// scene-name resolver, and the playlists on air (SP-program's playlist,
+/// B4 step 6) — never cg OBS's scene detection.
 #[tokio::test]
 async fn status_reports_songplayers_own_program_not_cg_obs_detection() {
     let state = test_state().await;
@@ -501,27 +501,10 @@ async fn status_reports_songplayers_own_program_not_cg_obs_detection() {
         obs.active_playlist_ids = [9].into_iter().collect();
     }
     let bus = Arc::clone(&state.program_bus);
-    let told = |shown: Option<i64>| {
-        let ticket = bus.legacy_cg().ticket();
-        assert!(bus.legacy_cg().confirmed(ticket, shown));
-    };
     bus.select_initial(4, Some("sp-slow"));
-    told(Some(7));
     let json = get_status(state.clone()).await;
     assert_eq!(json.active_scene.as_deref(), Some("sp-slow"));
-    assert_eq!(json.active_playlist_ids, [4, 7], "cg OBS still shows 7");
-
-    let now = crate::playback::wallclock::utc_now_100ns();
-    bus.cut(sp_core::config::PROGRAM_INPUT_ID, now, None);
-    let json = get_status(state.clone()).await;
-    assert_eq!(json.active_scene.as_deref(), Some("OBS manuál"));
-    assert_eq!(
-        json.active_playlist_ids,
-        [7],
-        "the input carries cg OBS's 7"
-    );
-    told(None);
-    assert!(get_status(state).await.active_playlist_ids.is_empty());
+    assert_eq!(json.active_playlist_ids, [4]);
 }
 
 /// #221 B4 step 6: on air is SP-program's playlist ONLY. The program restored
