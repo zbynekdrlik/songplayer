@@ -25,7 +25,13 @@
  * is captured first and restored after. #221 L3: scenes are switched through
  * SongPlayer's obs-websocket facade (`FACADE_WS_URL`, Companion's exact
  * studio-mode path: preview + transition, SongPlayer's own program feedback);
- * the recording and the profile read stay on cg OBS (`OBS_WS_URL`). Every
+ * the recording and the profile read stay on cg OBS (`OBS_WS_URL`). #221 B4
+ * step 6: SongPlayer no longer mirrors a press to cg OBS, and the recording
+ * is cg OBS's program, so the gate also puts cg OBS on the baseline scene for
+ * the take (its sp-* input carries the playlist's own NDI output, the
+ * pipeline the program bus takes too) and restores cg OBS's scene after.
+ * The lane that retires the per-playlist senders moves the recording to an
+ * `SP-program` receiver. Every
  * recording file (plus its auto-remux sibling) is deleted, and an operator's
  * own running recording is never touched (`startRecord` refuses). The SONG
  * mixer faders are set to unity for the measurement and restored after.
@@ -41,7 +47,7 @@
  * - kills the analysis;
  * - settles a pending start (at most 10 s);
  * - stops our recording;
- * - restores the faders and the scene;
+ * - restores the faders, the program scene and cg OBS's scene;
  * - then deletes every recording made.
  * Every step is attempted even if an earlier one fails.
  *
@@ -180,6 +186,10 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   let scenes: ObsDriver | null = null;
   let recorder: ObsDriver | null = null;
   let initialScene: string | null = null;
+  // #221 B4 step 6: cg OBS's own program scene before the gate, restored in
+  // afterAll once the gate switched it (`cgSwitched`).
+  let cgInitialScene: string | null = null;
+  let cgSwitched = false;
   let autoRemux = false;
   // Cleanup state shared with afterAll. A timed-out test body never reaches
   // its own finally, so afterAll finishes whatever is still marked here.
@@ -248,6 +258,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       // there is no scene to restore (afterAll skips the restore).
       initialScene = null;
     }
+    cgInitialScene = await recorder.currentProgramScene();
     autoRemux = await recorder.autoRemuxEnabled();
   });
 
@@ -318,6 +329,14 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           `the A/V gate must restore the program scene "${initialScene}"`,
         ).toBe(initialScene);
       });
+      await step("restore cg OBS's program scene", async () => {
+        if (!cgSwitched || !cgInitialScene) return;
+        await rec.switchScene(cgInitialScene);
+        expect(
+          await rec.currentProgramScene(),
+          `the A/V gate must restore cg OBS's program scene "${cgInitialScene}"`,
+        ).toBe(cgInitialScene);
+      });
       await step("delete the recordings", async () => {
         // A StopRecord whose inactive-poll timed out still left its path.
         const last = rec.lastRecordingPath;
@@ -376,6 +395,13 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         ),
       (s) => s.active_scene === baseline && s.active_playlist_ids.length === 1,
     );
+    // #221 B4 step 6: the recording is cg OBS's program, which SongPlayer no
+    // longer moves; put cg OBS on the same scene for the take (the file doc).
+    if ((await rec.currentProgramScene()) !== baseline) {
+      assertNotTornDown("cg OBS's scene switch");
+      cgSwitched = true;
+      await rec.switchScene(baseline);
+    }
     const active = status.active_playlist_ids;
     const first = await getJson<HealthRow[]>(request, "/api/v1/ndi/health");
     if (!active.some((id) => isPlayingWithFrames(first, id))) {
