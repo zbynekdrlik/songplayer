@@ -383,3 +383,106 @@ async fn a_recovery_resyncs_only_the_wall_owner_s_title_and_line() {
     assert_eq!(resyncs(&cmds), [Some("Song - Artist".to_string())]);
     assert_eq!(subtitle_lines(&cmds), ["gamma"], "{cmds:?}");
 }
+
+// -- ROZHODNUTÉ 6002459249 (3): no wall owner = nobody writes ---------------
+
+/// 7 plays its line ("gamma.") with nothing on air: "OBS manuál" is on
+/// program, so the authority published no playlist and no wall owner.
+async fn nothing_on_air() -> (PlaybackEngine, mpsc::Receiver<ResolumeCommand>) {
+    let (mut engine, mut rx) = test_engine(&SONGS).await;
+    play(&mut engine, 7, 42, Window::Due);
+    engine.pipelines.get_mut(&7).unwrap().lyrics_state = Some(one_line("gamma."));
+    engine.on_air.publish(on_air(&[]), None);
+    sent(&mut rx);
+    (engine, rx)
+}
+
+/// With "OBS manuál" on program no playlist owns the wall, and nobody
+/// writes it. A playlist played off program by hand (a ▶,
+/// `PlayEvent::Start`) feeds its own karaoke WS only: no Presenter push.
+#[tokio::test]
+async fn with_no_wall_owner_a_playlist_played_off_program_feeds_no_presenter() {
+    let (mut engine, mut rx) = nothing_on_air().await;
+    let _stage = presenter(&mut engine).await;
+    engine.set_scene_active_for_test(7, false); // played off program by hand
+
+    engine.dispatch_lyrics_if_changed(7, 60_000);
+
+    assert!(subtitle_lines(&sent(&mut rx)).is_empty(), "no wall line");
+    assert!(
+        engine.pipelines[&7].last_presenter_text.is_none(),
+        "7 pushed nothing to the Presenter"
+    );
+}
+
+/// The same with its scene still on program: the authority took it off the
+/// air (a cut to "OBS manuál") and its OFF is still queued. Its line, its
+/// song-end clear and its title timers write nothing, and a recovery names
+/// no title and clears the lines.
+#[tokio::test]
+async fn with_no_wall_owner_a_playlist_still_on_program_writes_nothing() {
+    let (mut engine, mut rx) = nothing_on_air().await;
+
+    engine.dispatch_lyrics_if_changed(7, 60_000);
+    assert!(subtitle_lines(&sent(&mut rx)).is_empty(), "no wall line");
+    engine.clear_lyrics_display(7);
+    assert_eq!(count(&sent(&mut rx), is_hide_subtitles), 0, "no clear");
+    let cmds = timer_fires(&mut engine, &mut rx, 7, true).await;
+    assert_eq!(count(&cmds, is_show_title), 0, "no title shown: {cmds:?}");
+    let cmds = timer_fires(&mut engine, &mut rx, 7, false).await;
+    assert_eq!(count(&cmds, is_hide_title), 0, "no title hidden: {cmds:?}");
+
+    engine.handle_resolume_recovery("127.0.0.1").await;
+    let cmds = sent(&mut rx);
+    assert_eq!(resyncs(&cmds), [None], "no title: {cmds:?}");
+    assert!(subtitle_lines(&cmds).is_empty(), "{cmds:?}");
+    assert_eq!(count(&cmds, is_hide_subtitles), 1, "{cmds:?}");
+}
+
+/// The owner's OFF with no owner left (a cut to "OBS manuál") blanks the
+/// stage display like the wall's line and title: nobody writes it any
+/// more, so the old owner's last line would stay there for good.
+#[tokio::test]
+async fn the_last_owner_s_off_blanks_the_stage_display() {
+    let (mut engine, mut rx) = test_engine(&SONGS).await;
+    play(&mut engine, 7, 42, Window::Due); // 7 on air, the owner
+    engine.pipelines.get_mut(&7).unwrap().lyrics_state = Some(one_line("gamma."));
+    let stage = presenter(&mut engine).await;
+    engine.dispatch_lyrics_if_changed(7, 60_000);
+    assert!(pushes(&stage, 1).await[0].contains("gamma"));
+    engine.on_air.publish(on_air(&[]), None); // the cut to "OBS manuál"
+    sent(&mut rx);
+
+    engine.handle_scene_change(7, false).await;
+
+    let cmds = sent(&mut rx);
+    assert_eq!(count(&cmds, is_hide_title), 1, "{cmds:?}");
+    assert_eq!(count(&cmds, is_hide_subtitles), 1, "{cmds:?}");
+    let bodies = pushes(&stage, 2).await;
+    assert!(
+        is_cleared(&bodies[1]),
+        "7's line leaves the stage: {bodies:?}"
+    );
+}
+
+/// A press from 7 to 9: 9 owns the wall before its ON, which is queued
+/// behind 7's OFF. That OFF leaves the stage display to 9's ON, with no
+/// blank flash in between (no push within a bounded window: correct code
+/// can never fail it).
+#[tokio::test]
+async fn an_off_with_the_next_owner_on_its_way_leaves_the_stage_display() {
+    let (mut engine, mut rx) = test_engine(&SONGS).await;
+    play(&mut engine, 7, 42, Window::Due);
+    engine.pipelines.get_mut(&7).unwrap().lyrics_state = Some(one_line("gamma."));
+    let stage = presenter(&mut engine).await;
+    engine.dispatch_lyrics_if_changed(7, 60_000);
+    assert!(pushes(&stage, 1).await[0].contains("gamma"));
+    engine.put_on_air_for_test(9); // the press: 9 on air, its ON queued
+    sent(&mut rx);
+
+    engine.handle_scene_change(7, false).await;
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let got = stage.received_requests().await.unwrap_or_default();
+    assert_eq!(got.len(), 1, "no stage push at 7's OFF");
+}

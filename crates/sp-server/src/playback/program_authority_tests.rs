@@ -80,7 +80,8 @@ fn members(diffed: &OnAirPlaylists, pids: &[i64]) -> Vec<bool> {
 /// The first value plays the program on the bus; a press is OFF for the old
 /// playlist, then ON for the new one; a press of the same scene re-kicks it.
 /// The set it diffed, and its owner, are written before its events, and
-/// before the first value nothing is on air and no owner restricts the wall.
+/// before the first value nothing is on air and nobody writes the wall
+/// (ROZHODNUTÉ 6002459249: no wall owner = nobody writes).
 #[tokio::test]
 async fn the_authority_plays_the_program_and_follows_every_change() {
     let bus = Arc::new(ProgramBus::new());
@@ -92,7 +93,10 @@ async fn the_authority_plays_the_program_and_follows_every_change() {
         "nothing before its first value"
     );
     assert_eq!(a.diffed.owner(), None, "nothing before its first value");
-    assert!(a.diffed.may_write_wall(4), "no owner restricts nothing");
+    assert!(
+        !a.diffed.may_write_wall(4) && !a.diffed.may_write_wall(7),
+        "no owner: nobody writes the wall"
+    );
     assert_eq!(
         next(&mut a.events, 1).await,
         [(7, true)],
@@ -118,7 +122,7 @@ async fn the_authority_plays_the_program_and_follows_every_change() {
 /// the wall. The program restored at startup leaves the air at the cut away
 /// from it — OFF at once, then ON for the new playlist, with no cg OBS answer
 /// to wait for — and a cut to "OBS manuál" leaves nothing on air and nobody
-/// owning the wall.
+/// owning, nor writing, the wall.
 #[tokio::test]
 async fn on_air_is_sp_program_s_playlist_only() {
     let pool = crate::db::create_memory_pool().await.unwrap();
@@ -152,6 +156,10 @@ async fn on_air_is_sp_program_s_playlist_only() {
     assert_eq!(next(&mut a.events, 1).await, [(4, false)]);
     assert_eq!(members(&a.diffed, &[4, 7]), [false, false]);
     assert_eq!(a.diffed.owner(), None, "\"OBS manuál\" names no playlist");
+    assert!(
+        !a.diffed.may_write_wall(4) && !a.diffed.may_write_wall(7),
+        "no owner: nobody writes the wall"
+    );
     nothing_more(&mut a.events).await;
 }
 
