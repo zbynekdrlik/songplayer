@@ -25,7 +25,10 @@ impl PlaybackEngine {
     #[cfg_attr(test, mutants::skip)]
     pub async fn handle_pipeline_event(&mut self, playlist_id: i64, event: PipelineEvent) {
         match &event {
-            PipelineEvent::Started { duration_ms, .. } => {
+            PipelineEvent::Started {
+                duration_ms,
+                position_ms,
+            } => {
                 // 1) Broadcast NowPlaying to the dashboard first so it
                 //    switches from "Nothing playing" immediately.
                 self.broadcast_now_playing_on_start(playlist_id, *duration_ms)
@@ -101,8 +104,7 @@ impl PlaybackEngine {
                     }
                 }
 
-                debug!(playlist_id, duration_ms, "video started");
-                let dur = *duration_ms;
+                let (dur, start_ms) = (*duration_ms, *position_ms);
 
                 // 2) Fix this song's title clock and arm its timers from it:
                 //    show 1.5 s from now, hide 3.5 s before the end. A recovery
@@ -111,10 +113,13 @@ impl PlaybackEngine {
                 //    video on this playlist: a stale hide_title from a skipped
                 //    4-min song would fire 3.5s before that song's natural end
                 //    during the next song, clearing the title mid-playback.
-                //    A resume hides 3.5 s before the song's real end.
+                //    A resume hides 3.5 s before the song's real end, counted
+                //    from where `Started` says the song really starts (#217:
+                //    0 when the resume's seek failed), not the asked start.
                 let now = tokio::time::Instant::now();
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
-                    let start_ms = pp.play_start_ms;
+                    let asked_ms = pp.play_start_ms;
+                    debug!(playlist_id, dur, start_ms, asked_ms, "video started");
                     pp.title_clock = pp
                         .current_video_id
                         .map(|video_id| title::TitleClock::new(video_id, now, dur, start_ms));

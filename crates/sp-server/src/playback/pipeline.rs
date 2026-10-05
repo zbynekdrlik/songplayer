@@ -39,7 +39,7 @@ use tracing::{debug, error, info, warn};
 // `pipeline::PipelineCommand` / `pipeline::PipelineEvent` path still resolves.
 #[path = "pipeline_types.rs"]
 mod pipeline_types;
-pub use pipeline_types::{PipelineCommand, PipelineEvent};
+pub use pipeline_types::{PipelineCommand, PipelineEvent, real_start_ms};
 
 /// Handle to a background decode-to-NDI pipeline thread.
 pub struct PlaybackPipeline {
@@ -577,30 +577,21 @@ fn decode_and_send(
     // Atomic play-from-position (issue #88): seek BEFORE the frame-submission
     // loop so there is no race window between Play and Seek. Seek failures are
     // non-fatal — the song still plays from 0 with a logged warning so the
-    // operator always gets audio/video rather than a silent abort.
-    if let Some(ms) = start_position_ms {
-        if let Err(e) = decoder.seek(ms) {
-            warn!(
-                playlist_id,
-                start_position_ms = ms,
-                ?e,
-                "decode_and_send: seek to start_position_ms failed — playing from 0"
-            );
-        } else {
-            info!(
-                playlist_id,
-                start_position_ms = ms,
-                "decode_and_send: seeked to start position"
-            );
-        }
-    }
+    // operator always gets audio/video rather than a silent abort; `Started`
+    // then reports 0, where the song really starts (#217).
+    let start_ms = real_start_ms(
+        start_position_ms,
+        |ms| decoder.seek(ms),
+        playlist_id,
+        "decode_and_send",
+    );
 
     // Report start (the FLAC STREAMINFO duration is sample-accurate at open).
     let _ = event_tx.send((
         playlist_id,
         PipelineEvent::Started {
             duration_ms: decoder.duration_ms(),
-            position_ms: start_position_ms.unwrap_or(0),
+            position_ms: start_ms,
         },
     ));
 

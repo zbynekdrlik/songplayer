@@ -202,9 +202,10 @@ struct PlaylistPipeline {
     /// scene-on reads (#217 addendum 3). Every Play clears it (`begin_play`),
     /// so it is `None` from a song change to the new `Started`.
     title_clock: Option<title::TitleClock>,
-    /// Where the current Play started: 0, or a resume's position. The title
-    /// clock hides 3.5 s before the song's real end, counted from it (#217
-    /// addendum 3).
+    /// Where the current Play ASKED to start: 0, or a resume's position.
+    /// The title clock counts from where `Started` says the song really
+    /// starts (#217: 0 when the start seek failed); this is only logged next
+    /// to it.
     play_start_ms: u64,
     /// Pause snapshot; consumed on manual /play to resume same song. #88.
     paused_at: Option<(i64, u64)>,
