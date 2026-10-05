@@ -260,6 +260,12 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   `assert!(true)`, and `assert_eq!(CONST, true)` trips
   `bool_assert_comparison` instead. Pin a default through behaviour
   (`assert!(genlock_pacing(None))`), not by asserting the const itself.
+- **`#[must_use]` goes on the TYPE, not also on a fn that returns it**
+  (#184, reasoned before CI). `clippy::double_must_use` is warn-by-default:
+  a `#[must_use]` fn whose return type is itself `#[must_use]` (`pub fn
+  settle(..) -> UnwatchedEnd` with `#[must_use] enum UnwatchedEnd`) fails
+  `-D warnings`. Mark the enum; mark a fn only when it returns a plain type
+  (`fn supervisor_exits(self) -> bool`).
 - **Moving Windows-only code into a shared helper can orphan a
   `#[cfg(windows)] use`** (#217 review round 1). `pipeline.rs`'s
   `#[cfg(windows)] use tracing::{debug, error, info, warn};` lost its last
@@ -651,7 +657,10 @@ the test that kills each one BEFORE CI's mutation gate runs.
   A `gh … --jq` filter with `\(.x)` string interpolation and a `for n in …;
   do gh issue comment $n --body-file $D/…` loop are refused too: write each
   body with the Write tool and run one plain `gh issue comment <N> -R <repo>
-  --body-file <abs path>` per issue (release 0.69.0 lane B).
+  --body-file <abs path>` per issue (release 0.69.0 lane B). A bounded wait
+  loop on `$SECONDS` arithmetic (`end=$((SECONDS+560)); while [ $SECONDS -lt
+  $end ]`) is refused as well: put the loop in a scratch script (`date +%s`
+  deadline) and run `bash <scratch>/wait.sh <arg>` (#184).
 - **A recursive grep over the repo's `.claude` dir trips the credential-store
   hook** (`block-vault-store-read.sh` reads the command TEXT: a recursive
   read of that dir counts as a vault read, even inside an edit script's
