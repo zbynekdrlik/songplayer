@@ -71,6 +71,16 @@ Rules for every post-deploy spec:
   imports the helper by its absolute `.ts` path and mirrors the spec's cases
   with `node:assert/strict`, run as `node --experimental-strip-types
   check.mts`.
+- **`expect.poll` does NOT retry a generator that throws** (#144, Playwright
+  1.59: `pollMatcher` awaits `poll.generator()` outside its own try). A
+  readiness poll whose `request.get` hits ECONNREFUSED after a restart, or its
+  own request timeout, fails the test at once instead of polling: wrap the
+  body in `try { … } catch { return false; }` and bound each read
+  (`request.get(url, { timeout: 10_000 })`), as `post-deploy-g35t.spec.ts`
+  does. Right after a restart `GET /api/v1/status` itself can stall: the
+  startup task in `lib.rs` (~445) holds the `tools_status` write guard through
+  the yt-dlp self-update and the sample-rate sweep (pre-existing, #144
+  comment 5998431231); the earliest-sorting specs absorb that window today.
 - **#221 L3: the scene driver is SongPlayer's facade** (`FACADE_WS_URL`,
   :4456). **#221 L4b:** `/api/v1/status.active_scene` /
   `active_playlist_ids` are SongPlayer's own program (the resolver, and the

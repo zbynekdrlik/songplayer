@@ -9,6 +9,7 @@ paths:
   - "crates/sp-server/src/stems/worker.rs"
   - "crates/sp-server/src/dabing/worker.rs"
   - "crates/sp-server/src/lyrics/idle_gate_abort.rs"
+  - "crates/sp-server/src/lyrics/g35t_probe*.rs"
   - "crates/sp-server/src/db/models_stems*.rs"
   - "crates/sp-server/src/metadata/manual*.rs"
   - "crates/sp-server/tests/startup_migration.rs"
@@ -38,6 +39,8 @@ Design record: #136 comment 5894034820.
 - These consumers derive those names from the CURRENT audio path:
   - the stem / dub mixer (`stems/reader.rs::open_audio_stream`);
   - the lyrics isolation (`idle_gate_abort::resolve_isolation_input`);
+  - the live g35t probe (`lyrics/g35t_probe.rs::pick_clip`, #144), which
+    reads the row and cuts its clip under `cache::SONG_FILES`;
   - `StemsState` (`models_stems::stems_on_disk`).
 - The recorded `vocals_file_path` / `instrumental_file_path` / `dub_file_path`
   columns are a record kept in sync with every move. The dub worker's input
