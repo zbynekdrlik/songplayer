@@ -33,13 +33,23 @@ pub(crate) struct ToolsSinks {
 }
 
 /// Publish the ready tools into `sinks`, then run `follow_ups` and return
-/// what it returns.
+/// what it returns. No lock is held while `follow_ups` runs: they are slow
+/// (a yt-dlp download, a probe of every song's FLAC), and the status route
+/// and a new dashboard socket read the status all along.
 pub(crate) async fn publish_then<R>(
     sinks: ToolsSinks,
     paths: ToolPaths,
     found: ToolsFound,
     follow_ups: impl Future<Output = R>,
 ) -> R {
+    publish(&sinks, paths, found).await;
+    follow_ups.await
+}
+
+/// Set the status fields, tell the open dashboards, store the paths. The
+/// status guard lives only in here: held past the return, it blocked every
+/// status read for as long as the follow-ups ran (#144).
+async fn publish(sinks: &ToolsSinks, paths: ToolPaths, found: ToolsFound) {
     let mut ts = sinks.status.write().await;
     ts.ytdlp_available = true;
     ts.ffmpeg_available = true;
@@ -55,7 +65,6 @@ pub(crate) async fn publish_then<R>(
     });
     *sinks.paths.write().await = Some(paths);
     info!("tools ready: yt-dlp and FFmpeg available");
-    follow_ups.await
 }
 
 #[cfg(test)]
