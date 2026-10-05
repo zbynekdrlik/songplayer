@@ -194,18 +194,20 @@ pub(super) fn staging(device: &ID3D11Device) -> Result<ID3D11Texture2D, GpuError
     )
 }
 
-/// Copy the render target into `staging` and read it: 3840×2160 BGRA rows,
-/// tightly packed (the mapped rows may be padded).
+/// Copy `source` (a 3840×2160 BGRA texture on `context`'s device: the render
+/// target, or Spout's shared texture opened by a receiver) into `staging`
+/// and read it: 3840×2160 BGRA rows, tightly packed (the mapped rows may be
+/// padded).
 pub(super) fn read_back(
     context: &ID3D11DeviceContext,
-    target: &RenderTarget,
+    source: &ID3D11Texture2D,
     staging: &ID3D11Texture2D,
 ) -> Result<Vec<u8>, GpuError> {
     let row = CANVAS_WIDTH as usize * 4;
     let rows = CANVAS_HEIGHT as usize;
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
     unsafe {
-        context.CopyResource(staging, &target.texture);
+        context.CopyResource(staging, source);
         context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
     }
     .map_err(|e| failed("Map", &e))?;

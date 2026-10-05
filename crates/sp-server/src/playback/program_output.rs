@@ -55,6 +55,13 @@
 //! missing side is the canvas black. The fit is video-side work in
 //! `submit_video`, after the VBAN hand-off, and inside the `submit_us` span
 //! (`health.timing`), so the box shows its cost.
+//!
+//! #223 S2: after VBAN's hand-off and before the video side, each boundary is
+//! offered to `SP-program-MAX` (`program_max.rs`) as a `MaxJob` of its NATIVE
+//! picture(s) — a forwarded source's own picture, both sides of a fade with
+//! the weight, the standby as black — never the canvas. The offer is `Arc`
+//! bumps into a 2-deep coalescing queue; the `program-max` thread composes
+//! and sends on its own time, so it never delays VBAN or the NDI submit.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -75,6 +82,7 @@ use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
 use crate::playback::program_canvas::{Canvas, FadeSide};
+use crate::playback::program_max::{MaxJob, MaxOut, MaxPicture};
 use crate::playback::program_output_timing::{BoundaryMarks, LateBoundary, utc_label};
 use crate::playback::program_transition::{
     AudioFormat, Layout, MIX_THREAD_NAME, MixJob, mix_audio_block, mix_bands,
@@ -134,6 +142,9 @@ pub struct ProgramOutput<B: NdiBackend> {
     /// #210: the boundary the limiter last ran on. A stamp that is not the
     /// grid boundary right after it is a restart of the program's timeline.
     limited_through: Option<i64>,
+    /// #223 S2: the `SP-program-MAX` hand-off each boundary is offered to,
+    /// after VBAN's block and before the video side.
+    max: Option<Arc<MaxOut>>,
 }
 
 /// #215: one run of mixed boundaries as the `SP-program` sender saw it: how
@@ -226,6 +237,24 @@ impl Pair {
         }
     }
 
+    /// #223 S2: what `SP-program-MAX` shows for the boundary on
+    /// `stamp_100ns`: the native picture(s) (`Arc` bumps), never the canvas.
+    fn max_job(&self, stamp_100ns: i64) -> MaxJob {
+        match self {
+            Pair::Source(job) => MaxJob::Picture {
+                stamp_100ns,
+                picture: MaxPicture::of(job),
+            },
+            Pair::Standby => MaxJob::Black { stamp_100ns },
+            Pair::Mix { mix, .. } => MaxJob::Fade {
+                stamp_100ns,
+                from: mix.from.as_ref().map(MaxPicture::of),
+                to: mix.to.as_ref().map(MaxPicture::of),
+                weight_q8: mix.weight_q8(),
+            },
+        }
+    }
+
     /// What VBAN gets for the boundary on `stamp_100ns`: the pair's own
     /// block, COPIED (its NDI submit still borrows it), or the standby
     /// silence.
@@ -266,6 +295,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             mix_run: MixRun::default(),
             limiter: PeakLimiter::new(PROGRAM_AUDIO_RATE_HZ),
             limited_through: None,
+            max: None,
         }
     }
 
@@ -281,6 +311,20 @@ impl<B: NdiBackend> ProgramOutput<B> {
         self
     }
 
+    /// #223 S2: also offer every boundary to `SP-program-MAX`.
+    pub fn with_max(mut self, max: Arc<MaxOut>) -> Self {
+        self.max = Some(max);
+        self
+    }
+
+    /// #223 S2: offer the boundary to `SP-program-MAX` (never waits for the
+    /// `program-max` thread; nothing is built while MAX takes nothing).
+    fn offer_max(&self, pair: &Pair, stamp_100ns: i64) {
+        if let Some(max) = &self.max {
+            max.offer_with(|| pair.max_job(stamp_100ns));
+        }
+    }
+
     /// #210: hand one pair's audio block to the VBAN output (never blocks);
     /// returns the instant it was handed over, read off `now`.
     fn feed_vban(&self, block: VbanBlock, now: &impl Fn() -> i64) -> i64 {
@@ -291,24 +335,26 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 
     /// Serve one program boundary: its audio side ([`split`](Self::split),
-    /// no video work) goes to VBAN FIRST, then the video side and the NDI
-    /// pair ([`submit_video`](Self::submit_video)) — #210: FOH audio never
-    /// waits for the video side of its own boundary (the NDI submit, a mixed
-    /// picture). A forwarded source job keeps its own stamps. What the
-    /// program makes itself (a standby pair, a mixed block) is stamped on
-    /// its boundary, the audio too: the block belongs to that boundary's
-    /// timeline instant, never the submit instant — a standby pair for a
-    /// missed boundary goes out up to the fill grace (3 slots) late (#224).
-    /// An unmixed boundary ends the run of mixed boundaries once it went
-    /// out. Returns the instants the boundary was served at, read off `now`
-    /// (the sender's wall: the stamps' timeline), for `health.timing`
-    /// (`program_output_timing.rs`).
+    /// no video work) goes to VBAN FIRST, then the boundary is offered to
+    /// `SP-program-MAX` (#223 S2, [`offer_max`](Self::offer_max)), then the
+    /// video side and the NDI pair ([`submit_video`](Self::submit_video)) —
+    /// #210: FOH audio never waits for the video side of its own boundary
+    /// (the NDI submit, a mixed picture). A forwarded source job keeps its
+    /// own stamps. What the program makes itself (a standby pair, a mixed
+    /// block) is stamped on its boundary, the audio too: the block belongs
+    /// to that boundary's timeline instant, never the submit instant — a
+    /// standby pair for a missed boundary goes out up to the fill grace (3
+    /// slots) late (#224). An unmixed boundary ends the run of mixed
+    /// boundaries once it went out. Returns the instants the boundary was
+    /// served at, read off `now` (the sender's wall: the stamps' timeline),
+    /// for `health.timing` (`program_output_timing.rs`).
     pub fn serve(&mut self, job: ProgramJob, now: impl Fn() -> i64) -> BoundaryMarks {
         let taken_100ns = now();
         let stamp_100ns = job.stamp_100ns();
         let mut pair = self.split(job);
         self.limit(&mut pair, stamp_100ns);
         let fed_100ns = self.feed_vban(pair.vban_block(stamp_100ns), &now);
+        self.offer_max(&pair, stamp_100ns);
         let ends_run = !matches!(pair, Pair::Mix { .. });
         let submit_start_100ns = self.submit_video(pair, stamp_100ns, &now);
         let submitted_100ns = now();
@@ -621,6 +667,7 @@ impl super::PlaybackEngine {
     /// #221 L4b: also tell cg OBS once what the restored program shows (the
     /// startup re-mirror) and start the playback authority
     /// (`program_authority.rs`), whose first value plays the restored program.
+    /// #223 S2: also start `SP-program-MAX` (its setting, then its thread).
     /// Call once, after the #196 startup senders.
     #[cfg_attr(test, mutants::skip)]
     pub async fn start_program(
@@ -636,6 +683,9 @@ impl super::PlaybackEngine {
             vban.clone(),
             shutdown.subscribe(),
         ));
+        // #223 S2: the setting first, then the program-max thread (Windows).
+        crate::playback::program_max::start_max(self.pool.clone(), bus.max().clone(), shutdown)
+            .await;
         #[cfg(windows)]
         crate::playback::vban_out::spawn_vban_thread(vban.clone());
         let mut shutdown_rx = shutdown.subscribe();
@@ -705,7 +755,9 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
                     return;
                 }
             };
-            let mut out = ProgramOutput::fhd(sender).with_vban(bus.vban().clone());
+            let mut out = ProgramOutput::fhd(sender)
+                .with_vban(bus.vban().clone())
+                .with_max(bus.max().clone());
             // #215 addendum 3 + #223 follow-up: how many threads paint a mixed
             // or fitted picture (this one + the persistent band workers).
             info!(
@@ -733,6 +785,9 @@ mod tests_fhd;
 #[cfg(test)]
 #[path = "program_output_tests_limit.rs"]
 mod tests_limit;
+#[cfg(test)]
+#[path = "program_output_tests_max.rs"]
+mod tests_max;
 #[cfg(test)]
 #[path = "program_output_tests_order.rs"]
 mod tests_order;

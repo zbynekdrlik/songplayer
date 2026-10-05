@@ -23,6 +23,9 @@
 //! itself carries `transition` (#215): the transition the next cut uses, the
 //! running window and the transition counters. #221 L4a: `legacy_cg`, what
 //! SongPlayer told cg OBS to show (`playback::legacy_cg::LegacyCgStatus`).
+//! #223 S2: `max`, the `SP-program-MAX` output (`playback::program_max::MaxStatus`:
+//! the setting, the `program-max` thread's state, the counters and the GPU /
+//! Spout cost p99s).
 
 use axum::Json;
 use axum::extract::State;
@@ -38,6 +41,7 @@ use crate::playback::legacy_cg::LegacyCgStatus;
 use crate::playback::ndi_input::{InputSettings, NdiInputStatus, load_input_settings};
 use crate::playback::program_bus::{ProgramBus, ProgramStatus};
 use crate::playback::program_follow::{FollowSettings, FollowStatus, load_follow_settings};
+use crate::playback::program_max::MaxStatus;
 use crate::playback::program_switch::{SwitchCtx, Via, switch_source};
 use crate::playback::vban_out::VbanStatus;
 use crate::remote::{RemoteSettings, RemoteStatus, load_remote_settings};
@@ -60,6 +64,7 @@ pub struct ProgramResponse {
     pub remote: RemoteStatus,
     pub follow: FollowStatus,
     pub legacy_cg: LegacyCgStatus,
+    pub max: MaxStatus,
 }
 
 /// The STORED settings the telemetry blocks report next to their live state.
@@ -78,6 +83,7 @@ impl ProgramResponse {
             remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             follow: bus.follow().status(&stored.follow),
             legacy_cg: bus.legacy_cg().status(),
+            max: bus.max().status(),
         }
     }
 }
@@ -167,6 +173,9 @@ pub async fn post_program_cut(
 #[cfg(test)]
 #[path = "program_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_tests_max.rs"]
+mod tests_max;
 #[cfg(test)]
 #[path = "program_tests_switch.rs"]
 mod tests_switch;

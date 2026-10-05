@@ -13,6 +13,9 @@ path = "src/main.rs"
 sp-core = { path = "../sp-core" }
 sp-ndi = { path = "../sp-ndi" }
 sp-decoder = { path = "../sp-decoder" }
+# #223 S2: the SP-program-MAX GPU compositor + its Spout sender (Windows; the
+# off-Windows stub reports `Unsupported`), driven by `playback/program_max*.rs`.
+sp-gpu = { path = "../sp-gpu" }
 
 tokio = { workspace = true }
 axum = { workspace = true }

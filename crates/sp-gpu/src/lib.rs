@@ -26,7 +26,9 @@
 //! `SPOUT_SP-program-MAX`), through the vendored Spout2 SDK 2.007.017
 //! (`vendor/spout2`, SpoutDX `SendTexture`, built by `build.rs`).
 //! [`spout_sender_names`] and [`spout_sender_info`] read Spout's registry the
-//! way a receiver does.
+//! way a receiver does; on Windows the doc-hidden `read_shared_texture`
+//! reads a sender's shared texture on a second WARP device, for tests
+//! (#223 S2).
 //!
 //! Every decision is a pure function here, tested on Linux (adapter choice,
 //! picture validation, layers, quad constants, upload residency, the colour
@@ -78,4 +80,6 @@ pub use stats::{ComposeStats, SpoutSendStats};
 #[cfg(not(windows))]
 pub use stub::{Compositor, SpoutSender, spout_sender_info, spout_sender_names};
 #[cfg(windows)]
-pub use win::{Compositor, SpoutSender, adapters, spout_sender_info, spout_sender_names};
+pub use win::{
+    Compositor, SpoutSender, adapters, read_shared_texture, spout_sender_info, spout_sender_names,
+};
