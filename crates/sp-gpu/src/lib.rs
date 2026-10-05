@@ -39,6 +39,11 @@
 //! (`tests/warp.rs`) compare against; `tests/spout.rs` proves the sender on
 //! WARP. Off Windows, [`Compositor`] cannot be built: it reports
 //! [`GpuError::Unsupported`].
+//!
+//! #223 S3b: on Windows, `VideoDevice` is the Direct3D 11 device Media
+//! Foundation decodes video on (sp-decoder's hardware decode): the same
+//! adapter rule, the video API, multithread-protected
+//! (`tests/video_device.rs`).
 
 mod adapter;
 mod color;
@@ -81,5 +86,6 @@ pub use stats::{ComposeStats, SpoutSendStats};
 pub use stub::{Compositor, SpoutSender, spout_sender_info, spout_sender_names};
 #[cfg(windows)]
 pub use win::{
-    Compositor, SpoutSender, adapters, read_shared_texture, spout_sender_info, spout_sender_names,
+    Compositor, SpoutSender, VideoDevice, adapters, read_shared_texture, spout_sender_info,
+    spout_sender_names,
 };
