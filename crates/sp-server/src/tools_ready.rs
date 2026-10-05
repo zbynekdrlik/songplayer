@@ -2,7 +2,7 @@
 //! publish them — the `ToolsStatus` fields, the `ToolsStatus` event, the
 //! `tool_paths` — then run the follow-ups the caller hands in (the yt-dlp
 //! self-update #140, the sample-rate sweep #40, the startup sync and every
-//! worker spawn).
+//! worker spawn). `ToolsStatus::message` is the dashboard message of a status.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -53,18 +53,27 @@ async fn publish(sinks: &ToolsSinks, paths: ToolPaths, found: ToolsFound) {
     let mut ts = sinks.status.write().await;
     ts.ytdlp_available = true;
     ts.ffmpeg_available = true;
-    ts.ytdlp_version = found.ytdlp_version.clone();
+    ts.ytdlp_version = found.ytdlp_version;
     ts.js_runtime_ok = found.js_runtime_ok;
-    ts.deno_version = found.deno_version.clone();
-    let _ = sinks.events.send(ServerMsg::ToolsStatus {
-        ytdlp_available: true,
-        ffmpeg_available: true,
-        ytdlp_version: found.ytdlp_version,
-        js_runtime_ok: found.js_runtime_ok,
-        deno_version: found.deno_version,
-    });
+    ts.deno_version = found.deno_version;
+    let _ = sinks.events.send(ts.message());
     *sinks.paths.write().await = Some(paths);
     info!("tools ready: yt-dlp and FFmpeg available");
+}
+
+impl ToolsStatus {
+    /// The dashboard's `ToolsStatus` message for this status: what `publish`
+    /// tells the open dashboards, and what a new dashboard socket is sent
+    /// first (`api/websocket.rs`).
+    pub(crate) fn message(&self) -> ServerMsg {
+        ServerMsg::ToolsStatus {
+            ytdlp_available: self.ytdlp_available,
+            ffmpeg_available: self.ffmpeg_available,
+            ytdlp_version: self.ytdlp_version.clone(),
+            js_runtime_ok: self.js_runtime_ok,
+            deno_version: self.deno_version.clone(),
+        }
+    }
 }
 
 #[cfg(test)]

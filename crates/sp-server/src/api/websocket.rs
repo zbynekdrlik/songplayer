@@ -5,7 +5,7 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures::stream::SplitSink;
-use futures::{SinkExt, StreamExt};
+use futures::{Sink, SinkExt, StreamExt};
 use sqlx::Row;
 use tracing::{debug, info, warn};
 
@@ -29,29 +29,7 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
     info!("WebSocket client connected");
 
     // Send initial state snapshot so the dashboard doesn't show stale data.
-    {
-        let obs = state.obs_state.read().await;
-        let obs_status = ServerMsg::ObsStatus {
-            connected: obs.connected,
-            active_scene: obs.current_scene.clone(),
-        };
-        if let Ok(json) = serde_json::to_string(&obs_status) {
-            let _ = write.send(Message::Text(json.into())).await;
-        }
-    }
-    {
-        let ts = state.tools_status.read().await;
-        let tools_msg = ServerMsg::ToolsStatus {
-            ytdlp_available: ts.ytdlp_available,
-            ffmpeg_available: ts.ffmpeg_available,
-            ytdlp_version: ts.ytdlp_version.clone(),
-            js_runtime_ok: ts.js_runtime_ok,
-            deno_version: ts.deno_version.clone(),
-        };
-        if let Ok(json) = serde_json::to_string(&tools_msg) {
-            let _ = write.send(Message::Text(json.into())).await;
-        }
-    }
+    send_status(&mut write, &state).await;
     // Replay every playlist's playback state and a playing one's song so a
     // dashboard opened mid-song shows what plays at once, instead of Idle or
     // "Nič nehrá" until the next broadcast (#15 live preview + karaoke panel
@@ -232,6 +210,36 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
     }
 }
 
+/// Send a newly connected dashboard the OBS status, then the tools status.
+async fn send_status<S>(write: &mut S, state: &AppState)
+where
+    S: Sink<Message> + Unpin,
+{
+    {
+        let obs = state.obs_state.read().await;
+        let obs_status = ServerMsg::ObsStatus {
+            connected: obs.connected,
+            active_scene: obs.current_scene.clone(),
+        };
+        send_json(write, &obs_status).await;
+    }
+    {
+        let ts = state.tools_status.read().await;
+        send_json(write, &ts.message()).await;
+    }
+}
+
+/// One message as a JSON text frame. A failed send is not handled here: the
+/// read loop sees the closed socket.
+async fn send_json<S>(write: &mut S, msg: &ServerMsg)
+where
+    S: Sink<Message> + Unpin,
+{
+    if let Ok(json) = serde_json::to_string(msg) {
+        let _ = write.send(Message::Text(json.into())).await;
+    }
+}
+
 /// Send [`on_connect_replay`] to one client; returns how many messages.
 async fn send_replay(write: &mut SplitSink<WebSocket, Message>, state: &AppState) -> usize {
     let msgs = on_connect_replay(state).await;
@@ -271,6 +279,85 @@ pub(crate) async fn on_connect_replay(state: &AppState) -> Vec<ServerMsg> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::convert::Infallible;
+    use std::sync::Arc;
+
+    use tokio::sync::{Semaphore, mpsc};
+
+    /// #144: a new dashboard's first frames (the OBS status, then the tools
+    /// status) are sent with no status lock held. The client here takes a
+    /// frame only when the test lets it, like a slow one with a full socket
+    /// buffer. While a frame waits, both locks must be free: a tokio `RwLock`
+    /// queues every reader behind a waiting writer, so a held read guard
+    /// would stall the OBS client's writes and every status read behind them.
+    #[tokio::test]
+    async fn a_slow_client_holds_no_status_lock_while_it_takes_the_status() {
+        let state = crate::api::routes::tests::test_state().await;
+        {
+            let mut obs = state.obs_state.write().await;
+            obs.connected = true;
+            obs.current_scene = Some("sp-fast".to_string());
+        }
+        {
+            let mut tools = state.tools_status.write().await;
+            tools.ytdlp_available = true;
+            tools.ytdlp_version = Some("2026.09.30".to_string());
+        }
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel::<Message>();
+        let release = Arc::new(Semaphore::new(0));
+        let gate = Arc::clone(&release);
+        let client = futures::sink::unfold((), move |(), frame: Message| {
+            let seen_tx = seen_tx.clone();
+            let gate = Arc::clone(&gate);
+            async move {
+                seen_tx.send(frame).expect("the test reads every frame");
+                gate.acquire().await.expect("the gate stays open").forget();
+                Ok::<(), Infallible>(())
+            }
+        });
+        let sender_state = state.clone();
+        let sender = tokio::spawn(async move {
+            let mut client = Box::pin(client);
+            send_status(&mut client, &sender_state).await;
+        });
+
+        let mut taken = Vec::new();
+        for _ in 0..2 {
+            let frame = seen_rx.recv().await.expect("a status frame");
+            assert!(
+                state.obs_state.try_write().is_ok(),
+                "the OBS status is locked while a frame waits for the client"
+            );
+            assert!(
+                state.tools_status.try_write().is_ok(),
+                "the tools status is locked while a frame waits for the client"
+            );
+            let text = match frame {
+                Message::Text(text) => text,
+                other => panic!("expected a text frame, got {other:?}"),
+            };
+            taken.push(serde_json::from_str::<ServerMsg>(text.as_str()).unwrap());
+            release.add_permits(1);
+        }
+        sender.await.unwrap();
+        assert_eq!(
+            taken,
+            vec![
+                ServerMsg::ObsStatus {
+                    connected: true,
+                    active_scene: Some("sp-fast".to_string()),
+                },
+                ServerMsg::ToolsStatus {
+                    ytdlp_available: true,
+                    ffmpeg_available: false,
+                    ytdlp_version: Some("2026.09.30".to_string()),
+                    js_runtime_ok: false,
+                    deno_version: None,
+                },
+            ]
+        );
+    }
 
     #[test]
     fn client_msg_deserializes() {
