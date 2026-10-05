@@ -69,13 +69,17 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   Nothing downstream can tell the paths apart; `width` / `height` come from
   the current media type per picture, as in software.
 
-## Which path really decoded (never assumed)
+## Which path really decoded (read from the pictures, not from the mode)
 
-- A picture in a DECODER texture came out of the GPU decoder: a DXGI
-  surface whose texture carries `D3D11_BIND_DECODER` (0x200; Microsoft: a
-  DXVA decoder's output array "should include the D3D11_BIND_DECODER
-  flag"). A system-memory picture, or one a software decoder uploaded into
-  a texture without that flag, did not (`DecodePath::of_picture(bind
+- The path is INFERRED from each picture (never from the mode): a picture
+  in a DECODER texture is taken to have come out of the GPU decoder. CI
+  never sees a real decoder texture (WARP decodes nothing); the box bench
+  is the proof (`diag-bench.md`: cross-check a `"software"` label against
+  the timings). In detail: a DXGI surface whose texture carries
+  `D3D11_BIND_DECODER` (0x200; Microsoft: a DXVA decoder's output array
+  "should include the D3D11_BIND_DECODER flag") counts as the GPU
+  decoder's. A system-memory picture, or one a software decoder uploaded
+  into a texture without that flag, does not (`DecodePath::of_picture(bind
   flags)`; the flags come from the `GetDesc` the readback reads anyway).
   Microsoft's "Supporting Direct3D 11 Video Decoding in Media Foundation":
   a decoder that finds no configuration on the device "must fall back to
@@ -84,7 +88,9 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   error: the box's GPU without a decoder for a codec, or WARP (no decoder
   profiles).
 - `decode_path()` = the last picture's path, `None` before the first;
-  `hw_adapter()`, `hw_fallback()`. `hw_decode::PathTracker::observe` notes,
+  `path_changes()` = how often a picture's path differed from the one
+  before it, a fall back's too (`PathTracker::changes`; the bench's
+  `path_changes`); `hw_adapter()`, `hw_fallback()`. `hw_decode::PathTracker::observe` notes,
   while the reader runs on the D3D path: its FIRST picture, counted
   (`hw_counters().first_picture`) and logged (INFO `mf_reader: hardware
   decode active (decoder surfaces, D3D11_BIND_DECODER)`, or WARN
@@ -111,7 +117,11 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   before the position): no picture lost or handed over twice. They are
   dropped by timestamp BEFORE any readback (`Resume::skips`), but each is
   still decoded, in software: up to one GOP, several seconds for a 4K AV1
-  file, during which the paced output repeats its last picture. A second
+  file, during which the paced output repeats its last picture AND plays
+  silence: the producer pulls audio with the video (`next_synced`), so a
+  blocked `next_frame` starves the audio too and the pacer's underrun
+  path fills it. Expect a multi-second A/V gap after a lost device. A
+  second
   error goes to the caller, as before S3b.
 - `HwCounters` (`sp_decoder::hw_counters()`, process-wide, every
   `Hardware` reader, the bench's too): `requested`, `gpu_decodes`,

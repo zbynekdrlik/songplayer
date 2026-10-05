@@ -71,6 +71,7 @@ pub(crate) fn bench_file(
     let run = measure(&mut reader, max_wall, || start.elapsed());
     let decode = DecodeFacts {
         path: reader.decode_path(),
+        path_changes: reader.path_changes(),
         adapter: reader.hw_adapter().map(str::to_string),
         fallback: reader.hw_fallback().map(|f| f.describe()),
         ..requested

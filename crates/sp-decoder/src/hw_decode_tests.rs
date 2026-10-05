@@ -160,6 +160,30 @@ fn a_change_of_path_mid_file_on_the_d3d_path_is_noted() {
         }
     );
     assert_eq!(tracker.last(), Some(DecodePath::Hardware));
+    assert_eq!(tracker.changes(), 2);
+}
+
+#[test]
+fn every_change_of_path_is_counted_a_fall_backs_too() {
+    let mut tracker = PathTracker::default();
+    assert_eq!(tracker.changes(), 0);
+    tracker.observe(DecodePath::Hardware, true);
+    tracker.observe(DecodePath::Hardware, true);
+    assert_eq!(tracker.changes(), 0, "one path so far");
+    // The mid-stream fall back: the reader is off the D3D path, nothing is
+    // noted, but the run now mixes two paths.
+    assert_eq!(
+        tracker.observe(DecodePath::Software, false),
+        PathNote::Nothing
+    );
+    assert_eq!(tracker.changes(), 1);
+    tracker.observe(DecodePath::Software, false);
+    assert_eq!(tracker.changes(), 1);
+    // A software reader never changes.
+    let mut software = PathTracker::default();
+    software.observe(DecodePath::Software, false);
+    software.observe(DecodePath::Software, false);
+    assert_eq!(software.changes(), 0);
 }
 
 #[test]

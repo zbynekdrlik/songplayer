@@ -128,16 +128,19 @@ failed`).
 - `budget {frame_period_us, mean_over_half_period}`.
 - #223 S3b, the decode path:
   - `hw_requested`: the request's `hw`.
-  - `decode_path`: `"hardware"` (the pictures came out of the GPU decoder:
-    DXGI surfaces in a `D3D11_BIND_DECODER` texture), `"software"`, or
-    `null` (no picture). It is READ
-    from the pictures (the last one), never assumed: a `hw` run that reads
-    `"software"` either fell back at open (`hw_fallback` says why: no
-    hardware adapter, no device) or Media Foundation's decoder found no
-    decoder on the GPU for the stream (no `hw_fallback`; the reader's WARN
-    `the D3D11 path is set up, but Media Foundation decodes this file in
-    software` names it). A mid-stream fall back also reads `"software"`,
-    with `hw_fallback` `mid-stream: …`: its timings mix both paths.
+  - `decode_path`: the path of the LAST picture: `"hardware"` (it came
+    out of the GPU decoder: a DXGI surface in a `D3D11_BIND_DECODER`
+    texture), `"software"`, or `null` (no picture). It is read from the
+    pictures, not from the mode: a `hw` run that reads `"software"` either
+    fell back at open (`hw_fallback` says why: no hardware adapter, no
+    device) or Media Foundation's decoder found no decoder on the GPU for
+    the stream (no `hw_fallback`; the reader's WARN `the D3D11 path is set
+    up, but Media Foundation decodes this file in software` names it).
+  - `path_changes`: how often a picture's path differed from the one
+    before it during the run (a mid-stream fall back, `hw_fallback`
+    `mid-stream: …`, or Media Foundation's decoder changing its mind).
+    The timings are ONE path's only when it is 0; judge the gate only on
+    such a run.
   - `adapter`: the GPU's name, only when `decode_path` is `"hardware"`
     (the box: `NVIDIA GeForce RTX 3070 Ti`).
   - `hw_fallback`: `open: <why>` / `mid-stream: <why>`, else `null`.
@@ -157,9 +160,17 @@ failed`).
 - A failed gate means a hardware-decode slice comes before any 4K download
   (revision 3, R3-4). S0 failed it (95 % AV1, 93 % VP9 at 4K, comment
   5981771378), so S3b added `hw`. Its gate: a `hw` run with `decode_path`
-  `"hardware"` on each 4K sample passes D2 (mean ≤ 50 % of 1/f), and the
+  `"hardware"` and `path_changes` 0 on each 4K sample passes D2 (mean ≤
+  50 % of 1/f), and the
   1440p baseline's `hw` mean is not above its software mean. Only then may
   `video_hw_decode` default to on.
+- The `"hardware"` path is INFERRED from the texture's
+  `D3D11_BIND_DECODER` (Microsoft's DXVA decoders write into such
+  textures; CI never sees a real decoder texture). Cross-check on the box:
+  a `hw` run that reads `"software"` while its mean is far below the
+  software run's means the inference missed (a decoder post-processing
+  into another texture, e.g. AV1 film grain, or a vendor's own decoder
+  MFT): record it on #223 rather than trusting the label.
 - Record the result on #223.
 
 **Logs:**

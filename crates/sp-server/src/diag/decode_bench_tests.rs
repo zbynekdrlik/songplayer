@@ -648,6 +648,7 @@ fn on_the_gpu() -> DecodeFacts {
     DecodeFacts {
         mode: DecodeMode::Hardware,
         path: Some(DecodePath::Hardware),
+        path_changes: 0,
         adapter: Some("NVIDIA GeForce RTX 3070 Ti".to_string()),
         fallback: None,
     }
@@ -693,13 +694,16 @@ fn a_hardware_run_that_decoded_in_software_names_no_adapter() {
     assert!(silent.hw_requested);
     assert_eq!(silent.decode_path, Some("software"));
     assert_eq!(silent.adapter, None, "it did not decode on that adapter");
-    // A mid-stream fall back: the adapter it left, and why.
+    // A mid-stream fall back: the adapter it left, and why; the run mixed
+    // two paths.
     let fell_back = clean_report().with_decode(DecodeFacts {
         path: Some(DecodePath::Software),
+        path_changes: 1,
         fallback: Some("mid-stream: Sample read failed: device removed".to_string()),
         ..on_the_gpu()
     });
     assert_eq!(fell_back.adapter, None);
+    assert_eq!(fell_back.path_changes, 1, "its timings mix two paths");
     assert_eq!(
         fell_back.hw_fallback.as_deref(),
         Some("mid-stream: Sample read failed: device removed")
@@ -726,6 +730,7 @@ fn the_decode_path_serializes_to_the_documented_json() {
     assert_eq!(json["decode_path"], "hardware");
     assert_eq!(json["adapter"], "NVIDIA GeForce RTX 3070 Ti");
     assert!(json["hw_fallback"].is_null());
+    assert_eq!(json["path_changes"], 0);
     let json = serde_json::to_value(clean_report()).unwrap();
     assert_eq!(json["hw_requested"], false);
     assert!(json["decode_path"].is_null());
@@ -741,7 +746,8 @@ fn a_hardware_runs_end_line_names_its_path() {
          wall_ms=15000 ended=TimeLimit \
          mean_us=16683 p50_us=16366 p99_us=17000 max_us=17000 \
          frame_period_us=33367 mean_over_half_period=false \
-         hw=requested decode_path=hardware adapter=NVIDIA GeForce RTX 3070 Ti hw_fallback=-"
+         hw=requested decode_path=hardware path_changes=0 adapter=NVIDIA GeForce RTX 3070 Ti \
+         hw_fallback=-"
     );
     let failed = BenchReport::open_failed("x.mp4", "open: no video".to_string(), 3, None)
         .with_decode(DecodeFacts {
@@ -753,7 +759,8 @@ fn a_hardware_runs_end_line_names_its_path() {
         failed.summary(),
         "file=x.mp4 0x0 codec=? fps=? open_ms=3 frames=0 wall_ms=0 ended=Error \
          mean_us=0 p50_us=0 p99_us=0 max_us=0 budget=unknown \
-         hw=requested decode_path=? adapter=- hw_fallback=open: no video device \
+         hw=requested decode_path=? path_changes=0 adapter=- \
+         hw_fallback=open: no video device \
          error=open: no video"
     );
 }

@@ -10,11 +10,13 @@
 //! as a DXGI surface, which the reader copies back into system memory in the
 //! same NV12 layout as the software path ([`SurfaceLayout`]).
 //!
-//! The path really used is read per picture, never assumed: a picture in a
-//! decoder texture (a DXGI surface whose texture carries
-//! `D3D11_BIND_DECODER`) came out of the GPU decoder; one in system memory,
-//! or in a texture a software decoder uploaded into, did not
-//! ([`DecodePath::of_picture`]). Media Foundation's decoder falls back to
+//! The path really used is read per picture, not from the mode: a picture in
+//! a decoder texture (a DXGI surface whose texture carries
+//! `D3D11_BIND_DECODER`) is taken to have come out of the GPU decoder; one
+//! in system memory, or in a texture a software decoder uploaded into, did
+//! not ([`DecodePath::of_picture`]). It is an inference from the texture
+//! (Microsoft's DXVA decoders write into such textures); the box's decode
+//! bench timings are its proof. Media Foundation's decoder falls back to
 //! software on its own when the GPU has no decoder for the stream
 //! (Microsoft's "Supporting Direct3D 11 Video Decoding in Media Foundation",
 //! "Fallback to Software Decoding"), so a `Hardware` reader can decode in
@@ -198,19 +200,34 @@ pub enum PathNote {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PathTracker {
     last: Option<DecodePath>,
+    /// How often a picture's path differed from the one before it.
+    changes: u32,
 }
 
 impl PathTracker {
     /// Record a handed-over picture's `path`, and say what is new about it
     /// while the reader runs on the D3D path (`on_d3d`). Off it (software
     /// from the start, or after a fall back, which has its own WARN) nothing
-    /// is new.
+    /// is new. Every change of path is counted ([`PathTracker::changes`]),
+    /// a fall back's too.
     pub fn observe(&mut self, path: DecodePath, on_d3d: bool) -> PathNote {
-        match self.last.replace(path) {
+        let before = self.last.replace(path);
+        if before.is_some_and(|from| from != path) {
+            self.changes = self.changes.saturating_add(1);
+        }
+        match before {
             None if on_d3d => PathNote::First,
             Some(from) if on_d3d && from != path => PathNote::Changed { from },
             _ => PathNote::Nothing,
         }
+    }
+
+    /// How often a picture's path differed from the one before it, for any
+    /// reason (a fall back, or Media Foundation's decoder changing its
+    /// mind): 0 = every picture came out of one path. The decode bench
+    /// reports it, so a run whose timings mix two paths is seen.
+    pub fn changes(&self) -> u32 {
+        self.changes
     }
 
     /// The last picture's path (`None` before the first).

@@ -304,6 +304,13 @@ impl MediaFoundationVideoReader {
         self.paths.last()
     }
 
+    /// How often a picture's path differed from the one before it
+    /// (`PathTracker::changes`): 0 = every picture handed over so far came
+    /// out of one path.
+    pub fn path_changes(&self) -> u32 {
+        self.paths.changes()
+    }
+
     /// The adapter the D3D path opened on, if it did.
     pub fn hw_adapter(&self) -> Option<&str> {
         self.adapter.as_deref()

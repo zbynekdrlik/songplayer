@@ -354,6 +354,8 @@ pub struct DecodeFacts {
     pub mode: DecodeMode,
     /// The path of the last picture (`None`: no picture).
     pub path: Option<DecodePath>,
+    /// How often a picture's path differed from the one before it.
+    pub path_changes: u32,
     /// The adapter the reader's GPU path opened on.
     pub adapter: Option<String>,
     /// Why the file left the GPU path (`"open: …"` / `"mid-stream: …"`).
@@ -396,11 +398,15 @@ pub struct BenchReport {
     pub budget: Option<Budget>,
     /// #223 S3b: the request asked for hardware decode (`"hw": true`).
     pub hw_requested: bool,
-    /// The path the pictures really came out of: `"hardware"` (the GPU
+    /// The path the LAST picture came out of: `"hardware"` (the GPU
     /// decoder's surfaces, `D3D11_BIND_DECODER`) or `"software"`; `null`
-    /// with no picture. A mid-stream fall back reads `"software"` (with
-    /// `hw_fallback`).
+    /// with no picture. The run's timings are one path's only when
+    /// `path_changes` is 0.
     pub decode_path: Option<&'static str>,
+    /// How often a picture's path differed from the one before it during
+    /// the run (a mid-stream fall back, or Media Foundation's decoder
+    /// changing its mind): 0 = one path.
+    pub path_changes: u32,
     /// The GPU's adapter name, only when `decode_path` is `"hardware"`.
     pub adapter: Option<String>,
     /// Why the file left the GPU path, if it did.
@@ -443,6 +449,7 @@ impl BenchReport {
             decode_path: None,
             adapter: None,
             hw_fallback: None,
+            path_changes: 0,
         }
     }
 
@@ -457,6 +464,7 @@ impl BenchReport {
             decode_path: decode.path.map(DecodePath::as_str),
             adapter: decode.adapter.filter(|_| hardware),
             hw_fallback: decode.fallback,
+            path_changes: decode.path_changes,
             ..self
         }
     }
@@ -489,6 +497,7 @@ impl BenchReport {
             decode_path: None,
             adapter: None,
             hw_fallback: None,
+            path_changes: 0,
         }
     }
 
@@ -541,8 +550,9 @@ impl BenchReport {
             return String::new();
         }
         format!(
-            " hw=requested decode_path={} adapter={} hw_fallback={}",
+            " hw=requested decode_path={} path_changes={} adapter={} hw_fallback={}",
             self.decode_path.unwrap_or("?"),
+            self.path_changes,
             self.adapter.as_deref().unwrap_or("-"),
             self.hw_fallback.as_deref().unwrap_or("-"),
         )
