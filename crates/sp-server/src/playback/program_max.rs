@@ -180,8 +180,8 @@ pub struct MaxStatus {
     /// Jobs dropped because the thread was a full queue behind.
     pub coalesced: u64,
     /// Jobs the thread took that did not go out (a failed build or frame, a
-    /// backoff). `submitted + failed` = the jobs it took on a GPU it has (an
-    /// `unsupported` platform counts neither).
+    /// backoff). `submitted + failed` = the jobs it took (an `unsupported`
+    /// platform counts neither).
     pub failed: u64,
     /// The p99 over the last [`MAX_STAT_WINDOW`] sent frames, µs: the plane
     /// uploads, the draw until the GPU finished it, Spout's `SendTexture`.

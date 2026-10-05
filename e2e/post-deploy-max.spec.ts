@@ -8,7 +8,8 @@
  * reads the live telemetry (`GET /api/v1/program` → `max`) twice and applies
  * the gate (`max-gate.ts`, unit-tested in the mock suite): the setting on,
  * the canvas and the Spout name, a hardware adapter, `running`, at least one
- * grid second of boundaries out, none failed and no device lost in between.
+ * grid second of boundaries out, and in between none coalesced (MAX kept up
+ * with the program), none failed and no device lost.
  *
  * The cost p99s are logged, not gated here: the budget (upload + draw + send
  * under 10 ms) and Arena's side (its source list, a scratch layer's FPS) are
@@ -27,7 +28,7 @@ async function readMax(request: APIRequestContext): Promise<MaxStatus> {
 }
 
 test.describe("SP-program-MAX (#223 S2)", () => {
-  test("composes on the GPU and sends to Spout on every boundary", async ({ request }) => {
+  test("composes on the GPU and keeps up with every boundary", async ({ request }) => {
     test.setTimeout(60_000);
 
     // The thread builds its compositor and sender at the first boundary

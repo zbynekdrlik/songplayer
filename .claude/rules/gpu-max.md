@@ -426,10 +426,12 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   differs from what the log last said, at most one per 5 s of the thread's
   time (`MAX_LOG_EVERY_100NS`, a `WarnLimiter`). A change inside the window
   is not lost: the first boundary after it writes the state as it is then
-  (`held_back` = the boundaries held back), so the log's last line always
-  names the current state (a lost device whose rebuild then finds no
-  adapter ends on the no-adapter WARN), and a failure that alternates with
-  sent boundaries never floods it. `serve` returns the line it logged, which
+  (`held_back` = the boundaries held back), so once a boundary comes after
+  the window the log's last line names the current state (a lost device
+  whose rebuild then finds no adapter ends on the no-adapter WARN; a
+  switch-off or a stop inside the window can leave it one change behind,
+  the telemetry's `state` is always current), and a failure that
+  alternates with sent boundaries never floods it. `serve` returns the line it logged, which
   the tests read.
 - Dropping the GPU objects (a lost device, MAX off) also drops the held
   pictures (`PictureIds::forget`): no decoded frame stays pinned out of
@@ -459,7 +461,7 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   takes jobs and its last boundary went out), `error: <why>` (its last
   boundary did not; `error: the program-max thread is not running` before
   it attached or after it ended). `submitted + failed` = the jobs it took
-  on a GPU it has (an `unsupported` platform counts neither). The p99s
+  (an `unsupported` platform counts neither). The p99s
   cover the last 900 sent frames (30 s). The mock (`e2e/mock-api.mjs`)
   mirrors the shape with `state: "unsupported"`, `adapter: null`.
 
@@ -471,8 +473,10 @@ twice and applies `max-gate.ts` (`maxGateFailures`, unit-tested in the mock
 suite by `max-gate.spec.ts`): the setting on, 3840×2160 under
 `SP-program-MAX`, an adapter that is not the Basic Render Driver,
 `running`, at least `MIN_BOUNDARIES` = 30 more boundaries out (the program
-sends one per grid slot, standby pairs included), `failed` and
-`device_resets` +0 in between. The p99s are logged, not gated; the budget
+sends one per grid slot, standby pairs included), and `coalesced` (MAX
+kept up with the program), `failed` and `device_resets` +0 in between. The
+first read comes after the first boundary went out, so the build's own
+time never counts. The p99s are logged, not gated; the budget
 and Arena's side stay in the box gate below.
 
 ### The WARP proof (`program_max_tests_warp.rs`, Windows only)

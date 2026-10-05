@@ -33,8 +33,10 @@
 //! again, at most one line per [`MAX_LOG_EVERY_100NS`]. A change inside that
 //! window is not lost: the first boundary after it writes the state as it
 //! is then, with how many boundaries were held back, so a failure that
-//! alternates with sent boundaries never floods the log and the log's last
-//! line always names the current state.
+//! alternates with sent boundaries never floods the log, and once a boundary
+//! comes after the window the log's last line names the current state (a
+//! switch-off or a stop inside the window can leave it one change behind;
+//! the telemetry's `state` is always current).
 //!
 //! The GPU is a trait ([`MaxGpu`]) so every decision here runs on Linux with
 //! a fake; the production one is [`SpoutGpu`] (`sp-gpu`'s `Compositor` on
@@ -56,8 +58,8 @@ use crate::playback::stat_window::WarnLimiter;
 /// S1b carry-over).
 pub const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(3);
 
-/// At most one failure WARN, and one recovery INFO, per 5 s of the thread's
-/// time (100 ns).
+/// At most one log line of the thread's state (a failure WARN or a
+/// recovery INFO) per 5 s of its time (100 ns).
 pub const MAX_LOG_EVERY_100NS: i64 = 50_000_000;
 
 /// The thread's time at `now` since `since`, in 100 ns (the unit of

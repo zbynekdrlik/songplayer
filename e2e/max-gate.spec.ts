@@ -40,12 +40,19 @@ test.describe("SP-program-MAX post-deploy gate (#223 S2)", () => {
     ]);
   });
 
-  test("a failed boundary or a lost device between the reads fails", () => {
-    const later = { ...running(160), failed: 3, device_resets: 3 };
+  test("a coalesced or failed boundary or a lost device between the reads fails", () => {
+    const later = { ...running(160), coalesced: 4, failed: 3, device_resets: 3 };
     expect(maxGateFailures(running(100), later)).toEqual([
+      "4 boundaries coalesced (MAX fell behind the program)",
       "1 boundaries failed",
       "the device was lost 2 times",
     ]);
+  });
+
+  test("counts from before the first read do not fail it", () => {
+    const before = { ...running(100), coalesced: 9, failed: 5, device_resets: 2 };
+    const after = { ...running(130), coalesced: 9, failed: 5, device_resets: 2 };
+    expect(maxGateFailures(before, after)).toEqual([]);
   });
 
   test("off, another state, another canvas or name fails", () => {

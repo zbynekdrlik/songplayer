@@ -30,8 +30,10 @@ export const MIN_BOUNDARIES = 30;
  * Why the box fails the gate between two reads of `max` (`first` before
  * `second`); empty when it passes: the setting on, the 3840×2160 canvas under
  * `SP-program-MAX`, a hardware adapter (never the Basic Render Driver), the
- * thread `running`, at least `MIN_BOUNDARIES` more boundaries out, none
- * failed and no device lost in between.
+ * thread `running`, at least `MIN_BOUNDARIES` more boundaries out, and in
+ * between none coalesced (the thread kept up with the program's 30
+ * boundaries a second: a 2-deep queue drops the oldest only when it falls
+ * behind), none failed and no device lost.
  */
 export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
   const failures: string[] = [];
@@ -51,6 +53,10 @@ export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
   const sent = second.submitted - first.submitted;
   if (sent < MIN_BOUNDARIES) {
     failures.push(`only ${sent} boundaries went out (at least ${MIN_BOUNDARIES})`);
+  }
+  const coalesced = second.coalesced - first.coalesced;
+  if (coalesced > 0) {
+    failures.push(`${coalesced} boundaries coalesced (MAX fell behind the program)`);
   }
   const failed = second.failed - first.failed;
   if (failed > 0) failures.push(`${failed} boundaries failed`);
