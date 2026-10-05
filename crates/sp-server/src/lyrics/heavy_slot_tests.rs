@@ -338,7 +338,7 @@ fn child_job_limit_is_ten_gib() {
 /// so an interpolation-swap mutant diverges.
 #[test]
 fn contained_line_is_grep_stable_with_alloc_mode() {
-    // cap 25, mask 0xE00000 (top-3 of 24), purge 1000, alloc lazy, reserve absent (default 4).
+    // cap 25, mask 0xE00000 (top-3 of 24), purge 1000, alloc lazy, reserve absent (default 2).
     let c = containment_from_settings(
         Some("25"),
         Some("e00000"),
@@ -350,13 +350,13 @@ fn contained_line_is_grep_stable_with_alloc_mode() {
     );
     assert_eq!(
         contained_line(42, 1_073_741_824, &c),
-        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy reserve_gib=4 max_ws_mb=4096"
+        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy reserve_gib=2 max_ws_mb=4096"
     );
     // The default (retained) mode renders `alloc_mode=retained`.
     let c = containment_from_settings(Some("50"), Some("f0"), None, None, None, None, 8);
     assert_eq!(
         contained_line(7, 2048, &c),
-        "heavy child contained (pid 7): mem_limit=2048B cpu_cap=50% affinity=0xf0 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=4 max_ws_mb=4096"
+        "heavy child contained (pid 7): mem_limit=2048B cpu_cap=50% affinity=0xf0 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=2 max_ws_mb=4096"
     );
 }
 
@@ -370,13 +370,13 @@ fn contained_line_carries_reserve_gib_after_alloc_mode() {
         Some("e00000"),
         Some("1000"),
         Some("lazy"),
-        Some("2"),
+        Some("3"),
         None,
         24,
     );
     assert_eq!(
         contained_line(42, 1_073_741_824, &c),
-        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy reserve_gib=2 max_ws_mb=4096"
+        "heavy child contained (pid 42): mem_limit=1073741824B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=1000 alloc_mode=lazy reserve_gib=3 max_ws_mb=4096"
     );
 }
 
@@ -390,12 +390,12 @@ fn contained_line_carries_the_applied_working_set_cap() {
     let c = containment_from_settings(None, Some("e00000"), None, None, None, Some("2048"), 24);
     assert_eq!(
         contained_line(9, 4096, &c),
-        "heavy child contained (pid 9): mem_limit=4096B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=4 max_ws_mb=2048"
+        "heavy child contained (pid 9): mem_limit=4096B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=2 max_ws_mb=2048"
     );
     let off = containment_from_settings(None, Some("e00000"), None, None, None, Some("0"), 24);
     assert_eq!(
         contained_line(9, 4096, &off),
-        "heavy child contained (pid 9): mem_limit=4096B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=4 max_ws_mb=off"
+        "heavy child contained (pid 9): mem_limit=4096B cpu_cap=25% affinity=0xe00000 mem_priority_low=true purge_delay_ms=-1 alloc_mode=retained reserve_gib=2 max_ws_mb=off"
     );
 }
 
