@@ -7,6 +7,9 @@ paths:
   - "crates/sp-decoder/src/split_sync*.rs"
   - "crates/sp-server/src/playback/karaoke.rs"
   - "scripts/stem_worker.py"
+  - "crates/sp-server/src/embedded_scripts.rs"
+  - "scripts/tests/test_stem_*.py"
+  - "scripts/tests/stem_fakes.py"
 ---
 
 # Karaoke stem separation (#14) — separator choice, gotchas, architecture
