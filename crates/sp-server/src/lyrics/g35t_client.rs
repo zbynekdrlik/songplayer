@@ -510,7 +510,7 @@ pub(crate) async fn transcribe_at(
                 });
             }
             Err(StepError::Fatal(e)) => {
-                let text = on_key(key_index, total, &e);
+                let text = on_key(key_index, total, e);
                 return Err(failure(api_keys, Some(key_index), &text, refused));
             }
         }

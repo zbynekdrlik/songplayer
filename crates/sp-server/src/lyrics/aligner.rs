@@ -428,8 +428,9 @@ pub async fn align_chunks(
 mod tests {
     use super::*;
 
-    /// #144: the one place the isolated vocal's name is written; the
-    /// isolation writes it and the live g35t probe reads it.
+    /// #144: the one place the isolated vocal's path is built (the startup
+    /// scan's `VOCALS_RE` matches the same name); the isolation writes it
+    /// and the live g35t probe reads it.
     #[test]
     fn the_isolated_vocal_is_named_after_the_youtube_id() {
         assert_eq!(

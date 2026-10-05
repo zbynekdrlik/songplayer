@@ -697,3 +697,39 @@ async fn a_clip_that_cannot_be_cut_stops_the_probe() {
     assert!(error.starts_with("ffmpeg did not start: "), "{error}");
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+/// The probe reads its song under `cache::SONG_FILES`, the lock a rename holds
+/// from its read to its record: while the lock is held it waits, and it reads
+/// the row only once it has the lock, so a record made under the lock is what
+/// it sees (the "must not finish yet" window is the safe direction: correct
+/// code waits however slow the runner is).
+#[tokio::test]
+async fn the_probe_reads_its_song_under_the_song_files_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, _info) = one_song(dir.path()).await;
+    let held = crate::downloader::cache::SONG_FILES.lock().await;
+
+    let probe = tokio::spawn({
+        let pool = pool.clone();
+        let cache = dir.path().to_path_buf();
+        async move {
+            let client = reqwest::Client::new();
+            let keys = keys(&["k-live"]);
+            run_probe(&pool, &cache, None, &keys, &client, "http://127.0.0.1:1").await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !probe.is_finished(),
+        "the probe waits for the song-files lock"
+    );
+    // A record lands while the lock is held: the probe must read it.
+    sqlx::query("UPDATE videos SET has_lyrics = 0")
+        .execute(&pool)
+        .await
+        .unwrap();
+    drop(held);
+
+    let report = probe.await.unwrap();
+    assert_eq!(report, G35tProbeReport::refused(NO_SONG.into(), None));
+}
