@@ -3,8 +3,8 @@ paths:
   - "crates/sp-server/src/obs/**"
   - "crates/sp-server/src/obs_bridge.rs"
   - "crates/sp-server/tests/common/mod.rs"
-  - "crates/sp-server/tests/scene_lookup_failure.rs"
-  - "crates/sp-server/tests/obs_snapshot.rs"
+  - "crates/sp-server/tests/obs_reconnect.rs"
+  - "crates/sp-server/tests/fake_obs_handshake.rs"
   - "crates/sp-server/src/playback/ndi_health.rs"
   - "crates/sp-server/src/playback/ndi_health_expect*.rs"
   - "crates/sp-server/src/playback/ndi_health_log.rs"
@@ -305,12 +305,8 @@ log lines. Add new per-snapshot logging to `health_log`, not to the handler.
   event_data }` on `obs_event_tx` — `Raw` is `ObsEvent`'s ONLY variant.
   #221 L4b deleted the engine bridge, and with it the last reader of
   `ObsEvent::SceneChanged` / `Connected` / `Disconnected`; release 0.69.0
-  (review 🔵 10) deleted those variants and their sends. The client's own
-  view of cg OBS (connected, the program scene, its playlists) is the
-  published `ObsSnapshot` (below): a test or a consumer that needs a scene
-  change waits for a snapshot that KNOWS the scene (connected, looked up),
-  never for an event (`tests/scene_detection.rs::program_snapshot`,
-  `tests/scene_lookup_failure.rs::known`). L6 deletes the scene detection.
+  (review 🔵 10) deleted those variants and their sends. The facade passes
+  on only `SceneListChanged` (`remote::protocol::passthrough_intent`).
 - The obs-websocket SERVER side (the facade) lives in `crate::remote`; see
   `remote-control.md`.
 
@@ -323,159 +319,45 @@ log lines. Add new per-snapshot logging to `health_log`, not to the handler.
 ## Gotcha: `e2e/post-deploy-report/index.html` is a TRACKED artifact
 Playwright runs regenerate it; it shows up as ` M` in `git status`. `git checkout -- e2e/post-deploy-report/index.html` before committing so it never lands in your diff.
 
-## Studio Mode can DROP `CurrentProgramSceneChanged` — the ~2 s poll reconciles it (#170)
+## cg OBS's program is NOT read any more (#221 L6)
 
-OBS on win-resolume runs Studio Mode with a 2 s Fade. From a `preview == program`
-state (e.g. right after a same-scene transition) OBS **drops** the next program
-switch's `CurrentProgramSceneChanged` — `GetCurrentProgramScene` reports the new
-scene but no event fires, so the event-only path never learns of it and the wall
-sits on a paused source (a dark wall in daily operation, reproduced live 3×). The
-connection loop therefore ALSO polls `GetCurrentProgramScene` every
-`SCENE_POLL_INTERVAL` (~2 s) in `connect_and_run`'s `tokio::select!`
-(`obs/scene_poll.rs::reconcile_program_scene`); on a mismatch with the last
-event-derived `ObsState::current_scene`
-(`scene_poll::scene_poll_detects_change(last, polled) -> Option<scene>`) it feeds
-the SAME `scene::apply_scene_change` path the event does — so the reader arm and
-the poll arm share one scene-apply body (keeps `obs/mod.rs` ≤1000). A duplicate
-same-scene apply publishes nothing (`ObsShared` publishes only a real change). The
-pure `scene_poll_detects_change` is Linux-unit-tested; `reconcile_program_scene`
-(I/O) is not (`obs/**` is excluded from the mutation gate). INFO log on a
-poll-caught switch: `obs: program scene changed without an event — reconciled by
-poll`.
+Design record 5873773896 §1g "L6": cg OBS is only the NDI input "OBS
+manuál", SongPlayer's own program drives playback (L4b) and nothing read
+what the client published about cg OBS's program after the L5 follow
+deletion. So the OBS client's scene detection is DELETED, not kept as a
+fallback — do not bring any of it back:
 
-## A FAILED scene lookup is not an empty scene (#218)
+- `obs/scene.rs` (`apply_scene_change`, `check_scene_items`, `LookupError`,
+  #218's "a failed lookup is not an empty scene"), `obs/scene_poll.rs` (the
+  #170 ~2 s `GetCurrentProgramScene` poll for a dropped
+  `CurrentProgramSceneChanged`), the connect-time `GetCurrentProgramScene`
+  read, `ReaderMessage::SceneChange` and the scene tickets;
+- `obs/snapshot.rs` (`ObsSnapshot` on a `watch`, `ObsShared`,
+  `ObsClient::snapshots()`, #219) and `obs/transition.rs` (`ObsTransition`,
+  the `GetCurrentSceneTransition` reader and its Notify wake, #219), with
+  the identify's Transitions (16) subscription;
+- `ObsState.{current_scene, active_playlist_ids, lookup_failed,
+  transition}` and `text::get_current_scene_request`;
+- their tests (`tests/scene_detection.rs`, `tests/scene_lookup_failure.rs`,
+  `tests/obs_snapshot.rs`) and the `FakeObsServer` knobs only they used.
 
-`scene::check_scene_items` returns `Result<HashSet<i64>, LookupError>`
-(`Closed` / `Timeout` / `Refused{code,comment}` / `NoSceneItems`; the pure
-`scene_items_from_reply`). Before #218 a `GetSceneItemList` timeout / close /
-answer without `sceneItems` returned an EMPTY set: `apply_scene_change` wrote
-it and broadcast `SceneChanged{ {} }`, the bridge scene-offed (paused) the
-playlist on program, the OBS follow (deleted at #221 L5) cut to "OBS
-manuál", and the poll (names only) never repaired it.
+What the client still does (`obs/mod.rs` module doc): the facade's calls
+(`remote_call.rs`), the title text, the #127/#173 ladder + the NDI source
+map the #196 self-check reads (both retired by lane 3 with the
+per-playlist senders), cg OBS's raw events, and `ObsState` = `connected`
+(`/api/v1/status.obs_connected`) + the #154 stream/record state. The
+identify subscribes Scenes (4: `SceneListChanged` for the facade) |
+Outputs (64: #154) = `EVENT_SUBSCRIPTIONS` (68, pinned in `mod_tests.rs`).
+The dashboard's connect-time `ObsStatus.active_scene` is SP-program's scene
+(`program_scene_name`, like `/api/v1/status`), never cg OBS's.
 
-- On a failure `apply_scene_change` stores the scene's NAME
-  (`current_scene`), KEEPS `active_playlist_ids`, sets
-  `ObsState::lookup_failed = Some(scene)` and broadcasts NOTHING. WARN on a
-  scene's first failure (`obs: looking up the scene's playlists failed —
-  keeping the previous ones; …`), debug on repeats; INFO `obs: the scene's
-  playlist lookup answered again` on the repair. `lookup_failed` is always
-  `None` or the current scene (the two are written together).
-- **Out-of-order answers (review rounds 1–3).** cg OBS may answer two
-  lookups out of order, the poll's relookups can overlap an event's lookup,
-  and an event can overtake a read. Every apply carries a ticket
-  (`ObsShared::scene_ticket`) taken BEFORE the scene it applies was read:
-  - an event's by the READER, the moment it reads the event off the wire
-    (`ReaderMessage::SceneChange { ticket }`) — round 3: taken at the main
-    loop's dequeue, an event cg OBS sent during the connect (queued while
-    steps 4–6 run) outranked the NEWER initial read and a stale
-    `SceneChanged` went out after the right one;
-  - the poll's and the initial read's BEFORE they send
-    `GetCurrentProgramScene` — round 2: taken after the read, a stale poll
-    answer outranked a newer event and cut back;
-  - the disconnect reset's (a fresh one), so an old connection's apply that
-    still writes after it is dropped.
-
-  It writes through `ObsShared::update_scene(ticket, …)`, which DROPS an
-  answer that arrives after a later ticket's answer was written (debug `a
-  newer scene lookup already answered`). The snapshot is published under
-  that write lock, so a consumer gets the scene changes in write order. A
-  dropped relookup costs one poll tick (the next one asks
-  again). The limit: tickets follow the order the READER sees things, not
-  the order cg OBS did them — an event cg OBS sent before answering a read
-  but that the reader reads after the read's ticket still outranks the read
-  (same or older state); that is stale only if cg OBS then drops the newer
-  event (#170), and the poll's mismatch path repairs it in ~4–6 s (plus one
-  lookup round-trip).
-  Tests: `a_poll_read_an_event_overtook_never_rolls_the_scene_back`
-  (the fake's `hold_program_scene` / `hold_lookups_of` + `release_held`: a
-  held answer must stay under the client's 2 s response timeout) and
-  `an_event_queued_during_the_connect_never_overrides_the_initial_read` (the
-  fake's `event_on_input_list`).
-- **Transition events never go through `reader_rx`:** the reader wakes the
-  transition reader's `Notify` itself (a burst merges into one read and
-  never blocks the reader, whose `reader_rx` is not drained during the
-  connect).
-- **The connection's helper tasks are reaped (review round 4):** every
-  helper goes through `spawn_helper(&mut spawned_tasks, …)`, which first
-  `try_join_next`s the finished ones (a `JoinSet` keeps a finished task until
-  joined, and the ~2 s poll alone spawns ~43 000 a day) and WARNs a helper
-  that panicked. Never call `spawned_tasks.spawn` directly.
-- The ~2 s poll repairs it: `scene_poll_verdict(last, lookup_failed, polled,
-  …)` → `PollVerdict::Relookup(scene)` when cg OBS still shows the stored
-  scene and its lookup failed — looked up again on that tick (no confirm
-  window: the event already came), every tick until it answers. cg OBS moved
-  on → the usual mismatch path (confirm window) for the new scene.
-- **Nested refusals are NOT failures.** obs-websocket 5 refuses
-  `GetSceneItemList` for a GROUP (602 "The specified source is not a scene.
-  (Is group)", `Request::AcquireScene` scene-only filter; groups need
-  `GetGroupSceneItemList`), and a nested SCENE item carries `inputKind: null`
-  (so it is not recursed at all). A refusal below the top level adds
-  nothing, as it always did; a timeout / close / reply without `sceneItems`
-  at ANY depth fails the whole lookup. Promoting the group refusal to a
-  failure would leave every scene holding a group "lookup failed" forever.
-- (#221: the facade's own lookup, `ScenePlaylists`, and its
-  `lookup_failed` reason are deleted; only the client's scene detection
-  looks scenes up.)
-- Test: `tests/scene_lookup_failure.rs` — the `FakeObsServer` knobs
-  `drop_scene_item_lists` (no answer, still logged in `requests` with
-  `"dropped": true`), `omit_scene_items` (success, no list) and
-  `refuse_scene_item_lists` (600), each for the next N lookups, plus `groups`
-  (a name listed there is refused with 602 like a real group). The first
-  published snapshot that knows the scene after the failure must already
-  carry the right set and come from a second lookup; a group on the program
-  scene must not fail it.
-- **Not mutation-scored:** `.cargo/mutants.toml` excludes all of
-  `sp-server/src/obs/`, so the pure `scene_items_from_reply`,
-  `scene_poll_verdict`, `obs_transition_from_reply`, `is_transition_event`
-  and the `depth > 0` refusal guard are guarded ONLY by their unit and
-  integration tests — keep those exact (both directions of each branch).
-
-## The OBS client PUBLISHES its state — `ObsSnapshot` on a `watch` (#219)
-
-ONE view of cg OBS: the OBS client's. `obs/snapshot.rs`: `ObsSnapshot`
-(`connected`, `current_scene`, `active_playlist_ids`, `lookup_failed`,
-`transition`) is the program part of `ObsState`, published on a
-`tokio::sync::watch` (`ObsClient::snapshots()`). Its one production
-consumer, the #215 OBS follow, is deleted (#221 L5, owner directive
-5999795799): nothing in production reads the snapshot now, and L6 deletes
-the scene detection that fills it. Until then the contract holds:
-
-- every write of those fields goes through `ObsShared::update(|s| …)` (a
-  scene apply: `update_scene(ticket, …)`, above), which changes `ObsState`
-  and publishes under the ONE write lock (a snapshot never shows a state the
-  lock did not hold; snapshots come in write order) and only on a real change
-  (`send_if_modified`: streaming / recording are not published and wake
-  nobody). Never write them through `state().write()` directly, or a
-  consumer misses the change;
-- `lookup_failed: Some(scene)` → `active_playlist_ids` belong to an EARLIER
-  scene: a consumer must not act on them;
-- `transition` = cg OBS's current scene transition, `None` while unknown;
-- a disconnect resets everything (`ObsState::reset_disconnected`, written
-  through `update_scene` with a fresh ticket, so it is published) — pinned by
-  `a_disconnect_forgets_everything_of_cg_obs` (the fields) and
-  `a_disconnect_is_published_and_the_reconnect_publishes_the_program_again`
-  (the fake's `close_client`); the channel starts at the default
-  (disconnected) snapshot; without OBS configured `start_obs` hands out a
-  CLOSED channel.
-- Functions taking the crate-private `ObsShared` (`apply_scene_change`,
-  `reconcile_program_scene`) are `pub(crate)` — a `pub fn` with it in its
-  signature trips `private_interfaces` under `-D warnings`.
-
-**cg OBS's transition is read by the client** (`obs/transition.rs`,
-`ObsTransition`; #221 L5 deleted its one consumer, the follow's "podľa OBS"
-transition, and its re-export from `playback::program_transition`; L6
-deletes the reader):
-one reader task per connection (in the connection's `JoinSet`), spawned
-right after the reader task (step 4b, before the NDI map rebuild): it reads
-`GetCurrentSceneTransition` at once, then each time the READER wakes it (its
-`Notify`, on `CurrentSceneTransitionChanged` /
-`CurrentSceneTransitionDurationChanged` — the identify's Transitions (16)
-subscription). A `Notify` wake keeps a change that arrives DURING a read, so
-reads never overlap and the newest answer wins. No answer → `transition =
-None` and a retry every `TRANSITION_RETRY` (2 s) until answered (first
-failure WARN, retries debug). Test: `tests/obs_snapshot.rs` with the
-`FakeObsServer`'s `scene_transition` knob (`None` answers `{}` = no kind);
-it also pins the published disconnect + reconnect.
+- **The connection's helper tasks are reaped** (#218 review round 4, still
+  true): every helper goes through `spawn_helper(&mut spawned_tasks, …)`,
+  which first `try_join_next`s the finished ones (a `JoinSet` keeps a
+  finished task until joined, and the connection loop never joins: one
+  helper per title text, ladder rung and rebuild) and WARNs a helper that
+  panicked. Never call `spawned_tasks.spawn` directly.
+- `obs/**` stays excluded from the mutation gate (below).
 
 ## Reading the health snapshot's `state` — `Playing` already means "on program" (#154)
 `handle_health_snapshot` RECONCILES the pipeline-reported state before storing it: a pipeline that is `Playing` but whose scene is NOT on OBS program (`scene_active == false`) is stored as `Paused`, not `Playing`. So a consumer that reads `NdiHealthRegistry::snapshots()` and checks `state == PlaybackStateLabel::Playing` is already getting "an output is playing AND OBS is showing it" — you do NOT need to also cross-reference `active_playlist_ids`. The #154 lyrics idle gate relies on exactly this (`lyrics/idle_gate.rs::any_playing`): "any snapshot Playing" = "the wall is showing an output" = defer heavy GPU work. Read the registry in-process (the engine already holds the `Arc`); never HTTP-loop `/api/v1/ndi/health` back to your own server.
@@ -584,8 +466,8 @@ AGAIN, doubling the per-push receiver-lottery rolls. `/api/v1/status` now carrie
 E2E "Restart SongPlayer" step SKIPS the restart (`exit 0`) when the running
 process reports the deployed `VERSION` (from the checkout) AND `uptime_s < 600` —
 i.e. it IS the fresh Deploy-started process — logging which branch it takes.
-The engine's OBS scene-poll reconcile + the OBS-client reconnect backoff cover
-the "pick up OBS after OBS start" case the restart used to serve.
+The OBS client's reconnect backoff covers the "pick up OBS after OBS start"
+case the restart used to serve.
 
 ## A restart is a receiver lottery until camera-box re-resolves — SongPlayer keeps the map stable
 

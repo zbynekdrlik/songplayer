@@ -552,11 +552,13 @@ are the recovery's `on_program_lines`.
 - **Both timers write the clip only on program, and a pause cancels them**
   (release 0.68.0 blockers 1a + 1c). The hide timer reads `scene_active`
   when it fires, like the show timer; since release 0.69.0 (review 🟡 2)
-  both also read whether their playlist may write the wall
+  both also read whether their playlist owns the wall
   (`title_timers.rs::WallGate`, `program-bus.md` "One wall owner"), so
   another playlist (the outgoing one of a cut until its OFF; before #221 B4
   step 6 also the other member of a two-member on-air set) never shows or
-  hides the owner's title, and a re-sync names only the owner's. So the new
+  hides the owner's title, and a re-sync names only the owner's. With no
+  owner ("OBS manuál" on program) no timer writes the title and a re-sync
+  names none (#221 lane 2: no owner = nobody writes). So the new
   owner's ON
   re-syncs the title even when it plays nothing (a `Resync` naming none,
   `scene_off::wall_after_owner_on`, review round 2): the old owner's hide

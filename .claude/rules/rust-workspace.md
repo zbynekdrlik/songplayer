@@ -467,8 +467,10 @@ always can). Reflowing such a line costs nothing and ends the doubt
 
 A tokio `JoinSet` keeps a FINISHED task (its cell + output) until
 `join_next` / `try_join_next` takes it. A set that only ever sees `spawn` +
-`abort_all` — the OBS connection loop's helpers, one per ~2 s poll tick —
-grows for the whole life of the connection (~43 000 cells a day). Route every
+`abort_all` — the OBS connection loop's helpers, then one per ~2 s scene
+poll tick (deleted in #221 L6; still one per title text, ladder rung and
+rebuild) — grows for the whole life of the connection (~43 000 cells a day
+at the poll's rate). Route every
 spawn through a helper that first drains `try_join_next()` (and WARNs a
 `JoinError` that is not a cancellation): `obs/mod.rs::spawn_helper`. Test it
 on the current-thread `#[tokio::test]`: spawn finished tasks, `yield_now` a

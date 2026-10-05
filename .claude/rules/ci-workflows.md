@@ -412,14 +412,12 @@ target` (`waitForPreviewApplied`, 3 s bound, throws "stale preview") BEFORE the
 trigger. Same rule for any future studio-mode automation (Companion-style
 control in the app): set preview → confirm preview → trigger.
 
-**Engine self-heal (the production bug the harness exposed):** a dropped
-`CurrentProgramSceneChanged` in daily studio-mode use is a dark wall for the
-operator, not just an E2E flake. `crates/sp-server/src/obs/` now polls
-`GetCurrentProgramScene` every ~2 s (`scene_poll::reconcile_program_scene`) and,
-on a mismatch with the last event-derived scene
-(`scene_poll::scene_poll_detects_change`), feeds the same `scene::apply_scene_change`
-path the event does (INFO log `obs: program scene changed without an event —
-reconciled by poll`).
+**Engine self-heal (history):** a dropped `CurrentProgramSceneChanged` in daily
+studio-mode use was a dark wall for the operator while playback followed cg
+OBS's program, so the OBS client polled `GetCurrentProgramScene` every ~2 s
+(`obs/scene_poll.rs`). #221 L4b moved the playback authority to SongPlayer's own
+program and L6 deleted that poll with the rest of cg OBS's scene detection
+(`obs-ndi-health.md`): nothing depends on cg OBS's program events any more.
 
 **afterAll read-back + afterEach restore:** the post-deploy suite restores the
 scene it started on and asserts `/api/v1/status.active_scene` (the engine's view)

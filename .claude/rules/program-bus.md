@@ -348,10 +348,11 @@ included, is comment 5872871751).
 
 ## The playback authority (#221 L4b, design record 5873773896 §1e)
 
-SongPlayer's own program decides what PLAYS; cg OBS's scene detection starts
-and pauses nothing (the OBS→engine bridge, `scene_change_commands` and
-`EngineCommand::SceneChanged` are deleted; a cg OBS disconnect pauses
-nothing).
+SongPlayer's own program decides what PLAYS (the OBS→engine bridge,
+`scene_change_commands` and `EngineCommand::SceneChanged` are deleted; a cg
+OBS disconnect pauses nothing). #221 L6 deleted cg OBS's scene detection
+itself: the OBS client no longer reads cg OBS's program at all
+(`obs-ndi-health.md`).
 
 - **On air** = `program_on_air::on_air_set(&on_air)`: SP-program's source
   when it is a playlist, ALONE (-1 "OBS manuál" is none), so the set has at
@@ -404,8 +405,8 @@ nothing).
     `legacy_cg.shown`;
   - the authority publishes it with the set (`OnAirPlaylists::publish`,
     before that value's events; the log line carries `wall_owner`);
-  - `OnAirPlaylists::may_write_wall(pid)`: while there is an owner, only it
-    writes the shared outputs — the `ShowSubtitles` / `HideSubtitles`
+  - `OnAirPlaylists::may_write_wall(pid)` = `owner == Some(pid)`: only the
+    owner writes the shared outputs — the `ShowSubtitles` / `HideSubtitles`
     dispatch and the Presenter push (`position_update.rs`), the song-end /
     PlayVideo clear of both (`clear_lyrics.rs`), both title timers
     (`title_timers.rs::WallGate`, read when they fire), the Play re-sync
@@ -417,8 +418,8 @@ nothing).
     OFF, and until that OFF is handled the outgoing playlist (still flagged
     on program) writes none of them; its dispatch forgets what it last
     sent, so the moment it owns the wall again its current line goes out.
-    A playlist played off program by hand writes none of them either while
-    there is an owner (it keeps its own karaoke WS);
+    A playlist played off program by hand writes none of them (it keeps
+    its own karaoke WS);
   - the new owner's ON re-syncs the WHOLE wall at once
     (`scene_off::wall_after_owner_on`, review rounds 1-2): the title (a
     playing owner's scene-on already sends its `Resync`; an owner that
@@ -434,12 +435,18 @@ nothing).
     line, or clears the stage display while the owner is in a blank
     stretch;
   - with NO owner (-1 "OBS manuál" on program, nothing on air, or before
-    the authority's first value: the engine's unit tests) nothing is
-    restricted, as before the owner: a song played off program by hand
-    feeds the Presenter (`lyrics-display.md` "Who may send a line"). So
-    while "OBS manuál" is on program, a song the operator plays off program
-    on the dashboard reaches the stage display (residual, for the main
-    session; it was the same while cg OBS's record named no playlist).
+    the authority's first value) NOBODY writes them (ROZHODNUTÉ 6002459249,
+    #221 lane 2; before, no owner restricted nothing and a song played off
+    program by hand fed the Presenter under "OBS manuál"). And the last
+    owner's OFF with no owner left (a cut to "OBS manuál") blanks the stage
+    display too (`wall_after_scene_off`: `presenter::push_empty` next to
+    the HideTitle + HideSubtitles), or the old owner's last line would stay
+    there for the whole manual scene. A press's OFF (the next owner already
+    published, its ON queued) leaves the display to that ON
+    (`wall_after_owner_on`): no blank flash. An engine unit test that wants
+    a wall write therefore puts its playlist on air as the owner first
+    (`PlaybackEngine::put_on_air_for_test`), as production does before its
+    ON.
 
   Pinned by `program_on_air_tests.rs` (the set and owner table),
   `program_authority_tests.rs` (the task over a real bus, its owner) and
@@ -448,11 +455,17 @@ nothing).
   title timers, the new owner's ON (`the_new_owner_s_on_re_syncs_the_wall_s_line`,
   `a_new_owner_that_plays_nothing_takes_the_old_owner_s_title_down`), an
   owner change by an OFF (`an_owner_change_by_an_off_re_syncs_the_stage_display`)
-  and the recovery). Those tests publish a two-member set with an owner
-  directly (`OnAirPlaylists::publish`): no production value has two members
-  any more, but the gate is the same, and it is what the cut moment above
+  and the recovery), plus the no-owner rule
+  (`with_no_wall_owner_a_playlist_played_off_program_feeds_no_presenter`,
+  `with_no_wall_owner_a_playlist_still_on_program_writes_nothing`,
+  `the_last_owner_s_off_blanks_the_stage_display`,
+  `an_off_with_the_next_owner_on_its_way_leaves_the_stage_display`). Those
+  tests publish a two-member set with an owner directly
+  (`OnAirPlaylists::publish`): no production value has two members any
+  more, but the gate is the same, and it is what the cut moment above
   relies on. A test that only `replace`s the diffed set (`#[cfg(test)]`)
-  publishes no owner.
+  publishes no owner, so nobody writes the wall there (the stale-check
+  and re-check tests).
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
   (its ON came before it existed). An ON for a playlist with NO pipeline

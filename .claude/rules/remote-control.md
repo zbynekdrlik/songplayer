@@ -105,6 +105,11 @@ come from `SP-program`, never from cg OBS.
   program-scene event is SongPlayer's own (`remote/studio_events.rs`, below);
   cg OBS's is NOT passed through. `SceneListChanged` is still cg OBS's,
   passed through verbatim with intent Scenes (4).
+- **At (re)connect** v3.15.3's `buildSceneList` sets `scene_active` from
+  `GetSceneList.currentProgramSceneName` and `scene_preview` from
+  `currentPreviewSceneName` (`index.js` 1102-1115). #221 lane 2
+  (ROZHODNUTÉ 6002459249): the forwarded answer carries SongPlayer's
+  scenes, never cg OBS's program (see "Connect-time feedback" below).
 - `SceneTransitionStarted` / `SceneTransitionEnded` only set Companion's
   `transition_active` variable (`index.js` 530-539, no field read); the
   post-deploy E2E driver waits for the Ended.
@@ -123,7 +128,8 @@ come from `SP-program`, never from cg OBS.
   - the ops, close codes and status codes;
   - Hello / Identify / Identified, parse and `check_identify`;
   - `Reply` (its own status, or cg OBS's `requestStatus` passed through);
-  - the route table: native / forward / `SetProgramScene` /
+  - the route table: native / forward / `SceneList` (lane 2: forwarded,
+    its program + preview made SongPlayer's) / `SetProgramScene` /
     `GetProgramScene` (L3) / `SetPreviewScene` / `GetPreviewScene` /
     `TriggerTransition` / `SetTransitionDuration` / unsupported;
   - the pure request checks (#221): `scene_name` (missing → 300),
@@ -133,7 +139,8 @@ come from `SP-program`, never from cg OBS.
 
   `FORWARDED_REQUESTS` = GetSceneList, GetInputList, GetSceneItemList,
   GetGroupSceneItemList (L3: `GetCurrentProgramScene` is native now). A test
-  pins it in sync with `route`. The studio requests are never forwarded.
+  pins it in sync with `route` (GetSceneList routes to `SceneList`, the
+  rest to `Forward`). The studio requests are never forwarded.
   `passthrough_intent` passes only cg OBS's `SceneListChanged`.
   `parse_client_message` takes the DECODED `Value` (#221 L2b), so both
   encodings share one parser.
@@ -266,6 +273,7 @@ come from `SP-program`, never from cg OBS.
 | `TriggerStudioModeTransition` | ALWAYS a switch to that preview (below), never short-circuited when it equals the program scene: a same-source cut is a bus no-op whose publication still counts (the re-kick). No preview and nothing on program → 604. The preview is NOT swapped afterwards. |
 | `SetCurrentProgramScene {sceneName}` | a switch to that scene |
 | `GetCurrentProgramScene` | (L3) `{sceneName, currentProgramSceneName}`: SP-program's scene (`program_scene_name`), never forwarded; nothing on program → 604 |
+| `GetSceneList` | (lane 2) forwarded; a successful answer's `currentProgramSceneName` = SP-program's scene (null while nothing is on it), `currentPreviewSceneName` = this session's preview, each `…Uuid` = cg OBS's uuid of that name in the answer's `scenes` (null when it lists none, e.g. "OBS manuál"); the rest verbatim (`protocol::with_songplayer_scenes`) |
 | `SetCurrentSceneTransitionDuration {transitionDuration}` | validated like obs-websocket (missing / null → 300, not a number → 401, outside 50..=20000 → 402), 100, NOT applied: `remote.last_transition_duration {ms, applied: false}` (a fraction truncates) |
 
 - **The preview is per session**, not OBS-global: Companion's preview →
@@ -403,6 +411,18 @@ playlists on air) went with it.
 - `GET /api/v1/program` → `remote.program_scene` = the same resolver
   (`null` — and `GetCurrentProgramScene` 604 — while nothing is on program
   or a playlist whose catalog names no scene is on it).
+- **Connect-time feedback (#221 lane 2, ROZHODNUTÉ 6002459249).** Since B4
+  step 6 nothing moves cg OBS to a playlist scene, so cg OBS's own program
+  differs from SP-program's whenever a playlist is on it, and Companion's
+  connect-time `scene_active` used to light cg OBS's manual scene until the
+  next program-scene event. `Route::SceneList` forwards `GetSceneList` and
+  `protocol::with_songplayer_scenes(data, program, preview)` (pure) replaces
+  the four fields: program = `program_scene_name(&bus.on_air_now())`
+  (`None` → null, never cg OBS's), preview = the session's
+  (`Session::preview_given`: the one it set, else the program), each uuid
+  looked up by name in the answer's own `scenes` (null when absent or
+  malformed). A failed answer, or data that is not an object, is left
+  alone. The scene list itself stays cg OBS's.
 
 ## Settings, API, UI
 
@@ -525,7 +545,11 @@ playlists on air) went with it.
   serves it with `bus.release_due(now + 1 min)`: with no source live, every
   due boundary is filled and the window is pruned), no transition for a
   press that cut nothing, `GetCurrentProgramScene` native (604, never
-  forwarded). Its `pub(super) request_collecting` answers a request and
+  forwarded), and (lane 2) `GetSceneList`'s program / preview / uuids
+  (`get_scene_list_names_sp_program_s_scene_and_this_session_s_preview`;
+  the pure cases in `protocol_tests.rs`, the null-at-connect pins in
+  `session_tests.rs` / `session_tests_msgpack.rs` /
+  `tests/remote_control.rs`). Its `pub(super) request_collecting` answers a request and
   returns the events that came before the response — use it whenever
   another client's press can have queued events.
 - `session_tests_msgpack.rs` (#221 L2b, same rig): the negotiation table
@@ -579,8 +603,9 @@ playlists on air) went with it.
   - shutdown.
 - `tests/remote_control.rs` runs end to end: client → facade → the REAL
   `ObsClient` → `FakeObsServer`. The harness serves `GetSceneList` /
-  `GetCurrentProgramScene` / `SetCurrentProgramScene` from `scene_list` /
-  `program_scene`, logs `requests`, and has `push_event`. #221 L3: after the
+  `SetCurrentProgramScene` from `scene_list` / `program_scene` (L6 deleted
+  its `GetCurrentProgramScene` answer: nothing asks cg OBS for its program
+  any more), logs `requests`, and has `push_event`. #221 L3: after the
   page-13 pair Companion gets SongPlayer's own `CurrentProgramSceneChanged`;
   a pushed cg OBS `CurrentProgramSceneChanged` never arrives before the
   pushed `SceneListChanged` witness (the OBS client's reader broadcasts raw
@@ -618,16 +643,6 @@ playlists on air) went with it.
   So a manual press whose switch cg OBS carries out after 2 s is answered
   "not ready" (207) and the program is kept while cg OBS (and so "OBS
   manuál") did switch. The next press corrects it.
-- **Companion's feedback at CONNECT is still cg OBS's.** v3.15.3's
-  `buildSceneList` sets `scene_active` from the forwarded `GetSceneList`'s
-  `currentProgramSceneName` (`index.js` 1102-1115), which is cg OBS's
-  program. Since B4 step 6 nothing moves cg OBS to a playlist scene, so the
-  two differ WHENEVER a playlist is on SP-program at Companion's
-  (re)connect (before, only after a cut to "OBS manuál" with no scene):
-  Companion's buttons light cg OBS's manual scene until the next
-  program-scene event corrects it. Found in L3, not in the design record —
-  the main session decides whether the forwarded answer is patched with
-  SP-program's scene (returned as a follow-up candidate).
 - **At most 16 sessions (#221 L4a, main-session decision 5882671183).** One
   1 MiB frame is decoded before it is closed: a JSON array of `0,` builds
   ~16× its size in `Value`s, a msgpack array of 1-byte nils ~32× (2^20 ×
