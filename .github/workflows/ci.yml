@@ -239,6 +239,33 @@ jobs:
           Get-ChildItem $dest | Format-Table Name, Length
       - name: Build Tauri app
         run: cargo tauri build
+      - name: Check SongPlayer.exe declares Common-Controls 6.0 (#223 S2)
+        # SongPlayer.exe links the Spout2 SDK (sp-gpu), whose SpoutUtils imports
+        # TaskDialogIndirect from comctl32 at load time. Only Common-Controls 6.0
+        # exports it, and Windows binds v6 only when the exe's manifest asks for
+        # it; otherwise the exe does not start (0xC0000139). tauri-build embeds
+        # its default manifest, which declares it, as resource #1. Read it back
+        # with the Windows SDK's mt.exe and fail if the declaration is missing.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'src-tauri\target\release\SongPlayer.exe'
+          if (-not (Test-Path $exe)) { throw "$exe was not built" }
+          $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $mt = Get-ChildItem -Path $kits -Recurse -Filter 'mt.exe' |
+            Where-Object { $_.FullName -like '*\x64\mt.exe' } |
+            Sort-Object FullName | Select-Object -Last 1
+          if (-not $mt) { throw "mt.exe (Windows SDK) not found under $kits" }
+          & $mt.FullName -nologo "-inputresource:$exe;#1" '-out:embedded.manifest'
+          if ($LASTEXITCODE -ne 0) { throw "mt.exe read no embedded manifest from $exe (exit $LASTEXITCODE)" }
+          $manifest = Get-Content 'embedded.manifest' -Raw
+          Write-Host $manifest
+          $ids = [regex]::Matches($manifest, '<(?:\w+:)?assemblyIdentity\b[^>]*>') | ForEach-Object { $_.Value }
+          $cc6 = $ids | Where-Object {
+            $_ -match 'name=["'']Microsoft\.Windows\.Common-Controls["'']' -and $_ -match 'version=["'']6\.0\.0\.0["'']'
+          }
+          if (-not $cc6) { throw "$exe's embedded manifest does not declare Microsoft.Windows.Common-Controls 6.0.0.0" }
+          Write-Host 'The embedded manifest declares Common-Controls 6.0.'
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
