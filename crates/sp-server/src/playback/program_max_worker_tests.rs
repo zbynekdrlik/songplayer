@@ -144,9 +144,11 @@ fn next_error(
     shared: &FakeShared,
     pick: impl Fn(&mut Script) -> Option<GpuError>,
 ) -> Option<GpuError> {
-    let mut script = shared.script.lock().unwrap_or_else(|p| p.into_inner());
-    // A generic `Fn`'s argument does not deref-coerce: pass the `Script`.
-    pick(&mut *script)
+    let mut guard = shared.script.lock().unwrap_or_else(|p| p.into_inner());
+    // A typed binding derefs the guard to the `Script` the picker takes
+    // (`&mut *guard` trips clippy::explicit_auto_deref under -D warnings).
+    let script: &mut Script = &mut guard;
+    pick(script)
 }
 
 impl Drop for FakeCompositor {

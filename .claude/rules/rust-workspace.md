@@ -250,6 +250,11 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   [u8; 3], [u8; 3]);`, then `let table: [ColourBar; 9]`. The lint stopped
   the Lint job, and every Windows job behind it (build, WARP tests, deploy)
   was skipped, so one tuple cost a whole CI cycle.
+- **`clippy::explicit_auto_deref` on `&mut *guard`** (#223 S2, CI Lint run
+  37267920602). Passing `&mut *guard` (a `MutexGuard<T>`) where the callee
+  takes `&mut T`, even to an `impl Fn(&mut T)`, is flagged under `-D
+  warnings`. Write a typed binding instead: `let t: &mut T = &mut guard;
+  f(t)`. It compiles in every call shape and leaves nothing for the lint.
 - **`clippy::assertions_on_constants` on `assert!(SOME_CONST)`** (#147
   bundle, reasoned before CI). Asserting a `const bool` is linted like
   `assert!(true)`, and `assert_eq!(CONST, true)` trips
