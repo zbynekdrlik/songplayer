@@ -1,4 +1,5 @@
-//! The Direct3D 11 compositor and its Spout sender (Windows). Every decision
+//! The Direct3D 11 compositor and its Spout sender (Windows), and the device
+//! Media Foundation decodes video on (`VideoDevice`, #223 S3b). Every decision
 //! they take is a pure, Linux-tested function of the crate (the adapter, the
 //! picture check, the layers, the quad constants, the upload residency, the
 //! Spout name rule, registry formats and shim codes, the sender's
@@ -14,6 +15,7 @@ mod receiver;
 mod spout_registry;
 mod spout_sender;
 mod textures;
+mod video_device;
 
 use std::marker::PhantomData;
 use std::time::Instant;
@@ -28,6 +30,7 @@ pub use device::adapters;
 pub use receiver::read_shared_texture;
 pub use spout_registry::{spout_sender_info, spout_sender_names};
 pub use spout_sender::SpoutSender;
+pub use video_device::VideoDevice;
 
 use crate::adapter::AdapterInfo;
 use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition};
@@ -35,6 +38,7 @@ use crate::error::GpuError;
 use crate::quad::QuadConstants;
 use crate::residency::{Resident, Upload, upload_for};
 use crate::stats::ComposeStats;
+use device::DeviceUse;
 use pipeline::{Pipeline, Quad};
 use textures::{PlaneTextures, RenderTarget};
 
@@ -79,14 +83,14 @@ impl Compositor {
     /// [`GpuError::NoAdapter`] when there is none: it never falls back to
     /// WARP on its own.
     pub fn new() -> Result<Self, GpuError> {
-        let ((device, context), adapter) = device::create_on_picked()?;
+        let ((device, context), adapter) = device::create_on_picked(DeviceUse::Compose)?;
         Self::build(device, context, adapter, "hardware")
     }
 
     /// The compositor on WARP, Direct3D's CPU rasterizer: for tests and CI
     /// (`windows-latest` has no GPU).
     pub fn new_warp() -> Result<Self, GpuError> {
-        let ((device, context), adapter) = device::create_warp()?;
+        let ((device, context), adapter) = device::create_warp(DeviceUse::Compose)?;
         Self::build(device, context, adapter, "warp")
     }
 
@@ -97,7 +101,7 @@ impl Compositor {
     /// [`GpuError::NoAdapter`]. Not for production.
     #[doc(hidden)]
     pub fn new_on_listed_adapter(index: usize) -> Result<Self, GpuError> {
-        let ((device, context), adapter) = device::create_on_listed(index)?;
+        let ((device, context), adapter) = device::create_on_listed(index, DeviceUse::Compose)?;
         Self::build(device, context, adapter, "listed")
     }
 

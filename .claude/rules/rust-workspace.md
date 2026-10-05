@@ -984,10 +984,13 @@ for the name before touching `Cargo.toml`:
 A feature change never touches `Cargo.lock`: features are not recorded
 there.
 
-**The `windows` crate (sp-decoder's MF bindings, 0.58) is NOT in the box's
-registry** (#223 S0): nothing on Tier-0 compiles a Windows target, so only
-windows-sys was ever downloaded. To check a signature, fetch the crate itself
-into the scratchpad (a download, not a build):
+**The `windows` crate (sp-decoder's MF bindings, 0.58) may be missing from
+the box's registry** (#223 S0): nothing on Tier-0 compiles a Windows target.
+Look first: `ls -d ~/.cargo/registry/src/*/windows-0.58.0` (by #223 S3b it
+was there, with `windows-core-0.58.0`; read `src/Windows/Win32/<Area>/mod.rs`
+in place, and copy a big `mod.rs` to the scratchpad before grepping it with
+a computed path, which the worktree guard refuses). If it is missing, fetch
+the crate itself into the scratchpad (a download, not a build):
 `curl -sSL -o w.crate https://crates.io/api/v1/crates/windows/0.58.0/download`,
 then `tar xzf w.crate windows-0.58.0/src/Windows/Win32/Media/MediaFoundation/mod.rs`
 and grep it (`pub unsafe fn GetNativeMediaType(&self, dwstreamindex: u32,

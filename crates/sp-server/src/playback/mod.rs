@@ -79,6 +79,7 @@ pub mod vban_clock; // #224 part 2: VBAN's + the NDI input's wall clock, VBAN's 
 pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
 pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
 pub mod vban_stall; // #210 part 2: the VBAN thread's late packets (ring, window max, WARN)
+pub mod video_decode; // #223 S3b: `video_hw_decode` (read at each song open) + its status
 pub mod wallclock;
 
 use std::collections::{HashMap, VecDeque};

@@ -98,20 +98,14 @@ pub struct StatusResponse {
     /// health (`api::metadata::status_block`). Missing key → default.
     #[serde(default)]
     pub metadata: crate::metadata::health::MetadataStatus,
+    /// #223 S3b: the `video_hw_decode` setting and what the hardware decode
+    /// path did (`playback::video_decode::status`). Missing key → default.
+    #[serde(default)]
+    pub video_decode: crate::playback::video_decode::VideoDecodeStatus,
 }
 
-pub use super::routes_status::HeavyContainmentStatus; // #136: moved for the 1000-line cap
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ToolsStatusResponse {
-    pub ytdlp_available: bool,
-    pub ffmpeg_available: bool,
-    pub ytdlp_version: Option<String>,
-    #[serde(default)]
-    pub js_runtime_ok: bool,
-    #[serde(default)]
-    pub deno_version: Option<String>,
-}
+// #136 / #223 S3b: moved to `routes_status` for the 1000-line cap.
+pub use super::routes_status::{HeavyContainmentStatus, ToolsStatusResponse};
 
 // ---------------------------------------------------------------------------
 // Playlist endpoints
@@ -749,6 +743,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         },
         commit: crate::lyrics::host_commit::read_status(),
         metadata: super::metadata::status_block(&state).await,
+        video_decode: crate::playback::video_decode::status(),
     })
 }
 

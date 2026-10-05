@@ -662,6 +662,8 @@ pub async fn start(
 
     // #14 karaoke: seed the process-global live control before pipelines spawn.
     crate::stems::control::init_from_settings(&pool).await;
+    // #223 S3b: `video_hw_decode` applied before any pipeline opens a song.
+    crate::playback::video_decode::start(&pool, &shutdown_tx).await;
 
     // 10. Playback engine (bridges API commands to the engine state machine)
     let mut engine = playback::PlaybackEngine::new(playback::PlaybackEngineConfig {

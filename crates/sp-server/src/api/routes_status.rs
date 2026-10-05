@@ -10,7 +10,8 @@
 //!   was told to show), ascending — the set the playback authority plays.
 //!
 //! #136: `HeavyContainmentStatus` lives here too (re-exported by `routes`),
-//! which made room in `routes.rs` for `status.metadata`.
+//! which made room in `routes.rs` for `status.metadata`; #223 S3b moved
+//! `ToolsStatusResponse` here too, for `status.video_decode`.
 
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +29,18 @@ pub struct HeavyContainmentStatus {
     pub affinity_mask: String,
     /// SongPlayer's own scheduling priority class (`high` on the Windows box).
     pub priority_class: String,
+}
+
+/// The tools block of `/api/v1/status` (yt-dlp, FFmpeg, the JS runtime).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ToolsStatusResponse {
+    pub ytdlp_available: bool,
+    pub ffmpeg_available: bool,
+    pub ytdlp_version: Option<String>,
+    #[serde(default)]
+    pub js_runtime_ok: bool,
+    #[serde(default)]
+    pub deno_version: Option<String>,
 }
 
 /// `(active_scene, active_playlist_ids)` of `/api/v1/status` (module doc).

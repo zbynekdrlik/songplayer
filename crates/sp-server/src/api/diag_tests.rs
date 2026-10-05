@@ -119,6 +119,33 @@ async fn without_media_foundation_the_run_is_501_and_frees_the_bench() {
     assert!(state.decode_bench.try_start().is_some());
 }
 
+/// #223 S3b: `hw` is an optional bool; anything else is axum's 422 before
+/// the handler runs (the bench stays free).
+#[tokio::test]
+async fn hw_must_be_a_bool() {
+    let (state, _tmp, dir) = bench_state().await;
+    std::fs::write(dir.join("x.mp4"), b"x").unwrap();
+    for hw in [r#""yes""#, "1", "null"] {
+        let body = format!(r#"{{"file":"x.mp4","seconds":1,"hw":{hw}}}"#);
+        let (status, text) = post_bench(&state, &body).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "hw {hw}: {text}");
+    }
+    assert!(state.decode_bench.try_start().is_some());
+}
+
+/// #223 S3b: a `"hw": true` request reaches the run like any other (on
+/// Linux: no Media Foundation, 501).
+#[cfg(not(windows))]
+#[tokio::test]
+async fn a_hardware_request_without_media_foundation_is_501() {
+    let (state, _tmp, dir) = bench_state().await;
+    std::fs::write(dir.join("x.mp4"), b"x").unwrap();
+    let body = serde_json::json!({ "file": "x.mp4", "seconds": 1, "hw": true }).to_string();
+    let (status, text) = post_bench(&state, &body).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{text}");
+    assert!(state.decode_bench.try_start().is_some());
+}
+
 /// The decoder crate's H.264 fixture: 160×120, 30 fps, 3 s
 /// (`crates/sp-decoder/tests/fixtures/regen.sh`).
 #[cfg(windows)]
@@ -160,6 +187,45 @@ async fn the_real_decoder_measures_the_fixture() {
         state.decode_bench.try_start().is_some(),
         "the bench is free after the run"
     );
+}
+
+/// #223 S3b: `"hw": true` on the fixture. `windows-latest` has no GPU, so
+/// the reader falls back to software at open (or Media Foundation decodes in
+/// software); the report says which, and the run is the software run's.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_hardware_request_measures_the_fixture_and_names_its_path() {
+    let (state, _tmp, dir) = bench_state().await;
+    std::fs::copy(decoder_fixture(), dir.join("h264.mp4")).unwrap();
+    let body = serde_json::json!({ "file": "h264.mp4", "seconds": 15, "hw": true }).to_string();
+    let (status, text) = post_bench(&state, &body).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(report["hw_requested"], true, "{text}");
+    assert_eq!(report["codec"], "H264", "{text}");
+    assert_eq!(report["ended"], "end_of_stream", "{text}");
+    assert!(report["frames"].as_u64().unwrap() > 0, "{text}");
+    match report["decode_path"].as_str() {
+        Some("hardware") => assert!(report["adapter"].is_string(), "{text}"),
+        Some("software") => assert!(report["adapter"].is_null(), "{text}"),
+        other => panic!("decode_path {other:?}: {text}"),
+    }
+    assert!(state.decode_bench.try_start().is_some());
+}
+
+/// The software run (no `hw`) says so.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_software_request_reports_the_software_path() {
+    let (state, _tmp, dir) = bench_state().await;
+    std::fs::copy(decoder_fixture(), dir.join("h264.mp4")).unwrap();
+    let (status, text) = post_bench(&state, &body("h264.mp4", 15)).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(report["hw_requested"], false, "{text}");
+    assert_eq!(report["decode_path"], "software", "{text}");
+    assert!(report["adapter"].is_null(), "{text}");
+    assert!(report["hw_fallback"].is_null(), "{text}");
 }
 
 #[cfg(windows)]

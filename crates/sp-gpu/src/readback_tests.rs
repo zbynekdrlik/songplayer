@@ -1,6 +1,6 @@
 //! Tests for the readback's row packing (#223 S1a, review round 4).
 
-use super::{mapped_len, unpad_rows};
+use super::{mapped_len, unpad_rows, unpad_rows_into};
 
 const P: u8 = 0xEE;
 
@@ -41,4 +41,17 @@ fn padded_rows_are_packed() {
 fn a_mapping_too_short_for_its_rows_is_refused() {
     assert_eq!(unpad_rows(&MAPPED[..12], 5, 3, 3), None);
     assert_eq!(unpad_rows(&MAPPED, 2, 3, 3), None);
+}
+
+/// #223 S3b: the packing appends to a buffer that already holds bytes (a
+/// picture's luma rows, then its UV rows), and a refused mapping appends
+/// nothing.
+#[test]
+fn rows_are_appended_after_what_the_buffer_holds() {
+    let mut dst = vec![7, 7];
+    assert_eq!(unpad_rows_into(&MAPPED, 5, 3, 3, &mut dst), Some(()));
+    assert_eq!(dst, vec![7, 7, 0, 1, 2, 10, 11, 12, 20, 21, 22]);
+    assert_eq!(unpad_rows_into(&MAPPED[..12], 5, 3, 3, &mut dst), None);
+    assert_eq!(unpad_rows_into(&MAPPED, 2, 3, 3, &mut dst), None);
+    assert_eq!(dst.len(), 11, "nothing appended on a refusal");
 }

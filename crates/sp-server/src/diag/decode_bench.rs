@@ -10,6 +10,11 @@
 //! (`playback::decode_thread`), is unpaced (as fast as it decodes), and
 //! stops after `seconds` of wall time or at the end of the stream.
 //!
+//! #223 S3b: an optional `"hw": true` opens the reader in `Hardware` mode
+//! (Media Foundation's decoder on the GPU), so the box measures hardware
+//! against software on the same samples; the report says which path really
+//! decoded ([`DecodeFacts`]).
+//!
 //! This file is the cross-platform part, Linux-tested:
 //!
 //! - [`DecodeBench`]: the sample dir and the one-run-at-a-time gate;
@@ -26,7 +31,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::Serialize;
-use sp_decoder::VideoStream;
+use sp_decoder::{DecodeMode, DecodePath, VideoStream};
 
 use crate::playback::decode_thread::spawn_decode_thread;
 use crate::playback::loop_stats::percentile_ceil;
@@ -342,6 +347,21 @@ pub struct StreamFacts {
     pub codec: Option<String>,
 }
 
+/// What the reader says about its decode path after the run (#223 S3b).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DecodeFacts {
+    /// What the request asked for (`"hw": true` = `Hardware`).
+    pub mode: DecodeMode,
+    /// The path of the last picture (`None`: no picture).
+    pub path: Option<DecodePath>,
+    /// How often a picture's path differed from the one before it.
+    pub path_changes: u32,
+    /// The adapter the reader's GPU path opened on.
+    pub adapter: Option<String>,
+    /// Why the file left the GPU path (`"open: …"` / `"mid-stream: …"`).
+    pub fallback: Option<String>,
+}
+
 /// One run's answer.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BenchReport {
@@ -376,6 +396,21 @@ pub struct BenchReport {
     pub thread_priority: Option<i32>,
     pub decode_us: DecodeUs,
     pub budget: Option<Budget>,
+    /// #223 S3b: the request asked for hardware decode (`"hw": true`).
+    pub hw_requested: bool,
+    /// The path the LAST picture came out of: `"hardware"` (the GPU
+    /// decoder's surfaces, `D3D11_BIND_DECODER`) or `"software"`; `null`
+    /// with no picture. The run's timings are one path's only when
+    /// `path_changes` is 0.
+    pub decode_path: Option<&'static str>,
+    /// How often a picture's path differed from the one before it during
+    /// the run (a mid-stream fall back, or Media Foundation's decoder
+    /// changing its mind): 0 = one path.
+    pub path_changes: u32,
+    /// The GPU's adapter name, only when `decode_path` is `"hardware"`.
+    pub adapter: Option<String>,
+    /// Why the file left the GPU path, if it did.
+    pub hw_fallback: Option<String>,
 }
 
 impl BenchReport {
@@ -410,6 +445,27 @@ impl BenchReport {
             thread_priority,
             decode_us: DecodeUs::of(&run.decode_us),
             budget: Budget::check(frame_rate, &run.decode_us),
+            hw_requested: false,
+            decode_path: None,
+            adapter: None,
+            hw_fallback: None,
+            path_changes: 0,
+        }
+    }
+
+    /// The report with the reader's decode path (#223 S3b). The adapter is
+    /// named only for a hardware path: a file that fell back, or that Media
+    /// Foundation decoded in software on the GPU's device, did not decode on
+    /// it.
+    pub fn with_decode(self, decode: DecodeFacts) -> Self {
+        let hardware = decode.path == Some(DecodePath::Hardware);
+        Self {
+            hw_requested: decode.mode == DecodeMode::Hardware,
+            decode_path: decode.path.map(DecodePath::as_str),
+            adapter: decode.adapter.filter(|_| hardware),
+            hw_fallback: decode.fallback,
+            path_changes: decode.path_changes,
+            ..self
         }
     }
 
@@ -437,6 +493,11 @@ impl BenchReport {
             thread_priority,
             decode_us: DecodeUs::default(),
             budget: None,
+            hw_requested: false,
+            decode_path: None,
+            adapter: None,
+            hw_fallback: None,
+            path_changes: 0,
         }
     }
 
@@ -465,7 +526,7 @@ impl BenchReport {
         };
         format!(
             "file={} {}x{} codec={} fps={fps} open_ms={} frames={} wall_ms={} ended={:?} \
-             mean_us={} p50_us={} p99_us={} max_us={} {budget}{error}",
+             mean_us={} p50_us={} p99_us={} max_us={} {budget}{}{error}",
             self.file,
             self.width,
             self.height,
@@ -478,6 +539,22 @@ impl BenchReport {
             self.decode_us.p50,
             self.decode_us.p99,
             self.decode_us.max,
+            self.hw_summary(),
+        )
+    }
+
+    /// The end line's hardware part (#223 S3b), only for a `"hw": true`
+    /// run, so a software run's line is the S0 baseline's.
+    fn hw_summary(&self) -> String {
+        if !self.hw_requested {
+            return String::new();
+        }
+        format!(
+            " hw=requested decode_path={} path_changes={} adapter={} hw_fallback={}",
+            self.decode_path.unwrap_or("?"),
+            self.path_changes,
+            self.adapter.as_deref().unwrap_or("-"),
+            self.hw_fallback.as_deref().unwrap_or("-"),
         )
     }
 }
@@ -548,9 +625,15 @@ where
 /// router tests (`api/diag_tests.rs`) run this on the real decoder.
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
-pub async fn run(path: PathBuf, file: String, max_wall: Duration, slot: BenchSlot) -> BenchOutcome {
+pub async fn run(
+    path: PathBuf,
+    file: String,
+    max_wall: Duration,
+    mode: DecodeMode,
+    slot: BenchSlot,
+) -> BenchOutcome {
     run_on_decode_thread(slot, move || {
-        super::decode_bench_mf::bench_file(&path, &file, max_wall)
+        super::decode_bench_mf::bench_file(&path, &file, max_wall, mode)
     })
     .await
 }
@@ -561,6 +644,7 @@ pub async fn run(
     _path: PathBuf,
     _file: String,
     _max_wall: Duration,
+    _mode: DecodeMode,
     _slot: BenchSlot,
 ) -> BenchOutcome {
     BenchOutcome::Unsupported

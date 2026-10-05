@@ -193,7 +193,8 @@ fn log_song_summary(
 /// duration, the source fps and where the song really starts (#217: 0 when the
 /// start seek failed), or an open error, back over `open_tx`. Preview sampling
 /// happens HERE — off the time-critical emit/submit path (`preview.md`). Exits on a Stop from
-/// the consumer, dropping the decoder on this thread.
+/// the consumer, dropping the decoder on this thread. #223 S3b: the reader opens in the
+/// `video_hw_decode` mode applied when the song opens (`video_decode.rs`).
 #[cfg_attr(test, mutants::skip)]
 fn run_decode_producer(
     video_path: std::path::PathBuf,
@@ -206,7 +207,10 @@ fn run_decode_producer(
 ) {
     use sp_decoder::MediaFoundationVideoReader;
 
-    let video_reader = match MediaFoundationVideoReader::open(&video_path) {
+    // #223 S3b: `video_hw_decode` as applied now; a change applies from the
+    // next song. The reader falls back to software on its own (WARN).
+    let mode = crate::playback::video_decode::global().mode();
+    let video_reader = match MediaFoundationVideoReader::open_with(&video_path, mode) {
         Ok(v) => v,
         Err(e) => {
             let _ = open_tx.send(Err(format!(

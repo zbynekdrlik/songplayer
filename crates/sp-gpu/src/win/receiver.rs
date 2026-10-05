@@ -23,7 +23,7 @@ use crate::spout::SharedTextureInfo;
 /// GPU, which runs the copy before it). For tests, not production.
 #[doc(hidden)]
 pub fn read_shared_texture(info: &SharedTextureInfo) -> Result<Vec<u8>, GpuError> {
-    let ((device, context), _) = device::create_warp()?;
+    let ((device, context), _) = device::create_warp(device::DeviceUse::Compose)?;
     let handle = HANDLE(info.share_handle_value() as *mut c_void);
     let mut texture: Option<ID3D11Texture2D> = None;
     unsafe { device.OpenSharedResource(handle, &mut texture) }
