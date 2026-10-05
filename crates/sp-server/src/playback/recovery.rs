@@ -136,17 +136,22 @@ impl super::PlaybackEngine {
         let now = Instant::now();
         let due = due_title_video(candidate, now);
         debug!(?candidate, ?due, "title window");
+        // Exhaustive, no wildcard: deleting an arm cannot compile, so no arm
+        // is a log-only equivalent mutant.
         match (due, text) {
             (Some(_), Some(Ok(title))) => Some((title, now)),
             (Some(video_id), Some(Err(e))) => {
                 warn!(video_id, %e, "title resync: DB lookup failed — nothing sent");
                 None
             }
-            (None, Some(Err(e))) => {
-                warn!(?candidate, %e, "title read failed — its title is not due");
+            (None, text) => {
+                if let Some(Err(e)) = text {
+                    warn!(?candidate, %e, "title read failed — its title is not due");
+                }
                 Some((None, now))
             }
-            _ => Some((None, now)),
+            // A due video always has a candidate, so its title was read.
+            (Some(_), None) => Some((None, now)),
         }
     }
 
