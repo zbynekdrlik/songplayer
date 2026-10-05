@@ -3,6 +3,7 @@ paths:
   - "crates/sp-server/src/lib.rs"
   - "crates/sp-server/src/tools_ready.rs"
   - "crates/sp-server/src/api/websocket.rs"
+  - "crates/sp-server/src/api/routes.rs"
 ---
 
 # Status locks — never held across a slow await (#144)
@@ -28,7 +29,13 @@ held across a slow await stalls the writer and every status read behind it.
 - **The socket shape now.** `api/websocket.rs::send_status` builds each first
   frame under its lock and sends it after the lock is released (a slow client
   with a full buffer must not hold `obs_state` / `tools_status`).
-  `ToolsStatus::message` is the one `ToolsStatus` → `ServerMsg` mapping.
+  `ToolsStatus::message` is the one `ToolsStatus` → `ServerMsg` mapping, and
+  `send_json` the one place the socket serializes and sends a frame.
+- **The status route shape now.** `api/routes.rs::status` copies the OBS
+  flag and clones the tools and LAN status at its top, each guard a statement
+  temporary, before its database waits (the playlist count, two settings, the
+  metadata block). A new status field is read the same way, never with a
+  guard bound across a query.
 - **Any status lock.** Set or read the fields in a block or a fn that ends
   before the next unrelated `.await`. A temporary
   (`*lock.write().await = v;`, `lock.read().await.message()` in a `let`) is
@@ -42,4 +49,9 @@ held across a slow await stalls the writer and every status read behind it.
   generous bound (60 s); on a regression the `try_write` assert fails first,
   so the test never blocks on the route. From INSIDE the step, read with
   `try_read()`: the same task holding the write guard would deadlock on
-  `.read().await`. See `tools_ready.rs` and `websocket.rs` tests.
+  `.read().await`. For a handler, poll it ONCE by hand
+  (`futures::poll!(std::pin::pin!(fut).as_mut())`) while the test holds the
+  memory pool's only connection: it parks on the pool, `Pending`, and the
+  `try_write` checks run at that exact point. See the `tools_ready.rs`,
+  `websocket.rs` and `routes_tests.rs` (`the_status_route_holds_no_status_lock_…`)
+  tests.
