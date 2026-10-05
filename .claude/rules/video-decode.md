@@ -199,5 +199,9 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   `MF2DBuffer_LockFlags_Read` and five out-pointers; `IMFDXGIBuffer::
   GetResource(&ID3D11Texture2D::IID, &mut raw)` returns an AddRef'd raw
   pointer (`ID3D11Texture2D::from_raw` takes it); `ID3D11Texture2D::GetDesc`
-  needs `Win32_Graphics_Dxgi_Common`; `SetMultithreadProtected` takes a
-  `BOOL` (`TRUE`), not a `bool`.
+  and `CreateTexture2D` need `Win32_Graphics_Dxgi_Common`;
+  `SetMultithreadProtected` and `MFCreateDXGISurfaceBuffer` take a `BOOL`
+  (`TRUE` / `FALSE`), not a `bool`; `CreateTexture2D(&desc, Some(&init),
+  Some(&mut tex))` works because `Some(&x)` coerces into the
+  `Option<*const T>` the binding asks for; an interface goes into a
+  `Param<IUnknown>` as `&iface`.
