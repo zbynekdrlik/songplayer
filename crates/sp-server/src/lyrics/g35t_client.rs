@@ -91,9 +91,9 @@ pub struct AsrWord {
 
 /// A key [`transcribe_at`] moved past: its index (0-based), whether it was
 /// a 429 (`rate_limited`: out of quota now) or a key refusal (a 403, or a 400
-/// naming the API key: a dead or invalid key), and why, redacted with every
-/// key. Reported by the live probe, so a dead key is visible even while a
-/// later key answers.
+/// naming the API key: dead, invalid, or not allowed this model or API; the
+/// reason says which), and why, redacted with every key. Reported by the live
+/// probe, so a refused key is visible even while a later key answers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyRefusal {
     pub key_index: usize,

@@ -34,7 +34,8 @@ export interface G35tClip {
 export interface G35tKeyRefusal {
   /** 0-based place in the key list. */
   key_index: number;
-  /** A 429 (out of quota now); false = a dead or invalid key (403 / 400). */
+  /** A 429 (out of quota now); false = a key refusal (a 403, or a 400 naming
+   * the key: dead, invalid, or not allowed this model; read `error`). */
   rate_limited: boolean;
   /** Why (a 429 or a key refusal), never the key. */
   error: string;

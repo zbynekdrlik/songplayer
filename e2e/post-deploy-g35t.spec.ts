@@ -32,10 +32,13 @@ test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
     test.setTimeout(300_000);
 
     // The probe cuts the clip with the app's ffmpeg, which the tools manager
-    // makes ready after a (re)start: wait for it rather than depend on the
-    // specs that happen to run before this one. A refused or slow status read
-    // (the app still starting) is "not yet", never a failure: expect.poll
-    // does not retry a generator that throws.
+    // makes ready after a (re)start: wait for it rather than rely on the specs
+    // that happen to run before this one for that. A refused or slow status
+    // read (the app still starting) is "not yet", never a failure: expect.poll
+    // does not retry a generator that throws. Right after a restart the status
+    // itself can stall behind the startup task's `tools_status` guard (a
+    // pre-existing lib.rs issue, #144 comment 5998431231); the earlier specs
+    // absorb that window today.
     await expect
       .poll(
         async () => {
@@ -57,9 +60,12 @@ test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
     const probe = (await resp.json()) as G35tProbe;
     console.log(`[#144 g35t probe] ${JSON.stringify(probe)}`);
     // Logged, not gated: the gate passes on any working key (#144 comment
-    // 5998042988). A refusal that is not a 429 is a dead or invalid key.
+    // 5998042988). A refusal that is not a 429 is a key refusal: the key is
+    // dead, invalid, or not allowed this model — the logged reason says which.
     for (const refused of probe.refused_keys) {
-      const kind = refused.rate_limited ? "rate-limited (429)" : "REFUSED (dead or invalid key)";
+      const kind = refused.rate_limited
+        ? "rate-limited (429)"
+        : "REFUSED (a 403/400 key refusal, not a 429: read the reason)";
       console.log(`[#144 g35t probe] key ${refused.key_index + 1} ${kind}: ${refused.error}`);
     }
 
