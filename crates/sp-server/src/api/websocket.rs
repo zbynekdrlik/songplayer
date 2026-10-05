@@ -211,22 +211,23 @@ async fn dispatch_client_msg(msg: ClientMsg, state: &AppState) {
 }
 
 /// Send a newly connected dashboard the OBS status, then the tools status.
+/// Each message is built under its lock and sent once the lock is released:
+/// a client slow to take a frame must never hold a status lock (#144, a
+/// tokio `RwLock` queues every reader behind a waiting writer).
 async fn send_status<S>(write: &mut S, state: &AppState)
 where
     S: Sink<Message> + Unpin,
 {
-    {
+    let obs_status = {
         let obs = state.obs_state.read().await;
-        let obs_status = ServerMsg::ObsStatus {
+        ServerMsg::ObsStatus {
             connected: obs.connected,
             active_scene: obs.current_scene.clone(),
-        };
-        send_json(write, &obs_status).await;
-    }
-    {
-        let ts = state.tools_status.read().await;
-        send_json(write, &ts.message()).await;
-    }
+        }
+    };
+    send_json(write, &obs_status).await;
+    let tools_status = state.tools_status.read().await.message();
+    send_json(write, &tools_status).await;
 }
 
 /// One message as a JSON text frame. A failed send is not handled here: the
