@@ -2064,7 +2064,7 @@ dependencies = [
 
 [[package]]
 name = "sp-core"
-version = "0.71.0-dev.12"
+version = "0.71.0-dev.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -2073,7 +2073,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.71.0-dev.12"
+version = "0.71.0-dev.13"
 dependencies = [
  "mutants",
  "sp-core",
@@ -2086,7 +2086,7 @@ dependencies = [
 
 [[package]]
 name = "sp-gpu"
-version = "0.71.0-dev.12"
+version = "0.71.0-dev.13"
 dependencies = [
  "cc",
  "mutants",
@@ -2098,7 +2098,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.71.0-dev.12"
+version = "0.71.0-dev.13"
 dependencies = [
  "libloading",
  "mutants",
@@ -2109,7 +2109,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.71.0-dev.12"
+version = "0.71.0-dev.13"
 dependencies = [
  "anyhow",
  "async-trait",
