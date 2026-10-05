@@ -2133,6 +2133,7 @@ dependencies = [
  "socket2",
  "sp-core",
  "sp-decoder",
+ "sp-gpu",
  "sp-ndi",
  "sqlx",
  "tempfile",

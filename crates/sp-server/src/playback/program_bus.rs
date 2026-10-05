@@ -87,6 +87,7 @@ use crate::playback::fleet_shift::{self, FleetShift, timeline_now_100ns};
 use crate::playback::legacy_cg::LegacyCg;
 use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::program_follow::FollowShared;
+use crate::playback::program_max::MaxOut;
 use crate::playback::program_on_air::OnAir;
 use crate::playback::program_output_timing::{
     BoundaryMarks, BoundaryTiming, BoundaryTimingStatus, LateBoundary,
@@ -685,6 +686,8 @@ pub struct ProgramBus {
     remote: Arc<RemoteShared>,
     /// #215: the OBS-follow telemetry (`follow` on `GET /api/v1/program`).
     follow: Arc<FollowShared>,
+    /// #223 S2: the `SP-program-MAX` hand-off + telemetry (`max`).
+    max: Arc<MaxOut>,
     /// #221 L4a: what SongPlayer told cg OBS to show (`legacy_cg.rs`, until
     /// B4 step 6).
     legacy_cg: Arc<LegacyCg>,
@@ -717,6 +720,7 @@ impl ProgramBus {
             input: Arc::new(NdiInputShared::default()),
             remote: Arc::new(RemoteShared::default()),
             follow: Arc::new(FollowShared::default()),
+            max: Arc::new(MaxOut::new()),
             legacy_cg: Arc::new(LegacyCg::default()),
             cut_serial: tokio::sync::Mutex::new(()),
             on_air: watch::channel(OnAir::default()).0,
@@ -742,6 +746,11 @@ impl ProgramBus {
     /// #215: the OBS-follow telemetry.
     pub fn follow(&self) -> &Arc<FollowShared> {
         &self.follow
+    }
+
+    /// #223 S2: the `SP-program-MAX` hand-off and its telemetry.
+    pub fn max(&self) -> &Arc<MaxOut> {
+        &self.max
     }
 
     /// #221 L4a: what SongPlayer told cg OBS to show.

@@ -989,6 +989,23 @@ function programBody() {
         .slice(0, 8) // VBAN_MAX_TARGETS
         .map((t) => ({ target: t, addr: null, error: null })),
     },
+    // #223 S2: SP-program-MAX (mirrors `MaxStatus`). The setting is ON unless
+    // it says "false"; the mock has no GPU, like the Linux server: unsupported.
+    max: {
+      enabled: settings.program_max_enabled !== "false",
+      state: "unsupported",
+      width: 3840,
+      height: 2160,
+      submitted: 0,
+      coalesced: 0,
+      failed: 0,
+      upload_us_p99: 0,
+      draw_us_p99: 0,
+      send_us_p99: 0,
+      device_resets: 0,
+      sender_backoffs: 0,
+      spout_name: "SP-program-MAX",
+    },
   };
 }
 // #212: the NDI input "OBS manuál" — `MACHINE (stream)` → `stream`, like

@@ -105,6 +105,21 @@ pub fn genlock_pacing(raw: Option<&str>) -> bool {
     raw.map_or(DEFAULT_GENLOCK_PACING, |v| v.trim() != "false")
 }
 
+/// #223 S2: the `SP-program-MAX` output — the program's fixed 3840×2160
+/// picture, composed on the GPU and shared with Resolume Arena over Spout.
+/// ON unless the setting says exactly `"false"` ([`program_max_enabled`]).
+pub const SETTING_PROGRAM_MAX_ENABLED: &str = "program_max_enabled";
+/// #223 S2: MAX is ON by default (the owner decided MAX exists, revision 3).
+pub const DEFAULT_PROGRAM_MAX_ENABLED: bool = true;
+
+/// #223 S2: whether a stored `program_max_enabled` turns `SP-program-MAX` on:
+/// OFF only for an explicit `"false"` (trimmed), else
+/// [`DEFAULT_PROGRAM_MAX_ENABLED`]. The ONE rule the startup read and the
+/// settings task share.
+pub fn program_max_enabled(raw: Option<&str>) -> bool {
+    raw.map_or(DEFAULT_PROGRAM_MAX_ENABLED, |v| v.trim() != "false")
+}
+
 /// #212: the program-bus source id of the NDI input (playlists are positive
 /// row ids, so a negative id can never collide with one).
 pub const PROGRAM_INPUT_ID: i64 = -1;
@@ -262,6 +277,23 @@ mod tests {
         assert!(genlock_pacing(Some("off?")), "a mangled value = ON");
         assert!(!genlock_pacing(Some("false")), "only an explicit false");
         assert!(!genlock_pacing(Some(" false\n")), "trimmed");
+    }
+
+    /// #223 S2: `SP-program-MAX` is ON unless the setting says exactly
+    /// "false" — the owner decided MAX exists, so a missing or mangled value
+    /// keeps it on.
+    #[test]
+    fn program_max_is_on_unless_the_setting_says_false() {
+        assert_eq!(SETTING_PROGRAM_MAX_ENABLED, "program_max_enabled");
+        assert!(program_max_enabled(None), "no setting = ON");
+        assert!(program_max_enabled(Some("true")));
+        assert!(program_max_enabled(Some("")), "an empty value = ON");
+        assert!(program_max_enabled(Some("no?")), "a mangled value = ON");
+        assert!(
+            !program_max_enabled(Some("false")),
+            "only an explicit false"
+        );
+        assert!(!program_max_enabled(Some(" false\n")), "trimmed");
     }
 
     #[test]
