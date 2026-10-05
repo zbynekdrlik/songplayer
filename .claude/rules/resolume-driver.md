@@ -480,9 +480,17 @@ are the recovery's `on_program_lines`.
     reopens the window.
   - A paused song is left alone (its resume's `Started` fixes a new
     clock).
-  - The corner left: a seek sent before the song's first `Started` (no
-    clock yet, its first ~0.3 s) is applied by the pipeline right after
-    `Started`, and the clock then counts from the Play's start.
+  - The corners left (review round 1):
+    - a seek sent before the song's first `Started` (no clock yet, its
+      first ~0.3 s) is applied by the pipeline right after `Started`, and
+      the clock then counts from the Play's start;
+    - a mid-song seek the decoder REFUSES (`pipeline.rs` "pipeline: seek
+      failed", the paced producer's "seek failed") is only warned about,
+      and the song plays on, but the engine has already re-anchored the
+      clock to the asked position: the title then hides early or late by
+      the difference. The pipeline reports no seek result to the engine;
+      closing it means a `Seeked { position_ms }` event, the start seek's
+      class again.
   - The hide arithmetic is ONE helper, `title::hide_point`, shared by `new`
     and `seeked`. It is out of `new` on purpose: cargo-mutants never
     mutates inside a fn named `new`.

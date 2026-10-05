@@ -96,13 +96,17 @@ through VBAN (2012 of 3.53M frames at 0 dBFS, finding 5847119155).
 **Why it is not under `audio/`.** `.cargo/mutants.toml` excluded all of
 `sp-decoder/src/audio/`, so the limiter went to the crate root, next to
 `level_probe.rs`. Since #210 (finding 5986249387) the exclusion names only
-`sp-decoder/src/audio/symphonia_reader` (its `open` / `decode_packet` /
-`seek` are Symphonia glue only real FLAC files of each sample format
-reach): `StemMixReader` (`stem_mix.rs`) is gated, and its 51 listed
-mutants each have a killing test (#210 added `debug_prints_the_mixer_state`
-and `one_call_emits_exactly_the_overlapping_whole_frames`; `drain` fails
-on an empty chunk instead of spinning to the mutation timeout). Pure mix
-logic may live in `audio/` again, but check `cargo mutants --list` first.
+the `SymphoniaAudioReader` methods (`open`, `decode_packet`, the stream
+impls: Symphonia glue only real FLAC files of each sample format reach).
+`StemMixReader` (`stem_mix.rs`, 51 listed mutants) and the reader's pure
+helpers (`ts_to_ms`, `ms_to_ts`, `seek_start`, `trim_leading_frames`, 30)
+are gated. Each of those mutants was mapped to a killing test by review,
+not run: the PR gate is diff-scoped, so they first run in an on-demand
+`/mutation-sweep` (#210 added `debug_prints_the_mixer_state` and
+`one_call_emits_exactly_the_overlapping_whole_frames`; `drain` and the
+integration test's `collect_frames` fail on an empty chunk instead of
+spinning to the mutation timeout). Pure mix logic may live in `audio/`
+again, but check `cargo mutants --list` first.
 The limiter is `pub` now (`sp_decoder::PeakLimiter`): the `SP-program`
 output runs its own instance after the transition crossfade
 (`vban-out.md`).

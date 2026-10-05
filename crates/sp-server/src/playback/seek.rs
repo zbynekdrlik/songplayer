@@ -22,7 +22,9 @@ impl PlaybackEngine {
     /// song is left alone: its resume's `Started` fixes a new clock. A seek sent
     /// before the song's `Started` (no clock yet, its first ~0.3 s) is applied
     /// by the pipeline right after `Started`, and the clock then counts from the
-    /// Play's start: a known corner.
+    /// Play's start: a known corner. So is a seek the decoder refuses: the
+    /// pipeline only warns and plays on, while the clock already follows the
+    /// asked position (the pipeline reports no seek result).
     pub async fn seek(&mut self, playlist_id: i64, position_ms: u64) {
         let now = Instant::now();
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {

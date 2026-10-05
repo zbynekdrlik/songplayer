@@ -32,7 +32,7 @@ use crossbeam_channel::{Receiver, TryRecvError};
 #[cfg(windows)]
 use std::time::Instant;
 #[cfg(windows)]
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 // #196: the PipelineCommand / PipelineEvent enums live in a sibling module to
 // keep this file under the 1000-line cap; re-exported so every existing

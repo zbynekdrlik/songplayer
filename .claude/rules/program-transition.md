@@ -191,7 +191,8 @@ or resume the paused song on scene-on instead of `SelectAndPlay`.
   sources sum to (cos θ + sin θ)·x, up to √2·x at mid-fade, so the sender
   runs every program block through ONE peak limiter after the crossfade
   (#210, `vban-out.md` "Data path"): a mixed block over 0.98 is scaled
-  down, never clamped flat at FOH, and outside a fade it is bit-identical.
+  down, never clamped flat at FOH; outside a fade SongPlayer's own
+  playlists pass bit for bit.
 - Picture: Q8 weight `w = round(256 · (k + ½)/n)`, blended
   `(f·(256 − w) + t·w + 128) >> 8` on Y and UV alike into a `frame_pool`
   buffer, always in the `SP-program` canvas (#223: 1920×1080, `program-bus.md`

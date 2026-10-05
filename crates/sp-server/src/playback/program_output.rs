@@ -30,8 +30,10 @@
 //! stem mix uses, its state carried from one boundary to the next, reset
 //! where the program's timeline restarts. A fade sums two sources that are
 //! each at most 0.98 up to 0.98·√2 at mid-fade, which VBAN's INT24 encoder
-//! would clamp flat at FOH; outside a fade nothing is over the ceiling, so
-//! the limiter is at rest and every block passes bit for bit.
+//! would clamp flat at FOH. Outside a fade SongPlayer's own playlists are at
+//! or under the ceiling, so the limiter is at rest and their blocks pass bit
+//! for bit; a hotter block (the NDI input "OBS manuál" forwards cg OBS's
+//! audio as it comes) is limited too, where VBAN used to clamp it.
 //!
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
 //! crossfaded here, on the sender thread: the audio per sample with the

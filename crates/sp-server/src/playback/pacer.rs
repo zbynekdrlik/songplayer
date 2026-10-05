@@ -398,6 +398,7 @@ impl Pacer {
     fn anchor_at(&mut self, first: i64) {
         self.wall_start_100ns = first;
         self.next_boundary_100ns = first;
+        self.seek_settling = false; // #150: a new song drops a seek it overtook
         self.pending = None;
         // A fresh seek / new song: drop any frame decoded ahead for the OLD grid
         // (#147 lane 4) — the pipeline re-`prepare`s against the new anchor.

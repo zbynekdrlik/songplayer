@@ -65,15 +65,21 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
     passes as it came, and VBAN sends silence for it;
   - VBAN's copy and the NDI submit carry the SAME limited block, VBAN
     first (`program_output_tests_order.rs` unchanged);
-  - outside a fade nothing is over the ceiling, so it is at rest and every
-    block passes bit for bit;
+  - outside a fade SongPlayer's own playlists are at or under the ceiling,
+    so it is at rest and their blocks pass bit for bit. A hotter block IS
+    limited outside a fade too: the NDI input "OBS manuál" forwards cg
+    OBS's audio as it comes, so a feed peaking over 0.98 now goes out at
+    the ceiling (0.98–1.0 used to pass, over 1.0 VBAN clamped it). That
+    engagement shows on no counter (`MixRun::limited` outside a fade run is
+    dropped); read cg OBS's own meters;
   - the fade's INFO line (`program transition: the fade's mixed boundaries
     went out`) carries `limited_frames` (`MixRun::limited`): the frames it
     scaled while the run went out, the boundary that ended it included.
     It is time under limiting, like the stem mix's `limited=`;
   - tests: `program_output_tests_limit.rs` (pins from a scratch
     numpy.float32 model: 1.3858 unlimited → 0.9800001, the boundary after
-    a fade at gain 0.929, bit-identical again 24 boundaries later, a
+    a fade at gain 0.929, bit-identical again 24 boundaries later, through
+    30 standby boundaries too, a 1.2 tone outside a fade → 0.9800001, a
     constant 0.98 at slots 4 + 5 = 3200 frames).
   - Box check: a dev1 VBAN capture across a 300 ms fade between two loud
     songs has 0 samples at |x| ≥ 0.999 (the INT24 full scale), and the

@@ -314,11 +314,11 @@ fn the_audio_is_bit_identical_again_once_the_release_ends() {
     );
 }
 
-/// Outside a fade every source is already at or under the ceiling (the stem
-/// mix limits at 0.98, a plain song is loudness-normalized far under it), so
-/// the limiter is at rest and a forwarded boundary goes out bit for bit, on
-/// VBAN and on NDI, a peak right at the ceiling included. The standby
-/// silence stays silence.
+/// Outside a fade SongPlayer's own playlists are at or under the ceiling (the
+/// stem mix limits at 0.98, a plain song is loudness-normalized far under
+/// it), so the limiter is at rest and a forwarded boundary goes out bit for
+/// bit, on VBAN and on NDI, a peak right at the ceiling included. The
+/// standby silence stays silence.
 #[test]
 fn outside_a_fade_a_block_at_or_under_the_ceiling_passes_bit_for_bit() {
     let (mut out, vban, backend) = output();
@@ -345,6 +345,54 @@ fn outside_a_fade_a_block_at_or_under_the_ceiling_passes_bit_for_bit() {
         bits(&backend.last_audio_planar()),
         vec![0; FRAMES * 2],
         "the standby silence stays exactly 0.0"
+    );
+}
+
+/// Outside a fade a block OVER the ceiling is limited too. SongPlayer's own
+/// playlists never carry one, but the NDI input "OBS manuál" forwards cg
+/// OBS's audio as it comes: a hot feed now goes out at the ceiling, VBAN and
+/// NDI alike, where VBAN used to clamp everything from 1.0 on flat.
+#[test]
+fn a_hot_block_outside_a_fade_is_limited_too() {
+    let (mut out, vban, backend) = output();
+    let job = ProgramJob::Source(pair(at(0), tone(0, 1.2)));
+    let (limited, ndi) = serve(&mut out, &vban, &backend, job);
+    let peak = peak(&limited);
+    assert!(
+        peak <= CEILING + CEILING_SLACK && peak > CEILING - 0.01,
+        "a 1.2 peak goes out at the ceiling: {peak}"
+    );
+    assert_eq!(bits(&limited), bits(&ndi), "VBAN = NDI");
+}
+
+/// The standby silence carries the release tail on: a fade's tail decays
+/// through the standby boundaries after it as through audio (0 × gain stays
+/// 0), so a source that comes back 30 boundaries later goes out bit for bit.
+/// A standby that skipped the limiter would freeze the tail (a reduction of
+/// ~0.07) and that source would come out reduced.
+#[test]
+fn the_release_tail_decays_through_the_standby_boundaries() {
+    let (mut out, vban, backend) = output();
+    for k in 0..9 {
+        let job = fade(k, k as u32, 9, tone(k, CEILING), tone(k, CEILING));
+        serve(&mut out, &vban, &backend, job);
+    }
+    for k in 9..39 {
+        out.submit(ProgramJob::Standby { stamp_100ns: at(k) });
+        assert_eq!(vban_block(&vban), VbanBlock::silence(at(k)));
+        assert_eq!(
+            bits(&backend.last_audio_planar()),
+            vec![0; FRAMES * 2],
+            "boundary {k}: the silence stays exactly 0.0"
+        );
+    }
+    let data = tone(39, 0.5);
+    let job = ProgramJob::Source(pair(at(39), data.clone()));
+    let (limited, _) = serve(&mut out, &vban, &backend, job);
+    assert_eq!(
+        bits(&limited),
+        bits(&data),
+        "the tail decayed through the standby: bit for bit"
     );
 }
 
