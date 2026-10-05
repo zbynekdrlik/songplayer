@@ -1,8 +1,8 @@
 //! A song's title timers (#217 addendum 3). The show timer (`Started` +
 //! 1.5 s) pushes the title; the hide timer (3.5 s before the end) takes it
 //! down, each only while its scene is on program when it fires (release
-//! 0.68.0 blocker 1a) and its playlist may write the wall (#221, release
-//! 0.69.0 review 🟡 2: while another playlist owns the wall, never). They
+//! 0.68.0 blocker 1a) and its playlist owns the wall (#221, release 0.69.0
+//! review 🟡 2: while another playlist, or none, owns it, never). They
 //! sleep until the instants of the song's `TitleClock`, the same instants a
 //! recovery or a scene-on reads (`recovery.rs`), so a `Resync` never
 //! contradicts a timer. They used to be armed inline in the `Started`
@@ -101,9 +101,10 @@ impl PlaybackEngine {
     /// (an instant hide), not when the new song's ShowTitle replaces it 1.5 s
     /// after its `Started`; if another on-program playlist's title is due,
     /// the Resync names that one. The timers and a `Resync` then never
-    /// disagree between the Play and the new `Started`. Off program, or on
-    /// air while another playlist owns the wall (#221 🟡 2), the playlist's
-    /// title is not on the wall: nothing is sent. A pause calls it
+    /// disagree between the Play and the new `Started`. Off program, or
+    /// when it does not own the wall (#221 🟡 2: another one does, or none
+    /// does), the playlist's title is not on the wall: nothing is sent. A
+    /// pause calls it
     /// too: a paused song's title is not due, and its timers are cancelled
     /// (release 0.68.0 blockers, review round 1).
     pub(super) async fn resync_after_play(&self, playlist_id: i64) {
@@ -142,9 +143,9 @@ impl super::PlaylistPipeline {
 }
 
 /// What a title timer checks when it fires: its playlist's scene is on
-/// program, and (#221, release 0.69.0 review 🟡 2) the playlist may write the
-/// wall (`OnAirPlaylists::may_write_wall`): while another playlist owns the
-/// wall, this one's timers never show or hide the shared title.
+/// program, and (#221, release 0.69.0 review 🟡 2) the playlist owns the
+/// wall (`OnAirPlaylists::may_write_wall`): while another playlist, or none,
+/// owns it, this one's timers never show or hide the shared title.
 #[derive(Clone)]
 struct WallGate {
     scene_active: Arc<AtomicBool>,
@@ -176,7 +177,7 @@ fn spawn_show_timer(
         if !gate.open() {
             debug!(
                 playlist_id,
-                "title suppressed — off program, or another playlist owns the wall"
+                "title suppressed — off program, or the playlist does not own the wall"
             );
             return;
         }
@@ -206,7 +207,7 @@ fn spawn_hide_timer(
         if !gate.open() {
             debug!(
                 playlist_id,
-                "title hide suppressed — off program, or another playlist owns the wall"
+                "title hide suppressed — off program, or the playlist does not own the wall"
             );
             return;
         }
