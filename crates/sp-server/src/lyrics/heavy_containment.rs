@@ -59,9 +59,9 @@ pub(crate) struct Containment {
     /// (`heavy_alloc_reserve_gib`, `1..=8`) — round-3b's mimalloc self-report
     /// showed the eager-committed 4 GiB arena IS the ~4 GiB piece of the
     /// child's 8.7 GiB peak commit (`commits: 0`), so a smaller reserve is the
-    /// lever ROZHODNUTÉ 3c measured; the default is 2 GiB since ROZHODNUTÉ
-    /// 5995652394. Read cross-platform by `stems/separator.rs` at separation
-    /// spawn.
+    /// lever ROZHODNUTÉ 3c measured; the default is 2 GiB since the
+    /// ROZHODNUTÉ of issue comment 5995652394. Read cross-platform by
+    /// `stems/separator.rs` at separation spawn.
     pub(crate) reserve_gib: u8,
     /// #147 round 9: the child's per-process working-set CAP in MiB
     /// (`heavy_max_working_set_mb`, default 4096, `0` = no cap, clamped
