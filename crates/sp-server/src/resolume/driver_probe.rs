@@ -73,7 +73,7 @@ impl HostDriver {
         &mut self,
         param_id: i64,
     ) -> Result<reqwest::StatusCode, anyhow::Error> {
-        let ep = self.endpoint().await?;
+        let ep = self.ensure_endpoint().await?;
         let url = format!("{}/api/v1/parameter/by-id/{param_id}", ep.base_url);
         let req = self.client.get(&url);
         Ok(Self::apply_host_header(req, &ep).send().await?.status())

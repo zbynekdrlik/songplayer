@@ -713,7 +713,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * `GET /api/v1/ndi/health` reports — a consistency check, NOT a hard-coded
    * state. #176 revised #164's rendering rule: the whole-box HEADER badge is now
    * ALWAYS visible — while `genlock_pacing` is OFF (`pacing.enabled == false`,
-   * the production default today) it shows the explicit grey `● GENLOCK OFF`
+   * set by hand; the default is ON since #147) it shows the explicit grey `● GENLOCK OFF`
    * (never hidden), so the owner can always tell at a glance whether SongPlayer
    * is genlocked. The PER-CARD badge keeps #164's "only where actionable" rule:
    * hidden while pacing is off, shown only on live (Playing/Paused) pacing-
@@ -750,7 +750,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const enabled = health.filter((o) => o.pacing?.enabled === true);
 
     if (enabled.length === 0) {
-      // #176: pacing disabled everywhere (prod default) — the ALWAYS-visible
+      // #176: pacing disabled everywhere (set OFF by hand; the default is ON, #147) — the ALWAYS-visible
       // header badge shows the explicit grey `● GENLOCK OFF`, derived from the
       // live health (no pacing-enabled output), never hidden. The per-card badge
       // stays hidden (#164 "only where actionable").

@@ -6,8 +6,8 @@
 //! (`diag::decode_bench`, `decode-bench`). The bench's numbers mean what
 //! playback sees only if both are scheduled alike, so both start here.
 //! (The SDK-clocked path, `pipeline.rs`, decodes inline on its pipeline
-//! thread. It runs only with the `genlock_pacing` setting OFF, its default
-//! in code; the box runs with it ON by the owner's rule.)
+//! thread. It runs only with the `genlock_pacing` setting set to `false`;
+//! the default is ON, by the owner's rule (#147).)
 //!
 //! The scheduling today is the platform default: `CreateThread` starts a
 //! thread at `THREAD_PRIORITY_NORMAL`, inside SongPlayer's

@@ -106,12 +106,13 @@ jobs:
           }
           Write-Host "OK: OBS WebSocket 4455 listening"
 
-          # genlock_pacing is a raw DB flag (default OFF) surfaced by /api/v1/settings only when set.
+          # genlock_pacing is a raw DB flag (default ON since #147, OFF only when set to "false"),
+          # surfaced by /api/v1/settings only when set.
           $settings = Invoke-RestMethod -Uri "$api/api/v1/settings" -TimeoutSec 5
           if ($settings.PSObject.Properties.Name -contains 'genlock_pacing') {
             $gp = $settings.genlock_pacing
           } else {
-            $gp = "(unset - default OFF)"
+            $gp = "(unset - default ON, #147)"
           }
           Write-Host "genlock_pacing = $gp"
 

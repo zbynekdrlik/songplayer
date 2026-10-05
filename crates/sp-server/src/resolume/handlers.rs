@@ -6,7 +6,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tracing::{debug, info, warn};
 
 use crate::resolume::TITLE_TOKEN;
-use crate::resolume::driver::{ClipInfo, HostDriver};
+use crate::resolume::driver::{ClipInfo, HostDriver, ResolvedEndpoint};
 
 /// Delay between writing the title text and starting the opacity fade.
 /// Resolume Arena needs a brief moment to commit a parameter write before
@@ -79,10 +79,10 @@ pub async fn show_title(driver: &mut HostDriver, text: &str) -> Result<(), anyho
         return Ok(());
     }
 
-    driver.ensure_endpoint().await?;
+    let ep = driver.ensure_endpoint().await?;
     let driver_ref: &HostDriver = driver;
 
-    set_text_all(driver_ref, &clips, text).await?;
+    set_text_all(driver_ref, &ep, &clips, text).await?;
     info!(
         token = TITLE_TOKEN,
         count = clips.len(),
@@ -94,7 +94,7 @@ pub async fn show_title(driver: &mut HostDriver, text: &str) -> Result<(), anyho
 
     let step_delay = fade_step_delay();
     for opacity in fade_steps(FADE_STEPS) {
-        set_opacity_all(driver_ref, &clips, opacity).await?;
+        set_opacity_all(driver_ref, &ep, &clips, opacity).await?;
         tokio::time::sleep(step_delay).await;
     }
 
@@ -122,8 +122,8 @@ pub async fn replace_title(driver: &mut HostDriver, text: &str) -> Result<(), an
     if text.is_empty() {
         return Ok(());
     }
-    driver.ensure_endpoint().await?;
-    set_opacity_all(driver, &clips, 0.0).await?;
+    let ep = driver.ensure_endpoint().await?;
+    set_opacity_all(driver, &ep, &clips, 0.0).await?;
     show_title(driver, text).await
 }
 
@@ -137,18 +137,18 @@ pub async fn hide_title(driver: &mut HostDriver) -> Result<(), anyhow::Error> {
         return Ok(());
     };
 
-    driver.ensure_endpoint().await?;
+    let ep = driver.ensure_endpoint().await?;
     let driver_ref: &HostDriver = driver;
 
     let step_delay = fade_step_delay();
     let steps: Vec<f64> = fade_steps(FADE_STEPS);
     for opacity in steps.iter().rev() {
-        set_opacity_all(driver_ref, &clips, *opacity).await?;
+        set_opacity_all(driver_ref, &ep, &clips, *opacity).await?;
         tokio::time::sleep(step_delay).await;
     }
-    set_opacity_all(driver_ref, &clips, 0.0).await?;
+    set_opacity_all(driver_ref, &ep, &clips, 0.0).await?;
 
-    set_text_all(driver_ref, &clips, "").await?;
+    set_text_all(driver_ref, &ep, &clips, "").await?;
 
     info!(
         token = TITLE_TOKEN,
@@ -173,11 +173,11 @@ pub async fn hide_title_now(driver: &mut HostDriver) -> Result<(), anyhow::Error
         return Ok(());
     };
 
-    driver.ensure_endpoint().await?;
+    let ep = driver.ensure_endpoint().await?;
     let driver_ref: &HostDriver = driver;
 
-    set_opacity_all(driver_ref, &clips, 0.0).await?;
-    set_text_all(driver_ref, &clips, "").await?;
+    set_opacity_all(driver_ref, &ep, &clips, 0.0).await?;
+    set_text_all(driver_ref, &ep, &clips, "").await?;
 
     info!(
         token = TITLE_TOKEN,
@@ -237,18 +237,18 @@ pub async fn set_subtitles(
         return Ok(());
     }
 
-    driver.ensure_endpoint().await?;
+    let ep = driver.ensure_endpoint().await?;
     let driver_ref: &HostDriver = driver;
 
     if let Some(clips) = subs_clips {
-        set_text_all(driver_ref, &clips, en).await?;
+        set_text_all(driver_ref, &ep, &clips, en).await?;
     }
     if let Some(clips) = subs_next_clips {
-        set_text_all(driver_ref, &clips, next_en).await?;
+        set_text_all(driver_ref, &ep, &clips, next_en).await?;
     }
     if let Some(clips) = subs_sk_clips {
         let sk_text = sk.unwrap_or("");
-        set_text_all(driver_ref, &clips, sk_text).await?;
+        set_text_all(driver_ref, &ep, &clips, sk_text).await?;
     }
     let _ = next_sk; // reserved for #sp-subssk-next when operator configures it
     Ok(())
@@ -286,17 +286,17 @@ pub async fn clear_subtitles(driver: &mut HostDriver) -> Result<(), anyhow::Erro
         return Ok(());
     }
 
-    driver.ensure_endpoint().await?;
+    let ep = driver.ensure_endpoint().await?;
     let driver_ref: &HostDriver = driver;
 
     if let Some(clips) = subs_clips {
-        set_text_all(driver_ref, &clips, "").await?;
+        set_text_all(driver_ref, &ep, &clips, "").await?;
     }
     if let Some(clips) = subs_next_clips {
-        set_text_all(driver_ref, &clips, "").await?;
+        set_text_all(driver_ref, &ep, &clips, "").await?;
     }
     if let Some(clips) = subs_sk_clips {
-        set_text_all(driver_ref, &clips, "").await?;
+        set_text_all(driver_ref, &ep, &clips, "").await?;
     }
     Ok(())
 }
@@ -324,26 +324,32 @@ where
     }
 }
 
+/// Write `text` to every clip in parallel, all on `ep`: the endpoint the
+/// handler resolved once before its first batch. No write reads the driver's
+/// endpoint cache, so its TTL running out mid-fade cannot drop a batch (#217).
 async fn set_text_all(
     driver: &HostDriver,
+    ep: &ResolvedEndpoint,
     clips: &[ClipInfo],
     text: &str,
 ) -> Result<(), anyhow::Error> {
     let futs = FuturesUnordered::new();
     for clip in clips {
-        futs.push(driver.set_text(clip.text_param_id, text));
+        futs.push(driver.set_text(ep, clip.text_param_id, text));
     }
     drain_all(futs).await
 }
 
+/// Set every clip's opacity in parallel on `ep` (see [`set_text_all`]).
 async fn set_opacity_all(
     driver: &HostDriver,
+    ep: &ResolvedEndpoint,
     clips: &[ClipInfo],
     opacity: f64,
 ) -> Result<(), anyhow::Error> {
     let futs = FuturesUnordered::new();
     for clip in clips {
-        futs.push(driver.set_clip_opacity(clip.clip_id, opacity));
+        futs.push(driver.set_clip_opacity(ep, clip.clip_id, opacity));
     }
     drain_all(futs).await
 }
@@ -652,28 +658,83 @@ mod tests {
         assert_eq!(received.len(), 0, "empty text should send no requests");
     }
 
-    #[tokio::test]
-    async fn set_text_without_ensure_endpoint_returns_error() {
-        // Create driver but DON'T call ensure_endpoint.
-        let driver = HostDriver::new("127.0.0.1".to_string(), 1);
+    // -----------------------------------------------------------------------
+    // A batch writes on the endpoint it was handed (#217, finding 5873261862)
+    // -----------------------------------------------------------------------
 
-        let result = driver.set_text(123, "test").await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("endpoint cache empty"),
-            "error should mention endpoint cache, got: {err}"
-        );
+    /// Two `#sp-title` clips (clip 100 / param 200, clip 101 / param 201) on a
+    /// driver whose handler already resolved the endpoint, whose cache then
+    /// went empty: the box's case, the 5-minute TTL running out between the
+    /// handler's `ensure_endpoint` and a fade step. Every PUT answers 204.
+    async fn driver_whose_cache_emptied() -> (MockServer, HostDriver, ResolvedEndpoint) {
+        let clips = vec![
+            ClipInfo {
+                clip_id: 100,
+                text_param_id: 200,
+            },
+            ClipInfo {
+                clip_id: 101,
+                text_param_id: 201,
+            },
+        ];
+        let (server, mut driver) = spawn_mock_driver_with_clips(clips).await;
+        Mock::given(method("PUT"))
+            .and(path_regex(
+                r"^/api/v1/(parameter|composition/clips)/by-id/\d+$",
+            ))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+        let ep = driver.ensure_endpoint().await.unwrap();
+        driver.forget_endpoint();
+        (server, driver, ep)
     }
 
+    /// Before #217 every write of the batch failed at once with `endpoint
+    /// cache empty` and nothing reached the wall. The batch must go out on the
+    /// endpoint it was handed.
     #[tokio::test]
-    async fn set_clip_opacity_without_ensure_endpoint_returns_error() {
-        let driver = HostDriver::new("127.0.0.1".to_string(), 1);
+    async fn a_text_batch_goes_out_after_the_endpoint_cache_empties() {
+        let (server, driver, ep) = driver_whose_cache_emptied().await;
+        let clips = clips_for_title(&driver).unwrap();
 
-        let result = driver.set_clip_opacity(123, 0.5).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("endpoint cache empty"));
+        set_text_all(&driver, &ep, &clips, "Amazing Grace - Chris Tomlin")
+            .await
+            .expect("every write of the batch goes out");
+
+        for param in [200, 201] {
+            assert_eq!(
+                texts_put(&server, param).await,
+                ["Amazing Grace - Chris Tomlin"],
+                "param {param}"
+            );
+        }
+    }
+
+    /// The fade's opacity batches: the same, for every clip of the batch.
+    #[tokio::test]
+    async fn an_opacity_batch_goes_out_after_the_endpoint_cache_empties() {
+        let (server, driver, ep) = driver_whose_cache_emptied().await;
+        let clips = clips_for_title(&driver).unwrap();
+
+        set_opacity_all(&driver, &ep, &clips, 0.35)
+            .await
+            .expect("every write of the batch goes out");
+
+        let received = server.received_requests().await.unwrap();
+        for clip_id in [100, 101] {
+            let route = format!("/api/v1/composition/clips/by-id/{clip_id}");
+            let bodies: Vec<serde_json::Value> = received
+                .iter()
+                .filter(|r| r.url.path() == route)
+                .map(|r| serde_json::from_slice(&r.body).unwrap())
+                .collect();
+            assert_eq!(bodies.len(), 1, "clip {clip_id}");
+            assert_eq!(
+                bodies[0]["video"]["opacity"]["value"], 0.35,
+                "clip {clip_id}"
+            );
+        }
     }
 
     /// Type alias used so test futures can be stored in a single

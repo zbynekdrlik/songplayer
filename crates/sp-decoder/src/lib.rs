@@ -15,6 +15,7 @@ mod types;
 pub mod audio;
 pub mod frame_pool;
 pub mod level_probe;
+mod peak_limiter; // #184: the stem mix's peak limiter (pure, mutation-tested)
 pub mod split_sync;
 pub mod stream;
 pub mod subtype; // #223 S0: an MF video subtype GUID as codec text (AV01, VP90, H264)

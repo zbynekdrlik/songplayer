@@ -2,6 +2,7 @@
 paths:
   - "crates/sp-server/src/stems/**"
   - "crates/sp-decoder/src/audio/stem_mix*.rs"
+  - "crates/sp-decoder/src/peak_limiter*.rs"
   - "crates/sp-decoder/src/audio/symphonia_reader*.rs"
   - "crates/sp-decoder/src/split_sync*.rs"
   - "crates/sp-server/src/playback/karaoke.rs"
@@ -49,13 +50,60 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   `vocals + instrumental == mix`, i.e. the stems are "loudnorm-matched to the mix"
   BY CONSTRUCTION. Do NOT re-loudnorm the stems (breaks additivity, distorts the
   balance, risks clipping); the source mix is already −14 LUFS. FullMix plays the
-  real mix file; the mixer clamps to [-1, 1] for the rare overshoot.
+  real mix file; an overshoot of the sum goes through the #184 peak limiter
+  (see "#184 — the peak limiter after the sum" below), never a clamp.
 - **Native output is 44.1 kHz** (model rate); the mix + the decoder require
   **48 kHz stereo**, so `stem_worker.py` resamples every stem to 48 kHz stereo
   before writing FLAC (PCM_24).
 - **The separation child NEVER holds a whole-video array (#207).** It runs under
   a 10 GiB per-process job cap. Read the mix one window at a time and stream
   each stem through `_StreamingStitchWriter`. See the #207 section at the end.
+
+## #184 — the peak limiter after the sum (`sp-decoder/src/peak_limiter.rs`, was a clamp at ±1.0)
+
+The dub readers sum the original (or its stems) with the dub voice, both at
+gain 1, so the sum goes over full scale when a voice peak lands on a loud bed.
+The old `acc.clamp(-1.0, 1.0)` cut those samples flat, and FOH heard the clip
+through VBAN (2012 of 3.53M frames at 0 dBFS, finding 5847119155).
+`StemMixReader` now runs the summed block through its own `PeakLimiter`:
+
+- **Ceiling 0.98** (−0.18 dBFS). It is stereo-linked: one gain per frame,
+  from the frame's highest |sample|.
+- **Instant attack, no lookahead.** No latency is added to the paced A/V
+  path. The trade-off: the rising edge of a NEW peak sits at the ceiling for
+  the samples that would exceed it, and a sustained over re-attacks a little
+  on each lobe. A 1.8× 100 Hz over gives 79 of the first lobe's 240 samples
+  at the ceiling and 30 of each later lobe's, where the clamp flattened 151.
+- **Release.** The REDUCTION (`1 − gain`) decays by `1 − 1/(0.050 s · rate)`
+  per frame. That is an exact division (no `exp`), so test pins hold on
+  Linux and Windows alike. At 48 kHz the gain rises by at most 1/2400 per
+  frame.
+- **Bit-identical at rest.** A gain of exactly 1.0 gives `x · 1.0 = x`.
+  The state is the reduction, not the gain: an f32 gain recovering toward 1.0
+  stalls below unity forever once its step d·(1 − R) is under half an ulp (up
+  to ~1200 ulp below 1.0 at 48 kHz), but a decaying reduction does not.
+  Once `1 − reduction` rounds to 1.0, the reduction is dropped to 0 (no
+  subnormal tail).
+- **State.** A field of the reader, so it carries across blocks. `seek`
+  resets it, and a new song opens a new reader.
+- **On the box:** the 1 Hz `stem-mix level` line ends with `limited=N`, the
+  frames scaled since the song opened. That is time UNDER limiting: one over
+  needing a 6 dB reduction adds its whole release tail, ~39 900 frames
+  (~0.8 s) at 48 kHz. It is not a count of overs, and it cannot be compared
+  with the 0 dBFS frame count of a VBAN capture (finding 5847119155). Check
+  the fix with such a capture: 0 samples at |x| ≥ 0.999.
+
+**Why it is not under `audio/`.** `.cargo/mutants.toml` excludes all of
+`sp-decoder/src/audio/` (the Symphonia wrapper), so pure DSP placed there is
+never mutation-tested. The limiter lives at the crate root, next to
+`level_probe.rs`; put any new pure mix logic there too.
+
+**Tests.** A test that wants the reader's output to EQUAL its gain must use a
+signal under the ceiling (the ramp tests read it off 0.5 and double it). A
+full-scale 1.0 is an over now. Derive the exact pins from a scratch f32 model
+(`numpy.float32` step by step): for example, unity again at frame 827 after a
+0.5 reduction at 1000 Hz. The `gain < 1.0` branch has an equivalent-output
+`<=` mutant, which `limited_frames` counts kill (824 for that fixture).
 
 ## #184 G5 — bounded audio read-ahead (any read-ahead = fader latency)
 
@@ -199,8 +247,8 @@ DELETED names.
   `false`).
 - **Mixing (`sp_decoder::StemMixReader`, `audio/stem_mix.rs`)** wraps N
   sample-aligned `AudioStream`s behind ONE `AudioStream`, so `SplitSyncedDecoder` /
-  pacer / genlock / NDI submit are UNTOUCHED. `out = clamp(Σ stream_k·gain_k, -1,
-  1)`; each stream's applied gain RAMPS linearly toward its live target atomic over
+  pacer / genlock / NDI submit are UNTOUCHED. `out = limit(Σ stream_k·gain_k)`
+  (the #184 peak limiter, below); each stream's applied gain RAMPS linearly toward its live target atomic over
   `ramp_samples = sample_rate/20` frames (**50 ms**, ≤ `1/ramp_samples` per frame),
   so a preset change is a crossfade, never a click. A song opens at its current
   preset (no fade-in). Buffers each stream (FLAC packet boundaries differ); an ended

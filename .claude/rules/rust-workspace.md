@@ -250,6 +250,11 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   [u8; 3], [u8; 3]);`, then `let table: [ColourBar; 9]`. The lint stopped
   the Lint job, and every Windows job behind it (build, WARP tests, deploy)
   was skipped, so one tuple cost a whole CI cycle.
+- **`clippy::assertions_on_constants` on `assert!(SOME_CONST)`** (#147
+  bundle, reasoned before CI). Asserting a `const bool` is linted like
+  `assert!(true)`, and `assert_eq!(CONST, true)` trips
+  `bool_assert_comparison` instead. Pin a default through behaviour
+  (`assert!(genlock_pacing(None))`), not by asserting the const itself.
 
 ## Toolchain drift: CI's stable Rust moves under an unchanged tree (Rust 1.99, 3.10.2026)
 
@@ -801,6 +806,15 @@ gate — even though the function is "obviously" covered on Windows. `#203`'s
 needed an explicit Linux unit test calling it through `MockNdiBackend`. When you
 add a pub fn during a diff, ask "does a LINUX `#[test]` actually call this?" — if
 not, add one or the mutation gate reddens.
+
+**cargo-mutants 27 never mutates inside a fn named `new`, and `exclude_re`
+also drops whole DIRECTORIES** (#184 bundle, review rounds 1–2).
+`PeakLimiter::new`'s `1 − 1000/(RELEASE_MS · rate)` listed no mutant until it
+moved into its own `release_factor` fn. `'sp-decoder/src/audio/'` excludes
+everything under that dir, so the pure limiter first written as
+`audio/limiter.rs` was never gated; it lives at the crate root now
+(`peak_limiter.rs`). Before trusting the gate, `--list` the range and check
+every new fn's arithmetic appears.
 
 **Extracting pure logic OUT of a `#[cfg(windows)]` module: mind the file NAME
 (#147 spin budget).** The `.cargo/mutants.toml` `exclude_re` entries are

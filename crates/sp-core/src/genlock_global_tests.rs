@@ -27,7 +27,7 @@ fn inp(
 
 #[test]
 fn off_when_no_output_has_pacing_enabled() {
-    // Production default: genlock_pacing=false everywhere → OFF, never hidden.
+    // genlock_pacing=false set by hand everywhere (the default is ON, #147) → OFF, never hidden.
     let out = [
         inp(false, true, LockState::Unlocked, false, "pacing disabled"),
         inp(false, false, LockState::Unlocked, false, "pacing disabled"),

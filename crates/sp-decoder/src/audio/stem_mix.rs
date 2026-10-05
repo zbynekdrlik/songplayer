@@ -6,8 +6,13 @@
 //! per-stream live gain:
 //!
 //! ```text
-//! out[i] = clamp(Σ stream_k[i] * gain_k, -1, 1)
+//! out[i] = limit(Σ stream_k[i] * gain_k)
 //! ```
+//!
+//! `limit` is the sample-peak limiter in `peak_limiter.rs` (#184): stereo-linked,
+//! instant attack, 50 ms release, ceiling 0.98. A sum at or under the ceiling
+//! with no release tail pending passes bit for bit; an over is scaled down,
+//! never clamped flat at ±1.0.
 //!
 //! It replaces the old two-stream `KaraokeAudioReader`: karaoke MODES are now
 //! gain PRESETS over the SAME open streams (`[original, vocals, instrumental]`),
@@ -41,7 +46,10 @@
 //! floor here), the target and applied gain per stream, and `gains_id` — the
 //! address of the first target atomic, which `playback/mix.rs` also logs for the
 //! control's live sets, so the log proves whether this reader holds the SAME
-//! atomics the faders write.
+//! atomics the faders write. `limited` counts the frames the #184 limiter has
+//! scaled since the song opened: every frame under a gain reduction, so one
+//! over adds its release tail too (~0.8 s at 48 kHz for a 6 dB reduction). It
+//! is time under limiting, not a count of overs or of clipped samples.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -52,6 +60,7 @@ use tracing::info;
 
 use crate::error::DecoderError;
 use crate::level_probe::{LevelProbe, LevelReading};
+use crate::peak_limiter::PeakLimiter;
 use crate::stream::{AudioStream, MediaStream};
 use crate::types::DecodedAudioFrame;
 
@@ -113,6 +122,9 @@ pub struct StemMixReader {
     label: String,
     /// 1 Hz level probe over the emitted (post-gain) output.
     probe: LevelProbe,
+    /// The peak limiter after the sum (#184). Its state carries across blocks
+    /// and a seek resets it; a new song builds a new reader.
+    limiter: PeakLimiter,
 }
 
 impl std::fmt::Debug for StemMixReader {
@@ -199,6 +211,7 @@ impl StemMixReader {
             emitted_frames: 0,
             label: format!("{n}-stream"),
             probe: LevelProbe::new(Instant::now()),
+            limiter: PeakLimiter::new(sample_rate),
         })
     }
 
@@ -234,6 +247,8 @@ impl StemMixReader {
     }
 
     /// Emit the 1 Hz `stem-mix level` line for a closed probe window.
+    /// Log-only: every value it prints comes from a tested accessor.
+    #[cfg_attr(test, mutants::skip)]
     fn log_level(&self, r: &LevelReading) {
         let targets: Vec<f32> = self
             .targets
@@ -242,14 +257,15 @@ impl StemMixReader {
             .collect();
         info!(
             label = %self.label,
-            "stem-mix level rms_dbfs={:.1} targets={} applied={} gains_id={:#x} samples={} blocks={} window_ms={}",
+            "stem-mix level rms_dbfs={:.1} targets={} applied={} gains_id={:#x} samples={} blocks={} window_ms={} limited={}",
             r.rms_dbfs,
             format_gains(&targets),
             format_gains(&self.current),
             self.gains_id(),
             r.samples,
             r.blocks,
-            r.window_ms
+            r.window_ms,
+            self.limiter.limited_frames()
         );
     }
 
@@ -290,6 +306,8 @@ impl MediaStream for StemMixReader {
             b.clear();
         }
         self.eos.fill(false);
+        // The audio after a seek is unrelated: no release tail carries over.
+        self.limiter.reset();
         // Re-anchor the output timestamp to the seek position.
         self.emitted_frames = position_ms.saturating_mul(self.sample_rate as u64) / 1000;
         Ok(())
@@ -354,9 +372,11 @@ impl AudioStream for StemMixReader {
                 for k in 0..n_streams {
                     acc += self.bufs[k].pop_front().unwrap_or(0.0) * self.current[k];
                 }
-                out.push(acc.clamp(-1.0, 1.0));
+                out.push(acc);
             }
         }
+        // #184: the peak limiter replaces the hard clamp at ±1.0.
+        self.limiter.process(&mut out, ch);
 
         let timestamp_ms = self.emitted_frames.saturating_mul(1000) / self.sample_rate as u64;
         self.emitted_frames += frames as u64;

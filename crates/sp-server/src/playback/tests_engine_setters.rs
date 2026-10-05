@@ -34,17 +34,24 @@ async fn fresh_engine() -> PlaybackEngine {
     })
 }
 
+/// #147: a fresh engine starts with pacing ON (`DEFAULT_GENLOCK_PACING`, the
+/// owner's rule); the startup read can still turn it off.
 #[tokio::test]
 async fn set_genlock_pacing_flips_the_flag() {
     let mut engine = fresh_engine().await;
     assert!(
+        engine.genlock_pacing,
+        "fresh engine defaults to pacing ON (#147)"
+    );
+    engine.set_genlock_pacing(false);
+    assert!(
         !engine.genlock_pacing,
-        "fresh engine defaults to pacing OFF"
+        "set_genlock_pacing(false) must clear the flag (mutant no-op leaves it on)"
     );
     engine.set_genlock_pacing(true);
     assert!(
         engine.genlock_pacing,
-        "set_genlock_pacing(true) must set the flag (mutant no-op leaves it false)"
+        "set_genlock_pacing(true) must set the flag"
     );
 }
 

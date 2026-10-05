@@ -532,7 +532,7 @@ impl HostDriver {
     /// `GET /api/v1/product` — a small JSON payload used only to confirm the
     /// Arena REST server is alive, without pulling the ~14 MB composition.
     async fn fetch_product(&mut self) -> Result<(), anyhow::Error> {
-        let ep = self.endpoint().await?;
+        let ep = self.ensure_endpoint().await?;
         let url = format!("{}/api/v1/product", ep.base_url);
         let req = self.client.get(&url);
         Self::apply_host_header(req, &ep)
@@ -765,7 +765,7 @@ impl HostDriver {
     async fn fetch_mapping_inner(
         &mut self,
     ) -> Result<HashMap<String, Vec<ClipInfo>>, anyhow::Error> {
-        let ep = self.endpoint().await?;
+        let ep = self.ensure_endpoint().await?;
         let url = format!("{}/api/v1/composition", ep.base_url);
         let req = self.client.get(&url);
         // A non-2xx is a failed fetch even with a JSON body (#217 addendum 2):
@@ -778,23 +778,14 @@ impl HostDriver {
         Ok(parse_composition(&body))
     }
 
-    /// Ensure the endpoint cache is populated. Call before parallel operations
-    /// that need to use `set_text`/`set_clip_opacity` concurrently via `&self`.
-    pub(crate) async fn ensure_endpoint(&mut self) -> Result<(), anyhow::Error> {
-        let _ = self.endpoint().await?;
-        Ok(())
-    }
-
-    /// Get the cached endpoint (must call `ensure_endpoint` first).
-    fn cached_endpoint(&self) -> Option<&ResolvedEndpoint> {
-        self.endpoint_cache.as_ref().filter(|ep| !ep.is_expired())
-    }
-
-    /// Resolve the host to an endpoint, caching the result for 5 minutes.
-    /// For IP literals, no DNS lookup is needed. For hostnames, we resolve
-    /// via DNS and store the IP in the URL with the original hostname in the
-    /// Host header (required by Resolume when addressed by hostname).
-    async fn endpoint(&mut self) -> Result<ResolvedEndpoint, anyhow::Error> {
+    /// Resolve the host to an endpoint, caching the result for 5 minutes, and
+    /// hand it to the caller. For IP literals, no DNS lookup is needed. For
+    /// hostnames, we resolve via DNS and store the IP in the URL with the
+    /// original hostname in the Host header (required by Resolume when
+    /// addressed by hostname). A handler resolves ONCE, before its first batch,
+    /// and passes the endpoint to every parallel write: no write reads the
+    /// cache, whose TTL could run out mid-fade (#217).
+    pub(crate) async fn ensure_endpoint(&mut self) -> Result<ResolvedEndpoint, anyhow::Error> {
         if let Some(ref cached) = self.endpoint_cache {
             if !cached.is_expired() {
                 return Ok(cached.clone());
@@ -836,49 +827,41 @@ impl HostDriver {
         }
     }
 
-    /// Set text on a clip parameter.
-    ///
-    /// `PUT /api/v1/parameter/by-id/{param_id}`
-    ///
-    /// Takes `&self` so multiple calls can be driven in parallel via
-    /// `FuturesUnordered`. Caller MUST have called `ensure_endpoint` first.
-    pub(crate) async fn set_text(&self, param_id: i64, text: &str) -> Result<(), anyhow::Error> {
-        let ep = self
-            .cached_endpoint()
-            .ok_or_else(|| anyhow::anyhow!("endpoint cache empty - call ensure_endpoint first"))?
-            .clone();
+    /// Set text on a clip parameter: `PUT /api/v1/parameter/by-id/{param_id}`
+    /// on `ep`, the endpoint the caller's batch resolved (`ensure_endpoint`).
+    /// Takes `&self` so a batch drives many in parallel (`FuturesUnordered`).
+    pub(crate) async fn set_text(
+        &self,
+        ep: &ResolvedEndpoint,
+        param_id: i64,
+        text: &str,
+    ) -> Result<(), anyhow::Error> {
         let url = format!("{}/api/v1/parameter/by-id/{param_id}", ep.base_url);
         let req = self
             .client
             .put(&url)
             .json(&serde_json::json!({ "value": text }));
-        let resp = Self::apply_host_header(req, &ep).send().await?;
+        let resp = Self::apply_host_header(req, ep).send().await?;
         self.note_push_status(resp.status());
         resp.error_for_status()?;
         Ok(())
     }
 
-    /// Set the opacity of a clip.
-    ///
-    /// `PUT /api/v1/composition/clips/by-id/{clip_id}`
-    ///
-    /// Takes `&self` so multiple calls can be driven in parallel via
-    /// `FuturesUnordered`. Caller MUST have called `ensure_endpoint` first.
+    /// Set the opacity of a clip: `PUT /api/v1/composition/clips/by-id/{clip_id}`
+    /// on `ep`, the endpoint the caller's batch resolved (`ensure_endpoint`).
+    /// Takes `&self` so a batch drives many in parallel (`FuturesUnordered`).
     pub(crate) async fn set_clip_opacity(
         &self,
+        ep: &ResolvedEndpoint,
         clip_id: i64,
         opacity: f64,
     ) -> Result<(), anyhow::Error> {
-        let ep = self
-            .cached_endpoint()
-            .ok_or_else(|| anyhow::anyhow!("endpoint cache empty - call ensure_endpoint first"))?
-            .clone();
         let url = format!("{}/api/v1/composition/clips/by-id/{clip_id}", ep.base_url);
         let req = self
             .client
             .put(&url)
             .json(&serde_json::json!({"video":{"opacity":{"value": opacity}}}));
-        let resp = Self::apply_host_header(req, &ep).send().await?;
+        let resp = Self::apply_host_header(req, ep).send().await?;
         self.note_push_status(resp.status());
         resp.error_for_status()?;
         Ok(())

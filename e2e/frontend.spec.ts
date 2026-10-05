@@ -419,7 +419,7 @@ test("pacing disabled everywhere shows GENLOCK OFF in the header, no per-card ba
   page,
   request,
 }) => {
-  // Production reality: genlock_pacing OFF on every output. #176 revises #164:
+  // genlock_pacing set OFF on every output (by hand; the default is ON, #147). #176 revises #164:
   // the header now ALWAYS shows the explicit grey '● GENLOCK OFF' so the owner
   // can tell at a glance the box is not genlocked; per-card badges stay hidden.
   const set = await request.post("/__mock/ndi-health", {
