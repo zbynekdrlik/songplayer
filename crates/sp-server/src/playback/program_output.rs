@@ -123,12 +123,16 @@ pub struct ProgramOutput<B: NdiBackend> {
 /// many, how many had a side fitted into the canvas (#223: a side not already
 /// a canvas picture), and the worst time the picture (the fits + blend, all
 /// their row bands) took, measured on this thread — the cost the review asked
-/// to see on the box, next to `health.coalesced`.
+/// to see on the box, next to `health.coalesced`. #210: also how many frames
+/// the program's peak limiter scaled while the run went out: its mixed
+/// boundaries and the boundary that ended it (where the release tail
+/// starts), so the box shows the limiter working through a fade.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct MixRun {
     pub(crate) boundaries: u64,
     pub(crate) fitted: u64,
     pub(crate) max_picture_us: u64,
+    pub(crate) limited: u64,
 }
 
 /// The one INFO line of a finished run of mixed boundaries (none for an
@@ -140,6 +144,7 @@ fn log_mix_run(run: &MixRun) {
             boundaries = run.boundaries,
             fitted = run.fitted,
             max_picture_us = run.max_picture_us,
+            limited_frames = run.limited,
             "program transition: the fade's mixed boundaries went out"
         );
     }
@@ -665,6 +670,9 @@ mod tests;
 #[cfg(test)]
 #[path = "program_output_tests_fhd.rs"]
 mod tests_fhd;
+#[cfg(test)]
+#[path = "program_output_tests_limit.rs"]
+mod tests_limit;
 #[cfg(test)]
 #[path = "program_output_tests_order.rs"]
 mod tests_order;
