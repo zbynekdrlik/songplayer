@@ -781,13 +781,14 @@ pub(crate) fn should_run_heartbeat(elapsed: std::time::Duration) -> bool {
 
 /// Pure predicate: is the just-completed poll a "bad poll" per the spec?
 /// Used by the pipeline thread to bump or reset `consecutive_bad_polls`.
-/// Branches (state guard, connections, fps, staleness) are individually
-/// covered by `heartbeat_decision_tests::classify_bad_poll_*` so the
-/// mutation runner can validate every boundary.
+/// Branches (state guard, fps, staleness) are individually covered by
+/// `heartbeat_decision_tests::classify_bad_poll_*` so the mutation runner
+/// can validate every boundary. #221: the receiver count is no criterion —
+/// a playlist's own output expects no receiver (`ndi_health_expect`).
 #[cfg(any(windows, test))]
 pub(crate) fn classify_bad_poll(
     state: &crate::playback::ndi_health::PlaybackStateLabel,
-    connections: i32,
+    _connections: i32,
     observed_fps: f32,
     nominal_fps: f32,
     last_submit_ts: Option<std::time::Instant>,
@@ -798,9 +799,6 @@ pub(crate) fn classify_bad_poll(
         crate::playback::ndi_health::PlaybackStateLabel::Playing
     ) {
         return false;
-    }
-    if connections == 0 {
-        return true;
     }
     // Guard `nominal_fps > 0.0` removed: with nominal=0, observed < 0 is
     // unreachable for non-negative observed, so it was a structurally unkillable mutant.

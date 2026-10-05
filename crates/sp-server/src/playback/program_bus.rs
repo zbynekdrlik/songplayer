@@ -191,6 +191,10 @@ pub struct ProgramHealth {
     pub submitted: u64,
     /// `SP-program` receiver connections (polled ~1/s by the output thread).
     pub connections: i32,
+    /// #221: `connections` was polled at least once (before that its 0 is no
+    /// reading). Not served: the API's `degraded_reason` reads it.
+    #[serde(skip)]
+    pub receivers_polled: bool,
     /// Boundary of the last submitted pair (100 ns); 0 = none yet.
     pub last_stamp_100ns: i64,
     /// #210: how late the sender served its boundaries, per stage.
@@ -267,9 +271,6 @@ pub struct ProgramCore {
     last_offer: HashMap<i64, i64>,
     queue: SubmitQueue<ProgramJob>,
     health: ProgramHealth,
-    /// #221: `health.connections` was polled at least once (before that
-    /// its 0 is no reading).
-    receivers_polled: bool,
     /// #210: the sender's per-boundary timing window (`health.timing`).
     timing: BoundaryTiming,
 }
@@ -295,7 +296,6 @@ impl ProgramCore {
             last_offer: HashMap::new(),
             queue: SubmitQueue::new(PROGRAM_QUEUE_BOUND),
             health: ProgramHealth::default(),
-            receivers_polled: false,
             timing: BoundaryTiming::default(),
         }
     }
@@ -619,8 +619,11 @@ impl ProgramCore {
     /// Latest `SP-program` receiver connection count (#221: the first poll's
     /// count, its last receiver going and the first coming back are logged).
     pub fn set_connections(&mut self, n: i32) {
-        let before = self.receivers_polled.then_some(self.health.connections);
-        self.receivers_polled = true;
+        let before = self
+            .health
+            .receivers_polled
+            .then_some(self.health.connections);
+        self.health.receivers_polled = true;
         let source = self.selected();
         crate::playback::ndi_health_expect::log_program_receivers(source, before, n);
         self.health.connections = n;

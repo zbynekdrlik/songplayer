@@ -60,7 +60,8 @@ pub struct ProgramResponse {
     #[serde(flatten)]
     pub program: ProgramStatus,
     /// #221 B4 step 6: SP-program's degraded reason — a source is on
-    /// program and nothing receives `SP-program` (`null` otherwise).
+    /// program and nothing receives `SP-program` (`null` otherwise, and
+    /// before the sender polled its receivers).
     pub degraded_reason: Option<&'static str>,
     pub vban: VbanStatus,
     pub input: NdiInputStatus,
@@ -76,7 +77,9 @@ struct StoredSettings {
 
 impl ProgramResponse {
     fn new(bus: &ProgramBus, program: ProgramStatus, stored: &StoredSettings) -> Self {
-        let degraded_reason = program_degraded_reason(program.source, program.health.connections);
+        let health = &program.health;
+        let polled = health.receivers_polled.then_some(health.connections);
+        let degraded_reason = program_degraded_reason(program.source, polled);
         Self {
             program,
             degraded_reason,
