@@ -46,11 +46,13 @@ impl VideoDevice {
     }
 
     /// The device on WARP, for the CI tests of a refused video device. On
-    /// `windows-latest` WARP REFUSES `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`:
+    /// `windows-latest` WARP REFUSES this device (BGRA +
+    /// `D3D11_CREATE_DEVICE_VIDEO_SUPPORT` at feature level 11.1 / 11.0):
     /// this returns [`GpuError::Api`] for `D3D11CreateDevice` with
-    /// DXGI_ERROR_UNSUPPORTED (0x887A0004; CI run 37293259981, although
-    /// Microsoft's `D3D11_CREATE_DEVICE_FLAG` page says WARP accepts it).
-    /// `tests/video_device.rs` asserts that refusal, and sp-decoder's
+    /// DXGI_ERROR_UNSUPPORTED (0x887A0004, CI run 37293259981; Microsoft's
+    /// `D3D11_CREATE_DEVICE_FLAG` page says a WARP device with the flag
+    /// succeeds, but limits video on a pre-WDDM-1.2 driver to feature level
+    /// 9.x). `tests/video_device.rs` asserts that refusal, and sp-decoder's
     /// `open_hardware_on_warp` falls back at open on it.
     #[doc(hidden)]
     pub fn new_warp() -> Result<Self, GpuError> {

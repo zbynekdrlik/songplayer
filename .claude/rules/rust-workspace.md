@@ -406,8 +406,9 @@ check `parts[0] == tools_dir`, which holds on both separators. Same rule for any
 `MAIN_SEPARATOR` / line-ending / drive-letter / temp-path assumption in a test.
 
 **A WARP (runner) premise is proven in CI before a test rests on it** (#223 S3b:
-the docs said WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`, `windows-latest`
-refuses it, three tests failed on correct code; `video-decode.md`).
+Microsoft's page reads as if WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`,
+`windows-latest` refuses it at 11.x, three tests failed on correct code;
+`video-decode.md`).
 
 **An engine test must not count the test pipeline's replies (release 0.68.0
 blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every

@@ -36,8 +36,8 @@ pub(super) enum DeviceUse {
     Compose,
     /// Media Foundation's hardware video decode (#223 S3b): BGRA plus the
     /// Direct3D 11 video API (`D3D11_CREATE_DEVICE_VIDEO_SUPPORT`, which DXVA
-    /// decoding needs; `windows-latest`'s WARP refuses it with
-    /// DXGI_ERROR_UNSUPPORTED, `tests/video_device.rs`).
+    /// decoding needs; `windows-latest`'s WARP refuses these flags at
+    /// `FEATURE_LEVELS` with DXGI_ERROR_UNSUPPORTED, `tests/video_device.rs`).
     VideoDecode,
 }
 
