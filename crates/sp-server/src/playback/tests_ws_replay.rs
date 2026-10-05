@@ -118,6 +118,7 @@ async fn a_new_dashboard_is_told_the_playing_song_before_its_state_and_an_idle_p
             PLAYING,
             PipelineEvent::Started {
                 duration_ms: 180_000,
+                position_ms: 0,
             },
         )
         .await;

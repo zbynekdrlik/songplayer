@@ -517,6 +517,7 @@ async fn a_resumed_song_s_clock_hides_3_5_s_before_its_real_end() {
             7,
             PipelineEvent::Started {
                 duration_ms: SONG_MS,
+                position_ms: 60_000,
             },
         )
         .await;
@@ -694,6 +695,7 @@ async fn a_resume_too_near_the_end_arms_no_title_timer() {
             7,
             PipelineEvent::Started {
                 duration_ms: SONG_MS,
+                position_ms: SONG_MS - 3_000,
             },
         )
         .await;
@@ -820,6 +822,7 @@ async fn started_fixes_the_song_s_title_clock_and_arms_its_timers() {
             7,
             PipelineEvent::Started {
                 duration_ms: SONG_MS,
+                position_ms: 0,
             },
         )
         .await;
@@ -849,3 +852,8 @@ mod wall;
 /// the 1000-line cap.
 #[path = "tests_wall_owner.rs"]
 mod owner;
+
+/// The title clock follows a seek and a failed-seek resume (#217), a child
+/// module for the 1000-line cap.
+#[path = "tests_title_seek.rs"]
+mod title_seek;

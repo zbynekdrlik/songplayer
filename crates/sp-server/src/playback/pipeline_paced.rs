@@ -510,7 +510,12 @@ pub(crate) fn decode_and_send_paced(
             // The producer is stopped + joined after the block.
             Err(msg) => break 'song DecodeResult::Error(msg),
         };
-        let _ = event_tx.send((playlist_id, PipelineEvent::Started { duration_ms }));
+        let position_ms = start_position_ms.unwrap_or(0);
+        let started = PipelineEvent::Started {
+            duration_ms,
+            position_ms,
+        };
+        let _ = event_tx.send((playlist_id, started));
 
         // Genlock path: NO `set_frame_rate` — emission is on the fixed integer
         // grid the submitter already carries (GENLOCK_GRID_FPS/1,

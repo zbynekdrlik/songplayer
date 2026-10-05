@@ -595,12 +595,12 @@ fn decode_and_send(
         }
     }
 
-    // Report start. Duration is sample-accurate from the FLAC STREAMINFO so
-    // it is always correct at open time — no more duration=0 bug.
+    // Report start (the FLAC STREAMINFO duration is sample-accurate at open).
     let _ = event_tx.send((
         playlist_id,
         PipelineEvent::Started {
             duration_ms: decoder.duration_ms(),
+            position_ms: start_position_ms.unwrap_or(0),
         },
     ));
 

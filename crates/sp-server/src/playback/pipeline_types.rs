@@ -39,8 +39,12 @@ pub enum PipelineCommand {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum PipelineEvent {
-    /// Video playback started; duration is known.
-    Started { duration_ms: u64 },
+    /// Video playback started; duration is known. `position_ms` is where
+    /// the song really starts (#217): the Play's `start_position_ms` when
+    /// the decoder's seek there worked, 0 when it failed (the song plays
+    /// from its start) or none was asked. The song's title clock counts
+    /// from it.
+    Started { duration_ms: u64, position_ms: u64 },
     /// Periodic position update.
     Position { position_ms: u64, duration_ms: u64 },
     /// Video reached its natural end.

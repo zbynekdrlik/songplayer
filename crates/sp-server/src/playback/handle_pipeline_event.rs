@@ -25,7 +25,7 @@ impl PlaybackEngine {
     #[cfg_attr(test, mutants::skip)]
     pub async fn handle_pipeline_event(&mut self, playlist_id: i64, event: PipelineEvent) {
         match &event {
-            PipelineEvent::Started { duration_ms } => {
+            PipelineEvent::Started { duration_ms, .. } => {
                 // 1) Broadcast NowPlaying to the dashboard first so it
                 //    switches from "Nothing playing" immediately.
                 self.broadcast_now_playing_on_start(playlist_id, *duration_ms)
