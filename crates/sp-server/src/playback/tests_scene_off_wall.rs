@@ -65,7 +65,7 @@ async fn going_off_program_resyncs_the_wall_to_a_playlist_still_on_program() {
     play(&mut engine, 7, 42, Window::Due); // the outgoing playlist
     play(&mut engine, 9, 44, Window::Due); // on program already, its title due
     engine.pipelines.get_mut(&9).unwrap().lyrics_state = Some(a_line_at_sixty_seconds());
-    engine.on_air.replace([9].into());
+    engine.put_on_air_for_test(9);
     sent(&mut rx);
 
     engine.handle_scene_change(7, false).await;
@@ -98,7 +98,7 @@ async fn going_off_program_fades_the_title_when_the_one_on_program_has_none_due(
     let (mut engine, mut rx) = test_engine(&[(7, 42, "Song"), (9, 44, "Later")]).await;
     play(&mut engine, 7, 42, Window::Due);
     play(&mut engine, 9, 44, Window::BeforeShow);
-    engine.on_air.replace([9].into());
+    engine.put_on_air_for_test(9);
     sent(&mut rx);
 
     engine.handle_scene_change(7, false).await;
@@ -117,6 +117,7 @@ async fn going_off_program_ignores_a_playlist_whose_off_is_queued_too() {
     let (mut engine, mut rx) = test_engine(&[(7, 42, "Song"), (9, 44, "Later")]).await;
     play(&mut engine, 7, 42, Window::Due);
     play(&mut engine, 9, 44, Window::Due);
+    engine.on_air.replace(Default::default()); // nothing on air: 9's OFF is queued
     sent(&mut rx);
 
     engine.handle_scene_change(7, false).await;
@@ -138,7 +139,7 @@ async fn going_off_program_re_sends_only_the_lines_still_on_program() {
     play(&mut engine, 9, 44, Window::Due); // on program, its title due, no line
     play(&mut engine, 11, 46, Window::OtherSong); // leaving too, a line at 60 s
     engine.pipelines.get_mut(&11).unwrap().lyrics_state = Some(a_line_at_sixty_seconds());
-    engine.on_air.replace([9].into());
+    engine.put_on_air_for_test(9);
     sent(&mut rx);
 
     engine.handle_scene_change(7, false).await;
@@ -162,7 +163,7 @@ async fn going_off_program_clears_the_obs_title_text_when_none_is_due() {
     engine.obs_cmd_tx = Some(obs_tx);
     play(&mut engine, 7, 42, Window::Due);
     play(&mut engine, 9, 44, Window::BeforeShow);
-    engine.on_air.replace([9].into());
+    engine.put_on_air_for_test(9);
     sent(&mut rx);
 
     engine.handle_scene_change(7, false).await;
@@ -217,7 +218,7 @@ async fn going_off_program_sends_no_title_when_the_due_title_s_read_fails() {
     play(&mut engine, 7, 42, Window::Due);
     play(&mut engine, 9, 44, Window::Due);
     engine.pipelines.get_mut(&9).unwrap().lyrics_state = Some(a_line_at_sixty_seconds());
-    engine.on_air.replace([9].into());
+    engine.put_on_air_for_test(9);
     sent(&mut rx);
     engine.pool.close().await;
 

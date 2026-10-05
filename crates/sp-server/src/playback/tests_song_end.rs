@@ -62,6 +62,8 @@ async fn presenter_empty_payload_on_song_end() {
         ),
     });
     engine.ensure_pipeline(77, "SP-test");
+    // #221: only the wall owner clears the stage display.
+    engine.put_on_air_for_test(77);
 
     // Fire Ended — handler should call clear_lyrics_display which
     // spawns the empty-PUT.

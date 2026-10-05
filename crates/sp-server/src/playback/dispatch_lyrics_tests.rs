@@ -121,6 +121,10 @@ fn install_pipeline(
         paused_at: None,
     };
     engine.pipelines.insert(playlist_id, pp);
+    // On program = on air as the wall owner (#221): the last one installed.
+    if scene_active {
+        engine.put_on_air_for_test(playlist_id);
+    }
 }
 
 #[tokio::test]
