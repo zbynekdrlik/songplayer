@@ -3,7 +3,9 @@
 //!
 //! `POST /api/v1/diag/decode-bench {"file": "<name>", "seconds": 1..=15}`
 //! decodes `<data dir>/bench/<name>` through SongPlayer's real video decoder
-//! and answers what one picture costs (`diag::decode_bench`):
+//! and answers what one picture costs (`diag::decode_bench`). #223 S3b: an
+//! optional `"hw": true` decodes on the GPU (the reader's `Hardware` mode);
+//! the report says which path really decoded:
 //!
 //! - 200: the report;
 //! - 500 (JSON): the report of a run the decoder ended, with its error and
@@ -14,8 +16,9 @@
 //! - 409: another run is in progress;
 //! - 501: a build without Media Foundation (Linux).
 //!
-//! axum answers a body that is not JSON (400), not the two fields (422) or
-//! not `application/json` (415) before this handler runs.
+//! axum answers a body that is not JSON (400), not the two fields or a `hw`
+//! that is not a bool (422), or not `application/json` (415) before this
+//! handler runs.
 
 use axum::Json;
 use axum::extract::State;
@@ -23,6 +26,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use tracing::{info, warn};
+
+use sp_decoder::DecodeMode;
 
 use crate::AppState;
 use crate::diag::decode_bench::{self, BenchFileError, BenchOutcome, BenchReport};
@@ -34,6 +39,9 @@ pub struct DecodeBenchRequest {
     pub file: String,
     /// The run's wall-time bound, 1 to 15 s.
     pub seconds: u64,
+    /// #223 S3b: decode on the GPU (`Hardware` mode). Absent = software.
+    #[serde(default)]
+    pub hw: bool,
 }
 
 /// `POST /api/v1/diag/decode-bench`: check the request, take the bench, run
@@ -44,7 +52,7 @@ pub async fn post_decode_bench(
 ) -> Response {
     // Every refusal says why, and logs it (a failed run is a WARN below).
     let refuse = |status: StatusCode, why: String| {
-        info!(file = ?req.file, seconds = req.seconds, %status, %why, "decode-bench: no report");
+        info!(file = ?req.file, seconds = req.seconds, hw = req.hw, %status, %why, "decode-bench: no report");
         (status, why).into_response()
     };
     let max_wall = match decode_bench::bench_seconds(req.seconds) {
@@ -65,7 +73,8 @@ pub async fn post_decode_bench(
         let why = "a decode-bench run is in progress".to_string();
         return refuse(StatusCode::CONFLICT, why);
     };
-    match decode_bench::run(path, req.file.clone(), max_wall, slot).await {
+    let mode = DecodeMode::from_hw_flag(req.hw);
+    match decode_bench::run(path, req.file.clone(), max_wall, mode, slot).await {
         BenchOutcome::Report(report) => (report_status(&report), Json(report)).into_response(),
         BenchOutcome::Unsupported => {
             let why = "decode-bench needs Windows Media Foundation".to_string();

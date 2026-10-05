@@ -7,12 +7,14 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use sp_decoder::{DecodedVideoFrame, DecoderError, MediaStream, PixelFormat, VideoStream};
+use sp_decoder::{
+    DecodeMode, DecodePath, DecodedVideoFrame, DecoderError, MediaStream, PixelFormat, VideoStream,
+};
 
 use super::{
-    BenchEnd, BenchFileError, BenchOutcome, BenchReport, BenchRun, Budget, DecodeBench, DecodeUs,
-    MAX_NAME_BYTES, PictureLayout, StreamFacts, bench_file_name, bench_seconds, is_device_name,
-    measure, run_on_decode_thread,
+    BenchEnd, BenchFileError, BenchOutcome, BenchReport, BenchRun, Budget, DecodeBench,
+    DecodeFacts, DecodeUs, MAX_NAME_BYTES, PictureLayout, StreamFacts, bench_file_name,
+    bench_seconds, is_device_name, measure, run_on_decode_thread,
 };
 
 // ---------------------------------------------------------------------------
@@ -634,6 +636,125 @@ fn the_end_log_line_names_the_stats_and_the_gate() {
         failed.summary(),
         "file=x.mp4 0x0 codec=? fps=? open_ms=3 frames=0 wall_ms=0 ended=Error \
          mean_us=0 p50_us=0 p99_us=0 max_us=0 budget=unknown error=open: no video"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The decode path (#223 S3b)
+// ---------------------------------------------------------------------------
+
+/// What a `"hw": true` run on the box's RTX reports.
+fn on_the_gpu() -> DecodeFacts {
+    DecodeFacts {
+        mode: DecodeMode::Hardware,
+        path: Some(DecodePath::Hardware),
+        adapter: Some("NVIDIA GeForce RTX 3070 Ti".to_string()),
+        fallback: None,
+    }
+}
+
+#[test]
+fn a_software_run_reports_no_hardware_request() {
+    let report = clean_report();
+    assert!(!report.hw_requested);
+    assert_eq!(report.decode_path, None, "before the reader said");
+    let report = report.with_decode(DecodeFacts {
+        path: Some(DecodePath::Software),
+        ..DecodeFacts::default()
+    });
+    assert!(!report.hw_requested);
+    assert_eq!(report.decode_path, Some("software"));
+    assert_eq!(report.adapter, None);
+    assert_eq!(report.hw_fallback, None);
+}
+
+#[test]
+fn a_hardware_run_on_the_gpu_names_its_adapter() {
+    let report = clean_report().with_decode(on_the_gpu());
+    assert!(report.hw_requested);
+    assert_eq!(report.decode_path, Some("hardware"));
+    assert_eq!(
+        report.adapter.as_deref(),
+        Some("NVIDIA GeForce RTX 3070 Ti")
+    );
+    assert_eq!(report.hw_fallback, None);
+    // The measurement itself is untouched.
+    assert_eq!(report.frames, 2);
+    assert_eq!(report.budget, gate(33_367, false));
+}
+
+#[test]
+fn a_hardware_run_that_decoded_in_software_names_no_adapter() {
+    // Media Foundation's decoder fell back on its own on the GPU's device.
+    let silent = clean_report().with_decode(DecodeFacts {
+        path: Some(DecodePath::Software),
+        ..on_the_gpu()
+    });
+    assert!(silent.hw_requested);
+    assert_eq!(silent.decode_path, Some("software"));
+    assert_eq!(silent.adapter, None, "it did not decode on that adapter");
+    // A mid-stream fall back: the adapter it left, and why.
+    let fell_back = clean_report().with_decode(DecodeFacts {
+        path: Some(DecodePath::Software),
+        fallback: Some("mid-stream: Sample read failed: device removed".to_string()),
+        ..on_the_gpu()
+    });
+    assert_eq!(fell_back.adapter, None);
+    assert_eq!(
+        fell_back.hw_fallback.as_deref(),
+        Some("mid-stream: Sample read failed: device removed")
+    );
+}
+
+#[test]
+fn a_hardware_run_with_no_picture_has_no_path() {
+    let report = BenchReport::open_failed("x.mp4", "open: no video".to_string(), 3, None)
+        .with_decode(DecodeFacts {
+            mode: DecodeMode::Hardware,
+            ..DecodeFacts::default()
+        });
+    assert!(report.hw_requested);
+    assert_eq!(report.decode_path, None);
+    assert_eq!(report.adapter, None);
+    assert!(report.failed(), "still the open's 500");
+}
+
+#[test]
+fn the_decode_path_serializes_to_the_documented_json() {
+    let json = serde_json::to_value(clean_report().with_decode(on_the_gpu())).unwrap();
+    assert_eq!(json["hw_requested"], true);
+    assert_eq!(json["decode_path"], "hardware");
+    assert_eq!(json["adapter"], "NVIDIA GeForce RTX 3070 Ti");
+    assert!(json["hw_fallback"].is_null());
+    let json = serde_json::to_value(clean_report()).unwrap();
+    assert_eq!(json["hw_requested"], false);
+    assert!(json["decode_path"].is_null());
+    assert!(json["adapter"].is_null());
+}
+
+#[test]
+fn a_hardware_runs_end_line_names_its_path() {
+    // A software run's line stays the S0 baseline's (the test above).
+    assert_eq!(
+        clean_report().with_decode(on_the_gpu()).summary(),
+        "file=av1_4k.mp4 3840x2176 codec=AV01 fps=29.970 open_ms=120 frames=2 \
+         wall_ms=15000 ended=TimeLimit \
+         mean_us=16683 p50_us=16366 p99_us=17000 max_us=17000 \
+         frame_period_us=33367 mean_over_half_period=false \
+         hw=requested decode_path=hardware adapter=NVIDIA GeForce RTX 3070 Ti hw_fallback=-"
+    );
+    let failed = BenchReport::open_failed("x.mp4", "open: no video".to_string(), 3, None)
+        .with_decode(DecodeFacts {
+            mode: DecodeMode::Hardware,
+            fallback: Some("open: no video device".to_string()),
+            ..DecodeFacts::default()
+        });
+    assert_eq!(
+        failed.summary(),
+        "file=x.mp4 0x0 codec=? fps=? open_ms=3 frames=0 wall_ms=0 ended=Error \
+         mean_us=0 p50_us=0 p99_us=0 max_us=0 budget=unknown \
+         hw=requested decode_path=? adapter=- hw_fallback=open: no video device \
+         error=open: no video"
     );
 }
 

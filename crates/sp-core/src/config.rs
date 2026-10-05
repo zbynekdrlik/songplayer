@@ -120,6 +120,24 @@ pub fn program_max_enabled(raw: Option<&str>) -> bool {
     raw.map_or(DEFAULT_PROGRAM_MAX_ENABLED, |v| v.trim() != "false")
 }
 
+/// #223 S3b: hardware video decode for playback — Media Foundation's decoder
+/// on the GPU (a Direct3D 11 device manager) instead of in software. The
+/// paced decode producer reads it when it opens a song, so a change applies
+/// from the next song ([`video_hw_decode`]).
+pub const SETTING_VIDEO_HW_DECODE: &str = "video_hw_decode";
+/// #223 S3b: OFF until the main session's box gate passes (4K decode mean
+/// ≤ 50 % of 1/f, 1440p not slower); the decode bench measures it with
+/// `"hw": true` meanwhile.
+pub const DEFAULT_VIDEO_HW_DECODE: bool = false;
+
+/// #223 S3b: whether a stored `video_hw_decode` turns hardware decode on: ON
+/// only for an explicit `"true"` (trimmed), else
+/// [`DEFAULT_VIDEO_HW_DECODE`]. The ONE rule the startup read and the
+/// settings task share.
+pub fn video_hw_decode(raw: Option<&str>) -> bool {
+    raw.map_or(DEFAULT_VIDEO_HW_DECODE, |v| v.trim() == "true")
+}
+
 /// #212: the program-bus source id of the NDI input (playlists are positive
 /// row ids, so a negative id can never collide with one).
 pub const PROGRAM_INPUT_ID: i64 = -1;
@@ -294,6 +312,21 @@ mod tests {
             "only an explicit false"
         );
         assert!(!program_max_enabled(Some(" false\n")), "trimmed");
+    }
+
+    /// #223 S3b: hardware decode is OFF unless the setting says exactly
+    /// "true" — playback stays on the measured software path until the box
+    /// gate passes, so a missing or mangled value keeps it off.
+    #[test]
+    fn video_hw_decode_is_off_unless_the_setting_says_true() {
+        assert_eq!(SETTING_VIDEO_HW_DECODE, "video_hw_decode");
+        assert!(!video_hw_decode(None), "no setting = OFF");
+        assert!(video_hw_decode(Some("true")));
+        assert!(video_hw_decode(Some(" true\n")), "trimmed");
+        assert!(!video_hw_decode(Some("false")));
+        assert!(!video_hw_decode(Some("")), "an empty value = OFF");
+        assert!(!video_hw_decode(Some("TRUE")), "only the exact word");
+        assert!(!video_hw_decode(Some("yes")), "a mangled value = OFF");
     }
 
     #[test]
