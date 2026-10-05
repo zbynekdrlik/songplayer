@@ -18,6 +18,7 @@ pub mod control;
 pub mod progress;
 pub mod queue_tiers; // #195 in-use-first stems queue tier inputs
 pub mod reader;
+mod scripts; // #207: stem_worker.py + the win_replace.py it imports
 pub mod separator;
 pub mod worker;
 mod worker_yield; // #184 G0.1 dub-priority tick-defer + mid-run yield decisions

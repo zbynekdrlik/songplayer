@@ -7,6 +7,7 @@ pub mod dabing;
 pub mod db;
 pub mod diag; // #223 S0: /api/v1/diag/* measurement benches
 pub mod downloader;
+mod embedded_scripts; // #207: the Python tool scripts a worker writes into tools_dir
 mod engine_command;
 mod engine_dispatch;
 pub use engine_command::EngineCommand;

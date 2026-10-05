@@ -589,23 +589,12 @@ impl StemWorker {
         }
     }
 
-    /// Materialise `stem_worker.py` into `tools_dir`, mirroring the lyrics
-    /// worker's `ensure_script`. The script is embedded at compile time via
-    /// `include_str!`, so it always ships alongside the binary; it is (re)written
-    /// only when the on-disk content differs, and the resolved path is returned.
+    /// Materialise the stem tool scripts into `tools_dir` (`stem_worker.py` +
+    /// the `win_replace.py` it imports, #207 — `super::scripts`), rewriting
+    /// only the stale ones, and return the worker script path.
     async fn ensure_script(&self) -> anyhow::Result<PathBuf> {
-        const EMBEDDED: &str = include_str!("../../../../scripts/stem_worker.py");
-        if let Some(parent) = self.script_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let stale = match tokio::fs::read_to_string(&self.script_path).await {
-            Ok(existing) => existing != EMBEDDED,
-            Err(_) => true,
-        };
-        if stale {
-            tokio::fs::write(&self.script_path, EMBEDDED).await?;
-            info!("stem_worker: wrote {}", self.script_path.display());
-        }
+        let scripts = super::scripts::embedded_tool_scripts();
+        crate::embedded_scripts::materialise(&self.tools_dir, &scripts, "stem_worker").await?;
         Ok(self.script_path.clone())
     }
 }
