@@ -31,6 +31,7 @@ mod song_input; // #136: a stem / dub job's input, re-read after the heavy slot
 mod song_relink; // #136: stems / dub left under an old name → the audio's name
 pub mod startup;
 pub mod stems;
+mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
 
 pub use panic_hook::install_panic_hook;
 
@@ -393,9 +394,12 @@ pub async fn start(
     let (dl_event_tx, _dl_event_rx_placeholder) = broadcast::channel::<String>(64);
     let dl_event_tx_for_worker = dl_event_tx.clone();
 
-    let tools_status_clone = tools_status.clone();
+    let tools_sinks = tools_ready::ToolsSinks {
+        status: tools_status.clone(),
+        paths: tool_paths.clone(),
+        events: event_tx.clone(),
+    };
     let tools_event_tx = event_tx.clone();
-    let tool_paths_clone = tool_paths.clone();
     let dl_pool = pool.clone();
     let dl_cache_dir = config.cache_dir.clone();
     // Same directory as the SQLite DB — where a production operator drops
@@ -439,164 +443,159 @@ pub async fn start(
                 // #189: ship + wire the Deno JS runtime for YouTube's n-challenge
                 // and run the startup self-check (memoizes the runtime args for
                 // every yt-dlp spawn; logs OK/MISSING loudly).
-                let (js_runtime_ok, deno_ver) =
+                let (js_runtime_ok, deno_version) =
                     downloader::ytdlp_cmd::init_js_runtime(&tools_mgr, &paths, &dl_data_dir).await;
-
-                let mut ts = tools_status_clone.write().await;
-                ts.ytdlp_available = true;
-                ts.ffmpeg_available = true;
-                ts.ytdlp_version = version.clone();
-                ts.js_runtime_ok = js_runtime_ok;
-                ts.deno_version = deno_ver.clone();
-                let _ = tools_event_tx.send(ServerMsg::ToolsStatus {
-                    ytdlp_available: true,
-                    ffmpeg_available: true,
+                let found = tools_ready::ToolsFound {
                     ytdlp_version: version,
                     js_runtime_ok,
-                    deno_version: deno_ver,
-                });
-                *tool_paths_clone.write().await = Some(paths.clone());
-                info!("tools ready: yt-dlp and FFmpeg available");
+                    deno_version,
+                };
 
-                // yt-dlp self-update (#140): the download worker never
-                // updates its own yt-dlp binary, so a box that has been up
-                // for a while silently falls behind YouTube's format
-                // changes (observed: `audio download failed … Requested
-                // format is not available` on a stale 2026.03 build — see
-                // `.claude/rules/youtube-cookies.md`). One-shot update
-                // right after tools are ready, then a shutdown-aware
-                // periodic re-update — never fatal, a stale yt-dlp should
-                // degrade, not crash the server.
-                let version_before = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
-                match tools_mgr.update_ytdlp().await {
-                    Ok(()) => {
-                        let version_after = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
-                        info!(
-                            version_before = ?version_before,
-                            version_after = ?version_after,
-                            "yt-dlp self-update: startup check complete"
-                        );
+                // Everything below runs AFTER the publish, with no lock
+                // held: `GET /api/v1/status` answers through it (#144).
+                let published = paths.clone();
+                let follow_ups = async move {
+                    // yt-dlp self-update (#140): the download worker never
+                    // updates its own yt-dlp binary, so a box that has been up
+                    // for a while silently falls behind YouTube's format
+                    // changes (observed: `audio download failed … Requested
+                    // format is not available` on a stale 2026.03 build — see
+                    // `.claude/rules/youtube-cookies.md`). One-shot update
+                    // right after tools are ready, then a shutdown-aware
+                    // periodic re-update — never fatal, a stale yt-dlp should
+                    // degrade, not crash the server.
+                    let version_before = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
+                    match tools_mgr.update_ytdlp().await {
+                        Ok(()) => {
+                            let version_after = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
+                            info!(
+                                version_before = ?version_before,
+                                version_after = ?version_after,
+                                "yt-dlp self-update: startup check complete"
+                            );
+                        }
+                        Err(e) => warn!("yt-dlp self-update: startup check failed: {e}"),
                     }
-                    Err(e) => warn!("yt-dlp self-update: startup check failed: {e}"),
-                }
-                // Shared with the download worker below: an update never
-                // runs while a song is downloading and vice versa.
-                let ytdlp_lock: downloader::YtdlpLock =
-                    std::sync::Arc::new(tokio::sync::Mutex::new(()));
-                let ytdlp_interval_secs = ytdlp_update_interval_secs();
-                tokio::spawn(periodic_ytdlp_update(
-                    tools_mgr,
-                    paths.ytdlp.clone(),
-                    ytdlp_interval_secs,
-                    ytdlp_lock.clone(),
-                    ytdlp_update_shutdown.subscribe(),
-                ));
-                info!(
-                    interval_secs = ytdlp_interval_secs,
-                    "periodic yt-dlp self-update worker started"
-                );
+                    // Shared with the download worker below: an update never
+                    // runs while a song is downloading and vice versa.
+                    let ytdlp_lock: downloader::YtdlpLock =
+                        std::sync::Arc::new(tokio::sync::Mutex::new(()));
+                    let ytdlp_interval_secs = ytdlp_update_interval_secs();
+                    tokio::spawn(periodic_ytdlp_update(
+                        tools_mgr,
+                        paths.ytdlp.clone(),
+                        ytdlp_interval_secs,
+                        ytdlp_lock.clone(),
+                        ytdlp_update_shutdown.subscribe(),
+                    ));
+                    info!(
+                        interval_secs = ytdlp_interval_secs,
+                        "periodic yt-dlp self-update worker started"
+                    );
 
-                // Defensive self-heal for #40: any normalized=1 row whose
-                // FLAC is not at 48 kHz would explode in
-                // SplitSyncedDecoder. Flip them back to normalized=0 so
-                // the download worker re-normalizes under the post-#38
-                // pipeline (which pins -ar 48000 -ac 2).
-                if let Err(e) = startup::flip_wrong_sample_rate_rows(
-                    &startup_sync_pool,
-                    startup::probe_sample_rate_symphonia,
-                )
-                .await
-                {
-                    tracing::warn!("self-heal: sample-rate sweep failed: {e}");
-                }
+                    // Defensive self-heal for #40: any normalized=1 row whose
+                    // FLAC is not at 48 kHz would explode in
+                    // SplitSyncedDecoder. Flip them back to normalized=0 so
+                    // the download worker re-normalizes under the post-#38
+                    // pipeline (which pins -ar 48000 -ac 2).
+                    if let Err(e) = startup::flip_wrong_sample_rate_rows(
+                        &startup_sync_pool,
+                        startup::probe_sample_rate_symphonia,
+                    )
+                    .await
+                    {
+                        tracing::warn!("self-heal: sample-rate sweep failed: {e}");
+                    }
 
-                // Startup sync fires AFTER tools are ready so the sync
-                // worker doesn't silently drop the requests.
-                if let Err(e) =
-                    startup::startup_sync_active_playlists(&startup_sync_pool, &startup_sync_tx)
-                        .await
-                {
-                    tracing::warn!("startup sync enqueue failed: {e}");
-                }
+                    // Startup sync fires AFTER tools are ready so the sync
+                    // worker doesn't silently drop the requests.
+                    if let Err(e) =
+                        startup::startup_sync_active_playlists(&startup_sync_pool, &startup_sync_tx)
+                            .await
+                    {
+                        tracing::warn!("startup sync enqueue failed: {e}");
+                    }
 
-                // Periodic re-sync (#139): the one-shot startup sync above
-                // only ever fires once, so a video added to a YouTube
-                // playlist later would never be picked up without an
-                // operator manually hitting the sync button. Spawned only
-                // once tools are ready, same as the startup sync itself.
-                let periodic_interval_secs = playlist_sync_interval_secs();
-                tokio::spawn(periodic_playlist_sync(
-                    periodic_sync_pool,
-                    periodic_sync_tx,
-                    periodic_interval_secs,
-                    periodic_sync_shutdown.subscribe(),
-                ));
-                info!(
-                    interval_secs = periodic_interval_secs,
-                    "periodic playlist sync worker started"
-                );
+                    // Periodic re-sync (#139): the one-shot startup sync above
+                    // only ever fires once, so a video added to a YouTube
+                    // playlist later would never be picked up without an
+                    // operator manually hitting the sync button. Spawned only
+                    // once tools are ready, same as the startup sync itself.
+                    let periodic_interval_secs = playlist_sync_interval_secs();
+                    tokio::spawn(periodic_playlist_sync(
+                        periodic_sync_pool,
+                        periodic_sync_tx,
+                        periodic_interval_secs,
+                        periodic_sync_shutdown.subscribe(),
+                    ));
+                    info!(
+                        interval_secs = periodic_interval_secs,
+                        "periodic playlist sync worker started"
+                    );
 
-                let lyrics_ytdlp = paths.ytdlp.clone();
-                let lyrics_python = paths.python.clone();
-                let dl_worker = downloader::DownloadWorker::new(
-                    dl_pool,
-                    paths,
-                    dl_cache_dir,
-                    dl_data_dir,
-                    dl_metadata_chain,
-                    dl_event_tx_for_worker,
-                    ytdlp_lock,
-                );
-                tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
-                info!("download worker started");
+                    let lyrics_ytdlp = paths.ytdlp.clone();
+                    let lyrics_python = paths.python.clone();
+                    let dl_worker = downloader::DownloadWorker::new(
+                        dl_pool,
+                        paths,
+                        dl_cache_dir,
+                        dl_data_dir,
+                        dl_metadata_chain,
+                        dl_event_tx_for_worker,
+                        ytdlp_lock,
+                    );
+                    tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
+                    info!("download worker started");
 
-                // Lyrics worker
-                let lyrics_pool_for_loop = lyrics_pool.clone();
-                let lyrics_worker = lyrics::LyricsWorker::new(
-                    lyrics_pool,
-                    lyrics_cache_dir,
-                    lyrics_ytdlp,
-                    lyrics_python,
-                    lyrics_tools_dir,
-                    Some(ai_client_for_dl),
-                    tools_event_tx.clone(),
-                    lyrics_ndi_health,
-                    lyrics_obs_state,
-                );
-                let current_processing_handle = lyrics_worker.current_processing();
-                tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
-                info!("lyrics worker started");
+                    // Lyrics worker
+                    let lyrics_pool_for_loop = lyrics_pool.clone();
+                    let lyrics_worker = lyrics::LyricsWorker::new(
+                        lyrics_pool,
+                        lyrics_cache_dir,
+                        lyrics_ytdlp,
+                        lyrics_python,
+                        lyrics_tools_dir,
+                        Some(ai_client_for_dl),
+                        tools_event_tx.clone(),
+                        lyrics_ndi_health,
+                        lyrics_obs_state,
+                    );
+                    let current_processing_handle = lyrics_worker.current_processing();
+                    tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
+                    info!("lyrics worker started");
 
-                // Lyrics queue-update broadcast loop (every 2s → WS clients)
-                tokio::spawn(crate::lyrics::worker::queue_update_loop(
-                    lyrics_pool_for_loop,
-                    tools_event_tx.clone(),
-                    current_processing_handle,
-                    lyrics_shutdown.subscribe(),
-                ));
+                    // Lyrics queue-update broadcast loop (every 2s → WS clients)
+                    tokio::spawn(crate::lyrics::worker::queue_update_loop(
+                        lyrics_pool_for_loop,
+                        tools_event_tx.clone(),
+                        current_processing_handle,
+                        lyrics_shutdown.subscribe(),
+                    ));
 
-                // Karaoke stem worker (#14) — separates the catalog into
-                // vocals + instrumental sidecars under the SAME #154 idle gate,
-                // lowest priority (after lyrics).
-                let stem_worker = crate::stems::StemWorker::new(
-                    stem_pool,
-                    stem_tools_dir,
-                    stem_ndi_health,
-                    stem_obs_state,
-                );
-                tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
-                // (StemWorker::run logs "stem worker started" once it is live.)
+                    // Karaoke stem worker (#14) — separates the catalog into
+                    // vocals + instrumental sidecars under the SAME #154 idle gate,
+                    // lowest priority (after lyrics).
+                    let stem_worker = crate::stems::StemWorker::new(
+                        stem_pool,
+                        stem_tools_dir,
+                        stem_ndi_health,
+                        stem_obs_state,
+                    );
+                    tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
+                    // (StemWorker::run logs "stem worker started" once it is live.)
 
-                // #183 D4: dub-synthesis worker (Gemini Live Translate) — same
-                // tools dir + heavy slot, BELOW_NORMAL, never gating playback.
-                let dub_worker = crate::dabing::DubWorker::new(
-                    dub_pool,
-                    dub_tools_dir,
-                    dub_ndi_health,
-                    dub_obs_state,
-                );
-                tokio::spawn(dub_worker.run(dub_shutdown.subscribe()));
-                // (DubWorker::run logs "dub worker started" once it is live.)
+                    // #183 D4: dub-synthesis worker (Gemini Live Translate) — same
+                    // tools dir + heavy slot, BELOW_NORMAL, never gating playback.
+                    let dub_worker = crate::dabing::DubWorker::new(
+                        dub_pool,
+                        dub_tools_dir,
+                        dub_ndi_health,
+                        dub_obs_state,
+                    );
+                    tokio::spawn(dub_worker.run(dub_shutdown.subscribe()));
+                    // (DubWorker::run logs "dub worker started" once it is live.)
+                };
+                tools_ready::publish_then(tools_sinks, published, found, follow_ups).await;
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");
