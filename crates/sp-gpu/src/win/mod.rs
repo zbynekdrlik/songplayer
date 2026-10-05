@@ -10,6 +10,7 @@
 
 mod device;
 mod pipeline;
+mod receiver;
 mod spout_registry;
 mod spout_sender;
 mod textures;
@@ -24,6 +25,7 @@ use windows::Win32::Graphics::Dxgi::IDXGIResource;
 use windows::core::Interface;
 
 pub use device::adapters;
+pub use receiver::read_shared_texture;
 pub use spout_registry::{spout_sender_info, spout_sender_names};
 pub use spout_sender::SpoutSender;
 
@@ -224,6 +226,6 @@ impl Compositor {
                 staging
             }
         };
-        textures::read_back(&self.context, &self.target, &staging)
+        textures::read_back(&self.context, &self.target.texture, &staging)
     }
 }

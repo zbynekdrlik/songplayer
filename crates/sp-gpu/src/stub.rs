@@ -4,7 +4,8 @@
 //! the sender's `new`, `send`, `size`, `name`, `registration`; the registry
 //! readers), so a cross-platform caller compiles everywhere. The Direct3D
 //! accessors (`device`, `render_target`, `shared_handle`), the test
-//! constructors `new_on_listed_adapter` / `with_name` and `adapters()` are
+//! constructors `new_on_listed_adapter` / `with_name`, `adapters()` and the
+//! tests' second-device readback `read_shared_texture` (#223 S2) are
 //! Windows-only.
 
 use std::convert::Infallible;
