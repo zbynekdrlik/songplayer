@@ -147,9 +147,10 @@ fader latency depends on the path (#148 v4):**
 
 | path | deadline | decoder read-ahead (fader-latency contribution) |
 |---|---|---|
-| paced (`genlock_pacing` ON, production) | `PACED_AUDIO_LEAD_MS = 250`, via `pacer::open_paced_decoder` | ≤ 250 ms + one chunk (~300 ms) |
-| pacing-OFF, no wall-clock emitter | 40 ms (`DEFAULT_TOLERANCE_MS`) | ≤ 40 ms + one chunk |
-| pacing-OFF, with the wall-clock emitter | `decoder_tolerance_ms(true)` = 1540 ms | ≤ 1540 ms + one chunk |
+| paced (the only path since #221 lane 3) | `PACED_AUDIO_LEAD_MS = 250`, via `pacer::open_paced_decoder` | ≤ 250 ms + one chunk (~300 ms) |
+
+(#221 lane 3 deleted the pacing-OFF paths: 40 ms with no wall-clock emitter,
+1540 ms with it.)
 
 This is the decoder's share only. On the paced path the fader latency the owner
 hears ALSO includes the producer's look-ahead queue: `DECODE_QUEUE_BOUND` = 12

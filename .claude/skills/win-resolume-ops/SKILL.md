@@ -338,12 +338,16 @@ gh workflow run genlock-soak.yml --ref dev -f minutes=5
 ```
 One job `soak` on the `[self-hosted, windows, resolume]` runner. It:
 1. checks out camera-box at a PINNED commit (`fdd68e47c…`) for the verifier;
-2. preflights SongPlayer `/api/v1/status` + OBS WebSocket 4455, notes the
-   `genlock_pacing` setting + per-output `lock_state` into the job summary;
-3. plays the first playlist with videos (no OBS scene switch — SongPlayer just
-   emits NDI on that SP-* stream, which cg OBS ingests; the live wall is
-   untouched) and, during the `minutes` window, samples `/api/v1/ndi/health`
-   once per minute into `sp-health.csv`;
+2. preflights SongPlayer `/api/v1/status` + OBS WebSocket 4455, notes what
+   `SP-program` carries (source + receivers) + per-pipeline `lock_state` into
+   the job summary;
+3. plays the first playlist with videos (no scene switch) and, during the
+   `minutes` window, samples `/api/v1/ndi/health` once per minute into
+   `sp-health.csv`. #221 lane 3: SongPlayer's only NDI output is
+   `SP-program`, so the receiver side sees the playlist only while it is
+   SongPlayer's program source and cg OBS shows a scene receiving
+   `SP-program` (e.g. the A/V gate's probe scene "A/V gate (SP-program)");
+   run the soak in that state;
 4. dumps the newest RESOLUME-SNV OBS log tail (last 4000 lines, byte-safe) to
    `cg-obs.log`;
 5. runs `camera-box/scripts/cg-chain-verify.sh --hops cg-obs` against that log

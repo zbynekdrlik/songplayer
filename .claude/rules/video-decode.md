@@ -141,8 +141,8 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   (`global()`), then a task re-reads it every 5 s. The PACED producer
   (`pipeline_paced.rs::run_decode_producer`) opens each song with
   `global().mode()`: a change applies from the next song, a playing song
-  keeps its reader. The SDK-clocked path (`pipeline.rs`, `genlock_pacing`
-  off, unused on the box) stays software.
+  keeps its reader. (#221 lane 3 deleted the SDK-clocked path, which
+  stayed software.)
 - Toggle: `PATCH /api/v1/settings {"video_hw_decode": "true"}`; no restart.
 - `GET /api/v1/status` → `video_decode {hw_decode, hw_requested,
   gpu_decodes, mf_software, open_fallbacks, mid_stream_fallbacks,

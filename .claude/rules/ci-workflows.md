@@ -488,5 +488,6 @@ sampled 30 min with the flag still OFF (21.9.2026). The working form is
 has a NEW job id, so poll `gh api repos/<r>/actions/runs/<run>/jobs?filter=latest`
 (or `jobs/<new-id>`) — polling the old id reports the old attempt's success.
 Confirm the restart with `/api/v1/status` `uptime_s` before sampling anything
-that depends on a startup-read setting (`genlock_pacing`).
+that depends on a startup-read setting (e.g. `sp_min_working_set_mb`;
+the `genlock_pacing` setting this was written for is deleted, #221 lane 3).
 

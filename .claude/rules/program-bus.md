@@ -22,21 +22,25 @@ paths:
 # Program bus + NDI `SP-program` (#209, B1 of EPIC #174)
 
 SongPlayer is the master switcher: its own NDI output `SP-program` carries the
-playlist output cut to it. Design record: #209 comment 5844972899.
+playlist cut to it. Design record: #209 comment 5844972899. #221 lane 3:
+`SP-program` is SongPlayer's ONLY NDI sender — a playlist pipeline has no NDI
+output of its own and feeds this bus alone (`pipeline-testability.md`).
 
 ## How a boundary reaches the program
 
-- The paced submit thread (`paced_output.rs::PacedConsumer::submit`, the
-  pipeline-lifetime consumer since #147) copies its boundary job (`program_bus::program_copy`: an `Arc` bump of the
-  `SharedFrame` + the one audio block) BEFORE its own submit moves the frame
-  into the holdover, and offers it right AFTER that submit
-  (`ProgramBus::offer(pid, job)` — it takes NO clock, see below). Only a
-  source that can own a
-  program boundary pays for the copy, but EVERY paced source records its
-  progress on every boundary (`touch`, inside `program_copy`). Without that,
-  the source you cut to looks absent until its first owned frame lands, and
-  a slow first frame (> the sender's b+1 ms check) turned the cut boundary
-  black (#209 review finding).
+- The paced consumer (`paced_output.rs::PacedConsumer::submit`, the
+  pipeline-lifetime consumer since #147) delivers each boundary job to its
+  `BoundaryOut`; in production `InstalledBus` → `paced_output::offer_to_bus`
+  (#221 lane 3; before, it sent the job to the playlist's own NDI sender
+  first and offered an `Arc` copy, `program_copy`, deleted): the job is
+  MOVED into `ProgramBus::offer(pid, job)` (it takes NO clock, see below)
+  only when the source can own a program boundary, but EVERY paced source
+  records its progress on every boundary (`ProgramBus::touch`, inside
+  `offer_to_bus`). Without that, the source you cut to looks absent until
+  its first owned frame lands, and a slow first frame (> the sender's b+1 ms
+  check) turned the cut boundary black (#209 review finding). Tests:
+  `paced_output_tests_bus.rs` (a playlist on program reaches the bus, one
+  off program only touches it) and `program_bus_tests.rs`.
 - #215: every offered pair carries `SubmitJob::live` — `true` only for the
   source's own decoded content (the pacer's `PacedSink::emit`, an NDI input
   capture), `false` for every standby pair (`emit_standby`, the
@@ -142,15 +146,19 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   builds its output `.with_max(bus.max().clone())`. Details, the telemetry
   (`max` on `GET /api/v1/program`) and the box gate: `gpu-max.md` "Runtime
   wiring".
-- `start_program` runs in `lib.rs::start` AFTER the #196 startup senders, so
-  `SP-program` is created after every playlist sender and the per-playlist
-  name→port order does not change across restarts. Exception: when the
-  startup senders exceed their budget (the timeout branch), `SP-program` may
-  be created while late playlist senders are still coming up.
-- A dead program sender (no NDI SDK, sender creation failed, the SDK-clocked
-  `genlock_pacing=false` path offers nothing) shows as `health.submitted`
-  not rising and a stale `last_stamp_100ns` on `GET /api/v1/program`; the
-  cause is in the log (`SP-program` lines).
+- `start_program` runs in `lib.rs::start` AFTER the startup pipelines
+  (`startup_pipelines.rs`). #221 lane 3: `SP-program` is the only NDI
+  sender, so on Windows `start_program` first waits (≤ 10 s, #196) until the
+  previous instance released the sender port span
+  (`startup_pipelines::wait_for_program_ports`, 5960..5962), then creates it:
+  a restart gives it the same port (the first one the NDI runtime hands
+  out), the one DistroAV's receivers reconnect to by URL. (Its port moved
+  once, at the 0.71.0-dev.16 deploy that retired the per-playlist senders,
+  which used to take the ports before it: read its URL on a receiver after
+  that deploy.)
+- A dead program sender (no NDI SDK, sender creation failed) shows as
+  `health.submitted` not rising and a stale `last_stamp_100ns` on
+  `GET /api/v1/program`; the cause is in the log (`SP-program` lines).
 - The selected source persists as setting `program_source` (written BEFORE
   the cut; a failed write cuts nothing) and is restored with
   `select_initial` (owns every boundary, `cut_boundary_100ns: null`).
@@ -303,9 +311,10 @@ included, is comment 5872871751).
   (`ProgramStatus::on_wire`, #224 part 2): what a receiver sees, the
   internal boundary + D(K_F), floored. `ProgramCore::status()` stays
   internal.
-- `/api/v1/ndi/health` is unchanged (an array of per-pipeline snapshots
-  consumed by sp-ui + e2e); where the program's health also belongs there is
-  an open question on #209.
+- `/api/v1/ndi/health` stays an array of per-pipeline snapshots (consumed
+  by sp-ui + e2e); #221 lane 3 removed its sender fields (`connections`,
+  `sender_url`, `burn_on`, `recovery_step`): the receivers are SP-program's,
+  here.
 - sp-ui `ProgramControl` (dashboard, testids `program-control`,
   `program-source`, `program-cut` + `data-playlist-id` + `aria-pressed`,
   `program-error`) polls `GET /api/v1/program` through `store::poll_into`.
@@ -479,9 +488,9 @@ itself: the OBS client no longer reads cg OBS's program at all
 - **A runtime pipeline** (`EnsurePipeline`) of a playlist already on air
   whose scene is not flagged runs `handle_scene_change(pid, true)` itself
   (its ON came before it existed). An ON for a playlist with NO pipeline
-  creates it (`ensure_pipeline_for_playlist`, then the same guard): the
-  #196 startup senders run before `start_program`, but past their 45 s
-  budget the rest were never created (review round 1, F3).
+  creates it (`ensure_pipeline_for_playlist`, then the same guard): a
+  playlist made active after the startup pipelines were created has none
+  (review round 1, F3; then it was the #196 startup senders' 45 s budget).
 - **A manual ▶ claims nothing** (`PlayEvent::Start`: WaitingForScene +
   Start → SelectAndPlay; `handle_engine_play` fires `VideosAvailable` +
   `Start`). Off air the playlist plays OFF program: `scene_active` stays
@@ -536,9 +545,9 @@ itself: the OBS client no longer reads cg OBS's program at all
 ## SP-program's receiver (#221 B4 step 6, `ndi_health_expect.rs`)
 
 Every consumer takes `SP-program` (NDI: the Presenter, strih, the stream)
-or `SP-program-MAX` (Spout: the LED wall); a playlist's own NDI output has
-none any more (`obs-ndi-health.md`). So the receiver the box must have is
-SP-program's:
+or `SP-program-MAX` (Spout: the LED wall); a playlist has no NDI output of
+its own (#221 lane 3, `obs-ndi-health.md`). So the receiver the box must
+have is SP-program's:
 
 - `health.connections` = the `SP-program` sender's receiver count, polled
   about once a second by the program thread (`ProgramBus::set_connections`);
