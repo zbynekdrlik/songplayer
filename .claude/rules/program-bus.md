@@ -529,9 +529,10 @@ SP-program's:
   polled count is `< 1`, else `null` — also before the first poll (review
   round 1: it used to name the initial 0 for about a second after a start);
 - `ProgramCore::set_connections` logs `log_program_receivers`: a WARN when
-  the first poll finds no receiver or the last one goes while a source is on
-  program, an INFO when the first poll finds one or the first one comes
-  back;
+  SP-program turns dark (a source on program with no receiver: the first
+  poll, the last receiver gone, or a source come on program with none —
+  `receivers_dark` keeps the state between polls), an INFO when the first
+  poll finds a receiver or the first one comes back;
 - the post-deploy E2E gates it (`e2e/ndi-health-gate.ts::programReceiverVerdict`,
   `post-deploy.spec.ts` "SP-program has a live NDI receiver",
   `post-deploy-dabing.spec.ts`); the mock serves `degraded_reason` from

@@ -271,6 +271,9 @@ pub struct ProgramCore {
     last_offer: HashMap<i64, i64>,
     queue: SubmitQueue<ProgramJob>,
     health: ProgramHealth,
+    /// #221: the last receiver poll found `SP-program` dark (a source on
+    /// program, no receiver); its WARN is not repeated.
+    receivers_dark: bool,
     /// #210: the sender's per-boundary timing window (`health.timing`).
     timing: BoundaryTiming,
 }
@@ -296,6 +299,7 @@ impl ProgramCore {
             last_offer: HashMap::new(),
             queue: SubmitQueue::new(PROGRAM_QUEUE_BOUND),
             health: ProgramHealth::default(),
+            receivers_dark: false,
             timing: BoundaryTiming::default(),
         }
     }
@@ -616,8 +620,9 @@ impl ProgramCore {
         self.health.last_stamp_100ns = stamp_100ns;
     }
 
-    /// Latest `SP-program` receiver connection count (#221: the first poll's
-    /// count, its last receiver going and the first coming back are logged).
+    /// Latest `SP-program` receiver connection count (#221: turning dark — a
+    /// source on program with no receiver — and the first receiver found or
+    /// back are logged).
     pub fn set_connections(&mut self, n: i32) {
         let before = self
             .health
@@ -625,7 +630,12 @@ impl ProgramCore {
             .then_some(self.health.connections);
         self.health.receivers_polled = true;
         let source = self.selected();
-        crate::playback::ndi_health_expect::log_program_receivers(source, before, n);
+        self.receivers_dark = crate::playback::ndi_health_expect::log_program_receivers(
+            source,
+            before,
+            n,
+            self.receivers_dark,
+        );
         self.health.connections = n;
     }
 

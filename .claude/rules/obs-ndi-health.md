@@ -249,9 +249,12 @@ inputs and a playlist's own output has 0 receivers normally.
   ever poll, so `spawn_program_thread` sets a polled 0 at once and the
   reason is named (review round 2).
   `ProgramCore::set_connections` logs it (`log_program_receivers`, logging
-  only): a WARN when the first poll finds no receiver or the last one goes
-  while a source is on program, an INFO when the first poll finds one or
-  the first one comes back.
+  only): a WARN when SP-program turns dark — a source on program with no
+  receiver: the first poll finds none, the last one goes, or a source comes
+  on program while none is connected (review round 4; the dark state is
+  kept for the next poll, `receivers_dark`, so the WARN is not repeated) —
+  and an INFO when the first poll finds a receiver or the first one comes
+  back.
 - **Lane 3 deletes the rest** (main comment 5999882988): the per-playlist
   senders, with the ladder (`obs/ndi_recovery*.rs`), the manual `POST
   /api/v1/ndi/recover/{id}`, `recovery_step`, the #196 self-check and the

@@ -21,8 +21,8 @@
 //! - **`SP-program` expects a receiver while a source is on program**
 //!   ([`program_degraded_reason`]): served as `degraded_reason` on
 //!   `GET /api/v1/program` once the sender has polled its receivers, logged
-//!   at the first poll, when its last receiver goes and when the first comes
-//!   back ([`log_program_receivers`]), and gated by the post-deploy E2E.
+//!   when it turns dark and when a receiver is found or back
+//!   ([`log_program_receivers`]), and gated by the post-deploy E2E.
 
 use tracing::{info, warn};
 
@@ -57,26 +57,34 @@ pub(crate) fn program_degraded_reason(
 }
 
 /// The log line of a new `SP-program` receiver count (`before` = `None` on
-/// the first poll): a WARN when a source is on program and the first poll
-/// finds no receiver or the last one went, an INFO when the first poll finds
-/// one or the first one came back. Logging only
-/// (`ProgramCore::set_connections`).
+/// the first poll), and whether `SP-program` is now dark (a source on
+/// program, no receiver): a WARN when it turns dark (`was_dark` false: the
+/// first poll finds no receiver, the last one went, or a source came on
+/// program while none was connected), an INFO when the first poll finds a
+/// receiver or the first one came back. Logging only
+/// (`ProgramCore::set_connections` keeps the dark state for the next poll).
 #[cfg_attr(test, mutants::skip)]
-pub(crate) fn log_program_receivers(source: Option<i64>, before: Option<i32>, after: i32) {
-    let had = before.map(|n| n >= 1);
+pub(crate) fn log_program_receivers(
+    source: Option<i64>,
+    before: Option<i32>,
+    after: i32,
+    was_dark: bool,
+) -> bool {
     let has = after >= 1;
-    if !has && source.is_some() && had != Some(false) {
+    let dark = source.is_some() && !has;
+    if dark && !was_dark {
         warn!(
             ?source,
             "SP-program: {PROGRAM_NO_RECEIVER_REASON} — the Presenter, strih and the stream get nothing over NDI"
         );
-    } else if has && had != Some(true) {
+    } else if has && before.is_none_or(|n| n < 1) {
         info!(
             receivers = after,
             ?source,
             "SP-program: a receiver is connected"
         );
     }
+    dark
 }
 
 #[cfg(test)]
