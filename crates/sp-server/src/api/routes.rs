@@ -724,13 +724,13 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         tools: ToolsStatusResponse {
             ytdlp_available: tools.ytdlp_available,
             ffmpeg_available: tools.ffmpeg_available,
-            ytdlp_version: tools.ytdlp_version.clone(),
+            ytdlp_version: tools.ytdlp_version,
             js_runtime_ok: tools.js_runtime_ok,
-            deno_version: tools.deno_version.clone(),
+            deno_version: tools.deno_version,
         },
         playlist_count,
-        lan_url: lan.lan_url.clone(),
-        lan_ip: lan.lan_ip.clone(),
+        lan_url: lan.lan_url,
+        lan_ip: lan.lan_ip,
         preview_encoder: crate::playback::preview::preview_encoder::chosen_encoder(),
         uptime_s: crate::process_start::uptime_secs(),
         heavy_containment: HeavyContainmentStatus {
