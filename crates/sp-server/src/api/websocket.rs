@@ -4,7 +4,6 @@
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
-use futures::stream::SplitSink;
 use futures::{Sink, SinkExt, StreamExt};
 use sqlx::Row;
 use tracing::{debug, info, warn};
@@ -55,9 +54,7 @@ async fn handle_ws(socket: WebSocket, state: AppState) {
                                 let err = ServerMsg::Error {
                                     message: format!("invalid message: {e}"),
                                 };
-                                if let Ok(json) = serde_json::to_string(&err) {
-                                    let _ = write.send(Message::Text(json.into())).await;
-                                }
+                                send_json(&mut write, &err).await;
                             }
                         }
                     }
@@ -242,12 +239,13 @@ where
 }
 
 /// Send [`on_connect_replay`] to one client; returns how many messages.
-async fn send_replay(write: &mut SplitSink<WebSocket, Message>, state: &AppState) -> usize {
+async fn send_replay<S>(write: &mut S, state: &AppState) -> usize
+where
+    S: Sink<Message> + Unpin,
+{
     let msgs = on_connect_replay(state).await;
     for msg in &msgs {
-        if let Ok(json) = serde_json::to_string(msg) {
-            let _ = write.send(Message::Text(json.into())).await;
-        }
+        send_json(write, msg).await;
     }
     msgs.len()
 }

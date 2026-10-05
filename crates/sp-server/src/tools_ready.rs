@@ -139,7 +139,10 @@ mod tests {
             found(),
             follow_ups,
         ));
-        started_rx.await.expect("the follow-ups start");
+        tokio::time::timeout(Duration::from_secs(60), started_rx)
+            .await
+            .expect("the publish ends and the follow-ups start")
+            .expect("the follow-ups start");
 
         assert!(
             state.tools_status.try_write().is_ok(),

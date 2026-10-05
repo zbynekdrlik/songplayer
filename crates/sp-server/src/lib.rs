@@ -399,7 +399,7 @@ pub async fn start(
         paths: tool_paths.clone(),
         events: event_tx.clone(),
     };
-    let tools_event_tx = event_tx.clone();
+    let lyrics_event_tx = event_tx.clone();
     let dl_pool = pool.clone();
     let dl_cache_dir = config.cache_dir.clone();
     // Same directory as the SQLite DB — where a production operator drops
@@ -556,7 +556,7 @@ pub async fn start(
                         lyrics_python,
                         lyrics_tools_dir,
                         Some(ai_client_for_dl),
-                        tools_event_tx.clone(),
+                        lyrics_event_tx.clone(),
                         lyrics_ndi_health,
                         lyrics_obs_state,
                     );
@@ -567,7 +567,7 @@ pub async fn start(
                     // Lyrics queue-update broadcast loop (every 2s → WS clients)
                     tokio::spawn(crate::lyrics::worker::queue_update_loop(
                         lyrics_pool_for_loop,
-                        tools_event_tx.clone(),
+                        lyrics_event_tx.clone(),
                         current_processing_handle,
                         lyrics_shutdown.subscribe(),
                     ));
