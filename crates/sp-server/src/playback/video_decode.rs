@@ -146,6 +146,9 @@ pub struct VideoDecodeStatus {
     pub open_fallbacks: u64,
     /// Reopens in software after a decode error on the GPU path.
     pub mid_stream_fallbacks: u64,
+    /// Changes of decode path mid-file on the GPU path with no error (Media
+    /// Foundation's decoder changed its mind).
+    pub path_changes: u64,
     /// The last fall back: `"open: …"` / `"mid-stream: …"`.
     pub last_fallback: Option<String>,
 }
@@ -159,6 +162,7 @@ pub fn status_of(setting: &HwDecodeSetting, stats: HwDecodeStats) -> VideoDecode
         mf_software: stats.mf_software,
         open_fallbacks: stats.open_fallbacks,
         mid_stream_fallbacks: stats.mid_stream_fallbacks,
+        path_changes: stats.path_changes,
         last_fallback: stats.last_fallback,
     }
 }

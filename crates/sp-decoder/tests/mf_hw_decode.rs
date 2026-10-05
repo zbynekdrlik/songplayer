@@ -338,17 +338,27 @@ fn a_software_reader_goes_on_where_it_stopped_after_a_mid_stream_fallback() {
     assert_goes_on_after_a_mid_stream_fallback(reader, "software reader");
 }
 
-/// The fall back the feature exists for: a reader on the D3D path (WARP's
-/// device manager, or its refusal, see the WARP test) leaves it for the
-/// system-memory path mid-file.
+/// The fall back the feature exists for: a `Hardware` reader on WARP leaves
+/// the D3D path for the system-memory path mid-file. Same contract as the
+/// WARP open test: the reader runs on WARP's device manager, or the source
+/// reader refused it (then this is the software reader's fall back again);
+/// which one is logged.
 #[test]
-fn a_reader_on_the_d3d_path_goes_on_where_it_stopped_after_a_mid_stream_fallback() {
+fn a_hardware_reader_goes_on_where_it_stopped_after_a_mid_stream_fallback() {
     let reader = MediaFoundationVideoReader::open_hardware_on_warp(&fixture())
         .expect("a Hardware open on WARP");
+    let on_d3d = reader.hw_adapter().is_some();
+    let refused = reader
+        .hw_fallback()
+        .is_some_and(|f| f.reason.starts_with("the source reader refused"));
     eprintln!(
-        "d3d reader: adapter={:?} open fallback={:?}",
-        reader.hw_adapter(),
+        "hardware reader: on the D3D path={on_d3d} open fallback={:?}",
         reader.hw_fallback().map(|f| f.describe())
     );
-    assert_goes_on_after_a_mid_stream_fallback(reader, "d3d reader");
+    assert!(
+        on_d3d || refused,
+        "the D3D11 path was not built on WARP: {:?}",
+        reader.hw_fallback()
+    );
+    assert_goes_on_after_a_mid_stream_fallback(reader, "hardware reader");
 }

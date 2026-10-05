@@ -3,8 +3,8 @@
 
 use super::{
     D3D11_BIND_DECODER, DXGI_FORMAT_NV12, DecodeMode, DecodePath, FallbackGate, FallbackStage,
-    HwCounters, HwDecodeStats, HwFallback, OnDecodeError, PathTracker, Resume, SurfaceError,
-    SurfaceLayout, hw_counters, mapped_from_scanline0, on_decode_error,
+    HwCounters, HwDecodeStats, HwFallback, OnDecodeError, PathNote, PathTracker, Resume,
+    SurfaceError, SurfaceLayout, hw_counters, mapped_from_scanline0, on_decode_error,
 };
 use crate::error::DecoderError;
 
@@ -106,23 +106,60 @@ fn an_out_of_memory_leaves_the_gates_allowance() {
 }
 
 #[test]
-fn only_the_first_picture_on_the_d3d_path_is_counted() {
+fn the_first_picture_on_the_d3d_path_is_noted_once() {
     let mut on_gpu = PathTracker::default();
     assert_eq!(on_gpu.last(), None);
-    assert!(on_gpu.observe(DecodePath::Hardware, true), "the first one");
-    assert!(!on_gpu.observe(DecodePath::Hardware, true));
+    assert_eq!(on_gpu.observe(DecodePath::Hardware, true), PathNote::First);
+    assert_eq!(
+        on_gpu.observe(DecodePath::Hardware, true),
+        PathNote::Nothing
+    );
     assert_eq!(on_gpu.last(), Some(DecodePath::Hardware));
-    // After a fall back: the path follows, nothing more is counted.
-    assert!(!on_gpu.observe(DecodePath::Software, false));
+    // After a fall back (its own WARN): the path follows, nothing is noted.
+    assert_eq!(
+        on_gpu.observe(DecodePath::Software, false),
+        PathNote::Nothing
+    );
     assert_eq!(on_gpu.last(), Some(DecodePath::Software));
-    // A software reader's pictures are never counted.
+    // A software reader's pictures are never noted.
     let mut software = PathTracker::default();
-    assert!(!software.observe(DecodePath::Software, false));
+    assert_eq!(
+        software.observe(DecodePath::Software, false),
+        PathNote::Nothing
+    );
     assert_eq!(software.last(), Some(DecodePath::Software));
-    // MF decoding in software on the D3D path is counted once too.
+    // MF decoding in software on the D3D path is noted once too.
     let mut silent = PathTracker::default();
-    assert!(silent.observe(DecodePath::Software, true));
-    assert!(!silent.observe(DecodePath::Software, true));
+    assert_eq!(silent.observe(DecodePath::Software, true), PathNote::First);
+    assert_eq!(
+        silent.observe(DecodePath::Software, true),
+        PathNote::Nothing
+    );
+}
+
+#[test]
+fn a_change_of_path_mid_file_on_the_d3d_path_is_noted() {
+    let mut tracker = PathTracker::default();
+    assert_eq!(tracker.observe(DecodePath::Hardware, true), PathNote::First);
+    // MF's decoder drops to software with no error: noted, once.
+    assert_eq!(
+        tracker.observe(DecodePath::Software, true),
+        PathNote::Changed {
+            from: DecodePath::Hardware
+        }
+    );
+    assert_eq!(
+        tracker.observe(DecodePath::Software, true),
+        PathNote::Nothing
+    );
+    // And back.
+    assert_eq!(
+        tracker.observe(DecodePath::Hardware, true),
+        PathNote::Changed {
+            from: DecodePath::Software
+        }
+    );
+    assert_eq!(tracker.last(), Some(DecodePath::Hardware));
 }
 
 #[test]
@@ -498,6 +535,9 @@ fn the_counters_count_each_outcome_on_its_own() {
         stage: FallbackStage::MidStream,
         reason: "device hung".into(),
     });
+    counters.path_changed();
+    counters.path_changed();
+    counters.path_changed();
     assert_eq!(
         counters.snapshot(),
         HwDecodeStats {
@@ -506,6 +546,7 @@ fn the_counters_count_each_outcome_on_its_own() {
             mf_software: 1,
             open_fallbacks: 1,
             mid_stream_fallbacks: 2,
+            path_changes: 3,
             last_fallback: Some("mid-stream: device hung".into()),
         }
     );

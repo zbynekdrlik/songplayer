@@ -179,6 +179,21 @@ impl FallbackGate {
     }
 }
 
+/// What a handed-over picture's path means for the counters and the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathNote {
+    /// Nothing new.
+    Nothing,
+    /// The first picture of a reader on the D3D path: counted
+    /// ([`HwCounters::first_picture`]) and logged, so a silent software
+    /// decode is seen.
+    First,
+    /// A later picture on the D3D path came out of another path than the one
+    /// before (Media Foundation's decoder changed its mind mid-file, with no
+    /// error): counted ([`HwCounters::path_changed`]) and logged.
+    Changed { from: DecodePath },
+}
+
 /// The path of the pictures a reader handed over.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PathTracker {
@@ -186,14 +201,16 @@ pub struct PathTracker {
 }
 
 impl PathTracker {
-    /// Record a handed-over picture's `path`. `true` for the reader's first
-    /// picture while it runs on the D3D path: that one is counted
-    /// ([`HwCounters::first_picture`]) and logged, so a silent software
-    /// decode is seen once per file.
-    pub fn observe(&mut self, path: DecodePath, on_d3d: bool) -> bool {
-        let first = self.last.is_none();
-        self.last = Some(path);
-        first && on_d3d
+    /// Record a handed-over picture's `path`, and say what is new about it
+    /// while the reader runs on the D3D path (`on_d3d`). Off it (software
+    /// from the start, or after a fall back, which has its own WARN) nothing
+    /// is new.
+    pub fn observe(&mut self, path: DecodePath, on_d3d: bool) -> PathNote {
+        match self.last.replace(path) {
+            None if on_d3d => PathNote::First,
+            Some(from) if on_d3d && from != path => PathNote::Changed { from },
+            _ => PathNote::Nothing,
+        }
     }
 
     /// The last picture's path (`None` before the first).
@@ -416,10 +433,14 @@ pub struct HwDecodeStats {
     /// Foundation's decoder made in software (it found no decoder on the
     /// GPU for the stream).
     pub mf_software: u64,
-    /// Of those, the ones whose `Hardware` open failed (opened in software).
+    /// Of those, the ones whose `Hardware` open failed and that opened in
+    /// software.
     pub open_fallbacks: u64,
     /// Reopens in software after a decode error on the D3D path.
     pub mid_stream_fallbacks: u64,
+    /// Changes of path mid-file on the D3D path with no error
+    /// ([`PathNote::Changed`]).
+    pub path_changes: u64,
     /// The last fall back, [`HwFallback::describe`].
     pub last_fallback: Option<String>,
 }
@@ -432,6 +453,7 @@ pub struct HwCounters {
     mf_software: AtomicU64,
     open_fallbacks: AtomicU64,
     mid_stream_fallbacks: AtomicU64,
+    path_changes: AtomicU64,
     last_fallback: Mutex<Option<String>>,
 }
 
@@ -443,6 +465,7 @@ impl HwCounters {
             mf_software: AtomicU64::new(0),
             open_fallbacks: AtomicU64::new(0),
             mid_stream_fallbacks: AtomicU64::new(0),
+            path_changes: AtomicU64::new(0),
             last_fallback: Mutex::new(None),
         }
     }
@@ -459,6 +482,11 @@ impl HwCounters {
             DecodePath::Software => &self.mf_software,
         };
         counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A reader on the D3D path changed its pictures' path mid-file.
+    pub fn path_changed(&self) {
+        self.path_changes.fetch_add(1, Ordering::Relaxed);
     }
 
     /// A reader fell back to software.
@@ -488,6 +516,7 @@ impl HwCounters {
             mf_software: self.mf_software.load(Ordering::Relaxed),
             open_fallbacks: self.open_fallbacks.load(Ordering::Relaxed),
             mid_stream_fallbacks: self.mid_stream_fallbacks.load(Ordering::Relaxed),
+            path_changes: self.path_changes.load(Ordering::Relaxed),
             last_fallback,
         }
     }

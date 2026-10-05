@@ -36,8 +36,8 @@ use super::dxgi_frame::DxgiSurface;
 use super::hw_session::{HwDevice, HwSession};
 use crate::error::DecoderError;
 use crate::hw_decode::{
-    DecodeMode, DecodePath, FallbackGate, FallbackStage, HwFallback, OnDecodeError, PathTracker,
-    Resume, hw_counters,
+    DecodeMode, DecodePath, FallbackGate, FallbackStage, HwFallback, OnDecodeError, PathNote,
+    PathTracker, Resume, hw_counters,
 };
 use crate::stream::{MediaStream, VideoStream};
 use crate::types::{DecodedVideoFrame, PixelFormat};
@@ -157,8 +157,8 @@ impl MediaFoundationVideoReader {
                     fallback = %fallback.describe(),
                     "mf_reader: hardware decode did not open; this file decodes in software"
                 );
-                hw_counters().fell_back(&fallback);
                 let opened = Self::create(path, None)?;
+                hw_counters().fell_back(&fallback);
                 let mut reader = Self::from_opened(path, DecodeMode::Hardware, opened, None);
                 reader.fallback = Some(fallback);
                 Ok(reader)
@@ -510,24 +510,40 @@ impl MediaFoundationVideoReader {
         }))
     }
 
-    /// Record the path of a picture; the first one on the D3D path is
-    /// counted and logged (`PathTracker`), so a silent software decode is
-    /// seen.
+    /// Record the path of a picture (`PathTracker`): the first one on the
+    /// D3D path, and any later change of path on it, is counted and logged,
+    /// so a silent software decode is seen.
     fn observe(&mut self, path: DecodePath) {
-        if self.paths.observe(path, self.hw.is_some()) {
-            hw_counters().first_picture(path);
-            let adapter = self.adapter.as_deref().unwrap_or("?");
-            match path {
-                DecodePath::Hardware => info!(
-                    file = %self.path.display(),
+        let note = self.paths.observe(path, self.hw.is_some());
+        let file = self.path.display();
+        let adapter = self.adapter.as_deref().unwrap_or("?");
+        match (note, path) {
+            (PathNote::Nothing, _) => {}
+            (PathNote::First, DecodePath::Hardware) => {
+                hw_counters().first_picture(path);
+                info!(
+                    file = %file,
                     adapter,
                     "mf_reader: hardware decode active (decoder surfaces, D3D11_BIND_DECODER)"
-                ),
-                DecodePath::Software => warn!(
-                    file = %self.path.display(),
+                );
+            }
+            (PathNote::First, DecodePath::Software) => {
+                hw_counters().first_picture(path);
+                warn!(
+                    file = %file,
                     adapter,
                     "mf_reader: the D3D11 path is set up, but Media Foundation decodes this file in software"
-                ),
+                );
+            }
+            (PathNote::Changed { from }, _) => {
+                hw_counters().path_changed();
+                warn!(
+                    file = %file,
+                    adapter,
+                    from = from.as_str(),
+                    to = path.as_str(),
+                    "mf_reader: the decode path changed mid-file with no error"
+                );
             }
         }
     }
@@ -544,9 +560,9 @@ impl MediaFoundationVideoReader {
             fallback = %fallback.describe(),
             "mf_reader: a decode error on the D3D11 path; this file goes on in software"
         );
+        let opened = Self::create(&self.path, None)?;
         hw_counters().fell_back(&fallback);
         self.fallback = Some(fallback);
-        let opened = Self::create(&self.path, None)?;
         self.reader = opened.reader;
         self.hw = None;
         self.width = opened.width;

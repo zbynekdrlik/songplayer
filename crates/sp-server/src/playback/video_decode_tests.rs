@@ -139,6 +139,7 @@ fn the_status_carries_the_setting_and_the_counters() {
         mf_software: 1,
         open_fallbacks: 1,
         mid_stream_fallbacks: 2,
+        path_changes: 5,
         last_fallback: Some("mid-stream: device removed".into()),
     };
     assert_eq!(
@@ -150,6 +151,7 @@ fn the_status_carries_the_setting_and_the_counters() {
             mf_software: 1,
             open_fallbacks: 1,
             mid_stream_fallbacks: 2,
+            path_changes: 5,
             last_fallback: Some("mid-stream: device removed".into()),
         }
     );
@@ -170,6 +172,7 @@ fn the_status_serializes_to_the_documented_json() {
         mf_software: 0,
         open_fallbacks: 1,
         mid_stream_fallbacks: 0,
+        path_changes: 4,
         last_fallback: Some("open: no video device".into()),
     })
     .unwrap();
@@ -179,6 +182,7 @@ fn the_status_serializes_to_the_documented_json() {
     assert_eq!(json["mf_software"], 0);
     assert_eq!(json["open_fallbacks"], 1);
     assert_eq!(json["mid_stream_fallbacks"], 0);
+    assert_eq!(json["path_changes"], 4);
     assert_eq!(json["last_fallback"], "open: no video device");
     // A block from an older build, missing keys: each reads as its zero.
     let old: VideoDecodeStatus = serde_json::from_str(r#"{"hw_decode": true}"#).unwrap();
@@ -222,6 +226,7 @@ async fn the_status_route_carries_the_video_decode_block() {
         "mf_software",
         "open_fallbacks",
         "mid_stream_fallbacks",
+        "path_changes",
     ] {
         assert!(block[key].is_u64(), "{key}: {json}");
     }

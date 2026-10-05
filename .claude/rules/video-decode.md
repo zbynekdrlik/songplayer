@@ -84,12 +84,15 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   error: the box's GPU without a decoder for a codec, or WARP (no decoder
   profiles).
 - `decode_path()` = the last picture's path, `None` before the first;
-  `hw_adapter()`, `hw_fallback()`. The first picture on the D3D path
-  (`hw_decode::PathTracker::observe`, once per file) is counted
-  (`hw_counters().first_picture`) and logged: INFO `mf_reader:
-  hardware decode active (decoder surfaces, D3D11_BIND_DECODER)`, or WARN
+  `hw_adapter()`, `hw_fallback()`. `hw_decode::PathTracker::observe` notes,
+  while the reader runs on the D3D path: its FIRST picture, counted
+  (`hw_counters().first_picture`) and logged (INFO `mf_reader: hardware
+  decode active (decoder surfaces, D3D11_BIND_DECODER)`, or WARN
   `mf_reader: the D3D11 path is set up, but Media Foundation decodes this
-  file in software`.
+  file in software`), and any later CHANGE of path with no error (MF's
+  decoder changing its mind mid-file), counted (`path_changed`) and
+  logged (WARN `mf_reader: the decode path changed mid-file with no
+  error`, `from` / `to`).
 
 ## Never a dead song
 
@@ -113,7 +116,8 @@ frame period in software); the anchors and MF facts (comment 5990523303).
 - `HwCounters` (`sp_decoder::hw_counters()`, process-wide, every
   `Hardware` reader, the bench's too): `requested`, `gpu_decodes`,
   `mf_software`, `open_fallbacks`, `mid_stream_fallbacks`,
-  `last_fallback`.
+  `path_changes`, `last_fallback`. A fall back is counted once the file
+  has opened in software (a file that opens nowhere is only the error).
 
 ## The setting and the telemetry (`sp-server/src/playback/video_decode.rs`)
 
@@ -130,7 +134,7 @@ frame period in software); the anchors and MF facts (comment 5990523303).
 - Toggle: `PATCH /api/v1/settings {"video_hw_decode": "true"}`; no restart.
 - `GET /api/v1/status` → `video_decode {hw_decode, hw_requested,
   gpu_decodes, mf_software, open_fallbacks, mid_stream_fallbacks,
-  last_fallback}` (the setting + the counters; counts of FILES since the
+  path_changes, last_fallback}` (the setting + the counters; counts of FILES since the
   process started, not live state; `#[serde(default)]`, so a missing key
   reads as zero).
 - `POST /api/v1/diag/decode-bench` takes `"hw": true` and reports
@@ -141,8 +145,9 @@ frame period in software); the anchors and MF facts (comment 5990523303).
 - `src/video/` is `cfg(windows)` and OUT of the mutation gate
   (`.cargo/mutants.toml`). Every decision is `src/hw_decode.rs` at the
   crate root (in the gate), Linux-tested in `hw_decode_tests.rs`. Keep it
-  that way: logic added inside `video/` is untested by the gate. Never
-  name a pure helper under `video/` or `audio/` (both excluded dirs).
+  that way: logic added inside `video/` is untested by the gate. Never put
+  a pure helper under `video/` (excluded), nor among
+  `audio/symphonia_reader.rs`'s wrapper methods (excluded by type name).
 - `tests/mf_hw_decode.rs` (Windows; `windows-latest` has no GPU): a
   `Hardware` open of the H.264 fixture on the picked adapter (an open fall
   back on CI) and on WARP (`open_hardware_on_warp`, doc-hidden) must
@@ -169,11 +174,13 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   texture without `D3D11_BIND_DECODER` reads `software`.
 - The mid-stream fall back is proven on CI by
   `fail_next_read_for_test` (doc-hidden: one injected decode error, the
-  gate armed) on a software reader AND on a reader on the D3D path (WARP:
-  it leaves the device manager for the system-memory path mid-file). The
-  fixture has ONE keyframe (at 0), so the reopen decodes pictures 0..=9
-  again and must drop them; the sequence must equal the uninterrupted
-  software one.
+  gate armed) on a software reader AND on a `Hardware` reader on WARP. The
+  latter leaves WARP's device manager for the system-memory path mid-file
+  when the source reader took the manager; under the WARP open test's
+  contract it may instead have refused it (then it is the software case
+  again), and the test logs which. The fixture has ONE keyframe (at 0), so
+  the reopen decodes pictures 0..=9 again and must drop them; the sequence
+  must equal the uninterrupted software one.
 - `sp-gpu/tests/video_device.rs` (Windows): the device has the video API
   (creation flags + `ID3D11VideoDevice`) and is multithread-protected, on
   WARP and on the listed Basic Render Driver; `new()` is the picked adapter
