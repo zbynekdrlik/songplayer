@@ -354,9 +354,11 @@ jobs:
       # code paths, so we gate only that crate here to keep CI time bounded.
       # It runs after a failed debug test step too (the job still fails), so
       # a release-only failure shows in the same run; never after a failed
-      # build or a cancel.
+      # build, and never on a cancelled run (`!cancelled()`: the runner
+      # re-checks a step's `if` on cancel, and the outcome test alone would
+      # keep it running past a newer push's cancel-in-progress).
       - name: Run sp-decoder tests (release mode)
-        if: success() || steps.tests.outcome == 'failure'
+        if: ${{ !cancelled() && (success() || steps.tests.outcome == 'failure') }}
         run: cargo test -p sp-decoder --release --verbose --no-fail-fast
 
   test-integrity:
