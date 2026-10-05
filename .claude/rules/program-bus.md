@@ -519,16 +519,17 @@ SP-program's:
 
 - `health.connections` = the `SP-program` sender's receiver count, polled
   about once a second by the program thread (`ProgramBus::set_connections`);
-  0 until the first poll;
+  0 until the first poll, which `health.receivers_polled` (serde-skipped)
+  tells apart;
 - `GET /api/v1/program` → top-level `degraded_reason` =
-  `program_degraded_reason(source, health.connections)`: `"no NDI receiver
-  on SP-program"` while a source (a playlist or -1) is on program and
-  `connections < 1`, else `null` (so for about a second after a start it
-  names the not-yet-polled count);
+  `program_degraded_reason(source, polled count)`: `"no NDI receiver on
+  SP-program"` while a source (a playlist or -1) is on program and the
+  polled count is `< 1`, else `null` — also before the first poll (review
+  round 1: it used to name the initial 0 for about a second after a start);
 - `ProgramCore::set_connections` logs `log_program_receivers`: a WARN when
   the first poll finds no receiver or the last one goes while a source is on
   program, an INFO when the first poll finds one or the first one comes
-  back (`receivers_polled` tells the first poll's 0 from a real one);
+  back;
 - the post-deploy E2E gates it (`e2e/ndi-health-gate.ts::programReceiverVerdict`,
   `post-deploy.spec.ts` "SP-program has a live NDI receiver",
   `post-deploy-dabing.spec.ts`); the mock serves `degraded_reason` from

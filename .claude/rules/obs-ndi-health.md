@@ -214,18 +214,27 @@ deleted, `remote-control.md`), so DistroAV disconnects cg OBS's `sp-*`
 inputs and a playlist's own output has 0 receivers normally.
 
 - **A playlist's output expects NO receiver**
-  (`playback/ndi_health_expect.rs::PLAYLIST_RECEIVER_EXPECTED` = `false`).
-  `handle_health_snapshot` drops ONLY the dark-wall reason
-  (`expected_reason`, pure + mutation-scored: the handler is
-  `mutants::skip`) and passes the constant to
-  `ladder_suppressed_after_restart` and `no_receiver_after_restart`. So no
-  per-playlist dark wall is reported and the #173 ladder (whose targets are
-  cg OBS's `sp-*` inputs) never runs on its own: it fires only on that
-  reason. An underrun / "no frames in 10s" stays (`compute_degraded_reason`
-  answers the dark-wall reason whenever connections == 0, so those need a
-  poll with a receiver; SP-program takes the output over the bus either
-  way). The state label (the badge, the #154/#167 idle gates, `transport`)
-  stays keyed on on-air. The heartbeat log line carries `receiver_expected`.
+  (`playback/ndi_health_expect.rs::PLAYLIST_RECEIVER_EXPECTED` = `false`),
+  so its receiver count plays no part in its HEALTH (review round 1):
+  - the pipeline counts no bad poll for it (`pipeline::classify_bad_poll`
+    takes no count: a bad poll is an underrun or a submit stale > 10 s);
+  - `handle_health_snapshot` judges it on `judged_connections(connections,
+    expected)` (pure + mutation-scored: the real count where a receiver is
+    expected, at least 1 where none is): the degraded reason
+    (`compute_degraded_reason`), the #196 reconnect latch, the ladder
+    suppression, the post-restart self-check and the genlock lock all read
+    the judged count;
+  - so a playlist output at 0 receivers has no dark-wall reason (the #173
+    ladder, whose targets are cg OBS's `sp-*` inputs, fires only on that
+    reason, so it never runs on its own), no "no receiver after restart",
+    and no DEGRADED "no receiver" lock badge — while an underrun
+    ("underrunning (x/y fps)") or a stall ("no frames in 10s") is still
+    reported at 0 receivers (before review round 1 the dark-wall reason
+    came first and hid them);
+  - the snapshot's `connections`, the logs and the persisted receiver count
+    keep the REAL count. The state label (the badge, the #154/#167 idle
+    gates, `transport`) stays keyed on on-air. The heartbeat log line
+    carries `receiver_expected`.
 - **`SP-program` expects a receiver while a source is on program**
   (`program_degraded_reason(source, health.connections)`, pure): served as
   the top-level `degraded_reason` on `GET /api/v1/program` — `"no NDI
@@ -233,22 +242,26 @@ inputs and a playlist's own output has 0 receivers normally.
   (a playlist, or -1 "OBS manuál") is on program and `health.connections
   < 1`, else `null`. The `SP-program` thread polls the count about once a
   second (`ProgramBus::set_connections`); until its first poll the count
-  reads 0, so the reason shows for about a second after a start.
+  reads 0 and is no reading (`health.receivers_polled`, serde-skipped), so
+  no reason is named then (review round 1).
   `ProgramCore::set_connections` logs it (`log_program_receivers`, logging
   only): a WARN when the first poll finds no receiver or the last one goes
   while a source is on program, an INFO when the first poll finds one or
   the first one comes back.
 - **Lane 3 deletes the rest** (main comment 5999882988): the per-playlist
   senders, with the ladder (`obs/ndi_recovery*.rs`), the manual `POST
-  /api/v1/ndi/recover/{id}`, `recovery_step` and the #196 self-check. Until
-  then they stay, idle: nothing expects a receiver on a playlist output.
-- Tests: `ndi_health_expect_tests.rs` (the reason tables),
-  `ndi_health_tests_expect.rs` (a playlist output on air expects no
-  receiver, an underrun is still reported, the self-check flags only an
-  output with pre-restart receivers), `api/program_tests.rs`
-  (`degraded_reason` with and without a receiver, -1 too). A test that puts
-  its playlist on program uses `engine.set_on_program_for_test(pid)`
-  (`scene_active` only).
+  /api/v1/ndi/recover/{id}`, `recovery_step`, the #196 self-check and the
+  dark-wall branch of `compute_degraded_reason`. Until then they stay,
+  idle: the judged count never makes a playlist output dark or flagged.
+- Tests: `ndi_health_expect_tests.rs` (the `judged_connections` and
+  `program_degraded_reason` tables), `ndi_health_tests_expect.rs` (a
+  healthy 0-receiver poll on air, the LOCKED lock at 0 receivers, an
+  underrun and a stall reported at 0 receivers, the self-check never flags
+  a playlist output), `pipeline_heartbeat_tests.rs`
+  (`classify_bad_poll_ignores_the_receiver_count`), `api/program_tests.rs`
+  (`degraded_reason` before the first poll, with and without a receiver,
+  -1 too). A test that puts its playlist on program uses
+  `engine.set_on_program_for_test(pid)` (`scene_active` only).
 
 **Where `handle_health_snapshot`'s parts live (#221 L4a review: it was over
 the ~300-line budget).** The connection-change / degraded / recovered lines
@@ -525,8 +538,7 @@ reconnect VISIBLE instead:
 - **Decision (pure, in `sp_core::health::no_receiver_after_restart`,
   exact-boundary + mutation tested):** 30 s after the senders are ready
   (`mark_senders_ready` → `elapsed_since_ready`), an output that is expected
-  to have a receiver (since #221 B4 step 6 never a playlist output,
-  `ndi_health_expect`) OR
+  to have a receiver OR
   had `≥ 1` receiver before the restart, has NOT reconnected since (a one-time
   latch — once it reaches `≥ 1` it is never flagged again this process, so a
   later legitimate off-program drop is not a restart failure), and still has
@@ -535,7 +547,11 @@ reconnect VISIBLE instead:
   reason, so `is_dark` is false and the ladder never runs; ONE WARN per output
   (latched, cleared on recovery); the manual `POST /api/v1/ndi/recover/{id}`
   stays. Precedence: the "no OBS scene for this output" reason (item 5) wins over
-  the self-check when there is genuinely no OBS input.
+  the self-check when there is genuinely no OBS input. **#221 B4 step 6: it
+  never flags a playlist output** — no receiver is expected on one, and the
+  handler hands the self-check the judged count (at least 1), so the
+  HealthBar's `health-ndi` segment stays hidden; lane 3 deletes it with
+  the per-playlist senders.
 - **HealthBar:** the shared `HealthBar` renders a `health-ndi` segment
   `NDI: N výstup(y/ov) bez prijímača` (Slovak plural via
   `sp_core::health::ndi_label`/`ndi_output_word`), hidden when N=0, clearing the
@@ -574,17 +590,29 @@ acceptance.
 
 **Rule: no change to decode, pacing, the mixer, NDI or the audio path merges
 unless this gate is green.** The owner saw a major lipsync regression while
-every other gate was green. This gate is the one that measures what the wall
-and the recording actually get.
+every other gate was green. This gate is the one that measures a real output
+end to end. Until #221 B4 step 6 that was what the wall took (cg OBS's
+program); since then the wall, the Presenter, strih and the stream take
+SongPlayer's program, and the gate records the baseline playlist's own NDI
+output through cg OBS (the pipeline the program bus takes too) until the
+lane that retires the per-playlist senders moves it to an `SP-program`
+receiver.
 
 - **Where it runs:** `e2e/post-deploy-av-sync.spec.ts`, inside the E2E job's
   "Feature-level Playwright (post-deploy spec)" step (`post-deploy.config.ts`
   matches `post-deploy*.spec.ts`). It uses the shared `ObsDriver` (obs-websocket)
   twice (#221 L3): the SCENE driver on SongPlayer's facade (`FACADE_WS_URL`,
   :4456 — Companion's studio-mode path, SongPlayer's own program feedback and
-  transition events), and a second one on cg OBS (`OBS_WS_URL`, :4455) ONLY
-  for `GetProfileParameter` / `StartRecord` / `StopRecord` /
-  `GetRecordStatus` (the recording is cg OBS's program).
+  transition events), and a second one on cg OBS (`OBS_WS_URL`, :4455) for
+  `GetProfileParameter` / `StartRecord` / `StopRecord` /
+  `GetRecordStatus` (the recording is cg OBS's program) and — since #221
+  B4 step 6 deleted the mirror that moved cg OBS with a press — to put cg
+  OBS itself on the baseline scene for the take (only when it is not there
+  already; its `sp-*` input carries the playlist's own NDI output, the
+  pipeline the program bus takes too), restored in `afterAll`. Without it
+  the take recorded cg OBS's own manual scene and the audio correlation
+  failed (review round 1 🔴). The lane that retires the per-playlist
+  senders moves the recording to an `SP-program` receiver.
   **`obs-driver.ts` keeps the BARE `obs-websocket-js` import (#221 L2b).**
   In Node it resolves (package `exports` → `import` / `require`) to the
   MSGPACK build, which offers only `obswebsocket.msgpack` — exactly what
@@ -662,9 +690,9 @@ and the recording actually get.
        python AND its ffmpeg children hold the file open).
     2. It settles an in-flight start, waiting at most 10 s.
     3. It stops our recording, only while `isRecording()`.
-    4. It restores the faders and the scene. This comes BEFORE the slow file
-       deletion, so a hook that runs out of time never leaves the program on
-       the baseline scene.
+    4. It restores the faders, the program scene and cg OBS's own scene
+       (#221 B4 step 6). This comes BEFORE the slow file deletion, so a hook
+       that runs out of time never leaves the program on the baseline scene.
     5. It deletes recordings:
        - recordings the body never removed get a 15 s wait for their remux
          sibling;

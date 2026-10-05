@@ -437,7 +437,9 @@ against the emitted slots (`seq` differenced by `EventWindow`, fed via
 `playback/lock_state.rs::lock_for_heartbeat`), so 24/25-fps content on the 30-fps
 grid reads LOCKED, not DEGRADED. Precedence (first match wins): `!clock_ok` →
 UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections==0`
-→ DEGRADED "no receiver"; `resyncs_w>0` → DEGRADED "resync in 60 s"; `slots_w==0`
+→ DEGRADED "no receiver" (#221 B4 step 6: a playlist output's lock reads the
+JUDGED count, at least 1, since it expects no receiver — `obs-ndi-health.md`);
+`resyncs_w>0` → DEGRADED "resync in 60 s"; `slots_w==0`
 (nothing emitted, no grid) → LOCKED; then the late rate check and, only while
 `decoding` (#150), the repeat rate check; else LOCKED.
 
