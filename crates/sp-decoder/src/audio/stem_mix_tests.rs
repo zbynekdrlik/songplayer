@@ -67,10 +67,17 @@ fn mock(packets: Vec<Vec<f32>>, sr: u32, ch: u16, dur: u64) -> Box<dyn AudioStre
     Box::new(MockAudio::new(packets, sr, ch, dur))
 }
 
-/// Drain the reader into one flat interleaved Vec (mixing all packets).
+/// Drain the reader into one flat interleaved Vec (mixing all packets). A
+/// reader with nothing to emit returns `None`, never an empty chunk: under a
+/// mutant that emits empty chunks this fails at once instead of spinning
+/// until the mutation run's timeout (#210: the gate covers stem_mix.rs now).
 fn drain(reader: &mut StemMixReader) -> Vec<f32> {
     let mut out = Vec::new();
     while let Some(f) = reader.next_samples().unwrap() {
+        assert!(
+            !f.data.is_empty(),
+            "an empty chunk: nothing to emit is None"
+        );
         out.extend(f.data);
     }
     out
@@ -704,4 +711,52 @@ fn format_gains_prints_two_decimals() {
         "[0.00,1.00,0.50,0.33]"
     );
     assert_eq!(format_gains(&[]), "[]");
+}
+
+// ── #210: the mutation gate covers stem_mix.rs (the `audio/` exclusion now
+// names only the Symphonia wrapper); these pin what no other test sees ──────
+
+/// The reader's `Debug` prints its own observable state (the boxed streams
+/// are not `Debug`).
+#[test]
+fn debug_prints_the_mixer_state() {
+    let r = reader3(vec![], vec![], vec![], 1.0, 1.0, 1.0);
+    let text = format!("{r:?}");
+    assert!(text.starts_with("StemMixReader {"), "{text}");
+    for field in [
+        "streams: 3",
+        "sample_rate: 48000",
+        "channels: 2",
+        "label: \"3-stream\"",
+    ] {
+        assert!(text.contains(field), "{field} missing from {text}");
+    }
+}
+
+/// One call emits every whole frame the streams overlap on, no more and no
+/// fewer: four stereo frames buffered in each stream come out as ONE
+/// 8-sample chunk, and a mono reader emits exactly its three buffered
+/// samples, none padded. `drain` concatenates the calls, so it cannot see
+/// how the frames were shared out between them.
+#[test]
+fn one_call_emits_exactly_the_overlapping_whole_frames() {
+    let mut r = reader3(
+        vec![vec![0.1; 8]],
+        vec![vec![0.1; 8]],
+        vec![vec![0.1; 8]],
+        1.0,
+        1.0,
+        1.0,
+    );
+    let first = r.next_samples().unwrap().expect("the buffered frames");
+    assert_eq!(first.data.len(), 8, "all four buffered frames in one call");
+    assert!(r.next_samples().unwrap().is_none(), "nothing left");
+
+    let mut m = mono(vec![0.25, 0.5, 0.75], 1000);
+    let first = m.next_samples().unwrap().expect("the buffered samples");
+    assert_eq!(
+        first.data,
+        vec![0.25, 0.5, 0.75],
+        "exactly what was buffered"
+    );
 }

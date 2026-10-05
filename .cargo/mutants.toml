@@ -90,7 +90,14 @@ exclude_re = [
   # excluded — MockNdiBackend unit tests + FrameSubmitter cross-platform tests
   # cover them; the Windows-gated decoder in sp-decoder/reader.rs is skipped by
   # cargo-mutants on Linux automatically (cfg(windows) not compiled in).
-  'sp-decoder/src/audio/',                # Symphonia wrapper — external-lib glue, fixture-tested
+  # sp-decoder/src/audio/symphonia_reader.rs: the Symphonia wrapper — `open`,
+  #   `decode_packet` (the F32 / S32 / S16 buffer arms, the EOF guard) and
+  #   `seek` are external-lib glue that only real FLAC files of each sample
+  #   format reach (fixture-tested, tests/symphonia_audio.rs). The rest of
+  #   audio/ is NOT excluded any more (#210, finding 5986249387):
+  #   `StemMixReader` (stem_mix.rs: the ramps, the limiter call, the probe)
+  #   is pure f32 over mock streams, and its tests kill every listed mutant.
+  'sp-decoder/src/audio/symphonia_reader',
   'sp-decoder/src/video/',                # Windows-only MF wrapper — fixture-tested
   # sp-gpu/src/win/: the Direct3D 11 calls of the SP-program-MAX compositor
   #   (#223 S1a) and its Spout sender + registry reader (S1b, over the C++
