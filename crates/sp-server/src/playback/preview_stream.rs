@@ -536,8 +536,11 @@ impl StreamShared {
     /// it (a frozen preview at HAVE_METADATA).
     pub fn settle_unwatched_run(&self) -> UnwatchedEnd {
         let _lifecycle = self.lifecycle_lock();
-        self.release_encoder();
-        UnwatchedEnd::Released
+        if !self.has_viewer() {
+            self.release_encoder();
+            return UnwatchedEnd::Released;
+        }
+        UnwatchedEnd::Restart
     }
 
     /// End a stopped child's stream for every viewer that may hold its init
@@ -551,7 +554,9 @@ impl StreamShared {
     /// produced nothing a viewer could hold, so viewers still waiting for an
     /// init keep their stream and simply receive the next one.
     pub fn end_stopped_stream(&self) {
-        self.relay.reset();
+        if self.relay.init().is_some() {
+            self.relay.close();
+        }
     }
 }
 
@@ -603,6 +608,7 @@ impl ViewerGuard {
     /// the encoder, or released the claim before this returns (the caller's
     /// `ensure_running` then claims a fresh one).
     pub fn subscribe(tap: &StreamTap) -> (ViewerGuard, Arc<FragmentRelay>) {
+        let _lifecycle = tap.shared.lifecycle_lock();
         tap.shared.viewers.fetch_add(1, Ordering::AcqRel);
         (
             ViewerGuard {

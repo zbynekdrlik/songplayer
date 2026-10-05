@@ -390,9 +390,6 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
                         label = shared.label(),
                         "preview-encoder: child exited with viewers present — respawning"
                     );
-                    if matches!(outcome, RunOutcome::ChildExited) {
-                        shared.relay().close();
-                    }
                     continue;
                 }
                 // Budget spent: close the relay so viewers see `Closed` and
