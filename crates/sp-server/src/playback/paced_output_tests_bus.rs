@@ -10,7 +10,7 @@ use crate::playback::frame_buf::SharedFrame;
 use crate::playback::pacer::{PacedFrame, Pacer, ServiceOutcome};
 use crate::playback::program_bus::{OfferOutcome, ProgramBus, ProgramJob, Take};
 use crate::playback::submit_handoff::{SUBMIT_HANDOFF_BOUND, SubmitJob, merge_pacing_stats};
-use crate::playback::wallclock::WallClock;
+use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_ndi::AudioFrame;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -96,7 +96,7 @@ fn queued(bus: &ProgramBus) -> Vec<(i64, u32)> {
 }
 
 /// Run `consumer` until it waits at wall time `now`.
-fn drain(handoff: &SharedHandoff, consumer: &mut PacedConsumer<BusOut>, now: i64) {
+fn drain<O: BoundaryOut>(handoff: &SharedHandoff, consumer: &mut PacedConsumer<O>, now: i64) {
     for _ in 0..64 {
         let step = handoff.step_now(now);
         if matches!(step, ConsumerStep::Wait(_) | ConsumerStep::Exit) {
@@ -188,4 +188,50 @@ fn a_playlist_off_program_feeds_the_bus_only_its_progress() {
         "the selected source's pair is taken"
     );
     assert_eq!(queued(&bus), vec![(b(4), 8)]);
+}
+
+/// A [`BoundaryOut`] whose delivery takes `cost_100ns` on the test's clock.
+struct SlowOut {
+    clk: SettableClock,
+    cost_100ns: i64,
+}
+
+impl BoundaryOut for SlowOut {
+    fn deliver(&mut self, _playlist_id: i64, _job: SubmitJob) {
+        self.clk.set(self.clk.get() + self.cost_100ns);
+    }
+}
+
+/// The consumer times each delivery on its own wall: its lateness from the
+/// stamp to the START of the delivery, its cost from start to done (the
+/// `iter_p99_us` of `merge_pacing_stats`), and the last delivery when it
+/// ENDED. A delivery that takes 5 ms reads 5 000 µs.
+#[test]
+fn a_delivery_s_cost_is_its_time_on_the_consumer_s_wall() {
+    let (_pacer_wall, clk) = WallClock::settable(0);
+    let wall = WallClock::new(Box::new(clk.clone()));
+    let handoff = SharedHandoff::new(SUBMIT_HANDOFF_BOUND);
+    let out = SlowOut {
+        clk: clk.clone(),
+        cost_100ns: 50_000,
+    };
+    let mut consumer = PacedConsumer::new(out, ON_PROGRAM, wall, black());
+    let feed = PacedFeed::attach(&handoff);
+    for k in 1..=3 {
+        clk.set(b(k));
+        handoff.offer(job(b(k)));
+        drain(&handoff, &mut consumer, b(k));
+    }
+    drop(feed);
+
+    let c = handoff.snapshot().0;
+    assert_eq!(c.submitted, 3);
+    assert_eq!(c.submit_p99_us(), 5_000, "each delivery took 5 ms");
+    assert_eq!(c.max_late_us, 0, "each delivery STARTED on its boundary");
+    assert_eq!(c.late_frames, 0);
+    assert_eq!(
+        c.last_submit_100ns,
+        b(3) + 50_000,
+        "the last delivery is stamped when it ended"
+    );
 }
