@@ -258,6 +258,10 @@ pub struct Pacer {
     jitter_idx: usize,
     repeats: u64,
     resyncs: u64,
+    /// #150: seeks counted at their first fresh frame
+    /// (`PacingStats::seeks`), and whether one is still waiting for it.
+    seeks: u64,
+    seek_settling: bool,
     relatches: u64,
     dropped: u64,
     /// Lag (whole grid slots the serviced boundary sat behind `floor(now)`) at
@@ -323,6 +327,8 @@ impl Pacer {
             jitter_idx: 0,
             repeats: 0,
             resyncs: 0,
+            seeks: 0,
+            seek_settling: false,
             relatches: 0,
             dropped: 0,
             last_lag_slots: 0,
@@ -566,6 +572,7 @@ impl Pacer {
 
         let outcome = if let Some(frame) = due {
             self.on_emit(emit_now, stamp_boundary);
+            self.count_settled_seek(); // #150
             sink.emit(&frame, &audio_frames, stamp_boundary, stamp_boundary);
             self.last_frame = Some(frame);
             ServiceOutcome::Emitted
@@ -817,6 +824,7 @@ impl Pacer {
             jitter_p99_us: self.jitter_p99_us(),
             repeats: self.repeats,
             resyncs: self.resyncs,
+            seeks: self.seeks,
             relatches: self.relatches,
             dropped: self.dropped,
             lag_slots: self.last_lag_slots,
