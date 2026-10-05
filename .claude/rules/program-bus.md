@@ -128,6 +128,19 @@ playlist output cut to it. Design record: #209 comment 5844972899.
   VBAN hand-off after its block's first packet was due, over VBAN's send
   latency L, #210 part 2; `vban-out.md` "The program boundary's timing"). `ProgramOutput::submit` is only the tests' shorthand
   (`#[cfg(test)]`, no clock, returns the stamp).
+- #223 S2: between `feed_vban` and `submit_video`, `serve` offers the
+  boundary to `SP-program-MAX` (`offer_max` → `program_max::MaxOut`, on
+  `ProgramBus::max()`): the NATIVE picture of a forwarded pair, both native
+  pictures + the weight of a fade, black for the standby, never the
+  1920×1080 canvas. `Arc` bumps into a 2-deep coalescing queue; the
+  `program-max` thread composes on the GPU and sends over Spout on its own
+  time, so a stalled MAX never delays VBAN or the NDI submit
+  (`program_output_tests_max.rs`). `start_program` calls
+  `program_max::start_max` BEFORE it spawns the `SP-program` thread (the
+  setting `program_max_enabled` is applied first), and the Windows thread
+  builds its output `.with_max(bus.max().clone())`. Details, the telemetry
+  (`max` on `GET /api/v1/program`) and the box gate: `gpu-max.md` "Runtime
+  wiring".
 - `start_program` runs in `lib.rs::start` AFTER the #196 startup senders, so
   `SP-program` is created after every playlist sender and the per-playlist
   name→port order does not change across restarts. Exception: when the
@@ -240,9 +253,11 @@ included, is comment 5872871751).
     3.1 MB write on the `SP-program` thread before the bands start, ~0.3 ms
     at FHD, ~4× that on a 4K canvas) — the bands could initialise their own
     part instead (it needs `MaybeUninit` slices, i.e. `unsafe`).
-- **Out of this slice** (later #223 slices, comment 5872871751): the
-  `SP-program-MAX` output for the LED walls (max(FHD, native)), its
-  `MaxSide`, Spout, the zero-receiver gate, downloads above 1440p.
+- **Out of this slice** (later #223 slices, comment 5872871751; revision
+  3, 5979609879): `SP-program-MAX` is a fixed 3840×2160 picture composed on
+  the GPU and sent over Spout since S2 (`gpu-max.md` "Runtime wiring"); its
+  `MaxSide` holder plumbing (S3), the source FHD stage, the zero-receiver
+  gate, NDI MAX and downloads above 1440p are later slices.
 - Tests: `program_output_tests_fhd.rs` (the production canvas: 2560×1440,
   1280×720 and 2560×1080 sources → 1920×1080 stride 1920, the quadrants
   scaled not cropped, the 21:9 bars; pass-through as the same allocation,
@@ -265,7 +280,7 @@ included, is comment 5872871751).
   submitted, connections, last_stamp_100ns, timing{…} (#210, the sender's
   per-boundary stage timing, `vban-out.md`)}, vban{…} (#210), input{…}
   (#212), remote{…} (#213), transition{…} + follow{…} (#215),
-  legacy_cg{shown} (#221 L4a)}`;
+  legacy_cg{shown} (#221 L4a), max{…} (#223 S2, `gpu-max.md`)}`;
   `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404
   unknown playlist. Source `-1` is the #212 NDI input "OBS manuál" (404 unless
   it is enabled with a source) — see `ndi-input.md`.

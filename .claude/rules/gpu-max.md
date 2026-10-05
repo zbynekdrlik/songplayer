@@ -1,16 +1,21 @@
 ---
 paths:
   - "crates/sp-gpu/**"
+  - "crates/sp-server/src/playback/program_max*.rs"
+  - "crates/sp-server/src/playback/program_output_tests_max.rs"
+  - "crates/sp-server/src/api/program_tests_max.rs"
+  - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
 ---
 
-# The `SP-program-MAX` GPU compositor and Spout sender: `crates/sp-gpu` (#223 S1a, S1b)
+# The `SP-program-MAX` GPU compositor and Spout sender: `crates/sp-gpu` (#223 S1a, S1b) and its runtime wiring (S2)
 
 Design: #223 revision 3, R3-2 (comment 5979609879). `SP-program-MAX` is a
 FIXED 3840×2160 canvas (owner, 3.10.2026: "4k", "both outputs static"). A 4K
 fade costs ~40–45 ms on the CPU, over the 33.3 ms slot, so MAX is composed on
 the GPU. This crate is the compositor (device, upload, draw, readback) and,
-since S1b, its Spout sender (below); S2 adds the `program-max` thread and the
-`MaxJob` hand-off (sp-server).
+since S1b, its Spout sender (below); S2 wires both into the program output
+(sp-server `playback/program_max.rs` + `program_max_worker.rs`, "Runtime
+wiring" below).
 
 ## What one boundary draws (`composition.rs`)
 
@@ -162,12 +167,22 @@ anchors are on #223 (comment 5984577044).
   passes no `/MANIFEST` flag, so link.exe's default writes a side-by-side
   `<exe>.manifest` FILE with that dependency: that is what lets the test
   exes start. It never embeds a second manifest. The Tauri app embeds its
-  own (tauri-build's declares Common-Controls 6.0), which wins over the side
-  file. S2 checks the shipped exe's EMBEDDED manifest declares
-  Common-Controls 6.0 (if it ever did not, the app would not start).
-- BSD-2 asks for the notice in the documentation of a binary distribution:
-  when S2 links sp-gpu into the app, the installer/about must carry
-  `vendor/spout2/LICENSE`.
+  own, which wins over the side file: `src-tauri/build.rs` calls
+  `tauri_build::build()` with default attributes, and tauri-build 2.x
+  `WindowsAttributes::new()` embeds `windows-app-manifest.xml` (resource
+  #1, RT_MANIFEST), which depends on `Microsoft.Windows.Common-Controls`
+  6.0.0.0 (read in tauri-build 2.5.6 and 2.7.0). Since S2 SongPlayer.exe
+  links sp-gpu, so the CI step "Check SongPlayer.exe declares
+  Common-Controls 6.0" (`ci.yml`, Build Tauri job) reads the built exe's
+  embedded manifest back with the Windows SDK's `mt.exe
+  -inputresource:<exe>;#1` and fails without the declaration: a build.rs
+  or tauri-build change can never ship an exe that does not start.
+- BSD-2 asks for the notice in the documentation of a binary distribution.
+  Since S2 the installer ships `src-tauri/resources/THIRD-PARTY-NOTICES.txt`
+  (`tauri.conf.json` `bundle.resources`), which holds
+  `vendor/spout2/LICENSE` verbatim; `tests/notice.rs` (every platform)
+  fails if it differs from the vendored LICENSE or is not bundled. A
+  Spout2 bump re-copies the LICENSE into it.
 
 ### The sender
 
@@ -317,21 +332,139 @@ WARP has supported shared resources since Windows 8 (the
 D3D11_RESOURCE_MISC_FLAG docs); the second-device test FAILS with the
 HRESULT if it ever refuses, it never skips.
 
-### The box checks S2 runs (win-resolume)
+## Runtime wiring: `SP-program-MAX` in the program output (#223 S2)
 
-- `spout_sender_info("SP-program-MAX")` after the first send: 3840×2160,
-  format 87, the host path = the installed `songplayer.exe`;
-- Arena `GET /api/v1/sources` lists `SPOUT_SP-program-MAX` (category "Spout
-  Servers"); on a scratch layer (Bridge.avc saved and restored) it shows the
-  program at 30 frames/s, with Arena's FPS held and its CPU change measured
-  (R3-2 S2 gate; M0 moved this measurement to S2);
-- `max.send_us_p99` and `SP-program` / VBAN timing unchanged (health deltas
-  0);
-- the exe's EMBEDDED manifest declares Common-Controls 6.0 (the SDK's
-  `TaskDialogIndirect` import), and the installer carries the Spout2 BSD-2
-  notice.
+Design: revision 3 R3-1 (what MAX shows) and R3-2 (the `program-max`
+thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
+#223 comment 5987322560.
 
-## Telemetry (`ComposeStats`, for S2's `max.*_p99`)
+### What MAX shows, and where it is offered (`program_output.rs`)
+
+- `ProgramOutput::serve` = `split` → `limit` → `feed_vban` → **`offer_max`**
+  → `submit_video`. VBAN has the boundary's block before ANY MAX work, and
+  MAX has its job before the canvas fit and the NDI submit
+  (`program_output_tests_max.rs`: a hook inside the offer sees VBAN's block
+  and no NDI send, for all three job kinds).
+- The job (`Pair::max_job`, `program_max::MaxJob`) is the NATIVE picture,
+  never the 1920×1080 canvas (R3-1): a forwarded source pair → `Picture`
+  (its own `SharedFrame`, an `Arc` bump, its own width/height/stride); a
+  fade boundary → `Fade { from, to, weight_q8 }` (both native pictures, a
+  missing side `None` = black, the weight `MixJob::weight_q8`); the
+  program's standby → `Black`. Every job carries `SP-program`'s stamp (Spout
+  has no timecode; the stamp names the boundary). Held / paused / seek /
+  starve pictures reach MAX as whatever picture their source pair carries;
+  the `MaxSide` plumbing that keeps them native is S3.
+
+### The hand-off (`program_max.rs`, `MaxOut`, one per process on `ProgramBus::max`)
+
+- `offer_with(make)`: one short lock; `make` (the `Arc` bumps) runs only
+  when the job would be taken (on, a `program-max` thread attached, not
+  stopped). The queue is the `SubmitQueue` (`MAX_HANDOFF_BOUND` = 2): a full
+  queue drops its OLDEST job and counts it (`coalesced`). The program thread
+  never waits for the consumer: a stalled consumer only coalesces
+  (`a_stalled_max_thread_never_delays_vban_or_the_ndi_submit`: the fake
+  GPU's compose held behind a gate, six more boundaries reach NDI and VBAN
+  within the bound, `coalesced` 4, MAX then draws boundary 0 and the newest
+  two).
+- The consumer's `next(holding)`: `Stop` wins; while off, `Release` when it
+  holds GPU objects; else the next job. `set_enabled(false)` drops the
+  queued jobs and wakes it; `attach()` returns the guard whose drop stops
+  the offers (a dead thread never leaves a stale "running").
+- The queue and the stats are two locks: an API read never contends with
+  the program thread's offer; the p99 windows are copied under the lock and
+  sorted after it.
+
+### The `program-max` thread (`program_max_worker.rs`)
+
+- `run_max_loop(out, gpu)`: `attach`, then `next` → `serve` / `release` /
+  exit. The GPU is the `MaxGpu` trait (`compositor()`, `sender(&c)`, each
+  object `MaxCompositor::compose` / `MaxSender::send`), so every decision is
+  Linux-tested on a fake (`program_max_worker_tests.rs`). Production is
+  `SpoutGpu` (`Compositor::new()` on the picked adapter, `SpoutSender::new`
+  = `SP-program-MAX`), spawned by `start_max` on Windows as thread
+  `program-max`.
+- Both objects are built ON the thread at the first job (neither is `Send`)
+  and dropped sender first (it holds references into the compositor's
+  device and render target).
+- **Picture ids (`PictureIds`).** S1a's residency skips the upload of an id
+  the slot holds, so an id must never name other bytes: ids come from a
+  counter. A picture that is the same allocation (`SharedFrame::ptr_eq`) as
+  one of the last composed boundary's keeps its id; those `Arc`s are held
+  by `PictureIds`, so none can be freed and its address reused while
+  compared. A held / paused / repeated frame is not uploaded again. Never
+  key an id on an address or on address + stamp (the latter re-uploads
+  every held picture).
+- **Failures** (`serve` → `recover`, never a panic):
+  - a lost device (compose, send or a build) drops both; rebuilt on the
+    next job, no wait (`device_resets`);
+  - a refused sender (`SpoutNotRegistered`, `SpoutNameTaken`: `is_refusal`)
+    drops the sender only; a new one after `MAX_RETRY_BACKOFF` = 3 s
+    (`sender_backoffs`), since an immediate retry is refused the same way
+    and each makes a new 4K shared texture;
+  - any failed build (`NoAdapter`, a shader, a sender that could not open)
+    waits the same backoff: never a device creation per boundary;
+  - any other failure (a picture that is not whole NV12, one frame Spout
+    lost) costs that boundary only;
+  - `Unsupported` (off Windows) is final: never built again.
+  Every failure counts `failed`; a skipped boundary during a backoff too.
+  The WARN `program max: a boundary did not go out` fires once per new
+  failure text (`record_failed` returns whether the state changed), the
+  INFO `program max: boundaries go out` once per recovery.
+
+### The setting and the telemetry
+
+- `program_max_enabled` (`sp_core::config::program_max_enabled`): ON unless
+  it says exactly `"false"` (the owner decided MAX exists). `start_max`
+  (`start_program`, before the `SP-program` thread) applies it FIRST, so an
+  off setting never builds a sender; `run_max_settings_task` re-reads it
+  every 5 s (`MAX_SETTINGS_POLL`; the poll is a parameter, the test uses
+  5 ms) and, on shutdown, stops the thread. Off = no offers, the thread
+  drops the sender (Spout unregisters `SP-program-MAX`) and the compositor.
+  Toggle it with `PUT /api/v1/settings {"settings": {"program_max_enabled":
+  "false"}}`; no restart.
+- `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width:
+  3840, height: 2160, submitted, coalesced, failed, upload_us_p99,
+  draw_us_p99, send_us_p99, device_resets, sender_backoffs, spout_name}`
+  (`MaxStatus`). `state` (`state_label`): `unsupported` (off Windows: no
+  thread) wins, then `off` (the setting), then the thread: `running` (it
+  takes jobs and its last boundary went out), `error: <why>` (its last
+  boundary did not; `error: the program-max thread is not running` before
+  it attached or after it ended). `submitted + failed` = the jobs it took.
+  The p99s cover the last 900 sent frames (30 s). The mock
+  (`e2e/mock-api.mjs`) mirrors the shape with `state: "unsupported"`.
+
+### The WARP proof (`program_max_tests_warp.rs`, Windows only)
+
+A `ProgramOutput` (mock NDI) offers to a real `run_max_loop` whose GPU is
+`Compositor::new_warp()` + `SpoutSender::with_name(…, "SP-program-MAX-s2-warp-test")`.
+A 1280×720 Source boundary, then a 21:9 → 720p Mix boundary (slot 4 of 9):
+Spout's registry lists the sender at 3840×2160 format 87, and its shared
+texture read on a SECOND WARP device (`sp_gpu::read_shared_texture`,
+doc-hidden, `win/receiver.rs`) matches S1a's reference within its tolerance;
+after the stop the sender is unlisted. Each picture is served TWICE and read
+after the second went out: the readback takes no Spout mutex, and the second
+draw's wait for the GPU proves the first send's copy done (the second copy
+writes the same bytes).
+
+### The box gate after the deploy (the main session runs it)
+
+- `GET /api/v1/program` → `max.state` reads `running` with `submitted`
+  rising, and Arena's `GET /api/v1/sources` lists `SPOUT_SP-program-MAX`
+  (category "Spout Servers"); `spout_sender_info("SP-program-MAX")`:
+  3840×2160, format 87, host path = the installed `SongPlayer.exe`;
+- SP-program's `health.timing` (`ready_late_us_max`,
+  `vban_feed_late_us_max`, `submit_us_max`, the `_over_*` counts) and
+  `vban` (`late_sends`, `late_max_us`, `blocks_dropped`) are unchanged
+  against the pre-deploy numbers over the same window;
+- the MAX p99s are within budget: `upload_us_p99 + draw_us_p99 +
+  send_us_p99 < 10 000` µs, `max.coalesced` +0 and `failed` +0 outside a
+  restart;
+- a scratch Arena layer showing the Spout source holds Arena's FPS
+  (composition saved and restored; Bridge.avc saved and restored);
+- the CI step proved the exe's embedded manifest (Common-Controls 6.0), and
+  the installer carries `resources/THIRD-PARTY-NOTICES.txt`.
+
+## Telemetry (`ComposeStats`, behind `max.*_p99`)
 
 - `upload_us`: the CPU time of this call's uploads, texture creation
   included.
@@ -387,3 +520,11 @@ build step, and WARP and the RTX run the same source. A compile error is
   - `GetData` maps `S_FALSE` to `Ok`: read the BOOL it writes.
 - `tests/warp.rs` is `#![cfg(windows)]`. The `Build (Windows)` job runs it
   (`cargo test --workspace`). Linux compiles it to an empty test binary.
+- S2's sp-server side (`playback/program_max.rs`, `program_max_worker.rs`)
+  is NOT excluded from the mutation gate: every decision runs on Linux over
+  the fake GPU. Only the Windows glue is `mutants::skip`: `spawn_max_thread`
+  (`#[cfg(windows)]`), `SpoutGpu::sender` and the two one-line trait impls
+  on `Compositor` / `SpoutSender` (off Windows no compositor exists to call
+  them on). `SpoutGpu::compositor` stays gated: off Windows it is
+  `Unsupported`, which `off_windows_the_production_gpu_is_unsupported`
+  pins through the worker.
