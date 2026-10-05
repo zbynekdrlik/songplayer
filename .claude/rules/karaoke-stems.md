@@ -81,12 +81,17 @@ through VBAN (2012 of 3.53M frames at 0 dBFS, finding 5847119155).
 - **Bit-identical at rest.** A gain of exactly 1.0 gives `x · 1.0 = x`.
   The state is the reduction, not the gain: an f32 gain recovering toward 1.0
   stalls below unity forever once its step d·(1 − R) is under half an ulp (up
-  to ~1200 ulp below 1.0 at 48 kHz), but a decaying reduction does not. Once `1 − reduction` rounds to 1.0, the
-  reduction is dropped to 0 (no subnormal tail).
+  to ~1200 ulp below 1.0 at 48 kHz), but a decaying reduction does not.
+  Once `1 − reduction` rounds to 1.0, the reduction is dropped to 0 (no
+  subnormal tail).
 - **State.** A field of the reader, so it carries across blocks. `seek`
   resets it, and a new song opens a new reader.
 - **On the box:** the 1 Hz `stem-mix level` line ends with `limited=N`, the
-  frames scaled since the song opened.
+  frames scaled since the song opened. That is time UNDER limiting: one over
+  needing a 6 dB reduction adds its whole release tail, ~39 900 frames
+  (~0.8 s) at 48 kHz. It is not a count of overs, and it cannot be compared
+  with the 0 dBFS frame count of a VBAN capture (finding 5847119155). Check
+  the fix with such a capture: 0 samples at |x| ≥ 0.999.
 
 **Why it is not under `audio/`.** `.cargo/mutants.toml` excludes all of
 `sp-decoder/src/audio/` (the Symphonia wrapper), so pure DSP placed there is

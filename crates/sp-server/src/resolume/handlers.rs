@@ -690,8 +690,8 @@ mod tests {
         (server, driver, ep)
     }
 
-    /// Today every write of the batch fails at once with `endpoint cache
-    /// empty` and nothing reaches the wall. The batch must go out on the
+    /// Before #217 every write of the batch failed at once with `endpoint
+    /// cache empty` and nothing reached the wall. The batch must go out on the
     /// endpoint it was handed.
     #[tokio::test]
     async fn a_text_batch_goes_out_after_the_endpoint_cache_empties() {

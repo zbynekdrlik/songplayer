@@ -47,7 +47,9 @@
 //! address of the first target atomic, which `playback/mix.rs` also logs for the
 //! control's live sets, so the log proves whether this reader holds the SAME
 //! atomics the faders write. `limited` counts the frames the #184 limiter has
-//! scaled since the song opened.
+//! scaled since the song opened: every frame under a gain reduction, so one
+//! over adds its release tail too (~0.8 s at 48 kHz for a 6 dB reduction). It
+//! is time under limiting, not a count of overs or of clipped samples.
 
 use std::collections::VecDeque;
 use std::sync::Arc;

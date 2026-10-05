@@ -208,8 +208,8 @@ fn release_fixture() -> Vec<f32> {
     s
 }
 
-/// A 1.8× over (three streams of a 100 Hz sine at 0.6, gain 1 each): today
-/// 1208 of its 1920 samples are clamped flat at exactly ±1.0. Limited, no
+/// A 1.8× over (three streams of a 100 Hz sine at 0.6, gain 1 each): before
+/// #184 the clamp cut 1208 of its 1920 samples flat at ±1.0. Limited, no
 /// sample reaches full scale; every sample stays at or under the ceiling
 /// (0.98, plus one f32 rounding of the gain).
 #[test]
@@ -254,8 +254,8 @@ fn both_channels_take_the_over_frames_gain() {
 
 /// Instant attack, smooth release: the over frame comes out at the ceiling,
 /// then the gain recovers EXPONENTIALLY (reduction 0.5 × 0.98^k at frame
-/// 3 + k), never jumping back to unity. Today the clamp hands frame 4 its full
-/// 0.5 again, a gain jump of +0.49 in one frame. The stated bound: the gain
+/// 3 + k), never jumping back to unity. Before #184 the clamp handed frame 4
+/// its full 0.5 again, a gain jump of +0.49 in one frame. The stated bound: the gain
 /// rises by at most 1/release_frames = 1/50 per frame (the reduction ≤ 1 times
 /// 1 − 0.98), and never falls while the input stays quiet.
 #[test]
@@ -299,8 +299,8 @@ fn the_gain_recovers_at_the_release_rate_after_an_over() {
 /// Once the release has run out the mix is bit-identical again. In f32 the
 /// gain 1 − 0.5 × 0.98^k first rounds to exactly 1.0 at frame 827 (scratch
 /// model of the limiter); from there every frame is `x · 1.0 = x`, bit for
-/// bit. Frame 826 is the last one still (slightly) reduced. Today frame 826
-/// is already untouched.
+/// bit. Frame 826 is the last one still (slightly) reduced. Before #184 (no
+/// release, the clamp) frame 826 was already untouched.
 #[test]
 fn the_mix_is_bit_identical_again_once_the_release_ends() {
     let input = release_fixture();
