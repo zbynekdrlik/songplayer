@@ -15,10 +15,14 @@
 //! must reopen the file in software and go on where it stopped, with no
 //! picture lost or handed over twice.
 //!
-//! The readback of a GPU picture never runs on CI through a decoder (WARP
-//! decodes nothing), so `a_dxgi_surface_is_read_back_into_the_software_layout`
-//! runs it on a real DXGI surface: a WARP NV12 texture TALLER than the
-//! picture (decoders align theirs), wrapped as a decoder wraps its output.
+//! The readback of a GPU picture never runs on CI through a decoder, so
+//! `a_dxgi_surface_is_read_back_into_the_software_layout` runs it on a real
+//! DXGI surface: a WARP NV12 texture TALLER than the picture (decoders align
+//! theirs), wrapped as a decoder wraps its output. The texture is made on a
+//! plain WARP device (`plain_warp_device`): `windows-latest`'s WARP refuses
+//! the video API (`D3D11_CREATE_DEVICE_VIDEO_SUPPORT`, DXGI_ERROR_UNSUPPORTED,
+//! CI run 37293259981), and neither making an NV12 texture nor mapping it
+//! needs that API.
 
 #![cfg(windows)]
 
@@ -26,11 +30,17 @@ use sp_decoder::{
     DecodeMode, DecodePath, DecodedVideoFrame, FallbackStage, MediaFoundationVideoReader,
     MediaStream, VideoStream, hw_counters, read_texture_as_decoded_sample,
 };
+use windows::Win32::Foundation::TRUE;
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_DECODER, D3D11_FORMAT_SUPPORT_TEXTURE2D, D3D11_SUBRESOURCE_DATA,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+    D3D11_BIND_DECODER, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_FORMAT_SUPPORT_TEXTURE2D,
+    D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+    D3D11CreateDevice, ID3D11Device, ID3D11Multithread,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_NV12, DXGI_SAMPLE_DESC};
+use windows::core::Interface;
 
 /// The fixture's own picture: 160×120 (MF may pad the height to 128).
 const W: usize = 160;
@@ -224,12 +234,40 @@ fn a_hardware_reader_seeks_to_the_picture_software_seeks_to() {
     );
 }
 
+/// A WARP device WITHOUT the video API: BGRA support at feature level 11.1
+/// or 11.0 (the compositor's WARP device, `sp_gpu`'s `DeviceUse::Compose`,
+/// which CI builds), multithread-protected like the reader's video device.
+/// It is the device of the readback test's texture, not a decode device.
+fn plain_warp_device() -> ID3D11Device {
+    let mut device = None;
+    unsafe {
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_WARP,
+            None,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            Some(&[D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0][..]),
+            D3D11_SDK_VERSION,
+            Some(&mut device),
+            None,
+            None,
+        )
+    }
+    .expect("a WARP device without the video API");
+    let device: ID3D11Device = device.expect("D3D11CreateDevice gave a device");
+    let multithread: ID3D11Multithread = device.cast().expect("ID3D11Multithread");
+    // Returns whether the protection was on before; it is on after.
+    let _was_on = unsafe { multithread.SetMultithreadProtected(TRUE) };
+    device
+}
+
 /// A WARP NV12 texture of 160×128 (as a decoder aligns a 160×120 picture)
 /// whose bytes each say where they are, read back as a 160×120 picture: the
 /// first 120 luma rows, then the first 60 UV rows of the UV plane that
 /// starts after ALL 128 luma rows, packed at a stride of 160. This is the
 /// layout `Lock2DSize` maps (Direct3D's NV12), which no decoder reaches on
-/// CI.
+/// CI. The texture's device has no video API (`plain_warp_device`); if WARP
+/// cannot make NV12 textures, the test FAILS on that, it never skips.
 #[test]
 fn a_dxgi_surface_is_read_back_into_the_software_layout() {
     // The pure crate's constants are the SDK's.
@@ -243,8 +281,7 @@ fn a_dxgi_surface_is_read_back_into_the_software_layout() {
     );
     const TEXTURE_W: usize = 160;
     const TEXTURE_H: usize = 128;
-    let video = sp_gpu::VideoDevice::new_warp().expect("a video device on WARP");
-    let device = video.device();
+    let device = plain_warp_device();
     let support =
         unsafe { device.CheckFormatSupport(DXGI_FORMAT_NV12) }.expect("WARP answers for NV12");
     assert_ne!(

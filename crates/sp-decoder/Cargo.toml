@@ -30,3 +30,12 @@ windows = { version = "0.58", features = [
 # Placeholder crate that defines the `mutants::skip` attribute as a no-op,
 # letting cargo-mutants exclude specific functions from mutation testing.
 mutants = "0.0.4"
+
+# #223 S3b: tests/mf_hw_decode.rs creates its own WARP device
+# (`D3D11CreateDevice` needs Direct3D + Dxgi) and names DXGI_ERROR_UNSUPPORTED,
+# WARP's answer to the video API (the same `windows` 0.58, two more features).
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Dxgi",
+] }
