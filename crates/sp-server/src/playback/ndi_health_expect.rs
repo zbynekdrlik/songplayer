@@ -33,18 +33,14 @@ pub(crate) const PLAYLIST_RECEIVER_EXPECTED: bool = false;
 /// and `SP-program` has no NDI receiver.
 pub(crate) const PROGRAM_NO_RECEIVER_REASON: &str = "no NDI receiver on SP-program";
 
-/// The receiver count an output's HEALTH is judged on: the real one where a
-/// receiver is expected; where none is, 0 receivers is normal, so the count
-/// is taken as satisfied (at least 1) and never makes the output dark,
+/// The receiver count a playlist output's HEALTH is judged on: it expects
+/// no receiver ([`PLAYLIST_RECEIVER_EXPECTED`]), so 0 is normal and the count
+/// is taken as satisfied (at least 1). It never makes the output dark,
 /// flagged after a restart or DEGRADED in its lock — an underrun or a stalled
 /// submit still does. The snapshot, the logs and the persisted count keep the
 /// real one.
-pub(crate) fn judged_connections(connections: i32, receiver_expected: bool) -> i32 {
-    if receiver_expected {
-        connections
-    } else {
-        connections.max(1)
-    }
+pub(crate) fn judged_connections(connections: i32) -> i32 {
+    connections.max(1)
 }
 
 /// `SP-program`'s degraded reason: [`PROGRAM_NO_RECEIVER_REASON`] while a

@@ -4,28 +4,17 @@
 //! SP-program's reason on `GET /api/v1/program` in `api/program_tests.rs`.
 //! Wired via `#[cfg(test)] #[path = "ndi_health_expect_tests.rs"] mod tests;`.
 
-use super::{
-    PLAYLIST_RECEIVER_EXPECTED, PROGRAM_NO_RECEIVER_REASON, judged_connections,
-    program_degraded_reason,
-};
-
-/// Where a receiver is expected the real count is judged; where none is, 0
-/// (or the SDK's -1) is taken as satisfied, and a real count passes as it is.
-#[test]
-fn the_count_is_judged_satisfied_only_where_no_receiver_is_expected() {
-    assert_eq!(judged_connections(0, true), 0);
-    assert_eq!(judged_connections(-1, true), -1);
-    assert_eq!(judged_connections(3, true), 3);
-    assert_eq!(judged_connections(0, false), 1);
-    assert_eq!(judged_connections(-1, false), 1);
-    assert_eq!(judged_connections(3, false), 3);
-}
+use super::{PROGRAM_NO_RECEIVER_REASON, judged_connections, program_degraded_reason};
 
 /// #221 B4 step 6: a playlist's own output expects no receiver, so its 0
-/// receivers is judged satisfied.
+/// receivers (or the SDK's -1) is judged satisfied, and a real count passes
+/// as it is.
 #[test]
-fn a_playlist_output_expects_no_receiver() {
-    assert_eq!(judged_connections(0, PLAYLIST_RECEIVER_EXPECTED), 1);
+fn a_playlist_output_s_count_is_judged_satisfied() {
+    assert_eq!(judged_connections(0), 1);
+    assert_eq!(judged_connections(-1), 1);
+    assert_eq!(judged_connections(1), 1);
+    assert_eq!(judged_connections(3), 3);
 }
 
 /// SP-program expects a receiver while any source is on program (a

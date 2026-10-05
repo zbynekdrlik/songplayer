@@ -37,7 +37,10 @@
 //!   `ShowSubtitles` dispatch and the Presenter push (`position_update.rs`),
 //!   the song-end clear (`clear_lyrics.rs`), the title timers
 //!   (`title_timers.rs`) and a re-sync's title and lines (`recovery.rs`). A
-//!   playlist played off program by hand writes none of them.
+//!   playlist played off program by hand then writes none of them. With no
+//!   owner ("OBS manuál" on program, nothing on air) nothing is restricted:
+//!   such a playlist feeds the Presenter as before the owner (a residual,
+//!   `program-bus.md` "One wall owner").
 //! - A pipeline created after its playlist went on air (a runtime
 //!   `EnsurePipeline`) goes on program itself (`runtime_pipeline.rs`). An ON
 //!   for a playlist with NO pipeline (the #196 startup senders ran out of

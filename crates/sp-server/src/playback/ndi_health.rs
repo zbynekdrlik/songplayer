@@ -595,7 +595,7 @@ impl crate::playback::PlaybackEngine {
         // SP-program's own receiver is the expected one
         // (`program_degraded_reason`).
         let expected = PLAYLIST_RECEIVER_EXPECTED;
-        let judged = judged_connections(connections, expected);
+        let judged = judged_connections(connections);
         let base_degraded_reason = compute_degraded_reason(
             &canonical_state,
             judged,
