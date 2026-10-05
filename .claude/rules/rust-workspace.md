@@ -380,8 +380,8 @@ every worker is done with it. The pieces that made that hold, and testable:
 A multi-thread tokio worker runs the task it spawned LAST first (its LIFO
 slot) and other workers may steal the rest, so two tasks spawned back to
 back can start in either order. The OBS client once spawned a task per
-facade call, so a playlist press's mirror could reach cg OBS after a later
-press. Anything whose ORDER matters goes through ONE task that takes the
+facade call, so a press's switch could reach cg OBS after a later press's.
+Anything whose ORDER matters goes through ONE task that takes the
 items in order (`obs::remote_call::run_calls`: write each frame, then take
 the next; a scene switch's answer is awaited first because cg OBS runs its
 messages on a thread pool; only a getter's answer wait is spawned). A test
@@ -728,8 +728,9 @@ the test that kills each one BEFORE CI's mutation gate runs.
   listed `*`→`+` and `*`→`/`; with the 2 s default the `+` mutant is
   EQUIVALENT (2 + 2 = 2 × 2) and would survive the gate. Write such a
   constant as a literal (`Duration::from_secs(4)`) and pin the relation in
-  a test (`MIRROR_EXTRA_WAIT == DEFAULT_RESPONSE_TIMEOUT * 2`; a runtime
-  `Duration * u32` is fine there, it is not `const`).
+  a test (`MIRROR_EXTRA_WAIT == DEFAULT_RESPONSE_TIMEOUT * 2`, a constant
+  since deleted with the #221 mirror; a runtime `Duration * u32` is fine
+  there, it is not `const`).
 - `(at - plane) % ds` where `plane` is a multiple of `ds` (a plane or row
   edge): the `-`→`+` mutant gives the SAME remainder, so it is equivalent
   and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,

@@ -81,8 +81,14 @@ Rules for every post-deploy spec:
 - **#221 L3: the scene driver is SongPlayer's facade** (`FACADE_WS_URL`,
   :4456). **#221 L4b:** `/api/v1/status.active_scene` /
   `active_playlist_ids` are SongPlayer's own program (the resolver, and the
-  on-air set = SP-program's playlist ∪ the one cg OBS was told to show).
-  Right after `switchScene` returns, the previous playlist is still on air
-  until cg OBS answers the mirror: wait for the set to settle (at most one
-  playlist; `waitEngineActiveScene`, the A/V gate's `length === 1` poll),
-  never read it once.
+  on-air set = SP-program's playlist alone since B4 step 6: none for "OBS
+  manuál"). The playback authority applies a switch a moment after the
+  facade answers it: wait for the engine to reach the scene
+  (`waitEngineActiveScene`, the A/V gate's `length === 1` poll), never read
+  it once.
+- **#221 B4 step 6: a receiver is checked on `SP-program`, never on a
+  playlist's own output** (it has no consumer any more): poll `GET
+  /api/v1/program` through `ndi-health-gate.ts::programReceiverVerdict` (a
+  source on program, `health.connections > 0`, `degraded_reason` null), as
+  `post-deploy.spec.ts` and `post-deploy-dabing.spec.ts` do. A playlist
+  output's `connections` on `/api/v1/ndi/health` is 0 normally now.

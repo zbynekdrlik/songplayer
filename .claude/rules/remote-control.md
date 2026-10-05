@@ -3,7 +3,6 @@ paths:
   - "crates/sp-server/src/remote/**"
   - "crates/sp-server/src/playback/program_switch*.rs"
   - "crates/sp-server/src/playback/scene_catalog*.rs"
-  - "crates/sp-server/src/playback/legacy_cg*.rs"
   - "crates/sp-server/src/api/program_tests_switch.rs"
   - "crates/sp-server/src/obs/remote_call.rs"
   - "crates/sp-server/tests/remote_control.rs"
@@ -161,10 +160,11 @@ come from `SP-program`, never from cg OBS.
 - `remote/studio_events.rs` (#221 L3) holds the facade's OWN events (see
   "Program feedback" below): `FacadeEvent`, `run_program_feedback`,
   `announce_transition`, `wait_transition_end`.
-- `remote/map.rs` (pure) is now only the #215 OBS follow's scene →
-  `SceneAction` rule. Its `KeepReason` labels (`not_switched`,
-  `input_inactive`) are shared with the switch path.
-- `playback/program_switch.rs` is the ONE switch path of a press (below).
+- `playback/program_switch.rs` is the ONE switch path of a press (below);
+  its keep reasons are its own constants (`NOT_SWITCHED`,
+  `INPUT_INACTIVE`, `CATALOG_FAILED`, `PERSIST_FAILED`). #221 L5 deleted
+  `remote/map.rs` (the OBS follow's scene → `SceneAction` rule) with the
+  follow.
   `playback/scene_catalog.rs` says which scene is a playlist's.
 - `remote/session.rs` runs one client, in the codec its handshake picked, in
   a `select!` that is `biased` toward events: cg OBS's, then the facade's
@@ -193,12 +193,12 @@ come from `SP-program`, never from cg OBS.
   - #221 deleted `RemoteCall::ScenePlaylists` (the cg scene-item lookup):
     the facade never asks cg OBS which playlists a scene shows.
   - **The newest press reaches cg OBS last (#221 review rounds 1–5)** — for
-    switches cg OBS answers within the OBS client's 2 s (see Residuals). The
-    connection loop hands every `Remote` call to ONE forwarder per connection
-    (`remote_call::forwarder` → `run_calls`, in the connection's task set).
-    A playlist press's mirror is not awaited by the facade, so each of these
-    traps would let it land after a later press and leave cg OBS on the
-    older scene:
+    switches cg OBS answers within the OBS client's 2 s (see Residuals).
+    Since B4 step 6 only a MANUAL press switches cg OBS; a playlist press
+    sends it nothing. The connection loop hands every `Remote` call to ONE
+    forwarder per connection (`remote_call::forwarder` → `run_calls`, in
+    the connection's task set). Each of these traps would let an older
+    switch land after a newer one and leave cg OBS on the older scene:
     - **a task PER call** (the #213 shape) can start the newest first: a
       multi-thread tokio worker runs the task it spawned last from its LIFO
       slot. The forwarder writes each frame (`Dispatcher::send`) before it
@@ -210,34 +210,23 @@ come from `SP-program`, never from cg OBS.
       `SetCurrentProgramScene`, at most 2 s) before it writes the next call;
       a getter's answer is awaited in a task of its own.
 
-  - **A superseded switch is never sent (round 3, narrowed in round 4).**
-    While cg OBS answers slowly (its UI thread busy), each queued switch
-    would hold the forwarder up to 2 s, so the newest mirror could wait
-    behind them until its waiter gave up (`wait_mirror`) and be skipped. So
-    a switch with a later, still wanted MIRROR queued behind it
-    (`RemoteCall::Request.supersedes`, set only by `program_switch`'s mirror
-    through `Upstream::enqueue(…, true)`) is
-    answered with nothing and never written. A manual press's forward
-    supersedes NOTHING: its `SP-program` cut depends on cg OBS's answer,
-    which may be a refusal (600) or come too late — a mirror it replaced
-    would be lost. A superseded mirror's waiter logs at debug, not WARN.
   - **An awaited switch keeps its requester's verdict (round 5).** Every
-    call carries its requester's `deadline` (`Upstream::enqueue`: now + the
-    upstream timeout). A manual press's switch (ordered, not a mirror) with
-    less than the forwarder's answer timeout left — e.g. queued behind an
-    unanswered mirror (2 s) with ~1 s of its 3 s left — is answered with
+    call carries its requester's `deadline` (`Upstream::request` enqueues
+    it: now + the upstream timeout). A manual press's switch with less than
+    the forwarder's answer timeout left — e.g. queued behind another
+    unanswered switch (2 s) with ~1 s of its 3 s left — is answered with
     nothing and never written (`RemoteCall::too_late`): a switch cg OBS
     answers within its 2 s never lands after the facade answered the press
-    "not ready" (a keep; for a later answer see Residuals). A
-    mirror goes out however late (its cut already happened), and a getter is
+    "not ready" (a keep; for a later answer see Residuals). A getter is
     written while its requester still waits (it changes nothing in cg OBS).
     A call whose requester already gave up is skipped (`reply.is_closed()`).
-  - **A mirror's waiter outwaits the forwarder.** `record_mirror` waits with
-    `Upstream::wait_mirror` = the upstream timeout + `MIRROR_EXTRA_WAIT`
-    (4 s = a switch in flight + the mirror's own answer, each ≤ 2 s; pinned
-    to `2 × DEFAULT_RESPONSE_TIMEOUT` by a test), so a mirror that waited
-    in the queue and was then answered within the OBS client's 2 s is
-    recorded `ok`, not `not_ready`.
+  - **Deleted with the mirror (B4 step 6):** the supersede rule (a later
+    playlist MIRROR replaced a queued switch: `RemoteCall::Request.supersedes`,
+    `Upstream::enqueue(…, true)`), the mirror's longer waiter
+    (`Upstream::wait_mirror`, `MIRROR_EXTRA_WAIT`) and the last-cut id it
+    answered by (`last_cut_id`, `set_cg_forward`). With no unawaited switch
+    left, every switch in the queue is a requester's awaited one, and
+    `Upstream::request` (enqueue + wait) is the facade's only call.
   - The forwarder's answer timeout is a parameter (`run_calls(…,
     answer_timeout)`; `forwarder()` passes the production 2 s): the tests
     pass 10 minutes, so a wait the forwarder must not do fails them, and
@@ -245,24 +234,18 @@ come from `SP-program`, never from cg OBS.
     `the_calls_reach_cg_obs_in_queue_order`,
     `a_scene_switch_is_answered_before_the_next_call_goes_out`,
     `a_getter_never_holds_the_next_call_back`,
-    `a_switch_a_later_mirror_supersedes_is_never_sent`,
-    `a_later_manual_forward_supersedes_nothing`,
-    `an_abandoned_later_switch_supersedes_nothing`,
-    `an_awaited_switch_with_too_little_time_left_is_never_sent`; the facade
-    side by `only_the_mirror_of_a_playlist_press_supersedes_an_earlier_switch`;
-    the mirror's waiter by
-    `a_mirror_answered_after_the_upstream_timeout_is_still_recorded`
-    (paused clock).
+    `an_awaited_switch_with_too_little_time_left_is_never_sent`,
+    `an_abandoned_call_is_never_sent_and_a_live_one_is`.
   - Every raw op=5 event cg OBS sends is broadcast as `ObsEvent::Raw` on the
     existing `obs_event_tx` (#221 L4b deleted the engine bridge: nothing in
     the engine reads cg OBS's events).
-- **Never block the engine's OBS queue.** `Upstream::enqueue` uses
+- **Never block the engine's OBS queue.** `Upstream::request` enqueues with
   `try_send` (a full queue returns 207 at once; FIFO, so a call goes out
-  after every call queued before it) and `Upstream::wait` waits at most the
-  upstream timeout (`UPSTREAM_TIMEOUT`, 3 s; a test may set a longer one
-  with the `#[doc(hidden)] pub` `with_timeout` — the end-to-end test uses
-  20 s, so a stalled coverage runner never runs a manual press out of its
-  time). `request` = both. A call whose requester gave up is skipped on the
+  after every call queued before it) and waits at most the upstream timeout
+  (`UPSTREAM_TIMEOUT`, 3 s; a test may set a longer one with the
+  `#[doc(hidden)] pub` `with_timeout` — the end-to-end test uses 20 s, so a
+  stalled coverage runner never runs a manual press out of its time).
+  A call whose requester gave up is skipped on the
   OBS side (`reply.is_closed()`), and a switch with too little of its time
   left is never written (above). A stale `SetCurrentProgramScene` queued
   while cg OBS was away must never switch cg OBS seconds after the press was
@@ -301,15 +284,12 @@ whole switch:
 
 1. `kind` = the scene catalog (one `get_active_playlists` read). Unreadable
    → keep, `catalog_failed`, 205.
-2. **Playlist(pid)**: `persist_and_cut(pid, catalog name)` FIRST — never
-   gated on cg OBS (an unreachable cg OBS still cuts and plays). Then the
-   legacy MIRROR, until B4 step 6: `SetCurrentProgramScene(catalog name)` is
-   `enqueue`d for cg OBS and NOT awaited under the lock; a spawned
-   `record_mirror` waits (≤ the upstream timeout + 4 s) and sets the cut's
-   `cg_forward` (`pending` → `ok` | `error <code>` | `not_ready`) only while
-   that cut is still the last one (`RemoteShared::set_cg_forward` by the id
-   `record_cut` returned). The reply is 100 whatever the mirror does. A
-   failed persist cuts nothing, mirrors nothing, 205 `persist_failed`.
+2. **Playlist(pid)**: `persist_and_cut(pid, catalog name)` — never gated
+   on cg OBS (an unreachable cg OBS still cuts and plays), and cg OBS is
+   told NOTHING (#221 B4 step 6 deleted the legacy mirror: every consumer
+   takes `SP-program`, and cg OBS keeps whatever manual scene it shows).
+   The reply is 100, `cg_forward` null. A failed persist cuts nothing, 205
+   `persist_failed`.
 3. **Manual**: `SetCurrentProgramScene(X)` to cg OBS FIRST, awaited under
    the lock ("OBS manuál" carries cg OBS's program; a later press must not
    overtake it). Refused → cg OBS's own answer (600) passed through, keep
@@ -329,8 +309,9 @@ whole switch:
 6. `remote.last_remote_cut {scene, action (playlist|input|keep), source,
    reason (not_switched|input_inactive|persist_failed|catalog_failed),
    cut_boundary_100ns, at_ms, via (program|transition|dashboard),
-   cg_forward}`. The follow's `last_follow_cut` has the same shape with
-   `via` / `cg_forward` null.
+   cg_forward}`; `cg_forward` is cg OBS's answer to a MANUAL press's
+   forward (`ok` | `error <code>` | `not_ready`), null whenever nothing
+   went to cg OBS (a playlist, "OBS manuál" itself, a dashboard cut).
 
 A request without `sceneName` (a `sceneUuid` only) is answered `300` and
 nothing is switched. Companion always sends the name.
@@ -339,89 +320,53 @@ nothing is switched. Companion always sends the name.
 
 `POST /api/v1/program/cut {source}` keeps its 404 checks (unknown playlist;
 -1 while the NDI input is not a source), then calls
-`program_switch::switch_source(ctx, source, Via::Dashboard)` under the SAME
-`switch_order`:
+`program_switch::switch_source(pool, bus, source, Via::Dashboard)` under the
+SAME `switch_order`. Since B4 step 6 it never reaches cg OBS (it takes no
+`Upstream`; the API's `LegacyCg::link()` and `Upstream::unlinked()` are
+deleted), and every record has `cg_forward` null:
 
-- a playlist whose catalog names a scene: cut FIRST (published with that
-  scene), then mirrored exactly like a playlist press (the record's `scene`
-  is the catalog name, `via: dashboard`);
+- a playlist whose catalog names a scene: cut, published with that scene
+  (the record's `scene` is the catalog name, `via: dashboard`);
 - a playlist whose catalog names no scene (inactive, no / a shared NDI
-  output name): cut with no scene, cg OBS is NOT told (WARN; the record's
-  `scene` is the playlist id, `cg_forward` null);
+  output name): cut with no scene (WARN; the record's `scene` is the
+  playlist id);
 - -1: a cut only, published with no scene ("OBS manuál" by the resolver);
-  no cg OBS call, `cg_forward` null — cg OBS keeps what it shows;
 - an unreadable catalog or a failed persist: nothing cut, recorded as a
   keep (`catalog_failed` / `persist_failed`), HTTP 500.
 
-The API reaches cg OBS through `LegacyCg::link()`: `AppState` is built
-before the OBS client exists, so `start_program` attaches the OBS client's
-`Upstream` to `legacy_cg` next to `start_remote`; until then (and in a test
-state) it is `Upstream::unlinked()`, whose mirror is `not_ready` at once. A
-dashboard cut announces no transition events (unchanged from L3); its
+A dashboard cut announces no transition events (unchanged from L3); its
 program-scene event comes from the on-air watch.
 
-### SongPlayer's record of what it told cg OBS (#221 L4a, `playback/legacy_cg.rs`)
+### Deleted at B4 step 6: the legacy mirror and `legacy_cg` (#221)
 
-Until B4 step 6 the legacy consumers take cg OBS's program, which the
-mirror drives. `ProgramBus::legacy_cg()` keeps `shown: watch<Option<i64>>`
-— SongPlayer's record of its OWN commands, never cg OBS tracking:
+Until B4 step 6 the legacy consumers (the LED wall, the Presenter, strih,
+the stream, FOH's cg OBS VBAN) took cg OBS's program, so every playlist
+press and dashboard cut was MIRRORED to cg OBS (`SetCurrentProgramScene`
+with the catalog name, unawaited, its answer recorded as `cg_forward`), and
+`playback/legacy_cg.rs` kept SongPlayer's record of what it told cg OBS
+(`legacy_cg.shown`, a ticketed watch: the union in the on-air set, the
+wall owner's fallback, the dark-wall expectation, the startup
+re-mirror's seed). Owner directive 5999795799 + ROZHODNUTÉ 5999378483:
+every consumer takes SongPlayer's program now (the LED wall
+`SP-program-MAX`, the Presenter / strih / the stream `SP-program`, FOH its
+VBAN), and cg OBS is only the NDI input "OBS manuál". So these are DELETED,
+not kept as a fallback — do not bring any of them back:
 
-- a mirror cg OBS answered OK → `Some(pid)` (`confirm_mirror`, after
-  `record_mirror` returns `true` = `cg_forward ok`);
-- a manual scene cg OBS answered OK → `None` (recorded in `switch_manual`
-  before the NDI-input check: cg OBS switched even when SP-program keeps);
-- a refusal, no answer, a superseded mirror, a command never sent →
-  unchanged; "OBS manuál" itself and a dashboard -1 send nothing;
-- **the OBS follow's observation** (release 0.69.0 review 🟡 1,
-  `program_follow.rs::Follow::follow_scene`): with `program_follow_obs` on
-  (the rollback below, or the settings checkbox) cg OBS is the authority, so
-  its program scene IS what it shows. A followed scene is a switch like any
-  other: under the `switch_order`, a ticket taken before its cut, then
-  `confirmed(ticket, observed)` — the catalog playlist of that scene, `None`
-  for a manual one, on EVERY known scene (the one SP-program already shows
-  too). Before, the follow recorded nothing: after the rollback a playlist
-  mirrored earlier stayed on air next to the followed one for good (both
-  playing and writing the wall, the dark-wall check on the stale one). A
-  playlist read that fails records nothing (WARN). Pinned by
-  `program_follow_tests.rs::the_follow_records_what_cg_obs_shows` and
-  `…_waits_for_the_switch_order_and_outranks_an_older_command`.
+- the mirror of a playlist press and of a dashboard cut (`mirror`,
+  `record_mirror`, `confirm_mirror`, `MIRROR_EXTRA_WAIT`,
+  `Upstream::wait_mirror`, `RemoteShared::set_cg_forward` / `last_cut_id`,
+  the supersede rule of `obs/remote_call.rs`);
+- the startup re-mirror (`program_switch::remirror_on_air`,
+  `startup_answer`);
+- `legacy_cg` (`LegacyCg`, its tickets, `link()` / `Upstream::unlinked()`,
+  `ProgramBus::legacy_cg()`, `legacy_cg {shown}` on `GET /api/v1/program`)
+  and its tests (`legacy_cg_tests.rs`, `session_tests_legacy.rs`).
 
-Every command takes a `Ticket` UNDER the `switch_order` (the mirror in
-`mirror`, the manual forward before its request), so tickets follow the
-switch order; `confirmed(ticket, shown)` applies only when the ticket is
-newer than every answer applied before (`<=` the last applied → dropped),
-so the late answer to an older press never overwrites a newer one's. A
-skipped ticket never blocks a newer answer. At startup
-`restore_selected_source` records the restored source when it is a playlist
-(`LegacyCg::restored`). Residual (review rounds 2-3): `shown` is not
-persisted; the restore seeds it from SP-program's saved source, which is
-what cg OBS shows only if that source's last mirror was accepted. After a
-dashboard cut to -1 (cg OBS keeps showing playlist P) and a restart,
-`shown` is `None` (P's dark-wall check silent until the next press, fails
-safe); after a cut to Q whose mirror failed (cg OBS still shows P) and a
-restart, `shown` is `Some(Q)`. #221 L4b (main-session decision 1, comment
-5884501960): `shown` stays unpersisted, and at startup
-`program_switch::remirror_on_air` sends the restored playlist's catalog scene
-to cg OBS ONCE through this ticketed mirror, so the seed is what cg OBS was
-told once cg OBS accepts it — that closes the Q case (a re-mirror that never
-lands within the mirror's wait, 3 + 4 s, e.g. cg OBS still starting, leaves
-the unconfirmed seed: a failed mirror, see `program-bus.md` "The playback
-authority"). A restored -1 sends nothing (the decision: cg OBS keeps its
-manual scene), so the dashboard -1 case stays (for the main session):
-after a dashboard cut to -1 while cg OBS showed P and a restart, P is NOT
-on air (`shown` `None`); its pipeline, created Idle at startup, never
-starts, while cg OBS (and "OBS manuál") still shows P's output, until the
-next press. Three more of the same class (review round 2), listed in
-`legacy_cg.rs`: a manual press while "OBS manuál" is inactive (or whose -1
-cut failed to persist) seeds `Some(P)` after a restart and the re-mirror
-moves cg OBS off the operator's manual scene; a cut to a playlist whose
-catalog names no scene leaves an unconfirmed seed. Persisting `shown`
-would close all four — a main-session call. Every change is logged (`legacy cg: cg OBS shows what SongPlayer told
-it` INFO from → to; a dropped late answer DEBUG; the restore INFO). Served as `legacy_cg {shown}` on
-`GET /api/v1/program`; it keys the dark-wall expectation
-(`ndi_health_expect`, `obs-ndi-health.md`) and, from L4b, the playback
-authority (`LegacyCg::shown()` is the receiver for it). Deleted at B4 step 6
-with the mirror and the link.
+cg OBS keeps whatever manual scene it shows; only a manual press switches
+it. Its residuals (`shown` unpersisted, a re-mirror moving cg OBS off the
+operator's manual scene after a restart, a failed mirror leaving two
+playlists on air) went with it.
+
 
 ## Program feedback + transition events (#221 L3, `remote/studio_events.rs`)
 
@@ -430,7 +375,7 @@ with the mirror and the link.
   into its `JoinSet`), watches `ProgramBus::on_air()`, names it with the one
   resolver and emits whenever the NAME changes (`scene_change`). So it
   follows EVERY cut: a press, a dashboard `POST /api/v1/program/cut`, the
-  OBS follow, the startup restore. A publication under the same name (a
+  startup restore. A publication under the same name (a
   same-scene press, the re-kick) is no event, as in OBS. The value on air
   when the listener starts is not announced (a client reads it at connect).
   -1 with no scene is "OBS manuál". The watch coalesces: A → B → A faster
@@ -560,10 +505,14 @@ with the mirror and the link.
   - Telemetry fields are read through the API's own JSON
     (`last_cut_json`), so a test never depends on a struct field it only
     wants to see serialized.
-  - "A playlist press never waits for cg OBS" is proven with a fake that
-    HOLDS every `SetCurrentProgramScene` reply open and a rig whose upstream
-    timeout is 10 minutes: an awaited mirror could never be answered inside
-    the test's 10 s bound. Never prove it with a wall-time threshold.
+  - "A playlist press tells cg OBS nothing" (#221 B4 step 6) is proven by a
+    WITNESS: a forwarded getter (`GetInputList`) sent after the press. The
+    OBS client's command queue is FIFO, so a switch the press had queued
+    would reach the fake first (`session_tests_studio.rs::witness`; the
+    msgpack and end-to-end tests do the same). "It never waits for cg OBS"
+    keeps the fake that HOLDS every `SetCurrentProgramScene` reply open and
+    a 10-minute upstream timeout. Never prove either with a wall-time
+    threshold.
   - The switch order: the test holds `bus.switch_order()`, sends a press,
     and requires NO answer for 200 ms (the safe direction), then releases.
     `a_manual_press_holds_the_switch_order_until_cg_obs_answers` pins that
@@ -607,28 +556,22 @@ with the mirror and the link.
   current-thread runtime + `try_recv` Empty), the event shapes, and
   `wait_transition_end` / `announce_transition` on a paused clock (at once
   for a Cut, the served window, the 15 s bound).
-- `playback/program_switch_tests.rs`: `cg_forward_label`, the records, and
-  `record_mirror` (its answer lands only on its own cut; an answer after the
-  upstream timeout is still recorded, and the wait is bounded; L4a: it says
-  whether cg OBS accepted, and `confirm_mirror` records by ticket).
-- `playback/legacy_cg_tests.rs` (L4a, pure): the ticket rule, the restore,
-  the watch, the dashboard link (unlinked until attached, the first stays).
-- `session_tests_legacy.rs` (L4a, same rig): an accepted mirror → its
-  playlist, an accepted manual scene → none (with the input off too), a
-  refused mirror (a playlist whose scene cg OBS lacks) / a refused manual
-  scene / an unreachable cg OBS → unchanged, and two held mirrors answered
-  newest first (a "must not change" window, the safe direction).
-- `api/program_tests_switch.rs` (L4a): the dashboard cut through the real
-  router with a fake cg OBS attached to `legacy_cg`: cut first then
-  mirrored (`via: dashboard`, `legacy_cg.shown`), -1 a cut only, a refused
-  mirror, no link (`not_ready`), a playlist that names no scene, a failed
-  persist (500), the `switch_order` wait, and the restore.
+- `playback/program_switch_tests.rs` (pure): `cg_forward_label`, the `Via`
+  labels and the keep reasons, and the records (`via`, `cg_forward` null
+  for a playlist). L4a's `record_mirror` / `confirm_mirror` tests,
+  `legacy_cg_tests.rs` and `session_tests_legacy.rs` were deleted with the
+  mirror (B4 step 6).
+- `api/program_tests_switch.rs` (L4a, B4 step 6): the dashboard cut through
+  the real router: a playlist cut sends nothing to cg OBS (`via:
+  dashboard`, `cg_forward` null), is published and recorded with its
+  catalog scene, -1 a cut only, a playlist that names no scene, a failed
+  persist (500), and the `switch_order` wait.
 - `session_tests_cap.rs` (L4a): 16 identified sessions, the 17th handshake
   answered 503 and counted, a freed slot takes a new session.
-- `mod_tests.rs` covers the settings, the telemetry, `Upstream` on a paused
-  clock (the time-out leaves the call marked abandoned and its `deadline` is
-  the enqueue time + the timeout; a full queue never waits) and the settings
-  task over real ports:
+- `mod_tests.rs` covers the settings, the telemetry, `Upstream::request` on
+  a paused clock (the time-out leaves the call marked abandoned and its
+  `deadline` is the enqueue time + the timeout; a full queue never waits)
+  and the settings task over real ports:
   - bind;
   - a same-port password rebind;
   - disable;
@@ -641,7 +584,9 @@ with the mirror and the link.
   page-13 pair Companion gets SongPlayer's own `CurrentProgramSceneChanged`;
   a pushed cg OBS `CurrentProgramSceneChanged` never arrives before the
   pushed `SceneListChanged` witness (the OBS client's reader broadcasts raw
-  events in wire order).
+  events in wire order). B4 step 6: a forwarded getter after the press is
+  the witness that cg OBS got no `SetCurrentProgramScene`, and its program
+  stays on the scene it showed.
 - Every wait is bounded (`TIMEOUT` ≤ 20 s); no sleep is used as
   synchronization.
 
@@ -672,17 +617,17 @@ with the mirror and the link.
   with no margin for the write itself); a written frame cannot be recalled.
   So a manual press whose switch cg OBS carries out after 2 s is answered
   "not ready" (207) and the program is kept while cg OBS (and so "OBS
-  manuál") did switch; a mirror cg OBS answers after 2 s is recorded
-  `cg_forward: not_ready` although cg OBS followed. The next press
-  corrects it.
+  manuál") did switch. The next press corrects it.
 - **Companion's feedback at CONNECT is still cg OBS's.** v3.15.3's
   `buildSceneList` sets `scene_active` from the forwarded `GetSceneList`'s
   `currentProgramSceneName` (`index.js` 1102-1115), which is cg OBS's
-  program. Until B4 step 6 the mirror keeps cg OBS on SP-program's playlist
-  scene, so they differ only after SongPlayer cut to "OBS manuál" with no
-  scene (a startup restore, a dashboard cut to -1); the next program-scene
-  event corrects it. Found in L3, not in the design record — the main
-  session decides whether the forwarded answer is patched.
+  program. Since B4 step 6 nothing moves cg OBS to a playlist scene, so the
+  two differ WHENEVER a playlist is on SP-program at Companion's
+  (re)connect (before, only after a cut to "OBS manuál" with no scene):
+  Companion's buttons light cg OBS's manual scene until the next
+  program-scene event corrects it. Found in L3, not in the design record —
+  the main session decides whether the forwarded answer is patched with
+  SP-program's scene (returned as a follow-up candidate).
 - **At most 16 sessions (#221 L4a, main-session decision 5882671183).** One
   1 MiB frame is decoded before it is closed: a JSON array of `0,` builds
   ~16× its size in `Value`s, a msgpack array of 1-byte nils ~32× (2^20 ×
@@ -710,43 +655,24 @@ with the mirror and the link.
   `TriggerStudioModeTransition`: the facade ends a Cut at once, and Node's
   `ws` may hand the response and the Ended frame over in one tick, so a flag
   raised after the call's promise could undo the Ended and stall the wait.
-- #221 L4b: the PLAYBACK follows SongPlayer's own program (`program-bus.md`
-  "The playback authority"): a playlist press cuts `SP-program` and plays the
-  playlist at once; the previous playlist stays on air until cg OBS answers
-  the mirror (the union with `legacy_cg.shown`). A failed mirror leaves BOTH
-  playing (the legacy consumers keep cg OBS's playlist) until the next press.
-  Only ONE of them writes the shared wall outputs — the lines, the title,
-  the Presenter: the wall owner, SP-program's playlist (release 0.69.0
-  review 🟡 2, `program-bus.md` "One wall owner"). Before, both wrote the
-  one wall, which alternated between the two songs.
+- #221 L4b + B4 step 6: the PLAYBACK follows SongPlayer's own program
+  (`program-bus.md` "The playback authority"): a playlist press cuts
+  `SP-program` and plays the playlist at once, and the previous playlist
+  leaves the air in the same change (held only by its transition window).
+  Only SP-program's playlist writes the shared wall outputs — the lines, the
+  title, the Presenter (`program-bus.md` "One wall owner").
 - Hand switches in cg OBS's own UI are invisible to the facade (no cg
-  tracking, by the owner's ruling): the next press decides. Since L4b the
-  playlist cg OBS was switched to by hand is not on air, so the consumers on
-  cg OBS show its paused (or idle black) output until that press; before
-  L4b cg OBS's scene detection started it.
-- **Until the cutover / L4b the E2E's "scene to restore" is SP-program's,
-  not the wall's** (L3 + review round 1, for the main session; since L4b
-  `/api/v1/status.active_scene` is SongPlayer's own program, and the box runs
-  with the follow off and "OBS manuál" on since the cutover). The E2E
-  captures its initial scene from the facade (the dispatch: the cg driver is
-  for the recording only), but cg OBS's program — what the wall, FOH, lv1
-  and strih take — can differ from SP-program's name:
-  - cg OBS on a manual scene while "OBS manuál" is off: the follow keeps the
-    last playlist on SP-program (box 28.9: the input was off);
-  - a manual → manual change in cg OBS: the follow publishes nothing, so
-    SP-program still names the first manual scene;
-  - a restart while a manual scene was on: -1 is restored with NO scene, so
-    the facade names it "OBS manuál" (a keep while the input is off: no
-    transition event, the driver's wait times out, and `post-deploy.spec.ts`
-    `afterAll`'s engine check, cg OBS's `active_scene` until L4b, fails).
-
-  In the first two the E2E's restore presses SP-program's scene, and the
-  mirror leaves cg OBS — the wall — on it instead of the operator's manual
-  scene. Not hit while a playlist is on program (the box: source 7). The
-  driver's old same-scene skip made it worse (a baseline press the facade
-  already named never re-mirrored cg OBS) and was removed in round 1; the
-  rest needs either the cutover + L4b, or a read-only initial scene from cg
-  OBS until then — a decision for the main session.
+  tracking, by the owner's ruling) and start nothing: a playlist scene cg
+  OBS shows by hand reaches the program only as "OBS manuál" (its paused or
+  idle output), until the next press.
+- **The E2E's "scene to restore" is SP-program's** (the facade's name),
+  which is what every consumer takes since B4 step 6. Restoring a playlist
+  scene leaves cg OBS untouched; restoring a manual scene is a manual press
+  (cg OBS first, then "OBS manuál"). A restart while a manual scene was on
+  restores -1 with NO scene, so the facade names it "OBS manuál" (a keep
+  while the input is off: no transition event and the driver's wait times
+  out). (The L3 cases where SP-program's name differed from what the wall
+  showed needed the deleted follow and mirror.)
 
 ## Box acceptance (the supervisor's job)
 
@@ -762,8 +688,9 @@ only, so it proves the JSON path, never Companion's. It must:
 - report studio mode ON and list cg OBS's scenes;
 - on `SetCurrentPreviewScene(baseline sp-*)` + `TriggerStudioModeTransition`
   (the page-13 pair), cut `SP-program` to that playlist (program `filled`
-  +0, `last_remote_cut.via = transition`) and then switch cg OBS
-  (`cg_forward` → `ok`), with no `GetSceneItemList` from the facade;
+  +0, `last_remote_cut.via = transition`) and leave cg OBS's program where
+  it was (`cg_forward` null; B4 step 6), with no `GetSceneItemList` from
+  the facade;
 - on a manual scene, switch cg OBS first, then cut to "OBS manuál" while the
   input is enabled;
 - on `SetCurrentSceneTransitionDuration 2000`, answer 100 and leave
@@ -783,7 +710,10 @@ the program scene afterwards.
 
 **Cutover (Companion `cg_obs` → the facade).** Attempt 1 (29.9.2026, comment
 5881650057) is the runbook: record the prior state, `ndi_input_enabled=true`,
-`program_follow_obs=false`, repoint `cg_obs` from `cg.lan:4455` to
-`10.77.9.201:4456` in Companion's web UI, then watch the SongPlayer log for
-`remote: client connected peer=10.77.9.205:… encoding=MsgPack`. Rollback =
-`cg_obs` back to `cg.lan:4455` + `program_follow_obs=true`.
+repoint `cg_obs` from `cg.lan:4455` to `10.77.9.201:4456` in Companion's web
+UI, then watch the SongPlayer log for `remote: client connected
+peer=10.77.9.205:… encoding=MsgPack`. Its rollback (`cg_obs` back to
+`cg.lan:4455` + `program_follow_obs=true`) is gone: #221 L5 deleted the
+follow and its setting (owner directive 5999795799), so a playlist scene
+pressed in cg OBS reaches the program only as "OBS manuál". Rolling back
+means redeploying the release before #221 B4 step 6.
