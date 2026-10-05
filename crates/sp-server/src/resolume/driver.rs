@@ -532,7 +532,7 @@ impl HostDriver {
     /// `GET /api/v1/product` — a small JSON payload used only to confirm the
     /// Arena REST server is alive, without pulling the ~14 MB composition.
     async fn fetch_product(&mut self) -> Result<(), anyhow::Error> {
-        let ep = self.endpoint().await?;
+        let ep = self.ensure_endpoint().await?;
         let url = format!("{}/api/v1/product", ep.base_url);
         let req = self.client.get(&url);
         Self::apply_host_header(req, &ep)
@@ -765,7 +765,7 @@ impl HostDriver {
     async fn fetch_mapping_inner(
         &mut self,
     ) -> Result<HashMap<String, Vec<ClipInfo>>, anyhow::Error> {
-        let ep = self.endpoint().await?;
+        let ep = self.ensure_endpoint().await?;
         let url = format!("{}/api/v1/composition", ep.base_url);
         let req = self.client.get(&url);
         // A non-2xx is a failed fetch even with a JSON body (#217 addendum 2):
@@ -778,18 +778,14 @@ impl HostDriver {
         Ok(parse_composition(&body))
     }
 
-    /// Resolve the endpoint and hand it to the caller. A handler resolves ONCE,
-    /// before its first batch, and passes it to every parallel write: no write
-    /// reads the cache, whose 5-minute TTL could run out mid-fade (#217).
+    /// Resolve the host to an endpoint, caching the result for 5 minutes, and
+    /// hand it to the caller. For IP literals, no DNS lookup is needed. For
+    /// hostnames, we resolve via DNS and store the IP in the URL with the
+    /// original hostname in the Host header (required by Resolume when
+    /// addressed by hostname). A handler resolves ONCE, before its first batch,
+    /// and passes the endpoint to every parallel write: no write reads the
+    /// cache, whose TTL could run out mid-fade (#217).
     pub(crate) async fn ensure_endpoint(&mut self) -> Result<ResolvedEndpoint, anyhow::Error> {
-        self.endpoint().await
-    }
-
-    /// Resolve the host to an endpoint, caching the result for 5 minutes.
-    /// For IP literals, no DNS lookup is needed. For hostnames, we resolve
-    /// via DNS and store the IP in the URL with the original hostname in the
-    /// Host header (required by Resolume when addressed by hostname).
-    async fn endpoint(&mut self) -> Result<ResolvedEndpoint, anyhow::Error> {
         if let Some(ref cached) = self.endpoint_cache {
             if !cached.is_expired() {
                 return Ok(cached.clone());

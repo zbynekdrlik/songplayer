@@ -312,7 +312,8 @@ const OFF_REASON: &str = "pacing vypnuté";
 /// always-visible dashboard badge (#176):
 ///
 /// - **No output has pacing enabled** → [`GlobalLock::Off`] (reason
-///   `"pacing vypnuté"`) — the production default; grey, never hidden.
+///   `"pacing vypnuté"`) — pacing set OFF by hand (the default is ON,
+///   #147); grey, never hidden.
 /// - **Pacing-enabled LIVE outputs** → the worst effective state over them
 ///   (UNLOCKED > DEGRADED > LOCKED); a LOCKED-but-clock-not-ok output is demoted
 ///   to UNLOCKED. The reason is the worst live output's reason (or `"locked"`).

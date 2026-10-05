@@ -322,7 +322,7 @@ the text clear.
   error are gone. An endpoint about 1 s past its DNS TTL is harmless: the
   TTL only decides when the NEXT handler re-resolves.
 - **Never add a write that reads `endpoint_cache` itself.** Take the
-  endpoint as a parameter (the batch's), or resolve through `endpoint()` in
+  endpoint as a parameter (the batch's), or resolve through `ensure_endpoint` in
   a `&mut self` step (the composition fetch, the probe).
 - **Test:** `HostDriver::forget_endpoint` (`#[cfg(test)]`, in
   `driver_push.rs`) empties the cache after the test resolved the endpoint,

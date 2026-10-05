@@ -11,7 +11,8 @@
 //!
 //! `limit` is the sample-peak limiter in `peak_limiter.rs` (#184): stereo-linked,
 //! instant attack, 50 ms release, ceiling 0.98. A sum at or under the ceiling
-//! passes bit for bit; an over is scaled down, never clamped flat at ±1.0.
+//! with no release tail pending passes bit for bit; an over is scaled down,
+//! never clamped flat at ±1.0.
 //!
 //! It replaces the old two-stream `KaraokeAudioReader`: karaoke MODES are now
 //! gain PRESETS over the SAME open streams (`[original, vocals, instrumental]`),

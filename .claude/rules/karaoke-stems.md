@@ -72,16 +72,16 @@ through VBAN (2012 of 3.53M frames at 0 dBFS, finding 5847119155).
 - **Instant attack, no lookahead.** No latency is added to the paced A/V
   path. The trade-off: the rising edge of a NEW peak sits at the ceiling for
   the samples that would exceed it, and a sustained over re-attacks a little
-  on each lobe. A 1.8× 100 Hz over gives 30 of 240 samples per lobe at the
-  ceiling, where the clamp flattened 151.
+  on each lobe. A 1.8× 100 Hz over gives 79 of the first lobe's 240 samples
+  at the ceiling and 30 of each later lobe's, where the clamp flattened 151.
 - **Release.** The REDUCTION (`1 − gain`) decays by `1 − 1/(0.050 s · rate)`
   per frame. That is an exact division (no `exp`), so test pins hold on
   Linux and Windows alike. At 48 kHz the gain rises by at most 1/2400 per
   frame.
 - **Bit-identical at rest.** A gain of exactly 1.0 gives `x · 1.0 = x`.
   The state is the reduction, not the gain: an f32 gain recovering toward 1.0
-  stalls one ulp below unity forever (1 − d·R rounds back for d < ~1200 ulp),
-  but a decaying reduction does not. Once `1 − reduction` rounds to 1.0, the
+  stalls below unity forever once its step d·(1 − R) is under half an ulp (up
+  to ~1200 ulp below 1.0 at 48 kHz), but a decaying reduction does not. Once `1 − reduction` rounds to 1.0, the
   reduction is dropped to 0 (no subnormal tail).
 - **State.** A field of the reader, so it carries across blocks. `seek`
   resets it, and a new song opens a new reader.

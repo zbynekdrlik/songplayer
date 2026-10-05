@@ -389,8 +389,8 @@ async fn refresh_mapping_populates_clip_mapping_from_composition() {
 #[tokio::test]
 async fn endpoint_returns_cached_value_on_subsequent_calls() {
     let mut driver = HostDriver::new("127.0.0.1".to_string(), 8090);
-    let ep1 = driver.endpoint().await.unwrap();
-    let ep2 = driver.endpoint().await.unwrap();
+    let ep1 = driver.ensure_endpoint().await.unwrap();
+    let ep2 = driver.ensure_endpoint().await.unwrap();
     // Same resolved_at means we got the cached value, not a fresh resolve.
     assert_eq!(ep1.resolved_at, ep2.resolved_at);
     assert_eq!(ep1.base_url, ep2.base_url);

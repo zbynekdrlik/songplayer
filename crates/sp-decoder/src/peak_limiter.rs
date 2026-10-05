@@ -13,7 +13,7 @@
 //! - **Instant attack, no lookahead.** The gain drops at once to what the
 //!   frame needs (`ceiling / peak`), and adds no latency to the paced A/V path.
 //! - **Exponential release.** The gain reduction decays by the factor
-//!   `1 − 1/(RELEASE_MS · rate)` per frame (a 50 ms time constant). That is an
+//!   `1 − 1000/(RELEASE_MS · rate)` per frame (a 50 ms time constant). That is an
 //!   exact IEEE division, so the result is the same on every platform. The
 //!   gain therefore rises by at most `1/release_frames` per frame (1/2400 at
 //!   48 kHz).
@@ -22,9 +22,10 @@
 //!   untouched.
 //!
 //! The state is the gain REDUCTION (`1 − gain`), not the gain. A gain
-//! recovering in f32 toward 1.0 would stall one ulp below unity forever; a
-//! reduction decays freely, and once the gain rounds to exactly 1.0 the state
-//! is dropped to 0.
+//! recovering in f32 toward 1.0 stalls below unity forever once its step
+//! `d · (1 − R)` is under half an ulp (up to ~1200 ulp below 1.0 at 48 kHz);
+//! a reduction decays freely, and once the gain rounds to exactly 1.0 the
+//! state is dropped to 0.
 
 /// The limiter's ceiling: 0.98 (−0.18 dBFS), just under full scale, so the
 /// VBAN INT24 encoder's ±1.0 clamp never engages.
