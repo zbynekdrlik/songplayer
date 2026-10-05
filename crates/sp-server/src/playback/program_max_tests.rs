@@ -60,6 +60,7 @@ fn a_new_max_is_off_and_builds_no_job() {
     );
     assert_eq!((status.width, status.height), (3840, 2160));
     assert_eq!(status.spout_name, "SP-program-MAX");
+    assert_eq!(status.adapter, None, "no compositor built yet");
     assert_eq!(
         [
             status.submitted,
@@ -266,8 +267,13 @@ fn the_records_count_and_name_the_state() {
     max.record_device_reset();
     max.record_sender_backoff();
     max.record_sender_backoff();
+    max.record_adapter("NVIDIA GeForce RTX 3070 Ti".into());
     let status = max.status();
     assert_eq!((status.device_resets, status.sender_backoffs), (1, 2));
+    assert_eq!(
+        status.adapter.as_deref(),
+        Some("NVIDIA GeForce RTX 3070 Ti")
+    );
 
     assert!(
         max.record_sent(compose(1, 2), SpoutSendStats { send_us: 3 }),
@@ -305,6 +311,7 @@ fn the_max_block_has_its_api_names() {
     assert_eq!(
         keys,
         [
+            "adapter",
             "coalesced",
             "device_resets",
             "draw_us_p99",

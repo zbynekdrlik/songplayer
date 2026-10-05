@@ -1005,6 +1005,7 @@ function programBody() {
       device_resets: 0,
       sender_backoffs: 0,
       spout_name: "SP-program-MAX",
+      adapter: null,
     },
   };
 }

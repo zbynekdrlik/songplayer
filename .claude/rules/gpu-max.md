@@ -5,6 +5,8 @@ paths:
   - "crates/sp-server/src/playback/program_output_tests_max.rs"
   - "crates/sp-server/src/api/program_tests_max.rs"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
+  - "e2e/post-deploy-max.spec.ts"
+  - "e2e/max-gate*.ts"
 ---
 
 # The `SP-program-MAX` GPU compositor and Spout sender: `crates/sp-gpu` (#223 S1a, S1b) and its runtime wiring (S2)
@@ -182,7 +184,10 @@ anchors are on #223 (comment 5984577044).
   (`tauri.conf.json` `bundle.resources`), which holds
   `vendor/spout2/LICENSE` verbatim; `tests/notice.rs` (every platform)
   fails if it differs from the vendored LICENSE or is not bundled. A
-  Spout2 bump re-copies the LICENSE into it.
+  Spout2 bump re-copies the LICENSE into it. The same file points at
+  mimalloc's MIT license (#168's override DLLs), which the Build Tauri job
+  stages next to them as `resources/mimalloc/LICENSE-mimalloc.txt` (CI-built,
+  never committed; `tests/notice.rs` pins the staging line).
 
 ### The sender
 
@@ -395,8 +400,14 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   key an id on an address or on address + stamp (the latter re-uploads
   every held picture).
 - **Failures** (`serve` → `recover`, never a panic):
-  - a lost device (compose, send or a build) drops both; rebuilt on the
-    next job, no wait (`device_resets`);
+  - a lost device at compose or send drops both; rebuilt at once on the
+    next job (`device_resets`), unless the rebuilt pair is lost again
+    before a boundary went out (`lost_unsent`): then the rebuild waits the
+    backoff, so a GPU that keeps losing its device is never rebuilt (a new
+    device, shaders, a 4K target, a Spout sender and its 4K shared texture)
+    30 times a second next to Arena;
+  - a lost device while building waits the backoff like any failed build
+    (it drops the compositor too);
   - a refused sender (`SpoutNotRegistered`, `SpoutNameTaken`: `is_refusal`)
     drops the sender only; a new one after `MAX_RETRY_BACKOFF` = 3 s
     (`sender_backoffs`), since an immediate retry is refused the same way
@@ -407,9 +418,15 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
     lost) costs that boundary only;
   - `Unsupported` (off Windows) is final: never built again.
   Every failure counts `failed`; a skipped boundary during a backoff too.
-  The WARN `program max: a boundary did not go out` fires once per new
-  failure text (`record_failed` returns whether the state changed), the
-  INFO `program max: boundaries go out` once per recovery.
+  The WARN `program max: a boundary did not go out` fires for a new failure
+  text (`record_failed` returns whether the state changed), the INFO
+  `program max: boundaries go out` for a recovery, each at most once per
+  5 s of the thread's time (`MAX_LOG_EVERY_100NS`, a `WarnLimiter` each,
+  `held_back` = how many it skipped): a failure that alternates with sent
+  boundaries never floods the log.
+- Dropping the GPU objects (a lost device, MAX off) also drops the held
+  pictures (`PictureIds::forget`): no decoded frame stays pinned out of
+  `frame_pool` while MAX is off.
 
 ### The setting and the telemetry
 
@@ -420,18 +437,34 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   every 5 s (`MAX_SETTINGS_POLL`; the poll is a parameter, the test uses
   5 ms) and, on shutdown, stops the thread. Off = no offers, the thread
   drops the sender (Spout unregisters `SP-program-MAX`) and the compositor.
-  Toggle it with `PUT /api/v1/settings {"settings": {"program_max_enabled":
-  "false"}}`; no restart.
+  Toggle it with `PATCH /api/v1/settings {"program_max_enabled": "false"}`
+  (a flat body; `api/program_tests_max.rs` saves it through the router and
+  reads it back); no restart.
 - `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width:
   3840, height: 2160, submitted, coalesced, failed, upload_us_p99,
-  draw_us_p99, send_us_p99, device_resets, sender_backoffs, spout_name}`
-  (`MaxStatus`). `state` (`state_label`): `unsupported` (off Windows: no
+  draw_us_p99, send_us_p99, device_resets, sender_backoffs, spout_name,
+  adapter}` (`MaxStatus`; `adapter` = the adapter the last compositor was
+  built on, `None` before the first build: R3-2 asks the box to name its
+  RTX). `state` (`state_label`): `unsupported` (off Windows: no
   thread) wins, then `off` (the setting), then the thread: `running` (it
   takes jobs and its last boundary went out), `error: <why>` (its last
   boundary did not; `error: the program-max thread is not running` before
-  it attached or after it ended). `submitted + failed` = the jobs it took.
-  The p99s cover the last 900 sent frames (30 s). The mock
-  (`e2e/mock-api.mjs`) mirrors the shape with `state: "unsupported"`.
+  it attached or after it ended). `submitted + failed` = the jobs it took
+  on a GPU it has (an `unsupported` platform counts neither). The p99s
+  cover the last 900 sent frames (30 s). The mock (`e2e/mock-api.mjs`)
+  mirrors the shape with `state: "unsupported"`, `adapter: null`.
+
+### The live post-deploy gate (`e2e/post-deploy-max.spec.ts`)
+
+Nothing else goes red if the thread dies on the box (the program, VBAN and
+every other output work without it), so the post-deploy suite reads `max`
+twice and applies `max-gate.ts` (`maxGateFailures`, unit-tested in the mock
+suite by `max-gate.spec.ts`): the setting on, 3840×2160 under
+`SP-program-MAX`, an adapter that is not the Basic Render Driver,
+`running`, at least `MIN_BOUNDARIES` = 30 more boundaries out (the program
+sends one per grid slot, standby pairs included), `failed` and
+`device_resets` +0 in between. The p99s are logged, not gated; the budget
+and Arena's side stay in the box gate below.
 
 ### The WARP proof (`program_max_tests_warp.rs`, Windows only)
 
@@ -448,8 +481,9 @@ writes the same bytes).
 
 ### The box gate after the deploy (the main session runs it)
 
-- `GET /api/v1/program` → `max.state` reads `running` with `submitted`
-  rising, and Arena's `GET /api/v1/sources` lists `SPOUT_SP-program-MAX`
+- the post-deploy spec above passed (`running`, `submitted` rising,
+  `max.adapter` names the RTX 3070 Ti), and Arena's `GET /api/v1/sources`
+  lists `SPOUT_SP-program-MAX`
   (category "Spout Servers"); `spout_sender_info("SP-program-MAX")`:
   3840×2160, format 87, host path = the installed `SongPlayer.exe`;
 - SP-program's `health.timing` (`ready_late_us_max`,

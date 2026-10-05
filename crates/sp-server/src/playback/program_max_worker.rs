@@ -15,7 +15,10 @@
 //! Failures never panic the thread and never reach the program:
 //!
 //! - a lost device drops the sender and the compositor; both are rebuilt on
-//!   the next job (`device_resets`);
+//!   the next job (`device_resets`), unless the rebuilt pair is lost again
+//!   before a boundary went out: then the rebuild waits [`MAX_RETRY_BACKOFF`]
+//!   (a GPU that keeps losing its device is never rebuilt 30 times a
+//!   second);
 //! - a refused sender (another sender holds `SP-program-MAX`, Spout did not
 //!   list or register it) is dropped, and a new one is made only after
 //!   [`MAX_RETRY_BACKOFF`] (`sender_backoffs`): an immediate retry would be
@@ -24,6 +27,11 @@
 //!   is retried after the same backoff, never on every boundary;
 //! - any other failure (a picture that is not whole NV12, one frame Spout
 //!   lost) costs that boundary only.
+//!
+//! A failure is WARNed when it is new (another text than the state before),
+//! a recovery INFOed, each at most once per [`MAX_LOG_EVERY_100NS`] with the
+//! count held back (a failure that alternates with sent boundaries never
+//! floods the log).
 //!
 //! The GPU is a trait ([`MaxGpu`]) so every decision here runs on Linux with
 //! a fake; the production one is [`SpoutGpu`] (`sp-gpu`'s `Compositor` on
@@ -38,14 +46,29 @@ use tracing::{info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, MaxPicture};
+use crate::playback::stat_window::WarnLimiter;
 
-/// How long the thread waits before it builds again after a refused sender
-/// or a failed build ("a few seconds", the S1b carry-over).
+/// How long the thread waits before it builds again after a refused sender,
+/// a failed build or a second lost device in a row ("a few seconds", the
+/// S1b carry-over).
 pub const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(3);
+
+/// At most one failure WARN, and one recovery INFO, per 5 s of the thread's
+/// time (100 ns).
+pub const MAX_LOG_EVERY_100NS: i64 = 50_000_000;
+
+/// The thread's time at `now` since `since`, in 100 ns (the unit of
+/// `WarnLimiter`); 0 before `since`.
+pub fn elapsed_100ns(since: Instant, now: Instant) -> i64 {
+    let ns = now.saturating_duration_since(since).as_nanos();
+    i64::try_from(ns / 100).unwrap_or(i64::MAX)
+}
 
 /// The compositor half of the GPU: draw one boundary into the render target.
 pub trait MaxCompositor {
     fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError>;
+    /// The adapter it runs on (the telemetry's `adapter`).
+    fn adapter(&self) -> String;
 }
 
 /// The Spout half: share the render target as it is now.
@@ -88,6 +111,12 @@ impl MaxCompositor for sp_gpu::Compositor {
     #[cfg_attr(test, mutants::skip)]
     fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError> {
         sp_gpu::Compositor::compose(self, composition)
+    }
+
+    /// `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    fn adapter(&self) -> String {
+        sp_gpu::Compositor::adapter(self).name.clone()
     }
 }
 
@@ -135,6 +164,12 @@ impl PictureIds {
         };
         self.held = labelled;
         composition
+    }
+
+    /// Hold no picture any more (the compositor is gone): the frames are
+    /// freed, and every picture gets a new id.
+    pub fn forget(&mut self) {
+        self.held.clear();
     }
 
     /// `picture` with its id: the id of the same allocation held or already
@@ -225,6 +260,12 @@ pub struct MaxWorker<'a, G: MaxGpu> {
     retry_at: Option<Instant>,
     /// The GPU said `Unsupported`: never build again.
     unsupported: bool,
+    /// A device was lost and no boundary went out since.
+    lost_unsent: bool,
+    /// Where the log limiters' time starts.
+    started: Instant,
+    failures: WarnLimiter,
+    recoveries: WarnLimiter,
 }
 
 impl<'a, G: MaxGpu> MaxWorker<'a, G> {
@@ -237,6 +278,10 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             ids: PictureIds::default(),
             retry_at: None,
             unsupported: false,
+            lost_unsent: false,
+            started: Instant::now(),
+            failures: WarnLimiter::default(),
+            recoveries: WarnLimiter::default(),
         }
     }
 
@@ -248,12 +293,16 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
 
     /// Compose and send one boundary at `now`, and report it.
     pub fn serve(&mut self, job: &MaxJob, now: Instant) {
+        let at = elapsed_100ns(self.started, now);
         match self.attempt(job, now) {
             Ok((compose, send)) => {
-                if self.out.record_sent(compose, send) {
+                self.lost_unsent = false;
+                if self.out.record_sent(compose, send)
+                    && let Some(held_back) = self.recoveries.admit(at, MAX_LOG_EVERY_100NS)
+                {
                     info!(
                         stamp_100ns = job.stamp_100ns(),
-                        "program max: boundaries go out"
+                        held_back, "program max: boundaries go out"
                     );
                 }
             }
@@ -263,10 +312,13 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
                 self.out.record_unsupported();
             }
             Err(Skip::Failed(failure)) => {
-                if self.out.record_failed(failure.error()) {
+                if self.out.record_failed(failure.error())
+                    && let Some(held_back) = self.failures.admit(at, MAX_LOG_EVERY_100NS)
+                {
                     warn!(
                         error = %failure.error(),
                         failure = ?failure,
+                        held_back,
                         "program max: a boundary did not go out"
                     );
                 }
@@ -290,7 +342,11 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         }
         let compositor = match self.compositor.take() {
             Some(compositor) => compositor,
-            None => self.gpu.compositor().map_err(Skip::build)?,
+            None => {
+                let built = self.gpu.compositor().map_err(Skip::build)?;
+                self.out.record_adapter(built.adapter());
+                built
+            }
         };
         let compositor = self.compositor.insert(compositor);
         let sender = match self.sender.take() {
@@ -305,19 +361,22 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     }
 
     /// After a failure: a lost device drops both objects (rebuilt on the
-    /// next job), a refused sender drops the sender; a build failure or a
-    /// refusal waits [`MAX_RETRY_BACKOFF`] before the next build.
+    /// next job), a refused sender drops the sender; a build failure, a
+    /// refusal or a second lost device before a boundary went out waits
+    /// [`MAX_RETRY_BACKOFF`] before the next build.
     fn recover(&mut self, failure: &Failure, now: Instant) {
         let error = failure.error();
         let refused = is_refusal(error);
+        let lost_again = error.is_device_lost() && self.lost_unsent;
         if error.is_device_lost() {
             self.drop_gpu();
             self.out.record_device_reset();
+            self.lost_unsent = true;
         } else if refused {
             self.sender = None;
             self.out.record_sender_backoff();
         }
-        if matches!(failure, Failure::Build(_)) || refused {
+        if matches!(failure, Failure::Build(_)) || refused || lost_again {
             self.retry_at = Some(now + MAX_RETRY_BACKOFF);
         }
     }
@@ -335,6 +394,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     fn drop_gpu(&mut self) {
         self.sender = None;
         self.compositor = None;
+        self.ids.forget();
     }
 }
 

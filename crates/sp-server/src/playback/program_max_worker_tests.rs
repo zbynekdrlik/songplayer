@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use sp_gpu::{ComposeStats, Composition, GpuError, Nv12Picture, PictureError, SpoutSendStats};
 
 use super::{
-    MAX_RETRY_BACKOFF, MaxCompositor, MaxGpu, MaxSender, MaxWorker, PictureIds, is_refusal,
-    run_max_loop,
+    MAX_LOG_EVERY_100NS, MAX_RETRY_BACKOFF, MaxCompositor, MaxGpu, MaxSender, MaxWorker,
+    PictureIds, elapsed_100ns, is_refusal, run_max_loop,
 };
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::{MAX_NOT_RUNNING, MaxJob, MaxOut, MaxPicture};
@@ -104,6 +104,9 @@ pub(crate) struct FakeShared {
     script: Mutex<Script>,
     hold: Mutex<Option<Hold>>,
 }
+
+/// The fake compositor's adapter.
+pub(crate) const FAKE_ADAPTER: &str = "Fake GPU";
 
 /// The stats every fake compose and send report.
 pub(crate) const UPLOAD_US: u64 = 11;
@@ -208,6 +211,10 @@ impl MaxCompositor for FakeCompositor {
                 uploads: 1,
             }),
         }
+    }
+
+    fn adapter(&self) -> String {
+        FAKE_ADAPTER.to_string()
     }
 }
 
@@ -400,6 +407,72 @@ fn the_first_job_builds_both_on_the_thread_then_composes_and_sends() {
         (status.upload_us_p99, status.draw_us_p99, status.send_us_p99),
         (UPLOAD_US, DRAW_US, SEND_US)
     );
+    assert_eq!(status.adapter.as_deref(), Some(FAKE_ADAPTER));
+}
+
+#[test]
+fn a_second_lost_device_before_a_boundary_went_out_waits_the_backoff() {
+    let max = MaxOut::new();
+    let gpu = FakeGpu::default();
+    gpu.script().compose.push_back(device_lost());
+    gpu.script().compose.push_back(device_lost());
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let t0 = Instant::now();
+    worker.serve(&MaxJob::Black { stamp_100ns: 1 }, t0);
+    worker.serve(&MaxJob::Black { stamp_100ns: 2 }, t0);
+    assert_eq!(
+        gpu.log().compositors_built,
+        2,
+        "the first loss rebuilds at once, and the rebuilt pair is lost again"
+    );
+    worker.serve(&MaxJob::Black { stamp_100ns: 3 }, t0);
+    assert_eq!(
+        gpu.log().compositors_built,
+        2,
+        "lost again before a boundary went out: no rebuild inside the backoff"
+    );
+    worker.serve(&MaxJob::Black { stamp_100ns: 4 }, t0 + MAX_RETRY_BACKOFF);
+    let log = gpu.log();
+    assert_eq!((log.compositors_built, log.sent), (3, 1));
+    drop(log);
+    assert_eq!(max.status().device_resets, 2);
+}
+
+#[test]
+fn a_lost_device_after_a_sent_boundary_rebuilds_at_once_again() {
+    let max = MaxOut::new();
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let t0 = Instant::now();
+    gpu.script().compose.push_back(device_lost());
+    worker.serve(&MaxJob::Black { stamp_100ns: 1 }, t0);
+    worker.serve(&MaxJob::Black { stamp_100ns: 2 }, t0);
+    assert_eq!(gpu.log().sent, 1, "rebuilt and sent");
+    gpu.script().compose.push_back(device_lost());
+    worker.serve(&MaxJob::Black { stamp_100ns: 3 }, t0);
+    worker.serve(&MaxJob::Black { stamp_100ns: 4 }, t0);
+    let log = gpu.log();
+    assert_eq!(
+        (log.compositors_built, log.sent),
+        (3, 2),
+        "a boundary went out between the two losses: the rebuild does not wait"
+    );
+}
+
+#[test]
+fn the_log_time_is_the_threads_time_in_100ns() {
+    let t0 = Instant::now();
+    assert_eq!(elapsed_100ns(t0, t0), 0);
+    assert_eq!(
+        elapsed_100ns(t0, t0 + Duration::from_millis(1500)),
+        15_000_000
+    );
+    assert_eq!(
+        elapsed_100ns(t0 + Duration::from_secs(1), t0),
+        0,
+        "never negative"
+    );
+    assert_eq!(MAX_LOG_EVERY_100NS, 50_000_000, "5 s");
 }
 
 #[test]
@@ -451,6 +524,7 @@ fn a_device_lost_at_send_drops_both_too() {
 #[test]
 fn a_refused_sender_is_dropped_and_a_new_one_waits_the_backoff() {
     let max = MaxOut::new();
+    max.set_enabled(true);
     let gpu = FakeGpu::default();
     gpu.script().send.push_back(not_registered());
     let mut worker = MaxWorker::new(&max, gpu.clone());
@@ -639,6 +713,23 @@ fn release_drops_the_sender_then_the_compositor_and_forgets_the_backoff() {
         gpu.log().drops,
         ["sender", "compositor", "sender", "compositor"],
         "a release drops the sender before the compositor"
+    );
+}
+
+#[test]
+fn a_release_forgets_the_pictures_it_held() {
+    let max = MaxOut::new();
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let a = picture(4, 2);
+    let t0 = Instant::now();
+    worker.serve(&plain(1, &a), t0);
+    worker.release();
+    worker.serve(&plain(2, &a), t0);
+    assert_eq!(
+        gpu.log().drawn,
+        [Drawn::Picture(pic(1, &a)), Drawn::Picture(pic(2, &a))],
+        "the frame is no longer held after the release, so it is a new id"
     );
 }
 

@@ -1,6 +1,9 @@
 SongPlayer - third-party notices
 ================================
 
+The mimalloc override DLLs (resources/mimalloc, Microsoft mimalloc, MIT)
+ship with their own license next to them: resources/mimalloc/LICENSE-mimalloc.txt.
+
 SongPlayer.exe contains the Spout2 SDK 2.007.017 (its SpoutDX sender
 sources), https://github.com/leadedge/Spout2, used under the following
 license:

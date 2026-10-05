@@ -32,13 +32,16 @@ async fn get_program_reports_the_max_block() {
             "device_resets": 0,
             "sender_backoffs": 0,
             "spout_name": "SP-program-MAX",
+            "adapter": null,
         }),
         "nothing started MAX in a unit test: the setting is not applied"
     );
     assert_eq!(json["ndi_name"], PROGRAM_NDI_NAME, "the program stays flat");
     assert!(json["vban"].is_object(), "the other blocks stay");
 
-    let max = state.program_bus.max();
+    // An Arc of its own: the thread guard below must not borrow `state`,
+    // which the cut call moves.
+    let max = state.program_bus.max().clone();
     max.set_enabled(true);
     let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
     assert_eq!(json["max"]["enabled"], true);
@@ -54,6 +57,7 @@ async fn get_program_reports_the_max_block() {
         SpoutSendStats { send_us: 900 },
     );
     max.record_device_reset();
+    max.record_adapter("NVIDIA GeForce RTX 3070 Ti".into());
     let pid = add_playlist(&state.pool, "slow").await;
     let (status, json) = call(
         state,
@@ -76,4 +80,26 @@ async fn get_program_reports_the_max_block() {
         )
     );
     assert_eq!(m["device_resets"], 1);
+    assert_eq!(m["adapter"], "NVIDIA GeForce RTX 3070 Ti");
+}
+
+/// The setting saves through the settings API (`PATCH /api/v1/settings`,
+/// a flat body) and loads back the way the settings task reads it.
+#[tokio::test]
+async fn the_max_setting_saves_through_the_settings_api_and_loads_back() {
+    use crate::playback::program_max::load_max_enabled;
+    let state = test_state().await;
+    assert!(load_max_enabled(&state.pool).await.unwrap(), "default ON");
+    let (status, _) = call(
+        state.clone(),
+        "PATCH",
+        "/api/v1/settings",
+        Some(serde_json::json!({ "program_max_enabled": "false" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(
+        !load_max_enabled(&state.pool).await.unwrap(),
+        "switched off"
+    );
 }

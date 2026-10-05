@@ -181,7 +181,8 @@ pub struct MaxStatus {
     /// Jobs dropped because the thread was a full queue behind.
     pub coalesced: u64,
     /// Jobs the thread took that did not go out (a failed build or frame, a
-    /// backoff). `submitted + failed` = the jobs it took.
+    /// backoff). `submitted + failed` = the jobs it took on a GPU it has (an
+    /// `unsupported` platform counts neither).
     pub failed: u64,
     /// The p99 over the last [`MAX_STAT_WINDOW`] sent frames, µs: the plane
     /// uploads, the draw until the GPU finished it, Spout's `SendTexture`.
@@ -196,6 +197,10 @@ pub struct MaxStatus {
     pub sender_backoffs: u64,
     /// The Spout sender name (Arena: `SPOUT_<name>`).
     pub spout_name: &'static str,
+    /// The adapter the last compositor was built on (revision 3 R3-2: the
+    /// box must name its RTX, never a virtual adapter or the Basic Render
+    /// Driver); `None` before the first build.
+    pub adapter: Option<String>,
 }
 
 /// The hand-off's shared state (one lock, shared with the program thread).
@@ -253,6 +258,7 @@ struct Stats {
     failed: u64,
     device_resets: u64,
     sender_backoffs: u64,
+    adapter: Option<String>,
     upload: Window,
     draw: Window,
     send: Window,
@@ -313,6 +319,7 @@ impl MaxOut {
                 failed: 0,
                 device_resets: 0,
                 sender_backoffs: 0,
+                adapter: None,
                 upload: Window::default(),
                 draw: Window::default(),
                 send: Window::default(),
@@ -478,6 +485,11 @@ impl MaxOut {
         self.lock_stats().sender_backoffs += 1;
     }
 
+    /// A compositor was built on `adapter`.
+    pub fn record_adapter(&self, adapter: String) {
+        self.lock_stats().adapter = Some(adapter);
+    }
+
     /// The telemetry. The windows are copied under the lock and sorted
     /// after it, so the thread's next record never waits for a sort.
     pub fn status(&self) -> MaxStatus {
@@ -485,10 +497,11 @@ impl MaxOut {
             let queue = self.lock_queue();
             (queue.enabled, queue.coalesced)
         };
-        let (phase, counts, upload, draw, send) = {
+        let (phase, adapter, counts, upload, draw, send) = {
             let stats = self.lock_stats();
             (
                 stats.phase.clone(),
+                stats.adapter.clone(),
                 [
                     stats.submitted,
                     stats.failed,
@@ -515,6 +528,7 @@ impl MaxOut {
             device_resets,
             sender_backoffs,
             spout_name: SPOUT_SENDER_NAME,
+            adapter,
         }
     }
 }

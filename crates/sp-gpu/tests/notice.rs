@@ -9,6 +9,7 @@ const LICENSE: &str = include_str!("../vendor/spout2/LICENSE");
 const README: &str = include_str!("../vendor/spout2/README.md");
 const NOTICE: &str = include_str!("../../../src-tauri/resources/THIRD-PARTY-NOTICES.txt");
 const TAURI_CONF: &str = include_str!("../../../src-tauri/tauri.conf.json");
+const CI: &str = include_str!("../../../.github/workflows/ci.yml");
 
 /// The text with LF line ends (a Windows checkout may give CRLF).
 fn lf(text: &str) -> String {
@@ -39,4 +40,17 @@ fn the_installer_bundles_the_notice() {
         TAURI_CONF.contains("\"resources/THIRD-PARTY-NOTICES.txt\""),
         "tauri.conf.json bundle.resources lists the notice"
     );
+}
+
+/// The mimalloc DLLs are staged by CI (never committed); their MIT license
+/// is staged next to them (`resources/mimalloc/*` ships it), and the notice
+/// says where it is.
+#[test]
+fn the_installer_carries_mimallocs_license_too() {
+    assert!(
+        CI.contains("Copy-Item 'mimalloc-src/LICENSE' (Join-Path $dest 'LICENSE-mimalloc.txt')"),
+        "ci.yml stages mimalloc's LICENSE with its DLLs"
+    );
+    assert!(TAURI_CONF.contains("\"resources/mimalloc/*\""));
+    assert!(lf(NOTICE).contains("resources/mimalloc/LICENSE-mimalloc.txt"));
 }

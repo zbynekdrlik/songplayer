@@ -209,8 +209,10 @@ jobs:
         # Build mimalloc's Windows dynamic override from a PINNED tag and stage
         # the override DLL + the repo's prebuilt redirect DLL + minject.exe into
         # resources/mimalloc/, which tauri.conf.json's bundle.resources ships in
-        # the NSIS installer next to SongPlayer.exe. The step FAILS if any of the
-        # three files is missing (no continue-on-error, no "|| true").
+        # the NSIS installer next to SongPlayer.exe, with mimalloc's MIT LICENSE
+        # (#223 S2: the installer carries its third-party notices). The step
+        # FAILS if any of the four files is missing (no continue-on-error, no
+        # "|| true").
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -232,7 +234,8 @@ jobs:
           Copy-Item $built.FullName (Join-Path $dest 'mimalloc.dll') -Force
           Copy-Item 'mimalloc-src/bin/mimalloc-redirect.dll' (Join-Path $dest 'mimalloc-redirect.dll') -Force
           Copy-Item 'mimalloc-src/bin/minject.exe' (Join-Path $dest 'minject.exe') -Force
-          foreach ($f in @('mimalloc.dll', 'mimalloc-redirect.dll', 'minject.exe')) {
+          Copy-Item 'mimalloc-src/LICENSE' (Join-Path $dest 'LICENSE-mimalloc.txt') -Force
+          foreach ($f in @('mimalloc.dll', 'mimalloc-redirect.dll', 'minject.exe', 'LICENSE-mimalloc.txt')) {
             if (-not (Test-Path (Join-Path $dest $f))) { throw "staged mimalloc file missing: $f" }
           }
           Write-Host 'Staged mimalloc override resources:'
