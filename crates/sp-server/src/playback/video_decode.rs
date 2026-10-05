@@ -9,8 +9,7 @@
 //! - The paced decode producer (`pipeline_paced.rs`) reads [`global`]'s
 //!   [`HwDecodeSetting::mode`] when it OPENS a song, so a change applies from
 //!   the next song (one opened at most one poll after the save); a playing
-//!   song keeps its reader. The SDK-clocked path (`genlock_pacing` off, not
-//!   used on the box) stays software.
+//!   song keeps its reader (the only decode path since #221 lane 3).
 //! - `GET /api/v1/status` → `video_decode` ([`status`]): the setting and the
 //!   process's `sp_decoder::hw_counters` (every reader opened in `Hardware`
 //!   mode, the decode bench's included).

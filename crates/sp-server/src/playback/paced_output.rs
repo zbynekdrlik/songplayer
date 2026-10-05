@@ -8,8 +8,8 @@
 //! production [`InstalledBus`]). Before, it sent each boundary to the
 //! playlist's own NDI sender first and offered the same job to the bus after.
 //!
-//! **#168 output-side split.** The `genlock_pacing` emit thread used to
-//! perform the NDI submit INLINE at each grid boundary, and it stalled under a
+//! **#168 output-side split.** The paced emit thread used to perform the
+//! (then per-playlist) NDI submit INLINE at each grid boundary, and it stalled under a
 //! resident heavy child; so the emit thread only stamps a frame and hands it
 //! over in ~µs through a bounded [`SharedHandoff`], and a dedicated consumer
 //! thread takes it from there.
@@ -561,7 +561,10 @@ pub fn run_paced_consumer<O: BoundaryOut>(mut consumer: PacedConsumer<O>, handof
         }
         consumer.serve(handoff, step);
     }
-    info!(playlist_id = pid, "paced output: consumer drained + stopped");
+    info!(
+        playlist_id = pid,
+        "paced output: consumer drained + stopped"
+    );
 }
 
 /// The pipeline-lifetime consumer thread (#147). Dropping it stops the

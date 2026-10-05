@@ -664,7 +664,10 @@ fn the_pipeline_output_spawns_one_consumer_thread_and_joins_it_on_drop() {
     let mut output = PipelineOutput::new(7, out.clone());
     let first = output.handoff(4, 2);
     let again = output.handoff(4, 2);
-    assert!(Arc::ptr_eq(&first, &again), "one consumer thread per pipeline");
+    assert!(
+        Arc::ptr_eq(&first, &again),
+        "one consumer thread per pipeline"
+    );
     let feed = PacedFeed::attach(&first);
     first.offer(job(b(1), 8, Some(2)));
     let deadline = Instant::now() + Duration::from_secs(10);

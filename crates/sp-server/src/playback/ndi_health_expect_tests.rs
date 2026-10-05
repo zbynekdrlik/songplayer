@@ -1,23 +1,9 @@
-//! #221: where a receiver is expected (pure). The engine-level effect on a
-//! playlist output's health (the dark-wall reason, the ladder, the #196
-//! self-check, the lock) is pinned in `ndi_health_tests_expect.rs`;
-//! SP-program's reason on `GET /api/v1/program` in `api/program_tests.rs`.
+//! #221: where a receiver is expected (pure): `SP-program`, the one NDI
+//! sender. Its reason on `GET /api/v1/program` is pinned in
+//! `api/program_tests.rs`.
 //! Wired via `#[cfg(test)] #[path = "ndi_health_expect_tests.rs"] mod tests;`.
 
-use super::{
-    PROGRAM_NO_RECEIVER_REASON, judged_connections, program_degraded_reason, receiver_log,
-};
-
-/// #221 B4 step 6: a playlist's own output expects no receiver, so its 0
-/// receivers (or the SDK's -1) is judged satisfied, and a real count passes
-/// as it is.
-#[test]
-fn a_playlist_output_s_count_is_judged_satisfied() {
-    assert_eq!(judged_connections(0), 1);
-    assert_eq!(judged_connections(-1), 1);
-    assert_eq!(judged_connections(1), 1);
-    assert_eq!(judged_connections(3), 3);
-}
+use super::{PROGRAM_NO_RECEIVER_REASON, program_degraded_reason, receiver_log};
 
 /// SP-program expects a receiver while any source is on program (a
 /// playlist, or -1 "OBS manuál"): 0 or fewer receivers is the degraded

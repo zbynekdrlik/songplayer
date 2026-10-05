@@ -179,8 +179,7 @@ fn run_loop_windows(
     let mut output = PipelineOutput::new(playlist_id, InstalledBus);
     // The paced scheduler persists across songs (counters accumulate) and
     // re-anchors per Play/Seek.
-    let mut pacer =
-        crate::playback::pacer::Pacer::new(sp_core::genlock::GENLOCK_GRID_FPS, true);
+    let mut pacer = crate::playback::pacer::Pacer::new(sp_core::genlock::GENLOCK_GRID_FPS, true);
 
     let mut paused = false;
     let mut last_heartbeat = std::time::Instant::now();

@@ -20,8 +20,8 @@
 //!   `GET /api/v1/playback/{playlist_id}/preview.jpg` serves (or `204` when
 //!   idle).
 //!
-//! Mirrors the shared-registry pattern of [`super::ndi_burn::NdiBurnRegistry`]:
-//! [`PreviewRegistry`] maps `playlist_id` → `PreviewTap`, is created once in
+//! A shared registry: [`PreviewRegistry`] maps `playlist_id` → `PreviewTap`,
+//! is created once in
 //! `lib.rs::start`, shared with `AppState` (route reader) and the playback
 //! engine (registers a tap per pipeline at spawn).
 //!
@@ -452,9 +452,9 @@ pub fn encode_jpeg_rgb(frame: &RawPreviewFrame, quality: u8) -> Result<Vec<u8>, 
     Ok(buf)
 }
 
-/// Shared registry of per-playlist preview taps. Mirrors
-/// [`super::ndi_burn::NdiBurnRegistry`]: created once in `lib.rs::start`,
-/// shared with `AppState` (route) and the playback engine (spawn).
+/// Shared registry of per-playlist preview taps: created once in
+/// `lib.rs::start`, shared with `AppState` (route) and the playback engine
+/// (spawn).
 pub struct PreviewRegistry {
     cfg: PreviewConfig,
     taps: RwLock<HashMap<i64, PreviewTap>>,
@@ -478,9 +478,9 @@ impl PreviewRegistry {
 
     /// Register (or reuse) BOTH the JPEG tap and the #178 stream tap for
     /// `playlist_id`, returning the bundle the decode loops offer to. Idempotent.
-    /// `lead_ms` is the decode-seam A/V-sync lead for this pipeline's clocking
-    /// path (#178 round 2): 100 on the SDK-clocked path (the #192 lookahead), 0
-    /// on the paced path; it is stamped onto the stream tap at first register.
+    /// `lead_ms` is the decode-seam A/V-sync lead (#178 round 2,
+    /// `preview_stream::decode_seam_lead_ms`); it is stamped onto the stream
+    /// tap at first register.
     pub fn register_taps(&self, playlist_id: i64, lead_ms: u32) -> DecodeTaps {
         DecodeTaps {
             preview: self.register(playlist_id),

@@ -67,8 +67,8 @@
 //! This file is the PURE, Linux-tested decision layer ([`ProgramCore`]) plus
 //! its `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the settings persistence
 //! of the selected source. The `SP-program` sender + its thread live in
-//! `program_output.rs`; the offer hook sits in the paced submit thread
-//! (`paced_output.rs`).
+//! `program_output.rs`; the offer hook sits in each playlist pipeline's paced
+//! consumer (`paced_output.rs`, its only output since #221 lane 3).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
@@ -426,8 +426,9 @@ impl ProgramCore {
     }
 
     /// Every paced source reports its progress here on every boundary (via
-    /// [`program_copy`]), program candidate or not, so a source that is cut to
-    /// is already known to be live. Returns whether `pid` can own a boundary.
+    /// `paced_output::offer_to_bus`), program candidate or not, so a source
+    /// that is cut to is already known to be live. Returns whether `pid` can
+    /// own a boundary.
     pub fn touch(&mut self, pid: i64, stamp_100ns: i64) -> bool {
         self.last_offer.insert(pid, stamp_100ns);
         self.is_candidate(pid)
@@ -878,16 +879,6 @@ impl ProgramBus {
         self.lock().stop = true;
         self.ready.notify_all();
     }
-}
-
-/// A copy of a source's boundary job for the program — an `Arc` bump of the
-/// frame and one ≤ 12.8 KB audio block — taken BEFORE the source's own submit
-/// moves the frame into its holdover, and only when `pid` can own a program
-/// boundary. Every source records its progress here on every boundary
-/// ([`ProgramCore::touch`]); a source that cannot own one pays that one lock
-/// and nothing else.
-pub fn program_copy(bus: &ProgramBus, pid: i64, job: &SubmitJob) -> Option<SubmitJob> {
-    bus.touch(pid, job.video_tc_100ns).then(|| job.clone())
 }
 
 static PROGRAM_BUS: OnceLock<Arc<ProgramBus>> = OnceLock::new();

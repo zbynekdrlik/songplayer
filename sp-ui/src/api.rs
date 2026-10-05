@@ -175,31 +175,14 @@ pub struct PacingView {
 pub struct AudioView {
     #[serde(default)]
     pub underruns: u64,
-    /// #192 wall-clock audio emitter (SDK-clocked path).
-    #[serde(default)]
-    pub emitter: EmitterView,
 }
 
-/// Wall-clock audio-emitter telemetry (#192), the subset the badge tooltip
-/// shows for the SDK-clocked path.
-#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
-pub struct EmitterView {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub silence_blocks: u64,
-    #[serde(default)]
-    pub ring_depth_ms: u64,
-    #[serde(default)]
-    pub emit_jitter_p99_us: u64,
-    #[serde(default)]
-    pub late_blocks: u64,
-}
-
-/// One NDI output's health as consumed by the dashboard's genlock badges
-/// (#150). A read-only view over the server's `PipelineHealthSnapshot`; every
-/// field `#[serde(default)]` so a partial or newer payload still deserialises
-/// and unknown server fields are ignored.
+/// One playlist pipeline's health as consumed by the dashboard's genlock
+/// badges (#150). A read-only view over the server's `PipelineHealthSnapshot`;
+/// every field `#[serde(default)]` so a partial or newer payload still
+/// deserialises and unknown server fields are ignored. #221 lane 3: a
+/// playlist has no NDI output of its own any more, so there is no receiver
+/// count (`SP-program`'s is on `GET /api/v1/program`).
 #[derive(Clone, Debug, PartialEq, serde::Deserialize)]
 pub struct NdiOutputHealth {
     #[serde(default)]
@@ -210,8 +193,6 @@ pub struct NdiOutputHealth {
     /// An output is LIVE on the wall iff this is `Playing`.
     #[serde(default)]
     pub state: String,
-    #[serde(default)]
-    pub connections: i32,
     #[serde(default = "default_lock_state")]
     pub lock_state: LockState,
     #[serde(default)]
@@ -222,11 +203,6 @@ pub struct NdiOutputHealth {
     pub pacing: PacingView,
     #[serde(default)]
     pub audio: AudioView,
-    /// #196: server-set health reason (e.g. the dark-wall reason, "no OBS scene
-    /// for this output", or "no receiver after restart"). The `HealthBar`
-    /// counts the last for its NDI badge. A missing key deserializes to `None`.
-    #[serde(default)]
-    pub degraded_reason: Option<String>,
 }
 
 impl NdiOutputHealth {

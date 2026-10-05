@@ -128,11 +128,8 @@ fn cancel_title_timers_aborts_pending_handles() {
         let mut pp = PlaylistPipeline {
             pipeline: PlaybackPipeline::spawn(
                 "test".to_string(),
-                None,
                 mpsc::unbounded_channel().0,
                 1,
-                false,
-                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 crate::playback::preview::preview_stream::DecodeTaps {
                     preview: crate::playback::preview::PreviewTap::new(
                         Default::default(),
@@ -143,7 +140,6 @@ fn cancel_title_timers_aborts_pending_handles() {
                         0,
                     ),
                 },
-                None,
             ),
             state: PlayState::Idle,
             mode: PlaybackMode::default(),

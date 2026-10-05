@@ -95,7 +95,7 @@ impl PlaybackEngine {
     /// them has a line). "On program" = `scene_active` AND in the
     /// authority's diffed set: a playlist whose OFF is queued too is leaving,
     /// and it owns nothing, so its title and line are no candidates either
-    /// (`title_candidates`, `on_program_lines`: the wall owner's only).
+    /// (`title_candidate`, `on_program_lines`: the wall owner's only).
     ///
     /// #221 review round 3: the stage display is re-synced to the wall owner
     /// too (`resync_presenter`), as at an owner's ON: that repeats the

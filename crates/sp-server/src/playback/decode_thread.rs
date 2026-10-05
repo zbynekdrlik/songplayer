@@ -5,16 +5,15 @@
 //! (`pipeline_paced.rs`, `paced-decode-<playlist id>`) and the decode bench
 //! (`diag::decode_bench`, `decode-bench`). The bench's numbers mean what
 //! playback sees only if both are scheduled alike, so both start here.
-//! (The SDK-clocked path, `pipeline.rs`, decodes inline on its pipeline
-//! thread. It runs only with the `genlock_pacing` setting set to `false`;
-//! the default is ON, by the owner's rule (#147).)
+//! (#221 lane 3 deleted the SDK-clocked path, which decoded inline on its
+//! pipeline thread.)
 //!
 //! The scheduling today is the platform default: `CreateThread` starts a
 //! thread at `THREAD_PRIORITY_NORMAL`, inside SongPlayer's
 //! `HIGH_PRIORITY_CLASS` (#203, `process_start::set_high_priority_class`).
 //! The decode thread is deliberately NOT raised. Only the grid-paced emit,
 //! NDI input and VBAN threads are, each from inside its own body
-//! (`pipeline::pipeline_audio::raise_thread_priority`, `mmcss`). A decode
+//! (`mmcss::raise_thread_priority`, `mmcss::join_pro_audio`). A decode
 //! thread's priority must NOT be set that way: a change belongs in
 //! [`spawn_decode_thread`] (as the first step of the spawned closure), so the
 //! bench follows it.

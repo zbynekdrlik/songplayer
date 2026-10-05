@@ -22,7 +22,6 @@ fn playing_snapshot(playlist_id: i64, ndi_name: &str) -> PipelineHealthSnapshot 
         playlist_id,
         ndi_name: ndi_name.to_string(),
         state: PlaybackStateLabel::Playing,
-        connections: 1,
         frames_submitted_total: 0,
         frames_submitted_last_5s: 0,
         observed_fps: 24.0,
@@ -37,9 +36,6 @@ fn playing_snapshot(playlist_id: i64, ndi_name: &str) -> PipelineHealthSnapshot 
         audio: AudioStats::default(),
         lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
         lock_reason: String::new(),
-        burn_on: false,
-        recovery_step: None,
-        sender_url: None,
         transport: sp_core::playback::TransportState::Idle,
     }
 }

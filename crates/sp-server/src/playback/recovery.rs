@@ -90,71 +90,64 @@ impl super::PlaylistPipeline {
     }
 }
 
-/// The video whose title is due at `now` among `candidates` (`(playlist id,
-/// clock)`): an open clock. The candidates are the wall owner's alone
-/// (`title_candidates`), so one at most; were there several, the highest
-/// playlist id would win, so the HashMap order never decides.
-fn due_title_video(candidates: &[(i64, TitleClock)], now: Instant) -> Option<i64> {
-    candidates
-        .iter()
+/// The video whose title is due at `now`: the candidate's (`(playlist id,
+/// clock)`, the wall owner's song, `title_candidate`) when its clock is open.
+/// #221 lane 3: one wall, one owner, so one candidate at most — the old
+/// highest-playlist-id tie-break among several is gone.
+fn due_title_video(candidate: Option<(i64, TitleClock)>, now: Instant) -> Option<i64> {
+    candidate
         .filter(|(_, clock)| clock.open_at(now))
-        .max_by_key(|(playlist_id, _)| *playlist_id)
         .map(|(_, clock)| clock.video_id)
 }
 
 impl super::PlaybackEngine {
-    /// The songs whose title could be on the wall: `(playlist id, clock)` of
-    /// every playing, on-program pipeline with its own song's clock that may
-    /// write the wall (#221, release 0.69.0 review 🟡 2: the wall owner only;
-    /// none without one).
-    fn title_candidates(&self) -> Vec<(i64, TitleClock)> {
-        self.pipelines
-            .iter()
-            .filter(|&(&playlist_id, _)| self.on_air.may_write_wall(playlist_id))
-            .filter_map(|(&playlist_id, pp)| match pp.state {
-                PlayState::Playing { video_id } => {
-                    pp.on_air_clock(video_id).map(|clock| (playlist_id, clock))
-                }
-                _ => None,
-            })
-            .collect()
+    /// The song whose title could be on the wall: `(playlist id, clock)` of
+    /// the wall owner's pipeline when it plays on program with its own song's
+    /// clock (#221, release 0.69.0 review 🟡 2); none without an owner.
+    fn title_candidate(&self) -> Option<(i64, TitleClock)> {
+        let owner = self.on_air.owner()?;
+        let pp = self.pipelines.get(&owner)?;
+        match pp.state {
+            PlayState::Playing { video_id } => {
+                pp.on_air_clock(video_id).map(|clock| (owner, clock))
+            }
+            _ => None,
+        }
     }
 
     /// Decide the wall's title (#217 addendum 3): the due title or none, and
     /// the instant it was decided at. `None` when the due song's title read
     /// failed: a transient error must not hide a title mid-song, so nothing
     /// is sent. A failed read of a candidate that is not due is logged and
-    /// does not matter (the candidates are the wall owner's alone, #221).
+    /// does not matter.
     ///
-    /// The candidates' titles are read FIRST, one await per candidate. The
-    /// due title is then decided at `Instant::now()`, and the callers send it
-    /// with no await in between. A timer that fired during the reads is
-    /// already past its instant, so the Resync agrees with it. Deciding before
-    /// the reads let a hide timer's HideTitle land ahead of a Resync that
-    /// still named the title, which superseded it (review round 2).
+    /// The candidate's title is read FIRST. The due title is then decided at
+    /// `Instant::now()`, and the callers send it with no await in between. A
+    /// timer that fired during the read is already past its instant, so the
+    /// Resync agrees with it. Deciding before the read let a hide timer's
+    /// HideTitle land ahead of a Resync that still named the title, which
+    /// superseded it (review round 2).
     pub(super) async fn decide_wall_title(&self) -> Option<(Option<String>, Instant)> {
-        let candidates = self.title_candidates();
-        let mut titles = Vec::with_capacity(candidates.len());
-        for &(_, clock) in &candidates {
-            let text = title::title_text(&self.pool, clock.video_id).await;
-            titles.push((clock.video_id, text));
-        }
+        let candidate = self.title_candidate();
+        let text = match candidate {
+            Some((_, clock)) => Some(title::title_text(&self.pool, clock.video_id).await),
+            None => None,
+        };
         let now = Instant::now();
-        let due = due_title_video(&candidates, now);
-        debug!(?candidates, ?due, "title window");
-        let mut title = None;
-        for (video_id, text) in titles {
-            match text {
-                Ok(text) if due == Some(video_id) => title = text,
-                Ok(_) => {}
-                Err(e) if due == Some(video_id) => {
-                    warn!(video_id, %e, "title resync: DB lookup failed — nothing sent");
-                    return None;
-                }
-                Err(e) => warn!(video_id, %e, "title read failed — its title is not due"),
+        let due = due_title_video(candidate, now);
+        debug!(?candidate, ?due, "title window");
+        match (due, text) {
+            (Some(_), Some(Ok(title))) => Some((title, now)),
+            (Some(video_id), Some(Err(e))) => {
+                warn!(video_id, %e, "title resync: DB lookup failed — nothing sent");
+                None
             }
+            (None, Some(Err(e))) => {
+                warn!(?candidate, %e, "title read failed — its title is not due");
+                Some((None, now))
+            }
+            _ => Some((None, now)),
         }
-        Some((title, now))
     }
 
     /// Declare the wall's title to the Resolume driver (a `Resync`): the due
@@ -174,11 +167,11 @@ impl super::PlaybackEngine {
     }
 
     /// The wall's line of every playing, on-program pipeline that may write
-    /// the wall (#221 🟡 2: the wall owner only; none without one), at its
-    /// last reported position: `(playlist id, video id, ShowSubtitles)`. A
-    /// pipeline with no line there (no lyrics, a blank plan position) has
-    /// none. Used by a Resolume recovery and when a playlist goes off program
-    /// (`wall_after_scene_off`).
+    /// the wall (#221 🟡 2: the wall owner only, so one at most; none without
+    /// one), at its last reported position: `(playlist id, video id,
+    /// ShowSubtitles)`. A pipeline with no line there (no lyrics, a blank
+    /// plan position) has none. Used by a Resolume recovery and when a
+    /// playlist goes off program (`wall_after_scene_off`).
     pub(super) fn on_program_lines(&self) -> Vec<(i64, i64, ResolumeCommand)> {
         let mut shows = Vec::new();
         for (&playlist_id, pp) in &self.pipelines {

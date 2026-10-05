@@ -104,6 +104,9 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     /// The borrowed video is copied for the async
     /// double-buffer holdover, into a RECYCLED pool buffer
     /// ([`SharedFrame::copy_from_slice`], #147 round 10) — never a fresh alloc.
+    /// Test-only since #221 lane 3: the program output submits the zero-copy
+    /// `_owned` variant.
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn submit_frame_at_boundary(
         &mut self,
@@ -116,9 +119,7 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         audio_tc_100ns: i64,
     ) {
         // Borrow variant: copy the caller's buffer into a pooled SharedFrame and
-        // delegate (for a caller that keeps its own slice). The pacer's
-        // `PacedSink` impl and the program output both use the zero-copy
-        // `_owned` variant instead.
+        // delegate (for a test that keeps its own slice).
         self.submit_frame_at_boundary_owned(
             width,
             height,
@@ -207,9 +208,12 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     }
 }
 
-/// A `FrameSubmitter` is a [`PacedSink`](crate::playback::pacer::PacedSink):
-/// a pacer can emit straight into an NDI sender (the pacer tests drive it so,
-/// over `MockNdiBackend`).
+/// A `FrameSubmitter` is a [`PacedSink`](crate::playback::pacer::PacedSink)
+/// in the tests: a pacer emits straight into an NDI sender over
+/// `MockNdiBackend` (the pacer tests' real-wire rig). Production pacers emit
+/// into the paced consumer's hand-off (`submit_handoff.rs`), which feeds the
+/// program bus (#221 lane 3).
+#[cfg(test)]
 impl<B: NdiBackend> crate::playback::pacer::PacedSink for FrameSubmitter<B> {
     fn emit(
         &mut self,

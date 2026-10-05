@@ -325,9 +325,8 @@ impl UnwatchedEnd {
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
     label: String,
-    /// #178 A/V-sync lead (ms): how far the decode-seam audio LEADS the video on
-    /// this pipeline's clocking path (1500 on the SDK-clocked path from the #192
-    /// lookahead, 0 on the paced path). The encoder's audio feeder HOLDS each
+    /// #178 A/V-sync lead (ms): how far the decode-seam audio LEADS the video
+    /// ([`decode_seam_lead_ms`], 210). The encoder's audio feeder HOLDS each
     /// block this long (#184 round G3, `preview_audio_hold::AudioHold`) to bring
     /// preview A/V into sync (round 3 used a silence preroll; before it the
     /// box-unreliable `-itsoffset`).

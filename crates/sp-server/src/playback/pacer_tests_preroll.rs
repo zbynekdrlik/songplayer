@@ -108,7 +108,6 @@ fn a_slow_decoder_open_is_filled_with_standby_pairs_and_the_song_starts_on_the_n
     let backend = Arc::new(MockNdiBackend::new());
     let sender = NdiSender::new_with_clocking(backend.clone(), "PR", false, false).unwrap();
     let mut sub = FrameSubmitter::new(sender, 30, 1);
-    sub.set_paced(true);
     let blk = black_frame();
 
     for k in 1..=3 {

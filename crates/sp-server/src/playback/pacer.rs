@@ -17,8 +17,9 @@
 //! I/O is kept thin: the pacer OWNS its [`WallClock`] (a scheduling read at
 //! entry, an emit read right before the send so lateness includes decode time);
 //! the caller supplies `pull` (the next decoded frame) and a [`PacedSink`]
-//! (audio-before-video submission) — `FrameSubmitter` + the MF decoder in
-//! production, a recording fake + a synthetic stream over a settable clock in
+//! (audio-before-video submission) — the paced consumer's `HandoffSink`
+//! (`paced_output.rs`, to the program bus) + the MF decoder in production,
+//! a recording fake + a synthetic stream over a settable clock in
 //! tests, so every emit/repeat/drop/catch-up/resync/re-latch decision is
 //! Linux-testable.
 
@@ -79,9 +80,10 @@ impl PacedFrame {
     }
 }
 
-/// The sink the pacer emits through. `FrameSubmitter` implements it in
-/// production (audio-before-video async NDI submit with explicit timecodes);
-/// tests use a recording fake.
+/// The sink the pacer emits through. `paced_output::HandoffSink` implements it
+/// in production (the boundary's pair, handed to the pipeline's consumer,
+/// which delivers it to the program bus); tests use a recording fake, or the
+/// `FrameSubmitter` over `MockNdiBackend` for a real-wire rig.
 pub trait PacedSink {
     /// Emit one boundary: submit each chunk in `audio` (stamped `audio_tc_100ns`,
     /// the timeline instant of its first sample — the pacer passes the boundary
@@ -119,8 +121,8 @@ pub trait PacedSink {
     /// Emit one boundary from an already-shared frame (#203). The DEFAULT builds
     /// a one-shot [`PacedFrame`] over the borrowed pixels and delegates to
     /// [`emit_standby`](Self::emit_standby), so an `emit`-only sink still works;
-    /// `FrameSubmitter` OVERRIDES it to move the `SharedFrame` into the zero-copy
-    /// holdover. The standby pair (idle / pre-roll black, a starve fill, a held
+    /// `HandoffSink` (and the tests' `FrameSubmitter`) OVERRIDE it to move the
+    /// `SharedFrame` on by `Arc` (no pixel copy). The standby pair (idle / pre-roll black, a starve fill, a held
     /// seek frame, #147) goes through it by SHARED reference (a refcount bump).
     #[allow(clippy::too_many_arguments)]
     fn submit_shared(
@@ -928,9 +930,6 @@ impl Pacer {
             underruns: self.audio_buf.underruns(),
             overflows: self.audio_buf.overflows(),
             buffer_ms: self.audio_buf.buffer_ms(),
-            // The paced path has its own media-aligned audio; the wall-clock
-            // emitter (#192) is the SDK-clocked path's tool, disabled here.
-            emitter: Default::default(),
         }
     }
 }

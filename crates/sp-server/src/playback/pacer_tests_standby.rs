@@ -115,14 +115,12 @@ impl PacedSink for Rec {
     }
 }
 
-/// A paced `FrameSubmitter` over a recording mock (`clock_video=false`, as the
-/// paced pipeline creates it).
+/// A `FrameSubmitter` over a recording mock (`clock_video=false`, as
+/// `SP-program` creates it): the real-wire rig of the pacer.
 fn paced_submitter() -> (Arc<MockNdiBackend>, FrameSubmitter<MockNdiBackend>) {
     let backend = Arc::new(MockNdiBackend::new());
     let sender = NdiSender::new_with_clocking(backend.clone(), "SB", false, false).unwrap();
-    let mut sub = FrameSubmitter::new(sender, 30, 1);
-    sub.set_paced(true);
-    (backend, sub)
+    (backend, FrameSubmitter::new(sender, 30, 1))
 }
 
 #[test]
@@ -226,7 +224,6 @@ fn the_paced_output_never_sends_a_sync_frame_or_bgra_and_keeps_the_grid_contiguo
     let (backend, mut sub) = paced_submitter();
     let blk = black();
 
-    sub.send_standby_black(1920, 1080); // pipeline start
     for k in 1..=3 {
         clk.set(b(k));
         pacer.service_standby(idle(&blk), &mut sub);
@@ -244,7 +241,6 @@ fn the_paced_output_never_sends_a_sync_frame_or_bgra_and_keeps_the_grid_contiguo
         clk.set(b(k)); // Pause
         pacer.service_standby(Standby::FrozenLast, &mut sub);
     }
-    sub.send_standby_black(1920, 1080); // song end / Stop
     for k in 9..=10 {
         clk.set(b(k));
         pacer.service_standby(idle(&blk), &mut sub);
@@ -387,21 +383,6 @@ fn idle_to_play_keeps_the_stamp_and_audio_cadence_contiguous() {
             "play: one song block per boundary: {blocks:?}"
         );
     }
-}
-
-#[test]
-fn the_paced_outer_loop_enters_the_idle_fill_at_once_legacy_keeps_5_s() {
-    use crate::playback::pacer_sink::idle_poll;
-    assert_eq!(
-        idle_poll(true),
-        std::time::Duration::ZERO,
-        "paced: no 5 s hole before the idle fill after start / song end / stop"
-    );
-    assert_eq!(
-        idle_poll(false),
-        std::time::Duration::from_secs(5),
-        "SDK-clocked: the unchanged 5 s heartbeat poll"
-    );
 }
 
 #[test]

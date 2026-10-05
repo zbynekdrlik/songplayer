@@ -1,7 +1,7 @@
 //! Windows-only boundary-paced decode driver (#147).
 //!
-//! The `genlock_pacing`-ON counterpart to `pipeline::decode_and_send`. Instead
-//! of leaning on the NDI SDK's `clock_video` cadence, it drives the pure
+//! A playlist's only decode path since #221 lane 3 deleted the SDK-clocked
+//! one (`decode_and_send` and its `genlock_pacing` switch). It drives the pure
 //! [`Pacer`](crate::playback::pacer::Pacer): sleep-until-boundary on the wall
 //! clock, decode forward per the presentation rule, and emit exactly one video
 //! frame per grid boundary stamped with the floored boundary wall time. The MF

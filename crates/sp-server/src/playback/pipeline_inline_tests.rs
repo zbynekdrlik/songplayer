@@ -12,7 +12,8 @@ fn pipeline_spawn_and_shutdown() {
     let pipeline = PlaybackPipeline::spawn(
         "test-ndi".into(),
         event_tx,
-        1,        crate::playback::preview::preview_stream::DecodeTaps {
+        1,
+        crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
@@ -28,7 +29,8 @@ fn pipeline_drop_sends_shutdown() {
         let _pipeline = PlaybackPipeline::spawn(
             "test-drop".into(),
             event_tx,
-            2,            crate::playback::preview::preview_stream::DecodeTaps {
+            2,
+            crate::playback::preview::preview_stream::DecodeTaps {
                 preview: crate::playback::preview::PreviewTap::new(
                     Default::default(),
                     "test".into(),
@@ -47,7 +49,8 @@ fn pipeline_send_command_before_shutdown() {
     let pipeline = PlaybackPipeline::spawn(
         "test-cmd".into(),
         event_tx,
-        3,        crate::playback::preview::preview_stream::DecodeTaps {
+        3,
+        crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
@@ -64,7 +67,8 @@ fn pipeline_play_emits_event_on_non_windows() {
     let pipeline = PlaybackPipeline::spawn(
         "test-play".into(),
         event_tx,
-        4,        crate::playback::preview::preview_stream::DecodeTaps {
+        4,
+        crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
@@ -128,7 +132,8 @@ fn pipeline_send_seek_command() {
     let pipeline = PlaybackPipeline::spawn(
         "test-seek".into(),
         event_tx,
-        6,        crate::playback::preview::preview_stream::DecodeTaps {
+        6,
+        crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
@@ -151,7 +156,8 @@ fn pipeline_processes_multiple_sequential_plays() {
     let pipeline = PlaybackPipeline::spawn(
         "test-multi-play".into(),
         event_tx,
-        5,        crate::playback::preview::preview_stream::DecodeTaps {
+        5,
+        crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
@@ -208,7 +214,8 @@ fn play_with_start_position_ms_is_accepted() {
     let pipeline = PlaybackPipeline::spawn(
         "test-start-pos".into(),
         event_tx,
-        7,        crate::playback::preview::preview_stream::DecodeTaps {
+        7,
+        crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
