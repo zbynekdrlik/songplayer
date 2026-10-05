@@ -190,8 +190,9 @@ fn log_song_summary(
 /// that opens the reader must be the one that decodes / seeks / drops it), pulls
 /// frames as fast as the bounded queue allows (blocking on backpressure), and
 /// pushes them for the emit thread to pop at grid boundaries. Reports the media
-/// duration (or an open error) back over `open_tx`. Preview sampling happens HERE
-/// — off the time-critical emit/submit path (`preview.md`). Exits on a Stop from
+/// duration, the source fps and where the song really starts (#217: 0 when the
+/// start seek failed), or an open error, back over `open_tx`. Preview sampling
+/// happens HERE — off the time-critical emit/submit path (`preview.md`). Exits on a Stop from
 /// the consumer, dropping the decoder on this thread.
 #[cfg_attr(test, mutants::skip)]
 fn run_decode_producer(

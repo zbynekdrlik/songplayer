@@ -79,9 +79,9 @@ pub(crate) fn registry_with_forwarder(
 impl super::PlaylistPipeline {
     /// The title clock of the song whose title this pipeline could put on
     /// the wall (#217 addendum 3): `video_id`, played on program, with its own
-    /// clock (fixed at its `Started`, the instants the title timers sleep
-    /// until). Every Play clears the clock (`begin_play`), so the video check
-    /// is defensive.
+    /// clock (fixed at its `Started`, moved by a seek (`TitleClock::seeked`):
+    /// the instants the title timers sleep until). Every Play clears the
+    /// clock (`begin_play`), so the video check is defensive.
     fn on_air_clock(&self, video_id: i64) -> Option<TitleClock> {
         if !self.scene_active.load(Ordering::Acquire) {
             return None;
