@@ -11,10 +11,11 @@ use std::path::Path;
 
 /// One write pass at a time, process-wide. Two workers share a module
 /// (`win_replace.py` ships with both the stem and the dub worker), and each
-/// calls [`materialise`] right before spawning its child; without the lock,
-/// both could see the file stale after a deploy and one could rewrite it
-/// while the other's child imports it. Serialised, the second caller finds it
-/// up to date and writes nothing.
+/// calls [`materialise`] on its own schedule before it queues for the heavy
+/// slot and spawns its child; without the lock, both could see the file stale
+/// after a deploy and one could rewrite it while the other's child imports
+/// it. Serialised, the second caller finds it up to date and writes nothing,
+/// whatever the timing.
 static WRITE_PASS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Write every `(file name, content)` pair into `tools_dir` (created when

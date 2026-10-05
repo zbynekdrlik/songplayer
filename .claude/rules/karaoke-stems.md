@@ -777,9 +777,11 @@ the same wall first (#184 round F2, `dabing.md`).
   `embedded_scripts::materialise` (the dub worker uses the same helper).
   A missing `win_replace.py` would fail every separation at import.
   `materialise` holds one process-wide async lock per pass: both workers
-  ship `win_replace.py` and call it right before spawning, so without the
-  lock one could rewrite the file after a deploy while the other's child
-  imports it.
+  ship `win_replace.py` and call it on their own schedule (the stem worker
+  before it queues for the heavy slot), so without the lock one could
+  rewrite the file after a deploy while the other's child imports it. With
+  the lock plus "write only when the content differs", the second caller
+  never writes, whatever the timing.
 - **Tests.** `scripts/tests/test_stem_publish.py` emulates the Windows rule on
   Linux (`windows_rename` fixture: `os.replace` onto a held path raises the
   WinError 5 `PermissionError`, the POSIX rename succeeds and is recorded).
