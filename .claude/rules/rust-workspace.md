@@ -792,7 +792,9 @@ the test that kills each one BEFORE CI's mutation gate runs.
   the earlier gate passes (there: publish the owner, scene off). Likewise
   an engine test that drives a wall write must model what production does
   before it: put the playlist on air as the owner (`put_on_air_for_test`,
-  `program-bus.md` "One wall owner") — twenty tests relied on "no owner
+  `program-bus.md` "One wall owner") — the harnesses of
+  `dispatch_lyrics_tests`, `tests_scene_change`, `tests_hold`,
+  `tests_scene_off_wall` and `tests_song_end` relied on "no owner
   restricts nothing" until lane 2 made no owner mean nobody writes.
 - **A HANG fails the gate exactly like a survivor** (review round 1, same
   ticket). cargo-mutants kills a stalled test run at `--timeout` and reports
