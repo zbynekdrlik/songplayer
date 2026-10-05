@@ -5,6 +5,9 @@ paths:
   - "crates/sp-server/src/playback/title.rs"
   - "crates/sp-server/src/playback/title_timers.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event.rs"
+  - "crates/sp-server/src/playback/seek.rs"
+  - "crates/sp-server/src/playback/pipeline_types*.rs"
+  - "crates/sp-server/src/playback/tests_title_seek.rs"
 ---
 
 # Resolume host driver — poll policy, NOT READY mapping, stale ids, RecoveryEvent, the wall title (#157, #217)
@@ -459,11 +462,32 @@ are the recovery's `on_program_lines`.
   batch; else the second is a no-op, or retries a hide whose request
   failed and left `FadingOut`). Pinned by
   `a_scene_on_that_selects_a_song_resyncs_no_title_twice`.
-- **Residual: the clock is fixed at `Started`.** A resume whose seek failed
-  plays from 0 (`decode_and_send` and the paced producer log it), but
-  `Started` does not say so,
-  and a dashboard seek never moves the clock: the title then hides early or
-  late by the difference. The timers always worked this way.
+- **The clock follows the song's REAL position (#217, residual
+  5861473237).**
+  - `Started { duration_ms, position_ms }`: `position_ms` is where the song
+    really starts, from the pure `pipeline_types::real_start_ms` (the asked
+    `start_position_ms` when the decoder's seek there worked, 0 when it
+    failed or none was asked). Both decode paths use it; the paced producer
+    hands it to the emit thread with its open result. The clock counts
+    from it, so a resume whose seek failed hides its title 3.5 s before the
+    end of the WHOLE song. `play_start_ms` (the asked start) is only logged
+    next to it.
+  - A dashboard seek re-anchors the clock: `PlaybackEngine::seek`
+    (`playback/seek.rs`) → `TitleClock::seeked(now, duration, position)`
+    (the hide point from the new position, at `now` when already past; the
+    show point kept), then `arm_title_timers` and `resync_after_play`. A
+    seek into the last 3.5 s takes the title down at once, and a seek back
+    reopens the window.
+  - A paused song is left alone (its resume's `Started` fixes a new
+    clock).
+  - The corner left: a seek sent before the song's first `Started` (no
+    clock yet, its first ~0.3 s) is applied by the pipeline right after
+    `Started`, and the clock then counts from the Play's start.
+  - The hide arithmetic is ONE helper, `title::hide_point`, shared by `new`
+    and `seeked`. It is out of `new` on purpose: cargo-mutants never
+    mutates inside a fn named `new`.
+  - Tests: `tests_title_seek.rs` (a child of `tests_scene_change.rs`) and
+    `title_tests.rs::a_seek_moves_the_hide_point_and_keeps_the_show_point`.
 - **A title is due** when its pipeline plays on program with its own clock
   (`PlaylistPipeline::on_air_clock`) and that clock is `open_at(now)`:
   `[show_at, hide_at)`.
