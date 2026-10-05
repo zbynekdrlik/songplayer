@@ -157,8 +157,10 @@ The rule (do NOT regress):
     more when a viewer joined as the child stopped. A viewer holding that
     init (and maybe the last fragments) sees `Closed`, its socket closes, and
     the shim reconnects onto the next child's init. A viewer still in
-    `wait_for_init` never reads its receiver, so its socket closes only at
-    the ~10 s init timeout (`give_up` alike).
+    `wait_for_init` does not read its (closed) receiver while it waits: its
+    socket closes when the wait ends. That is right after it sends the next
+    child's init, or at the latest at the ~10 s init timeout (`give_up`
+    alike).
   - How fast the shim reconnects: a player that never reconnected does so at
     its next 1 Hz health tick (`msSinceLastReconnect` is null). Later
     reconnects wait `reconnectGapMs` (12 → 24 → 48 → 60 s), and an init alone
@@ -193,9 +195,11 @@ The rule (do NOT regress):
   close. The close makes the viewers leave, so a later read would race their
   WS tasks and pick respawn-vs-settle at random. With nobody watching it logs
   `child exited with nobody watching — settling` before the settle.
-- The `preview.ws` viewer lines (connected / disconnected / no init / idle)
-  carry `label` (`playlist-N`), so a viewer is tied to its encoder's
-  `preview-encoder` lines.
+- The `preview.ws` viewer lines carry `label` (`playlist-N`), so a viewer is
+  tied to its encoder's `preview-encoder` lines. That covers connected,
+  disconnected, no init, idle, init send failed, and lagged (DEBUG).
+  `ensure_running` logs (DEBUG) when a viewer joins an encoder that is
+  already claimed, the claim-vs-join branch this race hinged on.
 - Tests (`preview_stream_tests_lifecycle.rs`, pure, no sleeps):
   - the window sequence: subscribe → stale init → settle = `Restart`, claim
     held, viewer's stream `Closed` (the settle alone ends it);
@@ -206,8 +210,8 @@ The rule (do NOT regress):
     subscribe in progress, then sees its viewer.
 
   `cargo mutants --in-diff --list` gives five viable mutants, all killed:
-  `delete !` in the settle, `end_stopped_stream → ()`, `give_up → ()` and
-  `supervisor_exits → true / false`. The `lifecycle_lock`, settle and
+  `==` → `!=` on the settle's single `viewers` read, `end_stopped_stream →
+  ()`, `give_up → ()` and `supervisor_exits → true / false`. The `lifecycle_lock`, settle and
   subscribe return-value mutants are unviable.
 
 ### Three earlier box findings — do NOT regress them (#178)
@@ -298,8 +302,8 @@ behind the broadcast backlog is dropped (never blocks the reader).
   `Mutex<broadcast::Sender>`. `reset()` clears the cached init and is called at
   each child's START (so a late joiner after a reset waits for the NEW init).
   The stop no longer resets: since #184 every stop goes through
-  `StreamShared::end_stopped_stream` (see "#184 — the encoder stop never strands
-  a viewer" above). `close()` clears the init AND drops the sender (replacing
+  `StreamShared::end_stopped_stream`, or `give_up`'s unconditional close (see
+  "#184 — the encoder stop never strands a viewer" above). `close()` clears the init AND drops the sender (replacing
   it with a fresh channel), so every connected viewer's `recv()` returns
   `Closed` and its WS handler closes the socket. It runs after every child run
   that still caches an init (`end_stopped_stream`), and when the supervisor
@@ -513,8 +517,9 @@ a `buffered.end` that is itself stale, and the lag beacon rides the same backlog
   close (its viewers are still in `wait_for_init`).
   - Since #184 the rule lives in the pure, Linux-tested
     `StreamShared::end_stopped_stream`, keyed on "the relay still caches an
-    init". It runs for every way a child stops (see the #184 section above),
-    not only this one.
+    init". It runs for every way a child stops (or `give_up`'s
+    unconditional close does, see the #184 section above), not only this
+    one.
 - **Server log (`api/preview.rs`)**: every viewer session logs INFO on connect
   (init sent) and on disconnect with `secs` + `pongs` answered — a viewer the
   shim keeps reconnecting on a slow link shows up in the box log as a stream of

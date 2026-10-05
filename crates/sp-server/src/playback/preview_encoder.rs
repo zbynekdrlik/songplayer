@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use sp_decoder::LevelProbe;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::fmp4_relay::BoxSplitter;
 use super::preview_audio_hold::{AudioHold, AudioWrite};
@@ -304,7 +304,13 @@ fn probe_and_select(ffmpeg: &Path) -> String {
 #[cfg_attr(test, mutants::skip)]
 pub fn ensure_running(shared: Arc<StreamShared>, ffmpeg: std::path::PathBuf) {
     if !shared.try_claim_encoder() {
-        return; // already running
+        // Already claimed: this viewer joins the running supervisor (the
+        // claim-vs-join branch #184 hinged on).
+        debug!(
+            label = shared.label(),
+            "preview-encoder: encoder already claimed, viewer joins it"
+        );
+        return;
     }
     // A previously-pinned working encoder (a hardware encoder proved broken and
     // we fell back) skips the broken probe selection entirely (#178 box).
@@ -598,9 +604,10 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
 
     // Tear down: stop feeders, kill child, join everything (incl. the stderr
     // reader, which ends at the child's stderr EOF once the child is gone).
-    // The cached init is NOT cleared here (#184): `supervise` hands it to
-    // `StreamShared::end_stopped_stream`, which closes it for any viewer that
-    // may hold it instead of resetting it under that viewer (#178 item 17).
+    // The cached init is NOT cleared here (#184): `supervise` ends the stopped
+    // stream through `StreamShared::end_stopped_stream` (or `give_up`'s
+    // unconditional close), which closes it for any viewer that may hold it
+    // instead of resetting it under that viewer (#178 item 17).
     shutdown.store(true, Ordering::Relaxed);
     let _ = child.get().kill();
     let _ = child.get().wait();

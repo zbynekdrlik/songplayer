@@ -344,7 +344,9 @@ pub struct StreamShared {
     /// child. Taken by [`try_claim_encoder`](Self::try_claim_encoder)
     /// (`preview_encoder::ensure_running`); released when a run ends with
     /// nobody watching by [`settle_unwatched_run`](Self::settle_unwatched_run),
-    /// else by the supervisor's give-up / panic paths.
+    /// by [`give_up`](Self::give_up) (restart budget spent, or a panicked
+    /// supervisor), or by `ensure_running` itself when the supervisor thread
+    /// fails to spawn.
     encoder_running: AtomicBool,
     /// Orders [`ViewerGuard::subscribe`] against the encoder supervisor's
     /// [`settle_unwatched_run`](Self::settle_unwatched_run) (#184): its viewer
@@ -561,7 +563,10 @@ impl StreamShared {
     pub fn settle_unwatched_run(&self) -> UnwatchedEnd {
         let _lifecycle = self.lifecycle_lock();
         self.end_stopped_stream();
-        if !self.has_viewer() {
+        // One read decides AND is logged (a guard drop may decrement it, outside
+        // the lock, at any moment).
+        let viewers = self.viewers.load(Ordering::Relaxed);
+        if viewers == 0 {
             info!(
                 label = %self.label,
                 "preview-encoder: run settled with nobody watching — encoder released"
@@ -571,7 +576,7 @@ impl StreamShared {
         }
         info!(
             label = %self.label,
-            viewers = self.viewers.load(Ordering::Relaxed),
+            viewers,
             "preview-encoder: a viewer subscribed as the child stopped — keeping the encoder for a new child"
         );
         UnwatchedEnd::Restart
@@ -598,7 +603,7 @@ impl StreamShared {
             info!(
                 label = %self.label,
                 receivers,
-                "preview-encoder: stopped child's init closed (a viewer holding it reconnects onto the next child's)"
+                "preview-encoder: stopped child's init closed"
             );
         }
     }
@@ -606,10 +611,12 @@ impl StreamShared {
     /// The supervisor gives the stream up (#178 item 12: the restart budget is
     /// spent, or its thread panicked): close the relay, unconditionally, THEN
     /// release the claim (#184). A viewer holding an init sees `Closed` and its
-    /// socket closes; one still waiting for an init gives up at its ~10 s init
-    /// timeout. `give_up` takes no lock, so the order matters here: in the
-    /// reverse order a new supervisor could claim and cache its child's init
-    /// before this late close wiped it.
+    /// socket closes. One still in `wait_for_init` never reads its (closed)
+    /// receiver while it waits: its socket closes when the wait ends, right
+    /// after it sends a next child's init (if another viewer starts one) or at
+    /// the latest at the ~10 s init timeout. `give_up` takes no lock, so the
+    /// order matters here: in the reverse order a new supervisor could claim
+    /// and cache its child's init before this late close wiped it.
     pub fn give_up(&self) {
         self.relay.close();
         info!(

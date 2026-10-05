@@ -102,6 +102,10 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
         .await
         .is_err()
     {
+        info!(
+            label = tap.shared().label(),
+            "preview.ws: init segment send failed, viewer gone"
+        );
         return;
     }
     // #184 round G: viewer sessions are logged at INFO (open + close with the
@@ -144,7 +148,11 @@ async fn handle_preview_ws(mut socket: WebSocket, tap: StreamTap, ffmpeg: std::p
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     // Viewer fell behind: skip the dropped fragments and resync
                     // on the next keyframe-aligned fragment (never blocks).
-                    debug!(dropped = n, "preview.ws: viewer lagged, resyncing");
+                    debug!(
+                        label = tap.shared().label(),
+                        dropped = n,
+                        "preview.ws: viewer lagged, resyncing"
+                    );
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             },
