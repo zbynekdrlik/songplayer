@@ -73,8 +73,9 @@ frame period in software); the anchors and MF facts (comment 5990523303).
 
 - The path is INFERRED from each picture (never from the mode): a picture
   in a DECODER texture is taken to have come out of the GPU decoder. CI
-  never sees a real decoder texture (WARP decodes nothing); the box bench
-  is the proof (`diag-bench.md`: cross-check a `"software"` label against
+  never sees a real decoder texture (no GPU, and WARP has no video API,
+  below); the box bench is the proof (`diag-bench.md`: cross-check a
+  `"software"` label against
   the timings). In detail: a DXGI surface whose texture carries
   `D3D11_BIND_DECODER` (0x200; Microsoft: a DXVA decoder's output array
   "should include the D3D11_BIND_DECODER flag") counts as the GPU
@@ -85,8 +86,8 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   a decoder that finds no configuration on the device "must fall back to
   software decoding" (the device manager is withdrawn, the type
   renegotiated). So a `Hardware` reader can decode in software without any
-  error: the box's GPU without a decoder for a codec, or WARP (no decoder
-  profiles).
+  error: the box's GPU without a decoder for a codec. (Not WARP: it refuses
+  the video device outright, so a reader on it falls back at open.)
 - `decode_path()` = the last picture's path, `None` before the first;
   `path_changes()` = how often a picture's path differed from the one
   before it, a fall back's too (`PathTracker::changes`; the bench's
@@ -158,43 +159,70 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   that way: logic added inside `video/` is untested by the gate. Never put
   a pure helper under `video/` (excluded), nor among
   `audio/symphonia_reader.rs`'s wrapper methods (excluded by type name).
-- `tests/mf_hw_decode.rs` (Windows; `windows-latest` has no GPU): a
-  `Hardware` open of the H.264 fixture on the picked adapter (an open fall
-  back on CI) and on WARP (`open_hardware_on_warp`, doc-hidden) must
-  report `hardware` or `software` and decode every picture byte-identical
-  to the software reader over the visible 160×120 (H.264 decoding is
-  bit-exact). On WARP the video device, the DXGI device manager and its
-  reset must have been built: the reader runs on them, or the source
-  reader refused them (`the source reader refused …`, the only open fall
-  back after them); a reader on the D3D path counts its first picture.
-  Seek parity: each reader decodes 60 pictures (past 1 900 ms), then seeks
-  BACK to the middle; the fixture's one keyframe is at 0, so a real seek
-  hands over a picture at or before the target (a seek that did nothing
-  would hand over the 61st, ~2 000 ms), and the hardware reader's picture
+- **WARP has NO Direct3D 11 video API on CI, so the hardware path is
+  box-proven ONLY.** On `windows-latest`, `D3D11CreateDevice` on WARP with
+  `D3D11_CREATE_DEVICE_VIDEO_SUPPORT` returns DXGI_ERROR_UNSUPPORTED
+  (0x887A0004, run 37293259981), although Microsoft's
+  `D3D11_CREATE_DEVICE_FLAG` page says WARP (and the Basic Render Device)
+  accept it. Three S3b tests built on the docs failed on correct code. So
+  no `Hardware` reader reaches the D3D path on CI. DXVA pictures, the
+  readback of a decoder texture, a lost device and its mid-stream fall
+  back are proven only by the main session's box bench (`decode-bench`
+  with `"hw": true` on the box's GPU: `decode_path: "hardware"`,
+  `path_changes: 0`, `diag-bench.md`). A runner capability is proven in CI
+  before a test rests on it.
+- `tests/mf_hw_decode.rs` (Windows): a `Hardware` open of the H.264
+  fixture must decode every picture byte-identical to the software reader
+  over the visible 160×120 (H.264 decoding is bit-exact). On the picked
+  adapter it reports `hardware` or `software` (`assert_reported`: on CI an
+  open fall back, `NoAdapter`; on a GPU box it may run on the D3D path).
+  On WARP (`open_hardware_on_warp`, doc-hidden) it must fall back at OPEN
+  with exactly `no video device: D3D11CreateDevice failed (HRESULT
+  0x887a0004)` (`assert_fell_back_at_open_on_warp`: mode `Hardware`, no
+  adapter), `requested` and `open_fallbacks` counted, every picture
+  `software` with `path_changes` 0: the CI test of a refused video device.
+  A WARP that one day takes the API fails it; then write the WARP tests for
+  the D3D path they reach. Seek parity: each reader decodes 60 pictures
+  (past 1 900 ms), then seeks BACK to the middle; the fixture's one
+  keyframe is at 0, so a real seek hands over a picture at or before the
+  target (a seek that did nothing would hand over the 61st, ~2 000 ms), and
+  the `Hardware` reader's picture (one that fell back at open, asserted)
   equals the software reader's.
 - The DXGI readback is proven on a REAL surface, since no decoder reaches
-  it on CI: `a_dxgi_surface_is_read_back_into_the_software_layout` makes a
-  WARP NV12 texture of 160×128 (taller than the 160×120 picture, as
-  decoders align theirs) whose bytes say where they are, wraps it as a
-  decoder wraps its output (`read_texture_as_decoded_sample`, doc-hidden:
-  `MFCreateDXGISurfaceBuffer` in an `MFCreateSample` sample) and checks the
-  packed picture byte for byte: the UV plane really starts after ALL 128
-  texture rows in `Lock2DSize`'s mapping. It also pins the pure crate's
-  `DXGI_FORMAT_NV12` and `D3D11_BIND_DECODER` against the SDK's, and that a
-  texture without `D3D11_BIND_DECODER` reads `software`.
-- The mid-stream fall back is proven on CI by
-  `fail_next_read_for_test` (doc-hidden: one injected decode error, the
-  gate armed) on a software reader AND on a `Hardware` reader on WARP. The
-  latter leaves WARP's device manager for the system-memory path mid-file
-  when the source reader took the manager; under the WARP open test's
-  contract it may instead have refused it (then it is the software case
-  again), and the test logs which. The fixture has ONE keyframe (at 0), so
-  the reopen decodes pictures 0..=9 again and must drop them; the sequence
-  must equal the uninterrupted software one.
-- `sp-gpu/tests/video_device.rs` (Windows): the device has the video API
-  (creation flags + `ID3D11VideoDevice`) and is multithread-protected, on
-  WARP and on the listed Basic Render Driver; `new()` is the picked adapter
-  or `NoAdapter` (never WARP on its own).
+  it on CI: `a_dxgi_surface_is_read_back_into_the_software_layout` makes an
+  NV12 texture of 160×128 (taller than the 160×120 picture, as decoders
+  align theirs) on a PLAIN WARP device (`plain_warp_device`: BGRA, feature
+  level 11.1 / 11.0, multithread-protected, NO video flag: neither making
+  an NV12 texture nor mapping it needs the video API), whose bytes say
+  where they are, wraps it as a decoder wraps its output
+  (`read_texture_as_decoded_sample`, doc-hidden: `MFCreateDXGISurfaceBuffer`
+  in an `MFCreateSample` sample) and checks the packed picture byte for
+  byte: the UV plane really starts after ALL 128 texture rows in
+  `Lock2DSize`'s mapping. It asserts WARP's NV12 Texture2D support (a
+  refusal fails, never skips), pins the pure crate's `DXGI_FORMAT_NV12`
+  and `D3D11_BIND_DECODER` against the SDK's, and that a texture without
+  `D3D11_BIND_DECODER` reads `software`.
+- The mid-stream fall back from the D3D path cannot be reached on CI. Its
+  logic is covered by `fail_next_read_for_test` (doc-hidden: one injected
+  decode error, the gate armed) on a software reader, the same on a
+  `Hardware` reader that fell back at open (asserted first; the hook arms
+  the gate such a reader never arms itself), and `hw_decode_tests.rs` on
+  Linux. The fixture has ONE keyframe (at 0), so the reopen decodes
+  pictures 0..=9 again and must drop them; the sequence must equal the
+  uninterrupted software one.
+- `sp-gpu/tests/video_device.rs` (Windows): WARP makes a BGRA device but
+  refuses the video flags, and `VideoDevice::new_warp` reports
+  `GpuError::Api { D3D11CreateDevice, 0x887A0004 }`. Whether the listed
+  Basic Render Driver takes the video API is NOT proven (Microsoft's same
+  paragraph), so that test asks the driver with the same
+  `D3D11CreateDevice` call and asserts `new_on_listed_adapter` agrees (a
+  device with the video API and multithread protection on that adapter, or
+  the driver's own HRESULT); it prints the answer: pin the test to it once
+  a CI run has shown it. `new()` is the picked adapter or `NoAdapter`
+  (never WARP on its own).
+- Both CI test jobs run `cargo test --no-fail-fast` (#223 S3b: the failing
+  `mf_hw_decode` binary had stopped the run before sp-gpu's and
+  sp-server's tests ran).
 - `windows` 0.58 traps met here: `IMF2DBuffer2::Lock2DSize` takes
   `MF2DBuffer_LockFlags_Read` and five out-pointers; `IMFDXGIBuffer::
   GetResource(&ID3D11Texture2D::IID, &mut raw)` returns an AddRef'd raw

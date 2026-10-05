@@ -405,6 +405,10 @@ the platform string — round-trip the result through `std::env::split_paths` an
 check `parts[0] == tools_dir`, which holds on both separators. Same rule for any
 `MAIN_SEPARATOR` / line-ending / drive-letter / temp-path assumption in a test.
 
+**A WARP (runner) premise is proven in CI before a test rests on it** (#223 S3b:
+the docs said WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`, `windows-latest`
+refuses it, three tests failed on correct code; `video-decode.md`).
+
 **An engine test must not count the test pipeline's replies (release 0.68.0
 blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
 `PipelineCommand::Play` with a `PipelineEvent::Error`; on Windows the real

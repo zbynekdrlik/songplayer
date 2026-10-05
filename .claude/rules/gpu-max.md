@@ -116,7 +116,9 @@ wiring" below).
   (`ID3D11Multithread`). One per opened file, so its adapter list logs at
   DEBUG. `new()` never falls back to WARP; `new_warp()` /
   `new_on_listed_adapter(i)` are doc-hidden, for CI
-  (`tests/video_device.rs`).
+  (`tests/video_device.rs`). On `windows-latest` WARP REFUSES the video
+  flag (DXGI_ERROR_UNSUPPORTED, against Microsoft's docs), so `new_warp()`
+  returns that error there; the test asserts it (`video-decode.md`).
 - The render target is `B8G8R8A8_UNORM`, `BIND_RENDER_TARGET |
   BIND_SHADER_RESOURCE`, `D3D11_RESOURCE_MISC_SHARED`, NOT keyed.
 - **Spout2 2.007.017 facts** (SpoutDX source, read for S1a):
