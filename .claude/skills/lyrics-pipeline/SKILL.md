@@ -63,6 +63,15 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    pass ends (a track or a quarantine) it is retired to
    `{yt}_g35t_words_used.json`, so the next pass — a manual reprocess
    included — transcribes afresh.
+   **Language hint (#144, 5.10.2026):** every request carries
+   `language_codes ["en-US", "es-419"]` (`g35t_client::LANGUAGE_CODES`, the
+   ONE list; `transcribe_words` takes no language argument). Before, it was
+   `["en-US"]`, and Spanish songs were transcribed under an English hint.
+   The API reads the list as hints of the languages present; the model picks
+   per song and follows a bilingual one. `es-419` is the Spanish code in the
+   official supported table (no `es-ES`). Never add a per-song language
+   guess. Re-run songs the change affects with the targeted reprocess
+   (`POST /api/v1/lyrics/reprocess {"video_ids":[…]}`), no version bump.
 
 0c. **Title search for covers (#144, `title_search.rs`).** When no
    artist+title lookup found the song (no `lrclib`/`genius`/`override`/

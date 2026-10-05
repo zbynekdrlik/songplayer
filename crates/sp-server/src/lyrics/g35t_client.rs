@@ -48,7 +48,15 @@ const AUDIO_MIME_TYPE: &str = "audio/wav";
 /// carries. The API reference reads them as "hints about the languages
 /// present in the audio" (omitted or empty = automatic detection), and the
 /// transcribe guide says to pass them whenever the language is known.
-const LANGUAGE_CODES: &[&str] = &["en-US"];
+///
+/// The catalogue sings in English and Spanish, so both are hinted; the model
+/// picks between them per song and follows a bilingual one (code-switching).
+/// `es-419` (Latin America) is the Spanish code the official
+/// supported-languages table lists; it has no `es-ES`. Auto-detection over
+/// 85+ locales was rejected: on sung vocals it can land on a neighbouring
+/// language and put that on the wall. Design record: issue #144 comment
+/// 5995867005.
+const LANGUAGE_CODES: &[&str] = &["en-US", "es-419"];
 
 const FILE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const FILE_POLL_TIMEOUT: Duration = Duration::from_secs(60);
