@@ -26,9 +26,14 @@
 //! does run: the decisions in `hw_decode_tests.rs` (Linux), the seek parity
 //! and the software reopen through one injected decode failure
 //! (`fail_next_read_for_test`: the reader must go on where it stopped, no
-//! picture lost or handed over twice), and the readback below.
+//! picture lost or handed over twice).
 //!
-//! The readback of a GPU picture never runs on CI through a decoder, so
+//! Every test that changes or reads the process-wide `hw_counters()` (a
+//! `Hardware` open, an injected mid-stream fall back) holds `COUNTERS`, so a
+//! counter's change is that test's own and is pinned exactly.
+//!
+//! The readback of a GPU picture (the D3D path's picture copy) never runs on
+//! CI through a decoder, so
 //! `a_dxgi_surface_is_read_back_into_the_software_layout` runs it on a real
 //! DXGI surface: a WARP NV12 texture TALLER than the picture (decoders align
 //! theirs), wrapped as a decoder wraps its output. The texture is made on a
@@ -37,6 +42,9 @@
 //! video device, and this test is what proves it on CI.
 
 #![cfg(windows)]
+
+use std::io::Write;
+use std::sync::{Mutex, MutexGuard};
 
 use sp_decoder::{
     DecodeMode, DecodePath, DecodedVideoFrame, FallbackStage, MediaFoundationVideoReader,
@@ -56,6 +64,15 @@ use windows::Win32::Graphics::Dxgi::DXGI_ERROR_UNSUPPORTED;
 /// The fixture's own picture: 160×120 (MF may pad the height to 128).
 const W: usize = 160;
 const H: usize = 120;
+
+/// One counter-touching test at a time (the module doc).
+static COUNTERS: Mutex<()> = Mutex::new(());
+
+fn counters_alone() -> MutexGuard<'static, ()> {
+    COUNTERS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn fixture() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -138,16 +155,20 @@ fn assert_same_pictures(got: &[(u64, Vec<u8>)], want: &[(u64, Vec<u8>)], what: &
 
 /// What a `Hardware` reader reports: a hardware path names its adapter; a
 /// software one either fell back at open or runs on the D3D path with Media
-/// Foundation's software decoder.
+/// Foundation's software decoder. The line goes straight to stderr, not
+/// through `eprintln!` (which libtest captures for a passing test), so every
+/// CI log shows what the runner's adapter did.
 fn assert_reported(reader: &MediaFoundationVideoReader, what: &str) {
     assert_eq!(reader.decode_mode(), DecodeMode::Hardware, "{what}");
     let path = reader.decode_path();
     let fallback = reader.hw_fallback();
-    eprintln!(
+    writeln!(
+        std::io::stderr(),
         "{what}: decode_path={path:?} adapter={:?} fallback={:?}",
         reader.hw_adapter(),
         fallback.map(|f| f.describe())
-    );
+    )
+    .expect("stderr");
     match path {
         Some(DecodePath::Hardware) => {
             assert!(
@@ -168,10 +189,11 @@ fn assert_reported(reader: &MediaFoundationVideoReader, what: &str) {
 
 #[test]
 fn hardware_mode_opens_the_fixture_and_decodes_what_software_decodes() {
+    let _alone = counters_alone();
     let before = hw_counters().snapshot().requested;
     let mut reader = MediaFoundationVideoReader::open_with(&fixture(), DecodeMode::Hardware)
         .expect("a Hardware open never fails on a file software opens");
-    assert!(hw_counters().snapshot().requested > before, "counted");
+    assert_eq!(hw_counters().snapshot().requested, before + 1, "counted");
     let pictures = decode_all(&mut reader, "hardware (picked adapter)");
     assert_reported(&reader, "hardware (picked adapter)");
     assert_same_pictures(&pictures, &software_pictures(), "hardware (picked adapter)");
@@ -203,19 +225,31 @@ fn assert_fell_back_at_open_on_warp(reader: &MediaFoundationVideoReader, what: &
 }
 
 /// A `Hardware` open on WARP, the CI test of a refused video device: it
-/// falls back at open (counted), and every picture is decoded in software,
-/// on one path, and is the software reader's.
+/// falls back at open (counted once, and reported as the last fall back),
+/// and every picture is decoded in software, on one path, and is the
+/// software reader's.
 #[test]
 fn hardware_mode_on_warp_falls_back_at_open_and_decodes_what_software_decodes() {
+    let _alone = counters_alone();
     let before = hw_counters().snapshot();
     let mut reader = MediaFoundationVideoReader::open_hardware_on_warp(&fixture())
         .expect("a Hardware open on WARP never fails on a file software opens");
     assert_fell_back_at_open_on_warp(&reader, "hardware (WARP)");
     let after = hw_counters().snapshot();
-    assert!(after.requested > before.requested, "the request is counted");
-    assert!(
-        after.open_fallbacks > before.open_fallbacks,
+    assert_eq!(
+        after.requested,
+        before.requested + 1,
+        "the request is counted"
+    );
+    assert_eq!(
+        after.open_fallbacks,
+        before.open_fallbacks + 1,
         "the open fall back is counted"
+    );
+    assert_eq!(
+        after.last_fallback,
+        reader.hw_fallback().map(|f| f.describe()),
+        "the last fall back is this one"
     );
     let pictures = decode_all(&mut reader, "hardware (WARP)");
     assert_eq!(reader.decode_path(), Some(DecodePath::Software));
@@ -255,6 +289,7 @@ fn a_hardware_reader_seeks_to_the_picture_software_seeks_to() {
         );
         (frame.timestamp_ms, visible(&frame))
     };
+    let _alone = counters_alone();
     let hardware = MediaFoundationVideoReader::open_hardware_on_warp(&fixture())
         .expect("a Hardware open on WARP");
     assert_fell_back_at_open_on_warp(&hardware, "hardware");
@@ -373,7 +408,8 @@ fn a_dxgi_surface_is_read_back_into_the_software_layout() {
 }
 
 /// A reader decodes 10 pictures, one decode error is injected, and the rest
-/// must be exactly the uninterrupted software sequence.
+/// must be exactly the uninterrupted software sequence. The caller holds
+/// `COUNTERS`.
 fn assert_goes_on_after_a_mid_stream_fallback(mut reader: MediaFoundationVideoReader, what: &str) {
     let want = software_pictures();
     let before = hw_counters().snapshot().mid_stream_fallbacks;
@@ -390,15 +426,19 @@ fn assert_goes_on_after_a_mid_stream_fallback(mut reader: MediaFoundationVideoRe
     assert_eq!(fallback.stage, FallbackStage::MidStream, "{what}");
     assert!(fallback.reason.contains("injected"), "{what}: {fallback:?}");
     assert_eq!(reader.decode_path(), Some(DecodePath::Software), "{what}");
-    assert!(
-        hw_counters().snapshot().mid_stream_fallbacks > before,
-        "{what}: counted"
+    let after = hw_counters().snapshot();
+    assert_eq!(after.mid_stream_fallbacks, before + 1, "{what}: counted");
+    assert_eq!(
+        after.last_fallback,
+        Some(fallback.describe()),
+        "{what}: the last fall back is this one"
     );
     assert_same_pictures(&got, &want, what);
 }
 
 #[test]
 fn a_software_reader_goes_on_where_it_stopped_after_a_mid_stream_fallback() {
+    let _alone = counters_alone();
     let reader = MediaFoundationVideoReader::open(&fixture()).expect("software open");
     assert_goes_on_after_a_mid_stream_fallback(reader, "software reader");
 }
@@ -416,6 +456,7 @@ fn a_software_reader_goes_on_where_it_stopped_after_a_mid_stream_fallback() {
 /// mid-stream one.
 #[test]
 fn a_hardware_reader_that_fell_back_at_open_goes_on_after_an_injected_decode_error() {
+    let _alone = counters_alone();
     let reader = MediaFoundationVideoReader::open_hardware_on_warp(&fixture())
         .expect("a Hardware open on WARP");
     assert_fell_back_at_open_on_warp(&reader, "hardware reader");
