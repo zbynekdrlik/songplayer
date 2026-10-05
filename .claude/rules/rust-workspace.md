@@ -408,7 +408,9 @@ check `parts[0] == tools_dir`, which holds on both separators. Same rule for any
 **A WARP (runner) premise is proven in CI before a test rests on it** (#223 S3b:
 Microsoft's page reads as if WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`,
 `windows-latest` refuses it at 11.x, three tests failed on correct code;
-`video-decode.md`).
+`video-decode.md`). To put a runner fact in the CI log of a PASSING test, write
+`writeln!(std::io::stderr(), …)`: libtest captures `eprintln!` / `println!` of a
+passing test, not direct writes to the stderr handle.
 
 **An engine test must not count the test pipeline's replies (release 0.68.0
 blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
@@ -957,6 +959,11 @@ free-list keeps it), so `take(cap).as_ptr() == recycled_ptr` can never pass by
 address-reuse luck. A RED that FREES instead of recycling must be caught by a
 `pool_len` assertion (freeing never touches the pool, regardless of the
 allocator), NOT by a pointer-equality assertion (a freed address can be reused).
+
+**Process-wide COUNTERS too (#223 S3b review round 2):** `assert!(after > before)`
+on a static counter passes on a parallel sibling's increment. Every test that
+changes or reads it holds one `static Mutex<()>` (poison-tolerant), and the
+delta is pinned exactly (`before + 1`): `mf_hw_decode.rs` `COUNTERS`.
 
 ## A test-only serial lock held across `.await` must be a `tokio::sync::Mutex` (#184 G2 + G0.1, twice in one night)
 
