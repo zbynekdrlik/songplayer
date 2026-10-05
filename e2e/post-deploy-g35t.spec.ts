@@ -61,7 +61,8 @@ test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
     console.log(`[#144 g35t probe] ${JSON.stringify(probe)}`);
     // Logged, not gated: the gate passes on any working key (#144 comment
     // 5998042988). A refusal that is not a 429 is a key refusal: the key is
-    // dead, invalid, or not allowed this model — the logged reason says which.
+    // dead, invalid, or not allowed this model or API — the logged reason
+    // says which.
     for (const refused of probe.refused_keys) {
       const kind = refused.rate_limited
         ? "rate-limited (429)"

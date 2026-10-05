@@ -113,13 +113,15 @@ pub struct ClipInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct G35tProbeReport {
     pub ok: bool,
-    /// The model the request named ([`MODEL_SLUG`]).
+    /// The model every request names: [`MODEL_SLUG`], the constant
+    /// `interactions_body` sends.
     pub model: String,
     /// The key (0-based place in the `gemini_api_key` list) that answered,
     /// or whose answer ended the call; `None` when no key was tried, or the
     /// call was cut by [`PROBE_TIMEOUT`] (then `refused_keys` is empty too).
     pub key_index: Option<usize>,
-    /// The hint the request carried ([`LANGUAGE_CODES`]).
+    /// The hint every request carries: [`LANGUAGE_CODES`], the constant
+    /// `interactions_body` sends.
     pub language_codes: Vec<String>,
     pub word_count: usize,
     /// How long the transcription took (ms); 0 when none was sent.

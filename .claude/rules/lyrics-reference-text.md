@@ -71,7 +71,7 @@ Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or 
   - a key echoed across the 400-character cut leaves no prefix (`a_key_echoed_at_the_cut_never_leaks_a_prefix`);
   - a 400 on the request body stops at once: the spare key is never tried, the uploaded file is still deleted;
   - an answer with no words fails, and so does the bound.
-- The HTTP helpers of `g35t_client.rs` stay `mutants::skip`, and so do the probe's two shell-outs, `g35t_probe::cut_clip` (ffmpeg; its arguments are the tested `clip_args`) and the route handler `api/lyrics_g35t.rs::probe` (Google's root; the route is tested through the real router). `transcribe_at`, `on_key`, `failure` and every other probe function are gated.
+- The HTTP helpers of `g35t_client.rs` stay `mutants::skip`, and so do the probe's ffmpeg shell-out `g35t_probe::cut_clip` (its arguments are the tested `clip_args`) and its route glue `api/lyrics_g35t.rs::probe` (Google's root; the route is tested through the real router). `transcribe_at`, `on_key`, `failure` and every other probe function are gated.
 - `e2e/post-deploy-g35t.spec.ts` first polls `GET /api/v1/status` until `tools.ffmpeg_available` (a read that throws counts as "not yet"), so it does not rely on earlier specs for ffmpeg readiness. It still needs `/api/v1/status` to answer within the poll's 60 s: right after a restart the startup task holds the `tools_status` write guard through the yt-dlp self-update and the sample-rate sweep (`lib.rs`, pre-existing, #144 comment 5998431231), a window the earlier specs absorb today.
 
 ## The title search (covers)

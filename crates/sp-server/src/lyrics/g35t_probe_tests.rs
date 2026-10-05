@@ -501,8 +501,8 @@ async fn pool() -> SqlitePool {
 }
 
 /// The lowest-id row with served lyrics and its audio on disk wins; its
-/// vocal stem is the input when on disk; the window starts at its EARLIEST
-/// line. Rows missing a piece are passed over.
+/// isolated vocal (over its vocal stem) is the input when on disk; the window
+/// starts at its EARLIEST line. Rows missing a piece are passed over.
 #[tokio::test]
 async fn the_probe_picks_the_lowest_served_song_with_its_audio_on_disk() {
     let dir = tempfile::tempdir().unwrap();
