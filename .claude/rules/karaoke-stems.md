@@ -657,8 +657,9 @@ into an APP-OWNED venv interpreter.
   only** (next to `gpu_policy::env_for_child` in `stems/separator.rs`; the dub
   child is light, the mtl venv untouched): `MIMALLOC_PURGE_DELAY=-1` (never
   decommit freed pages back to the OS — the load-bearing knob; `0` brings the
-  storm back), `MIMALLOC_ARENA_EAGER_COMMIT=1`, `MIMALLOC_RESERVE_OS_MEMORY=4GiB`
-  (reserve+commit one arena up front so the first-touch fault cost is paid ONCE).
+  storm back), `MIMALLOC_ARENA_EAGER_COMMIT=1`, `MIMALLOC_RESERVE_OS_MEMORY`
+  (reserve+commit one arena up front so the first-touch fault cost is paid ONCE;
+  #168 shipped 4 GiB, the `heavy_alloc_reserve_gib` default is 2 GiB since #207).
   Fits under the 10 GiB per-child Job Object cap; numerically invisible to the
   model. These are env NO-OPS unless the interpreter carries the mimalloc override.
 
@@ -691,8 +692,9 @@ into an APP-OWNED venv interpreter.
 **The cap.** The separation child runs inside a per-child Windows Job Object
 with `JOB_OBJECT_LIMIT_PROCESS_MEMORY` = **10 GiB**
 (`heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES`). The #168 mimalloc arena
-reserve (the `heavy_alloc_reserve_gib` setting: 2 GiB on the box on 24.9.,
-committed but never touched) counts against the same 10 GiB.
+reserve (the `heavy_alloc_reserve_gib` setting: 2 GiB on the box since 24.9.
+and the default since 5.10., committed but never touched) counts against the
+same 10 GiB.
 Error 1455 from the job cap ignores how much commit the host has free.
 
 **Why whole-video arrays failed every video longer than ~35 min.** Before #207,
