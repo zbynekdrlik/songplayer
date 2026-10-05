@@ -65,8 +65,11 @@ answered correctly), and nothing ever ran the real providers.
   never retries (it is cosmetic).
 - An error text / log line carries the key INDEX (`key 2 of 5`), the status
   and a ≤ 200-char body excerpt redacted (longest key first) BEFORE the cut —
-  never a key. A recorded / probed provider error is cut to 300 chars
-  (`health::bounded_error`): a Claude error carries the proxy's whole reply.
+  never a key. ONE redaction: `gemini_api::redact_keys` (#144), used by
+  `GeminiProvider::excerpt` and by every `g35t_client` failure text, which
+  the live g35t probe answers as is. A recorded / probed provider error is
+  cut to 300 chars (`health::bounded_error`): a Claude error carries the
+  proxy's whole reply.
 - Request tools: `"tools": [{"google_search": {}}]` is still the grounding
   tool for `generateContent` on Gemini 3 Pro (ai.google.dev, checked
   29.9.2026). The answer text is every non-thought part joined.
@@ -155,6 +158,8 @@ answered correctly), and nothing ever ran the real providers.
   "Stand On Your Promise" / an artist containing "Emerging Sound" (case-
   insensitive). A new provider, model or key-format change must keep this
   gate green on the box, not just the unit tests.
+- The transcription has its own live gate (#144): `POST /api/v1/lyrics/g35t/probe`
+  and `e2e/post-deploy-g35t.spec.ts`, see `.claude/rules/lyrics-reference-text.md`.
 - The reprocess worker WARNs a failed row with EVERY provider's reason, in
   chain order, once per attempt (`backoff_s` = the stage's wait; stages
   shorter than the 30-min cycle are retried every cycle).

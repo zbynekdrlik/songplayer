@@ -9,6 +9,10 @@ paths:
   - "crates/sp-server/src/lyrics/worker_text_tiers*.rs"
   - "crates/sp-server/src/lyrics/worker_reference*.rs"
   - "crates/sp-server/src/lyrics/worker_g35t.rs"
+  - "crates/sp-server/src/lyrics/g35t_client*.rs"
+  - "crates/sp-server/src/lyrics/g35t_probe*.rs"
+  - "e2e/post-deploy-g35t.spec.ts"
+  - "e2e/g35t-gate*.ts"
   - "crates/sp-server/src/lyrics/orchestrator.rs"
   - "crates/sp-server/src/lyrics/audit_ctx.rs"
   - "crates/sp-server/src/lyrics/gather.rs"
@@ -45,6 +49,25 @@ paths:
   - when the pass ends, it is retired to `_used.json`, so a manual reprocess transcribes afresh. `run_text_tiers` does it in ONE place, after the tiers, for every outcome `ends_the_pass` accepts: a ★ or base-tier track, or a quarantine (tested). `a_pass_ending_in_a_track_retires_its_transcript` drives `run_text_tiers` offline to a base-tier track to pin the call itself.
 - `run_mtl_reference_stage` removes an earlier pass's `{yt}_alignment_audit.json` first; every PASS / FAIL / ERROR writes a new one, carrying `sung_*` and `sung_coverage_ok`.
 - The transcript is requested with `language_codes ["en-US", "es-419"]` (`g35t_client::LANGUAGE_CODES`, 5.10.2026; design record #144 comment 5995867005). Until then every song had an English-only hint, so a Spanish song's transcript, and with it its gate verdict and base-tier text, came from an English reading. A Spanish song processed before that change should be re-run with the targeted reprocess before its gate numbers are trusted.
+
+## The live g35t gate (5.10.2026)
+
+Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or refused key, a renamed model or a request field the API refuses (the `language_codes` hint above) stayed invisible with CI green while every new transcript failed. Design: #144 comments 5996797762 (main) and 5996959706 (the clip).
+
+- `POST /api/v1/lyrics/g35t/probe` (`api/lyrics_g35t.rs` → `lyrics/g35t_probe.rs::run_probe`) sends ONE short real request from the box through `g35t_client::transcribe_at`: the worker's own upload, poll, `interactions_body` (`MODEL_SLUG`, `LANGUAGE_CODES`) and key rotation. `transcribe_words` is `transcribe_at` on `GEMINI_API_ROOT`. Never give a probe its own request body or its own copy of the hint.
+- The clip: the lowest `videos.id` with `normalized = 1`, `has_lyrics = 1`, its audio on disk and a `{yt}_lyrics.json` with a line. The input is its vocal stem (`stems::stem_paths`) when on disk, else the audio. The window is 20 s (`CLIP_MS`) from the EARLIEST served line: an intro would answer 0 words, a false red. The app's ffmpeg (`tool_paths.ffmpeg`) cuts it to a 16 kHz mono PCM WAV in a temp dir.
+- The answer is `{ok, model, key_index, language_codes, word_count, latency_ms, error, clip, sample}`, always with 200. `ok` needs at least one word.
+  - `key_index` is 0-based (the worker's log field); the error text names a key as `key i of n`, 1-based.
+  - Never a key: `transcribe_at` redacts every failure text with every key (`gemini_api::redact_keys`), and `send_with_retry` redacts a refused body with its request's key before the 400-char cut.
+  - The key list is read from the setting on every call, as the worker reads it per song.
+  - `PROBE_TIMEOUT` (180 s) bounds it below the spec's 220 s, so a hung call fails the gate with its own error.
+- `e2e/post-deploy-g35t.spec.ts` gates the deploy through the pure `e2e/g35t-gate.ts` (`g35tGateFailures`: not ok, 0 words, another model, another hint), unit-tested by the mock-suite `e2e/g35t-gate.spec.ts`. A change of the model or the hint updates `G35T_MODEL` / `G35T_LANGUAGE_CODES` in the same PR.
+- `g35t_probe_tests.rs` drives `transcribe_at` against wiremock (`api_root` = the mock):
+  - a refused first key moves on (`key_index` 1);
+  - every key refused → the API's message under `key 2 of 2`, an echoed key redacted;
+  - a 400 on the request body stops at once: the spare key is never tried, the uploaded file is still deleted;
+  - an answer with no words fails, and so does the bound.
+- The HTTP helpers of `g35t_client.rs` stay `mutants::skip`; `transcribe_at`, `on_key` and the probe's own functions are gated.
 
 ## The title search (covers)
 
