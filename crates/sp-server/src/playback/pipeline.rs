@@ -985,3 +985,7 @@ mod heartbeat_decision_tests;
 #[cfg(test)]
 #[path = "pipeline_spawn_tests.rs"]
 mod pipeline_spawn_tests;
+
+#[cfg(test)]
+#[path = "pipeline_tests_no_sender.rs"]
+mod tests_no_sender;
