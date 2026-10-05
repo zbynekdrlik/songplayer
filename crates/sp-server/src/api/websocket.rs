@@ -281,6 +281,7 @@ mod tests {
 
     use std::convert::Infallible;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use tokio::sync::{Semaphore, mpsc};
 
@@ -323,7 +324,10 @@ mod tests {
 
         let mut taken = Vec::new();
         for _ in 0..2 {
-            let frame = seen_rx.recv().await.expect("a status frame");
+            let frame = tokio::time::timeout(Duration::from_secs(60), seen_rx.recv())
+                .await
+                .expect("the sender reaches its next frame")
+                .expect("a status frame");
             assert!(
                 state.obs_state.try_write().is_ok(),
                 "the OBS status is locked while a frame waits for the client"
@@ -339,7 +343,10 @@ mod tests {
             taken.push(serde_json::from_str::<ServerMsg>(text.as_str()).unwrap());
             release.add_permits(1);
         }
-        sender.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(60), sender)
+            .await
+            .expect("the sender ends once both frames are taken")
+            .unwrap();
         assert_eq!(
             taken,
             vec![
