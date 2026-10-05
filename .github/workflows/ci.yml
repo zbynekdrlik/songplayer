@@ -88,8 +88,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # --no-fail-fast: run every test binary even after one fails, so one
+      # CI run reports every failure (#223 S3b: a failing binary hid the rest).
       - name: Run tests
-        run: cargo test --workspace --verbose
+        run: cargo test --workspace --verbose --no-fail-fast
 
   test-wasm:
     name: Test WASM (sp-core)
@@ -338,15 +340,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build workspace
         run: cargo build --workspace
+      # --no-fail-fast: run every test binary even after one fails, so one
+      # CI run reports every failure (#223 S3b: sp-decoder's failing
+      # mf_hw_decode binary stopped the run before sp-gpu's and sp-server's
+      # tests ever ran).
       - name: Run tests
-        run: cargo test --workspace --verbose
+        id: tests
+        run: cargo test --workspace --verbose --no-fail-fast
       # Release-mode decoder tests — the Tauri shipped binary is a release
       # build, and the 2026-04-22 seek regression (commit 5977a9d) passed
       # debug-mode cargo test but broke MF ReadSample under release LTO.
       # sp-decoder is the only crate with Windows-specific release-sensitive
       # code paths, so we gate only that crate here to keep CI time bounded.
+      # It runs after a failed debug test step too (the job still fails), so
+      # a release-only failure shows in the same run; never after a failed
+      # build or a cancel.
       - name: Run sp-decoder tests (release mode)
-        run: cargo test -p sp-decoder --release --verbose
+        if: success() || steps.tests.outcome == 'failure'
+        run: cargo test -p sp-decoder --release --verbose --no-fail-fast
 
   test-integrity:
     name: Test Integrity Check
