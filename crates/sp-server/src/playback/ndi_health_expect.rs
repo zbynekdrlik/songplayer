@@ -56,13 +56,45 @@ pub(crate) fn program_degraded_reason(
     (source.is_some() && unreceived).then_some(PROGRAM_NO_RECEIVER_REASON)
 }
 
-/// The log line of a new `SP-program` receiver count (`before` = `None` on
-/// the first poll), and whether `SP-program` is now dark (a source on
-/// program, no receiver): a WARN when it turns dark (`was_dark` false: the
-/// first poll finds no receiver, the last one went, or a source came on
-/// program while none was connected), an INFO when the first poll finds a
-/// receiver or the first one came back. Logging only
-/// (`ProgramCore::set_connections` keeps the dark state for the next poll).
+/// What a new `SP-program` receiver count is logged as ([`receiver_log`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReceiverLog {
+    /// It turned dark: a source on program, no receiver (a WARN).
+    TurnedDark,
+    /// The first poll found a receiver, or the first one came back (an INFO).
+    ReceiverFound,
+    /// Nothing changed worth a line.
+    Nothing,
+}
+
+/// The decision of a new `SP-program` receiver count (pure): `before` is the
+/// last polled count (`None` on the first poll), `was_dark` whether the last
+/// poll found `SP-program` dark (a source on program, no receiver). Returns
+/// what to log and whether it is dark now. It turns dark (a WARN, not
+/// repeated while it stays dark) when the first poll finds no receiver, the
+/// last one went, or a source came on program while none was connected
+/// (review round 4); a receiver found on the first poll or back is an INFO.
+pub(crate) fn receiver_log(
+    source: Option<i64>,
+    before: Option<i32>,
+    after: i32,
+    was_dark: bool,
+) -> (ReceiverLog, bool) {
+    let has = after >= 1;
+    let dark = source.is_some() && !has;
+    let log = if dark && !was_dark {
+        ReceiverLog::TurnedDark
+    } else if has && before.is_none_or(|n| n < 1) {
+        ReceiverLog::ReceiverFound
+    } else {
+        ReceiverLog::Nothing
+    };
+    (log, dark)
+}
+
+/// The log line of a new `SP-program` receiver count ([`receiver_log`]
+/// decides); returns whether `SP-program` is dark now, which
+/// `ProgramCore::set_connections` keeps for the next poll. Logging only.
 #[cfg_attr(test, mutants::skip)]
 pub(crate) fn log_program_receivers(
     source: Option<i64>,
@@ -70,19 +102,18 @@ pub(crate) fn log_program_receivers(
     after: i32,
     was_dark: bool,
 ) -> bool {
-    let has = after >= 1;
-    let dark = source.is_some() && !has;
-    if dark && !was_dark {
-        warn!(
+    let (log, dark) = receiver_log(source, before, after, was_dark);
+    match log {
+        ReceiverLog::TurnedDark => warn!(
             ?source,
             "SP-program: {PROGRAM_NO_RECEIVER_REASON} — the Presenter, strih and the stream get nothing over NDI"
-        );
-    } else if has && before.is_none_or(|n| n < 1) {
-        info!(
+        ),
+        ReceiverLog::ReceiverFound => info!(
             receivers = after,
             ?source,
             "SP-program: a receiver is connected"
-        );
+        ),
+        ReceiverLog::Nothing => {}
     }
     dark
 }
