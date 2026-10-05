@@ -2,9 +2,9 @@
 //! Wired via `#[cfg(test)] #[path = "hw_decode_tests.rs"] mod tests;`.
 
 use super::{
-    D3D11_BIND_DECODER, DXGI_FORMAT_NV12, DecodeMode, DecodePath, FallbackStage, HwCounters,
-    HwDecodeStats, HwFallback, OnDecodeError, Resume, SurfaceError, SurfaceLayout, hw_counters,
-    mapped_from_scanline0, on_decode_error,
+    D3D11_BIND_DECODER, DXGI_FORMAT_NV12, DecodeMode, DecodePath, FallbackGate, FallbackStage,
+    HwCounters, HwDecodeStats, HwFallback, OnDecodeError, PathTracker, Resume, SurfaceError,
+    SurfaceLayout, hw_counters, mapped_from_scanline0, on_decode_error,
 };
 use crate::error::DecoderError;
 
@@ -75,6 +75,54 @@ fn a_reader_that_may_not_fall_back_hands_the_error_over() {
     // Software from the start, or already fallen back once.
     let error = DecoderError::ReadSample("device removed".into());
     assert_eq!(on_decode_error(false, &error), OnDecodeError::Propagate);
+}
+
+#[test]
+fn a_gate_reopens_once_and_only_when_armed() {
+    let error = DecoderError::ReadSample("device removed".into());
+    // A software reader's gate is never armed.
+    let mut software = FallbackGate::default();
+    assert_eq!(software.on_error(&error), OnDecodeError::Propagate);
+    // A reader on the D3D path: the first error reopens, the next one (now
+    // in software) goes to the caller.
+    let mut gate = FallbackGate::default();
+    gate.arm();
+    assert_eq!(gate.on_error(&error), OnDecodeError::ReopenSoftware);
+    assert_eq!(gate.on_error(&error), OnDecodeError::Propagate);
+}
+
+#[test]
+fn an_out_of_memory_leaves_the_gates_allowance() {
+    let mut gate = FallbackGate::default();
+    gate.arm();
+    let oom = DecoderError::FrameAlloc(12_441_600);
+    assert_eq!(gate.on_error(&oom), OnDecodeError::Propagate);
+    let error = DecoderError::ReadSample("device removed".into());
+    assert_eq!(
+        gate.on_error(&error),
+        OnDecodeError::ReopenSoftware,
+        "the allowance is still there"
+    );
+}
+
+#[test]
+fn only_the_first_picture_on_the_d3d_path_is_counted() {
+    let mut on_gpu = PathTracker::default();
+    assert_eq!(on_gpu.last(), None);
+    assert!(on_gpu.observe(DecodePath::Hardware, true), "the first one");
+    assert!(!on_gpu.observe(DecodePath::Hardware, true));
+    assert_eq!(on_gpu.last(), Some(DecodePath::Hardware));
+    // After a fall back: the path follows, nothing more is counted.
+    assert!(!on_gpu.observe(DecodePath::Software, false));
+    assert_eq!(on_gpu.last(), Some(DecodePath::Software));
+    // A software reader's pictures are never counted.
+    let mut software = PathTracker::default();
+    assert!(!software.observe(DecodePath::Software, false));
+    assert_eq!(software.last(), Some(DecodePath::Software));
+    // MF decoding in software on the D3D path is counted once too.
+    let mut silent = PathTracker::default();
+    assert!(silent.observe(DecodePath::Software, true));
+    assert!(!silent.observe(DecodePath::Software, true));
 }
 
 #[test]
@@ -166,6 +214,7 @@ fn a_seek_then_pictures_reopen_at_the_last_picture() {
 const SMALL: SurfaceLayout = SurfaceLayout {
     pitch: 8,
     surface_rows: 4,
+    surface_cols: 8,
     width: 6,
     height: 3,
 };
@@ -226,6 +275,7 @@ fn a_surface_as_tall_as_the_picture_has_its_uv_plane_right_after_it() {
     let layout = SurfaceLayout {
         pitch: 4,
         surface_rows: 2,
+        surface_cols: 4,
         width: 4,
         height: 2,
     };
@@ -253,6 +303,7 @@ fn an_empty_or_oversized_picture_is_refused() {
         let layout = SurfaceLayout {
             pitch: 32_768,
             surface_rows: 16_385,
+            surface_cols: 16_385,
             width,
             height,
         };
@@ -269,6 +320,7 @@ fn a_picture_16384_on_a_side_is_read() {
     let wide = SurfaceLayout {
         pitch: 16_384,
         surface_rows: 2,
+        surface_cols: 16_384,
         width: 16_384,
         height: 2,
     };
@@ -277,6 +329,7 @@ fn a_picture_16384_on_a_side_is_read() {
     let tall = SurfaceLayout {
         pitch: 2,
         surface_rows: 16_384,
+        surface_cols: 2,
         width: 2,
         height: 16_384,
     };
@@ -284,6 +337,28 @@ fn a_picture_16384_on_a_side_is_read() {
         .check(DXGI_FORMAT_NV12, 2 * 16_384 + 2 * 8_192)
         .unwrap();
     assert_eq!((copy.stride, copy.len), (2, 2 * (16_384 + 8_192)));
+}
+
+#[test]
+fn the_surface_must_be_as_wide_as_the_picture() {
+    let exact = SurfaceLayout {
+        surface_cols: 6,
+        ..SMALL
+    };
+    assert!(exact.check(DXGI_FORMAT_NV12, 1 << 20).is_ok());
+    // A pitch that holds the row is not enough: past the texture's width
+    // the copy would read the row's padding as pixels.
+    let narrow = SurfaceLayout {
+        surface_cols: 5,
+        ..SMALL
+    };
+    assert_eq!(
+        narrow.check(DXGI_FORMAT_NV12, 1 << 20),
+        Err(SurfaceError::Cols {
+            surface_cols: 5,
+            width: 6
+        })
+    );
 }
 
 #[test]
@@ -348,6 +423,7 @@ fn a_surface_no_mapping_could_hold_is_short() {
     let edge = SurfaceLayout {
         pitch: usize::MAX / 2,
         surface_rows: 2,
+        surface_cols: 6,
         width: 6,
         height: 2,
     };

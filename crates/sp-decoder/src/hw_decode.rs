@@ -154,6 +154,54 @@ pub fn on_decode_error(fallback_allowed: bool, error: &DecoderError) -> OnDecode
     }
 }
 
+/// Whether a decode error may still reopen the file in software: once per
+/// file, for a reader armed when it opened on the D3D path (or by a test's
+/// injected failure).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FallbackGate {
+    allowed: bool,
+}
+
+impl FallbackGate {
+    /// The reader may fall back (once).
+    pub fn arm(&mut self) {
+        self.allowed = true;
+    }
+
+    /// What to do with `error` ([`on_decode_error`]); a reopen uses the
+    /// allowance up, so a later error goes to the caller.
+    pub fn on_error(&mut self, error: &DecoderError) -> OnDecodeError {
+        let action = on_decode_error(self.allowed, error);
+        if action == OnDecodeError::ReopenSoftware {
+            self.allowed = false;
+        }
+        action
+    }
+}
+
+/// The path of the pictures a reader handed over.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PathTracker {
+    last: Option<DecodePath>,
+}
+
+impl PathTracker {
+    /// Record a handed-over picture's `path`. `true` for the reader's first
+    /// picture while it runs on the D3D path: that one is counted
+    /// ([`HwCounters::first_picture`]) and logged, so a silent software
+    /// decode is seen once per file.
+    pub fn observe(&mut self, path: DecodePath, on_d3d: bool) -> bool {
+        let first = self.last.is_none();
+        self.last = Some(path);
+        first && on_d3d
+    }
+
+    /// The last picture's path (`None` before the first).
+    pub fn last(&self) -> Option<DecodePath> {
+        self.last
+    }
+}
+
 /// Where the reader is in its file, so a software reopen goes on where the
 /// D3D path stopped: no picture handed over twice, none lost (the seek lands
 /// on the keyframe before the position, so the pictures up to the last one
@@ -221,6 +269,8 @@ pub struct SurfaceLayout {
     /// The texture's height (`D3D11_TEXTURE2D_DESC::Height`): the UV plane
     /// starts `pitch × surface_rows` bytes after row 0.
     pub surface_rows: usize,
+    /// The texture's width in pixels (`D3D11_TEXTURE2D_DESC::Width`).
+    pub surface_cols: usize,
     pub width: u32,
     pub height: u32,
 }
@@ -233,6 +283,8 @@ pub enum SurfaceError {
     Format(u32),
     #[error("a {width}x{height} picture is empty or over 16384 on a side")]
     Size { width: u32, height: u32 },
+    #[error("a surface {surface_cols} pixels wide cannot hold a {width}-pixel picture")]
+    Cols { surface_cols: usize, width: u32 },
     #[error("a pitch of {pitch} bytes cannot hold a row of {row} bytes")]
     Pitch { pitch: usize, row: usize },
     #[error("a surface of {surface_rows} rows cannot hold a {height}-row picture")]
@@ -261,10 +313,11 @@ pub struct SurfaceCopy {
 
 impl SurfaceLayout {
     /// Check the surface before anything is read: the format is NV12, the
-    /// picture is not empty nor over Direct3D's 16384 side, a pitch holds a
-    /// packed row, the surface holds the picture's rows, and the `mapped`
-    /// bytes (from scanline 0 to the end of the mapping) hold every row the
-    /// copy reads, up to the last UV row's last byte.
+    /// picture is not empty nor over Direct3D's 16384 side, the surface is as
+    /// wide and as tall as the picture (else the copy would read a row's
+    /// padding as pixels), a pitch holds a packed row, and the `mapped` bytes
+    /// (from scanline 0 to the end of the mapping) hold every row the copy
+    /// reads, up to the last UV row's last byte.
     pub fn check(&self, format: u32, mapped: usize) -> Result<SurfaceCopy, SurfaceError> {
         if format != DXGI_FORMAT_NV12 {
             return Err(SurfaceError::Format(format));
@@ -272,6 +325,12 @@ impl SurfaceLayout {
         let (width, height) = (self.width, self.height);
         if width == 0 || height == 0 || width > MAX_PICTURE_SIDE || height > MAX_PICTURE_SIDE {
             return Err(SurfaceError::Size { width, height });
+        }
+        if width as usize > self.surface_cols {
+            return Err(SurfaceError::Cols {
+                surface_cols: self.surface_cols,
+                width,
+            });
         }
         let row = nv12_chroma_row(width);
         if self.pitch < row {

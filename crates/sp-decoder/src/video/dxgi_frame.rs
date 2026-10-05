@@ -140,6 +140,7 @@ fn read_picture(
     let layout = SurfaceLayout {
         pitch,
         surface_rows: desc.Height as usize,
+        surface_cols: desc.Width as usize,
         width,
         height,
     };

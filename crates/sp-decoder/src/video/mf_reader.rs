@@ -36,8 +36,8 @@ use super::dxgi_frame::DxgiSurface;
 use super::hw_session::{HwDevice, HwSession};
 use crate::error::DecoderError;
 use crate::hw_decode::{
-    DecodeMode, DecodePath, FallbackStage, HwFallback, OnDecodeError, Resume, hw_counters,
-    on_decode_error,
+    DecodeMode, DecodePath, FallbackGate, FallbackStage, HwFallback, OnDecodeError, PathTracker,
+    Resume, hw_counters,
 };
 use crate::stream::{MediaStream, VideoStream};
 use crate::types::{DecodedVideoFrame, PixelFormat};
@@ -64,12 +64,12 @@ pub struct MediaFoundationVideoReader {
     hw: Option<HwSession>,
     /// The adapter the D3D path opened on (kept after a fall back).
     adapter: Option<String>,
-    /// The path of the last picture handed over.
-    path_now: Option<DecodePath>,
+    /// The path of the pictures handed over.
+    paths: PathTracker,
     /// Why this file left the hardware path, if it did.
     fallback: Option<HwFallback>,
-    /// A decode error may still reopen the file in software (once).
-    fallback_allowed: bool,
+    /// Whether a decode error may still reopen the file in software (once).
+    gate: FallbackGate,
     resume: Resume,
     /// A test's injected decode failure for the next read.
     inject_failure: bool,
@@ -144,7 +144,7 @@ impl MediaFoundationVideoReader {
                 let mut reader =
                     Self::from_opened(path, DecodeMode::Hardware, opened, Some(session));
                 reader.adapter = Some(adapter);
-                reader.fallback_allowed = true;
+                reader.gate.arm();
                 Ok(reader)
             }
             Err(reason) => {
@@ -179,9 +179,9 @@ impl MediaFoundationVideoReader {
             mode,
             hw,
             adapter: None,
-            path_now: None,
+            paths: PathTracker::default(),
             fallback: None,
-            fallback_allowed: false,
+            gate: FallbackGate::default(),
             resume: Resume::default(),
             inject_failure: false,
         }
@@ -301,7 +301,7 @@ impl MediaFoundationVideoReader {
     /// `Hardware` = a DXGI surface from the GPU decoder. `None` before the
     /// first picture.
     pub fn decode_path(&self) -> Option<DecodePath> {
-        self.path_now
+        self.paths.last()
     }
 
     /// The adapter the D3D path opened on, if it did.
@@ -321,7 +321,7 @@ impl MediaFoundationVideoReader {
     #[doc(hidden)]
     pub fn fail_next_read_for_test(&mut self) {
         self.inject_failure = true;
-        self.fallback_allowed = true;
+        self.gate.arm();
     }
 
     fn make_video_output_type() -> Result<IMFMediaType, DecoderError> {
@@ -511,9 +511,10 @@ impl MediaFoundationVideoReader {
     }
 
     /// Record the path of a picture; the first one on the D3D path is
-    /// counted and logged, so a silent software decode is seen.
+    /// counted and logged (`PathTracker`), so a silent software decode is
+    /// seen.
     fn observe(&mut self, path: DecodePath) {
-        if self.hw.is_some() && self.path_now.is_none() {
+        if self.paths.observe(path, self.hw.is_some()) {
             hw_counters().first_picture(path);
             let adapter = self.adapter.as_deref().unwrap_or("?");
             match path {
@@ -529,7 +530,6 @@ impl MediaFoundationVideoReader {
                 ),
             }
         }
-        self.path_now = Some(path);
     }
 
     /// Reopen the file in software after `error` on the D3D path, where the
@@ -546,7 +546,6 @@ impl MediaFoundationVideoReader {
         );
         hw_counters().fell_back(&fallback);
         self.fallback = Some(fallback);
-        self.fallback_allowed = false;
         let opened = Self::create(&self.path, None)?;
         self.reader = opened.reader;
         self.hw = None;
@@ -657,7 +656,7 @@ impl VideoStream for MediaFoundationVideoReader {
                     return Ok(Some(frame));
                 }
                 Ok(None) => return Ok(None),
-                Err(e) => match on_decode_error(self.fallback_allowed, &e) {
+                Err(e) => match self.gate.on_error(&e) {
                     OnDecodeError::ReopenSoftware => self.reopen_in_software(&e)?,
                     OnDecodeError::Propagate => return Err(e),
                 },

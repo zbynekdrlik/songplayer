@@ -172,14 +172,33 @@ fn hardware_mode_on_warp_decodes_what_software_decodes() {
         "the D3D11 path was not built on WARP: {:?}",
         reader.hw_fallback()
     );
+    let first_pictures = |stats: sp_decoder::HwDecodeStats| stats.gpu_decodes + stats.mf_software;
+    let counted_before = first_pictures(hw_counters().snapshot());
     let pictures = decode_all(&mut reader, "hardware (WARP)");
     assert_reported(&reader, "hardware (WARP)");
+    if on_d3d {
+        // A reader on the D3D path counts its first picture's path.
+        assert!(
+            first_pictures(hw_counters().snapshot()) > counted_before,
+            "the first picture on the D3D path is counted"
+        );
+    }
     assert_same_pictures(&pictures, &software_pictures(), "hardware (WARP)");
 }
 
+/// The fixture's one keyframe is at 0, so a seek to the middle lands there.
+/// Each reader first decodes 60 pictures (past 1 900 ms) and then seeks BACK
+/// to the middle: a seek that did nothing would hand over the 61st picture
+/// (~2 000 ms), a real one a picture at or before the target.
 #[test]
 fn a_hardware_reader_seeks_to_the_picture_software_seeks_to() {
     let first_after_seek = |mut reader: MediaFoundationVideoReader, what: &str| {
+        for i in 0..60 {
+            reader
+                .next_frame()
+                .unwrap_or_else(|e| panic!("{what}: decode {i}: {e}"))
+                .unwrap_or_else(|| panic!("{what}: picture {i}"));
+        }
         let target = reader.duration_ms() / 2;
         reader
             .seek(target)
@@ -188,6 +207,11 @@ fn a_hardware_reader_seeks_to_the_picture_software_seeks_to() {
             .next_frame()
             .unwrap_or_else(|e| panic!("{what}: decode after the seek: {e}"))
             .unwrap_or_else(|| panic!("{what}: a picture after the seek"));
+        assert!(
+            frame.timestamp_ms <= target,
+            "{what}: the seek moved back to {target} ms or before, got {} ms",
+            frame.timestamp_ms
+        );
         (frame.timestamp_ms, visible(&frame))
     };
     let hardware = MediaFoundationVideoReader::open_hardware_on_warp(&fixture())
@@ -283,11 +307,11 @@ fn a_dxgi_surface_is_read_back_into_the_software_layout() {
     );
 }
 
-#[test]
-fn a_mid_stream_fallback_goes_on_where_it_stopped() {
+/// A reader decodes 10 pictures, one decode error is injected, and the rest
+/// must be exactly the uninterrupted software sequence.
+fn assert_goes_on_after_a_mid_stream_fallback(mut reader: MediaFoundationVideoReader, what: &str) {
     let want = software_pictures();
     let before = hw_counters().snapshot().mid_stream_fallbacks;
-    let mut reader = MediaFoundationVideoReader::open(&fixture()).expect("software open");
     let mut got = Vec::new();
     for _ in 0..10 {
         let frame = reader.next_frame().expect("decode").expect("a picture");
@@ -296,14 +320,35 @@ fn a_mid_stream_fallback_goes_on_where_it_stopped() {
     reader.fail_next_read_for_test();
     // The fixture's one keyframe is at 0: the reopen decodes pictures 0..=9
     // again and must drop them.
-    got.extend(decode_all(&mut reader, "after the injected failure"));
+    got.extend(decode_all(&mut reader, what));
     let fallback = reader.hw_fallback().expect("the reader fell back");
-    assert_eq!(fallback.stage, FallbackStage::MidStream);
-    assert!(fallback.reason.contains("injected"), "{fallback:?}");
-    assert_eq!(reader.decode_path(), Some(DecodePath::Software));
+    assert_eq!(fallback.stage, FallbackStage::MidStream, "{what}");
+    assert!(fallback.reason.contains("injected"), "{what}: {fallback:?}");
+    assert_eq!(reader.decode_path(), Some(DecodePath::Software), "{what}");
     assert!(
         hw_counters().snapshot().mid_stream_fallbacks > before,
-        "counted"
+        "{what}: counted"
     );
-    assert_same_pictures(&got, &want, "mid-stream fall back");
+    assert_same_pictures(&got, &want, what);
+}
+
+#[test]
+fn a_software_reader_goes_on_where_it_stopped_after_a_mid_stream_fallback() {
+    let reader = MediaFoundationVideoReader::open(&fixture()).expect("software open");
+    assert_goes_on_after_a_mid_stream_fallback(reader, "software reader");
+}
+
+/// The fall back the feature exists for: a reader on the D3D path (WARP's
+/// device manager, or its refusal, see the WARP test) leaves it for the
+/// system-memory path mid-file.
+#[test]
+fn a_reader_on_the_d3d_path_goes_on_where_it_stopped_after_a_mid_stream_fallback() {
+    let reader = MediaFoundationVideoReader::open_hardware_on_warp(&fixture())
+        .expect("a Hardware open on WARP");
+    eprintln!(
+        "d3d reader: adapter={:?} open fallback={:?}",
+        reader.hw_adapter(),
+        reader.hw_fallback().map(|f| f.describe())
+    );
+    assert_goes_on_after_a_mid_stream_fallback(reader, "d3d reader");
 }

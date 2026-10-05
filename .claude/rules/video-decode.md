@@ -53,8 +53,10 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   TEXTURE's height, never from `MF_MT_FRAME_SIZE`.
 - `hw_decode::SurfaceLayout::check` refuses, before any byte is read: a
   format other than NV12 (103; a 10-bit stream decodes into P010, 104), a
-  picture of 0 or over 16384 on a side, a pitch shorter than a row, a
-  surface with fewer rows than the picture, and a mapping (from scanline 0,
+  picture of 0 or over 16384 on a side, a texture narrower than the picture
+  (`surface_cols` = its `Width`: past it the copy would read a row's
+  padding as pixels), a pitch shorter than a row, a surface with fewer rows
+  than the picture, and a mapping (from scanline 0,
   `mapped_from_scanline0`) that does not reach the last UV row's last
   byte; an overflowing size is "short". A refusal is a decode error, so the
   file goes on in software.
@@ -82,8 +84,9 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   error: the box's GPU without a decoder for a codec, or WARP (no decoder
   profiles).
 - `decode_path()` = the last picture's path, `None` before the first;
-  `hw_adapter()`, `hw_fallback()`. The first picture on the D3D path is
-  counted (`hw_counters().first_picture`) and logged: INFO `mf_reader:
+  `hw_adapter()`, `hw_fallback()`. The first picture on the D3D path
+  (`hw_decode::PathTracker::observe`, once per file) is counted
+  (`hw_counters().first_picture`) and logged: INFO `mf_reader:
   hardware decode active (decoder surfaces, D3D11_BIND_DECODER)`, or WARN
   `mf_reader: the D3D11 path is set up, but Media Foundation decodes this
   file in software`.
@@ -96,7 +99,9 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   Only a file that does not open in software either is an error.
 - A decode error on the D3D path (a lost device, a surface the readback
   refuses, anything but `FrameAlloc`: `hw_decode::on_decode_error`)
-  reopens the file in software ONCE: WARN `mf_reader: a decode error on the
+  reopens the file in software ONCE (`hw_decode::FallbackGate`: armed when
+  the reader opens on the D3D path, used up by the reopen): WARN
+  `mf_reader: a decode error on the
   D3D11 path; …`, `hw_fallback` `mid-stream: …`. `hw_decode::Resume` seeks
   to the last picture handed over (or the last seek's target when none was
   since), and the pictures through it are dropped (MF lands on the keyframe
@@ -146,8 +151,12 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   bit-exact). On WARP the video device, the DXGI device manager and its
   reset must have been built: the reader runs on them, or the source
   reader refused them (`the source reader refused …`, the only open fall
-  back after them). A hardware reader's first picture after a seek equals
-  the software reader's.
+  back after them); a reader on the D3D path counts its first picture.
+  Seek parity: each reader decodes 60 pictures (past 1 900 ms), then seeks
+  BACK to the middle; the fixture's one keyframe is at 0, so a real seek
+  hands over a picture at or before the target (a seek that did nothing
+  would hand over the 61st, ~2 000 ms), and the hardware reader's picture
+  equals the software reader's.
 - The DXGI readback is proven on a REAL surface, since no decoder reaches
   it on CI: `a_dxgi_surface_is_read_back_into_the_software_layout` makes a
   WARP NV12 texture of 160×128 (taller than the 160×120 picture, as
@@ -159,10 +168,12 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   `DXGI_FORMAT_NV12` and `D3D11_BIND_DECODER` against the SDK's, and that a
   texture without `D3D11_BIND_DECODER` reads `software`.
 - The mid-stream fall back is proven on CI by
-  `fail_next_read_for_test` (doc-hidden): one injected decode error, even
-  on a software reader. The fixture has ONE keyframe (at 0), so the reopen
-  decodes pictures 0..=9 again and must drop them; the sequence must equal
-  the uninterrupted one.
+  `fail_next_read_for_test` (doc-hidden: one injected decode error, the
+  gate armed) on a software reader AND on a reader on the D3D path (WARP:
+  it leaves the device manager for the system-memory path mid-file). The
+  fixture has ONE keyframe (at 0), so the reopen decodes pictures 0..=9
+  again and must drop them; the sequence must equal the uninterrupted
+  software one.
 - `sp-gpu/tests/video_device.rs` (Windows): the device has the video API
   (creation flags + `ID3D11VideoDevice`) and is multithread-protected, on
   WARP and on the listed Basic Render Driver; `new()` is the picked adapter
