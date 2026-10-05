@@ -486,3 +486,30 @@ async fn an_off_with_the_next_owner_on_its_way_leaves_the_stage_display() {
     let got = stage.received_requests().await.unwrap_or_default();
     assert_eq!(got.len(), 1, "no stage push at 7's OFF");
 }
+
+/// Review round 2: a press from 7 to 9, then a cut to "OBS manuál" before
+/// 9's ON was handled (dropped as stale). 7's OFF came while 9 owned the
+/// wall, so it left the stage display to 9's ON; 9's OFF then finds 9's
+/// scene never on program. The stage display still goes blank: every OFF
+/// that leaves no owner clears it, or 7's line would stay there.
+#[tokio::test]
+async fn an_off_that_leaves_no_owner_blanks_the_stage_display_even_unflagged() {
+    let (mut engine, mut rx) = test_engine(&SONGS).await;
+    play(&mut engine, 7, 42, Window::Due);
+    engine.pipelines.get_mut(&7).unwrap().lyrics_state = Some(one_line("gamma."));
+    let stage = presenter(&mut engine).await;
+    engine.dispatch_lyrics_if_changed(7, 60_000);
+    assert!(pushes(&stage, 1).await[0].contains("gamma"));
+    engine.put_on_air_for_test(9); // the press: 9 owns the wall, its ON queued
+    engine.handle_scene_change(7, false).await;
+    engine.on_air.publish(on_air(&[]), None); // the cut to "OBS manuál"
+    sent(&mut rx);
+
+    engine.handle_scene_change(9, false).await; // 9's OFF (its ON was stale)
+
+    let bodies = pushes(&stage, 2).await;
+    assert!(
+        is_cleared(&bodies[1]),
+        "7's line leaves the stage: {bodies:?}"
+    );
+}
