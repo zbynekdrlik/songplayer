@@ -202,7 +202,6 @@ impl LyricsWorker {
             &self.client,
             gemini_keys,
             input_audio,
-            &["en-US".to_string()],
         )
         .await
         {
