@@ -17,7 +17,8 @@ use windows::Win32::Media::MediaFoundation::{IMFDXGIDeviceManager, MFCreateDXGID
 pub(crate) enum HwDevice {
     /// The adapter `sp_gpu::pick_adapter` chooses (production).
     Picked,
-    /// WARP (tests and CI: `windows-latest` has no GPU).
+    /// WARP (tests and CI: `windows-latest` has no GPU, and its WARP refuses
+    /// the video API, so this is the refused-device open fall back).
     Warp,
 }
 

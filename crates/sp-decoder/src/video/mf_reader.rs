@@ -116,9 +116,11 @@ impl MediaFoundationVideoReader {
         }
     }
 
-    /// `Hardware` mode on a WARP device instead of the picked GPU: for the
-    /// Windows CI tests (`windows-latest` has no GPU). WARP has no decoder
-    /// profiles, so Media Foundation's decoder decodes in software on it.
+    /// `Hardware` mode on a WARP device instead of the picked GPU: the
+    /// Windows CI test of a refused video device. `windows-latest`'s WARP has
+    /// no Direct3D 11 video API (`sp_gpu::VideoDevice::new_warp` is
+    /// DXGI_ERROR_UNSUPPORTED), so this open falls back to software at open
+    /// with that reason; it never reaches the D3D path.
     #[doc(hidden)]
     #[cfg_attr(test, mutants::skip)]
     pub fn open_hardware_on_warp(path: &Path) -> Result<Self, DecoderError> {
