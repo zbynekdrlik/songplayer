@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use super::tests::{
-    Calls, connect, enable_input, hello_identify, last_cut_json, next_json, persisted_source,
-    press, request, rig, rig_on, rig_with, send_json, wait_for,
+    Calls, Client, connect, enable_input, hello_identify, last_cut_json, next_json,
+    persisted_source, press, request, rig, rig_on, rig_with, send_json, wait_for,
 };
 use super::tests_feedback::request_collecting;
 use crate::obs::ObsCommand;
@@ -66,8 +66,19 @@ fn preview(scene: &str) -> Option<Value> {
 
 // ---- the one switch path (#221) ---------------------------------------------
 
+/// The witness that a press told cg OBS nothing: a forwarded getter sent
+/// after it. The OBS client's command queue is FIFO, so a switch the press
+/// had queued would reach the fake before it.
+async fn witness(ws: &mut Client) {
+    let d = request(ws, "GetInputList", None).await;
+    assert_eq!(d["requestStatus"]["code"], 100);
+}
+
+/// #221 B4 step 6: a playlist press cuts `SP-program` from SongPlayer's own
+/// catalog and sends NOTHING to cg OBS (no mirror any more: cg OBS keeps
+/// whatever manual scene it shows, only "OBS manuál" takes its program).
 #[tokio::test]
-async fn a_playlist_scene_is_cut_from_the_catalog_first_then_mirrored_to_cg_obs() {
+async fn a_playlist_scene_is_cut_from_the_catalog_and_sends_nothing_to_cg_obs() {
     let rig = rig().await;
     let mut ws = connect(rig.addr).await;
     hello_identify(&mut ws, 0).await;
@@ -78,27 +89,19 @@ async fn a_playlist_scene_is_cut_from_the_catalog_first_then_mirrored_to_cg_obs(
     assert_eq!(status.source, Some(7));
     assert!(status.cut_boundary_100ns.is_some_and(|b| b > 0));
     assert_eq!(persisted_source(&rig.pool).await.as_deref(), Some("7"));
-    // Published under the catalog's name, the scene cg OBS shows it in.
+    // Published under the catalog's name.
     assert_eq!(rig.bus.on_air_now().scene.as_deref(), Some("sp-fast"));
-    // The mirror: the same switch to cg OBS, by the catalog's name, and no
-    // scene lookup at all.
-    wait_for("cg OBS follows the press", || {
-        rig.calls() == ["SetCurrentProgramScene sp-fast"]
-    })
-    .await;
-    wait_for("the mirror's answer is recorded", || {
-        last_cut_json(&rig)["cg_forward"] == "ok"
-    })
-    .await;
+    witness(&mut ws).await;
+    assert_eq!(rig.calls(), ["GetInputList "], "cg OBS is told nothing");
     let cut = last_cut_json(&rig);
     assert_eq!(cut["scene"], "SP-Fast");
     assert_eq!(cut["action"], "playlist");
     assert_eq!(cut["source"], 7);
     assert_eq!(cut["reason"], Value::Null);
     assert_eq!(cut["via"], "program");
+    assert_eq!(cut["cg_forward"], Value::Null, "nothing went to cg OBS");
     assert_eq!(cut["cut_boundary_100ns"], json!(status.cut_boundary_100ns));
     assert!(cut["at_ms"].as_i64().unwrap() > 1_700_000_000_000, "{cut}");
-    assert_eq!(rig.calls().len(), 1, "no lookup, no second call");
 }
 
 #[tokio::test]
@@ -165,11 +168,12 @@ async fn a_companion_button_previews_then_transitions_and_cuts_the_program() {
         (cut["scene"].as_str(), cut["via"].as_str()),
         (Some("sp-fast"), Some("transition"))
     );
-    wait_for("cg OBS is mirrored", || {
-        rig.calls() == ["SetCurrentProgramScene sp-fast"]
-    })
-    .await;
     assert!(rig.remote().unsupported_requests.is_empty());
+    // #221 B4 step 6: cg OBS is told nothing. The transition's events come
+    // first (this client subscribed to every intent), then the witness.
+    let (d, _events) = request_collecting(&mut ws, "GetInputList", None).await;
+    assert_eq!(d["requestStatus"]["code"], 100);
+    assert_eq!(rig.calls(), ["GetInputList "], "cg OBS is told nothing");
 }
 
 #[tokio::test]
@@ -256,7 +260,6 @@ async fn a_transition_to_the_scene_on_air_always_switches() {
     let mut ws = connect(rig.addr).await;
     hello_identify(&mut ws, 0).await;
     press(&mut ws, "sp-fast").await;
-    wait_for("the first mirror", || rig.calls().len() == 1).await;
     let seq = rig.bus.on_air_now().seq;
     let cuts = rig.bus.status().health.cuts;
     // No preview set: the preview is the program scene, sp-fast.
@@ -265,19 +268,14 @@ async fn a_transition_to_the_scene_on_air_always_switches() {
     assert_eq!(rig.bus.on_air_now().seq, seq + 1, "published again");
     assert_eq!(rig.bus.status().health.cuts, cuts, "a bus no-op");
     assert_eq!(last_cut_json(&rig)["via"], "transition");
-    wait_for("cg OBS re-takes the scene too", || {
-        rig.calls()
-            == [
-                "SetCurrentProgramScene sp-fast",
-                "SetCurrentProgramScene sp-fast",
-            ]
-    })
-    .await;
     // A preview set to the scene on air switches the same way.
     request(&mut ws, "SetCurrentPreviewScene", preview("sp-fast")).await;
     request(&mut ws, "TriggerStudioModeTransition", None).await;
     assert_eq!(rig.bus.on_air_now().seq, seq + 2);
     assert_eq!(rig.bus.status().source, Some(7));
+    // #221 B4 step 6: neither the press nor the re-kicks told cg OBS anything.
+    witness(&mut ws).await;
+    assert_eq!(rig.calls(), ["GetInputList "]);
 }
 
 #[tokio::test]
@@ -337,7 +335,11 @@ async fn a_playlist_press_cuts_even_when_cg_obs_is_unreachable() {
     assert_eq!(rig.bus.status().source, Some(3));
     let cut = last_cut_json(&rig);
     assert_eq!(cut["action"], "playlist");
-    assert_eq!(cut["cg_forward"], "not_ready");
+    assert_eq!(
+        cut["cg_forward"],
+        Value::Null,
+        "a playlist press asks cg OBS nothing"
+    );
     // A manual press needs cg OBS: not ready, the program kept.
     let d = press(&mut ws, "Slido").await;
     assert_eq!(d["requestStatus"]["code"], 207);
@@ -353,10 +355,13 @@ async fn a_playlist_press_cuts_even_when_cg_obs_is_unreachable() {
     );
 }
 
+/// #221 B4 step 6: a playlist press never waits for cg OBS, because it sends
+/// it nothing. cg OBS holds every switch here and the facade would wait 10
+/// minutes for one, so a press that sent (and awaited) a switch could never
+/// be answered in the test; both presses cut at once, and cg OBS holds
+/// nothing.
 #[tokio::test]
 async fn a_playlist_press_never_waits_for_cg_obs() {
-    // cg OBS holds every switch; the facade would wait 10 minutes for it, so
-    // a press that awaited its mirror could never be answered in the test.
     let (cmd_tx, calls, held) = spawn_holding_upstream();
     let upstream_timeout = Duration::from_secs(600);
     let rig = rig_on(
@@ -372,35 +377,17 @@ async fn a_playlist_press_never_waits_for_cg_obs() {
     let d = press(&mut ws, "sp-fast").await;
     assert_eq!(d["requestStatus"]["code"], 100);
     assert_eq!(rig.bus.status().source, Some(7));
-    wait_for("cg OBS holds the mirror", || {
-        held.lock().unwrap().len() == 1
-    })
-    .await;
-    assert_eq!(last_cut_json(&rig)["cg_forward"], "pending");
-    // The next press is not held behind it: the switch order is free.
     let d = press(&mut ws, "sp-slow").await;
     assert_eq!(d["requestStatus"]["code"], 100);
     assert_eq!(rig.bus.status().source, Some(3));
-    wait_for("both mirrors reached cg OBS, in press order", || {
-        rig.calls()
-            == [
-                "SetCurrentProgramScene sp-fast",
-                "SetCurrentProgramScene sp-slow",
-            ]
-    })
-    .await;
-    // cg OBS answers both: the last cut records its own answer.
-    let replies: Vec<_> = held.lock().unwrap().drain(..).collect();
-    for reply in replies {
-        let _ = reply.send(Some(
-            json!({ "requestStatus": { "result": true, "code": 100 } }),
-        ));
-    }
-    wait_for("the answer is recorded", || {
-        last_cut_json(&rig)["cg_forward"] == "ok"
-    })
-    .await;
-    assert_eq!(last_cut_json(&rig)["scene"], "sp-slow");
+    witness(&mut ws).await; // a getter: this cg OBS answers it at once
+    assert_eq!(rig.calls(), ["GetInputList "]);
+    assert!(held.lock().unwrap().is_empty(), "cg OBS holds no switch");
+    let cut = last_cut_json(&rig);
+    assert_eq!(
+        (cut["scene"].as_str(), cut["cg_forward"].as_str()),
+        (Some("sp-slow"), None)
+    );
 }
 
 /// #221 review round 4: only a playlist press's mirror may supersede an
@@ -541,17 +528,13 @@ async fn a_manual_press_holds_the_switch_order_until_cg_obs_answers() {
     assert_eq!(answer["d"]["requestId"], "playlist");
     assert_eq!(answer["d"]["requestStatus"]["code"], 100);
     assert_eq!(rig.bus.status().source, Some(7));
-    wait_for(
-        "the playlist press is mirrored after the manual switch",
-        || {
-            rig.calls()
-                == [
-                    "SetCurrentProgramScene Slido",
-                    "SetCurrentProgramScene sp-fast",
-                ]
-        },
-    )
-    .await;
+    // #221 B4 step 6: only the manual press reached cg OBS.
+    witness(&mut playlist).await;
+    assert_eq!(
+        rig.calls(),
+        ["SetCurrentProgramScene Slido", "GetInputList "],
+        "the playlist press tells cg OBS nothing"
+    );
 }
 
 #[tokio::test]

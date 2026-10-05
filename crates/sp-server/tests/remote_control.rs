@@ -9,7 +9,8 @@
 //! connect → Identify → studio mode ON (#221) → GetSceneList (cg OBS's scenes
 //! 1:1) → a page-13 button, `SetCurrentPreviewScene(playlist scene)` +
 //! `TriggerStudioModeTransition` → `SP-program` cut to the playlist from
-//! SongPlayer's own playlists, cg OBS mirrored → Companion's feedback is
+//! SongPlayer's own playlists, cg OBS told nothing (#221 B4 step 6) →
+//! Companion's feedback is
 //! SongPlayer's OWN `CurrentProgramSceneChanged` (#221 L3), and cg OBS's is
 //! never passed through → SetCurrentProgramScene(manual scene) → cg OBS
 //! switched, then a cut to "OBS manuál".
@@ -206,7 +207,8 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     assert_eq!(list["responseData"]["currentProgramSceneName"], "sp-slow");
 
     // A page-13 playlist button: preview, then transition. SP-program cuts to
-    // ytfast from SongPlayer's own playlists; cg OBS is mirrored after it.
+    // ytfast from SongPlayer's own playlists; #221 B4 step 6: cg OBS is told
+    // nothing and keeps its own program.
     let previewed = request(
         &mut ws,
         "SetCurrentPreviewScene",
@@ -219,21 +221,6 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     assert_eq!(pressed["requestStatus"]["result"], true);
     assert_eq!(bus.status().source, Some(7));
     assert!(bus.status().cut_boundary_100ns.is_some_and(|b| b > 0));
-    wait_until("cg OBS is mirrored to sp-fast", || {
-        let fake = &fake;
-        async move { fake.state().await.program_scene.as_deref() == Some("sp-fast") }
-    })
-    .await;
-    let cg_now = fake.state().await;
-    assert!(
-        cg_now
-            .requests
-            .iter()
-            .any(|r| r["requestType"] == "SetCurrentProgramScene"
-                && r["requestData"]["sceneName"] == "sp-fast"),
-        "cg OBS never got the switch: {:?}",
-        cg_now.requests
-    );
     assert_eq!(
         db::models::get_setting(&pool, "program_source")
             .await
@@ -242,8 +229,7 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         Some("7")
     );
 
-    // #221 L3: Companion's button feedback is SongPlayer's OWN program (the
-    // fake cg OBS emits no event for the mirrored switch).
+    // #221 L3: Companion's button feedback is SongPlayer's OWN program.
     let feedback = loop {
         let msg = next_json(&mut ws).await;
         if msg["op"] == 5 && msg["d"]["eventType"] == "CurrentProgramSceneChanged" {
@@ -285,6 +271,22 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
             .all(|m| m["d"]["eventType"] != "CurrentProgramSceneChanged"),
         "cg OBS's program scene reached Companion: {before:?}"
     );
+    // #221 B4 step 6: the playlist press told cg OBS nothing. The witness: a
+    // getter forwarded after it (the OBS client writes the facade's calls in
+    // queue order, so a switch the press had queued would have reached cg
+    // OBS first). cg OBS keeps its own program.
+    let inputs = request(&mut ws, "GetInputList", None).await;
+    assert_eq!(inputs["requestStatus"]["code"], 100);
+    let cg_now = fake.state().await;
+    assert!(
+        cg_now
+            .requests
+            .iter()
+            .all(|r| r["requestType"] != "SetCurrentProgramScene"),
+        "a playlist press switched cg OBS: {:?}",
+        cg_now.requests
+    );
+    assert_eq!(cg_now.program_scene.as_deref(), Some("sp-slow"));
     // SongPlayer's program scene, never cg OBS's.
     let program = request(&mut ws, "GetCurrentProgramScene", None).await;
     assert_eq!(

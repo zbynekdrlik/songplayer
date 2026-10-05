@@ -231,10 +231,6 @@ async fn companion_over_msgpack_presses_a_page_13_button_and_gets_every_event_as
     assert_eq!(rig.bus.status().source, Some(3));
     assert_eq!(rig.bus.on_air_now().scene.as_deref(), Some("sp-slow"));
     assert_eq!(last_cut_json(&rig)["via"], "transition");
-    wait_for("cg OBS is mirrored", || {
-        rig.calls() == ["GetSceneList ", "SetCurrentProgramScene sp-slow"]
-    })
-    .await;
     // SongPlayer's own feedback, all as msgpack: Started before Ended, the
     // program-scene event anywhere among them.
     let mut events = Vec::new();
@@ -276,6 +272,12 @@ async fn companion_over_msgpack_presses_a_page_13_button_and_gets_every_event_as
             "eventData": scenes,
         }})
     );
+    // #221 B4 step 6: the playlist press told cg OBS nothing. A forwarded
+    // getter is the witness: the OBS client's queue is FIFO, so a switch the
+    // press had queued would have reached the fake first.
+    let d = request_msgpack(&mut ws, "GetInputList", Value::Null).await;
+    assert_eq!(d["requestStatus"]["code"], 100);
+    assert_eq!(rig.calls(), ["GetSceneList ", "GetInputList "]);
 
     // v4's batch (op 8 → op 9), as msgpack both ways.
     let batch = json!({ "op": 8, "d": {

@@ -183,6 +183,47 @@ async fn the_authority_publishes_the_wall_owner_with_the_set() {
     nothing_more(&mut a.events).await;
 }
 
+/// #221 B4 step 6: on air is SP-program's playlist ONLY, and it alone owns
+/// the wall. The program restored at startup leaves the air at the cut away
+/// from it — OFF at once, then ON for the new playlist, with no cg OBS answer
+/// to wait for — and a cut to "OBS manuál" leaves nothing on air and nobody
+/// owning the wall.
+#[tokio::test]
+async fn on_air_is_sp_program_s_playlist_only() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    crate::db::models::set_setting(
+        &pool,
+        crate::playback::program_bus::SETTING_PROGRAM_SOURCE,
+        "7",
+    )
+    .await
+    .unwrap();
+    let bus = Arc::new(ProgramBus::new());
+    let restored = crate::playback::program_bus::restore_selected_source(&pool, &bus).await;
+    assert_eq!(restored, Some(7));
+    let mut a = authority(&bus);
+    assert_eq!(
+        next(&mut a.events, 1).await,
+        [(7, true)],
+        "the restored program"
+    );
+    assert_eq!(a.diffed.owner(), Some(7));
+
+    bus.cut(4, utc_now_100ns(), Some("sp-slow"));
+    assert_eq!(next(&mut a.events, 2).await, [(7, false), (4, true)]);
+    assert_eq!(members(&a.diffed, &[4, 7]), [true, false]);
+    assert_eq!(a.diffed.owner(), Some(4));
+    assert!(!a.diffed.may_write_wall(7), "7 is off air");
+    nothing_more(&mut a.events).await;
+
+    bus.cut(PROGRAM_INPUT_ID, utc_now_100ns(), None);
+    assert_eq!(next(&mut a.events, 1).await, [(4, false)]);
+    assert_eq!(members(&a.diffed, &[4, 7]), [false, false]);
+    assert_eq!(a.diffed.owner(), None, "\"OBS manuál\" names no playlist");
+    nothing_more(&mut a.events).await;
+}
+
 /// It ends on shutdown, and when the engine's channel is gone.
 #[tokio::test]
 async fn the_authority_ends_on_shutdown_or_without_an_engine() {

@@ -176,17 +176,22 @@ async fn a_refused_mirror_keeps_the_cut_and_changes_no_record() {
     assert_eq!(state.program_bus.legacy_cg().shown_now(), None);
 }
 
-/// Before `start_program` attaches the OBS client's link (and in a test
-/// state), the mirror is not ready at once and the cut still happens.
+/// #221 B4 step 6: a dashboard cut to a playlist sends NOTHING to cg OBS —
+/// no mirror, so no `cg_forward` — and the program answer has no
+/// `legacy_cg` record any more.
 #[tokio::test]
-async fn without_a_link_to_cg_obs_the_cut_happens_and_the_mirror_is_not_ready() {
+async fn a_dashboard_playlist_cut_sends_nothing_to_cg_obs() {
     let state = test_state().await;
     let fast = add_playlist(&state.pool, "fast").await;
     let (status, json) = cut(&state, fast).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["source"], fast);
-    assert_eq!(last_cut(&state)["cg_forward"], "not_ready");
-    assert_eq!(json["legacy_cg"], json!({ "shown": null }));
+    let record = last_cut(&state);
+    assert_eq!(record["scene"], "sp-fast");
+    assert_eq!(record["action"], "playlist");
+    assert_eq!(record["via"], "dashboard");
+    assert_eq!(record["cg_forward"], Value::Null, "nothing went to cg OBS");
+    assert!(json.get("legacy_cg").is_none(), "{json}");
 }
 
 /// A playlist whose catalog names no scene (here: inactive) is cut with no

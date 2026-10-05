@@ -524,6 +524,33 @@ async fn status_reports_songplayers_own_program_not_cg_obs_detection() {
     assert!(get_status(state).await.active_playlist_ids.is_empty());
 }
 
+/// #221 B4 step 6: on air is SP-program's playlist ONLY. The program restored
+/// at startup is on air until a cut away from it; a cut to "OBS manuál"
+/// leaves no playlist on air (cg OBS shows a manual scene, not a playlist).
+#[tokio::test]
+async fn status_puts_only_sp_program_s_playlist_on_air() {
+    use crate::playback::program_bus::{SETTING_PROGRAM_SOURCE, restore_selected_source};
+    let state = test_state().await;
+    crate::db::models::set_setting(&state.pool, SETTING_PROGRAM_SOURCE, "7")
+        .await
+        .unwrap();
+    let bus = Arc::clone(&state.program_bus);
+    assert_eq!(restore_selected_source(&state.pool, &bus).await, Some(7));
+    assert_eq!(get_status(state.clone()).await.active_playlist_ids, [7]);
+
+    let now = crate::playback::wallclock::utc_now_100ns();
+    bus.cut(sp_core::config::PROGRAM_INPUT_ID, now, None);
+    let json = get_status(state.clone()).await;
+    assert_eq!(json.active_scene.as_deref(), Some("OBS manuál"));
+    assert!(
+        json.active_playlist_ids.is_empty(),
+        "no playlist is on air with \"OBS manuál\": {:?}",
+        json.active_playlist_ids
+    );
+    bus.cut(4, now, Some("sp-slow"));
+    assert_eq!(get_status(state).await.active_playlist_ids, [4]);
+}
+
 /// #51: `/api/v1/status` must surface the LAN `sp.local` URL + raw-IP
 /// fallback the mDNS task writes into the shared `lan_status` handle, so the
 /// dashboard can show the offline-LAN address without guessing.

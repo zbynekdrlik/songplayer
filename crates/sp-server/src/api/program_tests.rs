@@ -58,6 +58,40 @@ async fn get_program_reports_no_source_before_any_cut() {
     assert_eq!(json["health"]["cuts"], 0);
 }
 
+/// #221: the program answer has no `follow` block (L5 deleted the OBS
+/// follow) and no `legacy_cg` record (B4 step 6), and its receiver
+/// expectation is SP-program's own: while a source is on program, no NDI
+/// receiver on `SP-program` is the `degraded_reason`; nothing on program, or
+/// a receiver connected, is none.
+#[tokio::test]
+async fn the_program_answer_has_no_follow_no_legacy_cg_and_expects_sp_program_s_receiver() {
+    let state = test_state().await;
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert!(json.get("follow").is_none(), "{json}");
+    assert!(json.get("legacy_cg").is_none(), "{json}");
+    assert_eq!(
+        json["degraded_reason"],
+        serde_json::Value::Null,
+        "nothing on program"
+    );
+
+    let slow = add_playlist(&state.pool, "slow").await;
+    state.program_bus.select_initial(slow, Some("sp-slow"));
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(json["health"]["connections"], 0);
+    assert_eq!(json["degraded_reason"], "no NDI receiver on SP-program");
+
+    state.program_bus.set_connections(2);
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(json["degraded_reason"], serde_json::Value::Null);
+
+    // "OBS manuál" on program expects a receiver on SP-program the same way.
+    state.program_bus.set_connections(0);
+    state.program_bus.select_initial(-1, None);
+    let (_, json) = call(state, "GET", "/api/v1/program", None).await;
+    assert_eq!(json["degraded_reason"], "no NDI receiver on SP-program");
+}
+
 #[tokio::test]
 async fn cut_selects_the_source_get_reports_it_and_it_persists() {
     let state = test_state().await;
