@@ -20,7 +20,7 @@
 //!   child paces at CFR) — never blocks.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
@@ -296,6 +296,18 @@ pub struct AudioBlock {
     pub samples: Vec<f32>,
 }
 
+/// How [`StreamShared::settle_unwatched_run`] ends an encoder run that stopped
+/// with nobody watching (#184).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnwatchedEnd {
+    /// No viewer at the settle: the encoder claim was released. The supervisor
+    /// exits; the next viewer's `ensure_running` claims a fresh one.
+    Released,
+    /// A viewer subscribed after the stop was decided: the claim is KEPT and
+    /// the supervisor starts a new child for it.
+    Restart,
+}
+
 /// State shared between the decode-side taps, the WS viewers, and the encoder
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
@@ -309,8 +321,17 @@ pub struct StreamShared {
     lead_ms: u32,
     /// Number of connected WS viewers. `0` = the offer fast-path early-out.
     viewers: AtomicUsize,
-    /// Whether an encoder child is currently running for this pipeline.
+    /// The encoder claim: a supervisor thread owns this pipeline's ffmpeg
+    /// child. Taken by [`try_claim_encoder`](Self::try_claim_encoder)
+    /// (`preview_encoder::ensure_running`); released when a run ends with
+    /// nobody watching by [`settle_unwatched_run`](Self::settle_unwatched_run),
+    /// else by the supervisor's give-up / panic paths.
     encoder_running: AtomicBool,
+    /// Orders [`ViewerGuard::subscribe`] against the encoder supervisor's
+    /// [`settle_unwatched_run`](Self::settle_unwatched_run) (#184): its viewer
+    /// re-check and the claim release are ONE step no subscribe can slip into.
+    /// Never taken on the offer hot path (iron rule 1).
+    lifecycle: Mutex<()>,
     video_tx: Sender<Vec<u8>>,
     video_rx: Receiver<Vec<u8>>,
     audio_tx: Sender<AudioBlock>,
@@ -333,6 +354,7 @@ impl StreamShared {
             lead_ms,
             viewers: AtomicUsize::new(0),
             encoder_running: AtomicBool::new(false),
+            lifecycle: Mutex::new(()),
             video_tx,
             video_rx,
             audio_tx,
@@ -478,9 +500,58 @@ impl StreamShared {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
     }
-    /// Release the running flag (the child's monitor thread on teardown).
+    /// Release the claim unconditionally. A run that ended with nobody watching
+    /// releases it through [`settle_unwatched_run`](Self::settle_unwatched_run)
+    /// instead (#184); this bare release is for the supervisor's give-up path,
+    /// its panic guard and a failed thread spawn.
     pub fn release_encoder(&self) {
         self.encoder_running.store(false, Ordering::Release);
+    }
+
+    /// The lifecycle lock (see the field). A poisoned lock is still a lock: a
+    /// panic elsewhere must not stop every later viewer from subscribing.
+    fn lifecycle_lock(&self) -> MutexGuard<'_, ()> {
+        self.lifecycle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Settle an encoder run that ended with nobody watching (#184): the viewer
+    /// TTL ran out, or the child exited on its own while nobody watched. The
+    /// supervisor calls it after the teardown and
+    /// [`end_stopped_stream`](Self::end_stopped_stream). It runs under the
+    /// lifecycle lock, which [`ViewerGuard::subscribe`] also takes, so every
+    /// viewer either subscribed before it (and is seen here) or subscribes after
+    /// the claim was released (its `ensure_running` then claims a fresh
+    /// encoder):
+    ///
+    /// - no viewer → release the claim: [`UnwatchedEnd::Released`], the
+    ///   supervisor exits;
+    /// - a viewer subscribed since the stop was decided → keep the claim:
+    ///   [`UnwatchedEnd::Restart`], the supervisor runs a new child for it.
+    ///
+    /// Before #184 the stop released the claim with no re-check, after the
+    /// supervisor returned: a viewer that subscribed in between found the claim
+    /// held, so its `ensure_running` started nothing, and no child ever ran for
+    /// it (a frozen preview at HAVE_METADATA).
+    pub fn settle_unwatched_run(&self) -> UnwatchedEnd {
+        let _lifecycle = self.lifecycle_lock();
+        self.release_encoder();
+        UnwatchedEnd::Released
+    }
+
+    /// End a stopped child's stream for every viewer that may hold its init
+    /// (#184; generalises the round-G respawn close). The supervisor calls it
+    /// after EVERY child run, once the child and its reader are gone. With an
+    /// init cached, a viewer may already have sent it (and the child's last
+    /// fragments) to its browser: the relay is CLOSED, so that viewer's socket
+    /// closes and the shim reconnects onto the next child's init. A bare reset
+    /// would leave it holding the old init while the next child's restarted
+    /// timeline arrives (a frozen preview). With no init cached the child
+    /// produced nothing a viewer could hold, so viewers still waiting for an
+    /// init keep their stream and simply receive the next one.
+    pub fn end_stopped_stream(&self) {
+        self.relay.reset();
     }
 }
 
@@ -526,7 +597,11 @@ pub struct ViewerGuard {
 
 impl ViewerGuard {
     /// Register a viewer against `tap` (increments the count) and return the
-    /// guard plus the fragment relay to read from.
+    /// guard plus the fragment relay to read from. The count is taken under the
+    /// lifecycle lock (#184), so a stopping encoder's
+    /// [`StreamShared::settle_unwatched_run`] either sees this viewer and keeps
+    /// the encoder, or released the claim before this returns (the caller's
+    /// `ensure_running` then claims a fresh one).
     pub fn subscribe(tap: &StreamTap) -> (ViewerGuard, Arc<FragmentRelay>) {
         tap.shared.viewers.fetch_add(1, Ordering::AcqRel);
         (
@@ -594,3 +669,7 @@ impl DecodeTaps {
 #[cfg(test)]
 #[path = "preview_stream_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "preview_stream_tests_lifecycle.rs"]
+mod tests_lifecycle;
