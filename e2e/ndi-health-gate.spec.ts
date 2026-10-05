@@ -52,7 +52,7 @@ test.describe("SP-program dark gate logic (#127, #221)", () => {
     expect(unpolled.ok).toBe(false);
   });
 
-  test("fails a program not polled yet, or with nothing on it", () => {
+  test("fails a program with no valid reading (-1), or with nothing on it", () => {
     expect(programReceiverVerdict(program(7, -1)).health).toBe("never_polled");
     expect(programReceiverVerdict(program(7, -1)).ok).toBe(false);
     const empty = programReceiverVerdict(program(null, 3));

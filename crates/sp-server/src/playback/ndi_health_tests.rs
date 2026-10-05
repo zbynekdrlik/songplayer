@@ -78,11 +78,15 @@ pub(super) fn dark_wall_event(now: Instant, consecutive_bad_polls: u32) -> Pipel
 /// #221 B4 step 6: no NDI receiver is expected on a playlist's OWN output any
 /// more — SP-program takes the playlist off the program bus, and cg OBS never
 /// shows a playlist scene again — so a playlist on program with 0 receivers
-/// is NOT a dark wall: never the dark-wall reason and no #173 ladder rung
-/// against cg OBS's inputs, however many bad polls it reports (the receiver
-/// expectation is SP-program's, `GET /api/v1/program` → `degraded_reason`).
-/// Before, this poll nudged cg OBS (`NudgeNdiReceiver`, rung 0) and named the
-/// dark wall.
+/// is NOT a dark wall: a run of bad polls (an underrun, as the pipeline now
+/// counts them) up to 100 is named as the underrun, never the dark-wall
+/// reason, and runs no #173 ladder rung against cg OBS's inputs (the
+/// receiver expectation is SP-program's, `GET /api/v1/program` →
+/// `degraded_reason`). The snapshot keeps the real count and the bad polls
+/// (visibility only). Before, a dark poll here nudged cg OBS
+/// (`NudgeNdiReceiver`, rung 0) and named the dark wall; the 2026-04-27
+/// production failure was v0.25.0's per-sender `RecreateSender` on prolonged
+/// `connections=0` (v0.26.0 ripped the whole trigger out).
 #[tokio::test]
 async fn a_playlist_output_on_program_with_no_receiver_is_never_dark_and_runs_no_ladder() {
     let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
@@ -93,15 +97,20 @@ async fn a_playlist_output_on_program_with_no_receiver_is_never_dark_and_runs_no
     let now = Instant::now();
     let threshold = crate::obs::ndi_recovery::NUDGE_THRESHOLD_BAD_POLLS;
     for polls in [2, threshold, threshold + 2, threshold + 4, 100] {
-        engine.handle_health_snapshot(4, dark_wall_event(now, polls));
+        let mut underrun = dark_wall_event(now, polls);
+        if let PipelineEvent::HealthSnapshot { observed_fps, .. } = &mut underrun {
+            *observed_fps = 10.0; // below half of the nominal 30
+        }
+        engine.handle_health_snapshot(4, underrun);
     }
     let snap = registry.snapshots()[0].clone();
     assert_eq!(snap.state, PlaybackStateLabel::Playing, "it is on program");
     assert_eq!(snap.connections, 0);
-    assert_ne!(
+    assert_eq!(snap.consecutive_bad_polls, 100);
+    assert_eq!(
         snap.degraded_reason.as_deref(),
-        Some(DARK_WALL_REASON),
-        "no dark wall on a playlist output"
+        Some("underrunning (10/30 fps)"),
+        "the underrun, never the dark wall"
     );
     assert_eq!(snap.recovery_step, None, "no ladder rung");
     assert!(
@@ -429,30 +438,6 @@ fn degraded_reason_emits_underrun_when_fps_below_half_nominal() {
 fn degraded_reason_emits_stale_when_fps_ok_and_connections_ok() {
     let r = compute_degraded_reason(&PlaybackStateLabel::Playing, 1, 30.0, 30.0, 2);
     assert_eq!(r.as_deref(), Some("no frames in 10s"));
-}
-
-/// Regression test for the 2026-04-27 production failure (v0.25.0's
-/// per-sender `RecreateSender` on prolonged `connections=0`; v0.26.0 ripped
-/// the whole trigger out). #221 B4 step 6: a playlist's own output expects no
-/// receiver at all, so the pipeline counts no bad poll for 0 receivers, and
-/// a long run of such polls on program leaves no degraded reason and no
-/// other side effect — the snapshot is visibility only.
-#[tokio::test]
-async fn handle_health_snapshot_visibility_only_on_prolonged_dark_wall() {
-    let (mut engine, registry) = fresh_engine().await;
-    engine.ensure_pipeline(7, "SP-fast");
-    engine.set_state_for_test(7, PlayState::Playing { video_id: 1 });
-    engine.set_on_program_for_test(7);
-
-    let now = Instant::now();
-    for _ in 0..100 {
-        engine.handle_health_snapshot(7, dark_wall_event(now, 0));
-    }
-
-    let snap = &registry.snapshots()[0];
-    assert_eq!(snap.consecutive_bad_polls, 0);
-    assert_eq!(snap.connections, 0);
-    assert_eq!(snap.degraded_reason, None);
 }
 
 /// A degraded reason clears on a clean poll, so the "ndi: pipeline

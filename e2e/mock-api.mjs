@@ -908,8 +908,9 @@ function programBody() {
   return {
     ndi_name: "SP-program",
     source: programState.source,
-    // #221 B4 step 6: SP-program's receiver expectation (mirrors
-    // `ndi_health_expect::program_degraded_reason`).
+    // #221 B4 step 6: SP-program's receiver expectation, as
+    // `ndi_health_expect::program_degraded_reason` decides it for a POLLED
+    // count (the mock has no unpolled state: its count is always a reading).
     degraded_reason:
       programState.source !== null && programConnections < 1
         ? "no NDI receiver on SP-program"

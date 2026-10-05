@@ -331,7 +331,12 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       });
       await step("restore cg OBS's program scene", async () => {
         if (!cgSwitched || !cgInitialScene) return;
-        await rec.switchScene(cgInitialScene);
+        // A manual scene restored through the facade above already put cg
+        // OBS back on it: no same-scene studio transition on cg OBS (its
+        // 2 s self-fade, and the #170 dropped-next-event state).
+        if ((await rec.currentProgramScene()) !== cgInitialScene) {
+          await rec.switchScene(cgInitialScene);
+        }
         expect(
           await rec.currentProgramScene(),
           `the A/V gate must restore cg OBS's program scene "${cgInitialScene}"`,
@@ -402,6 +407,23 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       cgSwitched = true;
       await rec.switchScene(baseline);
     }
+    // The take records cg OBS's sp-* input of the baseline's own NDI output.
+    // No receiver is expected on that output any more (#221), so nothing
+    // watches or recovers it: wait until cg OBS's input is attached, else
+    // fail naming it, never as an unmeasurable recording.
+    const baselinePid = status.active_playlist_ids[0];
+    await pollUntil(
+      `cg OBS's ${baseline} input receiving the playlist's own NDI output (connections >= 1)`,
+      30_000,
+      async () =>
+        (
+          await getJson<{ playlist_id: number; ndi_name?: string; connections: number }[]>(
+            request,
+            "/api/v1/ndi/health",
+          )
+        ).find((r) => r.playlist_id === baselinePid) ?? null,
+      (row) => (row?.connections ?? 0) >= 1,
+    );
     const active = status.active_playlist_ids;
     const first = await getJson<HealthRow[]>(request, "/api/v1/ndi/health");
     if (!active.some((id) => isPlayingWithFrames(first, id))) {

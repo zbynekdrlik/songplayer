@@ -336,8 +336,9 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * over Spout, gated by `post-deploy-max.spec.ts`), and cg OBS never shows a
    * playlist scene again, so a playlist's own NDI output has no consumer.
    * This gate polls `GET /api/v1/program` until a source is on program,
-   * `SP-program` has `health.connections > 0` (`0` = dark; `-1` = not polled
-   * yet, so keep waiting) and the server names no `degraded_reason`, and
+   * `SP-program` has `health.connections > 0` (`0` = dark, or not polled yet
+   * right after a start; `-1` = no valid reading; keep waiting either way)
+   * and the server names no `degraded_reason`, and
    * FAILS if it stays dark. It switches no scene: whatever the program shows
    * is what its receivers take.
    *

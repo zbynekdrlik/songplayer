@@ -9,7 +9,10 @@
  * mode is ON there, so `switchScene` takes Companion's exact path (preview,
  * then transition), and the program scene and the transition events are
  * SongPlayer's own. A second driver on cg OBS (`OBS_WS_URL`, :4455) is kept
- * only for the recording and profile requests of the A/V gate.
+ * for the A/V gate: its recording and profile requests, and (#221 B4 step 6:
+ * SongPlayer no longer mirrors a press to cg OBS) putting cg OBS itself on
+ * the baseline scene for the take and back, each switch only when cg OBS is
+ * on another scene.
  */
 
 // The bare import: in Node it resolves to the MSGPACK build, which offers
@@ -70,8 +73,10 @@ export class ObsDriver {
    *    driver talks to SongPlayer's facade, where a same-scene transition is
    *    the designed re-kick (it plays a playlist paused out of band). The skip
    *    existed for cg OBS's own same-scene 2 s fade, which dropped the next
-   *    switch's event (#170); the E2E no longer switches cg OBS directly
-   *    (#221 B4 step 6: a playlist press tells cg OBS nothing at all).
+   *    switch's event (#170). The scene driver never switches cg OBS (#221
+   *    B4 step 6: a playlist press tells cg OBS nothing at all); the A/V
+   *    gate's recorder does, and guards each of its switches against the
+   *    same scene itself.
    *  - In studio mode, drive the transition the studio way
    *    (`SetCurrentPreviewScene` + `TriggerStudioModeTransition`) so OBS emits
    *    the program-scene-changed event SongPlayer reacts to; fall back to

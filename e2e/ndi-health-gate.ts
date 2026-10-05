@@ -41,7 +41,7 @@ export type OutputHealth = "live" | "dark" | "never_polled";
 export function classifyConnections(connections: number): OutputHealth {
   if (connections > 0) return "live";
   if (connections === 0) return "dark";
-  return "never_polled"; // -1 = not polled yet
+  return "never_polled"; // -1: no valid reading (the SDK's error value)
 }
 
 /** The gate's verdict on `SP-program`. */
