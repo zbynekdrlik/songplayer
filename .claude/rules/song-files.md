@@ -9,6 +9,7 @@ paths:
   - "crates/sp-server/src/stems/worker.rs"
   - "crates/sp-server/src/dabing/worker.rs"
   - "crates/sp-server/src/lyrics/idle_gate_abort.rs"
+  - "crates/sp-server/src/lyrics/g35t_probe*.rs"
   - "crates/sp-server/src/db/models_stems*.rs"
   - "crates/sp-server/src/metadata/manual*.rs"
   - "crates/sp-server/tests/startup_migration.rs"

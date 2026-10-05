@@ -53,7 +53,8 @@ export interface G35tProbe {
   latency_ms: number;
   /** Why the probe failed (never a key); null when ok. */
   error: string | null;
-  /** Keys refused before the one that decided the outcome. */
+  /** Keys refused before the one that decided the outcome; every key when
+   * all were refused. */
   refused_keys: G35tKeyRefusal[];
   clip: G35tClip | null;
   /** The first words heard. */

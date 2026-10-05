@@ -14,8 +14,9 @@
  * `POST /api/v1/lyrics/g35t/probe` cuts 20 s of a cached song from its first
  * served line (the isolated vocal the worker uploads when on disk, else its
  * vocal stem, else the mix) and sends it through the worker's call: the same
- * upload, request body, language hint and key rotation. One short paid call per deploy, like the metadata probe. It passes
- * on any working key; the keys refused before it are logged (`refused_keys`).
+ * upload, request body, language hint and key rotation. One short paid call
+ * per deploy, like the metadata probe. It passes on any working key; the keys
+ * refused before it are logged (`refused_keys`).
  *
  * API-level on purpose: the probe has no dashboard surface. The decision is
  * the pure `g35t-gate.ts`, unit-tested in the mock suite.
@@ -32,14 +33,20 @@ test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
 
     // The probe cuts the clip with the app's ffmpeg, which the tools manager
     // makes ready after a (re)start: wait for it rather than depend on the
-    // specs that happen to run before this one.
+    // specs that happen to run before this one. A refused or slow status read
+    // (the app still starting) is "not yet", never a failure: expect.poll
+    // does not retry a generator that throws.
     await expect
       .poll(
         async () => {
-          const status = await request.get("/api/v1/status");
-          if (status.status() !== 200) return false;
-          const body = (await status.json()) as { tools?: { ffmpeg_available?: boolean } };
-          return body.tools?.ffmpeg_available === true;
+          try {
+            const status = await request.get("/api/v1/status", { timeout: 10_000 });
+            if (status.status() !== 200) return false;
+            const body = (await status.json()) as { tools?: { ffmpeg_available?: boolean } };
+            return body.tools?.ffmpeg_available === true;
+          } catch {
+            return false;
+          }
         },
         { message: "the app's ffmpeg is ready (tools.ffmpeg_available)", timeout: 60_000 },
       )
