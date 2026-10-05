@@ -748,6 +748,17 @@ the test that kills each one BEFORE CI's mutation gate runs.
     to 0 — both spin forever on a paused clock. Bound it with `for n in
     1..=MAX` and break on the cap or the budget before pausing; the cap
     turns both mutants into a wrong probe count a test sees.
+  - the same for a BLOCKING consumer (#223 S2, `program_max.rs`): a
+    `next()` that waits on a condvar until a job, a release or a stop is
+    ready hangs any test that calls it on the test thread once a mutant
+    inverts its condition (`delete !` on `!enabled` made a queued job
+    "not ready" forever). Put the decision in a non-blocking step
+    (`Queue::step` → `Option`, served as `try_next`), let `next` only loop
+    on it, and have every unit test take steps with `try_next`; only a
+    wake-up test calls `next`, on a helper thread behind `recv_timeout`.
+    Likewise never `join()` a loop thread right after `stop()`: a
+    `stop → ()` mutant leaves it running and the join hangs. Wait
+    `wait_until(|| handle.is_finished())` (bounded) first, then join.
 
 **`tokio::select!` drops the branch futures before a handler runs**
 (tokio `macros/select.rs`: the futures live inside the `let output = {…}`
@@ -858,6 +869,19 @@ naming why, and move its logic into a cross-platform fn with Linux tests
 (`diag::decode_bench::run_on_decode_thread`: the thread, the slot dropped
 before the send, a panic caught as `Failed`). Re-list after the change: only
 the Linux twin should remain, and it should be unviable.
+
+**cargo-mutants skips a test module only by a PLAIN `#[cfg(test)]`** (#223
+S2). It recognizes `#[cfg(test)]` on the `mod` (it reads the attribute's
+top-level idents, it does not evaluate `all(...)`). A Windows-only test file
+wired as `#[cfg(all(test, windows))] #[path = "x_tests_warp.rs"] mod
+tests_warp;` had every helper fn inside listed as a mutant, each one a
+certain survivor on the Linux runner. Write two attributes instead (they are
+ANDed): `#[cfg(test)]` then `#[cfg(windows)]`, and re-list.
+
+**The design-gate hook reads every `#<digits>` in a commit message as an
+issue** (#223 S2). `block-commit-without-design.sh` blocked a commit whose
+message said "the embedded manifest (resource #1)": it looked for a design
+comment on issue 1. Write such a number without the hash ("resource id 1").
 
 ## Inserting a `mod` before a `#[cfg(test)]` test module STEALS the gate (#192 r5)
 
