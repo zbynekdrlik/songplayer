@@ -12,9 +12,9 @@
  * post-deploy check.
  *
  * `POST /api/v1/lyrics/g35t/probe` cuts 20 s of a cached song from its first
- * served line (its isolated vocal stem when on disk) and sends it through the
- * worker's call: the same upload, request body, language hint and key
- * rotation. One short paid call per deploy, like the metadata probe. It passes
+ * served line (the isolated vocal the worker uploads when on disk, else its
+ * vocal stem, else the mix) and sends it through the worker's call: the same
+ * upload, request body, language hint and key rotation. One short paid call per deploy, like the metadata probe. It passes
  * on any working key; the keys refused before it are logged (`refused_keys`).
  *
  * API-level on purpose: the probe has no dashboard surface. The decision is
@@ -49,8 +49,11 @@ test.describe("Gemini 3.5 Transcribe live gate (#144)", () => {
     expect(resp.status(), "POST /api/v1/lyrics/g35t/probe").toBe(200);
     const probe = (await resp.json()) as G35tProbe;
     console.log(`[#144 g35t probe] ${JSON.stringify(probe)}`);
+    // Logged, not gated: the gate passes on any working key (#144 comment
+    // 5997623040). A refusal that is not a 429 is a dead or invalid key.
     for (const refused of probe.refused_keys) {
-      console.log(`[#144 g35t probe] key ${refused.key_index} refused: ${refused.error}`);
+      const kind = refused.rate_limited ? "rate-limited (429)" : "REFUSED (dead or invalid key)";
+      console.log(`[#144 g35t probe] key ${refused.key_index + 1} ${kind}: ${refused.error}`);
     }
 
     expect(g35tGateFailures(probe), "the g35t probe must hear words").toEqual([]);

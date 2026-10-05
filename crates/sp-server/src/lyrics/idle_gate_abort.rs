@@ -291,9 +291,8 @@ impl crate::lyrics::worker::LyricsWorker {
         if !vocals_in.exists() {
             return Ok(None);
         }
-        let wav_path = self
-            .cache_dir
-            .join(format!("{}_vocals16k.wav", row.youtube_id));
+        let wav_path =
+            crate::lyrics::aligner::isolated_vocal_path(&self.cache_dir, &row.youtube_id);
         // #171: resumable per-segment scratch dir next to the cache. Preserved
         // across a stall/kill so the next pick resumes from finished segments.
         let work_dir = self.cache_dir.join(format!("{}_isolation", row.youtube_id));

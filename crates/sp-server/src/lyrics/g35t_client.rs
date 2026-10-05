@@ -89,12 +89,15 @@ pub struct AsrWord {
     pub end_ms: u64,
 }
 
-/// A key [`transcribe_at`] moved past (a 429 or a key refusal): its index
-/// (0-based) and why, redacted with every key. Reported by the live probe, so
-/// a dead key is visible even while a later key answers.
+/// A key [`transcribe_at`] moved past: its index (0-based), whether it was
+/// a 429 (`rate_limited`: out of quota now) or a key refusal (a 403, or a 400
+/// naming the API key: a dead or invalid key), and why, redacted with every
+/// key. Reported by the live probe, so a dead key is visible even while a
+/// later key answers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyRefusal {
     pub key_index: usize,
+    pub rate_limited: bool,
     pub error: String,
 }
 
@@ -126,9 +129,12 @@ pub(crate) struct TranscribeFailure {
 
 /// Outcome of a single HTTP step against one API key.
 enum StepError {
-    /// `KeyVerdict::NextKey` (a 429 or a key refusal) — the caller should try
-    /// the NEXT key in `api_keys`.
-    NextKey(anyhow::Error),
+    /// `KeyVerdict::NextKey` (a 429, `rate_limited`, or a key refusal) — the
+    /// caller should try the NEXT key in `api_keys`.
+    NextKey {
+        rate_limited: bool,
+        error: anyhow::Error,
+    },
     /// Any other failure — abort the transcription entirely.
     Fatal(anyhow::Error),
 }
@@ -178,9 +184,10 @@ async fn send_with_retry(
 /// any other status → `Fatal`. `body` is already the reply's excerpt.
 fn step_error(what: &str, verdict: KeyVerdict, status: u16, body: &str) -> StepError {
     match verdict {
-        KeyVerdict::NextKey { .. } => StepError::NextKey(anyhow!(
-            "g35t_client {what}: key refused status={status} body={body}"
-        )),
+        KeyVerdict::NextKey { rate_limited } => StepError::NextKey {
+            rate_limited,
+            error: anyhow!("g35t_client {what}: key refused status={status} body={body}"),
+        },
         KeyVerdict::RetrySameKey => StepError::Fatal(anyhow!(
             "g35t_client {what}: exhausted retries status={status} body={body}"
         )),
@@ -485,14 +492,22 @@ pub(crate) async fn transcribe_at(
                     refused,
                 });
             }
-            Err(StepError::NextKey(e)) => {
+            Err(StepError::NextKey {
+                rate_limited,
+                error: e,
+            }) => {
                 let error = redact_keys(&format!("{e:#}"), api_keys);
                 tracing::warn!(
                     key_index,
+                    rate_limited,
                     error = %error,
                     "g35t_client: key refused (429 or a key refusal) — trying next key"
                 );
-                refused.push(KeyRefusal { key_index, error });
+                refused.push(KeyRefusal {
+                    key_index,
+                    rate_limited,
+                    error,
+                });
             }
             Err(StepError::Fatal(e)) => {
                 let text = on_key(key_index, total, &e);
@@ -596,11 +611,15 @@ pub fn words_from_response(v: &Value) -> Vec<AsrWord> {
 mod tests {
     use super::*;
 
-    /// #136: the shared key verdict maps onto this client's two outcomes.
+    /// #136: the shared key verdict maps onto this client's two outcomes;
+    /// #144: a next-key refusal keeps whether it was a 429.
     #[test]
     fn a_refused_reply_maps_to_next_key_or_fatal() {
         let text = |e: StepError| match e {
-            StepError::NextKey(e) => format!("next: {e}"),
+            StepError::NextKey {
+                rate_limited,
+                error,
+            } => format!("next (rate_limited={rate_limited}): {error}"),
             StepError::Fatal(e) => format!("fatal: {e}"),
         };
         assert_eq!(
@@ -610,7 +629,18 @@ mod tests {
                 429,
                 "quota"
             )),
-            "next: g35t_client upload: key refused status=429 body=quota"
+            "next (rate_limited=true): g35t_client upload: key refused status=429 body=quota"
+        );
+        assert_eq!(
+            text(step_error(
+                "upload",
+                KeyVerdict::NextKey {
+                    rate_limited: false
+                },
+                403,
+                "denied"
+            )),
+            "next (rate_limited=false): g35t_client upload: key refused status=403 body=denied"
         );
         assert_eq!(
             text(step_error("poll", KeyVerdict::RetrySameKey, 503, "down")),

@@ -92,6 +92,14 @@ pub fn isolation_timeout(duration_ms: Option<i64>) -> std::time::Duration {
 // preprocess_vocals
 // ---------------------------------------------------------------------------
 
+/// Where a song's isolated vocal lives: `{cache}/{youtube_id}_vocals16k.wav`,
+/// the 16 kHz mono float WAV [`preprocess_vocals`] writes and the g35t ★ /
+/// base tier uploads. Kept across runs; the startup cache scan knows the name
+/// (`downloader::cache`). The live g35t probe sends a clip of it (#144).
+pub(crate) fn isolated_vocal_path(cache_dir: &Path, youtube_id: &str) -> PathBuf {
+    cache_dir.join(format!("{youtube_id}_vocals16k.wav"))
+}
+
 /// Build the `preprocess-vocals` argv (script + flags), in order. `#144`: the
 /// input is the stems worker's vocals sidecar (`--vocals-in`), not the mix — the
 /// step is anvuew dereverb + 16 kHz resample only, the BS-RoFormer isolation
@@ -419,6 +427,16 @@ pub async fn align_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #144: the one place the isolated vocal's name is written; the
+    /// isolation writes it and the live g35t probe reads it.
+    #[test]
+    fn the_isolated_vocal_is_named_after_the_youtube_id() {
+        assert_eq!(
+            isolated_vocal_path(Path::new("/cache"), "gq-4FVRr_ow"),
+            Path::new("/cache").join("gq-4FVRr_ow_vocals16k.wav")
+        );
+    }
 
     /// Audit: retired symbols must no longer be referenced from this file.
     /// Keeps the compiler from being the only line of defence against a

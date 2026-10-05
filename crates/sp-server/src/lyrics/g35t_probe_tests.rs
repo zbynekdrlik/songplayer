@@ -13,6 +13,7 @@ use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
+use crate::lyrics::g35t_client::KeyRefusal;
 
 /// The Gemini File-API name the mock upload gives the clip.
 const FILE: &str = "files/probe-clip";
@@ -34,7 +35,7 @@ fn clip_wav(dir: &Path) -> PathBuf {
 fn clip_info() -> ClipInfo {
     ClipInfo {
         youtube_id: "fffffffffff".to_string(),
-        source: ClipSource::Vocals,
+        source: ClipSource::IsolatedVocal,
         start_ms: 12_345,
         duration_ms: CLIP_MS,
     }
@@ -107,14 +108,19 @@ fn completed_with(words: &[&str]) -> String {
 /// Google's refusal of an invalid key (a 400 naming the API key: next key).
 const INVALID_KEY: &str = r#"{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}"#;
 
+/// Google's answer to a key out of quota (a 429: next key).
+const OUT_OF_QUOTA: &str = r#"{"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}"#;
+
 // ---- the answer for every API outcome -------------------------------------
 
-/// A refused first key moves to the next; the answer reports the key that
-/// answered, the words, the model and the hint — and the request really
-/// carried that model and hint (the worker's own body).
+/// A rate-limited key and a dead key move to the next; the answer reports
+/// the key that answered, each refusal (a 429 told apart from a dead key),
+/// the words, the model and the hint — and the request really carried that
+/// model and hint (the worker's own body).
 #[tokio::test]
 async fn a_probe_reports_the_words_the_answering_key_the_model_and_the_hint() {
     let server = MockServer::start().await;
+    upload_answers(&server, "k-busy", 429, OUT_OF_QUOTA.to_string()).await;
     upload_answers(&server, "k-dead", 400, INVALID_KEY.to_string()).await;
     upload_accepts(&server, "k-live").await;
     interactions_answer(&server, 200, completed_with(&["Holy", "is", "the", "Lord"])).await;
@@ -123,7 +129,7 @@ async fn a_probe_reports_the_words_the_answering_key_the_model_and_the_hint() {
     let report = probe_clip(
         &reqwest::Client::new(),
         &server.uri(),
-        &keys(&["k-dead", "k-live"]),
+        &keys(&["k-busy", "k-dead", "k-live"]),
         &clip_wav(dir.path()),
         Some(clip_info()),
         LIMIT,
@@ -134,16 +140,24 @@ async fn a_probe_reports_the_words_the_answering_key_the_model_and_the_hint() {
     assert!(report.ok);
     assert_eq!(report.model, "gemini-3.5-transcribe");
     assert_eq!(report.language_codes, ["en-US", "es-419"]);
-    assert_eq!(report.key_index, Some(1), "the second key answered");
+    assert_eq!(report.key_index, Some(2), "the third key answered");
     assert_eq!(report.word_count, 4);
     assert_eq!(report.sample, "Holy is the Lord");
     assert_eq!(report.clip, Some(clip_info()));
     assert_eq!(
         report.refused_keys,
-        [KeyRefusal {
-            key_index: 0,
-            error: format!("g35t_client upload: key refused status=400 body={INVALID_KEY}"),
-        }],
+        [
+            KeyRefusal {
+                key_index: 0,
+                rate_limited: true,
+                error: format!("g35t_client upload: key refused status=429 body={OUT_OF_QUOTA}"),
+            },
+            KeyRefusal {
+                key_index: 1,
+                rate_limited: false,
+                error: format!("g35t_client upload: key refused status=400 body={INVALID_KEY}"),
+            },
+        ],
         "a dead key shows even though a later key answered"
     );
 
@@ -202,10 +216,12 @@ async fn a_refused_key_fails_the_probe_with_the_api_message() {
         [
             KeyRefusal {
                 key_index: 0,
+                rate_limited: false,
                 error: format!("g35t_client upload: key refused status=403 body={first}"),
             },
             KeyRefusal {
                 key_index: 1,
+                rate_limited: false,
                 error: format!("g35t_client upload: key refused status=403 body={second_redacted}"),
             },
         ]
@@ -299,6 +315,7 @@ async fn a_key_echoed_at_the_cut_never_leaks_a_prefix() {
         report.refused_keys,
         [KeyRefusal {
             key_index: 0,
+            rate_limited: false,
             error: format!("g35t_client upload: key refused status=403 body={excerpt}"),
         }]
     );
@@ -411,15 +428,19 @@ fn clip_args_cut_the_window_into_a_16khz_mono_float_wav() {
 fn the_clip_info_names_the_song_the_file_and_the_window() {
     let clip = ProbeClip {
         youtube_id: "fffffffffff".to_string(),
-        input: PathBuf::from("/cache/x_audio_vocals.flac"),
-        source: ClipSource::Vocals,
+        input: PathBuf::from("/cache/fffffffffff_vocals16k.wav"),
+        source: ClipSource::IsolatedVocal,
         start_ms: 12_345,
     };
     assert_eq!(clip.info(), clip_info());
     assert_eq!(
         serde_json::to_value(clip_info()).unwrap(),
-        json!({"youtube_id": "fffffffffff", "source": "vocals", "start_ms": 12345,
+        json!({"youtube_id": "fffffffffff", "source": "isolated_vocal", "start_ms": 12345,
                "duration_ms": 20000})
+    );
+    assert_eq!(
+        serde_json::to_value(ClipSource::VocalStem).unwrap(),
+        json!("vocal_stem")
     );
     assert_eq!(serde_json::to_value(ClipSource::Mix).unwrap(), json!("mix"));
 }
@@ -510,10 +531,13 @@ async fn the_probe_picks_the_lowest_served_song_with_its_audio_on_disk() {
     let audio = audio_on_disk(cache, "eeeeeeeeeee");
     insert_video(&pool, 5, "eeeeeeeeeee", 1, 1, Some(audio.as_path())).await;
     lyrics_on_disk(cache, "eeeeeeeeeee", &[]);
-    // 6: the pick — its stem on disk, its lines out of order.
+    // 6: the pick — its isolated vocal and its stem on disk, its lines out
+    // of order.
     let audio = audio_on_disk(cache, "fffffffffff");
-    let vocals = crate::stems::stem_paths(&audio).0;
-    std::fs::write(&vocals, b"flac").unwrap();
+    let stem = crate::stems::stem_paths(&audio).0;
+    std::fs::write(&stem, b"flac").unwrap();
+    let isolated = cache.join("fffffffffff_vocals16k.wav");
+    std::fs::write(&isolated, b"wav").unwrap();
     insert_video(&pool, 6, "fffffffffff", 1, 1, Some(audio.as_path())).await;
     lyrics_on_disk(cache, "fffffffffff", &[41_500, 12_345, 20_000]);
     // 7: also good, but a higher id.
@@ -527,15 +551,40 @@ async fn the_probe_picks_the_lowest_served_song_with_its_audio_on_disk() {
         clip,
         ProbeClip {
             youtube_id: "fffffffffff".to_string(),
-            input: vocals,
-            source: ClipSource::Vocals,
+            input: isolated,
+            source: ClipSource::IsolatedVocal,
             start_ms: 12_345,
         }
     );
 }
 
+/// No isolated vocal on disk: the vocal stem.
 #[tokio::test]
-async fn without_a_vocal_stem_the_clip_is_cut_from_the_mix() {
+async fn without_the_isolated_vocal_the_clip_is_cut_from_the_stem() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = dir.path();
+    let pool = pool().await;
+    let audio = audio_on_disk(cache, "fffffffffff");
+    let stem = crate::stems::stem_paths(&audio).0;
+    std::fs::write(&stem, b"flac").unwrap();
+    insert_video(&pool, 1, "fffffffffff", 1, 1, Some(audio.as_path())).await;
+    lyrics_on_disk(cache, "fffffffffff", &[7_250]);
+
+    let clip = pick_clip(&pool, cache).await.unwrap();
+
+    assert_eq!(
+        clip,
+        ProbeClip {
+            youtube_id: "fffffffffff".to_string(),
+            input: stem,
+            source: ClipSource::VocalStem,
+            start_ms: 7_250,
+        }
+    );
+}
+
+#[tokio::test]
+async fn without_either_vocal_the_clip_is_cut_from_the_mix() {
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path();
     let pool = pool().await;

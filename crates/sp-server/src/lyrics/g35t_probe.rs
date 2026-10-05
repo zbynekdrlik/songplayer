@@ -16,13 +16,17 @@
 //! - the song: the lowest `videos.id` with `normalized = 1`,
 //!   `has_lyrics = 1`, its audio on disk and a `{yt}_lyrics.json` with a
 //!   line ([`pick_clip`]);
-//! - the input: its isolated vocal stem (`stems::stem_paths`) when on disk,
-//!   else the audio itself (the full mix);
+//! - the input: the isolated vocal the worker itself uploads
+//!   (`aligner::isolated_vocal_path`, `{yt}_vocals16k.wav`) when on disk,
+//!   else its vocal stem (`stems::stem_paths`), else the audio itself (the
+//!   full mix);
 //! - the window: [`CLIP_MS`] from the first served line's start, so the clip
 //!   holds singing (an instrumental intro would answer 0 words, a false red);
 //! - cut by the app's ffmpeg into a 16 kHz mono float WAV ([`clip_args`]),
 //!   the format of the worker's own isolated vocal, in a temp dir dropped
-//!   after the call.
+//!   after the call. The pick and the cut hold `cache::SONG_FILES`, the lock
+//!   a rename holds, so the input is never renamed between the two; the cut
+//!   is bounded by [`CUT_TIMEOUT`].
 //!
 //! The answer never carries a key: the client's error texts name a key by
 //! its place in the list (`key 2 of 5`) and are redacted with every key.
@@ -50,6 +54,12 @@ pub const CLIP_MS: u64 = 20_000;
 /// probe; a 20 s clip answers in seconds).
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// Bound of the ffmpeg cut (it takes well under a second): a hung ffmpeg
+/// fails the probe with its own error, its process killed on drop, and the
+/// song-files lock it holds is released. With [`PROBE_TIMEOUT`] it stays
+/// below the spec's 220 s.
+pub const CUT_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// Words of the transcript the answer quotes (`sample`): the read-back that
 /// the model really heard the clip.
 const SAMPLE_WORDS: usize = 8;
@@ -58,9 +68,11 @@ const SAMPLE_WORDS: usize = 8;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClipSource {
-    /// The isolated vocal stem (`…_audio_vocals.flac`).
-    Vocals,
-    /// The song's audio, the full mix (no vocal stem on disk).
+    /// The isolated vocal the worker uploads (`{yt}_vocals16k.wav`).
+    IsolatedVocal,
+    /// The vocal stem (`…_audio_vocals.flac`): no isolated vocal on disk.
+    VocalStem,
+    /// The song's audio, the full mix: neither vocal on disk.
     Mix,
 }
 
@@ -104,7 +116,8 @@ pub struct G35tProbeReport {
     /// The model the request named ([`MODEL_SLUG`]).
     pub model: String,
     /// The key (0-based place in the `gemini_api_key` list) that answered,
-    /// or whose answer ended the call; `None` when no key was tried.
+    /// or whose answer ended the call; `None` when no key was tried, or the
+    /// call was cut by [`PROBE_TIMEOUT`] (then `refused_keys` is empty too).
     pub key_index: Option<usize>,
     /// The hint the request carried ([`LANGUAGE_CODES`]).
     pub language_codes: Vec<String>,
@@ -114,8 +127,9 @@ pub struct G35tProbeReport {
     /// Why the probe failed (never a key); `None` when `ok`. An API error
     /// carries the reply's 400-character excerpt (`g35t_client`).
     pub error: Option<String>,
-    /// The keys refused (a 429 or a key refusal) before the one that decided
-    /// the outcome, in order; every key when all were refused.
+    /// The keys refused (a 429, `rate_limited`, or a key refusal) before the
+    /// one that decided the outcome, in order; every key when all were
+    /// refused.
     pub refused_keys: Vec<KeyRefusal>,
     /// The clip sent; `None` when the probe stopped before picking one.
     pub clip: Option<ClipInfo>,
@@ -199,9 +213,12 @@ pub async fn pick_clip(pool: &SqlitePool, cache_dir: &Path) -> Result<ProbeClip,
         let Some(start_ms) = first_line_start(cache_dir, &youtube_id).await else {
             continue;
         };
-        let vocals = crate::stems::stem_paths(&audio).0;
-        let (input, source) = if vocals.is_file() {
-            (vocals, ClipSource::Vocals)
+        let isolated = crate::lyrics::aligner::isolated_vocal_path(cache_dir, &youtube_id);
+        let stem = crate::stems::stem_paths(&audio).0;
+        let (input, source) = if isolated.is_file() {
+            (isolated, ClipSource::IsolatedVocal)
+        } else if stem.is_file() {
+            (stem, ClipSource::VocalStem)
         } else {
             (audio, ClipSource::Mix)
         };
@@ -302,10 +319,11 @@ pub async fn probe_clip(
     }
 }
 
-/// The whole probe on `api_root`: the key list, the song, ffmpeg, the cut,
-/// then [`probe_clip`]. Each missing piece stops it with its reason, before
-/// anything is sent. `ffmpeg` is the app's bundled ffmpeg (`None` while the
-/// tools are still starting).
+/// The whole probe on `api_root`: the key list, the song, ffmpeg, the cut
+/// (the pick and the cut under `cache::SONG_FILES`, the cut bounded by
+/// [`CUT_TIMEOUT`]), then [`probe_clip`]. Each missing piece stops it with its
+/// reason, before anything is sent. `ffmpeg` is the app's bundled ffmpeg
+/// (`None` while the tools are still starting).
 pub async fn run_probe(
     pool: &SqlitePool,
     cache_dir: &Path,
@@ -318,26 +336,38 @@ pub async fn run_probe(
         let error = "no Gemini API key configured (setting gemini_api_key is empty)";
         return G35tProbeReport::refused(error.to_string(), None);
     }
-    let clip = match pick_clip(pool, cache_dir).await {
-        Ok(clip) => clip,
-        Err(error) => return G35tProbeReport::refused(error, None),
-    };
-    let info = clip.info();
-    let Some(ffmpeg) = ffmpeg else {
-        let error = "ffmpeg is not ready yet (the tools are still starting)";
-        return G35tProbeReport::refused(error.to_string(), Some(info));
-    };
     let dir = match tempfile::tempdir() {
         Ok(dir) => dir,
         Err(e) => {
             let error = format!("no temp dir for the clip: {e}");
-            return G35tProbeReport::refused(error, Some(info));
+            return G35tProbeReport::refused(error, None);
         }
     };
     let wav = dir.path().join("g35t_probe.wav");
-    if let Err(error) = cut_clip(&ffmpeg, &clip, &wav).await {
-        return G35tProbeReport::refused(error, Some(info));
-    }
+    let info = {
+        // A rename (the metadata repair, a title correction) holds this lock
+        // from its read to its record: holding it from the pick through the
+        // cut, the clip's input is never renamed in between.
+        let _files = crate::downloader::cache::SONG_FILES.lock().await;
+        let clip = match pick_clip(pool, cache_dir).await {
+            Ok(clip) => clip,
+            Err(error) => return G35tProbeReport::refused(error, None),
+        };
+        let info = clip.info();
+        let Some(ffmpeg) = ffmpeg else {
+            let error = "ffmpeg is not ready yet (the tools are still starting)";
+            return G35tProbeReport::refused(error.to_string(), Some(info));
+        };
+        match tokio::time::timeout(CUT_TIMEOUT, cut_clip(&ffmpeg, &clip, &wav)).await {
+            Ok(Ok(())) => info,
+            Ok(Err(error)) => return G35tProbeReport::refused(error, Some(info)),
+            Err(_) => {
+                let secs = CUT_TIMEOUT.as_secs();
+                let error = format!("ffmpeg did not cut the clip within {secs} s");
+                return G35tProbeReport::refused(error, Some(info));
+            }
+        }
+    };
     probe_clip(client, api_root, keys, &wav, Some(info), PROBE_TIMEOUT).await
 }
 

@@ -23,7 +23,8 @@ export const G35T_LANGUAGE_CODES = ["en-US", "es-419"];
 /** The clip the probe sent (`g35t_probe::ClipInfo`). */
 export interface G35tClip {
   youtube_id: string;
-  /** "vocals" (the isolated vocal stem) or "mix" (the song's audio). */
+  /** "isolated_vocal" (the `{yt}_vocals16k.wav` the worker uploads),
+   * "vocal_stem" (the karaoke vocal stem) or "mix" (the song's audio). */
   source: string;
   start_ms: number;
   duration_ms: number;
@@ -33,6 +34,8 @@ export interface G35tClip {
 export interface G35tKeyRefusal {
   /** 0-based place in the key list. */
   key_index: number;
+  /** A 429 (out of quota now); false = a dead or invalid key (403 / 400). */
+  rate_limited: boolean;
   /** Why (a 429 or a key refusal), never the key. */
   error: string;
 }
@@ -42,7 +45,8 @@ export interface G35tProbe {
   ok: boolean;
   model: string;
   /** The Gemini key (0-based place in the list) that answered, or whose
-   * answer ended the call; null when no key was tried. */
+   * answer ended the call; null when no key was tried, or the call was cut
+   * by the probe's bound. */
   key_index: number | null;
   language_codes: string[];
   word_count: number;

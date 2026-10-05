@@ -18,8 +18,15 @@ function answered(): G35tProbe {
     word_count: 37,
     latency_ms: 6_412,
     error: null,
-    refused_keys: [{ key_index: 0, error: "g35t_client upload: key refused status=400" }],
-    clip: { youtube_id: "gq-4FVRr_ow", source: "vocals", start_ms: 12_345, duration_ms: 20_000 },
+    refused_keys: [
+      { key_index: 0, rate_limited: false, error: "g35t_client upload: key refused status=400" },
+    ],
+    clip: {
+      youtube_id: "gq-4FVRr_ow",
+      source: "isolated_vocal",
+      start_ms: 12_345,
+      duration_ms: 20_000,
+    },
     sample: "Holy is the Lord God Almighty the earth",
   };
 }
