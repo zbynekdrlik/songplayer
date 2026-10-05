@@ -1,11 +1,7 @@
 import { test, expect, Page, APIRequestContext, Locator } from "@playwright/test";
 import { averageDb } from "./audio-helpers.mjs";
 import { healthRow, readyDub } from "./box-api";
-import {
-  programReceiverVerdict,
-  type ProgramReceiverVerdict,
-  type ProgramReceiverView,
-} from "./ndi-health-gate";
+import { programReceiverVerdict, type ProgramReceiverView } from "./ndi-health-gate";
 import { describeProgram, readProgramState } from "./program-state";
 
 /**
@@ -208,22 +204,21 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
         message: "the Dabing playlist's output SP-dabing must be up",
       })
       .toBe("SP-dabing");
-    let verdict: ProgramReceiverVerdict | null = null;
+    // The poll returns the whole verdict, so a failure prints the last one
+    // (source, connections, degraded_reason).
     await expect
       .poll(
         async () => {
           try {
             const resp = await request.get("/api/v1/program", { timeout: 10_000 });
-            verdict = programReceiverVerdict((await resp.json()) as ProgramReceiverView);
-            return verdict.ok;
-          } catch {
-            return false;
+            return programReceiverVerdict((await resp.json()) as ProgramReceiverView);
+          } catch (e) {
+            return { ok: false, error: String(e) };
           }
         },
         { timeout: 60000, message: "SP-program must have ≥ 1 receiver" },
       )
-      .toBe(true);
-    expect(verdict, "the last program read").not.toBeNull();
+      .toMatchObject({ ok: true });
   });
 
   test("real mouse: the dub fader and the seek bar commit on release", async ({

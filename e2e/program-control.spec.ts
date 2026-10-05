@@ -333,6 +333,13 @@ test("the Program control cuts with the Nastavenia fade and names no cg OBS tran
   expect(program).not.toHaveProperty("legacy_cg");
   // A dashboard cut tells cg OBS nothing (#221 B4 step 6).
   expect(program.remote.last_remote_cut.cg_forward).toBeNull();
+  // SP-program's receiver (#221 B4 step 6): a source on program with no
+  // receiver is named in the answer; a receiver clears it.
+  expect(program.degraded_reason).toBe("no NDI receiver on SP-program");
+  await request.post("/__mock/program-connections", { data: { connections: 2 } });
+  program = await (await request.get("/api/v1/program")).json();
+  expect(program.health.connections).toBe(2);
+  expect(program.degraded_reason).toBeNull();
 
   // A stored `obs` (the retired follow mode) is the default fade.
   await request.patch("/api/v1/settings", {

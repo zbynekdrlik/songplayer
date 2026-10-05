@@ -45,6 +45,11 @@ test.describe("SP-program dark gate logic (#127, #221)", () => {
     expect(verdict.ok).toBe(false);
     expect(verdict.health).toBe("dark");
     expect(verdict.degraded_reason).toBe("no NDI receiver on SP-program");
+    // Before the sender's first poll the server names no reason, and the
+    // count's 0 still fails: the post-deploy gate keeps polling.
+    const unpolled = programReceiverVerdict(program(7, 0));
+    expect(unpolled.degraded_reason).toBeNull();
+    expect(unpolled.ok).toBe(false);
   });
 
   test("fails a program not polled yet, or with nothing on it", () => {

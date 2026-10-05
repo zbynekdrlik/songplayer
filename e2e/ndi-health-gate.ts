@@ -31,7 +31,9 @@ export interface ProgramReceiverView {
  * Receiver liveness for one NDI output:
  *  - `live`         — `connections > 0`, a receiver is subscribed.
  *  - `dark`         — `connections === 0`, nothing receives it.
- *  - `never_polled` — `connections < 0` (`-1`), not polled yet.
+ *  - `never_polled` — `connections < 0` (`-1`): no valid reading (the SDK's
+ *    error value; SP-program reads 0, not -1, before its first poll, and the
+ *    server names no `degraded_reason` then), so keep polling.
  */
 export type OutputHealth = "live" | "dark" | "never_polled";
 
