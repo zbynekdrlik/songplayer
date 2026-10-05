@@ -218,9 +218,10 @@ inputs and a playlist's own output has 0 receivers normally.
   so its receiver count plays no part in its HEALTH (review round 1):
   - the pipeline counts no bad poll for it (`pipeline::classify_bad_poll`
     takes no count: a bad poll is an underrun or a submit stale > 10 s);
-  - `handle_health_snapshot` judges it on `judged_connections(connections,
-    expected)` (pure + mutation-scored: the real count where a receiver is
-    expected, at least 1 where none is): the degraded reason
+  - `handle_health_snapshot` judges it on `judged_connections(connections)`
+    (pure + mutation-scored: at least 1, since a playlist output expects
+    none; review round 2 dropped an arm for an expected receiver that no
+    output reaches): the degraded reason
     (`compute_degraded_reason`), the #196 reconnect latch, the ladder
     suppression, the post-restart self-check and the genlock lock all read
     the judged count;
@@ -236,14 +237,17 @@ inputs and a playlist's own output has 0 receivers normally.
     gates, `transport`) stays keyed on on-air. The heartbeat log line
     carries `receiver_expected`.
 - **`SP-program` expects a receiver while a source is on program**
-  (`program_degraded_reason(source, health.connections)`, pure): served as
+  (`program_degraded_reason(source, the polled count)`, pure): served as
   the top-level `degraded_reason` on `GET /api/v1/program` — `"no NDI
   receiver on SP-program"` (`PROGRAM_NO_RECEIVER_REASON`) while a source
   (a playlist, or -1 "OBS manuál") is on program and `health.connections
   < 1`, else `null`. The `SP-program` thread polls the count about once a
   second (`ProgramBus::set_connections`); until its first poll the count
   reads 0 and is no reading (`health.receivers_polled`, serde-skipped), so
-  no reason is named then (review round 1).
+  no reason is named then (review round 1). When there is no sender at all
+  (no NDI SDK, the sender or its thread could not be created) nothing will
+  ever poll, so `spawn_program_thread` sets a polled 0 at once and the
+  reason is named (review round 2).
   `ProgramCore::set_connections` logs it (`log_program_receivers`, logging
   only): a WARN when the first poll finds no receiver or the last one goes
   while a source is on program, an INFO when the first poll finds one or
@@ -305,7 +309,7 @@ log lines. Add new per-snapshot logging to `health_log`, not to the handler.
 `ci.yml` runs `cargo mutants --in-diff` with `--exclude-re 'sp-server/src/obs/'` — pure logic in `obs/` is NOT mutation-scored (still unit-test it, but survivors there won't fail CI). Code in `playback/ndi_health.rs` **is** scored: every new non-`mutants::skip` fn there needs tests that kill its true/false mutants (e.g. `evaluate_recovery` is killed by a nudge-fires + a nudge-does-not-fire engine test).
 
 ## E2E dark gate (post-deploy suite) — on `SP-program` (#127, #221 B4 step 6)
-`post-deploy.spec.ts` "SP-program has a live NDI receiver — the program is not dark" polls `GET /api/v1/program` (≤ 60 s, no scene switch) until `programReceiverVerdict` says `ok`: a source on program, `health.connections > 0` and the server's `degraded_reason` `null`. `connections`: `>0` live, `0` dark, `<0` never polled (keep polling); `source: null` = nothing on program, a failure too. `post-deploy-dabing.spec.ts` asks the same of SP-program next to "SP-dabing is up" (the dub takes the program, not its own receiver). Pure decision logic lives in `e2e/ndi-health-gate.ts` (unit-tested by `ndi-health-gate.spec.ts` in the ubuntu **mock** suite — a `test()` that never touches `page` runs with no browser/box). Before #221 the gate read a playlist's own output from `/api/v1/ndi/health`; that output has no consumer any more. Keep the baseline-scene discipline (CLAUDE.md "E2E must not switch to disruptive OBS scenes").
+`post-deploy.spec.ts` "SP-program has a live NDI receiver — the program is not dark" polls `GET /api/v1/program` (≤ 60 s, no scene switch) until `programReceiverVerdict` says `ok`: a source on program, `health.connections > 0` and the server's `degraded_reason` `null`. `connections`: `>0` live, `0` dark (also right after a start, before the sender's first poll, when the server names no reason yet), `<0` no valid reading (the SDK's error value) — keep polling on both; `source: null` = nothing on program, a failure too. `post-deploy-dabing.spec.ts` asks the same of SP-program next to "SP-dabing is up" (the dub takes the program, not its own receiver). Pure decision logic lives in `e2e/ndi-health-gate.ts` (unit-tested by `ndi-health-gate.spec.ts` in the ubuntu **mock** suite — a `test()` that never touches `page` runs with no browser/box). Before #221 the gate read a playlist's own output from `/api/v1/ndi/health`; that output has no consumer any more. Keep the baseline-scene discipline (CLAUDE.md "E2E must not switch to disruptive OBS scenes").
 
 ## Gotcha: `e2e/post-deploy-report/index.html` is a TRACKED artifact
 Playwright runs regenerate it; it shows up as ` M` in `git status`. `git checkout -- e2e/post-deploy-report/index.html` before committing so it never lands in your diff.

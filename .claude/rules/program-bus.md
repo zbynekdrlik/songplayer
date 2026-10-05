@@ -520,7 +520,9 @@ SP-program's:
 - `health.connections` = the `SP-program` sender's receiver count, polled
   about once a second by the program thread (`ProgramBus::set_connections`);
   0 until the first poll, which `health.receivers_polled` (serde-skipped)
-  tells apart;
+  tells apart; with no sender at all (no NDI SDK, the sender or its thread
+  could not be created) `spawn_program_thread` sets a polled 0 at once
+  (review round 2), so the reason below is named instead of never;
 - `GET /api/v1/program` → top-level `degraded_reason` =
   `program_degraded_reason(source, polled count)`: `"no NDI receiver on
   SP-program"` while a source (a playlist or -1) is on program and the
