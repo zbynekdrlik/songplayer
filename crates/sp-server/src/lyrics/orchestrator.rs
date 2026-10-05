@@ -180,7 +180,6 @@ impl ReferenceStageBackend for RealReferenceStageBackend {
             &self.http_client,
             &self.gemini_keys,
             vocals_wav,
-            &["en-US".to_string()],
         )
         .await
     }

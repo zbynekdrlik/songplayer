@@ -44,6 +44,20 @@ use crate::gemini_api::{
 const MODEL_SLUG: &str = "gemini-3.5-transcribe";
 const AUDIO_MIME_TYPE: &str = "audio/wav";
 
+/// #144: the BCP-47 `transcription_config.language_codes` every request
+/// carries. The API reference reads them as "hints about the languages
+/// present in the audio" (omitted or empty = automatic detection), and the
+/// transcribe guide says to pass them whenever the language is known.
+///
+/// The catalogue sings in English and Spanish, so both are hinted; the model
+/// picks between them per song and follows a bilingual one (code-switching).
+/// `es-419` (Latin America) is the Spanish code the official
+/// supported-languages table lists; it has no `es-ES`. Auto-detection over
+/// 85+ locales was rejected: on sung vocals it can land on a neighbouring
+/// language and put that on the wall. Design record: issue #144 comment
+/// 5995867005.
+const LANGUAGE_CODES: &[&str] = &["en-US", "es-419"];
+
 const FILE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const FILE_POLL_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -202,24 +216,32 @@ async fn poll_file_ready(
     }
 }
 
+/// The `POST /v1beta/interactions` body for one uploaded audio file: the
+/// model, the audio input and the transcription config, which is the
+/// [`LANGUAGE_CODES`] hint plus verbatim mode with word timestamps. The mode
+/// must ride along: a `language_codes` sent without a `mode` comes back as a
+/// completed interaction with no words. Pure — unit-tested.
+fn interactions_body(file_uri: &str, mime_type: &str) -> Value {
+    serde_json::json!({
+        "model": MODEL_SLUG,
+        "input": [{"type": "audio", "uri": file_uri, "mime_type": mime_type}],
+        "generation_config": {
+            "transcription_config": {
+                "language_codes": LANGUAGE_CODES,
+                "mode": {"type": "verbatim", "timestamp_granularities": ["word"]},
+            }
+        }
+    })
+}
+
 #[cfg_attr(test, mutants::skip)]
 async fn run_interactions(
     client: &reqwest::Client,
     api_key: &str,
     file_uri: &str,
     mime_type: &str,
-    language_codes: &[String],
 ) -> Result<Value, StepError> {
-    let body = serde_json::json!({
-        "model": MODEL_SLUG,
-        "input": [{"type": "audio", "uri": file_uri, "mime_type": mime_type}],
-        "generation_config": {
-            "transcription_config": {
-                "language_codes": language_codes,
-                "mode": {"type": "verbatim", "timestamp_granularities": ["word"]},
-            }
-        }
-    });
+    let body = interactions_body(file_uri, mime_type);
 
     let resp = send_with_retry("interactions", Some(INTERACTIONS_TIMEOUT), || {
         client
@@ -283,7 +305,6 @@ async fn transcribe_after_upload(
     api_key: &str,
     file: &Value,
     file_name: &str,
-    language_codes: &[String],
 ) -> Result<Vec<AsrWord>, StepError> {
     let ready = poll_file_ready(client, api_key, file_name).await?;
     let file_uri = ready
@@ -299,7 +320,7 @@ async fn transcribe_after_upload(
         .unwrap_or(AUDIO_MIME_TYPE)
         .to_string();
 
-    let response = run_interactions(client, api_key, &file_uri, &mime_type, language_codes).await?;
+    let response = run_interactions(client, api_key, &file_uri, &mime_type).await?;
     Ok(words_from_response(&response))
 }
 
@@ -309,7 +330,6 @@ async fn transcribe_with_key(
     api_key: &str,
     audio_bytes: &[u8],
     mime_type: &str,
-    language_codes: &[String],
 ) -> Result<Vec<AsrWord>, StepError> {
     let file = upload_audio(client, api_key, audio_bytes, mime_type).await?;
     let file_name = file
@@ -318,7 +338,7 @@ async fn transcribe_with_key(
         .ok_or_else(|| StepError::Fatal(anyhow!("g35t_client: upload response missing file.name")))?
         .to_string();
 
-    let result = transcribe_after_upload(client, api_key, &file, &file_name, language_codes).await;
+    let result = transcribe_after_upload(client, api_key, &file, &file_name).await;
 
     delete_file_best_effort(client, api_key, &file_name).await;
     result
@@ -344,13 +364,13 @@ fn audio_mime_for_path(path: &Path) -> &'static str {
 /// Transcribe an audio file with Gemini 3.5 Transcribe, returning word-level
 /// timings. The upload MIME is inferred from the extension (`.wav` → audio/wav,
 /// `.flac` → audio/flac, #171). Tries `api_keys` in order (see module docs for
-/// the key-rotation / retry contract).
+/// the key-rotation / retry contract). Every request hints the catalogue's
+/// languages ([`LANGUAGE_CODES`], #144); no caller picks them.
 #[cfg_attr(test, mutants::skip)]
 pub async fn transcribe_words(
     client: &reqwest::Client,
     api_keys: &[String],
     wav_path: &Path,
-    language_codes: &[String],
 ) -> Result<Vec<AsrWord>> {
     if api_keys.is_empty() {
         bail!("g35t_client: no Gemini API keys configured");
@@ -363,12 +383,13 @@ pub async fn transcribe_words(
     let started = std::time::Instant::now();
     let mut last_err: Option<anyhow::Error> = None;
     for (key_idx, api_key) in api_keys.iter().enumerate() {
-        match transcribe_with_key(client, api_key, &audio_bytes, mime_type, language_codes).await {
+        match transcribe_with_key(client, api_key, &audio_bytes, mime_type).await {
             Ok(words) => {
                 tracing::info!(
                     key_index = key_idx,
                     word_count = words.len(),
                     elapsed_s = started.elapsed().as_secs_f64(),
+                    language_codes = ?LANGUAGE_CODES,
                     "g35t_client: transcription complete"
                 );
                 return Ok(words);
@@ -484,6 +505,32 @@ mod tests {
                 "fatal: g35t_client interactions: unexpected status=404 body={}",
                 "x".repeat(400)
             )
+        );
+    }
+
+    /// #144: every request hints the catalogue's English AND Spanish, so a
+    /// Spanish song is no longer transcribed under an English-only hint. The
+    /// whole body is pinned: the verbatim word-timestamp mode must ride along
+    /// with the hint (a hint without a `mode` returns no words).
+    #[test]
+    fn interactions_body_hints_the_catalogue_s_english_and_spanish() {
+        let body = interactions_body("https://files.example/abc", "audio/flac");
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "model": "gemini-3.5-transcribe",
+                "input": [{
+                    "type": "audio",
+                    "uri": "https://files.example/abc",
+                    "mime_type": "audio/flac"
+                }],
+                "generation_config": {
+                    "transcription_config": {
+                        "language_codes": ["en-US", "es-419"],
+                        "mode": {"type": "verbatim", "timestamp_granularities": ["word"]}
+                    }
+                }
+            })
         );
     }
 

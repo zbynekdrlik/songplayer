@@ -75,6 +75,16 @@ if a call starts failing.
   `POST /v1beta/interactions` with `{model, input:[{type:"audio",uri,mime_type}],
   generation_config:{transcription_config:{language_codes:["en-US"],
   mode:{type:"verbatim",timestamp_granularities:["word"]}}}}`.
+- `language_codes` (official reference, read 5.10.2026): BCP-47 hints of the
+  languages PRESENT in the audio, several allowed; omitted or `[]` = automatic
+  detection across 85+ locales. The supported table lists Spanish only as
+  `es-419` / `es-US` (no `es-ES`, although the guide's short example uses it).
+  A `language_codes` sent WITHOUT a `mode` returns a completed interaction with
+  zero words (SpekoAI/gateway PR #78), so always send the mode. Production
+  sends `["en-US", "es-419"]` since #144 (`g35t_client::LANGUAGE_CODES`); the
+  eval backend's default stays `["en-US"]` so the 2026-09-12 numbers stay
+  comparable. Set `G35T_LANGUAGE_CODES=en-US,es-419` to measure the
+  production hint.
 - Words: `steps[*].content[*].annotations[*]` with `type: "word_info"`,
   `start_offset`/`end_offset` as STRINGS `"5.200s"` / `"9s"` (100 ms grid), no
   per-word confidence. `DELETE /v1beta/{name}` afterwards.

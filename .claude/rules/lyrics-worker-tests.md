@@ -61,8 +61,9 @@ structure, UPDATE those counts too — they are CRLF-normalised and body-scoped.
 ## `stem_worker.py` tests follow the same pattern (#207)
 
 `scripts/tests/test_stem_streaming.py` loads `stem_worker.py` by path and fakes
-torch / librosa / audio_separator the same way. It drives `cmd_separate`
-end to end with a real soundfile mix. Its gotchas:
+torch / librosa / audio_separator the same way (`scripts/tests/stem_fakes.py`,
+shared with `test_stem_publish.py`). It drives `cmd_separate` end to end with
+a real soundfile mix. Its gotchas:
 
 - **Trap, don't trust.** Make the fake `librosa.load` RAISE on the mix path,
   and monkeypatch the whole-array reference functions (`_stitch_segments`,

@@ -44,6 +44,7 @@ paths:
   - it is reused only for the same vocal (same length and mtime), within 6 h, and never when empty;
   - when the pass ends, it is retired to `_used.json`, so a manual reprocess transcribes afresh. `run_text_tiers` does it in ONE place, after the tiers, for every outcome `ends_the_pass` accepts: a ★ or base-tier track, or a quarantine (tested). `a_pass_ending_in_a_track_retires_its_transcript` drives `run_text_tiers` offline to a base-tier track to pin the call itself.
 - `run_mtl_reference_stage` removes an earlier pass's `{yt}_alignment_audit.json` first; every PASS / FAIL / ERROR writes a new one, carrying `sung_*` and `sung_coverage_ok`.
+- The transcript is requested with `language_codes ["en-US", "es-419"]` (`g35t_client::LANGUAGE_CODES`, 5.10.2026; design record #144 comment 5995867005). Until then every song had an English-only hint, so a Spanish song's transcript, and with it its gate verdict and base-tier text, came from an English reading. A Spanish song processed before that change should be re-run with the targeted reprocess before its gate numbers are trusted.
 
 ## The title search (covers)
 

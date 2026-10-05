@@ -11,11 +11,13 @@
 //!
 //! - **`Retained`** (today's #168 default) — commit the reserved arena UP FRONT
 //!   (`MIMALLOC_ARENA_EAGER_COMMIT=1`), never/rarely decommit
-//!   (`MIMALLOC_PURGE_DELAY=<purge_delay_ms>`, `-1` = never), reserve one 4 GiB
-//!   arena (`MIMALLOC_RESERVE_OS_MEMORY=4GiB`). The first-touch fault storm is
-//!   paid ONCE — at the price of ~9 GB commit held for the child's whole run.
+//!   (`MIMALLOC_PURGE_DELAY=<purge_delay_ms>`, `-1` = never), reserve one
+//!   arena (`MIMALLOC_RESERVE_OS_MEMORY`, the `heavy_alloc_reserve_gib`
+//!   setting: #168 shipped 4 GiB, the default is 2 GiB since #207). The
+//!   first-touch fault storm is paid ONCE — at the price of the commit held
+//!   for the child's whole run (~9 GB with the 4 GiB arena).
 //! - **`Lazy`** (#207 phase-3) — do NOT commit the arena up front
-//!   (`MIMALLOC_ARENA_EAGER_COMMIT=0`): the 4 GiB reserve stays reserved-not-
+//!   (`MIMALLOC_ARENA_EAGER_COMMIT=0`): the reserve stays reserved-not-
 //!   committed and commit grows with first touch, returned to the OS after the
 //!   purge delay. The phase-2 box measurement (issue #207 comment 5791417188)
 //!   showed the purge delay is NOT the commit lever over an EAGER-committed
@@ -65,8 +67,10 @@ const DIAGNOSTIC_ON: &str = "1";
 /// ([`crate::lyrics::heavy_containment::parse_reserve_gib`]). One arena
 /// reserved (RETAINED: + committed) at start; under the 10 GiB per-child job
 /// cap. Same reserve in both modes — LAZY only changes whether it is
-/// committed up front.
-pub const RESERVE_GIB_DEFAULT: u8 = 4;
+/// committed up front. 2 GiB since ROZHODNUTÉ 5995652394 (issue #207,
+/// 5.10.2026): the box measured a 2 GiB arena with mimalloc `touched 0`, so
+/// the old 4 GiB default held ~2 GiB of commit per heavy child for nothing.
+pub const RESERVE_GIB_DEFAULT: u8 = 2;
 
 /// `MIMALLOC_ARENA_EAGER_COMMIT` for RETAINED mode — commit the reserved arena
 /// up front (today's #168 behaviour): the first-touch fault storm is paid once.

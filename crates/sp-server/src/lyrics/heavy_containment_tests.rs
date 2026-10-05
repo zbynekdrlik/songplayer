@@ -243,16 +243,17 @@ fn containment_carries_the_parsed_alloc_mode() {
 
 // ---------------------------------------------------------------------------
 // #207 round-3c — parse_reserve_gib (heavy_alloc_reserve_gib setting) + the
-// Containment reserve_gib field. Valid = 1..=8; else fall back to 4 (ROZHODNUTÉ
-// 3c, comment 5793008637: round-3b's mimalloc self-report showed the
-// eager-committed 4 GiB arena IS the ~4 GiB piece of the child's peak commit).
+// Containment reserve_gib field. Valid = 1..=8; else fall back to the default,
+// 2 GiB since ROZHODNUTÉ 5995652394 (5.10.2026: the box measured 2 GiB with
+// mimalloc `touched 0`, so a 4 GiB arena held ~2 GiB of commit per heavy child
+// for nothing).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn reserve_gib_absent_or_garbage_is_default_4() {
-    assert_eq!(parse_reserve_gib(None), 4);
-    assert_eq!(parse_reserve_gib(Some("abc")), 4);
-    assert_eq!(parse_reserve_gib(Some("")), 4);
+fn reserve_gib_absent_or_garbage_is_default_2() {
+    assert_eq!(parse_reserve_gib(None), 2);
+    assert_eq!(parse_reserve_gib(Some("abc")), 2);
+    assert_eq!(parse_reserve_gib(Some("")), 2);
 }
 
 #[test]
@@ -266,22 +267,41 @@ fn reserve_gib_valid_values_pass_through() {
 
 #[test]
 fn reserve_gib_out_of_range_falls_back_to_default() {
-    // Below the 1 GiB floor or above the 8 GiB ceiling → default (4).
-    assert_eq!(parse_reserve_gib(Some("0")), 4);
-    assert_eq!(parse_reserve_gib(Some("9")), 4);
-    assert_eq!(parse_reserve_gib(Some("-1")), 4);
+    // Below the 1 GiB floor or above the 8 GiB ceiling → default (2).
+    assert_eq!(parse_reserve_gib(Some("0")), 2);
+    assert_eq!(parse_reserve_gib(Some("9")), 2);
+    assert_eq!(parse_reserve_gib(Some("-1")), 2);
 }
 
 #[test]
 fn containment_carries_the_parsed_reserve_gib() {
-    // Absent → the default (4); explicit in-range → verbatim.
+    // Absent → the default (2); explicit in-range → verbatim (3, not the
+    // default, so a pass-through and a fallback read differently).
     assert_eq!(
         containment_from_settings(None, None, None, None, None, None, 24).reserve_gib,
-        4
+        2
     );
     assert_eq!(
-        containment_from_settings(None, None, None, None, Some("2"), None, 24).reserve_gib,
-        2
+        containment_from_settings(None, None, None, None, Some("3"), None, 24).reserve_gib,
+        3
+    );
+}
+
+/// ROZHODNUTÉ 5995652394: with no `heavy_alloc_reserve_gib` setting the
+/// separation child's mimalloc arena is 2 GiB — the default the settings layer
+/// resolves is the `MIMALLOC_RESERVE_OS_MEMORY` value the child is spawned with
+/// (`stems/separator.rs` passes `containment.reserve_gib` to `heavy_alloc_env`).
+#[test]
+fn with_no_setting_the_separation_child_reserves_2_gib() {
+    let c = containment_from_settings(None, None, None, None, None, None, 24);
+    let env = crate::lyrics::heavy_alloc_env::heavy_alloc_env(
+        c.alloc_mode,
+        c.purge_delay_ms,
+        c.reserve_gib,
+    );
+    assert!(
+        env.contains(&("MIMALLOC_RESERVE_OS_MEMORY".to_string(), "2GiB".to_string())),
+        "{env:?}"
     );
 }
 

@@ -449,7 +449,12 @@ review round 3). Before pushing, scan every changed file's doc lines: a doc
 line matching `^\s*(//!|///) ?([-+*]|\d+[.)]) ` followed by a non-blank doc
 line indented less than 3 spaces is the lint (a ~30-line Python scan in the
 scratchpad, list files from `git diff --name-only <base>..HEAD -- '*.rs'`;
-check it flags a known-bad sample first).
+check it flags a known-bad sample first). The scan is deliberately wider
+than markdown: CommonMark's ordered marker is 1-9 digits, so a wrapped
+10-digit comment id (`/// 5995652394. Read …`) is not a list item, and
+mid-paragraph only `1.` / `1)` can open an ordered list (`-`, `+`, `*`
+always can). Reflowing such a line costs nothing and ends the doubt
+(#207).
 
 ## A long-lived `JoinSet` must be JOINED, not only spawned and aborted (#219)
 

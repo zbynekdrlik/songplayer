@@ -7,6 +7,9 @@ paths:
   - "crates/sp-decoder/src/split_sync*.rs"
   - "crates/sp-server/src/playback/karaoke.rs"
   - "scripts/stem_worker.py"
+  - "crates/sp-server/src/embedded_scripts.rs"
+  - "scripts/tests/test_stem_*.py"
+  - "scripts/tests/stem_fakes.py"
 ---
 
 # Karaoke stem separation (#14) — separator choice, gotchas, architecture
@@ -337,8 +340,9 @@ DELETED names.
      `<cache>/<id>_isolation|_stemsep/seg_*.wav`, SKIP windows already present on
      start (logs `isolation resumed from chunk N/M`), load models ONCE, then
      stitch (weight-normalised linear crossfade — for stems STREAMED since #207,
-     see the #207 section; `_stitch_segments` is only the test reference) + atomic
-     `os.replace` to the final output + remove the work dir. Stems stitch BOTH
+     see the #207 section; `_stitch_segments` is only the test reference) + an
+     atomic publish to the final output (stems: the `win_replace` POSIX rename
+     since #207) + remove the work dir. Stems stitch BOTH
      stems with IDENTICAL crossfade weights so `vocals+instrumental==mix`
      additivity holds by linearity. audio-separator exposes NO per-chunk resume
      hook (verified on box — `Separator.separate()` returns whole stems only), so
@@ -656,8 +660,9 @@ into an APP-OWNED venv interpreter.
   only** (next to `gpu_policy::env_for_child` in `stems/separator.rs`; the dub
   child is light, the mtl venv untouched): `MIMALLOC_PURGE_DELAY=-1` (never
   decommit freed pages back to the OS — the load-bearing knob; `0` brings the
-  storm back), `MIMALLOC_ARENA_EAGER_COMMIT=1`, `MIMALLOC_RESERVE_OS_MEMORY=4GiB`
-  (reserve+commit one arena up front so the first-touch fault cost is paid ONCE).
+  storm back), `MIMALLOC_ARENA_EAGER_COMMIT=1`, `MIMALLOC_RESERVE_OS_MEMORY`
+  (reserve+commit one arena up front so the first-touch fault cost is paid ONCE;
+  #168 shipped 4 GiB, the `heavy_alloc_reserve_gib` default is 2 GiB since #207).
   Fits under the 10 GiB per-child Job Object cap; numerically invisible to the
   model. These are env NO-OPS unless the interpreter carries the mimalloc override.
 
@@ -690,8 +695,9 @@ into an APP-OWNED venv interpreter.
 **The cap.** The separation child runs inside a per-child Windows Job Object
 with `JOB_OBJECT_LIMIT_PROCESS_MEMORY` = **10 GiB**
 (`heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES`). The #168 mimalloc arena
-reserve (the `heavy_alloc_reserve_gib` setting: 2 GiB on the box on 24.9.,
-committed but never touched) counts against the same 10 GiB.
+reserve (the `heavy_alloc_reserve_gib` setting: 2 GiB on the box since 24.9.
+and the default since 5.10., committed but never touched) counts against the
+same 10 GiB.
 Error 1455 from the job cap ignores how much commit the host has free.
 
 **Why whole-video arrays failed every video longer than ~35 min.** Before #207,
@@ -725,10 +731,11 @@ limit, not the box.
   weight-normalises. It writes every sample before the next segment's start as
   a clipped float32 block to a PCM_24 FLAC `.tmp`, and holds ONLY the overlap
   tail (`max_retained_samples` == overlap, whatever the segment count).
-  - It publishes with `os.replace` only after all declared segments have been
-    added.
+  - It publishes only after all declared segments have been added, with
+    `win_replace.replace_file` (the POSIX rename), never `os.replace`: see
+    "Publishing a stem SongPlayer holds open" below.
   - On any failure (an exception, too few segments, or a failed final close
-    or replace) it retries the close so the handle is released, removes the
+    or rename) it retries the close so the handle is released, removes the
     `.tmp`, and leaves the final sidecar untouched.
   - Its output is **bit-identical** to
     `_write_array_48k_stereo(_stitch_segments(...))`.
@@ -745,6 +752,43 @@ stem. Anything that grows with video length fails for long videos under the
 10 GiB cap. The per-window working set (a 30 s window, the separator,
 `_load_48k_stereo` of one separated window, and the 2 s tail) is the budget.
 The resumable per-segment work dir (#171) is unchanged.
+
+## Publishing a stem SongPlayer holds open (#207, `win_replace`)
+
+SongPlayer holds BOTH stem sidecars open whenever the song is loaded, even
+paused: `stems/reader.rs::open_audio_stream` opens them with Rust std, which
+shares READ|WRITE|DELETE. On Windows `os.replace` is
+`MoveFileExW(MOVEFILE_REPLACE_EXISTING)`, which fails with `[WinError 5]
+Access is denied` while any other handle has the target open. So a
+re-separation of a loaded song could not publish its stems; the dub hit
+the same wall first (#184 round F2, `dabing.md`).
+
+- **Both publishes go through `win_replace.replace_file`**: the streaming
+  writer's `close` and the reference `_write_array_48k_stereo`. It is the
+  dub's POSIX-semantics rename (`FileRenameInfoEx`), so the open reader keeps
+  the old stem and the next song open gets the new one.
+- **The per-segment scratch WAVs keep `os.replace`.** They live in the work
+  dir and no reader opens them; only a published sidecar needs the POSIX
+  rename (the same split as `dub_worker` / `lyrics_worker`).
+- **A refused POSIX rename** (a reader without share-delete, a volume without
+  `FileRenameInfoEx`) fails the run loudly; the previous stem stays and the
+  `.tmp` is removed.
+- **Shipping.** `stem_worker.py` imports `win_replace` at module load, so the
+  stem worker writes `win_replace.py` next to it: `stems/scripts.rs::
+  embedded_tool_scripts` = `[stem_worker.py, win_replace.py]`, written by
+  `StemWorker::ensure_script` through the shared
+  `embedded_scripts::materialise` (the dub worker uses the same helper).
+  A missing `win_replace.py` would fail every separation at import.
+  `materialise` holds one process-wide async lock per pass: both workers
+  ship `win_replace.py` and call it on their own schedule (the stem worker
+  before it queues for the heavy slot), so without the lock one could
+  rewrite the file after a deploy while the other's child imports it. With
+  the lock plus "write only when the content differs", the second caller
+  never writes, whatever the timing.
+- **Tests.** `scripts/tests/test_stem_publish.py` emulates the Windows rule on
+  Linux (`windows_rename` fixture: `os.replace` onto a held path raises the
+  WinError 5 `PermissionError`, the POSIX rename succeeds and is recorded).
+  The `cmd_separate` fake model stack is shared in `scripts/tests/stem_fakes.py`.
 
 ## Audio readers after a seek: the first sample IS the target (#148 v3)
 

@@ -56,10 +56,11 @@ pub(crate) struct Containment {
     /// Read cross-platform by `stems/separator.rs` at separation spawn.
     pub(crate) alloc_mode: AllocMode,
     /// #207 round-3c: the `MIMALLOC_RESERVE_OS_MEMORY` arena size in GiB
-    /// (`heavy_alloc_reserve_gib`, `1..=8`, default 4) — round-3b's mimalloc
-    /// self-report showed the eager-committed 4 GiB arena IS the ~4 GiB piece
-    /// of the child's 8.7 GiB peak commit (`commits: 0`), so a smaller reserve
-    /// is the lever ROZHODNUTÉ 3c measures. Read cross-platform by
+    /// (`heavy_alloc_reserve_gib`, `1..=8`) — round-3b's mimalloc self-report
+    /// showed the eager-committed 4 GiB arena IS the ~4 GiB piece of the
+    /// child's 8.7 GiB peak commit (`commits: 0`), so a smaller reserve is the
+    /// lever ROZHODNUTÉ 3c measured; the default is 2 GiB since the
+    /// ROZHODNUTÉ of issue comment 5995652394. Read cross-platform by
     /// `stems/separator.rs` at separation spawn.
     pub(crate) reserve_gib: u8,
     /// #147 round 9: the child's per-process working-set CAP in MiB
@@ -268,7 +269,7 @@ fn parse_alloc_mode(raw: Option<&str>) -> AllocMode {
 /// #207 round-3c: parse the `heavy_alloc_reserve_gib` setting into the
 /// `MIMALLOC_RESERVE_OS_MEMORY` arena size, GiB. Valid values are `1..=8`;
 /// anything missing, unparseable, or out of range falls back to
-/// [`crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT`] (4). Pure — the WARN
+/// [`crate::lyrics::heavy_alloc_env::RESERVE_GIB_DEFAULT`] (2). Pure — the WARN
 /// on an out-of-range value lives in the impure caller
 /// (`heavy_slot::refresh_containment`), never here.
 fn parse_reserve_gib(raw: Option<&str>) -> u8 {

@@ -795,7 +795,9 @@ every retry while the video stayed loaded.
   between Linux and Windows.
 - **Shipping.** `win_replace.py` is the 4th entry of `embedded_tool_scripts`, and
   `dub_worker.py` imports it at module load (`import win_replace as wr`). It is in
-  the CI ruff scope.
+  the CI ruff scope. Since #207 the stem worker ships it too (the stems are
+  published the same way, `karaoke-stems.md`), and both workers write their
+  scripts through the shared `embedded_scripts::materialise`.
 - **When the rename itself fails** (a reader opened WITHOUT share-delete, a
   pre-1709 Windows, or a cache dir on a non-NTFS/network volume that lacks
   `FileRenameInfoEx`; there is deliberately no fallback to plain `FileRenameInfo`,
