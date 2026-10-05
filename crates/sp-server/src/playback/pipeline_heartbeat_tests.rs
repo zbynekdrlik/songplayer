@@ -20,15 +20,20 @@ fn should_run_heartbeat_returns_false_below_5_seconds() {
     assert!(!should_run_heartbeat(Duration::from_millis(4_999)));
 }
 
+/// #221 B4 step 6 (review round 1): a playlist's own output expects no NDI
+/// receiver (`ndi_health_expect`), so 0 receivers is no bad poll: a full-rate
+/// grid with a fresh submit is good whatever the count. Before, every poll
+/// of an output cg OBS no longer showed counted as bad.
 #[test]
-fn classify_bad_poll_connections_zero_while_playing() {
-    assert!(classify_bad_poll(
+fn classify_bad_poll_ignores_the_receiver_count() {
+    let now = Instant::now();
+    assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
         0,
         30.0,
         30.0,
-        None,
-        Instant::now(),
+        Some(now),
+        now,
     ));
 }
 

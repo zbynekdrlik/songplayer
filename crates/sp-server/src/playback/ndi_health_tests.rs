@@ -78,10 +78,11 @@ pub(super) fn dark_wall_event(now: Instant, consecutive_bad_polls: u32) -> Pipel
 /// #221 B4 step 6: no NDI receiver is expected on a playlist's OWN output any
 /// more — SP-program takes the playlist off the program bus, and cg OBS never
 /// shows a playlist scene again — so a playlist on program with 0 receivers
-/// is NOT a dark wall: no degraded reason, no #173 ladder rung against cg
-/// OBS's inputs, however long it stays at 0 (the receiver expectation is
-/// SP-program's, `GET /api/v1/program` → `degraded_reason`). Before, this
-/// poll nudged cg OBS (`NudgeNdiReceiver`, rung 0) and named the dark wall.
+/// is NOT a dark wall: never the dark-wall reason and no #173 ladder rung
+/// against cg OBS's inputs, however many bad polls it reports (the receiver
+/// expectation is SP-program's, `GET /api/v1/program` → `degraded_reason`).
+/// Before, this poll nudged cg OBS (`NudgeNdiReceiver`, rung 0) and named the
+/// dark wall.
 #[tokio::test]
 async fn a_playlist_output_on_program_with_no_receiver_is_never_dark_and_runs_no_ladder() {
     let (mut engine, registry, mut obs_rx) = fresh_engine_with_obs_cmd().await;
@@ -97,8 +98,9 @@ async fn a_playlist_output_on_program_with_no_receiver_is_never_dark_and_runs_no
     let snap = registry.snapshots()[0].clone();
     assert_eq!(snap.state, PlaybackStateLabel::Playing, "it is on program");
     assert_eq!(snap.connections, 0);
-    assert_eq!(
-        snap.degraded_reason, None,
+    assert_ne!(
+        snap.degraded_reason.as_deref(),
+        Some(DARK_WALL_REASON),
         "no dark wall on a playlist output"
     );
     assert_eq!(snap.recovery_step, None, "no ladder rung");
@@ -432,8 +434,9 @@ fn degraded_reason_emits_stale_when_fps_ok_and_connections_ok() {
 /// Regression test for the 2026-04-27 production failure (v0.25.0's
 /// per-sender `RecreateSender` on prolonged `connections=0`; v0.26.0 ripped
 /// the whole trigger out). #221 B4 step 6: a playlist's own output expects no
-/// receiver at all, so 100 dark polls on program leave no degraded reason
-/// and no other side effect — the snapshot is visibility only.
+/// receiver at all, so the pipeline counts no bad poll for 0 receivers, and
+/// a long run of such polls on program leaves no degraded reason and no
+/// other side effect — the snapshot is visibility only.
 #[tokio::test]
 async fn handle_health_snapshot_visibility_only_on_prolonged_dark_wall() {
     let (mut engine, registry) = fresh_engine().await;
@@ -442,10 +445,12 @@ async fn handle_health_snapshot_visibility_only_on_prolonged_dark_wall() {
     engine.set_on_program_for_test(7);
 
     let now = Instant::now();
-    engine.handle_health_snapshot(7, dark_wall_event(now, 100));
+    for _ in 0..100 {
+        engine.handle_health_snapshot(7, dark_wall_event(now, 0));
+    }
 
     let snap = &registry.snapshots()[0];
-    assert_eq!(snap.consecutive_bad_polls, 100);
+    assert_eq!(snap.consecutive_bad_polls, 0);
     assert_eq!(snap.connections, 0);
     assert_eq!(snap.degraded_reason, None);
 }

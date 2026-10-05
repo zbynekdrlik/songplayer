@@ -61,8 +61,9 @@ async fn get_program_reports_no_source_before_any_cut() {
 /// #221: the program answer has no `follow` block (L5 deleted the OBS
 /// follow) and no `legacy_cg` record (B4 step 6), and its receiver
 /// expectation is SP-program's own: while a source is on program, no NDI
-/// receiver on `SP-program` is the `degraded_reason`; nothing on program, or
-/// a receiver connected, is none.
+/// receiver on `SP-program` is the `degraded_reason`; nothing on program, a
+/// receiver connected, or no receiver poll yet (the count's 0 is no
+/// reading, review round 1) is none.
 #[tokio::test]
 async fn the_program_answer_has_no_follow_no_legacy_cg_and_expects_sp_program_s_receiver() {
     let state = test_state().await;
@@ -79,6 +80,14 @@ async fn the_program_answer_has_no_follow_no_legacy_cg_and_expects_sp_program_s_
     state.program_bus.select_initial(slow, Some("sp-slow"));
     let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
     assert_eq!(json["health"]["connections"], 0);
+    assert_eq!(
+        json["degraded_reason"],
+        serde_json::Value::Null,
+        "the sender has not polled its receivers yet"
+    );
+
+    state.program_bus.set_connections(0);
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
     assert_eq!(json["degraded_reason"], "no NDI receiver on SP-program");
 
     state.program_bus.set_connections(2);
