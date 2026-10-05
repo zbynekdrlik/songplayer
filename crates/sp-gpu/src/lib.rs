@@ -74,7 +74,7 @@ pub use error::{
 };
 pub use picture::{MAX_PICTURE_SIDE, Nv12Picture, PictureError, Plane, Planes};
 pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect};
-pub use readback::{mapped_len, unpad_rows};
+pub use readback::{mapped_len, unpad_rows, unpad_rows_into};
 pub use residency::{Resident, Upload, upload_for};
 pub use spout::{
     NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN, SPOUT_NAME_MAX_LEN,

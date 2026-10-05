@@ -11,7 +11,9 @@
 //! same NV12 layout as the software path ([`SurfaceLayout`]).
 //!
 //! The path really used is read per picture, never assumed: a picture in a
-//! DXGI surface was decoded on the GPU, one in system memory in software
+//! decoder texture (a DXGI surface whose texture carries
+//! `D3D11_BIND_DECODER`) came out of the GPU decoder; one in system memory,
+//! or in a texture a software decoder uploaded into, did not
 //! ([`DecodePath::of_picture`]). Media Foundation's decoder falls back to
 //! software on its own when the GPU has no decoder for the stream
 //! (Microsoft's "Supporting Direct3D 11 Video Decoding in Media Foundation",
@@ -35,7 +37,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sp_core::nv12::{nv12_chroma_row, nv12_len};
-use sp_gpu::{MAX_PICTURE_SIDE, mapped_len};
+use sp_gpu::{MAX_PICTURE_SIDE, mapped_len, unpad_rows_into};
 
 use crate::error::DecoderError;
 
@@ -69,15 +71,22 @@ pub enum DecodePath {
     Hardware,
 }
 
+/// `D3D11_BIND_DECODER`: a texture a DXVA decoder decodes into
+/// (Microsoft: its output texture array's "binding flags should include the
+/// D3D11_BIND_DECODER flag").
+pub const D3D11_BIND_DECODER: u32 = 0x200;
+
 impl DecodePath {
-    /// The path of a picture Media Foundation handed over: a DXGI surface was
-    /// decoded on the GPU, a buffer in system memory in software (also on the
-    /// D3D path, when the decoder MFT fell back on its own).
-    pub fn of_picture(dxgi_surface: bool) -> Self {
-        if dxgi_surface {
-            DecodePath::Hardware
-        } else {
-            DecodePath::Software
+    /// The path of a picture Media Foundation handed over, from the bind
+    /// flags of the texture its DXGI surface lies in (`None`: a buffer in
+    /// system memory). Only a decoder texture's picture came out of the GPU
+    /// decoder; a system-memory one (also on the D3D path, when the decoder
+    /// MFT fell back on its own) or one a software decoder uploaded into a
+    /// texture did not.
+    pub fn of_picture(surface_bind_flags: Option<u32>) -> Self {
+        match surface_bind_flags {
+            Some(flags) if flags & D3D11_BIND_DECODER != 0 => DecodePath::Hardware,
+            _ => DecodePath::Software,
         }
     }
 
@@ -169,18 +178,17 @@ impl Resume {
         };
     }
 
-    /// Whether the decoded picture at `timestamp_ms` is handed over (and,
-    /// when it is, record it). After a reopen, the pictures up to and
-    /// including the last one handed over are dropped.
-    pub fn take(&mut self, timestamp_ms: u64) -> bool {
-        if self
-            .skip_through_ms
+    /// Whether the decoded picture at `timestamp_ms` is dropped: after a
+    /// reopen, the pictures up to and including the last one handed over.
+    /// Asked before the picture is read back, so a dropped one costs no copy.
+    pub fn skips(&self, timestamp_ms: u64) -> bool {
+        self.skip_through_ms
             .is_some_and(|last| timestamp_ms <= last)
-        {
-            return false;
-        }
+    }
+
+    /// The picture at `timestamp_ms` was handed over.
+    pub fn delivered(&mut self, timestamp_ms: u64) {
         self.delivered_ms = Some(timestamp_ms);
-        true
     }
 
     /// The reader reopens the file: where to seek (`None`: the file's start,
@@ -242,6 +250,8 @@ pub struct SurfaceCopy {
     pub stride: u32,
     /// The packed picture's bytes: `nv12_len(stride, height)`.
     pub len: usize,
+    /// The mapped bytes the copy reads, up to the last UV row's last byte.
+    pub needed: usize,
     pitch: usize,
     luma_rows: usize,
     chroma_rows: usize,
@@ -297,6 +307,7 @@ impl SurfaceLayout {
         Ok(SurfaceCopy {
             stride,
             len: nv12_len(stride, height),
+            needed,
             pitch: self.pitch,
             luma_rows,
             chroma_rows,
@@ -307,17 +318,22 @@ impl SurfaceLayout {
 
 impl SurfaceCopy {
     /// Append the packed picture to `dst`: the first `stride` bytes of each
-    /// luma row, then of each UV row. `mapped` is the checked mapping (at
-    /// least the `mapped` bytes [`SurfaceLayout::check`] was given).
-    pub fn copy(&self, mapped: &[u8], dst: &mut Vec<u8>) {
+    /// luma row, then of each UV row (`sp_gpu::unpad_rows_into`, the rows
+    /// the compositor's readback packs). A `mapped` shorter than
+    /// [`SurfaceCopy::needed`] is refused before anything is appended.
+    pub fn copy(&self, mapped: &[u8], dst: &mut Vec<u8>) -> Result<(), SurfaceError> {
+        let short = SurfaceError::Short {
+            len: mapped.len(),
+            needed: self.needed,
+        };
+        if mapped.len() < self.needed {
+            return Err(short);
+        }
         let row = self.stride as usize;
         let (luma, chroma) = mapped.split_at(self.chroma_offset);
-        for line in luma.chunks(self.pitch).take(self.luma_rows) {
-            dst.extend_from_slice(&line[..row]);
-        }
-        for line in chroma.chunks(self.pitch).take(self.chroma_rows) {
-            dst.extend_from_slice(&line[..row]);
-        }
+        unpad_rows_into(luma, self.pitch, row, self.luma_rows, dst).ok_or(short)?;
+        unpad_rows_into(chroma, self.pitch, row, self.chroma_rows, dst).ok_or(short)?;
+        Ok(())
     }
 }
 
@@ -336,7 +352,7 @@ pub struct HwDecodeStats {
     /// Readers opened in `Hardware` mode.
     pub requested: u64,
     /// Of those, the ones whose first picture came out of the GPU decoder.
-    pub hardware: u64,
+    pub gpu_decodes: u64,
     /// Of those, the ones on the D3D path whose first picture Media
     /// Foundation's decoder made in software (it found no decoder on the
     /// GPU for the stream).
@@ -353,7 +369,7 @@ pub struct HwDecodeStats {
 #[derive(Debug, Default)]
 pub struct HwCounters {
     requested: AtomicU64,
-    hardware: AtomicU64,
+    gpu_decodes: AtomicU64,
     mf_software: AtomicU64,
     open_fallbacks: AtomicU64,
     mid_stream_fallbacks: AtomicU64,
@@ -364,7 +380,7 @@ impl HwCounters {
     const fn zero() -> Self {
         HwCounters {
             requested: AtomicU64::new(0),
-            hardware: AtomicU64::new(0),
+            gpu_decodes: AtomicU64::new(0),
             mf_software: AtomicU64::new(0),
             open_fallbacks: AtomicU64::new(0),
             mid_stream_fallbacks: AtomicU64::new(0),
@@ -380,7 +396,7 @@ impl HwCounters {
     /// The first picture of a reader on the D3D path came out of `path`.
     pub fn first_picture(&self, path: DecodePath) {
         let counter = match path {
-            DecodePath::Hardware => &self.hardware,
+            DecodePath::Hardware => &self.gpu_decodes,
             DecodePath::Software => &self.mf_software,
         };
         counter.fetch_add(1, Ordering::Relaxed);
@@ -409,7 +425,7 @@ impl HwCounters {
             .clone();
         HwDecodeStats {
             requested: self.requested.load(Ordering::Relaxed),
-            hardware: self.hardware.load(Ordering::Relaxed),
+            gpu_decodes: self.gpu_decodes.load(Ordering::Relaxed),
             mf_software: self.mf_software.load(Ordering::Relaxed),
             open_fallbacks: self.open_fallbacks.load(Ordering::Relaxed),
             mid_stream_fallbacks: self.mid_stream_fallbacks.load(Ordering::Relaxed),

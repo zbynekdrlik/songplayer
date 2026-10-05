@@ -14,18 +14,36 @@
 //! the copy packs the picture into a `frame_pool` buffer in the software
 //! path's layout (`stride` = one chroma row, `height` luma rows, then
 //! ⌈height/2⌉ UV rows), so the rest of the pipeline cannot tell the paths
-//! apart.
+//! apart. The texture's bind flags say whether the picture came out of the
+//! GPU decoder (`hw_decode::DecodePath::of_picture`: `D3D11_BIND_DECODER`).
+//!
+//! `read_texture_as_decoded_sample` (doc-hidden) runs this readback on a
+//! texture the caller made, wrapped the way a decoder wraps its output: the
+//! Windows CI test of the layout, where no GPU decoder exists.
 
 use std::ffi::c_void;
 
+use windows::Win32::Foundation::FALSE;
 use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
 use windows::Win32::Media::MediaFoundation::{
     IMF2DBuffer2, IMFDXGIBuffer, IMFMediaBuffer, IMFSample, MF2DBuffer_LockFlags_Read,
+    MFCreateDXGISurfaceBuffer, MFCreateSample,
 };
 use windows::core::Interface;
 
 use crate::error::DecoderError;
-use crate::hw_decode::{SurfaceLayout, mapped_from_scanline0};
+use crate::hw_decode::{DecodePath, SurfaceLayout, mapped_from_scanline0};
+
+/// A picture read back out of a DXGI surface.
+#[derive(Debug)]
+pub struct DxgiPicture {
+    /// The packed NV12 bytes (a `frame_pool` buffer).
+    pub data: Vec<u8>,
+    /// Their row stride.
+    pub stride: u32,
+    /// Whether the texture was a decoder's output (`D3D11_BIND_DECODER`).
+    pub path: DecodePath,
+}
 
 /// A sample's picture in a DXGI surface: its one buffer, as a media buffer
 /// (for `IMF2DBuffer2`) and as a DXGI buffer (for the texture).
@@ -54,13 +72,13 @@ impl DxgiSurface {
     }
 
     /// Copy the `width`×`height` picture out of the surface into a
-    /// `frame_pool` buffer: the packed NV12 bytes and their row stride.
-    pub(super) fn read(&self, width: u32, height: u32) -> Result<(Vec<u8>, u32), DecoderError> {
+    /// `frame_pool` buffer, and say where it came from.
+    pub(super) fn read(&self, width: u32, height: u32) -> Result<DxgiPicture, DecoderError> {
         read_picture(&self.buffer, &self.dxgi, width, height)
     }
 }
 
-/// The texture behind a DXGI buffer: its rows and its format.
+/// The texture behind a DXGI buffer: its rows, its format, its bind flags.
 fn surface_desc(dxgi: &IMFDXGIBuffer) -> Result<D3D11_TEXTURE2D_DESC, DecoderError> {
     let mut raw: *mut c_void = std::ptr::null_mut();
     unsafe { dxgi.GetResource(&ID3D11Texture2D::IID, &mut raw) }
@@ -94,7 +112,7 @@ fn read_picture(
     dxgi: &IMFDXGIBuffer,
     width: u32,
     height: u32,
-) -> Result<(Vec<u8>, u32), DecoderError> {
+) -> Result<DxgiPicture, DecoderError> {
     let desc = surface_desc(dxgi)?;
     let two_d: IMF2DBuffer2 = buffer
         .cast()
@@ -134,6 +152,35 @@ fn read_picture(
     // mapping (`Lock2DSize`'s bounds, `mapped_from_scanline0`), which stays
     // valid until `_locked` unlocks it after the copy.
     let src = unsafe { std::slice::from_raw_parts(scanline0.cast_const(), mapped) };
-    copy.copy(src, &mut picture);
-    Ok((picture, copy.stride))
+    copy.copy(src, &mut picture)
+        .map_err(|e| DecoderError::BufferLock(format!("DXGI surface: {e}")))?;
+    Ok(DxgiPicture {
+        data: picture,
+        stride: copy.stride,
+        path: DecodePath::of_picture(Some(desc.BindFlags)),
+    })
+}
+
+/// Read subresource 0 of `texture` back as a `width`×`height` picture,
+/// wrapped the way a DXVA decoder wraps its output
+/// (`MFCreateDXGISurfaceBuffer` in an `MFCreateSample` sample): the same
+/// `DxgiSurface::of` + `read` a GPU-decoded sample takes. For the Windows CI
+/// test of the readback (no GPU decoder there); not for production.
+#[doc(hidden)]
+pub fn read_texture_as_decoded_sample(
+    texture: &ID3D11Texture2D,
+    width: u32,
+    height: u32,
+) -> Result<DxgiPicture, DecoderError> {
+    super::mf_reader::com_startup()?;
+    let buffer = unsafe { MFCreateDXGISurfaceBuffer(&ID3D11Texture2D::IID, texture, 0, FALSE) }
+        .map_err(|e| DecoderError::BufferLock(format!("MFCreateDXGISurfaceBuffer: {e}")))?;
+    let sample = unsafe { MFCreateSample() }
+        .map_err(|e| DecoderError::BufferLock(format!("MFCreateSample: {e}")))?;
+    unsafe { sample.AddBuffer(&buffer) }
+        .map_err(|e| DecoderError::BufferLock(format!("IMFSample::AddBuffer: {e}")))?;
+    let surface = DxgiSurface::of(&sample)?.ok_or_else(|| {
+        DecoderError::BufferLock("the wrapped texture is not a DXGI surface".into())
+    })?;
+    surface.read(width, height)
 }

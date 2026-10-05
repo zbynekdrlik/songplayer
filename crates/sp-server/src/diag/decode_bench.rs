@@ -396,9 +396,9 @@ pub struct BenchReport {
     pub budget: Option<Budget>,
     /// #223 S3b: the request asked for hardware decode (`"hw": true`).
     pub hw_requested: bool,
-    /// The path the pictures really came out of: `"hardware"` (DXGI
-    /// surfaces from the GPU decoder) or `"software"`; `null` with no
-    /// picture. A mid-stream fall back reads `"software"` (with
+    /// The path the pictures really came out of: `"hardware"` (the GPU
+    /// decoder's surfaces, `D3D11_BIND_DECODER`) or `"software"`; `null`
+    /// with no picture. A mid-stream fall back reads `"software"` (with
     /// `hw_fallback`).
     pub decode_path: Option<&'static str>,
     /// The GPU's adapter name, only when `decode_path` is `"hardware"`.

@@ -135,7 +135,7 @@ fn the_status_carries_the_setting_and_the_counters() {
     setting.set(true);
     let stats = HwDecodeStats {
         requested: 7,
-        hardware: 4,
+        gpu_decodes: 4,
         mf_software: 1,
         open_fallbacks: 1,
         mid_stream_fallbacks: 2,
@@ -146,7 +146,7 @@ fn the_status_carries_the_setting_and_the_counters() {
         VideoDecodeStatus {
             hw_decode: true,
             hw_requested: 7,
-            hw_decoding: 4,
+            gpu_decodes: 4,
             mf_software: 1,
             open_fallbacks: 1,
             mid_stream_fallbacks: 2,
@@ -166,7 +166,7 @@ fn the_status_serializes_to_the_documented_json() {
     let json = serde_json::to_value(VideoDecodeStatus {
         hw_decode: true,
         hw_requested: 3,
-        hw_decoding: 2,
+        gpu_decodes: 2,
         mf_software: 0,
         open_fallbacks: 1,
         mid_stream_fallbacks: 0,
@@ -175,11 +175,20 @@ fn the_status_serializes_to_the_documented_json() {
     .unwrap();
     assert_eq!(json["hw_decode"], true);
     assert_eq!(json["hw_requested"], 3);
-    assert_eq!(json["hw_decoding"], 2);
+    assert_eq!(json["gpu_decodes"], 2);
     assert_eq!(json["mf_software"], 0);
     assert_eq!(json["open_fallbacks"], 1);
     assert_eq!(json["mid_stream_fallbacks"], 0);
     assert_eq!(json["last_fallback"], "open: no video device");
+    // A block from an older build, missing keys: each reads as its zero.
+    let old: VideoDecodeStatus = serde_json::from_str(r#"{"hw_decode": true}"#).unwrap();
+    assert_eq!(
+        old,
+        VideoDecodeStatus {
+            hw_decode: true,
+            ..VideoDecodeStatus::default()
+        }
+    );
 }
 
 /// `GET /api/v1/status` carries the block, through the real router.
@@ -209,7 +218,7 @@ async fn the_status_route_carries_the_video_decode_block() {
     assert!(block["hw_decode"].is_boolean(), "{json}");
     assert!(block["hw_requested"].as_u64().unwrap() >= 1, "{json}");
     for key in [
-        "hw_decoding",
+        "gpu_decodes",
         "mf_software",
         "open_fallbacks",
         "mid_stream_fallbacks",

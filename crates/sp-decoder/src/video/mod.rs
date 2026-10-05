@@ -10,4 +10,6 @@ mod dxgi_frame;
 mod hw_session;
 pub mod mf_reader;
 
+#[doc(hidden)]
+pub use dxgi_frame::{DxgiPicture, read_texture_as_decoded_sample};
 pub use mf_reader::MediaFoundationVideoReader;

@@ -454,19 +454,26 @@ impl MediaFoundationVideoReader {
         }
     }
 
-    /// The next decoded picture, from a DXGI surface on the D3D path (the
-    /// GPU decoded it) or from a system-memory buffer (software).
+    /// The next decoded picture the caller does not have yet, from a DXGI
+    /// surface on the D3D path or from a system-memory buffer (software).
+    /// After a software reopen, the pictures `Resume` drops are dropped
+    /// before any readback (each still costs its decode).
     fn read_picture(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
-        let Some((sample, timestamp_100ns)) = self.read_sample()? else {
-            return Ok(None);
+        let (sample, timestamp_ms) = loop {
+            let Some((sample, timestamp_100ns)) = self.read_sample()? else {
+                return Ok(None);
+            };
+            let timestamp_ms = (timestamp_100ns.max(0) / 10_000) as u64;
+            if !self.resume.skips(timestamp_ms) {
+                break (sample, timestamp_ms);
+            }
         };
         let surface = if self.hw.is_some() {
             DxgiSurface::of(&sample)?
         } else {
             None
         };
-        let path = DecodePath::of_picture(surface.is_some());
-        let (data, width, height, stride) = match surface {
+        let (data, width, height, stride, path) = match surface {
             Some(surface) => {
                 let media_type: IMFMediaType = unsafe {
                     self.reader
@@ -474,8 +481,8 @@ impl MediaFoundationVideoReader {
                         .map_err(|e| DecoderError::ReadSample(e.to_string()))?
                 };
                 let (width, height) = frame_size(&media_type);
-                let (data, stride) = surface.read(width, height)?;
-                (data, width, height, stride)
+                let picture = surface.read(width, height)?;
+                (picture.data, width, height, picture.stride, picture.path)
             }
             None => {
                 let buffer: IMFMediaBuffer = unsafe {
@@ -483,11 +490,11 @@ impl MediaFoundationVideoReader {
                         .ConvertToContiguousBuffer()
                         .map_err(|e| DecoderError::BufferLock(e.to_string()))?
                 };
-                Self::lock_video_buffer(&buffer, &self.reader)?
+                let (data, width, height, stride) = Self::lock_video_buffer(&buffer, &self.reader)?;
+                (data, width, height, stride, DecodePath::of_picture(None))
             }
         };
         self.observe(path);
-        let timestamp_ms = (timestamp_100ns.max(0) / 10_000) as u64;
 
         if timestamp_ms > self.duration_ms {
             self.duration_ms = timestamp_ms;
@@ -513,7 +520,7 @@ impl MediaFoundationVideoReader {
                 DecodePath::Hardware => info!(
                     file = %self.path.display(),
                     adapter,
-                    "mf_reader: hardware decode active (DXGI surfaces)"
+                    "mf_reader: hardware decode active (decoder surfaces, D3D11_BIND_DECODER)"
                 ),
                 DecodePath::Software => warn!(
                     file = %self.path.display(),
@@ -604,7 +611,7 @@ impl MediaFoundationVideoReader {
 }
 
 /// `CoInitializeEx` (STA) and `MFStartup` on the calling thread.
-fn com_startup() -> Result<(), DecoderError> {
+pub(super) fn com_startup() -> Result<(), DecoderError> {
     unsafe {
         let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         if hr.is_err() {
@@ -644,22 +651,17 @@ impl VideoStream for MediaFoundationVideoReader {
             } else {
                 self.read_picture()
             };
-            let frame = match read {
-                Ok(Some(frame)) => frame,
+            match read {
+                Ok(Some(frame)) => {
+                    self.resume.delivered(frame.timestamp_ms);
+                    return Ok(Some(frame));
+                }
                 Ok(None) => return Ok(None),
                 Err(e) => match on_decode_error(self.fallback_allowed, &e) {
-                    OnDecodeError::ReopenSoftware => {
-                        self.reopen_in_software(&e)?;
-                        continue;
-                    }
+                    OnDecodeError::ReopenSoftware => self.reopen_in_software(&e)?,
                     OnDecodeError::Propagate => return Err(e),
                 },
-            };
-            if self.resume.take(frame.timestamp_ms) {
-                return Ok(Some(frame));
             }
-            // A picture the caller already has (after a reopen): back to the pool.
-            crate::frame_pool::recycle(frame.data);
         }
     }
 

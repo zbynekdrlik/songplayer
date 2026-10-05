@@ -128,8 +128,9 @@ failed`).
 - `budget {frame_period_us, mean_over_half_period}`.
 - #223 S3b, the decode path:
   - `hw_requested`: the request's `hw`.
-  - `decode_path`: `"hardware"` (the pictures came out of the GPU decoder
-    as DXGI surfaces), `"software"`, or `null` (no picture). It is READ
+  - `decode_path`: `"hardware"` (the pictures came out of the GPU decoder:
+    DXGI surfaces in a `D3D11_BIND_DECODER` texture), `"software"`, or
+    `null` (no picture). It is READ
     from the pictures (the last one), never assumed: a `hw` run that reads
     `"software"` either fell back at open (`hw_fallback` says why: no
     hardware adapter, no device) or Media Foundation's decoder found no

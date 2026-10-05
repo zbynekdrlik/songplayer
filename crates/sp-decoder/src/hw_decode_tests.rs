@@ -2,9 +2,9 @@
 //! Wired via `#[cfg(test)] #[path = "hw_decode_tests.rs"] mod tests;`.
 
 use super::{
-    DXGI_FORMAT_NV12, DecodeMode, DecodePath, FallbackStage, HwCounters, HwDecodeStats, HwFallback,
-    OnDecodeError, Resume, SurfaceError, SurfaceLayout, hw_counters, mapped_from_scanline0,
-    on_decode_error,
+    D3D11_BIND_DECODER, DXGI_FORMAT_NV12, DecodeMode, DecodePath, FallbackStage, HwCounters,
+    HwDecodeStats, HwFallback, OnDecodeError, Resume, SurfaceError, SurfaceLayout, hw_counters,
+    mapped_from_scanline0, on_decode_error,
 };
 use crate::error::DecoderError;
 
@@ -20,9 +20,19 @@ fn the_mode_is_software_unless_hardware_is_asked_for() {
 }
 
 #[test]
-fn a_dxgi_surface_was_decoded_on_the_gpu_a_system_buffer_in_software() {
-    assert_eq!(DecodePath::of_picture(true), DecodePath::Hardware);
-    assert_eq!(DecodePath::of_picture(false), DecodePath::Software);
+fn only_a_decoder_textures_picture_came_out_of_the_gpu_decoder() {
+    assert_eq!(D3D11_BIND_DECODER, 0x200, "d3d11.h");
+    // A DXVA decoder's output texture array: BIND_DECODER, maybe more.
+    assert_eq!(DecodePath::of_picture(Some(0x200)), DecodePath::Hardware);
+    assert_eq!(
+        DecodePath::of_picture(Some(0x200 | 0x8)),
+        DecodePath::Hardware,
+        "BIND_DECODER | BIND_SHADER_RESOURCE"
+    );
+    // A software decoder's upload into a texture, and system memory.
+    assert_eq!(DecodePath::of_picture(Some(0x8)), DecodePath::Software);
+    assert_eq!(DecodePath::of_picture(Some(0)), DecodePath::Software);
+    assert_eq!(DecodePath::of_picture(None), DecodePath::Software);
     assert_eq!(DecodePath::Hardware.as_str(), "hardware");
     assert_eq!(DecodePath::Software.as_str(), "software");
 }
@@ -79,12 +89,22 @@ fn a_host_out_of_memory_is_never_a_reason_to_leave_the_gpu() {
 // Where a software reopen goes on
 // ---------------------------------------------------------------------------
 
+/// What the reader does with a decoded picture at `ts`: drop it unread when
+/// `skips` says so, else hand it over. Whether it was handed over.
+fn take(resume: &mut Resume, ts: u64) -> bool {
+    if resume.skips(ts) {
+        return false;
+    }
+    resume.delivered(ts);
+    true
+}
+
 #[test]
 fn a_fresh_reader_hands_every_picture_over_and_reopens_from_the_start() {
     let mut resume = Resume::default();
     assert_eq!(resume.reopen(), None, "nothing handed over, no seek");
     for ts in [0, 33, 66] {
-        assert!(resume.take(ts), "{ts}");
+        assert!(take(&mut resume, ts), "{ts}");
     }
 }
 
@@ -92,49 +112,49 @@ fn a_fresh_reader_hands_every_picture_over_and_reopens_from_the_start() {
 fn a_reopen_seeks_to_the_last_picture_and_drops_the_ones_through_it() {
     let mut resume = Resume::default();
     for ts in [0, 33, 66, 100] {
-        assert!(resume.take(ts));
+        assert!(take(&mut resume, ts));
     }
     assert_eq!(resume.reopen(), Some(100));
     // The seek lands on the keyframe before 100: decoded again, dropped.
     for ts in [0, 33, 66, 99, 100] {
-        assert!(!resume.take(ts), "{ts} was handed over already");
+        assert!(!take(&mut resume, ts), "{ts} was handed over already");
     }
-    assert!(resume.take(101), "the first new picture");
-    assert!(resume.take(133));
+    assert!(take(&mut resume, 101), "the first new picture");
+    assert!(take(&mut resume, 133));
 }
 
 #[test]
 fn a_reopen_right_after_a_seek_goes_to_the_seek_target_and_drops_nothing() {
     let mut resume = Resume::default();
-    assert!(resume.take(0));
-    assert!(resume.take(33));
+    assert!(take(&mut resume, 0));
+    assert!(take(&mut resume, 33));
     resume.on_seek(5_000);
     assert_eq!(resume.reopen(), Some(5_000));
     // MF lands on the keyframe before 5 000; the caller asked for it.
-    assert!(resume.take(4_800));
+    assert!(take(&mut resume, 4_800));
 }
 
 #[test]
 fn a_seek_clears_a_pending_drop() {
     let mut resume = Resume::default();
-    assert!(resume.take(2_000));
+    assert!(take(&mut resume, 2_000));
     assert_eq!(resume.reopen(), Some(2_000));
-    assert!(!resume.take(1_900));
+    assert!(!take(&mut resume, 1_900));
     // The caller seeks back: what comes now was asked for.
     resume.on_seek(0);
-    assert!(resume.take(0));
-    assert!(resume.take(33));
+    assert!(take(&mut resume, 0));
+    assert!(take(&mut resume, 33));
 }
 
 #[test]
 fn a_seek_then_pictures_reopen_at_the_last_picture() {
     let mut resume = Resume::default();
     resume.on_seek(5_000);
-    assert!(resume.take(4_800));
-    assert!(resume.take(4_833));
+    assert!(take(&mut resume, 4_800));
+    assert!(take(&mut resume, 4_833));
     assert_eq!(resume.reopen(), Some(4_833));
-    assert!(!resume.take(4_833));
-    assert!(resume.take(4_866));
+    assert!(!take(&mut resume, 4_833));
+    assert!(take(&mut resume, 4_866));
 }
 
 // ---------------------------------------------------------------------------
@@ -165,9 +185,10 @@ fn a_surface_is_packed_row_by_row_from_both_planes() {
         .expect("a whole NV12 surface");
     assert_eq!(copy.stride, 6);
     assert_eq!(copy.len, 30, "6 × (3 + 2)");
+    assert_eq!(copy.needed, SMALL_NEEDED);
     let src = mapped(SMALL_NEEDED);
     let mut dst = Vec::new();
-    copy.copy(&src, &mut dst);
+    copy.copy(&src, &mut dst).expect("a whole mapping");
     let mut want = Vec::new();
     for start in [0, 8, 16, 32, 40] {
         want.extend_from_slice(&src[start..start + 6]);
@@ -181,7 +202,7 @@ fn the_copy_appends_to_what_the_buffer_holds() {
     let copy = SMALL.check(DXGI_FORMAT_NV12, SMALL_NEEDED).unwrap();
     let mut dst = Vec::with_capacity(copy.len + 4);
     dst.extend_from_slice(&[9, 9]);
-    copy.copy(&mapped(SMALL_NEEDED), &mut dst);
+    copy.copy(&mapped(SMALL_NEEDED), &mut dst).unwrap();
     assert_eq!(dst.len(), 2 + copy.len);
     assert_eq!(&dst[..3], &[9, 9, 0]);
 }
@@ -212,7 +233,7 @@ fn a_surface_as_tall_as_the_picture_has_its_uv_plane_right_after_it() {
     assert_eq!((copy.stride, copy.len), (4, 12));
     let src = mapped(12);
     let mut dst = Vec::new();
-    copy.copy(&src, &mut dst);
+    copy.copy(&src, &mut dst).unwrap();
     assert_eq!(dst, src);
 }
 
@@ -340,6 +361,28 @@ fn a_surface_no_mapping_could_hold_is_short() {
 }
 
 #[test]
+fn a_copy_from_a_shorter_slice_than_checked_is_refused_and_appends_nothing() {
+    // The checked mapping is 46 bytes; the copy is handed fewer (a caller
+    // bug): an error, never a panic in the decode thread.
+    let copy = SMALL.check(DXGI_FORMAT_NV12, SMALL_NEEDED).unwrap();
+    for len in [SMALL_NEEDED - 1, 40, 10, 0] {
+        let mut dst = vec![9];
+        assert_eq!(
+            copy.copy(&mapped(len), &mut dst),
+            Err(SurfaceError::Short {
+                len,
+                needed: SMALL_NEEDED
+            }),
+            "{len}"
+        );
+        assert_eq!(dst, vec![9], "{len}: nothing appended");
+    }
+    let mut dst = Vec::new();
+    assert_eq!(copy.copy(&mapped(SMALL_NEEDED + 9), &mut dst), Ok(()));
+    assert_eq!(dst.len(), 30, "a longer mapping copies the same picture");
+}
+
+#[test]
 fn the_mapped_bytes_count_from_scanline_0_to_the_mappings_end() {
     assert_eq!(mapped_from_scanline0(1_000, 1_000, 46), Some(46));
     assert_eq!(mapped_from_scanline0(1_000, 1_010, 46), Some(36));
@@ -383,7 +426,7 @@ fn the_counters_count_each_outcome_on_its_own() {
         counters.snapshot(),
         HwDecodeStats {
             requested: 4,
-            hardware: 2,
+            gpu_decodes: 2,
             mf_software: 1,
             open_fallbacks: 1,
             mid_stream_fallbacks: 2,

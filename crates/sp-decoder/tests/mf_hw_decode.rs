@@ -14,13 +14,23 @@
 //! test injects one decode failure (`fail_next_read_for_test`): the reader
 //! must reopen the file in software and go on where it stopped, with no
 //! picture lost or handed over twice.
+//!
+//! The readback of a GPU picture never runs on CI through a decoder (WARP
+//! decodes nothing), so `a_dxgi_surface_is_read_back_into_the_software_layout`
+//! runs it on a real DXGI surface: a WARP NV12 texture TALLER than the
+//! picture (decoders align theirs), wrapped as a decoder wraps its output.
 
 #![cfg(windows)]
 
 use sp_decoder::{
     DecodeMode, DecodePath, DecodedVideoFrame, FallbackStage, MediaFoundationVideoReader,
-    MediaStream, VideoStream, hw_counters,
+    MediaStream, VideoStream, hw_counters, read_texture_as_decoded_sample,
 };
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_BIND_DECODER, D3D11_FORMAT_SUPPORT_TEXTURE2D, D3D11_SUBRESOURCE_DATA,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+};
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_NV12, DXGI_SAMPLE_DESC};
 
 /// The fixture's own picture: 160×120 (MF may pad the height to 128).
 const W: usize = 160;
@@ -150,22 +160,127 @@ fn hardware_mode_opens_the_fixture_and_decodes_what_software_decodes() {
 fn hardware_mode_on_warp_decodes_what_software_decodes() {
     let mut reader = MediaFoundationVideoReader::open_hardware_on_warp(&fixture())
         .expect("a Hardware open on WARP never fails on a file software opens");
+    // The video device, the DXGI device manager and its reset were built on
+    // WARP: either the source reader runs on them, or it refused them (the
+    // only open fall back that comes after them).
+    let on_d3d = reader.hw_adapter().is_some();
+    let refused = reader
+        .hw_fallback()
+        .is_some_and(|f| f.reason.starts_with("the source reader refused"));
+    assert!(
+        on_d3d || refused,
+        "the D3D11 path was not built on WARP: {:?}",
+        reader.hw_fallback()
+    );
     let pictures = decode_all(&mut reader, "hardware (WARP)");
     assert_reported(&reader, "hardware (WARP)");
     assert_same_pictures(&pictures, &software_pictures(), "hardware (WARP)");
 }
 
 #[test]
-fn a_hardware_reader_seeks_and_decodes() {
-    let mut reader = MediaFoundationVideoReader::open_hardware_on_warp(&fixture())
+fn a_hardware_reader_seeks_to_the_picture_software_seeks_to() {
+    let first_after_seek = |mut reader: MediaFoundationVideoReader, what: &str| {
+        let target = reader.duration_ms() / 2;
+        reader
+            .seek(target)
+            .unwrap_or_else(|e| panic!("{what}: seek: {e}"));
+        let frame = reader
+            .next_frame()
+            .unwrap_or_else(|e| panic!("{what}: decode after the seek: {e}"))
+            .unwrap_or_else(|| panic!("{what}: a picture after the seek"));
+        (frame.timestamp_ms, visible(&frame))
+    };
+    let hardware = MediaFoundationVideoReader::open_hardware_on_warp(&fixture())
         .expect("a Hardware open on WARP");
-    let target = reader.duration_ms() / 2;
-    reader.seek(target).expect("seek on the hardware reader");
-    let frame = reader
-        .next_frame()
-        .expect("decode after the seek")
-        .expect("a picture after the seek");
-    assert_eq!(visible(&frame).len(), W * H * 3 / 2);
+    let software = MediaFoundationVideoReader::open(&fixture()).expect("software open");
+    assert_same_pictures(
+        &[first_after_seek(hardware, "hardware")],
+        &[first_after_seek(software, "software")],
+        "the first picture after a seek",
+    );
+}
+
+/// A WARP NV12 texture of 160×128 (as a decoder aligns a 160×120 picture)
+/// whose bytes each say where they are, read back as a 160×120 picture: the
+/// first 120 luma rows, then the first 60 UV rows of the UV plane that
+/// starts after ALL 128 luma rows, packed at a stride of 160. This is the
+/// layout `Lock2DSize` maps (Direct3D's NV12), which no decoder reaches on
+/// CI.
+#[test]
+fn a_dxgi_surface_is_read_back_into_the_software_layout() {
+    // The pure crate's constants are the SDK's.
+    assert_eq!(
+        sp_decoder::hw_decode::DXGI_FORMAT_NV12,
+        DXGI_FORMAT_NV12.0 as u32
+    );
+    assert_eq!(
+        sp_decoder::hw_decode::D3D11_BIND_DECODER,
+        D3D11_BIND_DECODER.0 as u32
+    );
+    const TEXTURE_W: usize = 160;
+    const TEXTURE_H: usize = 128;
+    let video = sp_gpu::VideoDevice::new_warp().expect("a video device on WARP");
+    let device = video.device();
+    let support =
+        unsafe { device.CheckFormatSupport(DXGI_FORMAT_NV12) }.expect("WARP answers for NV12");
+    assert_ne!(
+        support & D3D11_FORMAT_SUPPORT_TEXTURE2D.0 as u32,
+        0,
+        "WARP must make NV12 textures ({support:#x})"
+    );
+    let surface: Vec<u8> = (0..TEXTURE_W * (TEXTURE_H + TEXTURE_H / 2))
+        .map(|i| (i % 251) as u8)
+        .collect();
+    let desc = D3D11_TEXTURE2D_DESC {
+        Width: TEXTURE_W as u32,
+        Height: TEXTURE_H as u32,
+        MipLevels: 1,
+        ArraySize: 1,
+        Format: DXGI_FORMAT_NV12,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Usage: D3D11_USAGE_DEFAULT,
+        BindFlags: 0,
+        CPUAccessFlags: 0,
+        MiscFlags: 0,
+    };
+    // NV12 initial data: the UV plane follows the luma plane at
+    // SysMemPitch × Height.
+    let init = D3D11_SUBRESOURCE_DATA {
+        pSysMem: surface.as_ptr().cast(),
+        SysMemPitch: TEXTURE_W as u32,
+        SysMemSlicePitch: 0,
+    };
+    let mut texture = None;
+    unsafe { device.CreateTexture2D(&desc, Some(&init), Some(&mut texture)) }
+        .expect("a 160x128 NV12 texture on WARP");
+    let texture = texture.expect("CreateTexture2D gave a texture");
+
+    let picture = read_texture_as_decoded_sample(&texture, W as u32, H as u32)
+        .expect("the DXGI surface reads back");
+
+    let mut want = Vec::with_capacity(W * H * 3 / 2);
+    for y in 0..H {
+        want.extend_from_slice(&surface[y * TEXTURE_W..y * TEXTURE_W + W]);
+    }
+    let uv = TEXTURE_W * TEXTURE_H;
+    for y in 0..H / 2 {
+        let row = uv + y * TEXTURE_W;
+        want.extend_from_slice(&surface[row..row + W]);
+    }
+    assert_eq!(picture.stride, W as u32);
+    assert_eq!(picture.data.len(), want.len());
+    if picture.data != want {
+        let at = picture.data.iter().zip(&want).position(|(a, b)| a != b);
+        panic!("the read-back picture differs from the texture at byte {at:?}");
+    }
+    assert_eq!(
+        picture.path,
+        DecodePath::Software,
+        "a texture without D3D11_BIND_DECODER is no decoder's output"
+    );
 }
 
 #[test]

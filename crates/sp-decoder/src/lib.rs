@@ -42,3 +42,6 @@ pub use types::{DecodedAudioFrame, DecodedVideoFrame, PixelFormat, VideoStreamIn
 
 #[cfg(windows)]
 pub use video::MediaFoundationVideoReader;
+#[cfg(windows)]
+#[doc(hidden)]
+pub use video::{DxgiPicture, read_texture_as_decoded_sample};

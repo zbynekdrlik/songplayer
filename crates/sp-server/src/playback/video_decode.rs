@@ -127,16 +127,18 @@ pub async fn start(pool: &SqlitePool, shutdown: &broadcast::Sender<()>) {
     ));
 }
 
-/// `GET /api/v1/status` → `video_decode`. A missing key deserializes to the
-/// zero value (older clients / the mock stay ok).
+/// `GET /api/v1/status` → `video_decode`. Every count runs since the process
+/// started (files, not live state). A missing key deserializes to its zero
+/// value (older clients / the mock stay ok).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct VideoDecodeStatus {
     /// The setting `video_hw_decode`, as last applied.
     pub hw_decode: bool,
-    /// Readers opened in `Hardware` mode since the process started.
+    /// Files opened in `Hardware` mode.
     pub hw_requested: u64,
     /// Of those, the ones whose first picture came out of the GPU decoder.
-    pub hw_decoding: u64,
+    pub gpu_decodes: u64,
     /// Of those, the ones on the GPU path that Media Foundation's decoder
     /// decoded in software (no decoder on the GPU for the stream).
     pub mf_software: u64,
@@ -153,7 +155,7 @@ pub fn status_of(setting: &HwDecodeSetting, stats: HwDecodeStats) -> VideoDecode
     VideoDecodeStatus {
         hw_decode: setting.hw(),
         hw_requested: stats.requested,
-        hw_decoding: stats.hardware,
+        gpu_decodes: stats.gpu_decodes,
         mf_software: stats.mf_software,
         open_fallbacks: stats.open_fallbacks,
         mid_stream_fallbacks: stats.mid_stream_fallbacks,
