@@ -13,18 +13,18 @@ the streaming replacement in `scripts/stem_worker.py`:
 - `cmd_separate` never loads the whole mix (fake model stack, real soundfile).
 
 numpy + soundfile only (the `eval-checks` CI env) — torch / librosa /
-audio_separator are faked via `sys.modules` (lyrics-worker-tests.md).
+audio_separator are faked via `sys.modules` (`stem_fakes.py`,
+lyrics-worker-tests.md).
 """
 
 import importlib.util
 import os
-import sys
-import types
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import soundfile as sf
+from stem_fakes import install_fakes
 
 _SCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -326,75 +326,6 @@ def test_audio_info_reads_the_header(tmp_path):
 # ---- cmd_separate end to end with a fake model stack -----------------------
 
 
-def _fake_torch():
-    torch = types.ModuleType("torch")
-    torch.bfloat16 = object()
-
-    class _OOM(Exception):
-        pass
-
-    torch.cuda = SimpleNamespace(
-        is_available=lambda: False,
-        device_count=lambda: 0,
-        empty_cache=lambda: None,
-        set_per_process_memory_fraction=lambda *_a, **_k: None,
-        OutOfMemoryError=_OOM,
-    )
-    return torch
-
-
-def _install_fakes(monkeypatch, mix_path):
-    """Fake torch / audio_separator / librosa. The fake separator splits its
-    input into vocals = 0.3 * x and other = 0.7 * x (so v + i == x). The fake
-    librosa.load REFUSES the mix path: the heavy child must never load it."""
-    loads = []
-    windows = []  # (frames, channels) of every window the separator received
-
-    def fake_load(path, sr=None, mono=True):
-        if os.path.abspath(path) == os.path.abspath(mix_path):
-            raise AssertionError("#207: the whole mix was loaded into memory")
-        y, native = sf.read(path, dtype="float32", always_2d=False)
-        assert sr in (None, native), "fake librosa does not resample"
-        loads.append(path)
-        return (y.T if y.ndim == 2 else y), native
-
-    librosa = types.ModuleType("librosa")
-    librosa.load = fake_load
-
-    class FakeSeparator:
-        def __init__(
-            self, model_file_dir=None, output_format=None, output_dir=None, **_k
-        ):
-            self.output_dir = output_dir
-
-        def load_model(self, name):
-            self.model = name
-
-        def separate(self, path):
-            x, sr = sf.read(path, dtype="float32", always_2d=False)
-            windows.append((x.shape[0], 1 if x.ndim == 1 else x.shape[1]))
-            base = os.path.splitext(os.path.basename(path))[0]
-            names = []
-            for token, gain in (("Vocals", 0.3), ("Other", 0.7)):
-                name = f"{base}_({token})_kim.wav"
-                sf.write(
-                    os.path.join(self.output_dir, name), x * gain, sr, subtype="FLOAT"
-                )
-                names.append(name)
-            return names
-
-    sep_pkg = types.ModuleType("audio_separator")
-    sep_mod = types.ModuleType("audio_separator.separator")
-    sep_mod.Separator = FakeSeparator
-    sep_pkg.separator = sep_mod
-
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch())
-    monkeypatch.setitem(sys.modules, "librosa", librosa)
-    monkeypatch.setitem(sys.modules, "audio_separator", sep_pkg)
-    monkeypatch.setitem(sys.modules, "audio_separator.separator", sep_mod)
-    return loads, windows
-
-
 def test_cmd_separate_streams_without_loading_the_whole_mix(tmp_path, monkeypatch):
     # Shrink the window geometry so the test is fast; the logic is identical.
     monkeypatch.setattr(sw, "STEM_SEGMENT_SECONDS", 3.0)
@@ -407,7 +338,7 @@ def test_cmd_separate_streams_without_loading_the_whole_mix(tmp_path, monkeypatc
     sf.write(mix_path, mix, sr, format="FLAC", subtype="PCM_24")
     mix, _ = sf.read(mix_path, dtype="float32")  # the quantised mix
 
-    loads, windows = _install_fakes(monkeypatch, mix_path)
+    loads, windows = install_fakes(monkeypatch, mix_path)
     work_dir = str(tmp_path / "work")
     vocals_out = str(tmp_path / "song_audio_vocals.flac")
     instr_out = str(tmp_path / "song_audio_instrumental.flac")

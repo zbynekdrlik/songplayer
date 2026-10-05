@@ -638,17 +638,22 @@ mod tests {
         )
     }
 
+    /// #207: `stem_worker.py` imports `win_replace` (the POSIX rename that
+    /// publishes a stem SongPlayer holds open), so both ship in `tools_dir`.
     #[tokio::test]
-    async fn ensure_script_materialises_stem_worker_py() {
+    async fn ensure_script_materialises_stem_worker_py_and_win_replace_py() {
         let pool = crate::db::create_memory_pool().await.unwrap();
         let dir = tempfile::tempdir().unwrap();
         let worker = test_worker(pool, dir.path().to_path_buf());
 
         let path = worker.ensure_script().await.unwrap();
 
-        assert!(path.exists(), "stem_worker.py was not written");
+        assert_eq!(path, dir.path().join("stem_worker.py"));
         let written = tokio::fs::read_to_string(&path).await.unwrap();
         assert_eq!(written, include_str!("../../../../scripts/stem_worker.py"));
+        let helper = tokio::fs::read_to_string(dir.path().join("win_replace.py")).await;
+        let helper = helper.expect("win_replace.py is not shipped next to stem_worker.py");
+        assert_eq!(helper, include_str!("../../../../scripts/win_replace.py"));
     }
 
     #[tokio::test]
