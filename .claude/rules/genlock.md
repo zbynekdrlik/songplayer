@@ -504,7 +504,9 @@ UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections=
     inside the pacer (the paced hot path, the `PacingStats` shape).
   - Box check: after a Pause→Play and after a dashboard seek of an output
     on program, `/api/v1/ndi/health` `lock_state` stays `LOCKED` and
-    `pacing.seeks` grows by one per settled seek.
+    `pacing.seeks` grows by one per settled seek. The per-minute
+    `ndi: genlock` line carries it too (`seeks=`, review round 2), so a
+    DEGRADED → LOCKED flip at a seek reads from the log alone.
   - Tests: `lock_state_tests.rs` (`a_resume_after_a_standby_minute_…`,
     `a_seek_reads_locked_…`), `pacer_tests_preroll.rs`
     (`a_seek_is_counted_when_its_first_new_frame_goes_out`,

@@ -397,6 +397,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             jitter_p99_us: 120,
             repeats: 5,
             resyncs: 1,
+            seeks: 3,
             relatches: 2,
             dropped: 7,
             lag_slots: 4,
@@ -453,6 +454,8 @@ fn format_genlock_line_contains_every_key_token() {
         "p99_us=120",
         "repeats=5",
         "resyncs=1",
+        // #150: the seek count the lock window restarts on.
+        "seeks=3",
         "relatches=2",
         "lag=4",
         "av_align_err_ms=-12.5",

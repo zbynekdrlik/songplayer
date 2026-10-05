@@ -809,7 +809,7 @@ fn should_log_periodic_heartbeat(prev: Option<DateTime<Utc>>, cur: DateTime<Utc>
 /// unit-testable; the periodic INFO path logs the returned string verbatim.
 pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
     format!(
-        "ndi: genlock playlist_id={pid} ndi_name={name} seq={seq} late={late} p99_us={p99} repeats={repeats} resyncs={resyncs} relatches={relatches} lag={lag} av_align_err_ms={av_err:.1} av_corrections={av_corr} av_corrected_samples={av_samples} av_frame_offset_ms={av_off:.1} av_frame_offset_min_ms={av_off_min:.1} av_frame_offset_max_ms={av_off_max:.1} wall_anchor_max_step_us={wa_step} wall_anchor_wide_brackets={wa_wide} wall_anchor_slewed_us={wa_slewed} wall_anchor_steps_followed={wa_followed} wall_anchor_last_step_us={wa_last} wall_anchor_holds_followed={wa_holds} wall_anchor_last_hold_us={wa_hold} wall_anchor_probes_rejected={wa_rejected} wall_anchor_detect_to_follow_us={wa_detect} fleet_shift_slots={shift_slots} last_regrid_remainder_us={remainder} song_change_unserviced_slots={unserviced} consumer_fill_pairs={fills} underruns={underruns} clock_ok={clock_ok} lock={lock} reason=\"{reason}\"",
+        "ndi: genlock playlist_id={pid} ndi_name={name} seq={seq} late={late} p99_us={p99} repeats={repeats} resyncs={resyncs} seeks={seeks} relatches={relatches} lag={lag} av_align_err_ms={av_err:.1} av_corrections={av_corr} av_corrected_samples={av_samples} av_frame_offset_ms={av_off:.1} av_frame_offset_min_ms={av_off_min:.1} av_frame_offset_max_ms={av_off_max:.1} wall_anchor_max_step_us={wa_step} wall_anchor_wide_brackets={wa_wide} wall_anchor_slewed_us={wa_slewed} wall_anchor_steps_followed={wa_followed} wall_anchor_last_step_us={wa_last} wall_anchor_holds_followed={wa_holds} wall_anchor_last_hold_us={wa_hold} wall_anchor_probes_rejected={wa_rejected} wall_anchor_detect_to_follow_us={wa_detect} fleet_shift_slots={shift_slots} last_regrid_remainder_us={remainder} song_change_unserviced_slots={unserviced} consumer_fill_pairs={fills} underruns={underruns} clock_ok={clock_ok} lock={lock} reason=\"{reason}\"",
         pid = s.playlist_id,
         name = s.ndi_name,
         seq = s.pacing.seq,
@@ -817,6 +817,7 @@ pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
         p99 = s.pacing.jitter_p99_us,
         repeats = s.pacing.repeats,
         resyncs = s.pacing.resyncs,
+        seeks = s.pacing.seeks, // #150: the lock window restarts when it moves
         relatches = s.pacing.relatches,
         lag = s.pacing.lag_slots,
         av_err = s.pacing.av_align_err_ms,
