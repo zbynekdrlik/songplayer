@@ -536,6 +536,48 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(msg).not.toContain("before the attach");
   });
 
+  test("the latch window is measured at the read's START, and only answered reads move it", async () => {
+    // Review round 5 hand mutants. A 6 s read that starts 66 s after the
+    // attach saw the state at 66 s, within the window, though it answered at
+    // 72 s.
+    const stuck = () =>
+      lock("DEGRADED", "recent_event", probe(), { recent_event_inputs: [{ name: "sp-slow", events: 9 }] });
+    const slow = fakeClock();
+    slow.t = 166_000;
+    const slowReads = fakeRead(slow, stuck, 6_000);
+    const slowMsg = await rejection(
+      waitForProbeLock(slowReads.read, PROBE, {
+        now: slow.now,
+        sleep: slow.sleep,
+        timeoutMs: 1_000,
+        phaseEventsBeforeAttach: 2,
+        attachedAt: 100_000,
+      }),
+    );
+    expect(slowReads.starts).toEqual([166_000]);
+    expect(slowMsg).toContain("the probe had 2 lifetime phase events before the attach");
+    // One answer 65 s after the attach, then only failed reads up to the
+    // bound at 80 s: the facet the explanation describes is the one at 65 s.
+    const clock = fakeClock();
+    clock.t = 165_000;
+    let n = 0;
+    const read = async (): Promise<GenlockLock> => {
+      n++;
+      if (n === 1) return stuck();
+      throw new Error("http://127.0.0.1:8899/bundle-state.json: Timeout 10000ms exceeded");
+    };
+    const msg = await rejection(
+      waitForProbeLock(read, PROBE, {
+        now: clock.now,
+        sleep: clock.sleep,
+        phaseEventsBeforeAttach: 2,
+        attachedAt: 100_000,
+      }),
+    );
+    expect(msg).toContain("1 reads answered, ");
+    expect(msg).toContain("the probe had 2 lifetime phase events before the attach");
+  });
+
   test("waitForProbeLock: idle → DEGRADED/audio_pairing → LOCKED/none, polled every 250 ms", async () => {
     // camera-box's observed attach, from the call: the old heartbeat (probe
     // idle) until 3.1 s, DEGRADED/audio_pairing (probe locked) until 4.1 s,
