@@ -1,5 +1,5 @@
 /**
- * What is on the OBS program right now, as SongPlayer reports it (#184).
+ * What is on SongPlayer's program right now, as SongPlayer reports it (#184).
  *
  * A program-state spec runs against the live box and NEVER switches the
  * program to set itself up (other specs press scenes through the facade

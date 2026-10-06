@@ -724,8 +724,9 @@ the test that kills each one BEFORE CI's mutation gate runs.
   put such text in a script file written with the Write tool (release 0.69.0
   lane B).
 - **The worktree guard also refuses any command that NAMES `.git`** (release
-  0.71.0 review): `grep -r --exclude-dir=.git …` reads as an unverifiable
-  git operation, and a `sed -i` whose pattern holds `'!.git'` tripped the
+  0.71.0 review), a `.github/…` path included: `grep -r --exclude-dir=.git …`
+  or `actionlint .github/workflows/x.yml` chained after a `cd` reads as an
+  unverifiable git operation, and a `sed -i` whose pattern holds `'!.git'` tripped the
   vault hook. `rg` is not installed on the box. Write the search as a small
   script with the Write tool (`grep -rnIF --exclude-dir=…` inside it) and run
   `bash <scratch>/refs.sh`; likewise `gh … -q '"\(.x)"'` jq interpolation:

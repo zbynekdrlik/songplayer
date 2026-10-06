@@ -5,7 +5,7 @@ paths:
   - "e2e/box-api.ts"
 ---
 
-# Post-deploy specs: the OBS program can be ANY sp-* scene (#184)
+# Post-deploy specs: SongPlayer's program can be ANY sp-* scene (#184)
 
 A program-state spec runs on the live box and never switches the program to set
 itself up (other post-deploy specs press `sp-*` scenes through SongPlayer's

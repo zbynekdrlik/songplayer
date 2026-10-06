@@ -327,8 +327,8 @@ an idle check; Claude during active prompts can too.
 
 Receiver-side ground-truth soak for the genlock chain (Genlock 4/6 lane 2).
 `workflow_dispatch`-only for now (the daily `schedule` line is committed
-commented-out; enable it when camera-box#1295 puts cg OBS on the genlock
-build). It is NOT wired to push/PR — it deliberately waits `minutes`, which is
+commented-out; enable it only once pointing the A/V gate's probe for a soak
+is automated, see "What it can see since #221 lane 3" below). It is NOT wired to push/PR — it deliberately waits `minutes`, which is
 allowed only outside the PR pipeline (CLAUDE.md "CI architecture").
 
 **Run it:**

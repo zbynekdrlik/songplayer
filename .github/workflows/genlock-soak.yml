@@ -48,7 +48,7 @@ on:
         type: string
         default: cg-obs
   # schedule:
-  #   - cron: "17 3 * * *"   # enable when camera-box#1295 puts cg OBS on the genlock build (see songplayer#149)
+  #   - cron: "17 3 * * *"   # enable only once the probe pointing is automated (header; songplayer#149)
 
 permissions:
   contents: read

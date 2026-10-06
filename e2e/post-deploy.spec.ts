@@ -546,9 +546,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   /**
    * Full-chain end-to-end test for issue #11 + #9 combined.
    *
-   * 1. Non-sp scene on OBS program, ytfast paused.
+   * 1. The baseline scene (`pickBaselineScene`, sp-slow) on program, ytfast
+   *    paused.
    * 2. Open the dashboard in Playwright; ytfast card shows "Nothing playing".
-   * 3. Switch OBS program scene to `sp-fast` via obs-websocket-js.
+   * 3. Press `sp-fast` through SongPlayer's facade via obs-websocket-js.
    * 4. Within 15 seconds the ytfast card must transition to `.np-info`.
    *
    * This exercises the entire chain (#221 L4b):
