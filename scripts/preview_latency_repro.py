@@ -240,39 +240,49 @@ class VideoClock:
     pause) nothing is written, so the encoder starves and the picture holds
     pixel-exact; the next canvas first fills the slots decided before it
     arrived with the last written one (at most MAX_GAP_FILL_SLOTS, a longer gap
-    ends the encoder run), then takes its own slot once it is decided."""
+    ends the encoder run), then takes its own slot once it is decided. The
+    newest canvas for a slot replaces the pending one; a pending canvas whose
+    slot was decided before a newer one arrived stays (review round 3)."""
 
     def __init__(self):
         self.start_us = None
-        self.pending = None  # (frame, arrival_us)
+        self.pending = []  # [(frame, arrival_us)], oldest first, one per slot
         self.last = None
         self.written = self.repeated = self.skipped = self.max_burst = 0
 
     def offer(self, frame, arrival_us: int):
-        if self.pending is not None:
-            self.skipped += 1
-        self.pending = (frame, arrival_us)
+        if self.pending:
+            newest = self.pending[-1][1]
+            due = self.start_us is not None and (
+                self.slot_of(arrival_us) > self.slot_of(newest))
+            if not due:
+                self.pending.pop()
+                self.skipped += 1
+        self.pending.append((frame, arrival_us))
 
     @staticmethod
     def slots_due(elapsed_us: int) -> int:
         return max(0, elapsed_us - DECIDE_LATE_US) // FRAME_US + 1
 
-    def pending_slot(self):
-        if self.start_us is None or self.pending is None:
-            return None
-        elapsed = max(0, self.pending[1] - self.start_us)
+    def slot_of(self, arrival_us: int) -> int:
+        elapsed = max(0, arrival_us - self.start_us)
         slot = 0 if elapsed == 0 else self.slots_due(elapsed - 1)
         return max(slot, self.written)
+
+    def pending_slot(self):
+        if self.start_us is None or not self.pending:
+            return None
+        return self.slot_of(self.pending[0][1])
 
     def must_restart(self) -> bool:
         slot = self.pending_slot()
         return slot is not None and slot > self.written + MAX_GAP_FILL_SLOTS
 
     def take_due(self, now_us: int):
-        if self.pending is None:
+        if not self.pending:
             return None
         if self.start_us is None:
-            self.start_us = self.pending[1]
+            self.start_us = self.pending[0][1]
         slot = self.pending_slot()
         fill = slot - self.written
         if fill > MAX_GAP_FILL_SLOTS:
@@ -283,14 +293,14 @@ class VideoClock:
             self.max_burst = max(self.max_burst, fill)
             return self.last, fill
         if self.slots_due(max(0, now_us - self.start_us)) > slot:
-            self.last, self.pending = self.pending[0], None
+            self.last = self.pending.pop(0)[0]
             self.written = slot + 1
             self.max_burst = max(self.max_burst, 1)
             return self.last, 1
         return None
 
     def wait_us(self, now_us: int) -> int:
-        if self.pending is None:
+        if not self.pending:
             return 200_000
         slot = self.pending_slot()
         if slot is None or slot > self.written:
@@ -317,7 +327,7 @@ def video_feeder(sh: Shared, sock: socket.socket, vq: queue.Queue) -> None:
     clock = VideoClock()
     while not sh.stop.is_set():
         fr = next_frame(vq, clock.wait_us(us()) / 1e6)
-        while fr is not None:  # the newest canvas takes the slot
+        while fr is not None:  # every canvas that came (the newest for a slot wins)
             clock.offer(fr, us())
             fr = next_frame(vq, 0)
         now = us()
@@ -326,7 +336,7 @@ def video_feeder(sh: Shared, sock: socket.socket, vq: queue.Queue) -> None:
                   file=sys.stderr)
             sh.restart_requested = True
             return
-        for _ in range(2):  # at most the gap's fill, then the new canvas
+        while True:  # the gap's fill, then each canvas whose slot is decided
             due = clock.take_due(now)
             if due is None:
                 break

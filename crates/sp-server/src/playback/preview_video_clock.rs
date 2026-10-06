@@ -20,10 +20,13 @@
 //!
 //! - A slot is written only with a NEW picture. Slot `k ≥ 1` is decided
 //!   [`DECIDE_LATE_US`] (half a slot) after its time, and a canvas belongs to
-//!   the first slot decided at or after its ARRIVAL; the newest canvas for a
+//!   the first slot decided at or after its ARRIVAL. The newest canvas for a
 //!   slot wins (the ones it replaced are skipped and go back to the tap's
-//!   pool). So every slot shows the picture nearest its time, whatever the
-//!   source's rate (24 fps: −18..+22 ms, 30 fps: −20..+7 ms).
+//!   pool), and a canvas whose slot was decided before a newer one arrived
+//!   is due and stays, however late the feeder's timer wakes (#221 review
+//!   round 3). So every slot shows the picture nearest its time, whatever
+//!   the source's rate (picture − slot: 24 fps −22..+18 ms, 30 fps
+//!   −7..+20 ms).
 //! - With no new picture nothing is written: during a pause the encoder
 //!   starves and the picture holds pixel-exact. A repeated canvas would not:
 //!   the encoder re-encodes it a little differently every few frames.
@@ -33,11 +36,15 @@
 //!   every slot and stays on the audio's. A fill is bounded by
 //!   [`MAX_GAP_FILL_SLOTS`]; a longer gap ends the encoder run instead (a new
 //!   child starts both timelines at 0, its viewers reconnect onto its init).
+//!   A video that shows one picture longer than that while it plays (a
+//!   variable-rate still stretch: the decoder delivers no new frame) restarts
+//!   the encoder the same way, a known cost of the bound.
 //!
 //! A clock step moves neither input. Units: times are µs on the feeder's
 //! monotonic clock (`clock_base` in `preview_encoder::run_child`, the same base
 //! the audio preroll reads).
 
+use std::collections::VecDeque;
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::Arc;
@@ -79,7 +86,7 @@ pub struct VideoClockStats {
     /// Slots filled with the last written picture after a gap (a pause, a
     /// decode stall, a write that blocked, a source below 25 fps).
     pub repeated: u64,
-    /// Canvases replaced by a newer one before their slot came.
+    /// Canvases replaced by a newer one for the same slot (never written).
     pub skipped: u64,
     /// The largest gap fill since the last [`VideoClock::take_stats`] (1 in
     /// steady play: a new picture's own slot).
@@ -91,12 +98,14 @@ pub struct VideoClockStats {
 pub struct VideoClock<T> {
     /// When frame 0's canvas arrived (µs); `None` until one has.
     start_us: Option<u64>,
-    /// The newest canvas not written yet, with its arrival (µs).
-    pending: Option<(T, u64)>,
+    /// The canvases not written yet, oldest first, with their arrival (µs):
+    /// one per slot, each for a later slot than the one before it. Once the
+    /// feeder has taken every due write, at most the newest is left.
+    pending: VecDeque<(T, u64)>,
     /// The last canvas written: what a gap is filled with.
     last: Option<T>,
-    /// The canvas the last write replaced as `last`, for the tap's pool.
-    released: Option<T>,
+    /// The canvases writes replaced as `last`, for the tap's pool.
+    released: Vec<T>,
     stats: VideoClockStats,
 }
 
@@ -104,9 +113,9 @@ impl<T> Default for VideoClock<T> {
     fn default() -> Self {
         Self {
             start_us: None,
-            pending: None,
+            pending: VecDeque::new(),
             last: None,
-            released: None,
+            released: Vec::new(),
             stats: VideoClockStats::default(),
         }
     }
@@ -134,37 +143,56 @@ impl<T> VideoClock<T> {
     }
 
     /// A tapped canvas that arrived at `arrival_us`: it takes its slot when
-    /// that is decided. Returns the pending canvas it replaces (never
-    /// written: skipped), for the tap's pool.
+    /// that is decided. It replaces the newest pending canvas if that one is
+    /// for the same slot (or no frame 0 exists yet) and returns it (never
+    /// written: skipped), for the tap's pool. A pending canvas whose slot was
+    /// decided before this arrival is due: it stays, and this one queues for
+    /// a later slot.
     pub fn offer(&mut self, frame: T, arrival_us: u64) -> Option<T> {
-        let old = self
-            .pending
-            .replace((frame, arrival_us))
-            .map(|(old, _)| old);
-        if old.is_some() {
+        let newest = self.pending.back().map(|&(_, at)| at);
+        let replaced = match (self.start_us, newest) {
+            // Its slot was decided by this arrival: it is due and stays. The
+            // feeder's timer may wake after a decision, when a newer canvas
+            // has already come (#221 review round 3).
+            (Some(start), Some(at))
+                if self.slot_of(start, arrival_us) > self.slot_of(start, at) =>
+            {
+                None
+            }
+            (_, Some(_)) => self.pending.pop_back().map(|(old, _)| old),
+            (_, None) => None,
+        };
+        self.pending.push_back((frame, arrival_us));
+        if replaced.is_some() {
             self.stats.skipped += 1;
         }
-        old
+        replaced
     }
 
-    /// Frame 0's arrival and the pending canvas's slot (never one already
-    /// written), once both exist.
+    /// The slot of a canvas that arrived at `arrival_us`, frame 0 having
+    /// arrived at `start_us`: never one already written.
+    fn slot_of(&self, start_us: u64, arrival_us: u64) -> u64 {
+        slot_of_arrival(arrival_us.saturating_sub(start_us)).max(self.stats.written)
+    }
+
+    /// Frame 0's arrival and the oldest pending canvas's slot, once both
+    /// exist.
     fn pending_slot(&self) -> Option<(u64, u64)> {
         let start = self.start_us?;
-        let arrival = self.pending.as_ref()?.1;
-        let slot = slot_of_arrival(arrival.saturating_sub(start)).max(self.stats.written);
-        Some((start, slot))
+        let arrival = self.pending.front()?.1;
+        Some((start, self.slot_of(start, arrival)))
     }
 
     /// The next write at `now_us`, if any: a canvas and how many times to
     /// write it. Call again until `None`: a gap first returns the last written
-    /// picture for the slots decided before the new canvas arrived, then the
-    /// new canvas once its own slot is decided. `None` while no new canvas is
-    /// pending (a pause writes nothing), before its slot is decided, and when
-    /// the gap is longer than [`MAX_GAP_FILL_SLOTS`] ([`Self::must_restart`]).
-    /// The first canvas starts the schedule at its arrival as frame 0.
+    /// picture for the slots decided before the oldest pending canvas arrived,
+    /// then that canvas once its own slot is decided, then the next one. `None`
+    /// while no new canvas is pending (a pause writes nothing), before its
+    /// slot is decided, and when the gap is longer than [`MAX_GAP_FILL_SLOTS`]
+    /// ([`Self::must_restart`]). The first canvas starts the schedule at its
+    /// arrival as frame 0.
     pub fn take_due(&mut self, now_us: u64) -> Option<(&T, u64)> {
-        let first = self.pending.as_ref()?.1;
+        let first = self.pending.front()?.1;
         self.start_us = Some(self.start_us.unwrap_or(first));
         let (start, slot) = self.pending_slot()?;
         let fill = slot - self.stats.written;
@@ -180,16 +208,18 @@ impl<T> VideoClock<T> {
         // Its own slot, once decided (`slots_due` never counts fewer than the
         // slot of a canvas that has arrived by `now_us`).
         if slots_due(now_us.saturating_sub(start)) > slot {
-            let (fresh, _) = self.pending.take()?;
+            let (fresh, _) = self.pending.pop_front()?;
             self.stats.written = slot + 1;
             self.stats.max_burst = self.stats.max_burst.max(1);
-            self.released = self.last.replace(fresh);
+            if let Some(old) = self.last.replace(fresh) {
+                self.released.push(old);
+            }
             return self.last.as_ref().map(|frame| (frame, 1));
         }
         None
     }
 
-    /// Whether the gap the pending canvas would fill is longer than
+    /// Whether the gap the oldest pending canvas would fill is longer than
     /// [`MAX_GAP_FILL_SLOTS`]: the feeder ends the encoder run instead of
     /// writing it (a new child restarts both timelines).
     pub fn must_restart(&self) -> bool {
@@ -197,23 +227,24 @@ impl<T> VideoClock<T> {
             .is_some_and(|(_, slot)| slot > self.stats.written + MAX_GAP_FILL_SLOTS)
     }
 
-    /// The canvas the last write replaced as the fill picture, once (for the
-    /// tap's pool).
+    /// A canvas a write replaced as the fill picture, each once (for the
+    /// tap's pool): call until `None`.
     pub fn released(&mut self) -> Option<T> {
-        self.released.take()
+        self.released.pop()
     }
 
     /// How long the feeder may wait for the next canvas at `now_us` (µs): 0
-    /// for the first canvas or while a gap fill is due, until the pending
-    /// canvas's slot is decided, and [`IDLE_POLL_US`] while none is pending.
+    /// for the first canvas or while a gap fill is due, until the oldest
+    /// pending canvas's slot is decided, and [`IDLE_POLL_US`] while none is
+    /// pending.
     pub fn wait_us(&self, now_us: u64) -> u64 {
-        match (self.pending.is_some(), self.pending_slot()) {
-            (false, _) => IDLE_POLL_US,
-            (true, None) => 0,
-            (true, Some((start, slot))) if slot == self.stats.written => {
+        match (self.pending.is_empty(), self.pending_slot()) {
+            (true, _) => IDLE_POLL_US,
+            (false, None) => 0,
+            (false, Some((start, slot))) if slot == self.stats.written => {
                 (start + slot * FRAME_US + DECIDE_LATE_US).saturating_sub(now_us)
             }
-            (true, Some(_)) => 0,
+            (false, Some(_)) => 0,
         }
     }
 
@@ -283,7 +314,7 @@ pub(super) fn spawn_video_feeder(
                     Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
                     Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 }
-                // The newest canvas takes the slot.
+                // Every canvas that came meanwhile (the newest for a slot wins).
                 while let Ok(frame) = rx.try_recv() {
                     offer_canvas(&shared, &mut clock, frame, us());
                 }
@@ -297,16 +328,14 @@ pub(super) fn spawn_video_feeder(
                     restart.store(true, Ordering::Relaxed);
                     break;
                 }
-                // At most the gap's fill, then the new canvas.
-                for _ in 0..2 {
-                    let Some((frame, n)) = clock.take_due(now) else {
-                        break;
-                    };
+                // Every due write: a gap's fill, then each canvas whose slot
+                // is decided, in slot order (several after a late wake).
+                while let Some((frame, n)) = clock.take_due(now) {
                     if (0..n).any(|_| sock.write_all(frame).is_err()) {
                         break 'feed;
                     }
                 }
-                if let Some(old) = clock.released() {
+                while let Some(old) = clock.released() {
                     shared.recycle_frame(old);
                 }
                 // `.max(1)`: a frame 0 at clock_base itself is not "none yet".
