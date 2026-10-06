@@ -142,7 +142,7 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
   });
 
   test("silent → flowing: the audio counts once it is above the floor for 1 s", () => {
-    let s = feed(NO_STREAK, 0, 4_000, 0); // the receiver's warm-up: no audio
+    let s = feed(NO_STREAK, 0, 4_000, 0); // DistroAV delivers no audio yet
     expect(s.since).toBeNull();
     expect(audioFlowing(s, 4_000)).toBe(false);
     s = nextAudioStreak(s, 0.1, 4_050); // -20 dBFS: the audio starts
@@ -201,7 +201,7 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
     const meters = fakeMeters();
     let t = 0;
     const wait = waitForInputAudio(meters.subscribe, PROBE, { now: () => t });
-    // 4 s of picture without audio, then -12 dBFS.
+    // 4 s in which DistroAV delivers no audio yet, then -12 dBFS.
     for (t = 0; t <= 8_000 && meters.listening; t += 50) {
       meters.push([{ inputName: "other", inputLevelsMul: [[1, 1, 1]] }, probeAt(t < 4_000 ? 0 : 0.25)]);
     }
@@ -219,7 +219,7 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
     const meters = fakeMeters();
     let t = 0;
     const wait = waitForInputAudio(meters.subscribe, PROBE, { now: () => t });
-    // Audio from 0, a gap at 600 ms (the dev.17 warm-up shape), audio again.
+    // Audio from 0, one silent reading at 600 ms, audio again.
     for (t = 0; t <= 8_000 && meters.listening; t += 50) {
       meters.push([probeAt(t === 600 ? 0 : 0.25)]);
     }
@@ -260,10 +260,12 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
     expect(msg).toContain("last input peaks [-66.0, -66.0] dBFS");
     expect(msg).toContain("loudest -12.0 dBFS");
     expect(msg).toContain("longest run above the floor 300 ms");
-    expect(msg, "an active, silent probe: DistroAV delivers no audio").toContain(
-      "DistroAV delivers no audio",
-    );
-    expect(msg, "the pairing never silences the meter").not.toContain("pairing locks");
+    // The probe WAS loud (-12 dBFS runs) but never held 1 s: the explanation
+    // must say so, never "no audio" next to readings that show audio
+    // (review round 3).
+    expect(msg).toContain("rose above the floor (loudest -12.0 dBFS) but never held 1000 ms");
+    expect(msg).not.toContain("delivers no audio");
+    expect(msg, "the pairing never silences the meter").not.toMatch(/pairing/i);
     expect(meters.listening, "unsubscribed at the bound").toBe(false);
     expect(meters.unsubscribes).toBe(1);
   });
@@ -280,11 +282,11 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
   });
 
   test("the bound's explanation follows what the meter saw", () => {
-    const seen = (events: number, withInput: number): AudioWaitReport => ({
+    const seen = (events: number, withInput: number, loudestDbfs = -Infinity): AudioWaitReport => ({
       waitedMs: 20_000,
       events,
       withInput,
-      loudestDbfs: -Infinity,
+      loudestDbfs,
       lastPeaksDbfs: null,
       longestStreakMs: 0,
     });
@@ -292,13 +294,26 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
     // Events, but never the probe: it is not on the program feed.
     expect(explainAudioWait(seen(400, 0))).toContain("never active");
     expect(explainAudioWait(seen(400, 0))).toContain("probe scene");
-    // The probe metered but silent: the receiver's audio never held.
-    // The probe metered but silent: DistroAV delivers it no audio. camera-box's
-    // pairing withholds packets from the MIX, after the meter's tap, so it is
-    // never the cause of a silent meter (review round 2).
-    expect(explainAudioWait(seen(400, 400))).toContain("DistroAV delivers no audio");
-    expect(explainAudioWait(seen(400, 400))).not.toContain("pairing locks");
     expect(explainAudioWait(seen(400, 1))).not.toContain("never active");
+    // The probe metered, never above the floor: DistroAV delivers it no audio.
+    // camera-box's pairing withholds packets from the MIX, after the meter's
+    // tap, so it is never the cause of a silent meter (review round 2).
+    expect(explainAudioWait(seen(400, 400))).toContain("DistroAV delivers no audio");
+    expect(explainAudioWait(seen(400, 400))).not.toMatch(/pairing/i);
+    // The floor itself is silence too.
+    expect(explainAudioWait(seen(400, 400, -60))).toContain("DistroAV delivers no audio");
+    // Above the floor but never held: audio with gaps, or the events stopped —
+    // never "no audio" (review round 3). The hold and the floor are the wait's.
+    const loud = explainAudioWait(seen(400, 400, -12.04));
+    expect(loud).toContain("rose above the floor (loudest -12.0 dBFS) but never held 1000 ms");
+    expect(loud).not.toContain("delivers no audio");
+    expect(loud).not.toMatch(/pairing/i);
+    expect(explainAudioWait(seen(400, 400, -30), { floorDbfs: -20, holdMs: 2_000 })).toContain(
+      "DistroAV delivers no audio",
+    );
+    expect(explainAudioWait(seen(400, 400, -12), { floorDbfs: -20, holdMs: 2_000 })).toContain(
+      "never held 2000 ms",
+    );
   });
 
   test("a closed connection ends the wait at once, naming the close", async () => {

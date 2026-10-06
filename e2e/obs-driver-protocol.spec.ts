@@ -169,7 +169,7 @@ async function meterStub(peakAt: (event: number) => number, dropAfter?: number) 
 }
 
 test("the audio wait subscribes to InputVolumeMeters only around the wait (#221 dev.18)", async () => {
-  // The receiver's warm-up: 20 silent events (~200 ms), then -12 dBFS.
+  // DistroAV delivers no audio for 20 events (~200 ms), then -12 dBFS.
   const stub = await meterStub((n) => (n < 20 ? 0 : 0.25));
   let driver: ObsDriver | null = null;
   try {
