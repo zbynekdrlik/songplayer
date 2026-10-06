@@ -92,7 +92,7 @@ impl Refusal {
         }
     }
 
-    /// The answer's text.
+    /// The reason in words: the 409 body's `error` (and the refusal WARN).
     pub fn message(self) -> &'static str {
         match self {
             Self::Inactive => {
