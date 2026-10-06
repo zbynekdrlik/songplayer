@@ -454,7 +454,7 @@ fn audio_preroll_samples_caps_the_connect_gap_at_5s() {
     assert_eq!(audio_preroll_samples(9_000, 0), 480_000);
 }
 
-// ── #184 round G2: the preview audio is kept on the wall clock BOTH ways ─────
+// ── #184 round G2: the preview audio is kept on the elapsed (monotonic) time BOTH ways ──
 
 /// Stereo frames per millisecond at 48 kHz (test-side literal, so a mutant of
 /// the production constant cannot hide behind the same expression).

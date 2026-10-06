@@ -749,7 +749,7 @@ time. The discipline, for EVERY audio assertion (`e2e/post-deploy-preview.spec.t
   `e2e/audio-helpers.mjs` and are unit-tested on ubuntu in `frontend.spec.ts`
   (mock-free), so the determinism is proven without the box.
 
-## #184 round G2 — the preview audio is kept on the wall clock BOTH ways; the owner's path is the acceptance
+## #184 round G2 — the preview audio is kept on the elapsed (monotonic) time BOTH ways; the owner's path is the acceptance
 
 The owner heard a fader change ~70 s late and the preview then froze into a
 reconnect loop — reproduced on LAN in a real browser (#184 comment 5802408328),
