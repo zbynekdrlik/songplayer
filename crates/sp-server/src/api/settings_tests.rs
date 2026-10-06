@@ -131,12 +131,12 @@ async fn every_secret_setting_reads_as_the_mask() {
     let text = get_text(&state).await;
     for (key, clear) in SECRETS {
         for part in clear.split(", ") {
-            assert!(!text.contains(part), "{key} in clear: {text}");
+            assert!(!text.contains(part), "{key} in clear in the GET");
         }
     }
     let all: HashMap<String, String> = serde_json::from_str(&text).unwrap();
     for (key, _) in SECRETS {
-        assert_eq!(all[*key], SECRET_MASK, "{key}");
+        assert!(all[*key] == SECRET_MASK, "{key} does not read as the mask");
     }
     assert_eq!(
         all["assemblyai_api_key"], "",
@@ -152,19 +152,22 @@ async fn the_peers_list_shows_each_peers_secrets_masked() {
     store(&state.pool, SETTING_PEERS, &peers_text(&[snv()])).await;
 
     let text = get_text(&state).await;
-    assert!(!text.contains(KEY), "the peer key in clear: {text}");
-    assert!(
-        !text.contains(CF_SECRET),
-        "the Cloudflare secret in clear: {text}"
-    );
+    assert!(!text.contains(KEY), "the peer key in clear");
+    assert!(!text.contains(CF_SECRET), "the Cloudflare secret in clear");
     let all: HashMap<String, String> = serde_json::from_str(&text).unwrap();
     let peers: Vec<PeerConfig> = serde_json::from_str(&all[SETTING_PEERS]).unwrap();
     assert_eq!(peers.len(), 1);
     assert_eq!(peers[0].name, "snv");
     assert_eq!(peers[0].base_url, "https://sp.newlevel.media");
-    assert_eq!(peers[0].key, SECRET_MASK);
+    assert!(
+        peers[0].key == SECRET_MASK,
+        "the peer key reads as the mask"
+    );
     assert_eq!(peers[0].cf_client_id.as_deref(), Some("client-id.access"));
-    assert_eq!(peers[0].cf_client_secret.as_deref(), Some(SECRET_MASK));
+    assert!(
+        peers[0].cf_client_secret.as_deref() == Some(SECRET_MASK),
+        "the cf secret reads as the mask"
+    );
 }
 
 /// The dashboard's save: read the map, change one field, send the whole map
@@ -182,9 +185,8 @@ async fn a_settings_map_saved_back_with_masks_keeps_every_secret() {
     assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
 
     for (key, clear) in SECRETS {
-        assert_eq!(
-            stored(&state.pool, key).await.as_deref(),
-            Some(*clear),
+        assert!(
+            stored(&state.pool, key).await.as_deref() == Some(*clear),
             "{key} kept"
         );
     }
@@ -212,15 +214,17 @@ async fn a_new_secret_replaces_the_stored_one_and_an_empty_one_clears_it() {
     ]);
     let (status, text) = patch(&state, &sent).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
-    assert_eq!(
-        stored(&state.pool, SETTING_GEMINI_API_KEY).await.as_deref(),
-        Some("example-gemini-three")
+    assert!(
+        stored(&state.pool, SETTING_GEMINI_API_KEY).await.as_deref()
+            == Some("example-gemini-three"),
+        "the new gemini_api_key replaces the stored one"
     );
-    assert_eq!(
+    assert!(
         stored(&state.pool, SETTING_REMOTE_WS_PASSWORD)
             .await
-            .as_deref(),
-        Some("")
+            .as_deref()
+            == Some(""),
+        "the empty remote_ws_password clears the stored one"
     );
 }
 
@@ -267,14 +271,17 @@ async fn a_peer_api_key_needs_32_characters() {
 
     let (status, text) = patch(&state, &body(&[(SETTING_PEER_API_KEY, short)])).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
-    assert!(!text.contains(short), "the key never appears: {text}");
-    assert_eq!(stored(&state.pool, SETTING_PEER_API_KEY).await, None);
+    assert!(!text.contains(short), "the key never appears");
+    assert!(
+        stored(&state.pool, SETTING_PEER_API_KEY).await.is_none(),
+        "a 31-character peer_api_key was written"
+    );
 
     let (status, text) = patch(&state, &body(&[(SETTING_PEER_API_KEY, KEY)])).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
-    assert_eq!(
-        stored(&state.pool, SETTING_PEER_API_KEY).await.as_deref(),
-        Some(KEY)
+    assert!(
+        stored(&state.pool, SETTING_PEER_API_KEY).await.as_deref() == Some(KEY),
+        "the 32-character peer_api_key is written"
     );
 }
 
@@ -300,7 +307,10 @@ async fn a_masked_peer_list_does_not_hide_a_node_named_like_a_peer() {
     let (status, text) = patch(&state, &sent).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
     assert_eq!(stored(&state.pool, SETTING_NODE_NAME).await, None);
-    assert_eq!(stored(&state.pool, SETTING_PEERS).await, Some(peers));
+    assert!(
+        stored(&state.pool, SETTING_PEERS).await == Some(peers),
+        "the stored peers are untouched"
+    );
 }
 
 /// The PATCH has no login and the API answers any origin, so the GET's
@@ -313,7 +323,10 @@ async fn a_masked_peer_key_cannot_follow_a_new_base_url() {
 
     let mut all = get_all(&state).await;
     let mut shown: Vec<PeerConfig> = serde_json::from_str(&all[SETTING_PEERS]).unwrap();
-    assert_eq!(shown[0].key, SECRET_MASK);
+    assert!(
+        shown[0].key == SECRET_MASK,
+        "the GET shows the peer key masked"
+    );
     shown[0].base_url = "https://attacker.example".into();
     all.insert(SETTING_PEERS.to_string(), peers_text(&shown));
     let (status, text) = patch(&state, &all).await;
@@ -322,10 +335,7 @@ async fn a_masked_peer_key_cannot_follow_a_new_base_url() {
         text.contains("snv") && text.contains("base_url"),
         "the reason names the peer and its base_url: {text}"
     );
-    assert!(
-        !text.contains(KEY),
-        "the reason never names the key: {text}"
-    );
+    assert!(!text.contains(KEY), "the reason never names the key");
     assert!(
         !text.contains("attacker.example"),
         "the reason never names the URL: {text}"

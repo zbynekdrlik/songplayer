@@ -72,7 +72,10 @@ async fn status_shows_the_node_and_its_peers_without_secrets() {
     store(&ex.pool, SETTING_PEER_TRANSFERS_PAUSED, "true").await;
     let (code, body) = get_status(&ex).await;
     assert_eq!(code, StatusCode::OK);
-    assert!(!body.contains(KEY) && !body.contains(CF_SECRET), "{body}");
+    assert!(
+        !body.contains(KEY) && !body.contains(CF_SECRET),
+        "the status shows a key or a cf secret"
+    );
     let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
     assert_eq!(s.node_name.as_deref(), Some("pp"));
     assert!(!s.serving, "no peer_api_key here");
@@ -100,7 +103,10 @@ async fn status_names_a_setting_that_does_not_hold() {
     store(&ex.pool, SETTING_PEERS, &peers).await;
     let (code, body) = get_status(&ex).await;
     assert_eq!(code, StatusCode::OK);
-    assert!(!body.contains(KEY) && !body.contains(CF_SECRET), "{body}");
+    assert!(
+        !body.contains(KEY) && !body.contains(CF_SECRET),
+        "the status shows a key or a cf secret"
+    );
     let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
     assert!(
         s.config_error
@@ -122,7 +128,7 @@ async fn a_named_node_with_its_key_serves_and_lists_no_peer() {
     store(&ex.pool, SETTING_PEER_API_KEY, KEY).await;
     let (code, body) = get_status(&ex).await;
     assert_eq!(code, StatusCode::OK);
-    assert!(!body.contains(KEY), "{body}");
+    assert!(!body.contains(KEY), "the status shows a key");
     let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
     assert_eq!(s.node_name.as_deref(), Some("snv"));
     assert!(s.serving);
@@ -177,7 +183,7 @@ async fn a_peer_without_a_cloudflare_token_has_no_cf_access() {
     store(&ex.pool, SETTING_PEERS, &peers).await;
     let (code, body) = get_status(&ex).await;
     assert_eq!(code, StatusCode::OK);
-    assert!(!body.contains(KEY), "{body}");
+    assert!(!body.contains(KEY), "the status shows a key");
     let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
     assert_eq!(s.config_error, None);
     assert_eq!(

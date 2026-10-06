@@ -62,7 +62,10 @@ fn a_named_node_with_its_key_serves_and_with_peers_asks() {
     let c =
         NodeConfig::from_settings(Some(" pp "), Some(KEY), Some(&list(&[peer("snv")]))).unwrap();
     assert_eq!(c.node_name.as_deref(), Some("pp"));
-    assert_eq!(c.serve_key.as_deref(), Some(KEY));
+    assert!(
+        c.serve_key.as_deref() == Some(KEY),
+        "the serving key as stored"
+    );
     assert!(c.serving());
     assert!(c.asking());
     assert_eq!(c.peers, vec![peer("snv")]);
@@ -102,10 +105,7 @@ fn a_name_is_1_to_32_of_lowercase_digits_and_dashes() {
 fn a_serving_key_has_at_least_32_characters() {
     let short = &KEY[..MIN_KEY_LEN - 1];
     let err = NodeConfig::from_settings(Some("snv"), Some(short), None).unwrap_err();
-    assert!(
-        !err.contains(short),
-        "the key never appears in an error: {err}"
-    );
+    assert!(!err.contains(short), "the key never appears in an error");
     assert!(
         NodeConfig::from_settings(Some("snv"), Some(KEY), None)
             .unwrap()
@@ -208,26 +208,32 @@ fn every_peer_list_rule_is_enforced() {
 fn a_peer_list_error_never_echoes_the_setting() {
     let raw = "\"secret-value-that-must-not-leak\"";
     let err = NodeConfig::from_settings(Some("pp"), None, Some(raw)).unwrap_err();
-    assert!(!err.contains("secret-value"), "{err}");
-    assert!(err.contains("line 1"), "{err}");
+    assert!(
+        !err.contains("secret-value"),
+        "the error echoes the setting"
+    );
+    assert!(err.contains("line 1"), "the error names no position");
 }
 
 #[test]
 fn debug_never_prints_a_secret() {
     let d = format!("{:?}", peer("snv"));
-    assert!(!d.contains(KEY), "{d}");
-    assert!(!d.contains(CF_SECRET), "{d}");
+    assert!(!d.contains(KEY), "PeerConfig Debug shows the key");
+    assert!(
+        !d.contains(CF_SECRET),
+        "PeerConfig Debug shows the cf secret"
+    );
     assert!(
         d.contains("client-id.access"),
-        "the client id is not a secret: {d}"
+        "the client id is not a secret"
     );
-    assert!(d.contains(MASK), "{d}");
+    assert!(d.contains(MASK), "PeerConfig Debug shows no mask");
     let c = NodeConfig::from_settings(Some("snv"), Some(KEY), None).unwrap();
     let d = format!("{c:?}");
-    assert!(!d.contains(KEY), "{d}");
+    assert!(!d.contains(KEY), "NodeConfig Debug shows the key");
     assert!(
         d.contains("snv") && d.contains(MASK),
-        "the name shown, the key masked: {d}"
+        "the name shown, the key masked"
     );
 }
 
@@ -243,22 +249,25 @@ fn shown_peers_masks_each_peers_secrets() {
         ..peer("old")
     };
     let shown = shown_peers(&list(&[peer("snv"), rig.clone(), keyless]));
-    assert!(!shown.contains(KEY), "{shown}");
-    assert!(!shown.contains(CF_SECRET), "{shown}");
+    assert!(!shown.contains(KEY), "shown_peers shows a key");
+    assert!(!shown.contains(CF_SECRET), "shown_peers shows a cf secret");
     let back: Vec<PeerConfig> = serde_json::from_str(&shown).unwrap();
     assert_eq!(back.len(), 3);
     assert_eq!(back[0].name, "snv");
-    assert_eq!(back[0].key, MASK);
-    assert_eq!(back[0].cf_client_secret.as_deref(), Some(MASK));
+    assert!(back[0].key == MASK, "snv's key reads as the mask");
+    assert!(
+        back[0].cf_client_secret.as_deref() == Some(MASK),
+        "snv's cf secret reads as the mask"
+    );
     assert_eq!(back[0].cf_client_id.as_deref(), Some("client-id.access"));
     assert_eq!(back[0].base_url, "https://sp.newlevel.media");
-    assert_eq!(back[1].key, MASK);
+    assert!(back[1].key == MASK, "rig's key reads as the mask");
     assert_eq!(back[1].cf_client_secret, None);
     assert_eq!(back[2].key, "", "an empty key stays empty");
     let rig_alone = shown_peers(&list(&[rig]));
     assert!(
         !rig_alone.contains("cf_client"),
-        "no Cloudflare token stays absent: {rig_alone}"
+        "no Cloudflare token stays absent"
     );
     assert_eq!(
         shown_peers("not json"),
@@ -324,7 +333,7 @@ fn unmask_takes_the_stored_secret_of_the_same_peer() {
         "no stored cf secret"
     );
     let fresh = unmask_peers(vec![peer("snv")], &[]).unwrap();
-    assert_eq!(fresh[0].key, KEY, "a key sent in clear is taken as sent");
+    assert!(fresh[0].key == KEY, "a key sent in clear is taken as sent");
 }
 
 /// A masked Cloudflare secret also stays with its `cf_client_id`; a new
@@ -384,18 +393,19 @@ async fn checked_peer_api_key_is_32_or_more_characters_or_empty() {
     let pool = pool().await;
     let none: HashMap<String, String> = HashMap::new();
     let short = &KEY[..MIN_KEY_LEN - 1];
-    let err = checked(&pool, SETTING_PEER_API_KEY, short, &none)
-        .await
-        .unwrap_err();
-    assert!(
-        !err.contains(short),
-        "the key never appears in an error: {err}"
-    );
+    let err = match checked(&pool, SETTING_PEER_API_KEY, short, &none).await {
+        Ok(_) => panic!("a 31-character peer_api_key was accepted"),
+        Err(e) => e,
+    };
+    assert!(!err.contains(short), "the key never appears in an error");
     let exact = checked(&pool, SETTING_PEER_API_KEY, KEY, &none).await;
-    assert_eq!(exact, Ok(KEY.to_string()));
+    assert!(
+        exact == Ok(KEY.to_string()),
+        "a 32-character key is taken as sent"
+    );
     let padded = format!(" {KEY} ");
     let trimmed = checked(&pool, SETTING_PEER_API_KEY, &padded, &none).await;
-    assert_eq!(trimmed, Ok(KEY.to_string()));
+    assert!(trimmed == Ok(KEY.to_string()), "the key is trimmed");
     let cleared = checked(&pool, SETTING_PEER_API_KEY, "", &none).await;
     assert_eq!(cleared, Ok(String::new()));
 }
@@ -446,9 +456,10 @@ async fn checked_peers_unmasks_from_the_stored_list_and_validates() {
         base_url: "https://snv.example".into(),
         ..peer("snv").masked()
     };
-    let err = checked(&pool, SETTING_PEERS, &list(&[moved]), &none)
-        .await
-        .unwrap_err();
+    let err = match checked(&pool, SETTING_PEERS, &list(&[moved]), &none).await {
+        Ok(_) => panic!("a masked key was taken to a changed base_url"),
+        Err(e) => e,
+    };
     assert!(
         err.contains("send its key again"),
         "a masked key stays with its stored base_url: {err}"
@@ -481,9 +492,8 @@ async fn checked_peers_unmasks_from_the_stored_list_and_validates() {
     store(&pool, SETTING_PEERS, "not json").await;
     let rig = list(&[peer("rig")]);
     let taken = checked(&pool, SETTING_PEERS, &rig, &none).await;
-    assert_eq!(
-        taken,
-        Ok(rig),
+    assert!(
+        taken == Ok(rig),
         "a stored list that does not parse counts as empty"
     );
 }
