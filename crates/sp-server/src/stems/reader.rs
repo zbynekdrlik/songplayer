@@ -102,7 +102,8 @@ pub fn dub_gains_for(kind: AudioSourceKind, f: MixFaders) -> Vec<f32> {
 }
 
 /// Open the audio stream for `audio_path` honouring the live karaoke control.
-/// Returns a boxed [`AudioStream`] ready to hand to `SplitSyncedDecoder::new`.
+/// Returns a boxed [`AudioStream`] ready to hand to the paced decoder
+/// (`SplitSyncedDecoder::with_audio_lead`).
 pub fn open_audio_stream(
     audio_path: &Path,
     control: &MixControl,

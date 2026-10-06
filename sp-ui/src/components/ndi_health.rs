@@ -107,7 +107,7 @@ fn global_inputs(health: &[NdiOutputHealth]) -> Vec<GlobalLockInput> {
 fn global_title(health: &[NdiOutputHealth], off: bool) -> String {
     let mut parts: Vec<String> = Vec::new();
     if off {
-        parts.push("pacing vypnuté → NDI SDK clock, free-running".to_string());
+        parts.push("pacing vypnuté — žiadny výstup zatiaľ nehlási pacing".to_string());
     }
     for o in health {
         parts.push(format!(

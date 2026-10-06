@@ -436,7 +436,7 @@ test("pacing disabled everywhere shows GENLOCK OFF in the header, no per-card ba
   await expect(global).toBeVisible({ timeout: 6000 });
   await expect(global).toContainText("● GENLOCK OFF");
   await expect(global).toHaveClass(/lock-off/);
-  // The OFF tooltip explains the free-running state.
+  // The OFF tooltip explains the state (no output reports pacing yet).
   await expect(global).toHaveAttribute("title", /pacing vypnuté/);
 
   // No per-card badge anywhere while pacing is off (the header badge is the only

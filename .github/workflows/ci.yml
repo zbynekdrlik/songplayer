@@ -1529,10 +1529,15 @@ jobs:
       - name: Verify playback updates OBS text source
         shell: powershell
         run: |
-          # Find a playlist with videos
+          # Find a playlist with videos that is NOT SP-program's source: this
+          # step plays and then pauses its pick, and pausing the program's own
+          # playlist would freeze the live wall and silence FOH (release 0.71.0
+          # review round 4).
+          $programSource = (Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program").source
           $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
           $testPl = $null
           foreach ($pl in $playlists) {
+            if ($pl.id -eq $programSource) { continue }
             $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
             if ($videos.Count -gt 0) {
               $testPl = $pl
@@ -1540,7 +1545,7 @@ jobs:
             }
           }
           if (-not $testPl) {
-            Write-Error "FAIL: No playlist with videos found"
+            Write-Error "FAIL: No playlist with videos found (other than SP-program's source $programSource)"
             exit 1
           }
           Write-Host "Testing playback on '$($testPl.name)' (id=$($testPl.id))"
@@ -1626,8 +1631,9 @@ jobs:
           # (-1) on program nobody does. A playlist played off program writes
           # nothing, so the check would read whatever the owner shows, and
           # fail with -1 on program. So the test playlist goes on SP-program
-          # first, through the dashboard's own cut, and SP-program gets back
-          # what it showed once the composition is read (also on a failure).
+          # first, through the dashboard's own cut, and SP-program gets its old
+          # source back once the composition is read (also on a failure; a
+          # playlist then starts its next song, like the suite's afterAll).
           # A box whose program never had a source keeps the test playlist:
           # there is no "nothing" to cut back to.
           $sourceBefore = (Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program").source
@@ -1677,16 +1683,19 @@ jobs:
               Start-Sleep -Seconds 1
             }
           } finally {
-            # Cleanup before the assertions: release the player (unless it was
-            # read in place), then give SP-program back its source (a
-            # playlist, or -1 "OBS manual").
-            if (-not $inPlace) {
-              Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
-            }
+            # Cleanup before the assertions. Cut away: give SP-program its old
+            # source back (a playlist, or -1 "OBS manual") with NO pause: the
+            # test playlist leaves program and pauses itself after the fade
+            # (scene_off.rs), so the program never carries a frozen, silent
+            # picture of it (review round 4). No source to give back, or the
+            # test playlist was the source but not playing: pause it. Read in
+            # place: nothing.
             if ($cutAway -and $null -ne $sourceBefore) {
               $back = @{ source = $sourceBefore } | ConvertTo-Json -Compress
               Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $back | Out-Null
               Write-Host "SP-program back on source $sourceBefore"
+            } elseif (-not $inPlace) {
+              Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
             }
           }
           $titleClips = @()
@@ -1714,14 +1723,16 @@ jobs:
 
           # ASSERT: every #sp-title clip must have non-empty text after playback.
           # If text is empty, SongPlayer's show_title path is broken.
-          $emptyClips = $titleClips | Where-Object { -not $_.Text -or $_.Text.Trim() -eq '' }
+          # @(): in Windows PowerShell 5.1 ONE matching PSCustomObject has no
+          # .Count ($null), so a single empty clip would pass `-gt 0`.
+          $emptyClips = @($titleClips | Where-Object { -not $_.Text -or $_.Text.Trim() -eq '' })
           if ($emptyClips.Count -gt 0) {
             Write-Error "FAIL: $($emptyClips.Count) of $($titleClips.Count) #sp-title clips have empty text after playback. SongPlayer is not pushing titles to Resolume."
             exit 1
           }
 
           # ASSERT: also check the warning indicator is gone.
-          $withWarning = $titleClips | Where-Object { $_.Text -match [char]0x26A0 }
+          $withWarning = @($titleClips | Where-Object { $_.Text -match [char]0x26A0 })
           if ($withWarning.Count -gt 0) {
             Write-Error "FAIL: $($withWarning.Count) clips contain the legacy warning indicator (U+26A0). The redesign should have removed it."
             exit 1

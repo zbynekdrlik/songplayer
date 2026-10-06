@@ -36,6 +36,13 @@ Two traps, both cost real debugging time (#149):
   (`'odpojené'`) reaches the written spec as mojibake and silently never matches.
   Comments are fine. `scripts/check_workflow_ps_ascii.py` (run by the eval-checks
   pytest via `scripts/tests/test_check_workflow_ps_ascii.py`) fails CI on a violation.
+- **Windows PowerShell 5.1 array traps** (release 0.71.0 review). (1)
+  `Invoke-RestMethod` emits a JSON array as ONE pipeline object, so
+  `Invoke-RestMethod … | Where-Object` sees the whole array once: store it in
+  a variable and `foreach` over it. (2) A single `[pscustomobject]` has no
+  `.Count` (it reads `$null`, fixed only in PowerShell 6+), so
+  `($rows | Where-Object …).Count -gt 0` is FALSE for exactly one match: wrap
+  every filter whose count you test in `@(…)`.
 - **Relaunching SongPlayer after a kill: end the scheduled-task INSTANCE first**
   (`Stop-ScheduledTask -TaskName SongPlayer`, then wait until the state is no longer
   `Running`). The task is `MultipleInstances=IgnoreNew`; after a bare
@@ -345,16 +352,21 @@ step picks the test playlist by the baseline discipline
 (`e2e/obs-baseline-scene.ts`: an active `sp-slow` playlist with videos, else
 any `sp-*` but `sp-fast` and `sp-warmup`, the sync tone), cuts SP-program to
 it with `POST /api/v1/program/cut`, plays, reads Arena's composition, and in
-a `finally` pauses it and cuts back to the old source. When the test
+a `finally` cuts back to the old source with NO pause (the test playlist
+leaves program and pauses itself after the fade, so the program never
+carries its frozen, silent picture; it pauses only with no source to give
+back). When the test
 playlist already IS the program's source and playing (its `/api/v1/ndi/health`
 row reads `Playing`), it is read in place: no cut, no play, no pause, so the
 live program is never paused (review round 3). An empty title is read again
 once a second, at most 10 more times: a song shows no title in its last
 3.5 s and first 1.5 s. Never let it pick `sp-warmup` or `sp-fast`: it is on
-the live wall and FOH for ~20 s. The cut back re-kicks the old source (a
-playlist that was paused on program starts its next song, the same as the
-post-deploy suite's `afterAll` restore); a box whose program never had a
-source keeps the test playlist (no "nothing" to cut back to).
+the live wall and FOH for ~20 s. The cut back re-kicks the old source: a
+playlist starts its NEXT song, whether it was playing or paused (the same
+as the post-deploy suite's `afterAll` restore); a box whose program never
+had a source keeps the test playlist (no "nothing" to cut back to). The
+step before it, "Verify playback updates OBS text source", plays and pauses
+a playlist that is NOT the program's source, for the same reason.
 
 **Two push runs for ONE commit: never cancel either by hand** (28.9.2026,
 `36494106201` + `36494106433`). The concurrency group already cancels the
