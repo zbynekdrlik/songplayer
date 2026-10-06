@@ -465,9 +465,13 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(unknown).not.toContain("the cause is");
     expect(unknown).toContain("relock");
     expect(unknown).toContain("candidates");
-    // Review round 10: the backward step is a cause too, and the most
-    // lifetime events is never evidence.
-    expect(unknown).toContain("backward step");
+    // Review rounds 10-11: the backward step is a live-input cause too,
+    // with its own note (it is not in the facet), and the most lifetime
+    // events is never evidence.
+    expect(unknown).toContain(
+      "late hold or backward step on a live input (a backward step is not in the facet: " +
+        "invisible in both lists)",
+    );
     expect(unknown).toContain("is not evidence");
     expect(named).toContain("box-wide");
     // Another reason with events before the attach: not the wake either.
