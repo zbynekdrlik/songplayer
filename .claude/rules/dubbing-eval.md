@@ -177,7 +177,10 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   session starts it multiplied were the drift trigger (`.claude/rules/dabing.md`).
 - **Voice-band measurement (#184 round E2, 2026-09-22).** `eval/dubbing/
   voice_band_measure.py` renders `seg.wav` through one pinned Live session per
-  catalogue voice and prints the voiced 5-s f0 band. Two traps: (1) run it as a
+  catalogue voice and prints the voiced 5-s f0 band. Its key comes from
+  `GEMINI_API_KEY` only (first entry of the list; #229: it no longer reads the
+  settings endpoint, which shows `********`) — on dev1 run it under
+  `airuleset.py secret exec GEMINI_API_KEY -- …`. Two traps: (1) run it as a
   MODULE from the repo root (`python -m eval.dubbing.voice_band_measure`) — a
   direct `python eval/dubbing/voice_band_measure.py` dies on `from eval.dubbing.
   voices import` (only `eval/dubbing/` lands on `sys.path`). (2) Measure with
