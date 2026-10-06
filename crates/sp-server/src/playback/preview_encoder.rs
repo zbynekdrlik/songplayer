@@ -393,7 +393,17 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
                     *g = Some("libx264".to_string());
                 }
             }
-            RunOutcome::ChildExitedNoInit | RunOutcome::ChildExited => {
+            // #221 A1: a fresh child after a long pause, for the viewers: the
+            // stopped stream ends (they reconnect onto the new init), no
+            // restart budget is spent. Nobody watching: settled below.
+            RunOutcome::Restart if shared.has_viewer() => {
+                info!(
+                    label = shared.label(),
+                    "preview-encoder: a fresh child after a long pause"
+                );
+                shared.end_stopped_stream();
+            }
+            RunOutcome::ChildExitedNoInit | RunOutcome::ChildExited | RunOutcome::Restart => {
                 // Nobody watching: settle it like a TTL stop (#184) — a viewer
                 // that subscribes as the child exits gets a new child. Read
                 // before any stream close (closed viewers leave).
@@ -437,6 +447,9 @@ enum RunOutcome {
     ViewersGone,
     ChildExited,
     ChildExitedNoInit,
+    /// #221 A1: the video feeder asked for a fresh child (a gap too long to
+    /// fill); not a crash, so it costs no restart budget.
+    Restart,
 }
 
 /// One child run: bind loopback listeners, spawn ffmpeg, accept its two
@@ -633,8 +646,8 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
 
 /// Watch the viewer count + child liveness. Returns when the viewers have been
 /// gone past [`VIEWER_TTL`], the child exits on its own, or the video feeder
-/// asks for a fresh child (`restart`, #221 A1: a gap too long to fill) — a
-/// `ChildExited`, which `supervise` respawns for the viewers.
+/// asks for a fresh child (`restart`, #221 A1: a gap too long to fill),
+/// which `supervise` starts for the viewers.
 #[cfg_attr(test, mutants::skip)]
 fn monitor_loop(
     shared: &Arc<StreamShared>,
@@ -645,11 +658,7 @@ fn monitor_loop(
     let mut empty_since: Option<Instant> = None;
     loop {
         if restart.load(Ordering::Relaxed) {
-            info!(
-                label = shared.label(),
-                "preview-encoder: the video feeder asked for a fresh child"
-            );
-            return RunOutcome::ChildExited;
+            return RunOutcome::Restart;
         }
         // Child exited on its own?
         if let Ok(Some(_)) = child.try_wait() {

@@ -164,12 +164,10 @@ impl<T> VideoClock<T> {
     /// the gap is longer than [`MAX_GAP_FILL_SLOTS`] ([`Self::must_restart`]).
     /// The first canvas starts the schedule at its arrival as frame 0.
     pub fn take_due(&mut self, now_us: u64) -> Option<(&T, u64)> {
-        // RED (#221): the 8d1f980a time-of-call schedule (a canvas takes the
-        // slot due when it is TAKEN, not the one its arrival belongs to).
-        self.pending.as_ref()?;
-        let start = *self.start_us.get_or_insert(now_us);
-        let due = slots_due(now_us.saturating_sub(start));
-        let fill = due.checked_sub(self.stats.written + 1)?;
+        let first = self.pending.as_ref()?.1;
+        self.start_us = Some(self.start_us.unwrap_or(first));
+        let (start, slot) = self.pending_slot()?;
+        let fill = slot - self.stats.written;
         if fill > MAX_GAP_FILL_SLOTS {
             return None;
         }
@@ -179,11 +177,16 @@ impl<T> VideoClock<T> {
             self.stats.max_burst = self.stats.max_burst.max(fill);
             return self.last.as_ref().map(|last| (last, fill));
         }
-        let (fresh, _) = self.pending.take()?;
-        self.stats.written = due;
-        self.stats.max_burst = self.stats.max_burst.max(1);
-        self.released = self.last.replace(fresh);
-        self.last.as_ref().map(|frame| (frame, 1))
+        // Its own slot, once decided (`slots_due` never counts fewer than the
+        // slot of a canvas that has arrived by `now_us`).
+        if slots_due(now_us.saturating_sub(start)) > slot {
+            let (fresh, _) = self.pending.take()?;
+            self.stats.written = slot + 1;
+            self.stats.max_burst = self.stats.max_burst.max(1);
+            self.released = self.last.replace(fresh);
+            return self.last.as_ref().map(|frame| (frame, 1));
+        }
+        None
     }
 
     /// Whether the gap the pending canvas would fill is longer than
@@ -204,13 +207,13 @@ impl<T> VideoClock<T> {
     /// for the first canvas or while a gap fill is due, until the pending
     /// canvas's slot is decided, and [`IDLE_POLL_US`] while none is pending.
     pub fn wait_us(&self, now_us: u64) -> u64 {
-        // RED (#221): the 8d1f980a wait (to the next slot's decision).
-        match (self.start_us, &self.pending) {
-            (_, None) => IDLE_POLL_US,
-            (None, Some(_)) => 0,
-            (Some(start), Some(_)) => {
-                (start + self.stats.written * FRAME_US + DECIDE_LATE_US).saturating_sub(now_us)
+        match (self.pending.is_some(), self.pending_slot()) {
+            (false, _) => IDLE_POLL_US,
+            (true, None) => 0,
+            (true, Some((start, slot))) if slot == self.stats.written => {
+                (start + slot * FRAME_US + DECIDE_LATE_US).saturating_sub(now_us)
             }
+            (true, Some(_)) => 0,
         }
     }
 
