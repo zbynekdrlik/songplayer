@@ -119,6 +119,64 @@ pub fn video_hw_decode(raw: Option<&str>) -> bool {
     raw.map_or(DEFAULT_VIDEO_HW_DECODE, |v| v.trim() == "true")
 }
 
+// #229: the node exchange — SongPlayer sites (SNV, PP) share processed content.
+/// This node's name in the exchange (`snv`, `pp`); empty = the exchange is off.
+pub const SETTING_NODE_NAME: &str = "node_name";
+/// The key this node's peer API accepts (`X-SP-Peer-Key`); empty = not serving.
+pub const SETTING_PEER_API_KEY: &str = "peer_api_key";
+/// The peers this node asks before a heavy job: a JSON list (sp-server `peer::config`).
+pub const SETTING_PEERS: &str = "peers";
+/// "true" stops new peer transfers both ways (an operator's pause, later #230's).
+pub const SETTING_PEER_TRANSFERS_PAUSED: &str = "peer_transfers_paused";
+/// The most this node SENDS to its peers, in Mbit/s (its uplink also carries the live stream).
+pub const SETTING_PEER_SERVE_MAX_MBPS: &str = "peer_serve_max_mbps";
+pub const DEFAULT_PEER_SERVE_MAX_MBPS: u32 = 20;
+pub const MAX_PEER_SERVE_MAX_MBPS: u32 = 10_000;
+
+/// #229: transfers pause only when the setting says exactly "true".
+pub fn peer_transfers_paused(raw: Option<&str>) -> bool {
+    raw.map(str::trim) == Some("true")
+}
+
+/// #229: the upload cap in Mbit/s: a whole number in 1..=10000, else the default.
+pub fn peer_serve_max_mbps(raw: Option<&str>) -> u32 {
+    raw.and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|v| (1..=MAX_PEER_SERVE_MAX_MBPS).contains(v))
+        .unwrap_or(DEFAULT_PEER_SERVE_MAX_MBPS)
+}
+
+/// #229: the Genius lyrics token (read by the lyrics worker from the DB).
+pub const SETTING_GENIUS_ACCESS_TOKEN: &str = "genius_access_token";
+
+/// #229: what a secret setting reads as outside the node (`GET /api/v1/settings`).
+/// A PATCH that sends it back keeps the stored value.
+pub const SECRET_MASK: &str = "********";
+
+/// #229: the secret settings this app reads or writes — keys, tokens,
+/// passwords. THE list: `GET /api/v1/settings` masks them (sp-server
+/// `api::settings`), the dashboard shows the mask. Workers read the stored
+/// value from the DB, never through the API. (`peers` is not on it: it holds
+/// its secrets INSIDE a JSON list; sp-server masks those fields.)
+pub const SECRET_SETTINGS: &[&str] = &[
+    SETTING_GEMINI_API_KEY,
+    SETTING_GENIUS_ACCESS_TOKEN,
+    SETTING_OBS_WEBSOCKET_PASSWORD,
+    SETTING_PEER_API_KEY,
+    SETTING_REMOTE_WS_PASSWORD,
+];
+
+/// #229: a setting NAMED like a credential is secret too, listed or not: the
+/// settings table keeps every row ever written, e.g. a retired provider's
+/// `replicate_api_token` / `assemblyai_api_key` (#159 deleted their code, not
+/// the rows), or a key an operator PATCHed by hand.
+pub const SECRET_SETTING_SUFFIXES: &[&str] = &["_key", "_token", "_password", "_secret"];
+
+/// #229: whether `key` is a secret setting: on [`SECRET_SETTINGS`], or named
+/// with one of [`SECRET_SETTING_SUFFIXES`].
+pub fn is_secret_setting(key: &str) -> bool {
+    SECRET_SETTINGS.contains(&key) || SECRET_SETTING_SUFFIXES.iter().any(|s| key.ends_with(s))
+}
+
 /// #212: the program-bus source id of the NDI input (playlists are positive
 /// row ids, so a negative id can never collide with one).
 pub const PROGRAM_INPUT_ID: i64 = -1;
@@ -302,5 +360,91 @@ mod tests {
         assert_eq!(SETTING_MIX_DUB_VOKALY, "mix_dub_vokaly");
         assert_eq!(SETTING_MIX_DUB_PODKLAD, "mix_dub_podklad");
         assert_eq!(SETTING_MIX_DUB_DABING, "mix_dub_dabing");
+    }
+
+    #[test]
+    fn exchange_setting_keys() {
+        assert_eq!(SETTING_NODE_NAME, "node_name");
+        assert_eq!(SETTING_PEER_API_KEY, "peer_api_key");
+        assert_eq!(SETTING_PEERS, "peers");
+        assert_eq!(SETTING_PEER_TRANSFERS_PAUSED, "peer_transfers_paused");
+        assert_eq!(SETTING_PEER_SERVE_MAX_MBPS, "peer_serve_max_mbps");
+    }
+
+    /// #229: peer transfers pause only on an explicit "true"; a missing or
+    /// mangled value keeps them running.
+    #[test]
+    fn peer_transfers_pause_only_on_true() {
+        assert!(!peer_transfers_paused(None));
+        assert!(peer_transfers_paused(Some("true")));
+        assert!(peer_transfers_paused(Some(" true\n")), "trimmed");
+        assert!(!peer_transfers_paused(Some("TRUE")), "only the exact word");
+        assert!(!peer_transfers_paused(Some("1")));
+        assert!(!peer_transfers_paused(Some("")));
+    }
+
+    /// #229: what this node sends to peers is capped at 1..=10000 Mbit/s;
+    /// anything else reads as the 20 Mbit/s default.
+    #[test]
+    fn peer_serve_cap_is_1_to_10000_mbps_else_20() {
+        assert_eq!(peer_serve_max_mbps(None), 20);
+        assert_eq!(peer_serve_max_mbps(Some("50")), 50);
+        assert_eq!(peer_serve_max_mbps(Some(" 7 ")), 7);
+        assert_eq!(peer_serve_max_mbps(Some("1")), 1);
+        assert_eq!(peer_serve_max_mbps(Some("10000")), 10_000);
+        assert_eq!(peer_serve_max_mbps(Some("10001")), 20);
+        assert_eq!(peer_serve_max_mbps(Some("0")), 20);
+        assert_eq!(peer_serve_max_mbps(Some("-1")), 20);
+        assert_eq!(peer_serve_max_mbps(Some("fast")), 20);
+    }
+
+    /// #229: THE secret list, exactly; each one masked by name too.
+    #[test]
+    fn the_secret_settings_list() {
+        assert_eq!(SECRET_MASK, "********");
+        assert_eq!(SETTING_GENIUS_ACCESS_TOKEN, "genius_access_token");
+        assert_eq!(
+            SECRET_SETTINGS,
+            &[
+                "gemini_api_key",
+                "genius_access_token",
+                "obs_websocket_password",
+                "peer_api_key",
+                "remote_ws_password",
+            ]
+        );
+        for key in SECRET_SETTINGS {
+            assert!(is_secret_setting(key), "{key}");
+        }
+    }
+
+    /// #229: a setting named like a credential is secret even unlisted (a
+    /// retired provider's row still in the DB); every other setting is not.
+    #[test]
+    fn a_setting_named_like_a_credential_is_secret() {
+        for key in [
+            "replicate_api_token",
+            "assemblyai_api_key",
+            "some_secret",
+            "x_password",
+        ] {
+            assert!(is_secret_setting(key), "{key}");
+        }
+        for key in [
+            "gemini_model",
+            "obs_websocket_url",
+            "cache_dir",
+            "peers",
+            "node_name",
+            "peer_transfers_paused",
+            "peer_serve_max_mbps",
+            "remote_ws_port",
+            "token",
+            "keyboard",
+            "api_key_hint",
+            "",
+        ] {
+            assert!(!is_secret_setting(key), "{key}");
+        }
     }
 }
