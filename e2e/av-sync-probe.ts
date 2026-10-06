@@ -44,14 +44,20 @@ export const PROGRAM_NDI_NAME = "SP-program";
 export const NDI_INPUT_KIND = "ndi_source";
 
 /**
- * Settings the probe always sets over its template's, so the recording has
- * the program's picture AND audio whatever input it copied: its audio on
- * (`ndi_audio`), not the low-bandwidth monitor (`genlock_monitor`), the
- * highest bandwidth (`ndi_bw_mode` 0; 2 would be audio only).
+ * Settings the probe always carries over its template's (set at creation AND
+ * on every run), so the recording is the program's picture AND audio through
+ * the receive path camera-box certified, whatever input it copied: the
+ * genlock FIFO on (`genlock_fifo`: DistroAV then forces source-timecode sync,
+ * KEEP_ACTIVE, the highest bandwidth and normal latency), its audio on
+ * (`ndi_audio`), not the low-bandwidth monitor (`genlock_monitor`), no
+ * measurement burn (`genlock_burn`: a QR on the recording), the highest
+ * bandwidth (`ndi_bw_mode` 0; 2 would be audio only).
  */
 export const PROBE_FIXED_SETTINGS: Readonly<Record<string, unknown>> = {
+  genlock_fifo: true,
   ndi_audio: true,
   genlock_monitor: false,
+  genlock_burn: false,
   ndi_bw_mode: 0,
 };
 
@@ -111,14 +117,16 @@ export interface ProbeState {
 }
 
 /** One provisioning step, in the order the gate runs them. */
-export type ProbeStep = "create_scene" | "create_input" | "add_to_scene" | "idle";
+export type ProbeStep = "create_scene" | "create_input" | "add_to_scene" | "reset";
 
 /**
  * The steps that leave the probe scene ready and the probe IDLE: create the
- * scene when it is missing; create the input in it (idle) when the input is
- * missing; else put the existing input into the scene when it is not there,
- * and idle it when it still points somewhere (a run that died mid-take).
- * Nothing for a ready, idle probe, and never a removal.
+ * scene when it is missing; create the input in it (idle, with
+ * [`PROBE_FIXED_SETTINGS`]) when the input is missing; else put the existing
+ * input into the scene when it is not there, and RESET it on every run
+ * ([`probeIdleSettings`]: its fixed settings again, and idle — a run that died
+ * mid-take may have left it pointed, a hand edit may have changed a
+ * setting). Never a removal.
  */
 export function probeSteps(state: ProbeState): ProbeStep[] {
   const steps: ProbeStep[] = [];
@@ -128,8 +136,13 @@ export function probeSteps(state: ProbeState): ProbeStep[] {
     return steps;
   }
   if (!state.inputInScene) steps.push("add_to_scene");
-  if (state.inputSource !== null && state.inputSource !== "") steps.push("idle");
+  steps.push("reset");
   return steps;
+}
+
+/** What an existing probe is reset to on every run: its fixed settings, idle. */
+export function probeIdleSettings(): Record<string, unknown> {
+  return { ...PROBE_FIXED_SETTINGS, ndi_source_name: "" };
 }
 
 /**

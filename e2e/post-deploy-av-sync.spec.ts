@@ -34,9 +34,11 @@
  * the input is shown or not — and is pointed at `SP-program` only once
  * `SP-program` carries the baseline playlist (never "OBS manuál": cg OBS
  * would record itself); the take waits until SP-program's receivers rose.
- * afterAll restores cg OBS's scene first, idles the probe, then restores the
- * program scene, so cg OBS never shows `SP-program` while the program shows
- * cg OBS, and no probe receiver stays on `SP-program`. Every
+ * afterAll idles the probe first (an idle probe shows nothing, so restoring
+ * the program to "OBS manuál" can never loop the picture), restores the
+ * program scene, then cg OBS's own scene only when the program restore did
+ * not already (a manual scene is set on cg OBS by the facade), and no probe
+ * receiver stays on `SP-program`. Every
  * recording file (plus its auto-remux sibling) is deleted, and an operator's
  * own running recording is never touched (`startRecord` refuses). The SONG
  * mixer faders are set to unity for the measurement and restored after.
@@ -52,8 +54,8 @@
  * - kills the analysis;
  * - settles a pending start (at most 10 s);
  * - stops our recording;
- * - restores the faders, cg OBS's scene, idles the probe, then the program
- *   scene;
+ * - restores the faders, idles the probe, restores the program scene, then
+ *   cg OBS's scene;
  * - then deletes every recording made.
  * Every step is attempted even if an earlier one fails.
  *
@@ -80,6 +82,7 @@ import {
   AV_PROBE_SCENE,
   NDI_INPUT_KIND,
   pickTemplateInput,
+  probeIdleSettings,
   probeInputSettings,
   probeReceiverAttached,
   probeSteps,
@@ -156,8 +159,8 @@ interface ProgramView {
  * #221 lane 3: make cg OBS's probe scene ready and its input IDLE
  * (`av-sync-probe.ts`): the scene and its one DistroAV input, created when
  * missing (the input's settings copied from an existing cg OBS NDI input,
- * with audio + full bandwidth forced, and no source), put in the scene, and
- * idled when a run that died mid-take left it pointed; never removed.
+ * with the certified receive path forced, and no source), put in the scene,
+ * and reset (its fixed settings, idle) on every run; never removed.
  * Returns the source name `SP-program` is advertised under, which the take
  * points the probe at.
  */
@@ -198,7 +201,7 @@ async function ensureProbeScene(rec: ObsDriver): Promise<string> {
       const id = await rec.addSceneItem(AV_PROBE_SCENE, AV_PROBE_INPUT);
       await rec.fitToCanvas(AV_PROBE_SCENE, id);
     } else {
-      await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: "" });
+      await rec.setInputSettings(AV_PROBE_INPUT, probeIdleSettings());
     }
   }
   return wanted;
@@ -286,6 +289,9 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   let cgInitialScene: string | null = null;
   let cgSwitched = false;
   let probePointed = false;
+  // cg OBS was ON the probe scene before the gate (a dead run): the body
+  // fails at its start (nothing to restore it to), afterAll idles the probe.
+  let cgStuckOnProbe = false;
   let autoRemux = false;
   // Cleanup state shared with afterAll. A timed-out test body never reaches
   // its own finally, so afterAll finishes whatever is still marked here.
@@ -355,6 +361,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       initialScene = null;
     }
     cgInitialScene = await recorder.currentProgramScene();
+    cgStuckOnProbe = cgInitialScene === AV_PROBE_SCENE;
     autoRemux = await recorder.autoRemuxEnabled();
   });
 
@@ -417,25 +424,13 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           await ctx.dispose();
         }
       });
-      // #221 lane 3: cg OBS's scene FIRST. Its probe scene shows SP-program,
-      // so restoring the program to "OBS manuál" (cg OBS) while cg OBS still
-      // shows the probe would loop the picture.
-      await step("restore cg OBS's program scene", async () => {
-        if (!cgSwitched || !cgInitialScene) return;
-        // Guarded: no same-scene studio transition on cg OBS (its 2 s
-        // self-fade, and the #170 dropped-next-event state).
-        if ((await rec.currentProgramScene()) !== cgInitialScene) {
-          await rec.switchScene(cgInitialScene);
-        }
-        expect(
-          await rec.currentProgramScene(),
-          `the A/V gate must restore cg OBS's program scene "${cgInitialScene}"`,
-        ).toBe(cgInitialScene);
-      });
-      // #221 lane 3: an idle probe holds no receiver on SP-program (DistroAV
-      // keeps one whether the input is shown or not).
+      // #221 lane 3: idle the probe FIRST. An idle probe holds no receiver on
+      // SP-program (DistroAV keeps one whether the input is shown or not) and
+      // shows nothing, so the program restore below can never loop the
+      // picture through cg OBS. Also after a dead run that left cg OBS on the
+      // probe scene (`cgStuckOnProbe`, the body failed at its start).
       await step("idle the probe", async () => {
-        if (!probePointed) return;
+        if (!probePointed && !cgStuckOnProbe) return;
         await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: "" });
         probePointed = false;
       });
@@ -446,6 +441,20 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           await driver.currentProgramScene(),
           `the A/V gate must restore the program scene "${initialScene}"`,
         ).toBe(initialScene);
+      });
+      // Then cg OBS's own scene, guarded: a manual scene the program restore
+      // put back is already on cg OBS (the facade sets it there), so no
+      // same-scene studio transition on cg OBS (its 2 s self-fade, and the
+      // #170 dropped-next-event state).
+      await step("restore cg OBS's program scene", async () => {
+        if (!cgSwitched || !cgInitialScene) return;
+        if ((await rec.currentProgramScene()) !== cgInitialScene) {
+          await rec.switchScene(cgInitialScene);
+        }
+        expect(
+          await rec.currentProgramScene(),
+          `the A/V gate must restore cg OBS's program scene "${cgInitialScene}"`,
+        ).toBe(cgInitialScene);
       });
       await step("delete the recordings", async () => {
         // A StopRecord whose inactive-poll timed out still left its path.
@@ -485,6 +494,13 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     ]) {
       expect(fs.existsSync(p), `${label} must exist at ${p}`).toBe(true);
     }
+    // #221 lane 3: a run that died mid-take left cg OBS on the probe scene;
+    // there is no scene of the owner's to restore it to (afterAll idles the
+    // probe), so fail before touching anything.
+    expect(
+      cgStuckOnProbe,
+      `cg OBS is on the A/V gate's probe scene "${AV_PROBE_SCENE}" (a previous run died mid-take) — put cg OBS back on its own scene`,
+    ).toBe(false);
 
     // 1. Put the baseline sp-* output on program.
     const baseline = pickBaselineScene(await driver.listScenes());

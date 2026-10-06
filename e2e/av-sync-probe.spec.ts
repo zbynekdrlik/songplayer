@@ -10,6 +10,7 @@ import {
   AV_PROBE_SCENE,
   ndiHost,
   pickTemplateInput,
+  probeIdleSettings,
   probeInputSettings,
   probeReceiverAttached,
   probeSteps,
@@ -55,51 +56,76 @@ test.describe("A/V gate probe scene (#221 lane 3)", () => {
     expect(pickTemplateInput([])).toBeNull();
   });
 
-  test("the probe input copies a template, forces audio + full bandwidth, starts idle", () => {
+  test("the probe input copies a template, forces the certified receive path, starts idle", () => {
     const template = {
       ndi_source_name: "RESOLUME-SNV (SP-slow)",
-      ndi_behavior: 0,
+      ndi_behavior: 2,
+      ndi_sync: 1,
       ndi_bw_mode: 2, // audio only on the template: never on the probe
       ndi_audio: false,
       genlock_monitor: true,
-      genlock_fifo: true,
+      genlock_burn: true,
+      genlock_fifo: false,
     };
     expect(probeInputSettings(template, "")).toEqual({
       ndi_source_name: "",
-      ndi_behavior: 0,
+      // Kept from the template; DistroAV forces them once genlock_fifo is on.
+      ndi_behavior: 2,
+      ndi_sync: 1,
+      // Forced by the probe.
+      genlock_fifo: true,
       ndi_bw_mode: 0,
       ndi_audio: true,
       genlock_monitor: false,
-      genlock_fifo: true,
+      genlock_burn: false,
     });
     expect(template.ndi_source_name, "the template is not changed").toBe("RESOLUME-SNV (SP-slow)");
     expect(probeInputSettings(null, "")).toEqual({
       ndi_source_name: "",
+      genlock_fifo: true,
       ndi_audio: true,
       genlock_monitor: false,
+      genlock_burn: false,
       ndi_bw_mode: 0,
     });
   });
 
-  test("the provisioning steps leave the probe ready and idle, never removed", () => {
+  test("an existing probe is reset to its fixed settings, idle", () => {
+    expect(probeIdleSettings()).toEqual({
+      ndi_source_name: "",
+      genlock_fifo: true,
+      ndi_audio: true,
+      genlock_monitor: false,
+      genlock_burn: false,
+      ndi_bw_mode: 0,
+    });
+  });
+
+  test("the provisioning steps leave the probe ready, reset and idle, never removed", () => {
     const missing = { sceneExists: false, inputSource: undefined, inputInScene: false };
+    // A new input is created idle with its fixed settings: no reset needed.
     expect(probeSteps(missing)).toEqual(["create_scene", "create_input"]);
     expect(probeSteps({ ...missing, sceneExists: true })).toEqual(["create_input"]);
-    // The input exists elsewhere: the scene is made and the input put in it.
+    // The input exists elsewhere: the scene is made, the input put in it, reset.
     expect(probeSteps({ sceneExists: false, inputSource: "", inputInScene: false })).toEqual([
       "create_scene",
       "add_to_scene",
+      "reset",
     ]);
-    // A run that died mid-take left it pointed at SP-program: idle it.
+    // A run that died mid-take left it pointed at SP-program: reset (idle) it.
     expect(
       probeSteps({ sceneExists: true, inputSource: "X (SP-program)", inputInScene: true }),
-    ).toEqual(["idle"]);
+    ).toEqual(["reset"]);
     expect(
       probeSteps({ sceneExists: true, inputSource: "X (SP-program)", inputInScene: false }),
-    ).toEqual(["add_to_scene", "idle"]);
-    // Ready and idle: nothing (no name set at all reads as idle too).
-    expect(probeSteps({ sceneExists: true, inputSource: "", inputInScene: true })).toEqual([]);
-    expect(probeSteps({ sceneExists: true, inputSource: null, inputInScene: true })).toEqual([]);
+    ).toEqual(["add_to_scene", "reset"]);
+    // Ready and idle: still reset, so a hand-edited setting never survives a run.
+    expect(probeSteps({ sceneExists: true, inputSource: "", inputInScene: true })).toEqual([
+      "reset",
+    ]);
+    expect(probeSteps({ sceneExists: true, inputSource: null, inputInScene: true })).toEqual([
+      "reset",
+    ]);
   });
 
   test("the take records SP-program only while it carries the baseline playlist", () => {
