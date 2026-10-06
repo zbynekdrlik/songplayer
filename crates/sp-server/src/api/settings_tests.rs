@@ -302,3 +302,35 @@ async fn a_masked_peer_list_does_not_hide_a_node_named_like_a_peer() {
     assert_eq!(stored(&state.pool, SETTING_NODE_NAME).await, None);
     assert_eq!(stored(&state.pool, SETTING_PEERS).await, Some(peers));
 }
+
+/// R13: the PATCH has no login and the API answers any origin, so the GET's
+/// masked peer list sent back with a new `base_url` must not re-point the
+/// stored key and Cloudflare token at that host.
+#[tokio::test]
+async fn a_masked_peer_key_cannot_follow_a_new_base_url() {
+    let state = test_state().await;
+    store(&state.pool, SETTING_PEERS, &peers_text(&[snv()])).await;
+
+    let mut all = get_all(&state).await;
+    let mut shown: Vec<PeerConfig> = serde_json::from_str(&all[SETTING_PEERS]).unwrap();
+    assert_eq!(shown[0].key, SECRET_MASK);
+    shown[0].base_url = "https://attacker.example".into();
+    all.insert(SETTING_PEERS.to_string(), peers_text(&shown));
+    let (status, text) = patch(&state, &all).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
+    assert!(
+        text.contains("snv") && text.contains("base_url"),
+        "the reason names the peer and its base_url: {text}"
+    );
+    assert!(
+        !text.contains(KEY),
+        "the reason never names the key: {text}"
+    );
+    assert!(
+        !text.contains("attacker.example"),
+        "the reason never names the URL: {text}"
+    );
+    let kept: Vec<PeerConfig> =
+        serde_json::from_str(&stored(&state.pool, SETTING_PEERS).await.unwrap()).unwrap();
+    assert_eq!(kept, vec![snv()], "the stored peer is untouched");
+}

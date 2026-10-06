@@ -270,14 +270,46 @@ fn shown_peers_masks_each_peers_secrets() {
 #[test]
 fn unmask_takes_the_stored_secret_of_the_same_peer() {
     let stored = vec![peer("snv")];
-    let sent = PeerConfig {
+    let kept = unmask_peers(vec![peer("snv").masked()], &stored).unwrap();
+    assert_eq!(
+        kept,
+        vec![peer("snv")],
+        "the same base_url and cf_client_id: the stored key and cf secret"
+    );
+
+    // R13: a masked secret stays with the base_url it was stored for. The
+    // PATCH has no login, so a peer re-pointed at another host must not take
+    // the stored key and Cloudflare token there.
+    let moved = PeerConfig {
         base_url: "https://other.example".into(),
         ..peer("snv").masked()
     };
-    let merged = unmask_peers(vec![sent], &stored).unwrap();
-    assert_eq!(merged[0].key, KEY);
-    assert_eq!(merged[0].cf_client_secret.as_deref(), Some(CF_SECRET));
-    assert_eq!(merged[0].base_url, "https://other.example");
+    let err = unmask_peers(vec![moved], &stored).unwrap_err();
+    assert!(
+        err.contains("peer snv") && err.contains("send its key again"),
+        "{err}"
+    );
+    assert!(!err.contains("other.example"), "never the URL: {err}");
+    let moved_with_its_key = PeerConfig {
+        base_url: "https://other.example".into(),
+        key: KEY.into(),
+        ..peer("snv").masked()
+    };
+    let err = unmask_peers(vec![moved_with_its_key], &stored).unwrap_err();
+    assert!(
+        err.contains("peer snv") && err.contains("send cf_client_secret again"),
+        "the masked cf secret stays with the stored base_url too: {err}"
+    );
+    let moved_in_clear = PeerConfig {
+        base_url: "https://other.example".into(),
+        ..peer("snv")
+    };
+    assert_eq!(
+        unmask_peers(vec![moved_in_clear.clone()], &stored),
+        Ok(vec![moved_in_clear]),
+        "secrets sent in clear are taken as sent"
+    );
+
     assert!(
         unmask_peers(vec![peer("pp").masked()], &stored).is_err(),
         "no stored peer of that name"
@@ -293,6 +325,39 @@ fn unmask_takes_the_stored_secret_of_the_same_peer() {
     );
     let fresh = unmask_peers(vec![peer("snv")], &[]).unwrap();
     assert_eq!(fresh[0].key, KEY, "a key sent in clear is taken as sent");
+}
+
+/// R13: a masked Cloudflare secret also stays with its `cf_client_id`; a new
+/// service token is sent whole.
+#[test]
+fn a_masked_cf_secret_stays_with_its_client_id() {
+    let stored = vec![peer("snv")];
+    let new_id = PeerConfig {
+        cf_client_id: Some("other-id.access".into()),
+        ..peer("snv").masked()
+    };
+    let err = unmask_peers(vec![new_id], &stored).unwrap_err();
+    assert!(
+        err.contains("peer snv") && err.contains("send cf_client_secret again"),
+        "{err}"
+    );
+    assert!(!err.contains("other-id"), "never the client id: {err}");
+    let new_token = PeerConfig {
+        cf_client_id: Some("other-id.access".into()),
+        cf_client_secret: Some("cf-other-secret-example".into()),
+        ..peer("snv").masked()
+    };
+    let merged = unmask_peers(vec![new_token], &stored).unwrap();
+    let want = PeerConfig {
+        cf_client_id: Some("other-id.access".into()),
+        cf_client_secret: Some("cf-other-secret-example".into()),
+        ..peer("snv")
+    };
+    assert_eq!(
+        merged,
+        vec![want],
+        "the stored key (the same base_url), the new token as sent"
+    );
 }
 
 #[tokio::test]
@@ -369,23 +434,26 @@ async fn checked_peers_unmasks_from_the_stored_list_and_validates() {
     let pool = pool().await;
     let none: HashMap<String, String> = HashMap::new();
     store(&pool, SETTING_PEERS, &list(&[peer("snv")])).await;
+    let same = list(&[peer("snv").masked()]);
+    let written = checked(&pool, SETTING_PEERS, &same, &none).await.unwrap();
+    let back: Vec<PeerConfig> = serde_json::from_str(&written).unwrap();
+    assert_eq!(
+        back,
+        vec![peer("snv")],
+        "the same base_url and cf_client_id: the stored key + cf secret"
+    );
     let moved = PeerConfig {
         base_url: "https://snv.example".into(),
         ..peer("snv").masked()
     };
-    let written = checked(&pool, SETTING_PEERS, &list(&[moved]), &none)
+    let err = checked(&pool, SETTING_PEERS, &list(&[moved]), &none)
         .await
-        .unwrap();
-    let back: Vec<PeerConfig> = serde_json::from_str(&written).unwrap();
-    let want = PeerConfig {
-        base_url: "https://snv.example".into(),
-        ..peer("snv")
-    };
-    assert_eq!(
-        back,
-        vec![want],
-        "the stored key + cf secret, the new base_url"
+        .unwrap_err();
+    assert!(
+        err.contains("send its key again"),
+        "R13: a masked key stays with its stored base_url: {err}"
     );
+    assert!(!err.contains("snv.example"), "never the URL: {err}");
 
     let stranger = list(&[peer("rig").masked()]);
     let err = checked(&pool, SETTING_PEERS, &stranger, &none).await;
