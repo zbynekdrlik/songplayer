@@ -118,9 +118,9 @@ pub trait PacedSink {
 
     /// Emit one boundary from an already-shared frame (#203). The DEFAULT builds
     /// a one-shot [`PacedFrame`] over the borrowed pixels and delegates to
-    /// [`emit_standby`](Self::emit_standby), so an `emit`-only sink still works;
-    /// `HandoffSink` (and the tests' `FrameSubmitter`) OVERRIDE it to move the
-    /// `SharedFrame` on by `Arc`. The standby pair (idle / pre-roll black, a starve fill, a held
+    /// [`emit_standby`](Self::emit_standby), so an `emit`-only sink still works (the
+    /// `HandoffSink` keeps it: its job takes the frame by `Arc`); the tests' `FrameSubmitter`
+    /// OVERRIDES it into its zero-copy holdover. The standby pair (idle / pre-roll black, a starve fill, a held
     /// seek frame, #147) goes through it by SHARED reference (a refcount bump).
     #[allow(clippy::too_many_arguments)]
     fn submit_shared(

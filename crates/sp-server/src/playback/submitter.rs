@@ -45,8 +45,6 @@ pub struct FrameSubmitter<B: NdiBackend> {
     prev_frame: Option<SharedFrame>,
     frame_rate_n: i32,
     frame_rate_d: i32,
-    /// Monotonic count of submitted pairs.
-    frames_submitted_total: u64,
     /// The wall clock whose fleet relabel registry puts the wire labels on
     /// every pair (#224 part 2). Never ticked here: the pairs arrive stamped.
     wall: WallClock,
@@ -80,7 +78,6 @@ impl<B: NdiBackend> FrameSubmitter<B> {
             prev_frame: None,
             frame_rate_n,
             frame_rate_d,
-            frames_submitted_total: 0,
             wall,
             black_nv12: BlackNv12::default(),
         }
@@ -147,7 +144,6 @@ impl<B: NdiBackend> FrameSubmitter<B> {
         video_tc_100ns: i64,
         audio_tc_100ns: i64,
     ) {
-        self.frames_submitted_total += 1;
         // #224 part 2: the ONE edge where the fleet labels go on. The video
         // stamp is an internal boundary b: on the wire it is b's boundary
         // K_F slots later, floored — never future-dated. K_F is read once and
@@ -187,10 +183,6 @@ impl<B: NdiBackend> FrameSubmitter<B> {
     /// Borrow the underlying sender (the program output polls its receivers).
     pub fn sender(&self) -> &NdiSender<B> {
         &self.sender
-    }
-
-    pub fn frames_submitted_total(&self) -> u64 {
-        self.frames_submitted_total
     }
 
     /// The standby NV12 black for `width`×`height`, cached for the output's
@@ -399,10 +391,6 @@ mod submitter_tests_standby;
 #[cfg(test)]
 #[path = "submitter_tests_timecode.rs"]
 mod submitter_tests_timecode;
-
-#[cfg(test)]
-#[path = "submitter_tests_mutants.rs"]
-mod submitter_tests_mutants;
 
 #[cfg(test)]
 #[path = "submitter_tests_regrid.rs"]

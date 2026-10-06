@@ -49,9 +49,9 @@ pub fn plan_sleep_100ns(now_100ns: i64, until_100ns: i64, interval_100ns: i64) -
 /// The default [`PacedSink::submit_shared`] body: build a one-shot [`PacedFrame`]
 /// over the borrowed pixels and delegate to [`PacedSink::emit_standby`] (every
 /// shared-picture submit is a standby pair, #215), so a sink that implements
-/// only `emit` (the test sinks) keeps working. The production
-/// `paced_output::HandoffSink` OVERRIDES `submit_shared` to move the
-/// [`SharedFrame`] on by `Arc` instead.
+/// only `emit` keeps working. The production `paced_output::HandoffSink`
+/// keeps this default (its job takes the frame by `Arc` clone, no pixel
+/// copy); the tests' `FrameSubmitter` overrides it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn default_submit_shared<S: PacedSink + ?Sized>(
     sink: &mut S,

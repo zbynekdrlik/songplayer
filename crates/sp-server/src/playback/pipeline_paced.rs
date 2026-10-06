@@ -384,8 +384,8 @@ fn producer_drain_wait(
     }
 }
 
-/// Boundary-paced EMIT loop (#147 producer/consumer split). Same command / event
-/// contract as `pipeline::decode_and_send`, but the cadence is the wall-clock grid
+/// Boundary-paced EMIT loop (#147 producer/consumer split). The command / event
+/// contract of the deleted SDK-clocked `decode_and_send`, but the cadence is the wall-clock grid
 /// and the decode happens on a dedicated producer thread ([`run_decode_producer`])
 /// that fills a bounded look-ahead queue — box test 4 (2026-09-15) proved a
 /// one-frame synchronous look-ahead cannot hold the grid on this box while the
@@ -451,8 +451,8 @@ pub(crate) fn decode_and_send_paced(
         pacer.continue_grid_after(last);
     }
     let handoff_ref: &SharedHandoff = &handoff;
-    // Heartbeat window baselines: the honest observed fps is the SUBMIT-side
-    // frame count (frames that actually left the box), not the emit count. The
+    // Heartbeat window baselines: the honest observed fps is the DELIVERY-side
+    // frame count (frames the consumer handed to the program bus), not the emit count. The
     // thread's counters live for the pipeline, so start from where they are.
     let mut hb_prev_total: u64 = handoff_ref.submitted();
     let mut hb_prev_instant = Instant::now();

@@ -181,7 +181,6 @@ fn frame_submitter_submit_shared_is_zero_copy_via_the_owned_path() {
         src_ptr,
         "and the holdover keeps that same allocation"
     );
-    assert_eq!(sub.frames_submitted_total(), 1);
 }
 
 #[test]
@@ -216,7 +215,6 @@ fn paced_sink_emit_submits_the_pacer_frame_without_a_pixel_copy() {
         "the holdover shares the pacer's allocation (an Arc bump)"
     );
     assert_eq!(&frame.video[..], &[16u8; 12][..], "pacer pixels untouched");
-    assert_eq!(sub.frames_submitted_total(), 1);
 }
 
 #[test]
