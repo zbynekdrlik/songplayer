@@ -294,11 +294,11 @@ fn unmask_takes_the_stored_secret_of_the_same_peer() {
         ..peer("snv").masked()
     };
     let err = unmask_peers(vec![moved], &stored).unwrap_err();
+    assert!(!err.contains("other.example"), "the error names the URL");
     assert!(
         err.contains("peer snv") && err.contains("send its key again"),
         "{err}"
     );
-    assert!(!err.contains("other.example"), "never the URL: {err}");
     let moved_with_its_key = PeerConfig {
         base_url: "https://other.example".into(),
         key: KEY.into(),
@@ -307,7 +307,7 @@ fn unmask_takes_the_stored_secret_of_the_same_peer() {
     let err = unmask_peers(vec![moved_with_its_key], &stored).unwrap_err();
     assert!(
         err.contains("peer snv") && err.contains("send cf_client_secret again"),
-        "the masked cf secret stays with the stored base_url too: {err}"
+        "the masked cf secret stays with the stored base_url too"
     );
     let moved_in_clear = PeerConfig {
         base_url: "https://other.example".into(),
@@ -346,11 +346,11 @@ fn a_masked_cf_secret_stays_with_its_client_id() {
         ..peer("snv").masked()
     };
     let err = unmask_peers(vec![new_id], &stored).unwrap_err();
+    assert!(!err.contains("other-id"), "the error names the client id");
     assert!(
         err.contains("peer snv") && err.contains("send cf_client_secret again"),
         "{err}"
     );
-    assert!(!err.contains("other-id"), "never the client id: {err}");
     let new_token = PeerConfig {
         cf_client_id: Some("other-id.access".into()),
         cf_client_secret: Some("cf-other-secret-example".into()),
@@ -460,11 +460,11 @@ async fn checked_peers_unmasks_from_the_stored_list_and_validates() {
         Ok(_) => panic!("a masked key was taken to a changed base_url"),
         Err(e) => e,
     };
+    assert!(!err.contains("snv.example"), "the error names the URL");
     assert!(
         err.contains("send its key again"),
         "a masked key stays with its stored base_url: {err}"
     );
-    assert!(!err.contains("snv.example"), "never the URL: {err}");
 
     let stranger = list(&[peer("rig").masked()]);
     let err = checked(&pool, SETTING_PEERS, &stranger, &none).await;

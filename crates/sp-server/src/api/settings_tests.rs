@@ -251,14 +251,14 @@ async fn a_bad_peer_list_is_refused_and_nothing_is_written() {
         (SETTING_PEERS, "[{\"name\":\"SNV\"}]"),
     ]);
     let (status, text) = patch(&state, &sent).await;
+    assert!(
+        !text.contains("SNV"),
+        "the reason never echoes the sent peers text"
+    );
     assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
     assert!(
         text.contains(SETTING_PEERS),
         "the reason names peers: {text}"
-    );
-    assert!(
-        !text.contains("SNV"),
-        "the reason never echoes the sent peers text: {text}"
     );
     assert_eq!(stored(&state.pool, SETTING_GEMINI_MODEL).await, None);
     assert_eq!(stored(&state.pool, SETTING_PEERS).await, None);
@@ -270,8 +270,8 @@ async fn a_peer_api_key_needs_32_characters() {
     let short = &KEY[..31];
 
     let (status, text) = patch(&state, &body(&[(SETTING_PEER_API_KEY, short)])).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
     assert!(!text.contains(short), "the key never appears");
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
     assert!(
         stored(&state.pool, SETTING_PEER_API_KEY).await.is_none(),
         "a 31-character peer_api_key was written"
@@ -330,15 +330,15 @@ async fn a_masked_peer_key_cannot_follow_a_new_base_url() {
     shown[0].base_url = "https://attacker.example".into();
     all.insert(SETTING_PEERS.to_string(), peers_text(&shown));
     let (status, text) = patch(&state, &all).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
-    assert!(
-        text.contains("snv") && text.contains("base_url"),
-        "the reason names the peer and its base_url: {text}"
-    );
     assert!(!text.contains(KEY), "the reason never names the key");
     assert!(
         !text.contains("attacker.example"),
         "the reason never names the URL: {text}"
+    );
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
+    assert!(
+        text.contains("snv") && text.contains("base_url"),
+        "the reason names the peer and its base_url: {text}"
     );
     let kept: Vec<PeerConfig> =
         serde_json::from_str(&stored(&state.pool, SETTING_PEERS).await.unwrap()).unwrap();
