@@ -453,9 +453,9 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     const unknown = explainProbeLock(lock("DEGRADED", "recent_event", probe()), PROBE);
     expect(unknown).toContain('"DEGRADED" (reason "recent_event")');
     expect(unknown).not.toContain("before the attach");
-    // Review round 7: the generic recent_event text says the latch is
-    // box-wide and how to find the input (diff the two input lists), never
-    // "the one with the most events".
+    // Review rounds 7-8: the generic recent_event text says the latch is
+    // box-wide and that the two input lists are candidates, never proof
+    // (and never "the one with the most events").
     expect(unknown).toContain("box-wide");
     expect(unknown).toContain("inputs at the bound");
     // Review round 8: the text never names "the cause" from the two lists —
@@ -549,6 +549,9 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     );
     expect(reads.starts.at(-1)).toBe(180_000);
     expect(msg).not.toContain("before the attach");
+    // Review round 9: the bound's distance is the last answered read's too
+    // (the wait's start would print 65000).
+    expect(msg).toContain("the last answered read started 80000 ms after the bind");
   });
 
   test("a read exactly WAKE_LATCH_WINDOW_MS after the attach is past the window", async () => {
@@ -613,9 +616,9 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
   });
 
   test("the bound lists every genlock input as the last answered line saw it", async () => {
-    // Review round 7: the box-wide latch's input is the one that turned
-    // connected and live with events between the line before the attach
-    // and this one, so the bound logs this one too.
+    // Review rounds 7-8: the bound lists this line's inputs too, next to the
+    // list logged before the attach: candidates for the box-wide latch,
+    // never proof.
     const clock = fakeClock();
     const reads = fakeRead(clock, () => lock("DEGRADED", "recent_event", probe()));
     const msg = await rejection(
