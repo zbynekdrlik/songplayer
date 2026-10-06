@@ -184,9 +184,13 @@ export interface AudioWaitReport {
   lastPeaksDbfs: number[] | null;
   /** The longest run above the floor seen. */
   longestStreakMs: number;
-  /** The run above the floor still open when the wait ended (its last event
-   *  within the gap bound of the end), in ms; null or absent when none was. */
-  openRunMs?: number | null;
+  /** How many runs above the floor began (a run restarted after a gap in
+   *  the events counts again). */
+  runsAboveFloor: number;
+  /** The run above the floor still open when the wait ended — its last
+   *  reading within the gap bound of the end — as what was observed: how
+   *  long before the end it began, and its last reading. Null when none was. */
+  openRun: { beganMsBeforeEnd: number; lastReadingMsBeforeEnd: number } | null;
 }
 
 export interface AudioWaitOptions extends StreakOptions {
@@ -227,12 +231,16 @@ export function describeAudioWait(report: AudioWaitReport): string {
  * floor and hold:
  * - no event at all;
  * - an input that was never active;
- * - an active input still above the floor at the end, in a run shorter than
- *   the hold: its audio began too close to the bound (a late start);
- * - an active input that rose above the floor but never held: audio with
- *   gaps, or the meter events stopped;
+ * - an active input whose ONLY run above the floor came after silence and
+ *   was still open at the end (shorter than the hold): its audio started
+ *   late;
+ * - an active input that rose above the floor but never held, in any other
+ *   way (several runs, or one that ended): audio with gaps, or the meter
+ *   events stopped;
  * - an active input that never rose above the floor: DistroAV delivers it
  *   no audio.
+ *
+ * Every number it names was observed.
  */
 export function explainAudioWait(
   report: AudioWaitReport,
@@ -254,19 +262,22 @@ export function explainAudioWait(
   // camera-box's genlock audio pairing withholds packets from the MIX, after
   // the meter's tap, so it never silences or breaks this meter (review
   // round 2): no branch below names it.
-  const openRunMs = report.openRunMs ?? null;
-  if (openRunMs !== null) {
+  const open = report.openRun;
+  if (open !== null && report.runsAboveFloor === 1) {
     return (
-      `The probe's audio was still above the floor when the bound hit (a run of ` +
-      `${Math.round(openRunMs)} ms): it began less than ${holdMs} ms before it, so ` +
-      `DistroAV's audio for the probe started late (that run was not interrupted).`
+      `The probe's audio rose above the floor only after silence, ` +
+      `${Math.round(open.beganMsBeforeEnd)} ms before the bound, and was still above it ` +
+      `there (last reading ${Math.round(open.lastReadingMsBeforeEnd)} ms before it): ` +
+      `DistroAV's audio for the probe started late.`
     );
   }
   if (report.loudestDbfs > floorDbfs) {
+    const runs = `${report.runsAboveFloor} run${report.runsAboveFloor === 1 ? "" : "s"}`;
     return (
       `The probe's audio rose above the floor (loudest ${fmtDbfs(report.loudestDbfs)} dBFS) ` +
-      `but never held ${holdMs} ms: DistroAV delivers it with gaps, or the meter events ` +
-      `stopped (more than ${maxGapMs} ms apart, or the probe left the program feed).`
+      `but never held ${holdMs} ms (${runs} above it): DistroAV delivers it with gaps, or ` +
+      `the meter events stopped (more than ${maxGapMs} ms apart, or the probe left the ` +
+      `program feed).`
     );
   }
   return (
@@ -315,13 +326,14 @@ export function waitForInputAudio(
       loudestDbfs: -Infinity,
       lastPeaksDbfs: null,
       longestStreakMs: 0,
-      openRunMs: null,
+      runsAboveFloor: 0,
+      openRun: null,
     };
     const maxGapMs = opts.maxGapMs ?? MAX_METER_GAP_MS;
     let streak = NO_STREAK;
     let done = false;
     let unsubscribe: (() => void) | null = null;
-    // The error is built AFTER `waitedMs` and `openRunMs` are set, so it can
+    // The error is built AFTER `waitedMs` and `openRun` are set, so it can
     // name them.
     const finish = (error: (() => Error) | null) => {
       if (done) return;
@@ -330,11 +342,12 @@ export function waitForInputAudio(
       unsubscribe?.();
       const end = now();
       report.waitedMs = end - start;
-      // A run is still open only if its last event is within the gap bound
-      // of the end; an older one stopped (the events did).
-      report.openRunMs =
+      // A run is still open only if its last reading is within the gap bound
+      // of the end (the same <= as `nextAudioStreak`); an older one stopped
+      // (the events did).
+      report.openRun =
         streak.since !== null && streak.lastAt !== null && end - streak.lastAt <= maxGapMs
-          ? streak.lastAt - streak.since
+          ? { beganMsBeforeEnd: end - streak.since, lastReadingMsBeforeEnd: end - streak.lastAt }
           : null;
       if (error) reject(error());
       else resolve(report);
@@ -362,8 +375,10 @@ export function waitForInputAudio(
             typeof l[2] === "number" && Number.isFinite(l[2]) ? mulToDbfs(l[2]) : -Infinity,
           );
         }
+        const prevSince = streak.since;
         streak = nextAudioStreak(streak, peak, at, opts);
         if (streak.since !== null) {
+          if (streak.since !== prevSince) report.runsAboveFloor++;
           report.longestStreakMs = Math.max(report.longestStreakMs, at - streak.since);
         }
         if (audioFlowing(streak, at, holdMs)) finish(null);
