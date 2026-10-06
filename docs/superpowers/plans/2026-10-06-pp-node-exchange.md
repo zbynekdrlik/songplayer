@@ -18,6 +18,7 @@ These override the tasks below wherever they differ:
 - The origin of fetched content goes into `peer_fetches`; the row keeps the peer's real source values.
 - The stem fetch runs before the lyrics-venv check (lane 9).
 - Phase 0 resets `node_name` and the peer key on PP's copied DB before its first start.
+- Lane 1 masks EVERY secret-class setting in `GET /api/v1/settings` (the existing `gemini_api_key`, `obs_websocket_password`, `remote_ws_password`, the Genius token, and the new peer secrets). One list in `sp_core::config`; a masked PATCH keeps the stored value (#229, gap 10).
 
 ## Global Constraints
 
