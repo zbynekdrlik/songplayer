@@ -7,18 +7,36 @@ rust-version.workspace = true
 
 [dependencies]
 sp-core = { path = "../sp-core" }
+# #223 S3b: hardware video decode — the Direct3D 11 device Media Foundation
+# decodes on (`sp_gpu::VideoDevice`, Windows; the compositor's adapter rule)
+# and the mapped-rows bound (`sp_gpu::mapped_len`, pure, every platform).
+sp-gpu = { path = "../sp-gpu" }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 symphonia = { workspace = true }
 
+# #223 S3b: Direct3D11 + Dxgi_Common read a decoded DXGI surface's texture
+# (`ID3D11Texture2D::GetDesc`: its rows and format).
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Media_MediaFoundation",
     "Win32_System_Com",
     "Win32_Foundation",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi_Common",
 ] }
 
 [dev-dependencies]
 # Placeholder crate that defines the `mutants::skip` attribute as a no-op,
 # letting cargo-mutants exclude specific functions from mutation testing.
 mutants = "0.0.4"
+
+# #223 S3b: tests/mf_hw_decode.rs creates its own WARP device
+# (`D3D11CreateDevice` needs Direct3D + Dxgi) and names DXGI_ERROR_UNSUPPORTED,
+# windows-latest WARP's answer to the video flag at feature level 11.x (the
+# same `windows` 0.58, two more features).
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Dxgi",
+] }

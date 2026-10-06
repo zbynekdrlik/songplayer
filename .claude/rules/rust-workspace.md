@@ -154,6 +154,16 @@ entry" found one each round. All three came from ONE condition written twice
 so when two decisions depend on the same state, derive both from one
 predicate (`Window::holds_on_air`).
 
+**Drive a timer-driven state machine with a LATE consumer too (#221 review
+round 3).** The preview's `VideoClock` passed every test whose feeder woke each
+millisecond, yet lost pictures on Windows: its timer wakes up to 15.6 ms after
+the decision it waited for, while an input event wakes it at once, so a newer
+input arrived BEFORE the late decision ran and replaced the one that was
+already due. Model the consumer as the OS runs it: woken by each input at its
+real time AND by its timer `late` after each deadline, swept over ≥ 3 phases
+(0 / 2 / 15.6 ms, `preview_video_clock_tests.rs::one_second_late`), and assert
+the output does not depend on `late`.
+
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
 compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
@@ -209,7 +219,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   a `const fn` too — don't avoid it there. The no-compile box can't see it; it
   cost #192 round 3 a whole review round (three ceil-divs in `audio_emitter.rs`
   `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
-  already uses `.div_ceil()` (`chunking.rs`, `burn_overlay.rs`) — grep before
+  already uses `.div_ceil()` (`chunking.rs`, `loop_stats.rs`) — grep before
   hand-rolling a ceil.
 - **`clippy::manual_contains`** (`perf`, warn-by-default → `-D warnings`, #212
   follow-up review round 4). `slice.iter().any(|&x| x == y)` must be
@@ -242,6 +252,49 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   workspace is 1.85. Write `opt.is_none_or(|x| x.id != id)`: negate the
   closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
   the same table.
+- **`clippy::type_complexity` on a test's known-value table** (#223 S1a, CI
+  Lint run 37223378573). A table typed inline as an array of tuples, e.g.
+  `[(&str, [u8; 3], [u8; 3], [u8; 3]); 9]`, is "very complex" under `-D
+  warnings` (tests count, since Lint runs `--all-targets`). Name the row
+  above the test's doc comment: `type ColourBar = (&'static str, [u8; 3],
+  [u8; 3], [u8; 3]);`, then `let table: [ColourBar; 9]`. The lint stopped
+  the Lint job, and every Windows job behind it (build, WARP tests, deploy)
+  was skipped, so one tuple cost a whole CI cycle.
+- **`clippy::explicit_auto_deref` on `&mut *guard`** (#223 S2, CI Lint run
+  37267920602). Passing `&mut *guard` (a `MutexGuard<T>`) where the callee
+  takes `&mut T`, even to an `impl Fn(&mut T)`, is flagged under `-D
+  warnings`. Write a typed binding instead: `let t: &mut T = &mut guard;
+  f(t)`. It compiles in every call shape and leaves nothing for the lint.
+- **`clippy::field_reassign_with_default` on a test fixture** (#221 lane 3,
+  CI Lint run 37399017815). `let mut s = Fake::default();` followed by
+  `s.field = …;` is linted under `-D warnings` (`--all-targets` covers
+  `tests/`). Build it with struct-update syntax instead:
+  `Fake { field: …, ..Default::default() }`. Mutating through a method
+  (`s.map.insert(…)`) is not flagged. A lane deleting code around such a
+  fixture (here the `FakeObsState` knobs) leaves exactly this shape behind.
+- **`clippy::assertions_on_constants` on `assert!(SOME_CONST)`** (#147
+  bundle, reasoned before CI). Asserting a `const bool` is linted like
+  `assert!(true)`, and `assert_eq!(CONST, true)` trips
+  `bool_assert_comparison` instead. Pin a default through behaviour
+  (`assert!(program_max_enabled(None))`), not by asserting the const itself.
+- **`#[must_use]` goes on the TYPE, not also on a fn that returns it**
+  (#184, reasoned before CI). `clippy::double_must_use` is warn-by-default:
+  a `#[must_use]` fn whose return type is itself `#[must_use]` (`pub fn
+  settle(..) -> UnwatchedEnd` with `#[must_use] enum UnwatchedEnd`) fails
+  `-D warnings`. Mark the enum; mark a fn only when it returns a plain type
+  (`fn supervisor_exits(self) -> bool`).
+- **Moving Windows-only code into a shared helper can orphan a
+  `#[cfg(windows)] use`** (#217 review round 1). `pipeline.rs`'s
+  `#[cfg(windows)] use tracing::{debug, error, info, warn};` lost its last
+  bare `warn!` when the start-seek block moved into the cross-platform
+  `pipeline_types::real_start_ms`. Linux clippy never compiles that `use`,
+  so only the Windows build warns. After moving a block out of `#[cfg(windows)]`
+  code, grep the file for every name in its cfg-gated `use` lines.
+- **A helper called only from `#[cfg(windows)]` code: a `pub fn` re-exported
+  by `pub use` from the `pub mod` needs no allow** (#217). A `pub(crate)` fn
+  with no Linux caller is `dead_code` there, and a `pub(crate) use` of it is
+  `unused_imports`. `pub use pipeline_types::{…, real_start_ms}` makes it
+  crate API, so neither lint fires, and its Linux unit tests still gate it.
 
 ## Toolchain drift: CI's stable Rust moves under an unchanged tree (Rust 1.99, 3.10.2026)
 
@@ -308,6 +361,14 @@ failed on them (`36438006665`):
   the opaque one is not. Use the helper as a temporary
   (`pool.run(&recorder(&log))`), bind it in a block, or take the data out
   without moving (`std::mem::take(&mut *log.lock().unwrap())`).
+- **A borrow returned from ONE branch lives for the whole function → E0502
+  on a later mutation of the same field** (#221 A1 lane, review round 2:
+  the GREEN commit did not compile). `if fill > 0 && let Some(last) =
+  self.last.as_ref() { …; return Some((last, fill)); }` followed by
+  `self.last.replace(fresh)` is rejected (NLL problem case 3: a reference
+  returned conditionally is treated as borrowed to the end). Test the
+  condition without binding (`&& self.last.is_some()`) and borrow only in
+  the return (`return self.last.as_ref().map(|last| (last, fill));`).
 
 ## A persistent worker pool with borrowed jobs (#223 follow-up, `playback/band_pool.rs`)
 
@@ -344,8 +405,8 @@ every worker is done with it. The pieces that made that hold, and testable:
 A multi-thread tokio worker runs the task it spawned LAST first (its LIFO
 slot) and other workers may steal the rest, so two tasks spawned back to
 back can start in either order. The OBS client once spawned a task per
-facade call, so a playlist press's mirror could reach cg OBS after a later
-press. Anything whose ORDER matters goes through ONE task that takes the
+facade call, so a press's switch could reach cg OBS after a later press's.
+Anything whose ORDER matters goes through ONE task that takes the
 items in order (`obs::remote_call::run_calls`: write each frame, then take
 the next; a scene switch's answer is awaited first because cg OBS runs its
 messages on a thread pool; only a getter's answer wait is spawned). A test
@@ -369,12 +430,31 @@ the platform string — round-trip the result through `std::env::split_paths` an
 check `parts[0] == tools_dir`, which holds on both separators. Same rule for any
 `MAIN_SEPARATOR` / line-ending / drive-letter / temp-path assumption in a test.
 
+**A WARP (runner) premise is proven in CI before a test rests on it** (#223 S3b:
+Microsoft's page reads as if WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`,
+`windows-latest` refuses it at 11.x, three tests failed on correct code;
+`video-decode.md`). To put a runner fact in the CI log of a PASSING test, write
+`writeln!(std::io::stderr(), …)`: libtest captures `eprintln!` / `println!` of a
+passing test, not direct writes to the stderr handle.
+
+**A fix in `#[cfg(windows)]` code still gets its RED** (#221 review round 2):
+a `#[cfg(windows)] #[test]` next to the Linux tests runs on that job, e.g.
+`program_output_tests.rs::no_ndi_sdk_reads_as_a_polled_zero` calls the
+private `spawn_program_thread(None, bus)` and reads the bus. Put
+`#[cfg(windows)]` on the test fn itself and use only imports the Linux tests
+already use, so the Linux target has no unused import.
+
 **An engine test must not count the test pipeline's replies (release 0.68.0
 blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
 `PipelineCommand::Play` with a `PipelineEvent::Error`; on Windows the real
-pipeline has no NDI backend in CI, sends ONE Error at spawn and then only
-waits for Shutdown. So "no Play was sent" read from `event_rx` passes or fails
-by platform. Read it from engine state every Play resets instead: every Play
+pipeline runs (since #221 lane 3 it needs no NDI SDK: it feeds the program
+bus): its 30 fps idle fill and a consumer thread from spawn, a
+`HealthSnapshot` every 5 s, and a Play of a test path answered with a decode
+Error after its pre-roll. (Before lane 3, with no NDI backend in CI, it sent
+ONE Error at spawn and then only waited for Shutdown.) So "no Play was sent"
+read from `event_rx` passes or fails by platform, and an engine test's
+pipelines cost a little CPU on the Windows job: watch its duration after a
+change that adds engine tests. Read it from engine state every Play resets instead: every Play
 calls `begin_play`, which clears the song's title clock (`tests_hold.rs`).
 
 **Never key a "stale event" check on a tokio task id.** tokio documents that
@@ -406,14 +486,21 @@ review round 3). Before pushing, scan every changed file's doc lines: a doc
 line matching `^\s*(//!|///) ?([-+*]|\d+[.)]) ` followed by a non-blank doc
 line indented less than 3 spaces is the lint (a ~30-line Python scan in the
 scratchpad, list files from `git diff --name-only <base>..HEAD -- '*.rs'`;
-check it flags a known-bad sample first).
+check it flags a known-bad sample first). The scan is deliberately wider
+than markdown: CommonMark's ordered marker is 1-9 digits, so a wrapped
+10-digit comment id (`/// 5995652394. Read …`) is not a list item, and
+mid-paragraph only `1.` / `1)` can open an ordered list (`-`, `+`, `*`
+always can). Reflowing such a line costs nothing and ends the doubt
+(#207).
 
 ## A long-lived `JoinSet` must be JOINED, not only spawned and aborted (#219)
 
 A tokio `JoinSet` keeps a FINISHED task (its cell + output) until
 `join_next` / `try_join_next` takes it. A set that only ever sees `spawn` +
-`abort_all` — the OBS connection loop's helpers, one per ~2 s poll tick —
-grows for the whole life of the connection (~43 000 cells a day). Route every
+`abort_all` — the OBS connection loop's helpers, then one per ~2 s scene
+poll tick (deleted in #221 L6; still one per title text, ladder rung and
+rebuild) — grows for the whole life of the connection (~43 000 cells a day
+at the poll's rate). Route every
 spawn through a helper that first drains `try_join_next()` (and WARNs a
 `JoinError` that is not a cancellation): `obs/mod.rs::spawn_helper`. Test it
 on the current-thread `#[tokio::test]`: spawn finished tasks, `yield_now` a
@@ -593,6 +680,11 @@ behaviour, not a wrong spot. Keep them compiling on both sides:
   serves keeps compiling when GREEN deletes the other variants;
 - tests of functions that only GREEN adds (new pure helpers) go in the GREEN
   commit, as new tests; no RED test is edited there.
+- a NEW enum variant a route table returns (#221 lane 2: `Route::SceneList`)
+  breaks an existing pin like `assert_eq!(route(t), Route::Forward)`. Put
+  the new contract into the RED as an assertion that compiles on the old
+  tree (`assert_ne!(route("GetSceneList"), Route::Forward)`), so GREEN
+  edits no existing test (a GREEN that re-pinned it was flagged in review).
 
 **`cargo mutants --in-diff <range> --list` compiles nothing (#215).** It
 lists the diff's mutants (`file:line` + replacement) so a review can name
@@ -621,13 +713,24 @@ the test that kills each one BEFORE CI's mutation gate runs.
   A `gh … --jq` filter with `\(.x)` string interpolation and a `for n in …;
   do gh issue comment $n --body-file $D/…` loop are refused too: write each
   body with the Write tool and run one plain `gh issue comment <N> -R <repo>
-  --body-file <abs path>` per issue (release 0.69.0 lane B).
+  --body-file <abs path>` per issue (release 0.69.0 lane B). A bounded wait
+  loop on `$SECONDS` arithmetic (`end=$((SECONDS+560)); while [ $SECONDS -lt
+  $end ]`) is refused as well: put the loop in a scratch script (`date +%s`
+  deadline) and run `bash <scratch>/wait.sh <arg>` (#184).
 - **A recursive grep over the repo's `.claude` dir trips the credential-store
   hook** (`block-vault-store-read.sh` reads the command TEXT: a recursive
   read of that dir counts as a vault read, even inside an edit script's
   heredoc). Search the rules with the Grep tool and a `path` or `glob`, and
   put such text in a script file written with the Write tool (release 0.69.0
   lane B).
+- **The worktree guard also refuses any command that NAMES `.git`** (release
+  0.71.0 review), a `.github/…` path included: `grep -r --exclude-dir=.git …`
+  or `actionlint .github/workflows/x.yml` chained after a `cd` reads as an
+  unverifiable git operation, and a `sed -i` whose pattern holds `'!.git'` tripped the
+  vault hook. `rg` is not installed on the box. Write the search as a small
+  script with the Write tool (`grep -rnIF --exclude-dir=…` inside it) and run
+  `bash <scratch>/refs.sh`; likewise `gh … -q '"\(.x)"'` jq interpolation:
+  dump with a Python script that calls `gh … --json` and parses it.
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N
@@ -637,6 +740,11 @@ the test that kills each one BEFORE CI's mutation gate runs.
 - `a && b && c` parses as `(a && b) && c`, so its two `&&`→`||` mutants
   are `(a || b) && c` and `(a && b) || c` — never `a || (b && c)`. Model
   those two when you name the killing test (#215 round 4).
+- It generates NO mutant inside a macro's arguments (#144): `format!("key
+  {} of {total}", key_index + 1)` lists no `+` mutant, and neither does an
+  expression inside `assert!` / `json!` / `vec!`. A formula whose value
+  matters goes into a `let` or a helper fn outside the macro, or its test
+  pins it through the produced text.
 - It generates NO mutant for a plain assignment (`self.flag = false;`) or
   for an `if` condition that is a bare variable (`if breaker_just_closed {`).
   Deleting such a line survives the gate unseen, so give it its own
@@ -647,12 +755,22 @@ the test that kills each one BEFORE CI's mutation gate runs.
   (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
   effect with a behaviour test (#217 addendum 2,
   `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+- It never SWAPS a method or a field for its sibling (`pop_front` ↔
+  `pop_back`, `front()` ↔ `back()`, `first` ↔ `last`) — #221 review round
+  5: a queue that replaced its OLDEST entry instead of its newest passed
+  all 18 tests because none ever held two entries. For every such choice,
+  write a test whose state makes the two siblings differ (two entries
+  pending), and check it against the swapped variant in the scratch model.
 - **A branch whose ONLY effect is a log line survives the gate** (#224
   part 2 review round 3: `if … && !slew.owe(..) { warn!(..) }` — the
   delete-`!` mutant only moves the WARN). Give such a branch an observable
   effect a test reads (a counter: `WallVbanClock::taken_at_once`). Likewise
   never compute a log-only value inline (`jump_us = jump / 10`): its `/`→`%`
   / `*` mutants are invisible; log through a tested helper (`to_us(jump)`).
+  When WHICH line to log is the logic (a WARN on a state edge), extract the
+  decision into a pure fn returning an enum + the new state and test its
+  table; the `mutants::skip` logger only maps it (#221 review round 4,
+  `ndi_health_expect::receiver_log`).
 - **A timing pin at ONE phase can be phase-lucky** (#224 part 2 review
   round 3: VBAN's ±100 ppm bound held with the step on block 100 and broke
   on block 101 at 50 ppm). When a result depends on where an event lands
@@ -672,8 +790,9 @@ the test that kills each one BEFORE CI's mutation gate runs.
   listed `*`→`+` and `*`→`/`; with the 2 s default the `+` mutant is
   EQUIVALENT (2 + 2 = 2 × 2) and would survive the gate. Write such a
   constant as a literal (`Duration::from_secs(4)`) and pin the relation in
-  a test (`MIRROR_EXTRA_WAIT == DEFAULT_RESPONSE_TIMEOUT * 2`; a runtime
-  `Duration * u32` is fine there, it is not `const`).
+  a test (`MIRROR_EXTRA_WAIT == DEFAULT_RESPONSE_TIMEOUT * 2`, a constant
+  since deleted with the #221 mirror; a runtime `Duration * u32` is fine
+  there, it is not `const`).
 - `(at - plane) % ds` where `plane` is a multiple of `ds` (a plane or row
   edge): the `-`→`+` mutant gives the SAME remainder, so it is equivalent
   and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,
@@ -706,6 +825,21 @@ the test that kills each one BEFORE CI's mutation gate runs.
   any fix that adds a guard or adapts an existing test, re-list the FULL
   branch range (`cargo mutants --in-diff <base>..HEAD --list`) and re-map
   every mutant to a killer, not just the round's own diff.
+- **A tightened gate in FRONT of another one makes that one's test
+  vacuous** (#221 lane 2, review round 2). `may_write_wall` became
+  `owner == Some(pid)`, ahead of the `scene_active` gate in
+  `dispatch_lyrics_if_changed`; `dispatch_lyrics_resolume_gated_on_scene_active`
+  published no owner, so it returned at the NEW gate and still passed —
+  deleting the scene check would have passed every test (the fn is
+  `mutants::skip`, so no mutant shows it). When a gate is added or
+  tightened, re-read every test NAMED after a later gate and set it up so
+  the earlier gate passes (there: publish the owner, scene off). Likewise
+  an engine test that drives a wall write must model what production does
+  before it: put the playlist on air as the owner (`put_on_air_for_test`,
+  `program-bus.md` "One wall owner") — the harnesses of
+  `dispatch_lyrics_tests`, `tests_scene_change`, `tests_hold`,
+  `tests_scene_off_wall` and `tests_song_end` relied on "no owner
+  restricts nothing" until lane 2 made no owner mean nobody writes.
 - **A HANG fails the gate exactly like a survivor** (review round 1, same
   ticket). cargo-mutants kills a stalled test run at `--timeout` and reports
   TIMEOUT, which turns the shard red. The #215 harness first counted its
@@ -723,6 +857,17 @@ the test that kills each one BEFORE CI's mutation gate runs.
     to 0 — both spin forever on a paused clock. Bound it with `for n in
     1..=MAX` and break on the cap or the budget before pausing; the cap
     turns both mutants into a wrong probe count a test sees.
+  - the same for a BLOCKING consumer (#223 S2, `program_max.rs`): a
+    `next()` that waits on a condvar until a job, a release or a stop is
+    ready hangs any test that calls it on the test thread once a mutant
+    inverts its condition (`delete !` on `!enabled` made a queued job
+    "not ready" forever). Put the decision in a non-blocking step
+    (`Queue::step` → `Option`, served as `try_next`), let `next` only loop
+    on it, and have every unit test take steps with `try_next`; only a
+    wake-up test calls `next`, on a helper thread behind `recv_timeout`.
+    Likewise never `join()` a loop thread right after `stop()`: a
+    `stop → ()` mutant leaves it running and the join hangs. Wait
+    `wait_until(|| handle.is_finished())` (bounded) first, then join.
 
 **`tokio::select!` drops the branch futures before a handler runs**
 (tokio `macros/select.rs`: the futures live inside the `let output = {…}`
@@ -794,6 +939,16 @@ needed an explicit Linux unit test calling it through `MockNdiBackend`. When you
 add a pub fn during a diff, ask "does a LINUX `#[test]` actually call this?" — if
 not, add one or the mutation gate reddens.
 
+**cargo-mutants 27 never mutates inside a fn named `new`, and `exclude_re`
+also drops whole DIRECTORIES** (#184 bundle, review rounds 1–2).
+`PeakLimiter::new`'s `1 − 1000/(RELEASE_MS · rate)` listed no mutant until it
+moved into its own `release_factor` fn. `'sp-decoder/src/audio/'` then
+excluded everything under that dir (#210 narrowed it to the
+`SymphoniaAudioReader` methods, below), so the pure limiter first written as
+`audio/limiter.rs` was never gated; it lives at the crate root now
+(`peak_limiter.rs`). Before trusting the gate, `--list` the range and check
+every new fn's arithmetic appears.
+
 **Extracting pure logic OUT of a `#[cfg(windows)]` module: mind the file NAME
 (#147 spin budget).** The `.cargo/mutants.toml` `exclude_re` entries are
 SUBSTRING regexes. `'sp-server/src/playback/pipeline_paced'` excludes
@@ -802,6 +957,41 @@ into `pipeline_paced_spin.rs` would compile on Linux but never be
 mutation-tested. Name it outside every excluded prefix: `pacer_spin.rs`, with
 `pub mod` in `playback/mod.rs`. Then `grep` the exclude list for your new path
 before committing.
+
+**Exclude a type's glue, gate its file's pure helpers: a fn-scoped regex by
+TYPE name** (#210). A mutant's description names the type of a method
+(`replace SymphoniaAudioReader::open …`, `… in <impl AudioStream for
+SymphoniaAudioReader>::next_samples`), never a free fn's. So
+`'sp-decoder/src/audio/symphonia_reader\.rs:[0-9]+:[0-9]+:.*SymphoniaAudioReader'`
+excludes every method of the wrapper and leaves `ts_to_ms` / `seek_start` /
+… gated, with no line numbers to go stale. Check it with `cargo mutants
+--list --file <file>` (with the config) against `--no-config`: the two lists
+must split exactly into glue and helpers.
+
+**A `#[cfg(windows)]` fn in a NON-excluded file is still LISTED, and its mutants
+survive (#223 S0).** cargo-mutants reads the source without evaluating `cfg`,
+so `cargo mutants --in-diff … --list` lists e.g. `replace run -> BenchOutcome
+with Default::default()` for the `#[cfg(windows)]` twin of a fn. On the Linux
+runner that body is never compiled, so even a mutant that could not type-check
+(no `Default` on the type) builds and every test passes: MISSED. Keep such a
+fn a one-line wrapper with `#[cfg_attr(test, mutants::skip)]` and a doc line
+naming why, and move its logic into a cross-platform fn with Linux tests
+(`diag::decode_bench::run_on_decode_thread`: the thread, the slot dropped
+before the send, a panic caught as `Failed`). Re-list after the change: only
+the Linux twin should remain, and it should be unviable.
+
+**cargo-mutants skips a test module only by a PLAIN `#[cfg(test)]`** (#223
+S2). It recognizes `#[cfg(test)]` on the `mod` (it reads the attribute's
+top-level idents, it does not evaluate `all(...)`). A Windows-only test file
+wired as `#[cfg(all(test, windows))] #[path = "x_tests_warp.rs"] mod
+tests_warp;` had every helper fn inside listed as a mutant, each one a
+certain survivor on the Linux runner. Write two attributes instead (they are
+ANDed): `#[cfg(test)]` then `#[cfg(windows)]`, and re-list.
+
+**The design-gate hook reads every `#<digits>` in a commit message as an
+issue** (#223 S2). `block-commit-without-design.sh` blocked a commit whose
+message said "the embedded manifest (resource #1)": it looked for a design
+comment on issue 1. Write such a number without the hash ("resource id 1").
 
 ## Inserting a `mod` before a `#[cfg(test)]` test module STEALS the gate (#192 r5)
 
@@ -859,6 +1049,11 @@ address-reuse luck. A RED that FREES instead of recycling must be caught by a
 `pool_len` assertion (freeing never touches the pool, regardless of the
 allocator), NOT by a pointer-equality assertion (a freed address can be reused).
 
+**Process-wide COUNTERS too (#223 S3b review round 2):** `assert!(after > before)`
+on a static counter passes on a parallel sibling's increment. Every test that
+changes or reads it holds one `static Mutex<()>` (poison-tolerant), and the
+delta is pinned exactly (`before + 1`): `mf_hw_decode.rs` `COUNTERS`.
+
 ## A test-only serial lock held across `.await` must be a `tokio::sync::Mutex` (#184 G2 + G0.1, twice in one night)
 
 `clippy --all-targets -D warnings` runs `clippy::await_holding_lock` on the lib
@@ -889,6 +1084,20 @@ for the name before touching `Cargo.toml`:
 
 A feature change never touches `Cargo.lock`: features are not recorded
 there.
+
+**The `windows` crate (sp-decoder's MF bindings, 0.58) may be missing from
+the box's registry** (#223 S0): nothing on Tier-0 compiles a Windows target.
+Look first: `ls -d ~/.cargo/registry/src/*/windows-0.58.0` (by #223 S3b it
+was there, with `windows-core-0.58.0`; read `src/Windows/Win32/<Area>/mod.rs`
+in place, and copy a big `mod.rs` to the scratchpad before grepping it with
+a computed path, which the worktree guard refuses). If it is missing, fetch
+the crate itself into the scratchpad (a download, not a build):
+`curl -sSL -o w.crate https://crates.io/api/v1/crates/windows/0.58.0/download`,
+then `tar xzf w.crate windows-0.58.0/src/Windows/Win32/Media/MediaFoundation/mod.rs`
+and grep it (`pub unsafe fn GetNativeMediaType(&self, dwstreamindex: u32,
+dwmediatypeindex: u32) -> windows_core::Result<IMFMediaType>`). `GUID`'s
+public `data1..data4` fields are in `windows-core-0.58.0/src/guid.rs`, from
+the same URL with `windows-core`.
 
 ## Adding a path dependency between workspace crates on the Tier-0 box (#184 G4)
 

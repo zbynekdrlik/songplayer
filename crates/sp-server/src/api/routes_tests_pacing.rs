@@ -22,7 +22,6 @@ async fn ndi_health_endpoint_includes_pacing() {
         playlist_id: 22,
         ndi_name: "SP-paced".to_string(),
         state: PlaybackStateLabel::Playing,
-        connections: 1,
         frames_submitted_total: 10,
         frames_submitted_last_5s: 3,
         observed_fps: 30.0,
@@ -63,14 +62,10 @@ async fn ndi_health_endpoint_includes_pacing() {
             underruns: 4,
             overflows: 1,
             buffer_ms: 66,
-            emitter: Default::default(),
         },
-        // #149 Lane 1: an enabled, receiver-connected, event-free pipeline is LOCKED.
+        // #149 Lane 1: an enabled, event-free pipeline is LOCKED.
         lock_state: sp_core::genlock::lock_state::LockState::Locked,
         lock_reason: "locked".to_string(),
-        burn_on: false,
-        recovery_step: None,
-        sender_url: None,
         transport: sp_core::playback::TransportState::Idle,
     });
 

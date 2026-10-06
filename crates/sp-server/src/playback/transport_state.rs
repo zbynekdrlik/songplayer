@@ -2,7 +2,7 @@
 //! [`TransportState`] (#201).
 //!
 //! `TransportState` answers only "is this pipeline decoding right now?",
-//! INDEPENDENTLY of whether its NDI output is on OBS program. It sits beside
+//! INDEPENDENTLY of whether its playlist is on SongPlayer's program. It sits beside
 //! `state: WsPlaybackState` on `PlaybackStateChanged`: `play_state_to_ws` keeps
 //! folding the on/off-program fact into `state` (a decoding-off-program pipeline
 //! is reported `WaitingForScene`, unchanged — the #170 scene-aware contract),

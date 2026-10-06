@@ -158,6 +158,8 @@ impl Pacer {
     /// the last pre-seek picture with the standby silence, instead of flashing
     /// the pre-roll's black. A repeated seek before any new frame keeps the
     /// earlier hold. Without a fill (no pre-roll ran) it is a plain `anchor`.
+    /// #150: the seek is counted once its first fresh frame goes out
+    /// ([`count_settled_seek`](Pacer::count_settled_seek)).
     pub fn anchor_seek(&mut self) {
         let held = self.last_frame.take().map(|f| FillFrame {
             width: f.width,
@@ -166,16 +168,30 @@ impl Pacer {
             video: f.video,
         });
         self.anchor();
+        self.seek_settling = true;
         if let Some(fill) = self.standby_fill.as_mut() {
             fill.hold = held.or(fill.hold.take());
+        }
+    }
+
+    /// #150: a fresh frame went out. The first one after a seek's
+    /// re-anchor is the seek taking effect: count it
+    /// (`PacingStats::seeks`). The genlock lock window starts over at the
+    /// heartbeat that reads it (`lock_state.rs`), so whatever the seek's
+    /// refill did before this frame (the held picture's fills, a resync)
+    /// is already in the counters it restarts from, never read as a fault.
+    pub(super) fn count_settled_seek(&mut self) {
+        if self.seek_settling {
+            self.seek_settling = false;
+            self.seeks += 1;
         }
     }
 
     /// A boundary with nothing of the song to show (#147): with a standby fill
     /// set (by [`preroll`](Pacer::preroll)), it still carries the standby pair
     /// (the held pre-seek picture, else the black), so the output never has a
-    /// hole. Without a fill (the SDK-clocked path never sets one, and neither do
-    /// the unit tests that pin a bare starve) nothing is sent. Returns
+    /// hole. Without a fill (the unit tests that pin a bare starve set none)
+    /// nothing is sent. Returns
     /// [`ServiceOutcome::Starved`] either way.
     pub(super) fn fill_starved<S: PacedSink>(
         &mut self,

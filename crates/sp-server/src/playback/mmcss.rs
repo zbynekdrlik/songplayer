@@ -184,9 +184,33 @@ pub fn join_pro_audio(thread: &str) -> MmcssTask {
     let task = MmcssTask::join(MMCSS_PRO_AUDIO);
     log_outcome(thread, task.outcome());
     if task.outcome().needs_fallback() {
-        crate::playback::pipeline::pipeline_audio::raise_thread_priority(thread);
+        raise_thread_priority(thread);
     }
     task
+}
+
+/// Raise the calling thread to `THREAD_PRIORITY_TIME_CRITICAL` so a heavy
+/// child's CPU/memory burst cannot delay a grid slot: the NDI input's grid
+/// thread (`ndi-input`), and the #210 VBAN sender when MMCSS refuses it
+/// ([`join_pro_audio`]'s fallback). `thread` labels the log line. (#221
+/// lane 3 moved it here from `pipeline_audio.rs`, deleted with the
+/// per-playlist NDI senders' wall-clock audio emitter.)
+///
+/// mutants::skip — a Windows thread call; logging only besides it.
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn raise_thread_priority(thread: &str) {
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
+    };
+    // SAFETY: GetCurrentThread returns a pseudo-handle valid for the calling
+    // thread; SetThreadPriority is a leaf call with primitive args.
+    let ok = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL) };
+    if ok == 0 {
+        tracing::warn!(thread, "SetThreadPriority(TIME_CRITICAL) failed");
+    } else {
+        tracing::info!(thread, "thread priority = TIME_CRITICAL");
+    }
 }
 
 /// The one log line of a join. Logging only.

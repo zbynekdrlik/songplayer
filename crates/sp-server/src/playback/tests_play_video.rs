@@ -206,6 +206,7 @@ async fn started_event_unconditionally_resets_lyrics_state() {
             7,
             PipelineEvent::Started {
                 duration_ms: 60_000,
+                position_ms: 0,
             },
         )
         .await;
@@ -534,6 +535,7 @@ async fn started_event_with_malformed_lyrics_warns_and_clears_state() {
             7,
             PipelineEvent::Started {
                 duration_ms: 60_000,
+                position_ms: 0,
             },
         )
         .await;
@@ -719,7 +721,7 @@ async fn play_video_off_program_broadcasts_waiting_for_scene() {
     );
 }
 
-/// Playlist 10 (NDI output `SP-fast`) with one normalized song, 77, and its
+/// Playlist 10 (`ndi_output_name` `SP-fast`) with one normalized song, 77, and its
 /// pipeline, off program; the Resolume and dashboard WS receivers.
 async fn one_song_engine() -> (
     PlaybackEngine,

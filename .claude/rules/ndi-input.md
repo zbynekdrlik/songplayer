@@ -94,7 +94,7 @@ label "OBS manuál". Design record: #212 comment 5847592877 (Approach 1).
 ## The grid thread (`playback/ndi_input.rs`)
 
 - `run_input_loop` (Windows thread `ndi-input`, `THREAD_PRIORITY_TIME_CRITICAL`
-  via `pipeline_audio::raise_thread_priority` + the 1 ms timer: while cut it
+  via `mmcss::raise_thread_priority` + the 1 ms timer: while cut it
   owns every program boundary) ticks on the program wall domain: a
   `WallVbanClock`, ticked once per boundary. `grid_step` (→ `InputGridStep`)
   applies the pacer's rule, with the resync decided by
@@ -246,7 +246,9 @@ that is ~14 black-filled program slots. Design record: #212 comment 5849076208
     visible_sources}`.
   - `enabled` and `source` come from the STORED settings, so a save shows at
     once.
-  - `stream` = `obs::ndi_discovery::extract_ndi_stream_name(source)`.
+  - `stream` = `extract_ndi_stream_name(source)` (`playback/ndi_input_name.rs`,
+    a child module of `ndi_input.rs`; #221 lane 3 moved it out of the deleted
+    `obs/ndi_discovery.rs`).
   - The input is a program source only while it is ACTIVE:
     `ndi_input_enabled` plus a non-empty `ndi_input_source`
     (`InputSettings::active()`, the same rule as `NdiInput::service`). An

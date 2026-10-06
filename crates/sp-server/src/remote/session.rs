@@ -374,6 +374,18 @@ impl Session<'_> {
         match protocol::route(request_type) {
             Route::Native(reply) => reply,
             Route::Forward => forward(facade, request_type, item.request_data.clone()).await,
+            // #221 lane 2: cg OBS's list, SongPlayer's program and preview.
+            Route::SceneList => {
+                let mut reply = forward(facade, request_type, item.request_data.clone()).await;
+                if reply.succeeded()
+                    && let Some(data) = reply.data.as_mut()
+                {
+                    let program = program_scene_name(&facade.bus.on_air_now());
+                    let preview = self.preview_given(program.clone());
+                    protocol::with_songplayer_scenes(data, program.as_deref(), preview.as_deref());
+                }
+                reply
+            }
             Route::SetProgramScene => match protocol::scene_name(data) {
                 Ok(scene) => switch(facade, &scene, Via::Program).await,
                 Err(reply) => reply,
@@ -426,9 +438,13 @@ impl Session<'_> {
     /// This client's preview scene: the one it set, else the program scene
     /// (`program_scene_name`), else none.
     fn preview_scene(&self) -> Option<String> {
-        self.preview
-            .clone()
-            .or_else(|| program_scene_name(&self.facade.bus.on_air_now()))
+        self.preview_given(program_scene_name(&self.facade.bus.on_air_now()))
+    }
+
+    /// This client's preview scene with SP-program's scene `program`: the
+    /// one it set, else `program`.
+    fn preview_given(&self, program: Option<String>) -> Option<String> {
+        self.preview.clone().or(program)
     }
 
     /// `SetCurrentPreviewScene`: store it and, for a client subscribed to
@@ -509,9 +525,6 @@ mod tests_cap;
 #[cfg(test)]
 #[path = "session_tests_feedback.rs"]
 mod tests_feedback;
-#[cfg(test)]
-#[path = "session_tests_legacy.rs"]
-mod tests_legacy;
 #[cfg(test)]
 #[path = "session_tests_msgpack.rs"]
 mod tests_msgpack;

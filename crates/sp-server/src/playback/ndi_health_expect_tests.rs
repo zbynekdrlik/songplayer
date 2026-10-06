@@ -1,45 +1,80 @@
-//! #221 L4a: `receiver_expected` (pure). The engine-level effect on the
-//! dark-wall reason, the ladder and the #196 self-check is pinned in
-//! `ndi_health_tests_expect.rs`.
+//! #221: where a receiver is expected (pure): `SP-program`, the one NDI
+//! sender. Its reason on `GET /api/v1/program` is pinned in
+//! `api/program_tests.rs`.
 //! Wired via `#[cfg(test)] #[path = "ndi_health_expect_tests.rs"] mod tests;`.
 
-use super::{expected_reason, receiver_expected};
-use crate::playback::ndi_health::{DARK_WALL_REASON, PlaybackStateLabel};
+use super::{PROGRAM_NO_RECEIVER_REASON, program_degraded_reason, receiver_log};
 
+/// SP-program expects a receiver while any source is on program (a
+/// playlist, or -1 "OBS manuál"): 0 or fewer receivers is the degraded
+/// reason, one or more is none, nothing on program is none, and so is a
+/// count the sender never polled (review round 1).
 #[test]
-fn a_receiver_is_expected_only_on_air_and_where_cg_obs_was_told() {
-    let playing = PlaybackStateLabel::Playing;
-    assert!(receiver_expected(&playing, Some(7), 7));
-    assert!(
-        !receiver_expected(&playing, Some(3), 7),
-        "cg OBS shows another playlist"
+fn sp_program_expects_a_receiver_while_a_source_is_on_program() {
+    assert_eq!(PROGRAM_NO_RECEIVER_REASON, "no NDI receiver on SP-program");
+    let dark = Some(PROGRAM_NO_RECEIVER_REASON);
+    assert_eq!(program_degraded_reason(Some(7), Some(0)), dark);
+    assert_eq!(
+        program_degraded_reason(Some(-1), Some(0)),
+        dark,
+        "OBS manuál"
     );
-    assert!(
-        !receiver_expected(&playing, None, 7),
-        "cg OBS shows a manual scene, or nothing was told"
+    assert_eq!(
+        program_degraded_reason(Some(7), Some(-1)),
+        dark,
+        "the SDK's error value"
     );
-    for off_air in [
-        PlaybackStateLabel::Paused,
-        PlaybackStateLabel::WaitingForScene,
-        PlaybackStateLabel::Idle,
-    ] {
-        assert!(
-            !receiver_expected(&off_air, Some(7), 7),
-            "{off_air:?} is not on air"
-        );
-    }
+    assert_eq!(
+        program_degraded_reason(Some(7), Some(1)),
+        None,
+        "one receiver"
+    );
+    assert_eq!(program_degraded_reason(Some(7), Some(3)), None);
+    assert_eq!(
+        program_degraded_reason(Some(7), None),
+        None,
+        "not polled yet"
+    );
+    assert_eq!(
+        program_degraded_reason(None, Some(0)),
+        None,
+        "nothing on program"
+    );
+    assert_eq!(program_degraded_reason(None, Some(2)), None);
 }
 
-/// Only the dark-wall reason keys on the expectation; any other reason (an
-/// underrun, no frames) passes through either way.
+/// #221 review round 4: SP-program's receiver log turns dark — a source on
+/// program, no receiver — once per dark stretch: on the first poll, when the
+/// last receiver goes, and when a source comes on program while none is
+/// connected; a receiver found on the first poll or back is the INFO.
 #[test]
-fn only_the_dark_wall_reason_is_dropped_where_no_receiver_is_expected() {
-    let dark = || Some(DARK_WALL_REASON.to_string());
-    let underrun = || Some("underrunning (10/30 fps)".to_string());
-    assert_eq!(expected_reason(dark(), false), None);
-    assert_eq!(expected_reason(dark(), true), dark());
-    assert_eq!(expected_reason(underrun(), false), underrun());
-    assert_eq!(expected_reason(underrun(), true), underrun());
-    assert_eq!(expected_reason(None, false), None);
-    assert_eq!(expected_reason(None, true), None);
+fn sp_program_s_receiver_log_turns_dark_once_and_names_a_receiver_found() {
+    use super::ReceiverLog::{Nothing, ReceiverFound, TurnedDark};
+    // The first poll.
+    assert_eq!(receiver_log(Some(7), None, 0, false), (TurnedDark, true));
+    assert_eq!(
+        receiver_log(Some(7), None, 2, false),
+        (ReceiverFound, false)
+    );
+    assert_eq!(receiver_log(None, None, 0, false), (Nothing, false));
+    // Still dark: no repeat.
+    assert_eq!(receiver_log(Some(7), Some(0), 0, true), (Nothing, true));
+    // The last receiver went.
+    assert_eq!(receiver_log(Some(7), Some(2), 0, false), (TurnedDark, true));
+    // A source came on program while none was connected.
+    assert_eq!(receiver_log(Some(7), Some(0), 0, false), (TurnedDark, true));
+    // The first receiver came back.
+    assert_eq!(
+        receiver_log(Some(7), Some(0), 1, true),
+        (ReceiverFound, false)
+    );
+    assert_eq!(
+        receiver_log(None, Some(-1), 1, false),
+        (ReceiverFound, false)
+    );
+    // Receivers all along.
+    assert_eq!(receiver_log(Some(7), Some(1), 1, false), (Nothing, false));
+    assert_eq!(receiver_log(Some(7), Some(2), 3, false), (Nothing, false));
+    // Nothing on program and no receiver is not dark.
+    assert_eq!(receiver_log(None, Some(0), 0, true), (Nothing, false));
 }

@@ -30,7 +30,9 @@ use std::time::{Duration, Instant};
 use super::parser::shorten_artist;
 use super::sanitize::strip_emoji;
 use super::{MetadataError, MetadataProvider};
-use crate::gemini_api::{GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, send_on_key};
+use crate::gemini_api::{
+    GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, body_excerpt, send_on_key,
+};
 
 static JSON_FENCE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"```(?:json)?\s*([\s\S]*?)\s*```").expect("compile"));
@@ -422,30 +424,11 @@ impl GeminiProvider {
         })
     }
 
-    /// `text` with every configured key replaced by `<key>`: an error text
-    /// or a log line must never carry a key, whatever the server echoes.
-    /// Longest key first, so a key that contains another one is replaced
-    /// whole.
-    fn redact(&self, text: &str) -> String {
-        let mut keys: Vec<&str> = self
-            .keys
-            .iter()
-            .map(String::as_str)
-            .filter(|k| !k.is_empty())
-            .collect();
-        keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
-        keys.into_iter()
-            .fold(text.to_string(), |acc, k| acc.replace(k, "<key>"))
-    }
-
-    /// `body` on one line, redacted, cut to [`BODY_EXCERPT_CHARS`] characters
-    /// (redacted BEFORE the cut, so no key prefix survives at the edge).
+    /// `body` on one line, every configured key redacted, cut to
+    /// [`BODY_EXCERPT_CHARS`] characters: the shared `gemini_api::body_excerpt`
+    /// (one copy of the rule, #144; redacted BEFORE the cut).
     fn excerpt(&self, body: &str) -> String {
-        let one_line = body.split_whitespace().collect::<Vec<_>>().join(" ");
-        self.redact(&one_line)
-            .chars()
-            .take(BODY_EXCERPT_CHARS)
-            .collect()
+        body_excerpt(body, &self.keys, BODY_EXCERPT_CHARS)
     }
 }
 

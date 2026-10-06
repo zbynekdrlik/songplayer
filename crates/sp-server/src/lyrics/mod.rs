@@ -11,6 +11,7 @@ pub mod claude_merge;
 pub mod description_provider;
 pub mod display_plan;
 pub mod g35t_client;
+pub mod g35t_probe; // #144: the live post-deploy probe of g35t (POST /api/v1/lyrics/g35t/probe)
 pub mod g35t_transcript;
 pub mod gather;
 pub mod genius;

@@ -15,6 +15,21 @@ mod tests {
     }
 
     #[test]
+    fn the_data_dir_is_the_db_dir() {
+        let data = std::path::Path::new("data");
+        let cfg = ServerConfig {
+            db_path: data.join("songplayer.db"),
+            ..ServerConfig::default()
+        };
+        assert_eq!(cfg.data_dir(), data.to_path_buf());
+        // A bare DB file name keeps every join relative to the current dir.
+        assert_eq!(
+            ServerConfig::default().data_dir().join("bench"),
+            PathBuf::from("bench")
+        );
+    }
+
+    #[test]
     fn tools_status_default() {
         let ts = ToolsStatus::default();
         assert!(!ts.ytdlp_available);
@@ -51,7 +66,6 @@ mod tests {
         let (sync_tx, _) = mpsc::channel::<SyncRequest>(16);
         let (resolume_tx, _) = mpsc::channel::<resolume::ResolumeCommand>(16);
 
-        let (obs_rebuild_tx, _) = broadcast::channel::<()>(4);
         let state = AppState {
             pool,
             event_tx,
@@ -61,7 +75,6 @@ mod tests {
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
             resolume_tx,
-            obs_rebuild_tx,
             cache_dir: PathBuf::from("cache"),
             ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
                 PathBuf::from("cache"),
@@ -71,11 +84,11 @@ mod tests {
             presenter_client: None,
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
-            ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
             preview_registry: Arc::new(playback::preview::PreviewRegistry::new()),
             program_bus: Arc::new(playback::program_bus::ProgramBus::new()),
             lan_status: mdns::new_status_handle(),
             metadata_chain: std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![])),
+            decode_bench: Arc::new(crate::diag::decode_bench::DecodeBench::new("bench".into())),
         };
 
         // Verify the router can be built.
@@ -92,7 +105,6 @@ mod tests {
 
         let (sync_tx, _) = mpsc::channel::<SyncRequest>(16);
         let (resolume_tx, _) = mpsc::channel::<resolume::ResolumeCommand>(16);
-        let (obs_rebuild_tx, _) = broadcast::channel::<()>(4);
 
         let state = AppState {
             pool,
@@ -103,7 +115,6 @@ mod tests {
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
             resolume_tx,
-            obs_rebuild_tx,
             cache_dir: PathBuf::from("cache"),
             ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
                 PathBuf::from("cache"),
@@ -113,11 +124,11 @@ mod tests {
             presenter_client: None,
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
-            ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
             preview_registry: Arc::new(playback::preview::PreviewRegistry::new()),
             program_bus: Arc::new(playback::program_bus::ProgramBus::new()),
             lan_status: mdns::new_status_handle(),
             metadata_chain: std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![])),
+            decode_bench: Arc::new(crate::diag::decode_bench::DecodeBench::new("bench".into())),
         };
 
         // Verify clone works.

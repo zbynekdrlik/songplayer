@@ -9,7 +9,7 @@
 //! (no pull for 5 boundaries ≈ 167 ms) must then play with **0 underruns**,
 //! bit-exact audio across the stall and **0 A/V corrections**. The deeper
 //! buffer never moves the A/V line, because the grid is aligned by media time.
-//! A control run at the 40 ms pacing-OFF pairing deadline starves on the same
+//! A control run at the 40 ms default pairing deadline starves on the same
 //! stall, which proves the stall is real.
 
 use std::ops::RangeInclusive;
@@ -207,7 +207,7 @@ fn a_5_boundary_video_stall_mid_song_plays_the_paced_audio_bit_exact_with_no_und
 
 #[test]
 fn the_same_stall_starves_the_audio_at_the_40_ms_pairing_deadline() {
-    // Control: without the paced lead (the pacing-OFF pairing deadline) the
+    // Control: without the paced lead (the 40 ms default pairing deadline) the
     // grid holds only ~40 ms past the parked frame, so the stall underruns.
     let (v, a) = readers();
     let dec = SplitSyncedDecoder::new(v, a).expect("valid mock readers");
@@ -220,17 +220,14 @@ fn the_same_stall_starves_the_audio_at_the_40_ms_pairing_deadline() {
 }
 
 #[test]
-fn the_paced_opener_uses_the_250_ms_lead_and_pacing_off_keeps_40() {
+fn the_paced_opener_uses_the_250_ms_lead_and_the_plain_decoder_keeps_40() {
     assert_eq!(PACED_AUDIO_LEAD_MS, 250);
     let (v, a) = readers();
     let paced = open_paced_decoder(v, a).expect("valid mock readers");
     assert_eq!(paced.audio_lead_ms(), PACED_AUDIO_LEAD_MS);
-    // Pacing OFF: `pipeline_audio::open_synced_decoder` pairs at
-    // `decoder_tolerance_ms(false)` — the unchanged 40 ms default.
-    assert_eq!(
-        crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(false),
-        DEFAULT_TOLERANCE_MS
-    );
+    // A decoder opened without the paced lead pairs at the 40 ms default
+    // (the stall control above; #221 lane 3 deleted the SDK-clocked path
+    // that opened its decoders so).
     assert_eq!(DEFAULT_TOLERANCE_MS, 40);
     let (v, a) = readers();
     let off = SplitSyncedDecoder::new(v, a).expect("valid mock readers");

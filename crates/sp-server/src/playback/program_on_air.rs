@@ -12,19 +12,16 @@
 //! - Every publisher names the scene: a playlist press passes the playlist's
 //!   catalog scene (`scene_catalog`, whatever ASCII case was pressed), a
 //!   manual press the scene pressed, "OBS manuál" itself none; the startup
-//!   restore and a dashboard cut pass the playlist's catalog scene; the OBS
-//!   follow the cg OBS scene it follows, but only when it cuts: a followed
-//!   change that keeps the source (manual → manual, both -1) publishes
-//!   nothing, so the published scene stays the earlier one until L5 deletes
-//!   the follow.
+//!   restore and a dashboard cut pass the playlist's catalog scene.
 //! - [`program_scene_name`] is the ONE name resolver: the scene, else "OBS
 //!   manuál" for the NDI input, else none. It never asks cg OBS.
 //! - #221 L4b: [`on_air_set`] is the ONE "which playlists are on air" rule,
 //!   and [`on_air_changes`] the events a change of it becomes
 //!   (`program_authority.rs`, the playback authority).
 //! - #221 (release 0.69.0 review 🟡 2): [`wall_owner`] is the ONE playlist
-//!   of that set that writes the shared wall outputs; the authority
-//!   publishes it with the set.
+//!   that writes the shared wall outputs; the authority publishes it with
+//!   the set. #221 B4 step 6: the set is that playlist alone (no more cg OBS
+//!   record), so it has at most one member.
 //!
 //! The facade's per-session preview and feedback (#221 L2, L3),
 //! `/api/v1/status` and the playback authority (L4b) read them.
@@ -69,32 +66,22 @@ pub fn program_scene_name(on_air: &OnAir) -> Option<String> {
     }
 }
 
-/// #221 L4b (design record 5873773896 §1e): the playlists on air —
-/// `SP-program`'s source when it is a playlist (the NDI input "OBS manuál"
-/// is none), together with the playlist SongPlayer last told cg OBS to show
-/// (`legacy_cg.shown`). Until B4 step 6 the legacy consumers (Arena, FOH,
-/// lv1, strih) still take cg OBS's program, so a playlist cg OBS still shows
-/// stays on air: after a dashboard cut to "OBS manuál" (the input carries
-/// it), or while a mirror is unanswered or failed.
-pub fn on_air_set(on_air: &OnAir, cg_shown: Option<i64>) -> BTreeSet<i64> {
-    let program = on_air.source.filter(|&source| source != PROGRAM_INPUT_ID);
-    program.into_iter().chain(cg_shown).collect()
+/// #221 (release 0.69.0 review 🟡 2; B4 step 6): the ONE playlist that
+/// owns the shared wall outputs — `#sp-subs*` (`ShowSubtitles`), the
+/// `#sp-title` clip (the title timers, a re-sync's title) and the Presenter
+/// stage display: `SP-program`'s source when it is a playlist, else none (the
+/// NDI input "OBS manuál" names no playlist, and nothing selected yet). B4
+/// step 6 deleted the legacy mirror and SongPlayer's record of what it told
+/// cg OBS, so cg OBS's program owns nothing any more.
+pub fn wall_owner(on_air: &OnAir) -> Option<i64> {
+    on_air.source.filter(|&source| source != PROGRAM_INPUT_ID)
 }
 
-/// #221 (release 0.69.0 review 🟡 2): the ONE playlist that owns the shared
-/// wall outputs — `#sp-subs*` (`ShowSubtitles`), the `#sp-title` clip (the
-/// title timers, a re-sync's title) and the Presenter stage display.
-/// `SP-program`'s source when it is a playlist (the LED wall takes
-/// SP-program since B4), else the playlist cg OBS was told to show
-/// (`legacy_cg.shown`), else none. Always a member of [`on_air_set`], and
-/// `None` only when that set is empty. The other member of a two-member set
-/// (after a failed or late mirror, or a dashboard cut to "OBS manuál")
-/// keeps playing for the consumers that still take cg OBS, but writes no
-/// shared output: before, both wrote the one wall, and one's hide timer took
-/// the other's title down.
-pub fn wall_owner(on_air: &OnAir, cg_shown: Option<i64>) -> Option<i64> {
-    let program = on_air.source.filter(|&source| source != PROGRAM_INPUT_ID);
-    program.or(cg_shown)
+/// #221 L4b (design record 5873773896 §1e; B4 step 6): the playlists on air
+/// — the wall owner, `SP-program`'s playlist, alone. Every consumer takes
+/// `SP-program` now, so a playlist off it plays for nobody. At most one.
+pub fn on_air_set(on_air: &OnAir) -> BTreeSet<i64> {
+    wall_owner(on_air).into_iter().collect()
 }
 
 /// #221 L4b: the `(playlist, on)` events of a change from `previous` to
@@ -102,9 +89,8 @@ pub fn wall_owner(on_air: &OnAir, cg_shown: Option<i64>) -> Option<i64> {
 /// that entered and for `cut_to` — the source `SP-program` was just cut to
 /// (a new publication) — even when it was on air already: the re-kick, so
 /// a press of the scene already on air plays a playlist paused out of band.
-/// A member nobody cut to (the outgoing playlist cg OBS still shows, one a
-/// dashboard cut to "OBS manuál" keeps on air) is never re-kicked, so a
-/// paused one stays paused (review round 1). Each part ascending.
+/// A member nobody cut to is never re-kicked, so a paused one stays paused
+/// (review round 1). Each part ascending.
 pub fn on_air_changes(
     previous: &BTreeSet<i64>,
     current: &BTreeSet<i64>,

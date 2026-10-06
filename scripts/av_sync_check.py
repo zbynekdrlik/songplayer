@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Post-deploy A/V sync + audio-dropout gate (#147).
 
-Compares an OBS PROGRAM recording of a playing SongPlayer output against the
-ORIGINAL cached sidecars (``<base>_audio.flac`` + ``<base>_video.mp4``) and
+Compares an OBS recording of SongPlayer's PROGRAM (``SP-program``, received
+by cg OBS's A/V probe scene since #221 lane 3) while a playlist plays against
+the ORIGINAL cached sidecars (``<base>_audio.flac`` + ``<base>_video.mp4``) and
 answers two questions about the real output the operator sees:
 
 1. **Lipsync.** ``A/V = audio_offset - video_offset`` in ms, where each offset

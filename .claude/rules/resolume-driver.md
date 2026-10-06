@@ -5,6 +5,9 @@ paths:
   - "crates/sp-server/src/playback/title.rs"
   - "crates/sp-server/src/playback/title_timers.rs"
   - "crates/sp-server/src/playback/handle_pipeline_event.rs"
+  - "crates/sp-server/src/playback/seek.rs"
+  - "crates/sp-server/src/playback/pipeline_types*.rs"
+  - "crates/sp-server/src/playback/tests_title_seek.rs"
 ---
 
 # Resolume host driver — poll policy, NOT READY mapping, stale ids, RecoveryEvent, the wall title (#157, #217)
@@ -303,6 +306,32 @@ shutdown only, and no RecoveryEvent reached the engine again.
   a send right after the build, with no await between, reaches the engine
   channel (the `#[cfg(test)]` `ResolumeRegistry::recovery_sender`).
 
+## A write batch goes out on the endpoint its handler resolved (#217, `endpoint cache empty`)
+
+Box 27.9 / 28.9 (finding 5873261862): `parallel Resolume request failed
+error=endpoint cache empty - call ensure_endpoint first`, in bursts of
+several lines in the same millisecond. The cache was never cold: every
+handler calls `ensure_endpoint` first. But each parallel write
+(`set_text`, `set_clip_opacity`) read the cache AGAIN, through the 300 s
+`RESOLUTION_TTL` check. A title fade runs about 1.1 s after the handler's
+resolve, so when the TTL ran out inside it, every write of the next batch
+failed at once, and the handler's `?` dropped the rest of the fade and
+the text clear.
+
+- **`ensure_endpoint` returns the `ResolvedEndpoint`.** The handler resolves
+  once, before its first batch, and hands the same `&ep` to every
+  `set_text_all` / `set_opacity_all`, and each of those to every write. No
+  write reads the cache; `cached_endpoint` and the "endpoint cache empty"
+  error are gone. An endpoint about 1 s past its DNS TTL is harmless: the
+  TTL only decides when the NEXT handler re-resolves.
+- **Never add a write that reads `endpoint_cache` itself.** Take the
+  endpoint as a parameter (the batch's), or resolve through `ensure_endpoint` in
+  a `&mut self` step (the composition fetch, the probe).
+- **Test:** `HostDriver::forget_endpoint` (`#[cfg(test)]`, in
+  `driver_push.rs`) empties the cache after the test resolved the endpoint,
+  as the TTL running out does. `handlers::tests::a_text_batch_goes_out_after_the_endpoint_cache_empties`
+  and its opacity twin pin it.
+
 ## Subtitle clips: blank, never skip (#217 addendum 2)
 
 - `clear_subtitles` clears `#sp-subs`, `#sp-subs-next` AND `#sp-subssk`. The
@@ -373,7 +402,8 @@ current subtitle state of the playing, on-program pipelines:
 - ONE `HideSubtitles` only when none of them has a line (a blank plan
   position, or a song with no `lyrics_state`). The subtitle clips are shared
   by every on-program playlist, so a blank one must never clear another's
-  line (review round 5; `obs/scene.rs` can keep several active playlists);
+  line (review round 5; since #221 only the wall owner's line is re-sent,
+  `recovery.rs::on_program_lines`, and with no owner none is);
 - that same one `HideSubtitles` when NO SongPlayer playlist plays on program.
   The scene-off hide goes through the same `clear_subtitles` path, so an
   outage can have swallowed it too (review round 6).
@@ -426,18 +456,47 @@ are the recovery's `on_program_lines`.
   1.5 s after the new `Started`. The old title stayed up over that gap, and
   a recovery inside it disagreed with the timers. Now the Play's `Resync`
   names no title for this playlist, so the old title goes down at the Play
-  (an instant hide), unless another on-program playlist's title is due (see
-  "Several due"). Off program nothing is sent. A scene-on that selects a
+  (an instant hide). Off program, or for a playlist that does not own the
+  wall, nothing is sent. A scene-on that selects a
   song sends two (the Play's, then the scene-on's): the driver does one
   action for them (`take_queued` drops the first when both are in one
   batch; else the second is a no-op, or retries a hide whose request
   failed and left `FadingOut`). Pinned by
   `a_scene_on_that_selects_a_song_resyncs_no_title_twice`.
-- **Residual: the clock is fixed at `Started`.** A resume whose seek failed
-  plays from 0 (`decode_and_send` and the paced producer log it), but
-  `Started` does not say so,
-  and a dashboard seek never moves the clock: the title then hides early or
-  late by the difference. The timers always worked this way.
+- **The clock follows the song's REAL position (#217, residual
+  5861473237).**
+  - `Started { duration_ms, position_ms }`: `position_ms` is where the song
+    really starts, from the pure `pipeline_types::real_start_ms` (the asked
+    `start_position_ms` when the decoder's seek there worked, 0 when it
+    failed or none was asked). Both decode paths use it; the paced producer
+    hands it to the emit thread with its open result. The clock counts
+    from it, so a resume whose seek failed hides its title 3.5 s before the
+    end of the WHOLE song. `play_start_ms` (the asked start) is only logged
+    next to it.
+  - A dashboard seek re-anchors the clock: `PlaybackEngine::seek`
+    (`playback/seek.rs`) → `TitleClock::seeked(now, duration, position)`
+    (the hide point from the new position, at `now` when already past; the
+    show point kept), then `arm_title_timers` and `resync_after_play`. A
+    seek into the last 3.5 s takes the title down at once, and a seek back
+    reopens the window.
+  - A paused song is left alone (its resume's `Started` fixes a new
+    clock).
+  - The corners left (review round 1):
+    - a seek sent before the song's first `Started` (no clock yet, its
+      first ~0.3 s) is applied by the pipeline right after `Started`, and
+      the clock then counts from the Play's start;
+    - a mid-song seek the decoder REFUSES (`pipeline.rs` "pipeline: seek
+      failed", the paced producer's "seek failed") is only warned about,
+      and the song plays on, but the engine has already re-anchored the
+      clock to the asked position: the title then hides early or late by
+      the difference. The pipeline reports no seek result to the engine;
+      closing it means a `Seeked { position_ms }` event, the start seek's
+      class again.
+  - The hide arithmetic is ONE helper, `title::hide_point`, shared by `new`
+    and `seeked`. It is out of `new` on purpose: cargo-mutants never
+    mutates inside a fn named `new`.
+  - Tests: `tests_title_seek.rs` (a child of `tests_scene_change.rs`) and
+    `title_tests.rs::a_seek_moves_the_hide_point_and_keeps_the_show_point`.
 - **A title is due** when its pipeline plays on program with its own clock
   (`PlaylistPipeline::on_air_clock`) and that clock is `open_at(now)`:
   `[show_at, hide_at)`.
@@ -494,10 +553,14 @@ are the recovery's `on_program_lines`.
 - **Both timers write the clip only on program, and a pause cancels them**
   (release 0.68.0 blockers 1a + 1c). The hide timer reads `scene_active`
   when it fires, like the show timer; since release 0.69.0 (review 🟡 2)
-  both also read whether their playlist may write the wall
-  (`title_timers.rs::WallGate`, `program-bus.md` "One wall owner"), so the
-  other member of a two-member on-air set never shows or hides the owner's
-  title, and a re-sync names only the owner's. So the new owner's ON
+  both also read whether their playlist owns the wall
+  (`title_timers.rs::WallGate`, `program-bus.md` "One wall owner"), so
+  another playlist (the outgoing one of a cut until its OFF; before #221 B4
+  step 6 also the other member of a two-member on-air set) never shows or
+  hides the owner's title, and a re-sync names only the owner's. With no
+  owner ("OBS manuál" on program) no timer writes the title and a re-sync
+  names none (#221 lane 2: no owner = nobody writes). So the new
+  owner's ON
   re-syncs the title even when it plays nothing (a `Resync` naming none,
   `scene_off::wall_after_owner_on`, review round 2): the old owner's hide
   timer no longer takes its title down. Before, a hide timer armed by a song
@@ -516,14 +579,13 @@ are the recovery's `on_program_lines`.
   The held playlist itself no longer starts a song
   (`.claude/rules/program-transition.md`, "A held playlist has no side
   effects").
-- **Several due** (a program scene with more than one SongPlayer playlist;
-  they share the one `#sp-title` clip): the highest playlist id, so the
-  answer never depends on HashMap order. Residual: the lower id's own show
-  timer still pushes its title, so the clip shows whichever of the two
-  pushed last until a Resync names the higher id's. A shared-clip corner
-  older than #217, left as is (review round 4). A Play of one of them then
-  names the OTHER playlist's due title: the wall swaps to it, and 1.5 s
-  after the new `Started` to the new song's (review round 5).
+- **One candidate at most** (#221 lane 2): a re-sync's title candidate
+  is the wall owner's alone (`recovery.rs::title_candidate`, an `Option`),
+  and with no owner ("OBS manuál" on program) there is none, so a Resync
+  names no title. #221 lane 3 deleted the old highest-playlist-id
+  tie-break: `due_title_video` takes that one candidate (main ROZHODNUTÉ
+  6002459249 (4)). The "several due" residual of #217 — two SongPlayer
+  playlists sharing the clip on one cg OBS scene — cannot happen any more.
 - **The text** comes from `format_title_text` (one formatter, see above).
   The OBS text source follows the Resync: the title, or cleared, as the hide
   timer clears it. A failed read of the due title sends nothing: a transient

@@ -1,6 +1,7 @@
 import { test, expect, Page, APIRequestContext, Locator } from "@playwright/test";
 import { averageDb } from "./audio-helpers.mjs";
-import { healthRow, HealthRow, readyDub } from "./box-api";
+import { healthRow, readyDub } from "./box-api";
+import { programReceiverVerdict, type ProgramReceiverView } from "./ndi-health-gate";
 import { describeProgram, readProgramState } from "./program-state";
 
 /**
@@ -11,8 +12,9 @@ import { describeProgram, readProgramState } from "./program-state";
  * So the real-mouse test reads the program state (`program-state.ts`) and
  * asserts the on/off-program badge that matches it. What this proves after
  * every deploy:
- *  1. the Dabing section lists a READY dub (the 40-min acceptance sample) and
- *     the SP-dabing NDI output carries at least one receiver;
+ *  1. the Dabing section lists a READY dub (the 40-min acceptance sample),
+ *     its pipeline (label SP-dabing) is up, and SP-program (which carries it to every
+ *     consumer while it is on program, #221 B4 step 6) has a receiver;
  *  2. the shared Player on /dabing is driven by a REAL mouse: a drag on the
  *     mix-vokaly fader PATCHes the console and stays put, a drag on the seek bar posts a
  *     seek — the two controls the owner found dead on 20.9.2026 (#200);
@@ -183,25 +185,40 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
       .toBeGreaterThanOrEqual(landed + 1000);
   }
 
-  test("a READY dub is listed and SP-dabing has a receiver", async ({ request }) => {
+  test("a READY dub is listed, the Dabing pipeline is up and SP-program has a receiver", async ({
+    request,
+  }) => {
     const dub = await readyDub(request);
     dabingPid = dub.pid;
     sampleVideoId = dub.videoId;
 
-    // The deploy restarts SongPlayer a couple of minutes before this suite; the
-    // OBS/DistroAV inputs re-attach within the +30 s self-check window, so poll
-    // (the "wall is not dark" test uses the same 60 s budget).
-    let out: HealthRow | undefined;
+    // #221 B4 step 6: the Dabing output reaches its consumers only through
+    // SongPlayer's program, so the receiver that must exist is SP-program's
+    // (#221 lane 3: a playlist has no NDI output of its own). The deploy
+    // restarts SongPlayer a couple of minutes before this suite and its
+    // receivers re-attach, so poll (the post-deploy.spec.ts program gate uses
+    // the same 60 s budget).
+    await expect
+      .poll(async () => (await healthRow(request, dabingPid))?.ndi_name, {
+        timeout: 60000,
+        message: "the Dabing playlist's pipeline (SP-dabing) must be up",
+      })
+      .toBe("SP-dabing");
+    // The poll returns the whole verdict, so a failure prints the last one
+    // (source, connections, degraded_reason).
     await expect
       .poll(
         async () => {
-          out = await healthRow(request, dabingPid);
-          return out?.connections ?? -1;
+          try {
+            const resp = await request.get("/api/v1/program", { timeout: 10_000 });
+            return programReceiverVerdict((await resp.json()) as ProgramReceiverView);
+          } catch (e) {
+            return { ok: false, error: String(e) };
+          }
         },
-        { timeout: 60000, message: "SP-dabing must be advertised with ≥ 1 receiver" },
+        { timeout: 60000, message: "SP-program must have ≥ 1 receiver" },
       )
-      .toBeGreaterThanOrEqual(1);
-    expect(out!.ndi_name).toBe("SP-dabing");
+      .toMatchObject({ ok: true });
   });
 
   test("real mouse: the dub fader and the seek bar commit on release", async ({

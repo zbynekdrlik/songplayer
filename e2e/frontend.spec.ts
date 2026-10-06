@@ -108,19 +108,19 @@ const ALLOWED_CONSOLE = [
 // (SP-worship→Worship, SP-background→Background, SP-live→ytlive).
 const GENLOCK_ENABLED_FIXTURE = [
   {
-    ndi_name: "SP-worship", playlist_id: 1, state: "Playing", connections: 2,
+    ndi_name: "SP-worship", playlist_id: 1, state: "Playing",
     lock_state: "LOCKED", lock_reason: "locked",
     clock: { is_locked: true, mode: "LOCK", offset_ns: 100, clock_ok: true },
     pacing: { enabled: true }, audio: {},
   },
   {
-    ndi_name: "SP-background", playlist_id: 2, state: "Playing", connections: 0,
-    lock_state: "DEGRADED", lock_reason: "no receiver",
+    ndi_name: "SP-background", playlist_id: 2, state: "Playing",
+    lock_state: "DEGRADED", lock_reason: "resync in 60 s",
     clock: { is_locked: true, mode: "LOCK", offset_ns: 120, clock_ok: true },
     pacing: { enabled: true }, audio: {},
   },
   {
-    ndi_name: "SP-live", playlist_id: 184, state: "Idle", connections: 0,
+    ndi_name: "SP-live", playlist_id: 184, state: "Idle",
     lock_state: "UNLOCKED", lock_reason: "pacing disabled",
     clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
     pacing: { enabled: false }, audio: {},
@@ -129,19 +129,19 @@ const GENLOCK_ENABLED_FIXTURE = [
 
 const GENLOCK_ALL_DISABLED_FIXTURE = [
   {
-    ndi_name: "SP-worship", playlist_id: 1, state: "Playing", connections: 2,
+    ndi_name: "SP-worship", playlist_id: 1, state: "Playing",
     lock_state: "UNLOCKED", lock_reason: "pacing disabled",
     clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
     pacing: { enabled: false }, audio: {},
   },
   {
-    ndi_name: "SP-background", playlist_id: 2, state: "Playing", connections: 0,
+    ndi_name: "SP-background", playlist_id: 2, state: "Playing",
     lock_state: "UNLOCKED", lock_reason: "pacing disabled",
     clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
     pacing: { enabled: false }, audio: {},
   },
   {
-    ndi_name: "SP-live", playlist_id: 184, state: "Idle", connections: 0,
+    ndi_name: "SP-live", playlist_id: 184, state: "Idle",
     lock_state: "UNLOCKED", lock_reason: "pacing disabled",
     clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },
     pacing: { enabled: false }, audio: {},
@@ -329,7 +329,7 @@ test("per-card lock badge shows only on live pacing-enabled outputs (#164)", asy
     .locator(".lock-badge");
   await expect(bgBadge).toBeVisible();
   await expect(bgBadge).toContainText("DEGRADED");
-  await expect(bgBadge).toContainText("no receiver");
+  await expect(bgBadge).toContainText("resync in 60 s");
   await expect(bgBadge).toHaveClass(/lock-degraded/);
 
   // The pacing-disabled SP-live (ytlive) row carries NO badge at all.
@@ -361,7 +361,7 @@ test("global genlock summary reports the worst live pacing-enabled output (#164)
   await expect(global).toBeVisible({ timeout: 5000 });
   await expect(global).toContainText("DEGRADED");
   await expect(global).toContainText("1/2");
-  await expect(global).toContainText("no receiver");
+  await expect(global).toContainText("resync in 60 s");
   await expect(global).toHaveClass(/lock-degraded/);
 });
 
@@ -387,13 +387,13 @@ test("global genlock summary flips to LOCKED after an all-locked fixture (#164)"
   const resp = await request.post("/__mock/ndi-health", {
     data: [
       {
-        ndi_name: "SP-worship", playlist_id: 1, state: "Playing", connections: 2,
+        ndi_name: "SP-worship", playlist_id: 1, state: "Playing",
         lock_state: "LOCKED", lock_reason: "locked",
         clock: { is_locked: true, mode: "LOCK", offset_ns: 100, clock_ok: true },
         pacing: { enabled: true }, audio: {},
       },
       {
-        ndi_name: "SP-background", playlist_id: 2, state: "Playing", connections: 3,
+        ndi_name: "SP-background", playlist_id: 2, state: "Playing",
         lock_state: "LOCKED", lock_reason: "locked",
         clock: { is_locked: true, mode: "LOCK", offset_ns: 120, clock_ok: true },
         pacing: { enabled: true }, audio: {},
@@ -419,7 +419,7 @@ test("pacing disabled everywhere shows GENLOCK OFF in the header, no per-card ba
   page,
   request,
 }) => {
-  // Production reality: genlock_pacing OFF on every output. #176 revises #164:
+  // No output reports pacing (#221 lane 3: pacing is the only path). #176 revises #164:
   // the header now ALWAYS shows the explicit grey '● GENLOCK OFF' so the owner
   // can tell at a glance the box is not genlocked; per-card badges stay hidden.
   const set = await request.post("/__mock/ndi-health", {
@@ -436,7 +436,7 @@ test("pacing disabled everywhere shows GENLOCK OFF in the header, no per-card ba
   await expect(global).toBeVisible({ timeout: 6000 });
   await expect(global).toContainText("● GENLOCK OFF");
   await expect(global).toHaveClass(/lock-off/);
-  // The OFF tooltip explains the free-running state.
+  // The OFF tooltip explains the state (no output reports pacing yet).
   await expect(global).toHaveAttribute("title", /pacing vypnuté/);
 
   // No per-card badge anywhere while pacing is off (the header badge is the only
@@ -458,7 +458,6 @@ test("a live pacing-enabled UNLOCKED output turns the header badge red UNLOCKED 
         ndi_name: "SP-worship",
         playlist_id: 1,
         state: "Playing",
-        connections: 2,
         lock_state: "UNLOCKED",
         lock_reason: "clock not ok",
         clock: { is_locked: false, mode: "", offset_ns: null, clock_ok: false },

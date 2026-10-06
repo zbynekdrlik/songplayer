@@ -128,11 +128,8 @@ fn cancel_title_timers_aborts_pending_handles() {
         let mut pp = PlaylistPipeline {
             pipeline: PlaybackPipeline::spawn(
                 "test".to_string(),
-                None,
                 mpsc::unbounded_channel().0,
                 1,
-                false,
-                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 crate::playback::preview::preview_stream::DecodeTaps {
                     preview: crate::playback::preview::PreviewTap::new(
                         Default::default(),
@@ -143,7 +140,6 @@ fn cancel_title_timers_aborts_pending_handles() {
                         0,
                     ),
                 },
-                None,
             ),
             state: PlayState::Idle,
             mode: PlaybackMode::default(),
@@ -281,6 +277,7 @@ async fn pipeline_started_event_broadcasts_now_playing() {
             99,
             PipelineEvent::Started {
                 duration_ms: 180_000,
+                position_ms: 0,
             },
         )
         .await;
@@ -594,6 +591,7 @@ async fn position_events_are_throttled() {
             99,
             PipelineEvent::Started {
                 duration_ms: 180_000,
+                position_ms: 0,
             },
         )
         .await;

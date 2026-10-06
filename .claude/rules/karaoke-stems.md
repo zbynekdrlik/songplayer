@@ -2,10 +2,13 @@
 paths:
   - "crates/sp-server/src/stems/**"
   - "crates/sp-decoder/src/audio/stem_mix*.rs"
+  - "crates/sp-decoder/src/peak_limiter*.rs"
   - "crates/sp-decoder/src/audio/symphonia_reader*.rs"
   - "crates/sp-decoder/src/split_sync*.rs"
-  - "crates/sp-server/src/playback/karaoke.rs"
   - "scripts/stem_worker.py"
+  - "crates/sp-server/src/embedded_scripts.rs"
+  - "scripts/tests/test_stem_*.py"
+  - "scripts/tests/stem_fakes.py"
 ---
 
 # Karaoke stem separation (#14) — separator choice, gotchas, architecture
@@ -49,13 +52,81 @@ on #14: "use what is actually best on the day, not what was good 5 months ago").
   `vocals + instrumental == mix`, i.e. the stems are "loudnorm-matched to the mix"
   BY CONSTRUCTION. Do NOT re-loudnorm the stems (breaks additivity, distorts the
   balance, risks clipping); the source mix is already −14 LUFS. FullMix plays the
-  real mix file; the mixer clamps to [-1, 1] for the rare overshoot.
+  real mix file; an overshoot of the sum goes through the #184 peak limiter
+  (see "#184 — the peak limiter after the sum" below), never a clamp.
 - **Native output is 44.1 kHz** (model rate); the mix + the decoder require
   **48 kHz stereo**, so `stem_worker.py` resamples every stem to 48 kHz stereo
   before writing FLAC (PCM_24).
 - **The separation child NEVER holds a whole-video array (#207).** It runs under
   a 10 GiB per-process job cap. Read the mix one window at a time and stream
   each stem through `_StreamingStitchWriter`. See the #207 section at the end.
+
+## #184 — the peak limiter after the sum (`sp-decoder/src/peak_limiter.rs`, was a clamp at ±1.0)
+
+The dub readers sum the original (or its stems) with the dub voice, both at
+gain 1, so the sum goes over full scale when a voice peak lands on a loud bed.
+The old `acc.clamp(-1.0, 1.0)` cut those samples flat, and FOH heard the clip
+through VBAN (2012 of 3.53M frames at 0 dBFS, finding 5847119155).
+`StemMixReader` now runs the summed block through its own `PeakLimiter`:
+
+- **Ceiling 0.98** (−0.18 dBFS). It is stereo-linked: one gain per frame,
+  from the frame's highest |sample|.
+- **Instant attack, no lookahead.** No latency is added to the paced A/V
+  path. The trade-off: the rising edge of a NEW peak sits at the ceiling for
+  the samples that would exceed it, and a sustained over re-attacks a little
+  on each lobe. A 1.8× 100 Hz over gives 79 of the first lobe's 240 samples
+  at the ceiling and 30 of each later lobe's, where the clamp flattened 151.
+- **Release.** The REDUCTION (`1 − gain`) decays by `1 − 1/(0.050 s · rate)`
+  per frame. That is an exact division (no `exp`), so test pins hold on
+  Linux and Windows alike. At 48 kHz the gain rises by at most 1/2400 per
+  frame.
+- **The ceiling is exact.** Each scaled sample is clamped to ±0.98: the
+  f32 gain alone (`1 − (1 − 0.98/peak)`) left about one over in four a code
+  or two above it, which the program's own limiter then scaled again
+  (release 0.71.0 review, `no_limited_sample_leaves_above_the_ceiling`).
+- **Bit-identical at rest.** A gain of exactly 1.0 gives `x · 1.0 = x`.
+  The state is the reduction, not the gain: an f32 gain recovering toward 1.0
+  stalls below unity forever once its step d·(1 − R) is under half an ulp (up
+  to ~1200 ulp below 1.0 at 48 kHz), but a decaying reduction does not.
+  Once `1 − reduction` rounds to 1.0, the reduction is dropped to 0 (no
+  subnormal tail).
+- **State.** A field of the reader, so it carries across blocks. `seek`
+  resets it, and a new song opens a new reader.
+- **On the box:** the 1 Hz `stem-mix level` line ends with `limited=N`, the
+  frames scaled since the song opened. That is time UNDER limiting: one over
+  needing a 6 dB reduction adds its whole release tail, ~39 900 frames
+  (~0.8 s) at 48 kHz. It is not a count of overs, and it cannot be compared
+  with the 0 dBFS frame count of a VBAN capture (finding 5847119155). Check
+  the fix with such a capture: 0 samples at |x| ≥ 0.999.
+
+**Why it is not under `audio/`.** `.cargo/mutants.toml` excluded all of
+`sp-decoder/src/audio/`, so the limiter went to the crate root, next to
+`level_probe.rs`. Since #210 (finding 5986249387) the exclusion names only
+the `SymphoniaAudioReader` methods (`open`, `decode_packet`, the stream
+impls), a line-number-free scope over the Symphonia glue: symphonia's
+FLAC decoder always yields i32 buffers, so `decode_packet`'s F32 / S16
+arms can never run here, and its S32 arm and the accessors are pinned by
+the 24-bit ramp fixtures (a `--no-config` /mutation-sweep of the file
+could prove them killed and narrow the scope further).
+`StemMixReader` (`stem_mix.rs`, 51 listed mutants) and the reader's pure
+helpers (`ts_to_ms`, `ms_to_ts`, `seek_start`, `trim_leading_frames`, 30)
+are gated. Each of those mutants was mapped to a killing test by review,
+not run: the PR gate is diff-scoped, so they first run in an on-demand
+`/mutation-sweep` (#210 added `debug_prints_the_mixer_state` and
+`one_call_emits_exactly_the_overlapping_whole_frames`; `drain` and the
+integration test's `collect_frames` fail on an empty chunk instead of
+spinning to the mutation timeout). Pure mix logic may live in `audio/`
+again, but check `cargo mutants --list` first.
+The limiter is `pub` now (`sp_decoder::PeakLimiter`): the `SP-program`
+output runs its own instance after the transition crossfade
+(`vban-out.md`).
+
+**Tests.** A test that wants the reader's output to EQUAL its gain must use a
+signal under the ceiling (the ramp tests read it off 0.5 and double it). A
+full-scale 1.0 is an over now. Derive the exact pins from a scratch f32 model
+(`numpy.float32` step by step): for example, unity again at frame 827 after a
+0.5 reduction at 1000 Hz. The `gain < 1.0` branch has an equivalent-output
+`<=` mutant, which `limited_frames` counts kill (824 for that fixture).
 
 ## #184 G5 — bounded audio read-ahead (any read-ahead = fader latency)
 
@@ -79,9 +150,10 @@ fader latency depends on the path (#148 v4):**
 
 | path | deadline | decoder read-ahead (fader-latency contribution) |
 |---|---|---|
-| paced (`genlock_pacing` ON, production) | `PACED_AUDIO_LEAD_MS = 250`, via `pacer::open_paced_decoder` | ≤ 250 ms + one chunk (~300 ms) |
-| pacing-OFF, no wall-clock emitter | 40 ms (`DEFAULT_TOLERANCE_MS`) | ≤ 40 ms + one chunk |
-| pacing-OFF, with the wall-clock emitter | `decoder_tolerance_ms(true)` = 1540 ms | ≤ 1540 ms + one chunk |
+| paced (the only path since #221 lane 3) | `PACED_AUDIO_LEAD_MS = 250`, via `pacer::open_paced_decoder` | ≤ 250 ms + one chunk (~300 ms) |
+
+(#221 lane 3 deleted the pacing-OFF paths: 40 ms with no wall-clock emitter,
+1540 ms with it.)
 
 This is the decoder's share only. On the paced path the fader latency the owner
 hears ALSO includes the producer's look-ahead queue: `DECODE_QUEUE_BOUND` = 12
@@ -199,8 +271,8 @@ DELETED names.
   `false`).
 - **Mixing (`sp_decoder::StemMixReader`, `audio/stem_mix.rs`)** wraps N
   sample-aligned `AudioStream`s behind ONE `AudioStream`, so `SplitSyncedDecoder` /
-  pacer / genlock / NDI submit are UNTOUCHED. `out = clamp(Σ stream_k·gain_k, -1,
-  1)`; each stream's applied gain RAMPS linearly toward its live target atomic over
+  pacer / genlock / NDI submit are UNTOUCHED. `out = limit(Σ stream_k·gain_k)`
+  (the #184 peak limiter, below); each stream's applied gain RAMPS linearly toward its live target atomic over
   `ramp_samples = sample_rate/20` frames (**50 ms**, ≤ `1/ramp_samples` per frame),
   so a preset change is a crossfade, never a click. A song opens at its current
   preset (no fade-in). Buffers each stream (FLAC packet boundaries differ); an ended
@@ -272,8 +344,9 @@ DELETED names.
      `<cache>/<id>_isolation|_stemsep/seg_*.wav`, SKIP windows already present on
      start (logs `isolation resumed from chunk N/M`), load models ONCE, then
      stitch (weight-normalised linear crossfade — for stems STREAMED since #207,
-     see the #207 section; `_stitch_segments` is only the test reference) + atomic
-     `os.replace` to the final output + remove the work dir. Stems stitch BOTH
+     see the #207 section; `_stitch_segments` is only the test reference) + an
+     atomic publish to the final output (stems: the `win_replace` POSIX rename
+     since #207) + remove the work dir. Stems stitch BOTH
      stems with IDENTICAL crossfade weights so `vocals+instrumental==mix`
      additivity holds by linearity. audio-separator exposes NO per-chunk resume
      hook (verified on box — `Separator.separate()` returns whole stems only), so
@@ -591,8 +664,9 @@ into an APP-OWNED venv interpreter.
   only** (next to `gpu_policy::env_for_child` in `stems/separator.rs`; the dub
   child is light, the mtl venv untouched): `MIMALLOC_PURGE_DELAY=-1` (never
   decommit freed pages back to the OS — the load-bearing knob; `0` brings the
-  storm back), `MIMALLOC_ARENA_EAGER_COMMIT=1`, `MIMALLOC_RESERVE_OS_MEMORY=4GiB`
-  (reserve+commit one arena up front so the first-touch fault cost is paid ONCE).
+  storm back), `MIMALLOC_ARENA_EAGER_COMMIT=1`, `MIMALLOC_RESERVE_OS_MEMORY`
+  (reserve+commit one arena up front so the first-touch fault cost is paid ONCE;
+  #168 shipped 4 GiB, the `heavy_alloc_reserve_gib` default is 2 GiB since #207).
   Fits under the 10 GiB per-child Job Object cap; numerically invisible to the
   model. These are env NO-OPS unless the interpreter carries the mimalloc override.
 
@@ -625,8 +699,9 @@ into an APP-OWNED venv interpreter.
 **The cap.** The separation child runs inside a per-child Windows Job Object
 with `JOB_OBJECT_LIMIT_PROCESS_MEMORY` = **10 GiB**
 (`heavy_slot.rs::CHILD_JOB_MEMORY_LIMIT_BYTES`). The #168 mimalloc arena
-reserve (the `heavy_alloc_reserve_gib` setting: 2 GiB on the box on 24.9.,
-committed but never touched) counts against the same 10 GiB.
+reserve (the `heavy_alloc_reserve_gib` setting: 2 GiB on the box since 24.9.
+and the default since 5.10., committed but never touched) counts against the
+same 10 GiB.
 Error 1455 from the job cap ignores how much commit the host has free.
 
 **Why whole-video arrays failed every video longer than ~35 min.** Before #207,
@@ -660,10 +735,11 @@ limit, not the box.
   weight-normalises. It writes every sample before the next segment's start as
   a clipped float32 block to a PCM_24 FLAC `.tmp`, and holds ONLY the overlap
   tail (`max_retained_samples` == overlap, whatever the segment count).
-  - It publishes with `os.replace` only after all declared segments have been
-    added.
+  - It publishes only after all declared segments have been added, with
+    `win_replace.replace_file` (the POSIX rename), never `os.replace`: see
+    "Publishing a stem SongPlayer holds open" below.
   - On any failure (an exception, too few segments, or a failed final close
-    or replace) it retries the close so the handle is released, removes the
+    or rename) it retries the close so the handle is released, removes the
     `.tmp`, and leaves the final sidecar untouched.
   - Its output is **bit-identical** to
     `_write_array_48k_stereo(_stitch_segments(...))`.
@@ -680,6 +756,43 @@ stem. Anything that grows with video length fails for long videos under the
 10 GiB cap. The per-window working set (a 30 s window, the separator,
 `_load_48k_stereo` of one separated window, and the 2 s tail) is the budget.
 The resumable per-segment work dir (#171) is unchanged.
+
+## Publishing a stem SongPlayer holds open (#207, `win_replace`)
+
+SongPlayer holds BOTH stem sidecars open whenever the song is loaded, even
+paused: `stems/reader.rs::open_audio_stream` opens them with Rust std, which
+shares READ|WRITE|DELETE. On Windows `os.replace` is
+`MoveFileExW(MOVEFILE_REPLACE_EXISTING)`, which fails with `[WinError 5]
+Access is denied` while any other handle has the target open. So a
+re-separation of a loaded song could not publish its stems; the dub hit
+the same wall first (#184 round F2, `dabing.md`).
+
+- **Both publishes go through `win_replace.replace_file`**: the streaming
+  writer's `close` and the reference `_write_array_48k_stereo`. It is the
+  dub's POSIX-semantics rename (`FileRenameInfoEx`), so the open reader keeps
+  the old stem and the next song open gets the new one.
+- **The per-segment scratch WAVs keep `os.replace`.** They live in the work
+  dir and no reader opens them; only a published sidecar needs the POSIX
+  rename (the same split as `dub_worker` / `lyrics_worker`).
+- **A refused POSIX rename** (a reader without share-delete, a volume without
+  `FileRenameInfoEx`) fails the run loudly; the previous stem stays and the
+  `.tmp` is removed.
+- **Shipping.** `stem_worker.py` imports `win_replace` at module load, so the
+  stem worker writes `win_replace.py` next to it: `stems/scripts.rs::
+  embedded_tool_scripts` = `[stem_worker.py, win_replace.py]`, written by
+  `StemWorker::ensure_script` through the shared
+  `embedded_scripts::materialise` (the dub worker uses the same helper).
+  A missing `win_replace.py` would fail every separation at import.
+  `materialise` holds one process-wide async lock per pass: both workers
+  ship `win_replace.py` and call it on their own schedule (the stem worker
+  before it queues for the heavy slot), so without the lock one could
+  rewrite the file after a deploy while the other's child imports it. With
+  the lock plus "write only when the content differs", the second caller
+  never writes, whatever the timing.
+- **Tests.** `scripts/tests/test_stem_publish.py` emulates the Windows rule on
+  Linux (`windows_rename` fixture: `os.replace` onto a held path raises the
+  WinError 5 `PermissionError`, the POSIX rename succeeds and is recorded).
+  The `cmd_separate` fake model stack is shared in `scripts/tests/stem_fakes.py`.
 
 ## Audio readers after a seek: the first sample IS the target (#148 v3)
 

@@ -34,11 +34,12 @@ pub const TITLE_SHOW_DELAY_MS: u64 = 1500;
 pub const TITLE_HIDE_BEFORE_END_MS: u64 = 3500;
 
 /// The one clock of a song's title window (#217 addendum 3): the instants
-/// the title timers sleep until, fixed at the song's `Started`. A recovery
-/// or a scene-on reads the SAME instants, so its `Resync` never contradicts a
-/// timer. (It read the decoder position before, which the pipeline reports
-/// every 500 ms: near each boundary the two disagreed, and a queued Resync
-/// could keep a title into the next song or hide a title just shown.)
+/// the title timers sleep until, fixed at the song's `Started` and moved by
+/// a seek ([`seeked`](Self::seeked)). A recovery or a scene-on reads the SAME
+/// instants, so its `Resync` never contradicts a timer. (It read the decoder
+/// position before, which the pipeline reports every 500 ms: near each
+/// boundary the two disagreed, and a queued Resync could keep a title into
+/// the next song or hide a title just shown.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TitleClock {
     /// The song this clock belongs to.
@@ -52,23 +53,31 @@ pub struct TitleClock {
 
 impl TitleClock {
     /// The clock of `video_id`, a `duration_ms` song whose `Started` came at
-    /// `started_at`, `start_ms` into it (0, or a resume's position). The
-    /// title shows 1.5 s after the start and hides 3.5 s before the song's
-    /// REAL end, so a resume 5 s or less before the end has no window
-    /// (`shows`, review round 4). A resume whose seek failed plays from 0,
-    /// but `Started` does not say so: its title then hides early by the
-    /// requested position (a known residual, as for a dashboard seek).
+    /// `started_at`, `start_ms` into it: where `Started` says the song really
+    /// starts (#217: 0, or a resume's position; 0 again when the resume's
+    /// seek failed and the song plays from its start). The title shows 1.5 s
+    /// after the start and hides 3.5 s before the song's REAL end, so a
+    /// resume 5 s or less before the end has no window (`shows`, review
+    /// round 4).
     pub fn new(video_id: i64, started_at: Instant, duration_ms: u64, start_ms: u64) -> Self {
-        let hide_at = if duration_ms > TITLE_SHOW_DELAY_MS + TITLE_HIDE_BEFORE_END_MS {
-            let until_hide = (duration_ms - TITLE_HIDE_BEFORE_END_MS).saturating_sub(start_ms);
-            Some(started_at + Duration::from_millis(until_hide))
-        } else {
-            None
-        };
         Self {
             video_id,
             show_at: started_at + Duration::from_millis(TITLE_SHOW_DELAY_MS),
-            hide_at,
+            hide_at: hide_point(started_at, duration_ms, start_ms),
+        }
+    }
+
+    /// #217: the clock after a seek to `position_ms` at `now` (the song plays
+    /// on from there). The hide point follows the song's new position: 3.5 s
+    /// before its end, counted from `now`, so a seek into the last 3.5 s puts
+    /// it at `now` and the title is no longer due. The show point stays where
+    /// the song's start put it: a seek in the song's first 1.5 s still shows
+    /// the title then, and a later seek never runs the show again over a title
+    /// that is already up.
+    pub fn seeked(self, now: Instant, duration_ms: u64, position_ms: u64) -> Self {
+        Self {
+            hide_at: hide_point(now, duration_ms, position_ms),
+            ..self
         }
     }
 
@@ -82,6 +91,19 @@ impl TitleClock {
     /// Whether the title is due at `now`: from `show_at`, before `hide_at`.
     pub fn open_at(&self, now: Instant) -> bool {
         now >= self.show_at && self.hide_at.is_none_or(|hide_at| now < hide_at)
+    }
+}
+
+/// When a `duration_ms` song playing from `position_ms` at `at` hides its
+/// title: 3.5 s before its end, at `at` when that is already past. `None`
+/// for a song of 5 s or less (or an unknown 0 duration): it keeps its title
+/// to the end.
+fn hide_point(at: Instant, duration_ms: u64, position_ms: u64) -> Option<Instant> {
+    if duration_ms > TITLE_SHOW_DELAY_MS + TITLE_HIDE_BEFORE_END_MS {
+        let until_hide = (duration_ms - TITLE_HIDE_BEFORE_END_MS).saturating_sub(position_ms);
+        Some(at + Duration::from_millis(until_hide))
+    } else {
+        None
     }
 }
 

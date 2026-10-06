@@ -15,10 +15,9 @@ use serde_json::{Value, json};
 use super::tests::{
     Client, connect, enable_input, hello_identify, next_json, press, request, rig, send_json,
 };
-use crate::playback::program_switch::{SwitchCtx, Via, switch_source};
+use crate::playback::program_switch::{Via, switch_source};
 use crate::playback::program_transition::{SpecSource, TransitionSpec};
 use crate::playback::wallclock::utc_now_100ns;
-use crate::remote::Upstream;
 
 /// `EventSubscription::Scenes`.
 const SCENES: u64 = 4;
@@ -128,20 +127,18 @@ async fn a_dashboard_cut_is_fed_back_with_no_transition_events() {
     hello_identify(&mut ws, SCENES | TRANSITIONS).await;
     // The dashboard's cut path (`POST /api/v1/program/cut`, #221 L4a:
     // `switch_source`, via=dashboard), not the facade.
-    let upstream = Upstream::unlinked();
-    let ctx = SwitchCtx {
-        pool: &rig.pool,
-        bus: &rig.bus,
-        upstream: &upstream,
-    };
-    switch_source(&ctx, 3, Via::Dashboard).await.unwrap();
+    switch_source(&rig.pool, &rig.bus, 3, Via::Dashboard)
+        .await
+        .unwrap();
     assert_eq!(next_event(&mut ws).await, program_scene_changed("sp-slow"));
     // No transition event: the next message is a later request's response.
     let (_, before) = request_collecting(&mut ws, "GetStudioModeEnabled", None).await;
     assert!(before.is_empty(), "{before:?}");
     assert_eq!(rig.remote().program_scene.as_deref(), Some("sp-slow"));
     // "OBS manuál" with no scene is named by the resolver.
-    switch_source(&ctx, -1, Via::Dashboard).await.unwrap();
+    switch_source(&rig.pool, &rig.bus, -1, Via::Dashboard)
+        .await
+        .unwrap();
     assert_eq!(
         next_event(&mut ws).await,
         program_scene_changed("OBS manuál")
@@ -272,4 +269,58 @@ async fn get_current_program_scene_is_sp_programs_own_scene() {
         "cg OBS is never asked: {:?}",
         rig.calls()
     );
+}
+
+/// #221 lane 2 (ROZHODNUTÉ 6002459249): Companion's feedback at CONNECT
+/// comes from `GetSceneList` (`currentProgramSceneName` → `scene_active`,
+/// `currentPreviewSceneName` → `scene_preview`). cg OBS's own program
+/// (sp-slow in the fake) is wrong whenever a playlist is on SP-program, so
+/// the forwarded answer names SP-program's scene and this session's preview,
+/// each with cg OBS's uuid of that scene (null for a name cg OBS does not
+/// list); the scene list itself is cg OBS's.
+#[tokio::test]
+async fn get_scene_list_names_sp_program_s_scene_and_this_session_s_preview() {
+    let rig = rig().await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+
+    // A playlist on SP-program; no preview set: the preview is the program.
+    rig.bus.select_initial(7, Some("sp-fast"));
+    let d = request(&mut ws, "GetSceneList", None).await;
+    assert_eq!(d["requestStatus"], json!({ "result": true, "code": 100 }));
+    let data = &d["responseData"];
+    assert_eq!(data["currentProgramSceneName"], "sp-fast");
+    assert_eq!(data["currentProgramSceneUuid"], "u-sp-fast");
+    assert_eq!(data["currentPreviewSceneName"], "sp-fast");
+    assert_eq!(data["currentPreviewSceneUuid"], "u-sp-fast");
+    let names: Vec<&str> = data["scenes"]
+        .as_array()
+        .expect("cg OBS's scene list")
+        .iter()
+        .map(|s| s["sceneName"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["sp-fast", "sp-slow", "Slido", "Trailer"]);
+
+    // This session's own preview.
+    let set = request(
+        &mut ws,
+        "SetCurrentPreviewScene",
+        Some(json!({ "sceneName": "Slido" })),
+    )
+    .await;
+    assert_eq!(set["requestStatus"]["code"], 100);
+    let d = request(&mut ws, "GetSceneList", None).await;
+    assert_eq!(d["responseData"]["currentProgramSceneName"], "sp-fast");
+    assert_eq!(d["responseData"]["currentPreviewSceneName"], "Slido");
+    assert_eq!(d["responseData"]["currentPreviewSceneUuid"], "u-Slido");
+
+    // "OBS manuál" with no scene name: cg OBS lists no such scene.
+    rig.bus.select_initial(-1, None);
+    let d = request(&mut ws, "GetSceneList", None).await;
+    assert_eq!(d["responseData"]["currentProgramSceneName"], "OBS manuál");
+    assert!(
+        d["responseData"]["currentProgramSceneUuid"].is_null(),
+        "{d}"
+    );
+    assert_eq!(d["responseData"]["currentPreviewSceneName"], "Slido");
 }

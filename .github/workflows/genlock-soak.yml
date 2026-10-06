@@ -11,9 +11,26 @@ name: Genlock soak (receiver ground-truth)
 #
 # This is a cron/dispatch soak, deliberately NOT wired to push/pull_request: it waits
 # `minutes` (allowed only outside the PR pipeline, per CLAUDE.md "CI architecture").
-# Until camera-box#1295 puts cg OBS on the genlock build there are no `genlock-fifo audit`
-# lines in the receiver log, so every run is the honest count-gate BEFORE picture (FAIL,
-# NO SOURCES). The daily `schedule` line below is commented until then.
+# The daily `schedule` line below stays commented: the cg-obs hop has a source only
+# while the A/V gate's probe is pointed by hand (next paragraph), so an unattended
+# run reads NO SOURCES (FAIL).
+#
+# #221 lane 3: SongPlayer's only NDI output is `SP-program` (a playlist has no
+# SP-* stream of its own any more; pacing is the only path, the
+# `genlock_pacing` setting is gone). The `cg-obs` hop therefore sees
+# SongPlayer only through a cg OBS input of `SP-program` that is on cg OBS's
+# program, and the test playlist reaches it only while it is SongPlayer's
+# program source. The A/V gate's probe scene "A/V gate (SP-program)" is that
+# input only while it is POINTED: the gate keeps it IDLE (`ndi_source_name`
+# "") outside its take, so for a soak point it at "<HOST> (SP-program)" by
+# hand and put cg OBS on the probe scene; afterwards set it back to "" (a
+# pointed probe holds a receiver on SP-program and masks the post-deploy
+# dark gate, `obs-ndi-health.md`) AND put cg OBS back on its own scene (the
+# next A/V gate refuses to start while cg OBS shows the probe scene). The
+# verify step counts that input (`CG_CHAIN_CGOBS_SRC_RE`; the verifier's
+# default `sp-.*_video` names inputs that receive nothing any more).
+# Run the soak in that state; the preflight writes the program source to the
+# job summary.
 
 on:
   workflow_dispatch:
@@ -31,7 +48,7 @@ on:
         type: string
         default: cg-obs
   # schedule:
-  #   - cron: "17 3 * * *"   # enable when camera-box#1295 puts cg OBS on the genlock build (see songplayer#149)
+  #   - cron: "17 3 * * *"   # enable only once the probe pointing is automated (header; songplayer#149)
 
 permissions:
   contents: read
@@ -83,7 +100,7 @@ jobs:
           fi
           echo "OK: verifier toolchain present"
 
-      - name: Preflight (SongPlayer + OBS + genlock_pacing)
+      - name: Preflight (SongPlayer + OBS + SP-program)
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
@@ -106,14 +123,9 @@ jobs:
           }
           Write-Host "OK: OBS WebSocket 4455 listening"
 
-          # genlock_pacing is a raw DB flag (default OFF) surfaced by /api/v1/settings only when set.
-          $settings = Invoke-RestMethod -Uri "$api/api/v1/settings" -TimeoutSec 5
-          if ($settings.PSObject.Properties.Name -contains 'genlock_pacing') {
-            $gp = $settings.genlock_pacing
-          } else {
-            $gp = "(unset - default OFF)"
-          }
-          Write-Host "genlock_pacing = $gp"
+          # #221 lane 3: SP-program is the only NDI output; record what it carries.
+          $program = Invoke-RestMethod -Uri "$api/api/v1/program" -TimeoutSec 5
+          Write-Host "SP-program source = $($program.source) receivers = $($program.health.connections)"
 
           # Current lock_state per output (the honest send-side truth for the summary).
           $health = Invoke-RestMethod -Uri "$api/api/v1/ndi/health" -TimeoutSec 5
@@ -124,7 +136,7 @@ jobs:
           [void]$sb.AppendLine("- SongPlayer version: ``$($status.version)``")
           [void]$sb.AppendLine("- OBS connected: ``$($status.obs_connected)`` (scene ``$($status.active_scene)``)")
           [void]$sb.AppendLine("- OBS WebSocket 4455: listening")
-          [void]$sb.AppendLine("- ``genlock_pacing`` setting: ``$gp``")
+          [void]$sb.AppendLine("- ``SP-program`` source: ``$($program.source)`` (receivers ``$($program.health.connections)``)")
           [void]$sb.AppendLine("")
           [void]$sb.AppendLine("### lock_state at preflight (per output)")
           [void]$sb.AppendLine("")
@@ -156,9 +168,9 @@ jobs:
           Write-Host "Soak window: $minutes minute(s)"
 
           # Pick the first playlist that has videos - mirrors the ci.yml E2E "play a playlist"
-          # mechanics exactly. We do NOT switch the OBS program scene: playing a playlist makes
-          # SongPlayer emit NDI on that playlist's SP-* stream, which the cg OBS ingests as an
-          # input regardless of the live program scene - so the wall is untouched (off-program-safe).
+          # mechanics exactly. We do NOT switch any scene. #221 lane 3: the playlist reaches NDI
+          # receivers only through SP-program, so it is measured only while it is SongPlayer's
+          # program source (see the header).
           $playlists = Invoke-RestMethod -Uri "$api/api/v1/playlists"
           $testPl = $null
           foreach ($pl in $playlists) {
@@ -166,7 +178,7 @@ jobs:
             if ($videos.Count -gt 0) { $testPl = $pl; break }
           }
           if (-not $testPl) {
-            Write-Error "FAIL: no playlist has any videos to play. Cannot generate NDI output for the receiver soak."
+            Write-Error "FAIL: no playlist has any videos to play. Nothing to soak."
             exit 1
           }
           Write-Host "Playing '$($testPl.name)' (id=$($testPl.id), ndi=$($testPl.ndi_output_name))"
@@ -256,6 +268,8 @@ jobs:
         env:
           HOPS: ${{ inputs.hops }}
           SKEW_BOUND_MS: ${{ inputs.skew_bound_ms }}
+          # #221 lane 3: cg OBS's only input of SongPlayer is the probe (header).
+          CG_CHAIN_CGOBS_SRC_RE: '^A/V gate SP-program$'
         run: |
           set -uo pipefail
           HOPS="${HOPS:-cg-obs}"

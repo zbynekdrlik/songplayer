@@ -1,6 +1,6 @@
-//! Genlock stamping tests for [`FrameSubmitter`] (#146). A fake, frozen
-//! [`WallClock`] makes the stamped timecodes deterministic without any
-//! `sleep`. Wired via
+//! Genlock stamping + holdover tests for [`FrameSubmitter`] (#146, #203). An
+//! injected [`WallClock`] makes the stamps deterministic without any `sleep`.
+//! Wired via
 //! `#[cfg(test)] #[path = "submitter_tests_timecode.rs"] mod submitter_tests_timecode;`.
 
 use super::*;
@@ -23,41 +23,12 @@ fn audio(tc_ignored: Option<i64>) -> Vec<AudioFrame> {
 }
 
 #[test]
-fn video_timecode_is_floored_to_grid_and_audio_is_raw_wall() {
-    let backend = Arc::new(MockNdiBackend::new());
-    let sender = NdiSender::new_with_clocking(backend.clone(), "G", true, false).unwrap();
-    let fake_now: i64 = 123_456_789;
-    let mut sub = FrameSubmitter::new_with_wallclock(sender, 30, 1, WallClock::fixed(fake_now));
-
-    sub.submit_nv12(4, 2, 4, vec![0u8; 12], &audio(None));
-
-    // Video: floored to the 30 fps grid (contract §4 — FLOOR, never ceil).
-    let expected_video = floor_boundary_100ns(fake_now, GENLOCK_GRID_FPS);
-    assert_eq!(
-        backend.video_timecodes(),
-        vec![expected_video],
-        "video timecode must be the floored 30 fps boundary"
-    );
-    // Audio: raw wall clock at submission, NO boundary snap (contract §6).
-    assert_eq!(
-        backend.audio_timecodes(),
-        vec![fake_now],
-        "audio timecode must be the raw wall clock, unsnapped"
-    );
-    // The fixture is deliberately off-grid so the snap is observable.
-    assert_ne!(
-        expected_video, fake_now,
-        "fixture must be off-grid so the floor is observable"
-    );
-}
-
-#[test]
 fn audio_is_submitted_before_video() {
     let backend = Arc::new(MockNdiBackend::new());
-    let sender = NdiSender::new_with_clocking(backend.clone(), "G2", true, false).unwrap();
+    let sender = NdiSender::new_with_clocking(backend.clone(), "G2", false, false).unwrap();
     let mut sub = FrameSubmitter::new_with_wallclock(sender, 30, 1, WallClock::fixed(1_000_000));
 
-    sub.submit_nv12(4, 2, 4, vec![0u8; 12], &audio(None));
+    sub.submit_frame_at_boundary(4, 2, 4, &[0u8; 12], &audio(None), 333_333, 333_333);
 
     let calls = backend.calls();
     let idx_audio = calls
@@ -127,19 +98,16 @@ fn new_with_wallclock_uses_the_injected_clock_directly() {
         "new_with_wallclock must use the injected clock directly"
     );
 
-    // The injected clock is the one that stamps. The hot read path is
-    // monotonic-only; the submit's one wall tick takes the step probe's one
-    // realtime read (#224) and nothing else.
-    sub.submit_nv12(4, 2, 4, vec![0u8; 12], &[]);
-    assert_eq!(
-        clock.samples(),
-        1 + 1,
-        "a submit adds exactly the tick's step-probe read"
-    );
+    // A boundary submit reads no clock at all: the pair arrives stamped, and
+    // the wall only lends its relabel registry (K = 0 on a private one), so
+    // the wire stamp is the boundary itself.
+    let b = floor_boundary_100ns(7_000_000, GENLOCK_GRID_FPS);
+    sub.submit_frame_at_boundary(4, 2, 4, &[0u8; 12], &[], b, b);
+    assert_eq!(clock.samples(), 1, "a boundary submit samples nothing");
     assert_eq!(
         backend.video_timecodes(),
-        vec![floor_boundary_100ns(7_000_000, GENLOCK_GRID_FPS)],
-        "video timecode must derive from the injected clock"
+        vec![b],
+        "the boundary goes out as stamped"
     );
 }
 
@@ -154,8 +122,8 @@ fn holdover_keeps_the_submitted_frame_alive_across_the_async_call() {
     let sender = NdiSender::new_with_clocking(backend.clone(), "HO", false, false).unwrap();
     let mut sub = FrameSubmitter::new(sender, 30, 1);
 
-    let data = vec![3u8; 4 * 2 * 3 / 2];
-    sub.submit_nv12(4, 2, 4, data, &[]);
+    let data = SharedFrame::new(vec![3u8; 4 * 2 * 3 / 2]);
+    sub.submit_frame_at_boundary_owned(4, 2, 4, data, &[], 333_333, 333_333);
 
     let (recv_ptr, recv_len) = backend
         .last_async_video_slice()
@@ -172,8 +140,8 @@ fn holdover_keeps_the_submitted_frame_alive_across_the_async_call() {
     assert_eq!(held.len(), recv_len, "and its full length");
 
     // A second submit releases the first allocation and holds the second.
-    let data2 = vec![9u8; 4 * 2 * 3 / 2];
-    sub.submit_nv12(4, 2, 4, data2, &[]);
+    let data2 = SharedFrame::new(vec![9u8; 4 * 2 * 3 / 2]);
+    sub.submit_frame_at_boundary_owned(4, 2, 4, data2, &[], 666_666, 666_666);
     let (recv_ptr2, _) = backend.last_async_video_slice().unwrap();
     let held2 = sub.prev_frame.as_ref().unwrap();
     assert_eq!(
@@ -213,7 +181,6 @@ fn frame_submitter_submit_shared_is_zero_copy_via_the_owned_path() {
         src_ptr,
         "and the holdover keeps that same allocation"
     );
-    assert_eq!(sub.frames_submitted_total(), 1);
 }
 
 #[test]
@@ -248,44 +215,6 @@ fn paced_sink_emit_submits_the_pacer_frame_without_a_pixel_copy() {
         "the holdover shares the pacer's allocation (an Arc bump)"
     );
     assert_eq!(&frame.video[..], &[16u8; 12][..], "pacer pixels untouched");
-    assert_eq!(sub.frames_submitted_total(), 1);
-}
-
-#[test]
-fn paced_sink_emit_with_burn_on_paints_a_fork_never_the_pacer_frame() {
-    // #147 round 10: `emit` now hands the pacer's OWN Arc to the owned path, so
-    // the burn overlay must fork (`make_mut`, refcount >= 2) and paint the fork.
-    // The pacer's pixels — reused for its starvation repeat — must stay clean.
-    let backend = Arc::new(MockNdiBackend::new());
-    let sender = NdiSender::new_with_clocking(backend.clone(), "EB", false, false).unwrap();
-    let mut sub = FrameSubmitter::new(sender, 30, 1);
-    sub.set_burn_flag(Arc::new(std::sync::atomic::AtomicBool::new(true)));
-    let (w, h, stride) = (1920u32, 1080u32, 1920u32);
-    let frame = crate::playback::pacer::PacedFrame {
-        pts_ns: 0,
-        width: w,
-        height: h,
-        stride,
-        video: SharedFrame::new(vec![0u8; (stride * h * 3 / 2) as usize]),
-        audio: Vec::new(),
-    };
-    let pacer_ptr = frame.video.as_ptr() as usize;
-
-    PacedSink::emit(&mut sub, &frame, &[], 3_333_300, 3_333_300);
-
-    assert!(
-        frame.video.iter().all(|&b| b == 0),
-        "the pacer's frame is never painted"
-    );
-    let held = sub.prev_frame.as_ref().unwrap();
-    assert!(!held.ptr_eq(&frame.video), "the burn painted a fork");
-    assert_ne!(&held[..], &frame.video[..], "and the fork carries the QR");
-    let (sent_ptr, sent_len) = backend.last_async_video_slice().unwrap();
-    assert_ne!(
-        sent_ptr, pacer_ptr,
-        "the SDK gets the fork, not the pacer frame"
-    );
-    assert_eq!(sent_len, frame.video.len());
 }
 
 #[test]

@@ -71,11 +71,12 @@ exclude_re = [
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::synthesize',
   # dabing/worker.rs::ensure_script: materialises the embedded Python tool scripts
   #   (dub_worker.py + dub_live_session.py + dub_loudness.py + win_replace.py) into
-  #   the box's cache/tools dir — pure async fs I/O, no Linux unit test constructs a
+  #   the box's cache/tools dir — one call, no Linux unit test constructs a
   #   DubWorker to drive it (same class as synthesize). The one DECISION it carries
   #   — WHICH scripts ship — is the pure free fn `embedded_tool_scripts()`, which
   #   stays mutation-covered by `embedded_tool_scripts_ship_worker_and_helpers`
-  #   (#184 rounds F/F2/H).
+  #   (#184 rounds F/F2/H); the stale-rewrite loop is the shared, gated
+  #   `embedded_scripts::materialise` (#207).
   'dabing/worker\.rs:[0-9]+:[0-9]+:.*DubWorker::ensure_script',
   # api/preview.rs::handle_preview_ws: the WebSocket session of the live preview —
   #   an upgraded socket + a running ffmpeg encoder child + the fragment relay.
@@ -87,20 +88,41 @@ exclude_re = [
   # sp-server/src/resolume/ is NOT excluded — handlers/driver have wiremock tests.
   # sp-server/src/playback/mod.rs is NOT excluded — title timer logic is unit-tested.
   # sp-ndi/, sp-decoder/reader.rs, sp-server/src/playback/pipeline.rs are NOT
-  # excluded — MockNdiBackend unit tests + FrameSubmitter cross-platform tests
+  # excluded — MockNdiBackend unit tests + the pipeline's cross-platform tests
   # cover them; the Windows-gated decoder in sp-decoder/reader.rs is skipped by
-  # cargo-mutants on Linux automatically (cfg(windows) not compiled in).
-  'sp-decoder/src/audio/',                # Symphonia wrapper — external-lib glue, fixture-tested
+  # cargo-mutants on Linux automatically (cfg(windows) not compiled in). The
+  # #[cfg(windows)] run_loop / run_loop_windows of pipeline.rs carry
+  # `mutants::skip` (#221 lane 3 retired the stale line pin for them).
+  # sp-decoder/src/audio/symphonia_reader.rs: the methods of the Symphonia
+  #   wrapper itself (every mutant naming `SymphoniaAudioReader`: `open`,
+  #   `decode_packet`, the MediaStream / AudioStream impls), a
+  #   line-number-free scope over external-lib glue. Symphonia's FLAC
+  #   decoder always yields i32 buffers, so `decode_packet`'s F32 / S16 arms
+  #   can never run for this FLAC-only reader; its S32 arm and the accessors
+  #   are pinned by the 24-bit ramp fixtures (tests/symphonia_audio.rs) and
+  #   could be gated after a `--no-config` /mutation-sweep of the file
+  #   proves them killed. Its pure helpers (`ts_to_ms`, `ms_to_ts`,
+  #   `seek_start`, `trim_leading_frames`) and the rest of audio/ are NOT
+  #   excluded any more (#210, finding 5986249387): they and `StemMixReader`
+  #   (stem_mix.rs: the ramps, the limiter call, the probe) are pure code
+  #   with exact unit pins (symphonia_reader_tests.rs, stem_mix_tests.rs).
+  'sp-decoder/src/audio/symphonia_reader\.rs:[0-9]+:[0-9]+:.*SymphoniaAudioReader',
   'sp-decoder/src/video/',                # Windows-only MF wrapper — fixture-tested
+  # sp-gpu/src/win/: the Direct3D 11 calls of the SP-program-MAX compositor
+  #   (#223 S1a) and its Spout sender + registry reader (S1b, over the C++
+  #   shim), a #[cfg(windows)] module: dead on the Linux runner, so every
+  #   mutant builds and survives. Its decisions live in the crate's pure,
+  #   Linux-tested modules (adapter, picture, composition, quad, residency,
+  #   color, error, reference, readback, spout, spout_state); the module is
+  #   proven on WARP
+  #   (windows-latest) by tests/warp.rs and tests/spout.rs.
+  'sp-gpu/src/win/',
   # -- genlock #146–#151: Windows-only paced pipeline + Python MTL shell-out --
   # playback/pipeline_paced.rs + pipeline_paced_idle.rs: whole modules are
   #   #[cfg(windows)] (mod.rs) so they are NOT compiled on the Linux mutation
   #   runner; every mutant lands in dead code, builds, and no test runs it ->
-  #   MISSED. Same class as the sp-decoder/{audio,video} exclusions (target-only).
+  #   MISSED. Same class as the sp-decoder/video exclusion (target-only).
   'sp-server/src/playback/pipeline_paced',
-  # pipeline.rs:239:5 run_loop -> (): the #[cfg(windows)] run_loop twin (the
-  #   #[cfg(not(windows))] run_loop is compiled + covered). Windows dead code.
-  'pipeline\.rs:239:5: replace run_loop with \(\)',
   # lyrics/mtl_aligner.rs: the forced-alignment wrapper shells out to the Python
   #   LyricsAlignment-MTL tool (tokio::process::Command) not installed on the
   #   runner; run_once/align/write_text_json are subprocess/file glue and
@@ -125,33 +147,33 @@ exclude_re = [
   'replace \|\| with && in split_one_lyrics_line',
   'replace > with (<|==|>=) in split_one_lyrics_line',
   # === genlock #146–#151 provably-equivalent arithmetic (audit 2026-09-13, PR #153) ===
-  # pacer_prepare.rs:84:66 and pacer.rs:801:70 (- -> + / /) in the p99 index
+  # pacer_prepare.rs:84:66 and pacer.rs:812:70 (- -> + / /) in the p99 index
   #   `((len*99)/100).min(len-1)`: floor(len*99/100) <= len-1 for every len>=1,
   #   so the `.min(len-1)` clamp never binds; replacing `len-1` cannot change the
   #   index. (iter_percentile_us IS killable — there p=100 makes the clamp load-bearing.)
   'pacer_prepare\.rs:84:66: replace - with \+ in Pacer::prep_p99_us',
   'pacer_prepare\.rs:84:66: replace - with / in Pacer::prep_p99_us',
-  'pacer\.rs:801:70: replace - with \+ in Pacer::jitter_p99_us',
-  'pacer\.rs:801:70: replace - with / in Pacer::jitter_p99_us',
-  # pacer.rs:744:20 > -> >= in on_emit: body is only `max_late_us = late_us`; the
+  'pacer\.rs:812:70: replace - with \+ in Pacer::jitter_p99_us',
+  'pacer\.rs:812:70: replace - with / in Pacer::jitter_p99_us',
+  # pacer.rs:755:20 > -> >= in on_emit: body is only `max_late_us = late_us`; the
   #   operators differ solely at `late_us == max_late_us`, where the assignment
   #   writes the value it just compared — a no-op. Output identical for all inputs.
-  'pacer\.rs:744:20: replace > with >= in Pacer::on_emit',
-  # pacer.rs:679:28 += -> *= / -= in service_standby: the mutated `relatches += 1`
+  'pacer\.rs:755:20: replace > with >= in Pacer::on_emit',
+  # pacer.rs:691:28 += -> *= / -= in service_standby: the mutated `relatches += 1`
   #   sits in the `if emit_now < boundary` backward-step net, but service_standby
   #   takes both now_100ns() reads with no decode pull between them and only
   #   reaches this point after `sched_now >= boundary`, so on a monotonic clock
   #   emit_now == sched_now >= boundary and the branch is unreachable by any
-  #   terminating deterministic test. (The `service` mutant at 530:28 IS killable.)
-  'pacer\.rs:679:28: replace \+= with \*= in Pacer::service_standby',
-  'pacer\.rs:679:28: replace \+= with -= in Pacer::service_standby',
+  #   terminating deterministic test. (The `service` mutant at 540:28 IS killable.)
+  'pacer\.rs:691:28: replace \+= with \*= in Pacer::service_standby',
+  'pacer\.rs:691:28: replace \+= with -= in Pacer::service_standby',
 
   # === TIMEOUTs (non-terminating under mutation; not catchable by a terminating
   #     test, like the apply_greedy loop-counter pins) ==========================
   # pacer.rs:78 PacedFrame::pts_100ns (/->% and ->0/1/-1): pts drives the
   #   decode-advance loop; a constant/zero pts never advances it -> 300 s TIMEOUT.
   'pacer\.rs:78:',
-  # lock_state.rs:96:31 >-><  in EventWindow::evict: inverts the ring-drain guard
+  # lock_state.rs:126:31 >-><  in EventWindow::evict: inverts the ring-drain guard
   #   so eviction never makes progress under the window-fill test -> TIMEOUT.
-  'lock_state\.rs:96:31: replace > with < in EventWindow::evict',
+  'lock_state\.rs:126:31: replace > with < in EventWindow::evict',
 ]

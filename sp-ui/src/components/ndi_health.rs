@@ -18,9 +18,9 @@ use crate::api::NdiOutputHealth;
 use crate::store::DashboardStore;
 
 /// #164: a per-card lock badge is shown only when pacing is enabled AND the
-/// output is on the wall (Playing or Paused). While `genlock_pacing` is OFF —
-/// the production default (#147) — no badge is shown at all, so the dashboard
-/// is not littered with '● UNLOCKED — pacing disabled' on every card.
+/// output is on the wall (Playing or Paused). An output that reports no pacing
+/// (none since #221 lane 3: pacing is the only path) shows no badge, so the
+/// dashboard is never littered with '● UNLOCKED — pacing disabled'.
 pub fn should_show_lock_badge(o: &NdiOutputHealth) -> bool {
     o.pacing.enabled && matches!(o.state.as_str(), "Playing" | "Paused")
 }
@@ -55,7 +55,7 @@ fn badge_text(o: &NdiOutputHealth) -> String {
     }
 }
 
-/// Tooltip: clock / pacing / audio / receiver values for one output.
+/// Tooltip: clock / pacing / audio values for one output.
 fn badge_title(o: &NdiOutputHealth) -> String {
     let offset = o
         .clock
@@ -67,25 +67,13 @@ fn badge_title(o: &NdiOutputHealth) -> String {
     } else {
         o.clock.mode.as_str()
     };
-    // #192: on the SDK-clocked path the wall-clock audio emitter carries the
-    // audio telemetry (silence/ring/jitter); the paced path shows the A/V
-    // media offset (#148) and underruns.
-    let audio = if o.audio.emitter.enabled {
-        format!(
-            "emitter[sdk-video/wallclock-audio] silence={} ring={}ms jitter_p99={}us late={}",
-            o.audio.emitter.silence_blocks,
-            o.audio.emitter.ring_depth_ms,
-            o.audio.emitter.emit_jitter_p99_us,
-            o.audio.emitter.late_blocks,
-        )
-    } else {
-        format!(
-            "av={:+.1}ms underruns={}",
-            o.pacing.av_align_err_ms, o.audio.underruns,
-        )
-    };
+    // The A/V media offset (#148) and the paced audio's underruns.
+    let audio = format!(
+        "av={:+.1}ms underruns={}",
+        o.pacing.av_align_err_ms, o.audio.underruns,
+    );
     format!(
-        "clock: locked={} mode={} offset={} | pacing: late={} p99={}us repeats={} resyncs={} lag={} | audio: {} | receiver: connections={}",
+        "clock: locked={} mode={} offset={} | pacing: late={} p99={}us repeats={} resyncs={} lag={} | audio: {}",
         o.clock.is_locked,
         mode,
         offset,
@@ -95,7 +83,6 @@ fn badge_title(o: &NdiOutputHealth) -> String {
         o.pacing.resyncs,
         o.pacing.lag_slots,
         audio,
-        o.connections,
     )
 }
 
@@ -120,7 +107,7 @@ fn global_inputs(health: &[NdiOutputHealth]) -> Vec<GlobalLockInput> {
 fn global_title(health: &[NdiOutputHealth], off: bool) -> String {
     let mut parts: Vec<String> = Vec::new();
     if off {
-        parts.push("pacing vypnuté → NDI SDK clock, free-running".to_string());
+        parts.push("pacing vypnuté — žiadny výstup zatiaľ nehlási pacing".to_string());
     }
     for o in health {
         parts.push(format!(
@@ -139,10 +126,12 @@ fn global_title(health: &[NdiOutputHealth], off: bool) -> String {
 /// #176: the dashboard header's whole-box genlock summary — ALWAYS rendered
 /// (`(class, text, title)`), never hidden. Delegates the state decision to the
 /// unit-tested pure `sp_core::genlock::lock_state::global_lock_summary`, then
-/// composes the display text: the explicit `● GENLOCK OFF` (grey) when no output
-/// has pacing enabled — the production default (#164's hide-when-off rule is
-/// revised) — else `● LOCKED / DEGRADED / UNLOCKED` with an `n/m` live-locked
-/// count and the worst output's reason.
+/// composes the display text: the explicit `● GENLOCK OFF` (grey) when no
+/// pipeline reports pacing yet (pacing is the only path since #221 lane 3;
+/// #164's hide-when-off rule is revised) — else `● LOCKED / DEGRADED /
+/// UNLOCKED` with an `n/m` live-locked count and the worst output's reason.
+/// The inputs are the playlist pipelines' pacing and bus delivery, never
+/// `SP-program`'s own sender (`genlock.md`).
 fn global_summary(health: &[NdiOutputHealth]) -> (String, String, String) {
     let summary = global_lock_summary(&global_inputs(health));
     let off = summary.state == GlobalLock::Off;
@@ -227,7 +216,7 @@ pub fn GlobalLockBadge() -> impl IntoView {
             {move || {
                 let health = store.ndi_health.get();
                 // #176: ALWAYS render the whole-box badge — grey `● GENLOCK OFF`
-                // in the production (pacing-off) default, else LOCKED/DEGRADED/
+                // when no pipeline reports pacing yet, else LOCKED/DEGRADED/
                 // UNLOCKED. Never hidden (revises #164).
                 let (class, text, title) = global_summary(&health);
                 view! {

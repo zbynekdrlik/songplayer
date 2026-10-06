@@ -5,7 +5,7 @@
 //! two playlist-id lists the tiered selector
 //! (`db::models_stems_priority::get_next_stem_job`) and the panel's tiered
 //! `queue_position` both consume:
-//!   - tier 1: the playlist(s) ON OBS program right now, and
+//!   - tier 1: the playlist(s) ON SongPlayer's program right now, and
 //!   - tier 2: playlists played in the last `stems_recent_days` days.
 //!
 //! Kept free fns so the lyrics reprocess worker can adopt the same tiering later
@@ -26,7 +26,7 @@ const RESTRICTED_TIERS: usize = 2;
 /// Default recency window (`stems_recent_days` setting) for tier 2.
 pub(crate) const STEMS_RECENT_DAYS_DEFAULT: i64 = 7;
 
-/// The playlist(s) currently ON OBS program. A snapshot's `state` is already
+/// The playlist(s) currently ON SongPlayer's program. A snapshot's `state` is already
 /// reconciled by `handle_health_snapshot` to mean "playing AND on program" (a
 /// playing-but-off-program pipeline is stored as `Paused`), so `Playing` here is
 /// precisely "the wall is showing this output". Pure + unit-tested.
@@ -168,7 +168,6 @@ mod tests {
             playlist_id,
             ndi_name: format!("SP-{playlist_id}"),
             state,
-            connections: 2,
             frames_submitted_total: 0,
             frames_submitted_last_5s: 0,
             observed_fps: 0.0,
@@ -183,9 +182,6 @@ mod tests {
             audio: AudioStats::default(),
             lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
             lock_reason: String::new(),
-            burn_on: false,
-            recovery_step: None,
-            sender_url: None,
             transport: sp_core::playback::TransportState::Idle,
         }
     }

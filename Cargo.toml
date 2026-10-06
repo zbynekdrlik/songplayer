@@ -3,6 +3,7 @@ members = [
     "crates/sp-core",
     "crates/sp-ndi",
     "crates/sp-decoder",
+    "crates/sp-gpu",
     "crates/sp-server",
 ]
 exclude = [
@@ -12,7 +13,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "0.70.0"
+version = "0.71.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.85"

@@ -3,8 +3,8 @@
 //!
 //! Sits next to the #15 JPEG [`PreviewTap`](crate::playback::preview::PreviewTap)
 //! (which stays for the card thumbnail): both are bundled into [`DecodeTaps`]
-//! and offered from the SAME decode seam in `pipeline::decode_and_send` and
-//! `pipeline_paced::run_decode_producer`. The stream tap turns each decoded
+//! and offered from the SAME decode seam, `pipeline_paced::run_decode_producer`
+//! (the only decode loop since #221 lane 3). The stream tap turns each decoded
 //! NV12 frame into a FIXED 640×360 letterboxed NV12 frame and each post-mix
 //! audio block into interleaved f32, hands both to a bounded channel, and — on
 //! the first WS viewer — spawns ONE bundled-`ffmpeg` child
@@ -17,13 +17,15 @@
 //!   producer / emit thread.
 //! * With a viewer, the downscale runs on the decode thread (nearest-neighbour,
 //!   no encode) into a RECYCLED buffer; a full channel DROPS the frame (the
-//!   child paces at CFR) — never blocks.
+//!   feeder takes the newest canvas per 40 ms slot of the monotonic clock
+//!   anyway, #221) — never blocks.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
+use tracing::info;
 
 use super::fmp4_relay::FragmentRelay;
 use super::preview_audio_probe::{SharedLevelProbe, log_tap_level};
@@ -38,7 +40,9 @@ pub const OUT_NV12_LEN: usize = (OUT_W as usize) * (OUT_H as usize) * 3 / 2;
 const BLACK_Y: u8 = 16;
 const NEUTRAL_C: u8 = 128;
 
-/// Bounded video backlog handed to the feeder (drop-on-full; the child paces CFR).
+/// Bounded video backlog handed to the feeder (drop-on-full; the feeder takes
+/// the newest canvas per 40 ms slot of the monotonic clock,
+/// `preview_video_clock.rs`).
 const VIDEO_CHANNEL_CAP: usize = 4;
 /// Bounded audio backlog (small f32 blocks; drop-on-full so the emit path never waits).
 const AUDIO_CHANNEL_CAP: usize = 48;
@@ -164,31 +168,26 @@ pub fn to_stereo(samples: &[f32], channels: u32) -> Option<Vec<f32>> {
     }
 }
 
-/// The decode-seam A/V-sync lead (ms) for a pipeline's clocking path (#178
-/// round 2). On the SDK-clocked path (`genlock_pacing == false`, so the #192
-/// wall-clock emitter carries the audio) the decoder opens with a 1500 ms audio
-/// read-ahead, so at the decode seam the audio LEADS the video by that much; the
+/// The decode-seam A/V-sync lead (ms) (#178 round 2): the paced decoder reads
+/// `PACED_AUDIO_LEAD_MS` (250 ms) of audio ahead of each frame (#148 v4), so at
+/// the decode seam the audio LEADS the video by 250 − 40 = 210 ms, and the
 /// encoder's audio feeder re-syncs by HOLDING each block that long before
 /// writing it (#184 round G3, `preview_audio_hold::AudioHold` — round 3 folded
-/// it into a silence preroll, which parked the whole lead in the socket). The
-/// paced path has no emitter, but its decoder reads `PACED_AUDIO_LEAD_MS`
-/// (250 ms) ahead (#148 v4), so its seam audio leads by 250 − 40 = 210 ms.
-pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
-    let decoder_lead_ms = if genlock_pacing {
-        crate::playback::pacer::PACED_AUDIO_LEAD_MS
-    } else {
-        crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(true)
-    };
-    (decoder_lead_ms - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS) as u32
+/// it into a silence preroll, which parked the whole lead in the socket). #221
+/// lane 3 deleted the SDK-clocked path and its 1500 ms emitter read-ahead.
+pub fn decode_seam_lead_ms() -> u32 {
+    (crate::playback::pacer::PACED_AUDIO_LEAD_MS - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS)
+        as u32
 }
 
 /// How many interleaved-stereo f32 samples of SILENCE the audio feeder prepends
 /// to align the preview's sample-count audio timeline with the video's
-/// wall-clock timeline (#178 round 3). `connect_gap_ms` is how long the video
+/// frame-count timeline (#178 round 3; both on the monotonic clock since
+/// #221). `connect_gap_ms` is how long the video
 /// input had already been feeding when the audio input connected (feed-on-connect
 /// opens video first), capped at 5 s so a late-connecting audio input can never
 /// prepend an unbounded silence; `lead_ms` is the decode-seam A/V lead
-/// ([`lead_ms_for`]) that the SDK-clocked emitter's read-ahead introduces —
+/// ([`decode_seam_lead_ms`]) that the decoder's audio read-ahead introduces —
 /// since #184 round G3 the feeder passes 0 here and HOLDS the lead instead
 /// (`preview_audio_hold`), so the socket never carries it. At
 /// 48 kHz stereo each millisecond is `48 * 2` interleaved f32 samples. Replaces
@@ -202,14 +201,15 @@ pub fn audio_preroll_samples(connect_gap_ms: u64, lead_ms: u32) -> usize {
 pub const PREVIEW_AUDIO_FRAMES_PER_MS: u64 = 48;
 
 /// Pad threshold (#184 round G2): when the audio written so far lags the wall
-/// clock by MORE than this, the feeder writes silence up to the wall — on a
+/// (the real time elapsed on the monotonic clock, #221) by MORE than this, the
+/// feeder writes silence up to the wall — on a
 /// block AND on every feeder poll (200 ms in G2, 30 ms since round G3), so
-/// ffmpeg (which interleaves the wall-clock video with the sample-count audio by
+/// ffmpeg (which interleaves the counted video with the sample-count audio by
 /// timestamp) is never starved of audio and never stops emitting fragments.
 pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
 
 /// Ahead bound (#184 round G2): a block that would push the written audio MORE
-/// than this ahead of the wall clock is trimmed. Round G's add-only gap fill
+/// than this ahead of the wall is trimmed. Round G's add-only gap fill
 /// padded silence while the decode-seam blocks were late and then APPENDED the
 /// late catch-up burst behind that silence, so every hiccup permanently shifted
 /// the preview audio later than its video — the ~70 s "fader heard a minute
@@ -217,7 +217,7 @@ pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
 pub const MAX_AHEAD_MS: u64 = 300;
 
 /// Where a trimmed burst lands (#184 round G2): its OLDEST frames are dropped
-/// so the written audio ends this far ahead of the wall clock (a little headroom
+/// so the written audio ends this far ahead of the wall (a little headroom
 /// for the next on-time block, well inside [`MAX_AHEAD_MS`]).
 pub const ALIGN_TARGET_AHEAD_MS: u64 = 100;
 
@@ -232,10 +232,10 @@ pub struct AlignAction {
 
 /// Silence (stereo frames) to write when NO block arrived within the feeder's
 /// poll (#184 round G2 — 200 ms then, 30 ms since round G3): everything up to
-/// the wall clock once the written audio lags it by more than
+/// the wall once the written audio lags it by more than
 /// [`ALIGN_PAD_THRESHOLD_MS`], else nothing. `wall_frames` is the target
-/// position on the audio timeline (the
-/// elapsed wall time since the feeder started, plus its start preroll), and
+/// position on the audio timeline (the real time elapsed on the monotonic
+/// clock since the feeder started, plus its start preroll), and
 /// `written_frames` the stereo frames already written. Never negative.
 pub fn align_timeout(wall_frames: u64, written_frames: u64) -> usize {
     let threshold = ALIGN_PAD_THRESHOLD_MS * PREVIEW_AUDIO_FRAMES_PER_MS;
@@ -259,16 +259,17 @@ pub fn block_tail_range(skip_frames: usize, block_samples: usize) -> std::ops::R
     start..whole
 }
 
-/// Keep the preview's SAMPLE-COUNT audio timeline on the video's WALL-CLOCK
-/// timeline in BOTH directions for one block of `block_frames` stereo frames
+/// Keep the preview's SAMPLE-COUNT audio timeline on the video's timeline (the
+/// real time elapsed on the monotonic clock, #221) in BOTH directions for one
+/// block of `block_frames` stereo frames
 /// (#184 round G2, replacing the add-only #178 item-15 gap fill): pad up to the
 /// wall when behind by more than [`ALIGN_PAD_THRESHOLD_MS`] (exactly like
 /// [`align_timeout`]); then, if the block would end more than [`MAX_AHEAD_MS`]
 /// ahead of the wall, skip its OLDEST frames so it ends
 /// [`ALIGN_TARGET_AHEAD_MS`] ahead (at most the whole block — a block that
 /// cannot reach the target is dropped entirely, never a negative write). The
-/// trimmed audio is lost from the PREVIEW only; the wall / NDI path never sees
-/// this code.
+/// trimmed audio is lost from the PREVIEW only; the paced output / program
+/// bus never sees this code.
 pub fn align_block(wall_frames: u64, written_frames: u64, block_frames: usize) -> AlignAction {
     let pad_frames = align_timeout(wall_frames, written_frames);
     let block_end = written_frames + pad_frames as u64 + block_frames as u64;
@@ -296,21 +297,61 @@ pub struct AudioBlock {
     pub samples: Vec<f32>,
 }
 
+/// How [`StreamShared::settle_unwatched_run`] ends an encoder run that stopped
+/// with nobody watching (#184). `must_use`: a supervisor that ignored a
+/// `Restart` and returned would keep the claim with no child running, and every
+/// later viewer would find the claim held and get no encoder at all.
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnwatchedEnd {
+    /// No viewer at the settle: the encoder claim was released. The supervisor
+    /// exits; the next viewer's `ensure_running` claims a fresh one.
+    Released,
+    /// A viewer subscribed after the stop was decided: the claim is KEPT and
+    /// the supervisor starts a new child for it.
+    Restart,
+}
+
+impl UnwatchedEnd {
+    /// Whether the supervisor exits after this settle: only after `Released`
+    /// (the claim is free). After `Restart` it still holds the claim and must
+    /// run a new child. Swapped, a supervisor would exit holding the claim (it
+    /// sticks for good: every later viewer gets no encoder) or run a child it
+    /// no longer owns, next to the next viewer's supervisor.
+    #[must_use]
+    pub fn supervisor_exits(self) -> bool {
+        match self {
+            UnwatchedEnd::Released => true,
+            UnwatchedEnd::Restart => false,
+        }
+    }
+}
+
 /// State shared between the decode-side taps, the WS viewers, and the encoder
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
     label: String,
-    /// #178 A/V-sync lead (ms): how far the decode-seam audio LEADS the video on
-    /// this pipeline's clocking path (1500 on the SDK-clocked path from the #192
-    /// lookahead, 0 on the paced path). The encoder's audio feeder HOLDS each
+    /// #178 A/V-sync lead (ms): how far the decode-seam audio LEADS the video
+    /// ([`decode_seam_lead_ms`], 210). The encoder's audio feeder HOLDS each
     /// block this long (#184 round G3, `preview_audio_hold::AudioHold`) to bring
     /// preview A/V into sync (round 3 used a silence preroll; before it the
     /// box-unreliable `-itsoffset`).
     lead_ms: u32,
     /// Number of connected WS viewers. `0` = the offer fast-path early-out.
     viewers: AtomicUsize,
-    /// Whether an encoder child is currently running for this pipeline.
+    /// The encoder claim: a supervisor thread owns this pipeline's ffmpeg
+    /// child. Taken by [`try_claim_encoder`](Self::try_claim_encoder)
+    /// (`preview_encoder::ensure_running`); released when a run ends with
+    /// nobody watching by [`settle_unwatched_run`](Self::settle_unwatched_run),
+    /// by [`give_up`](Self::give_up) (restart budget spent, or a panicked
+    /// supervisor), or by `ensure_running` itself when the supervisor thread
+    /// fails to spawn.
     encoder_running: AtomicBool,
+    /// Orders [`ViewerGuard::subscribe`] against the encoder supervisor's
+    /// [`settle_unwatched_run`](Self::settle_unwatched_run) (#184): its viewer
+    /// re-check and the claim release are ONE step no subscribe can slip into.
+    /// Never taken on the offer hot path (iron rule 1).
+    lifecycle: Mutex<()>,
     video_tx: Sender<Vec<u8>>,
     video_rx: Receiver<Vec<u8>>,
     audio_tx: Sender<AudioBlock>,
@@ -333,6 +374,7 @@ impl StreamShared {
             lead_ms,
             viewers: AtomicUsize::new(0),
             encoder_running: AtomicBool::new(false),
+            lifecycle: Mutex::new(()),
             video_tx,
             video_rx,
             audio_tx,
@@ -360,7 +402,7 @@ impl StreamShared {
         letterbox_nv12_into(sw, sh, stride, nv12, &mut buf);
         match self.video_tx.try_send(buf) {
             Ok(()) => {}
-            Err(TrySendError::Full(b)) => self.recycle(b),
+            Err(TrySendError::Full(b)) => self.recycle_frame(b),
             Err(TrySendError::Disconnected(_)) => {}
         }
     }
@@ -423,8 +465,14 @@ impl StreamShared {
         vec![0u8; OUT_NV12_LEN]
     }
 
+    /// Hand a canvas buffer BACK to the tap's pool so the next watched frame
+    /// letterboxes into it (#147 round 10): a full channel's dropped frame,
+    /// and the encoder's video feeder's frame once it is done with it. Before
+    /// the feeder recycled, every watched frame was a fresh zeroed 337.5 KB
+    /// allocation. A buffer of the wrong size, or one past `POOL_MAX`, is
+    /// freed instead (the pool is bounded).
     #[cfg_attr(test, mutants::skip)]
-    fn recycle(&self, buf: Vec<u8>) {
+    pub fn recycle_frame(&self, buf: Vec<u8>) {
         if buf.len() != OUT_NV12_LEN {
             return;
         }
@@ -433,22 +481,6 @@ impl StreamShared {
                 p.push(buf);
             }
         }
-    }
-
-    /// Feeder side (encoder child): write one tapped canvas frame to the child's
-    /// video input, then hand the buffer BACK to the tap's pool so the next
-    /// watched frame letterboxes into it (#147 round 10). Before this the feeder
-    /// dropped every written frame, the pool refilled only on a full channel,
-    /// and every watched frame was a fresh zeroed 337.5 KB allocation. The
-    /// buffer is recycled on a write error too (the pool is bounded).
-    pub fn write_frame<W: std::io::Write>(
-        &self,
-        out: &mut W,
-        frame: Vec<u8>,
-    ) -> std::io::Result<()> {
-        let written = out.write_all(&frame);
-        self.recycle(frame);
-        written
     }
 
     /// Feeder side (encoder child): drain the video/audio backlog.
@@ -478,9 +510,109 @@ impl StreamShared {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
     }
-    /// Release the running flag (the child's monitor thread on teardown).
+    /// Release the claim unconditionally. A supervisor that ran a child never
+    /// calls it directly (#184): it releases through
+    /// [`settle_unwatched_run`](Self::settle_unwatched_run) or
+    /// [`give_up`](Self::give_up), which end the stopped child's stream FIRST.
+    /// The bare release is for a supervisor thread that failed to spawn.
     pub fn release_encoder(&self) {
         self.encoder_running.store(false, Ordering::Release);
+    }
+
+    /// The lifecycle lock (see the field). A poisoned lock is still a lock: a
+    /// panic elsewhere must not stop every later viewer from subscribing.
+    fn lifecycle_lock(&self) -> MutexGuard<'_, ()> {
+        self.lifecycle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Settle an encoder run that ended with nobody watching (#184): the viewer
+    /// TTL ran out, or the child exited on its own while nobody watched. The
+    /// supervisor calls it once the child and its reader are gone. It ends the
+    /// stopped child's stream ([`end_stopped_stream`](Self::end_stopped_stream))
+    /// before it may release the claim. Under the lock the order is moot (no
+    /// new supervisor can claim before the lock is dropped, since its viewer
+    /// must subscribe first), but it is the one rule every release keeps:
+    /// [`give_up`](Self::give_up) releases without the lock, where it matters.
+    /// It runs under the lifecycle lock, which [`ViewerGuard::subscribe`] also
+    /// takes, so every viewer either subscribed before it (and is seen here) or
+    /// subscribes after the claim was released (its `ensure_running` then
+    /// claims a fresh encoder). One INFO line logs the outcome:
+    ///
+    /// - no viewer → release the claim: [`UnwatchedEnd::Released`], the
+    ///   supervisor exits;
+    /// - a viewer subscribed since the stop was decided → keep the claim:
+    ///   [`UnwatchedEnd::Restart`], the supervisor runs a new child for it.
+    ///
+    /// Before #184 the stop released the claim with no re-check, after the
+    /// supervisor returned: a viewer that subscribed in between found the claim
+    /// held, so its `ensure_running` started nothing, and no child ever ran for
+    /// it (a frozen preview at HAVE_METADATA).
+    pub fn settle_unwatched_run(&self) -> UnwatchedEnd {
+        let _lifecycle = self.lifecycle_lock();
+        self.end_stopped_stream();
+        // One read decides AND is logged (a guard drop may decrement it, outside
+        // the lock, at any moment).
+        let viewers = self.viewers.load(Ordering::Relaxed);
+        if viewers == 0 {
+            info!(
+                label = %self.label,
+                "preview-encoder: run settled with nobody watching — encoder released"
+            );
+            self.release_encoder();
+            return UnwatchedEnd::Released;
+        }
+        info!(
+            label = %self.label,
+            viewers,
+            "preview-encoder: a viewer subscribed as the child stopped — keeping the encoder for a new child"
+        );
+        UnwatchedEnd::Restart
+    }
+
+    /// End a stopped child's stream for every viewer that may hold its init
+    /// (#184; generalises the round-G respawn close), once the child and its
+    /// reader are gone. [`settle_unwatched_run`](Self::settle_unwatched_run)
+    /// calls it; the supervisor calls it before a respawn or the libx264
+    /// fallback; [`give_up`](Self::give_up) closes unconditionally instead.
+    /// With an init cached, a viewer may already have sent it (and the child's
+    /// last fragments) to its browser: the relay is CLOSED, so that viewer's
+    /// socket closes and the shim reconnects onto the next child's init. A
+    /// bare reset would leave it holding the old init while the next child's
+    /// restarted timeline arrives (a frozen preview). With no init cached the
+    /// child produced nothing a viewer could hold, so viewers still waiting
+    /// for an init keep their stream and simply receive the next one. A second
+    /// call is a no-op. The log counts the receivers it closed: 0 on an
+    /// ordinary stop, more when a viewer joined as the child stopped.
+    pub fn end_stopped_stream(&self) {
+        if self.relay.init().is_some() {
+            let receivers = self.relay.viewer_count();
+            self.relay.close();
+            info!(
+                label = %self.label,
+                receivers,
+                "preview-encoder: stopped child's init closed"
+            );
+        }
+    }
+
+    /// The supervisor gives the stream up (#178 item 12: the restart budget is
+    /// spent, or its thread panicked): close the relay, unconditionally, THEN
+    /// release the claim (#184). A viewer holding an init sees `Closed` and its
+    /// socket closes. One still in `wait_for_init` never reads its (closed)
+    /// receiver while it waits: its socket closes when the wait ends, right
+    /// after it sends a next child's init (if another viewer starts one) or at
+    /// the latest at the ~10 s init timeout. `give_up` takes no lock, so the
+    /// order matters here: in the reverse order a new supervisor could claim
+    /// and cache its child's init before this late close wiped it.
+    pub fn give_up(&self) {
+        self.relay.close();
+        info!(
+            label = %self.label,
+            "preview-encoder: stream given up — encoder released"
+        );
+        self.release_encoder();
     }
 }
 
@@ -526,8 +658,13 @@ pub struct ViewerGuard {
 
 impl ViewerGuard {
     /// Register a viewer against `tap` (increments the count) and return the
-    /// guard plus the fragment relay to read from.
+    /// guard plus the fragment relay to read from. The count is taken under the
+    /// lifecycle lock (#184), so a stopping encoder's
+    /// [`StreamShared::settle_unwatched_run`] either sees this viewer and keeps
+    /// the encoder, or released the claim before this returns (the caller's
+    /// `ensure_running` then claims a fresh one).
     pub fn subscribe(tap: &StreamTap) -> (ViewerGuard, Arc<FragmentRelay>) {
+        let _lifecycle = tap.shared.lifecycle_lock();
         tap.shared.viewers.fetch_add(1, Ordering::AcqRel);
         (
             ViewerGuard {
@@ -567,8 +704,8 @@ pub struct DecodeTaps {
 
 impl DecodeTaps {
     /// Offer one decoded frame (video + its post-mix audio) to BOTH taps in one
-    /// call, before the NDI submit / audio-emitter push consumes them. Borrows
-    /// only — nothing is moved out of the frame.
+    /// call, before the pacer takes it (#221 lane 3: the paced output feeds
+    /// only the program bus). Borrows only — nothing is moved out of the frame.
     #[inline]
     pub fn offer_frame(
         &self,
@@ -594,3 +731,7 @@ impl DecodeTaps {
 #[cfg(test)]
 #[path = "preview_stream_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "preview_stream_tests_lifecycle.rs"]
+mod tests_lifecycle;

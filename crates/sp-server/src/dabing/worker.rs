@@ -531,25 +531,15 @@ impl DubWorker {
     }
 
     /// Materialise the dub tool scripts into `tools_dir` (embedded at compile
-    /// time), rewriting only the stale ones. Mirrors `StemWorker::ensure_script`;
-    /// ships `dub_worker.py` plus the modules it imports: `dub_live_session.py`
-    /// (the round-H continuous session), `dub_loudness.py` (the round-F
-    /// loudness-matched assembly) and `win_replace.py` (the round-F2 POSIX
-    /// rename of the finished dub). Returns the worker script path.
+    /// time) through the shared `embedded_scripts::materialise`, rewriting only
+    /// the stale ones, like `StemWorker::ensure_script`; ships `dub_worker.py`
+    /// plus the modules it imports: `dub_live_session.py` (the round-H
+    /// continuous session), `dub_loudness.py` (the round-F loudness-matched
+    /// assembly) and `win_replace.py` (the round-F2 POSIX rename of the
+    /// finished dub). Returns the worker script path.
     async fn ensure_script(&self) -> anyhow::Result<PathBuf> {
-        let tools_dir = self.script_path.parent().unwrap_or_else(|| Path::new("."));
-        tokio::fs::create_dir_all(tools_dir).await?;
-        for (name, content) in embedded_tool_scripts() {
-            let path = tools_dir.join(name);
-            let stale = match tokio::fs::read_to_string(&path).await {
-                Ok(existing) => existing != content,
-                Err(_) => true,
-            };
-            if stale {
-                tokio::fs::write(&path, content).await?;
-                info!("dub_worker: wrote {}", path.display());
-            }
-        }
+        let scripts = embedded_tool_scripts();
+        crate::embedded_scripts::materialise(&self.tools_dir, &scripts, "dub_worker").await?;
         Ok(self.script_path.clone())
     }
 }

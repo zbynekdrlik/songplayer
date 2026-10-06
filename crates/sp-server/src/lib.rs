@@ -5,7 +5,9 @@ mod ai_proxy_watchdog;
 pub mod api;
 pub mod dabing;
 pub mod db;
+pub mod diag; // #223 S0: /api/v1/diag/* measurement benches
 pub mod downloader;
+mod embedded_scripts; // #207: the Python tool scripts a worker writes into tools_dir
 mod engine_command;
 mod engine_dispatch;
 pub use engine_command::EngineCommand;
@@ -29,6 +31,7 @@ mod song_input; // #136: a stem / dub job's input, re-read after the heavy slot
 mod song_relink; // #136: stems / dub left under an old name → the audio's name
 pub mod startup;
 pub mod stems;
+mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
 
 pub use panic_hook::install_panic_hook;
 
@@ -64,9 +67,6 @@ pub struct AppState {
     pub tool_paths: Arc<RwLock<Option<ToolPaths>>>,
     pub sync_tx: mpsc::Sender<SyncRequest>,
     pub resolume_tx: mpsc::Sender<resolume::ResolumeCommand>,
-    /// Signal — sent by playlist CRUD handlers so the OBS client can rebuild
-    /// its NDI source map.
-    pub obs_rebuild_tx: broadcast::Sender<()>,
     /// Directory where cached media and lyrics JSON files are stored.
     pub cache_dir: PathBuf,
     pub ai_proxy: Arc<ai::proxy::ProxyManager>,
@@ -75,12 +75,8 @@ pub struct AppState {
     pub presenter_client: Option<Arc<presenter::PresenterClient>>,
     /// Resolume registry exposing per-host health snapshots.
     pub resolume_registry: Arc<resolume::ResolumeRegistry>,
-    /// NDI health registry exposing per-pipeline health snapshots.
+    /// Per-pipeline health snapshots (`/api/v1/ndi/health`).
     pub ndi_health_registry: Arc<playback::ndi_health::NdiHealthRegistry>,
-    /// Runtime burn-id overlay toggle registry (#151). `POST /api/v1/ndi/burn`
-    /// reads/writes it synchronously; the playback engine + pipeline threads
-    /// share the same registry (default OFF, never persisted).
-    pub ndi_burn_registry: Arc<playback::ndi_burn::NdiBurnRegistry>,
     /// Per-playlist live preview tap registry (#15 part 2).
     /// `GET /api/v1/playback/{id}/preview.jpg` reads it; the playback engine +
     /// pipeline decode loops share the same registry (an idle tap costs one
@@ -94,6 +90,8 @@ pub struct AppState {
     /// #136: the ONE metadata provider chain — the same `Arc` the download and
     /// reprocess workers use; `status.metadata` + the probe route read it.
     pub metadata_chain: Arc<metadata::ProviderChain>,
+    /// #223 S0: `POST /api/v1/diag/decode-bench`'s sample dir and one-run gate.
+    pub decode_bench: Arc<diag::decode_bench::DecodeBench>,
 }
 
 /// Status of external tool availability.
@@ -119,6 +117,19 @@ pub struct ServerConfig {
     pub port: u16,
     /// Directory containing the WASM frontend (`dist/`). If set, serves static files.
     pub dist_dir: Option<PathBuf>,
+}
+
+impl ServerConfig {
+    /// The data dir: the DB's own dir (`C:\ProgramData\SongPlayer` on the
+    /// box). The crash log, `cookies.txt` and the decode bench's samples
+    /// (`bench\`) live there, outside the media cache. A bare DB file name
+    /// gives the current dir.
+    pub fn data_dir(&self) -> PathBuf {
+        self.db_path
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
 }
 
 impl Default for ServerConfig {
@@ -166,12 +177,7 @@ pub async fn start(
     // is captured to a durable crash file before release `panic = "abort"`
     // kills the process (#156). Idempotent: the Tauri shell installs it earlier
     // when present, and the internal `Once` makes the double call safe.
-    let crash_log = config
-        .db_path
-        .parent()
-        .map(|d| d.join("songplayer-panic.log"))
-        .unwrap_or_else(|| PathBuf::from("songplayer-panic.log"));
-    crate::install_panic_hook(crash_log);
+    crate::install_panic_hook(config.data_dir().join("songplayer-panic.log"));
 
     // 1. Database
     let pool = db::create_pool(&format!("sqlite:{}", config.db_path.display())).await?;
@@ -207,8 +213,6 @@ pub async fn start(
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let (event_tx, _) = broadcast::channel::<ServerMsg>(256);
     let (engine_tx, mut engine_rx) = mpsc::channel::<EngineCommand>(64);
-    // Rebuild signal from playlist CRUD → OBS client.
-    let (obs_rebuild_tx, _) = broadcast::channel::<()>(16);
 
     // 3. Shared state
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
@@ -237,9 +241,6 @@ pub async fn start(
     // 3b. NDI health registry — constructed before AppState so both the engine
     // (writer) and the AppState (reader) can hold an Arc to the same instance.
     let ndi_health_registry = Arc::new(playback::ndi_health::NdiHealthRegistry::new());
-    // #151: one burn-id toggle registry shared by AppState (API) + the engine
-    // (pipeline spawn + health). Default OFF, never persisted.
-    let ndi_burn_registry = Arc::new(playback::ndi_burn::NdiBurnRegistry::new());
     // #15 part 2: one live-preview tap registry shared by AppState (route) +
     // the engine (registers a tap per pipeline at spawn; the decode loops feed
     // it). Idle taps cost one atomic load per decoded frame.
@@ -319,7 +320,6 @@ pub async fn start(
         tool_paths: tool_paths.clone(),
         sync_tx: sync_tx.clone(),
         resolume_tx: resolume_cmd_tx.clone(),
-        obs_rebuild_tx: obs_rebuild_tx.clone(),
         cache_dir: config.cache_dir.clone(),
         ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
             config.cache_dir.clone(),
@@ -329,11 +329,13 @@ pub async fn start(
         presenter_client: presenter_client.clone(),
         resolume_registry: resolume_registry.clone(),
         ndi_health_registry: ndi_health_registry.clone(),
-        ndi_burn_registry: ndi_burn_registry.clone(),
         preview_registry: preview_registry.clone(),
         program_bus: program_bus.clone(),
         lan_status: lan_status.clone(),
         metadata_chain: metadata_chain.clone(),
+        decode_bench: Arc::new(diag::decode_bench::DecodeBench::new(
+            config.data_dir().join("bench"),
+        )),
     };
 
     // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
@@ -378,18 +380,17 @@ pub async fn start(
     let (dl_event_tx, _dl_event_rx_placeholder) = broadcast::channel::<String>(64);
     let dl_event_tx_for_worker = dl_event_tx.clone();
 
-    let tools_status_clone = tools_status.clone();
-    let tools_event_tx = event_tx.clone();
-    let tool_paths_clone = tool_paths.clone();
+    let tools_sinks = tools_ready::ToolsSinks {
+        status: tools_status.clone(),
+        paths: tool_paths.clone(),
+        events: event_tx.clone(),
+    };
+    let lyrics_event_tx = event_tx.clone();
     let dl_pool = pool.clone();
     let dl_cache_dir = config.cache_dir.clone();
     // Same directory as the SQLite DB — where a production operator drops
     // cookies.txt (Netscape format) to authenticate yt-dlp downloads (#141).
-    let dl_data_dir = config
-        .db_path
-        .parent()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let dl_data_dir = config.data_dir();
     let dl_shutdown_tx = shutdown_tx.clone();
     let dl_metadata_chain = metadata_chain.clone();
     let startup_sync_pool = pool.clone();
@@ -428,164 +429,159 @@ pub async fn start(
                 // #189: ship + wire the Deno JS runtime for YouTube's n-challenge
                 // and run the startup self-check (memoizes the runtime args for
                 // every yt-dlp spawn; logs OK/MISSING loudly).
-                let (js_runtime_ok, deno_ver) =
+                let (js_runtime_ok, deno_version) =
                     downloader::ytdlp_cmd::init_js_runtime(&tools_mgr, &paths, &dl_data_dir).await;
-
-                let mut ts = tools_status_clone.write().await;
-                ts.ytdlp_available = true;
-                ts.ffmpeg_available = true;
-                ts.ytdlp_version = version.clone();
-                ts.js_runtime_ok = js_runtime_ok;
-                ts.deno_version = deno_ver.clone();
-                let _ = tools_event_tx.send(ServerMsg::ToolsStatus {
-                    ytdlp_available: true,
-                    ffmpeg_available: true,
+                let found = tools_ready::ToolsFound {
                     ytdlp_version: version,
                     js_runtime_ok,
-                    deno_version: deno_ver,
-                });
-                *tool_paths_clone.write().await = Some(paths.clone());
-                info!("tools ready: yt-dlp and FFmpeg available");
+                    deno_version,
+                };
 
-                // yt-dlp self-update (#140): the download worker never
-                // updates its own yt-dlp binary, so a box that has been up
-                // for a while silently falls behind YouTube's format
-                // changes (observed: `audio download failed … Requested
-                // format is not available` on a stale 2026.03 build — see
-                // `.claude/rules/youtube-cookies.md`). One-shot update
-                // right after tools are ready, then a shutdown-aware
-                // periodic re-update — never fatal, a stale yt-dlp should
-                // degrade, not crash the server.
-                let version_before = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
-                match tools_mgr.update_ytdlp().await {
-                    Ok(()) => {
-                        let version_after = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
-                        info!(
-                            version_before = ?version_before,
-                            version_after = ?version_after,
-                            "yt-dlp self-update: startup check complete"
-                        );
+                // Everything below runs AFTER the publish, with no lock
+                // held: `GET /api/v1/status` answers through it (#144).
+                let published = paths.clone();
+                let follow_ups = async move {
+                    // yt-dlp self-update (#140): the download worker never
+                    // updates its own yt-dlp binary, so a box that has been up
+                    // for a while silently falls behind YouTube's format
+                    // changes (observed: `audio download failed … Requested
+                    // format is not available` on a stale 2026.03 build — see
+                    // `.claude/rules/youtube-cookies.md`). One-shot update
+                    // right after tools are ready, then a shutdown-aware
+                    // periodic re-update — never fatal, a stale yt-dlp should
+                    // degrade, not crash the server.
+                    let version_before = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
+                    match tools_mgr.update_ytdlp().await {
+                        Ok(()) => {
+                            let version_after = tools_mgr.ytdlp_version(&paths.ytdlp).await.ok();
+                            info!(
+                                version_before = ?version_before,
+                                version_after = ?version_after,
+                                "yt-dlp self-update: startup check complete"
+                            );
+                        }
+                        Err(e) => warn!("yt-dlp self-update: startup check failed: {e}"),
                     }
-                    Err(e) => warn!("yt-dlp self-update: startup check failed: {e}"),
-                }
-                // Shared with the download worker below: an update never
-                // runs while a song is downloading and vice versa.
-                let ytdlp_lock: downloader::YtdlpLock =
-                    std::sync::Arc::new(tokio::sync::Mutex::new(()));
-                let ytdlp_interval_secs = ytdlp_update_interval_secs();
-                tokio::spawn(periodic_ytdlp_update(
-                    tools_mgr,
-                    paths.ytdlp.clone(),
-                    ytdlp_interval_secs,
-                    ytdlp_lock.clone(),
-                    ytdlp_update_shutdown.subscribe(),
-                ));
-                info!(
-                    interval_secs = ytdlp_interval_secs,
-                    "periodic yt-dlp self-update worker started"
-                );
+                    // Shared with the download worker below: an update never
+                    // runs while a song is downloading and vice versa.
+                    let ytdlp_lock: downloader::YtdlpLock =
+                        std::sync::Arc::new(tokio::sync::Mutex::new(()));
+                    let ytdlp_interval_secs = ytdlp_update_interval_secs();
+                    tokio::spawn(periodic_ytdlp_update(
+                        tools_mgr,
+                        paths.ytdlp.clone(),
+                        ytdlp_interval_secs,
+                        ytdlp_lock.clone(),
+                        ytdlp_update_shutdown.subscribe(),
+                    ));
+                    info!(
+                        interval_secs = ytdlp_interval_secs,
+                        "periodic yt-dlp self-update worker started"
+                    );
 
-                // Defensive self-heal for #40: any normalized=1 row whose
-                // FLAC is not at 48 kHz would explode in
-                // SplitSyncedDecoder. Flip them back to normalized=0 so
-                // the download worker re-normalizes under the post-#38
-                // pipeline (which pins -ar 48000 -ac 2).
-                if let Err(e) = startup::flip_wrong_sample_rate_rows(
-                    &startup_sync_pool,
-                    startup::probe_sample_rate_symphonia,
-                )
-                .await
-                {
-                    tracing::warn!("self-heal: sample-rate sweep failed: {e}");
-                }
+                    // Defensive self-heal for #40: any normalized=1 row whose
+                    // FLAC is not at 48 kHz would explode in
+                    // SplitSyncedDecoder. Flip them back to normalized=0 so
+                    // the download worker re-normalizes under the post-#38
+                    // pipeline (which pins -ar 48000 -ac 2).
+                    if let Err(e) = startup::flip_wrong_sample_rate_rows(
+                        &startup_sync_pool,
+                        startup::probe_sample_rate_symphonia,
+                    )
+                    .await
+                    {
+                        tracing::warn!("self-heal: sample-rate sweep failed: {e}");
+                    }
 
-                // Startup sync fires AFTER tools are ready so the sync
-                // worker doesn't silently drop the requests.
-                if let Err(e) =
-                    startup::startup_sync_active_playlists(&startup_sync_pool, &startup_sync_tx)
-                        .await
-                {
-                    tracing::warn!("startup sync enqueue failed: {e}");
-                }
+                    // Startup sync fires AFTER tools are ready so the sync
+                    // worker doesn't silently drop the requests.
+                    if let Err(e) =
+                        startup::startup_sync_active_playlists(&startup_sync_pool, &startup_sync_tx)
+                            .await
+                    {
+                        tracing::warn!("startup sync enqueue failed: {e}");
+                    }
 
-                // Periodic re-sync (#139): the one-shot startup sync above
-                // only ever fires once, so a video added to a YouTube
-                // playlist later would never be picked up without an
-                // operator manually hitting the sync button. Spawned only
-                // once tools are ready, same as the startup sync itself.
-                let periodic_interval_secs = playlist_sync_interval_secs();
-                tokio::spawn(periodic_playlist_sync(
-                    periodic_sync_pool,
-                    periodic_sync_tx,
-                    periodic_interval_secs,
-                    periodic_sync_shutdown.subscribe(),
-                ));
-                info!(
-                    interval_secs = periodic_interval_secs,
-                    "periodic playlist sync worker started"
-                );
+                    // Periodic re-sync (#139): the one-shot startup sync above
+                    // only ever fires once, so a video added to a YouTube
+                    // playlist later would never be picked up without an
+                    // operator manually hitting the sync button. Spawned only
+                    // once tools are ready, same as the startup sync itself.
+                    let periodic_interval_secs = playlist_sync_interval_secs();
+                    tokio::spawn(periodic_playlist_sync(
+                        periodic_sync_pool,
+                        periodic_sync_tx,
+                        periodic_interval_secs,
+                        periodic_sync_shutdown.subscribe(),
+                    ));
+                    info!(
+                        interval_secs = periodic_interval_secs,
+                        "periodic playlist sync worker started"
+                    );
 
-                let lyrics_ytdlp = paths.ytdlp.clone();
-                let lyrics_python = paths.python.clone();
-                let dl_worker = downloader::DownloadWorker::new(
-                    dl_pool,
-                    paths,
-                    dl_cache_dir,
-                    dl_data_dir,
-                    dl_metadata_chain,
-                    dl_event_tx_for_worker,
-                    ytdlp_lock,
-                );
-                tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
-                info!("download worker started");
+                    let lyrics_ytdlp = paths.ytdlp.clone();
+                    let lyrics_python = paths.python.clone();
+                    let dl_worker = downloader::DownloadWorker::new(
+                        dl_pool,
+                        paths,
+                        dl_cache_dir,
+                        dl_data_dir,
+                        dl_metadata_chain,
+                        dl_event_tx_for_worker,
+                        ytdlp_lock,
+                    );
+                    tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
+                    info!("download worker started");
 
-                // Lyrics worker
-                let lyrics_pool_for_loop = lyrics_pool.clone();
-                let lyrics_worker = lyrics::LyricsWorker::new(
-                    lyrics_pool,
-                    lyrics_cache_dir,
-                    lyrics_ytdlp,
-                    lyrics_python,
-                    lyrics_tools_dir,
-                    Some(ai_client_for_dl),
-                    tools_event_tx.clone(),
-                    lyrics_ndi_health,
-                    lyrics_obs_state,
-                );
-                let current_processing_handle = lyrics_worker.current_processing();
-                tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
-                info!("lyrics worker started");
+                    // Lyrics worker
+                    let lyrics_pool_for_loop = lyrics_pool.clone();
+                    let lyrics_worker = lyrics::LyricsWorker::new(
+                        lyrics_pool,
+                        lyrics_cache_dir,
+                        lyrics_ytdlp,
+                        lyrics_python,
+                        lyrics_tools_dir,
+                        Some(ai_client_for_dl),
+                        lyrics_event_tx.clone(),
+                        lyrics_ndi_health,
+                        lyrics_obs_state,
+                    );
+                    let current_processing_handle = lyrics_worker.current_processing();
+                    tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
+                    info!("lyrics worker started");
 
-                // Lyrics queue-update broadcast loop (every 2s → WS clients)
-                tokio::spawn(crate::lyrics::worker::queue_update_loop(
-                    lyrics_pool_for_loop,
-                    tools_event_tx.clone(),
-                    current_processing_handle,
-                    lyrics_shutdown.subscribe(),
-                ));
+                    // Lyrics queue-update broadcast loop (every 2s → WS clients)
+                    tokio::spawn(crate::lyrics::worker::queue_update_loop(
+                        lyrics_pool_for_loop,
+                        lyrics_event_tx.clone(),
+                        current_processing_handle,
+                        lyrics_shutdown.subscribe(),
+                    ));
 
-                // Karaoke stem worker (#14) — separates the catalog into
-                // vocals + instrumental sidecars under the SAME #154 idle gate,
-                // lowest priority (after lyrics).
-                let stem_worker = crate::stems::StemWorker::new(
-                    stem_pool,
-                    stem_tools_dir,
-                    stem_ndi_health,
-                    stem_obs_state,
-                );
-                tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
-                // (StemWorker::run logs "stem worker started" once it is live.)
+                    // Karaoke stem worker (#14) — separates the catalog into
+                    // vocals + instrumental sidecars under the SAME #154 idle gate,
+                    // lowest priority (after lyrics).
+                    let stem_worker = crate::stems::StemWorker::new(
+                        stem_pool,
+                        stem_tools_dir,
+                        stem_ndi_health,
+                        stem_obs_state,
+                    );
+                    tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
+                    // (StemWorker::run logs "stem worker started" once it is live.)
 
-                // #183 D4: dub-synthesis worker (Gemini Live Translate) — same
-                // tools dir + heavy slot, BELOW_NORMAL, never gating playback.
-                let dub_worker = crate::dabing::DubWorker::new(
-                    dub_pool,
-                    dub_tools_dir,
-                    dub_ndi_health,
-                    dub_obs_state,
-                );
-                tokio::spawn(dub_worker.run(dub_shutdown.subscribe()));
-                // (DubWorker::run logs "dub worker started" once it is live.)
+                    // #183 D4: dub-synthesis worker (Gemini Live Translate) — same
+                    // tools dir + heavy slot, BELOW_NORMAL, never gating playback.
+                    let dub_worker = crate::dabing::DubWorker::new(
+                        dub_pool,
+                        dub_tools_dir,
+                        dub_ndi_health,
+                        dub_obs_state,
+                    );
+                    tokio::spawn(dub_worker.run(dub_shutdown.subscribe()));
+                    // (DubWorker::run logs "dub worker started" once it is live.)
+                };
+                tools_ready::publish_then(tools_sinks, published, found, follow_ups).await;
             }
             Err(e) => {
                 tracing::error!("tools setup failed: {e}");
@@ -625,9 +621,9 @@ pub async fn start(
         }
     });
 
-    // 7. OBS WebSocket client (#219: its snapshots feed the program follow,
-    // `start_program`; #221 L4b: its scene detection drives no playback).
-    let obs_side = obs_bridge::start_obs(&pool, &obs_state, &obs_rebuild_tx, &shutdown_tx).await?;
+    // 7. OBS WebSocket client (#221 L6: no scene detection; it serves the
+    // facade's forwards and manual press, and the title text).
+    let obs_side = obs_bridge::start_obs(&pool, &obs_state, &shutdown_tx).await?;
 
     // 8. Reprocess worker — on the SAME metadata chain as the download worker
     // (#136: it used to get Gemini alone, so it could never repair a row).
@@ -652,6 +648,8 @@ pub async fn start(
 
     // #14 karaoke: seed the process-global live control before pipelines spawn.
     crate::stems::control::init_from_settings(&pool).await;
+    // #223 S3b: `video_hw_decode` applied before any pipeline opens a song.
+    crate::playback::video_decode::start(&pool, &shutdown_tx).await;
 
     // 10. Playback engine (bridges API commands to the engine state machine)
     let mut engine = playback::PlaybackEngine::new(playback::PlaybackEngineConfig {
@@ -664,58 +662,22 @@ pub async fn start(
         presenter_client,
         ndi_health_registry,
     });
-    // Inject the shared dantesync clock-health handle into every NDI health snapshot (#146).
+    // Inject the shared dantesync clock-health handle into every health snapshot (#146).
     engine.set_clock_health(clock_health);
-
-    // Boundary-paced emission staging flag (#147): DB setting `genlock_pacing`
-    // ("true"/"false"), default OFF. Read once before pipelines are spawned.
-    let genlock_pacing = db::models::get_setting(&pool, "genlock_pacing")
-        .await
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false);
-    info!(genlock_pacing, "genlock boundary-paced emission flag");
-    engine.set_genlock_pacing(genlock_pacing);
-    // #151: share the burn-id toggle registry BEFORE pipelines spawn (registered at spawn).
-    engine.set_ndi_burn_registry(ndi_burn_registry.clone());
     // #15 part 2: share the preview registry BEFORE pipelines spawn (each
     // pipeline registers a preview tap into it at spawn).
     engine.set_preview_registry(preview_registry.clone());
-    // #196: share the OBS-input → playlist-id map so the health handler can
-    // tell whether an OBS input advertises an output (skip the ladder + set a
-    // distinct reason when none does). Only when OBS is configured.
-    if let Some(map) = obs_side.ndi_sources {
-        engine.set_ndi_source_map(map);
-    }
 
-    // #196: pre-create pipelines (= NDI senders) for all active playlists
-    // deterministically in playlist.id order, after waiting for the previous
-    // instance's ports to be released, so a restart yields the SAME name→port
-    // map (the dark-wall-after-restart fix). Runs before `start_program` and the
-    // engine loop; one missing past the budget is created on its authority ON.
+    // A pipeline for every active playlist, in playlist.id order and its row's
+    // mode (#225 unit 2), before `start_program` and the engine loop. #221 lane
+    // 3: a pipeline has no NDI sender of its own (it feeds the program bus),
+    // so this waits for nothing; `start_program` then creates SP-program, the
+    // only NDI sender, after its #196 port wait.
     let active_playlists = db::models::get_active_playlists(&pool)
         .await
         .unwrap_or_default();
-    // Bounded (0.60.0 review): a stuck sender must never delay the HTTP bind.
-    let budget = playback::startup_senders::STARTUP_SENDERS_BUDGET;
-    match tokio::time::timeout(budget, engine.create_startup_senders(&active_playlists)).await {
-        Ok(()) => info!(
-            count = active_playlists.len(),
-            "playback pipelines created for active playlists"
-        ),
-        Err(_) => {
-            warn!(
-                budget_s = budget.as_secs(),
-                "startup senders exceeded their budget — binding the API now"
-            );
-            // The +30 s self-check clock must still start (shared registry).
-            state.ndi_health_registry.mark_senders_ready();
-        }
-    }
-    engine
-        .start_program(program_bus, &shutdown_tx, obs_side.snapshots)
-        .await;
+    engine.create_startup_pipelines(&active_playlists);
+    engine.start_program(program_bus, &shutdown_tx).await;
 
     // Engine subscribes to the download worker's broadcast so that
     // `processed:<youtube_id>` events can rewake pipelines stuck in

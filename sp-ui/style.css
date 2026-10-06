@@ -1197,7 +1197,7 @@ body {
 .lock-locked { color: var(--success); }
 .lock-degraded { color: var(--warning); }
 .lock-unlocked { color: var(--error); }
-/* #176: GENLOCK OFF — grey, the production default (pacing off), never hidden. */
+/* #176: GENLOCK OFF — grey, no pipeline reports pacing yet (pacing is the only path, #221 lane 3), never hidden. */
 .lock-off { color: var(--text-dim); }
 
 /* #180 dubbing D1 — Dabing section + per-row toggle. */

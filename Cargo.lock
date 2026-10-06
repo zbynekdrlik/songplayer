@@ -1472,12 +1472,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "qrcode"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
-
-[[package]]
 name = "quinn"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2064,7 +2058,7 @@ dependencies = [
 
 [[package]]
 name = "sp-core"
-version = "0.70.0"
+version = "0.71.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2073,10 +2067,11 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.70.0"
+version = "0.71.0"
 dependencies = [
  "mutants",
  "sp-core",
+ "sp-gpu",
  "symphonia",
  "thiserror",
  "tracing",
@@ -2084,8 +2079,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sp-gpu"
+version = "0.71.0"
+dependencies = [
+ "cc",
+ "mutants",
+ "sp-core",
+ "thiserror",
+ "tracing",
+ "windows",
+]
+
+[[package]]
 name = "sp-ndi"
-version = "0.70.0"
+version = "0.71.0"
 dependencies = [
  "libloading",
  "mutants",
@@ -2096,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.70.0"
+version = "0.71.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2109,7 +2116,6 @@ dependencies = [
  "jpeg-encoder",
  "mdns-sd",
  "mutants",
- "qrcode",
  "rand 0.8.5",
  "regex",
  "reqwest",
@@ -2121,6 +2127,7 @@ dependencies = [
  "socket2",
  "sp-core",
  "sp-decoder",
+ "sp-gpu",
  "sp-ndi",
  "sqlx",
  "tempfile",

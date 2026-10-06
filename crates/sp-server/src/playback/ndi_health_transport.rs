@@ -21,11 +21,11 @@ use sp_core::playback::TransportState;
 use super::ndi_health::PlaybackStateLabel;
 
 /// Map a pipeline's RAW [`PlaybackStateLabel`] (`reported_state`) to its own
-/// [`TransportState`], INDEPENDENTLY of whether its scene is on OBS program.
+/// [`TransportState`], INDEPENDENTLY of whether it is on SongPlayer's program.
 pub(crate) fn transport_from_reported(state: &PlaybackStateLabel) -> TransportState {
     match state {
-        // A decoding pipeline is Playing regardless of whether its scene is on
-        // OBS program — an off-program decoding dub reads `transport: Playing`
+        // A decoding pipeline is Playing regardless of whether it is on
+        // SongPlayer's program — an off-program decoding dub reads `transport: Playing`
         // on `/api/v1/ndi/health`.
         PlaybackStateLabel::Playing => TransportState::Playing,
         // A Playing-off-program pipeline the registry reconciled to `Paused`,

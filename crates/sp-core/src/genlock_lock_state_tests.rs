@@ -6,14 +6,13 @@ use crate::genlock::lock_state::{
     LockInputs, LockState, OutputLock, derive, expected_repeat_permille, summarize,
 };
 
-/// A healthy LOCKED base: clock ok, pacing on, a receiver, no window events, a
-/// full minute of 24-fps-on-30-grid slots. Tests override single fields with
+/// A healthy LOCKED base: clock ok, pacing on, no window events, a full
+/// minute of 24-fps-on-30-grid slots. Tests override single fields with
 /// struct-update syntax so no 9-arg helper is needed (`too_many_arguments`).
 fn base() -> LockInputs {
     LockInputs {
         clock_ok: true,
         pacing_enabled: true,
-        connections: 2,
         late_w: 0,
         repeats_w: 0,
         resyncs_w: 0,
@@ -28,7 +27,7 @@ fn base() -> LockInputs {
 
 #[test]
 fn unlocked_when_clock_not_ok() {
-    // clock_ok=false wins even with pacing enabled + a receiver + no events.
+    // clock_ok=false wins even with pacing enabled + no events.
     let (s, r) = derive(&LockInputs {
         clock_ok: false,
         ..base()
@@ -39,23 +38,13 @@ fn unlocked_when_clock_not_ok() {
 
 #[test]
 fn unlocked_when_pacing_disabled() {
-    // clock ok but pacing OFF (today's flag-OFF steady state).
+    // clock ok but pacing OFF (set by hand; the default is ON since #147).
     let (s, r) = derive(&LockInputs {
         pacing_enabled: false,
         ..base()
     });
     assert_eq!(s, LockState::Unlocked);
     assert_eq!(r, "pacing disabled");
-}
-
-#[test]
-fn degraded_when_no_receiver() {
-    let (s, r) = derive(&LockInputs {
-        connections: 0,
-        ..base()
-    });
-    assert_eq!(s, LockState::Degraded);
-    assert_eq!(r, "no receiver");
 }
 
 #[test]
@@ -223,25 +212,14 @@ fn clock_beats_pacing() {
 }
 
 #[test]
-fn pacing_beats_receiver() {
+fn pacing_beats_resync() {
     let (s, r) = derive(&LockInputs {
         pacing_enabled: false,
-        connections: 0,
+        resyncs_w: 5,
         ..base()
     });
     assert_eq!(s, LockState::Unlocked);
     assert_eq!(r, "pacing disabled");
-}
-
-#[test]
-fn receiver_beats_resync() {
-    let (s, r) = derive(&LockInputs {
-        connections: 0,
-        resyncs_w: 5,
-        ..base()
-    });
-    assert_eq!(s, LockState::Degraded);
-    assert_eq!(r, "no receiver");
 }
 
 #[test]
@@ -278,11 +256,10 @@ fn late_beats_repeats() {
 
 #[test]
 fn standby_repeats_on_every_slot_are_locked_when_not_decoding() {
-    // RED for #150: 1800 slots, 1800 repeats, 24-fps source on the 30 grid, one
-    // receiver, clock + pacing ok, NOT decoding → LOCKED (today: DEGRADED).
+    // RED for #150: 1800 slots, 1800 repeats, 24-fps source on the 30 grid,
+    // clock + pacing ok, NOT decoding → LOCKED (today: DEGRADED).
     let (s, r) = derive(&LockInputs {
         decoding: false,
-        connections: 1,
         slots_w: 1800,
         repeats_w: 1800,
         ..base()

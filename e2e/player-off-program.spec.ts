@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 
-// #221 L4b: SongPlayer's own program (SP-program, plus what it told cg OBS)
-// is the playback authority, so a manual ▶ never claims program. A playlist
+// #221 L4b: SongPlayer's own program (SP-program's playlist, B4 step 6) is
+// the playback authority, so a manual ▶ never claims program. A playlist
 // that is NOT on air plays OFF program: the server reports the scene-aware
 // state `WaitingForScene` with transport `Playing`, and the Player's state
 // label reads "Hrá mimo programu" (not "Čaká na scénu"). A playlist ON air

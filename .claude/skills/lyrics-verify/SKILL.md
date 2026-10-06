@@ -19,14 +19,22 @@ triggers:
 
 # Songplayer Lyrics Wall-Verification Rules
 
-## Always use sp-live setlist, never scene-switch
+## Always use sp-live setlist, never another playlist's scene
 
 Wall verify MUST use the `sp-live` setlist (playlist 184):
 1. `POST /api/v1/playlists/184/items` with the song's `video_id`
 2. `POST /api/v1/playlists/184/play-video` with `video_id`
 
-NEVER switch OBS to the song's native scene (`sp-slow`, `sp-fast`, etc.) during
-a verify loop. Scene switches disrupt the user's current wall state.
+Only SongPlayer's PROGRAM playlist reaches the wall (#221): it alone writes the
+lyrics lines, the title and the Presenter, and its picture is what the LED wall
+shows (`SP-program-MAX`). A play-video while sp-live is NOT on program plays it
+off program, and nothing reaches the wall. So sp-live must be the program's
+source: check `GET /api/v1/program` (`source` = 184), and if it is not, put it
+there with the dashboard's Program control or `POST /api/v1/program/cut
+{"source": 184}` before the loop.
+
+NEVER cut the program to the song's native playlist (`sp-slow`, `sp-fast`,
+etc.) during a verify loop: that disrupts the user's wall state for nothing.
 
 ## Pre-flight probe before reprocess
 
@@ -82,7 +90,8 @@ So the user can click and inspect the YouTube source before approving.
 
 ## Dark wall = halt, not verification
 
-If Resolume Arena is hung or not consuming the SP-live NDI, the wall is dark.
+If Resolume Arena is hung or not consuming `SP-program-MAX` (Spout), the wall
+is dark.
 Worker dispatching correct subtitles to a stuck Resolume does NOT count as
 verification. Detect: `curl 127.0.0.1:8090/api/v1/composition` returns error
 or `Get-Process Arena | Format-List Responding` shows `False`.

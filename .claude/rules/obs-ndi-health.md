@@ -3,18 +3,22 @@ paths:
   - "crates/sp-server/src/obs/**"
   - "crates/sp-server/src/obs_bridge.rs"
   - "crates/sp-server/tests/common/mod.rs"
-  - "crates/sp-server/tests/scene_lookup_failure.rs"
-  - "crates/sp-server/tests/obs_snapshot_follow.rs"
+  - "crates/sp-server/tests/obs_reconnect.rs"
+  - "crates/sp-server/tests/fake_obs_handshake.rs"
   - "crates/sp-server/src/playback/ndi_health.rs"
   - "crates/sp-server/src/playback/ndi_health_expect*.rs"
   - "crates/sp-server/src/playback/ndi_health_log.rs"
-  - "crates/sp-server/src/playback/ndi_recovery_trigger.rs"
   - "crates/sp-server/src/playback/ndi_health_tests*.rs"
+  - "crates/sp-server/src/playback/startup_pipelines.rs"
   - "e2e/post-deploy.spec.ts"
   - "e2e/ndi-health-gate.ts"
+  - "e2e/ndi-health-gate.spec.ts"
+  - "e2e/post-deploy-dabing.spec.ts"
   - "e2e/post-deploy-av-sync.spec.ts"
   - "e2e/av-sync-gate.ts"
+  - "e2e/av-sync-probe*.ts"
   - "e2e/av-sync-evidence.ts"
+  - "e2e/obs-audio-wait*.ts"
   - "e2e/obs-driver.ts"
   - "scripts/av_sync_check.py"
   - "scripts/av_sync_drift.py"
@@ -24,536 +28,428 @@ paths:
   - "scripts/tests/test_av_sync_profile.py"
 ---
 
-# OBS ↔ NDI health & receiver recovery (#127)
+# OBS ↔ NDI health, the `SP-program` receiver, the post-deploy A/V gate
 
-## The dark-wall failure shape (the worst this project has)
-A SongPlayer restart tears down the NDI sender endpoint OBS's DistroAV receiver was bound to; DistroAV does **not** re-run discovery on its own, so the video plate is black while `ndi_health.rs` still reports `state=Playing`, `connections=0`. Every dashboard/health-check/CI gate can pass green while the wall is dark. `compute_degraded_reason` already computes `degraded_reason = "no NDI receiver — wall is dark"` (const `DARK_WALL_REASON`).
+## The one NDI sender is `SP-program` (#221 lane 3)
 
-## Recovering a stranded receiver — clear + restore, NEVER RecreateSender
-- The nudge is **receiver-side over the OBS WebSocket**: clear the NDI input's `ndi_source_name` to `""`, then restore the original — this forces DistroAV to re-run discovery. Re-applying the **identical** value is a **no-op** (DistroAV won't restart the receiver when nothing changed — proven on #127, `consecutive_bad_polls` kept climbing). `obs/ndi_recovery.rs` (pure trigger policy + `NdiRecoveryTracker`) → `ObsCommand::NudgeNdiReceiver` → `obs/ndi_discovery.rs::reapply_ndi_input`.
-- **NEVER** a per-sender `PipelineCommand::RecreateSender` — structurally cannot fix a receiver-side binding (CLAUDE.md "Disabled subsystems", #60).
-- To go from a health snapshot's bare `ndi_name` (e.g. `"SP-slow"`) to the OBS input (`sp-slow_video`), enumerate NDI inputs (`fetch_ndi_input_names`) and match `extract_ndi_stream_name(ndi_source_name) == ndi_name` — the machine-prefix split (`"MACHINE (stream)"`).
+Every consumer takes SongPlayer's PROGRAM: the LED wall `SP-program-MAX`
+(Spout), the Presenter, strih and the stream `SP-program` (NDI), FOH its
+VBAN. cg OBS is only the NDI input "OBS manuál" (`ndi-input.md`). Lane 3
+(ROZHODNUTÉ 5877969167, plan 5999882988) retired the per-playlist NDI senders
+(`SP-slow`, `SP-fast`, …): a playlist pipeline feeds the program bus and
+nothing else (`pipeline-testability.md`). Deleted with them — do not bring any
+of it back:
 
-## The stored `ndi_source_name` host case MUST equal the advertised name (#173)
-NDI advertises each SongPlayer sender as `"<HOST> (<stream>)"` where `<HOST>` is
-the box's computer name **as the NDI runtime announces it** = Windows
-`COMPUTERNAME` (`RESOLUME-SNV` on win-resolume), NOT `gethostname()`/`hostname`
-(lowercase `resolume-snv`). DistroAV's receiver re-match after a sender
-re-announce (every SongPlayer restart) is **case-sensitive**, so an OBS input
-whose stored `ndi_source_name` is the lowercase form never re-attaches → 0
-receivers while on program = dark wall, even though `extract_ndi_stream_name`
-matches by stream and the map looks fine.
+- the #127/#173 receiver-recovery ladder (`obs/ndi_recovery*.rs`,
+  `obs/ndi_remove.rs`, `playback/ndi_recovery_trigger.rs`,
+  `ObsCommand::NudgeNdiReceiver`), the manual `POST /api/v1/ndi/recover/{id}`
+  and `recovery_step`;
+- the NDI source map (`obs/ndi_discovery.rs`: `NdiSourceMap`, the rebuild
+  signal from the playlist CRUD, `canonical_sender_name`), and with it the
+  #196 "no OBS scene for this output" reason;
+- the dark-wall reason of a playlist output, the #196 post-restart receiver
+  self-check, its persisted receiver baseline (`db/models_ndi.rs`; the stale
+  `ndi_last_receivers_<id>` settings rows are left in the DB, harmless) and
+  the HealthBar `health-ndi` segment;
+- the #196 sender-URL discovery (`sp-ndi` `find.rs` / `source_url.rs`,
+  `send_get_source_url`, `discover_local_sources`, `sender_url`);
+- the #151 burn-id overlay (`burn_on`, `POST /api/v1/ndi/burn`) and the
+  `genlock_pacing` switch with the SDK-clocked path (`genlock.md`);
+- the lock rule "no receiver" (`sp_core::genlock::lock_state::derive`).
 
-- **Code guard:** `obs/ndi_discovery.rs::canonical_sender_name(stored, advertised)`
-  returns `Some(advertised)` iff the stored value differs from
-  `"<COMPUTERNAME> (<stream>)"` in ASCII case ALONE. `rebuild_ndi_source_map`
-  (connect + rebuild signal) and the #127 nudge `reapply_ndi_input` both call it
-  and rewrite via `SetInputSettings`, logging INFO
-  `ndi: normalized input '<name>' sender host case → 'RESOLUME-SNV (SP-x)'`. The
-  nudge now restores the ADVERTISED name, never the stored lowercase one.
-  `advertised_ndi_host()` reads `COMPUTERNAME`; unset (Linux/CI) → normalization
-  is skipped (never a wrong-case rewrite). The rewrite can only change host
-  CASE toward the verified-correct advertised host, never rename to a different
-  sender.
-- **Manual remedy (over obs-websocket / MCP):** set the input's `ndi_source_name`
-  to the uppercase advertised host —
-  `mcp__obs-resolume__obs-set-input-settings <input>_video {"ndi_source_name":"RESOLUME-SNV (SP-x)"}`.
-  Confirm the advertised host with `$env:COMPUTERNAME` on the box (NOT `hostname`).
-- **Flap escalation (#173):** `obs/ndi_recovery.rs` `NdiRecoveryTracker` counts
-  recover→re-dark-within-`FLAP_WINDOW_100NS` (30 s) flaps; after
-  `FLAP_ESCALATE_COUNT` (2) it forces a `ClearRestore` once (bypassing the
-  below-threshold skip) so the normalizing re-apply lands promptly, and logs
-  `ndi-recovery: receiver flapping ... escalating to a clear+restore`.
+NEVER a per-sender `PipelineCommand::RecreateSender` (CLAUDE.md "Disabled
+subsystems", #60) — it never could fix a receiver-side binding.
 
-## Escalation ladder — recover a WEDGED DistroAV receiver (#173 round 2)
-Clear+restore fixes a mis-named / unmatched source, but a receiver **wedged**
-inside DistroAV after the sender was recreated several times (repeated SongPlayer
-restarts) **ignores it** — box 17.9.2026: on-program `SP-fast` (uppercase, healthy
-name) stayed `connections=0` for ~20 min through three `outcome=Applied`
-clear+restore nudges, while `SP-warmup` on the SAME sender process had 6 receivers
-(per-input wedge, camera-box#1096 class; NOT #60 sender/mDNS). So a sustained dark
-wall now ESCALATES a ladder (`obs/ndi_recovery.rs::next_step`, pure + unit-tested;
-executor `obs/ndi_recovery_io.rs`, I/O over the healthy OBS WebSocket):
+## `/api/v1/ndi/health` = the playlist pipelines' health
 
-- **Rung 0 `ClearRestore`** — fires at the dark threshold (`NUDGE_THRESHOLD_BAD_POLLS`
-  = 6 polls ≈ 30 s): clear + restore `ndi_source_name` to the ADVERTISED name.
-- **Rung 1 `ToggleSceneItem`** — `LADDER_STEP_SPACING_POLLS` (2 polls ≈ 10 s) later:
-  `SetSceneItemEnabled` OFF→ON so DistroAV tears down + recreates the receiver.
-  **Round 3: read `GetSceneItemEnabled` back after the OFF→ON.** The two acks do
-  NOT prove the item is visible — an operator who hid the source on program
-  leaves it disabled, and the toggle "applied" while the wall stayed dark. If the
-  read-back is `false`, set it ON again and log
-  `ndi-recovery: rung 1 — item was disabled, re-enabled`. The ladder must never
-  leave an on-program item hidden.
-- **Rung 2 `RecreateInput`** — 2 more polls later, **RENAME-FIRST (round 3),
-  NEVER remove-then-reuse-a-name.** `SetInputName` the OLD input to a unique temp
-  (`<input>__recover_<uuid8>`) — a SYNCHRONOUS rename that frees the original name
-  — then `CreateInput` the replacement DIRECTLY under the original name (same
-  scene, identical `inputKind` + `inputSettings`, advertised name), PROVE it
-  exists (`CreateInput` returned a `sceneItemId` AND `GetSceneItemList` lists it),
-  restore the saved transform + z-order, THEN `RemoveInput` the renamed-away old.
-  On any pre-remove failure the old content is renamed back to the original name —
-  the scene is never emptied. At the START of the attempt any leftover
-  `<input>__recover_*` temps from an earlier interrupted recreate are swept
-  best-effort (`fetch_ndi_input_names` → `is_stale_recover_input` → `RemoveInput`,
-  counted in a WARN) — their unique-per-attempt names are never reused, so their
-  async teardown is harmless. The gate `LADDER_RECREATE_ENABLED`
-  (`obs/ndi_recovery.rs`) is a real switch: `false` makes the ladder cool down at
-  rung 1 instead. The pure step list `recreate_plan()` (`obs/ndi_recovery_io.rs`)
-  is unit-tested for BOTH invariants: never remove before verify, and never reuse
-  a name freed by a remove.
-- **Cool-down** `LADDER_COOLDOWN_POLLS` (6 polls ≈ 30 s) after the recreate, then
-  the ladder restarts at rung 0. One action per rung per poll; the ladder resets
-  the moment the receiver re-attaches.
+The route keeps its name (the dashboard, the post-deploy E2E and camera-box
+read it). One row per pipeline (`ndi_health.rs::PipelineHealthSnapshot`):
+`ndi_name` (the playlist's `ndi_output_name`, its scene label), `state`,
+`transport`, the frame counters and fps, `consecutive_bad_polls`,
+`degraded_reason`, `clock`, `pacing`, `audio`, `lock_state` / `lock_reason`.
+No receiver field: a row's `degraded_reason` is an underrun
+(`underrunning (x/y fps)`) or a stalled delivery (`no frames in 10s`) at
+≥ 2 consecutive bad polls while Playing on program (`compute_degraded_reason`;
+a bad poll is classified by `pipeline::classify_bad_poll`). Pinned by
+`ndi_health_tests.rs::a_health_row_carries_no_ndi_sender_fields`.
 
-The fired rung is surfaced on `/api/v1/ndi/health` as `recovery_step`
-(`ClearRestore` / `ToggleSceneItem` / `RecreateInput` / `null`) so the E2E / log
-can see which rung recovered a wall. NEVER a per-sender `RecreateSender` (#60).
+- `handle_health_snapshot` is sync + `mutants::skip` glue; its log lines are
+  `ndi_health::health_log::log_health_snapshot` (child module
+  `ndi_health_log.rs`, logging only: degraded / recovered and the
+  once-per-minute heartbeat + genlock + loop-stats lines). Add new
+  per-snapshot logging there, not to the handler.
+- Compose new per-pipeline state into `NdiHealthRegistry` (the `Arc` the
+  engine already holds) rather than a new `PlaybackEngine` field
+  (`playback/mod.rs` is near the cap).
 
-- **Manual equivalents (over obs-websocket / MCP), same order:**
-  1. clear+restore — `mcp__obs-resolume__obs-set-input-settings <input>_video {"ndi_source_name":""}` then the advertised `RESOLUME-SNV (SP-x)`.
-  2. toggle — `mcp__obs-resolume__obs-set-scene-item-enabled` (sceneName + sceneItemId, `false` then `true`; find the id with `obs-get-scene-items`), then `obs-get-scene-items` again to confirm `sceneItemEnabled: true`.
-  3. recreate (rename-first) — `obs-get-input-settings` (capture `inputKind` + `inputSettings`) → `obs-set-input-name` the OLD input → `<input>__recover_x` (frees the original name) → `obs-create-input` under the ORIGINAL name (same scene, inputKind `ndi_source`, advertised `ndi_source_name`) → confirm it lists → `obs-set-scene-item-transform` + index → `obs-remove-input` the renamed-away old. NEVER create/rename INTO a name you just removed (601 async-teardown race). Or just fire the app path: `POST /api/v1/ndi/recover/{playlist_id}?step=recreate`.
-  Always end with OBS on `sp-fast`, engine `[7]`, `SP-fast Playing` with receivers.
+## `SP-program` expects a receiver while a source is on program
 
-- **Inactive-output caveat:** `connections=0` on an INACTIVE output is NORMAL
-  (`ndi_behavior 0`, 1 s timeout — DistroAV drops an off-program source); only an
-  ON-PROGRAM output with `connections=0` is a dark wall worth a ladder rung (see
-  the dedicated section below — `handle_health_snapshot` maps Playing+inactive →
-  Paused so `is_dark` never fires off-program).
+`ndi_health_expect.rs::program_degraded_reason(source, the polled count)`,
+pure: served as the top-level `degraded_reason` on `GET /api/v1/program` —
+`"no NDI receiver on SP-program"` (`PROGRAM_NO_RECEIVER_REASON`) while a
+source (a playlist, or -1 "OBS manuál") is on program and
+`health.connections < 1`, else `null`. The `SP-program` thread polls the
+count about once a second (`ProgramBus::set_connections`); until its first
+poll the count reads 0 and is no reading (`health.receivers_polled`,
+serde-skipped), so no reason is named then. With no sender at all (no NDI
+SDK, the sender or its thread could not be created) nothing will ever poll,
+so `spawn_program_thread` sets a polled 0 at once and the reason is named.
+`ProgramCore::set_connections` logs it through the pure, mutation-scored
+`ndi_health_expect::receiver_log` (a WARN when SP-program turns dark, an INFO
+when the first poll finds a receiver or the first one comes back; the logger
+is `mutants::skip`, so change the decision there). The first poll runs on
+the first served pair, before any receiver can re-attach, so every start
+with a source on program logs the WARN, then the INFO once a receiver
+attaches: the pair times the receivers' re-attach after a restart.
+Tests: `ndi_health_expect_tests.rs`, `api/program_tests.rs`.
 
-- **Ladder limits — when receiver-side recovery CANNOT clear it (box 17.9.2026,
-  #173 round 5).** The whole ladder is receiver-side; a receiver that stays
-  `connections=0` through many `outcome=Applied` clear+restore nudges AND
-  `recreate` rungs AND a manual clear+restore with a long (~12 s) clear-hold is
-  **wedged deeper than any receiver-side action can reach** — only a SongPlayer
-  process restart (fresh NDI runtime) clears it (round 4 saw a restart bring dark
-  `SP-fast` back to `connections=2`; SongPlayer must NOT be force-restarted outside
-  a deploy). **Diagnostic: count the OTHER outputs.** If 8-of-9 senders from the
-  SAME SongPlayer process have receivers (`SP-presence`/`SP-worship`/… `connections
-  ≥ 2`) and only ONE on-program output is hard-`0`, it is a **per-input receiver
-  wedge**, NOT a process-global mDNS failure (#60) — do not chase it receiver-side;
-  a redeploy/restart is the fix. A per-restart-intermittent dark `SP-fast` right
-  after a deploy is this class (the E2E suite hammering `sp-fast`'s ladder just
-  after the restart can deepen the wedge); re-verify `SP-fast connections ≥ 1`
-  after the NEXT deploy rather than burning the lane on receiver-side attempts.
+## `SP-program`'s port is pinned across a restart (#196)
 
-## obs-websocket 5.x write-path gotchas (recreate/toggle a scene item, #173)
-When recreating or re-transforming an NDI input over obs-websocket 5.x
-(`obs/ndi_recovery_io.rs`):
-- **There is no "which scenes contain source X" request.** Resolve an input's
-  scene + `sceneItemId` + `sceneItemIndex` by scanning `GetSceneList` →
-  `GetSceneItemList` per scene and matching `sourceName`. `GetSceneItemList`
-  already embeds `sceneItemId`, `sceneItemIndex` AND `sceneItemTransform`.
-- **`GetInputSettings` returns both `inputSettings` AND `inputKind`** — capture
-  both so a `CreateInput` recreate is byte-identical (kind `ndi_source`).
-- **`CreateInput` adds the scene item at the TOP of the scene** (highest index)
-  and returns a NEW `sceneItemId`. Restore the original z-order with
-  `SetSceneItemIndex` and the transform with `SetSceneItemTransform`.
-- **A round-tripped `sceneItemTransform` carries read-only/derived fields**
-  (`width`, `height`, `sourceWidth`, `sourceHeight`) that OBS computes from the
-  scale/source and REJECTS as out-of-range on `SetSceneItemTransform` — STRIP
-  them before writing (keep position/scale/rotation/crop/bounds/alignment).
-- **`RemoveInput` deletes the input and EVERY scene item referencing it** across
-  all scenes; our `sp-*_video` inputs each live in exactly one scene, so the
-  single-scene recreate is safe. Recreate briefly blacks that scene (~sub-second)
-  — acceptable only because the ladder fires when the wall is ALREADY dark.
-- **Round 5 — a bare `RemoveInput` of a RECEIVING DistroAV `ndi_source` reports
-  success but does NOTHING.** The libobs source destroy blocks on the receiver
-  thread, which never joins while the sender is up, so the input + its scene item
-  LINGER as an operator-visible duplicate (box 17.9.2026 round 4:
-  `sp-youth_video__recover_f0831b7d` stayed listed 2.75+ min after a "successful"
-  `RemoveInput`; a second manual `RemoveInput` also "succeeded" without effect).
-  **The fix (`obs/ndi_remove.rs::remove_ndi_input_hard`):** `SetInputSettings`
-  clear `ndi_source_name` to `""` (overlay=true — DistroAV stops the receiver on
-  an empty source) → THEN `RemoveInput` → **READ BACK** `GetInputList` +
-  `GetSceneItemList` → still listed and a scene-item id is known →
-  `RemoveSceneItem(scene, id)` (a rename keeps the item id) → read back once more
-  → still present → loud WARN with both listings. **Never trust the `RemoveInput`
-  response code — read the removal back.** Both rung-2 removal call-sites (the
-  recreate's `RemoveRenamedOld` and the start-of-attempt stale-`__recover_*`
-  sweep) route through this hard remove, so rung 2 ends with exactly ONE input.
-  **Manual equivalent:** `obs-set-input-settings <temp> {"ndi_source_name":""}`
-  THEN `obs-remove-input <temp>` (+ `obs-remove-scene-item` if the item lingers).
-- **Round 3 — RENAME-FIRST, because `RemoveInput` frees the name ASYNCHRONOUSLY.**
-  DistroAV tears an `ndi_source` down on its own thread, so the OBS input NAME is
-  NOT free the instant `RemoveInput` returns — reusing that name immediately
-  (create OR `SetInputName`) races the teardown and returns obs-websocket
-  **`601 "a source already exists by that new input name"`**. Two box incidents:
-  (1) round-2 remove-then-create left the scene EMPTY when the create lost the
-  race; (2) the round-3 create-temp-then-**rename-back-to-original** left every
-  recreate named `<input>_recover` when the RENAME lost the SAME race
-  (17.9.2026). The fix is to never reuse a name freed by a remove: **rename the
-  old input away (a synchronous rename frees the original name at once), create
-  the replacement DIRECTLY under the original name, then remove the renamed-away
-  old** (its temp name is never reused, so its async teardown is harmless). And
-  ALWAYS log the full obs-websocket error on a failed write —
-  `d.requestStatus.code` + `d.requestStatus.comment` + the step name
-  (`log_obs_failure` / `send_ok_logged`); the round-2 executor swallowed the
-  CreateInput error, so the cause was unknown for a whole cycle.
+DistroAV's genlock build reconnects a stale source BY URL with the PINNED
+previous port (`reset_ndi_receiver: connect BY-URL '10.77.9.201:5970'`), and
+the NDI runtime hands each `send_create` the next free TCP port in creation
+order. `SP-program` is the only sender, so on Windows `start_program` first
+waits (≤ 10 s) until the previous instance has released the span
+(`startup_pipelines::wait_for_program_ports` → `wait_for_ports_free` +
+`ndi_ports_free` over `ndi_port_range(NDI_SENDERS)` = 5960..5962), then
+creates it: a restart gets the same port again. A span still busy after the
+bound is a WARN, never a blocked start. The pure pieces are Linux-tested in
+`startup_pipelines.rs`. The port moves ONCE, at the 0.71.0-dev.16 deploy that
+retires the per-playlist senders (they took the ports before it): see "The
+cutover" below.
 
-## `connections=0` on an INACTIVE output is NORMAL (not a dark wall)
-The `sp-*` NDI inputs run `ndi_behavior 0` with a 1 s `ndi_behavior_timeout`, so
-DistroAV **disconnects an inactive source** — an output that is NOT on OBS
-program legitimately reports `connections=0`. Only an **on-program** output with
-`connections=0` is the dark-wall failure. This is exactly why
-`handle_health_snapshot` maps `Playing + scene_inactive → Paused` (so
-`compute_degraded_reason` returns `None`) and why E2E test 12 cross-references
-`active_playlist_ids`: do NOT read a bare `connections=0` on an off-program
-output as a fault.
+- **GOTCHA — `NDIlib_send_get_source_name().p_url_address` is EMPTY for a
+  local sender** (#196): a sender's own `host:port` is not readable from the
+  sender side; read it on a receiver (or with `NDIlib_find`, which the NDI
+  input's source list uses, `ndi-input.md`).
+- **The stored `ndi_source_name` host case MUST equal the advertised name**
+  (#173): NDI advertises `"<HOST> (<stream>)"` with `<HOST>` = Windows
+  `COMPUTERNAME` (`RESOLUME-SNV`), NOT `hostname` (lowercase). DistroAV's
+  re-match after a sender re-announce is case-sensitive, so a cg OBS input
+  stored with the lowercase host never re-attaches. The A/V gate's probe
+  input is named from `COMPUTERNAME` for exactly this reason.
 
-**#221 L4a: a receiver is expected only where cg OBS was told to show the
-playlist** (`playback/ndi_health_expect.rs::receiver_expected` = the
-reconciled label is `Playing` AND `legacy_cg.shown == Some(pid)`, read from
-the engine's program bus, `remote-control.md`). Once "on air" is SongPlayer's
-own program (L4b, done), a playlist on `SP-program` that cg OBS does not show has 0
-receivers normally, and the #173 ladder would churn cg OBS's inputs. So
-`handle_health_snapshot` drops ONLY the dark-wall reason while no receiver
-is expected (`ndi_health_expect::expected_reason`, pure + mutation-scored:
-the handler is `mutants::skip`), and passes `receiver_expected` (not the
-label) to `ladder_suppressed_after_restart` and
-`no_receiver_after_restart`. An underrun / "no frames in 10s" stays: those
-need a poll with a receiver that is bad on its own (`compute_degraded_reason`
-answers the dark-wall reason whenever connections == 0), and SP-program takes
-the output either way (review round 1 — the first cut blanked the whole
-reason on a wrong premise). The state label (the badge, the #154/#167 idle
-gates, `transport`) stays keyed on on-air. The heartbeat log line carries
-`receiver_expected`. Tests: a dark-wall test sets its playlist on program
-with `engine.set_on_program_for_test(pid)` (scene on program + cg told to
-show it); `set_cg_shown_for_test(shown)` alone records cg OBS's side
-(`ndi_health_tests_expect.rs`). Until B4 step 6, when the dark-wall check
-moves to SP-program's own receivers.
+## The cutover (0.71.0-dev.16) — what a deploy of lane 3 changes outside SongPlayer
 
-**Where `handle_health_snapshot`'s parts live (#221 L4a review: it was over
-the ~300-line budget).** The connection-change / degraded / recovered lines
-and the once-per-minute heartbeat + genlock + loop-stats lines are
-`ndi_health::health_log::log_health_snapshot` (child module
-`ndi_health_log.rs`, logging only, reads the values from the snapshot it
-logs). The automatic ladder's rung is `PlaybackEngine::run_recovery_rung`
-in `ndi_recovery_trigger.rs`, next to the manual trigger; both queue through
-the one `queue_recovery_rung` (try_send, never blocking) and keep their own
-log lines. Add new per-snapshot logging to `health_log`, not to the handler.
+- **cg OBS's `sp-*` inputs lose their senders.** `SP-slow`, `SP-fast`, … no
+  longer exist, so those inputs (and their scenes) show black. DistroAV's
+  `ndi_behavior` 0 is KEEP_ACTIVE, and cg OBS's genlock build forces it on
+  every input with `genlock_fifo` on (the default,
+  `camera-box/vendor/distroav/src/ndi-source.cpp`): those inputs keep
+  receivers whether shown or not, and the genlock build reconnects a stale
+  source BY URL to its pinned port. The input pinned to the port `SP-program`
+  now takes would land on `SP-program`: it would show the program inside an
+  `sp-*` scene (a picture loop if cg OBS shows that scene while "OBS manuál"
+  is on program) and count as a receiver of `SP-program` (masking a lost
+  Presenter / strih / stream). Required BEFORE the lane-3 commits reach
+  `dev` (main session / owner, never the E2E): a push to `dev` deploys AND
+  runs the post-deploy E2E at once, and both its dark gate and the A/V
+  gate's receiver-rise wait read `SP-program`'s receivers, so a stale input
+  that lands on the new port fails or masks them on the very first run. Set
+  every stale `sp-*` input's `ndi_source_name` to `""` (an empty source
+  stops a DistroAV receiver), then after the deploy check
+  `GET /api/v1/program` `health.connections` = the real consumers. NEVER
+  remove those scenes (release 0.71.0 review): the facade forwards cg OBS's
+  scene list as it is (`with_songplayer_scenes` rewrites only the current
+  program / preview fields), so Companion's playlist buttons and the
+  post-deploy suite (`scenes.includes("sp-fast")`, `pickBaselineScene`, the
+  A/V gate's baseline) find a playlist by its `sp-*` scene NAME in it.
+- **`SP-program`'s port moves once** (it used to be created after the
+  playlist senders): its consumers (the Presenter, strih, the stream)
+  reconnect to the pinned OLD port and must re-resolve; confirm each one
+  shows `SP-program` again after the deploy.
+- The owner's rule (5.10.2026): name every consumer still on an old source
+  and ASK him to re-point it, never assume.
 
-## Adding recovery/health state without touching `playback/mod.rs`
-`handle_health_snapshot` runs on the engine but the engine struct lives in `playback/mod.rs` (often owned by a parallel lane). Compose new per-pipeline state into `NdiHealthRegistry` (the `Arc` the engine already holds) instead of adding a `PlaybackEngine` field — the engine reaches it via `self.ndi_health_registry.<method>()`. `handle_health_snapshot` is sync + `mutants::skip`; send `ObsCommand` with `try_send` (channel cap 64).
+## One restart per push (#196 round 2)
+
+The Deploy job starts SongPlayer; the post-deploy E2E job used to restart it
+AGAIN. `/api/v1/status` carries `uptime_s` (`crate::process_start`, marked at
+the top of `lib::start`), and the E2E "Restart SongPlayer" step SKIPS the
+restart (`exit 0`) when the running process reports the deployed `VERSION`
+(from the checkout) AND `uptime_s < 600` — i.e. it IS the fresh
+Deploy-started process — logging which branch it takes. The OBS client's
+reconnect backoff covers the "pick up OBS after OBS start" case.
+
+## obs-websocket 5.x write-path gotchas (the A/V gate's probe scene, and any scene item)
+
+Learned on the #173 ladder (deleted), still true for any input / scene-item
+write — the A/V gate provisions its probe scene this way (`e2e/obs-driver.ts`):
+
+- **There is no "which scenes contain source X" request.** Resolve a scene
+  item by `GetSceneItemId {sceneName, sourceName}` (600 = not in that scene),
+  or scan `GetSceneList` → `GetSceneItemList` per scene.
+- **`GetInputSettings` returns both `inputSettings` AND `inputKind`** (600 =
+  no such input). DistroAV's `ndi_behavior` 0 is KEEP_ACTIVE (the receiver
+  runs whether the input is shown or not), `ndi_behavior_timeout` 1 is "keep
+  content" (not 1 second), and cg OBS's genlock build forces KEEP_ACTIVE on
+  every `genlock_fifo` input. Only an EMPTY `ndi_source_name` stops a
+  receiver.
+- **`CreateInput` adds the scene item at the TOP of the scene** and returns
+  its `sceneItemId`. Fit it with `SetSceneItemTransform` (bounds = the
+  `GetVideoSettings` base size, `OBS_BOUNDS_SCALE_INNER`). A round-tripped
+  `sceneItemTransform` carries read-only fields (`width`, `height`,
+  `sourceWidth`, `sourceHeight`) that OBS REJECTS as out-of-range — strip
+  them before writing one back.
+- **`RemoveInput` of a RECEIVING DistroAV `ndi_source` reports success but
+  does nothing** (the libobs destroy blocks on the receiver thread): clear
+  `ndi_source_name` to `""` first, then remove, then READ BACK. And
+  **`RemoveInput` frees the name ASYNCHRONOUSLY**: reusing it at once races
+  the teardown (`601 "a source already exists by that new input name"`).
+  The A/V gate therefore never removes its probe input; it idles it
+  (`""`) outside the take and points it at `SP-program` only for it.
+- Always log the full obs-websocket error on a failed write
+  (`d.requestStatus.code` + `comment` + the step).
+- **obs-websocket-js 5.0.8 never settles a `call` / `reidentify` whose
+  socket closes** (`onClose` emits `ConnectionClosed`, then `cleanup()`
+  drops the internal listeners the pending promise waits on; a LATER call
+  throws "Not connected"). A wait that must end listens to
+  `ConnectionClosed` itself, as `ObsDriver.waitForInputAudio` does
+  (#221 dev.18).
 
 ## The OBS client serves the #213 remote control (`ObsCommand::Remote`, `ObsEvent::Raw`)
+
 - `ObsCommand::Remote(remote_call::RemoteCall)` runs a forwarded request
   for the Companion facade, on this ONE connection (`obs/remote_call.rs`). A
-  call whose requester gave up (`reply.is_closed()`) is skipped. #221
-  deleted the facade's scene → playlists lookup (`ScenePlaylists`): the
-  facade decides from SongPlayer's own playlists, so the forwarder no
-  longer takes the `NdiSourceMap`. The facade's calls go through ONE
+  call whose requester gave up (`reply.is_closed()`) is skipped. The facade
+  decides from SongPlayer's own playlists. The facade's calls go through ONE
   forwarder per connection, `remote_call::run_calls`, in queue order (never
   a task per call), and a scene switch's answer is awaited before the next
   call is written (cg OBS runs messages on a thread pool): see
   `remote-control.md`.
-- `ObsCommand` is no longer `Clone`: it holds a oneshot sender.
+- `ObsCommand` is not `Clone`: it holds a oneshot sender.
 - The reader broadcasts EVERY op=5 event as `ObsEvent::Raw { event_type,
-  event_data }` on `obs_event_tx` — `Raw` is `ObsEvent`'s ONLY variant.
-  #221 L4b deleted the engine bridge, and with it the last reader of
-  `ObsEvent::SceneChanged` / `Connected` / `Disconnected`; release 0.69.0
-  (review 🔵 10) deleted those variants and their sends. The client's own
-  view of cg OBS (connected, the program scene, its playlists) is the
-  published `ObsSnapshot` (below): a test or a consumer that needs a scene
-  change waits for a snapshot that KNOWS the scene (connected, looked up),
-  never for an event (`tests/scene_detection.rs::program_snapshot`,
-  `tests/scene_lookup_failure.rs::known`). L6 deletes the scene detection.
+  event_data }` on `obs_event_tx` — `Raw` is `ObsEvent`'s ONLY variant. The
+  facade passes on only `SceneListChanged`
+  (`remote::protocol::passthrough_intent`).
 - The obs-websocket SERVER side (the facade) lives in `crate::remote`; see
   `remote-control.md`.
 
 ## Mutation gate: `obs/**` is EXCLUDED
-`ci.yml` runs `cargo mutants --in-diff` with `--exclude-re 'sp-server/src/obs/'` — pure logic in `obs/` is NOT mutation-scored (still unit-test it, but survivors there won't fail CI). Code in `playback/ndi_health.rs` **is** scored: every new non-`mutants::skip` fn there needs tests that kill its true/false mutants (e.g. `evaluate_recovery` is killed by a nudge-fires + a nudge-does-not-fire engine test).
 
-## E2E dark-wall gate (post-deploy suite)
-Select the on-program output from `GET /api/v1/status` → `active_playlist_ids`, cross-reference `GET /api/v1/ndi/health` by `playlist_id`. `connections`: `>0` live, `0` dark (#127), `-1` never-polled-yet (keep polling). Pure decision logic lives in `e2e/ndi-health-gate.ts` (unit-tested by `ndi-health-gate.spec.ts` in the ubuntu **mock** suite — a `test()` that never touches `page` runs with no browser/box). Keep the baseline-scene discipline (CLAUDE.md "E2E must not switch to disruptive OBS scenes").
+`ci.yml` runs `cargo mutants --in-diff` with `obs/` excluded
+(`.cargo/mutants.toml`) — pure logic in `obs/` is NOT mutation-scored (still
+unit-test it, but survivors there won't fail CI). Code in
+`playback/ndi_health*.rs` **is** scored: every new non-`mutants::skip` fn
+there needs tests that kill its mutants.
+
+## E2E dark gate (post-deploy suite) — on `SP-program` (#127, #221 B4 step 6)
+
+`post-deploy.spec.ts` "SP-program has a live NDI receiver — the program is not dark" polls `GET /api/v1/program` (≤ 60 s, no scene switch) until `programReceiverVerdict` says `ok`: a source on program, `health.connections > 0` and the server's `degraded_reason` `null`. `connections`: `>0` live, `0` dark (also right after a start, before the sender's first poll, when the server names no reason yet), `<0` no valid reading (the SDK's error value) — keep polling on both; `source: null` = nothing on program, a failure too. `post-deploy-dabing.spec.ts` asks the same of SP-program next to "the Dabing pipeline is up" (the dub takes the program). Pure decision logic lives in `e2e/ndi-health-gate.ts` (unit-tested by `ndi-health-gate.spec.ts` in the ubuntu **mock** suite — a `test()` that never touches `page` runs with no browser/box). Keep the baseline-scene discipline (CLAUDE.md "E2E must not switch to disruptive OBS scenes").
 
 ## Gotcha: `e2e/post-deploy-report/index.html` is a TRACKED artifact
+
 Playwright runs regenerate it; it shows up as ` M` in `git status`. `git checkout -- e2e/post-deploy-report/index.html` before committing so it never lands in your diff.
 
-## Studio Mode can DROP `CurrentProgramSceneChanged` — the ~2 s poll reconciles it (#170)
+## cg OBS's program is NOT read any more (#221 L6)
 
-OBS on win-resolume runs Studio Mode with a 2 s Fade. From a `preview == program`
-state (e.g. right after a same-scene transition) OBS **drops** the next program
-switch's `CurrentProgramSceneChanged` — `GetCurrentProgramScene` reports the new
-scene but no event fires, so the event-only path never learns of it and the wall
-sits on a paused source (a dark wall in daily operation, reproduced live 3×). The
-connection loop therefore ALSO polls `GetCurrentProgramScene` every
-`SCENE_POLL_INTERVAL` (~2 s) in `connect_and_run`'s `tokio::select!`
-(`obs/scene_poll.rs::reconcile_program_scene`); on a mismatch with the last
-event-derived `ObsState::current_scene`
-(`scene_poll::scene_poll_detects_change(last, polled) -> Option<scene>`) it feeds
-the SAME `scene::apply_scene_change` path the event does — so the reader arm and
-the poll arm share one scene-apply body (keeps `obs/mod.rs` ≤1000). A duplicate
-same-scene apply publishes nothing (`ObsShared` publishes only a real change). The
-pure `scene_poll_detects_change` is Linux-unit-tested; `reconcile_program_scene`
-(I/O) is not (`obs/**` is excluded from the mutation gate). INFO log on a
-poll-caught switch: `obs: program scene changed without an event — reconciled by
-poll`.
+Design record 5873773896 §1g "L6": SongPlayer's own program drives playback
+(L4b), so the OBS client's scene detection is DELETED, not kept as a
+fallback — do not bring any of it back: `obs/scene.rs`, `obs/scene_poll.rs`,
+the connect-time `GetCurrentProgramScene` read, `ReaderMessage::SceneChange`,
+`obs/snapshot.rs` (`ObsSnapshot`), `obs/transition.rs`, `ObsState.{current_scene,
+active_playlist_ids, lookup_failed, transition}`,
+`text::get_current_scene_request`, and their tests and `FakeObsServer`
+pieces.
 
-## A FAILED scene lookup is not an empty scene (#218)
+What the client still does (`obs/mod.rs` module doc): the facade's calls
+(`remote_call.rs`), the title text, cg OBS's raw events, and `ObsState` =
+`connected` (`/api/v1/status.obs_connected`) + the #154 stream/record state.
+The identify subscribes Scenes (4: `SceneListChanged` for the facade) |
+Outputs (64: #154) = `EVENT_SUBSCRIPTIONS` (68, pinned in `mod_tests.rs`).
+The dashboard's connect-time `ObsStatus.active_scene` is SP-program's scene
+(`program_scene_name`), never cg OBS's.
 
-`scene::check_scene_items` returns `Result<HashSet<i64>, LookupError>`
-(`Closed` / `Timeout` / `Refused{code,comment}` / `NoSceneItems`; the pure
-`scene_items_from_reply`). Before #218 a `GetSceneItemList` timeout / close /
-answer without `sceneItems` returned an EMPTY set: `apply_scene_change` wrote
-it and broadcast `SceneChanged{ {} }`, the bridge scene-offed (paused) the
-playlist on program, the follow cut to "OBS manuál", and the poll (names
-only) never repaired it.
-
-- On a failure `apply_scene_change` stores the scene's NAME
-  (`current_scene`), KEEPS `active_playlist_ids`, sets
-  `ObsState::lookup_failed = Some(scene)` and broadcasts NOTHING. WARN on a
-  scene's first failure (`obs: looking up the scene's playlists failed —
-  keeping the previous ones; …`), debug on repeats; INFO `obs: the scene's
-  playlist lookup answered again` on the repair. `lookup_failed` is always
-  `None` or the current scene (the two are written together).
-- **Out-of-order answers (review rounds 1–3).** cg OBS may answer two
-  lookups out of order, the poll's relookups can overlap an event's lookup,
-  and an event can overtake a read. Every apply carries a ticket
-  (`ObsShared::scene_ticket`) taken BEFORE the scene it applies was read:
-  - an event's by the READER, the moment it reads the event off the wire
-    (`ReaderMessage::SceneChange { ticket }`) — round 3: taken at the main
-    loop's dequeue, an event cg OBS sent during the connect (queued while
-    steps 4–6 run) outranked the NEWER initial read and a stale
-    `SceneChanged` went out after the right one;
-  - the poll's and the initial read's BEFORE they send
-    `GetCurrentProgramScene` — round 2: taken after the read, a stale poll
-    answer outranked a newer event and cut back;
-  - the disconnect reset's (a fresh one), so an old connection's apply that
-    still writes after it is dropped.
-
-  It writes through `ObsShared::update_scene(ticket, …)`, which DROPS an
-  answer that arrives after a later ticket's answer was written (debug `a
-  newer scene lookup already answered`). The snapshot is published under
-  that write lock, so a consumer gets the scene changes in write order. A
-  dropped relookup costs one poll tick (the next one asks
-  again). The limit: tickets follow the order the READER sees things, not
-  the order cg OBS did them — an event cg OBS sent before answering a read
-  but that the reader reads after the read's ticket still outranks the read
-  (same or older state); that is stale only if cg OBS then drops the newer
-  event (#170), and the poll's mismatch path repairs it in ~4–6 s (plus one
-  lookup round-trip).
-  Tests: `a_poll_read_an_event_overtook_never_rolls_the_scene_back`
-  (the fake's `hold_program_scene` / `hold_lookups_of` + `release_held`: a
-  held answer must stay under the client's 2 s response timeout) and
-  `an_event_queued_during_the_connect_never_overrides_the_initial_read` (the
-  fake's `event_on_input_list`).
-- **Transition events never go through `reader_rx`:** the reader wakes the
-  transition reader's `Notify` itself (a burst merges into one read and
-  never blocks the reader, whose `reader_rx` is not drained during the
-  connect).
-- **The connection's helper tasks are reaped (review round 4):** every
+- **The connection's helper tasks are reaped** (#218 review round 4): every
   helper goes through `spawn_helper(&mut spawned_tasks, …)`, which first
   `try_join_next`s the finished ones (a `JoinSet` keeps a finished task until
-  joined, and the ~2 s poll alone spawns ~43 000 a day) and WARNs a helper
-  that panicked. Never call `spawned_tasks.spawn` directly.
-- The ~2 s poll repairs it: `scene_poll_verdict(last, lookup_failed, polled,
-  …)` → `PollVerdict::Relookup(scene)` when cg OBS still shows the stored
-  scene and its lookup failed — looked up again on that tick (no confirm
-  window: the event already came), every tick until it answers. cg OBS moved
-  on → the usual mismatch path (confirm window) for the new scene.
-- **Nested refusals are NOT failures.** obs-websocket 5 refuses
-  `GetSceneItemList` for a GROUP (602 "The specified source is not a scene.
-  (Is group)", `Request::AcquireScene` scene-only filter; groups need
-  `GetGroupSceneItemList`), and a nested SCENE item carries `inputKind: null`
-  (so it is not recursed at all). A refusal below the top level adds
-  nothing, as it always did; a timeout / close / reply without `sceneItems`
-  at ANY depth fails the whole lookup. Promoting the group refusal to a
-  failure would leave every scene holding a group "lookup failed" forever.
-- (#221: the facade's own lookup, `ScenePlaylists`, and its
-  `lookup_failed` reason are deleted; only the client's scene detection
-  looks scenes up.)
-- Test: `tests/scene_lookup_failure.rs` — the `FakeObsServer` knobs
-  `drop_scene_item_lists` (no answer, still logged in `requests` with
-  `"dropped": true`), `omit_scene_items` (success, no list) and
-  `refuse_scene_item_lists` (600), each for the next N lookups, plus `groups`
-  (a name listed there is refused with 602 like a real group). The first
-  published snapshot that knows the scene after the failure must already
-  carry the right set and come from a second lookup; a group on the program
-  scene must not fail it.
-- **Not mutation-scored:** `.cargo/mutants.toml` excludes all of
-  `sp-server/src/obs/`, so the pure `scene_items_from_reply`,
-  `scene_poll_verdict`, `obs_transition_from_reply`, `is_transition_event`
-  and the `depth > 0` refusal guard are guarded ONLY by their unit and
-  integration tests — keep those exact (both directions of each branch).
-
-## The OBS client PUBLISHES its state — `ObsSnapshot` on a `watch` (#219)
-
-ONE view of cg OBS: the OBS client's. `obs/snapshot.rs`: `ObsSnapshot`
-(`connected`, `current_scene`, `active_playlist_ids`, `lookup_failed`,
-`transition`) is the program part of `ObsState`, published on a
-`tokio::sync::watch` (`ObsClient::snapshots()`); `lib.rs` step 7
-(`obs_bridge::start_obs`) hands it to `start_program` → the #215 follow
-(`program-transition.md`). The contract:
-
-- every write of those fields goes through `ObsShared::update(|s| …)` (a
-  scene apply: `update_scene(ticket, …)`, above), which changes `ObsState`
-  and publishes under the ONE write lock (a snapshot never shows a state the
-  lock did not hold; snapshots come in write order) and only on a real change
-  (`send_if_modified`: streaming / recording are not published and wake
-  nobody). Never write them through `state().write()` directly, or a
-  consumer misses the change;
-- `lookup_failed: Some(scene)` → `active_playlist_ids` belong to an EARLIER
-  scene: a consumer must not act on them (the follow ignores the snapshot);
-- `transition` = cg OBS's current scene transition, `None` while unknown;
-- a disconnect resets everything (`ObsState::reset_disconnected`, written
-  through `update_scene` with a fresh ticket, so it is published) — pinned by
-  `a_disconnect_forgets_everything_of_cg_obs` (the fields) and
-  `a_disconnect_is_published_and_the_reconnect_publishes_the_program_again`
-  (the fake's `close_client`); the channel starts at the default
-  (disconnected) snapshot; without OBS configured `start_obs` hands out a
-  CLOSED channel.
-- Functions taking the crate-private `ObsShared` (`apply_scene_change`,
-  `reconcile_program_scene`) are `pub(crate)` — a `pub fn` with it in its
-  signature trips `private_interfaces` under `-D warnings`.
-
-**cg OBS's transition is read by the client** (`obs/transition.rs`,
-`ObsTransition` lives here, re-exported by `playback::program_transition`):
-one reader task per connection (in the connection's `JoinSet`), spawned
-right after the reader task (step 4b, before the NDI map rebuild): it reads
-`GetCurrentSceneTransition` at once, then each time the READER wakes it (its
-`Notify`, on `CurrentSceneTransitionChanged` /
-`CurrentSceneTransitionDurationChanged` — the identify's Transitions (16)
-subscription). A `Notify` wake keeps a change that arrives DURING a read, so
-reads never overlap and the newest answer wins. No answer → `transition =
-None` and a retry every `TRANSITION_RETRY` (2 s) until answered (first
-failure WARN, retries debug). Test: `tests/obs_snapshot_follow.rs` with the
-`FakeObsServer`'s `scene_transition` knob (`None` answers `{}` = no kind).
+  joined, and the connection loop never joins: one helper per title text)
+  and WARNs a helper that panicked. Never call `spawned_tasks.spawn`
+  directly.
 
 ## Reading the health snapshot's `state` — `Playing` already means "on program" (#154)
-`handle_health_snapshot` RECONCILES the pipeline-reported state before storing it: a pipeline that is `Playing` but whose scene is NOT on OBS program (`scene_active == false`) is stored as `Paused`, not `Playing`. So a consumer that reads `NdiHealthRegistry::snapshots()` and checks `state == PlaybackStateLabel::Playing` is already getting "an output is playing AND OBS is showing it" — you do NOT need to also cross-reference `active_playlist_ids`. The #154 lyrics idle gate relies on exactly this (`lyrics/idle_gate.rs::any_playing`): "any snapshot Playing" = "the wall is showing an output" = defer heavy GPU work. Read the registry in-process (the engine already holds the `Arc`); never HTTP-loop `/api/v1/ndi/health` back to your own server.
 
-## A restart is a receiver lottery until camera-box re-resolves — pin the name→port map (#196)
-DistroAV's genlock build reconnects a stale source **BY URL with the PINNED
-previous port** (`reset_ndi_receiver: connect BY-URL '10.77.9.201:5970'`), and
-the NDI runtime hands each `send_create` the next free TCP port from ~5961 up in
-**creation order**. So if SongPlayer creates its senders in a non-deterministic
-order across a restart (the old lazy / thread-raced path), a stream name can
-move to a different port and the receiver's by-URL reconnect lands on the wrong
-or a dead sender → `connections=0` on the on-program output = dark wall, and the
-#173 receiver-side ladder CANNOT clear it (only another restart re-rolls it). Fix
-(round 1): **deterministic, restart-safe creation** in `playback/startup_senders.rs`
-+ `runtime_pipeline.rs::ensure_pipeline_inner`:
-- **Port-availability wait first** (`wait_for_ports_free` + `ndi_ports_free`, ≤10 s
-  poll on 5960..=5960+N+1) so an immediate restart waits for the previous
-  instance's listeners to release before creating — same span, same assignment.
-- **Serialized id-order creation:** `create_startup_senders` creates each active
-  playlist's sender one at a time in `playlist.id` order, waiting for a per-pipeline
-  ready one-shot (fired by the pipeline thread right after `send_create`) before the
-  next — so `send_create` runs in a fixed order every restart, not OS-scheduler order.
-  Runs before `start_program` and the engine loop; a pipeline missing past the
-  startup budget is created on the playback authority's ON (#221 L4b).
-- Box-verified 2026-09-20: after a deploy restart, on-program SP-slow
-  `connections=2`, every output 2–4, no dark wall.
-- **No dark-wall ladder for an output with no OBS input** (`effective_dark_reason`
-  + `PlaybackEngine::output_has_obs_input`, tokio `try_read` on the shared
-  `NdiSourceMap`): a Playing-on-program output at `connections=0` whose stream is
-  advertised by NO OBS NDI input gets `degraded_reason = "no OBS scene for this
-  output"` (not the dark-wall reason), so `is_dark` is false and the every-10 s
-  degraded/recovered flap stops (the SP-dabing-before-its-scene case).
-
-**GOTCHA — `NDIlib_send_get_source_name().p_url_address` is EMPTY for a local
-sender (#196).** The round-1 plan surfaced each sender's advertised `host:port`
-as `sender_url` on `/api/v1/ndi/health` by reading `p_url_address` from
-`NDIlib_send_get_source_name`. On the real win-resolume NDI runtime that field is
-empty for a LOCAL sender (verified: `sender_url` null for all 10 outputs on a
-stable process, even with a ≤2 s post-create retry) — `send_get_source_name`
-returns the sender's NAME (`p_ndi_name`), not the URL a receiver connects to. The
-port ASSIGNMENT is still deterministic; only its DISPLAY via `sender_url` was
-unavailable this way.
-
-## The name→port map is read via `NDIlib_find`, not the sender getter (#196 round 2)
-
-The ruling on the GOTCHA above: read each sender's advertised `host:port` from
-the SDK's OWN discovery, not the sender-side getter.
-`sp_ndi::NdiBackend::discover_local_sources` opens ONE `NDIlib_find_create_v2`
-(`show_local_sources = true`) AFTER the id-ordered startup senders exist, polls
-`NDIlib_find_get_current_sources` for ≤ 3 s until every own name appears, records
-`p_url_address` per output, then destroys the finder;
-`startup_senders::discover_and_record_sender_urls` matches the discovered
-`(name, url)` to our outputs with the pure `sp_ndi::find::{source_matches,
-match_source_urls}` (`"RESOLUME-SNV (SP-x)"` matches own bare `"SP-x"` by the
-`"(<bare>)"` suffix), writes them into `NdiHealthRegistry` (surfaced as
-`sender_url` on `/api/v1/ndi/health`), and logs one `ndi: sender ready
-name=SP-x url=10.77.9.201:5963` line per output (one WARN if a name never
-appears within 3 s). It retries ONCE at +30 s (the finder can take a moment to
-see a fresh local sender). `MockNdiBackend::set_discovered_sources` drives the
-whole match path on Linux; `send_get_source_name` stays only as the name check.
-
-## Post-restart receiver self-check — the ladder is NOT the tool for it (#196 round 2)
-
-The #173 receiver-side ladder CANNOT clear a restart wedge (only another restart
-re-rolls it), so a distinct, LADDER-FREE self-check makes a failed post-restart
-reconnect VISIBLE instead:
-
-- **Baseline:** each health poll persists the per-output receiver count in the
-  `settings` table (`db/models_ndi.rs`, key `ndi_last_receivers_<id>`, one row per
-  output — never `db/models.rs` at the 1000-line cap). At startup that map is read
-  back ONCE (`NdiHealthRegistry::seed_pre_restart_counts`) as the PRE-restart
-  baseline; the live counts keep being persisted for the NEXT restart.
-- **Decision (pure, in `sp_core::health::no_receiver_after_restart`,
-  exact-boundary + mutation tested):** 30 s after the senders are ready
-  (`mark_senders_ready` → `elapsed_since_ready`), an output that is on program
-  (#221 L4a: a receiver expected, `ndi_health_expect`) OR
-  had `≥ 1` receiver before the restart, has NOT reconnected since (a one-time
-  latch — once it reaches `≥ 1` it is never flagged again this process, so a
-  later legitimate off-program drop is not a restart failure), and still has
-  `< 1` receiver → `degraded_reason = "no receiver after restart"`
-  (`sp_core::health::NO_RECEIVER_AFTER_RESTART_REASON`). This is a NON-dark-wall
-  reason, so `is_dark` is false and the ladder never runs; ONE WARN per output
-  (latched, cleared on recovery); the manual `POST /api/v1/ndi/recover/{id}`
-  stays. Precedence: the "no OBS scene for this output" reason (item 5) wins over
-  the self-check when there is genuinely no OBS input.
-- **HealthBar:** the shared `HealthBar` renders a `health-ndi` segment
-  `NDI: N výstup(y/ov) bez prijímača` (Slovak plural via
-  `sp_core::health::ndi_label`/`ndi_output_word`), hidden when N=0, clearing the
-  moment they reconnect. It counts snapshots whose `degraded_reason` equals the
-  shared reason string.
-- **Caveat:** a previously-connected output intentionally taken OFF program right
-  at the restart (and never re-subscribed) can read as flagged until it reconnects
-  once — accepted (the wall is a persistent installation where DistroAV keeps
-  off-program `sp-*` sources subscribed, so a previously-connected output that
-  stays 0 IS the anomaly worth surfacing).
-
-## One restart per push (#196 round 2)
-
-The Deploy job starts SongPlayer; the post-deploy E2E job then restarted it
-AGAIN, doubling the per-push receiver-lottery rolls. `/api/v1/status` now carries
-`uptime_s` (`crate::process_start`, marked at the top of `lib::start`), and the
-E2E "Restart SongPlayer" step SKIPS the restart (`exit 0`) when the running
-process reports the deployed `VERSION` (from the checkout) AND `uptime_s < 600` —
-i.e. it IS the fresh Deploy-started process — logging which branch it takes.
-The engine's OBS scene-poll reconcile + the OBS-client reconnect backoff cover
-the "pick up OBS after OBS start" case the restart used to serve.
-
-## A restart is a receiver lottery until camera-box re-resolves — SongPlayer keeps the map stable
-
-DistroAV's genlock build reconnects a stale source BY URL with the PINNED
-previous port; SongPlayer's job is to keep the name→port map IDENTICAL across
-restarts (round 1: port-availability wait + serialized id-order creation) so that
-by-URL reconnect lands on the right sender. SongPlayer now also MAKES the map
-visible (`sender_url` via `NDIlib_find`) and ESCALATES a failed reconnect
-(the self-check above) — but the receiver-side re-resolve after a sender restart
-is camera-box's (camera-box#1096/#1302). Read `sender_url` per output on
-`/api/v1/ndi/health` to confirm the map is stable across the 10-restart box
-acceptance.
+`handle_health_snapshot` RECONCILES the pipeline-reported state before
+storing it: a pipeline that is `Playing` but whose scene is NOT on program
+(`scene_active == false`) is stored as `Paused`. So a consumer that reads
+`NdiHealthRegistry::snapshots()` and checks `state == PlaybackStateLabel::Playing`
+is already getting "a playlist is playing AND it is on program". The #154
+lyrics idle gate relies on exactly this (`lyrics/idle_gate.rs::any_playing`).
+Read the registry in-process (the engine already holds the `Arc`); never
+HTTP-loop `/api/v1/ndi/health` back to your own server.
 
 ## Post-deploy A/V gate (#147) — lipsync + audio dropouts on the REAL output
 
 **Rule: no change to decode, pacing, the mixer, NDI or the audio path merges
 unless this gate is green.** The owner saw a major lipsync regression while
-every other gate was green. This gate is the one that measures what the wall
-and the recording actually get.
+every other gate was green. This gate is the one that measures a real output
+end to end. Until #221 B4 step 6 that was what the wall took (cg OBS's
+program); since #221 lane 3 it records SongPlayer's PROGRAM, `SP-program`,
+the output every consumer takes, through cg OBS's own probe scene (below).
 
 - **Where it runs:** `e2e/post-deploy-av-sync.spec.ts`, inside the E2E job's
   "Feature-level Playwright (post-deploy spec)" step (`post-deploy.config.ts`
   matches `post-deploy*.spec.ts`). It uses the shared `ObsDriver` (obs-websocket)
   twice (#221 L3): the SCENE driver on SongPlayer's facade (`FACADE_WS_URL`,
   :4456 — Companion's studio-mode path, SongPlayer's own program feedback and
-  transition events), and a second one on cg OBS (`OBS_WS_URL`, :4455) ONLY
-  for `GetProfileParameter` / `StartRecord` / `StopRecord` /
-  `GetRecordStatus` (the recording is cg OBS's program).
+  transition events), and a second one on cg OBS (`OBS_WS_URL`, :4455) for
+  `GetProfileParameter` / `StartRecord` / `StopRecord` /
+  `GetRecordStatus` (the recording is cg OBS's program) and — #221 lane 3 —
+  the gate's own PROBE SCENE (`e2e/av-sync-probe.ts`, design question
+  6004634711 option 1):
+  - `AV_PROBE_SCENE` "A/V gate (SP-program)" holds ONE DistroAV input,
+    `AV_PROBE_INPUT` "A/V gate SP-program". The gate provisions it itself
+    (`ensureProbeScene` + `probeSteps`): the scene and the input are
+    created when missing (the settings copied from `sp-slow_video`, else an
+    `sp-*_video`, else any cg OBS NDI input, `pickTemplateInput`, with
+    `genlock_fifo` on (the certified receive path: DistroAV then forces
+    source-timecode sync, KEEP_ACTIVE, the highest bandwidth, normal
+    latency), `ndi_audio` on, `genlock_monitor` and `genlock_burn` off and
+    `ndi_bw_mode` 0 forced, `PROBE_FIXED_SETTINGS`), put into the scene when
+    it is not there, and an existing probe RESET on every run (its fixed
+    settings again and idle, `probeIdleSettings`: a hand edit of its
+    settings never survives a run; a hidden scene item or a muted input is
+    not undone, the take then fails as unmeasurable), NEVER removed (a
+    receiving DistroAV input does not delete reliably, above).
+    It is not an sp-* name, so it is never a playlist scene in SongPlayer's
+    catalog, and `pickBaselineScene` never picks it. Cost: one permanent
+    technical scene in the owner's cg OBS scene list (a press of it by hand
+    during a take while "OBS manuál" is on program would loop the picture).
+  - **The probe is IDLE outside the take** (`ndi_source_name` `""`, set at
+    provisioning — also after a run that died mid-take — and in
+    `afterAll`): DistroAV keeps a receiver whether the input is shown or not
+    (KEEP_ACTIVE, above), so a probe left pointed at SP-program would hold
+    a receiver on it forever and the dark gate above could no longer see the
+    real consumers go.
+  - The take runs only while `/api/v1/program.source` is the baseline
+    playlist (`programCarriesBaseline`): with "OBS manuál" (-1) on program
+    cg OBS would record itself through SP-program.
+  - The gate reads SP-program's receivers with the probe idle, once two
+    reads ~1.5 s apart agree (`receiversSettled`, ≤ ~15 s), then points the
+    probe at `"<COMPUTERNAME> (SP-program)"` (else the host the template
+    input names, `programSourceName`), switches cg OBS to the probe scene
+    when it is not on it already, and waits (≤ 30 s) until SP-program's
+    `health.connections` rose above that count (`probeReceiverAttached`);
+    it fails naming it, never as an unmeasurable take.
+  - **A freshly attached probe's VIDEO reaches the recording before its
+    AUDIO: wait for its audio meter before recording (#221 dev.18) — and
+    know what that meter can see (below).** The receiver count rises
+    as soon as DistroAV connects, and the picture flows at once. The audio
+    reaches cg OBS's MIX (what StartRecord records) only with gaps until
+    camera-box's genlock audio pairing (camera-box 1367) has fixed the
+    delay: by their design the pairing withholds the packets from the mix
+    until its latch locks. The dev.17 cg OBS log (local time):
+    - the probe's scene reset 08:49:31.566;
+    - DistroAV bound the source 33.114;
+    - `genlock-shallow-lock` 36.133;
+    - DEGRADED `audio_pairing` 36.217;
+    - LOCKED 37.214 (4.1 s after the bind).
+
+    The gate logged its take start at 35.705: 4.1 s after the reset and
+    2.6 s after the bind. The take opened with two dropouts (0.100 s / 22 ms,
+    0.227 s / 234 ms, run 37423917199). Its audio came at 0.122–0.227 s,
+    stopped until 0.461 s, and was clean from there. Before lane 3 the gate
+    recorded a long-attached input and never met this. So before EVERY take
+    the gate waits for the probe's audio (`ObsDriver.waitForInputAudio`, the
+    pure decision in `e2e/obs-audio-wait.ts`), and only then reads the
+    playing video and records:
+    - **Signal:** obs-websocket's `InputVolumeMeters`. Each input's
+      `inputLevelsMul` is one `[magnitude × volume, peak × volume, peak]`
+      triple per channel, linear. The gate reads the THIRD value, the input
+      peak BEFORE the fader and mute (does the receiver deliver audio?),
+      from the loudest channel. A muted probe still fails as unmeasurable.
+    - **Condition:** above −60 dBFS for 1 s in a row. Three things restart
+      the run:
+      - a silent reading;
+      - an event without the probe (obs-websocket meters only ACTIVE
+        inputs, those on the PROGRAM feed — `obs_source_active`; an input
+        only on a preview is not metered. The probe is on cg OBS's program
+        from the scene switch);
+      - more than 500 ms between meter events (only observed continuity
+        counts).
+    - **Bound:** 20 s. It rejects with the meter state it saw: the events,
+      the ones with the probe, its last peaks, the loudest, and the longest
+      run. It also says what that state means (`explainAudioWait`):
+      - no event at all: the subscription did not apply;
+      - events, but never the probe: the probe is not active (cg OBS is not
+        on the probe scene, or its item is hidden);
+      - the probe's ONLY run above the floor came after a METERED silence (a
+        reading of the probe at or below the floor) and was still open when
+        the bound hit (`runsAboveFloor` 1 + `readingsAtOrBelowFloor` > 0 +
+        `openRun`, rounds 4-6): its audio started late.
+        - The text names only what was observed: when the run began and
+          its last reading, both before the bound.
+        - An open run is one whose last reading is within the gap bound of
+          the end, the same `<=` as the streak.
+        - A probe that became active late (absent from the events, never
+          read silent) is not a late start; it falls to the next case;
+      - the probe above the floor at times, but never for the hold, in any
+        other way (several runs, or one that ended; rounds 3-5): DistroAV
+        delivers it with gaps, or the meter events stopped (more than
+        500 ms apart, or the probe left the program feed). It names the
+        number of runs. Gappy audio whose bound lands mid-burst stays here,
+        never a "late start". Never "no audio" next to readings that show
+        audio;
+      - the probe metered, never above the floor: DistroAV delivers it no
+        audio (SP-program carries no sound, or the probe's `ndi_audio` is
+        off).
+
+      The explanation uses the wait's OWN floor, hold and gap. None of
+      these cases is ever the pairing's (see "Blind to the withhold"
+      below).
+
+      A connection that closes mid-wait ends it at once, naming the close
+      (the driver listens to `ConnectionClosed`). It never sits out the
+      bound and then reports "no event".
+    - **High-volume event:** obs-websocket sends it every 50 ms only to a
+      session that asks for it. The cg OBS recorder asks with a `Reidentify`
+      (All | `InputVolumeMeters` = 1 << 16) for the wait alone, and drops it
+      after with an EXPLICIT `eventSubscriptions: All`, also when the wait
+      fails: a `Reidentify` without the field KEEPS the current ones. A
+      connect never asks for it. `e2e/obs-driver-protocol.spec.ts` pins
+      both on a msgpack stub.
+    - **Blind to the withhold (review round 2) — the meter sits BEFORE
+      it.** obs-websocket's meter is an audio CAPTURE CALLBACK
+      (`Obs_VolumeMeter.cpp`), and camera-box's libobs calls the callbacks
+      for EVERY packet the source outputs: `source_signal_audio_data`, at
+      the end of `source_output_audio_data` (camera-box
+      `vendor/obs-studio/libobs/obs-source.c`). That includes the packets
+      the pairing withholds from the mix (the `GENLOCK_AUDIO_ACT_WITHHOLD`
+      branch just before it). camera-box's `genlock-audio-pairing.md`:
+      "its packets never enter the mix (they still reach the audio
+      callbacks/monitoring)". So the wait proves DistroAV delivers audio
+      and adds its 1 s. It does NOT observe the pairing's lock. Its cover
+      for the warm-up is the time it takes: the dev.17 take would have
+      started ~1 s later, after its audio turned clean (0.461 s into it)
+      but before LOCKED (37.214). A slower first lock (camera-box's
+      withhold runs up to 10 s after the first packet) would reach the
+      take again. Waiting on the pairing's own state is the open design
+      question on #221. camera-box's documented channels:
+      - the probe's `genlock-fifo audit` line in the OBS log
+        (`audio_hold=pending`);
+      - the `genlock-lock-json:` facet on `:8899/bundle-state.json`
+        (per-input `locked`; on change and a ~30 s heartbeat).
+
+      A vendor request `GetGenlockStats` was mentioned, but it is not in
+      camera-box's tree (checked 6.10.2026).
+    - **Limit:** obs-websocket also HOLDS a level until no audio has
+      arrived for 0.3 s (`Obs_VolumeMeter.cpp` `GetMeterData`), so a gap
+      in DistroAV's own delivery shorter than ~300 ms is invisible too.
+      Never "fix" a take that still opens with dropouts by loosening the
+      dropout check.
+  - `afterAll` idles the probe FIRST (an idle probe shows nothing, so
+    restoring the program to "OBS manuál" can never loop the picture through
+    cg OBS), then restores the program scene through the facade (a manual
+    scene is set on cg OBS there too), then cg OBS's own scene, guarded
+    against a same-scene switch (cg OBS's 2 s self-fade, the #170
+    dropped-event state).
+  - cg OBS found ON the probe scene before the gate (a run that died
+    mid-take, `cgStuckOnProbe`) fails the body at its start, naming it:
+    there is no scene of the owner's to restore cg OBS to. `afterAll` still
+    idles the probe in that case.
+  - Before lane 3 the gate recorded cg OBS's sp-* input of the baseline
+    playlist's own NDI output (lane 1's stopgap, deleted with those
+    outputs).
   **`obs-driver.ts` keeps the BARE `obs-websocket-js` import (#221 L2b).**
   In Node it resolves (package `exports` → `import` / `require`) to the
   MSGPACK build, which offers only `obswebsocket.msgpack` — exactly what
@@ -565,10 +461,12 @@ and the recording actually get.
   Companion cutover hit it (#221 comment 5881650057), so never reintroduce
   it: `e2e/obs-driver-protocol.spec.ts` pins the msgpack offer.
   It parks the program on the shared baseline scene (`e2e/obs-baseline-scene.ts`:
-  sp-slow, never sp-warmup/sp-fast). It proves the output is PLAYING with
-  `/api/v1/ndi/health`: `state=Playing` AND `frames_submitted_last_5s > 0`.
-  It sets the SONG faders to unity, then `StartRecord` → 20 s → `StopRecord`,
-  which returns `outputPath`.
+  sp-slow, never sp-warmup/sp-fast) through the facade. It proves the
+  baseline playlist is PLAYING with `/api/v1/ndi/health`: `state=Playing`
+  (= on program) AND `frames_submitted_last_5s > 0`.
+  It sets the SONG faders to unity. Then, for every take, it waits for the
+  probe's audio (above), reads the playing video, and runs `StartRecord` →
+  20 s → `StopRecord`, which returns `outputPath`.
   - `startRecord` refuses to touch a recording the operator already started.
   - **Takes (max 3).** A take is repeated only in two cases:
     - `/api/v1/mix` shows a different `video_id` after the take, so the song
@@ -580,8 +478,15 @@ and the recording actually get.
 
     A `fail` is never retaken. Neither is an audio-side `cannot_measure`,
     which can be a real audio fault. A retake starts only while less than
-    110 s of the 300 s budget is used, so a full worst-case take (including
-    copying the evidence) still fits.
+    110 s of the 320 s budget is used. The spec derives it:
+    `RETAKE_BEFORE_MS` = `TEST_TIMEOUT_MS` − `WORST_TAKE_MS` − 10 s.
+    - `WORST_TAKE_MS` is 200 s. It is summed from the take's own bounds,
+      including the 20 s audio wait and copying the evidence.
+    - The 10 s covers the calls the sum does not count: the audio wait's
+      two `Reidentify` round trips, the StartRecord pre-check, the `/mix`
+      and `/videos` reads, and spawning the analysis.
+    - #221 dev.18 raised `TEST_TIMEOUT_MS` from 300 s to 320 s, by the
+      audio wait's bound, so a run keeps the retake room it had before.
     The run is classified by `classifyAvSyncRun`: the stdout JSON and the exit
     code must agree. Missing JSON (a numpy import failure, an argparse error)
     is `error`, not a verdict.
@@ -617,8 +522,9 @@ and the recording actually get.
     the file. An undeletable file fails the test after the verdict, never
     masking it.
   - `afterAll` first sets `tornDown`. Playwright does not cancel a
-    timed-out body, so after that point the body refuses to start a
-    recording, the recording wait, the analysis, or a skip.
+    timed-out body, so after that point the body refuses to start the
+    probe audio wait, a recording, the recording wait, the analysis, or a
+    skip.
   - It awaits an in-flight `StartRecord`, which is tracked as
     `startInFlight`. A start that resolved is ours, even if the body never
     got to set `recordingOurs`. A REJECTED start (an operator recording was
@@ -631,9 +537,10 @@ and the recording actually get.
        python AND its ffmpeg children hold the file open).
     2. It settles an in-flight start, waiting at most 10 s.
     3. It stops our recording, only while `isRecording()`.
-    4. It restores the faders and the scene. This comes BEFORE the slow file
-       deletion, so a hook that runs out of time never leaves the program on
-       the baseline scene.
+    4. It restores the faders, idles the probe, restores the program
+       scene, then cg OBS's own scene (#221 B4 step 6, lane 3; the probe
+       bullets above). This comes BEFORE the slow file deletion, so a hook
+       that runs out of time never leaves the program on the baseline scene.
     5. It deletes recordings:
        - recordings the body never removed get a 15 s wait for their remux
          sibling;

@@ -415,7 +415,6 @@ mod tests {
         let (engine_tx, _) = mpsc::channel(16);
         let (sync_tx, _) = mpsc::channel(16);
         let (resolume_tx, _) = mpsc::channel(16);
-        let (obs_rebuild_tx, _) = broadcast::channel(4);
         let state = crate::AppState {
             pool,
             event_tx,
@@ -425,7 +424,6 @@ mod tests {
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
             resolume_tx,
-            obs_rebuild_tx,
             cache_dir: cache_dir.clone(),
             ai_proxy: Arc::new(crate::ai::proxy::ProxyManager::new(
                 cache_dir,
@@ -437,11 +435,11 @@ mod tests {
             presenter_client: None,
             resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-            ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
             preview_registry: Arc::new(crate::playback::preview::PreviewRegistry::new()),
             program_bus: Arc::new(crate::playback::program_bus::ProgramBus::new()),
             lan_status: crate::mdns::new_status_handle(),
             metadata_chain: std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![])),
+            decode_bench: Arc::new(crate::diag::decode_bench::DecodeBench::new("bench".into())),
         };
         (state, tmp)
     }

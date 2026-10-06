@@ -45,7 +45,7 @@ const REANNOUNCE_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Settings key: value `"false"` (also `0`/`off`/`no`) disables the whole LAN
 /// mDNS advertisement. Absent or anything else = enabled. Read once at
-/// startup, so a change needs a restart (same contract as `genlock_pacing`).
+/// startup, so a change needs a restart.
 pub const SETTING_LAN_MDNS_ENABLED: &str = "lan_mdns_enabled";
 
 /// LAN address surfaced to the dashboard via `/api/v1/status`.

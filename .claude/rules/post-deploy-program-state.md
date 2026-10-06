@@ -5,11 +5,13 @@ paths:
   - "e2e/box-api.ts"
 ---
 
-# Post-deploy specs: the OBS program can be ANY sp-* scene (#184)
+# Post-deploy specs: SongPlayer's program can be ANY sp-* scene (#184)
 
-The post-deploy suite runs on the live box and never switches OBS scenes to set
-itself up. After an event the operator leaves the program on whatever scene the
-event ended with. On 26.9.2026 that was `sp-dabing`, so the Dabing output was ON
+A program-state spec runs on the live box and never switches the program to set
+itself up (other post-deploy specs press `sp-*` scenes through SongPlayer's
+facade and restore its program in `afterAll`; the A/V gate parks cg OBS on its
+probe scene). After an event the operator leaves the program on whatever scene
+the event ended with. On 26.9.2026 that was `sp-dabing`, so the Dabing output was ON
 program. Two specs had hard-coded "Dabing is always off program" and "the
 auto-selected dashboard card is playing", and both went red for a non-product
 reason.
@@ -61,7 +63,14 @@ Rules for every post-deploy spec:
   worker cannot delete the symlink afterwards (the worktree guard resolves
   it into the main checkout and refuses); `.gitignore` ignores
   `e2e/node_modules` without a trailing slash, so the link is never
-  committed and goes with the worktree.
+  committed and goes with the worktree. Or run `npm ci` in the worktree's
+  `e2e/` (a real, ignored directory; it needs no cleanup). Playwright only
+  strips types, so for a STRICT type check install `typescript` and
+  `@types/node` into a scratch dir and run its `tsc --noEmit --strict
+  --esModuleInterop --skipLibCheck --target es2022 --module esnext
+  --moduleResolution bundler --typeRoots <scratch>/node_modules/@types
+  --types node <files>` from `e2e/` (#221 dev.18). The known noise is the
+  untyped `ws` in `obs-driver-protocol.spec.ts`.
 - **A post-deploy check's decision logic is a pure helper with a mock-suite
   unit spec** (`e2e/cache-layout.ts` for the FLAC layout, #136;
   `av-sync-gate.ts`, `obs-scene-wait.ts`). The post-deploy spec only reads
@@ -71,11 +80,24 @@ Rules for every post-deploy spec:
   imports the helper by its absolute `.ts` path and mirrors the spec's cases
   with `node:assert/strict`, run as `node --experimental-strip-types
   check.mts`.
+- **`expect.poll` does NOT retry a generator that throws** (#144, Playwright
+  1.59: `pollMatcher` awaits `poll.generator()` outside its own try). A
+  readiness poll whose `request.get` hits ECONNREFUSED after a restart, or its
+  own request timeout, fails the test at once instead of polling: wrap the
+  body in `try { … } catch { return false; }` and bound each read
+  (`request.get(url, { timeout: 10_000 })`), as `post-deploy-g35t.spec.ts`
+  does.
 - **#221 L3: the scene driver is SongPlayer's facade** (`FACADE_WS_URL`,
   :4456). **#221 L4b:** `/api/v1/status.active_scene` /
   `active_playlist_ids` are SongPlayer's own program (the resolver, and the
-  on-air set = SP-program's playlist ∪ the one cg OBS was told to show).
-  Right after `switchScene` returns, the previous playlist is still on air
-  until cg OBS answers the mirror: wait for the set to settle (at most one
-  playlist; `waitEngineActiveScene`, the A/V gate's `length === 1` poll),
-  never read it once.
+  on-air set = SP-program's playlist alone since B4 step 6: none for "OBS
+  manuál"). The playback authority applies a switch a moment after the
+  facade answers it: wait for the engine to reach the scene
+  (`waitEngineActiveScene`, the A/V gate's `length === 1` poll), never read
+  it once.
+- **#221: a receiver is checked on `SP-program`, the only NDI sender**
+  (lane 3 retired the per-playlist outputs): poll `GET /api/v1/program`
+  through `ndi-health-gate.ts::programReceiverVerdict` (a source on program,
+  `health.connections > 0`, `degraded_reason` null), as `post-deploy.spec.ts`
+  and `post-deploy-dabing.spec.ts` do. `/api/v1/ndi/health` rows have no
+  receiver field any more.

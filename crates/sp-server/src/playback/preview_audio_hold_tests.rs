@@ -4,7 +4,8 @@ use super::*;
 
 /// Stereo frames per millisecond (48 kHz).
 const F: u64 = 48;
-/// The SDK-clocked seam lead (`lead_ms_for(false)`).
+/// A seam lead well past the write-ahead (the deleted SDK-clocked path's
+/// 1500 ms): every hold rule is exercised at it.
 const LEAD: u32 = 1500;
 
 /// An interleaved-stereo block of `frames` frames, every sample `v`.
@@ -199,7 +200,7 @@ fn the_cap_drops_the_oldest_held_block() {
 #[test]
 fn in_flight_audio_stays_within_the_write_ahead_for_a_minute() {
     // A steady 30 fps seam (1600-frame blocks, stamped on arrival) and an
-    // encoder that consumes audio in step with its wall-clock video. The audio
+    // encoder that consumes audio in step with its video. The audio
     // written beyond what the encoder consumed is what must sit in the socket:
     // G2 parked the whole 1.5 s lead there (the box's small loopback buffers
     // could not hold it); held, it never exceeds write-ahead + 300 ms, and a
@@ -305,7 +306,7 @@ fn a_block_after_content_stays_contiguous_within_the_g2_band() {
 #[test]
 fn in_flight_never_exceeds_the_write_ahead_plus_one_block() {
     // The tight form of the in-flight bound (steady 30 fps seam, encoder
-    // consuming in step with the wall-clock video): write-ahead + one block.
+    // consuming in step with the video): write-ahead + one block.
     let mut h = AudioHold::new(0, LEAD);
     let bound = AUDIO_WRITE_AHEAD_MS * F + 1_600;
     for k in 0..1_800u64 {

@@ -84,16 +84,12 @@ fn install_pipeline(
 ) {
     let pipeline = PlaybackPipeline::spawn(
         format!("test-{playlist_id}"),
-        None,
         mpsc::unbounded_channel().0,
         playlist_id,
-        false,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
-        None,
     );
     let pp = PlaylistPipeline {
         pipeline,
@@ -121,6 +117,10 @@ fn install_pipeline(
         paused_at: None,
     };
     engine.pipelines.insert(playlist_id, pp);
+    // On program = on air as the wall owner (#221): the last one installed.
+    if scene_active {
+        engine.put_on_air_for_test(playlist_id);
+    }
 }
 
 #[tokio::test]
@@ -227,6 +227,9 @@ async fn dispatch_lyrics_fires_on_line_change() {
     }
 }
 
+/// The scene gate itself: 99 owns the wall (#221: published on air, its ON
+/// not handled yet) but its scene is not on program, so the owner gate lets
+/// it through and only `scene_active` keeps Resolume silent.
 #[tokio::test]
 async fn dispatch_lyrics_resolume_gated_on_scene_active() {
     let (mut engine, mut resolume_rx, mut ws_rx) = build_engine().await;
@@ -236,6 +239,7 @@ async fn dispatch_lyrics_resolume_gated_on_scene_active() {
         false, // scene_active = false: Resolume must NOT fire
         Some(LyricsState::new(make_track())),
     );
+    engine.put_on_air_for_test(99);
 
     engine.dispatch_lyrics_if_changed(99, 1500);
 
@@ -358,7 +362,8 @@ async fn resolume_recovery_re_sends_hide_for_a_song_without_lyrics() {
 /// Review round 5: two playing, on-program playlists share the subtitle
 /// clips, one with a line and one without lyrics. The recovery must not let
 /// the blank one's HideSubtitles land after (HashMap order) and clear the
-/// other's line: the line goes out, and no Hide.
+/// other's line: the line goes out, and no Hide. (#221: only the wall owner
+/// writes the wall — 99, installed last — so 98 sends nothing at all.)
 #[tokio::test]
 async fn resolume_recovery_never_hides_another_on_program_playlist_s_line() {
     let (mut engine, mut resolume_rx, _ws_rx) = build_engine().await;

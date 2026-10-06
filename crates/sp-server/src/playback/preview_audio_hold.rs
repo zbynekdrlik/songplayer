@@ -5,11 +5,12 @@
 //!
 //! Why (measured with `scripts/preview_latency_repro.py`, see
 //! `.claude/rules/preview.md` "#184 round G3"): the decode-seam audio LEADS the
-//! video by `lead_ms` (1500 ms on the SDK-clocked path). Round G2 put that lead
+//! video by `lead_ms` (1500 ms on the since-deleted SDK-clocked path, 210 ms
+//! on the paced one, `preview_stream::decode_seam_lead_ms`). Round G2 put that lead
 //! INTO the encoder's audio input — a lead-long silence preroll, then every
 //! block the moment it arrived — so ~1.5 s (~576 KB) of PCM had to sit in flight
 //! in the loopback socket, because ffmpeg consumes audio only in step with the
-//! wall-clock video. With Windows-sized loopback buffers it does not fit:
+//! video. With Windows-sized loopback buffers it does not fit:
 //! `write_all` blocks, the bounded seam channel fills and keeps its OLDEST
 //! blocks, and the aligner — which placed a block by when it was DEQUEUED —
 //! wrote them seconds late while its `ahead_ms` still read 0. That invisible
@@ -43,7 +44,7 @@ use super::preview_stream::{
     PREVIEW_AUDIO_FRAMES_PER_MS, align_block, align_timeout, block_tail_range,
 };
 
-/// How far ahead of the wall-clock video the written audio runs (ms), capped at
+/// How far ahead of the video the written audio runs (ms), capped at
 /// the seam lead. Enough that ffmpeg never waits for audio (a silence pad fires
 /// once the written audio is 150 ms behind its target and the feeder polls
 /// every 30 ms, so the audio stays ahead of the video), small enough (~77 KB of
@@ -121,8 +122,8 @@ impl AudioHold {
         self.ahead_us / 1000
     }
 
-    /// Where the written audio should be at `now_us`: the wall clock plus the
-    /// write-ahead.
+    /// Where the written audio should be at `now_us`: the real time elapsed
+    /// on the monotonic clock plus the write-ahead.
     pub fn position_at(&self, now_us: u64) -> u64 {
         self.base_frames + frames_in(now_us + self.ahead_us)
     }

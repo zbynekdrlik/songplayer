@@ -9,7 +9,8 @@
 //! connect → Identify → studio mode ON (#221) → GetSceneList (cg OBS's scenes
 //! 1:1) → a page-13 button, `SetCurrentPreviewScene(playlist scene)` +
 //! `TriggerStudioModeTransition` → `SP-program` cut to the playlist from
-//! SongPlayer's own playlists, cg OBS mirrored → Companion's feedback is
+//! SongPlayer's own playlists, cg OBS told nothing (#221 B4 step 6) →
+//! Companion's feedback is
 //! SongPlayer's OWN `CurrentProgramSceneChanged` (#221 L3), and cg OBS's is
 //! never passed through → SetCurrentProgramScene(manual scene) → cg OBS
 //! switched, then a cut to "OBS manuál".
@@ -17,7 +18,6 @@
 
 mod common;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -88,7 +88,7 @@ where
 
 #[tokio::test]
 async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
-    // SongPlayer's DB: the ytfast playlist (NDI output SP-fast, id 7) and the
+    // SongPlayer's DB: the ytfast playlist (ndi_output_name SP-fast, id 7) and the
     // #212 NDI input "OBS manuál" enabled with a source.
     let pool = db::create_memory_pool().await.unwrap();
     db::run_migrations(&pool).await.unwrap();
@@ -106,51 +106,30 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         .await
         .unwrap();
 
-    // cg OBS: a playlist scene with SongPlayer's SP-fast NDI source, a baseline
-    // scene, and a manual browser scene.
-    let mut cg = FakeObsState::default();
-    cg.inputs
-        .insert("sp-fast_video".into(), "ndi_source".into());
-    cg.input_settings.insert(
-        "sp-fast_video".into(),
-        json!({ "ndi_source_name": "RESOLUME-SNV (SP-fast)" }),
-    );
-    cg.scene_items.insert(
-        "sp-fast".into(),
-        vec![("sp-fast_video".into(), false, "ndi_source".into())],
-    );
-    cg.scene_items.insert(
-        "Slido".into(),
-        vec![("slido_browser".into(), false, "browser_source".into())],
-    );
-    cg.scene_list = vec!["sp-fast".into(), "sp-slow".into(), "Slido".into()];
-    cg.program_scene = Some("sp-slow".into());
+    // cg OBS: a playlist scene, a baseline scene and a manual browser scene.
+    let cg = FakeObsState {
+        scene_list: vec!["sp-fast".into(), "sp-slow".into(), "Slido".into()],
+        program_scene: Some("sp-slow".into()),
+        ..Default::default()
+    };
     let fake = FakeObsServer::spawn_with_state(cg).await;
 
     // SongPlayer's real OBS client, connected to cg OBS.
-    let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
     let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
-    let (_rebuild_tx, rebuild_rx) = broadcast::channel::<()>(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
     let client = obs::ObsClient::spawn(
         obs::ObsConfig {
             url: fake.url(),
             password: None,
         },
-        pool.clone(),
-        ndi_sources.clone(),
         obs_state.clone(),
         obs_event_tx.clone(),
-        rebuild_rx,
         shutdown_rx,
     );
-    wait_until("the OBS client maps sp-fast_video to playlist 7", || {
-        let map = ndi_sources.clone();
-        async move {
-            let m = map.read().await;
-            m.get("sp-fast_video") == Some(&7)
-        }
+    wait_until("the OBS client is connected to cg OBS", || {
+        let state = obs_state.clone();
+        async move { state.read().await.connected }
     })
     .await;
 
@@ -193,7 +172,7 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     let studio = request(&mut ws, "GetStudioModeEnabled", None).await;
     assert_eq!(studio["responseData"]["studioModeEnabled"], true);
 
-    // The scene list is cg OBS's, 1:1.
+    // The scene list is cg OBS's, 1:1 (its program scene SongPlayer's).
     let list = request(&mut ws, "GetSceneList", None).await;
     assert_eq!(list["requestStatus"]["code"], 100);
     let names: Vec<&str> = list["responseData"]["scenes"]
@@ -203,10 +182,16 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         .map(|s| s["sceneName"].as_str().unwrap())
         .collect();
     assert_eq!(names, vec!["sp-fast", "sp-slow", "Slido"]);
-    assert_eq!(list["responseData"]["currentProgramSceneName"], "sp-slow");
+    // #221 lane 2: its program scene is SP-program's, never cg OBS's own
+    // (sp-slow): nothing is on SP-program yet.
+    assert!(
+        list["responseData"]["currentProgramSceneName"].is_null(),
+        "{list}"
+    );
 
     // A page-13 playlist button: preview, then transition. SP-program cuts to
-    // ytfast from SongPlayer's own playlists; cg OBS is mirrored after it.
+    // ytfast from SongPlayer's own playlists; #221 B4 step 6: cg OBS is told
+    // nothing and keeps its own program.
     let previewed = request(
         &mut ws,
         "SetCurrentPreviewScene",
@@ -219,21 +204,6 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     assert_eq!(pressed["requestStatus"]["result"], true);
     assert_eq!(bus.status().source, Some(7));
     assert!(bus.status().cut_boundary_100ns.is_some_and(|b| b > 0));
-    wait_until("cg OBS is mirrored to sp-fast", || {
-        let fake = &fake;
-        async move { fake.state().await.program_scene.as_deref() == Some("sp-fast") }
-    })
-    .await;
-    let cg_now = fake.state().await;
-    assert!(
-        cg_now
-            .requests
-            .iter()
-            .any(|r| r["requestType"] == "SetCurrentProgramScene"
-                && r["requestData"]["sceneName"] == "sp-fast"),
-        "cg OBS never got the switch: {:?}",
-        cg_now.requests
-    );
     assert_eq!(
         db::models::get_setting(&pool, "program_source")
             .await
@@ -242,8 +212,7 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         Some("7")
     );
 
-    // #221 L3: Companion's button feedback is SongPlayer's OWN program (the
-    // fake cg OBS emits no event for the mirrored switch).
+    // #221 L3: Companion's button feedback is SongPlayer's OWN program.
     let feedback = loop {
         let msg = next_json(&mut ws).await;
         if msg["op"] == 5 && msg["d"]["eventType"] == "CurrentProgramSceneChanged" {
@@ -285,11 +254,35 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
             .all(|m| m["d"]["eventType"] != "CurrentProgramSceneChanged"),
         "cg OBS's program scene reached Companion: {before:?}"
     );
+    // #221 B4 step 6: the playlist press told cg OBS nothing. The witness: a
+    // getter forwarded after it (the OBS client writes the facade's calls in
+    // queue order, so a switch the press had queued would have reached cg
+    // OBS first). cg OBS keeps its own program.
+    let inputs = request(&mut ws, "GetInputList", None).await;
+    assert_eq!(inputs["requestStatus"]["code"], 100);
+    let cg_now = fake.state().await;
+    assert!(
+        cg_now
+            .requests
+            .iter()
+            .all(|r| r["requestType"] != "SetCurrentProgramScene"),
+        "a playlist press switched cg OBS: {:?}",
+        cg_now.requests
+    );
+    assert_eq!(cg_now.program_scene.as_deref(), Some("sp-slow"));
     // SongPlayer's program scene, never cg OBS's.
     let program = request(&mut ws, "GetCurrentProgramScene", None).await;
     assert_eq!(
         program["responseData"]["currentProgramSceneName"],
         "sp-fast"
+    );
+    // #221 lane 2: Companion's connect-time feedback (`GetSceneList`) names
+    // it too, with cg OBS's uuid of that scene; cg OBS still shows sp-slow.
+    let list = request(&mut ws, "GetSceneList", None).await;
+    assert_eq!(list["responseData"]["currentProgramSceneName"], "sp-fast");
+    assert_eq!(
+        list["responseData"]["currentProgramSceneUuid"],
+        "uuid-sp-fast"
     );
 
     // A manual cg OBS scene: cg OBS switches, SP-program cuts to "OBS manuál".

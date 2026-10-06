@@ -28,27 +28,54 @@
 //! moves to the NEXT key; a 5xx retries the SAME key with backoff (2/4/8/16s,
 //! up to 4 retries). Any other failure aborts immediately. Never log a header
 //! or a key value — only the key's INDEX; log word count + elapsed time at
-//! info on success.
+//! info on success. A failure's text names the key as `key i of n` and is
+//! redacted with every key (`gemini_api::redact_keys`; a refused body with
+//! its request's key BEFORE the 400-char cut), so it may go to a log or to
+//! the live probe (`g35t_probe`, #144) as is.
+//!
+//! [`transcribe_words`] is the worker's call on Google's API root;
+//! [`transcribe_at`] is the same call on any root (a mock server in tests)
+//! that also says which key answered — the post-deploy probe uses it.
 
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::time::sleep;
 
 use crate::gemini_api::{
-    GEMINI_API_ROOT as API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, send_on_key,
+    GEMINI_API_ROOT, KeyReply, KeyVerdict, RETRY_BACKOFFS, body_excerpt, redact_keys, send_on_key,
 };
 
-const MODEL_SLUG: &str = "gemini-3.5-transcribe";
+/// The model every request names (the probe reports it, #144).
+pub(crate) const MODEL_SLUG: &str = "gemini-3.5-transcribe";
 const AUDIO_MIME_TYPE: &str = "audio/wav";
+
+/// #144: the BCP-47 `transcription_config.language_codes` every request
+/// carries. The API reference reads them as "hints about the languages
+/// present in the audio" (omitted or empty = automatic detection), and the
+/// transcribe guide says to pass them whenever the language is known.
+///
+/// The catalogue sings in English and Spanish, so both are hinted; the model
+/// picks between them per song and follows a bilingual one (code-switching).
+/// `es-419` (Latin America) is the Spanish code the official
+/// supported-languages table lists; it has no `es-ES`. Auto-detection over
+/// 85+ locales was rejected: on sung vocals it can land on a neighbouring
+/// language and put that on the wall. Design record: issue #144 comment
+/// 5995867005. The live probe reports this same constant (`g35t_probe`).
+pub(crate) const LANGUAGE_CODES: &[&str] = &["en-US", "es-419"];
 
 const FILE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const FILE_POLL_TIMEOUT: Duration = Duration::from_secs(60);
 
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 const INTERACTIONS_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Characters of a refused reply's body an error text keeps
+/// (`gemini_api::body_excerpt`: one line, redacted, then cut).
+const BODY_EXCERPT_CHARS: usize = 400;
 
 /// One ASR word with millisecond timing. Deliberately separate from
 /// `sp_core::lyrics::LyricsWord` / `crate::lyrics::backend::AlignedWord` —
@@ -62,20 +89,54 @@ pub struct AsrWord {
     pub end_ms: u64,
 }
 
-/// Outcome of a single HTTP step against one API key.
-enum StepError {
-    /// `KeyVerdict::NextKey` (a 429 or a key refusal) — the caller should try
-    /// the NEXT key in `api_keys`.
-    NextKey(anyhow::Error),
-    /// Any other failure — abort `transcribe_words` entirely.
-    Fatal(anyhow::Error),
+/// A key [`transcribe_at`] moved past: its index (0-based), whether it was
+/// a 429 (`rate_limited`: out of quota now) or a key refusal (a 403, or a 400
+/// naming the API key: dead, invalid, or not allowed this model or API; the
+/// reason says which), and why, redacted with every key. Reported by the live
+/// probe, so a refused key is visible even while a later key answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyRefusal {
+    pub key_index: usize,
+    pub rate_limited: bool,
+    pub error: String,
 }
 
-fn truncate(s: &str, max: usize) -> &str {
-    match s.char_indices().nth(max) {
-        Some((idx, _)) => &s[..idx],
-        None => s,
-    }
+/// A transcription [`transcribe_at`] got: the words, and the index (0-based,
+/// in the `gemini_api_key` list, the `key_index` of the log line) of the key
+/// that answered.
+#[derive(Debug)]
+pub(crate) struct Transcription {
+    pub(crate) words: Vec<AsrWord>,
+    pub(crate) key_index: usize,
+    /// The keys refused before the one that answered, in order.
+    pub(crate) refused: Vec<KeyRefusal>,
+}
+
+/// A transcription [`transcribe_at`] did not get.
+#[derive(Debug)]
+pub(crate) struct TranscribeFailure {
+    /// Index (0-based) of the key whose answer ended the call: the key a
+    /// fatal answer came on, or the last key when every key was refused.
+    /// `None` when no key was tried (none configured, or the audio could not
+    /// be read).
+    pub(crate) key_index: Option<usize>,
+    /// What went wrong: names the key as `key i of n` (1-based) and carries
+    /// the API's own answer, with every key redacted.
+    pub(crate) error: anyhow::Error,
+    /// The keys refused on the way, in order (every key when all were).
+    pub(crate) refused: Vec<KeyRefusal>,
+}
+
+/// Outcome of a single HTTP step against one API key.
+enum StepError {
+    /// `KeyVerdict::NextKey` (a 429, `rate_limited`, or a key refusal) — the
+    /// caller should try the NEXT key in `api_keys`.
+    NextKey {
+        rate_limited: bool,
+        error: anyhow::Error,
+    },
+    /// Any other failure — abort the transcription entirely.
+    Fatal(anyhow::Error),
 }
 
 /// Issue one HTTP call on one key through the shared `gemini_api::send_on_key`
@@ -83,12 +144,17 @@ fn truncate(s: &str, max: usize) -> &str {
 /// map its reply: a 429 or a key refusal is `StepError::NextKey` (the same
 /// key would fail identically); anything else not answered is `Fatal`.
 /// `build` is invoked fresh on every attempt because a
-/// `reqwest::RequestBuilder` is consumed by `.send()`.
+/// `reqwest::RequestBuilder` is consumed by `.send()`. A refused body goes
+/// to `step_error` as its `gemini_api::body_excerpt`: on one line, redacted
+/// with `api_key` (the request's own key) BEFORE the [`BODY_EXCERPT_CHARS`]
+/// cut, so no key prefix survives at the edge.
 // The loop itself is unit-tested in `gemini_api_tests.rs` against a mock
-// server; this mapping only wraps it (the API root here is a constant).
+// server; this mapping only wraps it. The probe tests (`g35t_probe_tests.rs`)
+// drive it end to end through `transcribe_at`.
 #[cfg_attr(test, mutants::skip)]
 async fn send_with_retry(
     what: &str,
+    api_key: &str,
     timeout: Option<Duration>,
     build: impl Fn() -> reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, StepError> {
@@ -104,19 +170,24 @@ async fn send_with_retry(
             verdict,
             status,
             body,
-        } => Err(step_error(what, verdict, status, &body)),
+        } => Err(step_error(
+            what,
+            verdict,
+            status,
+            &body_excerpt(&body, &[api_key], BODY_EXCERPT_CHARS),
+        )),
     }
 }
 
 /// A refused `send_on_key` reply as this client's `StepError`: a 429 or a
 /// key refusal → `NextKey` (try the next key); a 5xx after every pause or
-/// any other status → `Fatal`.
+/// any other status → `Fatal`. `body` is already the reply's excerpt.
 fn step_error(what: &str, verdict: KeyVerdict, status: u16, body: &str) -> StepError {
-    let body = truncate(body, 400);
     match verdict {
-        KeyVerdict::NextKey { .. } => StepError::NextKey(anyhow!(
-            "g35t_client {what}: key refused status={status} body={body}"
-        )),
+        KeyVerdict::NextKey { rate_limited } => StepError::NextKey {
+            rate_limited,
+            error: anyhow!("g35t_client {what}: key refused status={status} body={body}"),
+        },
         KeyVerdict::RetrySameKey => StepError::Fatal(anyhow!(
             "g35t_client {what}: exhausted retries status={status} body={body}"
         )),
@@ -129,13 +200,14 @@ fn step_error(what: &str, verdict: KeyVerdict, status: u16, body: &str) -> StepE
 #[cfg_attr(test, mutants::skip)]
 async fn upload_audio(
     client: &reqwest::Client,
+    root: &str,
     api_key: &str,
     audio_bytes: &[u8],
     mime_type: &str,
 ) -> Result<Value, StepError> {
-    let resp = send_with_retry("upload", Some(UPLOAD_TIMEOUT), || {
+    let resp = send_with_retry("upload", api_key, Some(UPLOAD_TIMEOUT), || {
         client
-            .post(format!("{API_ROOT}/upload/v1beta/files"))
+            .post(format!("{root}/upload/v1beta/files"))
             .header("x-goog-api-key", api_key)
             .header("X-Goog-Upload-Protocol", "raw")
             .header("X-Goog-Upload-Header-Content-Type", mime_type)
@@ -164,14 +236,15 @@ async fn upload_audio(
 #[cfg_attr(test, mutants::skip)]
 async fn poll_file_ready(
     client: &reqwest::Client,
+    root: &str,
     api_key: &str,
     file_name: &str,
 ) -> Result<Value, StepError> {
     let started = std::time::Instant::now();
     loop {
-        let resp = send_with_retry("file poll", None, || {
+        let resp = send_with_retry("file poll", api_key, None, || {
             client
-                .get(format!("{API_ROOT}/v1beta/{file_name}"))
+                .get(format!("{root}/v1beta/{file_name}"))
                 .header("x-goog-api-key", api_key)
         })
         .await?;
@@ -202,28 +275,37 @@ async fn poll_file_ready(
     }
 }
 
-#[cfg_attr(test, mutants::skip)]
-async fn run_interactions(
-    client: &reqwest::Client,
-    api_key: &str,
-    file_uri: &str,
-    mime_type: &str,
-    language_codes: &[String],
-) -> Result<Value, StepError> {
-    let body = serde_json::json!({
+/// The `POST /v1beta/interactions` body for one uploaded audio file: the
+/// model, the audio input and the transcription config, which is the
+/// [`LANGUAGE_CODES`] hint plus verbatim mode with word timestamps. The mode
+/// must ride along: a `language_codes` sent without a `mode` comes back as a
+/// completed interaction with no words. Pure — unit-tested.
+fn interactions_body(file_uri: &str, mime_type: &str) -> Value {
+    serde_json::json!({
         "model": MODEL_SLUG,
         "input": [{"type": "audio", "uri": file_uri, "mime_type": mime_type}],
         "generation_config": {
             "transcription_config": {
-                "language_codes": language_codes,
+                "language_codes": LANGUAGE_CODES,
                 "mode": {"type": "verbatim", "timestamp_granularities": ["word"]},
             }
         }
-    });
+    })
+}
 
-    let resp = send_with_retry("interactions", Some(INTERACTIONS_TIMEOUT), || {
+#[cfg_attr(test, mutants::skip)]
+async fn run_interactions(
+    client: &reqwest::Client,
+    root: &str,
+    api_key: &str,
+    file_uri: &str,
+    mime_type: &str,
+) -> Result<Value, StepError> {
+    let body = interactions_body(file_uri, mime_type);
+
+    let resp = send_with_retry("interactions", api_key, Some(INTERACTIONS_TIMEOUT), || {
         client
-            .post(format!("{API_ROOT}/v1beta/interactions"))
+            .post(format!("{root}/v1beta/interactions"))
             .header("x-goog-api-key", api_key)
             .json(&body)
     })
@@ -248,9 +330,14 @@ async fn run_interactions(
 /// Best-effort cleanup — never fatal, mirrors the Python prototype's
 /// `delete_file` (a cleanup failure must not fail the whole transcription).
 #[cfg_attr(test, mutants::skip)]
-async fn delete_file_best_effort(client: &reqwest::Client, api_key: &str, file_name: &str) {
+async fn delete_file_best_effort(
+    client: &reqwest::Client,
+    root: &str,
+    api_key: &str,
+    file_name: &str,
+) {
     match client
-        .delete(format!("{API_ROOT}/v1beta/{file_name}"))
+        .delete(format!("{root}/v1beta/{file_name}"))
         .header("x-goog-api-key", api_key)
         .send()
         .await
@@ -280,12 +367,12 @@ async fn delete_file_best_effort(client: &reqwest::Client, api_key: &str, file_n
 #[cfg_attr(test, mutants::skip)]
 async fn transcribe_after_upload(
     client: &reqwest::Client,
+    root: &str,
     api_key: &str,
     file: &Value,
     file_name: &str,
-    language_codes: &[String],
 ) -> Result<Vec<AsrWord>, StepError> {
-    let ready = poll_file_ready(client, api_key, file_name).await?;
+    let ready = poll_file_ready(client, root, api_key, file_name).await?;
     let file_uri = ready
         .get("uri")
         .and_then(|u| u.as_str())
@@ -299,28 +386,28 @@ async fn transcribe_after_upload(
         .unwrap_or(AUDIO_MIME_TYPE)
         .to_string();
 
-    let response = run_interactions(client, api_key, &file_uri, &mime_type, language_codes).await?;
+    let response = run_interactions(client, root, api_key, &file_uri, &mime_type).await?;
     Ok(words_from_response(&response))
 }
 
 #[cfg_attr(test, mutants::skip)]
 async fn transcribe_with_key(
     client: &reqwest::Client,
+    root: &str,
     api_key: &str,
     audio_bytes: &[u8],
     mime_type: &str,
-    language_codes: &[String],
 ) -> Result<Vec<AsrWord>, StepError> {
-    let file = upload_audio(client, api_key, audio_bytes, mime_type).await?;
+    let file = upload_audio(client, root, api_key, audio_bytes, mime_type).await?;
     let file_name = file
         .get("name")
         .and_then(|n| n.as_str())
         .ok_or_else(|| StepError::Fatal(anyhow!("g35t_client: upload response missing file.name")))?
         .to_string();
 
-    let result = transcribe_after_upload(client, api_key, &file, &file_name, language_codes).await;
+    let result = transcribe_after_upload(client, root, api_key, &file, &file_name).await;
 
-    delete_file_best_effort(client, api_key, &file_name).await;
+    delete_file_best_effort(client, root, api_key, &file_name).await;
     result
 }
 
@@ -341,53 +428,120 @@ fn audio_mime_for_path(path: &Path) -> &'static str {
     }
 }
 
-/// Transcribe an audio file with Gemini 3.5 Transcribe, returning word-level
-/// timings. The upload MIME is inferred from the extension (`.wav` → audio/wav,
-/// `.flac` → audio/flac, #171). Tries `api_keys` in order (see module docs for
-/// the key-rotation / retry contract).
-#[cfg_attr(test, mutants::skip)]
+/// Transcribe an audio file with Gemini 3.5 Transcribe on Google's API root,
+/// returning word-level timings: the worker's call, [`transcribe_at`] on
+/// [`GEMINI_API_ROOT`]. The upload MIME is inferred from the extension
+/// (`.wav` → audio/wav, `.flac` → audio/flac, #171). Tries `api_keys` in
+/// order (see module docs for the key-rotation / retry contract). Every
+/// request hints the catalogue's languages ([`LANGUAGE_CODES`], #144); no
+/// caller picks them.
+#[cfg_attr(test, mutants::skip)] // Google's root; `transcribe_at` is tested on a mock
 pub async fn transcribe_words(
     client: &reqwest::Client,
     api_keys: &[String],
     wav_path: &Path,
-    language_codes: &[String],
 ) -> Result<Vec<AsrWord>> {
-    if api_keys.is_empty() {
-        bail!("g35t_client: no Gemini API keys configured");
-    }
-    let audio_bytes = tokio::fs::read(wav_path)
+    transcribe_at(client, GEMINI_API_ROOT, api_keys, wav_path)
         .await
-        .with_context(|| format!("g35t_client: reading {}", wav_path.display()))?;
-    let mime_type = audio_mime_for_path(wav_path);
+        .map(|t| t.words)
+        .map_err(|f| f.error)
+}
 
+/// [`transcribe_words`] on any API root (`api_root` without a trailing
+/// slash: Google's in production, a mock server in tests), telling which key
+/// answered, or on a failure which key's answer ended the call. The same
+/// upload, poll, request body ([`interactions_body`]) and key rotation as
+/// the worker's call, so the live probe (`g35t_probe`, #144) sends exactly
+/// what a song does.
+pub(crate) async fn transcribe_at(
+    client: &reqwest::Client,
+    api_root: &str,
+    api_keys: &[String],
+    audio_path: &Path,
+) -> Result<Transcription, TranscribeFailure> {
+    if api_keys.is_empty() {
+        let text = "g35t_client: no Gemini API keys configured";
+        return Err(failure(api_keys, None, text, Vec::new()));
+    }
+    let audio_bytes = match tokio::fs::read(audio_path).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            let text = format!("g35t_client: reading {}: {e}", audio_path.display());
+            return Err(failure(api_keys, None, &text, Vec::new()));
+        }
+    };
+    let mime_type = audio_mime_for_path(audio_path);
+
+    let total = api_keys.len();
     let started = std::time::Instant::now();
-    let mut last_err: Option<anyhow::Error> = None;
-    for (key_idx, api_key) in api_keys.iter().enumerate() {
-        match transcribe_with_key(client, api_key, &audio_bytes, mime_type, language_codes).await {
+    let mut refused: Vec<KeyRefusal> = Vec::new();
+    for (key_index, api_key) in api_keys.iter().enumerate() {
+        match transcribe_with_key(client, api_root, api_key, &audio_bytes, mime_type).await {
             Ok(words) => {
                 tracing::info!(
-                    key_index = key_idx,
+                    key_index,
                     word_count = words.len(),
+                    refused_keys = refused.len(),
                     elapsed_s = started.elapsed().as_secs_f64(),
+                    language_codes = ?LANGUAGE_CODES,
                     "g35t_client: transcription complete"
                 );
-                return Ok(words);
+                return Ok(Transcription {
+                    words,
+                    key_index,
+                    refused,
+                });
             }
-            Err(StepError::NextKey(e)) => {
+            Err(StepError::NextKey {
+                rate_limited,
+                error: e,
+            }) => {
+                let error = redact_keys(&format!("{e:#}"), api_keys);
                 tracing::warn!(
-                    key_index = key_idx,
-                    error = %e,
+                    key_index,
+                    rate_limited,
+                    error = %error,
                     "g35t_client: key refused (429 or a key refusal) — trying next key"
                 );
-                last_err = Some(e);
-                continue;
+                refused.push(KeyRefusal {
+                    key_index,
+                    rate_limited,
+                    error,
+                });
             }
             Err(StepError::Fatal(e)) => {
-                return Err(e);
+                let text = on_key(key_index, total, e);
+                return Err(failure(api_keys, Some(key_index), &text, refused));
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow!("g35t_client: all API keys exhausted")))
+    // Every key was refused: the list is not empty, so `refused` holds them all.
+    let last = refused.last().map_or("", |r| r.error.as_str());
+    let text = format!(
+        "g35t_client: no key answered ({total} tried); {}",
+        on_key(total - 1, total, last)
+    );
+    Err(failure(api_keys, Some(total - 1), &text, refused))
+}
+
+/// `key i of n: <error>`: a key named by its 1-based place in the list
+/// (`key_index` + 1 of `total`), never by its value.
+fn on_key(key_index: usize, total: usize, error: impl std::fmt::Display) -> String {
+    format!("key {} of {total}: {error:#}", key_index + 1)
+}
+
+/// A [`TranscribeFailure`] whose error is `text` with every key redacted.
+fn failure(
+    api_keys: &[String],
+    key_index: Option<usize>,
+    text: &str,
+    refused: Vec<KeyRefusal>,
+) -> TranscribeFailure {
+    TranscribeFailure {
+        key_index,
+        error: anyhow!(redact_keys(text, api_keys)),
+        refused,
+    }
 }
 
 /// Parse a Gemini offset string like `"5.200s"` or `"9s"` into whole
@@ -457,14 +611,17 @@ pub fn words_from_response(v: &Value) -> Vec<AsrWord> {
 mod tests {
     use super::*;
 
-    /// #136: the shared key verdict maps onto this client's two outcomes.
+    /// #136: the shared key verdict maps onto this client's two outcomes;
+    /// #144: a next-key refusal keeps whether it was a 429.
     #[test]
     fn a_refused_reply_maps_to_next_key_or_fatal() {
         let text = |e: StepError| match e {
-            StepError::NextKey(e) => format!("next: {e}"),
+            StepError::NextKey {
+                rate_limited,
+                error,
+            } => format!("next (rate_limited={rate_limited}): {error}"),
             StepError::Fatal(e) => format!("fatal: {e}"),
         };
-        let long = "x".repeat(500);
         assert_eq!(
             text(step_error(
                 "upload",
@@ -472,18 +629,55 @@ mod tests {
                 429,
                 "quota"
             )),
-            "next: g35t_client upload: key refused status=429 body=quota"
+            "next (rate_limited=true): g35t_client upload: key refused status=429 body=quota"
+        );
+        assert_eq!(
+            text(step_error(
+                "upload",
+                KeyVerdict::NextKey {
+                    rate_limited: false
+                },
+                403,
+                "denied"
+            )),
+            "next (rate_limited=false): g35t_client upload: key refused status=403 body=denied"
         );
         assert_eq!(
             text(step_error("poll", KeyVerdict::RetrySameKey, 503, "down")),
             "fatal: g35t_client poll: exhausted retries status=503 body=down"
         );
+        // The body arrives as its excerpt (`body_excerpt`, which cuts it):
+        // nothing is cut here.
+        let long = "x".repeat(500);
         assert_eq!(
             text(step_error("interactions", KeyVerdict::Stop, 404, &long)),
-            format!(
-                "fatal: g35t_client interactions: unexpected status=404 body={}",
-                "x".repeat(400)
-            )
+            format!("fatal: g35t_client interactions: unexpected status=404 body={long}")
+        );
+    }
+
+    /// #144: every request hints the catalogue's English AND Spanish, so a
+    /// Spanish song is no longer transcribed under an English-only hint. The
+    /// whole body is pinned: the verbatim word-timestamp mode must ride along
+    /// with the hint (a hint without a `mode` returns no words).
+    #[test]
+    fn interactions_body_hints_the_catalogue_s_english_and_spanish() {
+        let body = interactions_body("https://files.example/abc", "audio/flac");
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "model": "gemini-3.5-transcribe",
+                "input": [{
+                    "type": "audio",
+                    "uri": "https://files.example/abc",
+                    "mime_type": "audio/flac"
+                }],
+                "generation_config": {
+                    "transcription_config": {
+                        "language_codes": ["en-US", "es-419"],
+                        "mode": {"type": "verbatim", "timestamp_granularities": ["word"]}
+                    }
+                }
+            })
         );
     }
 

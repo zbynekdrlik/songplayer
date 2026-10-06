@@ -88,8 +88,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # --no-fail-fast: run every test binary even after one fails, so one
+      # CI run reports every failure (#223 S3b: a failing binary hid the rest).
       - name: Run tests
-        run: cargo test --workspace --verbose
+        run: cargo test --workspace --verbose --no-fail-fast
 
   test-wasm:
     name: Test WASM (sp-core)
@@ -209,8 +211,10 @@ jobs:
         # Build mimalloc's Windows dynamic override from a PINNED tag and stage
         # the override DLL + the repo's prebuilt redirect DLL + minject.exe into
         # resources/mimalloc/, which tauri.conf.json's bundle.resources ships in
-        # the NSIS installer next to SongPlayer.exe. The step FAILS if any of the
-        # three files is missing (no continue-on-error, no "|| true").
+        # the NSIS installer next to SongPlayer.exe, with mimalloc's MIT LICENSE
+        # (#223 S2: the installer carries its third-party notices). The step
+        # FAILS if any of the four files is missing (no continue-on-error, no
+        # "|| true").
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -232,13 +236,41 @@ jobs:
           Copy-Item $built.FullName (Join-Path $dest 'mimalloc.dll') -Force
           Copy-Item 'mimalloc-src/bin/mimalloc-redirect.dll' (Join-Path $dest 'mimalloc-redirect.dll') -Force
           Copy-Item 'mimalloc-src/bin/minject.exe' (Join-Path $dest 'minject.exe') -Force
-          foreach ($f in @('mimalloc.dll', 'mimalloc-redirect.dll', 'minject.exe')) {
+          Copy-Item 'mimalloc-src/LICENSE' (Join-Path $dest 'LICENSE-mimalloc.txt') -Force
+          foreach ($f in @('mimalloc.dll', 'mimalloc-redirect.dll', 'minject.exe', 'LICENSE-mimalloc.txt')) {
             if (-not (Test-Path (Join-Path $dest $f))) { throw "staged mimalloc file missing: $f" }
           }
           Write-Host 'Staged mimalloc override resources:'
           Get-ChildItem $dest | Format-Table Name, Length
       - name: Build Tauri app
         run: cargo tauri build
+      - name: Check SongPlayer.exe declares Common-Controls 6.0 (#223 S2)
+        # SongPlayer.exe links the Spout2 SDK (sp-gpu), whose SpoutUtils imports
+        # TaskDialogIndirect from comctl32 at load time. Only Common-Controls 6.0
+        # exports it, and Windows binds v6 only when the exe's manifest asks for
+        # it; otherwise the exe does not start (0xC0000139). tauri-build embeds
+        # its default manifest, which declares it, as resource #1. Read it back
+        # with the Windows SDK's mt.exe and fail if the declaration is missing.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'src-tauri\target\release\SongPlayer.exe'
+          if (-not (Test-Path $exe)) { throw "$exe was not built" }
+          $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $mt = Get-ChildItem -Path $kits -Recurse -Filter 'mt.exe' |
+            Where-Object { $_.FullName -like '*\x64\mt.exe' } |
+            Sort-Object FullName | Select-Object -Last 1
+          if (-not $mt) { throw "mt.exe (Windows SDK) not found under $kits" }
+          & $mt.FullName -nologo "-inputresource:$exe;#1" '-out:embedded.manifest'
+          if ($LASTEXITCODE -ne 0) { throw "mt.exe read no embedded manifest from $exe (exit $LASTEXITCODE)" }
+          $manifest = Get-Content 'embedded.manifest' -Raw
+          Write-Host $manifest
+          $ids = [regex]::Matches($manifest, '<(?:\w+:)?assemblyIdentity\b[^>]*>') | ForEach-Object { $_.Value }
+          $cc6 = $ids | Where-Object {
+            $_ -match 'name=["'']Microsoft\.Windows\.Common-Controls["'']' -and $_ -match 'version=["'']6\.0\.0\.0["'']'
+          }
+          if (-not $cc6) { throw "$exe's embedded manifest does not declare Microsoft.Windows.Common-Controls 6.0.0.0" }
+          Write-Host 'The embedded manifest declares Common-Controls 6.0.'
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
@@ -308,15 +340,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build workspace
         run: cargo build --workspace
+      # --no-fail-fast: run every test binary even after one fails, so one
+      # CI run reports every failure (#223 S3b: sp-decoder's failing
+      # mf_hw_decode binary stopped the run before sp-gpu's and sp-server's
+      # tests ever ran).
       - name: Run tests
-        run: cargo test --workspace --verbose
+        id: tests
+        run: cargo test --workspace --verbose --no-fail-fast
       # Release-mode decoder tests — the Tauri shipped binary is a release
       # build, and the 2026-04-22 seek regression (commit 5977a9d) passed
       # debug-mode cargo test but broke MF ReadSample under release LTO.
       # sp-decoder is the only crate with Windows-specific release-sensitive
       # code paths, so we gate only that crate here to keep CI time bounded.
+      # It runs after a failed debug test step too (the job still fails), so
+      # a release-only failure shows in the same run; never after a failed
+      # build, and never on a cancelled run (`!cancelled()`: the runner
+      # re-checks a step's `if` on cancel, and the outcome test alone would
+      # keep it running past a newer push's cancel-in-progress).
       - name: Run sp-decoder tests (release mode)
-        run: cargo test -p sp-decoder --release --verbose
+        if: ${{ !cancelled() && (success() || steps.tests.outcome == 'failure') }}
+        run: cargo test -p sp-decoder --release --verbose --no-fail-fast
 
   test-integrity:
     name: Test Integrity Check
@@ -1083,6 +1126,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Release 0.71.0 review: the steps below act on the box before the
+      # post-deploy suite (they may start OBS or restart SongPlayer, they cut
+      # SP-program for the title check, they write "[CI PROBE]" to the
+      # Presenter), and minutes pass after the deploy's own lease wait. So
+      # the job waits out another repo's rig lease first, with the deploy's
+      # gate and bounds; the wait before the suite below stays.
+      - name: Wait for the rig lease (never act on the box over another repo's lease)
+        shell: powershell
+        timeout-minutes: 70
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          if (-not (Test-Path $py)) {
+            Write-Error "FAIL: $py not found - the rig-lease gate needs the box's Python 3.12"
+            exit 1
+          }
+          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json" --url "http://dev1:8890/rig-lease.json" --poll-seconds 30 --max-wait-seconds 3600
+          $code = $LASTEXITCODE
+          if ($code -eq 3) {
+            Write-Error "FAIL: another repo still holds the rig lease after 60 min - not acting on the box over it"
+            exit 1
+          }
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig-lease gate itself failed (exit $code)"
+            exit 1
+          }
+
       - name: Ensure OBS is running
         shell: powershell
         run: |
@@ -1460,10 +1529,15 @@ jobs:
       - name: Verify playback updates OBS text source
         shell: powershell
         run: |
-          # Find a playlist with videos
+          # Find a playlist with videos that is NOT SP-program's source: this
+          # step plays and then pauses its pick, and pausing the program's own
+          # playlist would freeze the live wall and silence FOH (release 0.71.0
+          # review round 4).
+          $programSource = (Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program").source
           $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
           $testPl = $null
           foreach ($pl in $playlists) {
+            if ($pl.id -eq $programSource) { continue }
             $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
             if ($videos.Count -gt 0) {
               $testPl = $pl
@@ -1471,7 +1545,7 @@ jobs:
             }
           }
           if (-not $testPl) {
-            Write-Error "FAIL: No playlist with videos found"
+            Write-Error "FAIL: No playlist with videos found (other than SP-program's source $programSource)"
             exit 1
           }
           Write-Host "Testing playback on '$($testPl.name)' (id=$($testPl.id))"
@@ -1522,32 +1596,116 @@ jobs:
           }
           Write-Host "OK: Resolume reachable + Responding=True"
 
-          # Find a playlist with videos and trigger playback.
+          # Find an ACTIVE playlist with videos and an NDI output name (only
+          # such a playlist has a pipeline, so only it can be on program), by
+          # the baseline discipline of e2e/obs-baseline-scene.ts (CLAUDE.md
+          # "E2E must not switch to disruptive OBS scenes"): its scene (the
+          # lowercased NDI output name, the scene catalog's rule) is sp-slow
+          # if there is one, else any sp-* scene but sp-fast and sp-warmup
+          # (the sync tone). This step puts it on program for ~20 s.
           $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
-          $testPl = $null
+          $candidates = @()
           foreach ($pl in $playlists) {
+            if (-not $pl.is_active -or -not $pl.ndi_output_name) { continue }
+            $scene = $pl.ndi_output_name.ToLowerInvariant()
+            if (-not $scene.StartsWith("sp-") -or $scene -eq "sp-fast" -or $scene -eq "sp-warmup") { continue }
             $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
             if ($videos.Count -gt 0) {
-              $testPl = $pl
-              break
+              $candidates += [pscustomobject]@{ Playlist = $pl; Scene = $scene }
             }
           }
+          $testPl = $null
+          $slow = @($candidates | Where-Object { $_.Scene -eq "sp-slow" })
+          if ($slow.Count -gt 0) {
+            $testPl = $slow[0].Playlist
+          } elseif ($candidates.Count -gt 0) {
+            $testPl = $candidates[0].Playlist
+          }
           if (-not $testPl) {
-            Write-Error "FAIL: No playlist with videos found for Resolume verification"
+            Write-Error "FAIL: No active playlist with videos and an sp-* scene other than sp-fast / sp-warmup found for Resolume verification"
             exit 1
           }
-          Write-Host "Triggering playback on '$($testPl.name)' (id=$($testPl.id)) for Resolume verification"
-          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
 
-          # Wait long enough for title to show: 1.5s show delay + 1s fade-in.
-          # Also wait for cold-start to fully wire the lookahead push to
-          # #sp-subs-next clips (asserted later in this step). 5s was too
-          # tight after Phase A added new modules; the lookahead push needs
-          # ~10s to populate after first playback request on a fresh process.
-          Start-Sleep -Seconds 15
+          # #221 lane 2 (release 0.71.0 review): only SP-program's playlist,
+          # the wall owner, writes the title and the lines; with "OBS manual"
+          # (-1) on program nobody does. A playlist played off program writes
+          # nothing, so the check would read whatever the owner shows, and
+          # fail with -1 on program. So the test playlist goes on SP-program
+          # first, through the dashboard's own cut, and SP-program gets its old
+          # source back once the composition is read (also on a failure; a
+          # playlist then starts its next song, like the suite's afterAll).
+          # A box whose program never had a source keeps the test playlist:
+          # there is no "nothing" to cut back to.
+          $sourceBefore = (Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program").source
+          Write-Host "SP-program source before the check: $sourceBefore"
+          $cutAway = ($sourceBefore -ne $testPl.id)
+          # Already on program AND playing (sp-slow is the operators' usual
+          # background): read its title in place, never play or pause it, so
+          # the live program is left as it was (release 0.71.0 review round 3).
+          # (A variable + foreach: Windows PowerShell 5.1 pipes a JSON array
+          # from Invoke-RestMethod as ONE object.)
+          $healthRows = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/ndi/health"
+          $row = $null
+          foreach ($h in $healthRows) {
+            if ($h.playlist_id -eq $testPl.id) { $row = $h; break }
+          }
+          $inPlace = (-not $cutAway) -and ($null -ne $row) -and ($row.state -eq "Playing")
+          try {
+            if ($cutAway) {
+              $cut = @{ source = $testPl.id } | ConvertTo-Json -Compress
+              Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $cut | Out-Null
+              Write-Host "SP-program cut to '$($testPl.name)' (id=$($testPl.id)) for the check"
+            }
+            if ($inPlace) {
+              Write-Host "'$($testPl.name)' (id=$($testPl.id)) is already on SP-program and playing - reading its title in place"
+            } else {
+              Write-Host "Triggering playback on '$($testPl.name)' (id=$($testPl.id)) for Resolume verification"
+              Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
+            }
 
-          # Query Resolume composition for #sp-title clips.
-          $comp = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/composition" -TimeoutSec 10
+            # Wait long enough for title to show: 1.5s show delay + 1s fade-in.
+            # Also wait for cold-start to fully wire the lookahead push to
+            # #sp-subs-next clips (asserted later in this step). 5s was too
+            # tight after Phase A added new modules; the lookahead push needs
+            # ~10s to populate after first playback request on a fresh process.
+            Start-Sleep -Seconds 15
+
+            # Query Resolume composition for #sp-title clips. A song shows no
+            # title in its last 3.5 s and its first 1.5 s (the title clock),
+            # so a read that finds an empty title reads again, once a second,
+            # at most 10 more times; the assertions below judge the last read.
+            for ($read = 1; $read -le 11; $read++) {
+              $comp = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/composition" -TimeoutSec 10
+              $titleTexts = @(foreach ($layer in $comp.layers) { foreach ($clip in $layer.clips) { if ($clip.name.value -match '#sp-title') { [string]$clip.video.sourceparams.Text.value } } })
+              $emptyTexts = @($titleTexts | Where-Object { $_.Trim() -eq '' })
+              if ($titleTexts.Count -eq 0 -or $emptyTexts.Count -eq 0) { break }
+              Write-Host "Read ${read}: $($emptyTexts.Count) of $($titleTexts.Count) #sp-title clips empty (a song boundary?)"
+              if ($read -lt 11) { Start-Sleep -Seconds 1 }
+            }
+          } finally {
+            # Cleanup before the assertions. Cut away: give SP-program its old
+            # source back (a playlist, or -1 "OBS manual") with NO pause: the
+            # test playlist leaves program and pauses itself after the fade
+            # (scene_off.rs), so the program never carries a frozen, silent
+            # picture of it (review round 4). No source to give back, or the
+            # test playlist was the source but not playing: pause it. Read in
+            # place: nothing.
+            if ($cutAway -and $null -ne $sourceBefore) {
+              $back = @{ source = $sourceBefore } | ConvertTo-Json -Compress
+              try {
+                Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $back | Out-Null
+                Write-Host "SP-program back on source $sourceBefore"
+              } catch {
+                # The old source is refused now (the NDI input switched off, the
+                # playlist deleted): never leave the test playlist playing on
+                # the wall. Pause it, then fail with the refusal.
+                Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
+                throw
+              }
+            } elseif (-not $inPlace) {
+              Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
+            }
+          }
           $titleClips = @()
           foreach ($layer in $comp.layers) {
             foreach ($clip in $layer.clips) {
@@ -1566,9 +1724,6 @@ jobs:
             Write-Host "  $($c.Name) -> text='$($c.Text)' opacity=$($c.Opacity)"
           }
 
-          # Cleanup: pause playback before assertions so we always release the player.
-          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
-
           if ($titleClips.Count -eq 0) {
             Write-Error "FAIL: Resolume is reachable but has zero #sp-title clips. Titles cannot reach the wall. Create a clip with '#sp-title' in its name."
             exit 1
@@ -1576,14 +1731,16 @@ jobs:
 
           # ASSERT: every #sp-title clip must have non-empty text after playback.
           # If text is empty, SongPlayer's show_title path is broken.
-          $emptyClips = $titleClips | Where-Object { -not $_.Text -or $_.Text.Trim() -eq '' }
+          # @(): in Windows PowerShell 5.1 ONE matching PSCustomObject has no
+          # .Count ($null), so a single empty clip would pass `-gt 0`.
+          $emptyClips = @($titleClips | Where-Object { -not $_.Text -or $_.Text.Trim() -eq '' })
           if ($emptyClips.Count -gt 0) {
             Write-Error "FAIL: $($emptyClips.Count) of $($titleClips.Count) #sp-title clips have empty text after playback. SongPlayer is not pushing titles to Resolume."
             exit 1
           }
 
           # ASSERT: also check the warning indicator is gone.
-          $withWarning = $titleClips | Where-Object { $_.Text -match [char]0x26A0 }
+          $withWarning = @($titleClips | Where-Object { $_.Text -match [char]0x26A0 })
           if ($withWarning.Count -gt 0) {
             Write-Error "FAIL: $($withWarning.Count) clips contain the legacy warning indicator (U+26A0). The redesign should have removed it."
             exit 1
@@ -1640,8 +1797,8 @@ jobs:
           Write-Host "  #sp-subssk texts:"
           foreach ($t in $subsSkClips) { Write-Host "    '$t'" }
           # Skip the lookahead gate when subs clips are all empty/whitespace.
-          # ytwarmup playlist's continuous picker is non-deterministic — it
-          # may select a vocal-exercise video with no lyrics, in which case
+          # The test playlist's continuous picker is non-deterministic — it
+          # may select a video with no lyrics (an instrumental), in which case
           # SongPlayer pushes nothing and every clip retains its empty
           # default. "Empty == empty" is not a regression, so the gate must
           # only fire when there IS lyric text on #sp-subs to compare.
@@ -1656,7 +1813,7 @@ jobs:
             # behaviour, not a missing lookahead. ~87% of allowed-set
             # songs have at least one consecutive-duplicate-line pair, so
             # the gate must tolerate it (see issue #105).
-            $distinctSubs = $nonEmptySubs | Select-Object -Unique
+            $distinctSubs = @($nonEmptySubs | Select-Object -Unique)
             if ($distinctSubs.Count -eq 1) {
               Write-Host "INFO: #sp-subs has only one distinct text ('$($distinctSubs[0])') - repeated-line section, skipping lookahead gate"
             } else {
@@ -2046,6 +2203,31 @@ jobs:
             exit 1
           }
           Write-Host "OK: the A/V gate venv at $venv has numpy $version with numpy.fft"
+
+      # #221 lane 3 (camera-box request, 6.10.2026): the post-deploy suite
+      # switches cg OBS's program for the A/V gate's take (the probe scene)
+      # and presses scenes through the facade, so it waits out another
+      # repo's rig lease as the deploy does: minutes pass between the
+      # deploy's wait and the take. Same gate, same bounds.
+      - name: Wait for the rig lease (never run the post-deploy suite over another repo's lease)
+        shell: powershell
+        timeout-minutes: 70
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          if (-not (Test-Path $py)) {
+            Write-Error "FAIL: $py not found - the rig-lease gate needs the box's Python 3.12"
+            exit 1
+          }
+          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json" --url "http://dev1:8890/rig-lease.json" --poll-seconds 30 --max-wait-seconds 3600
+          $code = $LASTEXITCODE
+          if ($code -eq 3) {
+            Write-Error "FAIL: another repo still holds the rig lease after 60 min - not running the post-deploy suite over it"
+            exit 1
+          }
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig-lease gate itself failed (exit $code)"
+            exit 1
+          }
 
       - name: Feature-level Playwright (post-deploy spec)
         shell: powershell

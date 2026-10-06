@@ -130,13 +130,12 @@ fn lock_for_heartbeat_holds_locked_on_a_clean_grid() {
     let mut w = EventWindow::new();
     // Two heartbeats 60 s apart: 1800 slots, 100 late (≈ 5.6 %), 360 structural
     // 24→30 repeats — a holding 24-fps grid → LOCKED.
-    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 24.0, 30, Playing);
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 24.0, 30, Playing);
     let (s, r) = lock_for_heartbeat(
         &mut w,
         60 * U,
         &paced(1800, 100, 360, 0),
         true,
-        2,
         24.0,
         30,
         Playing,
@@ -150,13 +149,12 @@ fn lock_for_heartbeat_degrades_on_a_stall() {
     use sp_core::genlock::lock_state::LockState;
     let mut w = EventWindow::new();
     // 750 late / 1800 slots ≈ 42 % → the sender-side stall → DEGRADED (late).
-    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 24.0, 30, Playing);
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 24.0, 30, Playing);
     let (s, r) = lock_for_heartbeat(
         &mut w,
         60 * U,
         &paced(1800, 750, 360, 0),
         true,
-        2,
         24.0,
         30,
         Playing,
@@ -168,7 +166,7 @@ fn lock_for_heartbeat_degrades_on_a_stall() {
 // #168 round 6b regression pair — the EXACT box read (22.9.2026 17:56 UTC,
 // SP-slow, a 23.976-fps NTSC-24 file on the 30-fps grid): slots 1803, late 3,
 // repeats 362 (= 20.1 % ≈ the structural 1 − 24/30 conversion), resyncs 0, clock
-// ok, pacing on, 2 receivers. With the DECODER's `source_fps` (23.976) the
+// ok, pacing on. With the DECODER's `source_fps` (23.976) the
 // 20.1 % repeats are the by-design conversion → LOCKED; with the paced path's
 // grid-valued `nominal_fps` (30.0) the rule expects 0 % → the same repeats
 // falsely DEGRADE. Same counts, different `source_fps` → the whole fix.
@@ -177,13 +175,12 @@ fn lock_for_heartbeat_degrades_on_a_stall() {
 fn lock_for_heartbeat_source_fps_23976_holds_locked() {
     use sp_core::genlock::lock_state::LockState;
     let mut w = EventWindow::new();
-    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 23.976, 30, Playing);
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 23.976, 30, Playing);
     let (s, r) = lock_for_heartbeat(
         &mut w,
         60 * U,
         &paced(1803, 3, 362, 0),
         true,
-        2,
         23.976,
         30,
         Playing,
@@ -203,13 +200,12 @@ fn lock_for_heartbeat_grid_source_fps_falsely_degrades() {
     // Feeding the grid rate (30.0, what the paced `nominal_fps` reads) as the
     // source is the BUG: expected repeat 0 % → the 20.1 % structural repeats trip
     // the margin → DEGRADED. This pins WHY `source_fps` must be the decoder rate.
-    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 2, 30.0, 30, Playing);
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 30.0, 30, Playing);
     let (s, r) = lock_for_heartbeat(
         &mut w,
         60 * U,
         &paced(1803, 3, 362, 0),
         true,
-        2,
         30.0,
         30,
         Playing,
@@ -227,22 +223,12 @@ fn standby_minute(
     transport: sp_core::playback::TransportState,
 ) -> (sp_core::genlock::lock_state::LockState, &'static str) {
     let mut w = EventWindow::new();
-    let _ = lock_for_heartbeat(
-        &mut w,
-        0,
-        &paced(0, 0, 0, 0),
-        true,
-        2,
-        23.976,
-        30,
-        transport,
-    );
+    let _ = lock_for_heartbeat(&mut w, 0, &paced(0, 0, 0, 0), true, 23.976, 30, transport);
     lock_for_heartbeat(
         &mut w,
         60 * U,
         &paced(1800, 2, 1800, 0),
         true,
-        2,
         23.976,
         30,
         transport,
@@ -259,6 +245,93 @@ fn lock_for_heartbeat_paused_standby_repeats_hold_locked() {
 fn lock_for_heartbeat_idle_standby_repeats_hold_locked() {
     use sp_core::genlock::lock_state::LockState;
     assert_eq!(standby_minute(Idle), (LockState::Locked, "locked"));
+}
+
+// #150, ROZHODNUTÉ 5984539219 (design question 5823282098): the window starts
+// over when the output's timeline changes under it, a resume (`decoding`
+// flips) or a seek (`PacingStats::seeks` moves). Heartbeats every 5 s of a
+// 23.976-fps file on the 30-fps grid: 30 slots a second, 20 % of them the
+// structural repeats while playing, every one a repeat of the frozen frame
+// while paused.
+
+/// One heartbeat at `t_s` seconds: a locked clock, the file's 23.976 fps on
+/// the 30-fps grid.
+fn beat(
+    w: &mut EventWindow,
+    t_s: i64,
+    pacing: &crate::playback::ndi_health::PacingStats,
+    transport: sp_core::playback::TransportState,
+) -> (sp_core::genlock::lock_state::LockState, &'static str) {
+    lock_for_heartbeat(w, t_s * U, pacing, true, 23.976, 30, transport)
+}
+
+/// [`paced`] after `seeks` seeks.
+fn paced_after(
+    seeks: u64,
+    seq: u64,
+    repeats: u64,
+    resyncs: u64,
+) -> crate::playback::ndi_health::PacingStats {
+    crate::playback::ndi_health::PacingStats {
+        seeks,
+        ..paced(seq, 0, repeats, resyncs)
+    }
+}
+
+#[test]
+fn a_resume_after_a_standby_minute_reads_locked_from_its_first_heartbeat() {
+    use sp_core::genlock::lock_state::LockState;
+    let mut w = EventWindow::new();
+    // Paused for a minute: every slot is a standby repeat.
+    for t in (0..=60).step_by(5) {
+        let n = 30 * t as u64;
+        assert_eq!(
+            beat(&mut w, t, &paced(n, 0, n, 0), Paused).0,
+            LockState::Locked
+        );
+    }
+    // Play: 5 s of the file add 150 slots and their 30 structural repeats.
+    assert_eq!(
+        beat(&mut w, 65, &paced(1950, 0, 1830, 0), Playing),
+        (LockState::Locked, "locked"),
+        "the first heartbeat after Play never reads the standby minute"
+    );
+    assert_eq!(
+        beat(&mut w, 70, &paced(2100, 0, 1860, 0), Playing),
+        (LockState::Locked, "locked"),
+        "the next window holds only the playing slots"
+    );
+}
+
+#[test]
+fn a_seek_reads_locked_from_the_heartbeat_that_sees_it() {
+    use sp_core::genlock::lock_state::LockState;
+    let mut w = EventWindow::new();
+    // A clean playing minute.
+    for t in (0..=60).step_by(5) {
+        let n = 30 * t as u64;
+        assert_eq!(
+            beat(&mut w, t, &paced(n, 0, n / 5, 0), Playing).0,
+            LockState::Locked
+        );
+    }
+    // A seek: its refill resynced the grid once, and the heartbeat after its
+    // first new frame reads the seek counted.
+    assert_eq!(
+        beat(&mut w, 65, &paced_after(1, 1950, 390, 1), Playing),
+        (LockState::Locked, "locked"),
+        "the seek's own resync is part of its re-anchor, never a 60 s DEGRADED"
+    );
+    assert_eq!(
+        beat(&mut w, 70, &paced_after(1, 2100, 420, 1), Playing),
+        (LockState::Locked, "locked"),
+        "the next clean window"
+    );
+    assert_eq!(
+        beat(&mut w, 75, &paced_after(1, 2250, 450, 2), Playing),
+        (LockState::Degraded, "resync in 60 s"),
+        "a resync after the seek is a real one again"
+    );
 }
 
 #[test]
@@ -291,7 +364,6 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
         playlist_id: 7,
         ndi_name: "SP-fast".to_string(),
         state: PlaybackStateLabel::Playing,
-        connections: 2,
         frames_submitted_total: 100,
         frames_submitted_last_5s: 30,
         observed_fps: 30.0,
@@ -310,6 +382,7 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             jitter_p99_us: 120,
             repeats: 5,
             resyncs: 1,
+            seeks: 3,
             relatches: 2,
             dropped: 7,
             lag_slots: 4,
@@ -340,13 +413,9 @@ fn sample_snapshot() -> crate::playback::ndi_health::PipelineHealthSnapshot {
             underruns: 9,
             overflows: 0,
             buffer_ms: 66,
-            emitter: Default::default(),
         },
         lock_state: LockState::Degraded,
         lock_reason: "late > 25 % of slots in 60 s".to_string(),
-        burn_on: false,
-        recovery_step: None,
-        sender_url: None,
         transport: sp_core::playback::TransportState::Idle,
     }
 }
@@ -366,6 +435,8 @@ fn format_genlock_line_contains_every_key_token() {
         "p99_us=120",
         "repeats=5",
         "resyncs=1",
+        // #150: the seek count the lock window restarts on.
+        "seeks=3",
         "relatches=2",
         "lag=4",
         "av_align_err_ms=-12.5",

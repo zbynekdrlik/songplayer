@@ -1,22 +1,44 @@
 //! Media Foundation video-only reader.
+//!
+//! #223 S3b: a reader opens its file in a [`DecodeMode`]
+//! ([`MediaFoundationVideoReader::open_with`]). `Software` (the default, and
+//! [`MediaFoundationVideoReader::open`]) is the path every song took before:
+//! Media Foundation's software decoders, each picture locked out of a
+//! system-memory buffer. `Hardware` gives the source reader a Direct3D 11
+//! device on the GPU (`hw_session.rs`: `sp_gpu::VideoDevice` behind a DXGI
+//! device manager, `MF_SOURCE_READER_D3D_MANAGER`), so the decoder MFT
+//! decodes with DXVA and hands each picture over as a DXGI surface, which is
+//! copied back in the software path's NV12 layout (`dxgi_frame.rs`). The path
+//! really used is read from every picture ([`DecodePath::of_picture`]), and
+//! the hardware path never kills a song: a failed open, or a decode error on
+//! the D3D path, falls back to software for that file with a WARN. Every
+//! decision is `crate::hw_decode`'s (Linux-tested); this file only calls
+//! Media Foundation.
 
 use std::os::windows::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 use windows::Win32::Media::MediaFoundation::{
     IMFAttributes, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader, MF_API_VERSION,
     MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
-    MF_PD_DURATION, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-    MF_SOURCE_READER_MEDIASOURCE, MF_SOURCE_READERF_ENDOFSTREAM, MFCreateAttributes,
-    MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Video, MFSTARTUP_NOSOCKET,
-    MFStartup, MFVideoFormat_NV12,
+    MF_PD_DURATION, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READER_D3D_MANAGER,
+    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READER_MEDIASOURCE,
+    MF_SOURCE_READERF_ENDOFSTREAM, MFCreateAttributes, MFCreateMediaType,
+    MFCreateSourceReaderFromURL, MFMediaType_Video, MFSTARTUP_NOSOCKET, MFStartup,
+    MFVideoFormat_NV12,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::core::PCWSTR;
 
+use super::dxgi_frame::DxgiSurface;
+use super::hw_session::{HwDevice, HwSession};
 use crate::error::DecoderError;
+use crate::hw_decode::{
+    DecodeMode, DecodePath, FallbackGate, FallbackStage, HwFallback, OnDecodeError, PathNote,
+    PathTracker, Resume, hw_counters,
+};
 use crate::stream::{MediaStream, VideoStream};
 use crate::types::{DecodedVideoFrame, PixelFormat};
 
@@ -25,11 +47,32 @@ const VIDEO_STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
 /// Video-only Media Foundation source reader.
 pub struct MediaFoundationVideoReader {
     reader: IMFSourceReader,
+    /// The file, for a software reopen (#223 S3b).
+    path: PathBuf,
     duration_ms: u64,
     width: u32,
     height: u32,
     frame_rate_num: u32,
     frame_rate_den: u32,
+    /// The negotiated type carried `MF_MT_FRAME_RATE`; `false` = the
+    /// 29.97 fps fallback.
+    frame_rate_known: bool,
+    /// What the caller asked for.
+    mode: DecodeMode,
+    /// The device manager while the source reader runs on the D3D path;
+    /// `None` in software and after a fall back.
+    hw: Option<HwSession>,
+    /// The adapter the D3D path opened on (kept after a fall back).
+    adapter: Option<String>,
+    /// The path of the pictures handed over.
+    paths: PathTracker,
+    /// Why this file left the hardware path, if it did.
+    fallback: Option<HwFallback>,
+    /// Whether a decode error may still reopen the file in software (once).
+    gate: FallbackGate,
+    resume: Resume,
+    /// A test's injected decode failure for the next read.
+    inject_failure: bool,
 }
 
 // SAFETY: IMFSourceReader is a COM interface that windows-rs marks as !Send.
@@ -40,18 +83,116 @@ pub struct MediaFoundationVideoReader {
 // the same pattern used by all video/audio readers in this crate.
 unsafe impl Send for MediaFoundationVideoReader {}
 
+/// What a source reader negotiated at open.
+struct Opened {
+    reader: IMFSourceReader,
+    duration_ms: u64,
+    width: u32,
+    height: u32,
+    frame_rate_num: u32,
+    frame_rate_den: u32,
+    frame_rate_known: bool,
+}
+
 impl MediaFoundationVideoReader {
+    /// Open `path` in software (`open_with(path, DecodeMode::Software)`).
     #[cfg_attr(test, mutants::skip)]
     pub fn open(path: &Path) -> Result<Self, DecoderError> {
-        unsafe {
-            let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-            if hr.is_err() {
-                return Err(DecoderError::ComInit(format!("CoInitializeEx: {hr}")));
-            }
-            MFStartup(MF_API_VERSION, MFSTARTUP_NOSOCKET)
-                .map_err(|e| DecoderError::ComInit(format!("MFStartup: {e}")))?;
-        }
+        Self::open_with(path, DecodeMode::Software)
+    }
 
+    /// Open `path` in `mode` (#223 S3b). A `Hardware` open that cannot set up
+    /// the D3D path opens the file in software (WARN, [`Self::hw_fallback`]);
+    /// only a file that does not open in software either is an error.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn open_with(path: &Path, mode: DecodeMode) -> Result<Self, DecoderError> {
+        com_startup()?;
+        match mode {
+            DecodeMode::Software => {
+                let opened = Self::create(path, None)?;
+                Ok(Self::from_opened(path, mode, opened, None))
+            }
+            DecodeMode::Hardware => Self::open_hardware(path, HwDevice::Picked),
+        }
+    }
+
+    /// `Hardware` mode on a WARP device instead of the picked GPU: the
+    /// Windows CI test of a refused video device. `windows-latest`'s WARP
+    /// refuses the video device (`sp_gpu::VideoDevice::new_warp` is
+    /// DXGI_ERROR_UNSUPPORTED), so this open falls back to software at open
+    /// with that reason; it never reaches the D3D path.
+    #[doc(hidden)]
+    #[cfg_attr(test, mutants::skip)]
+    pub fn open_hardware_on_warp(path: &Path) -> Result<Self, DecoderError> {
+        com_startup()?;
+        Self::open_hardware(path, HwDevice::Warp)
+    }
+
+    fn open_hardware(path: &Path, device: HwDevice) -> Result<Self, DecoderError> {
+        hw_counters().requested();
+        let attempt = HwSession::new(device).and_then(|session| {
+            let opened = Self::create(path, Some(&session))
+                .map_err(|e| format!("the source reader refused the D3D11 device: {e}"))?;
+            Ok((opened, session))
+        });
+        match attempt {
+            Ok((opened, session)) => {
+                info!(
+                    file = %path.display(),
+                    adapter = session.adapter_name(),
+                    "mf_reader: opened on the D3D11 path (hardware decode requested)"
+                );
+                let adapter = session.adapter_name().to_string();
+                let mut reader =
+                    Self::from_opened(path, DecodeMode::Hardware, opened, Some(session));
+                reader.adapter = Some(adapter);
+                reader.gate.arm();
+                Ok(reader)
+            }
+            Err(reason) => {
+                let fallback = HwFallback {
+                    stage: FallbackStage::Open,
+                    reason,
+                };
+                warn!(
+                    file = %path.display(),
+                    fallback = %fallback.describe(),
+                    "mf_reader: hardware decode did not open; this file decodes in software"
+                );
+                let opened = Self::create(path, None)?;
+                hw_counters().fell_back(&fallback);
+                let mut reader = Self::from_opened(path, DecodeMode::Hardware, opened, None);
+                reader.fallback = Some(fallback);
+                Ok(reader)
+            }
+        }
+    }
+
+    fn from_opened(path: &Path, mode: DecodeMode, opened: Opened, hw: Option<HwSession>) -> Self {
+        Self {
+            reader: opened.reader,
+            path: path.to_path_buf(),
+            duration_ms: opened.duration_ms,
+            width: opened.width,
+            height: opened.height,
+            frame_rate_num: opened.frame_rate_num,
+            frame_rate_den: opened.frame_rate_den,
+            frame_rate_known: opened.frame_rate_known,
+            mode,
+            hw,
+            adapter: None,
+            paths: PathTracker::default(),
+            fallback: None,
+            gate: FallbackGate::default(),
+            resume: Resume::default(),
+            inject_failure: false,
+        }
+    }
+
+    /// A source reader on `path` with NV12 output, on `hw`'s device when
+    /// given (the D3D path), else in software (no device: the reader before
+    /// #223 S3b, unchanged).
+    fn create(path: &Path, hw: Option<&HwSession>) -> Result<Opened, DecoderError> {
         let wide_path: Vec<u16> = path
             .as_os_str()
             .encode_wide()
@@ -60,7 +201,7 @@ impl MediaFoundationVideoReader {
 
         let mut attrs: Option<IMFAttributes> = None;
         unsafe {
-            MFCreateAttributes(&mut attrs, 1)
+            MFCreateAttributes(&mut attrs, 2)
                 .map_err(|e| DecoderError::ComInit(format!("MFCreateAttributes: {e}")))?;
         }
         let attrs = attrs
@@ -71,6 +212,11 @@ impl MediaFoundationVideoReader {
                 .map_err(|e| {
                     DecoderError::ComInit(format!("SetUINT32 ENABLE_HARDWARE_TRANSFORMS: {e}"))
                 })?;
+        }
+        if let Some(hw) = hw {
+            unsafe { attrs.SetUnknown(&MF_SOURCE_READER_D3D_MANAGER, hw.manager()) }.map_err(
+                |e| DecoderError::ComInit(format!("SetUnknown SOURCE_READER_D3D_MANAGER: {e}")),
+            )?;
         }
 
         let reader: IMFSourceReader = unsafe {
@@ -93,18 +239,15 @@ impl MediaFoundationVideoReader {
                 .GetCurrentMediaType(VIDEO_STREAM)
                 .map_err(|e| DecoderError::ReadSample(format!("GetCurrentMediaType video: {e}")))?
         };
-        let (width, height) = unsafe {
-            let size = negotiated_video.GetUINT64(&MF_MT_FRAME_SIZE).unwrap_or(0);
-            ((size >> 32) as u32, size as u32)
-        };
-        let (frame_rate_num, frame_rate_den) = unsafe {
+        let (width, height) = frame_size(&negotiated_video);
+        let (frame_rate_num, frame_rate_den, frame_rate_known) = unsafe {
             match negotiated_video.GetUINT64(&MF_MT_FRAME_RATE) {
-                Ok(packed) => ((packed >> 32) as u32, packed as u32),
+                Ok(packed) => ((packed >> 32) as u32, packed as u32, true),
                 Err(e) => {
                     tracing::warn!(
                         "MF_MT_FRAME_RATE unavailable: {e}; falling back to 30000/1001 (29.97 fps)"
                     );
-                    (30000, 1001)
+                    (30000, 1001, false)
                 }
             }
         };
@@ -118,14 +261,76 @@ impl MediaFoundationVideoReader {
             }
         };
 
-        Ok(Self {
+        Ok(Opened {
             reader,
             duration_ms,
             width,
             height,
             frame_rate_num,
             frame_rate_den,
+            frame_rate_known,
         })
+    }
+
+    /// The codec the file's video stream is compressed with, as the native
+    /// media type's subtype text (`AV01`, `VP90`, `H264`, `HEVC`;
+    /// [`crate::subtype::subtype_name`]). `None` when MF does not answer.
+    /// The decode bench reports it (#223 S0), so a measured sample is known to
+    /// be the codec it is named after.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn codec(&self) -> Option<String> {
+        let native: IMFMediaType =
+            unsafe { self.reader.GetNativeMediaType(VIDEO_STREAM, 0) }.ok()?;
+        let guid = unsafe { native.GetGUID(&MF_MT_SUBTYPE) }.ok()?;
+        Some(crate::subtype::subtype_name(
+            guid.data1, guid.data2, guid.data3, guid.data4,
+        ))
+    }
+
+    /// Whether [`VideoStream::frame_rate`] is the stream's own rate, not the
+    /// 29.97 fps fallback `open` takes when MF reports none. The decode bench
+    /// (#223 S0) judges D2's budget only against a known rate.
+    pub fn frame_rate_known(&self) -> bool {
+        self.frame_rate_known
+    }
+
+    /// What the caller asked for (#223 S3b).
+    pub fn decode_mode(&self) -> DecodeMode {
+        self.mode
+    }
+
+    /// The path the last picture handed over really came out of (#223 S3b):
+    /// `Hardware` = a DXGI surface from the GPU decoder. `None` before the
+    /// first picture.
+    pub fn decode_path(&self) -> Option<DecodePath> {
+        self.paths.last()
+    }
+
+    /// How often a picture's path differed from the one before it
+    /// (`PathTracker::changes`): 0 = every picture handed over so far came
+    /// out of one path.
+    pub fn path_changes(&self) -> u32 {
+        self.paths.changes()
+    }
+
+    /// The adapter the D3D path opened on, if it did.
+    pub fn hw_adapter(&self) -> Option<&str> {
+        self.adapter.as_deref()
+    }
+
+    /// Why this file left the hardware path, if it did.
+    pub fn hw_fallback(&self) -> Option<&HwFallback> {
+        self.fallback.as_ref()
+    }
+
+    /// Make the next read fail as a decode error on the D3D path would, so
+    /// the reader reopens the file in software once, even when it opened in
+    /// software: the only way CI (no GPU) runs the mid-stream fall back.
+    /// For tests, not production.
+    #[doc(hidden)]
+    pub fn fail_next_read_for_test(&mut self) {
+        self.inject_failure = true;
+        self.gate.arm();
     }
 
     fn make_video_output_type() -> Result<IMFMediaType, DecoderError> {
@@ -163,9 +368,9 @@ impl MediaFoundationVideoReader {
             // Fill a RECYCLED buffer (capacity >= len, cleared) via
             // `extend_from_slice` into retained capacity — no demand-zero page
             // fault after the first frame of a resolution (#203 2b). The
-            // SDK-clocked path wraps this Vec in `SharedFrame::new` at
-            // `submit_nv12` and the paced path in `to_paced_frame`, so its
-            // last-owner drop returns the allocation to `frame_pool` for reuse.
+            // paced path wraps this Vec in `to_paced_frame` (the only path
+            // since #221 lane 3), so its last-owner drop returns the
+            // allocation to `frame_pool` for reuse.
             // #207: FALLIBLE — a host OOM (out of commit) returns a typed
             // `FrameAlloc` error the pipeline maps to a dropped frame instead of
             // aborting the whole process (`handle_alloc_error`, the #156 class).
@@ -201,10 +406,7 @@ impl MediaFoundationVideoReader {
                 .GetCurrentMediaType(VIDEO_STREAM)
                 .map_err(|e| DecoderError::ReadSample(e.to_string()))?
         };
-        let (width, height) = unsafe {
-            let size = media_type.GetUINT64(&MF_MT_FRAME_SIZE).unwrap_or(0);
-            ((size >> 32) as u32, size as u32)
-        };
+        let (width, height) = frame_size(&media_type);
         let stride = unsafe {
             media_type
                 .GetUINT32(&MF_MT_DEFAULT_STRIDE)
@@ -214,14 +416,175 @@ impl MediaFoundationVideoReader {
 
         Ok((nv12, width, height, stride))
     }
-}
 
-impl MediaStream for MediaFoundationVideoReader {
-    fn duration_ms(&self) -> u64 {
-        self.duration_ms
+    /// The next sample and its timestamp (100 ns), `None` at the end.
+    fn read_sample(&mut self) -> Result<Option<(IMFSample, i64)>, DecoderError> {
+        // When hardware transforms are enabled, `ReadSample` is permitted to
+        // return `S_OK` with a null sample while the decoder is still
+        // draining pre-roll frames — the caller must keep calling until a
+        // sample comes out or the end-of-stream flag is set. Cap the retry
+        // count so a broken source can't spin forever.
+        const MAX_NULL_RETRIES: usize = 64;
+
+        let mut null_retries = 0_usize;
+        loop {
+            let mut flags: u32 = 0;
+            let mut timestamp_100ns: i64 = 0;
+            let mut actual_stream_index: u32 = 0;
+            let mut sample: Option<IMFSample> = None;
+
+            unsafe {
+                self.reader
+                    .ReadSample(
+                        VIDEO_STREAM,
+                        0,
+                        Some(&mut actual_stream_index as *mut _),
+                        Some(&mut flags as *mut _),
+                        Some(&mut timestamp_100ns as *mut _),
+                        Some(&mut sample as *mut _),
+                    )
+                    .map_err(|e| DecoderError::ReadSample(e.to_string()))?;
+            }
+
+            if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                return Ok(None);
+            }
+
+            if let Some(s) = sample {
+                return Ok(Some((s, timestamp_100ns)));
+            }
+
+            null_retries += 1;
+            if null_retries >= MAX_NULL_RETRIES {
+                return Err(DecoderError::ReadSample(format!(
+                    "ReadSample returned null without EOS {MAX_NULL_RETRIES} times"
+                )));
+            }
+        }
     }
 
-    fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
+    /// The next decoded picture the caller does not have yet, from a DXGI
+    /// surface on the D3D path or from a system-memory buffer (software).
+    /// After a software reopen, the pictures `Resume` drops are dropped
+    /// before any readback (each still costs its decode).
+    fn read_picture(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
+        let (sample, timestamp_ms) = loop {
+            let Some((sample, timestamp_100ns)) = self.read_sample()? else {
+                return Ok(None);
+            };
+            let timestamp_ms = (timestamp_100ns.max(0) / 10_000) as u64;
+            if !self.resume.skips(timestamp_ms) {
+                break (sample, timestamp_ms);
+            }
+        };
+        let surface = if self.hw.is_some() {
+            DxgiSurface::of(&sample)?
+        } else {
+            None
+        };
+        let (data, width, height, stride, path) = match surface {
+            Some(surface) => {
+                let media_type: IMFMediaType = unsafe {
+                    self.reader
+                        .GetCurrentMediaType(VIDEO_STREAM)
+                        .map_err(|e| DecoderError::ReadSample(e.to_string()))?
+                };
+                let (width, height) = frame_size(&media_type);
+                let picture = surface.read(width, height)?;
+                (picture.data, width, height, picture.stride, picture.path)
+            }
+            None => {
+                let buffer: IMFMediaBuffer = unsafe {
+                    sample
+                        .ConvertToContiguousBuffer()
+                        .map_err(|e| DecoderError::BufferLock(e.to_string()))?
+                };
+                let (data, width, height, stride) = Self::lock_video_buffer(&buffer, &self.reader)?;
+                (data, width, height, stride, DecodePath::of_picture(None))
+            }
+        };
+        self.observe(path);
+
+        if timestamp_ms > self.duration_ms {
+            self.duration_ms = timestamp_ms;
+        }
+
+        Ok(Some(DecodedVideoFrame {
+            data,
+            width,
+            height,
+            stride,
+            timestamp_ms,
+            pixel_format: PixelFormat::Nv12,
+        }))
+    }
+
+    /// Record the path of a picture (`PathTracker`): the first one on the
+    /// D3D path, and any later change of path on it, is counted and logged,
+    /// so a silent software decode is seen.
+    fn observe(&mut self, path: DecodePath) {
+        let note = self.paths.observe(path, self.hw.is_some());
+        let file = self.path.display();
+        let adapter = self.adapter.as_deref().unwrap_or("?");
+        match (note, path) {
+            (PathNote::Nothing, _) => {}
+            (PathNote::First, DecodePath::Hardware) => {
+                hw_counters().first_picture(path);
+                info!(
+                    file = %file,
+                    adapter,
+                    "mf_reader: hardware decode active (decoder surfaces, D3D11_BIND_DECODER)"
+                );
+            }
+            (PathNote::First, DecodePath::Software) => {
+                hw_counters().first_picture(path);
+                warn!(
+                    file = %file,
+                    adapter,
+                    "mf_reader: the D3D11 path is set up, but Media Foundation decodes this file in software"
+                );
+            }
+            (PathNote::Changed { from }, _) => {
+                hw_counters().path_changed();
+                warn!(
+                    file = %file,
+                    adapter,
+                    from = from.as_str(),
+                    to = path.as_str(),
+                    "mf_reader: the decode path changed mid-file with no error"
+                );
+            }
+        }
+    }
+
+    /// Reopen the file in software after `error` on the D3D path, where the
+    /// last picture handed over was (#223 S3b, once per file).
+    fn reopen_in_software(&mut self, error: &DecoderError) -> Result<(), DecoderError> {
+        let fallback = HwFallback {
+            stage: FallbackStage::MidStream,
+            reason: error.to_string(),
+        };
+        warn!(
+            file = %self.path.display(),
+            fallback = %fallback.describe(),
+            "mf_reader: a decode error on the D3D11 path; this file goes on in software"
+        );
+        let opened = Self::create(&self.path, None)?;
+        hw_counters().fell_back(&fallback);
+        self.fallback = Some(fallback);
+        self.reader = opened.reader;
+        self.hw = None;
+        self.width = opened.width;
+        self.height = opened.height;
+        self.duration_ms = self.duration_ms.max(opened.duration_ms);
+        if let Some(position_ms) = self.resume.reopen() {
+            self.set_position(position_ms)?;
+        }
+        Ok(())
+    }
+
+    /// `IMFSourceReader::SetCurrentPosition` to `position_ms`.
+    fn set_position(&mut self, position_ms: u64) -> Result<(), DecoderError> {
         // MSDN IMFSourceReader::SetCurrentPosition:
         //   `guidtimeformat` must point to a GUID that identifies the time
         //   format. Use a pointer to GUID_NULL for 100-ns units — the call
@@ -271,73 +634,59 @@ impl MediaStream for MediaFoundationVideoReader {
     }
 }
 
+/// `CoInitializeEx` (STA) and `MFStartup` on the calling thread.
+pub(super) fn com_startup() -> Result<(), DecoderError> {
+    unsafe {
+        let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if hr.is_err() {
+            return Err(DecoderError::ComInit(format!("CoInitializeEx: {hr}")));
+        }
+        MFStartup(MF_API_VERSION, MFSTARTUP_NOSOCKET)
+            .map_err(|e| DecoderError::ComInit(format!("MFStartup: {e}")))?;
+    }
+    Ok(())
+}
+
+/// A media type's `MF_MT_FRAME_SIZE` (0×0 when it has none).
+fn frame_size(media_type: &IMFMediaType) -> (u32, u32) {
+    let size = unsafe { media_type.GetUINT64(&MF_MT_FRAME_SIZE) }.unwrap_or(0);
+    ((size >> 32) as u32, size as u32)
+}
+
+impl MediaStream for MediaFoundationVideoReader {
+    fn duration_ms(&self) -> u64 {
+        self.duration_ms
+    }
+
+    fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
+        self.resume.on_seek(position_ms);
+        self.set_position(position_ms)
+    }
+}
+
 impl VideoStream for MediaFoundationVideoReader {
     #[cfg_attr(test, mutants::skip)]
     fn next_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
-        // When hardware transforms are enabled, `ReadSample` is permitted to
-        // return `S_OK` with a null sample while the decoder is still
-        // draining pre-roll frames — the caller must keep calling until a
-        // sample comes out or the end-of-stream flag is set. Cap the retry
-        // count so a broken source can't spin forever.
-        const MAX_NULL_RETRIES: usize = 64;
-
-        let mut null_retries = 0_usize;
-        let (sample, timestamp_100ns) = loop {
-            let mut flags: u32 = 0;
-            let mut timestamp_100ns: i64 = 0;
-            let mut actual_stream_index: u32 = 0;
-            let mut sample: Option<IMFSample> = None;
-
-            unsafe {
-                self.reader
-                    .ReadSample(
-                        VIDEO_STREAM,
-                        0,
-                        Some(&mut actual_stream_index as *mut _),
-                        Some(&mut flags as *mut _),
-                        Some(&mut timestamp_100ns as *mut _),
-                        Some(&mut sample as *mut _),
-                    )
-                    .map_err(|e| DecoderError::ReadSample(e.to_string()))?;
+        loop {
+            let read = if std::mem::take(&mut self.inject_failure) {
+                Err(DecoderError::ReadSample(
+                    "a decode failure injected by a test".into(),
+                ))
+            } else {
+                self.read_picture()
+            };
+            match read {
+                Ok(Some(frame)) => {
+                    self.resume.delivered(frame.timestamp_ms);
+                    return Ok(Some(frame));
+                }
+                Ok(None) => return Ok(None),
+                Err(e) => match self.gate.on_error(&e) {
+                    OnDecodeError::ReopenSoftware => self.reopen_in_software(&e)?,
+                    OnDecodeError::Propagate => return Err(e),
+                },
             }
-
-            if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
-                return Ok(None);
-            }
-
-            if let Some(s) = sample {
-                break (s, timestamp_100ns);
-            }
-
-            null_retries += 1;
-            if null_retries >= MAX_NULL_RETRIES {
-                return Err(DecoderError::ReadSample(format!(
-                    "ReadSample returned null without EOS {MAX_NULL_RETRIES} times"
-                )));
-            }
-        };
-
-        let buffer: IMFMediaBuffer = unsafe {
-            sample
-                .ConvertToContiguousBuffer()
-                .map_err(|e| DecoderError::BufferLock(e.to_string()))?
-        };
-
-        let (nv12_data, width, height, stride) = Self::lock_video_buffer(&buffer, &self.reader)?;
-        let timestamp_ms = (timestamp_100ns.max(0) / 10_000) as u64;
-
-        if timestamp_ms > self.duration_ms {
-            self.duration_ms = timestamp_ms;
         }
-
-        Ok(Some(DecodedVideoFrame {
-            data: nv12_data,
-            width,
-            height,
-            stride,
-            timestamp_ms,
-            pixel_format: PixelFormat::Nv12,
-        }))
     }
 
     fn width(&self) -> u32 {

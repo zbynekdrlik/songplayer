@@ -5,9 +5,10 @@
 use serde::{Deserialize, Serialize};
 
 /// Boundary-paced emission telemetry (#147), surfaced on
-/// `GET /api/v1/ndi/health` as `pacing`. `enabled=false` + all-zero is what an
-/// SDK-clocked (flag-OFF) or idle pipeline reports; the `Pacer`
-/// (`playback/pacer.rs`) fills real values on the paced path.
+/// `GET /api/v1/ndi/health` as `pacing`. The `Pacer` (`playback/pacer.rs`)
+/// fills the scheduling values and the paced output's consumer the
+/// output-side ones (`submit_handoff::merge_pacing_stats`); `enabled=false` +
+/// all-zero is the default before the first heartbeat.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct PacingStats {
     /// Whether boundary-paced emission is active for this pipeline.
@@ -50,8 +51,6 @@ pub struct PacingStats {
     /// re-anchor bounds it (the same signal `iter_p99_us` was, now measured where
     /// the decode actually happens).
     pub prep_p99_us: u64,
-    pub submit_call_us_max: u64,
-    pub submit_call_us_p99: u64,
     /// #148: audio − picture media offset (ms) at the last paced boundary, before
     /// its correction; + = audio ahead.
     pub av_align_err_ms: f64,
@@ -118,4 +117,9 @@ pub struct PacingStats {
     /// #147: boundaries the submit consumer serviced itself (held picture +
     /// silence) between two scopes, cumulative.
     pub consumer_fill_pairs: u64,
+    /// #150: seeks, each counted when its first frame at the new position
+    /// went out, cumulative. The genlock lock window (`lock_state.rs`)
+    /// starts over when it moves, so a seek never reads DEGRADED off the
+    /// slots before it, nor off its own refill.
+    pub seeks: u64,
 }

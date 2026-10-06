@@ -38,6 +38,12 @@ import shutil
 import sys
 import tempfile
 
+# #207: the stems are published with a POSIX-semantics rename. On Windows
+# `os.replace` (MoveFileExW) fails with WinError 5 while SongPlayer holds the
+# old stem open, which it does whenever the song is loaded. stdlib only;
+# shipped next to this script by the Rust stem worker.
+import win_replace as wr
+
 # The chosen karaoke separator (MIT-licensed, best-measured 8 GB two-stem).
 KARAOKE_STEM_MODEL = "vocals_mel_band_roformer.ckpt"
 
@@ -177,11 +183,13 @@ class _StreamingStitchWriter:
     memory (`retained_samples`, peak `max_retained_samples`).
 
     Published ATOMICALLY like `_write_array_48k_stereo`: the FLAC is written to
-    a sibling `.tmp` and `os.replace`d into place only after ALL
-    `n_segments` were added. Any failure (an exception inside the `with`
-    block, or too few segments) removes the `.tmp` and leaves the final path
-    untouched — the live playback reader keys on the sidecar's existence, and a
-    torn stem there would corrupt the wall's NDI audio.
+    a sibling `.tmp` and renamed into place with `win_replace.replace_file`
+    (#207: the POSIX rename succeeds while SongPlayer holds the old stem open)
+    only after ALL `n_segments` were added. Any failure (an exception inside
+    the `with` block, too few segments, or a refused rename) removes the
+    `.tmp` and leaves the final path untouched — the live playback reader
+    keys on the sidecar's existence, and a torn stem there would corrupt the
+    wall's NDI audio.
 
     Use as a context manager::
 
@@ -336,7 +344,8 @@ class _StreamingStitchWriter:
             self._flush_to(end)
 
     def close(self):
-        """Publish: requires every declared segment; atomic `os.replace`."""
+        """Publish: requires every declared segment; atomic POSIX rename
+        (`win_replace.replace_file`, #207)."""
         if self._added != self.n_segments:
             self.abort()
             raise RuntimeError(
@@ -344,7 +353,7 @@ class _StreamingStitchWriter:
             )
         try:
             self._file.close()
-            os.replace(self.tmp_path, self.out_path)
+            wr.replace_file(self.tmp_path, self.out_path)
         except BaseException:
             # A failed final flush/close (disk full) or replace: retry the
             # close so the handle is released (Windows keeps an open file
@@ -540,10 +549,12 @@ def _load_48k_stereo(src_path):
 
 def _write_array_48k_stereo(out_array, out_path):
     """Write an (n, 2) 48 kHz array to a FLAC ATOMICALLY (#14): write a sibling
-    `.tmp` then `os.replace` it into place (atomic on the same filesystem, POSIX
-    + Windows), so a killed subprocess never leaves a HALF-WRITTEN FLAC at the
-    final sidecar path — the live playback reader keys on the sidecar's
-    existence, and a torn file there would corrupt the wall's NDI audio.
+    `.tmp` then rename it into place with `win_replace.replace_file` (atomic on
+    the same filesystem; a POSIX rename on Windows, #207, so it also succeeds
+    while SongPlayer holds the old stem open), so a killed subprocess never
+    leaves a HALF-WRITTEN FLAC at the final sidecar path — the live playback
+    reader keys on the sidecar's existence, and a torn file there would
+    corrupt the wall's NDI audio.
 
     #207: whole-array writer, kept as the REFERENCE output format the tests
     compare `_StreamingStitchWriter` against (which publishes the same way);
@@ -556,7 +567,7 @@ def _write_array_48k_stereo(out_array, out_path):
     try:
         # format= is REQUIRED: the atomic temp path ends in ".tmp".
         sf.write(tmp_path, out, OUTPUT_SAMPLE_RATE, format="FLAC", subtype="PCM_24")
-        os.replace(tmp_path, out_path)
+        wr.replace_file(tmp_path, out_path)
     finally:
         if os.path.exists(tmp_path):
             with contextlib.suppress(OSError):
@@ -586,6 +597,8 @@ def _separate_one_segment(
     for arr, path in ((v, segv_path), (i, segi_path)):
         tmp = path + ".tmp"
         sf.write(tmp, arr, OUTPUT_SAMPLE_RATE, format="WAV", subtype="FLOAT")
+        # Work-dir scratch that no reader opens: a plain os.replace is enough
+        # here. Only the published stems need the POSIX rename (#207).
         os.replace(tmp, path)
 
     for f in os.listdir(stem_dir):

@@ -4,24 +4,24 @@
 //! picture + silence — and the next pacer continues right after it.
 //!
 //! The pipeline is driven single-threaded and deterministically: one handoff,
-//! the consumer on a twin of the owner's `MockNdiBackend` sender, and a pacer,
-//! all on ONE settable clock; `drain` runs the consumer until it waits (in
-//! production it runs concurrently on its own thread). The window between two
-//! scopes (the old producer's teardown + the next scope's setup) is modelled
-//! as slots nobody feeds (`Rig::between_scopes`).
+//! the consumer delivering to a recording output ([`Recorder`], #221 lane 3: a
+//! playlist has no NDI sender; production delivers to the program bus), and a
+//! pacer, all on ONE settable clock; `drain` runs the consumer until it waits
+//! (in production it runs concurrently on its own thread). The window between
+//! two scopes (the old producer's teardown + the next scope's setup) is
+//! modelled as slots nobody feeds (`Rig::between_scopes`).
 //! Song frames are 8×2 (A) / 12×2 (B) and the standby black 4×2, so the
-//! `send_video_async(…,WxH,…)` call strings name each boundary's picture.
+//! recorded `WxH` names each boundary's picture.
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::pacer::{PacedFrame, PacedSink, Pacer, ServiceOutcome, Standby, StandbyBlack};
 use crate::playback::submit_handoff::{SUBMIT_HANDOFF_BOUND, SubmitCounters, SubmitJob};
-use crate::playback::submitter::FrameSubmitter;
 use crate::playback::wallclock::{SettableClock, WallClock};
-use sp_ndi::test_util::MockNdiBackend;
-use sp_ndi::{AudioFrame, NdiSender};
+use sp_core::genlock::floor_boundary_100ns;
+use sp_ndi::AudioFrame;
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// The k-th exact-rational grid boundary at 30 fps, in 100-ns units.
@@ -32,10 +32,10 @@ fn b(k: i64) -> i64 {
 /// A quarter of the 30 fps slot: a detached boundary is filled this late.
 const GRACE: i64 = 83_333;
 
-const AUDIO: &str = "send_audio(42,sr=48000,ch=2,spc=1600)";
-const BLACK: &str = "send_video_async(42,NV12,4x2,stride=4,30/1)";
-const SONG_A: &str = "send_video_async(42,NV12,8x2,stride=8,30/1)";
-const SONG_B: &str = "send_video_async(42,NV12,12x2,stride=12,30/1)";
+const AUDIO: &str = "audio(ch=2,spc=1600)";
+const BLACK: &str = "4x2";
+const SONG_A: &str = "8x2";
+const SONG_B: &str = "12x2";
 
 /// A `w`×2 song frame at `pts_ns` with one boundary of stereo audio.
 fn frame(w: u32, pts_ns: i64) -> PacedFrame {
@@ -84,9 +84,63 @@ fn job(stamp: i64, w: u32, channels: Option<u32>) -> SubmitJob {
     }
 }
 
+/// What the consumer delivered, in order, with the playlist it delivered for:
+/// the tests' [`BoundaryOut`].
+#[derive(Clone, Default)]
+struct Recorder(Arc<Mutex<Vec<(i64, SubmitJob)>>>);
+
+impl BoundaryOut for Recorder {
+    fn deliver(&mut self, playlist_id: i64, job: SubmitJob) {
+        self.0.lock().unwrap().push((playlist_id, job));
+    }
+}
+
+impl Recorder {
+    fn jobs(&self) -> Vec<(i64, SubmitJob)> {
+        self.0.lock().unwrap().clone()
+    }
+
+    /// Every delivered pair: its audio block(s) (`audio(ch=C,spc=N)`; a block
+    /// with no channels carries nothing), then its picture (`WxH`).
+    fn sends(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (_, job) in self.jobs() {
+            for a in job.audio.iter().filter(|a| a.channels > 0) {
+                let spc = a.data.len() / a.channels as usize;
+                out.push(format!("audio(ch={},spc={spc})", a.channels));
+            }
+            out.push(format!("{}x{}", job.width, job.height));
+        }
+        out
+    }
+
+    fn video_timecodes(&self) -> Vec<i64> {
+        self.jobs().iter().map(|(_, j)| j.video_tc_100ns).collect()
+    }
+
+    fn audio_timecodes(&self) -> Vec<i64> {
+        self.jobs().iter().map(|(_, j)| j.audio_tc_100ns).collect()
+    }
+
+    /// The last delivered picture's allocation: `(address, length)`.
+    fn last_picture(&self) -> Option<(usize, usize)> {
+        self.jobs()
+            .last()
+            .map(|(_, j)| (j.video.as_ptr() as usize, j.video.len()))
+    }
+
+    /// The last delivered pair's first audio block (empty with none).
+    fn last_audio(&self) -> Vec<f32> {
+        self.jobs()
+            .last()
+            .and_then(|(_, j)| j.audio.first().map(|a| a.data.clone()))
+            .unwrap_or_default()
+    }
+}
+
 /// Run `consumer` until it waits at wall time `now`: every queued job
-/// submitted, every due fill done.
-fn drain(handoff: &SharedHandoff, consumer: &mut PacedConsumer<MockNdiBackend>, now: i64) {
+/// delivered, every due fill done.
+fn drain(handoff: &SharedHandoff, consumer: &mut PacedConsumer<Recorder>, now: i64) {
     for _ in 0..64 {
         let step = handoff.step_now(now);
         if matches!(step, ConsumerStep::Wait(_) | ConsumerStep::Exit) {
@@ -99,12 +153,9 @@ fn drain(handoff: &SharedHandoff, consumer: &mut PacedConsumer<MockNdiBackend>, 
 
 /// The paced output as the pipeline runs it (see the module doc).
 struct Rig {
-    backend: Arc<MockNdiBackend>,
-    /// The owning sender, alive past every check: dropping it appends
-    /// `send_destroy` (#209 gotcha).
-    _owner: NdiSender<MockNdiBackend>,
+    out: Recorder,
     handoff: Arc<SharedHandoff>,
-    consumer: PacedConsumer<MockNdiBackend>,
+    consumer: PacedConsumer<Recorder>,
     pacer: Pacer,
     clk: SettableClock,
     black: SharedFrame,
@@ -112,12 +163,8 @@ struct Rig {
 
 impl Rig {
     fn new() -> Self {
-        let backend = Arc::new(MockNdiBackend::new());
-        let owner = NdiSender::new_with_clocking(backend.clone(), "PO", false, false).unwrap();
         let (pacer_wall, clk) = WallClock::settable(0);
         let consumer_wall = WallClock::new(Box::new(clk.clone()));
-        let mut submitter = FrameSubmitter::new(owner.twin(), 30, 1);
-        submitter.set_paced(true);
         let black = SharedFrame::new(vec![16u8; 4 * 2 * 3 / 2]);
         let picture = Picture {
             width: 4,
@@ -125,13 +172,13 @@ impl Rig {
             stride: 4,
             video: black.clone(),
         };
-        let consumer = PacedConsumer::new(submitter, 7, consumer_wall, picture);
+        let out = Recorder::default();
+        let consumer = PacedConsumer::new(out.clone(), 7, consumer_wall, picture);
         let mut pacer = Pacer::with_wallclock(30, true, pacer_wall);
         clk.set(0);
         pacer.anchor(); // the first boundary is b(1)
         Self {
-            backend,
-            _owner: owner,
+            out,
             handoff: Arc::new(SharedHandoff::new(SUBMIT_HANDOFF_BOUND)),
             consumer,
             pacer,
@@ -154,14 +201,9 @@ impl Rig {
         }
     }
 
-    /// Every audio / video send after the sender's creation (the consumer's
-    /// connection-count polls are left out).
+    /// Every delivered audio block and picture, in order.
     fn sends(&self) -> Vec<String> {
-        self.backend.calls()[1..]
-            .iter()
-            .filter(|c| !c.starts_with("send_get_no_connections"))
-            .cloned()
-            .collect()
+        self.out.sends()
     }
 
     fn counters(&self) -> SubmitCounters {
@@ -193,17 +235,17 @@ fn a_song_change_gap_and_a_slow_decoder_open_keep_every_stamp_one_slot_apart() {
             rig.drain();
         }
     }
-    let last_a = rig.backend.last_async_video_slice();
+    let last_a = rig.out.last_picture();
     // The old producer's teardown + the next scope's setup take 3 slots:
     // nobody feeds b(4)..=b(6).
     for k in 4..=6 {
         rig.between_scopes(k, k);
         assert_eq!(
-            rig.backend.last_async_video_slice(),
+            rig.out.last_picture(),
             last_a,
             "b({k}) holds song A's last picture (same buffer, no copy)"
         );
-        let silence = rig.backend.last_audio_planar();
+        let silence = rig.out.last_audio();
         assert_eq!(silence.len(), 3200, "b({k}): one stereo block");
         assert!(silence.iter().all(|&s| s == 0.0), "b({k}): silence");
     }
@@ -246,7 +288,7 @@ fn a_song_change_gap_and_a_slow_decoder_open_keep_every_stamp_one_slot_apart() {
         }
     }
     assert_eq!(
-        rig.backend.video_timecodes(),
+        rig.out.video_timecodes(),
         (1..=12).map(b).collect::<Vec<_>>(),
         "Δ = exactly one slot across the song change"
     );
@@ -255,7 +297,7 @@ fn a_song_change_gap_and_a_slow_decoder_open_keep_every_stamp_one_slot_apart() {
     want.extend(pairs(SONG_B, 3));
     assert_eq!(rig.sends(), want, "one audio + video pair per boundary");
     // A fill's audio block is stamped on its boundary, like its picture.
-    assert_eq!(rig.backend.audio_timecodes()[3..6], [b(4), b(5), b(6)]);
+    assert_eq!(rig.out.audio_timecodes()[3..6], [b(4), b(5), b(6)]);
     let c = rig.counters();
     assert_eq!(c.consumer_fill_pairs, 3);
     assert_eq!(c.song_change_unserviced_slots, 0);
@@ -297,11 +339,11 @@ fn pause_resume_stays_contiguous_and_a_song_change_while_paused_holds_the_frozen
             "a pacer owns b(1..=7)"
         );
     }
-    let frozen = rig.backend.last_async_video_slice();
+    let frozen = rig.out.last_picture();
     // Play B arrives while paused: 3 slots between the scopes.
     rig.between_scopes(8, 10);
     assert_eq!(
-        rig.backend.last_async_video_slice(),
+        rig.out.last_picture(),
         frozen,
         "the fills hold the frozen picture"
     );
@@ -328,7 +370,7 @@ fn pause_resume_stays_contiguous_and_a_song_change_while_paused_holds_the_frozen
         }
     }
     assert_eq!(
-        rig.backend.video_timecodes(),
+        rig.out.video_timecodes(),
         (1..=12).map(b).collect::<Vec<_>>(),
         "play → pause → play → (paused) next song: Δ = one slot throughout"
     );
@@ -362,7 +404,7 @@ fn idle_to_play_across_a_slow_open_holds_the_idle_black_and_stays_contiguous() {
     }
     rig.between_scopes(4, 6);
     assert_eq!(
-        rig.backend.last_async_video_slice().map(|(ptr, _)| ptr),
+        rig.out.last_picture().map(|(ptr, _)| ptr),
         Some(rig.black.as_ptr() as usize),
         "the fills hold the idle black itself (a refcount bump)"
     );
@@ -388,7 +430,7 @@ fn idle_to_play_across_a_slow_open_holds_the_idle_black_and_stays_contiguous() {
         }
     }
     assert_eq!(
-        rig.backend.video_timecodes(),
+        rig.out.video_timecodes(),
         (1..=8).map(b).collect::<Vec<_>>(),
         "idle → play: Δ = one slot"
     );
@@ -414,7 +456,7 @@ fn a_consumer_starved_past_eight_slots_resyncs_and_counts_the_hole_honestly() {
     // The consumer is not scheduled for 12 slots: b(2) is 11 behind b(13).
     rig.clk.set(b(13) + GRACE);
     rig.drain();
-    assert_eq!(rig.backend.video_timecodes(), vec![b(1), b(13)]);
+    assert_eq!(rig.out.video_timecodes(), vec![b(1), b(13)]);
     let c = rig.counters();
     assert_eq!(c.consumer_fill_pairs, 1);
     assert_eq!(
@@ -449,7 +491,7 @@ fn a_scope_attaching_while_the_last_jobs_are_still_queued_continues_after_them()
     );
     h.offer(job(b(5), 8, Some(2)));
     rig.drain();
-    assert_eq!(rig.backend.video_timecodes(), vec![b(3), b(4), b(5)]);
+    assert_eq!(rig.out.video_timecodes(), vec![b(3), b(4), b(5)]);
     let c = rig.counters();
     assert_eq!(c.dropped, 0);
     assert_eq!(c.song_change_unserviced_slots, 0);
@@ -472,7 +514,7 @@ fn the_old_pacers_queued_tail_does_not_hide_a_hole_before_the_next_pacers_first_
     rig.drain();
     h.offer(job(b(15), 8, Some(2)));
     rig.drain();
-    assert_eq!(rig.backend.video_timecodes(), vec![b(3), b(4), b(15)]);
+    assert_eq!(rig.out.video_timecodes(), vec![b(3), b(4), b(15)]);
     assert_eq!(rig.counters().song_change_unserviced_slots, 10);
 }
 
@@ -487,7 +529,7 @@ fn an_attached_pacer_owns_the_grid_even_when_it_is_late() {
     rig.clk.set(b(9));
     assert!(matches!(h.step_now(b(9)), ConsumerStep::Wait(None)));
     rig.drain();
-    assert_eq!(rig.backend.video_timecodes(), vec![b(1)]);
+    assert_eq!(rig.out.video_timecodes(), vec![b(1)]);
     drop(feed);
     // Detached: the fill is due a grace after the next boundary.
     assert!(matches!(
@@ -505,7 +547,7 @@ fn a_job_at_or_before_the_last_serviced_stamp_is_dropped_never_sent() {
     h.offer(job(b(3), 8, Some(2)));
     h.offer(job(b(2), 8, Some(2)));
     rig.drain();
-    assert_eq!(rig.backend.video_timecodes(), vec![b(3)]);
+    assert_eq!(rig.out.video_timecodes(), vec![b(3)]);
     assert_eq!(rig.counters().dropped, 2, "both stale jobs counted");
     assert_eq!(rig.counters().submitted, 1);
 }
@@ -529,7 +571,7 @@ fn stop_drains_the_queue_then_exits_without_filling() {
     );
     rig.drain();
     assert_eq!(
-        rig.backend.video_timecodes(),
+        rig.out.video_timecodes(),
         vec![b(1)],
         "the drained job went out"
     );
@@ -548,7 +590,7 @@ fn a_fill_follows_the_last_audio_layout_and_ignores_an_empty_one() {
     // A job with no audio keeps it too.
     h.offer(job(b(5), 8, None));
     rig.between_scopes(5, 6);
-    let mono = "send_audio(42,sr=48000,ch=1,spc=1600)";
+    let mono = "audio(ch=1,spc=1600)";
     assert_eq!(
         rig.sends(),
         vec![
@@ -557,38 +599,37 @@ fn a_fill_follows_the_last_audio_layout_and_ignores_an_empty_one() {
         "every fill after a mono song is a mono silent block"
     );
     assert_eq!(
-        rig.backend.video_timecodes(),
+        rig.out.video_timecodes(),
         (1..=6).map(b).collect::<Vec<_>>()
     );
 }
 
 #[test]
-fn the_consumer_polls_connections_on_its_first_submit_then_every_thirtieth() {
+fn the_consumer_counts_each_delivery_s_lateness_honestly() {
     let mut rig = Rig::new();
     let h = rig.handoff.clone();
-    rig.backend.set_connection_count(3);
-    // Each job is submitted 3 ms after its boundary.
-    rig.clk.set(b(1) + 30_000);
-    h.offer(job(b(1), 8, Some(2)));
-    rig.drain();
-    assert_eq!(h.snapshot().1, 3, "polled on the first submit");
-    rig.backend.set_connection_count(5);
-    for k in 2..=30 {
+    // Each job is delivered 3 ms after its boundary.
+    for k in 1..=31 {
         rig.clk.set(b(k) + 30_000);
         h.offer(job(b(k), 8, Some(2)));
         rig.drain();
     }
-    assert_eq!(h.snapshot().1, 3, "not polled on submits 2..=30");
-    rig.clk.set(b(31) + 30_000);
-    h.offer(job(b(31), 8, Some(2)));
-    rig.drain();
-    assert_eq!(h.snapshot().1, 5, "polled again on the 31st");
     let c = rig.counters();
     assert_eq!(c.submitted, 31);
     assert_eq!(c.late_frames, 31, "3 ms after the stamp is late (> 2 ms)");
     assert_eq!(c.max_late_us, 3_000);
     assert_eq!(c.last_submit_100ns, b(31) + 30_000);
-    assert_eq!(c.submit_p99_us(), 0, "the fixed clock measures no SDK cost");
+    assert_eq!(
+        c.submit_p99_us(),
+        0,
+        "the fixed clock measures no delivery cost"
+    );
+    let jobs = rig.out.jobs();
+    assert_eq!(jobs.len(), 31);
+    assert!(
+        jobs.iter().all(|(pid, _)| *pid == 7),
+        "every boundary is delivered as the consumer's playlist's"
+    );
 }
 
 #[test]
@@ -618,21 +659,22 @@ fn continue_grid_after_latches_the_boundary_right_after_the_last_serviced_stamp(
 }
 
 #[test]
-fn the_pipeline_submitter_spawns_one_paced_thread_and_joins_it_before_destroying_the_sender() {
-    let backend = Arc::new(MockNdiBackend::new());
-    let sender = NdiSender::new_with_clocking(backend.clone(), "PS", false, false).unwrap();
-    let mut submitter = FrameSubmitter::new(sender, 30, 1);
-    submitter.set_paced(true);
-    let first = submitter.paced_handoff(7, 4, 2);
-    let again = submitter.paced_handoff(7, 4, 2);
-    assert!(Arc::ptr_eq(&first, &again), "one paced thread per pipeline");
+fn the_pipeline_output_spawns_one_consumer_thread_and_joins_it_on_drop() {
+    let out = Recorder::default();
+    let mut output = PipelineOutput::new(7, out.clone());
+    let first = output.handoff(4, 2);
+    let again = output.handoff(4, 2);
+    assert!(
+        Arc::ptr_eq(&first, &again),
+        "one consumer thread per pipeline"
+    );
     let feed = PacedFeed::attach(&first);
     first.offer(job(b(1), 8, Some(2)));
     let deadline = Instant::now() + Duration::from_secs(10);
     while first.submitted() < 1 {
         assert!(
             Instant::now() < deadline,
-            "the paced thread never submitted"
+            "the consumer thread never delivered"
         );
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -642,40 +684,27 @@ fn the_pipeline_submitter_spawns_one_paced_thread_and_joins_it_before_destroying
     // Drop on a helper thread, so a hung join fails in bounded time.
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        drop(submitter);
+        drop(output);
         let _ = tx.send(());
     });
     rx.recv_timeout(Duration::from_secs(10))
-        .expect("dropping the submitter stops + joins the paced thread");
-    let calls = backend.calls();
-    assert!(calls.contains(&SONG_A.to_string()), "the job went out");
-    assert_eq!(
-        calls
-            .iter()
-            .filter(|c| c.starts_with("send_destroy"))
-            .count(),
-        1,
-        "the twin never destroys"
-    );
-    assert_eq!(
-        calls.last().map(String::as_str),
-        Some("send_destroy(42)"),
-        "the owning sender is destroyed LAST, after the paced thread flushed"
+        .expect("dropping the output stops + joins the consumer thread");
+    assert!(
+        out.sends().contains(&SONG_A.to_string()),
+        "the job was delivered"
     );
 }
 
 #[test]
-fn a_paced_thread_that_is_gone_is_respawned_by_the_next_scope() {
-    let backend = Arc::new(MockNdiBackend::new());
-    let sender = NdiSender::new_with_clocking(backend.clone(), "PR", false, false).unwrap();
-    let mut submitter = FrameSubmitter::new(sender, 30, 1);
-    submitter.set_paced(true);
-    let first = submitter.paced_handoff(7, 4, 2);
+fn a_consumer_thread_that_is_gone_is_respawned_by_the_next_scope() {
+    let out = Recorder::default();
+    let mut output = PipelineOutput::new(7, out.clone());
+    let first = output.handoff(4, 2);
     // The thread exits (stop here; a panic in production).
     first.stop();
     let deadline = Instant::now() + Duration::from_secs(10);
     let second = loop {
-        let h = submitter.paced_handoff(7, 4, 2);
+        let h = output.handoff(4, 2);
         if !Arc::ptr_eq(&h, &first) {
             break h;
         }
@@ -685,53 +714,41 @@ fn a_paced_thread_that_is_gone_is_respawned_by_the_next_scope() {
         );
         std::thread::sleep(Duration::from_millis(1));
     };
-    // The respawned thread submits.
+    // The respawned thread delivers.
     let feed = PacedFeed::attach(&second);
     second.offer(job(b(1), 8, Some(2)));
     while second.submitted() < 1 {
         assert!(
             Instant::now() < deadline,
-            "the respawned thread never submitted"
+            "the respawned thread never delivered"
         );
         std::thread::sleep(Duration::from_millis(1));
     }
     drop(feed);
     assert!(
-        Arc::ptr_eq(&second, &submitter.paced_handoff(7, 4, 2)),
+        Arc::ptr_eq(&second, &output.handoff(4, 2)),
         "a live thread is kept"
     );
     drop(first);
     drop(second);
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        drop(submitter);
+        drop(output);
         let _ = tx.send(());
     });
     rx.recv_timeout(Duration::from_secs(10))
-        .expect("dropping the submitter joins the respawned thread");
-    let calls = backend.calls();
-    assert!(calls.contains(&SONG_A.to_string()));
-    assert_eq!(
-        calls.last().map(String::as_str),
-        Some("send_destroy(42)"),
-        "one owner, destroyed last"
-    );
+        .expect("dropping the output joins the respawned thread");
+    assert!(out.sends().contains(&SONG_A.to_string()));
 }
 
 #[test]
-fn the_live_paced_thread_services_detached_boundaries_on_its_own() {
-    let backend = Arc::new(MockNdiBackend::new());
-    let sender = NdiSender::new_with_clocking(backend.clone(), "PL", false, false).unwrap();
-    let mut submitter = FrameSubmitter::new(sender, 30, 1);
-    submitter.set_paced(true);
-    let handoff = submitter.paced_handoff(9, 4, 2);
+fn the_live_consumer_thread_services_detached_boundaries_on_its_own() {
+    let out = Recorder::default();
+    let mut output = PipelineOutput::new(9, out.clone());
+    let handoff = output.handoff(4, 2);
     // One job on the current real boundary, then nobody feeds.
     let now = crate::playback::wallclock::utc_now_100ns();
-    handoff.offer(job(
-        sp_core::genlock::floor_boundary_100ns(now, 30),
-        8,
-        Some(2),
-    ));
+    handoff.offer(job(floor_boundary_100ns(now, 30), 8, Some(2)));
     let deadline = Instant::now() + Duration::from_secs(10);
     while handoff.submitted() < 4 {
         assert!(
@@ -742,19 +759,19 @@ fn the_live_paced_thread_services_detached_boundaries_on_its_own() {
     }
     // Real time on a shared runner: assert the shape, not the timing (the
     // exact contiguity is pinned by the deterministic tests above).
-    let stamps = backend.video_timecodes();
+    let stamps = out.video_timecodes();
     for pair in stamps.windows(2) {
         assert!(pair[1] > pair[0], "stamps only increase: {stamps:?}");
     }
     for s in &stamps {
         assert_eq!(
-            sp_core::genlock::floor_boundary_100ns(*s, 30),
+            floor_boundary_100ns(*s, 30),
             *s,
             "every fill is stamped exactly on a grid boundary"
         );
     }
     drop(handoff);
-    drop(submitter);
+    drop(output);
 }
 
 #[test]

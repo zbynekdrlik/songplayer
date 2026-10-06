@@ -27,23 +27,18 @@ impl PlaybackEngine {
         }
     }
 
-    /// Test-only (#221 L4a): put a pipeline on program the way the dark-wall
-    /// check expects a receiver on it (`ndi_health_expect`): its scene is on
-    /// program AND cg OBS was told to show it (`legacy_cg` on the engine's
-    /// program bus; a fresh bus when none is set yet).
+    /// Test-only: put a pipeline on program (its scene on program). #221 B4
+    /// step 6: that is all "on program" means for the health check — no
+    /// receiver is expected on a playlist's own output (`ndi_health_expect`).
     pub(crate) fn set_on_program_for_test(&mut self, playlist_id: i64) {
         self.set_scene_active_for_test(playlist_id, true);
-        self.set_cg_shown_for_test(Some(playlist_id));
     }
 
-    /// Test-only (#221 L4a): record that cg OBS was told to show `shown` (a
-    /// playlist, or `None` for a manual scene) on the engine's program bus.
-    pub(crate) fn set_cg_shown_for_test(&self, shown: Option<i64>) {
-        let bus = self
-            .program
-            .get_or_init(|| std::sync::Arc::new(super::program_bus::ProgramBus::new()));
-        let legacy = bus.legacy_cg();
-        let ticket = legacy.ticket();
-        legacy.confirmed(ticket, shown);
+    /// Test-only: `playlist_id` is on air and owns the wall, as the playback
+    /// authority publishes SP-program's playlist (`program_authority.rs`). A
+    /// test of the wall writes (the lines, the title, the Presenter) puts its
+    /// playlist on air first, as production does before its ON.
+    pub(crate) fn put_on_air_for_test(&self, playlist_id: i64) {
+        self.on_air.publish([playlist_id].into(), Some(playlist_id));
     }
 }

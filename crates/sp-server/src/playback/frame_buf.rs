@@ -65,19 +65,6 @@ impl SharedFrame {
     pub fn ptr_eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
-
-    /// Exclusive mutable access to the pixels, cloning ONLY if this handle is not
-    /// the sole owner ([`Arc::make_mut`]). It exists so the paced burn-id overlay
-    /// can paint into its own copy without disturbing any other holder. On the
-    /// paced path the pacer usually still holds the frame for its starvation
-    /// repeat, so this normally FORKS into a `frame_pool` copy (#147 round 10);
-    /// it is in place only when this handle is the sole owner, which is safe.
-    pub fn make_mut(&mut self) -> &mut Vec<u8> {
-        // `Arc::make_mut` forks the `PooledBuf` (a pooled copy, via its `Clone`)
-        // only when this is not the sole owner; `as_vec_mut` exposes the inner
-        // `Vec` the overlay needs (`DerefMut` targets `[u8]`, not `Vec<u8>`).
-        Arc::make_mut(&mut self.0).as_vec_mut()
-    }
 }
 
 impl Deref for SharedFrame {
@@ -94,6 +81,37 @@ impl fmt::Debug for SharedFrame {
         f.debug_struct("SharedFrame")
             .field("len", &self.0.len())
             .finish()
+    }
+}
+
+/// Neutral-black NV12 pixel bytes: Y = studio black 16, interleaved UV = 128.
+fn black_nv12_bytes(width: u32, height: u32) -> Vec<u8> {
+    let y = (width as usize) * (height as usize);
+    let mut data = vec![16u8; y];
+    data.resize(y + y / 2, 128u8);
+    data
+}
+
+/// The standby NV12 black (#147 standby same-path), cached: built once for a
+/// size and handed out by `Arc` clone (a refcount bump, no pixel copy); a
+/// different size rebuilds it once. The `SP-program` sender's submitter and
+/// every playlist pipeline's paced output (`paced_output::PipelineOutput`,
+/// #221 lane 3) keep one each.
+#[derive(Debug, Default)]
+pub struct BlackNv12(Option<(u32, u32, SharedFrame)>);
+
+impl BlackNv12 {
+    /// The neutral NV12 black of `width`×`height`.
+    pub fn get(&mut self, width: u32, height: u32) -> SharedFrame {
+        if let Some((w, h, frame)) = &self.0
+            && *w == width
+            && *h == height
+        {
+            return frame.clone();
+        }
+        let frame = SharedFrame::new(black_nv12_bytes(width, height));
+        self.0 = Some((width, height, frame.clone()));
+        frame
     }
 }
 
@@ -124,32 +142,6 @@ mod tests {
         let e = SharedFrame::new(Vec::new());
         assert_eq!(e.len(), 0);
         assert!(e.is_empty());
-    }
-
-    #[test]
-    fn make_mut_is_in_place_for_a_sole_owner() {
-        let mut f = SharedFrame::new(vec![0u8; 3]);
-        let before = f.as_ptr(); // via Deref -> [u8]::as_ptr
-        f.make_mut()[1] = 5;
-        assert_eq!(&f[..], &[0u8, 5, 0][..]);
-        assert_eq!(
-            f.as_ptr(),
-            before,
-            "sole owner: make_mut mutates in place, no realloc"
-        );
-    }
-
-    #[test]
-    fn make_mut_clones_when_shared_leaving_the_reader_intact() {
-        let mut f = SharedFrame::new(vec![0u8; 3]);
-        let g = f.clone(); // now shared (refcount 2)
-        f.make_mut()[0] = 7;
-        assert_eq!(&f[..], &[7u8, 0, 0][..], "the writer's copy changes");
-        assert_eq!(&g[..], &[0u8, 0, 0][..], "the shared reader is untouched");
-        assert!(
-            !f.ptr_eq(&g),
-            "make_mut on a shared handle forks the allocation"
-        );
     }
 
     #[test]

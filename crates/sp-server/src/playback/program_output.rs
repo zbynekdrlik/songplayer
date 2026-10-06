@@ -14,9 +14,12 @@
 //! queued job as soon as it is queued. `start_program` (an
 //! `impl PlaybackEngine` split out of `mod.rs` for the 1000-line cap) restores
 //! the persisted source, installs the process-wide bus for the paced submit
-//! threads, and on Windows starts the thread on the engine's NDI backend. It
-//! runs AFTER the #196 startup senders, so the per-playlist name→port order is
-//! unchanged.
+//! threads, and on Windows starts the thread on the engine's NDI backend.
+//! #221 lane 3: `SP-program` is SongPlayer's only NDI sender (a playlist feeds
+//! this bus, never an NDI output of its own), so before it is created
+//! `start_program` waits for the previous instance to release its port span
+//! (`startup_pipelines::wait_for_program_ports`, #196): a restart gives it the
+//! same port, the one DistroAV's receivers reconnect to by URL.
 //!
 //! #210: every submitted pair's audio block (forwarded, mixed, or the standby
 //! silence) is handed to the program's VBAN output (`vban_out.rs`) BEFORE its
@@ -24,7 +27,17 @@
 //! never waits for the video side of its own boundary (a slow NDI send, a
 //! mixed picture; a video side longer than a slot still delays the NEXT
 //! boundary's take, which `health.timing` shows as `ready_late_us`), and
-//! `start_program` also starts the VBAN thread + its settings task.
+//! `start_program` also starts the VBAN thread + its settings task. Every
+//! block first goes through the program's ONE peak limiter (#210, after the
+//! crossfade, finding 5986249387): the same `sp_decoder::PeakLimiter` the
+//! stem mix uses, its state carried from one boundary to the next, reset
+//! where the program's timeline restarts. A fade sums two sources that are
+//! each at most 0.98 up to 0.98·√2 at mid-fade, which VBAN's INT24 encoder
+//! would clamp flat at FOH. SongPlayer's own playlists are at or under the
+//! ceiling, so once a fade's release tail has decayed (≤ ~24 boundaries)
+//! the limiter is at rest and their blocks pass bit for bit; a hotter block
+//! (the NDI input "OBS manuál" forwards cg OBS's audio as it comes) is
+//! limited too, where VBAN used to clamp it.
 //!
 //! #215: a [`ProgramJob::Mix`] (one boundary inside a transition window) is
 //! crossfaded here, on the sender thread: the audio per sample with the
@@ -32,8 +45,8 @@
 //! in row bands (`program_transition::mix_nv12_into`, #215 addendum 3) on the
 //! sender's persistent band workers (`band_pool.rs`, #223 follow-up: started
 //! once with the output, never per picture). `start_program` also starts the
-//! OBS-follow task (`program_follow.rs`) and hands the bus to the engine for
-//! the deferred scene-go-off pause.
+//! transition-settings task (`program_transition_settings.rs`, #221 L5) and
+//! hands the bus to the engine for the deferred scene-go-off pause.
 //!
 //! #223: `SP-program` is ALWAYS 1920×1080 (the owner's rule). Every picture
 //! the sender submits is in its canvas (`program_canvas.rs`, the standby's own
@@ -45,6 +58,13 @@
 //! missing side is the canvas black. The fit is video-side work in
 //! `submit_video`, after the VBAN hand-off, and inside the `submit_us` span
 //! (`health.timing`), so the box shows its cost.
+//!
+//! #223 S2: after VBAN's hand-off and before the video side, each boundary is
+//! offered to `SP-program-MAX` (`program_max.rs`) as a `MaxJob` of its NATIVE
+//! picture(s) — a forwarded source's own picture, both sides of a fade with
+//! the weight, the standby as black — never the canvas. The offer is `Arc`
+//! bumps into a 2-deep coalescing queue; the `program-max` thread composes
+//! and sends on its own time, so it never delays VBAN or the NDI submit.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -54,6 +74,7 @@ use sp_core::genlock::{
     GENLOCK_GRID_FPS, GENLOCK_MAX_CATCHUP_INTERVALS, floor_boundary_100ns, lag_slots_100ns,
     strict_next_boundary_100ns,
 };
+use sp_decoder::PeakLimiter;
 use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -64,13 +85,14 @@ use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
 use crate::playback::program_canvas::{Canvas, FadeSide};
+use crate::playback::program_max::{MaxJob, MaxOut, MaxPicture};
 use crate::playback::program_output_timing::{BoundaryMarks, LateBoundary, utc_label};
 use crate::playback::program_transition::{
     AudioFormat, Layout, MIX_THREAD_NAME, MixJob, mix_audio_block, mix_bands,
 };
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::submitter::FrameSubmitter;
-use crate::playback::vban_out::{VbanBlock, VbanOut, run_vban_config_task};
+use crate::playback::vban_out::{VbanBlock, VbanOut, is_program_block, run_vban_config_task};
 use crate::playback::wallclock::WallClock;
 
 /// The program's picture size, 1080p (the paced idle size): #223, every
@@ -117,18 +139,31 @@ pub struct ProgramOutput<B: NdiBackend> {
     /// The run of mixed boundaries being sent (a window), logged once when
     /// the next unmixed boundary ends it.
     mix_run: MixRun,
+    /// #210: the program's peak limiter. Every program block goes through it
+    /// before VBAN and the NDI submit get it ([`limit`](Self::limit)).
+    limiter: PeakLimiter,
+    /// #210: the boundary the limiter last ran on. A stamp that is not the
+    /// grid boundary right after it is a restart of the program's timeline.
+    limited_through: Option<i64>,
+    /// #223 S2: the `SP-program-MAX` hand-off each boundary is offered to,
+    /// after VBAN's block and before the video side.
+    max: Option<Arc<MaxOut>>,
 }
 
 /// #215: one run of mixed boundaries as the `SP-program` sender saw it: how
 /// many, how many had a side fitted into the canvas (#223: a side not already
 /// a canvas picture), and the worst time the picture (the fits + blend, all
 /// their row bands) took, measured on this thread — the cost the review asked
-/// to see on the box, next to `health.coalesced`.
+/// to see on the box, next to `health.coalesced`. #210: also how many frames
+/// the program's peak limiter scaled while the run went out: its mixed
+/// boundaries and the boundary that ended it (where the release tail
+/// starts), so the box shows the limiter working through a fade.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct MixRun {
     pub(crate) boundaries: u64,
     pub(crate) fitted: u64,
     pub(crate) max_picture_us: u64,
+    pub(crate) limited: u64,
 }
 
 /// The one INFO line of a finished run of mixed boundaries (none for an
@@ -140,6 +175,7 @@ fn log_mix_run(run: &MixRun) {
             boundaries = run.boundaries,
             fitted = run.fitted,
             max_picture_us = run.max_picture_us,
+            limited_frames = run.limited,
             "program transition: the fade's mixed boundaries went out"
         );
     }
@@ -193,6 +229,35 @@ fn send<B: NdiBackend>(
 }
 
 impl Pair {
+    /// #210: the audio this pair carries to VBAN and NDI: a forwarded
+    /// pair's own, a fade's crossfaded block, or the program's one silent
+    /// block for a standby pair (`silence`).
+    fn audio_mut<'a>(&'a mut self, silence: &'a mut [AudioFrame]) -> &'a mut [AudioFrame] {
+        match self {
+            Pair::Source(job) => &mut job.audio,
+            Pair::Standby => silence,
+            Pair::Mix { audio, .. } => audio,
+        }
+    }
+
+    /// #223 S2: what `SP-program-MAX` shows for the boundary on
+    /// `stamp_100ns`: the native picture(s) (`Arc` bumps), never the canvas.
+    fn max_job(&self, stamp_100ns: i64) -> MaxJob {
+        match self {
+            Pair::Source(job) => MaxJob::Picture {
+                stamp_100ns,
+                picture: MaxPicture::of(job),
+            },
+            Pair::Standby => MaxJob::Black { stamp_100ns },
+            Pair::Mix { mix, .. } => MaxJob::Fade {
+                stamp_100ns,
+                from: mix.from.as_ref().map(MaxPicture::of),
+                to: mix.to.as_ref().map(MaxPicture::of),
+                weight_q8: mix.weight_q8(),
+            },
+        }
+    }
+
     /// What VBAN gets for the boundary on `stamp_100ns`: the pair's own
     /// block, COPIED (its NDI submit still borrows it), or the standby
     /// silence.
@@ -211,8 +276,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// stride `width` ([`PROGRAM_STANDBY_W`] × [`PROGRAM_STANDBY_H`] =
     /// 1920×1080 in production; the tests use small canvases).
     pub fn new(sender: NdiSender<B>, width: u32, height: u32) -> Self {
-        let mut submitter = FrameSubmitter::new(sender, GENLOCK_GRID_FPS as i32, 1);
-        submitter.set_paced(true);
+        let submitter = FrameSubmitter::new(sender, GENLOCK_GRID_FPS as i32, 1);
         let spc = samples_per_boundary(PROGRAM_AUDIO_RATE_HZ as i64, GENLOCK_GRID_FPS);
         let silence = vec![AudioFrame {
             data: vec![0.0; spc * PROGRAM_AUDIO_CHANNELS as usize],
@@ -231,6 +295,9 @@ impl<B: NdiBackend> ProgramOutput<B> {
                 mix_bands(crate::lyrics::heavy_slot::logical_cores()),
             ),
             mix_run: MixRun::default(),
+            limiter: PeakLimiter::new(PROGRAM_AUDIO_RATE_HZ),
+            limited_through: None,
+            max: None,
         }
     }
 
@@ -246,6 +313,20 @@ impl<B: NdiBackend> ProgramOutput<B> {
         self
     }
 
+    /// #223 S2: also offer every boundary to `SP-program-MAX`.
+    pub fn with_max(mut self, max: Arc<MaxOut>) -> Self {
+        self.max = Some(max);
+        self
+    }
+
+    /// #223 S2: offer the boundary to `SP-program-MAX` (never waits for the
+    /// `program-max` thread; nothing is built while MAX takes nothing).
+    fn offer_max(&self, pair: &Pair, stamp_100ns: i64) {
+        if let Some(max) = &self.max {
+            max.offer_with(|| pair.max_job(stamp_100ns));
+        }
+    }
+
     /// #210: hand one pair's audio block to the VBAN output (never blocks);
     /// returns the instant it was handed over, read off `now`.
     fn feed_vban(&self, block: VbanBlock, now: &impl Fn() -> i64) -> i64 {
@@ -256,23 +337,26 @@ impl<B: NdiBackend> ProgramOutput<B> {
     }
 
     /// Serve one program boundary: its audio side ([`split`](Self::split),
-    /// no video work) goes to VBAN FIRST, then the video side and the NDI
-    /// pair ([`submit_video`](Self::submit_video)) — #210: FOH audio never
-    /// waits for the video side of its own boundary (the NDI submit, a mixed
-    /// picture). A forwarded source job keeps its own stamps. What the
-    /// program makes itself (a standby pair, a mixed block) is stamped on
-    /// its boundary, the audio too: the block belongs to that boundary's
-    /// timeline instant, never the submit instant — a standby pair for a
-    /// missed boundary goes out up to the fill grace (3 slots) late (#224).
-    /// An unmixed boundary ends the run of mixed boundaries once it went
-    /// out. Returns the instants the boundary was served at, read off `now`
-    /// (the sender's wall: the stamps' timeline), for `health.timing`
-    /// (`program_output_timing.rs`).
+    /// no video work) goes to VBAN FIRST, then the boundary is offered to
+    /// `SP-program-MAX` (#223 S2, [`offer_max`](Self::offer_max)), then the
+    /// video side and the NDI pair ([`submit_video`](Self::submit_video)) —
+    /// #210: FOH audio never waits for the video side of its own boundary
+    /// (the NDI submit, a mixed picture). A forwarded source job keeps its
+    /// own stamps. What the program makes itself (a standby pair, a mixed
+    /// block) is stamped on its boundary, the audio too: the block belongs
+    /// to that boundary's timeline instant, never the submit instant — a
+    /// standby pair for a missed boundary goes out up to the fill grace (3
+    /// slots) late (#224). An unmixed boundary ends the run of mixed
+    /// boundaries once it went out. Returns the instants the boundary was
+    /// served at, read off `now` (the sender's wall: the stamps' timeline),
+    /// for `health.timing` (`program_output_timing.rs`).
     pub fn serve(&mut self, job: ProgramJob, now: impl Fn() -> i64) -> BoundaryMarks {
         let taken_100ns = now();
         let stamp_100ns = job.stamp_100ns();
-        let pair = self.split(job);
+        let mut pair = self.split(job);
+        self.limit(&mut pair, stamp_100ns);
         let fed_100ns = self.feed_vban(pair.vban_block(stamp_100ns), &now);
+        self.offer_max(&pair, stamp_100ns);
         let ends_run = !matches!(pair, Pair::Mix { .. });
         let submit_start_100ns = self.submit_video(pair, stamp_100ns, &now);
         let submitted_100ns = now();
@@ -319,6 +403,35 @@ impl<B: NdiBackend> ProgramOutput<B> {
                 Pair::Mix { mix, audio }
             }
         }
+    }
+
+    /// #210: run the boundary's audio through the program's peak limiter,
+    /// in place, BEFORE VBAN's copy and the NDI submit: both then carry the
+    /// same limited block, VBAN first. Every program block goes through it
+    /// (a forwarded pair's, a fade's crossfaded block, the standby silence:
+    /// 0 × gain stays 0, and its tail decays in step with time), so its
+    /// state, and the gain, carry from one boundary to the next. A stamp that
+    /// is not the grid boundary right after the last one (the first boundary,
+    /// a resync that skipped stamps) restarts the program's timeline: the
+    /// audio after it is unrelated, so the release tail is dropped. A block
+    /// that is not one program block (48 kHz stereo, one boundary: what VBAN
+    /// carries; VBAN sends silence for anything else) passes as it came.
+    fn limit(&mut self, pair: &mut Pair, stamp_100ns: i64) {
+        let follows = self
+            .limited_through
+            .is_some_and(|last| strict_next_boundary_100ns(last, GENLOCK_GRID_FPS) == stamp_100ns);
+        if !follows {
+            self.limiter.reset();
+        }
+        self.limited_through = Some(stamp_100ns);
+        let before = self.limiter.limited_frames();
+        for frame in pair.audio_mut(&mut self.silence) {
+            if is_program_block(frame) {
+                let channels = frame.channels as usize;
+                self.limiter.process(&mut frame.data, channels);
+            }
+        }
+        self.mix_run.limited += self.limiter.limited_frames() - before;
     }
 
     /// #210: the video side of a boundary VBAN already has, then its NDI
@@ -550,20 +663,16 @@ impl super::PlaybackEngine {
     /// #212: also start the NDI input "OBS manuál" (its settings task, and on
     /// Windows its grid thread on the engine's NDI SDK). #213: also start the
     /// Companion remote control's settings task (its listener cuts this bus and
-    /// reaches cg OBS through the engine's OBS client). #215: also start the
-    /// OBS-follow task and keep the bus for the deferred scene-go-off pause;
-    /// #219: the follow consumes the OBS client's snapshots (`obs`).
-    /// #221 L4b: also tell cg OBS once what the restored program shows (the
-    /// startup re-mirror) and start the playback authority
-    /// (`program_authority.rs`), whose first value plays the restored program.
-    /// Call once, after the #196 startup senders.
+    /// reaches cg OBS through the engine's OBS client, for a manual scene).
+    /// #215: also keep the bus for the deferred scene-go-off pause; #221 L5:
+    /// start the transition-settings task (the OBS follow is deleted).
+    /// #221 L4b: also start the playback authority (`program_authority.rs`),
+    /// whose first value plays the restored program. #223 S2: also start
+    /// `SP-program-MAX` (its setting, then its thread). Call once, after the
+    /// startup pipelines (`startup_pipelines.rs`); #221 lane 3: on Windows the
+    /// `SP-program` sender is created after the #196 port wait.
     #[cfg_attr(test, mutants::skip)]
-    pub async fn start_program(
-        &self,
-        bus: Arc<ProgramBus>,
-        shutdown: &broadcast::Sender<()>,
-        obs: tokio::sync::watch::Receiver<crate::obs::ObsSnapshot>,
-    ) {
+    pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
         let _ = self.program.set(bus.clone()); // #215: the deferred scene-go-off pause
         let vban = bus.vban().clone();
         tokio::spawn(run_vban_config_task(
@@ -571,6 +680,9 @@ impl super::PlaybackEngine {
             vban.clone(),
             shutdown.subscribe(),
         ));
+        // #223 S2: the setting first, then the program-max thread (Windows).
+        crate::playback::program_max::start_max(self.pool.clone(), bus.max().clone(), shutdown)
+            .await;
         #[cfg(windows)]
         crate::playback::vban_out::spawn_vban_thread(vban.clone());
         let mut shutdown_rx = shutdown.subscribe();
@@ -579,7 +691,10 @@ impl super::PlaybackEngine {
             warn!("program bus: a bus was already installed — keeping the first one");
         }
         #[cfg(windows)]
-        spawn_program_thread(self.ndi_backend.clone(), bus.clone());
+        {
+            crate::playback::startup_pipelines::wait_for_program_ports().await;
+            spawn_program_thread(self.ndi_backend.clone(), bus.clone());
+        }
         #[cfg(windows)]
         let receive = self
             .ndi_backend
@@ -596,19 +711,18 @@ impl super::PlaybackEngine {
         );
         let upstream =
             crate::remote::Upstream::new(self.obs_cmd_tx.clone(), self.obs_event_tx.clone());
-        // #221 L4a: the dashboard's cut mirrors to cg OBS through the same link.
-        bus.legacy_cg().attach(upstream.clone());
-        // #221 L4b decision 1: cg OBS is told once what the restored program shows.
-        crate::playback::program_switch::remirror_on_air(&bus, &upstream).await;
-        // #221 L4b: SP-program (∪ SongPlayer's cg OBS record) drives playback.
+        // #221 L4b: SP-program's playlist drives playback.
         tokio::spawn(super::program_authority::run_program_authority(
             bus.clone(),
             self.event_tx.clone(),
             self.on_air.clone(),
             shutdown.subscribe(),
         ));
-        let follow = crate::playback::program_follow::Follow::new(self.pool.clone(), bus.clone());
-        crate::playback::program_follow::start_follow(follow, obs, shutdown);
+        crate::playback::program_transition_settings::start_transition_settings(
+            self.pool.clone(),
+            bus.clone(),
+            shutdown,
+        );
         crate::remote::start_remote(self.pool.clone(), bus.clone(), upstream, shutdown);
         tokio::spawn(async move {
             let _ = shutdown_rx.recv().await;
@@ -620,14 +734,19 @@ impl super::PlaybackEngine {
 }
 
 /// Windows: create the `SP-program` sender on the shared NDI backend and run
-/// [`run_program_loop`] on its own thread.
+/// [`run_program_loop`] on its own thread. #221 review round 2: when there is
+/// no sender (no NDI SDK, the sender or the thread could not be created),
+/// nothing will ever poll its receivers, so the bus reads a polled 0 at once
+/// (`degraded_reason` names it instead of waiting for a first poll).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
-fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus: Arc<ProgramBus>) {
+fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<ProgramBus>) {
     let Some(backend) = backend else {
         warn!("NDI SDK not available — no SP-program output");
+        bus.set_connections(0);
         return;
     };
+    let no_thread = bus.clone();
     let spawned = std::thread::Builder::new()
         .name("program-output".into())
         .spawn(move || {
@@ -637,10 +756,13 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
                 Ok(s) => s,
                 Err(e) => {
                     tracing::error!(%e, "failed to create the SP-program NDI sender");
+                    bus.set_connections(0);
                     return;
                 }
             };
-            let mut out = ProgramOutput::fhd(sender).with_vban(bus.vban().clone());
+            let mut out = ProgramOutput::fhd(sender)
+                .with_vban(bus.vban().clone())
+                .with_max(bus.max().clone());
             // #215 addendum 3 + #223 follow-up: how many threads paint a mixed
             // or fitted picture (this one + the persistent band workers).
             info!(
@@ -656,6 +778,7 @@ fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus:
         });
     if let Err(e) = spawned {
         tracing::error!(%e, "failed to spawn the SP-program output thread");
+        no_thread.set_connections(0);
     }
 }
 
@@ -665,6 +788,12 @@ mod tests;
 #[cfg(test)]
 #[path = "program_output_tests_fhd.rs"]
 mod tests_fhd;
+#[cfg(test)]
+#[path = "program_output_tests_limit.rs"]
+mod tests_limit;
+#[cfg(test)]
+#[path = "program_output_tests_max.rs"]
+mod tests_max;
 #[cfg(test)]
 #[path = "program_output_tests_order.rs"]
 mod tests_order;

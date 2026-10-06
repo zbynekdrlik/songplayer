@@ -92,6 +92,34 @@ fn a_resume_hides_3_5_s_before_the_real_end_or_shows_no_title() {
     assert!(short.shows());
 }
 
+/// #217: a seek moves the hide point to the song's new position (3.5 s
+/// before its end, counted from the seek) and keeps the show point (1.5 s
+/// after the song started). A seek into the last 3.5 s puts the hide point
+/// at the seek; a seek back to the start puts it a whole song away; a song
+/// of 5 s or less still keeps its title to the end.
+#[test]
+fn a_seek_moves_the_hide_point_and_keeps_the_show_point() {
+    let base = Instant::now();
+    let clock = TitleClock::new(42, base, 240_000, 0);
+    let now = base + ms(10_000);
+    let seeked = clock.seeked(now, 240_000, 180_000);
+    assert_eq!(seeked.video_id, 42);
+    assert_eq!(seeked.show_at, base + ms(1_500), "the show point stays");
+    assert_eq!(seeked.hide_at, Some(now + ms(56_500)));
+    assert_eq!(
+        clock.seeked(now, 240_000, 237_000).hide_at,
+        Some(now),
+        "past the hide point: the title is no longer due"
+    );
+    assert_eq!(
+        clock.seeked(now, 240_000, 0).hide_at,
+        Some(now + ms(236_500)),
+        "back to the start"
+    );
+    let short = TitleClock::new(42, base, 5_000, 0).seeked(now, 5_000, 1_000);
+    assert_eq!(short.hide_at, None, "a 5 s song keeps its title to its end");
+}
+
 /// `shows` is strict: a hide point AT the show point leaves no window.
 #[test]
 fn a_clock_shows_a_title_only_when_its_hide_point_is_after_its_show_point() {

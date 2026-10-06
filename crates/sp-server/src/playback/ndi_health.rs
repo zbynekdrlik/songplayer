@@ -1,21 +1,27 @@
 // crates/sp-server/src/playback/ndi_health.rs
-//! NDI per-pipeline health snapshot types + lock-free registry +
-//! engine aggregator.
+//! Per-pipeline health snapshot types + lock-free registry + engine
+//! aggregator, served on `GET /api/v1/ndi/health` (the route keeps its
+//! name: the dashboard, the post-deploy E2E and camera-box read it).
+//!
+//! #221 lane 3: a playlist pipeline has NO NDI sender of its own any more —
+//! it feeds the program bus, and `SP-program` (`program_output.rs`) is the
+//! one NDI sender. So a row carries no receiver count, no sender URL, no
+//! burn flag and no recovery rung: the #127/#173 receiver ladder, the #196
+//! post-restart self-check and its persisted receiver baseline went with
+//! the senders. `SP-program`'s receivers are on `GET /api/v1/program`.
 //!
 //! Extracted from mod.rs to keep the file under the 1000-line cap.
 //! Mirrors `playback/recovery.rs` precedent and `resolume::ResolumeRegistry`
 //! shape from PR #54.
 
-use crate::obs::ndi_recovery::{NdiRecoveryTracker, RecoveryStep};
 use crate::playback::clock_health::ClockHealth;
-use crate::playback::ndi_health_expect::{expected_reason, receiver_expected};
 use crate::playback::ndi_health_transport::transport_from_reported;
 // `PacingStats` lives in its own file (1000-line cap); re-exported so every
 // `ndi_health::PacingStats` path stays valid.
 pub use crate::playback::pacing_stats::PacingStats;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{
     RwLock,
     atomic::{AtomicUsize, Ordering},
@@ -28,36 +34,11 @@ use tracing::warn;
 #[path = "ndi_health_log.rs"]
 mod health_log;
 
-/// The `degraded_reason` string a Playing-on-program pipeline gets when it has
-/// zero NDI receivers — the "dark wall" state (#127). Single source of truth so
-/// the receiver-recovery trigger and the dashboard read the same string.
-pub(crate) const DARK_WALL_REASON: &str = "no NDI receiver — wall is dark";
-
-/// #196: the `degraded_reason` a Playing-on-program output gets when it is
-/// dark (`connections==0`) but NO OBS NDI input advertises its stream — the
-/// receiver-side recovery ladder is not the tool for this class (there is no
-/// input to nudge), so we set a distinct reason and skip the ladder entirely,
-/// which also stops the every-10 s degraded/recovered flap the incident saw
-/// for an output whose OBS scene did not exist yet (SP-dabing).
-pub(crate) const NO_OBS_INPUT_REASON: &str = "no OBS scene for this output";
-
-/// #196: choose the effective dark reason for a Playing-on-program output.
-/// When the base reason is the dark-wall reason but no OBS input advertises
-/// this output, return [`NO_OBS_INPUT_REASON`] instead — which is NOT the
-/// dark-wall reason, so the caller's `is_dark` is false and the ladder never
-/// runs. Any other base reason passes through unchanged. Pure so the branch
-/// is mutation-scored.
-pub(crate) fn effective_dark_reason(base: Option<String>, has_obs_input: bool) -> Option<String> {
-    if base.as_deref() == Some(DARK_WALL_REASON) && !has_obs_input {
-        Some(NO_OBS_INPUT_REASON.to_string())
-    } else {
-        base
-    }
-}
-
-/// Per-pipeline NDI health. Serialized to the dashboard via
+/// Per-pipeline health. Serialized to the dashboard via
 /// `GET /api/v1/ndi/health`. Built by the engine from
 /// `PipelineEvent::HealthSnapshot` events emitted by the pipeline thread.
+/// `ndi_name` is the playlist's `ndi_output_name`, the label its scene and
+/// the dashboard name it by (#221 lane 3: no sender carries it any more).
 #[derive(Clone, Debug, Serialize)]
 pub struct PipelineHealthSnapshot {
     pub playlist_id: i64,
@@ -67,9 +48,6 @@ pub struct PipelineHealthSnapshot {
     /// (before reconciliation), for `/api/v1/ndi/health`. Additive (= Idle).
     #[serde(default)]
     pub transport: sp_core::playback::TransportState,
-    /// Connection count from `NDIlib_send_get_no_connections`. `-1` means
-    /// the heartbeat has never run yet (e.g. pipeline just spawned).
-    pub connections: i32,
     pub frames_submitted_total: u64,
     pub frames_submitted_last_5s: u32,
     pub observed_fps: f32,
@@ -79,55 +57,34 @@ pub struct PipelineHealthSnapshot {
     pub last_submit_ts: Option<DateTime<Utc>>,
     pub last_heartbeat_ts: Option<DateTime<Utc>>,
     pub consecutive_bad_polls: u32,
-    /// Populated server-side when `consecutive_bad_polls >= 2`. The dashboard
-    /// renders this verbatim; it does NOT compute its own staleness.
-    ///
-    /// Visibility-only: SongPlayer does not auto-recover from this state in
-    /// v0.26.0+. The 2026-04-27 production failure showed per-sender recreate
-    /// cannot fix the actual root cause (NDI runtime mDNS bound to a stale
-    /// network adapter); recovery requires a process restart or full NDI
-    /// runtime re-init (tracked in #60).
+    /// Populated server-side when `consecutive_bad_polls >= 2` while Playing
+    /// on program: an underrun or a stalled delivery to the program bus. The
+    /// dashboard renders this verbatim; it does NOT compute its own
+    /// staleness.
     pub degraded_reason: Option<String>,
     /// dantesync-derived clock health (#146). The same box-wide value is
     /// stamped onto every pipeline's snapshot; `clock_ok` gates the genlock
     /// lock-state. Defaults to `no dantesync` until the poller reports.
     pub clock: ClockHealth,
-    /// Boundary-paced emission telemetry (#147). Default (`enabled=false`,
-    /// zeros) on the SDK-clocked (flag-OFF) path; filled from the `Pacer` when
-    /// `genlock_pacing` is on.
+    /// Boundary-paced emission telemetry (#147), filled from the `Pacer`
+    /// (pacing is the only path since #221 lane 3).
     pub pacing: PacingStats,
-    /// Paced-audio telemetry (#148). Default (`enabled=false`, zeros) on the
-    /// SDK-clocked / idle path; filled from the `Pacer`'s `AudioGridBuffer` on
-    /// the paced path.
+    /// Paced-audio telemetry (#148), filled from the `Pacer`'s
+    /// `AudioGridBuffer`.
     pub audio: AudioStats,
     /// Derived three-state genlock lock (#149, contract §7 A7.3): the same
     /// LOCKED / DEGRADED / UNLOCKED vocabulary the OBS indicator uses
     /// (camera-box#1298). Computed at snapshot time from `clock.clock_ok`,
-    /// `pacing.enabled`, `connections`, and the last-60-s event window; flag
-    /// OFF (pacing disabled) ⇒ `Unlocked`.
+    /// `pacing.enabled` and the last-60-s event window.
     pub lock_state: sp_core::genlock::lock_state::LockState,
-    /// Human reason for `lock_state` (e.g. `"pacing disabled"`, `"no receiver"`,
+    /// Human reason for `lock_state` (e.g. `"pacing disabled"`,
     /// `"locked"`). Rendered verbatim by the dashboard / log.
     pub lock_reason: String,
-    /// Whether the runtime burn-id QR overlay (#151) is currently ON for this
-    /// output. Default `false`; toggled via `POST /api/v1/ndi/burn`; the fleet's
-    /// burn-leak guard sweeps this to confirm no QR was left on the LED wall.
-    pub burn_on: bool,
-    /// #173 round 2: the dark-wall recovery ladder rung last fired in the current
-    /// dark outage (`ClearRestore` / `ToggleSceneItem` / `RecreateInput`), or
-    /// `None` when not recovering. Cleared to `None` the moment the receiver
-    /// re-attaches, so the dashboard / E2E can see which rung recovered a wall.
-    pub recovery_step: Option<RecoveryStep>,
-    /// #196: the sender's advertised source URL (`host:port`) as the NDI runtime
-    /// assigned it, e.g. `"10.77.9.201:5963"`. `None` until the SDK reports one.
-    /// Makes a restart's name→port shuffle — the root cause of the
-    /// dark-wall-after-restart incident — visible on `/api/v1/ndi/health`.
-    pub sender_url: Option<String>,
 }
 
 /// Paced-audio telemetry (#148), surfaced on `GET /api/v1/ndi/health` as
-/// `audio`. `enabled=false` + all-zero is what an SDK-clocked (flag-OFF) or idle
-/// pipeline reports; the `Pacer` fills real values from its `AudioGridBuffer`.
+/// `audio`. `enabled=false` + all-zero is what an idle pipeline reports; the
+/// `Pacer` fills real values from its `AudioGridBuffer`.
 /// The A/V alignment itself (`av_align_err_ms`, …) is on [`PacingStats`].
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AudioStats {
@@ -142,34 +99,6 @@ pub struct AudioStats {
     /// Current buffered audio (ms) after the last take — no setpoint: the
     /// depth follows the decoder's audio lookahead (#148 design v2).
     pub buffer_ms: u64,
-    /// Wall-clock audio-emitter telemetry (#192) for the SDK-clocked path. The
-    /// paced path leaves this at `enabled=false`; the SDK-clocked path fills it
-    /// from the dedicated emitter thread (`playback/audio_emitter.rs`).
-    #[serde(default)]
-    pub emitter: EmitterStats,
-}
-
-/// Wall-clock NDI audio-emitter telemetry (#192), surfaced on
-/// `GET /api/v1/ndi/health` as `audio.emitter`. On the SDK-clocked path the
-/// emitter clocks the NDI audio stream off the wall clock (one 1600-sample
-/// block per 33.333 ms grid slot, silence when the ring is short) so the stream
-/// never starves at song transitions and the receiver's servo sees a clean
-/// 48 kHz rate. `enabled=false` + all-zero is the default (paced / idle path).
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EmitterStats {
-    /// Whether the wall-clock audio emitter is active for this pipeline.
-    pub enabled: bool,
-    /// `"sdk-video/wallclock-audio"` when enabled, empty otherwise.
-    pub mode: String,
-    /// Silence blocks emitted (cumulative) — grows ONLY at transitions / stalls.
-    pub silence_blocks: u64,
-    /// Current ring depth (ms of buffered decoded audio ahead of the grid).
-    pub ring_depth_ms: u64,
-    /// 99th-percentile emit jitter (µs) — the emit thread's grid accuracy.
-    pub emit_jitter_p99_us: u64,
-    /// Emits that woke a whole block or more past their grid boundary
-    /// (cumulative) — should stay ≈ 0 with a TIME_CRITICAL emit thread.
-    pub late_blocks: u64,
 }
 
 /// Wire-level playback state used by the NDI health snapshot. Distinct from
@@ -184,23 +113,6 @@ pub enum PlaybackStateLabel {
     Paused,
 }
 
-/// Snapshot of the per-pipeline frame counter window. Returned by
-/// `FrameSubmitter::drain_window`; the heartbeat consumer divides
-/// `frames_in_window` by `window_secs` to get observed fps.
-#[derive(Clone, Debug)]
-pub struct WindowStats {
-    pub frames_in_window: u32,
-    pub window_secs: f32,
-    /// `Instant::now()` captured when `drain_window` ran.
-    pub drained_at: Instant,
-    /// #192 round 3: the worst per-call `send_video_async` duration (µs) over the
-    /// drained window, from the submitter's `SubmitHist`. 0 with no submit.
-    pub submit_call_us_max: u64,
-    /// #192 round 3: the 99th-percentile per-call `send_video_async` duration
-    /// (µs) over the drained window. 0 with no submit.
-    pub submit_call_us_p99: u64,
-}
-
 /// Lock-free-read registry holding the latest health snapshot per pipeline.
 /// Mirrors `crate::resolume::ResolumeRegistry` from PR #54: one Arc held by
 /// the playback engine (writer) and another by `AppState` (reader). The
@@ -208,16 +120,6 @@ pub struct WindowStats {
 /// returned Vec is owned data, no lifetimes leak out.
 pub struct NdiHealthRegistry {
     snapshots: RwLock<HashMap<i64, PipelineHealthSnapshot>>,
-    /// #196: the advertised source URL (`host:port`) each output's sender was
-    /// assigned, recorded once at sender creation and read back onto every
-    /// health snapshot. Kept out of `snapshots` so it survives across heartbeat
-    /// rebuilds and is independent of which heartbeat path (SDK-clocked/paced)
-    /// runs.
-    sender_urls: RwLock<HashMap<i64, String>>,
-    /// #127 receiver-recovery state. Composed here (rather than as a new
-    /// `PlaybackEngine` field) so the engine reaches it through the `Arc` it
-    /// already holds; the single writer is `handle_health_snapshot`.
-    recovery: NdiRecoveryTracker,
     /// #167 readiness: the wall-clock instant this registry (≈ the process /
     /// engine) started, so the heavy-work startup grace + floor are measured
     /// off the same `Arc` both heavy workers already hold.
@@ -227,30 +129,6 @@ pub struct NdiHealthRegistry {
     /// heartbeat (`snapshots` len). The gap is the "not proven idle yet" window
     /// that must read as wall-in-use.
     expected_pipelines: AtomicUsize,
-    /// #196: per-output receiver count read from the settings table at startup
-    /// — the PRE-restart snapshot the post-restart self-check compares against.
-    /// Seeded once (`seed_pre_restart_counts`) before senders are created; never
-    /// overwritten in memory (the live counts are persisted to the DB instead).
-    pre_restart_counts: RwLock<HashMap<i64, i32>>,
-    /// #196: outputs that have reached `connections >= 1` at least once since
-    /// this process started. Once an output reconnects, the restart-reconnect
-    /// succeeded and the self-check never flags it again this process (a later
-    /// legitimate off-program drop is not a restart failure).
-    reconnected: RwLock<HashSet<i64>>,
-    /// #196: outputs already WARN-logged for "no receiver after restart" — so
-    /// the WARN fires once per output, not once per 5 s poll. Cleared when the
-    /// output recovers, so a genuinely new failure re-warns.
-    warned_no_receiver: RwLock<HashSet<i64>>,
-    /// #196: when the startup senders became ready — the +30 s self-check clock.
-    /// `None` until `mark_senders_ready`.
-    senders_ready_at: RwLock<Option<Instant>>,
-    /// #198 item 5: pending receiver-count DB writes, keyed by playlist so a
-    /// flapping count debounces to its LATEST value (a `HashMap` insert dedups).
-    /// The SYNC `handle_health_snapshot` only QUEUES here (no `tokio::spawn` — a
-    /// spawn from a sync caller with no reactor panics, and one detached task per
-    /// 5 s poll per output has no write ordering); the async pipeline-event
-    /// handler drains and awaits them in order.
-    pending_persist: RwLock<HashMap<i64, i32>>,
 }
 
 impl NdiHealthRegistry {
@@ -260,148 +138,9 @@ impl NdiHealthRegistry {
     pub fn new() -> Self {
         Self {
             snapshots: RwLock::new(HashMap::new()),
-            sender_urls: RwLock::new(HashMap::new()),
-            recovery: NdiRecoveryTracker::new(),
             created_at: Instant::now(),
             expected_pipelines: AtomicUsize::new(0),
-            pre_restart_counts: RwLock::new(HashMap::new()),
-            reconnected: RwLock::new(HashSet::new()),
-            warned_no_receiver: RwLock::new(HashSet::new()),
-            senders_ready_at: RwLock::new(None),
-            pending_persist: RwLock::new(HashMap::new()),
         }
-    }
-
-    /// #198 item 5: queue a receiver-count persist for `playlist_id` (the latest
-    /// value wins — a flapping count debounces). Sync + non-panicking (no
-    /// reactor needed); the async event handler drains it via
-    /// [`drain_pending_persists`](Self::drain_pending_persists). A poisoned lock
-    /// silently drops the write (the next change re-queues; a lost baseline only
-    /// affects the NEXT restart's self-check, never live playback).
-    pub fn queue_receiver_count_persist(&self, playlist_id: i64, connections: i32) {
-        if let Ok(mut m) = self.pending_persist.write() {
-            m.insert(playlist_id, connections);
-        }
-    }
-
-    /// #198 item 5: take (and clear) the pending receiver-count persists so the
-    /// async caller can write them in order. `mem::take` empties the buffer, so
-    /// a value is written at most once per drain regardless of how many polls
-    /// queued it.
-    pub fn drain_pending_persists(&self) -> Vec<(i64, i32)> {
-        match self.pending_persist.write() {
-            Ok(mut m) => std::mem::take(&mut *m).into_iter().collect(),
-            Err(_) => Vec::new(),
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // #196: post-restart receiver self-check state
-    // -----------------------------------------------------------------------
-
-    /// #196: seed the pre-restart per-output receiver baseline (read from the
-    /// settings table at startup). Called once before the startup senders are
-    /// created; a poisoned lock silently keeps the empty baseline.
-    pub fn seed_pre_restart_counts(&self, counts: HashMap<i64, i32>) {
-        if let Ok(mut m) = self.pre_restart_counts.write() {
-            *m = counts;
-        }
-    }
-
-    /// #196: the pre-restart receiver count recorded for `playlist_id`, or `0`
-    /// if none (unknown output, or a poisoned lock — the safe direction: an
-    /// unknown output is treated as "had no receiver", so it is not flagged
-    /// unless it is currently on program).
-    pub fn pre_restart_count(&self, playlist_id: i64) -> i32 {
-        self.pre_restart_counts
-            .read()
-            .ok()
-            .and_then(|m| m.get(&playlist_id).copied())
-            .unwrap_or(0)
-    }
-
-    /// #196: mark that the startup senders are ready — starts the +30 s
-    /// self-check clock. Idempotent: only the FIRST call sets the instant.
-    pub fn mark_senders_ready(&self) {
-        if let Ok(mut t) = self.senders_ready_at.write() {
-            if t.is_none() {
-                *t = Some(Instant::now());
-            }
-        }
-    }
-
-    /// #196: how long since the startup senders were ready, or `None` if they
-    /// are not ready yet (before which nothing is self-checked). A poisoned lock
-    /// reads as `None` (no self-check — the safe direction).
-    ///
-    /// mutants::skip — a wall-clock elapsed read (like `since_created`); a mutant
-    /// is catchable only by a wall-time assertion. The self-check DECISION it
-    /// feeds (`sp_core::health::no_receiver_after_restart`) is exhaustively
-    /// mutation-scored in sp-core.
-    #[cfg_attr(test, mutants::skip)]
-    pub fn elapsed_since_ready(&self) -> Option<Duration> {
-        self.senders_ready_at
-            .read()
-            .ok()
-            .and_then(|t| t.map(|i| i.elapsed()))
-    }
-
-    /// #196: record that `playlist_id` has reached `connections >= 1` since the
-    /// restart (latches the self-check off for it this process).
-    pub fn mark_reconnected(&self, playlist_id: i64) {
-        if let Ok(mut s) = self.reconnected.write() {
-            s.insert(playlist_id);
-        }
-    }
-
-    /// #196: whether `playlist_id` has reconnected since the restart.
-    /// (`is_ok_and`: a poisoned lock reads as `false` inside std, so there is no
-    /// separate mutable fallback literal — the reachable `false` comes from the
-    /// set not containing the id, which the unit test exercises.)
-    pub fn has_reconnected(&self, playlist_id: i64) -> bool {
-        self.reconnected
-            .read()
-            .is_ok_and(|s| s.contains(&playlist_id))
-    }
-
-    /// #196: record the "no receiver after restart" WARN for `playlist_id`.
-    /// Returns `true` iff this is the FIRST time (so the caller logs exactly
-    /// once per output, not once per poll). A poisoned lock returns `false`
-    /// (skip the WARN rather than spam) — the `false` lives inside `is_ok_and`,
-    /// so the only observable return is the reachable `HashSet::insert` result.
-    pub fn mark_warned_no_receiver(&self, playlist_id: i64) -> bool {
-        self.warned_no_receiver
-            .write()
-            .is_ok_and(|mut s| s.insert(playlist_id))
-    }
-
-    /// #196: clear the "no receiver after restart" WARN latch when an output
-    /// recovers, so a genuinely new failure re-warns.
-    pub fn clear_warned_no_receiver(&self, playlist_id: i64) {
-        if let Ok(mut s) = self.warned_no_receiver.write() {
-            s.remove(&playlist_id);
-        }
-    }
-
-    /// #196: record the advertised source URL a sender was assigned at creation.
-    /// `None` is ignored (keeps any previously-recorded URL rather than erasing
-    /// it — a stub/failed create should not clobber a known URL).
-    pub fn set_sender_url(&self, playlist_id: i64, url: Option<String>) {
-        let Some(url) = url else {
-            return;
-        };
-        if let Ok(mut map) = self.sender_urls.write() {
-            map.insert(playlist_id, url);
-        }
-    }
-
-    /// #196: the advertised source URL recorded for `playlist_id`, or `None` if
-    /// none has been recorded yet. A poisoned lock reads as `None`.
-    pub fn sender_url(&self, playlist_id: i64) -> Option<String> {
-        self.sender_urls
-            .read()
-            .ok()
-            .and_then(|m| m.get(&playlist_id).cloned())
     }
 
     /// #167: record that the engine created one more playback pipeline. Called
@@ -444,22 +183,6 @@ impl NdiHealthRegistry {
     #[cfg_attr(test, mutants::skip)]
     pub fn since_created(&self) -> Duration {
         self.created_at.elapsed()
-    }
-
-    /// #127 / #173: evaluate the receiver-recovery ladder for one pipeline and
-    /// apply the state mutation. Returns `Some(step)` iff the engine should
-    /// execute that OBS recovery rung now, else `None`. `is_dark` is true iff the
-    /// pipeline is Playing on program with the dark-wall `degraded_reason` set
-    /// (`connections == 0`).
-    pub fn evaluate_recovery(
-        &self,
-        playlist_id: i64,
-        is_dark: bool,
-        consecutive_bad_polls: u32,
-        now_100ns: i64,
-    ) -> Option<RecoveryStep> {
-        self.recovery
-            .evaluate(playlist_id, is_dark, consecutive_bad_polls, now_100ns)
     }
 
     /// Replace (or insert) the snapshot for `playlist_id`.
@@ -523,22 +246,19 @@ impl crate::playback::PlaybackEngine {
     /// Process a `PipelineEvent::HealthSnapshot` for `playlist_id`.
     /// Reconciles the pipeline-reported state against the canonical
     /// `PlayState`, fills `degraded_reason` when consecutive_bad_polls >= 2,
-    /// and writes the result into the shared `NdiHealthRegistry`.
+    /// derives the genlock lock, and writes the result into the shared
+    /// `NdiHealthRegistry`.
     ///
-    /// mutants::skip — the glue here (the pipeline lookup, the label
-    /// match, the registry calls, and the #221 L4a wiring of the
-    /// receiver expectation into the self-check and the ladder suppression)
-    /// is pinned BEHAVIOURALLY by the unit tests
+    /// mutants::skip — the glue here (the pipeline lookup, the label match,
+    /// the registry calls) is pinned BEHAVIOURALLY by the unit tests
     /// (`handle_health_snapshot_populates_registry_*`,
-    /// `..._fills_degraded_reason_*`, `engine_overrides_idle_to_waiting_*`,
-    /// `ndi_health_tests_expect.rs`); its DECISIONS are pure and
-    /// mutation-scored elsewhere (`ndi_health_expect`, `effective_dark_reason`,
-    /// `sp_core::health`). The log lines are `health_log::log_health_snapshot`
-    /// and the rung is `run_recovery_rung` (#221 L4a review).
+    /// `..._fills_degraded_reason_*`, `engine_overrides_idle_to_waiting_*`);
+    /// its DECISIONS are pure and tested elsewhere (`compute_degraded_reason`,
+    /// `lock_state::lock_for_heartbeat`). The log lines are
+    /// `health_log::log_health_snapshot`.
     #[cfg_attr(test, mutants::skip)]
     pub fn handle_health_snapshot(&mut self, playlist_id: i64, event: PipelineEvent) {
         let PipelineEvent::HealthSnapshot {
-            connections,
             frames_submitted_total,
             frames_submitted_last_5s,
             observed_fps,
@@ -568,13 +288,11 @@ impl crate::playback::PlaybackEngine {
         // Reconcile state: the canonical engine knows about WaitingForScene;
         // the pipeline thread doesn't. Override the pipeline's Idle when the
         // engine says WaitingForScene. Also map Playing+scene_inactive to
-        // Paused so compute_degraded_reason returns None when OBS is not
-        // on this pipeline's scene (connections=0 there is normal noise).
+        // Paused, so the label reads "Playing" only for a playlist on air
+        // (the badge, the #154/#167 idle gates) and an off-air playlist that
+        // keeps playing is never reported degraded.
         let scene_active = pp.scene_active.load(Ordering::Acquire);
         let canonical_state = match (&pp.state, &reported_state, scene_active) {
-            // OBS isn't on this pipeline's scene → no subscriber is expected.
-            // Map Playing to a quiet state so compute_degraded_reason returns
-            // None even when connections == 0.
             (PlayState::Playing { .. }, PlaybackStateLabel::Playing, false) => {
                 PlaybackStateLabel::Paused
             }
@@ -584,112 +302,28 @@ impl crate::playback::PlaybackEngine {
             _ => reported_state.clone(),
         };
 
-        let ndi_name = pp.pipeline.ndi_name().to_string();
-        // #221 L4a: a receiver is expected only while cg OBS was told to show
-        // this playlist (`ndi_health_expect`); else 0 receivers is normal: no
-        // dark-wall reason, no self-check, no ladder (an underrun still counts).
-        let cg_shown = self.program.get().and_then(|b| b.legacy_cg().shown_now());
-        let expected = receiver_expected(&canonical_state, cg_shown, playlist_id);
-        let base_degraded_reason = expected_reason(
-            compute_degraded_reason(
-                &canonical_state,
-                connections,
-                observed_fps,
-                nominal_fps,
-                consecutive_bad_polls,
-            ),
-            expected,
+        let ndi_name = pp.pipeline.output_name().to_string();
+        let degraded_reason = compute_degraded_reason(
+            &canonical_state,
+            observed_fps,
+            nominal_fps,
+            consecutive_bad_polls,
         );
-        // #196 item 5: if this output is dark (Playing on program, connections=0)
-        // but NO OBS NDI input advertises its stream, the receiver-side recovery
-        // ladder is not the tool for it — set a distinct reason and skip the
-        // ladder (`effective_dark_reason` returns a NON-dark-wall reason, so
-        // `is_dark` below is false). This stops the every-10 s degraded/recovered
-        // flap the incident saw for an output whose OBS scene did not exist yet.
-        let has_obs_input = self.output_has_obs_input(playlist_id);
-        let degraded_reason = effective_dark_reason(base_degraded_reason, has_obs_input);
 
-        // #196 item 4: post-restart receiver self-check. Once an output reaches
-        // a receiver, latch it as reconnected (and clear any earlier WARN); then
-        // — 30 s after the startup senders are ready — an output on program (or
-        // one that had a receiver before the restart) that still has none is
-        // flagged with a DISTINCT reason, so the receiver-side recovery ladder
-        // is NOT run for it (it cannot clear a restart wedge — only another
-        // restart re-rolls it). This is a NON-dark-wall reason, so `is_dark`
-        // below stays false. The whole decision is the pure, mutation-scored
-        // `sp_core::health::no_receiver_after_restart`.
-        if connections >= 1 {
-            self.ndi_health_registry.mark_reconnected(playlist_id);
-            self.ndi_health_registry
-                .clear_warned_no_receiver(playlist_id);
-        }
-        let elapsed_since_ready = self.ndi_health_registry.elapsed_since_ready();
-        let reconnected = self.ndi_health_registry.has_reconnected(playlist_id);
-        // #196: from the moment the senders are ready until an on-program output
-        // reconnects, the #173 receiver-side ladder is suppressed for it — the
-        // ladder cannot clear a restart wedge (it can deepen it), so it must
-        // NEVER run during the post-restart window (the self-check surfaces the
-        // failure at +30 s instead). This closes the ~10–30 s window where the
-        // dark-wall reason would otherwise arm the ladder before the +30 s
-        // `no_receiver_after_restart` reason takes over.
-        let ladder_suppressed = sp_core::health::ladder_suppressed_after_restart(
-            elapsed_since_ready,
-            reconnected,
-            expected,
-            connections,
-        );
-        let degraded_reason = if degraded_reason.as_deref() != Some(NO_OBS_INPUT_REASON)
-            && sp_core::health::no_receiver_after_restart(
-                elapsed_since_ready,
-                reconnected,
-                expected,
-                self.ndi_health_registry.pre_restart_count(playlist_id),
-                connections,
-            ) {
-            if self
-                .ndi_health_registry
-                .mark_warned_no_receiver(playlist_id)
-            {
-                warn!(
-                    playlist_id,
-                    ndi_name = %ndi_name,
-                    "ndi: {} — receiver did not return after the restart (self-check; NOT running the ladder)",
-                    sp_core::health::NO_RECEIVER_AFTER_RESTART_REASON,
-                );
-            }
-            Some(sp_core::health::NO_RECEIVER_AFTER_RESTART_REASON.to_string())
-        } else {
-            degraded_reason
-        };
-
-        // Look up the previous snapshot from the registry to detect
-        // connection-count changes and degraded transitions for logging.
+        // The previous snapshot, for the degraded / recovered transition and
+        // the once-per-minute heartbeat lines.
         let prev = self
             .ndi_health_registry
             .snapshots()
             .into_iter()
             .find(|s| s.playlist_id == playlist_id);
-        let prev_connections = prev.as_ref().map(|s| s.connections);
-
-        // #196: persist the current receiver count whenever it changes (incl.
-        // the first snapshot) so the NEXT restart's self-check baseline knows
-        // this output had (or lost) a receiver before it. #198 item 5: only
-        // QUEUE it here — this handler is sync, and a `tokio::spawn` from a sync
-        // caller with no reactor panics (and a flapping count would spawn one
-        // detached, unordered task per 5 s poll). The async pipeline-event
-        // handler drains and awaits the queued writes.
-        if prev_connections != Some(connections) {
-            self.ndi_health_registry
-                .queue_receiver_count_persist(playlist_id, connections);
-        }
 
         // Lock-state derivation (#149, Lane 1). Read the box-wide clock health,
         // push this heartbeat's cumulative pacing counters into the per-pipeline
         // 60 s window (a monotonic timestamp off the engine's `Instant` origin —
         // the window is purely relative, so no wall clock is needed), then
-        // derive the three-state lock from clock_ok + pacing.enabled +
-        // connections + the differenced window counts. A `-1` "never polled"
-        // connection count maps to 0 receivers.
+        // derive the three-state lock from clock_ok + pacing.enabled + the
+        // differenced window counts.
         let clock = match self.clock_health.read() {
             Ok(guard) => guard.clone(),
             Err(_) => ClockHealth::default(),
@@ -698,50 +332,25 @@ impl crate::playback::PlaybackEngine {
             .saturating_duration_since(self.instant_origin.0)
             .as_nanos()
             / 100) as i64;
-        // #168 r6b: push this heartbeat's cumulative pacing counters into the 60 s
-        // window, difference it (slots + late/repeats/resyncs), and derive the
-        // rate-normalised lock. Feed `source_fps` (the DECODER rate, path-independent)
-        // — NOT `nominal_fps` (the grid on the paced path, which falsely degraded a
-        // 24-fps output) — with `grid_fps` the pacer's fixed `GENLOCK_GRID_FPS`.
+        // #168 r6b: feed `source_fps` (the DECODER rate, path-independent) —
+        // NOT `nominal_fps` (the grid, which falsely degraded a 24-fps output)
+        // — with `grid_fps` the pacer's fixed `GENLOCK_GRID_FPS`.
         let (lock_state, lock_reason) = crate::playback::lock_state::lock_for_heartbeat(
             self.lock_windows.entry(playlist_id).or_default(),
             heartbeat_100ns,
             &pacing,
             clock.clock_ok,
-            connections.max(0) as u32,
             source_fps,
             sp_core::genlock::GENLOCK_GRID_FPS as u32,
             transport_from_reported(&reported_state),
         );
 
-        // #127 / #173 receiver-side recovery: evaluate the dark-wall ladder for
-        // this pipeline BEFORE building the snapshot, so the fired rung is
-        // recorded on it. `is_dark` = Playing on program with the dark-wall
-        // reason (connections == 0) AND not in the #196 post-restart window
-        // (where the ladder must never run — it cannot clear a restart wedge).
-        let is_dark = degraded_reason.as_deref() == Some(DARK_WALL_REASON) && !ladder_suppressed;
-        let recovery_step_fired = self.ndi_health_registry.evaluate_recovery(
-            playlist_id,
-            is_dark,
-            consecutive_bad_polls,
-            heartbeat_100ns,
-        );
-        // Surface the ladder rung on the snapshot: the rung fired this poll, or
-        // the last rung still in flight this outage (carried from the previous
-        // snapshot); cleared to None the moment the receiver re-attaches.
-        let recovery_step = if is_dark {
-            recovery_step_fired.or_else(|| prev.as_ref().and_then(|s| s.recovery_step))
-        } else {
-            None
-        };
-
         let snapshot = PipelineHealthSnapshot {
             playlist_id,
-            ndi_name: ndi_name.clone(),
-            state: canonical_state.clone(),
+            ndi_name,
+            state: canonical_state,
             // #201 round 2: raw transport (pre-reconciliation), for the API.
             transport: transport_from_reported(&reported_state),
-            connections,
             frames_submitted_total,
             frames_submitted_last_5s,
             observed_fps,
@@ -750,39 +359,17 @@ impl crate::playback::PlaybackEngine {
             last_submit_ts: last_submit_ts.map(|t| self.instant_to_utc(t)),
             last_heartbeat_ts: Some(self.instant_to_utc(last_heartbeat_ts)),
             consecutive_bad_polls,
-            degraded_reason: degraded_reason.clone(),
+            degraded_reason,
             clock,
             pacing,
             audio,
             lock_state,
             lock_reason: lock_reason.to_string(),
-            // #151: read the shared burn flag by output name so the health JSON
-            // reflects the current toggle state (false unless the API set it).
-            burn_on: self.ndi_burn_registry.is_on(&ndi_name),
-            recovery_step,
-            // #196: the advertised host:port this sender landed on, recorded in
-            // the registry at sender creation (`create_startup_senders` / the
-            // runtime ensure path), so it survives across heartbeats and both
-            // the SDK-clocked and paced heartbeat paths.
-            sender_url: self.ndi_health_registry.sender_url(playlist_id),
         };
 
-        health_log::log_health_snapshot(
-            &snapshot,
-            prev.as_ref(),
-            scene_active,
-            expected,
-            &loop_stats,
-        );
+        health_log::log_health_snapshot(&snapshot, prev.as_ref(), scene_active, &loop_stats);
 
         self.ndi_health_registry.update(snapshot);
-
-        // #127 / #173: if the ladder fired a recovery rung this poll, execute it
-        // over the healthy OBS WebSocket (clear+restore → toggle → recreate).
-        // The rung was chosen above by `evaluate_recovery`.
-        if let Some(step) = recovery_step_fired {
-            self.run_recovery_rung(playlist_id, &ndi_name, step);
-        }
     }
 }
 
@@ -809,7 +396,7 @@ fn should_log_periodic_heartbeat(prev: Option<DateTime<Utc>>, cur: DateTime<Utc>
 /// unit-testable; the periodic INFO path logs the returned string verbatim.
 pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
     format!(
-        "ndi: genlock playlist_id={pid} ndi_name={name} seq={seq} late={late} p99_us={p99} repeats={repeats} resyncs={resyncs} relatches={relatches} lag={lag} av_align_err_ms={av_err:.1} av_corrections={av_corr} av_corrected_samples={av_samples} av_frame_offset_ms={av_off:.1} av_frame_offset_min_ms={av_off_min:.1} av_frame_offset_max_ms={av_off_max:.1} wall_anchor_max_step_us={wa_step} wall_anchor_wide_brackets={wa_wide} wall_anchor_slewed_us={wa_slewed} wall_anchor_steps_followed={wa_followed} wall_anchor_last_step_us={wa_last} wall_anchor_holds_followed={wa_holds} wall_anchor_last_hold_us={wa_hold} wall_anchor_probes_rejected={wa_rejected} wall_anchor_detect_to_follow_us={wa_detect} fleet_shift_slots={shift_slots} last_regrid_remainder_us={remainder} song_change_unserviced_slots={unserviced} consumer_fill_pairs={fills} underruns={underruns} clock_ok={clock_ok} lock={lock} reason=\"{reason}\"",
+        "ndi: genlock playlist_id={pid} ndi_name={name} seq={seq} late={late} p99_us={p99} repeats={repeats} resyncs={resyncs} seeks={seeks} relatches={relatches} lag={lag} av_align_err_ms={av_err:.1} av_corrections={av_corr} av_corrected_samples={av_samples} av_frame_offset_ms={av_off:.1} av_frame_offset_min_ms={av_off_min:.1} av_frame_offset_max_ms={av_off_max:.1} wall_anchor_max_step_us={wa_step} wall_anchor_wide_brackets={wa_wide} wall_anchor_slewed_us={wa_slewed} wall_anchor_steps_followed={wa_followed} wall_anchor_last_step_us={wa_last} wall_anchor_holds_followed={wa_holds} wall_anchor_last_hold_us={wa_hold} wall_anchor_probes_rejected={wa_rejected} wall_anchor_detect_to_follow_us={wa_detect} fleet_shift_slots={shift_slots} last_regrid_remainder_us={remainder} song_change_unserviced_slots={unserviced} consumer_fill_pairs={fills} underruns={underruns} clock_ok={clock_ok} lock={lock} reason=\"{reason}\"",
         pid = s.playlist_id,
         name = s.ndi_name,
         seq = s.pacing.seq,
@@ -817,6 +404,7 @@ pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
         p99 = s.pacing.jitter_p99_us,
         repeats = s.pacing.repeats,
         resyncs = s.pacing.resyncs,
+        seeks = s.pacing.seeks, // #150: the lock window restarts when it moves
         relatches = s.pacing.relatches,
         lag = s.pacing.lag_slots,
         av_err = s.pacing.av_align_err_ms,
@@ -853,7 +441,9 @@ pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
 /// Pure helper: convert canonical state + per-poll values + consecutive
 /// bad-poll count into the degraded_reason string. The frontend uses this
 /// string verbatim. Returns None when the snapshot is healthy or below
-/// the >=2 consecutive gate.
+/// the >=2 consecutive gate. #221 lane 3: no receiver count — a playlist
+/// has no NDI output of its own, so a bad poll is an underrun or a stalled
+/// delivery (`pipeline::classify_bad_poll`).
 ///
 /// Mutation testing: the >=2 gate is a single comparison; the helper is
 /// excluded from cargo-mutants because the boundary is exhaustively
@@ -861,7 +451,6 @@ pub(crate) fn format_genlock_line(s: &PipelineHealthSnapshot) -> String {
 #[cfg_attr(test, mutants::skip)]
 fn compute_degraded_reason(
     state: &PlaybackStateLabel,
-    connections: i32,
     observed_fps: f32,
     nominal_fps: f32,
     consecutive_bad_polls: u32,
@@ -871,9 +460,6 @@ fn compute_degraded_reason(
     }
     if consecutive_bad_polls < 2 {
         return None;
-    }
-    if connections == 0 {
-        return Some(DARK_WALL_REASON.to_string());
     }
     if nominal_fps > 0.0 && observed_fps < nominal_fps / 2.0 {
         return Some(format!(
@@ -896,6 +482,3 @@ mod lock_state_tests;
 #[cfg(test)]
 #[path = "ndi_health_tests.rs"]
 mod tests;
-#[cfg(test)]
-#[path = "ndi_health_tests_expect.rs"]
-mod tests_expect;

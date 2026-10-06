@@ -65,15 +65,11 @@ pub const SETTING_REMOTE_WS_PASSWORD: &str = "remote_ws_password";
 /// #213: the default remote-control port, next to cg OBS's own 4455.
 pub const DEFAULT_REMOTE_WS_PORT: u16 = 4456;
 
-/// #215 (B5 of EPIC #174): `SP-program` follows cg OBS's program scene
-/// natively (the scene → source rule of the #213 remote control). `"true"`
-/// follows; anything else (or absent) = off, the default.
-pub const SETTING_PROGRAM_FOLLOW_OBS: &str = "program_follow_obs";
-/// #215: the transition every program cut uses: `obs` (cg OBS's current scene
-/// transition, the default), `fade` or `cut`.
+/// #215: the transition every program cut uses: `fade` or `cut`; anything
+/// else (or absent) is the default fade of [`SETTING_PROGRAM_TRANSITION_MS`].
+/// #221 L5 retired `obs` (cg OBS's scene transition) with the OBS follow.
 pub const SETTING_PROGRAM_TRANSITION: &str = "program_transition";
-/// #215: the fade length in ms when SongPlayer picks it (`fade`, or `obs`
-/// while cg OBS's transition is not known).
+/// #215: the fade length in ms (`fade`, and the default).
 pub const SETTING_PROGRAM_TRANSITION_MS: &str = "program_transition_ms";
 /// #215: the default fade length (9 slots of the 30 fps grid).
 pub const DEFAULT_PROGRAM_TRANSITION_MS: u32 = 300;
@@ -88,6 +84,39 @@ pub fn program_transition_ms(raw: Option<&str>) -> u32 {
     raw.and_then(|v| v.trim().parse::<u32>().ok())
         .filter(|&ms| ms != 0)
         .unwrap_or(DEFAULT_PROGRAM_TRANSITION_MS)
+}
+
+/// #223 S2: the `SP-program-MAX` output — the program's fixed 3840×2160
+/// picture, composed on the GPU and shared with Resolume Arena over Spout.
+/// ON unless the setting says exactly `"false"` ([`program_max_enabled`]).
+pub const SETTING_PROGRAM_MAX_ENABLED: &str = "program_max_enabled";
+/// #223 S2: MAX is ON by default (the owner decided MAX exists, revision 3).
+pub const DEFAULT_PROGRAM_MAX_ENABLED: bool = true;
+
+/// #223 S2: whether a stored `program_max_enabled` turns `SP-program-MAX` on:
+/// OFF only for an explicit `"false"` (trimmed), else
+/// [`DEFAULT_PROGRAM_MAX_ENABLED`]. The ONE rule the startup read and the
+/// settings task share.
+pub fn program_max_enabled(raw: Option<&str>) -> bool {
+    raw.map_or(DEFAULT_PROGRAM_MAX_ENABLED, |v| v.trim() != "false")
+}
+
+/// #223 S3b: hardware video decode for playback — Media Foundation's decoder
+/// on the GPU (a Direct3D 11 device manager) instead of in software. The
+/// paced decode producer reads it when it opens a song, so a change applies
+/// from the next song ([`video_hw_decode`]).
+pub const SETTING_VIDEO_HW_DECODE: &str = "video_hw_decode";
+/// #223 S3b: OFF until the main session's box gate passes (4K decode mean
+/// ≤ 50 % of 1/f, 1440p not slower); the decode bench measures it with
+/// `"hw": true` meanwhile.
+pub const DEFAULT_VIDEO_HW_DECODE: bool = false;
+
+/// #223 S3b: whether a stored `video_hw_decode` turns hardware decode on: ON
+/// only for an explicit `"true"` (trimmed), else
+/// [`DEFAULT_VIDEO_HW_DECODE`]. The ONE rule the startup read and the
+/// settings task share.
+pub fn video_hw_decode(raw: Option<&str>) -> bool {
+    raw.map_or(DEFAULT_VIDEO_HW_DECODE, |v| v.trim() == "true")
 }
 
 /// #212: the program-bus source id of the NDI input (playlists are positive
@@ -207,7 +236,6 @@ mod tests {
 
     #[test]
     fn program_transition_setting_keys_and_default_ms() {
-        assert_eq!(SETTING_PROGRAM_FOLLOW_OBS, "program_follow_obs");
         assert_eq!(SETTING_PROGRAM_TRANSITION, "program_transition");
         assert_eq!(SETTING_PROGRAM_TRANSITION_MS, "program_transition_ms");
         assert_eq!(DEFAULT_PROGRAM_TRANSITION_MS, 300);
@@ -233,6 +261,38 @@ mod tests {
         assert_eq!(program_transition_ms(Some("abc")), 300);
         assert_eq!(program_transition_ms(Some("")), 300);
         assert_eq!(program_transition_ms(None), 300);
+    }
+
+    /// #223 S2: `SP-program-MAX` is ON unless the setting says exactly
+    /// "false" — the owner decided MAX exists, so a missing or mangled value
+    /// keeps it on.
+    #[test]
+    fn program_max_is_on_unless_the_setting_says_false() {
+        assert_eq!(SETTING_PROGRAM_MAX_ENABLED, "program_max_enabled");
+        assert!(program_max_enabled(None), "no setting = ON");
+        assert!(program_max_enabled(Some("true")));
+        assert!(program_max_enabled(Some("")), "an empty value = ON");
+        assert!(program_max_enabled(Some("no?")), "a mangled value = ON");
+        assert!(
+            !program_max_enabled(Some("false")),
+            "only an explicit false"
+        );
+        assert!(!program_max_enabled(Some(" false\n")), "trimmed");
+    }
+
+    /// #223 S3b: hardware decode is OFF unless the setting says exactly
+    /// "true" — playback stays on the measured software path until the box
+    /// gate passes, so a missing or mangled value keeps it off.
+    #[test]
+    fn video_hw_decode_is_off_unless_the_setting_says_true() {
+        assert_eq!(SETTING_VIDEO_HW_DECODE, "video_hw_decode");
+        assert!(!video_hw_decode(None), "no setting = OFF");
+        assert!(video_hw_decode(Some("true")));
+        assert!(video_hw_decode(Some(" true\n")), "trimmed");
+        assert!(!video_hw_decode(Some("false")));
+        assert!(!video_hw_decode(Some("")), "an empty value = OFF");
+        assert!(!video_hw_decode(Some("TRUE")), "only the exact word");
+        assert!(!video_hw_decode(Some("yes")), "a mangled value = OFF");
     }
 
     #[test]

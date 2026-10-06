@@ -1,6 +1,6 @@
 //! #195: the stems queue serves what is IN USE first. The plain
 //! `models_stems::get_next_video_for_stems` picks by `stem_manual_priority DESC,
-//! id ASC` only — so the playlist on OBS program can wait days behind low-id
+//! id ASC` only — so the playlist on program can wait days behind low-id
 //! videos of unused playlists. This module wraps that query in a tiered selector
 //! (and mirrors the tier rank onto the panel's queue position) without touching
 //! the eligibility predicate or the stem separation itself.
@@ -15,8 +15,8 @@
 //! Inner order inside every tier is unchanged (`stem_manual_priority DESC,
 //! id ASC`); an empty id list SKIPS its tier (never `IN ()`).
 //!
-//! In its own sibling module because `db/models.rs` is at the 1000-line cap
-//! (`db/models_ndi.rs` precedent). The playlist-id tier inputs are built by the
+//! In its own sibling module because `db/models.rs` is at the 1000-line cap.
+//! The playlist-id tier inputs are built by the
 //! worker-agnostic free fns in `crate::stems::queue_tiers`.
 
 use sqlx::{Row, SqlitePool};

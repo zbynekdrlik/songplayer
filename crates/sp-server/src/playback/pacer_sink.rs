@@ -1,11 +1,9 @@
 //! Pacer scheduling + sink helpers split out of `pacer.rs` to keep it under the
-//! 1000-line cap: the pure [`plan_sleep_100ns`] sleep decision (#147 change 4),
-//! the [`default_submit_shared`] `PacedSink::submit_shared` default (#203) and
-//! the outer loop's [`idle_poll`] (#147 standby same-path). `SleepDecision` and
-//! `plan_sleep_100ns` are re-exported from `pacer` so their original paths stay
-//! valid; `idle_poll` is used from here.
-
-use std::time::Duration;
+//! 1000-line cap: the pure [`plan_sleep_100ns`] sleep decision (#147 change 4)
+//! and the [`default_submit_shared`] `PacedSink::submit_shared` default (#203).
+//! `SleepDecision` and `plan_sleep_100ns` are re-exported from `pacer` so their
+//! original paths stay valid. (#221 lane 3 deleted `idle_poll`: the pipeline's
+//! outer loop polls its commands without a wait, `pipeline.rs`.)
 
 use sp_core::genlock::UNITS_PER_SECOND;
 use sp_ndi::AudioFrame;
@@ -48,33 +46,12 @@ pub fn plan_sleep_100ns(now_100ns: i64, until_100ns: i64, interval_100ns: i64) -
     }
 }
 
-/// How long the pipeline's outer loop waits for a command before it enters the
-/// idle fill (#147 standby same-path). Paced: `PACED_IDLE_POLL` (zero), so the idle
-/// black + silence goes out on the very next boundary after pipeline start, a
-/// song end or a stop, and the grid never sits empty for the old 5 s poll.
-/// SDK-clocked (legacy): the unchanged 5 s heartbeat poll.
-pub fn idle_poll(genlock_pacing: bool) -> Duration {
-    if genlock_pacing {
-        PACED_IDLE_POLL
-    } else {
-        LEGACY_IDLE_POLL
-    }
-}
-
-/// Paced outer-loop poll: no wait — standby is the paced grid's job (#147).
-const PACED_IDLE_POLL: Duration = Duration::ZERO;
-
-/// SDK-clocked outer-loop poll: one idle heartbeat per 5 s (unchanged).
-const LEGACY_IDLE_POLL: Duration = Duration::from_secs(5);
-
 /// The default [`PacedSink::submit_shared`] body: build a one-shot [`PacedFrame`]
 /// over the borrowed pixels and delegate to [`PacedSink::emit_standby`] (every
 /// shared-picture submit is a standby pair, #215), so a sink that implements
-/// only `emit` (the test sinks) keeps working. [`FrameSubmitter`]
-/// OVERRIDES `submit_shared` to move the [`SharedFrame`] straight into the
-/// zero-copy async holdover instead.
-///
-/// [`FrameSubmitter`]: crate::playback::submitter::FrameSubmitter
+/// only `emit` keeps working. The production `paced_output::HandoffSink`
+/// keeps this default (its job takes the frame by `Arc` clone, no pixel
+/// copy); the tests' `FrameSubmitter` overrides it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn default_submit_shared<S: PacedSink + ?Sized>(
     sink: &mut S,

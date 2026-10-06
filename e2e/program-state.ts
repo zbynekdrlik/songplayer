@@ -1,8 +1,9 @@
 /**
- * What is on the OBS program right now, as SongPlayer reports it (#184).
+ * What is on SongPlayer's program right now, as SongPlayer reports it (#184).
  *
- * The post-deploy suite runs against the live box and NEVER switches OBS
- * scenes (CLAUDE.md). After an event the operator leaves the program on
+ * A program-state spec runs against the live box and NEVER switches the
+ * program to set itself up (other specs press scenes through the facade
+ * and restore it). After an event the operator leaves the program on
  * whatever sp-* scene the event ended with — a regular playlist scene
  * (sp-slow, sp-fast, …) or `sp-dabing`. A spec that hard-codes one of those
  * states fails for a non-product reason (#184: the run after the 25.9 event
@@ -33,7 +34,7 @@ export interface ProgramState {
    *  #221 L4b: the scene catalog's name for SP-program's source). */
   activeScene: string | null;
   /** SongPlayer's on-air set (`/api/v1/status.active_playlist_ids`):
-   *  SP-program's playlist plus the one cg OBS was told to show. */
+   *  SP-program's playlist (#221 B4 step 6: none for "OBS manuál"). */
   activePlaylistIds: number[];
   /** True when the Dabing playlist (`kind == "dabing"`) is on program. */
   dabingOnProgram: boolean;

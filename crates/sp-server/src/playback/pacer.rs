@@ -17,8 +17,8 @@
 //! I/O is kept thin: the pacer OWNS its [`WallClock`] (a scheduling read at
 //! entry, an emit read right before the send so lateness includes decode time);
 //! the caller supplies `pull` (the next decoded frame) and a [`PacedSink`]
-//! (audio-before-video submission) — `FrameSubmitter` + the MF decoder in
-//! production, a recording fake + a synthetic stream over a settable clock in
+//! (audio-before-video submission) — `HandoffSink` (to the program bus) + the
+//! MF decoder in production, a recording fake + a synthetic stream over a settable clock in
 //! tests, so every emit/repeat/drop/catch-up/resync/re-latch decision is
 //! Linux-testable.
 
@@ -79,9 +79,9 @@ impl PacedFrame {
     }
 }
 
-/// The sink the pacer emits through. `FrameSubmitter` implements it in
-/// production (audio-before-video async NDI submit with explicit timecodes);
-/// tests use a recording fake.
+/// The sink the pacer emits through. `paced_output::HandoffSink` implements it
+/// in production (its consumer delivers each pair to the program bus); tests
+/// use a recording fake, or `FrameSubmitter` over `MockNdiBackend`.
 pub trait PacedSink {
     /// Emit one boundary: submit each chunk in `audio` (stamped `audio_tc_100ns`,
     /// the timeline instant of its first sample — the pacer passes the boundary
@@ -118,9 +118,9 @@ pub trait PacedSink {
 
     /// Emit one boundary from an already-shared frame (#203). The DEFAULT builds
     /// a one-shot [`PacedFrame`] over the borrowed pixels and delegates to
-    /// [`emit_standby`](Self::emit_standby), so an `emit`-only sink still works;
-    /// `FrameSubmitter` OVERRIDES it to move the `SharedFrame` into the zero-copy
-    /// holdover. The standby pair (idle / pre-roll black, a starve fill, a held
+    /// [`emit_standby`](Self::emit_standby), so an `emit`-only sink still works (the
+    /// `HandoffSink` keeps it: its job takes the frame by `Arc`); the tests' `FrameSubmitter`
+    /// OVERRIDES it into its zero-copy holdover. The standby pair (idle / pre-roll black, a starve fill, a held
     /// seek frame, #147) goes through it by SHARED reference (a refcount bump).
     #[allow(clippy::too_many_arguments)]
     fn submit_shared(
@@ -258,6 +258,10 @@ pub struct Pacer {
     jitter_idx: usize,
     repeats: u64,
     resyncs: u64,
+    /// #150: seeks counted at their first fresh frame
+    /// (`PacingStats::seeks`), and whether one is still waiting for it.
+    seeks: u64,
+    seek_settling: bool,
     relatches: u64,
     dropped: u64,
     /// Lag (whole grid slots the serviced boundary sat behind `floor(now)`) at
@@ -323,6 +327,8 @@ impl Pacer {
             jitter_idx: 0,
             repeats: 0,
             resyncs: 0,
+            seeks: 0,
+            seek_settling: false,
             relatches: 0,
             dropped: 0,
             last_lag_slots: 0,
@@ -392,6 +398,7 @@ impl Pacer {
     fn anchor_at(&mut self, first: i64) {
         self.wall_start_100ns = first;
         self.next_boundary_100ns = first;
+        self.seek_settling = false; // #150: a new song drops a seek it overtook
         self.pending = None;
         // A fresh seek / new song: drop any frame decoded ahead for the OLD grid
         // (#147 lane 4) — the pipeline re-`prepare`s against the new anchor.
@@ -566,6 +573,7 @@ impl Pacer {
 
         let outcome = if let Some(frame) = due {
             self.on_emit(emit_now, stamp_boundary);
+            self.count_settled_seek(); // #150
             sink.emit(&frame, &audio_frames, stamp_boundary, stamp_boundary);
             self.last_frame = Some(frame);
             ServiceOutcome::Emitted
@@ -817,6 +825,7 @@ impl Pacer {
             jitter_p99_us: self.jitter_p99_us(),
             repeats: self.repeats,
             resyncs: self.resyncs,
+            seeks: self.seeks,
             relatches: self.relatches,
             dropped: self.dropped,
             lag_slots: self.last_lag_slots,
@@ -843,8 +852,8 @@ impl Pacer {
             // #224 part 2: the same wall's relabel and its last remainder.
             fleet_shift_slots: self.wall.shift().slots,
             last_regrid_remainder_us: self.wall.shift().last_remainder_100ns / 10,
-            // #168 r2: the pacer does not submit — the paced submit thread fills
-            // `submit_call_us_max`/`_p99` via `merge_pacing_stats`; 0 here.
+            // The paced output's consumer fills its own counters via
+            // `merge_pacing_stats`.
             ..Default::default()
         }
     }
@@ -919,9 +928,6 @@ impl Pacer {
             underruns: self.audio_buf.underruns(),
             overflows: self.audio_buf.overflows(),
             buffer_ms: self.audio_buf.buffer_ms(),
-            // The paced path has its own media-aligned audio; the wall-clock
-            // emitter (#192) is the SDK-clocked path's tool, disabled here.
-            emitter: Default::default(),
         }
     }
 }

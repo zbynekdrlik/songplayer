@@ -6,8 +6,9 @@
 //! play/pause/skip/previous/mode. Replaces the old, un-hardened
 //! `POST /api/v1/playlists/{id}/seek` (which returned 204 unconditionally). The
 //! same downstream path as before: `EngineCommand::Seek` → `PlaybackEngine::seek`
-//! → `PipelineCommand::Seek` (the decode loop clears the audio emitter ring on
-//! seek; lyrics/subtitle position follows the pipeline position events).
+//! → `PipelineCommand::Seek` (the paced producer flushes its queue and drops
+//! every pre-seek frame, the pacer re-anchors; lyrics/subtitle position
+//! follows the pipeline position events).
 //!
 //! Hardening:
 //! - `404 Not Found` when the playlist row does not exist.

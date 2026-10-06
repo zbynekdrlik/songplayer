@@ -327,8 +327,8 @@ an idle check; Claude during active prompts can too.
 
 Receiver-side ground-truth soak for the genlock chain (Genlock 4/6 lane 2).
 `workflow_dispatch`-only for now (the daily `schedule` line is committed
-commented-out; enable it when camera-box#1295 puts cg OBS on the genlock
-build). It is NOT wired to push/PR — it deliberately waits `minutes`, which is
+commented-out; enable it only once pointing the A/V gate's probe for a soak
+is automated, see "What it can see since #221 lane 3" below). It is NOT wired to push/PR — it deliberately waits `minutes`, which is
 allowed only outside the PR pipeline (CLAUDE.md "CI architecture").
 
 **Run it:**
@@ -338,12 +338,16 @@ gh workflow run genlock-soak.yml --ref dev -f minutes=5
 ```
 One job `soak` on the `[self-hosted, windows, resolume]` runner. It:
 1. checks out camera-box at a PINNED commit (`fdd68e47c…`) for the verifier;
-2. preflights SongPlayer `/api/v1/status` + OBS WebSocket 4455, notes the
-   `genlock_pacing` setting + per-output `lock_state` into the job summary;
-3. plays the first playlist with videos (no OBS scene switch — SongPlayer just
-   emits NDI on that SP-* stream, which cg OBS ingests; the live wall is
-   untouched) and, during the `minutes` window, samples `/api/v1/ndi/health`
-   once per minute into `sp-health.csv`;
+2. preflights SongPlayer `/api/v1/status` + OBS WebSocket 4455, notes what
+   `SP-program` carries (source + receivers) + per-pipeline `lock_state` into
+   the job summary;
+3. plays the first playlist with videos (no scene switch) and, during the
+   `minutes` window, samples `/api/v1/ndi/health` once per minute into
+   `sp-health.csv`. #221 lane 3: SongPlayer's only NDI output is
+   `SP-program`, so the receiver side sees the playlist only while it is
+   SongPlayer's program source and cg OBS shows a scene receiving
+   `SP-program` (e.g. the A/V gate's probe scene "A/V gate (SP-program)");
+   run the soak in that state;
 4. dumps the newest RESOLUME-SNV OBS log tail (last 4000 lines, byte-safe) to
    `cg-obs.log`;
 5. runs `camera-box/scripts/cg-chain-verify.sh --hops cg-obs` against that log
@@ -358,15 +362,17 @@ One job `soak` on the `[self-hosted, windows, resolume]` runner. It:
 - `cg-obs.log` — the receiver log tail the verdict was computed from.
 - `cg-verdict.txt` — the verifier's printed per-hop table + OVERALL PASS/FAIL.
 
-**Expected result TODAY = FAIL (count-gate BEFORE picture).** Until
-camera-box#1295 lands, cg OBS is not on the genlock build, so its log carries
-NO `genlock-fifo audit 'sp-*_video'` lines. The verifier reports the `cg-obs`
-hop as `NO SOURCES` / `UNREADABLE` and exits 3 → the job is RED. Equivalently:
-`locked=0` on every `sp-*` input is the honest count-gate signal that there is
-no genlock picture yet — that is the correct, expected state, not a regression.
-The workflow flips to a real PASS/FAIL verdict only once the receiver is on the
-genlock build (add the `schedule` line then and add the `strih`/`stream` hops
-once the runner has the ssh/bundle-state reader, camera-box#1294 Q10).
+**What it can see since #221 lane 3.** SongPlayer's only output is
+`SP-program`, and cg OBS's only input of it is the A/V gate's probe
+"A/V gate SP-program" (`CG_CHAIN_CGOBS_SRC_RE`; the verifier's default
+`sp-.*_video` names inputs that receive nothing any more). The gate keeps that
+probe IDLE outside its take, so an unattended soak reads `NO SOURCES` and exits
+3 (RED): that is the probe being idle, not a regression. For a real verdict,
+point the probe at `<HOST> (SP-program)` and put cg OBS on the probe scene by
+hand, run the soak, then set the probe back to `""` and cg OBS back on its own
+scene (the workflow header). Add the `schedule` line and the `strih`/`stream`
+hops only once that is automated and the runner has the ssh/bundle-state reader
+(camera-box#1294 Q10).
 
 **Bumping the pinned camera-box ref:** replace the full 40-char SHA in the
 `Checkout camera-box` step with a newer camera-box commit that still ships
@@ -404,3 +410,26 @@ The wall's clips were repointed from `RESOLUME-SNV (cg-obs)` to `RESOLUME-SNV (S
 Save the composition first (`GET /api/v1/composition` > file) so the rollback is exact.
 
 - **A REST change lives only in Arena's MEMORY until the composition is saved (#221, 30.9.2026).** The 29.9 switch was never saved, so a Save & Quit + relaunch at 15:19Z brought back the file's cg-obs sources and the wall silently ran on cg OBS for a day. End EVERY Arena change with `POST /api/v1/composition/save` (Arena 7.28 REST, no body = the current file, 204 after ~4.6 s for the 36 MB `Bridge.avc`). Then check the file: its mtime, plus `Select-String -SimpleMatch 'SP-program'` count > 0. Back the `.avc` up to `C:\ProgramData\SongPlayer\backup\` first. The GUI path does not work over MCP: Arena will not take the foreground (SetForegroundWindow is refused even after an Alt press, and Ctrl+S never reached it), and the MCP screenshot of the desktop is black.
+
+## Arena: moving clips in EVERY deck to a new source (#221/#223, 5.10.2026)
+
+The REST deck-by-deck run failed. The safe path is an offline edit of the saved `.avc` plus a relaunch. Scripts are in `C:\ProgramData\SongPlayer\ops\223\`.
+
+- **Identify a clip's source exactly.** In REST it is the first line of `clip.video.description` (`RESOLUME-SNV (cg-obs)\nNDI · 1920x1080 …`, or `SP-program-MAX`). In the `.avc` it is the clip's `<PrimarySource><VideoSource type="NDIVideoSource"><NDIVideoInfo sourceName="…"/>` (or `type="SpoutVideoSource"><SpoutInfo serverName="…"/>`).
+  - NEVER match a name anywhere in the clip's video JSON. That hit clips by an effect's option list.
+- **REST deck switching is not a batch tool.**
+  - `POST /decks/by-id/<id>/select` lags. The deck's `selected` flag and the layers' clip ids update seconds apart: a first load takes ~18 s, a loaded deck ~1 s. Until then, `clips/by-id` of the new deck answers 404.
+  - A select re-ids params, so SongPlayer's map goes stale and refreshes (expected 404 WARNs).
+  - A save attempted during that churn answered **412**, and nothing was written.
+- **Offline edit (`avc_to_max.py`).**
+  - Write a COPY of `Bridge.avc`, replacing each matched clip's `VideoSource` with the exact form Arena itself saved for that source type.
+  - Set Width/Height `default` to the new source size and keep the clip's own `value`. A value still equal to the NDI 640×480 placeholder default means "follow the live 1920×1080 source".
+  - A clip named after its source (default = value = the source name) gets the new name, as Arena does on an open.
+  - Prove the diff with `avc_diff.py`: everything outside the matched clips must be byte-identical, and both files must parse as XML.
+- **Swap.**
+  - Snapshot `/composition` first, to know which clips are live.
+  - `Stop-Process Arena -Force` (no save), back up the live `.avc`, copy in the new one and check its hash, then `Start-ScheduledTask SP-ArenaLaunch`.
+- **Arena does NOT reconnect clips after a relaunch.** Only Blank/BG layers came back live. Reconnect every clip that was live in the pre-kill snapshot (`reconnect.py`), or the wall shows no SongPlayer video.
+- **Full `/composition` read (~15 MB):** PowerShell `Invoke-WebRequest` failed with "connection forcibly closed". Python `urllib` reads it in 0.4 s.
+- **Wall check from session 0:** the scheduled task `SP-WallShot` (interactive) runs `shot.ps1` and grabs the output displays to `shots\wall_after.png`. `wallmean.ps1` gives the video area's brightness: 0 = pure black.
+- **A black Spout clip:** re-triggering (`/connect`) does not bring the picture back. Re-open the source (`/open source:///video/SP-program-MAX`), then PUT the size back to 1920×1080 (#223 comment 5996266548).

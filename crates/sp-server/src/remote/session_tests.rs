@@ -578,14 +578,21 @@ async fn get_version_and_studio_mode_are_answered_by_the_facade() {
     );
 }
 
+/// The scene list is cg OBS's, forwarded; its program and preview scene are
+/// SongPlayer's (#221 lane 2, ROZHODNUTÉ 6002459249: never cg OBS's own
+/// program, `session_tests_feedback.rs`) — here nothing is on SP-program
+/// and no preview is set, so both are null.
 #[tokio::test]
-async fn the_scene_list_is_forwarded_to_cg_obs_verbatim() {
+async fn the_scene_list_is_forwarded_to_cg_obs_with_songplayer_s_program() {
     let rig = rig().await;
     let mut ws = connect(rig.addr).await;
     hello_identify(&mut ws, 0).await;
     let d = request(&mut ws, "GetSceneList", None).await;
     assert_eq!(d["requestStatus"], json!({ "result": true, "code": 100 }));
-    assert_eq!(d["responseData"], scene_list());
+    let mut expected = scene_list();
+    expected["currentProgramSceneName"] = Value::Null;
+    expected["currentProgramSceneUuid"] = Value::Null;
+    assert_eq!(d["responseData"], expected);
     let d = request(
         &mut ws,
         "GetSceneItemList",
@@ -767,7 +774,7 @@ async fn a_press_without_a_scene_name_is_300_and_not_forwarded() {
 }
 
 #[tokio::test]
-async fn a_cut_that_cannot_be_persisted_is_205_cuts_nothing_and_mirrors_nothing() {
+async fn a_cut_that_cannot_be_persisted_is_205_cuts_nothing_and_tells_cg_obs_nothing() {
     let rig = rig().await;
     let mut ws = connect(rig.addr).await;
     hello_identify(&mut ws, 0).await;
@@ -786,7 +793,7 @@ async fn a_cut_that_cannot_be_persisted_is_205_cuts_nothing_and_mirrors_nothing(
     assert_eq!(cut.reason, Some("persist_failed"));
     assert!(
         rig.calls().is_empty(),
-        "cg OBS is not mirrored: {:?}",
+        "cg OBS is told nothing: {:?}",
         rig.calls()
     );
 }

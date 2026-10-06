@@ -60,8 +60,8 @@ pub struct StatusResponse {
     pub version: String,
     pub obs_connected: bool,
     pub active_scene: Option<String>,
-    /// #221 L4b: the playlists on air — SP-program's playlist ∪ the one cg
-    /// OBS was told to show, ascending (`routes_status`). `active_scene` is
+    /// #221 L4b: the playlists on air — SP-program's playlist alone (B4 step
+    /// 6), none for "OBS manuál" (`routes_status`). `active_scene` is
     /// SongPlayer's own program scene name (the one resolver).
     pub active_playlist_ids: Vec<i64>,
     pub tools: ToolsStatusResponse,
@@ -98,20 +98,14 @@ pub struct StatusResponse {
     /// health (`api::metadata::status_block`). Missing key → default.
     #[serde(default)]
     pub metadata: crate::metadata::health::MetadataStatus,
+    /// #223 S3b: the `video_hw_decode` setting and what the hardware decode
+    /// path did (`playback::video_decode::status`). Missing key → default.
+    #[serde(default)]
+    pub video_decode: crate::playback::video_decode::VideoDecodeStatus,
 }
 
-pub use super::routes_status::HeavyContainmentStatus; // #136: moved for the 1000-line cap
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ToolsStatusResponse {
-    pub ytdlp_available: bool,
-    pub ffmpeg_available: bool,
-    pub ytdlp_version: Option<String>,
-    #[serde(default)]
-    pub js_runtime_ok: bool,
-    #[serde(default)]
-    pub deno_version: Option<String>,
-}
+// #136 / #223 S3b: moved to `routes_status` for the 1000-line cap.
+pub use super::routes_status::{HeavyContainmentStatus, ToolsStatusResponse};
 
 // ---------------------------------------------------------------------------
 // Playlist endpoints
@@ -192,11 +186,8 @@ pub async fn create_playlist(
             let is_active = row.get::<i32, _>("is_active") != 0;
             drop(row);
 
-            // Trigger a scene-detection rebuild so the new playlist can be
-            // matched against OBS NDI inputs immediately.
-            let _ = state.obs_rebuild_tx.send(());
-            // #132: register a playback pipeline for the new playlist so scene
-            // detection can start it without a process restart. The engine
+            // #132: register a playback pipeline for the new playlist so the
+            // playback authority can start it without a restart. The engine
             // reconciles from the DB (creates only when active + non-empty NDI).
             // GUARANTEED delivery (`.send().await`, not `try_send`): a dropped
             // command would leave the playlist unplayable until a restart — the
@@ -318,7 +309,6 @@ pub async fn update_playlist(
                 if let Some(mode) = mode {
                     super::routes_mode::tell_engine(&state.engine_tx, id, mode).await;
                 }
-                let _ = state.obs_rebuild_tx.send(());
                 // #132: reconcile the playback pipeline with the update.
                 // Deactivation tears the pipeline down; every other update
                 // (activation, NDI-name set, rename) ensures it — the ensure
@@ -356,7 +346,6 @@ pub async fn delete_playlist(
             if result.rows_affected() == 0 {
                 StatusCode::NOT_FOUND.into_response()
             } else {
-                let _ = state.obs_rebuild_tx.send(());
                 // #132: tear down the deleted playlist's pipeline symmetrically.
                 // Guaranteed delivery (`.send().await`), as in `create_playlist`.
                 let _ = state
@@ -690,9 +679,10 @@ pub async fn update_settings(
 // ---------------------------------------------------------------------------
 
 pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
-    let obs = state.obs_state.read().await;
-    let tools = state.tools_status.read().await;
-
+    // #144: each status copied out at once, no lock held across the awaits below.
+    let obs_connected = state.obs_state.read().await.connected;
+    let tools = state.tools_status.read().await.clone();
+    let lan = state.lan_status.read().await.clone();
     let playlist_count = sqlx::query("SELECT COUNT(*) AS c FROM playlists")
         .fetch_one(&state.pool)
         .await
@@ -701,8 +691,6 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
 
     let (active_scene, active_playlist_ids) =
         super::routes_status::on_air_fields(&state.program_bus);
-
-    let lan = state.lan_status.read().await;
 
     // #203/#207/#207r3c: resolve the live containment; purge delay/alloc mode/reserve_gib/max_ws (#147 r9) are internal-only, not surfaced here.
     let heavy_cap = crate::db::models::get_setting(&state.pool, "heavy_cpu_cap_pct")
@@ -725,19 +713,19 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
 
     Json(StatusResponse {
         version: sp_core::config::VERSION.to_string(),
-        obs_connected: obs.connected,
+        obs_connected,
         active_scene,
         active_playlist_ids,
         tools: ToolsStatusResponse {
             ytdlp_available: tools.ytdlp_available,
             ffmpeg_available: tools.ffmpeg_available,
-            ytdlp_version: tools.ytdlp_version.clone(),
+            ytdlp_version: tools.ytdlp_version,
             js_runtime_ok: tools.js_runtime_ok,
-            deno_version: tools.deno_version.clone(),
+            deno_version: tools.deno_version,
         },
         playlist_count,
-        lan_url: lan.lan_url.clone(),
-        lan_ip: lan.lan_ip.clone(),
+        lan_url: lan.lan_url,
+        lan_ip: lan.lan_ip,
         preview_encoder: crate::playback::preview::preview_encoder::chosen_encoder(),
         uptime_s: crate::process_start::uptime_secs(),
         heavy_containment: HeavyContainmentStatus {
@@ -749,6 +737,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         },
         commit: crate::lyrics::host_commit::read_status(),
         metadata: super::metadata::status_block(&state).await,
+        video_decode: crate::playback::video_decode::status(),
     })
 }
 
@@ -828,38 +817,15 @@ pub async fn get_resolume_health(
     Json(state.resolume_registry.health_snapshots())
 }
 
-/// GET /api/v1/ndi/health — return per-pipeline NDI delivery health.
-/// Empty `[]` if no pipelines have reported a heartbeat yet.
+/// GET /api/v1/ndi/health — every playlist pipeline's health (its playback
+/// state, its paced delivery to the program bus, its genlock lock). #221 lane
+/// 3: a playlist has no NDI output of its own, so a row carries no receiver
+/// field; SP-program's are on `GET /api/v1/program`. Empty `[]` if no
+/// pipeline has reported a heartbeat yet.
 pub async fn get_ndi_health(
     State(state): State<AppState>,
 ) -> Json<Vec<crate::playback::ndi_health::PipelineHealthSnapshot>> {
     Json(state.ndi_health_registry.snapshots())
-}
-
-/// Body for `POST /api/v1/ndi/burn` (#151).
-#[derive(Debug, Deserialize)]
-pub struct SetBurnRequest {
-    /// The NDI output name (e.g. `"SP-fast"`) to toggle.
-    pub output: String,
-    /// Turn the burn-id QR overlay on (`true`) or off (`false`).
-    pub on: bool,
-}
-
-/// POST /api/v1/ndi/burn — toggle the runtime burn-id QR overlay for one NDI
-/// output (#151). `204` on success; `404` if the output is unknown; `409`
-/// ("pacing disabled") when the output exists but `genlock_pacing` is off (the
-/// burn is only painted on the paced path — the fleet's TEST mode runs with
-/// pacing on). Default OFF, never persisted.
-pub async fn set_ndi_burn(
-    State(state): State<AppState>,
-    Json(body): Json<SetBurnRequest>,
-) -> impl IntoResponse {
-    use crate::playback::ndi_burn::BurnSetResult;
-    match state.ndi_burn_registry.set(&body.output, body.on) {
-        BurnSetResult::Ok => StatusCode::NO_CONTENT.into_response(),
-        BurnSetResult::NotFound => StatusCode::NOT_FOUND.into_response(),
-        BurnSetResult::PacingDisabled => (StatusCode::CONFLICT, "pacing disabled").into_response(),
-    }
 }
 
 pub async fn delete_resolume_host(
@@ -978,10 +944,6 @@ mod tests_clock;
 #[cfg(test)]
 #[path = "routes_tests_pacing.rs"]
 mod tests_pacing;
-
-#[cfg(test)]
-#[path = "routes_tests_burn.rs"]
-mod tests_burn;
 
 #[cfg(test)]
 #[path = "routes_tests_runtime_pipeline.rs"]

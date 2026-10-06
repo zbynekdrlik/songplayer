@@ -314,8 +314,7 @@ impl NdiInputShared {
             running: self.is_running(),
             connected: c.connected,
             source: settings.source.clone(),
-            stream: crate::obs::ndi_discovery::extract_ndi_stream_name(&settings.source)
-                .to_string(),
+            stream: source_name::extract_ndi_stream_name(&settings.source).to_string(),
             frames_received: c.frames_received,
             video_repeats: c.video_repeats,
             video_drops: c.video_drops,
@@ -785,9 +784,9 @@ fn spawn_input_thread(receive: Option<Arc<dyn NdiReceiveBackend>>, bus: Arc<Prog
         .spawn(move || {
             crate::playback::pipeline_paced::request_high_res_timer();
             // The input owns every program boundary while it is cut: guaranteed
-            // priority, like the paced audio threads (the VBAN sender is an
-            // MMCSS "Pro Audio" thread since #210 part 2, `mmcss.rs`).
-            crate::playback::pipeline::pipeline_audio::raise_thread_priority("ndi-input");
+            // priority (the VBAN sender is an MMCSS "Pro Audio" thread since
+            // #210 part 2, `mmcss.rs`).
+            crate::playback::mmcss::raise_thread_priority("ndi-input");
             info!(has_sdk = receive.is_some(), "ndi input thread started");
             let shared = bus.input().clone();
             let mut input = NdiInput::new(receive, shared, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H);
@@ -854,6 +853,10 @@ pub async fn run_input_config_task(
     }
     info!("ndi input: settings task stopped");
 }
+
+// The bare stream name of the input's source (#221 lane 3 moved it here).
+#[path = "ndi_input_name.rs"]
+mod source_name;
 
 #[cfg(test)]
 #[path = "ndi_input_tests.rs"]

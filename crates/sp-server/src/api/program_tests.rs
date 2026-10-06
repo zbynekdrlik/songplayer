@@ -58,6 +58,49 @@ async fn get_program_reports_no_source_before_any_cut() {
     assert_eq!(json["health"]["cuts"], 0);
 }
 
+/// #221: the program answer has no `follow` block (L5 deleted the OBS
+/// follow) and no `legacy_cg` record (B4 step 6), and its receiver
+/// expectation is SP-program's own: while a source is on program, no NDI
+/// receiver on `SP-program` is the `degraded_reason`; nothing on program, a
+/// receiver connected, or no receiver poll yet (the count's 0 is no
+/// reading, review round 1) is none.
+#[tokio::test]
+async fn the_program_answer_has_no_follow_no_legacy_cg_and_expects_sp_program_s_receiver() {
+    let state = test_state().await;
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert!(json.get("follow").is_none(), "{json}");
+    assert!(json.get("legacy_cg").is_none(), "{json}");
+    assert_eq!(
+        json["degraded_reason"],
+        serde_json::Value::Null,
+        "nothing on program"
+    );
+
+    let slow = add_playlist(&state.pool, "slow").await;
+    state.program_bus.select_initial(slow, Some("sp-slow"));
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(json["health"]["connections"], 0);
+    assert_eq!(
+        json["degraded_reason"],
+        serde_json::Value::Null,
+        "the sender has not polled its receivers yet"
+    );
+
+    state.program_bus.set_connections(0);
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(json["degraded_reason"], "no NDI receiver on SP-program");
+
+    state.program_bus.set_connections(2);
+    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
+    assert_eq!(json["degraded_reason"], serde_json::Value::Null);
+
+    // "OBS manuál" on program expects a receiver on SP-program the same way.
+    state.program_bus.set_connections(0);
+    state.program_bus.select_initial(-1, None);
+    let (_, json) = call(state, "GET", "/api/v1/program", None).await;
+    assert_eq!(json["degraded_reason"], "no NDI receiver on SP-program");
+}
+
 #[tokio::test]
 async fn cut_selects_the_source_get_reports_it_and_it_persists() {
     let state = test_state().await;
@@ -497,11 +540,11 @@ async fn the_remote_block_reports_the_stored_settings_and_the_live_state() {
     assert!(!json.to_string().contains("supersecretpassword"));
 }
 
-// ---- #215: the `transition` + `follow` blocks ------------------------------
+// ---- #215: the `transition` block -----------------------------------------
 
 #[tokio::test]
-async fn the_program_reports_the_transition_and_the_follow() {
-    use crate::playback::program_transition::{ObsTransition, SpecSource, TransitionSpec};
+async fn the_program_reports_the_transition() {
+    use crate::playback::program_transition::{SpecSource, TransitionSpec};
     let state = test_state().await;
     let (status, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -519,54 +562,7 @@ async fn the_program_reports_the_transition_and_the_follow() {
             "cue_wait_boundaries": 0,
             "cue_timeouts": 0,
         }),
-        "until the follow task sets one, a cut is a hard cut"
-    );
-    assert_eq!(
-        json["follow"],
-        serde_json::json!({
-            "enabled": false,
-            "mode": "obs",
-            "ms": 300,
-            "obs_transition": null,
-            "last_follow_cut": null,
-        })
-    );
-
-    // The stored settings show at once, cg OBS's transition once it answered.
-    let (status, _) = call(
-        state.clone(),
-        "PATCH",
-        "/api/v1/settings",
-        Some(serde_json::json!({
-            "program_follow_obs": "true",
-            "program_transition": "fade",
-            "program_transition_ms": "500",
-        })),
-    )
-    .await;
-    assert!(status.is_success(), "got {status}");
-    state
-        .program_bus
-        .follow()
-        .set_obs_transition(ObsTransition {
-            name: "Fade".to_string(),
-            kind: "fade_transition".to_string(),
-            duration_ms: Some(300),
-        });
-    let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
-    assert_eq!(
-        json["follow"],
-        serde_json::json!({
-            "enabled": true,
-            "mode": "fade",
-            "ms": 500,
-            "obs_transition": {
-                "name": "Fade",
-                "kind": "fade_transition",
-                "duration_ms": 300,
-            },
-            "last_follow_cut": null,
-        })
+        "until the transition-settings task sets one, a cut is a hard cut"
     );
 
     // A cut with a 300 ms fade in force opens a 9-slot window from the
@@ -577,7 +573,7 @@ async fn the_program_reports_the_transition_and_the_follow() {
     assert!(
         state
             .program_bus
-            .set_transition(TransitionSpec::fade(300, SpecSource::Obs))
+            .set_transition(TransitionSpec::fade(300, SpecSource::Setting))
     );
     let (status, json) = call(
         state.clone(),
@@ -594,7 +590,7 @@ async fn the_program_reports_the_transition_and_the_follow() {
             "kind": "fade",
             "duration_ms": 300,
             "n_slots": 9,
-            "source": "obs",
+            "source": "setting",
             "active": {
                 "from": slow,
                 "to": fast,
@@ -610,7 +606,6 @@ async fn the_program_reports_the_transition_and_the_follow() {
             "cue_timeouts": 0,
         })
     );
-    assert_eq!(json["follow"]["enabled"], true, "the cut answer carries it");
     let (_, json) = call(state, "GET", "/api/v1/program", None).await;
     assert_eq!(json["transition"]["active"]["to"], fast);
 }
@@ -621,7 +616,7 @@ async fn the_program_reports_the_transition_and_the_follow() {
 async fn a_dashboard_cut_is_published_with_the_playlists_catalog_scene() {
     use crate::playback::program_on_air::program_scene_name;
     let state = test_state().await;
-    let fast = add_playlist(&state.pool, "fast").await; // NDI output SP-fast
+    let fast = add_playlist(&state.pool, "fast").await; // ndi_output_name SP-fast
     let (status, _) = call(
         state.clone(),
         "POST",
@@ -659,7 +654,7 @@ async fn a_dashboard_cut_is_published_with_the_playlists_catalog_scene() {
 #[tokio::test]
 async fn the_remote_block_names_sp_programs_scene_after_a_dashboard_cut() {
     let state = test_state().await;
-    let fast = add_playlist(&state.pool, "fast").await; // NDI output SP-fast
+    let fast = add_playlist(&state.pool, "fast").await; // ndi_output_name SP-fast
     let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
     assert_eq!(json["remote"]["program_scene"], serde_json::Value::Null);
     let (status, json) = call(

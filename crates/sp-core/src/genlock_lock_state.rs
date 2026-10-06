@@ -47,10 +47,8 @@ impl LockState {
 pub struct LockInputs {
     /// Box clock locked (dantesync LOCK/NANO).
     pub clock_ok: bool,
-    /// Boundary pacing enabled for this output (`genlock_pacing`).
+    /// Boundary pacing active for this output (`PacingStats::enabled`).
     pub pacing_enabled: bool,
-    /// NDI receivers currently attached.
-    pub connections: u32,
     /// Late emits in the 60 s window (a submit > 2 ms past its boundary).
     pub late_w: u64,
     /// Last-frame repeats in the 60 s window (the fps-conversion + any starvation).
@@ -106,35 +104,33 @@ pub fn expected_repeat_permille(source_fps: f32, grid_fps: u32) -> u64 {
     1000u64.saturating_sub(source_permille / grid_fps as u64)
 }
 
-/// Derive the lock state + a static reason from the clock/pacing/receiver inputs
-/// and the rate-normalised 60 s window counts (contract §7 A7.3, calibrated
-/// #168 round 6 / #149). Checks in strict precedence — the FIRST match wins:
+/// Derive the lock state + a static reason from the clock/pacing inputs and
+/// the rate-normalised 60 s window counts (contract §7 A7.3, calibrated #168
+/// round 6 / #149). Checks in strict precedence — the FIRST match wins:
 ///
 /// 1. `!clock_ok`                           → `(Unlocked, "clock not ok")`
 /// 2. `!pacing_enabled`                     → `(Unlocked, "pacing disabled")`
-/// 3. `connections == 0`                    → `(Degraded, "no receiver")`
-/// 4. `resyncs_w > 0`                       → `(Degraded, "resync in 60 s")`
-/// 5. `slots_w == 0`                        → `(Locked,   "locked")`
-/// 6. `late_w > 25 %` of slots             → `(Degraded, "late > 25 % of slots in 60 s")`
-/// 7. `decoding && repeats_w > fps-conversion + 10 %` → `(Degraded, "repeats above the fps conversion in 60 s")`
-/// 8. otherwise                             → `(Locked,   "locked")`
+/// 3. `resyncs_w > 0`                       → `(Degraded, "resync in 60 s")`
+/// 4. `slots_w == 0`                        → `(Locked,   "locked")`
+/// 5. `late_w > 25 %` of slots             → `(Degraded, "late > 25 % of slots in 60 s")`
+/// 6. `decoding && repeats_w > fps-conversion + 10 %` → `(Degraded, "repeats above the fps conversion in 60 s")`
+/// 7. otherwise                             → `(Locked,   "locked")`
 ///
-/// So clock beats pacing beats receiver beats resync; an output that emitted
-/// nothing (`slots_w == 0` — no grid to break) reads LOCKED; then the two
+/// So clock beats pacing beats resync; an output that emitted nothing
+/// (`slots_w == 0` — no grid to break) reads LOCKED; then the two
 /// rate-normalised checks. Resyncs stay a hard event (0 in the calibration).
-/// Rule 7 applies only while `decoding` (#150): under pacing a paused / idle
+/// Rule 6 applies only while `decoding` (#150): under pacing a paused / idle
 /// output fills every slot with a standby repeat by design, so its repeat rate
-/// is not starvation — but its late / resync / receiver / clock rules still
-/// apply, so a standby grid that genuinely breaks still reads DEGRADED.
+/// is not starvation — but its late / resync / clock rules still apply, so a
+/// standby grid that genuinely breaks still reads DEGRADED. #221 lane 3
+/// deleted the "no receiver" rule: a playlist has no NDI output of its own,
+/// and `SP-program`'s receivers are judged on `GET /api/v1/program`.
 pub fn derive(inputs: &LockInputs) -> (LockState, &'static str) {
     if !inputs.clock_ok {
         return (LockState::Unlocked, "clock not ok");
     }
     if !inputs.pacing_enabled {
         return (LockState::Unlocked, "pacing disabled");
-    }
-    if inputs.connections == 0 {
-        return (LockState::Degraded, "no receiver");
     }
     if inputs.resyncs_w > 0 {
         return (LockState::Degraded, "resync in 60 s");
@@ -257,9 +253,9 @@ pub fn summarize(outputs: &[OutputLock]) -> LockSummary {
 
 /// The dashboard's always-visible global genlock state (#176). Adds a fourth
 /// state `Off` to the LOCKED / DEGRADED / UNLOCKED lock vocabulary: `Off` means
-/// NO output has boundary pacing enabled (`genlock_pacing=false`, the production
-/// default #147) — the box free-runs on the NDI SDK clock, a deliberate
-/// configuration, not a fault. Rendered grey; the other three keep their
+/// NO output reports boundary pacing (since #221 lane 3 pacing is the only
+/// path, so that is a box with no playlist pipeline reporting yet) — not a
+/// fault. Rendered grey; the other three keep their
 /// green / amber / red colours (camera-box#1298). This is the #176 revision of
 /// #164's "hide the badge entirely while pacing is off".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -304,15 +300,16 @@ fn effective_global(o: &GlobalLockInput) -> LockState {
     }
 }
 
-/// The reason shown in the `● GENLOCK OFF` tooltip: the box free-runs on the
-/// NDI SDK clock because boundary pacing is off (`genlock_pacing=false`).
+/// The reason shown in the `● GENLOCK OFF` tooltip: no output reports boundary
+/// pacing.
 const OFF_REASON: &str = "pacing vypnuté";
 
 /// Reduce the per-output genlock inputs into ONE whole-box GLOBAL state for the
 /// always-visible dashboard badge (#176):
 ///
 /// - **No output has pacing enabled** → [`GlobalLock::Off`] (reason
-///   `"pacing vypnuté"`) — the production default; grey, never hidden.
+///   `"pacing vypnuté"`) — no output reports pacing (#221 lane 3: pacing is
+///   the only path); grey, never hidden.
 /// - **Pacing-enabled LIVE outputs** → the worst effective state over them
 ///   (UNLOCKED > DEGRADED > LOCKED); a LOCKED-but-clock-not-ok output is demoted
 ///   to UNLOCKED. The reason is the worst live output's reason (or `"locked"`).

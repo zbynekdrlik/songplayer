@@ -52,21 +52,23 @@ fn parse_available_encoders_dedups_and_ignores_blank_lines() {
 
 #[test]
 fn ffmpeg_args_are_exact_for_libx264_with_low_latency_tuning() {
-    // #178 round 3: only the video input is wall-clock stamped; the f32le PCM
-    // input carries none (sample-count timestamps), and there is no -itsoffset.
+    // #221: no input is wall-clock stamped. The rawvideo input counts frames
+    // at 25 fps (`-framerate 25`), the f32le PCM input counts samples, and both
+    // are written on SongPlayer's monotonic clock. There is no -itsoffset
+    // (#178 round 3).
     let args = build_ffmpeg_args(5001, 5002, "libx264");
     let expected: Vec<String> = [
         "-hide_banner",
         "-loglevel",
         "error",
-        "-use_wallclock_as_timestamps",
-        "1",
         "-f",
         "rawvideo",
         "-pix_fmt",
         "nv12",
         "-s",
         "640x360",
+        "-framerate",
+        "25",
         "-i",
         "tcp://127.0.0.1:5001",
         "-f",
@@ -170,24 +172,52 @@ fn ffmpeg_args_never_contain_itsoffset() {
 }
 
 #[test]
-fn only_the_video_input_is_wall_clock_stamped() {
-    // The raw PCM input must keep its SAMPLE-COUNT timestamps: wall-clock stamps
-    // on bursty PCM made the box's ffmpeg (N-123867, 2026-04) emit ZERO audio
-    // packets — an fMP4 whose audio track stays empty never becomes playable in
-    // MSE (readyState 1 forever, #178 box) — and mangled the DTS on ffmpeg 6.1.
-    let args = build_ffmpeg_args(9001, 9002, "libx264");
-    let stamps: Vec<usize> = args
-        .iter()
-        .enumerate()
-        .filter(|(_, a)| *a == "-use_wallclock_as_timestamps")
-        .map(|(i, _)| i)
-        .collect();
-    let video_i = args
-        .iter()
-        .position(|a| a == "tcp://127.0.0.1:9001")
-        .expect("video input URL present");
-    assert_eq!(stamps.len(), 1, "exactly one wall-clock-stamped input");
-    assert!(stamps[0] < video_i, "and it is the video input");
+fn no_input_is_wall_clock_stamped_and_the_video_counts_the_output_rate() {
+    // #221: ffmpeg's wall-clock stamps read the SYSTEM clock, which the box's
+    // nightly UTC step moves (+1.54 s on 6.10.2026 02:00:11). With the video
+    // input stamped and the PCM input counted, one step put the picture 3.5-4.7 s
+    // behind the sound for the encoder's whole life (local repro, #221 comment
+    // 6008217701), and a pause kept showing new pictures for over 6 s. So NO
+    // input carries `-use_wallclock_as_timestamps`: the rawvideo input is
+    // counted at `-framerate` (the feeder writes one frame per 40 ms slot of
+    // the monotonic clock from frame 0; nothing during a pause, the gap is
+    // filled on the next picture), equal to the output `-r`. The PCM input
+    // keeps its sample count (#178 round 3: wall-clock-stamped PCM made the
+    // box's ffmpeg mux ZERO audio packets).
+    for encoder in ["libx264", "h264_nvenc"] {
+        let args = build_ffmpeg_args(9001, 9002, encoder);
+        assert!(
+            !args.iter().any(|a| a == "-use_wallclock_as_timestamps"),
+            "no wall-clock-stamped input for {encoder}"
+        );
+        let video_i = args
+            .iter()
+            .position(|a| a == "tcp://127.0.0.1:9001")
+            .expect("video input URL present");
+        let rates: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| *a == "-framerate")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(rates.len(), 1, "exactly one counted input for {encoder}");
+        assert_eq!(
+            rates[0] + 3,
+            video_i,
+            "`-framerate N -i <video url>`: it is the video input's for {encoder}"
+        );
+        let out_rate = args
+            .windows(2)
+            .find(|w| w[0] == "-r")
+            .map(|w| w[1].clone())
+            .expect("an output -r");
+        assert_eq!(args[rates[0] + 1], "25", "the video input counts 25 fps");
+        assert_eq!(
+            args[rates[0] + 1],
+            out_rate,
+            "the input rate is the output rate: no frame is dropped or repeated"
+        );
+    }
 }
 
 // ── #178 item 12: encoder restart budget ─────────────────────────────────────
@@ -221,7 +251,7 @@ fn feeder_poll_keeps_the_written_audio_ahead_of_the_video() {
     // ALIGN_PAD_THRESHOLD_MS behind its write-ahead position, and only as often
     // as it polls. So the poll interval — plus a Windows timer oversleep of
     // ~15.6 ms — must stay under write-ahead − pad threshold (50 ms), or the
-    // written audio drops behind the wall-clock video and ffmpeg waits for it.
+    // written audio drops behind the video and ffmpeg waits for it.
     use crate::playback::preview::preview_audio_hold::AUDIO_WRITE_AHEAD_MS;
     use crate::playback::preview::preview_stream::ALIGN_PAD_THRESHOLD_MS;
     const TIMER_SLACK_US: u64 = 15_600;

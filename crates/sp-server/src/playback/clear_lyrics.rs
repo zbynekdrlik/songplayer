@@ -22,9 +22,9 @@ impl super::PlaybackEngine {
     /// subtitle clips alone. Its song end, a song without lyrics or a
     /// PlayVideo blanked the on-program playlist's `#sp-subs` line.
     ///
-    /// #221 (release 0.69.0 review 🟡 2): while a playlist owns the wall,
-    /// only its clear reaches the shared subtitle clips and the Presenter
-    /// (`OnAirPlaylists::may_write_wall`).
+    /// #221 (release 0.69.0 review 🟡 2): only the wall owner's clear reaches
+    /// the shared subtitle clips and the Presenter
+    /// (`OnAirPlaylists::may_write_wall`); with no owner, nobody's.
     #[cfg_attr(test, mutants::skip)]
     pub(super) fn clear_lyrics_display(&self, playlist_id: i64) {
         let owns_wall = self.on_air.may_write_wall(playlist_id);

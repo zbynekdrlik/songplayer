@@ -1,14 +1,15 @@
 //! #221 L4b: SongPlayer's own program is the PLAYBACK authority (design
-//! record 5873773896 §1e). cg OBS's scene detection starts and pauses
-//! nothing any more.
+//! record 5873773896 §1e). cg OBS's scene detection started and paused
+//! nothing any more, and #221 L6 deleted it.
 //!
 //! - **What is on air** is `program_on_air::on_air_set`: `SP-program`'s
-//!   source when it is a playlist, together with the playlist SongPlayer last
-//!   told cg OBS to show (`legacy_cg.shown`, until B4 step 6).
+//!   source when it is a playlist, alone (#221 B4 step 6 deleted the legacy
+//!   mirror and SongPlayer's record of what it told cg OBS, which used to
+//!   join the set: every consumer takes `SP-program` now).
 //! - **The task** ([`run_program_authority`], spawned by `start_program`)
-//!   watches the bus's on-air watch and `legacy_cg.shown`. On its first
-//!   value (the program restored at startup) and on every change of either,
-//!   it sends `PipelineEvent::OnProgram` on the engine's own event channel
+//!   watches the bus's on-air watch. On its first value (the program
+//!   restored at startup) and on every change, it sends
+//!   `PipelineEvent::OnProgram` on the engine's own event channel
 //!   (the #215 `SceneOffDue` precedent): OFF for every playlist that left,
 //!   then ON for every playlist that entered and for the source of a new
 //!   cut (a new `seq`: the re-kick of a press of the scene already on air;
@@ -30,17 +31,21 @@
 //!   an outgoing playlist is held only through its transition window
 //!   (`Hold::Until`, `scene_off.rs`).
 //! - **One wall owner** (release 0.69.0 review 🟡 2): with each set the task
-//!   publishes its `program_on_air::wall_owner` (SP-program's playlist, else
-//!   the one cg OBS was told to show). While there is one, only it writes
-//!   the shared wall outputs ([`OnAirPlaylists::may_write_wall`]): the
-//!   `ShowSubtitles` dispatch and the Presenter push (`position_update.rs`),
-//!   the song-end clear (`clear_lyrics.rs`), the title timers
-//!   (`title_timers.rs`) and a re-sync's title and lines (`recovery.rs`). The
-//!   other member of a two-member set keeps playing but writes none of them.
+//!   publishes its `program_on_air::wall_owner`, SP-program's playlist (none
+//!   while "OBS manuál" is on program). Only it writes the shared wall
+//!   outputs ([`OnAirPlaylists::may_write_wall`]): the `ShowSubtitles`
+//!   dispatch and the Presenter push (`position_update.rs`), the song-end
+//!   clear (`clear_lyrics.rs`), the title timers (`title_timers.rs`) and a
+//!   re-sync's title and lines (`recovery.rs`). A playlist played off
+//!   program by hand writes none of them. With no owner ("OBS manuál" on
+//!   program, nothing on air, or before the task's first value) NOBODY
+//!   writes them (ROZHODNUTÉ 6002459249), and an OFF that leaves no owner
+//!   blanks the wall (`scene_off::wall_after_scene_off`) and the stage
+//!   display (`scene_off::scene_off`).
 //! - A pipeline created after its playlist went on air (a runtime
 //!   `EnsurePipeline`) goes on program itself (`runtime_pipeline.rs`). An ON
-//!   for a playlist with NO pipeline (the #196 startup senders ran out of
-//!   their budget) creates it lazily, and it goes on program the same way.
+//!   for a playlist with NO pipeline (none was created for it at startup)
+//!   creates it lazily, and it goes on program the same way.
 //!
 //! A manual ▶ claims nothing (`PlayEvent::Start`, `engine_play.rs`).
 
@@ -82,8 +87,9 @@ impl OnAirPlaylists {
         *self.diffed() = Diffed { playlists, owner };
     }
 
-    /// Test-only: the diffed set alone, with no owner (every playlist on
-    /// program writes the wall, as before the owner).
+    /// Test-only: the diffed set alone, with no owner (so nobody writes the
+    /// wall): for the tests of the stale check and the hold re-check, and
+    /// the no-owner wall tests (nothing on air, the cut to "OBS manuál").
     #[cfg(test)]
     pub fn replace(&self, playlists: BTreeSet<i64>) {
         self.publish(playlists, None);
@@ -101,19 +107,19 @@ impl OnAirPlaylists {
     }
 
     /// Whether `playlist_id` may write the shared wall outputs (the lines,
-    /// the title, the Presenter): while a playlist owns the wall, only that
-    /// one. With none (nothing on air, or before the task's first value) this
-    /// restricts nothing: a playlist whose OFF is still queued writes as
-    /// before, and its OFF re-syncs the wall (`wall_after_scene_off`).
+    /// the title, the Presenter): only the wall owner. With none ("OBS
+    /// manuál" on program, nothing on air, or before the task's first value)
+    /// nobody may (ROZHODNUTÉ 6002459249): a playlist played off program by
+    /// hand, or one whose OFF is still queued, writes nothing, and the last
+    /// owner's OFF blanks the wall (`wall_after_scene_off`, `scene_off`).
     pub fn may_write_wall(&self, playlist_id: i64) -> bool {
-        self.diffed().owner.is_none_or(|owner| owner == playlist_id)
+        self.diffed().owner == Some(playlist_id)
     }
 }
 
 /// The playback authority task (the module doc). Test:
 /// `program_authority_tests.rs` (the first value, every change, the re-kick,
-/// the union with the cg OBS record, the diffed set, shutdown, a gone
-/// engine).
+/// the diffed set and its owner, shutdown, a gone engine).
 pub async fn run_program_authority(
     bus: Arc<ProgramBus>,
     events: mpsc::UnboundedSender<(i64, PipelineEvent)>,
@@ -121,7 +127,6 @@ pub async fn run_program_authority(
     mut shutdown: broadcast::Receiver<()>,
 ) {
     let mut on_air = bus.on_air();
-    let mut shown = bus.legacy_cg().shown();
     let mut previous = BTreeSet::new();
     let mut seen_seq = 0;
     loop {
@@ -130,9 +135,8 @@ pub async fn run_program_authority(
         // selection): its source is re-kicked.
         let cut_to = program.source.filter(|_| program.seq != seen_seq);
         seen_seq = program.seq;
-        let cg_shown = *shown.borrow_and_update();
-        let current = on_air_set(&program, cg_shown);
-        let owner = wall_owner(&program, cg_shown);
+        let current = on_air_set(&program);
+        let owner = wall_owner(&program);
         diffed.publish(current.clone(), owner);
         for (pid, on) in on_air_changes(&previous, &current, cut_to) {
             if events.send((pid, PipelineEvent::OnProgram(on))).is_err() {
@@ -140,12 +144,11 @@ pub async fn run_program_authority(
                 return;
             }
         }
-        log_on_air(&previous, &current, program.source, owner, cg_shown);
+        log_on_air(&previous, &current, program.source, owner);
         previous = current;
         tokio::select! {
             _ = shutdown.recv() => return,
             changed = on_air.changed() => if changed.is_err() { return },
-            changed = shown.changed() => if changed.is_err() { return },
         }
     }
 }
@@ -158,7 +161,6 @@ fn log_on_air(
     current: &BTreeSet<i64>,
     program: Option<i64>,
     wall_owner: Option<i64>,
-    cg_shown: Option<i64>,
 ) {
     if previous != current {
         info!(
@@ -166,7 +168,6 @@ fn log_on_air(
             ?current,
             ?program,
             ?wall_owner,
-            ?cg_shown,
             "program authority: the playlists on air changed"
         );
     } else {
@@ -174,8 +175,7 @@ fn log_on_air(
             ?current,
             ?program,
             ?wall_owner,
-            ?cg_shown,
-            "program authority: on air again (a press of the same scene, or cg OBS confirmed it)"
+            "program authority: on air again (a press of the same scene)"
         );
     }
 }

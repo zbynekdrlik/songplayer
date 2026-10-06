@@ -1,83 +1,75 @@
 /**
- * Pure decision logic for the post-deploy NDI dark-wall gate (#127).
+ * Pure decision logic for the post-deploy dark gate (#127), on `SP-program`
+ * (#221 B4 step 6).
  *
- * Separated from Playwright I/O so the "is any on-program output dark?"
- * decision is unit-testable without the deployed win-resolume box. The
- * post-deploy suite feeds this the on-program playlist ids
- * (`/api/v1/status.active_playlist_ids`) and the `/api/v1/ndi/health` array,
- * then polls until every on-program output has a live receiver.
+ * Every consumer takes SongPlayer's PROGRAM now: the Presenter, strih and the
+ * stream receive `SP-program` over NDI, the LED wall `SP-program-MAX` over
+ * Spout, FOH its VBAN. cg OBS is only the NDI input "OBS manuál", and a
+ * playlist has no NDI output of its own (#221 lane 3). The receiver that
+ * must exist is
+ * `SP-program`'s: `GET /api/v1/program` → `health.connections`, and the
+ * server's own verdict `degraded_reason` ("no NDI receiver on SP-program").
+ *
+ * Separated from Playwright I/O so the decision is unit-testable without the
+ * deployed win-resolume box (`ndi-health-gate.spec.ts`, the ubuntu mock
+ * suite). The post-deploy suite polls `/api/v1/program` until the verdict is
+ * `ok`.
  */
 
-/** Subset of a `/api/v1/ndi/health` snapshot this gate reads. */
-export interface HealthSnapshot {
-  playlist_id: number;
-  ndi_name: string;
-  connections: number;
+/** Subset of `GET /api/v1/program` this gate reads. */
+export interface ProgramReceiverView {
+  /** The source on program: a playlist id, `-1` for "OBS manuál", `null`
+   *  before anything was selected. */
+  source: number | null;
+  health: { connections: number };
+  /** The server's verdict (#221): `null` while SP-program has a receiver or
+   *  nothing is on program. */
+  degraded_reason?: string | null;
 }
 
 /**
- * Receiver liveness for one output:
+ * Receiver liveness for one NDI output:
  *  - `live`         — `connections > 0`, a receiver is subscribed.
- *  - `dark`         — `connections === 0`, Playing but nothing receives (the
- *                     #127 dark wall).
- *  - `never_polled` — `connections < 0` (`-1`), the heartbeat has not run yet.
+ *  - `dark`         — `connections === 0`, nothing receives it.
+ *  - `never_polled` — `connections < 0` (`-1`): no valid reading (the SDK's
+ *    error value; SP-program reads 0, not -1, before its first poll, and the
+ *    server names no `degraded_reason` then), so keep polling.
  */
 export type OutputHealth = "live" | "dark" | "never_polled";
 
-/** Classify a pipeline's NDI receiver connection count. */
+/** Classify an NDI sender's receiver connection count. */
 export function classifyConnections(connections: number): OutputHealth {
   if (connections > 0) return "live";
   if (connections === 0) return "dark";
-  return "never_polled"; // -1 = heartbeat has not run yet
+  return "never_polled"; // -1: no valid reading (the SDK's error value)
 }
 
-/** An on-program output that does not (yet) have a live receiver. */
-export interface UnhealthyOutput {
-  playlist_id: number;
-  ndi_name: string;
+/** The gate's verdict on `SP-program`. */
+export interface ProgramReceiverVerdict {
+  /** A source is on program and `SP-program` has a live receiver, and the
+   *  server names no degraded reason. */
+  ok: boolean;
+  health: OutputHealth | "nothing_on_program";
+  source: number | null;
   connections: number;
-  health: OutputHealth;
+  degraded_reason: string | null;
 }
 
 /**
- * Given the on-program playlist ids and the `/api/v1/ndi/health` array, return
- * the on-program outputs that do NOT yet have a live receiver.
- *
- * An on-program playlist with no health snapshot at all is reported as
- * `never_polled`. An empty result means every on-program output has
- * `connections > 0` — the gate passes. Off-program pipelines are ignored on
- * purpose: a non-program pipeline at `connections === 0` is normal and must
- * not fail the gate.
+ * `SP-program`'s receiver verdict. Nothing on program fails too: the box
+ * always has a program source, and a program that carries nothing is not a
+ * live output.
  */
-export function unhealthyOnProgramOutputs(
-  activePlaylistIds: number[],
-  health: HealthSnapshot[],
-): UnhealthyOutput[] {
-  const byId = new Map<number, HealthSnapshot>();
-  for (const s of health) byId.set(s.playlist_id, s);
-
-  const out: UnhealthyOutput[] = [];
-  for (const id of activePlaylistIds) {
-    const snap = byId.get(id);
-    if (!snap) {
-      // On program but not present in the health array — never observed.
-      out.push({
-        playlist_id: id,
-        ndi_name: `playlist ${id}`,
-        connections: -1,
-        health: "never_polled",
-      });
-      continue;
-    }
-    const health_ = classifyConnections(snap.connections);
-    if (health_ !== "live") {
-      out.push({
-        playlist_id: snap.playlist_id,
-        ndi_name: snap.ndi_name,
-        connections: snap.connections,
-        health: health_,
-      });
-    }
-  }
-  return out;
+export function programReceiverVerdict(program: ProgramReceiverView): ProgramReceiverVerdict {
+  const connections = program.health.connections;
+  const degraded_reason = program.degraded_reason ?? null;
+  const health =
+    program.source === null ? "nothing_on_program" : classifyConnections(connections);
+  return {
+    ok: health === "live" && degraded_reason === null,
+    health,
+    source: program.source,
+    connections,
+    degraded_reason,
+  };
 }

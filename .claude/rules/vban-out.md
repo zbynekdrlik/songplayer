@@ -42,6 +42,48 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   Keep that order in any new submit path.
   A pair whose audio is not exactly one 48 kHz stereo 1600-frame frame is sent
   as silence and counted in `blocks_substituted`.
+- **The program's audio is limited before VBAN and NDI get it (#210,
+  finding 5986249387).** The scene transition's equal-power crossfade sums
+  two sources that are each at most 0.98 (the stem mix's #184 limiter) up
+  to 0.98·√2 ≈ 1.39 at mid-fade, and `f32_to_int24` clamps everything from
+  ±1.0 flat: a clip at FOH. So `ProgramOutput::serve` runs `limit` between
+  `split` and `feed_vban`, in place on the pair's audio:
+  - ONE `sp_decoder::PeakLimiter` (the #184 limiter, now `pub`: ceiling
+    0.98, stereo-linked, instant attack, 50 ms release, bit-identical at
+    rest) owned by the `ProgramOutput`;
+  - every program block goes through it: a forwarded pair's, a fade's
+    crossfaded block, the standby silence (0 × gain stays 0; the tail
+    decays in step with time). Its state carries from one boundary to the
+    next, so the gain is continuous across boundary edges and a fade's
+    release tail reaches the boundaries after it (they are not
+    bit-identical until it ends, ~24 boundaries after a fade that peaked
+    at 1.39);
+  - it is reset where the program's timeline restarts: a stamp that is not
+    the grid boundary right after the last one (`limited_through`; the
+    first boundary, a resync that skipped stamps);
+  - only a program block (`is_program_block`) is limited: anything else
+    passes as it came, and VBAN sends silence for it;
+  - VBAN's copy and the NDI submit carry the SAME limited block, VBAN
+    first (`program_output_tests_order.rs` unchanged);
+  - outside a fade SongPlayer's own playlists are at or under the ceiling,
+    so it is at rest and their blocks pass bit for bit. A hotter block IS
+    limited outside a fade too: the NDI input "OBS manuál" forwards cg
+    OBS's audio as it comes, so a feed peaking over 0.98 now goes out at
+    the ceiling (0.98–1.0 used to pass, over 1.0 VBAN clamped it). That
+    engagement shows on no counter (`MixRun::limited` outside a fade run is
+    dropped); read cg OBS's own meters;
+  - the fade's INFO line (`program transition: the fade's mixed boundaries
+    went out`) carries `limited_frames` (`MixRun::limited`): the frames it
+    scaled while the run went out, the boundary that ended it included.
+    It is time under limiting, like the stem mix's `limited=`;
+  - tests: `program_output_tests_limit.rs` (pins from a scratch
+    numpy.float32 model: 1.3858 unlimited → 0.9800001, the boundary after
+    a fade at gain 0.929, bit-identical again 24 boundaries later, through
+    30 standby boundaries too, a 1.2 tone outside a fade → 0.9800001, a
+    constant 0.98 at slots 4 + 5 = 3200 frames).
+  - Box check: a dev1 VBAN capture across a 300 ms fade between two loud
+    songs has 0 samples at |x| ≥ 0.999 (the INT24 full scale), and the
+    fade line's `limited_frames` > 0.
 - The queue never blocks. Over `VBAN_QUEUE_BOUND` (10 = the program queue's
   bound) it drops the OLDEST block and counts it in `blocks_dropped`.
 - The `vban-output` thread (`run_vban_loop`, Windows) encodes one block into 8
@@ -64,8 +106,9 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
 - The thread is an MMCSS "Pro Audio" thread at `AVRT_PRIORITY_HIGH` for its
   whole life (#210 part 2, `mmcss::join_pro_audio`; below), with the 1 ms
   multimedia timer. When MMCSS refuses it, it falls back to
-  `THREAD_PRIORITY_TIME_CRITICAL` (`pipeline_audio::raise_thread_priority`,
-  shared with the NDI audio emitter and the NDI input).
+  `THREAD_PRIORITY_TIME_CRITICAL` (`mmcss::raise_thread_priority`, shared
+  with the NDI input; #221 lane 3 moved it out of the deleted
+  `pipeline_audio.rs`).
 - Clock: its own `WallClock`, ticked through `program_output::BoundaryTicker`
   once per boundary passed (`WallVbanClock::slewing`; the NDI input uses
   `WallVbanClock::new`, which follows its wall). `run_vban_loop` reads the clock on

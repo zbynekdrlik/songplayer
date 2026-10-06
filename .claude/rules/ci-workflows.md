@@ -36,6 +36,13 @@ Two traps, both cost real debugging time (#149):
   (`'odpojené'`) reaches the written spec as mojibake and silently never matches.
   Comments are fine. `scripts/check_workflow_ps_ascii.py` (run by the eval-checks
   pytest via `scripts/tests/test_check_workflow_ps_ascii.py`) fails CI on a violation.
+- **Windows PowerShell 5.1 array traps** (release 0.71.0 review). (1)
+  `Invoke-RestMethod` emits a JSON array as ONE pipeline object, so
+  `Invoke-RestMethod … | Where-Object` sees the whole array once: store it in
+  a variable and `foreach` over it. (2) A single `[pscustomobject]` has no
+  `.Count` (it reads `$null`, fixed only in PowerShell 6+), so
+  `($rows | Where-Object …).Count -gt 0` is FALSE for exactly one match: wrap
+  every filter whose count you test in `@(…)`.
 - **Relaunching SongPlayer after a kill: end the scheduled-task INSTANCE first**
   (`Stop-ScheduledTask -TaskName SongPlayer`, then wait until the state is no longer
   `Running`). The task is `MultipleInstances=IgnoreNew`; after a bare
@@ -58,6 +65,14 @@ frontend-e2e mock-API wait loop makes actionlint exit 1 — that is not your dif
   gate drop the old swap-file hacks. Exclusions are STRUCTURAL (cfg(windows)/shell-out/
   HTTP glue) or documented provably-equivalent/TIMEOUT pins — keep every rationale
   comment; a dropped exclusion resurrects a survivor and reds a future PR.
+- **A `file.rs:LINE:COL` pin goes stale SILENTLY** when lines above it move: it
+  then excludes nothing (or the wrong operator), and nothing fails until that
+  file is in some PR's diff. #221 lane 3 found four pins (`pacer.rs`,
+  `lock_state.rs`) already wrong at base. After ANY edit above a pinned line, or
+  when a pinned file is in the diff, re-check each pin: `sed -n LINEp` the file,
+  confirm column COL is the operator the comment names inside the named
+  function, and keep the comment's line numbers in step. A doc-only edit in a
+  pinned file should stay line-neutral.
 - cargo-mutants exit codes: **0**=all caught, **2**=survivors, **3**=timeouts (all
   "expected" for the full sweep), **1**=usage, **4**=baseline/build fail (real tooling
   errors). The PR gate treats a MISSED mutant as a HARD fail (never continue-on-error).
@@ -86,8 +101,8 @@ The no-compile box only learns about survivors ~15 min after the push, so shape
 pure code up front. cargo-mutants' binary-operator table (its book,
 `mutants.md`):
 
-- `<` → `==`, `>`
-- `>` → `==`, `<`
+- `<` → `==`, `>` (and `<=`, below)
+- `>` → `==`, `<` (and `>=`, below)
 - `<=` → `>`
 - `>=` → `<` ONLY
 - `==` ↔ `!=`, `&&` ↔ `||`
@@ -95,6 +110,15 @@ pure code up front. cargo-mutants' binary-operator table (its book,
 
 So a cap guard written `if len >= CAP { return }` has a single mutant, `<`,
 and a monotonic counter leaves it no `==` equivalent (#213 `note_unsupported`).
+
+**The table is not the whole list (#223 S1a).** The box's cargo-mutants 27.0
+`--list` also turned `x > MAX` into `x >= MAX` and `stride < row` into
+`stride <= row`, so every strict comparison needs an exact-boundary test
+(`a_side_over_the_texture_limit_is_refused` takes exactly 16384 on BOTH
+axes; one axis alone left the other's `>=` mutant unkilled). It also lists
+`delete -` on a negative float literal inside a `const` table
+(`sp-gpu` `BT709_LIMITED_TO_FULL`): pin every entry's value, not only a few.
+List the diff's mutants (`rust-workspace.md`) instead of trusting the table.
 - **Clamp with `.max()` / `.min()`, not `if a < b { a = b }`** — `<` → `<=` on
   such a clamp is a provably EQUIVALENT mutant (the assignment is a no-op when
   equal) and can never be killed; `.max()` leaves no comparison to mutate.
@@ -284,8 +308,14 @@ stops SongPlayer:
   failure and fails the job.
 - Residual: the gate reads the lease, it does not HOLD it. A lease another
   repo takes in the ~1 min between the check and "Deploy SongPlayer"
-  (artifact downloads) is not seen; the E2E job after the deploy does not
-  check it either.
+  (artifact downloads) is not seen. The E2E job runs the same gate again
+  twice: right after its checkout, before its first step that acts on the
+  box (release 0.71.0 review: starting OBS, the restart, the title check's
+  program cut, the Presenter "[CI PROBE]"), and right before
+  "Feature-level Playwright (post-deploy spec)" (camera-box's request,
+  6.10.2026). The suite switches cg OBS's program for the A/V
+  gate's probe scene and presses scenes through the facade, and minutes
+  pass between the deploy's wait and the take.
 - Hardening (review rounds 3-4): a body over 64 KiB (`MAX_BODY_BYTES`; a
   lease is ~400 B; the bound is pinned exactly), JSON nested past the
   recursion limit, bad UTF-8, a non-HTTP listener, a body shorter than its
@@ -314,6 +344,32 @@ stops SongPlayer:
   bound), the fetch over a real local HTTP server. Python runs locally on
   the Tier-0 box, so its RED/GREEN is really run before the push.
 
+**The E2E job's "Verify Resolume title delivery" cuts SP-program** (release
+0.71.0 review). Since #221 lane 2 only SP-program's playlist writes the
+title and the lines (`may_write_wall`), and with "OBS manuál" (-1) on
+program nobody does, so playing a playlist off program proves nothing. The
+step picks the test playlist by the baseline discipline
+(`e2e/obs-baseline-scene.ts`: an active `sp-slow` playlist with videos, else
+any `sp-*` but `sp-fast` and `sp-warmup`, the sync tone), cuts SP-program to
+it with `POST /api/v1/program/cut`, plays, reads Arena's composition, and in
+a `finally` cuts back to the old source with NO pause (the test playlist
+leaves program and pauses itself after the fade, so the program never
+carries its frozen, silent picture). It pauses the test playlist only with
+no source to give back, when the cut back is refused (then the step fails),
+or when it was the source but not playing (played, then paused again). When
+the test
+playlist already IS the program's source and playing (its `/api/v1/ndi/health`
+row reads `Playing`), it is read in place: no cut, no play, no pause, so the
+live program is never paused (review round 3). An empty title is read again
+once a second, at most 10 more times: a song shows no title in its last
+3.5 s and first 1.5 s. Never let it pick `sp-warmup` or `sp-fast`: it is on
+the live wall and FOH for ~20 s. The cut back re-kicks the old source: a
+playlist starts its NEXT song, whether it was playing or paused (the same
+as the post-deploy suite's `afterAll` restore); a box whose program never
+had a source keeps the test playlist (no "nothing" to cut back to). The
+step before it, "Verify playback updates OBS text source", plays and pauses
+a playlist that is NOT the program's source, for the same reason.
+
 **Two push runs for ONE commit: never cancel either by hand** (28.9.2026,
 `36494106201` + `36494106433`). The concurrency group already cancels the
 older one. `gh run cancel` on the queued survivor still lands, even when the
@@ -325,21 +381,21 @@ in full (`gh run rerun <id>`, not `--failed`).
 
 **#221 L3 (read this first).** The E2E scene driver no longer talks to cg
 OBS: `ObsDriver` connects to SongPlayer's obs-websocket facade
-(`FACADE_WS_URL`, :4456; cg OBS :4455 only for the A/V gate's recording and
-profile read). The contract is in `remote-control.md` ("Program feedback")
+(`FACADE_WS_URL`, :4456). cg OBS :4455 serves only the A/V gate: its
+recording and profile read, its probe scene (#221 lane 3) and the wait for
+the probe's audio meter (#221 dev.18; see `obs-ndi-health.md`). The contract is in `remote-control.md` ("Program feedback")
 and the driver's own doc:
 - the transition is SP-program's (the Settings fade, e.g. 300 ms, or a Cut
   that ends at once), announced by SongPlayer's `SceneTransitionStarted` /
   `SceneTransitionEnded`, not cg OBS's 2 s fade; the driver raises its
   transition flag BEFORE the trigger;
 - a switch to the scene already on program is ALWAYS sent (the facade's
-  re-kick re-mirrors cg OBS); the round-3 skip below is gone (review round
-  1 of the L3 lane);
+  re-kick); the round-3 skip below is gone (review round 1 of the L3 lane);
 - since L4b `active_scene` / `active_playlist_ids` are SongPlayer's own
-  program (the resolver + the on-air set); right after a switch the on-air
-  set holds BOTH playlists until cg OBS answers the mirror, a moment AFTER
-  the driver returns: wait for it to settle (`waitEngineActiveScene` treats
-  more than one playlist on air as not settled), never read once.
+  program (the resolver + the on-air set, SP-program's playlist alone since
+  B4 step 6); the playback authority applies a switch a moment AFTER the
+  driver returns: wait for the engine (`waitEngineActiveScene`), never read
+  once. Since B4 step 6 a playlist press never switches cg OBS (no mirror).
 
 The rest of this section is the #170 history of the cg OBS driver.
 
@@ -404,14 +460,12 @@ target` (`waitForPreviewApplied`, 3 s bound, throws "stale preview") BEFORE the
 trigger. Same rule for any future studio-mode automation (Companion-style
 control in the app): set preview → confirm preview → trigger.
 
-**Engine self-heal (the production bug the harness exposed):** a dropped
-`CurrentProgramSceneChanged` in daily studio-mode use is a dark wall for the
-operator, not just an E2E flake. `crates/sp-server/src/obs/` now polls
-`GetCurrentProgramScene` every ~2 s (`scene_poll::reconcile_program_scene`) and,
-on a mismatch with the last event-derived scene
-(`scene_poll::scene_poll_detects_change`), feeds the same `scene::apply_scene_change`
-path the event does (INFO log `obs: program scene changed without an event —
-reconciled by poll`).
+**Engine self-heal (history):** a dropped `CurrentProgramSceneChanged` in daily
+studio-mode use was a dark wall for the operator while playback followed cg
+OBS's program, so the OBS client polled `GetCurrentProgramScene` every ~2 s
+(`obs/scene_poll.rs`). #221 L4b moved the playback authority to SongPlayer's own
+program and L6 deleted that poll with the rest of cg OBS's scene detection
+(`obs-ndi-health.md`): nothing depends on cg OBS's program events any more.
 
 **afterAll read-back + afterEach restore:** the post-deploy suite restores the
 scene it started on and asserts `/api/v1/status.active_scene` (the engine's view)
@@ -450,7 +504,7 @@ is already pushed (history rewrite is banned), a LATER commit carrying
 `while deque.len() > CAP { deque.pop_front(); }` is correct code that a
 `>`→`<` mutant turns into an infinite loop on an empty deque — cargo-mutants
 reports TIMEOUT (300 s), which fails the shard exactly like a MISSED mutant
-(#192 r3, `loop_stats.rs::SubmitHist::observe`). When one push can overshoot
+(#192 r3, `loop_stats.rs::SubmitHist::observe`, deleted by #221 lane 3). When one push can overshoot
 by at most one, write `if len > CAP { pop_front(); }`; for bulk trims use
 `truncate`/`drain(..n)` with a `saturating_sub` count. Any loop whose exit
 depends on a comparison a mutant can flip needs a structural bound.
@@ -482,5 +536,6 @@ sampled 30 min with the flag still OFF (21.9.2026). The working form is
 has a NEW job id, so poll `gh api repos/<r>/actions/runs/<run>/jobs?filter=latest`
 (or `jobs/<new-id>`) — polling the old id reports the old attempt's success.
 Confirm the restart with `/api/v1/status` `uptime_s` before sampling anything
-that depends on a startup-read setting (`genlock_pacing`).
+that depends on a startup-read setting (e.g. `sp_min_working_set_mb`;
+the `genlock_pacing` setting this was written for is deleted, #221 lane 3).
 

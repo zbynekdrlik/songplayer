@@ -77,30 +77,32 @@ impl PlaybackEngine {
     /// already false). With no other playlist on program, its title fades
     /// out (`HideTitle`) and its line goes (`HideSubtitles`), as before L4b;
     /// cg OBS's title text is cleared too (`title::push_hide`, review round
-    /// 6: the OFF cancelled the song's hide timer, which clears it).
+    /// 6: the OFF cancelled the song's hide timer, which clears it). With no
+    /// wall owner left either, the OFF also blanks the stage display
+    /// ([`Self::scene_off`]).
     ///
-    /// #221 L4b review rounds 3-4: the playback authority sends the incoming
-    /// ON at the press and the outgoing OFF only when cg OBS confirms the
-    /// mirror, so the incoming playlist can be on program already, its title
-    /// and line up (or overwritten by the outgoing ones on the shared clips).
-    /// Then the wall is re-synced to it: its due title (a `Resync`; with none
+    /// #221 L4b review rounds 3-4: another playlist can be on program
+    /// already when this OFF is handled, its title and line up (or
+    /// overwritten by the outgoing ones on the shared clips): after a quick
+    /// cut away and back, whose stale events the engine drops. (#221 B4 step
+    /// 6: the authority sends a cut's OFF and ON together, OFF first; the
+    /// outgoing OFF no longer waits for cg OBS's answer to a mirror.) Then
+    /// the wall is re-synced to it: its due title (a `Resync`; with none
     /// due the outgoing title fades and cg OBS's text is cleared,
     /// `title::push_hide`, where a `Resync(None)` would cut it; nothing when
     /// the due title's read failed, `decide_wall_title`), and its
     /// current line re-sent at once (one `HideSubtitles` only when none of
     /// them has a line). "On program" = `scene_active` AND in the
-    /// authority's diffed set: a playlist whose OFF is queued too is leaving.
-    /// Its title is still a candidate (`title_candidates`), so a due one can
-    /// be re-synced for the moment until its own OFF re-syncs the wall.
+    /// authority's diffed set: a playlist whose OFF is queued too is leaving,
+    /// and it owns nothing, so its title and line are no candidates either
+    /// (`title_candidate`, `on_program_lines`: the wall owner's only).
     ///
-    /// #221 review round 3: the wall owner can change by this OFF alone (a
-    /// cut to "OBS manuál" while cg OBS still shows another playlist), so the
-    /// stage display is re-synced to the owner too (`resync_presenter`), as
-    /// at an owner's ON. After the OFF of a member that did not own the wall,
-    /// that repeats the owner's current line, or (review round 4) clears the
-    /// stage display while the owner is in a blank stretch, where its
-    /// dispatch holds its last line: the display goes blank like the wall
-    /// until the owner's next line.
+    /// #221 review round 3: the stage display is re-synced to the wall owner
+    /// too (`resync_presenter`), as at an owner's ON: that repeats the
+    /// owner's current line, or (review round 4) clears the stage display
+    /// while the owner is in a blank stretch, where its dispatch holds its
+    /// last line: the display goes blank like the wall until the owner's
+    /// next line.
     pub(super) async fn wall_after_scene_off(&mut self) {
         let others_on_program = self
             .pipelines
@@ -150,11 +152,10 @@ impl PlaybackEngine {
         }
     }
 
-    /// The wall after its owner's ON (#221, review rounds 1-2). The owner can
-    /// change by this ON alone (SP-program cut to it while cg OBS still shows
-    /// the old owner), and the old owner writes nothing any more — its hide
-    /// timer, song-end clear and Presenter pushes included — so the whole
-    /// wall is re-synced to the new owner at once: its title (a `playing`
+    /// The wall after its owner's ON (#221, review rounds 1-2). The old
+    /// owner writes nothing once it is off the air — its hide timer,
+    /// song-end clear and Presenter pushes included — so the whole wall is
+    /// re-synced to the new owner at once: its title (a `playing`
     /// owner's scene-on already sent the `Resync`, `push_title_for_playing`;
     /// one that plays nothing takes the old title down), its line
     /// (`resync_wall_lines`) and the stage display (`resync_presenter`).
@@ -194,9 +195,20 @@ impl PlaybackEngine {
         };
     }
 
-    /// The scene-go-off half of `handle_scene_change`: pause, unless the
-    /// program bus holds the playlist through a transition.
+    /// The scene-go-off half of `handle_scene_change` (the authority's OFF):
+    /// pause, unless the program bus holds the playlist through a
+    /// transition. An OFF that leaves NO wall owner ("OBS manuál" on
+    /// program) first blanks the stage display: nobody writes it any more
+    /// (ROZHODNUTÉ 6002459249), so the last owner's line would stay — also
+    /// when this playlist's scene was never on program (a press and a cut
+    /// away before its ON was handled, which is then dropped as stale:
+    /// review round 2). A press's OFF, with the next owner already
+    /// published, leaves the display to that owner's ON
+    /// (`wall_after_owner_on`): no blank flash.
     pub(super) async fn scene_off(&mut self, playlist_id: i64) {
+        if self.on_air.owner().is_none() {
+            crate::presenter::push_empty(self.presenter_client.as_ref(), "no wall owner");
+        }
         self.scene_off_step(playlist_id, timeline_now_100ns()).await;
     }
 

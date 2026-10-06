@@ -419,7 +419,7 @@ pub(crate) async fn resolve_containment(pool: &sqlx::SqlitePool) -> Containment 
         .ok()
         .flatten();
     // #207 round-3c: the operator reserve-size knob (GiB), read the same way.
-    // A present but out-of-range value collapses to the default 4; WARN (each
+    // A present but out-of-range value collapses to `RESERVE_GIB_DEFAULT` (2); WARN (each
     // tick) so the operator sees the setting was ignored (the pure parse fn
     // stays silent).
     let reserve = crate::db::models::get_setting(pool, "heavy_alloc_reserve_gib")

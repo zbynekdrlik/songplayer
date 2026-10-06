@@ -44,9 +44,9 @@ pub struct SplitSyncedDecoder {
     pending_audio: VecDeque<DecodedAudioFrame>,
     /// How far past each video frame's timestamp the audio is read and handed
     /// out with it: the `next_synced` deadline is `video_ts + audio_lead_ms`.
-    /// The pacing-OFF path pairs at 40 ms (or 1540 ms with the wall-clock
-    /// emitter); the paced path reads a 250 ms cushion ahead (#148 v4). The G5
-    /// read gate bounds the read-ahead to this lead plus one chunk.
+    /// The paced path, the only one since #221 lane 3, reads a 250 ms cushion
+    /// ahead (#148 v4). The G5 read gate bounds the read-ahead to this lead
+    /// plus one chunk.
     audio_lead_ms: u64,
     duration_ms: u64,
     /// After a seek, the sample-accurate audio target the video must fast-forward
@@ -81,10 +81,8 @@ impl SplitSyncedDecoder {
     }
 
     /// Like [`new`], but reads (and hands out) audio up to `audio_lead_ms` past
-    /// each video frame's timestamp. Callers:
-    ///
-    /// - the SDK-clocked path with the wall-clock emitter (1540 ms, #192);
-    /// - the PACED path (250 ms, #148 v4).
+    /// each video frame's timestamp. Its caller is the PACED path (250 ms,
+    /// #148 v4; #221 lane 3 deleted the SDK-clocked path and its 1540 ms).
     ///
     /// The paced pacer aligns the audio to the picture by MEDIA time, so there
     /// the lead only changes how much audio is buffered — never which sample

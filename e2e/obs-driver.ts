@@ -2,14 +2,20 @@
  * Thin wrapper around obs-websocket-js for post-deploy Playwright tests.
  *
  * Used by the post-deploy suite to switch scenes and verify that SongPlayer's
- * scene-driven playback engine reacts correctly.
+ * program (the playback authority since #221 L4b) reacts correctly.
  *
  * #221 L3: the SCENE driver connects to SongPlayer's obs-websocket facade
  * (`FACADE_WS_URL`, :4456), the server Companion's buttons talk to: studio
  * mode is ON there, so `switchScene` takes Companion's exact path (preview,
  * then transition), and the program scene and the transition events are
  * SongPlayer's own. A second driver on cg OBS (`OBS_WS_URL`, :4455) is kept
- * only for the recording and profile requests of the A/V gate.
+ * for the A/V gate: its recording and profile requests, and (#221 lane 3) the
+ * gate's probe scene — provisioning it (`av-sync-probe.ts`: the scene, its one
+ * DistroAV receiver of `SP-program`) and putting cg OBS on it for the take and
+ * back, each switch only when cg OBS is on another scene — and (#221 dev.18)
+ * the wait for the probe's audio before every take (`waitForInputAudio`, the
+ * only user of the high-volume `InputVolumeMeters`, subscribed for the wait
+ * alone).
  */
 
 // The bare import: in Node it resolves to the MSGPACK build, which offers
@@ -18,7 +24,13 @@
 // OBS always did, so both drivers go through it; never import
 // "obs-websocket-js/json" here, it would test a path Companion never takes
 // (obs-driver-protocol.spec.ts).
-import OBSWebSocket from "obs-websocket-js";
+import OBSWebSocket, { EventSubscription } from "obs-websocket-js";
+import {
+  meterInputs,
+  waitForInputAudio,
+  type AudioWaitOptions,
+  type AudioWaitReport,
+} from "./obs-audio-wait";
 import { waitForPreviewApplied, waitForSceneSwitchApplied } from "./obs-scene-wait";
 
 export class ObsDriver {
@@ -51,7 +63,8 @@ export class ObsDriver {
 
   async listScenes(): Promise<string[]> {
     const r = await this.obs.call("GetSceneList");
-    return (r as { scenes: { sceneName: string }[] }).scenes.map((s) => s.sceneName);
+    // obs-websocket-js types `scenes` as plain JSON objects.
+    return (r as unknown as { scenes: { sceneName: string }[] }).scenes.map((s) => s.sceneName);
   }
 
   private async studioModeEnabled(): Promise<boolean> {
@@ -68,13 +81,12 @@ export class ObsDriver {
    *
    *  - #221 L3: a switch to the scene already on program is ALWAYS sent. The
    *    driver talks to SongPlayer's facade, where a same-scene transition is
-   *    the designed re-kick: it re-mirrors the scene to cg OBS, whose program
-   *    can differ from SP-program until the cutover (e.g. cg OBS on a manual
-   *    scene while "OBS manual" is off keeps the last playlist on
-   *    SP-program). Skipping it left cg OBS, and so the engine's
-   *    `active_scene`, off the target (review round 1). The skip existed for
-   *    cg OBS's own same-scene 2 s fade, which dropped the next switch's
-   *    event (#170); the E2E no longer switches cg OBS directly.
+   *    the designed re-kick (it plays a playlist paused out of band). The skip
+   *    existed for cg OBS's own same-scene 2 s fade, which dropped the next
+   *    switch's event (#170). The scene driver never switches cg OBS (#221
+   *    B4 step 6: a playlist press tells cg OBS nothing at all); the A/V
+   *    gate's recorder does, and guards each of its switches against the
+   *    same scene itself.
    *  - In studio mode, drive the transition the studio way
    *    (`SetCurrentPreviewScene` + `TriggerStudioModeTransition`) so OBS emits
    *    the program-scene-changed event SongPlayer reacts to; fall back to
@@ -186,6 +198,152 @@ export class ObsDriver {
     return outputPath;
   }
 
+  // ---- #221 lane 3: the A/V gate's probe scene (cg OBS only) ----
+
+  /** The names of the inputs of `inputKind` (e.g. DistroAV's `ndi_source`). */
+  async listInputs(inputKind: string): Promise<string[]> {
+    const r = await this.obs.call("GetInputList", { inputKind });
+    return (r as { inputs: { inputName: string }[] }).inputs.map((i) => i.inputName);
+  }
+
+  /** An input's settings, or null when OBS has no input of that name. */
+  async inputSettings(inputName: string): Promise<Record<string, unknown> | null> {
+    try {
+      const r = await this.obs.call("GetInputSettings", { inputName });
+      return (r as { inputSettings: Record<string, unknown> }).inputSettings;
+    } catch (e) {
+      if (isNotFound(e)) return null;
+      throw e;
+    }
+  }
+
+  /** The id of `sourceName`'s item in `sceneName`, or null when it has none. */
+  async sceneItemId(sceneName: string, sourceName: string): Promise<number | null> {
+    try {
+      const r = await this.obs.call("GetSceneItemId", { sceneName, sourceName });
+      return (r as { sceneItemId: number }).sceneItemId;
+    } catch (e) {
+      if (isNotFound(e)) return null;
+      throw e;
+    }
+  }
+
+  async createScene(sceneName: string): Promise<void> {
+    await this.obs.call("CreateScene", { sceneName });
+  }
+
+  /** Create an input in `sceneName`; returns its scene item id. */
+  async createInput(
+    sceneName: string,
+    inputName: string,
+    inputKind: string,
+    inputSettings: Record<string, unknown>,
+  ): Promise<number> {
+    const r = await this.obs.call("CreateInput", {
+      sceneName,
+      inputName,
+      inputKind,
+      // obs-websocket-js types settings as a JSON object.
+      inputSettings: inputSettings as never,
+      sceneItemEnabled: true,
+    });
+    return (r as { sceneItemId: number }).sceneItemId;
+  }
+
+  /** Put an existing source into `sceneName`; returns its scene item id. */
+  async addSceneItem(sceneName: string, sourceName: string): Promise<number> {
+    const r = await this.obs.call("CreateSceneItem", {
+      sceneName,
+      sourceName,
+      sceneItemEnabled: true,
+    });
+    return (r as { sceneItemId: number }).sceneItemId;
+  }
+
+  /** Merge `inputSettings` into an input's settings. */
+  async setInputSettings(inputName: string, inputSettings: Record<string, unknown>): Promise<void> {
+    await this.obs.call("SetInputSettings", {
+      inputName,
+      inputSettings: inputSettings as never,
+      overlay: true,
+    });
+  }
+
+  /** Fit a scene item to the canvas, aspect kept (bounds = the base size). */
+  async fitToCanvas(sceneName: string, sceneItemId: number): Promise<void> {
+    const v = (await this.obs.call("GetVideoSettings")) as {
+      baseWidth: number;
+      baseHeight: number;
+    };
+    await this.obs.call("SetSceneItemTransform", {
+      sceneName,
+      sceneItemId,
+      sceneItemTransform: {
+        positionX: 0,
+        positionY: 0,
+        alignment: 5, // top left
+        boundsType: "OBS_BOUNDS_SCALE_INNER",
+        boundsAlignment: 0, // centred in the bounds
+        boundsWidth: v.baseWidth,
+        boundsHeight: v.baseHeight,
+      },
+    });
+  }
+
+  /**
+   * #221 dev.18: wait until `inputName`'s audio flows — its input peak above
+   * the floor for 1 s in a row, bounded (`obs-audio-wait.ts`; the A/V gate
+   * calls it on the probe before every StartRecord).
+   *
+   * `InputVolumeMeters` is a HIGH-VOLUME event (every active input, every
+   * 50 ms) that obs-websocket sends only to a session that asks for it, so
+   * this session asks with a `Reidentify` for the wait alone and drops it
+   * again after, whatever the outcome. The drop names the default `All`
+   * explicitly: a `Reidentify` without `eventSubscriptions` keeps the current
+   * ones. A connect never asks for it (`obs-driver-protocol.spec.ts`). A
+   * connection that closes mid-wait ends it at once, naming the close, not
+   * after the bound as "no event".
+   */
+  async waitForInputAudio(
+    inputName: string,
+    opts: AudioWaitOptions = {},
+  ): Promise<AudioWaitReport> {
+    await this.obs.reidentify({
+      eventSubscriptions: EventSubscription.All | EventSubscription.InputVolumeMeters,
+    });
+    let report: AudioWaitReport;
+    try {
+      report = await waitForInputAudio(
+        (onMeters, onClosed) => {
+          const meters = (data: { inputs: unknown }) => onMeters(meterInputs(data.inputs));
+          const closed = (e: { code?: number; message?: string }) =>
+            onClosed(`code ${e.code ?? "?"}${e.message ? `, ${e.message}` : ""}`);
+          this.obs.on("InputVolumeMeters", meters);
+          this.obs.on("ConnectionClosed", closed);
+          return () => {
+            this.obs.off("InputVolumeMeters", meters);
+            this.obs.off("ConnectionClosed", closed);
+          };
+        },
+        inputName,
+        opts,
+      );
+    } catch (e) {
+      // Keep the wait's own error; a failed drop is only logged here.
+      await this.dropVolumeMeters().catch((d) =>
+        console.warn(`OBS: could not drop InputVolumeMeters after a failed audio wait: ${d}`),
+      );
+      throw e;
+    }
+    await this.dropVolumeMeters();
+    return report;
+  }
+
+  /** Back to the default subscriptions (`All`, no high-volume event). */
+  private async dropVolumeMeters(): Promise<void> {
+    await this.obs.reidentify({ eventSubscriptions: EventSubscription.All });
+  }
+
   async disconnect(): Promise<void> {
     try {
       await this.obs.disconnect();
@@ -193,4 +351,9 @@ export class ObsDriver {
       // Ignore errors during disconnect.
     }
   }
+}
+
+/** obs-websocket's "resource not found" (600): no input / scene item of that name. */
+function isNotFound(e: unknown): boolean {
+  return (e as { code?: number } | null)?.code === 600;
 }

@@ -20,26 +20,29 @@ fn should_run_heartbeat_returns_false_below_5_seconds() {
     assert!(!should_run_heartbeat(Duration::from_millis(4_999)));
 }
 
+/// #221: a playlist has no NDI output of its own (lane 3), so a bad poll is
+/// an underrun or a stale delivery only: a full-rate grid with a fresh
+/// delivery is good. Before B4 step 6 every poll at 0 receivers (an output cg
+/// OBS no longer showed) counted as bad.
 #[test]
-fn classify_bad_poll_connections_zero_while_playing() {
-    assert!(classify_bad_poll(
+fn a_full_rate_poll_with_a_fresh_delivery_is_good() {
+    let now = Instant::now();
+    assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        0,
         30.0,
         30.0,
-        None,
-        Instant::now(),
+        Some(now),
+        now,
     ));
 }
 
 #[test]
 fn classify_bad_poll_paused_is_never_bad() {
-    // Even with connections=0, fps=0, and no recent submit, the Paused
+    // Even with fps=0 and no recent submit, the Paused
     // state must not bump consecutive_bad_polls. Same non-Playing guard
     // as Idle / WaitingForScene.
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Paused,
-        0,
         0.0,
         30.0,
         None,
@@ -51,7 +54,6 @@ fn classify_bad_poll_paused_is_never_bad() {
 fn classify_bad_poll_idle_is_never_bad() {
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Idle,
-        0,
         0.0,
         30.0,
         None,
@@ -64,7 +66,6 @@ fn classify_bad_poll_underrun_when_observed_below_half_nominal() {
     // 10 < 30/2=15 => bad
     assert!(classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         10.0,
         30.0,
         Some(Instant::now()),
@@ -73,7 +74,6 @@ fn classify_bad_poll_underrun_when_observed_below_half_nominal() {
     // 16 >= 15 => not bad
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         16.0,
         30.0,
         Some(Instant::now()),
@@ -84,10 +84,9 @@ fn classify_bad_poll_underrun_when_observed_below_half_nominal() {
 #[test]
 fn classify_bad_poll_stale_when_last_submit_more_than_10s_ago() {
     let now = Instant::now();
-    // 11s ago, fps healthy, connections healthy => stale bad-poll
+    // 11s ago, fps healthy => stale bad-poll
     assert!(classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         30.0,
         30.0,
         Some(now - Duration::from_secs(11)),
@@ -96,7 +95,6 @@ fn classify_bad_poll_stale_when_last_submit_more_than_10s_ago() {
     // 9s ago => not stale, all healthy => not bad
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         30.0,
         30.0,
         Some(now - Duration::from_secs(9)),
@@ -113,7 +111,6 @@ fn classify_bad_poll_does_not_trigger_underrun_when_nominal_fps_is_zero() {
     let now = Instant::now();
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         10.0, // observed
         0.0,  // nominal — guard should skip underrun
         Some(now),
@@ -129,7 +126,6 @@ fn classify_bad_poll_underrun_excludes_exact_half_nominal() {
     let now = Instant::now();
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         15.0, // exactly nominal/2 with nominal=30
         30.0,
         Some(now),
@@ -138,164 +134,11 @@ fn classify_bad_poll_underrun_excludes_exact_half_nominal() {
     // Just under should still be bad.
     assert!(classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         14.99,
         30.0,
         Some(now),
         now,
     ));
-}
-
-// ---------------------------------------------------------------------------
-// Regression test for #133: /api/v1/ndi/health froze on the last pre-pause
-// snapshot (state=Playing, stale fps) because decode_and_send's paused
-// branch never emitted a HealthSnapshot event at all. This proves the
-// paused-tick heartbeat reports Paused with zeroed fps and a non-increasing
-// frame total instead — exercised via MockNdiBackend since decode_and_send
-// itself is Windows-only and cannot run on Linux CI (no MediaFoundation),
-// but emit_heartbeat only needs a generic FrameSubmitter<B: NdiBackend>,
-// same as submitter.rs's own tests.
-// ---------------------------------------------------------------------------
-#[test]
-fn paused_heartbeat_reports_paused_state_with_non_increasing_counters() {
-    use crate::playback::submitter::FrameSubmitter;
-    use sp_ndi::test_util::MockNdiBackend;
-    use std::sync::Arc;
-
-    let backend = Arc::new(MockNdiBackend::new());
-    let sender = sp_ndi::NdiSender::new_with_clocking(backend, "SP-test", true, false).unwrap();
-    let mut submitter = FrameSubmitter::new(sender, 30, 1);
-
-    // Simulate active playback: 5 real frames submitted before pause.
-    for _ in 0..5 {
-        submitter.submit_nv12(4, 2, 4, vec![0u8; 4 * 2 * 3 / 2], &[]);
-    }
-    let total_before_pause = submitter.frames_submitted_total();
-    assert_eq!(total_before_pause, 5);
-    // Simulate the last Playing-state heartbeat that would have drained
-    // this window before pause began (mirrors run_heartbeat_inner's
-    // drain_window call) — otherwise the paused tick below would still see
-    // those 5 frames sitting in the undrained window and report a bogus
-    // nonzero fps instead of the zeroed fps a real paused tick produces.
-    let _ = submitter.drain_window();
-
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-    // Force should_run_heartbeat(...) to gate true on the first tick.
-    let mut last_heartbeat = Instant::now() - Duration::from_secs(6);
-    let mut consecutive_bad_polls: u32 = 0;
-
-    // Paused tick: no new frames submitted since pause began.
-    run_heartbeat_paused(
-        &mut submitter,
-        &event_tx,
-        42,
-        &mut last_heartbeat,
-        &mut consecutive_bad_polls,
-    );
-
-    let (playlist_id, event) = event_rx.try_recv().expect(
-        "paused branch must emit a HealthSnapshot event — a silent pause \
-         freezes /api/v1/ndi/health on the pre-pause snapshot forever",
-    );
-    assert_eq!(playlist_id, 42);
-    match event {
-        PipelineEvent::HealthSnapshot {
-            reported_state,
-            observed_fps,
-            frames_submitted_total,
-            ..
-        } => {
-            assert_eq!(
-                reported_state,
-                PlaybackStateLabel::Paused,
-                "must report Paused, never the stale Playing state"
-            );
-            assert_eq!(
-                observed_fps, 0.0,
-                "no frames submitted while paused -> fps must be zeroed"
-            );
-            assert_eq!(
-                frames_submitted_total, total_before_pause,
-                "frame total must not increase while paused"
-            );
-        }
-        other => panic!("unexpected event: {other:?}"),
-    }
-}
-
-/// A paused tick BEFORE the 5s cadence has elapsed must not emit anything —
-/// matches the Playing branch's should_run_heartbeat gate so pausing doesn't
-/// spam the health channel every 100ms poll.
-#[test]
-fn paused_heartbeat_respects_5s_cadence() {
-    use crate::playback::submitter::FrameSubmitter;
-    use sp_ndi::test_util::MockNdiBackend;
-    use std::sync::Arc;
-
-    let backend = Arc::new(MockNdiBackend::new());
-    let sender = sp_ndi::NdiSender::new_with_clocking(backend, "SP-test2", true, false).unwrap();
-    let mut submitter = FrameSubmitter::new(sender, 30, 1);
-
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut last_heartbeat = Instant::now(); // just ticked — well under 5s
-    let mut consecutive_bad_polls: u32 = 0;
-
-    run_heartbeat_paused(
-        &mut submitter,
-        &event_tx,
-        7,
-        &mut last_heartbeat,
-        &mut consecutive_bad_polls,
-    );
-
-    assert!(
-        event_rx.try_recv().is_err(),
-        "must not emit before the 5s heartbeat cadence elapses"
-    );
-}
-
-#[test]
-fn heartbeat_forwards_the_pacing_flag() {
-    // #147 change 7: an idle/paused heartbeat carries pacing.enabled = the flag
-    // (and any accumulated counters), NOT PacingStats::default() (enabled=false).
-    use crate::playback::ndi_health::PacingStats;
-    use crate::playback::submitter::FrameSubmitter;
-    use sp_ndi::test_util::MockNdiBackend;
-    use std::sync::Arc;
-
-    let backend = Arc::new(MockNdiBackend::new());
-    let sender = sp_ndi::NdiSender::new_with_clocking(backend, "HB-pacing", true, false).unwrap();
-    let mut submitter = FrameSubmitter::new(sender, 30, 1);
-
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut last_heartbeat = Instant::now() - Duration::from_secs(6);
-    let mut consecutive_bad_polls: u32 = 0;
-
-    let pacing = PacingStats {
-        enabled: true,
-        seq: 3,
-        ..Default::default()
-    };
-    emit_heartbeat(
-        &mut submitter,
-        &event_tx,
-        99,
-        PlaybackStateLabel::Paused,
-        &mut last_heartbeat,
-        &mut consecutive_bad_polls,
-        pacing.clone(),
-        crate::playback::ndi_health::AudioStats::default(),
-        crate::playback::loop_stats::LoopStageStats::default(),
-    );
-
-    let (_pid, event) = event_rx.try_recv().expect("heartbeat must emit");
-    match event {
-        PipelineEvent::HealthSnapshot { pacing: got, .. } => {
-            assert_eq!(got, pacing, "the pacing flag + counters must be forwarded");
-            assert!(got.enabled, "idle/paused snapshot must report enabled=flag");
-        }
-        other => panic!("unexpected event: {other:?}"),
-    }
 }
 
 #[test]
@@ -306,7 +149,6 @@ fn classify_bad_poll_stale_excludes_exact_10s() {
     let now = Instant::now();
     assert!(!classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         30.0,
         30.0,
         Some(now - Duration::from_secs(10)),
@@ -315,7 +157,6 @@ fn classify_bad_poll_stale_excludes_exact_10s() {
     // 10s + 1ns should be stale.
     assert!(classify_bad_poll(
         &PlaybackStateLabel::Playing,
-        1,
         30.0,
         30.0,
         Some(now - Duration::from_secs(10) - Duration::from_nanos(1)),

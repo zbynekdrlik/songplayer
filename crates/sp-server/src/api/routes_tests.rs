@@ -26,7 +26,6 @@ pub(crate) async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> 
     let (engine_tx, _) = mpsc::channel(16);
     let (sync_tx, _) = mpsc::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
-    let (obs_rebuild_tx, _) = broadcast::channel(4);
     AppState {
         pool,
         event_tx,
@@ -36,7 +35,6 @@ pub(crate) async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> 
         tool_paths: Arc::new(RwLock::new(None)),
         sync_tx,
         resolume_tx,
-        obs_rebuild_tx,
         cache_dir: cache_dir.clone(),
         ai_proxy: std::sync::Arc::new(crate::ai::proxy::ProxyManager::new(
             cache_dir,
@@ -48,11 +46,11 @@ pub(crate) async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> 
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-        ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
         preview_registry: Arc::new(crate::playback::preview::PreviewRegistry::new()),
         program_bus: Arc::new(crate::playback::program_bus::ProgramBus::new()),
         lan_status: crate::mdns::new_status_handle(),
         metadata_chain: std::sync::Arc::new(crate::metadata::ProviderChain::new(vec![])),
+        decode_bench: Arc::new(crate::diag::decode_bench::DecodeBench::new("bench".into())),
     }
 }
 
@@ -94,6 +92,73 @@ async fn status_returns_200() {
     assert!(json["version"].is_string());
     assert_eq!(json["obs_connected"], false);
     assert_eq!(json["playlist_count"], 0);
+}
+
+/// #144: the status route reads the OBS, tools and LAN status, then waits on
+/// the database. It copies every status out BEFORE its first database wait
+/// and holds no status lock while it waits: a tokio `RwLock` queues every
+/// reader behind a waiting writer, so a read guard held across a slow query
+/// stalls the OBS client's writes and every status read behind them. The
+/// test holds the memory pool's only connection and polls the route once, so
+/// it parks on the pool; there it changes every status (a held guard fails
+/// the `try_write`), and the answer must carry the values from before.
+#[tokio::test]
+async fn the_status_route_holds_no_status_lock_while_it_waits_on_the_database() {
+    let state = test_state().await;
+    state.obs_state.write().await.connected = true;
+    state.tools_status.write().await.ytdlp_version = Some("before".to_string());
+    *state.lan_status.write().await = crate::mdns::LanStatus {
+        lan_url: Some("http://sp.local:8920".to_string()),
+        lan_ip: Some("10.77.9.201".to_string()),
+    };
+    let held = state.pool.acquire().await.unwrap();
+    let mut answer = std::pin::pin!(status(State(state.clone())));
+    assert!(
+        futures::poll!(answer.as_mut()).is_pending(),
+        "the route waits for the held database connection"
+    );
+    state
+        .obs_state
+        .try_write()
+        .expect("the OBS status is locked while the route waits on the database")
+        .connected = false;
+    state
+        .tools_status
+        .try_write()
+        .expect("the tools status is locked while the route waits on the database")
+        .ytdlp_version = Some("after".to_string());
+    *state
+        .lan_status
+        .try_write()
+        .expect("the LAN status is locked while the route waits on the database") =
+        crate::mdns::LanStatus::default();
+
+    drop(held);
+    let response = tokio::time::timeout(std::time::Duration::from_secs(60), answer)
+        .await
+        .expect("the route answers once the connection is free")
+        .into_response();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        json["obs_connected"], true,
+        "the OBS status from before the wait"
+    );
+    assert_eq!(
+        json["tools"]["ytdlp_version"], "before",
+        "the tools status from before the wait"
+    );
+    assert_eq!(
+        json["lan_url"], "http://sp.local:8920",
+        "the LAN status from before the wait"
+    );
+    assert_eq!(
+        json["lan_ip"], "10.77.9.201",
+        "the LAN status from before the wait"
+    );
 }
 
 #[tokio::test]
@@ -422,38 +487,43 @@ async fn get_status(state: AppState) -> StatusResponse {
 }
 
 /// #221 L4b: `/api/v1/status` reports SongPlayer's OWN program — the one
-/// scene-name resolver, and the playlists on air (SP-program's playlist ∪
-/// the one cg OBS was told to show) — never cg OBS's scene detection.
+/// scene-name resolver, and the playlists on air (SP-program's playlist,
+/// B4 step 6). (L6 deleted cg OBS's scene detection it once read.)
 #[tokio::test]
-async fn status_reports_songplayers_own_program_not_cg_obs_detection() {
+async fn status_reports_songplayers_own_program() {
     let state = test_state().await;
-    {
-        let mut obs = state.obs_state.write().await;
-        obs.current_scene = Some("cg-scene".into());
-        obs.active_playlist_ids = [9].into_iter().collect();
-    }
     let bus = Arc::clone(&state.program_bus);
-    let told = |shown: Option<i64>| {
-        let ticket = bus.legacy_cg().ticket();
-        assert!(bus.legacy_cg().confirmed(ticket, shown));
-    };
     bus.select_initial(4, Some("sp-slow"));
-    told(Some(7));
     let json = get_status(state.clone()).await;
     assert_eq!(json.active_scene.as_deref(), Some("sp-slow"));
-    assert_eq!(json.active_playlist_ids, [4, 7], "cg OBS still shows 7");
+    assert_eq!(json.active_playlist_ids, [4]);
+}
+
+/// #221 B4 step 6: on air is SP-program's playlist ONLY. The program restored
+/// at startup is on air until a cut away from it; a cut to "OBS manuál"
+/// leaves no playlist on air (cg OBS shows a manual scene, not a playlist).
+#[tokio::test]
+async fn status_puts_only_sp_program_s_playlist_on_air() {
+    use crate::playback::program_bus::{SETTING_PROGRAM_SOURCE, restore_selected_source};
+    let state = test_state().await;
+    crate::db::models::set_setting(&state.pool, SETTING_PROGRAM_SOURCE, "7")
+        .await
+        .unwrap();
+    let bus = Arc::clone(&state.program_bus);
+    assert_eq!(restore_selected_source(&state.pool, &bus).await, Some(7));
+    assert_eq!(get_status(state.clone()).await.active_playlist_ids, [7]);
 
     let now = crate::playback::wallclock::utc_now_100ns();
     bus.cut(sp_core::config::PROGRAM_INPUT_ID, now, None);
     let json = get_status(state.clone()).await;
     assert_eq!(json.active_scene.as_deref(), Some("OBS manuál"));
-    assert_eq!(
-        json.active_playlist_ids,
-        [7],
-        "the input carries cg OBS's 7"
+    assert!(
+        json.active_playlist_ids.is_empty(),
+        "no playlist is on air with \"OBS manuál\": {:?}",
+        json.active_playlist_ids
     );
-    told(None);
-    assert!(get_status(state).await.active_playlist_ids.is_empty());
+    bus.cut(4, now, Some("sp-slow"));
+    assert_eq!(get_status(state).await.active_playlist_ids, [4]);
 }
 
 /// #51: `/api/v1/status` must surface the LAN `sp.local` URL + raw-IP
@@ -484,118 +554,6 @@ async fn status_reflects_lan_advertisement() {
     let json: StatusResponse = serde_json::from_slice(&body).unwrap();
     assert_eq!(json.lan_url.as_deref(), Some("http://sp.local:8920"));
     assert_eq!(json.lan_ip.as_deref(), Some("10.77.9.201"));
-}
-
-/// Playlist CRUD must signal the OBS client to rebuild its NDI source
-/// map — otherwise newly-added playlists never get scene-matched.
-#[tokio::test]
-async fn create_playlist_sends_obs_rebuild_signal() {
-    let state = test_state().await;
-    let mut rebuild_rx = state.obs_rebuild_tx.subscribe();
-    let app = app(state);
-
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/playlists")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_string(&serde_json::json!({
-                        "name": "New",
-                        "youtube_url": "https://youtube.com/playlist?list=PLnew",
-                        "ndi_output_name": "SP-new"
-                    }))
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::CREATED);
-
-    // Rebuild signal must arrive within 200 ms.
-    tokio::time::timeout(std::time::Duration::from_millis(200), rebuild_rx.recv())
-        .await
-        .expect("rebuild signal should arrive within 200ms")
-        .expect("rebuild channel should still be open");
-}
-
-#[tokio::test]
-async fn update_playlist_sends_obs_rebuild_signal() {
-    let state = test_state().await;
-
-    // Seed a playlist directly via the pool (bypass the create path so
-    // the signal under test is the update signal).
-    sqlx::query(
-        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
-         VALUES (1, 'orig', 'u', 'SP-orig')",
-    )
-    .execute(&state.pool)
-    .await
-    .unwrap();
-
-    let mut rebuild_rx = state.obs_rebuild_tx.subscribe();
-    let app = app(state);
-
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/api/v1/playlists/1")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_string(&serde_json::json!({
-                        "ndi_output_name": "SP-renamed"
-                    }))
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-
-    tokio::time::timeout(std::time::Duration::from_millis(200), rebuild_rx.recv())
-        .await
-        .expect("rebuild signal should arrive within 200ms")
-        .expect("rebuild channel should still be open");
-}
-
-#[tokio::test]
-async fn delete_playlist_sends_obs_rebuild_signal() {
-    let state = test_state().await;
-
-    sqlx::query(
-        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
-         VALUES (1, 'd', 'u', 'SP-d')",
-    )
-    .execute(&state.pool)
-    .await
-    .unwrap();
-
-    let mut rebuild_rx = state.obs_rebuild_tx.subscribe();
-    let app = app(state);
-
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri("/api/v1/playlists/1")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-
-    tokio::time::timeout(std::time::Duration::from_millis(200), rebuild_rx.recv())
-        .await
-        .expect("rebuild signal should arrive within 200ms")
-        .expect("rebuild channel should still be open");
 }
 
 // ---------------------------------------------------------------------------
