@@ -539,9 +539,9 @@ already pool/Arc-reused by #203 2b. Round 10 converted:
   `PooledBuf::clone` copy into a pooled buffer:
   `PooledBuf::copy_from_slice` / `SharedFrame::copy_from_slice` →
   `frame_pool::take`.
-- The #178 stream tap's vfeed hands each written canvas back to the tap's pool
-  (`StreamShared::write_frame`). Before, every watched frame was a fresh
-  337.5 KB alloc.
+- The #178 stream tap's vfeed hands each canvas it is done with back to the
+  tap's pool (`StreamShared::recycle_frame`). Before, every watched frame was a
+  fresh 337.5 KB alloc.
 - The #15 JPEG tap downscales into the RGB buffer the encoder worker hands back
   (`Inbox.spare`, `downscale_nv12_to_rgb_into`).
 

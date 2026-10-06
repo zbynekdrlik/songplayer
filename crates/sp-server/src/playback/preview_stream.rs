@@ -396,7 +396,7 @@ impl StreamShared {
         letterbox_nv12_into(sw, sh, stride, nv12, &mut buf);
         match self.video_tx.try_send(buf) {
             Ok(()) => {}
-            Err(TrySendError::Full(b)) => self.recycle(b),
+            Err(TrySendError::Full(b)) => self.recycle_frame(b),
             Err(TrySendError::Disconnected(_)) => {}
         }
     }
@@ -459,8 +459,14 @@ impl StreamShared {
         vec![0u8; OUT_NV12_LEN]
     }
 
+    /// Hand a canvas buffer BACK to the tap's pool so the next watched frame
+    /// letterboxes into it (#147 round 10): a full channel's dropped frame,
+    /// and the encoder's video feeder's frame once it is done with it. Before
+    /// the feeder recycled, every watched frame was a fresh zeroed 337.5 KB
+    /// allocation. A buffer of the wrong size, or one past [`POOL_MAX`], is
+    /// freed instead (the pool is bounded).
     #[cfg_attr(test, mutants::skip)]
-    fn recycle(&self, buf: Vec<u8>) {
+    pub fn recycle_frame(&self, buf: Vec<u8>) {
         if buf.len() != OUT_NV12_LEN {
             return;
         }
@@ -469,22 +475,6 @@ impl StreamShared {
                 p.push(buf);
             }
         }
-    }
-
-    /// Feeder side (encoder child): write one tapped canvas frame to the child's
-    /// video input, then hand the buffer BACK to the tap's pool so the next
-    /// watched frame letterboxes into it (#147 round 10). Before this the feeder
-    /// dropped every written frame, the pool refilled only on a full channel,
-    /// and every watched frame was a fresh zeroed 337.5 KB allocation. The
-    /// buffer is recycled on a write error too (the pool is bounded).
-    pub fn write_frame<W: std::io::Write>(
-        &self,
-        out: &mut W,
-        frame: Vec<u8>,
-    ) -> std::io::Result<()> {
-        let written = out.write_all(&frame);
-        self.recycle(frame);
-        written
     }
 
     /// Feeder side (encoder child): drain the video/audio backlog.
