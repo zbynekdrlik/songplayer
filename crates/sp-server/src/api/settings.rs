@@ -55,3 +55,7 @@ pub async fn update_settings(
     }
     StatusCode::NO_CONTENT.into_response()
 }
+
+#[cfg(test)]
+#[path = "settings_tests.rs"]
+mod tests;
