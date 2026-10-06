@@ -362,13 +362,19 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       - no event at all: the subscription did not apply;
       - events, but never the probe: the probe is not active (cg OBS is not
         on the probe scene, or its item is hidden);
-      - the probe still above the floor when the bound hit, in a run
-        shorter than the hold (review round 4, `openRunMs`): its audio
-        started late, too close to the bound;
-      - the probe above the floor at times, but never for the hold
-        (review round 3): DistroAV delivers it with gaps, or the meter
-        events stopped (more than 500 ms apart, or the probe left the
-        program feed). Never "no audio" next to readings that show audio;
+      - the probe's ONLY run above the floor came after silence and was
+        still open when the bound hit (`runsAboveFloor` 1 + `openRun`,
+        rounds 4-5): its audio started late. The text names only what was
+        observed: when the run began and its last reading, both before the
+        bound. An open run is one whose last reading is within the gap
+        bound of the end, the same `<=` as the streak;
+      - the probe above the floor at times, but never for the hold, in any
+        other way (several runs, or one that ended; rounds 3-5): DistroAV
+        delivers it with gaps, or the meter events stopped (more than
+        500 ms apart, or the probe left the program feed). It names the
+        number of runs. Gappy audio whose bound lands mid-burst stays here,
+        never a "late start". Never "no audio" next to readings that show
+        audio;
       - the probe metered, never above the floor: DistroAV delivers it no
         audio (SP-program carries no sound, or the probe's `ndi_audio` is
         off).
