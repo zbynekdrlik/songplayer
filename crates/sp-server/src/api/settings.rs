@@ -6,12 +6,14 @@
 //!   credential still in a node's database is masked too,
 //!   `is_secret_setting`) reads as `SECRET_MASK`. `peers` shows each peer's
 //!   key and Cloudflare secret as the mask (`peer::config::shown_peers`). An
-//!   empty value reads as stored: it reveals nothing, and the form shows an
-//!   empty field.
+//!   empty or blank value reads as stored: it reveals nothing, and the form
+//!   shows an empty field.
 //! - A PATCH value exactly `SECRET_MASK` for a masked setting keeps the stored
 //!   value: nothing is written for it, and the exchange checks do not count
 //!   it as sent. Any other value replaces the stored one; `""` clears it. A
-//!   masked peer sent back inside `peers` takes the stored peer's secrets.
+//!   masked peer sent back inside `peers` takes the stored peer's secrets,
+//!   but only while its `base_url` (for the Cloudflare secret also its
+//!   `cf_client_id`) is the stored one (`peer::config::unmask_peers`).
 //! - An exchange setting that does not hold (`node_name`, `peer_api_key`,
 //!   `peers`: `peer::config::checked`) refuses the whole PATCH with 400 and
 //!   the reason, before anything is written. The reason names keys, peers and

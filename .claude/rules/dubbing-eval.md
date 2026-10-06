@@ -17,12 +17,22 @@ API; never put one on a command line, in a log or in a commit.
 
 - **On win-resolume:** read it read-only from SongPlayer's database inside
   Python, straight into the process env (the value goes from Python's stdout
-  into the variable: never echoed, never on argv). `gemini_api_key` is a
-  comma-separated list; this takes its first entry:
+  into the variable: never echoed, never on argv). PowerShell mangles an
+  inline `python -c "..."` (`lyrics-eval-backends.md`), so `FileWrite` this
+  script once to `C:\ProgramData\SongPlayer\eval-run\read_gemini_key.py`.
+  `gemini_api_key` is a comma-separated list: it prints the first entry, or
+  the whole list with `--all`:
+
+  ```python
+  import sqlite3, sys
+  db = sqlite3.connect('file:C:/ProgramData/SongPlayer/songplayer.db?mode=ro', uri=True)
+  keys = db.execute('SELECT value FROM settings WHERE key = ?', ('gemini_api_key',)).fetchone()[0]
+  print(keys if '--all' in sys.argv else keys.split(',')[0].strip())
+  ```
 
   ```powershell
   $py = 'C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe'
-  $env:GEMINI_API_KEY = & $py -c "import sqlite3; db = sqlite3.connect('file:C:/ProgramData/SongPlayer/songplayer.db?mode=ro', uri=True); print(db.execute('SELECT value FROM settings WHERE key = ?', ('gemini_api_key',)).fetchone()[0].split(',')[0].strip())"
+  $env:GEMINI_API_KEY = & $py C:\ProgramData\SongPlayer\eval-run\read_gemini_key.py
   ```
 
   UNVERIFIED on the box until its first run (#229).
@@ -166,7 +176,7 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   never on a command line / log / commit.
 - **Session-length drift (#184 round E, verified 2026-09-21).** The pin HOLDS at a
   session START but the model DRIFTS inside a LONG session. Experiment on the same
-  120 s EN slice (`seg.wav`, key read inside python from the box settings): ONE
+  120 s EN slice (`seg.wav`, key read inside python from the box settings, before #229): ONE
   pinned 120 s session → 0 windows > 150 Hz, 0 band flips (5-s scan, median 93 Hz);
   the SAME slice as four 30 s pinned sessions → 3 windows (11 %), 3 flips — so
   shorter is NOT automatically better, ~2 min is the validated point and ~7 min is
@@ -276,13 +286,13 @@ the Developer-API default `api_version` is `v1beta` (`dub_worker.py` pins
 **Running it on win-resolume (main session, MCP `Shell`, PowerShell).** The script
 imports nothing from `eval.*`, so copy the single file to the box and run it
 directly. Put the key in the process env WITHOUT printing it, read read-only
-from SongPlayer's database inside Python ("Reading the Gemini key" above; the
-settings API shows `********` since #229), and start the ~26-min run detached
-(an MCP Shell call would time out):
+from SongPlayer's database inside Python (`read_gemini_key.py`, "Reading the
+Gemini key" above; the settings API shows `********` since #229), and start
+the ~26-min run detached (an MCP Shell call would time out):
 
 ```powershell
 $py  = 'C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe'
-$env:GEMINI_API_KEY = & $py -c "import sqlite3; db = sqlite3.connect('file:C:/ProgramData/SongPlayer/songplayer.db?mode=ro', uri=True); print(db.execute('SELECT value FROM settings WHERE key = ?', ('gemini_api_key',)).fetchone()[0].split(',')[0].strip())"
+$env:GEMINI_API_KEY = & $py C:\ProgramData\SongPlayer\eval-run\read_gemini_key.py
 $pr  = 'C:\ProgramData\SongPlayer\cache\tools\live_translate_continuous_probe.py'
 $src = 'C:\ProgramData\SongPlayer\cache\Morning Prayer Devotion_Jonathan_Dhp-qrZDK1g_normalized_audio.flac'
 $out = 'C:\ProgramData\SongPlayer\cache\probe_h\voice_none'

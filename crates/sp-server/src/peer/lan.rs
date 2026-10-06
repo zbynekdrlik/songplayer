@@ -17,7 +17,8 @@ use super::config::NodeConfig;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExchangeStatus {
     pub node_name: Option<String>,
-    /// The peer API answers (`node_name` + `peer_api_key` set).
+    /// Serving = `node_name` + `peer_api_key` are set (this node will serve
+    /// once the peer API exists, lane 4).
     pub serving: bool,
     pub transfers_paused: bool,
     /// Why the exchange settings do not hold (the exchange then acts as off).

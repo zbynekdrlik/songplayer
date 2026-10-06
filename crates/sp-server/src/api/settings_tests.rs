@@ -254,7 +254,7 @@ async fn a_bad_peer_list_is_refused_and_nothing_is_written() {
     );
     assert!(
         !text.contains("SNV"),
-        "the reason never echoes peers: {text}"
+        "the reason never echoes the sent peers text: {text}"
     );
     assert_eq!(stored(&state.pool, SETTING_GEMINI_MODEL).await, None);
     assert_eq!(stored(&state.pool, SETTING_PEERS).await, None);
@@ -303,7 +303,7 @@ async fn a_masked_peer_list_does_not_hide_a_node_named_like_a_peer() {
     assert_eq!(stored(&state.pool, SETTING_PEERS).await, Some(peers));
 }
 
-/// R13: the PATCH has no login and the API answers any origin, so the GET's
+/// The PATCH has no login and the API answers any origin, so the GET's
 /// masked peer list sent back with a new `base_url` must not re-point the
 /// stored key and Cloudflare token at that host.
 #[tokio::test]

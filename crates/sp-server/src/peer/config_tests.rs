@@ -277,7 +277,7 @@ fn unmask_takes_the_stored_secret_of_the_same_peer() {
         "the same base_url and cf_client_id: the stored key and cf secret"
     );
 
-    // R13: a masked secret stays with the base_url it was stored for. The
+    // A masked secret stays with the base_url it was stored for. The
     // PATCH has no login, so a peer re-pointed at another host must not take
     // the stored key and Cloudflare token there.
     let moved = PeerConfig {
@@ -327,7 +327,7 @@ fn unmask_takes_the_stored_secret_of_the_same_peer() {
     assert_eq!(fresh[0].key, KEY, "a key sent in clear is taken as sent");
 }
 
-/// R13: a masked Cloudflare secret also stays with its `cf_client_id`; a new
+/// A masked Cloudflare secret also stays with its `cf_client_id`; a new
 /// service token is sent whole.
 #[test]
 fn a_masked_cf_secret_stays_with_its_client_id() {
@@ -451,7 +451,7 @@ async fn checked_peers_unmasks_from_the_stored_list_and_validates() {
         .unwrap_err();
     assert!(
         err.contains("send its key again"),
-        "R13: a masked key stays with its stored base_url: {err}"
+        "a masked key stays with its stored base_url: {err}"
     );
     assert!(!err.contains("snv.example"), "never the URL: {err}");
 

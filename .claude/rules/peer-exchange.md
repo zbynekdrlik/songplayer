@@ -45,6 +45,13 @@ file; nothing of them exists yet.
   `cf_client_secret`, keeps them on a masked PATCH, and refuses (400,
   nothing written) a PATCH whose exchange setting does not hold — see
   `settings-secrets.md`.
+- A masked peer secret stays where it was stored for
+  (`peer::config::unmask_peers`): a masked `key` only with the stored
+  `base_url`, a masked `cf_client_secret` only with the stored `base_url`
+  and `cf_client_id`; a peer re-pointed at another host sends its secrets
+  again in clear, else 400. The settings PATCH has no login, so this is
+  what stops a LAN page from routing the stored key and Cloudflare token to
+  its own host once the peer client (lane 5) exists.
 - Set them only through the secret channel: `airuleset.py secret exec <NAME>
   -- python3 <script>`, where the script PATCHes `/api/v1/settings` from the
   env var (the `lyrics-eval-backends.md` recipe). Never in chat, on a command
@@ -71,5 +78,7 @@ file; nothing of them exists yet.
   `api::router` carries a fallback (the SPA): axum panics when merging two
   routers that both have one, so an exchange router never gets a fallback.
 - Tests: `peer/lan_tests.rs` (the route through `peer::router` + `oneshot`
-  over a migrated in-memory database), `peer/config_tests.rs`,
-  `api/settings_tests.rs`.
+  over a migrated in-memory database; the merge exactly as `lib.rs` does it,
+  `api::router` with a dist dir merged with `peer::router`, still serving
+  the SPA), `peer/config_tests.rs`, `api/settings_tests.rs`. On the box:
+  `e2e/post-deploy-settings-secrets.spec.ts` reads the status read-only.

@@ -1,16 +1,17 @@
 //! #229: this node's place in the node exchange, read live from its settings.
 //!
 //! - `node_name` (`snv`, `pp`): empty = the exchange is off (no serving, no asking).
-//! - `peer_api_key`: the key this node's peer API accepts (`X-SP-Peer-Key`);
-//!   empty = the peer API answers 404.
+//! - `peer_api_key`: the key this node's peer API will accept (`X-SP-Peer-Key`;
+//!   the peer API comes in lane 4); empty = not serving.
 //! - `peers`: a JSON list of [`PeerConfig`] — the nodes asked first.
 //!
 //! The secrets (keys, a Cloudflare Access client secret) never leave the node
 //! in clear: `GET /api/v1/settings` (`api::settings`) shows each peer's secrets
 //! as [`MASK`] ([`shown_peers`]); a PATCH that sends a masked peer back keeps
-//! the stored secret ([`unmask_peers`]); [`checked`] refuses an exchange
-//! setting that does not hold; `Debug` prints the mask; no error text echoes
-//! a secret or the `peers` text.
+//! the stored secret while the peer's `base_url` (for the Cloudflare secret
+//! also its `cf_client_id`) is the stored one ([`unmask_peers`]); [`checked`]
+//! refuses an exchange setting that does not hold; `Debug` prints the mask; no
+//! error text echoes a secret or the `peers` text.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -81,7 +82,7 @@ fn mask(secret: &str) -> &'static str {
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct NodeConfig {
     pub node_name: Option<String>,
-    /// The key this node's peer API accepts; `None` = not serving.
+    /// The key this node's peer API will accept (lane 4); `None` = not serving.
     pub serve_key: Option<String>,
     pub peers: Vec<PeerConfig>,
 }
@@ -138,7 +139,8 @@ impl NodeConfig {
         Self::from_settings(node_name.as_deref(), serve_key.as_deref(), peers.as_deref())
     }
 
-    /// The peer API answers (a name and a key).
+    /// Serving = a node name and a key are set (this node will serve once the
+    /// peer API exists, lane 4).
     pub fn serving(&self) -> bool {
         self.node_name.is_some() && self.serve_key.is_some()
     }
@@ -315,17 +317,19 @@ pub fn unmask_peers(
 }
 
 /// The value a settings PATCH writes for `key`, or why the PATCH is refused
-/// (then it writes nothing). `incoming` is the whole PATCH body, so a
-/// `node_name` and a `peers` sent together are checked against each other.
+/// (then it writes nothing). `incoming` is the settings really sent: a value
+/// kept on the mask is left out by the caller (`api::settings::prepare`). So
+/// a `node_name` and a `peers` sent together are checked against each other.
 ///
 /// - `peer_api_key`: trimmed; `""` clears it, else at least [`MIN_KEY_LEN`]
 ///   characters (the error never names the key).
 /// - `node_name`: trimmed; `""` clears it, else a valid name, and (when no
 ///   `peers` is sent along) no stored peer's name.
 /// - `peers`: a peer list (an error names only the position); a masked secret
-///   takes the stored peer's ([`unmask_peers`]; a stored list that does not
-///   parse counts as empty); the list's rules hold against the node name
-///   sent, else the stored one.
+///   takes the stored peer's while its `base_url` (and `cf_client_id`) is the
+///   stored one ([`unmask_peers`]; a stored list that does not parse counts
+///   as empty); the list's rules hold against the node name sent, else the
+///   stored one.
 /// - any other key: as sent.
 ///
 /// A value equal to [`MASK`] for a masked setting keeps the stored one: the

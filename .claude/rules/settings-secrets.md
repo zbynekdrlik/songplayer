@@ -29,7 +29,10 @@ never shows a secret; only the database holds it in clear.
   the rows), and GET lists every row.
 - A new secret goes on the list. If its name lacks those suffixes, also give
   it its own `is_secret_setting` test: otherwise only the list's exact-slice
-  test (`the_secret_settings_list`) pins it.
+  test (`the_secret_settings_list`) pins it. Update the two JS copies of the
+  rule with it: `e2e/mock-api.mjs` (`SECRET_SETTINGS`,
+  `SECRET_SETTING_SUFFIXES`) and `e2e/post-deploy-settings-secrets.spec.ts`
+  (the same two lists).
 - `peers` (the exchange's peer list, `peer-exchange.md`) is not on the list:
   its secrets sit INSIDE its JSON, masked field by field.
 
@@ -51,6 +54,14 @@ never shows a secret; only the database holds it in clear.
   takes the stored secret of the stored peer of the same name
   (`peer::config::unmask_peers`); a masked secret with no such stored peer is
   refused.
+- A masked peer secret stays with what it was stored for: a masked `key`
+  only with the stored `base_url`, a masked `cf_client_secret` only with the
+  stored `base_url` AND `cf_client_id`; else 400 ("send its key again" /
+  "send cf_client_secret again", naming only the peer). The PATCH has no
+  login and the router answers any origin (`CorsLayer::permissive`), so a
+  page on the LAN could otherwise re-point a peer at its own host and have
+  the node send it the stored key and Cloudflare token. A secret sent in
+  clear is taken as sent (`a_masked_peer_key_cannot_follow_a_new_base_url`).
 - An exchange setting that does not hold (`node_name`, `peer_api_key`,
   `peers`: `peer::config::checked`) refuses the whole PATCH: 400 with the
   reason, and NOTHING is written. The reason names keys, peers and positions,
@@ -87,8 +98,10 @@ never shows a secret; only the database holds it in clear.
 ## Eval and ops scripts never read a key through GET
 
 - GET shows `********`, so a key read through it is the mask.
-- On win-resolume: read the key read-only from the database inside Python,
-  straight into the process env (never echoed, never on a command line).
+- On win-resolume: read the key read-only from the database inside Python
+  (`eval-run\read_gemini_key.py`, written with `FileWrite`: PowerShell
+  mangles an inline `python -c`), straight into the process env (never
+  echoed, never on a command line).
 - On dev1: put it in `GEMINI_API_KEY` through the secret channel
   (`python3 ~/devel/airuleset/airuleset.py secret exec GEMINI_API_KEY --
   <cmd>`).
@@ -102,6 +115,9 @@ never shows a secret; only the database holds it in clear.
 `e2e/post-deploy-settings-secrets.spec.ts`, read-only: on the box every
 secret setting in `GET /api/v1/settings` reads `""` or `********`,
 `gemini_api_key` reads the mask, and Nastavenia's Gemini "API kľúč" field
-shows the mask in a password input. It never PATCHes and never saves. A
-failure names the key, never the value, and the spec records no trace: a
-failed run's trace would carry the response body.
+shows the mask in a password input; `GET /api/v1/exchange/status` answers
+200 with `config_error` null, a boolean `serving` and a `peers` list (the
+exchange router is merged in and the box's exchange settings hold). It
+never PATCHes and never saves. A failure names the key or field, never the
+value, and the spec records no trace: a failed run's trace would carry the
+response body.

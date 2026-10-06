@@ -172,8 +172,9 @@ test("a save that changes only a plain setting sends the masks back and keeps th
   expect(patches[0]["remote_ws_password"]).toBe(MASK);
   expect(patches[0]["gemini_model"]).toBe("gemini-2.5-pro");
 
-  // Backend effect: the stored remote password was kept (the mask wrote
-  // nothing), so the remote control still asks for a password.
+  // Backend effect: the remote control still has a password (`remote.auth`),
+  // so the masked save did not clear it. The keep itself (nothing written
+  // for a masked value) is pinned in Rust: api/settings_tests.rs.
   const program = await (await request.get("/api/v1/program")).json();
   expect(program.remote.auth).toBe(true);
 

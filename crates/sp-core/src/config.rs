@@ -122,7 +122,7 @@ pub fn video_hw_decode(raw: Option<&str>) -> bool {
 // #229: the node exchange — SongPlayer sites (SNV, PP) share processed content.
 /// This node's name in the exchange (`snv`, `pp`); empty = the exchange is off.
 pub const SETTING_NODE_NAME: &str = "node_name";
-/// The key this node's peer API accepts (`X-SP-Peer-Key`); empty = not serving.
+/// The key this node's peer API will accept (`X-SP-Peer-Key`, lane 4); empty = not serving.
 pub const SETTING_PEER_API_KEY: &str = "peer_api_key";
 /// The peers this node asks before a heavy job: a JSON list (sp-server `peer::config`).
 pub const SETTING_PEERS: &str = "peers";
