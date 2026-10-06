@@ -201,14 +201,15 @@ pub fn audio_preroll_samples(connect_gap_ms: u64, lead_ms: u32) -> usize {
 pub const PREVIEW_AUDIO_FRAMES_PER_MS: u64 = 48;
 
 /// Pad threshold (#184 round G2): when the audio written so far lags the wall
-/// clock by MORE than this, the feeder writes silence up to the wall — on a
+/// (the real time elapsed on the monotonic clock, #221) by MORE than this, the
+/// feeder writes silence up to the wall — on a
 /// block AND on every feeder poll (200 ms in G2, 30 ms since round G3), so
 /// ffmpeg (which interleaves the counted video with the sample-count audio by
 /// timestamp) is never starved of audio and never stops emitting fragments.
 pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
 
 /// Ahead bound (#184 round G2): a block that would push the written audio MORE
-/// than this ahead of the wall clock is trimmed. Round G's add-only gap fill
+/// than this ahead of the wall is trimmed. Round G's add-only gap fill
 /// padded silence while the decode-seam blocks were late and then APPENDED the
 /// late catch-up burst behind that silence, so every hiccup permanently shifted
 /// the preview audio later than its video — the ~70 s "fader heard a minute
@@ -216,7 +217,7 @@ pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
 pub const MAX_AHEAD_MS: u64 = 300;
 
 /// Where a trimmed burst lands (#184 round G2): its OLDEST frames are dropped
-/// so the written audio ends this far ahead of the wall clock (a little headroom
+/// so the written audio ends this far ahead of the wall (a little headroom
 /// for the next on-time block, well inside [`MAX_AHEAD_MS`]).
 pub const ALIGN_TARGET_AHEAD_MS: u64 = 100;
 
@@ -231,10 +232,10 @@ pub struct AlignAction {
 
 /// Silence (stereo frames) to write when NO block arrived within the feeder's
 /// poll (#184 round G2 — 200 ms then, 30 ms since round G3): everything up to
-/// the wall clock once the written audio lags it by more than
+/// the wall once the written audio lags it by more than
 /// [`ALIGN_PAD_THRESHOLD_MS`], else nothing. `wall_frames` is the target
-/// position on the audio timeline (the
-/// elapsed wall time since the feeder started, plus its start preroll), and
+/// position on the audio timeline (the real time elapsed on the monotonic
+/// clock since the feeder started, plus its start preroll), and
 /// `written_frames` the stereo frames already written. Never negative.
 pub fn align_timeout(wall_frames: u64, written_frames: u64) -> usize {
     let threshold = ALIGN_PAD_THRESHOLD_MS * PREVIEW_AUDIO_FRAMES_PER_MS;

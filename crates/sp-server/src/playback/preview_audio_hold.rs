@@ -122,8 +122,8 @@ impl AudioHold {
         self.ahead_us / 1000
     }
 
-    /// Where the written audio should be at `now_us`: the wall clock plus the
-    /// write-ahead.
+    /// Where the written audio should be at `now_us`: the real time elapsed
+    /// on the monotonic clock plus the write-ahead.
     pub fn position_at(&self, now_us: u64) -> u64 {
         self.base_frames + frames_in(now_us + self.ahead_us)
     }

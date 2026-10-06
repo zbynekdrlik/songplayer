@@ -345,7 +345,9 @@ pub fn ensure_running(shared: Arc<StreamShared>, ffmpeg: std::path::PathBuf) {
 }
 
 /// Own the child + feeders + reader for one run, until the viewers are gone
-/// past the TTL or the child exits. Falls back to `libx264` once if a hardware
+/// past the TTL, the child exits, or the video feeder asks for a fresh child
+/// after a gap too long to fill (#221, `RunOutcome::Restart`: no restart
+/// budget spent). Falls back to `libx264` once if a hardware
 /// encoder child dies before producing the init segment. Every return has
 /// released the encoder claim (#184): a run that ended with nobody watching is
 /// settled under the lifecycle lock (a viewer that subscribed meanwhile keeps
@@ -466,7 +468,7 @@ enum RunOutcome {
 
 /// One child run: bind loopback listeners, spawn ffmpeg, accept its two
 /// connections, feed video+audio, split its stdout into the relay, and monitor
-/// for the viewer-TTL / child exit.
+/// for the viewer-TTL / child exit / the video feeder's restart request (#221).
 #[cfg_attr(test, mutants::skip)]
 fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOutcome {
     let v_listener = match TcpListener::bind("127.0.0.1:0") {
@@ -740,7 +742,7 @@ const AFEED_POLL_US: u64 = 30_000;
 /// [`AudioHold`] with its arrival stamp and is written `lead − write_ahead`
 /// after it arrived, placed by that arrival (a block that waited is trimmed,
 /// never delayed); the socket carries only the write-ahead, whatever its buffer
-/// size. The round-G2 wall-clock rules (silence when nothing arrives, bursts
+/// size. The round-G2 alignment rules (silence when nothing arrives, bursts
 /// trimmed) live in [`AudioHold::take_writes`]. Logs the effective timing at
 /// start and `preview-afeed: ahead_ms padded_ms skipped_ms held_ms queued
 /// dropped` at INFO every 10 s, plus the #184 G4 `preview-afeed level` line
