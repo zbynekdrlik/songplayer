@@ -91,8 +91,9 @@ input.
   little differently every few frames: the decoded 64×36 picture the pause
   E2E hashes changed on 78-96 of 150 repeats, longest stable run 120-560 ms
   (it needs ≥ 2 s). No x264 setting inside the #184 round F bitrate cap
-  avoids that. So a slot is written only with a NEW picture: during a pause
-  nothing is written, the encoder starves, and the picture holds pixel-exact,
+  avoids that. So nothing is written until a NEW picture arrives: during a
+  pause nothing is written, the encoder starves, and the picture holds
+  pixel-exact (the gap is filled when the next picture comes, below),
   as before #221. Never make the feeder repeat a picture on idle slots, and
   never loosen the E2E's exact hash instead (rejected option A2: the talking
   head's slow motion is as small per frame as the re-encoding noise).
@@ -166,7 +167,9 @@ input.
   250-slot bound and the restart, the wait, frame 0's origin, the stats
   window; round 3: a due canvas stays when a newer one arrives first, a
   feeder timer 0 / 2 / 15.6 ms late writes the same pictures at 24, 30
-  and 60 fps (`one_second_late`), every replaced picture comes back) and
+  and 60 fps (`one_second_late`), every replaced picture comes back;
+  round 5: a newer canvas replaces only the newest pending one, never a due
+  one, with two pending) and
   `preview_encoder_tests.rs::no_input_is_wall_clock_stamped_and_the_video_counts_the_output_rate`
   (+ the exact vector).
 - **Local proof** (`scripts/preview_latency_repro.py`, dev1 ffmpeg 6.1.1,

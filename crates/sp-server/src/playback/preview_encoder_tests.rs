@@ -179,8 +179,9 @@ fn no_input_is_wall_clock_stamped_and_the_video_counts_the_output_rate() {
     // behind the sound for the encoder's whole life (local repro, #221 comment
     // 6008217701), and a pause kept showing new pictures for over 6 s. So NO
     // input carries `-use_wallclock_as_timestamps`: the rawvideo input is
-    // counted at `-framerate` (the feeder writes exactly that many frames per
-    // second of the monotonic clock), equal to the output `-r`. The PCM input
+    // counted at `-framerate` (the feeder writes one frame per 40 ms slot of
+    // the monotonic clock from frame 0; nothing during a pause, the gap is
+    // filled on the next picture), equal to the output `-r`. The PCM input
     // keeps its sample count (#178 round 3: wall-clock-stamped PCM made the
     // box's ffmpeg mux ZERO audio packets).
     for encoder in ["libx264", "h264_nvenc"] {

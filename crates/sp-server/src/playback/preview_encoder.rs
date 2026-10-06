@@ -176,8 +176,10 @@ pub fn parse_available_encoders(encoders_stdout: &str) -> Vec<String> {
 ///
 /// #221 — NO input is wall-clock stamped: both COUNT on SongPlayer's monotonic
 /// clock. The rawvideo input is read at `-framerate` [`PREVIEW_FPS`] (the video
-/// feeder writes exactly that many frames per second, `preview_video_clock.rs`),
-/// the f32le PCM input by its sample count (the audio feeder,
+/// feeder writes one frame per 40 ms slot of the monotonic clock from frame 0;
+/// nothing during a pause, the gap is filled on the next picture,
+/// `preview_video_clock.rs`), the f32le PCM input by its sample count (the
+/// audio feeder,
 /// `preview_audio_hold.rs`). ffmpeg's `-use_wallclock_as_timestamps` read the
 /// SYSTEM clock, so the box's nightly UTC step moved the video timeline alone
 /// and a running preview showed the picture seconds behind the sound. #178

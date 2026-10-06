@@ -18,7 +18,7 @@
 //! `-framerate` [`PREVIEW_FPS`], one frame per [`FRAME_US`] slot of the
 //! monotonic clock from the first canvas on (#221 A1, ROZHODNUTÉ 6008679010):
 //!
-//! - A slot is written only with a NEW picture. Slot `k ≥ 1` is decided
+//! - Nothing is written until a NEW picture arrives. Slot `k ≥ 1` is decided
 //!   [`DECIDE_LATE_US`] (half a slot) after its time, and a canvas belongs to
 //!   the first slot decided at or after its ARRIVAL. The newest canvas for a
 //!   slot wins (the ones it replaced are skipped and go back to the tap's
