@@ -4,10 +4,11 @@
  *
  * Why: the gate records `SP-program` through cg OBS's probe input
  * (`av-sync-probe.ts`), a DistroAV receiver attached just before the take. A
- * freshly attached receiver delivers its PICTURE at once, but its AUDIO only
- * with gaps until camera-box's genlock audio pairing (camera-box 1367) has
- * fixed the delay; by their design the pairing withholds the audio until its
- * latch locks.
+ * freshly attached receiver delivers its PICTURE at once. Its AUDIO reaches
+ * cg OBS's MIX (what StartRecord records) only with gaps until camera-box's
+ * genlock audio pairing (camera-box 1367) has fixed the delay. By their
+ * design the pairing withholds the packets from the mix until its latch
+ * locks.
  *
  * The cg OBS log of the dev.17 run (local time):
  * - the probe's scene reset at 08:49:31.566;
@@ -22,12 +23,27 @@
  * stopped until 0.461 s, and the rest of the 20 s was clean. Before lane 3
  * the gate recorded a long-attached input and never met this warm-up.
  *
- * The condition: the probe's obs-websocket `InputVolumeMeters` reading must
- * be above a silence floor (−60 dBFS) for 1 s in a row. The wait is bounded
- * (20 s), and the bound fails loudly with the meter state it saw. The
- * condition is build-independent; camera-box's vendor `GetGenlockStats`
- * "locked" poll is not. The dropout check, its thresholds and its edge guard
- * are unchanged.
+ * The condition (the main session's decided design): the probe's
+ * obs-websocket `InputVolumeMeters` reading must be above a silence floor
+ * (−60 dBFS) for 1 s in a row. The wait is bounded (20 s), and the bound
+ * fails loudly with the meter state it saw. The dropout check, its
+ * thresholds and its edge guard are unchanged.
+ *
+ * **What the meter can NOT see (review round 2).** obs-websocket's meter is
+ * an audio CAPTURE CALLBACK. camera-box's libobs calls it for every packet
+ * the source outputs: `source_signal_audio_data`, at the end of
+ * `source_output_audio_data` (camera-box
+ * `vendor/obs-studio/libobs/obs-source.c`). That includes the packets the
+ * pairing WITHHOLDS from the mix (the `GENLOCK_AUDIO_ACT_WITHHOLD` branch
+ * just before it). camera-box's `genlock-audio-pairing.md` says the same:
+ * "its packets never enter the mix (they still reach the audio
+ * callbacks/monitoring)".
+ *
+ * So this wait proves that DistroAV delivers audio, and adds the 1 s hold.
+ * It never observes the pairing's withhold. Its cover for the warm-up is
+ * the time it takes: the dev.17 take would have started ~1 s later,
+ * after the audio turned clean (0.461 s into it), but still before LOCKED.
+ * Waiting on the pairing's own state is an open design question on #221.
  *
  * What a reading is (obs-websocket 5,
  * `plugins/obs-websocket/src/utils/Obs_VolumeMeter.cpp`):
@@ -40,11 +56,8 @@
  *   program feed (`obs_source_active`). An input that is only on a preview is
  *   not metered. An event without the probe resets the streak.
  * - A level is HELD until no audio has arrived for more than 0.3 s, then
- *   reset to 0. So a gap shorter than ~300 ms is invisible to this meter.
- *   The dev.17 warm-up gaps all fell within ~0.35 s of the first audio, so
- *   1 s of continuous audio before StartRecord clears them. A warm-up with
- *   short gaps later than that would still reach the take (`obs-ndi-health.md`,
- *   "Limit").
+ *   reset to 0. So a gap in DistroAV's delivery shorter than ~300 ms is
+ *   invisible to this meter too (`obs-ndi-health.md`, "Limit").
  *
  * Only continuity that was OBSERVED counts: a gap of more than
  * `MAX_METER_GAP_MS` between two meter events restarts the streak.
@@ -60,7 +73,8 @@ export const SILENCE_FLOOR_DBFS = -60;
 /** The audio must be above the floor for this long in a row. */
 export const AUDIO_HOLD_MS = 1_000;
 
-/** The wait's bound. camera-box expects ~5 s from the attach to the audio. */
+/** The wait's bound, well above camera-box's ~4 s from the bind to LOCKED
+ *  (dev.17: 33.114 → 37.214). */
 export const AUDIO_WAIT_TIMEOUT_MS = 20_000;
 
 /** More than this between two meter events (obs-websocket sends one every
@@ -207,7 +221,8 @@ export function describeAudioWait(report: AudioWaitReport): string {
 
 /**
  * What the meter state at the bound most likely means: no event at all, an
- * input that was never active, or an active input whose audio never held.
+ * input that was never active, or an active input DistroAV delivers no (or
+ * only broken) audio for.
  */
 export function explainAudioWait(report: AudioWaitReport): string {
   if (report.events === 0) {
@@ -220,11 +235,12 @@ export function explainAudioWait(report: AudioWaitReport): string {
       "the probe scene, and is the probe's scene item visible?"
     );
   }
+  // camera-box's genlock audio pairing withholds packets from the MIX, after
+  // the meter's tap, so it never silences this meter (review round 2).
   return (
-    "A freshly attached DistroAV receiver delivers its picture at once and its " +
-    "audio with gaps until camera-box's genlock audio pairing locks (~4 s after " +
-    "the bind). A probe that stays silent longer gets no audio: does SP-program " +
-    "carry the playlist's sound, and is the probe's NDI audio on?"
+    "The probe was metered but stayed at or below the floor, so DistroAV delivers no audio " +
+    "for it: does SP-program carry the playlist's sound, and is the probe's NDI audio " +
+    "(ndi_audio) on?"
   );
 }
 

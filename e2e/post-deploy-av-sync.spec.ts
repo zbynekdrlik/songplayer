@@ -36,11 +36,13 @@
  * would record itself); the take waits until SP-program's receivers rose.
  * #221 dev.18: every StartRecord then waits until the probe's AUDIO flows
  * (`obs-audio-wait.ts`: its InputVolumeMeters input peak above -60 dBFS for
- * 1 s in a row, bounded at 20 s): a freshly attached DistroAV receiver
- * delivers its picture at once and its audio with gaps until camera-box's
- * genlock audio pairing locks (~4 s after the bind), and a take started
- * before that opened with two dropouts (dev.17, run 37423917199). The
- * dropout check is unchanged.
+ * 1 s in a row, bounded at 20 s). A freshly attached DistroAV receiver
+ * delivers its picture at once, and its audio reaches the mix with gaps
+ * until camera-box's genlock audio pairing locks (~4 s after the bind). A
+ * take started before that opened with two dropouts (dev.17, run
+ * 37423917199). The meter is tapped BEFORE the pairing's withhold, so the
+ * wait proves DistroAV delivers audio and adds its 1 s; it does not observe
+ * the lock (`obs-audio-wait.ts`). The dropout check is unchanged.
  * afterAll idles the probe first (an idle probe shows nothing, so restoring
  * the program to "OBS manuál" can never loop the picture), restores the
  * program scene, then cg OBS's own scene only when the program restore did
