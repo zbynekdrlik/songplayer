@@ -72,7 +72,16 @@ Rules for every post-deploy spec:
 - **A post-deploy check's decision logic is a pure helper with a mock-suite
   unit spec** (`e2e/cache-layout.ts` for the FLAC layout, #136;
   `av-sync-gate.ts`, `obs-scene-wait.ts`). The post-deploy spec only reads
-  the box and calls it, so the rule is tested in CI without a box. On the
+  the box and calls it, so the rule is tested in CI without a box. A
+  bounded POLL gets its clock AND its pause injected (`probe-lock-wait.ts`,
+  #221 dev.19: `now` + `sleep`, and the read as a function): a fake clock
+  that advances on each sleep and inside each fake read runs the whole
+  wait (slow reads, the bound, a read started at it) deterministically in
+  milliseconds. A mutant that stops advancing the clock (a `sleep(0)`)
+  hangs the test instead of failing it: run hand mutants with an outer
+  timeout. An HTTP read of ANOTHER service goes through the test's own
+  `request` with an absolute URL and `{ timeout, failOnStatusCode: false }`
+  (the baseURL does not apply). On the
   Tier-0 box a pure helper (interfaces / type annotations only, no enums)
   also runs with plain node and no install: a scratch `check.mts` that
   imports the helper by its absolute `.ts` path and mirrors the spec's cases

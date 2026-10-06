@@ -19,6 +19,7 @@ paths:
   - "e2e/av-sync-probe*.ts"
   - "e2e/av-sync-evidence.ts"
   - "e2e/obs-audio-wait*.ts"
+  - "e2e/probe-lock-wait*.ts"
   - "e2e/obs-driver.ts"
   - "scripts/av_sync_check.py"
   - "scripts/av_sync_drift.py"
@@ -327,8 +328,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     `health.connections` rose above that count (`probeReceiverAttached`);
     it fails naming it, never as an unmeasurable take.
   - **A freshly attached probe's VIDEO reaches the recording before its
-    AUDIO: wait for its audio meter before recording (#221 dev.18) — and
-    know what that meter can see (below).** The receiver count rises
+    AUDIO: wait for cg OBS's genlock LOCK on it (#221 dev.19), then for its
+    audio meter (#221 dev.18), before recording — and know what the meter
+    can see (below).** The receiver count rises
     as soon as DistroAV connects, and the picture flows at once. The audio
     reaches cg OBS's MIX (what StartRecord records) only with gaps until
     camera-box's genlock audio pairing (camera-box 1367) has fixed the
@@ -345,9 +347,77 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     0.227 s / 234 ms, run 37423917199). Its audio came at 0.122–0.227 s,
     stopped until 0.461 s, and was clean from there. Before lane 3 the gate
     recorded a long-attached input and never met this. So before EVERY take
-    the gate waits for the probe's audio (`ObsDriver.waitForInputAudio`, the
-    pure decision in `e2e/obs-audio-wait.ts`), and only then reads the
-    playing video and records:
+    the gate waits for cg OBS's genlock to LOCK the probe (#221 dev.19, the
+    next bullet), then for the probe's audio (`ObsDriver.waitForInputAudio`,
+    the pure decision in `e2e/obs-audio-wait.ts`), and only then reads the
+    playing video and records.
+  - **The lock wait (#221 dev.19, `e2e/probe-lock-wait.ts`) — the exact
+    signal the meter cannot see.** ROZHODNUTÉ 6012938501 option 3, on
+    camera-box's read path (comment 6012957666):
+    - **Endpoint:** `GET :8899/bundle-state.json`, camera-box's health
+      server on cg OBS's box (`scripts/bundle-state-server.py`, binds
+      0.0.0.0). Object `genlock_lock`, parsed AT REQUEST TIME from the
+      NEWEST `genlock-lock-json:` line in cg OBS's log
+      (`scripts/bundle_state_genlock.py`): `state` (LOCKED | DEGRADED |
+      UNLOCKED), `reason` (none | audio_pairing | recent_event | qpc_drift
+      | …), `inputs["A/V gate SP-program"]` = `{locked, connected, idle,
+      latency_ms, underruns, relocks, late_holds, depth}`, plus
+      `recent_event_inputs` / `audio_unexpected_inputs` when they name an
+      offender. camera-box OMITS the object when the log tail holds no
+      such line: that is a failure here, never a wait.
+    - **When a line is written:** on a box `state` / `reason` change, else
+      every ~30 s (`OBSBasicStatusBar.cpp`,
+      `GENLOCK_JSON_HEARTBEAT_TICKS`). A per-input change (the probe
+      locking) writes nothing by itself: it shows at the next box change
+      or heartbeat. The attach's own DEGRADED/`audio_pairing` → LOCKED/`none`
+      changes write the lines the wait needs (camera-box's attach,
+      6.10.2026: attach 08:49:33.1, shallow latch 36.13, DEGRADED 36.22 with
+      the probe locked and not idle, LOCKED 37.21).
+    - **Condition, all four, compared exactly:** the probe's `idle ===
+      false` AND `locked === true`, the box `state === "LOCKED"` AND
+      `reason === "none"`. The box-level `audio_pairing` reason is the HTTP
+      proxy for the probe's audio placement (`audio_hold`), which only cg
+      OBS's log carries per input.
+    - **`idle === false` is the freshness proof.** `idle` = a CONNECTED
+      input with < 60 frames over the last 60 s, classified once its sample
+      ring spans ≥ 54 s (an absent, `connected: false`, input is never
+      idle). An idled probe (`ndi_source_name` "") stops DistroAV's receiver
+      thread (`ndi_source_update` → `ndi_source_thread_stop`), so it keeps
+      `connected` true and reads `idle: true` about a minute later. The
+      probe is idle for minutes between runs, so a line with it `idle:
+      false` is from after the attach. Limit: a probe re-idled less than
+      ~60 s before the attach still reads `idle: false` (only after a run
+      that died with the probe pointed, which `cgStuckOnProbe` mostly
+      catches).
+    - **Cadence:** a read every 250 ms after the previous one answers,
+      bounded at 15 s from the call. EACH READ IS A FULL camera-box GATHER
+      (the log read, an obs-websocket read, the Windows process facets):
+      their own `:8899` watchdogs allow 10 s and note ~6.6 s answers, so a
+      read gets 10 s (`LOCK_READ_TIMEOUT_MS`) and the real cadence is the
+      gather time + 250 ms. The log is read first, so a read sees the state
+      at its START: a read that starts within the bound counts even when it
+      answers after it, and none starts after it (`LOCK_WAIT_WORST_MS` =
+      25 s). If camera-box's answers get slow, a slow first lock can reach
+      the bound: read `the slowest N ms` in the take's log line first.
+    - **Fails loud, never a skip:** at the bound with the last facet (state,
+      reason, the probe's fields, any named offender), the trail of
+      changes and what the first unmet condition means
+      (`explainProbeLock`); a read that fails (no answer, non-200, non-JSON,
+      no facet) at once.
+    - **Endpoint resolution:** `CG_BUNDLE_STATE_URL` (a URL or a comma
+      list), default `127.0.0.1`, `localhost`, then `resolume.lan` (the
+      name camera-box gave), all `:8899/bundle-state.json`. The gate runs ON
+      cg OBS's box, so loopback answers or refuses at once; a LAN name can
+      hang on DNS or a route. `resolveBundleState` picks the first URL
+      that answers WITH the facet once per run, at the start of the test
+      body, before any scene switch: none answering fails the gate before
+      it touches anything.
+    - **Log line:** `A/V gate take N: probe locked after X ms (R reads of
+      <url>, the slowest S ms: +0 ms LOCKED/none, probe locked=false
+      idle=true → +3300 ms DEGRADED/audio_pairing, … → …)`.
+    - **Never touched by the gate:** cg OBS and camera-box's server are
+      only READ; the lock wait changes nothing on the box.
+  - **The meter wait (#221 dev.18), after the lock wait:**
     - **Signal:** obs-websocket's `InputVolumeMeters`. Each input's
       `inputLevelsMul` is one `[magnitude × volume, peak × volume, peak]`
       triple per channel, linear. The gate reads the THIRD value, the input
@@ -412,21 +482,20 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       the pairing withholds from the mix (the `GENLOCK_AUDIO_ACT_WITHHOLD`
       branch just before it). camera-box's `genlock-audio-pairing.md`:
       "its packets never enter the mix (they still reach the audio
-      callbacks/monitoring)". So the wait proves DistroAV delivers audio
-      and adds its 1 s. It does NOT observe the pairing's lock. Its cover
-      for the warm-up is the time it takes: the dev.17 take would have
-      started ~1 s later, after its audio turned clean (0.461 s into it)
-      but before LOCKED (37.214). A slower first lock (camera-box's
-      withhold runs up to 10 s after the first packet) would reach the
-      take again. Waiting on the pairing's own state is the open design
-      question on #221. camera-box's documented channels:
-      - the probe's `genlock-fifo audit` line in the OBS log
-        (`audio_hold=pending`);
-      - the `genlock-lock-json:` facet on `:8899/bundle-state.json`
-        (per-input `locked`; on change and a ~30 s heartbeat).
-
-      A vendor request `GetGenlockStats` was mentioned, but it is not in
-      camera-box's tree (checked 6.10.2026).
+      callbacks/monitoring)". So the meter proves DistroAV delivers audio
+      and adds its 1 s. It does NOT observe the pairing's lock. On its own
+      (dev.18) its cover for the warm-up was the time it takes: the dev.17
+      take would have started ~1 s later, after its audio turned clean
+      (0.461 s into it) but before LOCKED (37.214), and a slower first
+      lock (camera-box's withhold runs up to 10 s after the first packet)
+      would have reached the take again. **Covered since dev.19 by the
+      lock wait above**, which reads the pairing's own state through the
+      `genlock_lock` facet. The other channels camera-box documents stay
+      unused: the probe's `genlock-fifo audit` line in the OBS log
+      (`audio_hold=pending`, the per-input truth, but the runner would
+      have to read cg OBS's log dir), and a vendor request
+      `GetGenlockStats`, which is not in camera-box's tree (checked
+      6.10.2026; their `genlock-lock-facet.md` rejects a vendor plugin).
     - **Limit:** obs-websocket also HOLDS a level until no audio has
       arrived for 0.3 s (`Obs_VolumeMeter.cpp` `GetMeterData`), so a gap
       in DistroAV's own delivery shorter than ~300 ms is invisible too.
@@ -459,9 +528,10 @@ the output every consumer takes, through cg OBS's own probe scene (below).
   sp-slow, never sp-warmup/sp-fast) through the facade. It proves the
   baseline playlist is PLAYING with `/api/v1/ndi/health`: `state=Playing`
   (= on program) AND `frames_submitted_last_5s > 0`.
-  It sets the SONG faders to unity. Then, for every take, it waits for the
-  probe's audio (above), reads the playing video, and runs `StartRecord` →
-  20 s → `StopRecord`, which returns `outputPath`.
+  It sets the SONG faders to unity. Then, for every take, it waits for cg
+  OBS's genlock to lock the probe, then for the probe's audio (above),
+  reads the playing video, and runs `StartRecord` → 20 s → `StopRecord`,
+  which returns `outputPath`.
   - `startRecord` refuses to touch a recording the operator already started.
   - **Takes (max 3).** A take is repeated only in two cases:
     - `/api/v1/mix` shows a different `video_id` after the take, so the song
@@ -473,15 +543,21 @@ the output every consumer takes, through cg OBS's own probe scene (below).
 
     A `fail` is never retaken. Neither is an audio-side `cannot_measure`,
     which can be a real audio fault. A retake starts only while less than
-    110 s of the 320 s budget is used. The spec derives it:
+    110 s of the 345 s budget is used. The spec derives it:
     `RETAKE_BEFORE_MS` = `TEST_TIMEOUT_MS` − `WORST_TAKE_MS` − 10 s.
-    - `WORST_TAKE_MS` is 200 s. It is summed from the take's own bounds,
-      including the 20 s audio wait and copying the evidence.
+    - `WORST_TAKE_MS` is 225 s. It is summed from the take's own bounds,
+      including the lock wait's worst case (`LOCK_WAIT_WORST_MS`, 25 s: its
+      15 s bound + one 10 s read started at it), the 20 s audio wait and
+      copying the evidence.
     - The 10 s covers the calls the sum does not count: the audio wait's
       two `Reidentify` round trips, the StartRecord pre-check, the `/mix`
-      and `/videos` reads, and spawning the analysis.
+      and `/videos` reads, and spawning the analysis. The lock wait's
+      reads are inside its own worst case.
     - #221 dev.18 raised `TEST_TIMEOUT_MS` from 300 s to 320 s, by the
-      audio wait's bound, so a run keeps the retake room it had before.
+      audio wait's bound; dev.19 to 345 s, by the lock wait's worst case.
+      A run keeps the retake room it had before either wait. The one-off
+      endpoint resolution before the first take is outside the take sum
+      (≤ 10 s per URL tried; loopback refuses at once).
     The run is classified by `classifyAvSyncRun`: the stdout JSON and the exit
     code must agree. Missing JSON (a numpy import failure, an argparse error)
     is `error`, not a verdict.
@@ -518,8 +594,8 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     masking it.
   - `afterAll` first sets `tornDown`. Playwright does not cancel a
     timed-out body, so after that point the body refuses to start the
-    probe audio wait, a recording, the recording wait, the analysis, or a
-    skip.
+    probe lock wait, the probe audio wait, a recording, the recording wait,
+    the analysis, or a skip.
   - It awaits an in-flight `StartRecord`, which is tracked as
     `startInFlight`. A start that resolved is ours, even if the body never
     got to set `recordingOurs`. A REJECTED start (an operator recording was
