@@ -40,10 +40,12 @@
  * callbacks/monitoring)".
  *
  * So this wait proves that DistroAV delivers audio, and adds the 1 s hold.
- * It never observes the pairing's withhold. Its cover for the warm-up is
- * the time it takes: the dev.17 take would have started ~1 s later,
- * after the audio turned clean (0.461 s into it), but still before LOCKED.
- * Waiting on the pairing's own state is an open design question on #221.
+ * It never observes the pairing's withhold: on its own, its cover for the
+ * warm-up was only the time it takes (the dev.17 take would have started
+ * ~1 s later, after the audio turned clean, 0.461 s into it, but still
+ * before LOCKED). #221 dev.19 covers the withhold exactly: the gate first
+ * waits for cg OBS's genlock to LOCK the probe (`probe-lock-wait.ts`,
+ * camera-box's `genlock_lock` facet), then runs this wait, then records.
  *
  * What a reading is (obs-websocket 5,
  * `plugins/obs-websocket/src/utils/Obs_VolumeMeter.cpp`):

@@ -42,7 +42,14 @@
  * take started before that opened with two dropouts (dev.17, run
  * 37423917199). The meter is tapped BEFORE the pairing's withhold, so the
  * wait proves DistroAV delivers audio and adds its 1 s; it does not observe
- * the lock (`obs-audio-wait.ts`). The dropout check is unchanged.
+ * the lock (`obs-audio-wait.ts`). #221 dev.19: so the meter wait comes AFTER
+ * a wait on the lock itself (`probe-lock-wait.ts`): camera-box's
+ * `genlock_lock` facet on cg OBS's `:8899/bundle-state.json`, polled every
+ * 250 ms (bounded at 15 s) until the probe's `idle` is false (the heartbeat
+ * is from after the attach), its `locked` is true and the box is `LOCKED`
+ * for reason `none`. The endpoint (`CG_BUNDLE_STATE_URL`) is resolved before
+ * any scene switch, and an unreachable one fails the gate there. The dropout
+ * check is unchanged.
  * afterAll idles the probe first (an idle probe shows nothing, so restoring
  * the program to "OBS manuál" can never loop the picture), restores the
  * program scene, then cg OBS's own scene only when the program restore did
@@ -102,6 +109,14 @@ import {
 import { EVIDENCE_COPY_MS, keepRecording, keepText, type Evidence } from "./av-sync-evidence";
 import { AUDIO_WAIT_TIMEOUT_MS } from "./obs-audio-wait";
 import {
+  LOCK_WAIT_WORST_MS,
+  bundleStateRead,
+  bundleStateUrls,
+  resolveBundleState,
+  waitForProbeLock,
+  type HttpGet,
+} from "./probe-lock-wait";
+import {
   classifyAvSyncRun,
   isPlayingWithFrames,
   keepsEvidence,
@@ -121,22 +136,29 @@ const PYTHON =
   process.env.SP_AVSYNC_PYTHON ||
   "C:\\ProgramData\\SongPlayer\\e2e\\avsync_venv\\Scripts\\python.exe";
 const FFMPEG = process.env.SP_FFMPEG || "C:\\ProgramData\\SongPlayer\\cache\\tools\\ffmpeg.exe";
+// #221 dev.19: camera-box's health endpoint on cg OBS's box, read for the
+// probe's genlock lock (`probe-lock-wait.ts`; a URL or a comma list,
+// default loopback then resolume.lan).
+const CG_BUNDLE_STATE_URLS = bundleStateUrls(process.env.CG_BUNDLE_STATE_URL);
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "av_sync_check.py");
 
 const MAX_AV_MS = 40;
 const RECORD_MS = 20_000;
 const ANALYSIS_TIMEOUT_MS = 60_000; // ~5-10 s on the box
 const MAX_TAKES = 3;
-// #221 dev.18: 300 → 320 s, by the probe audio wait's bound, so a take keeps
-// the retake room it had before the wait (RETAKE_BEFORE_MS stays 110 s).
-const TEST_TIMEOUT_MS = 320_000;
-// The worst case of one take: skip 15 + play 30 + the probe audio wait
-// (AUDIO_WAIT_TIMEOUT_MS, 20) + record (RECORD_MS, 20) + stop 10 + analysis
-// (ANALYSIS_TIMEOUT_MS, 60) + cleanup 35 + evidence copy 2 x
-// EVIDENCE_COPY_MS (5) = 200 s.
+// #221 dev.18: 300 → 320 s, by the probe audio wait's bound; dev.19: 320 →
+// 345 s, by the lock wait's worst case. A take keeps the retake room it had
+// before either wait (RETAKE_BEFORE_MS stays 110 s).
+const TEST_TIMEOUT_MS = 345_000;
+// The worst case of one take: skip 15 + play 30 + the probe lock wait
+// (LOCK_WAIT_WORST_MS, 25: its 15 s bound + one read started at it) + the
+// probe audio wait (AUDIO_WAIT_TIMEOUT_MS, 20) + record (RECORD_MS, 20) +
+// stop 10 + analysis (ANALYSIS_TIMEOUT_MS, 60) + cleanup 35 + evidence copy
+// 2 x EVIDENCE_COPY_MS (5) = 225 s.
 const WORST_TAKE_MS =
   15_000 +
   30_000 +
+  LOCK_WAIT_WORST_MS +
   AUDIO_WAIT_TIMEOUT_MS +
   RECORD_MS +
   10_000 +
@@ -146,7 +168,8 @@ const WORST_TAKE_MS =
 // A retake starts only while this much of the budget has been used. A full
 // worst-case take then still fits, with 10 s for the calls not counted above
 // (the audio wait's two Reidentify round trips, the StartRecord pre-check,
-// the /mix and /videos reads, spawning the analysis).
+// the /mix and /videos reads, spawning the analysis). The lock wait's reads
+// are inside its own worst case.
 const RETAKE_BEFORE_MS = TEST_TIMEOUT_MS - WORST_TAKE_MS - 10_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -527,6 +550,20 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       cgStuckOnProbe,
       `cg OBS is on the A/V gate's probe scene "${AV_PROBE_SCENE}" (a previous run that died mid-take, a genlock soak or a hand press left it there) — put cg OBS back on its own scene`,
     ).toBe(false);
+    // #221 dev.19: every take waits for cg OBS's genlock to lock the probe
+    // (`probe-lock-wait.ts`), read from camera-box's health endpoint. It is a
+    // dependency of the gate, so find it before touching any scene: none
+    // answering with its genlock_lock fails here, loudly.
+    const httpGet: HttpGet = async (url, timeoutMs) => {
+      const r = await request.get(url, { timeout: timeoutMs, failOnStatusCode: false });
+      return { status: r.status(), body: await r.text() };
+    };
+    const lockEndpoint = await resolveBundleState(CG_BUNDLE_STATE_URLS, httpGet);
+    console.log(
+      `A/V gate: cg OBS's genlock state from ${lockEndpoint.url} ` +
+        `(state ${JSON.stringify(lockEndpoint.lock.state)}, reason ${JSON.stringify(lockEndpoint.lock.reason)})`,
+    );
+    const readLock = bundleStateRead(lockEndpoint.url, httpGet);
 
     // 1. Put the baseline sp-* output on program.
     const baseline = pickBaselineScene(await driver.listScenes());
@@ -622,12 +659,21 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       let lastTakeNote = "";
       const undeleted: string[] = [];
       for (let take = 1; take <= MAX_TAKES; take++) {
-        // 3. The probe's AUDIO must flow first (#221 dev.18, the file doc): a
-        // take started before the probe's audio reaches cg OBS's mix opens
-        // with dropouts that are not SongPlayer's. The meter proves DistroAV
-        // delivers audio, not camera-box's pairing lock (the open question on
-        // #221). Waited before the video is read, so the song read is the one
+        // 3. cg OBS's genlock must have LOCKED the probe, then its AUDIO must
+        // flow (#221 dev.19 + dev.18, the file doc): a take started before
+        // the probe's audio reaches cg OBS's mix opens with dropouts that are
+        // not SongPlayer's. The lock wait observes camera-box's pairing (the
+        // probe locked, the box LOCKED for none); the meter, tapped before
+        // the pairing's withhold, proves DistroAV delivers audio. Both are
+        // waited before the video is read, so the song read is the one
         // playing at StartRecord.
+        assertNotTornDown("the probe lock wait");
+        const lock = await waitForProbeLock(readLock, AV_PROBE_INPUT);
+        console.log(
+          `A/V gate take ${take}: probe locked after ${Math.round(lock.waitedMs)} ms ` +
+            `(${lock.reads} reads of ${lockEndpoint.url}, the slowest ` +
+            `${Math.round(lock.slowestReadMs)} ms: ${lock.seen.join(" → ")})`,
+        );
         assertNotTornDown("the probe audio wait");
         const audio = await rec.waitForInputAudio(AV_PROBE_INPUT);
         console.log(
