@@ -260,9 +260,10 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
     expect(msg).toContain("last input peaks [-66.0, -66.0] dBFS");
     expect(msg).toContain("loudest -12.0 dBFS");
     expect(msg).toContain("longest run above the floor 300 ms");
-    // The probe WAS loud (-12 dBFS runs) but never held 1 s: the explanation
-    // must say so, never "no audio" next to readings that show audio
-    // (review round 3).
+    // The probe WAS loud (readings up to -12 dBFS) but never held 1 s, and
+    // its last run had ended before the bound: the explanation must say so,
+    // never "no audio" next to readings that show audio (review round 3).
+    expect(msg).not.toContain("still above the floor");
     expect(msg).toContain("rose above the floor (loudest -12.0 dBFS) but never held 1000 ms");
     expect(msg).not.toContain("delivers no audio");
     expect(msg, "the pairing never silences the meter").not.toMatch(/pairing/i);
@@ -314,6 +315,66 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
     expect(explainAudioWait(seen(400, 400, -12), { floorDbfs: -20, holdMs: 2_000 })).toContain(
       "never held 2000 ms",
     );
+  });
+
+  test("audio that began too close to the bound is named as a late start, not as gaps", async () => {
+    // Review round 4: silence, then steady audio still flowing when the bound
+    // hits, a run shorter than the hold. Neither "gaps" nor "no audio".
+    const meters = fakeMeters();
+    let t = 0;
+    const wait = waitForInputAudio(meters.subscribe, PROBE, { now: () => t, timeoutMs: 50 });
+    for (t = 0; t <= 600; t += 50) meters.push([probeAt(0)]);
+    for (t = 650; t <= 1_100; t += 50) meters.push([probeAt(0.25)]);
+    t = 1_100; // the bound, with the run of 450 ms still open
+    const err = await wait.then(
+      () => null,
+      (e: Error) => e,
+    );
+    const msg = err?.message ?? "";
+    expect(msg).toContain("still above the floor when the bound hit (a run of 450 ms)");
+    expect(msg).toContain("began less than 1000 ms before it");
+    expect(msg).not.toContain("with gaps");
+    expect(msg).not.toContain("delivers no audio");
+    expect(msg).not.toMatch(/pairing/i);
+  });
+
+  test("a run that went stale before the bound is not a late start", async () => {
+    // The last loud event is more than the gap bound before the bound: the
+    // events stopped, so the run is not "still" open.
+    const meters = fakeMeters();
+    let t = 0;
+    const wait = waitForInputAudio(meters.subscribe, PROBE, { now: () => t, timeoutMs: 50 });
+    for (t = 0; t <= 300; t += 50) meters.push([probeAt(0.25)]);
+    t = 900; // 600 ms after the last event when the bound hits
+    const err = await wait.then(
+      () => null,
+      (e: Error) => e,
+    );
+    const msg = err?.message ?? "";
+    expect(msg).not.toContain("still above the floor");
+    expect(msg).toContain("rose above the floor (loudest -12.0 dBFS) but never held 1000 ms");
+  });
+
+  test("the bound explains with the wait's own floor and hold", async () => {
+    // Review round 4: -30 dBFS readings under a -20 dBFS floor are silence
+    // for THIS wait, so the explanation says "no audio", never "rose above".
+    const meters = fakeMeters();
+    let t = 0;
+    const wait = waitForInputAudio(meters.subscribe, PROBE, {
+      now: () => t,
+      timeoutMs: 50,
+      floorDbfs: -20,
+      holdMs: 2_000,
+    });
+    for (t = 0; t <= 2_500; t += 50) meters.push([probeAt(10 ** (-30 / 20))]);
+    const err = await wait.then(
+      () => null,
+      (e: Error) => e,
+    );
+    const msg = err?.message ?? "";
+    expect(msg).toContain("input peak above -20 dBFS for 2000 ms in a row");
+    expect(msg).toContain("DistroAV delivers no audio");
+    expect(msg).not.toContain("rose above the floor");
   });
 
   test("a closed connection ends the wait at once, naming the close", async () => {
