@@ -574,7 +574,11 @@ playlists on air) went with it.
   `from_str::<Value>` re-parses it in this build).
 - `e2e/obs-driver-protocol.spec.ts` (ubuntu mock suite, no box): a local
   msgpack-only stub must accept the post-deploy driver; the driver must
-  offer only `obswebsocket.msgpack` and send no text frame.
+  offer only `obswebsocket.msgpack` and send no text frame. #221 dev.18:
+  a connect asks for no high-volume event, and the A/V gate's audio wait
+  subscribes `InputVolumeMeters` with a `Reidentify` only around the wait
+  and drops it with an explicit `All` after, also when it fails
+  (`obs-ndi-health.md`).
 - `studio_events_tests.rs`: `scene_change`, the feedback task over a real
   bus (a same-name publication is checked with `yield_now` rounds on the
   current-thread runtime + `try_recv` Empty), the event shapes, and

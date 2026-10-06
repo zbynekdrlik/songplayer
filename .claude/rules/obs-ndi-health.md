@@ -18,6 +18,7 @@ paths:
   - "e2e/av-sync-gate.ts"
   - "e2e/av-sync-probe*.ts"
   - "e2e/av-sync-evidence.ts"
+  - "e2e/obs-audio-wait*.ts"
   - "e2e/obs-driver.ts"
   - "scripts/av_sync_check.py"
   - "scripts/av_sync_drift.py"
@@ -319,6 +320,55 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     when it is not on it already, and waits (≤ 30 s) until SP-program's
     `health.connections` rose above that count (`probeReceiverAttached`);
     it fails naming it, never as an unmeasurable take.
+  - **A freshly attached probe delivers VIDEO before AUDIO: wait for its
+    audio meter before recording (#221 dev.18).** The receiver count rises
+    as soon as DistroAV connects, and the picture flows at once.
+    camera-box's genlock audio pairing (camera-box 1367) WITHHOLDS the
+    audio until its latch fixes the delay, ~5 s after the attach. The
+    dev.17 cg OBS log shows it:
+    - bound 08:49:33.114;
+    - `genlock-shallow-lock` 36.133;
+    - DEGRADED `audio_pairing` 36.217;
+    - LOCKED 37.214.
+
+    The gate's StartRecord came at 35.705. The take opened with two
+    dropouts (0.100 s / 22 ms, 0.227 s / 234 ms, run 37423917199), and the
+    rest of it was clean. Before lane 3 the gate recorded a long-attached
+    input and never met this. So before EVERY take the gate waits for the
+    probe's audio (`ObsDriver.waitForInputAudio`, the pure decision in
+    `e2e/obs-audio-wait.ts`), and only then reads the playing video and
+    records:
+    - **Signal:** obs-websocket's `InputVolumeMeters`. Each input's
+      `inputLevelsMul` is one `[magnitude × volume, peak × volume, peak]`
+      triple per channel, linear. The gate reads the THIRD value, the input
+      peak BEFORE the fader and mute (does the receiver deliver audio?),
+      from the loudest channel. A muted probe still fails as unmeasurable.
+    - **Condition:** above −60 dBFS for 1 s in a row. Three things restart
+      the run:
+      - a silent reading;
+      - an event without the probe (obs-websocket meters only ACTIVE
+        inputs: the probe is on cg OBS's program from the scene switch);
+      - more than 500 ms between meter events (only observed continuity
+        counts).
+    - **Bound:** 20 s. It rejects with the meter state it saw: the events,
+      the ones with the probe, its last peaks, the loudest, and the longest
+      run.
+    - **High-volume event:** obs-websocket sends it every 50 ms only to a
+      session that asks for it. The cg OBS recorder asks with a `Reidentify`
+      (All | `InputVolumeMeters` = 1 << 16) for the wait alone, and drops it
+      after with an EXPLICIT `eventSubscriptions: All`, also when the wait
+      fails: a `Reidentify` without the field KEEPS the current ones. A
+      connect never asks for it. `e2e/obs-driver-protocol.spec.ts` pins
+      both on a msgpack stub.
+    - **Limit:** obs-websocket HOLDS a level until no audio has arrived for
+      0.3 s (`Obs_VolumeMeter.cpp` `GetMeterData`), so a gap shorter than
+      ~300 ms is invisible to the meter. The 1 s run clears the dev.17
+      warm-up, whose gaps fell within ~0.35 s of the first audio. A
+      warm-up with sub-300 ms gaps later than that would still show as
+      dropouts. Never "fix" that by loosening the dropout check.
+    - **Not used:** camera-box's vendor request `GetGenlockStats` (poll
+      until the probe is locked). It is specific to their OBS build; the
+      meter is the build-independent condition.
   - `afterAll` idles the probe FIRST (an idle probe shows nothing, so
     restoring the program to "OBS manuál" can never loop the picture through
     cg OBS), then restores the program scene through the facade (a manual
@@ -346,8 +396,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
   sp-slow, never sp-warmup/sp-fast) through the facade. It proves the
   baseline playlist is PLAYING with `/api/v1/ndi/health`: `state=Playing`
   (= on program) AND `frames_submitted_last_5s > 0`.
-  It sets the SONG faders to unity, then `StartRecord` → 20 s → `StopRecord`,
-  which returns `outputPath`.
+  It sets the SONG faders to unity. Then, for every take, it waits for the
+  probe's audio (above), reads the playing video, and runs `StartRecord` →
+  20 s → `StopRecord`, which returns `outputPath`.
   - `startRecord` refuses to touch a recording the operator already started.
   - **Takes (max 3).** A take is repeated only in two cases:
     - `/api/v1/mix` shows a different `video_id` after the take, so the song
@@ -359,8 +410,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
 
     A `fail` is never retaken. Neither is an audio-side `cannot_measure`,
     which can be a real audio fault. A retake starts only while less than
-    110 s of the 300 s budget is used, so a full worst-case take (including
-    copying the evidence) still fits.
+    100 s of the 300 s budget is used (`RETAKE_BEFORE_MS`). That way a full
+    worst-case take of 200 s still fits: the 20 s audio wait and copying
+    the evidence are both counted.
     The run is classified by `classifyAvSyncRun`: the stdout JSON and the exit
     code must agree. Missing JSON (a numpy import failure, an argparse error)
     is `error`, not a verdict.
