@@ -14,9 +14,10 @@ TCP listeners exactly like `run_child`:
   (``--source testsrc2`` puts a detailed lavfi picture under it);
 * the video feeder is a 1:1 port of `preview_video_clock.rs` (#221 A1): a
   40 ms slot of the MONOTONIC clock is written only with a NEW frame (the
-  newest, decided half a slot late); with none (a pause) NOTHING is written,
-  so the encoder starves; the next frame fills the missed slots with the last
-  one (at most 250), then takes its slot. The encoder reads it at
+  newest that arrived by the slot's decision, half a slot late); with none (a
+  pause) NOTHING is written, so the encoder starves; the next frame fills the
+  slots decided before it arrived with the last one (at most 250), then takes
+  its own slot. The encoder reads it at
   `-framerate 25` with NO wall-clock stamp; frame 0 is the origin the audio
   aligns to;
 * the audio feeder is a 1:1 port of `spawn_audio_feeder`: preroll
@@ -234,40 +235,46 @@ def seam(sh: Shared, vq: queue.Queue, aq: queue.Queue, fps: float, switch_at: fl
 
 class VideoClock:
     """1:1 port of `preview_video_clock.rs::VideoClock` (#221 A1): a 40 ms slot
-    is written only with a NEW canvas (the newest, decided half a slot after the
-    slot's time); with none (a pause) nothing is written, so the encoder starves
-    and the picture holds pixel-exact; the next new canvas first fills the
-    missed slots with the last written one (at most MAX_GAP_FILL_SLOTS, a longer
-    gap ends the encoder run), then takes its own slot."""
+    is written only with a NEW canvas; a canvas belongs to the first slot
+    decided (half a slot after its time) at or after its ARRIVAL; with none (a
+    pause) nothing is written, so the encoder starves and the picture holds
+    pixel-exact; the next canvas first fills the slots decided before it
+    arrived with the last written one (at most MAX_GAP_FILL_SLOTS, a longer gap
+    ends the encoder run), then takes its own slot once it is decided."""
 
     def __init__(self):
         self.start_us = None
-        self.pending = None
+        self.pending = None  # (frame, arrival_us)
         self.last = None
         self.written = self.repeated = self.skipped = self.max_burst = 0
 
-    def offer(self, frame):
+    def offer(self, frame, arrival_us: int):
         if self.pending is not None:
             self.skipped += 1
-        self.pending = frame
+        self.pending = (frame, arrival_us)
 
-    def due(self, now_us: int) -> int:
-        return max(0, now_us - self.start_us - DECIDE_LATE_US) // FRAME_US + 1
+    @staticmethod
+    def slots_due(elapsed_us: int) -> int:
+        return max(0, elapsed_us - DECIDE_LATE_US) // FRAME_US + 1
 
-    def must_restart(self, now_us: int) -> bool:
+    def pending_slot(self):
         if self.start_us is None or self.pending is None:
-            return False
-        return self.due(now_us) > self.written + 1 + MAX_GAP_FILL_SLOTS
+            return None
+        elapsed = max(0, self.pending[1] - self.start_us)
+        slot = 0 if elapsed == 0 else self.slots_due(elapsed - 1)
+        return max(slot, self.written)
+
+    def must_restart(self) -> bool:
+        slot = self.pending_slot()
+        return slot is not None and slot > self.written + MAX_GAP_FILL_SLOTS
 
     def take_due(self, now_us: int):
         if self.pending is None:
             return None
         if self.start_us is None:
-            self.start_us = now_us
-        due = self.due(now_us)
-        if due < self.written + 1:
-            return None
-        fill = due - (self.written + 1)
+            self.start_us = self.pending[1]
+        slot = self.pending_slot()
+        fill = slot - self.written
         if fill > MAX_GAP_FILL_SLOTS:
             return None
         if fill > 0 and self.last is not None:
@@ -275,17 +282,20 @@ class VideoClock:
             self.repeated += fill
             self.max_burst = max(self.max_burst, fill)
             return self.last, fill
-        self.last, self.pending = self.pending, None
-        self.written = due
-        self.max_burst = max(self.max_burst, 1)
-        return self.last, 1
+        if self.slots_due(max(0, now_us - self.start_us)) > slot:
+            self.last, self.pending = self.pending[0], None
+            self.written = slot + 1
+            self.max_burst = max(self.max_burst, 1)
+            return self.last, 1
+        return None
 
     def wait_us(self, now_us: int) -> int:
         if self.pending is None:
             return 200_000
-        if self.start_us is None:
+        slot = self.pending_slot()
+        if slot is None or slot > self.written:
             return 0
-        return max(0, self.start_us + self.written * FRAME_US + DECIDE_LATE_US - now_us)
+        return max(0, self.start_us + slot * FRAME_US + DECIDE_LATE_US - now_us)
 
 
 def next_frame(vq: queue.Queue, timeout_s: float):
@@ -308,10 +318,10 @@ def video_feeder(sh: Shared, sock: socket.socket, vq: queue.Queue) -> None:
     while not sh.stop.is_set():
         fr = next_frame(vq, clock.wait_us(us()) / 1e6)
         while fr is not None:  # the newest canvas takes the slot
-            clock.offer(fr)
+            clock.offer(fr, us())
             fr = next_frame(vq, 0)
         now = us()
-        if clock.must_restart(now):
+        if clock.must_restart():
             print("video feeder: a gap over 10 s — production ends the encoder run here",
                   file=sys.stderr)
             sh.restart_requested = True
@@ -328,7 +338,7 @@ def video_feeder(sh: Shared, sock: socket.socket, vq: queue.Queue) -> None:
                 print(f"video feeder: write failed ({e}) — child gone", file=sys.stderr)
                 return
         if clock.start_us is not None and not sh.first_video_wall:
-            sh.first_video_wall = base + clock.start_us / 1e6  # frame 0: the video origin
+            sh.first_video_wall = base + clock.start_us / 1e6  # frame 0's arrival: the origin
         sh.video_stats = [clock.written, clock.repeated, clock.skipped, clock.max_burst]
 
 

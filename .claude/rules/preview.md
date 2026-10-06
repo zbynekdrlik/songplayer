@@ -98,42 +98,54 @@ input.
   head's slow motion is as small per frame as the re-encoding noise).
 - **`preview_video_clock.rs::VideoClock`** (pure, Linux-tested,
   mutation-gated):
-  - Slot `k` is decided `k × 40 ms + 20 ms` (`DECIDE_LATE_US`, half a
-    slot) after frame 0, with the NEWEST tapped canvas: the picture nearest
-    the slot's time (a 30 fps source: −20..+13 ms), never one a whole slot
-    old. A canvas replaced before its slot is skipped and goes back to the
-    tap's pool (`StreamShared::recycle_frame`, #147 r10).
+  - Frame 0 is the first canvas, at its arrival. Slot `k ≥ 1` is decided
+    `k × 40 ms + 20 ms` (`DECIDE_LATE_US`, half a slot) after it. A canvas
+    belongs to the first slot decided at or after its ARRIVAL
+    (`offer(frame, arrival_us)`, `slot_of_arrival`), never one already
+    written; the newest canvas for a slot wins, the ones it replaced are
+    skipped and go back to the tap's pool (`StreamShared::recycle_frame`,
+    #147 r10). So a slot never shows a picture from after its decision:
+    24 fps lands within −18..+22 ms of each slot, 30 fps −20..+7 ms (a
+    time-of-call rule put a 24 fps picture up to 60 ms early, review
+    round 2).
   - The next new picture after a gap (a pause, a decode stall, a write that
-    blocked) first fills the missed slots with the LAST written picture
-    (`take_due` returns it with the count, then the new canvas once): the
-    video counts every slot and stays on the audio. That is what ffmpeg's
-    `cfr` did with the wall-clock stamps. The replaced fill picture goes
-    back to the pool (`released`).
-  - A fill is bounded: at most `MAX_GAP_FILL_SLOTS` = 250 (10 s, the span
-    ffmpeg's muxer holds the audio of a starved video, ~86 MB written at
-    once). A longer gap writes nothing: `must_restart` → the feeder sets the
-    run's `restart` flag and stops, `monitor_loop` ends the run as
-    `ChildExited`, and `supervise` respawns a child for the viewers (the
-    relay is closed, they reconnect onto its init, ~1 s; the restart budget
-    applies).
+    blocked, a source below 25 fps) first fills every slot decided before it
+    arrived with the LAST written picture (`take_due` returns it with the
+    count), then takes its own slot once that is decided: the video counts
+    every slot and stays on the audio. That is what ffmpeg's `cfr` did with
+    the wall-clock stamps. The replaced fill picture goes back to the pool
+    (`released`).
+  - A fill is bounded: at most `MAX_GAP_FILL_SLOTS` = 250 (10 s; a cap on
+    the catch-up burst, ~86 MB written and encoded at once). A longer gap
+    writes nothing: `must_restart` → the feeder sets the run's `restart`
+    flag and stops, `monitor_loop` returns `RunOutcome::Restart`, and
+    `supervise` ends the stopped stream and starts a child for the viewers
+    (they reconnect onto its init, ~1 s). It is not a crash: no restart
+    budget is spent. With nobody watching it settles like any exit. (The
+    encoder's output stalls during any pause: locally ffmpeg 6.1.1 even
+    stopped reading its audio input while the video starved, so nothing
+    is lost by restarting after a long one.)
 - **The feeder glue** (`spawn_video_feeder`, `mutants::skip`, in the same
-  file): drains stale frames at connect, waits `clock.wait_us(now)` (until
-  the pending canvas's decision, else `IDLE_POLL_US`), offers every queued
-  canvas (the newest wins), checks `must_restart`, then writes what
-  `take_due` returns (at most two answers: the fill, then the new canvas).
-  `first_video_us` = frame 0's time: the video timeline's origin, which the
+  file): drains stale frames at connect, waits `clock.wait_us(now)` (0
+  while a fill is due, until the pending canvas's decision, else
+  `IDLE_POLL_US`), offers every queued canvas with its arrival = when the
+  feeder received it (a canvas wakes it at once; the newest wins), checks
+  `must_restart`, then writes what `take_due` returns (at most two answers:
+  the fill, then the new canvas).
+  `first_video_us` = frame 0's arrival: the video timeline's origin, which the
   audio preroll (`audio_preroll_samples(gap, 0)`) aligns to. Feed-on-connect
   (finding 1 below) is unchanged: nothing is written before the first canvas.
 - **Log lines:** `preview-vfeed: start … fps=25`, every 10 s
   `preview-vfeed: written repeated skipped max_burst queued` (`max_burst` =
-  the largest single write in that window: 1 in steady play; a child's
-  start shows one burst while ffmpeg opens its audio input; the gap after a
-  pause), `preview-vfeed: a gap over 10 s — a fresh child …` and
-  `preview-encoder: the video feeder asked for a fresh child`.
+  the largest gap fill in that window: 1 in steady play; a child's start
+  shows one while ffmpeg opens its audio input; the gap after a pause),
+  `preview-vfeed: a gap over 10 s — a fresh child …` and
+  `preview-encoder: a fresh child after a long pause`.
 - **Tests:** `preview_video_clock_tests.rs` (a pause writes nothing and the
-  next picture fills the gap, the nearest-picture rate, newest wins +
-  recycle, a stall's fill, the 250-slot bound and the restart, the wait,
-  frame 0's origin, the stats window) and
+  next picture fills the gap, 30 fps and 24 fps sources, an arrival exactly
+  at a decision and 1 µs after it, newest wins + recycle, a stall, the
+  250-slot bound and the restart, the wait, frame 0's origin, the stats
+  window) and
   `preview_encoder_tests.rs::no_input_is_wall_clock_stamped_and_the_video_counts_the_output_rate`
   (+ the exact vector).
 - **Local proof** (`scripts/preview_latency_repro.py`, dev1 ffmpeg 6.1.1,
@@ -149,13 +161,15 @@ input.
   | #221 A1, no step / +1.543 s step | 0.44 / 0.45 s before the pause (the encoder starves) | 0 |
 
   The switch-mode A/V placement (`content_shift_s`, design = the 210 ms
-  lead) is 0.247 s with and without the step (the old feeder: 0.233 s). In
-  every run (the old feeder too) the encoder's output drifts ~1.7 % behind
-  the wall on dev1 (`video_output_behind_wall_s`), a harness property, not
-  the feeder.
+  lead) stays within 0.23-0.25 s with and without the step, 24 fps too
+  (the old feeder: 0.233 s). In every run (the old feeder too) the
+  encoder's output drifts 0.5-1.7 % behind the wall on dev1
+  (`video_output_behind_wall_s`), a harness property, not the feeder.
 - **Box re-check after a change here:** the three `post-deploy-preview`
-  tests (A/V sync, the lag readout, the 1 Mb/s link), and the box log's
-  `preview-vfeed` lines.
+  tests (A/V sync, the lag readout, the 1 Mb/s link), the box log's
+  `preview-vfeed` lines, and by hand a pause over 10 s then play: the
+  preview must reconnect onto a fresh child (`a fresh child after a long
+  pause`) and play in sync (the restart path is glue, no unit test).
 
 ## Iron rules (BOTH taps)
 

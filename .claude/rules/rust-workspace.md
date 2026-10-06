@@ -351,6 +351,14 @@ failed on them (`36438006665`):
   the opaque one is not. Use the helper as a temporary
   (`pool.run(&recorder(&log))`), bind it in a block, or take the data out
   without moving (`std::mem::take(&mut *log.lock().unwrap())`).
+- **A borrow returned from ONE branch lives for the whole function → E0502
+  on a later mutation of the same field** (#221 A1 lane, review round 2:
+  the GREEN commit did not compile). `if fill > 0 && let Some(last) =
+  self.last.as_ref() { …; return Some((last, fill)); }` followed by
+  `self.last.replace(fresh)` is rejected (NLL problem case 3: a reference
+  returned conditionally is treated as borrowed to the end). Test the
+  condition without binding (`&& self.last.is_some()`) and borrow only in
+  the return (`return self.last.as_ref().map(|last| (last, fill));`).
 
 ## A persistent worker pool with borrowed jobs (#223 follow-up, `playback/band_pool.rs`)
 
