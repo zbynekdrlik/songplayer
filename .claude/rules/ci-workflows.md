@@ -231,8 +231,11 @@ carries one `[no-test: <sha7> <reason>]` per covered commit; the script prints
 `bypass: … (declared by <sha7>)`. A `[no-test: <sha> …]` whose sha resolves
 to ANOTHER commit is only ever that declaration: it is never the declaring
 commit's own bypass (#221 dev.19, self-test fixture 10), so a `fix(#N):` that
-carries one still needs its own test(#N) or its own sha-less marker. Only the
-leading `fix(#N):` form is gated;
+carries one still needs its own test(#N) or its own sha-less marker. Never
+QUOTE the marker syntax (bracket, `no-test:`, text, bracket) in a fix commit's
+body while describing it: the script reads any such span as that commit's own
+bypass (169ab83a, #221 dev.19, is logged "bypass" though its RED is fce7efcd).
+Only the leading `fix(#N):` form is gated;
 scope-only subjects (`fix(stems): … (#14)`) are not. Run
 `bash scripts/check-red-green-order.sh origin/main..HEAD` before opening a
 release PR — it is bash-only, allowed under Tier-0.
