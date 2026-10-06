@@ -36,9 +36,15 @@ export const PLAY_WAIT_MS = 30_000;
 /** `StopRecord` until OBS reports the output inactive. */
 export const STOP_RECORD_MS = 10_000;
 
-/** Deleting one take's recording: the 15 s wait for its remux sibling plus
- *  10 s of busy-file retries for each of its two files. */
-export const CLEANUP_MS = 35_000;
+/** The wait for a recording's auto-remux sibling (`<base>.mp4`). */
+export const REMUX_SIBLING_WAIT_MS = 15_000;
+
+/** The retries of one file OBS still holds (Windows EBUSY/EPERM). */
+export const BUSY_RETRY_MS = 10_000;
+
+/** Deleting one take's recording: the wait for its remux sibling, then the
+ *  busy-file retries of each of its two files. */
+export const CLEANUP_MS = REMUX_SIBLING_WAIT_MS + 2 * BUSY_RETRY_MS;
 
 /** The calls one take makes that the sum below does not count. */
 export const UNCOUNTED_CALLS_MS = 10_000;

@@ -112,9 +112,11 @@ import {
 import { keepRecording, keepText, type Evidence } from "./av-sync-evidence";
 import {
   ANALYSIS_TIMEOUT_MS,
+  BUSY_RETRY_MS,
   MAX_TAKES,
   PLAY_WAIT_MS,
   RECORD_MS,
+  REMUX_SIBLING_WAIT_MS,
   RETAKE_BEFORE_MS,
   SKIP_WAIT_MS,
   STOP_RECORD_MS,
@@ -124,6 +126,7 @@ import {
   bundleStateRead,
   bundleStateUrls,
   probeAttachRefusal,
+  probePhaseEvents,
   probeReadyForTake,
   resolveBundleState,
   waitForProbeLock,
@@ -298,7 +301,7 @@ async function removeRecording(
   }
   if (keep) await keepRecording(files.filter((f) => fs.existsSync(f)), keep, siblingDeadline);
   for (const f of files) {
-    const deadline = Date.now() + 10_000;
+    const deadline = Date.now() + BUSY_RETRY_MS;
     for (;;) {
       try {
         fs.rmSync(f, { force: true });
@@ -507,7 +510,9 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         const left: string[] = [];
         // Not yet deleted by the body (it died first): wait for the remux sibling.
         const pending = [...stoppedHere, ...madeRecordings.filter((r) => !removedByBody.has(r))];
-        for (const rec of pending) left.push(...(await removeRecording(rec, autoRemux, 15_000)));
+        for (const rec of pending) {
+          left.push(...(await removeRecording(rec, autoRemux, REMUX_SIBLING_WAIT_MS)));
+        }
         // Deleted by the body: a re-sweep catches a sibling that appeared late.
         for (const rec of removedByBody) left.push(...(await removeRecording(rec, autoRemux, 0)));
         expect(left, "every OBS recording the gate made must be deleted").toEqual([]);
@@ -560,11 +565,22 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     // loudly, before any scene switch (`probeAttachRefusal`).
     const refusal = probeAttachRefusal(lockEndpoint.lock, AV_PROBE_INPUT);
     if (refusal !== null) {
-      await rec
-        .setInputSettings(AV_PROBE_INPUT, { ndi_source_name: "" })
-        .catch((e) => console.error(`A/V gate: could not idle the probe: ${e}`));
-      throw new Error(refusal);
+      const idled = await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: "" }).then(
+        () => "the gate idled it",
+        (e) => `idling it failed: ${e}`,
+      );
+      throw new Error(`${refusal}; ${idled}`);
     }
+    // A woken probe's lifetime phase events latch cg OBS's recent_event for
+    // 60 s (camera-box, `probe-lock-wait.ts`): name them before the attach.
+    const phaseEvents = probePhaseEvents(lockEndpoint.lock, AV_PROBE_INPUT);
+    console.log(
+      `A/V gate: the probe's lifetime relocks + late holds before the attach: ` +
+        `${phaseEvents ?? "unknown"}` +
+        (phaseEvents !== null && phaseEvents > 0
+          ? " (its wake can latch cg OBS's recent_event for 60 s: the lock wait may reach its bound)"
+          : ""),
+    );
     const readLock = bundleStateRead(lockEndpoint.url, httpGet);
 
     // 1. Put the baseline sp-* output on program.
@@ -760,7 +776,9 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
             ? { dir: path.join(testInfo.outputDir, "av-sync-evidence"), take }
             : null;
           if (keep) for (const [name, text] of texts) keepText(keep, name, text);
-          undeleted.push(...(await removeRecording(recording, autoRemux, 15_000, keep)));
+          undeleted.push(
+            ...(await removeRecording(recording, autoRemux, REMUX_SIBLING_WAIT_MS, keep)),
+          );
           removedByBody.add(recording);
         }
 

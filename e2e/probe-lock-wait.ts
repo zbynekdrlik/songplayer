@@ -69,7 +69,16 @@
  *   timeline; camera-box allows the withhold up to 10 s);
  * - an attach with no `audio_pairing` phase writes no change line, so the
  *   first fresh line is the next heartbeat (up to ~30 s): the 15 s bound
- *   can fail although the probe is fine.
+ *   can fail although the probe is fine;
+ * - a woken probe latches `recent_event` (review round 2, #221 comment
+ *   6014658984): camera-box counts an idle input's phase events
+ *   (`relocks + late_holds + backward_steps`) as 0, and when the probe
+ *   wakes its LIFETIME totals come back as a rise of the box's sum, which
+ *   holds DEGRADED/`recent_event` for 60 s (`GenlockLockState.hpp`
+ *   `genlock_input_phase_events`, `OBSBasicStatusBar.cpp`). cg OBS is
+ *   long-lived, so once the probe has had one phase event every later
+ *   attach can reach the 15 s bound ([`probePhaseEvents`] predicts it from
+ *   the line before the attach; `backward_steps` is not in the facet).
  * The per-input truth (`audio_hold=` in the probe's `genlock-fifo audit`
  * line) is only in cg OBS's log.
  *
@@ -122,7 +131,7 @@ export const DEFAULT_BUNDLE_STATE_URLS: readonly string[] = [
   "http://resolume.lan:8899/bundle-state.json",
 ];
 
-/** The four conditions, in the order an attach reaches them. */
+/** The conditions, as the error texts name them. */
 const CONDITION =
   'its idle false, locked true, state "LOCKED", reason "none", with its NDI connection live';
 
@@ -206,7 +215,7 @@ function probeEntry(lock: GenlockLock, probeInput: string): Record<string, unkno
 }
 
 export interface LockVerdict {
-  /** All four conditions hold: record. */
+  /** Every condition holds: record. */
   go: boolean;
   /** The conditions that do not hold, in the order an attach reaches them. */
   unmet: string[];
@@ -231,23 +240,43 @@ export function probeLockVerdict(lock: GenlockLock, probeInput: string): LockVer
 
 /**
  * Why the gate must not attach the probe on this facet, or null when it may.
- * Read BEFORE the attach: a probe that is not `idle` received within the
- * last minute (a run cancelled mid-take), and its line already reads like
- * a GO (an idled probe keeps `locked: true`), so no later line could be
- * proven to come from after this run's attach. A probe camera-box does not
- * list yet (a fresh box) proves nothing stale.
+ * Read BEFORE the attach: a probe line that could already read as a GO —
+ * connected, not `idle` (it received within the last minute: a run
+ * cancelled mid-take) and `locked` (an idled probe keeps its FIFO lock) —
+ * means no later line could be proven to come from after this run's
+ * attach. Anything else is safe to attach on: a probe camera-box does not
+ * list (a fresh box), an absent one (never idle, so its idle proves
+ * nothing; the wait needs a connected line), an unlocked one (a
+ * never-attached probe right after cg OBS starts reads connected and not
+ * yet classified idle, but cannot GO without new frames).
  */
 export function probeAttachRefusal(lock: GenlockLock, probeInput: string): string | null {
   const entry = probeEntry(lock, probeInput);
-  // An absent probe's idle proves nothing (it is never idle): the wait
-  // itself needs a line that shows it connected.
-  if (entry === null || entry.connected !== true || entry.idle !== false) return null;
+  if (entry === null || entry.connected !== true || entry.idle !== false || entry.locked !== true) {
+    return null;
+  }
   return (
-    `cg OBS's newest genlock line shows the probe "${probeInput}" receiving (idle false) ` +
-    "before this run attached it: it received within the last minute (a run cancelled " +
-    "mid-take?), so the lock wait could not prove a line to come from after the attach. " +
-    "The run idled it; re-run once it has received nothing for about a minute (#221)"
+    `cg OBS's newest genlock line shows the probe "${probeInput}" receiving (idle false) and ` +
+    "locked before this run attached it: it received within the last minute (a run " +
+    "cancelled mid-take?), so the lock wait could not prove a line to come from after the " +
+    "attach: re-run once it has received nothing for ~90 s (camera-box's 60 s idle window " +
+    "plus a heartbeat of up to 30 s) (#221)"
   );
+}
+
+/**
+ * The probe's lifetime phase events camera-box can see (`relocks +
+ * late_holds`; `backward_steps` is not in the facet), or null without a
+ * probe entry or with a field that is not a count. Read before the attach:
+ * non-zero predicts the woken probe's DEGRADED/`recent_event` (the file
+ * doc's third residual).
+ */
+export function probePhaseEvents(lock: GenlockLock, probeInput: string): number | null {
+  const entry = probeEntry(lock, probeInput);
+  if (entry === null) return null;
+  const { relocks, late_holds: lateHolds } = entry;
+  if (typeof relocks !== "number" || typeof lateHolds !== "number") return null;
+  return relocks + lateHolds;
 }
 
 /** The facet in words: the box verdict, the probe's entry (or the inputs
@@ -305,6 +334,14 @@ export function explainProbeLock(lock: GenlockLock, probeInput: string): string 
   if (entry.locked !== true) {
     return `The probe receives, but its genlock FIFO is not locked (locked ${fmt(entry.locked)}).`;
   }
+  if (lock.reason === "recent_event" && namesInput(lock.recent_event_inputs, probeInput)) {
+    return (
+      `cg OBS's genlock is ${fmt(lock.state)} for recent_event, and recent_event names the ` +
+      "probe: camera-box counts an idle input's phase events as 0, so the woken probe's " +
+      "lifetime relocks / late holds / backward steps came back as new events, which hold " +
+      "recent_event for 60 s (a camera-box wake re-baseline issue, #221 comment 6014658984)."
+    );
+  }
   if (lock.reason === "audio_pairing") {
     return (
       `cg OBS's genlock is ${fmt(lock.state)} for audio_pairing: a genlock input's placed ` +
@@ -316,6 +353,11 @@ export function explainProbeLock(lock: GenlockLock, probeInput: string): string 
     `cg OBS's genlock is ${fmt(lock.state)} (reason ${fmt(lock.reason)}), not "LOCKED" ` +
     '(reason "none").'
   );
+}
+
+/** Whether an offender list (`[{name, …}]`) names `probeInput`. */
+function namesInput(rows: unknown, probeInput: string): boolean {
+  return Array.isArray(rows) && rows.some((r) => isObject(r) && r.name === probeInput);
 }
 
 /** A read of one URL (`url: <failure>` on failure). The timeout is whole
