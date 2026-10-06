@@ -25,6 +25,7 @@ import {
   LOCK_READ_TIMEOUT_MS,
   LOCK_WAIT_TIMEOUT_MS,
   LOCK_WAIT_WORST_MS,
+  WAKE_LATCH_WINDOW_MS,
   bundleStateRead,
   bundleStateUrls,
   explainProbeLock,
@@ -455,6 +456,19 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     const other = explainProbeLock(lock("DEGRADED", "input_unlocked", probe()), PROBE, 3);
     expect(other).toContain('"DEGRADED" (reason "input_unlocked")');
     expect(other).not.toContain("before the attach");
+    // Review round 4: the probe's own state comes first, whatever the count —
+    // a stale line, a lost connection or an unlocked FIFO is named, never the
+    // wake.
+    const box = { recent_event_inputs: [{ name: "sp-slow", events: 9 }] };
+    expect(
+      explainProbeLock(lock("DEGRADED", "recent_event", probe({ idle: true }), box), PROBE, 3),
+    ).toContain("heartbeat");
+    expect(
+      explainProbeLock(lock("DEGRADED", "recent_event", probe({ connected: false }), box), PROBE, 3),
+    ).toContain("live NDI connection");
+    expect(
+      explainProbeLock(lock("DEGRADED", "recent_event", probe({ locked: false }), box), PROBE, 3),
+    ).toContain("FIFO is not locked");
   });
 
   test("the bound's explanation reads the probe's phase events from before the attach", async () => {
@@ -471,6 +485,35 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
       }),
     );
     expect(msg).toContain("the probe had 2 lifetime phase events before the attach");
+  });
+
+  test("the wake is named only while its 60 s latch can still hold", async () => {
+    // Review round 4: the probe stays attached across takes, and a take can
+    // start long after the attach; a recent_event seen more than the latch
+    // (plus the time to wake) after the attach is not the wake.
+    const stuck = () =>
+      lock("DEGRADED", "recent_event", probe(), { recent_event_inputs: [{ name: "sp-slow", events: 9 }] });
+    const boundAt = async (attachedAt: number): Promise<string> => {
+      const clock = fakeClock();
+      clock.t = 100_000;
+      const reads = fakeRead(clock, stuck);
+      return rejection(
+        waitForProbeLock(reads.read, PROBE, {
+          now: clock.now,
+          sleep: clock.sleep,
+          timeoutMs: 500,
+          phaseEventsBeforeAttach: 2,
+          attachedAt,
+        }),
+      );
+    };
+    // Attached 40 s before the wait: within the latch.
+    expect(await boundAt(60_000)).toContain("the probe had 2 lifetime phase events before the attach");
+    // Attached 95 s before: past the latch and the wake margin.
+    const late = await boundAt(5_000);
+    expect(late).not.toContain("before the attach");
+    expect(late).toContain('"DEGRADED" (reason "recent_event")');
+    expect(WAKE_LATCH_WINDOW_MS).toBe(70_000);
   });
 
   test("waitForProbeLock: idle → DEGRADED/audio_pairing → LOCKED/none, polled every 250 ms", async () => {
