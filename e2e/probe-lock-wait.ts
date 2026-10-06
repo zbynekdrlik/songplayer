@@ -1,109 +1,66 @@
 /**
- * The A/V gate waits for cg OBS's genlock to LOCK its probe before it records
- * (#221, dev.19) — the pure decision, the endpoint read, and the bounded wait.
+ * The A/V gate waits on cg OBS's genlock state before it records (#221,
+ * dev.19) — the pure decision, the endpoint read, and the bounded wait. The
+ * camera-box internals behind every field, and why each choice was made, are
+ * in `.claude/rules/av-gate-lock-wait.md`; this doc keeps what the code does.
  *
  * Why: the gate records `SP-program` through cg OBS's probe input
  * (`av-sync-probe.ts`), a DistroAV receiver attached just before the take.
- * Its audio reaches cg OBS's MIX (what StartRecord records) only once
- * camera-box's genlock audio pairing (camera-box 1367) has placed it: until
- * then the pairing WITHHOLDS the probe's packets from the mix, for up to
- * 10 s after its first packet. dev.17's take started before LOCKED and
- * opened with two dropouts (run 37423917199).
- *
- * dev.18 waits for the probe's `InputVolumeMeters` (`obs-audio-wait.ts`),
- * but that meter is tapped BEFORE the withhold: it proves DistroAV delivers
- * audio, never that the mix gets it. This wait reads cg OBS's genlock state
- * (the main session's ROZHODNUTÉ, #221 comment 6012938501; camera-box's
- * read path, comment 6012957666) and runs BEFORE the meter wait: lock →
+ * camera-box's genlock audio pairing WITHHOLDS the probe's audio from cg
+ * OBS's mix until it places it (up to 10 s after its first packet); dev.17's
+ * take started before that and opened with two dropouts (run 37423917199).
+ * The dev.18 meter wait (`obs-audio-wait.ts`) is tapped BEFORE the withhold.
+ * This wait (the main session's ROZHODNUTÉ, #221 comment 6012938501, on
+ * camera-box's read path, comment 6012957666) runs before the meter: lock →
  * meter → StartRecord ([`probeReadyForTake`]).
  *
- * The read: `GET :8899/bundle-state.json`, camera-box's health endpoint on
- * cg OBS's box (`scripts/bundle-state-server.py`). Its `genlock_lock`
- * object is parsed at request time from the NEWEST `genlock-lock-json:`
- * line in cg OBS's log (`scripts/bundle_state_genlock.py`):
- * - `state`: LOCKED | DEGRADED | UNLOCKED, `reason`: none | audio_pairing |
- *   recent_event | qpc_drift | …, as cg OBS's statusbar widget decided them;
- * - `inputs["A/V gate SP-program"]` = `{locked, connected, idle,
- *   latency_ms, underruns, relocks, late_holds, depth}`;
- * - `n_idle` (schema v6+; a line without it is refused: camera-box then
- *   defaults every `idle` to false, so no line could be proven fresh).
- * The widget writes the line on a box state, reason or media-clock CHANGE,
- * else every ~30 s (`OBSBasicStatusBar.cpp`, `GENLOCK_JSON_HEARTBEAT_TICKS`).
- * A per-input change writes nothing. The facet is omitted when cg OBS's log
- * holds no such line.
+ * The read: `GET :8899/bundle-state.json`, camera-box's health server on cg
+ * OBS's box; its `genlock_lock` object comes from the NEWEST
+ * `genlock-lock-json:` line in cg OBS's log, written on a box state / reason
+ * / media-clock change, else every ~30 s. [`parseGenlockLock`] refuses a
+ * response without the object, or a pre-v6 line (no `n_idle`).
  *
- * The condition, all at once (the four decided ones, plus the probe's live
- * NDI connection):
- * - the probe's `connected === true`. An ABSENT input (no NDI connection)
- *   is never classified idle, so it reads `idle: false`, and its FIFO lock
- *   is never cleared: a senderless probe line from before the attach would
- *   otherwise read as a GO (review round 1);
- * - the probe's `idle === false`. `idle` is true for a CONNECTED input with
- *   fewer than 60 frames over the last 60 s. An idled probe
- *   (`ndi_source_name` "") stops DistroAV's receiver thread, so it keeps
- *   `connected` and reads `idle: true` about a minute later; the probe is
- *   idle for minutes between runs. So a line with it `idle: false` was
- *   written AFTER the attach. A probe that is still `idle: false` before
- *   the attach (attached within the last minute: a run cancelled mid-take)
- *   would void this, so the gate refuses it first ([`probeAttachRefusal`]);
- * - the probe's `locked === true`: its FIFO frame-queue lock
- *   (`obs-source.c`: `genlock_locked_next_boundary_ns != 0`). It is NOT
- *   cleared when the probe is idled or starves, so it reads true as soon as
- *   the attach's frames make the probe `idle: false`;
- * - `state === "LOCKED"` and `reason === "none"`. `audio_pairing` means the
- *   probe's (or another input's) audio is PLACED but still more than 33 ms
- *   from its video, the slew after placement.
+ * The condition ([`probeLockVerdict`], all at once, compared exactly): the
+ * probe's `connected === true` (added in review round 1: an absent input is
+ * never idle and keeps its FIFO lock), `idle === false` (the line is from
+ * after the attach, given a probe idle for minutes before it), `locked ===
+ * true`, and the box `state === "LOCKED"` for `reason === "none"`. Before
+ * the attach, [`probeAttachRefusal`] refuses a probe line that could already
+ * read as a GO (a run cancelled mid-take).
  *
- * **What this facet can NOT see (review round 1, the open design question
- * on #221, comment 6014055098):** while the pairing still WITHHOLDS the
- * audio (hold mode PENDING, no video delay applied yet), libobs reads the
- * pairing offset as 0 (`obs-source.c`, "so the LOCK widget does not read
- * DEGRADED"): the box stays LOCKED/none and the probe reads locked. The
- * wait normally says GO on the LOCKED/none CHANGE line that ends the
- * attach's DEGRADED/`audio_pairing` slew, i.e. after the audio is placed
- * (camera-box's attach, 6.10.2026, local time: attach 08:49:33.1, shallow
- * latch 36.13, DEGRADED/`audio_pairing` 36.22, LOCKED/none 37.21). Two
- * residuals remain:
- * - a HEARTBEAT line written between the probe turning `idle: false` and
- *   the placement reads as a GO during the withhold (~0.7 s of the dev.17
- *   timeline; camera-box allows the withhold up to 10 s);
- * - an attach with no `audio_pairing` phase writes no change line, so the
- *   first fresh line is the next heartbeat (up to ~30 s): the 15 s bound
- *   can fail although the probe is fine;
- * - a woken probe latches `recent_event` (review round 2, #221 comment
- *   6014658984): camera-box counts an idle input's phase events
- *   (`relocks + late_holds + backward_steps`) as 0, and when the probe
- *   wakes its LIFETIME totals come back as a rise of the box's sum, which
- *   holds DEGRADED/`recent_event` for 60 s (`GenlockLockState.hpp`
- *   `genlock_input_phase_events`, `OBSBasicStatusBar.cpp`). cg OBS is
- *   long-lived, so once the probe has had one phase event every later
- *   attach can reach the 15 s bound ([`probePhaseEvents`] predicts it from
- *   the line before the attach; `backward_steps` is not in the facet).
- * The per-input truth (`audio_hold=` in the probe's `genlock-fifo audit`
- * line) is only in cg OBS's log.
+ * **It is NOT an exact view of the withhold** (the open design question on
+ * #221, comments 6014055098 and 6014658984). The wait normally says GO on
+ * the LOCKED/none change line that ends the attach's DEGRADED/`audio_pairing`
+ * slew, after the audio is placed. Residuals:
+ * 1. libobs reads the PENDING withhold as paired (offset 0) and never clears
+ *    the FIFO lock, so a HEARTBEAT written between the probe reading `idle:
+ *    false` (it can from the bind on: a reattach can reset its idle sample
+ *    ring) and the placement can read as a GO during the withhold;
+ * 2. an attach with no `audio_pairing` phase writes no change line, so the
+ *    first fresh line is the next heartbeat (≤ 30 s): the 15 s bound can fail
+ *    on a healthy probe;
+ * 3. an idle input's phase events count 0, so a woken probe's LIFETIME
+ *    relocks / late holds / backward steps come back as new events and hold
+ *    DEGRADED/`recent_event` for 60 s ([`probePhaseEvents`] reads the count
+ *    before the attach; [`explainProbeLock`] names the cause from it, never
+ *    from `recent_event_inputs`, which names camera-box's top lifetime
+ *    offender);
+ * 4. the refusal trusts the newest line before the attach: a probe whose FIFO
+ *    locked after that line (while still unlocked in it) is not refused.
  *
  * Polled every 250 ms, bounded at 15 s from the call. Each read is a FULL
- * camera-box gather (the log read, an obs-websocket read, the Windows
- * process facets; camera-box notes ~6.6 s answers, and their own `:8899`
- * watchdogs allow 10 s), so a read gets 10 s and the real cadence is the
- * gather time plus 250 ms. The log is read first, so a read sees the state
- * of its START: a read that starts within the bound counts even when it
- * answers after it, and none starts after it. Worst case: the bound plus
- * one read (`LOCK_WAIT_WORST_MS`). A read that fails (a slow gather, a
- * refused connection) is counted and retried while the bound allows.
- *
- * Fails loud, never a skip (it is a dependency of the gate): at the bound,
- * with the last `genlock_lock` seen (state, reason, the probe's fields),
- * the failed reads, the trail of changes and what the first unmet condition
- * means ([`explainProbeLock`]).
+ * camera-box gather (seconds), so a read gets 10 s, sees the state at its
+ * START, counts when it started within the bound, and none starts after it:
+ * the worst case is the bound plus one read (`LOCK_WAIT_WORST_MS`). A failed
+ * read is counted and retried while the bound allows. Fails loud, never a
+ * skip: at the bound with the last facet, the failed reads, the trail of
+ * changes and what the first unmet condition means.
  *
  * The endpoint (`CG_BUNDLE_STATE_URL`, a URL or a comma list) defaults to
- * loopback first: the gate runs ON cg OBS's box (win-resolume) and the
- * server binds 0.0.0.0, so a loopback refusal is instant, while the LAN name
- * `resolume.lan` (the name camera-box gave) can hang on DNS or a route.
- * [`resolveBundleState`] picks the first URL that answers with the facet,
- * once per run, before the gate switches any scene: none answering fails
- * the gate there, at once.
+ * loopback first (the gate runs ON cg OBS's box and the server binds
+ * 0.0.0.0), then `resolume.lan`. [`resolveBundleState`] picks the first URL
+ * that answers with the facet, once per run, before the gate switches any
+ * scene: none answering fails the gate there.
  *
  * The HTTP glue is the spec's (Playwright's `request`); these helpers are
  * unit-tested in the ubuntu mock suite (`probe-lock-wait.spec.ts`).
@@ -244,11 +201,14 @@ export function probeLockVerdict(lock: GenlockLock, probeInput: string): LockVer
  * connected, not `idle` (it received within the last minute: a run
  * cancelled mid-take) and `locked` (an idled probe keeps its FIFO lock) —
  * means no later line could be proven to come from after this run's
- * attach. Anything else is safe to attach on: a probe camera-box does not
- * list (a fresh box), an absent one (never idle, so its idle proves
- * nothing; the wait needs a connected line), an unlocked one (a
- * never-attached probe right after cg OBS starts reads connected and not
- * yet classified idle, but cannot GO without new frames).
+ * attach. Not refused: a probe camera-box does not list (a fresh box), an
+ * absent one (never idle, so its idle proves nothing; the wait needs a
+ * connected line), an unlocked one (a never-attached probe right after cg
+ * OBS starts reads connected and not yet classified idle). The last is a
+ * known residual: a probe whose FIFO locked AFTER the newest line (and was
+ * idled since) keeps `locked: true`, so a heartbeat before this run's attach
+ * could read as a GO; it needs that line to fall in the short window
+ * between the probe's idle flip and its FIFO lock.
  */
 export function probeAttachRefusal(lock: GenlockLock, probeInput: string): string | null {
   const entry = probeEntry(lock, probeInput);
@@ -308,9 +268,17 @@ function summarizeLock(lock: GenlockLock, probeInput: string): string {
 /**
  * What a facet that is not yet a GO means: the FIRST condition the attach
  * has not reached (the probe listed, connected, its heartbeat fresh, its
- * FIFO locked, then the box LOCKED for none).
+ * FIFO locked, then the box LOCKED for none). `phaseEventsBeforeAttach` is
+ * [`probePhaseEvents`] of the line read before the attach: with reason
+ * `recent_event` and a count above 0, the cause is the woken probe. It is
+ * never read from `recent_event_inputs`, which names camera-box's TOP
+ * LIFETIME offender, not the input whose count rose.
  */
-export function explainProbeLock(lock: GenlockLock, probeInput: string): string {
+export function explainProbeLock(
+  lock: GenlockLock,
+  probeInput: string,
+  phaseEventsBeforeAttach: number | null = null,
+): string {
   const entry = probeEntry(lock, probeInput);
   if (entry === null) {
     return (
@@ -334,12 +302,18 @@ export function explainProbeLock(lock: GenlockLock, probeInput: string): string 
   if (entry.locked !== true) {
     return `The probe receives, but its genlock FIFO is not locked (locked ${fmt(entry.locked)}).`;
   }
-  if (lock.reason === "recent_event" && namesInput(lock.recent_event_inputs, probeInput)) {
+  if (
+    lock.reason === "recent_event" &&
+    phaseEventsBeforeAttach !== null &&
+    phaseEventsBeforeAttach > 0
+  ) {
     return (
-      `cg OBS's genlock is ${fmt(lock.state)} for recent_event, and recent_event names the ` +
-      "probe: camera-box counts an idle input's phase events as 0, so the woken probe's " +
-      "lifetime relocks / late holds / backward steps came back as new events, which hold " +
-      "recent_event for 60 s (a camera-box wake re-baseline issue, #221 comment 6014658984)."
+      `cg OBS's genlock is ${fmt(lock.state)} for recent_event, and the probe had ` +
+      `${phaseEventsBeforeAttach} lifetime phase events before the attach (relocks + late ` +
+      "holds): camera-box counts an idle input's phase events as 0, so the woken probe's " +
+      "lifetime totals came back as new events, which hold recent_event for 60 s (a " +
+      "camera-box wake re-baseline issue, #221 comment 6014658984; recent_event_inputs " +
+      "names camera-box's top lifetime offender, not necessarily the probe)."
     );
   }
   if (lock.reason === "audio_pairing") {
@@ -353,11 +327,6 @@ export function explainProbeLock(lock: GenlockLock, probeInput: string): string 
     `cg OBS's genlock is ${fmt(lock.state)} (reason ${fmt(lock.reason)}), not "LOCKED" ` +
     '(reason "none").'
   );
-}
-
-/** Whether an offender list (`[{name, …}]`) names `probeInput`. */
-function namesInput(rows: unknown, probeInput: string): boolean {
-  return Array.isArray(rows) && rows.some((r) => isObject(r) && r.name === probeInput);
 }
 
 /** A read of one URL (`url: <failure>` on failure). The timeout is whole
@@ -437,6 +406,9 @@ export interface LockWaitOptions {
   now?: () => number;
   /** The pause; default a `setTimeout`. */
   sleep?: (ms: number) => Promise<void>;
+  /** [`probePhaseEvents`] of the line read before the attach, for the
+   *  bound's explanation ([`explainProbeLock`]); default unknown. */
+  phaseEventsBeforeAttach?: number | null;
 }
 
 /** The trail is capped; a stuck facet repeats one line, which is kept once. */
@@ -508,7 +480,7 @@ export async function waitForProbeLock(
     const why =
       last === null
         ? "No read of cg OBS's genlock state answered: is camera-box's :8899 server up?"
-        : explainProbeLock(last, probeInput);
+        : explainProbeLock(last, probeInput, opts.phaseEventsBeforeAttach ?? null);
     return new Error(
       `cg OBS's genlock did not lock the probe "${probeInput}" within ${timeoutMs} ms ` +
         `(${CONDITION}): ${report.reads} reads answered${failed}, the slowest ` +

@@ -159,6 +159,9 @@ const CG_BUNDLE_STATE_URLS = bundleStateUrls(process.env.CG_BUNDLE_STATE_URL);
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "av_sync_check.py");
 
 const MAX_AV_MS = 40;
+// The refusal's idle of the probe (#221 dev.19): bounded, so a hung
+// obs-websocket call never hides the refusal behind the test timeout.
+const PROBE_IDLE_BOUND_MS = 5_000;
 // The time budget (TEST_TIMEOUT_MS 345 s, a take's worst case 225 s, a retake
 // only before 110 s) lives in `av-sync-budget.ts`, pinned by its mock-suite
 // spec (#221 dev.19 review round 1).
@@ -565,10 +568,16 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     // loudly, before any scene switch (`probeAttachRefusal`).
     const refusal = probeAttachRefusal(lockEndpoint.lock, AV_PROBE_INPUT);
     if (refusal !== null) {
-      const idled = await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: "" }).then(
-        () => "the gate idled it",
-        (e) => `idling it failed: ${e}`,
-      );
+      // Logged first: obs-websocket-js never settles a call whose socket
+      // closes, so the idle is bounded and the refusal is never lost.
+      console.error(`A/V gate: ${refusal}`);
+      const idled = await Promise.race([
+        rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: "" }).then(
+          () => "the gate idled it",
+          (e) => `idling it failed: ${e}`,
+        ),
+        sleep(PROBE_IDLE_BOUND_MS).then(() => `idling it did not answer within ${PROBE_IDLE_BOUND_MS} ms`),
+      ]);
       throw new Error(`${refusal}; ${idled}`);
     }
     // A woken probe's lifetime phase events latch cg OBS's recent_event for
@@ -690,7 +699,9 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         const { audio } = await probeReadyForTake(
           async () => {
             assertNotTornDown("the probe lock wait");
-            const lock = await waitForProbeLock(readLock, AV_PROBE_INPUT);
+            const lock = await waitForProbeLock(readLock, AV_PROBE_INPUT, {
+              phaseEventsBeforeAttach: phaseEvents,
+            });
             console.log(
               `A/V gate take ${take}: probe locked after ${Math.round(lock.waitedMs)} ms ` +
                 `(${lock.reads} reads of ${lockEndpoint.url}, ${lock.failedReads} failed, ` +
