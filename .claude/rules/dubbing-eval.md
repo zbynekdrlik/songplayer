@@ -19,9 +19,15 @@ API; never put one on a command line, in a log or in a commit.
   Python, straight into the process env (the value goes from Python's stdout
   into the variable: never echoed, never on argv). PowerShell mangles an
   inline `python -c "..."` (`lyrics-eval-backends.md`), so `FileWrite` this
-  script once to `C:\ProgramData\SongPlayer\eval-run\read_gemini_key.py`.
-  `gemini_api_key` is a comma-separated list: it prints the first entry, or
-  the whole list with `--all`:
+  script once to `C:\ProgramData\SongPlayer\eval-run\read_gemini_key.py`,
+  after making sure that dir exists (MCP `Shell`, PowerShell):
+
+  ```powershell
+  New-Item -ItemType Directory -Force C:\ProgramData\SongPlayer\eval-run | Out-Null
+  ```
+
+  `gemini_api_key` is a comma-separated list: the script prints the first
+  entry, or the whole list with `--all`:
 
   ```python
   import sqlite3, sys

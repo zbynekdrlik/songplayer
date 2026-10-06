@@ -57,11 +57,14 @@ never shows a secret; only the database holds it in clear.
 - A masked peer secret stays with what it was stored for: a masked `key`
   only with the stored `base_url`, a masked `cf_client_secret` only with the
   stored `base_url` AND `cf_client_id`; else 400 ("send its key again" /
-  "send cf_client_secret again", naming only the peer). The PATCH has no
-  login and the router answers any origin (`CorsLayer::permissive`), so a
-  page on the LAN could otherwise re-point a peer at its own host and have
-  the node send it the stored key and Cloudflare token. A secret sent in
-  clear is taken as sent (`a_masked_peer_key_cannot_follow_a_new_base_url`).
+  "send cf_client_secret again", naming only the peer;
+  `a_masked_peer_key_cannot_follow_a_new_base_url`). The PATCH has no login
+  and the router answers any origin (`CorsLayer::permissive`), so a page on
+  the LAN could otherwise re-point a peer at its own host and have the node
+  send it the stored key and Cloudflare token. A secret sent in clear is
+  taken as sent (`peer/config_tests.rs`:
+  `unmask_takes_the_stored_secret_of_the_same_peer`,
+  `a_masked_cf_secret_stays_with_its_client_id`).
 - An exchange setting that does not hold (`node_name`, `peer_api_key`,
   `peers`: `peer::config::checked`) refuses the whole PATCH: 400 with the
   reason, and NOTHING is written. The reason names keys, peers and positions,
