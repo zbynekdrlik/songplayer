@@ -209,6 +209,27 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(v.unmet).toEqual(['state === "LOCKED"', 'reason === "none"']);
   });
 
+  test("a probe line without a live NDI connection → wait, whatever else it says", () => {
+    // Review round 1 follow-up (camera-box OBSBasicStatusBar.cpp): an ABSENT
+    // input (`connected: false`) is never classified idle, so it reads
+    // `idle: false`; its FIFO lock is never cleared either. A senderless
+    // probe line from before the attach would otherwise read as a GO.
+    const absent = probe({ connected: false });
+    const v = probeLockVerdict(lock("LOCKED", "none", absent), PROBE);
+    expect(v.go).toBe(false);
+    expect(v.unmet).toEqual(["probe connected === true"]);
+    expect(probeLockVerdict(lock("LOCKED", "none", probe({ connected: "true" })), PROBE).go).toBe(false);
+    expect(probeLockVerdict(lock("LOCKED", "none", probe({ connected: undefined })), PROBE).go).toBe(
+      false,
+    );
+    expect(explainProbeLock(lock("LOCKED", "none", absent), PROBE)).toContain(
+      "without a live NDI connection (connected false)",
+    );
+    // Its idle proves nothing, so it is not refused before the attach either:
+    // the wait itself needs a line that shows the probe connected.
+    expect(probeAttachRefusal(lock("LOCKED", "none", absent), PROBE)).toBeNull();
+  });
+
   test("the box LOCKED for another reason, or the probe unlocked → wait", () => {
     expect(probeLockVerdict(lock("LOCKED", "recent_event", probe()), PROBE).unmet).toEqual([
       'reason === "none"',
