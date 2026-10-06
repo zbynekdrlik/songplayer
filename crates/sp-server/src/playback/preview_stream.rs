@@ -3,8 +3,8 @@
 //!
 //! Sits next to the #15 JPEG [`PreviewTap`](crate::playback::preview::PreviewTap)
 //! (which stays for the card thumbnail): both are bundled into [`DecodeTaps`]
-//! and offered from the SAME decode seam in `pipeline::decode_and_send` and
-//! `pipeline_paced::run_decode_producer`. The stream tap turns each decoded
+//! and offered from the SAME decode seam, `pipeline_paced::run_decode_producer`
+//! (the only decode loop since #221 lane 3). The stream tap turns each decoded
 //! NV12 frame into a FIXED 640×360 letterboxed NV12 frame and each post-mix
 //! audio block into interleaved f32, hands both to a bounded channel, and — on
 //! the first WS viewer — spawns ONE bundled-`ffmpeg` child
@@ -262,8 +262,8 @@ pub fn block_tail_range(skip_frames: usize, block_samples: usize) -> std::ops::R
 /// ahead of the wall, skip its OLDEST frames so it ends
 /// [`ALIGN_TARGET_AHEAD_MS`] ahead (at most the whole block — a block that
 /// cannot reach the target is dropped entirely, never a negative write). The
-/// trimmed audio is lost from the PREVIEW only; the wall / NDI path never sees
-/// this code.
+/// trimmed audio is lost from the PREVIEW only; the paced output / program
+/// bus never sees this code.
 pub fn align_block(wall_frames: u64, written_frames: u64, block_frames: usize) -> AlignAction {
     let pad_frames = align_timeout(wall_frames, written_frames);
     let block_end = written_frames + pad_frames as u64 + block_frames as u64;
@@ -708,8 +708,8 @@ pub struct DecodeTaps {
 
 impl DecodeTaps {
     /// Offer one decoded frame (video + its post-mix audio) to BOTH taps in one
-    /// call, before the NDI submit / audio-emitter push consumes them. Borrows
-    /// only — nothing is moved out of the frame.
+    /// call, before the pacer takes it (#221 lane 3: the paced output feeds
+    /// only the program bus). Borrows only — nothing is moved out of the frame.
     #[inline]
     pub fn offer_frame(
         &self,

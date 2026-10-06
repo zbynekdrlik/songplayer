@@ -19,8 +19,12 @@ name: Genlock soak (receiver ground-truth)
 # SP-* stream of its own any more; pacing is the only path, the
 # `genlock_pacing` setting is gone). The `cg-obs` hop therefore sees
 # SongPlayer only through a cg OBS input of `SP-program` that is on cg OBS's
-# program (e.g. the A/V gate's probe scene "A/V gate (SP-program)"), and the
-# test playlist reaches it only while it is SongPlayer's program source.
+# program, and the test playlist reaches it only while it is SongPlayer's
+# program source. The A/V gate's probe scene "A/V gate (SP-program)" is that
+# input only while it is POINTED: the gate keeps it IDLE (`ndi_source_name`
+# "") outside its take, so for a soak point it at "<HOST> (SP-program)" by
+# hand, and set it back to "" afterwards (a pointed probe holds a receiver
+# on SP-program and masks the post-deploy dark gate, `obs-ndi-health.md`).
 # Run the soak in that state; the preflight writes the program source to the
 # job summary.
 

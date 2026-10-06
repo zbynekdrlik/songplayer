@@ -140,9 +140,13 @@ cutover" below.
   now takes would land on `SP-program`: it would show the program inside an
   `sp-*` scene (a picture loop if cg OBS shows that scene while "OBS manuál"
   is on program) and count as a receiver of `SP-program` (masking a lost
-  Presenter / strih / stream). Required at the deploy (main session / owner,
-  never the E2E): set every stale `sp-*` input's `ndi_source_name` to `""`
-  (an empty source stops a DistroAV receiver) or remove those scenes, then
+  Presenter / strih / stream). Required BEFORE the lane-3 commits reach
+  `dev` (main session / owner, never the E2E): a push to `dev` deploys AND
+  runs the post-deploy E2E at once, and both its dark gate and the A/V
+  gate's receiver-rise wait read `SP-program`'s receivers, so a stale input
+  that lands on the new port fails or masks them on the very first run. Set
+  every stale `sp-*` input's `ndi_source_name` to `""` (an empty source
+  stops a DistroAV receiver) or remove those scenes, then after the deploy
   check `GET /api/v1/program` `health.connections` = the real consumers.
 - **`SP-program`'s port moves once** (it used to be created after the
   playlist senders): its consumers (the Presenter, strih, the stream)
@@ -186,7 +190,8 @@ write — the A/V gate provisions its probe scene this way (`e2e/obs-driver.ts`)
   `ndi_source_name` to `""` first, then remove, then READ BACK. And
   **`RemoveInput` frees the name ASYNCHRONOUSLY**: reusing it at once races
   the teardown (`601 "a source already exists by that new input name"`).
-  The A/V gate therefore never removes its probe input; it re-points it.
+  The A/V gate therefore never removes its probe input; it idles it
+  (`""`) outside the take and points it at `SP-program` only for it.
 - Always log the full obs-websocket error on a failed write
   (`d.requestStatus.code` + `comment` + the step).
 
@@ -285,9 +290,14 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     (`ensureProbeScene` + `probeSteps`): the scene and the input are
     created when missing (the settings copied from `sp-slow_video`, else an
     `sp-*_video`, else any cg OBS NDI input, `pickTemplateInput`, with
-    `ndi_audio` on, `genlock_monitor` off and `ndi_bw_mode` 0 forced,
-    `PROBE_FIXED_SETTINGS`), put into the scene when it is not there, NEVER
-    removed (a receiving DistroAV input does not delete reliably, above).
+    `genlock_fifo` on (the certified receive path: DistroAV then forces
+    source-timecode sync, KEEP_ACTIVE, the highest bandwidth, normal
+    latency), `ndi_audio` on, `genlock_monitor` and `genlock_burn` off and
+    `ndi_bw_mode` 0 forced, `PROBE_FIXED_SETTINGS`), put into the scene when
+    it is not there, and an existing probe RESET on every run (its fixed
+    settings again and idle, `probeIdleSettings`: a hand edit never
+    survives a run), NEVER removed (a receiving DistroAV input does not
+    delete reliably, above).
     It is not an sp-* name, so it is never a playlist scene in SongPlayer's
     catalog, and `pickBaselineScene` never picks it. Cost: one permanent
     technical scene in the owner's cg OBS scene list (a press of it by hand
@@ -308,10 +318,16 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     when it is not on it already, and waits (≤ 30 s) until SP-program's
     `health.connections` rose above that count (`probeReceiverAttached`);
     it fails naming it, never as an unmeasurable take.
-  - `afterAll` restores cg OBS's scene FIRST (guarded against a same-scene
-    switch: cg OBS's 2 s self-fade, the #170 dropped-event state), idles
-    the probe, then restores the program scene: restoring the program to
-    "OBS manuál" while cg OBS still shows the probe would loop the picture.
+  - `afterAll` idles the probe FIRST (an idle probe shows nothing, so
+    restoring the program to "OBS manuál" can never loop the picture through
+    cg OBS), then restores the program scene through the facade (a manual
+    scene is set on cg OBS there too), then cg OBS's own scene, guarded
+    against a same-scene switch (cg OBS's 2 s self-fade, the #170
+    dropped-event state).
+  - cg OBS found ON the probe scene before the gate (a run that died
+    mid-take, `cgStuckOnProbe`) fails the body at its start, naming it:
+    there is no scene of the owner's to restore cg OBS to. `afterAll` still
+    idles the probe in that case.
   - Before lane 3 the gate recorded cg OBS's sp-* input of the baseline
     playlist's own NDI output (lane 1's stopgap, deleted with those
     outputs).
@@ -393,8 +409,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
        python AND its ffmpeg children hold the file open).
     2. It settles an in-flight start, waiting at most 10 s.
     3. It stops our recording, only while `isRecording()`.
-    4. It restores the faders, the program scene and cg OBS's own scene
-       (#221 B4 step 6). This comes BEFORE the slow file deletion, so a hook
+    4. It restores the faders, idles the probe, restores the program
+       scene, then cg OBS's own scene (#221 B4 step 6, lane 3; the probe
+       bullets above). This comes BEFORE the slow file deletion, so a hook
        that runs out of time never leaves the program on the baseline scene.
     5. It deletes recordings:
        - recordings the body never removed get a 15 s wait for their remux

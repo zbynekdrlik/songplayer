@@ -1,11 +1,11 @@
 //! Live low-res video preview tap (#15, part 2).
 //!
 //! Each playback pipeline gets a [`PreviewTap`] (a cheap `Arc` handle). The
-//! Windows decode loops (`pipeline::decode_and_send` +
-//! `pipeline_paced::decode_and_send_paced`) offer every decoded NV12 frame to
-//! the tap via [`PreviewTap::try_offer`] BEFORE the frame is submitted to NDI.
-//! The offer is engineered to NEVER touch the NDI submit / genlock / pacing
-//! path and NEVER block the decode thread:
+//! Windows decode producer (`pipeline_paced::run_decode_producer`) offers
+//! every decoded NV12 frame to the tap via [`PreviewTap::try_offer`] BEFORE
+//! the frame is handed to the pacer (and from there to the program bus, #221
+//! lane 3). The offer is engineered to NEVER touch the paced output / program
+//! bus / genlock / pacing path and NEVER block the decode thread:
 //!
 //! * With no viewer, `try_offer` is a couple of relaxed atomic loads + return
 //!   — no lock, no allocation, never blocks (a recent `GET .../preview.jpg`
