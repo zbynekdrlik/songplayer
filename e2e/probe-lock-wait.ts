@@ -34,18 +34,21 @@
  * slew, after the audio is placed. Residuals:
  * 1. libobs reads the PENDING withhold as paired (offset 0) and does not
  *    clear the FIFO lock when the probe is idled or starves, so a HEARTBEAT
- *    written between the probe reading `idle:
- *    false` (it can from the bind on: a reattach can reset its idle sample
- *    ring) and the placement can read as a GO during the withhold;
+ *    written between the probe reading `idle: false` (it can from the bind
+ *    on: a reattach can reset its idle sample ring) and the placement can
+ *    read as a GO during the withhold;
  * 2. an attach with no `audio_pairing` phase writes no change line, so the
  *    first fresh line is the next heartbeat (≤ 30 s): the 15 s bound can fail
  *    on a healthy probe;
- * 3. an idle input's phase events count 0, so a woken probe's LIFETIME
- *    relocks / late holds / backward steps come back as new events and hold
- *    DEGRADED/`recent_event` for 60 s ([`probePhaseEvents`] reads the count
- *    before the attach; [`explainProbeLock`] names the cause from it, never
- *    from `recent_event_inputs`, which names camera-box's top lifetime
- *    offender, and only within `WAKE_LATCH_WINDOW_MS` of the attach);
+ * 3. an idle or absent input's phase events count 0, so a woken probe's
+ *    LIFETIME relocks / late holds / backward steps come back as new events
+ *    and hold DEGRADED/`recent_event` for 60 s ([`probePhaseEvents`] reads
+ *    the count before the attach; [`explainProbeLock`] names the cause from
+ *    it, only while the last read started within `WAKE_LATCH_WINDOW_MS` of
+ *    the attach, never from `recent_event_inputs`, which names camera-box's
+ *    top lifetime offender). The latch is box-wide: ANY genlock input on cg
+ *    OBS that reconnects with lifetime events (e.g. after a SongPlayer
+ *    restart, which the deploy does just before the E2E) holds it too;
  * 4. the refusal trusts the newest line before the attach: a probe whose FIFO
  *    locked after that line (while still unlocked in it) is not refused.
  *
@@ -83,9 +86,10 @@ export const LOCK_READ_TIMEOUT_MS = 10_000;
 export const LOCK_WAIT_WORST_MS = LOCK_WAIT_TIMEOUT_MS + LOCK_READ_TIMEOUT_MS;
 
 /** How long after the attach a `recent_event` can still be the woken
- *  probe's: camera-box holds it 60 s after the wake, and the probe wakes
- *  within ~10 s of its attach (DistroAV connecting, then 60 frames, or at
- *  once when a reconnect resets its idle sample ring). */
+ *  probe's, measured from the bind SongPlayer saw (its receiver count rose):
+ *  camera-box holds the latch 60 s after the wake, and the probe wakes
+ *  within ~10 s of the bind (60 frames, ~2–2.4 s, or at once when the
+ *  reconnect reset its idle sample ring). */
 export const WAKE_LATCH_WINDOW_MS = 70_000;
 
 /** cg OBS's health endpoint, tried in this order (the file doc). */
@@ -417,9 +421,10 @@ export interface LockWaitOptions {
   /** [`probePhaseEvents`] of the line read before the attach, for the
    *  bound's explanation ([`explainProbeLock`]); default unknown. */
   phaseEventsBeforeAttach?: number | null;
-  /** When the probe was attached, on `now`'s clock: the wake is named only
-   *  while the last read started within [`WAKE_LATCH_WINDOW_MS`] of it.
-   *  Default unknown (no window check). */
+  /** When the probe's receiver attached (the bind SongPlayer saw), on
+   *  `now`'s clock: the wake is named only while the last answered read
+   *  started within [`WAKE_LATCH_WINDOW_MS`] of it. Default unknown (no
+   *  window check). */
   attachedAt?: number;
 }
 

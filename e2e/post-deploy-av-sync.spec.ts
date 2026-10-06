@@ -627,9 +627,6 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     assertNotTornDown("pointing the probe at SP-program");
     probePointed = true;
     await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: probeSource });
-    // On the lock wait's own clock: its explanation names the woken probe only
-    // while camera-box's 60 s recent_event latch can still hold.
-    const attachedAt = performance.now();
     if ((await rec.currentProgramScene()) !== AV_PROBE_SCENE) {
       assertNotTornDown("cg OBS's probe scene switch");
       cgSwitched = true;
@@ -643,6 +640,11 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       async () => (await getJson<ProgramView>(request, "/api/v1/program")).health.connections,
       (now) => probeReceiverAttached(receiversBefore, now),
     );
+    // The bind SongPlayer saw (within ~1.5 s), on the lock wait's own clock:
+    // its explanation names the woken probe only while camera-box's 60 s
+    // recent_event latch can still hold (DistroAV may take up to the 30 s
+    // above to bind).
+    const attachedAt = performance.now();
     const active = status.active_playlist_ids;
     const first = await getJson<HealthRow[]>(request, "/api/v1/ndi/health");
     if (!active.some((id) => isPlayingWithFrames(first, id))) {
