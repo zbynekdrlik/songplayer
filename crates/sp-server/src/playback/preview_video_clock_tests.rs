@@ -184,10 +184,10 @@ fn a_pause_writes_nothing_and_the_next_picture_fills_the_gap() {
 }
 
 #[test]
-fn a_30_fps_source_fills_exactly_25_slots_a_second_with_the_nearest_pictures() {
+fn a_30_fps_source_fills_exactly_25_slots_a_second_with_the_newest_pictures() {
     // Canvas j arrives at j × 33.333 ms. Each slot gets the newest canvas
-    // that arrived by its decision (k × 40 ms + 20 ms): the nearest picture;
-    // the ones in between are skipped (back to the pool).
+    // that arrived by its decision (k × 40 ms + 20 ms), never one from after
+    // it; the ones in between are skipped (back to the pool).
     let mut clock = VideoClock::new();
     let writes = one_second_of(&mut clock, 33_333);
     assert_eq!(writes, once_each(PICKS_30_FPS));

@@ -12,12 +12,12 @@ TCP listeners exactly like `run_child`:
   `AUDIO_CHANNEL_CAP`) per tick; each frame's top-left 160x90 block carries
   the tick in its luma, so a picture change is visible in the output
   (``--source testsrc2`` puts a detailed lavfi picture under it);
-* the video feeder is a 1:1 port of `preview_video_clock.rs` (#221 A1): a
-  40 ms slot of the MONOTONIC clock is written only with a NEW frame (the
-  newest that arrived by the slot's decision, half a slot late); with none (a
-  pause) NOTHING is written, so the encoder starves; the next frame fills the
-  slots decided before it arrived with the last one (at most 250), then takes
-  its own slot. The encoder reads it at
+* the video feeder is a 1:1 port of `preview_video_clock.rs` (#221 A1):
+  nothing is written until a NEW frame arrives; each 40 ms slot of the
+  MONOTONIC clock takes the newest frame that arrived by its decision (half a
+  slot late); during a pause NOTHING is written, so the encoder starves; the
+  next frame fills the slots decided before it arrived with the last one (at
+  most 250), then takes its own slot. The encoder reads it at
   `-framerate 25` with NO wall-clock stamp; frame 0 is the origin the audio
   aligns to;
 * the audio feeder is a 1:1 port of `spawn_audio_feeder`: preroll
@@ -234,8 +234,8 @@ def seam(sh: Shared, vq: queue.Queue, aq: queue.Queue, fps: float, switch_at: fl
 
 
 class VideoClock:
-    """1:1 port of `preview_video_clock.rs::VideoClock` (#221 A1): a 40 ms slot
-    is written only with a NEW canvas; a canvas belongs to the first slot
+    """1:1 port of `preview_video_clock.rs::VideoClock` (#221 A1): nothing is
+    written until a NEW canvas arrives; a canvas belongs to the first slot
     decided (half a slot after its time) at or after its ARRIVAL; with none (a
     pause) nothing is written, so the encoder starves and the picture holds
     pixel-exact; the next canvas first fills the slots decided before it
@@ -284,9 +284,9 @@ class VideoClock:
         if self.start_us is None:
             self.start_us = self.pending[0][1]
         slot = self.pending_slot()
-        fill = slot - self.written
-        if fill > MAX_GAP_FILL_SLOTS:
+        if self.must_restart():  # the one bound predicate, as in the Rust
             return None
+        fill = slot - self.written
         if fill > 0 and self.last is not None:
             self.written += fill
             self.repeated += fill

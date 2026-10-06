@@ -24,9 +24,9 @@
 //!   slot wins (the ones it replaced are skipped and go back to the tap's
 //!   pool), and a canvas whose slot was decided before a newer one arrived
 //!   is due and stays, however late the feeder's timer wakes (#221 review
-//!   round 3). So every slot shows the picture nearest its time, whatever
-//!   the source's rate (picture − slot: 24 fps −22..+18 ms, 30 fps
-//!   −7..+20 ms).
+//!   round 3). So every slot shows the newest picture that arrived by its
+//!   decision, never one from after it, whatever the source's rate
+//!   (picture − slot: 24 fps −22..+18 ms, 30 fps −7..+20 ms).
 //! - With no new picture nothing is written: during a pause the encoder
 //!   starves and the picture holds pixel-exact. A repeated canvas would not:
 //!   the encoder re-encodes it a little differently every few frames.
@@ -64,8 +64,9 @@ pub const PREVIEW_FPS: u64 = 25;
 /// by a test.
 pub const FRAME_US: u64 = 40_000;
 
-/// How long after its time a slot `k ≥ 1` is decided (µs): half a slot, so a
-/// slot gets the picture nearest its time, not one up to a whole slot old.
+/// How long after its time a slot `k ≥ 1` is decided (µs): half a slot. A
+/// slot then takes the newest picture up to half a slot after its time,
+/// rather than only ones from before it (up to a whole slot old).
 pub const DECIDE_LATE_US: u64 = 20_000;
 
 /// The longest gap one new picture fills (slots): 10 s of 40 ms slots, at most
