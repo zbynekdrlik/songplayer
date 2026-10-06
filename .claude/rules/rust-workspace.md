@@ -422,9 +422,14 @@ already use, so the Linux target has no unused import.
 **An engine test must not count the test pipeline's replies (release 0.68.0
 blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
 `PipelineCommand::Play` with a `PipelineEvent::Error`; on Windows the real
-pipeline has no NDI backend in CI, sends ONE Error at spawn and then only
-waits for Shutdown. So "no Play was sent" read from `event_rx` passes or fails
-by platform. Read it from engine state every Play resets instead: every Play
+pipeline runs (since #221 lane 3 it needs no NDI SDK: it feeds the program
+bus): its 30 fps idle fill and a consumer thread from spawn, a
+`HealthSnapshot` every 5 s, and a Play of a test path answered with a decode
+Error after its pre-roll. (Before lane 3, with no NDI backend in CI, it sent
+ONE Error at spawn and then only waited for Shutdown.) So "no Play was sent"
+read from `event_rx` passes or fails by platform, and an engine test's
+pipelines cost a little CPU on the Windows job: watch its duration after a
+change that adds engine tests. Read it from engine state every Play resets instead: every Play
 calls `begin_play`, which clears the song's title clock (`tests_hold.rs`).
 
 **Never key a "stale event" check on a tokio task id.** tokio documents that

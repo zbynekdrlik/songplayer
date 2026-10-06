@@ -177,7 +177,7 @@ SQLite via sqlx with manual migrations. Migration logic lives in `crates/sp-serv
 - `sp-ndi` loads `Processing.NDI.Lib.x64.dll` at runtime via `libloading`
 - Gracefully degrades if NDI is not installed
 
-**NDI network name format (the NDI source map):**
+**NDI network name format:**
 NDI sources on the network are advertised as `"MACHINE (stream)"` — the machine hostname that owns the sender (its Windows `COMPUTERNAME`, case-sensitive for DistroAV's re-match), a space, then the stream name in parentheses. When OBS adds an NDI source, its `ndi_source_name` input setting stores this full string (e.g. `"RESOLUME-SNV (SP-program)"`). #221 lane 3: SongPlayer's only NDI sender is `SP-program`; a playlist's `ndi_output_name` (`"SP-fast"`) is now only its scene label (the scene catalog, `/api/v1/ndi/health` `ndi_name`), never a sender. The NDI input "OBS manuál" reads the bare stream of its source with `playback/ndi_input_name.rs::extract_ndi_stream_name`; the NDI source map and the receiver ladder that matched cg OBS inputs by it are deleted.
 
 **Split-file audio layout (FLAC pipeline):**

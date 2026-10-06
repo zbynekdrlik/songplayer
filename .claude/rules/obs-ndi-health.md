@@ -113,9 +113,9 @@ waits (≤ 10 s) until the previous instance has released the span
 `ndi_ports_free` over `ndi_port_range(NDI_SENDERS)` = 5960..5962), then
 creates it: a restart gets the same port again. A span still busy after the
 bound is a WARN, never a blocked start. The pure pieces are Linux-tested in
-`startup_pipelines.rs`. The port moved ONCE, at the 0.71.0-dev.16 deploy that
-retired the per-playlist senders (they took the ports before it): camera-box
-was told (main session heads-up).
+`startup_pipelines.rs`. The port moves ONCE, at the 0.71.0-dev.16 deploy that
+retires the per-playlist senders (they took the ports before it): see "The
+cutover" below.
 
 - **GOTCHA — `NDIlib_send_get_source_name().p_url_address` is EMPTY for a
   local sender** (#196): a sender's own `host:port` is not readable from the
@@ -127,6 +127,29 @@ was told (main session heads-up).
   re-match after a sender re-announce is case-sensitive, so a cg OBS input
   stored with the lowercase host never re-attaches. The A/V gate's probe
   input is named from `COMPUTERNAME` for exactly this reason.
+
+## The cutover (0.71.0-dev.16) — what a deploy of lane 3 changes outside SongPlayer
+
+- **cg OBS's `sp-*` inputs lose their senders.** `SP-slow`, `SP-fast`, … no
+  longer exist, so those inputs (and their scenes) show black. DistroAV's
+  `ndi_behavior` 0 is KEEP_ACTIVE, and cg OBS's genlock build forces it on
+  every input with `genlock_fifo` on (the default,
+  `camera-box/vendor/distroav/src/ndi-source.cpp`): those inputs keep
+  receivers whether shown or not, and the genlock build reconnects a stale
+  source BY URL to its pinned port. The input pinned to the port `SP-program`
+  now takes would land on `SP-program`: it would show the program inside an
+  `sp-*` scene (a picture loop if cg OBS shows that scene while "OBS manuál"
+  is on program) and count as a receiver of `SP-program` (masking a lost
+  Presenter / strih / stream). Required at the deploy (main session / owner,
+  never the E2E): set every stale `sp-*` input's `ndi_source_name` to `""`
+  (an empty source stops a DistroAV receiver) or remove those scenes, then
+  check `GET /api/v1/program` `health.connections` = the real consumers.
+- **`SP-program`'s port moves once** (it used to be created after the
+  playlist senders): its consumers (the Presenter, strih, the stream)
+  reconnect to the pinned OLD port and must re-resolve; confirm each one
+  shows `SP-program` again after the deploy.
+- The owner's rule (5.10.2026): name every consumer still on an old source
+  and ASK him to re-point it, never assume.
 
 ## One restart per push (#196 round 2)
 
@@ -147,9 +170,11 @@ write — the A/V gate provisions its probe scene this way (`e2e/obs-driver.ts`)
   item by `GetSceneItemId {sceneName, sourceName}` (600 = not in that scene),
   or scan `GetSceneList` → `GetSceneItemList` per scene.
 - **`GetInputSettings` returns both `inputSettings` AND `inputKind`** (600 =
-  no such input). Copy an existing DistroAV input's settings to get its
-  bandwidth / sync / "disconnect when not shown" (`ndi_behavior 0`, 1 s
-  timeout) behaviour.
+  no such input). DistroAV's `ndi_behavior` 0 is KEEP_ACTIVE (the receiver
+  runs whether the input is shown or not), `ndi_behavior_timeout` 1 is "keep
+  content" (not 1 second), and cg OBS's genlock build forces KEEP_ACTIVE on
+  every `genlock_fifo` input. Only an EMPTY `ndi_source_name` stops a
+  receiver.
 - **`CreateInput` adds the scene item at the TOP of the scene** and returns
   its `sceneItemId`. Fit it with `SetSceneItemTransform` (bounds = the
   `GetVideoSettings` base size, `OBS_BOUNDS_SCALE_INNER`). A round-tripped
@@ -256,30 +281,37 @@ the output every consumer takes, through cg OBS's own probe scene (below).
   the gate's own PROBE SCENE (`e2e/av-sync-probe.ts`, design question
   6004634711 option 1):
   - `AV_PROBE_SCENE` "A/V gate (SP-program)" holds ONE DistroAV input,
-    `AV_PROBE_INPUT` "A/V gate SP-program", receiving
-    `"<COMPUTERNAME> (SP-program)"` (else the host an existing cg OBS NDI
-    input names). The gate provisions it itself (`ensureProbeScene` +
-    `probeSteps`): the scene and the input are created when missing (the
-    input's settings copied from an existing cg OBS NDI input, so it
-    disconnects while not shown and holds no receiver on SP-program outside
-    the take), put into the scene and re-pointed when they differ, NEVER
+    `AV_PROBE_INPUT` "A/V gate SP-program". The gate provisions it itself
+    (`ensureProbeScene` + `probeSteps`): the scene and the input are
+    created when missing (the settings copied from `sp-slow_video`, else an
+    `sp-*_video`, else any cg OBS NDI input, `pickTemplateInput`, with
+    `ndi_audio` on, `genlock_monitor` off and `ndi_bw_mode` 0 forced,
+    `PROBE_FIXED_SETTINGS`), put into the scene when it is not there, NEVER
     removed (a receiving DistroAV input does not delete reliably, above).
     It is not an sp-* name, so it is never a playlist scene in SongPlayer's
     catalog, and `pickBaselineScene` never picks it. Cost: one permanent
     technical scene in the owner's cg OBS scene list (a press of it by hand
-    while "OBS manuál" is on program would loop the picture).
+    during a take while "OBS manuál" is on program would loop the picture).
+  - **The probe is IDLE outside the take** (`ndi_source_name` `""`, set at
+    provisioning — also after a run that died mid-take — and in
+    `afterAll`): DistroAV keeps a receiver whether the input is shown or not
+    (KEEP_ACTIVE, above), so a probe left pointed at SP-program would hold
+    a receiver on it forever and the dark gate above could no longer see the
+    real consumers go.
   - The take runs only while `/api/v1/program.source` is the baseline
     playlist (`programCarriesBaseline`): with "OBS manuál" (-1) on program
     cg OBS would record itself through SP-program.
-  - cg OBS is switched to the probe scene only when it is not on it
-    already, then the gate waits (≤ 30 s) until SP-program's
-    `health.connections` rose above the count before the switch (cg OBS's
-    receiver attached; `probeReceiverAttached`) and fails naming it, never
-    as an unmeasurable take.
+  - The gate reads SP-program's receivers with the probe idle, once two
+    reads ~1.5 s apart agree (`receiversSettled`, ≤ ~15 s), then points the
+    probe at `"<COMPUTERNAME> (SP-program)"` (else the host the template
+    input names, `programSourceName`), switches cg OBS to the probe scene
+    when it is not on it already, and waits (≤ 30 s) until SP-program's
+    `health.connections` rose above that count (`probeReceiverAttached`);
+    it fails naming it, never as an unmeasurable take.
   - `afterAll` restores cg OBS's scene FIRST (guarded against a same-scene
-    switch: cg OBS's 2 s self-fade, the #170 dropped-event state), then the
-    program scene: restoring the program to "OBS manuál" while cg OBS still
-    shows the probe would loop the picture.
+    switch: cg OBS's 2 s self-fade, the #170 dropped-event state), idles
+    the probe, then restores the program scene: restoring the program to
+    "OBS manuál" while cg OBS still shows the probe would loop the picture.
   - Before lane 3 the gate recorded cg OBS's sp-* input of the baseline
     playlist's own NDI output (lane 1's stopgap, deleted with those
     outputs).
