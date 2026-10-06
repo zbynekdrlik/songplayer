@@ -252,3 +252,15 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   Some(&mut tex))` works because `Some(&x)` coerces into the
   `Option<*const T>` the binding asks for; an interface goes into a
   `Param<IUnknown>` as `&iface`.
+
+## A box without the VP9 / AV1 Video Extensions opens no YouTube file (#229, 6.10.2026)
+
+Media Foundation decodes VP9 and AV1 only through the Store's VP9 / AV1
+Video Extensions. A Windows 11 IoT LTSC box (resolume-pp) has neither. On it,
+every cached video fails to open in both modes: the hardware open falls back,
+then software fails with "No video: SetCurrentMediaType failed: No suitable
+transform". Before blaming the reader, check `Get-AppxPackage -AllUsers` for
+`Microsoft.VP9VideoExtensions` / `Microsoft.AV1VideoExtension`. SNV runs VP9
+1.2.20.0 and AV1 2.0.35.0. `win-resolume-ops` "PP site" has the winget
+install.
+

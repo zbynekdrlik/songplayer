@@ -50,7 +50,7 @@ Path-scoped rules in `.claude/rules/` auto-load on their `paths:`; skills in
 | Lyrics pipeline | `lyrics-pipeline` | lyrics processing, alignment providers, pipeline versioning, translation, Gemini/CLIProxy, reprocess |
 | Wall verification | `lyrics-verify` | /lyrics-verify, wall-verify loop, catalog songs, sp-live setlist, quarantine |
 | Lyrics eval | `lyrics-eval` | evaluating ASR/alignment backends, /lyrics-eval command, eval harness |
-| win-resolume ops | `win-resolume-ops` | deployments, CI monitoring, Resolume diagnostics, OBS, runner health |
+| win-resolume ops | `win-resolume-ops` | deployments, CI monitoring, Resolume diagnostics, OBS, runner health, the PP site (resolume-pp) |
 | CI quality | `ci-discipline` | writing CI jobs, reviewing PRs, test design, quality gates |
 
 ## Project Overview
