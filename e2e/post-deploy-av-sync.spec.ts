@@ -34,6 +34,15 @@
  * the input is shown or not — and is pointed at `SP-program` only once
  * `SP-program` carries the baseline playlist (never "OBS manuál": cg OBS
  * would record itself); the take waits until SP-program's receivers rose.
+ * #221 dev.18: every StartRecord then waits until the probe's AUDIO flows
+ * (`obs-audio-wait.ts`: its InputVolumeMeters input peak above -60 dBFS for
+ * 1 s in a row, bounded at 20 s). A freshly attached DistroAV receiver
+ * delivers its picture at once, and its audio reaches the mix with gaps
+ * until camera-box's genlock audio pairing locks (~4 s after the bind). A
+ * take started before that opened with two dropouts (dev.17, run
+ * 37423917199). The meter is tapped BEFORE the pairing's withhold, so the
+ * wait proves DistroAV delivers audio and adds its 1 s; it does not observe
+ * the lock (`obs-audio-wait.ts`). The dropout check is unchanged.
  * afterAll idles the probe first (an idle probe shows nothing, so restoring
  * the program to "OBS manuál" can never loop the picture), restores the
  * program scene, then cg OBS's own scene only when the program restore did
@@ -90,7 +99,8 @@ import {
   programSourceName,
   receiversSettled,
 } from "./av-sync-probe";
-import { keepRecording, keepText, type Evidence } from "./av-sync-evidence";
+import { EVIDENCE_COPY_MS, keepRecording, keepText, type Evidence } from "./av-sync-evidence";
+import { AUDIO_WAIT_TIMEOUT_MS } from "./obs-audio-wait";
 import {
   classifyAvSyncRun,
   isPlayingWithFrames,
@@ -117,11 +127,27 @@ const MAX_AV_MS = 40;
 const RECORD_MS = 20_000;
 const ANALYSIS_TIMEOUT_MS = 60_000; // ~5-10 s on the box
 const MAX_TAKES = 3;
-const TEST_TIMEOUT_MS = 300_000;
+// #221 dev.18: 300 → 320 s, by the probe audio wait's bound, so a take keeps
+// the retake room it had before the wait (RETAKE_BEFORE_MS stays 110 s).
+const TEST_TIMEOUT_MS = 320_000;
+// The worst case of one take: skip 15 + play 30 + the probe audio wait
+// (AUDIO_WAIT_TIMEOUT_MS, 20) + record (RECORD_MS, 20) + stop 10 + analysis
+// (ANALYSIS_TIMEOUT_MS, 60) + cleanup 35 + evidence copy 2 x
+// EVIDENCE_COPY_MS (5) = 200 s.
+const WORST_TAKE_MS =
+  15_000 +
+  30_000 +
+  AUDIO_WAIT_TIMEOUT_MS +
+  RECORD_MS +
+  10_000 +
+  ANALYSIS_TIMEOUT_MS +
+  35_000 +
+  2 * EVIDENCE_COPY_MS;
 // A retake starts only while this much of the budget has been used. A full
-// worst-case take (skip 15 + play 30 + record 20 + stop 10 + analysis 60 +
-// cleanup 35 + evidence copy 2 x 5 s) then still fits within TEST_TIMEOUT_MS.
-const RETAKE_BEFORE_MS = 110_000;
+// worst-case take then still fits, with 10 s for the calls not counted above
+// (the audio wait's two Reidentify round trips, the StartRecord pre-check,
+// the /mix and /videos reads, spawning the analysis).
+const RETAKE_BEFORE_MS = TEST_TIMEOUT_MS - WORST_TAKE_MS - 10_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -596,7 +622,21 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       let lastTakeNote = "";
       const undeleted: string[] = [];
       for (let take = 1; take <= MAX_TAKES; take++) {
-        // 3. Which video is playing, and its ORIGINAL sidecars.
+        // 3. The probe's AUDIO must flow first (#221 dev.18, the file doc): a
+        // take started before the probe's audio reaches cg OBS's mix opens
+        // with dropouts that are not SongPlayer's. The meter proves DistroAV
+        // delivers audio, not camera-box's pairing lock (the open question on
+        // #221). Waited before the video is read, so the song read is the one
+        // playing at StartRecord.
+        assertNotTornDown("the probe audio wait");
+        const audio = await rec.waitForInputAudio(AV_PROBE_INPUT);
+        console.log(
+          `A/V gate take ${take}: probe audio flowing after ${Math.round(audio.waitedMs)} ms ` +
+            `(${audio.withInput}/${audio.events} meter events with the probe, ` +
+            `loudest ${audio.loudestDbfs.toFixed(1)} dBFS)`,
+        );
+
+        // Which video is playing, and its ORIGINAL sidecars.
         const videoId = await currentVideo();
         expect(videoId, `/api/v1/mix now_playing must name playlist ${playlistId}'s video`).not.toBeNull();
         const videos = await getJson<Array<{ id: number; youtube_id: string; title: string }>>(

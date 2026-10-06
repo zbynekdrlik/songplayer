@@ -61,7 +61,14 @@ Rules for every post-deploy spec:
   worker cannot delete the symlink afterwards (the worktree guard resolves
   it into the main checkout and refuses); `.gitignore` ignores
   `e2e/node_modules` without a trailing slash, so the link is never
-  committed and goes with the worktree.
+  committed and goes with the worktree. Or run `npm ci` in the worktree's
+  `e2e/` (a real, ignored directory; it needs no cleanup). Playwright only
+  strips types, so for a STRICT type check install `typescript` and
+  `@types/node` into a scratch dir and run its `tsc --noEmit --strict
+  --esModuleInterop --skipLibCheck --target es2022 --module esnext
+  --moduleResolution bundler --typeRoots <scratch>/node_modules/@types
+  --types node <files>` from `e2e/` (#221 dev.18). The known noise is the
+  untyped `ws` in `obs-driver-protocol.spec.ts`.
 - **A post-deploy check's decision logic is a pure helper with a mock-suite
   unit spec** (`e2e/cache-layout.ts` for the FLAC layout, #136;
   `av-sync-gate.ts`, `obs-scene-wait.ts`). The post-deploy spec only reads

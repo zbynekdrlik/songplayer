@@ -12,7 +12,10 @@
  * for the A/V gate: its recording and profile requests, and (#221 lane 3) the
  * gate's probe scene — provisioning it (`av-sync-probe.ts`: the scene, its one
  * DistroAV receiver of `SP-program`) and putting cg OBS on it for the take and
- * back, each switch only when cg OBS is on another scene.
+ * back, each switch only when cg OBS is on another scene — and (#221 dev.18)
+ * the wait for the probe's audio before every take (`waitForInputAudio`, the
+ * only user of the high-volume `InputVolumeMeters`, subscribed for the wait
+ * alone).
  */
 
 // The bare import: in Node it resolves to the MSGPACK build, which offers
@@ -21,7 +24,13 @@
 // OBS always did, so both drivers go through it; never import
 // "obs-websocket-js/json" here, it would test a path Companion never takes
 // (obs-driver-protocol.spec.ts).
-import OBSWebSocket from "obs-websocket-js";
+import OBSWebSocket, { EventSubscription } from "obs-websocket-js";
+import {
+  meterInputs,
+  waitForInputAudio,
+  type AudioWaitOptions,
+  type AudioWaitReport,
+} from "./obs-audio-wait";
 import { waitForPreviewApplied, waitForSceneSwitchApplied } from "./obs-scene-wait";
 
 export class ObsDriver {
@@ -54,7 +63,8 @@ export class ObsDriver {
 
   async listScenes(): Promise<string[]> {
     const r = await this.obs.call("GetSceneList");
-    return (r as { scenes: { sceneName: string }[] }).scenes.map((s) => s.sceneName);
+    // obs-websocket-js types `scenes` as plain JSON objects.
+    return (r as unknown as { scenes: { sceneName: string }[] }).scenes.map((s) => s.sceneName);
   }
 
   private async studioModeEnabled(): Promise<boolean> {
@@ -278,6 +288,60 @@ export class ObsDriver {
         boundsHeight: v.baseHeight,
       },
     });
+  }
+
+  /**
+   * #221 dev.18: wait until `inputName`'s audio flows — its input peak above
+   * the floor for 1 s in a row, bounded (`obs-audio-wait.ts`; the A/V gate
+   * calls it on the probe before every StartRecord).
+   *
+   * `InputVolumeMeters` is a HIGH-VOLUME event (every active input, every
+   * 50 ms) that obs-websocket sends only to a session that asks for it, so
+   * this session asks with a `Reidentify` for the wait alone and drops it
+   * again after, whatever the outcome. The drop names the default `All`
+   * explicitly: a `Reidentify` without `eventSubscriptions` keeps the current
+   * ones. A connect never asks for it (`obs-driver-protocol.spec.ts`). A
+   * connection that closes mid-wait ends it at once, naming the close, not
+   * after the bound as "no event".
+   */
+  async waitForInputAudio(
+    inputName: string,
+    opts: AudioWaitOptions = {},
+  ): Promise<AudioWaitReport> {
+    await this.obs.reidentify({
+      eventSubscriptions: EventSubscription.All | EventSubscription.InputVolumeMeters,
+    });
+    let report: AudioWaitReport;
+    try {
+      report = await waitForInputAudio(
+        (onMeters, onClosed) => {
+          const meters = (data: { inputs: unknown }) => onMeters(meterInputs(data.inputs));
+          const closed = (e: { code?: number; message?: string }) =>
+            onClosed(`code ${e.code ?? "?"}${e.message ? `, ${e.message}` : ""}`);
+          this.obs.on("InputVolumeMeters", meters);
+          this.obs.on("ConnectionClosed", closed);
+          return () => {
+            this.obs.off("InputVolumeMeters", meters);
+            this.obs.off("ConnectionClosed", closed);
+          };
+        },
+        inputName,
+        opts,
+      );
+    } catch (e) {
+      // Keep the wait's own error; a failed drop is only logged here.
+      await this.dropVolumeMeters().catch((d) =>
+        console.warn(`OBS: could not drop InputVolumeMeters after a failed audio wait: ${d}`),
+      );
+      throw e;
+    }
+    await this.dropVolumeMeters();
+    return report;
+  }
+
+  /** Back to the default subscriptions (`All`, no high-volume event). */
+  private async dropVolumeMeters(): Promise<void> {
+    await this.obs.reidentify({ eventSubscriptions: EventSubscription.All });
   }
 
   async disconnect(): Promise<void> {

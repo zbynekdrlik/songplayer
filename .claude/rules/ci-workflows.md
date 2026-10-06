@@ -345,8 +345,9 @@ in full (`gh run rerun <id>`, not `--failed`).
 
 **#221 L3 (read this first).** The E2E scene driver no longer talks to cg
 OBS: `ObsDriver` connects to SongPlayer's obs-websocket facade
-(`FACADE_WS_URL`, :4456; cg OBS :4455 only for the A/V gate's recording and
-profile read). The contract is in `remote-control.md` ("Program feedback")
+(`FACADE_WS_URL`, :4456). cg OBS :4455 serves only the A/V gate: its
+recording and profile read, its probe scene (#221 lane 3) and the wait for
+the probe's audio meter (#221 dev.18; see `obs-ndi-health.md`). The contract is in `remote-control.md` ("Program feedback")
 and the driver's own doc:
 - the transition is SP-program's (the Settings fade, e.g. 300 ms, or a Cut
   that ends at once), announced by SongPlayer's `SceneTransitionStarted` /
