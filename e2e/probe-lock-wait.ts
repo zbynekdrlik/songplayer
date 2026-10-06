@@ -47,14 +47,15 @@
  *    [`explainProbeLock`] only while the last ANSWERED read started within
  *    `WAKE_LATCH_WINDOW_MS` of `attachedAt`, the bind SongPlayer saw; never
  *    from `recent_event_inputs`, which names camera-box's top lifetime
- *    offender). The latch is box-wide: ANY genlock input on cg OBS that
- *    wakes or reconnects with lifetime events holds it too (e.g. after a
- *    SongPlayer restart, if cg OBS has another genlock input on
- *    `SP-program`, SongPlayer's only NDI sender). The input that latched is
- *    the one that turned connected and live with events between the line
- *    before the attach (the spec logs its inputs, [`summarizeInputs`]) and
- *    the line at the bound (the bound's error lists them) — never "the one
- *    with the most events";
+ *    offender). The latch is box-wide: ANY rise of cg OBS's phase-event sum
+ *    holds it — any genlock input that wakes or reconnects with lifetime
+ *    events (e.g. after a SongPlayer restart, if cg OBS has another genlock
+ *    input on `SP-program`, SongPlayer's only NDI sender), or a real relock
+ *    or late hold on a live input. The inputs of the line before the attach
+ *    (the spec logs them, [`summarizeInputs`]) and of the line at the bound
+ *    (the bound's error lists them, with how long after the bind its read
+ *    started) are candidates, never proof: they carry no times, and the
+ *    input with the most lifetime events is not evidence;
  * 4. the refusal trusts the newest line before the attach: a probe whose FIFO
  *    locked after that line (while still unlocked in it) is not refused.
  *
@@ -264,10 +265,11 @@ export function probePhaseEvents(lock: GenlockLock, probeInput: string): number 
  * Every genlock input of the facet in one line: its name, `connected`,
  * `idle`, `locked` and lifetime `relocks + late_holds` (`?` when not
  * counts); "none" without inputs. The spec logs it for the line before the
- * attach, and the bound's error for the last answered line: the box-wide
- * `recent_event` latch comes from an input that turned connected and live
- * with events between the two (compare them; the input with the most
- * lifetime events is NOT the cause, camera-box's own top-offender trap).
+ * attach, and the bound's error for the last answered line: candidates for
+ * the box-wide `recent_event` latch (an input that woke or reconnected, or a
+ * real relock / late hold), never proof — the lists carry no times, and the
+ * input with the most lifetime events is not evidence (camera-box's own
+ * top-offender trap).
  */
 export function summarizeInputs(lock: GenlockLock): string {
   const inputs = lock.inputs;
@@ -371,10 +373,12 @@ export function explainProbeLock(
   }
   const boxWide =
     lock.reason === "recent_event"
-      ? " recent_event is box-wide: any genlock input that woke or reconnected within the " +
-        "last 60 s with lifetime phase events latches it; the cause is the input that turned " +
-        "connected and live between the inputs the gate logged ahead of the attach and the " +
-        "inputs at the bound, never the one with the most events."
+      ? " recent_event is box-wide: ANY rise of cg OBS's phase-event sum in the last 60 s " +
+        "latches it — a genlock input that woke or reconnected with lifetime events (events=0 " +
+        "in a list does not rule one out: backward steps are not shown), or a real relock or " +
+        "late hold on a live input. The inputs the gate logged ahead of the attach and the " +
+        "inputs at the bound are candidates only (they carry no times, and the first list is " +
+        "older than the attach); the input with the most lifetime events is not evidence."
       : "";
   return (
     `cg OBS's genlock is ${fmt(lock.state)} (reason ${fmt(lock.reason)}), not "LOCKED" ` +
@@ -543,10 +547,15 @@ export async function waitForProbeLock(
   function boundError(): Error {
     const failed =
       report.failedReads > 0 ? `, ${report.failedReads} failed (the last: ${lastFailure})` : "";
+    const sinceBind =
+      opts.attachedAt === undefined
+        ? ""
+        : ` (the last answered read started ${Math.round(lastAt - opts.attachedAt)} ms after the bind)`;
     const lastText =
       last === null
         ? "none"
-        : `${describeGenlockLock(last, probeInput)}; inputs at the bound: ${summarizeInputs(last)}`;
+        : `${describeGenlockLock(last, probeInput)}; inputs at the bound${sinceBind}: ` +
+          summarizeInputs(last);
     const why =
       last === null
         ? "No read of cg OBS's genlock state answered: is camera-box's :8899 server up?"

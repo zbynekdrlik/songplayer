@@ -23,7 +23,10 @@
 #     a single preceding `test(#N)` commit (the test is the regression
 #     guard, the fix can land in multiple commits if needed).
 #   * A `[no-test: <reason>]` marker anywhere in a fix commit's full body is
-#     a LOGGED bypass (per regression-test-first.md) — not a violation.
+#     a LOGGED bypass (per regression-test-first.md) — not a violation —
+#     except a `[no-test: <sha> …]` whose sha resolves to ANOTHER commit:
+#     that is only a retroactive declaration (below), never the declaring
+#     commit's own bypass.
 #   * Any `test(<scope>)` commit whose subject mentions `(#N)` anywhere (e.g.
 #     `test(config): RED — … (#145)`) counts as the RED commit for N, not
 #     only the strict `test(#N)` leading form.
