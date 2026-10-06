@@ -132,6 +132,15 @@ fn a_base_url_is_http_or_https_with_a_host() {
     assert!(!valid_base_url("https://ho st"));
 }
 
+/// A `user:password@` in a peer's base_url would show in clear in the GET's
+/// `peers` and in `Debug` (only the key and the Cloudflare secret are masked).
+#[test]
+fn a_base_url_never_carries_a_password() {
+    assert!(!valid_base_url("https://u:p@host"));
+    assert!(!valid_base_url("http://user@10.77.9.201:8920"));
+    assert!(valid_base_url("https://sp.newlevel.media"));
+}
+
 #[test]
 fn every_peer_list_rule_is_enforced() {
     let own = Some("pp");
