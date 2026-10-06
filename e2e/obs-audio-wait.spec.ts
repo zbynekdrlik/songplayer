@@ -4,10 +4,15 @@
  * never touch `page`, so they need no browser and no box.
  *
  * The gate's first take on dev.17 (run 37423917199) opened with two audio
- * dropouts: a freshly attached DistroAV receiver delivers its picture first
- * and its audio only once camera-box's genlock audio pairing locks (~5 s), and
- * StartRecord came ~4 s after the attach. The gate now waits until the probe
- * input's obs-websocket `InputVolumeMeters` reading is non-silent for 1 s.
+ * dropouts. A freshly attached DistroAV receiver delivers its picture at
+ * once, and its audio reaches cg OBS's MIX with gaps until camera-box's
+ * genlock audio pairing locks (LOCKED 4.1 s after the bind). The take
+ * started 2.6 s after the bind. The gate now waits until the probe input's
+ * obs-websocket `InputVolumeMeters` reading is non-silent for 1 s.
+ *
+ * That meter is tapped BEFORE the pairing's withhold: it shows that DistroAV
+ * delivers audio, never that the mix gets it (`obs-audio-wait.ts`). So a
+ * silent meter is never the pairing's fault.
  */
 
 import { test, expect } from "@playwright/test";
@@ -255,7 +260,10 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
     expect(msg).toContain("last input peaks [-66.0, -66.0] dBFS");
     expect(msg).toContain("loudest -12.0 dBFS");
     expect(msg).toContain("longest run above the floor 300 ms");
-    expect(msg, "an active, silent probe: the warm-up explanation").toContain("audio pairing");
+    expect(msg, "an active, silent probe: DistroAV delivers no audio").toContain(
+      "DistroAV delivers no audio",
+    );
+    expect(msg, "the pairing never silences the meter").not.toContain("pairing locks");
     expect(meters.listening, "unsubscribed at the bound").toBe(false);
     expect(meters.unsubscribes).toBe(1);
   });
@@ -285,7 +293,11 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
     expect(explainAudioWait(seen(400, 0))).toContain("never active");
     expect(explainAudioWait(seen(400, 0))).toContain("probe scene");
     // The probe metered but silent: the receiver's audio never held.
-    expect(explainAudioWait(seen(400, 400))).toContain("audio pairing");
+    // The probe metered but silent: DistroAV delivers it no audio. camera-box's
+    // pairing withholds packets from the MIX, after the meter's tap, so it is
+    // never the cause of a silent meter (review round 2).
+    expect(explainAudioWait(seen(400, 400))).toContain("DistroAV delivers no audio");
+    expect(explainAudioWait(seen(400, 400))).not.toContain("pairing locks");
     expect(explainAudioWait(seen(400, 1))).not.toContain("never active");
   });
 
