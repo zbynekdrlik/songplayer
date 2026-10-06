@@ -320,8 +320,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     when it is not on it already, and waits (≤ 30 s) until SP-program's
     `health.connections` rose above that count (`probeReceiverAttached`);
     it fails naming it, never as an unmeasurable take.
-  - **A freshly attached probe delivers VIDEO before AUDIO: wait for its
-    audio meter before recording (#221 dev.18).** The receiver count rises
+  - **A freshly attached probe's VIDEO reaches the recording before its
+    AUDIO: wait for its audio meter before recording (#221 dev.18) — and
+    know what that meter can see (below).** The receiver count rises
     as soon as DistroAV connects, and the picture flows at once. The audio
     reaches cg OBS's MIX (what StartRecord records) only with gaps until
     camera-box's genlock audio pairing (camera-box 1367) has fixed the
@@ -361,9 +362,16 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       - no event at all: the subscription did not apply;
       - events, but never the probe: the probe is not active (cg OBS is not
         on the probe scene, or its item is hidden);
-      - the probe metered but silent: DistroAV delivers it no audio
-        (SP-program carries no sound, or the probe's `ndi_audio` is off).
-        Never the pairing: see "Blind to the withhold" below.
+      - the probe above the floor at times, but never for the hold
+        (review round 3): DistroAV delivers it with gaps, or the meter
+        events stopped (more than 500 ms apart, or the probe left the
+        program feed). Never "no audio" next to readings that show audio;
+      - the probe metered, never above the floor: DistroAV delivers it no
+        audio (SP-program carries no sound, or the probe's `ndi_audio` is
+        off).
+
+      Neither case is ever the pairing's (see "Blind to the withhold"
+      below).
 
       A connection that closes mid-wait ends it at once, naming the close
       (the driver listens to `ConnectionClosed`). It never sits out the
@@ -449,7 +457,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     `RETAKE_BEFORE_MS` = `TEST_TIMEOUT_MS` − `WORST_TAKE_MS` − 10 s.
     - `WORST_TAKE_MS` is 200 s. It is summed from the take's own bounds,
       including the 20 s audio wait and copying the evidence.
-    - The 10 s covers the calls the sum does not count.
+    - The 10 s covers the calls the sum does not count: the audio wait's
+      two `Reidentify` round trips, the StartRecord pre-check, the `/mix`
+      and `/videos` reads, and spawning the analysis.
     - #221 dev.18 raised `TEST_TIMEOUT_MS` from 300 s to 320 s, by the
       audio wait's bound, so a run keeps the retake room it had before.
     The run is classified by `classifyAvSyncRun`: the stdout JSON and the exit
