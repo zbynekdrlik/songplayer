@@ -124,12 +124,16 @@ lock, so a senderless probe line would read as a GO).
    (e.g. after a SongPlayer restart, IF cg OBS has another genlock input on
    `SP-program`, SongPlayer's only NDI sender). The gate logs every input of
    the line read before the attach and of the last line at the bound
-   (`summarizeInputs`: connected, idle, locked, relocks + late holds): the
-   input that latched is the one that turned connected and live with events
-   between the two lists — never "the one with the most events" (camera-box's
-   own top-offender trap). A camera-box re-baseline fix (a woken or
-   reconnected input's totals are not new events) is the cure, not a longer
-   bound.
+   (`summarizeInputs`: connected, idle, locked, relocks + late holds; the
+   bound also says how long after the bind its last read started). They are
+   CANDIDATES, never proof: any rise of the sum latches it — a woken or
+   reconnected input (events=0 does not rule one out: backward steps are not
+   in the facet) or a real relock / late hold on a live input; the lists
+   carry no times, the first is older than the attach, and past the wake
+   window the probe itself always "turned live" between them. The input with
+   the most lifetime events is not evidence (camera-box's own top-offender
+   trap). A camera-box re-baseline fix (a woken or reconnected input's totals
+   are not new events) is the cure, not a longer bound.
 4. **The refusal trusts the newest line before the attach:** a probe whose
    FIFO locked AFTER that line (unlocked in it) and was idled since keeps
    `locked: true`, so a heartbeat before this run's attach could read as a

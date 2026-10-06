@@ -232,9 +232,15 @@ carries one `[no-test: <sha7> <reason>]` per covered commit; the script prints
 to ANOTHER commit is only ever that declaration: it is never the declaring
 commit's own bypass (#221 dev.19, self-test fixture 10), so a `fix(#N):` that
 carries one still needs its own test(#N) or its own sha-less marker. Never
-QUOTE the marker syntax (bracket, `no-test:`, text, bracket) in a fix commit's
-body while describing it: the script reads any such span as that commit's own
-bypass (169ab83a, #221 dev.19, is logged "bypass" though its RED is fce7efcd).
+QUOTE the marker syntax (bracket, `no-test:`, text, bracket) in ANY commit
+message while describing it: this script reads such a span in a fix commit as
+its own bypass (169ab83a, #221 dev.19, is logged "bypass" though its RED is
+fce7efcd), and airuleset's pre-push gate (`gates/pushbypass.py`) reads it in
+ANY commit of the pushed range as that commit's own bypass — logged to the
+owner's bypass audit (`no-test-skips.log`), retroactive declarations
+included (it has no own-vs-retro distinction). #221 dev.19's lane carries
+the shape in fce7efcd, 5ef970aa, 169ab83a and cc033a43: expect those audit
+entries when it is pushed; every fix there has its RED test.
 Only the leading `fix(#N):` form is gated;
 scope-only subjects (`fix(stems): … (#14)`) are not. Run
 `bash scripts/check-red-green-order.sh origin/main..HEAD` before opening a
