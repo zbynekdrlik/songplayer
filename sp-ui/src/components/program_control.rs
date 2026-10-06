@@ -18,10 +18,19 @@
 //! source), and the progress of a running fade (`transition` on
 //! `GET /api/v1/program`).
 //!
+//! #221 ROZHODNUTÉ 6022247729: every consumer takes `SP-program`, so the
+//! server refuses (409) a cut to a playlist that is inactive or whose scene
+//! catalog names no scene — it would black them all. `GET /api/v1/program`
+//! lists those playlists (`cut_refused`, the server's own rule, polled with
+//! the rest), and their buttons are DISABLED with a tooltip saying why
+//! (`cut_title`). Before the first poll nothing is disabled; the server
+//! still refuses.
+//!
 //! Testids (set here, never by a caller): `program-control`, `program-source`
 //! (the "Na programe: …" line), `program-transition` (the "Prechod: …" line),
 //! `program-cut` (one button per source, with `data-playlist-id` (`-1` for the
-//! input) + `aria-pressed` on the on-program one), `program-error`.
+//! input) + `aria-pressed` on the on-program one, `disabled` + the reason's
+//! `title` on a refused playlist), `program-error`.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -44,6 +53,46 @@ pub struct ProgramState {
     /// #215: the transition the next cut uses + the running window.
     #[serde(default)]
     pub transition: ProgramTransition,
+    /// #221: the playlists a cut refuses now, with the reason; `None` before
+    /// the first poll and when the server could not read them.
+    #[serde(default)]
+    pub cut_refused: Option<Vec<CutRefused>>,
+}
+
+/// One entry of `GET /api/v1/program` → `cut_refused`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct CutRefused {
+    #[serde(default)]
+    pub source: i64,
+    /// `playlist_inactive` or `no_scene`.
+    #[serde(default)]
+    pub reason: String,
+}
+
+impl ProgramState {
+    /// Why the server refuses a cut to playlist `pid` now, `None` when it
+    /// does not.
+    pub fn refusal(&self, pid: i64) -> Option<&str> {
+        self.cut_refused
+            .as_deref()?
+            .iter()
+            .find(|r| r.source == pid)
+            .map(|r| r.reason.as_str())
+    }
+}
+
+/// A playlist's cut button tooltip: what it does, or why it is disabled.
+pub fn cut_title(refusal: Option<&str>) -> &'static str {
+    match refusal {
+        None => "Strih na program",
+        Some("playlist_inactive") => {
+            "Playlist je neaktívny — strih by zatemnil celý program (stenu, FOH, Presenter, stream)"
+        }
+        Some("no_scene") => {
+            "Playlist nemá vlastnú scénu (chýba mu NDI výstup, alebo ho zdieľa s iným aktívnym playlistom) — na program ho strihnúť nemožno"
+        }
+        Some(_) => "Strih na tento playlist server odmieta",
+    }
 }
 
 /// The part of `GET /api/v1/program` → `transition` this control renders.
@@ -176,6 +225,11 @@ pub fn ProgramControl() -> impl IntoView {
                         let pid = p.id;
                         let name = p.name.clone();
                         let is_on = move || on_program.get() == Some(pid);
+                        // A Memo, so a poll that keeps the refusal never
+                        // touches the button.
+                        let refusal = Memo::new(move |_| {
+                            program.with(|s| s.refusal(pid).map(str::to_string))
+                        });
                         view! {
                             <button
                                 class="program-cut"
@@ -183,7 +237,8 @@ pub fn ProgramControl() -> impl IntoView {
                                 data-testid="program-cut"
                                 data-playlist-id=pid.to_string()
                                 aria-pressed=move || is_on().to_string()
-                                title="Strih na program"
+                                prop:disabled=move || refusal.with(Option::is_some)
+                                title=move || refusal.with(|r| cut_title(r.as_deref()))
                                 on:click=move |_| cut(pid)
                             >
                                 {name}

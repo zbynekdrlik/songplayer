@@ -145,14 +145,76 @@ const twelvePlaylists = Array.from({ length: 12 }, (_, i) => {
   };
 });
 
+// #221 (ROZHODNUTÉ 6022247729): opt-in fixture for the program cut's refusal —
+// the 3 default playlists plus one INACTIVE playlist and one active playlist
+// with NO NDI output name. A dashboard cut to either is refused (409) and its
+// Program-control button is disabled.
+const refusalPlaylists = [
+  ...playlists,
+  {
+    id: 30,
+    name: "Archív",
+    youtube_url: "https://youtube.com/playlist?list=PLarchiv",
+    ndi_output_name: "SP-archiv",
+    playback_mode: "continuous",
+    is_active: false,
+    created_at: "2026-01-01 00:00:00",
+    updated_at: "2026-01-01 00:00:00",
+  },
+  {
+    id: 31,
+    name: "Bez výstupu",
+    youtube_url: "https://youtube.com/playlist?list=PLbezvystupu",
+    ndi_output_name: "",
+    playback_mode: "continuous",
+    is_active: true,
+    created_at: "2026-01-01 00:00:00",
+    updated_at: "2026-01-01 00:00:00",
+  },
+];
+
 // "default" → the 3-playlist fixture above (every other spec relies on it);
-// "twelve" → the 12-playlist fixture. The #165 spec POSTs "twelve" in
-// beforeEach and resets to "default" in afterEach so no state leaks into the
-// serially-run sibling spec files (playwright.config.ts pins workers: 1).
+// "twelve" → the 12-playlist fixture; "refusals" → the #221 refusal fixture.
+// A spec that POSTs a non-default mode in beforeEach resets to "default" in
+// afterEach so no state leaks into the serially-run sibling spec files
+// (playwright.config.ts pins workers: 1). (The name predates #221: these are
+// the fixture's playlists, inactive ones included, as `GET /api/v1/playlists`
+// lists them.)
 let fixtureMode = "default";
 function activePlaylists() {
-  return fixtureMode === "twelve" ? twelvePlaylists : playlists;
+  if (fixtureMode === "twelve") return twelvePlaylists;
+  if (fixtureMode === "refusals") return refusalPlaylists;
+  return playlists;
 }
+
+// #221 ROZHODNUTÉ 6022247729: mirrors `program_switch::cut_scene` — a
+// playlist names a scene when it is active and exactly one active playlist
+// has its NDI output name (ignoring ASCII case); an inactive one is refused
+// `playlist_inactive`, an active one with no scene `no_scene`.
+function cutRefusal(id) {
+  const active = activePlaylists().filter((p) => p.is_active);
+  const own = active.find((p) => p.id === id);
+  if (!own) return "playlist_inactive";
+  const name = (own.ndi_output_name || "").trim().toLowerCase();
+  if (name === "") return "no_scene";
+  const sharing = active.filter(
+    (p) => (p.ndi_output_name || "").trim().toLowerCase() === name,
+  );
+  return sharing.length === 1 ? null : "no_scene";
+}
+function cutRefused() {
+  return activePlaylists()
+    .map((p) => p.id)
+    .sort((a, b) => a - b)
+    .map((source) => ({ source, reason: cutRefusal(source) }))
+    .filter((r) => r.reason !== null);
+}
+const CUT_REFUSAL_TEXT = {
+  playlist_inactive:
+    "the playlist is inactive: it has no output, so a cut would put black on SP-program and every consumer of it",
+  no_scene:
+    "the playlist names no scene (no NDI output name, or one another active playlist shares), so it cannot go on SP-program",
+};
 
 // `normalized` and `gemini_failed` are required (non-`#[serde(default)]`)
 // fields on sp_core::models::Video — every fixture must include them or
@@ -243,9 +305,11 @@ app.get("/api/v1/playlists", (_req, res) => {
   res.json(activePlaylists());
 });
 
-// #165: switch the playlists fixture between "default" (3) and "twelve" (12).
+// #165: switch the playlists fixture between "default" (3) and "twelve" (12);
+// #221: "refusals" (the 3 + an inactive and a scene-less playlist).
 app.post("/__mock/fixture", (req, res) => {
-  fixtureMode = req.body?.mode === "twelve" ? "twelve" : "default";
+  const mode = req.body?.mode;
+  fixtureMode = mode === "twelve" || mode === "refusals" ? mode : "default";
   res.json({ mode: fixtureMode, count: activePlaylists().length });
 });
 
@@ -912,6 +976,8 @@ function programBody() {
       programState.source !== null && programConnections < 1
         ? "no NDI receiver on SP-program"
         : null,
+    // #221 ROZHODNUTÉ 6022247729: the playlists a cut refuses now.
+    cut_refused: cutRefused(),
     previous: programState.previous,
     cut_boundary_100ns: programState.cuts > 0 ? 17900000000000000 : null,
     health: {
@@ -1071,22 +1137,36 @@ app.post("/api/v1/program/cut", (req, res) => {
     res.status(404).send("unknown playlist");
     return;
   }
+  // Every body that reaches a cut decision, refused ones included, so a spec
+  // can prove a disabled button posted nothing.
   programLastCut = req.body;
+  // #221 ROZHODNUTÉ 6022247729: an inactive or scene-less playlist is
+  // refused (409), nothing changes, and it is recorded as a keep.
+  const refusal = source === -1 ? null : cutRefusal(source);
+  if (refusal !== null) {
+    programLastRemoteCut = {
+      scene: String(source),
+      action: "keep",
+      source: null,
+      reason: refusal,
+      cut_boundary_100ns: null,
+      at_ms: Date.now(),
+      via: "dashboard",
+      cg_forward: null,
+    };
+    res.status(409).send(CUT_REFUSAL_TEXT[refusal]);
+    return;
+  }
   const playlist = activePlaylists().find((p) => p.id === source);
   programLastRemoteCut = {
-    scene:
-      source === -1
-        ? "OBS manuál"
-        : (playlist?.ndi_output_name || String(source)).toLowerCase(),
+    scene: source === -1 ? "OBS manuál" : playlist.ndi_output_name.toLowerCase(),
     action: source === -1 ? "input" : "playlist",
     source,
     reason: null,
     cut_boundary_100ns: null,
     at_ms: Date.now(),
     via: "dashboard",
-    // #221 B4 step 6: a dashboard cut tells cg OBS nothing. The mock's
-    // playlists all name a scene; the server's no-scene cases (inactive,
-    // empty or shared NDI name) are not modelled.
+    // #221 B4 step 6: a dashboard cut tells cg OBS nothing.
     cg_forward: null,
   };
   if (programState.source !== source) {
