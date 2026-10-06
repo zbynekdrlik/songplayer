@@ -355,7 +355,7 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     spec and the meter wait): camera-box's `genlock_lock` facet on cg OBS's
     `:8899/bundle-state.json`, the condition (the probe connected, `idle`
     false, `locked`, the box LOCKED for none), the refusal before the
-    attach, the cadence and bound, the budget, and its THREE residuals (it
+    attach, the cadence and bound, the budget, and its FOUR residuals (it
     is not an exact view of the withhold; open design question on #221).
   - **The meter wait (#221 dev.18), after the lock wait:**
     - **Signal:** obs-websocket's `InputVolumeMeters`. Each input's
@@ -488,25 +488,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
 
     A `fail` is never retaken. Neither is an audio-side `cannot_measure`,
     which can be a real audio fault. A retake starts only while less than
-    110 s of the 345 s budget is used. `e2e/av-sync-budget.ts` derives it
-    (pinned by `av-sync-budget.spec.ts`; the sum in `av-gate-lock-wait.md`):
-    `RETAKE_BEFORE_MS` = `TEST_TIMEOUT_MS` − `WORST_TAKE_MS` −
-    `UNCOUNTED_CALLS_MS` (10 s). The take's own waits (`SKIP_WAIT_MS`,
-    `PLAY_WAIT_MS`, `STOP_RECORD_MS`, `REMUX_SIBLING_WAIT_MS`,
-    `BUSY_RETRY_MS`) are the constants the spec waits on.
-    - `WORST_TAKE_MS` is 225 s. It is summed from the take's own bounds,
-      including the lock wait's worst case (`LOCK_WAIT_WORST_MS`, 25 s: its
-      15 s bound + one 10 s read started at it), the 20 s audio wait and
-      copying the evidence.
-    - The 10 s covers the calls the sum does not count: the audio wait's
-      two `Reidentify` round trips, the StartRecord pre-check, the `/mix`
-      and `/videos` reads, and spawning the analysis. The lock wait's
-      reads are inside its own worst case.
-    - #221 dev.18 raised `TEST_TIMEOUT_MS` from 300 s to 320 s, by the
-      audio wait's bound; dev.19 to 345 s, by the lock wait's worst case.
-      A run keeps the retake room it had before either wait. The one-off
-      endpoint resolution before the first take is outside the take sum
-      (≤ 10 s per URL tried; loopback refuses at once).
+    `RETAKE_BEFORE_MS` (110 s of the 345 s budget) is used: the sum, its
+    constants and its history are in `av-gate-lock-wait.md` ("The budget";
+    `e2e/av-sync-budget.ts`, pinned by `av-sync-budget.spec.ts`).
     The run is classified by `classifyAvSyncRun`: the stdout JSON and the exit
     code must agree. Missing JSON (a numpy import failure, an argparse error)
     is `error`, not a verdict.

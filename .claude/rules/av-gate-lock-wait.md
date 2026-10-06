@@ -19,7 +19,7 @@ camera-box's read path, comment 6012957666): lock → meter → StartRecord,
 through `probeReadyForTake` (the meter wait starts only once the lock wait
 resolved; pinned in `probe-lock-wait.spec.ts`).
 
-**It is NOT an exact view of the withhold.** Three residuals, verified in
+**It is NOT an exact view of the withhold.** Four residuals, verified in
 camera-box's source and escalated as the open design question on #221
 (comments 6014055098, 6014658984). Read them before trusting a green or
 "fixing" a red.
@@ -83,12 +83,16 @@ box `state === "LOCKED"` and `reason === "none"` — the decided four plus
 `connected` (review round 1: an ABSENT input is never idle and keeps its FIFO
 lock, so a senderless probe line would read as a GO).
 
-## The three residuals
+## The four residuals
 
-1. **A false GO:** a HEARTBEAT written between the probe's `idle` turning
-   false (60 frames, ~2–2.4 s after the bind) and the audio's placement reads
-   as a GO during the withhold (~0.7 s on camera-box's 6.10 attach, up to ~8 s
-   if the withhold runs its 10 s). Normally the wait says GO on the
+1. **A false GO:** a HEARTBEAT written between the probe reading `idle:
+   false` and the audio's placement can read as a GO during the withhold.
+   The probe reads `idle: false` 60 frames (~2–2.4 s) after the bind, or
+   from the bind on: DistroAV reports `connected: false` while it reconnects,
+   a widget tick in that gap drops the probe's idle sample ring, and a fresh
+   ring stays unclassified (`idle: false`) for ~54 s. So the window can run
+   from the bind to the placement (~3 s on camera-box's 6.10 attach, up to
+   ~10 s if the withhold runs its 10 s). Normally the wait says GO on the
    LOCKED/none CHANGE line that ends the attach's DEGRADED/`audio_pairing`
    slew (6.10: attach 08:49:33.1, shallow latch 36.13, DEGRADED 36.22, LOCKED
    37.21).
@@ -96,14 +100,21 @@ lock, so a senderless probe line would read as a GO).
    line, so the first fresh line is the next heartbeat (≤ 30 s): the 15 s
    bound can fail on a healthy probe.
 3. **A woken probe latches `recent_event`:** its LIFETIME phase events come
-   back as a rise when it wakes, so DEGRADED/`recent_event` (naming the probe
-   in `recent_event_inputs`) holds for 60 s. cg OBS is long-lived (the E2E
-   starts it only when it is not running), so once the probe has had one
-   phase event every later attach can reach the bound. The gate logs the
-   probe's `relocks + late_holds` before the attach (`probePhaseEvents`;
-   non-zero predicts it; `backward_steps` is not in the facet) and the
-   bound's explanation names it. A camera-box wake re-baseline fix is the
-   cure, not a longer bound.
+   back as a rise when it wakes, so DEGRADED/`recent_event` holds for 60 s.
+   cg OBS is long-lived (the E2E starts it only when it is not running), so
+   once the probe has had one phase event every later attach can reach the
+   bound. The gate logs the probe's `relocks + late_holds` before the attach
+   (`probePhaseEvents`; non-zero predicts it; `backward_steps` is not in the
+   facet) and the bound's explanation names the wake from THAT count, never
+   from `recent_event_inputs`: camera-box names its TOP LIFETIME offender
+   there (recomputed every tick), not the input whose count rose, so a probe
+   wake can be named as another input and another input's real event as the
+   probe. A camera-box wake re-baseline fix is the cure, not a longer bound.
+4. **The refusal trusts the newest line before the attach:** a probe whose
+   FIFO locked AFTER that line (unlocked in it) and was idled since keeps
+   `locked: true`, so a heartbeat before this run's attach could read as a
+   GO. It needs that line to fall in the short window between the probe's
+   idle flip and its lock.
 
 The per-input truth is `audio_hold=` (off | latency | timecode | pending) in
 the probe's `genlock-fifo audit` line, every ~5 s, in cg OBS's own log only.
@@ -118,8 +129,10 @@ idles the probe, fails loudly (appending "the gate idled it" or why idling
 failed), and the next run passes once the probe has been idle for ~90 s. Not
 refused: an absent probe (its idle proves nothing; the wait needs a connected
 line), an unlocked one (a never-attached probe right after cg OBS starts reads
-connected and not yet classified idle, but cannot GO without new frames), a
-probe camera-box does not list yet (a fresh box).
+connected and not yet classified idle; residual 4), a probe camera-box does
+not list yet (a fresh box). The refusal is logged before the idle, and the
+idle is bounded at 5 s (`PROBE_IDLE_BOUND_MS`): obs-websocket-js never
+settles a call whose socket closes.
 
 ## Cadence, bound and failures
 
@@ -146,11 +159,16 @@ probe camera-box does not list yet (a fresh box).
 `TEST_TIMEOUT_MS` 345 s; `WORST_TAKE_MS` 225 s = skip 15 + play 30 + the lock
 wait's worst 25 + the audio wait 20 + record 20 + stop 10 + analysis 60 +
 cleanup 35 (`REMUX_SIBLING_WAIT_MS` 15 + 2 × `BUSY_RETRY_MS` 10) + 2 evidence
-copies × 5; `RETAKE_BEFORE_MS` = 345 − 225 − `UNCOUNTED_CALLS_MS` 10 = 110 s.
+copies × 5; `RETAKE_BEFORE_MS` = 345 − 225 − `UNCOUNTED_CALLS_MS` 10 = 110 s
+(the 10 s covers the calls the sum does not count: the audio wait's two
+`Reidentify` round trips, the StartRecord pre-check, the `/mix` and `/videos`
+reads, spawning the analysis; the lock wait's reads are inside its own worst
+case).
 The spec waits on these same constants. A wait that joins a take adds its
 worst case to both `WORST_TAKE_MS` and `TEST_TIMEOUT_MS`, so the retake room
 stays 110 s (dev.18: 300 → 320 s; dev.19: 320 → 345 s). The one-off endpoint
-resolution before the first take is outside the take sum.
+resolution before the first take is outside the take sum (≤ 10 s per URL
+tried; loopback refuses at once).
 
 ## Testing it
 
