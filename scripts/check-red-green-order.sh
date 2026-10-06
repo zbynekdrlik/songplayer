@@ -226,9 +226,16 @@ self_test() {
         fix601_sha="$(git rev-parse HEAD)"
         git commit --allow-empty -q -m "fix(#602): no test, declares #601's bypass" -m "[no-test: ${fix601_sha:0:7} merge compile fix]"
         git tag fixture-retro-in-fix
+
+        # Fixture 11: a fix commit that declares ANOTHER commit's bypass AND
+        # carries its own marker after it — its own marker is its bypass.
+        git commit --allow-empty -q -m "fix(#603): landed without a marker"
+        fix603_sha="$(git rev-parse HEAD)"
+        git commit --allow-empty -q -m "fix(#604): ops-only, declares #603's bypass too" -m "[no-test: ${fix603_sha:0:7} merge compile fix] [no-test: own reason here]"
+        git tag fixture-retro-and-own
     )
 
-    local good_rc bad_rc prefixes_good_rc bug_bad_rc hotfix_bad_rc regression_bad_rc no_test_rc scoped_test_rc retro_alone_rc retro_declared_rc retro_in_fix_rc
+    local good_rc bad_rc prefixes_good_rc bug_bad_rc hotfix_bad_rc regression_bad_rc no_test_rc scoped_test_rc retro_alone_rc retro_declared_rc retro_in_fix_rc retro_and_own_rc
     good_rc=0
     bad_rc=0
     prefixes_good_rc=0
@@ -240,6 +247,7 @@ self_test() {
     retro_alone_rc=0
     retro_declared_rc=0
     retro_in_fix_rc=0
+    retro_and_own_rc=0
     ( cd "$tmp" && "$SCRIPT" fixture-base..fixture-good >/dev/null 2>&1 ) || good_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-base..fixture-bad >/dev/null 2>&1 ) || bad_rc=$?
     ( cd "$tmp" && "$SCRIPT" fixture-bad..fixture-prefixes-good >/dev/null 2>&1 ) || prefixes_good_rc=$?
@@ -253,6 +261,8 @@ self_test() {
     retro_declared_out="$( cd "$tmp" && "$SCRIPT" fixture-scoped-test-good..fixture-retro-declared 2>&1 )" || retro_declared_rc=$?
     local retro_in_fix_out
     retro_in_fix_out="$( cd "$tmp" && "$SCRIPT" fixture-retro-declared..fixture-retro-in-fix 2>&1 )" || retro_in_fix_rc=$?
+    local retro_and_own_out
+    retro_and_own_out="$( cd "$tmp" && "$SCRIPT" fixture-retro-in-fix..fixture-retro-and-own 2>&1 )" || retro_and_own_rc=$?
 
     if [ "$good_rc" -ne 0 ]; then
         echo "self-test FAIL: well-formed range expected rc=0, got $good_rc"
@@ -304,6 +314,10 @@ self_test() {
     fi
     if [[ "$retro_in_fix_out" != *"declared by"* ]]; then
         echo "self-test FAIL: the declared fix's bypass was not logged — got: $retro_in_fix_out"
+        return 1
+    fi
+    if [ "$retro_and_own_rc" -ne 0 ] || [[ "$retro_and_own_out" != *"#604 [no-test: own reason here]"* ]]; then
+        echo "self-test FAIL: a fix(#N) with a retro marker THEN its own marker expected rc=0 and its own marker logged, got rc=$retro_and_own_rc — got: $retro_and_own_out"
         return 1
     fi
     echo "ok: self-test passed (all bug-prefix subjects gate correctly)"

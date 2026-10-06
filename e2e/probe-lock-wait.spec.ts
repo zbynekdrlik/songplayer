@@ -458,6 +458,13 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     // "the one with the most events".
     expect(unknown).toContain("box-wide");
     expect(unknown).toContain("inputs at the bound");
+    // Review round 8: the text never names "the cause" from the two lists —
+    // a real relock or late hold on a live input latches it too, and the
+    // lists carry no times — so it names the causes and calls the lists
+    // candidates.
+    expect(unknown).not.toContain("the cause is");
+    expect(unknown).toContain("relock");
+    expect(unknown).toContain("candidates");
     expect(named).toContain("box-wide");
     // Another reason with events before the attach: not the wake either.
     const other = explainProbeLock(lock("DEGRADED", "input_unlocked", probe()), PROBE, 3);
@@ -562,6 +569,47 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     );
     expect(reads.starts[0]).toBe(170_000);
     expect(msg).not.toContain("before the attach");
+  });
+
+  test("the bound lists the LAST answered line's inputs, not the first", async () => {
+    // Review round 8 hand mutant: a reader whose inputs change, ending with a
+    // failed read.
+    const clock = fakeClock();
+    let n = 0;
+    const read = async (): Promise<GenlockLock> => {
+      n++;
+      if (n === 3) throw new Error("HTTP 500");
+      const slow = { locked: true, connected: n === 2, idle: false, relocks: 0, late_holds: 0 };
+      return lock("DEGRADED", "recent_event", probe(), { inputs: { "sp-slow": slow, [PROBE]: probe() } });
+    };
+    const msg = await rejection(
+      waitForProbeLock(read, PROBE, { now: clock.now, sleep: clock.sleep, timeoutMs: 500 }),
+    );
+    expect(msg).toContain('inputs at the bound: "sp-slow" connected=true');
+    expect(msg).not.toContain('"sp-slow" connected=false');
+  });
+
+  test("the bound says how long after the bind its last answered read started", async () => {
+    // Review round 8: whether the comparison spans more than the 60 s latch.
+    const stuck = () => lock("DEGRADED", "recent_event", probe());
+    const clock = fakeClock();
+    clock.t = 105_000;
+    const reads = fakeRead(clock, stuck);
+    const msg = await rejection(
+      waitForProbeLock(reads.read, PROBE, {
+        now: clock.now,
+        sleep: clock.sleep,
+        timeoutMs: 100,
+        attachedAt: 100_000,
+      }),
+    );
+    expect(msg).toContain("the last answered read started 5000 ms after the bind");
+    const clock2 = fakeClock();
+    const reads2 = fakeRead(clock2, stuck);
+    const unknownBind = await rejection(
+      waitForProbeLock(reads2.read, PROBE, { now: clock2.now, sleep: clock2.sleep, timeoutMs: 100 }),
+    );
+    expect(unknownBind).not.toContain("after the bind");
   });
 
   test("the bound lists every genlock input as the last answered line saw it", async () => {
