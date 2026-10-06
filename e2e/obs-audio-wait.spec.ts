@@ -297,6 +297,7 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
       lastPeaksDbfs: null,
       longestStreakMs: 0,
       runsAboveFloor,
+      readingsAtOrBelowFloor: 0,
       openRun: null,
     });
     expect(explainAudioWait(seen(0, 0))).toContain("subscription did not apply");
@@ -385,6 +386,44 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
     expect(msg).toContain("4 runs above it");
     expect(msg).toContain("with gaps");
     expect(msg).not.toContain("started late");
+  });
+
+  test("a run after an event gap counts again: two runs are gaps, never a late start", async () => {
+    // Review round 6: loud, no event for 600 ms, loud again and still open at
+    // the bound. The restart after the gap is a second run.
+    const meters = fakeMeters();
+    let t = 0;
+    const wait = waitForInputAudio(meters.subscribe, PROBE, { now: () => t, timeoutMs: 50 });
+    for (t = 0; t <= 300; t += 50) meters.push([probeAt(0.25)]);
+    for (t = 900; t <= 1_100; t += 50) meters.push([probeAt(0.25)]);
+    t = 1_100;
+    const msg = await wait.then(
+      () => "",
+      (e: Error) => e.message,
+    );
+    expect(msg).toContain("2 runs above it");
+    expect(msg).toContain("more than 500 ms apart");
+    expect(msg).not.toContain("started late");
+  });
+
+  test("a late start needs a silent reading of the probe before its run", async () => {
+    // Review round 6: the probe absent from the events (inactive) for a long
+    // stretch, then one loud run open at the bound. Nothing at or below the
+    // floor was ever metered, so "after silence" would be false: the probe
+    // became active late, it is not DistroAV's late start.
+    const meters = fakeMeters();
+    let t = 0;
+    const wait = waitForInputAudio(meters.subscribe, PROBE, { now: () => t, timeoutMs: 50 });
+    for (t = 0; t <= 600; t += 50) meters.push([{ inputName: "cam", inputLevelsMul: [[1, 1, 1]] }]);
+    for (t = 650; t <= 1_050; t += 50) meters.push([probeAt(0.25)]);
+    t = 1_050;
+    const msg = await wait.then(
+      () => "",
+      (e: Error) => e.message,
+    );
+    expect(msg).not.toContain("started late");
+    expect(msg).not.toContain("after silence");
+    expect(msg).toContain("1 run above it");
   });
 
   test("a run that went stale before the bound is not a late start", async () => {
