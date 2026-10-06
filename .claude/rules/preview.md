@@ -6,6 +6,7 @@ paths:
   - "crates/sp-server/src/playback/preview_encoder.rs"
   - "crates/sp-server/src/playback/preview_audio_hold*.rs"
   - "crates/sp-server/src/playback/preview_audio_probe*.rs"
+  - "crates/sp-server/src/playback/preview_video_clock*.rs"
   - "crates/sp-decoder/src/level_probe*.rs"
   - "scripts/preview_latency_repro.py"
   - "crates/sp-server/src/playback/fmp4_relay.rs"
@@ -60,8 +61,73 @@ The letterbox's placement (`placement_for`) is `playback::nv12_fit::aspect_fit`,
 shared with the #215 `SP-program` fit: change it there, for both (the preview's
 nearest-neighbour pixel copy stays its own).
 Tapping BOTH audio and video at this ONE decode seam keeps them offered together,
-so ffmpeg's `-use_wallclock_as_timestamps` keeps A/V in sync, and it stays OFF the
-paced emit thread (which must never wait).
+so the two feeders, which both count SongPlayer's monotonic clock (#221, below),
+keep A/V in sync, and it stays OFF the paced emit thread (which must never wait).
+
+## #221 — one monotonic clock: a clock step must never move one input
+
+**The preview encoder's video and audio count ONE clock, SongPlayer's
+monotonic `Instant`. No input is ever stamped with the wall clock.** The
+rawvideo input is read at `-framerate 25` (`PREVIEW_FPS`, = the output `-r`
+and the 1 s GOP); the video feeder writes exactly 25 frames per second of the
+monotonic clock. The f32le PCM input counts samples placed by the audio
+feeder on the same clock (`AudioHold`, below). Never put
+`-use_wallclock_as_timestamps` back on any input.
+
+- **Why (the incident, 6.10.2026):** the video input used to carry
+  `-use_wallclock_as_timestamps 1`, so ffmpeg stamped it with `av_gettime()`,
+  the SYSTEM clock. The box's nightly UTC step (dantesync's date step at
+  ~02:00:11Z, +0.84 to +1.54 s, the step genlock follows, #224) moved the video
+  timeline alone. A running encoder then showed the picture seconds behind
+  the sound for the rest of its life, and `post-deploy-preview.spec.ts:390`
+  saw new pictures 6.19 s+ after a pause (CI run 37400177771, the first run
+  whose preview child lived across 02:00:11). The pipeline had paused within
+  ~150 ms (`preview-afeed level … samples=0`); the late pictures came out of
+  the encoder. Root cause #221 comment 6008217701, decision 6008231226.
+- **`preview_video_clock.rs::VideoClock`** (pure, Linux-tested,
+  mutation-gated): frame `k` is due `k × 40 ms` after the first canvas
+  (`take_due` returns the canvas and how many slots are due). Each slot
+  writes the NEWEST tapped canvas, else the last one again: a pause freezes
+  the picture on the next slot and the stream keeps flowing (the pause no
+  longer relies on the encoder starving). Every slot a blocked write missed is
+  written at once, so the video never falls behind the audio. A canvas
+  replaced before its slot (a 30/60 fps source) is skipped and goes back to
+  the tap's pool (`StreamShared::recycle_frame`, #147 r10).
+- **The feeder glue** (`spawn_video_feeder`, `mutants::skip`, in the same
+  file): drains stale frames at connect, waits `clock.wait_us(now)` for the
+  next canvas, offers every queued canvas (the newest wins), writes what
+  `take_due` returns. `first_video_us` = frame 0's slot: the video timeline's
+  origin, which the audio preroll (`audio_preroll_samples(gap, 0)`) aligns
+  to. Feed-on-connect (finding 1 below) is unchanged: nothing is written
+  before the first canvas.
+- **Log lines:** `preview-vfeed: start … fps=25` and every 10 s
+  `preview-vfeed: written repeated skipped max_burst queued`. A paused song
+  grows `repeated` by 25/s; `max_burst` > 1 means a write blocked (the
+  encoder did not read its video for `max_burst × 40 ms`).
+- **Tests:** `preview_video_clock_tests.rs` (rate, pause repeat, newest wins
+  + recycle, blocked-write catch-up, the wait, frame 0's origin) and
+  `preview_encoder_tests.rs::no_input_is_wall_clock_stamped_and_the_video_counts_the_output_rate`
+  (+ the exact vector).
+- **Local proof** (`scripts/preview_latency_repro.py`, dev1 ffmpeg 6.1.1,
+  `--feeder g3 --pause-at 14 [--step-ms 1543 --step-at 6]`; the step is an
+  LD_PRELOAD shim that moves only the ffmpeg child's wall clock):
+
+  | | last new picture vs the pause's silence (media) | it leaves the encoder after the pause |
+  |---|---|---|
+  | old (wall-clock video), no step | −0.045 s | before the pause |
+  | old, +1.543 s step | **+3.53 / +4.74 s** | **3.95 / 4.97 s** |
+  | #221, no step | −0.219 s | 0.04-0.53 s |
+  | #221, +1.543 s step | −0.239 s | 0.03 s |
+
+  The switch-mode A/V placement (`content_shift_s`, design = the 210 ms
+  lead) is 0.229 s without and 0.245 s with the step (the old feeder: 0.233 s
+  without).
+  In every run (old feeder too) the encoder's output drifts ~1.7 % behind the
+  wall on dev1 (`video_output_behind_wall_s`), a harness property, not the
+  feeder.
+- **Box re-check after a change here:** the three `post-deploy-preview`
+  tests (A/V sync, the lag readout, the 1 Mb/s link), and the box log's
+  `preview-vfeed` lines.
 
 ## Iron rules (BOTH taps)
 
@@ -75,7 +141,8 @@ paced emit thread (which must never wait).
 3. **`pacer.rs` / `paced_output.rs` / FLAC / genlock stay byte-for-byte.**
    The preview adds exactly ONE `offer_frame` call per decoded frame.
 4. **A full channel DROPS the frame, never blocks.** The stream video/audio
-   bounded channels drop-on-full (the child paces CFR); a lagging WS viewer is
+   bounded channels drop-on-full (the video feeder writes 25 fps of the
+   monotonic clock anyway, #221); a lagging WS viewer is
    dropped by the broadcast relay and resyncs on the next keyframe fragment.
 5. **Viewer-scoped, on-demand.** The stream encoder child spawns on the FIRST WS
    viewer and is killed `VIEWER_TTL` (5 s) after the last one leaves. The JPEG
@@ -231,9 +298,10 @@ The rule (do NOT regress):
 
 ### A/V timestamps + alignment (#178 round 3) — PCM is NEVER wall-clock stamped
 
-**ONLY the video input carries `-use_wallclock_as_timestamps 1`. The raw f32le
-PCM input keeps its SAMPLE-COUNT timestamps.** This is the round-3 box root
-cause: fed the production args, the box's ffmpeg build (`N-123867`, 2026-04)
+**The raw f32le PCM input keeps its SAMPLE-COUNT timestamps.** (Round 3 left
+`-use_wallclock_as_timestamps 1` on the video input only; #221 took it off
+the video too, see "#221 — one monotonic clock" above.) This is the round-3
+box root cause: fed the production args, the box's ffmpeg build (`N-123867`, 2026-04)
 muxes **ZERO audio packets** when the bursty PCM input is wall-clock stamped
 (every `moof` carries ONE `traf` — video only — though the `moov` declares two
 tracks). MSE's `buffered` is the INTERSECTION of the tracks, so an empty audio
@@ -241,8 +309,9 @@ track = nothing playable, forever (`readyState 1`, empty `buffered` — the whol
 round-1/2 box symptom). Dropping the flag on the PCM input → 376 audio packets in
 8 s. So `build_ffmpeg_args` takes NO `lead_ms` and emits NO `-itsoffset` (on the
 box the audio `start_time` stayed 0.000 regardless of `-itsoffset`, so it was
-never a dependable lever). The `only_the_video_input_is_wall_clock_stamped` +
-exact-vector tests pin this — never add wall-clock stamps to the PCM input.
+never a dependable lever). The
+`no_input_is_wall_clock_stamped_and_the_video_counts_the_output_rate` +
+exact-vector tests pin this — never add wall-clock stamps to any input.
 
 **A/V is aligned on OUR side by a silence preroll.** The audio + video are tapped
 together at the ONE decode seam, but the paced decoder reads audio ahead of the
@@ -258,12 +327,13 @@ late. The G3 ±300 ms band then keeps or trims that. Box-check it with
 `ensure_pipeline_inner → register_taps → StreamTap::new`; pinned by
 `tests_runtime_pipeline.rs::a_created_pipeline_registers_its_preview_taps_with_the_paced_lead`). Because the video feeder
 starts on-connect BEFORE the audio input connects, the audio feeder measures how
-far the video wall-clock timeline is already ahead and PREPENDS silence to match:
+far the video timeline is already ahead and PREPENDS silence to match:
 `audio_preroll_samples(connect_gap_ms, lead_ms) = (min(gap,5000)+lead_ms)*48*2`
 interleaved-stereo f32 samples (48 kHz stereo; gap capped at 5 s; exact-value
 unit-tested, no equivalent mutants). The feeders also DRAIN any stale queued
 frames/blocks on start so a previous viewer's backlog never front-runs the live
-edge; the video feeder stamps the wall-time of its first write for the gap.
+edge; the video feeder stores frame 0's slot (the monotonic µs of the video
+timeline's origin, #221) for the gap.
 **Since #184 round G3 the feeder calls it with `lead_ms = 0`** — the preroll is
 the connect gap only and the lead (210 ms since #221 lane 3; 1500 ms on the
 deleted SDK-clocked path the G3 measurement below was taken on) is HELD in the
@@ -545,8 +615,11 @@ a `buffered.end` that is itself stale, and the lag beacon rides the same backlog
 the owner's actual complaint path every deploy, with all timings PRINTED:
 
 - **Pause freezes the preview.** Clicking the Player's `player-playpause` posts
-  `/pause`, which stops the pipeline decode → the encoder child starves → the WS
-  stops → the `<video>` drains its (≤ 2 s) buffer and freezes. The proof taps the
+  `/pause`, which stops the pipeline decode → the video feeder writes the last
+  picture again on every slot (#221: the stream keeps flowing, the picture is
+  frozen) → the `<video>` reaches it within its (≤ 2 s) live-edge distance.
+  Before #221 the encoder starved instead, and a wall-clock step made the
+  picture outlive the pause by seconds (6.10.2026, the incident above). The proof taps the
   DECODED output directly, not the toggle text: a small offscreen-canvas
   frame-hash must go STABLE (last change within 3 s of pause, then held ≥ 2 s),
   AND a Web Audio `AnalyserNode` RMS tap on the `<video>` must drop below a quiet
@@ -613,11 +686,12 @@ reconnect loop — reproduced on LAN in a real browser (#184 comment 5802408328)
 so round G's transport-only diagnosis was wrong. The root cause was the audio
 feeder's timing model. Do NOT regress:
 
-- **Two timelines.** The encoder's VIDEO input is wall-clock stamped
-  (`-use_wallclock_as_timestamps`); its PCM AUDIO input is SAMPLE-COUNT timed
+- **Two timelines.** The encoder's VIDEO input was wall-clock stamped then
+  (`-use_wallclock_as_timestamps`; since #221 it counts 25 fps of the
+  monotonic clock); its PCM AUDIO input is SAMPLE-COUNT timed
   (round 3: the box ffmpeg muxes zero audio packets when PCM is wall-stamped —
   never change that). So preview A/V stays in sync only while the audio WRITTEN
-  so far equals the wall time elapsed. Anything that makes the two diverge
+  so far equals the time elapsed. Anything that makes the two diverge
   shifts the audio against the picture for the child's whole life.
 - **Why add-only gap fill accumulated lag.** The decode-seam blocks
   (`StreamTap::offer_audio`, bounded channel of 48) arrive late on a loaded box
@@ -725,7 +799,7 @@ feeder (hold + snap + 30 ms poll); before the snap the G3 shift read 1.38-1.57 s
 `AUDIO_LOOKAHEAD_MS`, on the SDK-clocked path measured here; 210 ms on the
 paced path, the only one since #221 lane 3). G2 put that lead INTO the encoder's audio input (a
 lead-long silence preroll, then each block the moment it arrived). ffmpeg
-consumes audio only in step with its wall-clock video, so ~1.5 s ≈ 576 KB of PCM
+consumes audio only in step with its video, so ~1.5 s ≈ 576 KB of PCM
 had to sit in flight — our send buffer + ffmpeg's receive buffer + its input
 queue. Linux's multi-MB loopback buffers hold it (so nothing reproduced with
 defaults); Windows-sized ones do not: `write_all` blocks, the feeder stops
@@ -733,8 +807,9 @@ draining the crossbeam channel, the channel fills to 48 blocks and STAYS full
 (the seam drops the NEWEST, the channel keeps the OLDEST), and the aligner — which
 placed a block by when it was DEQUEUED — pads silence to the wall and then writes
 a block that already waited 48 iterations. `ahead_ms` reads 0 while the content
-is seconds stale. Pause is a different path (the decode stops, the encoder
-starves, the MSE buffer drains in ~2-3.75 s) — it never exercises this queue.
+is seconds stale. Pause is a different path (the decode stops; the encoder
+starved then, it gets the last picture repeated since #221; the MSE playhead
+reaches the live edge in ~2-3.75 s) — it never exercises this queue.
 
 **The rule (do NOT regress):**
 
@@ -794,6 +869,9 @@ starves, the MSE buffer drains in ~2-3.75 s) — it never exercises this queue.
   --feeder g2|g3 [--sndbuf 65536 --audio-url-query recv_buffer_size=65536]
   [--stall-every 3 --stall-ms 700 --nice --cpu-hogs 3] --duration 40
   --switch-at 25` (BtbN linux64 master builds match the box's ffmpeg family).
+  The table above used `--lead-ms 1500` (the default is now the paced 210)
+  and the wall-clock-stamped video feeder; since #221 the script's video
+  feeder and args mirror `preview_video_clock.rs` (`--pause-at`, `--step-ms`).
 
 ## Stage level probes (#184 G4)
 

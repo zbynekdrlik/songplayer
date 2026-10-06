@@ -9,9 +9,13 @@ TCP listeners exactly like `run_child`:
 * a synthetic "decode seam" thread ticks at the video fps and offers ONE NV12
   640x360 frame (bounded queue of 4, drop-on-full — `VIDEO_CHANNEL_CAP`) plus
   ONE interleaved-f32 stereo audio block (bounded queue of 48, drop-on-full —
-  `AUDIO_CHANNEL_CAP`) per tick;
-* the video feeder writes frames on connect (feed-on-connect, `spawn_video_feeder`)
-  and stamps the first write;
+  `AUDIO_CHANNEL_CAP`) per tick; each frame's top-left 160x90 block carries
+  the tick in its luma, so a picture change is visible in the output;
+* the video feeder is a 1:1 port of `preview_video_clock.rs` (#221): from the
+  first frame on it writes exactly 25 frames per second of the MONOTONIC clock
+  (the newest offered frame, else the last one again; slots a blocked write
+  missed are written at once), and the encoder reads it at `-framerate 25`
+  with NO wall-clock stamp; slot 0 is the timeline origin the audio aligns to;
 * the audio feeder is a 1:1 port of `spawn_audio_feeder`: preroll
   `audio_preroll_samples(gap, lead)`, then `align_block` / `align_timeout`
   against `wall_frames` on every block and every 200 ms receive timeout;
@@ -34,6 +38,18 @@ decoded, the silence onset (media time) is located, and the report prints:
   ffmpeg had actually EMITTED, sampled once a second, plus the audio socket's
   kernel queues (our Send-Q, ffmpeg's Recv-Q) from `ss`.
 
+``--pause-at P`` stops the seam offering anything at P s (the pipeline's
+pause); the report then adds the media time of the last NEW picture, how far
+it trails the audio's silence onset (``pause_picture_minus_sound_s``) and when
+the fragment carrying it left the encoder after the pause
+(``pause_last_new_picture_emit_s``, the #221 E2E bound is 3 s in the browser).
+``--step-ms S --step-at A`` steps the ffmpeg child's WALL clock by S ms at A s
+(an LD_PRELOAD shim over ``clock_gettime(CLOCK_REALTIME)`` / ``gettimeofday``,
+compiled with ``cc`` into ``--workdir``), like the box's nightly UTC step
+(+1543 ms on 6.10.2026): with both inputs counted on the monotonic clock the
+step must change nothing (#221: with the old wall-clock-stamped video the
+picture trailed the sound by 3.5-4.7 s after it).
+
 ``--feeder g2`` is the 0.65.0-dev.15 feeder (lead written up front as a
 silence preroll, aligned at DEQUEUE time); ``--feeder g3`` is the round-G3
 feeder (`preview_audio_hold.rs`: the lead HELD in the feeder, each block aligned
@@ -46,8 +62,11 @@ Usage::
     python3 scripts/preview_latency_repro.py --ffmpeg /usr/bin/ffmpeg \\
         [--feeder g3] [--sndbuf 65536 --audio-url-query recv_buffer_size=65536] \\
         [--duration 40 --switch-at 25 --lead-ms 1500]
+    python3 scripts/preview_latency_repro.py --ffmpeg /usr/bin/ffmpeg --feeder g3 \\
+        --duration 24 --switch-at 99 --pause-at 14 [--step-ms 1543 --step-at 6]
 
-Measured on dev1 (2026-09-24) — see `.claude/rules/preview.md` "#184 round G3".
+Measured on dev1 (2026-09-24) — see `.claude/rules/preview.md` "#184 round G3";
+the clock-step / pause rows (6.10.2026): "#221 — one monotonic clock".
 """
 
 from __future__ import annotations
@@ -74,6 +93,9 @@ ALIGN_PAD_THRESHOLD_MS = 150
 MAX_AHEAD_MS = 300
 ALIGN_TARGET_AHEAD_MS = 100
 RATE = 48_000
+PREVIEW_FPS = 25  # preview_video_clock.rs
+FRAME_US = 40_000
+MARK_W, MARK_H = 160, 90  # the top-left block carrying the seam tick in its luma
 
 
 # --- 1:1 ports of the pure Rust aligner --------------------------------------
@@ -107,8 +129,9 @@ def build_ffmpeg_args(video_port: int, audio_port: int, video_in_opts: list[str]
     options inserted right before each `-i` and extra output options before the
     muxer (empty lists == the production vector)."""
     return ["-hide_banner", "-loglevel", "error",
-            "-use_wallclock_as_timestamps", "1", "-f", "rawvideo", "-pix_fmt", "nv12",
-            "-s", f"{OUT_W}x{OUT_H}", *video_in_opts, "-i", f"tcp://127.0.0.1:{video_port}",
+            "-f", "rawvideo", "-pix_fmt", "nv12",
+            "-s", f"{OUT_W}x{OUT_H}", "-framerate", str(PREVIEW_FPS), *video_in_opts,
+            "-i", f"tcp://127.0.0.1:{video_port}",
             "-f", "f32le", "-ar", "48000", "-ac", "2", *audio_in_opts,
             "-i", f"tcp://127.0.0.1:{audio_port}" + (f"?{audio_url_query}" if audio_url_query else ""),
             "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
@@ -126,6 +149,9 @@ class Shared:
     first_video_wall: float = 0.0
     audio_feeder_start: float = 0.0
     switch_wall: float = 0.0
+    pause_wall: float = 0.0
+    step_wall: float = 0.0
+    video_stats: list = field(default_factory=lambda: [0, 0, 0, 0])  # written, repeated, skipped, max_burst
     silence_written_frame: int = -1  # written_frames when the first silent CONTENT frame was written
     written_frames: int = 0
     padded_frames: int = 0
@@ -138,12 +164,13 @@ class Shared:
 
 
 def seam(sh: Shared, vq: queue.Queue, aq: queue.Queue, fps: float, switch_at: float,
-         stall_every: float, stall_ms: int) -> None:
+         stall_every: float, stall_ms: int, pause_at: float) -> None:
     """The decode seam: one video frame + one audio block per tick, drop-on-full.
 
     With ``stall_every`` > 0 the seam STALLS for ``stall_ms`` every
     ``stall_every`` seconds and then catches up by emitting the missed ticks
-    back-to-back — the loaded-box decode hiccup + catch-up burst (#184 G2)."""
+    back-to-back — the loaded-box decode hiccup + catch-up burst (#184 G2).
+    From ``pause_at`` s (> 0) on it offers nothing: the pipeline's pause."""
     frame = bytes([16]) * (OUT_W * OUT_H) + bytes([128]) * (OUT_W * OUT_H // 2)
     block_frames_f = RATE / fps
     phase = 0.0
@@ -160,9 +187,15 @@ def seam(sh: Shared, vq: queue.Queue, aq: queue.Queue, fps: float, switch_at: fl
             next_stall = time.monotonic() + stall_every
         elif nxt > now:
             time.sleep(nxt - now)
+        if pause_at > 0 and sh.audio_feeder_start and time.monotonic() - sh.audio_feeder_start >= pause_at:
+            if not sh.pause_wall:
+                sh.pause_wall = time.monotonic()
+            continue
         n += 1
-        f = bytearray(frame)  # vary the luma so x264 has something to encode
-        f[(n * 97) % (OUT_W * OUT_H)] = 235
+        f = bytearray(frame)  # the tick in the marker block's luma (x264 encodes a change)
+        luma = 16 + (n * 7) % 220
+        for row in range(MARK_H):
+            f[row * OUT_W:row * OUT_W + MARK_W] = bytes([luma]) * MARK_W
         try:
             vq.put_nowait(bytes(f))
         except queue.Full:
@@ -185,19 +218,130 @@ def seam(sh: Shared, vq: queue.Queue, aq: queue.Queue, fps: float, switch_at: fl
             sh.audio_drops += 1  # drop-on-full, like StreamShared::offer_audio
 
 
+class VideoClock:
+    """1:1 port of `preview_video_clock.rs::VideoClock` (#221): frame k is due
+    k x FRAME_US after the first canvas, the newest canvas takes a slot, else
+    the last one is written again; every slot a blocked write missed is due at
+    once."""
+
+    def __init__(self):
+        self.start_us = None
+        self.current = None
+        self.current_written = False
+        self.written = self.repeated = self.skipped = self.max_burst = 0
+
+    def offer(self, frame):
+        if self.current is not None and not self.current_written:
+            self.skipped += 1
+        self.current = frame
+        self.current_written = False
+
+    def take_due(self, now_us: int):
+        if self.current is None:
+            return None
+        if self.start_us is None:
+            self.start_us = now_us
+        n = max(0, (now_us - self.start_us) // FRAME_US + 1 - self.written)
+        if n == 0:
+            return None
+        self.written += n
+        self.repeated += n - (0 if self.current_written else 1)
+        self.max_burst = max(self.max_burst, n)
+        self.current_written = True
+        return self.current, n
+
+    def wait_us(self, now_us: int) -> int:
+        if self.start_us is not None:
+            return max(0, self.start_us + self.written * FRAME_US - now_us)
+        return 0 if self.current is not None else 200_000
+
+
+def next_frame(vq: queue.Queue, timeout_s: float):
+    """The next offered frame within ``timeout_s`` (0 = only one already queued),
+    or None when none came — the feeder's normal idle case, not an error."""
+    try:
+        return vq.get(timeout=timeout_s) if timeout_s > 0 else vq.get_nowait()
+    except queue.Empty:
+        return None
+
+
 def video_feeder(sh: Shared, sock: socket.socket, vq: queue.Queue) -> None:
+    """Port of `preview_video_clock.rs::spawn_video_feeder` on the monotonic clock."""
+    base = time.monotonic()
+
+    def us() -> int:
+        return int((time.monotonic() - base) * 1_000_000)
+
+    clock = VideoClock()
     while not sh.stop.is_set():
-        try:
-            fr = vq.get(timeout=0.2)
-        except queue.Empty:
+        fr = next_frame(vq, clock.wait_us(us()) / 1e6)
+        while fr is not None:  # the newest canvas takes the slot
+            clock.offer(fr)
+            fr = next_frame(vq, 0)
+        due = clock.take_due(us())
+        if due is None:
             continue
+        canvas, n = due
         try:
-            sock.sendall(fr)
+            for _ in range(n):
+                sock.sendall(canvas)
         except OSError as e:
             print(f"video feeder: write failed ({e}) — child gone", file=sys.stderr)
             return
         if not sh.first_video_wall:
-            sh.first_video_wall = time.monotonic()
+            sh.first_video_wall = base + clock.start_us / 1e6  # slot 0: the video origin
+        sh.video_stats = [clock.written, clock.repeated, clock.skipped, clock.max_burst]
+
+
+STEP_SHIM_C = r"""
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/time.h>
+#include <time.h>
+static long long off_ns(void) {
+    const char *f = getenv("STEP_FILE");
+    FILE *fp = f ? fopen(f, "r") : 0;
+    long long v = 0;
+    if (!fp) return 0;
+    if (fscanf(fp, "%lld", &v) != 1) v = 0;
+    fclose(fp);
+    return v;
+}
+int clock_gettime(clockid_t c, struct timespec *ts) {
+    static int (*real)(clockid_t, struct timespec *) = 0;
+    if (!real) real = (int (*)(clockid_t, struct timespec *))dlsym(RTLD_NEXT, "clock_gettime");
+    int r = real(c, ts);
+    if (r == 0 && c == CLOCK_REALTIME) {
+        long long ns = (long long)ts->tv_sec * 1000000000LL + ts->tv_nsec + off_ns();
+        ts->tv_sec = ns / 1000000000LL;
+        ts->tv_nsec = ns % 1000000000LL;
+    }
+    return r;
+}
+int gettimeofday(struct timeval *tv, void *tz) {
+    struct timespec ts;
+    (void)tz;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    tv->tv_sec = ts.tv_sec;
+    tv->tv_usec = ts.tv_nsec / 1000;
+    return 0;
+}
+"""
+
+
+def step_env(workdir: str) -> tuple[dict, str]:
+    """Build the wall-clock step shim; the child's env and the offset file."""
+    src = os.path.join(workdir, "preview_step_clock.c")
+    lib = os.path.join(workdir, "preview_step_clock.so")
+    with open(src, "w") as fh:
+        fh.write(STEP_SHIM_C)
+    subprocess.run(["cc", "-shared", "-fPIC", "-O2", "-o", lib, src, "-ldl"], check=True)
+    step_file = os.path.join(workdir, f"preview_step_clock-{os.getpid()}.ns")
+    with open(step_file, "w") as fh:
+        fh.write("0")
+    return dict(os.environ, LD_PRELOAD=lib, STEP_FILE=step_file), step_file
 
 
 def audio_feeder(sh: Shared, sock: socket.socket, aq: queue.Queue, lead_ms: int) -> None:
@@ -471,12 +615,13 @@ def run(args) -> dict:
     # with the (BELOW_NORMAL) encoder child, never with the harness itself.
     hogs = [subprocess.Popen([sys.executable, "-c", "import os\nos.nice(19)\nwhile True: pass"])
             for _ in range(args.cpu_hogs)]
+    env, step_file = step_env(args.workdir) if args.step_ms else (None, "")
     child = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
+                             stderr=subprocess.PIPE, env=env)
     vq: queue.Queue = queue.Queue(VIDEO_CHANNEL_CAP)
     aq: queue.Queue = queue.Queue(AUDIO_CHANNEL_CAP)
     for target, targs in ((seam, (sh, vq, aq, args.fps, args.switch_at, args.stall_every,
-                                  args.stall_ms)),
+                                  args.stall_ms, args.pause_at)),
                           (read_boxes, (sh, child.stdout))):
         threading.Thread(target=target, args=targs, daemon=True).start()
     vl.settimeout(5)
@@ -493,6 +638,10 @@ def run(args) -> dict:
     end = time.monotonic() + args.duration
     while time.monotonic() < end:
         time.sleep(1.0)
+        if step_file and not sh.step_wall and time.monotonic() - sh.audio_feeder_start >= args.step_at:
+            with open(step_file, "w") as fh:  # the child's wall clock jumps now
+                fh.write(str(args.step_ms * 1_000_000))
+            sh.step_wall = time.monotonic()
         if tracks is None and sh.init:
             tracks = parse_init(sh.init)
         emitted = emitted_v = 0.0
@@ -521,6 +670,33 @@ def run(args) -> dict:
 def rms_db(samples, i: int, win: int) -> float:
     rms = math.sqrt(sum(x * x for x in samples[i:i + win]) / win)
     return 20 * math.log10(rms) if rms > 0 else -200.0
+
+
+def pause_metrics(sh: Shared, args, path: str, frags: list, vtid: int, onset: float) -> dict:
+    """#221: the media time of the last NEW picture (the marker block's luma
+    still changing), how far it trails the pause's silence onset in the audio,
+    and when the fragment carrying it left the encoder after the pause."""
+    out = subprocess.run([args.ffmpeg, "-hide_banner", "-i", path, "-map", "0:v", "-vf",
+                          f"crop={MARK_W}:{MARK_H}:0:0,signalstats,"
+                          "metadata=print:key=lavfi.signalstats.YAVG", "-f", "null", "-"],
+                         capture_output=True, text=True, check=True).stderr
+    frames = []
+    pts = None
+    for line in out.splitlines():
+        if "pts_time:" in line:
+            pts = float(line.split("pts_time:")[1].split()[0])
+        elif "YAVG=" in line and pts is not None:
+            frames.append((pts, float(line.split("YAVG=")[1])))
+    last_new = next((frames[i][0] for i in range(len(frames) - 1, 0, -1)
+                     if abs(frames[i][1] - frames[i - 1][1]) > 1.0), None)
+    if last_new is None:
+        return {"pause_last_new_picture_media_s": None}
+    emit = next((w for w, r in frags if vtid in r and r[vtid][1] >= last_new), None)
+    return {
+        "pause_last_new_picture_media_s": round(last_new, 3),
+        "pause_picture_minus_sound_s": round(last_new - onset, 3),
+        "pause_last_new_picture_emit_s": round(emit - sh.pause_wall, 3) if emit else None,
+    }
 
 
 def analyse(sh: Shared, args, eff_sndbuf: int, stderr: str) -> dict:
@@ -559,15 +735,19 @@ def analyse(sh: Shared, args, eff_sndbuf: int, stderr: str) -> dict:
         "feeder": args.feeder,
         "sndbuf_effective": eff_sndbuf,
         "lead_ms": args.lead_ms,
+        "step_ms": args.step_ms,
         "fragments": len(frags),
         "drops_video_audio": [sh.video_drops, sh.audio_drops],
+        "video_written_repeated_skipped_maxburst": sh.video_stats,
         "padded_ms_skipped_ms": [sh.padded_frames // FRAMES_PER_MS, sh.skipped_frames // FRAMES_PER_MS],
         "silence_onset_media_s": None if onset is None else round(onset, 3),
         "silence_written_media_s": (round(sh.silence_written_frame / RATE, 3)
                                     if sh.silence_written_frame >= 0 else None),
-        "video_media_at_switch_s": round(video_media_at_switch, 3),
     }
-    if onset is not None:
+    if sh.pause_wall and onset is not None:
+        res.update(pause_metrics(sh, args, path, frags, vtid, onset))
+    if t_sw and onset is not None:
+        res["video_media_at_switch_s"] = round(video_media_at_switch, 3)
         res["content_shift_s"] = round(onset - video_media_at_switch, 3)
         ea = next((w for w, r in frags if atid in r and r[atid][1] > onset), None)
         ev = next((w for w, r in frags if vtid in r and r[vtid][1] > onset), None)
@@ -592,8 +772,9 @@ def main() -> int:
     p.add_argument("--switch-at", type=float, default=15.0,
                    help="seconds after the audio feeder starts when the tone becomes silence")
     p.add_argument("--fps", type=float, default=30.0, help="decode-seam cadence (source fps)")
-    p.add_argument("--lead-ms", type=int, default=1500,
-                   help="lead_ms_for(false) == AUDIO_LOOKAHEAD_MS")
+    p.add_argument("--lead-ms", type=int, default=210,
+                   help="the decode-seam lead: decode_seam_lead_ms() = 210 (the #184 G3 table "
+                        "used 1500, the deleted SDK-clocked path's)")
     p.add_argument("--sndbuf", type=int, default=0,
                    help="SO_SNDBUF on the audio socket (0 = OS default)")
     p.add_argument("--feeder", choices=["g2", "g3"], default="g2",
@@ -606,6 +787,13 @@ def main() -> int:
     p.add_argument("--audio-url-query", default="",
                    help="query on ffmpeg's audio tcp:// url, e.g. recv_buffer_size=16384 "
                         "(emulates a small Windows loopback receive window)")
+    p.add_argument("--pause-at", type=float, default=0.0,
+                   help="seconds after the audio feeder starts when the seam stops offering "
+                        "(the pipeline's pause; 0 = never)")
+    p.add_argument("--step-ms", type=int, default=0,
+                   help="step the ffmpeg child's wall clock by this many ms (0 = never)")
+    p.add_argument("--step-at", type=float, default=6.0,
+                   help="seconds after the audio feeder starts when the wall clock steps")
     p.add_argument("--video-in-opt", action="append", default=[])
     p.add_argument("--audio-in-opt", action="append", default=[])
     p.add_argument("--out-opt", action="append", default=[])
