@@ -431,8 +431,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       would have reached the take again. **Narrowed since dev.19 by the
       lock wait above** (cg OBS's genlock state through the `genlock_lock`
       facet), which still reads the withhold's PENDING phase as paired and
-      can be held DEGRADED by a woken probe's phase events
-      (`av-gate-lock-wait.md`, the open design question on #221). The other channels
+      can be held DEGRADED by a woken probe's, or any reconnected genlock
+      input's, lifetime phase events (box-wide; `av-gate-lock-wait.md`,
+      the open design question on #221). The other channels
       camera-box documents stay unused: the probe's `genlock-fifo audit`
       line in the OBS log (`audio_hold=pending`, the per-input truth, but
       the runner would have to read cg OBS's log dir), and a vendor request

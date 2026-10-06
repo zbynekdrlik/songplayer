@@ -21,7 +21,8 @@ resolved; pinned in `probe-lock-wait.spec.ts`).
 
 **It is NOT an exact view of the withhold.** Four residuals, verified in
 camera-box's source and escalated as the open design question on #221
-(comments 6014055098, 6014658984). Read them before trusting a green or
+(comments 6014055098, 6014658984, 6016284903). Read them before trusting a
+green or
 "fixing" a red.
 
 ## The endpoint
@@ -109,17 +110,23 @@ lock, so a senderless probe line would read as a GO).
    from `recent_event_inputs`: camera-box names its TOP LIFETIME offender
    there (recomputed every tick), not the input whose count rose, so a probe
    wake can be named as another input and another input's real event as the
-   probe. It is named only while the last answered read started within
-   `WAKE_LATCH_WINDOW_MS` (70 s: the 60 s latch plus ~10 s to wake) of the
-   BIND SongPlayer saw (the spec takes the instant its probe-receiver poll
-   resolves; DistroAV may take up to that poll's 30 s to bind): the probe
-   stays attached across takes, and a take can start long after the attach.
-   The latch is BOX-WIDE: an idle OR absent input counts 0 phase events, so
-   ANY genlock input on cg OBS that reconnects with lifetime events holds
-   `recent_event` for 60 s too (e.g. after the SongPlayer restart the deploy
-   does just before the E2E). A camera-box re-baseline fix (a woken or
-   reconnected input's totals are not new events) is the cure, not a longer
-   bound.
+   probe. The wait passes that count to the explanation only while the
+   last answered read started within `WAKE_LATCH_WINDOW_MS` (70 s) of
+   `attachedAt`, which the spec takes a few seconds AFTER the bind (after cg
+   OBS's scene switch and the probe-receiver poll; DistroAV may take up to
+   that poll's 30 s to bind). The probe wakes within ~3.5 s of its bind (60
+   frames in ~2.4 s plus a 1 Hz widget tick, or at once), so the 10 s over
+   the 60 s latch is a deliberate margin: the wake may be named a little
+   late, never missed. The probe stays attached across takes, and a take
+   can start long after the attach. The latch is BOX-WIDE: an idle OR absent
+   input counts 0 phase events, so ANY genlock input on cg OBS that
+   reconnects with lifetime events holds `recent_event` for 60 s too (e.g.
+   after a SongPlayer restart, IF cg OBS has another genlock input on
+   `SP-program` or `SP-dabing`). The gate logs every input of the line read
+   before the attach (`summarizeInputs`: connected, idle, locked, relocks +
+   late holds), so a red bound shows which one. A camera-box re-baseline fix
+   (a woken or reconnected input's totals are not new events) is the cure,
+   not a longer bound.
 4. **The refusal trusts the newest line before the attach:** a probe whose
    FIFO locked AFTER that line (unlocked in it) and was idled since keeps
    `locked: true`, so a heartbeat before this run's attach could read as a
