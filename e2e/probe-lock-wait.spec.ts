@@ -442,6 +442,39 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(clock.t - started).toBeLessThanOrEqual(LOCK_WAIT_WORST_MS);
   });
 
+  test("a read is never started after the bound, even one that would see LOCKED", async () => {
+    // Instant reads every 300 ms under a 1 s bound: the read at 900 ms
+    // answers inside it, and the next one would start at 1 200 ms.
+    const clock = fakeClock();
+    const reads = fakeRead(clock, (at) =>
+      at < 1_000 ? lock("DEGRADED", "audio_pairing", probe()) : lock("LOCKED", "none", probe()),
+    );
+    const msg = await rejection(
+      waitForProbeLock(reads.read, PROBE, {
+        now: clock.now,
+        sleep: clock.sleep,
+        timeoutMs: 1_000,
+        pollMs: 300,
+      }),
+    );
+    expect(msg).toContain("within 1000 ms");
+    expect(reads.starts).toEqual([0, 300, 600, 900]);
+  });
+
+  test("the slowest read is the longest one, not the last", async () => {
+    const clock = fakeClock();
+    const durations = [700, 100, 100];
+    let n = 0;
+    const read = async (): Promise<GenlockLock> => {
+      clock.t += durations[n++];
+      return n < 3 ? lock("DEGRADED", "audio_pairing", probe()) : lock("LOCKED", "none", probe());
+    };
+    const report = await waitForProbeLock(read, PROBE, { now: clock.now, sleep: clock.sleep });
+    expect(report.reads).toBe(3);
+    expect(report.slowestReadMs).toBe(700);
+    expect(report.waitedMs).toBe(1_400);
+  });
+
   test("an endpoint that stops answering mid-wait fails it at once", async () => {
     const clock = fakeClock();
     let n = 0;
