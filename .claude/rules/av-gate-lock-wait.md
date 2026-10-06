@@ -109,12 +109,17 @@ lock, so a senderless probe line would read as a GO).
    from `recent_event_inputs`: camera-box names its TOP LIFETIME offender
    there (recomputed every tick), not the input whose count rose, so a probe
    wake can be named as another input and another input's real event as the
-   probe. A camera-box wake re-baseline fix is the cure, not a longer bound.
+   probe. It is named only while the read showing it started within
+   `WAKE_LATCH_WINDOW_MS` (70 s: the 60 s latch plus ~10 s to wake) of the
+   attach: the probe stays attached across takes, and a take can start long
+   after the attach. A camera-box wake re-baseline fix is the cure, not a
+   longer bound.
 4. **The refusal trusts the newest line before the attach:** a probe whose
    FIFO locked AFTER that line (unlocked in it) and was idled since keeps
    `locked: true`, so a heartbeat before this run's attach could read as a
-   GO. It needs that line to fall in the short window between the probe's
-   idle flip and its lock.
+   GO. It needs that line to show the probe receiving but unlocked: before
+   its first attach locks after a cg OBS start (tens of seconds), or right
+   after a FIFO lock clear (a backward-step regime end, a latency-pin rise).
 
 The per-input truth is `audio_hold=` (off | latency | timecode | pending) in
 the probe's `genlock-fifo audit` line, every ~5 s, in cg OBS's own log only.
