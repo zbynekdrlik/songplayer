@@ -37,8 +37,8 @@ pub struct VideoFrame {
     pub pixel_format: PixelFormat,
     /// Genlock video timecode: `floor_boundary_100ns(present_wall)` in 100-ns
     /// units since the Unix epoch (camera-box#1294 §4). `None` keeps the NDI
-    /// SYNTHESIZE marker — used only for the standby black frame, which is not
-    /// on the grid yet (camera-box#1294 open question 7).
+    /// SYNTHESIZE marker (it was used only for the SDK-clocked standby black
+    /// frame, which #221 lane 3 deleted with the path).
     pub timecode_100ns: Option<i64>,
 }
 

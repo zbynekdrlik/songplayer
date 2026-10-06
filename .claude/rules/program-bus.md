@@ -420,7 +420,7 @@ itself: the OBS client no longer reads cg OBS's program at all
     PlayVideo clear of both (`clear_lyrics.rs`), both title timers
     (`title_timers.rs::WallGate`, read when they fire), the Play re-sync
     (`resync_after_play`) and a re-sync's title candidates and lines
-    (`recovery.rs::title_candidates` / `on_program_lines`, so also the
+    (`recovery.rs::title_candidate` / `on_program_lines`, so also the
     Resolume recovery and `wall_after_scene_off`);
   - the set has one member now, so the gate's work is the moment of a cut:
     the authority publishes the new owner BEFORE it sends the outgoing

@@ -5,7 +5,6 @@ paths:
   - "crates/sp-decoder/src/peak_limiter*.rs"
   - "crates/sp-decoder/src/audio/symphonia_reader*.rs"
   - "crates/sp-decoder/src/split_sync*.rs"
-  - "crates/sp-server/src/playback/karaoke.rs"
   - "scripts/stem_worker.py"
   - "crates/sp-server/src/embedded_scripts.rs"
   - "scripts/tests/test_stem_*.py"

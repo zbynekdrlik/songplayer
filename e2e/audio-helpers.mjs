@@ -11,8 +11,8 @@
  *
  * Used to wait until preview audio is provably flowing before taking a baseline:
  * a viewer that joins a running encoder session right after a song restart
- * receives the emitter's silence padding for its first seconds, so one early
- * sample is not proof of audibility.
+ * receives silence for its first seconds (the paced fills and the encoder's
+ * AudioHold pad), so one early sample is not proof of audibility.
  *
  * @param {number[]} samples
  * @param {number} threshold

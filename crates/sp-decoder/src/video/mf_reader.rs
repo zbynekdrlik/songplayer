@@ -368,9 +368,9 @@ impl MediaFoundationVideoReader {
             // Fill a RECYCLED buffer (capacity >= len, cleared) via
             // `extend_from_slice` into retained capacity — no demand-zero page
             // fault after the first frame of a resolution (#203 2b). The
-            // SDK-clocked path wraps this Vec in `SharedFrame::new` at
-            // `submit_nv12` and the paced path in `to_paced_frame`, so its
-            // last-owner drop returns the allocation to `frame_pool` for reuse.
+            // paced path wraps this Vec in `to_paced_frame` (the only path
+            // since #221 lane 3), so its last-owner drop returns the
+            // allocation to `frame_pool` for reuse.
             // #207: FALLIBLE — a host OOM (out of commit) returns a typed
             // `FrameAlloc` error the pipeline maps to a dropped frame instead of
             // aborting the whole process (`handle_alloc_error`, the #156 class).

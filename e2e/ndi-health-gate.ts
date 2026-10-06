@@ -4,9 +4,9 @@
  *
  * Every consumer takes SongPlayer's PROGRAM now: the Presenter, strih and the
  * stream receive `SP-program` over NDI, the LED wall `SP-program-MAX` over
- * Spout, FOH its VBAN. cg OBS is only the NDI input "OBS manuál" and never
- * shows a playlist scene again, so a playlist's own NDI output has no
- * consumer (0 receivers is normal there). The receiver that must exist is
+ * Spout, FOH its VBAN. cg OBS is only the NDI input "OBS manuál", and a
+ * playlist has no NDI output of its own (#221 lane 3). The receiver that
+ * must exist is
  * `SP-program`'s: `GET /api/v1/program` → `health.connections`, and the
  * server's own verdict `degraded_reason` ("no NDI receiver on SP-program").
  *

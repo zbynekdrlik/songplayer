@@ -682,8 +682,10 @@ playlists on air) went with it.
   title, the Presenter (`program-bus.md` "One wall owner").
 - Hand switches in cg OBS's own UI are invisible to the facade (no cg
   tracking, by the owner's ruling) and start nothing: a playlist scene cg
-  OBS shows by hand reaches the program only as "OBS manuál" (its paused or
-  idle output), until the next press.
+  OBS shows by hand reaches the program only as "OBS manuál", until the
+  next press. Since #221 lane 3 no sender is behind its `sp-*` input any
+  more, so that is black (or a picture loop, if the input still points at
+  `SP-program`'s pinned port: `obs-ndi-health.md` "The cutover").
 - **The E2E's "scene to restore" is SP-program's** (the facade's name),
   which is what every consumer takes since B4 step 6. Restoring a playlist
   scene leaves cg OBS untouched; restoring a manual scene is a manual press

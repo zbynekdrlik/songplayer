@@ -122,7 +122,7 @@ impl NdiLib {
             )?;
             let find_destroy = Self::resolve::<FnFindDestroy>(&library, b"NDIlib_find_destroy\0")?;
             // #212: the receive half is OPTIONAL — a missing symbol must never
-            // cost the senders (every playlist output + SP-program).
+            // cost the sender (`SP-program`, SongPlayer's one NDI output).
             let recv = match Self::resolve_recv(&library) {
                 Ok(fns) => Some(fns),
                 Err(e) => {

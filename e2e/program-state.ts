@@ -1,8 +1,9 @@
 /**
  * What is on the OBS program right now, as SongPlayer reports it (#184).
  *
- * The post-deploy suite runs against the live box and NEVER switches OBS
- * scenes (CLAUDE.md). After an event the operator leaves the program on
+ * A program-state spec runs against the live box and NEVER switches the
+ * program to set itself up (other specs press scenes through the facade
+ * and restore it). After an event the operator leaves the program on
  * whatever sp-* scene the event ended with — a regular playlist scene
  * (sp-slow, sp-fast, …) or `sp-dabing`. A spec that hard-codes one of those
  * states fails for a non-product reason (#184: the run after the 25.9 event

@@ -362,15 +362,17 @@ One job `soak` on the `[self-hosted, windows, resolume]` runner. It:
 - `cg-obs.log` — the receiver log tail the verdict was computed from.
 - `cg-verdict.txt` — the verifier's printed per-hop table + OVERALL PASS/FAIL.
 
-**Expected result TODAY = FAIL (count-gate BEFORE picture).** Until
-camera-box#1295 lands, cg OBS is not on the genlock build, so its log carries
-NO `genlock-fifo audit 'sp-*_video'` lines. The verifier reports the `cg-obs`
-hop as `NO SOURCES` / `UNREADABLE` and exits 3 → the job is RED. Equivalently:
-`locked=0` on every `sp-*` input is the honest count-gate signal that there is
-no genlock picture yet — that is the correct, expected state, not a regression.
-The workflow flips to a real PASS/FAIL verdict only once the receiver is on the
-genlock build (add the `schedule` line then and add the `strih`/`stream` hops
-once the runner has the ssh/bundle-state reader, camera-box#1294 Q10).
+**What it can see since #221 lane 3.** SongPlayer's only output is
+`SP-program`, and cg OBS's only input of it is the A/V gate's probe
+"A/V gate SP-program" (`CG_CHAIN_CGOBS_SRC_RE`; the verifier's default
+`sp-.*_video` names inputs that receive nothing any more). The gate keeps that
+probe IDLE outside its take, so an unattended soak reads `NO SOURCES` and exits
+3 (RED): that is the probe being idle, not a regression. For a real verdict,
+point the probe at `<HOST> (SP-program)` and put cg OBS on the probe scene by
+hand, run the soak, then set the probe back to `""` and cg OBS back on its own
+scene (the workflow header). Add the `schedule` line and the `strih`/`stream`
+hops only once that is automated and the runner has the ssh/bundle-state reader
+(camera-box#1294 Q10).
 
 **Bumping the pinned camera-box ref:** replace the full 40-char SHA in the
 `Checkout camera-box` step with a newer camera-box commit that still ships

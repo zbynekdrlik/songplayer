@@ -302,8 +302,11 @@ stops SongPlayer:
 - Residual: the gate reads the lease, it does not HOLD it. A lease another
   repo takes in the ~1 min between the check and "Deploy SongPlayer"
   (artifact downloads) is not seen. The E2E job runs the same gate again
-  right before "Feature-level Playwright (post-deploy spec)" (camera-box's
-  request, 6.10.2026). The suite switches cg OBS's program for the A/V
+  twice: right after its checkout, before its first step that acts on the
+  box (release 0.71.0 review: starting OBS, the restart, the title check's
+  program cut, the Presenter "[CI PROBE]"), and right before
+  "Feature-level Playwright (post-deploy spec)" (camera-box's request,
+  6.10.2026). The suite switches cg OBS's program for the A/V
   gate's probe scene and presses scenes through the facade, and minutes
   pass between the deploy's wait and the take.
 - Hardening (review rounds 3-4): a body over 64 KiB (`MAX_BODY_BYTES`; a
@@ -468,7 +471,7 @@ is already pushed (history rewrite is banned), a LATER commit carrying
 `while deque.len() > CAP { deque.pop_front(); }` is correct code that a
 `>`→`<` mutant turns into an infinite loop on an empty deque — cargo-mutants
 reports TIMEOUT (300 s), which fails the shard exactly like a MISSED mutant
-(#192 r3, `loop_stats.rs::SubmitHist::observe`). When one push can overshoot
+(#192 r3, `loop_stats.rs::SubmitHist::observe`, deleted by #221 lane 3). When one push can overshoot
 by at most one, write `if len > CAP { pop_front(); }`; for bulk trims use
 `truncate`/`drain(..n)` with a `saturating_sub` count. Any loop whose exit
 depends on a comparison a mutant can flip needs a structural bound.

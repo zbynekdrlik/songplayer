@@ -2,7 +2,7 @@
  * Thin wrapper around obs-websocket-js for post-deploy Playwright tests.
  *
  * Used by the post-deploy suite to switch scenes and verify that SongPlayer's
- * scene-driven playback engine reacts correctly.
+ * program (the playback authority since #221 L4b) reacts correctly.
  *
  * #221 L3: the SCENE driver connects to SongPlayer's obs-websocket facade
  * (`FACADE_WS_URL`, :4456), the server Companion's buttons talk to: studio

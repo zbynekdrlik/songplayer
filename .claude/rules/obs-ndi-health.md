@@ -147,8 +147,13 @@ cutover" below.
   gate's receiver-rise wait read `SP-program`'s receivers, so a stale input
   that lands on the new port fails or masks them on the very first run. Set
   every stale `sp-*` input's `ndi_source_name` to `""` (an empty source
-  stops a DistroAV receiver) or remove those scenes, then after the deploy
-  check `GET /api/v1/program` `health.connections` = the real consumers.
+  stops a DistroAV receiver), then after the deploy check
+  `GET /api/v1/program` `health.connections` = the real consumers. NEVER
+  remove those scenes (release 0.71.0 review): the facade forwards cg OBS's
+  scene list as it is (`with_songplayer_scenes` rewrites only the current
+  program / preview fields), so Companion's playlist buttons and the
+  post-deploy suite (`scenes.includes("sp-fast")`, `pickBaselineScene`, the
+  A/V gate's baseline) find a playlist by its `sp-*` scene NAME in it.
 - **`SP-program`'s port moves once** (it used to be created after the
   playlist senders): its consumers (the Presenter, strih, the stream)
   reconnect to the pinned OLD port and must re-resolve; confirm each one
@@ -230,7 +235,7 @@ there needs tests that kill its mutants.
 
 ## E2E dark gate (post-deploy suite) — on `SP-program` (#127, #221 B4 step 6)
 
-`post-deploy.spec.ts` "SP-program has a live NDI receiver — the program is not dark" polls `GET /api/v1/program` (≤ 60 s, no scene switch) until `programReceiverVerdict` says `ok`: a source on program, `health.connections > 0` and the server's `degraded_reason` `null`. `connections`: `>0` live, `0` dark (also right after a start, before the sender's first poll, when the server names no reason yet), `<0` no valid reading (the SDK's error value) — keep polling on both; `source: null` = nothing on program, a failure too. `post-deploy-dabing.spec.ts` asks the same of SP-program next to "SP-dabing is up" (the dub takes the program). Pure decision logic lives in `e2e/ndi-health-gate.ts` (unit-tested by `ndi-health-gate.spec.ts` in the ubuntu **mock** suite — a `test()` that never touches `page` runs with no browser/box). Keep the baseline-scene discipline (CLAUDE.md "E2E must not switch to disruptive OBS scenes").
+`post-deploy.spec.ts` "SP-program has a live NDI receiver — the program is not dark" polls `GET /api/v1/program` (≤ 60 s, no scene switch) until `programReceiverVerdict` says `ok`: a source on program, `health.connections > 0` and the server's `degraded_reason` `null`. `connections`: `>0` live, `0` dark (also right after a start, before the sender's first poll, when the server names no reason yet), `<0` no valid reading (the SDK's error value) — keep polling on both; `source: null` = nothing on program, a failure too. `post-deploy-dabing.spec.ts` asks the same of SP-program next to "the Dabing pipeline is up" (the dub takes the program). Pure decision logic lives in `e2e/ndi-health-gate.ts` (unit-tested by `ndi-health-gate.spec.ts` in the ubuntu **mock** suite — a `test()` that never touches `page` runs with no browser/box). Keep the baseline-scene discipline (CLAUDE.md "E2E must not switch to disruptive OBS scenes").
 
 ## Gotcha: `e2e/post-deploy-report/index.html` is a TRACKED artifact
 

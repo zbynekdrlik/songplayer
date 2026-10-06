@@ -136,11 +136,12 @@ delivery to the program bus; `SP-program`'s own NDI submit is timed on
   The health doc's `PacingStats` is `merge_pacing_stats`: late/max_late/iter_p99/
   dropped from the submit thread, seq/repeats/resyncs/relatches/lag/prep from the
   pacer (`/api/v1/ndi/health` shape unchanged); the paced heartbeat reads a
-  submit-side snapshot (`emit_heartbeat_paced`) since the submit thread owns the
-  submitter. The pure decisions (`submit_handoff.rs`) are Linux-tested +
-  mutation-scored; the `SharedHandoff` + consumer are cross-platform in
-  `paced_output.rs` (Linux-tested over `MockNdiBackend`; only the blocking wait
-  and the thread lifecycle are `mutants::skip`). Acceptance = box test 6
+  submit-side snapshot (`emit_heartbeat_paced`). The pure decisions
+  (`submit_handoff.rs`) are Linux-tested + mutation-scored; the
+  `SharedHandoff` + consumer are cross-platform in `paced_output.rs`
+  (Linux-tested over a recording sink, `paced_output_tests.rs` `Recorder`,
+  since #221 lane 3 took the NDI sender away; only the blocking wait and the
+  thread lifecycle are `mutants::skip`). Acceptance = box test 6
   (pacing ON, stems child resident, 60 s): `late_frames` < 1 % of
   `seq`, `resyncs`/`dropped`/`audio.underruns` 0, `lock_state=LOCKED`; then the
   flag stays ON and camera-box#1302 gets the receiver verdict.
@@ -164,7 +165,14 @@ delivery to the program bus; `SP-program`'s own NDI submit is timed on
   logic + tests live in sp-core and sp-ui calls it). The PER-CARD `LockBadge`
   keeps #164's "only where actionable" rule (hidden while pacing off). `sp_core::
   genlock::lock_state::summarize` stays a 3-state (no OFF) reference. Testid
-  `genlock-global-badge`.
+  `genlock-global-badge`. **What it covers since #221 lane 3** (release 0.71.0
+  review): every input of the summary is a playlist PIPELINE's 60 s window,
+  i.e. its pacer and its delivery to the program bus (`submit_handoff.rs`),
+  never an NDI wire. `SP-program`'s own sender is NOT in the badge: its
+  health is `GET /api/v1/program` `health` (`resyncs`, `late_dropped`,
+  `timing`) and its receiver `degraded_reason`. With nothing playing (e.g.
+  "OBS manuál" on program) the badge reads LOCKED "no live output" while
+  the clock is ok.
 - SDK-clocked wall-clock AUDIO emitter (#192, rounds 1–5) and the round-4
   video catch-up (`av_catchup.rs`): DELETED (#221 lane 3, the top section).
   What they taught that still holds: a coarse `thread::sleep` on the box
@@ -373,8 +381,9 @@ treated as a memory-residency problem (design record, issue #147 comment
 5812936370). The box runs with ~15 GB of commit over physical RAM. When the
 child's working set grows, Windows trims SongPlayer's frame pools and the NDI
 SDK's buffers, and the paced submit then takes hard page faults. Priority class,
-`timeBeginPeriod(1)` and the TIME_CRITICAL audio thread protect CPU time. None
-of them protects residency, so round 9 adds two guarantees and one gauge.
+`timeBeginPeriod(1)` and the TIME_CRITICAL audio thread (the #192 emitter,
+deleted by #221 lane 3) protected CPU time. None of them protects residency,
+so round 9 adds two guarantees and one gauge.
 
 ### The two settings
 
@@ -687,11 +696,12 @@ Now:
     far under the grid's 2 s cap, so it never grows.
   - **Cost.** Fader latency rises by up to the lead (`karaoke-stems.md` G5).
   - **Dashboard preview follows the lead.** The preview (#178) taps audio at
-    the SAME decode seam and holds it for `preview_stream::lead_ms_for(true)`
+    the SAME decode seam and holds it for `preview_stream::decode_seam_lead_ms()`
     = `PACED_AUDIO_LEAD_MS − 40` = 210 ms. If the lead changes, this changes
     with it (the test pins both), or the preview plays its audio early.
-  - **Scope.** The pacing-OFF path is untouched: `open_synced_decoder` →
-    `decoder_tolerance_ms` (40, or 1540 with the wall-clock emitter).
+  - **Scope.** The paced path is the only path since #221 lane 3 (the
+    pacing-OFF path, `open_synced_decoder` → 40 ms, or 1540 ms with the
+    wall-clock emitter, is deleted).
   - **A stall longer than ~250 ms still underruns.** Raise the lead only with
     a box measurement of the stall length, never as a blind bump.
   - **Resume flushes the cushion (known bound, unchanged design).**
@@ -1388,8 +1398,8 @@ submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
   moves by r < one slot), so the 2-deep handoff has nothing to coalesce. A
   REAL stall still catches up (up to 8 back to back) and may.
 
-**Tests** (`paced_output_tests.rs`, single-threaded over `MockNdiBackend` on ONE
-settable clock; 8×2 / 12×2 song frames and a 4×2 black name each boundary's
+**Tests** (`paced_output_tests.rs`, single-threaded over a recording sink, the
+`Recorder` of the bus delivery since #221 lane 3, on ONE settable clock; 8×2 / 12×2 song frames and a 4×2 black name each boundary's
 picture): a song change with 3 slots between the scopes AND a decoder whose
 open takes 3 more pre-roll slots, play → pause → resume → paused song change,
 and idle → play all give stamps with Δ = exactly one slot, the fills holding

@@ -13,7 +13,7 @@ import { describeProgram, readProgramState } from "./program-state";
  * asserts the on/off-program badge that matches it. What this proves after
  * every deploy:
  *  1. the Dabing section lists a READY dub (the 40-min acceptance sample),
- *     its output SP-dabing is up, and SP-program (which carries it to every
+ *     its pipeline (label SP-dabing) is up, and SP-program (which carries it to every
  *     consumer while it is on program, #221 B4 step 6) has a receiver;
  *  2. the shared Player on /dabing is driven by a REAL mouse: a drag on the
  *     mix-vokaly fader PATCHes the console and stays put, a drag on the seek bar posts a
@@ -185,7 +185,7 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
       .toBeGreaterThanOrEqual(landed + 1000);
   }
 
-  test("a READY dub is listed, SP-dabing is up and SP-program has a receiver", async ({
+  test("a READY dub is listed, the Dabing pipeline is up and SP-program has a receiver", async ({
     request,
   }) => {
     const dub = await readyDub(request);
