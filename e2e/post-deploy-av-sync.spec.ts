@@ -34,6 +34,12 @@
  * the input is shown or not — and is pointed at `SP-program` only once
  * `SP-program` carries the baseline playlist (never "OBS manuál": cg OBS
  * would record itself); the take waits until SP-program's receivers rose.
+ * #221 dev.18: every StartRecord then waits until the probe's AUDIO flows
+ * (`obs-audio-wait.ts`: its InputVolumeMeters input peak above -60 dBFS for
+ * 1 s in a row, bounded at 20 s): a freshly attached DistroAV receiver
+ * delivers its picture first and its audio only once camera-box's genlock
+ * audio pairing locks (~5 s), and a take started before that opened with
+ * two dropouts (dev.17, run 37423917199). The dropout check is unchanged.
  * afterAll idles the probe first (an idle probe shows nothing, so restoring
  * the program to "OBS manuál" can never loop the picture), restores the
  * program scene, then cg OBS's own scene only when the program restore did
@@ -119,9 +125,10 @@ const ANALYSIS_TIMEOUT_MS = 60_000; // ~5-10 s on the box
 const MAX_TAKES = 3;
 const TEST_TIMEOUT_MS = 300_000;
 // A retake starts only while this much of the budget has been used. A full
-// worst-case take (skip 15 + play 30 + record 20 + stop 10 + analysis 60 +
-// cleanup 35 + evidence copy 2 x 5 s) then still fits within TEST_TIMEOUT_MS.
-const RETAKE_BEFORE_MS = 110_000;
+// worst-case take (skip 15 + play 30 + the probe audio wait 20 (#221 dev.18,
+// AUDIO_WAIT_TIMEOUT_MS) + record 20 + stop 10 + analysis 60 + cleanup 35 +
+// evidence copy 2 x 5 s = 200 s) then still fits within TEST_TIMEOUT_MS.
+const RETAKE_BEFORE_MS = TEST_TIMEOUT_MS - 200_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -596,7 +603,19 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       let lastTakeNote = "";
       const undeleted: string[] = [];
       for (let take = 1; take <= MAX_TAKES; take++) {
-        // 3. Which video is playing, and its ORIGINAL sidecars.
+        // 3. The probe's AUDIO must flow first (#221 dev.18, the file doc): a
+        // take started inside the receiver's audio warm-up opens with
+        // dropouts that are not SongPlayer's. Waited before the video is
+        // read, so the song read is the one playing at StartRecord.
+        assertNotTornDown("the probe audio wait");
+        const audio = await rec.waitForInputAudio(AV_PROBE_INPUT);
+        console.log(
+          `A/V gate take ${take}: probe audio flowing after ${Math.round(audio.waitedMs)} ms ` +
+            `(${audio.withInput}/${audio.events} meter events with the probe, ` +
+            `loudest ${audio.loudestDbfs.toFixed(1)} dBFS)`,
+        );
+
+        // Which video is playing, and its ORIGINAL sidecars.
         const videoId = await currentVideo();
         expect(videoId, `/api/v1/mix now_playing must name playlist ${playlistId}'s video`).not.toBeNull();
         const videos = await getJson<Array<{ id: number; youtube_id: string; title: string }>>(
