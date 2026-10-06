@@ -81,7 +81,11 @@ Rules for every post-deploy spec:
   hangs the test instead of failing it: run hand mutants with an outer
   timeout. An HTTP read of ANOTHER service goes through the test's own
   `request` with an absolute URL and `{ timeout, failOnStatusCode: false }`
-  (the baseURL does not apply). On the
+  (the baseURL does not apply). A TEXT pin must fail on the OLD text: a
+  `toContain` of a word that already appears elsewhere in the message is
+  vacuous (#221 dev.19 review round 11: "backward step" matched "backward
+  steps are not shown"); pin the exact new phrase and run it against the
+  parent's helper before calling it a pin. On the
   Tier-0 box a pure helper (interfaces / type annotations only, no enums)
   also runs with plain node and no install: a scratch `check.mts` that
   imports the helper by its absolute `.ts` path and mirrors the spec's cases
