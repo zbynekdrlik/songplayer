@@ -322,22 +322,24 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     it fails naming it, never as an unmeasurable take.
   - **A freshly attached probe delivers VIDEO before AUDIO: wait for its
     audio meter before recording (#221 dev.18).** The receiver count rises
-    as soon as DistroAV connects, and the picture flows at once.
-    camera-box's genlock audio pairing (camera-box 1367) WITHHOLDS the
-    audio until its latch fixes the delay, ~5 s after the attach. The
-    dev.17 cg OBS log shows it:
-    - bound 08:49:33.114;
+    as soon as DistroAV connects, and the picture flows at once. The audio
+    comes with gaps until camera-box's genlock audio pairing
+    (camera-box 1367) has fixed the delay: by their design the pairing
+    withholds it until its latch locks. The dev.17 cg OBS log (local time):
+    - the probe's scene reset 08:49:31.566;
+    - DistroAV bound the source 33.114;
     - `genlock-shallow-lock` 36.133;
     - DEGRADED `audio_pairing` 36.217;
-    - LOCKED 37.214.
+    - LOCKED 37.214 (4.1 s after the bind).
 
-    The gate's StartRecord came at 35.705. The take opened with two
-    dropouts (0.100 s / 22 ms, 0.227 s / 234 ms, run 37423917199), and the
-    rest of it was clean. Before lane 3 the gate recorded a long-attached
-    input and never met this. So before EVERY take the gate waits for the
-    probe's audio (`ObsDriver.waitForInputAudio`, the pure decision in
-    `e2e/obs-audio-wait.ts`), and only then reads the playing video and
-    records:
+    The gate logged its take start at 35.705: 4.1 s after the reset and
+    2.6 s after the bind. The take opened with two dropouts (0.100 s / 22 ms,
+    0.227 s / 234 ms, run 37423917199). Its audio came at 0.122–0.227 s,
+    stopped until 0.461 s, and was clean from there. Before lane 3 the gate
+    recorded a long-attached input and never met this. So before EVERY take
+    the gate waits for the probe's audio (`ObsDriver.waitForInputAudio`, the
+    pure decision in `e2e/obs-audio-wait.ts`), and only then reads the
+    playing video and records:
     - **Signal:** obs-websocket's `InputVolumeMeters`. Each input's
       `inputLevelsMul` is one `[magnitude × volume, peak × volume, peak]`
       triple per channel, linear. The gate reads the THIRD value, the input
@@ -347,12 +349,23 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       the run:
       - a silent reading;
       - an event without the probe (obs-websocket meters only ACTIVE
-        inputs: the probe is on cg OBS's program from the scene switch);
+        inputs, those on the PROGRAM feed — `obs_source_active`; an input
+        only on a preview is not metered. The probe is on cg OBS's program
+        from the scene switch);
       - more than 500 ms between meter events (only observed continuity
         counts).
     - **Bound:** 20 s. It rejects with the meter state it saw: the events,
       the ones with the probe, its last peaks, the loudest, and the longest
-      run.
+      run. It also says what that state means (`explainAudioWait`):
+      - no event at all: the subscription did not apply;
+      - events, but never the probe: the probe is not active (cg OBS is not
+        on the probe scene, or its item is hidden);
+      - the probe metered but silent: the pairing's warm-up never ended, or
+        SP-program carries no sound.
+
+      A connection that closes mid-wait ends it at once, naming the close
+      (the driver listens to `ConnectionClosed`). It never sits out the
+      bound and then reports "no event".
     - **High-volume event:** obs-websocket sends it every 50 ms only to a
       session that asks for it. The cg OBS recorder asks with a `Reidentify`
       (All | `InputVolumeMeters` = 1 << 16) for the wait alone, and drops it
@@ -363,9 +376,12 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     - **Limit:** obs-websocket HOLDS a level until no audio has arrived for
       0.3 s (`Obs_VolumeMeter.cpp` `GetMeterData`), so a gap shorter than
       ~300 ms is invisible to the meter. The 1 s run clears the dev.17
-      warm-up, whose gaps fell within ~0.35 s of the first audio. A
-      warm-up with sub-300 ms gaps later than that would still show as
-      dropouts. Never "fix" that by loosening the dropout check.
+      warm-up, whose gaps fell within ~0.35 s of the first audio. LOCKED
+      came ~1.4 s after that first audio, though, so a 1 s run can start a
+      take before LOCKED. A warm-up with sub-300 ms gaps later than 1 s would
+      still show as dropouts. If a take ever opens with dropouts after the
+      wait, raise `AUDIO_HOLD_MS` (one constant; 2 s starts the dev.17 take
+      after LOCKED). Never "fix" it by loosening the dropout check.
     - **Not used:** camera-box's vendor request `GetGenlockStats` (poll
       until the probe is locked). It is specific to their OBS build; the
       meter is the build-independent condition.
@@ -410,9 +426,13 @@ the output every consumer takes, through cg OBS's own probe scene (below).
 
     A `fail` is never retaken. Neither is an audio-side `cannot_measure`,
     which can be a real audio fault. A retake starts only while less than
-    100 s of the 300 s budget is used (`RETAKE_BEFORE_MS`). That way a full
-    worst-case take of 200 s still fits: the 20 s audio wait and copying
-    the evidence are both counted.
+    110 s of the 320 s budget is used. The spec derives it:
+    `RETAKE_BEFORE_MS` = `TEST_TIMEOUT_MS` − `WORST_TAKE_MS` − 10 s.
+    - `WORST_TAKE_MS` is 200 s. It is summed from the take's own bounds,
+      including the 20 s audio wait and copying the evidence.
+    - The 10 s covers the calls the sum does not count.
+    - #221 dev.18 raised `TEST_TIMEOUT_MS` from 300 s to 320 s, by the
+      audio wait's bound, so a run keeps the retake room it had before.
     The run is classified by `classifyAvSyncRun`: the stdout JSON and the exit
     code must agree. Missing JSON (a numpy import failure, an argparse error)
     is `error`, not a verdict.
@@ -448,8 +468,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     the file. An undeletable file fails the test after the verdict, never
     masking it.
   - `afterAll` first sets `tornDown`. Playwright does not cancel a
-    timed-out body, so after that point the body refuses to start a
-    recording, the recording wait, the analysis, or a skip.
+    timed-out body, so after that point the body refuses to start the
+    probe audio wait, a recording, the recording wait, the analysis, or a
+    skip.
   - It awaits an in-flight `StartRecord`, which is tracked as
     `startInFlight`. A start that resolved is ours, even if the body never
     got to set `recordingOurs`. A REJECTED start (an operator recording was
