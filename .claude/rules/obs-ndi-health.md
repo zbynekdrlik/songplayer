@@ -362,12 +362,16 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       - no event at all: the subscription did not apply;
       - events, but never the probe: the probe is not active (cg OBS is not
         on the probe scene, or its item is hidden);
-      - the probe's ONLY run above the floor came after silence and was
-        still open when the bound hit (`runsAboveFloor` 1 + `openRun`,
-        rounds 4-5): its audio started late. The text names only what was
-        observed: when the run began and its last reading, both before the
-        bound. An open run is one whose last reading is within the gap
-        bound of the end, the same `<=` as the streak;
+      - the probe's ONLY run above the floor came after a METERED silence (a
+        reading of the probe at or below the floor) and was still open when
+        the bound hit (`runsAboveFloor` 1 + `readingsAtOrBelowFloor` > 0 +
+        `openRun`, rounds 4-6): its audio started late.
+        - The text names only what was observed: when the run began and
+          its last reading, both before the bound.
+        - An open run is one whose last reading is within the gap bound of
+          the end, the same `<=` as the streak.
+        - A probe that became active late (absent from the events, never
+          read silent) is not a late start; it falls to the next case;
       - the probe above the floor at times, but never for the hold, in any
         other way (several runs, or one that ended; rounds 3-5): DistroAV
         delivers it with gaps, or the meter events stopped (more than
