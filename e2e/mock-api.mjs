@@ -298,6 +298,45 @@ const settings = {
 // #210: the fixture as loaded, restored by `/__mock/settings-reset`.
 const settingsInitial = { ...settings };
 
+// #229: the settings API never shows a secret, as the server does. The source
+// of truth is Rust: `sp_core::config::{SECRET_MASK, SECRET_SETTINGS,
+// SECRET_SETTING_SUFFIXES, is_secret_setting}` and the GET / PATCH handlers
+// in `crates/sp-server/src/api/settings.rs`. A secret setting is one on the
+// list or one named like one (a retired credential still in a node's
+// database is masked too). GET shows every non-blank secret as the mask (a
+// blank one as stored: it reveals nothing); a PATCH value exactly the mask
+// keeps the stored secret. The handlers below read and write `settings`
+// itself, so the mock's own routes (e.g. `remote.auth` of
+// `/api/v1/program`) still see the stored values in clear, like the server's
+// workers. (`peers` is not used by the dashboard and is not modelled.)
+const SECRET_MASK = "********";
+const SECRET_SETTINGS = [
+  "gemini_api_key",
+  "genius_access_token",
+  "obs_websocket_password",
+  "peer_api_key",
+  "remote_ws_password",
+];
+const SECRET_SETTING_SUFFIXES = ["_key", "_token", "_password", "_secret"];
+
+function isSecretSetting(key) {
+  return (
+    SECRET_SETTINGS.includes(key) ||
+    SECRET_SETTING_SUFFIXES.some((suffix) => key.endsWith(suffix))
+  );
+}
+
+/** The stored settings as `GET /api/v1/settings` shows them (#229). */
+function shownSettings() {
+  const shown = {};
+  for (const [key, value] of Object.entries(settings)) {
+    const masked =
+      isSecretSetting(key) && typeof value === "string" && value.trim() !== "";
+    shown[key] = masked ? SECRET_MASK : value;
+  }
+  return shown;
+}
+
 const resolumeHosts = [];
 let nextResolumeId = 1;
 
@@ -559,16 +598,22 @@ app.post("/api/v1/control", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-// Settings
+// Settings (#229: every secret masked, see `shownSettings`)
 app.get("/api/v1/settings", (_req, res) => {
-  res.json(settings);
+  res.json(shownSettings());
 });
 
+// #229: as the server — a value exactly the mask for a secret setting keeps
+// the stored one (nothing written), any other value replaces it (`""` clears
+// it), and the answer is 204 with NO body.
 app.patch("/api/v1/settings", (req, res) => {
   for (const [key, value] of Object.entries(req.body)) {
+    if (value === SECRET_MASK && isSecretSetting(key)) {
+      continue;
+    }
     settings[key] = value;
   }
-  res.json(settings);
+  res.status(204).end();
 });
 
 // #210: test-only — restore the settings fixture (specs that save settings

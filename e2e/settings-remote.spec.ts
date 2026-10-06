@@ -120,7 +120,8 @@ test("the remote control defaults to off on 4456 without a password; one save se
   });
   await expect(page.locator('[data-testid="settings-remote-port"]')).toHaveValue("4460");
   await expect(page.locator('[data-testid="settings-remote-password"]')).toHaveValue(
-    SPEC_PASSWORD,
+    // #229: GET shows a stored secret masked, never in clear.
+    "********",
   );
 
   expect(realConsoleErrors()).toEqual([]);
