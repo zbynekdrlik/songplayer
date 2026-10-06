@@ -58,6 +58,14 @@ frontend-e2e mock-API wait loop makes actionlint exit 1 — that is not your dif
   gate drop the old swap-file hacks. Exclusions are STRUCTURAL (cfg(windows)/shell-out/
   HTTP glue) or documented provably-equivalent/TIMEOUT pins — keep every rationale
   comment; a dropped exclusion resurrects a survivor and reds a future PR.
+- **A `file.rs:LINE:COL` pin goes stale SILENTLY** when lines above it move: it
+  then excludes nothing (or the wrong operator), and nothing fails until that
+  file is in some PR's diff. #221 lane 3 found four pins (`pacer.rs`,
+  `lock_state.rs`) already wrong at base. After ANY edit above a pinned line, or
+  when a pinned file is in the diff, re-check each pin: `sed -n LINEp` the file,
+  confirm column COL is the operator the comment names inside the named
+  function, and keep the comment's line numbers in step. A doc-only edit in a
+  pinned file should stay line-neutral.
 - cargo-mutants exit codes: **0**=all caught, **2**=survivors, **3**=timeouts (all
   "expected" for the full sweep), **1**=usage, **4**=baseline/build fail (real tooling
   errors). The PR gate treats a MISSED mutant as a HARD fail (never continue-on-error).
