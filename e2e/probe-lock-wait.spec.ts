@@ -453,6 +453,13 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     const unknown = explainProbeLock(lock("DEGRADED", "recent_event", probe()), PROBE);
     expect(unknown).toContain('"DEGRADED" (reason "recent_event")');
     expect(unknown).not.toContain("before the attach");
+    // Review round 7: the generic recent_event text says the latch is
+    // box-wide and how to find the input (diff the two input lists), never
+    // "the one with the most events".
+    expect(unknown).toContain("box-wide");
+    expect(unknown).toContain("inputs at the bound");
+    expect(named).toContain("box-wide");
+    expect(other).not.toContain("box-wide");
     // Another reason with events before the attach: not the wake either.
     const other = explainProbeLock(lock("DEGRADED", "input_unlocked", probe()), PROBE, 3);
     expect(other).toContain('"DEGRADED" (reason "input_unlocked")');
@@ -557,6 +564,31 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(msg).not.toContain("before the attach");
   });
 
+  test("the bound lists every genlock input as the last answered line saw it", async () => {
+    // Review round 7: the box-wide latch's input is the one that turned
+    // connected and live with events between the line before the attach
+    // and this one, so the bound logs this one too.
+    const clock = fakeClock();
+    const reads = fakeRead(clock, () => lock("DEGRADED", "recent_event", probe()));
+    const msg = await rejection(
+      waitForProbeLock(reads.read, PROBE, { now: clock.now, sleep: clock.sleep, timeoutMs: 100 }),
+    );
+    expect(msg).toContain(
+      'inputs at the bound: "sp-slow" connected=true idle=false locked=true events=?; ' +
+        `"${PROBE}" connected=true idle=false locked=true events=1`,
+    );
+    // No answered read: no input list.
+    const clock2 = fakeClock();
+    const failing = async (): Promise<GenlockLock> => {
+      clock2.t += 10;
+      throw new Error("HTTP 500");
+    };
+    const none = await rejection(
+      waitForProbeLock(failing, PROBE, { now: clock2.now, sleep: clock2.sleep, timeoutMs: 100 }),
+    );
+    expect(none).not.toContain("inputs at the bound");
+  });
+
   test("summarizeInputs names every genlock input's state and lifetime events", () => {
     // Review round 6: the box-wide recent_event latch can come from ANY
     // reconnected input, so the line read before the attach is logged per
@@ -565,7 +597,7 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
       inputs: {
         "sp-slow": { locked: true, connected: true, idle: false, relocks: 0, late_holds: 0 },
         [PROBE]: { locked: true, connected: true, idle: true, relocks: 2, late_holds: 1 },
-        "OBS cam": { locked: false, connected: false, idle: false, relocks: "x" },
+        "OBS cam": { locked: false, connected: false, idle: false, relocks: "x", late_holds: 0 },
         "SP-dabing in": { locked: true, connected: true, idle: false, relocks: 1, late_holds: "y" },
       },
     });
