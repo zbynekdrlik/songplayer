@@ -107,9 +107,11 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         .unwrap();
 
     // cg OBS: a playlist scene, a baseline scene and a manual browser scene.
-    let mut cg = FakeObsState::default();
-    cg.scene_list = vec!["sp-fast".into(), "sp-slow".into(), "Slido".into()];
-    cg.program_scene = Some("sp-slow".into());
+    let cg = FakeObsState {
+        scene_list: vec!["sp-fast".into(), "sp-slow".into(), "Slido".into()],
+        program_scene: Some("sp-slow".into()),
+        ..Default::default()
+    };
     let fake = FakeObsServer::spawn_with_state(cg).await;
 
     // SongPlayer's real OBS client, connected to cg OBS.

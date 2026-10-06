@@ -255,6 +255,13 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   takes `&mut T`, even to an `impl Fn(&mut T)`, is flagged under `-D
   warnings`. Write a typed binding instead: `let t: &mut T = &mut guard;
   f(t)`. It compiles in every call shape and leaves nothing for the lint.
+- **`clippy::field_reassign_with_default` on a test fixture** (#221 lane 3,
+  CI Lint run 37399017815). `let mut s = Fake::default();` followed by
+  `s.field = …;` is linted under `-D warnings` (`--all-targets` covers
+  `tests/`). Build it with struct-update syntax instead:
+  `Fake { field: …, ..Default::default() }`. Mutating through a method
+  (`s.map.insert(…)`) is not flagged. A lane deleting code around such a
+  fixture (here the `FakeObsState` knobs) leaves exactly this shape behind.
 - **`clippy::assertions_on_constants` on `assert!(SOME_CONST)`** (#147
   bundle, reasoned before CI). Asserting a `const bool` is linted like
   `assert!(true)`, and `assert_eq!(CONST, true)` trips
