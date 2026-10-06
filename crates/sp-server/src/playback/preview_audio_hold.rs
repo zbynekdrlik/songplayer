@@ -10,7 +10,7 @@
 //! INTO the encoder's audio input — a lead-long silence preroll, then every
 //! block the moment it arrived — so ~1.5 s (~576 KB) of PCM had to sit in flight
 //! in the loopback socket, because ffmpeg consumes audio only in step with the
-//! wall-clock video. With Windows-sized loopback buffers it does not fit:
+//! video. With Windows-sized loopback buffers it does not fit:
 //! `write_all` blocks, the bounded seam channel fills and keeps its OLDEST
 //! blocks, and the aligner — which placed a block by when it was DEQUEUED —
 //! wrote them seconds late while its `ahead_ms` still read 0. That invisible
@@ -44,7 +44,7 @@ use super::preview_stream::{
     PREVIEW_AUDIO_FRAMES_PER_MS, align_block, align_timeout, block_tail_range,
 };
 
-/// How far ahead of the wall-clock video the written audio runs (ms), capped at
+/// How far ahead of the video the written audio runs (ms), capped at
 /// the seam lead. Enough that ffmpeg never waits for audio (a silence pad fires
 /// once the written audio is 150 ms behind its target and the feeder polls
 /// every 30 ms, so the audio stays ahead of the video), small enough (~77 KB of

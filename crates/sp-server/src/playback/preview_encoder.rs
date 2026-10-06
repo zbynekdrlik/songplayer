@@ -32,6 +32,7 @@ use super::preview_audio_probe::log_feed_level;
 use super::preview_stream::{
     OUT_H, OUT_W, PREVIEW_AUDIO_FRAMES_PER_MS, StreamShared, audio_preroll_samples,
 };
+use super::preview_video_clock::{PREVIEW_FPS, spawn_video_feeder};
 
 /// Encoder preference ladder: hardware first, software last.
 pub const ENCODER_LADDER: [&str; 4] = ["h264_nvenc", "h264_qsv", "h264_amf", "libx264"];
@@ -173,12 +174,18 @@ pub fn parse_available_encoders(encoders_stdout: &str) -> Vec<String> {
 /// `libx264` additionally gets `-preset ultrafast -tune zerolatency` for the
 /// low-latency software path.
 ///
-/// #178 round 3 — ONLY the video input is wall-clock stamped. The raw f32le PCM
-/// input keeps its SAMPLE-COUNT timestamps: `-use_wallclock_as_timestamps 1` on
-/// the bursty PCM made the box's ffmpeg (N-123867, 2026-04) mux ZERO audio
-/// packets (1 traf per moof), and an fMP4 whose audio track never fills is
-/// unplayable in MSE forever (`buffered` is the track intersection). A/V is
-/// aligned on OUR side instead — the audio feeder prepends silence
+/// #221 — NO input is wall-clock stamped: both COUNT on SongPlayer's monotonic
+/// clock. The rawvideo input is read at `-framerate` [`PREVIEW_FPS`] (the video
+/// feeder writes exactly that many frames per second, `preview_video_clock.rs`),
+/// the f32le PCM input by its sample count (the audio feeder,
+/// `preview_audio_hold.rs`). ffmpeg's `-use_wallclock_as_timestamps` read the
+/// SYSTEM clock, so the box's nightly UTC step moved the video timeline alone
+/// and a running preview showed the picture seconds behind the sound. #178
+/// round 3 already kept stamps off the PCM: on the bursty PCM they made the
+/// box's ffmpeg (N-123867, 2026-04) mux ZERO audio packets (1 traf per moof),
+/// and an fMP4 whose audio track never fills is unplayable in MSE forever
+/// (`buffered` is the track intersection). A/V is aligned on OUR side — the
+/// audio feeder prepends the connect gap as silence
 /// ([`audio_preroll_samples`](super::preview_stream::audio_preroll_samples)) —
 /// because `-itsoffset` was not a dependable lever on the box (audio `start_time`
 /// stayed 0.000). So there is NO `-itsoffset` and no `lead_ms` argument.
@@ -187,22 +194,22 @@ pub fn build_ffmpeg_args(video_port: u16, audio_port: u16, encoder: &str) -> Vec
         "-hide_banner".into(),
         "-loglevel".into(),
         "error".into(),
-        // Video input: raw NV12 at the fixed canvas size, wall-clock stamped.
-        "-use_wallclock_as_timestamps".into(),
-        "1".into(),
+        // Video input: raw NV12 at the fixed canvas size, counted at 25 fps.
         "-f".into(),
         "rawvideo".into(),
         "-pix_fmt".into(),
         "nv12".into(),
         "-s".into(),
         format!("{OUT_W}x{OUT_H}"),
+        "-framerate".into(),
+        PREVIEW_FPS.to_string(),
         "-i".into(),
         format!("tcp://127.0.0.1:{video_port}"),
     ];
     a.extend([
-        // Audio input: interleaved f32, 48 kHz stereo. NO wall-clock stamps —
-        // the sample-count timestamps are what the box's ffmpeg muxes (see the
-        // fn doc); the silence preroll in the audio feeder aligns it to video.
+        // Audio input: interleaved f32, 48 kHz stereo, counted by its samples
+        // (see the fn doc); the silence preroll in the audio feeder aligns it
+        // to the video.
         "-f".to_string(),
         "f32le".to_string(),
         "-ar".to_string(),
@@ -239,6 +246,8 @@ pub fn build_ffmpeg_args(video_port: u16, audio_port: u16, encoder: &str) -> Vec
             // each media fragment is 0.5 s, so the child emits EXACTLY two
             // fragments per second — that is why FragmentRelay::produced_ms()
             // can read the media time produced as (fragments since Init) × 500 ms.
+            // 25 is PREVIEW_FPS, the input's -framerate (#221: input rate =
+            // output rate, so cfr neither drops nor repeats a frame).
             "-g",
             "25",
             "-fps_mode",
@@ -500,10 +509,10 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
 
     // #178 round 3: deterministic A/V alignment on our side (the box ffmpeg keeps
     // the PCM audio start_time at 0.000, so `-itsoffset` is not a lever). A shared
-    // clock base + the wall-time of the FIRST video frame written let the audio
-    // feeder prepend exactly the silence the video timeline is already ahead by.
+    // monotonic clock base + the slot of video frame 0 let the audio feeder
+    // prepend exactly the silence the video timeline is already ahead by.
     let clock_base = Instant::now();
-    // Microseconds since `clock_base` of the first video write; 0 = none yet.
+    // Microseconds since `clock_base` of video frame 0's slot; 0 = none yet.
     let first_video_us = Arc::new(AtomicU64::new(0));
 
     // ffmpeg (as TCP client) opens its inputs SEQUENTIALLY: it connects input 0
@@ -674,55 +683,13 @@ fn accept_with_deadline(listener: &TcpListener, deadline: Duration) -> Option<Tc
     }
 }
 
-/// Feed tapped NV12 frames to the child's video socket until shutdown or a
-/// write error (child gone). Drains any STALE queued frames on start (a previous
-/// viewer's backlog would otherwise front-run the live edge) and stamps the
-/// wall-time of the first successful write into `first_video_us` (0 = none yet)
-/// so the audio feeder can measure how far the video timeline is ahead (#178 r3).
-#[cfg_attr(test, mutants::skip)]
-fn spawn_video_feeder(
-    shared: Arc<StreamShared>,
-    mut sock: TcpStream,
-    shutdown: Arc<AtomicBool>,
-    clock_base: Instant,
-    first_video_us: Arc<AtomicU64>,
-) -> std::io::Result<std::thread::JoinHandle<()>> {
-    std::thread::Builder::new()
-        .name("preview-vfeed".into())
-        .spawn(move || {
-            let rx = shared.video_receiver();
-            // Drop any frames queued before this child connected.
-            while rx.try_recv().is_ok() {}
-            while !shutdown.load(Ordering::Relaxed) {
-                match rx.recv_timeout(Duration::from_millis(200)) {
-                    Ok(frame) => {
-                        // #147 r10: the written buffer goes back to the pool.
-                        let written = sock.write_all(&frame);
-                        shared.recycle_frame(frame);
-                        if written.is_err() {
-                            break;
-                        }
-                        // Stamp the first successful video write (`.max(1)` so a
-                        // genuine sub-µs elapse never reads back as "none yet").
-                        if first_video_us.load(Ordering::Relaxed) == 0 {
-                            let us = clock_base.elapsed().as_micros() as u64;
-                            first_video_us.store(us.max(1), Ordering::Relaxed);
-                        }
-                    }
-                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
-                }
-            }
-        })
-}
-
-/// How often the audio feeder logs its wall-clock alignment (#184 round G2).
+/// How often the audio feeder logs its alignment (#184 round G2).
 const AFEED_LOG_EVERY: Duration = Duration::from_secs(10);
 /// Longest the audio feeder blocks waiting for a tapped block (µs) — a silence
 /// pad still runs this often while the decode seam is quiet. It must stay under
 /// the write-ahead (200 ms) minus the pad threshold (150 ms) with room for a
 /// Windows timer oversleep (~15.6 ms), so the written audio stays ahead of the
-/// wall-clock video and ffmpeg never waits for audio (#184 round-G3 review;
+/// video and ffmpeg never waits for audio (#184 round-G3 review;
 /// G2 polled every 200 ms and could fall 150 ms behind).
 const AFEED_POLL_US: u64 = 30_000;
 
@@ -730,7 +697,7 @@ const AFEED_POLL_US: u64 = 30_000;
 /// f32 bytes) until shutdown or a write error. On start it DRAINS any stale
 /// queued blocks, then PREPENDS silence equal to how far the video timeline is
 /// already ahead (`audio_preroll_samples(connect_gap_ms, 0)`) so the PCM
-/// sample-count timeline starts where the video wall-clock timeline started
+/// sample-count timeline starts where the video's frame 0 started
 /// (#178 round 3 — replaces the box-unreliable `-itsoffset`).
 ///
 /// #184 round G3: the decode-seam LEAD (`lead_ms`) is no longer written up

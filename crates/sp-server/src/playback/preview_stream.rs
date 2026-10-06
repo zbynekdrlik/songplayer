@@ -17,7 +17,7 @@
 //!   producer / emit thread.
 //! * With a viewer, the downscale runs on the decode thread (nearest-neighbour,
 //!   no encode) into a RECYCLED buffer; a full channel DROPS the frame (the
-//!   child paces at CFR) — never blocks.
+//!   feeder writes 25 fps of the monotonic clock anyway, #221) — never blocks.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -39,7 +39,8 @@ pub const OUT_NV12_LEN: usize = (OUT_W as usize) * (OUT_H as usize) * 3 / 2;
 const BLACK_Y: u8 = 16;
 const NEUTRAL_C: u8 = 128;
 
-/// Bounded video backlog handed to the feeder (drop-on-full; the child paces CFR).
+/// Bounded video backlog handed to the feeder (drop-on-full; the feeder writes
+/// 25 fps of the monotonic clock, `preview_video_clock.rs`).
 const VIDEO_CHANNEL_CAP: usize = 4;
 /// Bounded audio backlog (small f32 blocks; drop-on-full so the emit path never waits).
 const AUDIO_CHANNEL_CAP: usize = 48;
@@ -179,7 +180,7 @@ pub fn decode_seam_lead_ms() -> u32 {
 
 /// How many interleaved-stereo f32 samples of SILENCE the audio feeder prepends
 /// to align the preview's sample-count audio timeline with the video's
-/// wall-clock timeline (#178 round 3). `connect_gap_ms` is how long the video
+/// frame-count timeline (#178 round 3; both on the monotonic clock since #221). `connect_gap_ms` is how long the video
 /// input had already been feeding when the audio input connected (feed-on-connect
 /// opens video first), capped at 5 s so a late-connecting audio input can never
 /// prepend an unbounded silence; `lead_ms` is the decode-seam A/V lead
@@ -199,7 +200,7 @@ pub const PREVIEW_AUDIO_FRAMES_PER_MS: u64 = 48;
 /// Pad threshold (#184 round G2): when the audio written so far lags the wall
 /// clock by MORE than this, the feeder writes silence up to the wall — on a
 /// block AND on every feeder poll (200 ms in G2, 30 ms since round G3), so
-/// ffmpeg (which interleaves the wall-clock video with the sample-count audio by
+/// ffmpeg (which interleaves the counted video with the sample-count audio by
 /// timestamp) is never starved of audio and never stops emitting fragments.
 pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
 
@@ -254,8 +255,8 @@ pub fn block_tail_range(skip_frames: usize, block_samples: usize) -> std::ops::R
     start..whole
 }
 
-/// Keep the preview's SAMPLE-COUNT audio timeline on the video's WALL-CLOCK
-/// timeline in BOTH directions for one block of `block_frames` stereo frames
+/// Keep the preview's SAMPLE-COUNT audio timeline on the video's timeline (the
+/// real time elapsed on the monotonic clock, #221) in BOTH directions for one block of `block_frames` stereo frames
 /// (#184 round G2, replacing the add-only #178 item-15 gap fill): pad up to the
 /// wall when behind by more than [`ALIGN_PAD_THRESHOLD_MS`] (exactly like
 /// [`align_timeout`]); then, if the block would end more than [`MAX_AHEAD_MS`]
