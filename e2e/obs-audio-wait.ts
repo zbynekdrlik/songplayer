@@ -187,6 +187,8 @@ export interface AudioWaitReport {
   /** How many runs above the floor began (a run restarted after a gap in
    *  the events counts again). */
   runsAboveFloor: number;
+  /** How many readings of the probe were at or below the floor. */
+  readingsAtOrBelowFloor: number;
   /** The run above the floor still open when the wait ended — its last
    *  reading within the gap bound of the end — as what was observed: how
    *  long before the end it began, and its last reading. Null when none was. */
@@ -231,9 +233,9 @@ export function describeAudioWait(report: AudioWaitReport): string {
  * floor and hold:
  * - no event at all;
  * - an input that was never active;
- * - an active input whose ONLY run above the floor came after silence and
- *   was still open at the end (shorter than the hold): its audio started
- *   late;
+ * - an active input whose ONLY run above the floor came after a metered
+ *   silence (a reading of it at or below the floor) and was still open at
+ *   the end (shorter than the hold): its audio started late;
  * - an active input that rose above the floor but never held, in any other
  *   way (several runs, or one that ended): audio with gaps, or the meter
  *   events stopped;
@@ -262,8 +264,10 @@ export function explainAudioWait(
   // camera-box's genlock audio pairing withholds packets from the MIX, after
   // the meter's tap, so it never silences or breaks this meter (review
   // round 2): no branch below names it.
+  // A single open run had no silent reading inside it, so a silent reading
+  // of the probe came before it: "after silence" is what was metered.
   const open = report.openRun;
-  if (open !== null && report.runsAboveFloor === 1) {
+  if (open !== null && report.runsAboveFloor === 1 && report.readingsAtOrBelowFloor > 0) {
     return (
       `The probe's audio rose above the floor only after silence, ` +
       `${Math.round(open.beganMsBeforeEnd)} ms before the bound, and was still above it ` +
@@ -327,6 +331,7 @@ export function waitForInputAudio(
       lastPeaksDbfs: null,
       longestStreakMs: 0,
       runsAboveFloor: 0,
+      readingsAtOrBelowFloor: 0,
       openRun: null,
     };
     const maxGapMs = opts.maxGapMs ?? MAX_METER_GAP_MS;
@@ -380,6 +385,10 @@ export function waitForInputAudio(
         if (streak.since !== null) {
           if (streak.since !== prevSince) report.runsAboveFloor++;
           report.longestStreakMs = Math.max(report.longestStreakMs, at - streak.since);
+        } else if (peak !== null) {
+          // A reading of the probe that ended (or never began) a run: at or
+          // below the floor.
+          report.readingsAtOrBelowFloor++;
         }
         if (audioFlowing(streak, at, holdMs)) finish(null);
       },
