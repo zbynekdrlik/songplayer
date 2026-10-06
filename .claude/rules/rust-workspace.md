@@ -747,6 +747,12 @@ the test that kills each one BEFORE CI's mutation gate runs.
   (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
   effect with a behaviour test (#217 addendum 2,
   `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+- It never SWAPS a method or a field for its sibling (`pop_front` ↔
+  `pop_back`, `front()` ↔ `back()`, `first` ↔ `last`) — #221 review round
+  5: a queue that replaced its OLDEST entry instead of its newest passed
+  all 18 tests because none ever held two entries. For every such choice,
+  write a test whose state makes the two siblings differ (two entries
+  pending), and check it against the swapped variant in the scratch model.
 - **A branch whose ONLY effect is a log line survives the gate** (#224
   part 2 review round 3: `if … && !slew.owe(..) { warn!(..) }` — the
   delete-`!` mutant only moves the WARN). Give such a branch an observable
