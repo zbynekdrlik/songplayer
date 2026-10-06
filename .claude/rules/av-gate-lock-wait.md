@@ -109,11 +109,17 @@ lock, so a senderless probe line would read as a GO).
    from `recent_event_inputs`: camera-box names its TOP LIFETIME offender
    there (recomputed every tick), not the input whose count rose, so a probe
    wake can be named as another input and another input's real event as the
-   probe. It is named only while the read showing it started within
+   probe. It is named only while the last answered read started within
    `WAKE_LATCH_WINDOW_MS` (70 s: the 60 s latch plus ~10 s to wake) of the
-   attach: the probe stays attached across takes, and a take can start long
-   after the attach. A camera-box wake re-baseline fix is the cure, not a
-   longer bound.
+   BIND SongPlayer saw (the spec takes the instant its probe-receiver poll
+   resolves; DistroAV may take up to that poll's 30 s to bind): the probe
+   stays attached across takes, and a take can start long after the attach.
+   The latch is BOX-WIDE: an idle OR absent input counts 0 phase events, so
+   ANY genlock input on cg OBS that reconnects with lifetime events holds
+   `recent_event` for 60 s too (e.g. after the SongPlayer restart the deploy
+   does just before the E2E). A camera-box re-baseline fix (a woken or
+   reconnected input's totals are not new events) is the cure, not a longer
+   bound.
 4. **The refusal trusts the newest line before the attach:** a probe whose
    FIFO locked AFTER that line (unlocked in it) and was idled since keeps
    `locked: true`, so a heartbeat before this run's attach could read as a
