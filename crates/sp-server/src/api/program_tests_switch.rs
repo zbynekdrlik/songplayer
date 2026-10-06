@@ -135,7 +135,7 @@ async fn cut_text(state: &AppState, source: i64) -> (StatusCode, String) {
 /// 409 and changes NOTHING while `on_program` (published as `sp-fast`) is on
 /// SP-program: the source, its on-air scene, the persisted source and the
 /// cut counter stay. It is recorded as a keep with `reason`. Returns the
-/// answer's text.
+/// answer's `error` (the reason in words).
 async fn assert_refused(state: &AppState, source: i64, reason: &str, on_program: i64) -> String {
     let cuts = state.program_bus.status().health.cuts;
     let (status, text) = cut_text(state, source).await;
@@ -163,7 +163,10 @@ async fn assert_refused(state: &AppState, source: i64, reason: &str, on_program:
     assert_eq!(record["cut_boundary_100ns"], Value::Null);
     assert_eq!(record["via"], "dashboard");
     assert_eq!(record["cg_forward"], Value::Null);
-    text
+    body["error"]
+        .as_str()
+        .expect("the reason in words")
+        .to_string()
 }
 
 /// #221 ROZHODNUTÉ 6022247729 (replaces the L4a pin "a playlist whose catalog
@@ -178,8 +181,8 @@ async fn a_dashboard_cut_to_an_inactive_playlist_is_refused_and_changes_nothing(
     set_active(&state, slow, false).await;
     let (status, _) = cut(&state, fast).await;
     assert_eq!(status, StatusCode::OK);
-    let text = assert_refused(&state, slow, "playlist_inactive", fast).await;
-    assert!(text.contains("inactive"), "a clear reason: {text}");
+    let error = assert_refused(&state, slow, "playlist_inactive", fast).await;
+    assert!(error.contains("inactive"), "a clear reason: {error}");
 }
 
 /// The same for an ACTIVE playlist whose catalog names no scene: one with no
@@ -194,8 +197,8 @@ async fn a_dashboard_cut_to_a_playlist_that_names_no_scene_is_refused_and_change
     let (status, _) = cut(&state, fast).await;
     assert_eq!(status, StatusCode::OK);
     for pid in [unnamed, dup_a, dup_b] {
-        let text = assert_refused(&state, pid, "no_scene", fast).await;
-        assert!(text.contains("names no scene"), "a clear reason: {text}");
+        let error = assert_refused(&state, pid, "no_scene", fast).await;
+        assert!(error.contains("names no scene"), "a clear reason: {error}");
     }
 }
 

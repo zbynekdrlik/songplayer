@@ -194,14 +194,15 @@ pub fn ProgramControl() -> impl IntoView {
                 // button was not disabled yet). Say why: the 409 body's
                 // reason code in Slovak (the generic text for a body it
                 // cannot read).
-                Err((409, body)) => {
-                    let reason = serde_json::from_str::<CutRefused>(&body)
+                Err((409, answer)) => {
+                    let reason = serde_json::from_str::<CutRefused>(&answer)
                         .map(|r| r.reason)
                         .unwrap_or_default();
                     let why = refusal_text(&reason);
                     let _ = error.try_set(Some(format!("Strih odmietnutý: {why}")));
                 }
-                Err((_, e)) => {
+                Err(e) => {
+                    let e = crate::api::post_error(path, e);
                     let _ = error.try_set(Some(format!("Strih zlyhal: {e}")));
                 }
             }

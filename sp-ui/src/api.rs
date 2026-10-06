@@ -24,10 +24,17 @@ pub async fn post_json<T: Serialize, R: DeserializeOwned>(
 ) -> Result<R, String> {
     post_json_status(path, body)
         .await
-        .map_err(|(status, text)| match status {
-            0 => text,
-            _ => format!("POST {path} → {status}"),
-        })
+        .map_err(|e| post_error(path, e))
+}
+
+/// The message a failed POST to `path` shows (the [`post_json_status`]
+/// error): `POST {path} → {status}` for a non-2xx answer, else the error
+/// itself.
+pub fn post_error(path: &str, (status, text): (u16, String)) -> String {
+    match status {
+        0 => text,
+        _ => format!("POST {path} → {status}"),
+    }
 }
 
 /// [`post_json`] that keeps a non-2xx answer: `Err((status, body))`, so a
