@@ -323,9 +323,10 @@ the output every consumer takes, through cg OBS's own probe scene (below).
   - **A freshly attached probe delivers VIDEO before AUDIO: wait for its
     audio meter before recording (#221 dev.18).** The receiver count rises
     as soon as DistroAV connects, and the picture flows at once. The audio
-    comes with gaps until camera-box's genlock audio pairing
-    (camera-box 1367) has fixed the delay: by their design the pairing
-    withholds it until its latch locks. The dev.17 cg OBS log (local time):
+    reaches cg OBS's MIX (what StartRecord records) only with gaps until
+    camera-box's genlock audio pairing (camera-box 1367) has fixed the
+    delay: by their design the pairing withholds the packets from the mix
+    until its latch locks. The dev.17 cg OBS log (local time):
     - the probe's scene reset 08:49:31.566;
     - DistroAV bound the source 33.114;
     - `genlock-shallow-lock` 36.133;
@@ -360,8 +361,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       - no event at all: the subscription did not apply;
       - events, but never the probe: the probe is not active (cg OBS is not
         on the probe scene, or its item is hidden);
-      - the probe metered but silent: the pairing's warm-up never ended, or
-        SP-program carries no sound.
+      - the probe metered but silent: DistroAV delivers it no audio
+        (SP-program carries no sound, or the probe's `ndi_audio` is off).
+        Never the pairing: see "Blind to the withhold" below.
 
       A connection that closes mid-wait ends it at once, naming the close
       (the driver listens to `ConnectionClosed`). It never sits out the
@@ -373,18 +375,35 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       fails: a `Reidentify` without the field KEEPS the current ones. A
       connect never asks for it. `e2e/obs-driver-protocol.spec.ts` pins
       both on a msgpack stub.
-    - **Limit:** obs-websocket HOLDS a level until no audio has arrived for
-      0.3 s (`Obs_VolumeMeter.cpp` `GetMeterData`), so a gap shorter than
-      ~300 ms is invisible to the meter. The 1 s run clears the dev.17
-      warm-up, whose gaps fell within ~0.35 s of the first audio. LOCKED
-      came ~1.4 s after that first audio, though, so a 1 s run can start a
-      take before LOCKED. A warm-up with sub-300 ms gaps later than 1 s would
-      still show as dropouts. If a take ever opens with dropouts after the
-      wait, raise `AUDIO_HOLD_MS` (one constant; 2 s starts the dev.17 take
-      after LOCKED). Never "fix" it by loosening the dropout check.
-    - **Not used:** camera-box's vendor request `GetGenlockStats` (poll
-      until the probe is locked). It is specific to their OBS build; the
-      meter is the build-independent condition.
+    - **Blind to the withhold (review round 2) — the meter sits BEFORE
+      it.** obs-websocket's meter is an audio CAPTURE CALLBACK
+      (`Obs_VolumeMeter.cpp`), and camera-box's libobs calls the callbacks
+      for EVERY packet the source outputs: `source_signal_audio_data`, at
+      the end of `source_output_audio_data` (camera-box
+      `vendor/obs-studio/libobs/obs-source.c`). That includes the packets
+      the pairing withholds from the mix (the `GENLOCK_AUDIO_ACT_WITHHOLD`
+      branch just before it). camera-box's `genlock-audio-pairing.md`:
+      "its packets never enter the mix (they still reach the audio
+      callbacks/monitoring)". So the wait proves DistroAV delivers audio
+      and adds its 1 s. It does NOT observe the pairing's lock. Its cover
+      for the warm-up is the time it takes: the dev.17 take would have
+      started ~1 s later, after its audio turned clean (0.461 s into it)
+      but before LOCKED (37.214). A slower first lock (camera-box's
+      withhold runs up to 10 s after the first packet) would reach the
+      take again. Waiting on the pairing's own state is the open design
+      question on #221. camera-box's documented channels:
+      - the probe's `genlock-fifo audit` line in the OBS log
+        (`audio_hold=pending`);
+      - the `genlock-lock-json:` facet on `:8899/bundle-state.json`
+        (per-input `locked`; on change and a ~30 s heartbeat).
+
+      A vendor request `GetGenlockStats` was mentioned, but it is not in
+      camera-box's tree (checked 6.10.2026).
+    - **Limit:** obs-websocket also HOLDS a level until no audio has
+      arrived for 0.3 s (`Obs_VolumeMeter.cpp` `GetMeterData`), so a gap
+      in DistroAV's own delivery shorter than ~300 ms is invisible too.
+      Never "fix" a take that still opens with dropouts by loosening the
+      dropout check.
   - `afterAll` idles the probe FIRST (an idle probe shows nothing, so
     restoring the program to "OBS manuál" can never loop the picture through
     cg OBS), then restores the program scene through the facade (a manual
