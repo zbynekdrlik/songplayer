@@ -480,9 +480,11 @@ playlists on air) went with it.
   since #221 L3: "Seed settings" seeds `remote_ws_enabled=true` and fails
   unless the facade listens on 4456 without a password — what the E2E scene
   driver (`FACADE_WS_URL`) connects with.
-  - The password gates the WebSocket only. Like every other setting, it is
-    stored in plain text and readable through the unauthenticated
-    `GET /api/v1/settings`, so it does not protect against a hostile LAN.
+  - The password gates the WebSocket only. It is stored in plain text in
+    the database; since #229 the unauthenticated `GET /api/v1/settings`
+    shows it as `********` (`settings-secrets.md`). It still does not
+    protect against a hostile LAN (the database, the WebSocket without
+    TLS).
   - `RemoteSettings`' `Debug` never prints the password.
 - The surface is bounded:
   - a message or frame over `MAX_MESSAGE_BYTES` (1 MiB), text or binary,

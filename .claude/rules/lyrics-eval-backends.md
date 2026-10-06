@@ -230,7 +230,10 @@ raw outputs re-scored on the SAME manifest.
 
 **Run on win-resolume** (PowerShell, lyrics venv has google-genai 2.24.0; the
 key CSV goes ONLY into the process env — never echoed, never on argv; invalid
-key #1 and 429s rotate automatically). Code from the integrated branch
+key #1 and 429s rotate automatically). Since #229 `GET …/api/v1/settings`
+shows `gemini_api_key` as `********` (`settings-secrets.md`), so the key CSV
+is read read-only from SongPlayer's database inside Python — UNVERIFIED on the
+box until its first run (#229). Code from the integrated branch
 (`<ref>` = `dev` or the merge sha):
 
 ```powershell
@@ -240,7 +243,7 @@ Invoke-WebRequest "https://codeload.github.com/zbynekdrlik/songplayer/zip/<ref>"
 Expand-Archive "$root\src.zip" "$root\src" -Force
 $repo = (Get-ChildItem "$root\src" -Directory | Select-Object -First 1).FullName
 $py = 'C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe'
-$env:GEMINI_API_KEY = (Invoke-RestMethod 'http://10.77.9.201:8920/api/v1/settings').gemini_api_key
+$env:GEMINI_API_KEY = & $py -c "import sqlite3; db = sqlite3.connect('file:C:/ProgramData/SongPlayer/songplayer.db?mode=ro', uri=True); print(db.execute('SELECT value FROM settings WHERE key = ?', ('gemini_api_key',)).fetchone()[0])"
 Set-Location $repo
 # smoke ONE fixture per arm first (catches a request-shape 400 before 40 calls)
 & $py -m eval.lyrics.run_one_call --mode whole --raw-dir "$root\raw" --only 5JW87KKDTcU

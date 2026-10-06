@@ -9,6 +9,27 @@ The `eval/dubbing/` harness compares TTS engines for the Slovak dabing-dub lane.
 `fit.py` is PURE (CI runs only `tests/test_fit.py`); engines/mix/runner run at
 eval time on dev1 + dev2. Every hard-won fact below was verified live 2026-09-18.
 
+## Reading the Gemini key (#229: the settings API shows `********`)
+
+Since #229 `GET …/api/v1/settings` masks every secret (`settings-secrets.md`):
+a key read through it is the literal `********`. Never read a key through the
+API; never put one on a command line, in a log or in a commit.
+
+- **On win-resolume:** read it read-only from SongPlayer's database inside
+  Python, straight into the process env (the value goes from Python's stdout
+  into the variable: never echoed, never on argv). `gemini_api_key` is a
+  comma-separated list; this takes its first entry:
+
+  ```powershell
+  $py = 'C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe'
+  $env:GEMINI_API_KEY = & $py -c "import sqlite3; db = sqlite3.connect('file:C:/ProgramData/SongPlayer/songplayer.db?mode=ro', uri=True); print(db.execute('SELECT value FROM settings WHERE key = ?', ('gemini_api_key',)).fetchone()[0].split(',')[0].strip())"
+  ```
+
+  UNVERIFIED on the box until its first run (#229).
+- **On dev1:** put it in `GEMINI_API_KEY` through the secret channel,
+  `python3 ~/devel/airuleset/airuleset.py secret exec GEMINI_API_KEY -- <cmd>`
+  (the child gets the value as that env var; its output is redacted).
+
 ## Soniox TTS v2 (`tts-rt-v2`) voice cloning — REST surface (verified)
 
 Two DIFFERENT base URLs, both `Authorization: Bearer <SONIOX_API_KEY>`:
@@ -62,8 +83,9 @@ torch 2.10 with chatterbox's pinned deps and broke transformers/`LlamaModel`).
 - Pull large files OFF win-resolume via a temp `python -m http.server` +
   `curl` from dev1 (NOT `FileDownload` — it base64s into the transcript).
 - Transcript: `eval/lyrics/backends/gemini_3_5_transcribe.py` (`GEMINI_API_KEY`
-  from `GET http://10.77.9.201:8920/api/v1/settings`, csv list, first entry
-  works). Translation: POST the `translator.rs::build_prompt` text to the box's
+  in the env as in "Reading the Gemini key" above — never through
+  `GET …/api/v1/settings`, which shows `********` since #229; csv list, first
+  entry works). Translation: POST the `translator.rs::build_prompt` text to the box's
   CLIProxy `http://127.0.0.1:18787/v1/chat/completions` (localhost-only — run the
   curl ON the box), model `claude-fable-5-1`.
 - Stems: `scripts/stem_worker.py separate` on dev2 (needs `audio-separator[gpu]`
@@ -139,8 +161,9 @@ same 7 sentences (`seg_spec` items 2..8), plus an intensity layer.
   `.claude/rules/dabing.md` "round H step 2". Reuse the eval venv
   (`~/.claude/work-products/songplayer/dubbing-test/.venv-live`, has
   `google-genai==2.24.0`; add `librosa soundfile numpy` for the f0 read); the key
-  is read INSIDE Python from `GET http://10.77.9.201:8920/api/v1/settings`
-  `gemini_api_key` (csv, first entry), never on a command line / log / commit.
+  (`gemini_api_key`, csv, first entry) goes into the process env as in "Reading
+  the Gemini key" above — `GET …/api/v1/settings` shows `********` since #229 —
+  never on a command line / log / commit.
 - **Session-length drift (#184 round E, verified 2026-09-21).** The pin HOLDS at a
   session START but the model DRIFTS inside a LONG session. Experiment on the same
   120 s EN slice (`seg.wav`, key read inside python from the box settings): ONE
@@ -249,13 +272,14 @@ the Developer-API default `api_version` is `v1beta` (`dub_worker.py` pins
 
 **Running it on win-resolume (main session, MCP `Shell`, PowerShell).** The script
 imports nothing from `eval.*`, so copy the single file to the box and run it
-directly. Put the key in the process env from the SongPlayer settings WITHOUT
-printing it, and start the ~26-min run detached (an MCP Shell call would time out):
+directly. Put the key in the process env WITHOUT printing it, read read-only
+from SongPlayer's database inside Python ("Reading the Gemini key" above; the
+settings API shows `********` since #229), and start the ~26-min run detached
+(an MCP Shell call would time out):
 
 ```powershell
-$s = Invoke-RestMethod http://127.0.0.1:8920/api/v1/settings
-$env:GEMINI_API_KEY = ($s.gemini_api_key -split ',')[0].Trim()
 $py  = 'C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe'
+$env:GEMINI_API_KEY = & $py -c "import sqlite3; db = sqlite3.connect('file:C:/ProgramData/SongPlayer/songplayer.db?mode=ro', uri=True); print(db.execute('SELECT value FROM settings WHERE key = ?', ('gemini_api_key',)).fetchone()[0].split(',')[0].strip())"
 $pr  = 'C:\ProgramData\SongPlayer\cache\tools\live_translate_continuous_probe.py'
 $src = 'C:\ProgramData\SongPlayer\cache\Morning Prayer Devotion_Jonathan_Dhp-qrZDK1g_normalized_audio.flac'
 $out = 'C:\ProgramData\SongPlayer\cache\probe_h\voice_none'
@@ -268,7 +292,7 @@ Start-Process -FilePath $py -WindowStyle Hidden `
 
 `Start-Process` inherits `$env:GEMINI_API_KEY` from that shell; the key never
 appears in argv, a log or the transcript. UNVERIFIED until the first box run:
-that a process started this way survives the MCP `Shell` call returning (job-object
+the read-only database read (#229), and that a process started this way survives the MCP `Shell` call returning (job-object
 teardown) — confirm `stderr.log` keeps growing a minute later; if it died, launch
 it through a scheduled task instead. Arm B = the same with `--voice Charon`
 and `$out = ...\probe_h\voice_charon` (run the arms one after the other, not in
