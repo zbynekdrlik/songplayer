@@ -616,7 +616,7 @@ async fn the_program_reports_the_transition() {
 async fn a_dashboard_cut_is_published_with_the_playlists_catalog_scene() {
     use crate::playback::program_on_air::program_scene_name;
     let state = test_state().await;
-    let fast = add_playlist(&state.pool, "fast").await; // NDI output SP-fast
+    let fast = add_playlist(&state.pool, "fast").await; // ndi_output_name SP-fast
     let (status, _) = call(
         state.clone(),
         "POST",
@@ -654,7 +654,7 @@ async fn a_dashboard_cut_is_published_with_the_playlists_catalog_scene() {
 #[tokio::test]
 async fn the_remote_block_names_sp_programs_scene_after_a_dashboard_cut() {
     let state = test_state().await;
-    let fast = add_playlist(&state.pool, "fast").await; // NDI output SP-fast
+    let fast = add_playlist(&state.pool, "fast").await; // ndi_output_name SP-fast
     let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
     assert_eq!(json["remote"]["program_scene"], serde_json::Value::Null);
     let (status, json) = call(

@@ -721,7 +721,7 @@ async fn play_video_off_program_broadcasts_waiting_for_scene() {
     );
 }
 
-/// Playlist 10 (NDI output `SP-fast`) with one normalized song, 77, and its
+/// Playlist 10 (`ndi_output_name` `SP-fast`) with one normalized song, 77, and its
 /// pipeline, off program; the Resolume and dashboard WS receivers.
 async fn one_song_engine() -> (
     PlaybackEngine,
