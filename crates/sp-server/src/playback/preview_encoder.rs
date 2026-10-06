@@ -393,17 +393,29 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
                     *g = Some("libx264".to_string());
                 }
             }
-            // #221 A1: a fresh child after a long pause, for the viewers: the
-            // stopped stream ends (they reconnect onto the new init), no
-            // restart budget is spent. Nobody watching: settled below.
-            RunOutcome::Restart if shared.has_viewer() => {
+            // #221 A1: a fresh child after a long pause; not a crash, so no
+            // restart budget is spent. The viewers are read once, before any
+            // stream close (closed viewers leave).
+            RunOutcome::Restart => {
+                if !shared.has_viewer() {
+                    info!(
+                        label = shared.label(),
+                        "preview-encoder: a long pause with nobody watching — settling"
+                    );
+                    if shared.settle_unwatched_run().supervisor_exits() {
+                        return;
+                    }
+                    continue;
+                }
+                // The stopped stream ends: the viewers reconnect onto the
+                // new child's init.
                 info!(
                     label = shared.label(),
                     "preview-encoder: a fresh child after a long pause"
                 );
                 shared.end_stopped_stream();
             }
-            RunOutcome::ChildExitedNoInit | RunOutcome::ChildExited | RunOutcome::Restart => {
+            RunOutcome::ChildExitedNoInit | RunOutcome::ChildExited => {
                 // Nobody watching: settle it like a TTL stop (#184) — a viewer
                 // that subscribes as the child exits gets a new child. Read
                 // before any stream close (closed viewers leave).
