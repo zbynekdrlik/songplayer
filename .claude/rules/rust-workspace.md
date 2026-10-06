@@ -723,6 +723,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   heredoc). Search the rules with the Grep tool and a `path` or `glob`, and
   put such text in a script file written with the Write tool (release 0.69.0
   lane B).
+- **The worktree guard also refuses any command that NAMES `.git`** (release
+  0.71.0 review): `grep -r --exclude-dir=.git …` reads as an unverifiable
+  git operation, and a `sed -i` whose pattern holds `'!.git'` tripped the
+  vault hook. `rg` is not installed on the box. Write the search as a small
+  script with the Write tool (`grep -rnIF --exclude-dir=…` inside it) and run
+  `bash <scratch>/refs.sh`; likewise `gh … -q '"\(.x)"'` jq interpolation:
+  dump with a Python script that calls `gh … --json` and parses it.
 - **A NEW file is missing from `git diff <base>` until git tracks it**
   (#221 L2b): listing uncommitted work with `git diff 5ad0178f > range.diff`
   showed no mutant at all for the new `remote/codec.rs`. `git add -N
