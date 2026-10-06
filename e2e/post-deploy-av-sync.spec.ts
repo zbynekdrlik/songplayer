@@ -27,14 +27,16 @@
  * studio-mode path: preview + transition, SongPlayer's own program feedback);
  * the recording and the profile read stay on cg OBS (`OBS_WS_URL`). #221
  * lane 3: a playlist has no NDI output of its own, so the take records
- * SongPlayer's PROGRAM, `SP-program`, the output every consumer takes: cg OBS
- * is put on the gate's own probe scene (`av-sync-probe.ts`: one DistroAV
- * receiver of `SP-program`, provisioned by the gate, never an sp-* scene)
- * once `SP-program` carries the baseline playlist (never "OBS manuál": cg OBS
- * would record itself), and the take waits until that receiver is on
- * `SP-program`. cg OBS's own scene is restored first in afterAll, before the
+ * SongPlayer's PROGRAM, `SP-program`, the output every consumer takes,
+ * through the gate's own cg OBS probe scene (`av-sync-probe.ts`: one DistroAV
+ * input, provisioned by the gate, never an sp-* scene). The probe is IDLE
+ * (`ndi_source_name` "") outside the take — DistroAV keeps a receiver whether
+ * the input is shown or not — and is pointed at `SP-program` only once
+ * `SP-program` carries the baseline playlist (never "OBS manuál": cg OBS
+ * would record itself); the take waits until SP-program's receivers rose.
+ * afterAll restores cg OBS's scene first, idles the probe, then restores the
  * program scene, so cg OBS never shows `SP-program` while the program shows
- * cg OBS. Every
+ * cg OBS, and no probe receiver stays on `SP-program`. Every
  * recording file (plus its auto-remux sibling) is deleted, and an operator's
  * own running recording is never touched (`startRecord` refuses). The SONG
  * mixer faders are set to unity for the measurement and restored after.
@@ -50,7 +52,8 @@
  * - kills the analysis;
  * - settles a pending start (at most 10 s);
  * - stops our recording;
- * - restores the faders, cg OBS's scene and the program scene;
+ * - restores the faders, cg OBS's scene, idles the probe, then the program
+ *   scene;
  * - then deletes every recording made.
  * Every step is attempted even if an earlier one fails.
  *
@@ -76,11 +79,13 @@ import {
   AV_PROBE_INPUT,
   AV_PROBE_SCENE,
   NDI_INPUT_KIND,
+  pickTemplateInput,
   probeInputSettings,
   probeReceiverAttached,
   probeSteps,
   programCarriesBaseline,
   programSourceName,
+  receiversSettled,
 } from "./av-sync-probe";
 import { keepRecording, keepText, type Evidence } from "./av-sync-evidence";
 import {
@@ -148,14 +153,16 @@ interface ProgramView {
 }
 
 /**
- * #221 lane 3: make cg OBS's probe scene show `SP-program` (`av-sync-probe.ts`):
- * the scene and its one DistroAV receiver, created when missing (the
- * receiver's settings copied from an existing cg OBS NDI input), put in the
- * scene and re-pointed when they differ, never removed. Returns the source
- * name it shows.
+ * #221 lane 3: make cg OBS's probe scene ready and its input IDLE
+ * (`av-sync-probe.ts`): the scene and its one DistroAV input, created when
+ * missing (the input's settings copied from an existing cg OBS NDI input,
+ * with audio + full bandwidth forced, and no source), put in the scene, and
+ * idled when a run that died mid-take left it pointed; never removed.
+ * Returns the source name `SP-program` is advertised under, which the take
+ * points the probe at.
  */
 async function ensureProbeScene(rec: ObsDriver): Promise<string> {
-  const template = (await rec.listInputs(NDI_INPUT_KIND)).find((n) => n !== AV_PROBE_INPUT);
+  const template = pickTemplateInput(await rec.listInputs(NDI_INPUT_KIND));
   const templateSettings = template ? await rec.inputSettings(template) : null;
   const templateSource =
     typeof templateSettings?.ndi_source_name === "string" ? templateSettings.ndi_source_name : null;
@@ -175,8 +182,8 @@ async function ensureProbeScene(rec: ObsDriver): Promise<string> {
         : null;
   const inputInScene =
     sceneExists && current !== null && (await rec.sceneItemId(AV_PROBE_SCENE, AV_PROBE_INPUT)) !== null;
-  for (const step of probeSteps({ sceneExists, inputSource, inputInScene }, wanted)) {
-    console.log(`A/V gate: probe scene — ${step} (${AV_PROBE_SCENE}: ${wanted})`);
+  for (const step of probeSteps({ sceneExists, inputSource, inputInScene })) {
+    console.log(`A/V gate: probe scene — ${step} (${AV_PROBE_SCENE}, template ${template})`);
     if (step === "create_scene") {
       await rec.createScene(AV_PROBE_SCENE);
     } else if (step === "create_input") {
@@ -184,17 +191,35 @@ async function ensureProbeScene(rec: ObsDriver): Promise<string> {
         AV_PROBE_SCENE,
         AV_PROBE_INPUT,
         NDI_INPUT_KIND,
-        probeInputSettings(templateSettings, wanted),
+        probeInputSettings(templateSettings, ""),
       );
       await rec.fitToCanvas(AV_PROBE_SCENE, id);
     } else if (step === "add_to_scene") {
       const id = await rec.addSceneItem(AV_PROBE_SCENE, AV_PROBE_INPUT);
       await rec.fitToCanvas(AV_PROBE_SCENE, id);
     } else {
-      await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: wanted });
+      await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: "" });
     }
   }
   return wanted;
+}
+
+/**
+ * SP-program's receiver count once it has settled (two reads ~1.5 s apart
+ * agree, at most ~15 s): the idle probe's receiver leaves asynchronously and
+ * the sender polls its count about once a second.
+ */
+async function settledReceivers(request: APIRequestContext): Promise<number> {
+  const read = async () =>
+    (await getJson<ProgramView>(request, "/api/v1/program")).health.connections;
+  let previous: number | null = null;
+  let current = await read();
+  for (let i = 0; i < 10 && !receiversSettled(previous, current); i++) {
+    await sleep(1_500);
+    previous = current;
+    current = await read();
+  }
+  return current;
 }
 
 /** Kill a child AND its children (python -> ffmpeg), which keep the recording open. */
@@ -256,9 +281,11 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   let recorder: ObsDriver | null = null;
   let initialScene: string | null = null;
   // #221 lane 3: cg OBS's own program scene before the gate, restored in
-  // afterAll once the gate switched it to the probe scene (`cgSwitched`).
+  // afterAll once the gate switched it to the probe scene (`cgSwitched`), and
+  // whether the probe was pointed at SP-program (idled again in afterAll).
   let cgInitialScene: string | null = null;
   let cgSwitched = false;
+  let probePointed = false;
   let autoRemux = false;
   // Cleanup state shared with afterAll. A timed-out test body never reaches
   // its own finally, so afterAll finishes whatever is still marked here.
@@ -405,6 +432,13 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           `the A/V gate must restore cg OBS's program scene "${cgInitialScene}"`,
         ).toBe(cgInitialScene);
       });
+      // #221 lane 3: an idle probe holds no receiver on SP-program (DistroAV
+      // keeps one whether the input is shown or not).
+      await step("idle the probe", async () => {
+        if (!probePointed) return;
+        await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: "" });
+        probePointed = false;
+      });
       await step("restore the program scene", async () => {
         if (!initialScene) return;
         await driver.switchScene(initialScene);
@@ -481,12 +515,14 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       `SP-program must carry the baseline playlist ${baselinePid} (got source ${program.source})`,
     ).toBe(true);
     const probeSource = await ensureProbeScene(rec);
-    const receiversBefore = program.health.connections;
-    let switchedNow = false;
+    // The probe is idle now: SP-program's receivers without it.
+    const receiversBefore = await settledReceivers(request);
+    assertNotTornDown("pointing the probe at SP-program");
+    probePointed = true;
+    await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: probeSource });
     if ((await rec.currentProgramScene()) !== AV_PROBE_SCENE) {
       assertNotTornDown("cg OBS's probe scene switch");
       cgSwitched = true;
-      switchedNow = true;
       await rec.switchScene(AV_PROBE_SCENE);
     }
     // Wait until cg OBS's probe receiver is on SP-program (its receivers
@@ -495,7 +531,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       `cg OBS's probe receiver on ${probeSource} (SP-program's receivers above ${receiversBefore})`,
       30_000,
       async () => (await getJson<ProgramView>(request, "/api/v1/program")).health.connections,
-      (now) => probeReceiverAttached(switchedNow, receiversBefore, now),
+      (now) => probeReceiverAttached(receiversBefore, now),
     );
     const active = status.active_playlist_ids;
     const first = await getJson<HealthRow[]>(request, "/api/v1/ndi/health");

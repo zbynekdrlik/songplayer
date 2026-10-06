@@ -9,11 +9,13 @@ import {
   AV_PROBE_INPUT,
   AV_PROBE_SCENE,
   ndiHost,
+  pickTemplateInput,
   probeInputSettings,
   probeReceiverAttached,
   probeSteps,
   programCarriesBaseline,
   programSourceName,
+  receiversSettled,
 } from "./av-sync-probe";
 import { pickBaselineScene } from "./obs-baseline-scene";
 
@@ -45,43 +47,59 @@ test.describe("A/V gate probe scene (#221 lane 3)", () => {
     expect(programSourceName(undefined, null)).toBeNull();
   });
 
-  test("the probe input copies a template's settings with SP-program's name", () => {
+  test("the template is the baseline's input, else an sp-* one, never the probe", () => {
+    expect(pickTemplateInput(["cam1", "sp-fast_video", "sp-slow_video"])).toBe("sp-slow_video");
+    expect(pickTemplateInput([AV_PROBE_INPUT, "cam1", "sp-fast_video"])).toBe("sp-fast_video");
+    expect(pickTemplateInput([AV_PROBE_INPUT, "cam1"])).toBe("cam1");
+    expect(pickTemplateInput([AV_PROBE_INPUT])).toBeNull();
+    expect(pickTemplateInput([])).toBeNull();
+  });
+
+  test("the probe input copies a template, forces audio + full bandwidth, starts idle", () => {
     const template = {
       ndi_source_name: "RESOLUME-SNV (SP-slow)",
       ndi_behavior: 0,
-      ndi_behavior_timeout: 1,
-      ndi_bw_mode: 0,
+      ndi_bw_mode: 2, // audio only on the template: never on the probe
+      ndi_audio: false,
+      genlock_monitor: true,
+      genlock_fifo: true,
     };
-    expect(probeInputSettings(template, "RESOLUME-SNV (SP-program)")).toEqual({
-      ndi_source_name: "RESOLUME-SNV (SP-program)",
+    expect(probeInputSettings(template, "")).toEqual({
+      ndi_source_name: "",
       ndi_behavior: 0,
-      ndi_behavior_timeout: 1,
       ndi_bw_mode: 0,
+      ndi_audio: true,
+      genlock_monitor: false,
+      genlock_fifo: true,
     });
     expect(template.ndi_source_name, "the template is not changed").toBe("RESOLUME-SNV (SP-slow)");
-    expect(probeInputSettings(null, "X (SP-program)")).toEqual({
-      ndi_source_name: "X (SP-program)",
+    expect(probeInputSettings(null, "")).toEqual({
+      ndi_source_name: "",
+      ndi_audio: true,
+      genlock_monitor: false,
+      ndi_bw_mode: 0,
     });
   });
 
-  test("the provisioning steps: create, add, re-point, or nothing", () => {
-    const wanted = "RESOLUME-SNV (SP-program)";
+  test("the provisioning steps leave the probe ready and idle, never removed", () => {
     const missing = { sceneExists: false, inputSource: undefined, inputInScene: false };
-    expect(probeSteps(missing, wanted)).toEqual(["create_scene", "create_input"]);
-    expect(probeSteps({ ...missing, sceneExists: true }, wanted)).toEqual(["create_input"]);
+    expect(probeSteps(missing)).toEqual(["create_scene", "create_input"]);
+    expect(probeSteps({ ...missing, sceneExists: true })).toEqual(["create_input"]);
     // The input exists elsewhere: the scene is made and the input put in it.
+    expect(probeSteps({ sceneExists: false, inputSource: "", inputInScene: false })).toEqual([
+      "create_scene",
+      "add_to_scene",
+    ]);
+    // A run that died mid-take left it pointed at SP-program: idle it.
     expect(
-      probeSteps({ sceneExists: false, inputSource: wanted, inputInScene: false }, wanted),
-    ).toEqual(["create_scene", "add_to_scene"]);
+      probeSteps({ sceneExists: true, inputSource: "X (SP-program)", inputInScene: true }),
+    ).toEqual(["idle"]);
     expect(
-      probeSteps({ sceneExists: true, inputSource: "OLD (SP-program)", inputInScene: true }, wanted),
-    ).toEqual(["repoint"]);
-    expect(
-      probeSteps({ sceneExists: true, inputSource: null, inputInScene: false }, wanted),
-    ).toEqual(["add_to_scene", "repoint"]);
-    expect(
-      probeSteps({ sceneExists: true, inputSource: wanted, inputInScene: true }, wanted),
-    ).toEqual([]);
+      probeSteps({ sceneExists: true, inputSource: "X (SP-program)", inputInScene: false }),
+    ).toEqual(["add_to_scene", "idle"]);
+    // Ready and idle: nothing (no name set at all reads as idle too).
+    expect(probeSteps({ sceneExists: true, inputSource: "", inputInScene: true })).toEqual([]);
+    expect(probeSteps({ sceneExists: true, inputSource: null, inputInScene: true })).toEqual([]);
   });
 
   test("the take records SP-program only while it carries the baseline playlist", () => {
@@ -93,16 +111,19 @@ test.describe("A/V gate probe scene (#221 lane 3)", () => {
     expect(programCarriesBaseline(null, 7)).toBe(false);
   });
 
+  test("SP-program's receivers are settled once two reads agree", () => {
+    expect(receiversSettled(null, 3)).toBe(false);
+    expect(receiversSettled(4, 3)).toBe(false);
+    expect(receiversSettled(3, 3)).toBe(true);
+    expect(receiversSettled(0, 0)).toBe(true);
+  });
+
   test("the probe receiver is attached once SP-program's receivers rise", () => {
-    // Switched just now: the count must rise above the one before the switch.
-    expect(probeReceiverAttached(true, 3, 3)).toBe(false);
-    expect(probeReceiverAttached(true, 3, 4)).toBe(true);
-    expect(probeReceiverAttached(true, 0, 1)).toBe(true);
-    // A "no reading" before the switch counts as 0.
-    expect(probeReceiverAttached(true, -1, 0)).toBe(false);
-    expect(probeReceiverAttached(true, -1, 1)).toBe(true);
-    // cg OBS already showed the probe: any receiver will do.
-    expect(probeReceiverAttached(false, 5, 1)).toBe(true);
-    expect(probeReceiverAttached(false, 5, 0)).toBe(false);
+    expect(probeReceiverAttached(3, 3)).toBe(false);
+    expect(probeReceiverAttached(3, 4)).toBe(true);
+    expect(probeReceiverAttached(0, 1)).toBe(true);
+    // A "no reading" before the take counts as 0.
+    expect(probeReceiverAttached(-1, 0)).toBe(false);
+    expect(probeReceiverAttached(-1, 1)).toBe(true);
   });
 });
