@@ -524,6 +524,9 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
     // deadlock behind every "child did not connect its inputs" (#178, first live
     // box run: both nvenc and libx264 failed identically at the 5 s accept).
     let shutdown = Arc::new(AtomicBool::new(false));
+    // #221 A1: the video feeder asks for a fresh child after a gap it may
+    // not fill (`preview_video_clock::MAX_GAP_FILL_SLOTS`).
+    let restart = Arc::new(AtomicBool::new(false));
     let v_sock = match accept_with_deadline(&v_listener, Duration::from_secs(5)) {
         Some(s) => s,
         None => {
@@ -541,6 +544,7 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
         shared.clone(),
         v_sock,
         shutdown.clone(),
+        restart.clone(),
         clock_base,
         first_video_us.clone(),
     ) {
@@ -609,7 +613,7 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
             }
         };
 
-    let outcome = monitor_loop(shared, child.get(), &produced);
+    let outcome = monitor_loop(shared, child.get(), &produced, &restart);
 
     // Tear down: stop feeders, kill child, join everything (incl. the stderr
     // reader, which ends at the child's stderr EOF once the child is gone).
@@ -628,15 +632,25 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
 }
 
 /// Watch the viewer count + child liveness. Returns when the viewers have been
-/// gone past [`VIEWER_TTL`] or the child exits on its own.
+/// gone past [`VIEWER_TTL`], the child exits on its own, or the video feeder
+/// asks for a fresh child (`restart`, #221 A1: a gap too long to fill) — a
+/// `ChildExited`, which `supervise` respawns for the viewers.
 #[cfg_attr(test, mutants::skip)]
 fn monitor_loop(
     shared: &Arc<StreamShared>,
     child: &mut Child,
     produced: &Arc<AtomicBool>,
+    restart: &AtomicBool,
 ) -> RunOutcome {
     let mut empty_since: Option<Instant> = None;
     loop {
+        if restart.load(Ordering::Relaxed) {
+            info!(
+                label = shared.label(),
+                "preview-encoder: the video feeder asked for a fresh child"
+            );
+            return RunOutcome::ChildExited;
+        }
         // Child exited on its own?
         if let Ok(Some(_)) = child.try_wait() {
             // A child that emitted ANY stdout this run exited normally; one that

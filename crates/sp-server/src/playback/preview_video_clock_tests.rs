@@ -224,3 +224,81 @@ fn the_wait_runs_to_the_next_decision_and_never_below_zero() {
     clock.offer("C");
     assert_eq!(clock.wait_us(T0 + 70_000), 30_000, "slot 2 at 100 ms");
 }
+
+#[test]
+fn a_gap_of_ten_seconds_is_filled_and_a_longer_one_restarts_the_encoder() {
+    // 10.06 s after frame 0: slots 1-250 missed, slot 251 is the new picture's.
+    // The bound (MAX_GAP_FILL_SLOTS, 10 s) is written at once.
+    let mut clock = VideoClock::new();
+    clock.offer("A");
+    assert_eq!(clock.take_due(T0), Some((&"A", 1)));
+    clock.offer("B");
+    let at_bound = T0 + 251 * FRAME_US + DECIDE_LATE_US;
+    assert!(!clock.must_restart(at_bound), "250 slots are filled");
+    assert_eq!(
+        writes_at(&mut clock, at_bound, 4),
+        vec![("A", MAX_GAP_FILL_SLOTS), ("B", 1)]
+    );
+    assert_eq!(clock.stats().written, 252);
+
+    // One slot more: nothing is written, the feeder ends the encoder run.
+    let mut clock = VideoClock::new();
+    clock.offer("A");
+    assert_eq!(clock.take_due(T0), Some((&"A", 1)));
+    clock.offer("B");
+    let past_bound = at_bound + FRAME_US;
+    assert!(clock.must_restart(past_bound), "251 slots are too many");
+    assert!(writes_at(&mut clock, past_bound, 4).is_empty());
+    assert_eq!(clock.stats().written, 1, "nothing was written");
+}
+
+#[test]
+fn no_restart_without_a_pending_picture_or_before_the_first() {
+    let mut clock = VideoClock::new();
+    assert!(!clock.must_restart(T0), "no canvas yet");
+    clock.offer("A");
+    assert!(
+        !clock.must_restart(T0 + 600 * FRAME_US),
+        "frame 0 is never a gap"
+    );
+    assert_eq!(clock.take_due(T0), Some((&"A", 1)));
+    assert!(
+        !clock.must_restart(T0 + 600 * FRAME_US),
+        "a pause with no new picture waits, whatever its length"
+    );
+}
+
+#[test]
+fn the_replaced_fill_picture_goes_back_to_the_pool_once() {
+    let mut clock = VideoClock::new();
+    clock.offer("A");
+    assert_eq!(clock.take_due(T0), Some((&"A", 1)));
+    assert_eq!(clock.released(), None, "frame 0 replaced nothing");
+    clock.offer("B");
+    assert_eq!(clock.take_due(T0 + 60_000), Some((&"B", 1)));
+    assert_eq!(clock.released(), Some("A"), "B is the fill picture now");
+    assert_eq!(clock.released(), None, "handed back once");
+}
+
+#[test]
+fn take_stats_starts_a_new_max_burst_window() {
+    let mut clock = VideoClock::new();
+    clock.offer("A");
+    assert_eq!(clock.take_due(T0), Some((&"A", 1)));
+    clock.offer("B");
+    assert_eq!(
+        writes_at(&mut clock, T0 + 220_000, 4),
+        vec![("A", 4), ("B", 1)]
+    );
+    assert_eq!(clock.take_stats().max_burst, 4, "the window's gap");
+    assert_eq!(
+        clock.stats(),
+        VideoClockStats {
+            written: 6,
+            repeated: 4,
+            skipped: 0,
+            max_burst: 0,
+        },
+        "the totals stay, the window starts over"
+    );
+}
