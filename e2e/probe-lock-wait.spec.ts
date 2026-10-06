@@ -25,7 +25,9 @@ import {
   bundleStateUrls,
   explainProbeLock,
   parseGenlockLock,
+  probeAttachRefusal,
   probeLockVerdict,
+  probeReadyForTake,
   resolveBundleState,
   waitForProbeLock,
   type GenlockLock,
@@ -49,8 +51,8 @@ function probe(fields: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
-/** A `genlock_lock` facet: the box verdict, one live playlist input, and the
- *  probe's entry (none for null). */
+/** A `genlock_lock` facet (schema v6+: it carries `n_idle`): the box
+ *  verdict, one live playlist input, and the probe's entry (none for null). */
 function lock(
   state: string,
   reason: string,
@@ -61,6 +63,7 @@ function lock(
     state,
     reason,
     n_inputs: probeEntry ? 2 : 1,
+    n_idle: 0,
     inputs: {
       "sp-slow": { locked: true, connected: true, idle: false, depth: 2 },
       ...(probeEntry ? { [PROBE]: probeEntry } : {}),
@@ -121,6 +124,43 @@ async function rejection(p: Promise<unknown>): Promise<string> {
 }
 
 test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.19)", () => {
+  test("a take waits for the lock FIRST, and the meter only once it holds", async () => {
+    // Review round 1: nothing failed if the lock wait was dropped or moved
+    // after the meter. The take calls these two through probeReadyForTake.
+    const order: string[] = [];
+    const ready = await probeReadyForTake(
+      async () => {
+        order.push("lock start");
+        await Promise.resolve();
+        order.push("lock end");
+        return "locked";
+      },
+      async () => {
+        order.push("meter start");
+        return "flowing";
+      },
+    );
+    expect(order).toEqual(["lock start", "lock end", "meter start"]);
+    expect(ready).toEqual({ lock: "locked", audio: "flowing" });
+  });
+
+  test("a lock wait that fails never starts the meter wait", async () => {
+    let meterCalls = 0;
+    const msg = await rejection(
+      probeReadyForTake(
+        async () => {
+          throw new Error("cg OBS's genlock did not lock the probe");
+        },
+        async () => {
+          meterCalls++;
+          return "flowing";
+        },
+      ),
+    );
+    expect(msg).toBe("cg OBS's genlock did not lock the probe");
+    expect(meterCalls).toBe(0);
+  });
+
   test("the defaults: 250 ms polls, 15 s bound, 10 s per read, 25 s worst case", () => {
     expect(LOCK_POLL_MS).toBe(250);
     expect(LOCK_WAIT_TIMEOUT_MS).toBe(15_000);
@@ -249,6 +289,18 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(() => parseGenlockLock(200, body("LOCKED"))).toThrow("no genlock_lock object");
   });
 
+  test("parseGenlockLock refuses a line from before schema v6: its idle proves nothing", () => {
+    // Review round 1: camera-box defaults a missing per-input `idle` to false
+    // for a pre-v6 line (`bundle_state_genlock.py`), so every line would look
+    // fresh. A v6+ line carries the top-level `n_idle` count.
+    const { n_idle: _dropped, ...preV6 } = lock("LOCKED", "none", probe());
+    expect(() => parseGenlockLock(200, body(preV6))).toThrow("before camera-box's schema v6");
+    expect(() => parseGenlockLock(200, body({ ...preV6, n_idle: null }))).toThrow(
+      "before camera-box's schema v6",
+    );
+    expect(parseGenlockLock(200, body({ ...preV6, n_idle: 3 })).n_idle).toBe(3);
+  });
+
   test("resolveBundleState takes the first URL that answers with the facet", async () => {
     const asked: Array<[string, number]> = [];
     const get: HttpGet = async (url, timeoutMs) => {
@@ -300,6 +352,30 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(asked).toEqual([["http://cg:8899/bundle-state.json", 1_234]]);
     const bad = bundleStateRead("http://cg:8899/bundle-state.json", async () => ({ status: 503, body: "" }));
     expect(await rejection(bad(10))).toContain("http://cg:8899/bundle-state.json: HTTP 503");
+    // Playwright reads a timeout of 0 as "none": a read always gets at least
+    // 1 ms, in whole milliseconds (review round 1).
+    asked.length = 0;
+    await read(0);
+    await read(2.2);
+    expect(asked.map(([, t]) => t)).toEqual([1, 3]);
+  });
+
+  test("the probe must not have received for a minute before the attach", () => {
+    // Review round 1: an idled probe keeps `locked: true` (camera-box clears
+    // the FIFO lock only on a regime change), and `idle` turns true only
+    // ~60 s after its last frame. A probe still `idle: false` before this
+    // run's attach (a run cancelled mid-take) leaves a line that already
+    // reads like a GO: refuse, never wait on it.
+    expect(probeAttachRefusal(lock("LOCKED", "none", probe({ idle: true })), PROBE)).toBeNull();
+    // A probe camera-box does not list yet (a fresh box) proves nothing stale.
+    expect(probeAttachRefusal(lock("LOCKED", "none", null), PROBE)).toBeNull();
+    const refusal = probeAttachRefusal(lock("LOCKED", "none", probe()), PROBE);
+    expect(refusal).toContain(`shows the probe "${PROBE}" receiving (idle false)`);
+    expect(refusal).toContain("re-run");
+    expect(refusal).toContain("(#221)");
+    // Unlocked does not matter: only a probe that is not idle is refused.
+    const unlocked = lock("DEGRADED", "audio_pairing", probe({ locked: false }));
+    expect(probeAttachRefusal(unlocked, PROBE)).toContain("receiving");
   });
 
   test("waitForProbeLock: idle → DEGRADED/audio_pairing → LOCKED/none, polled every 250 ms", async () => {
@@ -475,20 +551,68 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(report.waitedMs).toBe(1_400);
   });
 
-  test("an endpoint that stops answering mid-wait fails it at once", async () => {
+  test("a read that fails mid-wait is retried within the bound", async () => {
+    // Review round 1: camera-box's gather can be slow; one read timing out
+    // must not fail the gate while the bound has room for another.
+    const clock = fakeClock();
+    let n = 0;
+    const read = async (): Promise<GenlockLock> => {
+      n++;
+      clock.t += n === 2 ? LOCK_READ_TIMEOUT_MS : 100;
+      if (n === 2) throw new Error("http://127.0.0.1:8899/bundle-state.json: Timeout 10000ms exceeded");
+      return n < 3 ? lock("DEGRADED", "audio_pairing", probe()) : lock("LOCKED", "none", probe());
+    };
+    const report = await waitForProbeLock(read, PROBE, { now: clock.now, sleep: clock.sleep });
+    expect(n).toBe(3);
+    expect(report.reads).toBe(2);
+    expect(report.failedReads).toBe(1);
+    expect(report.slowestReadMs).toBe(LOCK_READ_TIMEOUT_MS);
+    expect(report.waitedMs).toBe(100 + 250 + 10_000 + 250 + 100);
+    expect(report.seen).toEqual([
+      "+0 ms DEGRADED/audio_pairing, probe locked=true idle=false",
+      "+350 ms read failed: http://127.0.0.1:8899/bundle-state.json: Timeout 10000ms exceeded",
+      "+10600 ms LOCKED/none, probe locked=true idle=false",
+    ]);
+  });
+
+  test("an endpoint that stops answering fails the wait loudly at the bound", async () => {
     const clock = fakeClock();
     let n = 0;
     const read = async (): Promise<GenlockLock> => {
       n++;
       clock.t += 100;
-      if (n === 3) throw new Error("http://127.0.0.1:8899/bundle-state.json: connect ECONNREFUSED 127.0.0.1:8899");
+      if (n >= 3) {
+        throw new Error("http://127.0.0.1:8899/bundle-state.json: connect ECONNREFUSED 127.0.0.1:8899");
+      }
       return lock("DEGRADED", "audio_pairing", probe());
     };
-    const msg = await rejection(waitForProbeLock(read, PROBE, { now: clock.now, sleep: clock.sleep }));
-    expect(n, "no read after the failure").toBe(3);
-    expect(msg).toContain(`could not read cg OBS's genlock state while waiting for the probe "${PROBE}"`);
-    expect(msg).toContain("after 800 ms and 2 reads");
-    expect(msg).toContain("connect ECONNREFUSED 127.0.0.1:8899");
+    const msg = await rejection(
+      waitForProbeLock(read, PROBE, { now: clock.now, sleep: clock.sleep, timeoutMs: 2_000 }),
+    );
+    // A read every 350 ms from 0 to 1 750 ms: 2 answered, 4 failed.
+    expect(n).toBe(6);
+    expect(msg).toContain(`cg OBS's genlock did not lock the probe "${PROBE}" within 2000 ms`);
+    expect(msg).toContain(
+      "2 reads answered, 4 failed (the last: http://127.0.0.1:8899/bundle-state.json: " +
+        "connect ECONNREFUSED 127.0.0.1:8899)",
+    );
+    expect(msg).toContain('last genlock_lock: state "DEGRADED", reason "audio_pairing"');
     expect(msg).toContain("(#221)");
+  });
+
+  test("a wait whose every read failed says so, with no facet to describe", async () => {
+    const clock = fakeClock();
+    const read = async (): Promise<GenlockLock> => {
+      clock.t += 100;
+      throw new Error("http://127.0.0.1:8899/bundle-state.json: HTTP 500");
+    };
+    const msg = await rejection(
+      waitForProbeLock(read, PROBE, { now: clock.now, sleep: clock.sleep, timeoutMs: 1_000 }),
+    );
+    expect(msg).toContain(
+      "0 reads answered, 3 failed (the last: http://127.0.0.1:8899/bundle-state.json: HTTP 500)",
+    );
+    expect(msg).toContain("last genlock_lock: none");
+    expect(msg).toContain("No read of cg OBS's genlock state answered");
   });
 });
