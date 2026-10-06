@@ -627,6 +627,9 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     assertNotTornDown("pointing the probe at SP-program");
     probePointed = true;
     await rec.setInputSettings(AV_PROBE_INPUT, { ndi_source_name: probeSource });
+    // On the lock wait's own clock: its explanation names the woken probe only
+    // while camera-box's 60 s recent_event latch can still hold.
+    const attachedAt = performance.now();
     if ((await rec.currentProgramScene()) !== AV_PROBE_SCENE) {
       assertNotTornDown("cg OBS's probe scene switch");
       cgSwitched = true;
@@ -701,6 +704,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
             assertNotTornDown("the probe lock wait");
             const lock = await waitForProbeLock(readLock, AV_PROBE_INPUT, {
               phaseEventsBeforeAttach: phaseEvents,
+              attachedAt,
             });
             console.log(
               `A/V gate take ${take}: probe locked after ${Math.round(lock.waitedMs)} ms ` +

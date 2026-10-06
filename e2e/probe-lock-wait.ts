@@ -32,8 +32,9 @@
  * #221, comments 6014055098 and 6014658984). The wait normally says GO on
  * the LOCKED/none change line that ends the attach's DEGRADED/`audio_pairing`
  * slew, after the audio is placed. Residuals:
- * 1. libobs reads the PENDING withhold as paired (offset 0) and never clears
- *    the FIFO lock, so a HEARTBEAT written between the probe reading `idle:
+ * 1. libobs reads the PENDING withhold as paired (offset 0) and does not
+ *    clear the FIFO lock when the probe is idled or starves, so a HEARTBEAT
+ *    written between the probe reading `idle:
  *    false` (it can from the bind on: a reattach can reset its idle sample
  *    ring) and the placement can read as a GO during the withhold;
  * 2. an attach with no `audio_pairing` phase writes no change line, so the
@@ -44,7 +45,7 @@
  *    DEGRADED/`recent_event` for 60 s ([`probePhaseEvents`] reads the count
  *    before the attach; [`explainProbeLock`] names the cause from it, never
  *    from `recent_event_inputs`, which names camera-box's top lifetime
- *    offender);
+ *    offender, and only within `WAKE_LATCH_WINDOW_MS` of the attach);
  * 4. the refusal trusts the newest line before the attach: a probe whose FIFO
  *    locked after that line (while still unlocked in it) is not refused.
  *
@@ -80,6 +81,12 @@ export const LOCK_READ_TIMEOUT_MS = 10_000;
 /** The wait's worst case: a read that starts at the bound and takes its own
  *  timeout. The A/V gate's time budget counts this (`av-sync-budget.ts`). */
 export const LOCK_WAIT_WORST_MS = LOCK_WAIT_TIMEOUT_MS + LOCK_READ_TIMEOUT_MS;
+
+/** How long after the attach a `recent_event` can still be the woken
+ *  probe's: camera-box holds it 60 s after the wake, and the probe wakes
+ *  within ~10 s of its attach (DistroAV connecting, then 60 frames, or at
+ *  once when a reconnect resets its idle sample ring). */
+export const WAKE_LATCH_WINDOW_MS = 70_000;
 
 /** cg OBS's health endpoint, tried in this order (the file doc). */
 export const DEFAULT_BUNDLE_STATE_URLS: readonly string[] = [
@@ -207,8 +214,9 @@ export function probeLockVerdict(lock: GenlockLock, probeInput: string): LockVer
  * OBS starts reads connected and not yet classified idle). The last is a
  * known residual: a probe whose FIFO locked AFTER the newest line (and was
  * idled since) keeps `locked: true`, so a heartbeat before this run's attach
- * could read as a GO; it needs that line to fall in the short window
- * between the probe's idle flip and its FIFO lock.
+ * could read as a GO. It needs that line to show the probe receiving but
+ * unlocked: before its first attach locks after a cg OBS start, or right
+ * after a FIFO lock clear (a backward-step regime end, a latency-pin rise).
  */
 export function probeAttachRefusal(lock: GenlockLock, probeInput: string): string | null {
   const entry = probeEntry(lock, probeInput);
@@ -409,6 +417,10 @@ export interface LockWaitOptions {
   /** [`probePhaseEvents`] of the line read before the attach, for the
    *  bound's explanation ([`explainProbeLock`]); default unknown. */
   phaseEventsBeforeAttach?: number | null;
+  /** When the probe was attached, on `now`'s clock: the wake is named only
+   *  while the last read started within [`WAKE_LATCH_WINDOW_MS`] of it.
+   *  Default unknown (no window check). */
+  attachedAt?: number;
 }
 
 /** The trail is capped; a stuck facet repeats one line, which is kept once. */
@@ -440,6 +452,7 @@ export async function waitForProbeLock(
     seen: [],
   };
   let last: GenlockLock | null = null;
+  let lastAt = start;
   let lastFailure: string | null = null;
   let lastSummary: string | null = null;
   for (;;) {
@@ -465,12 +478,20 @@ export async function waitForProbeLock(
     } else {
       report.reads++;
       last = lock;
+      lastAt = readAt;
       if (probeLockVerdict(lock, probeInput).go) return report;
     }
     // No read starts after the bound.
     if (answeredAt - start >= timeoutMs) throw boundError();
     await sleep(pollMs);
     if (now() - start > timeoutMs) throw boundError();
+  }
+
+  /** The count before the attach, while the wake's latch can still hold. */
+  function wakeCount(): number | null {
+    const withinLatch =
+      opts.attachedAt === undefined || lastAt - opts.attachedAt < WAKE_LATCH_WINDOW_MS;
+    return withinLatch ? (opts.phaseEventsBeforeAttach ?? null) : null;
   }
 
   function boundError(): Error {
@@ -480,7 +501,7 @@ export async function waitForProbeLock(
     const why =
       last === null
         ? "No read of cg OBS's genlock state answered: is camera-box's :8899 server up?"
-        : explainProbeLock(last, probeInput, opts.phaseEventsBeforeAttach ?? null);
+        : explainProbeLock(last, probeInput, wakeCount());
     return new Error(
       `cg OBS's genlock did not lock the probe "${probeInput}" within ${timeoutMs} ms ` +
         `(${CONDITION}): ${report.reads} reads answered${failed}, the slowest ` +
