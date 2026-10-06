@@ -105,16 +105,28 @@ input.
     written; the newest canvas for a slot wins, the ones it replaced are
     skipped and go back to the tap's pool (`StreamShared::recycle_frame`,
     #147 r10). So a slot never shows a picture from after its decision:
-    24 fps lands within −18..+22 ms of each slot, 30 fps −20..+7 ms (a
+    picture − slot is −22..+18 ms at 24 fps and −7..+20 ms at 30 fps (a
     time-of-call rule put a 24 fps picture up to 60 ms early, review
     round 2).
+  - **A canvas due for a decided slot is never replaced (review round
+    3).** The pending canvases are a QUEUE, one per slot, oldest first:
+    `offer` replaces the newest pending one only when the new canvas is
+    for the SAME slot; when that slot was decided before the new arrival,
+    the pending canvas is due and stays, and the new one queues behind
+    it. The feeder's timer can wake well after a decision (15.6 ms on
+    Windows) while a canvas wakes it at once, so a newer canvas often
+    arrives first: replacing unconditionally threw the due picture away
+    (at 30 fps with a 15.6 ms late timer, 9 of 25 slots repeated).
+    `take_due` / `must_restart` / `wait_us` read the OLDEST pending
+    canvas, so one wake can write a fill and then several due canvases.
   - The next new picture after a gap (a pause, a decode stall, a write that
     blocked, a source below 25 fps) first fills every slot decided before it
     arrived with the LAST written picture (`take_due` returns it with the
     count), then takes its own slot once that is decided: the video counts
     every slot and stays on the audio. That is what ffmpeg's `cfr` did with
-    the wall-clock stamps. The replaced fill picture goes back to the pool
-    (`released`).
+    the wall-clock stamps. Every replaced fill picture goes back to the
+    pool (`released`, a stack popped until `None`: two writes in one wake
+    replace two).
   - A fill is bounded: at most `MAX_GAP_FILL_SLOTS` = 250 (10 s; a cap on
     the catch-up burst, ~86 MB written and encoded at once). A longer gap
     writes nothing: `must_restart` → the feeder sets the run's `restart`
@@ -124,14 +136,20 @@ input.
     budget is spent. With nobody watching it settles like any exit. (The
     encoder's output stalls during any pause: locally ffmpeg 6.1.1 even
     stopped reading its audio input while the video starved, so nothing
-    is lost by restarting after a long one.)
+    is lost by restarting after a long one.) `supervise` gives `Restart`
+    its own arm and reads the viewers ONCE (review round 3: two reads let
+    a viewer that subscribed in between take the crash path).
+  - A known cost of the bound: a video that shows one picture for over
+    10 s WHILE it plays (a variable-rate still stretch, the decoder
+    delivers no new frame) restarts the encoder like a long pause.
 - **The feeder glue** (`spawn_video_feeder`, `mutants::skip`, in the same
   file): drains stale frames at connect, waits `clock.wait_us(now)` (0
-  while a fill is due, until the pending canvas's decision, else
+  while a fill is due, until the oldest pending canvas's decision, else
   `IDLE_POLL_US`), offers every queued canvas with its arrival = when the
-  feeder received it (a canvas wakes it at once; the newest wins), checks
-  `must_restart`, then writes what `take_due` returns (at most two answers:
-  the fill, then the new canvas).
+  feeder received it (a canvas wakes it at once; the newest for a slot
+  wins), checks `must_restart`, then writes every answer `take_due` gives
+  (the fill, then each due canvas in slot order) and recycles every
+  `released` picture.
   `first_video_us` = frame 0's arrival: the video timeline's origin, which the
   audio preroll (`audio_preroll_samples(gap, 0)`) aligns to. Feed-on-connect
   (finding 1 below) is unchanged: nothing is written before the first canvas.
@@ -140,12 +158,15 @@ input.
   the largest gap fill in that window: 1 in steady play; a child's start
   shows one while ffmpeg opens its audio input; the gap after a pause),
   `preview-vfeed: a gap over 10 s — a fresh child …` and
-  `preview-encoder: a fresh child after a long pause`.
+  `preview-encoder: a fresh child after a long pause` (or `a long pause
+  with nobody watching — settling`).
 - **Tests:** `preview_video_clock_tests.rs` (a pause writes nothing and the
   next picture fills the gap, 30 fps and 24 fps sources, an arrival exactly
   at a decision and 1 µs after it, newest wins + recycle, a stall, the
   250-slot bound and the restart, the wait, frame 0's origin, the stats
-  window) and
+  window; round 3: a due canvas stays when a newer one arrives first, a
+  feeder timer 0 / 2 / 15.6 ms late writes the same pictures at 24, 30
+  and 60 fps (`one_second_late`), every replaced picture comes back) and
   `preview_encoder_tests.rs::no_input_is_wall_clock_stamped_and_the_video_counts_the_output_rate`
   (+ the exact vector).
 - **Local proof** (`scripts/preview_latency_repro.py`, dev1 ffmpeg 6.1.1,
@@ -161,13 +182,17 @@ input.
   | #221 A1, no step / +1.543 s step | 0.44 / 0.45 s before the pause (the encoder starves) | 0 |
 
   The switch-mode A/V placement (`content_shift_s`, design = the 210 ms
-  lead) stays within 0.23-0.25 s with and without the step, 24 fps too
+  lead) stays within 0.22-0.25 s with and without the step, 24 fps too
   (the old feeder: 0.233 s). In every run (the old feeder too) the
   encoder's output drifts 0.5-1.7 % behind the wall on dev1
   (`video_output_behind_wall_s`), a harness property, not the feeder.
 - **Box re-check after a change here:** the three `post-deploy-preview`
   tests (A/V sync, the lag readout, the 1 Mb/s link), the box log's
-  `preview-vfeed` lines, and by hand a pause over 10 s then play: the
+  `preview-vfeed` lines (in steady play of a ≥ 25 fps source `written`
+  grows 250 per 10 s and `repeated` stays near 0 after the child's start:
+  a growing `repeated` while playing means slots pass with no new picture,
+  decode jitter or a regression of the round-3 rule; `skipped` ≈ 50 per
+  10 s at 30 fps, ≈ 340 at 60 fps), and by hand a pause over 10 s then play: the
   preview must reconnect onto a fresh child (`a fresh child after a long
   pause`) and play in sync (the restart path is glue, no unit test).
 

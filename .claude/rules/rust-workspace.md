@@ -154,6 +154,16 @@ entry" found one each round. All three came from ONE condition written twice
 so when two decisions depend on the same state, derive both from one
 predicate (`Window::holds_on_air`).
 
+**Drive a timer-driven state machine with a LATE consumer too (#221 review
+round 3).** The preview's `VideoClock` passed every test whose feeder woke each
+millisecond, yet lost pictures on Windows: its timer wakes up to 15.6 ms after
+the decision it waited for, while an input event wakes it at once, so a newer
+input arrived BEFORE the late decision ran and replaced the one that was
+already due. Model the consumer as the OS runs it: woken by each input at its
+real time AND by its timer `late` after each deadline, swept over ≥ 3 phases
+(0 / 2 / 15.6 ms, `preview_video_clock_tests.rs::one_second_late`), and assert
+the output does not depend on `late`.
+
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
 compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
