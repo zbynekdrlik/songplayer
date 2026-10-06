@@ -51,7 +51,8 @@
  * on #221, comments 6014055098, 6014658984, 6016284903; residuals 1-4 in
  * `probe-lock-wait.ts`): the facet reads the pairing's PENDING withhold as
  * paired, so a heartbeat inside it can read as a GO; an attach with no
- * audio_pairing phase writes no fresh line before the 15 s bound; and any
+ * audio_pairing phase writes no change line, so its first fresh line can be
+ * the next heartbeat, up to 30 s later — past the 15 s bound; and any
  * genlock input on cg OBS that wakes or reconnects with lifetime phase
  * events (the probe itself included) holds the box DEGRADED/recent_event
  * for 60 s. A red lock wait is read from its explanation and the inputs
