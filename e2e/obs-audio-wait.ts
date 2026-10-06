@@ -220,11 +220,22 @@ export function describeAudioWait(report: AudioWaitReport): string {
 }
 
 /**
- * What the meter state at the bound most likely means: no event at all, an
- * input that was never active, or an active input DistroAV delivers no (or
- * only broken) audio for.
+ * What the meter state at the bound most likely means, under the wait's own
+ * floor and hold:
+ * - no event at all;
+ * - an input that was never active;
+ * - an active input that rose above the floor but never held: audio with
+ *   gaps, or the meter events stopped;
+ * - an active input that never rose above the floor: DistroAV delivers it
+ *   no audio.
  */
-export function explainAudioWait(report: AudioWaitReport): string {
+export function explainAudioWait(
+  report: AudioWaitReport,
+  opts: { floorDbfs?: number; holdMs?: number; maxGapMs?: number } = {},
+): string {
+  const floorDbfs = opts.floorDbfs ?? SILENCE_FLOOR_DBFS;
+  const holdMs = opts.holdMs ?? AUDIO_HOLD_MS;
+  const maxGapMs = opts.maxGapMs ?? MAX_METER_GAP_MS;
   if (report.events === 0) {
     return "obs-websocket sent no meter event: the InputVolumeMeters subscription did not apply.";
   }
@@ -236,7 +247,15 @@ export function explainAudioWait(report: AudioWaitReport): string {
     );
   }
   // camera-box's genlock audio pairing withholds packets from the MIX, after
-  // the meter's tap, so it never silences this meter (review round 2).
+  // the meter's tap, so it never silences or breaks this meter (review
+  // round 2): neither branch below names it.
+  if (report.loudestDbfs > floorDbfs) {
+    return (
+      `The probe's audio rose above the floor (loudest ${fmtDbfs(report.loudestDbfs)} dBFS) ` +
+      `but never held ${holdMs} ms: DistroAV delivers it with gaps, or the meter events ` +
+      `stopped (more than ${maxGapMs} ms apart, or the probe left the program feed).`
+    );
+  }
   return (
     "The probe was metered but stayed at or below the floor, so DistroAV delivers no audio " +
     "for it: does SP-program carry the playlist's sound, and is the probe's NDI audio " +
@@ -298,13 +317,13 @@ export function waitForInputAudio(
       else resolve(report);
     };
     const timer = setTimeout(() => {
-      finish(
-        () =>
-          new Error(
-            `the audio of OBS input "${inputName}" did not flow (${condition}) within ` +
-              `${timeoutMs} ms: ${describeAudioWait(report)}. ${explainAudioWait(report)} (#221)`,
-          ),
-      );
+      finish(() => {
+        const why = explainAudioWait(report, { floorDbfs, holdMs, maxGapMs: opts.maxGapMs });
+        return new Error(
+          `the audio of OBS input "${inputName}" did not flow (${condition}) within ` +
+            `${timeoutMs} ms: ${describeAudioWait(report)}. ${why} (#221)`,
+        );
+      });
     }, timeoutMs);
     unsubscribe = subscribe(
       (inputs) => {

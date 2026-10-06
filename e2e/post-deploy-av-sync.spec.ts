@@ -145,8 +145,8 @@ const WORST_TAKE_MS =
   2 * EVIDENCE_COPY_MS;
 // A retake starts only while this much of the budget has been used. A full
 // worst-case take then still fits, with 10 s for the calls not counted above
-// (the StartRecord pre-check, the /mix and /videos reads, spawning the
-// analysis).
+// (the audio wait's two Reidentify round trips, the StartRecord pre-check,
+// the /mix and /videos reads, spawning the analysis).
 const RETAKE_BEFORE_MS = TEST_TIMEOUT_MS - WORST_TAKE_MS - 10_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -623,9 +623,11 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       const undeleted: string[] = [];
       for (let take = 1; take <= MAX_TAKES; take++) {
         // 3. The probe's AUDIO must flow first (#221 dev.18, the file doc): a
-        // take started inside the receiver's audio warm-up opens with
-        // dropouts that are not SongPlayer's. Waited before the video is
-        // read, so the song read is the one playing at StartRecord.
+        // take started before the probe's audio reaches cg OBS's mix opens
+        // with dropouts that are not SongPlayer's. The meter proves DistroAV
+        // delivers audio, not camera-box's pairing lock (the open question on
+        // #221). Waited before the video is read, so the song read is the one
+        // playing at StartRecord.
         assertNotTornDown("the probe audio wait");
         const audio = await rec.waitForInputAudio(AV_PROBE_INPUT);
         console.log(
