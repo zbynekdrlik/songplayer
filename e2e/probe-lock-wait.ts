@@ -30,9 +30,8 @@
  *
  * **It is NOT an exact view of the withhold** (the open design question on
  * #221, comments 6014055098, 6014658984 and 6016284903). The wait normally
- * says GO on
- * the LOCKED/none change line that ends the attach's DEGRADED/`audio_pairing`
- * slew, after the audio is placed. Residuals:
+ * says GO on the LOCKED/none change line that ends the attach's
+ * DEGRADED/`audio_pairing` slew, after the audio is placed. Residuals:
  * 1. libobs reads the PENDING withhold as paired (offset 0) and does not
  *    clear the FIFO lock when the probe is idled or starves, so a HEARTBEAT
  *    written between the probe reading `idle: false` (it can from the bind
@@ -49,10 +48,13 @@
  *    `WAKE_LATCH_WINDOW_MS` of `attachedAt`, the bind SongPlayer saw; never
  *    from `recent_event_inputs`, which names camera-box's top lifetime
  *    offender). The latch is box-wide: ANY genlock input on cg OBS that
- *    reconnects with lifetime events holds it too (e.g. after a SongPlayer
- *    restart, if cg OBS has another genlock input on `SP-program` or
- *    `SP-dabing`; the spec logs every input before the attach,
- *    [`summarizeInputs`]);
+ *    wakes or reconnects with lifetime events holds it too (e.g. after a
+ *    SongPlayer restart, if cg OBS has another genlock input on
+ *    `SP-program`, SongPlayer's only NDI sender). The input that latched is
+ *    the one that turned connected and live with events between the line
+ *    before the attach (the spec logs its inputs, [`summarizeInputs`]) and
+ *    the line at the bound (the bound's error lists them) — never "the one
+ *    with the most events";
  * 4. the refusal trusts the newest line before the attach: a probe whose FIFO
  *    locked after that line (while still unlocked in it) is not refused.
  *
@@ -93,9 +95,10 @@ export const LOCK_WAIT_WORST_MS = LOCK_WAIT_TIMEOUT_MS + LOCK_READ_TIMEOUT_MS;
  *  probe's: camera-box holds the latch 60 s after the wake; the probe wakes
  *  within ~3.5 s of its bind (60 frames in ~2.4 s plus one 1 Hz widget
  *  tick, or at once when the reconnect reset its idle sample ring); and the
- *  spec takes `attachedAt` a few seconds AFTER the bind (after cg OBS's scene
- *  switch and the receiver poll). The 10 s over the latch is a deliberate
- *  margin: the explanation may name the wake a little late, never miss it. */
+ *  spec takes `attachedAt` ~1–2 s AFTER the bind (SongPlayer's ~1 s
+ *  receiver-count sample plus the 500 ms receiver poll). The 10 s over the
+ *  latch is a deliberate margin: the explanation may name the wake a little
+ *  late, never miss it. */
 export const WAKE_LATCH_WINDOW_MS = 70_000;
 
 /** cg OBS's health endpoint, tried in this order (the file doc). */
@@ -258,11 +261,13 @@ export function probePhaseEvents(lock: GenlockLock, probeInput: string): number 
 }
 
 /**
- * Every genlock input of the facet in one line, for the log before the
- * attach: its name, `connected`, `idle`, `locked` and lifetime `relocks +
- * late_holds` (`?` when not counts). The box-wide `recent_event` latch can
- * come from any input that reconnects with lifetime events, so a red bound
- * reads which one from here. "none" without inputs.
+ * Every genlock input of the facet in one line: its name, `connected`,
+ * `idle`, `locked` and lifetime `relocks + late_holds` (`?` when not
+ * counts); "none" without inputs. The spec logs it for the line before the
+ * attach, and the bound's error for the last answered line: the box-wide
+ * `recent_event` latch comes from an input that turned connected and live
+ * with events between the two (compare them; the input with the most
+ * lifetime events is NOT the cause, camera-box's own top-offender trap).
  */
 export function summarizeInputs(lock: GenlockLock): string {
   const inputs = lock.inputs;
@@ -364,9 +369,16 @@ export function explainProbeLock(
       "places it."
     );
   }
+  const boxWide =
+    lock.reason === "recent_event"
+      ? " recent_event is box-wide: any genlock input that woke or reconnected within the " +
+        "last 60 s with lifetime phase events latches it; the cause is the input that turned " +
+        "connected and live between the inputs the gate logged ahead of the attach and the " +
+        "inputs at the bound, never the one with the most events."
+      : "";
   return (
     `cg OBS's genlock is ${fmt(lock.state)} (reason ${fmt(lock.reason)}), not "LOCKED" ` +
-    '(reason "none").'
+    `(reason "none").${boxWide}`
   );
 }
 
@@ -531,7 +543,10 @@ export async function waitForProbeLock(
   function boundError(): Error {
     const failed =
       report.failedReads > 0 ? `, ${report.failedReads} failed (the last: ${lastFailure})` : "";
-    const lastText = last === null ? "none" : describeGenlockLock(last, probeInput);
+    const lastText =
+      last === null
+        ? "none"
+        : `${describeGenlockLock(last, probeInput)}; inputs at the bound: ${summarizeInputs(last)}`;
     const why =
       last === null
         ? "No read of cg OBS's genlock state answered: is camera-box's :8899 server up?"

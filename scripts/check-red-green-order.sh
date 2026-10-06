@@ -102,11 +102,28 @@ check_range() {
         if [[ "$subject" =~ ^(fix|bug|bugfix|hotfix|regression|repair|patch)\(#([0-9]+)\) ]]; then
             issue="${BASH_REMATCH[2]}"
             # A `[no-test: <reason>]` marker anywhere in the full commit body
-            # is a LOGGED bypass (regression-test-first.md), not a violation.
-            local body
+            # is a LOGGED bypass (regression-test-first.md), not a violation —
+            # unless it is a RETROACTIVE declaration for ANOTHER commit
+            # (`[no-test: <sha> …]` whose sha resolves to a different commit,
+            # handled by the first pass): that is never this commit's own.
+            local body scan own_marker=""
             body="$(git log -1 --format=%B "$sha")"
-            if [[ "$body" =~ \[no-test:[^]]*\] ]]; then
-                echo "bypass: $sha #$issue ${BASH_REMATCH[0]}"
+            scan="$body"
+            while [[ "$scan" =~ \[no-test:[^]]*\] ]]; do
+                local marker="${BASH_REMATCH[0]}"
+                scan="${scan#*"$marker"}"
+                if [[ "$marker" =~ ^\[no-test:[[:space:]]+([0-9a-fA-F]{7,40})[[:space:]] ]]; then
+                    local target
+                    if target="$(git rev-parse --verify -q "${BASH_REMATCH[1]}^{commit}" 2>/dev/null)" \
+                        && [ "$target" != "$sha" ]; then
+                        continue
+                    fi
+                fi
+                own_marker="$marker"
+                break
+            done
+            if [ -n "$own_marker" ]; then
+                echo "bypass: $sha #$issue $own_marker"
                 continue
             fi
             if [ -n "${amend_map[$sha]:-}" ]; then

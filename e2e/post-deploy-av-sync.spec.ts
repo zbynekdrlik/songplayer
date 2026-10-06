@@ -47,9 +47,15 @@
  * `genlock_lock` facet on cg OBS's `:8899/bundle-state.json`, polled every
  * 250 ms (bounded at 15 s) until the probe is connected and `idle` false
  * (the heartbeat is from after the attach), its `locked` is true and the box
- * is `LOCKED` for reason `none`. The facet cannot see the pairing's PENDING
- * withhold itself (it reads as paired), so a heartbeat inside it can still
- * read as a GO: the open design question on #221 (comment 6014055098). The
+ * is `LOCKED` for reason `none`. It is NOT exact (the open design question
+ * on #221, comments 6014055098, 6014658984, 6016284903; residuals 1-4 in
+ * `probe-lock-wait.ts`): the facet reads the pairing's PENDING withhold as
+ * paired, so a heartbeat inside it can read as a GO; an attach with no
+ * audio_pairing phase writes no fresh line before the 15 s bound; and any
+ * genlock input on cg OBS that wakes or reconnects with lifetime phase
+ * events (the probe itself included) holds the box DEGRADED/recent_event
+ * for 60 s. A red lock wait is read from its explanation and the inputs
+ * logged before the attach and at the bound. The
  * endpoint (`CG_BUNDLE_STATE_URL`) is resolved before any scene switch: an
  * unreachable one, or a probe that received within the last minute, fails
  * the gate there. The dropout check is unchanged.
@@ -645,11 +651,11 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       async () => (await getJson<ProgramView>(request, "/api/v1/program")).health.connections,
       (now) => probeReceiverAttached(receiversBefore, now),
     );
-    // A few seconds after the bind (after cg OBS's scene switch and this
-    // receiver poll), on the lock wait's own clock: its explanation names the
-    // woken probe only while camera-box's 60 s recent_event latch can still
-    // hold (`WAKE_LATCH_WINDOW_MS`; DistroAV may take up to the 30 s above to
-    // bind).
+    // ~1–2 s after the bind (SongPlayer's ~1 s receiver-count sample plus
+    // this poll's 500 ms), on the lock wait's own clock: its explanation
+    // names the woken probe only while camera-box's 60 s recent_event latch
+    // can still hold (`WAKE_LATCH_WINDOW_MS`; DistroAV may take up to the
+    // 30 s above to bind).
     const attachedAt = performance.now();
     const active = status.active_playlist_ids;
     const first = await getJson<HealthRow[]>(request, "/api/v1/ndi/health");
