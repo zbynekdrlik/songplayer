@@ -459,11 +459,11 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(unknown).toContain("box-wide");
     expect(unknown).toContain("inputs at the bound");
     expect(named).toContain("box-wide");
-    expect(other).not.toContain("box-wide");
     // Another reason with events before the attach: not the wake either.
     const other = explainProbeLock(lock("DEGRADED", "input_unlocked", probe()), PROBE, 3);
     expect(other).toContain('"DEGRADED" (reason "input_unlocked")');
     expect(other).not.toContain("before the attach");
+    expect(other).not.toContain("box-wide");
     // Review round 4: the probe's own state comes first, whatever the count —
     // a stale line, a lost connection or an unlocked FIFO is named, never the
     // wake.
