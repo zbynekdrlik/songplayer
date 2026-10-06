@@ -129,6 +129,7 @@ import {
   probePhaseEvents,
   probeReadyForTake,
   resolveBundleState,
+  summarizeInputs,
   waitForProbeLock,
   type HttpGet,
 } from "./probe-lock-wait";
@@ -590,6 +591,10 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           ? " (its wake can latch cg OBS's recent_event for 60 s: the lock wait may reach its bound)"
           : ""),
     );
+    // Every genlock input as cg OBS's newest line saw it: the box-wide
+    // recent_event latch can come from any input that reconnects with
+    // lifetime events (`summarizeInputs`).
+    console.log(`A/V gate: cg OBS's genlock inputs before the attach: ${summarizeInputs(lockEndpoint.lock)}`);
     const readLock = bundleStateRead(lockEndpoint.url, httpGet);
 
     // 1. Put the baseline sp-* output on program.
@@ -640,10 +645,11 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       async () => (await getJson<ProgramView>(request, "/api/v1/program")).health.connections,
       (now) => probeReceiverAttached(receiversBefore, now),
     );
-    // The bind SongPlayer saw (within ~1.5 s), on the lock wait's own clock:
-    // its explanation names the woken probe only while camera-box's 60 s
-    // recent_event latch can still hold (DistroAV may take up to the 30 s
-    // above to bind).
+    // A few seconds after the bind (after cg OBS's scene switch and this
+    // receiver poll), on the lock wait's own clock: its explanation names the
+    // woken probe only while camera-box's 60 s recent_event latch can still
+    // hold (`WAKE_LATCH_WINDOW_MS`; DistroAV may take up to the 30 s above to
+    // bind).
     const attachedAt = performance.now();
     const active = status.active_playlist_ids;
     const first = await getJson<HealthRow[]>(request, "/api/v1/ndi/health");

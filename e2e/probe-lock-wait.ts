@@ -29,7 +29,8 @@
  * read as a GO (a run cancelled mid-take).
  *
  * **It is NOT an exact view of the withhold** (the open design question on
- * #221, comments 6014055098 and 6014658984). The wait normally says GO on
+ * #221, comments 6014055098, 6014658984 and 6016284903). The wait normally
+ * says GO on
  * the LOCKED/none change line that ends the attach's DEGRADED/`audio_pairing`
  * slew, after the audio is placed. Residuals:
  * 1. libobs reads the PENDING withhold as paired (offset 0) and does not
@@ -43,12 +44,15 @@
  * 3. an idle or absent input's phase events count 0, so a woken probe's
  *    LIFETIME relocks / late holds / backward steps come back as new events
  *    and hold DEGRADED/`recent_event` for 60 s ([`probePhaseEvents`] reads
- *    the count before the attach; [`explainProbeLock`] names the cause from
- *    it, only while the last read started within `WAKE_LATCH_WINDOW_MS` of
- *    the attach, never from `recent_event_inputs`, which names camera-box's
- *    top lifetime offender). The latch is box-wide: ANY genlock input on cg
- *    OBS that reconnects with lifetime events (e.g. after a SongPlayer
- *    restart, which the deploy does just before the E2E) holds it too;
+ *    the count before the attach; [`waitForProbeLock`] passes it to
+ *    [`explainProbeLock`] only while the last ANSWERED read started within
+ *    `WAKE_LATCH_WINDOW_MS` of `attachedAt`, the bind SongPlayer saw; never
+ *    from `recent_event_inputs`, which names camera-box's top lifetime
+ *    offender). The latch is box-wide: ANY genlock input on cg OBS that
+ *    reconnects with lifetime events holds it too (e.g. after a SongPlayer
+ *    restart, if cg OBS has another genlock input on `SP-program` or
+ *    `SP-dabing`; the spec logs every input before the attach,
+ *    [`summarizeInputs`]);
  * 4. the refusal trusts the newest line before the attach: a probe whose FIFO
  *    locked after that line (while still unlocked in it) is not refused.
  *
@@ -85,11 +89,13 @@ export const LOCK_READ_TIMEOUT_MS = 10_000;
  *  timeout. The A/V gate's time budget counts this (`av-sync-budget.ts`). */
 export const LOCK_WAIT_WORST_MS = LOCK_WAIT_TIMEOUT_MS + LOCK_READ_TIMEOUT_MS;
 
-/** How long after the attach a `recent_event` can still be the woken
- *  probe's, measured from the bind SongPlayer saw (its receiver count rose):
- *  camera-box holds the latch 60 s after the wake, and the probe wakes
- *  within ~10 s of the bind (60 frames, ~2–2.4 s, or at once when the
- *  reconnect reset its idle sample ring). */
+/** How long after `attachedAt` a `recent_event` can still be the woken
+ *  probe's: camera-box holds the latch 60 s after the wake; the probe wakes
+ *  within ~3.5 s of its bind (60 frames in ~2.4 s plus one 1 Hz widget
+ *  tick, or at once when the reconnect reset its idle sample ring); and the
+ *  spec takes `attachedAt` a few seconds AFTER the bind (after cg OBS's scene
+ *  switch and the receiver poll). The 10 s over the latch is a deliberate
+ *  margin: the explanation may name the wake a little late, never miss it. */
 export const WAKE_LATCH_WINDOW_MS = 70_000;
 
 /** cg OBS's health endpoint, tried in this order (the file doc). */
@@ -249,6 +255,29 @@ export function probePhaseEvents(lock: GenlockLock, probeInput: string): number 
   const { relocks, late_holds: lateHolds } = entry;
   if (typeof relocks !== "number" || typeof lateHolds !== "number") return null;
   return relocks + lateHolds;
+}
+
+/**
+ * Every genlock input of the facet in one line, for the log before the
+ * attach: its name, `connected`, `idle`, `locked` and lifetime `relocks +
+ * late_holds` (`?` when not counts). The box-wide `recent_event` latch can
+ * come from any input that reconnects with lifetime events, so a red bound
+ * reads which one from here. "none" without inputs.
+ */
+export function summarizeInputs(lock: GenlockLock): string {
+  const inputs = lock.inputs;
+  if (!isObject(inputs)) return "none";
+  const rows = Object.entries(inputs).map(([name, entry]) => {
+    if (!isObject(entry)) return `${fmt(name)} ?`;
+    const { relocks, late_holds: lateHolds } = entry;
+    const events =
+      typeof relocks === "number" && typeof lateHolds === "number" ? relocks + lateHolds : "?";
+    return (
+      `${fmt(name)} connected=${word(entry.connected)} idle=${word(entry.idle)} ` +
+      `locked=${word(entry.locked)} events=${events}`
+    );
+  });
+  return rows.length > 0 ? rows.join("; ") : "none";
 }
 
 /** The facet in words: the box verdict, the probe's entry (or the inputs
