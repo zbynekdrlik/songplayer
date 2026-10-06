@@ -261,7 +261,13 @@ pub fn shown_peers(value: &str) -> String {
     }
 }
 
-/// `incoming` with every masked secret taken from the stored peer of the same name.
+/// `incoming` with every masked secret taken from the stored peer of the same
+/// name, but only where the secret was stored for: a masked `key` needs
+/// the stored `base_url`, a masked `cf_client_secret` the stored `base_url`
+/// and `cf_client_id`. The settings PATCH has no login, so a peer re-pointed
+/// at another host must send its secrets again, in clear; else the node would
+/// send the stored ones there. A secret sent in clear is taken as sent; an
+/// error names the peer, never a secret or the URL.
 pub fn unmask_peers(
     incoming: Vec<PeerConfig>,
     stored: &[PeerConfig],
@@ -271,21 +277,37 @@ pub fn unmask_peers(
         .map(|mut p| -> Result<PeerConfig, String> {
             let old = stored.iter().find(|s| s.name == p.name);
             if p.key == MASK {
-                p.key = old.map(|o| o.key.clone()).ok_or_else(|| {
+                let o = old.ok_or_else(|| {
                     format!(
                         "peer {}: a masked key, but no stored peer of that name",
                         p.name
                     )
                 })?;
+                if o.base_url != p.base_url {
+                    return Err(format!(
+                        "peer {}: base_url changed — send its key again (a masked key stays with its stored base_url)",
+                        p.name
+                    ));
+                }
+                p.key = o.key.clone();
             }
             if p.cf_client_secret.as_deref() == Some(MASK) {
-                let secret = old.and_then(|o| o.cf_client_secret.clone());
-                p.cf_client_secret = Some(secret.ok_or_else(|| {
-                    format!(
+                let Some((o, secret)) =
+                    old.and_then(|o| o.cf_client_secret.as_ref().map(|s| (o, s)))
+                else {
+                    return Err(format!(
                         "peer {}: a masked cf_client_secret, but none stored",
                         p.name
-                    )
-                })?);
+                    ));
+                };
+                let same_token = o.base_url == p.base_url && o.cf_client_id == p.cf_client_id;
+                if !same_token {
+                    return Err(format!(
+                        "peer {}: base_url or cf_client_id changed — send cf_client_secret again",
+                        p.name
+                    ));
+                }
+                p.cf_client_secret = Some(secret.clone());
             }
             Ok(p)
         })
