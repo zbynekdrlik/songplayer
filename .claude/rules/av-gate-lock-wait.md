@@ -131,8 +131,7 @@ lock, so a senderless probe line would read as a GO).
    reconnected input (events=0 does not rule one out: backward steps are not
    in the facet) or a real relock, late hold or backward step on a live
    input (a backward step is not in the facet: invisible in both lists); the
-   lists
-   carry no times, the first is older than the attach, and past the wake
+   lists carry no times, the first is older than the attach, and past the wake
    window the probe itself always "turned live" between them. The input with
    the most lifetime events is not evidence (camera-box's own top-offender
    trap). A camera-box re-baseline fix (a woken or reconnected input's totals

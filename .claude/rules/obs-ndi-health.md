@@ -544,8 +544,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     3. It stops our recording, only while `isRecording()`.
     4. It restores the faders, idles the probe, restores the program
        scene (only when the body switched it), then cg OBS's own scene
-       (#221 B4 step 6, lane 3; the probe bullets above). This comes BEFORE the slow file deletion, so a hook
-       that runs out of time never leaves the program on the baseline scene.
+       (#221 B4 step 6, lane 3; the probe bullets above). This comes
+       BEFORE the slow file deletion, so a hook that runs out of time never
+       leaves the program on the baseline scene.
     5. It deletes recordings:
        - recordings the body never removed get a 15 s wait for their remux
          sibling;
