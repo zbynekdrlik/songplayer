@@ -1,5 +1,6 @@
 //! #147 round 9 — SongPlayer's OWN page-fault rate + working set, carried on
-//! the paced `pipeline: loop-stats` line beside `submit_call_us_max`.
+//! the paced `pipeline: loop-stats` line (#221 lane 3 deleted the
+//! `submit_call_us_max` it was logged beside, with the per-playlist sender).
 //!
 //! The round-9 design (issue #147 comment 5812936370) attributes the residual
 //! paced-sender stall with a heavy child resident to memory residency: when the

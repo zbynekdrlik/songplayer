@@ -130,8 +130,9 @@ fn lead_read_ahead_stays_within_lead_plus_one_chunk_over_10k_frames() {
 
 #[test]
 fn new_keeps_the_40_ms_pairing_deadline() {
-    // The pacing-OFF path without the emitter (`new`, and `with_audio_lead`
-    // via `decoder_tolerance_ms(false)`) is unchanged: 40 ms, not the paced lead.
+    // `new` keeps the 40 ms pairing deadline, not the paced lead (the
+    // sp-server SDK-clocked path that opened its decoders so is deleted,
+    // #221 lane 3).
     assert_eq!(DEFAULT_TOLERANCE_MS, 40);
     let v = Box::new(MockVideo::new(&[0]));
     let a = Box::new(MockAudio::new(&[40, 41], 100));

@@ -5,7 +5,8 @@
 //!
 //! Why (measured with `scripts/preview_latency_repro.py`, see
 //! `.claude/rules/preview.md` "#184 round G3"): the decode-seam audio LEADS the
-//! video by `lead_ms` (1500 ms on the SDK-clocked path). Round G2 put that lead
+//! video by `lead_ms` (1500 ms on the since-deleted SDK-clocked path, 210 ms
+//! on the paced one, `preview_stream::decode_seam_lead_ms`). Round G2 put that lead
 //! INTO the encoder's audio input — a lead-long silence preroll, then every
 //! block the moment it arrived — so ~1.5 s (~576 KB) of PCM had to sit in flight
 //! in the loopback socket, because ffmpeg consumes audio only in step with the

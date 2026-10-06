@@ -209,7 +209,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   a `const fn` too — don't avoid it there. The no-compile box can't see it; it
   cost #192 round 3 a whole review round (three ceil-divs in `audio_emitter.rs`
   `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
-  already uses `.div_ceil()` (`chunking.rs`, `burn_overlay.rs`) — grep before
+  already uses `.div_ceil()` (`chunking.rs`, `loop_stats.rs`) — grep before
   hand-rolling a ceil.
 - **`clippy::manual_contains`** (`perf`, warn-by-default → `-D warnings`, #212
   follow-up review round 4). `slice.iter().any(|&x| x == y)` must be
@@ -259,7 +259,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   bundle, reasoned before CI). Asserting a `const bool` is linted like
   `assert!(true)`, and `assert_eq!(CONST, true)` trips
   `bool_assert_comparison` instead. Pin a default through behaviour
-  (`assert!(genlock_pacing(None))`), not by asserting the const itself.
+  (`assert!(program_max_enabled(None))`), not by asserting the const itself.
 - **`#[must_use]` goes on the TYPE, not also on a fn that returns it**
   (#184, reasoned before CI). `clippy::double_must_use` is warn-by-default:
   a `#[must_use]` fn whose return type is itself `#[must_use]` (`pub fn
@@ -422,9 +422,14 @@ already use, so the Linux target has no unused import.
 **An engine test must not count the test pipeline's replies (release 0.68.0
 blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
 `PipelineCommand::Play` with a `PipelineEvent::Error`; on Windows the real
-pipeline has no NDI backend in CI, sends ONE Error at spawn and then only
-waits for Shutdown. So "no Play was sent" read from `event_rx` passes or fails
-by platform. Read it from engine state every Play resets instead: every Play
+pipeline runs (since #221 lane 3 it needs no NDI SDK: it feeds the program
+bus): its 30 fps idle fill and a consumer thread from spawn, a
+`HealthSnapshot` every 5 s, and a Play of a test path answered with a decode
+Error after its pre-roll. (Before lane 3, with no NDI backend in CI, it sent
+ONE Error at spawn and then only waited for Shutdown.) So "no Play was sent"
+read from `event_rx` passes or fails by platform, and an engine test's
+pipelines cost a little CPU on the Windows job: watch its duration after a
+change that adds engine tests. Read it from engine state every Play resets instead: every Play
 calls `begin_play`, which clears the song's title clock (`tests_hold.rs`).
 
 **Never key a "stale event" check on a tokio task id.** tokio documents that

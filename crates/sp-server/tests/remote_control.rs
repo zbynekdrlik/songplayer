@@ -18,7 +18,6 @@
 
 mod common;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -107,44 +106,28 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         .await
         .unwrap();
 
-    // cg OBS: SongPlayer's SP-fast NDI input (the client maps it once it is
-    // connected: the readiness witness below), a playlist scene, a baseline
-    // scene and a manual browser scene.
+    // cg OBS: a playlist scene, a baseline scene and a manual browser scene.
     let mut cg = FakeObsState::default();
-    cg.inputs
-        .insert("sp-fast_video".into(), "ndi_source".into());
-    cg.input_settings.insert(
-        "sp-fast_video".into(),
-        json!({ "ndi_source_name": "RESOLUME-SNV (SP-fast)" }),
-    );
     cg.scene_list = vec!["sp-fast".into(), "sp-slow".into(), "Slido".into()];
     cg.program_scene = Some("sp-slow".into());
     let fake = FakeObsServer::spawn_with_state(cg).await;
 
     // SongPlayer's real OBS client, connected to cg OBS.
-    let ndi_sources: obs::NdiSourceMap = Arc::new(RwLock::new(HashMap::new()));
     let obs_state = Arc::new(RwLock::new(obs::ObsState::default()));
     let (obs_event_tx, _) = broadcast::channel::<obs::ObsEvent>(64);
-    let (_rebuild_tx, rebuild_rx) = broadcast::channel::<()>(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel::<()>(1);
     let client = obs::ObsClient::spawn(
         obs::ObsConfig {
             url: fake.url(),
             password: None,
         },
-        pool.clone(),
-        ndi_sources.clone(),
         obs_state.clone(),
         obs_event_tx.clone(),
-        rebuild_rx,
         shutdown_rx,
     );
-    wait_until("the OBS client maps sp-fast_video to playlist 7", || {
-        let map = ndi_sources.clone();
-        async move {
-            let m = map.read().await;
-            m.get("sp-fast_video") == Some(&7)
-        }
+    wait_until("the OBS client is connected to cg OBS", || {
+        let state = obs_state.clone();
+        async move { state.read().await.connected }
     })
     .await;
 

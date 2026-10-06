@@ -66,7 +66,6 @@ mod tests {
         let (sync_tx, _) = mpsc::channel::<SyncRequest>(16);
         let (resolume_tx, _) = mpsc::channel::<resolume::ResolumeCommand>(16);
 
-        let (obs_rebuild_tx, _) = broadcast::channel::<()>(4);
         let state = AppState {
             pool,
             event_tx,
@@ -76,7 +75,6 @@ mod tests {
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
             resolume_tx,
-            obs_rebuild_tx,
             cache_dir: PathBuf::from("cache"),
             ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
                 PathBuf::from("cache"),
@@ -86,7 +84,6 @@ mod tests {
             presenter_client: None,
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
-            ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
             preview_registry: Arc::new(playback::preview::PreviewRegistry::new()),
             program_bus: Arc::new(playback::program_bus::ProgramBus::new()),
             lan_status: mdns::new_status_handle(),
@@ -108,7 +105,6 @@ mod tests {
 
         let (sync_tx, _) = mpsc::channel::<SyncRequest>(16);
         let (resolume_tx, _) = mpsc::channel::<resolume::ResolumeCommand>(16);
-        let (obs_rebuild_tx, _) = broadcast::channel::<()>(4);
 
         let state = AppState {
             pool,
@@ -119,7 +115,6 @@ mod tests {
             tool_paths: Arc::new(RwLock::new(None)),
             sync_tx,
             resolume_tx,
-            obs_rebuild_tx,
             cache_dir: PathBuf::from("cache"),
             ai_proxy: Arc::new(ai::proxy::ProxyManager::new(
                 PathBuf::from("cache"),
@@ -129,7 +124,6 @@ mod tests {
             presenter_client: None,
             resolume_registry: Arc::new(resolume::ResolumeRegistry::new()),
             ndi_health_registry: Arc::new(playback::ndi_health::NdiHealthRegistry::new()),
-            ndi_burn_registry: Arc::new(playback::ndi_burn::NdiBurnRegistry::new()),
             preview_registry: Arc::new(playback::preview::PreviewRegistry::new()),
             program_bus: Arc::new(playback::program_bus::ProgramBus::new()),
             lan_status: mdns::new_status_handle(),
@@ -167,45 +161,5 @@ mod tests {
     #[test]
     fn sync_interval_from_defaults_on_zero() {
         assert_eq!(sync_interval_from(Some("0")), 600);
-    }
-
-    // -----------------------------------------------------------------
-    // The genlock pacing flag at startup (#147)
-    // -----------------------------------------------------------------
-
-    /// A fresh database has no `genlock_pacing` row: pacing is ON, the
-    /// owner's rule. SP-program takes only paced sources.
-    #[tokio::test]
-    async fn genlock_pacing_is_on_for_a_fresh_database() {
-        let pool = db::create_memory_pool().await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
-        assert!(genlock_pacing_setting(&pool).await);
-    }
-
-    /// A read that fails (here a closed pool) is not "off" either.
-    #[tokio::test]
-    async fn genlock_pacing_is_on_when_the_setting_cannot_be_read() {
-        let pool = db::create_memory_pool().await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
-        pool.close().await;
-        assert!(genlock_pacing_setting(&pool).await);
-    }
-
-    /// Only an explicit "false" selects the SDK-clocked legacy path.
-    #[tokio::test]
-    async fn genlock_pacing_is_off_only_for_an_explicit_false() {
-        let pool = db::create_memory_pool().await.unwrap();
-        db::run_migrations(&pool).await.unwrap();
-        for (value, want) in [
-            ("false", false),
-            ("true", true),
-            ("garbage", true),
-            ("", true),
-        ] {
-            db::models::set_setting(&pool, "genlock_pacing", value)
-                .await
-                .unwrap();
-            assert_eq!(genlock_pacing_setting(&pool).await, want, "{value:?}");
-        }
     }
 }

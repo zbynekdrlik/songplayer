@@ -18,9 +18,9 @@ use crate::api::NdiOutputHealth;
 use crate::store::DashboardStore;
 
 /// #164: a per-card lock badge is shown only when pacing is enabled AND the
-/// output is on the wall (Playing or Paused). While `genlock_pacing` is OFF —
-/// set by hand; the default is ON (#147) — no badge is shown at all, so the dashboard
-/// is not littered with '● UNLOCKED — pacing disabled' on every card.
+/// output is on the wall (Playing or Paused). An output that reports no pacing
+/// (none since #221 lane 3: pacing is the only path) shows no badge, so the
+/// dashboard is never littered with '● UNLOCKED — pacing disabled'.
 pub fn should_show_lock_badge(o: &NdiOutputHealth) -> bool {
     o.pacing.enabled && matches!(o.state.as_str(), "Playing" | "Paused")
 }
@@ -55,7 +55,7 @@ fn badge_text(o: &NdiOutputHealth) -> String {
     }
 }
 
-/// Tooltip: clock / pacing / audio / receiver values for one output.
+/// Tooltip: clock / pacing / audio values for one output.
 fn badge_title(o: &NdiOutputHealth) -> String {
     let offset = o
         .clock
@@ -67,25 +67,13 @@ fn badge_title(o: &NdiOutputHealth) -> String {
     } else {
         o.clock.mode.as_str()
     };
-    // #192: on the SDK-clocked path the wall-clock audio emitter carries the
-    // audio telemetry (silence/ring/jitter); the paced path shows the A/V
-    // media offset (#148) and underruns.
-    let audio = if o.audio.emitter.enabled {
-        format!(
-            "emitter[sdk-video/wallclock-audio] silence={} ring={}ms jitter_p99={}us late={}",
-            o.audio.emitter.silence_blocks,
-            o.audio.emitter.ring_depth_ms,
-            o.audio.emitter.emit_jitter_p99_us,
-            o.audio.emitter.late_blocks,
-        )
-    } else {
-        format!(
-            "av={:+.1}ms underruns={}",
-            o.pacing.av_align_err_ms, o.audio.underruns,
-        )
-    };
+    // The A/V media offset (#148) and the paced audio's underruns.
+    let audio = format!(
+        "av={:+.1}ms underruns={}",
+        o.pacing.av_align_err_ms, o.audio.underruns,
+    );
     format!(
-        "clock: locked={} mode={} offset={} | pacing: late={} p99={}us repeats={} resyncs={} lag={} | audio: {} | receiver: connections={}",
+        "clock: locked={} mode={} offset={} | pacing: late={} p99={}us repeats={} resyncs={} lag={} | audio: {}",
         o.clock.is_locked,
         mode,
         offset,
@@ -95,7 +83,6 @@ fn badge_title(o: &NdiOutputHealth) -> String {
         o.pacing.resyncs,
         o.pacing.lag_slots,
         audio,
-        o.connections,
     )
 }
 

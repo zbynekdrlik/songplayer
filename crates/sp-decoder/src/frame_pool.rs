@@ -25,7 +25,7 @@
 //! handoff coalesce and a seek flush all recycle through the same `Drop`.
 
 use std::collections::BTreeMap;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::sync::{Mutex, MutexGuard};
 
 /// Max recycled buffers kept per exact-capacity size class. Beyond this,
@@ -141,10 +141,9 @@ pub fn recycle(buf: Vec<u8>) {
 }
 
 /// An owned pixel buffer whose `Drop` returns its allocation to the pool for
-/// reuse instead of freeing it (#203). Derefs to `[u8]` like the `Vec` it wraps;
-/// `Clone` makes a separate copy, but INTO a recycled buffer of the same size
-/// class (#147 round 10). The burn overlay's `Arc::make_mut` forks EVERY paced
-/// frame while burn is ON, because the pacer always holds a second Arc.
+/// reuse instead of freeing it (#203). Derefs to `[u8]` like the `Vec` it wraps,
+/// read-only: a frame is never painted after it is decoded (#221 lane 3 deleted
+/// the burn overlay, the one writer).
 pub struct PooledBuf(Vec<u8>);
 
 impl PooledBuf {
@@ -156,12 +155,6 @@ impl PooledBuf {
         let mut buf = take(src.len());
         buf.extend_from_slice(src);
         Self(buf)
-    }
-
-    /// Exclusive access to the inner `Vec` — the burn overlay's `make_mut` path
-    /// needs `&mut Vec<u8>`, which `DerefMut` (targeting `[u8]`) cannot give.
-    pub fn as_vec_mut(&mut self) -> &mut Vec<u8> {
-        &mut self.0
     }
 
     /// Extract the inner buffer, taking ownership WITHOUT recycling it.
@@ -176,22 +169,10 @@ impl From<Vec<u8>> for PooledBuf {
     }
 }
 
-impl Clone for PooledBuf {
-    fn clone(&self) -> Self {
-        Self::copy_from_slice(&self.0)
-    }
-}
-
 impl Deref for PooledBuf {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
         &self.0
-    }
-}
-
-impl DerefMut for PooledBuf {
-    fn deref_mut(&mut self) -> &mut [u8] {
-        &mut self.0
     }
 }
 
@@ -306,12 +287,11 @@ mod tests {
     }
 
     #[test]
-    fn clone_copies_into_a_recycled_buffer_of_its_class() {
-        // #147 round 10: the burn overlay forks every paced frame through
-        // `Arc::make_mut` -> `PooledBuf::clone`. The fork must reuse a recycled
-        // buffer of the same size class, never a fresh 5.5 MB allocation. The
-        // spare stays alive in the pool until the clone takes it, so a fresh
-        // allocation can never land on its address by allocator coincidence.
+    fn copy_from_slice_copies_into_a_recycled_buffer_of_its_class() {
+        // #147 round 10: a copy must reuse a recycled buffer of the same size
+        // class, never a fresh 5.5 MB allocation. The spare stays alive in the
+        // pool until the copy takes it, so a fresh allocation can never land on
+        // its address by allocator coincidence.
         let _s = guard();
         let mut spare = Vec::with_capacity(160);
         spare.extend_from_slice(&[0u8; 160]);
@@ -322,12 +302,12 @@ mod tests {
         v.extend((0..cap).map(|i| (i * 7) as u8));
         let src = PooledBuf::from(v);
 
-        let copy = src.clone();
+        let copy = PooledBuf::copy_from_slice(&src);
 
         assert_eq!(
             copy.as_ptr(),
             spare_ptr,
-            "the clone reuses the pooled buffer"
+            "the copy reuses the pooled buffer"
         );
         assert_eq!(&copy[..], &src[..], "with the source's exact bytes");
         assert_ne!(copy.as_ptr(), src.as_ptr(), "still a separate allocation");
@@ -345,24 +325,6 @@ mod tests {
         assert_eq!(inner.as_ptr(), p, "into_inner returns the SAME allocation");
         assert_eq!(&inner[..], &[5u8; 80][..]);
         assert_eq!(pool_len(cap), 0, "into_inner does NOT recycle");
-    }
-
-    #[test]
-    fn pooled_buf_clone_is_a_fresh_copy() {
-        let _s = guard();
-        let a = PooledBuf::from(vec![9u8; 10]);
-        let b = a.clone();
-        assert_eq!(&a[..], &b[..], "same bytes");
-        assert_ne!(a.as_ptr(), b.as_ptr(), "clone is a separate allocation");
-    }
-
-    #[test]
-    fn pooled_buf_deref_mut_and_as_vec_mut_mutate_in_place() {
-        let _s = guard();
-        let mut p = PooledBuf::from(vec![0u8; 4]);
-        p[0] = 1; // DerefMut -> [u8]
-        p.as_vec_mut().push(2);
-        assert_eq!(&p[..], &[1u8, 0, 0, 0, 2][..]);
     }
 
     #[test]

@@ -25,8 +25,11 @@ paths:
 
 The dashboard playlist card has TWO preview surfaces sampled from the
 already-decoded output. The governing constraint (owner rescope 2026-09-13,
-genlock #146–#151) is unchanged: a preview must **never** touch the NDI submit /
-pacing / genlock path, add latency, or drop wall fps.
+genlock #146–#151) is unchanged: a preview must **never** touch the program
+path (the paced delivery to the program bus, `SP-program`'s NDI submit) /
+pacing / genlock, add latency, or drop wall fps. (#221 lane 3: a playlist has
+no NDI sender of its own; the preview is the only per-playlist picture left
+besides the program bus.)
 
 - **#15 JPEG thumbnail** — an opportunistic ≤ 5 fps still, no audio. Kept as the
   fallback thumbnail; served by `GET /api/v1/playback/{id}/preview.jpg`.
@@ -42,15 +45,13 @@ ALSO owns the #178 `StreamTap` per playlist (`register_taps` / `stream`) so no
 second registry is threaded through the near-1000-line `mod.rs`/`lib.rs`. The two
 taps are bundled into `preview_stream::DecodeTaps` and passed as the single
 tap-parameter slot through `PlaybackPipeline::spawn` → `run_loop` →
-`run_loop_windows` → the two decode fns.
+`run_loop_windows` → the decode producer.
 
-Each decode loop makes exactly ONE `taps.offer_frame(&video_frame, &audio_frames)`
-call, BEFORE the NDI submit / `#192` audio-emitter push consume the frame:
-
-- `pipeline::decode_and_send` (SDK-clocked path) — offer, then
-  `push_or_collect_audio`, then `submit_nv12`.
-- `pipeline_paced::run_decode_producer` (paced path) — offer on the PRODUCER
-  thread (off the emit/submit path entirely), before `to_paced_frame`.
+The decode makes exactly ONE `taps.offer_frame(&video_frame, &audio_frames)`
+call per frame: `pipeline_paced::run_decode_producer` offers on the PRODUCER
+thread (off the emit / delivery path entirely), before `to_paced_frame`. (#221
+lane 3 deleted the SDK-clocked `pipeline::decode_and_send`, the other offer
+site.)
 
 `offer_frame` fans out to: the JPEG tap (`preview.try_offer`), the stream video
 tap (`stream.try_offer_video` → NV12→NV12 letterbox into a fixed 640×360 canvas),
@@ -60,9 +61,7 @@ shared with the #215 `SP-program` fit: change it there, for both (the preview's
 nearest-neighbour pixel copy stays its own).
 Tapping BOTH audio and video at this ONE decode seam keeps them offered together,
 so ffmpeg's `-use_wallclock_as_timestamps` keeps A/V in sync, and it stays OFF the
-TIME_CRITICAL `#192` emit thread (which must never wait). (The main design comment
-named `audio_emitter.rs::emit_one_block` as the audio seam; the decode seam is the
-equivalent, simpler, single-seam realization — see #178.)
+paced emit thread (which must never wait).
 
 ## Iron rules (BOTH taps)
 
@@ -73,10 +72,8 @@ equivalent, simpler, single-seam realization — see #178.)
    (JPEG encode is on its worker thread); the stream tap does a cheap NN NV12
    letterbox into a RECYCLED buffer (the H.264 encode is in the ffmpeg CHILD).
    Never move an encoder onto the decode thread.
-3. **`pacer.rs` / `submitter.rs` / `pipeline_audio.rs` / FLAC / genlock stay
-   byte-for-byte.** The preview adds exactly ONE `offer_frame` call per decode
-   loop. `pacer_tests.rs`'s byte-exact legacy call-site guard pins the SDK-path
-   call site; update it (with a justification) if the call site changes.
+3. **`pacer.rs` / `paced_output.rs` / FLAC / genlock stay byte-for-byte.**
+   The preview adds exactly ONE `offer_frame` call per decoded frame.
 4. **A full channel DROPS the frame, never blocks.** The stream video/audio
    bounded channels drop-on-full (the child paces CFR); a lagging WS viewer is
    dropped by the broadcast relay and resyncs on the next keyframe fragment.
@@ -248,18 +245,18 @@ never a dependable lever). The `only_the_video_input_is_wall_clock_stamped` +
 exact-vector tests pin this — never add wall-clock stamps to the PCM input.
 
 **A/V is aligned on OUR side by a silence preroll.** The audio + video are tapped
-together at the ONE decode seam, but the merged #192 emitter opens the
-SDK-clocked decoder with a 100 ms audio read-ahead
-(`decoder_tolerance_ms(true) == 140` vs `DEFAULT_TOLERANCE_MS == 40`), so at the
-seam the `audio_frames` LEAD `video_frame` by `lead_ms` on the SDK-clocked path
-(historically 100 SDK / 0 paced; today 1500 SDK / **210 paced** — since #148 v4 the
-paced decoder reads `PACED_AUDIO_LEAD_MS = 250` ahead, so `lead_ms_for(true)` =
-250 − 40. The FIRST block after a start or seek covers from the frame's own
-media time, not from +lead, so `AudioHold` can place it up to the lead late. The
-G3 ±300 ms band then keeps or trims that, the same class as the SDK path's
-start burst. Box-check it with `scripts/preview_latency_repro.py` across a song
-change or seek. `lead_ms_for` / `StreamShared::lead_ms()`, threaded
-`ensure_pipeline_inner → register_taps → StreamTap::new`). Because the video feeder
+together at the ONE decode seam, but the paced decoder reads audio ahead of the
+picture (#148 v4: `PACED_AUDIO_LEAD_MS = 250`), so at the seam the
+`audio_frames` LEAD `video_frame` by `lead_ms` =
+`preview_stream::decode_seam_lead_ms()` = 250 − 40 = **210 ms**. (History: 100
+then 1500 on the SDK-clocked path, deleted by #221 lane 3; 0 on the paced path
+before #148 v4.) The FIRST block after a start or seek covers from the frame's
+own media time, not from +lead, so `AudioHold` can place it up to the lead
+late. The G3 ±300 ms band then keeps or trims that. Box-check it with
+`scripts/preview_latency_repro.py` across a song change or seek.
+`decode_seam_lead_ms()` / `StreamShared::lead_ms()`, threaded
+`ensure_pipeline_inner → register_taps → StreamTap::new`; pinned by
+`tests_runtime_pipeline.rs::a_created_pipeline_registers_its_preview_taps_with_the_paced_lead`). Because the video feeder
 starts on-connect BEFORE the audio input connects, the audio feeder measures how
 far the video wall-clock timeline is already ahead and PREPENDS silence to match:
 `audio_preroll_samples(connect_gap_ms, lead_ms) = (min(gap,5000)+lead_ms)*48*2`
@@ -268,8 +265,9 @@ unit-tested, no equivalent mutants). The feeders also DRAIN any stale queued
 frames/blocks on start so a previous viewer's backlog never front-runs the live
 edge; the video feeder stamps the wall-time of its first write for the gap.
 **Since #184 round G3 the feeder calls it with `lead_ms = 0`** — the preroll is
-the connect gap only and the lead (now 1500 ms, `AUDIO_LOOKAHEAD_MS`) is HELD in
-the feeder (see "#184 round G3" below); a lead-long silence preroll parked the
+the connect gap only and the lead (210 ms since #221 lane 3; 1500 ms on the
+deleted SDK-clocked path the G3 measurement below was taken on) is HELD in the
+feeder (see "#184 round G3" below); a lead-long silence preroll parked the
 whole lead in the loopback socket.
 
 ### Fixed-stereo audio input (`to_stereo`, #178 Round 2)
@@ -724,7 +722,8 @@ with the channel depth at the moment of the change. The G3 column is the final
 feeder (hold + snap + 30 ms poll); before the snap the G3 shift read 1.38-1.57 s.)
 
 **The mechanism.** The seam audio LEADS the video by `lead_ms` (1500 ms,
-`AUDIO_LOOKAHEAD_MS`). G2 put that lead INTO the encoder's audio input (a
+`AUDIO_LOOKAHEAD_MS`, on the SDK-clocked path measured here; 210 ms on the
+paced path, the only one since #221 lane 3). G2 put that lead INTO the encoder's audio input (a
 lead-long silence preroll, then each block the moment it arrived). ffmpeg
 consumes audio only in step with its wall-clock video, so ~1.5 s ≈ 576 KB of PCM
 had to sit in flight — our send buffer + ffmpeg's receive buffer + its input
@@ -745,8 +744,8 @@ starves, the MSE buffer drains in ~2-3.75 s) — it never exercises this queue.
   preroll is `audio_preroll_samples(gap, 0)`. The socket carries only the
   write-ahead (~77 KB + one seam block in steady state; + the 300 ms band right
   after a seam burst), so its buffer size is irrelevant.
-  The write-ahead is capped at the lead (paced path: lead 0 → write on
-  arrival at the wall).
+  The write-ahead is capped at the lead (with the paced 210 ms lead the
+  200 ms write-ahead applies: a block is written 10 ms after it arrived).
 - **Place a block by its ARRIVAL, never by its dequeue.** `offer_audio` stamps
   `AudioBlock { arrival, samples }` (only with a viewer, after the one-load
   fast path); `take_writes` aligns each due block against

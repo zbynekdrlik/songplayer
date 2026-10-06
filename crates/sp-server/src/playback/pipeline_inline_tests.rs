@@ -11,16 +11,12 @@ fn pipeline_spawn_and_shutdown() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let pipeline = PlaybackPipeline::spawn(
         "test-ndi".into(),
-        None,
         event_tx,
         1,
-        false,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
-        None,
     );
     pipeline.shutdown();
     // If we get here, the thread joined successfully.
@@ -32,11 +28,8 @@ fn pipeline_drop_sends_shutdown() {
     {
         let _pipeline = PlaybackPipeline::spawn(
             "test-drop".into(),
-            None,
             event_tx,
             2,
-            false,
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             crate::playback::preview::preview_stream::DecodeTaps {
                 preview: crate::playback::preview::PreviewTap::new(
                     Default::default(),
@@ -44,7 +37,6 @@ fn pipeline_drop_sends_shutdown() {
                 ),
                 stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
             },
-            None,
         );
         // Pipeline dropped here — Drop impl should send Shutdown and join.
     }
@@ -56,16 +48,12 @@ fn pipeline_send_command_before_shutdown() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let pipeline = PlaybackPipeline::spawn(
         "test-cmd".into(),
-        None,
         event_tx,
         3,
-        false,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
-        None,
     );
     pipeline.send(PipelineCommand::Stop);
     pipeline.send(PipelineCommand::Pause);
@@ -78,16 +66,12 @@ fn pipeline_play_emits_event_on_non_windows() {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let pipeline = PlaybackPipeline::spawn(
         "test-play".into(),
-        None,
         event_tx,
         4,
-        false,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
-        None,
     );
 
     pipeline.send(PipelineCommand::Play {
@@ -147,16 +131,12 @@ fn pipeline_send_seek_command() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let pipeline = PlaybackPipeline::spawn(
         "test-seek".into(),
-        None,
         event_tx,
         6,
-        false,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
-        None,
     );
     pipeline.send(PipelineCommand::Seek { position_ms: 5000 });
     pipeline.shutdown();
@@ -175,16 +155,12 @@ fn pipeline_processes_multiple_sequential_plays() {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let pipeline = PlaybackPipeline::spawn(
         "test-multi-play".into(),
-        None,
         event_tx,
         5,
-        false,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
-        None,
     );
 
     pipeline.send(PipelineCommand::Play {
@@ -237,16 +213,12 @@ fn play_with_start_position_ms_is_accepted() {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let pipeline = PlaybackPipeline::spawn(
         "test-start-pos".into(),
-        None,
         event_tx,
         7,
-        false,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
-        None,
     );
 
     pipeline.send(PipelineCommand::Play {
@@ -278,7 +250,7 @@ fn play_with_start_position_ms_is_accepted() {
 }
 
 /// Pin: `PipelineCommand::Play` must reset `paused = false` BEFORE
-/// entering `decode_and_send`, so a stale `Pause` cannot leak across
+/// entering `decode_and_send_paced`, so a stale `Pause` cannot leak across
 /// video changes. Static check via `include_str!` — fires red if the
 /// `paused = false` statement is moved out of the Play arm, deleted,
 /// or commented out.
@@ -289,8 +261,8 @@ fn play_command_clears_paused_state() {
         .find("Ok(PipelineCommand::Play {")
         .expect("Play arm must exist");
     let decode_call = src[play_arm_start..]
-        .find("decode_and_send(")
-        .expect("Play arm must call decode_and_send");
+        .find("decode_and_send_paced(")
+        .expect("Play arm must call decode_and_send_paced");
     let play_block = &src[play_arm_start..play_arm_start + decode_call];
 
     // Strict match: an actual statement (semicolon-terminated), not a
@@ -304,7 +276,7 @@ fn play_command_clears_paused_state() {
     assert!(
         live_lines.contains("paused = false;"),
         "PipelineCommand::Play must clear `paused = false;` (live statement, not \
-         a comment) BEFORE decode_and_send. Current Play arm:\n{play_block}"
+         a comment) BEFORE decode_and_send_paced. Current Play arm:\n{play_block}"
     );
 }
 
@@ -312,7 +284,6 @@ fn play_command_clears_paused_state() {
 fn health_snapshot_variant_constructs_and_clones() {
     let now = Instant::now();
     let ev = PipelineEvent::HealthSnapshot {
-        connections: 1,
         frames_submitted_total: 100,
         frames_submitted_last_5s: 30,
         observed_fps: 29.97,
@@ -329,13 +300,13 @@ fn health_snapshot_variant_constructs_and_clones() {
     let cloned = ev.clone();
     // Pattern-match to assert the variant exists and the fields round-trip.
     if let PipelineEvent::HealthSnapshot {
-        connections,
+        frames_submitted_total,
         frames_submitted_last_5s,
         reported_state,
         ..
     } = cloned
     {
-        assert_eq!(connections, 1);
+        assert_eq!(frames_submitted_total, 100);
         assert_eq!(frames_submitted_last_5s, 30);
         assert_eq!(reported_state, PlaybackStateLabel::Playing);
     } else {

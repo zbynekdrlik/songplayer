@@ -1,13 +1,13 @@
 //! Mutation-kill tests for the `PlaybackEngine` genlock-wiring setters
-//! (PR #153 / 0.47.0). Each setter's body was replaced with `()` by a
-//! surviving mutant (a no-op), so each test asserts the setter actually
-//! mutates the engine's observable state: the pacing flag flips, and the
-//! injected clock-health / burn-registry handles are the SAME `Arc` the
-//! setter was given (`Arc::ptr_eq`). Wired from `playback/mod.rs`, so this is
-//! a child of `crate::playback` and can read the engine's private fields.
+//! (PR #153 / 0.47.0). A setter's body replaced with `()` by a surviving
+//! mutant (a no-op) is caught by asserting the injected clock-health handle
+//! is the SAME `Arc` the setter was given (`Arc::ptr_eq`). #221 lane 3
+//! deleted the pacing flag (pacing is the only path) and the burn registry
+//! (it painted only the per-playlist senders) with their setters. Wired from
+//! `playback/mod.rs`, so this is a child of `crate::playback` and can read
+//! the engine's private fields.
 
 use super::clock_health::ClockHealth;
-use super::ndi_burn::NdiBurnRegistry;
 use super::ndi_health::NdiHealthRegistry;
 use super::{PlaybackEngine, PlaybackEngineConfig};
 use sp_core::ws::ServerMsg;
@@ -34,27 +34,6 @@ async fn fresh_engine() -> PlaybackEngine {
     })
 }
 
-/// #147: a fresh engine starts with pacing ON (`DEFAULT_GENLOCK_PACING`, the
-/// owner's rule); the startup read can still turn it off.
-#[tokio::test]
-async fn set_genlock_pacing_flips_the_flag() {
-    let mut engine = fresh_engine().await;
-    assert!(
-        engine.genlock_pacing,
-        "fresh engine defaults to pacing ON (#147)"
-    );
-    engine.set_genlock_pacing(false);
-    assert!(
-        !engine.genlock_pacing,
-        "set_genlock_pacing(false) must clear the flag (mutant no-op leaves it on)"
-    );
-    engine.set_genlock_pacing(true);
-    assert!(
-        engine.genlock_pacing,
-        "set_genlock_pacing(true) must set the flag"
-    );
-}
-
 #[tokio::test]
 async fn set_clock_health_injects_the_shared_handle() {
     let mut engine = fresh_engine().await;
@@ -63,16 +42,5 @@ async fn set_clock_health_injects_the_shared_handle() {
     assert!(
         Arc::ptr_eq(&engine.clock_health, &handle),
         "set_clock_health must store the injected Arc (mutant no-op keeps the default)"
-    );
-}
-
-#[tokio::test]
-async fn set_ndi_burn_registry_injects_the_shared_registry() {
-    let mut engine = fresh_engine().await;
-    let registry = Arc::new(NdiBurnRegistry::new());
-    engine.set_ndi_burn_registry(registry.clone());
-    assert!(
-        Arc::ptr_eq(&engine.ndi_burn_registry, &registry),
-        "set_ndi_burn_registry must store the injected Arc (mutant no-op keeps the default)"
     );
 }

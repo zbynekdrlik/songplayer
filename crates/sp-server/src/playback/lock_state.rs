@@ -167,22 +167,20 @@ impl EventWindow {
 
 /// Push this heartbeat's cumulative pacing counters into the 60 s `window`,
 /// difference the window (slots + late/repeats/resyncs), and derive the
-/// three-state lock from the clock/pacing/receiver inputs plus the
-/// rate-normalised counts (#168 round 6). The single seam `ndi_health.rs` calls
-/// so the 999/1000-line file stays line-neutral. `source_fps` is the playing
+/// three-state lock from the clock/pacing inputs plus the rate-normalised
+/// counts (#168 round 6). The single seam `ndi_health.rs` calls. `source_fps`
+/// is the playing
 /// file's nominal fps; `grid_fps` the pacer's fixed grid (`GENLOCK_GRID_FPS`).
 /// `transport` is the pipeline's RAW transport (#201, pre-scene-reconciliation):
 /// only `Playing` is decoding (#150) — a Paused / Idle output's standby repeats
 /// are by design and never read as starvation. The window starts over first
 /// when `decoding` flipped or a seek moved `pacing.seeks`
 /// ([`EventWindow::restart_on`], ROZHODNUTÉ 5984539219).
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn lock_for_heartbeat(
     window: &mut EventWindow,
     now_100ns: i64,
     pacing: &PacingStats,
     clock_ok: bool,
-    connections: u32,
     source_fps: f32,
     grid_fps: u32,
     transport: TransportState,
@@ -201,7 +199,6 @@ pub(crate) fn lock_for_heartbeat(
     derive(&LockInputs {
         clock_ok,
         pacing_enabled: pacing.enabled,
-        connections,
         late_w,
         repeats_w,
         resyncs_w,

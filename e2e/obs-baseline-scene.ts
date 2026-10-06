@@ -13,6 +13,8 @@
  * operator). It falls back to a non-sp scene only if no other sp-* exists.
  */
 
+import { AV_PROBE_SCENE } from "./av-sync-probe";
+
 export const DISALLOWED_BASELINE_SCENES = new Set(["sp-fast", "sp-warmup"]);
 
 export function pickBaselineScene(scenes: string[]): string {
@@ -26,8 +28,9 @@ export function pickBaselineScene(scenes: string[]): string {
   if (otherSp) return otherSp;
   // Last resort — non-sp scene. This may be the disruptive QR-code
   // test scene, but it's better than running a test where the baseline
-  // and the sp-fast probe scene collide.
-  const nonSp = scenes.find((s) => !s.startsWith("sp-"));
+  // and the sp-fast probe scene collide. Never the A/V gate's own probe
+  // scene (#221 lane 3): it shows SP-program, i.e. the program itself.
+  const nonSp = scenes.find((s) => !s.startsWith("sp-") && s !== AV_PROBE_SCENE);
   if (nonSp) return nonSp;
   return scenes[0];
 }

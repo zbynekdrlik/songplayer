@@ -186,9 +186,6 @@ pub async fn create_playlist(
             let is_active = row.get::<i32, _>("is_active") != 0;
             drop(row);
 
-            // Rebuild the NDI source map so the new playlist is matched
-            // against OBS NDI inputs immediately (the #196 self-check).
-            let _ = state.obs_rebuild_tx.send(());
             // #132: register a playback pipeline for the new playlist so the
             // playback authority can start it without a restart. The engine
             // reconciles from the DB (creates only when active + non-empty NDI).
@@ -312,7 +309,6 @@ pub async fn update_playlist(
                 if let Some(mode) = mode {
                     super::routes_mode::tell_engine(&state.engine_tx, id, mode).await;
                 }
-                let _ = state.obs_rebuild_tx.send(());
                 // #132: reconcile the playback pipeline with the update.
                 // Deactivation tears the pipeline down; every other update
                 // (activation, NDI-name set, rename) ensures it — the ensure
@@ -350,7 +346,6 @@ pub async fn delete_playlist(
             if result.rows_affected() == 0 {
                 StatusCode::NOT_FOUND.into_response()
             } else {
-                let _ = state.obs_rebuild_tx.send(());
                 // #132: tear down the deleted playlist's pipeline symmetrically.
                 // Guaranteed delivery (`.send().await`), as in `create_playlist`.
                 let _ = state
@@ -822,38 +817,15 @@ pub async fn get_resolume_health(
     Json(state.resolume_registry.health_snapshots())
 }
 
-/// GET /api/v1/ndi/health — return per-pipeline NDI delivery health.
-/// Empty `[]` if no pipelines have reported a heartbeat yet.
+/// GET /api/v1/ndi/health — every playlist pipeline's health (its playback
+/// state, its paced delivery to the program bus, its genlock lock). #221 lane
+/// 3: a playlist has no NDI output of its own, so a row carries no receiver
+/// field; SP-program's are on `GET /api/v1/program`. Empty `[]` if no
+/// pipeline has reported a heartbeat yet.
 pub async fn get_ndi_health(
     State(state): State<AppState>,
 ) -> Json<Vec<crate::playback::ndi_health::PipelineHealthSnapshot>> {
     Json(state.ndi_health_registry.snapshots())
-}
-
-/// Body for `POST /api/v1/ndi/burn` (#151).
-#[derive(Debug, Deserialize)]
-pub struct SetBurnRequest {
-    /// The NDI output name (e.g. `"SP-fast"`) to toggle.
-    pub output: String,
-    /// Turn the burn-id QR overlay on (`true`) or off (`false`).
-    pub on: bool,
-}
-
-/// POST /api/v1/ndi/burn — toggle the runtime burn-id QR overlay for one NDI
-/// output (#151). `204` on success; `404` if the output is unknown; `409`
-/// ("pacing disabled") when the output exists but `genlock_pacing` is off (the
-/// burn is only painted on the paced path — the fleet's TEST mode runs with
-/// pacing on). Default OFF, never persisted.
-pub async fn set_ndi_burn(
-    State(state): State<AppState>,
-    Json(body): Json<SetBurnRequest>,
-) -> impl IntoResponse {
-    use crate::playback::ndi_burn::BurnSetResult;
-    match state.ndi_burn_registry.set(&body.output, body.on) {
-        BurnSetResult::Ok => StatusCode::NO_CONTENT.into_response(),
-        BurnSetResult::NotFound => StatusCode::NOT_FOUND.into_response(),
-        BurnSetResult::PacingDisabled => (StatusCode::CONFLICT, "pacing disabled").into_response(),
-    }
 }
 
 pub async fn delete_resolume_host(
@@ -972,10 +944,6 @@ mod tests_clock;
 #[cfg(test)]
 #[path = "routes_tests_pacing.rs"]
 mod tests_pacing;
-
-#[cfg(test)]
-#[path = "routes_tests_burn.rs"]
-mod tests_burn;
 
 #[cfg(test)]
 #[path = "routes_tests_runtime_pipeline.rs"]

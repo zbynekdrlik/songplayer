@@ -1,12 +1,14 @@
 //! Windows-only boundary-paced decode driver (#147).
 //!
-//! The `genlock_pacing`-ON counterpart to `pipeline::decode_and_send`. Instead
-//! of leaning on the NDI SDK's `clock_video` cadence, it drives the pure
+//! A playlist's only decode path since #221 lane 3 deleted the SDK-clocked
+//! one (`decode_and_send` and its `genlock_pacing` switch). It drives the pure
 //! [`Pacer`](crate::playback::pacer::Pacer): sleep-until-boundary on the wall
 //! clock, decode forward per the presentation rule, and emit exactly one video
 //! frame per grid boundary stamped with the floored boundary wall time. The MF
-//! decode + real NDI submit are Windows-only; the scheduling DECISIONS all live
-//! in the (cross-platform, Linux-tested) `Pacer`.
+//! decode is Windows-only; the scheduling DECISIONS all live in the
+//! (cross-platform, Linux-tested) `Pacer`, and every boundary goes through the
+//! pipeline's paced output to the program bus (#221 lane 3: a playlist has no
+//! NDI output of its own).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -17,7 +19,9 @@ use tracing::{debug, error, info, warn};
 use crate::playback::decode_thread::spawn_decode_thread;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::{PacingStats, PlaybackStateLabel};
-use crate::playback::paced_output::{HandoffSink, PacedFeed, SharedHandoff};
+use crate::playback::paced_output::{
+    HandoffSink, InstalledBus, PacedFeed, PipelineOutput, SharedHandoff,
+};
 use crate::playback::pacer::{
     PacedFrame, Pacer, PrerollGate, ServiceOutcome, Standby, StandbyBlack, open_paced_decoder,
     plan_sleep_100ns,
@@ -30,7 +34,6 @@ use crate::playback::pipeline::{
 // The song-start pre-roll's standby black: the idle fill's 1080p size (#147).
 use crate::playback::pipeline_paced_idle::{IDLE_H as STANDBY_H, IDLE_W as STANDBY_W};
 use crate::playback::pipeline_paced_submit::emit_heartbeat_paced;
-use crate::playback::submitter::FrameSubmitter;
 
 /// A frame handed from the decode producer to the emit consumer (#147): the paced
 /// frame plus the ABSOLUTE decoded position (ms) for the pipeline's Position
@@ -136,7 +139,7 @@ pub(crate) fn sleep_to_boundary(pacer: &Pacer, until_100ns: i64) {
 /// Service exactly ONE standby boundary with the held last frame (#147): sleep
 /// to it if it is not due yet, then emit. Used at a natural song end, so the
 /// EOS audio tail the pacer holds leaves as that boundary's audio block, paired
-/// with the last frame, on the same handoff + submit thread as every boundary.
+/// with the last frame, on the same handoff + paced output as every boundary.
 fn serve_one_standby_boundary(pacer: &mut Pacer, sink: &mut HandoffSink<'_>) {
     loop {
         match pacer.service_standby(Standby::FrozenLast, &mut *sink) {
@@ -256,10 +259,8 @@ fn run_decode_producer(
 
     let duration_ms = decoder.duration_ms();
     // #168 r6b: report the DECODER's source fps alongside the duration so the
-    // paced heartbeat can carry a path-independent `source_fps` to the lock rule
-    // (the paced submitter carries the grid rate, so `submitter.nominal_fps()`
-    // there is the grid, never the source). `(num, den)` is the same pair the
-    // SDK path reads at `pipeline.rs` before `set_frame_rate`.
+    // paced heartbeat can carry the source's own rate to the lock rule (the
+    // heartbeat's `nominal_fps` is the grid, never the source).
     let (num, den) = decoder.frame_rate();
     let source_fps = if den == 0 {
         0.0
@@ -383,8 +384,8 @@ fn producer_drain_wait(
     }
 }
 
-/// Boundary-paced EMIT loop (#147 producer/consumer split). Same command / event
-/// contract as `pipeline::decode_and_send`, but the cadence is the wall-clock grid
+/// Boundary-paced EMIT loop (#147 producer/consumer split). The command / event
+/// contract of the deleted SDK-clocked `decode_and_send`, but the cadence is the wall-clock grid
 /// and the decode happens on a dedicated producer thread ([`run_decode_producer`])
 /// that fills a bounded look-ahead queue — box test 4 (2026-09-15) proved a
 /// one-frame synchronous look-ahead cannot hold the grid on this box while the
@@ -395,7 +396,7 @@ fn producer_drain_wait(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn decode_and_send_paced(
     cmd_rx: &Receiver<PipelineCommand>,
-    submitter: &mut FrameSubmitter<sp_ndi::RealNdiBackend>,
+    output: &mut PipelineOutput<InstalledBus>,
     pacer: &mut Pacer,
     video_path: &std::path::Path,
     audio_path: &std::path::Path,
@@ -433,26 +434,25 @@ pub(crate) fn decode_and_send_paced(
 
     // The pre-roll's standby black (#147 song-start hole): the SAME cached NV12
     // black as the idle fill.
-    let black = submitter.standby_black_nv12(STANDBY_W, STANDBY_H);
+    let black = output.standby_black_nv12(STANDBY_W, STANDBY_H);
 
-    // #168 output-side split: the NDI submit runs on a dedicated thread fed by a
-    // BOUNDED handoff, so a `send_video_async` stall never lands as a late
-    // boundary emit; the emit thread hands each boundary off in ~µs and reads a
-    // submit-side snapshot for the heartbeat. #147 (design record 5845527884,
+    // #168 output-side split: the delivery runs on a dedicated thread fed by a
+    // BOUNDED handoff, so the emit thread hands each boundary off in ~µs and
+    // reads the output's snapshot for the heartbeat. #147 (design record 5845527884,
     // Approach 1 (a)): that thread is this PIPELINE's, spawned on the first
     // paced scope and alive until the pipeline ends. This song only ATTACHES a
     // feeder: its pacer continues right after the last boundary the output
     // serviced (the previous song, the idle fill, or the consumer's own fills
     // while this decoder opened), and dropping the feed hands the grid back to
     // the consumer, which services every boundary until the next scope attaches.
-    let handoff = submitter.paced_handoff(playlist_id, STANDBY_W, STANDBY_H);
+    let handoff = output.handoff(STANDBY_W, STANDBY_H);
     let feed = PacedFeed::attach(&handoff);
     if let Some(last) = feed.continue_after_100ns() {
         pacer.continue_grid_after(last);
     }
     let handoff_ref: &SharedHandoff = &handoff;
-    // Heartbeat window baselines: the honest observed fps is the SUBMIT-side
-    // frame count (frames that actually left the box), not the emit count. The
+    // Heartbeat window baselines: the honest observed fps is the DELIVERY-side
+    // frame count (frames the consumer handed to the program bus), not the emit count. The
     // thread's counters live for the pipeline, so start from where they are.
     let mut hb_prev_total: u64 = handoff_ref.submitted();
     let mut hb_prev_instant = Instant::now();
@@ -514,8 +514,7 @@ pub(crate) fn decode_and_send_paced(
         };
         let _ = event_tx.send((playlist_id, started));
 
-        // Genlock path: NO `set_frame_rate` — emission is on the fixed integer
-        // grid the submitter already carries (GENLOCK_GRID_FPS/1,
+        // Emission is on the fixed integer grid (GENLOCK_GRID_FPS/1,
         // camera-box#1294 §2/§3). `preroll` anchored the grid.
 
         // Baseline for the per-song summary (#147 lane 3, change 4): the pacer's
@@ -595,7 +594,7 @@ pub(crate) fn decode_and_send_paced(
                 // Fill EVERY grid boundary with the frozen last real frame so the
                 // receiver stays `locked=` across a pause instead of dropping into
                 // holes/underruns — one on-grid stamped frame per boundary via the
-                // same Pacer sleep/emit machinery, handed off to the submit thread,
+                // same Pacer sleep/emit machinery, handed off to the paced output,
                 // with one silent audio block like a playing boundary (#147).
                 // Commands are serviced at the loop top every iteration.
                 match pacer.service_standby(Standby::FrozenLast, &mut sink) {
@@ -637,7 +636,7 @@ pub(crate) fn decode_and_send_paced(
             });
 
             // 3. Sleep to the boundary, then HAND OFF the pre-decoded frame to the
-            //    submit thread. `service` takes only the boundary audio chunk and
+            //    paced output. `service` takes only the boundary audio chunk and
             //    the `HandoffSink` enqueues audio-before-video with the on-grid
             //    stamp — NO decode and NO blocking submit on this thread (#168).
             sleep_to_boundary(pacer, target);
@@ -744,8 +743,8 @@ pub(crate) fn decode_and_send_paced(
     // Hand the grid back to the paced output FIRST (#147): from here its
     // consumer services every boundary (the held picture + silence) while the
     // producer's MF decoder is torn down and the next song opens — the window
-    // that used to skip 1–3 slots. Nothing is flushed or joined: the async
-    // holdover stays with the pipeline-lifetime submit thread.
+    // that used to skip 1–3 slots. Nothing is joined: the consumer is the
+    // pipeline's, alive across songs.
     drop(feed);
 
     // Stop the producer + join it so the decoder drops on its own STA thread

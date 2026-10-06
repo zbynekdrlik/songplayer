@@ -44,8 +44,8 @@
 //!   display (`scene_off::scene_off`).
 //! - A pipeline created after its playlist went on air (a runtime
 //!   `EnsurePipeline`) goes on program itself (`runtime_pipeline.rs`). An ON
-//!   for a playlist with NO pipeline (the #196 startup senders ran out of
-//!   their budget) creates it lazily, and it goes on program the same way.
+//!   for a playlist with NO pipeline (none was created for it at startup)
+//!   creates it lazily, and it goes on program the same way.
 //!
 //! A manual ▶ claims nothing (`PlayEvent::Start`, `engine_play.rs`).
 

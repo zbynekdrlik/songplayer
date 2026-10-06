@@ -74,8 +74,8 @@ use sp_ndi::AudioFrame;
 /// - **Fader latency.** It costs up to this much: `StemMixReader` applies the
 ///   gains at READ time (`karaoke-stems.md` G5).
 ///
-/// The pacing-OFF path keeps its own pairing deadline
-/// (`audio_emitter::decoder_tolerance_ms`).
+/// (#221 lane 3 deleted the SDK-clocked path and its own pairing
+/// deadline.)
 pub const PACED_AUDIO_LEAD_MS: u64 = 250;
 
 /// Open the split A/V decoder for the PACED pipeline: audio is read

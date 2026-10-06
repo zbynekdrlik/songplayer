@@ -7,7 +7,7 @@ paths:
   - "crates/sp-server/src/api/routes_mode.rs"
   - "crates/sp-server/src/api/routes.rs"
   - "crates/sp-server/src/playback/playlist_mode*.rs"
-  - "crates/sp-server/src/playback/startup_senders.rs"
+  - "crates/sp-server/src/playback/startup_pipelines.rs"
   - "crates/sp-server/src/playback/runtime_pipeline.rs"
   - "sp-ui/src/pages/dashboard.rs"
   - "crates/sp-server/src/playback/engine_play.rs"
@@ -109,7 +109,7 @@ Main's ROZHODNUTÉ: #225 comment 5975832356; how it is built: the
   `PlaybackMode::parse` (sp-core, the one parser; `from_str_lossy` delegates
   to it); an unknown value plays the default with a WARN naming the
   playlist. Both production creators pass it into `ensure_pipeline_inner`:
-  `startup_senders.rs` (each `Playlist` of `get_active_playlists`) and
+  `startup_pipelines.rs` (each `Playlist` of `get_active_playlists`) and
   `ensure_pipeline_for_playlist` (from the SELECT that decides the creation,
   so no second read). An existing pipeline keeps its mode. The sync
   `ensure_pipeline` (default mode) is `#[cfg(test)]`: no production path
@@ -148,8 +148,8 @@ Main's ROZHODNUTÉ: #225 comment 5975832356; how it is built: the
   with no pipeline, `broadcast_idle` (`Idle` in that mode). Then it
   returns: `SetMode` is a no-op transition, and `apply_event` would WARN
   "no pipeline" for an inactive playlist.
-- **Startup:** `startup_senders::startup_mode(playlists, id)` (pure,
-  unit-tested) picks each output's row mode for `create_startup_senders`.
+- **Startup:** `startup_pipelines::startup_mode(playlists, id)` (pure,
+  unit-tested) picks each pipeline's row mode for `create_startup_pipelines`.
 - **On the box:** a deploy of this changes what plays only where a row is
   not `continuous` (main's check 4.10.2026: all 10 rows `continuous`). A
   fresh DB seeds ytlive `single` (`startup.rs::ensure_live_playlist_exists`),
@@ -218,7 +218,7 @@ Two consequences, both review round 3:
   `engine_dispatch::dispatch`: a row's `single` starts the pipeline in
   Single; the PUT writes the row, reaches the running engine and is told,
   and a fresh engine built as `lib.rs` builds it (`get_active_playlists` →
-  `create_startup_senders`, real port probe) starts in it; a playlist
+  `create_startup_pipelines`) starts in it; a playlist
   update reaches the engine and the replay; an unknown row value plays
   Continuous; a pipeline-less playlist is told its new mode and forgotten on
   DELETE; an unknown mode is 400 for the mode route and the playlist update;
@@ -235,7 +235,7 @@ Two consequences, both review round 3:
   five tests had sent PATCH, a 405, and never reached the handler).
   `api/websocket.rs::a_ws_set_mode_saves_the_row_then_tells_the_engine`
   covers the WS path (its error text Slovak), and
-  `startup_senders.rs::a_startup_output_starts_in_its_own_rows_mode` the
+  `startup_pipelines.rs::a_startup_output_starts_in_its_own_rows_mode` the
   startup choice.
 - `e2e/player-known-state.spec.ts` (review round 2): `/__mock/ws-replay
   {no_song: [{playlist_id, state, transport}]}` + `/__mock/ws-drop` (closes

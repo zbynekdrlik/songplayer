@@ -168,7 +168,6 @@ mod tests {
             playlist_id,
             ndi_name: format!("SP-{playlist_id}"),
             state,
-            connections: 2,
             frames_submitted_total: 0,
             frames_submitted_last_5s: 0,
             observed_fps: 0.0,
@@ -183,9 +182,6 @@ mod tests {
             audio: AudioStats::default(),
             lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
             lock_reason: String::new(),
-            burn_on: false,
-            recovery_step: None,
-            sender_url: None,
             transport: sp_core::playback::TransportState::Idle,
         }
     }

@@ -26,7 +26,6 @@ pub(crate) async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> 
     let (engine_tx, _) = mpsc::channel(16);
     let (sync_tx, _) = mpsc::channel(16);
     let (resolume_tx, _) = mpsc::channel(16);
-    let (obs_rebuild_tx, _) = broadcast::channel(4);
     AppState {
         pool,
         event_tx,
@@ -36,7 +35,6 @@ pub(crate) async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> 
         tool_paths: Arc::new(RwLock::new(None)),
         sync_tx,
         resolume_tx,
-        obs_rebuild_tx,
         cache_dir: cache_dir.clone(),
         ai_proxy: std::sync::Arc::new(crate::ai::proxy::ProxyManager::new(
             cache_dir,
@@ -48,7 +46,6 @@ pub(crate) async fn test_state_with_cache_dir(cache_dir: std::path::PathBuf) -> 
         presenter_client: None,
         resolume_registry: Arc::new(crate::resolume::ResolumeRegistry::new()),
         ndi_health_registry: Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
-        ndi_burn_registry: Arc::new(crate::playback::ndi_burn::NdiBurnRegistry::new()),
         preview_registry: Arc::new(crate::playback::preview::PreviewRegistry::new()),
         program_bus: Arc::new(crate::playback::program_bus::ProgramBus::new()),
         lan_status: crate::mdns::new_status_handle(),
@@ -557,118 +554,6 @@ async fn status_reflects_lan_advertisement() {
     let json: StatusResponse = serde_json::from_slice(&body).unwrap();
     assert_eq!(json.lan_url.as_deref(), Some("http://sp.local:8920"));
     assert_eq!(json.lan_ip.as_deref(), Some("10.77.9.201"));
-}
-
-/// Playlist CRUD must signal the OBS client to rebuild its NDI source
-/// map — otherwise newly-added playlists never get scene-matched.
-#[tokio::test]
-async fn create_playlist_sends_obs_rebuild_signal() {
-    let state = test_state().await;
-    let mut rebuild_rx = state.obs_rebuild_tx.subscribe();
-    let app = app(state);
-
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/playlists")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_string(&serde_json::json!({
-                        "name": "New",
-                        "youtube_url": "https://youtube.com/playlist?list=PLnew",
-                        "ndi_output_name": "SP-new"
-                    }))
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::CREATED);
-
-    // Rebuild signal must arrive within 200 ms.
-    tokio::time::timeout(std::time::Duration::from_millis(200), rebuild_rx.recv())
-        .await
-        .expect("rebuild signal should arrive within 200ms")
-        .expect("rebuild channel should still be open");
-}
-
-#[tokio::test]
-async fn update_playlist_sends_obs_rebuild_signal() {
-    let state = test_state().await;
-
-    // Seed a playlist directly via the pool (bypass the create path so
-    // the signal under test is the update signal).
-    sqlx::query(
-        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
-         VALUES (1, 'orig', 'u', 'SP-orig')",
-    )
-    .execute(&state.pool)
-    .await
-    .unwrap();
-
-    let mut rebuild_rx = state.obs_rebuild_tx.subscribe();
-    let app = app(state);
-
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/api/v1/playlists/1")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_string(&serde_json::json!({
-                        "ndi_output_name": "SP-renamed"
-                    }))
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-
-    tokio::time::timeout(std::time::Duration::from_millis(200), rebuild_rx.recv())
-        .await
-        .expect("rebuild signal should arrive within 200ms")
-        .expect("rebuild channel should still be open");
-}
-
-#[tokio::test]
-async fn delete_playlist_sends_obs_rebuild_signal() {
-    let state = test_state().await;
-
-    sqlx::query(
-        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name) \
-         VALUES (1, 'd', 'u', 'SP-d')",
-    )
-    .execute(&state.pool)
-    .await
-    .unwrap();
-
-    let mut rebuild_rx = state.obs_rebuild_tx.subscribe();
-    let app = app(state);
-
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri("/api/v1/playlists/1")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-
-    tokio::time::timeout(std::time::Duration::from_millis(200), rebuild_rx.recv())
-        .await
-        .expect("rebuild signal should arrive within 200ms")
-        .expect("rebuild channel should still be open");
 }
 
 // ---------------------------------------------------------------------------

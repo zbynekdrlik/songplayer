@@ -1,47 +1,21 @@
 //! Where an NDI receiver is expected (#221, design record 5873773896 §1f;
 //! B4 step 6). Pure; a sibling of `ndi_health.rs` (its 1000-line cap).
 //!
-//! Every consumer takes SongPlayer's PROGRAM now: the LED wall `SP-program-MAX`
+//! Every consumer takes SongPlayer's PROGRAM: the LED wall `SP-program-MAX`
 //! (Spout), the Presenter, strih and the stream `SP-program` (NDI), FOH its
-//! VBAN. cg OBS is only the NDI input "OBS manuál", and SongPlayer never
-//! switches it to a playlist scene any more (the legacy mirror is deleted),
-//! so DistroAV disconnects cg OBS's sp-* inputs.
-//!
-//! - **A playlist's own NDI output expects NO receiver**
-//!   ([`PLAYLIST_RECEIVER_EXPECTED`]): `SP-program` takes the playlist off
-//!   the program bus, never over NDI. So its receiver count plays no part in
-//!   its health (review round 1): the pipeline counts no bad poll for it
-//!   (`pipeline::classify_bad_poll`), and the health handler judges it on a
-//!   satisfied count ([`judged_connections`]) — no dark-wall reason, so the
-//!   #173 ladder (whose targets are cg OBS's sp-* inputs) never runs on its
-//!   own; no #196 post-restart flag; no "no receiver" lock. An underrun or a
-//!   stalled submit is still reported. The per-playlist senders, with their
-//!   ladder and their #196 self-check, go in the lane that retires them
-//!   (main session comment 5999882988, lane 3).
-//! - **`SP-program` expects a receiver while a source is on program**
-//!   ([`program_degraded_reason`]): served as `degraded_reason` on
-//!   `GET /api/v1/program` once the sender has polled its receivers, logged
-//!   when it turns dark and when a receiver is found or back
-//!   ([`log_program_receivers`]), and gated by the post-deploy E2E.
+//! VBAN. cg OBS is only the NDI input "OBS manuál". #221 lane 3 retired the
+//! per-playlist NDI senders (a playlist feeds the program bus only), so
+//! `SP-program` is the one NDI sender, and it expects a receiver while a
+//! source is on program ([`program_degraded_reason`]): served as
+//! `degraded_reason` on `GET /api/v1/program` once the sender has polled its
+//! receivers, logged when it turns dark and when a receiver is found or back
+//! ([`log_program_receivers`]), and gated by the post-deploy E2E.
 
 use tracing::{info, warn};
-
-/// No receiver is expected on a playlist's own NDI output (the module doc).
-pub(crate) const PLAYLIST_RECEIVER_EXPECTED: bool = false;
 
 /// `GET /api/v1/program` → `degraded_reason` while a source is on program
 /// and `SP-program` has no NDI receiver.
 pub(crate) const PROGRAM_NO_RECEIVER_REASON: &str = "no NDI receiver on SP-program";
-
-/// The receiver count a playlist output's HEALTH is judged on: it expects
-/// no receiver ([`PLAYLIST_RECEIVER_EXPECTED`]), so 0 is normal and the count
-/// is taken as satisfied (at least 1). It never makes the output dark,
-/// flagged after a restart or DEGRADED in its lock — an underrun or a stalled
-/// submit still does. The snapshot, the logs and the persisted count keep the
-/// real one.
-pub(crate) fn judged_connections(connections: i32) -> i32 {
-    connections.max(1)
-}
 
 /// `SP-program`'s degraded reason: [`PROGRAM_NO_RECEIVER_REASON`] while a
 /// `source` is on program (a playlist, or -1 "OBS manuál": the consumers take

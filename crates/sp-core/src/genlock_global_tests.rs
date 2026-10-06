@@ -27,7 +27,7 @@ fn inp(
 
 #[test]
 fn off_when_no_output_has_pacing_enabled() {
-    // genlock_pacing=false set by hand everywhere (the default is ON, #147) → OFF, never hidden.
+    // No output reports pacing (#221 lane 3: pacing is the only path) → OFF, never hidden.
     let out = [
         inp(false, true, LockState::Unlocked, false, "pacing disabled"),
         inp(false, false, LockState::Unlocked, false, "pacing disabled"),
@@ -67,11 +67,11 @@ fn locked_when_all_live_pacing_enabled_are_locked() {
 fn degraded_is_the_worst_of_the_live_outputs() {
     let out = [
         inp(true, true, LockState::Locked, true, "locked"),
-        inp(true, true, LockState::Degraded, true, "no receiver"),
+        inp(true, true, LockState::Degraded, true, "resync in 60 s"),
     ];
     let s = global_lock_summary(&out);
     assert_eq!(s.state, GlobalLock::Degraded);
-    assert_eq!(s.reason, "no receiver");
+    assert_eq!(s.reason, "resync in 60 s");
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn unlocked_beats_degraded() {
     // worst-first ordering guards the max_by_key tie/flatten trap.
     let out = [
         inp(true, true, LockState::Unlocked, true, "clock not ok"),
-        inp(true, true, LockState::Degraded, true, "no receiver"),
+        inp(true, true, LockState::Degraded, true, "resync in 60 s"),
     ];
     let s = global_lock_summary(&out);
     assert_eq!(s.state, GlobalLock::Unlocked);

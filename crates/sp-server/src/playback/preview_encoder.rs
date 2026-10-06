@@ -954,7 +954,7 @@ fn spawn_stdout_reader(
 
 /// Apply Windows-only process flags: `CREATE_NO_WINDOW` (no console popup, per
 /// the subprocess rule) + `BELOW_NORMAL_PRIORITY_CLASS` (the encoder must never
-/// steal CPU from the NDI submit / audio-emitter threads).
+/// steal CPU from the paced output / `SP-program` sender threads).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 fn apply_windows_flags(cmd: &mut Command) {

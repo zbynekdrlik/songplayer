@@ -64,7 +64,7 @@ reduced to `String` in the trait so the fake needn't construct an
 ## Operator toggle + live verification
 
 - `lan_mdns_enabled` DB setting (default on) — read ONCE at startup, so a flip
-  needs a SongPlayer restart, exactly like `genlock_pacing`. Toggle via the
+  needs a SongPlayer restart. Toggle via the
   generic `PATCH /api/v1/settings {"lan_mdns_enabled":"false"}`; no dedicated
   UI.
 - The feature only ever DEGRADES: any mDNS failure logs a warn and leaves no

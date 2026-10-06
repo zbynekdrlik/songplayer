@@ -137,19 +137,6 @@ impl NdiBackend for HookedNdi {
     fn send_get_no_connections(&self, handle: usize, timeout_ms: u32) -> i32 {
         self.inner.send_get_no_connections(handle, timeout_ms)
     }
-
-    fn send_get_source_url(&self, handle: usize) -> Option<String> {
-        self.inner.send_get_source_url(handle)
-    }
-
-    fn discover_local_sources(
-        &self,
-        want_names: &[String],
-        overall_timeout_ms: u32,
-    ) -> Vec<(String, String)> {
-        self.inner
-            .discover_local_sources(want_names, overall_timeout_ms)
-    }
 }
 
 /// The gate a held send waits behind.

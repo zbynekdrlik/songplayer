@@ -32,12 +32,11 @@ impl PlaybackEngine {
     /// already on air goes on program at once (#221 L4b). Reconciles from the
     /// DB — a pipeline is (idempotently) created only when the playlist is
     /// active and has a non-empty NDI output name, mirroring the startup
-    /// pre-create loop in `lib.rs::start`, and it starts in its row's
-    /// playback mode (#225 unit 2). Delegates to the idempotent
-    /// `create_and_record_sender`, so a runtime pipeline picks up the same
-    /// engine-level `genlock_pacing` / `clock_health` / burn-registry
-    /// configuration as a boot pipeline. No-op for a missing row, an inactive
-    /// playlist, or an empty NDI name.
+    /// pre-create loop at startup (`startup_pipelines.rs`), and it starts in
+    /// its row's playback mode (#225 unit 2). Delegates to the idempotent
+    /// `ensure_pipeline_inner`, so a runtime pipeline gets the same preview
+    /// taps and health registration as a boot pipeline. No-op for a missing
+    /// row, an inactive playlist, or an empty NDI name.
     pub async fn ensure_pipeline_for_playlist(&mut self, playlist_id: i64) {
         use sqlx::Row;
         let row = match sqlx::query(
@@ -89,10 +88,8 @@ impl PlaybackEngine {
             playlist_id,
             ndi_name, "ensuring pipeline for runtime-created/activated playlist"
         );
-        // #196: record the sender's advertised URL for `/api/v1/ndi/health`
-        // (idempotent; a no-op if the pipeline already exists).
-        self.create_and_record_sender(playlist_id, &ndi_name, mode)
-            .await;
+        // Idempotent: a no-op if the pipeline already exists.
+        self.ensure_pipeline_inner(playlist_id, &ndi_name, mode);
         // #221 L4b: the playback authority's ON for a playlist already on air
         // may have come before its pipeline existed; it goes on program now.
         let on_program = self
@@ -110,7 +107,7 @@ impl PlaybackEngine {
 
     /// #132: Tear down a playlist's pipeline after a runtime delete/deactivate.
     /// Removing it from the map drops the `PlaybackPipeline`, whose `Drop`
-    /// sends `Shutdown` to its thread (destroying the NDI sender) — the same
+    /// sends `Shutdown` to its thread (stopping its paced output) — the same
     /// contract `run()`'s `pipelines.clear()` relies on. Also drops the
     /// playlist's genlock lock-state window. What the dashboard replay last
     /// recorded for it goes too (#225), with or without a pipeline.
@@ -146,65 +143,38 @@ impl PlaybackEngine {
 
     /// Ensure a pipeline exists for the given playlist, creating one in the
     /// DEFAULT mode if needed: the engine tests' shortcut. Production creates
-    /// every pipeline through `create_and_record_sender`, in its row's mode
-    /// (#225 unit 2), so this one is test-only.
+    /// every pipeline in its row's mode (#225 unit 2), so this one is
+    /// test-only.
     #[cfg(test)]
     pub fn ensure_pipeline(&mut self, playlist_id: i64, ndi_name: &str) {
-        self.ensure_pipeline_inner(playlist_id, ndi_name, PlaybackMode::default(), None);
+        self.ensure_pipeline_inner(playlist_id, ndi_name, PlaybackMode::default());
     }
 
     /// Create the playlist's pipeline (idempotent), starting in `mode` (its
-    /// row's, #225 unit 2), with an optional one-shot the newly spawned
-    /// pipeline thread fires (carrying the sender's advertised URL) the moment
-    /// its NDI sender is created (#196). `create_and_record_sender` passes
-    /// `Some(tx)` and awaits it, which serializes `send_create` in
-    /// `playlist.id` order at startup for a stable name→port map. If the
-    /// pipeline already exists (closure not run), its mode is kept, the sender
-    /// is dropped and the receiver sees a closed channel — the caller treats
-    /// that as "already ready".
+    /// row's, #225 unit 2). If the pipeline already exists, its mode is kept.
+    /// #221 lane 3: a pipeline has no NDI sender of its own; it feeds the
+    /// program bus, so nothing waits for anything here.
     pub(crate) fn ensure_pipeline_inner(
         &mut self,
         playlist_id: i64,
         ndi_name: &str,
         mode: PlaybackMode,
-        ready_tx: Option<tokio::sync::oneshot::Sender<Option<String>>>,
     ) {
         let event_tx = self.event_tx.clone();
-
-        #[cfg(windows)]
-        let ndi_backend = self.ndi_backend.clone();
-        #[cfg(not(windows))]
-        let ndi_backend: Option<()> = None;
-
-        let genlock_pacing = self.genlock_pacing;
-        let ndi_burn_registry = self.ndi_burn_registry.clone();
         let preview_registry = self.preview_registry.clone();
         let ndi_health_registry = self.ndi_health_registry.clone();
         self.pipelines.entry(playlist_id).or_insert_with(|| {
-            info!(
-                playlist_id,
-                ndi_name, genlock_pacing, "creating playback pipeline"
-            );
+            info!(playlist_id, ndi_name, "creating playback pipeline");
             // #167: count this created pipeline so the heavy-work startup grace
             // knows how many outputs must report before the wall reading is
             // trustworthy (runs once — this closure fires only on a vacant entry).
             ndi_health_registry.register_pipeline();
-            // #151: register this output's burn flag (default OFF, never
-            // persisted) and hand the shared Arc to the pipeline's submitter.
-            let burn_on = ndi_burn_registry.register(ndi_name, genlock_pacing);
-            // #15/#178: register the JPEG + A/V-stream taps (lead = #178 A/V-sync, pure fn).
-            let lead_ms = crate::playback::preview::preview_stream::lead_ms_for(genlock_pacing);
+            // #15/#178: register the JPEG + A/V-stream taps (the #178 A/V-sync
+            // lead of the paced decode seam, a pure fn).
+            let lead_ms = crate::playback::preview::preview_stream::decode_seam_lead_ms();
             let taps = preview_registry.register_taps(playlist_id, lead_ms);
-            let pipeline = PlaybackPipeline::spawn(
-                ndi_name.to_string(),
-                ndi_backend,
-                event_tx,
-                playlist_id,
-                genlock_pacing,
-                burn_on,
-                taps,
-                ready_tx,
-            );
+            let pipeline =
+                PlaybackPipeline::spawn(ndi_name.to_string(), event_tx, playlist_id, taps);
             PlaylistPipeline {
                 pipeline,
                 state: PlayState::Idle,

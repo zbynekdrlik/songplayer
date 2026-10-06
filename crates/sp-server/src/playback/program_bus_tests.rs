@@ -10,6 +10,7 @@
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::paced_output::offer_to_bus;
 use crate::playback::program_output::ProgramOutput;
 use crate::playback::submit_handoff::SubmitJob;
 use sp_core::genlock::{
@@ -383,7 +384,7 @@ fn a_source_that_stalls_at_the_cut_boundary_is_covered_by_the_standby_fill() {
 #[test]
 fn a_new_source_whose_first_frame_after_the_cut_is_slow_is_waited_for() {
     // Every paced source reports its progress on every boundary through
-    // `program_copy`, program candidate or not. So B is known to be live when
+    // `offer_to_bus`, program candidate or not. So B is known to be live when
     // the sender checks the cut boundary b(7) before B's first post-cut frame
     // is in: b(7) waits for B's frame instead of going black.
     let bus = ProgramBus::new();
@@ -392,12 +393,10 @@ fn a_new_source_whose_first_frame_after_the_cut_is_slow_is_waited_for() {
     for k in 1..=6 {
         let now = b(k) + 5 * MS;
         let a = job(4, &fa, b(k), 0.1);
-        if let Some(copy) = program_copy(&bus, SRC_A, &a) {
-            bus.offer(SRC_A, copy);
-        }
+        offer_to_bus(&bus, SRC_A, a);
         if k <= 5 {
             let bj = job(8, &fb, b(k), 0.2);
-            assert!(program_copy(&bus, SRC_B, &bj).is_none(), "B is off program");
+            assert!(offer_to_bus(&bus, SRC_B, bj).is_none(), "B is off program");
         }
         if k == 5 {
             bus.cut(SRC_B, now, None); // cut boundary b(7)
@@ -406,8 +405,11 @@ fn a_new_source_whose_first_frame_after_the_cut_is_slow_is_waited_for() {
     // B's b(6) submit is slow: the sender's b(7) check comes first.
     bus.release_due(b(7) + MS);
     let bj = job(8, &fb, b(7), 0.2);
-    let copy = program_copy(&bus, SRC_B, &bj).expect("B is on program now");
-    assert_eq!(bus.offer(SRC_B, copy), OfferOutcome::Accepted);
+    assert_eq!(
+        offer_to_bus(&bus, SRC_B, bj),
+        Some(OfferOutcome::Accepted),
+        "B is on program now"
+    );
 
     let mut sent = Vec::new();
     while let Take::Job(job) = bus.take_timeout(Duration::ZERO) {
@@ -750,13 +752,15 @@ fn the_bus_wakes_the_sender_and_stops_after_draining() {
     assert!(bus.is_candidate(SRC_A));
     let fa = frame(4, 2);
     let src = job(4, &fa, b(1), 0.1);
-    let copy = program_copy(&bus, SRC_A, &src).expect("A can own a boundary");
     assert!(
-        copy.video.ptr_eq(&fa),
-        "the copy is an Arc bump of the frame"
+        offer_to_bus(&bus, SRC_B, src.clone()).is_none(),
+        "B pays nothing"
     );
-    assert!(program_copy(&bus, SRC_B, &src).is_none(), "B pays nothing");
-    assert_eq!(bus.offer(SRC_A, copy), OfferOutcome::Accepted);
+    assert_eq!(
+        offer_to_bus(&bus, SRC_A, src),
+        Some(OfferOutcome::Accepted),
+        "A can own a boundary"
+    );
     match bus.take_timeout(Duration::ZERO) {
         Take::Job(job) => assert_eq!(job.stamp_100ns(), b(1)),
         _ => panic!("the forwarded boundary is queued"),

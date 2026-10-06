@@ -1,35 +1,31 @@
-//! Tests for PlaybackPipeline::spawn / ndi_name accessor.
-//! Extracted from pipeline.rs to keep that file under the 1000-line cap.
+//! Tests for PlaybackPipeline::spawn / the output-name accessor.
+//! Extracted from pipeline.rs to keep that file small.
 //! Included via `#[path = "pipeline_spawn_tests.rs"]` so `super::*` resolves
 //! to `pipeline`'s private items.
 
 use super::*;
 
 #[test]
-fn spawn_stores_ndi_name_for_accessor() {
+fn spawn_stores_the_output_name_for_the_accessor() {
     // Construct a real PlaybackPipeline. On non-Windows the run_loop
-    // stub just waits for commands and exits on Shutdown — no MF/NDI
-    // required. This test kills all three mutants on spawn/ndi_name:
-    // - Default::default() substitution → compile error or "" ndi_name
-    // - "" substitution on ndi_name() → assertion fails
-    // - "xyzzy" substitution on ndi_name() → assertion fails
+    // stub just waits for commands and exits on Shutdown — no MF required.
+    // This test kills the mutants on spawn/output_name:
+    // - Default::default() substitution → compile error or "" output_name
+    // - "" substitution on output_name() → assertion fails
+    // - "xyzzy" substitution on output_name() → assertion fails
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel::<(i64, PipelineEvent)>();
     let pp = PlaybackPipeline::spawn(
         "SP-fixture-name".to_string(),
-        None,
         event_tx,
         42,
-        false,
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         crate::playback::preview::preview_stream::DecodeTaps {
             preview: crate::playback::preview::PreviewTap::new(Default::default(), "test".into()),
             stream: crate::playback::preview::preview_stream::StreamTap::new("test".into(), 0),
         },
-        None, // #196: no startup-ready signal for this fixture
     );
     assert_eq!(
-        pp.ndi_name(),
+        pp.output_name(),
         "SP-fixture-name",
-        "spawn must store the ndi_name argument so ndi_health can label snapshots"
+        "spawn must store the output name so ndi_health can label snapshots"
     );
 }

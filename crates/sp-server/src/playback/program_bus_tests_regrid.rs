@@ -24,17 +24,15 @@ use super::*;
 use crate::playback::fleet_shift::FleetShift;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::paced_output::{
-    ConsumerStep, HandoffSink, PacedConsumer, PacedFeed, Picture, SharedHandoff,
+    BoundaryOut, ConsumerStep, HandoffSink, PacedConsumer, PacedFeed, Picture, SharedHandoff,
 };
 use crate::playback::pacer::{PacedFrame, PacedSink, Pacer, ServiceOutcome, plan_sleep_100ns};
 use crate::playback::program_output::BoundaryTicker;
 use crate::playback::program_transition::ActiveWindow;
 use crate::playback::submit_handoff::{SUBMIT_HANDOFF_BOUND, SubmitJob};
-use crate::playback::submitter::FrameSubmitter;
 use crate::playback::wallclock::{VirtualClock, WallClock};
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
-use sp_ndi::test_util::MockNdiBackend;
-use sp_ndi::{AudioFrame, NdiSender};
+use sp_ndi::AudioFrame;
 
 /// The source's program id (unused anywhere else, so the process-wide bus the
 /// consumer also offers to never owns it).
@@ -61,7 +59,8 @@ fn frame(j: i64) -> PacedFrame {
 }
 
 /// The pacer's sink: the paced output's handoff, and the program core the
-/// consumer's `program_copy` would offer the same pair to.
+/// consumer's delivery would offer the same pair to (the consumer itself
+/// delivers to [`Discard`]: the core is fed here, at emit time).
 struct Tee<'a> {
     out: HandoffSink<'a>,
     core: &'a mut ProgramCore,
@@ -73,6 +72,13 @@ impl PacedSink for Tee<'_> {
         self.core.offer(SRC, copy);
         self.out.emit(video, audio, v, a);
     }
+}
+
+/// A paced output that delivers nowhere: the [`Tee`] feeds the core.
+struct Discard;
+
+impl BoundaryOut for Discard {
+    fn deliver(&mut self, _playlist_id: i64, _job: SubmitJob) {}
 }
 
 /// What the rig counted.
@@ -91,17 +97,13 @@ fn run(step_100ns: i64) -> Outcome {
     let clk = VirtualClock::new(0);
     let fleet = Arc::new(FleetShift::default());
     let wall = || WallClock::with_fleet(Box::new(clk.clone()), fleet.clone());
-    let backend = Arc::new(MockNdiBackend::new());
-    let owner = NdiSender::new_with_clocking(backend, "RG", false, false).unwrap();
-    let mut submitter = FrameSubmitter::new_with_wallclock(owner.twin(), 30, 1, wall());
-    submitter.set_paced(true);
     let black = Picture {
         width: 4,
         height: 2,
         stride: 4,
         video: SharedFrame::new(vec![16u8; 12]),
     };
-    let mut consumer = PacedConsumer::new(submitter, SRC, wall(), black);
+    let mut consumer = PacedConsumer::new(Discard, SRC, wall(), black);
     let mut pacer = Pacer::with_wallclock(30, true, wall());
     let mut program_wall = wall();
     let mut ticker = BoundaryTicker::default();

@@ -86,9 +86,9 @@ Rules for every post-deploy spec:
   facade answers it: wait for the engine to reach the scene
   (`waitEngineActiveScene`, the A/V gate's `length === 1` poll), never read
   it once.
-- **#221 B4 step 6: a receiver is checked on `SP-program`, never on a
-  playlist's own output** (it has no consumer any more): poll `GET
-  /api/v1/program` through `ndi-health-gate.ts::programReceiverVerdict` (a
-  source on program, `health.connections > 0`, `degraded_reason` null), as
-  `post-deploy.spec.ts` and `post-deploy-dabing.spec.ts` do. A playlist
-  output's `connections` on `/api/v1/ndi/health` is 0 normally now.
+- **#221: a receiver is checked on `SP-program`, the only NDI sender**
+  (lane 3 retired the per-playlist outputs): poll `GET /api/v1/program`
+  through `ndi-health-gate.ts::programReceiverVerdict` (a source on program,
+  `health.connections > 0`, `degraded_reason` null), as `post-deploy.spec.ts`
+  and `post-deploy-dabing.spec.ts` do. `/api/v1/ndi/health` rows have no
+  receiver field any more.

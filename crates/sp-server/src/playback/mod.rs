@@ -5,32 +5,27 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 pub mod audio_grid;
-pub mod av_catchup; // #192 round 4: pure video-follows-audio catch-up decision (Linux-tested)
 pub mod band_pool; // #223: the SP-program sender's persistent row-band workers (no thread per picture)
-pub mod burn_overlay;
 mod clear_lyrics;
 pub mod clock_health;
 pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 pub mod decode_thread; // #223 S0: the one way a decode thread starts (producer + decode bench)
 mod engine_play;
 pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
-pub(crate) mod frame_alloc; // #207: map a decoder FrameAlloc error to a dropped frame (pure classify + rate-limit)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
 pub mod lock_state;
-pub mod loop_stats; // #192 round 3: pipeline-loop stage timing + submit-call histogram (pure)
+pub mod loop_stats; // the per-minute `pipeline: loop-stats` line + the shared percentile rule (pure)
 mod lyrics_loader;
 mod mix; // #184 round G set_mix (impl PlaybackEngine, 1000-line cap split)
 pub mod mmcss; // #210 part 2: a real-time sender thread as an MMCSS "Pro Audio" thread
-pub mod ndi_burn;
 pub mod ndi_health;
-pub(crate) mod ndi_health_expect; // #221: SP-program expects a receiver, a playlist output none
+pub(crate) mod ndi_health_expect; // #221: SP-program's receiver (the program's degraded reason + log)
 mod ndi_health_transport; // #201 round 2: pure reported-label -> TransportState (Linux-tested)
 pub mod ndi_input; // #212: the NDI input "OBS manuál" on the genlock grid → the program bus
-mod ndi_recovery_trigger; // #173 operator recover trigger (impl PlaybackEngine, 1000-line cap split)
 pub mod nv12_fit; // #215: aspect-kept NV12 placement (preview letterbox + program fit)
 pub mod paced_grid; // #147 the paced output's own boundary clock (pure, Linux-tested)
-pub mod paced_output; // #168/#147 paced submit side: handoff + consumer (cross-platform)
+pub mod paced_output; // #168/#147 a playlist's paced output: handoff + consumer → the program bus (cross-platform)
 pub mod pacer;
 pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame queue
 pub mod pacer_sink; // #203 pacer scheduling + shared-frame standby submit helpers
@@ -42,7 +37,7 @@ pub(crate) mod pipeline_paced;
 #[cfg(windows)]
 pub(crate) mod pipeline_paced_idle;
 #[cfg(windows)]
-pub(crate) mod pipeline_paced_submit; // #168 output-side split: submit thread + handoff glue
+pub(crate) mod pipeline_paced_submit; // #168 the paced heartbeat over the output's snapshot
 #[cfg(not(windows))]
 pub(crate) mod pipeline_stub;
 mod playlist_mode; // #225 unit 2: a mode the playlist's row holds — applied + told
@@ -65,7 +60,7 @@ mod runtime_pipeline;
 pub mod scene_catalog; // #221: which scene is a playlist's, from its NDI output name (no cg OBS lookup)
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
 mod seek; // #217: the engine's seek (the song's title clock follows it)
-pub mod startup_senders; // #196 deterministic restart-safe NDI sender startup (pure port-wait + order)
+pub mod startup_pipelines; // the startup pipelines (id order, row mode) + SP-program's #196 port wait
 pub mod stat_window; // #210 part 2: shared pure two-bucket worst + WARN rate limit
 pub mod state;
 pub mod submit_handoff; // #168 output-side split: pure emit->submit handoff decisions
@@ -99,6 +94,11 @@ use crate::playlist::selector::VideoSelector;
 
 use pipeline::{PipelineCommand, PipelineEvent, PlaybackPipeline};
 use state::{PlayAction, PlayEvent, PlayState};
+
+/// The loaded NDI SDK, shared (Windows only): `SP-program`'s sender
+/// (`program_output.rs`) and the NDI input "OBS manuál" use it.
+#[cfg(windows)]
+pub type SharedNdiBackend = Arc<sp_ndi::RealNdiBackend>;
 
 /// Minimum gap between `NowPlaying` position re-broadcasts per playlist.
 /// Keeps the WebSocket from flooding the dashboard on high-frequency
@@ -236,9 +236,11 @@ pub struct PlaybackEngine {
     pipelines: HashMap<i64, PlaylistPipeline>,
     event_rx: mpsc::UnboundedReceiver<(i64, PipelineEvent)>,
     event_tx: mpsc::UnboundedSender<(i64, PipelineEvent)>,
-    /// Shared NDI backend — loaded once, shared across all pipeline threads.
+    /// The loaded NDI SDK (Windows only): `SP-program`'s sender and the NDI
+    /// input "OBS manuál" use it. #221 lane 3: a playlist pipeline has no NDI
+    /// sender of its own.
     #[cfg(windows)]
-    ndi_backend: Option<pipeline::SharedNdiBackend>,
+    ndi_backend: Option<SharedNdiBackend>,
     /// For sending text source updates to OBS.
     obs_cmd_tx: Option<mpsc::Sender<crate::obs::ObsCommand>>,
     /// cg OBS's events — #213: the remote-control facade re-emits the scene ones.
@@ -262,35 +264,17 @@ pub struct PlaybackEngine {
     /// poller (spawned in `lib.rs::start`); read when building each NDI health
     /// snapshot. Defaults to `no dantesync` until a handle is injected.
     clock_health: std::sync::Arc<std::sync::RwLock<crate::playback::clock_health::ClockHealth>>,
-    /// Boundary-paced emission flag (#147, DB setting `genlock_pacing`, default
-    /// ON by the owner's rule: `sp_core::config::DEFAULT_GENLOCK_PACING`). Read
-    /// once at startup (`lib.rs::start`), passed to each pipeline at spawn. ON =
-    /// the wall-clock grid `Pacer`; OFF = the SDK-clocked legacy path.
-    genlock_pacing: bool,
     /// Per-pipeline genlock lock-state event windows (#149, Lane 1). One 60 s
     /// ring of cumulative pacing counters per playlist, pushed at each
     /// heartbeat; the snapshot's `lock_state` / `lock_reason` are derived from
     /// the differenced counts. Engine-thread-local, not shared.
     lock_windows: HashMap<i64, crate::playback::lock_state::EventWindow>,
-    /// Runtime burn-id overlay toggle registry (#151). Cloned into `AppState`
-    /// so the HTTP handler reads/writes it synchronously (404/409/204); each
-    /// pipeline gets a shared `Arc<AtomicBool>` from it at spawn; read here when
-    /// building each health snapshot (`burn_on`). Defaults to an empty registry
-    /// until `set_ndi_burn_registry` shares the one `lib.rs::start` owns.
-    ndi_burn_registry: std::sync::Arc<crate::playback::ndi_burn::NdiBurnRegistry>,
     /// Per-playlist live preview tap registry (#15 part 2). Cloned into
     /// `AppState` so `GET /api/v1/playback/{id}/preview.jpg` reads the same
     /// taps the pipeline decode loops write. Each pipeline gets a `PreviewTap`
     /// from it at spawn. Defaults to an empty registry until
     /// `set_preview_registry` shares the one `lib.rs::start` owns.
     preview_registry: std::sync::Arc<crate::playback::preview::PreviewRegistry>,
-    /// #196: the OBS-input → playlist-id map the OBS client rebuilds (shared
-    /// `Arc`, `lib.rs::start`). Read by `handle_health_snapshot` to tell whether
-    /// ANY OBS NDI input advertises an output's stream — a dark output with no
-    /// input gets the "no OBS scene for this output" reason and no recovery
-    /// ladder (item 5). `None` when OBS is not configured (never suppresses the
-    /// ladder in that case).
-    ndi_source_map: Option<crate::obs::NdiSourceMap>,
     /// #215: the program bus (set by `start_program`), asked whether a playlist
     /// that left program must keep playing through a transition.
     program: std::sync::OnceLock<Arc<crate::playback::program_bus::ProgramBus>>,
@@ -315,7 +299,8 @@ pub struct PlaybackEngineConfig {
 }
 
 impl PlaybackEngine {
-    /// Create a new playback engine. Loads the NDI SDK once on Windows.
+    /// Create a new playback engine. Loads the NDI SDK once on Windows (for
+    /// `SP-program` and the NDI input).
     pub fn new(cfg: PlaybackEngineConfig) -> Self {
         let PlaybackEngineConfig {
             pool,
@@ -339,7 +324,7 @@ impl PlaybackEngine {
                     Some(Arc::new(RealNdiBackend::new(Arc::new(lib))))
                 }
                 Err(e) => {
-                    warn!(%e, "NDI SDK not available — playback will not output NDI");
+                    warn!(%e, "NDI SDK not available — no SP-program, no NDI input");
                     None
                 }
             }
@@ -365,52 +350,11 @@ impl PlaybackEngine {
             clock_health: std::sync::Arc::new(std::sync::RwLock::new(
                 crate::playback::clock_health::ClockHealth::default(),
             )),
-            genlock_pacing: sp_core::config::DEFAULT_GENLOCK_PACING,
             lock_windows: HashMap::new(),
-            ndi_burn_registry: std::sync::Arc::new(
-                crate::playback::ndi_burn::NdiBurnRegistry::new(),
-            ),
             preview_registry: std::sync::Arc::new(crate::playback::preview::PreviewRegistry::new()),
-            ndi_source_map: None,
             program: std::sync::OnceLock::new(),
             on_air: Default::default(),
         }
-    }
-
-    /// #196: share the OBS-input → playlist-id map so `handle_health_snapshot`
-    /// can tell whether an OBS input advertises an output's stream. Called from
-    /// `lib.rs::start` with the same `Arc` the OBS client rebuilds.
-    pub fn set_ndi_source_map(&mut self, map: crate::obs::NdiSourceMap) {
-        self.ndi_source_map = Some(map);
-    }
-
-    /// #196: does ANY OBS NDI input currently advertise `playlist_id`'s output?
-    /// `true` when OBS is not configured (map absent) so the dark-wall ladder is
-    /// never suppressed without evidence. A poisoned lock also reads as `true`
-    /// (safe direction — keep the existing ladder behaviour).
-    pub(crate) fn output_has_obs_input(&self, playlist_id: i64) -> bool {
-        // `NdiSourceMap` is a tokio `RwLock`; `handle_health_snapshot` is sync,
-        // so use the non-blocking `try_read` (never `blocking_read`, which panics
-        // inside the async engine loop). Momentary writer contention reads as
-        // "unknown → has input" (the safe direction: don't suppress the ladder).
-        match &self.ndi_source_map {
-            None => true,
-            Some(map) => match map.try_read() {
-                Ok(m) => m.values().any(|&pid| pid == playlist_id),
-                Err(_) => true,
-            },
-        }
-    }
-
-    /// Inject the shared burn-id toggle registry (#151) that `lib.rs::start`
-    /// also hands to `AppState`, so the HTTP `POST /api/v1/ndi/burn` handler and
-    /// the pipeline threads share one registry. Must be called before pipelines
-    /// are spawned (new pipelines register into it at spawn).
-    pub fn set_ndi_burn_registry(
-        &mut self,
-        registry: std::sync::Arc<crate::playback::ndi_burn::NdiBurnRegistry>,
-    ) {
-        self.ndi_burn_registry = registry;
     }
 
     /// Inject the shared live-preview registry (#15 part 2) that
@@ -423,13 +367,6 @@ impl PlaybackEngine {
         registry: std::sync::Arc<crate::playback::preview::PreviewRegistry>,
     ) {
         self.preview_registry = registry;
-    }
-
-    /// Set the boundary-paced emission staging flag (#147), read from the DB
-    /// setting `genlock_pacing` at startup (`lib.rs::start`). Must be called
-    /// before pipelines are spawned; new pipelines pick it up at spawn.
-    pub fn set_genlock_pacing(&mut self, enabled: bool) {
-        self.genlock_pacing = enabled;
     }
 
     /// Inject the shared dantesync clock-health handle written by the poller

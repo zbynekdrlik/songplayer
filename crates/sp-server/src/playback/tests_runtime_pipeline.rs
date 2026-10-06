@@ -2,9 +2,10 @@
 //! runtime (via the API) must register / tear down its playback pipeline with
 //! the engine, so the playback authority (#221 L4b; cg OBS's scene detection
 //! at the time) can start playback without a process restart. Before the
-//! fix, the API CRUD handlers fired only `obs_rebuild_tx`
-//! and nothing ever called `ensure_pipeline` at runtime, so a runtime-created
-//! playlist logged `no pipeline for playlist` forever until a restart.
+//! fix, the API CRUD handlers fired only `obs_rebuild_tx` (the NDI source
+//! map's rebuild signal, deleted by #221 lane 3) and nothing ever called
+//! `ensure_pipeline` at runtime, so a runtime-created playlist logged
+//! `no pipeline for playlist` forever until a restart.
 //!
 //! Sibling `#[path]` file so `playback/mod.rs` stays under the 1000-line
 //! airuleset cap.
@@ -198,4 +199,25 @@ async fn remove_noop_when_absent() {
     let (mut engine, _pool) = engine_with_migrated_pool().await;
     engine.remove_pipeline(123); // must not panic
     assert!(engine.pipelines.is_empty());
+}
+
+/// #221 lane 3: a pipeline has no NDI sender of its own, and its dashboard
+/// preview (#15/#178) stays: creating it registers both preview taps, the
+/// stream tap with the paced decode seam's A/V lead
+/// (`PACED_AUDIO_LEAD_MS − 40` = 210 ms), and labels it with the playlist's
+/// output name.
+#[tokio::test]
+async fn a_created_pipeline_registers_its_preview_taps_with_the_paced_lead() {
+    let (mut engine, _pool) = engine_with_migrated_pool().await;
+    engine.ensure_pipeline(515, "SP-young");
+    assert!(
+        engine.preview_registry.get(515).is_some(),
+        "the JPEG preview tap (#15)"
+    );
+    let stream = engine
+        .preview_registry
+        .stream(515)
+        .expect("the A/V stream tap (#178)");
+    assert_eq!(stream.shared().lead_ms(), 210);
+    assert_eq!(engine.pipelines[&515].pipeline.output_name(), "SP-young");
 }

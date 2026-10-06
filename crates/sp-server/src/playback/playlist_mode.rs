@@ -1,7 +1,7 @@
 //! #225 unit 2: a playlist's playback mode has ONE persisted truth, its
 //! `playlists.playback_mode` row. Every pipeline starts in its row's mode
-//! (`db::models_playlists::row_mode`, passed in by `startup_senders.rs` and
-//! `runtime_pipeline.rs`). A change writes the row first, then tells the
+//! (`db::models_playlists::row_mode`, passed in by `startup_pipelines.rs`
+//! and `runtime_pipeline.rs`). A change writes the row first, then tells the
 //! engine (`api/routes_mode.rs` → `EngineCommand::SetMode` →
 //! `handle_command` → `PlaybackEngine::apply_mode`). Own module:
 //! `playback/mod.rs` sits near the 1000-line cap.

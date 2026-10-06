@@ -14,9 +14,12 @@
 //! queued job as soon as it is queued. `start_program` (an
 //! `impl PlaybackEngine` split out of `mod.rs` for the 1000-line cap) restores
 //! the persisted source, installs the process-wide bus for the paced submit
-//! threads, and on Windows starts the thread on the engine's NDI backend. It
-//! runs AFTER the #196 startup senders, so the per-playlist name→port order is
-//! unchanged.
+//! threads, and on Windows starts the thread on the engine's NDI backend.
+//! #221 lane 3: `SP-program` is SongPlayer's only NDI sender (a playlist feeds
+//! this bus, never an NDI output of its own), so before it is created
+//! `start_program` waits for the previous instance to release its port span
+//! (`startup_pipelines::wait_for_program_ports`, #196): a restart gives it the
+//! same port, the one DistroAV's receivers reconnect to by URL.
 //!
 //! #210: every submitted pair's audio block (forwarded, mixed, or the standby
 //! silence) is handed to the program's VBAN output (`vban_out.rs`) BEFORE its
@@ -273,8 +276,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// stride `width` ([`PROGRAM_STANDBY_W`] × [`PROGRAM_STANDBY_H`] =
     /// 1920×1080 in production; the tests use small canvases).
     pub fn new(sender: NdiSender<B>, width: u32, height: u32) -> Self {
-        let mut submitter = FrameSubmitter::new(sender, GENLOCK_GRID_FPS as i32, 1);
-        submitter.set_paced(true);
+        let submitter = FrameSubmitter::new(sender, GENLOCK_GRID_FPS as i32, 1);
         let spc = samples_per_boundary(PROGRAM_AUDIO_RATE_HZ as i64, GENLOCK_GRID_FPS);
         let silence = vec![AudioFrame {
             data: vec![0.0; spc * PROGRAM_AUDIO_CHANNELS as usize],
@@ -667,7 +669,8 @@ impl super::PlaybackEngine {
     /// #221 L4b: also start the playback authority (`program_authority.rs`),
     /// whose first value plays the restored program. #223 S2: also start
     /// `SP-program-MAX` (its setting, then its thread). Call once, after the
-    /// #196 startup senders.
+    /// startup pipelines (`startup_pipelines.rs`); #221 lane 3: on Windows the
+    /// `SP-program` sender is created after the #196 port wait.
     #[cfg_attr(test, mutants::skip)]
     pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
         let _ = self.program.set(bus.clone()); // #215: the deferred scene-go-off pause
@@ -688,7 +691,10 @@ impl super::PlaybackEngine {
             warn!("program bus: a bus was already installed — keeping the first one");
         }
         #[cfg(windows)]
-        spawn_program_thread(self.ndi_backend.clone(), bus.clone());
+        {
+            crate::playback::startup_pipelines::wait_for_program_ports().await;
+            spawn_program_thread(self.ndi_backend.clone(), bus.clone());
+        }
         #[cfg(windows)]
         let receive = self
             .ndi_backend
@@ -734,7 +740,7 @@ impl super::PlaybackEngine {
 /// (`degraded_reason` names it instead of waiting for a first poll).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
-fn spawn_program_thread(backend: Option<super::pipeline::SharedNdiBackend>, bus: Arc<ProgramBus>) {
+fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<ProgramBus>) {
     let Some(backend) = backend else {
         warn!("NDI SDK not available — no SP-program output");
         bus.set_connections(0);

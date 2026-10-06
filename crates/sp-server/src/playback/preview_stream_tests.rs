@@ -361,30 +361,17 @@ fn shared_reports_its_configured_lead_ms() {
 }
 
 #[test]
-fn lead_ms_for_sdk_path_is_the_emitter_lookahead() {
-    // genlock_pacing == false → the #192 wall-clock emitter is present → the
-    // decoder opens with the AUDIO_LOOKAHEAD_MS audio read-ahead (1500 ms since
-    // #192 round 3) → lead = (40 + lookahead) − 40 = lookahead. Pinned to the
-    // SAME constant the emitter uses so the preview preroll can never drift
-    // from the cushion; the exact value kills the `!` delete, the `- → +` and
-    // the `- → /` mutants on the pure formula.
-    let lookahead = crate::playback::pipeline::audio_emitter::AUDIO_LOOKAHEAD_MS as u32;
-    assert_eq!(lookahead, 1500);
-    assert_eq!(lead_ms_for(false), lookahead);
-}
-
-#[test]
-fn lead_ms_for_paced_path_is_the_paced_decoder_read_ahead() {
-    // genlock_pacing == true → no emitter, but the paced decoder reads
-    // PACED_AUDIO_LEAD_MS (250 ms) of audio ahead of each frame (#148 v4). At
-    // the decode seam the audio therefore leads the video by 250 − 40 = 210 ms,
-    // and the preview feeder must hold it that long. The test is pinned to the
-    // paced constant so the preview can never drift from the cushion; the exact
-    // value kills a `return 0` or branch-swap mutant.
+fn the_decode_seam_lead_is_the_paced_decoder_read_ahead() {
+    // The paced decoder reads PACED_AUDIO_LEAD_MS (250 ms) of audio ahead of
+    // each frame (#148 v4). At the decode seam the audio therefore leads the
+    // video by 250 − 40 = 210 ms, and the preview feeder must hold it that
+    // long. Pinned to the paced constant so the preview can never drift from
+    // the cushion; the exact value kills the `- → +` / `- → /` and the
+    // `return 0` / `return 1` mutants.
     let paced =
         crate::playback::pacer::PACED_AUDIO_LEAD_MS - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS;
-    assert_eq!(u64::from(lead_ms_for(true)), paced);
-    assert_eq!(lead_ms_for(true), 210);
+    assert_eq!(u64::from(decode_seam_lead_ms()), paced);
+    assert_eq!(decode_seam_lead_ms(), 210);
 }
 
 #[test]

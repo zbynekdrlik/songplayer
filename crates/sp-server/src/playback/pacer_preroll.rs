@@ -190,8 +190,8 @@ impl Pacer {
     /// A boundary with nothing of the song to show (#147): with a standby fill
     /// set (by [`preroll`](Pacer::preroll)), it still carries the standby pair
     /// (the held pre-seek picture, else the black), so the output never has a
-    /// hole. Without a fill (the SDK-clocked path never sets one, and neither do
-    /// the unit tests that pin a bare starve) nothing is sent. Returns
+    /// hole. Without a fill (the unit tests that pin a bare starve set none)
+    /// nothing is sent. Returns
     /// [`ServiceOutcome::Starved`] either way.
     pub(super) fn fill_starved<S: PacedSink>(
         &mut self,

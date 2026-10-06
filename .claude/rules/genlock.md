@@ -21,6 +21,34 @@ paths:
 ---
 # Genlock (NDI outputs locked to the fleet clock) — #146–#151
 
+## #221 lane 3 — read this first: one NDI sender, pacing the only path
+
+SongPlayer's only NDI sender is `SP-program` (`program_output.rs`; the LED
+wall's `SP-program-MAX` goes over Spout). A playlist pipeline has NO NDI
+output of its own: its paced consumer delivers every boundary to the program
+bus (`paced_output.rs`: `BoundaryOut` → `InstalledBus` → `offer_to_bus`), and
+`SP-program`'s `FrameSubmitter` is the one wire edge. Deleted with the
+per-playlist senders (0.71.0-dev.16) — the history below still names them:
+
+- the SDK-clocked path and its switch: `pipeline::decode_and_send`, the
+  `genlock_pacing` setting (`sp_core::config`), `pacer_sink::idle_poll`, the
+  SYNTHESIZE BGRA standby, `submit_nv12`, `send_standby_black`;
+- the #192 wall-clock audio emitter and its round-4 video catch-up
+  (`audio_emitter.rs`, `audio_edge_fade.rs`, `pipeline_audio.rs`,
+  `av_catchup.rs`, `sp_ndi::AudioSink`);
+- the #151 burn-id overlay (`burn_overlay.rs`, `ndi_burn.rs`,
+  `sp_core::genlock::burn`, `POST /api/v1/ndi/burn`, `burn_on`);
+- the per-playlist submit side: `submitter_paced.rs` (`paced_handoff`),
+  `NdiSender::twin`, the `send_video_async` call gauge
+  (`submit_call_us_max` / `_p99`, `SubmitHist`, `drain_window`,
+  `WindowStats`, `paced_submit_snapshot`), the receiver count on a
+  pipeline's health row and the lock's "no receiver" rule.
+
+Pacing is the only path (the owner's rule, #147 comment 5812898277: pacing
+stays ON). A "submit" on the pipeline side now means the consumer's
+delivery to the program bus; `SP-program`'s own NDI submit is timed on
+`GET /api/v1/program` `health.timing` (`vban-out.md`).
+
 - Normative contract: zbynekdrlik/camera-box#1294 (§1–§8). Reference math
   + 68 test vectors: camera-box `src/ndi.rs`, `src/genlock_stamp.rs`,
   `src/genlock_pacing.rs` — ported 1:1 into `sp_core::genlock` tests.
@@ -28,9 +56,8 @@ paths:
   `floor_boundary_100ns` on the fixed grid (`GENLOCK_GRID_FPS`), FLOOR never
   ceil; audio = the timeline instant of the block, i.e. the boundary it belongs
   to (#224: an on-time emit's "raw wall clock at submission", never the emit
-  instant of a late or catch-up emit); `SYNTHESIZE` only on the
-  SDK-clocked (legacy) standby BGRA black — the paced path never sends it
-  (see "Standby = the same paced path as playing" below).
+  instant of a late or catch-up emit); never `SYNTHESIZE` (it was only on
+  the deleted SDK-clocked standby BGRA black).
 - `clock_ok = is_locked && mode ∈ {LOCK, NANO}` from dantesync
   `127.0.0.1:8898/status`; unreachable → `no dantesync`, never blocks playback.
 - Acceptance is on the RECEIVER (`genlock-fifo audit … locked=1`, camera-box
@@ -40,11 +67,10 @@ paths:
   `floor(now)` at emission, never a stamp > the wall read before the send.
   The ns gate `genlock_emit_gate` + its 43 vectors are a reference port of
   camera-box's DECIMATOR — never use an epoch-multiple ns grid as a clock
-  (it drifts 10 ns/s against the second-anchored stamp grid). Flag
-  `genlock_pacing` (DB setting) is read at pipeline spawn → a flip needs a
-  SongPlayer restart (= a deploy). Box test 2026-09-13 01:43: idle/paused
-  outputs hold 30/s, but a PLAYING output ran ~27/s with every frame late
-  (p99 15 s, max 40 s) — read #147 before flipping the flag again.
+  (it drifts 10 ns/s against the second-anchored stamp grid). Box test
+  2026-09-13 01:43: idle/paused outputs held 30/s, but a PLAYING output ran
+  ~27/s with every frame late (p99 15 s, max 40 s) — what the decode split
+  below fixed. (The `genlock_pacing` switch is deleted, #221 lane 3.)
 - Playback ≠ capture (lane 3, 0.47.0-dev.13): catch-up advances the serviced
   boundary ONE slot per `service()` call, but each emitting call also costs one
   decoder `pull`; when a file's per-frame `iter_cost >= interval` the boundary
@@ -96,11 +122,12 @@ paths:
   now emits through `HandoffSink` (`paced_output.rs`): it hands the
   stamped frame to a BOUNDED handoff (`submit_handoff.rs::SubmitQueue`, depth
   `SUBMIT_HANDOFF_BOUND=2`) in ~µs and stays on the grid; a dedicated submit
-  thread owns the submitting `FrameSubmitter` (SDK per-instance affinity + the
+  thread owned the submitting `FrameSubmitter` (SDK per-instance affinity + the
   async double-buffer holdover stay single-threaded; since #147 it lives for
   the whole pipeline — see "The paced output services every boundary between
-  scopes" below) and does the blocking
-  `send_audio`+`send_video_async`. It works BECAUSE median submit (25 ms) < the
+  scopes" below) and did the blocking
+  `send_audio`+`send_video_async` (#221 lane 3: it now delivers to the
+  program bus; `SP-program` does the NDI submit). It works BECAUSE median submit (25 ms) < the
   33.3 ms grid slot: the submit thread's ~40 fps capacity vs 30 fps demand drains
   the p99 spikes out of a shallow queue. `late_frames` is measured HONESTLY at
   the submit thread (`submit_late_100ns` = stamp → submit-start, floored),
@@ -113,43 +140,20 @@ paths:
   submitter. The pure decisions (`submit_handoff.rs`) are Linux-tested +
   mutation-scored; the `SharedHandoff` + consumer are cross-platform in
   `paced_output.rs` (Linux-tested over `MockNdiBackend`; only the blocking wait
-  and the thread lifecycle are `mutants::skip`). The NON-paced
-  `pipeline::decode_and_send` path is untouched. Acceptance = box test 6
-  (`genlock_pacing=true`, stems child resident, 60 s): `late_frames` < 1 % of
+  and the thread lifecycle are `mutants::skip`). Acceptance = box test 6
+  (pacing ON, stems child resident, 60 s): `late_frames` < 1 % of
   `seq`, `resyncs`/`dropped`/`audio.underruns` 0, `lock_state=LOCKED`; then the
   flag stays ON and camera-box#1302 gets the receiver verdict.
-- Submit-call cost gauge on the paced path (#168 round 2, 0.63.0-dev.1): box
-  test 6 FAILED (17.9.: 94.5 % late, `iter_p99` 75.8 ms) because the NDI SDK
-  `send_video_async` itself costs ~25 ms median / 75 ms p99 per 2560×1440 frame
-  with the stems child resident (the 20.9. event showed up to 954 ms) — the
-  decode + emit are off the critical path, the remaining wall is the SDK call.
-  To decide (SDK cost intrinsic at 1440p → 1080p-genlocked vs 1440p-unlocked, or
-  load-induced → policy) this round PLUMBS the per-frame SDK cost onto the paced
-  heartbeat, plumbing only, no behaviour change. The submit thread already timed
-  every `send_video_async` into `FrameSubmitter.submit_times` (the round-3
-  `loop_stats::SubmitHist`) but never surfaced it; now the submit consumer
-  drains that SAME histogram on its ~1 s connection-poll cadence and folds the
-  `(max, p99)` worst-of into the handoff snapshot (pure
-  `submit_handoff::paced_submit_snapshot` + `PacedSubmitStats`), the heartbeat
-  `snapshot()` drains-and-resets it per window, and `emit_heartbeat_paced`
-  carries it BOTH into `PacingStats` (`submit_call_us_max`/`submit_call_us_p99`,
-  on `/api/v1/ndi/health` `pacing`) AND into the existing `pipeline: loop-stats`
-  log line (the SAME field names the SDK-clocked path uses). **Box test 7 reads
-  these:** with `genlock_pacing=true` + a stems child resident, the per-minute
-  `pipeline: loop-stats … submit_call_us_max=… submit_call_us_p99=…` line (and
-  the `/api/v1/ndi/health` `pacing` block) now names the paced per-frame SDK
-  submit cost, cross-read against `late %`; then the stems worker OFF for the
-  A/B. The `ndi: genlock` line was NOT touched (ndi_health.rs is at the 1000
-  cap); the number rides the loop-stats line + the health API instead.
-- Burn-id QR overlay (#151, run_id **911014**): the paced emit paints a QR of
-  `P{run_id}.{frame_id}.{gen_ts_ns}.{crc32}` bottom-right (side `0.28·h`, margin
-  `40/1080·h` — camera-box `payload.rs` + `burn-geom.hpp`, ported into
-  `sp_core::genlock::burn`; luma-only 16/235, chroma neutral 128) so the fleet's
-  `recording-verdict` proves contiguity for SP-originated frames.
+- Submit-call cost gauge (#168 round 2) and the burn-id QR overlay (#151):
+  DELETED with the per-playlist senders (#221 lane 3, the top section). Box
+  test 6 had shown the NDI SDK `send_video_async` costing ~25 ms median /
+  75 ms p99 per 2560×1440 frame with a stems child resident: since #223
+  `SP-program` sends one 1920×1080 canvas, and its cost is
+  `health.timing.submit_us` on `GET /api/v1/program`.
 - Dashboard genlock indicator (#150→#164→#176): the header `GlobalLockBadge`
   (`sp-ui/src/components/ndi_health.rs`) is **ALWAYS visible** — grey
-  `● GENLOCK OFF` when NO output has pacing enabled (pacing set OFF by hand,
-  `genlock_pacing=false`; the code default is ON since #147), else
+  `● GENLOCK OFF` when NO output reports pacing (since #221 lane 3 pacing is
+  the only path, so: no playlist pipeline reporting yet), else
   `● LOCKED`/`● DEGRADED`/`● UNLOCKED` (green/amber/red, `n/m` live-locked
   count + worst reason). #176 revised #164's "hide the
   badge entirely while pacing is off" — the owner must always be able to tell at
@@ -161,185 +165,40 @@ paths:
   keeps #164's "only where actionable" rule (hidden while pacing off). `sp_core::
   genlock::lock_state::summarize` stays a 3-state (no OFF) reference. Testid
   `genlock-global-badge`.
-- The burn is **default OFF, NEVER persisted, paced-path ONLY**: toggled per
-  output via `POST /api/v1/ndi/burn {output,on}` (204 / 404 / 409 "pacing
-  disabled"), read fresh every boundary through a shared `Arc<AtomicBool>`
-  (`NdiBurnRegistry`), surfaced as `burn_on` in `/api/v1/ndi/health`. A QR must
-  never reach the LED wall in production — a structural guard keeps the legacy
-  `decode_and_send` path from ever referencing the overlay.
-- SDK-clocked wall-clock AUDIO emitter (#192): on the production SDK-clocked
-  path (`genlock_pacing=false`) the NDI audio stream is now clocked by the WALL
-  CLOCK, independent of the video submits. `run_loop_windows` spawns ONE
-  dedicated OS thread per pipeline (`playback/pipeline_audio.rs::spawn_audio_emitter`,
-  `THREAD_PRIORITY_TIME_CRITICAL` via `windows-sys`) that emits ONE 1600-sample
-  block (48 kHz stereo = 33.333 ms = one grid slot) every wall boundary
-  (`WallClock` QPC + coarse-sleep-to-2ms + spin, the `pipeline_paced.rs` pattern,
-  1 ms `timeBeginPeriod`), stamping the NDI audio timecode from the GRID (a clean
-  48 kHz clock — this is what kills the receiver servo's ±1500 ppm "rate swings",
-  NOT a receiver bug). WHY it exists: `decode_and_send` used to submit audio only
-  alongside each video frame, so a song transition (`video ended naturally` →
-  next `Play`, 200–400 ms) or a heavy-child model-load stall left the audio
-  stream SILENT → the genlock OBS's 3 ms-budget ASRC servo read the ≥1-block hole
-  as starvation → buffer collapse + re-lock ate ~1 s of the next song. Now
-  `decode_and_send` PUSHES decoded audio into the emitter's bounded ring
-  (`AudioRing`, ~250 ms, `push_blocking` — bounded, back-pressures the decoder,
-  never drops) BEFORE that frame's `send_video`; the emit thread pops a whole
-  block per slot or emits a FULL silence block when the ring is short (never a
-  partial block, never a skipped slot), so the stream never starves. The pure
-  core (ring + grid + telemetry + the generic `emit_one_block` send seam) is in
-  `playback/audio_emitter.rs`, cross-platform + Linux-tested + mutation-scored;
-  only the thread lifecycle (spawn/priority/sleep-spin/join-before-sender-drop)
-  is `pipeline_audio.rs` (`#[cfg(windows)]`, `mutants::skip`, box-verified).
-  A/V: audio leads/lags video by at most one block (33 ms) + ring residency
-  (~2 blocks) — box-verify it stays inside the DistroAV sync window. Cross-thread
-  NDI: video (decode thread) + audio (emit thread) submit on the SAME
-  `NdiSender` via `sp_ndi::AudioSink` (`{Arc<B>, handle}`, cloned from the
-  submitter) — NDI permits audio+video from separate threads on one instance;
-  the emit thread MUST be joined before the sender is destroyed (the
-  `AudioEmitterThread` guard is declared AFTER `submitter` so it drops first).
-  Telemetry: `AudioStats.emitter {enabled, mode:"sdk-video/wallclock-audio",
-  silence_blocks, ring_depth_ms, emit_jitter_p99_us, late_blocks}` on
-  `/api/v1/ndi/health` + the dashboard badge tooltip; the emit thread logs a
-  per-minute `audio-emitter: heartbeat` line + one line per silence→audio edge
-  (`audio resumed after silence`). `silence_blocks` should grow ONLY at
-  transitions/stalls; `late_blocks` ≈ 0 and `emit_jitter_p99_us` < 500 with the
-  TIME_CRITICAL thread. The PACED path (`pipeline_paced.rs`) keeps its own audio
-  (the Pacer's media-aligned `AudioGridBuffer`, see "Paced audio" below) and is
-  untouched.
-  **Box finding 19.9.2026 (0.59.0-dev.6):** EVERY pipeline runs an emitter (idle
-  ones emit silence, so receivers never starve), and with the FIXED 2 ms spin the
-  per-minute p99 was 0.4–5.5 ms, not < 0.5 — on the 24-core, ~3 % busy,
-  Balanced-plan Win11 box the coarse `thread::sleep` overshoots by several ms
-  (parked cores), TIME_CRITICAL or not; SongPlayer used 0.10 cores total, so it
-  was NOT spin contention. Cure: `audio_emitter::SpinMargin` (pure, Linux-tested)
-  — margin = worst coarse-sleep overshoot of the last 900 slots + 0.5 ms, clamped
-  2–6 ms, and ONLY while the pipeline carried audio in the last 300 slots (a
-  song transition stays tight; ten silent idle emitters keep the cheap 2 ms).
-  `sleep_until` returns the overshoot; the heartbeat logs `spin_margin_us`.
-  Re-read p99 + SongPlayer CPU on the box after any change here.
-  **Round 2 — the ring needs a CUSHION (box 19.9.2026):** with the decoder's
-  plain 40 ms pairing the ring sat at 24–55 ms (FLAC chunks are ~85 ms, so the
-  depth saw-tooths to ~0) and any decode hiccup became a 33 ms SILENCE BLOCK
-  mid-song on the live output (`audio resumed after silence … silence_blocks=1`:
-  3× in 15 min unloaded, ~1/s while a second pipeline decoded) — and every
-  underrun shifted audio later for the rest of the song. Cure: the emitter path
-  opens the decoder through `pipeline_audio::open_synced_decoder` →
-  `SplitSyncedDecoder::with_audio_lead(40 + AUDIO_LOOKAHEAD_MS=100)` (named
-  `with_tolerance` before #148 v4), i.e. audio
-  is read ~100 ms AHEAD of video. That fills the ring to ≈ 98–225 ms (capacity
-  266) WITHOUT an A/V offset (the first block starts as the first frame goes
-  out; both then run in real time). Three rules ride with the lookahead: a
-  PAUSE must `hold_ring` (silence without popping — else the cushion plays out
-  past the pause point and audio leads after resume; released by the next
-  `push_blocking`), a SEEK and a new playback must `clear_ring` (else stale audio
-  queues ahead and audio lags), and the legacy no-emitter fallback keeps the
-  plain 40 ms (its audio rides the video frames). A `silence_blocks=1` resume
-  line mid-song is ALWAYS a defect — grep the box log for it after any change.
-  The heartbeat also logs `emit_call_max_us` (ring lock + NDI `send_audio`) to
-  tell an SDK/lock-delayed slot from a late wake-up.
-  **Round 3 — release code review (0.59.0, #192 items 1–6):** `AudioRing::push_some`
-  now CLEARS + re-fixes the ring layout when a push's `ch` differs from the fixed
-  layout (a mono song after a stereo one must not be read through the old frame
-  size), and accepts only whole frames of the pushed `ch`; `push_blocking`
-  truncates to whole frames and drops a partial-frame residual with one WARN — it
-  can no longer loop forever with `accepted==0` while free space exists (the
-  odd-length-input 250 ms `wait_timeout` spin). At a NATURAL song end
-  `pipeline_audio::drain_if_present` polls the pure `ring_is_drained` (< one block
-  buffered) every 5 ms for ≤ 400 ms so the song's tail is emitted before the next
-  song's `clear_ring` wipes it (natural-end path ONLY — Stop/Play/Shutdown still
-  clear). `AudioEmitter::tick` RE-ANCHORS the grid when this slot's boundary is
-  > 1 s behind `now` (counts `resyncs`, logged in the per-minute heartbeat only)
-  so a suspend/debugger stall never fires a TIME_CRITICAL catch-up burst;
-  `boundary_for` uses a CHECKED `i64::try_from` via the shared `units_for` helper.
-  All Linux-unit-tested with exact boundaries; the drain glue stays `mutants::skip`.
-  **Round 3 — 1.5 s cushion + stage telemetry (#192, box 20.9.2026):** the owner
-  heard audible holes during the service — mid-song `silence_blocks` 9–14 (≈ 300–
-  466 ms) on the on-program output while `emit_call_max_us` was only 33–67 ms, i.e.
-  PRODUCER stalls (the ONE decode loop stalling ~1 s under a resident stems child),
-  NOT the SDK send. Cure: `AUDIO_LOOKAHEAD_MS` 100 → **1500**, and the two derived
-  quantities now track it via pure `const fn`s so they can never drift below the
-  cushion: `RING_CAPACITY_BLOCKS = ring_capacity_blocks(AUDIO_LOOKAHEAD_MS)` (= 49
-  blocks ≈ 1633 ms — a capacity BELOW the lookahead would cap the realised cushion,
-  because `push_blocking` back-pressures the decoder at the cap), and the natural-
-  end drain deadline = `drain_budget_ms(AUDIO_LOOKAHEAD_MS)` (= lookahead + one
-  slot = 1534 ms; a fixed 400 ms would cut the last ~1.1 s of every song at the
-  deeper cushion). So a natural song end now blocks the decode thread up to ~1.5 s
-  draining the buffered tail (breaks early on `ring_is_drained`). Attribution
-  telemetry: `playback/loop_stats.rs` (pure, Linux-tested, mutation-clean) — a
-  `SubmitHist` on `FrameSubmitter` times each `send_video_async` (both `submit_nv12`
-  and `submit_frame_at_boundary_owned`), surfaced via `WindowStats`/`drain_window`,
-  and a `LoopStageMax` in `decode_and_send` times the decode / submit / audio stage
-  of each loop iteration; both ride the `HealthSnapshot` event and log a third
-  grep-stable `pipeline: loop-stats` line beside `ndi: heartbeat` (per UTC minute)
-  so the A/B box test (same song ± a resident stems child) names the stalling
-  stage. The paced (#168; pacing is ON in production since the #147 ruling) submit-thread also surfaces
-  this gauge now (#168 round 2, 0.63.0-dev.1): it drains the SAME
-  `FrameSubmitter.submit_times` through its handoff snapshot into
-  `emit_heartbeat_paced`, carried into `PacingStats` + the paced `pipeline:
-  loop-stats` line — see the "Submit-call cost gauge on the paced path" bullet
-  above.
-- **Round 4 (`av_catchup.rs`): video follows the wall-clock audio, SDK-clocked
-  path only.** The round-3 measurement showed the stall's residue is not a
-  submit-call block but a lasting A/V offset (the ring stays ~150 ms for the rest
-  of the song). So round 4 drops LATE video frames (audio already queued) until
-  the video catches up — `pipeline.rs` gains exactly ONE `if` at the submit site
-  (`pipeline_audio::is_late_frame` → pure `CatchUp::step`), counted as
-  `catchup_dropped` in the `pipeline: loop-stats` line. This runs ONLY on the
-  `genlock_pacing == false` (wall-clock-emitter) branch; the paced/genlock path
-  keeps its own re-latch logic and is untouched. Full contract: `pipeline-testability.md`.
+- SDK-clocked wall-clock AUDIO emitter (#192, rounds 1–5) and the round-4
+  video catch-up (`av_catchup.rs`): DELETED (#221 lane 3, the top section).
+  What they taught that still holds: a coarse `thread::sleep` on the box
+  overshoots by several ms (parked cores) TIME_CRITICAL or not, so a grid
+  thread spins its last ~2 ms (`pacer_spin.rs`); a song transition must
+  never leave an audio slot empty (the paced standby pair, below); a seek
+  must not deliver pre-target frames (`SplitSyncedDecoder` discards video
+  `< target` after a keyframe-aligned seek, `MAX_SEEK_DISCARD_FRAMES = 600`,
+  `split_sync.rs` — still in force).
 - Allocation-free steady state (#203, round 2a): the wall's page-fault storm
   under a resident heavy child was the per-frame `Vec<u8>` alloc/free (VirtualAlloc
   demand-zero faults + VirtualFree TLB shootbacks). The submit holdover is now a
   `playback::frame_buf::SharedFrame` (`Arc<Vec<u8>>`, NEVER `Arc<[u8]>` which
   copies) — `FrameSubmitter.prev_frame: Option<SharedFrame>`, sent via the new
   additive `NdiSender::send_video_async_slice(&[u8])`, so the holdover is a
-  refcount hold with ZERO pixel copy. Rules for anyone touching `submitter.rs` /
+  refcount hold with ZERO pixel copy (since #221 lane 3: `SP-program`'s
+  submitter, the only one). Rules for anyone touching `submitter.rs` /
   `pacer.rs`: the field-order SAFETY note still holds (sender drops before
-  `prev_frame`); the paced burn overlay paints via `SharedFrame::make_mut`, which
-  FORKS into a pooled copy while the pacer still holds its `last_frame` clone
-  (the usual case; in place only when the submit side is the sole owner, which
-  is safe — #147 round 10); idle Black is submitted by shared reference
-  through `PacedSink::submit_shared` (`Standby::Black{dims, &SharedFrame}`,
-  `service_standby` clones the Arc = a refcount bump per idle slot; since #147
-  the ONE black `SharedFrame` is cached in the submitter,
-  `FrameSubmitter::standby_black_nv12`, built once per pipeline);
-  `send_black_bgra` (SDK-clocked standby only since #147) reuses a `black_bgra`
-  buffer keyed by size (send is synchronous, so it is reclaimed the instant the
-  call returns). The NV12 decoder/handoff/pacer-repeat pool (a cross-crate `sp-decoder`
-  change) is round 2b, built on this `SharedFrame` seam. The audio emitter
-  (`audio_emitter.rs`) is also allocation-free per slot now: `EmittedBlock` is a
-  TAG enum, `pop_block` fills a reused `block_buf`, `samples_for` returns a borrow
-  (+ a reusable `silence` block), and the jitter-p99 sort moved OFF the
-  TIME_CRITICAL thread into `emitter_stats()` (on-demand, heartbeat cadence).
-- **Round 5 (#192): a SEEK must not break the cushion + click-free edges.** A seek
+  `prev_frame`); idle Black is handed on by shared reference through
+  `PacedSink::submit_shared` (`Standby::Black{dims, &SharedFrame}`,
+  `service_standby` clones the Arc = a refcount bump per idle slot; the ONE
+  black `SharedFrame` per pipeline is cached in its paced output,
+  `PipelineOutput::standby_black_nv12` → `frame_buf::BlackNv12`, built once).
+  The NV12 decoder/handoff/pacer-repeat pool (a cross-crate `sp-decoder`
+  change) is round 2b, built on this `SharedFrame` seam.
+- **Round 5 (#192): a SEEK must not deliver pre-target frames.** A seek
   forwarded a keyframe-aligned video seek, so `MediaFoundationVideoReader` landed
   on the PREVIOUS keyframe (`< target`) and `SplitSyncedDecoder::next_synced`
-  delivered those pre-target frames — the SDK-clocked sender paced them out (the
-  visible jump-back) and the pairing deadline pinned the ring depth ≈ 0 for the
-  REST of the song (audio led the picture). Fix (pure, Linux-tested): `seek`
-  records `pending_video_target_ms`; `next_synced` decode-and-DISCARDS video
-  frames `< target` (bounded by `MAX_SEEK_DISCARD_FRAMES = 600`, never spins)
-  before pairing, so the first delivered frame is `>= pos` and the cushion refills
-  like a fresh Play. `pipeline.rs` seek arm + the position report are UNTOUCHED
-  (same `decoder.seek(pos)` signature; the first reported ts is already `>= pos`).
-  Plus a pure `audio_edge_fade::EdgeFade` (sp-server): a fade-out TAIL (last block
-  ramped 1→0) at the audio→silence edge and a fade-in (0→1 over `FADE_IN_BLOCKS=3`)
-  at the silence→audio edge, removing the clicks a `clear_ring` / stall / song
-  transition otherwise produced. TWO design rules that kept every existing test
-  green: (1) shape the samples in `samples_for`, NOT `tick` — `tick`/`Emitted.block`
-  /`silence_blocks` stay RAW, so the transition log + the tick-asserting tests are
-  untouched; only the SENT samples change. (2) the fade-in fires ONLY on a genuine
-  silence→audio edge (`fade_in_pos` starts AT `FADE_IN_BLOCKS`, reset to 0 by
-  `on_silence`) — a COLD `samples_for(&Audio)` with no preceding silence stays
-  full gain, so the many dev tests that push+tick+`samples_for` and assert exact
-  samples keep passing; in production the emit thread always emits silence while
-  the ring fills, so the first real audio still fades in. Keep the #203
-  allocation-free contract: full-gain audio + plain silence are borrowed straight
-  from `block_buf` / the reusable `silence`; only faded slots use EdgeFade`s reused
-  `out` scratch, and `samples_for` borrows disjoint fields (`&mut edge_fade` +
-  `&ring`) so it stays zero-copy. The FIRST post-audio silence slot is now the tail
-  (not zeros) — a test asserting that slot is all-zeros must expect the tail + read
-  the SECOND slot for the zero block.
+  delivered those pre-target frames (a visible jump-back). Fix (pure,
+  Linux-tested, still in force): `seek` records `pending_video_target_ms`;
+  `next_synced` decode-and-DISCARDS video frames `< target` (bounded by
+  `MAX_SEEK_DISCARD_FRAMES = 600`, never spins) before pairing, so the first
+  delivered frame is `>= pos`. (Its other half, the emitter's click-free
+  `audio_edge_fade::EdgeFade`, is deleted with the emitter, #221 lane 3.)
 
 ## Allocation-free playing steady state — the recycling frame pool (#203 2b)
 
@@ -357,21 +216,20 @@ so the OS fault + TLB-shootdown cost is unchanged):
 - `sp-server`'s `SharedFrame = Arc<PooledBuf>` is the SINGLE sharing handle. One
   allocation flows the whole playing path by Arc bump: `to_paced_frame` wraps
   once → `PacedFrame.video` → the pacer's `last_frame` starvation repeat →
-  `SubmitJob::from_paced` (the handoff, `frame.video.clone()`) → the submitter's
-  `prev_frame` holdover. No pixel copy anywhere; the burn overlay's
-  `SharedFrame::make_mut` (`Arc::make_mut` → `PooledBuf::clone`, a copy into a
-  RECYCLED pool buffer since #147 round 10) is the only cloner and burn is
-  default OFF.
+  `SubmitJob::from_paced` (the handoff, `frame.video.clone()`) → the program
+  bus → `SP-program`'s `prev_frame` holdover (when the canvas passes it
+  through; a fit or a fade paints a pooled buffer, #223). No pixel copy on the
+  pipeline side.
 - **SDK-holdover safety invariant (unchanged from 2a):** a recycled buffer may
   be reused ONLY after every `Arc` is gone. Recycling fires exactly in
   `PooledBuf::Drop`, which the `Arc` runs only on the LAST holder drop — the
   submitter installs the new `prev_frame` (dropping the old Arc) AFTER the async
   call returns, so the buffer the SDK still points at is never recycled early.
   Keep `FrameSubmitter.sender` declared BEFORE `prev_frame` (field drop order).
-- The idle NV12 black and the cached BGRA black stay OUT of the pool as takers
-  (built from their own buffers, never `take`). The NV12 black lives in the
-  `FrameSubmitter` for the pipeline's life (#147); its single drop at pipeline
-  end recycles one bounded black buffer, which is harmless.
+- The idle NV12 black stays OUT of the pool as a taker (built from its own
+  buffer, never `take`). It lives in the pipeline's paced output
+  (`frame_buf::BlackNv12`) for the pipeline's life (#147); its single drop at
+  pipeline end recycles one bounded black buffer, which is harmless.
 
 ## Paced measurement session (#168 round-4 recipe)
 
@@ -387,25 +245,12 @@ investigation is now a 10-minute read.
 - **Pacing is ON in production permanently** (owner ruling, issue #147 comment
   5812898277, 24.9.2026): the residual stall is solved with guaranteed priority
   and residency, NEVER by switching pacing off — not as a "temporary state", not
-  for a measurement. `genlock_pacing` is read ONLY at startup (`lib.rs::start` →
-  `genlock_pacing_setting` → `engine.set_genlock_pacing`); a restart = `gh run rerun --job <LATEST Deploy
-  job id>` — look the id up each time (`gh run view <run> --json jobs`; a rerun
-  mints a NEW job id). The dabing 12–16 kHz single-snapshot E2E assertion that
+  for a measurement (#221 lane 3 deleted the switch itself). A restart =
+  `gh run rerun --job <LATEST Deploy job id>` — look the id up each time
+  (`gh run view <run> --json jobs`; a rerun mints a NEW job id). The dabing 12–16 kHz single-snapshot E2E assertion that
   used to fail on live content was reworked by #206 (post-deploy E2E: content/
   state-dependent audio assertions, closed — commit b41d06e) into a
   content-matched full-band RMS drop.
-- **The code default is ON too (#147, 4.10.2026 triage 5984521750).** ONE
-  truth, `sp_core::config`: `SETTING_GENLOCK_PACING`,
-  `DEFAULT_GENLOCK_PACING = true`, and `genlock_pacing(raw)`, which is OFF
-  only for an explicit `"false"` (trimmed). A missing row, a failed read
-  (`lib.rs::genlock_pacing_setting`) or a mangled value paces. A fresh
-  `PlaybackEngine` starts from the same const. Before, the read was
-  `== "true"` with `unwrap_or(false)`, so a lost setting meant a dark
-  SP-program (it takes only paced sources) and a silent FOH. The UI holds
-  no default: the dashboard renders each output's live `pacing.enabled`
-  telemetry (`PacingView`'s `#[serde(default)]` = "not reported"). The
-  SDK-clocked path stays selectable by an explicit `"false"` until its own
-  deletion unit.
 - **Change containment mid-session.** `heavy_cpu_cap_pct` /
   `heavy_cpu_affinity_mask` apply at the NEXT child spawn (`refresh_containment`
   per tick), NOT to the running child — so after a settings change, kill the venv
@@ -413,8 +258,10 @@ investigation is now a 10-minute read.
   `stem_attempts` + backoff; its already-written segments are intact.
 - **The no-child control:** `stem_worker_enabled=false` + `lyrics_worker_enabled=false`.
 - **Read the grid per minute** from `C:\ProgramData\SongPlayer\songplayer.<date>.log`:
-  `pipeline: loop-stats ndi_name="SP-slow" … submit_call_us_max` (the raw
-  `send_video_async` call cost) and `ndi: genlock … late=` (lateness/min).
+  `pipeline: loop-stats ndi_name="SP-slow" … page_faults_per_min` and
+  `ndi: genlock … late=` (lateness/min); `SP-program`'s own NDI submit cost
+  is `health.timing.submit_us` on `GET /api/v1/program` (the per-playlist
+  `submit_call_us_max` went with the per-playlist senders, #221 lane 3).
 - **Trust the window only if the child is PRODUCTIVE.** `TotalProcessorTime`
   delta over 6 s must be > 0 — a starved child (a 2-logical-core block, W3) gives
   a false-clean grid because it is doing no work, not because placement is safe.
@@ -436,10 +283,10 @@ the 60 s window (the old rule-4 `> 0`). It rate-normalises the window counts
 against the emitted slots (`seq` differenced by `EventWindow`, fed via
 `playback/lock_state.rs::lock_for_heartbeat`), so 24/25-fps content on the 30-fps
 grid reads LOCKED, not DEGRADED. Precedence (first match wins): `!clock_ok` →
-UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled"; `connections==0`
-→ DEGRADED "no receiver" (#221 B4 step 6: a playlist output's lock reads the
-JUDGED count, at least 1, since it expects no receiver — `obs-ndi-health.md`);
-`resyncs_w>0` → DEGRADED "resync in 60 s"; `slots_w==0`
+UNLOCKED "clock not ok"; `!pacing` → UNLOCKED "pacing disabled";
+`resyncs_w>0` → DEGRADED "resync in 60 s" (#221 lane 3 deleted the
+`connections==0` → "no receiver" rule: a playlist has no NDI output);
+`slots_w==0`
 (nothing emitted, no grid) → LOCKED; then the late rate check and, only while
 `decoding` (#150), the repeat rate check; else LOCKED.
 
@@ -453,16 +300,12 @@ JUDGED count, at least 1, since it expects no receiver — `obs-ndi-health.md`);
   and `source_fps` is the snapshot's **`source_fps`** — the DECODER's rate
   (`decoder.frame_rate()`), path-independent. **#168 r6b: NEVER use `nominal_fps`
   as the source rate.** `nominal_fps` is the OUTPUT nominal — the fixed grid (30)
-  on the paced path, the decoder rate only on the SDK-clocked path — so feeding it
+  on the paced path (the only one since #221 lane 3) — so feeding it
   as the source made a 23.976-fps output expect 0 % repeats and falsely DEGRADE on
   the structural 20 % conversion (box read 22.9.2026 17:56 UTC). The event +
   snapshot carry both: `nominal_fps` (output nominal) and `source_fps` (decoder).
-  **Sourcing `source_fps`:** SDK-clocked path = `submitter.nominal_fps()` (the
-  submitter is `set_frame_rate`'d to the decoder there). PACED path = threaded
-  from the decode PRODUCER via `open_tx` (`run_decode_producer` reads
-  `decoder.frame_rate()`; the submit thread owns the submitter, and the paced
-  submitter is NEVER `set_frame_rate`'d so `submitter.nominal_fps()` there is the
-  grid, not the source).
+  **Sourcing `source_fps`:** threaded from the decode PRODUCER via `open_tx`
+  (`run_decode_producer` reads `decoder.frame_rate()`).
 - **Calibration (22.9.2026, SP-slow 24 fps on the 30-fps grid, 1 800 slots/min):**
   clean grid late ≤ 6 % of slots (0–100/min), stalled 42 % (W1 ~750/min,
   30–105 ms); repeats a constant 20 % (= 1 − 24/30) in EVERY window; resyncs 0.
@@ -568,8 +411,7 @@ values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
 - **Why 3072 MiB.** A playing 1440p paced output holds about 21 NV12 buffers
   (look-ahead 12, pool class 6, handoff 2, repeat, holdover), about 115 MB. On
   top of that come the MF decoder and the SDK's per-sender compression buffers.
-  Each paced idle output holds one NV12 black, about 3 MB (no BGRA black since
-  #147; an SDK-clocked output still holds its ~8 MB BGRA black). That totals about
+  Each paced idle pipeline holds one NV12 black, about 3 MB. That totals about
   1–2 GB, and 3072 MiB leaves headroom. Re-size it from the new `working_set_mb`
   field.
 
@@ -621,7 +463,6 @@ values are flat strings in MiB, e.g. `{"sp_min_working_set_mb":"3072"}`.
     - the first minute after start;
     - the first minute after a gap of more than 5 min with no paced heartbeat
       (`MAX_SAMPLE_GAP_MS`), which re-baselines;
-    - the SDK-clocked path;
     - non-Windows.
   - `PageFaultCount` is a u32 that wraps about every 2.4 h at 500k/s. The delta
     is the shared wrap-safe `process_start::residency::fault_delta` (`wrapping_sub`).
@@ -655,7 +496,8 @@ productive: `TotalProcessorTime` delta over 6 s > 0.
 
 **Report per window:**
 
-- sender minutes with `submit_call_us_max` ≤ 20 ms;
+- `SP-program` minutes with `health.timing.submit_us_max` ≤ 20 ms (before
+  #221 lane 3: per-playlist sender minutes with `submit_call_us_max` ≤ 20 ms);
 - SongPlayer `page_faults_per_min` and `working_set_mb`;
 - receiver `dropped_due`, underruns, relocks and late_holds;
 - child throughput (segments or CPU-s per window).
@@ -688,13 +530,13 @@ page. A 1440p NV12 frame is 5.5 MB, about 1350 faults per fresh copy.
 (round 9, `proc_mem.rs`). Read it before and after any change on this path.
 
 **The audit (issue #147 comment 5814563750).** The playing wall path — the MF
-reader copy, `to_paced_frame` → pacer → handoff → submitter holdover, and
-`submit_nv12` — was already pool/Arc-reused by #203 2b. Round 10 converted:
+reader copy, `to_paced_frame` → pacer → handoff → submitter holdover — was
+already pool/Arc-reused by #203 2b. Round 10 converted:
 
 - `FrameSubmitter`'s `PacedSink::emit` is now an Arc bump into
   `submit_frame_at_boundary_owned`. It used to be a `to_vec` copy.
-- `submit_frame_at_boundary(&[u8])` and `PooledBuf::clone` (the burn overlay's
-  per-frame `make_mut` fork) copy into a pooled buffer:
+- `submit_frame_at_boundary(&[u8])` (test-only since #221 lane 3) and
+  `PooledBuf::clone` copy into a pooled buffer:
   `PooledBuf::copy_from_slice` / `SharedFrame::copy_from_slice` →
   `frame_pool::take`.
 - The #178 stream tap's vfeed hands each written canvas back to the tap's pool
@@ -754,9 +596,11 @@ first capped job, and logs
   `Mutex<HashMap>`, held across each SDK call: video, async video, flush,
   audio, tally, connections and source URL.
   `NDIlib_send_send_video_async_v2` blocks until the SDK has finished with that
-  sender's previous frame. With pacing, all ~10 outputs emit on the same
-  33.3 ms boundary, so one slow sender delayed every other output's video and
-  audio send. The per-output `submit_call_us_*` gauge included that wait.
+  sender's previous frame. With pacing, all ~10 outputs (then: one NDI
+  sender per playlist) emitted on the same 33.3 ms boundary, so one slow
+  sender delayed every other output's video and audio send. Since #221 lane
+  3 `SP-program` is the only sender; the per-handle locks still keep its
+  calls independent of the NDI input's receive handles (`ndi-input.md`).
 - **Map lock.** The map is now `HandleTable<RealHandleState>`: an `RwLock`
   over `usize → Arc<Mutex<Option<T>>>`. The map lock is held ONLY to insert,
   remove, or clone one handle's `Arc`, never across an SDK call.
@@ -1177,18 +1021,6 @@ Now:
       passes the boundary, and `yields × 1 ms ≤` the real time taken.
     - The virtual harness's `sleep_to` (`pacer_tests_wall_anchor.rs`) still
       has no spin at all.
-    - The SDK-clocked audio emitter's `pipeline_audio::sleep_until` (pacing
-      OFF only, not used on the box) still spins with no budget.
-  - **Legacy SDK-clocked path (pacing OFF):** `FrameSubmitter::submit_nv12`
-    ticks its wall per submitted frame and stamps `floor(now + D(K_F))`, its
-    timeline reading put back on the fleet labels. Since #224 part 2 its
-    stamps follow a date step at once, like a camera-box sender's
-    (`CLOCK_REALTIME`): a backward step makes the video timecode jump back by
-    the step, once (before, a ~1.5 s hold gave ~45 consecutive frames at
-    30 fps the SAME timecode). Its wall ticks only per submitted frame, so
-    between songs it REJOINS the fleet after more than 10 s idle (see "A date
-    step relabels"). Pacing is ON on the box (owner: it must stay ON), so
-    this applies only to the legacy path.
   - **Test-harness gotcha:** `VirtualClock`'s preempted read places `m1` BEFORE
     a wall read the test made at the same virtual `t`. A backward hold at a WIDE
     bracket's midpoint then reads up to width/2 below that earlier read. It is
@@ -1341,8 +1173,8 @@ whatever the state:
   is the tail. The receiver therefore gets exactly one audio block per video
   boundary into the idle fill.
   - Removed with this: the old audio-only tail (`SharedHandoff` `eos_tail` and
-    `FrameSubmitter::submit_audio_tail`). Kept with it, it gave n+1 blocks per
-    n boundaries at every song end.
+    `submit_audio_tail`). Kept with it, it gave n+1 blocks per n boundaries at
+    every song end.
   - A new map (`anchor`, lag re-anchor → `AvAlign::realign`) drops a held
     tail. With a Play already queued, the tail boundary is still served first,
     so nothing is lost; a stale tail is never replayed at a later pause.
@@ -1355,23 +1187,21 @@ whatever the state:
     counters are unchanged.
 - **The idle fill uses the playing path's submit thread.**
   `pipeline_paced_idle::run_idle_wait` attaches a `PacedFeed` to the
-  pipeline's paced submit thread and emits through its `HandoffSink`, the same
+  pipeline's paced output and emits through its `HandoffSink`, the same
   shape as `decode_and_send_paced` (see "The paced output services every
   boundary between scopes" below). The heartbeat goes through
-  `emit_heartbeat_paced`. The black is `FrameSubmitter::standby_black_nv12`,
+  `emit_heartbeat_paced`. The black is `PipelineOutput::standby_black_nv12`,
   built once per pipeline.
-- **No sync `send_video` and no BGRA on the paced path.** `run_loop_windows`
-  calls `FrameSubmitter::send_standby_black`: the legacy SYNTHESIZE BGRA when
-  SDK-clocked, a no-op when paced. The paced outer loop polls
-  `pacer_sink::idle_poll(true)` = 0, so the idle fill starts on the very next
-  boundary after start, a song end or a stop. The old 5 s `recv_timeout` left
-  the paced grid empty for up to 5 s.
-- **The SDK-clocked path is unchanged:** BGRA at the same sites, the 5 s poll,
-  and its own wall-clock audio emitter.
+- **No sync `send_video` and no BGRA.** The outer loop of `run_loop_windows`
+  polls its commands without a wait (`try_recv`), so the idle fill starts on
+  the very next boundary after start, a song end or a stop. (#221 lane 3
+  deleted `idle_poll`, the SDK-clocked 5 s poll and its SYNTHESIZE BGRA
+  standby.)
 
 Tests:
 
-- `pacer_tests_standby.rs`:
+- `pacer_tests_standby.rs` (over `FrameSubmitter` + `MockNdiBackend`, the
+  real-wire rig):
   - idle, paused and playing boundaries produce the identical `MockNdiBackend`
     `send_audio spc=1600` → `send_video_async NV12` pair;
   - a whole paced lifetime has no sync send and no BGRA, with stamps b(1)…b(10)
@@ -1382,8 +1212,7 @@ Tests:
   - a song end sends its EOS tail as the next standby block: 6 boundaries →
     6 blocks. With nothing buffered nothing is held, and a new song drops a
     held tail.
-- `submitter_tests_standby.rs`: `send_standby_black` for both paths, and the
-  cached NV12 black.
+- `submitter_tests_standby.rs`: `SP-program`'s cached NV12 black.
 - `pacer_tests_preroll.rs`:
   - a slow decoder open is filled with standby pairs (b(1)…b(9) contiguous,
     the song from the boundary after readiness);
@@ -1445,8 +1274,8 @@ Now:
   - a Pause queued during the pre-roll;
   - an empty file or a first-frame decode error.
 
-  A pacer that never ran a pre-roll (the SDK-clocked path, bare unit tests)
-  still starves silently.
+  A pacer that never ran a pre-roll (bare unit tests) still starves
+  silently.
 - **A failed open ends the pre-roll at once:** stop + join the submit thread,
   then `DecodeResult::Error`.
 - **Commands are held.** Commands queued during the pre-roll wait for the emit
@@ -1483,22 +1312,17 @@ submit thread, which coalesced away a stamp — camera-box's `stamp_gap`.
 **The rule.** A paced pipeline has ONE submit thread for its whole life
 (`paced_output.rs::PacedOutput`), never one per song or idle stretch:
 
-- **Lifetime.** `FrameSubmitter::paced_handoff` (`submitter_paced.rs`) spawns
-  it on the first paced scope and returns the same `Arc<SharedHandoff>` after
-  that. `pipeline.rs` owns the submitter by value (and is at the 1000-line
-  cap), so the thread cannot borrow it; it owns a twin `FrameSubmitter` built
-  on `NdiSender::twin()` — same backend + handle, whose `Drop` flushes but
-  never `send_destroy`s. The handle is the FIRST field of `FrameSubmitter`, so
-  it drops first: stop → drain the queue → flush → join, and only then does
-  the owning sender destroy the NDI instance. Only the twin sends async video
-  on the paced path (the owner's `send_standby_black` is a no-op there). The
-  owner's `flush()` on a pipeline Shutdown may run while the twin is still
-  sending: safe — the per-handle lock serialises the calls, the flush only
-  releases the SDK's pointer early, and the twin still holds its holdover.
+- **Lifetime.** `PipelineOutput::handoff` (`paced_output.rs`, owned by the
+  pipeline thread) spawns it on the first paced scope and returns the same
+  `Arc<SharedHandoff>` after that; dropping the `PipelineOutput` stops it
+  (drain the queue) and joins it. Since #221 lane 3 the consumer delivers to
+  a `BoundaryOut` (the program bus), so there is no NDI sender, twin or
+  flush on the pipeline side any more.
 - **A dead thread is respawned by the next scope.** The thread only exits on
-  stop, so a finished one panicked: `paced_handoff` (called at every scope
-  start) joins it, logs ERROR `paced submit thread is gone — respawning it`
-  (the join logs `paced submit thread panicked`), and spawns a fresh one. A
+  stop, so a finished one panicked: `PipelineOutput::handoff` (called at
+  every scope start) joins it, logs ERROR `paced output thread is gone —
+  respawning it` (the join logs `paced output thread panicked`), and spawns a
+  fresh one. A
   dead submit side costs at most the rest of one scope (the old per-scope
   `thread::scope` re-raised the panic at the song's end — also dark until
   then, and it took the pipeline thread down).
@@ -1572,11 +1396,11 @@ and idle → play all give stamps with Δ = exactly one slot, the fills holding
 the last picture (same buffer) + silence stamped on the boundary and
 `song_change_unserviced_slots = 0`; plus the > 8-slot resync count, the
 attached pacer owning the grid, stale jobs, stop draining the queue, the fill's
-audio layout, connection polling, the live thread filling on its own, the
-spawn-once + drop order, and a gone thread respawned by the next scope. The
-harness's `sends()` leaves out the consumer's `send_get_no_connections` polls
-(it polls on its FIRST submit, then every 30th). `paced_grid_tests.rs` pins
-every comparison of the pure grid.
+audio layout, the live thread filling on its own, the spawn-once + drop
+order, and a gone thread respawned by the next scope; the consumer delivers
+to a `Recorder` (`BoundaryOut`), and `paced_output_tests_bus.rs` delivers to
+a real `ProgramBus` (#221 lane 3). `paced_grid_tests.rs` pins every
+comparison of the pure grid.
 
 **Box acceptance** (#148 A/V series): across the E2E scene cuts the
 `ndi: genlock` line reads `song_change_unserviced_slots=0`, and camera-box
@@ -1605,8 +1429,7 @@ burst after a stall (or, before #224 part 2, a date step) used to stamp every bl
 emit instant, so cg OBS (timecode audio mode) placed the burst on top of
 itself — `audio_place_err_ms` / the placement sawtooth on camera-box issue
 1381. VBAN has no timecode (packets are scheduled from the pair's video
-stamp). The legacy SDK-clocked `submit_nv12` (pacing OFF) still stamps its
-per-frame audio at submission. Tests pin it: `pacer_tests.rs` (the mixed
+stamp). Tests pin it: `pacer_tests.rs` (the mixed
 catch-up/resync run, with the never-future-dated check read from the
 settable wall at each emit), `pacer_tests_lane4.rs`, `pacer_tests_standby.rs`,
 `program_output_tests.rs`, `program_bus_tests.rs`, `ndi_input_tests*.rs`.
@@ -1697,13 +1520,10 @@ submit consumer, `SP-program`, NDI input, VBAN).
   them equal (every paced path). D rounds up so an on-grid b
   lands EXACTLY K slots later; N rounds down, so a stamp is never
   future-dated: a pacer wall that has not followed yet stamps at most r
-  stale (it used to be S stale). The legacy `submit_nv12` puts its own
-  timeline reading back with `+ D(K_F)`. The SDK-clocked audio emitter
-  (#192, pacing OFF) is a wire edge too: its grid runs on its wall's
-  timeline, and `emit_one_block` sends `label(t) = t + D(K_F)`, unfloored
-  (its own grid; review round 1: a pipeline built after a step stamped its
-  audio D(K) off its video). The burn overlay's `gen_ts` is the wire stamp.
-  `SubmitJob`, the bus keys and VBAN's `due` stay internal.
+  stale (it used to be S stale). Since #221 lane 3 this is `SP-program`'s
+  submitter, the ONLY wire edge (the per-playlist senders, the legacy
+  `submit_nv12` and the #192 emitter's own labels are deleted). `SubmitJob`,
+  the bus keys and VBAN's `due` stay internal.
 - **What each output does** (pinned in virtual time):
   - pacer: the boundary after the step comes r early (ONE interval shrinks
     by r), content one frame per boundary, internal stamps contiguous, the
@@ -1744,7 +1564,6 @@ submit consumer, `SP-program`, NDI input, VBAN).
   `wallclock_tests_regrid.rs` (walls on one registry: the 1.3 ms residue,
   the join race, the 20 min idle rejoin at ±30 ppm with and without a step
   in the gap, the exact 10 s threshold, the line through a hold),
-  `audio_emitter_tests_regrid.rs` (the emitter's labels),
   `wallclock_tests_probe.rs` / `_confirm*.rs` / `_anchor.rs` (the relabel
   at the wall), `submitter_tests_regrid.rs` (floored, never above the
   virtual fleet clock, for a followed and a lagging wall; audio = video; a

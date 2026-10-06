@@ -10,6 +10,12 @@
 //! Because the median submit (25 ms) is below the 33.3 ms grid slot, the submit
 //! thread has spare throughput to drain the p99 spikes out of a shallow queue.
 //!
+//! **#221 lane 3:** a playlist has no NDI sender of its own any more, so the
+//! consumer's "submit" is the hand-over of the boundary to the program bus
+//! (`paced_output::offer_to_bus`); the NDI submit is `SP-program`'s
+//! (`program_output.rs`). The lateness and cost below are measured on that
+//! delivery: the same grid, the same 2 ms floor.
+//!
 //! This module is the PURE, cross-platform, Linux-tested + mutation-scored
 //! DECISION layer — the bound + coalesce policy (`handoff_policy`), the honest
 //! submit-side lateness math (measured where the frame LEAVES the box, not at the
@@ -43,19 +49,20 @@ pub const SUBMIT_LATE_THRESHOLD_100NS: i64 = 20_000;
 const SUBMIT_COST_RING: usize = 256;
 
 /// One stamped frame handed from the emit thread to the submit thread. Carries
-/// everything the submit thread needs to perform the audio-before-video NDI
-/// submit at the pre-computed genlock timecodes, plus the `stamp_boundary_100ns`
-/// (== `video_tc_100ns`) that the honest submit-side lateness is measured
-/// against. `Clone` is an `Arc` bump of the frame + the audio block (the #209
-/// program bus takes such a copy of an owned boundary).
+/// everything a boundary is (the picture, its audio block, the pre-computed
+/// genlock timecodes), plus the `stamp_boundary_100ns` (== `video_tc_100ns`)
+/// that the honest submit-side lateness is measured against. The consumer
+/// delivers it to the program bus, which forwards it to `SP-program`'s
+/// audio-before-video NDI submit (#221 lane 3). `Clone` is an `Arc` bump of
+/// the frame + the audio block.
 #[derive(Clone)]
 pub struct SubmitJob {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
     /// The NV12 frame, shared by `Arc` — Arc-cloned from the paced frame at the
-    /// handoff (no pixel copy, #203 2b) and moved into the submitter's async
-    /// double-buffer holdover on the submit thread.
+    /// handoff (no pixel copy, #203 2b), moved on to the program bus and, when
+    /// the source owns the boundary, into `SP-program`'s async holdover.
     pub video: SharedFrame,
     /// The boundary's audio chunk (0 or 1 frame of exactly
     /// `samples_per_boundary` samples, #148).
@@ -112,8 +119,8 @@ pub enum HandoffOutcome {
     /// The queue was at its bound (the submit thread is ≥ bound slots behind), so
     /// the OLDEST still-unsent job was DROPPED and this one enqueued — the
     /// freshest stamp is closest to live (`handoff_policy`). `depth` stays at the
-    /// bound. The dropped job never reached the SDK, so it is memory-safe to drop
-    /// (only the submit thread's own last-submitted buffer is retained by NDI).
+    /// bound. The dropped job never left the pipeline, so it is memory-safe to
+    /// drop (the frame is shared by `Arc`).
     Coalesced { depth: usize },
 }
 
@@ -182,8 +189,8 @@ impl<T> SubmitQueue<T> {
 }
 
 /// Honest submit-side lateness: how long after its stamp boundary the frame
-/// BEGAN leaving the box (read on the submit thread right before the SDK send),
-/// floored at 0. This is the queueing + backpressure delay the fix drives toward
+/// BEGAN its delivery (read on the consumer thread right before it hands the
+/// boundary to the program bus, #221 lane 3), floored at 0. This is the queueing + backpressure delay the fix drives toward
 /// zero — NOT the handoff instant (#168).
 pub fn submit_late_100ns(stamp_boundary_100ns: i64, submit_start_100ns: i64) -> i64 {
     (submit_start_100ns - stamp_boundary_100ns).max(0)
@@ -195,19 +202,20 @@ pub fn is_submit_late(late_100ns: i64) -> bool {
     late_100ns > SUBMIT_LATE_THRESHOLD_100NS
 }
 
-/// Submit-thread telemetry, measured where the frame leaves the box (#168). The
+/// Submit-thread telemetry, measured where the frame leaves the pipeline (#168;
+/// since #221 lane 3 its delivery to the program bus). The
 /// pacer keeps the SCHEDULING counters (seq/repeats/resyncs/relatches/lag/prep);
 /// these HONEST output-side counters replace the pacer's now-meaningless
 /// emit-side late/cost in the reported `PacingStats` (see [`merge_pacing_stats`]).
 #[derive(Clone, Debug)]
 pub struct SubmitCounters {
-    /// Frames actually submitted to the SDK.
+    /// Frames actually delivered (to the program bus, #221 lane 3).
     pub submitted: u64,
-    /// Submitted frames that began leaving the box > 2 ms past their stamp.
+    /// Delivered frames whose delivery began > 2 ms past their stamp.
     pub late_frames: u64,
     /// Worst submit-side lateness observed (µs).
     pub max_late_us: u64,
-    /// Jobs dropped by the handoff coalesce (never reached the SDK).
+    /// Jobs dropped by the handoff coalesce (never delivered).
     pub dropped: u64,
     /// Wall clock (100 ns) of the last real submit; 0 = none yet.
     pub last_submit_100ns: i64,
@@ -217,7 +225,7 @@ pub struct SubmitCounters {
     /// #147: grid slots nobody serviced across a song change / stop / idle
     /// transition. Must read 0.
     pub song_change_unserviced_slots: u64,
-    // per-frame SDK submit cost ring (µs), for `submit_p99_us`.
+    // per-frame delivery cost ring (µs), for `submit_p99_us`.
     cost_ring: [u64; SUBMIT_COST_RING],
     cost_idx: usize,
     cost_len: usize,
@@ -246,8 +254,8 @@ impl SubmitCounters {
     }
 
     /// Record one submitted frame: `late_100ns` = the honest stamp→submit-start
-    /// lateness, `cost_100ns` = the SDK submit cost (submit-start → submit-done),
-    /// `submit_done_100ns` = the wall clock after the send (for `last_submit`).
+    /// lateness, `cost_100ns` = the delivery cost (submit-start → submit-done),
+    /// `submit_done_100ns` = the wall clock after it (for `last_submit`).
     pub fn record_submit(&mut self, late_100ns: i64, cost_100ns: i64, submit_done_100ns: i64) {
         self.submitted += 1;
         if is_submit_late(late_100ns) {
@@ -266,7 +274,7 @@ impl SubmitCounters {
         }
     }
 
-    /// Record one handoff-coalesce drop (a job dropped before reaching the SDK).
+    /// Record one handoff-coalesce drop (a job dropped before its delivery).
     pub fn record_drop(&mut self) {
         self.dropped += 1;
     }
@@ -281,7 +289,7 @@ impl SubmitCounters {
         v[idx]
     }
 
-    /// 99th-percentile SDK submit cost (µs) — the honest "can the submit keep
+    /// 99th-percentile delivery cost (µs) — the honest "can the consumer keep
     /// up?" gauge, `>= interval` (≈ 33_333 µs @30 fps) meaning it cannot. This is
     /// what `iter_p99_us` reports on the paced path once the decode + submit are
     /// both off the emit thread.
@@ -290,54 +298,21 @@ impl SubmitCounters {
     }
 }
 
-/// The paced submit-call cost gauge (µs) — the worst `send_video_async` call
-/// `(max, p99)` drained from the submit thread's `FrameSubmitter.submit_times`
-/// (round 3's `SubmitHist`, the SAME instance/drain — no second histogram) over
-/// one heartbeat window (#168 round 2). The submit thread folds it worst-of on
-/// its ~1 s connection-poll cadence and the heartbeat drains-and-resets it, then
-/// it is carried into `PacingStats` + the `pipeline: loop-stats` line so a
-/// pacing-ON box test can finally name the per-frame SDK submit cost on the
-/// paced path (box test 6 showed 25 ms median / 75 ms p99 per 1440p frame).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PacedSubmitStats {
-    pub submit_call_us_max: u64,
-    pub submit_call_us_p99: u64,
-}
-
-/// Fold one freshly drained `(max, p99)` sub-window (from `SubmitHist::drain`)
-/// into the running per-heartbeat gauge, keeping the WORST of each via `.max()`
-/// (the heartbeat drains-and-resets `prev`, so the window is one heartbeat — a
-/// spike is never diluted by a quiet sub-window). Pure + mutation-tested; a
-/// bounded `.max()` fold, never a running `while`.
-pub fn paced_submit_snapshot(prev: PacedSubmitStats, max: u64, p99: u64) -> PacedSubmitStats {
-    PacedSubmitStats {
-        submit_call_us_max: prev.submit_call_us_max.max(max),
-        submit_call_us_p99: prev.submit_call_us_p99.max(p99),
-    }
-}
-
-/// Merge the pacer's SCHEDULING counters with the submit thread's HONEST
+/// Merge the pacer's SCHEDULING counters with the paced output's HONEST
 /// output-side counters into ONE `PacingStats` for the health doc (#168). The
-/// emit thread no longer submits, so `late_frames` / `max_late_us` / `iter_p99_us`
-/// come from the submit thread and `dropped` sums both drop kinds
-/// (decode-decimation + handoff-coalesce); the `submit_call_us_*` gauge (#168
-/// round 2) is the paced submit thread's drained `FrameSubmitter.submit_times`;
-/// the #147 `song_change_unserviced_slots` / `consumer_fill_pairs` are the
+/// emit thread does not deliver, so `late_frames` / `max_late_us` /
+/// `iter_p99_us` come from the output's consumer and `dropped` sums both drop
+/// kinds (decode-decimation + handoff-coalesce); the #147
+/// `song_change_unserviced_slots` / `consumer_fill_pairs` are the
 /// pipeline-lifetime consumer's; `seq` / `jitter` / `repeats` / `resyncs` /
 /// `relatches` / `lag_slots` / `prep_p99_us` / `enabled` stay the pacer's.
-pub fn merge_pacing_stats(
-    pacer: PacingStats,
-    submit: &SubmitCounters,
-    paced_submit: PacedSubmitStats,
-) -> PacingStats {
+pub fn merge_pacing_stats(pacer: PacingStats, submit: &SubmitCounters) -> PacingStats {
     let dropped = pacer.dropped + submit.dropped;
     PacingStats {
         late_frames: submit.late_frames,
         max_late_us: submit.max_late_us,
         iter_p99_us: submit.submit_p99_us(),
         dropped,
-        submit_call_us_max: paced_submit.submit_call_us_max,
-        submit_call_us_p99: paced_submit.submit_call_us_p99,
         song_change_unserviced_slots: submit.song_change_unserviced_slots,
         consumer_fill_pairs: submit.consumer_fill_pairs,
         ..pacer

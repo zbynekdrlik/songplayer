@@ -1,11 +1,8 @@
 //! Unit tests of the OBS WebSocket client (`obs/mod.rs`), split out for the
 //! 1000-line cap (#213). Wired via `#[cfg(test)] #[path = "mod_tests.rs"] mod tests;`.
 
-use std::collections::HashMap;
-
 use base64::Engine;
 use sha2::{Digest, Sha256};
-use tokio::sync::RwLock;
 
 use super::*;
 
@@ -135,66 +132,6 @@ fn test_parse_hello_without_auth() {
 
     assert_eq!(hello["op"].as_u64(), Some(0));
     assert!(hello["d"]["authentication"].as_object().is_none());
-}
-
-// ---- apply_rebuild_result: preserve-on-None regression guard ----
-//
-// These tests encode the fix for the 2026-04-19 event outage: the
-// NDI source map was built at startup, then a later rebuild returned
-// empty (OBS `GetInputList` responded with nothing), and the old
-// code overwrote the map. The scene detection that then read it is
-// deleted (#221 L6); the #196 self-check reads the map now.
-
-#[tokio::test]
-async fn apply_rebuild_result_writes_when_rebuild_succeeds() {
-    let lock = RwLock::new(HashMap::new());
-    let mut new_map = HashMap::new();
-    new_map.insert("sp-fast_video".into(), 7i64);
-
-    apply_rebuild_result(&lock, Some(new_map.clone())).await;
-
-    let guard = lock.read().await;
-    assert_eq!(*guard, new_map);
-}
-
-#[tokio::test]
-async fn apply_rebuild_result_preserves_existing_map_when_rebuild_returns_none() {
-    // Seed the map with production-shaped data — what startup built.
-    let mut seed = HashMap::new();
-    seed.insert("sp-warmup_video".into(), 2i64);
-    seed.insert("sp-fast_video".into(), 7i64);
-    seed.insert("sp-worship_video".into(), 6i64);
-    let lock = RwLock::new(seed.clone());
-
-    // Simulate a transient OBS failure: rebuild returned None.
-    apply_rebuild_result(&lock, None).await;
-
-    let guard = lock.read().await;
-    assert_eq!(
-        *guard, seed,
-        "None result MUST preserve the previous map — overwriting \
-         with empty on query failure is what broke the 2026-04-19 \
-         event"
-    );
-}
-
-#[tokio::test]
-async fn apply_rebuild_result_replaces_map_with_empty_when_rebuild_legitimately_empty() {
-    // A Some(empty) is a real signal: DB truly has no active playlists
-    // or OBS truly has no NDI inputs. That SHOULD wipe the map.
-    // (Contrast with None, which means the query failed.)
-    let mut seed = HashMap::new();
-    seed.insert("sp-fast_video".into(), 7i64);
-    let lock = RwLock::new(seed);
-
-    apply_rebuild_result(&lock, Some(HashMap::new())).await;
-
-    let guard = lock.read().await;
-    assert!(
-        guard.is_empty(),
-        "a legitimate empty rebuild (user removed all inputs) MUST \
-         wipe the map so its reader sees current reality"
-    );
 }
 
 /// The dashboard (sp-ui Nastavenia) stores the OBS password under

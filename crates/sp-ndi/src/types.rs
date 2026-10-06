@@ -94,12 +94,12 @@ unsafe impl Sync for NDIlib_send_create_t {}
 // Source descriptor
 // ---------------------------------------------------------------------------
 
-/// Source descriptor returned by `NDIlib_send_get_source_name` (#196).
+/// Source descriptor: what the source finder lists, and what a receiver
+/// connects to (#212, the NDI input "OBS manuál").
 ///
 /// The NDI SDK declares `p_url_address` inside an anonymous union with the
 /// deprecated `p_ip_address`; both are a single `*const c_char`, so a single
-/// pointer field is layout-compatible with the union. We only read
-/// `p_url_address` — the `host:port` a DistroAV receiver reconnects to.
+/// pointer field is layout-compatible with the union.
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
@@ -117,24 +117,21 @@ unsafe impl Send for NDIlib_source_t {}
 unsafe impl Sync for NDIlib_source_t {}
 
 // ---------------------------------------------------------------------------
-// Source finder (#196)
+// Source finder (#212's source list)
 // ---------------------------------------------------------------------------
 
-/// Opaque handle returned by `NDIlib_find_create_v2` (#196). One finder
-/// discovers every NDI source on the network (and, with
-/// `show_local_sources = true`, this machine's own senders), so we can read the
-/// advertised `host:port` the sender-side `NDIlib_send_get_source_name` leaves
-/// empty for a local sender.
+/// Opaque handle returned by `NDIlib_find_create_v2`. One finder discovers
+/// every NDI source on the network (and, with `show_local_sources = true`,
+/// this machine's own senders).
 #[allow(non_camel_case_types)]
 pub enum NDIlib_find_instance_t {}
 
-/// Passed to `NDIlib_find_create_v2` to configure a source finder (#196).
+/// Passed to `NDIlib_find_create_v2` to configure a source finder.
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub struct NDIlib_find_create_t {
-    /// If true, sources on THIS machine are discovered too — we need our own
-    /// senders' URLs, so this is always `true`.
+    /// If true, sources on THIS machine are discovered too.
     pub show_local_sources: bool,
     /// Comma-separated group list, or null for the default group.
     pub p_groups: *const c_char,

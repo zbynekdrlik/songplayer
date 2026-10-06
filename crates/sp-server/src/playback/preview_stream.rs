@@ -3,8 +3,8 @@
 //!
 //! Sits next to the #15 JPEG [`PreviewTap`](crate::playback::preview::PreviewTap)
 //! (which stays for the card thumbnail): both are bundled into [`DecodeTaps`]
-//! and offered from the SAME decode seam in `pipeline::decode_and_send` and
-//! `pipeline_paced::run_decode_producer`. The stream tap turns each decoded
+//! and offered from the SAME decode seam, `pipeline_paced::run_decode_producer`
+//! (the only decode loop since #221 lane 3). The stream tap turns each decoded
 //! NV12 frame into a FIXED 640×360 letterboxed NV12 frame and each post-mix
 //! audio block into interleaved f32, hands both to a bounded channel, and — on
 //! the first WS viewer — spawns ONE bundled-`ffmpeg` child
@@ -165,22 +165,16 @@ pub fn to_stereo(samples: &[f32], channels: u32) -> Option<Vec<f32>> {
     }
 }
 
-/// The decode-seam A/V-sync lead (ms) for a pipeline's clocking path (#178
-/// round 2). On the SDK-clocked path (`genlock_pacing == false`, so the #192
-/// wall-clock emitter carries the audio) the decoder opens with a 1500 ms audio
-/// read-ahead, so at the decode seam the audio LEADS the video by that much; the
+/// The decode-seam A/V-sync lead (ms) (#178 round 2): the paced decoder reads
+/// `PACED_AUDIO_LEAD_MS` (250 ms) of audio ahead of each frame (#148 v4), so at
+/// the decode seam the audio LEADS the video by 250 − 40 = 210 ms, and the
 /// encoder's audio feeder re-syncs by HOLDING each block that long before
 /// writing it (#184 round G3, `preview_audio_hold::AudioHold` — round 3 folded
-/// it into a silence preroll, which parked the whole lead in the socket). The
-/// paced path has no emitter, but its decoder reads `PACED_AUDIO_LEAD_MS`
-/// (250 ms) ahead (#148 v4), so its seam audio leads by 250 − 40 = 210 ms.
-pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
-    let decoder_lead_ms = if genlock_pacing {
-        crate::playback::pacer::PACED_AUDIO_LEAD_MS
-    } else {
-        crate::playback::pipeline::audio_emitter::decoder_tolerance_ms(true)
-    };
-    (decoder_lead_ms - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS) as u32
+/// it into a silence preroll, which parked the whole lead in the socket). #221
+/// lane 3 deleted the SDK-clocked path and its 1500 ms emitter read-ahead.
+pub fn decode_seam_lead_ms() -> u32 {
+    (crate::playback::pacer::PACED_AUDIO_LEAD_MS - sp_decoder::split_sync::DEFAULT_TOLERANCE_MS)
+        as u32
 }
 
 /// How many interleaved-stereo f32 samples of SILENCE the audio feeder prepends
@@ -189,7 +183,7 @@ pub fn lead_ms_for(genlock_pacing: bool) -> u32 {
 /// input had already been feeding when the audio input connected (feed-on-connect
 /// opens video first), capped at 5 s so a late-connecting audio input can never
 /// prepend an unbounded silence; `lead_ms` is the decode-seam A/V lead
-/// ([`lead_ms_for`]) that the SDK-clocked emitter's read-ahead introduces —
+/// ([`decode_seam_lead_ms`]) that the decoder's audio read-ahead introduces —
 /// since #184 round G3 the feeder passes 0 here and HOLDS the lead instead
 /// (`preview_audio_hold`), so the socket never carries it. At
 /// 48 kHz stereo each millisecond is `48 * 2` interleaved f32 samples. Replaces
@@ -268,8 +262,8 @@ pub fn block_tail_range(skip_frames: usize, block_samples: usize) -> std::ops::R
 /// ahead of the wall, skip its OLDEST frames so it ends
 /// [`ALIGN_TARGET_AHEAD_MS`] ahead (at most the whole block — a block that
 /// cannot reach the target is dropped entirely, never a negative write). The
-/// trimmed audio is lost from the PREVIEW only; the wall / NDI path never sees
-/// this code.
+/// trimmed audio is lost from the PREVIEW only; the paced output / program
+/// bus never sees this code.
 pub fn align_block(wall_frames: u64, written_frames: u64, block_frames: usize) -> AlignAction {
     let pad_frames = align_timeout(wall_frames, written_frames);
     let block_end = written_frames + pad_frames as u64 + block_frames as u64;
@@ -331,9 +325,8 @@ impl UnwatchedEnd {
 /// child. Held behind an `Arc` by [`StreamTap`].
 pub struct StreamShared {
     label: String,
-    /// #178 A/V-sync lead (ms): how far the decode-seam audio LEADS the video on
-    /// this pipeline's clocking path (1500 on the SDK-clocked path from the #192
-    /// lookahead, 0 on the paced path). The encoder's audio feeder HOLDS each
+    /// #178 A/V-sync lead (ms): how far the decode-seam audio LEADS the video
+    /// ([`decode_seam_lead_ms`], 210). The encoder's audio feeder HOLDS each
     /// block this long (#184 round G3, `preview_audio_hold::AudioHold`) to bring
     /// preview A/V into sync (round 3 used a silence preroll; before it the
     /// box-unreliable `-itsoffset`).
@@ -715,8 +708,8 @@ pub struct DecodeTaps {
 
 impl DecodeTaps {
     /// Offer one decoded frame (video + its post-mix audio) to BOTH taps in one
-    /// call, before the NDI submit / audio-emitter push consumes them. Borrows
-    /// only — nothing is moved out of the frame.
+    /// call, before the pacer takes it (#221 lane 3: the paced output feeds
+    /// only the program bus). Borrows only — nothing is moved out of the frame.
     #[inline]
     pub fn offer_frame(
         &self,

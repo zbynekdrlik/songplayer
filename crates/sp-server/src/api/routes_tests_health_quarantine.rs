@@ -99,7 +99,6 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
         playlist_id: 11,
         ndi_name: "SP-test".to_string(),
         state: PlaybackStateLabel::Playing,
-        connections: 1,
         frames_submitted_total: 100,
         frames_submitted_last_5s: 30,
         observed_fps: 29.97,
@@ -115,9 +114,6 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
         // #149 Lane 1: flag-OFF (pacing disabled) reports UNLOCKED by contract.
         lock_state: LockState::Unlocked,
         lock_reason: "pacing disabled".to_string(),
-        burn_on: false,
-        recovery_step: None,
-        sender_url: None,
         transport: sp_core::playback::TransportState::Idle,
     });
     let resp = app(state)

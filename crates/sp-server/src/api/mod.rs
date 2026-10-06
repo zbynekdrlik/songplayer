@@ -15,7 +15,6 @@ pub mod program; // #209 program bus: GET /api/v1/program + POST /api/v1/program
 pub mod routes;
 pub mod routes_import; // #180 shared bare-URL import core
 pub mod routes_mode; // #225 unit 2: a playlist's mode — the row first, then the engine
-pub mod routes_ndi_recover;
 pub mod routes_seek; // #194 unified seek route
 pub mod routes_status; // #221 L4b: /api/v1/status's program fields from SongPlayer's own program
 pub mod stems;
@@ -154,20 +153,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/ndi/health",
             axum::routing::get(routes::get_ndi_health),
         )
-        .route(
-            "/api/v1/ndi/burn",
-            axum::routing::post(routes::set_ndi_burn),
-        )
         // #209: the program bus — SongPlayer's own NDI `SP-program` (master switcher).
         .route("/api/v1/program", axum::routing::get(program::get_program))
         .route(
             "/api/v1/program/cut",
             axum::routing::post(program::post_program_cut),
-        )
-        // #173: operator/verification one-shot dark-wall recovery rung.
-        .route(
-            "/api/v1/ndi/recover/{playlist_id}",
-            axum::routing::post(routes_ndi_recover::post_ndi_recover),
         )
         // Lyrics
         .route(

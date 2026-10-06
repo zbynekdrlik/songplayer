@@ -8,22 +8,19 @@
 //! - the remote-control facade's calls (`remote_call.rs`): the forwarded
 //!   getters and a manual press's `SetCurrentProgramScene`;
 //! - the title text (`SetTextSource`);
-//! - the #127/#173 receiver ladder (`NudgeNdiReceiver`) and the NDI source
-//!   map the #196 self-check reads;
 //! - cg OBS's raw events for the facade (`ObsEvent::Raw`: only its
 //!   `SceneListChanged` is passed on);
 //! - `ObsState`: connected + the #154 stream/record state.
+//!
+//! #221 lane 3 deleted the #127/#173 receiver ladder (`NudgeNdiReceiver`)
+//! and the NDI source map with the per-playlist NDI senders whose cg OBS
+//! inputs they served.
 
 pub mod dispatcher;
-pub mod ndi_discovery;
-pub mod ndi_recovery;
-pub mod ndi_recovery_io;
-pub mod ndi_remove;
 pub(crate) mod output_state;
 pub mod remote_call;
 pub mod text;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -40,34 +37,6 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, info, warn};
 
 use crate::obs::dispatcher::{DEFAULT_RESPONSE_TIMEOUT, Dispatcher, DispatcherError};
-use crate::obs::ndi_discovery::rebuild_ndi_source_map;
-
-/// Apply a rebuild result to the shared NDI source map.
-///
-/// Writes the new map only when `result` is `Some`. A `None` result means
-/// the rebuild could not be trusted (typically a transient OBS query
-/// failure) and the previous map — even if stale — is kept so its reader
-/// (the #196 self-check, `PlaybackEngine::output_has_obs_input`) keeps
-/// working until the next successful rebuild.
-///
-/// This is the bug that broke the 2026-04-19 event (when the map still fed
-/// the scene detection, deleted in #221 L6): the old code wrote `new_map`
-/// unconditionally, so one failed `GetInputList` wiped the mapping.
-pub(crate) async fn apply_rebuild_result(
-    ndi_sources: &RwLock<HashMap<String, i64>>,
-    result: Option<HashMap<String, i64>>,
-) {
-    if let Some(new_map) = result {
-        let mut guard = ndi_sources.write().await;
-        *guard = new_map;
-    } else {
-        warn!(
-            "apply_rebuild_result: rebuild returned None, preserving \
-             previous NDI source map (size = {}) rather than wiping it",
-            ndi_sources.read().await.len()
-        );
-    }
-}
 
 /// Shared OBS connection state. #221 L6: nothing of cg OBS's program (its
 /// scene, the playlists it shows, its transition) is tracked any more.
@@ -125,10 +94,6 @@ pub async fn load_obs_config(pool: &SqlitePool) -> Result<Option<ObsConfig>, sql
     }))
 }
 
-/// Mapping of cg OBS's NDI input name to playlist ID (read by the #196
-/// self-check, `PlaybackEngine::output_has_obs_input`).
-pub type NdiSourceMap = Arc<RwLock<HashMap<String, i64>>>;
-
 /// Shared writer for the OBS WebSocket — wrapped in an Arc + Mutex so
 /// helper tasks spawned from the main loop can take turns sending
 /// requests without serialising on the response-await.
@@ -152,16 +117,6 @@ pub enum ObsCommand {
     SetTextSource {
         source_name: String,
         text: String,
-    },
-    /// #127 / #173: run one rung of the dark-wall recovery ladder for a stranded
-    /// NDI receiver. The handler finds the NDI input advertising `ndi_name` (the
-    /// bare stream, e.g. `"SP-slow"`) and executes `step` — clear+restore (rung
-    /// 0), toggle the scene item (rung 1), or remove+recreate the input (rung 2).
-    /// Receiver-side over the healthy OBS WebSocket — never a per-sender
-    /// `RecreateSender` (CLAUDE.md "Disabled subsystems", #60).
-    NudgeNdiReceiver {
-        ndi_name: String,
-        step: crate::obs::ndi_recovery::RecoveryStep,
     },
     /// #213: a call of the remote-control facade (`crate::remote`) to cg OBS —
     /// a forwarded obs-websocket request, run on this ONE connection by its ONE
@@ -203,17 +158,10 @@ impl ObsClient {
     /// Spawn the OBS WebSocket connection loop as a background task.
     ///
     /// Returns a client handle for sending commands and reading state.
-    ///
-    /// `pool` is used to rebuild the NDI source map from active playlists
-    /// after each (re)connect. `rebuild_rx` delivers explicit rebuild
-    /// requests — e.g. from playlist CRUD handlers.
     pub fn spawn(
         config: ObsConfig,
-        pool: SqlitePool,
-        ndi_sources: NdiSourceMap,
         shared_state: Arc<RwLock<ObsState>>,
         event_tx: broadcast::Sender<ObsEvent>,
-        mut rebuild_rx: broadcast::Receiver<()>,
         mut shutdown: broadcast::Receiver<()>,
     ) -> Self {
         let state = shared_state;
@@ -239,12 +187,9 @@ impl ObsClient {
                     }
                     result = connect_and_run(
                         &config,
-                        &pool,
-                        &ndi_sources,
                         &loop_state,
                         &loop_event_tx,
                         &mut cmd_rx,
-                        &mut rebuild_rx,
                     ) => {
                         // #80: every disconnect, including a clean
                         // server-side close, MUST fall through to the
@@ -399,12 +344,9 @@ async fn run_reader_task(
 /// Main connection loop: connect, authenticate, handle messages.
 async fn connect_and_run(
     config: &ObsConfig,
-    pool: &SqlitePool,
-    ndi_sources: &NdiSourceMap,
     state: &Arc<RwLock<ObsState>>,
     event_tx: &broadcast::Sender<ObsEvent>,
     cmd_rx: &mut mpsc::Receiver<ObsCommand>,
-    rebuild_rx: &mut broadcast::Receiver<()>,
 ) -> Result<(), anyhow::Error> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(&config.url).await?;
     let (mut write, mut read) = ws_stream.split();
@@ -478,32 +420,12 @@ async fn connect_and_run(
     let (remote_tx, forwarder) = remote_call::forwarder(Arc::clone(&write), dispatcher.clone());
     spawn_helper(&mut spawned_tasks, forwarder);
 
-    // Step 5: initial NDI source map rebuild (same retry-on-empty
-    // policy as before — the rebuild now goes via the dispatcher).
-    for attempt in 1..=5 {
-        let result = rebuild_ndi_source_map(&write, &dispatcher, pool).await;
-        let is_empty = result.as_ref().map(|m| m.is_empty()).unwrap_or(true);
-        apply_rebuild_result(ndi_sources, result).await;
-        if !is_empty {
-            break;
-        }
-        if attempt < 5 {
-            warn!("NDI source map empty after rebuild (attempt {attempt}/5); retrying in 2s");
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        } else {
-            warn!(
-                "NDI source map still empty after 5 rebuild attempts — kept \
-                 empty until the next external rebuild signal"
-            );
-        }
-    }
-
-    // Step 6 (#154): seed OBS stream/record state so the idle gate knows about
+    // Step 5 (#154): seed OBS stream/record state so the idle gate knows about
     // an output already active at connect time (no StreamStateChanged/
     // RecordStateChanged fires for it). Best-effort; see `output_state`.
     output_state::seed_output_state(&write, &dispatcher, state).await;
 
-    // Step 7: main loop — thin router: each arm spawns a task (a Remote
+    // Step 6: main loop — thin router: each arm spawns a task (a Remote
     // call goes to the connection's forwarder) to do the work. The write
     // half is shared via Arc<Mutex<>> so helper tasks lock it briefly for
     // the send and release before awaiting the op=7 response, preventing
@@ -580,58 +502,12 @@ async fn connect_and_run(
                             }
                         });
                     }
-                    ObsCommand::NudgeNdiReceiver { ndi_name, step } => {
-                        // #127 / #173: SongPlayer detected a stranded DistroAV
-                        // receiver (dark wall while Playing). Execute the chosen
-                        // ladder rung over this healthy OBS WebSocket. Spawned so
-                        // the main loop does not block on the OBS round-trips.
-                        let write = std::sync::Arc::clone(&write);
-                        let dispatcher = dispatcher.clone();
-                        spawn_helper(&mut spawned_tasks, async move {
-                            crate::obs::ndi_recovery_io::execute(
-                                &write,
-                                &dispatcher,
-                                &ndi_name,
-                                step,
-                            )
-                            .await;
-                        });
-                    }
                     ObsCommand::Remote(call) => {
                         // #213/#221: to this connection's forwarder, in order.
                         if remote_tx.send(call).is_err() {
                             warn!("remote: the forwarder of this OBS connection is gone — call dropped");
                         }
                     }
-                }
-            }
-            rebuild_result = rebuild_rx.recv() => {
-                let should_rebuild = match rebuild_result {
-                    Ok(()) => {
-                        debug!("received rebuild signal, refreshing NDI source map");
-                        true
-                    }
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        warn!(
-                            "rebuild signal channel lagged by {n} messages, \
-                             refreshing NDI source map once"
-                        );
-                        true
-                    }
-                    Err(broadcast::error::RecvError::Closed) => false,
-                };
-                if should_rebuild {
-                    let write = std::sync::Arc::clone(&write);
-                    let dispatcher = dispatcher.clone();
-                    let ndi_sources = std::sync::Arc::clone(ndi_sources);
-                    let pool = pool.clone();
-                    spawn_helper(&mut spawned_tasks, async move {
-                        apply_rebuild_result(
-                            &ndi_sources,
-                            rebuild_ndi_source_map(&write, &dispatcher, &pool).await,
-                        )
-                        .await;
-                    });
                 }
             }
         }
@@ -653,7 +529,7 @@ async fn connect_and_run(
 /// Spawn one of the connection's helper tasks into `tasks`, first reaping the
 /// finished ones (review round 4): a `JoinSet` keeps a finished task until it
 /// is joined, and the connection loop never joins (one helper per title
-/// text, ladder rung and rebuild, for the life of the connection). A helper
+/// text, for the life of the connection). A helper
 /// that panicked is logged here.
 fn spawn_helper(
     tasks: &mut JoinSet<()>,

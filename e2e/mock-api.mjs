@@ -770,8 +770,8 @@ app.get("/api/v1/resolume/health", (_req, res) => {
 // states via `POST /__mock/ndi-health`.
 //
 // Default fixture exercises the three badges at once:
-//   - SP-worship   → LOCKED   (live, receiver present, clock ok)
-//   - SP-background → DEGRADED (live, "no receiver")
+//   - SP-worship   → LOCKED   (live, clock ok)
+//   - SP-background → DEGRADED (live, "resync in 60 s")
 //   - SP-live       → UNLOCKED (Idle → non-live, "pacing disabled")
 // The global summary counts only LIVE outputs, so it resolves to
 // `DEGRADED — SP-background` (the non-live UNLOCKED SP-live is ignored).
@@ -782,7 +782,6 @@ let ndiHealth = [
     state: "Playing",
     // #201 round 2: the raw transport the API now exposes (default from state).
     transport: "Playing",
-    connections: 2,
     // #168 r6b: decoder source fps, additive; the UI ignores it (30-fps fixture).
     source_fps: 30,
     lock_state: "LOCKED",
@@ -804,17 +803,16 @@ let ndiHealth = [
     playlist_id: 2,
     state: "Playing",
     transport: "Playing",
-    connections: 0,
     source_fps: 30,
     lock_state: "DEGRADED",
-    lock_reason: "no receiver",
+    lock_reason: "resync in 60 s",
     clock: { is_locked: true, mode: "LOCK", offset_ns: 950, clock_ok: true },
     pacing: {
       enabled: true,
       late_frames: 0,
       jitter_p99_us: 55,
       repeats: 0,
-      resyncs: 0,
+      resyncs: 1,
       lag_slots: 0,
       av_align_err_ms: -0.6,
     },
@@ -825,7 +823,6 @@ let ndiHealth = [
     playlist_id: 184,
     state: "Idle",
     transport: "Idle",
-    connections: 0,
     source_fps: 30,
     lock_state: "UNLOCKED",
     lock_reason: "pacing disabled",

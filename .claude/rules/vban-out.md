@@ -106,8 +106,9 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
 - The thread is an MMCSS "Pro Audio" thread at `AVRT_PRIORITY_HIGH` for its
   whole life (#210 part 2, `mmcss::join_pro_audio`; below), with the 1 ms
   multimedia timer. When MMCSS refuses it, it falls back to
-  `THREAD_PRIORITY_TIME_CRITICAL` (`pipeline_audio::raise_thread_priority`,
-  shared with the NDI audio emitter and the NDI input).
+  `THREAD_PRIORITY_TIME_CRITICAL` (`mmcss::raise_thread_priority`, shared
+  with the NDI input; #221 lane 3 moved it out of the deleted
+  `pipeline_audio.rs`).
 - Clock: its own `WallClock`, ticked through `program_output::BoundaryTicker`
   once per boundary passed (`WallVbanClock::slewing`; the NDI input uses
   `WallVbanClock::new`, which follows its wall). `run_vban_loop` reads the clock on

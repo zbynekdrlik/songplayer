@@ -128,7 +128,8 @@ shifts layout.
 
 A per-card status badge that renders the same non-actionable value on every card
 (e.g. the genlock `LockBadge` showing '● UNLOCKED — pacing disabled' on all 9
-cards while `genlock_pacing` is OFF) reads as N errors, not one disabled feature.
+cards while pacing was off — the `genlock_pacing` switch, deleted by #221 lane
+3) reads as N errors, not one disabled feature.
 Gate it: render nothing when the state is a global no-op (`pacing.enabled ==
 false`), show a per-card badge only where it is actionable (Playing/Paused
 outputs), and fold the whole-box status into ONE header summary (#164,
