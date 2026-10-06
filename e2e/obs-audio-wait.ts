@@ -184,6 +184,9 @@ export interface AudioWaitReport {
   lastPeaksDbfs: number[] | null;
   /** The longest run above the floor seen. */
   longestStreakMs: number;
+  /** The run above the floor still open when the wait ended (its last event
+   *  within the gap bound of the end), in ms; null or absent when none was. */
+  openRunMs?: number | null;
 }
 
 export interface AudioWaitOptions extends StreakOptions {
@@ -224,6 +227,8 @@ export function describeAudioWait(report: AudioWaitReport): string {
  * floor and hold:
  * - no event at all;
  * - an input that was never active;
+ * - an active input still above the floor at the end, in a run shorter than
+ *   the hold: its audio began too close to the bound (a late start);
  * - an active input that rose above the floor but never held: audio with
  *   gaps, or the meter events stopped;
  * - an active input that never rose above the floor: DistroAV delivers it
@@ -248,7 +253,15 @@ export function explainAudioWait(
   }
   // camera-box's genlock audio pairing withholds packets from the MIX, after
   // the meter's tap, so it never silences or breaks this meter (review
-  // round 2): neither branch below names it.
+  // round 2): no branch below names it.
+  const openRunMs = report.openRunMs ?? null;
+  if (openRunMs !== null) {
+    return (
+      `The probe's audio was still above the floor when the bound hit (a run of ` +
+      `${Math.round(openRunMs)} ms): it began less than ${holdMs} ms before it, so ` +
+      `DistroAV's audio for the probe started late (that run was not interrupted).`
+    );
+  }
   if (report.loudestDbfs > floorDbfs) {
     return (
       `The probe's audio rose above the floor (loudest ${fmtDbfs(report.loudestDbfs)} dBFS) ` +
@@ -302,23 +315,33 @@ export function waitForInputAudio(
       loudestDbfs: -Infinity,
       lastPeaksDbfs: null,
       longestStreakMs: 0,
+      openRunMs: null,
     };
+    const maxGapMs = opts.maxGapMs ?? MAX_METER_GAP_MS;
     let streak = NO_STREAK;
     let done = false;
     let unsubscribe: (() => void) | null = null;
-    // The error is built AFTER `waitedMs` is set, so it can name it.
+    // The error is built AFTER `waitedMs` and `openRunMs` are set, so it can
+    // name them.
     const finish = (error: (() => Error) | null) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       unsubscribe?.();
-      report.waitedMs = now() - start;
+      const end = now();
+      report.waitedMs = end - start;
+      // A run is still open only if its last event is within the gap bound
+      // of the end; an older one stopped (the events did).
+      report.openRunMs =
+        streak.since !== null && streak.lastAt !== null && end - streak.lastAt <= maxGapMs
+          ? streak.lastAt - streak.since
+          : null;
       if (error) reject(error());
       else resolve(report);
     };
     const timer = setTimeout(() => {
       finish(() => {
-        const why = explainAudioWait(report, { floorDbfs, holdMs, maxGapMs: opts.maxGapMs });
+        const why = explainAudioWait(report, { floorDbfs, holdMs, maxGapMs });
         return new Error(
           `the audio of OBS input "${inputName}" did not flow (${condition}) within ` +
             `${timeoutMs} ms: ${describeAudioWait(report)}. ${why} (#221)`,
