@@ -75,24 +75,6 @@ pub async fn put_json<T: Serialize, R: DeserializeOwned>(
     resp.json::<R>().await.map_err(|e| e.to_string())
 }
 
-/// PATCH JSON to `path` and deserialise the response.
-#[allow(dead_code)]
-pub async fn patch_json<T: Serialize, R: DeserializeOwned>(
-    path: &str,
-    body: &T,
-) -> Result<R, String> {
-    let resp = Request::patch(path)
-        .json(body)
-        .map_err(|e| e.to_string())?
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.ok() {
-        return Err(format!("PATCH {} → {}", path, resp.status()));
-    }
-    resp.json::<R>().await.map_err(|e| e.to_string())
-}
-
 /// DELETE `path`.
 pub async fn delete(path: &str) -> Result<(), String> {
     let resp = Request::delete(path)
@@ -559,8 +541,8 @@ pub async fn patch_dub(video_id: i64, requested: bool) -> Result<(), String> {
 
 /// PATCH JSON to `path` and discard the response body. Mirror of
 /// `put_json_empty` / `post_json_empty` for handlers that reply `204 No
-/// Content`.
-async fn patch_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), String> {
+/// Content` (#229: the settings PATCH too).
+pub async fn patch_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), String> {
     let resp = Request::patch(path)
         .json(body)
         .map_err(|e| e.to_string())?
