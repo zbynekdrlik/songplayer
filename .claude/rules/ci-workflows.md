@@ -238,9 +238,15 @@ its own bypass (169ab83a, #221 dev.19, is logged "bypass" though its RED is
 fce7efcd), and airuleset's pre-push gate (`gates/pushbypass.py`) reads it in
 ANY commit of the pushed range as that commit's own bypass — logged to the
 owner's bypass audit (`no-test-skips.log`), retroactive declarations
-included (it has no own-vs-retro distinction). #221 dev.19's lane carries
-the shape in fce7efcd, 5ef970aa, 169ab83a and cc033a43: expect those audit
-entries when it is pushed; every fix there has its RED test.
+included (it has no own-vs-retro distinction), and it EXEMPTS that commit's
+touched files from the test gate; a marker in the pushed HEAD skips the whole
+push test gate (`gates/pushtest.py`). So a `chore(red-green)` declaration
+commit pushed as HEAD skips that gate for the push. #221 dev.19's lane
+carries the shape in four commits: 5ef970aa holds the one GENUINE retro
+declaration (for 044ba69a's spec glue, which has no mock-suite test);
+fce7efcd, 169ab83a and cc033a43 only QUOTE the syntax (their fixes have
+RED tests): expect four audit entries when it is pushed, three of them
+artifacts.
 Only the leading `fix(#N):` form is gated;
 scope-only subjects (`fix(stems): … (#14)`) are not. Run
 `bash scripts/check-red-green-order.sh origin/main..HEAD` before opening a

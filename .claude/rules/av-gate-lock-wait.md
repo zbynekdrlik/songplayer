@@ -125,10 +125,13 @@ lock, so a senderless probe line would read as a GO).
    `SP-program`, SongPlayer's only NDI sender). The gate logs every input of
    the line read before the attach and of the last line at the bound
    (`summarizeInputs`: connected, idle, locked, relocks + late holds; the
-   bound also says how long after the bind its last read started). They are
+   bound also says how long after the bind SongPlayer saw its last ANSWERED
+   read started; `attachedAt` trails the real bind by ~1–2 s). They are
    CANDIDATES, never proof: any rise of the sum latches it — a woken or
    reconnected input (events=0 does not rule one out: backward steps are not
-   in the facet) or a real relock / late hold on a live input; the lists
+   in the facet) or a real relock, late hold or backward step on a live
+   input (a backward step is not in the facet: invisible in both lists); the
+   lists
    carry no times, the first is older than the attach, and past the wake
    window the probe itself always "turned live" between them. The input with
    the most lifetime events is not evidence (camera-box's own top-offender
