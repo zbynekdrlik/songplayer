@@ -6,8 +6,8 @@ use sqlx::SqlitePool;
 
 /// Idempotently create the single `kind='dabing'` playlist that backs the
 /// Dabing section — mirrors [`super::ensure_live_playlist_exists`] (the SP-live
-/// seed). `ndi_output_name = 'SP-dabing'` (the section's own output; the OBS
-/// scene `sp-dabing` is created by hand in D5, legacy `yt*` scenes untouched).
+/// seed). `ndi_output_name = 'SP-dabing'` (its scene `sp-dabing` in SongPlayer's
+/// catalog; since #221 lane 3 a playlist has no NDI output of its own).
 /// Runs on every startup; the `WHERE NOT EXISTS` guard makes re-runs no-ops.
 pub async fn ensure_dabing_playlist_exists(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(

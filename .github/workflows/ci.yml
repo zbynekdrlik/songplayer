@@ -1633,14 +1633,29 @@ jobs:
           $sourceBefore = (Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program").source
           Write-Host "SP-program source before the check: $sourceBefore"
           $cutAway = ($sourceBefore -ne $testPl.id)
+          # Already on program AND playing (sp-slow is the operators' usual
+          # background): read its title in place, never play or pause it, so
+          # the live program is left as it was (release 0.71.0 review round 3).
+          # (A variable + foreach: Windows PowerShell 5.1 pipes a JSON array
+          # from Invoke-RestMethod as ONE object.)
+          $healthRows = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/ndi/health"
+          $row = $null
+          foreach ($h in $healthRows) {
+            if ($h.playlist_id -eq $testPl.id) { $row = $h; break }
+          }
+          $inPlace = (-not $cutAway) -and ($null -ne $row) -and ($row.state -eq "Playing")
           try {
             if ($cutAway) {
               $cut = @{ source = $testPl.id } | ConvertTo-Json -Compress
               Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $cut | Out-Null
               Write-Host "SP-program cut to '$($testPl.name)' (id=$($testPl.id)) for the check"
             }
-            Write-Host "Triggering playback on '$($testPl.name)' (id=$($testPl.id)) for Resolume verification"
-            Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
+            if ($inPlace) {
+              Write-Host "'$($testPl.name)' (id=$($testPl.id)) is already on SP-program and playing - reading its title in place"
+            } else {
+              Write-Host "Triggering playback on '$($testPl.name)' (id=$($testPl.id)) for Resolume verification"
+              Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
+            }
 
             # Wait long enough for title to show: 1.5s show delay + 1s fade-in.
             # Also wait for cold-start to fully wire the lookahead push to
@@ -1649,12 +1664,25 @@ jobs:
             # ~10s to populate after first playback request on a fresh process.
             Start-Sleep -Seconds 15
 
-            # Query Resolume composition for #sp-title clips.
-            $comp = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/composition" -TimeoutSec 10
+            # Query Resolume composition for #sp-title clips. A song shows no
+            # title in its last 3.5 s and its first 1.5 s (the title clock),
+            # so a read that finds an empty title reads again, once a second,
+            # at most 10 more times; the assertions below judge the last read.
+            for ($read = 1; $read -le 11; $read++) {
+              $comp = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/composition" -TimeoutSec 10
+              $titleTexts = @(foreach ($layer in $comp.layers) { foreach ($clip in $layer.clips) { if ($clip.name.value -match '#sp-title') { [string]$clip.video.sourceparams.Text.value } } })
+              $emptyTexts = @($titleTexts | Where-Object { $_.Trim() -eq '' })
+              if ($titleTexts.Count -eq 0 -or $emptyTexts.Count -eq 0) { break }
+              Write-Host "Read ${read}: $($emptyTexts.Count) of $($titleTexts.Count) #sp-title clips empty (a song boundary?) - reading again in 1 s"
+              Start-Sleep -Seconds 1
+            }
           } finally {
-            # Cleanup before the assertions: release the player, then give
-            # SP-program back its source (a playlist, or -1 "OBS manual").
-            Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
+            # Cleanup before the assertions: release the player (unless it was
+            # read in place), then give SP-program back its source (a
+            # playlist, or -1 "OBS manual").
+            if (-not $inPlace) {
+              Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
+            }
             if ($cutAway -and $null -ne $sourceBefore) {
               $back = @{ source = $sourceBefore } | ConvertTo-Json -Compress
               Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $back | Out-Null
