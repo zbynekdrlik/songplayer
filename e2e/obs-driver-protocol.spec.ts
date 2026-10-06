@@ -96,9 +96,10 @@ test("the scene driver speaks obswebsocket.msgpack, Companion's encoding", async
  *
  * The stub speaks msgpack, like cg OBS. While the session subscribes to
  * InputVolumeMeters it sends one meter event every 10 ms, the probe's peak
- * taken from `peakAt` (by event number).
+ * taken from `peakAt` (by event number). With `dropAfter` it drops the
+ * connection (no close frame) once it has sent that many events.
  */
-async function meterStub(peakAt: (event: number) => number) {
+async function meterStub(peakAt: (event: number) => number, dropAfter?: number) {
   const identify: unknown[] = [];
   const reidentify: number[] = [];
   const state = { metersOn: false, sent: 0 };
@@ -126,6 +127,10 @@ async function meterStub(peakAt: (event: number) => number) {
     timers.push(
       setInterval(() => {
         if (!state.metersOn) return;
+        if (dropAfter !== undefined && state.sent >= dropAfter) {
+          socket.terminate();
+          return;
+        }
         const peak = peakAt(state.sent++);
         const probe = [peak * 0.7, peak, peak];
         socket.send(
@@ -181,7 +186,10 @@ test("the audio wait subscribes to InputVolumeMeters only around the wait (#221 
 
     expect(stub.identify, "a connect asks for no high-volume event").toEqual([undefined]);
     expect(stub.reidentify).toEqual([4095 | 65536, 4095]);
-    expect(report.withInput).toBeGreaterThanOrEqual(20 + 10);
+    // The run cannot start before the 21st event; how many follow depends on
+    // the stub's real timer, so only the hold is pinned (review round 1).
+    expect(report.withInput).toBeGreaterThan(20);
+    expect(report.events).toBe(report.withInput);
     expect(report.longestStreakMs).toBeGreaterThanOrEqual(100);
     expect(report.loudestDbfs).toBeCloseTo(-12.04, 1);
   } finally {
@@ -203,6 +211,31 @@ test("a failed audio wait drops InputVolumeMeters too, and names the probe (#221
     expect(err?.message).toContain("did not flow");
     expect(stub.reidentify).toEqual([4095 | 65536, 4095]);
     expect(stub.state.metersOn).toBe(false);
+  } finally {
+    await driver?.disconnect();
+    await stub.close();
+  }
+});
+
+test("a connection lost mid-wait ends the audio wait at once, naming the close (#221 dev.18)", async () => {
+  // cg OBS goes away after 5 silent meter events: the wait must say so now,
+  // never sit out its bound and then report "no event".
+  const stub = await meterStub(() => 0, 5);
+  let driver: ObsDriver | null = null;
+  try {
+    driver = await ObsDriver.connect(stub.url);
+    const err = await driver
+      .waitForInputAudio(AV_PROBE_INPUT, { holdMs: 100, timeoutMs: 25_000 })
+      .then(
+        () => null,
+        (e: Error) => e,
+      );
+    expect(err?.message).toContain("the OBS connection closed");
+    expect(err?.message).toContain(`"${AV_PROBE_INPUT}"`);
+    expect(err?.message, "not the bound's error").not.toContain("did not flow");
+    // The drop could not be sent on a closed connection; the wait's own error
+    // is the one reported.
+    expect(stub.reidentify).toEqual([4095 | 65536]);
   } finally {
     await driver?.disconnect();
     await stub.close();
