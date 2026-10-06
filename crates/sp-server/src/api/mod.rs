@@ -17,6 +17,7 @@ pub mod routes_import; // #180 shared bare-URL import core
 pub mod routes_mode; // #225 unit 2: a playlist's mode — the row first, then the engine
 pub mod routes_seek; // #194 unified seek route
 pub mod routes_status; // #221 L4b: /api/v1/status's program fields from SongPlayer's own program
+pub mod settings; // #229: GET/PATCH /api/v1/settings (secrets masked)
 pub mod stems;
 pub mod videos;
 pub mod websocket;
@@ -110,7 +111,7 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         // Settings
         .route(
             "/api/v1/settings",
-            axum::routing::get(routes::get_settings).patch(routes::update_settings),
+            axum::routing::get(settings::get_settings).patch(settings::update_settings),
         )
         // #184 round G — the ONE global live mixer console (GET faders + now-
         // playing stems; PATCH any subset of the three faders).
