@@ -22,16 +22,40 @@ pub async fn post_json<T: Serialize, R: DeserializeOwned>(
     path: &str,
     body: &T,
 ) -> Result<R, String> {
+    post_json_status(path, body)
+        .await
+        .map_err(|e| post_error(path, e))
+}
+
+/// The message a failed POST to `path` shows (the [`post_json_status`]
+/// error): `POST {path} → {status}` for a non-2xx answer, else the error
+/// itself.
+pub fn post_error(path: &str, (status, text): (u16, String)) -> String {
+    match status {
+        0 => text,
+        _ => format!("POST {path} → {status}"),
+    }
+}
+
+/// [`post_json`] that keeps a non-2xx answer: `Err((status, body))`, so a
+/// caller can tell a refusal (#221: a program cut answered 409 with its
+/// `{reason, error}`) from any other failure; `Err((0, error))` when there
+/// was no answer or a 2xx answer did not decode.
+pub async fn post_json_status<T: Serialize, R: DeserializeOwned>(
+    path: &str,
+    body: &T,
+) -> Result<R, (u16, String)> {
     let resp = Request::post(path)
         .json(body)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| (0, e.to_string()))?
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| (0, e.to_string()))?;
     if !resp.ok() {
-        return Err(format!("POST {} → {}", path, resp.status()));
+        let text = resp.text().await.unwrap_or_default();
+        return Err((resp.status(), text));
     }
-    resp.json::<R>().await.map_err(|e| e.to_string())
+    resp.json::<R>().await.map_err(|e| (0, e.to_string()))
 }
 
 /// PUT JSON to `path` and deserialise the response.

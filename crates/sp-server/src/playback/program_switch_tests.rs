@@ -8,6 +8,31 @@ use serde_json::json;
 
 use super::*;
 use crate::playback::program_bus::ProgramBus;
+use crate::playback::scene_catalog::SceneCatalog;
+
+/// #221 ROZHODNUTÉ 6022247729: a dashboard cut takes a playlist's catalog
+/// scene, or names why it is refused — inactive (not among the active
+/// playlists the catalog was built from) or active with no scene (no NDI
+/// output name, or one another active playlist shares).
+#[test]
+fn a_cut_takes_the_catalog_scene_or_names_why_it_is_refused() {
+    let catalog = SceneCatalog::new([(7, "SP-fast"), (8, ""), (9, "SP-dup"), (10, "sp-DUP")]);
+    assert_eq!(cut_scene(&catalog, 7), Ok("sp-fast"));
+    for pid in [8, 9, 10] {
+        assert_eq!(cut_scene(&catalog, pid), Err(Refusal::NoScene), "{pid}");
+    }
+    assert_eq!(cut_scene(&catalog, 3), Err(Refusal::Inactive));
+    assert_eq!(
+        [Refusal::Inactive.reason(), Refusal::NoScene.reason()],
+        [PLAYLIST_INACTIVE, NO_SCENE]
+    );
+    assert_eq!(
+        [PLAYLIST_INACTIVE, NO_SCENE],
+        ["playlist_inactive", "no_scene"]
+    );
+    assert!(Refusal::Inactive.message().contains("inactive"));
+    assert!(Refusal::NoScene.message().contains("names no scene"));
+}
 
 #[test]
 fn cg_obs_answers_read_as_cg_forward() {

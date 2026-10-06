@@ -12,7 +12,11 @@
 //!   #221 L4a: the cut goes through the ONE switch path
 //!   (`program_switch::switch_source`, `via=dashboard`): under the bus's
 //!   `switch_order`, recorded as `remote.last_remote_cut`. #221 B4 step 6:
-//!   cg OBS is told nothing (the legacy mirror is deleted).
+//!   cg OBS is told nothing (the legacy mirror is deleted). #221
+//!   ROZHODNUTÉ 6022247729: a playlist that is inactive or whose catalog
+//!   names no scene is refused with `409` + `{reason, error}` (every
+//!   consumer takes SP-program, so the cut would black them all), recorded
+//!   as a keep.
 //!
 //! Both answer the program state plus `vban`, the #210 VBAN audio output's
 //! telemetry (`playback::vban_out::VbanStatus`), `input`, the #212 NDI
@@ -26,7 +30,10 @@
 //! `SP-program-MAX` output (`playback::program_max::MaxStatus`: the setting,
 //! the `program-max` thread's state, the counters and the GPU / Spout cost
 //! p99s). #221 L5 deleted the `follow` block (the OBS follow) and B4 step 6
-//! the `legacy_cg` record.
+//! the `legacy_cg` record. `cut_refused` (ROZHODNUTÉ 6022247729) lists the
+//! playlists a cut refuses now, `{source, reason}` in id order
+//! (`program_switch::refused_sources`, the cut's own rule; `null` when the
+//! playlists cannot be read): the dashboard disables their buttons.
 
 use axum::Json;
 use axum::extract::State;
@@ -42,7 +49,9 @@ use crate::playback::ndi_health_expect::program_degraded_reason;
 use crate::playback::ndi_input::{InputSettings, NdiInputStatus, load_input_settings};
 use crate::playback::program_bus::{ProgramBus, ProgramStatus};
 use crate::playback::program_max::MaxStatus;
-use crate::playback::program_switch::{Via, switch_source};
+use crate::playback::program_switch::{
+    RefusedSource, SourceError, Via, refused_sources, switch_source,
+};
 use crate::playback::vban_out::VbanStatus;
 use crate::remote::{RemoteSettings, RemoteStatus, load_remote_settings};
 
@@ -51,6 +60,15 @@ use crate::remote::{RemoteSettings, RemoteStatus, load_remote_settings};
 pub struct CutRequest {
     /// The playlist whose output goes on program, or `-1` for the NDI input.
     pub source: i64,
+}
+
+/// The `409` body of a refused cut (#221 ROZHODNUTÉ 6022247729): the reason
+/// code (`sp_core::program_refusal`, which the dashboard turns into its
+/// Slovak text) and the reason in words.
+#[derive(Debug, Serialize)]
+pub struct CutRefusedBody {
+    pub reason: &'static str,
+    pub error: &'static str,
 }
 
 /// The body of both program routes: the program state + the VBAN, NDI input
@@ -67,6 +85,9 @@ pub struct ProgramResponse {
     pub input: NdiInputStatus,
     pub remote: RemoteStatus,
     pub max: MaxStatus,
+    /// #221 ROZHODNUTÉ 6022247729: the playlists a cut refuses now (`null`
+    /// when the playlists cannot be read).
+    pub cut_refused: Option<Vec<RefusedSource>>,
 }
 
 /// The STORED settings the telemetry blocks report next to their live state.
@@ -76,7 +97,12 @@ struct StoredSettings {
 }
 
 impl ProgramResponse {
-    fn new(bus: &ProgramBus, program: ProgramStatus, stored: &StoredSettings) -> Self {
+    fn new(
+        bus: &ProgramBus,
+        program: ProgramStatus,
+        stored: &StoredSettings,
+        cut_refused: Option<Vec<RefusedSource>>,
+    ) -> Self {
         let health = &program.health;
         let polled = health.receivers_polled.then_some(health.connections);
         let degraded_reason = program_degraded_reason(program.source, polled);
@@ -87,8 +113,17 @@ impl ProgramResponse {
             input: bus.input().status(&stored.input),
             remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             max: bus.max().status(),
+            cut_refused,
         }
     }
+}
+
+/// The playlists a cut refuses now; `None` (WARN) when they cannot be read.
+async fn cut_refused(state: &AppState) -> Option<Vec<RefusedSource>> {
+    refused_sources(&state.pool)
+        .await
+        .inspect_err(|e| warn!(%e, "program: reading the playlists a cut refuses failed"))
+        .ok()
 }
 
 /// The STORED input and remote-control settings (a save shows at once; the
@@ -109,15 +144,17 @@ async fn stored_settings(state: &AppState) -> StoredSettings {
 /// `GET /api/v1/program`.
 pub async fn get_program(State(state): State<AppState>) -> Json<ProgramResponse> {
     let stored = stored_settings(&state).await;
+    let refused = cut_refused(&state).await;
     let bus = &state.program_bus;
-    Json(ProgramResponse::new(bus, bus.status(), &stored))
+    Json(ProgramResponse::new(bus, bus.status(), &stored, refused))
 }
 
 /// `POST /api/v1/program/cut` — `200` + the new program state, `404` for an
-/// unknown playlist or an NDI input that is disabled or has no source, `500`
-/// when the playlists cannot be read or the selection cannot be persisted
-/// (then nothing is cut). #221 L4a: through the one switch path
-/// (`switch_source`, `via=dashboard`).
+/// unknown playlist or an NDI input that is disabled or has no source, `409`
+/// for a playlist that is inactive or whose catalog names no scene (#221
+/// ROZHODNUTÉ 6022247729), `500` when the playlists cannot be read or the
+/// selection cannot be persisted (then nothing is cut). #221 L4a: through
+/// the one switch path (`switch_source`, `via=dashboard`).
 pub async fn post_program_cut(
     State(state): State<AppState>,
     Json(body): Json<CutRequest>,
@@ -145,7 +182,14 @@ pub async fn post_program_cut(
     let bus = &state.program_bus;
     let status = match switch_source(&state.pool, bus, body.source, Via::Dashboard).await {
         Ok(status) => status,
-        Err(e) => {
+        Err(SourceError::Refused(refusal)) => {
+            let body = CutRefusedBody {
+                reason: refusal.reason(),
+                error: refusal.message(),
+            };
+            return (StatusCode::CONFLICT, Json(body)).into_response();
+        }
+        Err(SourceError::Store(e)) => {
             warn!(%e, source = body.source, "program cut: nothing was cut");
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
@@ -156,7 +200,8 @@ pub async fn post_program_cut(
         cut_boundary_100ns = ?status.cut_boundary_100ns,
         "program cut"
     );
-    Json(ProgramResponse::new(&state.program_bus, status, &stored)).into_response()
+    let refused = cut_refused(&state).await;
+    Json(ProgramResponse::new(bus, status, &stored, refused)).into_response()
 }
 
 #[cfg(test)]

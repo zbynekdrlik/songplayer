@@ -863,6 +863,13 @@ scratch `dist/` snippet (+ recomputed SRI), watch the test go red, restore.
 Several spec files with one project: `--project=chromium a.spec.ts b.spec.ts`
 (with a space, `--project chromium a.spec.ts …` reads the files as project
 names).
+In a worktree lane the Bash guard refuses `node mock & … playwright …; kill`
+in one command (#221): put it in a scratchpad runner script (start the mock
+with `&`, keep `$!`, `trap` a kill-by-PID on EXIT, wait until `curl` answers
+on the port with a `date +%s` deadline, then `npx playwright test --config
+<scratch config> --project=chromium <specs>`), and write the port-substituted
+mock copy + config with an anchor-asserted Python edit. Delete both copies
+and the downloaded `dist/` before you commit.
 
 **An old-dist run proves only the RED when the lane changes Rust UI
 semantics (#225 review round 3).** The downloaded dist is the OLD wasm: a
@@ -874,6 +881,17 @@ wiped it on the new UI — a review round caught it by tracing. So when the
 Rust UI changes how the store reacts to a message, trace every existing
 spec that posts a mock message right after `page.goto` against the new
 logic, message by message, before calling the suite green.
+
+## Telling a refused POST from a failure: `api::post_json_status` (#221)
+
+`api::post_json` folds every failure into one string. A caller that must
+act on the STATUS or read the error BODY (the Program control's 409 refusal
+`{reason, error}`) calls `api::post_json_status` (`Err((status, body))`;
+`(0, error)` with no answer or an undecodable 2xx) and formats every other
+failure with `api::post_error(path, e)`, the one message `post_json` itself
+gives ("POST {path} → {status}"). Never parse `post_json`'s string, and never
+show a raw server body on the operator's line: map a reason code to Slovak
+through `sp_core` (`program_refusal::refusal_text`).
 
 ## A Nastavenia spec must wait for the LOADED settings before it clicks (#210)
 

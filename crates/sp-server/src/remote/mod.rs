@@ -186,7 +186,9 @@ pub struct RemoteCut {
     /// The program source cut to (`-1` = "OBS manuál"), `null` when kept.
     pub source: Option<i64>,
     /// Why nothing was cut: `not_switched` (cg OBS refused or did not answer
-    /// a manual scene), `input_inactive`, `persist_failed`, `catalog_failed`.
+    /// a manual scene), `input_inactive`, `persist_failed`, `catalog_failed`,
+    /// and for a refused dashboard cut (#221 ROZHODNUTÉ 6022247729)
+    /// `playlist_inactive` / `no_scene`.
     pub reason: Option<&'static str>,
     /// The boundary the cut lands on (`GET /api/v1/program`'s own field).
     pub cut_boundary_100ns: Option<i64>,

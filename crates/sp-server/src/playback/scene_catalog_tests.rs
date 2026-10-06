@@ -76,6 +76,20 @@ fn an_empty_or_shared_ndi_name_names_no_scene() {
     );
 }
 
+/// #221 ROZHODNUTÉ 6022247729: every playlist the catalog was built from is
+/// active, whether it names a scene or not; any other is not.
+#[test]
+fn the_catalog_knows_its_active_playlists_with_or_without_a_scene() {
+    let catalog = SceneCatalog::new([(1, ""), (3, "SP-x"), (4, "sp-X"), (5, "SP-y")]);
+    for pid in [1, 3, 4, 5] {
+        assert!(catalog.is_active(pid), "playlist {pid}");
+    }
+    for pid in [0, 2, 6] {
+        assert!(!catalog.is_active(pid), "playlist {pid}");
+    }
+    assert!(!SceneCatalog::default().is_active(1));
+}
+
 #[test]
 fn the_catalog_of_playlist_rows_reads_their_ndi_output_names() {
     let row = |id: i64, ndi: &str| Playlist {

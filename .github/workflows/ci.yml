@@ -1602,11 +1602,19 @@ jobs:
           # "E2E must not switch to disruptive OBS scenes"): its scene (the
           # lowercased NDI output name, the scene catalog's rule) is sp-slow
           # if there is one, else any sp-* scene but sp-fast and sp-warmup
-          # (the sync tone). This step puts it on program for ~20 s.
+          # (the sync tone). This step puts it on program for ~20 s. Never one
+          # the program cut refuses (#221: listed in cut_refused, e.g. an NDI
+          # name another active playlist shares; the cut would answer 409).
+          $refusedIds = @()
+          $programNow = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program"
+          if ($null -ne $programNow.cut_refused) {
+            foreach ($r in $programNow.cut_refused) { $refusedIds += $r.source }
+          }
           $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
           $candidates = @()
           foreach ($pl in $playlists) {
             if (-not $pl.is_active -or -not $pl.ndi_output_name) { continue }
+            if ($refusedIds -contains $pl.id) { continue }
             $scene = $pl.ndi_output_name.ToLowerInvariant()
             if (-not $scene.StartsWith("sp-") -or $scene -eq "sp-fast" -or $scene -eq "sp-warmup") { continue }
             $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
@@ -1638,6 +1646,13 @@ jobs:
           # there is no "nothing" to cut back to.
           $sourceBefore = (Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program").source
           Write-Host "SP-program source before the check: $sourceBefore"
+          # #221: a source the cut refuses (a playlist deactivated while on
+          # program, restored at startup) could never be cut back to, so the
+          # test playlist would stay on the wall. Fail before touching it.
+          if ($null -ne $sourceBefore -and $refusedIds -contains $sourceBefore) {
+            Write-Error "FAIL: SP-program's source $sourceBefore is a playlist the program cut refuses (#221: inactive or no scene) - not cutting away from it, a cut back would be refused"
+            exit 1
+          }
           $cutAway = ($sourceBefore -ne $testPl.id)
           # Already on program AND playing (sp-slow is the operators' usual
           # background): read its title in place, never play or pause it, so
@@ -1696,8 +1711,9 @@ jobs:
                 Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $back | Out-Null
                 Write-Host "SP-program back on source $sourceBefore"
               } catch {
-                # The old source is refused now (the NDI input switched off, the
-                # playlist deleted): never leave the test playlist playing on
+                # The old source is refused now (404: the NDI input switched off
+                # or the playlist deleted; 409, #221: the playlist deactivated or
+                # left with no scene): never leave the test playlist playing on
                 # the wall. Pause it, then fail with the refusal.
                 Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
                 throw
