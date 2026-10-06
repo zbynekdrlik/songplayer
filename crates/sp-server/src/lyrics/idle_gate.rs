@@ -316,8 +316,9 @@ impl crate::lyrics::worker::LyricsWorker {
     }
 
     /// Human detail for the gate log / dashboard, e.g. `"SP-fast Playing"`. For
-    /// the playing case it names the actual on-program NDI output; otherwise it
-    /// falls back to the generic `WallActivity::reason`.
+    /// the playing case it names the on-program playlist's `ndi_output_name`
+    /// label (a playlist has no NDI output of its own since #221 lane 3);
+    /// otherwise it falls back to the generic `WallActivity::reason`.
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn wall_busy_detail(&self, activity: WallActivity) -> String {
         if !activity.in_use() {
