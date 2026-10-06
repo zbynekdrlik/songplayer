@@ -15,10 +15,10 @@
  *     "Nothing playing" to a visible song/artist display. This catches
  *     issue #9 (server never broadcast ServerMsg::NowPlaying).
  *
- *  3. Switching the program scene to a matching `sp-*` scene via
- *     obs-websocket-js must kick off scene-driven playback — SongPlayer
- *     must detect the NDI source in the scene and start the pipeline.
- *     This catches issue #11 (ndi_sources map was empty). #221 L3: the
+ *  3. Pressing a playlist's `sp-*` scene via obs-websocket-js must cut
+ *     SongPlayer's program to that playlist and play it (#221 L4b: the
+ *     program is the playback authority; the NDI source map of issue #11
+ *     is deleted). #221 L3: the
  *     driver talks to SongPlayer's obs-websocket facade (`FACADE_WS_URL`),
  *     so its studio-mode branch (preview + transition, SongPlayer's own
  *     program feedback and transition events) is Companion's exact path.
@@ -294,7 +294,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * Issue #89 — Resolume Arena liveness gate.
    *
    * If Arena is hung, the LED wall is dark even though SongPlayer is
-   * dispatching subtitles to SP-live NDI correctly. Without this check
+   * dispatching subtitles correctly. Without this check
    * the post-deploy run reports green while the operator-visible
    * surface is broken (the failure mode behind the 2026-05-13 Thank
    * You verify session and earlier wall-dark incidents).
@@ -463,11 +463,11 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   /**
    * Issue #11 — scene-driven playback.
    *
-   * Switching OBS to `sp-fast` must cause SongPlayer to match the
-   * scene's NDI source against the ytfast playlist. This is what the
-   * original bug broke: `ndi_sources` was an empty HashMap so every
-   * scene-item lookup returned None, and scene-driven playback never
-   * fired.
+   * Pressing `sp-fast` through the facade must put the ytfast playlist on
+   * SongPlayer's program and play it: the scene is resolved from
+   * SongPlayer's own catalog (the playlist's `ndi_output_name`, #221). The
+   * original bug (an empty `ndi_sources` map, so scene-driven playback never
+   * fired) was in the NDI source map #221 lane 3 deleted.
    *
    * Strong assertion: after the scene switch, `/api/v1/status` must
    * report `active_playlist_ids` CONTAINING the ytfast playlist's id.
@@ -477,7 +477,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * (the scene catalog), never cg OBS's scene detection.
    *
    * Required environment: the scene catalog must map `sp-fast` to the
-   * ytfast playlist (its NDI output `SP-fast`), so the facade's switch
+   * ytfast playlist (its `ndi_output_name` `SP-fast`), so the facade's switch
    * cuts SP-program to it. If missing, the test fails hard (no skip).
    */
   test("switching OBS to sp-fast scene triggers ytfast playback", async ({ request }) => {
@@ -487,7 +487,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
     const scenes = await obs!.listScenes();
     expect(
       scenes.includes(FAST_SCENE_NAME),
-      `deployed OBS must have an "${FAST_SCENE_NAME}" scene with an NDI source subscribed to "SP-fast"`,
+      `cg OBS must list a scene named "${FAST_SCENE_NAME}" (the facade forwards its scene list: Companion's buttons and this suite)`,
     ).toBe(true);
 
     // Reset to a non-fast baseline scene first so we observe the
@@ -546,9 +546,10 @@ test.describe("SongPlayer post-deploy feature verification", () => {
   /**
    * Full-chain end-to-end test for issue #11 + #9 combined.
    *
-   * 1. Non-sp scene on OBS program, ytfast paused.
+   * 1. The baseline scene (`pickBaselineScene`, sp-slow) on program, ytfast
+   *    paused.
    * 2. Open the dashboard in Playwright; ytfast card shows "Nothing playing".
-   * 3. Switch OBS program scene to `sp-fast` via obs-websocket-js.
+   * 3. Press `sp-fast` through SongPlayer's facade via obs-websocket-js.
    * 4. Within 15 seconds the ytfast card must transition to `.np-info`.
    *
    * This exercises the entire chain (#221 L4b):
@@ -614,8 +615,9 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * engine to start playing, then asserts the dashboard card shows
    * `.np-info` with an advancing position counter. This catches:
    *
-   * - The bridge subscription race (initial SceneChanged missed
-   *   because the bridge subscribed after the OBS client spawned)
+   * - A press that never puts the playlist on air (the program
+   *   authority's ON, #221 L4b; it replaced the OBS -> engine bridge whose
+   *   subscription race this test first caught)
    * - The stuck-WaitingForScene bug (engine parks when SceneOn fires
    *   before any videos are normalized, and no event rewakes it)
    * - State broadcast bugs (engine plays but dashboard never updates)

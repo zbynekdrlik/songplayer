@@ -15,7 +15,7 @@ export interface HealthRow {
 
 /**
  * The output is PLAYING and actually emitting frames: its reconciled health
- * `state` is `Playing` (which already means "on OBS program", see
+ * `state` is `Playing` (which already means "on SongPlayer's program", see
  * obs-ndi-health.md #154), and it submitted frames in the last 5 s.
  */
 export function isPlayingWithFrames(health: HealthRow[], playlistId: number): boolean {

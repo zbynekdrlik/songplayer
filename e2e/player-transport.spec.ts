@@ -2,7 +2,7 @@ import { test, expect, APIRequestContext } from "@playwright/test";
 
 // #201: the shared Player's play/pause label follows the pipeline's own
 // TRANSPORT state, NOT the on/off-program state. A dub prepared OFF program on
-// the Dabing page decodes while its scene is off OBS program (the scene-aware
+// the Dabing page decodes while it is off program (the scene-aware
 // WS `state` is `WaitingForScene`) — the toggle must read `⏸ Pauza` (transport
 // Playing) while it plays, and show off-program ONLY in the badge
 // (`○ Mimo programu`). A genuinely paused off-program pipeline (transport

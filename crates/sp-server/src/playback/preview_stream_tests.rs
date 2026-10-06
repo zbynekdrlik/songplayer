@@ -432,7 +432,7 @@ fn to_stereo_drops_unexpected_channel_counts() {
 #[test]
 fn audio_preroll_samples_is_the_interleaved_stereo_silence_count() {
     // (min(gap,5000)+lead_ms) ms of silence, 48 kHz stereo = 48*2 samples/ms.
-    // No preroll at all when neither the video nor the emitter is ahead.
+    // No preroll at all when neither the video nor the decode seam is ahead.
     assert_eq!(audio_preroll_samples(0, 0), 0);
     // The canonical case from the design: a 250 ms connect gap + the 100 ms
     // decode-seam lead → 350 ms → 350 * 48 * 2 interleaved f32 samples.

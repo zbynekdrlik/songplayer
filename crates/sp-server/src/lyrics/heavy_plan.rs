@@ -443,8 +443,9 @@ impl crate::lyrics::worker::LyricsWorker {
         }
     }
 
-    /// Human detail for the per-step regime log: the playing NDI output's name
-    /// when the wall is in use, else the generic reason or `idle`.
+    /// Human detail for the per-step regime log: the playing playlist's
+    /// `ndi_output_name` label when the wall is in use, else the generic reason
+    /// or `idle`.
     #[cfg_attr(test, mutants::skip)]
     pub(crate) async fn wall_regime_detail(&self, activity: WallActivity) -> String {
         if !activity.in_use() {

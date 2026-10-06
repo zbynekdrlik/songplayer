@@ -579,14 +579,13 @@ are the recovery's `on_program_lines`.
   The held playlist itself no longer starts a song
   (`.claude/rules/program-transition.md`, "A held playlist has no side
   effects").
-- **One candidate at most** (#221 lane 2): a re-sync's title candidates
-  are the wall owner's alone (`recovery.rs::title_candidates`), and with
-  no owner ("OBS manuál" on program) there are none, so a Resync names no
-  title. (`due_title_video` still breaks a tie by the highest playlist id;
-  the over-general multi-member machinery is lane 3's to simplify, main
-  ROZHODNUTÉ 6002459249 (4). The "several due" residual of #217 — two
-  SongPlayer playlists sharing the clip on one cg OBS scene — cannot
-  happen any more.)
+- **One candidate at most** (#221 lane 2): a re-sync's title candidate
+  is the wall owner's alone (`recovery.rs::title_candidate`, an `Option`),
+  and with no owner ("OBS manuál" on program) there is none, so a Resync
+  names no title. #221 lane 3 deleted the old highest-playlist-id
+  tie-break: `due_title_video` takes that one candidate (main ROZHODNUTÉ
+  6002459249 (4)). The "several due" residual of #217 — two SongPlayer
+  playlists sharing the clip on one cg OBS scene — cannot happen any more.
 - **The text** comes from `format_title_text` (one formatter, see above).
   The OBS text source follows the Resync: the title, or cleared, as the hide
   timer clears it. A failed read of the due title sends nothing: a transient

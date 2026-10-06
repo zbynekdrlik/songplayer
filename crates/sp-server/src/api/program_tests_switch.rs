@@ -55,7 +55,7 @@ async fn a_dashboard_playlist_cut_sends_nothing_to_cg_obs() {
 #[tokio::test]
 async fn a_dashboard_playlist_cut_is_published_and_recorded_with_its_catalog_scene() {
     let state = test_state().await;
-    let fast = add_playlist(&state.pool, "fast").await; // NDI output SP-fast
+    let fast = add_playlist(&state.pool, "fast").await; // ndi_output_name SP-fast
     let (status, json) = cut(&state, fast).await;
     assert_eq!(status, StatusCode::OK);
     assert!(json["cut_boundary_100ns"].as_i64().is_some_and(|b| b > 0));

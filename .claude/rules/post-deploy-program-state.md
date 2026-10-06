@@ -5,11 +5,13 @@ paths:
   - "e2e/box-api.ts"
 ---
 
-# Post-deploy specs: the OBS program can be ANY sp-* scene (#184)
+# Post-deploy specs: SongPlayer's program can be ANY sp-* scene (#184)
 
-The post-deploy suite runs on the live box and never switches OBS scenes to set
-itself up. After an event the operator leaves the program on whatever scene the
-event ended with. On 26.9.2026 that was `sp-dabing`, so the Dabing output was ON
+A program-state spec runs on the live box and never switches the program to set
+itself up (other post-deploy specs press `sp-*` scenes through SongPlayer's
+facade and restore its program in `afterAll`; the A/V gate parks cg OBS on its
+probe scene). After an event the operator leaves the program on whatever scene
+the event ended with. On 26.9.2026 that was `sp-dabing`, so the Dabing output was ON
 program. Two specs had hard-coded "Dabing is always off program" and "the
 auto-selected dashboard card is playing", and both went red for a non-product
 reason.

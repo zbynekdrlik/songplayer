@@ -88,7 +88,7 @@ where
 
 #[tokio::test]
 async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
-    // SongPlayer's DB: the ytfast playlist (NDI output SP-fast, id 7) and the
+    // SongPlayer's DB: the ytfast playlist (ndi_output_name SP-fast, id 7) and the
     // #212 NDI input "OBS manuál" enabled with a source.
     let pool = db::create_memory_pool().await.unwrap();
     db::run_migrations(&pool).await.unwrap();

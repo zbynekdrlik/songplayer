@@ -152,6 +152,6 @@ fn new_keeps_the_40_ms_pairing_deadline() {
     assert_eq!(
         dec.audio_lead_ms(),
         1540,
-        "the emitter path's 1540 ms deadline is kept verbatim"
+        "any lead is kept verbatim (1540 ms was the deleted emitter path's)"
     );
 }

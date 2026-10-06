@@ -107,7 +107,7 @@ fn global_inputs(health: &[NdiOutputHealth]) -> Vec<GlobalLockInput> {
 fn global_title(health: &[NdiOutputHealth], off: bool) -> String {
     let mut parts: Vec<String> = Vec::new();
     if off {
-        parts.push("pacing vypnuté → NDI SDK clock, free-running".to_string());
+        parts.push("pacing vypnuté — žiadny výstup zatiaľ nehlási pacing".to_string());
     }
     for o in health {
         parts.push(format!(
@@ -126,10 +126,12 @@ fn global_title(health: &[NdiOutputHealth], off: bool) -> String {
 /// #176: the dashboard header's whole-box genlock summary — ALWAYS rendered
 /// (`(class, text, title)`), never hidden. Delegates the state decision to the
 /// unit-tested pure `sp_core::genlock::lock_state::global_lock_summary`, then
-/// composes the display text: the explicit `● GENLOCK OFF` (grey) when no output
-/// has pacing enabled — pacing set OFF by hand, the default is ON since #147
-/// (#164's hide-when-off rule is revised) — else `● LOCKED / DEGRADED /
+/// composes the display text: the explicit `● GENLOCK OFF` (grey) when no
+/// pipeline reports pacing yet (pacing is the only path since #221 lane 3;
+/// #164's hide-when-off rule is revised) — else `● LOCKED / DEGRADED /
 /// UNLOCKED` with an `n/m` live-locked count and the worst output's reason.
+/// The inputs are the playlist pipelines' pacing and bus delivery, never
+/// `SP-program`'s own sender (`genlock.md`).
 fn global_summary(health: &[NdiOutputHealth]) -> (String, String, String) {
     let summary = global_lock_summary(&global_inputs(health));
     let off = summary.state == GlobalLock::Off;
@@ -214,7 +216,7 @@ pub fn GlobalLockBadge() -> impl IntoView {
             {move || {
                 let health = store.ndi_health.get();
                 // #176: ALWAYS render the whole-box badge — grey `● GENLOCK OFF`
-                // when pacing is set OFF (the default is ON, #147), else LOCKED/DEGRADED/
+                // when no pipeline reports pacing yet, else LOCKED/DEGRADED/
                 // UNLOCKED. Never hidden (revises #164).
                 let (class, text, title) = global_summary(&health);
                 view! {

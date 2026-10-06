@@ -36,6 +36,13 @@ Two traps, both cost real debugging time (#149):
   (`'odpojené'`) reaches the written spec as mojibake and silently never matches.
   Comments are fine. `scripts/check_workflow_ps_ascii.py` (run by the eval-checks
   pytest via `scripts/tests/test_check_workflow_ps_ascii.py`) fails CI on a violation.
+- **Windows PowerShell 5.1 array traps** (release 0.71.0 review). (1)
+  `Invoke-RestMethod` emits a JSON array as ONE pipeline object, so
+  `Invoke-RestMethod … | Where-Object` sees the whole array once: store it in
+  a variable and `foreach` over it. (2) A single `[pscustomobject]` has no
+  `.Count` (it reads `$null`, fixed only in PowerShell 6+), so
+  `($rows | Where-Object …).Count -gt 0` is FALSE for exactly one match: wrap
+  every filter whose count you test in `@(…)`.
 - **Relaunching SongPlayer after a kill: end the scheduled-task INSTANCE first**
   (`Stop-ScheduledTask -TaskName SongPlayer`, then wait until the state is no longer
   `Running`). The task is `MultipleInstances=IgnoreNew`; after a bare
@@ -302,8 +309,11 @@ stops SongPlayer:
 - Residual: the gate reads the lease, it does not HOLD it. A lease another
   repo takes in the ~1 min between the check and "Deploy SongPlayer"
   (artifact downloads) is not seen. The E2E job runs the same gate again
-  right before "Feature-level Playwright (post-deploy spec)" (camera-box's
-  request, 6.10.2026). The suite switches cg OBS's program for the A/V
+  twice: right after its checkout, before its first step that acts on the
+  box (release 0.71.0 review: starting OBS, the restart, the title check's
+  program cut, the Presenter "[CI PROBE]"), and right before
+  "Feature-level Playwright (post-deploy spec)" (camera-box's request,
+  6.10.2026). The suite switches cg OBS's program for the A/V
   gate's probe scene and presses scenes through the facade, and minutes
   pass between the deploy's wait and the take.
 - Hardening (review rounds 3-4): a body over 64 KiB (`MAX_BODY_BYTES`; a
@@ -333,6 +343,32 @@ stops SongPlayer:
   clock (120 × 30 s then exit 3; a last short pause ends exactly at the
   bound), the fetch over a real local HTTP server. Python runs locally on
   the Tier-0 box, so its RED/GREEN is really run before the push.
+
+**The E2E job's "Verify Resolume title delivery" cuts SP-program** (release
+0.71.0 review). Since #221 lane 2 only SP-program's playlist writes the
+title and the lines (`may_write_wall`), and with "OBS manuál" (-1) on
+program nobody does, so playing a playlist off program proves nothing. The
+step picks the test playlist by the baseline discipline
+(`e2e/obs-baseline-scene.ts`: an active `sp-slow` playlist with videos, else
+any `sp-*` but `sp-fast` and `sp-warmup`, the sync tone), cuts SP-program to
+it with `POST /api/v1/program/cut`, plays, reads Arena's composition, and in
+a `finally` cuts back to the old source with NO pause (the test playlist
+leaves program and pauses itself after the fade, so the program never
+carries its frozen, silent picture). It pauses the test playlist only with
+no source to give back, when the cut back is refused (then the step fails),
+or when it was the source but not playing (played, then paused again). When
+the test
+playlist already IS the program's source and playing (its `/api/v1/ndi/health`
+row reads `Playing`), it is read in place: no cut, no play, no pause, so the
+live program is never paused (review round 3). An empty title is read again
+once a second, at most 10 more times: a song shows no title in its last
+3.5 s and first 1.5 s. Never let it pick `sp-warmup` or `sp-fast`: it is on
+the live wall and FOH for ~20 s. The cut back re-kicks the old source: a
+playlist starts its NEXT song, whether it was playing or paused (the same
+as the post-deploy suite's `afterAll` restore); a box whose program never
+had a source keeps the test playlist (no "nothing" to cut back to). The
+step before it, "Verify playback updates OBS text source", plays and pauses
+a playlist that is NOT the program's source, for the same reason.
 
 **Two push runs for ONE commit: never cancel either by hand** (28.9.2026,
 `36494106201` + `36494106433`). The concurrency group already cancels the
@@ -468,7 +504,7 @@ is already pushed (history rewrite is banned), a LATER commit carrying
 `while deque.len() > CAP { deque.pop_front(); }` is correct code that a
 `>`→`<` mutant turns into an infinite loop on an empty deque — cargo-mutants
 reports TIMEOUT (300 s), which fails the shard exactly like a MISSED mutant
-(#192 r3, `loop_stats.rs::SubmitHist::observe`). When one push can overshoot
+(#192 r3, `loop_stats.rs::SubmitHist::observe`, deleted by #221 lane 3). When one push can overshoot
 by at most one, write `if len > CAP { pop_front(); }`; for bulk trims use
 `truncate`/`drain(..n)` with a `saturating_sub` count. Any loop whose exit
 depends on a comparison a mutant can flip needs a structural bound.

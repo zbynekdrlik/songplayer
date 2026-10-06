@@ -50,10 +50,11 @@ pub enum PlaybackState {
     Playing,
 }
 
-/// The pipeline's OWN transport state, INDEPENDENT of whether its NDI output is
-/// on OBS program (#201). Orthogonal to [`PlaybackState`]: `PlaybackState` folds
-/// the on/off-program fact in (a decoding pipeline off program is reported as
-/// `WaitingForScene` so the wall-health / selector logic stays correct), while
+/// The pipeline's OWN transport state, INDEPENDENT of whether its playlist is
+/// on SongPlayer's program (#201; #221 L4b). Orthogonal to [`PlaybackState`]:
+/// `PlaybackState` folds the on/off-program fact in (a decoding pipeline off
+/// program is reported as `WaitingForScene` so the wall-health / selector
+/// logic stays correct), while
 /// `TransportState` answers only "is the pipeline decoding right now?".
 ///
 /// The shared Player reads `transport == Playing` for its play/pause label so a

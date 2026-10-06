@@ -66,7 +66,7 @@ fn engine_on(state: &AppState) -> Rig {
     (engine, ws_rx, resolume_rx)
 }
 
-/// A playlist row with an NDI output, so an active one gets a pipeline.
+/// A playlist row with an `ndi_output_name`, so an active one gets a pipeline.
 async fn insert(pool: &SqlitePool, id: i64, mode: &str, active: bool) {
     sqlx::query(
         "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, playback_mode, is_active) \

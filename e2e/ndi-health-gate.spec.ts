@@ -1,6 +1,6 @@
 /**
  * Unit tests for the pure dark gate logic (#127), on `SP-program` (#221 B4
- * step 6: a playlist's own NDI output has no consumer any more, so the
+ * step 6 / lane 3: a playlist has no NDI output of its own any more, so the
  * receiver that must exist is `SP-program`'s).
  *
  * Runs in the ubuntu mock suite (playwright.config.ts) — no browser and no

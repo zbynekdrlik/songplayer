@@ -61,6 +61,35 @@ fn an_over_frame_comes_out_at_the_ceiling_with_one_gain_for_both_channels() {
     assert_eq!(l.limited_frames(), 1);
 }
 
+/// Release 0.71.0 review: `ceiling / peak` and `1 − reduction` each round in
+/// f32, so `peak × gain` can land a code or two ABOVE 0.98 (a peak of 1.071
+/// came out at 0.98000008; about one over in four of this sweep did). The
+/// program's own limiter then scaled a limited stem mix again, so a playlist
+/// on program did not pass it bit for bit. No sample may leave above the
+/// ceiling, on either side.
+#[test]
+fn no_limited_sample_leaves_above_the_ceiling() {
+    let mut l = PeakLimiter::new(48_000);
+    let mut over_ceiling = Vec::new();
+    for k in 981..4_000_u16 {
+        let peak = f32::from(k) / 1000.0;
+        for frame in [[peak, -0.3_f32], [-peak, 0.3]] {
+            l.reset();
+            let mut out = frame;
+            l.process(&mut out, 2);
+            if out.iter().any(|s| s.abs() > LIMIT_CEILING) {
+                over_ceiling.push((frame, out));
+            }
+        }
+    }
+    assert!(
+        over_ceiling.is_empty(),
+        "{} frames left above {LIMIT_CEILING}, e.g. {:?}",
+        over_ceiling.len(),
+        &over_ceiling[..over_ceiling.len().min(3)]
+    );
+}
+
 #[test]
 fn the_reduction_decays_by_the_release_factor_each_quiet_frame() {
     let mut l = PeakLimiter::new(1_000);

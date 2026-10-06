@@ -726,8 +726,9 @@ time. The discipline, for EVERY audio assertion (`e2e/post-deploy-preview.spec.t
 
 - **Own the session + poll until AUDIBLE — never a fixed wait for "audio is
   present".** A viewer that joins a running encoder session right after a song
-  restart (`switching to new song`) gets the emitter's silence padding for its
-  first seconds (RMS ~0). Sample RMS on a bounded loop until it reads above the
+  restart (`switching to new song`) gets silence for its first seconds (RMS
+  ~0): the paced fills and the encoder's `AudioHold` pad (the #192 emitter
+  that first padded it is deleted, #221 lane 3). Sample RMS on a bounded loop until it reads above the
   floor for a STREAK of N samples (`audibleStreak` in `e2e/audio-helpers.mjs`),
   then take the baseline; fail with the observed max if never audible — that is a
   real defect, not a race. The per-sample wait is only spacing; the streak is the

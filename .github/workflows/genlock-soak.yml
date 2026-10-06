@@ -11,9 +11,9 @@ name: Genlock soak (receiver ground-truth)
 #
 # This is a cron/dispatch soak, deliberately NOT wired to push/pull_request: it waits
 # `minutes` (allowed only outside the PR pipeline, per CLAUDE.md "CI architecture").
-# Until camera-box#1295 puts cg OBS on the genlock build there are no `genlock-fifo audit`
-# lines in the receiver log, so every run is the honest count-gate BEFORE picture (FAIL,
-# NO SOURCES). The daily `schedule` line below is commented until then.
+# The daily `schedule` line below stays commented: the cg-obs hop has a source only
+# while the A/V gate's probe is pointed by hand (next paragraph), so an unattended
+# run reads NO SOURCES (FAIL).
 #
 # #221 lane 3: SongPlayer's only NDI output is `SP-program` (a playlist has no
 # SP-* stream of its own any more; pacing is the only path, the
@@ -48,7 +48,7 @@ on:
         type: string
         default: cg-obs
   # schedule:
-  #   - cron: "17 3 * * *"   # enable when camera-box#1295 puts cg OBS on the genlock build (see songplayer#149)
+  #   - cron: "17 3 * * *"   # enable only once the probe pointing is automated (header; songplayer#149)
 
 permissions:
   contents: read

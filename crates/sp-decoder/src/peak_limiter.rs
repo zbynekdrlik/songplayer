@@ -11,7 +11,8 @@
 //! under this ceiling, up to √2 above it. Both work the same way:
 //!
 //! - **Ceiling** [`LIMIT_CEILING`] = 0.98 (−0.18 dBFS). No sample leaves above
-//!   it (up to one f32 rounding of the gain).
+//!   it: a scaled sample is clamped to ±ceiling, because the f32 gain alone
+//!   can put a peak a code or two over it (release 0.71.0 review).
 //! - **Stereo-linked.** One gain per frame, from the frame's highest |sample|,
 //!   so the stereo image never shifts.
 //! - **Instant attack, no lookahead.** The gain drops at once to what the
@@ -97,8 +98,12 @@ impl PeakLimiter {
             } else {
                 self.reduction = 0.0;
             }
+            // `ceiling / peak` and `1 − reduction` each round in f32, so
+            // `peak × gain` can land a code or two above the ceiling: the
+            // clamp makes the ceiling exact. At rest every |sample| ≤ peak ≤
+            // ceiling, so it changes nothing there.
             for s in frame.iter_mut() {
-                *s *= gain;
+                *s = (*s * gain).clamp(-LIMIT_CEILING, LIMIT_CEILING);
             }
         }
     }

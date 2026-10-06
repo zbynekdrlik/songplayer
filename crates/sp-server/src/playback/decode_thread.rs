@@ -11,9 +11,10 @@
 //! The scheduling today is the platform default: `CreateThread` starts a
 //! thread at `THREAD_PRIORITY_NORMAL`, inside SongPlayer's
 //! `HIGH_PRIORITY_CLASS` (#203, `process_start::set_high_priority_class`).
-//! The decode thread is deliberately NOT raised. Only the grid-paced emit,
-//! NDI input and VBAN threads are, each from inside its own body
-//! (`mmcss::raise_thread_priority`, `mmcss::join_pro_audio`). A decode
+//! The decode thread is deliberately NOT raised. Only the NDI input and
+//! VBAN threads are, each from inside its own body
+//! (`mmcss::raise_thread_priority`, `mmcss::join_pro_audio`; the #192 audio
+//! emitter that was raised too is deleted, #221 lane 3). A decode
 //! thread's priority must NOT be set that way: a change belongs in
 //! [`spawn_decode_thread`] (as the first step of the spawned closure), so the
 //! bench follows it.

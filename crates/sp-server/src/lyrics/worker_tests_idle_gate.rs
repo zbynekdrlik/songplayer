@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-/// Minimal `Playing` health snapshot for a given NDI output. Mirrors the
+/// Minimal `Playing` health snapshot for a given `ndi_name` label. Mirrors the
 /// engine's real construction; the fields the gate reads are `state` (Playing)
 /// and `ndi_name` (for the log detail).
 fn playing_snapshot(playlist_id: i64, ndi_name: &str) -> PipelineHealthSnapshot {

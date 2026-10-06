@@ -36,9 +36,9 @@ Minimum CI gates that MUST be present (match reference projects):
 - Coverage thresholds
 - Post-deploy E2E that exercises REAL user workflows — not just API smoke tests
 
-Post-deploy E2E must verify: NDI sources created and discoverable, OBS sources
-controllable, dashboard loads and is interactive, playlist sync actually
-downloads videos.
+Post-deploy E2E must verify: `SP-program` (SongPlayer's one NDI output, #221)
+has a live receiver, OBS sources controllable, dashboard loads and is
+interactive, playlist sync actually downloads videos.
 
 ## Canonical-source regression CI — required
 

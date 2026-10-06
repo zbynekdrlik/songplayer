@@ -126,7 +126,8 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   second
   error goes to the caller, as before S3b.
 - `HwCounters` (`sp_decoder::hw_counters()`, process-wide, every
-  `Hardware` reader, the bench's too): `requested`, `gpu_decodes`,
+  `Hardware` open, the bench's too): `requested` (counted before the open,
+  so a file that then opens nowhere counts only there), `gpu_decodes`,
   `mf_software`, `open_fallbacks`, `mid_stream_fallbacks`,
   `path_changes`, `last_fallback`. A fall back is counted once the file
   has opened in software (a file that opens nowhere is only the error).
