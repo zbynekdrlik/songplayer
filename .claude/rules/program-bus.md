@@ -327,18 +327,28 @@ included, is comment 5872871751).
   `program-error`) polls `GET /api/v1/program` through `store::poll_into`.
   #221: a playlist listed in `cut_refused` has its `program-cut` button
   DISABLED (`prop:disabled`, a per-button `Memo` of
-  `ProgramState::refusal`) with the reason's Slovak `title` (`cut_title`);
-  the rest keep "Strih na program". It reads the polled answer, never
-  `store.playlists` (loaded once at app start, never refreshed). Nothing is
-  disabled before the first poll; the server refuses anyway.
+  `ProgramState::refusal`) with the reason's Slovak `title`; the rest keep
+  "Strih na program". The reason codes AND the Slovak texts are ONE
+  vocabulary in `sp_core::program_refusal` (`PLAYLIST_INACTIVE`,
+  `NO_SCENE`, `refusal_text`, `cut_button_title`; unit-tested and
+  mutation-gated there, sp-ui has no unit tests), which the server's keep
+  reasons re-export (`program_switch::{PLAYLIST_INACTIVE, NO_SCENE}`). It
+  reads the polled answer, never `store.playlists` (loaded once at app
+  start, never refreshed). Nothing is disabled before the first poll (or
+  while `cut_refused` is `null`): a cut the server refuses then (409, told
+  apart by `api::post_json_status`) shows "Strih odmietnutý: <why>" on
+  `program-error` — the generic text while no poll named the reason.
   The mock (`e2e/mock-api.mjs`) keeps program state in memory —
   `POST /__mock/program-reset` in `beforeEach`/`afterEach`. It mirrors the
-  refusal (`cutRefusal` = `cut_scene`, `cut_refused`, 409 + a keep) and has
-  the opt-in fixture `POST /__mock/fixture {mode: "refusals"}` (the 3
-  default playlists + 30 "Archív" inactive + 31 "Bez výstupu" with no NDI
-  name; reset to `default` in `afterEach`). The cut body
-  (`/__mock/program-last-cut`) is recorded before the refusal, so a spec
-  proves a disabled button posted nothing (`program-control.spec.ts`).
+  refusal (`cutRefusal` = `cut_scene` over `SceneCatalog::new`: blank
+  names, then grouping by the untrimmed ASCII-folded name; `cut_refused`,
+  409 + a keep) and has the opt-in fixture `POST /__mock/fixture {mode:
+  "refusals"}` (the 3 default playlists + 30 "Archív" inactive + 31 "Bez
+  výstupu" with no NDI name; reset to `default` in `afterEach`) and the knob
+  `/__mock/program-refusals-hidden {hidden}` (`cut_refused: null`; reset by
+  `/__mock/program-reset`). The cut body (`/__mock/program-last-cut`) is
+  recorded before the refusal, so a spec proves a disabled button posted
+  nothing (`program-control.spec.ts`).
 
 ## What is on air (#221 L1, design record 5873773896 §1b, §1d)
 

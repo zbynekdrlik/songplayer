@@ -187,18 +187,21 @@ function activePlaylists() {
   return playlists;
 }
 
-// #221 ROZHODNUTÉ 6022247729: mirrors `program_switch::cut_scene` — a
-// playlist names a scene when it is active and exactly one active playlist
-// has its NDI output name (ignoring ASCII case); an inactive one is refused
-// `playlist_inactive`, an active one with no scene `no_scene`.
+// #221 ROZHODNUTÉ 6022247729: mirrors `program_switch::cut_scene` over
+// `SceneCatalog::new` — a playlist names a scene when it is active, its NDI
+// output name is not blank, and no other active playlist has the same name
+// with only ASCII letters folded (untrimmed, like the server); an inactive
+// one is refused `playlist_inactive`, an active one with no scene `no_scene`.
+const asciiLower = (s) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
 function cutRefusal(id) {
   const active = activePlaylists().filter((p) => p.is_active);
   const own = active.find((p) => p.id === id);
   if (!own) return "playlist_inactive";
-  const name = (own.ndi_output_name || "").trim().toLowerCase();
-  if (name === "") return "no_scene";
+  const raw = own.ndi_output_name || "";
+  if (raw.trim() === "") return "no_scene";
+  const name = asciiLower(raw);
   const sharing = active.filter(
-    (p) => (p.ndi_output_name || "").trim().toLowerCase() === name,
+    (p) => (p.ndi_output_name || "").trim() !== "" && asciiLower(p.ndi_output_name) === name,
   );
   return sharing.length === 1 ? null : "no_scene";
 }
@@ -934,6 +937,11 @@ let programLastRemoteCut = null;
 // (`/__mock/program-connections`, #221 B4 step 6).
 let programActiveWindow = null;
 let programConnections = 0;
+// #221 test-only: answer `cut_refused: null` (the server could not read its
+// playlists), so the dashboard disables nothing while the cut still refuses
+// (`/__mock/program-refusals-hidden {hidden}`, cleared by
+// `/__mock/program-reset`).
+let programRefusalsHidden = false;
 // #215: the program transition — mirrors the server's `effective_spec`:
 // `cut` → a Cut, `fade` → a Fade of `program_transition_ms` (the operator's
 // choice); anything else (none, the retired `obs`) → the default Fade of
@@ -977,7 +985,7 @@ function programBody() {
         ? "no NDI receiver on SP-program"
         : null,
     // #221 ROZHODNUTÉ 6022247729: the playlists a cut refuses now.
-    cut_refused: cutRefused(),
+    cut_refused: programRefusalsHidden ? null : cutRefused(),
     previous: programState.previous,
     cut_boundary_100ns: programState.cuts > 0 ? 17900000000000000 : null,
     health: {
@@ -1192,7 +1200,12 @@ app.post("/__mock/program-reset", (_req, res) => {
   programLastRemoteCut = null;
   programActiveWindow = null;
   programConnections = 0;
+  programRefusalsHidden = false;
   res.json({ status: "reset" });
+});
+app.post("/__mock/program-refusals-hidden", (req, res) => {
+  programRefusalsHidden = req.body?.hidden === true;
+  res.json({ hidden: programRefusalsHidden });
 });
 // #221 B4 step 6 test-only: SP-program's NDI receiver count
 // (`health.connections`), `{connections: N}`.

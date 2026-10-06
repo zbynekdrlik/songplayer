@@ -458,4 +458,52 @@ test.describe("a playlist the cut refuses", () => {
     // Zero console errors — the last assertion.
     expect(realConsoleErrors(consoleMessages)).toEqual([]);
   });
+
+  test("a cut the dashboard did not know to be refused says why on the error line", async ({
+    page,
+    request,
+  }) => {
+    // The program answers carry no refusals (`cut_refused: null`, as when
+    // the server cannot read its playlists), so no button is disabled, and
+    // the server still refuses the cut (409).
+    await request.post("/__mock/program-refusals-hidden", {
+      data: { hidden: true },
+    });
+    const consoleMessages = collectConsole(page);
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto("/");
+    await expect(page.getByTestId("program-source")).toHaveText(
+      "Na programe: Worship",
+      { timeout: 10000 },
+    );
+    await page.waitForResponse((r) => r.url().endsWith("/api/v1/program"));
+    const archiv = page.locator(
+      '[data-testid="program-cut"][data-playlist-id="30"]',
+    );
+    await expect(archiv).toBeEnabled();
+    await expect(archiv).toHaveAttribute("title", "Strih na program");
+
+    const box = await archiv.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await expect(page.getByTestId("program-error")).toHaveText(
+      "Strih odmietnutý: Strih na tento playlist server odmieta",
+    );
+    await expect(page.getByTestId("program-source")).toHaveText(
+      "Na programe: Worship",
+    );
+    // Backend effect: the cut was posted and refused; nothing changed.
+    const last = await (await request.get("/__mock/program-last-cut")).json();
+    expect(last.body).toEqual({ source: 30 });
+    const program = await (await request.get("/api/v1/program")).json();
+    expect(program.source).toBe(1);
+    expect(program.health.cuts).toBe(0);
+    expect(program.remote.last_remote_cut.reason).toBe("playlist_inactive");
+
+    // The browser logs the deliberate 409; it is the point of the test.
+    // Zero other console errors — the last assertion.
+    expect(
+      realConsoleErrors(consoleMessages).filter((m) => !/status of 409/.test(m)),
+    ).toEqual([]);
+  });
 });

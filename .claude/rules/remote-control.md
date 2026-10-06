@@ -169,8 +169,10 @@ come from `SP-program`, never from cg OBS.
   `announce_transition`, `wait_transition_end`.
 - `playback/program_switch.rs` is the ONE switch path of a press (below);
   its keep reasons are its own constants (`NOT_SWITCHED`,
-  `INPUT_INACTIVE`, `CATALOG_FAILED`, `PERSIST_FAILED`, and for a refused
-  dashboard cut `PLAYLIST_INACTIVE` / `NO_SCENE`). #221 L5 deleted
+  `INPUT_INACTIVE`, `CATALOG_FAILED`, `PERSIST_FAILED`), and for a refused
+  dashboard cut `PLAYLIST_INACTIVE` / `NO_SCENE`, re-exported from
+  `sp_core::program_refusal` (one vocabulary with the dashboard's Slovak
+  texts). #221 L5 deleted
   `remote/map.rs` (the OBS follow's scene → `SceneAction` rule) with the
   follow.
   `playback/scene_catalog.rs` says which scene is a playlist's.
@@ -365,6 +367,12 @@ saying why (`program-bus.md`, "API + UI"). The facade path is unchanged: a
 press resolves a scene NAME through the catalog, so it never lands on such
 a playlist. A startup restore can still put one on program (a playlist
 deactivated after it was cut to); the cut away from it works as before.
+The restore is deliberately NOT refused (review round 1): it would not
+prevent a black program — an inactive (or unnamed) playlist has no
+pipeline, so restoring it and restoring nothing both carry the standby
+black — and an active playlist with a SHARED name still has a picture,
+which restoring keeps. The dashboard shows that playlist on program with
+its button disabled, and the operator cuts away as usual.
 
 A dashboard cut announces no transition events (unchanged from L3); its
 program-scene event comes from the on-air watch.

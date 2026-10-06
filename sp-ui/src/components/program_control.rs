@@ -23,8 +23,9 @@
 //! catalog names no scene — it would black them all. `GET /api/v1/program`
 //! lists those playlists (`cut_refused`, the server's own rule, polled with
 //! the rest), and their buttons are DISABLED with a tooltip saying why
-//! (`cut_title`). Before the first poll nothing is disabled; the server
-//! still refuses.
+//! (`sp_core::program_refusal::cut_button_title`, the vocabulary the server
+//! records). Before the first poll nothing is disabled; a cut the server
+//! refuses then (409) shows "Strih odmietnutý: <why>" on the error line.
 //!
 //! Testids (set here, never by a caller): `program-control`, `program-source`
 //! (the "Na programe: …" line), `program-transition` (the "Prechod: …" line),
@@ -36,6 +37,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
+use sp_core::program_refusal::{cut_button_title, refusal_text};
 
 use crate::components::selection;
 use crate::store::{DashboardStore, poll_into};
@@ -64,7 +66,7 @@ pub struct ProgramState {
 pub struct CutRefused {
     #[serde(default)]
     pub source: i64,
-    /// `playlist_inactive` or `no_scene`.
+    /// `sp_core::program_refusal::PLAYLIST_INACTIVE` or `NO_SCENE`.
     #[serde(default)]
     pub reason: String,
 }
@@ -78,20 +80,6 @@ impl ProgramState {
             .iter()
             .find(|r| r.source == pid)
             .map(|r| r.reason.as_str())
-    }
-}
-
-/// A playlist's cut button tooltip: what it does, or why it is disabled.
-pub fn cut_title(refusal: Option<&str>) -> &'static str {
-    match refusal {
-        None => "Strih na program",
-        Some("playlist_inactive") => {
-            "Playlist je neaktívny — strih by zatemnil celý program (stenu, FOH, Presenter, stream)"
-        }
-        Some("no_scene") => {
-            "Playlist nemá vlastnú scénu (chýba mu NDI výstup, alebo ho zdieľa s iným aktívnym playlistom) — na program ho strihnúť nemožno"
-        }
-        Some(_) => "Strih na tento playlist server odmieta",
     }
 }
 
@@ -194,12 +182,24 @@ pub fn ProgramControl() -> impl IntoView {
     let cut = move |id: i64| {
         spawn_local(async move {
             let body = serde_json::json!({ "source": id });
-            match crate::api::post_json::<_, ProgramState>("/api/v1/program/cut", &body).await {
+            let path = "/api/v1/program/cut";
+            match crate::api::post_json_status::<_, ProgramState>(path, &body).await {
                 Ok(state) => {
                     let _ = program.try_set(state);
                     let _ = error.try_set(None);
                 }
-                Err(e) => {
+                // #221: refused (an inactive or scene-less playlist; its
+                // button was not disabled yet). Say why, from the reason the
+                // last poll told — the generic text until one did.
+                Err((409, _)) => {
+                    let reason = program
+                        .try_with_untracked(|s| s.refusal(id).map(str::to_string))
+                        .flatten()
+                        .unwrap_or_default();
+                    let why = refusal_text(&reason);
+                    let _ = error.try_set(Some(format!("Strih odmietnutý: {why}")));
+                }
+                Err((_, e)) => {
                     let _ = error.try_set(Some(format!("Strih zlyhal: {e}")));
                 }
             }
@@ -238,7 +238,7 @@ pub fn ProgramControl() -> impl IntoView {
                                 data-playlist-id=pid.to_string()
                                 aria-pressed=move || is_on().to_string()
                                 prop:disabled=move || refusal.with(Option::is_some)
-                                title=move || refusal.with(|r| cut_title(r.as_deref()))
+                                title=move || refusal.with(|r| cut_button_title(r.as_deref()))
                                 on:click=move |_| cut(pid)
                             >
                                 {name}

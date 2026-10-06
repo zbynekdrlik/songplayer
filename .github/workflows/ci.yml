@@ -1696,10 +1696,10 @@ jobs:
                 Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $back | Out-Null
                 Write-Host "SP-program back on source $sourceBefore"
               } catch {
-                # The old source is refused now (the NDI input switched off, the
-                # playlist deleted, deactivated or left with no scene: 409, #221):
-                # never leave the test playlist playing on the wall. Pause it,
-                # then fail with the refusal.
+                # The old source is refused now (404: the NDI input switched off
+                # or the playlist deleted; 409, #221: the playlist deactivated or
+                # left with no scene): never leave the test playlist playing on
+                # the wall. Pause it, then fail with the refusal.
                 Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
                 throw
               }

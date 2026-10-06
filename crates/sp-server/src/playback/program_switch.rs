@@ -67,14 +67,11 @@ pub const INPUT_INACTIVE: &str = "input_inactive";
 pub const CATALOG_FAILED: &str = "catalog_failed";
 /// The keep reason of a switch whose source could not be persisted.
 pub const PERSIST_FAILED: &str = "persist_failed";
-/// The keep reason of a dashboard cut to an INACTIVE playlist (#221
-/// ROZHODNUTÉ 6022247729): it has no output, so SP-program — and every
-/// consumer of it — would carry black.
-pub const PLAYLIST_INACTIVE: &str = "playlist_inactive";
-/// The keep reason of a dashboard cut to an active playlist whose catalog
-/// names no scene (no NDI output name, or one another active playlist
-/// shares).
-pub const NO_SCENE: &str = "no_scene";
+/// The keep reasons of a refused dashboard cut (#221 ROZHODNUTÉ 6022247729):
+/// an INACTIVE playlist (it has no output, so SP-program — and every
+/// consumer of it — would carry black), and an active one whose catalog
+/// names no scene. ONE vocabulary with the dashboard's texts, in sp-core.
+pub use sp_core::program_refusal::{NO_SCENE, PLAYLIST_INACTIVE};
 
 /// Why a dashboard cut to a playlist is refused (409, #221 ROZHODNUTÉ
 /// 6022247729).
@@ -141,7 +138,10 @@ pub struct RefusedSource {
 }
 
 /// Every playlist a dashboard cut refuses now, in id order: the switch's own
-/// catalog read plus the playlists' ids, decided by [`cut_scene`].
+/// catalog read plus the playlists' ids, decided by [`cut_scene`]. Two reads,
+/// not one snapshot: a playlist (de)activated between them is listed wrongly
+/// for one dashboard poll at most; the cut itself always decides from its
+/// own read under the `switch_order`.
 pub async fn refused_sources(pool: &SqlitePool) -> Result<Vec<RefusedSource>, sqlx::Error> {
     let catalog = load_catalog(pool).await?;
     let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM playlists ORDER BY id")
