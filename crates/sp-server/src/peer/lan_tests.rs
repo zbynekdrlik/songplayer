@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use sp_core::config::{
@@ -128,6 +129,45 @@ async fn a_named_node_with_its_key_serves_and_lists_no_peer() {
     assert!(!s.transfers_paused);
     assert_eq!(s.config_error, None);
     assert_eq!(s.peers, Vec::<PeerStatus>::new());
+}
+
+/// `GET uri` on `app`: the status code and the body.
+async fn get_on(app: &Router, uri: &str) -> (StatusCode, String) {
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    (status, String::from_utf8(body.to_vec()).unwrap())
+}
+
+/// The router `lib.rs` serves: the app's (with its SPA fallback) merged with
+/// the exchange's. axum panics on a merge of two fallbacks, and the SPA must
+/// still serve every path no route takes.
+#[tokio::test]
+async fn the_exchange_routes_merge_with_the_app_router_and_its_spa_fallback() {
+    let state = crate::api::routes::tests::test_state().await;
+    let dist = tempfile::tempdir().unwrap();
+    std::fs::write(dist.path().join("index.html"), "<p>the dashboard</p>").unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let ex = Exchange::new(state.pool.clone(), cache.path().to_path_buf());
+    let app =
+        crate::api::router(state, Some(dist.path().to_path_buf())).merge(crate::peer::router(ex));
+
+    let (code, body) = get_on(&app, "/api/v1/exchange/status").await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
+    assert_eq!(s.config_error, None);
+    assert_eq!(s.node_name, None);
+    assert!(!s.serving);
+
+    let (code, body) = get_on(&app, "/some/spa/path").await;
+    assert_eq!(code, StatusCode::OK, "the SPA fallback still serves");
+    assert_eq!(body, "<p>the dashboard</p>");
+
+    let (code, body) = get_on(&app, "/api/v1/settings").await;
+    assert_eq!(code, StatusCode::OK, "{body}");
 }
 
 #[tokio::test]

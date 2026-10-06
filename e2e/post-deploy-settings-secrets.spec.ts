@@ -16,6 +16,9 @@
  *   key on the box when none is there.
  * - The Nastavenia form's Gemini "API kľúč" field shows the mask in a
  *   password input.
+ * - `GET /api/v1/exchange/status` (merged into the app's router) answers 200,
+ *   the box's exchange settings hold (`config_error` null), `serving` is a
+ *   boolean and `peers` a list. A failure names the field, never a value.
  *
  * Zero console errors is the last assertion (the same benign filters as
  * `post-deploy-flac.spec.ts`).
@@ -104,6 +107,29 @@ test.describe("settings secrets post-deploy verification (#229)", () => {
     const geminiKey = page.getByLabel("API kľúč");
     await expect(geminiKey).toHaveValue(SECRET_MASK, { timeout: 10_000 });
     await expect(geminiKey).toHaveAttribute("type", "password");
+
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test("the exchange status answers and the box's exchange settings hold", async ({
+    request,
+  }) => {
+    const resp = await request.get("/api/v1/exchange/status");
+    expect(resp.status(), "GET /api/v1/exchange/status").toBe(200);
+    const status = (await resp.json()) as Record<string, unknown>;
+
+    // The messages name the field only: a failure never prints a value.
+    expect(
+      status["config_error"] === null,
+      "the box's exchange settings do not hold (config_error is set)",
+    ).toBe(true);
+    expect(typeof status["serving"] === "boolean", "serving is not a boolean").toBe(
+      true,
+    );
+    expect(Array.isArray(status["peers"]), "peers is not a list").toBe(true);
+    console.log(
+      `exchange status: serving=${String(status["serving"])}, ${(status["peers"] as unknown[]).length} peer(s)`,
+    );
 
     expect(consoleErrors).toEqual([]);
   });
