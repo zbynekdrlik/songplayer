@@ -477,7 +477,7 @@ test.describe("SongPlayer post-deploy feature verification", () => {
    * (the scene catalog), never cg OBS's scene detection.
    *
    * Required environment: the scene catalog must map `sp-fast` to the
-   * ytfast playlist (its NDI output `SP-fast`), so the facade's switch
+   * ytfast playlist (its `ndi_output_name` `SP-fast`), so the facade's switch
    * cuts SP-program to it. If missing, the test fails hard (no skip).
    */
   test("switching OBS to sp-fast scene triggers ytfast playback", async ({ request }) => {

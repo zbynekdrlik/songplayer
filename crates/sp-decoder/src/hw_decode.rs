@@ -489,7 +489,7 @@ impl HwCounters {
         }
     }
 
-    /// A reader was opened in `Hardware` mode.
+    /// A `Hardware` open was asked for (counted before the open).
     pub fn requested(&self) {
         self.requested.fetch_add(1, Ordering::Relaxed);
     }

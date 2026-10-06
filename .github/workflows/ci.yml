@@ -1679,8 +1679,8 @@ jobs:
               $titleTexts = @(foreach ($layer in $comp.layers) { foreach ($clip in $layer.clips) { if ($clip.name.value -match '#sp-title') { [string]$clip.video.sourceparams.Text.value } } })
               $emptyTexts = @($titleTexts | Where-Object { $_.Trim() -eq '' })
               if ($titleTexts.Count -eq 0 -or $emptyTexts.Count -eq 0) { break }
-              Write-Host "Read ${read}: $($emptyTexts.Count) of $($titleTexts.Count) #sp-title clips empty (a song boundary?) - reading again in 1 s"
-              Start-Sleep -Seconds 1
+              Write-Host "Read ${read}: $($emptyTexts.Count) of $($titleTexts.Count) #sp-title clips empty (a song boundary?)"
+              if ($read -lt 11) { Start-Sleep -Seconds 1 }
             }
           } finally {
             # Cleanup before the assertions. Cut away: give SP-program its old
@@ -1692,8 +1692,16 @@ jobs:
             # place: nothing.
             if ($cutAway -and $null -ne $sourceBefore) {
               $back = @{ source = $sourceBefore } | ConvertTo-Json -Compress
-              Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $back | Out-Null
-              Write-Host "SP-program back on source $sourceBefore"
+              try {
+                Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $back | Out-Null
+                Write-Host "SP-program back on source $sourceBefore"
+              } catch {
+                # The old source is refused now (the NDI input switched off, the
+                # playlist deleted): never leave the test playlist playing on
+                # the wall. Pause it, then fail with the refusal.
+                Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
+                throw
+              }
             } elseif (-not $inPlace) {
               Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
             }

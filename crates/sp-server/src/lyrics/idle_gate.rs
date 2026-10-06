@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 /// win-resolume box, plus a `known` readiness flag (#167).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct WallActivity {
-    /// At least one playback pipeline is `Playing` on OBS program.
+    /// At least one playback pipeline is `Playing` on SongPlayer's program.
     pub any_playing: bool,
     /// OBS is actively streaming an output.
     pub obs_streaming: bool,

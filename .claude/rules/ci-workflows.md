@@ -354,8 +354,10 @@ any `sp-*` but `sp-fast` and `sp-warmup`, the sync tone), cuts SP-program to
 it with `POST /api/v1/program/cut`, plays, reads Arena's composition, and in
 a `finally` cuts back to the old source with NO pause (the test playlist
 leaves program and pauses itself after the fade, so the program never
-carries its frozen, silent picture; it pauses only with no source to give
-back). When the test
+carries its frozen, silent picture). It pauses the test playlist only with
+no source to give back, when the cut back is refused (then the step fails),
+or when it was the source but not playing (played, then paused again). When
+the test
 playlist already IS the program's source and playing (its `/api/v1/ndi/health`
 row reads `Playing`), it is read in place: no cut, no play, no pause, so the
 live program is never paused (review round 3). An empty title is read again

@@ -121,7 +121,7 @@ exclude_re = [
   # playback/pipeline_paced.rs + pipeline_paced_idle.rs: whole modules are
   #   #[cfg(windows)] (mod.rs) so they are NOT compiled on the Linux mutation
   #   runner; every mutant lands in dead code, builds, and no test runs it ->
-  #   MISSED. Same class as the sp-decoder/{audio,video} exclusions (target-only).
+  #   MISSED. Same class as the sp-decoder/video exclusion (target-only).
   'sp-server/src/playback/pipeline_paced',
   # lyrics/mtl_aligner.rs: the forced-alignment wrapper shells out to the Python
   #   LyricsAlignment-MTL tool (tokio::process::Command) not installed on the
