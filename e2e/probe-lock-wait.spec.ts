@@ -516,6 +516,26 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(WAKE_LATCH_WINDOW_MS).toBe(70_000);
   });
 
+  test("the latch window is measured at the LAST read, not at the wait's start", async () => {
+    // Hand mutant (round 4): the wait starts 65 s after the attach, inside
+    // the window, and its last read starts at 80 s, past it.
+    const clock = fakeClock();
+    clock.t = 165_000;
+    const reads = fakeRead(clock, () =>
+      lock("DEGRADED", "recent_event", probe(), { recent_event_inputs: [{ name: "sp-slow", events: 9 }] }),
+    );
+    const msg = await rejection(
+      waitForProbeLock(reads.read, PROBE, {
+        now: clock.now,
+        sleep: clock.sleep,
+        phaseEventsBeforeAttach: 2,
+        attachedAt: 100_000,
+      }),
+    );
+    expect(reads.starts.at(-1)).toBe(180_000);
+    expect(msg).not.toContain("before the attach");
+  });
+
   test("waitForProbeLock: idle → DEGRADED/audio_pairing → LOCKED/none, polled every 250 ms", async () => {
     // camera-box's observed attach, from the call: the old heartbeat (probe
     // idle) until 3.1 s, DEGRADED/audio_pairing (probe locked) until 4.1 s,
