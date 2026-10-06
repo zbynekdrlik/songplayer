@@ -1591,20 +1591,33 @@ jobs:
           }
           Write-Host "OK: Resolume reachable + Responding=True"
 
-          # Find an ACTIVE playlist with videos and an NDI output name: only
-          # such a playlist has a pipeline, so only it can be on program.
+          # Find an ACTIVE playlist with videos and an NDI output name (only
+          # such a playlist has a pipeline, so only it can be on program), by
+          # the baseline discipline of e2e/obs-baseline-scene.ts (CLAUDE.md
+          # "E2E must not switch to disruptive OBS scenes"): its scene (the
+          # lowercased NDI output name, the scene catalog's rule) is sp-slow
+          # if there is one, else any sp-* scene but sp-fast and sp-warmup
+          # (the sync tone). This step puts it on program for ~20 s.
           $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
-          $testPl = $null
+          $candidates = @()
           foreach ($pl in $playlists) {
             if (-not $pl.is_active -or -not $pl.ndi_output_name) { continue }
+            $scene = $pl.ndi_output_name.ToLowerInvariant()
+            if (-not $scene.StartsWith("sp-") -or $scene -eq "sp-fast" -or $scene -eq "sp-warmup") { continue }
             $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
             if ($videos.Count -gt 0) {
-              $testPl = $pl
-              break
+              $candidates += [pscustomobject]@{ Playlist = $pl; Scene = $scene }
             }
           }
+          $testPl = $null
+          $slow = @($candidates | Where-Object { $_.Scene -eq "sp-slow" })
+          if ($slow.Count -gt 0) {
+            $testPl = $slow[0].Playlist
+          } elseif ($candidates.Count -gt 0) {
+            $testPl = $candidates[0].Playlist
+          }
           if (-not $testPl) {
-            Write-Error "FAIL: No active playlist with videos found for Resolume verification"
+            Write-Error "FAIL: No active playlist with videos and an sp-* scene other than sp-fast / sp-warmup found for Resolume verification"
             exit 1
           }
 
@@ -1615,6 +1628,8 @@ jobs:
           # fail with -1 on program. So the test playlist goes on SP-program
           # first, through the dashboard's own cut, and SP-program gets back
           # what it showed once the composition is read (also on a failure).
+          # A box whose program never had a source keeps the test playlist:
+          # there is no "nothing" to cut back to.
           $sourceBefore = (Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program").source
           Write-Host "SP-program source before the check: $sourceBefore"
           $cutAway = ($sourceBefore -ne $testPl.id)
@@ -1735,8 +1750,8 @@ jobs:
           Write-Host "  #sp-subssk texts:"
           foreach ($t in $subsSkClips) { Write-Host "    '$t'" }
           # Skip the lookahead gate when subs clips are all empty/whitespace.
-          # ytwarmup playlist's continuous picker is non-deterministic — it
-          # may select a vocal-exercise video with no lyrics, in which case
+          # The test playlist's continuous picker is non-deterministic — it
+          # may select a video with no lyrics (an instrumental), in which case
           # SongPlayer pushes nothing and every clip retains its empty
           # default. "Empty == empty" is not a regression, so the gate must
           # only fire when there IS lyric text on #sp-subs to compare.

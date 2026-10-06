@@ -337,6 +337,21 @@ stops SongPlayer:
   bound), the fetch over a real local HTTP server. Python runs locally on
   the Tier-0 box, so its RED/GREEN is really run before the push.
 
+**The E2E job's "Verify Resolume title delivery" cuts SP-program** (release
+0.71.0 review). Since #221 lane 2 only SP-program's playlist writes the
+title and the lines (`may_write_wall`), and with "OBS manuál" (-1) on
+program nobody does, so playing a playlist off program proves nothing. The
+step picks the test playlist by the baseline discipline
+(`e2e/obs-baseline-scene.ts`: an active `sp-slow` playlist with videos, else
+any `sp-*` but `sp-fast` and `sp-warmup`, the sync tone), cuts SP-program to
+it with `POST /api/v1/program/cut`, plays, reads Arena's composition, and in
+a `finally` pauses it and cuts back to the old source. Never let it pick
+`sp-warmup` or `sp-fast`: it is on the live wall and FOH for ~20 s. The
+cut back re-kicks the old source, so a playlist that was paused on program
+plays again, the same as the post-deploy suite's `afterAll` restore; a box
+whose program never had a source keeps the test playlist (no "nothing" to
+cut back to).
+
 **Two push runs for ONE commit: never cancel either by hand** (28.9.2026,
 `36494106201` + `36494106433`). The concurrency group already cancels the
 older one. `gh run cancel` on the queued survivor still lands, even when the
