@@ -1349,7 +1349,7 @@ jobs:
             $seed.gemini_api_key = $env:GEMINI_API_KEY
             Write-Host "Seeding gemini_api_key from secret (was empty)"
           } else {
-            Write-Host "Preserving existing gemini_api_key (length $($current.gemini_api_key.Length))"
+            Write-Host "Preserving existing gemini_api_key (set; the API shows it masked, #229)"
           }
           # Seed the target model directly — seeding 'gemini-2.0-flash' here
           # used to bounce through the stale-model migration at server startup,

@@ -42,9 +42,14 @@ python3 -m venv /tmp/evalvenv
   line, in a log, in a committed file, or in the report). The key currently lives
   in `/home/newlevel/devel/voiceagent/.env`; read it into an env var in the same
   shell command and print only its length.
-- **Gemini** (EN transcript) — `GEMINI_API_KEY` env; the box's settings endpoint
-  `GET http://10.77.9.201:8920/api/v1/settings` returns `gemini_api_key`
-  (comma-separated; use entry that works).
+- **Gemini** (EN transcript) — `GEMINI_API_KEY` env. Since #229 the box's
+  settings endpoint `GET http://10.77.9.201:8920/api/v1/settings` shows
+  `gemini_api_key` as `********`, so never read it there: on dev1 put the key
+  in `GEMINI_API_KEY` through the secret channel (`python3
+  ~/devel/airuleset/airuleset.py secret exec GEMINI_API_KEY -- <cmd>`); on the
+  box read it read-only from SongPlayer's database inside Python
+  (`.claude/rules/dubbing-eval.md`, "Reading the Gemini key"). The stored value
+  is comma-separated; use an entry that works.
 
 ## Reproducing the run (hand-run inputs — never committed)
 

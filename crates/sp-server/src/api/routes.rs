@@ -38,12 +38,6 @@ pub struct UpdatePlaylistRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateSettingsRequest {
-    #[serde(flatten)]
-    pub settings: std::collections::HashMap<String, String>,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct AddResolumeHostRequest {
     pub label: String,
     pub host: String,
@@ -633,46 +627,8 @@ pub async fn previous(
 }
 
 // #225 unit 2: the mode route is in `api/routes_mode.rs`; #194: the seek
-// route in `api/routes_seek.rs` (the `/api/v1/playback/{id}/…` family).
-
-// ---------------------------------------------------------------------------
-// Settings endpoints
-// ---------------------------------------------------------------------------
-
-pub async fn get_settings(State(state): State<AppState>) -> impl IntoResponse {
-    let rows = sqlx::query("SELECT key, value FROM settings ORDER BY key")
-        .fetch_all(&state.pool)
-        .await;
-
-    match rows {
-        Ok(rows) => {
-            let mut map = serde_json::Map::new();
-            for r in &rows {
-                let key: String = r.get("key");
-                let value: String = r.get("value");
-                map.insert(key, serde_json::Value::String(value));
-            }
-            Json(serde_json::Value::Object(map)).into_response()
-        }
-        Err(e) => {
-            warn!("get_settings error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
-    }
-}
-
-pub async fn update_settings(
-    State(state): State<AppState>,
-    Json(body): Json<UpdateSettingsRequest>,
-) -> impl IntoResponse {
-    for (key, value) in &body.settings {
-        if let Err(e) = crate::db::models::set_setting(&state.pool, key, value).await {
-            warn!("update_settings error for key {key}: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    }
-    StatusCode::NO_CONTENT.into_response()
-}
+// route in `api/routes_seek.rs` (the `/api/v1/playback/{id}/…` family);
+// #229: the settings API (`GET`/`PATCH /api/v1/settings`) in `api/settings.rs`.
 
 // ---------------------------------------------------------------------------
 // Status endpoint

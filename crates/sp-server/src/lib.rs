@@ -19,6 +19,7 @@ pub mod now_playing;
 pub mod obs;
 mod obs_bridge;
 pub mod panic_hook;
+pub mod peer; // #229: the node exchange (serve what this node has, ask peers first)
 pub mod playback;
 pub mod playlist;
 pub mod presenter;
@@ -337,6 +338,8 @@ pub async fn start(
             config.data_dir().join("bench"),
         )),
     };
+    // #229: this node in the exchange; its routes merge into the router below.
+    let exchange = peer::Exchange::new(pool.clone(), config.cache_dir.clone());
 
     // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
     // the LAN with no internet. Reads `lan_mdns_enabled` (default on); a
@@ -717,7 +720,7 @@ pub async fn start(
     });
 
     // 11. Axum HTTP server
-    let router = api::router(state, config.dist_dir);
+    let router = api::router(state, config.dist_dir).merge(peer::router(exchange));
     let listener = {
         use socket2::{Domain, Socket, Type};
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;
