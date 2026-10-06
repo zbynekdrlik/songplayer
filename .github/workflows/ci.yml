@@ -1126,6 +1126,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Release 0.71.0 review: the steps below act on the box before the
+      # post-deploy suite (they may start OBS or restart SongPlayer, they cut
+      # SP-program for the title check, they write "[CI PROBE]" to the
+      # Presenter), and minutes pass after the deploy's own lease wait. So
+      # the job waits out another repo's rig lease first, with the deploy's
+      # gate and bounds; the wait before the suite below stays.
+      - name: Wait for the rig lease (never act on the box over another repo's lease)
+        shell: powershell
+        timeout-minutes: 70
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          if (-not (Test-Path $py)) {
+            Write-Error "FAIL: $py not found - the rig-lease gate needs the box's Python 3.12"
+            exit 1
+          }
+          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json" --url "http://dev1:8890/rig-lease.json" --poll-seconds 30 --max-wait-seconds 3600
+          $code = $LASTEXITCODE
+          if ($code -eq 3) {
+            Write-Error "FAIL: another repo still holds the rig lease after 60 min - not acting on the box over it"
+            exit 1
+          }
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig-lease gate itself failed (exit $code)"
+            exit 1
+          }
+
       - name: Ensure OBS is running
         shell: powershell
         run: |
@@ -1565,10 +1591,12 @@ jobs:
           }
           Write-Host "OK: Resolume reachable + Responding=True"
 
-          # Find a playlist with videos and trigger playback.
+          # Find an ACTIVE playlist with videos and an NDI output name: only
+          # such a playlist has a pipeline, so only it can be on program.
           $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
           $testPl = $null
           foreach ($pl in $playlists) {
+            if (-not $pl.is_active -or -not $pl.ndi_output_name) { continue }
             $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
             if ($videos.Count -gt 0) {
               $testPl = $pl
@@ -1576,21 +1604,48 @@ jobs:
             }
           }
           if (-not $testPl) {
-            Write-Error "FAIL: No playlist with videos found for Resolume verification"
+            Write-Error "FAIL: No active playlist with videos found for Resolume verification"
             exit 1
           }
-          Write-Host "Triggering playback on '$($testPl.name)' (id=$($testPl.id)) for Resolume verification"
-          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
 
-          # Wait long enough for title to show: 1.5s show delay + 1s fade-in.
-          # Also wait for cold-start to fully wire the lookahead push to
-          # #sp-subs-next clips (asserted later in this step). 5s was too
-          # tight after Phase A added new modules; the lookahead push needs
-          # ~10s to populate after first playback request on a fresh process.
-          Start-Sleep -Seconds 15
+          # #221 lane 2 (release 0.71.0 review): only SP-program's playlist,
+          # the wall owner, writes the title and the lines; with "OBS manual"
+          # (-1) on program nobody does. A playlist played off program writes
+          # nothing, so the check would read whatever the owner shows, and
+          # fail with -1 on program. So the test playlist goes on SP-program
+          # first, through the dashboard's own cut, and SP-program gets back
+          # what it showed once the composition is read (also on a failure).
+          $sourceBefore = (Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program").source
+          Write-Host "SP-program source before the check: $sourceBefore"
+          $cutAway = ($sourceBefore -ne $testPl.id)
+          try {
+            if ($cutAway) {
+              $cut = @{ source = $testPl.id } | ConvertTo-Json -Compress
+              Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $cut | Out-Null
+              Write-Host "SP-program cut to '$($testPl.name)' (id=$($testPl.id)) for the check"
+            }
+            Write-Host "Triggering playback on '$($testPl.name)' (id=$($testPl.id)) for Resolume verification"
+            Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/play" -Method Post -UseBasicParsing | Out-Null
 
-          # Query Resolume composition for #sp-title clips.
-          $comp = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/composition" -TimeoutSec 10
+            # Wait long enough for title to show: 1.5s show delay + 1s fade-in.
+            # Also wait for cold-start to fully wire the lookahead push to
+            # #sp-subs-next clips (asserted later in this step). 5s was too
+            # tight after Phase A added new modules; the lookahead push needs
+            # ~10s to populate after first playback request on a fresh process.
+            Start-Sleep -Seconds 15
+
+            # Query Resolume composition for #sp-title clips.
+            $comp = Invoke-RestMethod -Uri "http://127.0.0.1:8090/api/v1/composition" -TimeoutSec 10
+          } finally {
+            # Cleanup before the assertions: release the player, then give
+            # SP-program back its source (a playlist, or -1 "OBS manual").
+            Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
+            if ($cutAway -and $null -ne $sourceBefore) {
+              $back = @{ source = $sourceBefore } | ConvertTo-Json -Compress
+              Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program/cut" -Method Post -ContentType "application/json" -Body $back | Out-Null
+              Write-Host "SP-program back on source $sourceBefore"
+            }
+          }
           $titleClips = @()
           foreach ($layer in $comp.layers) {
             foreach ($clip in $layer.clips) {
@@ -1608,9 +1663,6 @@ jobs:
           foreach ($c in $titleClips) {
             Write-Host "  $($c.Name) -> text='$($c.Text)' opacity=$($c.Opacity)"
           }
-
-          # Cleanup: pause playback before assertions so we always release the player.
-          Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
 
           if ($titleClips.Count -eq 0) {
             Write-Error "FAIL: Resolume is reachable but has zero #sp-title clips. Titles cannot reach the wall. Create a clip with '#sp-title' in its name."
