@@ -101,3 +101,14 @@ Rules for every post-deploy spec:
   `health.connections > 0`, `degraded_reason` null), as `post-deploy.spec.ts`
   and `post-deploy-dabing.spec.ts` do. `/api/v1/ndi/health` rows have no
   receiver field any more.
+
+## A failed post-deploy test's trace is a PUBLIC artifact (#229)
+
+`post-deploy.config.ts` keeps a trace on failure, and CI uploads the report
+(7 days, public repo). A trace records every response the spec read,
+including `request` fixture API calls. Before #229 masked the settings API,
+`post-deploy-av-sync`'s trace (it GETs `/api/v1/settings` for `cache_dir`)
+put 8 clear credentials into run 37423917199's artifact. A spec that reads a
+secret-bearing endpoint sets `test.use({ trace: "off" })` and asserts
+without printing a value: a boolean `toBe(true)` with a message that names
+the key (`post-deploy-settings-secrets.spec.ts`).

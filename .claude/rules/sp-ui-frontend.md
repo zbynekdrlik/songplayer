@@ -893,6 +893,15 @@ gives ("POST {path} → {status}"). Never parse `post_json`'s string, and never
 show a raw server body on the operator's line: map a reason code to Slovak
 through `sp_core` (`program_refusal::refusal_text`).
 
+## A 204 answer has no body: call the `*_json_empty` helper (#229)
+
+`api::get` / `post_json` parse the response body as JSON, so a handler that
+answers 204 No Content (the settings PATCH) reads as an error there: the
+Nastavenia form showed "Chyba pri ukladaní" after every successful save on
+the box. Call `patch_json_empty` / `post_json_empty` / `put_json_empty` for
+a 204 route. And a mock route answers the server's REAL status and body: the
+mock's 200 + JSON for that PATCH hid the bug from five specs.
+
 ## A Nastavenia spec must wait for the LOADED settings before it clicks (#210)
 
 `SettingsPage` fetches `GET /api/v1/settings` in a `spawn_local`, and the form's

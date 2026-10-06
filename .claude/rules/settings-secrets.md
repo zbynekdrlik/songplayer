@@ -73,6 +73,15 @@ never shows a secret; only the database holds it in clear.
 - Success = 204 with no body.
 - `UpdateSettingsRequest` has no `Debug`: its map carries secrets in clear.
 
+## Tests never print a secret, not even a fixture one
+
+- Fixture secrets contain `example` (the staging scan's placeholder rule)
+  and stay short; no hex or long alphanumeric runs.
+- A failing assertion must not print a value that holds one: `unwrap_err()`
+  on an `Ok` holding a peer list becomes `match … { Ok(_) => panic!(…) }`,
+  and a no-echo check (`!text.contains(KEY)`) runs BEFORE any assertion
+  whose message prints the response text.
+
 ## Who reads the secrets in clear
 
 - The workers — lyrics (Gemini, Genius), metadata, dabing, the OBS client,
