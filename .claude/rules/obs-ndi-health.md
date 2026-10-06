@@ -195,6 +195,12 @@ write — the A/V gate provisions its probe scene this way (`e2e/obs-driver.ts`)
   (`""`) outside the take and points it at `SP-program` only for it.
 - Always log the full obs-websocket error on a failed write
   (`d.requestStatus.code` + `comment` + the step).
+- **obs-websocket-js 5.0.8 never settles a `call` / `reidentify` whose
+  socket closes** (`onClose` emits `ConnectionClosed`, then `cleanup()`
+  drops the internal listeners the pending promise waits on; a LATER call
+  throws "Not connected"). A wait that must end listens to
+  `ConnectionClosed` itself, as `ObsDriver.waitForInputAudio` does
+  (#221 dev.18).
 
 ## The OBS client serves the #213 remote control (`ObsCommand::Remote`, `ObsEvent::Raw`)
 
