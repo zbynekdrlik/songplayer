@@ -360,6 +360,13 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
     expect(msg).not.toMatch(/pairing/i);
   });
 
+  test("one silent reading before the run is enough for a late start", async () => {
+    // Review round 7: the smallest metered silence, a single reading.
+    const msg = await boundMessage((t) => (t < 50 ? 0 : 0.25), 0, 500, 500);
+    expect(msg).toContain("rose above the floor only after silence, 450 ms before the bound");
+    expect(msg).toContain("started late");
+  });
+
   test("a late start whose readings stalled names when it began, not a hold-sized guess", async () => {
     // Review round 5: the open run's last reading may be up to the gap bound
     // before the end, so it may have begun more than the hold before it.
@@ -389,12 +396,15 @@ test.describe("A/V gate: wait for the probe's audio (#221 dev.18)", () => {
   });
 
   test("a run after an event gap counts again: two runs are gaps, never a late start", async () => {
-    // Review round 6: loud, no event for 600 ms, loud again and still open at
-    // the bound. The restart after the gap is a second run.
+    // Review round 6: one silent reading, loud, no event for 600 ms, loud
+    // again and still open at the bound. The restart after the gap is a
+    // second run. The silent reading first (review round 7) leaves the RUN
+    // COUNT as the only thing between this state and a "late start".
     const meters = fakeMeters();
     let t = 0;
     const wait = waitForInputAudio(meters.subscribe, PROBE, { now: () => t, timeoutMs: 50 });
-    for (t = 0; t <= 300; t += 50) meters.push([probeAt(0.25)]);
+    meters.push([probeAt(0)]);
+    for (t = 50; t <= 300; t += 50) meters.push([probeAt(0.25)]);
     for (t = 900; t <= 1_100; t += 50) meters.push([probeAt(0.25)]);
     t = 1_100;
     const msg = await wait.then(
