@@ -600,7 +600,8 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     // Every genlock input as cg OBS's newest line saw it (`summarizeInputs`);
     // the lock wait's bound lists them again for its last line. Candidates
     // for the box-wide recent_event latch (an input that wakes or reconnects
-    // with lifetime events, or a real relock / late hold), never proof.
+    // with lifetime events, or a real relock, late hold or backward step —
+    // the last invisible in both lists), never proof.
     console.log(`A/V gate: cg OBS's genlock inputs before the attach: ${summarizeInputs(lockEndpoint.lock)}`);
     const readLock = bundleStateRead(lockEndpoint.url, httpGet);
 

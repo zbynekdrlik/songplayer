@@ -50,11 +50,13 @@
  *    offender). The latch is box-wide: ANY rise of cg OBS's phase-event sum
  *    holds it — any genlock input that wakes or reconnects with lifetime
  *    events (e.g. after a SongPlayer restart, if cg OBS has another genlock
- *    input on `SP-program`, SongPlayer's only NDI sender), or a real relock
- *    or late hold on a live input. The inputs of the line before the attach
- *    (the spec logs them, [`summarizeInputs`]) and of the line at the bound
- *    (the bound's error lists them, with how long after the bind its read
- *    started) are candidates, never proof: they carry no times, and the
+ *    input on `SP-program`, SongPlayer's only NDI sender), or a real
+ *    relock, late hold or backward step on a live input (a backward step is
+ *    not in the facet: invisible in both lists). The inputs of the line
+ *    before the attach (the spec logs them, [`summarizeInputs`]) and of the
+ *    line at the bound (the bound's error lists them, with how long after
+ *    the bind SongPlayer saw its last answered read started) are
+ *    candidates, never proof: they carry no times, and the
  *    input with the most lifetime events is not evidence;
  * 4. the refusal trusts the newest line before the attach: a probe whose FIFO
  *    locked after that line (while still unlocked in it) is not refused.
@@ -267,7 +269,8 @@ export function probePhaseEvents(lock: GenlockLock, probeInput: string): number 
  * counts); "none" without inputs. The spec logs it for the line before the
  * attach, and the bound's error for the last answered line: candidates for
  * the box-wide `recent_event` latch (an input that woke or reconnected, or a
- * real relock / late hold), never proof — the lists carry no times, and the
+ * real relock, late hold or backward step — the last invisible in both),
+ * never proof — the lists carry no times, and the
  * input with the most lifetime events is not evidence (camera-box's own
  * top-offender trap).
  */
@@ -375,8 +378,9 @@ export function explainProbeLock(
     lock.reason === "recent_event"
       ? " recent_event is box-wide: ANY rise of cg OBS's phase-event sum in the last 60 s " +
         "latches it — a genlock input that woke or reconnected with lifetime events (events=0 " +
-        "in a list does not rule one out: backward steps are not shown), or a real relock or " +
-        "late hold on a live input. The inputs the gate logged ahead of the attach and the " +
+        "in a list does not rule one out: backward steps are not shown), or a real relock, " +
+        "late hold or backward step (not in the facet: invisible in both lists) on a live " +
+        "input. The inputs the gate logged ahead of the attach and the " +
         "inputs at the bound are candidates only (they carry no times, and the first list is " +
         "older than the attach); the input with the most lifetime events is not evidence."
       : "";
@@ -550,7 +554,8 @@ export async function waitForProbeLock(
     const sinceBind =
       opts.attachedAt === undefined
         ? ""
-        : ` (the last answered read started ${Math.round(lastAt - opts.attachedAt)} ms after the bind)`;
+        : ` (the last answered read started ${Math.round(lastAt - opts.attachedAt)} ms after the ` +
+          "bind SongPlayer saw)";
     const lastText =
       last === null
         ? "none"
