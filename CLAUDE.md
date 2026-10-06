@@ -374,4 +374,5 @@ genuine release optimization of sp-server's dependency graph.
   wall on whatever scene the last test happened to switch to.
   The A/V gate (`post-deploy-av-sync.spec.ts`) also puts cg OBS on its own
   probe scene "A/V gate (SP-program)" for the take (#221 lane 3: it records
-  `SP-program` there) and restores cg OBS's scene FIRST in `afterAll`.
+  `SP-program` there); `afterAll` idles the probe first, then restores the
+  program scene, then cg OBS's own scene.

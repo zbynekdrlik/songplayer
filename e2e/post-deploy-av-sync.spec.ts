@@ -494,12 +494,12 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     ]) {
       expect(fs.existsSync(p), `${label} must exist at ${p}`).toBe(true);
     }
-    // #221 lane 3: a run that died mid-take left cg OBS on the probe scene;
-    // there is no scene of the owner's to restore it to (afterAll idles the
-    // probe), so fail before touching anything.
+    // #221 lane 3: cg OBS left on the probe scene (a run that died mid-take,
+    // a genlock soak, a hand press) has no scene of the owner's to restore
+    // it to (afterAll idles the probe), so fail before touching anything.
     expect(
       cgStuckOnProbe,
-      `cg OBS is on the A/V gate's probe scene "${AV_PROBE_SCENE}" (a previous run died mid-take) — put cg OBS back on its own scene`,
+      `cg OBS is on the A/V gate's probe scene "${AV_PROBE_SCENE}" (a previous run that died mid-take, a genlock soak or a hand press left it there) — put cg OBS back on its own scene`,
     ).toBe(false);
 
     // 1. Put the baseline sp-* output on program.

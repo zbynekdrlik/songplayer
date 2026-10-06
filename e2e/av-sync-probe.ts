@@ -125,8 +125,9 @@ export type ProbeStep = "create_scene" | "create_input" | "add_to_scene" | "rese
  * [`PROBE_FIXED_SETTINGS`]) when the input is missing; else put the existing
  * input into the scene when it is not there, and RESET it on every run
  * ([`probeIdleSettings`]: its fixed settings again, and idle — a run that died
- * mid-take may have left it pointed, a hand edit may have changed a
- * setting). Never a removal.
+ * mid-take may have left it pointed, a hand edit may have changed one of
+ * its settings; only its settings: a hidden scene item or a muted input is
+ * not undone, the take then fails as unmeasurable). Never a removal.
  */
 export function probeSteps(state: ProbeState): ProbeStep[] {
   const steps: ProbeStep[] = [];

@@ -295,9 +295,10 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     latency), `ndi_audio` on, `genlock_monitor` and `genlock_burn` off and
     `ndi_bw_mode` 0 forced, `PROBE_FIXED_SETTINGS`), put into the scene when
     it is not there, and an existing probe RESET on every run (its fixed
-    settings again and idle, `probeIdleSettings`: a hand edit never
-    survives a run), NEVER removed (a receiving DistroAV input does not
-    delete reliably, above).
+    settings again and idle, `probeIdleSettings`: a hand edit of its
+    settings never survives a run; a hidden scene item or a muted input is
+    not undone, the take then fails as unmeasurable), NEVER removed (a
+    receiving DistroAV input does not delete reliably, above).
     It is not an sp-* name, so it is never a playlist scene in SongPlayer's
     catalog, and `pickBaselineScene` never picks it. Cost: one permanent
     technical scene in the owner's cg OBS scene list (a press of it by hand

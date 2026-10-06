@@ -23,8 +23,12 @@ name: Genlock soak (receiver ground-truth)
 # program source. The A/V gate's probe scene "A/V gate (SP-program)" is that
 # input only while it is POINTED: the gate keeps it IDLE (`ndi_source_name`
 # "") outside its take, so for a soak point it at "<HOST> (SP-program)" by
-# hand, and set it back to "" afterwards (a pointed probe holds a receiver
-# on SP-program and masks the post-deploy dark gate, `obs-ndi-health.md`).
+# hand and put cg OBS on the probe scene; afterwards set it back to "" (a
+# pointed probe holds a receiver on SP-program and masks the post-deploy
+# dark gate, `obs-ndi-health.md`) AND put cg OBS back on its own scene (the
+# next A/V gate refuses to start while cg OBS shows the probe scene). The
+# verify step counts that input (`CG_CHAIN_CGOBS_SRC_RE`; the verifier's
+# default `sp-.*_video` names inputs that receive nothing any more).
 # Run the soak in that state; the preflight writes the program source to the
 # job summary.
 
@@ -264,6 +268,8 @@ jobs:
         env:
           HOPS: ${{ inputs.hops }}
           SKEW_BOUND_MS: ${{ inputs.skew_bound_ms }}
+          # #221 lane 3: cg OBS's only input of SongPlayer is the probe (header).
+          CG_CHAIN_CGOBS_SRC_RE: '^A/V gate SP-program$'
         run: |
           set -uo pipefail
           HOPS="${HOPS:-cg-obs}"
