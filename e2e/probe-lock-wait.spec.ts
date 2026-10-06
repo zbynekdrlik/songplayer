@@ -15,7 +15,7 @@
  * exact view of the withhold: the facet reads the pairing's PENDING phase as
  * paired, and a woken probe's lifetime phase events latch `recent_event`
  * (`probe-lock-wait.ts`, the open design question on #221, comments
- * 6014055098 and 6014658984).
+ * 6014055098, 6014658984 and 6016284903).
  */
 
 import { test, expect } from "@playwright/test";
@@ -566,12 +566,14 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
         "sp-slow": { locked: true, connected: true, idle: false, relocks: 0, late_holds: 0 },
         [PROBE]: { locked: true, connected: true, idle: true, relocks: 2, late_holds: 1 },
         "OBS cam": { locked: false, connected: false, idle: false, relocks: "x" },
+        "SP-dabing in": { locked: true, connected: true, idle: false, relocks: 1, late_holds: "y" },
       },
     });
     expect(summarizeInputs(facet)).toBe(
       '"sp-slow" connected=true idle=false locked=true events=0; ' +
         `"${PROBE}" connected=true idle=true locked=true events=3; ` +
-        '"OBS cam" connected=false idle=false locked=false events=?',
+        '"OBS cam" connected=false idle=false locked=false events=?; ' +
+        '"SP-dabing in" connected=true idle=false locked=true events=?',
     );
     expect(summarizeInputs({ state: "LOCKED", reason: "none", inputs: {} })).toBe("none");
     expect(summarizeInputs({ state: "LOCKED", reason: "none" })).toBe("none");
