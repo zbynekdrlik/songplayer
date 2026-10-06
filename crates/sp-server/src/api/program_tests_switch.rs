@@ -115,7 +115,7 @@ async fn set_active(state: &AppState, pid: i64, active: bool) {
         .unwrap();
 }
 
-/// The cut's status and its body as text (a refusal answers plain text).
+/// The cut's status and its body as text, whatever it is.
 async fn cut_text(state: &AppState, source: i64) -> (StatusCode, String) {
     let req = Request::builder()
         .method("POST")
@@ -140,6 +140,10 @@ async fn assert_refused(state: &AppState, source: i64, reason: &str, on_program:
     let cuts = state.program_bus.status().health.cuts;
     let (status, text) = cut_text(state, source).await;
     assert_eq!(status, StatusCode::CONFLICT, "playlist {source}: {text}");
+    // Review round 2: the body names the reason code, so the dashboard can
+    // say why in Slovak (`sp_core::program_refusal::refusal_text`).
+    let body: Value = serde_json::from_str(&text).expect("a JSON refusal body");
+    assert_eq!(body["reason"], reason, "{text}");
     let program = state.program_bus.status();
     assert_eq!(program.source, Some(on_program), "SP-program unchanged");
     assert_eq!(program.health.cuts, cuts, "nothing was cut");

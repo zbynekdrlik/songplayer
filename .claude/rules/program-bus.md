@@ -17,6 +17,7 @@ paths:
   - "crates/sp-server/src/api/program*.rs"
   - "sp-ui/src/components/program_control.rs"
   - "e2e/program-control.spec.ts"
+  - "crates/sp-core/src/program_refusal.rs"
 ---
 
 # Program bus + NDI `SP-program` (#209, B1 of EPIC #174)
@@ -336,8 +337,10 @@ included, is comment 5872871751).
   reads the polled answer, never `store.playlists` (loaded once at app
   start, never refreshed). Nothing is disabled before the first poll (or
   while `cut_refused` is `null`): a cut the server refuses then (409, told
-  apart by `api::post_json_status`) shows "Strih odmietnutý: <why>" on
-  `program-error` — the generic text while no poll named the reason.
+  apart by `api::post_json_status`, which keeps a non-2xx answer's status
+  and body) shows "Strih odmietnutý: <why>" on `program-error`, `<why>` =
+  `refusal_text` of the 409 body's `reason` (the generic text for a body
+  it cannot read).
   The mock (`e2e/mock-api.mjs`) keeps program state in memory —
   `POST /__mock/program-reset` in `beforeEach`/`afterEach`. It mirrors the
   refusal (`cutRefusal` = `cut_scene` over `SceneCatalog::new`: blank

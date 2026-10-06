@@ -435,12 +435,18 @@ test.describe("a playlist the cut refuses", () => {
       data: { source: 30 },
     });
     expect(inactive.status()).toBe(409);
-    expect(await inactive.text()).toContain("inactive");
+    expect(await inactive.json()).toEqual({
+      reason: "playlist_inactive",
+      error: expect.stringContaining("inactive"),
+    });
     const noScene = await request.post("/api/v1/program/cut", {
       data: { source: 31 },
     });
     expect(noScene.status()).toBe(409);
-    expect(await noScene.text()).toContain("names no scene");
+    expect(await noScene.json()).toEqual({
+      reason: "no_scene",
+      error: expect.stringContaining("names no scene"),
+    });
     program = await (await request.get("/api/v1/program")).json();
     expect(program.source).toBe(2);
     expect(program.health.cuts).toBe(1);
@@ -465,7 +471,8 @@ test.describe("a playlist the cut refuses", () => {
   }) => {
     // The program answers carry no refusals (`cut_refused: null`, as when
     // the server cannot read its playlists), so no button is disabled, and
-    // the server still refuses the cut (409).
+    // the server still refuses the cut (409 + `{reason, error}`): the error
+    // line says why from the answer's reason.
     await request.post("/__mock/program-refusals-hidden", {
       data: { hidden: true },
     });
@@ -487,7 +494,7 @@ test.describe("a playlist the cut refuses", () => {
     expect(box).not.toBeNull();
     await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
     await expect(page.getByTestId("program-error")).toHaveText(
-      "Strih odmietnutý: Strih na tento playlist server odmieta",
+      "Strih odmietnutý: Playlist je neaktívny — strih by zatemnil celý program (stenu, FOH, Presenter, stream)",
     );
     await expect(page.getByTestId("program-source")).toHaveText(
       "Na programe: Worship",

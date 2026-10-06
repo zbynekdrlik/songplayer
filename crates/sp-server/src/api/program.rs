@@ -14,8 +14,9 @@
 //!   `switch_order`, recorded as `remote.last_remote_cut`. #221 B4 step 6:
 //!   cg OBS is told nothing (the legacy mirror is deleted). #221
 //!   ROZHODNUTÉ 6022247729: a playlist that is inactive or whose catalog
-//!   names no scene is refused with `409` (every consumer takes
-//!   SP-program, so the cut would black them all), recorded as a keep.
+//!   names no scene is refused with `409` + `{reason, error}` (every
+//!   consumer takes SP-program, so the cut would black them all), recorded
+//!   as a keep.
 //!
 //! Both answer the program state plus `vban`, the #210 VBAN audio output's
 //! telemetry (`playback::vban_out::VbanStatus`), `input`, the #212 NDI
@@ -59,6 +60,15 @@ use crate::remote::{RemoteSettings, RemoteStatus, load_remote_settings};
 pub struct CutRequest {
     /// The playlist whose output goes on program, or `-1` for the NDI input.
     pub source: i64,
+}
+
+/// The `409` body of a refused cut (#221 ROZHODNUTÉ 6022247729): the reason
+/// code (`sp_core::program_refusal`, which the dashboard turns into its
+/// Slovak text) and the reason in words.
+#[derive(Debug, Serialize)]
+pub struct CutRefusedBody {
+    pub reason: &'static str,
+    pub error: &'static str,
 }
 
 /// The body of both program routes: the program state + the VBAN, NDI input
@@ -173,7 +183,11 @@ pub async fn post_program_cut(
     let status = match switch_source(&state.pool, bus, body.source, Via::Dashboard).await {
         Ok(status) => status,
         Err(SourceError::Refused(refusal)) => {
-            return (StatusCode::CONFLICT, refusal.message()).into_response();
+            let body = CutRefusedBody {
+                reason: refusal.reason(),
+                error: refusal.message(),
+            };
+            return (StatusCode::CONFLICT, Json(body)).into_response();
         }
         Err(SourceError::Store(e)) => {
             warn!(%e, source = body.source, "program cut: nothing was cut");

@@ -22,13 +22,18 @@ pub async fn post_json<T: Serialize, R: DeserializeOwned>(
     path: &str,
     body: &T,
 ) -> Result<R, String> {
-    post_json_status(path, body).await.map_err(|(_, e)| e)
+    post_json_status(path, body)
+        .await
+        .map_err(|(status, text)| match status {
+            0 => text,
+            _ => format!("POST {path} → {status}"),
+        })
 }
 
-/// [`post_json`] that keeps the HTTP status of a non-2xx answer
-/// (`Err((status, message))`; status 0 when there was no answer or a 2xx
-/// answer did not decode), so a caller can tell a refusal (#221: a program
-/// cut answered 409) from any other failure.
+/// [`post_json`] that keeps a non-2xx answer: `Err((status, body))`, so a
+/// caller can tell a refusal (#221: a program cut answered 409 with its
+/// `{reason, error}`) from any other failure; `Err((0, error))` when there
+/// was no answer or a 2xx answer did not decode.
 pub async fn post_json_status<T: Serialize, R: DeserializeOwned>(
     path: &str,
     body: &T,
@@ -40,7 +45,8 @@ pub async fn post_json_status<T: Serialize, R: DeserializeOwned>(
         .await
         .map_err(|e| (0, e.to_string()))?;
     if !resp.ok() {
-        return Err((resp.status(), format!("POST {} → {}", path, resp.status())));
+        let text = resp.text().await.unwrap_or_default();
+        return Err((resp.status(), text));
     }
     resp.json::<R>().await.map_err(|e| (0, e.to_string()))
 }

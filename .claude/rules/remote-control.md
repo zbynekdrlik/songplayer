@@ -339,9 +339,12 @@ deleted), and every record has `cg_forward` null:
 
 - a playlist whose catalog names a scene: cut, published with that scene
   (the record's `scene` is the catalog name, `via: dashboard`);
-- a playlist whose catalog names no scene is REFUSED, HTTP 409 with the
-  reason's text, nothing on SP-program changes (source, on-air scene,
-  persisted source, `health.cuts`), recorded as a keep (the record's
+- a playlist whose catalog names no scene is REFUSED, HTTP 409 with a
+  JSON body `{reason, error}` (`api::program::CutRefusedBody`: the reason
+  code + the reason in words; the dashboard shows the code's Slovak text,
+  `sp_core::program_refusal::refusal_text`), nothing on SP-program
+  changes (source, on-air scene, persisted source, `health.cuts`),
+  recorded as a keep (the record's
   `scene` is the playlist id, `source` null) with `playlist_inactive`
   (not among the active playlists) or `no_scene` (active, but no / a
   shared NDI output name). ROZHODNUTÉ 6022247729 (the 0.71.0 release
@@ -368,10 +371,12 @@ press resolves a scene NAME through the catalog, so it never lands on such
 a playlist. A startup restore can still put one on program (a playlist
 deactivated after it was cut to); the cut away from it works as before.
 The restore is deliberately NOT refused (review round 1): it would not
-prevent a black program — an inactive (or unnamed) playlist has no
-pipeline, so restoring it and restoring nothing both carry the standby
-black — and an active playlist with a SHARED name still has a picture,
-which restoring keeps. The dashboard shows that playlist on program with
+prevent a black program — an inactive playlist, or an active one with an
+EMPTY NDI name, has no pipeline (`startup_pipelines.rs` and
+`runtime_pipeline.rs` check `is_empty()`, untrimmed), so restoring it and
+restoring nothing both carry the standby black — and an active playlist
+with a whitespace-only or a SHARED name (refused `no_scene`: the catalog
+trims) still has a pipeline and a picture, which restoring keeps. The dashboard shows that playlist on program with
 its button disabled, and the operator cuts away as usual.
 
 A dashboard cut announces no transition events (unchanged from L3); its
@@ -630,9 +635,9 @@ playlists on air) went with it.
   dashboard`, `cg_forward` null), is published and recorded with its
   catalog scene, -1 a cut only, a failed persist (500), and the
   `switch_order` wait. ROZHODNUTÉ 6022247729: a cut to an inactive playlist
-  and to one with an empty or a shared NDI name is 409 with its text
-  (`cut_text` reads the plain body), nothing changes and a keep is
-  recorded (`assert_refused`); after a refusal a playlist with a scene and
+  and to one with an empty or a shared NDI name is 409 with its
+  `{reason, error}` body (`cut_text` reads it as text), nothing changes
+  and a keep is recorded (`assert_refused`); after a refusal a playlist with a scene and
   -1 still cut; both answers list `cut_refused` and a re-activated
   playlist leaves it.
 - `session_tests_cap.rs` (L4a): 16 identified sessions, the 17th handshake

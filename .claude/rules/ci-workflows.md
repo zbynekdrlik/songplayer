@@ -350,7 +350,8 @@ title and the lines (`may_write_wall`), and with "OBS manuál" (-1) on
 program nobody does, so playing a playlist off program proves nothing. The
 step picks the test playlist by the baseline discipline
 (`e2e/obs-baseline-scene.ts`: an active `sp-slow` playlist with videos, else
-any `sp-*` but `sp-fast` and `sp-warmup`, the sync tone), cuts SP-program to
+any `sp-*` but `sp-fast` and `sp-warmup`, the sync tone; never one listed in
+`GET /api/v1/program` → `cut_refused`, #221: the cut would answer 409), cuts SP-program to
 it with `POST /api/v1/program/cut`, plays, reads Arena's composition, and in
 a `finally` cuts back to the old source with NO pause (the test playlist
 leaves program and pauses itself after the fade, so the program never

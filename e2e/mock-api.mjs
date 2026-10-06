@@ -1162,12 +1162,12 @@ app.post("/api/v1/program/cut", (req, res) => {
       via: "dashboard",
       cg_forward: null,
     };
-    res.status(409).send(CUT_REFUSAL_TEXT[refusal]);
+    res.status(409).json({ reason: refusal, error: CUT_REFUSAL_TEXT[refusal] });
     return;
   }
   const playlist = activePlaylists().find((p) => p.id === source);
   programLastRemoteCut = {
-    scene: source === -1 ? "OBS manuál" : playlist.ndi_output_name.toLowerCase(),
+    scene: source === -1 ? "OBS manuál" : asciiLower(playlist.ndi_output_name),
     action: source === -1 ? "input" : "playlist",
     source,
     reason: null,

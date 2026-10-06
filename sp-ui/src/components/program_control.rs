@@ -25,7 +25,8 @@
 //! the rest), and their buttons are DISABLED with a tooltip saying why
 //! (`sp_core::program_refusal::cut_button_title`, the vocabulary the server
 //! records). Before the first poll nothing is disabled; a cut the server
-//! refuses then (409) shows "Strih odmietnutý: <why>" on the error line.
+//! refuses then (409 + `{reason, error}`) shows "Strih odmietnutý: <why>"
+//! on the error line, `<why>` = the reason code's Slovak text.
 //!
 //! Testids (set here, never by a caller): `program-control`, `program-source`
 //! (the "Na programe: …" line), `program-transition` (the "Prechod: …" line),
@@ -61,7 +62,8 @@ pub struct ProgramState {
     pub cut_refused: Option<Vec<CutRefused>>,
 }
 
-/// One entry of `GET /api/v1/program` → `cut_refused`.
+/// One entry of `GET /api/v1/program` → `cut_refused`; also the part of a
+/// refused cut's 409 body (`{reason, error}`) this control reads.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct CutRefused {
     #[serde(default)]
@@ -189,12 +191,12 @@ pub fn ProgramControl() -> impl IntoView {
                     let _ = error.try_set(None);
                 }
                 // #221: refused (an inactive or scene-less playlist; its
-                // button was not disabled yet). Say why, from the reason the
-                // last poll told — the generic text until one did.
-                Err((409, _)) => {
-                    let reason = program
-                        .try_with_untracked(|s| s.refusal(id).map(str::to_string))
-                        .flatten()
+                // button was not disabled yet). Say why: the 409 body's
+                // reason code in Slovak (the generic text for a body it
+                // cannot read).
+                Err((409, body)) => {
+                    let reason = serde_json::from_str::<CutRefused>(&body)
+                        .map(|r| r.reason)
                         .unwrap_or_default();
                     let why = refusal_text(&reason);
                     let _ = error.try_set(Some(format!("Strih odmietnutý: {why}")));

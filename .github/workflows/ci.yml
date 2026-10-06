@@ -1602,11 +1602,19 @@ jobs:
           # "E2E must not switch to disruptive OBS scenes"): its scene (the
           # lowercased NDI output name, the scene catalog's rule) is sp-slow
           # if there is one, else any sp-* scene but sp-fast and sp-warmup
-          # (the sync tone). This step puts it on program for ~20 s.
+          # (the sync tone). This step puts it on program for ~20 s. Never one
+          # the program cut refuses (#221: listed in cut_refused, e.g. an NDI
+          # name another active playlist shares; the cut would answer 409).
+          $refusedIds = @()
+          $programNow = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program"
+          if ($null -ne $programNow.cut_refused) {
+            foreach ($r in $programNow.cut_refused) { $refusedIds += $r.source }
+          }
           $playlists = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists"
           $candidates = @()
           foreach ($pl in $playlists) {
             if (-not $pl.is_active -or -not $pl.ndi_output_name) { continue }
+            if ($refusedIds -contains $pl.id) { continue }
             $scene = $pl.ndi_output_name.ToLowerInvariant()
             if (-not $scene.StartsWith("sp-") -or $scene -eq "sp-fast" -or $scene -eq "sp-warmup") { continue }
             $videos = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/playlists/$($pl.id)/videos"
