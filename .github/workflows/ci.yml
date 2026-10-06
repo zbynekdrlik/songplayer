@@ -2090,6 +2090,31 @@ jobs:
           }
           Write-Host "OK: the A/V gate venv at $venv has numpy $version with numpy.fft"
 
+      # #221 lane 3 (camera-box request, 6.10.2026): the post-deploy suite
+      # switches cg OBS's program for the A/V gate's take (the probe scene)
+      # and presses scenes through the facade, so it waits out another
+      # repo's rig lease as the deploy does: minutes pass between the
+      # deploy's wait and the take. Same gate, same bounds.
+      - name: Wait for the rig lease (never run the post-deploy suite over another repo's lease)
+        shell: powershell
+        timeout-minutes: 70
+        run: |
+          $py = "C:\Program Files\Python312\python.exe"
+          if (-not (Test-Path $py)) {
+            Write-Error "FAIL: $py not found - the rig-lease gate needs the box's Python 3.12"
+            exit 1
+          }
+          & $py scripts\rig_lease_gate.py --own-repo "${{ github.repository }}" --url "http://10.77.9.200:8890/rig-lease.json" --url "http://dev1:8890/rig-lease.json" --poll-seconds 30 --max-wait-seconds 3600
+          $code = $LASTEXITCODE
+          if ($code -eq 3) {
+            Write-Error "FAIL: another repo still holds the rig lease after 60 min - not running the post-deploy suite over it"
+            exit 1
+          }
+          if ($code -ne 0) {
+            Write-Error "FAIL: the rig-lease gate itself failed (exit $code)"
+            exit 1
+          }
+
       - name: Feature-level Playwright (post-deploy spec)
         shell: powershell
         env:

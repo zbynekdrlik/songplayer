@@ -301,8 +301,11 @@ stops SongPlayer:
   failure and fails the job.
 - Residual: the gate reads the lease, it does not HOLD it. A lease another
   repo takes in the ~1 min between the check and "Deploy SongPlayer"
-  (artifact downloads) is not seen; the E2E job after the deploy does not
-  check it either.
+  (artifact downloads) is not seen. The E2E job runs the same gate again
+  right before "Feature-level Playwright (post-deploy spec)" (camera-box's
+  request, 6.10.2026). The suite switches cg OBS's program for the A/V
+  gate's probe scene and presses scenes through the facade, and minutes
+  pass between the deploy's wait and the take.
 - Hardening (review rounds 3-4): a body over 64 KiB (`MAX_BODY_BYTES`; a
   lease is ~400 B; the bound is pinned exactly), JSON nested past the
   recursion limit, bad UTF-8, a non-HTTP listener, a body shorter than its
