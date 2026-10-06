@@ -11,10 +11,12 @@
 import { test, expect } from "@playwright/test";
 import {
   ANALYSIS_TIMEOUT_MS,
+  BUSY_RETRY_MS,
   CLEANUP_MS,
   MAX_TAKES,
   PLAY_WAIT_MS,
   RECORD_MS,
+  REMUX_SIBLING_WAIT_MS,
   RETAKE_BEFORE_MS,
   SKIP_WAIT_MS,
   STOP_RECORD_MS,
@@ -45,6 +47,10 @@ test.describe("A/V gate time budget (#147, #221)", () => {
       15_000, 30_000, 20_000, 10_000,
     ]);
     expect([ANALYSIS_TIMEOUT_MS, CLEANUP_MS]).toEqual([60_000, 35_000]);
+    // Review round 2: the cleanup is the spec's own bounds — the wait for a
+    // recording's remux sibling, then the busy-file retries of its two files.
+    expect(CLEANUP_MS).toBe(REMUX_SIBLING_WAIT_MS + 2 * BUSY_RETRY_MS);
+    expect([REMUX_SIBLING_WAIT_MS, BUSY_RETRY_MS]).toEqual([15_000, 10_000]);
     expect(LOCK_WAIT_WORST_MS).toBe(25_000);
     expect(AUDIO_WAIT_TIMEOUT_MS).toBe(20_000);
   });

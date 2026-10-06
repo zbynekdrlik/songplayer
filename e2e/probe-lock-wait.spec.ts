@@ -6,12 +6,16 @@
  * dev.18 waits for the probe's `InputVolumeMeters`, which is tapped BEFORE
  * camera-box's genlock audio-pairing withhold: it proves DistroAV delivers
  * audio, never that the mix gets it. The main session's ROZHODNUTÉ
- * (#221 comment 6012938501) makes the wait exact: before the meter wait, the
- * gate polls camera-box's `genlock_lock` facet on cg OBS's `:8899`
- * `/bundle-state.json` (camera-box's read path, #221 comment 6012957666)
- * until the probe's `idle` is false, its `locked` is true, and the box is
- * `LOCKED` for reason `none`. `idle === false` proves the heartbeat is from
- * after the attach.
+ * (#221 comment 6012938501) adds a wait on cg OBS's genlock state before the
+ * meter wait: the gate polls camera-box's `genlock_lock` facet on cg OBS's
+ * `:8899/bundle-state.json` (camera-box's read path, #221 comment
+ * 6012957666) until the probe is connected, its `idle` is false (the line
+ * is from after the attach, given a probe idle for a minute before it), its
+ * `locked` is true, and the box is `LOCKED` for reason `none`. It is not an
+ * exact view of the withhold: the facet reads the pairing's PENDING phase as
+ * paired, and a woken probe's lifetime phase events latch `recent_event`
+ * (`probe-lock-wait.ts`, the open design question on #221, comments
+ * 6014055098 and 6014658984).
  */
 
 import { test, expect } from "@playwright/test";
@@ -27,6 +31,7 @@ import {
   parseGenlockLock,
   probeAttachRefusal,
   probeLockVerdict,
+  probePhaseEvents,
   probeReadyForTake,
   resolveBundleState,
   waitForProbeLock,
@@ -189,7 +194,7 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(DEFAULT_BUNDLE_STATE_URLS).toHaveLength(3);
   });
 
-  test("all four hold: the probe receives, it is locked, the box is LOCKED for none → go", () => {
+  test("all hold: the probe receives, it is locked, the box is LOCKED for none → go", () => {
     expect(probeLockVerdict(lock("LOCKED", "none", probe()), PROBE)).toEqual({ go: true, unmet: [] });
   });
 
@@ -394,9 +399,44 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(refusal).toContain(`shows the probe "${PROBE}" receiving (idle false)`);
     expect(refusal).toContain("re-run");
     expect(refusal).toContain("(#221)");
-    // Unlocked does not matter: only a probe that is not idle is refused.
+    // Review round 2: only a line that could read as a GO is refused. An
+    // UNLOCKED probe (a never-attached one right after cg OBS starts reads
+    // connected and not yet classified idle, but unlocked) cannot GO without
+    // new frames, so it is not refused; nor is a non-boolean idle.
     const unlocked = lock("DEGRADED", "audio_pairing", probe({ locked: false }));
-    expect(probeAttachRefusal(unlocked, PROBE)).toContain("receiving");
+    expect(probeAttachRefusal(unlocked, PROBE)).toBeNull();
+    expect(probeAttachRefusal(lock("LOCKED", "none", probe({ idle: "false" })), PROBE)).toBeNull();
+    // The refusal says how long to wait, and never claims what the caller did.
+    expect(refusal).toContain("~90 s");
+    expect(refusal).not.toMatch(/idled it/);
+  });
+
+  test("a woken probe's lifetime phase events are named, before the attach and in the bound", () => {
+    // Review round 2 (camera-box GenlockLockState.hpp genlock_input_phase_events,
+    // OBSBasicStatusBar.cpp): an idle probe contributes 0 phase events, so its
+    // lifetime relocks + late holds come back as a RISE when it wakes, which
+    // latches DEGRADED/recent_event for 60 s.
+    expect(probePhaseEvents(lock("LOCKED", "none", probe({ relocks: 2, late_holds: 1 })), PROBE)).toBe(3);
+    expect(probePhaseEvents(lock("LOCKED", "none", probe({ relocks: 0, late_holds: 0 })), PROBE)).toBe(0);
+    // Not counters (or no probe): unknown.
+    expect(probePhaseEvents(lock("LOCKED", "none", probe({ relocks: null })), PROBE)).toBeNull();
+    expect(probePhaseEvents(lock("LOCKED", "none", null), PROBE)).toBeNull();
+    const woke = explainProbeLock(
+      lock("DEGRADED", "recent_event", probe({ relocks: 2, late_holds: 1 }), {
+        recent_event_inputs: [{ name: PROBE, events: 3 }],
+      }),
+      PROBE,
+    );
+    expect(woke).toContain("recent_event names the probe");
+    expect(woke).toContain("lifetime");
+    expect(woke).toContain("60 s");
+    // Another input named: the generic text, naming it.
+    const other = explainProbeLock(
+      lock("DEGRADED", "recent_event", probe(), { recent_event_inputs: [{ name: "sp-slow", events: 1 }] }),
+      PROBE,
+    );
+    expect(other).toContain('"DEGRADED" (reason "recent_event")');
+    expect(other).not.toContain("names the probe");
   });
 
   test("waitForProbeLock: idle → DEGRADED/audio_pairing → LOCKED/none, polled every 250 ms", async () => {
