@@ -17,7 +17,8 @@
 //!   producer / emit thread.
 //! * With a viewer, the downscale runs on the decode thread (nearest-neighbour,
 //!   no encode) into a RECYCLED buffer; a full channel DROPS the frame (the
-//!   child paces at CFR) — never blocks.
+//!   feeder takes the newest canvas per 40 ms slot of the monotonic clock
+//!   anyway, #221) — never blocks.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -39,7 +40,9 @@ pub const OUT_NV12_LEN: usize = (OUT_W as usize) * (OUT_H as usize) * 3 / 2;
 const BLACK_Y: u8 = 16;
 const NEUTRAL_C: u8 = 128;
 
-/// Bounded video backlog handed to the feeder (drop-on-full; the child paces CFR).
+/// Bounded video backlog handed to the feeder (drop-on-full; the feeder takes
+/// the newest canvas per 40 ms slot of the monotonic clock,
+/// `preview_video_clock.rs`).
 const VIDEO_CHANNEL_CAP: usize = 4;
 /// Bounded audio backlog (small f32 blocks; drop-on-full so the emit path never waits).
 const AUDIO_CHANNEL_CAP: usize = 48;
@@ -179,7 +182,8 @@ pub fn decode_seam_lead_ms() -> u32 {
 
 /// How many interleaved-stereo f32 samples of SILENCE the audio feeder prepends
 /// to align the preview's sample-count audio timeline with the video's
-/// wall-clock timeline (#178 round 3). `connect_gap_ms` is how long the video
+/// frame-count timeline (#178 round 3; both on the monotonic clock since
+/// #221). `connect_gap_ms` is how long the video
 /// input had already been feeding when the audio input connected (feed-on-connect
 /// opens video first), capped at 5 s so a late-connecting audio input can never
 /// prepend an unbounded silence; `lead_ms` is the decode-seam A/V lead
@@ -197,14 +201,15 @@ pub fn audio_preroll_samples(connect_gap_ms: u64, lead_ms: u32) -> usize {
 pub const PREVIEW_AUDIO_FRAMES_PER_MS: u64 = 48;
 
 /// Pad threshold (#184 round G2): when the audio written so far lags the wall
-/// clock by MORE than this, the feeder writes silence up to the wall — on a
+/// (the real time elapsed on the monotonic clock, #221) by MORE than this, the
+/// feeder writes silence up to the wall — on a
 /// block AND on every feeder poll (200 ms in G2, 30 ms since round G3), so
-/// ffmpeg (which interleaves the wall-clock video with the sample-count audio by
+/// ffmpeg (which interleaves the counted video with the sample-count audio by
 /// timestamp) is never starved of audio and never stops emitting fragments.
 pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
 
 /// Ahead bound (#184 round G2): a block that would push the written audio MORE
-/// than this ahead of the wall clock is trimmed. Round G's add-only gap fill
+/// than this ahead of the wall is trimmed. Round G's add-only gap fill
 /// padded silence while the decode-seam blocks were late and then APPENDED the
 /// late catch-up burst behind that silence, so every hiccup permanently shifted
 /// the preview audio later than its video — the ~70 s "fader heard a minute
@@ -212,7 +217,7 @@ pub const ALIGN_PAD_THRESHOLD_MS: u64 = 150;
 pub const MAX_AHEAD_MS: u64 = 300;
 
 /// Where a trimmed burst lands (#184 round G2): its OLDEST frames are dropped
-/// so the written audio ends this far ahead of the wall clock (a little headroom
+/// so the written audio ends this far ahead of the wall (a little headroom
 /// for the next on-time block, well inside [`MAX_AHEAD_MS`]).
 pub const ALIGN_TARGET_AHEAD_MS: u64 = 100;
 
@@ -227,10 +232,10 @@ pub struct AlignAction {
 
 /// Silence (stereo frames) to write when NO block arrived within the feeder's
 /// poll (#184 round G2 — 200 ms then, 30 ms since round G3): everything up to
-/// the wall clock once the written audio lags it by more than
+/// the wall once the written audio lags it by more than
 /// [`ALIGN_PAD_THRESHOLD_MS`], else nothing. `wall_frames` is the target
-/// position on the audio timeline (the
-/// elapsed wall time since the feeder started, plus its start preroll), and
+/// position on the audio timeline (the real time elapsed on the monotonic
+/// clock since the feeder started, plus its start preroll), and
 /// `written_frames` the stereo frames already written. Never negative.
 pub fn align_timeout(wall_frames: u64, written_frames: u64) -> usize {
     let threshold = ALIGN_PAD_THRESHOLD_MS * PREVIEW_AUDIO_FRAMES_PER_MS;
@@ -254,8 +259,9 @@ pub fn block_tail_range(skip_frames: usize, block_samples: usize) -> std::ops::R
     start..whole
 }
 
-/// Keep the preview's SAMPLE-COUNT audio timeline on the video's WALL-CLOCK
-/// timeline in BOTH directions for one block of `block_frames` stereo frames
+/// Keep the preview's SAMPLE-COUNT audio timeline on the video's timeline (the
+/// real time elapsed on the monotonic clock, #221) in BOTH directions for one
+/// block of `block_frames` stereo frames
 /// (#184 round G2, replacing the add-only #178 item-15 gap fill): pad up to the
 /// wall when behind by more than [`ALIGN_PAD_THRESHOLD_MS`] (exactly like
 /// [`align_timeout`]); then, if the block would end more than [`MAX_AHEAD_MS`]
@@ -396,7 +402,7 @@ impl StreamShared {
         letterbox_nv12_into(sw, sh, stride, nv12, &mut buf);
         match self.video_tx.try_send(buf) {
             Ok(()) => {}
-            Err(TrySendError::Full(b)) => self.recycle(b),
+            Err(TrySendError::Full(b)) => self.recycle_frame(b),
             Err(TrySendError::Disconnected(_)) => {}
         }
     }
@@ -459,8 +465,14 @@ impl StreamShared {
         vec![0u8; OUT_NV12_LEN]
     }
 
+    /// Hand a canvas buffer BACK to the tap's pool so the next watched frame
+    /// letterboxes into it (#147 round 10): a full channel's dropped frame,
+    /// and the encoder's video feeder's frame once it is done with it. Before
+    /// the feeder recycled, every watched frame was a fresh zeroed 337.5 KB
+    /// allocation. A buffer of the wrong size, or one past `POOL_MAX`, is
+    /// freed instead (the pool is bounded).
     #[cfg_attr(test, mutants::skip)]
-    fn recycle(&self, buf: Vec<u8>) {
+    pub fn recycle_frame(&self, buf: Vec<u8>) {
         if buf.len() != OUT_NV12_LEN {
             return;
         }
@@ -469,22 +481,6 @@ impl StreamShared {
                 p.push(buf);
             }
         }
-    }
-
-    /// Feeder side (encoder child): write one tapped canvas frame to the child's
-    /// video input, then hand the buffer BACK to the tap's pool so the next
-    /// watched frame letterboxes into it (#147 round 10). Before this the feeder
-    /// dropped every written frame, the pool refilled only on a full channel,
-    /// and every watched frame was a fresh zeroed 337.5 KB allocation. The
-    /// buffer is recycled on a write error too (the pool is bounded).
-    pub fn write_frame<W: std::io::Write>(
-        &self,
-        out: &mut W,
-        frame: Vec<u8>,
-    ) -> std::io::Result<()> {
-        let written = out.write_all(&frame);
-        self.recycle(frame);
-        written
     }
 
     /// Feeder side (encoder child): drain the video/audio backlog.

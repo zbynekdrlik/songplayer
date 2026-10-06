@@ -49,6 +49,8 @@ pub mod preview_audio_probe;
 pub mod preview_encoder;
 #[path = "preview_stream.rs"]
 pub mod preview_stream;
+#[path = "preview_video_clock.rs"]
+pub mod preview_video_clock;
 
 use preview_stream::{DecodeTaps, StreamTap};
 

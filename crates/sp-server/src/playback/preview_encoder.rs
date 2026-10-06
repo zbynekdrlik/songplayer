@@ -32,6 +32,7 @@ use super::preview_audio_probe::log_feed_level;
 use super::preview_stream::{
     OUT_H, OUT_W, PREVIEW_AUDIO_FRAMES_PER_MS, StreamShared, audio_preroll_samples,
 };
+use super::preview_video_clock::{PREVIEW_FPS, spawn_video_feeder};
 
 /// Encoder preference ladder: hardware first, software last.
 pub const ENCODER_LADDER: [&str; 4] = ["h264_nvenc", "h264_qsv", "h264_amf", "libx264"];
@@ -173,12 +174,19 @@ pub fn parse_available_encoders(encoders_stdout: &str) -> Vec<String> {
 /// `libx264` additionally gets `-preset ultrafast -tune zerolatency` for the
 /// low-latency software path.
 ///
-/// #178 round 3 — ONLY the video input is wall-clock stamped. The raw f32le PCM
-/// input keeps its SAMPLE-COUNT timestamps: `-use_wallclock_as_timestamps 1` on
-/// the bursty PCM made the box's ffmpeg (N-123867, 2026-04) mux ZERO audio
-/// packets (1 traf per moof), and an fMP4 whose audio track never fills is
-/// unplayable in MSE forever (`buffered` is the track intersection). A/V is
-/// aligned on OUR side instead — the audio feeder prepends silence
+/// #221 — NO input is wall-clock stamped: both COUNT on SongPlayer's monotonic
+/// clock. The rawvideo input is read at `-framerate` [`PREVIEW_FPS`] (the video
+/// feeder writes one frame per 40 ms slot of the monotonic clock from frame 0;
+/// nothing during a pause, the gap is filled on the next picture,
+/// `preview_video_clock.rs`), the f32le PCM input by its sample count (the
+/// audio feeder, `preview_audio_hold.rs`). ffmpeg's `-use_wallclock_as_timestamps` read the
+/// SYSTEM clock, so the box's nightly UTC step moved the video timeline alone
+/// and a running preview showed the picture seconds behind the sound. #178
+/// round 3 already kept stamps off the PCM: on the bursty PCM they made the
+/// box's ffmpeg (N-123867, 2026-04) mux ZERO audio packets (1 traf per moof),
+/// and an fMP4 whose audio track never fills is unplayable in MSE forever
+/// (`buffered` is the track intersection). A/V is aligned on OUR side — the
+/// audio feeder prepends the connect gap as silence
 /// ([`audio_preroll_samples`](super::preview_stream::audio_preroll_samples)) —
 /// because `-itsoffset` was not a dependable lever on the box (audio `start_time`
 /// stayed 0.000). So there is NO `-itsoffset` and no `lead_ms` argument.
@@ -187,22 +195,22 @@ pub fn build_ffmpeg_args(video_port: u16, audio_port: u16, encoder: &str) -> Vec
         "-hide_banner".into(),
         "-loglevel".into(),
         "error".into(),
-        // Video input: raw NV12 at the fixed canvas size, wall-clock stamped.
-        "-use_wallclock_as_timestamps".into(),
-        "1".into(),
+        // Video input: raw NV12 at the fixed canvas size, counted at 25 fps.
         "-f".into(),
         "rawvideo".into(),
         "-pix_fmt".into(),
         "nv12".into(),
         "-s".into(),
         format!("{OUT_W}x{OUT_H}"),
+        "-framerate".into(),
+        PREVIEW_FPS.to_string(),
         "-i".into(),
         format!("tcp://127.0.0.1:{video_port}"),
     ];
     a.extend([
-        // Audio input: interleaved f32, 48 kHz stereo. NO wall-clock stamps —
-        // the sample-count timestamps are what the box's ffmpeg muxes (see the
-        // fn doc); the silence preroll in the audio feeder aligns it to video.
+        // Audio input: interleaved f32, 48 kHz stereo, counted by its samples
+        // (see the fn doc); the silence preroll in the audio feeder aligns it
+        // to the video.
         "-f".to_string(),
         "f32le".to_string(),
         "-ar".to_string(),
@@ -239,6 +247,8 @@ pub fn build_ffmpeg_args(video_port: u16, audio_port: u16, encoder: &str) -> Vec
             // each media fragment is 0.5 s, so the child emits EXACTLY two
             // fragments per second — that is why FragmentRelay::produced_ms()
             // can read the media time produced as (fragments since Init) × 500 ms.
+            // 25 is PREVIEW_FPS, the input's -framerate (#221: input rate =
+            // output rate, so cfr neither drops nor repeats a frame).
             "-g",
             "25",
             "-fps_mode",
@@ -336,7 +346,9 @@ pub fn ensure_running(shared: Arc<StreamShared>, ffmpeg: std::path::PathBuf) {
 }
 
 /// Own the child + feeders + reader for one run, until the viewers are gone
-/// past the TTL or the child exits. Falls back to `libx264` once if a hardware
+/// past the TTL, the child exits, or the video feeder asks for a fresh child
+/// after a gap too long to fill (#221, `RunOutcome::Restart`: no restart
+/// budget spent). Falls back to `libx264` once if a hardware
 /// encoder child dies before producing the init segment. Every return has
 /// released the encoder claim (#184): a run that ended with nobody watching is
 /// settled under the lifecycle lock (a viewer that subscribed meanwhile keeps
@@ -384,6 +396,28 @@ fn supervise(shared: Arc<StreamShared>, ffmpeg: &Path, encoder: &str) {
                     *g = Some("libx264".to_string());
                 }
             }
+            // #221 A1: a fresh child after a long pause; not a crash, so no
+            // restart budget is spent. The viewers are read once, before any
+            // stream close (closed viewers leave).
+            RunOutcome::Restart => {
+                if !shared.has_viewer() {
+                    info!(
+                        label = shared.label(),
+                        "preview-encoder: a long pause with nobody watching — settling"
+                    );
+                    if shared.settle_unwatched_run().supervisor_exits() {
+                        return;
+                    }
+                    continue;
+                }
+                // The stopped stream ends: the viewers reconnect onto the
+                // new child's init.
+                info!(
+                    label = shared.label(),
+                    "preview-encoder: a fresh child after a long pause"
+                );
+                shared.end_stopped_stream();
+            }
             RunOutcome::ChildExitedNoInit | RunOutcome::ChildExited => {
                 // Nobody watching: settle it like a TTL stop (#184) — a viewer
                 // that subscribes as the child exits gets a new child. Read
@@ -428,11 +462,14 @@ enum RunOutcome {
     ViewersGone,
     ChildExited,
     ChildExitedNoInit,
+    /// #221 A1: the video feeder asked for a fresh child (a gap too long to
+    /// fill); not a crash, so it costs no restart budget.
+    Restart,
 }
 
 /// One child run: bind loopback listeners, spawn ffmpeg, accept its two
 /// connections, feed video+audio, split its stdout into the relay, and monitor
-/// for the viewer-TTL / child exit.
+/// for the viewer-TTL / child exit / the video feeder's restart request (#221).
 #[cfg_attr(test, mutants::skip)]
 fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOutcome {
     let v_listener = match TcpListener::bind("127.0.0.1:0") {
@@ -500,10 +537,10 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
 
     // #178 round 3: deterministic A/V alignment on our side (the box ffmpeg keeps
     // the PCM audio start_time at 0.000, so `-itsoffset` is not a lever). A shared
-    // clock base + the wall-time of the FIRST video frame written let the audio
-    // feeder prepend exactly the silence the video timeline is already ahead by.
+    // monotonic clock base + the slot of video frame 0 let the audio feeder
+    // prepend exactly the silence the video timeline is already ahead by.
     let clock_base = Instant::now();
-    // Microseconds since `clock_base` of the first video write; 0 = none yet.
+    // Microseconds since `clock_base` of video frame 0's slot; 0 = none yet.
     let first_video_us = Arc::new(AtomicU64::new(0));
 
     // ffmpeg (as TCP client) opens its inputs SEQUENTIALLY: it connects input 0
@@ -515,6 +552,9 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
     // deadlock behind every "child did not connect its inputs" (#178, first live
     // box run: both nvenc and libx264 failed identically at the 5 s accept).
     let shutdown = Arc::new(AtomicBool::new(false));
+    // #221 A1: the video feeder asks for a fresh child after a gap it may
+    // not fill (`preview_video_clock::MAX_GAP_FILL_SLOTS`).
+    let restart = Arc::new(AtomicBool::new(false));
     let v_sock = match accept_with_deadline(&v_listener, Duration::from_secs(5)) {
         Some(s) => s,
         None => {
@@ -532,6 +572,7 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
         shared.clone(),
         v_sock,
         shutdown.clone(),
+        restart.clone(),
         clock_base,
         first_video_us.clone(),
     ) {
@@ -600,7 +641,7 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
             }
         };
 
-    let outcome = monitor_loop(shared, child.get(), &produced);
+    let outcome = monitor_loop(shared, child.get(), &produced, &restart);
 
     // Tear down: stop feeders, kill child, join everything (incl. the stderr
     // reader, which ends at the child's stderr EOF once the child is gone).
@@ -619,15 +660,21 @@ fn run_child(shared: &Arc<StreamShared>, ffmpeg: &Path, encoder: &str) -> RunOut
 }
 
 /// Watch the viewer count + child liveness. Returns when the viewers have been
-/// gone past [`VIEWER_TTL`] or the child exits on its own.
+/// gone past [`VIEWER_TTL`], the child exits on its own, or the video feeder
+/// asks for a fresh child (`restart`, #221 A1: a gap too long to fill),
+/// which `supervise` starts for the viewers.
 #[cfg_attr(test, mutants::skip)]
 fn monitor_loop(
     shared: &Arc<StreamShared>,
     child: &mut Child,
     produced: &Arc<AtomicBool>,
+    restart: &AtomicBool,
 ) -> RunOutcome {
     let mut empty_since: Option<Instant> = None;
     loop {
+        if restart.load(Ordering::Relaxed) {
+            return RunOutcome::Restart;
+        }
         // Child exited on its own?
         if let Ok(Some(_)) = child.try_wait() {
             // A child that emitted ANY stdout this run exited normally; one that
@@ -674,53 +721,13 @@ fn accept_with_deadline(listener: &TcpListener, deadline: Duration) -> Option<Tc
     }
 }
 
-/// Feed tapped NV12 frames to the child's video socket until shutdown or a
-/// write error (child gone). Drains any STALE queued frames on start (a previous
-/// viewer's backlog would otherwise front-run the live edge) and stamps the
-/// wall-time of the first successful write into `first_video_us` (0 = none yet)
-/// so the audio feeder can measure how far the video timeline is ahead (#178 r3).
-#[cfg_attr(test, mutants::skip)]
-fn spawn_video_feeder(
-    shared: Arc<StreamShared>,
-    mut sock: TcpStream,
-    shutdown: Arc<AtomicBool>,
-    clock_base: Instant,
-    first_video_us: Arc<AtomicU64>,
-) -> std::io::Result<std::thread::JoinHandle<()>> {
-    std::thread::Builder::new()
-        .name("preview-vfeed".into())
-        .spawn(move || {
-            let rx = shared.video_receiver();
-            // Drop any frames queued before this child connected.
-            while rx.try_recv().is_ok() {}
-            while !shutdown.load(Ordering::Relaxed) {
-                match rx.recv_timeout(Duration::from_millis(200)) {
-                    Ok(frame) => {
-                        // #147 r10: `write_frame` returns the buffer to the pool.
-                        if shared.write_frame(&mut sock, frame).is_err() {
-                            break;
-                        }
-                        // Stamp the first successful video write (`.max(1)` so a
-                        // genuine sub-µs elapse never reads back as "none yet").
-                        if first_video_us.load(Ordering::Relaxed) == 0 {
-                            let us = clock_base.elapsed().as_micros() as u64;
-                            first_video_us.store(us.max(1), Ordering::Relaxed);
-                        }
-                    }
-                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
-                }
-            }
-        })
-}
-
-/// How often the audio feeder logs its wall-clock alignment (#184 round G2).
+/// How often the audio feeder logs its alignment (#184 round G2).
 const AFEED_LOG_EVERY: Duration = Duration::from_secs(10);
 /// Longest the audio feeder blocks waiting for a tapped block (µs) — a silence
 /// pad still runs this often while the decode seam is quiet. It must stay under
 /// the write-ahead (200 ms) minus the pad threshold (150 ms) with room for a
 /// Windows timer oversleep (~15.6 ms), so the written audio stays ahead of the
-/// wall-clock video and ffmpeg never waits for audio (#184 round-G3 review;
+/// video and ffmpeg never waits for audio (#184 round-G3 review;
 /// G2 polled every 200 ms and could fall 150 ms behind).
 const AFEED_POLL_US: u64 = 30_000;
 
@@ -728,7 +735,7 @@ const AFEED_POLL_US: u64 = 30_000;
 /// f32 bytes) until shutdown or a write error. On start it DRAINS any stale
 /// queued blocks, then PREPENDS silence equal to how far the video timeline is
 /// already ahead (`audio_preroll_samples(connect_gap_ms, 0)`) so the PCM
-/// sample-count timeline starts where the video wall-clock timeline started
+/// sample-count timeline starts where the video's frame 0 started
 /// (#178 round 3 — replaces the box-unreliable `-itsoffset`).
 ///
 /// #184 round G3: the decode-seam LEAD (`lead_ms`) is no longer written up
@@ -736,7 +743,7 @@ const AFEED_POLL_US: u64 = 30_000;
 /// [`AudioHold`] with its arrival stamp and is written `lead − write_ahead`
 /// after it arrived, placed by that arrival (a block that waited is trimmed,
 /// never delayed); the socket carries only the write-ahead, whatever its buffer
-/// size. The round-G2 wall-clock rules (silence when nothing arrives, bursts
+/// size. The round-G2 alignment rules (silence when nothing arrives, bursts
 /// trimmed) live in [`AudioHold::take_writes`]. Logs the effective timing at
 /// start and `preview-afeed: ahead_ms padded_ms skipped_ms held_ms queued
 /// dropped` at INFO every 10 s, plus the #184 G4 `preview-afeed level` line

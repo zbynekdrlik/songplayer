@@ -207,28 +207,20 @@ fn offer_video_queues_a_fixed_canvas_frame_with_a_viewer() {
 }
 
 #[test]
-fn write_frame_writes_the_canvas_and_the_next_offer_reuses_its_buffer() {
-    // #147 round 10: the feeder hands each written frame back to the tap's
-    // pool, so a watched preview letterboxes into the SAME buffer every frame
-    // instead of a fresh 337.5 KB allocation. The buffer stays alive in the
-    // pool between the write and the next offer, so the pointer match cannot
-    // come from allocator address reuse.
+fn a_recycled_frame_is_the_next_offers_buffer() {
+    // #147 round 10: the feeder hands each frame it is done with back to the
+    // tap's pool, so a watched preview letterboxes into the SAME buffer every
+    // frame instead of a fresh 337.5 KB allocation. The buffer stays alive in
+    // the pool between the recycle and the next offer, so the pointer match
+    // cannot come from allocator address reuse.
     let tap = StreamTap::new("t".into(), 0);
     let (_guard, _relay) = ViewerGuard::subscribe(&tap);
     let rx = tap.shared().video_receiver();
     tap.try_offer_video(1920, 1080, 1920, &solid_nv12(1920, 1080, 1920, 200, 90));
     let first = rx.try_recv().expect("a frame is queued while watched");
     let first_ptr = first.as_ptr() as usize;
-    let expected = first.clone();
 
-    let mut sink: Vec<u8> = Vec::new();
-    tap.shared()
-        .write_frame(&mut sink, first)
-        .expect("a Vec sink never fails");
-    assert_eq!(
-        sink, expected,
-        "the child input gets the exact canvas bytes"
-    );
+    tap.shared().recycle_frame(first);
 
     tap.try_offer_video(1920, 1080, 1920, &solid_nv12(1920, 1080, 1920, 30, 160));
     let second = rx.try_recv().expect("the second frame is queued");
@@ -241,27 +233,6 @@ fn write_frame_writes_the_canvas_and_the_next_offer_reuses_its_buffer() {
     assert!(
         second[..(OUT_W * OUT_H) as usize].iter().all(|&y| y == 30),
         "the recycled buffer carries the NEW frame's luma, not the old one"
-    );
-}
-
-#[test]
-fn write_frame_reports_a_write_error() {
-    struct Broken;
-    impl std::io::Write for Broken {
-        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::other("child gone"))
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let tap = StreamTap::new("t".into(), 0);
-    let err = tap
-        .shared()
-        .write_frame(&mut Broken, vec![0u8; OUT_NV12_LEN]);
-    assert!(
-        err.is_err(),
-        "a dead child's write error reaches the feeder"
     );
 }
 
@@ -483,7 +454,7 @@ fn audio_preroll_samples_caps_the_connect_gap_at_5s() {
     assert_eq!(audio_preroll_samples(9_000, 0), 480_000);
 }
 
-// ── #184 round G2: the preview audio is kept on the wall clock BOTH ways ─────
+// ── #184 round G2: the preview audio is kept on the elapsed (monotonic) time BOTH ways ──
 
 /// Stereo frames per millisecond at 48 kHz (test-side literal, so a mutant of
 /// the production constant cannot hide behind the same expression).

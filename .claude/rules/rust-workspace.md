@@ -154,6 +154,16 @@ entry" found one each round. All three came from ONE condition written twice
 so when two decisions depend on the same state, derive both from one
 predicate (`Window::holds_on_air`).
 
+**Drive a timer-driven state machine with a LATE consumer too (#221 review
+round 3).** The preview's `VideoClock` passed every test whose feeder woke each
+millisecond, yet lost pictures on Windows: its timer wakes up to 15.6 ms after
+the decision it waited for, while an input event wakes it at once, so a newer
+input arrived BEFORE the late decision ran and replaced the one that was
+already due. Model the consumer as the OS runs it: woken by each input at its
+real time AND by its timer `late` after each deadline, swept over ≥ 3 phases
+(0 / 2 / 15.6 ms, `preview_video_clock_tests.rs::one_second_late`), and assert
+the output does not depend on `late`.
+
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
 compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
@@ -351,6 +361,14 @@ failed on them (`36438006665`):
   the opaque one is not. Use the helper as a temporary
   (`pool.run(&recorder(&log))`), bind it in a block, or take the data out
   without moving (`std::mem::take(&mut *log.lock().unwrap())`).
+- **A borrow returned from ONE branch lives for the whole function → E0502
+  on a later mutation of the same field** (#221 A1 lane, review round 2:
+  the GREEN commit did not compile). `if fill > 0 && let Some(last) =
+  self.last.as_ref() { …; return Some((last, fill)); }` followed by
+  `self.last.replace(fresh)` is rejected (NLL problem case 3: a reference
+  returned conditionally is treated as borrowed to the end). Test the
+  condition without binding (`&& self.last.is_some()`) and borrow only in
+  the return (`return self.last.as_ref().map(|last| (last, fill));`).
 
 ## A persistent worker pool with borrowed jobs (#223 follow-up, `playback/band_pool.rs`)
 
@@ -729,6 +747,12 @@ the test that kills each one BEFORE CI's mutation gate runs.
   (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
   effect with a behaviour test (#217 addendum 2,
   `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+- It never SWAPS a method or a field for its sibling (`pop_front` ↔
+  `pop_back`, `front()` ↔ `back()`, `first` ↔ `last`) — #221 review round
+  5: a queue that replaced its OLDEST entry instead of its newest passed
+  all 18 tests because none ever held two entries. For every such choice,
+  write a test whose state makes the two siblings differ (two entries
+  pending), and check it against the swapped variant in the scratch model.
 - **A branch whose ONLY effect is a log line survives the gate** (#224
   part 2 review round 3: `if … && !slew.owe(..) { warn!(..) }` — the
   delete-`!` mutant only moves the WARN). Give such a branch an observable
