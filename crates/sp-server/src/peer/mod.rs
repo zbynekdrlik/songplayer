@@ -4,3 +4,4 @@
 //! `docs/superpowers/specs/2026-10-06-pp-site-node-exchange-design.md`).
 
 pub mod config;
+pub mod lan;
