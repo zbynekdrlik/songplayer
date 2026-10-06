@@ -934,8 +934,9 @@ not, add one or the mutation gate reddens.
 **cargo-mutants 27 never mutates inside a fn named `new`, and `exclude_re`
 also drops whole DIRECTORIES** (#184 bundle, review rounds 1–2).
 `PeakLimiter::new`'s `1 − 1000/(RELEASE_MS · rate)` listed no mutant until it
-moved into its own `release_factor` fn. `'sp-decoder/src/audio/'` excludes
-everything under that dir, so the pure limiter first written as
+moved into its own `release_factor` fn. `'sp-decoder/src/audio/'` then
+excluded everything under that dir (#210 narrowed it to the
+`SymphoniaAudioReader` methods, below), so the pure limiter first written as
 `audio/limiter.rs` was never gated; it lives at the crate root now
 (`peak_limiter.rs`). Before trusting the gate, `--list` the range and check
 every new fn's arithmetic appears.

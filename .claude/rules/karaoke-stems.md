@@ -80,6 +80,10 @@ through VBAN (2012 of 3.53M frames at 0 dBFS, finding 5847119155).
   per frame. That is an exact division (no `exp`), so test pins hold on
   Linux and Windows alike. At 48 kHz the gain rises by at most 1/2400 per
   frame.
+- **The ceiling is exact.** Each scaled sample is clamped to ±0.98: the
+  f32 gain alone (`1 − (1 − 0.98/peak)`) left about one over in four a code
+  or two above it, which the program's own limiter then scaled again
+  (release 0.71.0 review, `no_limited_sample_leaves_above_the_ceiling`).
 - **Bit-identical at rest.** A gain of exactly 1.0 gives `x · 1.0 = x`.
   The state is the reduction, not the gain: an f32 gain recovering toward 1.0
   stalls below unity forever once its step d·(1 − R) is under half an ulp (up

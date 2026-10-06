@@ -29,7 +29,9 @@ const T0: i64 = 17_900_000_000_000_000;
 /// program's limiter shares: no sample the program sends goes over it.
 const CEILING: f32 = 0.98;
 
-/// A limited sample may sit one f32 rounding of its gain above the ceiling.
+/// A margin only: the limiter clamps a limited sample to the ceiling
+/// exactly (release 0.71.0 review; the f32 gain alone could leave it a code
+/// or two above).
 const CEILING_SLACK: f32 = 1e-6;
 
 /// Frames per boundary: 48 kHz on the 30 fps grid.

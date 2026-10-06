@@ -218,7 +218,8 @@ fn release_fixture() -> Vec<f32> {
 /// A 1.8× over (three streams of a 100 Hz sine at 0.6, gain 1 each): before
 /// #184 the clamp cut 1208 of its 1920 samples flat at ±1.0. Limited, no
 /// sample reaches full scale; every sample stays at or under the ceiling
-/// (0.98, plus one f32 rounding of the gain).
+/// (0.98; the limiter clamps to it exactly since the release 0.71.0 review,
+/// the 1e-6 slack is a margin only).
 #[test]
 fn an_over_never_reaches_full_scale() {
     let sine: Vec<f32> = (0..960)
