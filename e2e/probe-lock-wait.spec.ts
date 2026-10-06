@@ -406,6 +406,8 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     const unlocked = lock("DEGRADED", "audio_pairing", probe({ locked: false }));
     expect(probeAttachRefusal(unlocked, PROBE)).toBeNull();
     expect(probeAttachRefusal(lock("LOCKED", "none", probe({ idle: "false" })), PROBE)).toBeNull();
+    // Review round 3: nor a non-boolean locked.
+    expect(probeAttachRefusal(lock("LOCKED", "none", probe({ locked: "true" })), PROBE)).toBeNull();
     // The refusal says how long to wait, and never claims what the caller did.
     expect(refusal).toContain("~90 s");
     expect(refusal).not.toMatch(/idled it/);
@@ -421,22 +423,54 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     // Not counters (or no probe): unknown.
     expect(probePhaseEvents(lock("LOCKED", "none", probe({ relocks: null })), PROBE)).toBeNull();
     expect(probePhaseEvents(lock("LOCKED", "none", null), PROBE)).toBeNull();
+    // Review round 3: both counts must be numbers.
+    expect(probePhaseEvents(lock("LOCKED", "none", probe({ relocks: 2, late_holds: "1" })), PROBE)).toBeNull();
+    // Review round 3: camera-box's recent_event_inputs names its TOP LIFETIME
+    // offender (OBSBasicStatusBar.cpp), not the input whose count rose, so
+    // the cause is read from the probe's count BEFORE the attach, whoever is
+    // named. This REPLACES round 2's "recent_event names the probe" test.
     const woke = explainProbeLock(
-      lock("DEGRADED", "recent_event", probe({ relocks: 2, late_holds: 1 }), {
-        recent_event_inputs: [{ name: PROBE, events: 3 }],
+      lock("DEGRADED", "recent_event", probe(), {
+        recent_event_inputs: [{ name: "sp-slow", events: 9 }],
       }),
       PROBE,
+      3,
     );
-    expect(woke).toContain("recent_event names the probe");
-    expect(woke).toContain("lifetime");
+    expect(woke).toContain("the probe had 3 lifetime phase events before the attach");
     expect(woke).toContain("60 s");
-    // Another input named: the generic text, naming it.
-    const other = explainProbeLock(
-      lock("DEGRADED", "recent_event", probe(), { recent_event_inputs: [{ name: "sp-slow", events: 1 }] }),
+    expect(woke).toContain("top lifetime offender");
+    // No events before the attach, even with the probe named: not the wake.
+    const named = explainProbeLock(
+      lock("DEGRADED", "recent_event", probe(), { recent_event_inputs: [{ name: PROBE, events: 9 }] }),
       PROBE,
+      0,
     );
-    expect(other).toContain('"DEGRADED" (reason "recent_event")');
-    expect(other).not.toContain("names the probe");
+    expect(named).toContain('"DEGRADED" (reason "recent_event")');
+    expect(named).not.toContain("before the attach");
+    // Unknown count: the generic text.
+    const unknown = explainProbeLock(lock("DEGRADED", "recent_event", probe()), PROBE);
+    expect(unknown).toContain('"DEGRADED" (reason "recent_event")');
+    expect(unknown).not.toContain("before the attach");
+    // Another reason with events before the attach: not the wake either.
+    const other = explainProbeLock(lock("DEGRADED", "input_unlocked", probe()), PROBE, 3);
+    expect(other).toContain('"DEGRADED" (reason "input_unlocked")');
+    expect(other).not.toContain("before the attach");
+  });
+
+  test("the bound's explanation reads the probe's phase events from before the attach", async () => {
+    const clock = fakeClock();
+    const reads = fakeRead(clock, () =>
+      lock("DEGRADED", "recent_event", probe(), { recent_event_inputs: [{ name: "sp-slow", events: 9 }] }),
+    );
+    const msg = await rejection(
+      waitForProbeLock(reads.read, PROBE, {
+        now: clock.now,
+        sleep: clock.sleep,
+        timeoutMs: 500,
+        phaseEventsBeforeAttach: 2,
+      }),
+    );
+    expect(msg).toContain("the probe had 2 lifetime phase events before the attach");
   });
 
   test("waitForProbeLock: idle → DEGRADED/audio_pairing → LOCKED/none, polled every 250 ms", async () => {
