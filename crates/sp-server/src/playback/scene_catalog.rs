@@ -10,6 +10,10 @@
 //! - A playlist with an empty `ndi_output_name`, or one whose name another
 //!   active playlist shares, names no scene. Each such conflict is logged
 //!   once as a WARN.
+//! - The catalog knows which playlists are active (`is_active`), so a
+//!   dashboard cut refused for a playlist that names no scene can say why:
+//!   inactive, or active with no scene (`program_switch::cut_scene`, #221
+//!   ROZHODNUTÉ 6022247729).
 //!
 //! The #221 switch path decides with this catalog, never with cg OBS's scene
 //! items. A `playlists.scene_name` column was rejected in the design: nothing
@@ -38,6 +42,8 @@ pub struct SceneCatalog {
     scenes: BTreeMap<String, i64>,
     /// The playlists that name no scene, one log line each.
     conflicts: Vec<String>,
+    /// Every playlist the catalog was built from: the active ones.
+    active: BTreeSet<i64>,
 }
 
 impl SceneCatalog {
@@ -46,7 +52,9 @@ impl SceneCatalog {
     pub fn new<'a>(playlists: impl IntoIterator<Item = (i64, &'a str)>) -> Self {
         let mut named: BTreeMap<String, Vec<i64>> = BTreeMap::new();
         let mut conflicts = Vec::new();
+        let mut active = BTreeSet::new();
         for (pid, ndi_name) in playlists {
+            active.insert(pid);
             if ndi_name.trim().is_empty() {
                 conflicts.push(format!("playlist {pid} has no NDI output name"));
             } else {
@@ -65,7 +73,11 @@ impl SceneCatalog {
                 )),
             }
         }
-        Self { scenes, conflicts }
+        Self {
+            scenes,
+            conflicts,
+            active,
+        }
     }
 
     /// The catalog of these (active) playlists.
@@ -93,6 +105,12 @@ impl SceneCatalog {
     /// The playlists that name no scene, one log line each.
     pub fn conflicts(&self) -> &[String] {
         &self.conflicts
+    }
+
+    /// Whether playlist `pid` is one the catalog was built from (an ACTIVE
+    /// playlist), whether it names a scene or not.
+    pub fn is_active(&self, pid: i64) -> bool {
+        self.active.contains(&pid)
     }
 }
 

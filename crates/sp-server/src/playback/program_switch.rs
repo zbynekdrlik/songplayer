@@ -34,8 +34,14 @@
 //! #221 L4a: `POST /api/v1/program/cut` switches a SOURCE through the same
 //! path ([`switch_source`], `via=dashboard`): a playlist is cut with its
 //! catalog scene, -1 ("OBS manuál") with none; neither tells cg OBS
-//! anything.
+//! anything. ROZHODNUTÉ 6022247729: a playlist whose catalog names no scene
+//! (inactive, or no / a shared NDI output name) is REFUSED ([`cut_scene`],
+//! recorded as a keep, 409): every consumer takes `SP-program`, so such a
+//! cut would black them all at once. [`refused_sources`] lists those
+//! playlists by the same rule for the dashboard, which disables their
+//! buttons.
 
+use serde::Serialize;
 use serde_json::{Value, json};
 use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
 use sqlx::SqlitePool;
@@ -43,7 +49,7 @@ use tracing::{info, warn};
 
 use crate::playback::ndi_input::load_input_settings;
 use crate::playback::program_bus::{ProgramBus, ProgramStatus, persist_and_cut};
-use crate::playback::scene_catalog::{SceneKind, load_catalog};
+use crate::playback::scene_catalog::{SceneCatalog, SceneKind, load_catalog};
 use crate::remote::protocol::Reply;
 use crate::remote::{RemoteCut, Upstream, clip, now_ms};
 
@@ -61,6 +67,97 @@ pub const INPUT_INACTIVE: &str = "input_inactive";
 pub const CATALOG_FAILED: &str = "catalog_failed";
 /// The keep reason of a switch whose source could not be persisted.
 pub const PERSIST_FAILED: &str = "persist_failed";
+/// The keep reason of a dashboard cut to an INACTIVE playlist (#221
+/// ROZHODNUTÉ 6022247729): it has no output, so SP-program — and every
+/// consumer of it — would carry black.
+pub const PLAYLIST_INACTIVE: &str = "playlist_inactive";
+/// The keep reason of a dashboard cut to an active playlist whose catalog
+/// names no scene (no NDI output name, or one another active playlist
+/// shares).
+pub const NO_SCENE: &str = "no_scene";
+
+/// Why a dashboard cut to a playlist is refused (409, #221 ROZHODNUTÉ
+/// 6022247729).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// The playlist is inactive.
+    Inactive,
+    /// The playlist is active, but its catalog names no scene.
+    NoScene,
+}
+
+impl Refusal {
+    /// The keep reason ([`PLAYLIST_INACTIVE`] / [`NO_SCENE`]).
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Inactive => PLAYLIST_INACTIVE,
+            Self::NoScene => NO_SCENE,
+        }
+    }
+
+    /// The answer's text.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Inactive => {
+                "the playlist is inactive: it has no output, so a cut would put black on SP-program and every consumer of it"
+            }
+            Self::NoScene => {
+                "the playlist names no scene (no NDI output name, or one another active playlist shares), so it cannot go on SP-program"
+            }
+        }
+    }
+}
+
+/// The scene a dashboard cut to playlist `pid` is published with, or why it
+/// is refused: inactive (not in the catalog of the active playlists), or
+/// active with no scene. The ONE rule of [`switch_source`] and
+/// [`refused_sources`].
+pub fn cut_scene(catalog: &SceneCatalog, pid: i64) -> Result<&str, Refusal> {
+    match catalog.scene_of(pid) {
+        Some(scene) => Ok(scene),
+        None if catalog.is_active(pid) => Err(Refusal::NoScene),
+        None => Err(Refusal::Inactive),
+    }
+}
+
+/// What a dashboard cut ([`switch_source`]) could not do.
+#[derive(Debug)]
+pub enum SourceError {
+    /// The playlist cannot go on program; recorded as a keep with its
+    /// reason, nothing cut.
+    Refused(Refusal),
+    /// Reading the playlists or persisting the source failed; recorded as a
+    /// keep, nothing cut.
+    Store(sqlx::Error),
+}
+
+/// A playlist a dashboard cut refuses now (`cut_refused` on both program
+/// answers).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RefusedSource {
+    pub source: i64,
+    /// [`PLAYLIST_INACTIVE`] or [`NO_SCENE`].
+    pub reason: &'static str,
+}
+
+/// Every playlist a dashboard cut refuses now, in id order: the switch's own
+/// catalog read plus the playlists' ids, decided by [`cut_scene`].
+pub async fn refused_sources(pool: &SqlitePool) -> Result<Vec<RefusedSource>, sqlx::Error> {
+    let catalog = load_catalog(pool).await?;
+    let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM playlists ORDER BY id")
+        .fetch_all(pool)
+        .await?;
+    Ok(ids
+        .into_iter()
+        .filter_map(|source| {
+            let refusal = cut_scene(&catalog, source).err()?;
+            Some(RefusedSource {
+                source,
+                reason: refusal.reason(),
+            })
+        })
+        .collect())
+}
 
 /// What triggered a switch (`last_remote_cut.via`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,23 +287,26 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
 /// NDI input while it is a source) through the same path as a press, under
 /// the same `switch_order`, recorded with `via`:
 /// - a playlist is cut, published with its catalog scene;
-/// - one whose catalog names no scene (inactive, or no / a shared NDI output
-///   name) is cut with no scene (WARN);
+/// - one whose catalog names no scene is REFUSED ([`cut_scene`]: inactive,
+///   or no / a shared NDI output name), recorded as a keep with its reason
+///   (#221 ROZHODNUTÉ 6022247729; it was cut with no scene before);
 /// - -1 ("OBS manuál") is cut with no scene, which the resolver names.
 ///
 /// cg OBS is told nothing (#221 B4 step 6: no mirror). Returns the program
 /// state of THIS cut (a later switch may already run when the caller reads
-/// the bus). `Err` when the playlists could not be read or the source could
-/// not be persisted (then nothing was cut, and it is recorded as a keep).
+/// the bus). `Err` when the cut is refused, or the playlists could not be
+/// read or the source could not be persisted: then nothing was cut, and it
+/// is recorded as a keep.
 pub async fn switch_source(
     pool: &SqlitePool,
     bus: &ProgramBus,
     source: i64,
     via: Via,
-) -> Result<ProgramStatus, sqlx::Error> {
+) -> Result<ProgramStatus, SourceError> {
     let _order = bus.switch_order().lock().await;
     if source == PROGRAM_INPUT_ID {
-        return cut_and_record(pool, bus, PROGRAM_INPUT_LABEL, via, source, None, None).await;
+        let cut = cut_and_record(pool, bus, PROGRAM_INPUT_LABEL, via, source, None, None);
+        return cut.await.map_err(SourceError::Store);
     }
     let catalog = match load_catalog(pool).await {
         Ok(catalog) => catalog,
@@ -214,18 +314,25 @@ pub async fn switch_source(
             warn!(source, %e, "program switch: reading the playlists failed — SP-program unchanged");
             let record = kept(&source.to_string(), via, CATALOG_FAILED, None);
             bus.remote().record_cut(record);
-            return Err(e);
+            return Err(SourceError::Store(e));
         }
     };
-    let Some(name) = catalog.scene_of(source).map(str::to_string) else {
-        warn!(
-            source,
-            "program switch: this playlist names no scene (inactive, or no / a shared NDI output name) — cut without a scene"
-        );
-        let pressed = source.to_string();
-        return cut_and_record(pool, bus, &pressed, via, source, None, None).await;
+    let name = match cut_scene(&catalog, source) {
+        Ok(name) => name.to_string(),
+        Err(refusal) => {
+            warn!(
+                source,
+                reason = refusal.reason(),
+                "program switch: a cut to this playlist is refused ({}) — SP-program unchanged",
+                refusal.message()
+            );
+            let record = kept(&source.to_string(), via, refusal.reason(), None);
+            bus.remote().record_cut(record);
+            return Err(SourceError::Refused(refusal));
+        }
     };
-    cut_and_record(pool, bus, &name, via, source, Some(&name), None).await
+    let cut = cut_and_record(pool, bus, &name, via, source, Some(&name), None);
+    cut.await.map_err(SourceError::Store)
 }
 
 /// "OBS manuál" itself: the NDI input, with no scene for cg OBS (module doc,
