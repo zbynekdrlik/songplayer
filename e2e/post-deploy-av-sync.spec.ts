@@ -43,13 +43,16 @@
  * 37423917199). The meter is tapped BEFORE the pairing's withhold, so the
  * wait proves DistroAV delivers audio and adds its 1 s; it does not observe
  * the lock (`obs-audio-wait.ts`). #221 dev.19: so the meter wait comes AFTER
- * a wait on the lock itself (`probe-lock-wait.ts`): camera-box's
+ * a wait on cg OBS's genlock state (`probe-lock-wait.ts`): camera-box's
  * `genlock_lock` facet on cg OBS's `:8899/bundle-state.json`, polled every
- * 250 ms (bounded at 15 s) until the probe's `idle` is false (the heartbeat
- * is from after the attach), its `locked` is true and the box is `LOCKED`
- * for reason `none`. The endpoint (`CG_BUNDLE_STATE_URL`) is resolved before
- * any scene switch, and an unreachable one fails the gate there. The dropout
- * check is unchanged.
+ * 250 ms (bounded at 15 s) until the probe is connected and `idle` false
+ * (the heartbeat is from after the attach), its `locked` is true and the box
+ * is `LOCKED` for reason `none`. The facet cannot see the pairing's PENDING
+ * withhold itself (it reads as paired), so a heartbeat inside it can still
+ * read as a GO: the open design question on #221 (comment 6014055098). The
+ * endpoint (`CG_BUNDLE_STATE_URL`) is resolved before any scene switch: an
+ * unreachable one, or a probe that received within the last minute, fails
+ * the gate there. The dropout check is unchanged.
  * afterAll idles the probe first (an idle probe shows nothing, so restoring
  * the program to "OBS manuál" can never loop the picture), restores the
  * program scene, then cg OBS's own scene only when the program restore did
@@ -106,12 +109,22 @@ import {
   programSourceName,
   receiversSettled,
 } from "./av-sync-probe";
-import { EVIDENCE_COPY_MS, keepRecording, keepText, type Evidence } from "./av-sync-evidence";
-import { AUDIO_WAIT_TIMEOUT_MS } from "./obs-audio-wait";
+import { keepRecording, keepText, type Evidence } from "./av-sync-evidence";
 import {
-  LOCK_WAIT_WORST_MS,
+  ANALYSIS_TIMEOUT_MS,
+  MAX_TAKES,
+  PLAY_WAIT_MS,
+  RECORD_MS,
+  RETAKE_BEFORE_MS,
+  SKIP_WAIT_MS,
+  STOP_RECORD_MS,
+  TEST_TIMEOUT_MS,
+} from "./av-sync-budget";
+import {
   bundleStateRead,
   bundleStateUrls,
+  probeAttachRefusal,
+  probeReadyForTake,
   resolveBundleState,
   waitForProbeLock,
   type HttpGet,
@@ -143,34 +156,9 @@ const CG_BUNDLE_STATE_URLS = bundleStateUrls(process.env.CG_BUNDLE_STATE_URL);
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "av_sync_check.py");
 
 const MAX_AV_MS = 40;
-const RECORD_MS = 20_000;
-const ANALYSIS_TIMEOUT_MS = 60_000; // ~5-10 s on the box
-const MAX_TAKES = 3;
-// #221 dev.18: 300 → 320 s, by the probe audio wait's bound; dev.19: 320 →
-// 345 s, by the lock wait's worst case. A take keeps the retake room it had
-// before either wait (RETAKE_BEFORE_MS stays 110 s).
-const TEST_TIMEOUT_MS = 345_000;
-// The worst case of one take: skip 15 + play 30 + the probe lock wait
-// (LOCK_WAIT_WORST_MS, 25: its 15 s bound + one read started at it) + the
-// probe audio wait (AUDIO_WAIT_TIMEOUT_MS, 20) + record (RECORD_MS, 20) +
-// stop 10 + analysis (ANALYSIS_TIMEOUT_MS, 60) + cleanup 35 + evidence copy
-// 2 x EVIDENCE_COPY_MS (5) = 225 s.
-const WORST_TAKE_MS =
-  15_000 +
-  30_000 +
-  LOCK_WAIT_WORST_MS +
-  AUDIO_WAIT_TIMEOUT_MS +
-  RECORD_MS +
-  10_000 +
-  ANALYSIS_TIMEOUT_MS +
-  35_000 +
-  2 * EVIDENCE_COPY_MS;
-// A retake starts only while this much of the budget has been used. A full
-// worst-case take then still fits, with 10 s for the calls not counted above
-// (the audio wait's two Reidentify round trips, the StartRecord pre-check,
-// the /mix and /videos reads, spawning the analysis). The lock wait's reads
-// are inside its own worst case.
-const RETAKE_BEFORE_MS = TEST_TIMEOUT_MS - WORST_TAKE_MS - 10_000;
+// The time budget (TEST_TIMEOUT_MS 345 s, a take's worst case 225 s, a retake
+// only before 110 s) lives in `av-sync-budget.ts`, pinned by its mock-suite
+// spec (#221 dev.19 review round 1).
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -341,6 +329,10 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   // cg OBS was ON the probe scene before the gate (a dead run): the body
   // fails at its start (nothing to restore it to), afterAll idles the probe.
   let cgStuckOnProbe = false;
+  // The body switched SongPlayer's program (afterAll restores it only then:
+  // a same-scene restore through the facade is a re-kick that plays a
+  // paused playlist, review round 1).
+  let programSwitched = false;
   let autoRemux = false;
   // Cleanup state shared with afterAll. A timed-out test body never reaches
   // its own finally, so afterAll finishes whatever is still marked here.
@@ -484,7 +476,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         probePointed = false;
       });
       await step("restore the program scene", async () => {
-        if (!initialScene) return;
+        if (!initialScene || !programSwitched) return;
         await driver.switchScene(initialScene);
         expect(
           await driver.currentProgramScene(),
@@ -563,6 +555,16 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       `A/V gate: cg OBS's genlock state from ${lockEndpoint.url} ` +
         `(state ${JSON.stringify(lockEndpoint.lock.state)}, reason ${JSON.stringify(lockEndpoint.lock.reason)})`,
     );
+    // A probe that received within the last minute (a run cancelled
+    // mid-take) leaves a line that already reads like a GO: idle it and fail
+    // loudly, before any scene switch (`probeAttachRefusal`).
+    const refusal = probeAttachRefusal(lockEndpoint.lock, AV_PROBE_INPUT);
+    if (refusal !== null) {
+      await rec
+        .setInputSettings(AV_PROBE_INPUT, { ndi_source_name: "" })
+        .catch((e) => console.error(`A/V gate: could not idle the probe: ${e}`));
+      throw new Error(refusal);
+    }
     const readLock = bundleStateRead(lockEndpoint.url, httpGet);
 
     // 1. Put the baseline sp-* output on program.
@@ -571,6 +573,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       baseline.startsWith("sp-"),
       `baseline scene must be an sp-* output, got "${baseline}"`,
     ).toBe(true);
+    programSwitched = true;
     await driver.switchScene(baseline);
     // #221 L4b: the playback authority puts the baseline's playlist on air
     // a moment after the facade's switch; wait until it alone is on air.
@@ -621,7 +624,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
     const waitPlaying = () =>
       pollUntil(
         `an on-program playlist of ${JSON.stringify(active)} Playing with frames_submitted_last_5s > 0`,
-        30_000,
+        PLAY_WAIT_MS,
         () => getJson<HealthRow[]>(request, "/api/v1/ndi/health"),
         (h) => active.some((id) => isPlayingWithFrames(h, id)),
       );
@@ -662,20 +665,28 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         // 3. cg OBS's genlock must have LOCKED the probe, then its AUDIO must
         // flow (#221 dev.19 + dev.18, the file doc): a take started before
         // the probe's audio reaches cg OBS's mix opens with dropouts that are
-        // not SongPlayer's. The lock wait observes camera-box's pairing (the
-        // probe locked, the box LOCKED for none); the meter, tapped before
-        // the pairing's withhold, proves DistroAV delivers audio. Both are
-        // waited before the video is read, so the song read is the one
-        // playing at StartRecord.
-        assertNotTornDown("the probe lock wait");
-        const lock = await waitForProbeLock(readLock, AV_PROBE_INPUT);
-        console.log(
-          `A/V gate take ${take}: probe locked after ${Math.round(lock.waitedMs)} ms ` +
-            `(${lock.reads} reads of ${lockEndpoint.url}, the slowest ` +
-            `${Math.round(lock.slowestReadMs)} ms: ${lock.seen.join(" → ")})`,
+        // not SongPlayer's. The lock wait reads cg OBS's genlock state (the
+        // probe locked, the box LOCKED for none, normally after the attach's
+        // audio_pairing slew; it cannot see the PENDING withhold itself); the
+        // meter, tapped before the pairing's withhold, proves DistroAV
+        // delivers audio. Both are waited before the video is read, so the
+        // song read is the one playing at StartRecord.
+        const { audio } = await probeReadyForTake(
+          async () => {
+            assertNotTornDown("the probe lock wait");
+            const lock = await waitForProbeLock(readLock, AV_PROBE_INPUT);
+            console.log(
+              `A/V gate take ${take}: probe locked after ${Math.round(lock.waitedMs)} ms ` +
+                `(${lock.reads} reads of ${lockEndpoint.url}, ${lock.failedReads} failed, ` +
+                `the slowest ${Math.round(lock.slowestReadMs)} ms: ${lock.seen.join(" → ")})`,
+            );
+            return lock;
+          },
+          async () => {
+            assertNotTornDown("the probe audio wait");
+            return rec.waitForInputAudio(AV_PROBE_INPUT);
+          },
         );
-        assertNotTornDown("the probe audio wait");
-        const audio = await rec.waitForInputAudio(AV_PROBE_INPUT);
         console.log(
           `A/V gate take ${take}: probe audio flowing after ${Math.round(audio.waitedMs)} ms ` +
             `(${audio.withInput}/${audio.events} meter events with the probe, ` +
@@ -702,7 +713,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         // afterAll may have begun while OBS was starting: leave the stop to it.
         assertNotTornDown("the recording wait");
         await sleep(RECORD_MS);
-        const recording = await rec.stopRecord();
+        const recording = await rec.stopRecord(STOP_RECORD_MS);
         madeRecordings.push(recording);
         recordingOurs = false;
         const after = await currentVideo();
@@ -766,7 +777,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
           expect(skip.ok(), `POST /skip for playlist ${playlistId}`).toBe(true);
           await pollUntil(
             `playlist ${playlistId} to move off video ${videoId}`,
-            15_000,
+            SKIP_WAIT_MS,
             currentVideo,
             (v) => v !== null && v !== videoId,
           );

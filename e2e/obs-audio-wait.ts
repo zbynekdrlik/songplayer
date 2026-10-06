@@ -43,9 +43,12 @@
  * It never observes the pairing's withhold: on its own, its cover for the
  * warm-up was only the time it takes (the dev.17 take would have started
  * ~1 s later, after the audio turned clean, 0.461 s into it, but still
- * before LOCKED). #221 dev.19 covers the withhold exactly: the gate first
- * waits for cg OBS's genlock to LOCK the probe (`probe-lock-wait.ts`,
- * camera-box's `genlock_lock` facet), then runs this wait, then records.
+ * before LOCKED). #221 dev.19 narrows it: the gate first waits for cg OBS's
+ * genlock state (`probe-lock-wait.ts`, camera-box's `genlock_lock` facet:
+ * the probe locked, the box LOCKED for none), then runs this wait, then
+ * records. That facet reads the withhold's PENDING phase as paired too, so
+ * the withhold is still not observed exactly (the open design question on
+ * #221, comment 6014055098).
  *
  * What a reading is (obs-websocket 5,
  * `plugins/obs-websocket/src/utils/Obs_VolumeMeter.cpp`):
