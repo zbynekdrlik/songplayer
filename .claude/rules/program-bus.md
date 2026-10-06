@@ -290,10 +290,17 @@ included, is comment 5872871751).
   per-boundary stage timing, `vban-out.md`)}, degraded_reason (#221 B4
   step 6, "SP-program's receiver" below), vban{…} (#210), input{…}
   (#212), remote{…} (#213), transition{…} (#215), max{…} (#223 S2,
-  `gpu-max.md`)}`;
+  `gpu-max.md`), cut_refused[{source, reason}] (#221, below)}`;
   `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404
-  unknown playlist. Source `-1` is the #212 NDI input "OBS manuál" (404 unless
-  it is enabled with a source) — see `ndi-input.md`.
+  unknown playlist, 409 for a playlist that is inactive or whose scene
+  catalog names no scene (#221 ROZHODNUTÉ 6022247729: every consumer takes
+  SP-program, so the cut would black them all; `remote-control.md` "The
+  dashboard cut on the same path"). Source `-1` is the #212 NDI input "OBS
+  manuál" (404 unless it is enabled with a source) — see `ndi-input.md`.
+- `cut_refused` (both answers): every playlist a cut refuses now, in id
+  order, `reason` `playlist_inactive` / `no_scene`
+  (`program_switch::refused_sources`, the cut's own `cut_scene` rule;
+  `null` when the playlists cannot be read).
 - The ONE cut path is `program_bus::persist_and_cut` (persist first, then cut),
   shared by the API and the #213 Companion remote control (`remote-control.md`).
   #221: it takes the scene name the cut is published with ("What is on air"
@@ -318,8 +325,20 @@ included, is comment 5872871751).
 - sp-ui `ProgramControl` (dashboard, testids `program-control`,
   `program-source`, `program-cut` + `data-playlist-id` + `aria-pressed`,
   `program-error`) polls `GET /api/v1/program` through `store::poll_into`.
+  #221: a playlist listed in `cut_refused` has its `program-cut` button
+  DISABLED (`prop:disabled`, a per-button `Memo` of
+  `ProgramState::refusal`) with the reason's Slovak `title` (`cut_title`);
+  the rest keep "Strih na program". It reads the polled answer, never
+  `store.playlists` (loaded once at app start, never refreshed). Nothing is
+  disabled before the first poll; the server refuses anyway.
   The mock (`e2e/mock-api.mjs`) keeps program state in memory —
-  `POST /__mock/program-reset` in `beforeEach`/`afterEach`.
+  `POST /__mock/program-reset` in `beforeEach`/`afterEach`. It mirrors the
+  refusal (`cutRefusal` = `cut_scene`, `cut_refused`, 409 + a keep) and has
+  the opt-in fixture `POST /__mock/fixture {mode: "refusals"}` (the 3
+  default playlists + 30 "Archív" inactive + 31 "Bez výstupu" with no NDI
+  name; reset to `default` in `afterEach`). The cut body
+  (`/__mock/program-last-cut`) is recorded before the refusal, so a spec
+  proves a disabled button posted nothing (`program-control.spec.ts`).
 
 ## What is on air (#221 L1, design record 5873773896 §1b, §1d)
 

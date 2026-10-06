@@ -169,7 +169,8 @@ come from `SP-program`, never from cg OBS.
   `announce_transition`, `wait_transition_end`.
 - `playback/program_switch.rs` is the ONE switch path of a press (below);
   its keep reasons are its own constants (`NOT_SWITCHED`,
-  `INPUT_INACTIVE`, `CATALOG_FAILED`, `PERSIST_FAILED`). #221 L5 deleted
+  `INPUT_INACTIVE`, `CATALOG_FAILED`, `PERSIST_FAILED`, and for a refused
+  dashboard cut `PLAYLIST_INACTIVE` / `NO_SCENE`). #221 L5 deleted
   `remote/map.rs` (the OBS follow's scene → `SceneAction` rule) with the
   follow.
   `playback/scene_catalog.rs` says which scene is a playlist's.
@@ -315,7 +316,8 @@ whole switch:
    manual keeps -1 (no mix, `health.cuts` unchanged) and publishes the new
    scene name.
 6. `remote.last_remote_cut {scene, action (playlist|input|keep), source,
-   reason (not_switched|input_inactive|persist_failed|catalog_failed),
+   reason (not_switched|input_inactive|persist_failed|catalog_failed, and
+   a refused dashboard cut's playlist_inactive|no_scene),
    cut_boundary_100ns, at_ms, via (program|transition|dashboard),
    cg_forward}`; `cg_forward` is cg OBS's answer to a MANUAL press's
    forward (`ok` | `error <code>` | `not_ready`), null whenever nothing
@@ -335,12 +337,34 @@ deleted), and every record has `cg_forward` null:
 
 - a playlist whose catalog names a scene: cut, published with that scene
   (the record's `scene` is the catalog name, `via: dashboard`);
-- a playlist whose catalog names no scene (inactive, no / a shared NDI
-  output name): cut with no scene (WARN; the record's `scene` is the
-  playlist id);
+- a playlist whose catalog names no scene is REFUSED, HTTP 409 with the
+  reason's text, nothing on SP-program changes (source, on-air scene,
+  persisted source, `health.cuts`), recorded as a keep (the record's
+  `scene` is the playlist id, `source` null) with `playlist_inactive`
+  (not among the active playlists) or `no_scene` (active, but no / a
+  shared NDI output name). ROZHODNUTÉ 6022247729 (the 0.71.0 release
+  review's escalated row 2): every consumer takes SP-program (the LED wall
+  over `SP-program-MAX`, FOH, the Presenter, the stream), so such a cut
+  blacked them all at once. It REPLACES the L4a pin "cut with no scene"
+  (`a_playlist_that_names_no_scene_is_cut_without_a_scene`, deleted).
+  The ONE rule is `program_switch::cut_scene(&catalog, pid)` (the catalog
+  scene, else `Refusal::Inactive` / `Refusal::NoScene`; it reads
+  `SceneCatalog::is_active`, the ids the catalog was built from), decided
+  under the `switch_order` from the same `load_catalog` read the cut uses;
+  `switch_source` returns `SourceError::Refused` / `Store` (409 / 500);
 - -1: a cut only, published with no scene ("OBS manuál" by the resolver);
 - an unreadable catalog or a failed persist: nothing cut, recorded as a
   keep (`catalog_failed` / `persist_failed`), HTTP 500.
+
+Both program answers (`GET` and the cut's 200) carry `cut_refused: [{source,
+reason}]`, every playlist a cut refuses now in id order
+(`program_switch::refused_sources`: the switch's own `load_catalog` + the
+playlists' ids, decided by `cut_scene`; `null` when unreadable). The
+dashboard disables those `program-cut` buttons with a Slovak tooltip
+saying why (`program-bus.md`, "API + UI"). The facade path is unchanged: a
+press resolves a scene NAME through the catalog, so it never lands on such
+a playlist. A startup restore can still put one on program (a playlist
+deactivated after it was cut to); the cut away from it works as before.
 
 A dashboard cut announces no transition events (unchanged from L3); its
 program-scene event comes from the on-air watch.
@@ -410,7 +434,9 @@ playlists on air) went with it.
   something must skip events (`request_collecting`).
 - `GET /api/v1/program` → `remote.program_scene` = the same resolver
   (`null` — and `GetCurrentProgramScene` 604 — while nothing is on program
-  or a playlist whose catalog names no scene is on it).
+  or a playlist whose catalog names no scene is on it: since ROZHODNUTÉ
+  6022247729 only a startup restore can put one there, a dashboard cut
+  refuses it).
 - **Connect-time feedback (#221 lane 2, ROZHODNUTÉ 6002459249).** Since B4
   step 6 nothing moves cg OBS to a playlist scene, so cg OBS's own program
   differs from SP-program's whenever a playlist is on it, and Companion's
@@ -585,15 +611,22 @@ playlists on air) went with it.
   `wait_transition_end` / `announce_transition` on a paused clock (at once
   for a Cut, the served window, the 15 s bound).
 - `playback/program_switch_tests.rs` (pure): `cg_forward_label`, the `Via`
-  labels and the keep reasons, and the records (`via`, `cg_forward` null
-  for a playlist). L4a's `record_mirror` / `confirm_mirror` tests,
+  labels and the keep reasons, the records (`via`, `cg_forward` null
+  for a playlist), and `cut_scene` (a scene, `NoScene` for an empty or a
+  shared NDI name, `Inactive` for a playlist outside the catalog, the
+  reasons and texts); `scene_catalog_tests.rs` pins `is_active`. L4a's `record_mirror` / `confirm_mirror` tests,
   `legacy_cg_tests.rs` and `session_tests_legacy.rs` were deleted with the
   mirror (B4 step 6).
 - `api/program_tests_switch.rs` (L4a, B4 step 6): the dashboard cut through
   the real router: a playlist cut sends nothing to cg OBS (`via:
   dashboard`, `cg_forward` null), is published and recorded with its
-  catalog scene, -1 a cut only, a playlist that names no scene, a failed
-  persist (500), and the `switch_order` wait.
+  catalog scene, -1 a cut only, a failed persist (500), and the
+  `switch_order` wait. ROZHODNUTÉ 6022247729: a cut to an inactive playlist
+  and to one with an empty or a shared NDI name is 409 with its text
+  (`cut_text` reads the plain body), nothing changes and a keep is
+  recorded (`assert_refused`); after a refusal a playlist with a scene and
+  -1 still cut; both answers list `cut_refused` and a re-activated
+  playlist leaves it.
 - `session_tests_cap.rs` (L4a): 16 identified sessions, the 17th handshake
   answered 503 and counted, a freed slot takes a new session.
 - `mod_tests.rs` covers the settings, the telemetry, `Upstream::request` on

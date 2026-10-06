@@ -1697,8 +1697,9 @@ jobs:
                 Write-Host "SP-program back on source $sourceBefore"
               } catch {
                 # The old source is refused now (the NDI input switched off, the
-                # playlist deleted): never leave the test playlist playing on
-                # the wall. Pause it, then fail with the refusal.
+                # playlist deleted, deactivated or left with no scene: 409, #221):
+                # never leave the test playlist playing on the wall. Pause it,
+                # then fail with the refusal.
                 Invoke-WebRequest -Uri "http://localhost:8920/api/v1/playback/$($testPl.id)/pause" -Method Post -UseBasicParsing | Out-Null
                 throw
               }
