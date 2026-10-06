@@ -69,10 +69,10 @@ keep A/V in sync, and it stays OFF the paced emit thread (which must never wait)
 **The preview encoder's video and audio count ONE clock, SongPlayer's
 monotonic `Instant`. No input is ever stamped with the wall clock.** The
 rawvideo input is read at `-framerate 25` (`PREVIEW_FPS`, = the output `-r`
-and the 1 s GOP); the video feeder writes exactly 25 frames per second of the
-monotonic clock. The f32le PCM input counts samples placed by the audio
-feeder on the same clock (`AudioHold`, below). Never put
-`-use_wallclock_as_timestamps` back on any input.
+and the 1 s GOP): one frame per 40 ms slot of the monotonic clock. The f32le
+PCM input counts samples placed by the audio feeder on the same clock
+(`AudioHold`, below). Never put `-use_wallclock_as_timestamps` back on any
+input.
 
 - **Why (the incident, 6.10.2026):** the video input used to carry
   `-use_wallclock_as_timestamps 1`, so ffmpeg stamped it with `av_gettime()`,
@@ -83,48 +83,76 @@ feeder on the same clock (`AudioHold`, below). Never put
   saw new pictures 6.19 s+ after a pause (CI run 37400177771, the first run
   whose preview child lived across 02:00:11). The pipeline had paused within
   ~150 ms (`preview-afeed level … samples=0`); the late pictures came out of
-  the encoder. Root cause #221 comment 6008217701, decision 6008231226.
+  the encoder. Root cause #221 comment 6008217701, decisions 6008231226 (one
+  monotonic clock) and 6008679010 (A1, below).
+- **A repeated picture is re-encoded differently, so a pixel-exact freeze
+  needs a STARVED encoder (A1).** Writing the last picture again on every
+  slot (the first #221 head) makes libx264 (500k VBV, 1 s GOP) re-encode it a
+  little differently every few frames: the decoded 64×36 picture the pause
+  E2E hashes changed on 78-96 of 150 repeats, longest stable run 120-560 ms
+  (it needs ≥ 2 s). No x264 setting inside the #184 round F bitrate cap
+  avoids that. So a slot is written only with a NEW picture: during a pause
+  nothing is written, the encoder starves, and the picture holds pixel-exact,
+  as before #221. Never make the feeder repeat a picture on idle slots, and
+  never loosen the E2E's exact hash instead (rejected option A2: the talking
+  head's slow motion is as small per frame as the re-encoding noise).
 - **`preview_video_clock.rs::VideoClock`** (pure, Linux-tested,
-  mutation-gated): frame `k` is due `k × 40 ms` after the first canvas
-  (`take_due` returns the canvas and how many slots are due). Each slot
-  writes the NEWEST tapped canvas, else the last one again: a pause freezes
-  the picture on the next slot and the stream keeps flowing (the pause no
-  longer relies on the encoder starving). Every slot a blocked write missed is
-  written at once, so the video never falls behind the audio. A canvas
-  replaced before its slot (a 30/60 fps source) is skipped and goes back to
-  the tap's pool (`StreamShared::recycle_frame`, #147 r10).
+  mutation-gated):
+  - Slot `k` is decided `k × 40 ms + 20 ms` (`DECIDE_LATE_US`, half a
+    slot) after frame 0, with the NEWEST tapped canvas: the picture nearest
+    the slot's time (a 30 fps source: −20..+13 ms), never one a whole slot
+    old. A canvas replaced before its slot is skipped and goes back to the
+    tap's pool (`StreamShared::recycle_frame`, #147 r10).
+  - The next new picture after a gap (a pause, a decode stall, a write that
+    blocked) first fills the missed slots with the LAST written picture
+    (`take_due` returns it with the count, then the new canvas once): the
+    video counts every slot and stays on the audio. That is what ffmpeg's
+    `cfr` did with the wall-clock stamps. The replaced fill picture goes
+    back to the pool (`released`).
+  - A fill is bounded: at most `MAX_GAP_FILL_SLOTS` = 250 (10 s, the span
+    ffmpeg's muxer holds the audio of a starved video, ~86 MB written at
+    once). A longer gap writes nothing: `must_restart` → the feeder sets the
+    run's `restart` flag and stops, `monitor_loop` ends the run as
+    `ChildExited`, and `supervise` respawns a child for the viewers (the
+    relay is closed, they reconnect onto its init, ~1 s; the restart budget
+    applies).
 - **The feeder glue** (`spawn_video_feeder`, `mutants::skip`, in the same
-  file): drains stale frames at connect, waits `clock.wait_us(now)` for the
-  next canvas, offers every queued canvas (the newest wins), writes what
-  `take_due` returns. `first_video_us` = frame 0's slot: the video timeline's
-  origin, which the audio preroll (`audio_preroll_samples(gap, 0)`) aligns
-  to. Feed-on-connect (finding 1 below) is unchanged: nothing is written
-  before the first canvas.
-- **Log lines:** `preview-vfeed: start … fps=25` and every 10 s
-  `preview-vfeed: written repeated skipped max_burst queued`. A paused song
-  grows `repeated` by 25/s; `max_burst` > 1 means a write blocked (the
-  encoder did not read its video for `max_burst × 40 ms`).
-- **Tests:** `preview_video_clock_tests.rs` (rate, pause repeat, newest wins
-  + recycle, blocked-write catch-up, the wait, frame 0's origin) and
+  file): drains stale frames at connect, waits `clock.wait_us(now)` (until
+  the pending canvas's decision, else `IDLE_POLL_US`), offers every queued
+  canvas (the newest wins), checks `must_restart`, then writes what
+  `take_due` returns (at most two answers: the fill, then the new canvas).
+  `first_video_us` = frame 0's time: the video timeline's origin, which the
+  audio preroll (`audio_preroll_samples(gap, 0)`) aligns to. Feed-on-connect
+  (finding 1 below) is unchanged: nothing is written before the first canvas.
+- **Log lines:** `preview-vfeed: start … fps=25`, every 10 s
+  `preview-vfeed: written repeated skipped max_burst queued` (`max_burst` =
+  the largest single write in that window: 1 in steady play; a child's
+  start shows one burst while ffmpeg opens its audio input; the gap after a
+  pause), `preview-vfeed: a gap over 10 s — a fresh child …` and
+  `preview-encoder: the video feeder asked for a fresh child`.
+- **Tests:** `preview_video_clock_tests.rs` (a pause writes nothing and the
+  next picture fills the gap, the nearest-picture rate, newest wins +
+  recycle, a stall's fill, the 250-slot bound and the restart, the wait,
+  frame 0's origin, the stats window) and
   `preview_encoder_tests.rs::no_input_is_wall_clock_stamped_and_the_video_counts_the_output_rate`
   (+ the exact vector).
 - **Local proof** (`scripts/preview_latency_repro.py`, dev1 ffmpeg 6.1.1,
-  `--feeder g3 --pause-at 14 [--step-ms 1543 --step-at 6]`; the step is an
-  LD_PRELOAD shim that moves only the ffmpeg child's wall clock):
+  `--feeder g3 --source testsrc2 --pause-at 14 [--step-ms 1543 --step-at 6]`;
+  the step is an LD_PRELOAD shim that moves only the ffmpeg child's wall
+  clock; `pause_exact_picture_changes_after_last_new` decodes the whole
+  64×36 picture like the E2E's hash):
 
-  | | last new picture vs the pause's silence (media) | it leaves the encoder after the pause |
+  | | last new picture leaves the encoder | exact picture changes after it |
   |---|---|---|
-  | old (wall-clock video), no step | −0.045 s | before the pause |
-  | old, +1.543 s step | **+3.53 / +4.74 s** | **3.95 / 4.97 s** |
-  | #221, no step | −0.219 s | 0.04-0.53 s |
-  | #221, +1.543 s step | −0.239 s | 0.03 s |
+  | old (wall-clock video), +1.543 s step | **3.95 / 4.97 s after the pause** (it trails the sound by 3.5-4.7 s) | n/a |
+  | first #221 head (repeat on every slot) | 0.03-0.53 s after the pause | **the picture breathes** (78-96 of 150) |
+  | #221 A1, no step / +1.543 s step | 0.44 / 0.45 s before the pause (the encoder starves) | 0 |
 
   The switch-mode A/V placement (`content_shift_s`, design = the 210 ms
-  lead) is 0.229 s without and 0.245 s with the step (the old feeder: 0.233 s
-  without).
-  In every run (old feeder too) the encoder's output drifts ~1.7 % behind the
-  wall on dev1 (`video_output_behind_wall_s`), a harness property, not the
-  feeder.
+  lead) is 0.247 s with and without the step (the old feeder: 0.233 s). In
+  every run (the old feeder too) the encoder's output drifts ~1.7 % behind
+  the wall on dev1 (`video_output_behind_wall_s`), a harness property, not
+  the feeder.
 - **Box re-check after a change here:** the three `post-deploy-preview`
   tests (A/V sync, the lag readout, the 1 Mb/s link), and the box log's
   `preview-vfeed` lines.
@@ -141,8 +169,8 @@ feeder on the same clock (`AudioHold`, below). Never put
 3. **`pacer.rs` / `paced_output.rs` / FLAC / genlock stay byte-for-byte.**
    The preview adds exactly ONE `offer_frame` call per decoded frame.
 4. **A full channel DROPS the frame, never blocks.** The stream video/audio
-   bounded channels drop-on-full (the video feeder writes 25 fps of the
-   monotonic clock anyway, #221); a lagging WS viewer is
+   bounded channels drop-on-full (the video feeder writes the newest canvas
+   per 40 ms slot of the monotonic clock, #221); a lagging WS viewer is
    dropped by the broadcast relay and resyncs on the next keyframe fragment.
 5. **Viewer-scoped, on-demand.** The stream encoder child spawns on the FIRST WS
    viewer and is killed `VIEWER_TTL` (5 s) after the last one leaves. The JPEG
@@ -615,11 +643,11 @@ a `buffered.end` that is itself stale, and the lag beacon rides the same backlog
 the owner's actual complaint path every deploy, with all timings PRINTED:
 
 - **Pause freezes the preview.** Clicking the Player's `player-playpause` posts
-  `/pause`, which stops the pipeline decode → the video feeder writes the last
-  picture again on every slot (#221: the stream keeps flowing, the picture is
-  frozen) → the `<video>` reaches it within its (≤ 2 s) live-edge distance.
-  Before #221 the encoder starved instead, and a wall-clock step made the
-  picture outlive the pause by seconds (6.10.2026, the incident above). The proof taps the
+  `/pause`, which stops the pipeline decode → the video feeder writes nothing
+  (#221 A1) → the encoder starves → the WS stops → the `<video>` drains its
+  (≤ 2 s) buffer and freezes pixel-exact. A repeated picture would breathe
+  (re-encoded) and fail the hash; a wall-clock-stamped video made the picture
+  outlive the pause by seconds after a UTC step (6.10.2026, the #221 section). The proof taps the
   DECODED output directly, not the toggle text: a small offscreen-canvas
   frame-hash must go STABLE (last change within 3 s of pause, then held ≥ 2 s),
   AND a Web Audio `AnalyserNode` RMS tap on the `<video>` must drop below a quiet
@@ -807,9 +835,9 @@ draining the crossbeam channel, the channel fills to 48 blocks and STAYS full
 (the seam drops the NEWEST, the channel keeps the OLDEST), and the aligner — which
 placed a block by when it was DEQUEUED — pads silence to the wall and then writes
 a block that already waited 48 iterations. `ahead_ms` reads 0 while the content
-is seconds stale. Pause is a different path (the decode stops; the encoder
-starved then, it gets the last picture repeated since #221; the MSE playhead
-reaches the live edge in ~2-3.75 s) — it never exercises this queue.
+is seconds stale. Pause is a different path (the decode stops, the encoder
+starves — still so since #221 A1 — the MSE buffer drains in ~2-3.75 s) — it
+never exercises this queue.
 
 **The rule (do NOT regress):**
 
@@ -871,7 +899,8 @@ reaches the live edge in ~2-3.75 s) — it never exercises this queue.
   --switch-at 25` (BtbN linux64 master builds match the box's ffmpeg family).
   The table above used `--lead-ms 1500` (the default is now the paced 210)
   and the wall-clock-stamped video feeder; since #221 the script's video
-  feeder and args mirror `preview_video_clock.rs` (`--pause-at`, `--step-ms`).
+  feeder and args mirror `preview_video_clock.rs` (`--pause-at`, `--step-ms`,
+  `--source`).
 
 ## Stage level probes (#184 G4)
 

@@ -180,7 +180,8 @@ pub fn decode_seam_lead_ms() -> u32 {
 
 /// How many interleaved-stereo f32 samples of SILENCE the audio feeder prepends
 /// to align the preview's sample-count audio timeline with the video's
-/// frame-count timeline (#178 round 3; both on the monotonic clock since #221). `connect_gap_ms` is how long the video
+/// frame-count timeline (#178 round 3; both on the monotonic clock since
+/// #221). `connect_gap_ms` is how long the video
 /// input had already been feeding when the audio input connected (feed-on-connect
 /// opens video first), capped at 5 s so a late-connecting audio input can never
 /// prepend an unbounded silence; `lead_ms` is the decode-seam A/V lead
@@ -256,7 +257,8 @@ pub fn block_tail_range(skip_frames: usize, block_samples: usize) -> std::ops::R
 }
 
 /// Keep the preview's SAMPLE-COUNT audio timeline on the video's timeline (the
-/// real time elapsed on the monotonic clock, #221) in BOTH directions for one block of `block_frames` stereo frames
+/// real time elapsed on the monotonic clock, #221) in BOTH directions for one
+/// block of `block_frames` stereo frames
 /// (#184 round G2, replacing the add-only #178 item-15 gap fill): pad up to the
 /// wall when behind by more than [`ALIGN_PAD_THRESHOLD_MS`] (exactly like
 /// [`align_timeout`]); then, if the block would end more than [`MAX_AHEAD_MS`]
@@ -464,7 +466,7 @@ impl StreamShared {
     /// letterboxes into it (#147 round 10): a full channel's dropped frame,
     /// and the encoder's video feeder's frame once it is done with it. Before
     /// the feeder recycled, every watched frame was a fresh zeroed 337.5 KB
-    /// allocation. A buffer of the wrong size, or one past [`POOL_MAX`], is
+    /// allocation. A buffer of the wrong size, or one past `POOL_MAX`, is
     /// freed instead (the pool is bounded).
     #[cfg_attr(test, mutants::skip)]
     pub fn recycle_frame(&self, buf: Vec<u8>) {
