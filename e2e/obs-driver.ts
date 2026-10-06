@@ -63,7 +63,8 @@ export class ObsDriver {
 
   async listScenes(): Promise<string[]> {
     const r = await this.obs.call("GetSceneList");
-    return (r as { scenes: { sceneName: string }[] }).scenes.map((s) => s.sceneName);
+    // obs-websocket-js types `scenes` as plain JSON objects.
+    return (r as unknown as { scenes: { sceneName: string }[] }).scenes.map((s) => s.sceneName);
   }
 
   private async studioModeEnabled(): Promise<boolean> {
@@ -299,7 +300,9 @@ export class ObsDriver {
    * this session asks with a `Reidentify` for the wait alone and drops it
    * again after, whatever the outcome. The drop names the default `All`
    * explicitly: a `Reidentify` without `eventSubscriptions` keeps the current
-   * ones. A connect never asks for it (`obs-driver-protocol.spec.ts`).
+   * ones. A connect never asks for it (`obs-driver-protocol.spec.ts`). A
+   * connection that closes mid-wait ends it at once, naming the close, not
+   * after the bound as "no event".
    */
   async waitForInputAudio(
     inputName: string,
@@ -311,10 +314,16 @@ export class ObsDriver {
     let report: AudioWaitReport;
     try {
       report = await waitForInputAudio(
-        (listener) => {
-          const onMeters = (data: { inputs: unknown }) => listener(meterInputs(data.inputs));
-          this.obs.on("InputVolumeMeters", onMeters);
-          return () => this.obs.off("InputVolumeMeters", onMeters);
+        (onMeters, onClosed) => {
+          const meters = (data: { inputs: unknown }) => onMeters(meterInputs(data.inputs));
+          const closed = (e: { code?: number; message?: string }) =>
+            onClosed(`code ${e.code ?? "?"}${e.message ? `, ${e.message}` : ""}`);
+          this.obs.on("InputVolumeMeters", meters);
+          this.obs.on("ConnectionClosed", closed);
+          return () => {
+            this.obs.off("InputVolumeMeters", meters);
+            this.obs.off("ConnectionClosed", closed);
+          };
         },
         inputName,
         opts,

@@ -4,21 +4,30 @@
  *
  * Why: the gate records `SP-program` through cg OBS's probe input
  * (`av-sync-probe.ts`), a DistroAV receiver attached just before the take. A
- * freshly attached receiver delivers its PICTURE first. camera-box's genlock
- * audio pairing (camera-box 1367) WITHHOLDS its audio until the latch has
- * fixed its delay, ~5 s after the attach (cg OBS log of the dev.17 run:
- * bound 08:49:33.114, `genlock-shallow-lock` 36.133, DEGRADED
- * `audio_pairing` 36.217, LOCKED 37.214). That run's StartRecord came ~4 s
- * after the attach (35.705), so its take opened with two dropouts
- * (0.100 s / 22 ms, 0.227 s / 234 ms; run 37423917199) while the rest of the
- * 20 s was clean. Before lane 3 the gate recorded a long-attached input and
- * never met this warm-up.
+ * freshly attached receiver delivers its PICTURE at once, but its AUDIO only
+ * with gaps until camera-box's genlock audio pairing (camera-box 1367) has
+ * fixed the delay; by their design the pairing withholds the audio until its
+ * latch locks.
  *
- * The condition: the probe's obs-websocket `InputVolumeMeters` reading is
- * above a silence floor (−60 dBFS) for 1 s in a row; bounded (20 s), and the
- * bound fails loudly with the meter state it saw. It is build-independent
- * (camera-box's vendor `GetGenlockStats` "locked" poll is not). The dropout
- * check, its thresholds and its edge guard are unchanged.
+ * The cg OBS log of the dev.17 run (local time):
+ * - the probe's scene reset at 08:49:31.566;
+ * - DistroAV bound the source at 33.114;
+ * - `genlock-shallow-lock` at 36.133;
+ * - DEGRADED `audio_pairing` at 36.217;
+ * - LOCKED at 37.214, 4.1 s after the bind.
+ *
+ * The gate logged its take start at 35.705: 4.1 s after the reset and 2.6 s
+ * after the bind. The take opened with two dropouts (0.100 s / 22 ms and
+ * 0.227 s / 234 ms; run 37423917199). Its audio came at 0.122–0.227 s, then
+ * stopped until 0.461 s, and the rest of the 20 s was clean. Before lane 3
+ * the gate recorded a long-attached input and never met this warm-up.
+ *
+ * The condition: the probe's obs-websocket `InputVolumeMeters` reading must
+ * be above a silence floor (−60 dBFS) for 1 s in a row. The wait is bounded
+ * (20 s), and the bound fails loudly with the meter state it saw. The
+ * condition is build-independent; camera-box's vendor `GetGenlockStats`
+ * "locked" poll is not. The dropout check, its thresholds and its edge guard
+ * are unchanged.
  *
  * What a reading is (obs-websocket 5,
  * `plugins/obs-websocket/src/utils/Obs_VolumeMeter.cpp`):
@@ -27,12 +36,15 @@
  *   value, the input peak BEFORE the input's fader and mute: the question is
  *   whether the receiver delivers audio. A muted or faded probe still
  *   records silence and then fails as unmeasurable (`obs-ndi-health.md`).
- * - One event every 50 ms, carrying only ACTIVE inputs (shown on a program
- *   or a preview). An event without the probe resets the streak.
+ * - One event every 50 ms, carrying only ACTIVE inputs: those on the
+ *   program feed (`obs_source_active`). An input that is only on a preview is
+ *   not metered. An event without the probe resets the streak.
  * - A level is HELD until no audio has arrived for more than 0.3 s, then
  *   reset to 0. So a gap shorter than ~300 ms is invisible to this meter.
  *   The dev.17 warm-up gaps all fell within ~0.35 s of the first audio, so
- *   1 s of continuous audio before StartRecord clears them.
+ *   1 s of continuous audio before StartRecord clears them. A warm-up with
+ *   short gaps later than that would still reach the take (`obs-ndi-health.md`,
+ *   "Limit").
  *
  * Only continuity that was OBSERVED counts: a gap of more than
  * `MAX_METER_GAP_MS` between two meter events restarts the streak.
@@ -181,7 +193,7 @@ function fmtDbfs(db: number): string {
 /** The meter state in words, for the bound's error. */
 export function describeAudioWait(report: AudioWaitReport): string {
   if (report.events === 0) {
-    return "no InputVolumeMeters event arrived (is the subscription applied?)";
+    return "no InputVolumeMeters event arrived";
   }
   const last = report.lastPeaksDbfs
     ? `[${report.lastPeaksDbfs.map(fmtDbfs).join(", ")}] dBFS`
@@ -194,15 +206,50 @@ export function describeAudioWait(report: AudioWaitReport): string {
 }
 
 /**
+ * What the meter state at the bound most likely means: no event at all, an
+ * input that was never active, or an active input whose audio never held.
+ */
+export function explainAudioWait(report: AudioWaitReport): string {
+  if (report.events === 0) {
+    return "obs-websocket sent no meter event: the InputVolumeMeters subscription did not apply.";
+  }
+  if (report.withInput === 0) {
+    return (
+      "The input was in none of the events, so it was never active " +
+      "(obs-websocket meters only the inputs on the program feed): is cg OBS on " +
+      "the probe scene, and is the probe's scene item visible?"
+    );
+  }
+  return (
+    "A freshly attached DistroAV receiver delivers its picture at once and its " +
+    "audio with gaps until camera-box's genlock audio pairing locks (~4 s after " +
+    "the bind). A probe that stays silent longer gets no audio: does SP-program " +
+    "carry the playlist's sound, and is the probe's NDI audio on?"
+  );
+}
+
+/**
+ * A meter source: `onMeters` gets every `InputVolumeMeters` event's inputs,
+ * and `onClosed` is called if the connection carrying them closes. Returns
+ * the removal of both.
+ */
+export type MeterSubscribe = (
+  onMeters: (inputs: MeterInput[]) => void,
+  onClosed: (reason: string) => void,
+) => () => void;
+
+/**
  * Wait until `inputName`'s audio is above the floor for `holdMs` in a row
- * ([`nextAudioStreak`] over every meter event), or reject once `timeoutMs`
- * has passed, naming the input, the condition and the meter state it saw
- * ([`describeAudioWait`]). `subscribe` registers the event listener and
- * returns its removal; the listener is removed as soon as the wait ends,
- * either way.
+ * ([`nextAudioStreak`] over every meter event). It rejects in two cases,
+ * naming the input, the condition and the meter state it saw
+ * ([`describeAudioWait`], [`explainAudioWait`]):
+ * - once `timeoutMs` has passed;
+ * - at once when the source reports its connection closed.
+ *
+ * The listeners are removed as soon as the wait ends, either way.
  */
 export function waitForInputAudio(
-  subscribe: (listener: (inputs: MeterInput[]) => void) => () => void,
+  subscribe: MeterSubscribe,
   inputName: string,
   opts: AudioWaitOptions = {},
 ): Promise<AudioWaitReport> {
@@ -210,6 +257,7 @@ export function waitForInputAudio(
   const holdMs = opts.holdMs ?? AUDIO_HOLD_MS;
   const timeoutMs = opts.timeoutMs ?? AUDIO_WAIT_TIMEOUT_MS;
   const floorDbfs = opts.floorDbfs ?? SILENCE_FLOOR_DBFS;
+  const condition = `input peak above ${floorDbfs} dBFS for ${holdMs} ms in a row`;
   return new Promise<AudioWaitReport>((resolve, reject) => {
     const start = now();
     const report: AudioWaitReport = {
@@ -223,46 +271,56 @@ export function waitForInputAudio(
     let streak = NO_STREAK;
     let done = false;
     let unsubscribe: (() => void) | null = null;
-    const finish = (error: Error | null) => {
+    // The error is built AFTER `waitedMs` is set, so it can name it.
+    const finish = (error: (() => Error) | null) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       unsubscribe?.();
       report.waitedMs = now() - start;
-      if (error) reject(error);
+      if (error) reject(error());
       else resolve(report);
     };
     const timer = setTimeout(() => {
       finish(
-        new Error(
-          `the audio of OBS input "${inputName}" did not flow (input peak above ` +
-            `${floorDbfs} dBFS for ${holdMs} ms in a row) within ${timeoutMs} ms: ` +
-            `${describeAudioWait(report)}. A freshly attached DistroAV receiver ` +
-            `delivers its picture first and its audio once camera-box's genlock ` +
-            `audio pairing locks (~5 s); a take recorded before that opens with ` +
-            `audio dropouts. (#221)`,
-        ),
+        () =>
+          new Error(
+            `the audio of OBS input "${inputName}" did not flow (${condition}) within ` +
+              `${timeoutMs} ms: ${describeAudioWait(report)}. ${explainAudioWait(report)} (#221)`,
+          ),
       );
     }, timeoutMs);
-    unsubscribe = subscribe((inputs) => {
-      if (done) return;
-      const at = now();
-      report.events++;
-      const peak = inputPeakMul(inputs, inputName);
-      if (peak !== null) {
-        report.withInput++;
-        report.loudestDbfs = Math.max(report.loudestDbfs, mulToDbfs(peak));
-        const input = inputs.find((i) => i.inputName === inputName)!;
-        report.lastPeaksDbfs = input.inputLevelsMul.map((l) =>
-          typeof l[2] === "number" && Number.isFinite(l[2]) ? mulToDbfs(l[2]) : -Infinity,
+    unsubscribe = subscribe(
+      (inputs) => {
+        if (done) return;
+        const at = now();
+        report.events++;
+        const peak = inputPeakMul(inputs, inputName);
+        if (peak !== null) {
+          report.withInput++;
+          report.loudestDbfs = Math.max(report.loudestDbfs, mulToDbfs(peak));
+          const input = inputs.find((i) => i.inputName === inputName)!;
+          report.lastPeaksDbfs = input.inputLevelsMul.map((l) =>
+            typeof l[2] === "number" && Number.isFinite(l[2]) ? mulToDbfs(l[2]) : -Infinity,
+          );
+        }
+        streak = nextAudioStreak(streak, peak, at, opts);
+        if (streak.since !== null) {
+          report.longestStreakMs = Math.max(report.longestStreakMs, at - streak.since);
+        }
+        if (audioFlowing(streak, at, holdMs)) finish(null);
+      },
+      (reason) => {
+        finish(
+          () =>
+            new Error(
+              `the OBS connection closed (${reason}) while waiting for the audio of input ` +
+                `"${inputName}" (${condition}), after ${Math.round(report.waitedMs)} ms: ` +
+                `${describeAudioWait(report)} (#221)`,
+            ),
         );
-      }
-      streak = nextAudioStreak(streak, peak, at, opts);
-      if (streak.since !== null) {
-        report.longestStreakMs = Math.max(report.longestStreakMs, at - streak.since);
-      }
-      if (audioFlowing(streak, at, holdMs)) finish(null);
-    });
+      },
+    );
     // A source that delivered events synchronously may have ended the wait
     // before `unsubscribe` was known.
     if (done) unsubscribe();

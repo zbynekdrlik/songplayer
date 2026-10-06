@@ -37,9 +37,10 @@
  * #221 dev.18: every StartRecord then waits until the probe's AUDIO flows
  * (`obs-audio-wait.ts`: its InputVolumeMeters input peak above -60 dBFS for
  * 1 s in a row, bounded at 20 s): a freshly attached DistroAV receiver
- * delivers its picture first and its audio only once camera-box's genlock
- * audio pairing locks (~5 s), and a take started before that opened with
- * two dropouts (dev.17, run 37423917199). The dropout check is unchanged.
+ * delivers its picture at once and its audio with gaps until camera-box's
+ * genlock audio pairing locks (~4 s after the bind), and a take started
+ * before that opened with two dropouts (dev.17, run 37423917199). The
+ * dropout check is unchanged.
  * afterAll idles the probe first (an idle probe shows nothing, so restoring
  * the program to "OBS manuál" can never loop the picture), restores the
  * program scene, then cg OBS's own scene only when the program restore did
@@ -96,7 +97,8 @@ import {
   programSourceName,
   receiversSettled,
 } from "./av-sync-probe";
-import { keepRecording, keepText, type Evidence } from "./av-sync-evidence";
+import { EVIDENCE_COPY_MS, keepRecording, keepText, type Evidence } from "./av-sync-evidence";
+import { AUDIO_WAIT_TIMEOUT_MS } from "./obs-audio-wait";
 import {
   classifyAvSyncRun,
   isPlayingWithFrames,
@@ -123,12 +125,27 @@ const MAX_AV_MS = 40;
 const RECORD_MS = 20_000;
 const ANALYSIS_TIMEOUT_MS = 60_000; // ~5-10 s on the box
 const MAX_TAKES = 3;
-const TEST_TIMEOUT_MS = 300_000;
+// #221 dev.18: 300 → 320 s, by the probe audio wait's bound, so a take keeps
+// the retake room it had before the wait (RETAKE_BEFORE_MS stays 110 s).
+const TEST_TIMEOUT_MS = 320_000;
+// The worst case of one take: skip 15 + play 30 + the probe audio wait
+// (AUDIO_WAIT_TIMEOUT_MS, 20) + record (RECORD_MS, 20) + stop 10 + analysis
+// (ANALYSIS_TIMEOUT_MS, 60) + cleanup 35 + evidence copy 2 x
+// EVIDENCE_COPY_MS (5) = 200 s.
+const WORST_TAKE_MS =
+  15_000 +
+  30_000 +
+  AUDIO_WAIT_TIMEOUT_MS +
+  RECORD_MS +
+  10_000 +
+  ANALYSIS_TIMEOUT_MS +
+  35_000 +
+  2 * EVIDENCE_COPY_MS;
 // A retake starts only while this much of the budget has been used. A full
-// worst-case take (skip 15 + play 30 + the probe audio wait 20 (#221 dev.18,
-// AUDIO_WAIT_TIMEOUT_MS) + record 20 + stop 10 + analysis 60 + cleanup 35 +
-// evidence copy 2 x 5 s = 200 s) then still fits within TEST_TIMEOUT_MS.
-const RETAKE_BEFORE_MS = TEST_TIMEOUT_MS - 200_000;
+// worst-case take then still fits, with 10 s for the calls not counted above
+// (the StartRecord pre-check, the /mix and /videos reads, spawning the
+// analysis).
+const RETAKE_BEFORE_MS = TEST_TIMEOUT_MS - WORST_TAKE_MS - 10_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
