@@ -28,6 +28,22 @@ fn started() -> VideoClock<&'static str> {
     clock
 }
 
+/// The canvases a 30 fps source puts on the 25 slots of its first second:
+/// each slot's newest by its decision (k × 40 ms + 20 ms).
+const PICKS_30_FPS: [u64; 25] = [
+    0, 1, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 27, 28, 29,
+];
+
+/// The same for a 60 fps source (canvas `j` at `j × 16.667 ms`).
+const PICKS_60_FPS: [u64; 25] = [
+    0, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25, 27, 29, 32, 34, 37, 39, 41, 44, 46, 49, 51, 53, 56, 58,
+];
+
+/// Each canvas id written once.
+fn once_each(ids: impl IntoIterator<Item = u64>) -> Vec<(u64, u64)> {
+    ids.into_iter().map(|id| (id, 1)).collect()
+}
+
 /// One second of a source at `period_us` (canvas `j` arrives at
 /// `T0 + j × period_us`), the feeder waking every millisecond: every write.
 fn one_second_of(clock: &mut VideoClock<u64>, period_us: u64) -> Vec<(u64, u64)> {
@@ -39,6 +55,27 @@ fn one_second_of(clock: &mut VideoClock<u64>, period_us: u64) -> Vec<(u64, u64)>
             j += 1;
         }
         writes.extend(writes_at(clock, T0 + ms * 1_000, 3));
+    }
+    writes
+}
+
+/// One second of a source at `period_us` as the feeder sees it: a canvas
+/// wakes it at its arrival (stamped exactly), and its timer wakes it `late_us`
+/// after each slot's decision (a coarse OS timer: 15.6 ms on Windows). Every
+/// due write is taken at each wake; a timer goes first at the same instant.
+fn one_second_late(clock: &mut VideoClock<u64>, period_us: u64, late_us: u64) -> Vec<(u64, u64)> {
+    let canvases = (0_u64..)
+        .map(|j| (T0 + j * period_us, Some(j)))
+        .take_while(|&(at, _)| at < T0 + 1_000_000);
+    let timers = (1..PREVIEW_FPS).map(|k| (T0 + k * FRAME_US + DECIDE_LATE_US + late_us, None));
+    let mut wakes: Vec<(u64, Option<u64>)> = canvases.chain(timers).collect();
+    wakes.sort_unstable();
+    let mut writes = Vec::new();
+    for (now, canvas) in wakes {
+        if let Some(j) = canvas {
+            clock.offer(j, now);
+        }
+        writes.extend(writes_at(clock, now, 3));
     }
     writes
 }
@@ -153,13 +190,7 @@ fn a_30_fps_source_fills_exactly_25_slots_a_second_with_the_nearest_pictures() {
     // the ones in between are skipped (back to the pool).
     let mut clock = VideoClock::new();
     let writes = one_second_of(&mut clock, 33_333);
-    let expected: Vec<(u64, u64)> = [
-        0, 1, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 27, 28, 29,
-    ]
-    .iter()
-    .map(|&id| (id, 1))
-    .collect();
-    assert_eq!(writes, expected);
+    assert_eq!(writes, once_each(PICKS_30_FPS));
     assert_eq!(
         clock.stats(),
         VideoClockStats {
@@ -346,4 +377,104 @@ fn take_stats_starts_a_new_max_burst_window() {
         },
         "the totals stay, the window starts over"
     );
+}
+
+#[test]
+fn a_picture_due_for_a_decided_slot_stays_when_a_newer_one_arrives_first() {
+    // #221 review round 3: B arrived in time for slot 1 (decided at 60 ms),
+    // but the feeder's timer woke late and C arrived at 62 ms first. B is
+    // due: it stays and takes slot 1, C waits for slot 2 (100 ms). C used to
+    // replace B, so slot 1 repeated A and B was never shown.
+    let mut clock = started();
+    assert_eq!(clock.offer("B", T0 + 30_000), None);
+    assert_eq!(
+        clock.offer("C", T0 + 62_000),
+        None,
+        "B is due, not replaced"
+    );
+    assert_eq!(clock.wait_us(T0 + 62_000), 0, "B is due now");
+    assert_eq!(writes_at(&mut clock, T0 + 62_000, 4), vec![("B", 1)]);
+    assert_eq!(clock.wait_us(T0 + 62_000), 38_000, "C's slot 2 at 100 ms");
+    // A canvas for a slot not decided yet is still replaced by a newer one.
+    assert_eq!(clock.offer("D", T0 + 90_000), Some("C"));
+    assert_eq!(writes_at(&mut clock, T0 + 100_000, 4), vec![("D", 1)]);
+    assert_eq!(
+        clock.stats(),
+        VideoClockStats {
+            written: 3,
+            repeated: 0,
+            skipped: 1,
+            max_burst: 1,
+        }
+    );
+}
+
+#[test]
+fn a_late_timer_writes_the_same_pictures_at_24_30_and_60_fps() {
+    // #221 review round 3: the feeder's timer may wake well after a slot's
+    // decision (15.6 ms on Windows), and a canvas may arrive in between; the
+    // pictures written must not depend on it. Three phases of lateness.
+    for late_us in [0, 2_000, 15_600] {
+        let mut clock = VideoClock::new();
+        assert_eq!(
+            one_second_late(&mut clock, 33_333, late_us),
+            once_each(PICKS_30_FPS),
+            "30 fps, timer {late_us} µs late"
+        );
+        assert_eq!(
+            clock.stats(),
+            VideoClockStats {
+                written: 25,
+                repeated: 0,
+                skipped: 5,
+                max_burst: 1,
+            }
+        );
+
+        let mut clock = VideoClock::new();
+        assert_eq!(
+            one_second_late(&mut clock, 41_667, late_us),
+            once_each((0..=11).chain([11]).chain(12..=23)),
+            "24 fps, timer {late_us} µs late"
+        );
+        assert_eq!(
+            clock.stats(),
+            VideoClockStats {
+                written: 25,
+                repeated: 1,
+                skipped: 0,
+                max_burst: 1,
+            }
+        );
+
+        let mut clock = VideoClock::new();
+        assert_eq!(
+            one_second_late(&mut clock, 16_667, late_us),
+            once_each(PICKS_60_FPS),
+            "60 fps, timer {late_us} µs late"
+        );
+        assert_eq!(
+            clock.stats(),
+            VideoClockStats {
+                written: 25,
+                repeated: 0,
+                skipped: 34,
+                max_burst: 1,
+            }
+        );
+    }
+}
+
+#[test]
+fn every_replaced_fill_picture_comes_back_once() {
+    // Two pictures written before the feeder hands the replaced ones back
+    // (two due canvases in one wake): both come back to the pool, each once.
+    let mut clock = started();
+    clock.offer("B", T0 + 1_000);
+    assert_eq!(clock.take_due(T0 + 60_000), Some((&"B", 1)));
+    clock.offer("C", T0 + 61_000);
+    assert_eq!(clock.take_due(T0 + 100_000), Some((&"C", 1)));
+    assert_eq!(clock.released(), Some("B"));
+    assert_eq!(clock.released(), Some("A"));
+    assert_eq!(clock.released(), None);
 }
