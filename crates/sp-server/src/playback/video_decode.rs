@@ -134,7 +134,8 @@ pub async fn start(pool: &SqlitePool, shutdown: &broadcast::Sender<()>) {
 pub struct VideoDecodeStatus {
     /// The setting `video_hw_decode`, as last applied.
     pub hw_decode: bool,
-    /// Files opened in `Hardware` mode.
+    /// Opens asked for in `Hardware` mode (a file that then opened nowhere
+    /// counts here and in none of the counts below).
     pub hw_requested: u64,
     /// Of those, the ones whose first picture came out of the GPU decoder.
     pub gpu_decodes: u64,

@@ -438,11 +438,13 @@ pub fn mapped_from_scanline0(start: usize, scanline0: usize, len: usize) -> Opti
     len.checked_sub(offset)
 }
 
-/// What the hardware path did across the process, every reader opened in
+/// What the hardware path did across the process, every open asked for in
 /// `Hardware` mode (the decode bench's included).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HwDecodeStats {
-    /// Readers opened in `Hardware` mode.
+    /// Opens asked for in `Hardware` mode, counted before the open: a file
+    /// that then opened nowhere (no reader at all) counts here and in none of
+    /// the counts below.
     pub requested: u64,
     /// Of those, the ones whose first picture came out of the GPU decoder.
     pub gpu_decodes: u64,
