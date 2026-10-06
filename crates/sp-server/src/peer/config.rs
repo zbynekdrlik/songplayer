@@ -176,7 +176,9 @@ fn valid_name(name: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-/// `http(s)://host[/path]`, no query, no fragment, no whitespace.
+/// `http(s)://host[/path]`, no query, no fragment, no whitespace, and no
+/// `user:password@` before the host (it would show in clear: only the key and
+/// the Cloudflare secret are masked).
 fn valid_base_url(url: &str) -> bool {
     let Some(rest) = url
         .strip_prefix("https://")
@@ -189,6 +191,7 @@ fn valid_base_url(url: &str) -> bool {
         && !rest.contains('?')
         && !rest.contains('#')
         && !url.contains(char::is_whitespace)
+        && !host.contains('@')
 }
 
 /// The peer list's rules; an error names the peer, never a secret.
