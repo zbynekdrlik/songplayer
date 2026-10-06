@@ -33,6 +33,7 @@ import {
   probeAttachRefusal,
   probeLockVerdict,
   probePhaseEvents,
+  summarizeInputs,
   probeReadyForTake,
   resolveBundleState,
   waitForProbeLock,
@@ -534,6 +535,47 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     );
     expect(reads.starts.at(-1)).toBe(180_000);
     expect(msg).not.toContain("before the attach");
+  });
+
+  test("a read exactly WAKE_LATCH_WINDOW_MS after the attach is past the window", async () => {
+    // Review round 6 boundary mutant (< vs <=).
+    const clock = fakeClock();
+    clock.t = 170_000;
+    const reads = fakeRead(clock, () =>
+      lock("DEGRADED", "recent_event", probe(), { recent_event_inputs: [{ name: "sp-slow", events: 9 }] }),
+    );
+    const msg = await rejection(
+      waitForProbeLock(reads.read, PROBE, {
+        now: clock.now,
+        sleep: clock.sleep,
+        timeoutMs: 100,
+        phaseEventsBeforeAttach: 2,
+        attachedAt: 100_000,
+      }),
+    );
+    expect(reads.starts[0]).toBe(170_000);
+    expect(msg).not.toContain("before the attach");
+  });
+
+  test("summarizeInputs names every genlock input's state and lifetime events", () => {
+    // Review round 6: the box-wide recent_event latch can come from ANY
+    // reconnected input, so the line read before the attach is logged per
+    // input (connected, idle, locked, relocks + late holds).
+    const facet = lock("LOCKED", "none", probe({ idle: true, relocks: 2, late_holds: 1 }), {
+      inputs: {
+        "sp-slow": { locked: true, connected: true, idle: false, relocks: 0, late_holds: 0 },
+        [PROBE]: { locked: true, connected: true, idle: true, relocks: 2, late_holds: 1 },
+        "OBS cam": { locked: false, connected: false, idle: false, relocks: "x" },
+      },
+    });
+    expect(summarizeInputs(facet)).toBe(
+      '"sp-slow" connected=true idle=false locked=true events=0; ' +
+        `"${PROBE}" connected=true idle=true locked=true events=3; ` +
+        '"OBS cam" connected=false idle=false locked=false events=?',
+    );
+    expect(summarizeInputs({ state: "LOCKED", reason: "none", inputs: {} })).toBe("none");
+    expect(summarizeInputs({ state: "LOCKED", reason: "none" })).toBe("none");
+    expect(summarizeInputs({ state: "LOCKED", reason: "none", inputs: { a: "x" } })).toBe('"a" ?');
   });
 
   test("the latch window is measured at the read's START, and only answered reads move it", async () => {
