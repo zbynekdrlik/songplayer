@@ -207,7 +207,8 @@ fn a_24_fps_source_fills_a_slot_it_misses_with_the_last_picture() {
     // Canvas j arrives at j × 41.667 ms, slower than the 25 slots a second.
     // Canvas 12 arrives at 500.004 ms, 4 µs after slot 12's decision: slot 12
     // repeats canvas 11 and canvas 12 takes slot 13. Every picture lands
-    // within about half a slot of its slot's time (−18..+22 ms).
+    // within about half a slot of its slot's time (picture − slot
+    // −22..+18 ms).
     let mut clock = VideoClock::new();
     let writes = one_second_of(&mut clock, 41_667);
     let expected: Vec<(u64, u64)> = (0..=11)
@@ -467,8 +468,9 @@ fn a_late_timer_writes_the_same_pictures_at_24_30_and_60_fps() {
 
 #[test]
 fn every_replaced_fill_picture_comes_back_once() {
-    // Two pictures written before the feeder hands the replaced ones back
-    // (two due canvases in one wake): both come back to the pool, each once.
+    // Two pictures written before the feeder drains `released` (as after a
+    // late wake with two due canvases): both replaced ones come back to the
+    // pool, each once.
     let mut clock = started();
     clock.offer("B", T0 + 1_000);
     assert_eq!(clock.take_due(T0 + 60_000), Some((&"B", 1)));

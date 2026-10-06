@@ -17,7 +17,8 @@
 //!   producer / emit thread.
 //! * With a viewer, the downscale runs on the decode thread (nearest-neighbour,
 //!   no encode) into a RECYCLED buffer; a full channel DROPS the frame (the
-//!   feeder writes 25 fps of the monotonic clock anyway, #221) — never blocks.
+//!   feeder takes the newest canvas per 40 ms slot of the monotonic clock
+//!   anyway, #221) — never blocks.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -39,8 +40,9 @@ pub const OUT_NV12_LEN: usize = (OUT_W as usize) * (OUT_H as usize) * 3 / 2;
 const BLACK_Y: u8 = 16;
 const NEUTRAL_C: u8 = 128;
 
-/// Bounded video backlog handed to the feeder (drop-on-full; the feeder writes
-/// 25 fps of the monotonic clock, `preview_video_clock.rs`).
+/// Bounded video backlog handed to the feeder (drop-on-full; the feeder takes
+/// the newest canvas per 40 ms slot of the monotonic clock,
+/// `preview_video_clock.rs`).
 const VIDEO_CHANNEL_CAP: usize = 4;
 /// Bounded audio backlog (small f32 blocks; drop-on-full so the emit path never waits).
 const AUDIO_CHANNEL_CAP: usize = 48;

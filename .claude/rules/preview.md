@@ -192,7 +192,7 @@ input.
   grows 250 per 10 s and `repeated` stays near 0 after the child's start:
   a growing `repeated` while playing means slots pass with no new picture,
   decode jitter or a regression of the round-3 rule; `skipped` ≈ 50 per
-  10 s at 30 fps, ≈ 340 at 60 fps), and by hand a pause over 10 s then play: the
+  10 s at 30 fps, ≈ 350 at 60 fps), and by hand a pause over 10 s then play: the
   preview must reconnect onto a fresh child (`a fresh child after a long
   pause`) and play in sync (the restart path is glue, no unit test).
 

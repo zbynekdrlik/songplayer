@@ -195,10 +195,11 @@ impl<T> VideoClock<T> {
         let first = self.pending.front()?.1;
         self.start_us = Some(self.start_us.unwrap_or(first));
         let (start, slot) = self.pending_slot()?;
-        let fill = slot - self.stats.written;
-        if fill > MAX_GAP_FILL_SLOTS {
+        // The one bound predicate, shared with the feeder's restart check.
+        if self.must_restart() {
             return None;
         }
+        let fill = slot - self.stats.written;
         if fill > 0 && self.last.is_some() {
             self.stats.written += fill;
             self.stats.repeated += fill;
