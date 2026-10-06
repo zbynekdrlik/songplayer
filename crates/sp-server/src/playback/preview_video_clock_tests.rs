@@ -411,6 +411,33 @@ fn a_picture_due_for_a_decided_slot_stays_when_a_newer_one_arrives_first() {
 }
 
 #[test]
+fn a_newer_canvas_replaces_only_the_newest_pending_one_never_a_due_one() {
+    // #221 review round 5: with two canvases pending, B due for slot 1 and C
+    // queued for slot 2, D (63 ms, also slot 2) replaces C, the NEWEST
+    // pending canvas; B, already due, is never the one replaced, and D's
+    // slot is compared with C's, not with B's.
+    let mut clock = started();
+    assert_eq!(clock.offer("B", T0 + 30_000), None);
+    assert_eq!(clock.offer("C", T0 + 62_000), None, "B is due");
+    assert_eq!(
+        clock.offer("D", T0 + 63_000),
+        Some("C"),
+        "the newest pending canvas is replaced"
+    );
+    assert_eq!(writes_at(&mut clock, T0 + 63_000, 4), vec![("B", 1)]);
+    assert_eq!(writes_at(&mut clock, T0 + 100_000, 4), vec![("D", 1)]);
+    assert_eq!(
+        clock.stats(),
+        VideoClockStats {
+            written: 3,
+            repeated: 0,
+            skipped: 1,
+            max_burst: 1,
+        }
+    );
+}
+
+#[test]
 fn a_late_timer_writes_the_same_pictures_at_24_30_and_60_fps() {
     // #221 review round 3: the feeder's timer may wake well after a slot's
     // decision (15.6 ms on Windows), and a canvas may arrive in between; the
