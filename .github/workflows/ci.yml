@@ -1646,6 +1646,13 @@ jobs:
           # there is no "nothing" to cut back to.
           $sourceBefore = (Invoke-RestMethod -Uri "http://localhost:8920/api/v1/program").source
           Write-Host "SP-program source before the check: $sourceBefore"
+          # #221: a source the cut refuses (a playlist deactivated while on
+          # program, restored at startup) could never be cut back to, so the
+          # test playlist would stay on the wall. Fail before touching it.
+          if ($null -ne $sourceBefore -and $refusedIds -contains $sourceBefore) {
+            Write-Error "FAIL: SP-program's source $sourceBefore is a playlist the program cut refuses (#221: inactive or no scene) - not cutting away from it, a cut back would be refused"
+            exit 1
+          }
           $cutAway = ($sourceBefore -ne $testPl.id)
           # Already on program AND playing (sp-slow is the operators' usual
           # background): read its title in place, never play or pause it, so

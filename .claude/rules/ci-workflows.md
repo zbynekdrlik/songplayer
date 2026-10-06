@@ -352,7 +352,9 @@ step picks the test playlist by the baseline discipline
 (`e2e/obs-baseline-scene.ts`: an active `sp-slow` playlist with videos, else
 any `sp-*` but `sp-fast` and `sp-warmup`, the sync tone), skipping any
 playlist listed in `GET /api/v1/program` → `cut_refused` (#221: the cut
-would answer 409; the step's own filter, not the helper's), cuts SP-program to
+would answer 409; the step's own filter, not the helper's; and it fails
+before any cut when SP-program's own source is listed there, since the cut
+back would be refused), cuts SP-program to
 it with `POST /api/v1/program/cut`, plays, reads Arena's composition, and in
 a `finally` cuts back to the old source with NO pause (the test playlist
 leaves program and pauses itself after the fade, so the program never

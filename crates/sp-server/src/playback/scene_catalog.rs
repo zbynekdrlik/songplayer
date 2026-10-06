@@ -144,7 +144,7 @@ pub async fn load_catalog(pool: &SqlitePool) -> Result<SceneCatalog, sqlx::Error
 }
 
 /// The scene a program source is published with when nobody pressed one
-/// (the startup restore, a dashboard cut): the playlist's catalog scene.
+/// (the startup restore): the playlist's catalog scene.
 /// `None` for the NDI input (the resolver names it "OBS manuál"), for a
 /// playlist that names no scene, and when the playlists cannot be read
 /// (WARN).
