@@ -52,8 +52,21 @@ fn the_default_clock_is_an_empty_one() {
     assert_eq!(clock.start_us(), None);
 }
 
+/// Every write `take_due` hands out at `now`, at most `limit` of them (a
+/// bounded loop: a mutant that never stops answering fails, it cannot hang).
+fn writes_at<T: Copy>(clock: &mut VideoClock<T>, now: u64, limit: usize) -> Vec<(T, u64)> {
+    let mut out = Vec::new();
+    for _ in 0..limit {
+        match clock.take_due(now) {
+            Some((frame, n)) => out.push((*frame, n)),
+            None => break,
+        }
+    }
+    out
+}
+
 #[test]
-fn the_first_canvas_is_written_at_once_and_the_next_slot_is_one_frame_later() {
+fn the_first_canvas_is_written_at_once_and_a_slot_waits_for_a_new_picture() {
     let mut clock = VideoClock::new();
     clock.offer("A");
     assert_eq!(
@@ -62,67 +75,86 @@ fn the_first_canvas_is_written_at_once_and_the_next_slot_is_one_frame_later() {
         "a canvas waits for its first slot: now"
     );
     assert_eq!(clock.take_due(T0), Some((&"A", 1)));
-    assert_eq!(clock.wait_us(T0), FRAME_US, "slot 1 is one frame later");
-    assert_eq!(clock.wait_us(T0 + 10_000), 30_000);
+    // #221 A1: nothing new, nothing written (the encoder starves, the picture
+    // holds pixel-exact): the feeder only polls.
+    assert_eq!(clock.wait_us(T0), IDLE_POLL_US);
+    assert_eq!(clock.take_due(T0 + 5 * FRAME_US), None, "no repeat");
+    // A new picture takes slot 1, decided half a slot after it (60 ms), so
+    // the canvas a slot gets is the one nearest its time, not up to 40 ms old.
+    clock.offer("B");
+    assert_eq!(clock.wait_us(T0 + 5_000), 55_000);
+    assert_eq!(clock.take_due(T0 + 59_999), None, "not before the decision");
     assert_eq!(
-        clock.take_due(T0 + FRAME_US - 1),
-        None,
-        "not before its slot"
-    );
-    assert_eq!(
-        clock.take_due(T0 + FRAME_US),
-        Some((&"A", 1)),
+        clock.take_due(T0 + 60_000),
+        Some((&"B", 1)),
         "exactly at it"
     );
-    assert_eq!(clock.wait_us(T0 + FRAME_US), FRAME_US);
+    assert_eq!(clock.wait_us(T0 + 60_000), IDLE_POLL_US);
 }
 
 #[test]
-fn exactly_25_frames_per_second_of_the_monotonic_clock() {
-    let mut clock = VideoClock::new();
-    clock.offer("A");
-    // A feeder that wakes every millisecond for one second writes 25 frames,
-    // one at a time.
-    let mut frames = 0;
-    for ms in 0..1_000 {
-        if let Some((_, n)) = clock.take_due(T0 + ms * 1_000) {
-            assert_eq!(n, 1, "one frame per slot at {ms} ms");
-            frames += n;
-        }
-    }
-    assert_eq!(frames, 25);
-    assert_eq!(
-        clock.take_due(T0 + 1_000_000),
-        Some((&"A", 1)),
-        "the 26th starts second 2"
-    );
-    let stats = clock.stats();
-    assert_eq!(stats.written, 26);
-    assert_eq!(stats.max_burst, 1);
-}
-
-#[test]
-fn a_pause_repeats_the_last_canvas_on_every_slot() {
-    // The decode stops offering (a pause): the stream keeps flowing with the
-    // last picture, frozen on the very next slot.
+fn a_pause_writes_nothing_and_the_next_picture_fills_the_gap() {
+    // #221 A1 (ROZHODNUTÉ 6008679010): a pause sends NOTHING, so the encoder
+    // starves and the picture freezes pixel-exact (a repeated canvas is
+    // re-encoded differently every few frames). The next picture fills the
+    // missed slots with the last one, then takes its own slot: the video
+    // timeline still counts every slot of the monotonic clock.
     let mut clock = VideoClock::new();
     clock.offer("A");
     assert_eq!(clock.take_due(T0), Some((&"A", 1)));
-    clock.offer("B");
-    assert_eq!(clock.take_due(T0 + FRAME_US), Some((&"B", 1)));
-    for k in 2..=51 {
+    for k in 1..=10 {
         assert_eq!(
-            clock.take_due(T0 + k * FRAME_US),
-            Some((&"B", 1)),
-            "slot {k} repeats the last canvas"
+            clock.take_due(T0 + k * FRAME_US + 20_000),
+            None,
+            "slot {k} of the pause writes nothing"
         );
     }
+    clock.offer("B");
+    // 430 ms: slots 1-10 are due; 1-9 get the last picture, 10 the new one.
+    assert_eq!(
+        writes_at(&mut clock, T0 + 10 * FRAME_US + 30_000, 4),
+        vec![("A", 9), ("B", 1)]
+    );
     assert_eq!(
         clock.stats(),
         VideoClockStats {
-            written: 52,
-            repeated: 50,
+            written: 11,
+            repeated: 9,
             skipped: 0,
+            max_burst: 9,
+        }
+    );
+}
+
+#[test]
+fn a_30_fps_source_fills_exactly_25_slots_a_second_with_the_nearest_pictures() {
+    // Canvas j arrives at j × 33.333 ms; the feeder wakes every millisecond.
+    // Slot k is decided at k × 40 ms + 20 ms with the newest canvas, so each
+    // slot gets the picture nearest its time; the ones in between are
+    // skipped (they go back to the pool).
+    let mut clock = VideoClock::new();
+    let mut ids = Vec::new();
+    let mut j: u64 = 0;
+    for ms in 0..1_000 {
+        while j * 33_333 <= ms * 1_000 {
+            clock.offer(j);
+            j += 1;
+        }
+        ids.extend(writes_at(&mut clock, T0 + ms * 1_000, 3));
+    }
+    let expected: Vec<(u64, u64)> = [
+        0, 1, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 27, 28, 29,
+    ]
+    .iter()
+    .map(|&id| (id, 1))
+    .collect();
+    assert_eq!(ids, expected);
+    assert_eq!(
+        clock.stats(),
+        VideoClockStats {
+            written: 25,
+            repeated: 0,
+            skipped: 5,
             max_burst: 1,
         }
     );
@@ -133,14 +165,15 @@ fn the_newest_canvas_takes_the_slot_and_a_replaced_one_comes_back() {
     let mut clock = VideoClock::new();
     clock.offer("A");
     assert_eq!(clock.take_due(T0), Some((&"A", 1)));
-    // A was written: replacing it hands it back, it was not skipped.
-    assert_eq!(clock.offer("B"), Some("A"));
+    // A was written and stays the gap's fill picture: offering B replaces
+    // nothing.
+    assert_eq!(clock.offer("B"), None);
     assert_eq!(clock.stats().skipped, 0);
     // B never reached a slot: replacing it skips it.
     assert_eq!(clock.offer("C"), Some("B"));
     assert_eq!(clock.stats().skipped, 1);
     assert_eq!(
-        clock.take_due(T0 + FRAME_US),
+        clock.take_due(T0 + 60_000),
         Some((&"C", 1)),
         "the newest one"
     );
@@ -156,50 +189,38 @@ fn the_newest_canvas_takes_the_slot_and_a_replaced_one_comes_back() {
 }
 
 #[test]
-fn every_slot_a_blocked_write_missed_is_written_at_once() {
-    // The feeder's write blocked for 200 ms: slots 1-5 passed. All five go out
-    // together, so the video timeline never falls behind the audio's.
+fn a_stalled_feeder_fills_the_missed_slots_with_the_last_written_picture() {
+    // The feeder's write blocked for 220 ms while B arrived: slots 1-4 passed
+    // unwritten. They get A, the last picture the encoder saw; B takes slot 5.
     let mut clock = VideoClock::new();
     clock.offer("A");
     assert_eq!(clock.take_due(T0), Some((&"A", 1)));
-    assert_eq!(clock.take_due(T0 + 5 * FRAME_US), Some((&"A", 5)));
+    clock.offer("B");
+    assert_eq!(
+        writes_at(&mut clock, T0 + 220_000, 4),
+        vec![("A", 4), ("B", 1)]
+    );
     assert_eq!(
         clock.stats(),
         VideoClockStats {
             written: 6,
-            repeated: 5,
+            repeated: 4,
             skipped: 0,
-            max_burst: 5,
+            max_burst: 4,
         }
     );
-    // A new canvas arrived during the next block: it fills the first missed
-    // slot, then repeats; the burst counts it once as fresh.
-    clock.offer("B");
-    assert_eq!(clock.take_due(T0 + 9 * FRAME_US + 1), Some((&"B", 4)));
-    assert_eq!(
-        clock.stats(),
-        VideoClockStats {
-            written: 10,
-            repeated: 8,
-            skipped: 0,
-            max_burst: 5,
-        }
-    );
-    assert_eq!(clock.wait_us(T0 + 9 * FRAME_US + 1), FRAME_US - 1);
 }
 
 #[test]
-fn the_wait_runs_to_the_next_slot_and_never_below_zero() {
+fn the_wait_runs_to_the_next_decision_and_never_below_zero() {
     let mut clock = VideoClock::new();
     clock.offer("A");
     assert_eq!(clock.take_due(T0), Some((&"A", 1)));
-    assert_eq!(clock.wait_us(T0), FRAME_US);
-    assert_eq!(clock.wait_us(T0 + FRAME_US), 0, "slot 1 is due");
-    assert_eq!(
-        clock.wait_us(T0 + FRAME_US + 10_000),
-        0,
-        "and overdue, not negative"
-    );
-    assert_eq!(clock.take_due(T0 + FRAME_US + 10_000), Some((&"A", 1)));
-    assert_eq!(clock.wait_us(T0 + FRAME_US + 10_000), 30_000, "slot 2");
+    clock.offer("B");
+    assert_eq!(clock.wait_us(T0), 60_000, "slot 1 is decided at 60 ms");
+    assert_eq!(clock.wait_us(T0 + 60_000), 0, "due");
+    assert_eq!(clock.wait_us(T0 + 70_000), 0, "overdue, not negative");
+    assert_eq!(clock.take_due(T0 + 70_000), Some((&"B", 1)));
+    clock.offer("C");
+    assert_eq!(clock.wait_us(T0 + 70_000), 30_000, "slot 2 at 100 ms");
 }
