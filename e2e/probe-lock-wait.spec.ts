@@ -465,6 +465,10 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(unknown).not.toContain("the cause is");
     expect(unknown).toContain("relock");
     expect(unknown).toContain("candidates");
+    // Review round 10: the backward step is a cause too, and the most
+    // lifetime events is never evidence.
+    expect(unknown).toContain("backward step");
+    expect(unknown).toContain("is not evidence");
     expect(named).toContain("box-wide");
     // Another reason with events before the attach: not the wake either.
     const other = explainProbeLock(lock("DEGRADED", "input_unlocked", probe()), PROBE, 3);
@@ -551,7 +555,7 @@ test.describe("A/V gate: wait for cg OBS's genlock lock on the probe (#221 dev.1
     expect(msg).not.toContain("before the attach");
     // Review round 9: the bound's distance is the last answered read's too
     // (the wait's start would print 65000).
-    expect(msg).toContain("the last answered read started 80000 ms after the bind");
+    expect(msg).toContain("the last answered read started 80000 ms after the bind SongPlayer saw");
   });
 
   test("a read exactly WAKE_LATCH_WINDOW_MS after the attach is past the window", async () => {
