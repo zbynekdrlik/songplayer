@@ -675,16 +675,17 @@ workers ask their peers before they run a job (below, from "Ask first").
     that sha, AND the row's CURRENT audio file has that size (the record is
     per video, the audio per row: a row whose audio is a local encode under
     another title's name is not vouched for);
-  - or this node's own hash of the row's current audio (`peer_hashes`,
-    while the file still has its hashed size and mtime, `HashEntry::holds`)
-    is that sha. PP hashes nothing while it does not serve (phase 1), so
-    there the fetch record is what counts.
+  - or this node's own hash of the row's current audio is that sha.
 
-  This node's hash is its `peer_hashes` entry while it holds, else taken
-  NOW at the hasher's rate and stored as the hasher would
-  (`hasher::hash_unchanged`, shared with the passes): PP in phase 1 runs no
-  hasher, and the audio phase 0 copied from SNV carries no fetch record,
-  so without it no copied song could ever take SNV's work.
+  The record is read FIRST: it reads no file, so an adopted song costs no
+  audio read. Only when it does not vouch is the audio hashed
+  (`Exchange::audio_sha`): its `peer_hashes` entry while that still holds
+  (`HashEntry::holds`, trusted as the catalog trusts it), else hashed NOW
+  at the hasher's rate and stored as the hasher would
+  (`hasher::hash_unchanged`, shared with the passes). PP in phase 1 runs
+  no hasher, and the audio phase 0 copied from SNV carries no fetch
+  record: without the on-demand hash no copied song could take SNV's
+  work.
 
   `Exchange::unless_peers_audio` runs it on `Ask::Fetch`, with the row's
   id, before any transfer (stems: after `job_input`, so a row with no audio
@@ -718,9 +719,12 @@ workers ask their peers before they run a job (below, from "Ask first").
     rows again once done.
 
   A download that runs here and then fails leaves a fetched pair in place
-  without its record: its stems and lyrics run here (the safe side). Test
-  fixtures of a peer's stems or lyrics record PP's audio as fetched from SNV
-  (`TestNode::audio_from`), the state a real PP has after its download.
+  without its record: the guard then hashes that audio, finds the peer's
+  bytes, and the peer's stems and lyrics are still taken (correctly: it IS
+  the peer's audio). Test fixtures of a peer's stems or lyrics record PP's
+  audio as fetched from SNV (`TestNode::audio_from`), the state a real PP
+  has after its download; the guard's own tests change PP's bytes so that
+  one branch alone decides (the record, a stored hash, a hash taken now).
 - Lyrics: never for an operator's ask here (`lyrics_manual_priority`, a
   non-blank `lyrics_override_text`), never for a video whose
   `{yt}_lyrics.json` here is a dub's subtitles (any row of it here

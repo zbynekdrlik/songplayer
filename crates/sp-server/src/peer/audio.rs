@@ -8,15 +8,16 @@
 //! this node downloaded itself, a different YouTube format) would drift
 //! against the audio this node plays.
 //!
-//! The hash is this node's `peer_hashes` entry while it still holds, else
-//! taken now at the hasher's rate and stored as the hasher would: a node
-//! that does not serve (PP in phase 1) runs no hasher, and the audio phase 0
-//! copied from SNV carries no fetch record. When this node cannot tell yet
-//! (the peer lists no audio of the video now, a rename there not hashed
-//! again; or no audio of the row is on disk here) the job waits like a
-//! failed fetch, within the same 2 h bound. While this node's transfers are
-//! paused nothing is read or hashed: the fetch would be refused anyway, so
-//! the job waits out the pause as a refused fetch does.
+//! The fetch record is read first: it reads no file. Only when it does not
+//! vouch is the row's audio hashed: its `peer_hashes` entry while that still
+//! holds, else hashed now at the hasher's rate and stored as the hasher
+//! would (a node that does not serve, PP in phase 1, runs no hasher, and the
+//! audio phase 0 copied from SNV carries no fetch record). When this node
+//! cannot tell yet (the peer lists no audio of the video now, a rename there
+//! not hashed again; or no audio of the row is on disk here) the job waits
+//! like a failed fetch, within the same 2 h bound. While this node's
+//! transfers are paused nothing is read or hashed: the fetch would be
+//! refused anyway, so the job waits out the pause as a refused fetch does.
 
 use std::path::Path;
 
@@ -30,11 +31,13 @@ use super::hasher::{HASH_BYTES_PER_S, hash_unchanged, stat};
 use super::kind::{ArtifactKind, Job};
 use crate::db::models_peer;
 
-/// A row's audio file on disk: its size and this node's hash of it.
+/// A row's audio file on disk now: its path as the row records it, its
+/// size and its mtime (`hasher::stat`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RowAudio {
-    pub(crate) size: u64,
-    pub(crate) hashed: Option<String>,
+struct RowAudio {
+    path: String,
+    size: i64,
+    mtime_ms: i64,
 }
 
 impl Exchange {
@@ -73,13 +76,21 @@ impl Exchange {
                 )
                 .ok()
                 .flatten();
-        let own = OwnAudio {
+        let mut own = OwnAudio {
             fetched: fetched
                 .as_ref()
                 .map(|(node, _, sha)| (node.as_str(), sha.as_str())),
-            size: row.size,
-            hashed: row.hashed.as_deref(),
+            size: u64::try_from(row.size).unwrap_or_default(),
+            hashed: None,
         };
+        // The record reads no file: the audio is hashed only when it does not
+        // vouch for it.
+        let hashed = if same_audio(peer, listed, own) {
+            None
+        } else {
+            self.audio_sha(&row).await
+        };
+        own.hashed = hashed.as_deref();
         if same_audio(peer, listed, own) {
             return None;
         }
@@ -108,10 +119,9 @@ impl Exchange {
             .await
     }
 
-    /// Row `video_id`'s current audio file: its size and this node's hash
-    /// of it (its `peer_hashes` entry while that holds, `HashEntry::holds`,
-    /// else hashed now). `None` for a row with no audio, or one not on disk.
-    pub(crate) async fn row_audio(&self, video_id: i64) -> Option<RowAudio> {
+    /// Row `video_id`'s current audio file on disk; `None` for a row with no
+    /// audio, or one not on disk.
+    async fn row_audio(&self, video_id: i64) -> Option<RowAudio> {
         let audio: Option<Option<String>> =
             sqlx::query_scalar("SELECT audio_file_path FROM videos WHERE id = ?")
                 .bind(video_id)
@@ -120,37 +130,43 @@ impl Exchange {
                 .inspect_err(|e| warn!(video_id, %e, "exchange: reading the row's audio failed"))
                 .ok()
                 .flatten();
-        let audio = audio.flatten()?;
-        let (size, mtime_ms) = stat(Path::new(&audio)).await?;
-        let stored = models_peer::hash_of(&self.pool, &audio)
-            .await
-            .inspect_err(|e| warn!(video_id, %e, "exchange: reading the audio's hash failed"))
-            .ok()
-            .flatten()
-            .filter(|entry| entry.holds(size, mtime_ms));
-        let hashed = match stored {
-            Some(entry) => Some(entry.sha256),
-            None => self.hash_now(Path::new(&audio), size, mtime_ms).await,
-        };
+        let path = audio.flatten()?;
+        let (size, mtime_ms) = stat(Path::new(&path)).await?;
         Some(RowAudio {
-            size: u64::try_from(size).ok()?,
-            hashed,
+            path,
+            size,
+            mtime_ms,
         })
     }
 
-    /// Hash `audio` (found at `size` / `mtime_ms`) now, at the hasher's
-    /// rate, and store the entry as the hasher would. `None` when it changed
-    /// meanwhile or cannot be read.
-    async fn hash_now(&self, audio: &Path, size: i64, mtime_ms: i64) -> Option<String> {
-        let entry = hash_unchanged(audio, size, mtime_ms, HASH_BYTES_PER_S)
+    /// This node's sha256 of `row`'s audio: its `peer_hashes` entry while
+    /// that still holds (`HashEntry::holds`), else hashed now at the
+    /// hasher's rate and stored as the hasher would. `None` when the file
+    /// changed meanwhile or cannot be read.
+    async fn audio_sha(&self, row: &RowAudio) -> Option<String> {
+        let stored = models_peer::hash_of(&self.pool, &row.path)
             .await
             .inspect_err(
-                |e| warn!(audio = %audio.display(), %e, "exchange: hashing the audio failed"),
+                |e| warn!(audio = %row.path, %e, "exchange: reading the audio's hash failed"),
             )
             .ok()
-            .flatten()?;
+            .flatten()
+            .filter(|entry| entry.holds(row.size, row.mtime_ms));
+        if let Some(entry) = stored {
+            return Some(entry.sha256);
+        }
+        let entry = hash_unchanged(
+            Path::new(&row.path),
+            row.size,
+            row.mtime_ms,
+            HASH_BYTES_PER_S,
+        )
+        .await
+        .inspect_err(|e| warn!(audio = %row.path, %e, "exchange: hashing the audio failed"))
+        .ok()
+        .flatten()?;
         if let Err(e) = models_peer::put_hash(&self.pool, &entry).await {
-            warn!(audio = %audio.display(), %e, "exchange: storing the audio's hash failed");
+            warn!(audio = %row.path, %e, "exchange: storing the audio's hash failed");
         }
         Some(entry.sha256)
     }

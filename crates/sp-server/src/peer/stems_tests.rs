@@ -175,13 +175,42 @@ async fn stems_whose_audio_the_peer_does_not_list_now_wait() {
     assert!(!pp.ex.parts_dir().exists(), "nothing transferred");
 }
 
-/// Nothing records where PP's audio came from, but PP's own hash of it is
-/// the sha SNV lists (phase 2: a node that serves hashes its audio): the
-/// same audio, so SNV's stems are taken.
+/// The fetch record is read first and reads no file: when it vouches (from
+/// SNV, at the sha SNV lists, a row audio of that size), the stems are taken
+/// and the audio is never hashed. The bytes here differ on purpose, so only
+/// the record can have said yes.
 #[tokio::test]
-async fn an_own_hash_equal_to_the_peers_audio_takes_its_stems() {
+async fn a_fetch_record_that_vouches_takes_the_stems_without_hashing() {
+    let (_snv, pp, job, audio) = snv_and_pp().await;
+    std::fs::write(&audio, bytes(3_000, 7)).unwrap();
+    assert!(matches!(first(Some(&pp.ex), &job).await, PeerStep::Done));
+    assert_eq!(
+        std::fs::read(crate::stems::stem_paths(&audio).0).unwrap(),
+        bytes(1_500, 3)
+    );
+    let hashes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_hashes")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(hashes, 0, "no hash taken");
+}
+
+/// Nothing records where PP's audio came from; PP's stored hash of it
+/// (phase 2: a node that serves hashes its audio) still holds and is the
+/// sha SNV lists: it is trusted as the hasher's, as the catalog trusts it,
+/// and SNV's stems are taken. The bytes here differ on purpose, so only the
+/// stored entry can have said yes.
+#[tokio::test]
+async fn a_stored_hash_that_holds_is_trusted_by_the_hook() {
     let (_snv, pp, job, audio) = snv_and_pp_own_audio().await;
+    std::fs::write(&audio, bytes(3_000, 7)).unwrap();
     pp.hash_now().await;
+    sqlx::query("UPDATE peer_hashes SET sha256 = ? WHERE path = ?")
+        .bind(crate::peer::rig::song_audio_sha())
+        .bind(audio.to_string_lossy().to_string())
+        .execute(pp.pool())
+        .await
+        .unwrap();
     assert!(matches!(first(Some(&pp.ex), &job).await, PeerStep::Done));
     assert_eq!(
         std::fs::read(crate::stems::stem_paths(&audio).0).unwrap(),
