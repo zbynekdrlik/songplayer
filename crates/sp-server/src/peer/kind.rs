@@ -47,7 +47,8 @@ impl ArtifactKind {
         }
     }
 
-    /// The kind a URL segment names; `None` for anything else (`unknown` too).
+    /// The kind a URL segment names (lane 4's artifact route); `None` for
+    /// anything else (`unknown` too).
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "video" => Some(Self::Video),
@@ -79,7 +80,8 @@ impl Job {
         }
     }
 
-    /// What a peer must hold for this job to be fetched instead of run.
+    /// What a peer must hold for this job to be fetched instead of run
+    /// (lane 7's decision).
     pub fn needs(self) -> &'static [ArtifactKind] {
         match self {
             Self::Download => &[ArtifactKind::Video, ArtifactKind::Audio],
@@ -88,7 +90,8 @@ impl Job {
         }
     }
 
-    /// What this job announces in its node's catalog while it runs.
+    /// What this job is to announce in its node's catalog while it runs
+    /// (one board entry per kind, `JobBoard::snapshot`).
     pub fn makes(self) -> &'static [ArtifactKind] {
         match self {
             Self::Download => &[

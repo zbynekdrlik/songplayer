@@ -1,5 +1,6 @@
-//! #229: the jobs this node runs now, announced while they run (lane 3's
-//! catalog is to list them).
+//! #229: the board of the jobs this node runs, each announced while it runs.
+//! Empty in production until lane 7: there `Exchange::ask` answers a job it
+//! runs here with `Local(JobGuard)`, and lane 3's catalog is to list them.
 //! In memory on purpose: a crash takes its announcements with it, so a peer
 //! never waits on a job that died (it would wait the full 2 h otherwise).
 //! A QUEUED job is not on the board: lane 3's catalog is to add those from
