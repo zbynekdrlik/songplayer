@@ -46,19 +46,19 @@ fn a_sha256_is_64_lowercase_hex_digits() {
 /// Review Focus 3: a newer peer's catalog — an unknown kind, a bad id, a bad
 /// sha, a job state this node does not know, a node name that does not hold,
 /// fields this node does not know (at the top and inside entries) — keeps
-/// every entry this node can use.
+/// every entry this node can use; a time that is not one reads as `None`.
 #[test]
 fn sanitized_keeps_only_what_this_node_can_use() {
     let sha = sha();
     let json = format!(
         r#"{{"node":"snv","artifacts":[
-            {{"youtube_id":"aaaaaaaaaaa","kind":"audio","version":1,"size":10,"sha256":"{sha}","codec":"flac"}},
+            {{"youtube_id":"aaaaaaaaaaa","kind":"audio","version":1,"size":10,"sha256":"{sha}","updated_at":"soon","codec":"flac"}},
             {{"youtube_id":"aaaaaaaaaaa","kind":"dub","version":1,"size":10,"sha256":"{sha}"}},
             {{"youtube_id":"../../x","kind":"video","version":1,"size":10,"sha256":"{sha}"}},
             {{"youtube_id":"bbbbbbbbbbb","kind":"video","version":1,"size":10,"sha256":"nothex"}}],
           "jobs":[
-            {{"youtube_id":"ccccccccccc","kind":"lyrics","node":"snv","state":"running","started_at":"t","progress":0.5}},
-            {{"youtube_id":"ddddddddddd","kind":"audio","node":"snv","state":"queued"}},
+            {{"youtube_id":"ccccccccccc","kind":"lyrics","node":"snv","state":"running","started_at":"2026-10-06T16:00:00.123Z","progress":0.5}},
+            {{"youtube_id":"ddddddddddd","kind":"audio","node":"snv","state":"queued","started_at":"yesterday"}},
             {{"youtube_id":"fffffffffff","kind":"lyrics","node":"SNV site","state":"running","started_at":"t"}},
             {{"youtube_id":"ccccccccccc","kind":"dub","node":"snv","state":"running","started_at":"t"}},
             {{"youtube_id":"eeeeeeeeeee","kind":"lyrics","node":"snv","state":"paused"}},
@@ -72,7 +72,7 @@ fn sanitized_keeps_only_what_this_node_can_use() {
         vec![artifact("aaaaaaaaaaa", ArtifactKind::Audio, &sha)]
     );
     let running = CatalogJob {
-        started_at: Some("t".into()),
+        started_at: Some("2026-10-06T16:00:00.123Z".into()),
         ..job("ccccccccccc", ArtifactKind::Lyrics, JobState::Running)
     };
     let queued = job("ddddddddddd", ArtifactKind::Audio, JobState::Queued);
@@ -96,6 +96,21 @@ fn a_catalog_node_name_that_does_not_hold_reads_as_empty() {
         ..Catalog::default()
     };
     assert_eq!(c.sanitized().node, "pp-2");
+}
+
+/// A peer's time is kept only when it is an RFC 3339 time.
+#[test]
+fn a_peer_time_is_kept_only_when_it_is_one() {
+    assert_eq!(
+        checked_time(Some("2026-10-06T16:00:00.123Z".into())).as_deref(),
+        Some("2026-10-06T16:00:00.123Z")
+    );
+    assert_eq!(checked_time(Some("t".into())), None);
+    assert_eq!(
+        checked_time(Some("2026-10-06T16:00:00.123Z\nINFO forged".into())),
+        None
+    );
+    assert_eq!(checked_time(None), None);
 }
 
 #[test]
