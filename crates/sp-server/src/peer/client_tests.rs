@@ -106,10 +106,11 @@ async fn a_cloudflare_login_redirect_is_access_refused_and_never_followed() {
 
 #[tokio::test]
 async fn a_403_is_access_refused_and_a_401_the_key() {
-    for (status, want) in [
+    let cases: [(u16, PeerError); 2] = [
         (403, PeerError::AccessRefused(403)),
         (401, PeerError::KeyRefused),
-    ] {
+    ];
+    for (status, want) in cases {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .respond_with(ResponseTemplate::new(status))
