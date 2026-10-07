@@ -4,8 +4,9 @@
 //!
 //! - A video's pair and stems: the representative row = the lowest id of the
 //!   YouTube id with an audio (rows of one video share files, #136). Stems
-//!   only when `stem_status = 'done'`, named after the CURRENT audio
-//!   (`stems::stem_paths`, `.claude/rules/song-files.md`).
+//!   only when a row of the video with that audio has `stem_status =
+//!   'done'`, named after the CURRENT audio (`stems::stem_paths`,
+//!   `.claude/rules/song-files.md`).
 //! - Lyrics: `{yt}_lyrics.json` at the highest pipeline version of the
 //!   video's rows with lyrics, never when ANY row of the video is
 //!   dub-requested or carries the Live-Translate track (that file is then the
@@ -48,8 +49,11 @@ pub struct CatalogCounts {
     pub queued: usize,
 }
 
-/// `?1` = an optional YouTube id filter.
-const MEDIA_ROWS: &str = "SELECT youtube_id, COALESCE(file_path, ''), audio_file_path, stem_status \
+/// `?1` = an optional YouTube id filter. The 4th column: a row of the video
+/// with the same audio has its stems done (rows share files, #136).
+const MEDIA_ROWS: &str = "SELECT youtube_id, COALESCE(file_path, ''), audio_file_path, \
+         EXISTS (SELECT 1 FROM videos s WHERE s.youtube_id = videos.youtube_id \
+             AND s.audio_file_path = videos.audio_file_path AND s.stem_status = 'done') \
      FROM videos WHERE id IN (SELECT MIN(id) FROM videos WHERE normalized = 1 \
          AND audio_file_path IS NOT NULL AND audio_file_path != '' \
          AND (?1 IS NULL OR youtube_id = ?1) GROUP BY youtube_id) \
@@ -71,7 +75,7 @@ const METADATA_ROWS: &str = "SELECT youtube_id, song, COALESCE(artist, ''), meta
          AND (?1 IS NULL OR youtube_id = ?1) GROUP BY youtube_id) \
      ORDER BY youtube_id";
 
-type MediaRow = (String, String, String, Option<String>);
+type MediaRow = (String, String, String, bool);
 type MetadataRow = (String, String, String, Option<String>, i64);
 
 /// The file artifacts this node's rows name (all, or one video's).
@@ -85,7 +89,7 @@ pub async fn artifact_files(
         .bind(youtube_id)
         .fetch_all(pool)
         .await?;
-    for (yt, video, audio, stem_status) in media {
+    for (yt, video, audio, stems_done) in media {
         if !is_valid_video_id(&yt) {
             continue;
         }
@@ -98,7 +102,7 @@ pub async fn artifact_files(
                 PathBuf::from(video),
             ));
         }
-        if stem_status.as_deref() == Some("done") {
+        if stems_done {
             let (vocals, instrumental) = crate::stems::stem_paths(&audio);
             files.push(file(&yt, ArtifactKind::StemVocals, STEMS_VERSION, vocals));
             files.push(file(
@@ -307,7 +311,8 @@ pub async fn peer_video(
         return Ok(None);
     };
     let duration: Option<Option<i64>> = sqlx::query_scalar(
-        "SELECT duration_ms FROM videos WHERE youtube_id = ? ORDER BY id LIMIT 1",
+        "SELECT duration_ms FROM videos WHERE youtube_id = ? AND duration_ms IS NOT NULL \
+         ORDER BY id LIMIT 1",
     )
     .bind(youtube_id)
     .fetch_optional(pool)

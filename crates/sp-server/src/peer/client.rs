@@ -228,13 +228,17 @@ impl PeerClient {
             return Err(e);
         }
         let body = read_bounded(resp, MAX_VIDEO_BYTES).await?;
-        serde_json::from_slice(&body).map_err(|e| {
+        let video: PeerVideo = serde_json::from_slice(&body).map_err(|e| {
             PeerError::BadResponse(format!(
                 "not a video row (line {}, column {})",
                 e.line(),
                 e.column()
             ))
-        })
+        })?;
+        if video.metadata.youtube_id != youtube_id {
+            return Err(PeerError::BadResponse("the row is of another video".into()));
+        }
+        Ok(video)
     }
 }
 
@@ -244,9 +248,18 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// A transport error, without its URL.
+/// A transport error with its causes (connect, DNS, TLS, timeout), without
+/// its URL: no cause in the chain holds the URL or a header.
 pub(crate) fn unreachable_err(e: reqwest::Error) -> PeerError {
-    PeerError::Unreachable(e.without_url().to_string())
+    let e = e.without_url();
+    let mut text = e.to_string();
+    let mut cause = std::error::Error::source(&e);
+    while let Some(c) = cause {
+        text.push_str(": ");
+        text.push_str(&c.to_string());
+        cause = c.source();
+    }
+    PeerError::Unreachable(text)
 }
 
 /// The whole body, refused once it passes `max` bytes.

@@ -6,7 +6,9 @@
 //! - download: `downloader::DOWNLOAD_DUE` (not downloaded, active playlist,
 //!   retry due);
 //! - lyrics: buckets 1–3 of `lyrics::reprocess` (`queued_where`: manual,
-//!   null, stale), only while `lyrics_worker_enabled` is on;
+//!   null, stale), only while `lyrics_worker_enabled` is on, and never for
+//!   a video the catalog will not serve lyrics of (any row of it
+//!   dub-requested or Live-Translate, `catalog::LYRICS_ROWS`);
 //! - stems: `db::models_stems_priority::STEM_ELIGIBLE_PRED`, only while
 //!   `stem_worker_enabled` is on.
 //!
@@ -41,12 +43,15 @@ pub async fn queued(pool: &SqlitePool) -> Result<Vec<(String, Job)>, sqlx::Error
         let version = i64::from(crate::lyrics::LYRICS_PIPELINE_VERSION);
         let lyrics: Vec<String> = sqlx::query_scalar(&format!(
             "SELECT DISTINCT v.youtube_id FROM videos v JOIN playlists p ON p.id = v.playlist_id \
-             WHERE {} ORDER BY v.youtube_id",
+             WHERE {} AND NOT EXISTS (SELECT 1 FROM videos d WHERE d.youtube_id = v.youtube_id \
+                 AND (d.dub_requested = 1 OR d.lyrics_source = ?)) \
+             ORDER BY v.youtube_id",
             crate::lyrics::reprocess::queued_where()
         ))
         .bind(version)
         .bind(version)
         .bind(version)
+        .bind(crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE)
         .fetch_all(pool)
         .await?;
         add(&mut jobs, lyrics, Job::Lyrics);
