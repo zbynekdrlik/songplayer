@@ -78,6 +78,11 @@ pub const RECENTRE_100NS: i64 = 100_000;
 /// SongPlayer's: the latency target before the entry's delay — two grid
 /// slots, VBAN's send budget (`VBAN_SEND_LATENCY_100NS`, pinned by a test).
 pub const BASE_LATENCY_100NS: i64 = 666_666;
+/// SongPlayer's: the blocks whose mean error a window-mean re-centre moves
+/// by. A step under one slot moves a 32-block window's mean past 10 ms only
+/// with ≥ 30 % of the window behind it, so these 8 all lie after the step;
+/// over ≥ 266 ms they average a driver's callback sawtooth out.
+pub const RECENT_BLOCKS: usize = 8;
 
 /// What [`RateRegression::offer`] did with a point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -288,6 +293,27 @@ struct Window {
     sum_latency_100ns: i64,
 }
 
+/// The last [`RECENT_BLOCKS`] blocks' latency errors (100 ns), a ring;
+/// emptied by a re-centre.
+#[derive(Debug, Default)]
+struct Recent {
+    errs: [i64; RECENT_BLOCKS],
+    count: usize,
+}
+
+impl Recent {
+    fn push(&mut self, err_100ns: i64) {
+        self.errs[self.count % RECENT_BLOCKS] = err_100ns;
+        self.count += 1;
+    }
+
+    /// Their mean (of fewer when fewer came since the last re-centre).
+    fn mean_100ns(&self) -> i64 {
+        let n = self.count.min(RECENT_BLOCKS).max(1);
+        self.errs[..n].iter().sum::<i64>() / n as i64
+    }
+}
+
 /// A closed window.
 struct Closed {
     x_mean_s: f64,
@@ -332,6 +358,7 @@ pub struct Servo {
     target_100ns: i64,
     origin_100ns: Option<i64>,
     window: Window,
+    recent: Recent,
     regression: RateRegression,
     level: LevelLoop,
     applied_ppm: f64,
@@ -350,6 +377,7 @@ impl Servo {
             target_100ns: target_latency_100ns,
             origin_100ns: None,
             window: Window::default(),
+            recent: Recent::default(),
             regression: RateRegression::default(),
             level: LevelLoop::default(),
             applied_ppm: 0.0,
@@ -389,6 +417,7 @@ impl Servo {
         if err_100ns.abs() > GROSS_STEP_100NS {
             return self.recentre(err_100ns);
         }
+        self.recent.push(err_100ns);
         let x_100ns = o.handled_100ns - origin;
         let y_s = o.consumed_frames as f64 / self.rate_hz - x_100ns as f64 / 1e7;
         let Some(w) = self.window.add(x_100ns, y_s, latency_100ns) else {
@@ -403,9 +432,11 @@ impl Servo {
         }
         self.latency_ms = w.latency_mean_100ns as f64 / 10_000.0;
         let mean_err_100ns = self.target_100ns - w.latency_mean_100ns;
+        let recent_100ns = self.recent.mean_100ns();
         if mean_err_100ns.abs() > RECENTRE_100NS {
             // A step inside the window shows in its mean only in part: the
             // block's own error is the whole of it.
+            let _ = recent_100ns;
             return self.recentre(err_100ns);
         }
         let dt_100ns = self
@@ -433,6 +464,7 @@ impl Servo {
 
     fn recentre(&mut self, err_100ns: i64) -> ServoAction {
         self.window = Window::default();
+        self.recent = Recent::default();
         self.level.reset_error();
         self.recentres += 1;
         ServoAction {

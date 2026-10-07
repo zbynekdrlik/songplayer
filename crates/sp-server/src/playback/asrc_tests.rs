@@ -47,10 +47,7 @@ fn the_ratio_is_the_rate_times_the_correction() {
         (48_000.0, 50.0, 96_002),
     ] {
         let got = total_frames(rate, ppm, 60);
-        assert!(
-            got.abs_diff(frames) <= 1,
-            "{rate} Hz {ppm} ppm: {got} frames, not {frames}"
-        );
+        assert_eq!(got, frames, "{rate} Hz {ppm} ppm");
     }
 }
 

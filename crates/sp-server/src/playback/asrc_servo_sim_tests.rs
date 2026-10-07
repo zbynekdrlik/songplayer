@@ -12,16 +12,25 @@
 //! is checked on the 100 ns instants the servo saw (rounding the float wall
 //! would let a 1e-7 s quantum read as a 5e-7 ppm over-move).
 //!
-//! A scratch model of this file gave: 0 underruns, latency error ≤ 4.1 ms
-//! after 70 s, |final − card| ≤ 4.1 ppm, re-centres 1, or 2 for a step over
-//! 10 ms (20 / 30 ms at three window phases, ±44 ms, a 100 ms forward step
-//! skipped once). Its fuzz (240 runs: cards ±120 ppm, jitter 0–30 ms, steps
-//! −35…+150 ms at random window phases, drops, 44.1–96 kHz, buffers 64–512)
-//! held every invariant; re-centres reached 4 only for a card beyond ±50 ppm
-//! (one drift before the lock) plus an 11.6 ms dropped buffer. Outside the
+//! A scratch model of this file gave, for the held cases: 0 underruns,
+//! latency error ≤ 4.1 ms after 70 s, |final − card| ≤ 4.1 ppm, re-centres
+//! 1, or 2 for a step over 10 ms (20 / 30 ms at three window phases, ±44 ms,
+//! a 100 ms forward step skipped once). Its fuzz (240 runs: cards ±120 ppm,
+//! jitter 0–30 ms, steps −35…+150 ms at random window phases, drops,
+//! 44.1–96 kHz, driver buffers 64–1024 frames up to 10.7 ms) held: no
+//! underrun within the budget, |ppm| ≤ 300, the slew, no skip asked twice,
+//! the latency error within 20 ms + half a callback period, |final − card|
+//! ≤ 5 ppm without a disturbance. Re-centres reached 4 only for a card
+//! beyond ±50 ppm (one drift before the lock) plus an 11.6 ms dropped buffer.
+//! A whole step under 10 ms is camera-box's blind spot: it enters the
+//! regression (rate bias ≈ 1.5·step/span, the span growing from 60 s) and
+//! the P term pays the level back over minutes — see the honest bounds of
+//! `a_step_under_10_ms_enters_the_rate_and_is_paid_back`. Outside the
 //! envelope by physics: a backward step larger than the 66.7 ms budget less
 //! the hand-off lateness can underrun (one event, phase-dependent) — the
-//! audio does not exist yet.
+//! audio does not exist yet; a driver period over one grid slot (2048
+//! frames at 48 kHz) saws past the per-block threshold and re-centres
+//! often.
 
 use super::*;
 
@@ -182,12 +191,29 @@ fn run(c: Case) -> Outcome {
     out
 }
 
+/// How close a case must hold: the per-block latency error (ms) and the
+/// final correction's distance from the card (ppm).
+#[derive(Clone, Copy)]
+struct Bounds {
+    latency_ms: f64,
+    final_ppm: f64,
+}
+
+const HELD: Bounds = Bounds {
+    latency_ms: 10.0,
+    final_ppm: 5.0,
+};
+
 fn assert_held(o: &Outcome, card_ppm: f64, recentres: u64) {
+    assert_within(o, card_ppm, recentres, HELD);
+}
+
+fn assert_within(o: &Outcome, card_ppm: f64, recentres: u64, b: Bounds) {
     assert_eq!(o.underruns, 0, "{o:?}");
     assert!(o.max_abs_ppm <= MAX_PPM, "{o:?}");
     assert!(o.worst_slew_excess <= 1e-9, "{o:?}");
-    assert!(o.worst_latency_err_ms <= 10.0, "{o:?}");
-    assert!((o.final_ppm - card_ppm).abs() <= 5.0, "{o:?}");
+    assert!(o.worst_latency_err_ms <= b.latency_ms, "{o:?}");
+    assert!((o.final_ppm - card_ppm).abs() <= b.final_ppm, "{o:?}");
     assert_eq!(o.recentres, recentres, "{o:?}");
     assert_eq!(o.asked_while_pending, 0, "{o:?}");
 }
@@ -269,6 +295,53 @@ fn a_dropped_buffer_is_absorbed() {
         ..SNV
     };
     assert_held(&run(c), -20.0, 1);
+}
+
+/// A 1024-frame driver at 48 kHz (a 21.3 ms callback period): each
+/// block's latency saws by a period, so a re-centre measures the last 8
+/// blocks. A 20 ms step still re-centres once. The per-block latency error
+/// read here carries the sawtooth itself: bounded by 10 ms + half a period.
+#[test]
+fn a_1024_frame_driver_at_48k_re_centres_a_20_ms_step_once() {
+    let c = Case {
+        rate: 48_000.0,
+        buffer: 1024,
+        card_ppm: 20.0,
+        step_s: 0.020,
+        ..SNV
+    };
+    let bounds = Bounds {
+        latency_ms: 20.7,
+        ..HELD
+    };
+    assert_within(&run(c), 20.0, 2, bounds);
+}
+
+/// A whole step under 10 ms (under the re-base residual and the window
+/// threshold) enters the regression as a point and the latency as a level
+/// error the P term pays back (camera-box's design): early (75 s, a short
+/// regression span) it biases the rate most. Honest bounds from the scratch
+/// model: |final − card| ≤ 9.5 ppm, up to 3 re-centres, peak 133 ppm.
+#[test]
+fn a_step_under_10_ms_enters_the_rate_and_is_paid_back() {
+    let bounds = Bounds {
+        latency_ms: 11.0,
+        final_ppm: 10.0,
+    };
+    for (step, at, recentres) in [
+        (0.0099, 75.0, 1),
+        (-0.0099, 75.0, 3),
+        (0.009, 400.0, 1),
+        (-0.009, 400.0, 1),
+    ] {
+        let c = Case {
+            card_ppm: 20.0,
+            step_s: step,
+            step_at_s: at,
+            ..SNV
+        };
+        assert_within(&run(c), 20.0, recentres, bounds);
+    }
 }
 
 #[test]

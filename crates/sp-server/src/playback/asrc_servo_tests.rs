@@ -484,6 +484,81 @@ fn a_step_inside_a_window_re_centres_by_the_whole_step() {
     assert_eq!(s.status().recentres, 2);
 }
 
+/// Blocks `from..from + n` of a 0 ppm card, each `(late_100ns, buffered)`
+/// by its index; the last action.
+fn feed_by(s: &mut Servo, from: i64, n: i64, f: impl Fn(i64) -> (i64, u64)) -> ServoAction {
+    let mut last = ServoAction {
+        correction_ppm: 0.0,
+        recentre_100ns: 0,
+    };
+    for k in from..from + n {
+        let (late_100ns, buffered) = f(k);
+        let consumed = ((k * GROSS_STEP_100NS) as f64 / 1e7 * RATE) as u64;
+        last = s.observe(obs(k, late_100ns, buffered, consumed));
+    }
+    last
+}
+
+/// After a step at block 10 the latency saws by 1 ms block to block (a
+/// driver's callback sawtooth): the window trips, and the re-centre moves by
+/// the last 8 blocks' mean — 4 × 199_999 and 4 × 209_999 — not by one block.
+#[test]
+fn a_window_trip_re_centres_by_the_last_8_blocks_mean() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(obs(0, 0, 6_400, 0));
+    // 4_480 frames = 466_667: 199_999 under; 4_384 = 456_667: 209_999 under.
+    let sawing = |k: i64| {
+        if k < 10 {
+            (0, 6_400)
+        } else if k % 2 == 0 {
+            (0, 4_480)
+        } else {
+            (0, 4_384)
+        }
+    };
+    assert_eq!(feed_by(&mut s, 1, 31, sawing).recentre_100ns, 0);
+    assert_eq!(feed_by(&mut s, 32, 1, sawing).recentre_100ns, 204_999);
+    assert_eq!(s.status().recentres, 2);
+}
+
+/// The latency was 20 ms low for 24 blocks and is back: the window's mean
+/// trips, the last 8 blocks are on target — nothing is spliced, the level
+/// loop takes the window as it is.
+#[test]
+fn a_transient_already_passed_splices_nothing() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(obs(0, 0, 6_400, 0));
+    let passed = |k: i64| if k <= 24 { (0, 4_480) } else { (0, 6_400) };
+    assert_eq!(feed_by(&mut s, 1, 32, passed).recentre_100ns, 0);
+    let st = s.status();
+    assert_eq!((st.recentres, st.latency_ms), (1, 51.6667), "{st:?}");
+}
+
+/// The last 8 blocks exactly 10 ms off (5_440 frames handled 1 early) after
+/// 24 blocks 20 ms off: held; 1 more (handled 2 early): re-centred by it.
+#[test]
+fn a_recent_error_of_exactly_10_ms_is_held_and_more_re_centres() {
+    for (early, recentre) in [(-1, 0), (-2, 100_001)] {
+        let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+        s.observe(obs(0, 0, 6_400, 0));
+        let f = |k: i64| if k <= 24 { (0, 4_480) } else { (early, 5_440) };
+        assert_eq!(feed_by(&mut s, 1, 32, f).recentre_100ns, recentre);
+    }
+}
+
+/// A window mean exactly 10 ms off (24 blocks 9 ms, 8 blocks 13 ms) is held,
+/// although the last 8 blocks alone are more than 10 ms off.
+#[test]
+fn a_window_mean_of_exactly_10_ms_is_held_whatever_the_last_blocks() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(obs(0, 0, 6_400, 0));
+    // 5_536 frames handled 1 early: 576_666 (90_000 under); 5_152: 536_666.
+    let f = |k: i64| if k <= 24 { (-1, 5_536) } else { (-1, 5_152) };
+    assert_eq!(feed_by(&mut s, 1, 32, f).recentre_100ns, 0);
+    let st = s.status();
+    assert_eq!((st.recentres, st.latency_ms), (1, 56.6666), "{st:?}");
+}
+
 /// A skip longer than one block runs over several: frames still to skip are
 /// not counted as buffered, so the servo does not ask for them again.
 #[test]
