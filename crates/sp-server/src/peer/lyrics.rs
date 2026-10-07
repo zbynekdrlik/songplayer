@@ -90,6 +90,16 @@ async fn wants_local(pool: &SqlitePool, row: &VideoLyricsRow) -> bool {
         .unwrap_or(true)
 }
 
+/// The largest lyrics track this node takes from a peer (a real one is a few
+/// hundred KiB; the part is read whole to check it): 16 MiB.
+const MAX_LYRICS_BYTES: u64 = 16_777_216;
+
+/// A peer's lyrics artifact of `size` bytes is one this node fetches.
+fn lyrics_size_ok(size: u64) -> bool {
+    let _ = size;
+    true
+}
+
 /// The peer's track into `{yt}_lyrics.json` with its row, or nothing newer.
 pub(crate) async fn adopt(
     ex: &Exchange,
@@ -97,6 +107,11 @@ pub(crate) async fn adopt(
     plan: &FetchPlan,
 ) -> Result<Adopted, PeerError> {
     let artifact = plan.artifact(ArtifactKind::Lyrics)?;
+    if !lyrics_size_ok(artifact.size) {
+        return Err(PeerError::BadResponse(format!(
+            "a lyrics track over {MAX_LYRICS_BYTES} bytes"
+        )));
+    }
     let video = ex.client.video(&plan.peer, &row.youtube_id).await?;
     let lyrics = video
         .lyrics

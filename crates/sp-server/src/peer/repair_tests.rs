@@ -37,7 +37,7 @@ async fn a_peers_provider_title_is_taken_and_its_origin_recorded() {
         None,
         "recorded only once the repair wrote it"
     );
-    record(&pp.ex, YT, &taken).await;
+    crate::peer::download::record_title(&pp.ex, YT, &taken).await;
     let (node, version, sha) = fetch_record(pp.pool(), YT, "metadata")
         .await
         .unwrap()

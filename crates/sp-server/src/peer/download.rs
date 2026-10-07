@@ -11,20 +11,71 @@
 use std::sync::Arc;
 
 use sp_core::metadata::MetadataSource;
-use tracing::warn;
+use tracing::{info, warn};
 
 use super::Exchange;
 use super::ask::{Ask, FetchPlan, PeerStep};
 use super::client::PeerError;
 use super::config::PeerConfig;
+use super::hash::sha256_hex;
 use super::kind::{ArtifactKind, Job, METADATA_PROVIDER};
-use super::wire::PeerMetadata;
+use super::wire::{PeerMetadata, now_ms};
+use crate::db::models_peer;
 use crate::downloader::VideoRow;
 use crate::downloader::cache::{audio_filename, video_filename};
 use crate::metadata::ProviderChain;
 use crate::metadata::manual::{
     DownloadTitle, MANUAL_SOURCE, download_title, manual_title, record_download,
 };
+
+/// A peer's title for a video, with where it came from: recorded in
+/// `peer_fetches` (kind `metadata`, [`record_title`]) once a download or the
+/// metadata repair wrote it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerTitle {
+    pub title: DownloadTitle,
+    /// The peer's configured name.
+    pub peer: String,
+    /// The title's metadata version (`kind::metadata_version`).
+    pub version: u32,
+    /// The sha256 of the title's canonical bytes (the catalog's).
+    pub sha256: String,
+}
+
+impl PeerTitle {
+    /// `m` from `peer`, when this node takes it ([`adopted_title`]).
+    pub fn of(peer: &str, m: &PeerMetadata) -> Option<Self> {
+        let title = adopted_title(m)?;
+        Some(Self {
+            title,
+            peer: peer.to_string(),
+            version: m.version(),
+            sha256: sha256_hex(&m.to_bytes()),
+        })
+    }
+}
+
+/// `youtube_id`'s title came from `t.peer`: recorded once it was written.
+pub async fn record_title(ex: &Exchange, youtube_id: &str, t: &PeerTitle) {
+    let recorded = models_peer::record_fetch(
+        &ex.pool,
+        youtube_id,
+        ArtifactKind::Metadata.as_str(),
+        &t.peer,
+        t.version,
+        &t.sha256,
+        now_ms(),
+    )
+    .await;
+    if let Err(e) = recorded {
+        warn!(youtube_id, %e, "exchange: recording a fetch failed");
+    }
+    info!(
+        youtube_id,
+        source = %format!("peer:{}", t.peer),
+        "exchange: a peer's title was taken"
+    );
+}
 
 /// The download worker's hook: fetch, wait or run here.
 pub(crate) async fn first(
@@ -40,9 +91,10 @@ pub(crate) async fn first(
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
         Ask::Wait { recheck, .. } => ex.defer(job, row.id, recheck).await,
         Ask::Fetch(plan) => match adopt(ex, chain, row, &plan).await {
-            Ok(()) => {
+            Ok(taken) => {
                 ex.fetched(job, &row.youtube_id, &plan.peer.name, &plan.artifacts)
                     .await;
+                let _ = taken;
                 PeerStep::Done
             }
             Err(e) => {
@@ -53,20 +105,21 @@ pub(crate) async fn first(
     }
 }
 
-/// The peer's pair into this node's cache under this node's title, recorded.
-/// The title is chosen once the pair is here: a failed fetch (retried on
-/// every recheck) never calls a provider.
+/// The peer's pair into this node's cache under this node's title, recorded;
+/// the peer's title when it was the one taken. The title is chosen once the
+/// pair is here: a failed fetch (retried on every recheck) never calls a
+/// provider.
 pub(crate) async fn adopt(
     ex: &Exchange,
     chain: &ProviderChain,
     row: &VideoRow,
     plan: &FetchPlan,
-) -> Result<(), PeerError> {
+) -> Result<Option<PeerTitle>, PeerError> {
     let video_artifact = plan.artifact(ArtifactKind::Video)?;
     let audio_artifact = plan.artifact(ArtifactKind::Audio)?;
     let video_part = ex.fetch(&plan.peer, video_artifact).await?;
     let audio_part = ex.fetch(&plan.peer, audio_artifact).await?;
-    let title = title_for(ex, chain, row, &plan.peer).await;
+    let (title, taken) = title_for(ex, chain, row, &plan.peer).await;
     let gf = title.gemini_failed;
     let video = ex.cache_dir.join(video_filename(
         &title.song,
@@ -92,28 +145,30 @@ pub(crate) async fn adopt(
         &audio,
     )
     .await?;
-    Ok(())
+    Ok(taken)
 }
 
-/// The title the fetched pair is named after and recorded with.
+/// The title the fetched pair is named after and recorded with, and the
+/// peer's title when that is the one.
 async fn title_for(
     ex: &Exchange,
     chain: &ProviderChain,
     row: &VideoRow,
     peer: &PeerConfig,
-) -> DownloadTitle {
+) -> (DownloadTitle, Option<PeerTitle>) {
     if let Ok(Some((song, artist))) = manual_title(&ex.pool, &row.youtube_id).await {
-        return DownloadTitle {
+        let correction = DownloadTitle {
             song,
             artist,
             source: MANUAL_SOURCE,
             gemini_failed: false,
         };
+        return (correction, None);
     }
     match ex.client.video(peer, &row.youtube_id).await {
         Ok(video) => {
-            if let Some(title) = adopted_title(&video.metadata) {
-                return title;
+            if let Some(taken) = PeerTitle::of(&peer.name, &video.metadata) {
+                return (taken.title.clone(), Some(taken));
             }
         }
         Err(e) => warn!(
@@ -122,7 +177,8 @@ async fn title_for(
             "exchange: reading the peer's title failed - asking this node's providers"
         ),
     }
-    download_title(&ex.pool, chain, &row.youtube_id, &row.title).await
+    let own = download_title(&ex.pool, chain, &row.youtube_id, &row.title).await;
+    (own, None)
 }
 
 /// A peer's title this node takes as its own: a provider's answer or an

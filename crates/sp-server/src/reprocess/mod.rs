@@ -274,7 +274,7 @@ impl ReprocessWorker {
             let t = &taken.title;
             let outcome = self.apply_title(row, &t.song, &t.artist, t.source).await?;
             if matches!(outcome, ReprocessOutcome::Success) {
-                crate::peer::repair::record(ex, &row.youtube_id, &taken).await;
+                crate::peer::download::record_title(ex, &row.youtube_id, &taken).await;
             }
             return Ok(outcome);
         }

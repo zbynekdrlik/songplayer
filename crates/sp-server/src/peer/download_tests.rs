@@ -5,7 +5,8 @@ use crate::db::models_peer::fetch_record;
 use crate::downloader::VideoRow;
 use crate::downloader::cache::{audio_filename, video_filename};
 use crate::metadata::manual::MANUAL_SOURCE;
-use crate::peer::kind::Job;
+use crate::peer::config::NodeConfig;
+use crate::peer::kind::{ArtifactKind, Job};
 use crate::peer::rig::{SNV_KEY, TestNode, bytes, counting_chain};
 use crate::peer::wire::PeerMetadata;
 use sp_core::metadata::MetadataSource;
@@ -158,12 +159,70 @@ async fn a_peers_pair_is_taken_and_nothing_runs_here() {
             .unwrap()
             .is_some()
     );
+    let (title_from, version, sha) = fetch_record(pp.pool(), YT, "metadata")
+        .await
+        .unwrap()
+        .expect("the title taken from the peer is recorded as its");
+    assert_eq!((title_from.as_str(), version), ("snv", 1));
+    assert_eq!(
+        sha,
+        snv_title_sha(&pp).await,
+        "the catalog's sha of the title"
+    );
     assert_eq!(
         std::fs::read_dir(pp.ex.parts_dir()).unwrap().count(),
         0,
         "no part left"
     );
     assert!(pp.ex.board.snapshot("pp").is_empty(), "nothing announced");
+}
+
+/// The sha256 SNV's catalog lists for the title of `YT`.
+async fn snv_title_sha(pp: &TestNode) -> String {
+    let cfg = NodeConfig::load(pp.pool()).await.unwrap();
+    let catalog = pp
+        .ex
+        .client
+        .catalog(cfg.peer("snv").unwrap())
+        .await
+        .unwrap();
+    catalog
+        .artifacts
+        .iter()
+        .find(|a| a.youtube_id == YT && a.kind == ArtifactKind::Metadata)
+        .unwrap()
+        .sha256
+        .clone()
+}
+
+/// A pair whose video cannot take its final name leaves nothing under the
+/// final names (the local download's rule): the audio, renamed first, is
+/// removed again, and so is the video's part.
+#[tokio::test]
+async fn a_video_that_cannot_take_its_name_leaves_no_audio_behind() {
+    let (_snv, pp, row) = snv_and_pp().await;
+    let video = pp
+        .cache()
+        .join(video_filename("Way Maker", "Sinach", YT, false));
+    std::fs::create_dir_all(&video).unwrap();
+    let (chain, _calls) = counting_chain();
+    assert!(matches!(
+        first(Some(&pp.ex), &chain, &row).await,
+        PeerStep::Deferred
+    ));
+    assert!(
+        !pp.cache()
+            .join(audio_filename("Way Maker", "Sinach", YT, false))
+            .exists(),
+        "no unrecorded audio under its final name"
+    );
+    assert_eq!(row_now(&pp, row.id).await.normalized, 0);
+    assert_eq!(
+        std::fs::read_dir(pp.ex.parts_dir()).unwrap().count(),
+        0,
+        "no part left"
+    );
+    assert_eq!(fetch_record(pp.pool(), YT, "metadata").await.unwrap(), None);
 }
 
 #[tokio::test]
@@ -198,6 +257,11 @@ async fn an_operator_correction_here_names_the_pair() {
             .exists()
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        fetch_record(pp.pool(), YT, "metadata").await.unwrap(),
+        None,
+        "this node's own title: nothing taken from the peer"
+    );
 }
 
 #[tokio::test]
@@ -253,6 +317,11 @@ async fn a_peers_parser_title_asks_this_nodes_providers() {
         pp.cache()
             .join(audio_filename("Chain Song", "Chain Artist", YT, false))
             .exists()
+    );
+    assert_eq!(
+        fetch_record(pp.pool(), YT, "metadata").await.unwrap(),
+        None,
+        "this node's providers named it"
     );
 }
 

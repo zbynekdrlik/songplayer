@@ -251,6 +251,15 @@ async fn an_operators_ask_here_ends_an_earlier_wait() {
     assert_eq!(waits, 0);
 }
 
+/// A peer's lyrics part is read whole: one over 16 MiB is refused before any
+/// transfer.
+#[test]
+fn a_lyrics_track_over_16_mib_is_not_fetched() {
+    assert!(lyrics_size_ok(0));
+    assert!(lyrics_size_ok(16 * 1024 * 1024));
+    assert!(!lyrics_size_ok(16 * 1024 * 1024 + 1));
+}
+
 /// A peer's source of any length is reported cut to the bounded error size.
 #[tokio::test]
 async fn a_source_mismatch_is_reported_bounded() {
