@@ -134,12 +134,14 @@ impl Exchange {
     }
 
     /// `job` of `youtube_id` runs here: a wait of it ends (a later ask starts
-    /// a fresh one, never inheriting this one's spent bound), and the job is
+    /// a fresh one, never inheriting this one's spent bound), the parts a
+    /// fetch of it left are dropped (`drop_job_parts`), and the job is
     /// announced while the returned guard lives.
     pub(crate) async fn run_here(&self, job: Job, youtube_id: &str) -> JobGuard {
         if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
             warn!(youtube_id, %e, "exchange: ending the wait failed");
         }
+        self.drop_job_parts(job, youtube_id).await;
         self.announce(youtube_id, job)
     }
 

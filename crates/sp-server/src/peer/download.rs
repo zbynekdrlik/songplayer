@@ -158,9 +158,13 @@ pub(crate) async fn adopt(
         &audio,
     )
     .await?;
-    // A correction made meanwhile is what was recorded (#136): then no title
-    // was taken from the peer.
-    Ok(taken.filter(|t| t.title == recorded))
+    Ok(written_title(taken, &recorded))
+}
+
+/// The peer's title when it is the one `record_download` wrote: a correction
+/// made meanwhile is what gets written (#136), and then none was taken.
+fn written_title(taken: Option<PeerTitle>, recorded: &DownloadTitle) -> Option<PeerTitle> {
+    taken.filter(|t| t.title == *recorded)
 }
 
 /// The title the fetched pair is named after and recorded with, and the

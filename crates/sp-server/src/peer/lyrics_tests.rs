@@ -260,7 +260,6 @@ fn a_lyrics_track_over_16_mib_is_not_fetched() {
     assert!(!lyrics_size_ok(16 * 1024 * 1024 + 1));
 }
 
-/// A peer's source of any length is reported cut to the bounded error size.
 /// A catalog entry over the cap is refused before `/videos` and before any
 /// transfer: no part of it reaches this node (without the cap the short
 /// body would leave its partial part).
@@ -278,6 +277,7 @@ async fn a_peers_lyrics_entry_over_16_mib_is_never_transferred() {
     assert_eq!(json_at(&pp), None);
 }
 
+/// A peer's source of any length is reported cut to the bounded error size.
 #[tokio::test]
 async fn a_source_mismatch_is_reported_bounded() {
     let (snv, pp, id, _) = snv_and_pp().await;

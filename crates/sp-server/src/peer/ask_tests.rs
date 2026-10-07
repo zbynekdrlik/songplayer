@@ -276,6 +276,33 @@ async fn a_failed_fetch_backs_off_from_the_first_wait() {
 /// A peer's copy wins over the 2 h bound, but a fetch of it that keeps
 /// failing does not: once the job has waited 2 h, the failure answers "run
 /// it here" (`None`), so it never spins on 1-min rechecks forever.
+/// A job that runs here drops the parts a fetch of it left (a short body
+/// kept for a resume, a pair that could not take its names): nothing is
+/// orphaned in `<cache>/peer/`. Another video's parts and another job's stay.
+#[tokio::test]
+async fn a_job_run_here_drops_the_parts_its_fetch_left() {
+    let pp = TestNode::start("pp", None).await;
+    let dir = pp.ex.parts_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let sha16 = "0123456789abcdef";
+    let names = [
+        format!("{YT}_video_{sha16}.part"),
+        format!("{YT}_audio_{sha16}.part"),
+        format!("{YT}_stem_vocals_{sha16}.part"),
+        format!("{OTHER}_video_{sha16}.part"),
+    ];
+    for name in &names {
+        std::fs::write(dir.join(name), b"x").unwrap();
+    }
+    let _guard = pp.ex.run_here(Job::Download, YT).await;
+    let mut left: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(left, vec![names[2].clone(), names[3].clone()]);
+}
+
 #[tokio::test]
 async fn a_fetch_failing_past_the_bound_runs_the_job_here() {
     let (_snv, pp) = snv_and_pp().await;

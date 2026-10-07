@@ -4,7 +4,7 @@ use super::*;
 use crate::db::models_peer::fetch_record;
 use crate::downloader::VideoRow;
 use crate::downloader::cache::{audio_filename, video_filename};
-use crate::metadata::manual::MANUAL_SOURCE;
+use crate::metadata::manual::{DownloadTitle, MANUAL_SOURCE};
 use crate::peer::config::NodeConfig;
 use crate::peer::kind::{ArtifactKind, Job};
 use crate::peer::rig::{SNV_KEY, TestNode, bytes, counting_chain};
@@ -115,6 +115,26 @@ fn a_peers_provider_or_operator_title_is_taken_a_parser_guess_is_not() {
     assert_eq!(adopted_title(&meta(None, false, "X")), None);
 }
 
+/// A peer's title counts as taken only when it is the title
+/// `record_download` wrote: a correction made meanwhile (#136) is written
+/// instead, and then nothing came from the peer.
+#[test]
+fn a_peer_title_counts_as_taken_only_when_it_was_written() {
+    let taken = PeerTitle::of("snv", &meta(Some("gemini"), false, "Way Maker")).unwrap();
+    assert_eq!(
+        written_title(Some(taken.clone()), &taken.title),
+        Some(taken.clone())
+    );
+    let correction = DownloadTitle {
+        song: "Cesta".into(),
+        artist: "Zbor".into(),
+        source: MANUAL_SOURCE,
+        gemini_failed: false,
+    };
+    assert_eq!(written_title(Some(taken), &correction), None);
+    assert_eq!(written_title(None, &correction), None);
+}
+
 /// The spec's "a peer has the artifact, so the other node fetches and
 /// processes nothing".
 #[tokio::test]
@@ -195,58 +215,106 @@ async fn snv_title_sha(pp: &TestNode) -> String {
         .clone()
 }
 
-/// A pair whose video cannot take its final name leaves no unrecorded audio
-/// under its final name (the local download's rule): the audio, renamed
-/// first, is removed again. The video's verified part stays for the next
-/// ask (re-hashed there, not transferred again).
-#[tokio::test]
-async fn a_video_that_cannot_take_its_name_leaves_no_audio_behind() {
-    let (_snv, pp, row) = snv_and_pp().await;
-    let video = pp
-        .cache()
-        .join(video_filename("Way Maker", "Sinach", YT, false));
-    std::fs::create_dir_all(&video).unwrap();
-    let (chain, _calls) = counting_chain();
-    assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
-        PeerStep::Deferred
-    ));
-    assert!(
-        !pp.cache()
-            .join(audio_filename("Way Maker", "Sinach", YT, false))
-            .exists(),
-        "no unrecorded audio under its final name"
-    );
-    assert_eq!(row_now(&pp, row.id).await.normalized, 0);
-    let parts: Vec<String> = std::fs::read_dir(pp.ex.parts_dir())
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(parts.len(), 1, "the video's part only: {parts:?}");
-    assert!(parts[0].starts_with(&format!("{YT}_video_")), "{parts:?}");
-    assert_eq!(fetch_record(pp.pool(), YT, "metadata").await.unwrap(), None);
+/// The final names of the pair PP's row takes (the peer's title).
+fn final_pair(pp: &TestNode) -> (std::path::PathBuf, std::path::PathBuf) {
+    (
+        pp.cache()
+            .join(video_filename("Way Maker", "Sinach", YT, false)),
+        pp.cache()
+            .join(audio_filename("Way Maker", "Sinach", YT, false)),
+    )
 }
 
-/// The audio's final name may hold another row's audio of the same video
-/// (rows share files by name, #136): a failed video rename never removes an
-/// audio that was there before.
+/// The kinds of the parts left in PP's parts dir, sorted.
+fn parts_of(pp: &TestNode) -> Vec<String> {
+    let mut kinds: Vec<String> = std::fs::read_dir(pp.ex.parts_dir())
+        .map(|d| {
+            d.map(|e| {
+                let name = e.unwrap().file_name().to_string_lossy().into_owned();
+                let rest = name.strip_prefix(&format!("{YT}_")).unwrap().to_string();
+                rest.rsplit_once('_').unwrap().0.to_string()
+            })
+            .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    kinds.sort();
+    kinds
+}
+
+/// The video goes first: when it cannot take its final name (another row's
+/// video open in a player; here a directory) nothing is touched, both
+/// verified parts stay, and the next ask places them.
 #[tokio::test]
-async fn a_failed_video_rename_keeps_an_audio_that_was_already_there() {
+async fn a_video_that_cannot_take_its_name_touches_nothing() {
     let (_snv, pp, row) = snv_and_pp().await;
-    let audio = pp
-        .cache()
-        .join(audio_filename("Way Maker", "Sinach", YT, false));
-    std::fs::write(&audio, b"another row's audio").unwrap();
-    let video = pp
-        .cache()
-        .join(video_filename("Way Maker", "Sinach", YT, false));
+    let (video, audio) = final_pair(&pp);
     std::fs::create_dir_all(&video).unwrap();
     let (chain, _calls) = counting_chain();
     assert!(matches!(
         first(Some(&pp.ex), &chain, &row).await,
         PeerStep::Deferred
     ));
-    assert!(audio.exists(), "an audio that was there stays");
+    assert!(!audio.exists(), "no audio under its final name");
+    assert_eq!(row_now(&pp, row.id).await.normalized, 0);
+    assert_eq!(parts_of(&pp), vec!["audio", "video"], "both parts stay");
+    assert_eq!(fetch_record(pp.pool(), YT, "metadata").await.unwrap(), None);
+    std::fs::remove_dir(&video).unwrap();
+    assert!(matches!(
+        first(Some(&pp.ex), &chain, &row).await,
+        PeerStep::Done
+    ));
+    assert_eq!(std::fs::read(&video).unwrap(), bytes(2_000, 1));
+    assert_eq!(std::fs::read(&audio).unwrap(), bytes(3_000, 2));
+    assert!(parts_of(&pp).is_empty());
+}
+
+/// A final name may hold another row's file of the same video (rows share
+/// files by name, #136): a failed video rename leaves that row's audio as
+/// it was.
+#[tokio::test]
+async fn a_failed_video_rename_leaves_another_rows_audio_as_it_was() {
+    let (_snv, pp, row) = snv_and_pp().await;
+    let (video, audio) = final_pair(&pp);
+    std::fs::write(&audio, b"another row's audio").unwrap();
+    std::fs::create_dir_all(&video).unwrap();
+    let (chain, _calls) = counting_chain();
+    assert!(matches!(
+        first(Some(&pp.ex), &chain, &row).await,
+        PeerStep::Deferred
+    ));
+    assert_eq!(std::fs::read(&audio).unwrap(), b"another row's audio");
+}
+
+/// When the audio cannot take its final name, a video this attempt placed
+/// goes back into its part: no unrecorded video under a final name, and
+/// both parts stay for the next ask.
+#[tokio::test]
+async fn an_audio_that_cannot_take_its_name_puts_the_video_back() {
+    let (_snv, pp, row) = snv_and_pp().await;
+    let (video, audio) = final_pair(&pp);
+    std::fs::create_dir_all(&audio).unwrap();
+    let (chain, _calls) = counting_chain();
+    assert!(matches!(
+        first(Some(&pp.ex), &chain, &row).await,
+        PeerStep::Deferred
+    ));
+    assert!(!video.exists(), "no unrecorded video under its final name");
+    assert_eq!(parts_of(&pp), vec!["audio", "video"], "both parts stay");
+}
+
+/// ... and never takes away a video that was there before (another row's).
+#[tokio::test]
+async fn an_audio_that_cannot_take_its_name_keeps_a_video_that_was_there() {
+    let (_snv, pp, row) = snv_and_pp().await;
+    let (video, audio) = final_pair(&pp);
+    std::fs::write(&video, b"another row's video").unwrap();
+    std::fs::create_dir_all(&audio).unwrap();
+    let (chain, _calls) = counting_chain();
+    assert!(matches!(
+        first(Some(&pp.ex), &chain, &row).await,
+        PeerStep::Deferred
+    ));
+    assert!(video.is_file(), "a video that was there stays");
 }
 
 #[tokio::test]
