@@ -832,8 +832,11 @@ feeder's timing model. Do NOT regress:
   dabing dragged back up (the ready dub is mostly speech — a pause on a thin bed
   must not read as a frozen preview). It never touches OBS scenes; `afterEach`
   (runs even when the body timed out — a body `finally` does not) restores the
-  dub memory (vokály 1, podklad 1, dabing as found), stops the preview, pauses
-  the Dabing output, and then asserts (f) as the last assertion.
+  dub memory exactly as found (all three faders, read before the clicks — never
+  a fixed value: a fixed vokály 1 made every deploy play the original voice under
+  the dub, 7.10.2026), stops the preview, pauses the Dabing output, and then
+  asserts (f) as the last assertion. Every post-deploy spec that moves the dub
+  memory restores it this way (dabing, preview, owner-path).
 
 ## #184 round G3 — the seam lead is HELD in the feeder, never parked in the socket
 
