@@ -310,6 +310,14 @@ jobs:
           path: dist/
       - name: Install E2E dependencies
         run: cd e2e && npm ci
+      # `--with-deps` runs apt-get. On 7.10.2026 its `apt-get update` stalled
+      # on an Ubuntu mirror twice in a row (70 min, then 28 min+) with apt's
+      # defaults; explicit 30 s network timeouts and 3 retries make a stalled
+      # fetch fail over to a retry instead of waiting out the job bound.
+      - name: Bound apt's network waits
+        run: |
+          printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "3";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-ci-network-timeouts
       - name: Install Playwright browsers
         run: cd e2e && npx playwright install chromium --with-deps
       - name: Install Google Chrome (H.264/AAC for the #178 preview MSE E2E)
