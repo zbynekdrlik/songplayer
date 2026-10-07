@@ -256,6 +256,37 @@ async fn a_peers_parser_title_asks_this_nodes_providers() {
     );
 }
 
+/// A fetch that fails asks no provider: a peer's copy is retried on every
+/// recheck (a Fetch beats the 2 h bound), and a paid provider call on each
+/// would add up. The title is chosen only once the pair is here.
+#[tokio::test]
+async fn a_failed_fetch_asks_no_provider() {
+    let (snv, pp, row) = snv_and_pp().await;
+    sqlx::query(
+        "UPDATE videos SET gemini_failed = 1, metadata_source = 'regex' WHERE youtube_id = ?",
+    )
+    .bind(YT)
+    .execute(snv.pool())
+    .await
+    .unwrap();
+    let wrong = crate::peer::hash::sha256_hex(b"not the audio");
+    sqlx::query("UPDATE peer_hashes SET sha256 = ? WHERE path LIKE '%_audio.flac'")
+        .bind(&wrong)
+        .execute(snv.pool())
+        .await
+        .unwrap();
+    let (chain, calls) = counting_chain();
+    assert!(matches!(
+        first(Some(&pp.ex), &chain, &row).await,
+        PeerStep::Deferred
+    ));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "no provider for a failed fetch"
+    );
+}
+
 /// The spec's "sha256 mismatch → discard and retry".
 #[tokio::test]
 async fn a_sha_mismatch_defers_then_the_retry_takes_the_pair() {
