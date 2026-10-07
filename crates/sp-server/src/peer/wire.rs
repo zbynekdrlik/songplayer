@@ -46,7 +46,8 @@ pub struct CatalogJob {
     pub kind: ArtifactKind,
     pub node: String,
     pub state: JobState,
-    /// When a running job started; `None` for a queued one.
+    /// When a running job started; `None` for a queued one
+    /// ([`Catalog::sanitized`] drops a queued entry's start).
     #[serde(default)]
     pub started_at: Option<String>,
 }
@@ -65,10 +66,10 @@ impl Catalog {
     /// Only what this node can use: an entry needs a known kind (and job
     /// state), a real YouTube id, a sha256 as 64 lowercase hex digits and, for
     /// a job, a node name that holds (`peer::config`'s rule). Separately, the
-    /// catalog's own `node` reads as empty when it is not a node name, and a
-    /// time is rewritten in its canonical form or, when it is not an RFC 3339
+    /// catalog's own `node` reads as empty when it is not a node name, a time
+    /// is rewritten in its canonical form or, when it is not an RFC 3339
     /// time, reads as `None` (its entry stays: a time is information only,
-    /// never a decision's input).
+    /// never a decision's input), and a queued job has no start.
     pub fn sanitized(mut self) -> Self {
         if !valid_name(&self.node) {
             self.node.clear();
@@ -88,7 +89,8 @@ impl Catalog {
             a.updated_at = checked_time(a.updated_at.as_deref());
         }
         for j in &mut self.jobs {
-            j.started_at = checked_time(j.started_at.as_deref());
+            let running = j.state == JobState::Running;
+            j.started_at = checked_time(j.started_at.as_deref()).filter(|_| running);
         }
         self
     }
@@ -124,11 +126,15 @@ impl PeerMetadata {
 }
 
 /// A peer's time in this node's canonical form ([`ms_to_rfc3339`]: UTC,
-/// milliseconds, `Z`), or `None` when it is not an RFC 3339 time. A peer
+/// milliseconds, `Z`), or `None` when it is not an RFC 3339 time or its
+/// canonical form would not read back as the same instant (a year outside
+/// 0000..=9999 once in UTC, e.g. `0000-01-01T00:00:00+01:00`). A peer
 /// controls the text, and a parse alone would keep it as sent: with
 /// whitespace around it, or a fraction of any length.
 fn checked_time(time: Option<&str>) -> Option<String> {
-    time.and_then(rfc3339_to_ms).map(ms_to_rfc3339)
+    let ms = time.and_then(rfc3339_to_ms)?;
+    let text = ms_to_rfc3339(ms);
+    (rfc3339_to_ms(&text) == Some(ms)).then_some(text)
 }
 
 /// 64 lowercase hex digits.
