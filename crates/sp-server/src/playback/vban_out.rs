@@ -618,7 +618,7 @@ pub fn sleep_until(clock: &mut dyn VbanClock, now_100ns: i64, end_100ns: i64) {
         if left <= 0 {
             return;
         }
-        let step = left;
+        let step = left.min(VBAN_MAX_WAIT_100NS);
         clock.sleep_100ns(step);
         if step == left {
             return;
