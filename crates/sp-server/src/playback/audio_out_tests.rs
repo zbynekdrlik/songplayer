@@ -282,3 +282,16 @@ fn a_running_vban_output_waits_for_its_address_with_the_resolve_error() {
     rx.recv_timeout(Duration::from_secs(20))
         .expect("the loop stops");
 }
+
+#[test]
+fn a_vban_output_whose_thread_could_not_start_says_why() {
+    // #233 review round 6: a failed UDP bind or thread spawn (Windows) left
+    // the output "opening" with no reason, for good.
+    let out = Arc::new(VbanOut::new());
+    out.set_config(active_config(&["127.0.0.1:6980"]));
+    let why = "the VBAN thread did not start: binding the UDP socket failed: denied";
+    out.set_start_error(why.to_string());
+    assert_eq!(out.start_error().as_deref(), Some(why));
+    let st = running_vban("out-1", out).status();
+    assert_eq!((st.state, st.reason.as_deref()), (STATE_WAITING, Some(why)));
+}

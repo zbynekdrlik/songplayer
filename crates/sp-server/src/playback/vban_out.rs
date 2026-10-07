@@ -351,6 +351,9 @@ pub struct VbanOut {
     delay_100ns: i64,
     /// #233: the queue's bound ([`queue_bound`] of the delay).
     bound: usize,
+    /// #233: why the output's thread could not start (Windows: the UDP bind
+    /// or the spawn failed); shown as the output's reason.
+    start_error: Mutex<Option<String>>,
 }
 
 impl Default for VbanOut {
@@ -380,6 +383,7 @@ impl VbanOut {
             format,
             delay_100ns,
             bound,
+            start_error: Mutex::new(None),
         }
     }
 
@@ -414,6 +418,16 @@ impl VbanOut {
     /// The VBAN thread is running.
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
+    }
+
+    /// #233: record why the output's thread could not start.
+    pub fn set_start_error(&self, why: String) {
+        *lock(&self.start_error) = Some(why);
+    }
+
+    /// #233: why the output's thread could not start, if it could not.
+    pub fn start_error(&self) -> Option<String> {
+        lock(&self.start_error).clone()
     }
 
     /// Hand one block over. Never blocks; over the bound (#233: [`queue_bound`]
