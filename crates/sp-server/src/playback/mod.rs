@@ -766,13 +766,8 @@ impl PlaybackEngine {
                     .map(|pp| pp.failures.run.avoid(current))
                     .unwrap_or_default();
 
-                let pick = VideoSelector::select_next_avoiding(
-                    &self.pool,
-                    playlist_id,
-                    mode,
-                    current,
-                    &avoid,
-                );
+                let pick =
+                    VideoSelector::select_next(&self.pool, playlist_id, mode, current, &avoid);
                 match pick.await {
                     Ok(Some(video_id)) => {
                         debug!(playlist_id, video_id, "selected video");
