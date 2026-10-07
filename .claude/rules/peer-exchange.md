@@ -129,8 +129,8 @@ extend this file; nothing of them exists yet.
   video+audio+metadata), Lyrics, Stems (needs and makes both stems).
 - A catalog's job entry is `wire::CatalogJob { youtube_id, kind, node,
   state, started_at }`, one per kind the job makes. `state` = `running` |
-  `queued`: the catalog lists a node's QUEUED jobs too (the plan's
-  decisions, lanes 2/3), and a node is to wait for either (lane 7).
+  `queued`: the catalog is to list a node's QUEUED jobs too (lane 3; the
+  plan's decisions), and a node is to wait for either (lane 7).
   `started_at` is set only for a running job (`null` for a queued one).
   `Catalog::announces(id, kinds)` = a running OR queued job (lane 7's
   Wait). The plan's lane-2 text calls these `RunningJob` / `Catalog::runs`:
@@ -153,7 +153,7 @@ extend this file; nothing of them exists yet.
   2), two nodes with the same song queued would each wait on the other's
   queued entry for the full 2 h, then both process it — the double work the
   queued entries exist to avoid. A tie-break must keep phase 1 as decided:
-  PP waits for SNV's queued jobs (ROZHODNUTÉ 6022851957 point 2). A rule
+  PP is to wait for SNV's queued jobs (ROZHODNUTÉ 6022851957 point 2). A rule
   keyed on the names needs both nodes to see the same pair, i.e. each
   node's configured name for a peer equals that peer's own `node_name`;
   nothing checks that yet (lane 7 could compare `PeerRead.peer` with the

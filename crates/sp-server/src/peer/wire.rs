@@ -19,14 +19,15 @@ pub struct Artifact {
     pub size: u64,
     /// 64 lowercase hex digits.
     pub sha256: String,
-    /// When the serving node listed (hashed) it; `None` for metadata.
+    /// When the serving node listed (hashed) it (lane 3 is to fill it);
+    /// `None` for metadata.
     #[serde(default)]
     pub updated_at: Option<String>,
 }
 
-/// Where a job a node announces stands. A peer waits for either (ROZHODNUTÉ
-/// 6022851957: both sites sync the same playlists, so a song SNV has only
-/// queued would otherwise be processed at PP too).
+/// Where a job a node announces stands. A peer is to wait for either (lane 7;
+/// ROZHODNUTÉ 6022851957: both sites sync the same playlists, so a song SNV
+/// has only queued would otherwise be processed at PP too).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {
@@ -52,7 +53,7 @@ pub struct CatalogJob {
     pub started_at: Option<String>,
 }
 
-/// `GET /api/v1/peer/catalog`.
+/// The body of `GET /api/v1/peer/catalog` (the route is lane 4's).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Catalog {
     pub node: String,
@@ -120,7 +121,8 @@ impl PeerMetadata {
         metadata_version(self.metadata_source.as_deref(), self.gemini_failed)
     }
 
-    /// The canonical bytes: the catalog's metadata sha256 is over these.
+    /// The canonical bytes: lane 3's catalog is to hash these for the
+    /// metadata artifact's sha256.
     pub fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_default()
     }

@@ -105,7 +105,7 @@ fn jobs_are_listed_in_youtube_id_order() {
 }
 
 /// `Exchange::announce` announces on the exchange's own board (the board
-/// lane 3's catalog lists).
+/// lane 3's catalog is to list).
 #[tokio::test]
 async fn the_exchange_announces_on_its_own_board() {
     let pool = crate::db::create_memory_pool().await.unwrap();
