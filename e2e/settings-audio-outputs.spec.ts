@@ -243,7 +243,7 @@ test("a saved entry the server does not run reads so, with the server's reason (
   await expect(rows.nth(0).locator('[data-testid="audio-output-state"]')).toContainText("beží", { timeout: 10000 });
   const skipped = rows.nth(1).locator('[data-testid="audio-output-state"]');
   await expect(skipped).toHaveText("uložený, nespustený", { timeout: 10000 });
-  await expect(skipped).toHaveAttribute("title", "entry 2 (id out-2): type must be vban");
+  await expect(skipped).toHaveAttribute("title", "Hlásenie servera: entry 2 (id out-2): type must be vban");
   // A row added here and not saved yet is still "neuložený".
   await page.locator('[data-testid="audio-outputs-add-vban"]').click();
   await expect(rows.nth(2).locator('[data-testid="audio-output-state"]')).toHaveText("neuložený");
@@ -264,14 +264,18 @@ test("Nastavenia whose settings did not load saves nothing (#233)", async ({ pag
     await expect(page.locator('[data-testid="audio-outputs-save"]')).toBeDisabled();
     await expect(page.getByRole("button", { name: "Uložiť nastavenia" })).toBeDisabled();
     await expect(page.locator(".save-status")).toHaveText("Nastavenia sa nenačítali — uloženie je vypnuté");
-    // An output added in this state still cannot replace the stored list:
-    // even a forced click on either save sends nothing.
+    // An output added in this state still cannot replace the stored list.
+    // The disabled buttons are the protection (a click on a disabled button
+    // reaches no handler); a `requestSubmit()` of the form reaches its submit
+    // handler past the disabled button, whose own guard sends nothing.
     await page.locator('[data-testid="audio-outputs-add-vban"]').click();
     await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(1);
     await expect(page.locator('[data-testid="audio-outputs-save"]')).toBeDisabled();
-    await page.locator('[data-testid="audio-outputs-save"]').click({ force: true });
-    await page.getByRole("button", { name: "Uložiť nastavenia" }).click({ force: true });
-    await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("");
+    await page.evaluate(() => (document.querySelector("form.settings-form") as HTMLFormElement).requestSubmit());
+    await expect(page.locator(".save-status")).toHaveText("Nastavenia sa nenačítali — uloženie je vypnuté");
+    // A round trip through the page after the attempts, then: no PATCH.
+    await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+    await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(2);
     expect(patches).toHaveLength(0);
   } finally {
     await request.post("/__mock/fail-mode", { data: { kind: "settings", enabled: false } });
@@ -300,15 +304,16 @@ test("Nastavenia saves nothing while its settings are still loading (#233)", asy
     await expect(saveOutputs).toBeDisabled();
     await expect(saveForm).toBeDisabled();
     await expect(page.locator('[data-testid="audio-outputs-load-error"]')).toHaveCount(0);
-    await saveOutputs.click({ force: true });
-    await saveForm.click({ force: true });
-    expect(patches).toHaveLength(0);
+    // The form's submit handler, reached past its disabled button: its guard
+    // sends nothing while the load runs.
+    await page.evaluate(() => (document.querySelector("form.settings-form") as HTMLFormElement).requestSubmit());
     release();
     await expect(page.locator('[data-testid="settings-gemini-model"]')).toHaveValue("gemini-2.5-flash", {
       timeout: 10000,
     });
     await expect(saveOutputs).toBeEnabled();
     await expect(saveForm).toBeEnabled();
+    expect(patches, "nothing was sent while the settings loaded").toHaveLength(0);
   } finally {
     release();
     await page.unroute("**/api/v1/settings");
@@ -331,4 +336,32 @@ test("an output added after one was removed takes a new id (#233)", async ({ pag
   await expect(rows.nth(1)).toHaveAttribute("data-id", "out-3");
   await expect(rows.nth(1).locator('[data-testid="audio-output-state"]')).toHaveText("neuložený");
   expect(realConsoleErrors()).toEqual([]);
+});
+
+test("a refused save keeps the edits and stores nothing (#233)", async ({ page, request }) => {
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: TWO } });
+  expect(seeded.status()).toBe(204);
+  await openSettings(page);
+  // The server refuses this PATCH (as it refuses a list it cannot take).
+  await page.route("**/api/v1/settings", async (route) => {
+    if (route.request().method() === "PATCH") {
+      await route.fulfill({ status: 400, contentType: "text/plain", body: "entry 2 (id out-2): vban.host is empty" });
+      return;
+    }
+    await route.continue();
+  });
+  try {
+    const rows = page.locator('[data-testid="audio-output-row"]');
+    await expect(rows).toHaveCount(2);
+    await rows.nth(1).locator('[data-testid="audio-output-delay"]').fill("30");
+    await page.locator('[data-testid="audio-outputs-save"]').click();
+    await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Chyba pri ukladaní");
+    await expect(rows.nth(1).locator('[data-testid="audio-output-delay"]')).toHaveValue("30");
+  } finally {
+    await page.unroute("**/api/v1/settings");
+  }
+  const stored = await (await request.get("/api/v1/settings")).json();
+  expect(JSON.parse(stored.audio_outputs)[1].delay_ms, "nothing stored").toBe(20);
+  // The refused PATCH is the point of the test: the browser logs its 400.
+  expect(realConsoleErrors().filter((m) => !/Failed to load resource.*400/.test(m))).toEqual([]);
 });
