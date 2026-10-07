@@ -16,6 +16,11 @@
 //! - It reads the driver's rate, preferred buffer, output channels and their
 //!   sample type, and never sets the rate, the clock source or the buffer,
 //!   nor opens the control panel (`ci.yml` scans `crates/` for those calls).
+//! - One holder per driver in the process (`asio_hold`): `open` holds the
+//!   driver's name before it loads the driver and `close` gives it back
+//!   after the release, so a rebuilt entry's successor never loads a second
+//!   instance while its predecessor still releases the first (it is refused
+//!   as busy and tries again after the 2 s backoff).
 //! - ASIO callbacks carry no user pointer: [`ASIO_SLOTS`] static slots, each
 //!   with its own four callbacks, hold the running streams. Two per ASIO
 //!   entry: a replaced output's old worker may still hold its slot while its
@@ -46,6 +51,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::playback::asio_format::{AsioSample, fill_channel, source_of, unsupported_sample_text};
+use crate::playback::asio_hold::{DriverHold, DriverHolds};
 use crate::playback::asio_out::{AsioDevice, AsioOut, Opened, Started, run_asio_worker};
 use crate::playback::asio_state::{DeviceEvents, Reason, reply, selector};
 
@@ -133,6 +139,9 @@ impl Slot {
 }
 
 static SLOTS: [Slot; ASIO_SLOTS] = [const { Slot::new() }; ASIO_SLOTS];
+
+/// The ASIO drivers this process holds (`asio_hold`).
+static HELD: DriverHolds = DriverHolds::new();
 
 /// The buffer switch of `slot`: copy, convert, count — nothing else.
 fn on_buffer(slot: &Slot, second: bool) {
@@ -308,6 +317,10 @@ impl Drop for ComApartment {
 
 /// One ASIO output's driver, on its worker thread.
 pub struct WinAsioDevice {
+    /// This device's hold on its driver's name, from before the load until
+    /// after the release (held only for its Drop).
+    #[allow(dead_code)]
+    hold: Option<DriverHold<'static>>,
     driver: Option<SafeHandle>,
     channels: [usize; 2],
     opened: Option<Opened>,
@@ -325,6 +338,7 @@ impl WinAsioDevice {
     /// No driver loaded; the calling (worker) thread is held as an STA.
     pub fn new() -> Self {
         Self {
+            hold: None,
             driver: None,
             channels: [0, 1],
             opened: None,
@@ -402,6 +416,14 @@ impl Default for WinAsioDevice {
 impl AsioDevice for WinAsioDevice {
     fn open(&mut self, name: &str, channels: [u32; 2]) -> Result<Opened, Reason> {
         self.close();
+        // Before anything loads: a held driver (the output this one
+        // replaces still releasing it) is busy for now. On a failed open the
+        // hold drops after the driver (locals drop in reverse order).
+        let Some(hold) = HELD.claim(name) else {
+            return Err(Reason::Busy(
+                "another SongPlayer output still holds the driver (the output this one replaces is releasing it)".into(),
+            ));
+        };
         let drivers = Metadata::enumerate().unwrap_or_default();
         let present: Vec<String> = drivers
             .iter()
@@ -430,6 +452,7 @@ impl AsioDevice for WinAsioDevice {
             return Err(Reason::Busy(text(&driver.last_error())));
         }
         let opened = Self::read(&driver, channels)?;
+        self.hold = Some(hold);
         self.driver = Some(driver);
         self.channels = [channels[0] as usize, channels[1] as usize];
         self.opened = Some(opened);
@@ -568,6 +591,8 @@ impl AsioDevice for WinAsioDevice {
         // azo's handle uninitialises its own COM init, then releases the
         // driver: still inside the device's apartment (`com`).
         self.driver = None;
+        // Given back only now, after the release.
+        self.hold = None;
         self.opened = None;
         if let Some(i) = self.slot.take() {
             SLOTS[i].claimed.store(false, Ordering::SeqCst);

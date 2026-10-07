@@ -271,3 +271,24 @@ fn a_lost_clock_reported_as_0_hz_reaches_the_worker_once() {
     assert_eq!(d.poll().rate_changed, None, "taken once");
     d.close();
 }
+
+/// A driver another output of this process holds (a rebuilt entry's
+/// predecessor still releasing it) is refused as busy before anything is
+/// loaded, even before the registry is read; once given back, the open goes
+/// on (here: to the registry, which does not list the test name).
+#[test]
+fn a_device_does_not_load_a_driver_another_output_holds() {
+    let name = "Held Card (songplayer test)";
+    let held = HELD.claim(name).expect("no other test holds it");
+    let mut d = WinAsioDevice::new();
+    match d.open(name, [0, 1]) {
+        Err(Reason::Busy(why)) => assert!(why.contains("another SongPlayer output"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    drop(held);
+    assert!(
+        matches!(d.open(name, [0, 1]), Err(Reason::NotFound { .. })),
+        "given back: the open reads the registry"
+    );
+    assert!(!HELD.is_held(name), "a failed open holds nothing");
+}
