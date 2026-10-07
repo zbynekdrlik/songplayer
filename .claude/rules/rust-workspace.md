@@ -361,6 +361,12 @@ failed on them (`36438006665`):
   the opaque one is not. Use the helper as a temporary
   (`pool.run(&recorder(&log))`), bind it in a block, or take the data out
   without moving (`std::mem::take(&mut *log.lock().unwrap())`).
+- **A closure that returns an async method's future borrowing the
+  closure's own argument is E0515** (#229 follow-up lane, caught by
+  reading): `let wait = |why: PeerError| self.after_failed_fetch(.., &why);`
+  then `wait(PeerError::Paused).await` — the future holds `&why`, which
+  dies when the closure returns. Write a small private `async fn` that
+  takes the value (`not_now(.., why: PeerError)`) and awaits inside.
 - **A borrow returned from ONE branch lives for the whole function → E0502
   on a later mutation of the same field** (#221 A1 lane, review round 2:
   the GREEN commit did not compile). `if fill > 0 && let Some(last) =
@@ -755,6 +761,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
   effect with a behaviour test (#217 addendum 2,
   `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+- **A comment added INSIDE a fn body puts that whole fn in the diff's
+  list** (#229 follow-up: one comment line in `pipeline_stub.rs`'s
+  `run_loop_stub` listed `replace run_loop_stub with ()`). `--in-diff`
+  takes every fn whose lines the diff touches. Before commenting inside a
+  gated fn, name the test that kills its body replacement (there:
+  `pipeline_inline_tests::pipeline_play_emits_event_on_non_windows`), or
+  put the comment above the fn.
 - It never SWAPS a method or a field for its sibling (`pop_front` ↔
   `pop_back`, `front()` ↔ `back()`, `first` ↔ `last`) — #221 review round
   5: a queue that replaced its OLDEST entry instead of its newest passed
@@ -868,6 +881,15 @@ the test that kills each one BEFORE CI's mutation gate runs.
     Likewise never `join()` a loop thread right after `stop()`: a
     `stop → ()` mutant leaves it running and the join hangs. Wait
     `wait_until(|| handle.is_finished())` (bounded) first, then join.
+  - the same for a RATE LIMITER on a real clock (#229, `peer::throttle`):
+    `done * 1e6 / rate` → `/`→`*`, or a `fn -> u64` rate replaced with `1`,
+    makes one pause last days, and every real-clock test that reads,
+    serves or fetches through it (the hasher, the peer API's body, a
+    two-node rig) hangs while the exact-rate unit test already failed.
+    Cap each pause (`throttle::MAX_PAUSE` = 2 s, above any legit pause at
+    the rates in use): a mutant then only slows those tests by seconds.
+    Pin exact rates on a paused clock, real-clock rates by a LOWER bound
+    only.
 
 **`tokio::select!` drops the branch futures before a handler runs**
 (tokio `macros/select.rs`: the futures live inside the `let output = {…}`
@@ -1210,3 +1232,31 @@ sees that. What held up across five review rounds:
     panics.
   - A 600 ms "must still work" sleep is exactly the window a ptrace stall
     fails on correct code.
+
+## A paused-clock test that awaits SQLite: hold auto-advance off (#229)
+
+Under `#[tokio::test(start_paused = true)]` the runtime AUTO-ADVANCES the
+clock to the next timer whenever it has nothing to run. SQLite answers on
+its own thread and sqlx's acquire timeout (30 s) is a tokio timer, so a DB
+await jumps the clock to that timeout and fails with `PoolTimedOut`
+(`worker_tests_idle_gate.rs`, CI run 34926435178); the pool's 10-minute
+reaper sleep is another target. A test that needs exact virtual instants
+around engine DB work (`failure_retry_tests.rs`, the Plays at 0/5/35/… s):
+
+- Hold auto-advance off for the whole test: a running `spawn_blocking` task
+  inhibits it (tokio `time::pause` docs; `BlockingSchedule` counts it).
+  `let (_hold, held) = std::sync::mpsc::channel::<()>();
+  tokio::task::spawn_blocking(move || { let _ = held.recv(); });` FIRST,
+  before the rig's migrations. `_hold` (named, not `_`) drops at the end,
+  which ends the task.
+- Move the clock yourself, only to the deadline you wait for:
+  `tokio::time::advance(due.saturating_duration_since(Instant::now())).await`,
+  reading `due` from the engine (a deadline field production also reads,
+  never a test-only one: `dead_code`). Then await the event; the runtime
+  fires the due timer when it parks.
+- No tokio timeout can bound a wait then (it never fires, or fires early):
+  bound it in REAL time with a `std::thread` that sleeps and sends on a
+  `oneshot`, selected against the event (`real_time_watchdog`, 30 s). A
+  mutant that drops the retry then fails the test instead of hanging it.
+- Bound the loop structurally (`for _ in 0..64`): the old code's Plays at
+  0 s never move the clock, so a time-only exit would spin forever.

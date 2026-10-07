@@ -121,20 +121,19 @@ impl PlaybackEngine {
             });
 
             // #134: a manually-picked song must count toward "already
-            // played" the same as a naturally-selected one (SelectAndPlay,
-            // above, does this same call) — otherwise the unplayed-first
+            // played" the same as a naturally-selected one (SelectAndPlay
+            // marks its song the same way) — otherwise the unplayed-first
             // selector would immediately re-offer a song the operator just
-            // played by hand.
-            if let Err(e) = crate::db::models::record_play(&self.pool, playlist_id, video_id).await
-            {
-                warn!(playlist_id, video_id, %e, "PlayVideo: failed to record play");
-            }
+            // played by hand. #229: it is recorded when it really starts
+            // (`song_started`), so a song that never opened is not played.
+            pp.record_on_start = Some(video_id);
 
             // #170: a PlayVideo on an off-program playlist shows
             // WaitingForScene (the WS replay re-tells it, #225); #201: the
             // transport is the raw decoding state (Playing here), so an
             // off-program dub reads `⏸ Pauza` while it plays.
             self.broadcast_state(playlist_id);
+            self.publish_open_failures(playlist_id); // #229: the Play ended a retry
         } else {
             warn!(playlist_id, video_id, "PlayVideo: no pipeline for playlist");
         }

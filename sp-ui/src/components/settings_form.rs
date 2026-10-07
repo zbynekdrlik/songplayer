@@ -219,15 +219,12 @@ pub fn SettingsForm() -> impl IntoView {
             transition_ms.get().trim().to_string(),
         );
 
+        // #229: the server answers the settings PATCH 204 with no body, so it
+        // is saved through the helper that reads no body.
         leptos::task::spawn_local(async move {
             save_status.set("Ukladám…".into());
-            match api::patch_json::<HashMap<String, String>, HashMap<String, String>>(
-                "/api/v1/settings",
-                &settings,
-            )
-            .await
-            {
-                Ok(_) => {
+            match api::patch_json_empty("/api/v1/settings", &settings).await {
+                Ok(()) => {
                     save_status.set("Uložené".into());
                     store.settings.set(settings);
                 }

@@ -12,14 +12,17 @@ Reuses the reference streaming pattern of `engines/gemini_live_translate.py` and
 `scripts/dub_worker.py::_translate_pcm` (pin the voice via `speech_config`,
 stream 16 kHz mono s16le at 100 ms chunks, drain, receive 24 kHz PCM). The f0
 per-window median is `scripts/dub_voice_check.window_medians` (the SAME helper the
-prod guard uses). The Gemini key is read INSIDE python from the box settings
-endpoint (`GET .../api/v1/settings`, `gemini_api_key` csv, first entry) and is
-NEVER printed, logged, put on a command line, or committed.
+prod guard uses). The Gemini key comes from the `GEMINI_API_KEY` environment
+variable (a comma-separated list: its first entry) and is NEVER printed, logged,
+put on a command line, or committed. Since #229 the box settings endpoint shows
+the key as `********`, so it is never read there: on dev1 the secret channel
+puts it in the env (`airuleset.py secret exec GEMINI_API_KEY -- …`).
 
 Run once, as a MODULE from the repo root, in the eval venv (has google-genai +
 numpy + soundfile; add librosa for a sharper f0 read) — the module form puts the
 repo root on `sys.path` so the `eval.dubbing.voices` import resolves:
-    ~/.claude/work-products/songplayer/dubbing-test/.venv-live/bin/python \
+    python3 ~/devel/airuleset/airuleset.py secret exec GEMINI_API_KEY -- \
+        ~/.claude/work-products/songplayer/dubbing-test/.venv-live/bin/python \
         -m eval.dubbing.voice_band_measure --voices Charon,Orus
 """
 
@@ -27,12 +30,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import subprocess
 import sys
 import time
-import urllib.request
 
 import numpy as np
 
@@ -49,7 +50,6 @@ WINDOW_S = 5.0
 DEFAULT_SEG = os.path.expanduser(
     "~/.claude/work-products/songplayer/dubbing-test/seg.wav"
 )
-SETTINGS_URL = "http://10.77.9.201:8920/api/v1/settings"
 
 
 def _load_dub_voice_check():
@@ -66,14 +66,13 @@ def _load_dub_voice_check():
 
 
 def _api_key() -> str:
-    """Read the Gemini key INSIDE python from the box settings endpoint (csv,
-    first entry). NEVER printed / logged / on a command line / committed."""
-    with urllib.request.urlopen(SETTINGS_URL, timeout=10) as r:
-        settings = json.load(r)
-    raw = (settings.get("gemini_api_key") or "").strip()
-    key = raw.split(",")[0].strip()
+    """The Gemini key from `GEMINI_API_KEY`, the env var
+    `engines/gemini_live_translate.py` reads too (a comma-separated list: its
+    first entry, stripped). NEVER printed / logged / on a command line /
+    committed."""
+    key = os.environ.get("GEMINI_API_KEY", "").split(",")[0].strip()
     if not key:
-        raise RuntimeError("no gemini_api_key in the box settings endpoint")
+        raise RuntimeError("GEMINI_API_KEY not set")
     return key
 
 

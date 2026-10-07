@@ -5,6 +5,7 @@ use sp_core::playback::PlaybackMode;
 use sqlx::SqlitePool;
 
 use crate::db::models;
+use crate::playback::failure_backoff::{PickPool, pick_pool};
 
 pub struct VideoSelector;
 
@@ -12,12 +13,18 @@ impl VideoSelector {
     /// Select next video for a playlist based on playback mode.
     /// Returns the video id (from `videos.id`) or `None` if nothing should
     /// play next. Custom playlists use `playlist_items` ordered by position
-    /// and advance `playlists.current_position` as a side-effect.
+    /// and advance `playlists.current_position` as a side-effect. A youtube
+    /// pick leaves out the songs in `avoid` while another one can be picked
+    /// (#229: the song just sent and the songs that failed to open since the
+    /// last start, which are not recorded as played; the pure rule is
+    /// `failure_backoff::pick_pool`). A custom playlist (by position) and Loop
+    /// mode pick as before.
     pub async fn select_next(
         pool: &SqlitePool,
         playlist_id: i64,
         mode: PlaybackMode,
         current_video_id: Option<i64>,
+        avoid: &[i64],
     ) -> Result<Option<i64>, sqlx::Error> {
         // Read the playlist kind to branch cleanly. Missing row → None.
         let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM playlists WHERE id = ?")
@@ -33,10 +40,10 @@ impl VideoSelector {
                     if let Some(id) = current_video_id {
                         return Ok(Some(id));
                     }
-                    Self::select_random_unplayed(pool, playlist_id).await
+                    Self::select_random_unplayed(pool, playlist_id, avoid).await
                 }
                 PlaybackMode::Continuous | PlaybackMode::Single => {
-                    Self::select_random_unplayed(pool, playlist_id).await
+                    Self::select_random_unplayed(pool, playlist_id, avoid).await
                 }
             },
         }
@@ -112,27 +119,29 @@ impl VideoSelector {
         }
     }
 
-    /// Pick a random normalized video that hasn't been played yet.
-    /// If all have been played, clear history and start fresh.
+    /// Pick a random normalized video that hasn't been played yet, leaving
+    /// out `avoid` while another one can be picked. With none left, clear
+    /// history and start fresh (`failure_backoff::pick_pool`).
     async fn select_random_unplayed(
         pool: &SqlitePool,
         playlist_id: i64,
+        avoid: &[i64],
     ) -> Result<Option<i64>, sqlx::Error> {
-        let mut unplayed = models::get_unplayed_normalized_video_ids(pool, playlist_id).await?;
-
-        if unplayed.is_empty() {
-            // Check if there are any normalized videos at all.
-            let all = models::get_normalized_video_ids(pool, playlist_id).await?;
-            if all.is_empty() {
-                return Ok(None);
+        let unplayed = models::get_unplayed_normalized_video_ids(pool, playlist_id).await?;
+        let all = models::get_normalized_video_ids(pool, playlist_id).await?;
+        let candidates = match pick_pool(&unplayed, &all, avoid) {
+            PickPool::Unplayed(songs) => songs,
+            PickPool::Restart(songs) if songs.is_empty() => return Ok(None),
+            PickPool::Restart(songs) => {
+                // All played (or only songs to avoid left) — clear history
+                // and start fresh.
+                models::clear_play_history(pool, playlist_id).await?;
+                songs
             }
-            // All played — clear history and start fresh.
-            models::clear_play_history(pool, playlist_id).await?;
-            unplayed = all;
-        }
+        };
 
         let mut rng = rand::thread_rng();
-        let chosen = unplayed.choose(&mut rng).copied();
+        let chosen = candidates.choose(&mut rng).copied();
         Ok(chosen)
     }
 }
@@ -183,7 +192,7 @@ mod tests {
         let mut selected = std::collections::HashSet::new();
         for _ in 0..3 {
             let vid =
-                VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Continuous, None)
+                VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Continuous, None, &[])
                     .await
                     .unwrap()
                     .expect("should select a video");
@@ -212,9 +221,10 @@ mod tests {
         }
 
         // Next selection should still work (history cleared internally).
-        let vid = VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Continuous, None)
-            .await
-            .unwrap();
+        let vid =
+            VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Continuous, None, &[])
+                .await
+                .unwrap();
         assert!(vid.is_some(), "should get a video after reset");
         assert!(video_ids.contains(&vid.unwrap()));
     }
@@ -223,20 +233,22 @@ mod tests {
     async fn continuous_single_video() {
         let (pool, playlist_id, video_ids) = setup_with_videos(1).await;
 
-        let vid = VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Continuous, None)
-            .await
-            .unwrap()
-            .expect("should select the only video");
+        let vid =
+            VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Continuous, None, &[])
+                .await
+                .unwrap()
+                .expect("should select the only video");
         assert_eq!(vid, video_ids[0]);
 
         // After playing it, reset should allow re-selection.
         db::models::record_play(&pool, playlist_id, vid)
             .await
             .unwrap();
-        let vid2 = VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Continuous, None)
-            .await
-            .unwrap()
-            .expect("should re-select after reset");
+        let vid2 =
+            VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Continuous, None, &[])
+                .await
+                .unwrap()
+                .expect("should re-select after reset");
         assert_eq!(vid2, video_ids[0]);
     }
 
@@ -244,11 +256,16 @@ mod tests {
     async fn loop_returns_current() {
         let (pool, playlist_id, video_ids) = setup_with_videos(3).await;
 
-        let vid =
-            VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Loop, Some(video_ids[1]))
-                .await
-                .unwrap()
-                .expect("should return current video");
+        let vid = VideoSelector::select_next(
+            &pool,
+            playlist_id,
+            PlaybackMode::Loop,
+            Some(video_ids[1]),
+            &[],
+        )
+        .await
+        .unwrap()
+        .expect("should return current video");
         assert_eq!(vid, video_ids[1]);
     }
 
@@ -256,7 +273,7 @@ mod tests {
     async fn loop_first_selection() {
         let (pool, playlist_id, video_ids) = setup_with_videos(3).await;
 
-        let vid = VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Loop, None)
+        let vid = VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Loop, None, &[])
             .await
             .unwrap()
             .expect("should select a video for first loop play");
@@ -267,9 +284,10 @@ mod tests {
     async fn empty_playlist_returns_none() {
         let (pool, playlist_id, _) = setup_with_videos(0).await;
 
-        let vid = VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Continuous, None)
-            .await
-            .unwrap();
+        let vid =
+            VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Continuous, None, &[])
+                .await
+                .unwrap();
         assert!(vid.is_none());
     }
 
@@ -330,40 +348,44 @@ mod tests {
         let (pool, custom_id) = setup_custom_playlist_with_items(&[10, 20, 30]).await;
 
         // First call: no current video → item at position 0 (10).
-        let v1 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, None)
+        let v1 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, None, &[])
             .await
             .unwrap();
         assert_eq!(v1, Some(10));
 
-        let v2 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(10))
-            .await
-            .unwrap();
+        let v2 =
+            VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(10), &[])
+                .await
+                .unwrap();
         assert_eq!(v2, Some(20));
 
-        let v3 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(20))
-            .await
-            .unwrap();
+        let v3 =
+            VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(20), &[])
+                .await
+                .unwrap();
         assert_eq!(v3, Some(30));
 
         // v21: past last position → WRAP to position 0. Pre-v21 this
         // returned None permanently and scene detection silently broke
         // on ytlive when its current_position reached MAX(position).
-        let v4 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(30))
-            .await
-            .unwrap();
+        let v4 =
+            VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(30), &[])
+                .await
+                .unwrap();
         assert_eq!(v4, Some(10), "past-end must wrap to first item");
 
         // And one more step to prove the wrap keeps rolling.
-        let v5 = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(10))
-            .await
-            .unwrap();
+        let v5 =
+            VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, Some(10), &[])
+                .await
+                .unwrap();
         assert_eq!(v5, Some(20));
     }
 
     #[tokio::test]
     async fn custom_single_does_not_auto_advance() {
         let (pool, custom_id) = setup_custom_playlist_with_items(&[10, 20, 30]).await;
-        let v = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Single, Some(10))
+        let v = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Single, Some(10), &[])
             .await
             .unwrap();
         assert_eq!(v, None);
@@ -372,7 +394,7 @@ mod tests {
     #[tokio::test]
     async fn custom_loop_returns_current_video() {
         let (pool, custom_id) = setup_custom_playlist_with_items(&[10, 20, 30]).await;
-        let v = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Loop, Some(20))
+        let v = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Loop, Some(20), &[])
             .await
             .unwrap();
         assert_eq!(v, Some(20));
@@ -381,7 +403,7 @@ mod tests {
     #[tokio::test]
     async fn custom_empty_playlist_returns_none() {
         let (pool, custom_id) = setup_custom_playlist_with_items(&[]).await;
-        let v = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, None)
+        let v = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Continuous, None, &[])
             .await
             .unwrap();
         assert_eq!(v, None);

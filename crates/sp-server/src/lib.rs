@@ -19,6 +19,7 @@ pub mod now_playing;
 pub mod obs;
 mod obs_bridge;
 pub mod panic_hook;
+pub mod peer; // #229: the node exchange (serve what this node has, ask peers first)
 pub mod playback;
 pub mod playlist;
 pub mod presenter;
@@ -337,6 +338,10 @@ pub async fn start(
             config.data_dir().join("bench"),
         )),
     };
+    // #229: this node in the exchange; its routes merge into the router below,
+    // its hasher fills the catalog's sha256 cache while the node serves.
+    let exchange = peer::Exchange::new(pool.clone(), config.cache_dir.clone());
+    tokio::spawn(peer::hasher::run(exchange.clone(), shutdown_tx.subscribe()));
 
     // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
     // the LAN with no internet. Reads `lan_mdns_enabled` (default on); a
@@ -393,6 +398,7 @@ pub async fn start(
     let dl_data_dir = config.data_dir();
     let dl_shutdown_tx = shutdown_tx.clone();
     let dl_metadata_chain = metadata_chain.clone();
+    let dl_exchange = exchange.clone(); // #229: each download asks the peers first
     let startup_sync_pool = pool.clone();
     let startup_sync_tx = sync_tx.clone();
     let periodic_sync_pool = pool.clone();
@@ -406,12 +412,14 @@ pub async fn start(
     let ai_client_for_dl = ai_client.clone();
     let lyrics_ndi_health = ndi_health_registry.clone();
     let lyrics_obs_state = obs_state.clone();
+    let lyrics_exchange = exchange.clone(); // #229: each song asks the peers first
     // #14 karaoke stem worker shares the same tools dir + idle-gate handles.
     let stem_pool = pool.clone();
     let stem_tools_dir = lyrics_tools_dir.clone();
     let stem_ndi_health = ndi_health_registry.clone();
     let stem_obs_state = obs_state.clone();
     let stem_shutdown = shutdown_tx.clone();
+    let stem_exchange = exchange.clone(); // #229: each separation asks the peers first
     // #183 D4 dub worker: same tools dir + idle-gate handles as the stem worker.
     let dub_pool = pool.clone();
     let dub_tools_dir = lyrics_tools_dir.clone();
@@ -529,7 +537,8 @@ pub async fn start(
                         dl_metadata_chain,
                         dl_event_tx_for_worker,
                         ytdlp_lock,
-                    );
+                    )
+                    .with_peer(dl_exchange);
                     tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
                     info!("download worker started");
 
@@ -545,7 +554,8 @@ pub async fn start(
                         lyrics_event_tx.clone(),
                         lyrics_ndi_health,
                         lyrics_obs_state,
-                    );
+                    )
+                    .with_peer(lyrics_exchange);
                     let current_processing_handle = lyrics_worker.current_processing();
                     tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
                     info!("lyrics worker started");
@@ -566,7 +576,8 @@ pub async fn start(
                         stem_tools_dir,
                         stem_ndi_health,
                         stem_obs_state,
-                    );
+                    )
+                    .with_peer(stem_exchange);
                     tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
                     // (StemWorker::run logs "stem worker started" once it is live.)
 
@@ -626,9 +637,11 @@ pub async fn start(
     let obs_side = obs_bridge::start_obs(&pool, &obs_state, &shutdown_tx).await?;
 
     // 8. Reprocess worker — on the SAME metadata chain as the download worker
-    // (#136: it used to get Gemini alone, so it could never repair a row).
+    // (#136: it used to get Gemini alone, so it could never repair a row);
+    // #229: a peer's title first.
     let reprocess_worker =
-        reprocess::ReprocessWorker::new(pool.clone(), metadata_chain, config.cache_dir.clone());
+        reprocess::ReprocessWorker::new(pool.clone(), metadata_chain, config.cache_dir.clone())
+            .with_peer(exchange.clone());
     tokio::spawn(reprocess_worker.run(shutdown_tx.subscribe()));
 
     // 9. Resolume command forwarding (registry was built before AppState above).
@@ -717,7 +730,7 @@ pub async fn start(
     });
 
     // 11. Axum HTTP server
-    let router = api::router(state, config.dist_dir);
+    let router = api::router(state, config.dist_dir).merge(peer::router(exchange));
     let listener = {
         use socket2::{Domain, Socket, Type};
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None)?;

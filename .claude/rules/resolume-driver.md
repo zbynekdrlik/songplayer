@@ -597,15 +597,13 @@ are the recovery's `on_program_lines`.
   and a `Position` before the new song's `Started` (no title clock yet) does
   not move it: that is the old song's last report, sent before its
   pipeline read the Play (`Position` names no video; review round 4).
-  Residual (older: pipeline events name no Play): the gate is exact only
-  when the old song's `Started` was handled before the new Play. If the
-  engine stalls and a pick is taken ahead of a still-queued `Started(A)`,
-  that `Started` fixes a clock for B, and A's queued reports pass until
-  `Started(B)`. A still-queued `Ended(A)` is likewise taken as B's: it
-  replaces B with the next song (Continuous), restarts B (Loop) or stops B
-  (Single). Exact attribution needs a
-  per-pipeline count of unanswered Plays; it was left out of the release
-  0.68.0 blockers (returned to the supervisor as a follow-up candidate).
+  Pipeline events name no Play. Since the #229 follow-up (design record
+  6029071745, `open-failures.md` "Which Play an answer belongs to") the
+  engine counts the Plays not answered yet. A `Started(A)` handled after
+  Play B was sent is ignored whole: it fixes no clock for B, so A's queued
+  reports move nothing until `Started(B)`. Residual: `Ended` is no answer.
+  A still-queued `Ended(A)` is still taken as B's: it replaces B with the
+  next song (Continuous), restarts B (Loop) or stops B (Single).
 - Pinned in `tests_scene_change.rs` (`Window::{Due, BeforeShow, AfterHide,
   OtherSong, NotStarted}`, the Play re-sync on and off program, the failed
   reads, the window-less resume), `title_tests.rs` (the clock's instants and

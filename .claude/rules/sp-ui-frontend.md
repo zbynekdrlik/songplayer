@@ -676,8 +676,16 @@ Two orthogonal facts, two sources — never conflate them:
 - **The on/off-program badge (`player-program-badge`) reads the WS `state`**
   (#225; `Playing` = the wall shows this output) → `● Na programe` /
   `○ Mimo programu`, and `◌ —` until the state is known. NEVER derive the
-  badge from `transport`. (#201 read `store.ndi_health` here, which lagged a
-  cut by up to ~5 s.)
+  on/off-program fact from `transport`. (#201 read `store.ndi_health` here,
+  which lagged a cut by up to ~5 s.) #229: while the health row names a
+  pending retry of failed opens and the pipeline is not told it decodes
+  (the label's own predicate, `player_view::waits_for_retry`), the badge is
+  `● Na programe — čaká na ďalší pokus` (`player_program_badge`, `on` style),
+  read from the 1 Hz health poll, so it lags a wait's start and end by up
+  to ~1 s, and only for a retry that belongs to SP-program's source
+  (`OpenFailures::retry_on_program`, ROZHODNUTÉ 6029773698): a ▶ off
+  program that waits keeps `○ Mimo programu`. `open-failures.md` has the
+  details.
 
 Server: `ServerMsg::PlaybackStateChanged` carries `transport: TransportState`
 (`#[serde(default)]` = `Idle`), filled by the engine from the RAW `PlayState` via
@@ -740,7 +748,9 @@ Right after a page load the Player showed "Nič nehrá" / "Mixér — nič nehr�
     #201/#221 labels;
   - `program_badge(state_known, state)` → `◌ —` until known, else
     `state == Playing` → `● Na programe` / `○ Mimo programu`. The badge and the
-    label read the SAME WS state, so a cut flips both in one render.
+    label read the SAME WS state, so a cut flips both in one render. The
+    Player calls it through `player_program_badge` (#229: the retry badge,
+    beside `player_state_label`'s retry label).
 - **The mixer slot** matches the view `Memo` (Rule 1): `Song` → the
   `LiveMixer`, `Idle` → `player-mixer-idle` "Mixér — nič nehrá", `Pending` →
   `player-mixer-pending` "Mixér — načítavam…" (the idle line's CSS box, so the
@@ -863,6 +873,13 @@ scratch `dist/` snippet (+ recomputed SRI), watch the test go red, restore.
 Several spec files with one project: `--project=chromium a.spec.ts b.spec.ts`
 (with a space, `--project chromium a.spec.ts …` reads the files as project
 names).
+In a worktree lane the Bash guard refuses `node mock & … playwright …; kill`
+in one command (#221): put it in a scratchpad runner script (start the mock
+with `&`, keep `$!`, `trap` a kill-by-PID on EXIT, wait until `curl` answers
+on the port with a `date +%s` deadline, then `npx playwright test --config
+<scratch config> --project=chromium <specs>`), and write the port-substituted
+mock copy + config with an anchor-asserted Python edit. Delete both copies
+and the downloaded `dist/` before you commit.
 
 **An old-dist run proves only the RED when the lane changes Rust UI
 semantics (#225 review round 3).** The downloaded dist is the OLD wasm: a
@@ -874,6 +891,26 @@ wiped it on the new UI — a review round caught it by tracing. So when the
 Rust UI changes how the store reacts to a message, trace every existing
 spec that posts a mock message right after `page.goto` against the new
 logic, message by message, before calling the suite green.
+
+## Telling a refused POST from a failure: `api::post_json_status` (#221)
+
+`api::post_json` folds every failure into one string. A caller that must
+act on the STATUS or read the error BODY (the Program control's 409 refusal
+`{reason, error}`) calls `api::post_json_status` (`Err((status, body))`;
+`(0, error)` with no answer or an undecodable 2xx) and formats every other
+failure with `api::post_error(path, e)`, the one message `post_json` itself
+gives ("POST {path} → {status}"). Never parse `post_json`'s string, and never
+show a raw server body on the operator's line: map a reason code to Slovak
+through `sp_core` (`program_refusal::refusal_text`).
+
+## A 204 answer has no body: call the `*_json_empty` helper (#229)
+
+`api::get` / `post_json` parse the response body as JSON, so a handler that
+answers 204 No Content (the settings PATCH) reads as an error there: the
+Nastavenia form showed "Chyba pri ukladaní" after every successful save on
+the box. Call `patch_json_empty` / `post_json_empty` / `put_json_empty` for
+a 204 route. And a mock route answers the server's REAL status and body: the
+mock's 200 + JSON for that PATCH hid the bug from five specs.
 
 ## A Nastavenia spec must wait for the LOADED settings before it clicks (#210)
 

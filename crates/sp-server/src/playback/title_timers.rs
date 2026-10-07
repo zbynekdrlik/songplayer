@@ -129,7 +129,11 @@ impl super::PlaylistPipeline {
     /// round 1): a recovery before the new `Started` re-pushed the old song's
     /// line, and a pause there recorded the old song's position for the new.
     /// So does the last pause's resume point (review round 2): a later ▶
-    /// resumed the old song over the new one.
+    /// resumed the old song over the new one. #229: this Play is the
+    /// attempt, so a pending retry of a failed open ends, and no song is
+    /// marked to be recorded until its caller marks this one. It is counted
+    /// as a Play not answered yet (`pending_plays`): every Play goes through
+    /// here, so only its own `Started` / `Error` acts.
     pub(super) fn begin_play(&mut self, start_ms: u64) {
         self.title_clock = None;
         self.cancel_title_timers();
@@ -137,6 +141,9 @@ impl super::PlaylistPipeline {
         self.lyrics_state = None;
         self.cached_position_ms = start_ms;
         self.paused_at = None;
+        self.failures.cancel_retry();
+        self.record_on_start = None;
+        self.pending_plays.sent();
     }
 }
 

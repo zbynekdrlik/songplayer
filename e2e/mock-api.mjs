@@ -145,14 +145,79 @@ const twelvePlaylists = Array.from({ length: 12 }, (_, i) => {
   };
 });
 
+// #221 (ROZHODNUTÉ 6022247729): opt-in fixture for the program cut's refusal —
+// the 3 default playlists plus one INACTIVE playlist and one active playlist
+// with NO NDI output name. A dashboard cut to either is refused (409) and its
+// Program-control button is disabled.
+const refusalPlaylists = [
+  ...playlists,
+  {
+    id: 30,
+    name: "Archív",
+    youtube_url: "https://youtube.com/playlist?list=PLarchiv",
+    ndi_output_name: "SP-archiv",
+    playback_mode: "continuous",
+    is_active: false,
+    created_at: "2026-01-01 00:00:00",
+    updated_at: "2026-01-01 00:00:00",
+  },
+  {
+    id: 31,
+    name: "Bez výstupu",
+    youtube_url: "https://youtube.com/playlist?list=PLbezvystupu",
+    ndi_output_name: "",
+    playback_mode: "continuous",
+    is_active: true,
+    created_at: "2026-01-01 00:00:00",
+    updated_at: "2026-01-01 00:00:00",
+  },
+];
+
 // "default" → the 3-playlist fixture above (every other spec relies on it);
-// "twelve" → the 12-playlist fixture. The #165 spec POSTs "twelve" in
-// beforeEach and resets to "default" in afterEach so no state leaks into the
-// serially-run sibling spec files (playwright.config.ts pins workers: 1).
+// "twelve" → the 12-playlist fixture; "refusals" → the #221 refusal fixture.
+// A spec that POSTs a non-default mode in beforeEach resets to "default" in
+// afterEach so no state leaks into the serially-run sibling spec files
+// (playwright.config.ts pins workers: 1). (The name predates #221: these are
+// the fixture's playlists, inactive ones included, as `GET /api/v1/playlists`
+// lists them.)
 let fixtureMode = "default";
 function activePlaylists() {
-  return fixtureMode === "twelve" ? twelvePlaylists : playlists;
+  if (fixtureMode === "twelve") return twelvePlaylists;
+  if (fixtureMode === "refusals") return refusalPlaylists;
+  return playlists;
 }
+
+// #221 ROZHODNUTÉ 6022247729: mirrors `program_switch::cut_scene` over
+// `SceneCatalog::new` — a playlist names a scene when it is active, its NDI
+// output name is not blank, and no other active playlist has the same name
+// with only ASCII letters folded (untrimmed, like the server); an inactive
+// one is refused `playlist_inactive`, an active one with no scene `no_scene`.
+const asciiLower = (s) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+function cutRefusal(id) {
+  const active = activePlaylists().filter((p) => p.is_active);
+  const own = active.find((p) => p.id === id);
+  if (!own) return "playlist_inactive";
+  const raw = own.ndi_output_name || "";
+  if (raw.trim() === "") return "no_scene";
+  const name = asciiLower(raw);
+  const sharing = active.filter(
+    (p) => (p.ndi_output_name || "").trim() !== "" && asciiLower(p.ndi_output_name) === name,
+  );
+  return sharing.length === 1 ? null : "no_scene";
+}
+function cutRefused() {
+  return activePlaylists()
+    .map((p) => p.id)
+    .sort((a, b) => a - b)
+    .map((source) => ({ source, reason: cutRefusal(source) }))
+    .filter((r) => r.reason !== null);
+}
+const CUT_REFUSAL_TEXT = {
+  playlist_inactive:
+    "the playlist is inactive: it has no output, so a cut would put black on SP-program and every consumer of it",
+  no_scene:
+    "the playlist names no scene (no NDI output name, or one another active playlist shares), so it cannot go on SP-program",
+};
 
 // `normalized` and `gemini_failed` are required (non-`#[serde(default)]`)
 // fields on sp_core::models::Video — every fixture must include them or
@@ -233,6 +298,45 @@ const settings = {
 // #210: the fixture as loaded, restored by `/__mock/settings-reset`.
 const settingsInitial = { ...settings };
 
+// #229: the settings API never shows a secret, as the server does. The source
+// of truth is Rust: `sp_core::config::{SECRET_MASK, SECRET_SETTINGS,
+// SECRET_SETTING_SUFFIXES, is_secret_setting}` and the GET / PATCH handlers
+// in `crates/sp-server/src/api/settings.rs`. A secret setting is one on the
+// list or one named like one (a retired credential still in a node's
+// database is masked too). GET shows every non-blank secret as the mask (a
+// blank one as stored: it reveals nothing); a PATCH value exactly the mask
+// keeps the stored secret. The handlers below read and write `settings`
+// itself, so the mock's own routes (e.g. `remote.auth` of
+// `/api/v1/program`) still see the stored values in clear, like the server's
+// workers. (`peers` is not used by the dashboard and is not modelled.)
+const SECRET_MASK = "********";
+const SECRET_SETTINGS = [
+  "gemini_api_key",
+  "genius_access_token",
+  "obs_websocket_password",
+  "peer_api_key",
+  "remote_ws_password",
+];
+const SECRET_SETTING_SUFFIXES = ["_key", "_token", "_password", "_secret"];
+
+function isSecretSetting(key) {
+  return (
+    SECRET_SETTINGS.includes(key) ||
+    SECRET_SETTING_SUFFIXES.some((suffix) => key.endsWith(suffix))
+  );
+}
+
+/** The stored settings as `GET /api/v1/settings` shows them (#229). */
+function shownSettings() {
+  const shown = {};
+  for (const [key, value] of Object.entries(settings)) {
+    const masked =
+      isSecretSetting(key) && typeof value === "string" && value.trim() !== "";
+    shown[key] = masked ? SECRET_MASK : value;
+  }
+  return shown;
+}
+
 const resolumeHosts = [];
 let nextResolumeId = 1;
 
@@ -243,9 +347,11 @@ app.get("/api/v1/playlists", (_req, res) => {
   res.json(activePlaylists());
 });
 
-// #165: switch the playlists fixture between "default" (3) and "twelve" (12).
+// #165: switch the playlists fixture between "default" (3) and "twelve" (12);
+// #221: "refusals" (the 3 + an inactive and a scene-less playlist).
 app.post("/__mock/fixture", (req, res) => {
-  fixtureMode = req.body?.mode === "twelve" ? "twelve" : "default";
+  const mode = req.body?.mode;
+  fixtureMode = mode === "twelve" || mode === "refusals" ? mode : "default";
   res.json({ mode: fixtureMode, count: activePlaylists().length });
 });
 
@@ -492,16 +598,22 @@ app.post("/api/v1/control", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-// Settings
+// Settings (#229: every secret masked, see `shownSettings`)
 app.get("/api/v1/settings", (_req, res) => {
-  res.json(settings);
+  res.json(shownSettings());
 });
 
+// #229: as the server — a value exactly the mask for a secret setting keeps
+// the stored one (nothing written), any other value replaces it (`""` clears
+// it), and the answer is 204 with NO body.
 app.patch("/api/v1/settings", (req, res) => {
   for (const [key, value] of Object.entries(req.body)) {
+    if (value === SECRET_MASK && isSecretSetting(key)) {
+      continue;
+    }
     settings[key] = value;
   }
-  res.json(settings);
+  res.status(204).end();
 });
 
 // #210: test-only — restore the settings fixture (specs that save settings
@@ -767,7 +879,9 @@ app.get("/api/v1/resolume/health", (_req, res) => {
 // Mirrors the real `GET /api/v1/ndi/health` array of PipelineHealthSnapshot:
 // per output `lock_state` (#149) / `lock_reason`, `clock` (#146),
 // `pacing` (#147), `audio` (#148). Mutable so a test can drive all three
-// states via `POST /__mock/ndi-health`.
+// states via `POST /__mock/ndi-health` (`POST /__mock/ndi-health-reset` puts
+// the default back). #229: every row carries `open_failures` (`null` while no
+// video failed to open since the last song started), as the server's does.
 //
 // Default fixture exercises the three badges at once:
 //   - SP-worship   → LOCKED   (live, clock ok)
@@ -775,7 +889,7 @@ app.get("/api/v1/resolume/health", (_req, res) => {
 //   - SP-live       → UNLOCKED (Idle → non-live, "pacing disabled")
 // The global summary counts only LIVE outputs, so it resolves to
 // `DEGRADED — SP-background` (the non-live UNLOCKED SP-live is ignored).
-let ndiHealth = [
+const NDI_HEALTH_DEFAULT = [
   {
     ndi_name: "SP-worship",
     playlist_id: 1,
@@ -797,6 +911,7 @@ let ndiHealth = [
       av_align_err_ms: 0.4,
     },
     audio: { underruns: 0 },
+    open_failures: null,
   },
   {
     ndi_name: "SP-background",
@@ -817,6 +932,7 @@ let ndiHealth = [
       av_align_err_ms: -0.6,
     },
     audio: { underruns: 0 },
+    open_failures: null,
   },
   {
     ndi_name: "SP-live",
@@ -837,11 +953,27 @@ let ndiHealth = [
       av_align_err_ms: 0,
     },
     audio: { underruns: 0 },
+    open_failures: null,
   },
 ];
 
+let ndiHealth = structuredClone(NDI_HEALTH_DEFAULT);
+
+// #229: like the server, a row's `open_failures` carries `retry_in_ms`, the
+// wait left until `retry_at_ms` read at this request (0 once due). Its
+// `on_program` (the pending retry belongs to the playlist as
+// SP-program's source, ROZHODNUTÉ 6029773698) passes through as a spec set
+// it; absent, the Player reads `false`.
 app.get("/api/v1/ndi/health", (_req, res) => {
-  res.json(ndiHealth);
+  const now = Date.now();
+  res.json(
+    ndiHealth.map((row) => {
+      const f = row.open_failures;
+      if (!f) return row;
+      const left = f.retry_at_ms == null ? null : Math.max(0, f.retry_at_ms - now);
+      return { ...row, open_failures: { ...f, retry_in_ms: left } };
+    }),
+  );
 });
 
 // Admin: replace the NDI health fixture with the posted JSON array.
@@ -853,6 +985,13 @@ app.post("/__mock/ndi-health", (req, res) => {
   }
   ndiHealth = req.body;
   res.json({ status: "set", count: ndiHealth.length });
+});
+
+// Admin: put the default NDI health fixture back (#229: a spec that sets
+// `open_failures` restores the rows other specs read).
+app.post("/__mock/ndi-health-reset", (_req, res) => {
+  ndiHealth = structuredClone(NDI_HEALTH_DEFAULT);
+  res.json({ status: "reset", count: ndiHealth.length });
 });
 
 // #209 program bus: mirrors the real `GET /api/v1/program` /
@@ -870,6 +1009,11 @@ let programLastRemoteCut = null;
 // (`/__mock/program-connections`, #221 B4 step 6).
 let programActiveWindow = null;
 let programConnections = 0;
+// #221 test-only: answer `cut_refused: null` (the server could not read its
+// playlists), so the dashboard disables nothing while the cut still refuses
+// (`/__mock/program-refusals-hidden {hidden}`, cleared by
+// `/__mock/program-reset`).
+let programRefusalsHidden = false;
 // #215: the program transition — mirrors the server's `effective_spec`:
 // `cut` → a Cut, `fade` → a Fade of `program_transition_ms` (the operator's
 // choice); anything else (none, the retired `obs`) → the default Fade of
@@ -912,6 +1056,8 @@ function programBody() {
       programState.source !== null && programConnections < 1
         ? "no NDI receiver on SP-program"
         : null,
+    // #221 ROZHODNUTÉ 6022247729: the playlists a cut refuses now.
+    cut_refused: programRefusalsHidden ? null : cutRefused(),
     previous: programState.previous,
     cut_boundary_100ns: programState.cuts > 0 ? 17900000000000000 : null,
     health: {
@@ -1071,22 +1217,36 @@ app.post("/api/v1/program/cut", (req, res) => {
     res.status(404).send("unknown playlist");
     return;
   }
+  // Every body that reaches a cut decision, refused ones included, so a spec
+  // can prove a disabled button posted nothing.
   programLastCut = req.body;
+  // #221 ROZHODNUTÉ 6022247729: an inactive or scene-less playlist is
+  // refused (409), nothing changes, and it is recorded as a keep.
+  const refusal = source === -1 ? null : cutRefusal(source);
+  if (refusal !== null) {
+    programLastRemoteCut = {
+      scene: String(source),
+      action: "keep",
+      source: null,
+      reason: refusal,
+      cut_boundary_100ns: null,
+      at_ms: Date.now(),
+      via: "dashboard",
+      cg_forward: null,
+    };
+    res.status(409).json({ reason: refusal, error: CUT_REFUSAL_TEXT[refusal] });
+    return;
+  }
   const playlist = activePlaylists().find((p) => p.id === source);
   programLastRemoteCut = {
-    scene:
-      source === -1
-        ? "OBS manuál"
-        : (playlist?.ndi_output_name || String(source)).toLowerCase(),
+    scene: source === -1 ? "OBS manuál" : asciiLower(playlist.ndi_output_name),
     action: source === -1 ? "input" : "playlist",
     source,
     reason: null,
     cut_boundary_100ns: null,
     at_ms: Date.now(),
     via: "dashboard",
-    // #221 B4 step 6: a dashboard cut tells cg OBS nothing. The mock's
-    // playlists all name a scene; the server's no-scene cases (inactive,
-    // empty or shared NDI name) are not modelled.
+    // #221 B4 step 6: a dashboard cut tells cg OBS nothing.
     cg_forward: null,
   };
   if (programState.source !== source) {
@@ -1112,7 +1272,12 @@ app.post("/__mock/program-reset", (_req, res) => {
   programLastRemoteCut = null;
   programActiveWindow = null;
   programConnections = 0;
+  programRefusalsHidden = false;
   res.json({ status: "reset" });
+});
+app.post("/__mock/program-refusals-hidden", (req, res) => {
+  programRefusalsHidden = req.body?.hidden === true;
+  res.json({ hidden: programRefusalsHidden });
 });
 // #221 B4 step 6 test-only: SP-program's NDI receiver count
 // (`health.connections`), `{connections: N}`.

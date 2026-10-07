@@ -199,6 +199,9 @@ impl PlaybackEngine {
                 title_clock: None,
                 play_start_ms: 0,
                 paused_at: None,
+                failures: Default::default(),
+                record_on_start: None,
+                pending_plays: Default::default(),
             }
         });
     }

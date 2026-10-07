@@ -22,16 +22,40 @@ pub async fn post_json<T: Serialize, R: DeserializeOwned>(
     path: &str,
     body: &T,
 ) -> Result<R, String> {
+    post_json_status(path, body)
+        .await
+        .map_err(|e| post_error(path, e))
+}
+
+/// The message a failed POST to `path` shows (the [`post_json_status`]
+/// error): `POST {path} → {status}` for a non-2xx answer, else the error
+/// itself.
+pub fn post_error(path: &str, (status, text): (u16, String)) -> String {
+    match status {
+        0 => text,
+        _ => format!("POST {path} → {status}"),
+    }
+}
+
+/// [`post_json`] that keeps a non-2xx answer: `Err((status, body))`, so a
+/// caller can tell a refusal (#221: a program cut answered 409 with its
+/// `{reason, error}`) from any other failure; `Err((0, error))` when there
+/// was no answer or a 2xx answer did not decode.
+pub async fn post_json_status<T: Serialize, R: DeserializeOwned>(
+    path: &str,
+    body: &T,
+) -> Result<R, (u16, String)> {
     let resp = Request::post(path)
         .json(body)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| (0, e.to_string()))?
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| (0, e.to_string()))?;
     if !resp.ok() {
-        return Err(format!("POST {} → {}", path, resp.status()));
+        let text = resp.text().await.unwrap_or_default();
+        return Err((resp.status(), text));
     }
-    resp.json::<R>().await.map_err(|e| e.to_string())
+    resp.json::<R>().await.map_err(|e| (0, e.to_string()))
 }
 
 /// PUT JSON to `path` and deserialise the response.
@@ -47,24 +71,6 @@ pub async fn put_json<T: Serialize, R: DeserializeOwned>(
         .map_err(|e| e.to_string())?;
     if !resp.ok() {
         return Err(format!("PUT {} → {}", path, resp.status()));
-    }
-    resp.json::<R>().await.map_err(|e| e.to_string())
-}
-
-/// PATCH JSON to `path` and deserialise the response.
-#[allow(dead_code)]
-pub async fn patch_json<T: Serialize, R: DeserializeOwned>(
-    path: &str,
-    body: &T,
-) -> Result<R, String> {
-    let resp = Request::patch(path)
-        .json(body)
-        .map_err(|e| e.to_string())?
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.ok() {
-        return Err(format!("PATCH {} → {}", path, resp.status()));
     }
     resp.json::<R>().await.map_err(|e| e.to_string())
 }
@@ -203,6 +209,10 @@ pub struct NdiOutputHealth {
     pub pacing: PacingView,
     #[serde(default)]
     pub audio: AudioView,
+    /// #229: the videos that failed to open in a row (`null` while none
+    /// did): the Player says why the program is black from it.
+    #[serde(default)]
+    pub open_failures: Option<sp_core::playback::OpenFailures>,
 }
 
 impl NdiOutputHealth {
@@ -535,8 +545,8 @@ pub async fn patch_dub(video_id: i64, requested: bool) -> Result<(), String> {
 
 /// PATCH JSON to `path` and discard the response body. Mirror of
 /// `put_json_empty` / `post_json_empty` for handlers that reply `204 No
-/// Content`.
-async fn patch_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), String> {
+/// Content` (#229: the settings PATCH too).
+pub async fn patch_json_empty<T: Serialize>(path: &str, body: &T) -> Result<(), String> {
     let resp = Request::patch(path)
         .json(body)
         .map_err(|e| e.to_string())?

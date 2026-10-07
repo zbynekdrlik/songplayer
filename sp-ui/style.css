@@ -141,7 +141,9 @@ body {
     max-width: 100%;
     overflow-wrap: anywhere;
 }
-.program-cut:hover { border-color: var(--text-dim); }
+.program-cut:hover:not(:disabled) { border-color: var(--text-dim); }
+/* #221: a playlist the server refuses to cut to (inactive / no scene). */
+.program-cut:disabled { opacity: 0.5; cursor: not-allowed; }
 .program-cut.program-cut-on {
     background: var(--error);
     border-color: var(--error);
@@ -1285,6 +1287,16 @@ body {
     color: #fff;
     background: var(--danger, #c0392b);
     border: 1px solid var(--danger, #c0392b);
+}
+
+/* #229: the playlist's videos cannot be opened — the reason a black program has. */
+.player-open-failures {
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    font-size: 0.85em;
+    color: var(--warning, #f8b400);
+    border: 1px solid var(--warning, #f8b400);
+    overflow-wrap: anywhere;
 }
 
 .player-seek-row { display: flex; flex-direction: column; gap: 6px; }

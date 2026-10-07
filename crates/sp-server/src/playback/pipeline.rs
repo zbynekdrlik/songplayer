@@ -283,6 +283,8 @@ fn run_loop_windows(
                             continue;
                         }
                         DecodeResult::Error(msg) => {
+                            // #229: the failed open's answer to its Play (one
+                            // per Play, in order: the engine's `PlayAnswers`).
                             paused = false;
                             error!(playlist_id, %msg, "decode error");
                             let _ = event_tx.send((playlist_id, PipelineEvent::Error(msg)));

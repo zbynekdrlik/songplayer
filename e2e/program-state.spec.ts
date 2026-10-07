@@ -12,10 +12,10 @@ import { test, expect } from "@playwright/test";
 import { classifyProgram, describeProgram, isDabing, PlaylistRow } from "./program-state";
 
 const PLAYLISTS: PlaylistRow[] = [
-  { id: 4, name: "ytslow", ndi_output_name: "SP-slow", kind: "youtube" },
-  { id: 7, name: "ytfast", ndi_output_name: "SP-fast", kind: "youtube" },
-  { id: 184, name: "ytlive", ndi_output_name: "SP-live", kind: "custom" },
-  { id: 648, name: "Dabing", ndi_output_name: "SP-dabing", kind: "dabing" },
+  { id: 4, name: "ytslow", ndi_output_name: "SP-slow", is_active: true, kind: "youtube" },
+  { id: 7, name: "ytfast", ndi_output_name: "SP-fast", is_active: true, kind: "youtube" },
+  { id: 184, name: "ytlive", ndi_output_name: "SP-live", is_active: true, kind: "custom" },
+  { id: 648, name: "Dabing", ndi_output_name: "SP-dabing", is_active: true, kind: "dabing" },
 ];
 
 test.describe("program-state classifier (#184)", () => {

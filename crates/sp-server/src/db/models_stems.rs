@@ -384,6 +384,26 @@ pub async fn count_stems_progress(pool: &SqlitePool) -> Result<(i64, i64), sqlx:
     Ok((pending, done))
 }
 
+/// The stems of row `video_id` are picked again after `wait`, with the status
+/// and the attempts untouched (the same `strftime` form the selector
+/// compares): a no-penalty recheck — a song with no audio on disk
+/// (`song_input`), a peer making the stems or a node with no venv (#229).
+pub async fn defer_stems(
+    pool: &SqlitePool,
+    video_id: i64,
+    wait: std::time::Duration,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE videos SET stem_next_attempt_at = \
+             strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) WHERE id = ?",
+    )
+    .bind(i64::try_from(wait.as_secs()).unwrap_or(i64::MAX))
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "models_tests_stems.rs"]
 mod tests;

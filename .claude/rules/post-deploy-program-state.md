@@ -93,11 +93,22 @@ Rules for every post-deploy spec:
   on-air set = SP-program's playlist alone since B4 step 6: none for "OBS
   manuál"). The playback authority applies a switch a moment after the
   facade answers it: wait for the engine to reach the scene
-  (`waitEngineActiveScene`, the A/V gate's `length === 1` poll), never read
-  it once.
+  (`program-state.ts::waitEngineActiveScene`, the A/V gate's `length === 1`
+  poll), never read it once.
 - **#221: a receiver is checked on `SP-program`, the only NDI sender**
   (lane 3 retired the per-playlist outputs): poll `GET /api/v1/program`
   through `ndi-health-gate.ts::programReceiverVerdict` (a source on program,
   `health.connections > 0`, `degraded_reason` null), as `post-deploy.spec.ts`
   and `post-deploy-dabing.spec.ts` do. `/api/v1/ndi/health` rows have no
   receiver field any more.
+
+## A failed post-deploy test's trace is a PUBLIC artifact (#229)
+
+`post-deploy.config.ts` keeps a trace on failure, and CI uploads the report
+(7 days, public repo). A trace records every response the spec read,
+including `request` fixture API calls. Before #229 masked the settings API,
+`post-deploy-av-sync`'s trace (it GETs `/api/v1/settings` for `cache_dir`)
+put 8 clear credentials into run 37423917199's artifact. A spec that reads a
+secret-bearing endpoint sets `test.use({ trace: "off" })` and asserts
+without printing a value: a boolean `toBe(true)` with a message that names
+the key (`post-deploy-settings-secrets.spec.ts`).

@@ -2,6 +2,7 @@
 
 pub mod models;
 pub mod models_dabing; // #180 dubbing D1 queries (own module, 1000-line cap)
+pub mod models_peer; // #229 the node exchange's tables (own module, models.rs is at the cap)
 pub mod models_playlists; // #225 every playlist id, for the WS on-connect replay (own module, 1000-line cap)
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 pub mod models_stems_priority; // #195 tiered in-use-first stems selector (own module, 1000-line cap)
@@ -42,6 +43,8 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (26, MIGRATION_V26),
     (27, MIGRATION_V27),
     (28, MIGRATION_V28),
+    (29, MIGRATION_V29),
+    (30, MIGRATION_V30),
 ];
 
 const MIGRATION_V1: &str = "
@@ -440,6 +443,41 @@ INSERT OR REPLACE INTO settings (key, value) VALUES ('mix_dub_dabing', '1');
 DELETE FROM settings WHERE key IN ('mix_vokaly', 'mix_podklad', 'mix_dabing');
 ";
 
+// V29 (#229): the node exchange's sha256 cache. The hasher (`peer/hasher.rs`)
+// hashes each artifact file once per (path, size, mtime); the catalog lists
+// only hashed files, so a catalog request never reads a file.
+const MIGRATION_V29: &str = "
+CREATE TABLE peer_hashes (
+    path TEXT PRIMARY KEY,
+    size INTEGER NOT NULL,
+    mtime_ms INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    hashed_at_ms INTEGER NOT NULL
+);
+";
+
+// V30 (#229): ask first. `peer_waits` = since when a job of a video waits for
+// a peer (the 2 h bound counts from the FIRST wait, kept until the wait ends);
+// `peer_fetches` = which node an artifact came from (source = peer:<node>).
+// The row's own source columns keep their meaning.
+const MIGRATION_V30: &str = "
+CREATE TABLE peer_waits (
+    youtube_id TEXT NOT NULL,
+    job TEXT NOT NULL,
+    since_ms INTEGER NOT NULL,
+    PRIMARY KEY (youtube_id, job)
+);
+CREATE TABLE peer_fetches (
+    youtube_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    node TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    fetched_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (youtube_id, kind)
+);
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -592,6 +630,14 @@ mod tests_v27;
 #[path = "mod_tests_v28.rs"]
 #[cfg(test)]
 mod tests_v28;
+
+#[path = "mod_tests_v29.rs"]
+#[cfg(test)]
+mod tests_v29;
+
+#[path = "mod_tests_v30.rs"]
+#[cfg(test)]
+mod tests_v30;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

@@ -13,6 +13,10 @@
  * The decision (`classifyProgram`) is pure so it is unit-tested in the mock
  * suite (`program-state.spec.ts`) without the box; `readProgramState` is the
  * thin I/O wrapper over `/api/v1/status` + `/api/v1/playlists`.
+ *
+ * The specs that DO press scenes (`post-deploy.spec.ts`, #229's
+ * `post-deploy-pp.spec.ts`) wait for the engine to follow with
+ * `readEngineActiveScene` / `waitEngineActiveScene`, below.
  */
 
 import { expect, APIRequestContext } from "@playwright/test";
@@ -25,6 +29,7 @@ export interface PlaylistRow {
   id: number;
   name: string;
   ndi_output_name: string;
+  is_active: boolean;
   kind: string;
 }
 
@@ -96,6 +101,48 @@ export async function readProgramState(request: APIRequestContext): Promise<Prog
     status.active_playlist_ids ?? [],
     playlists,
   );
+}
+
+// #170: read the ENGINE's view of the on-program scene to prove SongPlayer
+// actually followed a scene switch — not just that OBS reports it.
+// #221 L4b: `active_scene` is SongPlayer's own program (the one resolver) and
+// `active_playlist_ids` its on-air set: SP-program's playlist alone (#221 B4
+// step 6: no cg OBS record joins it any more, so it never holds two). A read
+// that names two playlists is reported as not settled (never a match).
+export async function readEngineActiveScene(
+  ctx: APIRequestContext,
+): Promise<string | null> {
+  try {
+    const resp = await ctx.get("/api/v1/status");
+    if (!resp.ok()) return null;
+    const status = (await resp.json()) as {
+      active_scene?: string | null;
+      active_playlist_ids?: number[];
+    };
+    const onAir = status.active_playlist_ids ?? [];
+    if (onAir.length > 1) {
+      return `${status.active_scene} (not settled, on air ${JSON.stringify(onAir)})`;
+    }
+    return status.active_scene ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Poll the engine's active scene until it equals `target` (or a short deadline).
+export async function waitEngineActiveScene(
+  ctx: APIRequestContext,
+  target: string,
+  timeoutMs = 5000,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  let last: string | null = null;
+  for (;;) {
+    last = await readEngineActiveScene(ctx);
+    if (last === target) return last;
+    if (Date.now() >= deadline) return last;
+    await new Promise((r) => setTimeout(r, 200));
+  }
 }
 
 /** One line for the test log: which scene, which playlists, which branch. */

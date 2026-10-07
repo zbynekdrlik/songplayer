@@ -433,3 +433,78 @@ The REST deck-by-deck run failed. The safe path is an offline edit of the saved 
 - **Full `/composition` read (~15 MB):** PowerShell `Invoke-WebRequest` failed with "connection forcibly closed". Python `urllib` reads it in 0.4 s.
 - **Wall check from session 0:** the scheduled task `SP-WallShot` (interactive) runs `shot.ps1` and grabs the output displays to `shots\wall_after.png`. `wallmean.ps1` gives the video area's brightness: 0 = pure black.
 - **A black Spout clip:** re-triggering (`/connect`) does not bring the picture back. Re-open the source (`/open source:///video/SP-program-MAX`), then PUT the size back to 1920×1080 (#223 comment 5996266548).
+
+## PP site — resolume-pp (#229 phase 0, 6.10.2026)
+
+SongPlayer's second node, in Poprad. Wired like SNV: SongPlayer is the program, the
+Arena "bridge" takes `SP-program-MAX`, and cg OBS is only the "OBS manuál" input.
+
+- **Reach it:**
+  - The MCP server `win-resolume-pp`, from `.mcp.json`. When the session did not
+    load its tools, call it over JSON-RPC with a small client that reads
+    `.mcp.json`; never print the key.
+  - From SNV / dev1 the PP LAN 10.77.8.x is NATed as 10.76.8.x, e.g. the Companion
+    `10.76.8.205:8000` and cg OBS `10.76.8.201:4455`.
+  - Never print a process command line on the box: RemoteOS's own carries its
+    auth key.
+- **Machine:**
+  - Windows 11 IoT Enterprise LTSC 24H2, RTX 3070 Ti Laptop GPU.
+  - Arena "Bridge PP": `Arena-Bridge.exe` as user `bridge`, REST 8090, Arena 7.22.
+    The composition is 1792×384, deck "Poprad", file
+    `C:\Users\bridge\Documents\Resolume Arena\Compositions\Bridge PP.avc`.
+  - Arena "Songs PP": `Arena.exe`, REST 8091. Leave it alone.
+  - cg OBS: the INSTALLED OBS 32.1.2 (`%APPDATA%\obs-studio`, collection
+    `Untitled`), websocket 4455 with no auth, NDI output `cg-obs`. The portable
+    `_APPS\cg_obs` is a leftover.
+- **The AHK safe loop (`NL_STARTUP.ahk`) relaunches Arena-Bridge, Arena and OBS
+  one second after any of them is gone.**
+  - Alt+Q pauses the loop and kills nothing; Alt+L resumes it and starts whatever
+    is missing. Send them with the MCP `Shortcut` tool.
+  - To edit OBS's scene collection: Alt+Q, `(Get-Process obs64).CloseMainWindow()`,
+    edit the JSON, then Alt+L.
+  - Never print the `.ahk` file: it holds a credential. Read it with those lines
+    masked.
+- **No VP9 / AV1 decoder out of the box.** LTSC ships without the Video
+  Extensions, so Media Foundation fails every YouTube file ("No suitable
+  transform") and a playlist on program skips about 6 songs a second (#229
+  comment 6026302395). Install from the Store with `winget install --id
+  9N4D0MSMP0PT --source msstore` (VP9) and `--id 9MVZQVXJBQ9V` (AV1), adding
+  `--accept-package-agreements --accept-source-agreements --silent`. These are the
+  same versions SNV runs. Check with `POST /api/v1/diag/decode-bench`.
+- **Arena 7.22 has no REST save.** `POST /composition/save` answers 403, and
+  Ctrl+S sent with `Shortcut` saved nothing. What works: `FocusWindow` "Resolume
+  Arena - Bridge PP", then click the Composition menu (150,50) and Save (140,223).
+  Coordinates are at 2560×1600. Unlike SNV, MCP input reaches the foreground here.
+  Check the `.avc` afterwards: its mtime, and a `Select-String` count of the new
+  clips.
+- **Text Block clips over REST** (the `#sp-title` / `#sp-subssk` set):
+  - Create one with `POST /composition/layers/<l>/clips/<c>/open`, text/plain
+    body `source:///video/Text%20Block` (the name percent-encoded).
+  - Name it with `PUT /composition/clips/by-id/<id>`
+    `{"name":{"value":"#sp-subssk"}}`.
+  - Set every source param with `PUT /parameter/by-id/<id>` from
+    `clip.video.sourceparams`. Set Font first: the Style choices depend on it.
+  - `Size` cannot go below 0.5. For smaller text, use the source `Scale`. It
+    scales about the block centre, so a right-aligned text moves inwards.
+  - Positive `Position Y` moves the text down.
+  - The driver only writes text and opacity. The operator's column trigger
+    connects the clips, so put them in every column that carries the MAX picture.
+  - PP layout: L11 `#sp-title` (Advent Pro SemiBold, Size 0.5, Scale 0.6, right +
+    top, Position X -25) and L12 `#sp-subssk` (Advent Pro Expanded ExtraBold, Size
+    0.6, centre + bottom, line width 1040, Position Y -40), in columns 2, 3, 4 and
+    16.
+  - The video frame's inside is about x 338–1442, y 15–358. The bottom corners of
+    the composition are empty.
+  - PP has no Yu Mincho, SNV's title font.
+- **Companion (10.77.8.205, Companion 5.0.6, obs-studio module 3.13.1):**
+  - Export with `GET /int/export/full?format=json`, or one page with
+    `/int/export/page/<n>?format=json`.
+  - Import a page in Import / Export: set the file input (Playwright
+    `setInputFiles`), choose the destination page, keep "Link to <connection>",
+    then "Replace page N".
+  - Press a button with `POST /api/location/<page>/<row>/<col>/press`.
+  - Page 13's `cg_obs` connection points at the facade `10.77.8.201:4456`, with
+    the SNV scene names (`sp-fast`…).
+- **RemoteOS shell output must be ASCII.** A Python script printing UTF-8 under
+  `PYTHONIOENCODING=utf-8` came back as "(no output)". Use
+  `sys.stdout.reconfigure(encoding="ascii", errors="backslashreplace")`.

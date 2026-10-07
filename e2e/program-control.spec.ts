@@ -354,3 +354,163 @@ test("the Program control cuts with the Nastavenia fade and names no cg OBS tran
   // Zero console errors — the last assertion.
   expect(realConsoleErrors(consoleMessages)).toEqual([]);
 });
+
+// #221 (ROZHODNUTÉ 6022247729): every consumer takes SP-program, so a cut to
+// an inactive playlist, or to one whose scene catalog names no scene, would
+// black the LED wall, FOH, the Presenter and the stream at once. The server
+// refuses it (409) and lists such playlists in `cut_refused`; their buttons
+// are disabled, with a tooltip saying why. The "refusals" fixture adds
+// 30 "Archív" (inactive) and 31 "Bez výstupu" (no NDI output name) to the
+// three default playlists.
+test.describe("a playlist the cut refuses", () => {
+  test.beforeEach(async ({ request }) => {
+    await request.post("/__mock/fixture", { data: { mode: "refusals" } });
+  });
+  test.afterEach(async ({ request }) => {
+    await request.post("/__mock/fixture", { data: { mode: "default" } });
+  });
+
+  test("an inactive or scene-less playlist's button is disabled and says why; an active one still cuts", async ({
+    page,
+    request,
+  }) => {
+    const consoleMessages = collectConsole(page);
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto("/");
+    const control = page.getByTestId("program-control");
+    await expect(page.getByTestId("program-source")).toHaveText(
+      "Na programe: Worship",
+      { timeout: 10000 },
+    );
+    await expect(control.getByTestId("program-cut")).toHaveCount(5);
+    const cutButton = (id: number) =>
+      control.locator(`[data-testid="program-cut"][data-playlist-id="${id}"]`);
+    const archiv = cutButton(30);
+    const unnamed = cutButton(31);
+    const background = cutButton(2);
+    await expect(archiv).toHaveText("Archív");
+    await expect(archiv).toBeDisabled();
+    await expect(archiv).toHaveAttribute("title", /^Playlist je neaktívny/);
+    await expect(unnamed).toBeDisabled();
+    await expect(unnamed).toHaveAttribute(
+      "title",
+      /^Playlist nemá vlastnú scénu/,
+    );
+    await expect(background).toBeEnabled();
+    await expect(background).toHaveAttribute("title", "Strih na program");
+
+    // A real mouse click on a disabled button posts nothing: across the next
+    // program poll (the safe direction) the mock saw no cut body and recorded
+    // no refusal, and the error line stays empty.
+    for (const refused of [archiv, unnamed]) {
+      const box = await refused.boundingBox();
+      expect(box).not.toBeNull();
+      await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    }
+    await page.waitForResponse((r) => r.url().endsWith("/api/v1/program"));
+    let last = await (await request.get("/__mock/program-last-cut")).json();
+    expect(last.body).toBeNull();
+    let program = await (await request.get("/api/v1/program")).json();
+    expect(program.remote.last_remote_cut).toBeNull();
+    expect(program.source).toBe(1);
+    await expect(page.getByTestId("program-error")).toHaveText("");
+    await expect(page.getByTestId("program-source")).toHaveText(
+      "Na programe: Worship",
+    );
+
+    // An active playlist with a scene still cuts, with the real mouse.
+    const box = await background.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await expect(page.getByTestId("program-source")).toHaveText(
+      "Na programe: Background",
+    );
+    await expect(background).toHaveAttribute("aria-pressed", "true");
+    last = await (await request.get("/__mock/program-last-cut")).json();
+    expect(last.body).toEqual({ source: 2 });
+
+    // The server refuses the same cuts from any client (409, with the
+    // reason), changes nothing, and lists both playlists with their reasons.
+    const inactive = await request.post("/api/v1/program/cut", {
+      data: { source: 30 },
+    });
+    expect(inactive.status()).toBe(409);
+    expect(await inactive.json()).toEqual({
+      reason: "playlist_inactive",
+      error: expect.stringContaining("inactive"),
+    });
+    const noScene = await request.post("/api/v1/program/cut", {
+      data: { source: 31 },
+    });
+    expect(noScene.status()).toBe(409);
+    expect(await noScene.json()).toEqual({
+      reason: "no_scene",
+      error: expect.stringContaining("names no scene"),
+    });
+    program = await (await request.get("/api/v1/program")).json();
+    expect(program.source).toBe(2);
+    expect(program.health.cuts).toBe(1);
+    expect(program.remote.last_remote_cut.action).toBe("keep");
+    expect(program.remote.last_remote_cut.reason).toBe("no_scene");
+    expect(program.cut_refused).toEqual([
+      { source: 30, reason: "playlist_inactive" },
+      { source: 31, reason: "no_scene" },
+    ]);
+    await expect(page.getByTestId("program-source")).toHaveText(
+      "Na programe: Background",
+    );
+    await expect(archiv).toBeDisabled();
+
+    // Zero console errors — the last assertion.
+    expect(realConsoleErrors(consoleMessages)).toEqual([]);
+  });
+
+  test("a cut the dashboard did not know to be refused says why on the error line", async ({
+    page,
+    request,
+  }) => {
+    // The program answers carry no refusals (`cut_refused: null`, as when
+    // the server cannot read its playlists), so no button is disabled, and
+    // the server still refuses the cut (409 + `{reason, error}`): the error
+    // line says why from the answer's reason.
+    await request.post("/__mock/program-refusals-hidden", {
+      data: { hidden: true },
+    });
+    const consoleMessages = collectConsole(page);
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto("/");
+    await expect(page.getByTestId("program-source")).toHaveText(
+      "Na programe: Worship",
+      { timeout: 10000 },
+    );
+    await page.waitForResponse((r) => r.url().endsWith("/api/v1/program"));
+    const archiv = page.locator(
+      '[data-testid="program-cut"][data-playlist-id="30"]',
+    );
+    await expect(archiv).toBeEnabled();
+    await expect(archiv).toHaveAttribute("title", "Strih na program");
+
+    const box = await archiv.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await expect(page.getByTestId("program-error")).toHaveText(
+      "Strih odmietnutý: Playlist je neaktívny — strih by zatemnil celý program (stenu, FOH, Presenter, stream)",
+    );
+    await expect(page.getByTestId("program-source")).toHaveText(
+      "Na programe: Worship",
+    );
+    // Backend effect: the cut was posted and refused; nothing changed.
+    const last = await (await request.get("/__mock/program-last-cut")).json();
+    expect(last.body).toEqual({ source: 30 });
+    const program = await (await request.get("/api/v1/program")).json();
+    expect(program.source).toBe(1);
+    expect(program.health.cuts).toBe(0);
+    expect(program.remote.last_remote_cut.reason).toBe("playlist_inactive");
+
+    // The browser logs the deliberate 409; it is the point of the test.
+    // Zero other console errors — the last assertion.
+    expect(
+      realConsoleErrors(consoleMessages).filter((m) => !/status of 409/.test(m)),
+    ).toEqual([]);
+  });
+});
