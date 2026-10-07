@@ -922,6 +922,19 @@ RwSignal<Option<bool>>` (`None` running, `Some(false)` failed) and passes it
 to both sections: save disabled until `Some(true)`, and a Slovak line on a
 failed load (mock: `/__mock/fail-mode {kind: "settings"}`).
 
+## Reaching a save handler past its disabled button in a spec (#233)
+
+A click on a disabled button reaches no handler, `click({force: true})`
+included, so a "no PATCH after a forced click" check proves only what
+`toBeDisabled()` already proved. To exercise a handler's OWN guard: re-enable
+the button by hand and click it (`button.disabled = false; button.click()`
+in `page.evaluate`; Leptos re-applies `prop:disabled` only when its
+signal changes), or call the form's `requestSubmit()`. `requestSubmit()`
+runs constraint validation first and fires `invalid` instead of `submit`
+when a field is out of range, so return whether `submit` fired (a `once`
+listener) and assert it. Check "no PATCH" only after a later round trip
+through the page (the PATCH would start from a `spawn_local`).
+
 ## A section of a shared settings map re-reads only its own keys (#233)
 
 Two Nastavenia sections (`settings_form.rs`, `audio_outputs.rs`) both read

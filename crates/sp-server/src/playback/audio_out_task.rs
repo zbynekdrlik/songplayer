@@ -5,8 +5,10 @@
 //! identical to a running one up to its name (and built for the same rate)
 //! is KEPT — its thread, queue and frame counter run on, a new name only
 //! relabels it — a new or changed one is built (its target resolved, its
-//! thread started), a removed or changed one is stopped (its thread drains
-//! and exits). A stored value that is no list changes nothing (Review Focus
+//! thread started), a removed or changed one is discarded
+//! (`OutputSink::discard`: its queue dropped, no push taken after it, its
+//! thread exits after at most the block it already holds; only the
+//! shutdown's `stop_all` drains). A stored value that is no list changes nothing (Review Focus
 //! 3): what runs keeps running and the problem is named. A kept VBAN output
 //! re-resolves its target every `VBAN_RESOLVE_EVERY`; a failed re-resolve
 //! keeps the last good address. The thread starter is a parameter, so a unit

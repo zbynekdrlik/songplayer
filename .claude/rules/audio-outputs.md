@@ -263,10 +263,15 @@ notice when the pin moves. Added to the lock with `cargo update --workspace`
   `apply_keeps_an_unchanged_output_when_another_is_added`,
   `renaming_an_output_keeps_it_running_under_its_new_name`). A rebuilt
   entry's new output starts its frame counter at 0 (a receiver sees one
-  jump). A replaced or removed output is stopped with `discard` (its queue
-  dropped: a delay lowered from 2 s to 0 never sends the old schedule next
-  to its successor, same host and stream name); only the shutdown's
-  `stop_all` drains (#233 review round 4).
+  jump). A replaced or removed output is stopped with `discard`: its queue
+  is dropped and a stopped output takes no later push (`apply` replaces the
+  list before it discards, so a boundary can still push into the old
+  snapshot), so a delay lowered from 2 s to 0 sends at most the ONE block
+  its thread already holds next to its successor (same host and stream
+  name), never the old schedule; only the shutdown's `stop_all` drains
+  (#233 review rounds 4–5). The slew's ±100 ppm per packet interval holds
+  for FOH's 48 kHz INT24; its 100 ns steps are a larger share of a shorter
+  interval (up to ~±250 ppm at 192 kHz).
 - A built output's thread is started through a PARAMETER (`StartThread`):
   `start_outputs` passes `start_vban_thread` (the MMCSS thread on Windows),
   every unit test a no-op or a recorder. Before, `build` spawned the real

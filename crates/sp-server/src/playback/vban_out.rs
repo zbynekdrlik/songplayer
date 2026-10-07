@@ -31,9 +31,11 @@
 //! at once, and a hold would leave a gap. Its clock
 //! ([`WallVbanClock::slewing`], policy [`RemainderSlew`], in `vban_clock.rs`)
 //! therefore neither jumps nor stops at the follow: it owes the movement and
-//! pays it back at [`VBAN_SLEW_PPM`], so every packet interval stays within
-//! its spacing ± 100 ppm (4.1667 ms at 48 kHz INT24) — no burst, no gap, no
-//! drop, no crossfade
+//! pays it back at [`VBAN_SLEW_PPM`], so every packet interval of FOH's
+//! 48 kHz INT24 stays within 4.1667 ms ± 100 ppm — no burst, no gap, no
+//! drop, no crossfade. (#233: the slew pays in whole 100 ns steps, so a
+//! destination with a shorter packet interval — a higher rate or FLOAT32 —
+//! gets a larger share per step, up to ~±250 ppm at 192 kHz.)
 //! (`slew_owed_us` on the status, signed).
 //!
 //! #233: one `VbanOut` per VBAN entry of the output list (`audio_out_task.rs`
@@ -474,10 +476,12 @@ impl VbanOut {
         self.ready.notify_all();
     }
 
-    /// #233: stop the thread now (a runtime replace or removal): the queued
-    /// blocks are dropped, so a changed output (a shorter delay, another
-    /// format) never sends its old schedule next to its rebuilt successor
-    /// (same host, same stream name). A process shutdown drains ([`Self::stop`]).
+    /// #233: stop the thread (a runtime replace or removal): the queued
+    /// blocks are dropped and no later push is taken, so a changed output (a
+    /// shorter delay, another format) sends at most the ONE block its thread
+    /// already holds next to its rebuilt successor (same host, same stream
+    /// name), never its old schedule. A process shutdown drains
+    /// ([`Self::stop`]).
     pub fn discard(&self) {
         let mut q = lock(&self.queue);
         q.blocks.clear();
