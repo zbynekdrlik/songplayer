@@ -565,12 +565,14 @@ workers ask their peers before they run a job (below, from "Ask first").
   node writes — `manual` stays `manual`, a peer's operator correction is
   final here too), else this node's providers (`download_title`). A failed
   fetch never calls a provider. Recorded by `record_download` (the local
-  path's own, #136: it re-reads a correction made meanwhile); a peer's
-  title taken is recorded in `peer_fetches` too (kind `metadata`,
-  `download::record_title`, the repair's own). The audio is renamed first;
-  when the video cannot take its name, the audio and the video's part are
-  removed again (the local path's rule: no unrecorded audio under a final
-  name).
+  path's own, #136: it re-reads a correction made meanwhile, and answers
+  the title it recorded); a peer's title is recorded in `peer_fetches` too
+  (kind `metadata`, `download::record_title`, the repair's own), only when
+  it is the title `record_download` wrote. The audio is renamed first; when
+  the video cannot take its name, the audio is removed again (the local
+  path's rule: no unrecorded audio under a final name) unless an audio was
+  already there (another row of the video, rows share files by name); the
+  video's verified part stays for the next ask (re-hashed, no transfer).
 - `downloader/` is out of the mutation gate: the logic stays in `peer/`,
   only the hook lives in `downloader/mod.rs`; its tests are `mod_tests.rs`
   (moved out for the cap) + `mod_tests_peer.rs` (tools missing on purpose:
