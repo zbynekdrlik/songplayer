@@ -218,17 +218,18 @@ impl Problem {
             Self::Empty => "je prázdne",
             Self::TooLong => "je príliš dlhé",
             Self::BadCharacters => "obsahuje nepovolený znak",
-            Self::Duplicate => "už má iný výstup",
+            Self::Duplicate => "má rovnakú hodnotu ako iný výstup",
             Self::UnsupportedRate => "musí byť podľa siete alebo 44100–192000 Hz",
-            Self::TooLarge => "je viac ako 2000 ms",
+            Self::TooLarge => "má viac ako 2000 ms",
             Self::Missing => "chýba",
             Self::BadPort => "musí byť 1 až 65535",
         }
     }
 }
 
-/// The Slovak name of a field, for the dashboard.
-fn field_sk(field: &str) -> &'static str {
+/// The Slovak name of a field, for the dashboard (shown as `pole „…“`, so
+/// every problem text agrees with the neuter "pole"); an unknown field as it is.
+fn field_sk(field: &'static str) -> &'static str {
     match field {
         "id" => "identifikátor",
         "name" => "názov",
@@ -238,7 +239,7 @@ fn field_sk(field: &str) -> &'static str {
         "vban.host" => "cieľ",
         "vban.port" => "port",
         "vban.stream_name" => "názov streamu",
-        _ => "pole",
+        _ => field,
     }
 }
 
@@ -310,7 +311,7 @@ impl ListError {
                 kind.as_str().to_uppercase()
             ),
             Self::Entry(e) => format!(
-                "Výstup {} ({}): {} {}",
+                "Výstup {} ({}): pole „{}“ {}",
                 e.index + 1,
                 shown_id(&e.id),
                 field_sk(e.field),
