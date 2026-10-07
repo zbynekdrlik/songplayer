@@ -1,10 +1,12 @@
 //! #229: the peer API's JSON, typed both ways. A peer's answer is untrusted:
 //! no `serde_json::Value` anywhere inside (`rust-workspace.md`), unknown
 //! fields are skipped, unknown kinds and job states read as `Unknown` and
-//! are dropped by [`Catalog::sanitized`].
+//! are dropped by [`Catalog::sanitized`], with any entry whose id, sha256 or
+//! node name does not hold.
 
 use serde::{Deserialize, Serialize};
 
+use super::config::valid_name;
 use super::kind::{ArtifactKind, metadata_version};
 use crate::downloader::cache::is_valid_video_id;
 
@@ -60,9 +62,15 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Only the entries this node can use: a known kind (and job state), a
-    /// real YouTube id, a sha256 as 64 lowercase hex digits.
+    /// Only what this node can use: a known kind (and job state), a real
+    /// YouTube id, a sha256 as 64 lowercase hex digits, a node name that holds
+    /// (`peer::config`'s rule; the catalog's own `node` reads as empty when it
+    /// does not). The times are information only: never checked, never a
+    /// decision's input.
     pub fn sanitized(mut self) -> Self {
+        if !valid_name(&self.node) {
+            self.node.clear();
+        }
         self.artifacts.retain(|a| {
             a.kind != ArtifactKind::Unknown
                 && is_sha256_hex(&a.sha256)
@@ -71,6 +79,7 @@ impl Catalog {
         self.jobs.retain(|j| {
             j.kind != ArtifactKind::Unknown
                 && j.state != JobState::Unknown
+                && valid_name(&j.node)
                 && is_valid_video_id(&j.youtube_id)
         });
         self
