@@ -473,7 +473,11 @@ impl VbanOut {
     /// format) never sends its old schedule next to its rebuilt successor
     /// (same host, same stream name). A process shutdown drains ([`Self::stop`]).
     pub fn discard(&self) {
-        self.stop();
+        let mut q = lock(&self.queue);
+        q.blocks.clear();
+        q.stop = true;
+        drop(q);
+        self.ready.notify_all();
     }
 
     /// Replace the config (the settings task).

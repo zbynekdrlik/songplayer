@@ -219,7 +219,9 @@ impl Problem {
             Self::TooLong => "je príliš dlhé",
             Self::BadCharacters => "obsahuje nepovolený znak",
             Self::Duplicate => "má rovnakú hodnotu ako iný výstup",
-            Self::UnsupportedRate => "musí byť podľa siete alebo 44100–192000 Hz",
+            Self::UnsupportedRate => {
+                "musí byť podľa siete alebo 44100, 48000, 88200, 96000 či 192000 Hz"
+            }
             Self::TooLarge => "má viac ako 2000 ms",
             Self::Missing => "chýba",
             Self::BadPort => "musí byť 1 až 65535",
