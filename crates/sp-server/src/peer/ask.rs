@@ -2,7 +2,8 @@
 //! fetches what a peer has, waits (≤ 2 h) for what a peer is making, or runs
 //! the job itself — announced in its own catalog for as long as the returned
 //! guard lives (`peer::decide` holds the rules). With no peers (SNV in phase
-//! 1) the answer is "here" with no network and no DB write.
+//! 1) `ask` answers "here" with no network and no DB write (a hook's own
+//! Local path, `run_here`, may delete a wait that cannot exist there).
 //!
 //! The waits are durable (V30 `peer_waits`, the FIRST start kept until the
 //! wait ends), the origin of a fetched artifact goes to `peer_fetches`
@@ -105,7 +106,7 @@ impl Exchange {
                     peer: p.clone(),
                     artifacts,
                 }),
-                None => Ask::Local(self.announce(youtube_id, job)),
+                None => Ask::Local(self.run_here(job, youtube_id).await),
             },
             Decision::Wait { peer, why } => {
                 if let Err(e) =
@@ -122,6 +123,14 @@ impl Exchange {
                 Ask::Local(self.run_here(job, youtube_id).await)
             }
         }
+    }
+
+    /// This node asks its peers before a job (a node name and at least one
+    /// peer, `NodeConfig::asking`); settings that do not hold read as no.
+    pub(crate) async fn asks_peers(&self) -> bool {
+        NodeConfig::load(&self.pool)
+            .await
+            .is_ok_and(|cfg| cfg.asking())
     }
 
     /// `job` of `youtube_id` runs here: a wait of it ends (a later ask starts

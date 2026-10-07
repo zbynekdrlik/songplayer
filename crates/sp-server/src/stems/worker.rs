@@ -209,6 +209,18 @@ impl StemWorker {
         }
     }
 
+    /// #229: with no venv (WARNed once), whether this tick goes on: only on a
+    /// node that asks its peers (it still takes a peer's stems); a node that
+    /// asks none (SNV in phase 1) or has no exchange stops at the venv as
+    /// before.
+    async fn no_venv_asks_peers(&self, python: &Path) -> bool {
+        self.warn_no_venv_once(python);
+        match &self.peer {
+            Some(ex) => ex.asks_peers().await,
+            None => false,
+        }
+    }
+
     /// #229: with no venv this node separates nothing, so a row it would run
     /// here is put back for `INPUT_MISSING_RECHECK` (no attempt, status
     /// untouched): the rows behind it reach their peer step too.
@@ -244,13 +256,13 @@ impl StemWorker {
             return;
         }
 
-        // #229: a node with no lyrics venv still takes a peer's stems (the
-        // plan's decisions: the stem fetch runs before the venv check), so
-        // the venv's return waits until after the peer step below.
+        // #229: a node with no lyrics venv that asks its peers still takes a
+        // peer's stems (the plan's decisions: the fetch runs before the venv
+        // check); its venv return waits until after the peer step below.
         let python = crate::lyrics::bootstrap::venv_python_path(&self.tools_dir);
         let venv_missing = !python.exists();
-        if venv_missing {
-            self.warn_no_venv_once(&python);
+        if venv_missing && !self.no_venv_asks_peers(&python).await {
+            return;
         }
 
         // #184 G0.1: a dub job has priority on the heavy slot. While one is queued

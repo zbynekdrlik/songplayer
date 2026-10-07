@@ -138,10 +138,14 @@ pub fn gives_up(waited: Duration) -> bool {
 pub const PAUSED_RECHECK: Duration = Duration::from_secs(300);
 
 /// After a failed fetch of a job that has waited `waited`: the next recheck,
-/// or `None` = run the job here (the bound, [`gives_up`]). `paused_here` =
-/// this node's own transfers are paused.
+/// or `None` = run the job here (the bound, [`gives_up`]). This node's own
+/// pause (`paused_here`) is waited out, never a reason to run the job here:
+/// the pause is about this node's bandwidth, and heavy work in its place
+/// would defeat it.
 pub fn after_failure(waited: Duration, paused_here: bool) -> Option<Duration> {
-    let _ = paused_here;
+    if paused_here {
+        return Some(PAUSED_RECHECK);
+    }
     (!gives_up(waited)).then(|| recheck_after(waited))
 }
 
