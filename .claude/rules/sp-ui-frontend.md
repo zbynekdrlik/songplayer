@@ -682,8 +682,10 @@ Two orthogonal facts, two sources — never conflate them:
   (the label's own predicate, `player_view::waits_for_retry`), the badge is
   `● Na programe — čaká na ďalší pokus` (`player_program_badge`, `on` style),
   read from the 1 Hz health poll, so it lags a wait's start and end by up
-  to ~1 s. A retry of a playlist ▶'d off program reads the same: an open
-  #229 question. `open-failures.md` has the details.
+  to ~1 s, and only for a retry the engine armed on program
+  (`OpenFailures::retry_on_program`, ROZHODNUTÉ 6029773698): a ▶ off
+  program that waits keeps `○ Mimo programu`. `open-failures.md` has the
+  details.
 
 Server: `ServerMsg::PlaybackStateChanged` carries `transport: TransportState`
 (`#[serde(default)]` = `Idle`), filled by the engine from the RAW `PlayState` via

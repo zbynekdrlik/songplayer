@@ -114,7 +114,7 @@ the review finding on the selection: 6028419694.
 ## Operator visibility
 
 - `PipelineHealthSnapshot.open_failures: Option<sp_core::playback::OpenFailures>`
-  `{count, last_error, retry_at_ms, retry_in_ms}` (`null` at 0). The engine
+  `{count, last_error, retry_at_ms, retry_in_ms, on_program}` (`null` at 0). The engine
   writes it as the run changes (`publish_open_failures` →
   `NdiHealthRegistry::set_open_failures`: `back_off`, `song_started`, the end
   of every `apply_event`, PlayVideo, Previous) and each heartbeat copies it.
@@ -128,28 +128,34 @@ the review finding on the selection: 6028419694.
   its text following the 1 Hz `store.ndi_health` poll; the state label reads
   "Čaká na ďalší pokus" while a retry waits, the state is known and the
   pipeline is not told it decodes (`player_state_label`).
-- The badge follows the SAME rule (`waits_for_retry`, one predicate, so the
-  two never disagree). `player_program_badge` reads "● Na programe — čaká
-  na ďalší pokus" (`ProgramBadge::OnProgramRetry`, the `on` style,
+- The badge follows the SAME rule (`waits_for_retry`, one predicate) for a
+  retry ARMED ON PROGRAM: `player_program_badge` reads "● Na programe —
+  čaká na ďalší pokus" (`ProgramBadge::OnProgramRetry`, the `on` style,
   `is_on_program`). The engine's wait is `WaitingForScene`, which alone
   read "○ Mimo programu" for SP-program's source, its program black. A
   pipeline told it decodes keeps the WS state's badge.
-- OPEN (#229 Design-question 6029484142): a retry is armed off program too.
-  `video_failed` backs off from `Playing` whatever the scene (a ▶ off air,
-  a dub prepared on the Dabing page). A `SceneOff` (a cut off program, or
-  the dashboard's Pause) ends a pending one, like the other ends under "The
-  pause"; nothing else reads the scene. The WS state and the health row
-  cannot tell the two apart, so a
-  playlist ▶'d off program that waits for a retry also reads "● Na programe
-  — čaká na ďalší pokus". The recommended fix is an engine fact on the row
-  (`OpenFailures.on_program`), pending the main session's decision.
+- A retry is armed off program too: `video_failed` backs off from
+  `Playing` whatever the scene (a ▶ off air, a dub prepared on the Dabing
+  page). The WS state cannot tell the two apart, so the engine states it
+  (ROZHODNUTÉ 6029773698, answering Design-question 6029484142):
+  - `back_off` records `on_program` = the playlist is in the authority's
+    on-air set (SP-program's source) when the retry is armed
+    (`PendingRetry.on_program`, `failure_backoff::RetryView`,
+    `OpenFailures.on_program`, `#[serde(default)]`, additive);
+  - it cannot change while that retry is pending: a cut on program sends a
+    Play, a cut off program (or the dashboard's Pause) is a `SceneOff`, and
+    both end the retry; with no retry pending the row says `false`;
+  - `OpenFailures::retry_pending` (the label's input) and
+    `retry_on_program` (the badge's): a ▶ off program that waits keeps "○
+    Mimo programu", with the label "Čaká na ďalší pokus".
 - The badge follows the 1 Hz health poll at both ends of a wait: it reads
   "○ Mimo programu" for up to ~1 s after the wait starts, and keeps the
   retry badge up to ~1 s after a cut off program or a Pause ends the retry
   (neither changes the WS state then). A cut flips the label and the badge
   in one render only outside a wait.
 - Mock: rows carry `open_failures: null`; the GET fills `retry_in_ms` per
-  request; `/__mock/ndi-health-reset` restores the default rows.
+  request and passes `on_program` through as a spec set it (absent = false);
+  `/__mock/ndi-health-reset` restores the default rows.
 
 ## Testing it
 
@@ -167,10 +173,15 @@ the review finding on the selection: 6028419694.
 - A late answer: `a_late_started_of_an_earlier_play_neither_records_nor_ends_the_run`
   and `a_late_error_of_an_earlier_play_neither_counts_nor_replaces_the_newer_play`
   (Play A, a skip = Play B, A's answer, then B's); the count itself in
-  `failure_backoff_tests.rs`. The badge table:
-  `player_view` `the_badge_says_on_program_while_the_retry_waits`; the mock
-  E2E sets the WS state with `/__mock/set-playing {playlist_id, state,
-  transport}` (`player-open-failures.spec.ts`).
+  `failure_backoff_tests.rs`. The badge table (× a retry armed on / off
+  program): `player_view`
+  `the_badge_says_on_program_while_a_retry_armed_on_program_waits`; the
+  flag on the row: `a_retry_armed_off_program_says_so_on_the_row`,
+  `a_retry_armed_on_program_says_so_until_it_ends` (on program =
+  `put_on_air_for_test` + the scene's ON). The mock E2E sets the WS state
+  with `/__mock/set-playing {playlist_id, state, transport}` and the row's
+  `on_program` through `/__mock/ndi-health` (`player-open-failures.spec.ts`:
+  both badges).
 - Adding a field to `PlaylistPipeline`: THREE literals build it
   (`runtime_pipeline.rs`, `tests.rs`, `dispatch_lyrics_tests.rs`); grep
   `PlaylistPipeline {` across the crate.
