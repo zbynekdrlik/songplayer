@@ -503,3 +503,23 @@ fn the_installer_notice_carries_the_pinned_rtrbs_license() {
          of the Software."
     ));
 }
+
+/// The ASIO host (Windows only) is azo 0.4.0 over azo-sys 0.3.2, without
+/// its `host` feature (main-session ruling 10); the installer's notice
+/// carries their MIT text (re-copy it when the pin moves).
+#[test]
+fn the_installer_notice_carries_the_pinned_azos_license() {
+    const NOTICE: &str = include_str!("../../../../src-tauri/resources/THIRD-PARTY-NOTICES.txt");
+    const MANIFEST: &str = include_str!("../../Cargo.toml");
+    let notice = NOTICE.replace("\r\n", "\n");
+    assert!(
+        MANIFEST.contains("azo = { version = \"=0.4.0\", default-features = false }"),
+        "the pin"
+    );
+    assert!(notice.contains("azo 0.4.0 and azo-sys 0.3.2"));
+    assert!(notice.contains("Copyright (c) 2026 LastExceed"));
+    assert!(notice.contains(
+        "The above copyright notice and this permission notice shall be included in all\n\
+         copies or substantial portions of the Software."
+    ));
+}
