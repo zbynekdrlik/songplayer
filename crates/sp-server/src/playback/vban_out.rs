@@ -90,18 +90,21 @@ pub fn target_spec(dest: &VbanDest) -> String {
 /// A packet sent more than this after its due time is a late send (2 ms).
 pub const VBAN_LATE_100NS: i64 = 20_000;
 
-/// Longest single sleep before a packet: 4 × L = 8 slots, the wall's tick
-/// cap per read (`BoundaryTicker`). #233: an output's whole wait may be this
-/// plus its delay (`plan_wait_up_to`), slept in steps of at most this
-/// (`sleep_until`). A due time further ahead is a clock mismatch; the thread
-/// never parks on it.
+/// Longest wait before a packet: 4 × L = 8 slots. #233: an output's wait
+/// may be this plus its delay (`plan_wait_up_to`). A due time further ahead
+/// is a clock mismatch; the thread never parks on it.
 pub const VBAN_MAX_WAIT_100NS: i64 = 4 * VBAN_SEND_LATENCY_100NS;
 
+/// The longest single sleep (#233): 7 slots, so one sleep plus an oversleep
+/// of under a slot passes at most 8 boundaries, the wall's tick cap per read
+/// (`BoundaryTicker`). A longer wait is slept in steps (`sleep_until`).
+pub const VBAN_SLEEP_STEP_100NS: i64 = 2_666_664;
+
 /// The sleeps one packet's wait may take (#233): the longest wait, 8 slots +
-/// the longest delay, in sleeps of at most [`VBAN_MAX_WAIT_100NS`].
-pub const VBAN_WAIT_STEPS: usize = 9;
+/// the longest delay, in steps of at most [`VBAN_SLEEP_STEP_100NS`].
+pub const VBAN_WAIT_STEPS: usize = 10;
 const _: () = assert!(
-    VBAN_WAIT_STEPS as i64 * VBAN_MAX_WAIT_100NS
+    VBAN_WAIT_STEPS as i64 * VBAN_SLEEP_STEP_100NS
         >= VBAN_MAX_WAIT_100NS + sp_core::audio_outputs::MAX_DELAY_MS as i64 * 10_000
 );
 
@@ -607,7 +610,7 @@ pub fn plan_wait_up_to(now_100ns: i64, at_100ns: i64, max_100ns: i64) -> i64 {
 }
 
 /// #233: sleep from `now_100ns` until `end_100ns` in sleeps of at most
-/// [`VBAN_MAX_WAIT_100NS`] (the wall's tick cap per read), reading the clock
+/// [`VBAN_SLEEP_STEP_100NS`] (under the wall's tick cap per read), reading the clock
 /// between two of them (each read ticks the wall) and planning the next from
 /// that read, so an oversleep never adds up. The read after the last sleep is
 /// the caller's.
@@ -618,7 +621,7 @@ pub fn sleep_until(clock: &mut dyn VbanClock, now_100ns: i64, end_100ns: i64) {
         if left <= 0 {
             return;
         }
-        let step = left.min(VBAN_MAX_WAIT_100NS);
+        let step = left.min(VBAN_SLEEP_STEP_100NS);
         clock.sleep_100ns(step);
         if step == left {
             return;
