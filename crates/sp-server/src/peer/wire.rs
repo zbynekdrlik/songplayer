@@ -66,8 +66,9 @@ impl Catalog {
     /// state), a real YouTube id, a sha256 as 64 lowercase hex digits and, for
     /// a job, a node name that holds (`peer::config`'s rule). Separately, the
     /// catalog's own `node` reads as empty when it is not a node name, and a
-    /// time that is not an RFC 3339 time reads as `None` (its entry stays: a
-    /// time is information only, never a decision's input).
+    /// time is rewritten in its canonical form or, when it is not an RFC 3339
+    /// time, reads as `None` (its entry stays: a time is information only,
+    /// never a decision's input).
     pub fn sanitized(mut self) -> Self {
         if !valid_name(&self.node) {
             self.node.clear();
@@ -84,10 +85,10 @@ impl Catalog {
                 && is_valid_video_id(&j.youtube_id)
         });
         for a in &mut self.artifacts {
-            a.updated_at = checked_time(a.updated_at.take());
+            a.updated_at = checked_time(a.updated_at.as_deref());
         }
         for j in &mut self.jobs {
-            j.started_at = checked_time(j.started_at.take());
+            j.started_at = checked_time(j.started_at.as_deref());
         }
         self
     }
@@ -122,10 +123,12 @@ impl PeerMetadata {
     }
 }
 
-/// A peer's time, kept only when it is an RFC 3339 time (a peer controls the
-/// text: it could be anything, of any length).
-fn checked_time(time: Option<String>) -> Option<String> {
-    time.filter(|t| rfc3339_to_ms(t).is_some())
+/// A peer's time in this node's canonical form ([`ms_to_rfc3339`]: UTC,
+/// milliseconds, `Z`), or `None` when it is not an RFC 3339 time. A peer
+/// controls the text, and a parse alone would keep it as sent: with
+/// whitespace around it, or a fraction of any length.
+fn checked_time(time: Option<&str>) -> Option<String> {
+    time.and_then(rfc3339_to_ms).map(ms_to_rfc3339)
 }
 
 /// 64 lowercase hex digits.
