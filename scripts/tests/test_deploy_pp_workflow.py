@@ -140,8 +140,11 @@ def test_songplayer_is_started_again_whatever_happened_before():
     text = _deploy_pp()
     start = _step(text, "Start SongPlayer")
     assert "if: always()" in start
-    assert text.count("always()") == 1
-    assert "!cancelled()" not in text
+    conditions = [
+        line.strip() for line in text.split("\n") if line.strip().startswith("if:")
+    ]
+    assert [c for c in conditions if "always()" in c] == ["if: always()"]
+    assert not [c for c in conditions if "cancelled()" in c]
 
 
 def test_the_pp_deploy_never_touches_the_db_task_acl_or_firewall():
