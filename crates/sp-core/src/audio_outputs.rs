@@ -629,6 +629,23 @@ pub fn new_asio(entries: &[OutputEntry], driver: &str) -> OutputEntry {
     )
 }
 
+/// The Slovak reason of a waiting ASIO output, by the server's stable code
+/// (`sp-server` `asio_state::Reason::code`; its English text is the
+/// tooltip). An unknown code (a later version's) reads as such.
+pub fn asio_reason_sk(code: &str) -> &'static str {
+    match code {
+        "not_found" => "ovládač nie je v systéme",
+        "busy" => "ovládač používa iný program",
+        "refused" => "ovládač sa nedá použiť",
+        "failed" => "chyba ovládača",
+        "reset" => "ovládač sa reštartuje",
+        "rate_changed" => "ovládač zmenil frekvenciu",
+        "stalled" => "ovládač neodpovedá",
+        "windows_only" => "ASIO funguje len vo Windows",
+        _ => "neznámy dôvod",
+    }
+}
+
 /// The stream name as #210 put it on the wire (`vban_packet::stream_name_bytes`):
 /// its first 16 characters, each non-ASCII or control character as `_`.
 pub fn wire_stream_name(name: &str) -> String {

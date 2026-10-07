@@ -17,8 +17,18 @@
 //! entry the server does not run reads "uložený, nespustený" with the
 //! server's `outputs_problems` line as its tooltip.
 //!
+//! #233 lane 3: an ASIO output ("Pridať výstup ASIO") picks a driver from
+//! `GET /api/v1/audio/asio-drivers` (loaded once; the add button waits for
+//! it) — a stored driver the box does not list stays, marked "(nenájdený)" —
+//! and its left / right channels, shown 1-based. Its rate is the driver's.
+//! Each row shows only its own type's fields (`<Show>` on a `Memo` of the
+//! type, so typing never re-creates them). A running ASIO output reads its
+//! latency, correction and underruns; a waiting one its reason in Slovak
+//! (`sp_core::audio_outputs::asio_reason_sk`) and its next try.
+//!
 //! Testids (set here): `settings-audio-outputs` (the fieldset),
 //! `settings-audio-network-rate`, `audio-outputs-add-vban`,
+//! `audio-outputs-add-asio`,
 //! `audio-outputs-save`, `audio-outputs-message` (class
 //! `audio-outputs-status`: `.save-status` is the form's alone, which the
 //! other Nastavenia specs read unscoped), `audio-outputs-load-error`,
@@ -26,14 +36,18 @@
 //! `audio-output-name`, `audio-output-enabled`, `audio-output-rate`
 //! (`network` or a rate), `audio-output-delay`, `audio-output-vban-host`,
 //! `audio-output-vban-port`, `audio-output-vban-stream`,
-//! `audio-output-vban-format`, `audio-output-state`, `audio-output-remove`.
+//! `audio-output-vban-format`, `audio-output-type` ("VBAN" / "ASIO"),
+//! `audio-output-asio-driver`, `audio-output-asio-left`,
+//! `audio-output-asio-right` (1-based), `audio-output-asio-rate`,
+//! `audio-output-state`, `audio-output-remove`.
 
 use std::collections::HashMap;
 
 use leptos::prelude::*;
 use serde::Deserialize;
 use sp_core::audio_outputs::{
-    OutputEntry, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat, new_vban, validate_list,
+    OutputEntry, OutputType, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat,
+    asio_reason_sk, new_asio, new_vban, validate_list,
 };
 use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
 
@@ -49,6 +63,32 @@ pub struct OutputLive {
     pub reason: Option<String>,
     #[serde(default)]
     pub latency_ms: f64,
+    /// #233: a running ASIO driver off the network's rate or with a long
+    /// buffer (the server's English, shown as the tooltip).
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub asio: Option<AsioLive>,
+}
+
+/// An ASIO output's live numbers (`outputs[i].asio`, the fields shown).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct AsioLive {
+    #[serde(default)]
+    pub ppm: f64,
+    #[serde(default)]
+    pub underruns: u64,
+    #[serde(default)]
+    pub reason_code: Option<String>,
+    #[serde(default)]
+    pub retry_in_s: Option<f64>,
+}
+
+/// `GET /api/v1/audio/asio-drivers`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+struct AsioDriverList {
+    #[serde(default)]
+    drivers: Vec<String>,
 }
 
 /// `GET /api/v1/program`, the outputs only.
@@ -107,10 +147,32 @@ fn live_text(live: &ProgramOutputs, id: &str, saved: bool) -> String {
     match live.outputs.iter().find(|o| o.id == id) {
         None if saved => "uložený, nespustený".to_string(),
         None => "neuložený".to_string(),
-        Some(o) if o.state == "running" => {
-            format!("{} · {:.0} ms", state_sk(&o.state), o.latency_ms)
+        Some(o) => output_text(o),
+    }
+}
+
+/// One output's state line: running = its latency (an ASIO output also its
+/// correction and underruns); an ASIO output that waits = why, in Slovak,
+/// and when it tries again.
+fn output_text(o: &OutputLive) -> String {
+    let state = state_sk(&o.state);
+    match (&o.asio, o.state.as_str()) {
+        (Some(a), "running") => format!(
+            "{state} · {:.0} ms · {:+.1} ppm · výpadky {}",
+            o.latency_ms, a.ppm, a.underruns
+        ),
+        (None, "running") => format!("{state} · {:.0} ms", o.latency_ms),
+        (Some(a), _) => {
+            let mut parts = vec![state.to_string()];
+            if let Some(code) = &a.reason_code {
+                parts.push(asio_reason_sk(code).to_string());
+            }
+            if let Some(s) = a.retry_in_s {
+                parts.push(format!("ďalší pokus o {s:.0} s"));
+            }
+            parts.join(" · ")
         }
-        Some(o) => state_sk(&o.state).to_string(),
+        (None, _) => state.to_string(),
     }
 }
 
@@ -121,7 +183,7 @@ fn live_reason(live: &ProgramOutputs, id: &str) -> String {
     live.outputs
         .iter()
         .find(|o| o.id == id)
-        .and_then(|o| o.reason.clone())
+        .and_then(|o| o.reason.clone().or_else(|| o.note.clone()))
         .or_else(|| {
             live.outputs_problems
                 .iter()
@@ -160,6 +222,16 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     let load_error = RwSignal::new(None::<String>);
     let message = RwSignal::new(String::new());
     let live = RwSignal::new(ProgramOutputs::default());
+    // The box's ASIO drivers, once (`None` until they are read; a failed
+    // read lists none).
+    let drivers = RwSignal::new(None::<Vec<String>>);
+    leptos::task::spawn_local(async move {
+        let list = api::get::<AsioDriverList>("/api/v1/audio/asio-drivers")
+            .await
+            .map(|l| l.drivers)
+            .unwrap_or_default();
+        let _ = drivers.try_set(Some(list));
+    });
 
     // Only the section's own two settings: the form above merges its save
     // into `store.settings`, which must not reset an unsaved row here.
@@ -212,6 +284,20 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
         entries.update(|l| {
             let known: Vec<OutputEntry> = l.iter().cloned().chain(saved).collect();
             let fresh = new_vban(&known);
+            l.push(fresh);
+        });
+    };
+    // An ASIO output on the first listed driver (none listed: an empty one,
+    // which validation refuses until a driver is picked).
+    let add_asio = move |_: leptos::ev::MouseEvent| {
+        let saved =
+            stored.with_untracked(|(list, _)| stored_list(list.as_deref()).unwrap_or_default());
+        let first = drivers
+            .with_untracked(|d| d.as_ref().and_then(|d| d.first().cloned()))
+            .unwrap_or_default();
+        entries.update(|l| {
+            let known: Vec<OutputEntry> = l.iter().cloned().chain(saved).collect();
+            let fresh = new_asio(&known, &first);
             l.push(fresh);
         });
     };
@@ -284,12 +370,28 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                 each=move || entries.with(|l| l.iter().map(|e| e.id.clone()).collect::<Vec<_>>())
                 key=|id| id.clone()
                 children=move |id| {
-                    view! { <OutputRow id=id entries=entries live=live saved_ids=saved_ids /> }
+                    view! {
+                        <OutputRow
+                            id=id
+                            entries=entries
+                            live=live
+                            saved_ids=saved_ids
+                            drivers=drivers
+                        />
+                    }
                 }
             />
             <div class="form-actions">
                 <button type="button" data-testid="audio-outputs-add-vban" on:click=add_vban>
                     "Pridať výstup VBAN"
+                </button>
+                <button
+                    type="button"
+                    data-testid="audio-outputs-add-asio"
+                    prop:disabled=move || drivers.with(Option::is_none)
+                    on:click=add_asio
+                >
+                    "Pridať výstup ASIO"
                 </button>
                 <button
                     type="button"
@@ -313,9 +415,50 @@ fn OutputRow(
     entries: RwSignal<Vec<OutputEntry>>,
     live: RwSignal<ProgramOutputs>,
     saved_ids: Memo<Vec<String>>,
+    drivers: RwSignal<Option<Vec<String>>>,
 ) -> impl IntoView {
     let row_id = id.clone();
     let id = StoredValue::new(id);
+    // The row's type: a Memo, so an edit of a field re-creates no field.
+    let kind = Memo::new(move |_| read(entries, &id.get_value(), |e| Some(e.kind)));
+    let asio_driver = Memo::new(move |_| {
+        read(entries, &id.get_value(), |e| {
+            e.asio
+                .as_ref()
+                .map(|a| a.driver.clone())
+                .unwrap_or_default()
+        })
+    });
+    // The listed drivers, and a stored one the box does not list (kept,
+    // marked): (value, label).
+    let driver_options = Memo::new(move |_| {
+        let current = asio_driver.get();
+        let listed = drivers.get().unwrap_or_default();
+        let mut options: Vec<(String, String)> =
+            listed.iter().map(|n| (n.clone(), n.clone())).collect();
+        if !current.is_empty() && !listed.contains(&current) {
+            options.push((current.clone(), format!("{current} (nenájdený)")));
+        }
+        options
+    });
+    // An ASIO channel shown 1-based; an entry that is no number edits nothing.
+    let channel = move |i: usize| {
+        read(entries, &id.get_value(), move |e| {
+            e.asio
+                .as_ref()
+                .map(|a| a.channels[i].saturating_add(1).to_string())
+                .unwrap_or_default()
+        })
+    };
+    let set_channel = move |i: usize, text: String| {
+        if let Ok(n) = text.trim().parse::<u32>() {
+            edit(entries, &id.get_value(), |e| {
+                if let Some(a) = e.asio.as_mut() {
+                    a.channels[i] = n.saturating_sub(1);
+                }
+            });
+        }
+    };
     let vban = move |f: fn(&VbanDest) -> String| {
         read(entries, &id.get_value(), move |e| {
             e.vban.as_ref().map(f).unwrap_or_default()
@@ -326,6 +469,9 @@ fn OutputRow(
         move |f: VbanSampleFormat| vban(|v| v.format.as_str().to_string()) == f.as_str();
     view! {
         <div class="audio-output-row" data-testid="audio-output-row" data-id=row_id>
+            <span class="audio-output-type" data-testid="audio-output-type">
+                {move || if kind.get() == Some(OutputType::Asio) { "ASIO" } else { "VBAN" }}
+            </span>
             <label>
                 "Názov"
                 <input
@@ -351,34 +497,6 @@ fn OutputRow(
                 "Zapnutý"
             </label>
             <label>
-                "Frekvencia"
-                <select
-                    data-testid="audio-output-rate"
-                    prop:value=move || rate_value(read(entries, &id.get_value(), |e| e.rate))
-                    on:change=move |ev| {
-                        let v = rate_choice(&event_target_value(&ev));
-                        edit(entries, &id.get_value(), |e| e.rate = v);
-                    }
-                >
-                    <option value="network" selected=move || rate_is(RateChoice::Network)>
-                        "podľa siete"
-                    </option>
-                    {SUPPORTED_RATES
-                        .iter()
-                        .map(|&r| {
-                            view! {
-                                <option
-                                    value=r.to_string()
-                                    selected=move || rate_is(RateChoice::Fixed(r))
-                                >
-                                    {format!("{r} Hz")}
-                                </option>
-                            }
-                        })
-                        .collect_view()}
-                </select>
-            </label>
-            <label>
                 "Oneskorenie (ms)"
                 <input
                     type="number"
@@ -392,87 +510,177 @@ fn OutputRow(
                     }
                 />
             </label>
-            <label>
-                "Cieľ (host)"
-                <input
-                    type="text"
-                    data-testid="audio-output-vban-host"
-                    placeholder="dev1.lan"
-                    prop:value=move || vban(|v| v.host.clone())
-                    on:input=move |ev| {
-                        let v = event_target_value(&ev).trim().to_string();
-                        edit(entries, &id.get_value(), |e| {
-                            if let Some(d) = e.vban.as_mut() {
-                                d.host = v;
-                            }
-                        });
-                    }
-                />
-            </label>
-            <label>
-                "Port"
-                <input
-                    type="number"
-                    min="1"
-                    max="65535"
-                    data-testid="audio-output-vban-port"
-                    prop:value=move || vban(|v| v.port.to_string())
-                    on:input=move |ev| {
-                        let v = event_target_value(&ev).trim().parse().unwrap_or(0);
-                        edit(entries, &id.get_value(), |e| {
-                            if let Some(d) = e.vban.as_mut() {
-                                d.port = v;
-                            }
-                        });
-                    }
-                />
-            </label>
-            <label>
-                "Názov streamu"
-                <input
-                    type="text"
-                    maxlength="16"
-                    data-testid="audio-output-vban-stream"
-                    prop:value=move || vban(|v| v.stream_name.clone())
-                    on:input=move |ev| {
-                        let v = event_target_value(&ev);
-                        edit(entries, &id.get_value(), |e| {
-                            if let Some(d) = e.vban.as_mut() {
-                                d.stream_name = v;
-                            }
-                        });
-                    }
-                />
-            </label>
-            <label>
-                "Formát"
-                <select
-                    data-testid="audio-output-vban-format"
-                    prop:value=move || vban(|v| v.format.as_str().to_string())
-                    on:change=move |ev| {
-                        let v = VbanSampleFormat::parse(&event_target_value(&ev))
-                            .unwrap_or_default();
-                        edit(entries, &id.get_value(), |e| {
-                            if let Some(d) = e.vban.as_mut() {
-                                d.format = v;
-                            }
-                        });
-                    }
-                >
-                    <option value="int16" selected=move || format_is(VbanSampleFormat::Int16)>
-                        "16 bitov"
-                    </option>
-                    <option value="int24" selected=move || format_is(VbanSampleFormat::Int24)>
-                        "24 bitov"
-                    </option>
-                    <option
-                        value="float32"
-                        selected=move || format_is(VbanSampleFormat::Float32)
+            <Show when=move || kind.get() == Some(OutputType::Asio)>
+                <span class="audio-output-asio-rate" data-testid="audio-output-asio-rate">
+                    "Frekvencia: podľa ovládača"
+                </span>
+                <label>
+                    "Ovládač"
+                    <select
+                        data-testid="audio-output-asio-driver"
+                        prop:value=move || asio_driver.get()
+                        on:change=move |ev| {
+                            let v = event_target_value(&ev);
+                            edit(entries, &id.get_value(), |e| {
+                                if let Some(a) = e.asio.as_mut() {
+                                    a.driver = v;
+                                }
+                            });
+                        }
                     >
-                        "32 bitov (float)"
-                    </option>
-                </select>
-            </label>
+                        {move || {
+                            driver_options
+                                .get()
+                                .into_iter()
+                                .map(|(value, label)| {
+                                    let this = value.clone();
+                                    view! {
+                                        <option
+                                            value=value
+                                            selected=move || asio_driver.get() == this
+                                        >
+                                            {label}
+                                        </option>
+                                    }
+                                })
+                                .collect_view()
+                        }}
+                    </select>
+                </label>
+                <label>
+                    "Kanál ľavý"
+                    <input
+                        type="number"
+                        min="1"
+                        max="512"
+                        data-testid="audio-output-asio-left"
+                        prop:value=move || channel(0)
+                        on:input=move |ev| set_channel(0, event_target_value(&ev))
+                    />
+                </label>
+                <label>
+                    "Kanál pravý"
+                    <input
+                        type="number"
+                        min="1"
+                        max="512"
+                        data-testid="audio-output-asio-right"
+                        prop:value=move || channel(1)
+                        on:input=move |ev| set_channel(1, event_target_value(&ev))
+                    />
+                </label>
+            </Show>
+            <Show when=move || kind.get() == Some(OutputType::Vban)>
+                <label>
+                    "Frekvencia"
+                    <select
+                        data-testid="audio-output-rate"
+                        prop:value=move || rate_value(read(entries, &id.get_value(), |e| e.rate))
+                        on:change=move |ev| {
+                            let v = rate_choice(&event_target_value(&ev));
+                            edit(entries, &id.get_value(), |e| e.rate = v);
+                        }
+                    >
+                        <option value="network" selected=move || rate_is(RateChoice::Network)>
+                            "podľa siete"
+                        </option>
+                        {SUPPORTED_RATES
+                            .iter()
+                            .map(|&r| {
+                                view! {
+                                    <option
+                                        value=r.to_string()
+                                        selected=move || rate_is(RateChoice::Fixed(r))
+                                    >
+                                        {format!("{r} Hz")}
+                                    </option>
+                                }
+                            })
+                            .collect_view()}
+                    </select>
+                </label>
+                <label>
+                    "Cieľ (host)"
+                    <input
+                        type="text"
+                        data-testid="audio-output-vban-host"
+                        placeholder="dev1.lan"
+                        prop:value=move || vban(|v| v.host.clone())
+                        on:input=move |ev| {
+                            let v = event_target_value(&ev).trim().to_string();
+                            edit(entries, &id.get_value(), |e| {
+                                if let Some(d) = e.vban.as_mut() {
+                                    d.host = v;
+                                }
+                            });
+                        }
+                    />
+                </label>
+                <label>
+                    "Port"
+                    <input
+                        type="number"
+                        min="1"
+                        max="65535"
+                        data-testid="audio-output-vban-port"
+                        prop:value=move || vban(|v| v.port.to_string())
+                        on:input=move |ev| {
+                            let v = event_target_value(&ev).trim().parse().unwrap_or(0);
+                            edit(entries, &id.get_value(), |e| {
+                                if let Some(d) = e.vban.as_mut() {
+                                    d.port = v;
+                                }
+                            });
+                        }
+                    />
+                </label>
+                <label>
+                    "Názov streamu"
+                    <input
+                        type="text"
+                        maxlength="16"
+                        data-testid="audio-output-vban-stream"
+                        prop:value=move || vban(|v| v.stream_name.clone())
+                        on:input=move |ev| {
+                            let v = event_target_value(&ev);
+                            edit(entries, &id.get_value(), |e| {
+                                if let Some(d) = e.vban.as_mut() {
+                                    d.stream_name = v;
+                                }
+                            });
+                        }
+                    />
+                </label>
+                <label>
+                    "Formát"
+                    <select
+                        data-testid="audio-output-vban-format"
+                        prop:value=move || vban(|v| v.format.as_str().to_string())
+                        on:change=move |ev| {
+                            let v = VbanSampleFormat::parse(&event_target_value(&ev))
+                                .unwrap_or_default();
+                            edit(entries, &id.get_value(), |e| {
+                                if let Some(d) = e.vban.as_mut() {
+                                    d.format = v;
+                                }
+                            });
+                        }
+                    >
+                        <option value="int16" selected=move || format_is(VbanSampleFormat::Int16)>
+                            "16 bitov"
+                        </option>
+                        <option value="int24" selected=move || format_is(VbanSampleFormat::Int24)>
+                            "24 bitov"
+                        </option>
+                        <option
+                            value="float32"
+                            selected=move || format_is(VbanSampleFormat::Float32)
+                        >
+                            "32 bitov (float)"
+                        </option>
+                    </select>
+                </label>
+            </Show>
             <span
                 class="audio-output-state"
                 data-testid="audio-output-state"

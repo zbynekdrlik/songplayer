@@ -637,8 +637,9 @@ function outputsRefusal(body) {
   if (!Array.isArray(list)) return "audio_outputs is not a JSON list (line 1, column 0)";
   // The cases the dashboard can send, in the server's order and words: first
   // every entry read field by field (`audio_out_config::entry`: id, type,
-  // vban, vban.host, vban.port, name; not vban.format, stream_name or the
-  // types of enabled / rate / delay_ms) …
+  // its type's block — vban: host, port; asio: driver, channels — then
+  // name; not vban.format, stream_name or the types of enabled / rate /
+  // delay_ms) …
   for (const [i, e] of list.entries()) {
     const first = `entry ${i + 1}`;
     if (e === null || typeof e !== "object" || Array.isArray(e)) return `${first} is not a JSON object`;
@@ -647,34 +648,76 @@ function outputsRefusal(body) {
     const at = `${first} (id ${shownId(e.id)})`;
     if (e.type === undefined) return `${at}: type is missing`;
     if (typeof e.type !== "string") return `${at}: type has the wrong type`;
-    if (e.type !== "vban") return `${at}: type must be vban`;
-    if (e.vban === undefined) return `${at}: vban is missing`;
-    if (e.vban === null || typeof e.vban !== "object" || Array.isArray(e.vban)) {
-      return `${at}: vban is not a JSON object`;
-    }
-    if (e.vban.host === undefined) return `${at}: vban.host is missing`;
-    if (typeof e.vban.host !== "string") return `${at}: vban.host has the wrong type`;
-    if (e.vban.port === undefined) return `${at}: vban.port is missing`;
-    if (!Number.isInteger(e.vban.port) || e.vban.port < 0 || e.vban.port > 65535) {
-      return `${at}: vban.port has the wrong type`;
-    }
+    if (e.type !== "vban" && e.type !== "asio") return `${at}: type must be vban or asio`;
+    const block = e.type === "vban" ? vbanBlockRefusal(e.vban, at) : asioBlockRefusal(e.asio, at);
+    if (block) return block;
     if (e.name === undefined) return `${at}: name is missing`;
   }
   // … then the shared validation (`validate_list`): the counts, then each
-  // entry's host and port before its duplicate check (not the id, name,
-  // rate, delay or stream checks: the dashboard validates those itself).
+  // entry's host and port (an ASIO entry's driver and channels) before its
+  // duplicate check, then a driver an earlier ASIO entry names (not the id,
+  // name, rate, delay or stream checks: the dashboard validates those).
   if (list.length > 16) return `audio_outputs has ${list.length} entries (at most 16)`;
-  if (list.length > 8) return `audio_outputs has ${list.length} vban entries (at most 8)`;
+  for (const [kind, max] of [
+    ["vban", 8],
+    ["asio", 4],
+  ]) {
+    const count = list.filter((e) => e.type === kind).length;
+    if (count > max) return `audio_outputs has ${count} ${kind} entries (at most ${max})`;
+  }
   const seen = new Set();
+  const drivers = new Set();
   for (const [i, e] of list.entries()) {
     const at = `entry ${i + 1} (id ${shownId(e.id)})`;
-    if (!e.vban.host) return `${at}: vban.host is empty`;
-    if (e.vban.port === 0) return `${at}: vban.port must be 1-65535`;
+    if (e.type === "vban") {
+      if (!e.vban.host) return `${at}: vban.host is empty`;
+      if (e.vban.port === 0) return `${at}: vban.port must be 1-65535`;
+    } else {
+      if (!e.asio.driver.trim()) return `${at}: asio.driver is empty`;
+      if (e.asio.channels.some((c) => c > 511)) return `${at}: asio.channels must be 0-511`;
+      if (e.asio.channels[0] === e.asio.channels[1]) {
+        return `${at}: asio.channels must name two different channels`;
+      }
+    }
     if (seen.has(e.id)) return `${at}: id is used by an earlier entry`;
     seen.add(e.id);
+    if (e.type === "asio") {
+      if (drivers.has(e.asio.driver)) {
+        return `${at}: asio.driver is already used by an earlier ASIO entry (a driver takes one client)`;
+      }
+      drivers.add(e.asio.driver);
+    }
   }
   return null;
 }
+function vbanBlockRefusal(v, at) {
+  if (v === undefined) return `${at}: vban is missing`;
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return `${at}: vban is not a JSON object`;
+  if (v.host === undefined) return `${at}: vban.host is missing`;
+  if (typeof v.host !== "string") return `${at}: vban.host has the wrong type`;
+  if (v.port === undefined) return `${at}: vban.port is missing`;
+  if (!Number.isInteger(v.port) || v.port < 0 || v.port > 65535) return `${at}: vban.port has the wrong type`;
+  return null;
+}
+// #233 lane 3: as `audio_out_config::asio_dest` (channels = [u32; 2]).
+function asioBlockRefusal(a, at) {
+  if (a === undefined) return `${at}: asio is missing`;
+  if (a === null || typeof a !== "object" || Array.isArray(a)) return `${at}: asio is not a JSON object`;
+  if (a.driver === undefined) return `${at}: asio.driver is missing`;
+  if (typeof a.driver !== "string") return `${at}: asio.driver has the wrong type`;
+  if (a.channels === undefined) return `${at}: asio.channels is missing`;
+  const u32 = (c) => Number.isInteger(c) && c >= 0 && c <= 4294967295;
+  if (!Array.isArray(a.channels) || a.channels.length !== 2 || !a.channels.every(u32)) {
+    return `${at}: asio.channels has the wrong type`;
+  }
+  return null;
+}
+
+// #233 lane 3: the box's registered ASIO drivers (two, so a test can pick
+// one that is not the first).
+app.get("/api/v1/audio/asio-drivers", (_req, res) => {
+  res.json({ drivers: ["Dante Virtual Soundcard (x64)", "Blackmagic ASIO"] });
+});
 
 // #229: as the server — a value exactly the mask for a secret setting keeps
 // the stored one (nothing written), any other value replaces it (`""` clears
@@ -703,6 +746,7 @@ app.post("/__mock/settings-reset", (_req, res) => {
   Object.assign(settings, settingsInitial);
   failModes.settings = false;
   outputsSkipped.clear();
+  asioHeld.clear();
   res.json({ status: "reset" });
 });
 
@@ -1227,13 +1271,71 @@ app.post("/__mock/outputs-skip", (req, res) => {
 });
 function mockOutputsProblems() {
   return mockStoredOutputs().flatMap((e, i) =>
-    outputsSkipped.has(e.id) ? [`entry ${i + 1} (id ${shownId(e.id)}): type must be vban`] : [],
+    outputsSkipped.has(e.id) ? [`entry ${i + 1} (id ${shownId(e.id)}): type must be vban or asio`] : [],
   );
+}
+// #233 lane 3: ASIO outputs the mock holds waiting (`/__mock/asio-state
+// {id, reason_code, reason, retry_in_s}`, cleared by `/__mock/settings-reset`).
+const asioHeld = new Map();
+app.post("/__mock/asio-state", (req, res) => {
+  const b = req.body || {};
+  asioHeld.set(String(b.id), {
+    reason_code: b.reason_code ?? null,
+    reason: b.reason ?? null,
+    retry_in_s: b.retry_in_s ?? null,
+  });
+  res.json({ held: [...asioHeld.keys()] });
+});
+// An ASIO entry as the server lists it: the driver "runs" at the network
+// rate (Int32LSB, 128 frames); a disabled one carries no `asio`.
+function mockAsioOutput(e, network) {
+  const enabled = e.enabled !== false;
+  const held = asioHeld.get(e.id);
+  const running = enabled && !held;
+  const latency = running ? 70.7 + (e.delay_ms || 0) : 0;
+  return {
+    id: e.id,
+    type: "asio",
+    name: e.name,
+    enabled,
+    state: !enabled ? "disabled" : held ? "waiting" : "running",
+    reason: enabled && held ? held.reason : null,
+    rate: enabled ? network : 0,
+    format: enabled ? "Int32LSB" : "",
+    channels: 2,
+    delay_ms: e.delay_ms || 0,
+    latency_ms: latency,
+    blocks_sent: 0,
+    blocks_dropped: 0,
+    ...(enabled
+      ? {
+          asio: {
+            driver: e.asio.driver,
+            channels: e.asio.channels,
+            driver_rate: network,
+            buffer_frames: 128,
+            out_channels: 64,
+            sample_type: "Int32LSB",
+            ppm: running ? 0.4 : 0,
+            rate_ppm: running ? 0.4 : 0,
+            locked: running,
+            latency_ms: latency,
+            underruns: 0,
+            resets: 0,
+            recentres: running ? 1 : 0,
+            overflows: 0,
+            retry_in_s: held ? held.retry_in_s : null,
+            reason_code: held ? held.reason_code : null,
+          },
+        }
+      : {}),
+  };
 }
 function mockOutputs() {
   const list = mockStoredOutputs().filter((e) => !outputsSkipped.has(e.id));
   const network = Number(settings.audio_network_rate || 48000);
   return list.map((e) => {
+    if (e.type === "asio") return mockAsioOutput(e, network);
     const rate = e.rate === "network" || e.rate === undefined ? network : Number(e.rate);
     const enabled = e.enabled !== false;
     return {
