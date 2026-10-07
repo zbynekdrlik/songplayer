@@ -9,6 +9,7 @@ paths:
   - "crates/sp-server/src/api/routes_tests_clock.rs"
   - "crates/sp-server/src/playlist/selector.rs"
   - "crates/sp-core/src/player_view.rs"
+  - "crates/sp-core/src/playback.rs"
   - "sp-ui/src/components/player.rs"
   - "e2e/mock-api.mjs"
   - "e2e/player-open-failures.spec.ts"
@@ -142,10 +143,15 @@ the review finding on the selection: 6028419694.
     on-air set (SP-program's source) when the retry is armed
     (`PendingRetry.on_program`, `failure_backoff::RetryView`,
     `OpenFailures.on_program`, `#[serde(default)]`, additive);
-  - it cannot change while that retry is pending: a cut on program sends a
-    Play, a cut off program (or the dashboard's Pause) is a `SceneOff`, and
-    both end the retry; with no retry pending the row says `false`;
-  - `OpenFailures::retry_pending` (the label's input) and
+  - a cut off program (or the dashboard's Pause) is a `SceneOff`, which
+    always ends the retry; a cut on program ends it with the Play its
+    selection sends, and when that sends none (no song to pick, a custom
+    playlist in Single mode, a DB error) `retry_came_on_program` (in
+    `handle_scene_change`, after the `SceneOn`) sets the flag from the
+    on-air set and re-publishes the row (review round 4); with no retry
+    pending the row says `false`;
+  - `OpenFailures::retry_pending` (from `retry_at_ms`, so the engine's own
+    row and a row as read agree; the label's input) and
     `retry_on_program` (the badge's): a ▶ off program that waits keeps "○
     Mimo programu", with the label "Čaká na ďalší pokus".
 - The badge follows the 1 Hz health poll at both ends of a wait: it reads
