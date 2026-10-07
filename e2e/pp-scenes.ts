@@ -98,14 +98,6 @@ export interface ManualSceneInput {
   playlistNames: Set<string>;
 }
 
-/**
- * The manual scene the gate presses: `PP_MANUAL_SCENE` when set (it must be
- * one of cg OBS's scenes and a manual one), else cg OBS's own program scene
- * when that is a manual scene. Anything else is an error naming
- * `PP_MANUAL_SCENE`: the gate never picks another cg OBS scene by itself. A
- * manual scene is none of: an active playlist's name, the A/V gate's probe
- * scene, "OBS manuál".
- */
 /** A manual scene: not blank, none of the active playlists' names
  *  (`playlistNames`), not the A/V gate's probe scene, not "OBS manuál". */
 export function isManualScene(scene: string, playlistNames: Set<string>): boolean {
@@ -117,6 +109,13 @@ export function isManualScene(scene: string, playlistNames: Set<string>): boolea
   );
 }
 
+/**
+ * The manual scene the gate presses: `PP_MANUAL_SCENE` when set (it must be
+ * one of cg OBS's scenes and a manual one, `isManualScene`), else cg OBS's
+ * own program scene when that is a manual scene. Anything else is an error
+ * naming `PP_MANUAL_SCENE`: the gate never picks another cg OBS scene by
+ * itself.
+ */
 export function pickManualScene(o: ManualSceneInput): { scene: string } | { error: string } {
   const manual = (s: string) => isManualScene(s, o.playlistNames);
   const configured = o.configured.trim();
@@ -170,12 +169,23 @@ export interface LastCutView {
   at_ms: number;
 }
 
+/** A pressed scene as the server records it (`remote::clip`: its first 64
+ *  characters, Unicode scalar values). */
+export function recordedScene(scene: string): string {
+  return [...scene].slice(0, 64).join("");
+}
+
 /** Whether the latest recorded switch (`remote.last_remote_cut`) is the
- *  gate's own last press: its scene, recorded at or after the instant the
- *  gate sent it (a refused keep included). */
+ *  gate's own last press: its scene (as recorded), recorded at or after the
+ *  instant the gate sent it (a refused keep included). */
 export function gateIsLatest(presses: GatePress[], cut: LastCutView | null): boolean {
   const last = presses.at(-1);
-  return last !== undefined && cut !== null && cut.scene === last.scene && cut.at_ms >= last.sentAtMs;
+  return (
+    last !== undefined &&
+    cut !== null &&
+    cut.scene === recordedScene(last.scene) &&
+    cut.at_ms >= last.sentAtMs
+  );
 }
 
 /**
@@ -242,7 +252,7 @@ export function manualCutLanded(p: ManualCutView, scene: string): boolean {
   return (
     p.source === -1 &&
     cut !== null &&
-    cut.scene === scene &&
+    cut.scene === recordedScene(scene) &&
     cut.action === "input" &&
     cut.source === -1 &&
     cut.cg_forward === "ok"
