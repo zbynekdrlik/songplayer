@@ -2,19 +2,20 @@ import { test, expect } from "@playwright/test";
 import {
   OBS_MANUAL,
   catalogScenes,
+  cgRestoreTarget,
   manualCutLanded,
   pickManualScene,
   pickPlaylistScene,
   playlistNames,
-  type PlaylistView,
 } from "./pp-scenes";
 import { AV_PROBE_SCENE } from "./av-sync-probe";
+import type { PlaylistRow } from "./program-state";
 
-function row(id: number, ndi: string, over: Partial<PlaylistView> = {}): PlaylistView {
+function row(id: number, ndi: string, over: Partial<PlaylistRow> = {}): PlaylistRow {
   return { id, name: `pl${id}`, ndi_output_name: ndi, is_active: true, kind: "youtube", ...over };
 }
 
-const ROWS: PlaylistView[] = [
+const ROWS: PlaylistRow[] = [
   row(1, "SP-fast"),
   row(2, "SP-slow"),
   row(3, "SP-worship"),
@@ -49,7 +50,7 @@ test.describe("PP's playlist scene (#229)", () => {
     expect(pickPlaylistScene(ROWS, [], VIDEOS)).toEqual({ scene: "sp-slow", playlistId: 2 });
   });
 
-  test("a refused playlist, one with no videos, and the Dabing one are never picked", () => {
+  test("a refused playlist, one with no playable video, and the Dabing one are never picked", () => {
     expect(pickPlaylistScene(ROWS, [2], VIDEOS)).toEqual({ scene: "sp-worship", playlistId: 3 });
     const noSlowVideos = new Map(VIDEOS).set(2, 0);
     expect(pickPlaylistScene(ROWS, [], noSlowVideos)).toEqual({
@@ -60,11 +61,11 @@ test.describe("PP's playlist scene (#229)", () => {
     expect(pickPlaylistScene(onlyDabing, [], VIDEOS)).toBeNull();
   });
 
-  test("a playlist missing from the video counts has no videos", () => {
+  test("a playlist missing from the playable counts has none", () => {
     expect(pickPlaylistScene([row(9, "SP-slow")], [], new Map())).toBeNull();
   });
 
-  test("one video is enough", () => {
+  test("one playable video is enough", () => {
     expect(pickPlaylistScene([row(9, "SP-slow")], [], new Map([[9, 1]]))).toEqual({
       scene: "sp-slow",
       playlistId: 9,
@@ -90,10 +91,15 @@ test.describe("PP's manual scene (#229)", () => {
     expect(pick).toEqual({ scene: "Svedectvo" });
   });
 
-  test("cg OBS on a playlist's, the probe's or no scene: the first manual scene", () => {
-    for (const cgProgram of ["SP-Slow", AV_PROBE_SCENE, null, "gone"]) {
+  test("cg OBS on a playlist's, the probe's or an unlisted scene: no guess, PP_MANUAL_SCENE is named", () => {
+    // Pressing some other cg OBS scene would change what PP's wall shows.
+    for (const cgProgram of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, "gone"]) {
       const pick = pickManualScene({ configured: "", cgProgram, scenes, playlistNames: names });
-      expect(pick, String(cgProgram)).toEqual({ scene: "Blank" });
+      expect(pick, cgProgram).toEqual({
+        error:
+          `cg OBS's program scene "${cgProgram}" is not a manual scene: set the repo variable ` +
+          "PP_MANUAL_SCENE to the manual scene the PP gate may press",
+      });
     }
   });
 
@@ -123,16 +129,9 @@ test.describe("PP's manual scene (#229)", () => {
     }
   });
 
-  test("no manual scene at all fails", () => {
-    const pick = pickManualScene({
-      configured: "",
-      cgProgram: null,
-      scenes: ["sp-slow", OBS_MANUAL],
-      playlistNames: names,
-    });
-    expect(pick).toEqual({
-      error: `no manual scene among cg OBS's scenes ${JSON.stringify(["sp-slow", OBS_MANUAL])}`,
-    });
+  test("a blank PP_MANUAL_SCENE is unset", () => {
+    const pick = pickManualScene({ configured: "  ", cgProgram: "Svedectvo", scenes, playlistNames: names });
+    expect(pick).toEqual({ scene: "Svedectvo" });
   });
 });
 
@@ -156,5 +155,19 @@ test.describe("PP's manual cut (#229)", () => {
     const kept = { ...landed.remote.last_remote_cut, action: "keep" };
     expect(manualCutLanded({ ...landed, remote: { last_remote_cut: kept } }, "Blank")).toBe(false);
     expect(manualCutLanded({ source: -1, remote: { last_remote_cut: null } }, "Blank")).toBe(false);
+  });
+});
+
+test.describe("cg OBS's restore after the PP gate (#229)", () => {
+  test("cg OBS is put back only when the gate moved it and it is still there", () => {
+    expect(cgRestoreTarget({ from: "Svedectvo", to: "Blank" }, "Blank")).toBe("Svedectvo");
+  });
+
+  test("an operator's change after the press is kept", () => {
+    expect(cgRestoreTarget({ from: "Svedectvo", to: "Blank" }, "Bannery")).toBeNull();
+  });
+
+  test("a gate that never moved cg OBS restores nothing", () => {
+    expect(cgRestoreTarget(null, "Bannery")).toBeNull();
   });
 });

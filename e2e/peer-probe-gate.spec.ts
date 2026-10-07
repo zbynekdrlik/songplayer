@@ -45,6 +45,8 @@ test.describe("peer probe gate (#229)", () => {
     expect(probeFailures([other], "snv", HOST)).toHaveLength(1);
     const plain = { ...ok, base_url: "http://sp.newlevel.media" };
     expect(probeFailures([plain], "snv", HOST)).toHaveLength(1);
+    const port = { ...ok, base_url: "https://sp.newlevel.media:8443" };
+    expect(probeFailures([port], "snv", HOST)).toHaveLength(1);
     const path = { ...ok, base_url: "https://sp.newlevel.media/songplayer" };
     expect(probeFailures([path], "snv", HOST)).toEqual([]);
     const junk = { ...ok, base_url: "not a url" };
@@ -115,6 +117,13 @@ test.describe("PP's identity and its peer (#229)", () => {
     const lan = { ...setUp.peers[0], base_url: "http://10.77.9.201:8920" };
     expect(peerSetupFailures({ ...setUp, peers: [lan] }, "pp", "snv", HOST)).toEqual([
       "peer snv is not read through https://sp.newlevel.media (base_url http://10.77.9.201:8920)",
+    ]);
+  });
+
+  test("a peer snv with no key fails", () => {
+    const keyless = { ...setUp.peers[0], has_key: false };
+    expect(peerSetupFailures({ ...setUp, peers: [keyless] }, "pp", "snv", HOST)).toEqual([
+      "peer snv has no key (SNV's peer_api_key)",
     ]);
   });
 

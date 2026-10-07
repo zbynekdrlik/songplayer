@@ -19,7 +19,8 @@ _REAL_DEPLOY = re.compile(
     r"github\.event_name == 'workflow_dispatch'\s*\|\|\s*"
     r"\(github\.event\.workflow_run\.conclusion == 'success'\s*&&\s*"
     r"github\.event\.workflow_run\.event == 'push'\s*&&\s*"
-    r"github\.event\.workflow_run\.head_branch == 'main'\)"
+    r"github\.event\.workflow_run\.head_branch == 'main'\s*&&\s*"
+    r"github\.event\.workflow_run\.head_sha == github\.sha\)"
 )
 
 
@@ -44,6 +45,23 @@ def _step(text: str, name_prefix: str) -> str:
             break
         end += 1
     return "\n".join(lines[start:end])
+
+
+def _conditions(text: str) -> list[str]:
+    """Every `if:` condition, a folded one (`if: >-`) joined into one line."""
+    lines = text.split("\n")
+    out: list[str] = []
+    for i, line in enumerate(lines):
+        if not line.strip().startswith("if:"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        parts = [line.strip()]
+        for nxt in lines[i + 1 :]:
+            if nxt.strip() and len(nxt) - len(nxt.lstrip(" ")) <= indent:
+                break
+            parts.append(nxt.strip())
+        out.append(" ".join(p for p in parts if p))
+    return out
 
 
 def _step_names(text: str) -> list[str]:
@@ -80,10 +98,28 @@ def test_every_pp_job_runs_on_the_pp_runner_and_no_other_workflow_does():
     assert text.count(_PP_RUNNER) == 2
     assert "[self-hosted, windows, resolume]" not in text
     for workflow in _WORKFLOWS.glob("*.yml"):
-        if workflow.name != "deploy-pp.yml":
-            assert "resolume-pp" not in workflow.read_text(
-                encoding="utf-8"
-            ), workflow.name
+        if workflow.name == "deploy-pp.yml":
+            continue
+        other = workflow.read_text(encoding="utf-8")
+        assert "resolume-pp" not in other, workflow.name
+        # The converse: a self-hosted job elsewhere names SNV's label, so it
+        # can never be picked up by the PP runner.
+        for line in other.split("\n"):
+            if "runs-on:" in line and "self-hosted" in line:
+                assert re.search(r"\bresolume\]", line), f"{workflow.name}: {line}"
+
+
+def test_a_rerun_of_an_older_main_run_never_reaches_pp():
+    # GitHub fires `workflow_run` `completed` for every attempt of a run: a
+    # re-run of an OLDER main CI run (the SNV restart recipe re-runs a Deploy
+    # job) ends green too. Only a run whose commit is main's tip at that
+    # moment deploys (`github.sha` of a workflow_run event = the default
+    # branch's last commit); an older build reaches PP only by a dispatch.
+    text = _deploy_pp()
+    group = next(line for line in text.split("\n") if line.strip().startswith("group:"))
+    assert "github.event.workflow_run.head_sha == github.sha" in group
+    resolve_if = next(c for c in _conditions(text) if "workflow_dispatch" in c)
+    assert "github.event.workflow_run.head_sha == github.sha" in resolve_if
 
 
 def test_pp_deploys_in_its_own_group_and_never_cancels_one_in_flight():
@@ -125,6 +161,9 @@ def test_the_build_is_downloaded_and_checked_before_songplayer_stops():
         ), before
     check = _step(_deploy_pp(), "Check the build")
     assert "$installers.Count -ne 1" in check
+    # The phase-0 task too: without it the deploy could stop SongPlayer and
+    # never start it again.
+    assert 'Get-ScheduledTask -TaskName "SongPlayer"' in check
 
 
 def test_the_install_checks_the_installers_exit_code():
@@ -134,17 +173,23 @@ def test_the_install_checks_the_installers_exit_code():
 
 
 def test_songplayer_is_started_again_whatever_happened_before():
-    # A failed install, a timeout or a cancel ("produkcia bezi") after the
-    # stop must never leave PP's wall without SongPlayer. `always()` is
-    # allowed on this one step only; every job uses the default `success()`.
+    # A failed install or a cancel ("produkcia bezi") after the stop must
+    # never leave PP's wall without SongPlayer. `always()` is allowed on this
+    # one step only; every job uses the default `success()`. The step proves
+    # SongPlayer answers again: "Health checks" is skipped on those paths.
     text = _deploy_pp()
     start = _step(text, "Start SongPlayer")
     assert "if: always()" in start
-    conditions = [
-        line.strip() for line in text.split("\n") if line.strip().startswith("if:")
-    ]
+    assert "http://localhost:8920/api/v1/status" in start
+    assert "did not come back" in start
+    conditions = _conditions(text)
     assert [c for c in conditions if "always()" in c] == ["if: always()"]
     assert not [c for c in conditions if "cancelled()" in c]
+
+
+def test_a_folded_condition_is_read_whole():
+    folded = "    if: >-\n      a == 'b'\n      || always()\n    steps:\n"
+    assert _conditions(folded) == ["if: >- a == 'b' || always()"]
 
 
 def test_the_pp_deploy_never_touches_the_db_task_acl_or_firewall():
@@ -152,12 +197,21 @@ def test_the_pp_deploy_never_touches_the_db_task_acl_or_firewall():
     for forbidden in (
         "Register-ScheduledTask",
         "Unregister-ScheduledTask",
+        "Set-ScheduledTask",
+        "New-ScheduledTask",
         "icacls",
+        "Set-Acl",
         "NetFirewallRule",
+        "netsh",
+        "advfirewall",
         "songplayer.db",
         "/api/v1/settings",
     ):
         assert forbidden not in text, forbidden
+    # schtasks only RUNS the phase-0 task (no /create, /change, /delete).
+    verbs = re.findall(r"\bschtasks(?:\.exe)?\s+/(\w+)", text, re.IGNORECASE)
+    assert verbs, "the deploy starts the task with schtasks /run"
+    assert {v.lower() for v in verbs} == {"run"}, verbs
 
 
 def test_the_pp_label_is_declared_and_the_runner_setup_takes_it():
