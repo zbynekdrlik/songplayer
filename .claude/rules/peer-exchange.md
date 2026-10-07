@@ -333,14 +333,19 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
   ci_run_id=<CI run>` (a dev build, or an older release, at PP only on
   purpose). Both go through `scripts/pp_deploy_pick.py`: a completed, green
   `push` run of `CI` (`.github/workflows/ci.yml`) in this repository, else
-  the `resolve` job fails and nothing touches PP. Both triggers need the workflow on `main` (the default
-  branch).
+  the `resolve` job fails and nothing touches PP. Both triggers need the
+  workflow on `main` (the default branch).
 - GitHub fires `workflow_run` `completed` for EVERY attempt of a run. A
   re-run of an OLDER main CI run (the SNV restart recipe, `gh run rerun
   --job <Deploy>`, ci-workflows.md) is skipped: its `head_sha` is not
   `github.sha` (for a workflow_run event, main's last commit). A re-run of
   the LATEST main run does re-deploy PP with the same build: that is also
-  how a failed release attempt reaches PP.
+  how a failed release attempt reaches PP. A re-run of an OLD deploy-pp
+  run keeps its original event and `github.sha`, so it passes that test
+  again: the deploy job's check step therefore reads main's LIVE tip
+  (`GET /repos/…/commits/main`) before anything stops and fails when the
+  release is no longer it. Never re-run an old deploy-pp run; dispatch the
+  build PP should get.
 - Its own concurrency group `deploy-pp` (an offline PP runner never blocks
   CI), never cancelled half-way. Only a run that really deploys takes it:
   GitHub keeps one PENDING run per group and cancels the one already
@@ -357,9 +362,11 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
   PP). No other workflow names `resolume-pp`, and every other self-hosted
   job names `resolume` (the guard test), so none can land on PP.
 - The deploy downloads the run's `tauri-installer` + `dist` and checks them
-  (one installer, an `index.html`) and the phase-0 `SongPlayer` task BEFORE
-  it stops anything: an expired artifact or a missing task fails with PP
-  still running. Then: stop (the task instance first, then the process,
+  (one installer, an `index.html`), the box (`COMPUTERNAME` must be
+  `RESOLUME-PP`: a runner that carries `resolume-pp` by mistake never stops
+  or installs anything), the release (still main's live tip, above) and
+  the phase-0 `SongPlayer` task BEFORE it stops anything: each failure
+  leaves PP running. Then: stop (the task instance first, then the process,
   CLIProxyAPI, port 8920 free; its own 5 min step bound), install `/S` (exit
   code read; a 10 min step bound), copy `dist`, start the task, check the
   version. The step bounds turn a hung stop or installer into a plain step
@@ -369,13 +376,16 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
   was stopped) and waits up to 90 s for the process and
   `/api/v1/status`, else it fails on its own ("did not come back - the wall
   may be dark"): "Health checks" is skipped once a step failed. Whether a
-  job TIMEOUT runs `always()` steps is not verified on this runner. It never
-  touches PP's DB, settings, task, ACL or firewall (phase 0 owns them).
+  job TIMEOUT runs `always()` steps is not verified on this runner. No
+  deploy step writes PP's DB or settings, nor the task, the ACL or the
+  firewall (phase 0 owns them); the gate's scene presses and its restore
+  cut persist only the program source, as every press does.
 - PP is often off. A job queued on an offline self-hosted runner fails after
   24 h; `ci.yml` keeps `dist` 5 days (as `tauri-installer`), so once PP is
   on, `gh workflow run deploy-pp.yml -f ci_run_id=<the newest green main CI
-  run>` redoes it within 5 days; later, the next release brings PP up to
-  date.
+  run>` redoes it within 5 days (never the re-run button of the failed
+  deploy-pp run: refused once main moved on); later, the next release
+  brings PP up to date.
 - Post-deploy at PP: `post-deploy-pp.config.ts` = `post-deploy-pp.spec.ts` +
   `post-deploy-max.spec.ts` (needs Node.js at PP). Not serial: a missing
   Cloudflare token must not hide the playback results.
@@ -398,7 +408,9 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
     left), never from the facade's list: that list is cg OBS's, forwarded,
     and PP's cg OBS has no `sp-*` scene;
   - a manual scene pressed through the facade lands as "OBS manuál"
-    (`manualCutLanded`: source -1, cut for that scene, `cg_forward ok`). The
+    (`manualCutLanded`: source -1, cut for that scene, `cg_forward ok`; a
+    scene name is compared as the server records it, its first 64
+    characters, `recordedScene`). The
     scene (`pickManualScene`) is the repo variable `PP_MANUAL_SCENE` when set
     (a manual cg OBS scene, else the test fails saying why), else the scene
     cg OBS already has on program (nothing changes on cg OBS). When cg OBS's
