@@ -550,7 +550,8 @@ async fn started_event_with_malformed_lyrics_warns_and_clears_state() {
 /// Regression for #134: handle_play_video must record the play in
 /// play_history the same as the natural SelectAndPlay selector path does,
 /// so a manually-picked song counts toward "already played" and the
-/// unplayed-first selector doesn't immediately re-offer it.
+/// unplayed-first selector doesn't immediately re-offer it. #229: both
+/// record it when the song really starts (its `Started`).
 #[tokio::test]
 async fn handle_play_video_records_play_history() {
     let pool = crate::db::create_memory_pool().await.unwrap();
@@ -596,16 +597,26 @@ async fn handle_play_video_records_play_history() {
 
     engine.handle_play_video(9, 77, None).await;
 
-    // After a manual play, play_history has one row for this video...
-    let history_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM play_history WHERE playlist_id = 9 AND video_id = 77",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    // #229: a song is played when it really starts, not when its Play is
+    // sent (a video that cannot be opened must not use up the rotation).
+    const ROWS: &str = "SELECT COUNT(*) FROM play_history WHERE playlist_id = 9 AND video_id = 77";
+    let rows: i64 = sqlx::query_scalar(ROWS).fetch_one(&pool).await.unwrap();
+    assert_eq!(rows, 0, "the sent Play alone records nothing");
+    engine
+        .handle_pipeline_event(
+            9,
+            PipelineEvent::Started {
+                duration_ms: 180_000,
+                position_ms: 0,
+            },
+        )
+        .await;
+
+    // After a manual play started, play_history has one row for this video...
+    let rows: i64 = sqlx::query_scalar(ROWS).fetch_one(&pool).await.unwrap();
     assert_eq!(
-        history_count, 1,
-        "handle_play_video must record the play in play_history"
+        rows, 1,
+        "handle_play_video must record the play in play_history once it starts"
     );
 
     // ...and the selector no longer considers it unplayed.

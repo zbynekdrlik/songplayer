@@ -1210,3 +1210,31 @@ sees that. What held up across five review rounds:
     panics.
   - A 600 ms "must still work" sleep is exactly the window a ptrace stall
     fails on correct code.
+
+## A paused-clock test that awaits SQLite: hold auto-advance off (#229)
+
+Under `#[tokio::test(start_paused = true)]` the runtime AUTO-ADVANCES the
+clock to the next timer whenever it has nothing to run. SQLite answers on
+its own thread and sqlx's acquire timeout (30 s) is a tokio timer, so a DB
+await jumps the clock to that timeout and fails with `PoolTimedOut`
+(`worker_tests_idle_gate.rs`, CI run 34926435178); the pool's 10-minute
+reaper sleep is another target. A test that needs exact virtual instants
+around engine DB work (`failure_retry_tests.rs`, the Plays at 0/5/35/… s):
+
+- Hold auto-advance off for the whole test: a running `spawn_blocking` task
+  inhibits it (tokio `time::pause` docs; `BlockingSchedule` counts it).
+  `let (_hold, held) = std::sync::mpsc::channel::<()>();
+  tokio::task::spawn_blocking(move || { let _ = held.recv(); });` FIRST,
+  before the rig's migrations. `_hold` (named, not `_`) drops at the end,
+  which ends the task.
+- Move the clock yourself, only to the deadline you wait for:
+  `tokio::time::advance(due.saturating_duration_since(Instant::now())).await`,
+  reading `due` from the engine (a deadline field production also reads,
+  never a test-only one: `dead_code`). Then await the event; the runtime
+  fires the due timer when it parks.
+- No tokio timeout can bound a wait then (it never fires, or fires early):
+  bound it in REAL time with a `std::thread` that sleeps and sends on a
+  `oneshot`, selected against the event (`real_time_watchdog`, 30 s). A
+  mutant that drops the retry then fails the test instead of hanging it.
+- Bound the loop structurally (`for _ in 0..64`): the old code's Plays at
+  0 s never move the clock, so a time-only exit would spin forever.

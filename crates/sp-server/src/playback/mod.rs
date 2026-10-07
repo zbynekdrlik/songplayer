@@ -11,6 +11,8 @@ pub mod clock_health;
 pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 pub mod decode_thread; // #223 S0: the one way a decode thread starts (producer + decode bench)
 mod engine_play;
+pub(crate) mod failure_backoff; // #229: the pause after failed opens (pure; the selector's pick too)
+mod failure_retry; // #229: the engine's retry of a playlist whose opens fail
 pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
@@ -211,6 +213,12 @@ struct PlaylistPipeline {
     play_start_ms: u64,
     /// Pause snapshot; consumed on manual /play to resume same song. #88.
     paused_at: Option<(i64, u64)>,
+    /// #229: the failed opens in a row and the pending retry
+    /// (`failure_retry.rs`); a `Started` ends the run.
+    failures: failure_retry::FailureState,
+    /// #229: the song a SelectAndPlay or a PlayVideo sent; its `Started`
+    /// records it as played (`song_started`). Every Play clears it first.
+    record_on_start: Option<i64>,
 }
 
 impl PlaylistPipeline {
@@ -552,6 +560,10 @@ impl PlaybackEngine {
         if matches!(cmd, PlayEvent::Skip) && self.pause_if_held(playlist_id, "skipped").await {
             return;
         }
+        // #229: a skip while a failed open's retry waits tries the next song now.
+        if matches!(cmd, PlayEvent::Skip) && self.skip_backoff(playlist_id).await {
+            return;
+        }
         self.apply_event(playlist_id, cmd).await;
     }
 
@@ -600,6 +612,7 @@ impl PlaybackEngine {
                     // off-program Previous shows WaitingForScene (#170), with
                     // the raw transport (#201).
                     self.broadcast_state(playlist_id);
+                    self.publish_open_failures(playlist_id); // #229: the Play ended a retry
                 }
                 self.resync_after_play(playlist_id).await;
             }
@@ -650,6 +663,10 @@ impl PlaybackEngine {
             return;
         };
 
+        // #229: off program, or paused: a failed open's retry waits no more.
+        if matches!(event, PlayEvent::SceneOff) {
+            pp.failures.cancel_retry();
+        }
         let mode = pp.mode;
         let old_state = pp.state.clone();
         let (new_state, action) = old_state.clone().transition(event, mode);
@@ -671,6 +688,7 @@ impl PlaybackEngine {
         {
             self.broadcast_state(playlist_id);
         }
+        self.publish_open_failures(playlist_id); // #229: the run as it is now
     }
 
     /// Cache the video's song/artist/duration and broadcast `NowPlaying`
@@ -741,8 +759,16 @@ impl PlaybackEngine {
                     .pipelines
                     .get(&playlist_id)
                     .and_then(|pp| pp.current_video_id);
+                // #229: leave out the song just sent and the run's failed ones.
+                let avoid = self
+                    .pipelines
+                    .get(&playlist_id)
+                    .map(|pp| pp.failures.run.avoid(current))
+                    .unwrap_or_default();
 
-                match VideoSelector::select_next(&self.pool, playlist_id, mode, current).await {
+                let pick =
+                    VideoSelector::select_next(&self.pool, playlist_id, mode, current, &avoid);
+                match pick.await {
                     Ok(Some(video_id)) => {
                         debug!(playlist_id, video_id, "selected video");
                         match crate::db::models::get_song_paths(&self.pool, video_id).await {
@@ -772,16 +798,8 @@ impl PlaybackEngine {
                                         audio: audio_path.into(),
                                         start_position_ms: None,
                                     });
-
-                                    if let Err(e) = crate::db::models::record_play(
-                                        &self.pool,
-                                        playlist_id,
-                                        video_id,
-                                    )
-                                    .await
-                                    {
-                                        warn!(playlist_id, video_id, %e, "failed to record play");
-                                    }
+                                    // #229: played once it starts (`song_started`).
+                                    pp.record_on_start = Some(video_id);
                                 }
                                 self.resync_after_play(playlist_id).await;
                             }

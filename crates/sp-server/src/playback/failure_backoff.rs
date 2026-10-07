@@ -1,0 +1,144 @@
+//! #229: the pause after videos that fail to open in a row (pure,
+//! Linux-tested, mutation-gated).
+//!
+//! When every file of a playlist fails to open (a box with no VP9/AV1
+//! decoder, an offline cache disk, an ACL change), each failure used to
+//! select the next song at once: ~6 songs a second at PP, 675 errors in
+//! ~35 s. The engine now counts the failures of a playlist in a row
+//! ([`FailureRun`]) and asks [`next_attempt`] how long to wait before the
+//! next song. A song that starts ends the run. The timer, its id and the
+//! resets live with the engine (`failure_retry.rs`).
+//!
+//! A song is recorded as played only when it starts (#229), so a song that
+//! cannot be opened stays "unplayed": the selection must leave it out, or at
+//! the end of a rotation it is the one song left and is picked for good
+//! ([`pick_pool`], fed by [`FailureRun::avoid`]).
+
+use std::collections::BTreeSet;
+use std::time::Duration;
+
+use sp_core::playback::OpenFailures;
+
+/// The first failure in a row that waits before the next attempt: one or
+/// two bad files must not stall a playlist.
+const FIRST_PAUSED: u32 = 3;
+
+/// The pauses from [`FIRST_PAUSED`] on, in seconds; the last one repeats.
+const PAUSES_S: [u64; 4] = [5, 30, 120, 300];
+
+/// The pause before the next attempt after `consecutive` failed opens in a
+/// row: `None` = select the next song at once (failures 1 and 2), then
+/// 5 s, 30 s, 120 s, and 300 s for every later one.
+pub fn next_attempt(consecutive: u32) -> Option<Duration> {
+    let step = usize::try_from(consecutive.checked_sub(FIRST_PAUSED)?).ok()?;
+    let secs = PAUSES_S[step.min(PAUSES_S.len() - 1)];
+    Some(Duration::from_secs(secs))
+}
+
+/// The UTC instant (ms since the epoch) `wait` after `now_utc_ms`: when a
+/// pending retry is due, for the health row (`retry_at_ms`).
+pub fn utc_ms_after(now_utc_ms: i64, wait: Duration) -> i64 {
+    now_utc_ms.saturating_add(i64::try_from(wait.as_millis()).unwrap_or(i64::MAX))
+}
+
+/// Where a youtube playlist's next random pick comes from (#229).
+#[derive(Debug, PartialEq, Eq)]
+pub enum PickPool {
+    /// Pick among these unplayed songs.
+    Unplayed(Vec<i64>),
+    /// The rotation restarts: clear the play history, then pick among these
+    /// (none = nothing to play).
+    Restart(Vec<i64>),
+}
+
+/// The songs a youtube playlist's next pick takes from: its `unplayed`
+/// songs minus `avoid` (the song just sent, and the songs that failed to
+/// open since the last start, [`FailureRun::avoid`]). With none left, the
+/// rotation restarts from `all` its songs minus `avoid`. Only when every
+/// song is to be avoided (a one-song playlist, or every open failed) does it
+/// pick as before #229: the unplayed songs, else a restart from all of them;
+/// the pause after failed opens paces those attempts.
+pub fn pick_pool(unplayed: &[i64], all: &[i64], avoid: &[i64]) -> PickPool {
+    let fresh = without(unplayed, avoid);
+    if !fresh.is_empty() {
+        return PickPool::Unplayed(fresh);
+    }
+    let rest = without(all, avoid);
+    if !rest.is_empty() {
+        return PickPool::Restart(rest);
+    }
+    if !unplayed.is_empty() {
+        return PickPool::Unplayed(unplayed.to_vec());
+    }
+    PickPool::Restart(all.to_vec())
+}
+
+/// `songs` without the ones in `avoid`, in order.
+fn without(songs: &[i64], avoid: &[i64]) -> Vec<i64> {
+    songs
+        .iter()
+        .copied()
+        .filter(|song| !avoid.contains(song))
+        .collect()
+}
+
+/// A playlist's failed opens in a row since its last song started.
+#[derive(Debug, Default)]
+pub struct FailureRun {
+    /// How many Plays failed in a row.
+    consecutive_failures: u32,
+    /// The last one's error; `None` while the run is empty.
+    last_failure: Option<String>,
+    /// The songs that failed in this run (the selection leaves them out).
+    failed: BTreeSet<i64>,
+}
+
+impl FailureRun {
+    /// One more failed open, with its `error`: the pause before the next
+    /// attempt ([`next_attempt`]); `None` = at once.
+    pub fn fail(&mut self, error: &str) -> Option<Duration> {
+        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+        self.last_failure = Some(error.to_owned());
+        next_attempt(self.consecutive_failures)
+    }
+
+    /// Failed opens in a row.
+    pub fn count(&self) -> u32 {
+        self.consecutive_failures
+    }
+
+    /// The song whose open failed (the playlist's current one), left out of
+    /// the selections until the run ends.
+    pub fn note_failed(&mut self, video_id: Option<i64>) {
+        self.failed.extend(video_id);
+    }
+
+    /// The songs the next selection leaves out: every song that failed in
+    /// this run, and the song just sent (`current`), which is not recorded as
+    /// played before it starts.
+    pub fn avoid(&self, current: Option<i64>) -> Vec<i64> {
+        self.failed.iter().copied().chain(current).collect()
+    }
+
+    /// A song started: the run is over. Returns what ended (`None` = no
+    /// open had failed), for the log.
+    pub fn reset(&mut self) -> Option<OpenFailures> {
+        std::mem::take(self).view(None)
+    }
+
+    /// The health row's `open_failures`, with the pending retry's due
+    /// instant (`retry_at_ms`); `None` while no open failed.
+    pub fn view(&self, retry_at_ms: Option<i64>) -> Option<OpenFailures> {
+        let last_error = self.last_failure.clone()?;
+        Some(OpenFailures {
+            count: self.consecutive_failures,
+            last_error,
+            retry_at_ms,
+            retry_in_ms: None, // filled at the read (`NdiHealthRegistry::snapshots`)
+        })
+    }
+}
+
+#[cfg(test)]
+#[path = "failure_backoff_tests.rs"]
+mod tests;

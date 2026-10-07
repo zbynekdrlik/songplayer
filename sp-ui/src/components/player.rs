@@ -98,9 +98,34 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // here as Slovak text and clear on the next successful command.
     let player_error = RwSignal::new(None::<String>);
 
+    // #229: this playlist's videos that failed to open in a row (its health
+    // row's `open_failures`, the 1 Hz poll of `store.ndi_health`): the reason
+    // a black program has. The line is mounted by a Memo (Rule 1); only its
+    // text follows the poll, whose `retry_in_ms` (read on the server's clock)
+    // moves the countdown.
+    let open_failures = move || {
+        store
+            .ndi_health
+            .get()
+            .into_iter()
+            .find(|o| o.playlist_id == pid)
+            .and_then(|o| o.open_failures)
+    };
+    let failing = Memo::new(move |_| open_failures().is_some());
+    let retry_pending =
+        Memo::new(move |_| open_failures().is_some_and(|f| f.retry_in_ms.is_some()));
+
     // #221 L4b: "Hrá mimo programu" for a playlist playing off program
     // (`sp_core::player_view::state_label`); "—" until the state is known.
-    let state_label = move || player_view::state_label(state_known.get(), state(), transport());
+    // #229: "Čaká na ďalší pokus" while the retry of failed opens waits.
+    let state_label = move || {
+        player_view::player_state_label(
+            state_known.get(),
+            state(),
+            transport(),
+            retry_pending.get(),
+        )
+    };
 
     // #225: the badge reads the SAME live WS state as the state label (`Playing`
     // = on program, #170), so a cut flips both in one render. It used to read
@@ -286,6 +311,23 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         view! {
                             <div class="player-error" data-testid="player-error">
                                 {e}
+                            </div>
+                        }
+                    })
+            }}
+
+            // --- #229: why the program is black: the videos cannot be opened ---
+            {move || {
+                failing
+                    .get()
+                    .then(|| {
+                        view! {
+                            <div class="player-open-failures" data-testid="player-open-failures">
+                                {move || {
+                                    open_failures()
+                                        .map(|f| player_view::open_failures_line(&f))
+                                        .unwrap_or_default()
+                                }}
                             </div>
                         }
                     })

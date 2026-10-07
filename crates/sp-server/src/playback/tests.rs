@@ -163,6 +163,8 @@ fn cancel_title_timers_aborts_pending_handles() {
             title_clock: None,
             play_start_ms: 0,
             paused_at: None,
+            failures: Default::default(),
+            record_on_start: None,
         };
 
         assert!(pp.title_show_abort.is_some());

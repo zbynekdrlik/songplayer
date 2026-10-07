@@ -80,6 +80,11 @@ pub struct PipelineHealthSnapshot {
     /// Human reason for `lock_state` (e.g. `"pacing disabled"`,
     /// `"locked"`). Rendered verbatim by the dashboard / log.
     pub lock_reason: String,
+    /// #229: the videos that failed to open in a row and when the next
+    /// attempt is due (`failure_retry.rs`), copied from the engine at each
+    /// heartbeat; `null` while none failed since the last song started. The
+    /// dashboard's Player says why the program is black from it.
+    pub open_failures: Option<sp_core::playback::OpenFailures>,
 }
 
 /// Paced-audio telemetry (#148), surfaced on `GET /api/v1/ndi/health` as
@@ -201,12 +206,44 @@ impl NdiHealthRegistry {
         }
     }
 
+    /// #229: rewrite one row's `open_failures` as the engine's run of failed
+    /// opens changes, between the 5 s heartbeats (which copy it too). A
+    /// playlist with no row yet gets it at its first heartbeat.
+    pub fn set_open_failures(
+        &self,
+        playlist_id: i64,
+        open_failures: Option<sp_core::playback::OpenFailures>,
+    ) {
+        match self.snapshots.write() {
+            Ok(mut map) => {
+                if let Some(row) = map.get_mut(&playlist_id) {
+                    row.open_failures = open_failures;
+                }
+            }
+            Err(_) => {
+                warn!(
+                    playlist_id,
+                    "NdiHealthRegistry: RwLock poisoned on write — open_failures dropped"
+                );
+            }
+        }
+    }
+
     /// Snapshot every pipeline's most recent NDI health for the
     /// `/api/v1/ndi/health` endpoint. Returns one entry per pipeline that
-    /// has reported at least one heartbeat.
+    /// has reported at least one heartbeat. #229: a row's `open_failures`
+    /// carries the wait left until its retry, read now on this clock.
     pub fn snapshots(&self) -> Vec<PipelineHealthSnapshot> {
+        let now_ms = Utc::now().timestamp_millis();
         match self.snapshots.read() {
-            Ok(map) => map.values().cloned().collect(),
+            Ok(map) => map
+                .values()
+                .cloned()
+                .map(|mut row| {
+                    row.open_failures = row.open_failures.map(|f| f.read_at(now_ms));
+                    row
+                })
+                .collect(),
             Err(_) => {
                 warn!("NdiHealthRegistry: RwLock poisoned on read — returning empty list");
                 Vec::new()
@@ -303,6 +340,7 @@ impl crate::playback::PlaybackEngine {
         };
 
         let ndi_name = pp.pipeline.output_name().to_string();
+        let open_failures = pp.failures.view(); // #229
         let degraded_reason = compute_degraded_reason(
             &canonical_state,
             observed_fps,
@@ -365,6 +403,7 @@ impl crate::playback::PlaybackEngine {
             audio,
             lock_state,
             lock_reason: lock_reason.to_string(),
+            open_failures,
         };
 
         health_log::log_health_snapshot(&snapshot, prev.as_ref(), scene_active, &loop_stats);

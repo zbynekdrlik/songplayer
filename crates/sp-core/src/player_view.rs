@@ -15,7 +15,7 @@
 //! These rules live here (WASM-safe, so the workspace tests and the mutation
 //! gate cover them; sp-ui has no unit-test job).
 
-use crate::playback::{PlaybackMode, PlaybackState, TransportState};
+use crate::playback::{OpenFailures, PlaybackMode, PlaybackState, TransportState};
 
 /// The title while the song is not known yet.
 pub const PENDING_TITLE: &str = "Načítavam…";
@@ -143,6 +143,54 @@ pub fn play_pause(state_known: bool, playing: bool) -> (&'static str, &'static s
 /// disables the select then.
 pub fn mode_value(state_known: bool, mode: PlaybackMode) -> &'static str {
     if state_known { mode.as_str() } else { "" }
+}
+
+/// #229: the Player's line for a playlist whose videos cannot be opened
+/// (its health row's `open_failures`):
+/// `Videá sa nedajú otvoriť (N×): {chyba} — ďalší pokus o X s`. X is the
+/// wait left the server read on its own clock (`retry_in_ms`): the browser's
+/// clock, on another machine, can be off. With no retry pending (the next
+/// song is tried at once, an attempt is under way, the playlist was cut off
+/// program or paused) the line has no "ďalší pokus".
+pub fn open_failures_line(failures: &OpenFailures) -> String {
+    let head = format!(
+        "Videá sa nedajú otvoriť ({}×): {}",
+        failures.count, failures.last_error
+    );
+    match failures.retry_in_ms {
+        Some(left_ms) => format!("{head} — ďalší pokus o {} s", retry_in_s(left_ms)),
+        None => head,
+    }
+}
+
+/// `retry_in_ms` in whole seconds, rounded up: "0 s" only once it is due.
+pub fn retry_in_s(retry_in_ms: u64) -> u64 {
+    retry_in_ms.div_ceil(1000)
+}
+
+/// #229: the state label while a playlist waits for the retry of its
+/// failed opens.
+pub const RETRY_PENDING_LABEL: &str = "Čaká na ďalší pokus";
+
+/// The Player's state label ([`state_label`]), except while the playlist
+/// waits for the retry of its failed opens (`retry_pending`: its health
+/// row's `open_failures` names a retry): "Čaká na ďalší pokus", not "Čaká na
+/// scénu" (it may well be on program, black). A pipeline told it decodes
+/// (transport `Playing`: "Hrá", or "Hrá mimo programu" off program) keeps
+/// its label: the retry's Play went out since the 1 Hz health row was read.
+/// Until the state is known the label claims nothing ("—", #225), the retry
+/// included.
+pub fn player_state_label(
+    state_known: bool,
+    state: PlaybackState,
+    transport: TransportState,
+    retry_pending: bool,
+) -> &'static str {
+    if state_known && retry_pending && transport != TransportState::Playing {
+        RETRY_PENDING_LABEL
+    } else {
+        state_label(state_known, state, transport)
+    }
 }
 
 #[cfg(test)]
@@ -275,5 +323,72 @@ mod tests {
         assert_eq!(mode_value(true, PlaybackMode::Loop), "loop");
         assert_eq!(mode_value(true, PlaybackMode::Single), "single");
         assert_eq!(mode_value(true, PlaybackMode::Continuous), "continuous");
+    }
+
+    /// #229: the seconds left round up, so the line never says "0 s" while
+    /// the retry is still ahead; a due retry reads 0.
+    #[test]
+    fn the_retry_countdown_rounds_up_to_whole_seconds() {
+        assert_eq!(retry_in_s(10_000), 10);
+        assert_eq!(retry_in_s(4_001), 5, "a part of a second counts whole");
+        assert_eq!(retry_in_s(4_000), 4);
+        assert_eq!(retry_in_s(1), 1);
+        assert_eq!(retry_in_s(0), 0, "due");
+    }
+
+    /// #229: while the retry waits the label says so, on or off program; a
+    /// playlist told `Playing` keeps "Hrá", and with no retry the label is
+    /// the usual one.
+    #[test]
+    fn the_state_label_says_the_playlist_waits_for_its_retry() {
+        assert_eq!(
+            player_state_label(true, PlaybackState::WaitingForScene, PAUSED, true),
+            "Čaká na ďalší pokus"
+        );
+        assert_eq!(
+            player_state_label(true, PlaybackState::Playing, PLAYING, true),
+            "Hrá"
+        );
+        assert_eq!(
+            player_state_label(true, PlaybackState::WaitingForScene, PLAYING, true),
+            "Hrá mimo programu",
+            "the retry's Play went out off program before the health row moved"
+        );
+        assert_eq!(
+            player_state_label(true, PlaybackState::WaitingForScene, PAUSED, false),
+            "Čaká na scénu"
+        );
+        assert_eq!(
+            player_state_label(false, PlaybackState::Idle, IDLE, false),
+            "—"
+        );
+        assert_eq!(
+            player_state_label(false, PlaybackState::WaitingForScene, PAUSED, true),
+            "—",
+            "until the state is known it claims nothing, a retry included"
+        );
+    }
+
+    #[test]
+    fn the_open_failures_line_names_the_count_the_error_and_the_retry() {
+        let mut failures = OpenFailures {
+            count: 4,
+            last_error: "No video: SetCurrentMediaType failed: No suitable transform".into(),
+            retry_at_ms: Some(1_791_331_230_000),
+            retry_in_ms: Some(29_500),
+        };
+        assert_eq!(
+            open_failures_line(&failures),
+            "Videá sa nedajú otvoriť (4×): No video: SetCurrentMediaType failed: \
+             No suitable transform — ďalší pokus o 30 s"
+        );
+        failures.retry_at_ms = None;
+        failures.retry_in_ms = None;
+        assert_eq!(
+            open_failures_line(&failures),
+            "Videá sa nedajú otvoriť (4×): No video: SetCurrentMediaType failed: \
+             No suitable transform",
+            "no retry pending: no countdown"
+        );
     }
 }

@@ -97,6 +97,10 @@ pub enum PipelineEvent {
     /// due for a re-check (`scene_off.rs`). It carries the hold's re-check
     /// id: only the pending re-check acts, any other is stale.
     SceneOffDue(u64),
+    /// #229: not from a pipeline thread — the pause after failed opens in a
+    /// row is over (`failure_retry.rs`). It carries the retry's id: only the
+    /// pending retry acts, any other is stale.
+    RetryDue(u64),
     /// #221 L4b: not from a pipeline thread — the playback authority
     /// (`program_authority.rs`): the playlist went on air (`true`) or left
     /// it (`false`). The engine drops it when it is stale.
