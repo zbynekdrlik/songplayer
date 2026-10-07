@@ -41,7 +41,8 @@ export interface ExchangeStatusView {
   peers: PeerStatusView[];
 }
 
-/** `url` is `https://<host>[/path]`: the host exactly, over TLS. */
+/** `url` is `https://<host>[/path]`: the host exactly, over TLS, on the
+ *  default port (Cloudflare's public edge). */
 function through(url: string, host: string): boolean {
   try {
     const u = new URL(url);
@@ -57,8 +58,9 @@ function notThrough(peer: string, viaHost: string, baseUrl: string): string {
 
 /**
  * Why PP's exchange settings fail the gate; empty when they pass: the
- * settings hold, this node is `node`, and `peer` is configured, read through
- * `https://<viaHost>` (Cloudflare) with a Cloudflare Access service token.
+ * settings hold, this node is `node`, and `peer` is configured with its key,
+ * read through `https://<viaHost>` (Cloudflare; that host exactly, TLS, the
+ * default port) with a Cloudflare Access service token.
  * PP cannot open a connection to SNV, so the public host is its only path,
  * and Cloudflare Access refuses a request with no token (a 302 to its login
  * page). Settings that do not hold read as the exchange OFF, so their reason
@@ -82,6 +84,7 @@ export function peerSetupFailures(
     return failures;
   }
   if (!through(p.base_url, viaHost)) failures.push(notThrough(peer, viaHost, p.base_url));
+  if (!p.has_key) failures.push(`peer ${peer} has no key (SNV's peer_api_key)`);
   if (!p.cf_access) {
     failures.push(
       `peer ${peer} has no Cloudflare Access service token (cf_client_id + cf_client_secret ` +

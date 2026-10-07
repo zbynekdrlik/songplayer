@@ -17,8 +17,9 @@
  *
  * The scenes come from `pp-scenes.ts` (the playlist scene from SongPlayer's
  * own catalog; the manual scene = cg OBS's own program scene unless the repo
- * variable PP_MANUAL_SCENE names one). The facade's program scene and cg
- * OBS's program scene are put back in `afterAll`. The tests are not serial: a
+ * variable PP_MANUAL_SCENE names one). `afterAll` puts SP-program back on its
+ * start scene, and cg OBS back on its own only when the manual press moved it
+ * and it is still there (`cgRestoreTarget`). The tests are not serial: a
  * missing Cloudflare token must not hide the playback results.
  */
 import {
@@ -37,13 +38,18 @@ import {
   type ProbeResult,
 } from "./peer-probe-gate";
 import {
+  cgRestoreTarget,
   manualCutLanded,
   pickManualScene,
   pickPlaylistScene,
   playlistNames,
   type ManualCutView,
-  type PlaylistView,
 } from "./pp-scenes";
+import {
+  readEngineActiveScene,
+  waitEngineActiveScene,
+  type PlaylistRow,
+} from "./program-state";
 
 const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
 const FACADE_WS_URL = process.env.FACADE_WS_URL || "ws://localhost:4456";
@@ -64,22 +70,25 @@ async function getJson<T>(request: APIRequestContext, url: string): Promise<T | 
   }
 }
 
-/** SongPlayer's own program scene (`/api/v1/status.active_scene`). */
-async function activeScene(request: APIRequestContext): Promise<string | null> {
-  return (await getJson<{ active_scene: string | null }>(request, "/api/v1/status"))?.active_scene ?? null;
-}
-
-async function readPlaylists(request: APIRequestContext): Promise<PlaylistView[]> {
+async function readPlaylists(request: APIRequestContext): Promise<PlaylistRow[]> {
   const resp = await request.get("/api/v1/playlists");
   expect(resp.status(), "GET /api/v1/playlists").toBe(200);
-  return (await resp.json()) as PlaylistView[];
+  return (await resp.json()) as PlaylistRow[];
 }
 
-async function videoCount(request: APIRequestContext, pid: number): Promise<number> {
+/** A playlist's playable videos: downloaded and normalized (the rows of a
+ *  synced but not yet downloaded song are listed too). */
+async function playableCount(request: APIRequestContext, pid: number): Promise<number> {
   const resp = await request.get(`/api/v1/playlists/${pid}/videos`);
   expect(resp.status(), `GET /api/v1/playlists/${pid}/videos`).toBe(200);
-  const videos = (await resp.json()) as unknown;
-  return Array.isArray(videos) ? videos.length : 0;
+  const videos = (await resp.json()) as { normalized: boolean }[];
+  return videos.filter((v) => v.normalized).length;
+}
+
+/** obs-websocket's 604 (InvalidResourceState): the facade's answer to
+ *  `GetCurrentProgramScene` while nothing is on SP-program. */
+function isNothingOnProgram(e: unknown): boolean {
+  return (e as { code?: number } | null)?.code === 604;
 }
 
 test.describe("PP post-deploy (#229)", () => {
@@ -125,21 +134,22 @@ test.describe("PP's program through the facade (#229)", () => {
   let cg: ObsDriver | null = null;
   /** SP-program's scene before the tests (null: nothing was on it). */
   let startScene: string | null = null;
-  /** cg OBS's own program scene before the tests. */
-  let cgStartScene: string | null = null;
   /** A test pressed a scene: afterAll restores the program. */
   let pressed = false;
+  /** The manual press moved cg OBS (from → to): afterAll may put it back. */
+  let cgMoved: { from: string; to: string } | null = null;
 
   test.beforeAll(async () => {
     facade = await ObsDriver.connect(FACADE_WS_URL);
     cg = await ObsDriver.connect(OBS_WS_URL);
     try {
       startScene = await facade.currentProgramScene();
-    } catch {
-      startScene = null; // the facade's 604: nothing is on SP-program
+    } catch (e) {
+      if (!isNothingOnProgram(e)) throw e;
+      startScene = null;
     }
-    cgStartScene = await cg.currentProgramScene();
-    console.log(`[#229 pp] at the start: SP-program "${startScene}", cg OBS "${cgStartScene}"`);
+    const cgScene = await cg.currentProgramScene();
+    console.log(`[#229 pp] at the start: SP-program "${startScene}", cg OBS "${cgScene}"`);
   });
 
   test.afterAll(async () => {
@@ -149,12 +159,7 @@ test.describe("PP's program through the facade (#229)", () => {
       if (pressed && facade && startScene !== null) {
         try {
           await facade.switchScene(startScene);
-          const deadline = Date.now() + 8_000;
-          let now = await activeScene(ctx);
-          while (now !== startScene && Date.now() < deadline) {
-            await new Promise((r) => setTimeout(r, 200));
-            now = await activeScene(ctx);
-          }
+          const now = await waitEngineActiveScene(ctx, startScene, 8_000);
           if (now !== startScene) {
             problems.push(`SP-program is on "${now}", not back on "${startScene}"`);
           }
@@ -164,15 +169,18 @@ test.describe("PP's program through the facade (#229)", () => {
       } else if (pressed) {
         console.log("[#229 pp] nothing was on SP-program at the start: the test's scene stays");
       }
-      if (cg && cgStartScene !== null) {
+      if (cg && cgMoved !== null) {
         try {
           const now = await cg.currentProgramScene();
-          if (now !== cgStartScene) {
-            await cg.switchScene(cgStartScene);
-            console.log(`[#229 pp] cg OBS back on "${cgStartScene}" (was "${now}")`);
+          const back = cgRestoreTarget(cgMoved, now);
+          if (back !== null) {
+            await cg.switchScene(back);
+            console.log(`[#229 pp] cg OBS back on "${back}" (the gate had moved it to "${now}")`);
+          } else {
+            console.log(`[#229 pp] cg OBS is on "${now}" (moved since the press): left as it is`);
           }
         } catch (e) {
-          problems.push(`putting cg OBS back on "${cgStartScene}" failed: ${e}`);
+          problems.push(`putting cg OBS back on "${cgMoved.from}" failed: ${e}`);
         }
       }
     } finally {
@@ -194,12 +202,15 @@ test.describe("PP's program through the facade (#229)", () => {
     );
     expect(program, "GET /api/v1/program").not.toBeNull();
     const refused = (program!.cut_refused ?? []).map((r) => r.source);
-    const videos = new Map<number, number>();
-    for (const r of rows.filter((x) => x.is_active)) videos.set(r.id, await videoCount(request, r.id));
-    const pick = pickPlaylistScene(rows, refused, videos);
+    const playable = new Map<number, number>();
+    for (const r of rows.filter((x) => x.is_active)) {
+      playable.set(r.id, await playableCount(request, r.id));
+    }
+    const pick = pickPlaylistScene(rows, refused, playable);
     expect(
       pick,
-      `a playlist to put on program (active, a scene, videos, not refused ${JSON.stringify(refused)}) ` +
+      `a playlist to put on program (active, a scene, a playable video, not refused ` +
+        `${JSON.stringify(refused)}; playable ${JSON.stringify([...playable])}) ` +
         `among ${JSON.stringify(rows.map((r) => [r.id, r.ndi_output_name, r.is_active, r.kind]))}`,
     ).not.toBeNull();
     const { scene, playlistId } = pick!;
@@ -208,7 +219,7 @@ test.describe("PP's program through the facade (#229)", () => {
     pressed = true;
     await facade!.switchScene(scene);
     await expect
-      .poll(() => activeScene(request), {
+      .poll(() => readEngineActiveScene(request), {
         message: `SongPlayer's program reaches ${scene}`,
         timeout: 15_000,
       })
@@ -241,16 +252,20 @@ test.describe("PP's program through the facade (#229)", () => {
     request,
   }) => {
     const rows = await readPlaylists(request);
+    const cgNow = await cg!.currentProgramScene();
     const pick = pickManualScene({
       configured: MANUAL_SCENE,
-      cgProgram: await cg!.currentProgramScene(),
+      cgProgram: cgNow,
       scenes: await facade!.listScenes(),
       playlistNames: playlistNames(rows),
     });
     if ("error" in pick) throw new Error(pick.error);
-    console.log(`[#229 pp] manual scene: ${pick.scene}`);
+    console.log(`[#229 pp] manual scene: ${pick.scene} (cg OBS on "${cgNow}")`);
 
     pressed = true;
+    // The press forwards the scene to cg OBS first: recorded before it, so a
+    // press that fails half-way is still put back.
+    if (pick.scene !== cgNow) cgMoved = { from: cgNow, to: pick.scene };
     await facade!.switchScene(pick.scene);
     await expect
       .poll(
@@ -265,7 +280,7 @@ test.describe("PP's program through the facade (#229)", () => {
       )
       .toBe(true);
     await expect
-      .poll(() => activeScene(request), {
+      .poll(() => readEngineActiveScene(request), {
         message: `SongPlayer names the program ${pick.scene}`,
         timeout: 15_000,
       })

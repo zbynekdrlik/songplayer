@@ -31,12 +31,7 @@
  *     might leak into the browser console.
  */
 
-import {
-  test,
-  expect,
-  request as apiRequest,
-  type APIRequestContext,
-} from "@playwright/test";
+import { test, expect, request as apiRequest } from "@playwright/test";
 import { ObsDriver } from "./obs-driver";
 import { pickBaselineScene } from "./obs-baseline-scene";
 import {
@@ -44,6 +39,7 @@ import {
   type ProgramReceiverVerdict,
   type ProgramReceiverView,
 } from "./ndi-health-gate";
+import { waitEngineActiveScene } from "./program-state";
 
 // #225: a Player title that names NO song — "Nič nehrá" (nothing plays) or
 // "Načítavam…" (the playlist's song is not known yet, e.g. right after
@@ -54,48 +50,6 @@ const NOT_A_SONG = /^(Nič nehrá|Načítavam…)$/;
 // #221 L3: SongPlayer's obs-websocket facade (the Companion remote control).
 const FACADE_WS_URL = process.env.FACADE_WS_URL || "ws://localhost:4456";
 const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
-
-// #170: read the ENGINE's view of the on-program scene to prove SongPlayer
-// actually followed a scene switch — not just that OBS reports it.
-// #221 L4b: `active_scene` is SongPlayer's own program (the one resolver) and
-// `active_playlist_ids` its on-air set: SP-program's playlist alone (#221 B4
-// step 6: no cg OBS record joins it any more, so it never holds two). A read
-// that names two playlists is reported as not settled (never a match).
-async function readEngineActiveScene(
-  ctx: APIRequestContext,
-): Promise<string | null> {
-  try {
-    const resp = await ctx.get("/api/v1/status");
-    if (!resp.ok()) return null;
-    const status = (await resp.json()) as {
-      active_scene?: string | null;
-      active_playlist_ids?: number[];
-    };
-    const onAir = status.active_playlist_ids ?? [];
-    if (onAir.length > 1) {
-      return `${status.active_scene} (not settled, on air ${JSON.stringify(onAir)})`;
-    }
-    return status.active_scene ?? null;
-  } catch {
-    return null;
-  }
-}
-
-// Poll the engine's active scene until it equals `target` (or a short deadline).
-async function waitEngineActiveScene(
-  ctx: APIRequestContext,
-  target: string,
-  timeoutMs = 5000,
-): Promise<string | null> {
-  const deadline = Date.now() + timeoutMs;
-  let last: string | null = null;
-  for (;;) {
-    last = await readEngineActiveScene(ctx);
-    if (last === target) return last;
-    if (Date.now() >= deadline) return last;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
 
 // Playlists deployed to win-resolume have predictable names. These tests
 // expect at least one playlist called `ytfast` (id varies) with
