@@ -5,7 +5,8 @@
 //!   before the catalog lists the file).
 //! - V30 `peer_waits`: since when a job of a video waits for a peer (the
 //!   first wait counts, `peer::ask`); `peer_fetches`: which node an artifact
-//!   came from.
+//!   came from (dropped once a job that makes it runs here,
+//!   [`forget_fetches`]; the audio's record is what `peer::audio` trusts).
 //!
 //! Plus the download's defer of the ask-first hooks (`defer_download`; the
 //! stems defer through `models_stems::defer_stems`, the lyrics through
@@ -17,6 +18,7 @@ use std::time::Duration;
 
 use sqlx::SqlitePool;
 
+use crate::peer::kind::ArtifactKind;
 use crate::peer::wire::PeerLyrics;
 
 /// One cached sha256: the file at `path` as it was when hashed.
@@ -29,6 +31,25 @@ pub struct HashEntry {
     pub sha256: String,
     /// When the hasher stored it: the catalog's `updated_at` and `?since=`.
     pub hashed_at_ms: i64,
+}
+
+impl HashEntry {
+    /// The entry still holds for a file of `size` bytes last written at
+    /// `mtime_ms`: the hash is of the bytes on disk now.
+    pub fn holds(&self, size: i64, mtime_ms: i64) -> bool {
+        self.size == size && self.mtime_ms == mtime_ms
+    }
+}
+
+/// The cached hash of `path`, if any; it holds only while the file still
+/// has its size and mtime ([`HashEntry::holds`]).
+pub async fn hash_of(pool: &SqlitePool, path: &str) -> Result<Option<HashEntry>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT path, size, mtime_ms, sha256, hashed_at_ms FROM peer_hashes WHERE path = ?",
+    )
+    .bind(path)
+    .fetch_optional(pool)
+    .await
 }
 
 /// Every cached hash, by path.
@@ -164,6 +185,24 @@ pub async fn fetch_record(
     .bind(kind)
     .fetch_optional(pool)
     .await
+}
+
+/// `youtube_id`'s artifacts of `kinds` no longer come from a peer: a job
+/// that makes them runs here (`Exchange::run_here`) and replaces them, so a
+/// record of a peer's copy would no longer describe this node's files.
+pub async fn forget_fetches(
+    pool: &SqlitePool,
+    youtube_id: &str,
+    kinds: &[ArtifactKind],
+) -> Result<(), sqlx::Error> {
+    for kind in kinds {
+        sqlx::query("DELETE FROM peer_fetches WHERE youtube_id = ? AND kind = ?")
+            .bind(youtube_id)
+            .bind(kind.as_str())
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
 }
 
 /// The download of row `video_id` is picked again after `wait`, with no

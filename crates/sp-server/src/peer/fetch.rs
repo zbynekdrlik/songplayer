@@ -55,8 +55,24 @@ impl PeerClient {
         Arc::clone(lock(&self.slots).entry(peer.to_string()).or_default())
     }
 
-    /// Artifact `a` of `peer` as a verified part in `parts_dir`.
+    /// Artifact `a` of `peer` as a verified part in `parts_dir`, in its turn
+    /// in the peer's transfer slot.
     pub async fn fetch(
+        &self,
+        peer: &PeerConfig,
+        a: &Artifact,
+        parts_dir: &Path,
+    ) -> Result<PathBuf, PeerError> {
+        let slot = self.slot(&peer.name);
+        let _turn = slot.lock().await;
+        self.fetch_unslotted(peer, a, parts_dir).await
+    }
+
+    /// [`PeerClient::fetch`] without the transfer slot: only for a transfer
+    /// probe (`peer::transfer_probe`), whose part is in its own temp dir (no
+    /// part an adoption writes) and is at most 64 MiB, so it never waits
+    /// behind the workers' transfers queued in the slot.
+    pub(crate) async fn fetch_unslotted(
         &self,
         peer: &PeerConfig,
         a: &Artifact,
@@ -64,8 +80,6 @@ impl PeerClient {
     ) -> Result<PathBuf, PeerError> {
         let name = part_name(a)
             .ok_or_else(|| PeerError::BadResponse("an artifact this node cannot name".into()))?;
-        let slot = self.slot(&peer.name);
-        let _turn = slot.lock().await;
         tokio::fs::create_dir_all(parts_dir).await?;
         drop_older_parts(parts_dir, a, &name).await;
         let part = parts_dir.join(&name);

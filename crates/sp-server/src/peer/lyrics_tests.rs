@@ -46,9 +46,17 @@ async fn lyrics_now(node: &TestNode, id: i64) -> LyricsNow {
 }
 
 /// SNV serves `mtl+g35t` lyrics with ★, SK translated (v2, masculine), aligned
-/// by `mtl`; PP has the song, no lyrics, and asks SNV. Returns SNV's JSON
-/// bytes.
+/// by `mtl`; PP has the song, its audio fetched from SNV (recorded), no
+/// lyrics, and asks SNV. Returns SNV's JSON bytes.
 async fn snv_and_pp() -> (TestNode, TestNode, i64, Vec<u8>) {
+    let (snv, pp, id, json) = snv_and_pp_own_audio().await;
+    pp.audio_from(YT, "snv").await;
+    (snv, pp, id, json)
+}
+
+/// As [`snv_and_pp`], but nothing records where PP's audio came from and
+/// PP has not hashed it.
+async fn snv_and_pp_own_audio() -> (TestNode, TestNode, i64, Vec<u8>) {
     let snv = TestNode::start("snv", Some(SNV_KEY)).await;
     let snv_id = snv.add_video(YT).await;
     snv.give_song(snv_id, YT, "Way Maker", "Sinach").await;
@@ -110,6 +118,84 @@ async fn a_peers_lyrics_are_taken_with_their_row() {
         .unwrap();
     assert_eq!(node, "snv");
     assert_eq!(parts_left(&pp), 0);
+}
+
+/// PP's audio is its own encode (downloaded here, its hash not SNV's audio):
+/// SNV's line timings were measured on another audio, so the lyrics are
+/// processed here. Nothing is fetched, the job is announced.
+#[tokio::test]
+async fn lyrics_made_from_another_audio_are_processed_here() {
+    let (_snv, pp, id, _) = snv_and_pp_own_audio().await;
+    let audio: String = sqlx::query_scalar("SELECT audio_file_path FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    std::fs::write(&audio, crate::peer::rig::bytes(3_000, 9)).unwrap();
+    pp.hash_now().await;
+    let row = lyrics_row(&pp, id).await;
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("expected Local")
+    };
+    assert_eq!(pp.ex.board.snapshot("pp").len(), 1, "the job runs here");
+    assert_eq!(json_at(&pp), None, "nothing taken");
+    assert_eq!(parts_left(&pp), 0, "nothing transferred");
+    let now = lyrics_now(&pp, id).await;
+    assert_eq!((now.has_lyrics, now.lyrics_attempts), (0, 0));
+}
+
+/// No audio of the row is on disk here: this node cannot tell whether SNV's
+/// line timings fit it, so the job waits like a failed fetch (no attempt,
+/// counted against the 2 h bound) and nothing is taken.
+#[tokio::test]
+async fn lyrics_of_a_song_with_no_audio_here_wait() {
+    let (_snv, pp, id, _) = snv_and_pp().await;
+    let audio: String = sqlx::query_scalar("SELECT audio_file_path FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    std::fs::remove_file(&audio).unwrap();
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        first(Some(&pp.ex), &row).await,
+        PeerStep::Deferred
+    ));
+    let now = lyrics_now(&pp, id).await;
+    assert_eq!((now.has_lyrics, now.lyrics_attempts), (0, 0));
+    assert!(now.lyrics_next_attempt_at.is_some(), "re-picked later");
+    assert_eq!(json_at(&pp), None);
+    assert_eq!(parts_left(&pp), 0);
+}
+
+/// The record does not vouch (another size) and this node's audio cannot
+/// be hashed now (here a directory at its path: it stats, it cannot be read,
+/// on Linux and on Windows): no verdict, so the job waits like a failed
+/// fetch instead of running here on a guess.
+#[tokio::test]
+async fn lyrics_whose_audio_cannot_be_hashed_now_wait() {
+    let (_snv, pp, id, _) = snv_and_pp().await;
+    let audio: String = sqlx::query_scalar("SELECT audio_file_path FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    std::fs::remove_file(&audio).unwrap();
+    std::fs::create_dir(&audio).unwrap();
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        first(Some(&pp.ex), &row).await,
+        PeerStep::Deferred
+    ));
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 1, "counted against the 2 h bound");
+    assert!(pp.ex.board.snapshot("pp").is_empty(), "nothing runs here");
+    let now = lyrics_now(&pp, id).await;
+    assert_eq!((now.has_lyrics, now.lyrics_attempts), (0, 0));
+    assert_eq!(json_at(&pp), None);
 }
 
 #[tokio::test]

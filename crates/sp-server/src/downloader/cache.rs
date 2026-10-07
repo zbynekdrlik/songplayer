@@ -252,6 +252,21 @@ fn path_column(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// A `videos` row records `path` as its video or its audio: the file is a
+/// song's, never debris to delete (#136: rows of one video share files by
+/// name, so a name one attempt writes can be the file another row plays).
+/// A caller that deletes on `false` holds [`SONG_FILES`] from this read to
+/// the delete, so no rename or record lands between them (the startup
+/// self-heal needs no lock: it runs before any renamer is started).
+pub async fn recorded_by_a_row(pool: &sqlx::SqlitePool, path: &Path) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM videos WHERE file_path = ?1 OR audio_file_path = ?1)",
+    )
+    .bind(path_column(path))
+    .fetch_one(pool)
+    .await
+}
+
 /// Rename a song's COMPLETE file set from `old` to `new` as one unit (#136):
 /// the files named after the audio ([`derived_files`]) first, then the audio,
 /// then the video. Returns the set now in effect: `new` when every move

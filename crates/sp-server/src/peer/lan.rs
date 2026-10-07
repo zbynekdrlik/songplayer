@@ -1,5 +1,6 @@
 //! #229: this node's exchange on the LAN API (no peer key):
-//! `GET /api/v1/exchange/status` and `POST /api/v1/exchange/probe`.
+//! `GET /api/v1/exchange/status`, `POST /api/v1/exchange/probe` and
+//! `POST /api/v1/exchange/probe/transfer`.
 
 use std::sync::Arc;
 
@@ -15,6 +16,7 @@ use super::Exchange;
 use super::catalog::{self, CatalogCounts};
 use super::client::LastRead;
 use super::config::NodeConfig;
+use super::transfer_probe::{PROBE_MAX_TIME, TransferProbe};
 use super::wire::CatalogJob;
 
 /// `GET /api/v1/exchange/status`.
@@ -65,6 +67,7 @@ pub fn router(ex: Arc<Exchange>) -> Router {
     Router::new()
         .route("/api/v1/exchange/status", get(status))
         .route("/api/v1/exchange/probe", post(probe))
+        .route("/api/v1/exchange/probe/transfer", post(probe_transfer))
         .with_state(ex)
 }
 
@@ -128,6 +131,25 @@ pub async fn probe(State(ex): State<Arc<Exchange>>) -> Response {
     }
     let ok = results.iter().filter(|r| r.ok).count();
     info!(peers = results.len(), ok, "exchange: probe");
+    Json(results).into_response()
+}
+
+/// One real artifact from every peer, now (`peer::transfer_probe`): the
+/// live gate of PP's transfers through Cloudflare. 409 when a transfer probe
+/// is already running or the exchange settings do not hold.
+pub async fn probe_transfer(State(ex): State<Arc<Exchange>>) -> Response {
+    let Ok(_one) = ex.transfer_probe.try_lock() else {
+        return (StatusCode::CONFLICT, "a transfer probe is already running").into_response();
+    };
+    let cfg = match NodeConfig::load(&ex.pool).await {
+        Ok(cfg) => cfg,
+        Err(e) => return (StatusCode::CONFLICT, e).into_response(),
+    };
+    let tmp = std::env::temp_dir();
+    let mut results: Vec<TransferProbe> = Vec::new();
+    for peer in &cfg.peers {
+        results.push(ex.probe_transfer(peer, &tmp, PROBE_MAX_TIME).await);
+    }
     Json(results).into_response()
 }
 

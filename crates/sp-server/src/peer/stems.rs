@@ -3,9 +3,11 @@
 //! transfer — read under `cache::SONG_FILES`, the lock a rename holds (#136,
 //! `.claude/rules/song-files.md`) — and marked done. Nothing is transferred
 //! for a song with no audio on disk here: `song_input::job_input` defers it
-//! with no attempt, as for a local separation. The stem worker asks before
-//! its venv check (the plan's decisions): a node with no lyrics venv still
-//! takes a peer's stems.
+//! with no attempt first, as for a local separation. Then only when this
+//! node's audio IS the peer's (`peer::audio`): stems separated from another
+//! encode are separated here instead. The stem worker asks before its venv
+//! check (the plan's decisions): a node with no lyrics venv still takes a
+//! peer's stems.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -37,6 +39,12 @@ pub async fn first(ex: Option<&Arc<Exchange>>, job: &StemJob) -> PeerStep {
             .await;
             if input.is_none() {
                 return PeerStep::Deferred;
+            }
+            if let Some(step) = ex
+                .unless_peers_audio(kind, &plan, job.video_id, &job.youtube_id)
+                .await
+            {
+                return step;
             }
             match adopt(ex, job, &plan).await {
                 Ok(()) => {

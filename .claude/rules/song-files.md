@@ -167,11 +167,27 @@ Design record: #136 comment 5894034820.
   a final name can already hold another row's recorded file: read
   `try_exists` BEFORE the rename, and rename the file a player may hold open
   (the video: Media Foundation does not share delete; the audio reader
-  does) FIRST, so its failure touches nothing. (`downloader/mod.rs`'s own
-  "video rename failed" branch still removes `audio_final`
-  unconditionally.) A test forces the failure with a DIRECTORY at the
-  target name: renaming a file onto an existing directory fails on Linux
-  (EISDIR) and on Windows.
+  does) FIRST, so its failure touches nothing. A test forces the failure
+  with a DIRECTORY at the target name: renaming a file onto an existing
+  directory fails on Linux (EISDIR) and on Windows.
+- **The local download's failed video rename keeps an audio a row records**
+  (#229 follow-up lane, `downloader/mod.rs::place_video`). The download
+  normalizes straight into `audio_final`, the name every row of the video
+  records; when the video then cannot take its name (another row's video
+  held open on Windows), the attempt drops its video temp (its audio temp
+  went right after the normalize), and drops the audio only when no row
+  records it (`cache::recorded_by_a_row`, the self-heal's own ownership
+  query, read and deleted under `cache::SONG_FILES`; a failed read keeps
+  it, WARNed). Pinned by
+  `mod_tests.rs::a_failed_video_rename_keeps_the_audio_two_rows_record`
+  (RED → GREEN), `…_drops_an_audio_no_row_records` (no orphan) and
+  `…_keeps_the_audio_when_the_rows_cannot_be_read`.
+  - Known, not fixed here: the normalize itself (`normalize_audio` pass 2)
+    writes straight into that shared name, so an ffmpeg that dies half-way
+    leaves a truncated audio other rows play. Normalizing into a temp name
+    and renaming needs a rename onto a file a player holds open on Windows
+    (the POSIX rename `win_replace` gives the Python children; nothing in
+    Rust does it yet): a follow-up candidate, #229 follow-up lane review.
 - **`startup::self_heal_cache` never deletes an orphan half-sidecar a row
   records.** That half belongs to a song split across two names (a move-back
   that failed); it is kept and WARNed. The post-deploy FLAC check accepts

@@ -9,6 +9,9 @@
  *   (`GET /api/v1/exchange/status`).
  * - `probeFailures`: PP's live read of that peer's catalog
  *   (`POST /api/v1/exchange/probe`).
+ * - `transferFailures`: PP's real transfer of that peer's smallest file
+ *   artifact, its byte count and sha256 read back at PP
+ *   (`POST /api/v1/exchange/probe/transfer`).
  */
 
 /** One entry of `POST /api/v1/exchange/probe` (sp-server `lan::ProbeResult`). */
@@ -105,5 +108,57 @@ export function probeFailures(results: ProbeResult[], peer: string, viaHost: str
   if (!through(r.base_url, viaHost)) failures.push(notThrough(peer, viaHost, r.base_url));
   if (!r.ok) failures.push(`reading ${peer}'s catalog failed: ${r.error ?? "no error text"}`);
   else if (r.artifacts < 1) failures.push(`${peer}'s catalog lists no artifact`);
+  return failures;
+}
+
+/** The catalog's entry of the artifact a transfer probe fetched (sp-server
+ *  `wire::Artifact`), the fields this gate reads. */
+export interface ProbedArtifact {
+  youtube_id: string;
+  kind: string;
+  size: number;
+  sha256: string;
+}
+
+/** One entry of `POST /api/v1/exchange/probe/transfer` (sp-server
+ *  `transfer_probe::TransferProbe`): the peer's smallest file artifact,
+ *  fetched by PP's own client into a temp dir outside its cache, then read
+ *  back (its byte count and sha256). */
+export interface TransferProbe {
+  name: string;
+  base_url: string;
+  ok: boolean;
+  artifact: ProbedArtifact | null;
+  bytes: number | null;
+  sha256: string | null;
+  latency_ms: number;
+  error: string | null;
+}
+
+/** Why PP's real transfer from `peer` fails the gate; empty when it passes:
+ *  the peer is read through `https://<viaHost>` (Cloudflare), a non-empty
+ *  FILE artifact came through whole (the catalog's byte count) and its
+ *  sha256 read back at PP is the catalog's. A `metadata` entry is answered
+ *  from a row, so it would not prove the file path through Cloudflare. */
+export function transferFailures(results: TransferProbe[], peer: string, viaHost: string): string[] {
+  const r = results.find((x) => x.name === peer);
+  if (!r) return [`no peer named ${peer} is configured`];
+  const failures: string[] = [];
+  if (!through(r.base_url, viaHost)) failures.push(notThrough(peer, viaHost, r.base_url));
+  if (!r.ok) {
+    failures.push(`transferring an artifact from ${peer} failed: ${r.error ?? "no error text"}`);
+    return failures;
+  }
+  const a = r.artifact;
+  if (a === null) return [...failures, `${peer}: the probe names no artifact it transferred`];
+  const what = `${peer}'s ${a.kind} of ${a.youtube_id}`;
+  if (a.kind === "metadata") failures.push(`${what} is not a file artifact`);
+  if (a.size < 1) failures.push(`${what} is empty: no bytes were transferred`);
+  if (r.bytes !== a.size) {
+    failures.push(`${what}: ${r.bytes ?? "no"} bytes arrived, the catalog says ${a.size}`);
+  }
+  if (r.sha256 !== a.sha256) {
+    failures.push(`${what}: sha256 ${r.sha256 ?? "none"} arrived, the catalog says ${a.sha256}`);
+  }
   return failures;
 }

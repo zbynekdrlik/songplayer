@@ -2,7 +2,10 @@
 //! reprocess or "Nesedí": `lyrics_manual_priority`; a `lyrics_override_text`),
 //! and never for a video whose `{yt}_lyrics.json` here is a dub's subtitles
 //! (any row of it dub-requested or Live-Translate: the catalog's dub rule,
-//! Review Focus 5). The peer's row (`/videos`) must match its catalog and must
+//! Review Focus 5), and only when this node's audio IS the peer's
+//! (`peer::audio`): every track's line timings were measured on the peer's
+//! audio, so a song whose audio here is another encode is processed here.
+//! The peer's row (`/videos`) must match its catalog and must
 //! not be the Live-Translate track; a copy of what the row already serves (the
 //! same source at the same version, e.g. the daily full-mix upgrade) is
 //! nothing newer: the job runs here. The track is parsed as a typed
@@ -46,20 +49,28 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
     match ex.ask(job, &row.youtube_id).await {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
         Ask::Wait { recheck, .. } => ex.defer(job, row.id, recheck).await,
-        Ask::Fetch(plan) => match adopt(ex, row, &plan).await {
-            Ok(Adopted::Track) => {
-                ex.fetched(job, &row.youtube_id, &plan.peer.name, &plan.artifacts)
-                    .await;
-                PeerStep::Done
+        Ask::Fetch(plan) => {
+            if let Some(step) = ex
+                .unless_peers_audio(job, &plan, row.id, &row.youtube_id)
+                .await
+            {
+                return step;
             }
-            Ok(Adopted::NothingNewer) => {
-                PeerStep::Local(Some(ex.run_here(job, &row.youtube_id).await))
+            match adopt(ex, row, &plan).await {
+                Ok(Adopted::Track) => {
+                    ex.fetched(job, &row.youtube_id, &plan.peer.name, &plan.artifacts)
+                        .await;
+                    PeerStep::Done
+                }
+                Ok(Adopted::NothingNewer) => {
+                    PeerStep::Local(Some(ex.run_here(job, &row.youtube_id).await))
+                }
+                Err(e) => {
+                    ex.after_failed_fetch(job, row.id, &row.youtube_id, &plan.peer.name, &e)
+                        .await
+                }
             }
-            Err(e) => {
-                ex.after_failed_fetch(job, row.id, &row.youtube_id, &plan.peer.name, &e)
-                    .await
-            }
-        },
+        }
     }
 }
 

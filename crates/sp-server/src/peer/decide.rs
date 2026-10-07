@@ -15,10 +15,14 @@
 //!
 //! Only the peers this node lists in its own `peers` setting are read, so a
 //! node waits only for those: SNV lists none in phase 1, and asks nobody.
+//!
+//! A Fetch of stems or lyrics is taken only when this node's audio is the
+//! audio the peer lists ([`same_audio`]; the stems and lyrics hooks ask it
+//! through `Exchange::unless_peers_audio`), else that job runs here.
 
 use std::time::Duration;
 
-use super::kind::{Job, acceptable};
+use super::kind::{ArtifactKind, Job, acceptable};
 use super::wire::{Artifact, Catalog};
 
 /// How long a job waits for its peers before it runs here (spec: "~2 h").
@@ -125,6 +129,40 @@ pub fn holds(catalog: &Catalog, job: Job, youtube_id: &str) -> Option<Vec<Artifa
                 .cloned()
         })
         .collect()
+}
+
+/// The audio `catalog` lists for `youtube_id` (a node lists one per video):
+/// the audio that node's stems and lyrics were made from.
+pub fn listed_audio<'a>(catalog: &'a Catalog, youtube_id: &str) -> Option<&'a Artifact> {
+    catalog
+        .artifacts
+        .iter()
+        .find(|a| a.youtube_id == youtube_id && a.kind == ArtifactKind::Audio)
+}
+
+/// What this node knows of a row's audio file on disk, for [`same_audio`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OwnAudio<'a> {
+    /// The `peer_fetches` record of the video's audio: the node it came from
+    /// and its sha256. One per VIDEO, so it vouches only for a row audio of
+    /// the fetched size (`size`).
+    pub fetched: Option<(&'a str, &'a str)>,
+    /// The size of the row's audio file.
+    pub size: u64,
+    /// This node's own hash of the row's audio file.
+    pub hashed: Option<&'a str>,
+}
+
+/// This node's audio IS `listed`, the audio `peer` lists now, so that peer's
+/// stems and lyrics fit it: this node fetched its video's audio from that
+/// peer at that very sha AND the row's audio has its size, or this node's
+/// own hash of the row's audio is that sha. Stems or line timings made from
+/// another encode would drift against this node's audio, so the job then
+/// runs here.
+pub fn same_audio(peer: &str, listed: &Artifact, own: OwnAudio<'_>) -> bool {
+    let sha = listed.sha256.as_str();
+    let fetched_here = own.fetched == Some((peer, sha)) && own.size == listed.size;
+    fetched_here || own.hashed == Some(sha)
 }
 
 /// A job that has waited `waited` for its peers runs here now: the bound of

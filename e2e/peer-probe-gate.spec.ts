@@ -2,8 +2,10 @@ import { test, expect } from "@playwright/test";
 import {
   peerSetupFailures,
   probeFailures,
+  transferFailures,
   type ExchangeStatusView,
   type ProbeResult,
+  type TransferProbe,
 } from "./peer-probe-gate";
 
 const HOST = "sp.newlevel.media";
@@ -82,6 +84,90 @@ test.describe("peer probe gate (#229)", () => {
   test("another peer's read is not this one's", () => {
     expect(probeFailures([{ ...ok, name: "other" }], "snv", HOST)).toEqual([
       "no peer named snv is configured",
+    ]);
+  });
+});
+
+const SHA = "ab".repeat(32);
+
+const moved: TransferProbe = {
+  name: "snv",
+  base_url: "https://sp.newlevel.media",
+  ok: true,
+  artifact: { youtube_id: "aaaaaaaaaaa", kind: "lyrics", size: 4321, sha256: SHA },
+  bytes: 4321,
+  sha256: SHA,
+  latency_ms: 900,
+  error: null,
+};
+
+test.describe("PP's real transfer from SNV (#229)", () => {
+  test("a whole file with the catalog's sha256 passes", () => {
+    expect(transferFailures([moved], "snv", HOST)).toEqual([]);
+  });
+
+  test("a missing peer fails", () => {
+    expect(transferFailures([{ ...moved, name: "other" }], "snv", HOST)).toEqual([
+      "no peer named snv is configured",
+    ]);
+  });
+
+  test("a transfer off the public host is not the Cloudflare path", () => {
+    const lan = { ...moved, base_url: "http://10.77.9.201:8920" };
+    expect(transferFailures([lan], "snv", HOST)).toEqual([
+      "peer snv is not read through https://sp.newlevel.media (base_url http://10.77.9.201:8920)",
+    ]);
+  });
+
+  test("a refused transfer fails with its error, or without one", () => {
+    const refused = {
+      ...moved,
+      ok: false,
+      bytes: null,
+      sha256: null,
+      error: "sha256 mismatch: the catalog says x, the bytes are y",
+    };
+    expect(transferFailures([refused], "snv", HOST)).toEqual([
+      "transferring an artifact from snv failed: sha256 mismatch: the catalog says x, the bytes are y",
+    ]);
+    expect(transferFailures([{ ...refused, error: null }], "snv", HOST)).toEqual([
+      "transferring an artifact from snv failed: no error text",
+    ]);
+  });
+
+  test("a probe that names no artifact fails", () => {
+    expect(transferFailures([{ ...moved, artifact: null }], "snv", HOST)).toEqual([
+      "snv: the probe names no artifact it transferred",
+    ]);
+  });
+
+  test("a short transfer fails with both byte counts", () => {
+    expect(transferFailures([{ ...moved, bytes: 4320 }], "snv", HOST)).toEqual([
+      "snv's lyrics of aaaaaaaaaaa: 4320 bytes arrived, the catalog says 4321",
+    ]);
+    expect(transferFailures([{ ...moved, bytes: null }], "snv", HOST)).toEqual([
+      "snv's lyrics of aaaaaaaaaaa: no bytes arrived, the catalog says 4321",
+    ]);
+  });
+
+  test("another sha256 fails with both", () => {
+    const other = "cd".repeat(32);
+    expect(transferFailures([{ ...moved, sha256: other }], "snv", HOST)).toEqual([
+      `snv's lyrics of aaaaaaaaaaa: sha256 ${other} arrived, the catalog says ${SHA}`,
+    ]);
+    expect(transferFailures([{ ...moved, sha256: null }], "snv", HOST)).toEqual([
+      `snv's lyrics of aaaaaaaaaaa: sha256 none arrived, the catalog says ${SHA}`,
+    ]);
+  });
+
+  test("a metadata entry or an empty file proves no file transfer", () => {
+    const metadata = { ...moved, artifact: { ...moved.artifact!, kind: "metadata" } };
+    expect(transferFailures([metadata], "snv", HOST)).toEqual([
+      "snv's metadata of aaaaaaaaaaa is not a file artifact",
+    ]);
+    const empty = { ...moved, bytes: 0, artifact: { ...moved.artifact!, size: 0 } };
+    expect(transferFailures([empty], "snv", HOST)).toEqual([
+      "snv's lyrics of aaaaaaaaaaa is empty: no bytes were transferred",
     ]);
   });
 });

@@ -50,6 +50,10 @@ pub enum PeerError {
     BadResponse(String),
     #[error("sha256 mismatch: the catalog says {expected}, the bytes are {got}")]
     ShaMismatch { expected: String, got: String },
+    /// Nothing was transferred: this node cannot tell yet whether the peer's
+    /// copy fits it (`peer::audio`).
+    #[error("not taken yet: {0}")]
+    NotYet(String),
     #[error("local: {0}")]
     Io(String),
 }

@@ -418,3 +418,109 @@ async fn record_download_failure_truncates_error_to_last_300_chars() {
         "last_download_error must be truncated to the last 300 chars"
     );
 }
+
+const SHARED_YT: &str = "aaaaaaaaaaa";
+
+/// Two playlists, each with a row of [`SHARED_YT`] that records `video` and
+/// `audio`, or no file at all (`None`): rows of one video share files by name
+/// (#136).
+async fn pool_with_two_rows(pair: Option<(&Path, &Path)>) -> SqlitePool {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p1', 'u1'), (2, 'p2', 'u2')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let video = pair.map(|(v, _)| v.to_string_lossy().into_owned());
+    let audio = pair.map(|(_, a)| a.to_string_lossy().into_owned());
+    for playlist in [1, 2] {
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, title, normalized, file_path, \
+             audio_file_path) VALUES (?, ?, 't', ?, ?, ?)",
+        )
+        .bind(playlist)
+        .bind(SHARED_YT)
+        .bind(pair.is_some())
+        .bind(&video)
+        .bind(&audio)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    pool
+}
+
+/// The local download's names for [`SHARED_YT`] in `dir`: the video temp, the
+/// final video and the final (normalized) audio, the temp and the audio
+/// written. With `video_held`, a non-empty directory holds the final video's
+/// name: a rename onto it fails on Linux and on Windows.
+fn download_files(dir: &Path, video_held: bool) -> (PathBuf, PathBuf, PathBuf) {
+    let temp = dir.join(format!("{SHARED_YT}_video_temp.mp4"));
+    let video = dir.join(cache::video_filename("Song", "Artist", SHARED_YT, false));
+    let audio = dir.join(cache::audio_filename("Song", "Artist", SHARED_YT, false));
+    std::fs::write(&temp, b"the fresh video").unwrap();
+    std::fs::write(&audio, b"the normalized audio").unwrap();
+    if video_held {
+        std::fs::create_dir(&video).unwrap();
+        std::fs::write(video.join("held"), b"in the way").unwrap();
+    }
+    (temp, video, audio)
+}
+
+/// #229 follow-up (data loss): the local download normalizes into the audio
+/// name every row of the video records (#136). When the video then cannot
+/// take its final name, that audio is still the one two rows play: it stays.
+#[tokio::test]
+async fn a_failed_video_rename_keeps_the_audio_two_rows_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let (temp, video, audio) = download_files(dir.path(), true);
+    let pool = pool_with_two_rows(Some((&video, &audio))).await;
+    assert!(place_video(&pool, &temp, &video, &audio).await.is_err());
+    assert_eq!(
+        std::fs::read(&audio).unwrap(),
+        b"the normalized audio",
+        "the audio two rows record survives the failed attempt"
+    );
+    assert!(!temp.exists(), "the attempt's video temp goes");
+}
+
+/// An audio no row records is this attempt's alone: it goes with the failed
+/// attempt, never left behind as an orphan.
+#[tokio::test]
+async fn a_failed_video_rename_drops_an_audio_no_row_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let (temp, video, audio) = download_files(dir.path(), true);
+    let pool = pool_with_two_rows(None).await;
+    assert!(place_video(&pool, &temp, &video, &audio).await.is_err());
+    assert!(
+        !audio.exists(),
+        "an unrecorded audio is this attempt's debris"
+    );
+    assert!(!temp.exists());
+}
+
+/// When the rows cannot be read, nobody can say the audio is debris: it
+/// stays (WARNed).
+#[tokio::test]
+async fn a_failed_video_rename_keeps_the_audio_when_the_rows_cannot_be_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let (temp, video, audio) = download_files(dir.path(), true);
+    let pool = pool_with_two_rows(None).await;
+    pool.close().await;
+    assert!(place_video(&pool, &temp, &video, &audio).await.is_err());
+    assert_eq!(std::fs::read(&audio).unwrap(), b"the normalized audio");
+    assert!(!temp.exists());
+}
+
+#[tokio::test]
+async fn a_placed_video_keeps_its_audio() {
+    let dir = tempfile::tempdir().unwrap();
+    let (temp, video, audio) = download_files(dir.path(), false);
+    let pool = pool_with_two_rows(None).await;
+    place_video(&pool, &temp, &video, &audio).await.unwrap();
+    assert_eq!(std::fs::read(&video).unwrap(), b"the fresh video");
+    assert_eq!(std::fs::read(&audio).unwrap(), b"the normalized audio");
+    assert!(!temp.exists());
+}

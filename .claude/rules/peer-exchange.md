@@ -104,23 +104,57 @@ workers ask their peers before they run a job (below, from "Ask first").
   latency_ms, error}]`, 409 with the reason when the settings do not hold.
   It is the live gate of PP → SNV through Cloudflare (PP's post-deploy
   subset calls it, "PP deploy" below).
+- `POST /api/v1/exchange/probe/transfer` (LAN, no key; `peer::transfer_probe`,
+  the #229 follow-up lane) transfers one real artifact of every peer now:
+  `[{name, base_url, ok, artifact, bytes, sha256, latency_ms, error}]`.
+  - Per peer: its catalog read now, its smallest non-empty FILE artifact
+    (`transfer_probe::pick`; a `metadata` entry is answered from a row, not
+    through the file path), at most `PROBE_MAX_BYTES` (64 MiB).
+  - Fetched through `PeerClient::fetch_unslotted` (the same request, size
+    bound and sha check as an adoption) into a temp dir under the OS temp
+    dir, NEVER the cache, removed when the probe ends. `bytes` / `sha256`
+    are what arrived, read back. A fresh temp dir holds no part, so no
+    `Range` request is sent: Range through Cloudflare stays unproven by the
+    gate (the adoptions' resume uses it).
+  - Bounded in time too: `PROBE_MAX_TIME` (300 s per peer, the catalog
+    read included, under the gate's 330 s request bound with PP's one
+    peer; phase 2, with more peers probed one after another, can pass
+    that bound). A transfer that trickles past it fails (`the probe took
+    over 300s`), its temp dir removed, and the probe lock is free for the
+    next gate run. Known limit: on Windows a blocking write still holding
+    the part when the bound fires can make that removal fail silently,
+    leaving at most 64 MiB in `%TEMP%\songplayer-peer-probe-*`.
+  - It does NOT take the per-peer transfer slot: its part is its own and
+    small, and the gate must not wait behind the workers' queued transfers
+    (a `tokio::sync::Mutex` serves them in arrival order, up to one per
+    worker, a whole video among them). `fetch` takes the slot and calls
+    `fetch_unslotted`; only the probe calls the latter directly.
+  - Refused (per peer, `ok: false`) while this node's transfers are paused,
+    with no catalog read either. One probe at a time: a second answers 409
+    (`Exchange::transfer_probe`, a lock per node); settings that do not hold
+    answer 409 too.
+  - PP's post-deploy subset calls it (`transferFailures`, "PP deploy"
+    below).
 - Later lanes may ADD fields to `ExchangeStatus` / `PeerStatus`.
 
 ## Wiring
 
-- `peer::Exchange { pool, cache_dir, board, client }` (`client` is
-  `pub(crate)`; `cache_dir` holds the `{yt}_lyrics.json` the catalog names
+- `peer::Exchange { pool, cache_dir, board, client, transfer_probe }`
+  (`client` and `transfer_probe` are `pub(crate)`; `cache_dir` holds the `{yt}_lyrics.json` the catalog names
   and the fetch parts dir `<cache>/peer/`; `board` = the jobs announced as
   running, below), built once by `lib.rs` right after `AppState`:
   `Exchange::new(pool, cache_dir) -> Arc<Exchange>` (it builds the board and
   the peer client). `lib.rs` spawns `peer::hasher::run` next to it and hands
   a clone to each asking worker (`with_peer`, "Ask first" below).
-- `peer::router(exchange)` = `lan::router` (status, probe) merged with
+- `peer::router(exchange)` = `lan::router` (status, probe, transfer
+  probe) merged with
   `api::router` (the peer API); `lib.rs` merges it into the app's router at
   "11. Axum HTTP server". `merge` is valid because only `api::router` (the
   dashboard's) carries a fallback (the SPA): axum panics when merging two
   routers that both have one, so an exchange router never gets a fallback.
   The peer routes get none of the dashboard's layers (no CORS).
+- `Exchange::transfer_probe` (a `tokio::sync::Mutex<()>`) is held while a
+  transfer probe runs: one at a time per node (`lan::probe_transfer`).
 - Tests: `peer/lan_tests.rs` (the route through `peer::router` + `oneshot`
   over a migrated in-memory database; the merge exactly as `lib.rs` does it,
   `api::router` with a dist dir merged with `peer::router`, still serving
@@ -297,7 +331,8 @@ workers ask their peers before they run a job (below, from "Ask first").
   video's lyrics too), 400 a bad id; files through tower-http `ServeFile`
   (Range → 206, HEAD, 416) in a body throttled to `peer_serve_max_mbps`
   (`throttle::throttled`), per response: phase 1 has one asking peer, which
-  sends one transfer at a time; a node-wide cap is for a second peer
+  sends one transfer at a time (plus, at a deploy, PP's small transfer
+  probe); a node-wide cap is for a second peer
   (phase 2). The `metadata` kind answers
   `PeerMetadata::to_bytes` as `application/json` (its sha is the catalog's).
 - SNV's post-deploy gate `e2e/post-deploy-peer-serving.spec.ts` needs no
@@ -317,7 +352,8 @@ workers ask their peers before they run a job (below, from "Ask first").
   API is off there), 503 `Paused`, other non-2xx `BadResponse`; a transport
   error is `Unreachable`: its cause chain (connect, DNS, TLS, timeout)
   without the URL (a TLS name mismatch names the peer's host, as the status
-  does). No error text holds a key.
+  does). `NotYet` is local: this node cannot tell yet whether a peer's copy
+  fits it (`peer::audio`). No error text holds a key.
 - Every GET carries `X-SP-Peer-Key`, plus `CF-Access-Client-Id/Secret` for a
   peer with a token. Timeouts: 10 s connect, 60 s between two reads, 30 s
   for a whole catalog or video row (an artifact has no total bound).
@@ -333,8 +369,8 @@ workers ask their peers before they run a job (below, from "Ask first").
   dropped; a 200 restarts it), never past the catalog's size (one byte over:
   dropped), sha-checked at the end (a mismatch drops the part AND the
   cached catalog); a short body keeps the part for the next attempt. One
-  transfer at a time per peer (`PeerClient::slot`); `Exchange::fetch`
-  refuses while paused. The adopters rename the verified part into place
+  transfer at a time per peer (`PeerClient::slot`; only the transfer probe
+  skips it, `fetch_unslotted`); `Exchange::fetch` refuses while paused. The adopters rename the verified part into place
   and fetch one job's artifacts from ONE peer (`FetchPlan` = one peer):
   two fetches of the same video and kind from two peers would drop each
   other's part. A failed adoption keeps a verified part: the next attempt
@@ -423,6 +459,12 @@ workers ask their peers before they run a job (below, from "Ask first").
     `cf_client_id + cf_client_secret`;
   - the live probe (`probeFailures`): the read worked, the catalog lists at
     least one artifact;
+  - the real transfer (`transferFailures`, `POST
+    /api/v1/exchange/probe/transfer`, a 6 min test bound): SNV's smallest
+    file artifact arrived whole (the catalog's byte count) with the
+    catalog's sha256, through `https://sp.newlevel.media`; a refusal, a
+    metadata or empty artifact, a short transfer or another sha fails it,
+    naming the cause;
   - a playlist pressed through the facade plays on program (health
     `Playing/Playing`) and SP-program has a receiver (an NDI receiver of
     `SP-program` must exist at PP, else this is red on every release). The
@@ -519,18 +561,22 @@ workers ask their peers before they run a job (below, from "Ask first").
   announced in this node's catalog while the hook holds the guard. A Wait
   records its start (`peer_waits`, the FIRST start kept).
 - Every job that runs here after a peer read goes through
-  `Exchange::run_here`: it ENDS the job's wait, drops the parts a fetch of
-  it left, then announces it (a later ask never inherits an old start and
-  its spent bound). The hooks' own Local paths use it too (an operator's
-  lyrics ask, nothing newer, a fetch that kept failing). The no-peers and
-  bad-settings paths only announce (no DB write): a wait recorded before
+  `Exchange::run_here`: it ENDS the job's wait, forgets the `peer_fetches`
+  records of what the job makes (`forget_origins`, the audio guard below),
+  drops the parts a fetch of it left, then announces it (a later ask never
+  inherits an old start and its spent bound). The hooks' own Local paths use
+  it too (an operator's lyrics ask, nothing newer, a fetch that kept
+  failing, another audio). The no-peers and bad-settings paths only announce
+  (`ask` writes nothing; the download hook then forgets the pair's
+  records, below): a wait recorded before
   the settings went bad survives them, so the first ask after the fix may
   run the job here at once (its bound already spent). Accepted.
 - A fetch refused by this node's own pause logs at DEBUG (it recurs for
   every row on every tick while the pause lasts); other fetch failures WARN.
 - Rechecks back off (`recheck_after`): a quarter of the wait so far, 2–20
   min, never past the bound, at least 1 min. A failed fetch
-  (`Exchange::fetch_failed`) counts as waiting and WARNs; a Fetch still
+  (`Exchange::fetch_failed`) counts as waiting and WARNs (`exchange: a
+  peer's copy was not taken - asking again later`); a Fetch still
   wins after the bound, but a fetch that KEEPS failing does not: once the
   job has waited the bound (`decide::gives_up`), `fetch_failed` answers
   `None` and the hook runs the job here (`Exchange::after_failed_fetch`;
@@ -588,16 +634,25 @@ workers ask their peers before they run a job (below, from "Ask first").
 - `Exchange::run_here` drops the parts of the job's needed kinds
   (`drop_job_parts`): a job that runs here (2 h bound, a fetch that kept
   failing) leaves no orphaned part in `<cache>/peer/`.
-- Not this lane's (a follow-up candidate): the LOCAL download's "video rename
-  failed" branch (`downloader/mod.rs`) still removes `audio_final`
-  unconditionally, which can be another row's recorded audio.
-- Known limits (follow-up candidates): `peer::stems::adopt` has no rollback
-  when the instrumental cannot take its name after the vocals did (rare: the
-  stem readers share delete); `models_peer::adopt_lyrics` is two UPDATEs, not
-  one transaction (a failed second one leaves the row's old ★ and
-  translation version); PP's post-deploy subset probes only the catalog,
-  never an artifact transfer through Cloudflare (step 4 below checks it by
-  hand).
+- The LOCAL download's "video rename failed" branch
+  (`downloader/mod.rs::place_video`, the #229 follow-up lane) deletes the
+  normalized audio only when no row records it (`cache::recorded_by_a_row`,
+  read and deleted under `cache::SONG_FILES`; a failed read keeps it):
+  the local download normalizes into the very name every row of the video
+  records (`song-files.md`).
+- Known limits (decision 6039426543 point 5: documented, revisit when PP
+  runs live): `peer::stems::adopt` has no rollback when the instrumental
+  cannot take its name after the vocals did (rare: the stem readers share
+  delete); `models_peer::adopt_lyrics` is two UPDATEs, not one transaction
+  (a failed second one leaves the row's old ★ and translation version); a
+  failed catalog read is not cached (no negative cache), so while a peer
+  is unreachable every ask reads it again, each bounded by the 10 s
+  connect timeout. The audio guard's on-demand hash (below) has no
+  single-flight: PP's stems and lyrics workers may hash the same audio
+  at once (two reads at the hasher's rate), and on a serving node an
+  entry it stores for an audio the catalog does not list (not the
+  video's lowest row) is pruned by the next hasher pass, then taken
+  again when asked. The waits' limits are under "Ask first" above.
 - `downloader/` is out of the mutation gate: the logic stays in `peer/`,
   only the hook lives in `downloader/mod.rs`; its tests are `mod_tests.rs`
   (moved out for the cap) + `mod_tests_peer.rs` (tools missing on purpose:
@@ -614,17 +669,74 @@ workers ask their peers before they run a job (below, from "Ask first").
   worker with no exchange stops at the missing venv as before #229
   (`no_venv_asks_peers`): no pick, no defer. Before a fetch, `song_input::job_input`
   re-reads the song's audio: none on disk → deferred with no attempt and
-  nothing transferred. The parts are renamed under `stem_paths(<the audio
+  nothing transferred; then the audio guard (below). The parts are renamed
+  under `stem_paths(<the audio
   the row records AFTER the transfer>)`, read under `SONG_FILES`, then
   `mark_stems_done`. `song_input_tests.rs` pins the order after the hook.
-- Known limit (a follow-up for the main to file): stems and ★ lyrics are
-  taken whatever this node's audio is; a song this node downloaded itself
-  (nobody had it within 2 h) can later take a peer's stems or line timings
-  made from the peer's own download. Stems are played INSTEAD of the
-  original (never mixed with it), so only a constant offset against the
-  video could show. A guard: take a peer's stems only when `peer_fetches`
-  records this node's audio from that peer with the audio sha its catalog
-  lists now.
+- The audio guard (`peer::audio`, the #229 follow-up lane): a peer's stems
+  and lyrics (★ or base tier: every track's line timings were measured on
+  the peer's audio) are taken only when this node's audio IS the peer's,
+  the pure `decide::same_audio` over the audio the peer lists
+  (`FetchPlan::peer_audio`: its sha256 and size, read by `ask` from the
+  same catalog as the decision, `decide::listed_audio`) and what this node
+  has (`decide::OwnAudio`):
+  - `peer_fetches` records the video's audio as fetched from that peer at
+    that sha, AND the row's CURRENT audio file has that size (the record is
+    per video, the audio per row: a row whose audio is a local encode under
+    another title's name is not vouched for);
+  - or this node's own hash of the row's current audio is that sha.
+
+  The record is read FIRST: it reads no file, so an adopted song costs no
+  audio read. Only when it does not vouch is the audio hashed
+  (`Exchange::audio_sha`): its `peer_hashes` entry while that still holds
+  (`HashEntry::holds`, trusted as the catalog trusts it), else hashed NOW
+  at the hasher's rate and stored as the hasher would
+  (`hasher::hash_unchanged`, shared with the passes). PP in phase 1 runs
+  no hasher, and the audio phase 0 copied from SNV carries no fetch
+  record: without the on-demand hash no copied song could take SNV's
+  work.
+
+  `Exchange::unless_peers_audio` runs it on `Ask::Fetch`, with the row's
+  id, before any transfer (stems: after `job_input`, so a row with no audio
+  on disk is still deferred with no attempt), and answers the step the
+  hook returns instead:
+  - another audio → the job runs here (`run_here`, INFO `exchange: the
+    peer's copy is made from another audio than this node's`): a song this
+    node downloaded itself (nobody had it within 2 h), or a peer that
+    downloaded its song again since;
+  - this node cannot tell yet → waited for like a failed fetch
+    (`after_failed_fetch` with `PeerError::NotYet`, no attempt, within the
+    2 h bound), never decided on a guess: the peer lists no audio of the
+    video right now (a rename there not hashed again yet: the stems or
+    `{yt}_lyrics.json` can still be listed), no audio of the row is on
+    disk here (the lyrics hook; the stems hook defers that before), or
+    the record does not vouch and the audio cannot be hashed now (it
+    changed meanwhile, a rename here; or it cannot be read): only a
+    computed sha that differs runs the job here;
+  - this node's transfers are paused → checked FIRST: nothing is read or
+    hashed, the job waits the pause out like a refused fetch (5 min
+    rechecks, never gives up).
+
+  Keeping the fetch record truthful:
+  - the download hook forgets the pair's records
+    (`Exchange::forget_origins`, `models_peer::forget_fetches`) on EVERY
+    Local it answers, the no-peers and bad-settings paths included (they
+    never go through `run_here`): a download here writes this node's own
+    audio under the names a fetched pair had. On SNV (no peers) that is
+    three no-op DELETEs per download (video, audio, metadata);
+  - `run_here` forgets the records of what its job makes, for any job;
+  - `peer::download::adopt` records the pair's origin BEFORE
+    `record_download` makes the row playable (a stems or lyrics ask in
+    between would otherwise find no record); `fetched` records the same
+    rows again once done.
+
+  A download that runs here and then fails leaves a fetched pair in place
+  without its record: the guard then hashes that audio, finds the peer's
+  bytes, and the peer's stems and lyrics are still taken (correctly: it IS
+  the peer's audio). Test fixtures of a peer's stems or lyrics record PP's
+  audio as fetched from SNV (`TestNode::audio_from`), the state a real PP
+  has after its download; the guard's own tests change PP's bytes so that
+  one branch alone decides (the record, a stored hash, a hash taken now).
 - Lyrics: never for an operator's ask here (`lyrics_manual_priority`, a
   non-blank `lyrics_override_text`), never for a video whose
   `{yt}_lyrics.json` here is a dub's subtitles (any row of it here
@@ -685,7 +797,18 @@ workers ask their peers before they run a job (below, from "Ask first").
   chain that counts its calls. Two nodes talk over real HTTP
   (`client_tests.rs`, `fetch_tests.rs`, `lan_tests.rs`, `ask_tests.rs`,
   `download_tests.rs`, `stems_tests.rs`, `lyrics_tests.rs`,
-  `repair_tests.rs`, and the workers' `*_tests_peer.rs`).
+  `repair_tests.rs`, `audio_tests.rs`, `transfer_probe_tests.rs`, and the
+  workers' `*_tests_peer.rs`). To prove a write happens BEFORE a later
+  step, make that step fail: a test trigger `CREATE TRIGGER … BEFORE
+  UPDATE ON videos BEGIN SELECT RAISE(ABORT, '…'); END` fails
+  `record_download`, and the origin must already be recorded
+  (`download_tests::an_adopted_pair_records_its_origin_before_the_row_plays`).
+  A guard with two branches needs a test where ONE branch alone decides
+  (change PP's bytes so the hash says no while the record says yes, and
+  the reverse); a fixture where both agree tests neither.
+  `TestNode::audio_from(yt, peer)` records
+  this node's audio as fetched from `peer` at the sha every node's
+  `give_song` audio has (`rig::song_audio_sha`).
 - wiremock stands in for Cloudflare Access and a peer (`client_tests.rs`,
   `fetch_tests.rs`); the routes go through the real `peer::router`
   (`api_tests.rs`, `lan_tests.rs`). A real-time rate test asserts a LOWER
