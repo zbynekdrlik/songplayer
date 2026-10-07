@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// A new variant is also ranked in sp-server's
 /// `peer::kind::metadata_version` (#229: who named a title decides whether a
-/// peer node takes it); its test `every_metadata_source_label_is_ranked`
-/// stops compiling until it is.
+/// peer node takes it). Its test `every_metadata_source_label_is_ranked`
+/// stops compiling until the variant has an arm in the test's `rank`; add it
+/// to that test's list as well.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MetadataSource {
     Gemini,

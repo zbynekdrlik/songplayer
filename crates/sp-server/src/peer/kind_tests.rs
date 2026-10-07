@@ -127,9 +127,10 @@ fn a_parser_title_with_no_provider_configured_is_a_parser_title() {
 }
 
 /// Every label the metadata chain writes is ranked on purpose. `rank` is an
-/// exhaustive match: a new `MetadataSource` variant stops this test from
-/// compiling until it is ranked here and in `metadata_version` (else that
-/// provider's titles would silently rank as a parser's).
+/// exhaustive match, so a new `MetadataSource` variant stops this test from
+/// compiling until it gets an arm there. Then add it to the loop's list and
+/// rank it in `metadata_version` too: else that provider's titles silently
+/// rank as a parser's (the list itself is not checked for completeness).
 #[test]
 fn every_metadata_source_label_is_ranked() {
     fn rank(source: MetadataSource) -> u32 {

@@ -39,7 +39,8 @@ impl JobBoard {
     }
 
     /// Every running job as catalog entries of `node`, one per kind it makes,
-    /// sorted by YouTube id, then kind.
+    /// sorted by YouTube id, then by the kind's wire name (`stem_instrumental`
+    /// before `stem_vocals`).
     pub fn snapshot(&self, node: &str) -> Vec<CatalogJob> {
         let mut jobs: Vec<CatalogJob> = self
             .lock()
