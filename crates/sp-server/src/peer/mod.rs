@@ -4,10 +4,12 @@
 //! `docs/superpowers/specs/2026-10-06-pp-site-node-exchange-design.md`).
 
 pub mod api;
+pub mod ask;
 pub mod board;
 pub mod catalog;
 pub mod client;
 pub mod config;
+pub mod decide;
 pub mod fetch;
 pub mod hash;
 pub mod hasher;
@@ -16,6 +18,8 @@ pub mod lan;
 pub mod queued;
 pub mod throttle;
 pub mod wire;
+
+pub use ask::{Ask, FetchPlan, PeerStep};
 
 use std::path::PathBuf;
 use std::sync::Arc;
