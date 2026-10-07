@@ -8,6 +8,9 @@
  *    service token (`peer-probe-gate.ts::peerSetupFailures`);
  *  - PP reads SNV's catalog live through Cloudflare
  *    (`POST /api/v1/exchange/probe`, `probeFailures`);
+ *  - PP transfers SNV's smallest file artifact through Cloudflare with its
+ *    own client and reads back its byte count and sha256
+ *    (`POST /api/v1/exchange/probe/transfer`, `transferFailures`);
  *  - a playlist pressed through SongPlayer's facade (Companion's path) plays
  *    on SongPlayer's program, and SP-program has a receiver;
  *  - a manual scene pressed through the facade reaches the program as "OBS
@@ -38,8 +41,10 @@ import { programReceiverVerdict, type ProgramReceiverView } from "./ndi-health-g
 import {
   peerSetupFailures,
   probeFailures,
+  transferFailures,
   type ExchangeStatusView,
   type ProbeResult,
+  type TransferProbe,
 } from "./peer-probe-gate";
 import {
   cgRestoreTarget,
@@ -132,6 +137,19 @@ test.describe("PP post-deploy (#229)", () => {
     const results = JSON.parse(body) as ProbeResult[];
     console.log(`[#229 pp] probe: ${body}`);
     expect(probeFailures(results, PEER, PEER_HOST)).toEqual([]);
+  });
+
+  test("PP transfers a real artifact from SNV through Cloudflare", async ({ request }) => {
+    // PP's client fetches SNV's smallest file artifact (≤ 64 MiB) into a temp
+    // dir outside its cache. It waits its turn in the per-peer transfer slot,
+    // behind at most one transfer a worker started after the deploy.
+    test.setTimeout(360_000);
+    const resp = await request.post("/api/v1/exchange/probe/transfer", { timeout: 330_000 });
+    const body = await resp.text();
+    expect(resp.status(), `POST /api/v1/exchange/probe/transfer: ${body}`).toBe(200);
+    const results = JSON.parse(body) as TransferProbe[];
+    console.log(`[#229 pp] transfer probe: ${body}`);
+    expect(transferFailures(results, PEER, PEER_HOST)).toEqual([]);
   });
 });
 

@@ -22,6 +22,7 @@ pub mod queued;
 pub mod repair;
 pub mod stems;
 pub mod throttle;
+pub mod transfer_probe;
 pub mod wire;
 
 pub use ask::{Ask, FetchPlan, PeerStep};
@@ -46,6 +47,8 @@ pub struct Exchange {
     pub board: Arc<board::JobBoard>,
     /// Reads the peers' catalogs and fetches their artifacts.
     pub(crate) client: client::PeerClient,
+    /// Held while a transfer probe runs (`transfer_probe`): one at a time.
+    pub(crate) transfer_probe: tokio::sync::Mutex<()>,
 }
 
 impl Exchange {
@@ -55,6 +58,7 @@ impl Exchange {
             cache_dir,
             board: Arc::new(board::JobBoard::default()),
             client: client::PeerClient::new(),
+            transfer_probe: tokio::sync::Mutex::new(()),
         })
     }
 
