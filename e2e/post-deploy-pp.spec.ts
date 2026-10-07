@@ -18,9 +18,12 @@
  * The scenes come from `pp-scenes.ts` (the playlist scene from SongPlayer's
  * own catalog; the manual scene = cg OBS's own program scene unless the repo
  * variable PP_MANUAL_SCENE names one). `afterAll` puts SP-program back on its
- * start scene, and cg OBS back on its own only when the manual press moved it
- * and it is still there (`cgRestoreTarget`). The tests are not serial: a
- * missing Cloudflare token must not hide the playback results.
+ * start source with a dashboard cut (it tells cg OBS nothing) only while the
+ * gate's own last press is still the latest switch (`programRestoreTarget`),
+ * and cg OBS back on its own only when the manual press moved it and it is
+ * still there (`cgRestoreTarget`): an operator's press meanwhile is kept. The
+ * tests are not serial: a missing Cloudflare token must not hide the playback
+ * results.
  */
 import {
   test,
@@ -43,13 +46,12 @@ import {
   pickManualScene,
   pickPlaylistScene,
   playlistNames,
+  programRestoreTarget,
+  type GatePress,
+  type LastCutView,
   type ManualCutView,
 } from "./pp-scenes";
-import {
-  readEngineActiveScene,
-  waitEngineActiveScene,
-  type PlaylistRow,
-} from "./program-state";
+import { readEngineActiveScene, type PlaylistRow } from "./program-state";
 
 const SONGPLAYER_URL = process.env.SONGPLAYER_URL || "http://localhost:8920";
 const FACADE_WS_URL = process.env.FACADE_WS_URL || "ws://localhost:4456";
@@ -85,10 +87,10 @@ async function playableCount(request: APIRequestContext, pid: number): Promise<n
   return videos.filter((v) => v.normalized).length;
 }
 
-/** obs-websocket's 604 (InvalidResourceState): the facade's answer to
- *  `GetCurrentProgramScene` while nothing is on SP-program. */
-function isNothingOnProgram(e: unknown): boolean {
-  return (e as { code?: number } | null)?.code === 604;
+/** `GET /api/v1/program`, the fields the restore reads. */
+interface ProgramNow {
+  source: number | null;
+  remote: { last_remote_cut: LastCutView | null };
 }
 
 test.describe("PP post-deploy (#229)", () => {
@@ -132,42 +134,63 @@ test.describe("PP post-deploy (#229)", () => {
 test.describe("PP's program through the facade (#229)", () => {
   let facade: ObsDriver | null = null;
   let cg: ObsDriver | null = null;
-  /** SP-program's scene before the tests (null: nothing was on it). */
-  let startScene: string | null = null;
-  /** A test pressed a scene: afterAll restores the program. */
-  let pressed = false;
+  /** SP-program's source before the tests (`GET /api/v1/program` →
+   *  `source`; null: nothing was on it, so there is nothing to put back). */
+  let startSource: number | null = null;
+  /** The last facade press the gate sent: afterAll may undo it. */
+  let lastPress: GatePress | null = null;
   /** The manual press moved cg OBS (from → to): afterAll may put it back. */
   let cgMoved: { from: string; to: string } | null = null;
+
+  /** Press `scene` through the facade, recorded first: a press that fails
+   *  half-way is still undone. */
+  async function press(scene: string): Promise<void> {
+    lastPress = { scene, sentAtMs: Date.now() };
+    await facade!.switchScene(scene);
+  }
 
   test.beforeAll(async () => {
     facade = await ObsDriver.connect(FACADE_WS_URL);
     cg = await ObsDriver.connect(OBS_WS_URL);
+    const ctx = await apiRequest.newContext({ baseURL: SONGPLAYER_URL });
     try {
-      startScene = await facade.currentProgramScene();
-    } catch (e) {
-      if (!isNothingOnProgram(e)) throw e;
-      startScene = null;
+      const program = await getJson<ProgramNow>(ctx, "/api/v1/program");
+      expect(program, "GET /api/v1/program before the presses").not.toBeNull();
+      startSource = program!.source;
+    } finally {
+      await ctx.dispose();
     }
     const cgScene = await cg.currentProgramScene();
-    console.log(`[#229 pp] at the start: SP-program "${startScene}", cg OBS "${cgScene}"`);
+    console.log(`[#229 pp] at the start: SP-program source ${startSource}, cg OBS "${cgScene}"`);
   });
 
   test.afterAll(async () => {
     const problems: string[] = [];
     const ctx = await apiRequest.newContext({ baseURL: SONGPLAYER_URL });
     try {
-      if (pressed && facade && startScene !== null) {
+      if (lastPress !== null) {
         try {
-          await facade.switchScene(startScene);
-          const now = await waitEngineActiveScene(ctx, startScene, 8_000);
-          if (now !== startScene) {
-            problems.push(`SP-program is on "${now}", not back on "${startScene}"`);
+          const now = await getJson<ProgramNow>(ctx, "/api/v1/program");
+          if (now === null) throw new Error("GET /api/v1/program failed");
+          const back = programRestoreTarget(startSource, lastPress, {
+            source: now.source,
+            last_remote_cut: now.remote.last_remote_cut,
+          });
+          if (back !== null) {
+            const resp = await ctx.post("/api/v1/program/cut", { data: { source: back } });
+            if (!resp.ok()) {
+              throw new Error(`POST /api/v1/program/cut ${back}: ${resp.status()} ${await resp.text()}`);
+            }
+            console.log(`[#229 pp] SP-program back on source ${back} (was ${now.source})`);
+          } else {
+            console.log(
+              `[#229 pp] SP-program left on source ${now.source} (start ${startSource}, ` +
+                `last switch ${JSON.stringify(now.remote.last_remote_cut)})`,
+            );
           }
         } catch (e) {
-          problems.push(`putting SP-program back on "${startScene}" failed: ${e}`);
+          problems.push(`putting SP-program back on source ${startSource} failed: ${e}`);
         }
-      } else if (pressed) {
-        console.log("[#229 pp] nothing was on SP-program at the start: the test's scene stays");
       }
       if (cg && cgMoved !== null) {
         try {
@@ -216,8 +239,7 @@ test.describe("PP's program through the facade (#229)", () => {
     const { scene, playlistId } = pick!;
     console.log(`[#229 pp] playlist scene: ${scene} (playlist ${playlistId})`);
 
-    pressed = true;
-    await facade!.switchScene(scene);
+    await press(scene);
     await expect
       .poll(() => readEngineActiveScene(request), {
         message: `SongPlayer's program reaches ${scene}`,
@@ -262,11 +284,10 @@ test.describe("PP's program through the facade (#229)", () => {
     if ("error" in pick) throw new Error(pick.error);
     console.log(`[#229 pp] manual scene: ${pick.scene} (cg OBS on "${cgNow}")`);
 
-    pressed = true;
     // The press forwards the scene to cg OBS first: recorded before it, so a
     // press that fails half-way is still put back.
     if (pick.scene !== cgNow) cgMoved = { from: cgNow, to: pick.scene };
-    await facade!.switchScene(pick.scene);
+    await press(pick.scene);
     await expect
       .poll(
         async () => {

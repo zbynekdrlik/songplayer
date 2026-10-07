@@ -12,7 +12,14 @@
  * - The MANUAL scene is the scene cg OBS already has on program: pressing it
  *   cuts SP-program to "OBS manuál" and leaves what cg OBS shows as it is.
  *   The repo variable `PP_MANUAL_SCENE` overrides it. The gate never guesses
- *   another cg OBS scene: that would change what PP's wall shows.
+ *   another cg OBS scene: that would change what PP's wall shows. A manual
+ *   scene that itself shows `SP-program` would loop the program into itself
+ *   once it is on "OBS manuál"; nothing here can see that (a precondition,
+ *   `peer-exchange.md` "PP deploy").
+ * - What goes BACK after the gate: SP-program's start source only while the
+ *   gate's own last press is still the latest switch (`programRestoreTarget`),
+ *   cg OBS's scene only while the gate's move is still there
+ *   (`cgRestoreTarget`). An operator's press meanwhile is kept.
  */
 
 import { AV_PROBE_SCENE } from "./av-sync-probe";
@@ -134,6 +141,41 @@ export function cgRestoreTarget(
   now: string,
 ): string | null {
   return moved !== null && now === moved.to ? moved.from : null;
+}
+
+/** A facade press the gate sent: the scene and the instant it was sent
+ *  (Unix ms; the runner and SongPlayer share PP's clock). */
+export interface GatePress {
+  scene: string;
+  sentAtMs: number;
+}
+
+/** `remote.last_remote_cut` of `GET /api/v1/program`, the fields the
+ *  restore reads (`at_ms`: Unix ms, when the switch was recorded). */
+export interface LastCutView {
+  scene: string;
+  action: string;
+  at_ms: number;
+}
+
+/**
+ * The source SP-program goes back to after the gate (`POST
+ * /api/v1/program/cut`, which tells cg OBS nothing): the start source, only
+ * while the latest recorded switch is the gate's own last press (its scene,
+ * recorded at or after the instant the gate sent it, not a refused keep)
+ * and the program is not on the start source already. `null` otherwise: no
+ * press, nothing was on program at the start, or someone switched since (an
+ * operator's press or cut is kept).
+ */
+export function programRestoreTarget(
+  start: number | null,
+  press: GatePress | null,
+  now: { source: number | null; last_remote_cut: LastCutView | null },
+): number | null {
+  const cut = now.last_remote_cut;
+  if (start === null || press === null || cut === null) return null;
+  const gates = cut.scene === press.scene && cut.at_ms >= press.sentAtMs && cut.action !== "keep";
+  return gates && now.source !== start ? start : null;
 }
 
 /** `GET /api/v1/program`, the fields the manual-cut check reads. */
