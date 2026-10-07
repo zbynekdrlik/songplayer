@@ -115,6 +115,8 @@ fn install_pipeline(
         title_clock: None,
         play_start_ms: 0,
         paused_at: None,
+        failures: Default::default(),
+        record_on_start: None,
     };
     engine.pipelines.insert(playlist_id, pp);
     // On program = on air as the wall owner (#221): the last one installed.

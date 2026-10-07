@@ -199,6 +199,7 @@ async fn when_every_open_fails_the_plays_follow_the_pause_table() {
     rig.engine.handle_scene_change(PID, true).await; // on program: the 1st Play
 
     let mut answered = Vec::new();
+    let mut last_error = String::new();
     for _ in 0..64 {
         if let Some(due) = pending_due(&rig.engine) {
             if due.duration_since(t0) > Duration::from_secs(600) {
@@ -207,8 +208,9 @@ async fn when_every_open_fails_the_plays_follow_the_pause_table() {
             tokio::time::advance(due.saturating_duration_since(Instant::now())).await;
         }
         let (playlist_id, event) = next_event(&mut rig.engine, &mut watchdog).await;
-        if matches!(event, PipelineEvent::Error(_)) {
+        if let PipelineEvent::Error(error) = &event {
             answered.push(t0.elapsed());
+            last_error = error.clone();
         }
         rig.engine.handle_pipeline_event(playlist_id, event).await;
     }
@@ -223,8 +225,9 @@ async fn when_every_open_fails_the_plays_follow_the_pause_table() {
     );
     assert_eq!(
         view(&rig.engine).map(|f| (f.count, f.last_error)),
-        Some((7, ERROR.to_string())),
-        "the run counts every failure and keeps the last error"
+        Some((7, last_error)),
+        "the run counts every failure and keeps the last error (the test \
+         pipeline's own text: the Linux stub's, or the Windows decode error)"
     );
     assert_eq!(
         out(&rig.engine).state,

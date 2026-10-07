@@ -600,7 +600,17 @@ async fn a_scene_back_on_program_ends_the_hold() {
         matches!(out(&rig.engine).state, PlayState::Playing { .. }),
         "on program again: the next song starts"
     );
-    assert_eq!(plays_recorded(&rig.engine).await, 1);
+    assert_eq!(
+        plays_recorded(&rig.engine).await,
+        0,
+        "#229: not recorded at the Play's send"
+    );
+    started(&mut rig.engine).await;
+    assert_eq!(
+        plays_recorded(&rig.engine).await,
+        1,
+        "recorded once it starts"
+    );
 }
 
 /// A hold that asks again (its window is not over at the re-check) replaces
