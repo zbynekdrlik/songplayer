@@ -183,4 +183,14 @@ test.describe("ASIO gate (#233)", () => {
       "it runs at 0 Hz, the driver at 0 Hz",
     ]);
   });
+
+  // #233 review round 1: an entry's delay (up to 2 s) is part of its
+  // latency, so the bound is a second ABOVE the delay, not a second flat.
+  test("the latency bound is a second above the entry's delay", () => {
+    const delayed = (latency_ms: number) => dvs(1900, { delay_ms: 1500, latency_ms }, { latency_ms });
+    expect(asioGateFailures(dvs(100), delayed(1566.7)), "1.5 s of delay").toEqual([]);
+    expect(asioGateFailures(dvs(100), delayed(2499.9))).toEqual([]);
+    expect(asioGateFailures(dvs(100), delayed(2500))).toEqual(["its latency is 2500 ms"]);
+    expect(asioGateFailures(dvs(100), delayed(0))).toEqual(["its latency is 0 ms"]);
+  });
 });
