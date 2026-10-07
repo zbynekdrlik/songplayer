@@ -68,14 +68,18 @@ pub fn same_but_name(running: &OutputEntry, wanted: &OutputEntry) -> bool {
 }
 
 /// Keep, build, stop. Ids are unique (validated), so at most one running
-/// output matches a wanted entry.
+/// output matches a wanted entry. An output whose thread could not start is
+/// never kept: it is rebuilt (retried) on every pass until it starts.
 pub fn plan(running: &[RunningOutput], wanted: &[OutputEntry], network_rate: u32) -> Plan {
     let mut kept = vec![false; running.len()];
     let mut steps = Vec::with_capacity(wanted.len());
     for w in wanted {
         let rate = build_rate(w, network_rate);
-        let same = (0..running.len())
-            .find(|&i| same_but_name(&running[i].entry, w) && running[i].built_rate == rate);
+        let same = (0..running.len()).find(|&i| {
+            same_but_name(&running[i].entry, w)
+                && running[i].built_rate == rate
+                && !running[i].start_failed()
+        });
         match same {
             Some(i) => {
                 kept[i] = true;

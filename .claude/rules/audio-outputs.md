@@ -351,7 +351,8 @@ is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
 `GET /api/v1/program` → `outputs[]` `{id, type, name, enabled, state
 (running|opening|waiting|disabled, `vban_state`; a thread that could not
 start — Windows: the UDP bind or the spawn failed — is "waiting" with
-`VbanOut::start_error` as its reason, never "opening" for good), reason, rate, format,
+`VbanOut::start_error` as its reason, never "opening" for good, and is
+rebuilt — retried — on the outputs task's next pass, `RunningOutput::start_failed`), reason, rate, format,
 channels, delay_ms, latency_ms (L + delay + the converter,
 `vban_latency_ms`), blocks_sent, blocks_dropped, vban: {#210's VbanStatus +
 blocks_sent}}`, `audio_network_rate`, `outputs_problems`; the cut answer
