@@ -227,13 +227,16 @@ workers ask their peers before they run a job (below, from "Ask first").
   jobs are always listed. A file rewritten under the same path keeps its
   old sha and size in the catalog until the hasher's next pass reaches it:
   a fetch then fails closed (size bound, sha check) and asks again later.
-- A file the rows name that is on disk but not hashed yet is announced as
-  its job, QUEUED (`catalog::unhashed`, `Job::making`; #229 finding
+- While the hasher runs (`hasher::should_hash`: serving, not paused), a
+  file the rows name that is on disk but not hashed yet is announced as its
+  job, QUEUED (`catalog::unhashed`, `Job::making`; #229 finding
   6036287850): a job that just ended here is otherwise neither announced nor
   listed until the next hash pass (up to ~70 s), and a peer waiting for it
   would read "nobody has it" and redo it. A file missing from disk is no
-  job. Only the unhashed paths are stat'ed (none in steady state). The
-  status's `catalog.queued` counts these entries too.
+  job. Only the unhashed paths are stat'ed: in steady state, only a file
+  the rows name that is missing from disk. A node that does not serve (PP
+  in phase 1) announces none: nobody reads its catalog and its hasher never
+  runs. The status's `catalog.queued` counts these entries too.
 - The hasher (`hasher::run`, every 60 s, the first pass after 60 s, only
   while this node serves and is not paused) hashes one file at a time at
   40 MiB/s: stat → hash → stat, a file that changed meanwhile waits for the
@@ -510,11 +513,18 @@ workers ask their peers before they run a job (below, from "Ask first").
   no network and no DB write; else the peers' catalogs (cached 60 s), the
   wait so far, `decide`. Local returns `Local(JobGuard)`: the job is
   announced in this node's catalog while the hook holds the guard. A Wait
-  records its start (`peer_waits`, the FIRST start kept); a Local ends it.
+  records its start (`peer_waits`, the FIRST start kept).
+- Every job that runs here goes through `Exchange::run_here`: it ENDS the
+  job's wait, then announces it (a later ask never inherits an old start
+  and its spent bound). The hooks' own Local paths use it too (an
+  operator's lyrics ask, nothing newer, a fetch that kept failing).
 - Rechecks back off (`recheck_after`): a quarter of the wait so far, 2–20
   min, never past the bound, at least 1 min. A failed fetch
   (`Exchange::fetch_failed`) counts as waiting and WARNs; a Fetch still
-  wins after the bound, so a peer's copy is retried on every recheck.
+  wins after the bound, but a fetch that KEEPS failing does not: once the
+  job has waited the bound (`decide::gives_up`), `fetch_failed` answers
+  `None` and the hook runs the job here (`Exchange::after_failed_fetch`;
+  no audio here, a refused track, this node paused for over 2 h).
 - `Exchange::fetched` ends the wait and records each artifact's origin in
   `peer_fetches` (node, version, sha256; `source = peer:<node>` in the INFO
   `exchange: done with a peer's copy`). The row's `metadata_source` /
@@ -523,8 +533,9 @@ workers ask their peers before they run a job (below, from "Ask first").
   write `peer:<node>` into them.
 - Each hook returns `PeerStep`: `Done` (the artifacts are in place and
   recorded), `Deferred` (the row's own recheck column moved, NO attempt
-  counted: `defer_download` → `next_attempt_at`, `defer_stems` →
-  `stem_next_attempt_at`, `record_lyrics_wait` → `lyrics_next_attempt_at`),
+  counted, `Exchange::defer`: `defer_download` → `next_attempt_at`,
+  `defer_stems` → `stem_next_attempt_at`, `record_lyrics_wait` →
+  `lyrics_next_attempt_at`),
   or `Local(Option<JobGuard>)` (`None` = no exchange wired, a unit-test
   worker). A worker with no exchange (`with_peer` not called) runs as
   before.
@@ -552,11 +563,18 @@ workers ask their peers before they run a job (below, from "Ask first").
 - Stems: the hook runs after the kill switch, the dub and wall defers, the
   pick and the terminal skip, and BEFORE the venv's `return` (the plan's
   decisions): a node with no lyrics venv still takes a peer's stems (the
-  venv WARN still fires once). The parts are renamed under
-  `stem_paths(<the audio the row records AFTER the transfer>)`, read under
-  `SONG_FILES`, then `mark_stems_done`; no audio on disk → a failed fetch
-  (deferred, no attempt). `song_input_tests.rs` pins the order after the
-  hook.
+  venv WARN still fires once). With no venv a row that runs here is put
+  back for `INPUT_MISSING_RECHECK` (10 min, no attempt), so the rows behind
+  it reach their peer step too. Before a fetch, `song_input::job_input`
+  re-reads the song's audio: none on disk → deferred with no attempt and
+  nothing transferred. The parts are renamed under `stem_paths(<the audio
+  the row records AFTER the transfer>)`, read under `SONG_FILES`, then
+  `mark_stems_done`. `song_input_tests.rs` pins the order after the hook.
+- Known limit (OPEN for the main): stems and ★ lyrics are taken whatever
+  this node's audio is; a song this node downloaded itself (nobody had it
+  within 2 h) can later take a peer's stems or line timings made from the
+  peer's own download. Stems are played INSTEAD of the original (never
+  mixed with it), so only a constant offset against the video could show.
 - Lyrics: never for an operator's ask here (`lyrics_manual_priority`, a
   non-blank `lyrics_override_text`), never for a video whose
   `{yt}_lyrics.json` here is a dub's subtitles (any row of it here
@@ -566,18 +584,25 @@ workers ask their peers before they run a job (below, from "Ask first").
   the row already serves = nothing newer → runs here (the daily full-mix
   upgrade stays local). The JSON is parsed as a typed `LyricsTrack` whose
   `source` must equal the row's (a refused part is deleted), renamed into
-  `{yt}_lyrics.json`; `adopt_lyrics` writes source, version, alignment
-  model, ★, and the translation version (0 when this row asks another
+  `{yt}_lyrics.json`; `adopt_lyrics` writes source, version and alignment
+  model through the lyrics row's one writer (`mark_video_lyrics_complete`),
+  then the ★ and the translation version (0 when this row asks another
   gender, so the retranslate pass redoes the SK lines; a row with no
-  gender takes the peer's).
+  gender, auto, takes the peer's: the gender its SK lines are in). The
+  worker then sends `LyricsCompleted`, as for its own lyrics. A refused
+  track's error text is cut to `metadata::health::bounded_error`.
 - Repair: `peer_title` at the top of `reprocess_one`, before the per-video
   backoff and the rate-limit cooldown (both are about the providers; a
-  peer's title costs none). The peer's catalog must list the video's
-  metadata and `/videos` must match that entry's sha256
-  (`PeerMetadata::to_bytes`); `adopted_title` decides, the origin goes to
-  `peer_fetches` (kind `metadata`). `apply_title` is the ONE repair write
-  (#136 locked re-check + rename + record), from a peer's title or the
-  providers'.
+  peer's title costs none). `process_all` no longer returns early in the
+  cooldown, and a rate limit no longer stops the batch: the rest of it
+  asks no provider but still takes the peers' titles. The peer's catalog
+  must list the video's metadata at version ≥ 1 (a parser's title there
+  costs no `/videos` request) and `/videos` must match that entry's sha256
+  (`PeerMetadata::to_bytes`); `adopted_title` decides. `apply_title` is the
+  ONE repair write (#136 locked re-check + rename + record), from a peer's
+  title or the providers'; the origin goes to `peer_fetches` (kind
+  `metadata`, `repair::record`) only once it wrote the title (a row that
+  left the queue meanwhile keeps no trace).
 - The kill switches (`lyrics_worker_enabled` / `stem_worker_enabled`) stop
   the whole tick, the fetch included. The download and repair workers have
   none; `dub_worker_enabled` stays off at PP until the owner wants dabing

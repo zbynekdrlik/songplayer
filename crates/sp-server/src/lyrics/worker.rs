@@ -203,6 +203,29 @@ impl LyricsWorker {
         self
     }
 
+    /// #229: the dashboard hears of a peer's lyrics as of the worker's own
+    /// (`LyricsCompleted`, the song's row as `adopt_lyrics` wrote it).
+    async fn peer_lyrics_completed(&self, video_id: i64) {
+        let row: Option<(String, Option<String>)> =
+            sqlx::query_as("SELECT youtube_id, lyrics_source FROM videos WHERE id = ?")
+                .bind(video_id)
+                .fetch_optional(&self.pool)
+                .await
+                .inspect_err(|e| warn!(video_id, %e, "worker: reading a peer's lyrics row failed"))
+                .ok()
+                .flatten();
+        if let Some((youtube_id, Some(source))) = row {
+            let _ = self.events_tx.send(ServerMsg::LyricsCompleted {
+                video_id,
+                youtube_id,
+                source,
+                quality_score: 0.0,
+                provider_count: 0,
+                duration_ms: 0,
+            });
+        }
+    }
+
     // I/O-only: updates shared RwLock + sends on broadcast channel. Fire-and-forget; no return value to assert.
     #[cfg_attr(test, mutants::skip)]
     #[allow(clippy::too_many_arguments)]
@@ -422,7 +445,8 @@ impl LyricsWorker {
         // this tick ends.
         let _announced = match crate::peer::lyrics::first(self.peer.as_ref(), &row).await {
             crate::peer::PeerStep::Local(guard) => guard,
-            crate::peer::PeerStep::Done | crate::peer::PeerStep::Deferred => return,
+            crate::peer::PeerStep::Done => return self.peer_lyrics_completed(video_id).await,
+            crate::peer::PeerStep::Deferred => return,
         };
         match self.process_song(row).await {
             Ok(SongOutcome::Done) => {}

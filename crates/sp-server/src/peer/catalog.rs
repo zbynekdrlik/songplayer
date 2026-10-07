@@ -199,8 +199,9 @@ pub fn listed_jobs(
 }
 
 /// This node's jobs as `node` lists them ([`listed_jobs`]): the board's
-/// running ones, the queued ones from its rows, and, queued too, the job of
-/// each of `files` not hashed yet ([`unhashed`]).
+/// running ones, the queued ones from its rows, and, queued too while the
+/// hasher runs (`hasher::should_hash`: serving, not paused), the job of each
+/// of `files` not hashed yet ([`unhashed`]).
 pub async fn jobs(
     ex: &Exchange,
     node: &str,
@@ -208,16 +209,19 @@ pub async fn jobs(
     hashes: &HashMap<String, HashEntry>,
 ) -> Result<Vec<CatalogJob>, sqlx::Error> {
     let mut queued = super::queued::queued(&ex.pool).await?;
-    queued.extend(unhashed(files, hashes).await);
+    if super::hasher::should_hash(ex).await {
+        queued.extend(unhashed(files, hashes).await);
+    }
     Ok(listed_jobs(ex.board.snapshot(node), &queued, node))
 }
 
 /// The job of each of `files` that is on disk but not in `hashes` yet: its
 /// output is this node's, listed after the hasher's next pass (every 60 s).
 /// Announced as queued, a peer waits for it instead of making it itself in
-/// that window (#229 finding 6036287850). A file missing from disk
-/// is no job (a peer would wait the full 2 h for nothing). Only these files
-/// are stat'ed, so in steady state a catalog stats nothing.
+/// that window (#229 finding 6036287850). A file missing from disk is no job
+/// (a peer would wait the full 2 h for nothing). Only these files are
+/// stat'ed: in steady state, only a file the rows name that is missing from
+/// disk.
 pub async fn unhashed(
     files: &[ArtifactFile],
     hashes: &HashMap<String, HashEntry>,

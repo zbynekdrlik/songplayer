@@ -19,7 +19,7 @@ use super::Exchange;
 use super::board::JobGuard;
 use super::client::PeerError;
 use super::config::{NodeConfig, PeerConfig};
-use super::decide::{Decision, LocalWhy, PeerRead, WaitWhy, decide, recheck_after};
+use super::decide::{Decision, LocalWhy, PeerRead, WaitWhy, decide, gives_up, recheck_after};
 use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, Catalog, now_ms};
 use crate::db::models_peer;
@@ -118,12 +118,50 @@ impl Exchange {
                 Ask::Wait { peer, recheck }
             }
             Decision::Local(why) => {
-                if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
-                    warn!(youtube_id, %e, "exchange: ending the wait failed");
-                }
                 log_local(youtube_id, job, why);
-                Ask::Local(self.announce(youtube_id, job))
+                Ask::Local(self.run_here(job, youtube_id).await)
             }
+        }
+    }
+
+    /// `job` of `youtube_id` runs here: a wait of it ends (a later ask starts
+    /// a fresh one, never inheriting this one's spent bound), and the job is
+    /// announced while the returned guard lives.
+    pub(crate) async fn run_here(&self, job: Job, youtube_id: &str) -> JobGuard {
+        if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
+            warn!(youtube_id, %e, "exchange: ending the wait failed");
+        }
+        self.announce(youtube_id, job)
+    }
+
+    /// Row `video_id` of `job` is picked again after `wait`, no attempt
+    /// counted, through that job's own recheck column.
+    pub(crate) async fn defer(&self, job: Job, video_id: i64, wait: Duration) -> PeerStep {
+        let deferred = match job {
+            Job::Download => models_peer::defer_download(&self.pool, video_id, wait).await,
+            Job::Stems => models_peer::defer_stems(&self.pool, video_id, wait).await,
+            Job::Lyrics => crate::db::models::record_lyrics_wait(&self.pool, video_id, wait).await,
+        };
+        if let Err(e) = deferred {
+            warn!(video_id, job = job.as_str(), %e, "exchange: deferring the job failed");
+        }
+        PeerStep::Deferred
+    }
+
+    /// A fetch of `job` for row `video_id` from `peer` failed: the row is
+    /// deferred while the job has waited less than the bound, else the job
+    /// runs here (`fetch_failed`).
+    pub(crate) async fn after_failed_fetch(
+        &self,
+        job: Job,
+        video_id: i64,
+        youtube_id: &str,
+        peer: &str,
+        error: &PeerError,
+    ) -> PeerStep {
+        match self.fetch_failed(job, youtube_id, peer, error).await {
+            Some(recheck) => self.defer(job, video_id, recheck).await,
+            None => PeerStep::Local(Some(self.run_here(job, youtube_id).await)),
         }
     }
 
@@ -142,7 +180,10 @@ impl Exchange {
     }
 
     /// A fetch from `peer` did not work: the job waits (counted against the
-    /// 2 h bound) and asks again after the returned recheck.
+    /// 2 h bound) and asks again after the returned recheck; `None` once it
+    /// has waited the bound (`decide::gives_up`): it runs here then, so a
+    /// peer's copy that keeps failing (no audio here, a refused track, this
+    /// node paused) is never retried forever.
     pub async fn fetch_failed(
         &self,
         job: Job,
@@ -159,6 +200,16 @@ impl Exchange {
             .ok()
             .flatten()
             .unwrap_or_default();
+        if gives_up(waited) {
+            warn!(
+                youtube_id,
+                job = job.as_str(),
+                peer,
+                %error,
+                "exchange: fetching from a peer kept failing for 2 h - processing here"
+            );
+            return None;
+        }
         let recheck = recheck_after(waited);
         warn!(
             youtube_id,

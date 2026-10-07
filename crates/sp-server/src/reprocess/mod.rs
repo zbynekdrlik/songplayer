@@ -173,23 +173,17 @@ impl ReprocessWorker {
     /// Process every row of the repair queue (`REPAIR_QUEUE_WHERE`). Returns
     /// the count of successfully reprocessed videos.
     ///
-    /// Aborts the current batch on the first rate-limit response, setting
-    /// the global cooldown so subsequent calls within the cooldown window
-    /// are no-ops.
+    /// The first rate-limit response sets the global cooldown: within it no
+    /// provider is called (the rest of this batch and later calls), while a
+    /// peer's title still repairs its row (#229, `peer::repair`).
     pub async fn process_all(&mut self) -> Result<usize, anyhow::Error> {
         let rows = self.fetch_gemini_failed().await?;
         if rows.is_empty() {
             return Ok(0);
         }
 
-        if self.in_global_cooldown() {
-            debug!(
-                count = rows.len(),
-                "reprocess skipped: rate-limit cooldown active"
-            );
-            return Ok(0);
-        }
-
+        // #229: no early return during the rate-limit cooldown: each row still
+        // takes a peer's title (`reprocess_one` checks the cooldown after it).
         info!(count = rows.len(), "found videos to reprocess");
         let mut success_count = 0;
 
@@ -200,13 +194,14 @@ impl ReprocessWorker {
                     success_count += 1;
                 }
                 Ok(ReprocessOutcome::RateLimited(reasons)) => {
+                    // #229: the rest of the batch asks no provider (the
+                    // cooldown) but still takes the peers' titles.
                     warn!(
                         video_id = %row.youtube_id,
                         %reasons,
-                        "metadata provider rate-limited; entering {}s cooldown, aborting batch",
+                        "metadata provider rate-limited; entering {}s cooldown, the batch goes on with the peers' titles only",
                         RATE_LIMIT_COOLDOWN.as_secs()
                     );
-                    break;
                 }
                 Ok(ReprocessOutcome::Failed(reasons)) => {
                     // One WARN per attempt; the backoff stage decides the next
@@ -272,12 +267,15 @@ impl ReprocessWorker {
         // the rate-limit cooldown (both about the providers) holds it back.
         let peer = self.peer.clone();
         if let Some(ex) = peer.as_deref()
-            && let Some(title) = crate::peer::repair::peer_title(ex, &row.youtube_id).await
+            && let Some(taken) = crate::peer::repair::peer_title(ex, &row.youtube_id).await
         {
             self.per_video_backoff.remove(&row.id);
-            return self
-                .apply_title(row, &title.song, &title.artist, title.source)
-                .await;
+            let t = &taken.title;
+            let outcome = self.apply_title(row, &t.song, &t.artist, t.source).await?;
+            if matches!(outcome, ReprocessOutcome::Success) {
+                crate::peer::repair::record(ex, &row.youtube_id, &taken).await;
+            }
+            return Ok(outcome);
         }
         if self.in_global_cooldown() {
             return Ok(ReprocessOutcome::Skipped);

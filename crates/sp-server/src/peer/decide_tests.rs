@@ -277,6 +277,14 @@ fn the_wait_ends_at_two_hours_but_a_peers_copy_is_still_taken() {
 }
 
 #[test]
+fn a_job_gives_up_on_its_peers_at_two_hours_exactly() {
+    assert!(!gives_up(Duration::ZERO));
+    assert!(!gives_up(MAX_PEER_WAIT - Duration::from_millis(1)));
+    assert!(gives_up(MAX_PEER_WAIT));
+    assert!(gives_up(3 * MAX_PEER_WAIT));
+}
+
+#[test]
 fn a_recheck_is_a_quarter_of_the_wait_2_to_20_min_never_past_the_bound() {
     let m = |n: u64| Duration::from_secs(n * 60);
     assert_eq!(recheck_after(Duration::ZERO), m(2));

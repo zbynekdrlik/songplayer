@@ -21,7 +21,8 @@ async fn snv_and_pp() -> (TestNode, TestNode) {
 #[tokio::test]
 async fn a_peers_provider_title_is_taken_and_its_origin_recorded() {
     let (_snv, pp) = snv_and_pp().await;
-    let title = peer_title(&pp.ex, YT).await.unwrap();
+    let taken = peer_title(&pp.ex, YT).await.unwrap();
+    let title = &taken.title;
     assert_eq!(
         (
             title.song.as_str(),
@@ -31,6 +32,12 @@ async fn a_peers_provider_title_is_taken_and_its_origin_recorded() {
         ),
         ("Way Maker", "Sinach", "gemini", false)
     );
+    assert_eq!(
+        fetch_record(pp.pool(), YT, "metadata").await.unwrap(),
+        None,
+        "recorded only once the repair wrote it"
+    );
+    record(&pp.ex, YT, &taken).await;
     let (node, version, sha) = fetch_record(pp.pool(), YT, "metadata")
         .await
         .unwrap()
@@ -81,7 +88,7 @@ async fn a_title_that_no_longer_matches_the_catalog_is_not_taken() {
     assert_eq!(fetch_record(pp.pool(), YT, "metadata").await.unwrap(), None);
     pp.ex.client.forget_catalog("snv");
     assert_eq!(
-        peer_title(&pp.ex, YT).await.unwrap().song,
+        peer_title(&pp.ex, YT).await.unwrap().title.song,
         "Way Maker Live",
         "a fresh catalog matches"
     );

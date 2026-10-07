@@ -209,6 +209,16 @@ impl StemWorker {
         }
     }
 
+    /// #229: with no venv this node separates nothing, so a row it would run
+    /// here is put back for `INPUT_MISSING_RECHECK` (no attempt, status
+    /// untouched): the rows behind it reach their peer step too.
+    async fn no_venv_puts_back(&self, video_id: i64) {
+        let wait = crate::song_input::INPUT_MISSING_RECHECK;
+        if let Err(e) = crate::db::models_peer::defer_stems(&self.pool, video_id, wait).await {
+            warn!(video_id, %e, "stem worker: putting a row back (no venv) failed");
+        }
+    }
+
     pub async fn run(self, mut shutdown_rx: broadcast::Receiver<()>) {
         let mut interval = tokio::time::interval(TICK);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -341,7 +351,7 @@ impl StemWorker {
             crate::peer::PeerStep::Done | crate::peer::PeerStep::Deferred => return,
         };
         if venv_missing {
-            return;
+            return self.no_venv_puts_back(job.video_id).await;
         }
 
         // #167: no HEAVY step for the first 60 s after engine start — the wall

@@ -9,7 +9,6 @@
 //! so the logic lives here and only the hook sits in `DownloadWorker`.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use sp_core::metadata::MetadataSource;
 use tracing::warn;
@@ -20,7 +19,6 @@ use super::client::PeerError;
 use super::config::PeerConfig;
 use super::kind::{ArtifactKind, Job, METADATA_PROVIDER};
 use super::wire::PeerMetadata;
-use crate::db::models_peer;
 use crate::downloader::VideoRow;
 use crate::downloader::cache::{audio_filename, video_filename};
 use crate::metadata::ProviderChain;
@@ -37,38 +35,21 @@ pub(crate) async fn first(
     let Some(ex) = ex else {
         return PeerStep::Local(None);
     };
-    match ex.ask(Job::Download, &row.youtube_id).await {
+    let job = Job::Download;
+    match ex.ask(job, &row.youtube_id).await {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
-        Ask::Wait { recheck, .. } => {
-            defer(ex, row.id, recheck).await;
-            PeerStep::Deferred
-        }
+        Ask::Wait { recheck, .. } => ex.defer(job, row.id, recheck).await,
         Ask::Fetch(plan) => match adopt(ex, chain, row, &plan).await {
             Ok(()) => {
-                ex.fetched(
-                    Job::Download,
-                    &row.youtube_id,
-                    &plan.peer.name,
-                    &plan.artifacts,
-                )
-                .await;
+                ex.fetched(job, &row.youtube_id, &plan.peer.name, &plan.artifacts)
+                    .await;
                 PeerStep::Done
             }
             Err(e) => {
-                let recheck = ex
-                    .fetch_failed(Job::Download, &row.youtube_id, &plan.peer.name, &e)
+                ex.after_failed_fetch(job, row.id, &row.youtube_id, &plan.peer.name, &e)
                     .await
-                    .unwrap_or_default();
-                defer(ex, row.id, recheck).await;
-                PeerStep::Deferred
             }
         },
-    }
-}
-
-async fn defer(ex: &Exchange, video_id: i64, wait: Duration) {
-    if let Err(e) = models_peer::defer_download(&ex.pool, video_id, wait).await {
-        warn!(video_id, %e, "exchange: deferring the download failed");
     }
 }
 

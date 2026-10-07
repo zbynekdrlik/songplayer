@@ -130,6 +130,11 @@ Design record: #136 comment 5894034820.
   - Pinned by `song_input_tests.rs` (structural: slot → re-read → job →
     separation / synthesis in each `process_next`; the rename and the
     missing-audio cases on a real DB).
+  - The node exchange (#229, `peer::stems`) calls `job_input` before it
+    fetches a peer's stems: no audio here = the same no-penalty recheck and
+    nothing transferred. A peer's stems land under the audio the row
+    records AFTER the transfer (read under `SONG_FILES`), so they need no
+    re-link.
 - **A job that writes derived files re-links its song when it finishes.** The
   stem worker runs `song_relink::relink_song` after `mark_stems_done`
   (`record_stem_result`), and the dub worker after `mark_dub_ready`

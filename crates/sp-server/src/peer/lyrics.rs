@@ -11,7 +11,6 @@
 //! (`models_peer::adopt_lyrics`).
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use sqlx::SqlitePool;
 use tracing::warn;
@@ -24,6 +23,7 @@ use super::wire::PeerLyrics;
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 use crate::db::models::VideoLyricsRow;
 use crate::db::models_peer;
+use crate::metadata::health::bounded_error;
 
 /// What [`adopt`] did with the peer's lyrics.
 #[derive(Debug, PartialEq, Eq)]
@@ -39,44 +39,27 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
     let Some(ex) = ex else {
         return PeerStep::Local(None);
     };
+    let job = Job::Lyrics;
     if wants_local(&ex.pool, row).await {
-        return PeerStep::Local(Some(ex.announce(&row.youtube_id, Job::Lyrics)));
+        return PeerStep::Local(Some(ex.run_here(job, &row.youtube_id).await));
     }
-    match ex.ask(Job::Lyrics, &row.youtube_id).await {
+    match ex.ask(job, &row.youtube_id).await {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
-        Ask::Wait { recheck, .. } => {
-            defer(ex, row.id, recheck).await;
-            PeerStep::Deferred
-        }
+        Ask::Wait { recheck, .. } => ex.defer(job, row.id, recheck).await,
         Ask::Fetch(plan) => match adopt(ex, row, &plan).await {
             Ok(Adopted::Track) => {
-                ex.fetched(
-                    Job::Lyrics,
-                    &row.youtube_id,
-                    &plan.peer.name,
-                    &plan.artifacts,
-                )
-                .await;
+                ex.fetched(job, &row.youtube_id, &plan.peer.name, &plan.artifacts)
+                    .await;
                 PeerStep::Done
             }
             Ok(Adopted::NothingNewer) => {
-                PeerStep::Local(Some(ex.announce(&row.youtube_id, Job::Lyrics)))
+                PeerStep::Local(Some(ex.run_here(job, &row.youtube_id).await))
             }
             Err(e) => {
-                let recheck = ex
-                    .fetch_failed(Job::Lyrics, &row.youtube_id, &plan.peer.name, &e)
+                ex.after_failed_fetch(job, row.id, &row.youtube_id, &plan.peer.name, &e)
                     .await
-                    .unwrap_or_default();
-                defer(ex, row.id, recheck).await;
-                PeerStep::Deferred
             }
         },
-    }
-}
-
-async fn defer(ex: &Exchange, video_id: i64, wait: Duration) {
-    if let Err(e) = crate::db::models::record_lyrics_wait(&ex.pool, video_id, wait).await {
-        warn!(video_id, %e, "exchange: deferring the lyrics failed");
     }
 }
 
@@ -141,10 +124,12 @@ pub(crate) async fn adopt(
     };
     if source != lyrics.source {
         let _ = tokio::fs::remove_file(&part).await;
-        return Err(PeerError::BadResponse(format!(
+        // Both texts are the peer's: cut to the bounded error size.
+        let text = format!(
             "the track's source {source:?} is not the row's {:?}",
             lyrics.source
-        )));
+        );
+        return Err(PeerError::BadResponse(bounded_error(&text)));
     }
     let json = ex.cache_dir.join(format!("{}_lyrics.json", row.youtube_id));
     tokio::fs::rename(&part, &json).await?;

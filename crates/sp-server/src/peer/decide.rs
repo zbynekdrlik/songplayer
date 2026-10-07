@@ -4,7 +4,8 @@
 //! that applies wins:
 //!
 //! 1. A peer that holds every artifact the job needs, at a version this node
-//!    takes → Fetch (even after the wait bound).
+//!    takes → Fetch (even after the wait bound; a fetch that keeps failing
+//!    is bounded by `Exchange::fetch_failed`, which counts as waiting).
 //! 2. Waited ≥ [`MAX_PEER_WAIT`] → Local.
 //! 3. A peer announcing a job (running or queued) that makes those kinds →
 //!    Wait.
@@ -87,7 +88,7 @@ pub fn decide(
             };
         }
     }
-    if waited.is_some_and(|w| w >= MAX_PEER_WAIT) {
+    if waited.is_some_and(gives_up) {
         return Decision::Local(LocalWhy::WaitedLongEnough);
     }
     let announcing = reads.iter().find(|r| {
@@ -124,6 +125,12 @@ pub fn holds(catalog: &Catalog, job: Job, youtube_id: &str) -> Option<Vec<Artifa
                 .cloned()
         })
         .collect()
+}
+
+/// A job that has waited `waited` for its peers runs here now: the bound of
+/// [`decide`]'s waits, and of a fetch that keeps failing (`Exchange::fetch_failed`).
+pub fn gives_up(waited: Duration) -> bool {
+    waited >= MAX_PEER_WAIT
 }
 
 /// The next re-check after waiting `waited`: a quarter of it, 2 to 20 min,
