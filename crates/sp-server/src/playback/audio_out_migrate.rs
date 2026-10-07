@@ -28,11 +28,12 @@ pub struct Migrated {
     pub skipped: Vec<String>,
 }
 
-/// `host:port` at the last colon, a port 1..=65535.
+/// `host:port` at the last colon, a port 1..=65535, read as #210's
+/// `ToSocketAddrs` read it (the caller trims the whole target): no space next
+/// to the colon is dropped, so a target #210 never resolved is not taken.
 pub fn split_target(spec: &str) -> Option<(String, u16)> {
     let (host, port) = spec.rsplit_once(':')?;
-    let port = port.trim().parse::<u16>().ok().filter(|p| *p != 0)?;
-    let host = host.trim();
+    let port = port.parse::<u16>().ok().filter(|p| *p != 0)?;
     (!host.is_empty()).then(|| (host.to_string(), port))
 }
 
