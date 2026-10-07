@@ -484,6 +484,9 @@ const failModes = {
   preview: false,
   // #233: GET /api/v1/settings (Nastavenia must save nothing it did not load).
   settings: false,
+  // #233 lane 3: GET /api/v1/audio/asio-drivers (a list never read marks no
+  // stored driver "nenájdený").
+  "asio-drivers": false,
 };
 
 function maybeFail(kind, res) {
@@ -716,6 +719,7 @@ function asioBlockRefusal(a, at) {
 // #233 lane 3: the box's registered ASIO drivers (two, so a test can pick
 // one that is not the first).
 app.get("/api/v1/audio/asio-drivers", (_req, res) => {
+  if (maybeFail("asio-drivers", res)) return;
   res.json({ drivers: ["Dante Virtual Soundcard (x64)", "Blackmagic ASIO"] });
 });
 
@@ -745,6 +749,7 @@ app.post("/__mock/settings-reset", (_req, res) => {
   }
   Object.assign(settings, settingsInitial);
   failModes.settings = false;
+  failModes["asio-drivers"] = false;
   outputsSkipped.clear();
   asioHeld.clear();
   res.json({ status: "reset" });

@@ -583,3 +583,66 @@ test("a waiting ASIO output says why in Slovak, with its next try (#233)", async
   );
   expect(realConsoleErrors()).toEqual([]);
 });
+
+// #233 review round 1: "(nenájdený)" is a claim about the box's list, made
+// only once the list was read (#225: the dashboard claims only what it was
+// told).
+const OLD_CARD = JSON.stringify([
+  { id: "out-4", name: "Old card", type: "asio", asio: { driver: "Old Card ASIO", channels: [0, 1] } },
+]);
+
+test("a stored ASIO driver is not called not found before the driver list is read (#233)", async ({
+  page,
+  request,
+}) => {
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: OLD_CARD } });
+  expect(seeded.status()).toBe(204);
+  // Hold the page's driver list until the test releases it.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/v1/audio/asio-drivers", async (route) => {
+    await held;
+    await route.continue();
+  });
+  try {
+    await openSettings(page);
+    const driver = page.locator('[data-testid="audio-output-asio-driver"]');
+    await expect(driver).toHaveValue("Old Card ASIO");
+    await expect(driver.locator("option")).toHaveCount(1);
+    await expect(driver.locator("option:checked")).toHaveText("Old Card ASIO");
+    await expect(page.locator('[data-testid="audio-outputs-add-asio"]')).toBeDisabled();
+    release();
+    await expect(driver.locator("option:checked")).toHaveText("Old Card ASIO (nenájdený)");
+    await expect(driver.locator("option")).toHaveCount(3);
+    await expect(page.locator('[data-testid="audio-outputs-add-asio"]')).toBeEnabled();
+  } finally {
+    release();
+    await page.unroute("**/api/v1/audio/asio-drivers");
+  }
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("a driver list that could not be read marks no driver and offers no ASIO output (#233)", async ({
+  page,
+  request,
+}) => {
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: OLD_CARD } });
+  expect(seeded.status()).toBe(204);
+  await request.post("/__mock/fail-mode", { data: { kind: "asio-drivers", enabled: true } });
+  try {
+    await openSettings(page);
+    const add = page.locator('[data-testid="audio-outputs-add-asio"]');
+    await expect(add).toHaveAttribute("title", "Zoznam ovládačov ASIO sa nenačítal", { timeout: 10000 });
+    await expect(add).toBeDisabled();
+    const driver = page.locator('[data-testid="audio-output-asio-driver"]');
+    await expect(driver).toHaveValue("Old Card ASIO");
+    await expect(driver.locator("option")).toHaveCount(1);
+    await expect(driver.locator("option:checked")).toHaveText("Old Card ASIO");
+  } finally {
+    await request.post("/__mock/fail-mode", { data: { kind: "asio-drivers", enabled: false } });
+  }
+  // The refused GET is the point of the test: the browser logs its 500.
+  expect(realConsoleErrors().filter((m) => !/Failed to load resource.*500/.test(m))).toEqual([]);
+});
