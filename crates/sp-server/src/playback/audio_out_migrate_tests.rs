@@ -76,7 +76,11 @@ fn the_first_8_targets_migrate_like_210_used_them() {
 
 #[test]
 fn a_target_210_never_resolved_is_skipped_and_named() {
-    let m = entries_from_vban(true, "", "nohost, :6980, h:0, h:x, ok:1, a b:2");
+    let m = entries_from_vban(
+        true,
+        "",
+        "nohost, :6980, h:0, h:x, ok:1, a b:2, h : 3, h :4",
+    );
     assert_eq!(m.entries.len(), 1);
     assert_eq!(m.entries[0].id, "out-1");
     assert_eq!(m.entries[0].vban.as_ref().unwrap().host, "ok");
@@ -88,6 +92,8 @@ fn a_target_210_never_resolved_is_skipped_and_named() {
             "h:0: not host:port".to_string(),
             "h:x: not host:port".to_string(),
             "a b:2: entry 2 (id out-2): vban.host has a character that is not allowed".to_string(),
+            "h : 3: not host:port".to_string(),
+            "h :4: entry 2 (id out-2): vban.host has a character that is not allowed".to_string(),
         ]
     );
 }
@@ -98,7 +104,13 @@ fn split_target_takes_the_last_colon() {
         split_target("fohabl.lan:6980"),
         Some(("fohabl.lan".into(), 6980))
     );
-    assert_eq!(split_target(" h : 1 "), Some(("h".into(), 1)));
+    // As #210's `ToSocketAddrs` read a target (trimmed whole by the caller):
+    // no space next to the colon is dropped, so "h : 1" never sent anywhere
+    // (its port " 1" is no number), and "h :1" keeps the host "h ", which
+    // the host check refuses.
+    assert_eq!(split_target("h : 1"), None);
+    assert_eq!(split_target("h: 1"), None);
+    assert_eq!(split_target("h :1"), Some(("h ".into(), 1)));
     assert_eq!(split_target("h:65535"), Some(("h".into(), 65535)));
     assert_eq!(split_target("a:b:7"), Some(("a:b".into(), 7)));
     assert_eq!(split_target("h:65536"), None);
