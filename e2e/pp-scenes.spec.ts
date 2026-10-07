@@ -11,6 +11,7 @@ import {
   pickPlaylistScene,
   playlistNames,
   programRestoreTarget,
+  recordedScene,
 } from "./pp-scenes";
 import { AV_PROBE_SCENE } from "./av-sync-probe";
 import type { PlaylistRow } from "./program-state";
@@ -227,6 +228,14 @@ test.describe("SP-program's restore after the PP gate (#229)", () => {
     ).toBe(-1);
     const landed = { ...recorded, action: "input", source: -1, cg_forward: "ok" };
     expect(manualCutLanded({ source: -1, remote: { last_remote_cut: landed } }, long)).toBe(true);
+  });
+
+  test("the clip counts characters (code points), as Rust's chars() does", () => {
+    const note = "\u{1F3B5}"; // one character, two UTF-16 units
+    const recorded = recordedScene(note.repeat(70));
+    expect([...recorded]).toHaveLength(64);
+    expect(recorded).toHaveLength(128);
+    expect(recordedScene("Blank")).toBe("Blank");
   });
 
   test("nothing to put back: no press, no start, or already on the start source", () => {

@@ -180,9 +180,26 @@ def test_a_rerun_of_an_old_deploy_pp_run_never_installs_an_older_build():
     # its 24 h queue) passes the resolve job's main-tip test again. The
     # check step reads main's LIVE tip before anything stops.
     check = _step(_deploy_pp(), "Check the build")
-    assert "repos/$env:GITHUB_REPOSITORY/commits/main" in check
-    assert '$env:EVENT_NAME -eq "workflow_run"' in check
+    # The ref read (no diff built, unlike GET /commits/main).
+    assert "repos/$env:GITHUB_REPOSITORY/git/ref/heads/main" in check
     assert "$tip -ne $env:HEAD_SHA" in check
+    # Fail closed: every event but an explicit dispatch is checked, and the
+    # env the test reads is wired (a missing EVENT_NAME must not skip it).
+    assert '$env:EVENT_NAME -ne "workflow_dispatch"' in check
+    assert "EVENT_NAME: ${{ github.event_name }}" in check
+    assert "HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}" in check
+
+
+def test_the_pp_suite_runs_only_on_the_pp_box():
+    # e2e-pp presses scenes and cuts the program: on a wrong box carrying
+    # resolume-pp it would drive that box's wall.
+    guard = _step(_deploy_pp(), "Check the box")
+    assert '$env:COMPUTERNAME -ine "RESOLUME-PP"' in guard
+    e2e = _deploy_pp().split("  e2e-pp:", 1)[1]
+    names = _step_names(e2e)
+    assert names.index("Check the box (RESOLUME-PP)") < names.index(
+        "Post-deploy Playwright (PP subset)"
+    )
 
 
 def test_the_stop_and_the_install_are_bounded_on_their_own():
@@ -207,6 +224,9 @@ def test_songplayer_is_started_again_whatever_happened_before():
     text = _deploy_pp()
     start = _step(text, "Start SongPlayer")
     assert "if: always()" in start
+    # It runs even after the box check failed: on a wrong box it touches
+    # nothing either.
+    assert '$env:COMPUTERNAME -ine "RESOLUME-PP"' in start
     assert "http://localhost:8920/api/v1/status" in start
     assert "did not come back" in start
     conditions = _conditions(text)
