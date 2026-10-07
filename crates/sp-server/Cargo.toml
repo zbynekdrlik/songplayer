@@ -89,7 +89,16 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_ProcessStatus",
     # #147 round 9: SetProcessWorkingSetSizeEx + QUOTA_LIMITS_HARDWS_* (hard min WS).
     "Win32_System_Memory",
+    # #233 lane 3: an ASIO output's worker pumps its driver's window messages
+    # (PeekMessageW / TranslateMessage / DispatchMessageW).
+    "Win32_UI_WindowsAndMessaging",
 ] }
+# #233 lane 3: the ASIO output's host — azo, a pure-Rust COM ASIO host (MIT,
+# no Steinberg SDK, no LLVM; iemmixer's choice), 0.4.0 per main-session
+# ruling 10 (finding 6046530840). Without its default `host` feature (a
+# oneshot-based helper thread the output does not use). Pinned exactly; its
+# MIT notice and azo-sys's ship in THIRD-PARTY-NOTICES.txt.
+azo = { version = "=0.4.0", default-features = false }
 
 [dev-dependencies]
 tower = "0.5"

@@ -7,6 +7,8 @@
 pub mod asio_format; // #233: an ASIO driver's sample types + the L/R channel fill (pure)
 pub mod asio_out; // #233: the ASIO output — its worker over a driver trait (open / run / close / backoff)
 pub mod asio_state; // #233: the ASIO output's decisions (backoff, reasons, replies, stall), pure
+#[cfg(windows)]
+pub mod asio_win; // #233: the ASIO output's azo (COM) glue — Windows only, out of the mutation gate
 pub mod asrc; // #233: the ASIO output's resampler (rubato Async sinc) + the re-centre splice
 pub mod asrc_servo; // #233: the ASIO output's drift servo (camera-box's asrc-compensator, for an output), pure
 pub mod audio_grid;
