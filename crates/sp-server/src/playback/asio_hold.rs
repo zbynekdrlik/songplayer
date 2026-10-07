@@ -34,6 +34,9 @@ impl DriverHolds {
     /// Hold `driver`, or `None` while another holder has it.
     pub fn claim(&self, driver: &str) -> Option<DriverHold<'_>> {
         let mut held = lock(&self.held);
+        if held.iter().any(|h| h == driver) {
+            return None;
+        }
         held.push(driver.to_string());
         Some(DriverHold {
             holds: self,
