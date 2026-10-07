@@ -55,15 +55,19 @@ test.describe("ASIO output (#233)", () => {
   }) => {
     test.setTimeout(240_000);
     expect(Number.isInteger(EXPECTED) && EXPECTED >= 0, "SP_ASIO_OUTPUTS_EXPECTED").toBe(true);
+    // A failed read is no count (never zero outputs: with EXPECTED "0" a
+    // broken API would pass), so the poll reads -1 then and tries again.
     const enabledAsio = async () =>
-      ((await readOutputs(request)) ?? []).filter((o) => o.type === "asio" && o.enabled);
+      (await readOutputs(request))?.filter((o) => o.type === "asio" && o.enabled) ?? null;
     await expect
-      .poll(async () => (await enabledAsio()).length, {
+      .poll(async () => (await enabledAsio())?.length ?? -1, {
         message: "enabled ASIO outputs (SP_ASIO_OUTPUTS_EXPECTED)",
         timeout: 20_000,
       })
       .toBe(EXPECTED);
-    for (const listed of await enabledAsio()) {
+    const enabled = await enabledAsio();
+    expect(enabled, "GET /api/v1/program").not.toBeNull();
+    for (const listed of enabled as OutputStatus[]) {
       const read = async () => (await readOutputs(request))?.find((o) => o.id === listed.id);
       await expect
         .poll(async () => (await read())?.state ?? "unread", {
