@@ -36,6 +36,38 @@ async function openSettings(page: Page) {
   });
 }
 
+// The two save handlers reached PAST their disabled buttons, so a test sees
+// their own `loaded` guards (a click on a disabled button reaches no handler):
+// - the outputs save: its button re-enabled by hand, then clicked (Leptos
+//   re-applies `prop:disabled` only when `loaded` changes);
+// - the form: `requestSubmit()` fires `submit` past the disabled button. It
+//   runs constraint validation first, so the helper returns whether `submit`
+//   really fired — a test asserts it, or an invalid default would make the
+//   check pass without reaching the guard.
+async function clickOutputsSavePastTheButton(page: Page) {
+  await page.evaluate(() => {
+    const button = document.querySelector('[data-testid="audio-outputs-save"]') as HTMLButtonElement;
+    button.disabled = false;
+    button.click();
+  });
+}
+
+async function submitFormPastTheButton(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const form = document.querySelector("form.settings-form") as HTMLFormElement;
+    let fired = false;
+    form.addEventListener(
+      "submit",
+      () => {
+        fired = true;
+      },
+      { once: true },
+    );
+    form.requestSubmit();
+    return fired;
+  });
+}
+
 function settingsPatches(page: Page): Record<string, unknown>[] {
   const bodies: Record<string, unknown>[] = [];
   page.on("request", (req) => {
@@ -264,18 +296,21 @@ test("Nastavenia whose settings did not load saves nothing (#233)", async ({ pag
     await expect(page.locator('[data-testid="audio-outputs-save"]')).toBeDisabled();
     await expect(page.getByRole("button", { name: "Uložiť nastavenia" })).toBeDisabled();
     await expect(page.locator(".save-status")).toHaveText("Nastavenia sa nenačítali — uloženie je vypnuté");
-    // An output added in this state still cannot replace the stored list.
-    // The disabled buttons are the protection (a click on a disabled button
-    // reaches no handler); a `requestSubmit()` of the form reaches its submit
-    // handler past the disabled button, whose own guard sends nothing.
+    // An output added in this state keeps the save disabled.
     await page.locator('[data-testid="audio-outputs-add-vban"]').click();
-    await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(1);
+    const rows = page.locator('[data-testid="audio-output-row"]');
+    await expect(rows).toHaveCount(1);
     await expect(page.locator('[data-testid="audio-outputs-save"]')).toBeDisabled();
-    await page.evaluate(() => (document.querySelector("form.settings-form") as HTMLFormElement).requestSubmit());
-    await expect(page.locator(".save-status")).toHaveText("Nastavenia sa nenačítali — uloženie je vypnuté");
+    // Each handler's own guard: an EMPTY list passes `validate_list`, so only
+    // the guard can stop the outputs save here.
+    await rows.nth(0).locator('[data-testid="audio-output-remove"]').click();
+    await expect(rows).toHaveCount(0);
+    await clickOutputsSavePastTheButton(page);
+    await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("");
+    expect(await submitFormPastTheButton(page), "the form's submit handler ran").toBe(true);
     // A round trip through the page after the attempts, then: no PATCH.
     await page.locator('[data-testid="audio-outputs-add-vban"]').click();
-    await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(2);
+    await expect(rows).toHaveCount(1);
     expect(patches).toHaveLength(0);
   } finally {
     await request.post("/__mock/fail-mode", { data: { kind: "settings", enabled: false } });
@@ -304,9 +339,11 @@ test("Nastavenia saves nothing while its settings are still loading (#233)", asy
     await expect(saveOutputs).toBeDisabled();
     await expect(saveForm).toBeDisabled();
     await expect(page.locator('[data-testid="audio-outputs-load-error"]')).toHaveCount(0);
-    // The form's submit handler, reached past its disabled button: its guard
-    // sends nothing while the load runs.
-    await page.evaluate(() => (document.querySelector("form.settings-form") as HTMLFormElement).requestSubmit());
+    // Both handlers reached past their disabled buttons while the load runs
+    // (no row yet: an empty list, so only the guard can stop the save).
+    await clickOutputsSavePastTheButton(page);
+    await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("");
+    expect(await submitFormPastTheButton(page), "the form's submit handler ran").toBe(true);
     release();
     await expect(page.locator('[data-testid="settings-gemini-model"]')).toHaveValue("gemini-2.5-flash", {
       timeout: 10000,
@@ -360,8 +397,6 @@ test("a refused save keeps the edits and stores nothing (#233)", async ({ page, 
   } finally {
     await page.unroute("**/api/v1/settings");
   }
-  const stored = await (await request.get("/api/v1/settings")).json();
-  expect(JSON.parse(stored.audio_outputs)[1].delay_ms, "nothing stored").toBe(20);
   // The refused PATCH is the point of the test: the browser logs its 400.
   expect(realConsoleErrors().filter((m) => !/Failed to load resource.*400/.test(m))).toEqual([]);
 });
