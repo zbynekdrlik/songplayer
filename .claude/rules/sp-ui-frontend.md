@@ -680,8 +680,10 @@ Two orthogonal facts, two sources — never conflate them:
   which lagged a cut by up to ~5 s.) #229: while the health row names a
   pending retry of failed opens and the pipeline is not told it decodes
   (the label's own predicate, `player_view::waits_for_retry`), the badge is
-  `● Na programe — čaká na ďalší pokus` (`player_program_badge`, `on` style):
-  a retry waits only on program. `open-failures.md` has the details.
+  `● Na programe — čaká na ďalší pokus` (`player_program_badge`, `on` style),
+  read from the 1 Hz health poll, so it lags a wait's start and end by up
+  to ~1 s. A retry of a playlist ▶'d off program reads the same: an open
+  #229 question. `open-failures.md` has the details.
 
 Server: `ServerMsg::PlaybackStateChanged` carries `transport: TransportState`
 (`#[serde(default)]` = `Idle`), filled by the engine from the RAW `PlayState` via

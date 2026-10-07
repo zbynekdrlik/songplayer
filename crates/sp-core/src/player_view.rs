@@ -12,10 +12,11 @@
 //! was told nothing plays, and "● Na programe" / "○ Mimo programu" only when it
 //! was told the state. The badge reads the same WS state as the state label
 //! (`Playing` = on program, #170), so a program cut flips both in one render.
-//! #229: while the playlist waits for the retry of its failed opens (a retry
-//! waits only on program), the label and the badge both say so, decided by
-//! ONE predicate. These rules live here (WASM-safe, so the workspace tests
-//! and the mutation gate cover them; sp-ui has no unit-test job).
+//! #229: while the playlist waits for the retry of its failed opens, the
+//! label and the badge both say so, decided by ONE predicate (the badge's
+//! on-program claim is an open question, see [`player_program_badge`]).
+//! These rules live here (WASM-safe, so the workspace tests and the mutation
+//! gate cover them; sp-ui has no unit-test job).
 
 use crate::playback::{OpenFailures, PlaybackMode, PlaybackState, TransportState};
 
@@ -100,8 +101,9 @@ pub enum ProgramBadge {
     Unknown,
     /// The wall shows this playlist.
     OnProgram,
-    /// #229: it is SP-program's source and waits for the retry of its
-    /// failed opens: on program, its program black.
+    /// #229: it waits for the retry of its failed opens, taken as on
+    /// program (SP-program's source, its program black; see
+    /// [`player_program_badge`] for the off-program case still open).
     OnProgramRetry,
     /// It is not on program.
     OffProgram,
@@ -217,10 +219,13 @@ pub fn player_state_label(
 /// for the retry of its failed opens ([`waits_for_retry`], the label's own
 /// rule): "● Na programe — čaká na ďalší pokus". The engine reports
 /// `WaitingForScene` then (nothing decodes), which alone reads "○ Mimo
-/// programu"; but a retry waits only on program (a cut off program ends it,
-/// `failure_retry.rs`), so the playlist IS SP-program's source, its program
-/// black. A pipeline told it decodes keeps its badge, read from the WS state
-/// as always.
+/// programu" for SP-program's source, its program black (design record
+/// 6029071745). Open (#229 Design-question 6029484142): a retry is also
+/// armed for a playlist ▶'d OFF program (`failure_retry.rs::video_failed`
+/// does not read the scene; a cut off program does end one), and neither
+/// the WS state nor the health row tells the two apart, so off program this
+/// badge claims on program too. A pipeline told it decodes keeps its badge,
+/// read from the WS state as always.
 pub fn player_program_badge(
     state_known: bool,
     state: PlaybackState,

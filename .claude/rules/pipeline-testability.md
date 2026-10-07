@@ -1,6 +1,8 @@
 ---
 paths:
   - "crates/sp-server/src/playback/pipeline.rs"
+  - "crates/sp-server/src/playback/pipeline_paced.rs"
+  - "crates/sp-server/src/playback/pipeline_stub.rs"
   - "crates/sp-server/src/playback/pipeline_heartbeat_tests.rs"
   - "crates/sp-server/src/playback/pipeline_inline_tests.rs"
   - "crates/sp-server/src/playback/pipeline_tests_no_sender.rs"
@@ -49,6 +51,17 @@ nothing else:
   (#221 lane 3, owner directive "delete legacy directions"): pacing is the
   only path. Its history is in the git log of `pipeline_audio.rs`,
   `audio_emitter.rs` and `av_catchup.rs` (deleted at 0.71.0-dev.16).
+
+## Every Play is answered exactly once, in order (#229 follow-up)
+
+The engine counts the Plays a pipeline was sent and has not answered
+(`failure_backoff::PlayAnswers`): only the answer to the LAST Play sent
+records a play or counts a failure. That needs exactly one `Started` or
+`Error` per Play, in command order: the stub's one `Error`; on Windows the
+pre-roll's `Started` or the failed open's `Error` (the pre-roll reads no
+command, nothing after `Started` sends an `Error`). A new answer path, a
+second answer, or an answer that can overtake an earlier Play's breaks it
+(`open-failures.md`, "Which Play an answer belongs to").
 
 ## Heartbeat helpers carry `mutants::skip` only where the effect is glue
 

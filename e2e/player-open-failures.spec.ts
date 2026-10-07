@@ -148,8 +148,8 @@ test("the Live page's Player shows the same line, and a due retry reads 0 s (#22
     { timeout: 5000 },
   );
   // While the retry waits the state label says so (not "Čaká na scénu"),
-  // and so does the badge: a retry waits only on program. One Player
-  // component, so the Live page reads what the dashboard does.
+  // and so does the badge. One Player component, so the Live page reads
+  // what the dashboard does.
   await expect(page.getByTestId("player-state")).toHaveText(
     "Čaká na ďalší pokus",
   );
@@ -163,10 +163,10 @@ test("the Live page's Player shows the same line, and a due retry reads 0 s (#22
 // #229 follow-up (design record 6029071745): while a playlist waits out the
 // retry of its failed opens, the engine reports `WaitingForScene` (nothing
 // decodes), so the badge read "○ Mimo programu" for the playlist that IS
-// SP-program's source, its program black. A retry waits only on program
-// (`failure_retry.rs`: a cut off program ends it), so the badge says "on
-// program, waiting". A playlist told it decodes keeps its badge: the retry's
-// Play went out before the 1 Hz health row moved.
+// SP-program's source, its program black: the badge now says "on program,
+// waiting" (a retry of a playlist played OFF program reads the same, the
+// open #229 Design-question 6029484142). A playlist told it decodes keeps
+// its badge: the retry's Play went out before the 1 Hz health row moved.
 test("on program and waiting out the retry, the badge says so (#229)", async ({
   page,
   request,

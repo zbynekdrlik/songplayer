@@ -503,6 +503,10 @@ pub(crate) fn decode_and_send_paced(
                 gap_resyncs, "paced: song change left > 8 boundaries unserviced (grid resync)"
             );
         }
+        // #229: this Play's ONE answer, `Started` below or the failed open's
+        // `Error` (sent by the caller). No command was read since the Play,
+        // and nothing after `Started` sends an `Error`: the engine's
+        // `PlayAnswers` count relies on one answer per Play, in order.
         let (duration_ms, source_fps, position_ms) = match opened {
             Ok(opened) => opened,
             // The producer is stopped + joined after the block.

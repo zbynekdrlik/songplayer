@@ -171,6 +171,13 @@ impl PlayAnswers {
         self.unanswered = self.unanswered.saturating_sub(1);
         self.unanswered == 0
     }
+
+    /// The Plays still waiting for their answer, for the log of an ignored
+    /// answer: a count that never comes back to 0 means a Play that was
+    /// never answered (the pipeline's one-answer rule broken).
+    pub fn pending(&self) -> u32 {
+        self.unanswered
+    }
 }
 
 #[cfg(test)]

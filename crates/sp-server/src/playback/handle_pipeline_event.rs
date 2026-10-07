@@ -35,6 +35,7 @@ impl PlaybackEngine {
                 if !self.answers_last_play(playlist_id) {
                     info!(
                         playlist_id,
+                        still_pending = self.plays_pending(playlist_id),
                         "the start of an earlier Play — ignored, a newer Play is under way"
                     );
                     return;
@@ -182,6 +183,7 @@ impl PlaybackEngine {
                 if !self.answers_last_play(playlist_id) {
                     info!(
                         playlist_id,
+                        still_pending = self.plays_pending(playlist_id),
                         "the failure of an earlier Play — ignored, a newer Play is under way"
                     );
                     return;
@@ -204,5 +206,16 @@ impl PlaybackEngine {
                 self.handle_health_snapshot(playlist_id, ev.clone());
             }
         }
+    }
+
+    /// #229 follow-up: the Plays of `playlist_id` still waiting for their
+    /// answer, for the log line of an ignored answer only (a count that
+    /// never comes back to 0 is a Play never answered). The count itself is
+    /// `PlayAnswers::pending`, tested there.
+    #[cfg_attr(test, mutants::skip)] // log-only value: nothing reads it
+    fn plays_pending(&self, playlist_id: i64) -> u32 {
+        self.pipelines
+            .get(&playlist_id)
+            .map_or(0, |pp| pp.pending_plays.pending())
     }
 }

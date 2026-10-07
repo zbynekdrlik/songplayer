@@ -43,6 +43,7 @@ fn run_loop_stub(
                     ?audio,
                     "video decode not available on this platform"
                 );
+                // #229: the Play's one answer, in order (`PlayAnswers`).
                 let _ = event_tx.send((
                     playlist_id,
                     PipelineEvent::Error("Video decode requires Windows (Media Foundation)".into()),

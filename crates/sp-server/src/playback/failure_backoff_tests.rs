@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use sp_core::playback::OpenFailures;
 
-use super::{FailureRun, next_attempt, utc_ms_after};
+use super::{FailureRun, PlayAnswers, next_attempt, utc_ms_after};
 
 fn secs(s: u64) -> Option<Duration> {
     Some(Duration::from_secs(s))
@@ -162,8 +162,6 @@ fn a_run_avoids_its_failed_songs_and_the_song_just_sent() {
     assert_eq!(run.avoid(Some(7)), vec![7], "a start ends the run's list");
 }
 
-use super::PlayAnswers;
-
 /// #229 follow-up (design record 6029071745): a `Started` or an `Error`
 /// names no Play, and the pipeline answers its Plays one by one, in order.
 /// Only the answer that brings the count of unanswered Plays to 0 is the
@@ -173,22 +171,29 @@ use super::PlayAnswers;
 #[test]
 fn only_the_answer_to_the_last_play_sent_acts() {
     let mut plays = PlayAnswers::default();
+    assert_eq!(plays.pending(), 0);
     plays.sent();
+    assert_eq!(plays.pending(), 1);
     assert!(plays.answered(), "one Play: its answer is the last one's");
+    assert_eq!(plays.pending(), 0);
 
     plays.sent(); // A
     plays.sent(); // B, a skip in A's pre-roll
     assert!(!plays.answered(), "A's answer, after B was sent");
+    assert_eq!(plays.pending(), 1, "B still waits");
     assert!(plays.answered(), "B's answer");
 
     plays.sent(); // A
     plays.sent(); // B
     plays.sent(); // C
+    assert_eq!(plays.pending(), 3);
     assert!(!plays.answered(), "A's Error, after B and C were sent");
     assert!(!plays.answered(), "B's answer, after C was sent");
     plays.sent(); // D, while C is under way
+    assert_eq!(plays.pending(), 2, "C and D wait");
     assert!(!plays.answered(), "C's answer, after D was sent");
     assert!(plays.answered(), "D's answer");
+    assert_eq!(plays.pending(), 0);
 }
 
 /// An answer with no Play pending (a test injects one; the pipeline never
@@ -199,6 +204,7 @@ fn an_answer_with_no_play_pending_acts_and_leaves_the_count_at_zero() {
     let mut plays = PlayAnswers::default();
     assert!(plays.answered());
     assert!(plays.answered());
+    assert_eq!(plays.pending(), 0, "saturated, never below 0");
     plays.sent();
     assert!(plays.answered(), "the next Play's answer owes nothing");
 }

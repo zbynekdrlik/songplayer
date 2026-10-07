@@ -81,7 +81,21 @@ the review finding on the selection: 6028419694.
   path. Only a `Shutdown` leaves a Play unanswered, and the pipeline is gone
   then. Keep it so: an answer that can come twice, or out of order, breaks
   the count. A Play id echoed in `Started` / `Error` (the design's rejected
-  Approach 3) would be the fix then.
+  Approach 3) would be the fix then. The rule is restated where the
+  pipeline code lives (`pipeline-testability.md`, comments at the answers
+  in `pipeline.rs`, `pipeline_paced.rs`, `pipeline_stub.rs`).
+- What a broken guarantee costs: a Play never answered leaves the count one
+  too high for the rest of the pipeline's life. Every real answer then
+  reads as an earlier Play's, so the playlist never moves on after a
+  failure and records nothing. The INFO line of every ignored answer
+  carries `still_pending` (`PlayAnswers::pending`): a value that never
+  returns to 0 is that.
+- Older and rare: the engine's event channel is keyed by playlist id, so a
+  removed pipeline's last answer (its thread finishes the open it was in
+  before it reads its `Shutdown`) can reach a NEW pipeline of the same
+  playlist. With a Play of its own pending it is taken as that Play's, and
+  the Play's own answer then saturates at 0 and acts again; the count heals
+  itself.
 - `failure_backoff::PlayAnswers`, `PlaylistPipeline.pending_plays`:
   - `begin_play` (every Play) calls `sent()`;
   - the `Started` and `Error` arms ask `answers_last_play` FIRST, and an
@@ -118,8 +132,20 @@ the review finding on the selection: 6028419694.
   two never disagree). `player_program_badge` reads "● Na programe — čaká
   na ďalší pokus" (`ProgramBadge::OnProgramRetry`, the `on` style,
   `is_on_program`). The engine's wait is `WaitingForScene`, which alone
-  reads "○ Mimo programu", but a retry waits only on program (a cut off
-  program ends it). A pipeline told it decodes keeps the WS state's badge.
+  read "○ Mimo programu" for SP-program's source, its program black. A
+  pipeline told it decodes keeps the WS state's badge.
+- OPEN (#229 Design-question 6029484142): a retry is armed off program too.
+  `video_failed` backs off from `Playing` whatever the scene (a ▶ off air,
+  a dub prepared on the Dabing page); only a cut off program ends a pending
+  one. The WS state and the health row cannot tell the two apart, so a
+  playlist ▶'d off program that waits for a retry also reads "● Na programe
+  — čaká na ďalší pokus". The recommended fix is an engine fact on the row
+  (`OpenFailures.on_program`), pending the main session's decision.
+- The badge follows the 1 Hz health poll at both ends of a wait: it reads
+  "○ Mimo programu" for up to ~1 s after the wait starts, and keeps the
+  retry badge up to ~1 s after a cut off program or a Pause ends the retry
+  (neither changes the WS state then). A cut flips the label and the badge
+  in one render only outside a wait.
 - Mock: rows carry `open_failures: null`; the GET fills `retry_in_ms` per
   request; `/__mock/ndi-health-reset` restores the default rows.
 
