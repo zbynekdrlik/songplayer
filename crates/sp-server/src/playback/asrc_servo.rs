@@ -413,3 +413,7 @@ impl Servo {
 #[cfg(test)]
 #[path = "asrc_servo_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "asrc_servo_sim_tests.rs"]
+mod sim_tests;
