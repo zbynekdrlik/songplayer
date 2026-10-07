@@ -264,14 +264,71 @@ test("Nastavenia whose settings did not load saves nothing (#233)", async ({ pag
     await expect(page.locator('[data-testid="audio-outputs-save"]')).toBeDisabled();
     await expect(page.getByRole("button", { name: "Uložiť nastavenia" })).toBeDisabled();
     await expect(page.locator(".save-status")).toHaveText("Nastavenia sa nenačítali — uloženie je vypnuté");
-    // An output added in this state still cannot replace the stored list.
+    // An output added in this state still cannot replace the stored list:
+    // even a forced click on either save sends nothing.
     await page.locator('[data-testid="audio-outputs-add-vban"]').click();
     await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(1);
     await expect(page.locator('[data-testid="audio-outputs-save"]')).toBeDisabled();
+    await page.locator('[data-testid="audio-outputs-save"]').click({ force: true });
+    await page.getByRole("button", { name: "Uložiť nastavenia" }).click({ force: true });
+    await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("");
     expect(patches).toHaveLength(0);
   } finally {
     await request.post("/__mock/fail-mode", { data: { kind: "settings", enabled: false } });
   }
   // The refused GET is the point of the test: the browser logs its 500.
   expect(realConsoleErrors().filter((m) => !/Failed to load resource.*500/.test(m))).toEqual([]);
+});
+
+test("Nastavenia saves nothing while its settings are still loading (#233)", async ({ page }) => {
+  const patches = settingsPatches(page);
+  // Hold the page's GET /api/v1/settings until the test releases it.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/v1/settings", async (route) => {
+    if (route.request().method() === "GET") await held;
+    await route.continue();
+  });
+  try {
+    await page.goto("/");
+    await page.locator('[data-testid="nav-settings"]').click();
+    await expect(page.locator('[data-testid="settings-audio-outputs"]')).toBeVisible({ timeout: 10000 });
+    const saveOutputs = page.locator('[data-testid="audio-outputs-save"]');
+    const saveForm = page.getByRole("button", { name: "Uložiť nastavenia" });
+    await expect(saveOutputs).toBeDisabled();
+    await expect(saveForm).toBeDisabled();
+    await expect(page.locator('[data-testid="audio-outputs-load-error"]')).toHaveCount(0);
+    await saveOutputs.click({ force: true });
+    await saveForm.click({ force: true });
+    expect(patches).toHaveLength(0);
+    release();
+    await expect(page.locator('[data-testid="settings-gemini-model"]')).toHaveValue("gemini-2.5-flash", {
+      timeout: 10000,
+    });
+    await expect(saveOutputs).toBeEnabled();
+    await expect(saveForm).toBeEnabled();
+  } finally {
+    release();
+    await page.unroute("**/api/v1/settings");
+  }
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("an output added after one was removed takes a new id (#233)", async ({ page, request }) => {
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: TWO } });
+  expect(seeded.status()).toBe(204);
+  await openSettings(page);
+  const rows = page.locator('[data-testid="audio-output-row"]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1).locator('[data-testid="audio-output-state"]')).toContainText("beží", { timeout: 10000 });
+  // out-2 is removed but not saved: it still runs under its id.
+  await rows.nth(1).locator('[data-testid="audio-output-remove"]').click();
+  await expect(rows).toHaveCount(1);
+  await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1)).toHaveAttribute("data-id", "out-3");
+  await expect(rows.nth(1).locator('[data-testid="audio-output-state"]')).toHaveText("neuložený");
+  expect(realConsoleErrors()).toEqual([]);
 });
