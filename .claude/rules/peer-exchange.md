@@ -172,3 +172,17 @@ extend this file; nothing of them exists yet.
   catalog: Review Focus 3), `peer/board_tests.rs`. A sha256 in a test is
   built (`"0123456789abcdef".repeat(4)`): the staging hook refuses a 40+
   character hex literal.
+
+## Writing a lane's docs (lane 2: five review rounds on this alone)
+
+- Code that only later lanes call: every doc comment and rules line about
+  what a LATER lane builds says it as future work and names the lane that
+  does it ("lane 3's catalog is to list them"), never in the present tense.
+- Read the lane from the plan's lane sections, not from memory: the lane
+  that first CALLS the code is often not the one that builds the API it
+  goes through (`Exchange::ask` is lane 7's, but "nothing calls `ask` yet";
+  the first production caller is lane 8's download hook).
+- A design point a later lane owns (e.g. lane 7's tie-break) is written as
+  OPEN with its constraints, never as a rule this lane picked.
+- Do this pass before the first review round: each later round reads the
+  same docs again.
