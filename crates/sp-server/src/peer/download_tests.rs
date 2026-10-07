@@ -195,9 +195,10 @@ async fn snv_title_sha(pp: &TestNode) -> String {
         .clone()
 }
 
-/// A pair whose video cannot take its final name leaves nothing under the
-/// final names (the local download's rule): the audio, renamed first, is
-/// removed again, and so is the video's part.
+/// A pair whose video cannot take its final name leaves no unrecorded audio
+/// under its final name (the local download's rule): the audio, renamed
+/// first, is removed again. The video's verified part stays for the next
+/// ask (re-hashed there, not transferred again).
 #[tokio::test]
 async fn a_video_that_cannot_take_its_name_leaves_no_audio_behind() {
     let (_snv, pp, row) = snv_and_pp().await;
@@ -217,12 +218,35 @@ async fn a_video_that_cannot_take_its_name_leaves_no_audio_behind() {
         "no unrecorded audio under its final name"
     );
     assert_eq!(row_now(&pp, row.id).await.normalized, 0);
-    assert_eq!(
-        std::fs::read_dir(pp.ex.parts_dir()).unwrap().count(),
-        0,
-        "no part left"
-    );
+    let parts: Vec<String> = std::fs::read_dir(pp.ex.parts_dir())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(parts.len(), 1, "the video's part only: {parts:?}");
+    assert!(parts[0].starts_with(&format!("{YT}_video_")), "{parts:?}");
     assert_eq!(fetch_record(pp.pool(), YT, "metadata").await.unwrap(), None);
+}
+
+/// The audio's final name may hold another row's audio of the same video
+/// (rows share files by name, #136): a failed video rename never removes an
+/// audio that was there before.
+#[tokio::test]
+async fn a_failed_video_rename_keeps_an_audio_that_was_already_there() {
+    let (_snv, pp, row) = snv_and_pp().await;
+    let audio = pp
+        .cache()
+        .join(audio_filename("Way Maker", "Sinach", YT, false));
+    std::fs::write(&audio, b"another row's audio").unwrap();
+    let video = pp
+        .cache()
+        .join(video_filename("Way Maker", "Sinach", YT, false));
+    std::fs::create_dir_all(&video).unwrap();
+    let (chain, _calls) = counting_chain();
+    assert!(matches!(
+        first(Some(&pp.ex), &chain, &row).await,
+        PeerStep::Deferred
+    ));
+    assert!(audio.exists(), "an audio that was there stays");
 }
 
 #[tokio::test]

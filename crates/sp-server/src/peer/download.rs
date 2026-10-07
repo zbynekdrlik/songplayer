@@ -143,7 +143,7 @@ pub(crate) async fn adopt(
         let _ = tokio::fs::remove_file(&video_part).await;
         return Err(e.into());
     }
-    record_download(
+    let recorded = record_download(
         &ex.pool,
         &ex.cache_dir,
         row.id,
@@ -153,7 +153,9 @@ pub(crate) async fn adopt(
         &audio,
     )
     .await?;
-    Ok(taken)
+    // A correction made meanwhile is what was recorded (#136): then no title
+    // was taken from the peer.
+    Ok(taken.filter(|t| t.title == recorded))
 }
 
 /// The title the fetched pair is named after and recorded with, and the

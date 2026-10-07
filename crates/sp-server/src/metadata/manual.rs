@@ -85,11 +85,13 @@ pub async fn download_title(
 }
 
 /// #136 (review round 1): record a finished download of row `video_db_id` of
-/// video `youtube_id` — the `title` it was named after and its fresh pair
-/// `video` / `audio` in `cache_dir` — through `mark_video_processed_pair`,
-/// under `cache::SONG_FILES` (no rename or re-link interleaves).
+/// video `youtube_id` — the `asked` title it was named after and its fresh
+/// pair `video` / `audio` in `cache_dir` — through `mark_video_processed_pair`,
+/// under `cache::SONG_FILES` (no rename or re-link interleaves). Answers the
+/// title it recorded (#229: a peer's title taken is recorded as such only
+/// when it is that one).
 ///
-/// `title` was read (`download_title`) before the download and the loudnorm,
+/// `asked` was read (`download_title`) before the download and the loudnorm,
 /// about a minute earlier. A correction of the video made in between (a PATCH
 /// of this row or of another row of it) is final, so the video's correction
 /// is read again under the lock: when there is one, the fresh pair is
@@ -101,10 +103,10 @@ pub async fn record_download(
     cache_dir: &Path,
     video_db_id: i64,
     youtube_id: &str,
-    title: &DownloadTitle,
+    asked: &DownloadTitle,
     video: &Path,
     audio: &Path,
-) -> Result<(), sqlx::Error> {
+) -> Result<DownloadTitle, sqlx::Error> {
     let _files = crate::downloader::cache::SONG_FILES.lock().await;
     let fresh = SongFiles {
         video: Some(video.to_path_buf()),
@@ -123,7 +125,7 @@ pub async fn record_download(
             };
             (corrected, files)
         }
-        Ok(None) => (title.clone(), fresh),
+        Ok(None) => (asked.clone(), fresh),
         Err(e) => {
             warn!(
                 video_db_id,
@@ -131,7 +133,7 @@ pub async fn record_download(
                 %e,
                 "metadata: reading the video's correction failed — the download keeps its title"
             );
-            (title.clone(), fresh)
+            (asked.clone(), fresh)
         }
     };
     let columns = files.columns();
@@ -145,7 +147,8 @@ pub async fn record_download(
         &columns.video,
         columns.audio.as_deref().unwrap_or_default(),
     )
-    .await
+    .await?;
+    Ok(asked.clone())
 }
 
 /// The INFO of a download whose fresh pair is renamed after a correction

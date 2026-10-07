@@ -242,7 +242,7 @@ async fn a_correction_made_during_the_download_names_the_fresh_pair() {
     .await
     .unwrap();
 
-    record_download(&pool, dir.path(), 8, "DOWNLOAD008", &title, &video, &audio)
+    let written = record_download(&pool, dir.path(), 8, "DOWNLOAD008", &title, &video, &audio)
         .await
         .unwrap();
 
@@ -286,6 +286,7 @@ async fn a_correction_made_during_the_download_names_the_fresh_pair() {
         !video.exists() && !audio.exists(),
         "no pair is left under the chain's name"
     );
+    assert_eq!(written, corrected, "it answers the title it recorded");
 }
 
 /// Pin: with no correction the download records the title it was named
@@ -299,9 +300,10 @@ async fn a_download_with_no_correction_records_its_own_title() {
     let title = title_of(&pool, &chain, 9).await;
     let [video, audio] = fresh_pair(dir.path(), 9, &title);
 
-    record_download(&pool, dir.path(), 9, "DOWNLOAD009", &title, &video, &audio)
+    let written = record_download(&pool, dir.path(), 9, "DOWNLOAD009", &title, &video, &audio)
         .await
         .unwrap();
+    assert_eq!(written, title);
 
     assert_eq!(
         recorded(&pool, 9).await,
