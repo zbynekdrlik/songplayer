@@ -547,13 +547,15 @@ fn two_asio_entries_on_one_driver_are_refused() {
     );
     let mut off = dvs("out-2");
     off.enabled = false;
-    assert!(
-        validate_list(&[dvs("out-1"), off]).is_err(),
+    assert_eq!(
+        validate_list(&[dvs("out-1"), off]),
+        Err(err),
         "a switched-off entry still names the driver"
     );
-    let mut other = dvs("out-2");
+    // Another driver is fine, a VBAN entry between them too (foh is out-1).
+    let mut other = dvs("out-3");
     asio_mut(&mut other).driver = "Blackmagic ASIO".into();
-    assert!(validate_list(&[dvs("out-1"), foh(), other]).is_ok());
+    assert!(validate_list(&[dvs("out-2"), foh(), other]).is_ok());
 }
 
 #[test]
