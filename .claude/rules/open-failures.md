@@ -5,9 +5,12 @@ paths:
   - "crates/sp-server/src/playback/engine_play.rs"
   - "crates/sp-server/src/playback/title_timers.rs"
   - "crates/sp-server/src/playback/state.rs"
+  - "crates/sp-server/src/playback/ndi_health.rs"
+  - "crates/sp-server/src/api/routes_tests_clock.rs"
   - "crates/sp-server/src/playlist/selector.rs"
   - "crates/sp-core/src/player_view.rs"
   - "sp-ui/src/components/player.rs"
+  - "e2e/mock-api.mjs"
   - "e2e/player-open-failures.spec.ts"
 ---
 
@@ -82,8 +85,8 @@ the review finding on the selection: 6028419694.
   (`sp_core::player_view::open_failures_line`, "Videá sa nedajú otvoriť (N×):
   … — ďalší pokus o X s", X = `retry_in_ms` rounded up), mounted by a Memo,
   its text following the 1 Hz `store.ndi_health` poll; the state label reads
-  "Čaká na ďalší pokus" while a retry waits and the state is known
-  (`player_state_label`). The
+  "Čaká na ďalší pokus" while a retry waits, the state is known and the
+  pipeline is not told it decodes (`player_state_label`). The
   on/off-program badge still reads the WS state (`WaitingForScene` → "○ Mimo
   programu", also for a playlist on program that waits black).
 - Mock: rows carry `open_failures: null`; the GET fills `retry_in_ms` per
