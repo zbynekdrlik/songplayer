@@ -146,7 +146,7 @@ impl PlaybackEngine {
     /// backs off too, and its badge must not claim the program.
     fn back_off(&mut self, playlist_id: i64, next: PlayState, error: &str, delay: Duration) {
         let tx = self.event_tx.clone();
-        let on_program = true; // RED: every retry claims the program (the old premise)
+        let on_program = self.on_air_contains(playlist_id);
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
             return;
         };

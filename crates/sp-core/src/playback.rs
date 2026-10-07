@@ -112,7 +112,7 @@ impl OpenFailures {
     /// Whether a retry is pending AND was armed on program: the Player's
     /// badge then says "on program, waiting" (`player_view`).
     pub fn retry_on_program(&self) -> bool {
-        self.retry_pending() // RED: any pending retry reads as on program (the old premise)
+        self.retry_pending() && self.on_program
     }
 
     /// The row as read at `now_ms` (UTC ms, the server's clock): its
