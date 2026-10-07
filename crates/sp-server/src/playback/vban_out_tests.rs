@@ -7,6 +7,7 @@
 //! Wired via `#[cfg(test)] #[path = "vban_out_tests.rs"] pub(crate) mod tests;`.
 
 use super::*;
+use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramJob};
 use crate::playback::program_output::ProgramOutput;
@@ -117,10 +118,10 @@ fn frame(data: Vec<f32>, channels: u32, sample_rate: u32) -> AudioFrame {
     }
 }
 
-fn block(due: i64, v: f32) -> VbanBlock {
-    VbanBlock {
+fn block(due: i64, v: f32) -> ProgramBlock {
+    ProgramBlock {
         due_100ns: due,
-        samples: Some(vec![v; VBAN_BLOCK_SAMPLES]),
+        samples: Some(vec![v; VBAN_BLOCK_SAMPLES].into()),
         substituted: false,
     }
 }
@@ -139,12 +140,12 @@ fn a_program_frame_is_copied_for_vban_and_anything_else_is_substituted_silence()
     // borrows the frames, so VBAN gets a copy of the same samples.
     let data: Vec<f32> = (0..3200).map(|i| i as f32 / 3200.0).collect();
     let frames = vec![frame(data.clone(), 2, 48_000)];
-    let b = VbanBlock::copied(7, &frames);
+    let b = ProgramBlock::copied(7, &frames);
     assert_eq!(
         b,
-        VbanBlock {
+        ProgramBlock {
             due_100ns: 7,
-            samples: Some(data),
+            samples: Some(data.into()),
             substituted: false,
         },
         "one program block is kept, on its boundary"
@@ -170,8 +171,8 @@ fn a_program_frame_is_copied_for_vban_and_anything_else_is_substituted_silence()
     ];
     for (frames, what) in cases {
         assert_eq!(
-            VbanBlock::copied(9, &frames),
-            VbanBlock {
+            ProgramBlock::copied(9, &frames),
+            ProgramBlock {
                 due_100ns: 9,
                 samples: None,
                 substituted: true,
@@ -179,7 +180,7 @@ fn a_program_frame_is_copied_for_vban_and_anything_else_is_substituted_silence()
             "{what}"
         );
     }
-    let s = VbanBlock::silence(11);
+    let s = ProgramBlock::silence(11);
     assert_eq!((s.due_100ns, s.samples, s.substituted), (11, None, false));
 }
 
@@ -437,9 +438,9 @@ fn a_substituted_block_is_counted_even_while_disabled() {
     let out = VbanOut::new();
     let mut clock = FakeClock::at(D);
     let mut sink = RecordingSink::on(&clock);
-    let b = VbanBlock::copied(D, &[]);
+    let b = ProgramBlock::copied(D, &[]);
     VbanSender::default().send_block(&out, &b, &mut sink, &mut clock);
-    VbanSender::default().send_block(&out, &VbanBlock::silence(D), &mut sink, &mut clock);
+    VbanSender::default().send_block(&out, &ProgramBlock::silence(D), &mut sink, &mut clock);
     assert_eq!(out.status().blocks_substituted, 1);
 }
 
@@ -546,9 +547,9 @@ fn one_block_over_loopback_udp_decodes_to_8_packets_of_the_block() {
     let out = out_with(active_config(&[target.as_str()]));
     let mut socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     let samples = ramp_block();
-    let b = VbanBlock {
+    let b = ProgramBlock {
         due_100ns: D,
-        samples: Some(samples.clone()),
+        samples: Some(samples.clone().into()),
         substituted: false,
     };
     let mut clock = FakeClock::at(D);

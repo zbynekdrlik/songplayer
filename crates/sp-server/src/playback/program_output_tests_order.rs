@@ -19,12 +19,13 @@ use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, FourCCVideoType, NdiBackend, NdiError, NdiSender};
 
 use super::{ProgramOutput, run_program_loop};
+use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramBus, ProgramJob};
 use crate::playback::program_output_timing::{BoundaryMarks, BoundarySample, BoundaryTimingStatus};
 use crate::playback::program_transition::{MixJob, crossfade_gains};
 use crate::playback::submit_handoff::SubmitJob;
-use crate::playback::vban_out::{VbanBlock, VbanOut, VbanTake};
+use crate::playback::vban_out::{VbanOut, VbanTake};
 use crate::playback::wallclock::{SettableClock, WallClock};
 
 const T0: i64 = 17_900_000_000_000_000;
@@ -178,7 +179,7 @@ struct Seen {
     /// send.
     queued_while_held: usize,
     /// The block VBAN got.
-    block: VbanBlock,
+    block: ProgramBlock,
     /// The stamp `submit` returned.
     stamp: i64,
     video_timecodes: Vec<i64>,
@@ -284,9 +285,9 @@ fn a_forwarded_pairs_block_reaches_vban_while_its_ndi_submit_is_held() {
     );
     assert_eq!(
         seen.block,
-        VbanBlock {
+        ProgramBlock {
             due_100ns: stamp,
-            samples: Some(data.clone()),
+            samples: Some(data.clone().into()),
             substituted: false,
         },
         "the pair's own block, on its boundary"
@@ -311,7 +312,7 @@ fn the_standby_silence_reaches_vban_while_its_ndi_submit_is_held() {
         seen.queued_while_held, 1,
         "VBAN has the standby silence before its NDI submit returns"
     );
-    assert_eq!(seen.block, VbanBlock::silence(stamp));
+    assert_eq!(seen.block, ProgramBlock::silence(stamp));
     assert_eq!(
         seen.ndi_planar,
         vec![0.0; 3200],

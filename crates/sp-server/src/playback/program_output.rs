@@ -79,6 +79,7 @@ use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+use crate::playback::audio_out_block::{ProgramBlock, is_program_block};
 use crate::playback::band_pool::BandPool;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{
@@ -92,7 +93,7 @@ use crate::playback::program_transition::{
 };
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::submitter::FrameSubmitter;
-use crate::playback::vban_out::{VbanBlock, VbanOut, is_program_block, run_vban_config_task};
+use crate::playback::vban_out::{VbanOut, run_vban_config_task};
 use crate::playback::wallclock::WallClock;
 
 /// The program's picture size, 1080p (the paced idle size): #223, every
@@ -261,11 +262,11 @@ impl Pair {
     /// What VBAN gets for the boundary on `stamp_100ns`: the pair's own
     /// block, COPIED (its NDI submit still borrows it), or the standby
     /// silence.
-    fn vban_block(&self, stamp_100ns: i64) -> VbanBlock {
+    fn vban_block(&self, stamp_100ns: i64) -> ProgramBlock {
         match self {
-            Pair::Source(job) => VbanBlock::copied(stamp_100ns, &job.audio),
-            Pair::Standby => VbanBlock::silence(stamp_100ns),
-            Pair::Mix { audio, .. } => VbanBlock::copied(stamp_100ns, audio),
+            Pair::Source(job) => ProgramBlock::copied(stamp_100ns, &job.audio),
+            Pair::Standby => ProgramBlock::silence(stamp_100ns),
+            Pair::Mix { audio, .. } => ProgramBlock::copied(stamp_100ns, audio),
         }
     }
 }
@@ -329,7 +330,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
 
     /// #210: hand one pair's audio block to the VBAN output (never blocks);
     /// returns the instant it was handed over, read off `now`.
-    fn feed_vban(&self, block: VbanBlock, now: &impl Fn() -> i64) -> i64 {
+    fn feed_vban(&self, block: ProgramBlock, now: &impl Fn() -> i64) -> i64 {
         if let Some(vban) = &self.vban {
             vban.push(block);
         }

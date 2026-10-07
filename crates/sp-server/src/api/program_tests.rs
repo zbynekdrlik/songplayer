@@ -210,7 +210,7 @@ async fn cut_without_a_source_is_rejected() {
 
 #[tokio::test]
 async fn get_program_reports_the_vban_block() {
-    use crate::playback::vban_out::VbanBlock;
+    use crate::playback::audio_out_block::ProgramBlock;
     use crate::playback::vban_out::tests::active_config;
     let state = test_state().await;
     let (status, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
@@ -228,7 +228,7 @@ async fn get_program_reports_the_vban_block() {
     let vban = state.program_bus.vban();
     vban.set_config(active_config(&["127.0.0.1:6980"]));
     for due in 0..11 {
-        vban.push(VbanBlock::silence(due)); // one over the bound
+        vban.push(ProgramBlock::silence(due)); // one over the bound
     }
     let (status, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -723,8 +723,9 @@ async fn get_program_reports_the_senders_boundary_timing() {
 /// so the box names every stall by its instant without a dev1 capture.
 #[tokio::test]
 async fn get_program_reports_the_vban_threads_late_packets() {
+    use crate::playback::audio_out_block::ProgramBlock;
+    use crate::playback::vban_out::VbanSender;
     use crate::playback::vban_out::tests::{FakeClock, RecordingSink, active_config};
-    use crate::playback::vban_out::{VbanBlock, VbanSender};
     use crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS;
     let state = test_state().await;
     let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
@@ -738,7 +739,7 @@ async fn get_program_reports_the_vban_threads_late_packets() {
     let sent = due + VBAN_SEND_LATENCY_100NS + 120_000;
     let mut clock = FakeClock::at(sent);
     let mut sink = RecordingSink::on(&clock);
-    VbanSender::default().send_block(vban, &VbanBlock::silence(due), &mut sink, &mut clock);
+    VbanSender::default().send_block(vban, &ProgramBlock::silence(due), &mut sink, &mut clock);
     let (status, json) = call(state, "GET", "/api/v1/program", None).await;
     assert_eq!(status, StatusCode::OK);
     let utc_ms = sent.div_euclid(10_000);

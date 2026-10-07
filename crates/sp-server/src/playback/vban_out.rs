@@ -50,17 +50,16 @@ use serde::Serialize;
 use sp_core::config::{
     DEFAULT_VBAN_STREAM_NAME, SETTING_VBAN_ENABLED, SETTING_VBAN_STREAM_NAME, SETTING_VBAN_TARGETS,
 };
-use sp_ndi::AudioFrame;
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::loop_stats::percentile_ceil;
 use crate::playback::program_output_timing::utc_label;
 use crate::playback::vban_packet::{
-    VBAN_BLOCK_SAMPLES, VBAN_CHANNELS, VBAN_SAMPLE_RATE_HZ, VBAN_SEND_LATENCY_100NS,
-    VBAN_STREAM_NAME_LEN, VbanBlockPackets, VbanEncoder, empty_block_packets, packet_send_at_100ns,
-    stream_name_bytes,
+    VBAN_SEND_LATENCY_100NS, VBAN_STREAM_NAME_LEN, VbanBlockPackets, VbanEncoder,
+    empty_block_packets, packet_send_at_100ns, stream_name_bytes,
 };
 use crate::playback::vban_stall::{VbanLateEvent, VbanStallLog, VbanStallWarn};
 // #224 part 2: VBAN's (and the NDI input's) wall clock and VBAN's slew live
@@ -103,51 +102,6 @@ pub const VBAN_LOG_EVERY: u64 = 1000;
 /// At most this many targets are sent to (each costs ~2.4 Mbit/s and one
 /// `send_to` per packet on the paced thread); the rest are ignored + logged.
 pub const VBAN_MAX_TARGETS: usize = 8;
-
-/// One program boundary's audio for VBAN.
-#[derive(Clone, Debug, PartialEq)]
-pub struct VbanBlock {
-    /// The boundary the block belongs to (the pair's video stamp, 100 ns).
-    pub due_100ns: i64,
-    /// 3200 interleaved stereo samples; `None` = silence.
-    pub samples: Option<Vec<f32>>,
-    /// The pair's audio was not one program block and is sent as silence.
-    pub substituted: bool,
-}
-
-impl VbanBlock {
-    /// The program's standby silence for `due_100ns`.
-    pub fn silence(due_100ns: i64) -> Self {
-        Self {
-            due_100ns,
-            samples: None,
-            substituted: false,
-        }
-    }
-
-    /// A pair's audio, COPIED: the program hands it over BEFORE the pair's
-    /// NDI submit, which still borrows the frames (#210). Exactly one 48 kHz
-    /// stereo 1600-frame frame is kept; anything else becomes silence,
-    /// marked `substituted`.
-    pub fn copied(due_100ns: i64, frames: &[AudioFrame]) -> Self {
-        let samples = match frames {
-            [frame] if is_program_block(frame) => Some(frame.data.clone()),
-            _ => None,
-        };
-        Self {
-            due_100ns,
-            substituted: samples.is_none(),
-            samples,
-        }
-    }
-}
-
-/// `frame` is one program audio block: 48 kHz, stereo, 1600 frames.
-pub fn is_program_block(frame: &AudioFrame) -> bool {
-    frame.channels as usize == VBAN_CHANNELS
-        && i64::from(frame.sample_rate) == VBAN_SAMPLE_RATE_HZ
-        && frame.data.len() == VBAN_BLOCK_SAMPLES
-}
 
 /// The three VBAN settings as stored.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -389,14 +343,14 @@ struct VbanCounters {
 }
 
 struct VbanQueue {
-    blocks: VecDeque<VbanBlock>,
+    blocks: VecDeque<ProgramBlock>,
     stop: bool,
 }
 
 /// What [`VbanOut::take_timeout`] returned.
 #[derive(Debug, PartialEq)]
 pub enum VbanTake {
-    Block(VbanBlock),
+    Block(ProgramBlock),
     /// The wait timed out with nothing queued.
     Idle,
     /// Stopped and drained.
@@ -446,7 +400,7 @@ impl VbanOut {
 
     /// Hand one block over. Never blocks; over [`VBAN_QUEUE_BOUND`] the
     /// oldest block is dropped and counted.
-    pub fn push(&self, block: VbanBlock) {
+    pub fn push(&self, block: ProgramBlock) {
         let dropped = {
             let mut q = lock(&self.queue);
             q.blocks.push_back(block);
@@ -665,7 +619,7 @@ impl VbanSender {
     pub fn send_block(
         &mut self,
         out: &VbanOut,
-        block: &VbanBlock,
+        block: &ProgramBlock,
         sink: &mut dyn VbanSink,
         clock: &mut dyn VbanClock,
     ) -> usize {
