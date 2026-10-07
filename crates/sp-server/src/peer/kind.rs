@@ -103,6 +103,19 @@ impl Job {
             Self::Stems => &[ArtifactKind::StemVocals, ArtifactKind::StemInstrumental],
         }
     }
+
+    /// The job that makes `kind` (the one whose [`Job::makes`] holds it);
+    /// `None` for a kind this node does not know.
+    pub fn making(kind: ArtifactKind) -> Option<Self> {
+        match kind {
+            ArtifactKind::Video | ArtifactKind::Audio | ArtifactKind::Metadata => {
+                Some(Self::Download)
+            }
+            ArtifactKind::Lyrics => Some(Self::Lyrics),
+            ArtifactKind::StemVocals | ArtifactKind::StemInstrumental => Some(Self::Stems),
+            ArtifactKind::Unknown => None,
+        }
+    }
 }
 
 /// Whether a peer's `version` of `kind` is one this node takes: exactly its

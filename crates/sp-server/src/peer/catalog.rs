@@ -14,9 +14,10 @@
 //! - Metadata: the representative row with a song; its bytes are
 //!   `PeerMetadata::to_bytes`.
 //! - Jobs: every running job on the board and every queued one
-//!   (`peer::queued`), one entry per kind ([`listed_jobs`]).
+//!   (`peer::queued`), one entry per kind ([`listed_jobs`]); queued too, the
+//!   job of a file on disk the hasher has not reached yet ([`unhashed`]).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -28,7 +29,7 @@ use super::kind::{ArtifactKind, Job, MEDIA_VERSION, STEMS_VERSION};
 use super::wire::{
     Artifact, Catalog, CatalogJob, JobState, PeerLyrics, PeerMetadata, PeerVideo, ms_to_rfc3339,
 };
-use crate::db::models_peer;
+use crate::db::models_peer::{self, HashEntry};
 use crate::downloader::cache::is_valid_video_id;
 
 /// One file artifact this node's rows name (not checked on disk).
@@ -197,11 +198,42 @@ pub fn listed_jobs(
     jobs
 }
 
-/// This node's jobs as `node` lists them: the board's running ones and the
-/// queued ones from its rows ([`listed_jobs`]).
-pub async fn jobs(ex: &Exchange, node: &str) -> Result<Vec<CatalogJob>, sqlx::Error> {
-    let queued = super::queued::queued(&ex.pool).await?;
+/// This node's jobs as `node` lists them ([`listed_jobs`]): the board's
+/// running ones, the queued ones from its rows, and, queued too, the job of
+/// each of `files` not hashed yet ([`unhashed`]).
+pub async fn jobs(
+    ex: &Exchange,
+    node: &str,
+    files: &[ArtifactFile],
+    hashes: &HashMap<String, HashEntry>,
+) -> Result<Vec<CatalogJob>, sqlx::Error> {
+    let mut queued = super::queued::queued(&ex.pool).await?;
+    queued.extend(unhashed(files, hashes).await);
     Ok(listed_jobs(ex.board.snapshot(node), &queued, node))
+}
+
+/// The job of each of `files` that is on disk but not in `hashes` yet: its
+/// output is this node's, listed after the hasher's next pass (every 60 s).
+/// Announced as queued, a peer waits for it instead of making it itself in
+/// that window (lanes 7-9, #229 finding 6036287850). A file missing from disk
+/// is no job (a peer would wait the full 2 h for nothing). Only these files
+/// are stat'ed, so in steady state a catalog stats nothing.
+pub async fn unhashed(
+    files: &[ArtifactFile],
+    hashes: &HashMap<String, HashEntry>,
+) -> Vec<(String, Job)> {
+    let mut jobs = Vec::new();
+    for f in files {
+        if hashes.contains_key(&path_key(&f.path)) {
+            continue;
+        }
+        if let Some(job) = Job::making(f.kind)
+            && tokio::fs::try_exists(&f.path).await.unwrap_or(false)
+        {
+            jobs.push((f.youtube_id.clone(), job));
+        }
+    }
+    jobs
 }
 
 /// This node's catalog as `node`: every hashed file (hashed after `since_ms`
@@ -214,7 +246,7 @@ pub async fn build(
     let files = artifact_files(&ex.pool, &ex.cache_dir, None).await?;
     let hashes = models_peer::all_hashes(&ex.pool).await?;
     let mut artifacts = Vec::new();
-    for f in files {
+    for f in &files {
         let Some(h) = hashes.get(&path_key(&f.path)) else {
             continue;
         };
@@ -222,7 +254,7 @@ pub async fn build(
             continue;
         }
         artifacts.push(Artifact {
-            youtube_id: f.youtube_id,
+            youtube_id: f.youtube_id.clone(),
             kind: f.kind,
             version: f.version,
             size: u64::try_from(h.size).unwrap_or(0),
@@ -244,7 +276,7 @@ pub async fn build(
     Ok(Catalog {
         node: node.to_string(),
         artifacts,
-        jobs: jobs(ex, node).await?,
+        jobs: jobs(ex, node, &files, &hashes).await?,
     })
 }
 
@@ -257,7 +289,7 @@ pub async fn counts(ex: &Exchange) -> Result<CatalogCounts, sqlx::Error> {
         .iter()
         .filter(|f| hashes.contains_key(&path_key(&f.path)))
         .count();
-    let queued = jobs(ex, "")
+    let queued = jobs(ex, "", &files, &hashes)
         .await?
         .iter()
         .filter(|j| j.state == JobState::Queued)
