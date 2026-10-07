@@ -19,8 +19,7 @@ pub struct Artifact {
     pub size: u64,
     /// 64 lowercase hex digits.
     pub sha256: String,
-    /// When the serving node listed (hashed) it (lane 3 is to fill it);
-    /// `None` for metadata.
+    /// When the serving node listed (hashed) it; `None` for metadata.
     #[serde(default)]
     pub updated_at: Option<String>,
 }
@@ -121,8 +120,8 @@ impl PeerMetadata {
         metadata_version(self.metadata_source.as_deref(), self.gemini_failed)
     }
 
-    /// The canonical bytes: lane 3's catalog is to hash these for the
-    /// metadata artifact's sha256.
+    /// The canonical bytes: the catalog's metadata sha256 is over them, and
+    /// the artifact route serves them.
     pub fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_default()
     }

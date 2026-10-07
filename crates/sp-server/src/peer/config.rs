@@ -1,8 +1,8 @@
 //! #229: this node's place in the node exchange, read live from its settings.
 //!
 //! - `node_name` (`snv`, `pp`): empty = the exchange is off (no serving, no asking).
-//! - `peer_api_key`: the key this node's peer API will accept (`X-SP-Peer-Key`;
-//!   the peer API comes in lane 4); empty = not serving.
+//! - `peer_api_key`: the key this node's peer API will accept (`X-SP-Peer-Key`,
+//!   `peer::api`); empty = not serving.
 //! - `peers`: a JSON list of [`PeerConfig`] — the nodes asked first.
 //!
 //! The secrets (keys, a Cloudflare Access client secret) never leave the node
@@ -82,7 +82,7 @@ fn mask(secret: &str) -> &'static str {
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct NodeConfig {
     pub node_name: Option<String>,
-    /// The key this node's peer API will accept (lane 4); `None` = not serving.
+    /// The key this node's peer API will accept; `None` = not serving.
     pub serve_key: Option<String>,
     pub peers: Vec<PeerConfig>,
 }
@@ -139,8 +139,7 @@ impl NodeConfig {
         Self::from_settings(node_name.as_deref(), serve_key.as_deref(), peers.as_deref())
     }
 
-    /// Serving = a node name and a key are set (this node will serve once the
-    /// peer API exists, lane 4).
+    /// Serving = a node name and a key are set: the peer API answers.
     pub fn serving(&self) -> bool {
         self.node_name.is_some() && self.serve_key.is_some()
     }

@@ -152,8 +152,8 @@ peer, nothing outside the tests fetches.
   video+audio+metadata), Lyrics, Stems (needs and makes both stems).
 - A catalog's job entry is `wire::CatalogJob { youtube_id, kind, node,
   state, started_at }`, one per kind the job makes. `state` = `running` |
-  `queued`: the catalog is to list a node's QUEUED jobs too (lane 3; the
-  plan's decisions), and a node is to wait for either (lane 7).
+  `queued`: the catalog lists a node's QUEUED jobs too (the plan's
+  decisions), and a node is to wait for either (lane 7).
   `started_at` is set only for a running job (`null` for a queued one).
   `Catalog::announces(id, kinds)` = a running OR queued job (lane 7's
   Wait). The plan's lane-2 text calls these `RunningJob` / `Catalog::runs`:
@@ -199,8 +199,9 @@ peer, nothing outside the tests fetches.
 
 - The catalog comes from this node's OWN rows (`catalog::artifact_files`):
   - per YouTube id the lowest row with an audio (rows share files, #136):
-    its video, its audio, and its stems only when `stem_status = 'done'`,
-    named after the CURRENT audio (`stems::stem_paths`);
+    its video, its audio, and its stems only when a row of the video with
+    that audio has `stem_status = 'done'`, named after the CURRENT audio
+    (`stems::stem_paths`);
   - `{yt}_lyrics.json` at the highest pipeline version of the video's rows
     with lyrics, never when ANY row of the video (lyrics or not) is
     dub-requested or carries `gemini-live-translate`: that one file per
@@ -211,7 +212,9 @@ peer, nothing outside the tests fetches.
   keyed by path, valid while size + mtime match. Building a catalog reads no
   file. `updated_at` = when it was hashed; `?since=` keeps files hashed
   strictly after it; metadata entries have no time and are always listed;
-  jobs are always listed.
+  jobs are always listed. A file rewritten under the same path keeps its
+  old sha and size in the catalog until the hasher's next pass reaches it:
+  a fetch then fails closed (size bound, sha check) and asks again later.
 - The hasher (`hasher::run`, every 60 s, the first pass after 60 s, only
   while this node serves and is not paused) hashes one file at a time at
   40 MiB/s: stat → hash → stat, a file that changed meanwhile waits for the
@@ -233,7 +236,9 @@ peer, nothing outside the tests fetches.
   - lyrics: `lyrics::reprocess::queued_where`, buckets 1–3 of the lyrics
     queue (manual, null, stale; bucket 4, the full-mix upgrade, already
     serves lyrics at the current version), only while
-    `lyrics_worker_enabled` is on;
+    `lyrics_worker_enabled` is on, and never for a video the catalog will
+    not serve lyrics of (the dub rule above: any row dub-requested or
+    Live-Translate);
   - stems: `db::models_stems_priority::STEM_ELIGIBLE_PRED`, only while
     `stem_worker_enabled` is on.
 - A change to a worker's queue changes what the catalog announces: keep the
@@ -259,12 +264,15 @@ peer, nothing outside the tests fetches.
   PeerLyrics {source, pipeline_version, alignment_model, reference,
   translation_version, translation_gender}}` (`catalog::peer_video`): the
   first titled row's metadata, the first row's duration, the served lyrics
-  row with the catalog's dub rule. 404 unknown, 400 a bad id. Lanes 8-9 are
-  to adopt from it.
+  row with the catalog's dub rule, the duration of the first row that has
+  one. 404 unknown, 400 a bad id. Lanes 8-9 are to adopt from it;
+  `PeerClient::video` refuses a row of another video than the one asked.
 - `artifact/{id}/{kind}`: 404 for an unknown or absent kind (a dubbed
   video's lyrics too), 400 a bad id; files through tower-http `ServeFile`
   (Range → 206, HEAD, 416) in a body throttled to `peer_serve_max_mbps`
-  (`throttle::throttled`); the `metadata` kind answers
+  (`throttle::throttled`), per response: phase 1 has one asking peer, which
+  sends one transfer at a time; a node-wide cap is for a second peer
+  (phase 2). The `metadata` kind answers
   `PeerMetadata::to_bytes` as `application/json` (its sha is the catalog's).
 - SNV's post-deploy gate `e2e/post-deploy-peer-serving.spec.ts` needs no
   key: the status says node `snv`, settings that hold, serving, catalog
@@ -281,7 +289,8 @@ peer, nothing outside the tests fetches.
   and the login page answers 200. Status → `PeerError`: 3xx/403
   `AccessRefused`, 401 `KeyRefused`, 404 `NotFound` (for a catalog: the
   API is off there), 503 `Paused`, other non-2xx `BadResponse`; a transport
-  error is `Unreachable` without its URL. No error text holds a key.
+  error is `Unreachable`: its cause chain (connect, DNS, TLS, timeout)
+  without the URL. No error text holds a key.
 - Every GET carries `X-SP-Peer-Key`, plus `CF-Access-Client-Id/Secret` for a
   peer with a token. Timeouts: 10 s connect, 60 s between two reads, 30 s
   for a whole catalog or video row (an artifact has no total bound).
@@ -299,7 +308,9 @@ peer, nothing outside the tests fetches.
   cached catalog); a short body keeps the part for the next attempt. One
   transfer at a time per peer (`PeerClient::slot`); `Exchange::fetch`
   refuses while paused. The caller renames the verified part into place
-  (lanes 8-9) and fetches one job's artifacts from one peer.
+  (lanes 8-9) and fetches one job's artifacts from one peer: two fetches of
+  the same video and kind from two peers would drop each other's part
+  (phase 2 has two peers; lane 7's design is to keep one fetch per job).
 - The Cloudflare Access service token for PP is MAIN SESSION OPS (plan task
   5.3 step 8, pending the owner on 7.10.2026, #229 comment 6031719797):
   until it exists the probe of `https://sp.newlevel.media` answers

@@ -1,11 +1,11 @@
 //! #229: the board of the jobs this node runs, each announced while it runs.
 //! Empty in production until lane 8 hooks the download job (lane 9 adds
 //! stems and lyrics): a hook runs a job here on lane 7's `Exchange::ask`
-//! answer `Local(JobGuard)`. Lane 3's catalog is to list the board.
+//! answer `Local(JobGuard)`. The catalog lists the board.
 //! In memory on purpose: a crash takes its announcements with it, so a peer
 //! never waits on a job that died (it would wait the full 2 h otherwise).
-//! A QUEUED job is not on the board: lane 3's catalog is to add those from
-//! the rows.
+//! A QUEUED job is not on the board: the catalog adds those from the rows
+//! (`peer::queued`).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
