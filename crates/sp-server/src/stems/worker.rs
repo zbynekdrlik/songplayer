@@ -204,7 +204,7 @@ impl StemWorker {
             .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
             warn!(
-                "stem worker: lyrics venv python not found at {python:?} — this node separates no stems until the lyrics bootstrap (a peer's stems are still taken)"
+                "stem worker: lyrics venv python not found at {python:?} — this node separates no stems until the lyrics bootstrap"
             );
         }
     }

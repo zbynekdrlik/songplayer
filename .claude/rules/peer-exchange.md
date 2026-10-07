@@ -529,6 +529,12 @@ workers ask their peers before they run a job (below, from "Ask first").
   (`peer_transfers_paused`) rechecks every 5 min (`PAUSED_RECHECK`) and
   never gives up: the pause is about this node's bandwidth, and heavy local
   work in its place would defeat it.
+- A wait on a peer's announced job ignores versions: after a dev-only
+  bump of `LYRICS_PIPELINE_VERSION` / `STEMS_VERSION` / `MEDIA_VERSION`
+  at SNV, PP (on main) can wait up to 2 h for a job whose output it will
+  not take (`kind::acceptable`), then runs it. Bounded, and such bumps are
+  rare (the lyrics one owner-gated); carrying a version on `CatalogJob`
+  is a follow-up candidate.
 - A wait whose row was dropped meanwhile (a song removed from a playlist)
   stays in `peer_waits`; a much later ask of the same video inherits its
   spent bound and runs the job here at once. Rare; nothing expires it.
@@ -559,7 +565,12 @@ workers ask their peers before they run a job (below, from "Ask first").
   node writes — `manual` stays `manual`, a peer's operator correction is
   final here too), else this node's providers (`download_title`). A failed
   fetch never calls a provider. Recorded by `record_download` (the local
-  path's own, #136: it re-reads a correction made meanwhile).
+  path's own, #136: it re-reads a correction made meanwhile); a peer's
+  title taken is recorded in `peer_fetches` too (kind `metadata`,
+  `download::record_title`, the repair's own). The audio is renamed first;
+  when the video cannot take its name, the audio and the video's part are
+  removed again (the local path's rule: no unrecorded audio under a final
+  name).
 - `downloader/` is out of the mutation gate: the logic stays in `peer/`,
   only the hook lives in `downloader/mod.rs`; its tests are `mod_tests.rs`
   (moved out for the cap) + `mod_tests_peer.rs` (tools missing on purpose:
@@ -594,7 +605,11 @@ workers ask their peers before they run a job (below, from "Ask first").
   peer's `/videos` row must match its catalog (pipeline version) and must
   not be `gemini-live-translate`; the same source at the same version as
   the row already serves = nothing newer → runs here (the daily full-mix
-  upgrade stays local). The JSON is parsed as a typed `LyricsTrack` whose
+  upgrade stays local, even while the peer runs or queues that same
+  upgrade: `NothingNewer` does not look at the peer's announcements, a known
+  limit — once a day per full-mix song both nodes may try it). A track over
+  16 MiB is refused before the transfer (`MAX_LYRICS_BYTES`: the part is
+  read whole). The JSON is parsed as a typed `LyricsTrack` whose
   `source` must equal the row's (a refused part is deleted), renamed into
   `{yt}_lyrics.json`; `adopt_lyrics` writes source, version and alignment
   model through the lyrics row's one writer (`mark_video_lyrics_complete`),
@@ -610,10 +625,10 @@ workers ask their peers before they run a job (below, from "Ask first").
   asks no provider but still takes the peers' titles. The peer's catalog
   must list the video's metadata at version ≥ 1 (a parser's title there
   costs no `/videos` request) and `/videos` must match that entry's sha256
-  (`PeerMetadata::to_bytes`); `adopted_title` decides. `apply_title` is the
+  (`PeerMetadata::to_bytes`); `PeerTitle::of` (`adopted_title`) decides. `apply_title` is the
   ONE repair write (#136 locked re-check + rename + record), from a peer's
   title or the providers'; the origin goes to `peer_fetches` (kind
-  `metadata`, `repair::record`) only once it wrote the title (a row that
+  `metadata`, `download::record_title`) only once it wrote the title (a row that
   left the queue meanwhile keeps no trace).
 - The kill switches (`lyrics_worker_enabled` / `stem_worker_enabled`) stop
   the whole tick, the fetch included. The download and repair workers have

@@ -76,8 +76,10 @@ struct ReprocessRow {
 enum ReprocessOutcome {
     /// Metadata was successfully updated (DB cleared `gemini_failed`).
     Success,
-    /// A provider said "rate limited" — the worker should stop the current
-    /// batch and honour [`RATE_LIMIT_COOLDOWN`]. Carries every provider's error.
+    /// A provider said "rate limited" — the worker starts
+    /// [`RATE_LIMIT_COOLDOWN`]: no provider is asked for the rest of the
+    /// batch (#229: the peers' titles still are). Carries every provider's
+    /// error.
     RateLimited(String),
     /// Non-rate-limit failure (transient, API error, or still
     /// `gemini_failed=true` from parser fallback). The batch may continue.
@@ -199,7 +201,7 @@ impl ReprocessWorker {
                     warn!(
                         video_id = %row.youtube_id,
                         %reasons,
-                        "metadata provider rate-limited; entering {}s cooldown, the batch goes on with the peers' titles only",
+                        "metadata provider rate-limited; entering {}s cooldown, no provider is asked for the rest of the batch",
                         RATE_LIMIT_COOLDOWN.as_secs()
                     );
                 }
