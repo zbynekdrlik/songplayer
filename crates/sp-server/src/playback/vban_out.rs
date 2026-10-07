@@ -277,8 +277,10 @@ pub struct VbanStatus {
     /// Packets sent more than 2 ms after their due time.
     pub late_sends: u64,
     /// #210 part 2: the worst packet's lateness (µs, `vban_stall.rs`) over
-    /// the last 14 400–28 800 packets sent: 60–120 s of sending. It does not
-    /// age while nothing is sent.
+    /// the last 14 400–28 800 packets sent: 60–120 s of sending at 48 kHz
+    /// INT24 (#233: the buckets count packets, so a destination sending more
+    /// packets a second covers less time). It does not age while nothing is
+    /// sent.
     pub late_max_us: u64,
     /// #210 part 2: the last 32 packets sent more than 5 ms late, oldest
     /// first: `{utc_ms, late_us}`.

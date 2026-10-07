@@ -126,8 +126,10 @@ sender, and its 48 kHz INT24 bytes are #210's.
   program and the pacer walls, so a UTC step slews in at the same rate — one
   clock domain. A packet's wait is capped at 4 × L = 8 slots
   (`VBAN_MAX_WAIT_100NS`; #233: plus the output's delay, slept in steps of
-  at most 8 slots, `sleep_until`), so a clock mismatch never parks the
-  thread and the wall is read at least every 8 boundaries.
+  at most 7 slots, `VBAN_SLEEP_STEP_100NS` / `sleep_until`, so a step plus
+  an oversleep of under a slot passes at most 8 boundaries, the wall's tick
+  cap per read), so a clock mismatch never parks the thread. A FOH wait
+  (≤ L) is one sleep.
 - The frame counter (`nuFrame`) grows by exactly 1 per SENT packet, across
   cuts and standby. While the output is disabled or has no resolved target,
   nothing is encoded or sent and the counter does not move.

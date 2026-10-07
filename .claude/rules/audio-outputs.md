@@ -373,10 +373,13 @@ load shows "Nastavenia sa nenačítali — …" on both. The message span is
 `audio-outputs-status` (`.save-status` is the form's alone: five Nastavenia
 specs read it unscoped, Playwright strict mode). A stored entry missing from
 `outputs[]` reads "uložený, nespustený" with its `outputs_problems` line as
-the tooltip (an unsaved one "neuložený"). `style.css` gives the section the
-form's fieldset look, one framed grid block per output. The mock refuses a
-bad list in the server's order and words (every entry read first, then the
-shared validation; the id through `shown_id`'s rule), serves `outputs[]`
+the tooltip (an unsaved one "neuložený"); a new row's id is above every
+row AND every stored entry (a removed, unsaved row still runs under its id).
+`style.css` gives the section the form's fieldset look, one framed grid
+block per output. The mock refuses the cases the dashboard can send in the
+server's order and words (every entry read first, then the counts, the host,
+the port and duplicates; the id through `shown_id`'s rule) — a SUBSET of
+the server's checks, never a stand-in for its tests, serves `outputs[]`
 from the stored list with a `vban` object per enabled entry, and has two
 knobs: `/__mock/fail-mode {kind: "settings"}` and `/__mock/outputs-skip
 {ids}` (both reset by `/__mock/settings-reset`).

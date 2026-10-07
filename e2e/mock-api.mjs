@@ -635,8 +635,10 @@ function outputsRefusal(body) {
     return "audio_outputs is not a JSON list (line 1, column 0)";
   }
   if (!Array.isArray(list)) return "audio_outputs is not a JSON list (line 1, column 0)";
-  // First every entry read field by field, in the server's order and words
-  // (`audio_out_config::entry`: id, type, vban.host, vban.port, name) …
+  // The cases the dashboard can send, in the server's order and words: first
+  // every entry read field by field (`audio_out_config::entry`: id, type,
+  // vban, vban.host, vban.port, name; not vban.format, stream_name or the
+  // types of enabled / rate / delay_ms) …
   for (const [i, e] of list.entries()) {
     const first = `entry ${i + 1}`;
     if (e === null || typeof e !== "object" || Array.isArray(e)) return `${first} is not a JSON object`;
@@ -647,6 +649,9 @@ function outputsRefusal(body) {
     if (typeof e.type !== "string") return `${at}: type has the wrong type`;
     if (e.type !== "vban") return `${at}: type must be vban`;
     if (e.vban === undefined) return `${at}: vban is missing`;
+    if (e.vban === null || typeof e.vban !== "object" || Array.isArray(e.vban)) {
+      return `${at}: vban is not a JSON object`;
+    }
     if (e.vban.host === undefined) return `${at}: vban.host is missing`;
     if (typeof e.vban.host !== "string") return `${at}: vban.host has the wrong type`;
     if (e.vban.port === undefined) return `${at}: vban.port is missing`;
@@ -656,8 +661,8 @@ function outputsRefusal(body) {
     if (e.name === undefined) return `${at}: name is missing`;
   }
   // … then the shared validation (`validate_list`): the counts, then each
-  // entry's own values before its duplicate check (the cases the dashboard
-  // can send).
+  // entry's host and port before its duplicate check (not the id, name,
+  // rate, delay or stream checks: the dashboard validates those itself).
   if (list.length > 16) return `audio_outputs has ${list.length} entries (at most 16)`;
   if (list.length > 8) return `audio_outputs has ${list.length} vban entries (at most 8)`;
   const seen = new Set();
