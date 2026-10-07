@@ -7,6 +7,7 @@
 pub mod asrc; // #233: the ASIO output's resampler (rubato Async sinc) + the re-centre splice
 pub mod asrc_servo; // #233: the ASIO output's drift servo (camera-box's asrc-compensator, for an output), pure
 pub mod audio_grid;
+pub mod audio_out_config; // #233: the outputs' settings — strict PATCH parse, lenient stored read
 pub mod band_pool; // #223: the SP-program sender's persistent row-band workers (no thread per picture)
 mod clear_lyrics;
 pub mod clock_health;
