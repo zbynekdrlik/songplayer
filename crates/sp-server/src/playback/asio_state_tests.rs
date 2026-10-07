@@ -279,3 +279,26 @@ fn every_reason_has_a_code_and_a_text() {
         assert_eq!((r.code(), r.text().as_str()), (code, text));
     }
 }
+
+/// The dashboard reads a waiting ASIO output's reason by its code
+/// (`sp_core::audio_outputs::asio_reason_sk`): every code has its Slovak.
+#[test]
+fn every_reason_code_has_its_slovak_on_the_dashboard() {
+    let reasons = [
+        Reason::NotFound { present: vec![] },
+        Reason::Busy(String::new()),
+        Reason::Refused(String::new()),
+        Reason::Failed(String::new()),
+        Reason::Reset,
+        Reason::RateChanged(0),
+        Reason::Stalled,
+        Reason::WindowsOnly,
+    ];
+    for r in reasons {
+        assert_ne!(
+            sp_core::audio_outputs::asio_reason_sk(r.code()),
+            "neznámy dôvod",
+            "{r:?}"
+        );
+    }
+}

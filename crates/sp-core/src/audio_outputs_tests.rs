@@ -667,3 +667,22 @@ fn a_new_asio_entry_takes_the_next_id_and_channels_1_and_2() {
         ("out-1", "ASIO 1")
     );
 }
+
+#[test]
+fn every_asio_reason_code_reads_in_slovak() {
+    let table = [
+        ("not_found", "ovládač nie je v systéme"),
+        ("busy", "ovládač používa iný program"),
+        ("refused", "ovládač sa nedá použiť"),
+        ("failed", "chyba ovládača"),
+        ("reset", "ovládač sa reštartuje"),
+        ("rate_changed", "ovládač zmenil frekvenciu"),
+        ("stalled", "ovládač neodpovedá"),
+        ("windows_only", "ASIO funguje len vo Windows"),
+        ("later", "neznámy dôvod"),
+        ("", "neznámy dôvod"),
+    ];
+    for (code, sk) in table {
+        assert_eq!(asio_reason_sk(code), sk, "{code}");
+    }
+}
