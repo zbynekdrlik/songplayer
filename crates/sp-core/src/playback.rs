@@ -93,20 +93,22 @@ pub struct OpenFailures {
     /// the browser's clock on another machine can be off.
     #[serde(default)]
     pub retry_in_ms: Option<u64>,
-    /// #229 follow-up (ROZHODNUTÉ 6029773698): the pending retry was armed
-    /// while the playlist was SP-program's source. It cannot change while
-    /// that retry is pending: a cut on program sends a Play and a cut off
-    /// program cancels it, both ending the retry. `false` with no retry
-    /// pending, and for a retry of a playlist played off program (a ▶ off
-    /// air). Additive: an older row reads `false`.
+    /// #229 follow-up (ROZHODNUTÉ 6029773698): the pending retry belongs to
+    /// SP-program's source. Set when the retry is armed; a cut off program
+    /// ends the retry, and a cut on program ends it with the Play its
+    /// selection sends, or, when that sends none, turns this `true`
+    /// (`handle_scene_change`). `false` with no retry pending, and for a
+    /// retry of a playlist played off program (a ▶ off air). Additive: an
+    /// older row reads `false`.
     #[serde(default)]
     pub on_program: bool,
 }
 
 impl OpenFailures {
-    /// Whether a retry is pending (the row names its wait).
+    /// Whether a retry is pending (the row names when it is due), on the
+    /// engine's own row and on one as read alike.
     pub fn retry_pending(&self) -> bool {
-        self.retry_in_ms.is_some()
+        self.retry_at_ms.is_some()
     }
 
     /// Whether a retry is pending AND was armed on program: the Player's

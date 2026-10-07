@@ -461,6 +461,7 @@ impl PlaybackEngine {
             self.apply_event(playlist_id, PlayEvent::VideosAvailable)
                 .await;
             self.apply_event(playlist_id, PlayEvent::SceneOn).await;
+            self.retry_came_on_program(playlist_id); // #229: an ON that sent no Play
 
             // #45 — re-push title for an already-Playing pipeline that
             // just gained program. The 1.5 s post-Started title-show task

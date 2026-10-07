@@ -63,10 +63,10 @@ pub(super) struct PendingRetry {
     pub(super) due: Instant,
     /// Its sleeping task, aborted when the retry ends early.
     task: tokio::task::AbortHandle,
-    /// It was armed while the playlist was SP-program's source (ROZHODNUTÉ
-    /// 6029773698). That cannot change while it is pending: a cut on
-    /// program sends a Play and a cut off program is a `SceneOff`, and both
-    /// end the retry.
+    /// It belongs to SP-program's source (ROZHODNUTÉ 6029773698): set when
+    /// it is armed. A cut off program is a `SceneOff`, which ends it; a cut
+    /// on program ends it with its selection's Play, or refreshes this flag
+    /// when no Play went out (`retry_came_on_program`).
     on_program: bool,
 }
 
@@ -175,6 +175,24 @@ impl PlaybackEngine {
         );
         self.broadcast_state(playlist_id);
         self.publish_open_failures(playlist_id);
+    }
+
+    /// `playlist_id` came on program (`handle_scene_change`, after its
+    /// `SceneOn`) and a retry is still pending: the ON's selection sent no
+    /// Play (no song to pick, a custom playlist in Single mode, a DB
+    /// error), which would have ended it. The retry now belongs to
+    /// SP-program's source, so its `on_program` and the health row follow
+    /// (review round 4: the badge read "○ Mimo programu" until it fired).
+    pub(super) fn retry_came_on_program(&mut self, playlist_id: i64) {
+        let on_program = self.on_air_contains(playlist_id);
+        let pending = self
+            .pipelines
+            .get_mut(&playlist_id)
+            .and_then(|pp| pp.failures.retry.as_mut());
+        if let Some(retry) = pending {
+            retry.on_program = on_program;
+            self.publish_open_failures(playlist_id);
+        }
     }
 
     /// The health row's `open_failures` now (`NdiHealthRegistry::set_open_failures`),
