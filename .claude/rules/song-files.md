@@ -1,6 +1,8 @@
 ---
 paths:
   - "crates/sp-server/src/downloader/cache*.rs"
+  - "crates/sp-server/src/downloader/mod.rs"
+  - "crates/sp-server/src/peer/download*.rs"
   - "crates/sp-server/src/reprocess/**"
   - "crates/sp-server/src/startup.rs"
   - "crates/sp-server/src/song_relink*.rs"
@@ -160,6 +162,14 @@ Design record: #136 comment 5894034820.
   - It KEEPS the dub + transcripts. The re-link adopts them under the kept
     song's name (same YouTube id, same audio). A dub is operator-requested and
     nothing re-runs it.
+- **A rollback after a failed rename removes a final name only when nothing
+  was there before** (#229, `peer::download::adopt`). Rows of one video
+  share files by name, so a final name can already hold another row's
+  recorded audio: read `try_exists` BEFORE the rename and remove after a
+  failure only what this attempt created. (`downloader/mod.rs`'s own "video
+  rename failed" branch still removes `audio_final` unconditionally.) A
+  test forces the failure with a DIRECTORY at the target name: renaming a
+  file onto an existing directory fails on Linux (EISDIR) and on Windows.
 - **`startup::self_heal_cache` never deletes an orphan half-sidecar a row
   records.** That half belongs to a song split across two names (a move-back
   that failed); it is kept and WARNed. The post-deploy FLAC check accepts
