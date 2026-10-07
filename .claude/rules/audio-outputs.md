@@ -1,6 +1,20 @@
 ---
 paths:
+  - "crates/sp-core/src/audio_outputs*.rs"
+  - "crates/sp-server/src/playback/audio_out*.rs"
+  - "crates/sp-server/src/playback/vban_rate*.rs"
+  - "crates/sp-server/src/playback/vban_out_tests_dest.rs"
+  - "crates/sp-server/src/playback/vban_packet_tests_format.rs"
+  - "crates/sp-server/src/playback/vban_packet_tests_legacy.rs"
   - "crates/sp-server/src/playback/asrc*.rs"
+  - "crates/sp-server/src/playback/asio_*.rs"
+  - "crates/sp-server/src/api/audio*.rs"
+  - "crates/sp-server/src/api/program_tests_outputs.rs"
+  - "crates/sp-server/src/api/settings_tests_audio.rs"
+  - "sp-ui/src/components/audio_outputs.rs"
+  - "e2e/settings-audio-outputs.spec.ts"
+  - "e2e/audio-outputs-gate*.ts"
+  - "e2e/post-deploy-audio-*.spec.ts"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
 ---
 
@@ -9,7 +23,8 @@ paths:
 Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, plan
 `docs/superpowers/plans/2026-10-07-audio-outputs-asio.md` (three lanes; lane
 1: the output list + VBAN per destination; lane 3: the ASIO output over
-`azo`). This file starts with lane 2; lanes 1 and 3 add their sections.
+`azo`). Lane 2's section (the drift servo, the ASRC) comes first, then lane
+1's; lane 3 adds its own.
 
 ## The drift servo and the ASRC (`asrc_servo.rs`, `asrc.rs`) — lane 2
 
@@ -208,3 +223,117 @@ pinned against the `Cargo.toml` version by
 `the_installer_notice_carries_the_pinned_rubatos_license` — re-copy the
 notice when the pin moves. Added to the lock with `cargo update --workspace`
 (Tier-0-allowed, compiles nothing): it adds exactly the new tree.
+
+## The list (`audio_outputs`) and the network rate (`audio_network_rate`) — lane 1
+
+- ONE setting, a JSON list of `sp_core::audio_outputs::OutputEntry`:
+  `{id, name, type, enabled, rate ("network" | Hz), delay_ms (0..=2000),
+  vban: {host, port, stream_name, format: int16|int24|float32}}`. Limits: 16
+  outputs, 8 VBAN (the per-type caps sum under 16: a const assert in
+  `audio_out_config.rs`); ids `[a-z0-9-]{1,32}`, unique; `out-N` from the
+  dashboard (`next_id`, saturating). An entry is built by `OutputEntry::vban`
+  or the server parser only (a new transport's field touches only those).
+- `audio_network_rate`: 44100 / 48000 / 88200 / 96000 / 192000, default 48000;
+  SNV = 96000 (MAIN SESSION OPS after the deploy). An entry at `"network"`
+  runs at it.
+- A PATCH is parsed strictly (`audio_out_config::parse_list`, through
+  `Box<RawValue>` maps, never `serde_json::Value`): every error names the
+  entry, the sanitized id (`shown_id`: a-z 0-9 - else `?`) and the field,
+  never the value (serde's text can quote input); a value that is no list
+  gives line and column only (serde_json 1.0.149 counts a top-level object
+  as column 0). 400 refuses the whole PATCH, nothing written
+  (`api/settings.rs::prepare` runs `checked` before the exchange check).
+  Stored normalized (every default written out).
+- The same rules in Slovak for the dashboard: `ListError::sk()`
+  ("Výstup 1 (out-1): cieľ je prázdne").
+- The outputs task (`audio_out_task.rs`) re-reads the list every 5 s,
+  leniently (`parse_stored`): an entry this version cannot read is skipped
+  and named in `outputs_problems` (a WARN once per new problem); the rest run.
+- An entry identical to a running one (and built for the same rate) is KEPT:
+  thread, queue, frame counter (`plan` → `Step::Keep`). Only a new or changed
+  entry is rebuilt; a network-rate change rebuilds only the `"network"`
+  entries. So a dashboard save, or the post-deploy probe entry, never
+  disturbs FOH (Review Focus 2,
+  `apply_keeps_an_unchanged_output_when_another_is_added`). A rebuilt entry's
+  new output starts its frame counter at 0 (a receiver sees one jump).
+
+## Migration (first start, `audio_out_migrate.rs`)
+
+`vban_enabled` / `vban_stream_name` / `vban_targets` → one entry per target
+(the first 8 non-empty ones #210 used), `rate: 48000` (fixed, NEVER
+"network"), `int24`, the stream name as #210 put it on the wire
+(`wire_stream_name`), `enabled` as #210 was (only `"true"`), named after its
+`host:port`. A target #210 could never have resolved is skipped and named.
+It runs at the outputs task's start, ONLY while `audio_outputs` is ABSENT and
+an old key exists, and writes the list with `INSERT OR IGNORE` (a list a
+PATCH stored meanwhile wins). **The `vban_*` keys are KEPT** (main-session
+ruling 4, 7.10.2026): the new code ignores them once the list exists, and a
+rollback to ≤ 0.72 still finds them, so FOH keeps its sound. Lane 3 deletes
+them (and `sp_core::config::SETTING_VBAN_*`) once the list has run a release.
+A `vban_*` change made on a rolled-back ≤ 0.72 is NOT carried forward when
+the list version comes back (the list exists then).
+
+## The fan-out (`audio_out.rs`)
+
+`ProgramOutput::serve` → `split` → `limit` → `feed_outputs` (ONE `Arc<[f32]>`
+copy of the limited block, `ProgramBlock`, `audio_out_block.rs`) → MAX →
+video side + NDI submit. `AudioOutputs` (owned by `ProgramBus`,
+`outputs()`) holds the running list as one `Arc` snapshot swapped whole by
+the task; `offer` pushes into every running output's own drop-oldest queue
+and never waits. Pinned:
+`program_output_tests_order.rs::every_output_has_the_block_before_the_ndi_submit`
+and `audio_out_tests.rs` (no cross-output drops). `ProgramOutput::with_vban`
+is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
+
+## VBAN per destination (`vban_out.rs`, `vban_packet.rs`, `vban_rate.rs`)
+
+- `VbanFormat`: SR index (48k=3, 96k=4, 192k=5, 44.1k=16, 88.2k=17), sample
+  type (INT16 0x01, INT24 0x02, FLOAT32 0x04), packets = the largest divisor
+  of `rate/30` within 256 frames and 1436 payload bytes (96k INT24: 16 × 200,
+  one every 1/480 s; 192k INT16: 25 × 256; 48k FLOAT32: 10 × 160). Packet k
+  at `due + L + delay + k·slot/packets`, floored.
+- 48 kHz INT24 = `VbanFormat::PROGRAM`: no converter, #210's bytes — pinned
+  against a verbatim copy of the 0.72.0 encoder (`vban_packet_tests_legacy.rs`,
+  `vban_out_tests_dest.rs::a_migrated_foh_entry_sends_the_0_72_datagrams`).
+- Other rates: rubato `Fft` with `FixedSync::Both` (1600 in, `rate/30` out;
+  5.0.1 takes the whole block as ONE FFT, `fft_chunks = chunk / min_in`),
+  delay `rate/60` frames = 16.7 ms at every rate (`fft_delay_frames`). A
+  silent or malformed block goes through the filter as zeros.
+- The delay: the sender's send latency is `L + delay`, and its wait cap is
+  the 4 slots PLUS the delay (`plan_wait_up_to`; the plan's 4-slot cap alone
+  sent a delayed output's first packet early,
+  `the_longest_delay_is_waited_for_whole`). The queue bound grows with it
+  (`queue_bound`: the program queue's 10 + `ceil(delay / slot)`).
+- One `VbanOut` per entry, ONE target (`VbanConfig::for_dest`,
+  `resolve_dest`); `VbanStallLog`'s buckets count packets, so at 96 kHz
+  `late_max_us` covers 30–60 s (ruling 11).
+
+## Telemetry
+
+`GET /api/v1/program` → `outputs[]` `{id, type, name, enabled, state
+(running|opening|waiting|disabled, `vban_state`), reason, rate, format,
+channels, delay_ms, latency_ms (L + delay + the converter,
+`vban_latency_ms`), blocks_sent, blocks_dropped, vban: {#210's VbanStatus +
+blocks_sent}}`, `audio_network_rate`, `outputs_problems`; the cut answer
+carries them too. The top-level `vban` is gone (ruling 5; its only readers
+were the mock and `settings-vban.spec.ts`, deleted).
+
+## Dashboard (`sp-ui` `audio_outputs.rs`)
+
+Nastavenia "Zvukové výstupy", after the main form: its own PATCH of only the
+two keys (`patch_json_empty`), validated with
+`sp_core::audio_outputs::validate_list` and shown as `ListError::sk()`
+before anything is sent; rows keyed by id, every cell reading the list by
+id; each row's live state from `outputs[]` (polled every 2 s). The main form
+MERGES its save into `store.settings` (replacing it blanked the list:
+Review Focus 1, `settings-audio-outputs.spec.ts`). The mock refuses a bad
+list like the server and serves `outputs[]` from the stored list.
+
+## Live gates (`e2e/post-deploy-audio-outputs.spec.ts`)
+
+FOH (`fohabl.lan:6980`) still 48 kHz INT24 `sp-program`, no delay, ≥ 25
+blocks between two reads, no send errors (`audio-outputs-gate.ts`, unit-
+tested in the mock suite); a temporary `e2e-96k` entry to a UDP receiver on
+127.0.0.1 reads index 4, 200-frame INT24 packets, a contiguous counter
+(480/s); `finally` restores the list. The file records no trace (it reads
+the settings). PP's subset does not run it (PP has no FOH entry).

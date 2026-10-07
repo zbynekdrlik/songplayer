@@ -127,14 +127,14 @@ output of its own and feeds this bus alone (`pipeline-testability.md`).
   FIRST, then does the video side (#223: a source picture's canvas fit, a
   mixed boundary's picture, the NDI submit), for every job kind — by
   structure: `split` (the audio side, no
-  video work) → `feed_vban` → `submit_video` (`vban-out.md` "Data path"; pinned by
+  video work) → `feed_outputs` → `submit_video` (`vban-out.md` "Data path"; pinned by
   `program_output_tests_order.rs` with a held NDI send). It returns the
   boundary's `BoundaryMarks`, which the loop records
   (`ProgramBus::record_timing` → `health.timing`, the rate-limited WARN of a
   VBAN hand-off after its block's first packet was due, over VBAN's send
   latency L, #210 part 2; `vban-out.md` "The program boundary's timing"). `ProgramOutput::submit` is only the tests' shorthand
   (`#[cfg(test)]`, no clock, returns the stamp).
-- #223 S2: between `feed_vban` and `submit_video`, `serve` offers the
+- #223 S2: between `feed_outputs` and `submit_video`, `serve` offers the
   boundary to `SP-program-MAX` (`offer_max` → `program_max::MaxOut`, on
   `ProgramBus::max()`): the NATIVE picture of a forwarded pair, both native
   pictures + the weight of a fade, black for the standby, never the
@@ -215,7 +215,7 @@ included, is comment 5872871751).
   thread-start INFO line names the canvas (`width`, `height`, `mix_bands`,
   `mix_workers`).
 - **Cost, on the box.** The fit is video-side work: `serve` = `split` →
-  `feed_vban` → `submit_video`, so VBAN gets the boundary's block before any
+  `feed_outputs` → `submit_video`, so VBAN gets the boundary's block before any
   fit. `submit_video` reads `submit_start` BEFORE the picture work, so
   `health.timing.submit_us` (`vban-out.md`) is the fit (or the fade's
   picture) + the NDI submit.

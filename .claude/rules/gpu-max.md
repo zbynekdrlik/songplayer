@@ -357,7 +357,7 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
 
 ### What MAX shows, and where it is offered (`program_output.rs`)
 
-- `ProgramOutput::serve` = `split` → `limit` → `feed_vban` → **`offer_max`**
+- `ProgramOutput::serve` = `split` → `limit` → `feed_outputs` → **`offer_max`**
   → `submit_video`. VBAN has the boundary's block before ANY MAX work, and
   MAX has its job before the canvas fit and the NDI submit
   (`program_output_tests_max.rs`: a hook inside the offer sees VBAN's block

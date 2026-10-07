@@ -5,29 +5,36 @@ paths:
   - "crates/sp-server/src/playback/stat_window*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
   - "crates/sp-server/src/api/program*.rs"
+  - "crates/sp-server/src/playback/audio_out*.rs"
   - "sp-ui/src/components/settings_form.rs"
-  - "e2e/settings-vban.spec.ts"
+  - "sp-ui/src/components/audio_outputs.rs"
 ---
 
 # VBAN audio output of the program (#210, B2 of EPIC #174)
 
 SongPlayer sends the program audio (the samples `SP-program` carries) as VBAN
 to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
-(#148). Design record: #210 comment 5846308506 (Approach 1).
+(#148). Design record: #210 comment 5846308506 (Approach 1). #233: VBAN is
+one transport of the program's output LIST (`audio-outputs.md`): one
+`VbanOut` + thread per entry, each with its own rate, format, delay and ONE
+target, fed by the fan-out (`audio_out.rs`); what follows is each entry's
+sender, and its 48 kHz INT24 bytes are #210's.
 
 ## Data path
 
 - `ProgramOutput::serve` (`program_output.rs`) hands each pair's audio to
-  `VbanOut::push` BEFORE the pair's `SP-program` NDI submit (#210 stall fix,
+  the outputs' fan-out (#233: `feed_outputs` → `AudioOutputs::offer` → every
+  `VbanOut::push`) BEFORE the pair's `SP-program` NDI submit (#210 stall fix,
   design record 5911744233). Same stamp, same samples:
-  - a forwarded or mixed block is COPIED (`VbanBlock::copied`, 12.8 KB): the
+  - a forwarded or mixed block is COPIED once (`ProgramBlock::copied`, an
+    `Arc<[f32]>` every output shares; #233 renamed #210's `VbanBlock`): the
     NDI submit still borrows the pair after the push;
-  - a standby pair becomes `VbanBlock::silence`;
+  - a standby pair becomes `ProgramBlock::silence`;
   - a mixed boundary computes its crossfaded block and pushes it FIRST, then
     paints the picture (`paint_mix`) and submits.
 
   The order is structural: `serve` = `split` (the audio side, no video work)
-  → `feed_vban` → `submit_video` (#223: a source picture's canvas fit, a
+  → `feed_outputs` → `submit_video` (#223: a source picture's canvas fit, a
   mix's picture, the standby black, then the NDI submit), and the run of
   mixed boundaries ends only after the unmixed
   boundary went out. So no video-side cost of a boundary — a slow NDI send,
@@ -47,7 +54,7 @@ to FOH (VB-Matrix on fohabl) and lv1. This replaces cg OBS's bursty obs-vban
   two sources that are each at most 0.98 (the stem mix's #184 limiter) up
   to 0.98·√2 ≈ 1.39 at mid-fade, and `f32_to_int24` clamps everything from
   ±1.0 flat: a clip at FOH. So `ProgramOutput::serve` runs `limit` between
-  `split` and `feed_vban`, in place on the pair's audio:
+  `split` and `feed_outputs`, in place on the pair's audio:
   - ONE `sp_decoder::PeakLimiter` (the #184 limiter, now `pub`: ceiling
     0.98, stereo-linked, instant attack, 50 ms release, bit-identical at
     rest) owned by the `ProgramOutput`;
@@ -139,35 +146,39 @@ The 28-byte header is little-endian:
 The payload is 1200 B of interleaved 3-byte LE samples, within the spec's
 1436 B data maximum. The default VBAN port is 6980.
 
+#233: other rates and formats per destination — `VbanFormat`
+(`audio-outputs.md`); the bytes above are the 48 kHz INT24 (`PROGRAM`)
+format, pinned against a copy of the 0.72.0 encoder by
+`vban_packet_tests_legacy.rs`.
+
 ## Settings + telemetry
 
-- The keys live in `sp_core::config`:
-  - `vban_enabled`: only `"true"` enables;
-  - `vban_stream_name`: default `sp-program`. Policy, not enforced by code:
-    never `cg` before B4;
-  - `vban_targets`: comma-separated `host:port`, at most `VBAN_MAX_TARGETS`
-    (8); extra entries are ignored with a warning.
-- `run_vban_config_task` re-reads them every 5 s, so a dashboard save applies
-  without a restart. It resolves DNS on a change and every 60 s, with std
-  `ToSocketAddrs` on the blocking pool and the first IPv4 address, because the
-  socket is IPv4. The 60 s re-resolve runs only while enabled. A failed
-  re-resolve KEEPS the target's last good address and shows the error.
-- `GET /api/v1/program` and the cut answer carry `vban`: `{enabled, running
-  (the thread is alive), stream_name, packets_sent, send_errors, blocks_dropped, blocks_substituted,
-  late_sends (> 2 ms after due), late_max_us, late_events[{utc_ms, late_us}]
-  (#210 part 2, below), send_interval_p99_us (last 1200 intervals),
-  frame_counter, slew_owed_us (#224 part 2), targets[{target, addr, error}]}`. The API reaches it through
-  `ProgramBus::vban()`, so there is no new `AppState` field and `lib.rs`
-  (1000/1000) is untouched.
-- UI: Nastavenia fieldset `settings-vban` with the testids
-  `settings-vban-enabled` (checkbox), `settings-vban-stream-name`
-  (maxlength 16) and `settings-vban-targets` (placeholder `dev1.lan:6980`,
-  never FOH). The mock keeps the vban_* keys
-  absent (defaults) and `/__mock/settings-reset` restores the fixture. Its
-  `GET /api/v1/program` derives `vban` from the stored settings. The spec
-  waits for `settings-gemini-model` to read the fixture's `gemini-2.5-flash`
-  before it clicks: the vban defaults equal the fixture, so only a field whose
-  fixture value differs from the form default proves the load landed.
+- Since #233 nothing reads the `vban_*` keys but the one-time migration:
+  each destination is an entry of `audio_outputs` (`audio-outputs.md`) with
+  its own format, delay and ONE target. The keys stay in the database (and
+  their constants in `sp_core::config`) so a rollback to ≤ 0.72 still sends
+  to FOH (ruling 4); lane 3 deletes them. Stream name policy, not enforced by
+  code: never `cg` before B4.
+- The outputs task (`audio_out_task.rs`) re-reads the list every 5 s, so a
+  dashboard save applies without a restart. It resolves an entry's target
+  when it builds it and every 60 s while it is kept (`needs_resolve`), with
+  std `ToSocketAddrs` on the blocking pool and the first IPv4 address,
+  because the socket is IPv4. A failed re-resolve KEEPS the target's last
+  good address and shows the error.
+- `GET /api/v1/program` and the cut answer carry each VBAN entry's
+  telemetry under `outputs[i].vban` (#233; the top-level `vban` is gone):
+  `{enabled, running (the thread is alive), stream_name, blocks_sent (#233),
+  packets_sent, send_errors, blocks_dropped, blocks_substituted, late_sends
+  (> 2 ms after due), late_max_us, late_events[{utc_ms, late_us}] (#210 part
+  2, below), send_interval_p99_us (last 1200 intervals), frame_counter,
+  slew_owed_us (#224 part 2), targets[{target, addr, error}]}`. The API
+  reaches it through `ProgramBus::outputs()`, so there is no new `AppState`
+  field and `lib.rs` is untouched.
+- UI: Nastavenia "Zvukové výstupy" (`audio-outputs.md`); #210's
+  `settings-vban` fieldset and its spec are gone. A Nastavenia spec waits for
+  `settings-gemini-model` to read the fixture's `gemini-2.5-flash` before it
+  clicks: only a field whose fixture value differs from the form default
+  proves the load landed.
 
 ## The program boundary's timing (`health.timing`, #210)
 
