@@ -3,7 +3,9 @@
 //! lenient stored read (a bad entry is skipped and named, the rest run).
 
 use super::*;
-use sp_core::audio_outputs::{OutputEntry, RateChoice, VbanDest, VbanSampleFormat};
+use sp_core::audio_outputs::{
+    AsioDest, OutputEntry, OutputType, RateChoice, VbanDest, VbanSampleFormat,
+};
 
 const FOH: &str = r#"{"id":"out-1","name":"FOH","type":"vban","enabled":true,"rate":48000,"delay_ms":0,"vban":{"host":"fohabl.lan","port":6980,"stream_name":"sp-program","format":"int24"}}"#;
 
@@ -71,7 +73,7 @@ fn each_type_error_names_the_entry_and_the_field_never_the_value() {
         ),
         (
             r#"[{"id":"out-1","name":"a","type":"midi","vban":{"host":"h","port":1}}]"#,
-            "entry 1 (id out-1): type must be vban",
+            "entry 1 (id out-1): type must be vban or asio",
         ),
         (
             r#"[{"id":"out-1","name":"a","vban":{"host":"h","port":1}}]"#,
@@ -106,7 +108,7 @@ fn each_type_error_names_the_entry_and_the_field_never_the_value() {
         (r#"[1]"#, "entry 1 is not a JSON object"),
         (
             r#"[{"id":"Secret-Ish\u0000","name":"a","type":"x"}]"#,
-            "entry 1 (id ?ecret-?sh?): type must be vban",
+            "entry 1 (id ?ecret-?sh?): type must be vban or asio",
         ),
     ];
     for (input, want) in cases {
@@ -145,14 +147,14 @@ fn a_value_error_comes_from_the_shared_validation() {
 #[test]
 fn a_stored_entry_this_version_cannot_read_is_skipped_and_the_rest_run() {
     let raw = format!(
-        r#"[{FOH},{{"id":"out-2","name":"DVS","type":"asio","asio":{{"driver":"Dante Virtual Soundcard (x64)","channels":[0,1]}}}},{FOH},{{"id":"out-4","name":"x","type":"vban","vban":{{"host":"","port":1}}}}]"#
+        r#"[{FOH},{{"id":"out-2","name":"AES67","type":"aes67"}},{FOH},{{"id":"out-4","name":"x","type":"vban","vban":{{"host":"","port":1}}}}]"#
     );
     let stored = parse_stored(Some(&raw));
     assert_eq!(stored.entries, vec![foh()]);
     assert_eq!(
         stored.problems,
         vec![
-            "entry 2 (id out-2): type must be vban".to_string(),
+            "entry 2 (id out-2): type must be vban or asio".to_string(),
             "entry 3 (id out-1): id is used by an earlier entry".to_string(),
             "entry 4 (id out-4): vban.host is empty".to_string(),
         ]
@@ -244,8 +246,123 @@ async fn load_reads_the_list_leniently_and_the_network_rate() {
         OutputsSettings {
             entries: vec![foh()],
             network_rate: 96_000,
-            problems: vec!["entry 2 (id out-2): type must be vban".to_string()],
+            problems: vec!["entry 2 (id out-2): asio is missing".to_string()],
             not_a_list: false,
         }
+    );
+}
+
+// #233 lane 3: ASIO entries.
+
+fn dvs(id: &str, driver: &str) -> String {
+    format!(
+        r#"{{"id":"{id}","name":"DVS","type":"asio","asio":{{"driver":"{driver}","channels":[0,1]}}}}"#
+    )
+}
+
+#[test]
+fn an_asio_entry_parses_and_a_bad_one_names_its_field() {
+    let ok = r#"[{"id":"out-3","name":"DVS","type":"asio","delay_ms":20,"asio":{"driver":"Dante Virtual Soundcard (x64)","channels":[2,3]}}]"#;
+    let e = &parse_list(ok).unwrap()[0];
+    assert_eq!(
+        (e.kind, e.enabled, e.rate, e.delay_ms),
+        (OutputType::Asio, true, RateChoice::Network, 20)
+    );
+    assert_eq!(e.vban, None);
+    assert_eq!(
+        e.asio.as_ref().unwrap(),
+        &AsioDest {
+            driver: "Dante Virtual Soundcard (x64)".into(),
+            channels: [2, 3]
+        }
+    );
+    let cases = [
+        (
+            r#"[{"id":"out-3","name":"DVS","type":"asio","asio":{"driver":"d","channels":[0,1,2]}}]"#,
+            "entry 1 (id out-3): asio.channels has the wrong type",
+        ),
+        (
+            r#"[{"id":"out-3","name":"DVS","type":"asio","asio":{"driver":"d","channels":[-1,1]}}]"#,
+            "entry 1 (id out-3): asio.channels has the wrong type",
+        ),
+        (
+            r#"[{"id":"out-3","name":"DVS","type":"asio"}]"#,
+            "entry 1 (id out-3): asio is missing",
+        ),
+        (
+            r#"[{"id":"out-3","name":"DVS","type":"asio","asio":{"channels":[0,1]}}]"#,
+            "entry 1 (id out-3): asio.driver is missing",
+        ),
+        (
+            r#"[{"id":"out-3","name":"DVS","type":"asio","asio":{"driver":"d"}}]"#,
+            "entry 1 (id out-3): asio.channels is missing",
+        ),
+        (
+            r#"[{"id":"out-3","name":"DVS","type":"asio","asio":"secret-ish"}]"#,
+            "entry 1 (id out-3): asio is not a JSON object",
+        ),
+        (
+            r#"[{"id":"out-3","name":"DVS","type":"asio","asio":{"driver":"d","channels":[4,4]}}]"#,
+            "entry 1 (id out-3): asio.channels must name two different channels",
+        ),
+    ];
+    for (input, want) in cases {
+        let err = parse_list(input).unwrap_err();
+        assert!(!err.contains("secret-ish"), "no echo of the input: {err}");
+        assert_eq!(err, want, "{input}");
+    }
+}
+
+#[test]
+fn each_type_reads_only_its_own_block() {
+    let vban_with_asio = r#"[{"id":"out-1","name":"a","type":"vban","vban":{"host":"h","port":1},"asio":{"driver":"d","channels":[0,1]}}]"#;
+    let e = &parse_list(vban_with_asio).unwrap()[0];
+    assert_eq!(
+        (e.kind, e.asio.is_none(), e.vban.is_some()),
+        (OutputType::Vban, true, true)
+    );
+    let asio_with_vban = r#"[{"id":"out-1","name":"a","type":"asio","vban":{"host":"h","port":1},"asio":{"driver":"d","channels":[0,1]}}]"#;
+    let e = &parse_list(asio_with_vban).unwrap()[0];
+    assert_eq!(
+        (e.kind, e.asio.is_some(), e.vban.is_none()),
+        (OutputType::Asio, true, true)
+    );
+    assert_eq!(
+        checked("audio_outputs", asio_with_vban).unwrap(),
+        r#"[{"id":"out-1","name":"a","type":"asio","enabled":true,"rate":"network","delay_ms":0,"asio":{"driver":"d","channels":[0,1]}}]"#,
+        "stored normalized, the other type's block dropped"
+    );
+}
+
+#[test]
+fn a_patch_with_one_driver_twice_is_refused() {
+    let raw = format!("[{},{}]", dvs("out-1", "DVS"), dvs("out-2", "DVS"));
+    assert_eq!(
+        parse_list(&raw).unwrap_err(),
+        "entry 2 (id out-2): asio.driver is already used by an earlier ASIO entry (a driver takes one client)"
+    );
+}
+
+#[test]
+fn the_stored_read_keeps_one_asio_entry_per_driver_and_four_at_most() {
+    let entries = [
+        dvs("out-1", "d1"),
+        dvs("out-2", "d1"),
+        dvs("out-3", "d2"),
+        dvs("out-4", "d3"),
+        dvs("out-5", "d4"),
+        dvs("out-6", "d5"),
+        FOH.to_string(),
+    ];
+    let stored = parse_stored(Some(&format!("[{}]", entries.join(","))));
+    let ids: Vec<&str> = stored.entries.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids, vec!["out-1", "out-3", "out-4", "out-5"]);
+    assert_eq!(
+        stored.problems,
+        vec![
+            "entry 2 (id out-2): asio.driver is already used by an earlier ASIO entry (a driver takes one client)".to_string(),
+            "entry 6 (id out-6): over the 4 asio entries".to_string(),
+            "entry 7 (id out-1): id is used by an earlier entry".to_string(),
+        ]
     );
 }

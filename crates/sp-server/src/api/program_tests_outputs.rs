@@ -161,7 +161,7 @@ async fn get_program_names_a_stored_entry_it_could_not_read() {
     let raw = format!(
         "[{},{}]",
         serde_json::to_string(&foh("out-1")).unwrap(),
-        r#"{"id":"out-2","name":"DVS","type":"asio","asio":{"driver":"Dante Virtual Soundcard (x64)","channels":[0,1]}}"#
+        r#"{"id":"out-2","name":"AES67","type":"aes67"}"#
     );
     crate::db::models::set_setting(&state.pool, "audio_outputs", &raw)
         .await
@@ -185,7 +185,7 @@ async fn get_program_names_a_stored_entry_it_could_not_read() {
     assert_eq!(json["outputs"][0]["id"], "out-1");
     assert_eq!(
         json["outputs_problems"],
-        serde_json::json!(["entry 2 (id out-2): type must be vban"])
+        serde_json::json!(["entry 2 (id out-2): type must be vban or asio"])
     );
 }
 
