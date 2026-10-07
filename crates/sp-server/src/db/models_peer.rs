@@ -16,6 +16,8 @@ use std::time::Duration;
 
 use sqlx::SqlitePool;
 
+use crate::peer::wire::PeerLyrics;
+
 /// One cached sha256: the file at `path` as it was when hashed.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct HashEntry {
@@ -194,6 +196,41 @@ pub async fn defer_stems(
              strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) WHERE id = ?",
     )
     .bind(i64::try_from(wait.as_secs()).unwrap_or(i64::MAX))
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Row `video_id` takes a peer's lyrics row (its `{yt}_lyrics.json` is in
+/// place already): the peer's source, version, alignment model and ★, and its
+/// translation version unless this row asks another translation gender, which
+/// is then 0, so the local retranslate pass redoes the SK lines. A row with no
+/// gender of its own takes the peer's, the gender its SK lines were written
+/// for. SQLite's SET reads the OLD row, so the CASE sees this row's own
+/// gender.
+pub async fn adopt_lyrics(
+    pool: &SqlitePool,
+    video_id: i64,
+    l: &PeerLyrics,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE videos SET has_lyrics = 1, lyrics_source = ?1, lyrics_pipeline_version = ?2, \
+             lyrics_quality_score = NULL, lyrics_manual_priority = 0, lyrics_attempts = 0, \
+             lyrics_next_attempt_at = NULL, \
+             lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
+             lyrics_alignment_model = ?3, lyrics_reference = ?4, \
+             lyrics_translation_version = CASE WHEN lyrics_translation_gender IS NULL \
+                 OR lyrics_translation_gender IS ?6 THEN ?5 ELSE 0 END, \
+             lyrics_translation_gender = COALESCE(lyrics_translation_gender, ?6) \
+         WHERE id = ?7",
+    )
+    .bind(&l.source)
+    .bind(i64::from(l.pipeline_version))
+    .bind(&l.alignment_model)
+    .bind(i64::from(l.reference))
+    .bind(i64::from(l.translation_version))
+    .bind(&l.translation_gender)
     .bind(video_id)
     .execute(pool)
     .await?;

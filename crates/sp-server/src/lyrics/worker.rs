@@ -69,6 +69,9 @@ pub struct LyricsWorker {
     /// #154 idle gate: once-per-transition log tracker so the "waiting — wall
     /// in use" INFO logs on each state change, not every 5-s tick.
     pub(crate) wall_gate_log: std::sync::Mutex<crate::lyrics::idle_gate::GateLog>,
+    /// #229: this node in the exchange, asked before each song (`None` in
+    /// tests that do not need it).
+    pub(crate) peer: Option<Arc<crate::peer::Exchange>>,
 }
 
 #[derive(Default)]
@@ -138,6 +141,7 @@ impl LyricsWorker {
             ndi_health_registry: Some(ndi_health_registry),
             obs_state: Some(obs_state),
             wall_gate_log: std::sync::Mutex::new(crate::lyrics::idle_gate::GateLog::default()),
+            peer: None,
         }
     }
 
@@ -169,6 +173,7 @@ impl LyricsWorker {
             ndi_health_registry: None,
             obs_state: None,
             wall_gate_log: std::sync::Mutex::new(crate::lyrics::idle_gate::GateLog::default()),
+            peer: None,
         }
     }
 
@@ -189,6 +194,12 @@ impl LyricsWorker {
     ) -> Self {
         self.ndi_health_registry = Some(ndi_health_registry);
         self.obs_state = Some(obs_state);
+        self
+    }
+
+    /// #229: ask the exchange's peers before each song.
+    pub fn with_peer(mut self, peer: Arc<crate::peer::Exchange>) -> Self {
+        self.peer = Some(peer);
         self
     }
 
@@ -406,6 +417,13 @@ impl LyricsWorker {
             row.artist,
             row.song
         );
+        // #229: ask the peers first (`peer::lyrics`): a peer's lyrics are
+        // taken, a peer's job waited for; else process here, announced until
+        // this tick ends.
+        let _announced = match crate::peer::lyrics::first(self.peer.as_ref(), &row).await {
+            crate::peer::PeerStep::Local(guard) => guard,
+            crate::peer::PeerStep::Done | crate::peer::PeerStep::Deferred => return,
+        };
         match self.process_song(row).await {
             Ok(SongOutcome::Done) => {}
             // #144: durable retry backoff (mirrors downloader #140) so the
@@ -899,3 +917,7 @@ mod tests_reference;
 #[path = "worker_tests_idle_gate.rs"]
 #[cfg(test)]
 mod tests_idle_gate;
+
+#[path = "worker_tests_peer.rs"]
+#[cfg(test)]
+mod tests_peer;
