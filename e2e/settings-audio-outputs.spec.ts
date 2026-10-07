@@ -646,3 +646,21 @@ test("a driver list that could not be read marks no driver and offers no ASIO ou
   // The refused GET is the point of the test: the browser logs its 500.
   expect(realConsoleErrors().filter((m) => !/Failed to load resource.*500/.test(m))).toEqual([]);
 });
+
+// #233 review round 1: the channels are shown 1-based; a typed 0 is no
+// channel and is refused in Slovak, never silently read as channel 1.
+test("an ASIO channel typed as 0 is refused, never read as channel 1 (#233)", async ({ page }) => {
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  await page.locator('[data-testid="audio-outputs-add-asio"]').click();
+  const left = page.locator('[data-testid="audio-output-asio-left"]');
+  await expect(left).toHaveValue("1");
+  await left.fill("0");
+  await expect(left).toHaveValue("0");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText(
+    "Výstup 1 (out-1): pole „kanály“ musí byť 1 až 512",
+  );
+  expect(patches).toHaveLength(0);
+  expect(realConsoleErrors()).toEqual([]);
+});
