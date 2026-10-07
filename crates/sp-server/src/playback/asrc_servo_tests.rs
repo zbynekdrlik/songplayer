@@ -144,6 +144,13 @@ fn a_step_straddling_a_window_realigns_the_next_point() {
         "{} vs {rate}",
         r.rate_ppm()
     );
+    // A 44 ms step: 22 ms in the straddled window's mean, 22 more in the
+    // next — the rest of the same step realigns (one step, one rebase).
+    let mut r = RateRegression::default();
+    line(&mut r, 100, 1.0, 20.0);
+    assert_eq!(r.offer(100.0, on(100.0) + 0.022), Offered::Rebased);
+    assert_eq!(r.offer(101.0, on(101.0) + 0.044), Offered::Realigned);
+    assert_eq!(r.offer(102.0, on(102.0) + 0.044), Offered::Inserted);
     // A flush forgets a pending realign.
     let mut r = RateRegression::default();
     line(&mut r, 100, 1.0, 20.0);
