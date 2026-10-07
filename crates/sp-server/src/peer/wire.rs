@@ -19,8 +19,7 @@ pub struct Artifact {
     pub size: u64,
     /// 64 lowercase hex digits.
     pub sha256: String,
-    /// When the serving node listed (hashed) it (lane 3 is to fill it);
-    /// `None` for metadata.
+    /// When the serving node listed (hashed) it; `None` for metadata.
     #[serde(default)]
     pub updated_at: Option<String>,
 }
@@ -121,8 +120,8 @@ impl PeerMetadata {
         metadata_version(self.metadata_source.as_deref(), self.gemini_failed)
     }
 
-    /// The canonical bytes: lane 3's catalog is to hash these for the
-    /// metadata artifact's sha256.
+    /// The canonical bytes: the catalog's metadata sha256 is over them, and
+    /// the artifact route serves them.
     pub fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_default()
     }
@@ -162,6 +161,28 @@ pub fn rfc3339_to_ms(text: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(text.trim())
         .ok()
         .map(|t| t.timestamp_millis())
+}
+
+/// A video's lyrics row as a node holds it: what an adopting node is to
+/// write (lane 9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerLyrics {
+    pub source: String,
+    pub pipeline_version: u32,
+    pub alignment_model: Option<String>,
+    /// The ★ reference tier (the wall marks it).
+    pub reference: bool,
+    pub translation_version: u32,
+    pub translation_gender: Option<String>,
+}
+
+/// `GET /api/v1/peer/videos/{youtube_id}`: a node is to adopt a title and a
+/// lyrics row from it without running the providers (lanes 8-9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerVideo {
+    pub metadata: PeerMetadata,
+    pub duration_ms: Option<i64>,
+    pub lyrics: Option<PeerLyrics>,
 }
 
 #[cfg(test)]

@@ -16,11 +16,38 @@ use crate::lyrics::g35t_transcript::SOURCE_G35T_FULLMIX;
 /// sets one day).
 const FULLMIX_UPGRADE_MIN_AGE_SECS: i64 = 86_400; // 1 day
 
-/// #182: the lyrics worker never processes a dub-requested video — a dubbed talk
-/// gets its EN/SK subtitles from the Live-session transcript
-/// (`dabing::subtitles`), not the song-lyrics pipeline. Every selector bucket
-/// ANDs in this one shared predicate (`v.` alias, matching the bucket queries).
-const EXCLUDE_DUB_REQUESTED: &str = " AND (v.dub_requested IS NULL OR v.dub_requested = 0) ";
+/// The rows every selector bucket draws from (`v.` / `p.` aliases, matching
+/// the bucket queries): on an active playlist, downloaded, past any retry
+/// backoff, and never a dub-requested video (#182: a dubbed talk gets its
+/// EN/SK subtitles from the Live-session transcript, `dabing::subtitles`, not
+/// the song-lyrics pipeline). Also in [`queued_where`] (#229).
+const LYRICS_DUE: &str = "p.is_active = 1 AND v.normalized = 1 \
+     AND (v.dub_requested IS NULL OR v.dub_requested = 0) \
+     AND (v.lyrics_next_attempt_at IS NULL \
+          OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+
+/// Not parked by a terminal failure (`failed`, `empty`, `no_source`, the
+/// `asr_gap` quarantine of #86, `unsupported_source`), unless it was parked
+/// at an OLDER pipeline version (the worker may succeed now). Binds ONE `?`:
+/// the current version. Buckets 1 and 2, and [`queued_where`] (#229).
+const LYRICS_NOT_PARKED: &str = "(v.lyrics_source IS NULL \
+     OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source') \
+     OR v.lyrics_pipeline_version < ?)";
+
+/// The rows buckets 1–3 (manual, null, stale) take, as one `WHERE` body (`v.`
+/// / `p.` aliases): the node exchange lists them as this node's QUEUED lyrics
+/// (#229, `peer::queued`). Bucket 4 (the full-mix upgrade) is not in it: its
+/// row already serves lyrics at the current version. Binds THREE `?`, each the
+/// current pipeline version.
+pub(crate) fn queued_where() -> String {
+    format!(
+        "{LYRICS_DUE} AND ((v.lyrics_manual_priority = 1 AND {LYRICS_NOT_PARKED}) \
+         OR ((v.has_lyrics IS NULL OR v.has_lyrics = 0) AND {LYRICS_NOT_PARKED} \
+             AND v.lyrics_manual_priority = 0) \
+         OR (v.has_lyrics = 1 AND v.lyrics_pipeline_version < ? \
+             AND v.lyrics_manual_priority = 0))"
+    )
+}
 
 /// Pick the next video the lyrics worker should process. Priority order:
 /// 1. Manual-priority songs (user clicked "Reprocess")
@@ -66,13 +93,7 @@ async fn fetch_bucket_manual(
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
                 v.spotify_track_id, v.spotify_resolved_at \
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
-         WHERE v.lyrics_manual_priority = 1 \
-               AND (v.lyrics_source IS NULL \
-                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source') \
-                    OR v.lyrics_pipeline_version < ?) \
-               AND p.is_active = 1 AND v.normalized = 1 {EXCLUDE_DUB_REQUESTED} \
-               AND (v.lyrics_next_attempt_at IS NULL \
-                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+         WHERE v.lyrics_manual_priority = 1 AND {LYRICS_NOT_PARKED} AND {LYRICS_DUE} \
          ORDER BY v.id ASC LIMIT 1",
     ))
     .bind(current_version as i64)
@@ -118,14 +139,8 @@ async fn fetch_bucket_null(
                 p.youtube_url, v.lyrics_override_text, v.lyrics_time_offset_ms, \
                 v.spotify_track_id, v.spotify_resolved_at \
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
-         WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) \
-               AND (v.lyrics_source IS NULL \
-                    OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source') \
-                    OR v.lyrics_pipeline_version < ?) \
-               AND v.lyrics_manual_priority = 0 \
-               AND p.is_active = 1 AND v.normalized = 1 {EXCLUDE_DUB_REQUESTED} \
-               AND (v.lyrics_next_attempt_at IS NULL \
-                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+         WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) AND {LYRICS_NOT_PARKED} \
+               AND v.lyrics_manual_priority = 0 AND {LYRICS_DUE} \
          ORDER BY RANDOM() LIMIT 1",
     ))
     .bind(current_version as i64)
@@ -158,10 +173,7 @@ async fn fetch_bucket_stale(
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.has_lyrics = 1 \
                AND v.lyrics_pipeline_version < ? \
-               AND v.lyrics_manual_priority = 0 \
-               AND p.is_active = 1 AND v.normalized = 1 {EXCLUDE_DUB_REQUESTED} \
-               AND (v.lyrics_next_attempt_at IS NULL \
-                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+               AND v.lyrics_manual_priority = 0 AND {LYRICS_DUE} \
          ORDER BY v.lyrics_quality_score ASC NULLS FIRST, RANDOM() LIMIT 1",
     ))
     .bind(current_version as i64)
@@ -198,10 +210,7 @@ async fn fetch_bucket_fullmix_upgrade(
          WHERE v.has_lyrics = 1 \
                AND v.lyrics_source = ? \
                AND v.lyrics_pipeline_version >= ? \
-               AND v.lyrics_manual_priority = 0 \
-               AND p.is_active = 1 AND v.normalized = 1 {EXCLUDE_DUB_REQUESTED} \
-               AND (v.lyrics_next_attempt_at IS NULL \
-                    OR v.lyrics_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+               AND v.lyrics_manual_priority = 0 AND {LYRICS_DUE} \
                AND (v.lyrics_processed_at IS NULL \
                     OR v.lyrics_processed_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)) \
          ORDER BY v.lyrics_processed_at ASC NULLS FIRST, RANDOM() LIMIT 1",

@@ -457,25 +457,29 @@ impl DownloadWorker {
     }
 }
 
-/// Fetch the next video that needs processing (#140): eligible rows are
-/// `normalized = 0` on an active playlist whose `next_attempt_at` is either
-/// NULL (never failed) or already due. Rows with a NULL `next_attempt_at`
-/// sort before due-now rows so a fresh video is never starved behind a
-/// backlog of retries, and within each group the lowest `id` wins — same
-/// FIFO order as before #140 for the common (no-failure) case.
+/// The rows the download worker takes (#140): `normalized = 0` on an active
+/// playlist whose `next_attempt_at` is NULL (never failed) or already due
+/// (`v.` / `p.` aliases). Binds ONE `?`: now, `chrono::Utc::now().to_rfc3339()`.
+/// The node exchange lists these rows as queued downloads (#229, `peer::queued`).
+pub(crate) const DOWNLOAD_DUE: &str = "v.normalized = 0 AND p.is_active = 1 \
+     AND (v.next_attempt_at IS NULL OR v.next_attempt_at <= ?)";
+
+/// Fetch the next video that needs processing ([`DOWNLOAD_DUE`]). Rows with
+/// a NULL `next_attempt_at` sort before due-now rows so a fresh video is never
+/// starved behind a backlog of retries, and within each group the lowest `id`
+/// wins — same FIFO order as before #140 for the common (no-failure) case.
 pub(crate) async fn fetch_next_unprocessed(
     pool: &SqlitePool,
 ) -> Result<Option<VideoRow>, sqlx::Error> {
     let now = chrono::Utc::now().to_rfc3339();
-    let row = sqlx::query_as::<_, VideoRow>(
+    let row = sqlx::query_as::<_, VideoRow>(&format!(
         "SELECT v.id, v.youtube_id, COALESCE(v.title, '') as title
          FROM videos v
          JOIN playlists p ON p.id = v.playlist_id
-         WHERE v.normalized = 0 AND p.is_active = 1
-           AND (v.next_attempt_at IS NULL OR v.next_attempt_at <= ?)
+         WHERE {DOWNLOAD_DUE}
          ORDER BY (v.next_attempt_at IS NOT NULL), v.id
          LIMIT 1",
-    )
+    ))
     .bind(&now)
     .fetch_optional(pool)
     .await?;

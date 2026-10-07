@@ -338,8 +338,10 @@ pub async fn start(
             config.data_dir().join("bench"),
         )),
     };
-    // #229: this node in the exchange; its routes merge into the router below.
+    // #229: this node in the exchange; its routes merge into the router below,
+    // its hasher fills the catalog's sha256 cache while the node serves.
     let exchange = peer::Exchange::new(pool.clone(), config.cache_dir.clone());
+    tokio::spawn(peer::hasher::run(exchange.clone(), shutdown_tx.subscribe()));
 
     // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
     // the LAN with no internet. Reads `lan_mdns_enabled` (default on); a
