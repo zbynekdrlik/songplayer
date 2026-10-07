@@ -417,11 +417,10 @@ mod tests {
     /// with a retry pending, the badge for each WS state as the engine
     /// reports it (with the transport it comes with), for a retry of
     /// SP-program's source and one of a playlist off program, beside the
-    /// label, which follows
-    /// the same rule for any pending retry. The engine's pause after failed
-    /// opens is `WaitingForScene` / `Paused`. A pipeline told it decodes
-    /// keeps its own badge and label (on program "Hrá", off program "Hrá
-    /// mimo programu").
+    /// label, which follows the same rule for any pending retry. The
+    /// engine's pause after failed opens is `WaitingForScene` / `Paused`. A
+    /// pipeline told it decodes keeps its own badge and label (on program
+    /// "Hrá", off program "Hrá mimo programu").
     #[test]
     fn the_badge_says_on_program_while_a_retry_of_sp_program_s_source_waits() {
         // (state, transport, the badge for a retry of SP-program's source,

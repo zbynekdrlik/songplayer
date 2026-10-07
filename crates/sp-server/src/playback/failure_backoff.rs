@@ -131,9 +131,8 @@ impl FailureRun {
 
     /// The health row's `open_failures`, with the pending `retry` (its due
     /// instant, `retry_at_ms`, and whether it belongs to SP-program's
-    /// source); `None`
-    /// while no open failed. With no retry pending the row claims no
-    /// program (`on_program` false).
+    /// source); `None` while no open failed. With no retry pending the row
+    /// claims no program (`on_program` false).
     pub fn view(&self, retry: Option<RetryView>) -> Option<OpenFailures> {
         let last_error = self.last_failure.clone()?;
         Some(OpenFailures {
