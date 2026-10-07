@@ -79,7 +79,6 @@ test.describe("audio outputs (#233)", () => {
     socket.on("message", (m) => packets.push(new Uint8Array(m)));
     await new Promise<void>((resolve) => socket.bind(0, "127.0.0.1", () => resolve()));
     const port = socket.address().port;
-    const restore = JSON.stringify(kept);
     const withProbe = [
       ...kept,
       {
@@ -110,6 +109,16 @@ test.describe("audio outputs (#233)", () => {
         receiverFailures(taken, { srIndex: 4, frames: 200, formatBit: 0x02, stream: "sp-e2e-96k", minPackets: 480 }),
       ).toEqual([]);
     } finally {
+      // Restore from the list stored NOW (an operator may have saved one
+      // meanwhile), without the probe; the snapshot only if it cannot be read.
+      let current = kept;
+      try {
+        const now = (await (await request.get("/api/v1/settings")).json()).audio_outputs as string | undefined;
+        if (now && now.trim()) current = JSON.parse(now) as { id: string }[];
+      } catch {
+        current = kept;
+      }
+      const restore = JSON.stringify(current.filter((e) => !e.id.startsWith("e2e-")));
       const back = await request.patch("/api/v1/settings", { data: { audio_outputs: restore } });
       socket.close();
       expect(back.status(), "the stored list is restored").toBe(204);
