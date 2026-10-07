@@ -332,10 +332,8 @@ impl DownloadWorker {
         }
 
         // Move the video temp to its final pair name.
-        if let Err(e) = tokio::fs::rename(&video_temp, &video_final).await {
+        if let Err(e) = place_video(&self.pool, &video_temp, &video_final, &audio_final).await {
             tracing::error!(video_id = %row.youtube_id, "video rename failed: {e}");
-            let _ = tokio::fs::remove_file(&audio_final).await;
-            let _ = tokio::fs::remove_file(&video_temp).await;
             self.record_failure(row.id, &row.youtube_id, &e.to_string())
                 .await;
             return false;
@@ -572,6 +570,22 @@ pub(crate) async fn record_download_failure(
     }
 
     Ok(new_attempts)
+}
+
+/// The fresh video temp → its final pair name. When it cannot take that name,
+/// this attempt's files go: the video temp and the normalized audio.
+async fn place_video(
+    _pool: &SqlitePool,
+    video_temp: &Path,
+    video_final: &Path,
+    audio_final: &Path,
+) -> std::io::Result<()> {
+    let Err(e) = tokio::fs::rename(video_temp, video_final).await else {
+        return Ok(());
+    };
+    let _ = tokio::fs::remove_file(audio_final).await;
+    let _ = tokio::fs::remove_file(video_temp).await;
+    Err(e)
 }
 
 fn cleanup_temps(video_temp: &Path, cache_dir: &Path, video_id: &str) {
