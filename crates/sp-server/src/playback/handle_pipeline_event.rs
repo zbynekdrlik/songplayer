@@ -29,10 +29,16 @@ impl PlaybackEngine {
                 duration_ms,
                 position_ms,
             } => {
-                // #229 follow-up RED: the answer is counted, but every answer
-                // still acts (the old behaviour; GREEN returns on an earlier
-                // Play's answer).
-                let _ = self.answers_last_play(playlist_id);
+                // #229 follow-up: a `Started` names no Play. The answer to an
+                // earlier Play (a newer one is under way, its song not open
+                // yet) records nothing, ends no run, fixes no title clock.
+                if !self.answers_last_play(playlist_id) {
+                    info!(
+                        playlist_id,
+                        "the start of an earlier Play — ignored, a newer Play is under way"
+                    );
+                    return;
+                }
                 // #229: a song opened — the run of failed opens is over, and
                 // a selected or picked song counts as played now.
                 self.song_started(playlist_id).await;
@@ -171,8 +177,15 @@ impl PlaybackEngine {
             }
             PipelineEvent::Error(msg) => {
                 warn!(playlist_id, %msg, "pipeline error");
-                // #229 follow-up RED: counted, still acted on (old behaviour).
-                let _ = self.answers_last_play(playlist_id);
+                // #229 follow-up: the failure of an earlier Play is not the
+                // newer song's: it counts no failure and selects nothing.
+                if !self.answers_last_play(playlist_id) {
+                    info!(
+                        playlist_id,
+                        "the failure of an earlier Play — ignored, a newer Play is under way"
+                    );
+                    return;
+                }
                 if self.pause_if_held(playlist_id, "its song failed").await {
                     return;
                 }
