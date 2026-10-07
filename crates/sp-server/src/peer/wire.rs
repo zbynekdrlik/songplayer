@@ -67,10 +67,10 @@ impl Catalog {
     /// YouTube id; an artifact also a sha256 as 64 lowercase hex digits; a job
     /// also a known state and a node name that holds (`peer::config`'s rule).
     /// Separately, the catalog's own `node` reads as empty when it is not a
-    /// node name, a time is rewritten in its canonical form or, when it is not
-    /// an RFC 3339 time, reads as `None` (its entry stays: a time is
-    /// information only, never a decision's input), and a queued job has no
-    /// start.
+    /// node name, a time is rewritten in its canonical form or reads as `None`
+    /// when it has none that reads back (`checked_time`; its entry stays: a
+    /// time is information only, never a decision's input), and a queued job
+    /// has no start.
     pub fn sanitized(mut self) -> Self {
         if !valid_name(&self.node) {
             self.node.clear();
