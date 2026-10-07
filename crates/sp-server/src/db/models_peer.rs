@@ -1,8 +1,18 @@
-//! #229: the node exchange's tables. V29 `peer_hashes`: this node's sha256
-//! cache, keyed by path; an entry holds while the file's size and mtime match
-//! (`peer::hasher` checks that before the catalog lists the file).
+//! #229: the node exchange's tables.
+//!
+//! - V29 `peer_hashes`: this node's sha256 cache, keyed by path; an entry
+//!   holds while the file's size and mtime match (`peer::hasher` checks that
+//!   before the catalog lists the file).
+//! - V30 `peer_waits`: since when a job of a video waits for a peer (the
+//!   first wait counts, `peer::ask`); `peer_fetches`: which node an artifact
+//!   came from.
+//!
+//! Plus the job defers of the ask-first hooks (`defer_download`,
+//! `defer_stems`; the lyrics job defers through `record_lyrics_wait`) and
+//! the lyrics row a node takes from a peer (`adopt_lyrics`).
 
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use sqlx::SqlitePool;
 
@@ -66,6 +76,128 @@ pub async fn prune_hashes(pool: &SqlitePool, keep: &HashSet<String>) -> Result<u
         pruned += remove_hash(pool, path).await?;
     }
     Ok(pruned)
+}
+
+/// How long `job` of `youtube_id` has waited for a peer at `now_ms`; `None` =
+/// not waiting. A clock stepped back past the start reads as no wait yet.
+pub async fn waited(
+    pool: &SqlitePool,
+    youtube_id: &str,
+    job: &str,
+    now_ms: i64,
+) -> Result<Option<Duration>, sqlx::Error> {
+    let since: Option<i64> =
+        sqlx::query_scalar("SELECT since_ms FROM peer_waits WHERE youtube_id = ? AND job = ?")
+            .bind(youtube_id)
+            .bind(job)
+            .fetch_optional(pool)
+            .await?;
+    Ok(since.map(|s| Duration::from_millis(u64::try_from(now_ms - s).unwrap_or(0))))
+}
+
+/// The job waits from `now_ms`, unless it already waits (the first start
+/// counts).
+pub async fn start_wait(
+    pool: &SqlitePool,
+    youtube_id: &str,
+    job: &str,
+    now_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("INSERT OR IGNORE INTO peer_waits (youtube_id, job, since_ms) VALUES (?, ?, ?)")
+        .bind(youtube_id)
+        .bind(job)
+        .bind(now_ms)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// The job no longer waits (it runs here, or a peer's copy was taken).
+pub async fn end_wait(pool: &SqlitePool, youtube_id: &str, job: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM peer_waits WHERE youtube_id = ? AND job = ?")
+        .bind(youtube_id)
+        .bind(job)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// `kind` of `youtube_id` came from peer `node` (the latest fetch wins).
+pub async fn record_fetch(
+    pool: &SqlitePool,
+    youtube_id: &str,
+    kind: &str,
+    node: &str,
+    version: u32,
+    sha256: &str,
+    at_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT OR REPLACE INTO peer_fetches \
+             (youtube_id, kind, node, version, sha256, fetched_at_ms) \
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(youtube_id)
+    .bind(kind)
+    .bind(node)
+    .bind(i64::from(version))
+    .bind(sha256)
+    .bind(at_ms)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// `(node, version, sha256)` of the last fetch of `kind` of `youtube_id`.
+pub async fn fetch_record(
+    pool: &SqlitePool,
+    youtube_id: &str,
+    kind: &str,
+) -> Result<Option<(String, i64, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT node, version, sha256 FROM peer_fetches WHERE youtube_id = ? AND kind = ?",
+    )
+    .bind(youtube_id)
+    .bind(kind)
+    .fetch_optional(pool)
+    .await
+}
+
+/// The download of row `video_id` is picked again after `wait`, with no
+/// attempt counted (`fetch_next_unprocessed` compares the same RFC 3339 form
+/// `record_download_failure` writes).
+pub async fn defer_download(
+    pool: &SqlitePool,
+    video_id: i64,
+    wait: Duration,
+) -> Result<(), sqlx::Error> {
+    let at = chrono::Utc::now()
+        + chrono::Duration::from_std(wait).unwrap_or_else(|_| chrono::Duration::zero());
+    sqlx::query("UPDATE videos SET next_attempt_at = ? WHERE id = ?")
+        .bind(at.to_rfc3339())
+        .bind(video_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// The stems of row `video_id` are picked again after `wait`, with the status
+/// and the attempts untouched (the stem selector compares
+/// `stem_next_attempt_at` in this form).
+pub async fn defer_stems(
+    pool: &SqlitePool,
+    video_id: i64,
+    wait: Duration,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE videos SET stem_next_attempt_at = \
+             strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) WHERE id = ?",
+    )
+    .bind(i64::try_from(wait.as_secs()).unwrap_or(i64::MAX))
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]

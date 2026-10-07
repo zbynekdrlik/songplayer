@@ -44,6 +44,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (27, MIGRATION_V27),
     (28, MIGRATION_V28),
     (29, MIGRATION_V29),
+    (30, MIGRATION_V30),
 ];
 
 const MIGRATION_V1: &str = "
@@ -455,6 +456,28 @@ CREATE TABLE peer_hashes (
 );
 ";
 
+// V30 (#229): ask first. `peer_waits` = since when a job of a video waits for
+// a peer (the 2 h bound counts from the FIRST wait, kept until the wait ends);
+// `peer_fetches` = which node an artifact came from (source = peer:<node>).
+// The row's own source columns keep their meaning.
+const MIGRATION_V30: &str = "
+CREATE TABLE peer_waits (
+    youtube_id TEXT NOT NULL,
+    job TEXT NOT NULL,
+    since_ms INTEGER NOT NULL,
+    PRIMARY KEY (youtube_id, job)
+);
+CREATE TABLE peer_fetches (
+    youtube_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    node TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    fetched_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (youtube_id, kind)
+);
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -611,6 +634,10 @@ mod tests_v28;
 #[path = "mod_tests_v29.rs"]
 #[cfg(test)]
 mod tests_v29;
+
+#[path = "mod_tests_v30.rs"]
+#[cfg(test)]
+mod tests_v30;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]
