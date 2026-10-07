@@ -5,7 +5,11 @@ paths:
   - "crates/sp-server/src/db/models_peer*.rs"
   - "crates/sp-server/src/db/mod_tests_v29.rs"
   - "crates/sp-server/src/db/mod_tests_v30.rs"
+  - "crates/sp-server/src/downloader/mod.rs"
   - "crates/sp-server/src/downloader/mod_tests_peer.rs"
+  - "crates/sp-server/src/stems/worker.rs"
+  - "crates/sp-server/src/lyrics/worker.rs"
+  - "crates/sp-server/src/reprocess/mod.rs"
   - "crates/sp-server/src/stems/worker_tests_peer.rs"
   - "crates/sp-server/src/lyrics/worker_tests_peer.rs"
   - "crates/sp-server/src/reprocess/tests_peer.rs"
@@ -514,10 +518,16 @@ workers ask their peers before they run a job (below, from "Ask first").
   wait so far, `decide`. Local returns `Local(JobGuard)`: the job is
   announced in this node's catalog while the hook holds the guard. A Wait
   records its start (`peer_waits`, the FIRST start kept).
-- Every job that runs here goes through `Exchange::run_here`: it ENDS the
-  job's wait, then announces it (a later ask never inherits an old start
-  and its spent bound). The hooks' own Local paths use it too (an
-  operator's lyrics ask, nothing newer, a fetch that kept failing).
+- Every job that runs here after a peer read goes through
+  `Exchange::run_here`: it ENDS the job's wait, drops the parts a fetch of
+  it left, then announces it (a later ask never inherits an old start and
+  its spent bound). The hooks' own Local paths use it too (an operator's
+  lyrics ask, nothing newer, a fetch that kept failing). The no-peers and
+  bad-settings paths only announce (no DB write): a wait recorded before
+  the settings went bad survives them, so the first ask after the fix may
+  run the job here at once (its bound already spent). Accepted.
+- A fetch refused by this node's own pause logs at DEBUG (it recurs for
+  every row on every tick while the pause lasts); other fetch failures WARN.
 - Rechecks back off (`recheck_after`): a quarter of the wait so far, 2–20
   min, never past the bound, at least 1 min. A failed fetch
   (`Exchange::fetch_failed`) counts as waiting and WARNs; a Fetch still
@@ -581,6 +591,13 @@ workers ask their peers before they run a job (below, from "Ask first").
 - Not this lane's (a follow-up candidate): the LOCAL download's "video rename
   failed" branch (`downloader/mod.rs`) still removes `audio_final`
   unconditionally, which can be another row's recorded audio.
+- Known limits (follow-up candidates): `peer::stems::adopt` has no rollback
+  when the instrumental cannot take its name after the vocals did (rare: the
+  stem readers share delete); `models_peer::adopt_lyrics` is two UPDATEs, not
+  one transaction (a failed second one leaves the row's old ★ and
+  translation version); PP's post-deploy subset probes only the catalog,
+  never an artifact transfer through Cloudflare (step 4 below checks it by
+  hand).
 - `downloader/` is out of the mutation gate: the logic stays in `peer/`,
   only the hook lives in `downloader/mod.rs`; its tests are `mod_tests.rs`
   (moved out for the cap) + `mod_tests_peer.rs` (tools missing on purpose:

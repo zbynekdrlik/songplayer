@@ -302,7 +302,9 @@ async fn an_audio_that_cannot_take_its_name_puts_the_video_back() {
     assert_eq!(parts_of(&pp), vec!["audio", "video"], "both parts stay");
 }
 
-/// ... and never takes away a video that was there before (another row's).
+/// ... and never takes away a video that was there before (another row's):
+/// it now holds the peer's verified copy of the same video (the rename
+/// replaced it, which cannot be undone), and stays.
 #[tokio::test]
 async fn an_audio_that_cannot_take_its_name_keeps_a_video_that_was_there() {
     let (_snv, pp, row) = snv_and_pp().await;
@@ -314,7 +316,11 @@ async fn an_audio_that_cannot_take_its_name_keeps_a_video_that_was_there() {
         first(Some(&pp.ex), &chain, &row).await,
         PeerStep::Deferred
     ));
-    assert!(video.is_file(), "a video that was there stays");
+    assert_eq!(
+        std::fs::read(&video).unwrap(),
+        bytes(2_000, 1),
+        "a video that was there stays, as the peer's copy"
+    );
 }
 
 #[tokio::test]

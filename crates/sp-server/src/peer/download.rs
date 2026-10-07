@@ -142,8 +142,9 @@ pub(crate) async fn adopt(
     let video_was_there = tokio::fs::try_exists(&video).await.unwrap_or(true);
     tokio::fs::rename(&video_part, &video).await?;
     if let Err(e) = tokio::fs::rename(&audio_part, &audio).await {
-        // No unrecorded video under its final name, never one that was there:
-        // the video this attempt placed goes back into its part.
+        // No unrecorded video under its final name: one this attempt placed
+        // goes back into its part. One that was there (another row's) stays,
+        // now the peer's copy of the same video; the next ask fetches again.
         if !video_was_there && tokio::fs::rename(&video, &video_part).await.is_err() {
             let _ = tokio::fs::remove_file(&video).await;
         }

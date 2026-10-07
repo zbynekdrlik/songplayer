@@ -273,9 +273,6 @@ async fn a_failed_fetch_backs_off_from_the_first_wait() {
     );
 }
 
-/// A peer's copy wins over the 2 h bound, but a fetch of it that keeps
-/// failing does not: once the job has waited 2 h, the failure answers "run
-/// it here" (`None`), so it never spins on 1-min rechecks forever.
 /// A job that runs here drops the parts a fetch of it left (a short body
 /// kept for a resume, a pair that could not take its names): nothing is
 /// orphaned in `<cache>/peer/`. Another video's parts and another job's stay.
@@ -303,6 +300,9 @@ async fn a_job_run_here_drops_the_parts_its_fetch_left() {
     assert_eq!(left, vec![names[2].clone(), names[3].clone()]);
 }
 
+/// A peer's copy wins over the 2 h bound, but a fetch of it that keeps
+/// failing does not: once the job has waited 2 h, the failure answers "run
+/// it here" (`None`), so it never spins on 1-min rechecks forever.
 #[tokio::test]
 async fn a_fetch_failing_past_the_bound_runs_the_job_here() {
     let (_snv, pp) = snv_and_pp().await;
