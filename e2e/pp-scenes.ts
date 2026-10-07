@@ -66,7 +66,9 @@ export function playlistNames(rows: PlaylistRow[]): Set<string> {
  * Dabing one, and has a playable video (`playable`: playlist id → its
  * normalized videos; missing = none). Among those, the SNV suites' baseline
  * discipline (`pickBaselineScene`): `sp-slow`, else any `sp-*` but `sp-fast`
- * and `sp-warmup`. `null` when there is none.
+ * and `sp-warmup`, else a catalog scene that is not `sp-*`, else the first
+ * (so `sp-fast` or `sp-warmup` when they are all that is left: a playlist is
+ * still tested). `null` when there is none.
  */
 export function pickPlaylistScene(
   rows: PlaylistRow[],
@@ -104,12 +106,19 @@ export interface ManualSceneInput {
  * manual scene is none of: an active playlist's name, the A/V gate's probe
  * scene, "OBS manuál".
  */
+/** A manual scene: not blank, none of the active playlists' names
+ *  (`playlistNames`), not the A/V gate's probe scene, not "OBS manuál". */
+export function isManualScene(scene: string, playlistNames: Set<string>): boolean {
+  return (
+    scene.trim() !== "" &&
+    !playlistNames.has(asciiLower(scene)) &&
+    scene !== AV_PROBE_SCENE &&
+    scene !== OBS_MANUAL
+  );
+}
+
 export function pickManualScene(o: ManualSceneInput): { scene: string } | { error: string } {
-  const manual = (s: string) =>
-    s.trim() !== "" &&
-    !o.playlistNames.has(asciiLower(s)) &&
-    s !== AV_PROBE_SCENE &&
-    s !== OBS_MANUAL;
+  const manual = (s: string) => isManualScene(s, o.playlistNames);
   const configured = o.configured.trim();
   if (configured !== "") {
     if (!o.scenes.includes(configured)) {
@@ -148,6 +157,9 @@ export function cgRestoreTarget(
 export interface GatePress {
   scene: string;
   sentAtMs: number;
+  /** The source the press puts on program when it is not refused: the
+   *  playlist's id, or -1 ("OBS manuál") for a manual scene. */
+  source: number;
 }
 
 /** `remote.last_remote_cut` of `GET /api/v1/program`, the fields the
@@ -158,24 +170,55 @@ export interface LastCutView {
   at_ms: number;
 }
 
+/** Whether the latest recorded switch (`remote.last_remote_cut`) is the
+ *  gate's own last press: its scene, recorded at or after the instant the
+ *  gate sent it (a refused keep included). */
+export function gateIsLatest(presses: GatePress[], cut: LastCutView | null): boolean {
+  const last = presses.at(-1);
+  return last !== undefined && cut !== null && cut.scene === last.scene && cut.at_ms >= last.sentAtMs;
+}
+
 /**
  * The source SP-program goes back to after the gate (`POST
  * /api/v1/program/cut`, which tells cg OBS nothing): the start source, only
- * while the latest recorded switch is the gate's own last press (its scene,
- * recorded at or after the instant the gate sent it, not a refused keep)
+ * while the program is still what the gate left — the latest recorded
+ * switch is the gate's own last press (`gateIsLatest`) and the program is on
+ * that press's source, or, when that last press was refused (a keep: the NDI
+ * input inactive, cg OBS refusing), on the source of the press before it —
  * and the program is not on the start source already. `null` otherwise: no
  * press, nothing was on program at the start, or someone switched since (an
  * operator's press or cut is kept).
  */
 export function programRestoreTarget(
   start: number | null,
-  press: GatePress | null,
+  presses: GatePress[],
   now: { source: number | null; last_remote_cut: LastCutView | null },
 ): number | null {
   const cut = now.last_remote_cut;
-  if (start === null || press === null || cut === null) return null;
-  const gates = cut.scene === press.scene && cut.at_ms >= press.sentAtMs && cut.action !== "keep";
-  return gates && now.source !== start ? start : null;
+  if (start === null || cut === null || !gateIsLatest(presses, cut)) return null;
+  const left = cut.action === "keep" ? presses.at(-2) : presses.at(-1);
+  if (left === undefined || now.source !== left.source) return null;
+  return now.source === start ? null : start;
+}
+
+/**
+ * How cg OBS goes back on its own scene after the gate moved it
+ * (`cgRestoreTarget`): through the facade when the gate left SP-program on
+ * "OBS manuál" (-1), no cut back is due, nothing switched since and that
+ * scene is a manual one (`isManualScene`) — the press moves cg OBS and
+ * SongPlayer names the program by that scene again — else on cg OBS
+ * directly (SP-program is cut back to a playlist, or someone switched since:
+ * a facade press would cut SP-program to "OBS manuál"; a playlist's name
+ * would cut SP-program to that playlist).
+ */
+export function cgRestoreVia(o: {
+  programBack: number | null;
+  gateIsLatest: boolean;
+  source: number | null;
+  backIsManual: boolean;
+}): "facade" | "cg" {
+  const facade = o.programBack === null && o.gateIsLatest && o.source === -1 && o.backIsManual;
+  return facade ? "facade" : "cg";
 }
 
 /** `GET /api/v1/program`, the fields the manual-cut check reads. */

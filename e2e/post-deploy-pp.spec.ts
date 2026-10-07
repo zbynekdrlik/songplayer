@@ -19,9 +19,10 @@
  * own catalog; the manual scene = cg OBS's own program scene unless the repo
  * variable PP_MANUAL_SCENE names one). `afterAll` puts SP-program back on its
  * start source with a dashboard cut (it tells cg OBS nothing) only while the
- * gate's own last press is still the latest switch (`programRestoreTarget`),
- * and cg OBS back on its own only when the manual press moved it and it is
- * still there (`cgRestoreTarget`): an operator's press meanwhile is kept. The
+ * program is still what the gate left (`programRestoreTarget`), and cg OBS
+ * back on its own only when the manual press moved it and it is still there
+ * (`cgRestoreTarget`; through the facade when SP-program stays on "OBS
+ * manuál", `cgRestoreVia`): an operator's press meanwhile is kept. The
  * tests are not serial: a missing Cloudflare token must not hide the playback
  * results.
  */
@@ -42,6 +43,9 @@ import {
 } from "./peer-probe-gate";
 import {
   cgRestoreTarget,
+  cgRestoreVia,
+  gateIsLatest,
+  isManualScene,
   manualCutLanded,
   pickManualScene,
   pickPlaylistScene,
@@ -137,15 +141,15 @@ test.describe("PP's program through the facade (#229)", () => {
   /** SP-program's source before the tests (`GET /api/v1/program` →
    *  `source`; null: nothing was on it, so there is nothing to put back). */
   let startSource: number | null = null;
-  /** The last facade press the gate sent: afterAll may undo it. */
-  let lastPress: GatePress | null = null;
+  /** Every facade press the gate sent, in order: afterAll may undo them. */
+  const presses: GatePress[] = [];
   /** The manual press moved cg OBS (from → to): afterAll may put it back. */
   let cgMoved: { from: string; to: string } | null = null;
 
-  /** Press `scene` through the facade, recorded first: a press that fails
-   *  half-way is still undone. */
-  async function press(scene: string): Promise<void> {
-    lastPress = { scene, sentAtMs: Date.now() };
+  /** Press `scene` (which puts `source` on program) through the facade,
+   *  recorded first: a press that fails half-way is still undone. */
+  async function press(scene: string, source: number): Promise<void> {
+    presses.push({ scene, sentAtMs: Date.now(), source });
     await facade!.switchScene(scene);
   }
 
@@ -167,15 +171,22 @@ test.describe("PP's program through the facade (#229)", () => {
   test.afterAll(async () => {
     const problems: string[] = [];
     const ctx = await apiRequest.newContext({ baseURL: SONGPLAYER_URL });
+    // What the restore of SP-program decided, for cg OBS's own restore.
+    let programBack: number | null = null;
+    let latest = false;
+    let sourceNow: number | null = null;
     try {
-      if (lastPress !== null) {
+      if (presses.length > 0) {
         try {
           const now = await getJson<ProgramNow>(ctx, "/api/v1/program");
           if (now === null) throw new Error("GET /api/v1/program failed");
-          const back = programRestoreTarget(startSource, lastPress, {
+          sourceNow = now.source;
+          latest = gateIsLatest(presses, now.remote.last_remote_cut);
+          const back = programRestoreTarget(startSource, presses, {
             source: now.source,
             last_remote_cut: now.remote.last_remote_cut,
           });
+          programBack = back;
           if (back !== null) {
             const resp = await ctx.post("/api/v1/program/cut", { data: { source: back } });
             if (!resp.ok()) {
@@ -197,8 +208,21 @@ test.describe("PP's program through the facade (#229)", () => {
           const now = await cg.currentProgramScene();
           const back = cgRestoreTarget(cgMoved, now);
           if (back !== null) {
-            await cg.switchScene(back);
-            console.log(`[#229 pp] cg OBS back on "${back}" (the gate had moved it to "${now}")`);
+            const backIsManual = isManualScene(back, playlistNames(await readPlaylists(ctx)));
+            const via = cgRestoreVia({
+              programBack,
+              gateIsLatest: latest,
+              source: sourceNow,
+              backIsManual,
+            });
+            if (via === "facade") {
+              // SP-program stays on "OBS manual": the press moves cg OBS back
+              // and SongPlayer names the program by that scene again.
+              await press(back, -1);
+            } else {
+              await cg.switchScene(back);
+            }
+            console.log(`[#229 pp] cg OBS back on "${back}" via ${via} (the gate had moved it to "${now}")`);
           } else {
             console.log(`[#229 pp] cg OBS is on "${now}" (moved since the press): left as it is`);
           }
@@ -239,7 +263,7 @@ test.describe("PP's program through the facade (#229)", () => {
     const { scene, playlistId } = pick!;
     console.log(`[#229 pp] playlist scene: ${scene} (playlist ${playlistId})`);
 
-    await press(scene);
+    await press(scene, playlistId);
     await expect
       .poll(() => readEngineActiveScene(request), {
         message: `SongPlayer's program reaches ${scene}`,
@@ -287,7 +311,7 @@ test.describe("PP's program through the facade (#229)", () => {
     // The press forwards the scene to cg OBS first: recorded before it, so a
     // press that fails half-way is still put back.
     if (pick.scene !== cgNow) cgMoved = { from: cgNow, to: pick.scene };
-    await press(pick.scene);
+    await press(pick.scene, -1);
     await expect
       .poll(
         async () => {
