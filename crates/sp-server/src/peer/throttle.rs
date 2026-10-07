@@ -3,15 +3,22 @@
 
 use std::time::Duration;
 
+/// The longest single pause. Never reached at the rates in use (a 64 KiB
+/// served chunk at the 1 Mbit/s minimum cap = 0.52 s, a 1 MiB hashed read at
+/// 40 MiB/s = 25 ms); it bounds a stall or a wrong rate, so a transfer or a
+/// hash never hangs.
+pub const MAX_PAUSE: Duration = Duration::from_secs(2);
+
 /// How long to pause after `done` bytes in `elapsed` so that the average
-/// stays at or under `rate` bytes/s. `rate` 0 = no limit.
+/// stays at or under `rate` bytes/s, at most [`MAX_PAUSE`] at a time (the
+/// next pause takes the rest). `rate` 0 = no limit.
 pub fn wait_for(done: u64, elapsed: Duration, rate: u64) -> Duration {
     if rate == 0 {
         return Duration::ZERO;
     }
     let due_us = u128::from(done) * 1_000_000 / u128::from(rate);
     let due = Duration::from_micros(u64::try_from(due_us).unwrap_or(u64::MAX));
-    due.saturating_sub(elapsed)
+    due.saturating_sub(elapsed).min(MAX_PAUSE)
 }
 
 /// Mbit/s as bytes/s.
