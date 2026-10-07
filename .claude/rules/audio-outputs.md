@@ -349,7 +349,9 @@ is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
 ## Telemetry
 
 `GET /api/v1/program` → `outputs[]` `{id, type, name, enabled, state
-(running|opening|waiting|disabled, `vban_state`), reason, rate, format,
+(running|opening|waiting|disabled, `vban_state`; a thread that could not
+start — Windows: the UDP bind or the spawn failed — is "waiting" with
+`VbanOut::start_error` as its reason, never "opening" for good), reason, rate, format,
 channels, delay_ms, latency_ms (L + delay + the converter,
 `vban_latency_ms`), blocks_sent, blocks_dropped, vban: {#210's VbanStatus +
 blocks_sent}}`, `audio_network_rate`, `outputs_problems`; the cut answer
@@ -377,7 +379,11 @@ before the Settings page LOADED the settings (`loaded`: `None` while
 `GET /api/v1/settings` runs, `Some(false)` when it failed, passed to both
 sections): an empty list shown before the load would replace the stored one
 (FOH's entry with it), and the form's fields would hold defaults; a failed
-load shows "Nastavenia sa nenačítali — …" on both. The message span is
+load shows "Nastavenia sa nenačítali — …" on both. The same holds over a
+stored list this dashboard cannot read (`load_error`, the rows reset to
+none). Each save is stopped twice: by its disabled button AND by its
+handler's own guard (`loaded` / `load_error`), the specs reaching the
+guards past the buttons (`sp-ui-frontend.md`). The message span is
 `audio-outputs-status` (`.save-status` is the form's alone: five Nastavenia
 specs read it unscoped, Playwright strict mode). A stored entry missing from
 `outputs[]` reads "uložený, nespustený" with its `outputs_problems` line as

@@ -2,6 +2,7 @@
 paths:
   - "sp-ui/**"
   - "e2e/mock-api.mjs"
+  - "e2e/settings-*.spec.ts"
   - "e2e/lyrics-follow.spec.ts"
   - "crates/sp-core/src/lyrics_follow.rs"
   - "e2e/player-known-state.spec.ts"
