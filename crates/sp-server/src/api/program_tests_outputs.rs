@@ -173,7 +173,7 @@ async fn get_program_names_a_stored_entry_it_could_not_read() {
         state.program_bus.outputs(),
         settings,
         &mut HashMap::new(),
-        &|_: &Arc<VbanOut>, _: &str| {},
+        &|_: &OutputSink, _: &str| {},
     )
     .await;
     let json = get_program(&state).await;
@@ -230,4 +230,64 @@ async fn get_program_reports_the_vban_threads_late_packets() {
         ])
     );
     assert_eq!(json["outputs"][0]["blocks_sent"], 1);
+}
+
+/// #233 lane 3: off Windows an ASIO output never opens; it says why (the
+/// production starter). On Windows a real worker opens the named driver: the
+/// Windows job's `asio_win` tests and the box gate cover that path.
+#[cfg(not(windows))]
+#[tokio::test]
+async fn an_asio_entry_off_windows_waits_and_says_why() {
+    let state = test_state().await;
+    let dvs = OutputEntry::asio(
+        "out-3",
+        "DVS",
+        sp_core::audio_outputs::AsioDest {
+            driver: "Dante Virtual Soundcard (x64)".into(),
+            channels: [0, 1],
+        },
+    );
+    let settings = crate::playback::audio_out_config::OutputsSettings {
+        entries: vec![dvs],
+        network_rate: 96_000,
+        problems: vec![],
+        not_a_list: false,
+    };
+    crate::playback::audio_out_task::apply(
+        state.program_bus.outputs(),
+        settings,
+        &mut HashMap::new(),
+        &crate::playback::audio_out_task::start_output_thread,
+    )
+    .await;
+    let json = get_program(&state).await;
+    let o = &json["outputs"][0];
+    assert_eq!(
+        (o["type"].as_str(), o["state"].as_str()),
+        (Some("asio"), Some("waiting"))
+    );
+    assert_eq!(o["reason"], "ASIO runs on Windows only");
+    assert_eq!(o["rate"], 0);
+    assert!(o.get("note").is_none());
+    let a = &o["asio"];
+    assert_eq!(a["driver"], "Dante Virtual Soundcard (x64)");
+    assert_eq!(a["channels"], serde_json::json!([0, 1]));
+    assert_eq!(a["reason_code"], "windows_only");
+    for key in [
+        "driver_rate",
+        "buffer_frames",
+        "out_channels",
+        "sample_type",
+        "ppm",
+        "rate_ppm",
+        "locked",
+        "latency_ms",
+        "underruns",
+        "resets",
+        "recentres",
+        "overflows",
+        "retry_in_s",
+    ] {
+        assert!(a.get(key).is_some(), "asio.{key}");
+    }
 }

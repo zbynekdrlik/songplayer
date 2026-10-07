@@ -292,6 +292,182 @@ fn a_vban_output_whose_thread_could_not_start_says_why() {
     let why = "the VBAN thread did not start: binding the UDP socket failed: denied";
     out.set_start_error(why.to_string());
     assert_eq!(out.start_error().as_deref(), Some(why));
-    let st = running_vban("out-1", out).status();
+    let st = running_vban("out-1", out).status(48_000);
     assert_eq!((st.state, st.reason.as_deref()), (STATE_WAITING, Some(why)));
+}
+
+// #233 lane 3: ASIO outputs in the fan-out and the status.
+
+fn dvs_entry() -> OutputEntry {
+    OutputEntry::asio(
+        "out-3",
+        "DVS",
+        sp_core::audio_outputs::AsioDest {
+            driver: "Dante Virtual Soundcard (x64)".into(),
+            channels: [0, 1],
+        },
+    )
+}
+
+fn running_asio(out: Arc<AsioOut>) -> RunningOutput {
+    RunningOutput {
+        entry: dvs_entry(),
+        built_rate: 0,
+        sink: Some(OutputSink::Asio(out)),
+        error: None,
+    }
+}
+
+/// An ASIO output whose driver opened with `opened` (one worker step).
+fn opened_asio(opened: crate::playback::asio_out::Opened) -> Arc<AsioOut> {
+    use crate::playback::asio_out::AsioWorker;
+    use crate::playback::asio_out::fake::FakeDevice;
+    let out = Arc::new(AsioOut::for_entry(&dvs_entry()).unwrap());
+    let mut d = FakeDevice::answering(vec![Ok(opened)]);
+    AsioWorker::new(0).step(&out, &mut d, 0, None);
+    out
+}
+
+#[test]
+fn the_status_notes_a_driver_rate_off_the_network_rate() {
+    use crate::playback::asio_out::fake::dvs;
+    let running = running_asio(opened_asio(dvs(48_000.0)));
+    let at96 = running.status(96_000);
+    assert_eq!(
+        (at96.kind, at96.state, at96.rate, at96.format),
+        ("asio", STATE_RUNNING, 48_000, "Int32LSB")
+    );
+    assert_eq!(
+        (
+            at96.id.as_str(),
+            at96.name.as_str(),
+            at96.channels,
+            at96.delay_ms
+        ),
+        ("out-3", "DVS", 2, 0)
+    );
+    assert_eq!(
+        at96.note.as_deref(),
+        Some("the driver runs at 48000 Hz, the network at 96000 Hz")
+    );
+    let asio = at96.asio.as_ref().unwrap();
+    assert_eq!(
+        (asio.driver.as_str(), asio.channels, asio.driver_rate),
+        ("Dante Virtual Soundcard (x64)", [0, 1], 48_000)
+    );
+    assert!(at96.vban.is_none());
+    assert_eq!(running.status(48_000).note, None);
+    // AudioOutputs::status reads the rate the list was applied with.
+    let outputs = AudioOutputs::new();
+    outputs.replace(vec![running]);
+    outputs.set_network_rate(96_000);
+    assert_eq!(outputs.status()[0].note, at96.note);
+}
+
+#[test]
+fn the_status_notes_a_driver_buffer_over_a_third_of_a_slot() {
+    use crate::playback::asio_out::fake::dvs;
+    let mut big = dvs(48_000.0);
+    big.buffer_frames = 2_048;
+    let st = running_asio(opened_asio(big)).status(96_000);
+    assert_eq!(
+        st.note.as_deref(),
+        Some(
+            "the driver runs at 48000 Hz, the network at 96000 Hz; the driver's buffer of \
+             2048 frames (42.7 ms) is over a third of a grid slot (11.1 ms): the drift servo \
+             may re-centre often"
+        )
+    );
+    let st = running_asio(opened_asio(big)).status(48_000);
+    assert!(
+        st.note
+            .unwrap()
+            .starts_with("the driver's buffer of 2048 frames")
+    );
+}
+
+#[test]
+fn a_waiting_asio_output_names_its_reason_and_notes_nothing() {
+    use crate::playback::asio_out::AsioWorker;
+    use crate::playback::asio_out::fake::{FakeDevice, dvs};
+    use crate::playback::asio_state::{DeviceEvents, Reason};
+    let out = Arc::new(AsioOut::for_entry(&dvs_entry()).unwrap());
+    let mut d = FakeDevice::answering(vec![Ok(dvs(48_000.0))]);
+    let mut w = AsioWorker::new(0);
+    w.step(&out, &mut d, 0, None);
+    d.events.push_back(DeviceEvents {
+        reset: true,
+        ..Default::default()
+    });
+    w.step(&out, &mut d, 1, None);
+    let st = running_asio(out).status(96_000);
+    assert_eq!(
+        (st.state, st.reason.as_deref()),
+        (STATE_WAITING, Some("the driver asked for a reset"))
+    );
+    assert_eq!(st.note, None, "a note only while it runs");
+    assert_eq!(st.asio.unwrap().reason_code, Some(Reason::Reset.code()));
+}
+
+#[test]
+fn an_asio_output_not_started_disabled_or_unbuilt_says_so() {
+    let fresh = running_asio(Arc::new(AsioOut::for_entry(&dvs_entry()).unwrap()));
+    let st = fresh.status(96_000);
+    assert_eq!(
+        (st.state, st.reason, st.rate, st.format),
+        (STATE_OPENING, None, 0, "")
+    );
+    assert!(!fresh.start_failed());
+    let out = Arc::new(AsioOut::for_entry(&dvs_entry()).unwrap());
+    let why = "the ASIO worker did not start: spawning it failed: no memory";
+    out.set_start_error(why.to_string());
+    let failed = running_asio(out);
+    assert!(failed.start_failed(), "rebuilt on the next pass");
+    assert_eq!(
+        (
+            failed.status(96_000).state,
+            failed.status(96_000).reason.as_deref()
+        ),
+        (STATE_WAITING, Some(why))
+    );
+    let mut off = dvs_entry();
+    off.enabled = false;
+    let disabled = RunningOutput {
+        entry: off,
+        built_rate: 0,
+        sink: None,
+        error: None,
+    };
+    let st = disabled.status(96_000);
+    assert_eq!((st.state, st.kind), (STATE_DISABLED, "asio"));
+    assert!(st.asio.is_none());
+    let unbuilt = RunningOutput {
+        entry: dvs_entry(),
+        built_rate: 0,
+        sink: None,
+        error: Some("not an ASIO entry".into()),
+    };
+    assert_eq!(
+        unbuilt.status(96_000).reason.as_deref(),
+        Some("not an ASIO entry")
+    );
+}
+
+#[test]
+fn an_asio_output_takes_the_shared_block_and_stops_or_discards() {
+    let out = Arc::new(AsioOut::for_entry(&dvs_entry()).unwrap());
+    let vban = Arc::new(VbanOut::new());
+    let outputs = AudioOutputs::new();
+    outputs.replace(vec![
+        running_vban("out-1", vban.clone()),
+        running_asio(out.clone()),
+    ]);
+    outputs.offer(&ProgramBlock::silence(1));
+    assert_eq!((out.queued(), vban.queued()), (1, 1));
+    outputs.stop_all();
+    outputs.offer(&ProgramBlock::silence(2));
+    assert_eq!(out.queued(), 1, "a stopped output takes nothing more");
+    let sink = OutputSink::Asio(out.clone());
+    sink.discard();
+    assert_eq!(out.queued(), 0, "a discard drops what is queued");
 }
