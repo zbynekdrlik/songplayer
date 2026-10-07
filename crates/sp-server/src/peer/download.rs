@@ -68,6 +68,8 @@ async fn defer(ex: &Exchange, video_id: i64, wait: Duration) {
 }
 
 /// The peer's pair into this node's cache under this node's title, recorded.
+/// The title is chosen once the pair is here: a failed fetch (retried on
+/// every recheck) never calls a provider.
 pub(crate) async fn adopt(
     ex: &Exchange,
     chain: &ProviderChain,
@@ -76,9 +78,9 @@ pub(crate) async fn adopt(
 ) -> Result<(), PeerError> {
     let video_artifact = plan.artifact(ArtifactKind::Video)?;
     let audio_artifact = plan.artifact(ArtifactKind::Audio)?;
-    let title = title_for(ex, chain, row, &plan.peer).await;
     let video_part = ex.fetch(&plan.peer, video_artifact).await?;
     let audio_part = ex.fetch(&plan.peer, audio_artifact).await?;
+    let title = title_for(ex, chain, row, &plan.peer).await;
     let gf = title.gemini_failed;
     let video = ex.cache_dir.join(video_filename(
         &title.song,
