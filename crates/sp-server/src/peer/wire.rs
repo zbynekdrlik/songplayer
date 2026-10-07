@@ -62,11 +62,12 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Only what this node can use: a known kind (and job state), a real
-    /// YouTube id, a sha256 as 64 lowercase hex digits, a node name that holds
-    /// (`peer::config`'s rule; the catalog's own `node` reads as empty when it
-    /// does not). The times are information only: never checked, never a
-    /// decision's input.
+    /// Only what this node can use: an entry needs a known kind (and job
+    /// state), a real YouTube id, a sha256 as 64 lowercase hex digits and, for
+    /// a job, a node name that holds (`peer::config`'s rule). Separately, the
+    /// catalog's own `node` reads as empty when it is not a node name, and a
+    /// time that is not an RFC 3339 time reads as `None` (its entry stays: a
+    /// time is information only, never a decision's input).
     pub fn sanitized(mut self) -> Self {
         if !valid_name(&self.node) {
             self.node.clear();
@@ -82,6 +83,12 @@ impl Catalog {
                 && valid_name(&j.node)
                 && is_valid_video_id(&j.youtube_id)
         });
+        for a in &mut self.artifacts {
+            a.updated_at = checked_time(a.updated_at.take());
+        }
+        for j in &mut self.jobs {
+            j.started_at = checked_time(j.started_at.take());
+        }
         self
     }
 
@@ -113,6 +120,12 @@ impl PeerMetadata {
     pub fn to_bytes(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_default()
     }
+}
+
+/// A peer's time, kept only when it is an RFC 3339 time (a peer controls the
+/// text: it could be anything, of any length).
+fn checked_time(time: Option<String>) -> Option<String> {
+    time.filter(|t| rfc3339_to_ms(t).is_some())
 }
 
 /// 64 lowercase hex digits.
