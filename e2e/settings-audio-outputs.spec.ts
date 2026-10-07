@@ -141,7 +141,7 @@ test("a bad entry is refused in Slovak before anything is sent (#233)", async ({
   await page.locator('[data-testid="audio-outputs-add-vban"]').click();
   await page.locator('[data-testid="audio-outputs-save"]').click();
   await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText(
-    "Výstup 1 (out-1): cieľ je prázdne",
+    "Výstup 1 (out-1): pole „cieľ“ je prázdne",
   );
   expect(patches).toHaveLength(0);
   expect(realConsoleErrors()).toEqual([]);

@@ -277,7 +277,10 @@ fn an_error_names_the_entry_the_id_and_the_field() {
         err.to_string(),
         "entry 2 (id out-1): vban.port must be 1-65535"
     );
-    assert_eq!(err.sk(), "Výstup 2 (out-1): port musí byť 1 až 65535");
+    assert_eq!(
+        err.sk(),
+        "Výstup 2 (out-1): pole „port“ musí byť 1 až 65535"
+    );
     assert_eq!(
         ListError::TooMany { count: 17 }.to_string(),
         "audio_outputs has 17 entries (at most 16)"
@@ -305,63 +308,68 @@ fn every_problem_and_field_has_its_english_and_slovak_text() {
             "id",
             Problem::Empty,
             "id is empty",
-            "identifikátor je prázdne",
+            "pole „identifikátor“ je prázdne",
         ),
         (
             "name",
             Problem::TooLong,
             "name is too long",
-            "názov je príliš dlhé",
+            "pole „názov“ je príliš dlhé",
         ),
         (
             "name",
             Problem::BadCharacters,
             "name has a character that is not allowed",
-            "názov obsahuje nepovolený znak",
+            "pole „názov“ obsahuje nepovolený znak",
         ),
         (
             "id",
             Problem::Duplicate,
             "id is used by an earlier entry",
-            "identifikátor už má iný výstup",
+            "pole „identifikátor“ má rovnakú hodnotu ako iný výstup",
         ),
         (
             "rate",
             Problem::UnsupportedRate,
             "rate must be \"network\" or 44100, 48000, 88200, 96000 or 192000",
-            "frekvencia musí byť podľa siete alebo 44100–192000 Hz",
+            "pole „frekvencia“ musí byť podľa siete alebo 44100–192000 Hz",
         ),
         (
             "delay_ms",
             Problem::TooLarge,
             "delay_ms is over 2000 ms",
-            "oneskorenie je viac ako 2000 ms",
+            "pole „oneskorenie“ má viac ako 2000 ms",
         ),
         (
             "vban",
             Problem::Missing,
             "vban is missing",
-            "nastavenie VBAN chýba",
+            "pole „nastavenie VBAN“ chýba",
         ),
         (
             "vban.host",
             Problem::Empty,
             "vban.host is empty",
-            "cieľ je prázdne",
+            "pole „cieľ“ je prázdne",
         ),
         (
             "vban.port",
             Problem::BadPort,
             "vban.port must be 1-65535",
-            "port musí byť 1 až 65535",
+            "pole „port“ musí byť 1 až 65535",
         ),
         (
             "vban.stream_name",
             Problem::TooLong,
             "vban.stream_name is too long",
-            "názov streamu je príliš dlhé",
+            "pole „názov streamu“ je príliš dlhé",
         ),
-        ("other", Problem::Missing, "other is missing", "pole chýba"),
+        (
+            "other",
+            Problem::Missing,
+            "other is missing",
+            "pole „other“ chýba",
+        ),
     ];
     for (field, problem, en, sk) in cases {
         let e = EntryError {
