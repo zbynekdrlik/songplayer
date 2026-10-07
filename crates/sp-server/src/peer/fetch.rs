@@ -164,27 +164,18 @@ impl PeerClient {
 
 /// Every other part of the same video and kind (an older copy's) is dropped.
 async fn drop_older_parts(dir: &Path, a: &Artifact, keep: &str) {
-    let prefix = format!("{}_{}_", a.youtube_id, a.kind.as_str());
-    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
-        return;
-    };
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with(&prefix) && name.ends_with(".part") && name != keep {
-            let _ = tokio::fs::remove_file(entry.path()).await;
-        }
-    }
+    drop_parts(dir, &a.youtube_id, a.kind, Some(keep)).await;
 }
 
-/// Every part of `youtube_id`'s `kind`.
-async fn drop_parts(dir: &Path, youtube_id: &str, kind: ArtifactKind) {
+/// Every part of `youtube_id`'s `kind` but `keep`.
+async fn drop_parts(dir: &Path, youtube_id: &str, kind: ArtifactKind, keep: Option<&str>) {
     let prefix = format!("{youtube_id}_{}_", kind.as_str());
     let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
         return;
     };
     while let Ok(Some(entry)) = entries.next_entry().await {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with(&prefix) && name.ends_with(".part") {
+        if name.starts_with(&prefix) && name.ends_with(".part") && keep != Some(name.as_str()) {
             let _ = tokio::fs::remove_file(entry.path()).await;
         }
     }
@@ -196,7 +187,7 @@ impl Exchange {
     /// dropped, so none is orphaned in `<cache>/peer/`.
     pub(crate) async fn drop_job_parts(&self, job: Job, youtube_id: &str) {
         for kind in job.needs() {
-            drop_parts(&self.parts_dir(), youtube_id, *kind).await;
+            drop_parts(&self.parts_dir(), youtube_id, *kind, None).await;
         }
     }
 
