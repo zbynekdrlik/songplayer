@@ -13,7 +13,7 @@
 use leptos::prelude::*;
 use serde::Serialize;
 use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
-use sp_core::player_view::{self, NowPlayingView, ProgramBadge};
+use sp_core::player_view::{self, NowPlayingView};
 use sp_core::preview_lag::preview_lag_display;
 use sp_core::seek_model::{PendingSeek, format_position, seek_display_ms, seek_target_ms};
 
@@ -131,8 +131,16 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // = on program, #170), so a cut flips both in one render. It used to read
     // `store.ndi_health` — the 1 Hz poll of the server's 5 s health sample —
     // and lagged the cut by up to ~5 s. A `Memo`, so a position tick never
-    // re-renders it.
-    let badge = Memo::new(move |_| player_view::program_badge(state_known.get(), state()));
+    // re-renders it. #229: while the retry of failed opens waits (on program,
+    // black), "● Na programe — čaká na ďalší pokus", by the label's own rule.
+    let badge = Memo::new(move |_| {
+        player_view::player_program_badge(
+            state_known.get(),
+            state(),
+            transport(),
+            retry_pending.get(),
+        )
+    });
 
     // --- transport (each command reports failure into `player_error`) ---
     let report = move |ctx: &'static str, r: Result<(), String>| match r {
@@ -296,7 +304,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                 </div>
                 <span
                     class="player-program-badge"
-                    class:on=move || badge.get() == ProgramBadge::OnProgram
+                    class:on=move || badge.get().is_on_program()
                     data-testid="player-program-badge"
                 >
                     {move || badge.get().label()}
