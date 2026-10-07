@@ -1,9 +1,9 @@
 //! #229: ask first. Before a heavy job a node reads its peers' catalogs and
 //! fetches what a peer has, waits (≤ 2 h) for what a peer is making, or runs
 //! the job itself — announced in its own catalog for as long as the returned
-//! guard lives (`peer::decide` holds the rules). With no peers (SNV in phase
-//! 1) `ask` answers "here" with no network and no DB write (a hook's own
-//! Local path, `run_here`, may delete a wait that cannot exist there).
+//! guard lives (`peer::decide` holds the rules). With no peers (SNV in
+//! phase 1) `ask` answers "here" with no network and no DB write (a hook's
+//! own Local path, `run_here`, may delete a wait that cannot exist there).
 //!
 //! The waits are durable (V30 `peer_waits`, the FIRST start kept until the
 //! wait ends), the origin of a fetched artifact goes to `peer_fetches`
