@@ -207,7 +207,7 @@ async fn a_failed_fetch_waits_and_a_done_one_records_its_origin() {
         .ex
         .fetch_failed(Job::Download, YT, "snv", &PeerError::NotFound)
         .await;
-    assert_eq!(recheck, Duration::from_secs(120));
+    assert_eq!(recheck, Some(Duration::from_secs(120)));
     assert_eq!(wait_rows(&pp).await, 1);
     assert!(
         waited(pp.pool(), YT, "download", now_ms())
@@ -240,10 +240,47 @@ async fn a_failed_fetch_backs_off_from_the_first_wait() {
         .ex
         .fetch_failed(Job::Stems, YT, "snv", &PeerError::NotFound)
         .await;
-    assert_eq!(recheck, Duration::from_secs(120), "another job's wait");
+    assert_eq!(
+        recheck,
+        Some(Duration::from_secs(120)),
+        "another job's wait"
+    );
     let recheck = pp
         .ex
         .fetch_failed(Job::Download, YT, "snv", &PeerError::NotFound)
         .await;
-    assert_eq!(recheck.as_secs(), 600, "a quarter of the 40 min waited");
+    assert_eq!(
+        recheck.map(|r| r.as_secs()),
+        Some(600),
+        "a quarter of the 40 min waited"
+    );
+}
+
+/// A peer's copy wins over the 2 h bound, but a fetch of it that keeps
+/// failing does not: once the job has waited 2 h, the failure answers "run
+/// it here" (`None`), so it never spins on 1-min rechecks forever.
+#[tokio::test]
+async fn a_fetch_failing_past_the_bound_runs_the_job_here() {
+    let (_snv, pp) = snv_and_pp().await;
+    let bound = i64::try_from(MAX_PEER_WAIT.as_millis()).unwrap();
+    start_wait(pp.pool(), YT, "download", now_ms() - bound + 60_000)
+        .await
+        .unwrap();
+    let recheck = pp
+        .ex
+        .fetch_failed(Job::Download, YT, "snv", &PeerError::NotFound)
+        .await;
+    assert_eq!(
+        recheck,
+        Some(Duration::from_secs(60)),
+        "a minute before the bound: one more try"
+    );
+    start_wait(pp.pool(), YT, "stems", now_ms() - bound - 1_000)
+        .await
+        .unwrap();
+    let recheck = pp
+        .ex
+        .fetch_failed(Job::Stems, YT, "snv", &PeerError::NotFound)
+        .await;
+    assert_eq!(recheck, None, "past the bound: run it here");
 }

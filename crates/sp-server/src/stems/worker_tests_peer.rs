@@ -74,6 +74,42 @@ async fn a_node_with_no_venv_still_takes_a_peers_stems() {
     );
 }
 
+/// A node with no venv separates nothing, so a row nobody else has is put
+/// back (no attempt): the rows behind it reach their peer step too.
+#[tokio::test]
+async fn a_node_with_no_venv_reaches_the_rows_behind_the_head() {
+    let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
+    crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
+    let snv = TestNode::start("snv", Some(SNV_KEY)).await;
+    let snv_id = snv.add_video(YT).await;
+    snv.give_song(snv_id, YT, "Way Maker", "Sinach").await;
+    snv.give_stems(snv_id).await;
+    snv.hash_now().await;
+    let pp = TestNode::start("pp", None).await;
+    pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    let head = pp.add_video("ccccccccccc").await;
+    pp.give_song(head, "ccccccccccc", "Iny", "Zbor").await;
+    let id = pp.add_video(YT).await;
+    pp.give_song(id, YT, "Way Maker", "Sinach").await;
+    let w = worker(&pp, false);
+    w.process_next().await;
+    w.process_next().await;
+    assert_eq!(
+        status(&pp, id).await.as_deref(),
+        Some("done"),
+        "the peer's stems of the second row"
+    );
+    let (head_status, attempts, next): (Option<String>, i64, Option<String>) = sqlx::query_as(
+        "SELECT stem_status, stem_attempts, stem_next_attempt_at FROM videos WHERE id = ?",
+    )
+    .bind(head)
+    .fetch_one(pp.pool())
+    .await
+    .unwrap();
+    assert_eq!((head_status, attempts), (None, 0), "no attempt counted");
+    assert!(next.is_some(), "the head is re-picked later");
+}
+
 #[tokio::test]
 async fn with_no_peers_the_stem_worker_goes_on_as_before() {
     let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;

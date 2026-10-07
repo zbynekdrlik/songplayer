@@ -226,9 +226,62 @@ async fn a_dubbed_video_here_is_never_answered_by_a_peer() {
     assert_eq!(json_at(&pp), Some(b"dub-subtitles".to_vec()));
 }
 
+/// A job that runs here ends any earlier wait of it, so a later ask of the
+/// same video and job never inherits an old start (and with it the 2 h bound
+/// already spent).
+#[tokio::test]
+async fn an_operators_ask_here_ends_an_earlier_wait() {
+    let (_snv, pp, id, _) = snv_and_pp().await;
+    crate::db::models_peer::start_wait(pp.pool(), YT, "lyrics", 1_000)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1 WHERE id = ?")
+        .bind(id)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &lyrics_row(&pp, id).await).await
+    else {
+        panic!("a reprocess asked here runs here")
+    };
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0);
+}
+
+/// A peer's source of any length is reported cut to the bounded error size.
+#[tokio::test]
+async fn a_source_mismatch_is_reported_bounded() {
+    let (snv, pp, id, _) = snv_and_pp().await;
+    let long = "x".repeat(2_000);
+    sqlx::query("UPDATE videos SET lyrics_source = ?")
+        .bind(&long)
+        .execute(snv.pool())
+        .await
+        .unwrap();
+    let Ask::Fetch(plan) = pp.ex.ask(Job::Lyrics, YT).await else {
+        panic!("expected Fetch")
+    };
+    let err = adopt(&pp.ex, &lyrics_row(&pp, id).await, &plan)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("is not the row's"), "{err}");
+    assert!(
+        err.chars().count() <= 320,
+        "{} characters",
+        err.chars().count()
+    );
+}
+
 #[tokio::test]
 async fn the_same_track_already_served_here_is_nothing_newer() {
     let (_snv, pp, id, _) = snv_and_pp().await;
+    crate::db::models_peer::start_wait(pp.pool(), YT, "lyrics", 1_000)
+        .await
+        .unwrap();
     pp.give_lyrics(id, YT, "mtl+g35t").await;
     std::fs::write(
         pp.cache().join(format!("{YT}_lyrics.json")),
@@ -250,6 +303,11 @@ async fn the_same_track_already_served_here_is_nothing_newer() {
         1,
         "the job runs here, announced"
     );
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0, "running here ends the earlier wait");
 }
 
 #[tokio::test]

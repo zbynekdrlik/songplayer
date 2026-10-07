@@ -149,7 +149,7 @@ impl Exchange {
         youtube_id: &str,
         peer: &str,
         error: &PeerError,
-    ) -> Duration {
+    ) -> Option<Duration> {
         let now = now_ms();
         if let Err(e) = models_peer::start_wait(&self.pool, youtube_id, job.as_str(), now).await {
             warn!(youtube_id, %e, "exchange: recording the wait failed");
@@ -168,7 +168,7 @@ impl Exchange {
             recheck_s = recheck.as_secs(),
             "exchange: fetching from a peer failed - asking again later"
         );
-        recheck
+        Some(recheck)
     }
 
     /// `job` is done with what `peer` had: the wait ends and each artifact's

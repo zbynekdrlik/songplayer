@@ -65,7 +65,8 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
             Err(e) => {
                 let recheck = ex
                     .fetch_failed(Job::Lyrics, &row.youtube_id, &plan.peer.name, &e)
-                    .await;
+                    .await
+                    .unwrap_or_default();
                 defer(ex, row.id, recheck).await;
                 PeerStep::Deferred
             }

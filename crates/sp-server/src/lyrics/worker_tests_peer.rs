@@ -35,9 +35,27 @@ async fn a_peers_lyrics_are_taken_by_the_lyrics_worker() {
     pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
     let id = pp.add_video(YT).await;
     pp.give_song(id, YT, "Way Maker", "Sinach").await;
-    worker(&pp).process_next().await;
+    let (events, mut rx) = broadcast::channel(16);
+    LyricsWorker::new_for_test(pp.pool().clone(), pp.cache().to_path_buf(), events)
+        .with_peer(pp.ex.clone())
+        .process_next()
+        .await;
     assert_eq!(lyrics_state(&pp, id).await.0, 1);
     assert!(pp.cache().join(format!("{YT}_lyrics.json")).exists());
+    let mut completed = None;
+    while let Ok(msg) = rx.try_recv() {
+        if let ServerMsg::LyricsCompleted {
+            video_id, source, ..
+        } = msg
+        {
+            completed = Some((video_id, source));
+        }
+    }
+    assert_eq!(
+        completed,
+        Some((id, "mtl+g35t".to_string())),
+        "the dashboard hears of a peer's lyrics as of its own"
+    );
 }
 
 #[tokio::test]

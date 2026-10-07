@@ -287,6 +287,39 @@ async fn a_failed_fetch_asks_no_provider() {
     );
 }
 
+/// A peer's pair that keeps failing for 2 h is downloaded here: the spec's
+/// "bounded at ~2 h, then process locally" holds for a failing fetch too.
+#[tokio::test]
+async fn a_pair_failing_past_the_bound_is_downloaded_here() {
+    let (snv, pp, row) = snv_and_pp().await;
+    let wrong = crate::peer::hash::sha256_hex(b"not the audio");
+    sqlx::query("UPDATE peer_hashes SET sha256 = ? WHERE path LIKE '%_audio.flac'")
+        .bind(&wrong)
+        .execute(snv.pool())
+        .await
+        .unwrap();
+    let past = crate::peer::wire::now_ms()
+        - i64::try_from(crate::peer::decide::MAX_PEER_WAIT.as_millis()).unwrap()
+        - 1_000;
+    crate::db::models_peer::start_wait(pp.pool(), YT, "download", past)
+        .await
+        .unwrap();
+    let (chain, _) = counting_chain();
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &chain, &row).await else {
+        panic!("expected the download to run here")
+    };
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0, "the wait ends: the job runs here");
+    assert_eq!(
+        row_now(&pp, row.id).await.next_attempt_at,
+        None,
+        "not deferred"
+    );
+}
+
 /// The spec's "sha256 mismatch → discard and retry".
 #[tokio::test]
 async fn a_sha_mismatch_defers_then_the_retry_takes_the_pair() {

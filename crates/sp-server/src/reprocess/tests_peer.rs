@@ -10,13 +10,18 @@ const YT: &str = "aaaaaaaaaaa";
 
 /// PP holds the song under a parser title (`_gf` files, in the repair queue).
 async fn pp_with_a_parser_title(pp: &TestNode) -> i64 {
-    let id = pp.add_video(YT).await;
+    parser_row(pp, YT).await
+}
+
+/// A row of `youtube_id` at PP under a parser title (`_gf` files).
+async fn parser_row(pp: &TestNode, youtube_id: &str) -> i64 {
+    let id = pp.add_video(youtube_id).await;
     let video = pp
         .cache()
-        .join(video_filename("Guess", "Unknown", YT, true));
+        .join(video_filename("Guess", "Unknown", youtube_id, true));
     let audio = pp
         .cache()
-        .join(audio_filename("Guess", "Unknown", YT, true));
+        .join(audio_filename("Guess", "Unknown", youtube_id, true));
     std::fs::write(&video, bytes(2_000, 1)).unwrap();
     std::fs::write(&audio, bytes(3_000, 2)).unwrap();
     crate::db::models::mark_video_processed_pair(
@@ -89,9 +94,10 @@ async fn a_peers_provider_title_repairs_the_row_with_no_provider_call() {
 }
 
 /// A peer's title costs no provider call, so the providers' rate-limit
-/// cooldown and this video's backoff never hold it back.
+/// cooldown and this video's backoff never hold it back: a batch run during
+/// the cooldown still takes it.
 #[tokio::test]
-async fn a_peers_title_is_taken_during_the_providers_cooldown() {
+async fn a_peers_title_is_taken_while_the_providers_cool_down() {
     let (_snv, pp) = snv_and_pp().await;
     let id = pp_with_a_parser_title(&pp).await;
     let (chain, calls) = counting_chain();
@@ -102,6 +108,70 @@ async fn a_peers_title_is_taken_during_the_providers_cooldown() {
     worker
         .per_video_backoff
         .insert(id, (Instant::now() + Duration::from_secs(600), 2));
+    assert_eq!(worker.process_all().await.unwrap(), 1);
+    assert_eq!(title(&pp, id).await.0, "Way Maker");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(
+        !worker.per_video_backoff.contains_key(&id),
+        "a repaired video leaves the backoff"
+    );
+}
+
+/// A provider that is always rate-limited.
+struct RateLimited;
+
+#[async_trait::async_trait]
+impl crate::metadata::MetadataProvider for RateLimited {
+    async fn extract(
+        &self,
+        _video_id: &str,
+        _title: &str,
+    ) -> Result<sp_core::metadata::VideoMetadata, crate::metadata::MetadataError> {
+        Err(crate::metadata::MetadataError::RateLimited("429".into()))
+    }
+
+    fn name(&self) -> &str {
+        "rate-limited"
+    }
+}
+
+/// A rate limit on one row stops the provider calls for the cooldown, not
+/// the peers' titles of the rows after it in the same batch.
+#[tokio::test]
+async fn a_rate_limit_in_the_batch_still_lets_a_peers_title_through() {
+    let (_snv, pp) = snv_and_pp().await;
+    let unknown_there = parser_row(&pp, "bbbbbbbbbbb").await;
+    let id = pp_with_a_parser_title(&pp).await;
+    let chain = crate::metadata::ProviderChain::new(vec![Box::new(RateLimited)]);
+    let mut worker =
+        ReprocessWorker::new(pp.pool().clone(), Arc::new(chain), pp.cache().to_path_buf())
+            .with_peer(pp.ex.clone());
+    assert_eq!(worker.process_all().await.unwrap(), 1);
+    assert!(worker.in_global_cooldown(), "the providers cool down");
+    assert_eq!(title(&pp, id).await.0, "Way Maker", "the peer's title");
+    assert_eq!(
+        title(&pp, unknown_there).await,
+        ("Guess".into(), "Unknown".into(), Some("regex".into()), 1),
+        "no title anywhere for the first row"
+    );
+}
+
+/// A peer's title is recorded as fetched only once it is written: a row
+/// that left the repair queue meanwhile (an operator's correction) keeps no
+/// trace of it.
+#[tokio::test]
+async fn a_peers_title_for_a_row_that_left_the_queue_leaves_no_record() {
+    let (_snv, pp) = snv_and_pp().await;
+    let id = pp_with_a_parser_title(&pp).await;
+    sqlx::query("UPDATE videos SET song = 'Moje', metadata_source = 'manual' WHERE id = ?")
+        .bind(id)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    let (chain, _) = counting_chain();
+    let mut worker =
+        ReprocessWorker::new(pp.pool().clone(), Arc::new(chain), pp.cache().to_path_buf())
+            .with_peer(pp.ex.clone());
     let row = ReprocessRow {
         id,
         youtube_id: YT.into(),
@@ -109,13 +179,14 @@ async fn a_peers_title_is_taken_during_the_providers_cooldown() {
     };
     assert!(matches!(
         worker.reprocess_one(&row).await.unwrap(),
-        ReprocessOutcome::Success
+        ReprocessOutcome::LeftQueue
     ));
-    assert_eq!(title(&pp, id).await.0, "Way Maker");
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert!(
-        !worker.per_video_backoff.contains_key(&id),
-        "a repaired video leaves the backoff"
+    assert_eq!(title(&pp, id).await.0, "Moje");
+    assert_eq!(
+        crate::db::models_peer::fetch_record(pp.pool(), YT, "metadata")
+            .await
+            .unwrap(),
+        None
     );
 }
 

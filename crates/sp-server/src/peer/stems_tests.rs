@@ -81,13 +81,31 @@ async fn a_peers_stems_land_under_this_nodes_audio_and_are_done() {
     );
 }
 
-/// Review Focus 4: a rename here while the transfer ran.
+/// Review Focus 4: a rename here while the transfer ran. The test holds the
+/// peer's transfer slot, so `adopt` waits INSIDE its first fetch; the song is
+/// renamed then, and only after that is the slot released.
 #[tokio::test]
 async fn stems_fetched_during_a_rename_land_under_the_new_name() {
     let (_snv, pp, job, audio) = snv_and_pp().await;
     let Ask::Fetch(plan) = pp.ex.ask(Job::Stems, YT).await else {
         panic!("expected Fetch")
     };
+    let slot = pp.ex.client.slot("snv");
+    let held = slot.lock().await;
+    let ex = pp.ex.clone();
+    let (spawned_job, spawned_plan) = (job.clone(), plan.clone());
+    let adopting = tokio::spawn(async move { adopt(&ex, &spawned_job, &spawned_plan).await });
+    // The fetch took its own handle of the slot: it waits for the lock now.
+    for _ in 0..2_000 {
+        if std::sync::Arc::strong_count(&slot) >= 3 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(
+        std::sync::Arc::strong_count(&slot) >= 3,
+        "adopt reached the transfer"
+    );
     let renamed = pp
         .cache()
         .join("Opravena_Zbor_aaaaaaaaaaa_normalized_audio.flac");
@@ -98,7 +116,8 @@ async fn stems_fetched_during_a_rename_land_under_the_new_name() {
         .execute(pp.pool())
         .await
         .unwrap();
-    adopt(&pp.ex, &job, &plan).await.unwrap();
+    drop(held);
+    adopting.await.unwrap().unwrap();
     let (new_vocals, new_instrumental) = crate::stems::stem_paths(&renamed);
     let (old_vocals, old_instrumental) = crate::stems::stem_paths(Path::new(&job.audio_file_path));
     assert!(new_vocals.exists());
@@ -147,6 +166,15 @@ async fn a_song_with_no_audio_here_is_deferred_not_failed() {
     let (status, attempts, next, _, _) = stem_state(&pp, job.video_id).await;
     assert_eq!((status, attempts), (None, 0));
     assert!(next.is_some());
+    assert!(
+        !pp.ex.parts_dir().exists(),
+        "nothing transferred for a song with no audio here"
+    );
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0, "no failed fetch: no wait");
 }
 
 #[tokio::test]

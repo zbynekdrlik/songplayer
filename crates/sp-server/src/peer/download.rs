@@ -57,7 +57,8 @@ pub(crate) async fn first(
             Err(e) => {
                 let recheck = ex
                     .fetch_failed(Job::Download, &row.youtube_id, &plan.peer.name, &e)
-                    .await;
+                    .await
+                    .unwrap_or_default();
                 defer(ex, row.id, recheck).await;
                 PeerStep::Deferred
             }
