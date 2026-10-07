@@ -3,6 +3,7 @@ import {
   OBS_MANUAL,
   catalogScenes,
   cgRestoreTarget,
+  cgRestoreVia,
   manualCutLanded,
   pickManualScene,
   pickPlaylistScene,
@@ -71,6 +72,11 @@ test.describe("PP's playlist scene (#229)", () => {
       scene: "sp-slow",
       playlistId: 9,
     });
+  });
+
+  test("only sp-fast and sp-warmup left: the first of them, not nothing (pickBaselineScene)", () => {
+    const rows = [row(1, "SP-fast"), row(4, "SP-warmup")];
+    expect(pickPlaylistScene(rows, [], VIDEOS)).toEqual({ scene: "sp-fast", playlistId: 1 });
   });
 
   test("nothing to play is null", () => {
@@ -160,38 +166,72 @@ test.describe("PP's manual cut (#229)", () => {
 });
 
 test.describe("SP-program's restore after the PP gate (#229)", () => {
-  const press = { scene: "sp-slow", sentAtMs: 1_000 };
+  const press = { scene: "sp-slow", sentAtMs: 1_000, source: 4 };
   const ours = { scene: "sp-slow", action: "playlist", at_ms: 1_200 };
 
   test("the gate's own cut still on program goes back to the start source", () => {
-    expect(programRestoreTarget(-1, press, { source: 4, last_remote_cut: ours })).toBe(-1);
+    expect(programRestoreTarget(-1, [press], { source: 4, last_remote_cut: ours })).toBe(-1);
   });
 
   test("a cut sent at the same millisecond as the press is the gate's", () => {
     const sameMs = { ...ours, at_ms: 1_000 };
-    expect(programRestoreTarget(-1, press, { source: 4, last_remote_cut: sameMs })).toBe(-1);
+    expect(programRestoreTarget(-1, [press], { source: 4, last_remote_cut: sameMs })).toBe(-1);
   });
 
   test("a cut from before the press is not the gate's", () => {
     const earlier = { ...ours, at_ms: 999 };
-    expect(programRestoreTarget(-1, press, { source: 4, last_remote_cut: earlier })).toBeNull();
+    expect(programRestoreTarget(-1, [press], { source: 4, last_remote_cut: earlier })).toBeNull();
   });
 
   test("an operator's press since the gate's is kept", () => {
     const operator = { scene: "Svedectvo", action: "input", at_ms: 1_500 };
-    expect(programRestoreTarget(4, press, { source: -1, last_remote_cut: operator })).toBeNull();
+    expect(programRestoreTarget(4, [press], { source: -1, last_remote_cut: operator })).toBeNull();
   });
 
-  test("a kept (refused) press restores nothing", () => {
+  test("a program on another source than the gate's press left is not the gate's", () => {
+    expect(programRestoreTarget(-1, [press], { source: 7, last_remote_cut: ours })).toBeNull();
+  });
+
+  test("a lone refused press changed nothing: nothing to put back", () => {
     const kept = { ...ours, action: "keep" };
-    expect(programRestoreTarget(-1, press, { source: 4, last_remote_cut: kept })).toBeNull();
+    expect(programRestoreTarget(-1, [press], { source: -1, last_remote_cut: kept })).toBeNull();
+  });
+
+  test("a refused manual press after the gate's playlist cut still puts the start back", () => {
+    // Test 3 cut to playlist 4, test 4's manual press was kept (the NDI
+    // input inactive, or cg OBS refused): the playlist is the gate's.
+    const manual = { scene: "Blank", sentAtMs: 2_000, source: -1 };
+    const keptManual = { scene: "Blank", action: "keep", at_ms: 2_100 };
+    expect(
+      programRestoreTarget(-1, [press, manual], { source: 4, last_remote_cut: keptManual }),
+    ).toBe(-1);
+  });
+
+  test("an operator's cut between the gate's two presses is kept", () => {
+    const manual = { scene: "Blank", sentAtMs: 2_000, source: -1 };
+    const keptManual = { scene: "Blank", action: "keep", at_ms: 2_100 };
+    expect(
+      programRestoreTarget(-1, [press, manual], { source: 9, last_remote_cut: keptManual }),
+    ).toBeNull();
   });
 
   test("nothing to put back: no press, no start, or already on the start source", () => {
-    expect(programRestoreTarget(-1, null, { source: 4, last_remote_cut: ours })).toBeNull();
-    expect(programRestoreTarget(null, press, { source: 4, last_remote_cut: ours })).toBeNull();
-    expect(programRestoreTarget(4, press, { source: 4, last_remote_cut: ours })).toBeNull();
-    expect(programRestoreTarget(-1, press, { source: 4, last_remote_cut: null })).toBeNull();
+    expect(programRestoreTarget(-1, [], { source: 4, last_remote_cut: ours })).toBeNull();
+    expect(programRestoreTarget(null, [press], { source: 4, last_remote_cut: ours })).toBeNull();
+    expect(programRestoreTarget(4, [press], { source: 4, last_remote_cut: ours })).toBeNull();
+    expect(programRestoreTarget(-1, [press], { source: 4, last_remote_cut: null })).toBeNull();
+  });
+});
+
+test.describe("how cg OBS goes back after the PP gate (#229)", () => {
+  test("SP-program left on OBS manual by the gate: through the facade, so SongPlayer names it", () => {
+    expect(cgRestoreVia({ programBack: null, gateIsLatest: true, source: -1 })).toBe("facade");
+  });
+
+  test("SP-program cut back to a playlist, or someone switched since: on cg OBS directly", () => {
+    expect(cgRestoreVia({ programBack: 4, gateIsLatest: true, source: -1 })).toBe("cg");
+    expect(cgRestoreVia({ programBack: null, gateIsLatest: false, source: -1 })).toBe("cg");
+    expect(cgRestoreVia({ programBack: null, gateIsLatest: true, source: 4 })).toBe("cg");
   });
 });
 
