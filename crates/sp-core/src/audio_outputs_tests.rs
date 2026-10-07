@@ -332,7 +332,7 @@ fn every_problem_and_field_has_its_english_and_slovak_text() {
             "rate",
             Problem::UnsupportedRate,
             "rate must be \"network\" or 44100, 48000, 88200, 96000 or 192000",
-            "pole „frekvencia“ musí byť podľa siete alebo 44100–192000 Hz",
+            "pole „frekvencia“ musí byť podľa siete alebo 44100, 48000, 88200, 96000 či 192000 Hz",
         ),
         (
             "delay_ms",

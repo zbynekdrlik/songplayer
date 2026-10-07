@@ -118,7 +118,7 @@ pub async fn apply(
     outputs.replace(next);
     for &i in &plan.stop {
         if let Some(sink) = &running[i].sink {
-            sink.stop();
+            sink.discard();
         }
         log_stopped(&running[i].entry);
     }

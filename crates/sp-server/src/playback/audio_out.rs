@@ -40,10 +40,18 @@ impl OutputSink {
         }
     }
 
-    /// Stop the output's thread once its queue is drained.
+    /// Stop the output's thread once its queue is drained (shutdown).
     pub fn stop(&self) {
         match self {
             Self::Vban(out) => out.stop(),
+        }
+    }
+
+    /// Stop the output's thread now, its queue dropped (a runtime replace
+    /// or removal, `audio_out_task::apply`).
+    pub fn discard(&self) {
+        match self {
+            Self::Vban(out) => out.discard(),
         }
     }
 }

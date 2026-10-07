@@ -214,12 +214,9 @@ async fn apply_keeps_an_unchanged_output_when_another_is_added() {
     assert_eq!(vban(&third[0]).delay_100ns(), 100_000);
     assert_eq!(
         sink_a.take_timeout(Duration::ZERO),
-        VbanTake::Block(ProgramBlock::silence(1))
-    );
-    assert_eq!(
-        sink_a.take_timeout(Duration::ZERO),
         VbanTake::Stopped,
-        "the old one stopped"
+        "the old one stopped, its queued block dropped: a changed output never \
+         sends its old schedule next to its successor"
     );
     let c_out = vban(&second[2]);
     assert_eq!(

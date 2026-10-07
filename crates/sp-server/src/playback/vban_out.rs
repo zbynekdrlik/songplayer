@@ -468,6 +468,14 @@ impl VbanOut {
         self.ready.notify_all();
     }
 
+    /// #233: stop the thread now (a runtime replace or removal): the queued
+    /// blocks are dropped, so a changed output (a shorter delay, another
+    /// format) never sends its old schedule next to its rebuilt successor
+    /// (same host, same stream name). A process shutdown drains ([`Self::stop`]).
+    pub fn discard(&self) {
+        self.stop();
+    }
+
     /// Replace the config (the settings task).
     pub fn set_config(&self, config: VbanConfig) {
         *lock(&self.config) = Arc::new(config);
