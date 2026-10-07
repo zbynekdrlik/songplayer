@@ -157,3 +157,10 @@ async fn only_a_serving_node_that_is_not_paused_hashes() {
     set(on.pool(), "peer_transfers_paused", "true").await;
     assert!(!should_hash(&on.ex).await, "paused");
 }
+
+/// 40 MiB/s: the wall reads its video from the same disk. (The constant is a
+/// literal, so the mutation gate has no arithmetic in it to vary.)
+#[test]
+fn the_hasher_reads_at_40_mib_per_second() {
+    assert_eq!(HASH_BYTES_PER_S, 40 << 20);
+}
