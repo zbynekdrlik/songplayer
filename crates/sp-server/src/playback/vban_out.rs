@@ -867,6 +867,7 @@ pub fn run_vban_loop(
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 pub fn spawn_vban_thread(out: Arc<VbanOut>, id: String) {
+    let watched = out.clone();
     let spawned = std::thread::Builder::new()
         .name("vban-output".into())
         .spawn(move || {
@@ -876,6 +877,9 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>, id: String) {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::error!(%e, "vban output: binding the UDP socket failed — no VBAN");
+                    out.set_start_error(format!(
+                        "the VBAN thread did not start: binding the UDP socket failed: {e}"
+                    ));
                     return;
                 }
             };
@@ -895,6 +899,9 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>, id: String) {
         });
     if let Err(e) = spawned {
         tracing::error!(%e, "vban output: spawning the thread failed");
+        watched.set_start_error(format!(
+            "the VBAN thread did not start: spawning it failed: {e}"
+        ));
     }
 }
 

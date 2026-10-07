@@ -132,6 +132,12 @@ impl RunningOutput {
                     .sink
                     .as_ref()
                     .map(|OutputSink::Vban(out)| (out.status(), out.is_running()));
+                // A build error, else why the thread could not start (#233).
+                let not_started = self
+                    .sink
+                    .as_ref()
+                    .and_then(|OutputSink::Vban(out)| out.start_error());
+                let build_error = self.error.clone().or(not_started);
                 let addressed = st
                     .as_ref()
                     .is_some_and(|(s, _)| s.targets.iter().any(|t| t.addr.is_some()));
@@ -141,7 +147,7 @@ impl RunningOutput {
                     .and_then(|t| t.error.clone());
                 let (state, reason) = vban_state(
                     e.enabled,
-                    self.error.as_deref(),
+                    build_error.as_deref(),
                     st.as_ref().is_some_and(|(_, running)| *running),
                     addressed,
                     resolve_error.as_deref(),
