@@ -22,8 +22,16 @@
 //! - a skip, which tries the next song at once (`skip_backoff`);
 //! - a song that starts (`Started`), which also resets the count.
 //!
+//! The run also keeps WHICH songs failed: a youtube selection leaves them
+//! out, with the song just sent (`FailureRun::avoid`,
+//! `failure_backoff::pick_pool`), so a song that never opened (and so is
+//! never recorded as played) cannot be picked for good at the end of a
+//! rotation.
+//!
 //! The health row shows the run (`open_failures`, `ndi_health.rs`), so a
-//! black program has a visible reason on the dashboard.
+//! black program has a visible reason on the dashboard. The engine writes
+//! it as the run changes (`publish_open_failures`: a pause, a start, any
+//! state event, a pick), not only at the pipeline's 5 s heartbeat.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -107,6 +115,7 @@ impl PlaybackEngine {
                 return;
             };
             let delay = pp.failures.run.fail(error);
+            pp.failures.run.note_failed(pp.current_video_id);
             let (next, action) = pp.state.clone().transition(event.clone(), pp.mode);
             delay
                 .filter(|_| action == Some(PlayAction::SelectAndPlay))
@@ -145,6 +154,18 @@ impl PlaybackEngine {
             "videos cannot be opened — the next attempt waits"
         );
         self.broadcast_state(playlist_id);
+        self.publish_open_failures(playlist_id);
+    }
+
+    /// The health row's `open_failures` now (`NdiHealthRegistry::set_open_failures`),
+    /// as the run of failed opens changes; each heartbeat copies it too.
+    pub(super) fn publish_open_failures(&self, playlist_id: i64) {
+        let open_failures = self
+            .pipelines
+            .get(&playlist_id)
+            .and_then(|pp| pp.failures.view());
+        self.ndi_health_registry
+            .set_open_failures(playlist_id, open_failures);
     }
 
     /// `PipelineEvent::RetryDue(id)`: the pause is over and the next song is
@@ -206,7 +227,9 @@ impl PlaybackEngine {
                 "a song started — the run of failed opens is over"
             );
         }
-        let Some(video_id) = pp.record_on_start.take() else {
+        let record = pp.record_on_start.take();
+        self.publish_open_failures(playlist_id);
+        let Some(video_id) = record else {
             return;
         };
         if let Err(e) = crate::db::models::record_play(&self.pool, playlist_id, video_id).await {

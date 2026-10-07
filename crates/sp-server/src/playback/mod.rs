@@ -11,7 +11,7 @@ pub mod clock_health;
 pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 pub mod decode_thread; // #223 S0: the one way a decode thread starts (producer + decode bench)
 mod engine_play;
-mod failure_backoff; // #229: the pause after failed opens in a row (pure)
+pub(crate) mod failure_backoff; // #229: the pause after failed opens (pure; the selector's pick too)
 mod failure_retry; // #229: the engine's retry of a playlist whose opens fail
 pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
@@ -612,6 +612,7 @@ impl PlaybackEngine {
                     // off-program Previous shows WaitingForScene (#170), with
                     // the raw transport (#201).
                     self.broadcast_state(playlist_id);
+                    self.publish_open_failures(playlist_id); // #229: the Play ended a retry
                 }
                 self.resync_after_play(playlist_id).await;
             }
@@ -687,6 +688,7 @@ impl PlaybackEngine {
         {
             self.broadcast_state(playlist_id);
         }
+        self.publish_open_failures(playlist_id); // #229: the run as it is now
     }
 
     /// Cache the video's song/artist/duration and broadcast `NowPlaying`
@@ -757,8 +759,21 @@ impl PlaybackEngine {
                     .pipelines
                     .get(&playlist_id)
                     .and_then(|pp| pp.current_video_id);
+                // #229: leave out the song just sent and the run's failed ones.
+                let avoid = self
+                    .pipelines
+                    .get(&playlist_id)
+                    .map(|pp| pp.failures.run.avoid(current))
+                    .unwrap_or_default();
 
-                match VideoSelector::select_next(&self.pool, playlist_id, mode, current).await {
+                let pick = VideoSelector::select_next_avoiding(
+                    &self.pool,
+                    playlist_id,
+                    mode,
+                    current,
+                    &avoid,
+                );
+                match pick.await {
                     Ok(Some(video_id)) => {
                         debug!(playlist_id, video_id, "selected video");
                         match crate::db::models::get_song_paths(&self.pool, video_id).await {

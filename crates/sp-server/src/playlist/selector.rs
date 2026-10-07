@@ -5,6 +5,7 @@ use sp_core::playback::PlaybackMode;
 use sqlx::SqlitePool;
 
 use crate::db::models;
+use crate::playback::failure_backoff::{PickPool, pick_pool};
 
 pub struct VideoSelector;
 
@@ -18,6 +19,21 @@ impl VideoSelector {
         playlist_id: i64,
         mode: PlaybackMode,
         current_video_id: Option<i64>,
+    ) -> Result<Option<i64>, sqlx::Error> {
+        Self::select_next_avoiding(pool, playlist_id, mode, current_video_id, &[]).await
+    }
+
+    /// [`Self::select_next`], leaving out the songs in `avoid` when another
+    /// one can be picked (#229: the song just sent and the songs that failed
+    /// to open since the last start, which are not recorded as played; the
+    /// pure rule is `failure_backoff::pick_pool`). A custom playlist (by
+    /// position) and Loop mode pick as before.
+    pub async fn select_next_avoiding(
+        pool: &SqlitePool,
+        playlist_id: i64,
+        mode: PlaybackMode,
+        current_video_id: Option<i64>,
+        avoid: &[i64],
     ) -> Result<Option<i64>, sqlx::Error> {
         // Read the playlist kind to branch cleanly. Missing row → None.
         let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM playlists WHERE id = ?")
@@ -33,10 +49,10 @@ impl VideoSelector {
                     if let Some(id) = current_video_id {
                         return Ok(Some(id));
                     }
-                    Self::select_random_unplayed(pool, playlist_id).await
+                    Self::select_random_unplayed(pool, playlist_id, avoid).await
                 }
                 PlaybackMode::Continuous | PlaybackMode::Single => {
-                    Self::select_random_unplayed(pool, playlist_id).await
+                    Self::select_random_unplayed(pool, playlist_id, avoid).await
                 }
             },
         }
@@ -112,27 +128,29 @@ impl VideoSelector {
         }
     }
 
-    /// Pick a random normalized video that hasn't been played yet.
-    /// If all have been played, clear history and start fresh.
+    /// Pick a random normalized video that hasn't been played yet, leaving
+    /// out `avoid` while another one can be picked. With none left, clear
+    /// history and start fresh (`failure_backoff::pick_pool`).
     async fn select_random_unplayed(
         pool: &SqlitePool,
         playlist_id: i64,
+        avoid: &[i64],
     ) -> Result<Option<i64>, sqlx::Error> {
-        let mut unplayed = models::get_unplayed_normalized_video_ids(pool, playlist_id).await?;
-
-        if unplayed.is_empty() {
-            // Check if there are any normalized videos at all.
-            let all = models::get_normalized_video_ids(pool, playlist_id).await?;
-            if all.is_empty() {
-                return Ok(None);
+        let unplayed = models::get_unplayed_normalized_video_ids(pool, playlist_id).await?;
+        let all = models::get_normalized_video_ids(pool, playlist_id).await?;
+        let candidates = match pick_pool(&unplayed, &all, avoid) {
+            PickPool::Unplayed(songs) => songs,
+            PickPool::Restart(songs) if songs.is_empty() => return Ok(None),
+            PickPool::Restart(songs) => {
+                // All played (or only songs to avoid left) — clear history
+                // and start fresh.
+                models::clear_play_history(pool, playlist_id).await?;
+                songs
             }
-            // All played — clear history and start fresh.
-            models::clear_play_history(pool, playlist_id).await?;
-            unplayed = all;
-        }
+        };
 
         let mut rng = rand::thread_rng();
-        let chosen = unplayed.choose(&mut rng).copied();
+        let chosen = candidates.choose(&mut rng).copied();
         Ok(chosen)
     }
 }

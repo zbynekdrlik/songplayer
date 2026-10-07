@@ -95,7 +95,61 @@ pub struct OpenFailures {
     pub retry_in_ms: Option<u64>,
 }
 
+impl OpenFailures {
+    /// The row as read at `now_ms` (UTC ms, the server's clock): its
+    /// `retry_in_ms` is the wait left until `retry_at_ms`, 0 once due.
+    pub fn read_at(self, now_ms: i64) -> Self {
+        let retry_in_ms = self
+            .retry_at_ms
+            .map(|at_ms| u64::try_from(at_ms.saturating_sub(now_ms)).unwrap_or(0));
+        Self {
+            retry_in_ms,
+            ..self
+        }
+    }
+}
+
 // #184 round G: the `KaraokeMode` enum was deleted. A karaoke MODE is no longer a
 // live setting — the ONE mixer is three independent faders (`sp_core::mixer_model::
 // MixFaders`) whose preset ids (`full_mix` / `karaoke_low` / `vocals_only` /
 // `instrumental_only`) are plain snapshot strings in `mixer_model`, not an enum.
+
+#[cfg(test)]
+mod tests {
+    use super::OpenFailures;
+
+    fn failures(retry_at_ms: Option<i64>) -> OpenFailures {
+        OpenFailures {
+            count: 3,
+            last_error: "x".into(),
+            retry_at_ms,
+            retry_in_ms: None,
+        }
+    }
+
+    /// #229: the wait left is read on the server's own clock, 0 once due.
+    #[test]
+    fn a_row_read_now_tells_the_wait_left() {
+        assert_eq!(
+            failures(Some(6_500)).read_at(1_000).retry_in_ms,
+            Some(5_500)
+        );
+        assert_eq!(failures(Some(1_000)).read_at(1_000).retry_in_ms, Some(0));
+        assert_eq!(
+            failures(Some(1_000)).read_at(9_000).retry_in_ms,
+            Some(0),
+            "past: 0, never negative"
+        );
+        assert_eq!(
+            failures(None).read_at(1_000).retry_in_ms,
+            None,
+            "no retry pending"
+        );
+        let read = failures(Some(6_500)).read_at(1_000);
+        assert_eq!(
+            (read.count, read.last_error.as_str(), read.retry_at_ms),
+            (3, "x", Some(6_500)),
+            "the rest of the row is kept"
+        );
+    }
+}

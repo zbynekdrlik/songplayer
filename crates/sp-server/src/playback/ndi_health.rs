@@ -206,12 +206,44 @@ impl NdiHealthRegistry {
         }
     }
 
+    /// #229: rewrite one row's `open_failures` as the engine's run of failed
+    /// opens changes, between the 5 s heartbeats (which copy it too). A
+    /// playlist with no row yet gets it at its first heartbeat.
+    pub fn set_open_failures(
+        &self,
+        playlist_id: i64,
+        open_failures: Option<sp_core::playback::OpenFailures>,
+    ) {
+        match self.snapshots.write() {
+            Ok(mut map) => {
+                if let Some(row) = map.get_mut(&playlist_id) {
+                    row.open_failures = open_failures;
+                }
+            }
+            Err(_) => {
+                warn!(
+                    playlist_id,
+                    "NdiHealthRegistry: RwLock poisoned on write — open_failures dropped"
+                );
+            }
+        }
+    }
+
     /// Snapshot every pipeline's most recent NDI health for the
     /// `/api/v1/ndi/health` endpoint. Returns one entry per pipeline that
-    /// has reported at least one heartbeat.
+    /// has reported at least one heartbeat. #229: a row's `open_failures`
+    /// carries the wait left until its retry, read now on this clock.
     pub fn snapshots(&self) -> Vec<PipelineHealthSnapshot> {
+        let now_ms = Utc::now().timestamp_millis();
         match self.snapshots.read() {
-            Ok(map) => map.values().cloned().collect(),
+            Ok(map) => map
+                .values()
+                .cloned()
+                .map(|mut row| {
+                    row.open_failures = row.open_failures.map(|f| f.read_at(now_ms));
+                    row
+                })
+                .collect(),
             Err(_) => {
                 warn!("NdiHealthRegistry: RwLock poisoned on read — returning empty list");
                 Vec::new()

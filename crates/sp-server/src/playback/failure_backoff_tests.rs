@@ -98,3 +98,66 @@ fn a_reset_ends_the_run_and_the_next_failure_counts_from_one() {
     );
     assert_eq!(run.count(), 1);
 }
+
+use super::{PickPool, pick_pool};
+
+/// The review of the lane: a song recorded only once it starts must not be
+/// picked again while another song can be. The pick leaves out the songs to
+/// avoid; with only those left unplayed, the rotation restarts without them;
+/// only when every song is to be avoided does it pick as before.
+#[test]
+fn the_pick_leaves_out_the_songs_to_avoid() {
+    assert_eq!(
+        pick_pool(&[11, 12, 13], &[11, 12, 13, 14], &[12]),
+        PickPool::Unplayed(vec![11, 13]),
+        "the unplayed songs that are not avoided, in order"
+    );
+    assert_eq!(
+        pick_pool(&[11, 13], &[11, 12, 13], &[]),
+        PickPool::Unplayed(vec![11, 13]),
+        "nothing to avoid: every unplayed song"
+    );
+    assert_eq!(
+        pick_pool(&[12], &[11, 12, 13], &[12]),
+        PickPool::Restart(vec![11, 13]),
+        "only an avoided song unplayed: the rotation restarts without it"
+    );
+    assert_eq!(
+        pick_pool(&[], &[11, 12], &[12]),
+        PickPool::Restart(vec![11]),
+        "every song played: a restart, without the song just sent"
+    );
+    assert_eq!(
+        pick_pool(&[12], &[11, 12], &[11, 12]),
+        PickPool::Unplayed(vec![12]),
+        "every song avoided: the unplayed ones, as before"
+    );
+    assert_eq!(
+        pick_pool(&[], &[11, 12], &[12, 11]),
+        PickPool::Restart(vec![11, 12]),
+        "every song avoided and played: a restart from all of them"
+    );
+    assert_eq!(
+        pick_pool(&[], &[], &[]),
+        PickPool::Restart(vec![]),
+        "no song: nothing to pick"
+    );
+}
+
+/// The run leaves out every song that failed in it, once each, and the song
+/// just sent; a start ends the list.
+#[test]
+fn a_run_avoids_its_failed_songs_and_the_song_just_sent() {
+    let mut run = FailureRun::default();
+    assert_eq!(run.avoid(None), Vec::<i64>::new());
+    assert_eq!(run.avoid(Some(7)), vec![7]);
+    run.note_failed(Some(9));
+    run.note_failed(Some(3));
+    run.note_failed(Some(9));
+    run.note_failed(None);
+    assert_eq!(run.avoid(Some(7)), vec![3, 9, 7]);
+    assert_eq!(run.avoid(None), vec![3, 9]);
+    run.fail("x");
+    run.reset();
+    assert_eq!(run.avoid(Some(7)), vec![7], "a start ends the run's list");
+}

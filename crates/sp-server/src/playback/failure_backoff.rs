@@ -8,7 +8,13 @@
 //! ([`FailureRun`]) and asks [`next_attempt`] how long to wait before the
 //! next song. A song that starts ends the run. The timer, its id and the
 //! resets live with the engine (`failure_retry.rs`).
+//!
+//! A song is recorded as played only when it starts (#229), so a song that
+//! cannot be opened stays "unplayed": the selection must leave it out, or at
+//! the end of a rotation it is the one song left and is picked for good
+//! ([`pick_pool`], fed by [`FailureRun::avoid`]).
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use sp_core::playback::OpenFailures;
@@ -35,6 +41,47 @@ pub fn utc_ms_after(now_utc_ms: i64, wait: Duration) -> i64 {
     now_utc_ms.saturating_add(i64::try_from(wait.as_millis()).unwrap_or(i64::MAX))
 }
 
+/// Where a youtube playlist's next random pick comes from (#229).
+#[derive(Debug, PartialEq, Eq)]
+pub enum PickPool {
+    /// Pick among these unplayed songs.
+    Unplayed(Vec<i64>),
+    /// The rotation restarts: clear the play history, then pick among these
+    /// (none = nothing to play).
+    Restart(Vec<i64>),
+}
+
+/// The songs a youtube playlist's next pick takes from: its `unplayed`
+/// songs minus `avoid` (the song just sent, and the songs that failed to
+/// open since the last start, [`FailureRun::avoid`]). With none left, the
+/// rotation restarts from `all` its songs minus `avoid`. Only when every
+/// song is to be avoided (a one-song playlist, or every open failed) does it
+/// pick as before #229: the unplayed songs, else a restart from all of them;
+/// the pause after failed opens paces those attempts.
+pub fn pick_pool(unplayed: &[i64], all: &[i64], avoid: &[i64]) -> PickPool {
+    let fresh = without(unplayed, avoid);
+    if !fresh.is_empty() {
+        return PickPool::Unplayed(fresh);
+    }
+    let rest = without(all, avoid);
+    if !rest.is_empty() {
+        return PickPool::Restart(rest);
+    }
+    if !unplayed.is_empty() {
+        return PickPool::Unplayed(unplayed.to_vec());
+    }
+    PickPool::Restart(all.to_vec())
+}
+
+/// `songs` without the ones in `avoid`, in order.
+fn without(songs: &[i64], avoid: &[i64]) -> Vec<i64> {
+    songs
+        .iter()
+        .copied()
+        .filter(|song| !avoid.contains(song))
+        .collect()
+}
+
 /// A playlist's failed opens in a row since its last song started.
 #[derive(Debug, Default)]
 pub struct FailureRun {
@@ -42,6 +89,8 @@ pub struct FailureRun {
     consecutive_failures: u32,
     /// The last one's error; `None` while the run is empty.
     last_failure: Option<String>,
+    /// The songs that failed in this run (the selection leaves them out).
+    failed: BTreeSet<i64>,
 }
 
 impl FailureRun {
@@ -56,6 +105,19 @@ impl FailureRun {
     /// Failed opens in a row.
     pub fn count(&self) -> u32 {
         self.consecutive_failures
+    }
+
+    /// The song whose open failed (the playlist's current one), left out of
+    /// the selections until the run ends.
+    pub fn note_failed(&mut self, video_id: Option<i64>) {
+        self.failed.extend(video_id);
+    }
+
+    /// The songs the next selection leaves out: every song that failed in
+    /// this run, and the song just sent (`current`), which is not recorded as
+    /// played before it starts.
+    pub fn avoid(&self, current: Option<i64>) -> Vec<i64> {
+        self.failed.iter().copied().chain(current).collect()
     }
 
     /// A song started: the run is over. Returns what ended (`None` = no

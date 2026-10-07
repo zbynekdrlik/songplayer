@@ -133,6 +133,7 @@ impl PlaybackEngine {
             // transport is the raw decoding state (Playing here), so an
             // off-program dub reads `⏸ Pauza` while it plays.
             self.broadcast_state(playlist_id);
+            self.publish_open_failures(playlist_id); // #229: the Play ended a retry
         } else {
             warn!(playlist_id, video_id, "PlayVideo: no pipeline for playlist");
         }
