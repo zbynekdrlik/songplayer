@@ -97,9 +97,11 @@ extend this file; nothing of them exists yet.
   - separately, the catalog's own `node` reads as `""` when it is not one.
 
   A peer is named by its CONFIGURED name (`PeerConfig::name`), never by the
-  `node` it sends. A time (`updated_at`, `started_at`) that is not an RFC
-  3339 time reads as `None` (`wire::checked_time`; the entry stays). Times
-  are information only, never a decision's input.
+  `node` it sends. A time (`updated_at`, `started_at`) is rewritten in the
+  canonical form (`wire::checked_time` = `ms_to_rfc3339` of the parsed
+  instant: UTC, milliseconds, `Z`), never kept as the peer's text; one that
+  is not an RFC 3339 time reads as `None` (the entry stays). Times are
+  information only, never a decision's input.
 - A node takes a peer's artifact only at ITS OWN current format
   (`kind::acceptable`): `MEDIA_VERSION` (video/audio), `STEMS_VERSION`,
   `LYRICS_PIPELINE_VERSION` (equality — a dev peer's newer lyrics are not
@@ -140,14 +142,17 @@ extend this file; nothing of them exists yet.
   (`normalized = 0`) AND on the board, so lane 3 lists an `(id, kind)` the
   board holds as running only and skips its queued entry (one entry per
   `(id, kind)`).
-- Lane 7 (phase 2, once SNV lists PP as a peer too): when BOTH nodes have
-  the same song queued, each would wait on the other's queued entry for the
-  full 2 h and then both process it, the double work the queued entries
-  exist to avoid. `decide` breaks that tie by comparing this node's
-  `node_name` with the peer's CONFIGURED name (`PeerRead.peer`), never the
-  `node` the peer sends: e.g. a queued entry of a peer whose name sorts
-  after this node's does not make this node wait. The wire's `state` tells
-  queued from running.
+- OPEN for lane 7's design (the main decides it; #229 comment 6030598502
+  item 7 and its correction): once SNV lists PP as a peer too (phase 2),
+  two nodes with the same song queued would each wait on the other's queued
+  entry for the full 2 h, then both process it — the double work the queued
+  entries exist to avoid. A tie-break must keep phase 1 as decided: PP
+  waits for SNV's queued jobs (ROZHODNUTÉ 6022851957 point 2). A rule keyed
+  on the names needs both nodes to see the same pair, i.e. each node's
+  configured name for a peer equals that peer's own `node_name`; nothing
+  checks that yet (lane 7 could compare `PeerRead.peer` with the sanitized
+  `Catalog.node` and WARN on a mismatch). The wire's `state` tells queued
+  from running.
 - `wire::PeerMetadata::to_bytes` = the metadata artifact's canonical bytes
   (serde field order; the catalog's metadata sha256 is over them). Times:
   `now_ms`, `ms_to_rfc3339` (`2026-10-06T16:00:00.123Z`; out of chrono's
