@@ -1,0 +1,232 @@
+//! #233: the ASIO resampler — 48 kHz → the card's rate with the servo's
+//! correction (the frame counts prove the ratio), its bounds, its delay, the
+//! tone kept; the splice — a pass-through delayed by its fade, an insert and a
+//! skip with no click; the installer's notice for the rubato it links.
+//!
+//! The frame counts are exact: rubato's `Async` steps its interpolation index
+//! in plain f64 (`asynchro.rs` `step_index`), so a scratch model of its
+//! `FixedAsync::Input` sizing gives them (the first block is 3 196 frames at
+//! 96 kHz: the sinc's start index is −255).
+
+use super::*;
+
+/// `blocks` program blocks of a 1 kHz tone (0.5 peak), both channels alike.
+fn tone(blocks: usize, hz: f32) -> Vec<Vec<f32>> {
+    (0..blocks)
+        .map(|b| {
+            (0..1600)
+                .flat_map(|i| {
+                    let x = (((b * 1600 + i) as f32) * 2.0 * std::f32::consts::PI * hz / 48_000.0)
+                        .sin()
+                        * 0.5;
+                    [x, x]
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn total_frames(rate: f64, ppm: f64, blocks: usize) -> usize {
+    let mut a = Asrc::new(rate).unwrap();
+    a.set_correction_ppm(ppm).unwrap();
+    let block = vec![0.0f32; 3200];
+    (0..blocks)
+        .map(|_| a.process(&block).unwrap().len() / 2)
+        .sum()
+}
+
+#[test]
+fn the_ratio_is_the_rate_times_the_correction() {
+    // 60 blocks (2 s of program): the ideal count less the sinc's start-up
+    // (2·ratio frames) and half a block of the first block's ratio ramp.
+    for (rate, ppm, frames) in [
+        (96_000.0, 0.0, 191_996),
+        (96_000.0, 100.0, 192_015),
+        (96_000.0, -250.0, 191_948),
+        (44_100.0, 0.0, 88_198),
+        (48_000.0, 50.0, 96_002),
+    ] {
+        let got = total_frames(rate, ppm, 60);
+        assert!(
+            got.abs_diff(frames) <= 1,
+            "{rate} Hz {ppm} ppm: {got} frames, not {frames}"
+        );
+    }
+}
+
+#[test]
+fn a_correction_past_1000_ppm_is_refused() {
+    let mut a = Asrc::new(96_000.0).unwrap();
+    assert!(a.set_correction_ppm(999.0).is_ok());
+    assert!(a.set_correction_ppm(-999.0).is_ok());
+    assert!(a.set_correction_ppm(1_001.0).is_err());
+    assert!(a.set_correction_ppm(-1_001.0).is_err());
+}
+
+#[test]
+fn the_delay_is_half_the_sinc_at_the_card_rate() {
+    assert_eq!(Asrc::new(96_000.0).unwrap().delay_frames(), 256);
+    assert_eq!(Asrc::new(48_000.0).unwrap().delay_frames(), 128);
+}
+
+/// One block gives at most `1600 · ratio · 1.001 + 10` frames (rubato's
+/// bound for a fixed input), which sizes the buffer once.
+#[test]
+fn the_most_one_block_gives_is_known() {
+    assert_eq!(Asrc::new(96_000.0).unwrap().max_out_frames(), 3_213);
+    assert_eq!(Asrc::new(48_000.0).unwrap().max_out_frames(), 1_611);
+}
+
+#[test]
+fn a_block_that_is_not_one_program_block_is_refused() {
+    let mut a = Asrc::new(96_000.0).unwrap();
+    assert!(a.process(&[0.0; 3198]).is_err());
+    assert!(a.process(&[0.0; 3202]).is_err());
+    assert!(a.process(&[0.0; 3200]).is_ok());
+}
+
+#[test]
+fn a_1khz_tone_stays_1khz_at_96k_with_a_correction() {
+    let mut a = Asrc::new(96_000.0).unwrap();
+    a.set_correction_ppm(300.0).unwrap();
+    let mut left = Vec::new();
+    for (b, block) in tone(30, 1000.0).iter().enumerate() {
+        let out = a.process(block).unwrap();
+        if b >= 3 {
+            left.extend(out.iter().step_by(2).copied());
+        }
+    }
+    // 27 blocks are 0.9 s of program: 900 cycles.
+    let rising = left
+        .windows(2)
+        .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+        .count();
+    assert!((898..=902).contains(&rising), "{rising}");
+}
+
+/// The largest step between neighbouring frames of the left channel.
+fn max_step(samples: &[f32]) -> f32 {
+    samples
+        .chunks_exact(2)
+        .collect::<Vec<_>>()
+        .windows(2)
+        .map(|w| (w[1][0] - w[0][0]).abs())
+        .fold(0.0, f32::max)
+}
+
+/// One fade step of a 0.5 signal at 96 kHz (480 frames), plus rounding.
+const FADE_STEP: f32 = 0.5 / 480.0 + 1e-6;
+
+/// Silent frames (left channel exactly 0) after the hold's 480-frame start-up.
+fn silent_frames(out: &[f32]) -> usize {
+    out[960..].chunks_exact(2).filter(|f| f[0] == 0.0).count()
+}
+
+#[test]
+fn the_splice_passes_audio_delayed_by_its_fade() {
+    let mut s = Splice::new(96_000.0, 0, 3_200);
+    assert_eq!(s.held_frames(), 480, "5 ms at 96 kHz");
+    let input: Vec<f32> = (0..9_600).map(|i| i as f32).collect();
+    let mut out = Vec::new();
+    for chunk in input.chunks(3_200) {
+        out.extend_from_slice(s.process(chunk));
+    }
+    let mut want = vec![0.0f32; 960];
+    want.extend_from_slice(&input[..input.len() - 960]);
+    assert_eq!(out, want, "bit for bit, 480 frames late");
+}
+
+#[test]
+fn an_insert_is_a_fade_a_gap_and_a_fade_never_a_click() {
+    let mut s = Splice::new(96_000.0, 4_800, 3_200);
+    let dc = vec![0.5f32; 6_400];
+    let mut out = Vec::new();
+    out.extend_from_slice(s.process(&dc));
+    s.insert(4_224); // 44 ms
+    out.extend_from_slice(s.process(&dc));
+    out.extend_from_slice(s.process(&dc));
+    assert_eq!(out.len(), 3 * 6_400 + 2 * 4_224);
+    // From frame 481 on: the first 480 frames are the hold's start-up silence.
+    assert!(
+        max_step(&out[962..]) <= FADE_STEP,
+        "{}",
+        max_step(&out[962..])
+    );
+    assert_eq!(
+        silent_frames(&out),
+        4_225,
+        "the fade out ends on one silent frame, then the 4_224 inserted"
+    );
+    assert_eq!(out[out.len() - 2], 0.5, "back at full level");
+}
+
+#[test]
+fn a_skip_is_a_fade_and_a_fade_and_spans_blocks() {
+    let mut s = Splice::new(96_000.0, 0, 3_200);
+    let dc = vec![0.5f32; 6_400];
+    let mut out = Vec::new();
+    out.extend_from_slice(s.process(&dc));
+    s.skip(4_224);
+    out.extend_from_slice(s.process(&dc));
+    out.extend_from_slice(s.process(&dc));
+    out.extend_from_slice(s.process(&dc));
+    assert_eq!(out.len(), 4 * 6_400 - 2 * 4_224);
+    assert!(max_step(&out[962..]) <= FADE_STEP);
+    assert_eq!(silent_frames(&out), 1, "faded to silence once, then in");
+    assert_eq!(out[out.len() - 2], 0.5, "back at full level");
+    let mut big = Splice::new(96_000.0, 0, 3_200);
+    big.process(&dc);
+    big.skip(5_000); // more than one block (3_200 frames)
+    assert_eq!(
+        big.process(&dc).len(),
+        0,
+        "the whole block is skipped (the hold stays held)"
+    );
+    assert_eq!(
+        big.process(&dc).len(),
+        6_400 - 2 * (5_000 - 3_200),
+        "the rest of the skip"
+    );
+}
+
+/// A re-centre that comes while the splice is still muted (an insert during
+/// a skip) fades nothing twice: the gap and the rest of the skip, one fade in.
+#[test]
+fn a_second_re_centre_while_muted_fades_once() {
+    let mut s = Splice::new(96_000.0, 4_800, 3_200);
+    let dc = vec![0.5f32; 6_400];
+    let mut out = Vec::new();
+    out.extend_from_slice(s.process(&dc));
+    s.skip(5_000);
+    assert!(s.process(&dc).is_empty(), "all skipped");
+    s.insert(1_000);
+    out.extend_from_slice(s.process(&dc));
+    out.extend_from_slice(s.process(&dc));
+    assert_eq!(out.len() / 2, 4 * 3_200 - 5_000 + 1_000);
+    assert!(
+        max_step(&out[962..]) <= FADE_STEP,
+        "{}",
+        max_step(&out[962..])
+    );
+    assert_eq!(silent_frames(&out), 1_001, "one fade out's end + the gap");
+    assert_eq!(out[out.len() - 2], 0.5, "back at full level");
+}
+
+/// The installer ships THIRD-PARTY-NOTICES.txt; it must carry the MIT notice
+/// of the rubato this crate pins (re-copy it when the pin moves).
+#[test]
+fn the_installer_notice_carries_the_pinned_rubatos_license() {
+    const NOTICE: &str = include_str!("../../../../src-tauri/resources/THIRD-PARTY-NOTICES.txt");
+    const MANIFEST: &str = include_str!("../../Cargo.toml");
+    let notice = NOTICE.replace("\r\n", "\n");
+    assert!(MANIFEST.contains("rubato = \"=5.0.1\""), "the pin");
+    assert!(
+        notice.contains("rubato 5.0.1"),
+        "the notice names the pinned version"
+    );
+    assert!(notice.contains("Copyright (c) 2020 Henrik Enquist"));
+    assert!(notice.contains(
+        "The above copyright notice and this permission notice shall be included in all\n\
+         copies or substantial portions of the Software."
+    ));
+}
