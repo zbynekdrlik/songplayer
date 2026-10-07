@@ -38,8 +38,10 @@ async function openSettings(page: Page) {
 
 // The two save handlers reached PAST their disabled buttons, so a test sees
 // their own `loaded` guards (a click on a disabled button reaches no handler):
-// - the outputs save: its button re-enabled by hand, then clicked (Leptos
-//   re-applies `prop:disabled` only when `loaded` changes);
+// - the outputs save: its button re-enabled by hand, clicked, and disabled
+//   again as it was (Leptos re-applies `prop:disabled` only when its signals,
+//   `loaded` and `load_error`, change — so a later `toBeEnabled()` still
+//   reads what Leptos set);
 // - the form: `requestSubmit()` fires `submit` past the disabled button. It
 //   runs constraint validation first, so the helper returns whether `submit`
 //   really fired — a test asserts it, or an invalid default would make the
@@ -47,8 +49,10 @@ async function openSettings(page: Page) {
 async function clickOutputsSavePastTheButton(page: Page) {
   await page.evaluate(() => {
     const button = document.querySelector('[data-testid="audio-outputs-save"]') as HTMLButtonElement;
+    const was = button.disabled;
     button.disabled = false;
     button.click();
+    button.disabled = was;
   });
 }
 
@@ -399,4 +403,42 @@ test("a refused save keeps the edits and stores nothing (#233)", async ({ page, 
   }
   // The refused PATCH is the point of the test: the browser logs its 400.
   expect(realConsoleErrors().filter((m) => !/Failed to load resource.*400/.test(m))).toEqual([]);
+});
+
+test("a stored list the dashboard cannot read is never saved over (#233)", async ({ page }) => {
+  const patches = settingsPatches(page);
+  // The stored list holds an entry this dashboard cannot read (a later
+  // version's type, after a rollback), served through the page's GET only.
+  await page.route("**/api/v1/settings", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const body = await response.json();
+    body.audio_outputs = JSON.stringify([
+      { id: "out-1", name: "DVS", type: "asio", asio: { driver: "Dante Virtual Soundcard (x64)", channels: [0, 1] } },
+    ]);
+    await route.fulfill({ response, json: body });
+  });
+  try {
+    await openSettings(page);
+    await expect(page.locator('[data-testid="audio-outputs-load-error"]')).toHaveText(
+      "Uložený zoznam výstupov sa nedá načítať — neukladajte ho",
+    );
+    await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="audio-outputs-save"]')).toBeDisabled();
+    // The save handler's own guard: reached past the disabled button, with
+    // the EMPTY list the section shows (it would pass `validate_list` and
+    // replace the unreadable stored list, FOH's entry with it).
+    await clickOutputsSavePastTheButton(page);
+    await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("");
+    // A round trip through the page after the attempt, then: no PATCH.
+    await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+    await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(1);
+    expect(patches).toHaveLength(0);
+  } finally {
+    await page.unroute("**/api/v1/settings");
+  }
+  expect(realConsoleErrors()).toEqual([]);
 });
