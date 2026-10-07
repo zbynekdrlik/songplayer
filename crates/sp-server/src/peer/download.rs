@@ -94,7 +94,9 @@ pub(crate) async fn first(
             Ok(taken) => {
                 ex.fetched(job, &row.youtube_id, &plan.peer.name, &plan.artifacts)
                     .await;
-                let _ = taken;
+                if let Some(t) = &taken {
+                    record_title(ex, &row.youtube_id, t).await;
+                }
                 PeerStep::Done
             }
             Err(e) => {
@@ -134,7 +136,13 @@ pub(crate) async fn adopt(
         gf,
     ));
     tokio::fs::rename(&audio_part, &audio).await?;
-    tokio::fs::rename(&video_part, &video).await?;
+    if let Err(e) = tokio::fs::rename(&video_part, &video).await {
+        // The local download's rule: no unrecorded audio under its final
+        // name. The verified video part goes too; the next ask fetches again.
+        let _ = tokio::fs::remove_file(&audio).await;
+        let _ = tokio::fs::remove_file(&video_part).await;
+        return Err(e.into());
+    }
     record_download(
         &ex.pool,
         &ex.cache_dir,

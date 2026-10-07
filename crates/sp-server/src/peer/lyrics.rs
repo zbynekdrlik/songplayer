@@ -96,8 +96,7 @@ const MAX_LYRICS_BYTES: u64 = 16_777_216;
 
 /// A peer's lyrics artifact of `size` bytes is one this node fetches.
 fn lyrics_size_ok(size: u64) -> bool {
-    let _ = size;
-    true
+    size <= MAX_LYRICS_BYTES
 }
 
 /// The peer's track into `{yt}_lyrics.json` with its row, or nothing newer.
