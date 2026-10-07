@@ -88,6 +88,7 @@ async fn status_shows_the_node_and_its_peers_without_secrets() {
             base_url: "https://sp.newlevel.media".into(),
             has_key: true,
             cf_access: true,
+            last_read: None,
         }]
     );
 }
@@ -193,6 +194,7 @@ async fn a_peer_without_a_cloudflare_token_has_no_cf_access() {
             base_url: "https://sp.newlevel.media".into(),
             has_key: true,
             cf_access: false,
+            last_read: None,
         }]
     );
 }
@@ -245,4 +247,79 @@ async fn a_node_answers_its_status_over_real_http() {
     let s: ExchangeStatus = reqwest::get(url).await.unwrap().json().await.unwrap();
     assert_eq!(s.node_name.as_deref(), Some(node.name.as_str()));
     assert_eq!(s.catalog.map(|c| c.files), Some(0));
+}
+
+async fn post_probe(ex: &Arc<Exchange>) -> (StatusCode, String) {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/exchange/probe")
+        .body(Body::empty())
+        .unwrap();
+    let resp = crate::peer::router(ex.clone()).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    (status, String::from_utf8(body.to_vec()).unwrap())
+}
+
+/// The live gate's route: every peer's catalog read now, kept for the status.
+#[tokio::test]
+async fn the_probe_reads_each_peer_now_and_the_status_keeps_it() {
+    use crate::peer::rig::{OTHER_KEY, SNV_KEY, TestNode};
+    let snv = TestNode::start("snv", Some(SNV_KEY)).await;
+    let id = snv.add_video("aaaaaaaaaaa").await;
+    snv.give_song(id, "aaaaaaaaaaa", "Way Maker", "Sinach")
+        .await;
+    snv.hash_now().await;
+    let pp = TestNode::start("pp", None).await;
+    let wrong = TestNode::start("wrong", Some(SNV_KEY)).await;
+    pp.set_peers(&[snv.as_peer(SNV_KEY), wrong.as_peer(OTHER_KEY)])
+        .await;
+    let (_, body) = get_status(&pp.ex).await;
+    let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
+    assert_eq!(s.peers[0].last_read, None, "no read before the probe");
+    let (status, body) = post_probe(&pp.ex).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!body.contains(SNV_KEY) && !body.contains(OTHER_KEY));
+    let results: Vec<ProbeResult> = serde_json::from_str(&body).unwrap();
+    assert_eq!(results.len(), 2);
+    let ok = &results[0];
+    assert_eq!(
+        (ok.name.as_str(), ok.base_url.as_str()),
+        ("snv", snv.base_url.as_str())
+    );
+    assert!(ok.ok && ok.error.is_none(), "{ok:?}");
+    assert_eq!(ok.artifacts, 3, "video + audio + metadata");
+    assert_eq!(
+        ok.jobs, 3,
+        "the song's lyrics and both stems are queued at SNV"
+    );
+    let refused = &results[1];
+    assert_eq!(refused.name, "wrong");
+    assert!(!refused.ok);
+    assert_eq!((refused.artifacts, refused.jobs), (0, 0));
+    assert!(refused.error.as_deref().unwrap().contains("peer key"));
+    let (_, body) = get_status(&pp.ex).await;
+    let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
+    let first = s.peers[0].last_read.as_ref().unwrap();
+    assert!(first.ok);
+    assert_eq!(first.latency_ms, ok.latency_ms);
+    assert!(!s.peers[1].last_read.as_ref().unwrap().ok);
+}
+
+#[tokio::test]
+async fn the_probe_refuses_settings_that_do_not_hold() {
+    let (ex, _dir) = exchange().await;
+    store(&ex.pool, SETTING_NODE_NAME, "PP").await;
+    let (status, body) = post_probe(&ex).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body.contains("node_name"), "{body}");
+}
+
+#[tokio::test]
+async fn a_probe_with_no_peer_reads_nothing() {
+    let (ex, _dir) = exchange().await;
+    let (status, body) = post_probe(&ex).await;
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "[]"));
 }
