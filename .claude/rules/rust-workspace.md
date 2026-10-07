@@ -145,6 +145,11 @@ the scratchpad, not the repo. When the Rust changes, update the model in the
 same step. Each fresh-context review pass should re-derive the pins with its own
 model; two independent models agreeing is the only local evidence available.
 
+**Python 3.12+ `sum()` of floats is compensated (Neumaier), Rust's is a
+plain left fold (#233 lane 2):** a model summing with `sum()` disagrees with
+the Rust in the last digits, enough to move an exact pin. Fold explicitly
+(`acc = acc + x`) in every model.
+
 **For a state machine, also FUZZ the model against invariants (#215 rounds
 4–6).** Hand-picked scenarios kept missing the program bus's cut edge cases;
 a randomized run (random cuts, source skews, pre-rolls, stalls) checked for
@@ -221,6 +226,10 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
   already uses `.div_ceil()` (`chunking.rs`, `loop_stats.rs`) — grep before
   hand-rolling a ceil.
+- **`clippy::manual_clamp` on `x.min(CONST).max(CONST)`** (#233 lane 2,
+  caught in review before CI): two constant bounds make clippy ask for
+  `x.clamp(lo, hi)` (warn-by-default → `-D warnings`). Write `clamp`
+  directly; it has no mutant either.
 - **`clippy::manual_contains`** (`perf`, warn-by-default → `-D warnings`, #212
   follow-up review round 4). `slice.iter().any(|&x| x == y)` must be
   `slice.contains(&y)` whenever the element type and `y`'s type are equal
@@ -805,6 +814,15 @@ the test that kills each one BEFORE CI's mutation gate runs.
   and survives. Subtract ONCE into a local (`let offset = …; (offset / ds,
   offset % ds)`), so the mutant also moves the quotient, which a test sees
   (#215 addendum 3, `nv12_mix.rs`).
+- **Key the harness by `line:col`, not by hand-named switches (#233 lane
+  2).** Write every operator of the model as a call carrying its Rust site
+  (`B("142:30", "-", a, b)`, comparisons, compound assignments, `delete !` /
+  `delete -`, fn-level `ret:` replacements), so each line of
+  `cargo mutants --list` maps mechanically to `MUT = "142:30:+"`. After an
+  edit moves lines, re-key with a difflib map from the old file to the new
+  one and hand-key only the changed lines; then cross-check both ways (every
+  listed site in the model, every model key listed) — a stale key that now
+  names another line is silent otherwise. 230–260 mutants run in ~4 min.
 - **A Python mutation harness for a pure kernel (#215 addendum 3).** Mirror
   the Rust function in the scratch model with one switch per listed mutant
   (`cargo mutants --in-diff … --list`) and a mirror of the Rust tests. Also
@@ -1114,6 +1132,18 @@ and grep it (`pub unsafe fn GetNativeMediaType(&self, dwstreamindex: u32,
 dwmediatypeindex: u32) -> windows_core::Result<IMFMediaType>`). `GUID`'s
 public `data1..data4` fields are in `windows-core-0.58.0/src/guid.rs`, from
 the same URL with `windows-core`.
+
+## Adding a NEW registry crate to the lock on the Tier-0 box (#233 lane 2)
+
+`cargo update -p <crate> --precise <v>` fails for a crate the lock does not
+hold yet ("did not match any packages"). With the members' lock versions
+current (`sync-version.sh` keeps them so now), `cargo update --workspace`
+(Tier-0-allowed, compiles nothing) adds exactly the new crate's tree and
+moves no other line — check that `git diff Cargo.lock` is additions only.
+Verify the newest version from the sparse index
+(`https://index.crates.io/<ab>/<cd>/<name>`, a neutral User-Agent) and read
+its source from the downloaded `.crate` (static.crates.io) before writing
+calls against it.
 
 ## Adding a path dependency between workspace crates on the Tier-0 box (#184 G4)
 
