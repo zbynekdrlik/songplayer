@@ -87,6 +87,15 @@ impl BlockQueue {
         }
     }
 
+    /// Drop the queued blocks, keep taking new ones (an ASIO output's open:
+    /// what queued while it opened is stale). Returns how many it dropped.
+    pub fn clear(&self) -> usize {
+        let mut q = lock(&self.inner);
+        let n = q.blocks.len();
+        q.blocks.clear();
+        n
+    }
+
     /// Blocks waiting.
     pub fn queued(&self) -> usize {
         lock(&self.inner).blocks.len()

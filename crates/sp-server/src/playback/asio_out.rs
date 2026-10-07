@@ -348,6 +348,12 @@ impl AsioWorker {
                 if let Some(note) = buffer_note(o.buffer_frames, rate) {
                     warn!(id = %out.id, driver = %out.driver, "asio output: {note}");
                 }
+                // Stale by the open's duration: the first block the servo
+                // sees is a fresh one.
+                let stale = out.queue.clear();
+                if stale > 0 {
+                    info!(id = %out.id, stale, "asio output: dropped the blocks queued while the driver opened");
+                }
                 out.update(|l| {
                     l.state = STATE_RUNNING;
                     l.reason = None;
