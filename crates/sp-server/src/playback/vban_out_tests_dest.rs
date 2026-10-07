@@ -10,6 +10,7 @@ use crate::playback::vban_packet::tests::parse_packet;
 use crate::playback::vban_packet::tests_legacy::{legacy_encode_block, oracle_blocks};
 use crate::playback::vban_packet::{VBAN_SEND_LATENCY_100NS, VbanFormat, stream_name_bytes};
 use sp_core::audio_outputs::{RateChoice, VbanDest, VbanSampleFormat};
+use std::time::Duration;
 
 const D: i64 = 17_900_000_000_000_000;
 const L: i64 = VBAN_SEND_LATENCY_100NS;
@@ -340,4 +341,27 @@ fn a_wait_is_slept_in_steps_the_wall_can_tick() {
     sleep_until(&mut c, 0, 2 * m + 7);
     assert_eq!(c.sleeps, vec![m, m - 993]);
     assert_eq!((c.now, c.reads), (2 * m + 7 + 1_000, 1));
+}
+
+#[test]
+fn a_stopped_output_takes_no_more_blocks() {
+    // #233 review round 5: `apply` replaces the list, then discards the old
+    // output; a boundary's push into the old snapshot can land after the
+    // discard. It must not queue (the old thread would send it on its old
+    // schedule, next to its successor).
+    let out = VbanOut::for_destination(VbanFormat::PROGRAM, 0);
+    out.discard();
+    out.push(ProgramBlock::silence(D));
+    assert_eq!(out.queued(), 0, "a push after the stop is refused");
+    assert_eq!(out.take_timeout(Duration::ZERO), VbanTake::Stopped);
+    // The shutdown drains what was queued before its stop, and nothing after.
+    let out = VbanOut::for_destination(VbanFormat::PROGRAM, 0);
+    out.push(ProgramBlock::silence(D));
+    out.stop();
+    out.push(ProgramBlock::silence(D + 333_333));
+    assert_eq!(
+        out.take_timeout(Duration::ZERO),
+        VbanTake::Block(ProgramBlock::silence(D))
+    );
+    assert_eq!(out.take_timeout(Duration::ZERO), VbanTake::Stopped);
 }
