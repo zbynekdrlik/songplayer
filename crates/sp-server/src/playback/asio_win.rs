@@ -83,8 +83,10 @@ struct Slot {
     size_change: AtomicBool,
     latencies: AtomicBool,
     overloads: AtomicU64,
-    /// A new rate's f64 bits; 0 = none.
+    /// The last rate `sampleRateDidChange` reported (f64 bits), valid while
+    /// `rate_changed` is set: 0.0's bits are 0, and 0 Hz is a lost clock.
     rate_bits: AtomicU64,
+    rate_changed: AtomicBool,
 }
 
 impl Slot {
@@ -103,6 +105,7 @@ impl Slot {
             latencies: AtomicBool::new(false),
             overloads: AtomicU64::new(0),
             rate_bits: AtomicU64::new(0),
+            rate_changed: AtomicBool::new(false),
         }
     }
 
@@ -122,6 +125,7 @@ impl Slot {
             &self.resync,
             &self.size_change,
             &self.latencies,
+            &self.rate_changed,
         ] {
             f.store(false, Ordering::SeqCst);
         }
@@ -203,6 +207,7 @@ macro_rules! slot_callbacks {
         }
         unsafe extern "system" fn $rate(rate: SampleRate) {
             SLOTS[$i].rate_bits.store(rate.to_bits(), Ordering::SeqCst);
+            SLOTS[$i].rate_changed.store(true, Ordering::SeqCst);
         }
     };
 }
@@ -484,13 +489,18 @@ impl AsioDevice for WinAsioDevice {
             return DeviceEvents::default();
         };
         let s = &SLOTS[i];
-        let rate_bits = s.rate_bits.swap(0, Ordering::SeqCst);
+        // The flag first: a later report between the two reads is the one
+        // read (the newest rate wins), never a lost one.
+        let rate_changed = s
+            .rate_changed
+            .swap(false, Ordering::SeqCst)
+            .then(|| f64::from_bits(s.rate_bits.load(Ordering::SeqCst)));
         DeviceEvents {
             reset: s.reset.swap(false, Ordering::SeqCst),
             resync: s.resync.swap(false, Ordering::SeqCst),
             buffer_size_change: s.size_change.swap(false, Ordering::SeqCst),
             latencies_changed: s.latencies.swap(false, Ordering::SeqCst),
-            rate_changed: (rate_bits != 0).then(|| f64::from_bits(rate_bits)),
+            rate_changed,
             overloads: s.overloads.load(Ordering::Relaxed),
             callbacks: s.callbacks.load(Ordering::Relaxed),
         }
