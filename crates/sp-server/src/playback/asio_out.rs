@@ -243,7 +243,11 @@ impl AsioOut {
     }
 
     fn update(&self, f: impl FnOnce(&mut Live)) {
-        f(&mut lock(&self.live));
+        // A guard does not deref-coerce into a generic closure's argument
+        // (`rust-workspace.md`): bind the `&mut Live` first.
+        let mut guard = lock(&self.live);
+        let live: &mut Live = &mut guard;
+        f(live);
     }
 }
 
