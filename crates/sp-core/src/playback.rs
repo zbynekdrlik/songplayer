@@ -88,6 +88,11 @@ pub struct OpenFailures {
     /// wait is pending: the next song is tried at once, an attempt is under
     /// way, or the playlist was cut off program or paused.
     pub retry_at_ms: Option<i64>,
+    /// The wait left until `retry_at_ms` when the row was READ, on the
+    /// server's own clock (0 once due): what a dashboard counts down, since
+    /// the browser's clock on another machine can be off.
+    #[serde(default)]
+    pub retry_in_ms: Option<u64>,
 }
 
 // #184 round G: the `KaraokeMode` enum was deleted. A karaoke MODE is no longer a

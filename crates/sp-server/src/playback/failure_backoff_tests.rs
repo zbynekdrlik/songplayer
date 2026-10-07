@@ -60,6 +60,7 @@ fn a_run_counts_the_failures_and_keeps_the_last_error() {
             count: 4,
             last_error: "No suitable transform".into(),
             retry_at_ms: Some(1_234),
+            retry_in_ms: None,
         })
     );
     assert_eq!(
@@ -83,6 +84,7 @@ fn a_reset_ends_the_run_and_the_next_failure_counts_from_one() {
             count: 3,
             last_error: "broken".into(),
             retry_at_ms: None,
+            retry_in_ms: None,
         }),
         "the reset reports the run that ended"
     );

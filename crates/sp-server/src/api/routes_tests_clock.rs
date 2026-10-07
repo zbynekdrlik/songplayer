@@ -78,8 +78,9 @@ async fn ndi_health_endpoint_includes_clock() {
 }
 
 /// #229: a playlist whose videos cannot be opened says so on the endpoint:
-/// how many failed in a row, the last error, and when the next attempt is
-/// due (UTC ms), so a black program has a visible reason.
+/// how many failed in a row, the last error, when the next attempt is due
+/// (UTC ms) and the wait left at the read on the server's clock (0 once
+/// due: this one is long past), so a black program has a visible reason.
 #[tokio::test]
 async fn ndi_health_endpoint_includes_open_failures() {
     use crate::playback::ndi_health::{PipelineHealthSnapshot, PlaybackStateLabel};
@@ -107,7 +108,8 @@ async fn ndi_health_endpoint_includes_open_failures() {
         open_failures: Some(sp_core::playback::OpenFailures {
             count: 4,
             last_error: "No video: SetCurrentMediaType failed: No suitable transform".into(),
-            retry_at_ms: Some(1_791_331_200_000),
+            retry_at_ms: Some(1_000),
+            retry_in_ms: None,
         }),
     });
 
@@ -130,7 +132,8 @@ async fn ndi_health_endpoint_includes_open_failures() {
         serde_json::json!({
             "count": 4,
             "last_error": "No video: SetCurrentMediaType failed: No suitable transform",
-            "retry_at_ms": 1_791_331_200_000_i64,
+            "retry_at_ms": 1_000,
+            "retry_in_ms": 0,
         })
     );
 }

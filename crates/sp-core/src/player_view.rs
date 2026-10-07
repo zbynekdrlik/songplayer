@@ -322,6 +322,7 @@ mod tests {
             count: 4,
             last_error: "No video: SetCurrentMediaType failed: No suitable transform".into(),
             retry_at_ms: Some(1_791_331_230_000),
+            retry_in_ms: None,
         };
         assert_eq!(
             open_failures_line(&failures, 1_791_331_200_000),

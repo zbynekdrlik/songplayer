@@ -72,6 +72,7 @@ impl FailureRun {
             count: self.consecutive_failures,
             last_error,
             retry_at_ms,
+            retry_in_ms: None, // filled at the read (`NdiHealthRegistry::snapshots`)
         })
     }
 }
