@@ -545,6 +545,10 @@ sampled 30 min with the flag still OFF (21.9.2026). The working form is
 `gh run rerun --job <job-id>` alone; it creates run ATTEMPT 2 whose Deploy job
 has a NEW job id, so poll `gh api repos/<r>/actions/runs/<run>/jobs?filter=latest`
 (or `jobs/<new-id>`) — polling the old id reports the old attempt's success.
+On a MAIN run that is still main's tip, the completed re-run also
+re-deploys PP (`deploy-pp.yml` fires on every completed attempt, #229,
+`peer-exchange.md` "PP deploy"); an older main run's re-run does not reach
+PP. Restart SNV from a dev run when PP must stay untouched.
 Confirm the restart with `/api/v1/status` `uptime_s` before sampling anything
 that depends on a startup-read setting (e.g. `sp_min_working_set_mb`;
 the `genlock_pacing` setting this was written for is deleted, #221 lane 3).
