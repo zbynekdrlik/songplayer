@@ -311,7 +311,11 @@ copy of the limited block, `ProgramBlock`, `audio_out_block.rs`) → MAX →
 video side + NDI submit. `AudioOutputs` (owned by `ProgramBus`,
 `outputs()`) holds the running list as one `Arc` snapshot swapped whole by
 the task; `offer` pushes into every running output's own drop-oldest queue
-and never waits. Pinned:
+and never waits. Every output's queue is ONE type,
+`audio_out_queue::BlockQueue` (a `VbanOut`'s and an `AsioOut`'s; #210's
+VBAN queue moved there in lane 3's review round 1, `VbanTake` re-exports its
+`Take`), and `audio_out_queue::lock` is the outputs' one poison-tolerant
+lock helper. Pinned:
 `program_output_tests_order.rs::every_output_has_the_block_before_the_ndi_submit`
 and `audio_out_tests.rs` (no cross-output drops). `ProgramOutput::with_vban`
 is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
@@ -419,7 +423,10 @@ subset does not run it (PP has no FOH entry).
 ## ASIO outputs (`asio_out.rs`, `asio_win.rs`, `asio_format.rs`, `asio_state.rs`) — lane 3
 
 **The entry.** `type: "asio"`, `asio: {driver, channels: [left, right]}`,
-0-based (the dashboard shows them 1-based). The driver is 1..=128
+0-based (the dashboard shows them 1-based through
+`sp_core::audio_outputs::{asio_channel_index, asio_channel_shown}`,
+wrapping: a typed 0 is stored as u32::MAX, refused "musí byť 1 až 512" and
+shown as 0 again, never read as channel 1). The driver is 1..=128
 characters with no control character; the channels are ≤ 511 and different.
 At most 4 ASIO entries (`MAX_ASIO_OUTPUTS`; the per-type caps sum under 16,
 the const assert). ONE entry per driver, a switched-off one included (DVS
@@ -431,8 +438,15 @@ network-rate change never rebuilds an ASIO output.
 **azo 0.4.0** (main-session ruling 10, `default-features = false`: no
 `oneshot` host): `driver::Metadata::enumerate` reads HKLM\SOFTWARE\ASIO
 (no COM, `list_drivers`); `driver::SafeHandle::new(&clsid)` initialises COM
-as an STA on the calling thread and uninitialises it on drop (`!Send`: it
-lives on the output's worker); `use azo::driver::Driver` for the methods;
+as an STA on the calling thread and uninitialises it in its own `Drop`,
+which runs BEFORE its interface field is released (`!Send`: it lives on the
+output's worker). So the device holds the thread's STA itself
+(`asio_win::ComApartment`, its last field, from `new` until it is dropped):
+every driver release happens inside the device's apartment (review round
+1; azo's own host does the same, `host.rs:105-111`; azo 0.2.1's InitGuard,
+which iemmixer ran, dropped the driver first). A failed `SafeHandle::new`
+leaks azo's own init count; inside the device's STA that init cannot have
+failed, so `open` balances it. `use azo::driver::Driver` for the methods;
 `dispose_buffers`. azo-sys 0.3.2: the sample-type codes (Int16/24/32LSB
 16-18, Float32LSB 19, Int32LSB16/18/20/24 24-27), `Callbacks` = four
 context-less `unsafe extern "system"` fn pointers. azo-sys needs bitflags
@@ -455,12 +469,30 @@ own callback thread and has two slots of cushion):
   `if > 0` / `else if < 0` would give a `>=` mutant that inserts 0, an
   equivalent survivor) → the ring. A closed output drops the blocks it is
   handed.
+- open drops the blocks queued while the driver opened (stale by the open's
+  duration; an INFO, never `blocks_dropped`), so the servo's first block is
+  fresh.
 - close: a reset request or a buffer-size change (answered 0: never
   resized live), a rate change of 1 Hz or more (`sampleRateDidChange(0)` =
-  a lost clock, "the driver lost its clock"), or 2 s with no callback
+  a lost clock, "the driver lost its clock": a slot marks a report with its
+  own flag, since 0.0's bits are 0), or 2 s with no callback
   (`StallWatch`). Underruns count across reopens (`underruns_closed`: a
-  device counts per run). A replaced entry on the SAME driver opens after
-  the old worker's release through the busy backoff (~2 s).
+  device counts per run).
+- one holder per driver in the process (`asio_hold`, `asio_win::HELD`): a
+  device holds the driver's name before it reads the registry or loads
+  anything, and gives it back after the driver is released. A rebuilt
+  entry's successor starts while its predecessor still releases the same
+  driver (`apply` starts the new output before it discards the old), so it
+  is refused `Busy` ("another SongPlayer output still holds the driver")
+  and opens after the 2 s backoff: never two instances of one driver in
+  one process (review round 1; before, it waited only if the driver
+  happened to refuse the second init).
+- the process exit does not wait for the release: the box stops SongPlayer
+  with `taskkill /F` (every deploy, the scheduled task), which no
+  in-process join could cover, so the driver is torn down with the process
+  and the next start opens it like any other open (busy → the backoff). Box
+  evidence for DVS: the MAIN SESSION OPS read the entry after the deploy
+  that follows its addition.
 - every open, failed open and close is logged with the reason and the retry.
 
 **The glue** (`asio_win.rs`, `#[cfg(windows)]`, excluded in
@@ -472,12 +504,15 @@ driver's type and zeroes every other channel and the frames the ring did not
 deliver (`asio_format::fill_channel`), counts an underrun only once primed,
 and only counts in atomics — no allocation, lock, log or syscall. Messages
 are counted and answered by `asio_state::reply` (iemmixer's table). `close`
-stops, unhooks the stream, frees it only once no callback is inside it
-(bounded 1 s: a stuck callback leaks it), disposes the buffers, drops the
-driver, THEN releases the slot. `poll` pumps the thread's window messages.
-The rate, the clock source and the panel are never touched: the Test
-Integrity job fails on `.set_sample_rate(` / `.set_clock_source(` /
-`.open_control_panel(` under `crates/`.
+stops a STARTED driver (a driver whose start never ran is not stopped),
+unhooks the stream, frees it only once no callback is inside it (bounded
+1 s: a stuck callback leaks it), disposes the buffers, drops the driver
+(inside the device's COM apartment), gives the driver's hold back, THEN
+releases the slot. `poll` pumps the thread's window messages. The rate,
+the clock source and the panel are never touched: the Test Integrity job
+fails on the names `set_sample_rate` / `set_clock_source` /
+`open_control_panel` anywhere under `crates/` (word boundaries: a method
+call, a UFCS call or a spaced one).
 
 **Status** (`outputs[i]`): `rate` = the driver's, `format` = its sample type,
 `latency_ms` = the servo's + the resampler's + the driver's output latency
@@ -496,11 +531,16 @@ starts no real worker. `GET /api/v1/audio/asio-drivers` = `{drivers: […]}`
 **Dashboard.** "Pridať výstup ASIO" (waits for the driver list) adds an ASIO
 row on the first listed driver, channels 1 / 2. Each row shows its type and
 only its own fields (`<Show>` on a `Memo` of the type); a stored driver the
-box does not list stays, "(nenájdený)"; the rate reads "podľa ovládača". A
+box does not list stays, marked "(nenájdený)" only once the list was READ
+(`sp_core::audio_outputs::asio_driver_options`: an unknown list — still
+loading, or its GET failed — marks nothing, #225's "claim only what you
+were told"); a failed read leaves the add button disabled with the title
+"Zoznam ovládačov ASIO sa nenačítal" (mock: `/__mock/fail-mode {kind:
+"asio-drivers"}`); the rate reads "podľa ovládača". A
 running ASIO row reads "beží · 71 ms · +0.4 ppm · výpadky 0"; a waiting one
 its reason in Slovak (`sp_core::audio_outputs::asio_reason_sk`, by the
 server's `reason_code`; every `Reason::code` has its text, pinned on the
-server) and its next try. Mock: two drivers, the server's ASIO refusals,
+server) and its next try. Mock: two drivers (or a 500, the fail-mode above), the server's ASIO refusals,
 an enabled ASIO entry running at the network rate, `/__mock/asio-state
 {id, reason_code, reason, retry_in_s}` (reset by `/__mock/settings-reset`).
 
@@ -512,14 +552,20 @@ a scratch model of the worker over lane 2's servo and rubato models. The
 servo's own latency figure is 66.625 ms whether the held frames are added or
 subtracted: only the RING pin sees that mutant. The glue runs on the Windows
 job (`asio_win_tests.rs`: the copy-only buffer switch over heap buffers,
-every slot's four callbacks, messages, a closed device releasing its slot).
+every slot's four callbacks, messages, a 0 Hz report, a closed device
+releasing its slot, a held driver refused before the registry is read, a
+device holding its thread's STA until it is dropped). `asio_hold_tests.rs`
+pins the holds on Linux.
 
 **Live gate** (`e2e/post-deploy-audio-asio.spec.ts`, SNV's suite and PP's
 subset): DVS is registered; exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
 outputs (ci.yml / deploy-pp.yml, "0" until the main session adds each box's
 DVS entry, then "1"), each running, then a minute (1 800 blocks) at its
 driver's rate with no underrun, no reopen, |ppm| ≤ 300 and a latency
-(`asioGateFailures`, unit-tested in the mock suite).
+over 0 and under the entry's delay + 1 s (`asioGateFailures`, unit-tested
+in the mock suite; `rate` vs `driver_rate` is a consistency check of two
+fields the server fills from the same driver read). A failed read of
+`GET /api/v1/program` never counts as zero outputs.
 
 **Notices.** rtrb 0.4.0 (MIT OR Apache-2.0; its LICENSE-MIT has no copyright
 line, its Cargo.toml names the authors), azo 0.4.0 and azo-sys 0.3.2 (MIT,
