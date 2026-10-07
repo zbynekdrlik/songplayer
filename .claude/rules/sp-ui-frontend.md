@@ -892,6 +892,28 @@ Rust UI changes how the store reacts to a message, trace every existing
 spec that posts a mock message right after `page.goto` against the new
 logic, message by message, before calling the suite green.
 
+## A `<select prop:value>` is set before its options mount: every option carries `selected` (#233)
+
+tachys (Leptos 0.7) builds an element's attributes BEFORE it mounts its
+children, and a reactive `prop:value` runs at once, so the select's value is
+set while it has no `<option>`: the browser then shows the FIRST option. A
+select whose value is set again after mount (an `Effect` on a later load)
+recovers; a `<For>` row built from data already loaded never does — after a
+reload every "Zvukové výstupy" row read "podľa siete" / "16 bitov" (#233
+review round 1). Give every option a reactive `selected=move || current ==
+this` (the `playlist_picker.rs` pattern) and keep `prop:value` for the live
+changes. A spec that checks a select's value after a load must use a value
+that is NOT its first option, or it passes on the bug.
+
+## A section of a shared settings map re-reads only its own keys (#233)
+
+Two Nastavenia sections (`settings_form.rs`, `audio_outputs.rs`) both read
+`store.settings` and each MERGES its save into it. An `Effect` reading the
+whole map re-runs on the other section's save and resets this section's
+unsaved edits. Each section reads its keys through a `Memo` (a `Memo` only
+propagates a changed value): the outputs section the two output keys, the
+form every other key.
+
 ## Telling a refused POST from a failure: `api::post_json_status` (#221)
 
 `api::post_json` folds every failure into one string. A caller that must

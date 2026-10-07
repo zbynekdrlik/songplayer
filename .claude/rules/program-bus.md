@@ -289,7 +289,9 @@ included, is comment 5872871751).
   health{forwarded, filled, late_dropped, resyncs, coalesced, cuts,
   submitted, connections, last_stamp_100ns, timing{…} (#210, the sender's
   per-boundary stage timing, `vban-out.md`)}, degraded_reason (#221 B4
-  step 6, "SP-program's receiver" below), vban{…} (#210), input{…}
+  step 6, "SP-program's receiver" below), outputs[…] +
+  audio_network_rate + outputs_problems (#233, `audio-outputs.md`; #210's
+  top-level vban{…} moved into outputs[i].vban), input{…}
   (#212), remote{…} (#213), transition{…} (#215), max{…} (#223 S2,
   `gpu-max.md`), cut_refused[{source, reason}] (#221, below)}`;
   `POST /api/v1/program/cut {"source": pid}` → 200 + that body, 404

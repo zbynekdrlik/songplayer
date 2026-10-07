@@ -246,16 +246,30 @@ notice when the pin moves. Added to the lock with `cargo update --workspace`
   Stored normalized (every default written out).
 - The same rules in Slovak for the dashboard: `ListError::sk()`
   ("Výstup 1 (out-1): cieľ je prázdne").
-- The outputs task (`audio_out_task.rs`) re-reads the list every 5 s,
-  leniently (`parse_stored`): an entry this version cannot read is skipped
-  and named in `outputs_problems` (a WARN once per new problem); the rest run.
-- An entry identical to a running one (and built for the same rate) is KEPT:
-  thread, queue, frame counter (`plan` → `Step::Keep`). Only a new or changed
-  entry is rebuilt; a network-rate change rebuilds only the `"network"`
-  entries. So a dashboard save, or the post-deploy probe entry, never
-  disturbs FOH (Review Focus 2,
-  `apply_keeps_an_unchanged_output_when_another_is_added`). A rebuilt entry's
-  new output starts its frame counter at 0 (a receiver sees one jump).
+- The outputs task (`audio_out_task.rs`) makes one pass (`tick`) every 5 s:
+  the migration until it has run (below), then the list, read leniently
+  (`parse_stored`): an entry this version cannot read is skipped and named
+  in `outputs_problems` (a WARN once per new problem); the rest run. A
+  stored value that is no list at all (`not_a_list`) changes NOTHING but the
+  problem: what runs keeps running (Review Focus 3, never "all outputs
+  off"; `a_stored_value_that_is_no_list_keeps_what_runs`).
+- An entry identical to a running one UP TO ITS NAME (`same_but_name`, and
+  built for the same rate) is KEPT: thread, queue, frame counter (`plan` →
+  `Step::Keep`); the kept output takes the new entry, so a rename only
+  relabels it. Only a new or changed entry is rebuilt; a network-rate
+  change rebuilds only the `"network"` entries. So a dashboard save, a
+  rename, or the post-deploy probe entry never disturbs FOH (Review Focus 2,
+  `apply_keeps_an_unchanged_output_when_another_is_added`,
+  `renaming_an_output_keeps_it_running_under_its_new_name`). A rebuilt
+  entry's new output starts its frame counter at 0 (a receiver sees one
+  jump).
+- A built output's thread is started through a PARAMETER (`StartThread`):
+  `start_outputs` passes `start_vban_thread` (the MMCSS thread on Windows),
+  every unit test a no-op or a recorder. Before, `build` spawned the real
+  thread itself, so on the Windows test job (`cargo test --workspace` on
+  `windows-latest`) the apply tests got a live `vban-output` thread taking
+  their queued blocks. Any new `cfg(windows)` OS-thread spawn reached from a
+  unit-tested fn needs the same seam (`rust-workspace.md`).
 
 ## Migration (first start, `audio_out_migrate.rs`)
 
@@ -264,9 +278,14 @@ notice when the pin moves. Added to the lock with `cargo update --workspace`
 "network"), `int24`, the stream name as #210 put it on the wire
 (`wire_stream_name`), `enabled` as #210 was (only `"true"`), named after its
 `host:port`. A target #210 could never have resolved is skipped and named.
-It runs at the outputs task's start, ONLY while `audio_outputs` is ABSENT and
-an old key exists, and writes the list with `INSERT OR IGNORE` (a list a
-PATCH stored meanwhile wins). **The `vban_*` keys are KEPT** (main-session
+It runs on the outputs task's first pass, ONLY while `audio_outputs` is
+ABSENT and an old key exists, and writes the list with `INSERT OR IGNORE` (a
+list a PATCH stored meanwhile wins). A pass whose migration FAILED (a busy
+or unreadable database) tries it again on the next pass (5 s), never only
+at the next restart (`a_failed_migration_is_tried_again_on_the_next_pass`).
+A target is read as #210's `ToSocketAddrs` read it (`split_target`: the
+whole target trimmed, nothing next to the colon), so "h : 1" is skipped,
+never migrated as h:1. **The `vban_*` keys are KEPT** (main-session
 ruling 4, 7.10.2026): the new code ignores them once the list exists, and a
 rollback to ≤ 0.72 still finds them, so FOH keeps its sound. Lane 3 deletes
 them (and `sp_core::config::SETTING_VBAN_*`) once the list has run a release.
@@ -300,10 +319,17 @@ is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
   delay `rate/60` frames = 16.7 ms at every rate (`fft_delay_frames`). A
   silent or malformed block goes through the filter as zeros.
 - The delay: the sender's send latency is `L + delay`, and its wait cap is
-  the 4 slots PLUS the delay (`plan_wait_up_to`; the plan's 4-slot cap alone
-  sent a delayed output's first packet early,
-  `the_longest_delay_is_waited_for_whole`). The queue bound grows with it
-  (`queue_bound`: the program queue's 10 + `ceil(delay / slot)`).
+  `VBAN_MAX_WAIT_100NS` (4 × L = 8 slots) PLUS the delay (`plan_wait_up_to`;
+  the 8-slot cap alone sent a delayed output's first packet early). That
+  wait is slept in steps of at most 8 slots (`sleep_until`, at most
+  `VBAN_WAIT_STEPS` = 9), the clock read between two of them and each next
+  step planned from that read: the wall ticks at most 8 boundaries per read
+  (`BoundaryTicker`), and an oversleep never adds up
+  (`the_longest_delay_is_waited_for_whole_in_sleeps_the_wall_can_tick`,
+  `a_wait_is_slept_in_steps_the_wall_can_tick`). The queue bound grows with
+  the delay (`queue_bound`: the program queue's 10 + `ceil(delay / slot)`).
+- A converter rubato refuses (none of the supported rates) sends silence
+  and logs one WARN (`VbanSender::new` reads `failed()`).
 - One `VbanOut` per entry, ONE target (`VbanConfig::for_dest`,
   `resolve_dest`); `VbanStallLog`'s buckets count packets, so at 96 kHz
   `late_max_us` covers 30–60 s (ruling 11).
@@ -326,8 +352,15 @@ two keys (`patch_json_empty`), validated with
 before anything is sent; rows keyed by id, every cell reading the list by
 id; each row's live state from `outputs[]` (polled every 2 s). The main form
 MERGES its save into `store.settings` (replacing it blanked the list:
-Review Focus 1, `settings-audio-outputs.spec.ts`). The mock refuses a bad
-list like the server and serves `outputs[]` from the stored list.
+Review Focus 1, `settings-audio-outputs.spec.ts`). Each section re-reads
+only ITS keys through a `Memo` (the section the two output keys, the form
+every other key), so neither section's save resets the other's unsaved
+edits. Every `<option>` of a select carries a reactive `selected`: tachys
+sets `prop:value` BEFORE the options mount, so a row read back from the
+store showed its select's FIRST option ("podľa siete", "16 bitov") until
+#233 review round 1 (the playlist picker's pattern). The mock refuses a bad
+list like the server (the id through `shown_id`'s rule) and serves
+`outputs[]` from the stored list, with a `vban` object per enabled entry.
 
 ## Live gates (`e2e/post-deploy-audio-outputs.spec.ts`)
 
@@ -335,5 +368,8 @@ FOH (`fohabl.lan:6980`) still 48 kHz INT24 `sp-program`, no delay, ≥ 25
 blocks between two reads, no send errors (`audio-outputs-gate.ts`, unit-
 tested in the mock suite); a temporary `e2e-96k` entry to a UDP receiver on
 127.0.0.1 reads index 4, 200-frame INT24 packets, a contiguous counter
-(480/s); `finally` restores the list. The file records no trace (it reads
-the settings). PP's subset does not run it (PP has no FOH entry).
+(480/s); `finally` restores the list. The probe needs a STORED list first:
+with none its PATCH would store one and the migration (only while no list
+is stored) would never run, FOH off for good. Its loopback receiver takes a
+4 MiB buffer. The file records no trace (it reads the settings). PP's
+subset does not run it (PP has no FOH entry).

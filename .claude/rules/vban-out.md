@@ -124,8 +124,10 @@ sender, and its 48 kHz INT24 bytes are #210's.
   not, the wall would go stale while the output is off, and the first packets
   after enabling would burst or stall. That is the same cadence as the
   program and the pacer walls, so a UTC step slews in at the same rate — one
-  clock domain. A single wait is capped at 4 slots (`VBAN_MAX_WAIT_100NS`), so
-  a clock mismatch never parks the thread.
+  clock domain. A packet's wait is capped at 4 × L = 8 slots
+  (`VBAN_MAX_WAIT_100NS`; #233: plus the output's delay, slept in steps of
+  at most 8 slots, `sleep_until`), so a clock mismatch never parks the
+  thread and the wall is read at least every 8 boundaries.
 - The frame counter (`nuFrame`) grows by exactly 1 per SENT packet, across
   cuts and standby. While the output is disabled or has no resolved target,
   nothing is encoded or sent and the counter does not move.
@@ -356,7 +358,8 @@ time (finding 5915907311, the stem worker ruled out). That is the
 The helpers in `vban_packet_tests.rs` (`parse_packet`, `ramp_block`) and
 `vban_out_tests.rs` (`FakeClock` with a `reads` counter, `RecordingSink`,
 `active_config`) are `pub(crate)`. `vban_out_tests.rs` reuses the packet
-helpers, and `api/program_tests.rs` reuses `active_config`. The schedule is tested on `FakeClock`,
+helpers, and `api/program_tests_outputs.rs`, `audio_out_tests.rs` and
+`vban_out_tests_dest.rs` reuse `active_config` (#233). The schedule is tested on `FakeClock`,
 with exact send instants and the recorded sleeps. The counter test drives a
 real `ProgramOutput` over `MockNdiBackend` and keeps the output alive past the
 assertions. The loopback test sends through a real `UdpSocket` to
@@ -364,8 +367,9 @@ assertions. The loopback test sends through a real `UdpSocket` to
 
 ## Box acceptance
 
-Box acceptance is the supervisor's job: point `vban_targets` at a dev1 LAN
-receiver and never at FOH, capture 60 s with tcpdump and check 0 counter gaps,
+Box acceptance is the supervisor's job: add a VBAN entry of the output list
+(#233; `vban_targets` is read only by the migration now) pointing at a dev1
+LAN receiver and never at FOH, capture 60 s with tcpdump and check 0 counter gaps,
 an interval p99 < 7 ms, and PCM that cross-correlates with `SP-program`.
 Routing fohabl/lv1 in VB-Matrix is B4, with the owner's go. The #210 stall
 fix adds: a 15 min dev1 capture with 0 inter-arrival gaps over 15 ms and 0
