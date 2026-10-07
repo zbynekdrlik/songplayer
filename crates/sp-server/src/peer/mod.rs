@@ -6,7 +6,9 @@
 pub mod api;
 pub mod board;
 pub mod catalog;
+pub mod client;
 pub mod config;
+pub mod fetch;
 pub mod hash;
 pub mod hasher;
 pub mod kind;
@@ -22,8 +24,8 @@ use sp_core::config::SETTING_PEER_TRANSFERS_PAUSED;
 use sqlx::SqlitePool;
 use tracing::warn;
 
-/// This node in the exchange: its database, its cache dir and its job board
-/// (a later lane adds its peer client). One per process, built by `lib.rs`.
+/// This node in the exchange: its database, its cache dir, its job board and
+/// its peer client. One per process, built by `lib.rs`.
 pub struct Exchange {
     /// The node's database: the exchange settings are read from it live.
     pub pool: SqlitePool,
@@ -33,6 +35,8 @@ pub struct Exchange {
     /// The jobs this node announces as running (empty until the worker hooks
     /// of lanes 8-9 announce theirs); the catalog lists them.
     pub board: Arc<board::JobBoard>,
+    /// Reads the peers' catalogs and fetches their artifacts.
+    pub(crate) client: client::PeerClient,
 }
 
 impl Exchange {
@@ -41,6 +45,7 @@ impl Exchange {
             pool,
             cache_dir,
             board: Arc::new(board::JobBoard::default()),
+            client: client::PeerClient::new(),
         })
     }
 
