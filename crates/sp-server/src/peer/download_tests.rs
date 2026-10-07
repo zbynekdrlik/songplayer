@@ -5,6 +5,7 @@ use crate::db::models_peer::fetch_record;
 use crate::downloader::VideoRow;
 use crate::downloader::cache::{audio_filename, video_filename};
 use crate::metadata::manual::{DownloadTitle, MANUAL_SOURCE};
+use crate::peer::ask::Ask;
 use crate::peer::config::NodeConfig;
 use crate::peer::kind::{ArtifactKind, Job};
 use crate::peer::rig::{SNV_KEY, TestNode, bytes, counting_chain};
@@ -588,6 +589,65 @@ async fn nobody_has_it_so_it_runs_here_announced() {
         (0, None),
         "nothing written"
     );
+}
+
+/// A download that runs here writes this node's own audio under the names
+/// a fetched pair had: the pair's peer origin goes first, also on the
+/// no-peers path, which never goes through `run_here` (else SNV's stems
+/// would be taken for this node's own encode once the peer is listed again).
+#[tokio::test]
+async fn a_download_here_with_no_peers_forgets_the_pairs_peer_origin() {
+    let pp = TestNode::start("pp", None).await;
+    let id = pp.add_video(YT).await;
+    pp.audio_from(YT, "snv").await;
+    for kind in ["video", "metadata", "lyrics"] {
+        crate::db::models_peer::record_fetch(pp.pool(), YT, kind, "snv", 1, "s", 10)
+            .await
+            .unwrap();
+    }
+    let row = VideoRow {
+        id,
+        youtube_id: YT.into(),
+        title: "t".into(),
+    };
+    let (chain, _) = counting_chain();
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &chain, &row).await else {
+        panic!("expected Local")
+    };
+    for kind in ["video", "audio", "metadata"] {
+        assert_eq!(
+            fetch_record(pp.pool(), YT, kind).await.unwrap(),
+            None,
+            "{kind}"
+        );
+    }
+    assert!(
+        fetch_record(pp.pool(), YT, "lyrics")
+            .await
+            .unwrap()
+            .is_some(),
+        "a kind the download does not make stays"
+    );
+}
+
+/// The audio's origin is recorded BEFORE `record_download` makes the row
+/// playable (a stems or lyrics ask in between must find it), so `adopt`
+/// alone, before the hook's `fetched`, leaves it.
+#[tokio::test]
+async fn an_adopted_pair_records_its_origin_before_the_row_plays() {
+    let (_snv, pp, row) = snv_and_pp().await;
+    let Ask::Fetch(plan) = pp.ex.ask(Job::Download, YT).await else {
+        panic!("expected Fetch")
+    };
+    let (chain, _) = counting_chain();
+    adopt(&pp.ex, &chain, &row, &plan).await.unwrap();
+    let (node, version, sha) = fetch_record(pp.pool(), YT, "audio")
+        .await
+        .unwrap()
+        .expect("the audio's origin");
+    assert_eq!((node.as_str(), version), ("snv", 1));
+    assert_eq!(sha, crate::peer::rig::song_audio_sha());
+    assert_eq!(row_now(&pp, row.id).await.normalized, 1);
 }
 
 #[tokio::test]

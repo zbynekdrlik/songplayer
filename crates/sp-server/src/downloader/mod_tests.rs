@@ -501,6 +501,19 @@ async fn a_failed_video_rename_drops_an_audio_no_row_records() {
     assert!(!temp.exists());
 }
 
+/// When the rows cannot be read, nobody can say the audio is debris: it
+/// stays (WARNed).
+#[tokio::test]
+async fn a_failed_video_rename_keeps_the_audio_when_the_rows_cannot_be_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let (temp, video, audio) = download_files(dir.path(), true);
+    let pool = pool_with_two_rows(None).await;
+    pool.close().await;
+    assert!(place_video(&pool, &temp, &video, &audio).await.is_err());
+    assert_eq!(std::fs::read(&audio).unwrap(), b"the normalized audio");
+    assert!(!temp.exists());
+}
+
 #[tokio::test]
 async fn a_placed_video_keeps_its_audio() {
     let dir = tempfile::tempdir().unwrap();

@@ -316,7 +316,9 @@ jobs:
       # e2e/post-deploy-pp.config.ts: e2e/post-deploy-pp.spec.ts (the version
       # in the DOM, PP's identity and its peer snv with a Cloudflare token, a
       # playlist on program with an SP-program receiver, a manual scene as
-      # OBS manual, the live read of SNV's catalog) + post-deploy-max.spec.ts.
+      # OBS manual, the live read of SNV's catalog, a real transfer of SNV's
+      # smallest file artifact with its sha and size checked) +
+      # post-deploy-max.spec.ts.
       - name: Post-deploy Playwright (PP subset)
         shell: powershell
         env:

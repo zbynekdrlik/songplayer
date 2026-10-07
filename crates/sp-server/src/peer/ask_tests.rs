@@ -80,11 +80,15 @@ async fn a_peer_that_has_it_is_fetched_from() {
     assert_eq!(plan.artifact(ArtifactKind::Video).unwrap().size, 2_000);
     assert_eq!(plan.artifact(ArtifactKind::Audio).unwrap().size, 3_000);
     assert!(plan.artifact(ArtifactKind::Lyrics).is_err());
+    let audio = plan
+        .peer_audio
+        .as_ref()
+        .expect("the audio SNV lists, from the catalog the decision read");
     assert_eq!(
-        plan.peer_audio,
-        Some(song_audio_sha()),
-        "the audio SNV lists, from the catalog the decision read"
+        (audio.youtube_id.as_str(), audio.kind, audio.size),
+        (YT, ArtifactKind::Audio, 3_000)
     );
+    assert_eq!(audio.sha256, song_audio_sha());
     assert_eq!(wait_rows(&pp).await, 0);
     assert!(
         pp.ex.board.snapshot("pp").is_empty(),

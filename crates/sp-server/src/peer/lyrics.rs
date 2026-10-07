@@ -50,10 +50,11 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
         Ask::Wait { recheck, .. } => ex.defer(job, row.id, recheck).await,
         Ask::Fetch(plan) => {
-            if !ex.has_peers_audio(&plan, row.id, &row.youtube_id).await {
-                return ex
-                    .run_here_on_own_audio(job, &row.youtube_id, &plan.peer.name)
-                    .await;
+            if let Some(step) = ex
+                .unless_peers_audio(job, &plan, row.id, &row.youtube_id)
+                .await
+            {
+                return step;
             }
             match adopt(ex, row, &plan).await {
                 Ok(Adopted::Track) => {

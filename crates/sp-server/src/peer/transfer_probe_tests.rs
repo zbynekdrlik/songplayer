@@ -120,6 +120,24 @@ async fn a_probe_transfers_the_peers_smallest_file_outside_the_cache() {
     assert_eq!(entries(pp.cache()), 0, "nothing written into the cache");
 }
 
+/// The gate never waits behind the workers' transfers: the probe does not
+/// take the peer's transfer slot (held here for the whole probe).
+#[tokio::test]
+async fn a_probe_does_not_wait_for_the_peers_transfer_slot() {
+    let (snv, pp, json) = snv_and_pp().await;
+    let slot = pp.ex.client.slot("snv");
+    let _held = slot.lock().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let probe = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        pp.ex.probe_transfer(&snv.as_peer(SNV_KEY), tmp.path()),
+    )
+    .await
+    .expect("the probe waited for the held slot");
+    assert!(probe.ok, "{probe:?}");
+    assert_eq!(probe.bytes, Some(json.len() as u64));
+}
+
 /// SNV's file changed after it was hashed: the catalog's sha no longer
 /// matches the bytes, so the transfer fails loudly and leaves nothing.
 #[tokio::test]

@@ -110,17 +110,21 @@ workers ask their peers before they run a job (below, from "Ask first").
   - Per peer: its catalog read now, its smallest non-empty FILE artifact
     (`transfer_probe::pick`; a `metadata` entry is answered from a row, not
     through the file path), at most `PROBE_MAX_BYTES` (64 MiB).
-  - Fetched through `PeerClient::fetch` (the same slot, Range resume, size
-    bound and sha check as an adoption) into a temp dir under the OS temp
-    dir, NEVER the cache, removed when the probe ends. `bytes` / `sha256`
-    are what arrived, read back.
+  - Fetched through `PeerClient::fetch_unslotted` (the same request, Range
+    resume, size bound and sha check as an adoption) into a temp dir under
+    the OS temp dir, NEVER the cache, removed when the probe ends. `bytes` /
+    `sha256` are what arrived, read back.
+  - It does NOT take the per-peer transfer slot: its part is its own and
+    small, and the gate must not wait behind the workers' queued transfers
+    (a `tokio::sync::Mutex` serves them in arrival order, up to one per
+    worker, a whole video among them). `fetch` takes the slot and calls
+    `fetch_unslotted`; only the probe calls the latter directly.
   - Refused (per peer, `ok: false`) while this node's transfers are paused,
     with no catalog read either. One probe at a time: a second answers 409
     (`Exchange::transfer_probe`, a lock per node); settings that do not hold
     answer 409 too.
   - PP's post-deploy subset calls it (`transferFailures`, "PP deploy"
-    below). It waits its turn in the per-peer slot, behind at most one
-    transfer a worker started.
+    below).
 - Later lanes may ADD fields to `ExchangeStatus` / `PeerStatus`.
 
 ## Wiring
@@ -545,11 +549,13 @@ workers ask their peers before they run a job (below, from "Ask first").
   records its start (`peer_waits`, the FIRST start kept).
 - Every job that runs here after a peer read goes through
   `Exchange::run_here`: it ENDS the job's wait, forgets the `peer_fetches`
-  records of what the job makes (the audio guard below), drops the parts a
-  fetch of it left, then announces it (a later ask never inherits an old
-  start and its spent bound). The hooks' own Local paths use it too (an operator's
-  lyrics ask, nothing newer, a fetch that kept failing). The no-peers and
-  bad-settings paths only announce (no DB write): a wait recorded before
+  records of what the job makes (`forget_origins`, the audio guard below),
+  drops the parts a fetch of it left, then announces it (a later ask never
+  inherits an old start and its spent bound). The hooks' own Local paths use
+  it too (an operator's lyrics ask, nothing newer, a fetch that kept
+  failing, another audio). The no-peers and bad-settings paths only announce
+  (`ask` writes nothing; the download hook then forgets the pair's
+  records, below): a wait recorded before
   the settings went bad survives them, so the first ask after the fix may
   run the job here at once (its bound already spent). Accepted.
 - A fetch refused by this node's own pause logs at DEBUG (it recurs for
@@ -650,26 +656,47 @@ workers ask their peers before they run a job (below, from "Ask first").
 - The audio guard (`peer::audio`, the #229 follow-up lane): a peer's stems
   and lyrics (★ or base tier: every track's line timings were measured on
   the peer's audio) are taken only when this node's audio IS the peer's,
-  the pure `decide::same_audio`:
-  - `peer_fetches` records this node's audio as fetched from that peer at
-    the sha the peer's catalog lists now (`FetchPlan::peer_audio`, read by
-    `ask` from the same catalog as the decision, `decide::listed_audio`);
-  - or this node's own hash of the row's CURRENT audio (`peer_hashes`,
+  the pure `decide::same_audio` over the audio the peer lists
+  (`FetchPlan::peer_audio`: its sha256 and size, read by `ask` from the
+  same catalog as the decision, `decide::listed_audio`) and what this node
+  has (`decide::OwnAudio`):
+  - `peer_fetches` records the video's audio as fetched from that peer at
+    that sha, AND the row's CURRENT audio file has that size (the record is
+    per video, the audio per row: a row whose audio is a local encode under
+    another title's name is not vouched for);
+  - or this node's own hash of the row's current audio (`peer_hashes`,
     while the file still has its hashed size and mtime, `HashEntry::holds`)
     is that sha. PP hashes nothing while it does not serve (phase 1), so
     there the fetch record is what counts.
 
-  Else the hook runs the job here (`Exchange::run_here_on_own_audio`, INFO
-  `exchange: the peer's copy is made from another audio than this node's`):
-  a song this node downloaded itself (nobody had it within 2 h), or a peer
-  that downloaded its song again since. The hooks check it on `Ask::Fetch`
-  with the row's id, before any transfer (stems: before `job_input`).
-  `run_here` forgets the `peer_fetches` records of the kinds its job makes
-  (`models_peer::forget_fetches`): a download that runs here writes this
-  node's own audio, so the old record never vouches for it. A download
-  that then fails leaves the fetched pair in place without its record:
-  its stems and lyrics run here (the safe side). Test fixtures of a peer's
-  stems or lyrics record PP's audio as fetched from SNV
+  `Exchange::unless_peers_audio` runs it on `Ask::Fetch`, with the row's
+  id, before any transfer (stems: before `job_input`), and answers the
+  step the hook returns instead:
+  - another audio → the job runs here (`run_here`, INFO `exchange: the
+    peer's copy is made from another audio than this node's`): a song this
+    node downloaded itself (nobody had it within 2 h), or a peer that
+    downloaded its song again since;
+  - the peer lists no audio of the video right now (a rename there not
+    hashed again yet: the stems or `{yt}_lyrics.json` can still be listed)
+    → waited for like a failed fetch (`after_failed_fetch`, no attempt,
+    within the 2 h bound), never decided on a guess.
+
+  Keeping the fetch record truthful:
+  - the download hook forgets the pair's records
+    (`Exchange::forget_origins`, `models_peer::forget_fetches`) on EVERY
+    Local it answers, the no-peers and bad-settings paths included (they
+    never go through `run_here`): a download here writes this node's own
+    audio under the names a fetched pair had. On SNV (no peers) that is one
+    no-op DELETE per download;
+  - `run_here` forgets the records of what its job makes, for any job;
+  - `peer::download::adopt` records the pair's origin BEFORE
+    `record_download` makes the row playable (a stems or lyrics ask in
+    between would otherwise find no record); `fetched` records the same
+    rows again once done.
+
+  A download that runs here and then fails leaves a fetched pair in place
+  without its record: its stems and lyrics run here (the safe side). Test
+  fixtures of a peer's stems or lyrics record PP's audio as fetched from SNV
   (`TestNode::audio_from`), the state a real PP has after its download.
 - Lyrics: never for an operator's ask here (`lyrics_manual_priority`, a
   non-blank `lyrics_override_text`), never for a video whose

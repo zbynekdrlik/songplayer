@@ -141,8 +141,9 @@ test.describe("PP post-deploy (#229)", () => {
 
   test("PP transfers a real artifact from SNV through Cloudflare", async ({ request }) => {
     // PP's client fetches SNV's smallest file artifact (≤ 64 MiB) into a temp
-    // dir outside its cache. It waits its turn in the per-peer transfer slot,
-    // behind at most one transfer a worker started after the deploy.
+    // dir outside its cache. It does not wait for the per-peer transfer slot
+    // (the workers' transfers queue there), so only that one file's transfer
+    // through Cloudflare counts against this bound.
     test.setTimeout(360_000);
     const resp = await request.post("/api/v1/exchange/probe/transfer", { timeout: 330_000 });
     const body = await resp.text();

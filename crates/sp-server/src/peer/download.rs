@@ -77,7 +77,11 @@ pub async fn record_title(ex: &Exchange, youtube_id: &str, t: &PeerTitle) {
     );
 }
 
-/// The download worker's hook: fetch, wait or run here.
+/// The download worker's hook: fetch, wait or run here. A download that runs
+/// here forgets the pair's peer origin before it starts (`forget_origins`):
+/// it writes this node's own audio under the names a fetched pair had. That
+/// holds on the no-peers and bad-settings paths too, which never go through
+/// `run_here`.
 pub(crate) async fn first(
     ex: Option<&Arc<Exchange>>,
     chain: &ProviderChain,
@@ -86,6 +90,15 @@ pub(crate) async fn first(
     let Some(ex) = ex else {
         return PeerStep::Local(None);
     };
+    let step = ask_or_fetch(ex, chain, row).await;
+    if let PeerStep::Local(_) = &step {
+        ex.forget_origins(Job::Download, &row.youtube_id).await;
+    }
+    step
+}
+
+/// Ask the peers about the row's download and act on the answer.
+async fn ask_or_fetch(ex: &Exchange, chain: &ProviderChain, row: &VideoRow) -> PeerStep {
     let job = Job::Download;
     match ex.ask(job, &row.youtube_id).await {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
@@ -150,6 +163,12 @@ pub(crate) async fn adopt(
         }
         return Err(e.into());
     }
+    // The pair under these names is the peer's from here on. Recorded before
+    // `record_download` makes the row playable: a stems or lyrics ask in
+    // between would otherwise find no record and process the song here
+    // (`peer::audio`). `fetched` records the same rows again once done.
+    ex.record_origins(&row.youtube_id, &plan.peer.name, &plan.artifacts)
+        .await;
     let recorded = record_download(
         &ex.pool,
         &ex.cache_dir,

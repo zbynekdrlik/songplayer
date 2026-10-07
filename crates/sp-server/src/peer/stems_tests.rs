@@ -133,6 +133,47 @@ async fn an_audio_fetched_at_an_older_sha_is_not_the_peers_now() {
     assert!(!crate::stems::stem_paths(&audio).0.exists());
 }
 
+/// The fetch record is per VIDEO: a row whose audio file is not the fetched
+/// one (another size: a local encode under another title's name) is not
+/// vouched for by it.
+#[tokio::test]
+async fn a_fetch_record_vouches_only_for_an_audio_of_the_fetched_size() {
+    let (_snv, pp, job, audio) = snv_and_pp().await;
+    std::fs::write(&audio, bytes(2_999, 9)).unwrap();
+    assert!(matches!(
+        first(Some(&pp.ex), &job).await,
+        PeerStep::Local(Some(_))
+    ));
+    assert!(!crate::stems::stem_paths(&audio).0.exists());
+}
+
+/// SNV lists the stems but, right now, not the audio they were made from (a
+/// rename there not hashed again yet): PP cannot tell, so it waits like a
+/// failed fetch (no attempt, the wait recorded, bounded at 2 h), and
+/// transfers nothing.
+#[tokio::test]
+async fn stems_whose_audio_the_peer_does_not_list_now_wait() {
+    let (snv, pp, job, audio) = snv_and_pp().await;
+    sqlx::query("DELETE FROM peer_hashes WHERE path LIKE '%_audio.flac'")
+        .execute(snv.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        first(Some(&pp.ex), &job).await,
+        PeerStep::Deferred
+    ));
+    let (status, attempts, next, ..) = stem_state(&pp, job.video_id).await;
+    assert_eq!((status, attempts), (None, 0));
+    assert!(next.is_some(), "re-picked after the recheck");
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 1, "counted against the 2 h bound");
+    assert!(!crate::stems::stem_paths(&audio).0.exists());
+    assert!(!pp.ex.parts_dir().exists(), "nothing transferred");
+}
+
 /// Nothing records where PP's audio came from, but PP's own hash of it is
 /// the sha SNV lists (phase 2: a node that serves hashes its audio): the
 /// same audio, so SNV's stems are taken.

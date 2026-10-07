@@ -29,13 +29,11 @@ pub async fn first(ex: Option<&Arc<Exchange>>, job: &StemJob) -> PeerStep {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
         Ask::Wait { recheck, .. } => ex.defer(kind, job.video_id, recheck).await,
         Ask::Fetch(plan) => {
-            if !ex
-                .has_peers_audio(&plan, job.video_id, &job.youtube_id)
+            if let Some(step) = ex
+                .unless_peers_audio(kind, &plan, job.video_id, &job.youtube_id)
                 .await
             {
-                return ex
-                    .run_here_on_own_audio(kind, &job.youtube_id, &plan.peer.name)
-                    .await;
+                return step;
             }
             let input = job_input(
                 &ex.pool,

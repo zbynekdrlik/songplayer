@@ -345,73 +345,81 @@ fn the_listed_audio_is_the_videos_own_audio() {
         ],
         &[],
     );
-    assert_eq!(listed_audio(&c, YT), Some(sha_n('c').as_str()));
+    assert_eq!(listed_audio(&c, YT), Some(&c.artifacts[2]));
     assert_eq!(listed_audio(&c, "ccccccccccc"), None);
     let no_audio = catalog(vec![with_sha(YT, Video, sha_n('d'))], &[]);
     assert_eq!(listed_audio(&no_audio, YT), None);
 }
 
-/// One row per case: who listed what, what this node recorded and hashed.
+/// One row per case: what this node recorded (the fetch: node, sha), its
+/// row audio's size, what it hashed, the answer. SNV lists sha 'a', 10 bytes.
 type AudioCase = (
     &'static str,
-    Option<char>,
     Option<(&'static str, char)>,
+    Option<u64>,
     Option<char>,
     bool,
 );
 
 #[test]
 fn this_nodes_audio_is_the_peers_only_by_its_fetch_or_its_own_hash() {
-    let table: [AudioCase; 8] = [
+    let snv_audio = with_sha(YT, Audio, sha_n('a'));
+    assert_eq!(snv_audio.size, 10);
+    let table: [AudioCase; 9] = [
         (
-            "fetched from snv at the sha snv lists",
-            Some('a'),
+            "fetched from snv at its sha, the same size",
             Some(("snv", 'a')),
+            Some(10),
             None,
             true,
+        ),
+        (
+            "fetched, but this row's audio has another size",
+            Some(("snv", 'a')),
+            Some(11),
+            None,
+            false,
+        ),
+        (
+            "fetched, but no audio file here",
+            Some(("snv", 'a')),
+            None,
+            None,
+            false,
         ),
         (
             "hashed here at the sha snv lists",
-            Some('a'),
             None,
+            Some(10),
             Some('a'),
             true,
         ),
-        ("both", Some('a'), Some(("snv", 'a')), Some('a'), true),
+        ("both", Some(("snv", 'a')), Some(10), Some('a'), true),
         (
             "fetched from another peer",
-            Some('a'),
             Some(("pp2", 'a')),
+            Some(10),
             None,
             false,
         ),
         (
             "fetched at an older sha",
-            Some('a'),
             Some(("snv", 'b')),
+            Some(10),
             Some('b'),
             false,
         ),
-        ("its own encode", Some('a'), None, Some('b'), false),
-        ("nothing known here", Some('a'), None, None, false),
-        (
-            "snv lists no audio",
-            None,
-            Some(("snv", 'a')),
-            Some('a'),
-            false,
-        ),
+        ("its own encode", None, Some(10), Some('b'), false),
+        ("nothing known here", None, None, None, false),
     ];
-    for (case, listed, fetched, hashed, want) in table {
-        let listed = listed.map(sha_n);
+    for (case, fetched, size, hashed, want) in table {
         let fetched = fetched.map(|(node, s)| (node, sha_n(s)));
         let hashed = hashed.map(sha_n);
-        let got = same_audio(
-            "snv",
-            listed.as_deref(),
-            fetched.as_ref().map(|(node, s)| (*node, s.as_str())),
-            hashed.as_deref(),
-        );
-        assert_eq!(got, want, "{case}");
+        let own = OwnAudio {
+            fetched: fetched.as_ref().map(|(node, s)| (*node, s.as_str())),
+            size,
+            hashed: hashed.as_deref(),
+        };
+        assert_eq!(same_audio("snv", &snv_audio, own), want, "{case}");
     }
 }

@@ -32,10 +32,10 @@ use crate::db::models_peer;
 pub struct FetchPlan {
     pub peer: PeerConfig,
     pub artifacts: Vec<Artifact>,
-    /// The sha256 of the audio the peer lists for the video, read from the
-    /// same catalog as the decision (`decide::listed_audio`): what its stems
-    /// and lyrics were made from (`Exchange::has_peers_audio`).
-    pub peer_audio: Option<String>,
+    /// The audio the peer lists for the video (its sha256 and size), read
+    /// from the same catalog as the decision (`decide::listed_audio`): what
+    /// its stems and lyrics were made from (`Exchange::unless_peers_audio`).
+    pub peer_audio: Option<Artifact>,
 }
 
 impl FetchPlan {
@@ -142,19 +142,15 @@ impl Exchange {
 
     /// `job` of `youtube_id` runs here: a wait of it ends (a later ask starts
     /// a fresh one, never inheriting this one's spent bound), the records of
-    /// a peer's copy of what it makes are dropped (the job replaces them: a
-    /// download here writes this node's own audio, so a later stems or
-    /// lyrics ask never reads the old "fetched from the peer" record,
-    /// `has_peers_audio`), the parts a fetch of it left are dropped
+    /// a peer's copy of what it makes are dropped (`forget_origins`: the job
+    /// replaces them), the parts a fetch of it left are dropped
     /// (`drop_job_parts`), and the job is announced while the returned guard
     /// lives.
     pub(crate) async fn run_here(&self, job: Job, youtube_id: &str) -> JobGuard {
         if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
             warn!(youtube_id, %e, "exchange: ending the wait failed");
         }
-        if let Err(e) = models_peer::forget_fetches(&self.pool, youtube_id, job.makes()).await {
-            warn!(youtube_id, %e, "exchange: forgetting a peer's copy failed");
-        }
+        self.forget_origins(job, youtube_id).await;
         self.drop_job_parts(job, youtube_id).await;
         self.announce(youtube_id, job)
     }
@@ -265,6 +261,24 @@ impl Exchange {
         if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
             warn!(youtube_id, %e, "exchange: ending the wait failed");
         }
+        self.record_origins(youtube_id, peer, artifacts).await;
+        info!(
+            youtube_id,
+            job = job.as_str(),
+            source = %format!("peer:{peer}"),
+            artifacts = artifacts.len(),
+            "exchange: done with a peer's copy"
+        );
+    }
+
+    /// Each of `artifacts` of `youtube_id` came from `peer` (`peer_fetches`,
+    /// the latest record wins).
+    pub(crate) async fn record_origins(
+        &self,
+        youtube_id: &str,
+        peer: &str,
+        artifacts: &[Artifact],
+    ) {
         let at = now_ms();
         for a in artifacts {
             let recorded = models_peer::record_fetch(
@@ -281,25 +295,28 @@ impl Exchange {
                 warn!(youtube_id, %e, "exchange: recording a fetch failed");
             }
         }
-        info!(
-            youtube_id,
-            job = job.as_str(),
-            source = %format!("peer:{peer}"),
-            artifacts = artifacts.len(),
-            "exchange: done with a peer's copy"
-        );
+    }
+
+    /// What `job` makes for `youtube_id` is this node's own from now on: the
+    /// records of a peer's copy of it are dropped, so the old "fetched from
+    /// the peer" record never vouches for this node's own audio
+    /// (`peer::audio`).
+    pub(crate) async fn forget_origins(&self, job: Job, youtube_id: &str) {
+        if let Err(e) = models_peer::forget_fetches(&self.pool, youtube_id, job.makes()).await {
+            warn!(youtube_id, %e, "exchange: forgetting a peer's copy failed");
+        }
     }
 }
 
-/// The sha256 of the audio `peer`'s catalog (as read for the decision)
-/// lists for `youtube_id`.
-fn peer_audio(reads: &[PeerRead<'_>], peer: &str, youtube_id: &str) -> Option<String> {
+/// The audio `peer`'s catalog (as read for the decision) lists for
+/// `youtube_id`.
+fn peer_audio(reads: &[PeerRead<'_>], peer: &str, youtube_id: &str) -> Option<Artifact> {
     reads
         .iter()
         .find(|r| r.peer == peer)
         .and_then(|r| r.catalog)
         .and_then(|c| listed_audio(c, youtube_id))
-        .map(str::to_string)
+        .cloned()
 }
 
 /// The INFO of a deferred job. Logging only.

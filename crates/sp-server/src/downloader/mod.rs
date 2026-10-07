@@ -331,6 +331,9 @@ impl DownloadWorker {
             return false;
         }
 
+        // The audio temp is normalized into `audio_final`: no path needs it.
+        let _ = tokio::fs::remove_file(&audio_temp).await;
+
         // Move the video temp to its final pair name.
         if let Err(e) = place_video(&self.pool, &video_temp, &video_final, &audio_final).await {
             tracing::error!(video_id = %row.youtube_id, "video rename failed: {e}");
@@ -338,9 +341,6 @@ impl DownloadWorker {
                 .await;
             return false;
         }
-
-        // Drop the audio temp.
-        let _ = tokio::fs::remove_file(&audio_temp).await;
 
         if let Err(e) = crate::metadata::manual::record_download(
             &self.pool,

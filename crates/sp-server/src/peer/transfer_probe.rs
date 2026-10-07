@@ -3,12 +3,14 @@
 //! peer: its catalog read now, its smallest FILE artifact ([`pick`]: a
 //! `metadata` entry is answered from a row, never through the file path
 //! the gate is about), at most [`PROBE_MAX_BYTES`], fetched through this
-//! node's own client (the same transfer slot, Range resume, size bound and
-//! sha check as an adoption, `PeerClient::fetch`) into a temp dir OUTSIDE
-//! the cache, which is removed when the probe ends. The bytes that arrived
-//! are counted and hashed again here, so the gate reads a real transfer,
-//! not a catalog. Refused while this node's transfers are paused; one probe
-//! at a time (the route answers 409 to a second).
+//! node's own client (the same request, Range resume, size bound and sha
+//! check as an adoption, `PeerClient::fetch_unslotted`) into a temp dir
+//! OUTSIDE the cache, which is removed when the probe ends. It does not take
+//! the peer's transfer slot: its part is its own and small, and the gate
+//! must not wait behind the workers' queued transfers. The bytes that
+//! arrived are counted and hashed again here, so the gate reads a real
+//! transfer, not a catalog. Refused while this node's transfers are paused;
+//! one probe at a time (the route answers 409 to a second).
 
 use std::path::Path;
 use std::time::Instant;
@@ -113,7 +115,7 @@ impl Exchange {
             .map_err(|e| format!("local: a temp dir: {e}"))?;
         let part = self
             .client
-            .fetch(peer, &artifact, dir.path())
+            .fetch_unslotted(peer, &artifact, dir.path())
             .await
             .map_err(|e| e.to_string())?;
         let read_back = |e: std::io::Error| format!("local: reading the part back: {e}");
