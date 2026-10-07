@@ -13,8 +13,9 @@ Spec: `docs/superpowers/specs/2026-10-06-pp-site-node-exchange-design.md`.
 Plan: `docs/superpowers/plans/2026-10-06-pp-node-exchange.md`.
 
 Lane 1 ships the settings, their validation and the status route below.
-Lanes 2–9 (catalog, peer API, client, ask-first hooks, PP deploy) extend this
-file; nothing of them exists yet.
+Lane 2 ships the exchange's vocabulary: kinds, versions, wire types, the job
+board. Lanes 3–9 (own catalog, peer API, client, ask-first hooks, PP deploy)
+extend this file; nothing of them exists yet.
 
 ## Settings (`peer::config::NodeConfig`, read live — no restart)
 
@@ -70,9 +71,10 @@ file; nothing of them exists yet.
 
 ## Wiring
 
-- `peer::Exchange { pool, cache_dir }` (pub fields; `cache_dir` has no reader
-  until lane 3), built once by `lib.rs` right after `AppState`:
-  `Exchange::new(pool, cache_dir) -> Arc<Exchange>`.
+- `peer::Exchange { pool, cache_dir, board }` (pub fields; `cache_dir` has
+  no reader until lane 3; `board` = the running jobs, below), built once by
+  `lib.rs` right after `AppState`: `Exchange::new(pool, cache_dir) ->
+  Arc<Exchange>` (it builds the board).
 - `peer::router(exchange)` holds every exchange route; `lib.rs` merges it into
   the app's router at "11. Axum HTTP server". `merge` is valid because only
   `api::router` carries a fallback (the SPA): axum panics when merging two
@@ -82,3 +84,50 @@ file; nothing of them exists yet.
   `api::router` with a dist dir merged with `peer::router`, still serving
   the SPA), `peer/config_tests.rs`, `api/settings_tests.rs`. On the box:
   `e2e/post-deploy-settings-secrets.spec.ts` reads the status read-only.
+
+## Kinds, versions, jobs (`peer::kind`, `peer::wire`, `peer::board`)
+
+- Kinds (`kind::ArtifactKind`, serde snake_case): `video`, `audio`,
+  `stem_vocals`, `stem_instrumental`, `lyrics`, `metadata`; `parse` reads a
+  URL segment (exact, never `unknown`). An unknown kind (a newer peer's
+  `dub`) reads as `Unknown`; `Catalog::sanitized` drops it with any artifact
+  whose YouTube id or sha256 (64 lowercase hex) is malformed.
+- A node takes a peer's artifact only at ITS OWN current format
+  (`kind::acceptable`): `MEDIA_VERSION` (video/audio), `STEMS_VERSION`,
+  `LYRICS_PIPELINE_VERSION` (equality — a dev peer's newer lyrics are not
+  taken). Bump `MEDIA_VERSION` / `STEMS_VERSION` in the same change that
+  alters that output.
+- The metadata version says who named the title (`kind::metadata_version`):
+  `manual` = 2 (an operator); the chain's provider label `gemini` (the
+  Claude provider writes it too) with `gemini_failed = 0` = 1; everything
+  else = 0 (a parser): `regex` — also the one written with `gemini_failed =
+  0` when no provider is configured (`metadata::fallback_from_title`) — no
+  source, a label this node does not know, a row in the repair queue. A
+  version ≥ 1 is taken. The plan's code ranked every non-manual
+  `gemini_failed = 0` row as a provider's, which would have advertised a
+  no-provider regex guess as a provider title (#229 comment 6030334867).
+- Jobs (`kind::Job`): Download (needs video+audio, makes
+  video+audio+metadata), Lyrics, Stems (needs and makes both stems).
+- A catalog's job entry is `wire::CatalogJob { youtube_id, kind, node, state,
+  started_at }`, one per kind the job makes. `state` = `running` | `queued`:
+  the catalog lists a peer's QUEUED jobs too (the plan's decisions, lanes
+  2/3), and a node waits for either. `started_at` is set only for a running
+  job (`null` for a queued one). An unknown state reads as `Unknown` and
+  `sanitized` drops the entry. `Catalog::announces(id, kinds)` = a running
+  OR queued job (lane 7's Wait). The plan's text calls these `RunningJob` /
+  `Catalog::runs`: the code names them `CatalogJob` / `announces`.
+- A RUNNING job is announced by the in-memory `board::JobBoard` while its
+  `#[must_use]` `JobGuard` lives (`Exchange::announce(youtube_id, job)`); a
+  crash takes the announcements along, never a DB row. A second guard of
+  the same job keeps the first one's start; the last guard to drop ends it.
+  `JobBoard::snapshot(node)` = the running entries, sorted by YouTube id,
+  then kind. QUEUED entries are not on the board: lane 3's catalog reads
+  them from the rows.
+- `wire::PeerMetadata::to_bytes` = the metadata artifact's canonical bytes
+  (serde field order; the catalog's metadata sha256 is over them). Times:
+  `now_ms`, `ms_to_rfc3339` (`2026-10-06T16:00:00.123Z`; out of chrono's
+  range = `""`), `rfc3339_to_ms` (any offset, trimmed).
+- Tests: `peer/kind_tests.rs`, `peer/wire_tests.rs` (a newer peer's catalog:
+  Review Focus 3), `peer/board_tests.rs`. A sha256 in a test is built
+  (`"0123456789abcdef".repeat(4)`): the staging hook refuses a 40+ character
+  hex literal.
