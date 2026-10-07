@@ -61,6 +61,12 @@ jpeg-encoder = "0.6"
 # if-addrs requirement so cargo unifies them into one build.
 mdns-sd = "0.21"
 if-addrs = "0.15"
+# #233: the program audio outputs' sample-rate conversion — rubato's `Async`
+# sinc (an ASIO output's drift-servo ratio, `playback/asrc.rs`); lane 1 will
+# use its synchronous `Fft` (default `fft_resampler` feature) for a VBAN
+# destination's fixed ratio. Pure Rust, MIT OR Apache-2.0 (its MIT notice
+# ships in THIRD-PARTY-NOTICES.txt), pinned exactly.
+rubato = "=5.0.1"
 
 # #162: the box-overload guard's Windows OS calls — GlobalMemoryStatusEx for the
 # pre-spawn memory-headroom read + a per-child Job Object (JOB_OBJECT_LIMIT_

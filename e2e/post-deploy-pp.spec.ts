@@ -105,6 +105,9 @@ test.describe("PP post-deploy (#229)", () => {
   test("the dashboard shows the deployed version", async ({ page, request }) => {
     const consoleMessages: string[] = [];
     page.on("console", (msg) => {
+      // Chromium's benign SRI warning on the preloaded WASM bundle
+      // (crbug.com/981419), filtered by every other dashboard spec.
+      if (/integrity.*attribute.*ignored/i.test(msg.text())) return;
       if (msg.type() === "error" || msg.type() === "warning") {
         consoleMessages.push(`[${msg.type()}] ${msg.text()}`);
       }
