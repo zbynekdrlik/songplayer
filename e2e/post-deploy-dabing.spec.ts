@@ -32,6 +32,8 @@ const ALLOWED_CONSOLE = [
 let consoleMessages: string[] = [];
 let dabingPid = 0;
 let sampleVideoId = 0;
+/** The box's dub memory as this suite found it, put back by `afterAll`. */
+let foundDub: { vokaly: number; podklad: number; dabing: number } | null = null;
 
 async function mouseDrag(page: Page, selector: string, from: number, to: number) {
   // page.mouse has no auto-scroll: a control below the fold receives nothing.
@@ -68,14 +70,27 @@ test.describe.serial("Dabing output on the box (#184, #200)", () => {
     expect(real).toEqual([]);
   });
 
+  test.beforeAll(async ({ request }) => {
+    // Read the dub memory before any test moves it: the operator's own setting
+    // (the designed default is `Len dabing` (0, 1, 1), sp-core `MixConsole`).
+    const resp = await request.get("/api/v1/mix");
+    expect(resp.status(), "GET /api/v1/mix").toBe(200);
+    foundDub = ((await resp.json()) as {
+      dub: { vokaly: number; podklad: number; dabing: number };
+    }).dub;
+    console.log(`[#184] dub memory as found: ${JSON.stringify(foundDub)}`);
+  });
+
   test.afterAll(async ({ request }) => {
-    // Leave the box as found: the full default DUB memory, Dabing output paused
-    // (#184 round G2: kind required; the Dabing player edits the dub memory).
-    await request
-      .patch("/api/v1/mix", {
-        data: { kind: "dub", vokaly: 1.0, podklad: 1.0, dabing: 1.0 },
-      })
-      .catch(() => {});
+    // Leave the box as found: the dub memory read in beforeAll, Dabing output
+    // paused (#184 round G2: kind required; the Dabing player edits the dub
+    // memory). Never a fixed value: restoring (1, 1, 1) here made every deploy
+    // play the original voice under the dub (7.10.2026).
+    if (foundDub) {
+      await request
+        .patch("/api/v1/mix", { data: { kind: "dub", ...foundDub } })
+        .catch(() => {});
+    }
     if (dabingPid) {
       await request.post(`/api/v1/playback/${dabingPid}/pause`);
     }
