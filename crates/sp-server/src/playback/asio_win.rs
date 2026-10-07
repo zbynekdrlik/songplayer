@@ -314,6 +314,8 @@ pub struct WinAsioDevice {
     slot: Option<usize>,
     stream: *mut Stream,
     buffers_created: bool,
+    /// `start` succeeded: `close` stops only a started driver.
+    started: bool,
     /// The thread's STA, for the device's whole life; declared last, so it
     /// drops last (after `Drop::drop` ran `close`, which releases the driver).
     com: ComApartment,
@@ -329,6 +331,7 @@ impl WinAsioDevice {
             slot: None,
             stream: ptr::null_mut(),
             buffers_created: false,
+            started: false,
             com: ComApartment::enter(),
         }
     }
@@ -477,6 +480,7 @@ impl AsioDevice for WinAsioDevice {
         self.stream = stream;
         SLOTS[slot].stream.store(stream, Ordering::SeqCst);
         driver.start().map_err(|e| failed(driver, "start", e))?;
+        self.started = true;
         let latency = driver.latencies().map(|l| l.out).unwrap_or(0);
         Ok(Started {
             output_latency_frames: u32::try_from(latency).unwrap_or(0),
@@ -523,11 +527,13 @@ impl AsioDevice for WinAsioDevice {
     }
 
     fn close(&mut self) {
-        if let Some(d) = self.driver.as_ref()
+        if self.started
+            && let Some(d) = self.driver.as_ref()
             && let Err(e) = d.stop()
         {
             warn!(%e, "asio output: stopping the driver failed (it is released anyway)");
         }
+        self.started = false;
         if let Some(i) = self.slot {
             let s = &SLOTS[i];
             s.stream.store(ptr::null_mut(), Ordering::SeqCst);
