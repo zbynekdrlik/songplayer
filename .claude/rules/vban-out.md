@@ -92,9 +92,12 @@ sender, and its 48 kHz INT24 bytes are #210's.
     songs has 0 samples at |x| ≥ 0.999 (the INT24 full scale), and the
     fade line's `limited_frames` > 0.
 - The queue never blocks. Over `VBAN_QUEUE_BOUND` (10 = the program queue's
-  bound) it drops the OLDEST block and counts it in `blocks_dropped`.
+  bound; #233: `queue_bound(delay)`, 10 + the delay's slots) it drops the
+  OLDEST block and counts it in `blocks_dropped`.
 - The `vban-output` thread (`run_vban_loop`, Windows) encodes one block into 8
-  packets of 200 frames, as INT24 PCM with full scale ±8388607 and clamping.
+  packets of 200 frames, as INT24 PCM with full scale ±8388607 and clamping
+  (48 kHz INT24 with no delay, FOH's; #233: each destination's format,
+  packet count and delay, `audio-outputs.md`).
   It sends packet k of boundary B at `due(B) + L + k·1e7/240` (100 ns, floored:
   0, 41 666, 83 333, …, 291 666). L is TWO slots (`VBAN_SEND_LATENCY_100NS` =
   666 666). It was one slot at first; the 26.9.2026 FOH capture (VB-Matrix stream 6,
@@ -319,7 +322,8 @@ time (finding 5915907311, the stem worker ruled out). That is the
   that copy: two small allocations (the 1200 intervals, 9.6 KB, and the
   ring of at most 32 events) plus their memcpy, review rounds 2–3).
   `send_block` times every packet it sends against its planned instant,
-  `due + L + k/240 s`:
+  `due + L + k/240 s` (48 kHz INT24; #233: `due + L + delay + offset(k)` per
+  destination):
   - over 5 ms late = an event `{utc_ms, late_us}` in a ring of the last
     32, served oldest first as `vban.late_events` (#233: under each VBAN
     output's `outputs[i].vban`). `utc_ms` is the fleet
@@ -344,8 +348,8 @@ time (finding 5915907311, the stem worker ruled out). That is the
 
   Every packet counts, so a block that reached the thread more than 5 ms
   after its first packet was due shows as a run of events: its packets
-  still over 5 ms late, packet k about X − 4.167·k ms for a block X ms past
-  due. A block 0–5 ms past due counts in
+  still over 5 ms late, packet k about X − 4.167·k ms (48 kHz INT24) for a
+  block X ms past due. A block 0–5 ms past due counts in
   `health.timing.vban_feed_late_over_budget` and `late_sends` but adds no
   event. The packet WARN of such a block, if one fires, carries
   `waited_us` 0.

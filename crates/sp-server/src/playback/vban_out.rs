@@ -17,7 +17,8 @@
 //! [`WallClock`](crate::playback::wallclock::WallClock), ticked
 //! once per grid boundary like the program wall ([`WallVbanClock`]) — also
 //! while nothing is sent, so its anchor never goes stale — and the
-//! on-time packets go out one every 4.1667 ms, one wait each, never as a burst.
+//! on-time packets go out one every 4.1667 ms (48 kHz INT24; #233: one every
+//! 1 / (30 · packets per block) s per destination), one wait each, never as a burst.
 //! A block that arrives after its first packet is due (a program fill after
 //! the 3-slot grace, a real stall) sends its past-due packets back-to-back and
 //! counts each as a late send. The frame counter grows by exactly 1 per packet
@@ -31,7 +32,8 @@
 //! ([`WallVbanClock::slewing`], policy [`RemainderSlew`], in `vban_clock.rs`)
 //! therefore neither jumps nor stops at the follow: it owes the movement and
 //! pays it back at [`VBAN_SLEW_PPM`], so every packet interval stays within
-//! 4.1667 ms ± 100 ppm — no burst, no gap, no drop, no crossfade
+//! its spacing ± 100 ppm (4.1667 ms at 48 kHz INT24) — no burst, no gap, no
+//! drop, no crossfade
 //! (`slew_owed_us` on the status, signed).
 //!
 //! #233: one `VbanOut` per VBAN entry of the output list (`audio_out_task.rs`

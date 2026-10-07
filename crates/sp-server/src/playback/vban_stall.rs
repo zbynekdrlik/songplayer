@@ -4,7 +4,9 @@
 //! On the box single packets went out 11–20 ms late on a fixed 10 s grid,
 //! the next one on time (finding 5915907311), visible only in a dev1
 //! capture. So the `vban-output` thread times every packet it sends against
-//! its planned instant, `due + L + k/240 s` (`VbanSender::send_block`), and
+//! its planned instant, `due + L + delay + offset(k)` (#233: offset(k) =
+//! k / (30 · packets per block) s, k/240 s at 48 kHz INT24 with no delay;
+//! `VbanSender::send_block`), and
 //! folds it into a [`VbanStallLog`] (pure, Linux-tested; its window and
 //! its WARN rate limit are `stat_window.rs`'s, shared with the program
 //! sender's `BoundaryTiming`):
@@ -31,7 +33,8 @@
 //! after a residue hold (≤ ~4 ms). Every packet the thread sends counts,
 //! so a block that reached the thread more than 5 ms after its first packet
 //! was due shows here too, as a run of events: its packets still over 5 ms
-//! late, packet k about X − 4.167·k ms for a block X ms past due. (A block
+//! late, packet k about X − 4.167·k ms (48 kHz INT24) for a block X ms past
+//! due. (A block
 //! 0–5 ms past due is counted only by `health.timing`'s
 //! `vban_feed_late_over_budget` and by `late_sends`.)
 

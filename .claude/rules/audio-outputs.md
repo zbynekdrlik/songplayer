@@ -263,7 +263,10 @@ notice when the pin moves. Added to the lock with `cargo update --workspace`
   `apply_keeps_an_unchanged_output_when_another_is_added`,
   `renaming_an_output_keeps_it_running_under_its_new_name`). A rebuilt
   entry's new output starts its frame counter at 0 (a receiver sees one
-  jump).
+  jump). A replaced or removed output is stopped with `discard` (its queue
+  dropped: a delay lowered from 2 s to 0 never sends the old schedule next
+  to its successor, same host and stream name); only the shutdown's
+  `stop_all` drains (#233 review round 4).
 - A built output's thread is started through a PARAMETER (`StartThread`):
   `start_outputs` passes `start_vban_thread` (the MMCSS thread on Windows),
   every unit test a no-op or a recorder. Before, `build` spawned the real
@@ -373,7 +376,7 @@ load shows "Nastavenia sa nenačítali — …" on both. The message span is
 `audio-outputs-status` (`.save-status` is the form's alone: five Nastavenia
 specs read it unscoped, Playwright strict mode). A stored entry missing from
 `outputs[]` reads "uložený, nespustený" with its `outputs_problems` line as
-the tooltip (an unsaved one "neuložený"); a new row's id is above every
+the tooltip, marked "Hlásenie servera: …" (an unsaved one "neuložený"); a new row's id is above every
 row AND every stored entry (a removed, unsaved row still runs under its id).
 `style.css` gives the section the form's fieldset look, one framed grid
 block per output. The mock refuses the cases the dashboard can send in the
@@ -391,7 +394,8 @@ blocks between two reads, no send errors (`audio-outputs-gate.ts`, unit-
 tested in the mock suite), polled for first (after a restart FOH is listed
 only once the outputs task's first pass ran); a temporary `e2e-96k` entry to a UDP receiver on
 127.0.0.1 reads index 4, 200-frame INT24 packets, a contiguous counter
-(480/s); `finally` restores the list. The probe needs a STORED list first:
+(480/s); `finally` restores the list stored NOW (an operator may have
+saved one meanwhile) without the probe. The probe needs a STORED list first:
 with none its PATCH would store one and the migration (only while no list
 is stored) would never run, FOH off for good. Its loopback receiver takes a
 4 MiB buffer. The file records no trace (it reads the settings). PP's
