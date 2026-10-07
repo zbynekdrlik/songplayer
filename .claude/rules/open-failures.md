@@ -64,11 +64,38 @@ the review finding on the selection: 6028419694.
   `failure_backoff::pick_pool`: unplayed minus avoid; else a restart (history
   cleared) from all minus avoid; only when every song is avoided, the old
   pick. Custom playlists (by position) and Loop ignore it.
-- Residuals: a late `Started` of an earlier Play takes the newer Play's mark
-  and resets the run (older: `Started` names no video); and on a box fault,
-  once every unplayed song has failed, the restart branch clears the play
-  history one time (the alternative, a pick without a clear, would let one
-  bad file fail every other song).
+- Residual: on a box fault, once every unplayed song has failed, the restart
+  branch clears the play history one time (the alternative, a pick without a
+  clear, would let one bad file fail every other song).
+
+## Which Play an answer belongs to (follow-up, design record 6029071745)
+
+- `PipelineEvent::Started` / `Error` name no Play. After Play A, then Play B
+  (a skip or a pick in A's pre-roll), A's answer can come after B went out.
+  It used to record B (not open yet), reset B's run, and (an `Error`) count
+  a failure and select a third song, replacing B before it opened.
+- The pipeline answers every Play exactly once and in order. The stub
+  answers each with one `Error`. On Windows a Play's pre-roll reads no
+  command, so a later Play waits for the earlier one's `Started` or
+  failed-open `Error`, and after `Started` the emit loop has no `Error`
+  path. Only a `Shutdown` leaves a Play unanswered, and the pipeline is gone
+  then. Keep it so: an answer that can come twice, or out of order, breaks
+  the count. A Play id echoed in `Started` / `Error` (the design's rejected
+  Approach 3) would be the fix then.
+- `failure_backoff::PlayAnswers`, `PlaylistPipeline.pending_plays`:
+  - `begin_play` (every Play) calls `sent()`;
+  - the `Started` and `Error` arms ask `answers_last_play` FIRST, and an
+    answer that leaves Plays pending returns at once (an INFO line): no
+    record, no run reset, no failure, no selection, no title clock, no
+    lyrics;
+  - an answer with nothing pending saturates at 0 and acts as before (a test
+    injects one with no Play sent).
+- `Ended` / `Position` are not answers: a still-queued `Ended(A)` is still
+  taken as B's (`resolume-driver.md`).
+- A test that sends more than one Play before the answer it injects must
+  inject the earlier answers too
+  (`a_song_is_recorded_as_played_when_it_starts`: the skip's late `Started`,
+  then Previous's).
 
 ## Operator visibility
 
@@ -86,9 +113,13 @@ the review finding on the selection: 6028419694.
   … — ďalší pokus o X s", X = `retry_in_ms` rounded up), mounted by a Memo,
   its text following the 1 Hz `store.ndi_health` poll; the state label reads
   "Čaká na ďalší pokus" while a retry waits, the state is known and the
-  pipeline is not told it decodes (`player_state_label`). The
-  on/off-program badge still reads the WS state (`WaitingForScene` → "○ Mimo
-  programu", also for a playlist on program that waits black).
+  pipeline is not told it decodes (`player_state_label`).
+- The badge follows the SAME rule (`waits_for_retry`, one predicate, so the
+  two never disagree). `player_program_badge` reads "● Na programe — čaká
+  na ďalší pokus" (`ProgramBadge::OnProgramRetry`, the `on` style,
+  `is_on_program`). The engine's wait is `WaitingForScene`, which alone
+  reads "○ Mimo programu", but a retry waits only on program (a cut off
+  program ends it). A pipeline told it decodes keeps the WS state's badge.
 - Mock: rows carry `open_failures: null`; the GET fills `retry_in_ms` per
   request; `/__mock/ndi-health-reset` restores the default rows.
 
@@ -105,6 +136,13 @@ the review finding on the selection: 6028419694.
   clears it), never by the pipeline's replies.
 - A random pick is pinned by repetition (ten playlists, thirty skips): a test
   that a random choice could pass by luck is no RED.
+- A late answer: `a_late_started_of_an_earlier_play_neither_records_nor_ends_the_run`
+  and `a_late_error_of_an_earlier_play_neither_counts_nor_replaces_the_newer_play`
+  (Play A, a skip = Play B, A's answer, then B's); the count itself in
+  `failure_backoff_tests.rs`. The badge table:
+  `player_view` `the_badge_says_on_program_while_the_retry_waits`; the mock
+  E2E sets the WS state with `/__mock/set-playing {playlist_id, state,
+  transport}` (`player-open-failures.spec.ts`).
 - Adding a field to `PlaylistPipeline`: THREE literals build it
   (`runtime_pipeline.rs`, `tests.rs`, `dispatch_lyrics_tests.rs`); grep
   `PlaylistPipeline {` across the crate.
