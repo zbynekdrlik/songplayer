@@ -762,3 +762,62 @@ async fn the_health_row_follows_the_run_between_heartbeats() {
         "a started song clears the row at once"
     );
 }
+
+/// ROZHODNUTÉ 6029773698: the row says whether the pending retry was armed
+/// while the playlist was SP-program's source; only then does the Player's
+/// badge claim the program. A ▶ off air backs off too (the state machine's
+/// `Playing` + `VideoError` reads no scene), and its retry is not on program.
+#[tokio::test]
+async fn a_retry_armed_off_program_says_so_on_the_row() {
+    let mut rig = rig().await;
+    heartbeat(&mut rig.engine); // the row exists
+    start(&mut rig.engine).await; // a ▶, nothing on air
+    for _ in 0..3 {
+        fail(&mut rig.engine).await;
+    }
+    assert!(
+        pending_id(&rig.engine).is_some(),
+        "a ▶ off air backs off too"
+    );
+    let failures = &health_row(&rig.registry)["open_failures"];
+    assert!(failures["retry_at_ms"].is_i64(), "{failures}");
+    assert_eq!(
+        failures["on_program"], false,
+        "not SP-program's source: {failures}"
+    );
+}
+
+/// The same on program: SP-program's source, its ON handled. The flag holds
+/// while that retry is pending; the cut off program ends the retry, and the
+/// claim with it.
+#[tokio::test]
+async fn a_retry_armed_on_program_says_so_until_it_ends() {
+    let mut rig = rig().await;
+    heartbeat(&mut rig.engine); // the row exists
+    rig.engine.put_on_air_for_test(PID);
+    rig.engine.handle_scene_change(PID, true).await; // the 1st Play
+    for _ in 0..3 {
+        fail(&mut rig.engine).await;
+    }
+    assert!(
+        pending_id(&rig.engine).is_some(),
+        "the 3rd failure armed a retry"
+    );
+    let failures = &health_row(&rig.registry)["open_failures"];
+    assert!(failures["retry_at_ms"].is_i64(), "{failures}");
+    assert_eq!(
+        failures["on_program"], true,
+        "SP-program's source: {failures}"
+    );
+
+    rig.engine.handle_scene_change(PID, false).await; // cut off program
+    let failures = &health_row(&rig.registry)["open_failures"];
+    assert!(
+        failures["retry_at_ms"].is_null(),
+        "the retry ended: {failures}"
+    );
+    assert_eq!(
+        failures["on_program"], false,
+        "no retry pending, no program claimed: {failures}"
+    );
+}

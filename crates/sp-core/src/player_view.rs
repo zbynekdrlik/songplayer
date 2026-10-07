@@ -13,10 +13,10 @@
 //! was told the state. The badge reads the same WS state as the state label
 //! (`Playing` = on program, #170), so a program cut flips both in one render.
 //! #229: while the playlist waits for the retry of its failed opens, the
-//! label and the badge both say so, decided by ONE predicate (the badge's
-//! on-program claim is an open question, see [`player_program_badge`]).
-//! These rules live here (WASM-safe, so the workspace tests and the mutation
-//! gate cover them; sp-ui has no unit-test job).
+//! label says so, and the badge too when that retry was armed on program
+//! (the engine's fact, `OpenFailures::on_program`), by ONE predicate. These
+//! rules live here (WASM-safe, so the workspace tests and the mutation gate
+//! cover them; sp-ui has no unit-test job).
 
 use crate::playback::{OpenFailures, PlaybackMode, PlaybackState, TransportState};
 
@@ -101,9 +101,8 @@ pub enum ProgramBadge {
     Unknown,
     /// The wall shows this playlist.
     OnProgram,
-    /// #229: it waits for the retry of its failed opens, taken as on
-    /// program (SP-program's source, its program black; see
-    /// [`player_program_badge`] for the off-program case still open).
+    /// #229: it waits for the retry of its failed opens, armed while it
+    /// was SP-program's source: on program, its program black.
     OnProgramRetry,
     /// It is not on program.
     OffProgram,
@@ -186,14 +185,14 @@ pub fn retry_in_s(retry_in_ms: u64) -> u64 {
 /// failed opens.
 pub const RETRY_PENDING_LABEL: &str = "Čaká na ďalší pokus";
 
-/// #229: the playlist waits for the retry of its failed opens, as far as the
-/// Player knows: its state is known, its health row's `open_failures` names
-/// a retry (`retry_pending`), and the pipeline is not told it decodes. A
-/// pipeline told it decodes (transport `Playing`) is past the wait: the
-/// retry's Play went out since the 1 Hz health row was read. The ONE rule
-/// both the state label and the badge follow, so they never disagree.
-fn waits_for_retry(state_known: bool, transport: TransportState, retry_pending: bool) -> bool {
-    state_known && retry_pending && transport != TransportState::Playing
+/// #229: the playlist waits for `retry` (a retry of its failed opens its
+/// health row names), as far as the Player knows: its state is known, the
+/// retry is there, and the pipeline is not told it decodes. A pipeline told
+/// it decodes (transport `Playing`) is past the wait: the retry's Play went
+/// out since the 1 Hz health row was read. The ONE rule the state label
+/// (any pending retry) and the badge (a retry armed on program) follow.
+fn waits_for_retry(state_known: bool, transport: TransportState, retry: bool) -> bool {
+    state_known && retry && transport != TransportState::Playing
 }
 
 /// The Player's state label ([`state_label`]), except while the playlist
@@ -216,23 +215,22 @@ pub fn player_state_label(
 }
 
 /// The Player's badge ([`program_badge`]), except while the playlist waits
-/// for the retry of its failed opens ([`waits_for_retry`], the label's own
-/// rule): "● Na programe — čaká na ďalší pokus". The engine reports
-/// `WaitingForScene` then (nothing decodes), which alone reads "○ Mimo
-/// programu" for SP-program's source, its program black (design record
-/// 6029071745). Open (#229 Design-question 6029484142): a retry is also
-/// armed for a playlist ▶'d OFF program (`failure_retry.rs::video_failed`
-/// does not read the scene; a cut off program does end one), and neither
-/// the WS state nor the health row tells the two apart, so off program this
-/// badge claims on program too. A pipeline told it decodes keeps its badge,
-/// read from the WS state as always.
+/// for a retry armed while it was SP-program's source (`retry_on_program`:
+/// its health row's `OpenFailures::retry_on_program`, the engine's fact,
+/// ROZHODNUTÉ 6029773698; [`waits_for_retry`], the label's own rule): "●
+/// Na programe — čaká na ďalší pokus". The engine reports `WaitingForScene`
+/// then (nothing decodes), which alone read "○ Mimo programu" for the
+/// playlist on program, its program black (design record 6029071745). A
+/// retry of a playlist played off program (a ▶ off air) keeps "○ Mimo
+/// programu" (its label still says "Čaká na ďalší pokus"). A pipeline told
+/// it decodes keeps its badge, read from the WS state as always.
 pub fn player_program_badge(
     state_known: bool,
     state: PlaybackState,
     transport: TransportState,
-    retry_pending: bool,
+    retry_on_program: bool,
 ) -> ProgramBadge {
-    if waits_for_retry(state_known, transport, retry_pending) {
+    if waits_for_retry(state_known, transport, retry_on_program) {
         ProgramBadge::OnProgramRetry
     } else {
         program_badge(state_known, state)
@@ -415,15 +413,18 @@ mod tests {
         );
     }
 
-    /// #229 follow-up (design record 6029071745): with a retry pending, the
-    /// badge for each WS state as the engine reports it (with the transport
-    /// it comes with), beside the label, which follows the same rule. The
-    /// engine's pause after failed opens is `WaitingForScene` / `Paused`,
-    /// taken as on program (off program: the open #229 Design-question
-    /// 6029484142). A pipeline told it decodes keeps its own badge and
-    /// label (on program "Hrá", off program "Hrá mimo programu").
+    /// #229 follow-up (design record 6029071745, ROZHODNUTÉ 6029773698):
+    /// with a retry pending, the badge for each WS state as the engine
+    /// reports it (with the transport it comes with), for a retry armed on
+    /// program and one armed off program, beside the label, which follows
+    /// the same rule for any pending retry. The engine's pause after failed
+    /// opens is `WaitingForScene` / `Paused`. A pipeline told it decodes
+    /// keeps its own badge and label (on program "Hrá", off program "Hrá
+    /// mimo programu").
     #[test]
-    fn the_badge_says_on_program_while_the_retry_waits() {
+    fn the_badge_says_on_program_while_a_retry_armed_on_program_waits() {
+        // (state, transport, the badge for a retry armed on program, the
+        // label for any pending retry)
         let table = [
             (
                 PlaybackState::Playing,
@@ -454,24 +455,37 @@ mod tests {
             assert_eq!(
                 player_program_badge(true, state, transport, true),
                 badge,
-                "{state:?} / {transport:?}, a retry pending"
-            );
-            assert_eq!(
-                player_state_label(true, state, transport, true),
-                label,
-                "{state:?} / {transport:?}: the label follows the same rule"
-            );
-            assert_eq!(
-                player_program_badge(false, state, transport, true),
-                ProgramBadge::Unknown,
-                "{state:?} / {transport:?}: nothing is claimed until the state is known"
+                "{state:?} / {transport:?}, a retry armed on program"
             );
             assert_eq!(
                 player_program_badge(true, state, transport, false),
                 program_badge(true, state),
-                "{state:?} / {transport:?}: no retry, the WS state's badge"
+                "{state:?} / {transport:?}: a retry armed off program, or none: \
+                 the WS state's badge"
             );
+            assert_eq!(
+                player_state_label(true, state, transport, true),
+                label,
+                "{state:?} / {transport:?}: the label, for any pending retry"
+            );
+            for retry_on_program in [false, true] {
+                assert_eq!(
+                    player_program_badge(false, state, transport, retry_on_program),
+                    ProgramBadge::Unknown,
+                    "{state:?} / {transport:?}: nothing is claimed until the state is known"
+                );
+            }
         }
+        // ROZHODNUTÉ 6029773698: a ▶ off program that waits for its retry
+        // keeps "○ Mimo programu", its label "Čaká na ďalší pokus".
+        assert_eq!(
+            player_program_badge(true, PlaybackState::WaitingForScene, PAUSED, false),
+            ProgramBadge::OffProgram
+        );
+        assert_eq!(
+            player_state_label(true, PlaybackState::WaitingForScene, PAUSED, true),
+            "Čaká na ďalší pokus"
+        );
         assert_eq!(
             ProgramBadge::OnProgramRetry.label(),
             "● Na programe — čaká na ďalší pokus"
@@ -479,7 +493,7 @@ mod tests {
     }
 
     /// Both on-program badges take the Player's `on` style: the retry one
-    /// claims on program too.
+    /// is on program too, only black.
     #[test]
     fn both_on_program_badges_take_the_on_style() {
         assert!(ProgramBadge::OnProgram.is_on_program());
@@ -495,6 +509,7 @@ mod tests {
             last_error: "No video: SetCurrentMediaType failed: No suitable transform".into(),
             retry_at_ms: Some(1_791_331_230_000),
             retry_in_ms: Some(29_500),
+            on_program: true,
         };
         assert_eq!(
             open_failures_line(&failures),

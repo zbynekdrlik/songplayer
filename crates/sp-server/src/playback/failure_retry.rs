@@ -46,7 +46,7 @@ use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 use super::PlaybackEngine;
-use super::failure_backoff::{FailureRun, utc_ms_after};
+use super::failure_backoff::{FailureRun, RetryView, utc_ms_after};
 use super::pipeline::PipelineEvent;
 use super::state::{PlayAction, PlayEvent, PlayState};
 
@@ -63,6 +63,11 @@ pub(super) struct PendingRetry {
     pub(super) due: Instant,
     /// Its sleeping task, aborted when the retry ends early.
     task: tokio::task::AbortHandle,
+    /// It was armed while the playlist was SP-program's source (ROZHODNUTÉ
+    /// 6029773698). That cannot change while it is pending: a cut on
+    /// program sends a Play and a cut off program is a `SceneOff`, and both
+    /// end the retry.
+    on_program: bool,
 }
 
 /// A playlist's failed opens in a row, and its pending retry.
@@ -92,17 +97,18 @@ impl FailureState {
         due
     }
 
-    /// The health row's `open_failures`: the run, and when its pending retry
-    /// is due in UTC ms (`None` while none is pending). `null` while no open
-    /// failed since the last song started.
+    /// The health row's `open_failures`: the run, when its pending retry is
+    /// due in UTC ms (`None` while none is pending) and whether that retry
+    /// was armed on program. `null` while no open failed since the last song
+    /// started.
     pub(super) fn view(&self) -> Option<OpenFailures> {
         let now = Instant::now();
         let utc_now_ms = chrono::Utc::now().timestamp_millis();
-        let retry_at_ms = self
-            .retry
-            .as_ref()
-            .map(|retry| utc_ms_after(utc_now_ms, retry.due.saturating_duration_since(now)));
-        self.run.view(retry_at_ms)
+        let retry = self.retry.as_ref().map(|retry| RetryView {
+            at_ms: utc_ms_after(utc_now_ms, retry.due.saturating_duration_since(now)),
+            on_program: retry.on_program,
+        });
+        self.run.view(retry)
     }
 }
 
@@ -135,9 +141,12 @@ impl PlaybackEngine {
     /// The state machine's `VideoError` step without its selection: the
     /// playlist waits in `next` (`WaitingForScene`), and ONE retry is armed
     /// `delay` from now. One WARN per pause names the playlist, the count and
-    /// the last error.
+    /// the last error. The retry records whether the playlist is
+    /// SP-program's source now (the authority's on-air set): a ▶ off air
+    /// backs off too, and its badge must not claim the program.
     fn back_off(&mut self, playlist_id: i64, next: PlayState, error: &str, delay: Duration) {
         let tx = self.event_tx.clone();
+        let on_program = true; // RED: every retry claims the program (the old premise)
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
             return;
         };
@@ -149,13 +158,19 @@ impl PlaybackEngine {
         })
         .abort_handle();
         pp.failures.cancel_retry(); // one retry per playlist
-        pp.failures.retry = Some(PendingRetry { id, due, task });
+        pp.failures.retry = Some(PendingRetry {
+            id,
+            due,
+            task,
+            on_program,
+        });
         pp.state = next;
         warn!(
             playlist_id,
             failures = pp.failures.run.count(),
             error,
             retry_in_s = delay.as_secs(),
+            on_program,
             "videos cannot be opened — the next attempt waits"
         );
         self.broadcast_state(playlist_id);

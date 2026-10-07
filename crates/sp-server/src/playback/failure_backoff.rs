@@ -129,17 +129,30 @@ impl FailureRun {
         std::mem::take(self).view(None)
     }
 
-    /// The health row's `open_failures`, with the pending retry's due
-    /// instant (`retry_at_ms`); `None` while no open failed.
-    pub fn view(&self, retry_at_ms: Option<i64>) -> Option<OpenFailures> {
+    /// The health row's `open_failures`, with the pending `retry` (its due
+    /// instant, `retry_at_ms`, and whether it was armed on program); `None`
+    /// while no open failed. With no retry pending the row claims no
+    /// program (`on_program` false).
+    pub fn view(&self, retry: Option<RetryView>) -> Option<OpenFailures> {
         let last_error = self.last_failure.clone()?;
         Some(OpenFailures {
             count: self.consecutive_failures,
             last_error,
-            retry_at_ms,
+            retry_at_ms: retry.map(|retry| retry.at_ms),
             retry_in_ms: None, // filled at the read (`NdiHealthRegistry::snapshots`)
+            on_program: retry.is_some_and(|retry| retry.on_program),
         })
     }
+}
+
+/// A pending retry as the health row tells it (#229 follow-up, ROZHODNUTÉ
+/// 6029773698).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryView {
+    /// When it is due (UTC ms since the epoch).
+    pub at_ms: i64,
+    /// It was armed while the playlist was SP-program's source.
+    pub on_program: bool,
 }
 
 /// The Plays a playlist's pipeline was sent and has not answered yet (#229

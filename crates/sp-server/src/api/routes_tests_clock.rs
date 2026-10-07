@@ -110,6 +110,7 @@ async fn ndi_health_endpoint_includes_open_failures() {
             last_error: "No video: SetCurrentMediaType failed: No suitable transform".into(),
             retry_at_ms: Some(1_000),
             retry_in_ms: None,
+            on_program: true,
         }),
     });
 
@@ -134,6 +135,7 @@ async fn ndi_health_endpoint_includes_open_failures() {
             "last_error": "No video: SetCurrentMediaType failed: No suitable transform",
             "retry_at_ms": 1_000,
             "retry_in_ms": 0,
+            "on_program": true,
         })
     );
 }

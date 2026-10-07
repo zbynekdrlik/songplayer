@@ -148,23 +148,29 @@ test("the Live page's Player shows the same line, and a due retry reads 0 s (#22
     { timeout: 5000 },
   );
   // While the retry waits the state label says so (not "Čaká na scénu").
-  // (Its badge is not pinned here: playlist 184 is not the mock's program
-  // source, the open off-program case of #229 Design-question 6029484142;
-  // the dashboard test below pins the badge on program.)
+  // Playlist 184 is not the program's source: its row names no retry armed
+  // on program (`on_program` absent = false), so its badge stays off
+  // program (ROZHODNUTÉ 6029773698). One Player component, so the Live page
+  // reads what the dashboard does.
   await expect(page.getByTestId("player-state")).toHaveText(
     "Čaká na ďalší pokus",
+  );
+  await expect(page.getByTestId("player-program-badge")).toHaveText(
+    "○ Mimo programu",
   );
   // Once the retry is due the countdown stops at 0, never below.
   await expect(line).toHaveText(/ďalší pokus o 0 s$/, { timeout: 8000 });
 });
 
-// #229 follow-up (design record 6029071745): while a playlist waits out the
-// retry of its failed opens, the engine reports `WaitingForScene` (nothing
-// decodes), so the badge read "○ Mimo programu" for the playlist that IS
-// SP-program's source, its program black: the badge now says "on program,
-// waiting" (a retry of a playlist played OFF program reads the same, the
-// open #229 Design-question 6029484142). A playlist told it decodes keeps
-// its badge: the retry's Play went out before the 1 Hz health row moved.
+// #229 follow-up (design record 6029071745, ROZHODNUTÉ 6029773698): while a
+// playlist waits out the retry of its failed opens, the engine reports
+// `WaitingForScene` (nothing decodes), so the badge read "○ Mimo programu"
+// for the playlist that IS SP-program's source, its program black. The row
+// now says whether the retry was armed on program (`on_program`): then the
+// badge says "on program, waiting". A retry of a playlist played off
+// program (a ▶ off air) keeps "○ Mimo programu", its label "Čaká na ďalší
+// pokus". A playlist told it decodes keeps its badge: the retry's Play went
+// out before the 1 Hz health row moved.
 test("on program and waiting out the retry, the badge says so (#229)", async ({
   page,
   request,
@@ -185,6 +191,7 @@ test("on program and waiting out the retry, the badge says so (#229)", async ({
     count: 3,
     last_error: ERROR,
     retry_at_ms: Date.now() + 30_000,
+    on_program: true,
   });
   await expect(label).toHaveText("Čaká na ďalší pokus", { timeout: 5000 });
   await expect(badge).toHaveText("● Na programe — čaká na ďalší pokus");
@@ -205,8 +212,37 @@ test("on program and waiting out the retry, the badge says so (#229)", async ({
     count: 4,
     last_error: ERROR,
     retry_at_ms: null,
+    on_program: false,
   });
   await expect(badge).toHaveText("○ Mimo programu", { timeout: 5000 });
   await expect(badge).not.toHaveClass(/\bon\b/);
   await expect(label).toHaveText("Čaká na scénu");
+});
+
+test("off program and waiting out the retry, the badge stays off program (#229)", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/?playlist=1");
+  await expect(page.getByTestId("player")).toBeVisible({ timeout: 15000 });
+  const badge = page.getByTestId("player-program-badge");
+  const label = page.getByTestId("player-state");
+  await expect(badge).toHaveText("● Na programe", { timeout: 15000 });
+
+  // A ▶ off program whose opens fail: it waits for its retry like one on
+  // program (`WaitingForScene`, nothing decodes), but the engine armed that
+  // retry while the playlist was not SP-program's source.
+  await setState(request, 1, "WaitingForScene", "Paused");
+  await setOpenFailures(request, 1, {
+    count: 3,
+    last_error: ERROR,
+    retry_at_ms: Date.now() + 30_000,
+    on_program: false,
+  });
+  await expect(label).toHaveText("Čaká na ďalší pokus", { timeout: 5000 });
+  await expect(badge).toHaveText("○ Mimo programu");
+  await expect(badge).not.toHaveClass(/\bon\b/);
+  await expect(page.getByTestId("player-open-failures")).toHaveText(
+    /^Videá sa nedajú otvoriť \(3×\): .* — ďalší pokus o \d+ s$/,
+  );
 });

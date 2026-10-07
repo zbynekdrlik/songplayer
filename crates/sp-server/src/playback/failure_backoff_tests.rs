@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use sp_core::playback::OpenFailures;
 
-use super::{FailureRun, PlayAnswers, next_attempt, utc_ms_after};
+use super::{FailureRun, PlayAnswers, RetryView, next_attempt, utc_ms_after};
 
 fn secs(s: u64) -> Option<Duration> {
     Some(Duration::from_secs(s))
@@ -55,18 +55,31 @@ fn a_run_counts_the_failures_and_keeps_the_last_error() {
     assert_eq!(run.fail("No suitable transform"), secs(30));
     assert_eq!(run.count(), 4);
     assert_eq!(
-        run.view(Some(1_234)),
+        run.view(Some(RetryView {
+            at_ms: 1_234,
+            on_program: true,
+        })),
         Some(OpenFailures {
             count: 4,
             last_error: "No suitable transform".into(),
             retry_at_ms: Some(1_234),
             retry_in_ms: None,
+            on_program: true,
         })
     );
+    let off_program = run.view(Some(RetryView {
+        at_ms: 1_234,
+        on_program: false,
+    }));
     assert_eq!(
-        run.view(None).and_then(|v| v.retry_at_ms),
-        None,
-        "no retry pending: no due instant"
+        off_program.map(|v| (v.retry_at_ms, v.on_program)),
+        Some((Some(1_234), false)),
+        "a retry armed off program (a ▶ off air)"
+    );
+    assert_eq!(
+        run.view(None).map(|v| (v.retry_at_ms, v.on_program)),
+        Some((None, false)),
+        "no retry pending: no due instant, no program claimed"
     );
 }
 
@@ -85,6 +98,7 @@ fn a_reset_ends_the_run_and_the_next_failure_counts_from_one() {
             last_error: "broken".into(),
             retry_at_ms: None,
             retry_in_ms: None,
+            on_program: false,
         }),
         "the reset reports the run that ended"
     );

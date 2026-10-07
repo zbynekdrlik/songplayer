@@ -112,8 +112,11 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
             .and_then(|o| o.open_failures)
     };
     let failing = Memo::new(move |_| open_failures().is_some());
-    let retry_pending =
-        Memo::new(move |_| open_failures().is_some_and(|f| f.retry_in_ms.is_some()));
+    let retry_pending = Memo::new(move |_| open_failures().is_some_and(|f| f.retry_pending()));
+    // ROZHODNUTÉ 6029773698: the engine says whether the pending retry was
+    // armed while this playlist was SP-program's source.
+    let retry_on_program =
+        Memo::new(move |_| open_failures().is_some_and(|f| f.retry_on_program()));
 
     // #221 L4b: "Hrá mimo programu" for a playlist playing off program
     // (`sp_core::player_view::state_label`); "—" until the state is known.
@@ -131,16 +134,16 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // = on program, #170), so a cut flips both in one render. It used to read
     // `store.ndi_health` — the 1 Hz poll of the server's 5 s health sample —
     // and lagged the cut by up to ~5 s. A `Memo`, so a position tick never
-    // re-renders it. #229: while the retry of failed opens waits (the health
+    // re-renders it. #229: while a retry armed on program waits (the health
     // row's `open_failures`, the 1 Hz poll), "● Na programe — čaká na ďalší
-    // pokus", by the label's own rule; taken as on program (off program: the
-    // open #229 Design-question 6029484142).
+    // pokus", by the label's own rule; a retry armed off program (a ▶ off
+    // air) keeps "○ Mimo programu".
     let badge = Memo::new(move |_| {
         player_view::player_program_badge(
             state_known.get(),
             state(),
             transport(),
-            retry_pending.get(),
+            retry_on_program.get(),
         )
     });
 
