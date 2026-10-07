@@ -11,6 +11,7 @@ pub mod audio_out; // #233: the program audio's fan-out to its outputs (one queu
 pub mod audio_out_block; // #233: one program boundary's audio block for the outputs
 pub mod audio_out_config; // #233: the outputs' settings — strict PATCH parse, lenient stored read
 pub mod audio_out_migrate; // #233: vban_* → the output list, once (the old keys stay)
+pub mod audio_out_task; // #233: the outputs' settings task (keep / build / stop, DNS, migration)
 pub mod band_pool; // #223: the SP-program sender's persistent row-band workers (no thread per picture)
 mod clear_lyrics;
 pub mod clock_health;
