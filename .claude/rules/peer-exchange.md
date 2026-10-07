@@ -348,6 +348,9 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
   main's tip (each starts this workflow too, which then skips) gets a group
   of its own and can never replace a release waiting there. The group's
   condition is the `resolve` job's `if:`, pinned equal by the guard test.
+  Real deploys do replace each other while pending: a newer release, or a
+  dispatch, replaces the one waiting (the newest wins; dispatch the one you
+  need again after it).
 - Runner: label `resolume-pp` ONLY (`RUNNER_LABELS=self-hosted,windows,
   resolume-pp` for `scripts/setup-runner.ps1`, which refuses `resolume` on
   `RESOLUME-PP`); it must never carry `resolume` (SNV's jobs would land on
@@ -389,9 +392,11 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
     `SP-program` must exist at PP, else this is red on every release). The
     scene comes from SongPlayer's own scene catalog
     (`pp-scenes.ts::pickPlaylistScene`: an active, not refused, not Dabing
-    playlist with a normalized video, the SNV baseline discipline), never
-    from the facade's list: that list is cg OBS's, forwarded, and PP's cg
-    OBS has no `sp-*` scene;
+    playlist with a normalized video; among those `pickBaselineScene`:
+    `sp-slow`, else an `sp-*` but `sp-fast` / `sp-warmup`, else a non-`sp-`
+    one, else the first — `sp-fast` or `sp-warmup` when only they are
+    left), never from the facade's list: that list is cg OBS's, forwarded,
+    and PP's cg OBS has no `sp-*` scene;
   - a manual scene pressed through the facade lands as "OBS manuál"
     (`manualCutLanded`: source -1, cut for that scene, `cg_forward ok`). The
     scene (`pickManualScene`) is the repo variable `PP_MANUAL_SCENE` when set
@@ -405,17 +410,32 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
     the wall.
   - `afterAll` puts SP-program back on the source it had before the tests
     with a dashboard cut (`POST /api/v1/program/cut`, which tells cg OBS
-    nothing), only while the latest recorded switch
-    (`remote.last_remote_cut`) is still the gate's own last press: its
-    scene, recorded at or after the instant the gate sent it
-    (`programRestoreTarget`; the runner and SongPlayer share PP's clock). A
-    playlist start source is re-kicked to its next song, as at SNV. cg OBS
-    goes back on its own scene only when the manual press moved it and it
-    is still there (`cgRestoreTarget`). An operator's press meanwhile is
-    kept on both. Nothing on program at the start (`source` null): nothing
-    to cut back to, the gate's last cut stays on air and persisted.
+    nothing), only while the program is still what the gate left
+    (`programRestoreTarget`): the latest recorded switch
+    (`remote.last_remote_cut`) is the gate's own last press (its scene,
+    recorded at or after the instant the gate sent it; the runner and
+    SongPlayer share PP's clock) and the program is on that press's source
+    — or, when that last press was refused (a keep: the NDI input inactive,
+    cg OBS refusing), on the source of the press before it, so a refused
+    manual press never leaves the test playlist on air. A playlist start
+    source is re-kicked to its next song, as at SNV. cg OBS goes back on
+    its own scene only when the manual press moved it and it is still there
+    (`cgRestoreTarget`), through the facade when SP-program stays on "OBS
+    manuál" and that scene is a manual one (so SongPlayer names the program
+    by it again), else on cg OBS directly (`cgRestoreVia`). An operator's
+    press meanwhile is kept on both. Nothing on program at the start
+    (`source` null): nothing to cut back to, the gate's last cut stays on
+    air and persisted.
+  - The live probe reads SNV, and SNV's own pipeline may be restarting
+    SongPlayer at that moment (main's E2E, then the post-merge dev push on
+    SNV's single runner): a red probe right after a release is checked
+    against SNV's deploy timeline before anything at PP.
 - "produkcia beží" at PP:
-  - `gh workflow disable deploy-pp.yml` first: no new run starts;
+  - `gh workflow disable deploy-pp.yml` first: no new run starts; also
+    cancel any deploy-pp run already pending or queued (`gh run list
+    --workflow deploy-pp.yml --status pending` / `--status queued`, then
+    `gh run cancel <id>`: whether a disable stops a run already pending in
+    the group is not verified);
   - a run in flight: cancel it while it is still in `resolve`, the
     downloads or "Check the build"; once "Stop SongPlayer" ran, let the
     deploy job finish (~2 min; a cancel there still starts SongPlayer, but

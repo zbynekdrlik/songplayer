@@ -4,8 +4,10 @@ name: Deploy to PP
 # (win-resolume) stays the dev rig. A CI run on main that ended green deploys
 # here. A dev build reaches PP only on purpose: dispatch this workflow with the
 # id of the CI run whose build PP gets (it must be a completed, green push run
-# of CI, scripts/pp_deploy_pick.py). PP's settings live in PP's DB and no step
-# here touches it, nor the phase-0 scheduled task, ACL or firewall.
+# of CI, scripts/pp_deploy_pick.py). PP's settings live in PP's DB and no
+# deploy step writes it (the gate's scene presses persist only the program
+# source, as every press does), nor the phase-0 scheduled task, ACL or
+# firewall.
 # The rules: .claude/rules/peer-exchange.md, "PP deploy".
 on:
   workflow_run:
