@@ -385,6 +385,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: The ASIO host never sets the rate or the clock source, nor opens the panel (#233)
+        run: |
+          set -euo pipefail
+          # Dante Controller / SoundGrid own the rate, the clock and the
+          # buffer; an ASIO output follows the driver (spec section 3;
+          # iemmixer I2). azo's Driver has these calls: none may be made.
+          if grep -rnE '\.(set_sample_rate|set_clock_source|open_control_panel)\(' --include='*.rs' crates/; then
+            echo "FAIL: SongPlayer's ASIO host must never set the driver's rate or clock, nor open its panel"
+            exit 1
+          fi
+          echo "OK: no ASIO setter is called"
+
       - name: Scan for ignored tests
         run: |
           IGNORED=$(grep -rn '#\[ignore\]' --include='*.rs' crates src-tauri || true)
