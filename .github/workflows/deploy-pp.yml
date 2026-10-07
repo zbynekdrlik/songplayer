@@ -133,8 +133,13 @@ jobs:
       # task INSTANCE first, else Task Scheduler can still report it Running
       # after a taskkill and the later `schtasks /run` does nothing
       # (ci-workflows.md). Then CLIProxyAPI, an orphan of the old process.
+      # Each of the next two steps has its own bound: a hung stop or
+      # installer fails its step in minutes (a plain step failure), and the
+      # always() Start step brings SongPlayer back, instead of PP waiting
+      # dark for the job's timeout.
       - name: Stop SongPlayer
         shell: powershell
+        timeout-minutes: 5
         run: |
           $ErrorActionPreference = "Continue"
           Write-Host "=== Stopping SongPlayer ==="
@@ -168,6 +173,7 @@ jobs:
 
       - name: Install SongPlayer and its dashboard (PP's DB and settings stay as they are)
         shell: powershell
+        timeout-minutes: 10
         run: |
           $ErrorActionPreference = "Stop"
           $installer = Get-ChildItem "artifacts\tauri\*.exe" | Select-Object -First 1

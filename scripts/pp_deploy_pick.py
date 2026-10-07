@@ -5,7 +5,7 @@ PP (the `resolume-pp` runner) drives a church site's live wall. It takes
 main releases only (a `workflow_run` of CI on main), or a build the main
 session dispatches on purpose (`workflow_dispatch -f ci_run_id=<run>`).
 Either way the build must come from a completed, green `push` run of the
-`CI` workflow of this repository. Refused, before PP is touched: a run whose
+`CI` workflow (`.github/workflows/ci.yml`) of this repository. Refused, before PP is touched: a run whose
 Gate went red (a failed test, a surviving mutant), a `pull_request` run (it
 builds nothing; a fork's head branch may even be named `main`), a run still
 in progress, and another repository's run.
@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 WORKFLOW = "CI"
+WORKFLOW_PATH = ".github/workflows/ci.yml"
 _SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -45,6 +46,10 @@ def pick(run: Any, repo: str) -> tuple[int, str]:
     name = run.get("name")
     if name != WORKFLOW:
         raise Refused(f"the run is the workflow {name!r}, not {WORKFLOW!r}")
+    # The name alone could be another workflow's: the file is the identity.
+    path = run.get("path")
+    if path != WORKFLOW_PATH:
+        raise Refused(f"the run's workflow file {path!r}, not {WORKFLOW_PATH!r}")
     event = run.get("event")
     if event != "push":
         raise Refused(f"the run's event {event!r}, not a push: it built nothing for PP")
