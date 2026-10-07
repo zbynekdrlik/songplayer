@@ -361,6 +361,12 @@ failed on them (`36438006665`):
   the opaque one is not. Use the helper as a temporary
   (`pool.run(&recorder(&log))`), bind it in a block, or take the data out
   without moving (`std::mem::take(&mut *log.lock().unwrap())`).
+- **A closure that returns an async method's future borrowing the
+  closure's own argument is E0515** (#229 follow-up lane, caught by
+  reading): `let wait = |why: PeerError| self.after_failed_fetch(.., &why);`
+  then `wait(PeerError::Paused).await` — the future holds `&why`, which
+  dies when the closure returns. Write a small private `async fn` that
+  takes the value (`not_now(.., why: PeerError)`) and awaits inside.
 - **A borrow returned from ONE branch lives for the whole function → E0502
   on a later mutation of the same field** (#221 A1 lane, review round 2:
   the GREEN commit did not compile). `if fill > 0 && let Some(last) =

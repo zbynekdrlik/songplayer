@@ -168,6 +168,36 @@ async fn lyrics_of_a_song_with_no_audio_here_wait() {
     assert_eq!(parts_left(&pp), 0);
 }
 
+/// The record does not vouch (another size) and this node's audio cannot
+/// be hashed now (here a directory at its path: it stats, it cannot be read,
+/// on Linux and on Windows): no verdict, so the job waits like a failed
+/// fetch instead of running here on a guess.
+#[tokio::test]
+async fn lyrics_whose_audio_cannot_be_hashed_now_wait() {
+    let (_snv, pp, id, _) = snv_and_pp().await;
+    let audio: String = sqlx::query_scalar("SELECT audio_file_path FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    std::fs::remove_file(&audio).unwrap();
+    std::fs::create_dir(&audio).unwrap();
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        first(Some(&pp.ex), &row).await,
+        PeerStep::Deferred
+    ));
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 1, "counted against the 2 h bound");
+    assert!(pp.ex.board.snapshot("pp").is_empty(), "nothing runs here");
+    let now = lyrics_now(&pp, id).await;
+    assert_eq!((now.has_lyrics, now.lyrics_attempts), (0, 0));
+    assert_eq!(json_at(&pp), None);
+}
+
 #[tokio::test]
 async fn the_same_translation_gender_here_keeps_the_translation() {
     let (_snv, pp, id, _) = snv_and_pp().await;

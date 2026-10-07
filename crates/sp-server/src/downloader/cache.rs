@@ -256,7 +256,8 @@ fn path_column(path: &Path) -> String {
 /// song's, never debris to delete (#136: rows of one video share files by
 /// name, so a name one attempt writes can be the file another row plays).
 /// A caller that deletes on `false` holds [`SONG_FILES`] from this read to
-/// the delete, so no rename or record lands between them.
+/// the delete, so no rename or record lands between them (the startup
+/// self-heal needs no lock: it runs before any renamer is started).
 pub async fn recorded_by_a_row(pool: &sqlx::SqlitePool, path: &Path) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM videos WHERE file_path = ?1 OR audio_file_path = ?1)",

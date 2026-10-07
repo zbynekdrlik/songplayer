@@ -14,8 +14,9 @@
 //! would (a node that does not serve, PP in phase 1, runs no hasher, and the
 //! audio phase 0 copied from SNV carries no fetch record). When this node
 //! cannot tell yet (the peer lists no audio of the video now, a rename there
-//! not hashed again; or no audio of the row is on disk here) the job waits
-//! like a failed fetch, within the same 2 h bound. While this node's
+//! not hashed again; no audio of the row is on disk here; or its audio
+//! cannot be hashed now) the job waits like a failed fetch, within the same
+//! 2 h bound. While this node's
 //! transfers are paused nothing is read or hashed: the fetch would be
 //! refused anyway, so the job waits out the pause as a refused fetch does.
 
@@ -44,8 +45,9 @@ impl Exchange {
     /// Before a hook takes `plan`'s stems or lyrics (`job`) for row
     /// `video_id`: `None` = this node's audio IS the audio the peer lists
     /// now, take them. Else the step the hook returns instead: the job runs
-    /// here (another audio, INFO), or waits, bounded like a failed fetch
-    /// (this node's pause, or it cannot tell yet).
+    /// here (another audio, INFO), or waits like a failed fetch: this node's
+    /// pause (5 min rechecks, never gives up), or it cannot tell yet (within
+    /// the 2 h bound).
     pub(crate) async fn unless_peers_audio(
         &self,
         job: Job,
@@ -84,11 +86,16 @@ impl Exchange {
             hashed: None,
         };
         // The record reads no file: the audio is hashed only when it does not
-        // vouch for it.
+        // vouch for it. A hash that cannot be taken now (the file changed
+        // meanwhile, a rename here; or it cannot be read) is no verdict.
         let hashed = if same_audio(peer, listed, own) {
             None
         } else {
-            self.audio_sha(&row).await
+            let Some(sha) = self.audio_sha(&row).await else {
+                let why = PeerError::NotYet("this node's audio could not be hashed now".into());
+                return Some(self.not_now(job, video_id, youtube_id, peer, why).await);
+            };
+            Some(sha)
         };
         own.hashed = hashed.as_deref();
         if same_audio(peer, listed, own) {

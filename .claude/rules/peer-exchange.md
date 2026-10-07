@@ -116,10 +116,14 @@ workers ask their peers before they run a job (below, from "Ask first").
     are what arrived, read back. A fresh temp dir holds no part, so no
     `Range` request is sent: Range through Cloudflare stays unproven by the
     gate (the adoptions' resume uses it).
-  - Bounded in time too: `PROBE_MAX_TIME` (300 s, the catalog read
-    included, under the gate's 330 s request bound). A transfer that
-    trickles past it fails (`the probe took over 300s`), its temp dir
-    removed, and the probe lock is free for the next gate run.
+  - Bounded in time too: `PROBE_MAX_TIME` (300 s per peer, the catalog
+    read included, under the gate's 330 s request bound with PP's one
+    peer; phase 2, with more peers probed one after another, can pass
+    that bound). A transfer that trickles past it fails (`the probe took
+    over 300s`), its temp dir removed, and the probe lock is free for the
+    next gate run. Known limit: on Windows a blocking write still holding
+    the part when the bound fires can make that removal fail silently,
+    leaving at most 64 MiB in `%TEMP%\songplayer-peer-probe-*`.
   - It does NOT take the per-peer transfer slot: its part is its own and
     small, and the gate must not wait behind the workers' queued transfers
     (a `tokio::sync::Mutex` serves them in arrival order, up to one per
@@ -643,7 +647,12 @@ workers ask their peers before they run a job (below, from "Ask first").
   (a failed second one leaves the row's old ★ and translation version); a
   failed catalog read is not cached (no negative cache), so while a peer
   is unreachable every ask reads it again, each bounded by the 10 s
-  connect timeout. The waits' limits are under "Ask first" above.
+  connect timeout. The audio guard's on-demand hash (below) has no
+  single-flight: PP's stems and lyrics workers may hash the same audio
+  at once (two reads at the hasher's rate), and on a serving node an
+  entry it stores for an audio the catalog does not list (not the
+  video's lowest row) is pruned by the next hasher pass, then taken
+  again when asked. The waits' limits are under "Ask first" above.
 - `downloader/` is out of the mutation gate: the logic stays in `peer/`,
   only the hook lives in `downloader/mod.rs`; its tests are `mod_tests.rs`
   (moved out for the cap) + `mod_tests_peer.rs` (tools missing on purpose:
@@ -699,8 +708,11 @@ workers ask their peers before they run a job (below, from "Ask first").
     (`after_failed_fetch` with `PeerError::NotYet`, no attempt, within the
     2 h bound), never decided on a guess: the peer lists no audio of the
     video right now (a rename there not hashed again yet: the stems or
-    `{yt}_lyrics.json` can still be listed), or no audio of the row is on
-    disk here (the lyrics hook; the stems hook defers that before);
+    `{yt}_lyrics.json` can still be listed), no audio of the row is on
+    disk here (the lyrics hook; the stems hook defers that before), or
+    the record does not vouch and the audio cannot be hashed now (it
+    changed meanwhile, a rename here; or it cannot be read): only a
+    computed sha that differs runs the job here;
   - this node's transfers are paused → checked FIRST: nothing is read or
     hashed, the job waits the pause out like a refused fetch (5 min
     rechecks, never gives up).
@@ -786,7 +798,15 @@ workers ask their peers before they run a job (below, from "Ask first").
   (`client_tests.rs`, `fetch_tests.rs`, `lan_tests.rs`, `ask_tests.rs`,
   `download_tests.rs`, `stems_tests.rs`, `lyrics_tests.rs`,
   `repair_tests.rs`, `audio_tests.rs`, `transfer_probe_tests.rs`, and the
-  workers' `*_tests_peer.rs`). `TestNode::audio_from(yt, peer)` records
+  workers' `*_tests_peer.rs`). To prove a write happens BEFORE a later
+  step, make that step fail: a test trigger `CREATE TRIGGER … BEFORE
+  UPDATE ON videos BEGIN SELECT RAISE(ABORT, '…'); END` fails
+  `record_download`, and the origin must already be recorded
+  (`download_tests::an_adopted_pair_records_its_origin_before_the_row_plays`).
+  A guard with two branches needs a test where ONE branch alone decides
+  (change PP's bytes so the hash says no while the record says yes, and
+  the reverse); a fixture where both agree tests neither.
+  `TestNode::audio_from(yt, peer)` records
   this node's audio as fetched from `peer` at the sha every node's
   `give_song` audio has (`rig::song_audio_sha`).
 - wiremock stands in for Cloudflare Access and a peer (`client_tests.rs`,
