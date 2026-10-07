@@ -21,11 +21,16 @@ fn the_wait_keeps_the_average_at_the_rate() {
     assert_eq!(wait_for(3, ms(0), 2), ms(1_500));
 }
 
+/// Rate 0 is no limit. A count far ahead of the rate does not overflow and
+/// pauses at most 2 s at a time: a stall, or a wrong rate, never hangs a
+/// transfer (or a test) for longer.
 #[test]
-fn rate_zero_is_no_limit_and_huge_counts_do_not_overflow() {
+fn rate_zero_is_no_limit_and_a_pause_is_at_most_two_seconds() {
+    let ms = Duration::from_millis;
     assert_eq!(wait_for(u64::MAX, Duration::ZERO, 0), Duration::ZERO);
-    let long = wait_for(u64::MAX, Duration::ZERO, 1);
-    assert!(long > Duration::from_secs(1 << 40), "{long:?}");
+    assert_eq!(wait_for(u64::MAX, Duration::ZERO, 1), ms(2_000));
+    assert_eq!(wait_for(2_500, ms(0), 1_000), ms(2_000), "2.5 s due");
+    assert_eq!(wait_for(2_500, ms(600), 1_000), ms(1_900));
 }
 
 #[test]
