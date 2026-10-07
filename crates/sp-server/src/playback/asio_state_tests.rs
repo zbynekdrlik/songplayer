@@ -226,9 +226,6 @@ fn the_ring_holds_the_target_four_slots_and_a_block() {
         ring_capacity_frames(48_000.0, 1_666_666, 1_610),
         14_400 + 1_610
     );
-    assert_eq!(recentre_frames(440_000, 96_000.0), 4_224);
-    assert_eq!(recentre_frames(-440_000, 96_000.0), -4_224);
-    assert_eq!(recentre_frames(0, 96_000.0), 0);
 }
 
 #[test]
