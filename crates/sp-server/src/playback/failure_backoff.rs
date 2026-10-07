@@ -13,6 +13,9 @@
 //! cannot be opened stays "unplayed": the selection must leave it out, or at
 //! the end of a rotation it is the one song left and is picked for good
 //! ([`pick_pool`], fed by [`FailureRun::avoid`]).
+//!
+//! A pipeline's `Started` and `Error` name no Play, so only the answer to
+//! the LAST Play sent records a play or counts a failure ([`PlayAnswers`]).
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -136,6 +139,37 @@ impl FailureRun {
             retry_at_ms,
             retry_in_ms: None, // filled at the read (`NdiHealthRegistry::snapshots`)
         })
+    }
+}
+
+/// The Plays a playlist's pipeline was sent and has not answered yet (#229
+/// follow-up, design record 6029071745). The pipeline answers every Play
+/// exactly once and in order: `Started` when its song opened, `Error` when it
+/// did not (a Play's pre-roll reads no command, so a later Play waits for the
+/// earlier one's answer). Neither event names its Play, so after a quick
+/// Play → Play (a skip or a pick in the first song's pre-roll) the first
+/// song's answer can come after the second Play went out. Only the answer
+/// that brings the count to 0 answers the LAST Play sent: only that one
+/// records a play, ends the run of failed opens or counts a failure.
+#[derive(Debug, Default)]
+pub struct PlayAnswers {
+    /// Plays sent and not answered yet.
+    unanswered: u32,
+}
+
+impl PlayAnswers {
+    /// A Play was sent.
+    pub fn sent(&mut self) {
+        self.unanswered = self.unanswered.saturating_add(1);
+    }
+
+    /// A `Started` or an `Error` came: whether it answers the last Play sent.
+    /// An answer with no Play pending answers the last one too, and the count
+    /// stays 0 (the pipeline never answers more than it was sent; a test may
+    /// inject one).
+    pub fn answered(&mut self) -> bool {
+        self.unanswered = self.unanswered.saturating_sub(1);
+        self.unanswered == 0
     }
 }
 

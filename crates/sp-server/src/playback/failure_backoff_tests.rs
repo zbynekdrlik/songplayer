@@ -161,3 +161,44 @@ fn a_run_avoids_its_failed_songs_and_the_song_just_sent() {
     run.reset();
     assert_eq!(run.avoid(Some(7)), vec![7], "a start ends the run's list");
 }
+
+use super::PlayAnswers;
+
+/// #229 follow-up (design record 6029071745): a `Started` or an `Error`
+/// names no Play, and the pipeline answers its Plays one by one, in order.
+/// Only the answer that brings the count of unanswered Plays to 0 is the
+/// LAST Play's: Play, Play, answer (the first, late), answer (the second).
+/// Whether it is a start or a failure does not matter: an Error after a
+/// newer Play is just as late.
+#[test]
+fn only_the_answer_to_the_last_play_sent_acts() {
+    let mut plays = PlayAnswers::default();
+    plays.sent();
+    assert!(plays.answered(), "one Play: its answer is the last one's");
+
+    plays.sent(); // A
+    plays.sent(); // B, a skip in A's pre-roll
+    assert!(!plays.answered(), "A's answer, after B was sent");
+    assert!(plays.answered(), "B's answer");
+
+    plays.sent(); // A
+    plays.sent(); // B
+    plays.sent(); // C
+    assert!(!plays.answered(), "A's Error, after B and C were sent");
+    assert!(!plays.answered(), "B's answer, after C was sent");
+    plays.sent(); // D, while C is under way
+    assert!(!plays.answered(), "C's answer, after D was sent");
+    assert!(plays.answered(), "D's answer");
+}
+
+/// An answer with no Play pending (a test injects one; the pipeline never
+/// answers more than it was sent) answers the last Play, as before the
+/// count: the count stays at 0, so the next Play's answer is its own.
+#[test]
+fn an_answer_with_no_play_pending_acts_and_leaves_the_count_at_zero() {
+    let mut plays = PlayAnswers::default();
+    assert!(plays.answered());
+    assert!(plays.answered());
+    plays.sent();
+    assert!(plays.answered(), "the next Play's answer owes nothing");
+}

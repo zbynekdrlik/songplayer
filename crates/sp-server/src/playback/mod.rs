@@ -219,6 +219,9 @@ struct PlaylistPipeline {
     /// #229: the song a SelectAndPlay or a PlayVideo sent; its `Started`
     /// records it as played (`song_started`). Every Play clears it first.
     record_on_start: Option<i64>,
+    /// #229 follow-up: the Plays sent and not answered yet (every Play counts
+    /// one, `begin_play`); only the answer to the last one acts.
+    pending_plays: failure_backoff::PlayAnswers,
 }
 
 impl PlaylistPipeline {

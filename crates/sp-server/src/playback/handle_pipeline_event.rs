@@ -19,7 +19,7 @@ impl PlaybackEngine {
     /// pipeline events and spawns title-show / title-hide timer tasks. Its
     /// branches are pinned by behaviour tests on an in-memory DB
     /// (`tests_hold.rs`, `tests_scene_change.rs`, `tests_play_video.rs`,
-    /// `program_authority_tests.rs`); the
+    /// `program_authority_tests.rs`, `failure_retry_tests.rs`); the
     /// individual concerns (timer cancellation, title formatting,
     /// get_video_title_info) have dedicated unit tests.
     #[cfg_attr(test, mutants::skip)]
@@ -29,6 +29,10 @@ impl PlaybackEngine {
                 duration_ms,
                 position_ms,
             } => {
+                // #229 follow-up RED: the answer is counted, but every answer
+                // still acts (the old behaviour; GREEN returns on an earlier
+                // Play's answer).
+                let _ = self.answers_last_play(playlist_id);
                 // #229: a song opened — the run of failed opens is over, and
                 // a selected or picked song counts as played now.
                 self.song_started(playlist_id).await;
@@ -167,6 +171,8 @@ impl PlaybackEngine {
             }
             PipelineEvent::Error(msg) => {
                 warn!(playlist_id, %msg, "pipeline error");
+                // #229 follow-up RED: counted, still acted on (old behaviour).
+                let _ = self.answers_last_play(playlist_id);
                 if self.pause_if_held(playlist_id, "its song failed").await {
                     return;
                 }

@@ -32,6 +32,11 @@
 //! black program has a visible reason on the dashboard. The engine writes
 //! it as the run changes (`publish_open_failures`: a pause, a start, any
 //! state event, a pick), not only at the pipeline's 5 s heartbeat.
+//!
+//! A `Started` or an `Error` names no Play. After a quick Play → Play, the
+//! first song's answer can come after the second Play went out; it records
+//! nothing, resets nothing and counts no failure (`answers_last_play`,
+//! `failure_backoff::PlayAnswers`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -207,6 +212,16 @@ impl PlaybackEngine {
         );
         self.apply_event(playlist_id, PlayEvent::Start).await;
         true
+    }
+
+    /// A `Started` or an `Error` of `playlist_id` came: whether it answers the
+    /// LAST Play sent (`failure_backoff::PlayAnswers`). `false` = the answer
+    /// to an earlier Play (a newer one is under way), which the event's arm
+    /// ignores. With no pipeline, the arm handles the event as before.
+    pub(super) fn answers_last_play(&mut self, playlist_id: i64) -> bool {
+        self.pipelines
+            .get_mut(&playlist_id)
+            .is_none_or(|pp| pp.pending_plays.answered())
     }
 
     /// `PipelineEvent::Started` of `playlist_id`: a song opened, so the run of
