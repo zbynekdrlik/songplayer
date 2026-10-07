@@ -460,6 +460,7 @@ impl DownloadWorker {
 /// The rows the download worker takes (#140): `normalized = 0` on an active
 /// playlist whose `next_attempt_at` is NULL (never failed) or already due
 /// (`v.` / `p.` aliases). Binds ONE `?`: now, `chrono::Utc::now().to_rfc3339()`.
+/// The node exchange lists these rows as queued downloads (#229, `peer::queued`).
 pub(crate) const DOWNLOAD_DUE: &str = "v.normalized = 0 AND p.is_active = 1 \
      AND (v.next_attempt_at IS NULL OR v.next_attempt_at <= ?)";
 
