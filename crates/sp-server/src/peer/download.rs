@@ -29,7 +29,11 @@ use crate::metadata::manual::{
 };
 
 /// The download worker's hook: fetch, wait or run here.
-pub async fn first(ex: Option<&Arc<Exchange>>, chain: &ProviderChain, row: &VideoRow) -> PeerStep {
+pub(crate) async fn first(
+    ex: Option<&Arc<Exchange>>,
+    chain: &ProviderChain,
+    row: &VideoRow,
+) -> PeerStep {
     let Some(ex) = ex else {
         return PeerStep::Local(None);
     };
