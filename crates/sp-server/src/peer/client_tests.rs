@@ -302,5 +302,6 @@ async fn a_video_row_of_another_video_is_refused() {
         .video(&peer_at(&server.uri(), false), "aaaaaaaaaaa")
         .await
         .unwrap_err();
-    assert!(matches!(err, PeerError::BadResponse(_)), "{err:?}");
+    let refused = PeerError::BadResponse("the row is of another video".into());
+    assert_eq!(err, refused, "parsed, then refused for its id");
 }
