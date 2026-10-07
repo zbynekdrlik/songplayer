@@ -875,6 +875,15 @@ the test that kills each one BEFORE CI's mutation gate runs.
     Likewise never `join()` a loop thread right after `stop()`: a
     `stop → ()` mutant leaves it running and the join hangs. Wait
     `wait_until(|| handle.is_finished())` (bounded) first, then join.
+  - the same for a RATE LIMITER on a real clock (#229, `peer::throttle`):
+    `done * 1e6 / rate` → `/`→`*`, or a `fn -> u64` rate replaced with `1`,
+    makes one pause last days, and every real-clock test that reads,
+    serves or fetches through it (the hasher, the peer API's body, a
+    two-node rig) hangs while the exact-rate unit test already failed.
+    Cap each pause (`throttle::MAX_PAUSE` = 2 s, above any legit pause at
+    the rates in use): a mutant then only slows those tests by seconds.
+    Pin exact rates on a paused clock, real-clock rates by a LOWER bound
+    only.
 
 **`tokio::select!` drops the branch futures before a handler runs**
 (tokio `macros/select.rs`: the futures live inside the `let output = {…}`
