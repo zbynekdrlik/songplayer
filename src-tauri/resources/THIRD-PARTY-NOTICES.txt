@@ -36,9 +36,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 SongPlayer.exe contains rubato 5.0.1, https://github.com/HEnquist/rubato,
 the sample-rate converter of its audio outputs. rubato is dual-licensed
-MIT OR Apache-2.0; SongPlayer uses it under the MIT license:
-
-MIT License
+MIT OR Apache-2.0; SongPlayer uses it under the MIT license (its
+LICENSE-MIT, verbatim):
 
 Copyright (c) 2020 Henrik Enquist
 

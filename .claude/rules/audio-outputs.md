@@ -72,13 +72,20 @@ window-mean error, ±50; I ±3, frozen while |rate + P + I| ≥ 300 (I's own
 share counts); clamp ±300, slew ≤ 5 ppm per second of wall (dt = the 100 ns
 between applied windows).
 
-**Steps:** a block more than one slot off target, or a window mean more than
-10 ms off, RE-CENTRES at once by the BLOCK's own error (the action's
-`recentre_100ns`: insert > 0, skip < 0; the window and the EMA restart; the
-regression is untouched, because the card's consumed count did not move).
-Not by the window's mean: a step inside a window shows in its mean only in
-part, and the rest was left to P (review round 1: 20–30 ms steps failed at
-4–9 of 17 window phases). A rate point more than 10 ms off the fit (once the
+**Steps:** a block more than one slot off target RE-CENTRES at once by its
+own error. A window mean more than 10 ms off RE-CENTRES by the mean error of
+the last 8 blocks (`RECENT_BLOCKS`, a ring emptied by a re-centre) when that
+is also more than 10 ms off; otherwise the level loop takes the window as it
+is (a transient already passed splices nothing). The action's
+`recentre_100ns`: insert > 0, skip < 0; the window, the ring and the EMA
+restart; the regression is untouched (the card's consumed count did not
+move). Not by the window's mean: a step inside a window shows in its mean
+only in part (review round 1: 20–30 ms steps failed at 4–9 of 17 window
+phases). Not by one block either: a block's latency saws by one driver
+callback period (review round 2: 2048 frames at 48 kHz re-centred 118 times
+in 900 s). The last 8 blocks lie after the step (a step under one slot moves
+a 32-block mean past 10 ms only with ≥ 30 % of the window behind it) and
+span ≥ 266 ms of the sawtooth. A rate point more than 10 ms off the fit (once the
 fit has 30 points) RE-BASES the regression (the offset absorbs the step, the
 slope stays) and the NEXT point REALIGNS onto the moved line whatever its
 residual (`Offered::Realigned`): the same straddle splits a step across two
@@ -88,8 +95,13 @@ fit has its points a step RESTARTS it. A window measuring > 100 000 ppm (a
 stalled card) FLUSHES it and holds the correction; `status()` reads the rate
 and the lock from the regression, so the flush shows at once. A whole step
 < 10 ms (a dropped callback, a 9 ms jump) enters the regression as a point —
-camera-box's design: it biases the rate up to ~1.5·step/600 s for one span
-while P/I hold the latency. A wall stepped back past the last window gives
+camera-box's design, and its blind spot: the rate bias is ≈ 1.5·step/span
+with the span growing from 60 s, so an early step weighs most (model, 20 ppm
+card: −9.9 ms at 75 s peaks the correction at 133 ppm, 3 re-centres, still
+9.5 ppm off at 900 s while P pays the level back; ±9 ms at 400 s ends 7–8 ppm
+off). A lower re-base residual for SongPlayer's absolute window-mean
+readings (much less noisy than camera-box's cumulative increments) is a
+main-session decision, not taken here. A wall stepped back past the last window gives
 no time: `dt` is floored at 0, so the EMA and the integral do not move (an
 EMA over −10 s divides by zero, and the NaN would stay).
 
@@ -113,10 +125,17 @@ plus half a block of the first ramp — derive pins from a model of rubato's
 **The closed-loop simulation** (`asrc_servo_sim_tests.rs`): card −50 / 0 /
 +50 ppm, ±1 ms steps, ±20 / ±30 ms steps at three window phases, ±44 ms, a
 100 ms forward step, a dropped callback, a 48 kHz card with 256-frame
-buffers; 900 s each; asserts 0 underruns, |ppm| ≤ 300, slew, latency error
-≤ 10 ms after 70 s (model: ≤ 4.1), |final − card| ≤ 5 ppm, re-centres 1 (2
-for a step over 10 ms), no re-centre asked while a skip runs. Harness rules
-learned here:
+buffers, a 1024-frame driver at 48 kHz with a 20 ms step; 900 s each;
+asserts 0 underruns, |ppm| ≤ 300, slew, latency error ≤ 10 ms after 70 s
+(model: ≤ 4.1; + half a period for the 1024-frame driver), |final − card|
+≤ 5 ppm, re-centres 1 (2 for a step over 10 ms), no re-centre asked while a
+skip runs. The sub-10 ms steps have their own honest bounds
+(`a_step_under_10_ms_enters_the_rate_and_is_paid_back`). **Envelope for
+lane 3:** a driver callback period well under one grid slot (≤ 512 frames
+at 48 kHz, ≤ 1024 at 96 kHz; 2048 at 48 kHz saws past the per-block
+threshold) — lane 3 reads the driver's preferred buffer and cannot change
+it, so it should surface a larger one in the status. Harness rules learned
+here:
 
 - draw the hand-off jitter ONCE per block and run the card's callbacks due
   by then first; the plan's loop redrew it on every callback, which ran
@@ -130,17 +149,19 @@ learned here:
   phase the plan pinned.
 
 The scratch model's fuzz (240 runs: cards ±120 ppm, jitter 0–30 ms, steps
-−35…+150 ms at random window phases, drops, 44.1–96 kHz, buffers 64–512)
-held every invariant. Re-centres reach 4 only for a card beyond ±50 ppm
-(before the 60 s lock P saturates at 50 and the level drifts once) plus a
-dropped 512-frame buffer at 44.1 kHz (11.6 ms, a re-centre of its own).
+−35…+150 ms at random window phases, drops, 44.1–96 kHz, buffers 64–1024 up
+to 10.7 ms) held: no underrun within the budget, |ppm| ≤ 300, the slew, no
+skip asked twice, |final − card| ≤ 5 ppm when undisturbed. Re-centres reach
+4 only for a card beyond ±50 ppm (before the 60 s lock P saturates at 50 and
+the level drifts once) plus a dropped 512-frame buffer at 44.1 kHz (11.6 ms,
+a re-centre of its own).
 Outside the envelope, by physics: a backward step larger than the target
 minus the hand-off lateness (48 ms on 30 ms of jitter) can underrun (one
 event, phase-dependent) — the audio does not exist yet; `delay_ms` widens
 the margin.
 
-**Mutation shape** (a model with one switch per listed mutant kills all
-239 + 78): the fit centres x once and sums `dx·y` (a second centring has
+**Mutation shape** (a model with one switch per listed mutant kills every
+viable one): the fit centres x once and sums `dx·y` (a second centring has
 equivalent mutants); eviction is `drain` past the cap, then a `while let`
 that pops by span (every pass pops: no mutant can spin); the origin
 subtraction `handled − origin` is only shift-visible, so
@@ -148,11 +169,21 @@ subtraction `handled − origin` is only shift-visible, so
 its `+` mutant overflow; the splice always resizes by `insert` (an
 `if insert > 0` guard has an equivalent `>=`); DC test signals hide a missing
 fade, so the splice tests pin the exact silent-frame count and the final
-level. The scratch model must fold sums left to right: Python 3.12's
-`sum()` of floats is compensated and disagrees with Rust in the last digits.
+level; the 8-block ring is pinned through alternating block errors (its
+index arithmetic only shows when the blocks differ). The scratch model must
+fold sums left to right: Python 3.12's `sum()` of floats is compensated and
+disagrees with Rust in the last digits.
+
+**A possible redesign (not taken; main-session call):** camera-box tests
+each window's INCREMENT against the fitted slope (`asrc_bench.rs` ~1150), so
+a step inside a window shows whole in one point; contiguous windows (each
+starting at the previous one's closing observation) with that residual would
+remove the realign.
 
 **rubato** `=5.0.1` (newest; MIT OR Apache-2.0; rust-version 1.87, CI builds
-on stable): its MIT text is in `src-tauri/resources/THIRD-PARTY-NOTICES.txt`,
+on stable): its LICENSE-MIT, verbatim, is in
+`src-tauri/resources/THIRD-PARTY-NOTICES.txt` (its own MIT/Apache
+dependencies get none, like every other Rust crate the project links),
 pinned against the `Cargo.toml` version by
 `the_installer_notice_carries_the_pinned_rubatos_license` — re-copy the
 notice when the pin moves. Added to the lock with `cargo update --workspace`

@@ -25,13 +25,16 @@
 //!   saturates (camera-box #1335 follow-up 5).
 //! - output: clamp(rate + P + I, ±300 ppm), moved at most 5 ppm per second of
 //!   the wall (camera-box #803: inaudible).
-//! - steps: a block more than one slot off target, or a window mean more than
-//!   10 ms off, re-centres at once by the block's own error (a step inside a
-//!   window shows in its mean only in part; the worker inserts or skips under
-//!   fades, `asrc::Splice`); a rate point more than 10 ms off the fit re-bases
-//!   the regression (#1335 follow-up 2) and the next point realigns onto the
-//!   moved line (a step inside a window splits across two window means): a
-//!   step moves the line, never the slope.
+//! - steps: a block more than one slot off target re-centres at once by its
+//!   error; a window mean more than 10 ms off re-centres by the mean error of
+//!   the last 8 blocks when that too is more than 10 ms off (a step inside a
+//!   window shows in its mean only in part, the last 8 blocks lie after it and
+//!   average the driver's callback sawtooth; a transient already passed
+//!   splices nothing). The worker inserts or skips under fades
+//!   (`asrc::Splice`). A rate point more than 10 ms off the fit re-bases the
+//!   regression (#1335 follow-up 2) and the next point realigns onto the moved
+//!   line (the same straddle splits a step across two window means); a whole
+//!   step under 10 ms enters it as a point (camera-box's design).
 //!
 //! Integers (100 ns) where a boundary is pinned (latency, window span), f64
 //! for the regression. Sign: a POSITIVE correction makes MORE output per
@@ -432,12 +435,12 @@ impl Servo {
         }
         self.latency_ms = w.latency_mean_100ns as f64 / 10_000.0;
         let mean_err_100ns = self.target_100ns - w.latency_mean_100ns;
+        // A step inside the window shows in its mean only in part: the last
+        // blocks' error is the whole of it (and a transient already passed is
+        // none of it — the level loop takes the window as it is).
         let recent_100ns = self.recent.mean_100ns();
-        if mean_err_100ns.abs() > RECENTRE_100NS {
-            // A step inside the window shows in its mean only in part: the
-            // block's own error is the whole of it.
-            let _ = recent_100ns;
-            return self.recentre(err_100ns);
+        if mean_err_100ns.abs() > RECENTRE_100NS && recent_100ns.abs() > RECENTRE_100NS {
+            return self.recentre(recent_100ns);
         }
         let dt_100ns = self
             .last_apply_100ns
