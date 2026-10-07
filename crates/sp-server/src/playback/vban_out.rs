@@ -871,8 +871,8 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>, id: String) {
     let spawned = std::thread::Builder::new()
         .name("vban-output".into())
         .spawn(move || {
-            crate::playback::pipeline_paced::request_high_res_timer();
-            let _mmcss = crate::playback::mmcss::join_pro_audio("vban-output");
+            // #233: bind first — a failed start is retried every 5 s, and must
+            // not take a timer period or join MMCSS each time.
             let mut socket = match UdpSocket::bind(("0.0.0.0", 0)) {
                 Ok(s) => s,
                 Err(e) => {
@@ -883,6 +883,8 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>, id: String) {
                     return;
                 }
             };
+            crate::playback::pipeline_paced::request_high_res_timer();
+            let _mmcss = crate::playback::mmcss::join_pro_audio("vban-output");
             let format = out.format();
             info!(
                 id = %id,
