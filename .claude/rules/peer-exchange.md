@@ -73,7 +73,7 @@ extend this file; nothing of them exists yet.
 
 - `peer::Exchange { pool, cache_dir, board }` (pub fields; `cache_dir` has
   no reader until lane 3; `board` = the jobs announced as running, below,
-  empty in production until lane 7), built once by `lib.rs` right after
+  empty in production until lane 8), built once by `lib.rs` right after
   `AppState`: `Exchange::new(pool, cache_dir) -> Arc<Exchange>` (it builds
   the board).
 - `peer::router(exchange)` holds every exchange route; `lib.rs` merges it into
@@ -140,14 +140,15 @@ extend this file; nothing of them exists yet.
 - A RUNNING job is announced by the in-memory `board::JobBoard` while its
   `#[must_use]` `JobGuard` lives (`Exchange::announce(youtube_id, job)`); a
   crash takes the announcements along, never a DB row. Nothing outside the
-  tests announces yet: from lane 7, `Exchange::ask` answers a job it runs
-  here with `Local(JobGuard)`. A second guard of
-  the same job keeps the first one's start; the last guard to drop ends it.
+  tests announces yet: lane 7's `Exchange::ask` answers a job it runs here
+  with `Local(JobGuard)`, and the first worker to ask is lane 8's download
+  hook (lane 9 adds stems and lyrics). A second guard of the same job keeps
+  the first one's start; the last guard to drop ends it.
   `JobBoard::snapshot(node)` = the running entries, sorted by YouTube id,
   then by the kind's WIRE NAME (`stem_instrumental` before `stem_vocals`,
   not the enum's order).
 - For lane 3: QUEUED entries are not on the board; lane 3's catalog is to
-  add them from the rows. Once lane 7 announces downloads, a download in
+  add them from the rows. Once lane 8 announces downloads, a download in
   progress is still a queued row (`normalized = 0`) AND on the board, so
   lane 3 must list an `(id, kind)` the board holds as running only and skip
   its queued entry (one entry per `(id, kind)`).

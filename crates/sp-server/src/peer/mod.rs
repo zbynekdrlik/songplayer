@@ -22,8 +22,8 @@ pub struct Exchange {
     /// The node's cache dir, where its processed files live (read from lane 3
     /// on, when the node serves and fetches them).
     pub cache_dir: PathBuf,
-    /// The jobs this node announces as running (empty until lane 7's workers
-    /// announce theirs; lane 3's catalog is to list them).
+    /// The jobs this node announces as running (empty until the worker hooks
+    /// of lanes 8-9 announce theirs; lane 3's catalog is to list them).
     pub board: Arc<board::JobBoard>,
 }
 
