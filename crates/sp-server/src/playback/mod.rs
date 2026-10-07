@@ -5,6 +5,7 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 pub mod asio_format; // #233: an ASIO driver's sample types + the L/R channel fill (pure)
+pub mod asio_state; // #233: the ASIO output's decisions (backoff, reasons, replies, stall), pure
 pub mod asrc; // #233: the ASIO output's resampler (rubato Async sinc) + the re-centre splice
 pub mod asrc_servo; // #233: the ASIO output's drift servo (camera-box's asrc-compensator, for an output), pure
 pub mod audio_grid;
