@@ -98,16 +98,28 @@ fn a_catalog_node_name_that_does_not_hold_reads_as_empty() {
     assert_eq!(c.sanitized().node, "pp-2");
 }
 
-/// A peer's time is kept only when it is an RFC 3339 time.
+/// A peer's time is kept only when it is an RFC 3339 time, and then in this
+/// node's canonical form: never the peer's own text (whitespace, a fraction
+/// of any length, another offset).
 #[test]
 fn a_peer_time_is_kept_only_when_it_is_one() {
+    let long_fraction = format!("2026-10-06T16:00:00.123{}Z", "4".repeat(997));
+    for time in [
+        "2026-10-06T16:00:00.123Z",
+        "2026-10-06T16:00:00.123Z\r\n",
+        long_fraction.as_str(),
+        "2026-10-06T18:00:00.123+02:00",
+        "2026-10-06t16:00:00.123z",
+    ] {
+        assert_eq!(
+            checked_time(Some(time)).as_deref(),
+            Some("2026-10-06T16:00:00.123Z"),
+            "{time:?}"
+        );
+    }
+    assert_eq!(checked_time(Some("t")), None);
     assert_eq!(
-        checked_time(Some("2026-10-06T16:00:00.123Z".into())).as_deref(),
-        Some("2026-10-06T16:00:00.123Z")
-    );
-    assert_eq!(checked_time(Some("t".into())), None);
-    assert_eq!(
-        checked_time(Some("2026-10-06T16:00:00.123Z\nINFO forged".into())),
+        checked_time(Some("2026-10-06T16:00:00.123Z\nINFO forged")),
         None
     );
     assert_eq!(checked_time(None), None);
