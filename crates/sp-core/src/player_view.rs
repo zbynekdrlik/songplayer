@@ -147,28 +147,47 @@ pub fn mode_value(state_known: bool, mode: PlaybackMode) -> &'static str {
 
 /// #229: the Player's line for a playlist whose videos cannot be opened
 /// (its health row's `open_failures`):
-/// `Videá sa nedajú otvoriť (N×): {chyba} — ďalší pokus o X s`. `now_ms` is
-/// the browser's clock (UTC ms).
-/// With no retry pending (the next song is tried at once, an attempt is
-/// under way, the playlist was cut off program or paused) the line has no
-/// "ďalší pokus".
-pub fn open_failures_line(failures: &OpenFailures, now_ms: i64) -> String {
+/// `Videá sa nedajú otvoriť (N×): {chyba} — ďalší pokus o X s`. X is the
+/// wait left the server read on its own clock (`retry_in_ms`): the browser's
+/// clock, on another machine, can be off. With no retry pending (the next
+/// song is tried at once, an attempt is under way, the playlist was cut off
+/// program or paused) the line has no "ďalší pokus".
+pub fn open_failures_line(failures: &OpenFailures) -> String {
     let head = format!(
         "Videá sa nedajú otvoriť ({}×): {}",
         failures.count, failures.last_error
     );
-    match failures.retry_at_ms {
-        Some(at_ms) => format!("{head} — ďalší pokus o {} s", retry_in_s(at_ms, now_ms)),
+    match failures.retry_in_ms {
+        Some(left_ms) => format!("{head} — ďalší pokus o {} s", retry_in_s(left_ms)),
         None => head,
     }
 }
 
-/// Whole seconds until the retry at `at_ms` (UTC ms), rounded up: 0 once it
-/// is due.
-pub fn retry_in_s(at_ms: i64, now_ms: i64) -> u64 {
-    u64::try_from(at_ms.saturating_sub(now_ms))
-        .unwrap_or(0)
-        .div_ceil(1000)
+/// `retry_in_ms` in whole seconds, rounded up: "0 s" only once it is due.
+pub fn retry_in_s(retry_in_ms: u64) -> u64 {
+    retry_in_ms.div_ceil(1000)
+}
+
+/// #229: the state label while a playlist waits for the retry of its
+/// failed opens.
+pub const RETRY_PENDING_LABEL: &str = "Čaká na ďalší pokus";
+
+/// The Player's state label ([`state_label`]), except while the playlist
+/// waits for the retry of its failed opens (`retry_pending`: its health
+/// row's `open_failures` names a retry): "Čaká na ďalší pokus", not "Čaká na
+/// scénu" (it may well be on program, black). A playlist told `Playing`
+/// keeps its label: a song started since the row was read.
+pub fn player_state_label(
+    state_known: bool,
+    state: PlaybackState,
+    transport: TransportState,
+    retry_pending: bool,
+) -> &'static str {
+    if retry_pending && state != PlaybackState::Playing {
+        RETRY_PENDING_LABEL
+    } else {
+        state_label(state_known, state, transport)
+    }
 }
 
 #[cfg(test)]
@@ -303,17 +322,38 @@ mod tests {
         assert_eq!(mode_value(true, PlaybackMode::Continuous), "continuous");
     }
 
-    /// #229: the seconds until a retry round up, so the line never says
-    /// "0 s" while the retry is still ahead; a due or past retry reads 0.
+    /// #229: the seconds left round up, so the line never says "0 s" while
+    /// the retry is still ahead; a due retry reads 0.
     #[test]
     fn the_retry_countdown_rounds_up_to_whole_seconds() {
-        assert_eq!(retry_in_s(10_000, 0), 10);
-        assert_eq!(retry_in_s(4_001, 0), 5, "a part of a second counts whole");
-        assert_eq!(retry_in_s(5_000, 1_000), 4, "measured from now");
-        assert_eq!(retry_in_s(1_000, 999), 1);
-        assert_eq!(retry_in_s(1_000, 1_000), 0, "due now");
-        assert_eq!(retry_in_s(1_000, 6_000), 0, "already past");
-        assert_eq!(retry_in_s(i64::MIN, i64::MAX), 0, "no overflow");
+        assert_eq!(retry_in_s(10_000), 10);
+        assert_eq!(retry_in_s(4_001), 5, "a part of a second counts whole");
+        assert_eq!(retry_in_s(4_000), 4);
+        assert_eq!(retry_in_s(1), 1);
+        assert_eq!(retry_in_s(0), 0, "due");
+    }
+
+    /// #229: while the retry waits the label says so, on or off program; a
+    /// playlist told `Playing` keeps "Hrá", and with no retry the label is
+    /// the usual one.
+    #[test]
+    fn the_state_label_says_the_playlist_waits_for_its_retry() {
+        assert_eq!(
+            player_state_label(true, PlaybackState::WaitingForScene, PAUSED, true),
+            "Čaká na ďalší pokus"
+        );
+        assert_eq!(
+            player_state_label(true, PlaybackState::Playing, PLAYING, true),
+            "Hrá"
+        );
+        assert_eq!(
+            player_state_label(true, PlaybackState::WaitingForScene, PAUSED, false),
+            "Čaká na scénu"
+        );
+        assert_eq!(
+            player_state_label(false, PlaybackState::Idle, IDLE, false),
+            "—"
+        );
     }
 
     #[test]
@@ -322,16 +362,17 @@ mod tests {
             count: 4,
             last_error: "No video: SetCurrentMediaType failed: No suitable transform".into(),
             retry_at_ms: Some(1_791_331_230_000),
-            retry_in_ms: None,
+            retry_in_ms: Some(29_500),
         };
         assert_eq!(
-            open_failures_line(&failures, 1_791_331_200_000),
+            open_failures_line(&failures),
             "Videá sa nedajú otvoriť (4×): No video: SetCurrentMediaType failed: \
              No suitable transform — ďalší pokus o 30 s"
         );
         failures.retry_at_ms = None;
+        failures.retry_in_ms = None;
         assert_eq!(
-            open_failures_line(&failures, 1_791_331_200_000),
+            open_failures_line(&failures),
             "Videá sa nedajú otvoriť (4×): No video: SetCurrentMediaType failed: \
              No suitable transform",
             "no retry pending: no countdown"

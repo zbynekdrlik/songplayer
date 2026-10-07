@@ -41,16 +41,6 @@ pub(crate) fn now_ms() -> u64 {
         .unwrap_or(0.0) as u64
 }
 
-/// The browser's wall clock in UTC ms (`performance.timeOrigin + now()`), for
-/// the #229 retry countdown: the server reports the retry's instant in UTC
-/// ms. `0` if the clock is unavailable (never in the running CSR app).
-fn utc_now_ms() -> i64 {
-    web_sys::window()
-        .and_then(|w| w.performance())
-        .map(|p| p.time_origin() + p.now())
-        .unwrap_or(0.0) as i64
-}
-
 #[component]
 pub fn Player(playlist_id: i64) -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
@@ -111,7 +101,8 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // #229: this playlist's videos that failed to open in a row (its health
     // row's `open_failures`, the 1 Hz poll of `store.ndi_health`): the reason
     // a black program has. The line is mounted by a Memo (Rule 1); only its
-    // text follows the poll, which also moves the retry countdown.
+    // text follows the poll, whose `retry_in_ms` (read on the server's clock)
+    // moves the countdown.
     let open_failures = move || {
         store
             .ndi_health
@@ -121,10 +112,20 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
             .and_then(|o| o.open_failures)
     };
     let failing = Memo::new(move |_| open_failures().is_some());
+    let retry_pending =
+        Memo::new(move |_| open_failures().is_some_and(|f| f.retry_in_ms.is_some()));
 
     // #221 L4b: "Hrá mimo programu" for a playlist playing off program
     // (`sp_core::player_view::state_label`); "—" until the state is known.
-    let state_label = move || player_view::state_label(state_known.get(), state(), transport());
+    // #229: "Čaká na ďalší pokus" while the retry of failed opens waits.
+    let state_label = move || {
+        player_view::player_state_label(
+            state_known.get(),
+            state(),
+            transport(),
+            retry_pending.get(),
+        )
+    };
 
     // #225: the badge reads the SAME live WS state as the state label (`Playing`
     // = on program, #170), so a cut flips both in one render. It used to read
@@ -324,7 +325,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                             <div class="player-open-failures" data-testid="player-open-failures">
                                 {move || {
                                     open_failures()
-                                        .map(|f| player_view::open_failures_line(&f, utc_now_ms()))
+                                        .map(|f| player_view::open_failures_line(&f))
                                         .unwrap_or_default()
                                 }}
                             </div>

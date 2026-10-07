@@ -959,8 +959,18 @@ const NDI_HEALTH_DEFAULT = [
 
 let ndiHealth = structuredClone(NDI_HEALTH_DEFAULT);
 
+// #229: like the server, a row's `open_failures` carries `retry_in_ms`, the
+// wait left until `retry_at_ms` read at this request (0 once due).
 app.get("/api/v1/ndi/health", (_req, res) => {
-  res.json(ndiHealth);
+  const now = Date.now();
+  res.json(
+    ndiHealth.map((row) => {
+      const f = row.open_failures;
+      if (!f) return row;
+      const left = f.retry_at_ms == null ? null : Math.max(0, f.retry_at_ms - now);
+      return { ...row, open_failures: { ...f, retry_in_ms: left } };
+    }),
+  );
 });
 
 // Admin: replace the NDI health fixture with the posted JSON array.
