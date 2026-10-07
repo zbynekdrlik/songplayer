@@ -755,6 +755,13 @@ the test that kills each one BEFORE CI's mutation gate runs.
   (`self.finish_push("hide_title_now", result);`): no mutant, so pin its
   effect with a behaviour test (#217 addendum 2,
   `a_retried_hide_that_404s_leaves_no_stale_note_for_the_next_push`).
+- **A comment added INSIDE a fn body puts that whole fn in the diff's
+  list** (#229 follow-up: one comment line in `pipeline_stub.rs`'s
+  `run_loop_stub` listed `replace run_loop_stub with ()`). `--in-diff`
+  takes every fn whose lines the diff touches. Before commenting inside a
+  gated fn, name the test that kills its body replacement (there:
+  `pipeline_inline_tests::pipeline_play_emits_event_on_non_windows`), or
+  put the comment above the fn.
 - It never SWAPS a method or a field for its sibling (`pop_front` ↔
   `pop_back`, `front()` ↔ `back()`, `first` ↔ `last`) — #221 review round
   5: a queue that replaced its OLDEST entry instead of its newest passed
