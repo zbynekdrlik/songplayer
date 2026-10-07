@@ -38,7 +38,7 @@ pub struct PeerTitle {
     pub peer: String,
     /// The title's metadata version (`kind::metadata_version`).
     pub version: u32,
-    /// The sha256 of the title's canonical bytes (the catalog's).
+    /// The sha256 of `PeerMetadata::to_bytes`, as the catalog computes it.
     pub sha256: String,
 }
 
@@ -135,12 +135,17 @@ pub(crate) async fn adopt(
         &row.youtube_id,
         gf,
     ));
+    // Another row of the video may have recorded an audio under that name
+    // (rows share files by name, #136).
+    let audio_was_there = tokio::fs::try_exists(&audio).await.unwrap_or(true);
     tokio::fs::rename(&audio_part, &audio).await?;
     if let Err(e) = tokio::fs::rename(&video_part, &video).await {
         // The local download's rule: no unrecorded audio under its final
-        // name. The verified video part goes too; the next ask fetches again.
-        let _ = tokio::fs::remove_file(&audio).await;
-        let _ = tokio::fs::remove_file(&video_part).await;
+        // name, never one that was there. The verified video part stays: the
+        // next ask re-hashes it, no transfer.
+        if !audio_was_there {
+            let _ = tokio::fs::remove_file(&audio).await;
+        }
         return Err(e.into());
     }
     let recorded = record_download(

@@ -148,7 +148,7 @@ pub async fn record_download(
         columns.audio.as_deref().unwrap_or_default(),
     )
     .await?;
-    Ok(asked.clone())
+    Ok(title)
 }
 
 /// The INFO of a download whose fresh pair is renamed after a correction
