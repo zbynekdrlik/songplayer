@@ -175,16 +175,18 @@ pub const RETRY_PENDING_LABEL: &str = "Čaká na ďalší pokus";
 /// The Player's state label ([`state_label`]), except while the playlist
 /// waits for the retry of its failed opens (`retry_pending`: its health
 /// row's `open_failures` names a retry): "Čaká na ďalší pokus", not "Čaká na
-/// scénu" (it may well be on program, black). A playlist told `Playing`
-/// keeps its label: a song started since the row was read. Until the state
-/// is known the label claims nothing ("—", #225), the retry included.
+/// scénu" (it may well be on program, black). A pipeline told it decodes
+/// (transport `Playing`: "Hrá", or "Hrá mimo programu" off program) keeps
+/// its label: the retry's Play went out since the 1 Hz health row was read.
+/// Until the state is known the label claims nothing ("—", #225), the retry
+/// included.
 pub fn player_state_label(
     state_known: bool,
     state: PlaybackState,
     transport: TransportState,
     retry_pending: bool,
 ) -> &'static str {
-    if state_known && retry_pending && state != PlaybackState::Playing {
+    if state_known && retry_pending && transport != TransportState::Playing {
         RETRY_PENDING_LABEL
     } else {
         state_label(state_known, state, transport)
@@ -346,6 +348,11 @@ mod tests {
         assert_eq!(
             player_state_label(true, PlaybackState::Playing, PLAYING, true),
             "Hrá"
+        );
+        assert_eq!(
+            player_state_label(true, PlaybackState::WaitingForScene, PLAYING, true),
+            "Hrá mimo programu",
+            "the retry's Play went out off program before the health row moved"
         );
         assert_eq!(
             player_state_label(true, PlaybackState::WaitingForScene, PAUSED, false),
