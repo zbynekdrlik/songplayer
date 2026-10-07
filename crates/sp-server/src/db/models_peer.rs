@@ -5,7 +5,8 @@
 //!   before the catalog lists the file).
 //! - V30 `peer_waits`: since when a job of a video waits for a peer (the
 //!   first wait counts, `peer::ask`); `peer_fetches`: which node an artifact
-//!   came from.
+//!   came from (dropped once a job that makes it runs here,
+//!   [`forget_fetches`]; the audio's record is what `peer::audio` trusts).
 //!
 //! Plus the download's defer of the ask-first hooks (`defer_download`; the
 //! stems defer through `models_stems::defer_stems`, the lyrics through

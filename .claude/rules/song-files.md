@@ -167,11 +167,19 @@ Design record: #136 comment 5894034820.
   a final name can already hold another row's recorded file: read
   `try_exists` BEFORE the rename, and rename the file a player may hold open
   (the video: Media Foundation does not share delete; the audio reader
-  does) FIRST, so its failure touches nothing. (`downloader/mod.rs`'s own
-  "video rename failed" branch still removes `audio_final`
-  unconditionally.) A test forces the failure with a DIRECTORY at the
-  target name: renaming a file onto an existing directory fails on Linux
-  (EISDIR) and on Windows.
+  does) FIRST, so its failure touches nothing. A test forces the failure
+  with a DIRECTORY at the target name: renaming a file onto an existing
+  directory fails on Linux (EISDIR) and on Windows.
+- **The local download's failed video rename keeps an audio a row records**
+  (#229 follow-up lane, `downloader/mod.rs::place_video`). The download
+  normalizes straight into `audio_final`, the name every row of the video
+  records; when the video then cannot take its name (another row's video
+  held open on Windows), the attempt drops its video temp, and drops the
+  audio only when no row records it (`cache::recorded_by_a_row`, the
+  self-heal's own ownership query, read and deleted under
+  `cache::SONG_FILES`; a failed read keeps it, WARNed). Pinned by
+  `mod_tests.rs::a_failed_video_rename_keeps_the_audio_two_rows_record`
+  (RED → GREEN) and `…_drops_an_audio_no_row_records` (no orphan).
 - **`startup::self_heal_cache` never deletes an orphan half-sidecar a row
   records.** That half belongs to a song split across two names (a move-back
   that failed); it is kept and WARNed. The post-deploy FLAC check accepts
