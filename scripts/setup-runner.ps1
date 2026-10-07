@@ -32,7 +32,13 @@ Write-Host "  Target user: $desktopUser" -ForegroundColor Gray
 $RunnerDir = "C:\actions-runner"
 $RepoUrl = "https://github.com/zbynekdrlik/songplayer"
 $RunnerName = $env:COMPUTERNAME.ToLower()
-$Labels = "self-hosted,windows,resolume"
+# #229: the PP site's runner takes its own label (RUNNER_LABELS=self-hosted,windows,resolume-pp)
+# so SNV's jobs ([self-hosted, windows, resolume]) never land on it.
+$Labels = if ($env:RUNNER_LABELS) { $env:RUNNER_LABELS } else { "self-hosted,windows,resolume" }
+$labelList = @($Labels -split "," | ForEach-Object { $_.Trim() })
+if ($env:COMPUTERNAME -ieq "RESOLUME-PP" -and ($labelList -contains "resolume")) {
+    throw "RESOLUME-PP must not carry the label 'resolume' (SNV's deploy and E2E jobs would run at PP). Set RUNNER_LABELS=self-hosted,windows,resolume-pp and run this again."
+}
 
 # --- Check if already installed ---
 if (Test-Path "$RunnerDir\.runner") {
