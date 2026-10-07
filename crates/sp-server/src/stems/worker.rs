@@ -67,6 +67,9 @@ pub struct StemWorker {
     /// Logged once when python is unavailable so the operator sees why nothing
     /// is separating, without spamming every tick.
     warned_no_python: std::sync::atomic::AtomicBool,
+    /// #229: this node in the exchange, asked before each separation (`None`
+    /// in tests that do not need it).
+    peer: Option<Arc<crate::peer::Exchange>>,
 }
 
 /// Parse the `stem_worker_enabled` setting. Default ON so a fresh deploy starts
@@ -182,7 +185,14 @@ impl StemWorker {
             obs_state: Some(obs_state),
             wall_gate_log: std::sync::Mutex::new(GateLog::default()),
             warned_no_python: std::sync::atomic::AtomicBool::new(false),
+            peer: None,
         }
+    }
+
+    /// #229: ask the exchange's peers before each separation.
+    pub fn with_peer(mut self, peer: Arc<crate::peer::Exchange>) -> Self {
+        self.peer = Some(peer);
+        self
     }
 
     pub async fn run(self, mut shutdown_rx: broadcast::Receiver<()>) {
@@ -210,17 +220,19 @@ impl StemWorker {
             return;
         }
 
+        // #229: a node with no lyrics venv still takes a peer's stems (the
+        // plan's decisions: the stem fetch runs before the venv check), so
+        // the venv's return waits until after the peer step below.
         let python = crate::lyrics::bootstrap::venv_python_path(&self.tools_dir);
-        if !python.exists() {
-            if !self
+        let venv_missing = !python.exists();
+        if venv_missing
+            && !self
                 .warned_no_python
                 .swap(true, std::sync::atomic::Ordering::Relaxed)
-            {
-                warn!(
-                    "stem worker: lyrics venv python not found at {python:?} — karaoke stems wait for the lyrics bootstrap"
-                );
-            }
-            return;
+        {
+            warn!(
+                "stem worker: lyrics venv python not found at {python:?} — this node separates no stems until the lyrics bootstrap (a peer's stems are still taken)"
+            );
         }
 
         // #184 G0.1: a dub job has priority on the heavy slot. While one is queued
@@ -309,6 +321,18 @@ impl StemWorker {
                 STEM_MAX_DURATION_MS
             );
             let _ = crate::db::models_stems::mark_stems_unsupported(&self.pool, job.video_id).await;
+            return;
+        }
+
+        // #229: ask the peers first (`peer::stems`): a peer's stems are taken,
+        // a peer's separation waited for; else separate here, announced until
+        // this tick ends. Before the venv check: a node with no venv still
+        // takes a peer's stems.
+        let _announced = match crate::peer::stems::first(self.peer.as_ref(), &job).await {
+            crate::peer::PeerStep::Local(guard) => guard,
+            crate::peer::PeerStep::Done | crate::peer::PeerStep::Deferred => return,
+        };
+        if venv_missing {
             return;
         }
 
@@ -606,3 +630,7 @@ mod plan_tests;
 #[cfg(test)]
 #[path = "worker_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "worker_tests_peer.rs"]
+mod tests_peer;

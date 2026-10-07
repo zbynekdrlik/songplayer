@@ -17,6 +17,7 @@ pub mod hasher;
 pub mod kind;
 pub mod lan;
 pub mod queued;
+pub mod stems;
 pub mod throttle;
 pub mod wire;
 
