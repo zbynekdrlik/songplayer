@@ -217,7 +217,9 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     };
 
     let on_save = move |_: leptos::ev::MouseEvent| {
-        if loaded.get_untracked() != Some(true) {
+        // Never save before the load landed, nor over a stored list this
+        // dashboard cannot read (its rows were reset to none).
+        if loaded.get_untracked() != Some(true) || load_error.get_untracked().is_some() {
             return;
         }
         let list = entries.get();
