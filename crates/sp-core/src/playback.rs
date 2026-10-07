@@ -184,18 +184,28 @@ mod tests {
     /// off air) is pending, not on program.
     #[test]
     fn a_retry_is_on_program_only_when_armed_there_and_still_pending() {
-        let row = |retry_in_ms: Option<u64>, on_program: bool| OpenFailures {
-            retry_in_ms,
-            on_program,
-            ..failures(Some(6_500))
+        // A row as read (`read_at` fills `retry_in_ms` from `retry_at_ms`).
+        let row = |retry_at_ms: Option<i64>, on_program: bool| {
+            OpenFailures {
+                on_program,
+                ..failures(retry_at_ms)
+            }
+            .read_at(1_000)
         };
-        assert!(row(Some(5_500), true).retry_pending());
-        assert!(row(Some(0), false).retry_pending(), "due: still pending");
-        assert!(!row(None, false).retry_pending());
-
-        assert!(row(Some(5_500), true).retry_on_program());
+        assert!(row(Some(6_500), true).retry_pending());
         assert!(
-            !row(Some(5_500), false).retry_on_program(),
+            row(Some(1_000), false).retry_pending(),
+            "due: still pending"
+        );
+        assert!(!row(None, false).retry_pending());
+        assert!(
+            failures(Some(6_500)).retry_pending(),
+            "the engine's own row, before a read fills `retry_in_ms`"
+        );
+
+        assert!(row(Some(6_500), true).retry_on_program());
+        assert!(
+            !row(Some(6_500), false).retry_on_program(),
             "armed off program (a ▶ off air)"
         );
         assert!(

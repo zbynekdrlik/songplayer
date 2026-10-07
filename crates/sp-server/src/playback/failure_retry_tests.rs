@@ -821,3 +821,43 @@ async fn a_retry_armed_on_program_says_so_until_it_ends() {
         "no retry pending, no program claimed: {failures}"
     );
 }
+
+/// Review round 4 (🔵): a cut ON program ends a pending retry only through
+/// the Play its selection sends. When the selection sends none (no song to
+/// pick: here every video is gone; a custom playlist in Single mode; a DB
+/// error), the retry armed off program stays pending while the playlist IS
+/// SP-program's source now, and the badge read "○ Mimo programu" for up to
+/// 300 s. The ON refreshes the flag of a retry that stays.
+#[tokio::test]
+async fn a_retry_still_pending_after_its_playlist_came_on_program_says_so() {
+    let mut rig = rig().await;
+    heartbeat(&mut rig.engine); // the row exists
+    start(&mut rig.engine).await; // a ▶, nothing on air
+    for _ in 0..3 {
+        fail(&mut rig.engine).await;
+    }
+    let armed = pending_id(&rig.engine).expect("a retry armed off program");
+    assert_eq!(
+        health_row(&rig.registry)["open_failures"]["on_program"],
+        false
+    );
+
+    sqlx::query("DELETE FROM videos WHERE playlist_id = ?")
+        .bind(PID)
+        .execute(&rig.engine.pool)
+        .await
+        .unwrap();
+    rig.engine.put_on_air_for_test(PID);
+    rig.engine.handle_scene_change(PID, true).await; // its selection finds no song
+
+    assert_eq!(
+        pending_id(&rig.engine),
+        Some(armed),
+        "no Play went out: the same retry is pending"
+    );
+    let failures = &health_row(&rig.registry)["open_failures"];
+    assert_eq!(
+        failures["on_program"], true,
+        "it is SP-program's source now: {failures}"
+    );
+}
