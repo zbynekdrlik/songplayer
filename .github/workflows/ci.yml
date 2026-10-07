@@ -2287,6 +2287,10 @@ jobs:
           # bundled ffmpeg (the box has no ffprobe; none is needed).
           SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\e2e\avsync_venv\Scripts\python.exe
           SP_FFMPEG: C:\ProgramData\SongPlayer\cache\tools\ffmpeg.exe
+          # #233 lane 3: how many enabled ASIO outputs the box must run
+          # (e2e/post-deploy-audio-asio.spec.ts). The main session adds SNV's
+          # DVS entry after the lane-3 deploy, then sets "1".
+          SP_ASIO_OUTPUTS_EXPECTED: "0"
         run: |
           # Runs the committed e2e/post-deploy*.spec.ts against the
           # deployed SongPlayer + OBS. This suite exercises the click
