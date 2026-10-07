@@ -61,8 +61,11 @@ the review finding on the selection: 6028419694.
   `failure_backoff::pick_pool`: unplayed minus avoid; else a restart (history
   cleared) from all minus avoid; only when every song is avoided, the old
   pick. Custom playlists (by position) and Loop ignore it.
-- Residual (older: `Started` names no video): a late `Started` of an earlier
-  Play takes the newer Play's mark and resets the run.
+- Residuals: a late `Started` of an earlier Play takes the newer Play's mark
+  and resets the run (older: `Started` names no video); and on a box fault,
+  once every unplayed song has failed, the restart branch clears the play
+  history one time (the alternative, a pick without a clear, would let one
+  bad file fail every other song).
 
 ## Operator visibility
 
@@ -79,7 +82,8 @@ the review finding on the selection: 6028419694.
   (`sp_core::player_view::open_failures_line`, "Videá sa nedajú otvoriť (N×):
   … — ďalší pokus o X s", X = `retry_in_ms` rounded up), mounted by a Memo,
   its text following the 1 Hz `store.ndi_health` poll; the state label reads
-  "Čaká na ďalší pokus" while a retry waits (`player_state_label`). The
+  "Čaká na ďalší pokus" while a retry waits and the state is known
+  (`player_state_label`). The
   on/off-program badge still reads the WS state (`WaitingForScene` → "○ Mimo
   programu", also for a playlist on program that waits black).
 - Mock: rows carry `open_failures: null`; the GET fills `retry_in_ms` per
