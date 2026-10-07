@@ -16,7 +16,7 @@ use super::Exchange;
 use super::catalog::{self, CatalogCounts};
 use super::client::LastRead;
 use super::config::NodeConfig;
-use super::transfer_probe::TransferProbe;
+use super::transfer_probe::{PROBE_MAX_TIME, TransferProbe};
 use super::wire::CatalogJob;
 
 /// `GET /api/v1/exchange/status`.
@@ -148,7 +148,7 @@ pub async fn probe_transfer(State(ex): State<Arc<Exchange>>) -> Response {
     let tmp = std::env::temp_dir();
     let mut results: Vec<TransferProbe> = Vec::new();
     for peer in &cfg.peers {
-        results.push(ex.probe_transfer(peer, &tmp).await);
+        results.push(ex.probe_transfer(peer, &tmp, PROBE_MAX_TIME).await);
     }
     Json(results).into_response()
 }

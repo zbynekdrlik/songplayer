@@ -229,7 +229,7 @@ impl Exchange {
                 job = job.as_str(),
                 peer,
                 %error,
-                "exchange: fetching from a peer kept failing for 2 h - processing here"
+                "exchange: a peer's copy was not taken for 2 h - processing here"
             );
             return None;
         };
@@ -249,7 +249,7 @@ impl Exchange {
                 peer,
                 %error,
                 recheck_s = recheck.as_secs(),
-                "exchange: fetching from a peer failed - asking again later"
+                "exchange: a peer's copy was not taken - asking again later"
             );
         }
         Some(recheck)

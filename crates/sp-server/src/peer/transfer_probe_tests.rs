@@ -3,14 +3,18 @@
 //! (Repo convention: names the parent only imports are imported explicitly.)
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use sp_core::config::{SETTING_NODE_NAME, SETTING_PEER_TRANSFERS_PAUSED};
 use tower::ServiceExt;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
 use crate::peer::Exchange;
+use crate::peer::config::PeerConfig;
 use crate::peer::hash::sha256_hex;
 use crate::peer::kind::ArtifactKind;
 use crate::peer::rig::{OTHER_KEY, SNV_KEY, TestNode, set};
@@ -102,7 +106,7 @@ async fn a_probe_transfers_the_peers_smallest_file_outside_the_cache() {
     let tmp = tempfile::tempdir().unwrap();
     let probe = pp
         .ex
-        .probe_transfer(&snv.as_peer(SNV_KEY), tmp.path())
+        .probe_transfer(&snv.as_peer(SNV_KEY), tmp.path(), PROBE_MAX_TIME)
         .await;
     assert!(probe.ok, "{probe:?}");
     assert_eq!(probe.error, None);
@@ -130,7 +134,8 @@ async fn a_probe_does_not_wait_for_the_peers_transfer_slot() {
     let tmp = tempfile::tempdir().unwrap();
     let probe = tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        pp.ex.probe_transfer(&snv.as_peer(SNV_KEY), tmp.path()),
+        pp.ex
+            .probe_transfer(&snv.as_peer(SNV_KEY), tmp.path(), PROBE_MAX_TIME),
     )
     .await
     .expect("the probe waited for the held slot");
@@ -149,7 +154,7 @@ async fn a_transfer_that_does_not_match_the_catalog_fails() {
     let tmp = tempfile::tempdir().unwrap();
     let probe = pp
         .ex
-        .probe_transfer(&snv.as_peer(SNV_KEY), tmp.path())
+        .probe_transfer(&snv.as_peer(SNV_KEY), tmp.path(), PROBE_MAX_TIME)
         .await;
     assert!(!probe.ok);
     let error = probe.error.unwrap();
@@ -165,7 +170,7 @@ async fn a_probe_names_a_refused_key() {
     let tmp = tempfile::tempdir().unwrap();
     let probe = pp
         .ex
-        .probe_transfer(&snv.as_peer(OTHER_KEY), tmp.path())
+        .probe_transfer(&snv.as_peer(OTHER_KEY), tmp.path(), PROBE_MAX_TIME)
         .await;
     assert!(!probe.ok);
     assert_eq!(probe.artifact, None);
@@ -185,12 +190,60 @@ async fn a_probe_waits_for_nothing_while_this_nodes_transfers_are_paused() {
     let tmp = tempfile::tempdir().unwrap();
     let probe = pp
         .ex
-        .probe_transfer(&snv.as_peer(SNV_KEY), tmp.path())
+        .probe_transfer(&snv.as_peer(SNV_KEY), tmp.path(), PROBE_MAX_TIME)
         .await;
     assert!(!probe.ok);
     assert!(probe.error.as_deref().unwrap().contains("paused"));
     assert_eq!(probe.artifact, None);
     assert!(pp.ex.client.last_reads().is_empty(), "no catalog read");
+}
+
+/// A peer whose artifact never arrives within the probe's bound: the probe
+/// fails naming the bound, its temp dir is gone, and its catalog entry is
+/// still reported.
+#[tokio::test]
+async fn a_probe_past_its_time_bound_fails_and_leaves_nothing() {
+    let server = MockServer::start().await;
+    let body = b"stalled track".to_vec();
+    let listed = Artifact {
+        youtube_id: YT.into(),
+        kind: ArtifactKind::Lyrics,
+        version: crate::lyrics::LYRICS_PIPELINE_VERSION,
+        size: body.len() as u64,
+        sha256: sha256_hex(&body),
+        updated_at: None,
+    };
+    let catalog = catalog_of(vec![listed.clone()]);
+    Mock::given(method("GET"))
+        .and(path("/api/v1/peer/catalog"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&catalog))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/peer/artifact/{YT}/lyrics")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(body)
+                .set_delay(Duration::from_secs(30)),
+        )
+        .mount(&server)
+        .await;
+    let pp = TestNode::start("pp", None).await;
+    let peer = PeerConfig {
+        name: "snv".into(),
+        base_url: server.uri(),
+        key: SNV_KEY.into(),
+        cf_client_id: None,
+        cf_client_secret: None,
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let bound = Duration::from_millis(500);
+    let probe = pp.ex.probe_transfer(&peer, tmp.path(), bound).await;
+    assert!(!probe.ok);
+    assert_eq!(probe.error.as_deref(), Some("the probe took over 500ms"));
+    assert_eq!(probe.artifact, Some(listed));
+    assert_eq!(entries(tmp.path()), 0, "the temp dir is removed");
+    assert_eq!(PROBE_MAX_TIME, Duration::from_secs(300));
 }
 
 async fn post_transfer(ex: &Arc<Exchange>) -> (StatusCode, String) {

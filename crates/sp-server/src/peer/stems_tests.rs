@@ -115,6 +115,7 @@ async fn stems_made_from_another_audio_are_separated_here() {
 #[tokio::test]
 async fn an_audio_fetched_at_an_older_sha_is_not_the_peers_now() {
     let (_snv, pp, job, audio) = snv_and_pp_own_audio().await;
+    std::fs::write(&audio, bytes(3_000, 7)).unwrap();
     crate::db::models_peer::record_fetch(
         pp.pool(),
         YT,
@@ -186,6 +187,48 @@ async fn an_own_hash_equal_to_the_peers_audio_takes_its_stems() {
         std::fs::read(crate::stems::stem_paths(&audio).0).unwrap(),
         bytes(1_500, 3)
     );
+}
+
+/// PP in phase 1 runs no hasher, and its audio copied from SNV in phase 0
+/// carries no fetch record: the hook hashes the row's audio now, finds it
+/// IS SNV's, and takes the stems.
+#[tokio::test]
+async fn an_audio_copied_from_the_peer_is_hashed_when_asked_and_its_stems_taken() {
+    let (_snv, pp, job, audio) = snv_and_pp_own_audio().await;
+    assert!(matches!(first(Some(&pp.ex), &job).await, PeerStep::Done));
+    assert_eq!(
+        std::fs::read(crate::stems::stem_paths(&audio).0).unwrap(),
+        bytes(1_500, 3)
+    );
+}
+
+/// While this node's transfers are paused the fetch would be refused: the
+/// job waits the pause out (5 min rechecks, no attempt), and nothing is
+/// read, hashed or transferred meanwhile.
+#[tokio::test]
+async fn while_transfers_are_paused_the_stems_wait_and_nothing_is_hashed() {
+    let (_snv, pp, job, audio) = snv_and_pp_own_audio().await;
+    crate::peer::rig::set(
+        pp.pool(),
+        sp_core::config::SETTING_PEER_TRANSFERS_PAUSED,
+        "true",
+    )
+    .await;
+    assert!(matches!(
+        first(Some(&pp.ex), &job).await,
+        PeerStep::Deferred
+    ));
+    let (status, attempts, next, ..) = stem_state(&pp, job.video_id).await;
+    assert_eq!((status, attempts), (None, 0));
+    let next = chrono::DateTime::parse_from_rfc3339(&next.unwrap()).unwrap();
+    let ahead = (next.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
+    assert!((280..=305).contains(&ahead), "{ahead}");
+    let hashes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_hashes")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(hashes, 0, "nothing hashed while paused");
+    assert!(!crate::stems::stem_paths(&audio).0.exists());
 }
 
 /// Review Focus 4: a rename here while the transfer ran. The test holds the

@@ -140,17 +140,16 @@ pub fn listed_audio<'a>(catalog: &'a Catalog, youtube_id: &str) -> Option<&'a Ar
         .find(|a| a.youtube_id == youtube_id && a.kind == ArtifactKind::Audio)
 }
 
-/// What this node knows of a row's audio, for [`same_audio`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// What this node knows of a row's audio file on disk, for [`same_audio`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OwnAudio<'a> {
     /// The `peer_fetches` record of the video's audio: the node it came from
     /// and its sha256. One per VIDEO, so it vouches only for a row audio of
     /// the fetched size (`size`).
     pub fetched: Option<(&'a str, &'a str)>,
-    /// The size of the row's audio file on disk now.
-    pub size: Option<u64>,
-    /// This node's own hash of the row's audio: a `peer_hashes` entry that
-    /// still holds.
+    /// The size of the row's audio file.
+    pub size: u64,
+    /// This node's own hash of the row's audio file.
     pub hashed: Option<&'a str>,
 }
 
@@ -162,7 +161,7 @@ pub struct OwnAudio<'a> {
 /// runs here.
 pub fn same_audio(peer: &str, listed: &Artifact, own: OwnAudio<'_>) -> bool {
     let sha = listed.sha256.as_str();
-    let fetched_here = own.fetched == Some((peer, sha)) && own.size == Some(listed.size);
+    let fetched_here = own.fetched == Some((peer, sha)) && own.size == listed.size;
     fetched_here || own.hashed == Some(sha)
 }
 

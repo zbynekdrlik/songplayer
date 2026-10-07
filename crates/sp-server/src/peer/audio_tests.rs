@@ -1,40 +1,71 @@
-//! #229 `peer::audio`: what this node has of a row's audio (its size on disk,
-//! its own hash while that still describes the file). The stems and lyrics
-//! hooks' decisions are in `stems_tests.rs` / `lyrics_tests.rs`.
+//! #229 `peer::audio`: a row's audio file as this node knows it (its size,
+//! its own hash: the stored one while it holds, else hashed now and
+//! stored). The stems and lyrics hooks' decisions are in `stems_tests.rs` /
+//! `lyrics_tests.rs`.
 
 use std::time::{Duration, SystemTime};
 
 use super::RowAudio;
+use crate::db::models_peer::hash_of;
+use crate::peer::hash::sha256_hex;
 use crate::peer::rig::{TestNode, bytes, song_audio_sha};
 
 const YT: &str = "aaaaaaaaaaa";
 
-/// PP with one downloaded song, hashed; its row id and audio path.
-async fn hashed_song() -> (TestNode, i64, std::path::PathBuf) {
+/// PP with one downloaded song; its row id and audio path.
+async fn song() -> (TestNode, i64, std::path::PathBuf) {
     let pp = TestNode::start("pp", None).await;
     let id = pp.add_video(YT).await;
     let (_, audio) = pp.give_song(id, YT, "Way Maker", "Sinach").await;
-    pp.hash_now().await;
     (pp, id, audio)
 }
 
-fn row(size: Option<u64>, hashed: Option<String>) -> RowAudio {
-    RowAudio { size, hashed }
+fn row(size: u64, sha: String) -> Option<RowAudio> {
+    Some(RowAudio {
+        size,
+        hashed: Some(sha),
+    })
 }
 
+/// A node that runs no hasher (PP in phase 1) hashes the row's audio when
+/// asked, and stores the entry as the hasher would.
 #[tokio::test]
-async fn the_rows_audio_is_its_size_and_hashed_sha() {
-    let (pp, id, _) = hashed_song().await;
+async fn an_audio_never_hashed_is_hashed_now_and_stored() {
+    let (pp, id, audio) = song().await;
     assert_eq!(
-        pp.ex.row_audio(id).await,
-        row(Some(3_000), Some(song_audio_sha()))
+        hash_of(pp.pool(), &audio.to_string_lossy()).await.unwrap(),
+        None
     );
+    assert_eq!(pp.ex.row_audio(id).await, row(3_000, song_audio_sha()));
+    let stored = hash_of(pp.pool(), &audio.to_string_lossy())
+        .await
+        .unwrap()
+        .expect("the entry is stored");
+    assert_eq!((stored.size, stored.sha256), (3_000, song_audio_sha()));
 }
 
-/// The same size, written again later: the old hash no longer describes it.
+/// A stored entry that still holds is used as it is: its sha (here a
+/// planted one) is answered, the file is not read again.
 #[tokio::test]
-async fn an_audio_rewritten_since_its_hash_has_no_hash() {
-    let (pp, id, audio) = hashed_song().await;
+async fn a_stored_hash_that_holds_is_used() {
+    let (pp, id, audio) = song().await;
+    pp.hash_now().await;
+    let planted = "0123456789abcdef".repeat(4);
+    sqlx::query("UPDATE peer_hashes SET sha256 = ? WHERE path = ?")
+        .bind(&planted)
+        .bind(audio.to_string_lossy().to_string())
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(pp.ex.row_audio(id).await, row(3_000, planted));
+}
+
+/// The same size, written again later: the old entry no longer describes
+/// it, so the file is hashed again and the entry replaced.
+#[tokio::test]
+async fn an_audio_rewritten_since_its_hash_is_hashed_again() {
+    let (pp, id, audio) = song().await;
+    pp.hash_now().await;
     std::fs::write(&audio, bytes(3_000, 9)).unwrap();
     let later = SystemTime::now() + Duration::from_secs(10);
     std::fs::File::options()
@@ -43,29 +74,21 @@ async fn an_audio_rewritten_since_its_hash_has_no_hash() {
         .unwrap()
         .set_modified(later)
         .unwrap();
-    assert_eq!(pp.ex.row_audio(id).await, row(Some(3_000), None));
+    let new_sha = sha256_hex(&bytes(3_000, 9));
+    assert_eq!(pp.ex.row_audio(id).await, row(3_000, new_sha.clone()));
+    let stored = hash_of(pp.pool(), &audio.to_string_lossy())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.sha256, new_sha);
 }
 
 #[tokio::test]
-async fn an_audio_never_hashed_or_gone_reads_as_it_is() {
+async fn a_row_with_no_audio_on_disk_has_none() {
     let pp = TestNode::start("pp", None).await;
     let id = pp.add_video(YT).await;
-    assert_eq!(
-        pp.ex.row_audio(id).await,
-        row(None, None),
-        "no audio recorded"
-    );
+    assert_eq!(pp.ex.row_audio(id).await, None, "no audio recorded");
     let (_, audio) = pp.give_song(id, YT, "Way Maker", "Sinach").await;
-    assert_eq!(
-        pp.ex.row_audio(id).await,
-        row(Some(3_000), None),
-        "not hashed"
-    );
-    pp.hash_now().await;
     std::fs::remove_file(&audio).unwrap();
-    assert_eq!(
-        pp.ex.row_audio(id).await,
-        row(None, None),
-        "the file is gone"
-    );
+    assert_eq!(pp.ex.row_audio(id).await, None, "the file is gone");
 }

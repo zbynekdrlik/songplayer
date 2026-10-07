@@ -144,6 +144,30 @@ async fn lyrics_made_from_another_audio_are_processed_here() {
     assert_eq!((now.has_lyrics, now.lyrics_attempts), (0, 0));
 }
 
+/// No audio of the row is on disk here: this node cannot tell whether SNV's
+/// line timings fit it, so the job waits like a failed fetch (no attempt,
+/// counted against the 2 h bound) and nothing is taken.
+#[tokio::test]
+async fn lyrics_of_a_song_with_no_audio_here_wait() {
+    let (_snv, pp, id, _) = snv_and_pp().await;
+    let audio: String = sqlx::query_scalar("SELECT audio_file_path FROM videos WHERE id = ?")
+        .bind(id)
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    std::fs::remove_file(&audio).unwrap();
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        first(Some(&pp.ex), &row).await,
+        PeerStep::Deferred
+    ));
+    let now = lyrics_now(&pp, id).await;
+    assert_eq!((now.has_lyrics, now.lyrics_attempts), (0, 0));
+    assert!(now.lyrics_next_attempt_at.is_some(), "re-picked later");
+    assert_eq!(json_at(&pp), None);
+    assert_eq!(parts_left(&pp), 0);
+}
+
 #[tokio::test]
 async fn the_same_translation_gender_here_keeps_the_translation() {
     let (_snv, pp, id, _) = snv_and_pp().await;

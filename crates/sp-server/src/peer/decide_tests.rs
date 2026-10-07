@@ -356,7 +356,7 @@ fn the_listed_audio_is_the_videos_own_audio() {
 type AudioCase = (
     &'static str,
     Option<(&'static str, char)>,
-    Option<u64>,
+    u64,
     Option<char>,
     bool,
 );
@@ -365,52 +365,46 @@ type AudioCase = (
 fn this_nodes_audio_is_the_peers_only_by_its_fetch_or_its_own_hash() {
     let snv_audio = with_sha(YT, Audio, sha_n('a'));
     assert_eq!(snv_audio.size, 10);
-    let table: [AudioCase; 9] = [
+    let fetched_a = Some(("snv", 'a'));
+    let table: [AudioCase; 8] = [
         (
             "fetched from snv at its sha, the same size",
-            Some(("snv", 'a')),
-            Some(10),
+            fetched_a,
+            10,
             None,
             true,
         ),
         (
             "fetched, but this row's audio has another size",
-            Some(("snv", 'a')),
-            Some(11),
-            None,
-            false,
-        ),
-        (
-            "fetched, but no audio file here",
-            Some(("snv", 'a')),
-            None,
+            fetched_a,
+            11,
             None,
             false,
         ),
         (
             "hashed here at the sha snv lists",
             None,
-            Some(10),
+            10,
             Some('a'),
             true,
         ),
-        ("both", Some(("snv", 'a')), Some(10), Some('a'), true),
+        ("both", fetched_a, 10, Some('a'), true),
         (
             "fetched from another peer",
             Some(("pp2", 'a')),
-            Some(10),
+            10,
             None,
             false,
         ),
         (
             "fetched at an older sha",
             Some(("snv", 'b')),
-            Some(10),
+            10,
             Some('b'),
             false,
         ),
-        ("its own encode", None, Some(10), Some('b'), false),
-        ("nothing known here", None, None, None, false),
+        ("its own encode", None, 10, Some('b'), false),
+        ("nothing known here", None, 10, None, false),
     ];
     for (case, fetched, size, hashed, want) in table {
         let fetched = fetched.map(|(node, s)| (node, sha_n(s)));

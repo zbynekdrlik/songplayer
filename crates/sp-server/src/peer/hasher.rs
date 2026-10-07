@@ -97,19 +97,34 @@ async fn one_file(
     if ex.transfers_paused().await {
         return Outcome::Paused;
     }
-    let Ok(sha256) = sha256_file(&f.path, rate).await else {
-        return Outcome::Missing;
-    };
-    if stat(&f.path).await != Some((size, mtime_ms)) {
-        return Outcome::Changed;
+    match hash_unchanged(&f.path, size, mtime_ms, rate).await {
+        Ok(Some(entry)) => Outcome::Hashed(entry),
+        Ok(None) => Outcome::Changed,
+        Err(_) => Outcome::Missing,
     }
-    Outcome::Hashed(HashEntry {
-        path: key,
+}
+
+/// The entry of the file at `path`, found at `(size, mtime_ms)`, hashed now
+/// at `rate` bytes/s (0 = no limit); `Ok(None)` when it changed while being
+/// hashed (stat → hash → stat), an `Err` when it cannot be read. The
+/// hasher's passes and `peer::audio`'s on-demand hash share it.
+pub(crate) async fn hash_unchanged(
+    path: &Path,
+    size: i64,
+    mtime_ms: i64,
+    rate: u64,
+) -> std::io::Result<Option<HashEntry>> {
+    let sha256 = sha256_file(path, rate).await?;
+    if stat(path).await != Some((size, mtime_ms)) {
+        return Ok(None);
+    }
+    Ok(Some(HashEntry {
+        path: path_key(path),
         size,
         mtime_ms,
         sha256,
         hashed_at_ms: now_ms(),
-    })
+    }))
 }
 
 /// `(size, mtime ms)` of a file, `None` when it cannot be read.

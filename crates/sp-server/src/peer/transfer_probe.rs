@@ -13,7 +13,7 @@
 //! one probe at a time (the route answers 409 to a second).
 
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -27,6 +27,11 @@ use super::wire::{Artifact, Catalog};
 /// The largest artifact a probe transfers: 64 MiB (a lyrics track is a few
 /// hundred KiB, a stem tens of MiB).
 pub const PROBE_MAX_BYTES: u64 = 67_108_864;
+
+/// The longest a probe of one peer takes, the catalog read included: under
+/// the PP gate's 330 s request bound, so the gate reads the probe's own
+/// failure, and a trickling transfer never holds the probe lock for long.
+pub const PROBE_MAX_TIME: Duration = Duration::from_secs(300);
 
 /// One peer's transfer probe.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,8 +70,15 @@ pub fn pick(catalog: &Catalog) -> Result<&Artifact, String> {
 
 impl Exchange {
     /// Transfer one artifact of `peer` into a temp dir under `tmp_parent`
-    /// (the OS temp dir in production) and read it back.
-    pub async fn probe_transfer(&self, peer: &PeerConfig, tmp_parent: &Path) -> TransferProbe {
+    /// (the OS temp dir in production) and read it back, within `max_time`
+    /// ([`PROBE_MAX_TIME`] from the route): a transfer that trickles past it
+    /// fails, its temp dir removed, and the probe lock is free again.
+    pub async fn probe_transfer(
+        &self,
+        peer: &PeerConfig,
+        tmp_parent: &Path,
+        max_time: Duration,
+    ) -> TransferProbe {
         let started = Instant::now();
         let mut probe = TransferProbe {
             name: peer.name.clone(),
@@ -78,7 +90,9 @@ impl Exchange {
             latency_ms: 0,
             error: None,
         };
-        let done = self.transfer_one(peer, tmp_parent, &mut probe).await;
+        let done = tokio::time::timeout(max_time, self.transfer_one(peer, tmp_parent, &mut probe))
+            .await
+            .unwrap_or_else(|_| Err(format!("the probe took over {max_time:?}")));
         probe.latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         probe.ok = done.is_ok();
         probe.error = done.err();

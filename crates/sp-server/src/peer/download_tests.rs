@@ -631,23 +631,31 @@ async fn a_download_here_with_no_peers_forgets_the_pairs_peer_origin() {
 }
 
 /// The audio's origin is recorded BEFORE `record_download` makes the row
-/// playable (a stems or lyrics ask in between must find it), so `adopt`
-/// alone, before the hook's `fetched`, leaves it.
+/// playable (a stems or lyrics ask in between must find it): with every
+/// UPDATE of the row refused, `record_download` fails, and the record of the
+/// pair now under this node's names is already there.
 #[tokio::test]
 async fn an_adopted_pair_records_its_origin_before_the_row_plays() {
     let (_snv, pp, row) = snv_and_pp().await;
     let Ask::Fetch(plan) = pp.ex.ask(Job::Download, YT).await else {
         panic!("expected Fetch")
     };
+    sqlx::query(
+        "CREATE TRIGGER refuse_row_updates BEFORE UPDATE ON videos \
+         BEGIN SELECT RAISE(ABORT, 'refused by the test'); END",
+    )
+    .execute(pp.pool())
+    .await
+    .unwrap();
     let (chain, _) = counting_chain();
-    adopt(&pp.ex, &chain, &row, &plan).await.unwrap();
+    assert!(adopt(&pp.ex, &chain, &row, &plan).await.is_err());
+    assert_eq!(row_now(&pp, row.id).await.normalized, 0, "never recorded");
     let (node, version, sha) = fetch_record(pp.pool(), YT, "audio")
         .await
         .unwrap()
-        .expect("the audio's origin");
+        .expect("the audio's origin, recorded first");
     assert_eq!((node.as_str(), version), ("snv", 1));
     assert_eq!(sha, crate::peer::rig::song_audio_sha());
-    assert_eq!(row_now(&pp, row.id).await.normalized, 1);
 }
 
 #[tokio::test]
