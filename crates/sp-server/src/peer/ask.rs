@@ -193,8 +193,9 @@ impl Exchange {
     /// A fetch from `peer` did not work: the job waits (counted against the
     /// 2 h bound) and asks again after the returned recheck; `None` once it
     /// has waited the bound (`decide::gives_up`): it runs here then, so a
-    /// peer's copy that keeps failing (no audio here, a refused track, this
-    /// node paused) is never retried forever.
+    /// peer's copy that keeps failing (a refused track, a peer answering
+    /// badly) is never retried forever. This node's own pause is waited out
+    /// every 5 min and never gives up (`decide::after_failure`).
     pub async fn fetch_failed(
         &self,
         job: Job,
@@ -222,15 +223,25 @@ impl Exchange {
             );
             return None;
         };
-        warn!(
-            youtube_id,
-            job = job.as_str(),
-            peer,
-            %error,
-            paused_here,
-            recheck_s = recheck.as_secs(),
-            "exchange: fetching from a peer failed - asking again later"
-        );
+        if paused_here {
+            // Expected for as long as the pause lasts: no WARN per row and tick.
+            debug!(
+                youtube_id,
+                job = job.as_str(),
+                peer,
+                recheck_s = recheck.as_secs(),
+                "exchange: transfers paused here - asking again later"
+            );
+        } else {
+            warn!(
+                youtube_id,
+                job = job.as_str(),
+                peer,
+                %error,
+                recheck_s = recheck.as_secs(),
+                "exchange: fetching from a peer failed - asking again later"
+            );
+        }
         Some(recheck)
     }
 
