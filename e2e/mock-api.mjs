@@ -879,7 +879,9 @@ app.get("/api/v1/resolume/health", (_req, res) => {
 // Mirrors the real `GET /api/v1/ndi/health` array of PipelineHealthSnapshot:
 // per output `lock_state` (#149) / `lock_reason`, `clock` (#146),
 // `pacing` (#147), `audio` (#148). Mutable so a test can drive all three
-// states via `POST /__mock/ndi-health`.
+// states via `POST /__mock/ndi-health` (`POST /__mock/ndi-health-reset` puts
+// the default back). #229: every row carries `open_failures` (`null` while no
+// video failed to open since the last song started), as the server's does.
 //
 // Default fixture exercises the three badges at once:
 //   - SP-worship   → LOCKED   (live, clock ok)
@@ -887,7 +889,7 @@ app.get("/api/v1/resolume/health", (_req, res) => {
 //   - SP-live       → UNLOCKED (Idle → non-live, "pacing disabled")
 // The global summary counts only LIVE outputs, so it resolves to
 // `DEGRADED — SP-background` (the non-live UNLOCKED SP-live is ignored).
-let ndiHealth = [
+const NDI_HEALTH_DEFAULT = [
   {
     ndi_name: "SP-worship",
     playlist_id: 1,
@@ -909,6 +911,7 @@ let ndiHealth = [
       av_align_err_ms: 0.4,
     },
     audio: { underruns: 0 },
+    open_failures: null,
   },
   {
     ndi_name: "SP-background",
@@ -929,6 +932,7 @@ let ndiHealth = [
       av_align_err_ms: -0.6,
     },
     audio: { underruns: 0 },
+    open_failures: null,
   },
   {
     ndi_name: "SP-live",
@@ -949,8 +953,11 @@ let ndiHealth = [
       av_align_err_ms: 0,
     },
     audio: { underruns: 0 },
+    open_failures: null,
   },
 ];
+
+let ndiHealth = structuredClone(NDI_HEALTH_DEFAULT);
 
 app.get("/api/v1/ndi/health", (_req, res) => {
   res.json(ndiHealth);
@@ -965,6 +972,13 @@ app.post("/__mock/ndi-health", (req, res) => {
   }
   ndiHealth = req.body;
   res.json({ status: "set", count: ndiHealth.length });
+});
+
+// Admin: put the default NDI health fixture back (#229: a spec that sets
+// `open_failures` restores the rows other specs read).
+app.post("/__mock/ndi-health-reset", (_req, res) => {
+  ndiHealth = structuredClone(NDI_HEALTH_DEFAULT);
+  res.json({ status: "reset", count: ndiHealth.length });
 });
 
 // #209 program bus: mirrors the real `GET /api/v1/program` /

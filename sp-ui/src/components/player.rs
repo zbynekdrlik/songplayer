@@ -41,6 +41,16 @@ pub(crate) fn now_ms() -> u64 {
         .unwrap_or(0.0) as u64
 }
 
+/// The browser's wall clock in UTC ms (`performance.timeOrigin + now()`), for
+/// the #229 retry countdown: the server reports the retry's instant in UTC
+/// ms. `0` if the clock is unavailable (never in the running CSR app).
+fn utc_now_ms() -> i64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.time_origin() + p.now())
+        .unwrap_or(0.0) as i64
+}
+
 #[component]
 pub fn Player(playlist_id: i64) -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
@@ -97,6 +107,20 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // Playback-command errors (play / pause / skip / prev / seek / mode) surface
     // here as Slovak text and clear on the next successful command.
     let player_error = RwSignal::new(None::<String>);
+
+    // #229: this playlist's videos that failed to open in a row (its health
+    // row's `open_failures`, the 1 Hz poll of `store.ndi_health`): the reason
+    // a black program has. The line is mounted by a Memo (Rule 1); only its
+    // text follows the poll, which also moves the retry countdown.
+    let open_failures = move || {
+        store
+            .ndi_health
+            .get()
+            .into_iter()
+            .find(|o| o.playlist_id == pid)
+            .and_then(|o| o.open_failures)
+    };
+    let failing = Memo::new(move |_| open_failures().is_some());
 
     // #221 L4b: "Hrá mimo programu" for a playlist playing off program
     // (`sp_core::player_view::state_label`); "—" until the state is known.
@@ -286,6 +310,23 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                         view! {
                             <div class="player-error" data-testid="player-error">
                                 {e}
+                            </div>
+                        }
+                    })
+            }}
+
+            // --- #229: why the program is black: the videos cannot be opened ---
+            {move || {
+                failing
+                    .get()
+                    .then(|| {
+                        view! {
+                            <div class="player-open-failures" data-testid="player-open-failures">
+                                {move || {
+                                    open_failures()
+                                        .map(|f| player_view::open_failures_line(&f, utc_now_ms()))
+                                        .unwrap_or_default()
+                                }}
                             </div>
                         }
                     })

@@ -1289,6 +1289,16 @@ body {
     border: 1px solid var(--danger, #c0392b);
 }
 
+/* #229: the playlist's videos cannot be opened — the reason a black program has. */
+.player-open-failures {
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    font-size: 0.85em;
+    color: var(--warning, #f8b400);
+    border: 1px solid var(--warning, #f8b400);
+    overflow-wrap: anywhere;
+}
+
 .player-seek-row { display: flex; flex-direction: column; gap: 6px; }
 .player-seek { width: 100%; accent-color: var(--accent); }
 .player-seek:disabled { opacity: 0.5; }

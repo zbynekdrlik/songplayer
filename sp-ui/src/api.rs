@@ -209,6 +209,10 @@ pub struct NdiOutputHealth {
     pub pacing: PacingView,
     #[serde(default)]
     pub audio: AudioView,
+    /// #229: the videos that failed to open in a row (`null` while none
+    /// did): the Player says why the program is black from it.
+    #[serde(default)]
+    pub open_failures: Option<sp_core::playback::OpenFailures>,
 }
 
 impl NdiOutputHealth {

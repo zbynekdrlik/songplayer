@@ -15,7 +15,7 @@
 //! These rules live here (WASM-safe, so the workspace tests and the mutation
 //! gate cover them; sp-ui has no unit-test job).
 
-use crate::playback::{PlaybackMode, PlaybackState, TransportState};
+use crate::playback::{OpenFailures, PlaybackMode, PlaybackState, TransportState};
 
 /// The title while the song is not known yet.
 pub const PENDING_TITLE: &str = "Načítavam…";
@@ -143,6 +143,32 @@ pub fn play_pause(state_known: bool, playing: bool) -> (&'static str, &'static s
 /// disables the select then.
 pub fn mode_value(state_known: bool, mode: PlaybackMode) -> &'static str {
     if state_known { mode.as_str() } else { "" }
+}
+
+/// #229: the Player's line for a playlist whose videos cannot be opened
+/// (its health row's `open_failures`):
+/// `Videá sa nedajú otvoriť (N×): {chyba} — ďalší pokus o X s`. `now_ms` is
+/// the browser's clock (UTC ms).
+/// With no retry pending (the next song is tried at once, an attempt is
+/// under way, the playlist was cut off program or paused) the line has no
+/// "ďalší pokus".
+pub fn open_failures_line(failures: &OpenFailures, now_ms: i64) -> String {
+    let head = format!(
+        "Videá sa nedajú otvoriť ({}×): {}",
+        failures.count, failures.last_error
+    );
+    match failures.retry_at_ms {
+        Some(at_ms) => format!("{head} — ďalší pokus o {} s", retry_in_s(at_ms, now_ms)),
+        None => head,
+    }
+}
+
+/// Whole seconds until the retry at `at_ms` (UTC ms), rounded up: 0 once it
+/// is due.
+pub fn retry_in_s(at_ms: i64, now_ms: i64) -> u64 {
+    u64::try_from(at_ms.saturating_sub(now_ms))
+        .unwrap_or(0)
+        .div_ceil(1000)
 }
 
 #[cfg(test)]
@@ -275,5 +301,39 @@ mod tests {
         assert_eq!(mode_value(true, PlaybackMode::Loop), "loop");
         assert_eq!(mode_value(true, PlaybackMode::Single), "single");
         assert_eq!(mode_value(true, PlaybackMode::Continuous), "continuous");
+    }
+
+    /// #229: the seconds until a retry round up, so the line never says
+    /// "0 s" while the retry is still ahead; a due or past retry reads 0.
+    #[test]
+    fn the_retry_countdown_rounds_up_to_whole_seconds() {
+        assert_eq!(retry_in_s(10_000, 0), 10);
+        assert_eq!(retry_in_s(4_001, 0), 5, "a part of a second counts whole");
+        assert_eq!(retry_in_s(5_000, 1_000), 4, "measured from now");
+        assert_eq!(retry_in_s(1_000, 999), 1);
+        assert_eq!(retry_in_s(1_000, 1_000), 0, "due now");
+        assert_eq!(retry_in_s(1_000, 6_000), 0, "already past");
+        assert_eq!(retry_in_s(i64::MIN, i64::MAX), 0, "no overflow");
+    }
+
+    #[test]
+    fn the_open_failures_line_names_the_count_the_error_and_the_retry() {
+        let mut failures = OpenFailures {
+            count: 4,
+            last_error: "No video: SetCurrentMediaType failed: No suitable transform".into(),
+            retry_at_ms: Some(1_791_331_230_000),
+        };
+        assert_eq!(
+            open_failures_line(&failures, 1_791_331_200_000),
+            "Videá sa nedajú otvoriť (4×): No video: SetCurrentMediaType failed: \
+             No suitable transform — ďalší pokus o 30 s"
+        );
+        failures.retry_at_ms = None;
+        assert_eq!(
+            open_failures_line(&failures, 1_791_331_200_000),
+            "Videá sa nedajú otvoriť (4×): No video: SetCurrentMediaType failed: \
+             No suitable transform",
+            "no retry pending: no countdown"
+        );
     }
 }
