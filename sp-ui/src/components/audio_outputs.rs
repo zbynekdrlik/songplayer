@@ -114,7 +114,8 @@ fn live_text(live: &ProgramOutputs, id: &str, saved: bool) -> String {
     }
 }
 
-/// A row's tooltip: the server's reason, or its problem with this entry.
+/// A row's tooltip: the server's reason, or its problem with this entry, in
+/// the server's own (English) words, marked as the server's.
 fn live_reason(live: &ProgramOutputs, id: &str) -> String {
     let named = format!("(id {id})");
     live.outputs
@@ -127,6 +128,7 @@ fn live_reason(live: &ProgramOutputs, id: &str) -> String {
                 .find(|p| p.contains(&named))
                 .cloned()
         })
+        .map(|text| format!("Hlásenie servera: {text}"))
         .unwrap_or_default()
 }
 
