@@ -5,6 +5,7 @@
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
 pub mod asio_format; // #233: an ASIO driver's sample types + the L/R channel fill (pure)
+pub mod asio_out; // #233: the ASIO output — its worker over a driver trait (open / run / close / backoff)
 pub mod asio_state; // #233: the ASIO output's decisions (backoff, reasons, replies, stall), pure
 pub mod asrc; // #233: the ASIO output's resampler (rubato Async sinc) + the re-centre splice
 pub mod asrc_servo; // #233: the ASIO output's drift servo (camera-box's asrc-compensator, for an output), pure
@@ -13,6 +14,7 @@ pub mod audio_out; // #233: the program audio's fan-out to its outputs (one queu
 pub mod audio_out_block; // #233: one program boundary's audio block for the outputs
 pub mod audio_out_config; // #233: the outputs' settings — strict PATCH parse, lenient stored read
 pub mod audio_out_migrate; // #233: vban_* → the output list, once (the old keys stay)
+pub mod audio_out_queue; // #233: a bounded drop-oldest block queue (the ASIO output's)
 pub mod audio_out_task; // #233: the outputs' settings task (keep / build / stop, DNS, migration)
 pub mod band_pool; // #223: the SP-program sender's persistent row-band workers (no thread per picture)
 mod clear_lyrics;
