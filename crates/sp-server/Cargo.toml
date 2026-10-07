@@ -92,6 +92,9 @@ windows-sys = { version = "0.59", features = [
     # #233 lane 3: an ASIO output's worker pumps its driver's window messages
     # (PeekMessageW / TranslateMessage / DispatchMessageW).
     "Win32_UI_WindowsAndMessaging",
+    # #233 lane 3: the ASIO worker holds its thread's COM apartment
+    # (CoInitializeEx / CoUninitialize) for its device's life.
+    "Win32_System_Com",
 ] }
 # #233 lane 3: the ASIO output's host — azo, a pure-Rust COM ASIO host (MIT,
 # no Steinberg SDK, no LLVM; iemmixer's choice), 0.4.0 per main-session

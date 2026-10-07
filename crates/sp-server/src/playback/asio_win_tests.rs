@@ -5,12 +5,15 @@
 //! configured channels in the driver's type, zeroes every other channel and
 //! the frames the ring did not deliver, and only counts; every slot's four
 //! callbacks reach that slot; a driver message is counted and answered; a
-//! device releases its slot.
+//! device releases its slot; a device holds its thread's COM apartment for
+//! its whole life.
 
 use std::sync::{Mutex, MutexGuard};
 
 use super::*;
 use sp_core::audio_outputs::MAX_ASIO_OUTPUTS;
+use windows_sys::Win32::Foundation::{S_FALSE, S_OK};
+use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
 
 /// The tests that take callback slots run one at a time (the slots are
 /// process-wide statics; nothing else in the test binary claims one).
@@ -223,4 +226,32 @@ fn a_driver_message_is_counted_answered_and_polled_once() {
         !SLOTS[i].claimed.load(Ordering::SeqCst),
         "a closed device releases its slot"
     );
+}
+
+/// azo 0.4.0's `SafeHandle` uninitialises COM in its own `Drop`, BEFORE its
+/// interface field is released, so with nothing else holding the thread's
+/// apartment the driver's `Release` would run after COM is down (review
+/// round 1). The device holds its thread's STA itself, from `new` until it
+/// is dropped: every driver release (inside `close`, which the device's own
+/// `Drop` runs before its fields drop) happens with COM up.
+#[test]
+fn a_device_holds_its_threads_com_apartment_until_it_is_dropped() {
+    std::thread::spawn(|| {
+        // A second STA init answers S_FALSE while the thread already is one.
+        let probe = || {
+            // SAFETY: a plain COM init of this thread, undone at once.
+            let hr = unsafe { CoInitializeEx(ptr::null(), COINIT_APARTMENTTHREADED as u32) };
+            if hr >= 0 {
+                // SAFETY: balances the probe's own successful init.
+                unsafe { CoUninitialize() };
+            }
+            hr
+        };
+        let device = WinAsioDevice::new();
+        assert_eq!(probe(), S_FALSE, "the device holds the thread's STA");
+        drop(device);
+        assert_eq!(probe(), S_OK, "and gives it back when it is dropped");
+    })
+    .join()
+    .expect("the probe thread");
 }
