@@ -15,7 +15,7 @@
 //! is not the network's or its buffer is over a third of a grid slot).
 
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use sp_core::audio_outputs::{DEFAULT_NETWORK_RATE, OutputEntry, OutputType};
@@ -23,6 +23,7 @@ use sp_core::audio_outputs::{DEFAULT_NETWORK_RATE, OutputEntry, OutputType};
 use crate::playback::asio_out::{AsioOut, AsioStatus};
 use crate::playback::asio_state::{Reason, buffer_note, rate_note};
 use crate::playback::audio_out_block::ProgramBlock;
+use crate::playback::audio_out_queue::lock;
 use crate::playback::vban_out::{VbanOut, VbanStatus};
 use crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS;
 use crate::playback::vban_rate::fft_delay_frames;
@@ -250,10 +251,6 @@ impl RunningOutput {
             asio: status,
         }
     }
-}
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// The program's audio outputs (owned by `ProgramBus`).

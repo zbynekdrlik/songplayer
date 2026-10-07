@@ -20,8 +20,8 @@
 //! driver's own callback thread; it has two slots of cushion). Status:
 //! `AsioOut::snapshot` → `GET /api/v1/program` `outputs[i].asio`.
 
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -37,7 +37,7 @@ use crate::playback::asrc::{Asrc, Splice};
 use crate::playback::asrc_servo::{BASE_LATENCY_100NS, Observation, Servo, frames_from_100ns};
 use crate::playback::audio_out::{STATE_OPENING, STATE_RUNNING, STATE_WAITING};
 use crate::playback::audio_out_block::ProgramBlock;
-use crate::playback::audio_out_queue::{BlockQueue, Take};
+use crate::playback::audio_out_queue::{BlockQueue, Take, lock};
 use crate::playback::vban_out::{VbanClock, queue_bound, should_log};
 use crate::playback::vban_packet::{VBAN_BLOCK_SAMPLES, VBAN_CHANNELS};
 
@@ -123,10 +123,6 @@ struct Live {
     reason: Option<Reason>,
     status: AsioStatus,
     blocks_sent: u64,
-}
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 /// One ASIO entry's shared side: its queue and its status.

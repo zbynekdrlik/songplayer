@@ -1,8 +1,10 @@
-//! #233: a bounded, never-blocking block queue for an output's thread (the
-//! ASIO output's; #210's `VbanOut` keeps its own): over the bound the OLDEST
-//! block is dropped and counted. A stopped queue takes no more blocks;
-//! `stop` lets the thread drain what is queued (process shutdown), `discard`
-//! drops it (a runtime replace or removal, `audio_out_task::apply`).
+//! #233: the bounded, never-blocking block queue of an output's thread
+//! (every `VbanOut`'s and every `AsioOut`'s; #210's VBAN queue moved here,
+//! review round 1): over the bound the OLDEST block is dropped and counted.
+//! A stopped queue takes no more blocks; `stop` lets the thread drain what is
+//! queued (process shutdown), `discard` drops it (a runtime replace or
+//! removal, `audio_out_task::apply`). Also the outputs' one poison-tolerant
+//! [`lock`].
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,7 +36,8 @@ pub struct BlockQueue {
     dropped: AtomicU64,
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+/// A poisoned lock is taken anyway (its data is plain counters and queues).
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 

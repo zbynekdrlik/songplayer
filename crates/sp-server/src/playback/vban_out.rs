@@ -51,7 +51,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -60,6 +60,7 @@ use sp_core::config::DEFAULT_VBAN_STREAM_NAME;
 use tracing::{info, warn};
 
 use crate::playback::audio_out_block::ProgramBlock;
+use crate::playback::audio_out_queue::{BlockQueue, lock};
 use crate::playback::loop_stats::percentile_ceil;
 use crate::playback::program_output_timing::utc_label;
 use crate::playback::vban_packet::{
@@ -305,7 +306,6 @@ struct VbanCounters {
     blocks_sent: u64,
     packets_sent: u64,
     send_errors: u64,
-    blocks_dropped: u64,
     blocks_substituted: u64,
     late_sends: u64,
     frame_counter: u32,
@@ -317,30 +317,15 @@ struct VbanCounters {
     stalls: VbanStallLog,
 }
 
-struct VbanQueue {
-    blocks: VecDeque<ProgramBlock>,
-    stop: bool,
-}
-
-/// What [`VbanOut::take_timeout`] returned.
-#[derive(Debug, PartialEq)]
-pub enum VbanTake {
-    Block(ProgramBlock),
-    /// The wait timed out with nothing queued.
-    Idle,
-    /// Stopped and drained.
-    Stopped,
-}
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|p| p.into_inner())
-}
+/// What [`VbanOut::take_timeout`] returned (#233: the outputs' one queue,
+/// `audio_out_queue`).
+pub use crate::playback::audio_out_queue::Take as VbanTake;
 
 /// The shared VBAN output: the hand-off queue, the current config and the
 /// counters. Every method holds a lock for µs only.
 pub struct VbanOut {
-    queue: Mutex<VbanQueue>,
-    ready: Condvar,
+    /// #233: the hand-off queue (bounded by [`queue_bound`] of the delay).
+    queue: BlockQueue,
     config: Mutex<Arc<VbanConfig>>,
     stats: Mutex<VbanCounters>,
     /// Set while [`run_vban_loop`] runs.
@@ -349,8 +334,6 @@ pub struct VbanOut {
     format: VbanFormat,
     /// #233: the entry's delay, added to the send latency (100 ns).
     delay_100ns: i64,
-    /// #233: the queue's bound ([`queue_bound`] of the delay).
-    bound: usize,
     /// #233: why the output's thread could not start (Windows: the UDP bind
     /// or the spawn failed); shown as the output's reason.
     start_error: Mutex<Option<String>>,
@@ -370,19 +353,13 @@ impl VbanOut {
 
     /// #233: an output for one destination's format, delayed by `delay_100ns`.
     pub fn for_destination(format: VbanFormat, delay_100ns: i64) -> Self {
-        let bound = queue_bound(delay_100ns);
         Self {
-            queue: Mutex::new(VbanQueue {
-                blocks: VecDeque::with_capacity(bound + 1),
-                stop: false,
-            }),
-            ready: Condvar::new(),
+            queue: BlockQueue::new(queue_bound(delay_100ns)),
             config: Mutex::new(Arc::new(VbanConfig::default())),
             stats: Mutex::new(VbanCounters::default()),
             running: AtomicBool::new(false),
             format,
             delay_100ns,
-            bound,
             start_error: Mutex::new(None),
         }
     }
@@ -412,7 +389,7 @@ impl VbanOut {
 
     /// #233: the queue's bound.
     pub fn bound(&self) -> usize {
-        self.bound
+        self.queue.bound()
     }
 
     /// The VBAN thread is running.
@@ -434,60 +411,32 @@ impl VbanOut {
     /// of the delay) the oldest block is dropped and counted. #233: a stopped
     /// output (discarded, or shutting down) takes no more blocks.
     pub fn push(&self, block: ProgramBlock) {
-        let dropped = {
-            let mut q = lock(&self.queue);
-            if q.stop {
-                return;
-            }
-            q.blocks.push_back(block);
-            let over = q.blocks.len() > self.bound;
-            if over {
-                q.blocks.pop_front();
-            }
-            over
-        };
-        self.ready.notify_one();
-        if dropped {
-            let n = {
-                let mut s = lock(&self.stats);
-                s.blocks_dropped += 1;
-                s.blocks_dropped
-            };
-            if should_log(n) {
-                warn!(
-                    blocks_dropped = n,
-                    bound = self.bound,
-                    thread_running = self.is_running(),
-                    "vban output: queue full — dropped the oldest block (the VBAN thread fell behind, or is not running)"
-                );
-            }
+        if let Some(n) = self.queue.push(block)
+            && should_log(n)
+        {
+            warn!(
+                blocks_dropped = n,
+                bound = self.queue.bound(),
+                thread_running = self.is_running(),
+                "vban output: queue full — dropped the oldest block (the VBAN thread fell behind, or is not running)"
+            );
         }
     }
 
     /// The next block, waiting at most `wait` for one. Queued blocks are
     /// drained before [`VbanTake::Stopped`].
     pub fn take_timeout(&self, wait: Duration) -> VbanTake {
-        let q = lock(&self.queue);
-        let (mut q, _) = self
-            .ready
-            .wait_timeout_while(q, wait, |q| q.blocks.is_empty() && !q.stop)
-            .unwrap_or_else(|p| p.into_inner());
-        match q.blocks.pop_front() {
-            Some(block) => VbanTake::Block(block),
-            None if q.stop => VbanTake::Stopped,
-            None => VbanTake::Idle,
-        }
+        self.queue.take_timeout(wait)
     }
 
     /// Blocks waiting in the queue.
     pub fn queued(&self) -> usize {
-        lock(&self.queue).blocks.len()
+        self.queue.queued()
     }
 
     /// Stop the thread once the queue is drained (process shutdown).
     pub fn stop(&self) {
-        lock(&self.queue).stop = true;
-        self.ready.notify_all();
+        self.queue.stop();
     }
 
     /// #233: stop the thread (a runtime replace or removal): the queued
@@ -497,11 +446,7 @@ impl VbanOut {
     /// name), never its old schedule. A process shutdown drains
     /// ([`Self::stop`]).
     pub fn discard(&self) {
-        let mut q = lock(&self.queue);
-        q.blocks.clear();
-        q.stop = true;
-        drop(q);
-        self.ready.notify_all();
+        self.queue.discard();
     }
 
     /// Replace the config (the settings task).
@@ -570,7 +515,7 @@ impl VbanOut {
             blocks_sent: s.blocks_sent,
             packets_sent: s.packets_sent,
             send_errors: s.send_errors,
-            blocks_dropped: s.blocks_dropped,
+            blocks_dropped: self.queue.dropped(),
             blocks_substituted: s.blocks_substituted,
             late_sends: s.late_sends,
             late_max_us: s.stalls.late_max_us(),
