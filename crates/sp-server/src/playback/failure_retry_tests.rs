@@ -628,35 +628,64 @@ async fn a_skip_before_the_song_starts_never_picks_it_again() {
 /// 5 s heartbeat: a 5 s pause would otherwise come and go unseen. The wait
 /// left is reported on the SERVER's clock (`retry_in_ms`, at the read), since
 /// the browser that shows it runs on another machine whose clock can be off.
+/// Every place that changes the run writes the row: a pause, an operator's
+/// pick and Previous (each a Play that ends the retry), a cut off program,
+/// a start.
 #[tokio::test]
 async fn the_health_row_follows_the_run_between_heartbeats() {
     let mut rig = rig().await;
     heartbeat(&mut rig.engine); // the row exists; no heartbeat from here on
     start(&mut rig.engine).await;
-    for _ in 0..3 {
-        fail(&mut rig.engine).await;
-    }
+    fail(&mut rig.engine).await;
+    fail(&mut rig.engine).await;
+    let before_arm = std::time::Instant::now();
+    fail(&mut rig.engine).await; // the 3rd: a 5 s pause
 
     let row = health_row(&rig.registry);
+    let waited_ms = u64::try_from(before_arm.elapsed().as_millis()).unwrap();
     let failures = &row["open_failures"];
     assert_eq!(failures["count"], 3, "written at the failure");
     let retry_in_ms = failures["retry_in_ms"]
         .as_u64()
         .expect("the wait left, on the server's clock");
     assert!(
-        (4_000..=5_000).contains(&retry_in_ms),
-        "the 5 s pause has just begun: {retry_in_ms} ms left"
+        retry_in_ms <= 5_000 && retry_in_ms + waited_ms + 5 >= 5_000,
+        "the 5 s pause less the {waited_ms} ms since it was armed: {retry_in_ms} ms left"
     );
+
+    // An operator's pick is the attempt: no retry is due while it runs.
+    rig.engine.handle_play_video(PID, SONGS[1], None).await;
+    let row = health_row(&rig.registry);
+    assert_eq!(
+        row["open_failures"]["count"], 3,
+        "the count waits for the outcome"
+    );
+    assert!(
+        row["open_failures"]["retry_at_ms"].is_null(),
+        "the pick ended the retry"
+    );
+    fail(&mut rig.engine).await; // the 4th: a 30 s pause
+    assert!(health_row(&rig.registry)["open_failures"]["retry_at_ms"].is_i64());
 
     rig.engine.handle_scene_change(PID, false).await; // cut off program
     let row = health_row(&rig.registry);
-    assert_eq!(row["open_failures"]["count"], 3, "the run is kept");
+    assert_eq!(row["open_failures"]["count"], 4, "the run is kept");
     assert!(
         row["open_failures"]["retry_at_ms"].is_null(),
         "off program no retry is due"
     );
 
-    rig.engine.handle_play_video(PID, SONGS[1], None).await;
+    rig.engine.handle_play_video(PID, SONGS[2], None).await;
+    fail(&mut rig.engine).await; // the 5th: a 120 s pause
+    assert!(health_row(&rig.registry)["open_failures"]["retry_at_ms"].is_i64());
+    rig.engine.handle_previous(PID).await;
+    let row = health_row(&rig.registry);
+    assert_eq!(row["open_failures"]["count"], 5);
+    assert!(
+        row["open_failures"]["retry_at_ms"].is_null(),
+        "Previous ended the retry"
+    );
+
     started(&mut rig.engine).await;
     assert!(
         health_row(&rig.registry)["open_failures"].is_null(),
