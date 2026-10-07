@@ -22,7 +22,7 @@ use super::wire::now_ms;
 use crate::db::models_peer::{self, HashEntry};
 
 /// The hasher's read rate: the wall reads its video from the same disk.
-pub const HASH_BYTES_PER_S: u64 = 40 * 1024 * 1024;
+pub const HASH_BYTES_PER_S: u64 = 41_943_040; // 40 MiB/s
 /// Between passes (the first pass waits too: the 60 s startup quiet, #167).
 const PASS_EVERY: Duration = Duration::from_secs(60);
 
