@@ -263,9 +263,8 @@ peer, nothing outside the tests fetches.
 - `videos/{id}` = `wire::PeerVideo {metadata, duration_ms, lyrics:
   PeerLyrics {source, pipeline_version, alignment_model, reference,
   translation_version, translation_gender}}` (`catalog::peer_video`): the
-  first titled row's metadata, the first row's duration, the served lyrics
-  row with the catalog's dub rule, the duration of the first row that has
-  one. 404 unknown, 400 a bad id. Lanes 8-9 are to adopt from it;
+  first titled row's metadata, the duration of the first row that has
+  one, the served lyrics row with the catalog's dub rule. 404 unknown, 400 a bad id. Lanes 8-9 are to adopt from it;
   `PeerClient::video` refuses a row of another video than the one asked.
 - `artifact/{id}/{kind}`: 404 for an unknown or absent kind (a dubbed
   video's lyrics too), 400 a bad id; files through tower-http `ServeFile`
@@ -290,7 +289,8 @@ peer, nothing outside the tests fetches.
   `AccessRefused`, 401 `KeyRefused`, 404 `NotFound` (for a catalog: the
   API is off there), 503 `Paused`, other non-2xx `BadResponse`; a transport
   error is `Unreachable`: its cause chain (connect, DNS, TLS, timeout)
-  without the URL. No error text holds a key.
+  without the URL (a TLS name mismatch names the peer's host, as the status
+  does). No error text holds a key.
 - Every GET carries `X-SP-Peer-Key`, plus `CF-Access-Client-Id/Secret` for a
   peer with a token. Timeouts: 10 s connect, 60 s between two reads, 30 s
   for a whole catalog or video row (an artifact has no total bound).

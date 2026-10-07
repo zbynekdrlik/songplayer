@@ -249,7 +249,8 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// A transport error with its causes (connect, DNS, TLS, timeout), without
-/// its URL: no cause in the chain holds the URL or a header.
+/// its URL and never a header (a key). A TLS name mismatch names the peer's
+/// host, which the status shows anyway (`base_url`).
 pub(crate) fn unreachable_err(e: reqwest::Error) -> PeerError {
     let e = e.without_url();
     let mut text = e.to_string();

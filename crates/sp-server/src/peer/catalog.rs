@@ -310,7 +310,7 @@ pub async fn peer_video(
     let Some(metadata) = metadata_for(pool, Some(youtube_id)).await?.pop() else {
         return Ok(None);
     };
-    let duration: Option<Option<i64>> = sqlx::query_scalar(
+    let duration: Option<i64> = sqlx::query_scalar(
         "SELECT duration_ms FROM videos WHERE youtube_id = ? AND duration_ms IS NOT NULL \
          ORDER BY id LIMIT 1",
     )
@@ -320,7 +320,7 @@ pub async fn peer_video(
     let lyrics = peer_lyrics(pool, youtube_id).await?;
     Ok(Some(PeerVideo {
         metadata,
-        duration_ms: duration.flatten(),
+        duration_ms: duration,
         lyrics,
     }))
 }
