@@ -135,16 +135,17 @@ pub(crate) async fn adopt(
         &row.youtube_id,
         gf,
     ));
-    // Another row of the video may have recorded an audio under that name
-    // (rows share files by name, #136).
-    let audio_was_there = tokio::fs::try_exists(&audio).await.unwrap_or(true);
-    tokio::fs::rename(&audio_part, &audio).await?;
-    if let Err(e) = tokio::fs::rename(&video_part, &video).await {
-        // The local download's rule: no unrecorded audio under its final
-        // name, never one that was there. The verified video part stays: the
-        // next ask re-hashes it, no transfer.
-        if !audio_was_there {
-            let _ = tokio::fs::remove_file(&audio).await;
+    // Rows of one video share files by name (#136): a final name may hold
+    // another row's recorded file. The video goes first: when it cannot take
+    // its name (that row's video open in a player) nothing is touched and both
+    // verified parts stay for the next ask (re-hashed there, no transfer).
+    let video_was_there = tokio::fs::try_exists(&video).await.unwrap_or(true);
+    tokio::fs::rename(&video_part, &video).await?;
+    if let Err(e) = tokio::fs::rename(&audio_part, &audio).await {
+        // No unrecorded video under its final name, never one that was there:
+        // the video this attempt placed goes back into its part.
+        if !video_was_there && tokio::fs::rename(&video, &video_part).await.is_err() {
+            let _ = tokio::fs::remove_file(&video).await;
         }
         return Err(e.into());
     }

@@ -178,7 +178,7 @@ async fn drop_older_parts(dir: &Path, a: &Artifact, keep: &str) {
 
 /// Every part of `youtube_id`'s `kind`.
 async fn drop_parts(dir: &Path, youtube_id: &str, kind: ArtifactKind) {
-    let prefix = format!("{youtube_id}-{}_", kind.as_str());
+    let prefix = format!("{youtube_id}_{}_", kind.as_str());
     let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
         return;
     };
