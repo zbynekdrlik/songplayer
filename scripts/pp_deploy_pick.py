@@ -77,7 +77,9 @@ def main(argv: Sequence[str]) -> int:
             run = json.loads(args.run_json.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             # The position only: the text could be anything.
-            raise Refused(f"the run is not JSON (line {e.lineno} column {e.colno})") from None
+            raise Refused(
+                f"the run is not JSON (line {e.lineno} column {e.colno})"
+            ) from None
         run_id, head_sha = pick(run, args.repo)
     except Refused as e:
         print(f"FAIL: {e}", file=sys.stderr)
@@ -85,7 +87,10 @@ def main(argv: Sequence[str]) -> int:
     branch = run.get("head_branch")
     # !r keeps a branch name on one line: a line break in it could start a
     # `::` workflow command in the job log.
-    print(f"PP gets CI run {run_id} (commit {head_sha}, branch {branch!r})", file=sys.stderr)
+    print(
+        f"PP gets CI run {run_id} (commit {head_sha}, branch {branch!r})",
+        file=sys.stderr,
+    )
     print(f"run_id={run_id}")
     print(f"head_sha={head_sha}")
     return 0
