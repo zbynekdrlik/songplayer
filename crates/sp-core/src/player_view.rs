@@ -228,7 +228,7 @@ pub fn player_program_badge(
     retry_pending: bool,
 ) -> ProgramBadge {
     if waits_for_retry(state_known, transport, retry_pending) {
-        ProgramBadge::OffProgram
+        ProgramBadge::OnProgramRetry
     } else {
         program_badge(state_known, state)
     }
