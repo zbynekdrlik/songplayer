@@ -293,6 +293,11 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [build-wasm]
+    # The job takes ~9 min. Its browser install runs `apt-get update`, and on
+    # 7.10.2026 an Ubuntu mirror stalled it for 70 min (main run 37670589944)
+    # until it was cancelled by hand; with no bound it would have held the
+    # release for GitHub's 6 h default. A stall now fails the job.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
