@@ -91,7 +91,12 @@ extend this file; nothing of them exists yet.
   `stem_vocals`, `stem_instrumental`, `lyrics`, `metadata`; `parse` reads a
   URL segment (exact, never `unknown`). An unknown kind (a newer peer's
   `dub`) reads as `Unknown`; `Catalog::sanitized` drops it with any artifact
-  whose YouTube id or sha256 (64 lowercase hex) is malformed.
+  whose YouTube id or sha256 (64 lowercase hex) is malformed. Node names in
+  a peer's catalog follow `peer::config::valid_name`: a job entry naming one
+  that does not hold is dropped, the catalog's own `node` then reads as `""`
+  (a peer is named by its CONFIGURED name, never by what it sends). The
+  times (`updated_at`, `started_at`) are information only: never checked,
+  never a decision's input.
 - A node takes a peer's artifact only at ITS OWN current format
   (`kind::acceptable`): `MEDIA_VERSION` (video/audio), `STEMS_VERSION`,
   `LYRICS_PIPELINE_VERSION` (equality — a dev peer's newer lyrics are not
@@ -105,7 +110,10 @@ extend this file; nothing of them exists yet.
   source, a label this node does not know, a row in the repair queue. A
   version ≥ 1 is taken. The plan's code ranked every non-manual
   `gemini_failed = 0` row as a provider's, which would have advertised a
-  no-provider regex guess as a provider title (#229 comment 6030334867).
+  no-provider regex guess as a provider title (#229 comment 6030334867). A
+  new `sp_core::metadata::MetadataSource` variant must be ranked here: the
+  exhaustive match in `kind_tests.rs::every_metadata_source_label_is_ranked`
+  stops compiling until it is.
 - Jobs (`kind::Job`): Download (needs video+audio, makes
   video+audio+metadata), Lyrics, Stems (needs and makes both stems).
 - A catalog's job entry is `wire::CatalogJob { youtube_id, kind, node, state,
@@ -122,7 +130,16 @@ extend this file; nothing of them exists yet.
   the same job keeps the first one's start; the last guard to drop ends it.
   `JobBoard::snapshot(node)` = the running entries, sorted by YouTube id,
   then kind. QUEUED entries are not on the board: lane 3's catalog reads
-  them from the rows.
+  them from the rows. A download in progress is still a queued row
+  (`normalized = 0`) AND on the board, so lane 3 lists an `(id, kind)` the
+  board holds as running only and skips its queued entry (one entry per
+  `(id, kind)`).
+- Lane 7 (phase 2, once SNV lists PP as a peer too): when BOTH nodes have
+  the same song queued, each would wait on the other's queued entry for the
+  full 2 h and then both process it, the double work the queued entries
+  exist to avoid. `decide` breaks that tie (e.g. a queued entry of a peer
+  whose name sorts after this node's does not make this node wait); the
+  wire already carries `state` and `node` for it.
 - `wire::PeerMetadata::to_bytes` = the metadata artifact's canonical bytes
   (serde field order; the catalog's metadata sha256 is over them). Times:
   `now_ms`, `ms_to_rfc3339` (`2026-10-06T16:00:00.123Z`; out of chrono's
