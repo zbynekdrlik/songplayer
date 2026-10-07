@@ -100,7 +100,9 @@ extend this file; nothing of them exists yet.
   `node` it sends. A time (`updated_at`, `started_at`) is rewritten in the
   canonical form (`wire::checked_time` = `ms_to_rfc3339` of the parsed
   instant: UTC, milliseconds, `Z`), never kept as the peer's text; one that
-  is not an RFC 3339 time reads as `None` (the entry stays). Times are
+  is not an RFC 3339 time, or whose canonical form would not read back (a
+  year outside 0000..=9999 once in UTC), reads as `None` (the entry stays).
+  Times are
   information only, never a decision's input.
 - A node takes a peer's artifact only at ITS OWN current format
   (`kind::acceptable`): `MEDIA_VERSION` (video/audio), `STEMS_VERSION`,
@@ -113,8 +115,8 @@ extend this file; nothing of them exists yet.
   else = 0 (a parser): `regex` — also the one written with `gemini_failed =
   0` when no provider is configured (`metadata::fallback_from_title`) — no
   source, a label this node does not know, a row in the repair queue. A
-  version ≥ 1 is taken. The plan's code ranked every non-manual
-  `gemini_failed = 0` row as a provider's, which would have advertised a
+  version ≥ 1 is taken. The plan's code ranked every labelled non-manual
+  row with `gemini_failed = 0` as a provider's, which would have advertised a
   no-provider regex guess as a provider title (#229 comment 6030334867). A
   new `sp_core::metadata::MetadataSource` variant must be ranked here: the
   exhaustive `rank` match in
@@ -127,7 +129,8 @@ extend this file; nothing of them exists yet.
   started_at }`, one per kind the job makes. `state` = `running` | `queued`:
   the catalog lists a peer's QUEUED jobs too (the plan's decisions, lanes
   2/3), and a node waits for either. `started_at` is set only for a running
-  job (`null` for a queued one). An unknown state reads as `Unknown` and
+  job (`null` for a queued one; `sanitized` drops a queued entry's start).
+  An unknown state reads as `Unknown` and
   `sanitized` drops the entry. `Catalog::announces(id, kinds)` = a running
   OR queued job (lane 7's Wait). The plan's text calls these `RunningJob` /
   `Catalog::runs`: the code names them `CatalogJob` / `announces`.
