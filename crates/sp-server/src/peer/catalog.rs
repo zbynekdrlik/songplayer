@@ -215,7 +215,7 @@ pub async fn jobs(
 /// The job of each of `files` that is on disk but not in `hashes` yet: its
 /// output is this node's, listed after the hasher's next pass (every 60 s).
 /// Announced as queued, a peer waits for it instead of making it itself in
-/// that window (lanes 7-9, #229 finding 6036287850). A file missing from disk
+/// that window (#229 finding 6036287850). A file missing from disk
 /// is no job (a peer would wait the full 2 h for nothing). Only these files
 /// are stat'ed, so in steady state a catalog stats nothing.
 pub async fn unhashed(

@@ -60,8 +60,8 @@ impl From<std::io::Error> for PeerError {
     }
 }
 
-/// A database step of an adopter (lanes 8-9: recording a fetched artifact on
-/// this node's row) is a local failure too.
+/// A database step of an adopter (`peer::{download, stems, lyrics}`:
+/// recording a fetched artifact on this node's row) is a local failure too.
 impl From<sqlx::Error> for PeerError {
     fn from(e: sqlx::Error) -> Self {
         Self::Io(e.to_string())

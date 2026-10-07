@@ -6,7 +6,7 @@
 //! mismatch drops it and the cached catalog). One transfer at a time per
 //! peer; the caller fetches one job's artifacts from one peer, so two
 //! transfers never write the same part. The caller renames the verified part
-//! into place (lanes 8-9).
+//! into place (`peer::{download, stems, lyrics}`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

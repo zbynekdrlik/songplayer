@@ -81,7 +81,7 @@ impl Job {
     }
 
     /// What a peer must hold for this job to be fetched instead of run
-    /// (lane 7's decision).
+    /// (`peer::decide`).
     pub fn needs(self) -> &'static [ArtifactKind] {
         match self {
             Self::Download => &[ArtifactKind::Video, ArtifactKind::Audio],
@@ -90,8 +90,9 @@ impl Job {
         }
     }
 
-    /// What this job is to announce in its node's catalog while it runs
-    /// (one board entry per kind, `JobBoard::snapshot`).
+    /// What this job announces in its node's catalog while it runs or is
+    /// queued (one entry per kind, `JobBoard::snapshot`,
+    /// `catalog::listed_jobs`).
     pub fn makes(self) -> &'static [ArtifactKind] {
         match self {
             Self::Download => &[

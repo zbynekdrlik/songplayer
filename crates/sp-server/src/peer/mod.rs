@@ -40,8 +40,8 @@ pub struct Exchange {
     /// The node's cache dir, where its processed files live: the catalog
     /// names `{yt}_lyrics.json` in it.
     pub cache_dir: PathBuf,
-    /// The jobs this node announces as running (empty until the worker hooks
-    /// of lanes 8-9 announce theirs); the catalog lists them.
+    /// The jobs this node runs, each announced while the worker hook that
+    /// runs it holds its guard (`Exchange::ask`); the catalog lists them.
     pub board: Arc<board::JobBoard>,
     /// Reads the peers' catalogs and fetches their artifacts.
     pub(crate) client: client::PeerClient,

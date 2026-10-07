@@ -24,9 +24,10 @@ pub struct Artifact {
     pub updated_at: Option<String>,
 }
 
-/// Where a job a node announces stands. A peer is to wait for either (lane 7;
-/// ROZHODNUTÉ 6022851957: both sites sync the same playlists, so a song SNV
-/// has only queued would otherwise be processed at PP too).
+/// Where a job a node announces stands. A peer waits for either
+/// (`peer::decide`; ROZHODNUTÉ 6022851957: both sites sync the same
+/// playlists, so a song SNV has only queued would otherwise be processed
+/// at PP too).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {
@@ -163,8 +164,8 @@ pub fn rfc3339_to_ms(text: &str) -> Option<i64> {
         .map(|t| t.timestamp_millis())
 }
 
-/// A video's lyrics row as a node holds it: what an adopting node is to
-/// write (lane 9).
+/// A video's lyrics row as a node holds it: what an adopting node writes
+/// (`peer::lyrics`, `models_peer::adopt_lyrics`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerLyrics {
     pub source: String,
@@ -176,8 +177,9 @@ pub struct PeerLyrics {
     pub translation_gender: Option<String>,
 }
 
-/// `GET /api/v1/peer/videos/{youtube_id}`: a node is to adopt a title and a
-/// lyrics row from it without running the providers (lanes 8-9).
+/// `GET /api/v1/peer/videos/{youtube_id}`: a node adopts a title and a
+/// lyrics row from it without running the providers (`peer::download`,
+/// `peer::lyrics`, `peer::repair`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerVideo {
     pub metadata: PeerMetadata,
