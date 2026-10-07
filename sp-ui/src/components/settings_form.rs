@@ -1,7 +1,10 @@
-//! Settings form for OBS, Gemini, dub, VBAN (#210), the NDI input "OBS manuál"
-//! (#212), the Companion remote control (#213), the program transition (#215;
-//! #221 L5 deleted the OBS follow and the "podľa OBS" transition) and cache
-//! configuration.
+//! Settings form for OBS, Gemini, dub, the NDI input "OBS manuál" (#212), the
+//! Companion remote control (#213), the program transition (#215; #221 L5
+//! deleted the OBS follow and the "podľa OBS" transition) and cache
+//! configuration. #233: #210's VBAN fieldset moved to "Zvukové výstupy"
+//! (`audio_outputs.rs`, the output list), which saves its own two settings;
+//! this form MERGES what it saved into `store.settings`, so the list it does
+//! not carry survives its save.
 
 use std::collections::HashMap;
 
@@ -71,10 +74,6 @@ pub fn SettingsForm() -> impl IntoView {
     let cache_dir = RwSignal::new(String::new());
     let dub_voice = RwSignal::new(config::DEFAULT_DUB_VOICE.to_string());
     let dub_model = RwSignal::new(config::DEFAULT_DUB_MODEL.to_string());
-    // #210: the program's VBAN audio output (off by default).
-    let vban_enabled = RwSignal::new(false);
-    let vban_stream_name = RwSignal::new(config::DEFAULT_VBAN_STREAM_NAME.to_string());
-    let vban_targets = RwSignal::new(String::new());
     // #212: the NDI input "OBS manuál" (off by default, no source).
     let ndi_input_enabled = RwSignal::new(false);
     let ndi_input_source = RwSignal::new(String::new());
@@ -121,13 +120,6 @@ pub fn SettingsForm() -> impl IntoView {
             config::SETTING_DUB_MODEL,
             config::DEFAULT_DUB_MODEL,
         ));
-        vban_enabled.set(setting_value(&settings, config::SETTING_VBAN_ENABLED, "false") == "true");
-        vban_stream_name.set(setting_value(
-            &settings,
-            config::SETTING_VBAN_STREAM_NAME,
-            config::DEFAULT_VBAN_STREAM_NAME,
-        ));
-        vban_targets.set(setting_value(&settings, config::SETTING_VBAN_TARGETS, ""));
         ndi_input_enabled
             .set(setting_value(&settings, config::SETTING_NDI_INPUT_ENABLED, "false") == "true");
         ndi_input_source.set(setting_value(
@@ -162,34 +154,16 @@ pub fn SettingsForm() -> impl IntoView {
     let on_save = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         let mut settings = HashMap::new();
-        settings.insert(
-            config::SETTING_OBS_WEBSOCKET_URL.to_string(),
-            obs_url.get(),
-        );
+        settings.insert(config::SETTING_OBS_WEBSOCKET_URL.to_string(), obs_url.get());
         settings.insert(
             config::SETTING_OBS_WEBSOCKET_PASSWORD.to_string(),
             obs_password.get(),
         );
-        settings.insert(
-            config::SETTING_GEMINI_API_KEY.to_string(),
-            gemini_key.get(),
-        );
-        settings.insert(
-            config::SETTING_GEMINI_MODEL.to_string(),
-            gemini_model.get(),
-        );
+        settings.insert(config::SETTING_GEMINI_API_KEY.to_string(), gemini_key.get());
+        settings.insert(config::SETTING_GEMINI_MODEL.to_string(), gemini_model.get());
         settings.insert(config::SETTING_CACHE_DIR.to_string(), cache_dir.get());
         settings.insert(config::SETTING_DUB_VOICE.to_string(), dub_voice.get());
         settings.insert(config::SETTING_DUB_MODEL.to_string(), dub_model.get());
-        settings.insert(
-            config::SETTING_VBAN_ENABLED.to_string(),
-            vban_enabled.get().to_string(),
-        );
-        settings.insert(
-            config::SETTING_VBAN_STREAM_NAME.to_string(),
-            vban_stream_name.get(),
-        );
-        settings.insert(config::SETTING_VBAN_TARGETS.to_string(), vban_targets.get());
         settings.insert(
             config::SETTING_NDI_INPUT_ENABLED.to_string(),
             ndi_input_enabled.get().to_string(),
@@ -226,7 +200,10 @@ pub fn SettingsForm() -> impl IntoView {
             match api::patch_json_empty("/api/v1/settings", &settings).await {
                 Ok(()) => {
                     save_status.set("Uložené".into());
-                    store.settings.set(settings);
+                    // #233: MERGE what this form saved — the outputs section
+                    // reads `audio_outputs` from the same map; replacing it
+                    // would blank the outputs list (Review Focus 1).
+                    store.settings.update(move |s| s.extend(settings));
                 }
                 Err(_) => {
                     save_status.set("Chyba pri ukladaní".into());
@@ -302,39 +279,6 @@ pub fn SettingsForm() -> impl IntoView {
                         data-testid="settings-dub-model"
                         prop:value=move || dub_model.get()
                         on:input=move |ev| dub_model.set(event_target_value(&ev))
-                    />
-                </label>
-            </fieldset>
-
-            <fieldset data-testid="settings-vban">
-                <legend>"Zvuk programu cez VBAN"</legend>
-                <label>
-                    <input
-                        type="checkbox"
-                        data-testid="settings-vban-enabled"
-                        prop:checked=move || vban_enabled.get()
-                        on:change=move |ev| vban_enabled.set(event_target_checked(&ev))
-                    />
-                    "Posielať zvuk programu (VBAN)"
-                </label>
-                <label>
-                    "Názov streamu"
-                    <input
-                        type="text"
-                        maxlength="16"
-                        data-testid="settings-vban-stream-name"
-                        prop:value=move || vban_stream_name.get()
-                        on:input=move |ev| vban_stream_name.set(event_target_value(&ev))
-                    />
-                </label>
-                <label>
-                    "Ciele (host:port, oddelené čiarkou)"
-                    <input
-                        type="text"
-                        data-testid="settings-vban-targets"
-                        placeholder="dev1.lan:6980"
-                        prop:value=move || vban_targets.get()
-                        on:input=move |ev| vban_targets.set(event_target_value(&ev))
                     />
                 </label>
             </fieldset>

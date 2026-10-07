@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use std::collections::HashMap;
 
 use crate::api;
-use crate::components::{resolume_hosts, settings_form};
+use crate::components::{audio_outputs, resolume_hosts, settings_form};
 use crate::store::DashboardStore;
 
 #[component]
@@ -24,6 +24,8 @@ pub fn SettingsPage() -> impl IntoView {
         <div class="settings-page">
             <h1>"Nastavenia"</h1>
             <settings_form::SettingsForm />
+            <hr />
+            <audio_outputs::AudioOutputs />
             <hr />
             <h2>"Hostitelia Resolume"</h2>
             <resolume_hosts::ResolumeHosts />

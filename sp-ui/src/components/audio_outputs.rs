@@ -1,0 +1,400 @@
+//! #233: Nastavenia "Zvukové výstupy" — the program's audio outputs (ONE
+//! list, `audio_outputs`) and the network sample rate. It edits
+//! `sp_core::audio_outputs` entries, refuses a bad list with the SERVER's
+//! own rules (the Slovak text of the first problem) before sending, saves
+//! ONLY `audio_outputs` + `audio_network_rate` (its own PATCH — never the
+//! other settings, which the form above saves), merges what it saved into
+//! `store.settings`, and shows each output's live state (`GET
+//! /api/v1/program` → `outputs[]`, every 2 s). Rows are keyed by id and every
+//! cell reads the list by id: a refresh never leaves a stale row, typing never
+//! drops focus (`sp-ui-frontend.md`).
+//!
+//! Testids (set here): `settings-audio-outputs` (the fieldset),
+//! `settings-audio-network-rate`, `audio-outputs-add-vban`,
+//! `audio-outputs-save`, `audio-outputs-message`, `audio-outputs-load-error`,
+//! and per row `audio-output-row` (`data-id` = the entry's id),
+//! `audio-output-name`, `audio-output-enabled`, `audio-output-rate`
+//! (`network` or a rate), `audio-output-delay`, `audio-output-vban-host`,
+//! `audio-output-vban-port`, `audio-output-vban-stream`,
+//! `audio-output-vban-format`, `audio-output-state`, `audio-output-remove`.
+
+use std::collections::HashMap;
+
+use leptos::prelude::*;
+use serde::Deserialize;
+use sp_core::audio_outputs::{
+    OutputEntry, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat, new_vban, validate_list,
+};
+use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
+
+use crate::api;
+use crate::store::DashboardStore;
+
+/// One output's live state (the fields this section shows).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct OutputLive {
+    pub id: String,
+    pub state: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub latency_ms: f64,
+}
+
+/// `GET /api/v1/program`, the outputs only.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ProgramOutputs {
+    #[serde(default)]
+    pub outputs: Vec<OutputLive>,
+}
+
+/// The Slovak label of an output's state.
+pub fn state_sk(state: &str) -> &'static str {
+    match state {
+        "running" => "beží",
+        "opening" => "otvára sa",
+        "waiting" => "čaká",
+        "disabled" => "vypnutý",
+        _ => "neznámy stav",
+    }
+}
+
+/// The stored list the section starts from; `Err` when it cannot be read
+/// (the section then refuses to save over it).
+pub fn stored_list(settings: &HashMap<String, String>) -> Result<Vec<OutputEntry>, String> {
+    match settings
+        .get(SETTING_AUDIO_OUTPUTS)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        None => Ok(Vec::new()),
+        Some(raw) => serde_json::from_str(raw)
+            .map_err(|_| "Uložený zoznam výstupov sa nedá načítať — neukladajte ho".to_string()),
+    }
+}
+
+/// A rate as the select's value.
+pub fn rate_value(rate: RateChoice) -> String {
+    match rate {
+        RateChoice::Network => "network".to_string(),
+        RateChoice::Fixed(hz) => hz.to_string(),
+    }
+}
+
+/// The select's value as a rate.
+pub fn rate_choice(value: &str) -> RateChoice {
+    value
+        .parse()
+        .map(RateChoice::Fixed)
+        .unwrap_or(RateChoice::Network)
+}
+
+fn live_text(live: &ProgramOutputs, id: &str) -> String {
+    match live.outputs.iter().find(|o| o.id == id) {
+        None => "neuložený".to_string(),
+        Some(o) if o.state == "running" => {
+            format!("{} · {:.0} ms", state_sk(&o.state), o.latency_ms)
+        }
+        Some(o) => state_sk(&o.state).to_string(),
+    }
+}
+
+fn live_reason(live: &ProgramOutputs, id: &str) -> String {
+    live.outputs
+        .iter()
+        .find(|o| o.id == id)
+        .and_then(|o| o.reason.clone())
+        .unwrap_or_default()
+}
+
+/// Read one field of the entry `id` (reactive).
+fn read<T: Default>(
+    list: RwSignal<Vec<OutputEntry>>,
+    id: &str,
+    f: impl Fn(&OutputEntry) -> T,
+) -> T {
+    list.with(|l| l.iter().find(|e| e.id == id).map(&f).unwrap_or_default())
+}
+
+/// Change the entry `id` in place.
+fn edit(list: RwSignal<Vec<OutputEntry>>, id: &str, f: impl FnOnce(&mut OutputEntry)) {
+    list.update(|l| {
+        if let Some(e) = l.iter_mut().find(|e| e.id == id) {
+            f(e);
+        }
+    });
+}
+
+#[component]
+pub fn AudioOutputs() -> impl IntoView {
+    let store = use_context::<DashboardStore>().expect("DashboardStore in context");
+    let entries = RwSignal::new(Vec::<OutputEntry>::new());
+    let network_rate = RwSignal::new(audio_network_rate(None).to_string());
+    let load_error = RwSignal::new(None::<String>);
+    let message = RwSignal::new(String::new());
+    let live = RwSignal::new(ProgramOutputs::default());
+
+    let _sync = Effect::new(move |_| {
+        let settings = store.settings.get();
+        match stored_list(&settings) {
+            Ok(list) => {
+                entries.set(list);
+                load_error.set(None);
+            }
+            Err(e) => {
+                entries.set(Vec::new());
+                load_error.set(Some(e));
+            }
+        }
+        let rate = settings.get(SETTING_AUDIO_NETWORK_RATE).map(String::as_str);
+        network_rate.set(audio_network_rate(rate).to_string());
+    });
+
+    let cancelled = RwSignal::new(false);
+    on_cleanup(move || cancelled.set(true));
+    let _poll = Effect::new(move |_| {
+        crate::store::poll_into("/api/v1/program", 2_000, cancelled, live);
+    });
+
+    let add_vban = move |_: leptos::ev::MouseEvent| {
+        entries.update(|l| {
+            let fresh = new_vban(l);
+            l.push(fresh);
+        });
+    };
+
+    let on_save = move |_: leptos::ev::MouseEvent| {
+        let list = entries.get();
+        if let Err(e) = validate_list(&list) {
+            message.set(e.sk());
+            return;
+        }
+        let Ok(text) = serde_json::to_string(&list) else {
+            return;
+        };
+        let mut body = HashMap::new();
+        body.insert(SETTING_AUDIO_OUTPUTS.to_string(), text);
+        body.insert(SETTING_AUDIO_NETWORK_RATE.to_string(), network_rate.get());
+        leptos::task::spawn_local(async move {
+            message.set("Ukladám…".into());
+            match api::patch_json_empty("/api/v1/settings", &body).await {
+                Ok(()) => {
+                    message.set("Uložené".into());
+                    store.settings.update(move |s| s.extend(body));
+                }
+                Err(_) => message.set("Chyba pri ukladaní".into()),
+            }
+        });
+    };
+
+    view! {
+        <fieldset class="audio-outputs" data-testid="settings-audio-outputs">
+            <legend>"Zvukové výstupy"</legend>
+            <label>
+                "Vzorkovacia frekvencia siete"
+                <select
+                    data-testid="settings-audio-network-rate"
+                    prop:value=move || network_rate.get()
+                    on:change=move |ev| network_rate.set(event_target_value(&ev))
+                >
+                    {SUPPORTED_RATES
+                        .iter()
+                        .map(|r| view! { <option value=r.to_string()>{format!("{r} Hz")}</option> })
+                        .collect_view()}
+                </select>
+            </label>
+            {move || {
+                load_error
+                    .get()
+                    .map(|e| {
+                        view! {
+                            <p class="audio-outputs-error" data-testid="audio-outputs-load-error">
+                                {e}
+                            </p>
+                        }
+                    })
+            }}
+            <For
+                each=move || entries.with(|l| l.iter().map(|e| e.id.clone()).collect::<Vec<_>>())
+                key=|id| id.clone()
+                children=move |id| view! { <OutputRow id=id entries=entries live=live /> }
+            />
+            <div class="form-actions">
+                <button type="button" data-testid="audio-outputs-add-vban" on:click=add_vban>
+                    "Pridať výstup VBAN"
+                </button>
+                <button
+                    type="button"
+                    data-testid="audio-outputs-save"
+                    prop:disabled=move || load_error.get().is_some()
+                    on:click=on_save
+                >
+                    "Uložiť výstupy"
+                </button>
+                <span class="save-status" data-testid="audio-outputs-message">
+                    {move || message.get()}
+                </span>
+            </div>
+        </fieldset>
+    }
+}
+
+#[component]
+fn OutputRow(
+    id: String,
+    entries: RwSignal<Vec<OutputEntry>>,
+    live: RwSignal<ProgramOutputs>,
+) -> impl IntoView {
+    let row_id = id.clone();
+    let id = StoredValue::new(id);
+    let vban = move |f: fn(&VbanDest) -> String| {
+        read(entries, &id.get_value(), move |e| {
+            e.vban.as_ref().map(f).unwrap_or_default()
+        })
+    };
+    view! {
+        <div class="audio-output-row" data-testid="audio-output-row" data-id=row_id>
+            <label>
+                "Názov"
+                <input
+                    type="text"
+                    data-testid="audio-output-name"
+                    prop:value=move || read(entries, &id.get_value(), |e| e.name.clone())
+                    on:input=move |ev| {
+                        let v = event_target_value(&ev);
+                        edit(entries, &id.get_value(), |e| e.name = v);
+                    }
+                />
+            </label>
+            <label>
+                <input
+                    type="checkbox"
+                    data-testid="audio-output-enabled"
+                    prop:checked=move || read(entries, &id.get_value(), |e| e.enabled)
+                    on:change=move |ev| {
+                        let v = event_target_checked(&ev);
+                        edit(entries, &id.get_value(), |e| e.enabled = v);
+                    }
+                />
+                "Zapnutý"
+            </label>
+            <label>
+                "Frekvencia"
+                <select
+                    data-testid="audio-output-rate"
+                    prop:value=move || rate_value(read(entries, &id.get_value(), |e| e.rate))
+                    on:change=move |ev| {
+                        let v = rate_choice(&event_target_value(&ev));
+                        edit(entries, &id.get_value(), |e| e.rate = v);
+                    }
+                >
+                    <option value="network">"podľa siete"</option>
+                    {SUPPORTED_RATES
+                        .iter()
+                        .map(|r| view! { <option value=r.to_string()>{format!("{r} Hz")}</option> })
+                        .collect_view()}
+                </select>
+            </label>
+            <label>
+                "Oneskorenie (ms)"
+                <input
+                    type="number"
+                    min="0"
+                    max="2000"
+                    data-testid="audio-output-delay"
+                    prop:value=move || read(entries, &id.get_value(), |e| e.delay_ms.to_string())
+                    on:input=move |ev| {
+                        let v = event_target_value(&ev).trim().parse().unwrap_or(0);
+                        edit(entries, &id.get_value(), |e| e.delay_ms = v);
+                    }
+                />
+            </label>
+            <label>
+                "Cieľ (host)"
+                <input
+                    type="text"
+                    data-testid="audio-output-vban-host"
+                    placeholder="dev1.lan"
+                    prop:value=move || vban(|v| v.host.clone())
+                    on:input=move |ev| {
+                        let v = event_target_value(&ev).trim().to_string();
+                        edit(entries, &id.get_value(), |e| {
+                            if let Some(d) = e.vban.as_mut() {
+                                d.host = v;
+                            }
+                        });
+                    }
+                />
+            </label>
+            <label>
+                "Port"
+                <input
+                    type="number"
+                    min="1"
+                    max="65535"
+                    data-testid="audio-output-vban-port"
+                    prop:value=move || vban(|v| v.port.to_string())
+                    on:input=move |ev| {
+                        let v = event_target_value(&ev).trim().parse().unwrap_or(0);
+                        edit(entries, &id.get_value(), |e| {
+                            if let Some(d) = e.vban.as_mut() {
+                                d.port = v;
+                            }
+                        });
+                    }
+                />
+            </label>
+            <label>
+                "Názov streamu"
+                <input
+                    type="text"
+                    maxlength="16"
+                    data-testid="audio-output-vban-stream"
+                    prop:value=move || vban(|v| v.stream_name.clone())
+                    on:input=move |ev| {
+                        let v = event_target_value(&ev);
+                        edit(entries, &id.get_value(), |e| {
+                            if let Some(d) = e.vban.as_mut() {
+                                d.stream_name = v;
+                            }
+                        });
+                    }
+                />
+            </label>
+            <label>
+                "Formát"
+                <select
+                    data-testid="audio-output-vban-format"
+                    prop:value=move || vban(|v| v.format.as_str().to_string())
+                    on:change=move |ev| {
+                        let v = VbanSampleFormat::parse(&event_target_value(&ev))
+                            .unwrap_or_default();
+                        edit(entries, &id.get_value(), |e| {
+                            if let Some(d) = e.vban.as_mut() {
+                                d.format = v;
+                            }
+                        });
+                    }
+                >
+                    <option value="int16">"16 bitov"</option>
+                    <option value="int24">"24 bitov"</option>
+                    <option value="float32">"32 bitov (float)"</option>
+                </select>
+            </label>
+            <span
+                class="audio-output-state"
+                data-testid="audio-output-state"
+                title=move || live_reason(&live.get(), &id.get_value())
+            >
+                {move || live_text(&live.get(), &id.get_value())}
+            </span>
+            <button
+                type="button"
+                data-testid="audio-output-remove"
+                on:click=move |_| entries.update(|l| l.retain(|e| e.id != id.get_value()))
+            >
+                "Odobrať"
+            </button>
+        </div>
+    }
+}
