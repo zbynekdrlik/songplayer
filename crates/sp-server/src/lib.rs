@@ -412,12 +412,14 @@ pub async fn start(
     let ai_client_for_dl = ai_client.clone();
     let lyrics_ndi_health = ndi_health_registry.clone();
     let lyrics_obs_state = obs_state.clone();
+    let lyrics_exchange = exchange.clone(); // #229: each song asks the peers first
     // #14 karaoke stem worker shares the same tools dir + idle-gate handles.
     let stem_pool = pool.clone();
     let stem_tools_dir = lyrics_tools_dir.clone();
     let stem_ndi_health = ndi_health_registry.clone();
     let stem_obs_state = obs_state.clone();
     let stem_shutdown = shutdown_tx.clone();
+    let stem_exchange = exchange.clone(); // #229: each separation asks the peers first
     // #183 D4 dub worker: same tools dir + idle-gate handles as the stem worker.
     let dub_pool = pool.clone();
     let dub_tools_dir = lyrics_tools_dir.clone();
@@ -552,7 +554,8 @@ pub async fn start(
                         lyrics_event_tx.clone(),
                         lyrics_ndi_health,
                         lyrics_obs_state,
-                    );
+                    )
+                    .with_peer(lyrics_exchange);
                     let current_processing_handle = lyrics_worker.current_processing();
                     tokio::spawn(lyrics_worker.run(lyrics_shutdown.subscribe()));
                     info!("lyrics worker started");
@@ -573,7 +576,8 @@ pub async fn start(
                         stem_tools_dir,
                         stem_ndi_health,
                         stem_obs_state,
-                    );
+                    )
+                    .with_peer(stem_exchange);
                     tokio::spawn(stem_worker.run(stem_shutdown.subscribe()));
                     // (StemWorker::run logs "stem worker started" once it is live.)
 
@@ -633,9 +637,11 @@ pub async fn start(
     let obs_side = obs_bridge::start_obs(&pool, &obs_state, &shutdown_tx).await?;
 
     // 8. Reprocess worker — on the SAME metadata chain as the download worker
-    // (#136: it used to get Gemini alone, so it could never repair a row).
+    // (#136: it used to get Gemini alone, so it could never repair a row);
+    // #229: a peer's title first.
     let reprocess_worker =
-        reprocess::ReprocessWorker::new(pool.clone(), metadata_chain, config.cache_dir.clone());
+        reprocess::ReprocessWorker::new(pool.clone(), metadata_chain, config.cache_dir.clone())
+            .with_peer(exchange.clone());
     tokio::spawn(reprocess_worker.run(shutdown_tx.subscribe()));
 
     // 9. Resolume command forwarding (registry was built before AppState above).
