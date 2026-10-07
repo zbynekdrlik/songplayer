@@ -44,20 +44,22 @@ fn a_sha256_is_64_lowercase_hex_digits() {
 }
 
 /// Review Focus 3: a newer peer's catalog — an unknown kind, a bad id, a bad
-/// sha, a job state this node does not know — keeps every entry this node
-/// can use.
+/// sha, a job state this node does not know, a node name that does not hold,
+/// fields this node does not know (at the top and inside entries) — keeps
+/// every entry this node can use.
 #[test]
 fn sanitized_keeps_only_what_this_node_can_use() {
     let sha = sha();
     let json = format!(
         r#"{{"node":"snv","artifacts":[
-            {{"youtube_id":"aaaaaaaaaaa","kind":"audio","version":1,"size":10,"sha256":"{sha}"}},
+            {{"youtube_id":"aaaaaaaaaaa","kind":"audio","version":1,"size":10,"sha256":"{sha}","codec":"flac"}},
             {{"youtube_id":"aaaaaaaaaaa","kind":"dub","version":1,"size":10,"sha256":"{sha}"}},
             {{"youtube_id":"../../x","kind":"video","version":1,"size":10,"sha256":"{sha}"}},
             {{"youtube_id":"bbbbbbbbbbb","kind":"video","version":1,"size":10,"sha256":"nothex"}}],
           "jobs":[
-            {{"youtube_id":"ccccccccccc","kind":"lyrics","node":"snv","state":"running","started_at":"t"}},
+            {{"youtube_id":"ccccccccccc","kind":"lyrics","node":"snv","state":"running","started_at":"t","progress":0.5}},
             {{"youtube_id":"ddddddddddd","kind":"audio","node":"snv","state":"queued"}},
+            {{"youtube_id":"fffffffffff","kind":"lyrics","node":"SNV site","state":"running","started_at":"t"}},
             {{"youtube_id":"ccccccccccc","kind":"dub","node":"snv","state":"running","started_at":"t"}},
             {{"youtube_id":"eeeeeeeeeee","kind":"lyrics","node":"snv","state":"paused"}},
             {{"youtube_id":"bad","kind":"lyrics","node":"snv","state":"running","started_at":"t"}}],
@@ -75,6 +77,25 @@ fn sanitized_keeps_only_what_this_node_can_use() {
     };
     let queued = job("ddddddddddd", ArtifactKind::Audio, JobState::Queued);
     assert_eq!(c.jobs, vec![running, queued]);
+}
+
+/// The catalog's own node name is checked like a configured one
+/// (`peer::config::valid_name`): one that does not hold reads as empty.
+#[test]
+fn a_catalog_node_name_that_does_not_hold_reads_as_empty() {
+    let too_long = "a".repeat(33);
+    for bad in ["", "SNV", "snv\nINFO forged", too_long.as_str()] {
+        let c = Catalog {
+            node: bad.to_string(),
+            ..Catalog::default()
+        };
+        assert_eq!(c.sanitized().node, "", "{bad:?}");
+    }
+    let c = Catalog {
+        node: "pp-2".into(),
+        ..Catalog::default()
+    };
+    assert_eq!(c.sanitized().node, "pp-2");
 }
 
 #[test]

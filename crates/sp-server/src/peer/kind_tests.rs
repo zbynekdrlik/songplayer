@@ -1,6 +1,8 @@
 //! #229 `peer::kind`: the artifact kinds and their wire names, the jobs and
 //! the kinds they need and make, and the version of each kind a node takes.
 
+use sp_core::metadata::MetadataSource;
+
 use super::*;
 use crate::lyrics::LYRICS_PIPELINE_VERSION;
 
@@ -122,4 +124,25 @@ fn a_parser_title_with_no_provider_configured_is_a_parser_title() {
         ArtifactKind::Metadata,
         metadata_version(Some("regex"), false)
     ));
+}
+
+/// Every label the metadata chain writes is ranked on purpose. `rank` is an
+/// exhaustive match: a new `MetadataSource` variant stops this test from
+/// compiling until it is ranked here and in `metadata_version` (else that
+/// provider's titles would silently rank as a parser's).
+#[test]
+fn every_metadata_source_label_is_ranked() {
+    fn rank(source: MetadataSource) -> u32 {
+        match source {
+            MetadataSource::Gemini => METADATA_PROVIDER,
+            MetadataSource::Regex => METADATA_PARSER,
+        }
+    }
+    for source in [MetadataSource::Gemini, MetadataSource::Regex] {
+        assert_eq!(
+            metadata_version(Some(source.as_str()), false),
+            rank(source),
+            "{source:?}"
+        );
+    }
 }

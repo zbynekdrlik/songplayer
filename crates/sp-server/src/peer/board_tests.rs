@@ -43,6 +43,23 @@ fn a_second_guard_of_the_same_job_keeps_it_listed_until_both_end() {
     assert!(board.snapshot("pp").is_empty());
 }
 
+/// A second guard of a running job keeps the job's first start, also once
+/// the first guard ends. The pause makes a fresh start a different
+/// millisecond, so a board that restamped the job would fail here.
+#[test]
+fn a_second_guard_keeps_the_first_start() {
+    let board = Arc::new(JobBoard::default());
+    let first = board.announce("aaaaaaaaaaa", Job::Lyrics);
+    let started = board.snapshot("pp")[0].started_at.clone();
+    assert!(started.is_some());
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let second = board.announce("aaaaaaaaaaa", Job::Lyrics);
+    assert_eq!(board.snapshot("pp")[0].started_at, started);
+    drop(first);
+    assert_eq!(board.snapshot("pp")[0].started_at, started);
+    drop(second);
+}
+
 /// Ending one job leaves the others of the same video and of other videos.
 #[test]
 fn a_guard_ends_only_its_own_job() {
