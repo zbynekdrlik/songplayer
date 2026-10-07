@@ -169,6 +169,20 @@ def test_the_build_is_downloaded_and_checked_before_songplayer_stops():
     # The phase-0 task too: without it the deploy could stop SongPlayer and
     # never start it again.
     assert 'Get-ScheduledTask -TaskName "SongPlayer"' in check
+    # The box itself: a runner that carries resolume-pp by mistake (labels
+    # can be edited later) never stops and installs anything.
+    assert '$env:COMPUTERNAME -ine "RESOLUME-PP"' in check
+
+
+def test_a_rerun_of_an_old_deploy_pp_run_never_installs_an_older_build():
+    # GitHub re-runs a workflow with its ORIGINAL event and github.sha, so a
+    # re-run of an old deploy-pp run (the button on one that failed after
+    # its 24 h queue) passes the resolve job's main-tip test again. The
+    # check step reads main's LIVE tip before anything stops.
+    check = _step(_deploy_pp(), "Check the build")
+    assert "repos/$env:GITHUB_REPOSITORY/commits/main" in check
+    assert '$env:EVENT_NAME -eq "workflow_run"' in check
+    assert "$tip -ne $env:HEAD_SHA" in check
 
 
 def test_the_stop_and_the_install_are_bounded_on_their_own():

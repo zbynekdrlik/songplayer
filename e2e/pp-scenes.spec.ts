@@ -4,6 +4,7 @@ import {
   catalogScenes,
   cgRestoreTarget,
   cgRestoreVia,
+  gateIsLatest,
   isManualScene,
   manualCutLanded,
   pickManualScene,
@@ -214,6 +215,18 @@ test.describe("SP-program's restore after the PP gate (#229)", () => {
     expect(
       programRestoreTarget(-1, [press, manual], { source: 9, last_remote_cut: keptManual }),
     ).toBeNull();
+  });
+
+  test("a scene name over 64 characters is matched as the server records it (clipped)", () => {
+    const long = "Bannery " + "x".repeat(70);
+    const longPress = { scene: long, sentAtMs: 1_000, source: -1 };
+    const recorded = { scene: [...long].slice(0, 64).join(""), action: "keep", at_ms: 1_100 };
+    expect(gateIsLatest([press, longPress], recorded)).toBe(true);
+    expect(
+      programRestoreTarget(-1, [press, longPress], { source: 4, last_remote_cut: recorded }),
+    ).toBe(-1);
+    const landed = { ...recorded, action: "input", source: -1, cg_forward: "ok" };
+    expect(manualCutLanded({ source: -1, remote: { last_remote_cut: landed } }, long)).toBe(true);
   });
 
   test("nothing to put back: no press, no start, or already on the start source", () => {
