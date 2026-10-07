@@ -173,7 +173,7 @@ extend this file; nothing of them exists yet.
   built (`"0123456789abcdef".repeat(4)`): the staging hook refuses a 40+
   character hex literal.
 
-## Writing a lane's docs (lane 2: five review rounds on this alone)
+## Writing a lane's docs (lane 2: review rounds 7–9 on this alone)
 
 - Code that only later lanes call: every doc comment and rules line about
   what a LATER lane builds says it as future work and names the lane that
