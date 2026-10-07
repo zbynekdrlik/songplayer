@@ -5,8 +5,11 @@ import { test, expect, type Page } from "@playwright/test";
 // output, fills it, saves; the save is ONE PATCH carrying exactly the two
 // keys; the values survive a reload and the output shows its live state from
 // GET /api/v1/program. A bad entry is refused in Slovak before anything is
-// sent. Saving the OTHER settings keeps the outputs list (Review Focus 1).
-// Zero console errors is each test's last assertion.
+// sent. Saving the OTHER settings keeps the outputs list (Review Focus 1),
+// and neither section's save drops the other's unsaved edits. A stored row
+// shows its OWN rate and format after a load (the selects' options are built
+// after the value is set: every option carries `selected`). Zero console
+// errors is each test's last assertion.
 
 const ALLOWED_CONSOLE = [
   /WebSocket connection/,
@@ -126,6 +129,7 @@ test("an empty list: add, fill and save one VBAN output; it survives a reload wi
   await openSettings(page);
   await expect(page.locator('[data-testid="audio-output-vban-host"]')).toHaveValue("dev1.lan");
   await expect(page.locator('[data-testid="audio-output-rate"]')).toHaveValue("96000");
+  await expect(page.locator('[data-testid="audio-output-vban-format"]')).toHaveValue("int24");
   await expect(page.locator('[data-testid="settings-audio-network-rate"]')).toHaveValue("96000");
   await expect(page.locator('[data-testid="audio-output-state"]')).toContainText("beží", { timeout: 10000 });
   expect(realConsoleErrors()).toEqual([]);
@@ -154,6 +158,9 @@ test("an output is removed and another switched off; the save carries exactly th
   const rows = page.locator('[data-testid="audio-output-row"]');
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0).locator('[data-testid="audio-output-name"]')).toHaveValue("FOH");
+  // FOH's own values, neither of them its select's first option.
+  await expect(rows.nth(0).locator('[data-testid="audio-output-rate"]')).toHaveValue("48000");
+  await expect(rows.nth(0).locator('[data-testid="audio-output-vban-format"]')).toHaveValue("int24");
   await expect(rows.nth(1).locator('[data-testid="audio-output-rate"]')).toHaveValue("network");
   await expect(rows.nth(1).locator('[data-testid="audio-output-delay"]')).toHaveValue("20");
   await expect(rows.nth(1).locator('[data-testid="audio-output-vban-format"]')).toHaveValue("int16");
@@ -186,5 +193,36 @@ test("saving the other settings keeps the outputs list (#233)", async ({ page, r
   await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(2);
   const stored = await (await request.get("/api/v1/settings")).json();
   expect(JSON.parse(stored.audio_outputs)).toHaveLength(2);
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("neither section's save drops the other's unsaved edits (#233)", async ({ page, request }) => {
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: TWO } });
+  expect(seeded.status()).toBe(204);
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  const rows = page.locator('[data-testid="audio-output-row"]');
+  await expect(rows).toHaveCount(2);
+
+  // An output added but not saved survives a save of the form above.
+  await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+  await expect(rows).toHaveCount(3);
+  await rows.nth(2).locator('[data-testid="audio-output-vban-host"]').fill("dev1.lan");
+  await page.locator('[data-testid="settings-gemini-model"]').fill("gemini-x");
+  await page.getByRole("button", { name: "Uložiť nastavenia" }).click();
+  await expect.poll(() => patches.length).toBe(1);
+  await expect(page.locator(".save-status").first()).toHaveText("Uložené");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(2).locator('[data-testid="audio-output-vban-host"]')).toHaveValue("dev1.lan");
+
+  // A field of the form edited but not saved survives a save of the outputs.
+  await page.locator('[data-testid="settings-gemini-model"]').fill("gemini-unsaved");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Uložené");
+  expect(patches).toHaveLength(2);
+  expect(Object.keys(patches[1]).sort()).toEqual(["audio_network_rate", "audio_outputs"]);
+  expect(JSON.parse(patches[1]["audio_outputs"] as string)).toHaveLength(3);
+  await expect(page.locator('[data-testid="settings-gemini-model"]')).toHaveValue("gemini-unsaved");
+  await expect(rows).toHaveCount(3);
   expect(realConsoleErrors()).toEqual([]);
 });
