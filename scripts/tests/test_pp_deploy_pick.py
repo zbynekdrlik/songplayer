@@ -22,6 +22,7 @@ def run(**over):
     base = {
         "id": 37600000001,
         "name": "CI",
+        "path": ".github/workflows/ci.yml",
         "event": "push",
         "status": "completed",
         "conclusion": "success",
@@ -45,6 +46,10 @@ def test_a_dev_run_is_taken_on_purpose_too():
     ("over", "reason"),
     [
         ({"name": "Release"}, "'Release', not 'CI'"),
+        (
+            {"path": ".github/workflows/other.yml"},
+            "'.github/workflows/other.yml', not '.github/workflows/ci.yml'",
+        ),
         ({"event": "pull_request"}, "event 'pull_request', not a push"),
         ({"status": "in_progress"}, "status 'in_progress', not completed"),
         ({"conclusion": "failure"}, "conclusion 'failure', not success"),

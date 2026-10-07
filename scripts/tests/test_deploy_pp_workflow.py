@@ -103,10 +103,15 @@ def test_every_pp_job_runs_on_the_pp_runner_and_no_other_workflow_does():
         other = workflow.read_text(encoding="utf-8")
         assert "resolume-pp" not in other, workflow.name
         # The converse: a self-hosted job elsewhere names SNV's label, so it
-        # can never be picked up by the PP runner.
+        # can never be picked up by the PP runner. Every runs-on is a one-line
+        # literal there (a block list or an expression would escape this read).
         for line in other.split("\n"):
-            if "runs-on:" in line and "self-hosted" in line:
-                assert re.search(r"\bresolume\]", line), f"{workflow.name}: {line}"
+            if not line.strip().startswith("runs-on:"):
+                continue
+            value = line.split("runs-on:", 1)[1].strip()
+            assert value and "${{" not in value, f"{workflow.name}: {line}"
+            if "self-hosted" in value:
+                assert re.search(r"\bresolume\]", value), f"{workflow.name}: {line}"
 
 
 def test_a_rerun_of_an_older_main_run_never_reaches_pp():
@@ -164,6 +169,14 @@ def test_the_build_is_downloaded_and_checked_before_songplayer_stops():
     # The phase-0 task too: without it the deploy could stop SongPlayer and
     # never start it again.
     assert 'Get-ScheduledTask -TaskName "SongPlayer"' in check
+
+
+def test_the_stop_and_the_install_are_bounded_on_their_own():
+    # A hung stop or installer would otherwise run until the job's timeout,
+    # with SongPlayer stopped; a step timeout is a plain step failure, after
+    # which the always() Start step brings SongPlayer back.
+    for name, minutes in (("Stop SongPlayer", 5), ("Install SongPlayer", 10)):
+        assert f"timeout-minutes: {minutes}" in _step(_deploy_pp(), name), name
 
 
 def test_the_install_checks_the_installers_exit_code():

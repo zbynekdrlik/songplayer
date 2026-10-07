@@ -7,6 +7,7 @@ import {
   pickManualScene,
   pickPlaylistScene,
   playlistNames,
+  programRestoreTarget,
 } from "./pp-scenes";
 import { AV_PROBE_SCENE } from "./av-sync-probe";
 import type { PlaylistRow } from "./program-state";
@@ -155,6 +156,42 @@ test.describe("PP's manual cut (#229)", () => {
     const kept = { ...landed.remote.last_remote_cut, action: "keep" };
     expect(manualCutLanded({ ...landed, remote: { last_remote_cut: kept } }, "Blank")).toBe(false);
     expect(manualCutLanded({ source: -1, remote: { last_remote_cut: null } }, "Blank")).toBe(false);
+  });
+});
+
+test.describe("SP-program's restore after the PP gate (#229)", () => {
+  const press = { scene: "sp-slow", sentAtMs: 1_000 };
+  const ours = { scene: "sp-slow", action: "playlist", at_ms: 1_200 };
+
+  test("the gate's own cut still on program goes back to the start source", () => {
+    expect(programRestoreTarget(-1, press, { source: 4, last_remote_cut: ours })).toBe(-1);
+  });
+
+  test("a cut sent at the same millisecond as the press is the gate's", () => {
+    const sameMs = { ...ours, at_ms: 1_000 };
+    expect(programRestoreTarget(-1, press, { source: 4, last_remote_cut: sameMs })).toBe(-1);
+  });
+
+  test("a cut from before the press is not the gate's", () => {
+    const earlier = { ...ours, at_ms: 999 };
+    expect(programRestoreTarget(-1, press, { source: 4, last_remote_cut: earlier })).toBeNull();
+  });
+
+  test("an operator's press since the gate's is kept", () => {
+    const operator = { scene: "Svedectvo", action: "input", at_ms: 1_500 };
+    expect(programRestoreTarget(4, press, { source: -1, last_remote_cut: operator })).toBeNull();
+  });
+
+  test("a kept (refused) press restores nothing", () => {
+    const kept = { ...ours, action: "keep" };
+    expect(programRestoreTarget(-1, press, { source: 4, last_remote_cut: kept })).toBeNull();
+  });
+
+  test("nothing to put back: no press, no start, or already on the start source", () => {
+    expect(programRestoreTarget(-1, null, { source: 4, last_remote_cut: ours })).toBeNull();
+    expect(programRestoreTarget(null, press, { source: 4, last_remote_cut: ours })).toBeNull();
+    expect(programRestoreTarget(4, press, { source: 4, last_remote_cut: ours })).toBeNull();
+    expect(programRestoreTarget(-1, press, { source: 4, last_remote_cut: null })).toBeNull();
   });
 });
 
