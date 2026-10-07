@@ -654,11 +654,19 @@ impl Default for VbanSender {
 
 impl VbanSender {
     fn new(format: VbanFormat, delay_100ns: i64) -> Self {
+        let converter = VbanRateConverter::new(format.rate_hz());
+        if let Some(why) = converter.failed() {
+            warn!(
+                rate = format.rate_hz(),
+                why,
+                "vban output: the rate converter could not be built — the output sends silence"
+            );
+        }
         Self {
             format,
             latency_100ns: VBAN_SEND_LATENCY_100NS + delay_100ns,
             max_wait_100ns: VBAN_MAX_WAIT_100NS + delay_100ns,
-            converter: VbanRateConverter::new(format.rate_hz()),
+            converter,
             encoder: VbanEncoder::default(),
             packets: empty_packets(format),
             last_send_100ns: None,

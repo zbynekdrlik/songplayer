@@ -6,8 +6,10 @@
 //! destination (FOH's) is passed through untouched: no copy, no filter, the
 //! #210 bytes. A silent block still goes through the filter (its state stays
 //! continuous). The delay is half the block FFT (`rate / 60` frames, 16.7 ms).
-//! If rubato refuses the converter (never for a supported rate) the
-//! destination sends silence and says why (`failed`).
+//! If rubato refuses the converter (never for a supported rate:
+//! `vban_rate_tests` builds each) the destination sends silence, and its VBAN
+//! thread logs one WARN naming why (`failed`, read by `VbanSender`); a block
+//! rubato refuses at these fixed sizes also goes out as silence.
 
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Fft, FixedSync, Resampler};
