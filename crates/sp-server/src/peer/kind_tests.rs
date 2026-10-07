@@ -63,6 +63,26 @@ fn each_job_needs_and_makes_its_kinds() {
     assert_eq!(Job::Stems.as_str(), "stems");
 }
 
+/// The catalog announces a not-yet-hashed file as the job that makes it.
+#[test]
+fn each_kind_is_made_by_the_job_whose_makes_holds_it() {
+    use ArtifactKind::*;
+    let expected = [
+        (Video, Job::Download),
+        (Audio, Job::Download),
+        (StemVocals, Job::Stems),
+        (StemInstrumental, Job::Stems),
+        (Lyrics, Job::Lyrics),
+        (Metadata, Job::Download),
+    ];
+    for (kind, job) in expected {
+        assert_eq!(Job::making(kind), Some(job), "{kind:?}");
+        assert!(job.makes().contains(&kind));
+    }
+    assert_eq!(expected.map(|(k, _)| k), ALL, "every known kind");
+    assert_eq!(Job::making(Unknown), None);
+}
+
 #[test]
 fn a_node_takes_the_current_format_of_each_kind() {
     use ArtifactKind::*;

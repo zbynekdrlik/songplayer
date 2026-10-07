@@ -4,18 +4,26 @@
 //! `docs/superpowers/specs/2026-10-06-pp-site-node-exchange-design.md`).
 
 pub mod api;
+pub mod ask;
 pub mod board;
 pub mod catalog;
 pub mod client;
 pub mod config;
+pub mod decide;
+pub mod download;
 pub mod fetch;
 pub mod hash;
 pub mod hasher;
 pub mod kind;
 pub mod lan;
+pub mod lyrics;
 pub mod queued;
+pub mod repair;
+pub mod stems;
 pub mod throttle;
 pub mod wire;
+
+pub use ask::{Ask, FetchPlan, PeerStep};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,8 +40,8 @@ pub struct Exchange {
     /// The node's cache dir, where its processed files live: the catalog
     /// names `{yt}_lyrics.json` in it.
     pub cache_dir: PathBuf,
-    /// The jobs this node announces as running (empty until the worker hooks
-    /// of lanes 8-9 announce theirs); the catalog lists them.
+    /// The jobs this node runs, each announced while the worker hook that
+    /// runs it holds its guard (`Exchange::ask`); the catalog lists them.
     pub board: Arc<board::JobBoard>,
     /// Reads the peers' catalogs and fetches their artifacts.
     pub(crate) client: client::PeerClient,

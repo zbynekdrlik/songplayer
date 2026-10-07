@@ -6,7 +6,7 @@
 //! mismatch drops it and the cached catalog). One transfer at a time per
 //! peer; the caller fetches one job's artifacts from one peer, so two
 //! transfers never write the same part. The caller renames the verified part
-//! into place (lanes 8-9).
+//! into place (`peer::{download, stems, lyrics}`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use super::Exchange;
 use super::client::{PeerClient, PeerError, lock, status_error, unreachable_err};
 use super::config::PeerConfig;
 use super::hash::sha256_file;
-use super::kind::ArtifactKind;
+use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, is_sha256_hex};
 use crate::downloader::cache::is_valid_video_id;
 
@@ -164,19 +164,33 @@ impl PeerClient {
 
 /// Every other part of the same video and kind (an older copy's) is dropped.
 async fn drop_older_parts(dir: &Path, a: &Artifact, keep: &str) {
-    let prefix = format!("{}_{}_", a.youtube_id, a.kind.as_str());
+    drop_parts(dir, &a.youtube_id, a.kind, Some(keep)).await;
+}
+
+/// Every part of `youtube_id`'s `kind` but `keep`.
+async fn drop_parts(dir: &Path, youtube_id: &str, kind: ArtifactKind, keep: Option<&str>) {
+    let prefix = format!("{youtube_id}_{}_", kind.as_str());
     let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
         return;
     };
     while let Ok(Some(entry)) = entries.next_entry().await {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with(&prefix) && name.ends_with(".part") && name != keep {
+        if name.starts_with(&prefix) && name.ends_with(".part") && keep != Some(name.as_str()) {
             let _ = tokio::fs::remove_file(entry.path()).await;
         }
     }
 }
 
 impl Exchange {
+    /// `job` of `youtube_id` runs here: the parts a fetch of it left (a short
+    /// body kept for a resume, a pair that could not take its names) are
+    /// dropped, so none is orphaned in `<cache>/peer/`.
+    pub(crate) async fn drop_job_parts(&self, job: Job, youtube_id: &str) {
+        for kind in job.needs() {
+            drop_parts(&self.parts_dir(), youtube_id, *kind, None).await;
+        }
+    }
+
     /// Where fetched artifacts wait as parts.
     pub(crate) fn parts_dir(&self) -> PathBuf {
         self.cache_dir.join("peer")

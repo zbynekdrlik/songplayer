@@ -1,6 +1,8 @@
 ---
 paths:
   - "crates/sp-server/src/downloader/cache*.rs"
+  - "crates/sp-server/src/downloader/mod.rs"
+  - "crates/sp-server/src/peer/download*.rs"
   - "crates/sp-server/src/reprocess/**"
   - "crates/sp-server/src/startup.rs"
   - "crates/sp-server/src/song_relink*.rs"
@@ -130,6 +132,11 @@ Design record: #136 comment 5894034820.
   - Pinned by `song_input_tests.rs` (structural: slot → re-read → job →
     separation / synthesis in each `process_next`; the rename and the
     missing-audio cases on a real DB).
+  - The node exchange (#229, `peer::stems`) calls `job_input` before it
+    fetches a peer's stems: no audio here = the same no-penalty recheck and
+    nothing transferred. A peer's stems land under the audio the row
+    records AFTER the transfer (read under `SONG_FILES`), so they need no
+    re-link.
 - **A job that writes derived files re-links its song when it finishes.** The
   stem worker runs `song_relink::relink_song` after `mark_stems_done`
   (`record_stem_result`), and the dub worker after `mark_dub_ready`
@@ -155,6 +162,16 @@ Design record: #136 comment 5894034820.
   - It KEEPS the dub + transcripts. The re-link adopts them under the kept
     song's name (same YouTube id, same audio). A dub is operator-requested and
     nothing re-runs it.
+- **A rollback after a failed rename undoes only what this attempt placed**
+  (#229, `peer::download::adopt`). Rows of one video share files by name, so
+  a final name can already hold another row's recorded file: read
+  `try_exists` BEFORE the rename, and rename the file a player may hold open
+  (the video: Media Foundation does not share delete; the audio reader
+  does) FIRST, so its failure touches nothing. (`downloader/mod.rs`'s own
+  "video rename failed" branch still removes `audio_final`
+  unconditionally.) A test forces the failure with a DIRECTORY at the
+  target name: renaming a file onto an existing directory fails on Linux
+  (EISDIR) and on Windows.
 - **`startup::self_heal_cache` never deletes an orphan half-sidecar a row
   records.** That half belongs to a song split across two names (a move-back
   that failed); it is kept and WARNed. The post-deploy FLAC check accepts

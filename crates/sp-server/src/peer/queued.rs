@@ -1,7 +1,7 @@
 //! #229: the jobs this node has QUEUED, read from its own rows with each
 //! worker's own predicate, never a copy (ROZHODNUTÉ 6022851957 point 2: a
-//! peer is to wait for a queued job as for a running one, lane 7). Queued =
-//! the worker would take the row now:
+//! peer waits for a queued job as for a running one, `peer::decide`).
+//! Queued = the worker would take the row now:
 //!
 //! - download: `downloader::DOWNLOAD_DUE` (not downloaded, active playlist,
 //!   retry due);

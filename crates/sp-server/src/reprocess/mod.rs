@@ -60,6 +60,9 @@ pub struct ReprocessWorker {
     cooldown_until: Option<Instant>,
     /// Per-video backoff: `video_id → (next_retry_at, stage_index)`.
     per_video_backoff: HashMap<i64, (Instant, usize)>,
+    /// #229: this node in the exchange, asked before the providers (`None`
+    /// in tests that do not need it).
+    peer: Option<Arc<crate::peer::Exchange>>,
 }
 
 /// Row data for a video that needs reprocessing.
@@ -73,8 +76,10 @@ struct ReprocessRow {
 enum ReprocessOutcome {
     /// Metadata was successfully updated (DB cleared `gemini_failed`).
     Success,
-    /// A provider said "rate limited" — the worker should stop the current
-    /// batch and honour [`RATE_LIMIT_COOLDOWN`]. Carries every provider's error.
+    /// A provider said "rate limited" — the worker starts
+    /// [`RATE_LIMIT_COOLDOWN`]: no provider is asked for the rest of the
+    /// batch (#229: the peers' titles still are). Carries every provider's
+    /// error.
     RateLimited(String),
     /// Non-rate-limit failure (transient, API error, or still
     /// `gemini_failed=true` from parser fallback). The batch may continue.
@@ -96,7 +101,14 @@ impl ReprocessWorker {
             cache_dir,
             cooldown_until: None,
             per_video_backoff: HashMap::new(),
+            peer: None,
         }
+    }
+
+    /// #229: ask the exchange's peers for a title before the providers.
+    pub fn with_peer(mut self, peer: Arc<crate::peer::Exchange>) -> Self {
+        self.peer = Some(peer);
+        self
     }
 
     /// Returns `true` if the worker is currently inside the rate-limit cooldown
@@ -163,23 +175,17 @@ impl ReprocessWorker {
     /// Process every row of the repair queue (`REPAIR_QUEUE_WHERE`). Returns
     /// the count of successfully reprocessed videos.
     ///
-    /// Aborts the current batch on the first rate-limit response, setting
-    /// the global cooldown so subsequent calls within the cooldown window
-    /// are no-ops.
+    /// The first rate-limit response sets the global cooldown: within it no
+    /// provider is called (the rest of this batch and later calls), while a
+    /// peer's title still repairs its row (#229, `peer::repair`).
     pub async fn process_all(&mut self) -> Result<usize, anyhow::Error> {
         let rows = self.fetch_gemini_failed().await?;
         if rows.is_empty() {
             return Ok(0);
         }
 
-        if self.in_global_cooldown() {
-            debug!(
-                count = rows.len(),
-                "reprocess skipped: rate-limit cooldown active"
-            );
-            return Ok(0);
-        }
-
+        // #229: no early return during the rate-limit cooldown: each row still
+        // takes a peer's title (`reprocess_one` checks the cooldown after it).
         info!(count = rows.len(), "found videos to reprocess");
         let mut success_count = 0;
 
@@ -190,13 +196,14 @@ impl ReprocessWorker {
                     success_count += 1;
                 }
                 Ok(ReprocessOutcome::RateLimited(reasons)) => {
+                    // #229: the rest of the batch asks no provider (the
+                    // cooldown) but still takes the peers' titles.
                     warn!(
                         video_id = %row.youtube_id,
                         %reasons,
-                        "metadata provider rate-limited; entering {}s cooldown, aborting batch",
+                        "metadata provider rate-limited; entering {}s cooldown, no provider is asked for the rest of the batch",
                         RATE_LIMIT_COOLDOWN.as_secs()
                     );
-                    break;
                 }
                 Ok(ReprocessOutcome::Failed(reasons)) => {
                     // One WARN per attempt; the backoff stage decides the next
@@ -251,12 +258,28 @@ impl ReprocessWorker {
 
     /// Retry metadata extraction for a single video.
     ///
-    /// Honours per-video backoff and surfaces rate-limit errors so the
-    /// caller can abort the batch and enter the global cooldown.
+    /// A peer's title first (#229); then honours the per-video backoff and
+    /// the global cooldown, and surfaces a rate-limit error (which starts
+    /// the cooldown: the rest of the batch asks no provider).
     async fn reprocess_one(
         &mut self,
         row: &ReprocessRow,
     ) -> Result<ReprocessOutcome, anyhow::Error> {
+        // #229: a peer's provider or operator title repairs the row with no
+        // provider call (`peer::repair`), so neither this video's backoff nor
+        // the rate-limit cooldown (both about the providers) holds it back.
+        let peer = self.peer.clone();
+        if let Some(ex) = peer.as_deref()
+            && let Some(taken) = crate::peer::repair::peer_title(ex, &row.youtube_id).await
+        {
+            self.per_video_backoff.remove(&row.id);
+            let t = &taken.title;
+            let outcome = self.apply_title(row, &t.song, &t.artist, t.source).await?;
+            if matches!(outcome, ReprocessOutcome::Success) {
+                crate::peer::download::record_title(ex, &row.youtube_id, &taken).await;
+            }
+            return Ok(outcome);
+        }
         if self.in_global_cooldown() {
             return Ok(ReprocessOutcome::Skipped);
         }
@@ -287,6 +310,22 @@ impl ReprocessWorker {
         // start from stage 0 again.
         self.per_video_backoff.remove(&row.id);
 
+        self.apply_title(row, &meta.song, &meta.artist, meta.source.as_str())
+            .await
+    }
+
+    /// The ONE repair write: the row re-checked against the queue under
+    /// `cache::SONG_FILES`, its file set renamed after `song` / `artist` (no
+    /// `_gf`), recorded on every row that recorded it, the title written with
+    /// `source`. Reached from the providers' answer and from a peer's title
+    /// (#229, `peer::repair`).
+    async fn apply_title(
+        &self,
+        row: &ReprocessRow,
+        song: &str,
+        artist: &str,
+        source: &str,
+    ) -> Result<ReprocessOutcome, anyhow::Error> {
         // #136: move the song's COMPLETE file set (the video, the audio, and the
         // stems + dub named after the audio) to the upgraded name as ONE unit
         // (`_gf` stripped). A song is never split across two names: when a move
@@ -310,13 +349,7 @@ impl ReprocessWorker {
         };
         let old =
             crate::downloader::cache::SongFiles::recorded(&file_path, audio_file_path.as_deref());
-        let new = old.named(
-            &self.cache_dir,
-            &meta.song,
-            &meta.artist,
-            &row.youtube_id,
-            false,
-        );
+        let new = old.named(&self.cache_dir, song, artist, &row.youtube_id, false);
         let files =
             crate::downloader::cache::rename_song_files(&row.youtube_id, &old, &new).columns();
 
@@ -335,9 +368,9 @@ impl ReprocessWorker {
              SET song = ?, artist = ?, metadata_source = ?, gemini_failed = 0
              WHERE id = ?",
         )
-        .bind(&meta.song)
-        .bind(&meta.artist)
-        .bind(meta.source.as_str())
+        .bind(song)
+        .bind(artist)
+        .bind(source)
         .bind(row.id)
         .execute(&self.pool)
         .await?;
@@ -349,7 +382,7 @@ impl ReprocessWorker {
     /// path uses): the first sanitized answer with a song, or EVERY
     /// provider's reason in chain order (#136: before, only the last one
     /// survived, and it was logged nowhere), flagged `rate_limited` when any
-    /// provider was, so the batch-abort path always wins over generic
+    /// provider was, so the cooldown path always wins over generic
     /// failures.
     async fn try_providers(
         &self,
@@ -596,8 +629,9 @@ mod tests {
         }
     }
 
-    /// Issue #12: on rate-limit, the worker must abort the current batch
-    /// and skip all subsequent calls until the cooldown window expires.
+    /// Issue #12: on rate-limit, the worker calls no provider for the rest
+    /// of the batch (#229: it no longer stops the batch, the peers' titles
+    /// still go through) and none until the cooldown window expires.
     ///
     /// Uses direct manipulation of `cooldown_until` instead of
     /// `tokio::time::advance` — the sqlite pool setup relies on real I/O
@@ -619,7 +653,8 @@ mod tests {
             Arc::new(ProviderChain::new(vec![Box::new(RateLimitProvider)]));
         let mut worker = ReprocessWorker::new(pool.clone(), providers, tmp.path().to_path_buf());
 
-        // First run: hits rate limit on the first video, aborts batch.
+        // First run: hits rate limit on the first video; the second row is
+        // skipped by the cooldown.
         let count = worker.process_all().await.unwrap();
         assert_eq!(count, 0);
         assert!(
@@ -759,3 +794,7 @@ mod tests_chain;
 #[cfg(test)]
 #[path = "tests_files.rs"]
 mod tests_files;
+
+#[cfg(test)]
+#[path = "tests_peer.rs"]
+mod tests_peer;

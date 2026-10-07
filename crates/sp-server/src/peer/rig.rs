@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sp_core::config::{SETTING_NODE_NAME, SETTING_PEER_API_KEY, SETTING_PEERS};
 use sqlx::SqlitePool;
@@ -201,6 +202,38 @@ impl Drop for TestNode {
     fn drop(&mut self) {
         self.server.abort();
     }
+}
+
+/// A metadata provider that counts its calls and answers "Chain Song" /
+/// "Chain Artist": a test sees whether this node asked its providers.
+pub(crate) struct Counting(pub(crate) Arc<AtomicUsize>);
+
+#[async_trait::async_trait]
+impl crate::metadata::MetadataProvider for Counting {
+    async fn extract(
+        &self,
+        _video_id: &str,
+        _title: &str,
+    ) -> Result<sp_core::metadata::VideoMetadata, crate::metadata::MetadataError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(sp_core::metadata::VideoMetadata {
+            song: "Chain Song".into(),
+            artist: "Chain Artist".into(),
+            source: sp_core::metadata::MetadataSource::Gemini,
+            gemini_failed: false,
+        })
+    }
+
+    fn name(&self) -> &str {
+        "counting"
+    }
+}
+
+/// A one-provider chain of [`Counting`] and its call counter.
+pub(crate) fn counting_chain() -> (crate::metadata::ProviderChain, Arc<AtomicUsize>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let chain = crate::metadata::ProviderChain::new(vec![Box::new(Counting(calls.clone()))]);
+    (chain, calls)
 }
 
 /// Store a setting of `pool`.
