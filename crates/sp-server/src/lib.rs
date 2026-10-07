@@ -398,6 +398,7 @@ pub async fn start(
     let dl_data_dir = config.data_dir();
     let dl_shutdown_tx = shutdown_tx.clone();
     let dl_metadata_chain = metadata_chain.clone();
+    let dl_exchange = exchange.clone(); // #229: each download asks the peers first
     let startup_sync_pool = pool.clone();
     let startup_sync_tx = sync_tx.clone();
     let periodic_sync_pool = pool.clone();
@@ -534,7 +535,8 @@ pub async fn start(
                         dl_metadata_chain,
                         dl_event_tx_for_worker,
                         ytdlp_lock,
-                    );
+                    )
+                    .with_peer(dl_exchange);
                     tokio::spawn(dl_worker.run(dl_shutdown_tx.subscribe()));
                     info!("download worker started");
 

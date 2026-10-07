@@ -201,8 +201,10 @@ pub async fn refused_title(
 
 /// Video `youtube_id`'s `(song, artist)` when a row of it is an operator's
 /// correction with a song (`mark_video_processed_pair` refuses an empty one;
-/// the lowest row id when several are); `artist` `""` when it has none.
-async fn manual_title(
+/// the lowest row id when several are); `artist` `""` when it has none. Also
+/// read by the node exchange (#229, `peer::download`): a peer's pair is named
+/// after it too.
+pub(crate) async fn manual_title(
     pool: &SqlitePool,
     youtube_id: &str,
 ) -> Result<Option<(String, String)>, sqlx::Error> {

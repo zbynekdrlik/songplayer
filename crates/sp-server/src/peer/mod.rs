@@ -10,6 +10,7 @@ pub mod catalog;
 pub mod client;
 pub mod config;
 pub mod decide;
+pub mod download;
 pub mod fetch;
 pub mod hash;
 pub mod hasher;

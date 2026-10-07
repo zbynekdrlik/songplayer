@@ -166,6 +166,9 @@ pub struct DownloadWorker {
     /// The ONE production metadata chain (#136), shared with the reprocess worker.
     metadata: Arc<ProviderChain>,
     event_tx: broadcast::Sender<String>,
+    /// #229: this node in the exchange, asked before each download (`None`
+    /// in tests that do not need it).
+    peer: Option<Arc<crate::peer::Exchange>>,
 }
 
 impl DownloadWorker {
@@ -186,7 +189,14 @@ impl DownloadWorker {
             data_dir,
             metadata,
             event_tx,
+            peer: None,
         }
+    }
+
+    /// #229: ask the exchange's peers before each download.
+    pub fn with_peer(mut self, peer: Arc<crate::peer::Exchange>) -> Self {
+        self.peer = Some(peer);
+        self
     }
 
     /// The cookie file path, if one currently exists on disk. Re-checked on
@@ -243,6 +253,18 @@ impl DownloadWorker {
         };
 
         tracing::info!(video_id = %row.youtube_id, title = %row.title, "processing video");
+        // #229: ask the peers first (`peer::download`): a peer's pair is
+        // taken, a peer's download waited for; else run it here, announced
+        // until this function returns.
+        let _announced =
+            match crate::peer::download::first(self.peer.as_ref(), &self.metadata, &row).await {
+                crate::peer::PeerStep::Done => {
+                    let _ = self.event_tx.send(format!("processed:{}", row.youtube_id));
+                    return true;
+                }
+                crate::peer::PeerStep::Deferred => return false,
+                crate::peer::PeerStep::Local(guard) => guard,
+            };
         let _ = self
             .event_tx
             .send(format!("downloading:{}", row.youtube_id));
@@ -577,3 +599,7 @@ pub(crate) struct VideoRow {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "mod_tests_peer.rs"]
+mod tests_peer;
