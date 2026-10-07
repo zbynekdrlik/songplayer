@@ -165,6 +165,7 @@ fn cancel_title_timers_aborts_pending_handles() {
             paused_at: None,
             failures: Default::default(),
             record_on_start: None,
+            pending_plays: Default::default(),
         };
 
         assert!(pp.title_show_abort.is_some());

@@ -458,11 +458,81 @@ async fn a_song_is_recorded_as_played_when_it_starts() {
 
     rig.engine.handle_command(PID, PlayEvent::Skip).await; // a selection, marked
     rig.engine.handle_previous(PID).await; // back to SONGS[4]: records nothing
-    started(&mut rig.engine).await;
+    started(&mut rig.engine).await; // the skipped selection's answer, late
+    started(&mut rig.engine).await; // Previous's song opened
     assert_eq!(
         played(&rig.engine).await,
         vec![selected, SONGS[4]],
         "the skipped selection never started, and Previous records nothing"
+    );
+}
+
+/// #229 follow-up (design record 6029071745): a `Started` names no Play.
+/// After Play A, then Play B (a skip in A's pre-roll), A's `Started` comes
+/// after B was sent. It answers the EARLIER Play: B has not opened, so it
+/// records nothing and leaves B's run of failed opens alone (it used to
+/// record B and end the run). B's own `Started` then records B, once.
+#[tokio::test]
+async fn a_late_started_of_an_earlier_play_neither_records_nor_ends_the_run() {
+    let mut rig = rig().await;
+    start(&mut rig.engine).await; // its open fails:
+    fail(&mut rig.engine).await; // a run of one, and Play A at once
+    let a = current(&rig.engine).expect("Play A");
+    rig.engine.handle_command(PID, PlayEvent::Skip).await; // Play B
+    let b = current(&rig.engine).expect("Play B");
+    assert_ne!(b, a, "the skip sent another song");
+
+    started(&mut rig.engine).await; // A opened, late
+    assert_eq!(
+        played(&rig.engine).await,
+        Vec::<i64>::new(),
+        "B has not opened: nothing is played yet"
+    );
+    assert_eq!(
+        view(&rig.engine).map(|f| f.count),
+        Some(1),
+        "B's run is not reset by A's answer"
+    );
+    assert_eq!(
+        out(&rig.engine).title_clock,
+        None,
+        "and A's answer fixes no title clock for B"
+    );
+
+    started(&mut rig.engine).await; // B opened
+    assert_eq!(
+        played(&rig.engine).await,
+        vec![b],
+        "exactly one play row, for B"
+    );
+    assert_eq!(view(&rig.engine), None, "B's start ends the run");
+}
+
+/// The same for a late failure: A's `Error` after B was sent is not B's.
+/// It counts no failure and selects no song (it used to replace B before B
+/// opened); B's own answer counts.
+#[tokio::test]
+async fn a_late_error_of_an_earlier_play_neither_counts_nor_replaces_the_newer_play() {
+    let mut rig = rig().await;
+    start(&mut rig.engine).await; // Play A
+    rig.engine.handle_command(PID, PlayEvent::Skip).await; // Play B
+    let b = current(&rig.engine).expect("Play B");
+    mark(&mut rig.engine);
+
+    fail(&mut rig.engine).await; // A did not open, late
+    assert!(!played_since_mark(&rig.engine), "no Play replaced B");
+    assert_eq!(current(&rig.engine), Some(b), "B is the song under way");
+    assert_eq!(view(&rig.engine), None, "A's failure is not counted");
+
+    fail(&mut rig.engine).await; // B did not open
+    assert_eq!(
+        view(&rig.engine).map(|f| f.count),
+        Some(1),
+        "B's own failure counts"
+    );
+    assert!(
+        played_since_mark(&rig.engine),
+        "and the next song is sent at once"
     );
 }
 
@@ -690,5 +760,105 @@ async fn the_health_row_follows_the_run_between_heartbeats() {
     assert!(
         health_row(&rig.registry)["open_failures"].is_null(),
         "a started song clears the row at once"
+    );
+}
+
+/// ROZHODNUTÉ 6029773698: the row says whether the pending retry belongs to
+/// SP-program's source (set when armed, refreshed by an ON that sent no
+/// Play); only then does the Player's badge claim the program. A ▶ off air
+/// backs off too (the state machine's `Playing` + `VideoError` reads no
+/// scene), and its retry is not on program.
+#[tokio::test]
+async fn a_retry_armed_off_program_says_so_on_the_row() {
+    let mut rig = rig().await;
+    heartbeat(&mut rig.engine); // the row exists
+    start(&mut rig.engine).await; // a ▶, nothing on air
+    for _ in 0..3 {
+        fail(&mut rig.engine).await;
+    }
+    assert!(
+        pending_id(&rig.engine).is_some(),
+        "a ▶ off air backs off too"
+    );
+    let failures = &health_row(&rig.registry)["open_failures"];
+    assert!(failures["retry_at_ms"].is_i64(), "{failures}");
+    assert_eq!(
+        failures["on_program"], false,
+        "not SP-program's source: {failures}"
+    );
+}
+
+/// The same on program: SP-program's source, its ON handled. The flag holds
+/// while that retry is pending; the cut off program ends the retry, and the
+/// claim with it.
+#[tokio::test]
+async fn a_retry_armed_on_program_says_so_until_it_ends() {
+    let mut rig = rig().await;
+    heartbeat(&mut rig.engine); // the row exists
+    rig.engine.put_on_air_for_test(PID);
+    rig.engine.handle_scene_change(PID, true).await; // the 1st Play
+    for _ in 0..3 {
+        fail(&mut rig.engine).await;
+    }
+    assert!(
+        pending_id(&rig.engine).is_some(),
+        "the 3rd failure armed a retry"
+    );
+    let failures = &health_row(&rig.registry)["open_failures"];
+    assert!(failures["retry_at_ms"].is_i64(), "{failures}");
+    assert_eq!(
+        failures["on_program"], true,
+        "SP-program's source: {failures}"
+    );
+
+    rig.engine.handle_scene_change(PID, false).await; // cut off program
+    let failures = &health_row(&rig.registry)["open_failures"];
+    assert!(
+        failures["retry_at_ms"].is_null(),
+        "the retry ended: {failures}"
+    );
+    assert_eq!(
+        failures["on_program"], false,
+        "no retry pending, no program claimed: {failures}"
+    );
+}
+
+/// Review round 4 (🔵): a cut ON program ends a pending retry only through
+/// the Play its selection sends. When the selection sends none (no song to
+/// pick: here every video is gone; a custom playlist in Single mode; a DB
+/// error), the retry armed off program stays pending while the playlist IS
+/// SP-program's source now, and the badge read "○ Mimo programu" for up to
+/// 300 s. The ON refreshes the flag of a retry that stays.
+#[tokio::test]
+async fn a_retry_still_pending_after_its_playlist_came_on_program_says_so() {
+    let mut rig = rig().await;
+    heartbeat(&mut rig.engine); // the row exists
+    start(&mut rig.engine).await; // a ▶, nothing on air
+    for _ in 0..3 {
+        fail(&mut rig.engine).await;
+    }
+    let armed = pending_id(&rig.engine).expect("a retry armed off program");
+    assert_eq!(
+        health_row(&rig.registry)["open_failures"]["on_program"],
+        false
+    );
+
+    sqlx::query("DELETE FROM videos WHERE playlist_id = ?")
+        .bind(PID)
+        .execute(&rig.engine.pool)
+        .await
+        .unwrap();
+    rig.engine.put_on_air_for_test(PID);
+    rig.engine.handle_scene_change(PID, true).await; // its selection finds no song
+
+    assert_eq!(
+        pending_id(&rig.engine),
+        Some(armed),
+        "no Play went out: the same retry is pending"
+    );
+    let failures = &health_row(&rig.registry)["open_failures"];
+    assert_eq!(
+        failures["on_program"], true,
+        "it is SP-program's source now: {failures}"
     );
 }

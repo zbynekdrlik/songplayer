@@ -676,8 +676,16 @@ Two orthogonal facts, two sources — never conflate them:
 - **The on/off-program badge (`player-program-badge`) reads the WS `state`**
   (#225; `Playing` = the wall shows this output) → `● Na programe` /
   `○ Mimo programu`, and `◌ —` until the state is known. NEVER derive the
-  badge from `transport`. (#201 read `store.ndi_health` here, which lagged a
-  cut by up to ~5 s.)
+  on/off-program fact from `transport`. (#201 read `store.ndi_health` here,
+  which lagged a cut by up to ~5 s.) #229: while the health row names a
+  pending retry of failed opens and the pipeline is not told it decodes
+  (the label's own predicate, `player_view::waits_for_retry`), the badge is
+  `● Na programe — čaká na ďalší pokus` (`player_program_badge`, `on` style),
+  read from the 1 Hz health poll, so it lags a wait's start and end by up
+  to ~1 s, and only for a retry that belongs to SP-program's source
+  (`OpenFailures::retry_on_program`, ROZHODNUTÉ 6029773698): a ▶ off
+  program that waits keeps `○ Mimo programu`. `open-failures.md` has the
+  details.
 
 Server: `ServerMsg::PlaybackStateChanged` carries `transport: TransportState`
 (`#[serde(default)]` = `Idle`), filled by the engine from the RAW `PlayState` via
@@ -740,7 +748,9 @@ Right after a page load the Player showed "Nič nehrá" / "Mixér — nič nehr�
     #201/#221 labels;
   - `program_badge(state_known, state)` → `◌ —` until known, else
     `state == Playing` → `● Na programe` / `○ Mimo programu`. The badge and the
-    label read the SAME WS state, so a cut flips both in one render.
+    label read the SAME WS state, so a cut flips both in one render. The
+    Player calls it through `player_program_badge` (#229: the retry badge,
+    beside `player_state_label`'s retry label).
 - **The mixer slot** matches the view `Memo` (Rule 1): `Song` → the
   `LiveMixer`, `Idle` → `player-mixer-idle` "Mixér — nič nehrá", `Pending` →
   `player-mixer-pending` "Mixér — načítavam…" (the idle line's CSS box, so the

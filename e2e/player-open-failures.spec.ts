@@ -56,6 +56,21 @@ async function setOpenFailures(
   expect(set.ok()).toBeTruthy();
 }
 
+/// Tell the dashboards `playlistId`'s state and transport, as the engine's
+/// `PlaybackStateChanged` does (`/__mock/set-playing`).
+async function setState(
+  request: APIRequestContext,
+  playlistId: number,
+  state: string,
+  transport: string,
+) {
+  const sent = await request.post("/__mock/set-playing", {
+    data: { playlist_id: playlistId, state, transport },
+  });
+  expect(sent.ok()).toBeTruthy();
+  expect((await sent.json()).clients).toBeGreaterThan(0);
+}
+
 /// The seconds the line counts down to the next attempt (NaN without one).
 function secondsLeft(text: string | null): number {
   const m = text?.match(/ďalší pokus o (\d+) s$/);
@@ -133,9 +148,101 @@ test("the Live page's Player shows the same line, and a due retry reads 0 s (#22
     { timeout: 5000 },
   );
   // While the retry waits the state label says so (not "Čaká na scénu").
+  // Playlist 184 is not the program's source: its row names no retry of
+  // SP-program's source (`on_program` absent = false), so its badge stays
+  // off program (ROZHODNUTÉ 6029773698). One Player component, so the Live page
+  // reads what the dashboard does.
   await expect(page.getByTestId("player-state")).toHaveText(
     "Čaká na ďalší pokus",
   );
+  await expect(page.getByTestId("player-program-badge")).toHaveText(
+    "○ Mimo programu",
+  );
   // Once the retry is due the countdown stops at 0, never below.
   await expect(line).toHaveText(/ďalší pokus o 0 s$/, { timeout: 8000 });
+});
+
+// #229 follow-up (design record 6029071745, ROZHODNUTÉ 6029773698): while a
+// playlist waits out the retry of its failed opens, the engine reports
+// `WaitingForScene` (nothing decodes), so the badge read "○ Mimo programu"
+// for the playlist that IS SP-program's source, its program black. The row
+// now says whether the retry belongs to SP-program's source (`on_program`):
+// then the badge says "on program, waiting". A retry of a playlist played off
+// program (a ▶ off air) keeps "○ Mimo programu", its label "Čaká na ďalší
+// pokus". A playlist told it decodes keeps its badge: the retry's Play went
+// out before the 1 Hz health row moved.
+test("on program and waiting out the retry, the badge says so (#229)", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/?playlist=1");
+  await expect(page.getByTestId("player")).toBeVisible({ timeout: 15000 });
+  const badge = page.getByTestId("player-program-badge");
+  const label = page.getByTestId("player-state");
+  // The replay: playlist 1 plays on program.
+  await expect(badge).toHaveText("● Na programe", { timeout: 15000 });
+
+  // The pause after failed opens: nothing decodes, WaitingForScene.
+  await setState(request, 1, "WaitingForScene", "Paused");
+  await expect(label).toHaveText("Čaká na scénu");
+  await expect(badge).toHaveText("○ Mimo programu");
+
+  await setOpenFailures(request, 1, {
+    count: 3,
+    last_error: ERROR,
+    retry_at_ms: Date.now() + 30_000,
+    on_program: true,
+  });
+  await expect(label).toHaveText("Čaká na ďalší pokus", { timeout: 5000 });
+  await expect(badge).toHaveText("● Na programe — čaká na ďalší pokus");
+  await expect(badge).toHaveClass(/\bon\b/);
+
+  // The retry's Play went out: the playlist is told it decodes on program
+  // before the health row says the retry is over.
+  await setState(request, 1, "Playing", "Playing");
+  await expect(label).toHaveText("Hrá");
+  await expect(badge).toHaveText("● Na programe");
+
+  // Its open failed again and it waits again. Then it is cut off program:
+  // the retry ends (the run is kept), and a playlist that waits with no
+  // retry pending is off program.
+  await setState(request, 1, "WaitingForScene", "Paused");
+  await expect(badge).toHaveText("● Na programe — čaká na ďalší pokus");
+  await setOpenFailures(request, 1, {
+    count: 4,
+    last_error: ERROR,
+    retry_at_ms: null,
+    on_program: false,
+  });
+  await expect(badge).toHaveText("○ Mimo programu", { timeout: 5000 });
+  await expect(badge).not.toHaveClass(/\bon\b/);
+  await expect(label).toHaveText("Čaká na scénu");
+});
+
+test("off program and waiting out the retry, the badge stays off program (#229)", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/?playlist=1");
+  await expect(page.getByTestId("player")).toBeVisible({ timeout: 15000 });
+  const badge = page.getByTestId("player-program-badge");
+  const label = page.getByTestId("player-state");
+  await expect(badge).toHaveText("● Na programe", { timeout: 15000 });
+
+  // A ▶ off program whose opens fail: it waits for its retry like one on
+  // program (`WaitingForScene`, nothing decodes), but the engine armed that
+  // retry while the playlist was not SP-program's source.
+  await setState(request, 1, "WaitingForScene", "Paused");
+  await setOpenFailures(request, 1, {
+    count: 3,
+    last_error: ERROR,
+    retry_at_ms: Date.now() + 30_000,
+    on_program: false,
+  });
+  await expect(label).toHaveText("Čaká na ďalší pokus", { timeout: 5000 });
+  await expect(badge).toHaveText("○ Mimo programu");
+  await expect(badge).not.toHaveClass(/\bon\b/);
+  await expect(page.getByTestId("player-open-failures")).toHaveText(
+    /^Videá sa nedajú otvoriť \(3×\): .* — ďalší pokus o \d+ s$/,
+  );
 });

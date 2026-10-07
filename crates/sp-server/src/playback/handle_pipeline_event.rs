@@ -19,7 +19,7 @@ impl PlaybackEngine {
     /// pipeline events and spawns title-show / title-hide timer tasks. Its
     /// branches are pinned by behaviour tests on an in-memory DB
     /// (`tests_hold.rs`, `tests_scene_change.rs`, `tests_play_video.rs`,
-    /// `program_authority_tests.rs`); the
+    /// `program_authority_tests.rs`, `failure_retry_tests.rs`); the
     /// individual concerns (timer cancellation, title formatting,
     /// get_video_title_info) have dedicated unit tests.
     #[cfg_attr(test, mutants::skip)]
@@ -29,6 +29,17 @@ impl PlaybackEngine {
                 duration_ms,
                 position_ms,
             } => {
+                // #229 follow-up: a `Started` names no Play. The answer to an
+                // earlier Play (a newer one is under way, its song not open
+                // yet) records nothing, ends no run, fixes no title clock.
+                if !self.answers_last_play(playlist_id) {
+                    info!(
+                        playlist_id,
+                        still_pending = self.plays_pending(playlist_id),
+                        "the start of an earlier Play — ignored, a newer Play is under way"
+                    );
+                    return;
+                }
                 // #229: a song opened — the run of failed opens is over, and
                 // a selected or picked song counts as played now.
                 self.song_started(playlist_id).await;
@@ -167,6 +178,16 @@ impl PlaybackEngine {
             }
             PipelineEvent::Error(msg) => {
                 warn!(playlist_id, %msg, "pipeline error");
+                // #229 follow-up: the failure of an earlier Play is not the
+                // newer song's: it counts no failure and selects nothing.
+                if !self.answers_last_play(playlist_id) {
+                    info!(
+                        playlist_id,
+                        still_pending = self.plays_pending(playlist_id),
+                        "the failure of an earlier Play — ignored, a newer Play is under way"
+                    );
+                    return;
+                }
                 if self.pause_if_held(playlist_id, "its song failed").await {
                     return;
                 }
@@ -185,5 +206,16 @@ impl PlaybackEngine {
                 self.handle_health_snapshot(playlist_id, ev.clone());
             }
         }
+    }
+
+    /// #229 follow-up: the Plays of `playlist_id` still waiting for their
+    /// answer, for the log line of an ignored answer only (a count that
+    /// never comes back to 0 is a Play never answered). The count itself is
+    /// `PlayAnswers::pending`, tested there.
+    #[cfg_attr(test, mutants::skip)] // log-only value: nothing reads it
+    fn plays_pending(&self, playlist_id: i64) -> u32 {
+        self.pipelines
+            .get(&playlist_id)
+            .map_or(0, |pp| pp.pending_plays.pending())
     }
 }

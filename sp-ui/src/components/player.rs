@@ -13,7 +13,7 @@
 use leptos::prelude::*;
 use serde::Serialize;
 use sp_core::playback::{PlaybackMode, PlaybackState, TransportState};
-use sp_core::player_view::{self, NowPlayingView, ProgramBadge};
+use sp_core::player_view::{self, NowPlayingView};
 use sp_core::preview_lag::preview_lag_display;
 use sp_core::seek_model::{PendingSeek, format_position, seek_display_ms, seek_target_ms};
 
@@ -112,8 +112,12 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
             .and_then(|o| o.open_failures)
     };
     let failing = Memo::new(move |_| open_failures().is_some());
-    let retry_pending =
-        Memo::new(move |_| open_failures().is_some_and(|f| f.retry_in_ms.is_some()));
+    let retry_pending = Memo::new(move |_| open_failures().is_some_and(|f| f.retry_pending()));
+    // ROZHODNUTÉ 6029773698: the engine says whether the pending retry
+    // belongs to SP-program's source (set when armed, refreshed by an ON
+    // that sent no Play).
+    let retry_on_program =
+        Memo::new(move |_| open_failures().is_some_and(|f| f.retry_on_program()));
 
     // #221 L4b: "Hrá mimo programu" for a playlist playing off program
     // (`sp_core::player_view::state_label`); "—" until the state is known.
@@ -131,8 +135,18 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // = on program, #170), so a cut flips both in one render. It used to read
     // `store.ndi_health` — the 1 Hz poll of the server's 5 s health sample —
     // and lagged the cut by up to ~5 s. A `Memo`, so a position tick never
-    // re-renders it.
-    let badge = Memo::new(move |_| player_view::program_badge(state_known.get(), state()));
+    // re-renders it. #229: while a retry of SP-program's source waits (the
+    // health row's `open_failures`, the 1 Hz poll), "● Na programe — čaká na
+    // ďalší pokus", by the label's own rule; the retry of a playlist played
+    // off program (a ▶ off air) keeps "○ Mimo programu".
+    let badge = Memo::new(move |_| {
+        player_view::player_program_badge(
+            state_known.get(),
+            state(),
+            transport(),
+            retry_on_program.get(),
+        )
+    });
 
     // --- transport (each command reports failure into `player_error`) ---
     let report = move |ctx: &'static str, r: Result<(), String>| match r {
@@ -296,7 +310,7 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
                 </div>
                 <span
                     class="player-program-badge"
-                    class:on=move || badge.get() == ProgramBadge::OnProgram
+                    class:on=move || badge.get().is_on_program()
                     data-testid="player-program-badge"
                 >
                     {move || badge.get().label()}

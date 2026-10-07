@@ -219,6 +219,9 @@ struct PlaylistPipeline {
     /// #229: the song a SelectAndPlay or a PlayVideo sent; its `Started`
     /// records it as played (`song_started`). Every Play clears it first.
     record_on_start: Option<i64>,
+    /// #229 follow-up: the Plays sent and not answered yet (every Play counts
+    /// one, `begin_play`); only the answer to the last one acts.
+    pending_plays: failure_backoff::PlayAnswers,
 }
 
 impl PlaylistPipeline {
@@ -458,6 +461,7 @@ impl PlaybackEngine {
             self.apply_event(playlist_id, PlayEvent::VideosAvailable)
                 .await;
             self.apply_event(playlist_id, PlayEvent::SceneOn).await;
+            self.retry_came_on_program(playlist_id); // #229: an ON that sent no Play
 
             // #45 — re-push title for an already-Playing pipeline that
             // just gained program. The 1.5 s post-Started title-show task

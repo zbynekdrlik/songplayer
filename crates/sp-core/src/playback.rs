@@ -93,9 +93,31 @@ pub struct OpenFailures {
     /// the browser's clock on another machine can be off.
     #[serde(default)]
     pub retry_in_ms: Option<u64>,
+    /// #229 follow-up (ROZHODNUTÉ 6029773698): the pending retry belongs to
+    /// SP-program's source. Set when the retry is armed; a cut off program
+    /// ends the retry, and a cut on program ends it with the Play its
+    /// selection sends, or, when that sends none, turns this `true`
+    /// (`handle_scene_change`). `false` with no retry pending, and for a
+    /// retry of a playlist played off program (a ▶ off air). Additive: an
+    /// older row reads `false`.
+    #[serde(default)]
+    pub on_program: bool,
 }
 
 impl OpenFailures {
+    /// Whether a retry is pending (the row names when it is due), on the
+    /// engine's own row and on one as read alike.
+    pub fn retry_pending(&self) -> bool {
+        self.retry_at_ms.is_some()
+    }
+
+    /// Whether a retry is pending AND belongs to SP-program's source (set
+    /// when armed, refreshed by an ON that sent no Play): the Player's badge
+    /// then says "on program, waiting" (`player_view`).
+    pub fn retry_on_program(&self) -> bool {
+        self.retry_pending() && self.on_program
+    }
+
     /// The row as read at `now_ms` (UTC ms, the server's clock): its
     /// `retry_in_ms` is the wait left until `retry_at_ms`, 0 once due.
     pub fn read_at(self, now_ms: i64) -> Self {
@@ -124,6 +146,7 @@ mod tests {
             last_error: "x".into(),
             retry_at_ms,
             retry_in_ms: None,
+            on_program: true,
         }
     }
 
@@ -147,9 +170,63 @@ mod tests {
         );
         let read = failures(Some(6_500)).read_at(1_000);
         assert_eq!(
-            (read.count, read.last_error.as_str(), read.retry_at_ms),
-            (3, "x", Some(6_500)),
+            (
+                read.count,
+                read.last_error.as_str(),
+                read.retry_at_ms,
+                read.on_program
+            ),
+            (3, "x", Some(6_500), true),
             "the rest of the row is kept"
         );
+    }
+
+    /// #229 follow-up (ROZHODNUTÉ 6029773698): a retry is pending while the
+    /// row names its wait; the badge's "on program, waiting" needs one that
+    /// belongs to SP-program's source. A retry of a playlist played off
+    /// program (a ▶ off air) is pending, not on program.
+    #[test]
+    fn a_retry_is_on_program_only_with_the_flag_and_still_pending() {
+        // A row as read (`read_at` fills `retry_in_ms` from `retry_at_ms`).
+        let row = |retry_at_ms: Option<i64>, on_program: bool| {
+            OpenFailures {
+                on_program,
+                ..failures(retry_at_ms)
+            }
+            .read_at(1_000)
+        };
+        assert!(row(Some(6_500), true).retry_pending());
+        assert!(
+            row(Some(1_000), false).retry_pending(),
+            "due: still pending"
+        );
+        assert!(!row(None, false).retry_pending());
+        assert!(
+            failures(Some(6_500)).retry_pending(),
+            "the engine's own row, before a read fills `retry_in_ms`"
+        );
+
+        assert!(row(Some(6_500), true).retry_on_program());
+        assert!(
+            !row(Some(6_500), false).retry_on_program(),
+            "armed off program (a ▶ off air)"
+        );
+        assert!(
+            !row(None, true).retry_on_program(),
+            "no retry pending, whatever the flag says"
+        );
+    }
+
+    /// The field is additive: a row without it (an older server, a mock
+    /// row) reads `false`, so its retry never claims on program.
+    #[test]
+    fn a_row_without_on_program_reads_false() {
+        let row: OpenFailures = serde_json::from_str(
+            r#"{"count":3,"last_error":"x","retry_at_ms":6500,"retry_in_ms":5500}"#,
+        )
+        .unwrap();
+        assert!(!row.on_program);
+        assert!(row.retry_pending());
+        assert!(!row.retry_on_program());
     }
 }

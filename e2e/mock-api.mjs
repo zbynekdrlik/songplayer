@@ -960,7 +960,10 @@ const NDI_HEALTH_DEFAULT = [
 let ndiHealth = structuredClone(NDI_HEALTH_DEFAULT);
 
 // #229: like the server, a row's `open_failures` carries `retry_in_ms`, the
-// wait left until `retry_at_ms` read at this request (0 once due).
+// wait left until `retry_at_ms` read at this request (0 once due). Its
+// `on_program` (the pending retry belongs to the playlist as
+// SP-program's source, ROZHODNUTÉ 6029773698) passes through as a spec set
+// it; absent, the Player reads `false`.
 app.get("/api/v1/ndi/health", (_req, res) => {
   const now = Date.now();
   res.json(

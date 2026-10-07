@@ -13,6 +13,9 @@
 //! cannot be opened stays "unplayed": the selection must leave it out, or at
 //! the end of a rotation it is the one song left and is picked for good
 //! ([`pick_pool`], fed by [`FailureRun::avoid`]).
+//!
+//! A pipeline's `Started` and `Error` name no Play, so only the answer to
+//! the LAST Play sent records a play or counts a failure ([`PlayAnswers`]).
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -126,16 +129,67 @@ impl FailureRun {
         std::mem::take(self).view(None)
     }
 
-    /// The health row's `open_failures`, with the pending retry's due
-    /// instant (`retry_at_ms`); `None` while no open failed.
-    pub fn view(&self, retry_at_ms: Option<i64>) -> Option<OpenFailures> {
+    /// The health row's `open_failures`, with the pending `retry` (its due
+    /// instant, `retry_at_ms`, and whether it belongs to SP-program's
+    /// source); `None` while no open failed. With no retry pending the row
+    /// claims no program (`on_program` false).
+    pub fn view(&self, retry: Option<RetryView>) -> Option<OpenFailures> {
         let last_error = self.last_failure.clone()?;
         Some(OpenFailures {
             count: self.consecutive_failures,
             last_error,
-            retry_at_ms,
+            retry_at_ms: retry.map(|retry| retry.at_ms),
             retry_in_ms: None, // filled at the read (`NdiHealthRegistry::snapshots`)
+            on_program: retry.is_some_and(|retry| retry.on_program),
         })
+    }
+}
+
+/// A pending retry as the health row tells it (#229 follow-up, ROZHODNUTÉ
+/// 6029773698).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryView {
+    /// When it is due (UTC ms since the epoch).
+    pub at_ms: i64,
+    /// It belongs to SP-program's source (`PendingRetry`'s `on_program`).
+    pub on_program: bool,
+}
+
+/// The Plays a playlist's pipeline was sent and has not answered yet (#229
+/// follow-up, design record 6029071745). The pipeline answers every Play
+/// exactly once and in order: `Started` when its song opened, `Error` when it
+/// did not (a Play's pre-roll reads no command, so a later Play waits for the
+/// earlier one's answer). Neither event names its Play, so after a quick
+/// Play → Play (a skip or a pick in the first song's pre-roll) the first
+/// song's answer can come after the second Play went out. Only the answer
+/// that brings the count to 0 answers the LAST Play sent: only that one
+/// records a play, ends the run of failed opens or counts a failure.
+#[derive(Debug, Default)]
+pub struct PlayAnswers {
+    /// Plays sent and not answered yet.
+    unanswered: u32,
+}
+
+impl PlayAnswers {
+    /// A Play was sent.
+    pub fn sent(&mut self) {
+        self.unanswered = self.unanswered.saturating_add(1);
+    }
+
+    /// A `Started` or an `Error` came: whether it answers the last Play sent.
+    /// An answer with no Play pending answers the last one too, and the count
+    /// stays 0 (the pipeline never answers more than it was sent; a test may
+    /// inject one).
+    pub fn answered(&mut self) -> bool {
+        self.unanswered = self.unanswered.saturating_sub(1);
+        self.unanswered == 0
+    }
+
+    /// The Plays still waiting for their answer, for the log of an ignored
+    /// answer: a count that never comes back to 0 means a Play that was
+    /// never answered (the pipeline's one-answer rule broken).
+    pub fn pending(&self) -> u32 {
+        self.unanswered
     }
 }
 

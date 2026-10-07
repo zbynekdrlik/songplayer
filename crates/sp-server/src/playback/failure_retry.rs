@@ -32,6 +32,11 @@
 //! black program has a visible reason on the dashboard. The engine writes
 //! it as the run changes (`publish_open_failures`: a pause, a start, any
 //! state event, a pick), not only at the pipeline's 5 s heartbeat.
+//!
+//! A `Started` or an `Error` names no Play. After a quick Play → Play, the
+//! first song's answer can come after the second Play went out; it records
+//! nothing, resets nothing and counts no failure (`answers_last_play`,
+//! `failure_backoff::PlayAnswers`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -41,7 +46,7 @@ use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 use super::PlaybackEngine;
-use super::failure_backoff::{FailureRun, utc_ms_after};
+use super::failure_backoff::{FailureRun, RetryView, utc_ms_after};
 use super::pipeline::PipelineEvent;
 use super::state::{PlayAction, PlayEvent, PlayState};
 
@@ -58,6 +63,11 @@ pub(super) struct PendingRetry {
     pub(super) due: Instant,
     /// Its sleeping task, aborted when the retry ends early.
     task: tokio::task::AbortHandle,
+    /// It belongs to SP-program's source (ROZHODNUTÉ 6029773698): set when
+    /// it is armed. A cut off program is a `SceneOff`, which ends it; a cut
+    /// on program ends it with its selection's Play, or refreshes this flag
+    /// when no Play went out (`retry_came_on_program`).
+    on_program: bool,
 }
 
 /// A playlist's failed opens in a row, and its pending retry.
@@ -87,17 +97,18 @@ impl FailureState {
         due
     }
 
-    /// The health row's `open_failures`: the run, and when its pending retry
-    /// is due in UTC ms (`None` while none is pending). `null` while no open
-    /// failed since the last song started.
+    /// The health row's `open_failures`: the run, when its pending retry is
+    /// due in UTC ms (`None` while none is pending) and whether that retry
+    /// belongs to SP-program's source. `null` while no open failed since the
+    /// last song started.
     pub(super) fn view(&self) -> Option<OpenFailures> {
         let now = Instant::now();
         let utc_now_ms = chrono::Utc::now().timestamp_millis();
-        let retry_at_ms = self
-            .retry
-            .as_ref()
-            .map(|retry| utc_ms_after(utc_now_ms, retry.due.saturating_duration_since(now)));
-        self.run.view(retry_at_ms)
+        let retry = self.retry.as_ref().map(|retry| RetryView {
+            at_ms: utc_ms_after(utc_now_ms, retry.due.saturating_duration_since(now)),
+            on_program: retry.on_program,
+        });
+        self.run.view(retry)
     }
 }
 
@@ -130,9 +141,12 @@ impl PlaybackEngine {
     /// The state machine's `VideoError` step without its selection: the
     /// playlist waits in `next` (`WaitingForScene`), and ONE retry is armed
     /// `delay` from now. One WARN per pause names the playlist, the count and
-    /// the last error.
+    /// the last error. The retry records whether the playlist is
+    /// SP-program's source now (the authority's on-air set): a ▶ off air
+    /// backs off too, and its badge must not claim the program.
     fn back_off(&mut self, playlist_id: i64, next: PlayState, error: &str, delay: Duration) {
         let tx = self.event_tx.clone();
+        let on_program = self.on_air_contains(playlist_id);
         let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
             return;
         };
@@ -144,17 +158,46 @@ impl PlaybackEngine {
         })
         .abort_handle();
         pp.failures.cancel_retry(); // one retry per playlist
-        pp.failures.retry = Some(PendingRetry { id, due, task });
+        pp.failures.retry = Some(PendingRetry {
+            id,
+            due,
+            task,
+            on_program,
+        });
         pp.state = next;
         warn!(
             playlist_id,
             failures = pp.failures.run.count(),
             error,
             retry_in_s = delay.as_secs(),
+            on_program,
             "videos cannot be opened — the next attempt waits"
         );
         self.broadcast_state(playlist_id);
         self.publish_open_failures(playlist_id);
+    }
+
+    /// `playlist_id` came on program (`handle_scene_change`, after its
+    /// `SceneOn`) and a retry is still pending: the ON's selection sent no
+    /// Play (no song to pick, a custom playlist in Single mode, a DB
+    /// error), which would have ended it. The retry now belongs to
+    /// SP-program's source, so its `on_program` and the health row follow
+    /// (review round 4: the badge read "○ Mimo programu" until it fired).
+    pub(super) fn retry_came_on_program(&mut self, playlist_id: i64) {
+        let on_program = self.on_air_contains(playlist_id);
+        let pending = self
+            .pipelines
+            .get_mut(&playlist_id)
+            .and_then(|pp| pp.failures.retry.as_mut());
+        if let Some(retry) = pending {
+            retry.on_program = on_program;
+            info!(
+                playlist_id,
+                on_program,
+                "on program while a retry of failed opens waits — the next attempt keeps its time"
+            );
+            self.publish_open_failures(playlist_id);
+        }
     }
 
     /// The health row's `open_failures` now (`NdiHealthRegistry::set_open_failures`),
@@ -207,6 +250,16 @@ impl PlaybackEngine {
         );
         self.apply_event(playlist_id, PlayEvent::Start).await;
         true
+    }
+
+    /// A `Started` or an `Error` of `playlist_id` came: whether it answers the
+    /// LAST Play sent (`failure_backoff::PlayAnswers`). `false` = the answer
+    /// to an earlier Play (a newer one is under way), which the event's arm
+    /// ignores. With no pipeline, the arm handles the event as before.
+    pub(super) fn answers_last_play(&mut self, playlist_id: i64) -> bool {
+        self.pipelines
+            .get_mut(&playlist_id)
+            .is_none_or(|pp| pp.pending_plays.answered())
     }
 
     /// `PipelineEvent::Started` of `playlist_id`: a song opened, so the run of

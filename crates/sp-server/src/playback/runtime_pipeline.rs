@@ -201,6 +201,7 @@ impl PlaybackEngine {
                 paused_at: None,
                 failures: Default::default(),
                 record_on_start: None,
+                pending_plays: Default::default(),
             }
         });
     }
