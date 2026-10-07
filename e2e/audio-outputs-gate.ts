@@ -2,8 +2,9 @@
  * #233 post-deploy gates (pure; unit-tested in the mock suite by
  * audio-outputs-gate.spec.ts): FOH still gets SongPlayer's 48 kHz INT24
  * `sp-program` through the output list (the migration kept it byte-identical),
- * and a VBAN destination at another rate carries that rate's index with a
- * contiguous frame counter.
+ * a VBAN destination at another rate carries that rate's index with a
+ * contiguous frame counter, and (lane 3) an ASIO output runs a minute at its
+ * driver's rate with no underrun and no reopen.
  */
 
 export interface VbanTelemetry {
@@ -29,6 +30,50 @@ export interface OutputStatus {
   blocks_sent: number;
   blocks_dropped: number;
   vban?: VbanTelemetry;
+  /** #233 lane 3: an ASIO output's telemetry. */
+  asio?: AsioTelemetry;
+  /** A running driver off the network's rate or with a long buffer. */
+  note?: string;
+}
+
+/** `outputs[i].asio` (the fields the gate reads). */
+export interface AsioTelemetry {
+  driver: string;
+  channels: number[];
+  driver_rate: number;
+  sample_type: string;
+  ppm: number;
+  underruns: number;
+  resets: number;
+  latency_ms: number;
+}
+
+/** The driver SNV's and PP's ASIO outputs play on. */
+export const DVS_DRIVER = "Dante Virtual Soundcard (x64)";
+/** One minute of program blocks (30 a second). */
+export const WINDOW_BLOCKS = 1800;
+/** The drift servo's bound, ppm (`asrc_servo::MAX_PPM`). */
+export const MAX_PPM = 300;
+
+/** Why an ASIO output's minute (two reads of `outputs[i]`) fails. */
+export function asioGateFailures(first: OutputStatus, second: OutputStatus): string[] {
+  const f: string[] = [];
+  if (second.state !== "running") {
+    f.push(`the ASIO output is ${second.state}${second.reason ? ` (${second.reason})` : ""}`);
+  }
+  const a = first.asio;
+  const b = second.asio;
+  if (!a || !b) return [...f, "no ASIO telemetry"];
+  if (b.driver_rate <= 0 || second.rate !== b.driver_rate) {
+    f.push(`it runs at ${second.rate} Hz, the driver at ${b.driver_rate} Hz`);
+  }
+  if (b.underruns > a.underruns) f.push(`${b.underruns - a.underruns} underruns in the window`);
+  if (b.resets > a.resets) f.push(`the driver was reopened ${b.resets - a.resets} times in the window`);
+  if (Math.abs(b.ppm) > MAX_PPM) f.push(`its correction is ${b.ppm} ppm (bound ${MAX_PPM})`);
+  if (!(second.latency_ms > 0 && second.latency_ms < 1000)) f.push(`its latency is ${second.latency_ms} ms`);
+  const blocks = second.blocks_sent - first.blocks_sent;
+  if (blocks < WINDOW_BLOCKS) f.push(`only ${blocks} blocks in the window, want ${WINDOW_BLOCKS}`);
+  return f;
 }
 
 /** SNV's FOH destination (#210's first target, migrated as out-1). */
