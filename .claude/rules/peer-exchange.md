@@ -343,9 +343,13 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
   how a failed release attempt reaches PP. A re-run of an OLD deploy-pp
   run keeps its original event and `github.sha`, so it passes that test
   again: the deploy job's check step therefore reads main's LIVE tip
-  (`GET /repos/…/commits/main`) before anything stops and fails when the
-  release is no longer it. Never re-run an old deploy-pp run; dispatch the
-  build PP should get.
+  (`GET /repos/…/git/ref/heads/main`, which builds no diff) before anything
+  stops and fails when the release is no longer it (fail closed: every
+  event but a dispatch is checked). Never re-run an old deploy-pp run;
+  dispatch the build PP should get. Such a re-run is evaluated with its
+  original payload, so it also takes the `deploy-pp` group and can push a
+  release pending there out before it is refused: dispatch that release
+  again then.
 - Its own concurrency group `deploy-pp` (an offline PP runner never blocks
   CI), never cancelled half-way. Only a run that really deploys takes it:
   GitHub keeps one PENDING run per group and cancels the one already
@@ -366,7 +370,8 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
   `RESOLUME-PP`: a runner that carries `resolume-pp` by mistake never stops
   or installs anything), the release (still main's live tip, above) and
   the phase-0 `SongPlayer` task BEFORE it stops anything: each failure
-  leaves PP running. Then: stop (the task instance first, then the process,
+  leaves PP running. The always() Start step and the `e2e-pp` job check
+  the box too, so a wrong box is never touched at all. Then: stop (the task instance first, then the process,
   CLIProxyAPI, port 8920 free; its own 5 min step bound), install `/S` (exit
   code read; a 10 min step bound), copy `dist`, start the task, check the
   version. The step bounds turn a hung stop or installer into a plain step
@@ -378,8 +383,10 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
   may be dark"): "Health checks" is skipped once a step failed. Whether a
   job TIMEOUT runs `always()` steps is not verified on this runner. No
   deploy step writes PP's DB or settings, nor the task, the ACL or the
-  firewall (phase 0 owns them); the gate's scene presses and its restore
-  cut persist only the program source, as every press does.
+  firewall (phase 0 owns them). The server itself does: the new build's
+  first start runs its migrations, the gate's presses and restore cut save
+  the program source, and a song the pressed playlist starts is recorded in
+  `play_history` (it weighs the next pick), as on any press.
 - PP is often off. A job queued on an offline self-hosted runner fails after
   24 h; `ci.yml` keeps `dist` 5 days (as `tauri-installer`), so once PP is
   on, `gh workflow run deploy-pp.yml -f ci_run_id=<the newest green main CI
