@@ -1,8 +1,8 @@
 //! #229: the jobs this node runs now, listed in its catalog while they run.
 //! In memory on purpose: a crash takes its announcements with it, so a peer
 //! never waits on a job that died (it would wait the full 2 h otherwise).
-//! A QUEUED job is not on the board: the catalog reads those from the rows
-//! (lane 3).
+//! A QUEUED job is not on the board: lane 3's catalog adds those from the
+//! rows.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};

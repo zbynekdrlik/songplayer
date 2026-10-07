@@ -1,8 +1,8 @@
 //! #229: the peer API's JSON, typed both ways. A peer's answer is untrusted:
 //! no `serde_json::Value` anywhere inside (`rust-workspace.md`), unknown
 //! fields are skipped, unknown kinds and job states read as `Unknown` and
-//! are dropped by [`Catalog::sanitized`], with any entry whose id, sha256 or
-//! node name does not hold.
+//! are dropped by [`Catalog::sanitized`], which also checks the ids, the
+//! sha256s, the node names and the times.
 
 use serde::{Deserialize, Serialize};
 

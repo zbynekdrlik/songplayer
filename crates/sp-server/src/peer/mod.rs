@@ -22,7 +22,7 @@ pub struct Exchange {
     /// The node's cache dir, where its processed files live (read from lane 3
     /// on, when the node serves and fetches them).
     pub cache_dir: PathBuf,
-    /// The jobs this node runs now (its catalog lists them, lane 3).
+    /// The jobs this node runs now (lane 3's catalog lists them).
     pub board: Arc<board::JobBoard>,
 }
 
@@ -35,7 +35,8 @@ impl Exchange {
         })
     }
 
-    /// Announce `job` for `youtube_id` in this node's catalog while the guard lives.
+    /// Announce `job` for `youtube_id` on this node's job board while the
+    /// guard lives.
     pub fn announce(&self, youtube_id: &str, job: kind::Job) -> board::JobGuard {
         self.board.announce(youtube_id, job)
     }

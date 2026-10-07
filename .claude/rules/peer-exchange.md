@@ -90,20 +90,22 @@ extend this file; nothing of them exists yet.
 - Kinds (`kind::ArtifactKind`, serde snake_case): `video`, `audio`,
   `stem_vocals`, `stem_instrumental`, `lyrics`, `metadata`; `parse` reads a
   URL segment (exact, never `unknown`). An unknown kind (a newer peer's
-  `dub`) reads as `Unknown`; `Catalog::sanitized` drops it with any artifact
-  whose YouTube id or sha256 (64 lowercase hex) is malformed. Node names in
-  a peer's catalog follow `peer::config::valid_name`:
-  - a job entry whose `node` is not one is dropped;
-  - separately, the catalog's own `node` reads as `""` when it is not one.
+  `dub`) reads as `Unknown`.
+- `Catalog::sanitized` keeps only what this node can use (Review Focus 3):
+  - an entry needs a known kind and a valid YouTube id; an artifact also a
+    sha256 as 64 lowercase hex digits; a job also a known state and a
+    `node` that is a node name (`peer::config::valid_name`);
+  - separately, the catalog's own `node` reads as `""` when it is not a
+    node name;
+  - a time (`updated_at`, `started_at`) is rewritten in the canonical form
+    (`wire::checked_time` = `ms_to_rfc3339` of the parsed instant: UTC,
+    milliseconds, `Z`), never kept as the peer's text; one that is not an
+    RFC 3339 time, or whose canonical form would not read back (a year
+    outside 0000..=9999 once in UTC), reads as `None` (the entry stays);
+  - a queued entry's `started_at` is dropped.
 
   A peer is named by its CONFIGURED name (`PeerConfig::name`), never by the
-  `node` it sends. A time (`updated_at`, `started_at`) is rewritten in the
-  canonical form (`wire::checked_time` = `ms_to_rfc3339` of the parsed
-  instant: UTC, milliseconds, `Z`), never kept as the peer's text; one that
-  is not an RFC 3339 time, or whose canonical form would not read back (a
-  year outside 0000..=9999 once in UTC), reads as `None` (the entry stays).
-  Times are
-  information only, never a decision's input.
+  `node` it sends. Times are information only, never a decision's input.
 - A node takes a peer's artifact only at ITS OWN current format
   (`kind::acceptable`): `MEDIA_VERSION` (video/audio), `STEMS_VERSION`,
   `LYRICS_PIPELINE_VERSION` (equality — a dev peer's newer lyrics are not
@@ -116,51 +118,53 @@ extend this file; nothing of them exists yet.
   0` when no provider is configured (`metadata::fallback_from_title`) — no
   source, a label this node does not know, a row in the repair queue. A
   version ≥ 1 is taken. The plan's code ranked every labelled non-manual
-  row with `gemini_failed = 0` as a provider's, which would have advertised a
-  no-provider regex guess as a provider title (#229 comment 6030334867). A
-  new `sp_core::metadata::MetadataSource` variant must be ranked here: the
-  exhaustive `rank` match in
+  row with `gemini_failed = 0` as a provider's, which would have advertised
+  a no-provider regex guess as a provider title (#229 comment 6030334867).
+  A new `sp_core::metadata::MetadataSource` variant must be ranked here:
+  the exhaustive `rank` match in
   `kind_tests.rs::every_metadata_source_label_is_ranked` stops compiling
   until it has an arm there; add it to that test's list and to
   `metadata_version` too (the list is not checked for completeness).
 - Jobs (`kind::Job`): Download (needs video+audio, makes
   video+audio+metadata), Lyrics, Stems (needs and makes both stems).
-- A catalog's job entry is `wire::CatalogJob { youtube_id, kind, node, state,
-  started_at }`, one per kind the job makes. `state` = `running` | `queued`:
-  the catalog lists a peer's QUEUED jobs too (the plan's decisions, lanes
-  2/3), and a node waits for either. `started_at` is set only for a running
-  job (`null` for a queued one; `sanitized` drops a queued entry's start).
-  An unknown state reads as `Unknown` and
-  `sanitized` drops the entry. `Catalog::announces(id, kinds)` = a running
-  OR queued job (lane 7's Wait). The plan's text calls these `RunningJob` /
-  `Catalog::runs`: the code names them `CatalogJob` / `announces`.
+- A catalog's job entry is `wire::CatalogJob { youtube_id, kind, node,
+  state, started_at }`, one per kind the job makes. `state` = `running` |
+  `queued`: the catalog lists a node's QUEUED jobs too (the plan's
+  decisions, lanes 2/3), and a node is to wait for either (lane 7).
+  `started_at` is set only for a running job (`null` for a queued one).
+  `Catalog::announces(id, kinds)` = a running OR queued job (lane 7's
+  Wait). The plan's lane-2 text calls these `RunningJob` / `Catalog::runs`:
+  the code names them `CatalogJob` / `announces` (the plan's later lanes
+  already use the new names).
 - A RUNNING job is announced by the in-memory `board::JobBoard` while its
   `#[must_use]` `JobGuard` lives (`Exchange::announce(youtube_id, job)`); a
   crash takes the announcements along, never a DB row. A second guard of
   the same job keeps the first one's start; the last guard to drop ends it.
   `JobBoard::snapshot(node)` = the running entries, sorted by YouTube id,
   then by the kind's WIRE NAME (`stem_instrumental` before `stem_vocals`,
-  not the enum's order). QUEUED entries are not on the board: lane 3's catalog reads
+  not the enum's order).
+- For lane 3: QUEUED entries are not on the board; lane 3's catalog adds
   them from the rows. A download in progress is still a queued row
-  (`normalized = 0`) AND on the board, so lane 3 lists an `(id, kind)` the
-  board holds as running only and skips its queued entry (one entry per
+  (`normalized = 0`) AND on the board, so lane 3 must list an `(id, kind)`
+  the board holds as running only and skip its queued entry (one entry per
   `(id, kind)`).
 - OPEN for lane 7's design (the main decides it; #229 comment 6030598502
-  item 7, corrected by 6030935897): once SNV lists PP as a peer too (phase 2),
-  two nodes with the same song queued would each wait on the other's queued
-  entry for the full 2 h, then both process it — the double work the queued
-  entries exist to avoid. A tie-break must keep phase 1 as decided: PP
-  waits for SNV's queued jobs (ROZHODNUTÉ 6022851957 point 2). A rule keyed
-  on the names needs both nodes to see the same pair, i.e. each node's
-  configured name for a peer equals that peer's own `node_name`; nothing
-  checks that yet (lane 7 could compare `PeerRead.peer` with the sanitized
-  `Catalog.node` and WARN on a mismatch). The wire's `state` tells queued
-  from running.
+  item 7, corrected by 6030935897): once SNV lists PP as a peer too (phase
+  2), two nodes with the same song queued would each wait on the other's
+  queued entry for the full 2 h, then both process it — the double work the
+  queued entries exist to avoid. A tie-break must keep phase 1 as decided:
+  PP waits for SNV's queued jobs (ROZHODNUTÉ 6022851957 point 2). A rule
+  keyed on the names needs both nodes to see the same pair, i.e. each
+  node's configured name for a peer equals that peer's own `node_name`;
+  nothing checks that yet (lane 7 could compare `PeerRead.peer` with the
+  sanitized `Catalog.node` and WARN on a mismatch). The wire's `state`
+  tells queued from running.
 - `wire::PeerMetadata::to_bytes` = the metadata artifact's canonical bytes
-  (serde field order; the catalog's metadata sha256 is over them). Times:
-  `now_ms`, `ms_to_rfc3339` (`2026-10-06T16:00:00.123Z`; out of chrono's
-  range = `""`), `rfc3339_to_ms` (any offset, trimmed).
-- Tests: `peer/kind_tests.rs`, `peer/wire_tests.rs` (a newer peer's catalog:
-  Review Focus 3), `peer/board_tests.rs`. A sha256 in a test is built
-  (`"0123456789abcdef".repeat(4)`): the staging hook refuses a 40+ character
-  hex literal.
+  (serde field order; the catalog's metadata sha256 is to be over them,
+  lane 3). Times: `now_ms`, `ms_to_rfc3339` (`2026-10-06T16:00:00.123Z`; an
+  instant out of chrono's range = `""`), `rfc3339_to_ms` (any offset,
+  trimmed).
+- Tests: `peer/kind_tests.rs`, `peer/wire_tests.rs` (a newer peer's
+  catalog: Review Focus 3), `peer/board_tests.rs`. A sha256 in a test is
+  built (`"0123456789abcdef".repeat(4)`): the staging hook refuses a 40+
+  character hex literal.
