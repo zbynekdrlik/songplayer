@@ -523,3 +523,51 @@ fn the_installer_notice_carries_the_pinned_azos_license() {
          copies or substantial portions of the Software."
     ));
 }
+
+/// A driver reporting 48 000.4 Hz runs at the admitted 48 000; a sub-hertz
+/// wobble of its later report (47 999.2) is no rate change.
+#[test]
+fn the_output_follows_the_admitted_whole_hertz_rate() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Ok(dvs(48_000.4))]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    assert_eq!(o.snapshot().status.driver_rate, 48_000);
+    d.events.push_back(DeviceEvents {
+        rate_changed: Some(47_999.2),
+        ..Default::default()
+    });
+    d.drain(1);
+    w.step(&o, &mut d, T0 + SLOT, None);
+    assert_eq!((o.snapshot().state, d.closes), ("running", 0));
+}
+
+/// The status counts the closed runs' underruns and the running one's.
+#[test]
+fn the_underruns_of_a_closed_run_and_the_running_one_add_up() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0)), Ok(dvs(96_000.0))]);
+    let mut w = AsioWorker::new(T0);
+    // One run: one block (8 636 frames), then 200 callbacks: 133 underruns.
+    let one_dry_run = |w: &mut AsioWorker, d: &mut FakeDevice, at: i64| {
+        w.step(&o, d, at, None);
+        let b = ProgramBlock {
+            due_100ns: at,
+            samples: None,
+            substituted: false,
+        };
+        w.step(&o, d, at + 50_000, Some(b));
+        d.drain(200);
+        w.step(&o, d, at + 60_000, None);
+    };
+    one_dry_run(&mut w, &mut d, T0);
+    assert_eq!(o.snapshot().status.underruns, 133);
+    d.events.push_back(DeviceEvents {
+        reset: true,
+        ..Default::default()
+    });
+    w.step(&o, &mut d, T0 + 70_000, None);
+    one_dry_run(&mut w, &mut d, T0 + 70_000 + 2 * S);
+    assert_eq!(d.starts, 2);
+    assert_eq!(o.snapshot().status.underruns, 133 + 133);
+}
