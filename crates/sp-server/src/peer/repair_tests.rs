@@ -6,11 +6,13 @@ use crate::peer::rig::{SNV_KEY, TestNode};
 
 const YT: &str = "aaaaaaaaaaa";
 
-/// SNV holds the song under a provider's title; PP asks SNV.
+/// SNV holds the song under a provider's title, its pair hashed (so the
+/// catalog lists the video and the audio before the title); PP asks SNV.
 async fn snv_and_pp() -> (TestNode, TestNode) {
     let snv = TestNode::start("snv", Some(SNV_KEY)).await;
     let id = snv.add_video(YT).await;
     snv.give_song(id, YT, "Way Maker", "Sinach").await;
+    snv.hash_now().await;
     let pp = TestNode::start("pp", None).await;
     pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
     (snv, pp)

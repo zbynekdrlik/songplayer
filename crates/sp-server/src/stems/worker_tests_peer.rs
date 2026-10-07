@@ -81,11 +81,17 @@ async fn with_no_peers_the_stem_worker_goes_on_as_before() {
     let pp = TestNode::start("pp", None).await;
     let id = pp.add_video(YT).await;
     pp.give_song(id, YT, "Way Maker", "Sinach").await;
-    worker(&pp, true).process_next().await;
+    let w = worker(&pp, true);
+    w.process_next().await;
     assert_eq!(
         status(&pp, id).await,
         None,
         "pending: the startup floor holds the separation"
+    );
+    assert!(
+        !w.warned_no_python
+            .load(std::sync::atomic::Ordering::Relaxed),
+        "a venv here: no missing-venv WARN"
     );
     let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
         .fetch_one(pp.pool())
