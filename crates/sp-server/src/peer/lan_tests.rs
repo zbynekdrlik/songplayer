@@ -196,3 +196,53 @@ async fn a_peer_without_a_cloudflare_token_has_no_cf_access() {
         }]
     );
 }
+
+/// The catalog's counts (files the rows name, how many are hashed, the
+/// queued job entries) and the jobs this node runs now.
+#[tokio::test]
+async fn status_counts_the_catalog_and_lists_the_running_jobs() {
+    use crate::peer::catalog::CatalogCounts;
+    use crate::peer::kind::{ArtifactKind, Job};
+    use crate::peer::rig::{SNV_KEY, TestNode};
+    use crate::peer::wire::JobState;
+    let node = TestNode::start("snv", Some(SNV_KEY)).await;
+    let id = node.add_video("aaaaaaaaaaa").await;
+    node.give_song(id, "aaaaaaaaaaa", "Way Maker", "Sinach")
+        .await;
+    let _job = node.ex.announce("bbbbbbbbbbb", Job::Lyrics);
+    let (_, body) = get_status(&node.ex).await;
+    let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
+    assert!(s.serving);
+    let counts = CatalogCounts {
+        files: 2,
+        listed: 0,
+        queued: 3,
+    };
+    assert_eq!(s.catalog, Some(counts), "lyrics + both stems queued");
+    assert_eq!(s.jobs.len(), 1);
+    let j = &s.jobs[0];
+    assert_eq!(
+        (j.youtube_id.as_str(), j.kind, j.node.as_str(), j.state),
+        (
+            "bbbbbbbbbbb",
+            ArtifactKind::Lyrics,
+            "snv",
+            JobState::Running
+        )
+    );
+    node.hash_now().await;
+    let (_, body) = get_status(&node.ex).await;
+    let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
+    let counted = s.catalog.unwrap();
+    assert_eq!((counted.files, counted.listed), (2, 2));
+}
+
+/// The rig's node answers over real HTTP (axum::serve on its port).
+#[tokio::test]
+async fn a_node_answers_its_status_over_real_http() {
+    let node = crate::peer::rig::TestNode::start("snv", None).await;
+    let url = format!("{}/api/v1/exchange/status", node.base_url);
+    let s: ExchangeStatus = reqwest::get(url).await.unwrap().json().await.unwrap();
+    assert_eq!(s.node_name.as_deref(), Some(node.name.as_str()));
+    assert_eq!(s.catalog.map(|c| c.files), Some(0));
+}
