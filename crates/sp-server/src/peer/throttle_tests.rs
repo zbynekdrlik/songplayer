@@ -39,3 +39,36 @@ fn mbit_per_second_in_bytes() {
     assert_eq!(mbps_to_bytes(20), 2_500_000);
     assert_eq!(mbps_to_bytes(10_000), 1_250_000_000);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_throttled_body_keeps_its_bytes_and_its_rate() {
+    use axum::body::{Body, Bytes};
+    let chunks: Vec<Result<Bytes, std::io::Error>> = vec![
+        Ok(Bytes::from(vec![1u8; 1_000])),
+        Ok(Bytes::from(vec![2u8; 1_000])),
+        Ok(Bytes::from(vec![3u8; 500])),
+    ];
+    let body = Body::from_stream(futures::stream::iter(chunks));
+    let started = tokio::time::Instant::now();
+    let out = axum::body::to_bytes(throttled(body, 1_000), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(out.len(), 2_500);
+    assert_eq!((out[0], out[1_000], out[2_499]), (1, 2, 3));
+    assert_eq!(
+        started.elapsed(),
+        Duration::from_millis(2_500),
+        "2 500 bytes at 1 000 B/s"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn rate_zero_passes_the_body_as_it_comes() {
+    let started = tokio::time::Instant::now();
+    let body = axum::body::Body::from(vec![7u8; 4_096]);
+    let out = axum::body::to_bytes(throttled(body, 0), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(out.len(), 4_096);
+    assert_eq!(started.elapsed(), Duration::ZERO);
+}
