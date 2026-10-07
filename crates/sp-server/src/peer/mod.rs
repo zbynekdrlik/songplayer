@@ -3,27 +3,43 @@
 //! another already did (`.claude/rules/peer-exchange.md`, spec
 //! `docs/superpowers/specs/2026-10-06-pp-site-node-exchange-design.md`).
 
+pub mod board;
 pub mod config;
+pub mod kind;
 pub mod lan;
+pub mod wire;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
 
-/// This node in the exchange: its database and its cache dir (later lanes add
-/// its job board and its peer client). One per process, built by `lib.rs`.
+/// This node in the exchange: its database, its cache dir and its job board
+/// (a later lane adds its peer client). One per process, built by `lib.rs`.
 pub struct Exchange {
     /// The node's database: the exchange settings are read from it live.
     pub pool: SqlitePool,
     /// The node's cache dir, where its processed files live (read from lane 3
     /// on, when the node serves and fetches them).
     pub cache_dir: PathBuf,
+    /// The jobs this node announces as running (empty until the worker hooks
+    /// of lanes 8-9 announce theirs; lane 3's catalog is to list them).
+    pub board: Arc<board::JobBoard>,
 }
 
 impl Exchange {
     pub fn new(pool: SqlitePool, cache_dir: PathBuf) -> Arc<Self> {
-        Arc::new(Self { pool, cache_dir })
+        Arc::new(Self {
+            pool,
+            cache_dir,
+            board: Arc::new(board::JobBoard::default()),
+        })
+    }
+
+    /// Announce `job` for `youtube_id` on this node's job board while the
+    /// guard lives.
+    pub fn announce(&self, youtube_id: &str, job: kind::Job) -> board::JobGuard {
+        self.board.announce(youtube_id, job)
     }
 }
 

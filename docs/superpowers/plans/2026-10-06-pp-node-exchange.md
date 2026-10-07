@@ -18,6 +18,7 @@ These override the tasks below wherever they differ:
 - The origin of fetched content goes into `peer_fetches`; the row keeps the peer's real source values.
 - The stem fetch runs before the lyrics-venv check (lane 9).
 - Phase 0 resets `node_name` and the peer key on PP's copied DB before its first start.
+- Lane 2 as built (lane worker, 7.10.2026, #229 comment 6030334867): a catalog's job entry is `wire::CatalogJob { youtube_id, kind, node, state: running|queued, started_at: Option<String> }` and `Catalog::runs` is `Catalog::announces` (a running OR queued job). The later lanes' code below uses these names. `kind::metadata_version` ranks only the chain's `gemini` label with `gemini_failed = 0` as a provider (1): a `regex` title written with no provider configured is a parser's (0).
 - Lane 1 masks EVERY secret-class setting in `GET /api/v1/settings` (the existing `gemini_api_key`, `obs_websocket_password`, `remote_ws_password`, the Genius token, and the new peer secrets). One list in `sp_core::config`; a masked PATCH keeps the stored value (#229, gap 10).
 
 ## Global Constraints
@@ -57,7 +58,7 @@ These override the tasks below wherever they differ:
 | `peer/config.rs` (+`config_tests.rs`) | `PeerConfig`, `NodeConfig` from settings, validation, masking (`shown`, `prepare_settings`, `unmask_peers`), redacting `Debug` | 1 |
 | `peer/lan.rs` (+`lan_tests.rs`) | LAN routes: `GET /api/v1/exchange/status`, `POST /api/v1/exchange/probe` | 1 (+3,5) |
 | `peer/kind.rs` (+`kind_tests.rs`) | `ArtifactKind`, `Job`, `MEDIA_VERSION`, `STEMS_VERSION`, metadata versions, `acceptable()` | 2 |
-| `peer/wire.rs` (+`wire_tests.rs`) | `Artifact`, `RunningJob`, `Catalog` (+`sanitized`, `runs`), `PeerMetadata`, `PeerLyrics`, `PeerVideo`, time helpers | 2 (+4) |
+| `peer/wire.rs` (+`wire_tests.rs`) | `Artifact`, `CatalogJob` + `JobState` (was `RunningJob`), `Catalog` (+`sanitized`, `announces`, was `runs`), `PeerMetadata`, `PeerLyrics`, `PeerVideo`, time helpers | 2 (+4) |
 | `peer/board.rs` (+`board_tests.rs`) | `JobBoard` + `JobGuard` (running jobs, announced while the guard lives) | 2 |
 | `peer/hash.rs`, `peer/throttle.rs` (+tests) | sha256 of bytes/files; rate math `wait_for`, `mbps_to_bytes`, `throttled` body | 3 (+4) |
 | `peer/catalog.rs` (+`catalog_tests.rs`) | this node's artifact files from its rows, metadata rows, lyrics row, `build()` the catalog, `counts()` | 3 (+4) |
@@ -2930,7 +2931,7 @@ mod tests;
 - Modify: `crates/sp-server/src/peer/lan.rs` (+ `lan_tests.rs`), `crates/sp-server/src/lib.rs`, `.claude/rules/peer-exchange.md`
 
 **Interfaces:**
-- Produces: `ExchangeStatus.catalog: Option<CatalogCounts>`, `ExchangeStatus.jobs: Vec<RunningJob>`; `lan::status` reads the pause through `Exchange::transfers_paused`.
+- Produces: `ExchangeStatus.catalog: Option<CatalogCounts>`, `ExchangeStatus.jobs: Vec<CatalogJob>`; `lan::status` reads the pause through `Exchange::transfers_paused`.
 
 - [ ] **Step 1: Write the failing tests** (append to `lan_tests.rs`)
 
@@ -2962,14 +2963,14 @@ async fn a_node_answers_its_status_over_real_http() {
 
 - [ ] **Step 2: Run (CI only):** `cargo test -p sp-server peer::lan` — Expected now: compile FAIL (no `catalog` field).
 
-- [ ] **Step 3: Implement.** In `lan.rs` add the imports `use super::catalog::{self, CatalogCounts};` and `use super::wire::RunningJob;`, drop the now-unused `SETTING_PEER_TRANSFERS_PAUSED`/`peer_transfers_paused` import, add the fields
+- [ ] **Step 3: Implement.** In `lan.rs` add the imports `use super::catalog::{self, CatalogCounts};` and `use super::wire::CatalogJob;`, drop the now-unused `SETTING_PEER_TRANSFERS_PAUSED`/`peer_transfers_paused` import, add the fields
 
 ```rust
     /// The files this node's rows name and how many its catalog lists
     /// (hashed); `None` when the rows cannot be read.
     pub catalog: Option<CatalogCounts>,
     /// The jobs this node runs now (its catalog lists them).
-    pub jobs: Vec<RunningJob>,
+    pub jobs: Vec<CatalogJob>,
 ```
 
 and in `status` read `transfers_paused: ex.transfers_paused().await,`, `catalog: catalog::counts(&ex).await.ok(),`, `jobs: ex.board.snapshot(cfg.node_name.as_deref().unwrap_or("")),` (compute `jobs` before `cfg` is moved into the struct literal).
@@ -5443,7 +5444,7 @@ Design comment for #229: *Approach:* one pure `decide(job, youtube_id, reads, wa
 
 use super::*;
 use crate::peer::kind::{ArtifactKind, Job, MEDIA_VERSION, STEMS_VERSION};
-use crate::peer::wire::{Artifact, Catalog, RunningJob};
+use crate::peer::wire::{Artifact, Catalog, CatalogJob, JobState};
 use std::time::Duration;
 use ArtifactKind::{Audio, StemInstrumental, StemVocals, Video};
 
@@ -5461,7 +5462,7 @@ fn catalog(artifacts: Vec<Artifact>, running: &[ArtifactKind]) -> Catalog {
         artifacts,
         jobs: running
             .iter()
-            .map(|k| RunningJob { youtube_id: YT.into(), kind: *k, node: "x".into(), started_at: "t".into() })
+            .map(|k| CatalogJob { youtube_id: YT.into(), kind: *k, node: "x".into(), state: JobState::Running, started_at: Some("t".into()) })
             .collect(),
     }
 }
@@ -5637,7 +5638,7 @@ pub fn decide(job: Job, youtube_id: &str, reads: &[PeerRead<'_>], waited: Option
     }
     if let Some(r) = reads
         .iter()
-        .find(|r| r.catalog.is_some_and(|c| c.runs(youtube_id, job.makes())))
+        .find(|r| r.catalog.is_some_and(|c| c.announces(youtube_id, job.makes())))
     {
         return Decision::Wait { peer: r.peer.to_string(), why: WaitWhy::PeerRunsIt };
     }

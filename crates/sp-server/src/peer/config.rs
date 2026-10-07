@@ -169,8 +169,9 @@ async fn stored_peers(pool: &SqlitePool) -> Result<Vec<PeerConfig>, String> {
     Ok(parse_peers(raw.as_deref()).unwrap_or_default())
 }
 
-/// A node or peer name: 1-32 of `a-z`, `0-9`, `-`.
-fn valid_name(name: &str) -> bool {
+/// A node or peer name: 1-32 of `a-z`, `0-9`, `-` (also the node names in a
+/// peer's catalog, `wire::Catalog::sanitized`).
+pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= MAX_NAME_LEN
         && name
