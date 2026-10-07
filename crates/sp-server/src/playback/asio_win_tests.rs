@@ -197,9 +197,8 @@ fn a_driver_message_is_counted_answered_and_polled_once() {
     assert_eq!(on_message(&SLOTS[i], selector::RESYNC_REQUEST, 0), 1);
     assert_eq!(on_message(&SLOTS[i], selector::LATENCIES_CHANGED, 0), 1);
     on_message(&SLOTS[i], selector::OVERLOAD, 0);
-    SLOTS[i]
-        .rate_bits
-        .store(48_000f64.to_bits(), Ordering::SeqCst);
+    // SAFETY: the callback touches only the static slot.
+    unsafe { (CALLBACKS[i].sample_rate_did_change)(48_000.0) };
     // A device that holds the slot (it implements Drop: no struct update).
     let mut d = WinAsioDevice::new();
     d.slot = Some(i);
@@ -254,4 +253,21 @@ fn a_device_holds_its_threads_com_apartment_until_it_is_dropped() {
     })
     .join()
     .expect("the probe thread");
+}
+
+/// `sampleRateDidChange(0.0)` is a lost clock: it reaches the worker as a
+/// rate change to 0 Hz (`Reason::RateChanged(0)`), taken once (review round
+/// 1: 0 was the "no change" mark of the rate bits, and 0.0's bits are 0).
+#[test]
+fn a_lost_clock_reported_as_0_hz_reaches_the_worker_once() {
+    let _g = serial();
+    let i = 2;
+    claim(i);
+    // SAFETY: the callback touches only the static slot.
+    unsafe { (CALLBACKS[i].sample_rate_did_change)(0.0) };
+    let mut d = WinAsioDevice::new();
+    d.slot = Some(i);
+    assert_eq!(d.poll().rate_changed, Some(0.0));
+    assert_eq!(d.poll().rate_changed, None, "taken once");
+    d.close();
 }
