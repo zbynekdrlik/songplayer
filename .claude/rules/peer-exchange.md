@@ -143,7 +143,7 @@ extend this file; nothing of them exists yet.
   board holds as running only and skips its queued entry (one entry per
   `(id, kind)`).
 - OPEN for lane 7's design (the main decides it; #229 comment 6030598502
-  item 7 and its correction): once SNV lists PP as a peer too (phase 2),
+  item 7, corrected by 6030935897): once SNV lists PP as a peer too (phase 2),
   two nodes with the same song queued would each wait on the other's queued
   entry for the full 2 h, then both process it — the double work the queued
   entries exist to avoid. A tie-break must keep phase 1 as decided: PP
