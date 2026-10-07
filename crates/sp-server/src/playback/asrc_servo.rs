@@ -11,8 +11,9 @@
 //! the frames buffered for the card (the ring + the splice's hold) and the
 //! frames the card consumed so far.
 //!
-//! - latency = (buffered − the splice's pending skip) / rate + (handled −
-//!   boundary): a boundary's time to its sound leaving SongPlayer. Target:
+//! - latency = (buffered − the splice's pending skip, signed) / rate +
+//!   (handled − boundary): a boundary's time to its sound leaving SongPlayer.
+//!   Target:
 //!   two grid slots (VBAN's send budget) + the entry's delay — not "2–3
 //!   driver buffers": one 33 ms block
 //!   arrives per boundary, 10–33 ms late in normal operation, so a ring held
@@ -82,9 +83,10 @@ pub const RECENTRE_100NS: i64 = 100_000;
 /// slots, VBAN's send budget (`VBAN_SEND_LATENCY_100NS`, pinned by a test).
 pub const BASE_LATENCY_100NS: i64 = 666_666;
 /// SongPlayer's: the blocks whose mean error a window-mean re-centre moves
-/// by. A step under one slot moves a 32-block window's mean past 10 ms only
-/// with ≥ 30 % of the window behind it, so these 8 all lie after the step;
-/// over ≥ 266 ms they average a driver's callback sawtooth out.
+/// by. With the level at target, a step under one slot moves a 32-block
+/// window's mean past 10 ms only with ≥ 30 % of the window behind it, so
+/// these 8 all lie after the step; over ≥ 266 ms they average a driver's
+/// callback sawtooth out.
 pub const RECENT_BLOCKS: usize = 8;
 
 /// What [`RateRegression::offer`] did with a point.
@@ -245,9 +247,10 @@ pub struct Observation {
     pub stamp_100ns: i64,
     /// Frames buffered for the card: the ring + the splice's hold.
     pub buffered_frames: u64,
-    /// Frames the splice has still to skip (`asrc::Splice::pending_skip_frames`):
-    /// buffered, but they never reach the card. A skip longer than one block
-    /// runs over several, and must not be asked for again meanwhile.
+    /// Frames the splice will still drop from the coming blocks' output
+    /// (`asrc::Splice::pending_skip_frames`): counted against the buffered
+    /// frames — signed, since after a stall they can outnumber them. A skip
+    /// longer than one block runs over several and is not asked for again.
     pub pending_skip_frames: u64,
     /// Frames the card consumed since the output opened.
     pub consumed_frames: u64,
@@ -332,6 +335,10 @@ impl Window {
     /// Add one observation (`x` relative to the servo's origin); a window
     /// spanning [`WINDOW_100NS`] closes and starts over.
     fn add(&mut self, x_100ns: i64, y_s: f64, latency_100ns: i64) -> Option<Closed> {
+        if self.first.is_some_and(|(x0, _)| x_100ns < x0) {
+            // The wall went back before this window began: start it over.
+            *self = Self::default();
+        }
         let (x0, y0) = *self.first.get_or_insert((x_100ns, y_s));
         self.n += 1;
         self.sum_x_s += x_100ns as f64 / 1e7;
@@ -409,7 +416,7 @@ impl Servo {
     }
 
     pub fn observe(&mut self, o: Observation) -> ServoAction {
-        let to_play = o.buffered_frames.saturating_sub(o.pending_skip_frames) as i64;
+        let to_play = o.buffered_frames as i64 - o.pending_skip_frames as i64;
         let latency_100ns =
             frames_to_100ns(to_play, self.rate_hz) + (o.handled_100ns - o.stamp_100ns);
         let err_100ns = self.target_100ns - latency_100ns;

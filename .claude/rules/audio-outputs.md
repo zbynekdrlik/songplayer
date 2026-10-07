@@ -23,10 +23,13 @@ insert, negative = skip) `Splice::insert` / `skip`, and pushes
 was handled, its boundary (stamp), the frames buffered for the card (the
 ring + the splice's 5 ms hold), the frames the splice has still to skip
 (`Splice::pending_skip_frames`) and the frames the card consumed since the
-output opened. The pending skip is counted OUT of the buffered frames: the
-splice skips at most one block per call, so a 100 ms skip runs over three
-blocks, and without it the servo would ask for the rest again (review round
-1: 150 ms of excess skipped 397 ms in 10 re-centres).
+output opened. The pending skip is counted OUT of the buffered frames,
+SIGNED: the splice skips at most one block per call, so a 100 ms skip runs
+over three blocks, and without it the servo would ask for the rest again
+(review round 1: 150 ms of excess skipped 397 ms in 10 re-centres); after a
+worker stall the frames still to skip can outnumber the buffered ones, and
+a `saturating_sub` read that as more to skip (review round 3: a 300 ms stall
+re-centred 15 times, 13 while a skip ran; signed: twice, none).
 
 **The latency target is two grid slots (66.7 ms, VBAN's send budget) + the
 entry's `delay_ms`, NOT the spec's "2–3 driver buffers".** The program hands
@@ -83,9 +86,14 @@ move). Not by the window's mean: a step inside a window shows in its mean
 only in part (review round 1: 20–30 ms steps failed at 4–9 of 17 window
 phases). Not by one block either: a block's latency saws by one driver
 callback period (review round 2: 2048 frames at 48 kHz re-centred 118 times
-in 900 s). The last 8 blocks lie after the step (a step under one slot moves
-a 32-block mean past 10 ms only with ≥ 30 % of the window behind it) and
-span ≥ 266 ms of the sawtooth. A rate point more than 10 ms off the fit (once the
+in 900 s). With the level at target the last 8 blocks lie after the step (a
+step under one slot moves a 32-block mean past 10 ms only with ≥ 30 % of the
+window behind it) and span ≥ 266 ms of the sawtooth. The trigger is the
+window's whole error, step plus any standing offset: a −10.5 ms step on a
+−45 ppm card whose level still stands 1.7 ms high from the start-up reads
+−8.8 ms and is left to the level loop (pinned among the honest bounds). A
+window whose wall goes back before its first point starts over (it would
+otherwise stay open the step + 1 s). A rate point more than 10 ms off the fit (once the
 fit has 30 points) RE-BASES the regression (the offset absorbs the step, the
 slope stays) and the NEXT point REALIGNS onto the moved line whatever its
 residual (`Offered::Realigned`): the same straddle splits a step across two
@@ -124,13 +132,16 @@ plus half a block of the first ramp — derive pins from a model of rubato's
 
 **The closed-loop simulation** (`asrc_servo_sim_tests.rs`): card −50 / 0 /
 +50 ppm, ±1 ms steps, ±20 / ±30 ms steps at three window phases, ±44 ms, a
-100 ms forward step, a dropped callback, a 48 kHz card with 256-frame
-buffers, a 1024-frame driver at 48 kHz with a 20 ms step; 900 s each;
+100 ms forward step, a dropped callback, a 200 ms worker stall (underruns by
+physics, the skip asked once), a 48 kHz card with 256-frame buffers, a
+1024-frame driver at 48 kHz with a 20 ms step; 900 s each;
 asserts 0 underruns, |ppm| ≤ 300, slew, latency error ≤ 10 ms after 70 s
 (model: ≤ 4.1; + half a period for the 1024-frame driver), |final − card|
-≤ 5 ppm, re-centres 1 (2 for a step over 10 ms), no re-centre asked while a
-skip runs. The sub-10 ms steps have their own honest bounds
-(`a_step_under_10_ms_enters_the_rate_and_is_paid_back`). **Envelope for
+≤ 5 ppm, re-centres 1 (2 for a step over 10 ms from a level at target), no
+re-centre asked while a skip runs. The sub-10 ms steps and the standing-offset
+case have their own honest bounds
+(`a_step_under_10_ms_enters_the_rate_and_is_paid_back`,
+`a_10_5_ms_step_on_a_standing_offset_is_left_to_the_level_loop`). **Envelope for
 lane 3:** a driver callback period well under one grid slot (≤ 512 frames
 at 48 kHz, ≤ 1024 at 96 kHz; 2048 at 48 kHz saws past the per-block
 threshold) — lane 3 reads the driver's preferred buffer and cannot change
