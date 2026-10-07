@@ -49,7 +49,11 @@ if (Test-Path "$RunnerDir\.runner") {
 
 # --- Download runner ---
 Write-Host "  [1/5] Downloading GitHub Actions runner..." -ForegroundColor White
-$runnerVersion = "2.325.0"
+# GitHub refuses runners it has retired ("out of date and can no longer register"),
+# so take the current release rather than a pinned version (#229).
+$latest = Invoke-RestMethod -Uri "https://api.github.com/repos/actions/runner/releases/latest" -Headers @{ "User-Agent" = "songplayer-setup-runner" }
+$runnerVersion = $latest.tag_name.TrimStart("v")
+if ($runnerVersion -notmatch '^\d+\.\d+\.\d+$') { throw "Could not read the latest runner version (got '$($latest.tag_name)')" }
 $downloadUrl = "https://github.com/actions/runner/releases/download/v$runnerVersion/actions-runner-win-x64-$runnerVersion.zip"
 New-Item -ItemType Directory -Path $RunnerDir -Force | Out-Null
 $zipPath = "$RunnerDir\runner.zip"
@@ -71,7 +75,9 @@ if (-not $token) {
 Write-Host "  [3/5] Configuring runner..." -ForegroundColor White
 Push-Location $RunnerDir
 .\config.cmd --url $RepoUrl --token $token --name $RunnerName --labels $Labels --runnergroup Default --work _work --unattended --replace
+$configExit = $LASTEXITCODE
 Pop-Location
+if ($configExit -ne 0) { throw "Runner registration failed (config.cmd exit $configExit); see $RunnerDir\_diag. Nothing was registered." }
 Write-Host "        Runner configured: $RunnerName [$Labels]" -ForegroundColor Green
 
 # --- Scheduled task ---
