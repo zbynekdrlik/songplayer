@@ -332,8 +332,8 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
   and still main's tip) or an explicit `gh workflow run deploy-pp.yml -f
   ci_run_id=<CI run>` (a dev build, or an older release, at PP only on
   purpose). Both go through `scripts/pp_deploy_pick.py`: a completed, green
-  `push` run of `CI` in this repository, else the `resolve` job fails and
-  nothing touches PP. Both triggers need the workflow on `main` (the default
+  `push` run of `CI` (`.github/workflows/ci.yml`) in this repository, else
+  the `resolve` job fails and nothing touches PP. Both triggers need the workflow on `main` (the default
   branch).
 - GitHub fires `workflow_run` `completed` for EVERY attempt of a run. A
   re-run of an OLDER main CI run (the SNV restart recipe, `gh run rerun
@@ -357,8 +357,10 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
   (one installer, an `index.html`) and the phase-0 `SongPlayer` task BEFORE
   it stops anything: an expired artifact or a missing task fails with PP
   still running. Then: stop (the task instance first, then the process,
-  CLIProxyAPI, port 8920 free), install `/S` (exit code read), copy `dist`,
-  start the task, check the version.
+  CLIProxyAPI, port 8920 free; its own 5 min step bound), install `/S` (exit
+  code read; a 10 min step bound), copy `dist`, start the task, check the
+  version. The step bounds turn a hung stop or installer into a plain step
+  failure within minutes, so the Start step below runs.
 - "Start SongPlayer" is `if: always()` (the one step that may be): after a
   failed install or a cancel it starts the task again (a no-op when nothing
   was stopped) and waits up to 90 s for the process and
@@ -397,32 +399,50 @@ exists yet: no worker asks a peer, nothing outside the tests fetches.
     cg OBS already has on program (nothing changes on cg OBS). When cg OBS's
     program is not a manual scene, the test fails naming `PP_MANUAL_SCENE`:
     the gate never picks another cg OBS scene by itself. The spec reads cg
-    OBS on `OBS_WS_URL` (:4455).
-  - `afterAll` puts SP-program back on its start scene (a playlist start
-    scene is re-kicked to its next song, as at SNV), and cg OBS back on its
-    own only when the manual press moved it and it is still there
-    (`cgRestoreTarget`): an operator's change meanwhile is kept.
+    OBS on `OBS_WS_URL` (:4455). Precondition (nothing checks it): that
+    scene must not itself show `SP-program` (an NDI `… (SP-program)`
+    source), or cutting to "OBS manuál" loops the program into itself on
+    the wall.
+  - `afterAll` puts SP-program back on the source it had before the tests
+    with a dashboard cut (`POST /api/v1/program/cut`, which tells cg OBS
+    nothing), only while the latest recorded switch
+    (`remote.last_remote_cut`) is still the gate's own last press: its
+    scene, recorded at or after the instant the gate sent it
+    (`programRestoreTarget`; the runner and SongPlayer share PP's clock). A
+    playlist start source is re-kicked to its next song, as at SNV. cg OBS
+    goes back on its own scene only when the manual press moved it and it
+    is still there (`cgRestoreTarget`). An operator's press meanwhile is
+    kept on both. Nothing on program at the start (`source` null): nothing
+    to cut back to, the gate's last cut stays on air and persisted.
 - "produkcia beží" at PP:
   - `gh workflow disable deploy-pp.yml` first: no new run starts;
   - a run in flight: cancel it while it is still in `resolve`, the
     downloads or "Check the build"; once "Stop SongPlayer" ran, let the
     deploy job finish (~2 min; a cancel there still starts SongPlayer, but
-    may cut the installer half-way), then cancel before `e2e-pp` starts;
-  - `e2e-pp` cut mid-suite skips `afterAll`: the program may stay on the
-    test playlist (and it is persisted) until the operator's next press;
+    may cut the installer half-way);
+  - `e2e-pp` starts on the same runner within seconds. Its first scene press
+    comes only after its checkout, `npm ci`, the Playwright install and the
+    MAX test (~1–2 min): cancel in that window. A cancel mid-suite sends
+    Playwright Ctrl+C, then a kill ~7.5 s later, so `afterAll` may run only
+    in part or not at all: the program may stay on the test playlist (and
+    it is persisted) until the operator's next press;
   - touch nothing else at PP. After "event skončil": `gh workflow enable
     deploy-pp.yml`, then dispatch the newest green main CI run if a release
     landed meanwhile.
 - Security: PP and SNV are self-hosted runners of a PUBLIC repository. The
-  repo's fork-PR approval policy must be `all_external_contributors` (MAIN
-  SESSION OPS, #229 lane 6), so no outside contributor's workflow runs on
-  either box without approval.
+  repo's fork-PR approval policy must be `all_external_contributors`
+  (`gh api -X PUT repos/zbynekdrlik/songplayer/actions/permissions/fork-pr-contributor-approval
+  -f approval_policy=all_external_contributors`; it read
+  `first_time_contributors` on 7.10.2026), set BEFORE the PP runner is
+  registered (MAIN SESSION OPS, #229 lane 6), so no outside contributor's
+  workflow runs on either box without approval.
 - A DB copied SNV → PP carries SNV's `node_name` / `peer_api_key`: PATCH
   PP's `node_name=pp` and `peer_api_key=""` before that DB's first start.
 - Guards: `scripts/tests/test_deploy_pp_workflow.py` (the triggers, the
-  main-tip rule, the label both ways, the group, the order, `always()` on
-  Start only and its wait, nothing of PP's setup touched, `dist` 5 days, SNV
-  ignoring the PP subset) and `scripts/tests/test_pp_deploy_pick.py` (Eval
+  main-tip rule, the label both ways (every other `runs-on` a one-line
+  literal), the group, the order, the step bounds, `always()` on Start only
+  and its wait, nothing of PP's setup touched, `dist` 5 days, SNV ignoring
+  the PP subset) and `scripts/tests/test_pp_deploy_pick.py` (Eval
   Checks pytest; the script is in both ruff lists); the pure e2e helpers in
   the mock suite (`peer-probe-gate.spec.ts`, `pp-scenes.spec.ts`).
 
