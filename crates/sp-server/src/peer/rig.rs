@@ -190,6 +190,11 @@ impl TestNode {
         .unwrap();
         json
     }
+
+    /// One hashing pass, no rate limit.
+    pub(crate) async fn hash_now(&self) -> super::hasher::HashPass {
+        super::hasher::hash_pass(&self.ex, 0).await.unwrap()
+    }
 }
 
 impl Drop for TestNode {

@@ -7,6 +7,7 @@ pub mod board;
 pub mod catalog;
 pub mod config;
 pub mod hash;
+pub mod hasher;
 pub mod kind;
 pub mod lan;
 pub mod queued;
