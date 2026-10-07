@@ -202,9 +202,14 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
         crate::store::poll_into("/api/v1/program", 2_000, cancelled, live);
     });
 
+    // A new id above every row AND every stored entry: a row removed but not
+    // saved yet still runs under its id, and a new row must never take it.
     let add_vban = move |_: leptos::ev::MouseEvent| {
+        let saved =
+            stored.with_untracked(|(list, _)| stored_list(list.as_deref()).unwrap_or_default());
         entries.update(|l| {
-            let fresh = new_vban(l);
+            let known: Vec<OutputEntry> = l.iter().cloned().chain(saved).collect();
+            let fresh = new_vban(&known);
             l.push(fresh);
         });
     };
