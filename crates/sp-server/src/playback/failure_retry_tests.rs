@@ -36,6 +36,11 @@ struct Rig {
 
 /// An engine with the playlist's pipeline and its five songs.
 async fn rig() -> Rig {
+    rig_with(&SONGS).await
+}
+
+/// An engine with the playlist's pipeline and these normalized songs.
+async fn rig_with(songs: &[i64]) -> Rig {
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
     sqlx::query(
@@ -46,7 +51,7 @@ async fn rig() -> Rig {
     .execute(&pool)
     .await
     .unwrap();
-    for video_id in SONGS {
+    for &video_id in songs {
         sqlx::query(
             "INSERT INTO videos (id, playlist_id, youtube_id, song, artist, normalized, \
              file_path, audio_file_path) VALUES (?, ?, ?, ?, 'Artist', 1, ?, ?)",
@@ -532,5 +537,129 @@ async fn the_health_row_names_the_failed_opens_and_the_next_attempt() {
     assert!(
         health_row(&rig.registry)["open_failures"].is_null(),
         "null again once a song started"
+    );
+}
+
+/// The song the playlist sent last.
+fn current(engine: &PlaybackEngine) -> Option<i64> {
+    out(engine).current_video_id
+}
+
+/// The review of the lane (#229): a song that never opened is not recorded
+/// as played, so at the end of a rotation it is the only unplayed song left.
+/// Picked again and again, it held the program black for good (5 s, 30 s,
+/// 120 s, then every 300 s). The selection leaves out the songs that failed
+/// since the last start: the rotation restarts without it.
+#[tokio::test]
+async fn one_song_that_cannot_be_opened_never_stalls_the_rotation() {
+    let mut rig = rig().await;
+    let broken = SONGS[0];
+    for &song in &SONGS[1..] {
+        crate::db::models::record_play(&rig.engine.pool, PID, song)
+            .await
+            .unwrap();
+    }
+    start(&mut rig.engine).await;
+    assert_eq!(
+        current(&rig.engine),
+        Some(broken),
+        "the rotation's last song"
+    );
+
+    fail(&mut rig.engine).await;
+
+    let next = current(&rig.engine).expect("a song was sent");
+    assert_ne!(
+        next, broken,
+        "the next Play is another song, not the one that failed"
+    );
+    assert!(matches!(out(&rig.engine).state, PlayState::Playing { .. }));
+    assert_eq!(
+        played(&rig.engine).await,
+        Vec::<i64>::new(),
+        "the rotation restarted: its history was cleared, as when every song has played"
+    );
+}
+
+/// The 1st and 2nd failures select the next song at once, and never a song
+/// that failed while another one can still be tried: with three songs the
+/// third Play is the one song that has not failed yet. (Picked at random, a
+/// failed song came back one time in three.) Ten playlists, so a random pick
+/// cannot pass by luck.
+#[tokio::test]
+async fn a_song_that_failed_is_not_picked_again_while_another_can_be() {
+    for round in 0..10 {
+        let mut rig = rig_with(&SONGS[..3]).await;
+        start(&mut rig.engine).await;
+        let first = current(&rig.engine).expect("a song");
+        fail(&mut rig.engine).await;
+        let second = current(&rig.engine).expect("a song");
+        fail(&mut rig.engine).await;
+        let third = current(&rig.engine).expect("a song");
+        assert_ne!(second, first, "round {round}: the 2nd Play is another song");
+        assert!(
+            third != first && third != second,
+            "round {round}: the 3rd Play is the song that has not failed \
+             ({first}, {second}, {third})"
+        );
+    }
+}
+
+/// A song is recorded only when it starts, so a skip in its pre-roll found it
+/// still unplayed and could pick it again (the review's second finding). The
+/// selection leaves out the song just sent: with two songs, every skip before
+/// a start alternates between them.
+#[tokio::test]
+async fn a_skip_before_the_song_starts_never_picks_it_again() {
+    let mut rig = rig_with(&SONGS[..2]).await;
+    start(&mut rig.engine).await;
+    for round in 0..30 {
+        let before = current(&rig.engine);
+        rig.engine.handle_command(PID, PlayEvent::Skip).await;
+        assert_ne!(
+            current(&rig.engine),
+            before,
+            "round {round}: a skip never sends the song it skipped while another is unplayed"
+        );
+    }
+}
+
+/// The health row follows the run as it changes, not only at the pipeline's
+/// 5 s heartbeat: a 5 s pause would otherwise come and go unseen. The wait
+/// left is reported on the SERVER's clock (`retry_in_ms`, at the read), since
+/// the browser that shows it runs on another machine whose clock can be off.
+#[tokio::test]
+async fn the_health_row_follows_the_run_between_heartbeats() {
+    let mut rig = rig().await;
+    heartbeat(&mut rig.engine); // the row exists; no heartbeat from here on
+    start(&mut rig.engine).await;
+    for _ in 0..3 {
+        fail(&mut rig.engine).await;
+    }
+
+    let row = health_row(&rig.registry);
+    let failures = &row["open_failures"];
+    assert_eq!(failures["count"], 3, "written at the failure");
+    let retry_in_ms = failures["retry_in_ms"]
+        .as_u64()
+        .expect("the wait left, on the server's clock");
+    assert!(
+        (4_000..=5_000).contains(&retry_in_ms),
+        "the 5 s pause has just begun: {retry_in_ms} ms left"
+    );
+
+    rig.engine.handle_scene_change(PID, false).await; // cut off program
+    let row = health_row(&rig.registry);
+    assert_eq!(row["open_failures"]["count"], 3, "the run is kept");
+    assert!(
+        row["open_failures"]["retry_at_ms"].is_null(),
+        "off program no retry is due"
+    );
+
+    rig.engine.handle_play_video(PID, SONGS[1], None).await;
+    started(&mut rig.engine).await;
+    assert!(
+        health_row(&rig.registry)["open_failures"].is_null(),
+        "a started song clears the row at once"
     );
 }
