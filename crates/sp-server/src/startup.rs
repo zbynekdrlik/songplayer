@@ -75,13 +75,7 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
     // (#136: a rename that moved one half and could not move it back), and the
     // row still plays it.
     for orphan in &scan.orphans {
-        let recorded: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM videos WHERE file_path = ?1 OR audio_file_path = ?1)",
-        )
-        .bind(orphan.path.to_string_lossy().as_ref())
-        .fetch_one(pool)
-        .await?;
-        if recorded {
+        if cache::recorded_by_a_row(pool, &orphan.path).await? {
             tracing::warn!(
                 "keeping a half-sidecar a row records (a song split across two names) for {}: {}",
                 orphan.video_id,

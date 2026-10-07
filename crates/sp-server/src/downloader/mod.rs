@@ -573,9 +573,13 @@ pub(crate) async fn record_download_failure(
 }
 
 /// The fresh video temp → its final pair name. When it cannot take that name,
-/// this attempt's files go: the video temp and the normalized audio.
+/// this attempt's files go: the video temp, and the normalized audio unless a
+/// row records it. Rows of one video share files by name (#136), so
+/// `audio_final` can be the audio another row of the video plays (its video
+/// held open there is what fails this rename on Windows): checked and deleted
+/// under `cache::SONG_FILES`, kept when the rows cannot be read.
 async fn place_video(
-    _pool: &SqlitePool,
+    pool: &SqlitePool,
     video_temp: &Path,
     video_final: &Path,
     audio_final: &Path,
@@ -583,8 +587,21 @@ async fn place_video(
     let Err(e) = tokio::fs::rename(video_temp, video_final).await else {
         return Ok(());
     };
-    let _ = tokio::fs::remove_file(audio_final).await;
     let _ = tokio::fs::remove_file(video_temp).await;
+    let _files = cache::SONG_FILES.lock().await;
+    match cache::recorded_by_a_row(pool, audio_final).await {
+        Ok(false) => {
+            let _ = tokio::fs::remove_file(audio_final).await;
+        }
+        Ok(true) => tracing::warn!(
+            audio = %audio_final.display(),
+            "download: the video could not take its name - keeping the audio a row records"
+        ),
+        Err(db) => tracing::warn!(
+            audio = %audio_final.display(),
+            "download: reading which rows record the audio failed - keeping it: {db}"
+        ),
+    }
     Err(e)
 }
 
