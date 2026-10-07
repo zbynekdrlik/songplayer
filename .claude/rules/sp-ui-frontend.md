@@ -905,6 +905,23 @@ this` (the `playlist_picker.rs` pattern) and keep `prop:value` for the live
 changes. A spec that checks a select's value after a load must use a value
 that is NOT its first option, or it passes on the bug.
 
+## One `.save-status` per page: a second section's message takes its own class (#233)
+
+Five Nastavenia specs read `page.locator(".save-status")` unscoped, and
+Playwright's strict mode throws on a single-value assertion that matches
+two elements. A new section's status line takes its own class
+(`audio-outputs-status`), never the form's `save-status`.
+
+## Save nothing the page did not load (#233)
+
+A section that saves a WHOLE value (the outputs list, the form's fields)
+must not save before the page's `GET /api/v1/settings` landed: what it
+shows before (or after a failed load) is no stored value, and a save would
+replace the stored one. The Settings page keeps `loaded:
+RwSignal<Option<bool>>` (`None` running, `Some(false)` failed) and passes it
+to both sections: save disabled until `Some(true)`, and a Slovak line on a
+failed load (mock: `/__mock/fail-mode {kind: "settings"}`).
+
 ## A section of a shared settings map re-reads only its own keys (#233)
 
 Two Nastavenia sections (`settings_form.rs`, `audio_outputs.rs`) both read

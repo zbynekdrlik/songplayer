@@ -12,10 +12,11 @@
 //! - a packet sent more than [`VBAN_STALL_EVENT_US`] after its planned
 //!   instant is an event, `(utc_ms, late_us)` ([`VbanLateEvent`]), kept in a
 //!   ring of the last [`VBAN_STALL_RING`] and served oldest first as
-//!   `vban.late_events` on `GET /api/v1/program`;
+//!   `vban.late_events` (#233: each VBAN output's `outputs[i].vban` on
+//!   `GET /api/v1/program`);
 //! - `vban.late_max_us` is the worst packet of the last 60–120 s of sending:
 //!   two buckets of [`VBAN_STALL_BUCKET_PACKETS`] packets, 60 s each at 240
-//!   packets/s;
+//!   packets/s (48 kHz; 30 s each at 96 kHz's 480);
 //! - ONE WARN per packet over [`VBAN_STALL_WARN_US`], at most one per
 //!   [`VBAN_STALL_WARN_EVERY_100NS`] of VBAN's timeline, the next one
 //!   carrying how many it skipped ([`VbanStallWarn`]).

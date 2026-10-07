@@ -319,7 +319,8 @@ time (finding 5915907311, the stem worker ruled out). That is the
   `send_block` times every packet it sends against its planned instant,
   `due + L + k/240 s`:
   - over 5 ms late = an event `{utc_ms, late_us}` in a ring of the last
-    32, served oldest first as `vban.late_events`. `utc_ms` is the fleet
+    32, served oldest first as `vban.late_events` (#233: under each VBAN
+    output's `outputs[i].vban`). `utc_ms` is the fleet
     label of the send reading (`VbanClock::label_100ns`, defaulted to the
     reading itself; `WallVbanClock` answers `t + D(K_F)`): UTC, to line up
     with a capture. In the ~14 min after a date step VBAN's clock still
@@ -327,6 +328,7 @@ time (finding 5915907311, the stem worker ruled out). That is the
     by that much: before it after a forward follow (≤ one slot), after it
     after a residue hold (≤ ~4 ms);
   - `vban.late_max_us`: the worst packet over the last 60–120 s of sending
+    at 48 kHz (the buckets count packets: 30–60 s at 96 kHz, #233)
     (two buckets of 14 400 packets; it does not age while nothing is sent);
   - over 10 ms = ONE WARN `vban output: a packet went out more than 10 ms
     after its planned instant` (`utc`, `late_us`, `packet` = k,
@@ -458,7 +460,8 @@ packets back to back before part 2).
   confirms, or a step over 2 ms landing on the resample tick whose probe is
   rejected (a wide or unconfirmed read; 1 tick in 100 plus a preempted
   read). The ±100 ppm guarantee covers date steps only.
-- Telemetry: `vban.slew_owed_us` on `GET /api/v1/program`, signed — r
+- Telemetry: `vban.slew_owed_us` on `GET /api/v1/program` (#233: each VBAN
+  output's `outputs[i].vban.slew_owed_us`), signed — r
   right after a follow (negative after a residue hold), then toward 0; 0 in
   steady state. `run_vban_loop` publishes it every pass.
 - Box acceptance at a controlled step: a dev1 capture with 0 bursts and 0

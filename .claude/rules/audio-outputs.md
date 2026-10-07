@@ -245,7 +245,8 @@ notice when the pin moves. Added to the lock with `cargo update --workspace`
   (`api/settings.rs::prepare` runs `checked` before the exchange check).
   Stored normalized (every default written out).
 - The same rules in Slovak for the dashboard: `ListError::sk()`
-  ("Výstup 1 (out-1): cieľ je prázdne").
+  ("Výstup 1 (out-1): pole „cieľ“ je prázdne": the field as `pole „…“`, so
+  every problem text agrees with the neuter "pole"; #233 review round 2).
 - The outputs task (`audio_out_task.rs`) makes one pass (`tick`) every 5 s:
   the migration until it has run (below), then the list, read leniently
   (`parse_stored`): an entry this version cannot read is skipped and named
@@ -321,10 +322,13 @@ is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
 - The delay: the sender's send latency is `L + delay`, and its wait cap is
   `VBAN_MAX_WAIT_100NS` (4 × L = 8 slots) PLUS the delay (`plan_wait_up_to`;
   the 8-slot cap alone sent a delayed output's first packet early). That
-  wait is slept in steps of at most 8 slots (`sleep_until`, at most
-  `VBAN_WAIT_STEPS` = 9), the clock read between two of them and each next
-  step planned from that read: the wall ticks at most 8 boundaries per read
-  (`BoundaryTicker`), and an oversleep never adds up
+  wait is slept in steps of at most 7 slots (`VBAN_SLEEP_STEP_100NS`,
+  `sleep_until`, at most `VBAN_WAIT_STEPS` = 10), the clock read between two
+  of them and each next step planned from that read: a step plus an
+  oversleep of under a slot passes at most 8 boundaries, the wall's tick cap
+  per read (`BoundaryTicker`; an 8-slot step could pass a 9th, review round
+  2), and an oversleep never adds up. A FOH wait (≤ L) is one sleep, as in
+  #210
   (`the_longest_delay_is_waited_for_whole_in_sleeps_the_wall_can_tick`,
   `a_wait_is_slept_in_steps_the_wall_can_tick`). The queue bound grows with
   the delay (`queue_bound`: the program queue's 10 + `ceil(delay / slot)`).
@@ -360,15 +364,29 @@ every other key), so neither section's save resets the other's unsaved
 edits. Every `<option>` of a select carries a reactive `selected`: tachys
 sets `prop:value` BEFORE the options mount, so a row read back from the
 store showed its select's FIRST option ("podľa siete", "16 bitov") until
-#233 review round 1 (the playlist picker's pattern). The mock refuses a bad
-list like the server (the id through `shown_id`'s rule) and serves
-`outputs[]` from the stored list, with a `vban` object per enabled entry.
+#233 review round 1 (the playlist picker's pattern). Nothing is saved
+before the Settings page LOADED the settings (`loaded`: `None` while
+`GET /api/v1/settings` runs, `Some(false)` when it failed, passed to both
+sections): an empty list shown before the load would replace the stored one
+(FOH's entry with it), and the form's fields would hold defaults; a failed
+load shows "Nastavenia sa nenačítali — …" on both. The message span is
+`audio-outputs-status` (`.save-status` is the form's alone: five Nastavenia
+specs read it unscoped, Playwright strict mode). A stored entry missing from
+`outputs[]` reads "uložený, nespustený" with its `outputs_problems` line as
+the tooltip (an unsaved one "neuložený"). `style.css` gives the section the
+form's fieldset look, one framed grid block per output. The mock refuses a
+bad list in the server's order and words (every entry read first, then the
+shared validation; the id through `shown_id`'s rule), serves `outputs[]`
+from the stored list with a `vban` object per enabled entry, and has two
+knobs: `/__mock/fail-mode {kind: "settings"}` and `/__mock/outputs-skip
+{ids}` (both reset by `/__mock/settings-reset`).
 
 ## Live gates (`e2e/post-deploy-audio-outputs.spec.ts`)
 
 FOH (`fohabl.lan:6980`) still 48 kHz INT24 `sp-program`, no delay, ≥ 25
 blocks between two reads, no send errors (`audio-outputs-gate.ts`, unit-
-tested in the mock suite); a temporary `e2e-96k` entry to a UDP receiver on
+tested in the mock suite), polled for first (after a restart FOH is listed
+only once the outputs task's first pass ran); a temporary `e2e-96k` entry to a UDP receiver on
 127.0.0.1 reads index 4, 200-frame INT24 packets, a contiguous counter
 (480/s); `finally` restores the list. The probe needs a STORED list first:
 with none its PATCH would store one and the migration (only while no list
