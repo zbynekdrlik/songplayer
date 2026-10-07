@@ -70,8 +70,15 @@ const OUTPUT_SETTINGS: [&str; 2] = [
     config::SETTING_AUDIO_NETWORK_RATE,
 ];
 
+/// What the form shows when the settings did not load.
+const NOT_LOADED: &str = "Nastavenia sa nenačítali — uloženie je vypnuté";
+
+/// `loaded`: the Settings page's load of `GET /api/v1/settings` — `None`
+/// while it runs, `Some(false)` when it failed. The form saves nothing
+/// before it loaded (its fields would hold defaults, its password fields
+/// nothing, and a save would write them over the stored values).
 #[component]
-pub fn SettingsForm() -> impl IntoView {
+pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
 
     let obs_url = RwSignal::new(String::new());
@@ -169,6 +176,9 @@ pub fn SettingsForm() -> impl IntoView {
 
     let on_save = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
+        if loaded.get_untracked() != Some(true) {
+            return;
+        }
         let mut settings = HashMap::new();
         settings.insert(config::SETTING_OBS_WEBSOCKET_URL.to_string(), obs_url.get());
         settings.insert(
@@ -398,8 +408,18 @@ pub fn SettingsForm() -> impl IntoView {
             </fieldset>
 
             <div class="form-actions">
-                <button type="submit">"Uložiť nastavenia"</button>
-                <span class="save-status">{move || save_status.get()}</span>
+                <button type="submit" prop:disabled=move || loaded.get() != Some(true)>
+                    "Uložiť nastavenia"
+                </button>
+                <span class="save-status">
+                    {move || {
+                        if loaded.get() == Some(false) {
+                            NOT_LOADED.to_string()
+                        } else {
+                            save_status.get()
+                        }
+                    }}
+                </span>
             </div>
         </form>
     }

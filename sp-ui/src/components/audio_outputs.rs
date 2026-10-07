@@ -11,11 +11,17 @@
 //! settings (a `Memo`), so a save of the form above never resets an unsaved
 //! row. Every `<option>` carries `selected`: tachys sets a reactive
 //! `prop:value` before a select's options are mounted, which would show the
-//! first option after a load.
+//! first option after a load. Nothing is saved until the page has LOADED
+//! the settings (`loaded`, set by the Settings page): an empty list before
+//! the load, or after a failed one, would replace the stored list. A saved
+//! entry the server does not run reads "uložený, nespustený" with the
+//! server's `outputs_problems` line as its tooltip.
 //!
 //! Testids (set here): `settings-audio-outputs` (the fieldset),
 //! `settings-audio-network-rate`, `audio-outputs-add-vban`,
-//! `audio-outputs-save`, `audio-outputs-message`, `audio-outputs-load-error`,
+//! `audio-outputs-save`, `audio-outputs-message` (class
+//! `audio-outputs-status`: `.save-status` is the form's alone, which the
+//! other Nastavenia specs read unscoped), `audio-outputs-load-error`,
 //! and per row `audio-output-row` (`data-id` = the entry's id),
 //! `audio-output-name`, `audio-output-enabled`, `audio-output-rate`
 //! (`network` or a rate), `audio-output-delay`, `audio-output-vban-host`,
@@ -50,7 +56,13 @@ pub struct OutputLive {
 pub struct ProgramOutputs {
     #[serde(default)]
     pub outputs: Vec<OutputLive>,
+    /// The stored entries the server does not run, each naming its id.
+    #[serde(default)]
+    pub outputs_problems: Vec<String>,
 }
+
+/// Why nothing can be saved: the settings did not load (`Some(false)`).
+const NOT_LOADED: &str = "Nastavenia sa nenačítali — výstupy sa nedajú uložiť";
 
 /// The Slovak label of an output's state.
 pub fn state_sk(state: &str) -> &'static str {
@@ -89,8 +101,11 @@ pub fn rate_choice(value: &str) -> RateChoice {
         .unwrap_or(RateChoice::Network)
 }
 
-fn live_text(live: &ProgramOutputs, id: &str) -> String {
+/// A row's state: the server's, else "uložený, nespustený" for a saved entry
+/// it does not run (skipped, or not applied yet), else "neuložený".
+fn live_text(live: &ProgramOutputs, id: &str, saved: bool) -> String {
     match live.outputs.iter().find(|o| o.id == id) {
+        None if saved => "uložený, nespustený".to_string(),
         None => "neuložený".to_string(),
         Some(o) if o.state == "running" => {
             format!("{} · {:.0} ms", state_sk(&o.state), o.latency_ms)
@@ -99,11 +114,19 @@ fn live_text(live: &ProgramOutputs, id: &str) -> String {
     }
 }
 
+/// A row's tooltip: the server's reason, or its problem with this entry.
 fn live_reason(live: &ProgramOutputs, id: &str) -> String {
+    let named = format!("(id {id})");
     live.outputs
         .iter()
         .find(|o| o.id == id)
         .and_then(|o| o.reason.clone())
+        .or_else(|| {
+            live.outputs_problems
+                .iter()
+                .find(|p| p.contains(&named))
+                .cloned()
+        })
         .unwrap_or_default()
 }
 
@@ -125,8 +148,10 @@ fn edit(list: RwSignal<Vec<OutputEntry>>, id: &str, f: impl FnOnce(&mut OutputEn
     });
 }
 
+/// `loaded`: the Settings page's load of `GET /api/v1/settings` — `None`
+/// while it runs, `Some(false)` when it failed.
 #[component]
-pub fn AudioOutputs() -> impl IntoView {
+pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
     let entries = RwSignal::new(Vec::<OutputEntry>::new());
     let network_rate = RwSignal::new(audio_network_rate(None).to_string());
@@ -144,6 +169,18 @@ pub fn AudioOutputs() -> impl IntoView {
             )
         })
     });
+    let saved_ids = Memo::new(move |_| {
+        stored.with(|(list, _)| {
+            stored_list(list.as_deref())
+                .map(|l| l.into_iter().map(|e| e.id).collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
+    });
+    let blocker = move || match loaded.get() {
+        Some(true) => load_error.get(),
+        Some(false) => Some(NOT_LOADED.to_string()),
+        None => None,
+    };
     let _sync = Effect::new(move |_| {
         let (list, rate) = stored.get();
         match stored_list(list.as_deref()) {
@@ -173,6 +210,9 @@ pub fn AudioOutputs() -> impl IntoView {
     };
 
     let on_save = move |_: leptos::ev::MouseEvent| {
+        if loaded.get_untracked() != Some(true) {
+            return;
+        }
         let list = entries.get();
         if let Err(e) = validate_list(&list) {
             message.set(e.sk());
@@ -222,8 +262,7 @@ pub fn AudioOutputs() -> impl IntoView {
                 </select>
             </label>
             {move || {
-                load_error
-                    .get()
+                blocker()
                     .map(|e| {
                         view! {
                             <p class="audio-outputs-error" data-testid="audio-outputs-load-error">
@@ -235,7 +274,9 @@ pub fn AudioOutputs() -> impl IntoView {
             <For
                 each=move || entries.with(|l| l.iter().map(|e| e.id.clone()).collect::<Vec<_>>())
                 key=|id| id.clone()
-                children=move |id| view! { <OutputRow id=id entries=entries live=live /> }
+                children=move |id| {
+                    view! { <OutputRow id=id entries=entries live=live saved_ids=saved_ids /> }
+                }
             />
             <div class="form-actions">
                 <button type="button" data-testid="audio-outputs-add-vban" on:click=add_vban>
@@ -244,12 +285,12 @@ pub fn AudioOutputs() -> impl IntoView {
                 <button
                     type="button"
                     data-testid="audio-outputs-save"
-                    prop:disabled=move || load_error.get().is_some()
+                    prop:disabled=move || loaded.get() != Some(true) || load_error.get().is_some()
                     on:click=on_save
                 >
                     "Uložiť výstupy"
                 </button>
-                <span class="save-status" data-testid="audio-outputs-message">
+                <span class="audio-outputs-status" data-testid="audio-outputs-message">
                     {move || message.get()}
                 </span>
             </div>
@@ -262,6 +303,7 @@ fn OutputRow(
     id: String,
     entries: RwSignal<Vec<OutputEntry>>,
     live: RwSignal<ProgramOutputs>,
+    saved_ids: Memo<Vec<String>>,
 ) -> impl IntoView {
     let row_id = id.clone();
     let id = StoredValue::new(id);
@@ -427,7 +469,11 @@ fn OutputRow(
                 data-testid="audio-output-state"
                 title=move || live_reason(&live.get(), &id.get_value())
             >
-                {move || live_text(&live.get(), &id.get_value())}
+                {move || {
+                    let id = id.get_value();
+                    let saved = saved_ids.with(|ids| ids.contains(&id));
+                    live_text(&live.get(), &id, saved)
+                }}
             </span>
             <button
                 type="button"
