@@ -350,10 +350,7 @@ impl AsioWorker {
                 }
                 // Stale by the open's duration: the first block the servo
                 // sees is a fresh one.
-                let stale = out.queue.clear();
-                if stale > 0 {
-                    info!(id = %out.id, stale, "asio output: dropped the blocks queued while the driver opened");
-                }
+                log_stale(&out.id, out.queue.clear());
                 out.update(|l| {
                     l.state = STATE_RUNNING;
                     l.reason = None;
@@ -500,6 +497,17 @@ fn process(
         run.primed = true;
     }
     out.update(|l| l.blocks_sent += 1);
+}
+
+/// The blocks an open dropped, logged when there were any.
+#[cfg_attr(test, mutants::skip)] // logging only; the drop is pinned by its test
+fn log_stale(id: &str, stale: usize) {
+    if stale > 0 {
+        info!(
+            id,
+            stale, "asio output: dropped the blocks queued while the driver opened"
+        );
+    }
 }
 
 /// The running output's numbers into its status (`underruns_closed`: the
