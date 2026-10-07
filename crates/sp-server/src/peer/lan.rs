@@ -7,24 +7,30 @@ use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use sp_core::config::{SETTING_PEER_TRANSFERS_PAUSED, peer_transfers_paused};
 use tracing::warn;
 
 use super::Exchange;
+use super::catalog::{self, CatalogCounts};
 use super::config::NodeConfig;
+use super::wire::CatalogJob;
 
 /// `GET /api/v1/exchange/status`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExchangeStatus {
     pub node_name: Option<String>,
-    /// Serving = `node_name` + `peer_api_key` are set (this node will serve
-    /// once the peer API exists, lane 4).
+    /// Serving = `node_name` + `peer_api_key` are set: the peer API answers.
     pub serving: bool,
     pub transfers_paused: bool,
     /// Why the exchange settings do not hold (the exchange then acts as off).
     /// It names settings and peers, never a secret (`peer::config`).
     pub config_error: Option<String>,
     pub peers: Vec<PeerStatus>,
+    /// The files this node's rows name, how many its catalog lists (hashed)
+    /// and the queued job entries it lists; `None` when the rows cannot be
+    /// read.
+    pub catalog: Option<CatalogCounts>,
+    /// The jobs this node runs now (its catalog lists them as running).
+    pub jobs: Vec<CatalogJob>,
 }
 
 /// One configured peer, without its secrets.
@@ -44,21 +50,20 @@ pub fn router(ex: Arc<Exchange>) -> Router {
 }
 
 pub async fn status(State(ex): State<Arc<Exchange>>) -> Json<ExchangeStatus> {
-    let paused = crate::db::models::get_setting(&ex.pool, SETTING_PEER_TRANSFERS_PAUSED)
-        .await
-        .inspect_err(|e| {
-            warn!("exchange status: reading {SETTING_PEER_TRANSFERS_PAUSED} failed: {e}")
-        })
-        .ok()
-        .flatten();
+    let transfers_paused = ex.transfers_paused().await;
     let (cfg, config_error) = match NodeConfig::load(&ex.pool).await {
         Ok(cfg) => (cfg, None),
         Err(e) => (NodeConfig::default(), Some(e)),
     };
+    let catalog = catalog::counts(&ex)
+        .await
+        .inspect_err(|e| warn!("exchange status: reading the catalog failed: {e}"))
+        .ok();
+    let jobs = ex.board.snapshot(cfg.node_name.as_deref().unwrap_or(""));
     Json(ExchangeStatus {
         node_name: cfg.node_name.clone(),
         serving: cfg.serving(),
-        transfers_paused: peer_transfers_paused(paused.as_deref()),
+        transfers_paused,
         config_error,
         peers: cfg
             .peers
@@ -70,6 +75,8 @@ pub async fn status(State(ex): State<Arc<Exchange>>) -> Json<ExchangeStatus> {
                 cf_access: p.cf_client_id.is_some(),
             })
             .collect(),
+        catalog,
+        jobs,
     })
 }
 
