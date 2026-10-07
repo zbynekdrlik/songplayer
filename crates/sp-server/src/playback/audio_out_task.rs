@@ -14,7 +14,11 @@
 //! 3): what runs keeps running and the problem is named. A kept VBAN output
 //! re-resolves its target every `VBAN_RESOLVE_EVERY`; a failed re-resolve
 //! keeps the last good address. The thread starter is a parameter, so a unit
-//! test on the Windows job starts no real thread.
+//! test on the Windows job starts no real thread. An ASIO entry (#233 lane 3)
+//! follows its driver's rate (`build_rate` 0: a network-rate change never
+//! rebuilds it), resolves nothing, and starts its worker through the same
+//! starter; a running driver off the network's rate or with a buffer over a
+//! third of a grid slot is WARNed once (`OutputStatus::note`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,7 +29,8 @@ use sqlx::SqlitePool;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-use crate::playback::audio_out::{AudioOutputs, OutputSink, RunningOutput};
+use crate::playback::asio_out::AsioOut;
+use crate::playback::audio_out::{AudioOutputs, OutputSink, OutputStatus, RunningOutput};
 use crate::playback::audio_out_config::{OutputsSettings, load};
 use crate::playback::audio_out_migrate::{MigrationOutcome, migrate_vban_settings};
 use crate::playback::vban_out::{VbanConfig, VbanOut, needs_resolve, resolve_dest};
@@ -33,9 +38,9 @@ use crate::playback::vban_out::{VbanConfig, VbanOut, needs_resolve, resolve_dest
 /// How often the list is re-read (#210's VBAN settings poll).
 pub const OUTPUTS_SETTINGS_POLL: Duration = Duration::from_secs(5);
 
-/// Starts a built VBAN output's thread: [`start_vban_thread`] in production,
-/// a recorder in the tests.
-pub type StartThread = dyn Fn(&Arc<VbanOut>, &str) + Send + Sync;
+/// Starts a built output's thread: [`start_output_thread`] in production, a
+/// recorder in the tests.
+pub type StartThread = dyn Fn(&OutputSink, &str) + Send + Sync;
 
 /// What to do with one wanted entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,14 +166,23 @@ async fn build(
                 out.set_config(resolve_dest(dest, true, Vec::new()).await);
                 resolved.insert(entry.id.clone(), Instant::now());
                 warn_unresolved(&entry.id, &out.config());
-                start(&out, &entry.id);
+                let sink = OutputSink::Vban(out);
+                start(&sink, &entry.id);
                 log_started(entry, built_rate);
-                output.sink = Some(OutputSink::Vban(out));
+                output.sink = Some(sink);
             }
             (Err(e), _) => output.error = Some(e),
             (Ok(_), None) => output.error = Some("not a VBAN entry".into()),
         },
-        OutputType::Asio => output.error = Some("this build runs no ASIO output yet".into()),
+        OutputType::Asio => match AsioOut::for_entry(entry) {
+            Ok(out) => {
+                let sink = OutputSink::Asio(Arc::new(out));
+                start(&sink, &entry.id);
+                log_started(entry, built_rate);
+                output.sink = Some(sink);
+            }
+            Err(e) => output.error = Some(e),
+        },
     }
     output
 }
@@ -194,6 +208,8 @@ async fn refresh_vban(output: &RunningOutput, resolved: &mut HashMap<String, Ins
 pub struct TaskState {
     resolved: HashMap<String, Instant>,
     reported: Vec<String>,
+    /// #233: the outputs' notes already WARNed (`id: note`).
+    noted: Vec<String>,
     migrated: bool,
 }
 
@@ -222,8 +238,30 @@ pub async fn tick(
             warn_new_problems(&settings.problems, &state.reported);
             state.reported = settings.problems.clone();
             apply(outputs, settings, &mut state.resolved, start).await;
+            warn_new_notes(&outputs.status(), &mut state.noted);
         }
         Err(e) => warn!(%e, "audio outputs: reading the settings failed"),
+    }
+}
+
+/// The production starter: a VBAN output's paced thread, an ASIO output's
+/// worker.
+pub fn start_output_thread(sink: &OutputSink, id: &str) {
+    match sink {
+        OutputSink::Vban(out) => start_vban_thread(out, id),
+        OutputSink::Asio(out) => start_asio_thread(out, id),
+    }
+}
+
+/// #233: an ASIO output's worker thread on Windows (`asio_win`); elsewhere
+/// it never opens and says why.
+pub fn start_asio_thread(out: &Arc<AsioOut>, id: &str) {
+    #[cfg(windows)]
+    crate::playback::asio_win::spawn_asio_thread(out.clone(), id.to_string());
+    #[cfg(not(windows))]
+    {
+        let _ = id;
+        out.set_windows_only();
     }
 }
 
@@ -247,6 +285,21 @@ fn warn_unresolved(id: &str, cfg: &VbanConfig) {
             "audio output: resolving a VBAN target failed"
         );
     }
+}
+
+#[cfg_attr(test, mutants::skip)] // logging only; the notes are tested through `OutputStatus::note`
+fn warn_new_notes(status: &[OutputStatus], noted: &mut Vec<String>) {
+    let now: Vec<String> = status
+        .iter()
+        .filter_map(|s| s.note.as_ref().map(|n| format!("{}: {n}", s.id)))
+        .collect();
+    for n in now.iter().filter(|n| !noted.contains(n)) {
+        warn!(
+            note = %n,
+            "audio output: an ASIO driver runs at another rate than the network, or with a long buffer"
+        );
+    }
+    *noted = now;
 }
 
 #[cfg_attr(test, mutants::skip)] // logging only; the problems are tested through `outputs_problems`
@@ -298,7 +351,7 @@ pub fn start_outputs(
     outputs: Arc<AudioOutputs>,
     shutdown: &broadcast::Sender<()>,
 ) {
-    let start: Arc<StartThread> = Arc::new(start_vban_thread);
+    let start: Arc<StartThread> = Arc::new(start_output_thread);
     tokio::spawn(run_outputs_task(pool, outputs, shutdown.subscribe(), start));
 }
 
