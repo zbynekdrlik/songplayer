@@ -6,6 +6,7 @@
 pub mod config;
 pub mod kind;
 pub mod lan;
+pub mod wire;
 
 use std::path::PathBuf;
 use std::sync::Arc;
