@@ -423,7 +423,7 @@ mod tests {
     /// keeps its own badge and label (on program "Hrá", off program "Hrá
     /// mimo programu").
     #[test]
-    fn the_badge_says_on_program_while_a_retry_armed_on_program_waits() {
+    fn the_badge_says_on_program_while_a_retry_of_sp_program_s_source_waits() {
         // (state, transport, the badge for a retry of SP-program's source,
         // the label for any pending retry)
         let table = [

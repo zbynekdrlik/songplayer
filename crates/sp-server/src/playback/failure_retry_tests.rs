@@ -763,10 +763,11 @@ async fn the_health_row_follows_the_run_between_heartbeats() {
     );
 }
 
-/// ROZHODNUTÉ 6029773698: the row says whether the pending retry was armed
-/// while the playlist was SP-program's source; only then does the Player's
-/// badge claim the program. A ▶ off air backs off too (the state machine's
-/// `Playing` + `VideoError` reads no scene), and its retry is not on program.
+/// ROZHODNUTÉ 6029773698: the row says whether the pending retry belongs to
+/// SP-program's source (set when armed, refreshed by an ON that sent no
+/// Play); only then does the Player's badge claim the program. A ▶ off air
+/// backs off too (the state machine's `Playing` + `VideoError` reads no
+/// scene), and its retry is not on program.
 #[tokio::test]
 async fn a_retry_armed_off_program_says_so_on_the_row() {
     let mut rig = rig().await;

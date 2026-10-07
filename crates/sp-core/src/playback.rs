@@ -186,7 +186,7 @@ mod tests {
     /// belongs to SP-program's source. A retry of a playlist played off
     /// program (a ▶ off air) is pending, not on program.
     #[test]
-    fn a_retry_is_on_program_only_when_armed_there_and_still_pending() {
+    fn a_retry_is_on_program_only_with_the_flag_and_still_pending() {
         // A row as read (`read_at` fills `retry_in_ms` from `retry_at_ms`).
         let row = |retry_at_ms: Option<i64>, on_program: bool| {
             OpenFailures {

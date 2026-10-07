@@ -148,9 +148,9 @@ test("the Live page's Player shows the same line, and a due retry reads 0 s (#22
     { timeout: 5000 },
   );
   // While the retry waits the state label says so (not "Čaká na scénu").
-  // Playlist 184 is not the program's source: its row names no retry armed
-  // on program (`on_program` absent = false), so its badge stays off
-  // program (ROZHODNUTÉ 6029773698). One Player component, so the Live page
+  // Playlist 184 is not the program's source: its row names no retry of
+  // SP-program's source (`on_program` absent = false), so its badge stays
+  // off program (ROZHODNUTÉ 6029773698). One Player component, so the Live page
   // reads what the dashboard does.
   await expect(page.getByTestId("player-state")).toHaveText(
     "Čaká na ďalší pokus",

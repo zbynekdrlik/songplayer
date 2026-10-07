@@ -47,7 +47,7 @@ the review finding on the selection: 6028419694.
   `song_started`. The count survives a cut away: the cut back's attempt fails
   into the next, longer pause.
 - One WARN per pause (`videos cannot be opened — the next attempt waits`,
-  `failures`, `error`, `retry_in_s`).
+  `failures`, `error`, `retry_in_s`, `on_program`).
 
 ## The play history: recorded at `Started`, and the selection avoids
 
@@ -149,8 +149,10 @@ the review finding on the selection: 6028419694.
     selection sends, and when that sends none (no song to pick, a custom
     playlist in Single mode, a DB error) `retry_came_on_program` (in
     `handle_scene_change`, after the `SceneOn`) sets the flag from the
-    on-air set and re-publishes the row (review round 4); with no retry
-    pending the row says `false`;
+    on-air set and re-publishes the row, with one INFO (`on program while a
+    retry of failed opens waits — the next attempt keeps its time`,
+    `on_program`; review round 4); with no retry pending the row says
+    `false`;
   - `OpenFailures::retry_pending` (from `retry_at_ms`, so the engine's own
     row and a row as read agree; the label's input) and
     `retry_on_program` (the badge's): a ▶ off program that waits keeps "○
@@ -180,9 +182,9 @@ the review finding on the selection: 6028419694.
 - A late answer: `a_late_started_of_an_earlier_play_neither_records_nor_ends_the_run`
   and `a_late_error_of_an_earlier_play_neither_counts_nor_replaces_the_newer_play`
   (Play A, a skip = Play B, A's answer, then B's); the count itself in
-  `failure_backoff_tests.rs`. The badge table (× a retry armed on / off
-  program): `player_view`
-  `the_badge_says_on_program_while_a_retry_armed_on_program_waits`; the
+  `failure_backoff_tests.rs`. The badge table (× a retry of SP-program's
+  source or not): `player_view`
+  `the_badge_says_on_program_while_a_retry_of_sp_program_s_source_waits`; the
   flag on the row: `a_retry_armed_off_program_says_so_on_the_row`,
   `a_retry_armed_on_program_says_so_until_it_ends`,
   `a_retry_still_pending_after_its_playlist_came_on_program_says_so` (the
