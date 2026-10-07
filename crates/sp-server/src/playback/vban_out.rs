@@ -98,7 +98,7 @@ pub const VBAN_MAX_WAIT_100NS: i64 = 4 * VBAN_SEND_LATENCY_100NS;
 /// The longest single sleep (#233): 7 slots, so one sleep plus an oversleep
 /// of under a slot passes at most 8 boundaries, the wall's tick cap per read
 /// (`BoundaryTicker`). A longer wait is slept in steps (`sleep_until`).
-pub const VBAN_SLEEP_STEP_100NS: i64 = 2_666_664;
+pub const VBAN_SLEEP_STEP_100NS: i64 = 2_333_331;
 
 /// The sleeps one packet's wait may take (#233): the longest wait, 8 slots +
 /// the longest delay, in steps of at most [`VBAN_SLEEP_STEP_100NS`].
