@@ -558,8 +558,9 @@ itself: the OBS client no longer reads cg OBS's program at all
   post-deploy read right after a press still waits for the engine's view
   to reach the scene (the authority's wake lags the facade's answer):
   `readEngineActiveScene` / `waitEngineActiveScene` in
-  `post-deploy.spec.ts` (two playlists read as "not settled", which no
-  longer happens), the A/V gate's baseline poll (`length === 1`).
+  `e2e/program-state.ts` (#229: shared by `post-deploy.spec.ts` and the PP
+  subset; two playlists read as "not settled", which no longer happens),
+  the A/V gate's baseline poll (`length === 1`).
 - **No startup re-mirror any more.** L4b's `program_switch::remirror_on_air`
   (main-session decision 1, comment 5884501960: send the restored
   playlist's scene to cg OBS once, so `legacy_cg.shown` was what cg OBS was

@@ -93,8 +93,8 @@ Rules for every post-deploy spec:
   on-air set = SP-program's playlist alone since B4 step 6: none for "OBS
   manuál"). The playback authority applies a switch a moment after the
   facade answers it: wait for the engine to reach the scene
-  (`waitEngineActiveScene`, the A/V gate's `length === 1` poll), never read
-  it once.
+  (`program-state.ts::waitEngineActiveScene`, the A/V gate's `length === 1`
+  poll), never read it once.
 - **#221: a receiver is checked on `SP-program`, the only NDI sender**
   (lane 3 retired the per-playlist outputs): poll `GET /api/v1/program`
   through `ndi-health-gate.ts::programReceiverVerdict` (a source on program,

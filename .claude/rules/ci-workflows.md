@@ -50,7 +50,8 @@ Two traps, both cost real debugging time (#149):
   then prints "currently running" and does nothing.
 
 Run `actionlint` locally on any workflow you touch (`~/.local/bin/actionlint`,
-config `.github/actionlint.yaml` declares the `resolume` runner label). Note: CI
+config `.github/actionlint.yaml` declares the `resolume` runner label and PP's
+`resolume-pp`, #229). Note: CI
 has **no** actionlint gate, and a pre-existing SC2034 (`i` unused) in the
 frontend-e2e mock-API wait loop makes actionlint exit 1 — that is not your diff.
 
@@ -274,7 +275,10 @@ a deploy or an E2E. `!cancelled()` keeps the skipped-dependency behaviour
 and is false once the run is cancelled; the Test Integrity Check pins it for
 all three jobs and rejects `always()` there. A step-level `if: always()`
 (artifact uploads) is harmless and stays. Never cancel a run for a held rig
-lease: the deploy waits for it itself (above).
+lease: the deploy waits for it itself (above). The PP deploy
+(`deploy-pp.yml`, #229, `peer-exchange.md` "PP deploy") takes the other
+side of the same lesson: its "Start SongPlayer" step is `if: always()`, so
+a cancel after the stop still brings SongPlayer back.
 
 ## The deploy waits for the rig lease (#221 L4a, `scripts/rig_lease_gate.py`)
 
@@ -483,14 +487,16 @@ song, zero duration) renders `np-idle` "Nothing playing", never a bogus
 `np-info` "0:00 / 0:00" (`sp-ui` `NowPlayingInfo::has_now_playing_content`) — so
 the position-advance check cannot be satisfied by an empty entry.
 
-## A Deploy-job re-run only works while the run's artifacts exist (`dist` = 1 day)
+## A Deploy-job re-run only works while the run's artifacts exist (`dist` = 5 days)
 
 `gh run rerun --job <Deploy>` of an older run is the sanctioned way to restart
 SongPlayer on the box (same build, Deploy + post-deploy E2E) — but the `dist`
-artifact has `retention-days: 1`, so a re-run of a run older than a day fails at
+artifact is kept only `retention-days: 5` (1 until #229, which raised it for
+the PP deploy: a job queued on an offline PP runner fails after 24 h and its
+redo needs the run's artifacts), so a re-run of an older run fails at
 "Download WASM frontend: Artifact not found for name: dist" BEFORE touching the
-box (17.9.2026, #170 acceptance). Past that window a post-restart suite needs a
-fresh push (a version bump is enough).
+box (17.9.2026, #170 acceptance, then with 1 day). Past that window a
+post-restart suite needs a fresh push (a version bump is enough).
 
 ## RED commit subjects: `test(#N): …` only — `test[red](#N)` is NOT parsed
 
@@ -539,6 +545,10 @@ sampled 30 min with the flag still OFF (21.9.2026). The working form is
 `gh run rerun --job <job-id>` alone; it creates run ATTEMPT 2 whose Deploy job
 has a NEW job id, so poll `gh api repos/<r>/actions/runs/<run>/jobs?filter=latest`
 (or `jobs/<new-id>`) — polling the old id reports the old attempt's success.
+On a MAIN run that is still main's tip, the completed re-run also
+re-deploys PP (`deploy-pp.yml` fires on every completed attempt, #229,
+`peer-exchange.md` "PP deploy"); an older main run's re-run does not reach
+PP. Restart SNV from a dev run when PP must stay untouched.
 Confirm the restart with `/api/v1/status` `uptime_s` before sampling anything
 that depends on a startup-read setting (e.g. `sp_min_working_set_mb`;
 the `genlock_pacing` setting this was written for is deleted, #221 lane 3).

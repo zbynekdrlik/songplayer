@@ -5,6 +5,14 @@ paths:
   - "crates/sp-server/src/db/models_peer*.rs"
   - "crates/sp-server/src/db/mod_tests_v29.rs"
   - "e2e/post-deploy-peer-serving.spec.ts"
+  - ".github/workflows/deploy-pp.yml"
+  - "scripts/pp_deploy_pick.py"
+  - "scripts/setup-runner.ps1"
+  - "scripts/tests/test_deploy_pp_workflow.py"
+  - "scripts/tests/test_pp_deploy_pick.py"
+  - "e2e/post-deploy-pp*.ts"
+  - "e2e/peer-probe-gate*.ts"
+  - "e2e/pp-scenes*.ts"
 ---
 
 # The node exchange (#229): serve what you have, ask peers first
@@ -19,9 +27,10 @@ Lane 1 ships the settings, their validation and the status route below.
 Lane 2 ships the exchange's vocabulary: kinds, versions, wire types, the job
 board. Lanes 3–5, one combined lane (ROZHODNUTÉ 6031694082), ship this
 node's catalog with its sha256 cache, the peer API with SNV's serving gate,
-and the peer client with the probe. Lanes 6–9 (PP deploy, the ask-first
-hooks) are to extend this file; nothing of them exists yet: no worker asks a
-peer, nothing outside the tests fetches.
+and the peer client with the probe. Lane 6 ships the PP deploy
+(`deploy-pp.yml`, its runner label and PP's post-deploy subset, below).
+Lanes 7–9 (the ask-first hooks) are to extend this file; nothing of them
+exists yet: no worker asks a peer, nothing outside the tests fetches.
 
 ## Settings (`peer::config::NodeConfig`, read live — no restart)
 
@@ -83,8 +92,8 @@ peer, nothing outside the tests fetches.
 - `POST /api/v1/exchange/probe` (LAN, no key) reads every peer's catalog
   now, one after the other: `[{name, base_url, ok, artifacts, jobs,
   latency_ms, error}]`, 409 with the reason when the settings do not hold.
-  It is the live gate of PP → SNV through Cloudflare (lane 6's PP
-  post-deploy subset is to call it).
+  It is the live gate of PP → SNV through Cloudflare (PP's post-deploy
+  subset calls it, "PP deploy" below).
 - Later lanes may ADD fields to `ExchangeStatus` / `PeerStatus`.
 
 ## Wiring
@@ -314,7 +323,167 @@ peer, nothing outside the tests fetches.
 - The Cloudflare Access service token for PP is MAIN SESSION OPS (plan task
   5.3 step 8, pending the owner on 7.10.2026, #229 comment 6031719797):
   until it exists the probe of `https://sp.newlevel.media` answers
-  `AccessRefused(302)`.
+  `AccessRefused(302)`, and PP's post-deploy subset fails naming the
+  missing token (below).
+
+## PP deploy (`deploy-pp.yml`)
+
+- PP gets main releases only: `workflow_run` of CI on `main` (green, push,
+  and still main's tip) or an explicit `gh workflow run deploy-pp.yml -f
+  ci_run_id=<CI run>` (a dev build, or an older release, at PP only on
+  purpose). Both go through `scripts/pp_deploy_pick.py`: a completed, green
+  `push` run of `CI` (`.github/workflows/ci.yml`) in this repository, else
+  the `resolve` job fails and nothing touches PP. Both triggers need the
+  workflow on `main` (the default branch).
+- GitHub fires `workflow_run` `completed` for EVERY attempt of a run. A
+  re-run of an OLDER main CI run (the SNV restart recipe, `gh run rerun
+  --job <Deploy>`, ci-workflows.md) is skipped: its `head_sha` is not
+  `github.sha` (for a workflow_run event, main's last commit). A re-run of
+  the LATEST main run does re-deploy PP with the same build: that is also
+  how a failed release attempt reaches PP. A re-run of an OLD deploy-pp
+  run keeps its original event and `github.sha`, so it passes that test
+  again: the deploy job's check step therefore reads main's LIVE tip
+  (`GET /repos/…/git/ref/heads/main`, which builds no diff) before anything
+  stops and fails when the release is no longer it (fail closed: every
+  event but a dispatch is checked). Never re-run an old deploy-pp run;
+  dispatch the build PP should get. Such a re-run is evaluated with its
+  original payload, so it also takes the `deploy-pp` group and can push a
+  release pending there out before it is refused: dispatch that release
+  again then.
+- Its own concurrency group `deploy-pp` (an offline PP runner never blocks
+  CI), never cancelled half-way. Only a run that really deploys takes it:
+  GitHub keeps one PENDING run per group and cancels the one already
+  pending, so a CI run on main that failed, was cancelled or is no longer
+  main's tip (each starts this workflow too, which then skips) gets a group
+  of its own and can never replace a release waiting there. The group's
+  condition is the `resolve` job's `if:`, pinned equal by the guard test.
+  Real deploys do replace each other while pending: a newer release, or a
+  dispatch, replaces the one waiting (the newest wins; dispatch the one you
+  need again after it).
+- Runner: label `resolume-pp` ONLY (`RUNNER_LABELS=self-hosted,windows,
+  resolume-pp` for `scripts/setup-runner.ps1`, which refuses `resolume` on
+  `RESOLUME-PP`); it must never carry `resolume` (SNV's jobs would land on
+  PP). No other workflow names `resolume-pp`, and every other self-hosted
+  job names `resolume` (the guard test), so none can land on PP.
+- The deploy downloads the run's `tauri-installer` + `dist` and checks them
+  (one installer, an `index.html`), the box (`COMPUTERNAME` must be
+  `RESOLUME-PP`: a runner that carries `resolume-pp` by mistake never stops
+  or installs anything), the release (still main's live tip, above) and
+  the phase-0 `SongPlayer` task BEFORE it stops anything: each failure
+  leaves PP running. The always() Start step and the `e2e-pp` job check
+  the box too, so a wrong box is never touched at all. Then: stop (the task instance first, then the process,
+  CLIProxyAPI, port 8920 free; its own 5 min step bound), install `/S` (exit
+  code read; a 10 min step bound), copy `dist`, start the task, check the
+  version. The step bounds turn a hung stop or installer into a plain step
+  failure within minutes, so the Start step below runs.
+- "Start SongPlayer" is `if: always()` (the one step that may be): after a
+  failed install or a cancel it starts the task again (a no-op when nothing
+  was stopped) and waits up to 90 s for the process and
+  `/api/v1/status`, else it fails on its own ("did not come back - the wall
+  may be dark"): "Health checks" is skipped once a step failed. Whether a
+  job TIMEOUT runs `always()` steps is not verified on this runner. No
+  deploy step writes PP's DB or settings, nor the task, the ACL or the
+  firewall (phase 0 owns them). The server itself does: the new build's
+  first start runs its migrations, the gate's presses and restore cut save
+  the program source, and a song the pressed playlist starts is recorded in
+  `play_history` (it weighs the next pick), as on any press.
+- PP is often off. A job queued on an offline self-hosted runner fails after
+  24 h; `ci.yml` keeps `dist` 5 days (as `tauri-installer`), so once PP is
+  on, `gh workflow run deploy-pp.yml -f ci_run_id=<the newest green main CI
+  run>` redoes it within 5 days (never the re-run button of the failed
+  deploy-pp run: refused once main moved on); later, the next release
+  brings PP up to date.
+- Post-deploy at PP: `post-deploy-pp.config.ts` = `post-deploy-pp.spec.ts` +
+  `post-deploy-max.spec.ts` (needs Node.js at PP). Not serial: a missing
+  Cloudflare token must not hide the playback results.
+  - the version in the DOM, a clean console;
+  - PP's identity and its peer (`peer-probe-gate.ts::peerSetupFailures`):
+    `node_name` `pp`, settings that hold, a peer `snv` with its key at
+    `https://sp.newlevel.media` (that host exactly, TLS, the default port)
+    with a Cloudflare Access token — a peer without one fails naming
+    `cf_client_id + cf_client_secret`;
+  - the live probe (`probeFailures`): the read worked, the catalog lists at
+    least one artifact;
+  - a playlist pressed through the facade plays on program (health
+    `Playing/Playing`) and SP-program has a receiver (an NDI receiver of
+    `SP-program` must exist at PP, else this is red on every release). The
+    scene comes from SongPlayer's own scene catalog
+    (`pp-scenes.ts::pickPlaylistScene`: an active, not refused, not Dabing
+    playlist with a normalized video; among those `pickBaselineScene`:
+    `sp-slow`, else an `sp-*` but `sp-fast` / `sp-warmup`, else a non-`sp-`
+    one, else the first — `sp-fast` or `sp-warmup` when only they are
+    left), never from the facade's list: that list is cg OBS's, forwarded,
+    and PP's cg OBS has no `sp-*` scene;
+  - a manual scene pressed through the facade lands as "OBS manuál"
+    (`manualCutLanded`: source -1, cut for that scene, `cg_forward ok`; a
+    scene name is compared as the server records it, its first 64
+    characters, `recordedScene`). The
+    scene (`pickManualScene`) is the repo variable `PP_MANUAL_SCENE` when set
+    (a manual cg OBS scene, else the test fails saying why), else the scene
+    cg OBS already has on program (nothing changes on cg OBS). When cg OBS's
+    program is not a manual scene, the test fails naming `PP_MANUAL_SCENE`:
+    the gate never picks another cg OBS scene by itself. The spec reads cg
+    OBS on `OBS_WS_URL` (:4455). Precondition (nothing checks it): that
+    scene must not itself show `SP-program` (an NDI `… (SP-program)`
+    source), or cutting to "OBS manuál" loops the program into itself on
+    the wall.
+  - `afterAll` puts SP-program back on the source it had before the tests
+    with a dashboard cut (`POST /api/v1/program/cut`, which tells cg OBS
+    nothing), only while the program is still what the gate left
+    (`programRestoreTarget`): the latest recorded switch
+    (`remote.last_remote_cut`) is the gate's own last press (its scene,
+    recorded at or after the instant the gate sent it; the runner and
+    SongPlayer share PP's clock) and the program is on that press's source
+    — or, when that last press was refused (a keep: the NDI input inactive,
+    cg OBS refusing), on the source of the press before it, so a refused
+    manual press never leaves the test playlist on air. A playlist start
+    source is re-kicked to its next song, as at SNV. cg OBS goes back on
+    its own scene only when the manual press moved it and it is still there
+    (`cgRestoreTarget`), through the facade when SP-program stays on "OBS
+    manuál" and that scene is a manual one (so SongPlayer names the program
+    by it again), else on cg OBS directly (`cgRestoreVia`). An operator's
+    press meanwhile is kept on both. Nothing on program at the start
+    (`source` null): nothing to cut back to, the gate's last cut stays on
+    air and persisted.
+  - The live probe reads SNV, and SNV's own pipeline may be restarting
+    SongPlayer at that moment (main's E2E, then the post-merge dev push on
+    SNV's single runner): a red probe right after a release is checked
+    against SNV's deploy timeline before anything at PP.
+- "produkcia beží" at PP:
+  - `gh workflow disable deploy-pp.yml` first: no new run starts; also
+    cancel any deploy-pp run already pending or queued (`gh run list
+    --workflow deploy-pp.yml --status pending` / `--status queued`, then
+    `gh run cancel <id>`: whether a disable stops a run already pending in
+    the group is not verified);
+  - a run in flight: cancel it while it is still in `resolve`, the
+    downloads or "Check the build"; once "Stop SongPlayer" ran, let the
+    deploy job finish (~2 min; a cancel there still starts SongPlayer, but
+    may cut the installer half-way);
+  - `e2e-pp` starts on the same runner within seconds. Its first scene press
+    comes only after its checkout, `npm ci`, the Playwright install and the
+    MAX test (~1–2 min): cancel in that window. A cancel mid-suite sends
+    Playwright Ctrl+C, then a kill ~7.5 s later, so `afterAll` may run only
+    in part or not at all: the program may stay on the test playlist (and
+    it is persisted) until the operator's next press;
+  - touch nothing else at PP. After "event skončil": `gh workflow enable
+    deploy-pp.yml`, then dispatch the newest green main CI run if a release
+    landed meanwhile.
+- Security: PP and SNV are self-hosted runners of a PUBLIC repository. The
+  repo's fork-PR approval policy must be `all_external_contributors`
+  (`gh api -X PUT repos/zbynekdrlik/songplayer/actions/permissions/fork-pr-contributor-approval
+  -f approval_policy=all_external_contributors`; it read
+  `first_time_contributors` on 7.10.2026), set BEFORE the PP runner is
+  registered (MAIN SESSION OPS, #229 lane 6), so no outside contributor's
+  workflow runs on either box without approval.
+- A DB copied SNV → PP carries SNV's `node_name` / `peer_api_key`: PATCH
+  PP's `node_name=pp` and `peer_api_key=""` before that DB's first start.
+- Guards: `scripts/tests/test_deploy_pp_workflow.py` (the triggers, the
+  main-tip rule, the label both ways (every other `runs-on` a one-line
+  literal), the group, the order, the step bounds, `always()` on Start only
+  and its wait, nothing of PP's setup touched, `dist` 5 days, SNV ignoring
+  the PP subset) and `scripts/tests/test_pp_deploy_pick.py` (Eval
+  Checks pytest; the script is in both ruff lists); the pure e2e helpers in
+  the mock suite (`peer-probe-gate.spec.ts`, `pp-scenes.spec.ts`).
 
 ## Tests
 

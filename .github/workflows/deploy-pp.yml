@@ -1,0 +1,360 @@
+name: Deploy to PP
+
+# #229: the PP church site (resolume-pp) runs main releases only; SNV
+# (win-resolume) stays the dev rig. A CI run on main that ended green deploys
+# here (never re-run an OLD deploy-pp run: it is refused once main moved on).
+# A dev build, or an older one, reaches PP only on purpose: dispatch this
+# workflow with the id of the CI run whose build PP gets (it must be a
+# completed, green push run of CI, scripts/pp_deploy_pick.py). PP's settings
+# live in PP's DB and no deploy step writes it (the server does: its
+# migrations, and the gate's presses save the program source and a started
+# song's play history, as any press does), nor the phase-0 scheduled task,
+# ACL or firewall.
+# The rules: .claude/rules/peer-exchange.md, "PP deploy".
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: "CI run id whose tauri-installer + dist artifacts PP gets (a completed, green push run)"
+        required: true
+        type: string
+
+# A release deploys only while it is main's tip: GitHub fires `completed`
+# for EVERY attempt of a CI run, and a re-run of an older main run (the SNV
+# restart recipe re-runs a Deploy job) ends green too. For a workflow_run
+# event `github.sha` is the default branch's last commit, so an older run's
+# re-run is skipped here; an older build reaches PP only by a dispatch.
+# Its own group: a queued job on an offline PP runner holds THIS group, never
+# CI's branch group (ci-workflows.md). A newer release waits for the one in
+# flight; a deploy is never cancelled half-way (it stops SongPlayer first).
+# Only a run that really deploys takes the group: GitHub keeps ONE pending run
+# per group and cancels the one already pending, so a CI run on main that
+# failed, was cancelled or is no longer main's tip (it starts this workflow
+# too, which then skips) would replace a release waiting there, and that
+# release would never reach PP. Such a run gets a group of its own. The
+# condition is the resolve job's `if:` (pinned equal by
+# scripts/tests/test_deploy_pp_workflow.py).
+concurrency:
+  group: ${{ (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_sha == github.sha)) && 'deploy-pp' || format('deploy-pp-skipped-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  resolve:
+    name: Pick the build for PP
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_branch == 'main'
+          && github.event.workflow_run.head_sha == github.sha)
+    outputs:
+      run_id: ${{ steps.pick.outputs.run_id }}
+      head_sha: ${{ steps.pick.outputs.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the CI run and its commit
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_ID_INPUT: ${{ inputs.ci_run_id }}
+          EVENT_RUN: ${{ toJSON(github.event.workflow_run) }}
+        run: |
+          set -euo pipefail
+          RUN_JSON="$RUNNER_TEMP/ci-run.json"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            case "$RUN_ID_INPUT" in
+              ''|*[!0-9]*) echo "FAIL: ci_run_id must be a CI run id (digits only)"; exit 1 ;;
+            esac
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID_INPUT" > "$RUN_JSON"
+          else
+            printf '%s' "$EVENT_RUN" > "$RUN_JSON"
+          fi
+          # A release and a dispatch go through the same check: a completed,
+          # green push run of CI in this repository, else exit 1 here.
+          python3 scripts/pp_deploy_pick.py --repo "$GITHUB_REPOSITORY" "$RUN_JSON" >> "$GITHUB_OUTPUT"
+
+  deploy-pp:
+    name: Deploy to resolume-pp
+    needs: [resolve]
+    runs-on: [self-hosted, windows, resolume-pp]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.head_sha }}
+
+      # The build and PP's phase-0 task are checked BEFORE SongPlayer stops:
+      # an expired artifact (dist is kept 5 days) or a missing task fails
+      # here, with PP still running.
+      - name: Download Tauri installer
+        uses: actions/download-artifact@v4
+        with:
+          name: tauri-installer
+          path: artifacts/tauri
+          run-id: ${{ needs.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download WASM frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: artifacts/dist
+          run-id: ${{ needs.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      # Also, before anything stops: the box is PP (a runner that carries
+      # resolume-pp by mistake - labels can be edited later - never stops or
+      # installs anything), and a release is still main's LIVE tip: GitHub
+      # re-runs a workflow with its ORIGINAL event and github.sha, so a re-run
+      # of an old deploy-pp run (the button on one that failed after its 24 h
+      # queue) passes the resolve job's test again and would install an older
+      # build over a newer release. A dispatch is exempt (on purpose).
+      - name: Check the build and PP's task (before anything stops)
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:COMPUTERNAME -ine "RESOLUME-PP") {
+            Write-Error "FAIL: this runner is $env:COMPUTERNAME, not RESOLUME-PP - its labels are wrong; not touching it"
+            exit 1
+          }
+          # Fail closed: every event but an explicit dispatch is checked. The
+          # ref read builds no diff (GET /commits/main would, and can time
+          # out on a large merge).
+          if ($env:EVENT_NAME -ne "workflow_dispatch") {
+            $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
+            $tip = (Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/git/ref/heads/main" -Headers $headers -TimeoutSec 30).object.sha
+            if ($tip -ne $env:HEAD_SHA) {
+              Write-Error "FAIL: this release is $env:HEAD_SHA but main is now $tip (a re-run of an old deploy-pp run?) - dispatch the build PP should get instead"
+              exit 1
+            }
+          }
+          $task = Get-ScheduledTask -TaskName "SongPlayer" -ErrorAction SilentlyContinue
+          if (-not $task) {
+            Write-Error "FAIL: no SongPlayer scheduled task at PP - the phase 0 install creates it (issue 229); not stopping SongPlayer"
+            exit 1
+          }
+          $installers = @(Get-ChildItem "artifacts\tauri\*.exe")
+          if ($installers.Count -ne 1) {
+            Write-Error "FAIL: the tauri-installer artifact holds $($installers.Count) installers, expected 1"
+            exit 1
+          }
+          if (-not (Test-Path "artifacts\dist\index.html")) {
+            Write-Error "FAIL: the dist artifact has no index.html"
+            exit 1
+          }
+          Write-Host "Installer: $($installers[0].Name) ($($installers[0].Length) bytes)"
+
+      # The phase-0 task `SongPlayer` (MultipleInstances=IgnoreNew): end the
+      # task INSTANCE first, else Task Scheduler can still report it Running
+      # after a taskkill and the later `schtasks /run` does nothing
+      # (ci-workflows.md). Then CLIProxyAPI, an orphan of the old process.
+      # Each of the next two steps has its own bound: a hung stop or
+      # installer fails its step in minutes (a plain step failure), and the
+      # always() Start step brings SongPlayer back, instead of PP waiting
+      # dark for the job's timeout.
+      - name: Stop SongPlayer
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = "Continue"
+          Write-Host "=== Stopping SongPlayer ==="
+          Stop-ScheduledTask -TaskName "SongPlayer" -ErrorAction SilentlyContinue
+          taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
+          $deadline = (Get-Date).AddSeconds(20)
+          while ((Get-Date) -lt $deadline) {
+            $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
+            $state = (Get-ScheduledTask -TaskName "SongPlayer" -ErrorAction SilentlyContinue).State
+            if (-not $proc -and $state -ne "Running") { break }
+            Start-Sleep -Milliseconds 500
+          }
+          taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
+          $deadline = (Get-Date).AddSeconds(30)
+          while ((Get-Date) -lt $deadline) {
+            $listening = netstat -an | Select-String ":8920 " | Select-String "LISTENING"
+            if (-not $listening) { break }
+            Start-Sleep -Seconds 1
+          }
+          $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
+          if ($proc) {
+            Write-Error "FAIL: SongPlayer.exe (PID $($proc.Id)) is still running - not installing over it"
+            exit 1
+          }
+          $listening = netstat -an | Select-String ":8920 " | Select-String "LISTENING"
+          if ($listening) {
+            Write-Error "FAIL: port 8920 is still in use after SongPlayer stopped"
+            exit 1
+          }
+          Write-Host "SongPlayer stopped"
+
+      - name: Install SongPlayer and its dashboard (PP's DB and settings stay as they are)
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Get-ChildItem "artifacts\tauri\*.exe" | Select-Object -First 1
+          Write-Host "=== Installing $($installer.Name) ==="
+          $p = Start-Process -FilePath $installer.FullName -ArgumentList "/S" -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            Write-Error "FAIL: the installer exited $($p.ExitCode)"
+            exit 1
+          }
+          $distTarget = "C:\Program Files\SongPlayer\dist"
+          if (Test-Path $distTarget) { Remove-Item -Path $distTarget -Recurse -Force }
+          Copy-Item -Path "artifacts\dist" -Destination $distTarget -Recurse -Force
+          Write-Host "Dashboard deployed to $distTarget"
+
+      # This step runs whatever happened before it: a failed install or a
+      # cancelled run ("produkcia bezi" at PP). Once SongPlayer was stopped,
+      # it must come back, or PP's wall stays dark. always() is right for
+      # THIS step only; the jobs keep the default success(). With SongPlayer
+      # still running (nothing was stopped) it does nothing. It proves
+      # SongPlayer answers again ("Health checks" below is skipped once a
+      # step failed or the run was cancelled), else it fails on its own.
+      - name: Start SongPlayer (the phase 0 scheduled task)
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          # It also runs after the box check failed: a wrong box is not touched.
+          if ($env:COMPUTERNAME -ine "RESOLUME-PP") {
+            Write-Error "FAIL: this runner is $env:COMPUTERNAME, not RESOLUME-PP - not touching it"
+            exit 1
+          }
+          $task = Get-ScheduledTask -TaskName "SongPlayer" -ErrorAction SilentlyContinue
+          if (-not $task) {
+            Write-Error "FAIL: no SongPlayer scheduled task at PP - the phase 0 install creates it (issue 229)"
+            exit 1
+          }
+          $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
+          if ($proc) {
+            Write-Host "SongPlayer is running (PID $($proc.Id)) - nothing to start"
+            exit 0
+          }
+          # No process but the instance still Running (IgnoreNew would drop
+          # the start): end the instance first.
+          if ($task.State -eq "Running") {
+            try { Stop-ScheduledTask -TaskName "SongPlayer" } catch { Write-Warning "Stop-ScheduledTask: $($_.Exception.Message)" }
+            $deadline = (Get-Date).AddSeconds(15)
+            while (((Get-ScheduledTask -TaskName "SongPlayer").State -eq "Running") -and ((Get-Date) -lt $deadline)) {
+              Start-Sleep -Milliseconds 500
+            }
+          }
+          Write-Host "Starting the task SongPlayer (runs as $($task.Principal.UserId))"
+          schtasks.exe /run /tn "SongPlayer"
+          if ($LASTEXITCODE -ne 0) { throw "schtasks.exe failed (exit code: $LASTEXITCODE)" }
+          $resp = $null
+          $deadline = (Get-Date).AddSeconds(90)
+          while ((Get-Date) -lt $deadline) {
+            try {
+              $resp = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 5
+              break
+            } catch {
+              Start-Sleep -Seconds 3
+            }
+          }
+          $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
+          if (-not $proc -or -not $resp) {
+            Write-Error "FAIL: SongPlayer did not come back at PP within 90 s (process: $([bool]$proc), API: $([bool]$resp)) - the wall may be dark"
+            exit 1
+          }
+          Write-Host "SongPlayer is back: PID $($proc.Id), version $($resp.version)"
+
+      # "Start SongPlayer" already waited for the API; this checks it is the
+      # new build.
+      - name: Health checks
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $VERSION = (Get-Content "VERSION" -Raw).Trim()
+          $resp = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 10
+          $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
+          if (-not $proc) {
+            Write-Error "FAIL: SongPlayer.exe is not running"
+            exit 1
+          }
+          if ($resp.version -ne $VERSION) {
+            Write-Error "FAIL: API version '$($resp.version)' != expected '$VERSION'"
+            exit 1
+          }
+          Write-Host "OK: PP runs $VERSION (PID $($proc.Id), obs_connected=$($resp.obs_connected))"
+
+  e2e-pp:
+    name: E2E Tests (resolume-pp)
+    needs: [resolve, deploy-pp]
+    runs-on: [self-hosted, windows, resolume-pp]
+    timeout-minutes: 20
+    steps:
+      # The suite presses scenes and cuts the program: never on another box
+      # that carries resolume-pp by mistake.
+      - name: Check the box (RESOLUME-PP)
+        shell: powershell
+        run: |
+          if ($env:COMPUTERNAME -ine "RESOLUME-PP") {
+            Write-Error "FAIL: this runner is $env:COMPUTERNAME, not RESOLUME-PP - its labels are wrong; not touching it"
+            exit 1
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.head_sha }}
+
+      # e2e/post-deploy-pp.config.ts: e2e/post-deploy-pp.spec.ts (the version
+      # in the DOM, PP's identity and its peer snv with a Cloudflare token, a
+      # playlist on program with an SP-program receiver, a manual scene as
+      # OBS manual, the live read of SNV's catalog) + post-deploy-max.spec.ts.
+      - name: Post-deploy Playwright (PP subset)
+        shell: powershell
+        env:
+          SONGPLAYER_URL: http://localhost:8920
+          FACADE_WS_URL: ws://localhost:4456
+          OBS_WS_URL: ws://localhost:4455
+          PP_MANUAL_SCENE: ${{ vars.PP_MANUAL_SCENE }}
+        run: |
+          if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+            Write-Error "FAIL: Node.js (npm) is not installed at PP - the post-deploy suite needs it"
+            exit 1
+          }
+          $env:SP_EXPECTED_VERSION = (Get-Content "VERSION" -Raw).Trim()
+          Set-Location $env:GITHUB_WORKSPACE\e2e
+          npm ci 2>&1 | Select-Object -Last 5
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: npm ci failed"
+            exit 1
+          }
+          npx playwright install chromium 2>&1 | Select-Object -Last 3
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: npx playwright install chromium failed"
+            exit 1
+          }
+          npx playwright test --config=post-deploy-pp.config.ts --reporter=list 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "FAIL: the PP post-deploy suite failed"
+            exit 1
+          }
+          Write-Host "OK: the PP post-deploy suite passed"
+
+      - name: Upload the PP post-deploy report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pp-post-deploy-report
+          path: |
+            e2e/post-deploy-report/
+            e2e/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

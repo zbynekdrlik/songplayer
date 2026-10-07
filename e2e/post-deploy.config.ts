@@ -34,11 +34,16 @@ export default defineConfig({
     // Bundled Chromium runs every post-deploy spec EXCEPT the two preview ones
     // (bundled Chromium lacks H.264/AAC). A project-level testIgnore REPLACES
     // the global testMatch's effect for this project, so it is the only filter
-    // needed to drop the preview spec here.
+    // needed to drop the preview spec here. #229: the PP subset runs only at
+    // PP (deploy-pp.yml, post-deploy-pp.config.ts), never on SNV.
     {
       name: "chromium",
       use: { browserName: "chromium" },
-      testIgnore: ["**/post-deploy-preview.spec.ts", "**/post-deploy-owner-path.spec.ts"],
+      testIgnore: [
+        "**/post-deploy-preview.spec.ts",
+        "**/post-deploy-owner-path.spec.ts",
+        "**/post-deploy-pp*.spec.ts",
+      ],
     },
     // The #178 live preview <video> must decode real H.264/AAC on the box.
     // Edge is always present on the Windows runner and carries the proprietary
