@@ -5,8 +5,10 @@
 
 pub mod board;
 pub mod config;
+pub mod hash;
 pub mod kind;
 pub mod lan;
+pub mod throttle;
 pub mod wire;
 
 use std::path::PathBuf;
