@@ -257,8 +257,8 @@ async fn a_peers_parser_title_asks_this_nodes_providers() {
 }
 
 /// A fetch that fails asks no provider: a peer's copy is retried on every
-/// recheck (a Fetch beats the 2 h bound), and a paid provider call on each
-/// would add up. The title is chosen only once the pair is here.
+/// recheck for up to 2 h, and a paid provider call on each would add up.
+/// The title is chosen only once the pair is here.
 #[tokio::test]
 async fn a_failed_fetch_asks_no_provider() {
     let (snv, pp, row) = snv_and_pp().await;

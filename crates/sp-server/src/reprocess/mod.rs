@@ -256,8 +256,9 @@ impl ReprocessWorker {
 
     /// Retry metadata extraction for a single video.
     ///
-    /// Honours per-video backoff and surfaces rate-limit errors so the
-    /// caller can abort the batch and enter the global cooldown.
+    /// A peer's title first (#229); then honours the per-video backoff and
+    /// the global cooldown, and surfaces a rate-limit error (which starts
+    /// the cooldown: the rest of the batch asks no provider).
     async fn reprocess_one(
         &mut self,
         row: &ReprocessRow,
@@ -379,7 +380,7 @@ impl ReprocessWorker {
     /// path uses): the first sanitized answer with a song, or EVERY
     /// provider's reason in chain order (#136: before, only the last one
     /// survived, and it was logged nowhere), flagged `rate_limited` when any
-    /// provider was, so the batch-abort path always wins over generic
+    /// provider was, so the cooldown path always wins over generic
     /// failures.
     async fn try_providers(
         &self,
@@ -626,8 +627,9 @@ mod tests {
         }
     }
 
-    /// Issue #12: on rate-limit, the worker must abort the current batch
-    /// and skip all subsequent calls until the cooldown window expires.
+    /// Issue #12: on rate-limit, the worker calls no provider for the rest
+    /// of the batch (#229: it no longer stops the batch, the peers' titles
+    /// still go through) and none until the cooldown window expires.
     ///
     /// Uses direct manipulation of `cooldown_until` instead of
     /// `tokio::time::advance` — the sqlite pool setup relies on real I/O
@@ -649,7 +651,8 @@ mod tests {
             Arc::new(ProviderChain::new(vec![Box::new(RateLimitProvider)]));
         let mut worker = ReprocessWorker::new(pool.clone(), providers, tmp.path().to_path_buf());
 
-        // First run: hits rate limit on the first video, aborts batch.
+        // First run: hits rate limit on the first video; the second row is
+        // skipped by the cooldown.
         let count = worker.process_all().await.unwrap();
         assert_eq!(count, 0);
         assert!(

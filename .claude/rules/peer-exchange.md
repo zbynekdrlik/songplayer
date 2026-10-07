@@ -524,7 +524,14 @@ workers ask their peers before they run a job (below, from "Ask first").
   wins after the bound, but a fetch that KEEPS failing does not: once the
   job has waited the bound (`decide::gives_up`), `fetch_failed` answers
   `None` and the hook runs the job here (`Exchange::after_failed_fetch`;
-  no audio here, a refused track, this node paused for over 2 h).
+  a refused track, a peer that keeps answering badly). One exception
+  (`decide::after_failure`): a fetch refused by THIS node's own pause
+  (`peer_transfers_paused`) rechecks every 5 min (`PAUSED_RECHECK`) and
+  never gives up: the pause is about this node's bandwidth, and heavy local
+  work in its place would defeat it.
+- A wait whose row was dropped meanwhile (a song removed from a playlist)
+  stays in `peer_waits`; a much later ask of the same video inherits its
+  spent bound and runs the job here at once. Rare; nothing expires it.
 - `Exchange::fetched` ends the wait and records each artifact's origin in
   `peer_fetches` (node, version, sha256; `source = peer:<node>` in the INFO
   `exchange: done with a peer's copy`). The row's `metadata_source` /
@@ -562,19 +569,24 @@ workers ask their peers before they run a job (below, from "Ask first").
 
 - Stems: the hook runs after the kill switch, the dub and wall defers, the
   pick and the terminal skip, and BEFORE the venv's `return` (the plan's
-  decisions): a node with no lyrics venv still takes a peer's stems (the
-  venv WARN still fires once). With no venv a row that runs here is put
-  back for `INPUT_MISSING_RECHECK` (10 min, no attempt), so the rows behind
-  it reach their peer step too. Before a fetch, `song_input::job_input`
+  decisions): a node with no lyrics venv that ASKS its peers still takes a
+  peer's stems (the venv WARN fires once); a row that would run here is then
+  put back for `INPUT_MISSING_RECHECK` (10 min, no attempt), so the rows
+  behind it reach their peer step too. A node that asks no peer (SNV) or a
+  worker with no exchange stops at the missing venv as before #229
+  (`no_venv_asks_peers`): no pick, no defer. Before a fetch, `song_input::job_input`
   re-reads the song's audio: none on disk → deferred with no attempt and
   nothing transferred. The parts are renamed under `stem_paths(<the audio
   the row records AFTER the transfer>)`, read under `SONG_FILES`, then
   `mark_stems_done`. `song_input_tests.rs` pins the order after the hook.
-- Known limit (OPEN for the main): stems and ★ lyrics are taken whatever
-  this node's audio is; a song this node downloaded itself (nobody had it
-  within 2 h) can later take a peer's stems or line timings made from the
-  peer's own download. Stems are played INSTEAD of the original (never
-  mixed with it), so only a constant offset against the video could show.
+- Known limit (a follow-up for the main to file): stems and ★ lyrics are
+  taken whatever this node's audio is; a song this node downloaded itself
+  (nobody had it within 2 h) can later take a peer's stems or line timings
+  made from the peer's own download. Stems are played INSTEAD of the
+  original (never mixed with it), so only a constant offset against the
+  video could show. A guard: take a peer's stems only when `peer_fetches`
+  records this node's audio from that peer with the audio sha its catalog
+  lists now.
 - Lyrics: never for an operator's ask here (`lyrics_manual_priority`, a
   non-blank `lyrics_override_text`), never for a video whose
   `{yt}_lyrics.json` here is a dub's subtitles (any row of it here
