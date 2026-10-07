@@ -183,26 +183,24 @@ async fn recheck_later(
     job: HeavyJob,
     recorded: &str,
 ) -> Result<(), sqlx::Error> {
-    let secs = INPUT_MISSING_RECHECK.as_secs() as i64;
-    let query = match job {
-        HeavyJob::Stems => sqlx::query(
-            "UPDATE videos SET stem_next_attempt_at = \
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) \
-             WHERE id = ?",
-        )
-        .bind(secs),
-        HeavyJob::Dub => sqlx::query(
-            "UPDATE videos SET dub_next_attempt_at = \
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)), \
-                 dub_error = ? \
-             WHERE id = ?",
-        )
-        .bind(secs)
-        .bind(format!(
-            "the song's audio file is missing: {recorded} (the dub waits, re-checked later)"
-        )),
+    let HeavyJob::Dub = job else {
+        // The one stem recheck write (also the node exchange's, #229).
+        return crate::db::models_stems::defer_stems(pool, video_id, INPUT_MISSING_RECHECK).await;
     };
-    query.bind(video_id).execute(pool).await?;
+    let secs = INPUT_MISSING_RECHECK.as_secs() as i64;
+    sqlx::query(
+        "UPDATE videos SET dub_next_attempt_at = \
+             strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)), \
+             dub_error = ? \
+         WHERE id = ?",
+    )
+    .bind(secs)
+    .bind(format!(
+        "the song's audio file is missing: {recorded} (the dub waits, re-checked later)"
+    ))
+    .bind(video_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

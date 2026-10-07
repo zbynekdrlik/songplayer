@@ -7,6 +7,7 @@ use std::time::Duration;
 use sqlx::SqlitePool;
 
 use super::*;
+use crate::db::models_stems::defer_stems;
 
 async fn pool() -> SqlitePool {
     let pool = crate::db::create_memory_pool().await.unwrap();

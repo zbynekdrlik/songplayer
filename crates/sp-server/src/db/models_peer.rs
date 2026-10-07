@@ -7,8 +7,9 @@
 //!   first wait counts, `peer::ask`); `peer_fetches`: which node an artifact
 //!   came from.
 //!
-//! Plus the job defers of the ask-first hooks (`defer_download`,
-//! `defer_stems`; the lyrics job defers through `record_lyrics_wait`) and
+//! Plus the download's defer of the ask-first hooks (`defer_download`; the
+//! stems defer through `models_stems::defer_stems`, the lyrics through
+//! `record_lyrics_wait`) and
 //! the lyrics row a node takes from a peer (`adopt_lyrics`).
 
 use std::collections::{HashMap, HashSet};
@@ -180,25 +181,6 @@ pub async fn defer_download(
         .bind(video_id)
         .execute(pool)
         .await?;
-    Ok(())
-}
-
-/// The stems of row `video_id` are picked again after `wait`, with the status
-/// and the attempts untouched (the stem selector compares
-/// `stem_next_attempt_at` in this form).
-pub async fn defer_stems(
-    pool: &SqlitePool,
-    video_id: i64,
-    wait: Duration,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE videos SET stem_next_attempt_at = \
-             strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) WHERE id = ?",
-    )
-    .bind(i64::try_from(wait.as_secs()).unwrap_or(i64::MAX))
-    .bind(video_id)
-    .execute(pool)
-    .await?;
     Ok(())
 }
 

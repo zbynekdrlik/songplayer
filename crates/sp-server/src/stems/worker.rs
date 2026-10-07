@@ -226,7 +226,7 @@ impl StemWorker {
     /// untouched): the rows behind it reach their peer step too.
     async fn no_venv_puts_back(&self, video_id: i64) {
         let wait = crate::song_input::INPUT_MISSING_RECHECK;
-        if let Err(e) = crate::db::models_peer::defer_stems(&self.pool, video_id, wait).await {
+        if let Err(e) = crate::db::models_stems::defer_stems(&self.pool, video_id, wait).await {
             warn!(video_id, %e, "stem worker: putting a row back (no venv) failed");
         }
     }

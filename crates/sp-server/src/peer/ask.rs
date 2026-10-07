@@ -148,7 +148,7 @@ impl Exchange {
     pub(crate) async fn defer(&self, job: Job, video_id: i64, wait: Duration) -> PeerStep {
         let deferred = match job {
             Job::Download => models_peer::defer_download(&self.pool, video_id, wait).await,
-            Job::Stems => models_peer::defer_stems(&self.pool, video_id, wait).await,
+            Job::Stems => crate::db::models_stems::defer_stems(&self.pool, video_id, wait).await,
             Job::Lyrics => crate::db::models::record_lyrics_wait(&self.pool, video_id, wait).await,
         };
         if let Err(e) = deferred {
