@@ -285,6 +285,13 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
     snv = (e2e / "post-deploy.config.ts").read_text(encoding="utf-8")
     assert '"**/post-deploy-pp*.spec.ts"' in snv
     pp = (e2e / "post-deploy-pp.config.ts").read_text(encoding="utf-8")
-    assert (
-        'testMatch: ["**/post-deploy-pp.spec.ts", "**/post-deploy-max.spec.ts"]' in pp
-    )
+    match = re.search(r"testMatch:\s*\[(.*?)\]", pp, re.S)
+    assert match, "post-deploy-pp.config.ts has no testMatch list"
+    specs = re.findall(r'"([^"]+)"', match.group(1))
+    # PP runs its own subset, MAX, and the masked-settings check (release
+    # 0.72.0 review), and never the SNV suite.
+    assert specs == [
+        "**/post-deploy-pp.spec.ts",
+        "**/post-deploy-max.spec.ts",
+        "**/post-deploy-settings-secrets.spec.ts",
+    ]
