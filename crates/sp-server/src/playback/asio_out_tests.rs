@@ -571,3 +571,23 @@ fn the_underruns_of_a_closed_run_and_the_running_one_add_up() {
     assert_eq!(d.starts, 2);
     assert_eq!(o.snapshot().status.underruns, 133 + 133);
 }
+
+/// Blocks queued while the driver opened (a COM load can take a second) are
+/// stale: an open drops them, so the first block the servo sees is fresh
+/// (no start-up skip, no underruns counted while it drains a backlog).
+#[test]
+fn an_open_drops_the_blocks_queued_while_it_opened() {
+    let o = out();
+    for k in 0..3 {
+        o.push(block(k));
+    }
+    assert_eq!(o.queued(), 3);
+    let mut d = FakeDevice::answering(vec![Err(Reason::Busy("init failed".into()))]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    assert_eq!(o.queued(), 3, "a failed open leaves the queue to the loop");
+    w.step(&o, &mut d, T0 + 2 * S, None);
+    assert_eq!(o.snapshot().state, "running");
+    assert_eq!(o.queued(), 0);
+    assert_eq!(o.snapshot().blocks_dropped, 0, "no overflow");
+}
