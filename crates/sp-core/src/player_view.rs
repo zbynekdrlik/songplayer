@@ -418,8 +418,9 @@ mod tests {
     /// #229 follow-up (design record 6029071745): with a retry pending, the
     /// badge for each WS state as the engine reports it (with the transport
     /// it comes with), beside the label, which follows the same rule. The
-    /// engine's pause after failed opens is `WaitingForScene` / `Paused`: on
-    /// program, black. A pipeline told it decodes keeps its own badge and
+    /// engine's pause after failed opens is `WaitingForScene` / `Paused`,
+    /// taken as on program (off program: the open #229 Design-question
+    /// 6029484142). A pipeline told it decodes keeps its own badge and
     /// label (on program "Hrá", off program "Hrá mimo programu").
     #[test]
     fn the_badge_says_on_program_while_the_retry_waits() {
@@ -477,8 +478,8 @@ mod tests {
         );
     }
 
-    /// Both on-program badges take the Player's `on` style; the retry one
-    /// is on program too, only black.
+    /// Both on-program badges take the Player's `on` style: the retry one
+    /// claims on program too.
     #[test]
     fn both_on_program_badges_take_the_on_style() {
         assert!(ProgramBadge::OnProgram.is_on_program());

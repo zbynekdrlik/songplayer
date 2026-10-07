@@ -147,14 +147,12 @@ test("the Live page's Player shows the same line, and a due retry reads 0 s (#22
     /^Videá sa nedajú otvoriť \(3×\): No video: SetCurrentMediaType failed: No suitable transform — ďalší pokus o [0-3] s$/,
     { timeout: 5000 },
   );
-  // While the retry waits the state label says so (not "Čaká na scénu"),
-  // and so does the badge. One Player component, so the Live page reads
-  // what the dashboard does.
+  // While the retry waits the state label says so (not "Čaká na scénu").
+  // (Its badge is not pinned here: playlist 184 is not the mock's program
+  // source, the open off-program case of #229 Design-question 6029484142;
+  // the dashboard test below pins the badge on program.)
   await expect(page.getByTestId("player-state")).toHaveText(
     "Čaká na ďalší pokus",
-  );
-  await expect(page.getByTestId("player-program-badge")).toHaveText(
-    "● Na programe — čaká na ďalší pokus",
   );
   // Once the retry is due the countdown stops at 0, never below.
   await expect(line).toHaveText(/ďalší pokus o 0 s$/, { timeout: 8000 });

@@ -131,8 +131,10 @@ pub fn Player(playlist_id: i64) -> impl IntoView {
     // = on program, #170), so a cut flips both in one render. It used to read
     // `store.ndi_health` — the 1 Hz poll of the server's 5 s health sample —
     // and lagged the cut by up to ~5 s. A `Memo`, so a position tick never
-    // re-renders it. #229: while the retry of failed opens waits (on program,
-    // black), "● Na programe — čaká na ďalší pokus", by the label's own rule.
+    // re-renders it. #229: while the retry of failed opens waits (the health
+    // row's `open_failures`, the 1 Hz poll), "● Na programe — čaká na ďalší
+    // pokus", by the label's own rule; taken as on program (off program: the
+    // open #229 Design-question 6029484142).
     let badge = Memo::new(move |_| {
         player_view::player_program_badge(
             state_known.get(),
