@@ -47,7 +47,7 @@ use leptos::prelude::*;
 use serde::Deserialize;
 use sp_core::audio_outputs::{
     OutputEntry, OutputType, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat,
-    asio_reason_sk, new_asio, new_vban, validate_list,
+    asio_driver_options, asio_reason_sk, new_asio, new_vban, validate_list,
 };
 use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
 
@@ -222,15 +222,20 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     let load_error = RwSignal::new(None::<String>);
     let message = RwSignal::new(String::new());
     let live = RwSignal::new(ProgramOutputs::default());
-    // The box's ASIO drivers, once (`None` until they are read; a failed
-    // read lists none).
+    // The box's ASIO drivers, once: `None` until they are read, and for
+    // good when the read failed (`drivers_failed`) — never an empty list
+    // standing in for one the dashboard was not told (#233 review round 1).
     let drivers = RwSignal::new(None::<Vec<String>>);
+    let drivers_failed = RwSignal::new(false);
     leptos::task::spawn_local(async move {
-        let list = api::get::<AsioDriverList>("/api/v1/audio/asio-drivers")
-            .await
-            .map(|l| l.drivers)
-            .unwrap_or_default();
-        let _ = drivers.try_set(Some(list));
+        match api::get::<AsioDriverList>("/api/v1/audio/asio-drivers").await {
+            Ok(list) => {
+                let _ = drivers.try_set(Some(list.drivers));
+            }
+            Err(_) => {
+                let _ = drivers_failed.try_set(true);
+            }
+        }
     });
 
     // Only the section's own two settings: the form above merges its save
@@ -389,6 +394,9 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     type="button"
                     data-testid="audio-outputs-add-asio"
                     prop:disabled=move || drivers.with(Option::is_none)
+                    title=move || {
+                        if drivers_failed.get() { "Zoznam ovládačov ASIO sa nenačítal" } else { "" }
+                    }
                     on:click=add_asio
                 >
                     "Pridať výstup ASIO"
@@ -429,17 +437,11 @@ fn OutputRow(
                 .unwrap_or_default()
         })
     });
-    // The listed drivers, and a stored one the box does not list (kept,
-    // marked): (value, label).
+    // The listed drivers, and a stored one the box does not list (kept;
+    // marked only once the list is known): (value, label).
     let driver_options = Memo::new(move |_| {
         let current = asio_driver.get();
-        let listed = drivers.get().unwrap_or_default();
-        let mut options: Vec<(String, String)> =
-            listed.iter().map(|n| (n.clone(), n.clone())).collect();
-        if !current.is_empty() && !listed.contains(&current) {
-            options.push((current.clone(), format!("{current} (nenájdený)")));
-        }
-        options
+        drivers.with(|listed| asio_driver_options(listed.as_deref(), &current))
     });
     // An ASIO channel shown 1-based; an entry that is no number edits nothing.
     let channel = move |i: usize| {

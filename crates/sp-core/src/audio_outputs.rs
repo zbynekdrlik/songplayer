@@ -629,6 +629,28 @@ pub fn new_asio(entries: &[OutputEntry], driver: &str) -> OutputEntry {
     )
 }
 
+/// The dashboard's driver choices for an ASIO entry, `(value, label)`: the
+/// box's listed drivers, then the entry's own driver when the list lacks
+/// it. That driver is marked "(nenájdený)" only when the list is KNOWN
+/// (`Some`); while it is unknown (not read yet, or its read failed) it is
+/// offered unmarked — the dashboard claims only what it was told (#225,
+/// #233 review round 1). An entry with no driver adds nothing.
+pub fn asio_driver_options(listed: Option<&[String]>, current: &str) -> Vec<(String, String)> {
+    let mut options: Vec<(String, String)> = listed
+        .unwrap_or_default()
+        .iter()
+        .map(|n| (n.clone(), n.clone()))
+        .collect();
+    if !current.is_empty() && !options.iter().any(|(value, _)| value == current) {
+        let label = match listed {
+            Some(_) => format!("{current} (nenájdený)"),
+            None => current.to_string(),
+        };
+        options.push((current.to_string(), label));
+    }
+    options
+}
+
 /// The Slovak reason of a waiting ASIO output, by the server's stable code
 /// (`sp-server` `asio_state::Reason::code`; its English text is the
 /// tooltip). An unknown code (a later version's) reads as such.

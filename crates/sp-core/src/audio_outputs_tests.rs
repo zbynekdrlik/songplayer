@@ -686,3 +686,32 @@ fn every_asio_reason_code_reads_in_slovak() {
         assert_eq!(asio_reason_sk(code), sk, "{code}");
     }
 }
+
+/// #233 review round 1: "(nenájdený)" only against a KNOWN list.
+#[test]
+fn the_driver_options_mark_a_stored_driver_only_a_known_list_lacks() {
+    let dvs = "Dante Virtual Soundcard (x64)";
+    let blackmagic = "Blackmagic ASIO";
+    let listed = vec![dvs.to_string(), blackmagic.to_string()];
+    let pair = |value: &str, label: &str| (value.to_string(), label.to_string());
+    let both = vec![pair(dvs, dvs), pair(blackmagic, blackmagic)];
+    assert_eq!(asio_driver_options(Some(&listed), blackmagic), both);
+    assert_eq!(asio_driver_options(Some(&listed), ""), both);
+    let mut with_old = both.clone();
+    with_old.push(pair("Old Card ASIO", "Old Card ASIO (nenájdený)"));
+    assert_eq!(
+        asio_driver_options(Some(&listed), "Old Card ASIO"),
+        with_old
+    );
+    assert_eq!(
+        asio_driver_options(Some(&[]), "Old Card ASIO"),
+        vec![pair("Old Card ASIO", "Old Card ASIO (nenájdený)")],
+        "a known empty list lacks it too"
+    );
+    assert_eq!(
+        asio_driver_options(None, "Old Card ASIO"),
+        vec![pair("Old Card ASIO", "Old Card ASIO")],
+        "an unknown list marks nothing"
+    );
+    assert_eq!(asio_driver_options(None, ""), Vec::new());
+}
