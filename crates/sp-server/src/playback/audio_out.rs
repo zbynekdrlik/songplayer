@@ -123,6 +123,14 @@ pub fn vban_latency_ms(delay_ms: u32, rate_hz: u32) -> f64 {
 }
 
 impl RunningOutput {
+    /// #233: its thread could not start (a failed UDP bind or spawn): the
+    /// outputs task rebuilds it on its next pass instead of keeping it.
+    pub fn start_failed(&self) -> bool {
+        self.sink
+            .as_ref()
+            .is_some_and(|OutputSink::Vban(out)| out.start_error().is_some())
+    }
+
     /// This output's line of `outputs[]`.
     pub fn status(&self) -> OutputStatus {
         let e = &self.entry;

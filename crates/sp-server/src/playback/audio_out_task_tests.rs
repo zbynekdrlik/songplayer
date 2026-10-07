@@ -515,3 +515,29 @@ async fn a_failed_migration_is_tried_again_on_the_next_pass() {
     assert_eq!(running[0].entry.id, "out-1");
     assert_eq!(vban(&running[0]).format().rate_hz(), 48_000);
 }
+
+#[test]
+fn an_output_whose_thread_could_not_start_is_rebuilt_on_the_next_pass() {
+    // #233 review round 7: kept as unchanged, a failed start stayed silent
+    // until the entry was edited or SongPlayer restarted.
+    let a = entry("out-1", FIXED);
+    let out = Arc::new(VbanOut::new());
+    out.set_start_error(
+        "the VBAN thread did not start: binding the UDP socket failed: denied".to_string(),
+    );
+    let failed = RunningOutput {
+        entry: a.clone(),
+        built_rate: 48_000,
+        sink: Some(OutputSink::Vban(out)),
+        error: None,
+    };
+    assert!(failed.start_failed());
+    assert!(!ran(&a, 48_000).start_failed(), "no sink: nothing failed");
+    assert_eq!(
+        plan(&[failed], &[a], 48_000),
+        Plan {
+            steps: vec![Step::Build],
+            stop: vec![0]
+        }
+    );
+}
