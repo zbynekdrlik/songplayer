@@ -60,6 +60,14 @@ impl From<std::io::Error> for PeerError {
     }
 }
 
+/// A database step of an adopter (lanes 8-9: recording a fetched artifact on
+/// this node's row) is a local failure too.
+impl From<sqlx::Error> for PeerError {
+    fn from(e: sqlx::Error) -> Self {
+        Self::Io(e.to_string())
+    }
+}
+
 /// The error an HTTP status means; `None` for a success.
 pub fn status_error(status: u16) -> Option<PeerError> {
     match status {
