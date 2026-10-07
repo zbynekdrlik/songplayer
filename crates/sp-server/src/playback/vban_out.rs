@@ -617,7 +617,9 @@ impl VbanSink for UdpSocket {
 }
 
 /// How long to wait from `now_100ns` for a packet due at `at_100ns`: never
-/// negative, never more than [`VBAN_MAX_WAIT_100NS`].
+/// negative, never more than [`VBAN_MAX_WAIT_100NS`] (#210's tests; the sender
+/// plans with [`plan_wait_up_to`] and its own cap).
+#[cfg(test)]
 pub fn plan_wait_100ns(now_100ns: i64, at_100ns: i64) -> i64 {
     plan_wait_up_to(now_100ns, at_100ns, VBAN_MAX_WAIT_100NS)
 }

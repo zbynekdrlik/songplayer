@@ -2,11 +2,17 @@
 //!
 //! The program's audio is one 1600-frame block of 48 kHz stereo interleaved
 //! f32 per 30 fps grid boundary (`sp_ndi::AudioFrame`, the same samples
-//! `SP-program` carries). [`VbanEncoder::encode_block`] turns one block into
-//! [`VBAN_PACKETS_PER_BLOCK`] packets of [`VBAN_FRAMES_PER_PACKET`] frames each,
-//! as PCM INT24, and [`packet_send_at_100ns`] says when each packet goes out, so
-//! the sender (`vban_out.rs`) sends an on-time packet every 1/240 s (a late
-//! block's past-due packets go out back-to-back and count as late sends).
+//! `SP-program` carries). #233: [`VbanEncoder::encode_into`] turns one block
+//! (converted to its destination's rate first, `vban_rate.rs`) into that
+//! destination's packets ([`VbanFormat`]: 8 packets of 200 frames as PCM INT24
+//! at 48 kHz, FOH's), and [`packet_send_at_in`] says when each one goes out,
+//! so the sender (`vban_out.rs`) sends an on-time packet every
+//! `1 / (30 · packets)` s, 1/240 s at 48 kHz INT24 (a late block's past-due
+//! packets go out back-to-back and count as late sends). #210's 48 kHz INT24
+//! entry points (`encode_block`, `write_header`, `packet_offset_100ns`,
+//! `packet_send_at_100ns`, `empty_block_packets`) are test-only wrappers over
+//! the `PROGRAM` format, so #210's own tests still run unchanged against the
+//! 0.72.0 bytes.
 //!
 //! Wire format, per the VB-Audio "VBAN Protocol Specifications" (revision 13,
 //! SEP 2025), little-endian throughout. The 28-byte header is:
@@ -102,7 +108,8 @@ const _: () = assert!(VBAN_PAYLOAD_LEN <= VBAN_DATA_MAX);
 /// One packet on the wire.
 pub type VbanPacket = [u8; VBAN_PACKET_LEN];
 
-/// The 8 packets of one block.
+/// The 8 packets of one block (#210's 48 kHz INT24 layout; test-only).
+#[cfg(test)]
 pub type VbanBlockPackets = [VbanPacket; VBAN_PACKETS_PER_BLOCK];
 
 /// The stream-name field for `name`: its first 16 characters as ASCII (any
@@ -282,7 +289,8 @@ pub fn write_header_as(
 }
 
 /// Write the 28-byte header for one packet into `out[..VBAN_HEADER_LEN]`
-/// (= the `PROGRAM` format).
+/// (= the `PROGRAM` format; #210's tests).
+#[cfg(test)]
 pub fn write_header(out: &mut [u8], name: &[u8; VBAN_STREAM_NAME_LEN], counter: u32) {
     write_header_as(VbanFormat::PROGRAM, out, name, counter);
 }
@@ -305,14 +313,17 @@ pub fn packet_send_at_in(fmt: VbanFormat, due_100ns: i64, latency_100ns: i64, k:
 }
 
 /// Offset of packet `k` from its block's first packet (100 ns): `k / 240 s`,
-/// floored — 0, 41 666, 83 333, 125 000, …, 291 666 (= the `PROGRAM` format).
+/// floored — 0, 41 666, 83 333, 125 000, …, 291 666 (= the `PROGRAM` format;
+/// #210's tests).
+#[cfg(test)]
 pub fn packet_offset_100ns(k: usize) -> i64 {
     packet_offset_in(VbanFormat::PROGRAM, k)
 }
 
 /// When packet `k` of the block for the boundary `due_100ns` is sent:
 /// `due + latency + k / 240 s`, on the program's wall domain (= the
-/// `PROGRAM` format).
+/// `PROGRAM` format; #210's tests).
+#[cfg(test)]
 pub fn packet_send_at_100ns(due_100ns: i64, latency_100ns: i64, k: usize) -> i64 {
     packet_send_at_in(VbanFormat::PROGRAM, due_100ns, latency_100ns, k)
 }
@@ -368,7 +379,8 @@ impl VbanEncoder {
     /// Encode one 48 kHz INT24 block into `out` (= the `PROGRAM` format):
     /// packet `k` carries interleaved samples `k·400 .. (k+1)·400` of
     /// `samples`, or silence when `samples` is `None` or not exactly
-    /// [`VBAN_BLOCK_SAMPLES`] long.
+    /// [`VBAN_BLOCK_SAMPLES`] long. #210's tests.
+    #[cfg(test)]
     pub fn encode_block(
         &mut self,
         name: &[u8; VBAN_STREAM_NAME_LEN],
@@ -385,7 +397,8 @@ impl VbanEncoder {
     }
 }
 
-/// A block's packets, zeroed (the encoder's reusable output buffer).
+/// A block's packets, zeroed (#210's tests).
+#[cfg(test)]
 pub fn empty_block_packets() -> Box<VbanBlockPackets> {
     Box::new([[0u8; VBAN_PACKET_LEN]; VBAN_PACKETS_PER_BLOCK])
 }
