@@ -4,9 +4,9 @@
 //! edits these types and runs the same validation the server runs on a
 //! settings PATCH (`sp-server` `playback/audio_out_config.rs`).
 //!
-//! An entry is built with [`OutputEntry::vban`] (lane 3 adds an ASIO
-//! constructor) or by the server's parser, never by a struct literal
-//! elsewhere, so a new transport's field touches only those places.
+//! An entry is built with [`OutputEntry::vban`] / [`OutputEntry::asio`] or by
+//! the server's parser, never by a struct literal elsewhere, so a new
+//! transport's field touches only those places.
 
 use std::fmt;
 
@@ -24,6 +24,12 @@ pub const DEFAULT_NETWORK_RATE: u32 = 48_000;
 pub const MAX_OUTPUTS: usize = 16;
 /// VBAN entries: each is one paced MMCSS thread (#210's `VBAN_MAX_TARGETS`).
 pub const MAX_VBAN_OUTPUTS: usize = 8;
+/// ASIO entries: each owns one driver on its own worker thread.
+pub const MAX_ASIO_OUTPUTS: usize = 4;
+/// An ASIO driver's registry description, characters.
+pub const MAX_DRIVER_NAME_LEN: usize = 128;
+/// The highest ASIO output channel an entry names (0-based; shown 1-based).
+pub const MAX_ASIO_CHANNEL: u32 = 511;
 pub const MAX_DELAY_MS: u32 = 2_000;
 pub const MAX_ID_LEN: usize = 32;
 pub const MAX_NAME_LEN: usize = 64;
@@ -31,26 +37,29 @@ pub const MAX_HOST_LEN: usize = 253;
 pub const MAX_STREAM_NAME_LEN: usize = 16;
 pub const DEFAULT_VBAN_PORT: u16 = 6980;
 
-/// The transport of an output (lane 3 adds `Asio`).
+/// The transport of an output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputType {
     Vban,
+    Asio,
 }
 
 impl OutputType {
     /// The values `type` accepts, for an error text.
-    pub const NAMES: &'static str = "vban";
+    pub const NAMES: &'static str = "vban or asio";
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Vban => "vban",
+            Self::Asio => "asio",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "vban" => Some(Self::Vban),
+            "asio" => Some(Self::Asio),
             _ => None,
         }
     }
@@ -154,6 +163,16 @@ pub struct VbanDest {
     pub format: VbanSampleFormat,
 }
 
+/// Where an ASIO output plays: a registered driver (its registry
+/// description) and its two output channels, left and right (0-based; the
+/// dashboard shows them 1-based). The driver's rate, buffer and sample type
+/// are the driver's own: an ASIO entry's `rate` is kept as stored, unused.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AsioDest {
+    pub driver: String,
+    pub channels: [u32; 2],
+}
+
 /// One output of the list.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputEntry {
@@ -169,6 +188,8 @@ pub struct OutputEntry {
     pub delay_ms: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vban: Option<VbanDest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asio: Option<AsioDest>,
 }
 
 impl OutputEntry {
@@ -182,6 +203,21 @@ impl OutputEntry {
             rate: RateChoice::Network,
             delay_ms: 0,
             vban: Some(dest),
+            asio: None,
+        }
+    }
+
+    /// An enabled ASIO entry, no delay (its rate is the driver's).
+    pub fn asio(id: &str, name: &str, dest: AsioDest) -> Self {
+        Self {
+            id: id.to_string(),
+            name: name.to_string(),
+            kind: OutputType::Asio,
+            enabled: true,
+            rate: RateChoice::Network,
+            delay_ms: 0,
+            vban: None,
+            asio: Some(dest),
         }
     }
 }
@@ -197,6 +233,9 @@ pub enum Problem {
     TooLarge,
     Missing,
     BadPort,
+    OutOfRange,
+    SameChannel,
+    DriverTaken,
 }
 
 impl Problem {
@@ -210,6 +249,11 @@ impl Problem {
             Self::TooLarge => "is over 2000 ms",
             Self::Missing => "is missing",
             Self::BadPort => "must be 1-65535",
+            Self::OutOfRange => "must be 0-511",
+            Self::SameChannel => "must name two different channels",
+            Self::DriverTaken => {
+                "is already used by an earlier ASIO entry (a driver takes one client)"
+            }
         }
     }
 
@@ -225,6 +269,10 @@ impl Problem {
             Self::TooLarge => "má viac ako 2000 ms",
             Self::Missing => "chýba",
             Self::BadPort => "musí byť 1 až 65535",
+            // The dashboard shows the channels 1-based.
+            Self::OutOfRange => "musí byť 1 až 512",
+            Self::SameChannel => "musí obsahovať dva rôzne kanály",
+            Self::DriverTaken => "je už použité iným výstupom ASIO (ovládač berie jedného klienta)",
         }
     }
 }
@@ -241,6 +289,9 @@ fn field_sk(field: &'static str) -> &'static str {
         "vban.host" => "cieľ",
         "vban.port" => "port",
         "vban.stream_name" => "názov streamu",
+        "asio" => "nastavenie ASIO",
+        "asio.driver" => "ovládač",
+        "asio.channels" => "kanály",
         _ => field,
     }
 }
@@ -375,6 +426,28 @@ fn host_problem(host: &str) -> Option<Problem> {
     }
 }
 
+fn driver_problem(driver: &str) -> Option<Problem> {
+    if driver.trim().is_empty() {
+        Some(Problem::Empty)
+    } else if driver.chars().count() > MAX_DRIVER_NAME_LEN {
+        Some(Problem::TooLong)
+    } else if driver.chars().any(char::is_control) {
+        Some(Problem::BadCharacters)
+    } else {
+        None
+    }
+}
+
+fn channels_problem(channels: [u32; 2]) -> Option<Problem> {
+    if channels.iter().any(|&c| c > MAX_ASIO_CHANNEL) {
+        Some(Problem::OutOfRange)
+    } else if channels[0] == channels[1] {
+        Some(Problem::SameChannel)
+    } else {
+        None
+    }
+}
+
 fn stream_problem(name: &str) -> Option<Problem> {
     if name.is_empty() {
         Some(Problem::Empty)
@@ -425,37 +498,75 @@ pub fn validate_entry(index: usize, e: &OutputEntry) -> Result<(), EntryError> {
                 return Err(err("vban.stream_name", p));
             }
         }
+        OutputType::Asio => {
+            let Some(a) = &e.asio else {
+                return Err(err("asio", Problem::Missing));
+            };
+            if let Some(p) = driver_problem(&a.driver) {
+                return Err(err("asio.driver", p));
+            }
+            if let Some(p) = channels_problem(a.channels) {
+                return Err(err("asio.channels", p));
+            }
+        }
     }
     Ok(())
 }
 
-/// The whole list: at most [`MAX_OUTPUTS`] entries and
-/// [`MAX_VBAN_OUTPUTS`] VBAN ones, every entry valid, ids unique.
+/// The driver of an ASIO entry (`None` for any other type).
+pub fn asio_driver(e: &OutputEntry) -> Option<&str> {
+    match e.kind {
+        OutputType::Asio => e.asio.as_ref().map(|a| a.driver.as_str()),
+        OutputType::Vban => None,
+    }
+}
+
+/// `e` names the driver of an ASIO entry in `earlier` (a driver takes one
+/// client; a switched-off entry still names its driver).
+pub fn driver_taken(earlier: &[OutputEntry], e: &OutputEntry) -> bool {
+    asio_driver(e).is_some_and(|d| earlier.iter().any(|p| asio_driver(p) == Some(d)))
+}
+
+/// How many entries of a type the list may hold.
+pub fn max_of_type(kind: OutputType) -> usize {
+    match kind {
+        OutputType::Vban => MAX_VBAN_OUTPUTS,
+        OutputType::Asio => MAX_ASIO_OUTPUTS,
+    }
+}
+
+/// The whole list: at most [`MAX_OUTPUTS`] entries, [`MAX_VBAN_OUTPUTS`]
+/// VBAN and [`MAX_ASIO_OUTPUTS`] ASIO ones, every entry valid, ids unique,
+/// each ASIO driver named once ([`driver_taken`]).
 pub fn validate_list(entries: &[OutputEntry]) -> Result<(), ListError> {
     if entries.len() > MAX_OUTPUTS {
         return Err(ListError::TooMany {
             count: entries.len(),
         });
     }
-    let vban = entries
-        .iter()
-        .filter(|e| e.kind == OutputType::Vban)
-        .count();
-    if vban > MAX_VBAN_OUTPUTS {
-        return Err(ListError::TooManyOfType {
-            kind: OutputType::Vban,
-            count: vban,
-            max: MAX_VBAN_OUTPUTS,
-        });
+    for kind in [OutputType::Vban, OutputType::Asio] {
+        let count = entries.iter().filter(|e| e.kind == kind).count();
+        let max = max_of_type(kind);
+        if count > max {
+            return Err(ListError::TooManyOfType { kind, count, max });
+        }
     }
     for (i, e) in entries.iter().enumerate() {
         validate_entry(i, e).map_err(ListError::Entry)?;
-        if entries[..i].iter().any(|p| p.id == e.id) {
+        let earlier = &entries[..i];
+        let problem = if earlier.iter().any(|p| p.id == e.id) {
+            Some(("id", Problem::Duplicate))
+        } else if driver_taken(earlier, e) {
+            Some(("asio.driver", Problem::DriverTaken))
+        } else {
+            None
+        };
+        if let Some((field, problem)) = problem {
             return Err(ListError::Entry(EntryError {
                 index: i,
                 id: e.id.clone(),
-                field: "id",
-                problem: Problem::Duplicate,
+                field,
+                problem,
             }));
         }
     }
@@ -498,6 +609,22 @@ pub fn new_vban(entries: &[OutputEntry]) -> OutputEntry {
             port: DEFAULT_VBAN_PORT,
             stream_name: default_stream_name(),
             format: VbanSampleFormat::Int24,
+        },
+    )
+}
+
+/// The entry the dashboard's "add ASIO" creates: the driver it is given
+/// (the first one the box lists, or none, which validation refuses) on
+/// channels 1 and 2.
+pub fn new_asio(entries: &[OutputEntry], driver: &str) -> OutputEntry {
+    let id = next_id(entries);
+    let n = id_number(&id).unwrap_or(1);
+    OutputEntry::asio(
+        &id,
+        &format!("ASIO {n}"),
+        AsioDest {
+            driver: driver.to_string(),
+            channels: [0, 1],
         },
     )
 }

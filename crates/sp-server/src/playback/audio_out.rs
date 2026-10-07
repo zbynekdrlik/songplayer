@@ -135,7 +135,7 @@ impl RunningOutput {
     pub fn status(&self) -> OutputStatus {
         let e = &self.entry;
         match e.kind {
-            OutputType::Vban => {
+            OutputType::Vban | OutputType::Asio => {
                 let st = self
                     .sink
                     .as_ref()

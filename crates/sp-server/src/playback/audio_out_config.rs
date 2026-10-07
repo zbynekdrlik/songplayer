@@ -13,8 +13,9 @@ use std::collections::BTreeMap;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 use sp_core::audio_outputs::{
-    EntryError, MAX_OUTPUTS, MAX_VBAN_OUTPUTS, OutputEntry, OutputType, Problem, RateChoice,
-    SUPPORTED_RATES, VbanDest, VbanSampleFormat, shown_id, validate_entry, validate_list,
+    AsioDest, EntryError, MAX_ASIO_OUTPUTS, MAX_OUTPUTS, MAX_VBAN_OUTPUTS, OutputEntry, OutputType,
+    Problem, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat, driver_taken, max_of_type,
+    shown_id, validate_entry, validate_list,
 };
 use sp_core::config::{
     DEFAULT_VBAN_STREAM_NAME, SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate,
@@ -23,7 +24,7 @@ use sqlx::SqlitePool;
 
 // The stored read caps each type; their sum stays within the list's total,
 // so a stored list never runs more than `MAX_OUTPUTS` outputs.
-const _: () = assert!(MAX_VBAN_OUTPUTS <= MAX_OUTPUTS);
+const _: () = assert!(MAX_VBAN_OUTPUTS + MAX_ASIO_OUTPUTS <= MAX_OUTPUTS);
 
 type Fields = BTreeMap<String, Box<RawValue>>;
 
@@ -96,7 +97,17 @@ fn vban_dest(raw: &RawValue, at: &str) -> Result<VbanDest, String> {
     })
 }
 
-/// Entry `index` read field by field (no validation of values yet).
+/// An ASIO entry's `asio` block (`[u32; 2]` refuses a third channel).
+fn asio_dest(raw: &RawValue, at: &str) -> Result<AsioDest, String> {
+    let r = Reader::of(raw, at, "asio.", &format!("{at}: asio"))?;
+    Ok(AsioDest {
+        driver: r.req("driver")?,
+        channels: r.req("channels")?,
+    })
+}
+
+/// Entry `index` read field by field (no validation of values yet). Each
+/// type reads only its own block.
 fn entry(index: usize, raw: &RawValue) -> Result<OutputEntry, String> {
     let first = format!("entry {}", index + 1);
     let head = Reader::of(raw, &first, "", &first)?;
@@ -112,8 +123,9 @@ fn entry(index: usize, raw: &RawValue) -> Result<OutputEntry, String> {
     let kind_text: String = r.req("type")?;
     let kind = OutputType::parse(&kind_text)
         .ok_or_else(|| format!("{at}: type must be {}", OutputType::NAMES))?;
-    let vban = match kind {
-        OutputType::Vban => Some(vban_dest(r.raw("vban")?, &at)?),
+    let (vban, asio) = match kind {
+        OutputType::Vban => (Some(vban_dest(r.raw("vban")?, &at)?), None),
+        OutputType::Asio => (None, Some(asio_dest(r.raw("asio")?, &at)?)),
     };
     Ok(OutputEntry {
         id,
@@ -123,6 +135,7 @@ fn entry(index: usize, raw: &RawValue) -> Result<OutputEntry, String> {
         rate: r.opt::<RateChoice>("rate")?.unwrap_or_default(),
         delay_ms: r.opt("delay_ms")?.unwrap_or(0),
         vban,
+        asio,
     })
 }
 
@@ -149,29 +162,33 @@ pub struct Stored {
 impl Stored {
     /// Keep entry `index` unless it breaks a rule the kept ones set: its own
     /// validation, a duplicate id, the per-type cap (whose sum stays within
-    /// `MAX_OUTPUTS`, the const assert above).
+    /// `MAX_OUTPUTS`, the const assert above), an ASIO driver a kept entry
+    /// already names.
     fn keep(&mut self, index: usize, e: OutputEntry) {
-        let vban = self
-            .entries
-            .iter()
-            .filter(|k| k.kind == OutputType::Vban)
-            .count();
+        let of_type = self.entries.iter().filter(|k| k.kind == e.kind).count();
+        let max = max_of_type(e.kind);
+        let entry_error = |field: &'static str, problem: Problem| {
+            EntryError {
+                index,
+                id: e.id.clone(),
+                field,
+                problem,
+            }
+            .to_string()
+        };
         let refusal = if let Err(err) = validate_entry(index, &e) {
             Some(err.to_string())
         } else if self.entries.iter().any(|k| k.id == e.id) {
-            let dup = EntryError {
-                index,
-                id: e.id.clone(),
-                field: "id",
-                problem: Problem::Duplicate,
-            };
-            Some(dup.to_string())
-        } else if e.kind == OutputType::Vban && vban >= MAX_VBAN_OUTPUTS {
+            Some(entry_error("id", Problem::Duplicate))
+        } else if of_type >= max {
             Some(format!(
-                "entry {} (id {}): over the {MAX_VBAN_OUTPUTS} vban entries",
+                "entry {} (id {}): over the {max} {} entries",
                 index + 1,
-                shown_id(&e.id)
+                shown_id(&e.id),
+                e.kind.as_str()
             ))
+        } else if driver_taken(&self.entries, &e) {
+            Some(entry_error("asio.driver", Problem::DriverTaken))
         } else {
             None
         };

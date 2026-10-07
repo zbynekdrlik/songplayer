@@ -52,10 +52,12 @@ pub struct Plan {
     pub stop: Vec<usize>,
 }
 
-/// The rate an entry's output is built for.
+/// The rate an entry's output is built for. An ASIO output follows its
+/// driver's rate (`0`), so a network-rate change never rebuilds it.
 pub fn build_rate(entry: &OutputEntry, network_rate: u32) -> u32 {
     match entry.kind {
         OutputType::Vban => effective_rate(entry.rate, network_rate),
+        OutputType::Asio => 0,
     }
 }
 
@@ -166,6 +168,7 @@ async fn build(
             (Err(e), _) => output.error = Some(e),
             (Ok(_), None) => output.error = Some("not a VBAN entry".into()),
         },
+        OutputType::Asio => output.error = Some("this build runs no ASIO output yet".into()),
     }
     output
 }
