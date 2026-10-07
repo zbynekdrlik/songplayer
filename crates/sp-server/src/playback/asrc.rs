@@ -110,6 +110,9 @@ pub struct Splice {
 impl Splice {
     /// For a card at `device_rate_hz`; `max_insert_frames` and
     /// `max_block_frames` size the buffer once (no allocation per block).
+    /// The servo's largest insert is its start re-centre, up to the target
+    /// latency (`asrc_servo::BASE_LATENCY_100NS` + the entry's delay) in
+    /// frames; a bigger one reallocates once, on the worker thread.
     pub fn new(device_rate_hz: f64, max_insert_frames: usize, max_block_frames: usize) -> Self {
         let fade = ((device_rate_hz * SPLICE_FADE_S).round() as usize).max(1);
         Self {

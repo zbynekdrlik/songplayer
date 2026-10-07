@@ -22,8 +22,9 @@
 //!   window's means): the least-squares slope over up to 600 s is the card's
 //!   ppm against the wall, used once 30 points span 60 s (camera-box #1084).
 //! - level loop: P 2 ppm/ms on a 10 s EMA of the window-mean latency error,
-//!   ±50 ppm; I 0.0002 ppm/(ms·s), ±3 ppm, frozen while rate + P + I
-//!   saturates (camera-box #1335 follow-up 5).
+//!   ±50 ppm (camera-box #1335 follow-up 5); I 0.0002 ppm/(ms·s), ±3 ppm,
+//!   frozen while rate + P + I saturates (the plan's form: camera-box freezes
+//!   on its estimate + bias + I, without P).
 //! - output: clamp(rate + P + I, ±300 ppm), moved at most 5 ppm per second of
 //!   the wall (camera-box #803: inaudible).
 //! - steps: a block more than one slot off target re-centres at once by its
@@ -33,9 +34,10 @@
 //!   average the driver's callback sawtooth; a transient already passed
 //!   splices nothing). The worker inserts or skips under fades
 //!   (`asrc::Splice`). A rate point more than 10 ms off the fit re-bases the
-//!   regression (#1335 follow-up 2) and the next point realigns onto the moved
-//!   line (the same straddle splits a step across two window means); a whole
-//!   step under 10 ms enters it as a point (camera-box's design).
+//!   regression (#1335 follow-up 2): it stays out, and the next point moves
+//!   the line by the whole step (the same straddle splits a step across two
+//!   window means); a whole step under 10 ms enters it as a point
+//!   (camera-box's design).
 //!
 //! Integers (100 ns) where a boundary is pinned (latency, window span), f64
 //! for the regression. Sign: a POSITIVE correction makes MORE output per
@@ -93,11 +95,12 @@ pub const RECENT_BLOCKS: usize = 8;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Offered {
     Inserted,
-    /// A step once the fit has its points: the line moved, the slope kept.
+    /// A step once the fit has its points: the point stays out, and the next
+    /// one moves the line onto the step (the slope kept).
     Rebased,
-    /// The point after a re-base, moved onto the new line whatever its
-    /// residual: a step inside a 1 s window shows partly in that window's
-    /// mean and fully in the next one's.
+    /// The point after a re-base: the line moves by its whole residual — a
+    /// step inside a 1 s window shows partly in that window's mean and fully
+    /// in the next one's.
     Realigned,
     /// A step before the fit has its points: the points start over.
     Restarted,
@@ -160,15 +163,16 @@ impl RateRegression {
             && let Some((slope, intercept, x0)) = self.fit()
         {
             let residual = y - (intercept + slope * (x_s - x0));
-            if residual.abs() > STEP_RESIDUAL_S {
-                self.offset_s += residual;
-                self.realign_next = true;
-                return Offered::Rebased;
-            }
+            // The point after a step moves the line by the whole step,
+            // whatever is left of it: one step re-bases once.
             if self.realign_next {
                 self.offset_s += residual;
                 self.realign_next = false;
                 return Offered::Realigned;
+            }
+            if residual.abs() > STEP_RESIDUAL_S {
+                self.realign_next = true;
+                return Offered::Rebased;
             }
         } else if let Some(&(_, last)) = self.points.back()
             && (y - last).abs() > STEP_RESIDUAL_S

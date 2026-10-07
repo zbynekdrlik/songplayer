@@ -72,8 +72,10 @@ fast, or too little is buffered); rubato's relative ratio is `1 + ppm·1e-6`.
 mean consumed/rate − (handled − origin)); the OLS slope over ≤ 600 s is the
 card's ppm, used once 30 points span 60 s; P on a 10 s EMA of the
 window-mean error, ±50; I ±3, frozen while |rate + P + I| ≥ 300 (I's own
-share counts); clamp ±300, slew ≤ 5 ppm per second of wall (dt = the 100 ns
-between applied windows).
+share counts; the plan's form — camera-box freezes on its estimate + bias +
+I, without P); clamp ±300, slew ≤ 5 ppm per second of wall (dt = the 100 ns
+between applied windows, floored at 0, not capped: after a forward wall
+step the slew may move 5·step ppm in one window).
 
 **Steps:** a block more than one slot off target RE-CENTRES at once by its
 own error. A window mean more than 10 ms off RE-CENTRES by the mean error of
@@ -93,12 +95,19 @@ window's whole error, step plus any standing offset: a −10.5 ms step on a
 −45 ppm card whose level still stands 1.7 ms high from the start-up reads
 −8.8 ms and is left to the level loop (pinned among the honest bounds). A
 window whose wall goes back before its first point starts over (it would
-otherwise stay open the step + 1 s). A rate point more than 10 ms off the fit (once the
-fit has 30 points) RE-BASES the regression (the offset absorbs the step, the
-slope stays) and the NEXT point REALIGNS onto the moved line whatever its
-residual (`Offered::Realigned`): the same straddle splits a step across two
-window means, and a remainder under 10 ms would otherwise sit in the
-regression as a level shift (~17 ppm of rate bias for a span). Before the
+otherwise stay open the step + 1 s). Known limit (review round 4, not fixed):
+a pure wall step of ≳ 110 ms landing mid-window makes that window read over
+100 000 ppm and FLUSHES the regression — the lock returns 60 s later, the
+correction slewing to P + I meanwhile; the same step at a window start only
+re-bases. A restart on a forward gap would need dense observations in every
+unit test (they feed 1 s-sparse ones). A rate point more than 10 ms off the fit (once the
+fit has 30 points) RE-BASES the regression: that point stays out, and the
+NEXT point REALIGNS — the offset moves by its whole residual, the slope stays
+(`Offered::Realigned`, checked before the step test, so one step re-bases
+once and `rebases` counts steps; with the offset moved only there, no
+equivalent mutant hides in a second offset update): the same straddle splits a step
+across two window means, and a remainder under 10 ms would otherwise sit in
+the regression as a level shift (~17 ppm of rate bias for a span). Before the
 fit has its points a step RESTARTS it. A window measuring > 100 000 ppm (a
 stalled card) FLUSHES it and holds the correction; `status()` reads the rate
 and the lock from the regression, so the flush shows at once. A whole step
