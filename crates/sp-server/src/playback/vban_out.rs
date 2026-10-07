@@ -415,10 +415,14 @@ impl VbanOut {
     }
 
     /// Hand one block over. Never blocks; over the bound (#233: [`queue_bound`]
-    /// of the delay) the oldest block is dropped and counted.
+    /// of the delay) the oldest block is dropped and counted. #233: a stopped
+    /// output (discarded, or shutting down) takes no more blocks.
     pub fn push(&self, block: ProgramBlock) {
         let dropped = {
             let mut q = lock(&self.queue);
+            if q.stop {
+                return;
+            }
             q.blocks.push_back(block);
             let over = q.blocks.len() > self.bound;
             if over {
