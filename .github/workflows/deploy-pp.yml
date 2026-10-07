@@ -5,10 +5,11 @@ name: Deploy to PP
 # here (never re-run an OLD deploy-pp run: it is refused once main moved on).
 # A dev build, or an older one, reaches PP only on purpose: dispatch this
 # workflow with the id of the CI run whose build PP gets (it must be a
-# completed, green push run of CI, scripts/pp_deploy_pick.py). PP's settings live in PP's DB and no
-# deploy step writes it (the gate's scene presses persist only the program
-# source, as every press does), nor the phase-0 scheduled task, ACL or
-# firewall.
+# completed, green push run of CI, scripts/pp_deploy_pick.py). PP's settings
+# live in PP's DB and no deploy step writes it (the server does: its
+# migrations, and the gate's presses save the program source and a started
+# song's play history, as any press does), nor the phase-0 scheduled task,
+# ACL or firewall.
 # The rules: .claude/rules/peer-exchange.md, "PP deploy".
 on:
   workflow_run:
@@ -131,9 +132,12 @@ jobs:
             Write-Error "FAIL: this runner is $env:COMPUTERNAME, not RESOLUME-PP - its labels are wrong; not touching it"
             exit 1
           }
-          if ($env:EVENT_NAME -eq "workflow_run") {
+          # Fail closed: every event but an explicit dispatch is checked. The
+          # ref read builds no diff (GET /commits/main would, and can time
+          # out on a large merge).
+          if ($env:EVENT_NAME -ne "workflow_dispatch") {
             $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
-            $tip = (Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/commits/main" -Headers $headers -TimeoutSec 30).sha
+            $tip = (Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/git/ref/heads/main" -Headers $headers -TimeoutSec 30).object.sha
             if ($tip -ne $env:HEAD_SHA) {
               Write-Error "FAIL: this release is $env:HEAD_SHA but main is now $tip (a re-run of an old deploy-pp run?) - dispatch the build PP should get instead"
               exit 1
@@ -226,6 +230,11 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+          # It also runs after the box check failed: a wrong box is not touched.
+          if ($env:COMPUTERNAME -ine "RESOLUME-PP") {
+            Write-Error "FAIL: this runner is $env:COMPUTERNAME, not RESOLUME-PP - not touching it"
+            exit 1
+          }
           $task = Get-ScheduledTask -TaskName "SongPlayer" -ErrorAction SilentlyContinue
           if (-not $task) {
             Write-Error "FAIL: no SongPlayer scheduled task at PP - the phase 0 install creates it (issue 229)"
@@ -290,6 +299,16 @@ jobs:
     runs-on: [self-hosted, windows, resolume-pp]
     timeout-minutes: 20
     steps:
+      # The suite presses scenes and cuts the program: never on another box
+      # that carries resolume-pp by mistake.
+      - name: Check the box (RESOLUME-PP)
+        shell: powershell
+        run: |
+          if ($env:COMPUTERNAME -ine "RESOLUME-PP") {
+            Write-Error "FAIL: this runner is $env:COMPUTERNAME, not RESOLUME-PP - its labels are wrong; not touching it"
+            exit 1
+          }
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.resolve.outputs.head_sha }}
