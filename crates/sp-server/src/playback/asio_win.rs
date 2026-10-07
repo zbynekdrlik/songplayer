@@ -6,9 +6,13 @@
 //! gate (`.cargo/mutants.toml`, like `sp-gpu/src/win/`).
 //!
 //! - Every driver call is made on the output's worker thread, which created
-//!   the driver (`azo::driver::SafeHandle::new` initialises COM as an STA
-//!   there and uninitialises it on drop) and pumps its window messages in
-//!   `poll`.
+//!   the driver and pumps its window messages in `poll`. The device holds
+//!   that thread's COM apartment (an STA, [`ComApartment`]) from `new` until
+//!   it is dropped: azo's `SafeHandle` initialises COM in `new` but
+//!   uninitialises it in its own `Drop`, BEFORE its interface field is
+//!   released, so without an outer apartment the driver's `Release` would
+//!   run after COM went down (review round 1; azo's own host keeps an outer
+//!   apartment the same way, `host.rs:105-111`).
 //! - It reads the driver's rate, preferred buffer, output channels and their
 //!   sample type, and never sets the rate, the clock source or the buffer,
 //!   nor opens the control panel (`ci.yml` scans `crates/` for those calls).
@@ -36,6 +40,7 @@ use azo::driver::{Driver, Metadata, SafeHandle};
 use azo::dto::ChannelId;
 use azo::sys::{Bool, Callbacks, MessageSelector, SampleRate, Time};
 use tracing::{error, info, warn};
+use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, TranslateMessage,
 };
@@ -265,6 +270,37 @@ fn pump_messages() {
     }
 }
 
+/// The calling thread's COM apartment (an STA), held until dropped.
+struct ComApartment {
+    /// The init succeeded (S_OK, or S_FALSE: already an STA), so the drop
+    /// owes one `CoUninitialize`.
+    held: bool,
+}
+
+impl ComApartment {
+    fn enter() -> Self {
+        // SAFETY: a plain COM init of the calling thread, balanced in Drop.
+        let hr = unsafe { CoInitializeEx(ptr::null(), COINIT_APARTMENTTHREADED as u32) };
+        if hr < 0 {
+            error!(
+                hr,
+                "asio output: COM refused this thread as an STA (a driver load will fail)"
+            );
+        }
+        Self { held: hr >= 0 }
+    }
+}
+
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        if self.held {
+            // SAFETY: balances this guard's successful init, on its thread
+            // (the device holding it is !Send: its stream pointer).
+            unsafe { CoUninitialize() };
+        }
+    }
+}
+
 /// One ASIO output's driver, on its worker thread.
 pub struct WinAsioDevice {
     driver: Option<SafeHandle>,
@@ -273,10 +309,13 @@ pub struct WinAsioDevice {
     slot: Option<usize>,
     stream: *mut Stream,
     buffers_created: bool,
+    /// The thread's STA, for the device's whole life; declared last, so it
+    /// drops last (after `Drop::drop` ran `close`, which releases the driver).
+    com: ComApartment,
 }
 
 impl WinAsioDevice {
-    /// No driver loaded.
+    /// No driver loaded; the calling (worker) thread is held as an STA.
     pub fn new() -> Self {
         Self {
             driver: None,
@@ -285,6 +324,7 @@ impl WinAsioDevice {
             slot: None,
             stream: ptr::null_mut(),
             buffers_created: false,
+            com: ComApartment::enter(),
         }
     }
 
@@ -365,8 +405,19 @@ impl AsioDevice for WinAsioDevice {
         else {
             return Err(Reason::NotFound { present });
         };
-        let driver = SafeHandle::new(&meta.clsid)
-            .map_err(|e| Reason::Failed(format!("loading the driver failed: {e}")))?;
+        let driver = match SafeHandle::new(&meta.clsid) {
+            Ok(driver) => driver,
+            Err(e) => {
+                // azo counted a COM init before its CoCreateInstance failed
+                // and never undoes it; inside the device's STA that init
+                // cannot have failed, so it is balanced here.
+                if self.com.held {
+                    // SAFETY: balances azo's init on this thread.
+                    unsafe { CoUninitialize() };
+                }
+                return Err(Reason::Failed(format!("loading the driver failed: {e}")));
+            }
+        };
         if !driver.init(None) {
             return Err(Reason::Busy(text(&driver.last_error())));
         }
@@ -498,7 +549,9 @@ impl AsioDevice for WinAsioDevice {
             warn!(%e, "asio output: disposing the driver's buffers failed (it is released anyway)");
         }
         self.buffers_created = false;
-        self.driver = None; // releases the driver, then CoUninitialize
+        // azo's handle uninitialises its own COM init, then releases the
+        // driver: still inside the device's apartment (`com`).
+        self.driver = None;
         self.opened = None;
         if let Some(i) = self.slot.take() {
             SLOTS[i].claimed.store(false, Ordering::SeqCst);
