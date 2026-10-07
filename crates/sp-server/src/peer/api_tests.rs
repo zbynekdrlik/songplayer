@@ -345,3 +345,19 @@ async fn an_artifact_is_sent_at_the_upload_cap() {
     assert_eq!((status, body.len()), (StatusCode::OK, 3_000));
     assert!(took >= std::time::Duration::from_millis(23), "{took:?}");
 }
+
+/// The video's duration from any of its rows (the first one may have none).
+#[tokio::test]
+async fn a_videos_duration_is_read_from_any_row() {
+    let node = snv_with_song().await;
+    let other = node.add_video_to(2, YT).await;
+    sqlx::query("UPDATE videos SET duration_ms = 241000 WHERE id = ?")
+        .bind(other)
+        .execute(node.pool())
+        .await
+        .unwrap();
+    let uri = format!("/api/v1/peer/videos/{YT}");
+    let (_, _, body) = call(&node, &uri, Some(SNV_KEY), None).await;
+    let v: PeerVideo = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v.duration_ms, Some(241_000));
+}

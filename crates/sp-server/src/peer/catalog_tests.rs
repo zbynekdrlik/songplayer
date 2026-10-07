@@ -331,3 +331,38 @@ fn listed_jobs_adds_each_queued_kind_once_and_sorts() {
         ]
     );
 }
+
+/// Rows of one video share its files (#136): stems the stem worker finished
+/// on another row are listed under the representative row's audio name.
+#[tokio::test]
+async fn stems_done_on_another_row_of_the_video_are_listed() {
+    let node = TestNode::start("snv", None).await;
+    let first = node.add_video(YT).await;
+    let (video, audio) = node.give_song(first, YT, "Way Maker", "Sinach").await;
+    let second = node.add_video_to(2, YT).await;
+    crate::db::models::mark_video_processed_pair(
+        node.pool(),
+        second,
+        "Way Maker",
+        "Sinach",
+        "gemini",
+        false,
+        &video.to_string_lossy(),
+        &audio.to_string_lossy(),
+    )
+    .await
+    .unwrap();
+    let (vocals, instrumental) = node.give_stems(second).await;
+    let files = artifact_files(node.pool(), node.cache(), None)
+        .await
+        .unwrap();
+    let stems: Vec<(ArtifactKind, PathBuf)> = files
+        .iter()
+        .filter(|f| f.kind == StemVocals || f.kind == StemInstrumental)
+        .map(|f| (f.kind, f.path.clone()))
+        .collect();
+    assert_eq!(
+        stems,
+        vec![(StemVocals, vocals), (StemInstrumental, instrumental)]
+    );
+}

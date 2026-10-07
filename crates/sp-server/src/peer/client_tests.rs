@@ -212,6 +212,12 @@ async fn an_unreachable_peer_is_unreachable() {
         .await
         .unwrap_err();
     assert!(matches!(err, PeerError::Unreachable(_)), "{err:?}");
+    let text = err.to_string().to_lowercase();
+    assert!(
+        text.contains("connect"),
+        "names the connect failure: {text}"
+    );
+    assert!(!text.contains("127.0.0.1"), "no URL: {text}");
 }
 
 #[tokio::test]
@@ -279,4 +285,22 @@ async fn a_bad_youtube_id_is_never_sent() {
         .await
         .unwrap_err();
     assert!(matches!(err, PeerError::BadResponse(_)));
+}
+
+/// A peer's video row must be the one asked for (lanes 8-9 adopt from it).
+#[tokio::test]
+async fn a_video_row_of_another_video_is_refused() {
+    let server = MockServer::start().await;
+    let row = r#"{"metadata":{"youtube_id":"bbbbbbbbbbb","song":"S","artist":"A",
+        "metadata_source":"gemini","gemini_failed":false},"duration_ms":null,"lyrics":null}"#;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/peer/videos/aaaaaaaaaaa"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(row))
+        .mount(&server)
+        .await;
+    let err = PeerClient::new()
+        .video(&peer_at(&server.uri(), false), "aaaaaaaaaaa")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, PeerError::BadResponse(_)), "{err:?}");
 }

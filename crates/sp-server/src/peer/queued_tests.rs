@@ -125,6 +125,24 @@ async fn lyrics_are_queued_as_the_lyrics_worker_picks_them() {
         )
         .await;
     }
+    // Review Focus 5: the catalog never serves lyrics for a video one of
+    // whose rows asked for the dub or holds the Live-Translate track, so its
+    // plain row is not announced as queued lyrics either.
+    let live = crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
+    let siblings = [
+        (1, "lyr_dubsib1", String::new()),
+        (2, "lyr_dubsib1", ", dub_requested = 1".to_string()),
+        (1, "lyr_ltsib01", String::new()),
+        (
+            2,
+            "lyr_ltsib01",
+            format!(", has_lyrics = 1, lyrics_source = '{live}', lyrics_pipeline_version = {v}"),
+        ),
+    ];
+    for (playlist, youtube_id, extra) in &siblings {
+        let set = format!("{DOWNLOADED}{extra}");
+        row(&node, *playlist, youtube_id, &set).await;
+    }
     assert_eq!(
         queued(node.pool()).await.unwrap(),
         of(
