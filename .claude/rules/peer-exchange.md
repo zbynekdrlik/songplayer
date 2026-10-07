@@ -568,11 +568,19 @@ workers ask their peers before they run a job (below, from "Ask first").
   path's own, #136: it re-reads a correction made meanwhile, and answers
   the title it recorded); a peer's title is recorded in `peer_fetches` too
   (kind `metadata`, `download::record_title`, the repair's own), only when
-  it is the title `record_download` wrote. The audio is renamed first; when
-  the video cannot take its name, the audio is removed again (the local
-  path's rule: no unrecorded audio under a final name) unless an audio was
-  already there (another row of the video, rows share files by name); the
-  video's verified part stays for the next ask (re-hashed, no transfer).
+  it is the title `record_download` wrote (`written_title`). Rows of one
+  video share files by name (#136), so a final name may hold another row's
+  file: the VIDEO is renamed first, and when it cannot take its name (that
+  row's video open in a player) nothing is touched and both verified parts
+  stay for the next ask (re-hashed, no transfer); when the audio then cannot
+  take its name, a video this attempt placed goes back into its part, a
+  video that was there stays.
+- `Exchange::run_here` drops the parts of the job's needed kinds
+  (`drop_job_parts`): a job that runs here (2 h bound, a fetch that kept
+  failing) leaves no orphaned part in `<cache>/peer/`.
+- Not this lane's (a follow-up candidate): the LOCAL download's "video rename
+  failed" branch (`downloader/mod.rs`) still removes `audio_final`
+  unconditionally, which can be another row's recorded audio.
 - `downloader/` is out of the mutation gate: the logic stays in `peer/`,
   only the hook lives in `downloader/mod.rs`; its tests are `mod_tests.rs`
   (moved out for the cap) + `mod_tests_peer.rs` (tools missing on purpose:
