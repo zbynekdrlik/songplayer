@@ -3,6 +3,7 @@
 //! another already did (`.claude/rules/peer-exchange.md`, spec
 //! `docs/superpowers/specs/2026-10-06-pp-site-node-exchange-design.md`).
 
+pub mod api;
 pub mod board;
 pub mod catalog;
 pub mod config;
@@ -61,9 +62,10 @@ impl Exchange {
     }
 }
 
-/// Every route of the exchange; `lib.rs` merges it into the app's router.
+/// Every route of the exchange: the LAN status (no key) and the peer API
+/// (`X-SP-Peer-Key`); `lib.rs` merges it into the app's router.
 pub fn router(ex: Arc<Exchange>) -> axum::Router {
-    lan::router(ex)
+    lan::router(ex.clone()).merge(api::router(ex))
 }
 
 #[cfg(test)]

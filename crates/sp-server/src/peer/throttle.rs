@@ -26,6 +26,25 @@ pub fn mbps_to_bytes(mbps: u32) -> u64 {
     u64::from(mbps) * 125_000
 }
 
+/// `body`, sent at no more than `rate` bytes/s (0 = as it comes).
+pub fn throttled(body: axum::body::Body, rate: u64) -> axum::body::Body {
+    use futures::StreamExt;
+    if rate == 0 {
+        return body;
+    }
+    let started = tokio::time::Instant::now();
+    let chunks = futures::stream::unfold(
+        (body.into_data_stream(), 0u64),
+        move |(mut stream, sent)| async move {
+            let chunk = stream.next().await?;
+            let sent = sent + chunk.as_ref().map_or(0, |b| b.len() as u64);
+            tokio::time::sleep(wait_for(sent, started.elapsed(), rate)).await;
+            Some((chunk, (stream, sent)))
+        },
+    );
+    axum::body::Body::from_stream(chunks)
+}
+
 #[cfg(test)]
 #[path = "throttle_tests.rs"]
 mod tests;

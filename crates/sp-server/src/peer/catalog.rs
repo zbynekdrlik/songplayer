@@ -24,7 +24,9 @@ use sqlx::SqlitePool;
 use super::Exchange;
 use super::hash::sha256_hex;
 use super::kind::{ArtifactKind, Job, MEDIA_VERSION, STEMS_VERSION};
-use super::wire::{Artifact, Catalog, CatalogJob, JobState, PeerMetadata, ms_to_rfc3339};
+use super::wire::{
+    Artifact, Catalog, CatalogJob, JobState, PeerLyrics, PeerMetadata, PeerVideo, ms_to_rfc3339,
+};
 use crate::db::models_peer;
 use crate::downloader::cache::is_valid_video_id;
 
@@ -261,6 +263,61 @@ pub async fn counts(ex: &Exchange) -> Result<CatalogCounts, sqlx::Error> {
         listed,
         queued,
     })
+}
+
+/// `?1` = the YouTube id, `?2` = the Live-Translate source: the same dub rule
+/// as [`LYRICS_ROWS`] (no row of the video dub-requested or Live-Translate).
+const LYRICS_ROW: &str = "SELECT lyrics_source, lyrics_pipeline_version, lyrics_alignment_model, \
+       lyrics_reference, lyrics_translation_version, lyrics_translation_gender \
+     FROM videos WHERE youtube_id = ?1 AND has_lyrics = 1 AND lyrics_source IS NOT NULL \
+       AND NOT EXISTS (SELECT 1 FROM videos d WHERE d.youtube_id = ?1 \
+                       AND (d.dub_requested = 1 OR d.lyrics_source = ?2)) \
+     ORDER BY lyrics_pipeline_version DESC, lyrics_processed_at DESC LIMIT 1";
+
+type LyricsRow = (String, i64, Option<String>, i64, i64, Option<String>);
+
+/// The lyrics row of `youtube_id` this node serves, if any.
+pub async fn peer_lyrics(
+    pool: &SqlitePool,
+    youtube_id: &str,
+) -> Result<Option<PeerLyrics>, sqlx::Error> {
+    let row: Option<LyricsRow> = sqlx::query_as(LYRICS_ROW)
+        .bind(youtube_id)
+        .bind(crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(
+        |(source, version, alignment_model, reference, translation, gender)| PeerLyrics {
+            source,
+            pipeline_version: u32::try_from(version).unwrap_or(0),
+            alignment_model,
+            reference: reference != 0,
+            translation_version: u32::try_from(translation).unwrap_or(0),
+            translation_gender: gender,
+        },
+    ))
+}
+
+/// `GET /api/v1/peer/videos/{youtube_id}`'s answer; `None` = no titled row.
+pub async fn peer_video(
+    pool: &SqlitePool,
+    youtube_id: &str,
+) -> Result<Option<PeerVideo>, sqlx::Error> {
+    let Some(metadata) = metadata_for(pool, Some(youtube_id)).await?.pop() else {
+        return Ok(None);
+    };
+    let duration: Option<Option<i64>> = sqlx::query_scalar(
+        "SELECT duration_ms FROM videos WHERE youtube_id = ? ORDER BY id LIMIT 1",
+    )
+    .bind(youtube_id)
+    .fetch_optional(pool)
+    .await?;
+    let lyrics = peer_lyrics(pool, youtube_id).await?;
+    Ok(Some(PeerVideo {
+        metadata,
+        duration_ms: duration.flatten(),
+        lyrics,
+    }))
 }
 
 /// A path as the hash cache keys it.

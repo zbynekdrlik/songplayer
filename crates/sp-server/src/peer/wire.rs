@@ -164,6 +164,28 @@ pub fn rfc3339_to_ms(text: &str) -> Option<i64> {
         .map(|t| t.timestamp_millis())
 }
 
+/// A video's lyrics row as a node holds it: what an adopting node is to
+/// write (lane 9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerLyrics {
+    pub source: String,
+    pub pipeline_version: u32,
+    pub alignment_model: Option<String>,
+    /// The ★ reference tier (the wall marks it).
+    pub reference: bool,
+    pub translation_version: u32,
+    pub translation_gender: Option<String>,
+}
+
+/// `GET /api/v1/peer/videos/{youtube_id}`: a node is to adopt a title and a
+/// lyrics row from it without running the providers (lanes 8-9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerVideo {
+    pub metadata: PeerMetadata,
+    pub duration_ms: Option<i64>,
+    pub lyrics: Option<PeerLyrics>,
+}
+
 #[cfg(test)]
 #[path = "wire_tests.rs"]
 mod tests;
