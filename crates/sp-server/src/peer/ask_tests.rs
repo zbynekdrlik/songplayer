@@ -5,7 +5,7 @@ use crate::db::models_peer::{fetch_record, start_wait, waited};
 use crate::peer::client::PeerError;
 use crate::peer::decide::MAX_PEER_WAIT;
 use crate::peer::kind::{ArtifactKind, Job};
-use crate::peer::rig::{SNV_KEY, TestNode};
+use crate::peer::rig::{SNV_KEY, TestNode, song_audio_sha};
 use crate::peer::wire::now_ms;
 use std::time::Duration;
 
@@ -80,10 +80,44 @@ async fn a_peer_that_has_it_is_fetched_from() {
     assert_eq!(plan.artifact(ArtifactKind::Video).unwrap().size, 2_000);
     assert_eq!(plan.artifact(ArtifactKind::Audio).unwrap().size, 3_000);
     assert!(plan.artifact(ArtifactKind::Lyrics).is_err());
+    assert_eq!(
+        plan.peer_audio,
+        Some(song_audio_sha()),
+        "the audio SNV lists, from the catalog the decision read"
+    );
     assert_eq!(wait_rows(&pp).await, 0);
     assert!(
         pp.ex.board.snapshot("pp").is_empty(),
         "a fetch is not announced as a job run here"
+    );
+}
+
+/// A job that runs here replaces what it makes: a download here writes this
+/// node's own audio, so the record that the audio came from SNV goes (a later
+/// stems ask must not read it as SNV's audio). The records of what the job
+/// does not make stay.
+#[tokio::test]
+async fn a_job_run_here_forgets_the_peers_copy_of_what_it_makes() {
+    let pp = TestNode::start("pp", None).await;
+    pp.audio_from(YT, "snv").await;
+    for kind in ["video", "metadata", "stem_vocals"] {
+        crate::db::models_peer::record_fetch(pp.pool(), YT, kind, "snv", 1, "s", 10)
+            .await
+            .unwrap();
+    }
+    let _guard = pp.ex.run_here(Job::Download, YT).await;
+    for kind in ["video", "audio", "metadata"] {
+        assert_eq!(
+            fetch_record(pp.pool(), YT, kind).await.unwrap(),
+            None,
+            "{kind}"
+        );
+    }
+    assert!(
+        fetch_record(pp.pool(), YT, "stem_vocals")
+            .await
+            .unwrap()
+            .is_some()
     );
 }
 

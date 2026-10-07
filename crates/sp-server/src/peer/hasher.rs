@@ -91,10 +91,7 @@ async fn one_file(
     let Some((size, mtime_ms)) = stat(&f.path).await else {
         return Outcome::Missing;
     };
-    if hashes
-        .get(&key)
-        .is_some_and(|h| h.size == size && h.mtime_ms == mtime_ms)
-    {
+    if hashes.get(&key).is_some_and(|h| h.holds(size, mtime_ms)) {
         return Outcome::Fresh;
     }
     if ex.transfers_paused().await {
@@ -116,7 +113,7 @@ async fn one_file(
 }
 
 /// `(size, mtime ms)` of a file, `None` when it cannot be read.
-async fn stat(path: &Path) -> Option<(i64, i64)> {
+pub(crate) async fn stat(path: &Path) -> Option<(i64, i64)> {
     let meta = tokio::fs::metadata(path).await.ok()?;
     let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
     Some((

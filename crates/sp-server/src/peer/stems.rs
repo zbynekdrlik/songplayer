@@ -1,11 +1,12 @@
 //! #229: the stems job asks first. A peer's two stems are fetched as parts,
 //! then placed under THIS node's audio name as the row records it AFTER the
 //! transfer — read under `cache::SONG_FILES`, the lock a rename holds (#136,
-//! `.claude/rules/song-files.md`) — and marked done. Nothing is transferred
-//! for a song with no audio on disk here: `song_input::job_input` defers it
-//! with no attempt, as for a local separation. The stem worker asks before
-//! its venv check (the plan's decisions): a node with no lyrics venv still
-//! takes a peer's stems.
+//! `.claude/rules/song-files.md`) — and marked done. Only when this node's
+//! audio IS the peer's (`peer::audio`): stems separated from another encode
+//! are separated here instead. Nothing is transferred for a song with no
+//! audio on disk here: `song_input::job_input` defers it with no attempt, as
+//! for a local separation. The stem worker asks before its venv check (the
+//! plan's decisions): a node with no lyrics venv still takes a peer's stems.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,6 +29,14 @@ pub async fn first(ex: Option<&Arc<Exchange>>, job: &StemJob) -> PeerStep {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
         Ask::Wait { recheck, .. } => ex.defer(kind, job.video_id, recheck).await,
         Ask::Fetch(plan) => {
+            if !ex
+                .has_peers_audio(&plan, job.video_id, &job.youtube_id)
+                .await
+            {
+                return ex
+                    .run_here_on_own_audio(kind, &job.youtube_id, &plan.peer.name)
+                    .await;
+            }
             let input = job_input(
                 &ex.pool,
                 job.video_id,

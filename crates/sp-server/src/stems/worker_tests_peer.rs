@@ -34,7 +34,8 @@ async fn status(node: &TestNode, id: i64) -> Option<String> {
         .unwrap()
 }
 
-/// SNV with the song and its stems hashed; PP with the song, asking SNV.
+/// SNV with the song and its stems hashed; PP with the song, its audio
+/// fetched from SNV (recorded), asking SNV.
 async fn snv_and_pp() -> (TestNode, TestNode, i64) {
     let snv = TestNode::start("snv", Some(SNV_KEY)).await;
     let snv_id = snv.add_video(YT).await;
@@ -45,6 +46,7 @@ async fn snv_and_pp() -> (TestNode, TestNode, i64) {
     pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
     let id = pp.add_video(YT).await;
     pp.give_song(id, YT, "Way Maker", "Sinach").await;
+    pp.audio_from(YT, "snv").await;
     (snv, pp, id)
 }
 
@@ -91,6 +93,7 @@ async fn a_node_with_no_venv_reaches_the_rows_behind_the_head() {
     pp.give_song(head, "ccccccccccc", "Iny", "Zbor").await;
     let id = pp.add_video(YT).await;
     pp.give_song(id, YT, "Way Maker", "Sinach").await;
+    pp.audio_from(YT, "snv").await;
     let w = worker(&pp, false);
     w.process_next().await;
     w.process_next().await;

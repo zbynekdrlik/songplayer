@@ -5,6 +5,7 @@
 
 pub mod api;
 pub mod ask;
+pub mod audio;
 pub mod board;
 pub mod catalog;
 pub mod client;

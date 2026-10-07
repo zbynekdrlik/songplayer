@@ -8,6 +8,7 @@ use sqlx::SqlitePool;
 
 use super::*;
 use crate::db::models_stems::defer_stems;
+use crate::peer::kind::ArtifactKind;
 
 async fn pool() -> SqlitePool {
     let pool = crate::db::create_memory_pool().await.unwrap();
@@ -146,6 +147,74 @@ async fn a_fetch_record_is_kept_per_video_and_kind() {
     .await
     .unwrap();
     assert_eq!(at, 20);
+}
+
+/// A job that runs here drops the records of the kinds it makes, of its
+/// video only.
+#[tokio::test]
+async fn forgetting_drops_only_the_named_kinds_of_the_video() {
+    let pool = pool().await;
+    for (yt, kind) in [
+        ("aaaaaaaaaaa", "video"),
+        ("aaaaaaaaaaa", "audio"),
+        ("aaaaaaaaaaa", "stem_vocals"),
+        ("bbbbbbbbbbb", "audio"),
+    ] {
+        record_fetch(&pool, yt, kind, "snv", 1, "s", 10)
+            .await
+            .unwrap();
+    }
+    forget_fetches(
+        &pool,
+        "aaaaaaaaaaa",
+        &[ArtifactKind::Video, ArtifactKind::Audio],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        fetch_record(&pool, "aaaaaaaaaaa", "video").await.unwrap(),
+        None
+    );
+    assert_eq!(
+        fetch_record(&pool, "aaaaaaaaaaa", "audio").await.unwrap(),
+        None
+    );
+    assert!(
+        fetch_record(&pool, "aaaaaaaaaaa", "stem_vocals")
+            .await
+            .unwrap()
+            .is_some(),
+        "a kind the job does not make stays"
+    );
+    assert!(
+        fetch_record(&pool, "bbbbbbbbbbb", "audio")
+            .await
+            .unwrap()
+            .is_some(),
+        "another video's record stays"
+    );
+}
+
+/// An entry holds only for the size AND the mtime it was hashed at.
+#[test]
+fn a_hash_holds_only_for_its_size_and_mtime() {
+    let e = entry("/c/a", "s");
+    assert!(e.holds(3, 4));
+    assert!(!e.holds(9, 4), "another size");
+    assert!(!e.holds(3, 9), "another mtime");
+    assert!(!e.holds(9, 9));
+}
+
+#[tokio::test]
+async fn a_hash_is_read_by_its_path() {
+    let pool = pool().await;
+    put_hash(&pool, &entry("/c/a", "s1")).await.unwrap();
+    put_hash(&pool, &entry("/c/b", "s2")).await.unwrap();
+    assert_eq!(
+        hash_of(&pool, "/c/b").await.unwrap(),
+        Some(entry("/c/b", "s2"))
+    );
+    assert_eq!(hash_of(&pool, "/c/c").await.unwrap(), None);
 }
 
 #[tokio::test]

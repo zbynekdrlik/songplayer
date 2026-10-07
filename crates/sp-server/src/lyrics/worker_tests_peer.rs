@@ -35,6 +35,7 @@ async fn a_peers_lyrics_are_taken_by_the_lyrics_worker() {
     pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
     let id = pp.add_video(YT).await;
     pp.give_song(id, YT, "Way Maker", "Sinach").await;
+    pp.audio_from(YT, "snv").await;
     let (events, mut rx) = broadcast::channel(16);
     LyricsWorker::new_for_test(pp.pool().clone(), pp.cache().to_path_buf(), events)
         .with_peer(pp.ex.clone())

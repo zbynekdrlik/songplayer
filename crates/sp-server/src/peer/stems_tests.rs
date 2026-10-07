@@ -9,9 +9,17 @@ use std::path::{Path, PathBuf};
 
 const YT: &str = "aaaaaaaaaaa";
 
-/// SNV has the song and its stems hashed; PP has the song (its own files,
-/// under its own title) and asks SNV.
+/// SNV has the song and its stems hashed; PP has the song under its own
+/// title, its audio fetched from SNV (recorded), and asks SNV.
 async fn snv_and_pp() -> (TestNode, TestNode, StemJob, PathBuf) {
+    let (snv, pp, job, audio) = snv_and_pp_own_audio().await;
+    pp.audio_from(YT, "snv").await;
+    (snv, pp, job, audio)
+}
+
+/// As [`snv_and_pp`], but nothing records where PP's audio came from and
+/// PP has not hashed it.
+async fn snv_and_pp_own_audio() -> (TestNode, TestNode, StemJob, PathBuf) {
     let snv = TestNode::start("snv", Some(SNV_KEY)).await;
     let snv_id = snv.add_video(YT).await;
     snv.give_song(snv_id, YT, "Way Maker", "Sinach").await;
@@ -78,6 +86,64 @@ async fn a_peers_stems_land_under_this_nodes_audio_and_are_done() {
         std::fs::read_dir(pp.ex.parts_dir()).unwrap().count(),
         0,
         "no part left"
+    );
+}
+
+/// PP's audio is its own encode (downloaded here; its own hash is not the
+/// audio SNV lists): SNV's stems were separated from another audio, so they
+/// are separated here. Nothing is fetched or placed, the job is announced.
+#[tokio::test]
+async fn stems_made_from_another_audio_are_separated_here() {
+    let (_snv, pp, job, audio) = snv_and_pp_own_audio().await;
+    std::fs::write(&audio, bytes(3_000, 9)).unwrap();
+    pp.hash_now().await;
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &job).await else {
+        panic!("expected Local")
+    };
+    assert_eq!(pp.ex.board.snapshot("pp").len(), 2, "both stems announced");
+    assert!(
+        !crate::stems::stem_paths(&audio).0.exists(),
+        "no stems placed"
+    );
+    assert!(!pp.ex.parts_dir().exists(), "nothing transferred");
+    let (status, attempts, ..) = stem_state(&pp, job.video_id).await;
+    assert_eq!((status, attempts), (None, 0));
+}
+
+/// PP fetched its audio from SNV, but at a sha SNV no longer lists (SNV
+/// downloaded it again since): not the audio SNV's stems are made from.
+#[tokio::test]
+async fn an_audio_fetched_at_an_older_sha_is_not_the_peers_now() {
+    let (_snv, pp, job, audio) = snv_and_pp_own_audio().await;
+    crate::db::models_peer::record_fetch(
+        pp.pool(),
+        YT,
+        "audio",
+        "snv",
+        crate::peer::kind::MEDIA_VERSION,
+        &"0123456789abcdef".repeat(4),
+        1_000,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        first(Some(&pp.ex), &job).await,
+        PeerStep::Local(Some(_))
+    ));
+    assert!(!crate::stems::stem_paths(&audio).0.exists());
+}
+
+/// Nothing records where PP's audio came from, but PP's own hash of it is
+/// the sha SNV lists (phase 2: a node that serves hashes its audio): the
+/// same audio, so SNV's stems are taken.
+#[tokio::test]
+async fn an_own_hash_equal_to_the_peers_audio_takes_its_stems() {
+    let (_snv, pp, job, audio) = snv_and_pp_own_audio().await;
+    pp.hash_now().await;
+    assert!(matches!(first(Some(&pp.ex), &job).await, PeerStep::Done));
+    assert_eq!(
+        std::fs::read(crate::stems::stem_paths(&audio).0).unwrap(),
+        bytes(1_500, 3)
     );
 }
 

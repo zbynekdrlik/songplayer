@@ -15,10 +15,14 @@
 //!
 //! Only the peers this node lists in its own `peers` setting are read, so a
 //! node waits only for those: SNV lists none in phase 1, and asks nobody.
+//!
+//! A Fetch of stems or lyrics is taken only when this node's audio is the
+//! audio the peer lists ([`same_audio`]; the stems and lyrics hooks ask it
+//! through `Exchange::has_peers_audio`), else that job runs here.
 
 use std::time::Duration;
 
-use super::kind::{Job, acceptable};
+use super::kind::{ArtifactKind, Job, acceptable};
 use super::wire::{Artifact, Catalog};
 
 /// How long a job waits for its peers before it runs here (spec: "~2 h").
@@ -125,6 +129,32 @@ pub fn holds(catalog: &Catalog, job: Job, youtube_id: &str) -> Option<Vec<Artifa
                 .cloned()
         })
         .collect()
+}
+
+/// The sha256 of the audio `catalog` lists for `youtube_id` (a node lists one
+/// per video): the audio that node's stems and lyrics were made from.
+pub fn listed_audio<'a>(catalog: &'a Catalog, youtube_id: &str) -> Option<&'a str> {
+    catalog
+        .artifacts
+        .iter()
+        .find(|a| a.youtube_id == youtube_id && a.kind == ArtifactKind::Audio)
+        .map(|a| a.sha256.as_str())
+}
+
+/// This node's audio IS the audio `peer` lists now (`listed`, its sha256),
+/// so that peer's stems and lyrics fit it: this node fetched its audio from
+/// that peer at that very sha (`fetched`: the `peer_fetches` record's node
+/// and sha), or its own hash of its audio is that sha (`hashed`: a
+/// `peer_hashes` entry that still holds). Nothing listed there: no. Stems or
+/// line timings made from another encode would drift against this node's
+/// audio, so the job then runs here.
+pub fn same_audio(
+    peer: &str,
+    listed: Option<&str>,
+    fetched: Option<(&str, &str)>,
+    hashed: Option<&str>,
+) -> bool {
+    listed.is_some_and(|sha| fetched == Some((peer, sha)) || hashed == Some(sha))
 }
 
 /// A job that has waited `waited` for its peers runs here now: the bound of

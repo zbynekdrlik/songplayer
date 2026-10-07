@@ -24,6 +24,16 @@ pub(crate) fn bytes(len: usize, seed: u8) -> Vec<u8> {
         .collect()
 }
 
+/// The audio [`TestNode::give_song`] writes, on every node.
+pub(crate) fn song_audio() -> Vec<u8> {
+    bytes(3_000, 2)
+}
+
+/// Its sha256, as a catalog lists it.
+pub(crate) fn song_audio_sha() -> String {
+    super::hash::sha256_hex(&song_audio())
+}
+
 pub(crate) struct TestNode {
     pub(crate) name: String,
     pub(crate) ex: Arc<Exchange>,
@@ -123,7 +133,7 @@ impl TestNode {
             .cache()
             .join(audio_filename(song, artist, youtube_id, false));
         std::fs::write(&video, bytes(2_000, 1)).unwrap();
-        std::fs::write(&audio, bytes(3_000, 2)).unwrap();
+        std::fs::write(&audio, song_audio()).unwrap();
         crate::db::models::mark_video_processed_pair(
             self.pool(),
             id,
@@ -137,6 +147,23 @@ impl TestNode {
         .await
         .unwrap();
         (video, audio)
+    }
+
+    /// This node's audio of `youtube_id` came from `peer` (a fetched pair),
+    /// at the sha of the audio every node's [`TestNode::give_song`] writes:
+    /// recorded as `Exchange::fetched` records it.
+    pub(crate) async fn audio_from(&self, youtube_id: &str, peer: &str) {
+        crate::db::models_peer::record_fetch(
+            self.pool(),
+            youtube_id,
+            "audio",
+            peer,
+            super::kind::MEDIA_VERSION,
+            &song_audio_sha(),
+            super::wire::now_ms(),
+        )
+        .await
+        .unwrap();
     }
 
     /// Row `id`'s stems, done, named after its current audio.

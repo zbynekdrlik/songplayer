@@ -319,3 +319,99 @@ fn a_recheck_is_a_quarter_of_the_wait_2_to_20_min_never_past_the_bound() {
     );
     assert_eq!(recheck_after(m(180)), m(1));
 }
+
+/// A distinct sha256 per `n` (built, never a hex literal: the staging hook).
+fn sha_n(n: char) -> String {
+    n.to_string().repeat(64)
+}
+
+fn with_sha(youtube_id: &str, kind: ArtifactKind, sha256: String) -> Artifact {
+    Artifact {
+        youtube_id: youtube_id.into(),
+        sha256,
+        ..art(kind, MEDIA_VERSION)
+    }
+}
+
+/// The audio of the video asked: not another video's audio listed before
+/// it, not the video's other kinds listed before it.
+#[test]
+fn the_listed_audio_is_the_videos_own_audio() {
+    let c = catalog(
+        vec![
+            with_sha("bbbbbbbbbbb", Audio, sha_n('a')),
+            with_sha(YT, StemVocals, sha_n('b')),
+            with_sha(YT, Audio, sha_n('c')),
+        ],
+        &[],
+    );
+    assert_eq!(listed_audio(&c, YT), Some(sha_n('c').as_str()));
+    assert_eq!(listed_audio(&c, "ccccccccccc"), None);
+    let no_audio = catalog(vec![with_sha(YT, Video, sha_n('d'))], &[]);
+    assert_eq!(listed_audio(&no_audio, YT), None);
+}
+
+/// One row per case: who listed what, what this node recorded and hashed.
+type AudioCase = (
+    &'static str,
+    Option<char>,
+    Option<(&'static str, char)>,
+    Option<char>,
+    bool,
+);
+
+#[test]
+fn this_nodes_audio_is_the_peers_only_by_its_fetch_or_its_own_hash() {
+    let table: [AudioCase; 8] = [
+        (
+            "fetched from snv at the sha snv lists",
+            Some('a'),
+            Some(("snv", 'a')),
+            None,
+            true,
+        ),
+        (
+            "hashed here at the sha snv lists",
+            Some('a'),
+            None,
+            Some('a'),
+            true,
+        ),
+        ("both", Some('a'), Some(("snv", 'a')), Some('a'), true),
+        (
+            "fetched from another peer",
+            Some('a'),
+            Some(("pp2", 'a')),
+            None,
+            false,
+        ),
+        (
+            "fetched at an older sha",
+            Some('a'),
+            Some(("snv", 'b')),
+            Some('b'),
+            false,
+        ),
+        ("its own encode", Some('a'), None, Some('b'), false),
+        ("nothing known here", Some('a'), None, None, false),
+        (
+            "snv lists no audio",
+            None,
+            Some(("snv", 'a')),
+            Some('a'),
+            false,
+        ),
+    ];
+    for (case, listed, fetched, hashed, want) in table {
+        let listed = listed.map(sha_n);
+        let fetched = fetched.map(|(node, s)| (node, sha_n(s)));
+        let hashed = hashed.map(sha_n);
+        let got = same_audio(
+            "snv",
+            listed.as_deref(),
+            fetched.as_ref().map(|(node, s)| (*node, s.as_str())),
+            hashed.as_deref(),
+        );
+        assert_eq!(got, want, "{case}");
+    }
+}
