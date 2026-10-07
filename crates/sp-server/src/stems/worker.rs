@@ -195,6 +195,20 @@ impl StemWorker {
         self
     }
 
+    /// The missing-venv WARN, once per process (`warned_no_python` is its
+    /// once-guard). Logging only.
+    #[cfg_attr(test, mutants::skip)]
+    fn warn_no_venv_once(&self, python: &Path) {
+        if !self
+            .warned_no_python
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            warn!(
+                "stem worker: lyrics venv python not found at {python:?} — this node separates no stems until the lyrics bootstrap (a peer's stems are still taken)"
+            );
+        }
+    }
+
     pub async fn run(self, mut shutdown_rx: broadcast::Receiver<()>) {
         let mut interval = tokio::time::interval(TICK);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -225,14 +239,8 @@ impl StemWorker {
         // the venv's return waits until after the peer step below.
         let python = crate::lyrics::bootstrap::venv_python_path(&self.tools_dir);
         let venv_missing = !python.exists();
-        if venv_missing
-            && !self
-                .warned_no_python
-                .swap(true, std::sync::atomic::Ordering::Relaxed)
-        {
-            warn!(
-                "stem worker: lyrics venv python not found at {python:?} — this node separates no stems until the lyrics bootstrap (a peer's stems are still taken)"
-            );
+        if venv_missing {
+            self.warn_no_venv_once(&python);
         }
 
         // #184 G0.1: a dub job has priority on the heavy slot. While one is queued
