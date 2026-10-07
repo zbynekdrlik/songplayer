@@ -119,6 +119,23 @@ async fn a_peers_finished_job_not_listed_yet_is_waited_for() {
     };
 }
 
+/// This node's own pause (`peer_transfers_paused`) refuses every fetch; it is
+/// waited out, never a reason to run the job here after the bound.
+#[tokio::test]
+async fn this_nodes_own_pause_is_waited_out_past_the_bound() {
+    let (_snv, pp) = snv_and_pp().await;
+    crate::peer::rig::set(pp.pool(), "peer_transfers_paused", "true").await;
+    let bound = i64::try_from(MAX_PEER_WAIT.as_millis()).unwrap();
+    start_wait(pp.pool(), YT, "download", now_ms() - bound - 1_000)
+        .await
+        .unwrap();
+    let recheck = pp
+        .ex
+        .fetch_failed(Job::Download, YT, "snv", &PeerError::Paused)
+        .await;
+    assert_eq!(recheck, Some(crate::peer::decide::PAUSED_RECHECK));
+}
+
 /// The 2 h bound counts from the FIRST wait, and the recheck backs off with it.
 #[tokio::test]
 async fn a_wait_keeps_its_first_start_and_backs_off() {

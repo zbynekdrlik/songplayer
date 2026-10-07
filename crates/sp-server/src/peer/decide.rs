@@ -133,6 +133,18 @@ pub fn gives_up(waited: Duration) -> bool {
     waited >= MAX_PEER_WAIT
 }
 
+/// The recheck of a fetch refused by this node's own pause
+/// (`peer_transfers_paused`).
+pub const PAUSED_RECHECK: Duration = Duration::from_secs(300);
+
+/// After a failed fetch of a job that has waited `waited`: the next recheck,
+/// or `None` = run the job here (the bound, [`gives_up`]). `paused_here` =
+/// this node's own transfers are paused.
+pub fn after_failure(waited: Duration, paused_here: bool) -> Option<Duration> {
+    let _ = paused_here;
+    (!gives_up(waited)).then(|| recheck_after(waited))
+}
+
 /// The next re-check after waiting `waited`: a quarter of it, 2 to 20 min,
 /// never past [`MAX_PEER_WAIT`], and at least a minute.
 pub fn recheck_after(waited: Duration) -> Duration {

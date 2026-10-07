@@ -19,7 +19,7 @@ use super::Exchange;
 use super::board::JobGuard;
 use super::client::PeerError;
 use super::config::{NodeConfig, PeerConfig};
-use super::decide::{Decision, LocalWhy, PeerRead, WaitWhy, decide, gives_up, recheck_after};
+use super::decide::{Decision, LocalWhy, PeerRead, WaitWhy, after_failure, decide, recheck_after};
 use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, Catalog, now_ms};
 use crate::db::models_peer;
@@ -200,7 +200,8 @@ impl Exchange {
             .ok()
             .flatten()
             .unwrap_or_default();
-        if gives_up(waited) {
+        let paused_here = self.transfers_paused().await;
+        let Some(recheck) = after_failure(waited, paused_here) else {
             warn!(
                 youtube_id,
                 job = job.as_str(),
@@ -209,13 +210,13 @@ impl Exchange {
                 "exchange: fetching from a peer kept failing for 2 h - processing here"
             );
             return None;
-        }
-        let recheck = recheck_after(waited);
+        };
         warn!(
             youtube_id,
             job = job.as_str(),
             peer,
             %error,
+            paused_here,
             recheck_s = recheck.as_secs(),
             "exchange: fetching from a peer failed - asking again later"
         );

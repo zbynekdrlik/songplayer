@@ -284,6 +284,24 @@ fn a_job_gives_up_on_its_peers_at_two_hours_exactly() {
     assert!(gives_up(3 * MAX_PEER_WAIT));
 }
 
+/// A failed fetch gives up at the bound, never for this node's own pause:
+/// the pause is about its bandwidth, and heavy work instead would defeat it.
+#[test]
+fn a_failed_fetch_gives_up_at_two_hours_but_never_for_a_pause_here() {
+    let m = |n: u64| Duration::from_secs(n * 60);
+    assert_eq!(after_failure(Duration::ZERO, false), Some(m(2)));
+    assert_eq!(after_failure(m(40), false), Some(m(10)));
+    assert_eq!(
+        after_failure(MAX_PEER_WAIT - Duration::from_secs(30), false),
+        Some(m(1))
+    );
+    assert_eq!(after_failure(MAX_PEER_WAIT, false), None);
+    assert_eq!(after_failure(3 * MAX_PEER_WAIT, false), None);
+    assert_eq!(after_failure(Duration::ZERO, true), Some(PAUSED_RECHECK));
+    assert_eq!(after_failure(3 * MAX_PEER_WAIT, true), Some(PAUSED_RECHECK));
+    assert_eq!(PAUSED_RECHECK, m(5));
+}
+
 #[test]
 fn a_recheck_is_a_quarter_of_the_wait_2_to_20_min_never_past_the_bound() {
     let m = |n: u64| Duration::from_secs(n * 60);

@@ -110,6 +110,30 @@ async fn a_node_with_no_venv_reaches_the_rows_behind_the_head() {
     assert!(next.is_some(), "the head is re-picked later");
 }
 
+/// A node that asks no peer (SNV in phase 1) and has no venv stops at the
+/// venv as before #229: no pick, no defer, no announcement.
+#[tokio::test]
+async fn with_no_peers_and_no_venv_the_stem_worker_stops_at_the_venv() {
+    let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
+    crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
+    let snv = TestNode::start("snv", Some(SNV_KEY)).await;
+    let id = snv.add_video(YT).await;
+    snv.give_song(id, YT, "Way Maker", "Sinach").await;
+    let w = worker(&snv, false);
+    w.process_next().await;
+    let (status, next): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT stem_status, stem_next_attempt_at FROM videos WHERE id = ?")
+            .bind(id)
+            .fetch_one(snv.pool())
+            .await
+            .unwrap();
+    assert_eq!((status, next), (None, None), "the row is not touched");
+    assert!(
+        w.warned_no_python
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+}
+
 #[tokio::test]
 async fn with_no_peers_the_stem_worker_goes_on_as_before() {
     let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
