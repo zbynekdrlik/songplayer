@@ -3,12 +3,17 @@ import { defineConfig } from "@playwright/test";
 /**
  * #229: the post-deploy subset at the PP site, run by
  * .github/workflows/deploy-pp.yml after every main release:
- * `post-deploy-pp.spec.ts` + `post-deploy-max.spec.ts` (SP-program-MAX).
+ * `post-deploy-pp.spec.ts` + `post-deploy-max.spec.ts` (SP-program-MAX) +
+ * `post-deploy-settings-secrets.spec.ts` (every secret masked, also at PP).
  * The SNV suite is post-deploy.config.ts; it ignores post-deploy-pp*.
  */
 export default defineConfig({
   testDir: ".",
-  testMatch: ["**/post-deploy-pp.spec.ts", "**/post-deploy-max.spec.ts"],
+  testMatch: [
+    "**/post-deploy-pp.spec.ts",
+    "**/post-deploy-max.spec.ts",
+    "**/post-deploy-settings-secrets.spec.ts",
+  ],
   timeout: 90_000,
   retries: 0,
   workers: 1,

@@ -37,7 +37,6 @@ import {
 } from "@playwright/test";
 import { healthRow } from "./box-api";
 import { ObsDriver } from "./obs-driver";
-import { programReceiverVerdict, type ProgramReceiverView } from "./ndi-health-gate";
 import {
   peerSetupFailures,
   probeFailures,
@@ -302,15 +301,19 @@ test.describe("PP's program through the facade (#229)", () => {
         { message: `playlist ${playlistId} plays on program (state/transport)`, timeout: 30_000 },
       )
       .toBe("Playing/Playing");
+    // PP has no NDI consumer of SP-program: its wall takes SP-program-MAX
+    // (post-deploy-max.spec.ts), and strih/stream are off at PP. So the PP
+    // gate asserts the program's source; the live-receiver check stays SNV's
+    // (post-deploy.spec.ts). Release 0.72.0 review.
     await expect
       .poll(
         async () => {
-          const p = await getJson<ProgramReceiverView>(request, "/api/v1/program");
-          return p ? programReceiverVerdict(p) : null;
+          const p = await getJson<{ source: number | null }>(request, "/api/v1/program");
+          return p ? p.source : null;
         },
-        { message: "SP-program carries the playlist and has a live receiver", timeout: 60_000 },
+        { message: "SP-program carries the playlist", timeout: 60_000 },
       )
-      .toMatchObject({ ok: true, source: playlistId });
+      .toBe(playlistId);
   });
 
   test("a manual scene pressed through the facade reaches the program as OBS manual", async ({
