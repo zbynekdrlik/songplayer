@@ -482,6 +482,8 @@ const failModes = {
   previous: false,
   mode: false,
   preview: false,
+  // #233: GET /api/v1/settings (Nastavenia must save nothing it did not load).
+  settings: false,
 };
 
 function maybeFail(kind, res) {
@@ -600,6 +602,7 @@ app.post("/api/v1/control", (_req, res) => {
 
 // Settings (#229: every secret masked, see `shownSettings`)
 app.get("/api/v1/settings", (_req, res) => {
+  if (maybeFail("settings", res)) return;
   res.json(shownSettings());
 });
 
@@ -669,6 +672,8 @@ app.post("/__mock/settings-reset", (_req, res) => {
     delete settings[key];
   }
   Object.assign(settings, settingsInitial);
+  failModes.settings = false;
+  outputsSkipped.clear();
   res.json({ status: "reset" });
 });
 
@@ -1147,7 +1152,7 @@ function programBody() {
     // stored list, like the server's outputs task; the mock "runs" every
     // enabled entry. #210's top-level `vban` block moved under each entry.
     audio_network_rate: Number(settings.audio_network_rate || 48000),
-    outputs_problems: [],
+    outputs_problems: mockOutputsProblems(),
     outputs: mockOutputs(),
     // #223 S2: SP-program-MAX (mirrors `MaxStatus`). The setting is ON unless
     // it says "false"; the mock has no GPU, like the Linux server: unsupported.
@@ -1173,14 +1178,31 @@ function programBody() {
 // list (an unreadable one lists nothing); an enabled VBAN entry carries its
 // `vban` telemetry like the server's (the fields the dashboard and the
 // gates read, no traffic).
-function mockOutputs() {
+function mockStoredOutputs() {
   let list = [];
   try {
     list = JSON.parse(settings.audio_outputs || "[]");
   } catch {
     list = [];
   }
-  if (!Array.isArray(list)) return [];
+  return Array.isArray(list) ? list : [];
+}
+// #233: stored entries the mock's "outputs task" skips (`/__mock/outputs-skip
+// {ids}`, cleared by `/__mock/settings-reset`): not in `outputs[]`, each named
+// in `outputs_problems` as the server names a skipped entry.
+const outputsSkipped = new Set();
+app.post("/__mock/outputs-skip", (req, res) => {
+  outputsSkipped.clear();
+  for (const id of (req.body && req.body.ids) || []) outputsSkipped.add(String(id));
+  res.json({ skipped: [...outputsSkipped] });
+});
+function mockOutputsProblems() {
+  return mockStoredOutputs().flatMap((e, i) =>
+    outputsSkipped.has(e.id) ? [`entry ${i + 1} (id ${shownId(e.id)}): type must be vban`] : [],
+  );
+}
+function mockOutputs() {
+  const list = mockStoredOutputs().filter((e) => !outputsSkipped.has(e.id));
   const network = Number(settings.audio_network_rate || 48000);
   return list.map((e) => {
     const rate = e.rate === "network" || e.rate === undefined ? network : Number(e.rate);

@@ -183,6 +183,9 @@ test("saving the other settings keeps the outputs list (#233)", async ({ page, r
   expect(seeded.status()).toBe(204);
   const patches = settingsPatches(page);
   await openSettings(page);
+  // ONE `.save-status` on the page (the form's): the specs of the other
+  // Nastavenia fields read it unscoped (Playwright strict mode).
+  await expect(page.locator(".save-status")).toHaveCount(1);
   await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(2);
   await page.locator('[data-testid="settings-gemini-model"]').fill("gemini-x");
   await page.getByRole("button", { name: "Uložiť nastavenia" }).click();
@@ -225,4 +228,50 @@ test("neither section's save drops the other's unsaved edits (#233)", async ({ p
   await expect(page.locator('[data-testid="settings-gemini-model"]')).toHaveValue("gemini-unsaved");
   await expect(rows).toHaveCount(3);
   expect(realConsoleErrors()).toEqual([]);
+});
+
+test("a saved entry the server does not run reads so, with the server's reason (#233)", async ({
+  page,
+  request,
+}) => {
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: TWO } });
+  expect(seeded.status()).toBe(204);
+  await request.post("/__mock/outputs-skip", { data: { ids: ["out-2"] } });
+  await openSettings(page);
+  const rows = page.locator('[data-testid="audio-output-row"]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0).locator('[data-testid="audio-output-state"]')).toContainText("beží", { timeout: 10000 });
+  const skipped = rows.nth(1).locator('[data-testid="audio-output-state"]');
+  await expect(skipped).toHaveText("uložený, nespustený", { timeout: 10000 });
+  await expect(skipped).toHaveAttribute("title", "entry 2 (id out-2): type must be vban");
+  // A row added here and not saved yet is still "neuložený".
+  await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+  await expect(rows.nth(2).locator('[data-testid="audio-output-state"]')).toHaveText("neuložený");
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("Nastavenia whose settings did not load saves nothing (#233)", async ({ page, request }) => {
+  const patches = settingsPatches(page);
+  await request.post("/__mock/fail-mode", { data: { kind: "settings", enabled: true } });
+  try {
+    await page.goto("/");
+    await page.locator('[data-testid="nav-settings"]').click();
+    await expect(page.locator('[data-testid="settings-audio-outputs"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="audio-outputs-load-error"]')).toHaveText(
+      "Nastavenia sa nenačítali — výstupy sa nedajú uložiť",
+      { timeout: 10000 },
+    );
+    await expect(page.locator('[data-testid="audio-outputs-save"]')).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Uložiť nastavenia" })).toBeDisabled();
+    await expect(page.locator(".save-status")).toHaveText("Nastavenia sa nenačítali — uloženie je vypnuté");
+    // An output added in this state still cannot replace the stored list.
+    await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+    await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid="audio-outputs-save"]')).toBeDisabled();
+    expect(patches).toHaveLength(0);
+  } finally {
+    await request.post("/__mock/fail-mode", { data: { kind: "settings", enabled: false } });
+  }
+  // The refused GET is the point of the test: the browser logs its 500.
+  expect(realConsoleErrors().filter((m) => !/Failed to load resource.*500/.test(m))).toEqual([]);
 });
