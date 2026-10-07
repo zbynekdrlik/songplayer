@@ -341,8 +341,10 @@ is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
 channels, delay_ms, latency_ms (L + delay + the converter,
 `vban_latency_ms`), blocks_sent, blocks_dropped, vban: {#210's VbanStatus +
 blocks_sent}}`, `audio_network_rate`, `outputs_problems`; the cut answer
-carries them too. The top-level `vban` is gone (ruling 5; its only readers
-were the mock and `settings-vban.spec.ts`, deleted).
+carries them too. The top-level `vban` is gone (ruling 5). Its readers were
+the mock, `settings-vban.spec.ts` (deleted), `program_tests_max.rs` (now
+reads `outputs`) and the MAX box gate in `gpu-max.md` (now FOH's
+`outputs[i].vban`).
 
 ## Dashboard (`sp-ui` `audio_outputs.rs`)
 

@@ -37,7 +37,11 @@ async fn get_program_reports_the_max_block() {
         "nothing started MAX in a unit test: the setting is not applied"
     );
     assert_eq!(json["ndi_name"], PROGRAM_NDI_NAME, "the program stays flat");
-    assert!(json["vban"].is_object(), "the other blocks stay");
+    assert!(json["outputs"].is_array(), "the other blocks stay");
+    assert!(
+        json.get("vban").is_none(),
+        "#233: the VBAN telemetry is outputs[i].vban"
+    );
 
     // An Arc of its own: the thread guard below must not borrow `state`,
     // which the cut call moves.
