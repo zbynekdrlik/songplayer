@@ -7,7 +7,11 @@
 //! `store.settings`, and shows each output's live state (`GET
 //! /api/v1/program` → `outputs[]`, every 2 s). Rows are keyed by id and every
 //! cell reads the list by id: a refresh never leaves a stale row, typing never
-//! drops focus (`sp-ui-frontend.md`).
+//! drops focus (`sp-ui-frontend.md`). The section re-reads only ITS two
+//! settings (a `Memo`), so a save of the form above never resets an unsaved
+//! row. Every `<option>` carries `selected`: tachys sets a reactive
+//! `prop:value` before a select's options are mounted, which would show the
+//! first option after a load.
 //!
 //! Testids (set here): `settings-audio-outputs` (the fieldset),
 //! `settings-audio-network-rate`, `audio-outputs-add-vban`,
@@ -59,14 +63,10 @@ pub fn state_sk(state: &str) -> &'static str {
     }
 }
 
-/// The stored list the section starts from; `Err` when it cannot be read
-/// (the section then refuses to save over it).
-pub fn stored_list(settings: &HashMap<String, String>) -> Result<Vec<OutputEntry>, String> {
-    match settings
-        .get(SETTING_AUDIO_OUTPUTS)
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-    {
+/// The stored list (`audio_outputs`) the section starts from; `Err` when it
+/// cannot be read (the section then refuses to save over it).
+pub fn stored_list(stored: Option<&str>) -> Result<Vec<OutputEntry>, String> {
+    match stored.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(Vec::new()),
         Some(raw) => serde_json::from_str(raw)
             .map_err(|_| "Uložený zoznam výstupov sa nedá načítať — neukladajte ho".to_string()),
@@ -134,9 +134,19 @@ pub fn AudioOutputs() -> impl IntoView {
     let message = RwSignal::new(String::new());
     let live = RwSignal::new(ProgramOutputs::default());
 
+    // Only the section's own two settings: the form above merges its save
+    // into `store.settings`, which must not reset an unsaved row here.
+    let stored = Memo::new(move |_| {
+        store.settings.with(|s| {
+            (
+                s.get(SETTING_AUDIO_OUTPUTS).cloned(),
+                s.get(SETTING_AUDIO_NETWORK_RATE).cloned(),
+            )
+        })
+    });
     let _sync = Effect::new(move |_| {
-        let settings = store.settings.get();
-        match stored_list(&settings) {
+        let (list, rate) = stored.get();
+        match stored_list(list.as_deref()) {
             Ok(list) => {
                 entries.set(list);
                 load_error.set(None);
@@ -146,8 +156,7 @@ pub fn AudioOutputs() -> impl IntoView {
                 load_error.set(Some(e));
             }
         }
-        let rate = settings.get(SETTING_AUDIO_NETWORK_RATE).map(String::as_str);
-        network_rate.set(audio_network_rate(rate).to_string());
+        network_rate.set(audio_network_rate(rate.as_deref()).to_string());
     });
 
     let cancelled = RwSignal::new(false);
@@ -199,7 +208,16 @@ pub fn AudioOutputs() -> impl IntoView {
                 >
                     {SUPPORTED_RATES
                         .iter()
-                        .map(|r| view! { <option value=r.to_string()>{format!("{r} Hz")}</option> })
+                        .map(|&r| {
+                            view! {
+                                <option
+                                    value=r.to_string()
+                                    selected=move || network_rate.get() == r.to_string()
+                                >
+                                    {format!("{r} Hz")}
+                                </option>
+                            }
+                        })
                         .collect_view()}
                 </select>
             </label>
@@ -252,6 +270,9 @@ fn OutputRow(
             e.vban.as_ref().map(f).unwrap_or_default()
         })
     };
+    let rate_is = move |r: RateChoice| read(entries, &id.get_value(), |e| e.rate) == r;
+    let format_is =
+        move |f: VbanSampleFormat| vban(|v| v.format.as_str().to_string()) == f.as_str();
     view! {
         <div class="audio-output-row" data-testid="audio-output-row" data-id=row_id>
             <label>
@@ -288,10 +309,21 @@ fn OutputRow(
                         edit(entries, &id.get_value(), |e| e.rate = v);
                     }
                 >
-                    <option value="network">"podľa siete"</option>
+                    <option value="network" selected=move || rate_is(RateChoice::Network)>
+                        "podľa siete"
+                    </option>
                     {SUPPORTED_RATES
                         .iter()
-                        .map(|r| view! { <option value=r.to_string()>{format!("{r} Hz")}</option> })
+                        .map(|&r| {
+                            view! {
+                                <option
+                                    value=r.to_string()
+                                    selected=move || rate_is(RateChoice::Fixed(r))
+                                >
+                                    {format!("{r} Hz")}
+                                </option>
+                            }
+                        })
                         .collect_view()}
                 </select>
             </label>
@@ -376,9 +408,18 @@ fn OutputRow(
                         });
                     }
                 >
-                    <option value="int16">"16 bitov"</option>
-                    <option value="int24">"24 bitov"</option>
-                    <option value="float32">"32 bitov (float)"</option>
+                    <option value="int16" selected=move || format_is(VbanSampleFormat::Int16)>
+                        "16 bitov"
+                    </option>
+                    <option value="int24" selected=move || format_is(VbanSampleFormat::Int24)>
+                        "24 bitov"
+                    </option>
+                    <option
+                        value="float32"
+                        selected=move || format_is(VbanSampleFormat::Float32)
+                    >
+                        "32 bitov (float)"
+                    </option>
                 </select>
             </label>
             <span

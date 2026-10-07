@@ -4,7 +4,8 @@
 //! configuration. #233: #210's VBAN fieldset moved to "Zvukové výstupy"
 //! (`audio_outputs.rs`, the output list), which saves its own two settings;
 //! this form MERGES what it saved into `store.settings`, so the list it does
-//! not carry survives its save.
+//! not carry survives its save, and it re-reads only the OTHER settings (a
+//! `Memo`), so a save of the outputs never resets a field edited here.
 
 use std::collections::HashMap;
 
@@ -63,6 +64,12 @@ fn effective_transition_ms(stored: &str) -> String {
         .to_string()
 }
 
+/// The settings "Zvukové výstupy" saves (`audio_outputs.rs`), not this form.
+const OUTPUT_SETTINGS: [&str; 2] = [
+    config::SETTING_AUDIO_OUTPUTS,
+    config::SETTING_AUDIO_NETWORK_RATE,
+];
+
 #[component]
 pub fn SettingsForm() -> impl IntoView {
     let store = use_context::<DashboardStore>().expect("DashboardStore in context");
@@ -86,9 +93,18 @@ pub fn SettingsForm() -> impl IntoView {
     let transition_ms = RwSignal::new(config::DEFAULT_PROGRAM_TRANSITION_MS.to_string());
     let save_status = RwSignal::new(String::new());
 
-    // Populate fields from store settings when they change.
+    // Populate fields from store settings when THEIRS change: the outputs
+    // section merges its two keys into `store.settings` on its own save.
+    let form_settings = Memo::new(move |_| {
+        store.settings.with(|s| {
+            s.iter()
+                .filter(|(k, _)| !OUTPUT_SETTINGS.contains(&k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<HashMap<String, String>>()
+        })
+    });
     let _sync = Effect::new(move |_| {
-        let settings = store.settings.get();
+        let settings = form_settings.get();
         obs_url.set(setting_value(
             &settings,
             config::SETTING_OBS_WEBSOCKET_URL,
