@@ -4,6 +4,7 @@ import {
   catalogScenes,
   cgRestoreTarget,
   cgRestoreVia,
+  isManualScene,
   manualCutLanded,
   pickManualScene,
   pickPlaylistScene,
@@ -224,14 +225,30 @@ test.describe("SP-program's restore after the PP gate (#229)", () => {
 });
 
 test.describe("how cg OBS goes back after the PP gate (#229)", () => {
+  const via = { programBack: null, gateIsLatest: true, source: -1, backIsManual: true };
+
   test("SP-program left on OBS manual by the gate: through the facade, so SongPlayer names it", () => {
-    expect(cgRestoreVia({ programBack: null, gateIsLatest: true, source: -1 })).toBe("facade");
+    expect(cgRestoreVia(via)).toBe("facade");
   });
 
   test("SP-program cut back to a playlist, or someone switched since: on cg OBS directly", () => {
-    expect(cgRestoreVia({ programBack: 4, gateIsLatest: true, source: -1 })).toBe("cg");
-    expect(cgRestoreVia({ programBack: null, gateIsLatest: false, source: -1 })).toBe("cg");
-    expect(cgRestoreVia({ programBack: null, gateIsLatest: true, source: 4 })).toBe("cg");
+    expect(cgRestoreVia({ ...via, programBack: 4 })).toBe("cg");
+    expect(cgRestoreVia({ ...via, gateIsLatest: false })).toBe("cg");
+    expect(cgRestoreVia({ ...via, source: 4 })).toBe("cg");
+  });
+
+  test("a cg OBS scene that is not a manual one goes back on cg OBS directly", () => {
+    // Pressed through the facade, a playlist's name would cut SP-program to
+    // that playlist.
+    expect(cgRestoreVia({ ...via, backIsManual: false })).toBe("cg");
+  });
+
+  test("a manual scene: not a playlist's name, the probe's or OBS manual", () => {
+    const names = playlistNames(ROWS);
+    expect(isManualScene("Blank", names)).toBe(true);
+    for (const s of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, " "]) {
+      expect(isManualScene(s, names), s).toBe(false);
+    }
   });
 });
 
