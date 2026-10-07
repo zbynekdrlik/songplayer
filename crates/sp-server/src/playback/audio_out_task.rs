@@ -72,8 +72,8 @@ pub fn plan(running: &[RunningOutput], wanted: &[OutputEntry], network_rate: u32
     let mut steps = Vec::with_capacity(wanted.len());
     for w in wanted {
         let rate = build_rate(w, network_rate);
-        let same =
-            (0..running.len()).find(|&i| running[i].entry == *w && running[i].built_rate == rate);
+        let same = (0..running.len())
+            .find(|&i| same_but_name(&running[i].entry, w) && running[i].built_rate == rate);
         match same {
             Some(i) => {
                 kept[i] = true;
@@ -93,6 +93,10 @@ pub async fn apply(
     resolved: &mut HashMap<String, Instant>,
     start: &StartThread,
 ) {
+    if settings.not_a_list {
+        outputs.set_problems(settings.problems);
+        return;
+    }
     let running = outputs.running();
     let plan = plan(&running, &settings.entries, settings.network_rate);
     for &i in &plan.stop {
@@ -102,7 +106,8 @@ pub async fn apply(
     for (entry, step) in settings.entries.iter().zip(&plan.steps) {
         let output = match *step {
             Step::Keep(i) => {
-                let kept = running[i].clone();
+                let mut kept = running[i].clone();
+                kept.entry = entry.clone();
                 refresh_vban(&kept, resolved).await;
                 kept
             }
@@ -127,7 +132,7 @@ async fn build(
     entry: &OutputEntry,
     network_rate: u32,
     resolved: &mut HashMap<String, Instant>,
-    _start: &StartThread,
+    start: &StartThread,
 ) -> RunningOutput {
     let built_rate = build_rate(entry, network_rate);
     let mut output = RunningOutput {
@@ -146,7 +151,7 @@ async fn build(
                 out.set_config(resolve_dest(dest, true, Vec::new()).await);
                 resolved.insert(entry.id.clone(), Instant::now());
                 warn_unresolved(&entry.id, &out.config());
-                start_vban_thread(&out, &entry.id);
+                start(&out, &entry.id);
                 log_started(entry, built_rate);
                 output.sink = Some(OutputSink::Vban(out));
             }
@@ -191,13 +196,15 @@ pub async fn tick(
 ) {
     if !state.migrated {
         match migrate_vban_settings(pool).await {
-            Ok(outcome) => log_migration(&outcome),
+            Ok(outcome) => {
+                log_migration(&outcome);
+                state.migrated = true;
+            }
             Err(e) => warn!(
                 %e,
                 "audio outputs: the vban_* migration failed — tried again on the next pass"
             ),
         }
-        state.migrated = true;
     }
     match load(pool).await {
         Ok(settings) => {
