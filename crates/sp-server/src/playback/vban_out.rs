@@ -90,10 +90,20 @@ pub fn target_spec(dest: &VbanDest) -> String {
 /// A packet sent more than this after its due time is a late send (2 ms).
 pub const VBAN_LATE_100NS: i64 = 20_000;
 
-/// Longest single wait before a packet (4 slots; #233: plus the output's
-/// delay, `plan_wait_up_to`). A due time further ahead is a clock mismatch;
-/// the thread never parks on it.
+/// Longest single sleep before a packet: 4 × L = 8 slots, the wall's tick
+/// cap per read (`BoundaryTicker`). #233: an output's whole wait may be this
+/// plus its delay (`plan_wait_up_to`), slept in steps of at most this
+/// (`sleep_until`). A due time further ahead is a clock mismatch; the thread
+/// never parks on it.
 pub const VBAN_MAX_WAIT_100NS: i64 = 4 * VBAN_SEND_LATENCY_100NS;
+
+/// The sleeps one packet's wait may take (#233): the longest wait, 8 slots +
+/// the longest delay, in sleeps of at most [`VBAN_MAX_WAIT_100NS`].
+pub const VBAN_WAIT_STEPS: usize = 9;
+const _: () = assert!(
+    VBAN_WAIT_STEPS as i64 * VBAN_MAX_WAIT_100NS
+        >= VBAN_MAX_WAIT_100NS + sp_core::audio_outputs::MAX_DELAY_MS as i64 * 10_000
+);
 
 /// Send intervals kept for the p99 (the last 5 s at 240 packets/s).
 pub const VBAN_INTERVAL_WINDOW: usize = 1200;
@@ -596,6 +606,27 @@ pub fn plan_wait_up_to(now_100ns: i64, at_100ns: i64, max_100ns: i64) -> i64 {
     (at_100ns - now_100ns).clamp(0, max_100ns)
 }
 
+/// #233: sleep from `now_100ns` until `end_100ns` in sleeps of at most
+/// [`VBAN_MAX_WAIT_100NS`] (the wall's tick cap per read), reading the clock
+/// between two of them (each read ticks the wall) and planning the next from
+/// that read, so an oversleep never adds up. The read after the last sleep is
+/// the caller's.
+pub fn sleep_until(clock: &mut dyn VbanClock, now_100ns: i64, end_100ns: i64) {
+    let mut now = now_100ns;
+    for _ in 0..VBAN_WAIT_STEPS {
+        let left = end_100ns - now;
+        if left <= 0 {
+            return;
+        }
+        let step = left;
+        clock.sleep_100ns(step);
+        if step == left {
+            return;
+        }
+        now = clock.now_100ns();
+    }
+}
+
 /// Packet-to-packet interval in µs (0 on a backward clock read).
 pub fn interval_us(prev_100ns: i64, now_100ns: i64) -> u64 {
     (now_100ns - prev_100ns).max(0) as u64 / 10
@@ -677,10 +708,9 @@ impl VbanSender {
         let packet_len = self.format.packet_len();
         for (k, packet) in self.packets.chunks_exact(packet_len).enumerate() {
             let at = packet_send_at_in(self.format, block.due_100ns, self.latency_100ns, k);
-            let wait = plan_wait_up_to(clock.now_100ns(), at, self.max_wait_100ns);
-            if wait > 0 {
-                clock.sleep_100ns(wait);
-            }
+            let now = clock.now_100ns();
+            let wait = plan_wait_up_to(now, at, self.max_wait_100ns);
+            sleep_until(clock, now, now + wait);
             let sent_at = clock.now_100ns();
             let mut errors = 0;
             let mut last_error = None;

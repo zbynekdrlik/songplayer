@@ -165,9 +165,12 @@ fn a_delay_moves_every_packet_by_the_delay() {
 }
 
 #[test]
-fn the_longest_delay_is_waited_for_whole() {
+fn the_longest_delay_is_waited_for_whole_in_sleeps_the_wall_can_tick() {
     // 2 s of delay: the first packet is 2 s + L after its boundary, past the
-    // 4-slot cap a sender without a delay keeps (a clock mismatch).
+    // 8-slot cap a sender without a delay keeps (a clock mismatch). It is
+    // waited for in sleeps of at most VBAN_MAX_WAIT_100NS (8 slots, the
+    // wall's tick cap per read), the clock read between two of them.
+    let m = VBAN_MAX_WAIT_100NS;
     let out = VbanOut::for_destination(VbanFormat::PROGRAM, 20_000_000);
     out.set_config(active_config(&["10.0.0.1:6980"]));
     let mut clock = FakeClock::at(D);
@@ -175,13 +178,25 @@ fn the_longest_delay_is_waited_for_whole() {
     let mut sender = VbanSender::for_out(&out);
     sender.send_block(&out, &block(D, None), &mut sink, &mut clock);
     assert_eq!(sink.sent[0].0, D + L + 20_000_000);
-    assert_eq!(clock.sleeps[0], L + 20_000_000, "one wait");
+    // L + 2 s = 20 666 666 = 7 × 2 666 664 + 2 000 018.
+    assert_eq!(&clock.sleeps[..8], &[m, m, m, m, m, m, m, 2_000_018]);
+    assert_eq!(clock.sleeps.len(), 8 + 7, "then one sleep per packet");
+    assert_eq!(
+        clock.reads,
+        1 + 7 + 1 + 7 * 2,
+        "packet 0: its plan, one read between two sleeps, its send; the rest: plan + send"
+    );
     // A block whose packets lie further out than that is not waited for:
-    // the cap is the delay + 4 slots.
+    // the cap is the delay + 8 slots, in the 9 sleeps it allows.
     let mut far = FakeClock::at(D);
     let mut sink = RecordingSink::on(&far);
     sender.send_block(&out, &block(D + 10_000_000_000, None), &mut sink, &mut far);
-    assert_eq!(far.sleeps[0], VBAN_MAX_WAIT_100NS + 20_000_000);
+    assert_eq!(&far.sleeps[..9], &[m, m, m, m, m, m, m, m, 1_333_352]);
+    assert_eq!(
+        far.sleeps[..9].iter().sum::<i64>(),
+        VBAN_MAX_WAIT_100NS + 20_000_000
+    );
+    assert_eq!(VBAN_WAIT_STEPS, 9);
     assert_eq!(plan_wait_up_to(0, 1_000, 999), 999);
     assert_eq!(plan_wait_up_to(0, 1_000, 1_001), 1_000);
     assert_eq!(plan_wait_up_to(1_001, 1_000, 5), 0);
@@ -268,4 +283,55 @@ fn the_config_carries_the_wire_name_and_the_status_its_target() {
     assert!(!def.enabled);
     assert_eq!(def.stream_name, "sp-program");
     assert!(def.targets.is_empty());
+}
+
+/// A clock whose every sleep lasts `late` longer than asked.
+struct Oversleeping {
+    now: i64,
+    late: i64,
+    sleeps: Vec<i64>,
+    reads: usize,
+}
+
+impl VbanClock for Oversleeping {
+    fn now_100ns(&mut self) -> i64 {
+        self.reads += 1;
+        self.now
+    }
+    fn sleep_100ns(&mut self, d_100ns: i64) {
+        self.sleeps.push(d_100ns);
+        self.now += d_100ns + self.late;
+    }
+    fn slew_owed_100ns(&self) -> i64 {
+        0
+    }
+}
+
+#[test]
+fn a_wait_is_slept_in_steps_the_wall_can_tick() {
+    let m = VBAN_MAX_WAIT_100NS;
+    // Nothing to wait (due now, or past): no sleep, no read.
+    let mut c = FakeClock::at(100);
+    sleep_until(&mut c, 100, 100);
+    sleep_until(&mut c, 100, 40);
+    assert!(c.sleeps.is_empty());
+    assert_eq!(c.reads, 0);
+    // One step: one sleep, and the read after it is the caller's.
+    sleep_until(&mut c, 100, 100 + m);
+    assert_eq!((c.sleeps.clone(), c.reads), (vec![m], 0));
+    // Three steps: a read between two sleeps.
+    let mut c = FakeClock::at(0);
+    sleep_until(&mut c, 0, 2 * m + 7);
+    assert_eq!((c.sleeps.clone(), c.reads), (vec![m, m, 7], 2));
+    // A sleep that overslept: the next one is planned from the read, so the
+    // oversleeps never add up (only the last one remains).
+    let mut c = Oversleeping {
+        now: 0,
+        late: 1_000,
+        sleeps: Vec::new(),
+        reads: 0,
+    };
+    sleep_until(&mut c, 0, 2 * m + 7);
+    assert_eq!(c.sleeps, vec![m, m - 993]);
+    assert_eq!((c.now, c.reads), (2 * m + 7 + 1_000, 1));
 }
