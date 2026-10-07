@@ -18,10 +18,9 @@ use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
     Adjustable, Async, FixedAsync, Resampler, SincInterpolationParameters, WindowFunction,
 };
+use sp_core::audio_outputs::PROGRAM_RATE;
 
-use crate::playback::vban_packet::{
-    VBAN_BLOCK_FRAMES, VBAN_BLOCK_SAMPLES, VBAN_CHANNELS, VBAN_SAMPLE_RATE_HZ,
-};
+use crate::playback::vban_packet::{VBAN_BLOCK_FRAMES, VBAN_BLOCK_SAMPLES, VBAN_CHANNELS};
 
 /// The sinc length (rubato's default; ~2.7 ms at 96 kHz).
 pub const ASRC_SINC_LEN: usize = 256;
@@ -39,7 +38,7 @@ pub struct Asrc {
 
 impl Asrc {
     pub fn new(device_rate_hz: f64) -> Result<Self, String> {
-        let ratio = device_rate_hz / VBAN_SAMPLE_RATE_HZ as f64;
+        let ratio = device_rate_hz / f64::from(PROGRAM_RATE);
         let params =
             SincInterpolationParameters::new(ASRC_SINC_LEN, WindowFunction::BlackmanHarris2);
         let inner = Async::<f32>::new_sinc(

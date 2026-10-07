@@ -18,9 +18,13 @@
 //!   consumer takes SP-program, so the cut would black them all), recorded
 //!   as a keep.
 //!
-//! Both answer the program state plus `vban`, the #210 VBAN audio output's
-//! telemetry (`playback::vban_out::VbanStatus`), `input`, the #212 NDI
-//! input's (`playback::ndi_input::NdiInputStatus`), `remote`, the #213
+//! Both answer the program state plus `outputs` (#233): every audio output
+//! of the list in list order (`playback::audio_out::OutputStatus`: id, type,
+//! name, enabled, state + reason, rate, format, channels, delay, latency,
+//! blocks sent / dropped, and a VBAN entry's #210 telemetry under `vban` —
+//! the top-level `vban` block is gone), `audio_network_rate` and
+//! `outputs_problems` (stored entries this version could not run); `input`,
+//! the #212 NDI input's (`playback::ndi_input::NdiInputStatus`), `remote`, the #213
 //! Companion remote control's (`remote::RemoteStatus`, #221 L3: with
 //! `program_scene`, SP-program's scene name), and `degraded_reason` (#221
 //! B4 step 6: "no NDI receiver on SP-program" while a source is on program
@@ -45,6 +49,7 @@ use tracing::{info, warn};
 use sp_core::config::PROGRAM_INPUT_ID;
 
 use crate::AppState;
+use crate::playback::audio_out::OutputStatus;
 use crate::playback::ndi_health_expect::program_degraded_reason;
 use crate::playback::ndi_input::{InputSettings, NdiInputStatus, load_input_settings};
 use crate::playback::program_bus::{ProgramBus, ProgramStatus};
@@ -52,7 +57,6 @@ use crate::playback::program_max::MaxStatus;
 use crate::playback::program_switch::{
     RefusedSource, SourceError, Via, refused_sources, switch_source,
 };
-use crate::playback::vban_out::VbanStatus;
 use crate::remote::{RemoteSettings, RemoteStatus, load_remote_settings};
 
 /// Body of `POST /api/v1/program/cut`.
@@ -71,8 +75,9 @@ pub struct CutRefusedBody {
     pub error: &'static str,
 }
 
-/// The body of both program routes: the program state + the VBAN, NDI input
-/// and remote-control telemetry, and SP-program's receiver expectation.
+/// The body of both program routes: the program state + the audio outputs,
+/// NDI input and remote-control telemetry, and SP-program's receiver
+/// expectation.
 #[derive(Debug, Serialize)]
 pub struct ProgramResponse {
     #[serde(flatten)]
@@ -81,7 +86,12 @@ pub struct ProgramResponse {
     /// program and nothing receives `SP-program` (`null` otherwise, and
     /// before the sender polled its receivers).
     pub degraded_reason: Option<&'static str>,
-    pub vban: VbanStatus,
+    /// #233: every audio output, in list order.
+    pub outputs: Vec<OutputStatus>,
+    /// #233: the network sample rate an output at "network" runs at.
+    pub audio_network_rate: u32,
+    /// #233: stored entries this version could not run (named, skipped).
+    pub outputs_problems: Vec<String>,
     pub input: NdiInputStatus,
     pub remote: RemoteStatus,
     pub max: MaxStatus,
@@ -109,7 +119,9 @@ impl ProgramResponse {
         Self {
             program,
             degraded_reason,
-            vban: bus.vban().status(),
+            outputs: bus.outputs().status(),
+            audio_network_rate: bus.outputs().network_rate(),
+            outputs_problems: bus.outputs().problems(),
             input: bus.input().status(&stored.input),
             remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             max: bus.max().status(),
@@ -210,6 +222,9 @@ mod tests;
 #[cfg(test)]
 #[path = "program_tests_max.rs"]
 mod tests_max;
+#[cfg(test)]
+#[path = "program_tests_outputs.rs"]
+mod tests_outputs;
 #[cfg(test)]
 #[path = "program_tests_switch.rs"]
 mod tests_switch;

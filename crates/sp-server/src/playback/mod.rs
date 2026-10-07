@@ -7,6 +7,11 @@
 pub mod asrc; // #233: the ASIO output's resampler (rubato Async sinc) + the re-centre splice
 pub mod asrc_servo; // #233: the ASIO output's drift servo (camera-box's asrc-compensator, for an output), pure
 pub mod audio_grid;
+pub mod audio_out; // #233: the program audio's fan-out to its outputs (one queue + thread each)
+pub mod audio_out_block; // #233: one program boundary's audio block for the outputs
+pub mod audio_out_config; // #233: the outputs' settings — strict PATCH parse, lenient stored read
+pub mod audio_out_migrate; // #233: vban_* → the output list, once (the old keys stay)
+pub mod audio_out_task; // #233: the outputs' settings task (keep / build / stop, DNS, migration)
 pub mod band_pool; // #223: the SP-program sender's persistent row-band workers (no thread per picture)
 mod clear_lyrics;
 pub mod clock_health;
@@ -76,6 +81,7 @@ mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-teste
 pub mod vban_clock; // #224 part 2: VBAN's + the NDI input's wall clock, VBAN's date-step slew
 pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
 pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
+pub mod vban_rate; // #233: a VBAN destination's fixed-ratio rate conversion (rubato Fft)
 pub mod vban_stall; // #210 part 2: the VBAN thread's late packets (ring, window max, WARN)
 pub mod video_decode; // #223 S3b: `video_hw_decode` (read at each song open) + its status
 pub mod wallclock;

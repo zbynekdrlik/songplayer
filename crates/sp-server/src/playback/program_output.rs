@@ -22,12 +22,13 @@
 //! same port, the one DistroAV's receivers reconnect to by URL.
 //!
 //! #210: every submitted pair's audio block (forwarded, mixed, or the standby
-//! silence) is handed to the program's VBAN output (`vban_out.rs`) BEFORE its
-//! NDI submit — a copy, the NDI submit still borrows the pair — so FOH audio
-//! never waits for the video side of its own boundary (a slow NDI send, a
-//! mixed picture; a video side longer than a slot still delays the NEXT
-//! boundary's take, which `health.timing` shows as `ready_late_us`), and
-//! `start_program` also starts the VBAN thread + its settings task. Every
+//! silence) is handed to the program's audio outputs (#233: the fan-out,
+//! `audio_out.rs`, one queue + thread per output, VBAN per destination)
+//! BEFORE its NDI submit — ONE shared copy, the NDI submit still borrows the
+//! pair — so FOH audio never waits for the video side of its own boundary (a
+//! slow NDI send, a mixed picture; a video side longer than a slot still
+//! delays the NEXT boundary's take, which `health.timing` shows as
+//! `ready_late_us`), and `start_program` also starts the outputs task. Every
 //! block first goes through the program's ONE peak limiter (#210, after the
 //! crossfade, finding 5986249387): the same `sp_decoder::PeakLimiter` the
 //! stem mix uses, its state carried from one boundary to the next, reset
@@ -79,6 +80,8 @@ use sp_ndi::{AudioFrame, NdiBackend, NdiSender};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+use crate::playback::audio_out::AudioOutputs;
+use crate::playback::audio_out_block::{ProgramBlock, is_program_block};
 use crate::playback::band_pool::BandPool;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{
@@ -92,7 +95,6 @@ use crate::playback::program_transition::{
 };
 use crate::playback::submit_handoff::SubmitJob;
 use crate::playback::submitter::FrameSubmitter;
-use crate::playback::vban_out::{VbanBlock, VbanOut, is_program_block, run_vban_config_task};
 use crate::playback::wallclock::WallClock;
 
 /// The program's picture size, 1080p (the paced idle size): #223, every
@@ -127,8 +129,9 @@ pub struct ProgramOutput<B: NdiBackend> {
     /// #223: the program's ONE picture layout, every picture it sends (the
     /// standby black included), with the fit plans into it.
     canvas: Canvas,
-    /// #210: the VBAN output each submitted pair's audio block goes to.
-    vban: Option<Arc<VbanOut>>,
+    /// #210 + #233: the program's audio outputs (`audio_out.rs`): each
+    /// submitted pair's limited block, copied once and shared.
+    outputs: Option<Arc<AudioOutputs>>,
     /// #215: audio frames per boundary (1600).
     spc: usize,
     /// #215 addendum 3 + #223 follow-up: the row bands a mixed or fitted
@@ -258,14 +261,14 @@ impl Pair {
         }
     }
 
-    /// What VBAN gets for the boundary on `stamp_100ns`: the pair's own
-    /// block, COPIED (its NDI submit still borrows it), or the standby
-    /// silence.
-    fn vban_block(&self, stamp_100ns: i64) -> VbanBlock {
+    /// What the audio outputs get for the boundary on `stamp_100ns`: the
+    /// pair's own block, COPIED once (its NDI submit still borrows it), or
+    /// the standby silence.
+    fn program_block(&self, stamp_100ns: i64) -> ProgramBlock {
         match self {
-            Pair::Source(job) => VbanBlock::copied(stamp_100ns, &job.audio),
-            Pair::Standby => VbanBlock::silence(stamp_100ns),
-            Pair::Mix { audio, .. } => VbanBlock::copied(stamp_100ns, audio),
+            Pair::Source(job) => ProgramBlock::copied(stamp_100ns, &job.audio),
+            Pair::Standby => ProgramBlock::silence(stamp_100ns),
+            Pair::Mix { audio, .. } => ProgramBlock::copied(stamp_100ns, audio),
         }
     }
 }
@@ -288,7 +291,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             submitter,
             silence,
             canvas: Canvas::new(width, height),
-            vban: None,
+            outputs: None,
             spc,
             bands: BandPool::new(
                 MIX_THREAD_NAME,
@@ -307,10 +310,16 @@ impl<B: NdiBackend> ProgramOutput<B> {
         Self::new(sender, PROGRAM_STANDBY_W, PROGRAM_STANDBY_H)
     }
 
-    /// #210: also hand every submitted pair's audio block to `vban`.
-    pub fn with_vban(mut self, vban: Arc<VbanOut>) -> Self {
-        self.vban = Some(vban);
+    /// #233: also hand every submitted pair's audio block to the outputs.
+    pub fn with_outputs(mut self, outputs: Arc<AudioOutputs>) -> Self {
+        self.outputs = Some(outputs);
         self
+    }
+
+    /// Tests: one VBAN output as the whole fan-out (the #210 tests' seam).
+    #[cfg(test)]
+    pub fn with_vban(self, vban: Arc<crate::playback::vban_out::VbanOut>) -> Self {
+        self.with_outputs(Arc::new(AudioOutputs::single_vban(vban)))
     }
 
     /// #223 S2: also offer every boundary to `SP-program-MAX`.
@@ -327,17 +336,18 @@ impl<B: NdiBackend> ProgramOutput<B> {
         }
     }
 
-    /// #210: hand one pair's audio block to the VBAN output (never blocks);
-    /// returns the instant it was handed over, read off `now`.
-    fn feed_vban(&self, block: VbanBlock, now: &impl Fn() -> i64) -> i64 {
-        if let Some(vban) = &self.vban {
-            vban.push(block);
+    /// #210 + #233: hand one pair's audio block to every output (never
+    /// blocks); returns the instant it was handed over, read off `now`.
+    fn feed_outputs(&self, block: ProgramBlock, now: &impl Fn() -> i64) -> i64 {
+        if let Some(outputs) = &self.outputs {
+            outputs.offer(&block);
         }
         now()
     }
 
     /// Serve one program boundary: its audio side ([`split`](Self::split),
-    /// no video work) goes to VBAN FIRST, then the boundary is offered to
+    /// no video work) goes to the audio outputs (VBAN, #233) FIRST, then the
+    /// boundary is offered to
     /// `SP-program-MAX` (#223 S2, [`offer_max`](Self::offer_max)), then the
     /// video side and the NDI pair ([`submit_video`](Self::submit_video)) —
     /// #210: FOH audio never waits for the video side of its own boundary
@@ -355,7 +365,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
         let stamp_100ns = job.stamp_100ns();
         let mut pair = self.split(job);
         self.limit(&mut pair, stamp_100ns);
-        let fed_100ns = self.feed_vban(pair.vban_block(stamp_100ns), &now);
+        let fed_100ns = self.feed_outputs(pair.program_block(stamp_100ns), &now);
         self.offer_max(&pair, stamp_100ns);
         let ends_run = !matches!(pair, Pair::Mix { .. });
         let submit_start_100ns = self.submit_video(pair, stamp_100ns, &now);
@@ -659,7 +669,8 @@ impl super::PlaybackEngine {
     /// #209: restore the persisted program source, install the process-wide
     /// bus the paced submit threads offer to, start the `SP-program` sender
     /// thread (Windows, on the engine's NDI backend), and stop it on shutdown.
-    /// #210: also start the VBAN thread (Windows) and its settings task.
+    /// #210 + #233: also start the audio outputs' task (the `vban_*`
+    /// migration, the 5 s list re-read, one thread per output).
     /// #212: also start the NDI input "OBS manuál" (its settings task, and on
     /// Windows its grid thread on the engine's NDI SDK). #213: also start the
     /// Companion remote control's settings task (its listener cuts this bus and
@@ -674,17 +685,11 @@ impl super::PlaybackEngine {
     #[cfg_attr(test, mutants::skip)]
     pub async fn start_program(&self, bus: Arc<ProgramBus>, shutdown: &broadcast::Sender<()>) {
         let _ = self.program.set(bus.clone()); // #215: the deferred scene-go-off pause
-        let vban = bus.vban().clone();
-        tokio::spawn(run_vban_config_task(
-            self.pool.clone(),
-            vban.clone(),
-            shutdown.subscribe(),
-        ));
+        let outputs = bus.outputs().clone();
+        crate::playback::audio_out_task::start_outputs(self.pool.clone(), outputs, shutdown);
         // #223 S2: the setting first, then the program-max thread (Windows).
         crate::playback::program_max::start_max(self.pool.clone(), bus.max().clone(), shutdown)
             .await;
-        #[cfg(windows)]
-        crate::playback::vban_out::spawn_vban_thread(vban.clone());
         let mut shutdown_rx = shutdown.subscribe();
         restore_selected_source(&self.pool, &bus).await;
         if !install(bus.clone()) {
@@ -727,7 +732,7 @@ impl super::PlaybackEngine {
         tokio::spawn(async move {
             let _ = shutdown_rx.recv().await;
             bus.stop();
-            vban.stop();
+            bus.outputs().stop_all();
             bus.input().stop();
         });
     }
@@ -761,7 +766,7 @@ fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<Progr
                 }
             };
             let mut out = ProgramOutput::fhd(sender)
-                .with_vban(bus.vban().clone())
+                .with_outputs(bus.outputs().clone())
                 .with_max(bus.max().clone());
             // #215 addendum 3 + #223 follow-up: how many threads paint a mixed
             // or fitted picture (this one + the persistent band workers).

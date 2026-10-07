@@ -2,6 +2,7 @@
 paths:
   - "sp-ui/**"
   - "e2e/mock-api.mjs"
+  - "e2e/settings-*.spec.ts"
   - "e2e/lyrics-follow.spec.ts"
   - "crates/sp-core/src/lyrics_follow.rs"
   - "e2e/player-known-state.spec.ts"
@@ -891,6 +892,67 @@ wiped it on the new UI — a review round caught it by tracing. So when the
 Rust UI changes how the store reacts to a message, trace every existing
 spec that posts a mock message right after `page.goto` against the new
 logic, message by message, before calling the suite green.
+
+## A `<select prop:value>` is set before its options mount: every option carries `selected` (#233)
+
+tachys (Leptos 0.7) builds an element's attributes BEFORE it mounts its
+children, and a reactive `prop:value` runs at once, so the select's value is
+set while it has no `<option>`: the browser then shows the FIRST option. A
+select whose value is set again after mount (an `Effect` on a later load)
+recovers; a `<For>` row built from data already loaded never does — after a
+reload every "Zvukové výstupy" row read "podľa siete" / "16 bitov" (#233
+review round 1). Give every option a reactive `selected=move || current ==
+this` (the `playlist_picker.rs` pattern) and keep `prop:value` for the live
+changes. A spec that checks a select's value after a load must use a value
+that is NOT its first option, or it passes on the bug.
+
+## One `.save-status` per page: a second section's message takes its own class (#233)
+
+Five Nastavenia specs read `page.locator(".save-status")` unscoped, and
+Playwright's strict mode throws on a single-value assertion that matches
+two elements. A new section's status line takes its own class
+(`audio-outputs-status`), never the form's `save-status`.
+
+## Save nothing the page did not load (#233)
+
+A section that saves a WHOLE value (the outputs list, the form's fields)
+must not save before the page's `GET /api/v1/settings` landed: what it
+shows before (or after a failed load) is no stored value, and a save would
+replace the stored one. The Settings page keeps `loaded:
+RwSignal<Option<bool>>` (`None` running, `Some(false)` failed) and passes it
+to both sections: save disabled until `Some(true)`, and a Slovak line on a
+failed load (mock: `/__mock/fail-mode {kind: "settings"}`).
+
+## Reaching a save handler past its disabled button in a spec (#233)
+
+A click on a disabled button reaches no handler, `click({force: true})`
+included, so a "no PATCH after a forced click" check proves only what
+`toBeDisabled()` already proved. To exercise a handler's OWN guard: re-enable
+the button by hand and click it (`button.disabled = false; button.click()`
+in `page.evaluate`; Leptos re-applies `prop:disabled` only when its
+signal changes), or call the form's `requestSubmit()`. `requestSubmit()`
+runs constraint validation first and fires `invalid` instead of `submit`
+when a field is out of range, so return whether `submit` fired (a `once`
+listener) and assert it. Check "no PATCH" only after a later round trip
+through the page (the PATCH would start from a `spawn_local`).
+
+A server state the mock refuses to store (an entry of a later version's
+type, a stored value the dashboard cannot read) is served through the
+page's own GET instead: `page.route(url, async (route) => { const response
+= await route.fetch(); const body = await response.json(); …;
+await route.fulfill({ response, json: body }); })`, PATCHes passed on with
+`route.continue()`, and `page.unroute` in `finally`
+(`settings-audio-outputs.spec.ts`, "a stored list the dashboard cannot read
+is never saved over").
+
+## A section of a shared settings map re-reads only its own keys (#233)
+
+Two Nastavenia sections (`settings_form.rs`, `audio_outputs.rs`) both read
+`store.settings` and each MERGES its save into it. An `Effect` reading the
+whole map re-runs on the other section's save and resets this section's
+unsaved edits. Each section reads its keys through a `Memo` (a `Memo` only
+propagates a changed value): the outputs section the two output keys, the
+form every other key.
 
 ## Telling a refused POST from a failure: `api::post_json_status` (#221)
 

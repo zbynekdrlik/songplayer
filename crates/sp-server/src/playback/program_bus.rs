@@ -83,6 +83,7 @@ use sqlx::SqlitePool;
 use tokio::sync::watch;
 use tracing::{info, warn};
 
+use crate::playback::audio_out::AudioOutputs;
 use crate::playback::fleet_shift::{self, FleetShift, timeline_now_100ns};
 use crate::playback::ndi_input::NdiInputShared;
 use crate::playback::program_max::MaxOut;
@@ -95,7 +96,6 @@ use crate::playback::program_transition::{
     Window,
 };
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
-use crate::playback::vban_out::VbanOut;
 use crate::remote::RemoteShared;
 
 /// The program output's NDI source name.
@@ -697,9 +697,9 @@ struct BusState {
 pub struct ProgramBus {
     state: Mutex<BusState>,
     ready: Condvar,
-    /// #210: the program's VBAN audio output, fed by the `SP-program` sender
-    /// thread and reported under `vban` on `GET /api/v1/program`.
-    vban: Arc<VbanOut>,
+    /// #210 + #233: the program's audio outputs, fed by the `SP-program`
+    /// sender thread and reported under `outputs` on `GET /api/v1/program`.
+    outputs: Arc<AudioOutputs>,
     /// #212: the NDI input "OBS manuál" (source id `PROGRAM_INPUT_ID`): its
     /// settings, stop flag and telemetry (`input` on `GET /api/v1/program`).
     input: Arc<NdiInputShared>,
@@ -733,7 +733,7 @@ impl ProgramBus {
                 stop: false,
             }),
             ready: Condvar::new(),
-            vban: Arc::new(VbanOut::new()),
+            outputs: Arc::new(AudioOutputs::new()),
             input: Arc::new(NdiInputShared::default()),
             remote: Arc::new(RemoteShared::default()),
             max: Arc::new(MaxOut::new()),
@@ -743,9 +743,9 @@ impl ProgramBus {
         }
     }
 
-    /// #210: the program's VBAN output.
-    pub fn vban(&self) -> &Arc<VbanOut> {
-        &self.vban
+    /// #233: the program's audio outputs.
+    pub fn outputs(&self) -> &Arc<AudioOutputs> {
+        &self.outputs
     }
 
     /// #212: the NDI input's shared state.

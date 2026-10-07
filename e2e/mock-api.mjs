@@ -289,8 +289,8 @@ const settings = {
   // `speaker` = the speaker's own voice. `dub_model` is deliberately absent so
   // the form shows its default.
   dub_voice: "speaker",
-  // #210: the vban_* keys are deliberately absent so the Nastavenia VBAN
-  // fieldset shows its defaults (off, `sp-program`, no targets).
+  // #233: audio_outputs / audio_network_rate are absent (an empty list,
+  // 48 kHz), as on a box that never had VBAN.
   // #212: the ndi_input_* keys are absent too (the input is off, no source).
   // #213: the remote_ws_* keys are absent too (off, port 4456, no password).
   // #215: the program_* transition keys are absent too (the default 300 ms fade).
@@ -482,6 +482,8 @@ const failModes = {
   previous: false,
   mode: false,
   preview: false,
+  // #233: GET /api/v1/settings (Nastavenia must save nothing it did not load).
+  settings: false,
 };
 
 function maybeFail(kind, res) {
@@ -600,13 +602,89 @@ app.post("/api/v1/control", (_req, res) => {
 
 // Settings (#229: every secret masked, see `shownSettings`)
 app.get("/api/v1/settings", (_req, res) => {
+  if (maybeFail("settings", res)) return;
   res.json(shownSettings());
 });
+
+// #233: as the server (`audio_out_config::checked`) — a bad output list or
+// network rate refuses the whole PATCH with 400 and the server's text,
+// before anything is written (the cases the dashboard can send).
+const MOCK_RATES = [44100, 48000, 88200, 96000, 192000];
+// As `sp_core::audio_outputs::shown_id`: at most 32 characters, each one
+// outside a-z 0-9 - shown as `?` (an error never echoes junk input).
+function shownId(id) {
+  return [...String(id ?? "")]
+    .slice(0, 32)
+    .map((c) => (/^[a-z0-9-]$/.test(c) ? c : "?"))
+    .join("");
+}
+function outputsRefusal(body) {
+  if (
+    body.audio_network_rate !== undefined &&
+    !MOCK_RATES.includes(Number(String(body.audio_network_rate).trim()))
+  ) {
+    return `audio_network_rate must be one of ${MOCK_RATES.join(", ")}`;
+  }
+  if (body.audio_outputs === undefined || String(body.audio_outputs).trim() === "") {
+    return null;
+  }
+  let list;
+  try {
+    list = JSON.parse(body.audio_outputs);
+  } catch {
+    return "audio_outputs is not a JSON list (line 1, column 0)";
+  }
+  if (!Array.isArray(list)) return "audio_outputs is not a JSON list (line 1, column 0)";
+  // The cases the dashboard can send, in the server's order and words: first
+  // every entry read field by field (`audio_out_config::entry`: id, type,
+  // vban, vban.host, vban.port, name; not vban.format, stream_name or the
+  // types of enabled / rate / delay_ms) …
+  for (const [i, e] of list.entries()) {
+    const first = `entry ${i + 1}`;
+    if (e === null || typeof e !== "object" || Array.isArray(e)) return `${first} is not a JSON object`;
+    if (e.id === undefined) return `${first}: id is missing`;
+    if (typeof e.id !== "string") return `${first}: id has the wrong type`;
+    const at = `${first} (id ${shownId(e.id)})`;
+    if (e.type === undefined) return `${at}: type is missing`;
+    if (typeof e.type !== "string") return `${at}: type has the wrong type`;
+    if (e.type !== "vban") return `${at}: type must be vban`;
+    if (e.vban === undefined) return `${at}: vban is missing`;
+    if (e.vban === null || typeof e.vban !== "object" || Array.isArray(e.vban)) {
+      return `${at}: vban is not a JSON object`;
+    }
+    if (e.vban.host === undefined) return `${at}: vban.host is missing`;
+    if (typeof e.vban.host !== "string") return `${at}: vban.host has the wrong type`;
+    if (e.vban.port === undefined) return `${at}: vban.port is missing`;
+    if (!Number.isInteger(e.vban.port) || e.vban.port < 0 || e.vban.port > 65535) {
+      return `${at}: vban.port has the wrong type`;
+    }
+    if (e.name === undefined) return `${at}: name is missing`;
+  }
+  // … then the shared validation (`validate_list`): the counts, then each
+  // entry's host and port before its duplicate check (not the id, name,
+  // rate, delay or stream checks: the dashboard validates those itself).
+  if (list.length > 16) return `audio_outputs has ${list.length} entries (at most 16)`;
+  if (list.length > 8) return `audio_outputs has ${list.length} vban entries (at most 8)`;
+  const seen = new Set();
+  for (const [i, e] of list.entries()) {
+    const at = `entry ${i + 1} (id ${shownId(e.id)})`;
+    if (!e.vban.host) return `${at}: vban.host is empty`;
+    if (e.vban.port === 0) return `${at}: vban.port must be 1-65535`;
+    if (seen.has(e.id)) return `${at}: id is used by an earlier entry`;
+    seen.add(e.id);
+  }
+  return null;
+}
 
 // #229: as the server — a value exactly the mask for a secret setting keeps
 // the stored one (nothing written), any other value replaces it (`""` clears
 // it), and the answer is 204 with NO body.
 app.patch("/api/v1/settings", (req, res) => {
+  const refusal = outputsRefusal(req.body);
+  if (refusal) {
+    res.status(400).send(refusal);
+    return;
+  }
   for (const [key, value] of Object.entries(req.body)) {
     if (value === SECRET_MASK && isSecretSetting(key)) {
       continue;
@@ -623,6 +701,8 @@ app.post("/__mock/settings-reset", (_req, res) => {
     delete settings[key];
   }
   Object.assign(settings, settingsInitial);
+  failModes.settings = false;
+  outputsSkipped.clear();
   res.json({ status: "reset" });
 });
 
@@ -1097,31 +1177,12 @@ function programBody() {
       cue_wait_boundaries: 0,
       cue_timeouts: 0,
     },
-    // #210: the VBAN output's telemetry (mirrors `VbanStatus`), from the
-    // stored settings like the real settings task.
-    vban: {
-      enabled: settings.vban_enabled === "true",
-      running: false,
-      stream_name: settings.vban_stream_name || "sp-program",
-      packets_sent: 0,
-      send_errors: 0,
-      blocks_dropped: 0,
-      blocks_substituted: 0,
-      late_sends: 0,
-      // #210 part 2: the VBAN thread's late packets (`vban_stall.rs`); the
-      // mock sends nothing.
-      late_max_us: 0,
-      late_events: [],
-      send_interval_p99_us: 0,
-      frame_counter: 0,
-      slew_owed_us: 0, // #224 part 2 (was missing from the mock)
-      targets: (settings.vban_targets || "")
-        .split(",")
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0)
-        .slice(0, 8) // VBAN_MAX_TARGETS
-        .map((t) => ({ target: t, addr: null, error: null })),
-    },
+    // #233: every audio output (mirrors `audio_out::OutputStatus`) from the
+    // stored list, like the server's outputs task; the mock "runs" every
+    // enabled entry. #210's top-level `vban` block moved under each entry.
+    audio_network_rate: Number(settings.audio_network_rate || 48000),
+    outputs_problems: mockOutputsProblems(),
+    outputs: mockOutputs(),
     // #223 S2: SP-program-MAX (mirrors `MaxStatus`). The setting is ON unless
     // it says "false"; the mock has no GPU, like the Linux server: unsupported.
     max: {
@@ -1142,6 +1203,78 @@ function programBody() {
     },
   };
 }
+// #233: the outputs as `GET /api/v1/program` lists them, from the stored
+// list (an unreadable one lists nothing); an enabled VBAN entry carries its
+// `vban` telemetry like the server's (the fields the dashboard and the
+// gates read, no traffic).
+function mockStoredOutputs() {
+  let list = [];
+  try {
+    list = JSON.parse(settings.audio_outputs || "[]");
+  } catch {
+    list = [];
+  }
+  return Array.isArray(list) ? list : [];
+}
+// #233: stored entries the mock's "outputs task" skips (`/__mock/outputs-skip
+// {ids}`, cleared by `/__mock/settings-reset`): not in `outputs[]`, each named
+// in `outputs_problems` as the server names a skipped entry.
+const outputsSkipped = new Set();
+app.post("/__mock/outputs-skip", (req, res) => {
+  outputsSkipped.clear();
+  for (const id of (req.body && req.body.ids) || []) outputsSkipped.add(String(id));
+  res.json({ skipped: [...outputsSkipped] });
+});
+function mockOutputsProblems() {
+  return mockStoredOutputs().flatMap((e, i) =>
+    outputsSkipped.has(e.id) ? [`entry ${i + 1} (id ${shownId(e.id)}): type must be vban`] : [],
+  );
+}
+function mockOutputs() {
+  const list = mockStoredOutputs().filter((e) => !outputsSkipped.has(e.id));
+  const network = Number(settings.audio_network_rate || 48000);
+  return list.map((e) => {
+    const rate = e.rate === "network" || e.rate === undefined ? network : Number(e.rate);
+    const enabled = e.enabled !== false;
+    return {
+      id: e.id,
+      type: e.type,
+      name: e.name,
+      enabled,
+      state: enabled ? "running" : "disabled",
+      reason: null,
+      rate,
+      format: (e.vban && e.vban.format) || "int24",
+      channels: 2,
+      delay_ms: e.delay_ms || 0,
+      latency_ms: 66.6666 + (e.delay_ms || 0) + (rate === 48000 ? 0 : 1000 / 60),
+      blocks_sent: 0,
+      blocks_dropped: 0,
+      ...(enabled && e.vban
+        ? {
+            vban: {
+              enabled: true,
+              running: true,
+              stream_name: e.vban.stream_name || "sp-program",
+              blocks_sent: 0,
+              packets_sent: 0,
+              send_errors: 0,
+              blocks_dropped: 0,
+              blocks_substituted: 0,
+              late_sends: 0,
+              late_max_us: 0,
+              late_events: [],
+              send_interval_p99_us: 0,
+              frame_counter: 0,
+              slew_owed_us: 0,
+              targets: [{ target: `${e.vban.host}:${e.vban.port}`, addr: null, error: null }],
+            },
+          }
+        : {}),
+    };
+  });
+}
+
 // #212: the NDI input "OBS manuál" — `MACHINE (stream)` → `stream`, like
 // the server's `extract_ndi_stream_name`.
 function ndiStreamName(full) {

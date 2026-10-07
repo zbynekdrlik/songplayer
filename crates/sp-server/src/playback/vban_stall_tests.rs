@@ -6,10 +6,11 @@
 use std::sync::Arc;
 
 use super::*;
+use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::fleet_shift::FleetShift;
 use crate::playback::vban_clock::WallVbanClock;
 use crate::playback::vban_out::tests::{FakeClock, RecordingSink, active_config};
-use crate::playback::vban_out::{VbanBlock, VbanClock, VbanOut, VbanSender};
+use crate::playback::vban_out::{VbanClock, VbanOut, VbanSender};
 use crate::playback::vban_packet::{VBAN_PACKETS_PER_SECOND, VBAN_SEND_LATENCY_100NS};
 use crate::playback::wallclock::{SystemClock, WallClock};
 use sp_core::genlock::UNITS_PER_SECOND;
@@ -180,7 +181,8 @@ fn a_late_packet_of_the_sender_reaches_the_status_at_its_send_instant() {
     let sent = P + l + 120_000;
     let mut clock = FakeClock::at(sent);
     let mut sink = RecordingSink::on(&clock);
-    let n = VbanSender::default().send_block(&out, &VbanBlock::silence(P), &mut sink, &mut clock);
+    let n =
+        VbanSender::default().send_block(&out, &ProgramBlock::silence(P), &mut sink, &mut clock);
     assert_eq!(n, 8);
     let st = out.status();
     assert_eq!(
@@ -229,7 +231,7 @@ fn a_late_packet_of_the_sender_is_stamped_with_its_clocks_label() {
     let sent = P + VBAN_SEND_LATENCY_100NS + 120_000;
     let mut clock = ShiftedClock(FakeClock::at(sent));
     let mut sink = RecordingSink::on(&clock.0);
-    VbanSender::default().send_block(&out, &VbanBlock::silence(P), &mut sink, &mut clock);
+    VbanSender::default().send_block(&out, &ProgramBlock::silence(P), &mut sink, &mut clock);
     assert_eq!(
         out.status().late_events[0],
         VbanLateEvent {

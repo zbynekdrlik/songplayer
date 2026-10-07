@@ -17,11 +17,12 @@ use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, NdiSender};
 
 use super::{MixRun, ProgramOutput};
+use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramJob};
 use crate::playback::program_transition::{AudioFormat, MixJob, mix_audio_block};
 use crate::playback::submit_handoff::SubmitJob;
-use crate::playback::vban_out::{VbanBlock, VbanOut, VbanTake};
+use crate::playback::vban_out::{VbanOut, VbanTake};
 
 const T0: i64 = 17_900_000_000_000_000;
 
@@ -131,7 +132,7 @@ fn output() -> (
 }
 
 /// The block VBAN got for the boundary just served.
-fn vban_block(vban: &VbanOut) -> VbanBlock {
+fn vban_block(vban: &VbanOut) -> ProgramBlock {
     match vban.take_timeout(Duration::ZERO) {
         VbanTake::Block(block) => block,
         other => panic!("VBAN got no block: {other:?}"),
@@ -154,7 +155,7 @@ fn serve(
     job: ProgramJob,
 ) -> (Vec<f32>, Vec<f32>) {
     out.submit(job);
-    let samples = vban_block(vban).samples.expect("an audio block");
+    let samples = vban_block(vban).samples.expect("an audio block").to_vec();
     (samples, ndi_interleaved(backend))
 }
 
@@ -342,7 +343,7 @@ fn outside_a_fade_a_block_at_or_under_the_ceiling_passes_bit_for_bit() {
     assert_eq!(bits(&limited), bits(&at_ceiling), "a block AT the ceiling");
 
     out.submit(ProgramJob::Standby { stamp_100ns: at(4) });
-    assert_eq!(vban_block(&vban), VbanBlock::silence(at(4)));
+    assert_eq!(vban_block(&vban), ProgramBlock::silence(at(4)));
     assert_eq!(
         bits(&backend.last_audio_planar()),
         vec![0; FRAMES * 2],
@@ -381,7 +382,7 @@ fn the_release_tail_decays_through_the_standby_boundaries() {
     }
     for k in 9..39 {
         out.submit(ProgramJob::Standby { stamp_100ns: at(k) });
-        assert_eq!(vban_block(&vban), VbanBlock::silence(at(k)));
+        assert_eq!(vban_block(&vban), ProgramBlock::silence(at(k)));
         assert_eq!(
             bits(&backend.last_audio_planar()),
             vec![0; FRAMES * 2],

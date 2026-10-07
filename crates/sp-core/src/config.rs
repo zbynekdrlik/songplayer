@@ -37,6 +37,10 @@ pub const SETTING_MIX_DUB_PODKLAD: &str = "mix_dub_podklad";
 pub const SETTING_MIX_DUB_DABING: &str = "mix_dub_dabing";
 /// #210 (B2 of EPIC #174): the program's VBAN audio output (to FOH VB-Matrix
 /// and lv1). `"true"` sends; anything else (or absent) = off, the default.
+/// #233: the three `vban_*` keys are read only by the one-time migration
+/// into [`SETTING_AUDIO_OUTPUTS`] (sp-server `audio_out_migrate.rs`), which
+/// KEEPS them, so a rollback to ≤ 0.72 still sends to FOH; lane 3 deletes
+/// the keys and these constants.
 pub const SETTING_VBAN_ENABLED: &str = "vban_enabled";
 /// #210: the ASCII VBAN stream name, at most 16 chars
 /// ([`DEFAULT_VBAN_STREAM_NAME`] until the B4 switch-over, never cg OBS's `cg`).
@@ -117,6 +121,19 @@ pub const DEFAULT_VIDEO_HW_DECODE: bool = false;
 /// settings task share.
 pub fn video_hw_decode(raw: Option<&str>) -> bool {
     raw.map_or(DEFAULT_VIDEO_HW_DECODE, |v| v.trim() == "true")
+}
+
+/// #233: the program's audio outputs, one JSON list (`crate::audio_outputs`).
+pub const SETTING_AUDIO_OUTPUTS: &str = "audio_outputs";
+/// #233: the audio network's sample rate, Hz; an output whose rate is
+/// "network" runs at it.
+pub const SETTING_AUDIO_NETWORK_RATE: &str = "audio_network_rate";
+
+/// #233: the stored network rate: a supported rate, else 48 kHz.
+pub fn audio_network_rate(raw: Option<&str>) -> u32 {
+    raw.and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|r| crate::audio_outputs::SUPPORTED_RATES.contains(r))
+        .unwrap_or(crate::audio_outputs::DEFAULT_NETWORK_RATE)
 }
 
 // #229: the node exchange — SongPlayer sites (SNV, PP) share processed content.

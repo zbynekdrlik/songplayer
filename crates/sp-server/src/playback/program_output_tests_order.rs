@@ -19,12 +19,13 @@ use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, FourCCVideoType, NdiBackend, NdiError, NdiSender};
 
 use super::{ProgramOutput, run_program_loop};
+use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramBus, ProgramJob};
 use crate::playback::program_output_timing::{BoundaryMarks, BoundarySample, BoundaryTimingStatus};
 use crate::playback::program_transition::{MixJob, crossfade_gains};
 use crate::playback::submit_handoff::SubmitJob;
-use crate::playback::vban_out::{VbanBlock, VbanOut, VbanTake};
+use crate::playback::vban_out::{VbanOut, VbanTake};
 use crate::playback::wallclock::{SettableClock, WallClock};
 
 const T0: i64 = 17_900_000_000_000_000;
@@ -178,7 +179,7 @@ struct Seen {
     /// send.
     queued_while_held: usize,
     /// The block VBAN got.
-    block: VbanBlock,
+    block: ProgramBlock,
     /// The stamp `submit` returned.
     stamp: i64,
     video_timecodes: Vec<i64>,
@@ -284,9 +285,9 @@ fn a_forwarded_pairs_block_reaches_vban_while_its_ndi_submit_is_held() {
     );
     assert_eq!(
         seen.block,
-        VbanBlock {
+        ProgramBlock {
             due_100ns: stamp,
-            samples: Some(data.clone()),
+            samples: Some(data.clone().into()),
             substituted: false,
         },
         "the pair's own block, on its boundary"
@@ -311,7 +312,7 @@ fn the_standby_silence_reaches_vban_while_its_ndi_submit_is_held() {
         seen.queued_while_held, 1,
         "VBAN has the standby silence before its NDI submit returns"
     );
-    assert_eq!(seen.block, VbanBlock::silence(stamp));
+    assert_eq!(seen.block, ProgramBlock::silence(stamp));
     assert_eq!(
         seen.ndi_planar,
         vec![0.0; 3200],
@@ -363,6 +364,53 @@ fn a_mixed_boundarys_block_reaches_vban_while_its_ndi_submit_is_held() {
     assert_eq!(
         (seen.stamp, seen.video_timecodes, seen.audio_timecodes),
         (stamp, vec![stamp], vec![stamp])
+    );
+}
+
+/// #233: with two outputs, BOTH hold the boundary's block before its NDI
+/// submit returns — the fan-out sits where #210's VBAN hand-off sat.
+#[test]
+fn every_output_has_the_block_before_the_ndi_submit() {
+    let gate = Arc::new(Gate::default());
+    let _opener = Opener(gate.clone());
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let held = gate.clone();
+    let backend = Arc::new(HookedNdi {
+        inner: MockNdiBackend::new(),
+        on_audio: Box::new(move || {
+            let _ = entered_tx.send(());
+            held.wait();
+        }),
+    });
+    let sender = NdiSender::new_with_clocking(backend.clone(), PROGRAM_NDI_NAME, false, false)
+        .expect("mock sender");
+    let (a, b) = (Arc::new(VbanOut::new()), Arc::new(VbanOut::new()));
+    let outputs = Arc::new(crate::playback::audio_out::AudioOutputs::new());
+    outputs.replace(vec![
+        crate::playback::audio_out::tests::running_vban("out-1", a.clone()),
+        crate::playback::audio_out::tests::running_vban("out-2", b.clone()),
+    ]);
+    let out = ProgramOutput::new(sender, 2, 2).with_outputs(outputs);
+    let stamp = at(4);
+    let submit = std::thread::spawn(move || {
+        let mut out = out;
+        let s = out.submit(ProgramJob::Standby { stamp_100ns: stamp });
+        (out, s)
+    });
+    entered_rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the pair's NDI submit started");
+    assert_eq!(
+        (a.queued(), b.queued()),
+        (1, 1),
+        "both outputs before the NDI submit"
+    );
+    gate.open();
+    let (_out, s) = submit.join().expect("the submit thread");
+    assert_eq!(s, stamp);
+    assert_eq!(
+        a.take_timeout(Duration::ZERO),
+        VbanTake::Block(ProgramBlock::silence(stamp))
     );
 }
 
@@ -437,7 +485,7 @@ fn the_sender_thread_puts_each_boundarys_timing_on_the_bus() {
     // serves exactly one).
     let (wall, clock) = WallClock::settable(b0 + 150_000);
     let bus = Arc::new(ProgramBus::new());
-    let out = slow_output(&clock, 100_000).with_vban(bus.vban().clone());
+    let out = slow_output(&clock, 100_000).with_outputs(bus.outputs().clone());
     let (done_tx, done_rx) = mpsc::channel();
     let thread = {
         let bus = bus.clone();

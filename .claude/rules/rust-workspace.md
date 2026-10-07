@@ -452,6 +452,15 @@ Microsoft's page reads as if WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`,
 `writeln!(std::io::stderr(), …)`: libtest captures `eprintln!` / `println!` of a
 passing test, not direct writes to the stderr handle.
 
+**A `#[cfg(windows)]` OS-thread spawn reached from a unit-tested fn RUNS on
+the Windows job** (#233 review round 1). `audio_out_task::build` called
+`start_vban_thread`, whose Windows branch spawns the real `vban-output`
+thread, so `apply_keeps_an_unchanged_output_when_another_is_added` got a live
+thread there that took the block it had queued (green on Linux, red on
+Windows). Pass the spawn in as a parameter (`StartThread`: production passes
+the real starter, a test a no-op or a recorder, which also pins that the
+start happens) instead of gating it on `not(test)`.
+
 **A fix in `#[cfg(windows)]` code still gets its RED** (#221 review round 2):
 a `#[cfg(windows)] #[test]` next to the Linux tests runs on that job, e.g.
 `program_output_tests.rs::no_ndi_sdk_reads_as_a_polled_zero` calls the
@@ -714,6 +723,12 @@ the test that kills each one BEFORE CI's mutation gate runs.
   then `cargo mutants --in-diff <scratch>/range.diff --list --dir <wt>`
   (no `cd`, no redirect). Diff from the MERGED `origin/dev`, not from the
   lane's original base: `<base>..HEAD` then also lists dev's own commits.
+  To KEEP the list (to diff it after each fix round and map only the new
+  mutants), a `> file` redirect is refused too: pipe it instead,
+  `cargo mutants … --list --dir <wt> | python3 -c "import sys;
+  open('<scratch>/mutants.txt','w').write(sys.stdin.read())"   # airuleset:build-ok list-only`
+  (#233 lane 1, eight review rounds: list → diff against the previous
+  list, ignoring line:col → map the new descriptions).
 - **Give a review dispatch the merged base SHA, not `origin/dev`** (#136):
   the `.git` is shared with the main checkout, so another session's fetch
   can move `origin/dev` mid-review, and `git diff origin/dev..HEAD` (a TREE
