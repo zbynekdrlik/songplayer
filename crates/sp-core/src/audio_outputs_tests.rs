@@ -71,6 +71,18 @@ fn a_rate_is_network_or_a_whole_number() {
 }
 
 #[test]
+fn a_rate_of_the_wrong_type_says_what_a_rate_is() {
+    let rate = |t: &str| serde_json::from_str::<RateChoice>(t);
+    for wrong in ["true", "-1", "48000.5", "null"] {
+        let text = rate(wrong).unwrap_err().to_string();
+        assert!(
+            text.contains(r#"expected "network" or a rate in Hz"#),
+            "{wrong}: {text}"
+        );
+    }
+}
+
+#[test]
 fn the_names_of_the_types_and_formats() {
     assert_eq!(OutputType::Vban.as_str(), "vban");
     assert_eq!(OutputType::parse("vban"), Some(OutputType::Vban));
