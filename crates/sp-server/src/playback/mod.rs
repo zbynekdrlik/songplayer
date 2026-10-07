@@ -788,16 +788,8 @@ impl PlaybackEngine {
                                         audio: audio_path.into(),
                                         start_position_ms: None,
                                     });
-
-                                    if let Err(e) = crate::db::models::record_play(
-                                        &self.pool,
-                                        playlist_id,
-                                        video_id,
-                                    )
-                                    .await
-                                    {
-                                        warn!(playlist_id, video_id, %e, "failed to record play");
-                                    }
+                                    // #229: played once it starts (`song_started`).
+                                    pp.record_on_start = Some(video_id);
                                 }
                                 self.resync_after_play(playlist_id).await;
                             }

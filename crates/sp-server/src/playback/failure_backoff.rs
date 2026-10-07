@@ -15,7 +15,7 @@ use sp_core::playback::OpenFailures;
 
 /// The first failure in a row that waits before the next attempt: one or
 /// two bad files must not stall a playlist.
-const FIRST_PAUSED: u32 = 1_000;
+const FIRST_PAUSED: u32 = 3;
 
 /// The pauses from [`FIRST_PAUSED`] on, in seconds; the last one repeats.
 const PAUSES_S: [u64; 4] = [5, 30, 120, 300];
