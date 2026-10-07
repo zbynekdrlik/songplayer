@@ -78,6 +78,7 @@ mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-teste
 pub mod vban_clock; // #224 part 2: VBAN's + the NDI input's wall clock, VBAN's date-step slew
 pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
 pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
+pub mod vban_rate; // #233: a VBAN destination's fixed-ratio rate conversion (rubato Fft)
 pub mod vban_stall; // #210 part 2: the VBAN thread's late packets (ring, window max, WARN)
 pub mod video_decode; // #223 S3b: `video_hw_decode` (read at each song open) + its status
 pub mod wallclock;
