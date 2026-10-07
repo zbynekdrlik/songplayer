@@ -115,6 +115,7 @@ async fn ndi_health_endpoint_returns_seeded_pipeline() {
         lock_state: LockState::Unlocked,
         lock_reason: "pacing disabled".to_string(),
         transport: sp_core::playback::TransportState::Idle,
+        open_failures: None,
     });
     let resp = app(state)
         .oneshot(

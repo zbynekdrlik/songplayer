@@ -11,6 +11,8 @@ pub mod clock_health;
 pub mod dashboard_replay; // #225: the engine's last dashboard state per playlist, replayed on WS connect
 pub mod decode_thread; // #223 S0: the one way a decode thread starts (producer + decode bench)
 mod engine_play;
+mod failure_backoff; // #229: the pause after failed opens in a row (pure)
+mod failure_retry; // #229: the engine's retry of a playlist whose opens fail
 pub mod fleet_shift; // #224 part 2: a date step relabels (pure split + the relabel registry)
 pub mod frame_buf; // #203 shared-frame seam: Arc<Vec<u8>> holdover, no pixel copy
 mod handle_pipeline_event;
@@ -211,6 +213,12 @@ struct PlaylistPipeline {
     play_start_ms: u64,
     /// Pause snapshot; consumed on manual /play to resume same song. #88.
     paused_at: Option<(i64, u64)>,
+    /// #229: the failed opens in a row and the pending retry
+    /// (`failure_retry.rs`); a `Started` ends the run.
+    failures: failure_retry::FailureState,
+    /// #229: the song a SelectAndPlay or a PlayVideo sent; its `Started`
+    /// records it as played (`song_started`). Every Play clears it first.
+    record_on_start: Option<i64>,
 }
 
 impl PlaylistPipeline {
@@ -552,6 +560,10 @@ impl PlaybackEngine {
         if matches!(cmd, PlayEvent::Skip) && self.pause_if_held(playlist_id, "skipped").await {
             return;
         }
+        // #229: a skip while a failed open's retry waits tries the next song now.
+        if matches!(cmd, PlayEvent::Skip) && self.skip_backoff(playlist_id).await {
+            return;
+        }
         self.apply_event(playlist_id, cmd).await;
     }
 
@@ -650,6 +662,10 @@ impl PlaybackEngine {
             return;
         };
 
+        // #229: off program, or paused: a failed open's retry waits no more.
+        if matches!(event, PlayEvent::SceneOff) {
+            pp.failures.cancel_retry();
+        }
         let mode = pp.mode;
         let old_state = pp.state.clone();
         let (new_state, action) = old_state.clone().transition(event, mode);

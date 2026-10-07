@@ -74,6 +74,22 @@ pub enum TransportState {
     Idle,
 }
 
+/// #229: the videos of a playlist that failed to open in a row, as
+/// `GET /api/v1/ndi/health` reports it per playlist (`open_failures`; `null`
+/// while none failed since the last song started). The Player's line about
+/// it is `player_view::open_failures_line`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenFailures {
+    /// Failed opens in a row.
+    pub count: u32,
+    /// The last one's error, as the pipeline reported it.
+    pub last_error: String,
+    /// When the next attempt is due (UTC ms since the epoch). `None` = no
+    /// wait is pending: the next song is tried at once, an attempt is under
+    /// way, or the playlist was cut off program or paused.
+    pub retry_at_ms: Option<i64>,
+}
+
 // #184 round G: the `KaraokeMode` enum was deleted. A karaoke MODE is no longer a
 // live setting — the ONE mixer is three independent faders (`sp_core::mixer_model::
 // MixFaders`) whose preset ids (`full_mix` / `karaoke_low` / `vocals_only` /

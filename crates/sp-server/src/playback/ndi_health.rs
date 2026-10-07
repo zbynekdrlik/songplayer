@@ -80,6 +80,11 @@ pub struct PipelineHealthSnapshot {
     /// Human reason for `lock_state` (e.g. `"pacing disabled"`,
     /// `"locked"`). Rendered verbatim by the dashboard / log.
     pub lock_reason: String,
+    /// #229: the videos that failed to open in a row and when the next
+    /// attempt is due (`failure_retry.rs`), copied from the engine at each
+    /// heartbeat; `null` while none failed since the last song started. The
+    /// dashboard's Player says why the program is black from it.
+    pub open_failures: Option<sp_core::playback::OpenFailures>,
 }
 
 /// Paced-audio telemetry (#148), surfaced on `GET /api/v1/ndi/health` as
@@ -303,6 +308,7 @@ impl crate::playback::PlaybackEngine {
         };
 
         let ndi_name = pp.pipeline.output_name().to_string();
+        let open_failures = pp.failures.view(); // #229
         let degraded_reason = compute_degraded_reason(
             &canonical_state,
             observed_fps,
@@ -365,6 +371,7 @@ impl crate::playback::PlaybackEngine {
             audio,
             lock_state,
             lock_reason: lock_reason.to_string(),
+            open_failures,
         };
 
         health_log::log_health_snapshot(&snapshot, prev.as_ref(), scene_active, &loop_stats);

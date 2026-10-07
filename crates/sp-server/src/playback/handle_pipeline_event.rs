@@ -29,6 +29,9 @@ impl PlaybackEngine {
                 duration_ms,
                 position_ms,
             } => {
+                // #229: a song opened — the run of failed opens is over, and
+                // a selected or picked song counts as played now.
+                self.song_started(playlist_id).await;
                 // 1) Broadcast NowPlaying to the dashboard first so it
                 //    switches from "Nothing playing" immediately.
                 self.broadcast_now_playing_on_start(playlist_id, *duration_ms)
@@ -172,9 +175,10 @@ impl PlaybackEngine {
                     pp.lyrics_state = None;
                 }
                 self.clear_lyrics_display(playlist_id);
-                self.apply_event(playlist_id, PlayEvent::VideoError(msg.clone()))
-                    .await;
+                // #229: counted; from the 3rd failure in a row the next song waits.
+                self.video_failed(playlist_id, msg).await;
             }
+            PipelineEvent::RetryDue(id) => self.retry_due(playlist_id, *id).await, // #229
             PipelineEvent::SceneOffDue(due) => self.scene_off_due(playlist_id, *due).await,
             PipelineEvent::OnProgram(on) => self.on_program(playlist_id, *on).await, // #221 L4b
             ev @ PipelineEvent::HealthSnapshot { .. } => {
