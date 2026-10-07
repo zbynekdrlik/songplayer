@@ -142,7 +142,11 @@ fn a_float32_destination_sends_10_packets_of_160_frames() {
     let sent = send(&out, &[block(D, Some(vec![0.25; 3200]))]);
     assert_eq!(sent.len(), 10);
     assert!(sent.iter().all(|(_, p)| p.len() == 1308 && p[7] == 0x04));
-    assert_eq!(&sent[0].1[28..32], &0.25f32.to_le_bytes(), "48 kHz: no converter");
+    assert_eq!(
+        &sent[0].1[28..32],
+        &0.25f32.to_le_bytes(),
+        "48 kHz: no converter"
+    );
     assert_eq!(sent[1].0 - sent[0].0, 33_333, "1/300 s apart");
 }
 
@@ -194,11 +198,7 @@ fn the_queue_holds_the_delay() {
     for i in 0..out.bound() as i64 {
         out.push(ProgramBlock::silence(D + i));
     }
-    assert_eq!(
-        out.status().blocks_dropped,
-        0,
-        "2 s of delay is all queued"
-    );
+    assert_eq!(out.status().blocks_dropped, 0, "2 s of delay is all queued");
     out.push(ProgramBlock::silence(D + 999));
     assert_eq!(out.status().blocks_dropped, 1);
     assert_eq!(VbanOut::new().bound(), VBAN_QUEUE_BOUND);

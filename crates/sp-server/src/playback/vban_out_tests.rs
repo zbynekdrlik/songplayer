@@ -1,9 +1,11 @@
 //! #210 VBAN output: the hand-off queue (drop-oldest overflow), the paced
 //! schedule on a fake clock (exact 100 ns send instants), disabled / no-target
 //! silence, the frame counter across blocks + a cut + standby through a real
-//! `ProgramOutput`, the settings load, DNS resolution, and a real loopback UDP
-//! round trip. The helpers are `pub(crate)`; `active_config` is reused by
-//! `api/program_tests.rs`.
+//! `ProgramOutput`, DNS resolution, and a real loopback UDP round trip (#233:
+//! the per-destination tests are `vban_out_tests_dest.rs`; the `vban_*`
+//! settings code they used to load is gone). The helpers are `pub(crate)`;
+//! `active_config` is reused by `vban_out_tests_dest.rs`, `audio_out_tests.rs`
+//! and `api/program_tests_outputs.rs`.
 //! Wired via `#[cfg(test)] #[path = "vban_out_tests.rs"] pub(crate) mod tests;`.
 
 use super::*;
@@ -93,10 +95,11 @@ impl VbanSink for RecordingSink {
 
 /// An enabled config (stream `sp-program`) sending to `addrs`.
 pub(crate) fn active_config(addrs: &[&str]) -> VbanConfig {
-    let settings = VbanSettings {
-        enabled: true,
+    let dest = sp_core::audio_outputs::VbanDest {
+        host: "test".into(),
+        port: 6980,
         stream_name: "sp-program".into(),
-        targets: addrs.join(","),
+        format: sp_core::audio_outputs::VbanSampleFormat::Int24,
     };
     let targets = addrs
         .iter()
@@ -106,7 +109,7 @@ pub(crate) fn active_config(addrs: &[&str]) -> VbanConfig {
             error: None,
         })
         .collect();
-    VbanConfig::new(&settings, targets)
+    VbanConfig::for_dest(&dest, true, targets)
 }
 
 fn frame(data: Vec<f32>, channels: u32, sample_rate: u32) -> AudioFrame {
@@ -585,63 +588,7 @@ fn the_wall_clock_reads_the_wall_and_sleeps_for_real() {
     assert!(slept < Duration::from_secs(2), "slept {slept:?}");
 }
 
-// --- settings + resolution ------------------------------------------------------
-
-#[tokio::test]
-async fn the_settings_load_with_defaults_and_stored_values() {
-    use crate::db::models::set_setting;
-    let pool = crate::db::create_memory_pool().await.unwrap();
-    crate::db::run_migrations(&pool).await.unwrap();
-    assert_eq!(
-        load_vban_settings(&pool).await.unwrap(),
-        VbanSettings {
-            enabled: false,
-            stream_name: "sp-program".into(),
-            targets: String::new(),
-        }
-    );
-    set_setting(&pool, "vban_enabled", "true").await.unwrap();
-    set_setting(&pool, "vban_stream_name", "  foh-test ")
-        .await
-        .unwrap();
-    set_setting(&pool, "vban_targets", "fohabl.lan:6980, ,lv1.lan:6980 ")
-        .await
-        .unwrap();
-    let s = load_vban_settings(&pool).await.unwrap();
-    assert!(s.enabled);
-    assert_eq!(s.stream_name, "foh-test");
-    assert_eq!(s.target_specs(), vec!["fohabl.lan:6980", "lv1.lan:6980"]);
-
-    set_setting(&pool, "vban_enabled", "yes").await.unwrap();
-    set_setting(&pool, "vban_stream_name", "   ").await.unwrap();
-    let s = load_vban_settings(&pool).await.unwrap();
-    assert!(!s.enabled, "only \"true\" enables");
-    assert_eq!(s.stream_name, "sp-program", "a blank name is the default");
-}
-
-#[test]
-fn at_most_8_targets_are_used() {
-    let ten = VbanSettings {
-        enabled: true,
-        stream_name: "sp-program".into(),
-        targets: (1..=10)
-            .map(|i| format!("10.0.0.{i}:6980"))
-            .collect::<Vec<_>>()
-            .join(", "),
-    };
-    let specs = ten.target_specs();
-    assert_eq!(specs.len(), 8);
-    assert_eq!(specs[0], "10.0.0.1:6980");
-    assert_eq!(specs[7], "10.0.0.8:6980");
-    assert_eq!(ten.ignored_targets(), 2);
-    let three = VbanSettings {
-        targets: "a:1,b:2, c:3".into(),
-        ..ten
-    };
-    assert_eq!(three.target_specs(), vec!["a:1", "b:2", "c:3"]);
-    assert_eq!(three.ignored_targets(), 0);
-    assert_eq!(VBAN_MAX_TARGETS, 8);
-}
+// --- resolution ----------------------------------------------------------------
 
 #[test]
 fn the_loop_reports_running_while_it_runs() {
@@ -727,73 +674,6 @@ fn the_system_resolver_takes_the_first_ipv4_address() {
     let v4b: SocketAddr = "10.0.0.2:1".parse().unwrap();
     assert_eq!(pick_ipv4([v6, v4a, v4b]), Some(v4a));
     assert_eq!(pick_ipv4([v6]), None);
-}
-
-#[tokio::test]
-async fn resolve_config_builds_the_config_from_the_settings() {
-    let settings = VbanSettings {
-        enabled: true,
-        stream_name: "foh-test".into(),
-        targets: "127.0.0.1:6980, bogus".into(),
-    };
-    let cfg = resolve_config(settings, Vec::new()).await;
-    assert!(cfg.enabled);
-    assert_eq!(cfg.stream_name, "foh-test");
-    assert_eq!(cfg.targets.len(), 2);
-    let local: SocketAddr = "127.0.0.1:6980".parse().unwrap();
-    assert_eq!(cfg.targets[0].addr, Some(local));
-    assert_eq!(cfg.targets[1].addr, None);
-    assert!(cfg.targets[1].error.is_some());
-    assert!(cfg.is_active());
-}
-
-#[test]
-fn the_config_carries_the_wire_name_and_the_status_its_targets() {
-    let settings = VbanSettings {
-        enabled: true,
-        stream_name: "é-a-very-long-stream".into(),
-        targets: String::new(),
-    };
-    let cfg = VbanConfig::new(
-        &settings,
-        vec![
-            VbanTarget {
-                spec: "fohabl.lan:6980".into(),
-                addr: Some("10.77.7.30:6980".parse().unwrap()),
-                error: None,
-            },
-            VbanTarget {
-                spec: "lv1.lan:6980".into(),
-                addr: None,
-                error: Some("nx".into()),
-            },
-        ],
-    );
-    assert_eq!(cfg.stream_name, "_-a-very-long-st", "what goes on the wire");
-    assert_eq!(&cfg.name_bytes, b"_-a-very-long-st");
-    let out = out_with(cfg);
-    let st = out.status();
-    assert!(st.enabled);
-    assert_eq!(st.stream_name, "_-a-very-long-st");
-    assert_eq!(
-        st.targets,
-        vec![
-            VbanTargetStatus {
-                target: "fohabl.lan:6980".into(),
-                addr: Some("10.77.7.30:6980".into()),
-                error: None,
-            },
-            VbanTargetStatus {
-                target: "lv1.lan:6980".into(),
-                addr: None,
-                error: Some("nx".into()),
-            },
-        ]
-    );
-    let def = VbanConfig::default();
-    assert!(!def.enabled);
-    assert_eq!(def.stream_name, "sp-program");
-    assert!(def.targets.is_empty());
 }
 
 #[test]

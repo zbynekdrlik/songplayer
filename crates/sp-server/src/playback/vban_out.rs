@@ -4,12 +4,15 @@
 //! FOH (VB-Matrix on fohabl) and lv1 take the program audio as VBAN. The
 //! `SP-program` sender thread (`program_output.rs`) hands each submitted
 //! pair's audio block (a forwarded source block, a mixed block or the
-//! standby silence) to [`VbanOut::push`] right BEFORE its NDI submit, so the
-//! video side of its own boundary never delays it (#210). The hand-off is a
-//! bounded, never-blocking queue: over [`VBAN_QUEUE_BOUND`] the OLDEST block
-//! is dropped and counted. A dedicated thread ([`run_vban_loop`]) encodes each block into
-//! 8 packets of 200 frames (`vban_packet.rs`) and sends packet `k` of the
-//! boundary `B` at `due(B) + L + k/240 s`, where L is two slots
+//! standby silence) to the outputs' fan-out (`audio_out.rs`, #233), which
+//! pushes it into every VBAN output's [`VbanOut::push`] right BEFORE its NDI
+//! submit, so the video side of its own boundary never delays it (#210). The
+//! hand-off is a bounded, never-blocking queue: over its bound
+//! ([`VBAN_QUEUE_BOUND`], plus the slots a delay holds) the OLDEST block is
+//! dropped and counted. A dedicated thread per output ([`run_vban_loop`])
+//! encodes each block in its destination's format (`vban_packet.rs`; at
+//! 48 kHz INT24, 8 packets of 200 frames) and sends packet `k` of the
+//! boundary `B` at `due(B) + L + delay + offset(k)`, where L is two slots
 //! ([`VBAN_SEND_LATENCY_100NS`]). It paces on its own
 //! [`WallClock`](crate::playback::wallclock::WallClock), ticked
 //! once per grid boundary like the program wall ([`WallVbanClock`]) — also
@@ -31,36 +34,35 @@
 //! 4.1667 ms ± 100 ppm — no burst, no gap, no drop, no crossfade
 //! (`slew_owed_us` on the status, signed).
 //!
-//! One UDP socket sends to every resolved target. The settings (`vban_enabled`,
-//! `vban_stream_name`, `vban_targets`) are re-read every
-//! [`VBAN_SETTINGS_POLL`] by [`run_vban_config_task`]. DNS is resolved when
-//! they change and, while enabled, re-resolved every [`VBAN_RESOLVE_EVERY`];
-//! a target whose re-resolve fails keeps its last good address, and at most
-//! [`VBAN_MAX_TARGETS`] targets are used. Telemetry is [`VbanStatus`], served
-//! under `vban` on `GET /api/v1/program`.
+//! #233: one `VbanOut` per VBAN entry of the output list (`audio_out_task.rs`
+//! builds it from the entry, resolves its target and spawns its thread): its
+//! own format ([`VbanFormat`]: rate index, sample type, packet geometry), rate
+//! converter (`vban_rate.rs`, bypassed at 48 kHz), delay (added to the send
+//! latency; the queue bound grows with it, [`queue_bound`]) and ONE target.
+//! The outputs task re-resolves its DNS every [`VBAN_RESOLVE_EVERY`]; a
+//! target whose re-resolve fails keeps its last good address. Telemetry is
+//! [`VbanStatus`], served under `outputs[i].vban` on `GET /api/v1/program`.
 
 use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::Serialize;
-use sp_core::config::{
-    DEFAULT_VBAN_STREAM_NAME, SETTING_VBAN_ENABLED, SETTING_VBAN_STREAM_NAME, SETTING_VBAN_TARGETS,
-};
-use sqlx::SqlitePool;
-use tokio::sync::broadcast;
+use sp_core::audio_outputs::{OutputEntry, VbanDest, effective_rate};
+use sp_core::config::DEFAULT_VBAN_STREAM_NAME;
 use tracing::{info, warn};
 
 use crate::playback::audio_out_block::ProgramBlock;
 use crate::playback::loop_stats::percentile_ceil;
 use crate::playback::program_output_timing::utc_label;
 use crate::playback::vban_packet::{
-    VBAN_SEND_LATENCY_100NS, VBAN_STREAM_NAME_LEN, VbanBlockPackets, VbanEncoder,
-    empty_block_packets, packet_send_at_100ns, stream_name_bytes,
+    VBAN_SEND_LATENCY_100NS, VBAN_STREAM_NAME_LEN, VbanEncoder, VbanFormat, empty_packets,
+    packet_send_at_in, stream_name_bytes,
 };
+use crate::playback::vban_rate::VbanRateConverter;
 use crate::playback::vban_stall::{VbanLateEvent, VbanStallLog, VbanStallWarn};
 // #224 part 2: VBAN's (and the NDI input's) wall clock and VBAN's slew live
 // in `vban_clock.rs` (review round 1: this file neared the 1000-line cap).
@@ -70,11 +72,27 @@ pub use crate::playback::vban_clock::{RemainderSlew, VBAN_SLEW_PPM, WallVbanCloc
 /// slots) plus the block behind it, with one to spare.
 pub const VBAN_QUEUE_BOUND: usize = crate::playback::program_bus::PROGRAM_QUEUE_BOUND;
 
+/// #233: one grid slot in 100 ns (a literal: `UNITS_PER_SECOND /
+/// GENLOCK_GRID_FPS`, pinned by `the_queue_holds_the_delay`).
+pub const SLOT_100NS: u64 = 333_333;
+
+/// #233: the queue bound of an output delayed by `delay_100ns`: the program
+/// queue's bound plus the slots the delay holds back.
+pub fn queue_bound(delay_100ns: i64) -> usize {
+    VBAN_QUEUE_BOUND + (delay_100ns.max(0) as u64).div_ceil(SLOT_100NS) as usize
+}
+
+/// #233: `host:port` of a destination (the target's spec and status label).
+pub fn target_spec(dest: &VbanDest) -> String {
+    format!("{}:{}", dest.host, dest.port)
+}
+
 /// A packet sent more than this after its due time is a late send (2 ms).
 pub const VBAN_LATE_100NS: i64 = 20_000;
 
-/// Longest single wait before a packet (4 slots). A due time further ahead is
-/// a clock mismatch; the thread never parks on it.
+/// Longest single wait before a packet (4 slots; #233: plus the output's
+/// delay, `plan_wait_up_to`). A due time further ahead is a clock mismatch;
+/// the thread never parks on it.
 pub const VBAN_MAX_WAIT_100NS: i64 = 4 * VBAN_SEND_LATENCY_100NS;
 
 /// Send intervals kept for the p99 (the last 5 s at 240 packets/s).
@@ -89,83 +107,12 @@ const _: () = assert!(
         < (crate::playback::program_output::MAX_TICKS_PER_WAKE * VBAN_SEND_LATENCY_100NS) as u128
 );
 
-/// How often the settings are re-read (a dashboard save applies within this).
-pub const VBAN_SETTINGS_POLL: Duration = Duration::from_secs(5);
-
 /// How often DNS is re-resolved when the settings did not change.
 pub const VBAN_RESOLVE_EVERY: Duration = Duration::from_secs(60);
 
 /// A repeating warning (overflow, substitution, send error) is logged on its
 /// first occurrence and then every this many.
 pub const VBAN_LOG_EVERY: u64 = 1000;
-
-/// At most this many targets are sent to (each costs ~2.4 Mbit/s and one
-/// `send_to` per packet on the paced thread); the rest are ignored + logged.
-pub const VBAN_MAX_TARGETS: usize = 8;
-
-/// The three VBAN settings as stored.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VbanSettings {
-    pub enabled: bool,
-    pub stream_name: String,
-    /// Comma-separated `host:port` list, as typed.
-    pub targets: String,
-}
-
-impl Default for VbanSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            stream_name: DEFAULT_VBAN_STREAM_NAME.to_string(),
-            targets: String::new(),
-        }
-    }
-}
-
-impl VbanSettings {
-    /// The non-empty, trimmed `host:port` entries of `targets`, at most
-    /// [`VBAN_MAX_TARGETS`] of them.
-    pub fn target_specs(&self) -> Vec<String> {
-        self.all_specs()
-            .take(VBAN_MAX_TARGETS)
-            .map(String::from)
-            .collect()
-    }
-
-    /// How many entries [`target_specs`](Self::target_specs) ignores.
-    pub fn ignored_targets(&self) -> usize {
-        self.all_specs().count().saturating_sub(VBAN_MAX_TARGETS)
-    }
-
-    fn all_specs(&self) -> impl Iterator<Item = &str> {
-        self.targets
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-    }
-}
-
-/// Read the VBAN settings: `vban_enabled == "true"` enables, a blank stream
-/// name falls back to [`DEFAULT_VBAN_STREAM_NAME`], absent targets = none.
-pub async fn load_vban_settings(pool: &SqlitePool) -> Result<VbanSettings, sqlx::Error> {
-    use crate::db::models::get_setting;
-    let enabled = get_setting(pool, SETTING_VBAN_ENABLED)
-        .await?
-        .is_some_and(|v| v.trim() == "true");
-    let stream_name = get_setting(pool, SETTING_VBAN_STREAM_NAME)
-        .await?
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| DEFAULT_VBAN_STREAM_NAME.to_string());
-    let targets = get_setting(pool, SETTING_VBAN_TARGETS)
-        .await?
-        .unwrap_or_default();
-    Ok(VbanSettings {
-        enabled,
-        stream_name,
-        targets,
-    })
-}
 
 /// One configured target and what it resolved to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -241,16 +188,20 @@ pub struct VbanConfig {
 }
 
 impl VbanConfig {
-    /// The config for `settings` over the resolved `targets`.
-    pub fn new(settings: &VbanSettings, targets: Vec<VbanTarget>) -> Self {
-        let name_bytes = stream_name_bytes(&settings.stream_name);
+    /// #233: the config of one destination over its resolved target.
+    pub fn for_dest(dest: &VbanDest, enabled: bool, targets: Vec<VbanTarget>) -> Self {
+        Self::named(enabled, &dest.stream_name, targets)
+    }
+
+    fn named(enabled: bool, stream_name: &str, targets: Vec<VbanTarget>) -> Self {
+        let name_bytes = stream_name_bytes(stream_name);
         let stream_name = name_bytes
             .iter()
             .take_while(|&&b| b != 0)
             .map(|&b| b as char)
             .collect();
         Self {
-            enabled: settings.enabled,
+            enabled,
             stream_name,
             name_bytes,
             targets,
@@ -264,17 +215,19 @@ impl VbanConfig {
 }
 
 impl Default for VbanConfig {
+    /// Disabled, the default stream name, no target.
     fn default() -> Self {
-        Self::new(&VbanSettings::default(), Vec::new())
+        Self::named(false, DEFAULT_VBAN_STREAM_NAME, Vec::new())
     }
 }
 
-/// Resolve `settings` on the blocking pool (std DNS) into a config.
-pub async fn resolve_config(settings: VbanSettings, previous: Vec<VbanTarget>) -> VbanConfig {
+/// #233: resolve one destination on the blocking pool (std DNS); a failed
+/// re-resolve keeps the last good address (`resolve_targets`).
+pub async fn resolve_dest(dest: VbanDest, enabled: bool, previous: Vec<VbanTarget>) -> VbanConfig {
     let joined = tokio::task::spawn_blocking(move || {
         let mut resolve = system_resolve;
-        let targets = resolve_targets(&settings.target_specs(), &previous, &mut resolve);
-        VbanConfig::new(&settings, targets)
+        let targets = resolve_targets(&[target_spec(&dest)], &previous, &mut resolve);
+        VbanConfig::for_dest(&dest, enabled, targets)
     })
     .await;
     joined.unwrap_or_else(|e| {
@@ -291,13 +244,15 @@ pub struct VbanTargetStatus {
     pub error: Option<String>,
 }
 
-/// `GET /api/v1/program` → `vban`.
+/// `GET /api/v1/program` → `outputs[i].vban` (#233; #210's top-level `vban`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct VbanStatus {
     pub enabled: bool,
-    /// The VBAN thread is running (Windows; started by `start_program`).
+    /// The VBAN thread is running (Windows; started by the outputs task).
     pub running: bool,
     pub stream_name: String,
+    /// #233: blocks sent (each its packets to the resolved target).
+    pub blocks_sent: u64,
     /// Packets sent (each to every resolved target).
     pub packets_sent: u64,
     /// UDP datagrams whose send failed.
@@ -328,6 +283,7 @@ pub struct VbanStatus {
 
 #[derive(Clone, Debug, Default)]
 struct VbanCounters {
+    blocks_sent: u64,
     packets_sent: u64,
     send_errors: u64,
     blocks_dropped: u64,
@@ -370,6 +326,12 @@ pub struct VbanOut {
     stats: Mutex<VbanCounters>,
     /// Set while [`run_vban_loop`] runs.
     running: AtomicBool,
+    /// #233: this destination's wire format.
+    format: VbanFormat,
+    /// #233: the entry's delay, added to the send latency (100 ns).
+    delay_100ns: i64,
+    /// #233: the queue's bound ([`queue_bound`] of the delay).
+    bound: usize,
 }
 
 impl Default for VbanOut {
@@ -379,18 +341,55 @@ impl Default for VbanOut {
 }
 
 impl VbanOut {
-    /// Disabled, no targets, nothing queued.
+    /// Disabled, no targets, nothing queued; #210's format, no delay.
     pub fn new() -> Self {
+        Self::for_destination(VbanFormat::PROGRAM, 0)
+    }
+
+    /// #233: an output for one destination's format, delayed by `delay_100ns`.
+    pub fn for_destination(format: VbanFormat, delay_100ns: i64) -> Self {
+        let bound = queue_bound(delay_100ns);
         Self {
             queue: Mutex::new(VbanQueue {
-                blocks: VecDeque::with_capacity(VBAN_QUEUE_BOUND + 1),
+                blocks: VecDeque::with_capacity(bound + 1),
                 stop: false,
             }),
             ready: Condvar::new(),
             config: Mutex::new(Arc::new(VbanConfig::default())),
             stats: Mutex::new(VbanCounters::default()),
             running: AtomicBool::new(false),
+            format,
+            delay_100ns,
+            bound,
         }
+    }
+
+    /// #233: the output of a VBAN entry at `network_rate`.
+    pub fn for_entry(entry: &OutputEntry, network_rate: u32) -> Result<Self, String> {
+        let dest = entry
+            .vban
+            .as_ref()
+            .ok_or_else(|| "not a VBAN entry".to_string())?;
+        let format = VbanFormat::new(effective_rate(entry.rate, network_rate), dest.format)?;
+        Ok(Self::for_destination(
+            format,
+            i64::from(entry.delay_ms) * 10_000,
+        ))
+    }
+
+    /// #233: this destination's wire format.
+    pub fn format(&self) -> VbanFormat {
+        self.format
+    }
+
+    /// #233: the entry's delay (100 ns).
+    pub fn delay_100ns(&self) -> i64 {
+        self.delay_100ns
+    }
+
+    /// #233: the queue's bound.
+    pub fn bound(&self) -> usize {
+        self.bound
     }
 
     /// The VBAN thread is running.
@@ -398,13 +397,13 @@ impl VbanOut {
         self.running.load(Ordering::SeqCst)
     }
 
-    /// Hand one block over. Never blocks; over [`VBAN_QUEUE_BOUND`] the
-    /// oldest block is dropped and counted.
+    /// Hand one block over. Never blocks; over the bound (#233: [`queue_bound`]
+    /// of the delay) the oldest block is dropped and counted.
     pub fn push(&self, block: ProgramBlock) {
         let dropped = {
             let mut q = lock(&self.queue);
             q.blocks.push_back(block);
-            let over = q.blocks.len() > VBAN_QUEUE_BOUND;
+            let over = q.blocks.len() > self.bound;
             if over {
                 q.blocks.pop_front();
             }
@@ -420,7 +419,7 @@ impl VbanOut {
             if should_log(n) {
                 warn!(
                     blocks_dropped = n,
-                    bound = VBAN_QUEUE_BOUND,
+                    bound = self.bound,
                     thread_running = self.is_running(),
                     "vban output: queue full — dropped the oldest block (the VBAN thread fell behind, or is not running)"
                 );
@@ -462,6 +461,11 @@ impl VbanOut {
     /// The current config.
     pub fn config(&self) -> Arc<VbanConfig> {
         lock(&self.config).clone()
+    }
+
+    /// #233: count one sent block.
+    fn record_block(&self) {
+        lock(&self.stats).blocks_sent += 1;
     }
 
     /// Count one substituted block; returns the total.
@@ -512,6 +516,7 @@ impl VbanOut {
             enabled: cfg.enabled,
             running: self.is_running(),
             stream_name: cfg.stream_name.clone(),
+            blocks_sent: s.blocks_sent,
             packets_sent: s.packets_sent,
             send_errors: s.send_errors,
             blocks_dropped: s.blocks_dropped,
@@ -581,7 +586,14 @@ impl VbanSink for UdpSocket {
 /// How long to wait from `now_100ns` for a packet due at `at_100ns`: never
 /// negative, never more than [`VBAN_MAX_WAIT_100NS`].
 pub fn plan_wait_100ns(now_100ns: i64, at_100ns: i64) -> i64 {
-    (at_100ns - now_100ns).clamp(0, VBAN_MAX_WAIT_100NS)
+    plan_wait_up_to(now_100ns, at_100ns, VBAN_MAX_WAIT_100NS)
+}
+
+/// #233: the wait for a packet due at `at_100ns`, never negative, never more
+/// than `max_100ns` (an output's [`VBAN_MAX_WAIT_100NS`] + its delay: a due
+/// time further ahead is a clock mismatch).
+pub fn plan_wait_up_to(now_100ns: i64, at_100ns: i64, max_100ns: i64) -> i64 {
+    (at_100ns - now_100ns).clamp(0, max_100ns)
 }
 
 /// Packet-to-packet interval in µs (0 on a backward clock read).
@@ -589,33 +601,53 @@ pub fn interval_us(prev_100ns: i64, now_100ns: i64) -> u64 {
     (now_100ns - prev_100ns).max(0) as u64 / 10
 }
 
-/// The sending side of one VBAN stream: the encoder (frame counter), the
-/// reusable packet buffer and the last send instant.
+/// The sending side of one VBAN stream: its format, its send latency (L +
+/// the delay) and wait cap, the rate converter (#233), the encoder (frame
+/// counter), the reusable packet buffer and the last send instant.
 pub struct VbanSender {
+    format: VbanFormat,
+    latency_100ns: i64,
+    max_wait_100ns: i64,
+    converter: VbanRateConverter,
     encoder: VbanEncoder,
-    packets: Box<VbanBlockPackets>,
+    packets: Vec<u8>,
     last_send_100ns: Option<i64>,
 }
 
 impl Default for VbanSender {
+    /// #210's sender: the `PROGRAM` format, no delay.
     fn default() -> Self {
-        Self {
-            encoder: VbanEncoder::default(),
-            packets: empty_block_packets(),
-            last_send_100ns: None,
-        }
+        Self::new(VbanFormat::PROGRAM, 0)
     }
 }
 
 impl VbanSender {
+    fn new(format: VbanFormat, delay_100ns: i64) -> Self {
+        Self {
+            format,
+            latency_100ns: VBAN_SEND_LATENCY_100NS + delay_100ns,
+            max_wait_100ns: VBAN_MAX_WAIT_100NS + delay_100ns,
+            converter: VbanRateConverter::new(format.rate_hz()),
+            encoder: VbanEncoder::default(),
+            packets: empty_packets(format),
+            last_send_100ns: None,
+        }
+    }
+
+    /// #233: the sender of `out`'s destination.
+    pub fn for_out(out: &VbanOut) -> Self {
+        Self::new(out.format(), out.delay_100ns())
+    }
+
     /// The `nuFrame` the next packet carries.
     pub fn next_counter(&self) -> u32 {
         self.encoder.next_counter()
     }
 
-    /// Send one block's 8 packets on their schedule to every resolved target,
-    /// or nothing while the output is disabled or has no resolved target.
-    /// Returns the packets sent.
+    /// Send one block's packets (8 at 48 kHz INT24, #233: its destination's
+    /// count) on their schedule to every resolved target, or nothing while
+    /// the output is disabled or has no resolved target. Returns the packets
+    /// sent.
     pub fn send_block(
         &mut self,
         out: &VbanOut,
@@ -629,7 +661,7 @@ impl VbanSender {
                 warn!(
                     blocks_substituted = n,
                     due_100ns = crate::playback::fleet_shift::wire_100ns(block.due_100ns),
-                    "vban output: a program pair's audio was not one 48 kHz stereo 1600-frame block — sent silence"
+                    "vban output: a program pair's audio was not one program block — sent silence"
                 );
             }
         }
@@ -638,12 +670,14 @@ impl VbanSender {
             self.last_send_100ns = None; // a disabled gap is not a send interval
             return 0;
         }
+        let samples = self.converter.convert(block.samples.as_deref());
         let first = self.encoder.next_counter();
         self.encoder
-            .encode_block(&cfg.name_bytes, block.samples.as_deref(), &mut self.packets);
-        for (k, packet) in self.packets.iter().enumerate() {
-            let at = packet_send_at_100ns(block.due_100ns, VBAN_SEND_LATENCY_100NS, k);
-            let wait = plan_wait_100ns(clock.now_100ns(), at);
+            .encode_into(self.format, &cfg.name_bytes, samples, &mut self.packets);
+        let packet_len = self.format.packet_len();
+        for (k, packet) in self.packets.chunks_exact(packet_len).enumerate() {
+            let at = packet_send_at_in(self.format, block.due_100ns, self.latency_100ns, k);
+            let wait = plan_wait_up_to(clock.now_100ns(), at, self.max_wait_100ns);
             if wait > 0 {
                 clock.sleep_100ns(wait);
             }
@@ -674,7 +708,8 @@ impl VbanSender {
                 warn_late_packet(&stall, k, wait);
             }
         }
-        self.packets.len()
+        out.record_block();
+        self.format.packets_per_block()
     }
 }
 
@@ -705,7 +740,7 @@ pub fn run_vban_loop(
     sink: &mut dyn VbanSink,
     clock: &mut dyn VbanClock,
 ) -> VbanSender {
-    let mut sender = VbanSender::default();
+    let mut sender = VbanSender::for_out(out);
     out.running.store(true, Ordering::SeqCst);
     loop {
         let take = out.take_timeout(VBAN_IDLE_WAIT);
@@ -732,12 +767,13 @@ pub fn run_vban_loop(
 }
 
 /// Windows: bind one UDP socket and run [`run_vban_loop`] on its own thread
-/// (`vban-output`), paced on a [`WallVbanClock`]. #210 part 2: the thread is
-/// an MMCSS "Pro Audio" thread at `AVRT_PRIORITY_HIGH` for its whole life
-/// (`mmcss::join_pro_audio`; `THREAD_PRIORITY_TIME_CRITICAL` if refused).
+/// (`vban-output`, one per VBAN entry #233, `id` = the entry's), paced on a
+/// [`WallVbanClock`]. #210 part 2: the thread is an MMCSS "Pro Audio" thread
+/// at `AVRT_PRIORITY_HIGH` for its whole life (`mmcss::join_pro_audio`;
+/// `THREAD_PRIORITY_TIME_CRITICAL` if refused).
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
-pub fn spawn_vban_thread(out: Arc<VbanOut>) {
+pub fn spawn_vban_thread(out: Arc<VbanOut>, id: String) {
     let spawned = std::thread::Builder::new()
         .name("vban-output".into())
         .spawn(move || {
@@ -750,7 +786,15 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>) {
                     return;
                 }
             };
-            info!(local = ?socket.local_addr().ok(), "vban output thread started");
+            let format = out.format();
+            info!(
+                id = %id,
+                rate = format.rate_hz(),
+                format = format.sample().as_str(),
+                delay_100ns = out.delay_100ns(),
+                local = ?socket.local_addr().ok(),
+                "vban output thread started"
+            );
             // #224 part 2: SlewRemainder — a date step never bursts VBAN.
             let wall = crate::playback::wallclock::WallClock::system();
             let mut clock = WallVbanClock::slewing(wall);
@@ -761,65 +805,9 @@ pub fn spawn_vban_thread(out: Arc<VbanOut>) {
     }
 }
 
-/// Keep the config in step with the settings: re-read them every
-/// [`VBAN_SETTINGS_POLL`], resolve DNS when they change and every
-/// [`VBAN_RESOLVE_EVERY`], log what changed and every resolve failure.
-#[cfg_attr(test, mutants::skip)]
-pub async fn run_vban_config_task(
-    pool: SqlitePool,
-    out: Arc<VbanOut>,
-    mut shutdown: broadcast::Receiver<()>,
-) {
-    let mut applied: Option<VbanSettings> = None;
-    let mut resolved_at: Option<Instant> = None;
-    loop {
-        match load_vban_settings(&pool).await {
-            Ok(settings) => {
-                let changed = applied.as_ref() != Some(&settings);
-                let since = resolved_at.map(|t| t.elapsed());
-                if needs_resolve(changed, settings.enabled, since) {
-                    if settings.ignored_targets() > 0 {
-                        warn!(
-                            ignored = settings.ignored_targets(),
-                            max = VBAN_MAX_TARGETS,
-                            "vban output: too many targets — the extra ones are ignored"
-                        );
-                    }
-                    let cfg = resolve_config(settings.clone(), out.config().targets.clone()).await;
-                    for t in cfg.targets.iter().filter(|t| t.error.is_some()) {
-                        warn!(
-                            spec = %t.spec,
-                            error = t.error.as_deref().unwrap_or_default(),
-                            kept = ?t.addr,
-                            "vban output: resolving a target failed"
-                        );
-                    }
-                    if changed {
-                        let resolved: Vec<_> =
-                            cfg.targets.iter().map(|t| (&t.spec, t.addr)).collect();
-                        info!(
-                            enabled = cfg.enabled,
-                            stream_name = %cfg.stream_name,
-                            resolved = ?resolved,
-                            active = cfg.is_active(),
-                            "vban output: settings applied"
-                        );
-                    }
-                    out.set_config(cfg);
-                    applied = Some(settings);
-                    resolved_at = Some(Instant::now());
-                }
-            }
-            Err(e) => warn!(%e, "vban output: reading the settings failed"),
-        }
-        tokio::select! {
-            _ = shutdown.recv() => break,
-            _ = tokio::time::sleep(VBAN_SETTINGS_POLL) => {}
-        }
-    }
-    info!("vban output: settings task stopped");
-}
-
 #[cfg(test)]
 #[path = "vban_out_tests.rs"]
 pub(crate) mod tests;
+#[cfg(test)]
+#[path = "vban_out_tests_dest.rs"]
+mod tests_dest;
