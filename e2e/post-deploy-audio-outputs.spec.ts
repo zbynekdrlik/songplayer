@@ -34,11 +34,25 @@ function fohBlocks(list: OutputStatus[]): number {
 
 test.describe("audio outputs (#233)", () => {
   test("FOH still gets 48 kHz INT24 sp-program", async ({ request }) => {
-    test.setTimeout(30_000);
+    test.setTimeout(45_000);
+    // Right after a restart FOH is listed once the outputs task's first pass
+    // ran (the migration, every entry's DNS): poll for it. A read that throws
+    // counts as "not yet" (expect.poll does not retry a throwing generator).
+    await expect
+      .poll(
+        async () => {
+          try {
+            return fohBlocks(await outputs(request));
+          } catch {
+            return -1;
+          }
+        },
+        { message: `a VBAN output to ${FOH_TARGET}`, timeout: 20_000 },
+      )
+      .toBeGreaterThanOrEqual(0);
     const first = await outputs(request);
     console.log(`[#233 outputs] first: ${JSON.stringify(first)}`);
     const start = fohBlocks(first);
-    expect(start, `a VBAN output to ${FOH_TARGET}`).toBeGreaterThanOrEqual(0);
     await expect
       .poll(async () => fohBlocks(await outputs(request)) - start, {
         message: `${MIN_BLOCKS} FOH blocks go out`,

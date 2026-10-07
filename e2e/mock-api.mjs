@@ -635,14 +635,38 @@ function outputsRefusal(body) {
     return "audio_outputs is not a JSON list (line 1, column 0)";
   }
   if (!Array.isArray(list)) return "audio_outputs is not a JSON list (line 1, column 0)";
+  // First every entry read field by field, in the server's order and words
+  // (`audio_out_config::entry`: id, type, vban.host, vban.port, name) …
+  for (const [i, e] of list.entries()) {
+    const first = `entry ${i + 1}`;
+    if (e === null || typeof e !== "object" || Array.isArray(e)) return `${first} is not a JSON object`;
+    if (e.id === undefined) return `${first}: id is missing`;
+    if (typeof e.id !== "string") return `${first}: id has the wrong type`;
+    const at = `${first} (id ${shownId(e.id)})`;
+    if (e.type === undefined) return `${at}: type is missing`;
+    if (typeof e.type !== "string") return `${at}: type has the wrong type`;
+    if (e.type !== "vban") return `${at}: type must be vban`;
+    if (e.vban === undefined) return `${at}: vban is missing`;
+    if (e.vban.host === undefined) return `${at}: vban.host is missing`;
+    if (typeof e.vban.host !== "string") return `${at}: vban.host has the wrong type`;
+    if (e.vban.port === undefined) return `${at}: vban.port is missing`;
+    if (!Number.isInteger(e.vban.port) || e.vban.port < 0 || e.vban.port > 65535) {
+      return `${at}: vban.port has the wrong type`;
+    }
+    if (e.name === undefined) return `${at}: name is missing`;
+  }
+  // … then the shared validation (`validate_list`): the counts, then each
+  // entry's own values before its duplicate check (the cases the dashboard
+  // can send).
+  if (list.length > 16) return `audio_outputs has ${list.length} entries (at most 16)`;
+  if (list.length > 8) return `audio_outputs has ${list.length} vban entries (at most 8)`;
   const seen = new Set();
   for (const [i, e] of list.entries()) {
     const at = `entry ${i + 1} (id ${shownId(e.id)})`;
+    if (!e.vban.host) return `${at}: vban.host is empty`;
+    if (e.vban.port === 0) return `${at}: vban.port must be 1-65535`;
     if (seen.has(e.id)) return `${at}: id is used by an earlier entry`;
     seen.add(e.id);
-    if (e.type !== "vban") return `${at}: type must be vban`;
-    if (!e.vban || !e.vban.host) return `${at}: vban.host is empty`;
-    if (!(e.vban.port >= 1 && e.vban.port <= 65535)) return `${at}: vban.port must be 1-65535`;
   }
   return null;
 }
