@@ -160,11 +160,14 @@ fn a_stored_entry_this_version_cannot_read_is_skipped_and_the_rest_run() {
 }
 
 #[test]
-fn a_stored_value_that_is_not_a_list_runs_nothing_and_says_so() {
+fn a_stored_value_that_is_not_a_list_is_flagged_and_named() {
     let stored = parse_stored(Some("not json"));
     assert!(stored.entries.is_empty());
+    assert!(stored.not_a_list, "the task changes nothing on it");
     assert_eq!(stored.problems.len(), 1);
     assert!(stored.problems[0].starts_with("audio_outputs is not a JSON list"));
+    assert!(parse_stored(Some(r#"{"a":1}"#)).not_a_list);
+    assert!(!parse_stored(Some(&format!("[{FOH}]"))).not_a_list);
     assert_eq!(parse_stored(None), Stored::default());
     assert_eq!(parse_stored(Some("  ")), Stored::default());
     assert_eq!(parse_stored(Some(" [] ")), Stored::default());
@@ -225,7 +228,8 @@ async fn load_reads_the_list_leniently_and_the_network_rate() {
         OutputsSettings {
             entries: vec![],
             network_rate: 48_000,
-            problems: vec![]
+            problems: vec![],
+            not_a_list: false,
         }
     );
     let raw = format!(r#"[{FOH},{{"id":"out-2","name":"x","type":"asio"}}]"#);
@@ -241,6 +245,7 @@ async fn load_reads_the_list_leniently_and_the_network_rate() {
             entries: vec![foh()],
             network_rate: 96_000,
             problems: vec!["entry 2 (id out-2): type must be vban".to_string()],
+            not_a_list: false,
         }
     );
 }

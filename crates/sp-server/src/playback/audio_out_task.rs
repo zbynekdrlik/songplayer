@@ -1,12 +1,16 @@
-//! #233: the outputs' settings task. At its start it runs the one-time
-//! `vban_*` migration (`audio_out_migrate.rs`); then every
-//! [`OUTPUTS_SETTINGS_POLL`] it reads the list (leniently) and the network
-//! rate, and applies them: an entry identical to a running one (and built
-//! for the same rate) is KEPT — its thread, queue and frame counter run on —
-//! a new or changed one is built (its target resolved, its thread spawned on
-//! Windows), a removed or changed one is stopped (its thread drains and
-//! exits). A kept VBAN output re-resolves its target every
-//! `VBAN_RESOLVE_EVERY`; a failed re-resolve keeps the last good address.
+//! #233: the outputs' settings task. Every [`OUTPUTS_SETTINGS_POLL`] it makes
+//! one pass ([`tick`]): the one-time `vban_*` migration (`audio_out_migrate.rs`)
+//! until it has run — a failed one is tried again on the next pass — then
+//! the list (read leniently) and the network rate, applied: an entry
+//! identical to a running one up to its name (and built for the same rate)
+//! is KEPT — its thread, queue and frame counter run on, a new name only
+//! relabels it — a new or changed one is built (its target resolved, its
+//! thread started), a removed or changed one is stopped (its thread drains
+//! and exits). A stored value that is no list changes nothing (Review Focus
+//! 3): what runs keeps running and the problem is named. A kept VBAN output
+//! re-resolves its target every `VBAN_RESOLVE_EVERY`; a failed re-resolve
+//! keeps the last good address. The thread starter is a parameter, so a unit
+//! test on the Windows job starts no real thread.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,6 +28,10 @@ use crate::playback::vban_out::{VbanConfig, VbanOut, needs_resolve, resolve_dest
 
 /// How often the list is re-read (#210's VBAN settings poll).
 pub const OUTPUTS_SETTINGS_POLL: Duration = Duration::from_secs(5);
+
+/// Starts a built VBAN output's thread: [`start_vban_thread`] in production,
+/// a recorder in the tests.
+pub type StartThread = dyn Fn(&Arc<VbanOut>, &str) + Send + Sync;
 
 /// What to do with one wanted entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +53,16 @@ pub fn build_rate(entry: &OutputEntry, network_rate: u32) -> u32 {
     match entry.kind {
         OutputType::Vban => effective_rate(entry.rate, network_rate),
     }
+}
+
+/// Whether a running output's entry is the wanted one up to its name: a new
+/// name only relabels the output, its thread runs on.
+pub fn same_but_name(running: &OutputEntry, wanted: &OutputEntry) -> bool {
+    let relabelled = OutputEntry {
+        name: wanted.name.clone(),
+        ..running.clone()
+    };
+    relabelled == *wanted
 }
 
 /// Keep, build, stop. Ids are unique (validated), so at most one running
@@ -73,6 +91,7 @@ pub async fn apply(
     outputs: &AudioOutputs,
     settings: OutputsSettings,
     resolved: &mut HashMap<String, Instant>,
+    start: &StartThread,
 ) {
     let running = outputs.running();
     let plan = plan(&running, &settings.entries, settings.network_rate);
@@ -87,7 +106,7 @@ pub async fn apply(
                 refresh_vban(&kept, resolved).await;
                 kept
             }
-            Step::Build => build(entry, settings.network_rate, resolved).await,
+            Step::Build => build(entry, settings.network_rate, resolved, start).await,
         };
         next.push(output);
     }
@@ -108,6 +127,7 @@ async fn build(
     entry: &OutputEntry,
     network_rate: u32,
     resolved: &mut HashMap<String, Instant>,
+    _start: &StartThread,
 ) -> RunningOutput {
     let built_rate = build_rate(entry, network_rate);
     let mut output = RunningOutput {
@@ -153,9 +173,45 @@ async fn refresh_vban(output: &RunningOutput, resolved: &mut HashMap<String, Ins
     resolved.insert(output.entry.id.clone(), Instant::now());
 }
 
+/// What the task carries from one pass to the next.
+#[derive(Debug, Default)]
+pub struct TaskState {
+    resolved: HashMap<String, Instant>,
+    reported: Vec<String>,
+    migrated: bool,
+}
+
+/// One pass of the task: the migration until it has run, then the list read
+/// and applied. A pass that cannot read the settings changes nothing.
+pub async fn tick(
+    pool: &SqlitePool,
+    outputs: &AudioOutputs,
+    state: &mut TaskState,
+    start: &StartThread,
+) {
+    if !state.migrated {
+        match migrate_vban_settings(pool).await {
+            Ok(outcome) => log_migration(&outcome),
+            Err(e) => warn!(
+                %e,
+                "audio outputs: the vban_* migration failed — tried again on the next pass"
+            ),
+        }
+        state.migrated = true;
+    }
+    match load(pool).await {
+        Ok(settings) => {
+            warn_new_problems(&settings.problems, &state.reported);
+            state.reported = settings.problems.clone();
+            apply(outputs, settings, &mut state.resolved, start).await;
+        }
+        Err(e) => warn!(%e, "audio outputs: reading the settings failed"),
+    }
+}
+
 /// Windows: the output's paced thread (#210's, MMCSS "Pro Audio").
 #[cfg_attr(test, mutants::skip)] // OS thread spawn; Windows-only, like #210's
-fn start_vban_thread(out: &Arc<VbanOut>, id: &str) {
+pub fn start_vban_thread(out: &Arc<VbanOut>, id: &str) {
     #[cfg(windows)]
     crate::playback::vban_out::spawn_vban_thread(out.clone(), id.to_string());
     #[cfg(not(windows))]
@@ -172,6 +228,13 @@ fn warn_unresolved(id: &str, cfg: &VbanConfig) {
             kept = ?t.addr,
             "audio output: resolving a VBAN target failed"
         );
+    }
+}
+
+#[cfg_attr(test, mutants::skip)] // logging only; the problems are tested through `outputs_problems`
+fn warn_new_problems(problems: &[String], reported: &[String]) {
+    for p in problems.iter().filter(|p| !reported.contains(p)) {
+        warn!(problem = %p, "audio outputs: a stored entry is skipped");
     }
 }
 
@@ -210,44 +273,28 @@ fn log_migration(outcome: &MigrationOutcome) {
     }
 }
 
-/// Spawn [`run_outputs_task`].
+/// Spawn [`run_outputs_task`] with the real thread starter.
 #[cfg_attr(test, mutants::skip)] // task spawn
 pub fn start_outputs(
     pool: SqlitePool,
     outputs: Arc<AudioOutputs>,
     shutdown: &broadcast::Sender<()>,
 ) {
-    tokio::spawn(run_outputs_task(pool, outputs, shutdown.subscribe()));
+    let start: Arc<StartThread> = Arc::new(start_vban_thread);
+    tokio::spawn(run_outputs_task(pool, outputs, shutdown.subscribe(), start));
 }
 
-/// The task: migrate once, then apply the settings every 5 s until shutdown,
-/// then stop every output.
-#[cfg_attr(test, mutants::skip)] // a timer loop around apply (tested)
+/// The task: a [`tick`] every 5 s until shutdown, then stop every output.
+#[cfg_attr(test, mutants::skip)] // a timer loop around tick (tested)
 pub async fn run_outputs_task(
     pool: SqlitePool,
     outputs: Arc<AudioOutputs>,
     mut shutdown: broadcast::Receiver<()>,
+    start: Arc<StartThread>,
 ) {
-    match migrate_vban_settings(&pool).await {
-        Ok(outcome) => log_migration(&outcome),
-        Err(e) => warn!(
-            %e,
-            "audio outputs: the vban_* migration failed — no VBAN output until it runs"
-        ),
-    }
-    let mut resolved = HashMap::new();
-    let mut reported: Vec<String> = Vec::new();
+    let mut state = TaskState::default();
     loop {
-        match load(&pool).await {
-            Ok(settings) => {
-                for p in settings.problems.iter().filter(|p| !reported.contains(p)) {
-                    warn!(problem = %p, "audio outputs: a stored entry is skipped");
-                }
-                reported = settings.problems.clone();
-                apply(&outputs, settings, &mut resolved).await;
-            }
-            Err(e) => warn!(%e, "audio outputs: reading the settings failed"),
-        }
+        tick(&pool, &outputs, &mut state, start.as_ref()).await;
         tokio::select! {
             _ = shutdown.recv() => break,
             _ = tokio::time::sleep(OUTPUTS_SETTINGS_POLL) => {}

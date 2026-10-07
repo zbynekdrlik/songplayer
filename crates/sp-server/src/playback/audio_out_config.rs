@@ -3,7 +3,8 @@
 //! (sanitized) id and the field, never the value: serde's own error text can
 //! quote the input — and stored normalized. The outputs task reads the stored
 //! list leniently: an entry this version cannot read (a rollback, a hand-edited
-//! row) is skipped and named in `problems`; the rest run. Untrusted JSON goes
+//! row) is skipped and named in `problems`; the rest run. A stored value that
+//! is no list changes nothing: what runs keeps running. Untrusted JSON goes
 //! only through `Box<RawValue>` maps into typed fields, never into
 //! `serde_json::Value` (`rust-workspace.md`).
 
@@ -140,6 +141,9 @@ pub fn parse_list(raw: &str) -> Result<Vec<OutputEntry>, String> {
 pub struct Stored {
     pub entries: Vec<OutputEntry>,
     pub problems: Vec<String>,
+    /// The stored value is no list: the task changes nothing (Review Focus
+    /// 3: what runs keeps running, never "all outputs off").
+    pub not_a_list: bool,
 }
 
 impl Stored {
@@ -179,7 +183,7 @@ impl Stored {
 }
 
 /// The stored value, leniently: each unreadable or invalid entry is skipped
-/// and named; a value that is no list runs nothing.
+/// and named; a value that is no list is named and flagged (`not_a_list`).
 pub fn parse_stored(raw: Option<&str>) -> Stored {
     let Some(raw) = raw.map(str::trim).filter(|r| !r.is_empty()) else {
         return Stored::default();
@@ -190,6 +194,7 @@ pub fn parse_stored(raw: Option<&str>) -> Stored {
             return Stored {
                 entries: Vec::new(),
                 problems: vec![problem],
+                not_a_list: true,
             };
         }
     };
@@ -238,6 +243,8 @@ pub struct OutputsSettings {
     pub entries: Vec<OutputEntry>,
     pub network_rate: u32,
     pub problems: Vec<String>,
+    /// [`Stored::not_a_list`]: apply nothing but the problem.
+    pub not_a_list: bool,
 }
 
 /// Read the two settings (the outputs task, every 5 s).
@@ -249,6 +256,7 @@ pub async fn load(pool: &SqlitePool) -> Result<OutputsSettings, sqlx::Error> {
         entries: stored.entries,
         network_rate: audio_network_rate(rate.as_deref()),
         problems: stored.problems,
+        not_a_list: stored.not_a_list,
     })
 }
 

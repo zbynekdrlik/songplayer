@@ -173,6 +173,7 @@ async fn get_program_names_a_stored_entry_it_could_not_read() {
         state.program_bus.outputs(),
         settings,
         &mut HashMap::new(),
+        &|_: &Arc<VbanOut>, _: &str| {},
     )
     .await;
     let json = get_program(&state).await;
