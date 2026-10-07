@@ -7,6 +7,7 @@
 pub mod asrc; // #233: the ASIO output's resampler (rubato Async sinc) + the re-centre splice
 pub mod asrc_servo; // #233: the ASIO output's drift servo (camera-box's asrc-compensator, for an output), pure
 pub mod audio_grid;
+pub mod audio_out; // #233: the program audio's fan-out to its outputs (one queue + thread each)
 pub mod audio_out_block; // #233: one program boundary's audio block for the outputs
 pub mod audio_out_config; // #233: the outputs' settings — strict PATCH parse, lenient stored read
 pub mod audio_out_migrate; // #233: vban_* → the output list, once (the old keys stay)
