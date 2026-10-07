@@ -635,6 +635,18 @@ pub fn plan_wait_up_to(now_100ns: i64, at_100ns: i64, max_100ns: i64) -> i64 {
     (at_100ns - now_100ns).clamp(0, max_100ns)
 }
 
+/// #233: an output's send latency, L + its delay (100 ns). Its own fn, not
+/// inside `VbanSender::new`: cargo-mutants never mutates a fn named `new`.
+pub fn send_latency_100ns(delay_100ns: i64) -> i64 {
+    VBAN_SEND_LATENCY_100NS + delay_100ns
+}
+
+/// #233: an output's longest wait for a packet, [`VBAN_MAX_WAIT_100NS`] + its
+/// delay (100 ns): a due time further ahead is a clock mismatch.
+pub fn max_wait_100ns(delay_100ns: i64) -> i64 {
+    VBAN_MAX_WAIT_100NS + delay_100ns
+}
+
 /// #233: sleep from `now_100ns` until `end_100ns` in sleeps of at most
 /// [`VBAN_SLEEP_STEP_100NS`] (under the wall's tick cap per read), reading the clock
 /// between two of them (each read ticks the wall) and planning the next from
@@ -693,8 +705,8 @@ impl VbanSender {
         }
         Self {
             format,
-            latency_100ns: VBAN_SEND_LATENCY_100NS + delay_100ns,
-            max_wait_100ns: VBAN_MAX_WAIT_100NS + delay_100ns,
+            latency_100ns: send_latency_100ns(delay_100ns),
+            max_wait_100ns: max_wait_100ns(delay_100ns),
             converter,
             encoder: VbanEncoder::default(),
             packets: empty_packets(format),

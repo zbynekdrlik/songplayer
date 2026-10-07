@@ -18,9 +18,21 @@ use sp_core::genlock::GENLOCK_GRID_FPS;
 
 use crate::playback::vban_packet::{VBAN_BLOCK_FRAMES, VBAN_BLOCK_SAMPLES, VBAN_CHANNELS};
 
+/// Whether a destination at `rate_hz` takes the program's blocks as they are
+/// (48 kHz: no converter, #210's bytes). Its own fn, not inside `new`:
+/// cargo-mutants never mutates a fn named `new` (FOH's bypass stays gated).
+pub fn passes_through(rate_hz: u32) -> bool {
+    rate_hz == PROGRAM_RATE
+}
+
+/// Frames of one boundary's block at `rate_hz` (`rate / 30`).
+pub fn block_frames_at(rate_hz: u32) -> usize {
+    (i64::from(rate_hz) / GENLOCK_GRID_FPS) as usize
+}
+
 /// The converter's delay at `rate_hz`, frames of the destination's rate.
 pub fn fft_delay_frames(rate_hz: u32) -> usize {
-    if rate_hz == PROGRAM_RATE {
+    if passes_through(rate_hz) {
         0
     } else {
         rate_hz as usize / 60
@@ -45,10 +57,10 @@ impl VbanRateConverter {
             out_frames: 0,
             failed: None,
         };
-        if rate_hz == PROGRAM_RATE {
+        if passes_through(rate_hz) {
             return bypass;
         }
-        let out_frames = (i64::from(rate_hz) / GENLOCK_GRID_FPS) as usize;
+        let out_frames = block_frames_at(rate_hz);
         let built = Fft::<f32>::new(
             PROGRAM_RATE as usize,
             rate_hz as usize,
