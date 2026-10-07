@@ -60,6 +60,9 @@ pub struct ReprocessWorker {
     cooldown_until: Option<Instant>,
     /// Per-video backoff: `video_id → (next_retry_at, stage_index)`.
     per_video_backoff: HashMap<i64, (Instant, usize)>,
+    /// #229: this node in the exchange, asked before the providers (`None`
+    /// in tests that do not need it).
+    peer: Option<Arc<crate::peer::Exchange>>,
 }
 
 /// Row data for a video that needs reprocessing.
@@ -96,7 +99,14 @@ impl ReprocessWorker {
             cache_dir,
             cooldown_until: None,
             per_video_backoff: HashMap::new(),
+            peer: None,
         }
+    }
+
+    /// #229: ask the exchange's peers for a title before the providers.
+    pub fn with_peer(mut self, peer: Arc<crate::peer::Exchange>) -> Self {
+        self.peer = Some(peer);
+        self
     }
 
     /// Returns `true` if the worker is currently inside the rate-limit cooldown
@@ -257,6 +267,18 @@ impl ReprocessWorker {
         &mut self,
         row: &ReprocessRow,
     ) -> Result<ReprocessOutcome, anyhow::Error> {
+        // #229: a peer's provider or operator title repairs the row with no
+        // provider call (`peer::repair`), so neither this video's backoff nor
+        // the rate-limit cooldown (both about the providers) holds it back.
+        let peer = self.peer.clone();
+        if let Some(ex) = peer.as_deref()
+            && let Some(title) = crate::peer::repair::peer_title(ex, &row.youtube_id).await
+        {
+            self.per_video_backoff.remove(&row.id);
+            return self
+                .apply_title(row, &title.song, &title.artist, title.source)
+                .await;
+        }
         if self.in_global_cooldown() {
             return Ok(ReprocessOutcome::Skipped);
         }
@@ -287,6 +309,22 @@ impl ReprocessWorker {
         // start from stage 0 again.
         self.per_video_backoff.remove(&row.id);
 
+        self.apply_title(row, &meta.song, &meta.artist, meta.source.as_str())
+            .await
+    }
+
+    /// The ONE repair write: the row re-checked against the queue under
+    /// `cache::SONG_FILES`, its file set renamed after `song` / `artist` (no
+    /// `_gf`), recorded on every row that recorded it, the title written with
+    /// `source`. Reached from the providers' answer and from a peer's title
+    /// (#229, `peer::repair`).
+    async fn apply_title(
+        &self,
+        row: &ReprocessRow,
+        song: &str,
+        artist: &str,
+        source: &str,
+    ) -> Result<ReprocessOutcome, anyhow::Error> {
         // #136: move the song's COMPLETE file set (the video, the audio, and the
         // stems + dub named after the audio) to the upgraded name as ONE unit
         // (`_gf` stripped). A song is never split across two names: when a move
@@ -310,13 +348,7 @@ impl ReprocessWorker {
         };
         let old =
             crate::downloader::cache::SongFiles::recorded(&file_path, audio_file_path.as_deref());
-        let new = old.named(
-            &self.cache_dir,
-            &meta.song,
-            &meta.artist,
-            &row.youtube_id,
-            false,
-        );
+        let new = old.named(&self.cache_dir, song, artist, &row.youtube_id, false);
         let files =
             crate::downloader::cache::rename_song_files(&row.youtube_id, &old, &new).columns();
 
@@ -335,9 +367,9 @@ impl ReprocessWorker {
              SET song = ?, artist = ?, metadata_source = ?, gemini_failed = 0
              WHERE id = ?",
         )
-        .bind(&meta.song)
-        .bind(&meta.artist)
-        .bind(meta.source.as_str())
+        .bind(song)
+        .bind(artist)
+        .bind(source)
         .bind(row.id)
         .execute(&self.pool)
         .await?;
@@ -759,3 +791,7 @@ mod tests_chain;
 #[cfg(test)]
 #[path = "tests_files.rs"]
 mod tests_files;
+
+#[cfg(test)]
+#[path = "tests_peer.rs"]
+mod tests_peer;
