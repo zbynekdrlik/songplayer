@@ -723,6 +723,12 @@ the test that kills each one BEFORE CI's mutation gate runs.
   then `cargo mutants --in-diff <scratch>/range.diff --list --dir <wt>`
   (no `cd`, no redirect). Diff from the MERGED `origin/dev`, not from the
   lane's original base: `<base>..HEAD` then also lists dev's own commits.
+  To KEEP the list (to diff it after each fix round and map only the new
+  mutants), a `> file` redirect is refused too: pipe it instead,
+  `cargo mutants … --list --dir <wt> | python3 -c "import sys;
+  open('<scratch>/mutants.txt','w').write(sys.stdin.read())"   # airuleset:build-ok list-only`
+  (#233 lane 1, eight review rounds: list → diff against the previous
+  list, ignoring line:col → map the new descriptions).
 - **Give a review dispatch the merged base SHA, not `origin/dev`** (#136):
   the `.git` is shared with the main checkout, so another session's fetch
   can move `origin/dev` mid-review, and `git diff origin/dev..HEAD` (a TREE

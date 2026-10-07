@@ -936,6 +936,15 @@ when a field is out of range, so return whether `submit` fired (a `once`
 listener) and assert it. Check "no PATCH" only after a later round trip
 through the page (the PATCH would start from a `spawn_local`).
 
+A server state the mock refuses to store (an entry of a later version's
+type, a stored value the dashboard cannot read) is served through the
+page's own GET instead: `page.route(url, async (route) => { const response
+= await route.fetch(); const body = await response.json(); …;
+await route.fulfill({ response, json: body }); })`, PATCHes passed on with
+`route.continue()`, and `page.unroute` in `finally`
+(`settings-audio-outputs.spec.ts`, "a stored list the dashboard cannot read
+is never saved over").
+
 ## A section of a shared settings map re-reads only its own keys (#233)
 
 Two Nastavenia sections (`settings_form.rs`, `audio_outputs.rs`) both read

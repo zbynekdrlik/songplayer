@@ -257,7 +257,9 @@ notice when the pin moves. Added to the lock with `cargo update --workspace`
 - An entry identical to a running one UP TO ITS NAME (`same_but_name`, and
   built for the same rate) is KEPT: thread, queue, frame counter (`plan` →
   `Step::Keep`); the kept output takes the new entry, so a rename only
-  relabels it. Only a new or changed entry is rebuilt; a network-rate
+  relabels it. The exception: an output whose thread could not start
+  (`RunningOutput::start_failed`, a failed UDP bind or spawn) is rebuilt on
+  every pass until it starts. Only a new or changed entry is rebuilt; a network-rate
   change rebuilds only the `"network"` entries. So a dashboard save, a
   rename, or the post-deploy probe entry never disturbs FOH (Review Focus 2,
   `apply_keeps_an_unchanged_output_when_another_is_added`,

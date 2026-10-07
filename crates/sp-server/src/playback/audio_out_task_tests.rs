@@ -4,7 +4,8 @@
 //! `apply` on real outputs: an unchanged output keeps its queue, a kept one
 //! re-resolves on #210's 60 s cadence, a build error is named on its entry, a
 //! built one starts its thread once (through the starter: no real thread on
-//! the Windows job), a stored value that is no list keeps what runs; the task
+//! the Windows job), one whose thread could not start is rebuilt on the next
+//! pass, a stored value that is no list keeps what runs; the task
 //! migrates — again on the next pass after a failure — and stops every
 //! output at shutdown.
 

@@ -4,7 +4,9 @@
 //! the list (read leniently) and the network rate, applied: an entry
 //! identical to a running one up to its name (and built for the same rate)
 //! is KEPT — its thread, queue and frame counter run on, a new name only
-//! relabels it — a new or changed one is built (its target resolved, its
+//! relabels it; unless its thread could not start
+//! (`RunningOutput::start_failed`): that one is rebuilt on every pass until
+//! it starts — a new or changed one is built (its target resolved, its
 //! thread started), a removed or changed one is discarded
 //! (`OutputSink::discard`: its queue dropped, no push taken after it, its
 //! thread exits after at most the block it already holds; only the
