@@ -11,9 +11,10 @@
 //! the frames buffered for the card (the ring + the splice's hold) and the
 //! frames the card consumed so far.
 //!
-//! - latency = buffered / rate + (handled − boundary): a boundary's time to
-//!   its sound leaving SongPlayer. Target: two grid slots (VBAN's send
-//!   budget) + the entry's delay — not "2–3 driver buffers": one 33 ms block
+//! - latency = (buffered − the splice's pending skip) / rate + (handled −
+//!   boundary): a boundary's time to its sound leaving SongPlayer. Target:
+//!   two grid slots (VBAN's send budget) + the entry's delay — not "2–3
+//!   driver buffers": one 33 ms block
 //!   arrives per boundary, 10–33 ms late in normal operation, so a ring held
 //!   at a few driver buffers would underrun on every block.
 //! - rate point = (handled, consumed / rate − handled) per 1 s window (the
@@ -25,9 +26,12 @@
 //! - output: clamp(rate + P + I, ±300 ppm), moved at most 5 ppm per second of
 //!   the wall (camera-box #803: inaudible).
 //! - steps: a block more than one slot off target, or a window mean more than
-//!   10 ms off, re-centres at once (the worker inserts or skips under fades,
-//!   `asrc::Splice`); a rate point more than 10 ms off the fit re-bases the
-//!   regression (#1335 follow-up 2): a step never disturbs the rate estimate.
+//!   10 ms off, re-centres at once by the block's own error (a step inside a
+//!   window shows in its mean only in part; the worker inserts or skips under
+//!   fades, `asrc::Splice`); a rate point more than 10 ms off the fit re-bases
+//!   the regression (#1335 follow-up 2) and the next point realigns onto the
+//!   moved line (a step inside a window splits across two window means): a
+//!   step moves the line, never the slope.
 //!
 //! Integers (100 ns) where a boundary is pinned (latency, window span), f64
 //! for the regression. Sign: a POSITIVE correction makes MORE output per
@@ -148,7 +152,7 @@ impl RateRegression {
             let residual = y - (intercept + slope * (x_s - x0));
             if residual.abs() > STEP_RESIDUAL_S {
                 self.offset_s += residual;
-                self.realign_next = false;
+                self.realign_next = true;
                 return Offered::Rebased;
             }
             if self.realign_next {
@@ -374,7 +378,7 @@ impl Servo {
     }
 
     pub fn observe(&mut self, o: Observation) -> ServoAction {
-        let to_play = o.buffered_frames;
+        let to_play = o.buffered_frames.saturating_sub(o.pending_skip_frames);
         let latency_100ns =
             frames_to_100ns(to_play, self.rate_hz) + (o.handled_100ns - o.stamp_100ns);
         let err_100ns = self.target_100ns - latency_100ns;
@@ -400,13 +404,17 @@ impl Servo {
         self.latency_ms = w.latency_mean_100ns as f64 / 10_000.0;
         let mean_err_100ns = self.target_100ns - w.latency_mean_100ns;
         if mean_err_100ns.abs() > RECENTRE_100NS {
-            return self.recentre(mean_err_100ns);
+            // A step inside the window shows in its mean only in part: the
+            // block's own error is the whole of it.
+            return self.recentre(err_100ns);
         }
         let dt_100ns = self
             .last_apply_100ns
             .map_or(w.span_100ns, |prev| w.x_end_100ns - prev);
         self.last_apply_100ns = Some(w.x_end_100ns);
-        let dt_s = dt_100ns as f64 / 1e7;
+        // A wall stepped back past the last window gives no time (the slew
+        // already moves nothing; the EMA and the integral must not either).
+        let dt_s = (dt_100ns as f64 / 1e7).max(0.0);
         let rate = self.regression.rate_ppm();
         let pi = self
             .level

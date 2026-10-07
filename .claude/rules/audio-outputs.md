@@ -15,13 +15,18 @@ Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, plan
 
 Pure modules, no thread, no I/O, no runtime wiring yet: lane 3's ASIO worker
 calls `Servo::observe` once per program block, gives the answer to
-`Asrc::set_correction_ppm` and `Splice::insert` / `skip`, and pushes
+`Asrc::set_correction_ppm` and (through `frames_from_100ns`: positive =
+insert, negative = skip) `Splice::insert` / `skip`, and pushes
 `Splice::process(Asrc::process(block))` into the card's ring.
 
 **The observation** (per block, on the program wall, 100 ns): when the block
 was handled, its boundary (stamp), the frames buffered for the card (the
-ring + the splice's 5 ms hold) and the frames the card consumed since the
-output opened.
+ring + the splice's 5 ms hold), the frames the splice has still to skip
+(`Splice::pending_skip_frames`) and the frames the card consumed since the
+output opened. The pending skip is counted OUT of the buffered frames: the
+splice skips at most one block per call, so a 100 ms skip runs over three
+blocks, and without it the servo would ask for the rest again (review round
+1: 150 ms of excess skipped 397 ms in 10 re-centres).
 
 **The latency target is two grid slots (66.7 ms, VBAN's send budget) + the
 entry's `delay_ms`, NOT the spec's "2–3 driver buffers".** The program hands
@@ -68,16 +73,25 @@ share counts); clamp ±300, slew ≤ 5 ppm per second of wall (dt = the 100 ns
 between applied windows).
 
 **Steps:** a block more than one slot off target, or a window mean more than
-10 ms off, RE-CENTRES at once (the action's `recentre_100ns`: insert > 0,
-skip < 0; the window and the EMA restart; the regression is untouched,
-because the card's consumed count did not move). A rate point more than
-10 ms off the fit (once the fit has 30 points) RE-BASES the regression (the
-offset absorbs the step, the slope stays); before that it RESTARTS it. A
-window measuring > 100 000 ppm (a stalled card) FLUSHES it and holds the
-correction; `status()` reads the rate and the lock from the regression, so
-the flush shows at once. A step < 10 ms (a dropped callback, a 9 ms jump)
-enters the regression as a point — camera-box's design: it biases the rate
-up to ~1.5·step/600 s for one span while P/I hold the latency.
+10 ms off, RE-CENTRES at once by the BLOCK's own error (the action's
+`recentre_100ns`: insert > 0, skip < 0; the window and the EMA restart; the
+regression is untouched, because the card's consumed count did not move).
+Not by the window's mean: a step inside a window shows in its mean only in
+part, and the rest was left to P (review round 1: 20–30 ms steps failed at
+4–9 of 17 window phases). A rate point more than 10 ms off the fit (once the
+fit has 30 points) RE-BASES the regression (the offset absorbs the step, the
+slope stays) and the NEXT point REALIGNS onto the moved line whatever its
+residual (`Offered::Realigned`): the same straddle splits a step across two
+window means, and a remainder under 10 ms would otherwise sit in the
+regression as a level shift (~17 ppm of rate bias for a span). Before the
+fit has its points a step RESTARTS it. A window measuring > 100 000 ppm (a
+stalled card) FLUSHES it and holds the correction; `status()` reads the rate
+and the lock from the regression, so the flush shows at once. A whole step
+< 10 ms (a dropped callback, a 9 ms jump) enters the regression as a point —
+camera-box's design: it biases the rate up to ~1.5·step/600 s for one span
+while P/I hold the latency. A wall stepped back past the last window gives
+no time: `dt` is floored at 0, so the EMA and the integral do not move (an
+EMA over −10 s divides by zero, and the NaN would stay).
 
 **The splice** (`Splice`): 5 ms fade out of the held tail, the silence or the
 skipped frames (a skip may span blocks; nothing is emitted while it eats a
@@ -97,23 +111,36 @@ plus half a block of the first ramp — derive pins from a model of rubato's
 (the plan's 300-block "±4" failed at +100 ppm by 1).
 
 **The closed-loop simulation** (`asrc_servo_sim_tests.rs`): card −50 / 0 /
-+50 ppm, ±1 ms and ±44 ms clock steps, a dropped callback, a 48 kHz card
-with 256-frame buffers; 900 s each; asserts 0 underruns, |ppm| ≤ 300, slew,
-latency error ≤ 10 ms after 70 s (model: ≤ 4.1), |final − card| ≤ 5 ppm,
-re-centres 1 (2 for ±44 ms). Two harness rules learned here:
++50 ppm, ±1 ms steps, ±20 / ±30 ms steps at three window phases, ±44 ms, a
+100 ms forward step, a dropped callback, a 48 kHz card with 256-frame
+buffers; 900 s each; asserts 0 underruns, |ppm| ≤ 300, slew, latency error
+≤ 10 ms after 70 s (model: ≤ 4.1), |final − card| ≤ 5 ppm, re-centres 1 (2
+for a step over 10 ms), no re-centre asked while a skip runs. Harness rules
+learned here:
 
 - draw the hand-off jitter ONCE per block and run the card's callbacks due
   by then first; the plan's loop redrew it on every callback, which ran
   callbacks due after the hand-off before it (±20 ms phantom latency);
 - check the slew on the 100 ns instants the servo saw, not the float wall:
-  rounding gives a 5e-7 ppm "over-move".
+  rounding gives a 5e-7 ppm "over-move";
+- model the splice as the worker will run it: an insert at once, a skip
+  from each later block's output, the pending skip in the observation;
+  an instant re-centre hides the double-skip;
+- sweep a step over ≥ 3 window phases: the straddle bug passed at the one
+  phase the plan pinned.
 
-Outside the envelope, by design: a backward step larger than the target
-minus the hand-off lateness (48 ms on 30 ms of jitter) underruns once — the
-audio does not exist yet; `delay_ms` widens the margin.
+The scratch model's fuzz (240 runs: cards ±120 ppm, jitter 0–30 ms, steps
+−35…+150 ms at random window phases, drops, 44.1–96 kHz, buffers 64–512)
+held every invariant. Re-centres reach 4 only for a card beyond ±50 ppm
+(before the 60 s lock P saturates at 50 and the level drifts once) plus a
+dropped 512-frame buffer at 44.1 kHz (11.6 ms, a re-centre of its own).
+Outside the envelope, by physics: a backward step larger than the target
+minus the hand-off lateness (48 ms on 30 ms of jitter) can underrun (one
+event, phase-dependent) — the audio does not exist yet; `delay_ms` widens
+the margin.
 
 **Mutation shape** (a model with one switch per listed mutant kills all
-230 + 76): the fit centres x once and sums `dx·y` (a second centring has
+239 + 78): the fit centres x once and sums `dx·y` (a second centring has
 equivalent mutants); eviction is `drain` past the cap, then a `while let`
 that pops by span (every pass pops: no mutant can spin); the origin
 subtraction `handled − origin` is only shift-visible, so
