@@ -280,9 +280,14 @@ async fn queued_jobs_are_listed_and_a_running_one_only_once() {
     assert_eq!(
         got,
         vec![
+            // Its download is done but not hashed yet: announced, queued, until
+            // the hasher lists its pair (lanes 7-9, finding 6036287850).
+            (YT, Audio, q, false),
             (YT, Lyrics, q, false),
+            (YT, Metadata, q, false),
             (YT, StemInstrumental, q, false),
             (YT, StemVocals, q, false),
+            (YT, Video, q, false),
             ("bbbbbbbbbbb", Audio, r, true),
             ("bbbbbbbbbbb", Metadata, r, true),
             ("bbbbbbbbbbb", Video, r, true),
@@ -292,7 +297,63 @@ async fn queued_jobs_are_listed_and_a_running_one_only_once() {
         ]
     );
     let counted = counts(&node.ex).await.unwrap();
-    assert_eq!(counted.queued, 6, "the running download is not counted");
+    assert_eq!(counted.queued, 9, "the running download is not counted");
+}
+
+/// The jobs `c` announces for `youtube_id`, in the catalog's order.
+fn announced(c: &Catalog, youtube_id: &str) -> Vec<(ArtifactKind, JobState)> {
+    c.jobs
+        .iter()
+        .filter(|j| j.youtube_id == youtube_id)
+        .map(|j| (j.kind, j.state))
+        .collect()
+}
+
+/// Lanes 7-9 (finding 6036287850): the output of a job this node finished
+/// is announced as that job, queued, until the hasher lists it, so a peer
+/// waits for it instead of making it itself. A file the rows name that is
+/// missing from disk is not announced.
+#[tokio::test]
+async fn a_finished_job_is_announced_until_its_files_are_listed() {
+    let node = TestNode::start("snv", None).await;
+    let id = node.add_video(YT).await;
+    let (video, audio) = node.give_song(id, YT, "Way Maker", "Sinach").await;
+    let (vocals, instrumental) = node.give_stems(id).await;
+    node.give_lyrics(id, YT, "mtl+g35t").await;
+    let q = JobState::Queued;
+    let c = build(&node.ex, "snv", None).await.unwrap();
+    assert_eq!(
+        announced(&c, YT),
+        vec![
+            (Audio, q),
+            (Lyrics, q),
+            (Metadata, q),
+            (StemInstrumental, q),
+            (StemVocals, q),
+            (Video, q)
+        ],
+        "nothing hashed: every job of the song"
+    );
+    hash(&node, &video, 1).await;
+    hash(&node, &vocals, 1).await;
+    hash(&node, &instrumental, 1).await;
+    let c = build(&node.ex, "snv", None).await.unwrap();
+    assert_eq!(
+        announced(&c, YT),
+        vec![(Audio, q), (Lyrics, q), (Metadata, q), (Video, q)],
+        "the stems are listed; the audio and the lyrics are not yet"
+    );
+    std::fs::remove_file(node.cache().join(format!("{YT}_lyrics.json"))).unwrap();
+    let c = build(&node.ex, "snv", None).await.unwrap();
+    assert_eq!(
+        announced(&c, YT),
+        vec![(Audio, q), (Metadata, q), (Video, q)],
+        "a file missing from disk is no job a peer waits for"
+    );
+    hash(&node, &audio, 1).await;
+    let c = build(&node.ex, "snv", None).await.unwrap();
+    assert!(announced(&c, YT).is_empty(), "everything listed");
+    assert_eq!(counts(&node.ex).await.unwrap().queued, 0);
 }
 
 fn running(youtube_id: &str, kind: ArtifactKind) -> CatalogJob {

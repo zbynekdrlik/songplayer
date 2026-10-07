@@ -99,6 +99,26 @@ async fn a_peer_running_the_job_is_waited_for() {
     assert!(pp.ex.board.snapshot("pp").is_empty(), "nothing runs here");
 }
 
+/// Finding 6036287850: a job the peer just finished is waited for until its
+/// hasher lists the files, never redone here in that window.
+#[tokio::test]
+async fn a_peers_finished_job_not_listed_yet_is_waited_for() {
+    let snv = TestNode::start("snv", Some(SNV_KEY)).await;
+    let id = snv.add_video(YT).await;
+    snv.give_song(id, YT, "Way Maker", "Sinach").await;
+    let pp = TestNode::start("pp", None).await;
+    pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    let Ask::Wait { peer, .. } = pp.ex.ask(Job::Download, YT).await else {
+        panic!("expected Wait")
+    };
+    assert_eq!(peer, "snv");
+    snv.hash_now().await;
+    pp.ex.client.forget_catalog("snv");
+    let Ask::Fetch(_) = pp.ex.ask(Job::Download, YT).await else {
+        panic!("listed now: expected Fetch")
+    };
+}
+
 /// The 2 h bound counts from the FIRST wait, and the recheck backs off with it.
 #[tokio::test]
 async fn a_wait_keeps_its_first_start_and_backs_off() {

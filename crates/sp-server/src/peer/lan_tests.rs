@@ -218,9 +218,13 @@ async fn status_counts_the_catalog_and_lists_the_running_jobs() {
     let counts = CatalogCounts {
         files: 2,
         listed: 0,
-        queued: 3,
+        queued: 6,
     };
-    assert_eq!(s.catalog, Some(counts), "lyrics + both stems queued");
+    assert_eq!(
+        s.catalog,
+        Some(counts),
+        "lyrics + both stems queued, and the download until its pair is hashed"
+    );
     assert_eq!(s.jobs.len(), 1);
     let j = &s.jobs[0];
     assert_eq!(
@@ -237,6 +241,7 @@ async fn status_counts_the_catalog_and_lists_the_running_jobs() {
     let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
     let counted = s.catalog.unwrap();
     assert_eq!((counted.files, counted.listed), (2, 2));
+    assert_eq!(counted.queued, 3, "lyrics + both stems");
 }
 
 /// The rig's node answers over real HTTP (axum::serve on its port).
