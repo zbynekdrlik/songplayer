@@ -19,17 +19,23 @@ on:
         required: true
         type: string
 
+# A release deploys only while it is main's tip: GitHub fires `completed`
+# for EVERY attempt of a CI run, and a re-run of an older main run (the SNV
+# restart recipe re-runs a Deploy job) ends green too. For a workflow_run
+# event `github.sha` is the default branch's last commit, so an older run's
+# re-run is skipped here; an older build reaches PP only by a dispatch.
 # Its own group: a queued job on an offline PP runner holds THIS group, never
 # CI's branch group (ci-workflows.md). A newer release waits for the one in
 # flight; a deploy is never cancelled half-way (it stops SongPlayer first).
 # Only a run that really deploys takes the group: GitHub keeps ONE pending run
 # per group and cancels the one already pending, so a CI run on main that
-# failed or was cancelled (it starts this workflow too, which then skips)
-# would replace a release waiting there, and that release would never reach
-# PP. Such a run gets a group of its own. The condition is the resolve job's
-# `if:` (pinned equal by scripts/tests/test_deploy_pp_workflow.py).
+# failed, was cancelled or is no longer main's tip (it starts this workflow
+# too, which then skips) would replace a release waiting there, and that
+# release would never reach PP. Such a run gets a group of its own. The
+# condition is the resolve job's `if:` (pinned equal by
+# scripts/tests/test_deploy_pp_workflow.py).
 concurrency:
-  group: ${{ (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')) && 'deploy-pp' || format('deploy-pp-skipped-{0}', github.run_id) }}
+  group: ${{ (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_sha == github.sha)) && 'deploy-pp' || format('deploy-pp-skipped-{0}', github.run_id) }}
   cancel-in-progress: false
 
 permissions:
@@ -44,7 +50,8 @@ jobs:
       github.event_name == 'workflow_dispatch'
       || (github.event.workflow_run.conclusion == 'success'
           && github.event.workflow_run.event == 'push'
-          && github.event.workflow_run.head_branch == 'main')
+          && github.event.workflow_run.head_branch == 'main'
+          && github.event.workflow_run.head_sha == github.sha)
     outputs:
       run_id: ${{ steps.pick.outputs.run_id }}
       head_sha: ${{ steps.pick.outputs.head_sha }}
@@ -83,8 +90,9 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.head_sha }}
 
-      # The build is fetched and checked BEFORE SongPlayer stops: an expired
-      # artifact (dist is kept 5 days) fails here, with PP still running.
+      # The build and PP's phase-0 task are checked BEFORE SongPlayer stops:
+      # an expired artifact (dist is kept 5 days) or a missing task fails
+      # here, with PP still running.
       - name: Download Tauri installer
         uses: actions/download-artifact@v4
         with:
@@ -101,10 +109,15 @@ jobs:
           run-id: ${{ needs.resolve.outputs.run_id }}
           github-token: ${{ github.token }}
 
-      - name: Check the build (one installer, a dashboard)
+      - name: Check the build and PP's task (before anything stops)
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+          $task = Get-ScheduledTask -TaskName "SongPlayer" -ErrorAction SilentlyContinue
+          if (-not $task) {
+            Write-Error "FAIL: no SongPlayer scheduled task at PP - the phase 0 install creates it (issue 229); not stopping SongPlayer"
+            exit 1
+          }
           $installers = @(Get-ChildItem "artifacts\tauri\*.exe")
           if ($installers.Count -ne 1) {
             Write-Error "FAIL: the tauri-installer artifact holds $($installers.Count) installers, expected 1"
@@ -169,12 +182,13 @@ jobs:
           Copy-Item -Path "artifacts\dist" -Destination $distTarget -Recurse -Force
           Write-Host "Dashboard deployed to $distTarget"
 
-      # This step runs whatever happened before it: a failed install, the
-      # job's timeout, a cancelled run ("produkcia bezi" at PP). Once
-      # SongPlayer was stopped, it must come back, or PP's wall stays dark.
-      # always() is right for THIS step only; the jobs keep the default
-      # success(). With SongPlayer still running (nothing was stopped) it
-      # does nothing. The phase-0 task's absence fails the job.
+      # This step runs whatever happened before it: a failed install or a
+      # cancelled run ("produkcia bezi" at PP). Once SongPlayer was stopped,
+      # it must come back, or PP's wall stays dark. always() is right for
+      # THIS step only; the jobs keep the default success(). With SongPlayer
+      # still running (nothing was stopped) it does nothing. It proves
+      # SongPlayer answers again ("Health checks" below is skipped once a
+      # step failed or the run was cancelled), else it fails on its own.
       - name: Start SongPlayer (the phase 0 scheduled task)
         if: always()
         shell: powershell
@@ -193,7 +207,7 @@ jobs:
           # No process but the instance still Running (IgnoreNew would drop
           # the start): end the instance first.
           if ($task.State -eq "Running") {
-            Stop-ScheduledTask -TaskName "SongPlayer"
+            try { Stop-ScheduledTask -TaskName "SongPlayer" } catch { Write-Warning "Stop-ScheduledTask: $($_.Exception.Message)" }
             $deadline = (Get-Date).AddSeconds(15)
             while (((Get-ScheduledTask -TaskName "SongPlayer").State -eq "Running") -and ((Get-Date) -lt $deadline)) {
               Start-Sleep -Milliseconds 500
@@ -202,12 +216,6 @@ jobs:
           Write-Host "Starting the task SongPlayer (runs as $($task.Principal.UserId))"
           schtasks.exe /run /tn "SongPlayer"
           if ($LASTEXITCODE -ne 0) { throw "schtasks.exe failed (exit code: $LASTEXITCODE)" }
-
-      - name: Health checks
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $VERSION = (Get-Content "VERSION" -Raw).Trim()
           $resp = $null
           $deadline = (Get-Date).AddSeconds(90)
           while ((Get-Date) -lt $deadline) {
@@ -219,12 +227,23 @@ jobs:
             }
           }
           $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
-          if (-not $proc) {
-            Write-Error "FAIL: SongPlayer.exe is not running"
+          if (-not $proc -or -not $resp) {
+            Write-Error "FAIL: SongPlayer did not come back at PP within 90 s (process: $([bool]$proc), API: $([bool]$resp)) - the wall may be dark"
             exit 1
           }
-          if (-not $resp) {
-            Write-Error "FAIL: http://localhost:8920/api/v1/status did not answer within 90 s"
+          Write-Host "SongPlayer is back: PID $($proc.Id), version $($resp.version)"
+
+      # "Start SongPlayer" already waited for the API; this checks it is the
+      # new build.
+      - name: Health checks
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $VERSION = (Get-Content "VERSION" -Raw).Trim()
+          $resp = Invoke-RestMethod -Uri "http://localhost:8920/api/v1/status" -TimeoutSec 10
+          $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
+          if (-not $proc) {
+            Write-Error "FAIL: SongPlayer.exe is not running"
             exit 1
           }
           if ($resp.version -ne $VERSION) {
