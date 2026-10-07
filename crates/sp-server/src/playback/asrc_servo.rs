@@ -275,8 +275,8 @@ pub struct ServoStatus {
     pub rebases: u64,
 }
 
-/// `frames` at `rate_hz` in 100 ns, rounded.
-pub fn frames_to_100ns(frames: u64, rate_hz: f64) -> i64 {
+/// `frames` (negative: owed) at `rate_hz` in 100 ns, rounded.
+pub fn frames_to_100ns(frames: i64, rate_hz: f64) -> i64 {
     (frames as f64 * 1e7 / rate_hz).round() as i64
 }
 
@@ -312,7 +312,7 @@ impl Recent {
 
     /// Their mean (of fewer when fewer came since the last re-centre).
     fn mean_100ns(&self) -> i64 {
-        let n = self.count.min(RECENT_BLOCKS).max(1);
+        let n = self.count.clamp(1, RECENT_BLOCKS);
         self.errs[..n].iter().sum::<i64>() / n as i64
     }
 }
@@ -409,7 +409,7 @@ impl Servo {
     }
 
     pub fn observe(&mut self, o: Observation) -> ServoAction {
-        let to_play = o.buffered_frames.saturating_sub(o.pending_skip_frames);
+        let to_play = o.buffered_frames.saturating_sub(o.pending_skip_frames) as i64;
         let latency_100ns =
             frames_to_100ns(to_play, self.rate_hz) + (o.handled_100ns - o.stamp_100ns);
         let err_100ns = self.target_100ns - latency_100ns;

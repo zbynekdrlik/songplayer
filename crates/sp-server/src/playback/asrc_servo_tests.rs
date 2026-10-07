@@ -365,6 +365,7 @@ fn frames_convert_to_100ns() {
     assert_eq!(frames_to_100ns(128, RATE), 13_333);
     assert_eq!(frames_to_100ns(0, RATE), 0);
     assert_eq!(frames_to_100ns(5_440, RATE), 566_667, "rounded");
+    assert_eq!(frames_to_100ns(-4_800, RATE), -500_000, "owed");
 }
 
 #[test]
@@ -578,6 +579,67 @@ fn a_pending_skip_is_not_asked_for_again() {
     };
     assert_eq!(s.observe(o).recentre_100ns, 0, "already being skipped");
     assert_eq!(s.status().recentres, 2);
+}
+
+/// A worker stall: blocks 31–35 are all handled at block 31's boundary +
+/// 150 ms, the ring down to the splice's hold (480 frames). The first asks
+/// for a skip of 88.3 ms; while it runs the frames still to skip outnumber
+/// the buffered ones (to play: negative) and nothing more is asked.
+#[test]
+fn a_skip_after_a_stall_is_not_asked_again_while_it_outruns_the_ring() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(obs(0, 0, 6_400, 0));
+    steady(&mut s, 1, 30, FEED);
+    let when = T0 + 31 * GROSS_STEP_100NS + 1_500_000;
+    let mut asked = Vec::new();
+    for (k, buffered, pending) in [
+        (31, 480, 0),
+        (32, 480, 5_280),
+        (33, 480, 2_080),
+        (34, 1_600, 0),
+        (35, 4_800, 0),
+    ] {
+        let a = s.observe(Observation {
+            handled_100ns: when,
+            stamp_100ns: T0 + k * GROSS_STEP_100NS,
+            buffered_frames: buffered,
+            pending_skip_frames: pending,
+            consumed_frames: 113_599,
+        });
+        asked.push(a.recentre_100ns);
+    }
+    assert_eq!(asked, [-883_334, 0, 0, 0, 0]);
+    assert_eq!(s.status().recentres, 2);
+}
+
+/// The wall steps back 2.5 s inside a window: the window starts over at the
+/// new reading (closing 1 s on), not 1 s past the old start.
+#[test]
+fn a_wall_stepped_back_inside_a_window_starts_it_over() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(at(T0, 6_400, 0));
+    s.observe(at(T0 + 1_000_000, 6_400, 9_600));
+    s.observe(at(T0 + 5_000_000, 6_400, 48_000));
+    s.observe(at(T0 - 20_000_000, 6_400, 52_800));
+    assert_eq!(s.status().latency_ms, 0.0, "open");
+    s.observe(at(T0 - 10_000_000, 6_400, 148_800));
+    assert_eq!(
+        s.status().latency_ms,
+        66.6667,
+        "closed 1 s after the new start"
+    );
+}
+
+/// Two blocks handled at one instant (a burst) both count in the window.
+#[test]
+fn blocks_handled_at_one_instant_share_a_window() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(at(T0, 6_400, 0));
+    // 6_400 frames = 666_667; 6_496 = 676_667.
+    s.observe(at(T0 + 1_000_000, 6_400, 9_600));
+    s.observe(at(T0 + 1_000_000, 6_496, 9_600));
+    s.observe(at(T0 + 11_000_000, 6_400, 105_600));
+    assert_eq!(s.status().latency_ms, 67.0, "the mean of three");
 }
 
 /// The wall steps back 11 s right at a window's close: the next window

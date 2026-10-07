@@ -55,6 +55,10 @@ struct Case {
     step_s: f64,
     step_at_s: f64,
     drop_at_s: Option<f64>,
+    /// The worker stalls from this boundary (s) for `stall_s`: those blocks
+    /// are all handled at its end, back to back.
+    stall_at_s: Option<f64>,
+    stall_s: f64,
 }
 
 const SNV: Case = Case {
@@ -65,6 +69,8 @@ const SNV: Case = Case {
     step_s: 0.0,
     step_at_s: 400.0,
     drop_at_s: None,
+    stall_at_s: None,
+    stall_s: 0.0,
 };
 const RUN_S: f64 = 900.0;
 const SLOT_S: f64 = GROSS_STEP_100NS as f64 / 1e7;
@@ -139,7 +145,12 @@ fn run(c: Case) -> Outcome {
             shift -= c.step_s;
             stepped = true;
         }
-        let handled = (stamp_s + 0.5 + shift + rng.unit() * c.jitter_s).max(last_handled);
+        let mut handled = (stamp_s + 0.5 + shift + rng.unit() * c.jitter_s).max(last_handled);
+        if let Some(at) = c.stall_at_s
+            && (at..at + c.stall_s).contains(&stamp_s)
+        {
+            handled = handled.max(at + c.stall_s + 0.5 + shift);
+        }
         if handled > RUN_S {
             break;
         }
@@ -156,7 +167,8 @@ fn run(c: Case) -> Outcome {
         });
         let latency_s = (card.fill - pending as f64) / c.rate + (wall_s - stamp_s);
         let quiet = (handled - (c.step_at_s + 0.5)).abs() > 3.0
-            && c.drop_at_s.is_none_or(|t| (handled - t).abs() > 3.0);
+            && c.drop_at_s.is_none_or(|t| (handled - t).abs() > 3.0)
+            && c.stall_at_s.is_none_or(|t| (handled - t).abs() > 3.0);
         if handled > 70.0 && quiet {
             let err_s = latency_s + a.recentre_100ns as f64 / 1e7 - BASE_LATENCY_100NS as f64 / 1e7;
             out.worst_latency_err_ms = out.worst_latency_err_ms.max(err_s.abs() * 1e3);
@@ -342,6 +354,45 @@ fn a_step_under_10_ms_enters_the_rate_and_is_paid_back() {
         };
         assert_within(&run(c), 20.0, recentres, bounds);
     }
+}
+
+/// The worker stalls 200 ms: the card runs dry (underruns: physics), then
+/// the late blocks come back to back. The skip they need is asked for once —
+/// while it runs, the frames still to skip outnumber the buffered ones.
+#[test]
+fn a_200_ms_worker_stall_is_skipped_once() {
+    let c = Case {
+        card_ppm: 20.0,
+        stall_at_s: Some(500.0),
+        stall_s: 0.200,
+        ..SNV
+    };
+    let o = run(c);
+    assert!(o.underruns > 0, "the ring ran dry: {o:?}");
+    assert_eq!((o.recentres, o.asked_while_pending), (2, 0), "{o:?}");
+    assert!(o.max_abs_ppm <= MAX_PPM, "{o:?}");
+    assert!(o.worst_slew_excess <= 1e-9, "{o:?}");
+    assert!(o.worst_latency_err_ms <= 10.0, "{o:?}");
+    assert!((o.final_ppm - 20.0).abs() <= 5.0, "{o:?}");
+}
+
+/// A −10.5 ms step on a −45 ppm card: the level still stands 1.7 ms high
+/// from the start-up (the level loop's ~500 s time constant), so the window
+/// mean reads −8.8 ms and nothing re-centres — the level loop pays it back
+/// (camera-box's blind spot; honest bounds from the model: 1 re-centre,
+/// |final − card| 6.2 ppm and the latency 2.7 ms short at 900 s).
+#[test]
+fn a_10_5_ms_step_on_a_standing_offset_is_left_to_the_level_loop() {
+    let c = Case {
+        card_ppm: -45.0,
+        step_s: -0.0105,
+        ..SNV
+    };
+    let bounds = Bounds {
+        latency_ms: 10.0,
+        final_ppm: 7.0,
+    };
+    assert_within(&run(c), -45.0, 1, bounds);
 }
 
 #[test]
