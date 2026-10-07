@@ -138,6 +138,12 @@ impl Splice {
         self.skip += frames;
     }
 
+    /// Frames still to skip: a skip longer than one block runs over several
+    /// (the servo's observation counts them out of the buffered frames).
+    pub fn pending_skip_frames(&self) -> usize {
+        self.skip
+    }
+
     /// One block of the resampler's output → what goes to the ring now.
     pub fn process(&mut self, input: &[f32]) -> &[f32] {
         let fade = self.fade;

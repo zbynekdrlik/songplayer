@@ -81,7 +81,11 @@ pub enum Offered {
     Inserted,
     /// A step once the fit has its points: the line moved, the slope kept.
     Rebased,
-    /// A step before that: the points start over.
+    /// The point after a re-base, moved onto the new line whatever its
+    /// residual: a step inside a 1 s window shows partly in that window's
+    /// mean and fully in the next one's.
+    Realigned,
+    /// A step before the fit has its points: the points start over.
     Restarted,
 }
 
@@ -90,6 +94,8 @@ pub enum Offered {
 pub struct RateRegression {
     points: VecDeque<(f64, f64)>,
     offset_s: f64,
+    /// The last point was a step: the next one realigns.
+    realign_next: bool,
 }
 
 impl RateRegression {
@@ -142,7 +148,13 @@ impl RateRegression {
             let residual = y - (intercept + slope * (x_s - x0));
             if residual.abs() > STEP_RESIDUAL_S {
                 self.offset_s += residual;
+                self.realign_next = false;
                 return Offered::Rebased;
+            }
+            if self.realign_next {
+                self.offset_s += residual;
+                self.realign_next = false;
+                return Offered::Realigned;
             }
         } else if let Some(&(_, last)) = self.points.back()
             && (y - last).abs() > STEP_RESIDUAL_S
@@ -166,6 +178,7 @@ impl RateRegression {
     pub fn flush(&mut self) {
         self.points.clear();
         self.offset_s = 0.0;
+        self.realign_next = false;
     }
 }
 
@@ -220,6 +233,10 @@ pub struct Observation {
     pub stamp_100ns: i64,
     /// Frames buffered for the card: the ring + the splice's hold.
     pub buffered_frames: u64,
+    /// Frames the splice has still to skip (`asrc::Splice::pending_skip_frames`):
+    /// buffered, but they never reach the card. A skip longer than one block
+    /// runs over several, and must not be asked for again meanwhile.
+    pub pending_skip_frames: u64,
     /// Frames the card consumed since the output opened.
     pub consumed_frames: u64,
 }
@@ -249,6 +266,12 @@ pub struct ServoStatus {
 /// `frames` at `rate_hz` in 100 ns, rounded.
 pub fn frames_to_100ns(frames: u64, rate_hz: f64) -> i64 {
     (frames as f64 * 1e7 / rate_hz).round() as i64
+}
+
+/// `v_100ns` at `rate_hz` in frames, rounded: a re-centre's frames (positive
+/// = insert, negative = skip).
+pub fn frames_from_100ns(v_100ns: i64, rate_hz: f64) -> i64 {
+    (v_100ns as f64 * rate_hz / 1e7).round() as i64
 }
 
 /// One window's sums; it closes once it spans [`WINDOW_100NS`].
@@ -351,8 +374,9 @@ impl Servo {
     }
 
     pub fn observe(&mut self, o: Observation) -> ServoAction {
+        let to_play = o.buffered_frames;
         let latency_100ns =
-            frames_to_100ns(o.buffered_frames, self.rate_hz) + (o.handled_100ns - o.stamp_100ns);
+            frames_to_100ns(to_play, self.rate_hz) + (o.handled_100ns - o.stamp_100ns);
         let err_100ns = self.target_100ns - latency_100ns;
         let Some(origin) = self.origin_100ns else {
             self.origin_100ns = Some(o.handled_100ns);

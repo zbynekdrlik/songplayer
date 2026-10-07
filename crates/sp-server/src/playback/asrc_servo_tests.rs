@@ -112,6 +112,11 @@ fn a_step_after_the_lock_rebases_and_keeps_the_rate() {
     );
     assert_eq!(
         r.offer(101.0, 20e-6 * 101.0 + 0.5 + 0.044),
+        Offered::Realigned,
+        "the next point realigns onto the moved line"
+    );
+    assert_eq!(
+        r.offer(102.0, 20e-6 * 102.0 + 0.5 + 0.044),
         Offered::Inserted,
         "the new line is the old one"
     );
@@ -121,8 +126,35 @@ fn a_step_after_the_lock_rebases_and_keeps_the_rate() {
     );
 }
 
+/// A 30 ms step inside a window: its mean is 22 ms off (re-based), the next
+/// window's is 30 ms off — 8 ms from the moved line, under the step residual,
+/// so without the realign it would stay in the regression as a level shift.
+#[test]
+fn a_step_straddling_a_window_realigns_the_next_point() {
+    let mut r = RateRegression::default();
+    line(&mut r, 100, 1.0, 20.0);
+    let rate = r.rate_ppm();
+    let on = |x: f64| 20e-6 * x + 0.5;
+    assert_eq!(r.offer(100.0, on(100.0) + 0.022), Offered::Rebased);
+    assert_eq!(r.offer(101.0, on(101.0) + 0.030), Offered::Realigned);
+    assert_eq!(r.offer(102.0, on(102.0) + 0.030), Offered::Inserted);
+    assert_eq!(r.offer(103.0, on(103.0) + 0.030), Offered::Inserted);
+    assert!(
+        (r.rate_ppm() - rate).abs() < 1e-6,
+        "{} vs {rate}",
+        r.rate_ppm()
+    );
+    // A flush forgets a pending realign.
+    let mut r = RateRegression::default();
+    line(&mut r, 100, 1.0, 20.0);
+    assert_eq!(r.offer(100.0, on(100.0) + 0.022), Offered::Rebased);
+    r.flush();
+    line(&mut r, 31, 1.0, 20.0);
+    assert_eq!(r.offer(31.0, on(31.0) + 0.005), Offered::Inserted);
+}
+
 /// A steep line (1000 ppm) from x = 50 s: every point on it is a point, one
-/// 11 ms above it is a step, and the next point on the moved line is a point.
+/// 11 ms above it is a step, the next one realigns, then the moved line goes on.
 #[test]
 fn a_steep_line_is_fitted_through_its_points() {
     let mut r = RateRegression::default();
@@ -133,6 +165,10 @@ fn a_steep_line_is_fitted_through_its_points() {
     assert_eq!(r.offer(121.0, 1e-3 * 121.0 + 0.5 + 0.011), Offered::Rebased);
     assert_eq!(
         r.offer(122.0, 1e-3 * 122.0 + 0.5 + 0.011),
+        Offered::Realigned
+    );
+    assert_eq!(
+        r.offer(123.0, 1e-3 * 123.0 + 0.5 + 0.011),
         Offered::Inserted
     );
 }
@@ -303,6 +339,7 @@ fn obs_at(t0: i64, k: i64, late_100ns: i64, buffered: u64, consumed: u64) -> Obs
         handled_100ns: t0 + k * GROSS_STEP_100NS + late_100ns,
         stamp_100ns: t0 + k * GROSS_STEP_100NS,
         buffered_frames: buffered,
+        pending_skip_frames: 0,
         consumed_frames: consumed,
     }
 }
@@ -317,6 +354,7 @@ fn at(at: i64, buffered: u64, consumed: u64) -> Observation {
         handled_100ns: at,
         stamp_100ns: at,
         buffered_frames: buffered,
+        pending_skip_frames: 0,
         consumed_frames: consumed,
     }
 }
@@ -327,6 +365,15 @@ fn frames_convert_to_100ns() {
     assert_eq!(frames_to_100ns(128, RATE), 13_333);
     assert_eq!(frames_to_100ns(0, RATE), 0);
     assert_eq!(frames_to_100ns(5_440, RATE), 566_667, "rounded");
+}
+
+#[test]
+fn frames_convert_from_100ns() {
+    assert_eq!(frames_from_100ns(10_000_000, RATE), 96_000);
+    assert_eq!(frames_from_100ns(13_333, RATE), 128, "rounded");
+    assert_eq!(frames_from_100ns(-666_666, RATE), -6_400, "a skip");
+    assert_eq!(frames_from_100ns(0, RATE), 0);
+    assert_eq!(frames_from_100ns(10_000_000, 44_100.0), 44_100);
 }
 
 #[test]
@@ -418,6 +465,68 @@ fn a_window_mean_exactly_10_ms_off_is_held_and_more_re_centres() {
     s.observe(obs(0, 0, 6_400, 0));
     assert_eq!(steady(&mut s, 1, 32, off_by(-2)).recentre_100ns, 100_001);
     assert_eq!(s.status().recentres, 2);
+}
+
+/// The latency drops 20 ms at block 10 of a window: the mean is 14.4 ms
+/// off (it trips), the re-centre moves by the block's whole 20 ms.
+#[test]
+fn a_step_inside_a_window_re_centres_by_the_whole_step() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(obs(0, 0, 6_400, 0));
+    assert_eq!(steady(&mut s, 1, 9, FEED).recentre_100ns, 0);
+    let low = Feed {
+        buffered: 4_480,
+        ..FEED
+    };
+    assert_eq!(steady(&mut s, 10, 22, low).recentre_100ns, 0);
+    // 4_480 frames = 466_667: 199_999 under the target.
+    assert_eq!(steady(&mut s, 32, 1, low).recentre_100ns, 199_999);
+    assert_eq!(s.status().recentres, 2);
+}
+
+/// A skip longer than one block runs over several: frames still to skip are
+/// not counted as buffered, so the servo does not ask for them again.
+#[test]
+fn a_pending_skip_is_not_asked_for_again() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(obs(0, 0, 6_400, 0));
+    let mut o = obs(1, 0, 6_400 + 9_600, 3_200);
+    let ask = s.observe(o);
+    assert_eq!(
+        ask.recentre_100ns,
+        BASE_LATENCY_100NS - 1_666_667,
+        "skip 100 ms"
+    );
+    o = Observation {
+        pending_skip_frames: 9_600,
+        ..obs(2, 0, 6_400 + 9_600, 6_400)
+    };
+    assert_eq!(s.observe(o).recentre_100ns, 0, "already being skipped");
+    assert_eq!(s.status().recentres, 2);
+}
+
+/// The wall steps back 11 s right at a window's close: the next window
+/// closes 10 s before the last one. No time passed for the level loop — the
+/// correction holds, finite (an EMA over −10 s would divide by zero).
+#[test]
+fn a_wall_stepped_back_past_the_last_window_moves_nothing() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    // 5_920 frames: the level 5 ms low, so the level loop has work to do.
+    s.observe(at(T0, 5_920, 0));
+    s.observe(at(T0 + 1_000_000, 5_920, 9_600));
+    s.observe(at(T0 + 11_000_000, 5_920, 105_600));
+    let before = s.status().correction_ppm;
+    assert!(before > 0.0, "{before}");
+    s.observe(at(T0 - 99_000_000, 5_920, 115_200));
+    s.observe(at(T0 - 89_000_000, 5_920, 211_200));
+    let after = s.status();
+    assert_eq!(after.latency_ms, 61.6667, "still 5 ms low");
+    assert_eq!(after.correction_ppm, before, "{after:?}");
+    // The next window, 1.1 s on: the loop goes on, finite.
+    s.observe(at(T0 - 88_000_000, 5_920, 220_800));
+    s.observe(at(T0 - 78_000_000, 5_920, 316_800));
+    let next = s.status().correction_ppm;
+    assert!(next.is_finite() && next > before, "{next} after {before}");
 }
 
 /// A window closes once it spans exactly 1 s (its latency is then reported).

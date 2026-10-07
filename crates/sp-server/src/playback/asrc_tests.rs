@@ -177,16 +177,19 @@ fn a_skip_is_a_fade_and_a_fade_and_spans_blocks() {
     let mut big = Splice::new(96_000.0, 0, 3_200);
     big.process(&dc);
     big.skip(5_000); // more than one block (3_200 frames)
+    assert_eq!(big.pending_skip_frames(), 5_000);
     assert_eq!(
         big.process(&dc).len(),
         0,
         "the whole block is skipped (the hold stays held)"
     );
+    assert_eq!(big.pending_skip_frames(), 1_800, "the rest, for the servo");
     assert_eq!(
         big.process(&dc).len(),
         6_400 - 2 * (5_000 - 3_200),
         "the rest of the skip"
     );
+    assert_eq!(big.pending_skip_frames(), 0);
 }
 
 /// A re-centre that comes while the splice is still muted (an insert during
