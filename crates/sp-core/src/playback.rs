@@ -111,8 +111,9 @@ impl OpenFailures {
         self.retry_at_ms.is_some()
     }
 
-    /// Whether a retry is pending AND was armed on program: the Player's
-    /// badge then says "on program, waiting" (`player_view`).
+    /// Whether a retry is pending AND belongs to SP-program's source (set
+    /// when armed, refreshed by an ON that sent no Play): the Player's badge
+    /// then says "on program, waiting" (`player_view`).
     pub fn retry_on_program(&self) -> bool {
         self.retry_pending() && self.on_program
     }
@@ -182,8 +183,8 @@ mod tests {
 
     /// #229 follow-up (ROZHODNUTÉ 6029773698): a retry is pending while the
     /// row names its wait; the badge's "on program, waiting" needs one that
-    /// was armed on program. A retry of a playlist played off program (a ▶
-    /// off air) is pending, not on program.
+    /// belongs to SP-program's source. A retry of a playlist played off
+    /// program (a ▶ off air) is pending, not on program.
     #[test]
     fn a_retry_is_on_program_only_when_armed_there_and_still_pending() {
         // A row as read (`read_at` fills `retry_in_ms` from `retry_at_ms`).

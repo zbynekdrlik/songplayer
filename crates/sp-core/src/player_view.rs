@@ -13,8 +13,8 @@
 //! was told the state. The badge reads the same WS state as the state label
 //! (`Playing` = on program, #170), so a program cut flips both in one render.
 //! #229: while the playlist waits for the retry of its failed opens, the
-//! label says so, and the badge too when that retry was armed on program
-//! (the engine's fact, `OpenFailures::on_program`), by ONE predicate. These
+//! label says so, and the badge too when that retry belongs to SP-program's
+//! source (the engine's fact, `OpenFailures::on_program`), by ONE predicate. These
 //! rules live here (WASM-safe, so the workspace tests and the mutation gate
 //! cover them; sp-ui has no unit-test job).
 
@@ -190,7 +190,7 @@ pub const RETRY_PENDING_LABEL: &str = "Čaká na ďalší pokus";
 /// retry is there, and the pipeline is not told it decodes. A pipeline told
 /// it decodes (transport `Playing`) is past the wait: the retry's Play went
 /// out since the 1 Hz health row was read. The ONE rule the state label
-/// (any pending retry) and the badge (a retry armed on program) follow.
+/// (any pending retry) and the badge (a retry of SP-program's source) follow.
 fn waits_for_retry(state_known: bool, transport: TransportState, retry: bool) -> bool {
     state_known && retry && transport != TransportState::Playing
 }
@@ -415,16 +415,17 @@ mod tests {
 
     /// #229 follow-up (design record 6029071745, ROZHODNUTÉ 6029773698):
     /// with a retry pending, the badge for each WS state as the engine
-    /// reports it (with the transport it comes with), for a retry armed on
-    /// program and one armed off program, beside the label, which follows
+    /// reports it (with the transport it comes with), for a retry of
+    /// SP-program's source and one of a playlist off program, beside the
+    /// label, which follows
     /// the same rule for any pending retry. The engine's pause after failed
     /// opens is `WaitingForScene` / `Paused`. A pipeline told it decodes
     /// keeps its own badge and label (on program "Hrá", off program "Hrá
     /// mimo programu").
     #[test]
     fn the_badge_says_on_program_while_a_retry_armed_on_program_waits() {
-        // (state, transport, the badge for a retry armed on program, the
-        // label for any pending retry)
+        // (state, transport, the badge for a retry of SP-program's source,
+        // the label for any pending retry)
         let table = [
             (
                 PlaybackState::Playing,
@@ -455,12 +456,12 @@ mod tests {
             assert_eq!(
                 player_program_badge(true, state, transport, true),
                 badge,
-                "{state:?} / {transport:?}, a retry armed on program"
+                "{state:?} / {transport:?}, a retry of SP-program's source"
             );
             assert_eq!(
                 player_program_badge(true, state, transport, false),
                 program_badge(true, state),
-                "{state:?} / {transport:?}: a retry armed off program, or none: \
+                "{state:?} / {transport:?}: a retry off program, or none: \
                  the WS state's badge"
             );
             assert_eq!(

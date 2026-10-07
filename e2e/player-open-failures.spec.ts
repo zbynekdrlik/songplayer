@@ -166,8 +166,8 @@ test("the Live page's Player shows the same line, and a due retry reads 0 s (#22
 // playlist waits out the retry of its failed opens, the engine reports
 // `WaitingForScene` (nothing decodes), so the badge read "○ Mimo programu"
 // for the playlist that IS SP-program's source, its program black. The row
-// now says whether the retry was armed on program (`on_program`): then the
-// badge says "on program, waiting". A retry of a playlist played off
+// now says whether the retry belongs to SP-program's source (`on_program`):
+// then the badge says "on program, waiting". A retry of a playlist played off
 // program (a ▶ off air) keeps "○ Mimo programu", its label "Čaká na ďalší
 // pokus". A playlist told it decodes keeps its badge: the retry's Play went
 // out before the 1 Hz health row moved.

@@ -99,8 +99,8 @@ impl FailureState {
 
     /// The health row's `open_failures`: the run, when its pending retry is
     /// due in UTC ms (`None` while none is pending) and whether that retry
-    /// was armed on program. `null` while no open failed since the last song
-    /// started.
+    /// belongs to SP-program's source. `null` while no open failed since the
+    /// last song started.
     pub(super) fn view(&self) -> Option<OpenFailures> {
         let now = Instant::now();
         let utc_now_ms = chrono::Utc::now().timestamp_millis();
@@ -191,6 +191,11 @@ impl PlaybackEngine {
             .and_then(|pp| pp.failures.retry.as_mut());
         if let Some(retry) = pending {
             retry.on_program = on_program;
+            info!(
+                playlist_id,
+                on_program,
+                "on program while a retry of failed opens waits — the next attempt keeps its time"
+            );
             self.publish_open_failures(playlist_id);
         }
     }

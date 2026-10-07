@@ -130,7 +130,8 @@ the review finding on the selection: 6028419694.
   "Čaká na ďalší pokus" while a retry waits, the state is known and the
   pipeline is not told it decodes (`player_state_label`).
 - The badge follows the SAME rule (`waits_for_retry`, one predicate) for a
-  retry ARMED ON PROGRAM: `player_program_badge` reads "● Na programe —
+  retry that BELONGS TO SP-PROGRAM'S SOURCE (set when armed, refreshed by
+  an ON that sent no Play): `player_program_badge` reads "● Na programe —
   čaká na ďalší pokus" (`ProgramBadge::OnProgramRetry`, the `on` style,
   `is_on_program`). The engine's wait is `WaitingForScene`, which alone
   read "○ Mimo programu" for SP-program's source, its program black. A
@@ -183,7 +184,9 @@ the review finding on the selection: 6028419694.
   program): `player_view`
   `the_badge_says_on_program_while_a_retry_armed_on_program_waits`; the
   flag on the row: `a_retry_armed_off_program_says_so_on_the_row`,
-  `a_retry_armed_on_program_says_so_until_it_ends` (on program =
+  `a_retry_armed_on_program_says_so_until_it_ends`,
+  `a_retry_still_pending_after_its_playlist_came_on_program_says_so` (the
+  ON refresh; on program =
   `put_on_air_for_test` + the scene's ON). The mock E2E sets the WS state
   with `/__mock/set-playing {playlist_id, state, transport}` and the row's
   `on_program` through `/__mock/ndi-health` (`player-open-failures.spec.ts`:
