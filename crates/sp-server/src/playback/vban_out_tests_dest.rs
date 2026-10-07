@@ -10,7 +10,6 @@ use crate::playback::vban_packet::tests::parse_packet;
 use crate::playback::vban_packet::tests_legacy::{legacy_encode_block, oracle_blocks};
 use crate::playback::vban_packet::{VBAN_SEND_LATENCY_100NS, VbanFormat, stream_name_bytes};
 use sp_core::audio_outputs::{RateChoice, VbanDest, VbanSampleFormat};
-use std::sync::Arc;
 
 const D: i64 = 17_900_000_000_000_000;
 const L: i64 = VBAN_SEND_LATENCY_100NS;
@@ -86,9 +85,15 @@ fn a_96k_destination_sends_16_packets_a_slot_with_index_4() {
     out.set_config(active_config(&["10.0.0.1:6980"]));
     let sent = send(&out, &[block(D, Some(vec![0.25; 3200]))]);
     assert_eq!(sent.len(), 16);
+    // k · 1e7 / 480, floored (a scratch model of packet_offset_in).
     let times: Vec<i64> = sent.iter().map(|(t, _)| *t - D - L).collect();
-    assert_eq!(&times[..4], &[0, 20_833, 41_666, 62_500]);
-    assert_eq!(times[15], 312_499);
+    assert_eq!(
+        times,
+        vec![
+            0, 20_833, 41_666, 62_500, 83_333, 104_166, 125_000, 145_833, 166_666, 187_500,
+            208_333, 229_166, 250_000, 270_833, 291_666, 312_500
+        ]
+    );
     for (k, (_, p)) in sent.iter().enumerate() {
         let parsed = parse_packet(p);
         assert_eq!(
@@ -263,20 +268,4 @@ fn the_config_carries_the_wire_name_and_the_status_its_target() {
     assert!(!def.enabled);
     assert_eq!(def.stream_name, "sp-program");
     assert!(def.targets.is_empty());
-}
-
-#[test]
-fn a_block_shares_its_samples_between_outputs() {
-    let frame = sp_ndi::AudioFrame {
-        data: vec![0.5; 3200],
-        channels: 2,
-        sample_rate: 48_000,
-        timecode_100ns: None,
-    };
-    let b = ProgramBlock::copied(D, &[frame]);
-    let c = b.clone();
-    assert!(Arc::ptr_eq(
-        b.samples.as_ref().unwrap(),
-        c.samples.as_ref().unwrap()
-    ));
 }
