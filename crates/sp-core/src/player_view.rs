@@ -101,8 +101,8 @@ pub enum ProgramBadge {
     Unknown,
     /// The wall shows this playlist.
     OnProgram,
-    /// #229: it waits for the retry of its failed opens, armed while it
-    /// was SP-program's source: on program, its program black.
+    /// #229: it waits for the retry of its failed opens as SP-program's
+    /// source: on program, its program black.
     OnProgramRetry,
     /// It is not on program.
     OffProgram,
@@ -215,7 +215,7 @@ pub fn player_state_label(
 }
 
 /// The Player's badge ([`program_badge`]), except while the playlist waits
-/// for a retry armed while it was SP-program's source (`retry_on_program`:
+/// for a retry that belongs to SP-program's source (`retry_on_program`:
 /// its health row's `OpenFailures::retry_on_program`, the engine's fact,
 /// ROZHODNUTÉ 6029773698; [`waits_for_retry`], the label's own rule): "●
 /// Na programe — čaká na ďalší pokus". The engine reports `WaitingForScene`

@@ -151,7 +151,7 @@ impl FailureRun {
 pub struct RetryView {
     /// When it is due (UTC ms since the epoch).
     pub at_ms: i64,
-    /// It was armed while the playlist was SP-program's source.
+    /// It belongs to SP-program's source (`PendingRetry`'s `on_program`).
     pub on_program: bool,
 }
 
