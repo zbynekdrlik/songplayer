@@ -136,8 +136,10 @@ the review finding on the selection: 6028419694.
   pipeline told it decodes keeps the WS state's badge.
 - OPEN (#229 Design-question 6029484142): a retry is armed off program too.
   `video_failed` backs off from `Playing` whatever the scene (a ▶ off air,
-  a dub prepared on the Dabing page); only a cut off program ends a pending
-  one. The WS state and the health row cannot tell the two apart, so a
+  a dub prepared on the Dabing page). A `SceneOff` (a cut off program, or
+  the dashboard's Pause) ends a pending one, like the other ends under "The
+  pause"; nothing else reads the scene. The WS state and the health row
+  cannot tell the two apart, so a
   playlist ▶'d off program that waits for a retry also reads "● Na programe
   — čaká na ďalší pokus". The recommended fix is an engine fact on the row
   (`OpenFailures.on_program`), pending the main session's decision.
