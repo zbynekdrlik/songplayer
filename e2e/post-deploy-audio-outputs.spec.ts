@@ -38,6 +38,7 @@ test.describe("audio outputs (#233)", () => {
     const first = await outputs(request);
     console.log(`[#233 outputs] first: ${JSON.stringify(first)}`);
     const start = fohBlocks(first);
+    expect(start, `a VBAN output to ${FOH_TARGET}`).toBeGreaterThanOrEqual(0);
     await expect
       .poll(async () => fohBlocks(await outputs(request)) - start, {
         message: `${MIN_BLOCKS} FOH blocks go out`,
@@ -51,15 +52,19 @@ test.describe("audio outputs (#233)", () => {
 
   test("a 96 kHz VBAN destination reads index 4 and a contiguous counter", async ({ request }) => {
     test.setTimeout(60_000);
-    const socket = dgram.createSocket("udp4");
+    // The box has a stored list (the migration ran). Without one the probe's
+    // PATCH would store a list, and the migration then never runs (it acts
+    // only while no list is stored): FOH would stay off for good.
+    const stored = (await (await request.get("/api/v1/settings")).json()).audio_outputs as string | undefined;
+    expect(stored?.trim(), "a stored output list").toBeTruthy();
+    const kept = (JSON.parse(stored as string) as { id: string }[]).filter((e) => !e.id.startsWith("e2e-"));
+    // 480 datagrams a second on loopback: a 4 MiB receive buffer, so a busy
+    // runner never drops one and fakes a counter jump.
+    const socket = dgram.createSocket({ type: "udp4", recvBufferSize: 4 << 20 });
     const packets: Uint8Array[] = [];
     socket.on("message", (m) => packets.push(new Uint8Array(m)));
     await new Promise<void>((resolve) => socket.bind(0, "127.0.0.1", () => resolve()));
     const port = socket.address().port;
-    const stored = (await (await request.get("/api/v1/settings")).json()).audio_outputs as string | undefined;
-    const kept = (JSON.parse(stored && stored.trim() ? stored : "[]") as { id: string }[]).filter(
-      (e) => !e.id.startsWith("e2e-"),
-    );
     const restore = JSON.stringify(kept);
     const withProbe = [
       ...kept,

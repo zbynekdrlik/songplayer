@@ -607,6 +607,14 @@ app.get("/api/v1/settings", (_req, res) => {
 // network rate refuses the whole PATCH with 400 and the server's text,
 // before anything is written (the cases the dashboard can send).
 const MOCK_RATES = [44100, 48000, 88200, 96000, 192000];
+// As `sp_core::audio_outputs::shown_id`: at most 32 characters, each one
+// outside a-z 0-9 - shown as `?` (an error never echoes junk input).
+function shownId(id) {
+  return [...String(id ?? "")]
+    .slice(0, 32)
+    .map((c) => (/^[a-z0-9-]$/.test(c) ? c : "?"))
+    .join("");
+}
 function outputsRefusal(body) {
   if (
     body.audio_network_rate !== undefined &&
@@ -626,7 +634,7 @@ function outputsRefusal(body) {
   if (!Array.isArray(list)) return "audio_outputs is not a JSON list (line 1, column 0)";
   const seen = new Set();
   for (const [i, e] of list.entries()) {
-    const at = `entry ${i + 1} (id ${e.id})`;
+    const at = `entry ${i + 1} (id ${shownId(e.id)})`;
     if (seen.has(e.id)) return `${at}: id is used by an earlier entry`;
     seen.add(e.id);
     if (e.type !== "vban") return `${at}: type must be vban`;
@@ -1162,7 +1170,9 @@ function programBody() {
   };
 }
 // #233: the outputs as `GET /api/v1/program` lists them, from the stored
-// list (an unreadable one lists nothing).
+// list (an unreadable one lists nothing); an enabled VBAN entry carries its
+// `vban` telemetry like the server's (the fields the dashboard and the
+// gates read, no traffic).
 function mockOutputs() {
   let list = [];
   try {
@@ -1189,6 +1199,27 @@ function mockOutputs() {
       latency_ms: 66.6666 + (e.delay_ms || 0) + (rate === 48000 ? 0 : 1000 / 60),
       blocks_sent: 0,
       blocks_dropped: 0,
+      ...(enabled && e.vban
+        ? {
+            vban: {
+              enabled: true,
+              running: true,
+              stream_name: e.vban.stream_name || "sp-program",
+              blocks_sent: 0,
+              packets_sent: 0,
+              send_errors: 0,
+              blocks_dropped: 0,
+              blocks_substituted: 0,
+              late_sends: 0,
+              late_max_us: 0,
+              late_events: [],
+              send_interval_p99_us: 0,
+              frame_counter: 0,
+              slew_owed_us: 0,
+              targets: [{ target: `${e.vban.host}:${e.vban.port}`, addr: null, error: null }],
+            },
+          }
+        : {}),
     };
   });
 }
