@@ -715,3 +715,24 @@ fn the_driver_options_mark_a_stored_driver_only_a_known_list_lacks() {
     );
     assert_eq!(asio_driver_options(None, ""), Vec::new());
 }
+
+/// #233 review round 1: a shown 0 is refused, never channel 1.
+#[test]
+fn an_asio_channel_is_shown_1_based_and_a_shown_0_is_refused() {
+    assert_eq!(asio_channel_index(1), 0);
+    assert_eq!(asio_channel_index(512), 511);
+    assert_eq!(asio_channel_index(0), u32::MAX);
+    assert_eq!(asio_channel_shown(0), 1);
+    assert_eq!(asio_channel_shown(511), 512);
+    assert_eq!(asio_channel_shown(u32::MAX), 0, "a typed 0 reads back as 0");
+    for shown in [0, 1, 2, 512, 513, u32::MAX] {
+        assert_eq!(asio_channel_shown(asio_channel_index(shown)), shown);
+    }
+    let mut e = new_asio(&[], "Dante Virtual Soundcard (x64)");
+    e.asio.as_mut().expect("an ASIO entry").channels[0] = asio_channel_index(0);
+    let err = validate_list(&[e]).expect_err("a shown 0 is no channel");
+    assert_eq!(
+        err.sk(),
+        "Výstup 1 (out-1): pole „kanály“ musí byť 1 až 512"
+    );
+}

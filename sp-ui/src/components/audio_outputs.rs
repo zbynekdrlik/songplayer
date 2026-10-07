@@ -47,7 +47,8 @@ use leptos::prelude::*;
 use serde::Deserialize;
 use sp_core::audio_outputs::{
     OutputEntry, OutputType, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat,
-    asio_driver_options, asio_reason_sk, new_asio, new_vban, validate_list,
+    asio_channel_index, asio_channel_shown, asio_driver_options, asio_reason_sk, new_asio,
+    new_vban, validate_list,
 };
 use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
 
@@ -448,7 +449,7 @@ fn OutputRow(
         read(entries, &id.get_value(), move |e| {
             e.asio
                 .as_ref()
-                .map(|a| a.channels[i].saturating_add(1).to_string())
+                .map(|a| asio_channel_shown(a.channels[i]).to_string())
                 .unwrap_or_default()
         })
     };
@@ -456,7 +457,7 @@ fn OutputRow(
         if let Ok(n) = text.trim().parse::<u32>() {
             edit(entries, &id.get_value(), |e| {
                 if let Some(a) = e.asio.as_mut() {
-                    a.channels[i] = n.saturating_sub(1);
+                    a.channels[i] = asio_channel_index(n);
                 }
             });
         }

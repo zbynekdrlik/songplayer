@@ -629,6 +629,20 @@ pub fn new_asio(entries: &[OutputEntry], driver: &str) -> OutputEntry {
     )
 }
 
+/// The stored (0-based) ASIO channel of the dashboard's 1-based `shown`
+/// one. A shown 0 is no channel: it wraps to `u32::MAX`, which validation
+/// refuses ("musí byť 1 až 512"), and [`asio_channel_shown`] shows it as 0
+/// again (#233 review round 1: it read as channel 1 without a word).
+pub fn asio_channel_index(shown: u32) -> u32 {
+    shown.wrapping_sub(1)
+}
+
+/// The dashboard's 1-based form of a stored ASIO channel (the inverse of
+/// [`asio_channel_index`] for every `u32`).
+pub fn asio_channel_shown(index: u32) -> u32 {
+    index.wrapping_add(1)
+}
+
 /// The dashboard's driver choices for an ASIO entry, `(value, label)`: the
 /// box's listed drivers, then the entry's own driver when the list lacks
 /// it. That driver is marked "(nenájdený)" only when the list is KNOWN
