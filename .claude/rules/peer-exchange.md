@@ -674,8 +674,10 @@ wait for a peer that has the song", below).
   `manual` correction, else the peer's title when it is a provider's or an
   operator's (`adopted_title`: metadata version ≥ 1, a song, the label this
   node writes — `manual` stays `manual`, a peer's operator correction is
-  final here too), else this node's providers (`download_title`). A failed
-  fetch never calls a provider. Recorded by `record_download` (the local
+  final here too), else the title parser's, marked for the repair
+  (`metadata::parser_for_repair`; #229 item A: the peer holds this very
+  song and names it too, so no provider — paid AI — is asked here; the
+  hook takes no provider chain). A failed fetch never calls a provider. Recorded by `record_download` (the local
   path's own, #136: it re-reads a correction made meanwhile, and answers
   the title it recorded); a peer's title is recorded in `peer_fetches` too
   (kind `metadata`, `download::record_title`, the repair's own), only when
@@ -843,7 +845,15 @@ wait for a peer that has the song", below).
   asks no provider but still takes the peers' titles. The peer's catalog
   must list the video's metadata at version ≥ 1 (a parser's title there
   costs no `/videos` request) and `/videos` must match that entry's sha256
-  (`PeerMetadata::to_bytes`); `PeerTitle::of` (`adopted_title`) decides. `apply_title` is the
+  (`PeerMetadata::to_bytes`); `PeerTitle::of` (`adopted_title`) decides.
+  #229 item A: with no peer's title yet the repair WAITS
+  (`peer::repair::waits_for_peer`, `ReprocessOutcome::WaitsForPeer`: no
+  provider, no backoff) while the listed peer this node took the song's
+  audio from lists that same audio (sha256) or cannot be read, bounded at
+  2 h (`peer_waits` job `metadata`, `decide::gives_up`); a peer's title
+  taken ends the wait (`repair::end_wait`); past the bound, or for a song
+  this node downloaded itself or whose peer holds another audio, the
+  providers repair it. `apply_title` is the
   ONE repair write (#136 locked re-check + rename + record), from a peer's
   title or the providers'; the origin goes to `peer_fetches` (kind
   `metadata`, `download::record_title`) only once it wrote the title (a row that
