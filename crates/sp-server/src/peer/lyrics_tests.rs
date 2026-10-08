@@ -427,8 +427,8 @@ async fn the_same_track_already_served_here_is_nothing_newer() {
 /// it) while SNV has its copy. A stand-in is replaced whatever its source,
 /// and in EVERY row of the video (they serve the one file): the hook takes
 /// nothing into its one row, it makes the stand-in due now and puts the row
-/// back (`STANDIN_MIN_RECHECK`, no attempt); the stand-in's own look then
-/// takes SNV's copy into both rows, the ★ along, and the stand-in is over.
+/// back (no attempt); the stand-in's own look then takes SNV's copy into
+/// both rows, the ★ along, and the stand-in is over.
 #[tokio::test]
 async fn a_stand_in_met_by_the_hook_is_replaced_in_every_row() {
     let (_snv, pp, id, snv_json) = snv_and_pp().await;
@@ -477,6 +477,50 @@ async fn a_stand_in_met_by_the_hook_is_replaced_in_every_row() {
         .await
         .unwrap();
     assert_eq!(standins, 0, "the stand-in is over");
+}
+
+/// Review round 4: handing a peer's copy to the stand-in's look counts as
+/// waiting, within the 2 h bound: a look that keeps not taking it (a refused
+/// track, an audio check that cannot tell) never puts the row back for good.
+/// Under the bound the row is put back and the wait recorded; once the job
+/// has waited the bound, it runs here, still standing in (the stand-in as
+/// it was).
+#[tokio::test]
+async fn a_stand_in_handed_the_copy_runs_here_after_the_bound() {
+    let (_snv, pp, id, _) = snv_and_pp().await;
+    pp.give_lyrics(id, YT, "mtl+g35t").await;
+    crate::db::models_peer::record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, i64::MAX)
+        .await
+        .unwrap();
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        first(Some(&pp.ex), &row).await,
+        PeerStep::Deferred
+    ));
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 1, "counted against the 2 h bound");
+    let long_ago = crate::peer::wire::now_ms()
+        - i64::try_from(crate::peer::decide::MAX_PEER_WAIT.as_millis()).unwrap();
+    sqlx::query("UPDATE peer_waits SET since_ms = ?")
+        .bind(long_ago)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    crate::db::models_peer::record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, 2_000)
+        .await
+        .unwrap();
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("after the bound the job runs here")
+    };
+    let standin: (String, i64, i64) =
+        sqlx::query_as("SELECT peer, made_at_ms, next_check_ms FROM peer_standins")
+            .fetch_one(pp.pool())
+            .await
+            .unwrap();
+    assert_eq!(standin, ("snv".to_string(), 1_000, 2_000), "kept as it was");
 }
 
 #[tokio::test]

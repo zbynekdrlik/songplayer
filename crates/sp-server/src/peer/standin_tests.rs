@@ -491,6 +491,49 @@ async fn a_lyrics_job_put_back_after_the_bound_keeps_standing_in() {
     assert_eq!(waits, 0, "no wait started");
 }
 
+/// Review round 4: the run put back after the bound while SNV still
+/// announces the lyrics job (queued: SNV's lyrics wait on its stems): a job
+/// that stands in already waited its bound, so the next pick waits for no
+/// peer again (no new 2 h wait on SNV's announced job) and runs here,
+/// still standing in.
+#[tokio::test]
+async fn a_lyrics_job_put_back_does_not_wait_again_on_an_announced_job() {
+    let snv = TestNode::start("snv", Some(SNV_KEY)).await;
+    set(snv.pool(), "lyrics_worker_enabled", "false").await;
+    set(snv.pool(), "stem_worker_enabled", "false").await;
+    let id = snv.add_video(YT).await;
+    snv.give_song(id, YT, "Way Maker", "Sinach").await;
+    snv.hash_now().await;
+    let _announced = snv.ex.announce(YT, Job::Lyrics);
+    let pp = TestNode::start("pp", None).await;
+    pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    pp.audio_from(YT, "snv").await;
+    let Ask::Wait { peer, .. } = pp.ex.ask(Job::Lyrics, YT).await else {
+        panic!("SNV announces the lyrics: a wait first")
+    };
+    assert_eq!(peer, "snv");
+    let long_ago = crate::peer::wire::now_ms() - i64::try_from(MAX_PEER_WAIT.as_millis()).unwrap();
+    sqlx::query("UPDATE peer_waits SET since_ms = ?")
+        .bind(long_ago)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    let Ask::Local(guard) = pp.ex.ask(Job::Lyrics, YT).await else {
+        panic!("the lyrics run here after the bound")
+    };
+    drop(guard);
+    assert_eq!(standins(&pp).await.len(), 1, "it stands in");
+    let Ask::Local(_guard) = pp.ex.ask(Job::Lyrics, YT).await else {
+        panic!("put back, they run here again, with no new wait on SNV's job")
+    };
+    assert_eq!(standins(&pp).await.len(), 1, "still standing in");
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0, "no wait started");
+}
+
 /// Review round 3: a fetch of the lyrics from another peer than the one
 /// they stand in for (phase 2: two peers listing them) kept failing for the
 /// bound: the job runs here, and the stand-in stays as it was.
