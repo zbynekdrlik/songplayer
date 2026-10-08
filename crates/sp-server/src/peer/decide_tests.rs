@@ -196,6 +196,72 @@ fn a_job_making_other_kinds_is_not_waited_for() {
     );
 }
 
+/// #229 PP audit (comment 6054582866): SNV had the song PP fetched (its
+/// audio listed) but no lyrics job announced, and PP processed the lyrics
+/// itself. A lyrics job now waits while a listed peer has the song, within
+/// the same 2 h bound; it runs here only when no listed peer has it at all.
+/// A peer announcing the job is named first, a peer with the song before an
+/// unreadable one; the stems and the download do not wait on the song.
+#[test]
+fn a_lyrics_job_waits_while_a_peer_has_the_song() {
+    let snv = catalog(vec![art(Audio, MEDIA_VERSION)], &[]);
+    let reads = [read("snv", Some(&snv))];
+    let has_the_song = Decision::Wait {
+        peer: "snv".into(),
+        why: WaitWhy::PeerHasTheSong,
+    };
+    assert_eq!(decide(Job::Lyrics, YT, &reads, None), has_the_song);
+    let just_under = MAX_PEER_WAIT - Duration::from_secs(1);
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, Some(just_under)),
+        has_the_song
+    );
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, Some(MAX_PEER_WAIT)),
+        Decision::Local(LocalWhy::WaitedLongEnough)
+    );
+    assert_eq!(
+        decide(Job::Lyrics, "bbbbbbbbbbb", &reads, None),
+        Decision::Local(LocalWhy::NobodyHasIt),
+        "the audio of another video"
+    );
+    assert_eq!(
+        decide(Job::Stems, YT, &reads, None),
+        Decision::Local(LocalWhy::NobodyHasIt)
+    );
+    assert_eq!(
+        decide(Job::Download, YT, &reads, None),
+        Decision::Local(LocalWhy::NobodyHasIt)
+    );
+    let runner = catalog(vec![], &[ArtifactKind::Lyrics]);
+    assert_eq!(
+        decide(
+            Job::Lyrics,
+            YT,
+            &[read("snv", Some(&snv)), read("busy", Some(&runner))],
+            None
+        ),
+        Decision::Wait {
+            peer: "busy".into(),
+            why: WaitWhy::PeerRunsIt
+        }
+    );
+    assert_eq!(
+        decide(
+            Job::Lyrics,
+            YT,
+            &[read("down", None), read("snv", Some(&snv))],
+            None
+        ),
+        has_the_song
+    );
+    assert_eq!(
+        song_holder(&[read("down", None), read("snv", Some(&snv))], YT),
+        Some("snv")
+    );
+    assert_eq!(song_holder(&[read("snv", Some(&snv))], "bbbbbbbbbbb"), None);
+}
+
 #[test]
 fn an_unreadable_peer_is_waited_for_after_the_readable_ones() {
     let busy = catalog(vec![], &[Video]);

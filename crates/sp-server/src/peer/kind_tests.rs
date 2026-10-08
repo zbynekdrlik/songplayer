@@ -63,6 +63,15 @@ fn each_job_needs_and_makes_its_kinds() {
     assert_eq!(Job::Stems.as_str(), "stems");
 }
 
+/// #229 PP audit (comment 6054582866): only the lyrics wait while a peer has
+/// the song; the stems and the download do not.
+#[test]
+fn only_the_lyrics_wait_while_a_peer_has_the_song() {
+    assert!(Job::Lyrics.waits_while_a_peer_has_the_song());
+    assert!(!Job::Stems.waits_while_a_peer_has_the_song());
+    assert!(!Job::Download.waits_while_a_peer_has_the_song());
+}
+
 /// The catalog announces a not-yet-hashed file as the job that makes it.
 #[test]
 fn each_kind_is_made_by_the_job_whose_makes_holds_it() {

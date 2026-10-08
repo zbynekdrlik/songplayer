@@ -9,9 +9,13 @@
 //! 2. Waited ≥ [`MAX_PEER_WAIT`] → Local.
 //! 3. A peer announcing a job (running or queued) that makes those kinds →
 //!    Wait.
-//! 4. A peer whose catalog could not be read → Wait (an outage or a refused
+//! 4. A job that waits while a peer has the song
+//!    ([`Job::waits_while_a_peer_has_the_song`]: the lyrics) and a peer that
+//!    lists the video's audio → Wait: that peer will make it from the very
+//!    audio this node fetched (#229 PP audit, comment 6054582866).
+//! 5. A peer whose catalog could not be read → Wait (an outage or a refused
 //!    key or token is not "nobody has it"; the same bound applies).
-//! 5. Else → Local.
+//! 6. Else → Local: no listed peer has the song at all.
 //!
 //! Only the peers this node lists in its own `peers` setting are read, so a
 //! node waits only for those: SNV lists none in phase 1, and asks nobody.
@@ -60,6 +64,9 @@ pub enum Decision {
 pub enum WaitWhy {
     /// The peer announces the job, running or queued.
     PeerRunsIt,
+    /// The peer has the song (it lists the video's audio): it will make the
+    /// job from it.
+    PeerHasTheSong,
     /// The peer's catalog could not be read.
     PeerUnreadable,
 }
@@ -105,6 +112,14 @@ pub fn decide(
             why: WaitWhy::PeerRunsIt,
         };
     }
+    if job.waits_while_a_peer_has_the_song()
+        && let Some(peer) = song_holder(reads, youtube_id)
+    {
+        return Decision::Wait {
+            peer: peer.to_string(),
+            why: WaitWhy::PeerHasTheSong,
+        };
+    }
     if let Some(r) = reads.iter().find(|r| r.catalog.is_none()) {
         return Decision::Wait {
             peer: r.peer.to_string(),
@@ -138,6 +153,18 @@ pub fn listed_audio<'a>(catalog: &'a Catalog, youtube_id: &str) -> Option<&'a Ar
         .artifacts
         .iter()
         .find(|a| a.youtube_id == youtube_id && a.kind == ArtifactKind::Audio)
+}
+
+/// The first listed peer that has the song: its catalog lists the video's
+/// audio ([`listed_audio`]).
+pub fn song_holder<'a>(reads: &[PeerRead<'a>], youtube_id: &str) -> Option<&'a str> {
+    reads
+        .iter()
+        .find(|r| {
+            r.catalog
+                .is_some_and(|c| listed_audio(c, youtube_id).is_some())
+        })
+        .map(|r| r.peer)
 }
 
 /// What this node knows of a row's audio file on disk, for [`same_audio`].

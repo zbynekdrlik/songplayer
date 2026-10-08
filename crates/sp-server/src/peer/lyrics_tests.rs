@@ -4,7 +4,7 @@ use super::*;
 use crate::db::models::VideoLyricsRow;
 use crate::db::models_peer::fetch_record;
 use crate::peer::kind::Job;
-use crate::peer::rig::{SNV_KEY, TestNode};
+use crate::peer::rig::{SNV_KEY, TestNode, set};
 
 const YT: &str = "aaaaaaaaaaa";
 const ROW_SQL: &str = "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
@@ -514,6 +514,38 @@ async fn a_peer_running_the_lyrics_job_defers_the_row_without_an_attempt() {
     let next = chrono::DateTime::parse_from_rfc3339(&now.lyrics_next_attempt_at.unwrap()).unwrap();
     let ahead = (next.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
     assert!((100..=125).contains(&ahead), "{ahead}");
+}
+
+/// #229 PP audit (comment 6054582866): SNV has the song PP fetched from it
+/// (its audio listed) but announces no lyrics job (here its lyrics worker is
+/// off). PP waits for SNV's lyrics, within the 2 h bound, instead of making
+/// a degraded track of its own: no attempt, nothing runs here.
+#[tokio::test]
+async fn lyrics_wait_while_a_peer_has_the_song() {
+    let snv = TestNode::start("snv", Some(SNV_KEY)).await;
+    set(snv.pool(), "lyrics_worker_enabled", "false").await;
+    let snv_id = snv.add_video(YT).await;
+    snv.give_song(snv_id, YT, "Way Maker", "Sinach").await;
+    snv.hash_now().await;
+    let pp = TestNode::start("pp", None).await;
+    pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    let id = pp.add_video(YT).await;
+    pp.give_song(id, YT, "Way Maker", "Sinach").await;
+    pp.audio_from(YT, "snv").await;
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        first(Some(&pp.ex), &row).await,
+        PeerStep::Deferred
+    ));
+    assert!(pp.ex.board.snapshot("pp").is_empty(), "nothing runs here");
+    let now = lyrics_now(&pp, id).await;
+    assert_eq!((now.has_lyrics, now.lyrics_attempts), (0, 0));
+    assert!(now.lyrics_next_attempt_at.is_some(), "re-picked later");
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 1, "counted against the 2 h bound");
 }
 
 #[tokio::test]

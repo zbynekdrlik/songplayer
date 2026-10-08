@@ -105,6 +105,17 @@ impl Job {
         }
     }
 
+    /// The job waits while a listed peer has the song (its catalog lists the
+    /// video's audio), as for a job the peer announces (`peer::decide`): only
+    /// the lyrics (#229 PP audit, comment 6054582866). A node's own lyrics
+    /// stay at its pipeline version for good, and a node with no AI proxy
+    /// (PP) makes a degraded track, while the peer's lyrics are made from
+    /// that very audio. Stems are the same model on every node, and the
+    /// download fetches the song itself.
+    pub fn waits_while_a_peer_has_the_song(self) -> bool {
+        false
+    }
+
     /// The job that makes `kind` (the one whose [`Job::makes`] holds it);
     /// `None` for a kind this node does not know.
     pub fn making(kind: ArtifactKind) -> Option<Self> {
