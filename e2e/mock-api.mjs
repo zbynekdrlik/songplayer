@@ -719,7 +719,12 @@ function asioBlockRefusal(a, at) {
 // #233 lane 3: the box's registered ASIO drivers (two, so a test can pick
 // one that is not the first).
 app.get("/api/v1/audio/asio-drivers", (_req, res) => {
-  if (maybeFail("asio-drivers", res)) return;
+  // As the server (#233 release review): a list it could not read is a 500
+  // naming why, in plain text — never an empty list.
+  if (failModes["asio-drivers"]) {
+    res.status(500).type("text/plain").send("the ASIO driver list could not be read: mock fail-mode");
+    return;
+  }
   res.json({ drivers: ["Dante Virtual Soundcard (x64)", "Blackmagic ASIO"] });
 });
 

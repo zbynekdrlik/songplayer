@@ -21,8 +21,17 @@ pub async fn get_asio_drivers() -> Response {
 
 /// The answer to a read of the driver list.
 pub(crate) fn drivers_answer(read: Result<Vec<String>, String>) -> Response {
-    let drivers = read.unwrap_or_default();
-    (StatusCode::OK, Json(AsioDrivers { drivers })).into_response()
+    match read {
+        Ok(drivers) => (StatusCode::OK, Json(AsioDrivers { drivers })).into_response(),
+        Err(why) => {
+            tracing::warn!(%why, "listing the ASIO drivers failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("the ASIO driver list could not be read: {why}"),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// The registry read (`asio_win::list_drivers`, tested on the Windows job),
