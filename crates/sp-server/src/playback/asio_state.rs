@@ -48,7 +48,9 @@ pub fn failures_after_close(failures: u32, ran_100ns: i64) -> u32 {
 /// Why an ASIO output is not running.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Reason {
-    NotFound { present: Vec<String> },
+    NotFound {
+        present: Vec<String>,
+    },
     Busy(String),
     Refused(String),
     Failed(String),
@@ -56,6 +58,9 @@ pub enum Reason {
     RateChanged(u32),
     Stalled,
     WindowsOnly,
+    /// Another output of this process still holds the driver (a rebuilt
+    /// entry's predecessor releasing it, `asio_hold`).
+    Held,
 }
 
 impl Reason {
@@ -67,9 +72,11 @@ impl Reason {
             Self::Refused(_) => "refused",
             Self::Failed(_) => "failed",
             Self::Reset => "reset",
+            Self::RateChanged(0) => "clock_lost",
             Self::RateChanged(_) => "rate_changed",
             Self::Stalled => "stalled",
             Self::WindowsOnly => "windows_only",
+            Self::Held => "held",
         }
     }
 
@@ -92,6 +99,7 @@ impl Reason {
             Self::RateChanged(r) => format!("the driver's rate changed to {r} Hz"),
             Self::Stalled => "no callback from the driver for 2 s".into(),
             Self::WindowsOnly => "ASIO runs on Windows only".into(),
+            Self::Held => "another SongPlayer output still holds the driver (the output this one replaces is releasing it)".into(),
         }
     }
 }

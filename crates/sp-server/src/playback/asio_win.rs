@@ -420,9 +420,7 @@ impl AsioDevice for WinAsioDevice {
         // replaces still releasing it) is busy for now. On a failed open the
         // hold drops after the driver (locals drop in reverse order).
         let Some(hold) = HELD.claim(name) else {
-            return Err(Reason::Busy(
-                "another SongPlayer output still holds the driver (the output this one replaces is releasing it)".into(),
-            ));
+            return Err(Reason::Held);
         };
         let drivers = Metadata::enumerate().unwrap_or_default();
         let present: Vec<String> = drivers

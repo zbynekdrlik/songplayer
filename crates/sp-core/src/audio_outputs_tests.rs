@@ -736,3 +736,17 @@ fn an_asio_channel_is_shown_1_based_and_a_shown_0_is_refused() {
         "Výstup 1 (out-1): pole „kanály“ musí byť 1 až 512"
     );
 }
+
+/// #233 review round 2: the two codes added for a lost clock and a driver
+/// another output still holds.
+#[test]
+fn a_lost_clock_and_a_held_driver_read_in_slovak() {
+    assert_eq!(
+        asio_reason_sk("clock_lost"),
+        "ovládač stratil hodinový signál"
+    );
+    assert_eq!(
+        asio_reason_sk("held"),
+        "ovládač ešte uvoľňuje predchádzajúci výstup"
+    );
+}

@@ -302,3 +302,30 @@ fn every_reason_code_has_its_slovak_on_the_dashboard() {
         );
     }
 }
+
+/// #233 review round 2: a lost clock and a driver another output still
+/// holds have their own codes, so the dashboard says what happened (not
+/// "the rate changed" / "another program uses it").
+#[test]
+fn a_lost_clock_and_a_held_driver_have_their_own_codes() {
+    let lost = Reason::RateChanged(0);
+    assert_eq!(
+        (lost.code(), lost.text().as_str()),
+        ("clock_lost", "the driver lost its clock (it reports 0 Hz)")
+    );
+    assert_eq!(Reason::RateChanged(1).code(), "rate_changed");
+    assert_eq!(
+        (Reason::Held.code(), Reason::Held.text().as_str()),
+        (
+            "held",
+            "another SongPlayer output still holds the driver (the output this one replaces is releasing it)"
+        )
+    );
+    for r in [lost, Reason::Held] {
+        assert_ne!(
+            sp_core::audio_outputs::asio_reason_sk(r.code()),
+            "neznámy dôvod",
+            "{r:?}"
+        );
+    }
+}
