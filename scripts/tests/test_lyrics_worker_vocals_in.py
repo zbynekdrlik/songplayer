@@ -6,7 +6,7 @@ runs anvuew dereverb + 16 kHz mono float32 resample ONLY — the second
 BS-RoFormer vocal-isolation pass is deleted (`sep_mel` gone), and `preload`
 warms only the anvuew dereverb model. v22 is one regime (mtl force-align in
 its own venv + Gemini 3.5 Transcribe), so the retired Qwen aligner is gone
-from the script: no `align-chunks` command, no aligner in `preload`.
+from the script: no chunk-alignment command, no aligner in `preload`.
 
 Runs in the `eval-checks` CI job (numpy + soundfile only). `torch`,
 `audio_separator` and `librosa` are injected as fakes — a fake dereverb

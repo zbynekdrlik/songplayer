@@ -467,7 +467,7 @@ mod tests {
     }
 
     /// #144: the chunk planner and the chunk assembler of the retired Qwen
-    /// aligner went with `align-chunks`, their only consumer.
+    /// aligner went with its chunk-alignment command, their only consumer.
     #[test]
     fn the_lyrics_module_declares_no_retired_chunk_modules() {
         let src = include_str!("mod.rs");
