@@ -792,7 +792,10 @@ the test that kills each one BEFORE CI's mutation gate runs.
   --body-file <abs path>` per issue (release 0.69.0 lane B). A bounded wait
   loop on `$SECONDS` arithmetic (`end=$((SECONDS+560)); while [ $SECONDS -lt
   $end ]`) is refused as well: put the loop in a scratch script (`date +%s`
-  deadline) and run `bash <scratch>/wait.sh <arg>` (#184).
+  deadline) and run `bash <scratch>/wait.sh <arg>` (#184). A command
+  that NAMES `eval/` (CI's ruff list starts with it) is refused too, read
+  as "runs a string through eval": put CI's exact ruff lint + format call
+  in a scratch script (`bash <scratch>/ci_ruff.sh`) (#233 closing lane).
 - **A recursive grep over the repo's `.claude` dir trips the credential-store
   hook** (`block-vault-store-read.sh` reads the command TEXT: a recursive
   read of that dir counts as a vault read, even inside an edit script's
@@ -859,7 +862,16 @@ the test that kills each one BEFORE CI's mutation gate runs.
   on block 101 at 50 ppm). When a result depends on where an event lands
   on a grid (packet spacing 41 666/41 667/41 668, the 100-tick resample),
   sweep the event over ≥ 3 consecutive phases in the test, and fuzz the
-  scratch model over all of them before pinning.
+  scratch model over all of them before pinning. "Phases" must be DISTINCT
+  modulo the grid: 0 / 11.1 / 22.2 / 33.3 ms over a 33.3 ms slot is three
+  (#233 closing lane round 3).
+- **A clamp or a cap's bound is visible only where it BINDS** (#233
+  closing lane round 3). `slew_eta_s` caps its peak at the room
+  `MAX_PPM + rate`; on the only downward test (a +40 ppm card) the ~308 ppm
+  peak stayed under 340 AND under the `*` mutant's 12 000, so `+` → `*` /
+  `/` survived. For every `min` / `max` / `clamp` / cap in the diff, give a
+  test whose value makes that bound the active one (there: a −40 ppm card,
+  room 260 < 308), and check both sides in the scratch model.
 - A match GUARD that is always true where it sits (`ShowTitle { .. } if
   self.recovery_sent_this_step` when the step has always fired an event by
   then) makes the guard→`true` mutant EQUIVALENT: it survives the gate. Drop
