@@ -556,7 +556,7 @@ impl Servo {
         let rate = self.regression.rate_ppm();
         // The offset slew beyond the calm zone; the level loop's I freezes
         // on the whole sum (its anti-windup counts the slew too).
-        let drain = 0.0;
+        let drain = braking_ppm(err_ms, self.calm_ms);
         let pi = self.level.update(err_ms, dt_s, rate + drain);
         let target = (rate + drain + pi).clamp(-MAX_PPM, MAX_PPM);
         self.applied_ppm = slew(self.applied_ppm, target, dt_s);
@@ -582,7 +582,9 @@ impl Servo {
     fn recentre(&mut self, err_100ns: i64, why: Recentre) -> ServoAction {
         self.window = Window::default();
         self.level.reset_error();
-        self.hard_recentres += 1;
+        if why != Recentre::Prime {
+            self.hard_recentres += 1;
+        }
         ServoAction {
             correction_ppm: self.applied_ppm,
             recentre_100ns: err_100ns,
@@ -595,9 +597,9 @@ impl Servo {
 /// short by more than [`HARD_DEFICIT_100NS`], or over by more than
 /// [`HARD_EXCESS_100NS`].
 pub fn hard_recentre(err_100ns: i64) -> Option<Recentre> {
-    if err_100ns > SLOT_100NS {
+    if err_100ns > HARD_DEFICIT_100NS {
         Some(Recentre::Deficit)
-    } else if err_100ns < -SLOT_100NS {
+    } else if err_100ns < -HARD_EXCESS_100NS {
         Some(Recentre::Excess)
     } else {
         None
