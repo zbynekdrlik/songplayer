@@ -793,9 +793,6 @@ impl LyricsWorker {
             Ok(Some(pair)) => pair,
             _ => return,
         };
-        if !self.translation_allowed(&youtube_id).await {
-            return;
-        }
         let lyrics_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
         let content = match tokio::fs::read_to_string(&lyrics_path).await {
             Ok(c) => c,
@@ -811,6 +808,10 @@ impl LyricsWorker {
                 return;
             }
         };
+        // #229 item C: asked once the track is read (review round 15).
+        if !self.translation_allowed(&youtube_id).await {
+            return;
+        }
         info!("lyrics_worker: retrying translation for {youtube_id}");
 
         let Some(ai_client) = &self.ai_client else {

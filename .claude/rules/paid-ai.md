@@ -82,8 +82,11 @@ Every path:
     no peer listed). A worker built without one (a unit test's harness,
     `peer` `None`) runs here unasked (review round 14).
 - **Translation passes** and `translate_track` (Claude):
-  `LyricsWorker::translation_allowed(youtube_id)`, asked after the pass
-  picked a song, so only a song it would translate is held.
+  `LyricsWorker::translation_allowed(youtube_id)`, asked once the pass
+  picked a song and read its track, so only a song it would translate is
+  held: a stale translation whose track cannot be read is only stamped
+  forward, as while ON (review round 15,
+  `a_stale_translation_with_no_track_is_stamped_forward_not_held_while_off`).
 - **Metadata chain** (Claude, Gemini):
   - `ProviderChain::providers` is async and answers `None` while OFF. The
     production chain is `gated` on the node's DB (`provider_chain(&pool, …)`);

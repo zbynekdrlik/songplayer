@@ -60,7 +60,8 @@ impl LyricsWorker {
     /// read live); while it is off the song's translation is held
     /// (`paid_ai::hold`, one INFO per song): its SK lines come with a peer's
     /// copy, or once the switch is on. Asked only for a song the pass would
-    /// translate, so the status names no translation that is not waiting.
+    /// translate (picked, its track read), so the status names no
+    /// translation that is not waiting.
     pub(crate) async fn translation_allowed(&self, youtube_id: &str) -> bool {
         if crate::paid_ai::enabled(&self.pool).await {
             return true;
@@ -105,9 +106,6 @@ impl LyricsWorker {
         };
         let video_id = row.id;
         let youtube_id = row.youtube_id.clone();
-        if !self.translation_allowed(&youtube_id).await {
-            return;
-        }
         let lyrics_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
         let content = match tokio::fs::read_to_string(&lyrics_path).await {
             Ok(c) => c,
@@ -129,6 +127,11 @@ impl LyricsWorker {
                 return;
             }
         };
+        // #229 item C: asked once the track is read (review round 15): an
+        // unreadable track is only stamped forward, never held.
+        if !self.translation_allowed(&youtube_id).await {
+            return;
+        }
         let gender = self.resolve_gender(video_id).await;
         info!(
             "lyrics_worker: retranslating {youtube_id} (gender={gender:?}, v{LYRICS_TRANSLATION_VERSION})"
