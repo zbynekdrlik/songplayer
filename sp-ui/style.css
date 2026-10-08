@@ -510,6 +510,24 @@ body {
     font-size: 0.85rem;
 }
 
+/* #233 (the owner): a running ASIO output's resampling, a line of its own
+   across the row; each figure carries its tooltip. */
+.audio-output-resampling {
+    grid-column: 1 / -1;
+    margin-bottom: 10px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+}
+
+.audio-output-resampling:empty {
+    display: none;
+}
+
+.audio-chip[title] {
+    cursor: help;
+    border-bottom: 1px dotted var(--border);
+}
+
 /* #233 lane 3: the row's transport ("VBAN" / "ASIO") and an ASIO row's rate
    note sit on the fields' baseline like the state line. */
 .audio-output-type,

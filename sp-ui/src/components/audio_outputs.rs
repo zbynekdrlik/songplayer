@@ -55,10 +55,13 @@ use std::collections::HashMap;
 
 use leptos::prelude::*;
 use serde::Deserialize;
+use sp_core::asio_resampling::{
+    AsioFigures, Chip, LastFault, asio_resampling_chips, asio_state_chips,
+};
 use sp_core::audio_outputs::{
     OutputEntry, OutputType, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat,
     asio_add_refusal, asio_channel_index, asio_channel_shown, asio_driver_options,
-    asio_running_text, asio_waiting_text, new_asio, new_vban, validate_list,
+    asio_waiting_text, new_asio, new_vban, validate_list,
 };
 use sp_core::audio_outputs_save::{
     NOT_CHECKED, SAVED, first_unreadable, parse_whole, rate_to_send, remove_one, save_refusal,
@@ -101,6 +104,95 @@ pub struct AsioLive {
     pub reason_code: Option<String>,
     #[serde(default)]
     pub retry_in_s: Option<f64>,
+    /// #233 (the owner's resampling row): the driver's rate, the card's clock
+    /// against SongPlayer's and its lock, the offset the ratio drains and
+    /// its time left, the hard re-centres and the last one.
+    #[serde(default)]
+    pub driver_rate: u32,
+    #[serde(default)]
+    pub rate_ppm: f64,
+    #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
+    pub offset_ms: f64,
+    #[serde(default)]
+    pub slew_eta_s: Option<f64>,
+    #[serde(default)]
+    pub hard_recentres: u64,
+    #[serde(default)]
+    pub last_hard_recentre: Option<HardRecentreLive>,
+}
+
+/// `outputs[i].asio.last_hard_recentre`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct HardRecentreLive {
+    #[serde(default)]
+    pub cause: String,
+    #[serde(default)]
+    pub ms: f64,
+    #[serde(default)]
+    pub lateness_ms: f64,
+    #[serde(default)]
+    pub ago_s: f64,
+}
+
+/// A running ASIO output's figures (`sp_core::asio_resampling`).
+fn asio_figures(o: &OutputLive, a: &AsioLive) -> AsioFigures {
+    AsioFigures {
+        latency_ms: o.latency_ms,
+        underruns: a.underruns,
+        hard_recentres: a.hard_recentres,
+        driver_rate: a.driver_rate,
+        rate_ppm: a.rate_ppm,
+        locked: a.locked,
+        ppm: a.ppm,
+        offset_ms: a.offset_ms,
+        slew_eta_s: a.slew_eta_s,
+        last_fault: a.last_hard_recentre.as_ref().map(|h| LastFault {
+            cause: h.cause.clone(),
+            ms: h.ms,
+            lateness_ms: h.lateness_ms,
+            ago_s: h.ago_s,
+        }),
+    }
+}
+
+/// The output `id` when it is an ASIO output that runs: its figures.
+fn running_asio(live: &ProgramOutputs, id: &str) -> Option<AsioFigures> {
+    let o = live.outputs.iter().find(|o| o.id == id)?;
+    let a = o.asio.as_ref()?;
+    (o.state == "running").then(|| asio_figures(o, a))
+}
+
+/// A row's state line as chips: a running ASIO output's figures (each with
+/// its tooltip), else the one state text (the row's tooltip shows through).
+fn state_chips(live: &ProgramOutputs, id: &str, saved: bool) -> Vec<Chip> {
+    match running_asio(live, id) {
+        Some(f) => asio_state_chips(state_sk("running"), &f),
+        None => vec![Chip {
+            key: "audio-output-state-text",
+            text: live_text(live, id, saved),
+            title: None,
+        }],
+    }
+}
+
+/// Chips separated by " · " (the separators are text too, so the line reads
+/// whole).
+fn chips_view(chips: Vec<Chip>) -> impl IntoView {
+    chips
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let sep = (i > 0).then(|| view! { <span class="audio-chip-sep">" · "</span> });
+            view! {
+                {sep}
+                <span class="audio-chip" data-testid=c.key title=c.title>
+                    {c.text}
+                </span>
+            }
+        })
+        .collect_view()
 }
 
 /// `GET /api/v1/audio/asio-drivers`.
@@ -170,13 +262,13 @@ fn live_text(live: &ProgramOutputs, id: &str, saved: bool) -> String {
     }
 }
 
-/// One output's state line: running = its latency (an ASIO output also its
-/// correction and underruns); an output that waits = why, in Slovak (an
-/// ASIO output also when it tries again).
+/// One output's state line: running = its latency (a running ASIO output
+/// is chips instead, `state_chips`); an output that waits = why, in Slovak
+/// (an ASIO output also when it tries again).
 fn output_text(o: &OutputLive) -> String {
     let state = state_sk(&o.state);
     match (&o.asio, o.state.as_str()) {
-        (Some(a), "running") => asio_running_text(state, o.latency_ms, a.ppm, a.underruns),
+        (Some(_), "running") => state.to_string(),
         (None, "running") => format!("{state} · {:.0} ms", o.latency_ms),
         (Some(a), _) => asio_waiting_text(state, a.reason_code.as_deref(), a.retry_in_s),
         (None, _) => vban_waiting_text(state, o.reason_code.as_deref()),
@@ -774,9 +866,17 @@ fn OutputRow(
                 {move || {
                     let id = id.get_value();
                     let saved = saved_ids.with(|ids| ids.contains(&id));
-                    live_text(&live.get(), &id, saved)
+                    chips_view(state_chips(&live.get(), &id, saved))
                 }}
             </span>
+            // #233 (the owner): a running ASIO output's resampling, its own
+            // line (empty otherwise).
+            <div class="audio-output-resampling" data-testid="audio-output-resampling">
+                {move || {
+                    let figures = running_asio(&live.get(), &id.get_value());
+                    chips_view(figures.map(|f| asio_resampling_chips(&f)).unwrap_or_default())
+                }}
+            </div>
             <button
                 type="button"
                 data-testid="audio-output-remove"
