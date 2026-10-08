@@ -90,14 +90,20 @@ pub async fn probe(
     {
         return (StatusCode::BAD_REQUEST, "youtube_id or title too long").into_response();
     }
+    // #229 item C: no provider is asked while this node's paid AI is off.
+    let Some(chain) = state.metadata_chain.providers().await else {
+        info!(
+            youtube_id,
+            "metadata probe: paid AI is off - no provider asked"
+        );
+        return (StatusCode::CONFLICT, crate::paid_ai::OFF_REASON).into_response();
+    };
     info!(
         youtube_id,
         title, "metadata probe: asking every provider of the chain"
     );
     let providers = futures::future::join_all(
-        state
-            .metadata_chain
-            .providers()
+        chain
             .iter()
             .map(|p| probe_one(&**p, youtube_id, title, PROBE_TIMEOUT)),
     )

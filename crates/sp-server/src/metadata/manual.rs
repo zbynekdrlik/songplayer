@@ -47,6 +47,8 @@ pub struct DownloadTitle {
 /// is kept, and the provider chain is never asked over it. Any other video
 /// asks the chain (`get_metadata`: the first provider that answers, else the
 /// title parser). A title that cannot be read asks the chain too (WARN).
+/// #229 item C: while paid AI is off the chain answers no provider: the
+/// title parser's, marked for the repair (`parser_while_paid_ai_off`).
 pub async fn download_title(
     pool: &SqlitePool,
     chain: &ProviderChain,
@@ -75,7 +77,10 @@ pub async fn download_title(
             "metadata: reading the video's title failed — asking the providers"
         ),
     }
-    let meta = super::get_metadata(chain.providers(), youtube_id, title).await;
+    let meta = match chain.providers().await {
+        Some(providers) => super::get_metadata(providers, youtube_id, title).await,
+        None => super::parser_while_paid_ai_off(youtube_id, title),
+    };
     DownloadTitle {
         song: meta.song,
         artist: meta.artist,

@@ -319,3 +319,31 @@ async fn a_download_with_no_correction_records_its_own_title() {
     );
     assert!(video.exists() && audio.exists());
 }
+
+/// #229 item C: while paid AI is off a download names the song by the title
+/// parser, marked for the repair, and asks no provider; once it is on the
+/// chain names it.
+#[tokio::test]
+async fn paid_ai_off_names_a_download_by_the_parser_for_the_repair() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let (chain, calls) = chain();
+    let chain = chain.gated(pool.clone());
+    crate::db::models::set_setting(&pool, "paid_ai_enabled", "false")
+        .await
+        .unwrap();
+    let off = download_title(&pool, &chain, "pa1d0ff0001", "Sinach - Way Maker").await;
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(off.source, MetadataSource::Regex.as_str());
+    assert!(off.gemini_failed, "marked for the repair");
+    assert!(!off.song.is_empty());
+    crate::db::models::set_setting(&pool, "paid_ai_enabled", "true")
+        .await
+        .unwrap();
+    let on = download_title(&pool, &chain, "pa1d0ff0001", "Sinach - Way Maker").await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        (on.song.as_str(), on.gemini_failed),
+        ("Another Song", false)
+    );
+}

@@ -91,6 +91,9 @@ enum ReprocessOutcome {
     /// The row left the repair queue while the batch ran (#136: the operator
     /// corrected its title): nothing was renamed or written.
     LeftQueue,
+    /// #229 item C: this node's paid AI is off and no peer had a title: no
+    /// provider was asked, no backoff (one INFO per video, `paid_ai::hold`).
+    Held,
 }
 
 impl ReprocessWorker {
@@ -220,6 +223,8 @@ impl ReprocessWorker {
                 Ok(ReprocessOutcome::Skipped) => {
                     debug!(video_id = %row.youtube_id, "in per-video backoff, skipped");
                 }
+                // #229 item C: `paid_ai::hold` logged it (one INFO per video).
+                Ok(ReprocessOutcome::Held) => {}
                 Ok(ReprocessOutcome::LeftQueue) => {
                     info!(
                         video_id = %row.youtube_id,
@@ -279,6 +284,11 @@ impl ReprocessWorker {
                 crate::peer::download::record_title(ex, &row.youtube_id, &taken).await;
             }
             return Ok(outcome);
+        }
+        // #229 item C: while paid AI is off only a peer's title repairs it.
+        if self.chain.providers().await.is_none() {
+            crate::paid_ai::hold(crate::paid_ai::Held::Metadata, &row.youtube_id);
+            return Ok(ReprocessOutcome::Held);
         }
         if self.in_global_cooldown() {
             return Ok(ReprocessOutcome::Skipped);
@@ -389,7 +399,10 @@ impl ReprocessWorker {
         video_id: &str,
         title: &str,
     ) -> Result<VideoMetadata, ChainFailure> {
-        crate::metadata::first_answer(self.chain.providers(), video_id, title).await
+        // No provider while paid AI is off (#229 item C; `reprocess_one`
+        // holds such a row before it gets here).
+        let providers = self.chain.providers().await.unwrap_or_default();
+        crate::metadata::first_answer(providers, video_id, title).await
     }
 
     /// `(the backoff stage's wait in seconds, the stage)` of a video — for the

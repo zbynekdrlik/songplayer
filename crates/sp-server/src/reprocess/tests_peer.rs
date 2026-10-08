@@ -212,3 +212,31 @@ async fn a_peers_parser_title_leaves_the_repair_to_the_providers() {
         None
     );
 }
+
+/// #229 item C: while PP's paid AI is off the repair takes a peer's title
+/// and asks no provider; a row no peer has a title for is held: still in
+/// the queue, no provider call, no backoff. Once paid AI is on, the held
+/// row asks the providers.
+#[tokio::test]
+async fn paid_ai_off_takes_a_peers_title_and_holds_the_rest() {
+    let (_snv, pp) = snv_and_pp().await;
+    crate::peer::rig::set(pp.pool(), "paid_ai_enabled", "false").await;
+    let id = pp_with_a_parser_title(&pp).await;
+    let other = parser_row(&pp, "bbbbbbbbbbb").await;
+    let (chain, calls) = counting_chain();
+    let chain = Arc::new(chain.gated(pp.pool().clone()));
+    let mut worker = ReprocessWorker::new(pp.pool().clone(), chain, pp.cache().to_path_buf())
+        .with_peer(pp.ex.clone());
+    assert_eq!(worker.process_all().await.unwrap(), 1, "the peer's title");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(title(&pp, id).await.0, "Way Maker");
+    assert_eq!(
+        title(&pp, other).await,
+        ("Guess".into(), "Unknown".into(), Some("regex".into()), 1),
+        "held in the repair queue"
+    );
+    assert!(worker.per_video_backoff.is_empty(), "no backoff");
+    crate::peer::rig::set(pp.pool(), "paid_ai_enabled", "true").await;
+    assert_eq!(worker.process_all().await.unwrap(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}

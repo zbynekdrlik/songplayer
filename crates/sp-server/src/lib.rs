@@ -311,7 +311,8 @@ pub async fn start(
     } else {
         gemini_model
     };
-    let metadata_chain = metadata::provider_chain(ai_client.clone(), &gemini_key, &gemini_model);
+    let metadata_chain =
+        metadata::provider_chain(&pool, ai_client.clone(), &gemini_key, &gemini_model);
 
     let state = AppState {
         pool: pool.clone(),

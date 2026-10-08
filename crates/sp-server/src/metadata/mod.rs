@@ -124,6 +124,15 @@ pub async fn get_metadata(
     }
 }
 
+/// #229 item C: the title while this node's paid AI is off — no provider is
+/// asked: the title parser's (free), marked for the repair (`gemini_failed`),
+/// which names it from a peer's title, or once the switch is on; one INFO
+/// per video (`paid_ai::hold`).
+pub(crate) fn parser_while_paid_ai_off(video_id: &str, title: &str) -> VideoMetadata {
+    crate::paid_ai::hold(crate::paid_ai::Held::Metadata, video_id);
+    fallback_from_title(title, true)
+}
+
 /// Regex-parser fallback when no provider named the video (every one failed,
 /// or answered a song the sanitizer reduced to nothing) — always runs the
 /// sanitizer over its own output too, since a title can itself carry emoji.

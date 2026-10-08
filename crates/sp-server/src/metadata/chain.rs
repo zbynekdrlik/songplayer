@@ -9,6 +9,10 @@
 //!
 //! Every provider is wrapped in [`Recorded`]: each call's outcome and latency
 //! lands in the chain's [`MetadataHealth`] and in the log, whoever calls it.
+//!
+//! #229 item C: the production chain is gated on the node's paid-AI switch
+//! ([`ProviderChain::providers`] answers none while it is off, read at every
+//! walk): every metadata path asks it, so no provider is called then.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -26,6 +30,9 @@ use crate::ai::client::AiClient;
 pub struct ProviderChain {
     providers: Vec<Box<dyn MetadataProvider>>,
     health: Arc<MetadataHealth>,
+    /// #229 item C: the database whose paid-AI switch gates every walk
+    /// ([`ProviderChain::gated`]); `None` = never gated (a test's chain).
+    paid_ai: Option<sqlx::SqlitePool>,
 }
 
 impl ProviderChain {
@@ -45,12 +52,29 @@ impl ProviderChain {
                 }) as Box<dyn MetadataProvider>
             })
             .collect();
-        Self { providers, health }
+        Self {
+            providers,
+            health,
+            paid_ai: None,
+        }
     }
 
-    /// The providers in chain order.
-    pub fn providers(&self) -> &[Box<dyn MetadataProvider>] {
-        &self.providers
+    /// #229 item C: this chain asks the paid-AI switch of `pool` before
+    /// every walk (`paid_ai::enabled`, read live).
+    pub fn gated(mut self, pool: sqlx::SqlitePool) -> Self {
+        self.paid_ai = Some(pool);
+        self
+    }
+
+    /// The providers in chain order, or `None` while this node's paid AI is
+    /// off (#229 item C): then no provider may be asked.
+    pub async fn providers(&self) -> Option<&[Box<dyn MetadataProvider>]> {
+        if let Some(pool) = &self.paid_ai
+            && !crate::paid_ai::enabled(pool).await
+        {
+            return None;
+        }
+        Some(&self.providers)
     }
 
     /// Every provider's health, in chain order.
@@ -64,26 +88,41 @@ impl ProviderChain {
 /// `gemini_keys_from_setting`, one key per attempt). Gemini is in the chain
 /// even with no key: it then fails at once with "no API key configured", so
 /// `status.metadata` names the misconfiguration instead of hiding a provider.
+/// Gated on `pool`'s paid-AI switch (#229 item C, [`ProviderChain::gated`]).
 pub fn provider_chain(
+    pool: &sqlx::SqlitePool,
     ai_client: Arc<AiClient>,
     gemini_csv: &str,
     gemini_model: &str,
 ) -> Arc<ProviderChain> {
-    provider_chain_at(
-        ai_client,
-        gemini_csv,
-        gemini_model,
-        crate::gemini_api::GEMINI_API_ROOT,
-    )
+    let api_root = crate::gemini_api::GEMINI_API_ROOT;
+    let chain = chain_at(ai_client, gemini_csv, gemini_model, api_root);
+    Arc::new(chain.gated(pool.clone()))
 }
 
-/// [`provider_chain`] with Gemini's API root injected (a mock server in tests).
+/// [`provider_chain`] with Gemini's API root injected (a mock server in
+/// tests), not gated.
 pub fn provider_chain_at(
     ai_client: Arc<AiClient>,
     gemini_csv: &str,
     gemini_model: &str,
     gemini_api_root: &str,
 ) -> Arc<ProviderChain> {
+    Arc::new(chain_at(
+        ai_client,
+        gemini_csv,
+        gemini_model,
+        gemini_api_root,
+    ))
+}
+
+/// Claude, then Gemini on `gemini_api_root`.
+fn chain_at(
+    ai_client: Arc<AiClient>,
+    gemini_csv: &str,
+    gemini_model: &str,
+    gemini_api_root: &str,
+) -> ProviderChain {
     let keys = crate::gemini_api::gemini_keys_from_setting(gemini_csv);
     // The key COUNT only — never a key.
     tracing::info!(
@@ -91,14 +130,14 @@ pub fn provider_chain_at(
         gemini_model,
         "metadata provider chain: claude, then gemini"
     );
-    Arc::new(ProviderChain::new(vec![
+    ProviderChain::new(vec![
         Box::new(ClaudeMetadataProvider::new(ai_client)),
         Box::new(GeminiProvider::with_api_root(
             keys,
             gemini_model.to_string(),
             gemini_api_root,
         )),
-    ]))
+    ])
 }
 
 /// A chain member: the provider plus its slot in the chain's health record.
