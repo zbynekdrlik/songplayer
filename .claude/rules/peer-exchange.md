@@ -771,9 +771,12 @@ wait for a peer that has the song", below).
   has after its download; the guard's own tests change PP's bytes so that
   one branch alone decides (the record, a stored hash, a hash taken now).
 - Lyrics: never for an operator's ask here (`lyrics_manual_priority`, a
-  non-blank `lyrics_override_text`), never for a video whose
-  `{yt}_lyrics.json` here is a dub's subtitles (any row of it here
-  dub-requested or `gemini-live-translate`), a failed read → here. The
+  non-blank `lyrics_override_text`) on ANY row of the video (its rows serve
+  one `{yt}_lyrics.json`; review round 5: the asked row only before), never
+  for a video whose `{yt}_lyrics.json` here is a dub's subtitles (any row
+  of it here dub-requested or `gemini-live-translate`), a failed read →
+  here; one query, `lyrics::kept_local`, which the stand-in's look asks
+  too. The
   peer's `/videos` row must match its catalog (pipeline version) and must
   not be `gemini-live-translate`; the same source at the same version as
   the row already serves = nothing newer → runs here (the daily full-mix
@@ -787,7 +790,10 @@ wait for a peer that has the song", below).
   there is handed to the stand-in (`Exchange::hand_to_standin`: the
   stand-in due now, the row put back for `recheck_after`, no attempt,
   counted as waiting against the 2 h bound, review round 4; after the bound
-  the job runs here, still standing in); the stand-in's own look takes the
+  the job runs here, still standing in, through `run_here_waited`: the
+  spent bound is KEPT, so a run put back runs here again at once, review
+  round 5; the look's `fetched` ends it, so does a stand-in kept for good);
+  the stand-in's own look takes the
   copy into every row, whatever its source ("The lyrics wait for a peer
   that has the song" below). The JSON is parsed as a typed
   `LyricsTrack` whose
@@ -888,7 +894,8 @@ parked `no_source` by `fail_song`). Three rules:
       (review round 1: a lowest row with none kept the stand-in waiting
       forever);
     - an operator's text or ask, a dub or a Live-Translate row on the video
-      (`OPERATOR_OR_DUB`) → dropped, no peer asked;
+      (`lyrics::kept_local`, the hook's own query) → dropped, no peer asked
+      (a dropped stand-in also ends a spent wait its hand-off kept);
     - the listed peers' catalogs (cached 60 s): the first holding the
       lyrics at this node's version (`holds`) → the audio guard's verdict
       (`Exchange::audio_verdict`, the side-effect-free half of
@@ -939,14 +946,17 @@ parked `no_source` by `fail_song`). Three rules:
   `kind_tests.rs::only_the_lyrics_wait_while_a_peer_has_the_song`,
   `lyrics_tests.rs::{lyrics_wait_while_a_peer_has_the_song,
   lyrics_of_a_song_downloaded_here_do_not_wait_for_a_peer,
-  a_stand_in_met_by_the_hook_is_replaced_in_every_row}`,
+  a_stand_in_met_by_the_hook_is_replaced_in_every_row,
+  a_stand_in_handed_the_copy_runs_here_after_the_bound,
+  an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here}`,
   `standin_tests.rs` (the supersede over two real nodes: every row, a
   parked track, the check row with an audio, the recheck, another audio,
   an operator or a dub, no row, the order, the recheck curve, every row or
   none over; the stand-in recorded after the bound — its source read or
   unreachable — and after a failing fetch from that source only, kept as
-  it was when the run is put back or another peer's fetch fails, ended by
-  `run_here` / `fetched`),
+  it was when the run is put back (no new wait on the song or on an
+  announced job) or another peer's fetch fails, ended by `run_here` /
+  `fetched`, a spent wait ended with a stand-in kept for good),
   `db/mod_tests_v31.rs` (the back-fill's cases),
   `lyrics/worker_tests_peer.rs::the_worker_replaces_a_stand_in_with_the_peers_copy`.
 
