@@ -392,8 +392,9 @@ jobs:
           # buffer; an ASIO output follows the driver (spec section 3;
           # iemmixer I2). azo's Driver has these calls: none may be made, in
           # any call shape (a method call, or `Driver::set_sample_rate(&d, …)`),
-          # so the scan matches the bare names.
-          if grep -rnE '\b(set_sample_rate|set_clock_source|open_control_panel)\b' --include='*.rs' crates/; then
+          # so the scan matches the bare names, and azo-sys's raw vtable call
+          # `control_panel` too.
+          if grep -rnE '\b(set_sample_rate|set_clock_source|open_control_panel|control_panel)\b' --include='*.rs' crates/; then
             echo "FAIL: SongPlayer's ASIO host must never set the driver's rate or clock, nor open its panel"
             exit 1
           fi
