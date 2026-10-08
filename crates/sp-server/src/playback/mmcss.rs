@@ -1,4 +1,5 @@
-//! #210 part 2: the `vban-output` thread as an MMCSS "Pro Audio" thread.
+//! #210 part 2: a VBAN output's thread (`vban-<id>`, #233; it was
+//! `vban-output`) as an MMCSS "Pro Audio" thread.
 //! Design record: #210 comment 5916097259 (Approach 1, item 1).
 //!
 //! On the box the VBAN thread was held off for 11–20 ms on a fixed 10 s grid

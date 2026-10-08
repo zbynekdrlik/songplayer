@@ -148,7 +148,7 @@ async fn the_first_start_writes_the_list_once_and_keeps_the_old_keys() {
         snv().entries,
         "the stored list parses back strictly"
     );
-    // Ruling 4: a rollback to <= 0.72 still finds #210's keys.
+    // Ruling 4: a rollback to <= 0.73.0 still finds #210's keys.
     assert_eq!(get(&pool, "vban_enabled").await.as_deref(), Some("true"));
     assert_eq!(
         get(&pool, "vban_stream_name").await.as_deref(),

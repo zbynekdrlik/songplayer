@@ -473,16 +473,17 @@ impl VbanOut {
     }
 
     /// #233: stop the thread (a runtime replace or removal): the queued
-    /// blocks are dropped and no later push is taken, so a changed output (a
-    /// shorter delay, another format) sends at most the ONE block its thread
-    /// already holds next to its rebuilt successor (same host, same stream
-    /// name), never its old schedule. A process shutdown drains
+    /// blocks are dropped and no later push is taken. The ONE block the
+    /// thread already holds still goes out, on its OLD schedule (the old
+    /// delay and format), next to the rebuilt successor (same host, same
+    /// stream name); nothing after it. A process shutdown drains
     /// ([`Self::stop`]).
     pub fn discard(&self) {
         self.queue.discard();
     }
 
-    /// Replace the config (the settings task).
+    /// Replace the config (the outputs task: a built entry's target, and its
+    /// re-resolve every 60 s).
     pub fn set_config(&self, config: VbanConfig) {
         *lock(&self.config) = Arc::new(config);
     }

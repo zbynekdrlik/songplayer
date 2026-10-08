@@ -233,6 +233,13 @@ notice when the pin moves. Added to the lock with `cargo update --workspace`
   `audio_out_config.rs`); ids `[a-z0-9-]{1,32}`, unique; `out-N` from the
   dashboard (`next_id`, saturating). An entry is built by `OutputEntry::vban`
   or the server parser only (a new transport's field touches only those).
+  Two VBAN entries may not send to the same destination: host (ignoring
+  case) + port + stream name (ignoring case), a switched-off one included
+  (`destination_taken`, "pole „nastavenie VBAN“ je už použité iným výstupom
+  VBAN (rovnaký cieľ, port aj názov streamu)"; release review): the PATCH
+  and the dashboard refuse it (`validate_list`); the lenient stored read
+  does not skip such an entry, so a list stored before the check keeps
+  running both.
 - `audio_network_rate`: 44100 / 48000 / 88200 / 96000 / 192000, default 48000;
   SNV = 96000 (MAIN SESSION OPS after the deploy). An entry at `"network"`
   runs at it.
@@ -269,8 +276,9 @@ notice when the pin moves. Added to the lock with `cargo update --workspace`
   is dropped and a stopped output takes no later push (`apply` replaces the
   list before it discards, so a boundary can still push into the old
   snapshot), so a delay lowered from 2 s to 0 sends at most the ONE block
-  its thread already holds next to its successor (same host and stream
-  name), never the old schedule; only the shutdown's `stop_all` drains
+  its thread already holds, on its OLD schedule (up to the old delay later),
+  next to its successor (same host and stream name), and nothing after it;
+  only the shutdown's `stop_all` drains
   (#233 review rounds 4–5). The slew's ±100 ppm per packet interval holds
   for FOH's 48 kHz INT24; its 100 ns steps are a larger share of a shorter
   interval (up to ~±250 ppm at 192 kHz).
@@ -278,9 +286,15 @@ notice when the pin moves. Added to the lock with `cargo update --workspace`
   `start_outputs` passes `start_vban_thread` (the MMCSS thread on Windows),
   every unit test a no-op or a recorder. Before, `build` spawned the real
   thread itself, so on the Windows test job (`cargo test --workspace` on
-  `windows-latest`) the apply tests got a live `vban-output` thread taking
+  `windows-latest`) the apply tests got a live VBAN thread taking
   their queued blocks. Any new `cfg(windows)` OS-thread spawn reached from a
   unit-tested fn needs the same seam (`rust-workspace.md`).
+- An output's thread loop holds a `RunGuard` (`audio_out_queue.rs`) for its
+  whole run: its drop clears `running`, and on an unwind sets the start
+  error "the VBAN | ASIO thread stopped: it panicked", so a panicked output
+  reads "waiting" with that reason (never "running" for good) and the
+  outputs task rebuilds it on its next pass (`start_failed`; release
+  review, `a_vban_thread_that_panics_is_not_running_and_says_why`).
 
 ## Migration (first start, `audio_out_migrate.rs`)
 
@@ -298,10 +312,13 @@ A target is read as #210's `ToSocketAddrs` read it (`split_target`: the
 whole target trimmed, nothing next to the colon), so "h : 1" is skipped,
 never migrated as h:1. **The `vban_*` keys are KEPT** (main-session
 ruling 4, 7.10.2026): the new code ignores them once the list exists, and a
-rollback to ≤ 0.72 still finds them, so FOH keeps its sound. A later lane
+rollback to ≤ 0.73.0 (the last release without the list) still finds
+them, so FOH keeps its sound. A dashboard edit of a migrated entry (FOH's
+host, delay, stream name) is NOT copied back to the keys: a rollback sends
+what they held when the migration ran. A later lane
 deletes them (and `sp_core::config::SETTING_VBAN_*`) once the list has run a
 main release (lane 3 kept them: lane 1 had not been in a main release yet).
-A `vban_*` change made on a rolled-back ≤ 0.72 is NOT carried forward when
+A `vban_*` change made on a rolled-back ≤ 0.73.0 is NOT carried forward when
 the list version comes back (the list exists then).
 
 ## The fan-out (`audio_out.rs`)
@@ -326,7 +343,10 @@ is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
   type (INT16 0x01, INT24 0x02, FLOAT32 0x04), packets = the largest divisor
   of `rate/30` within 256 frames and 1436 payload bytes (96k INT24: 16 × 200,
   one every 1/480 s; 192k INT16: 25 × 256; 48k FLOAT32: 10 × 160). Packet k
-  at `due + L + delay + k·slot/packets`, floored.
+  at `due + L + delay + k·slot/packets`, floored. The geometry (frames per
+  packet, packets per block, packet length) is computed once in
+  `VbanFormat::new` and stored (`with_geometry`; `PROGRAM`'s literal
+  200 / 8 / 1228 pinned against it).
 - 48 kHz INT24 = `VbanFormat::PROGRAM`: no converter, #210's bytes — pinned
   against a verbatim copy of the 0.72.0 encoder (`vban_packet_tests_legacy.rs`,
   `vban_out_tests_dest.rs::a_migrated_foh_entry_sends_the_0_72_datagrams`).
@@ -348,7 +368,13 @@ is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
   `a_wait_is_slept_in_steps_the_wall_can_tick`). The queue bound grows with
   the delay (`queue_bound`: the program queue's 10 + `ceil(delay / slot)`).
 - A converter rubato refuses (none of the supported rates) sends silence
-  and logs one WARN (`VbanSender::new` reads `failed()`).
+  and logs one WARN (`VbanSender::new` reads `failed()`); since the release
+  review it also sets the output's `fault`, "the {rate} Hz rate converter
+  could not be built ({why}): the output sends silence", so the output
+  reads "waiting" with that reason and `reason_code` `converter`.
+- Each output's thread is `vban-<id>` (`vban_thread_name`) and runs inside
+  `info_span!("vban_out", id, target)`; the push WARN names `id` and
+  `target` too (it was one `vban-output` name for every destination).
 - One `VbanOut` per entry, ONE target (`VbanConfig::for_dest`,
   `resolve_dest`); `VbanStallLog`'s buckets count packets, so at 96 kHz
   `late_max_us` covers 30–60 s (ruling 11).
@@ -363,12 +389,45 @@ rebuilt — retried — on the outputs task's next pass, `RunningOutput::start_f
 channels, delay_ms, latency_ms (L + delay + the converter,
 `vban_latency_ms`), blocks_sent, blocks_dropped, vban: {#210's VbanStatus +
 blocks_sent}}`, `audio_network_rate`, `outputs_problems`; the cut answer
-carries them too. The top-level `vban` is gone (ruling 5). Its readers were
+carries them too. A waiting VBAN output also carries `reason_code`
+(`vban_reason_code`, release review): its cause — `not_built`,
+`not_started` (a failed start or a panicked thread), `converter` — else
+`unresolved` (its target's resolve failed) or `resolving`; the dashboard
+reads it in Slovak (`sp_core::audio_outputs_save::vban_reason_sk`). An ASIO
+output's code stays under `asio.reason_code`. The top-level `vban` is gone (ruling 5). Its readers were
 the mock, `settings-vban.spec.ts` (deleted), `program_tests_max.rs` (now
 reads `outputs`) and the MAX box gate in `gpu-max.md` (now FOH's
 `outputs[i].vban`).
 
 ## Dashboard (`sp-ui` `audio_outputs.rs`)
+
+Release review (the decisions pure in `sp_core::audio_outputs_save`,
+unit-tested; the mock specs in `settings-audio-outputs.spec.ts`):
+
+- right before its PATCH the save re-reads `GET /api/v1/settings` and
+  refuses in Slovak, sending nothing, (1) while the migration is pending
+  (`audio_outputs` absent and a `vban_*` key present: a stored list would
+  stop the migration for good, FOH with it), (2) when the stored list
+  changed since the page loaded it (compared as lists: the server stores it
+  normalized), (3) when the rate changed elsewhere and this save would send
+  one; a failed re-read refuses too (`NOT_CHECKED`). "Loaded" is the store
+  after this section's own last save;
+- the rate is sent only when it is not the one loaded (`rate_to_send`), so
+  an untouched select never overwrites a rate set elsewhere;
+- a delay or an ASIO channel typed as no whole number is marked per row id,
+  field and slot and refused at save ("Výstup 1 (out-1): pole „oneskorenie“
+  nie je celé číslo"), never stored as 0 or ignored; removing a row's last
+  entry of its id forgets its marks (the next added row may take the id);
+- "Uložené" shows only while the rows and the rate are what was saved
+  (`shown_message`);
+- "Odobrať" removes ONE entry of a repeated id (`remove_one`; a keyed list of
+  duplicate ids is no state the page renders reliably, so this is a unit
+  test only);
+- a waiting VBAN row reads its reason in Slovak by `reason_code`
+  (`vban_waiting_text`: "čaká · cieľ sa nedá preložiť na adresu"), the
+  server's English text staying the tooltip. Mock: `/__mock/vban-state {id,
+  reason_code, reason}`, reset by `/__mock/settings-reset`.
+
 
 Nastavenia "Zvukové výstupy", after the main form: its own PATCH of only the
 two keys (`patch_json_empty`), validated with
@@ -577,7 +636,13 @@ per change. Off Windows an ASIO output never opens: "ASIO runs on Windows
 only" (`start_output_thread` → `start_asio_thread`). The task's
 `StartThread` takes the built `OutputSink`, so a unit test on the Windows job
 starts no real worker. `GET /api/v1/audio/asio-drivers` = `{drivers: […]}`
-(the registry, on the blocking pool; empty off Windows).
+(the registry, on the blocking pool; empty off Windows). An absent
+`HKLM\SOFTWARE\ASIO` key (HRESULT 0x80070002 / 0x80070003,
+`asio_state::registry_key_absent`) is an empty list; any other registry
+error answers 500 "the ASIO driver list could not be read: {why}"
+(`drivers_answer`, release review), so the dashboard's "Zoznam ovládačov
+ASIO sa nenačítal" names a real failure, never "no driver". The mock's
+`asio-drivers` fail-mode answers the same text.
 
 **Dashboard.** "Pridať výstup ASIO" (waits for the driver list) adds an ASIO
 row on the first listed driver, channels 1 / 2. Each row shows its type and
@@ -622,7 +687,9 @@ past 1 s parking the device, its successor told the driver is parked,
 pins the holds on Linux.
 
 **Live gate** (`e2e/post-deploy-audio-asio.spec.ts`, SNV's suite and PP's
-subset): DVS is registered; exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
+subset): DVS is registered — checked only when `SP_ASIO_OUTPUTS_EXPECTED`
+is over 0 (release review: a box expected to run none need not have DVS);
+exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
 outputs (ci.yml / deploy-pp.yml, "0" until the main session adds each box's
 DVS entry, then "1"), each running, then a minute (1 800 blocks) at its
 driver's rate with no underrun, no reopen, |ppm| ≤ 300 and a latency
@@ -639,6 +706,19 @@ fields the server fills from the same driver read). A failed read of
 line, its Cargo.toml names the authors), azo 0.4.0 and azo-sys 0.3.2 (MIT,
 identical LICENSE files) are in `THIRD-PARTY-NOTICES.txt`, each pinned
 against `Cargo.toml` by a test in `asio_out_tests.rs`.
+
+**Start-up underruns (release review, item 1 of the closing lane): not
+pinned from the code, no counter change.** Before block k the ring holds
+target − 5 ms (the splice's hold) − L_k (block k's hand-off lateness), not
+anything the first block left: the resampler's first process (3 196
+frames at 96 kHz), the servo's start re-centre against `Splice::new`'s
+max insert (the ring's capacity) and a late or bursty first block all
+leave that relation intact. An underrun then needs a block over ~61.7 ms
+late or a missing boundary. What a box measurement must show to name the
+cause (design comment 6053021913 on #233): `GET /api/v1/program/trace`
+rows that are late or missing, together with `outputs[i].asio.underruns /
+recentres / latency_ms / blocks_sent` and `health.resyncs` polled every
+200 ms over the first 60 s after a restart.
 
 **Still open for a closing lane:** the `vban_*` keys and
 `sp_core::config::SETTING_VBAN_*` stay until the list has run one main

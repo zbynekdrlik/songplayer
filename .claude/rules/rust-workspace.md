@@ -271,7 +271,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   addendum 3 review round 2). It is warn-by-default (complexity), so under
   `-D warnings` it fails the Lint job. Clippy's `METHODS_WITH_NEGATION`
   table maps a negated `is_some_and` to `is_none_or` from MSRV 1.82, and the
-  workspace is 1.85. Write `opt.is_none_or(|x| x.id != id)`: negate the
+  workspace is 1.87. Write `opt.is_none_or(|x| x.id != id)`: negate the
   closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
   the same table.
 - **`clippy::type_complexity` on a test's known-value table** (#223 S1a, CI
@@ -329,9 +329,16 @@ Lint job on code that passed a day earlier. The 1.99 drift that broke run
   nothing; dtolnay/async-trait#303). Never paper over it with allows on the
   traits.
 - **`Atomic*::fetch_update` deprecated (renamed `try_update`):** `try_update`
-  is newer than the workspace MSRV 1.85 (`clippy::incompatible_msrv`), so write
+  is newer than the workspace MSRV 1.87 (`clippy::incompatible_msrv`), so write
   the explicit `load` + `compare_exchange_weak` loop (`preview_stream.rs`
   `ViewerGuard::drop`).
+
+**The workspace MSRV is 1.87 (#233 release review: rubato 5.0.1 needs it).**
+Raising `rust-version` (root `Cargo.toml` and `src-tauri/Cargo.toml`) turns
+on clippy's MSRV-gated lints at the new version: `manual_is_multiple_of`
+(1.87) then rejects `x % n == 0` under `-D warnings`. Write
+`x.is_multiple_of(n)` (unsigned integers), and grep the tree for `% … == 0`
+in the same commit as the bump.
 
 When the Lint job fails on files the diff never touched, check the toolchain
 version in the job log first (`rust-1.99.0` in the clippy help URLs).
@@ -483,8 +490,8 @@ passing test, not direct writes to the stderr handle.
 
 **A `#[cfg(windows)]` OS-thread spawn reached from a unit-tested fn RUNS on
 the Windows job** (#233 review round 1). `audio_out_task::build` called
-`start_vban_thread`, whose Windows branch spawns the real `vban-output`
-thread, so `apply_keeps_an_unchanged_output_when_another_is_added` got a live
+`start_vban_thread`, whose Windows branch spawns the real VBAN output
+thread (then `vban-output`, `vban-<id>` since the release review), so `apply_keeps_an_unchanged_output_when_another_is_added` got a live
 thread there that took the block it had queued (green on Linux, red on
 Windows). Pass the spawn in as a parameter (`StartThread`: production passes
 the real starter, a test a no-op or a recorder, which also pins that the

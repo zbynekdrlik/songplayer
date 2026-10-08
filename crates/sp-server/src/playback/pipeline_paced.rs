@@ -60,10 +60,14 @@ struct ProducerPos {
 const DECODE_QUEUE_BOUND: usize = 12;
 
 /// Request a 1 ms Windows multimedia timer so the paced sleep granularity is
-/// ~1 ms rather than the default ~15.6 ms. Called once per paced pipeline
-/// thread. `timeBeginPeriod`/`timeEndPeriod` are ref-counted; the matching
-/// `timeEndPeriod` is intentionally omitted (the pipeline thread lives for the
-/// process lifetime). winmm is always present on Windows.
+/// ~1 ms rather than the default ~15.6 ms. Called at the start of every
+/// paced pipeline thread and of the program output, NDI input, VBAN and ASIO
+/// output threads; a VBAN or ASIO output's thread is started anew at every
+/// rebuild of its entry (#233), so the request repeats with each rebuild.
+/// `timeBeginPeriod`/`timeEndPeriod` are ref-counted per process; the
+/// matching `timeEndPeriod` is intentionally omitted: the resolution stays
+/// 1 ms either way, the count only grows by one per started thread. winmm
+/// is always present on Windows.
 pub(crate) fn request_high_res_timer() {
     #[link(name = "winmm")]
     unsafe extern "system" {

@@ -94,7 +94,9 @@ sender, and its 48 kHz INT24 bytes are #210's.
 - The queue never blocks. Over `VBAN_QUEUE_BOUND` (10 = the program queue's
   bound; #233: `queue_bound(delay)`, 10 + the delay's slots) it drops the
   OLDEST block and counts it in `blocks_dropped`.
-- The `vban-output` thread (`run_vban_loop`, Windows) encodes one block into 8
+- The VBAN thread (`run_vban_loop`, Windows; #233 release review: named
+  `vban-<id>` per output, its log lines inside an `info_span!("vban_out",
+  id, target)`; it was `vban-output`) encodes one block into 8
   packets of 200 frames, as INT24 PCM with full scale ±8388607 and clamping
   (48 kHz INT24 with no delay, FOH's; #233: each destination's format,
   packet count and delay, `audio-outputs.md`).
@@ -163,8 +165,9 @@ format, pinned against a copy of the 0.72.0 encoder by
 - Since #233 nothing reads the `vban_*` keys but the one-time migration:
   each destination is an entry of `audio_outputs` (`audio-outputs.md`) with
   its own format, delay and ONE target. The keys stay in the database (and
-  their constants in `sp_core::config`) so a rollback to ≤ 0.72 still sends
-  to FOH (ruling 4); a later lane deletes them once the list has run a main
+  their constants in `sp_core::config`) so a rollback to ≤ 0.73.0 still
+  sends to FOH (ruling 4) what they held when the migration ran (a
+  dashboard edit of the migrated entry is not copied back); a later lane deletes them once the list has run a main
   release (lane 3 kept them). Stream name policy, not enforced by
   code: never `cg` before B4.
 - The outputs task (`audio_out_task.rs`) re-reads the list every 5 s, so a
@@ -286,7 +289,7 @@ time (finding 5915907311, the stem worker ruled out). That is the
   (desktop, and Server with the Desktop Experience), so the process never
   starts without it; a missing DLL would stop the start, not take the
   fallback. Any real-time sender thread can take the same call (the NDI
-  input, the program output); only `vban-output` does so far.
+  input, the program output); only the VBAN threads do so far.
 - **Why it helps** (anchors comment 5916282660). TIME_CRITICAL is 15 in a
   NORMAL_PRIORITY_CLASS process: the top of the normal band, the same
   level the NDI runtime's own threads can set. NDI 6.3.2 imports

@@ -3,7 +3,7 @@
 //!
 //! On the box single packets went out 11–20 ms late on a fixed 10 s grid,
 //! the next one on time (finding 5915907311), visible only in a dev1
-//! capture. So the `vban-output` thread times every packet it sends against
+//! capture. So a VBAN output's thread (`vban-<id>`) times every packet it sends against
 //! its planned instant, `due + L + delay + offset(k)` (#233: offset(k) =
 //! k / (30 · packets per block) s, k/240 s at 48 kHz INT24 with no delay;
 //! `VbanSender::send_block`), and
