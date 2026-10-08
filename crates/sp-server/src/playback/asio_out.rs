@@ -14,6 +14,8 @@
 //!   re-centre to the splice → the ring. Then the driver's messages: a reset
 //!   (or a size change), a rate change or 2 s without a callback closes the
 //!   output (`asio_state::close_reason`, `StallWatch`).
+//! - parked (`Reason::Parked`, a driver callback that never returned): the
+//!   output stays closed for good, with no next try.
 //!
 //! A closed output drops the blocks it is handed (they would be stale).
 //! The worker is not an MMCSS thread (iemmixer: a helper never pre-empts the
@@ -109,7 +111,8 @@ pub struct AsioStatus {
     pub overflows: u64,
     /// The driver's `kAsioOverload` messages, since the output was built.
     pub overloads: u64,
-    /// While waiting: the seconds to the next open.
+    /// While waiting: the seconds to the next open (None for a parked
+    /// driver, which is never reopened).
     pub retry_in_s: Option<f64>,
     /// While waiting: the reason's stable code (`Reason::code`).
     pub reason_code: Option<&'static str>,

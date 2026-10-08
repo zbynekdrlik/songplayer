@@ -4,9 +4,12 @@
 //! is not found with the list; the buffer switch writes L/R into the two
 //! configured channels in the driver's type, zeroes every other channel and
 //! the frames the ring did not deliver, and only counts; every slot's four
-//! callbacks reach that slot; a driver message is counted and answered; a
-//! device releases its slot; a device holds its thread's COM apartment for
-//! its whole life.
+//! callbacks reach that slot; a driver message is counted and answered (a
+//! 0 Hz report too); a device releases its slot; a device holds its
+//! thread's COM apartment for its whole life; a held driver is refused
+//! before the registry is read; a callback stuck past the bound parks the
+//! device (its slot, driver and hold), and the output replacing it is told
+//! so; `close` pumps the thread's messages while a callback finishes.
 
 use std::sync::{Mutex, MutexGuard};
 

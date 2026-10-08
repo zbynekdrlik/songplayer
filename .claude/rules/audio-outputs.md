@@ -531,7 +531,7 @@ unhooks the stream, frees it only once no callback is inside it, disposes
 the buffers, drops the driver (inside the device's COM apartment), gives
 the driver's hold back, THEN releases the slot. Its wait for the in-flight
 callback PUMPS the thread's messages (a driver may need them to finish a
-callback; iemmixer `asio.rs:483-497`, review round 5; the bound is 1 s,
+callback; iemmixer `asio.rs:484-504`, review round 5; the bound is 1 s,
 iemmixer's 2 s). A callback still inside after that second PARKS the
 device (iemmixer `asio.rs:487-500`, review round 2):
 the stream is leaked, the buffers are not disposed, the driver is
@@ -546,8 +546,14 @@ SongPlayera"), never retried: the worker keeps the output closed for good
 bound (once 0 was read, the unhooked slot gives a later callback no
 stream). Known limit (iemmixer's too): a driver whose `stop()` never
 returns (its callback stuck) hangs the worker before the park check; the
-row stays at its last waiting reason, an edited entry's successor reads
-`held`, and only a restart of SongPlayer helps.
+row stays at its last waiting reason with a frozen "ďalší pokus o N s", an
+edited entry's successor reads `held`, and only a restart of SongPlayer
+helps. Two more edges, kept (review round 6): a device that parks INSIDE a
+close shows the close's normal countdown until its next open answers
+`Parked` (at most the backoff, ≤ 60 s); and a parked device's thread pumps
+no messages any more (the worker stays closed), so a callback blocked on
+this thread for good stays blocked — both inside a state only a restart
+ends.
 `outputReady` is not called: the plan allows it from the callback, but
 one driver buffer (1.3 ms at DVS's 128 frames / 96 kHz) is noise against
 the 66.7 ms target, and the call would go through a raw pointer to a
@@ -609,7 +615,9 @@ job (`asio_win_tests.rs`: the copy-only buffer switch over heap buffers,
 every slot's four callbacks, messages, a 0 Hz report, a closed device
 releasing its slot, a held driver refused before the registry is read, a
 device holding its thread's STA until it is dropped, a callback stuck
-past 1 s parking the device, its successor told the driver is parked).
+past 1 s parking the device, its successor told the driver is parked,
+`close` pumping the thread's messages while a callback finishes — a
+"callback" a 10 ms thread timer's proc lets leave).
 `asio_hold_tests.rs`
 pins the holds on Linux.
 

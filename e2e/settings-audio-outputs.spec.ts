@@ -713,6 +713,8 @@ test("a parked ASIO driver says only a restart helps, with no next try (#233)", 
       id: "out-1",
       reason_code: "parked",
       reason: "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts",
+      // The server sends no retry for a parked driver (review round 5); a
+      // retry here pins the dashboard's own guard (`asio_waiting_text`).
       retry_in_s: 60,
     },
   });
