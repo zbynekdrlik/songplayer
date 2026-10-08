@@ -62,9 +62,9 @@ SOFTWARE.
 SongPlayer.exe contains rtrb 0.4.0, https://github.com/mgeier/rtrb, the
 ring buffer between an ASIO output's worker and its driver's callback.
 rtrb is dual-licensed MIT OR Apache-2.0; SongPlayer uses it under the MIT
-license. Its authors, as its Cargo.toml names them: Stjepan Glavina,
-Matthias Geier. Its LICENSE-MIT, verbatim (the file carries no copyright
-line of its own):
+license. Its authors, as its Cargo.toml names them:
+Stjepan Glavina, Matthias Geier. Its LICENSE-MIT, verbatim (the file
+carries no copyright line of its own):
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
