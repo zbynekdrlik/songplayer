@@ -190,11 +190,27 @@ pub fn reply(sel: i32, value: i32) -> i32 {
     }
 }
 
+/// ASIO's ASE_NoClock (asio.h): the driver has no clock.
+pub const ASE_NO_CLOCK: i32 = -995;
+
+/// Under 1 Hz a driver has no clock (0 Hz, a fraction): the ONE lost-clock
+/// predicate of a report (`close_reason`) and of a read (`admit_rate`).
+pub fn lost_clock(rate: f64) -> bool {
+    rate.abs() < 1.0
+}
+
+/// What a failed `getSampleRate` stands for when it is one of ASIO's own
+/// codes: ASE_NoClock is a lost clock; `None` leaves any other error to the
+/// glue (`asio_win`, which only calls this).
+pub fn sample_rate_error(code: i32) -> Option<Reason> {
+    (code == ASE_NO_CLOCK).then_some(Reason::RateChanged(0))
+}
+
 /// The driver's rate, as the output follows it (never set). Under 1 Hz the
 /// driver has no clock: a lost clock, the same reason a 0 Hz report closes
 /// a run with (#233 review round 3).
 pub fn admit_rate(rate: f64) -> Result<u32, Reason> {
-    if rate.abs() < 1.0 {
+    if lost_clock(rate) {
         return Err(Reason::RateChanged(0));
     }
     if rate.is_finite() && (MIN_RATE..=MAX_RATE).contains(&rate) {

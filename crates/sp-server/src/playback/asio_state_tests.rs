@@ -117,7 +117,7 @@ fn a_zero_rate_is_a_lost_clock() {
     assert_eq!(close_reason(&lost, 96_000.0), Some(Reason::RateChanged(0)));
     assert_eq!(
         Reason::RateChanged(0).text(),
-        "the driver lost its clock (it reports 0 Hz)"
+        "the driver lost its clock (no rate)"
     );
 }
 
@@ -313,7 +313,7 @@ fn a_lost_clock_and_a_held_driver_have_their_own_codes() {
     let lost = Reason::RateChanged(0);
     assert_eq!(
         (lost.code(), lost.text().as_str()),
-        ("clock_lost", "the driver lost its clock (it reports 0 Hz)")
+        ("clock_lost", "the driver lost its clock (no rate)")
     );
     assert_eq!(Reason::RateChanged(1).code(), "rate_changed");
     assert_eq!(
@@ -368,5 +368,40 @@ fn a_parked_driver_has_its_own_code() {
     assert_ne!(
         sp_core::audio_outputs::asio_reason_sk(Reason::Parked.code()),
         "neznámy dôvod"
+    );
+}
+
+/// #233 review round 4: ONE lost-clock predicate — a report under 1 Hz
+/// closes as a lost clock (never "the rate changed to 1 Hz"), like a read
+/// under 1 Hz; ASE_NoClock from `getSampleRate` is one too.
+#[test]
+fn a_report_under_1_hz_closes_as_a_lost_clock_and_no_clock_is_one() {
+    for r in [0.6, 0.999, -0.5] {
+        let ev = DeviceEvents {
+            rate_changed: Some(r),
+            ..DeviceEvents::default()
+        };
+        assert_eq!(
+            close_reason(&ev, 96_000.0),
+            Some(Reason::RateChanged(0)),
+            "{r}"
+        );
+    }
+    let one = DeviceEvents {
+        rate_changed: Some(1.0),
+        ..DeviceEvents::default()
+    };
+    assert_eq!(close_reason(&one, 96_000.0), Some(Reason::RateChanged(1)));
+    assert!(lost_clock(0.999) && !lost_clock(1.0) && !lost_clock(-1.0));
+    assert_eq!(sample_rate_error(-995), Some(Reason::RateChanged(0)));
+    assert_eq!(
+        sample_rate_error(-1000),
+        None,
+        "ASE_NotPresent stays the glue's"
+    );
+    assert_eq!(
+        sample_rate_error(-999),
+        None,
+        "ASE_HWMalfunction stays the glue's"
     );
 }

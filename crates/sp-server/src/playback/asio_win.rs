@@ -57,7 +57,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::playback::asio_format::{AsioSample, fill_channel, source_of, unsupported_sample_text};
 use crate::playback::asio_hold::{DriverHold, DriverHolds};
 use crate::playback::asio_out::{AsioDevice, AsioOut, Opened, Started, run_asio_worker};
-use crate::playback::asio_state::{DeviceEvents, Reason, reply, selector};
+use crate::playback::asio_state::{DeviceEvents, Reason, reply, sample_rate_error, selector};
 
 /// Static callback slots: two per ASIO entry (`MAX_ASIO_OUTPUTS`).
 pub const ASIO_SLOTS: usize = 8;
@@ -360,13 +360,9 @@ impl WinAsioDevice {
     /// The driver's rate, preferred buffer, output channels and their one
     /// sample type (read, never set).
     fn read(driver: &SafeHandle, channels: [u32; 2]) -> Result<Opened, Reason> {
-        // ASE_NoClock: the driver has no clock (a lost clock, as a 0 Hz rate).
+        // ASE_NoClock is a lost clock (`asio_state::sample_rate_error`).
         let rate = driver.get_sample_rate().map_err(|e| {
-            if e.code() == azo::sys::ResultCode::NO_CLOCK {
-                Reason::RateChanged(0)
-            } else {
-                failed(driver, "getSampleRate", e)
-            }
+            sample_rate_error(e.code().0).unwrap_or_else(|| failed(driver, "getSampleRate", e))
         })?;
         let size = driver
             .buffer_size()
