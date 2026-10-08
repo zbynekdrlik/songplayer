@@ -12,8 +12,10 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::*;
 use sp_core::audio_outputs::MAX_ASIO_OUTPUTS;
+use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::Foundation::{S_FALSE, S_OK};
 use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
+use windows_sys::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 
 /// The tests that take callback slots run one at a time (the slots are
 /// process-wide statics; nothing else in the test binary claims one).
@@ -389,4 +391,82 @@ fn a_successor_of_a_parked_device_is_told_the_driver_is_parked() {
     drop(d);
     let mut successor = WinAsioDevice::new();
     assert_eq!(successor.open(name, [0, 1]), Err(Reason::Parked));
+}
+
+/// The slot whose "callback" a thread timer lets leave (`usize::MAX`: none).
+static TIMER_SLOT: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+/// The thread timer's proc: the callback in `TIMER_SLOT` leaves. Windows
+/// runs it only when the timer's thread dispatches its messages.
+unsafe extern "system" fn callback_leaves(_: HWND, _: u32, id: usize, _: u32) {
+    let i = TIMER_SLOT.swap(usize::MAX, Ordering::SeqCst);
+    if i < ASIO_SLOTS {
+        SLOTS[i].in_flight.fetch_sub(1, Ordering::SeqCst);
+    }
+    // SAFETY: this thread's own timer.
+    unsafe { KillTimer(ptr::null_mut(), id) };
+}
+
+/// Ends the test's "callback" (when the timer never ran: the device parked
+/// and kept the stream, which is freed here) and gives the slot back.
+struct TimerCallback {
+    slot: usize,
+    stream: *mut Stream,
+}
+
+impl Drop for TimerCallback {
+    fn drop(&mut self) {
+        if TIMER_SLOT.swap(usize::MAX, Ordering::SeqCst) == self.slot {
+            SLOTS[self.slot].in_flight.fetch_sub(1, Ordering::SeqCst);
+            // SAFETY: the parked device never frees it; no callback is in it.
+            drop(unsafe { Box::from_raw(self.stream) });
+        }
+        release(self.slot);
+    }
+}
+
+/// A driver may need the closing thread's messages to finish a callback
+/// (iemmixer `asio.rs:483-497`): `close` pumps them while it waits, so such
+/// a callback leaves and the device is NOT parked (review round 5). The
+/// "callback" here leaves when a 10 ms thread timer's proc runs — only on a
+/// dispatch of the thread's messages.
+#[test]
+fn close_pumps_the_threads_messages_while_a_callback_finishes() {
+    let _g = serial();
+    std::thread::spawn(|| {
+        let i = 5;
+        claim(i);
+        let (_p, consumer) = rtrb::RingBuffer::<f32>::new(8);
+        let stream = Box::into_raw(Box::new(Stream {
+            ring: UnsafeCell::new(consumer),
+            scratch: UnsafeCell::new(vec![0.0; 8]),
+            buffers: Vec::new(),
+            frames: 4,
+            sample: AsioSample::Int32In24,
+            left: 0,
+            right: 1,
+        }));
+        SLOTS[i].stream.store(stream, Ordering::SeqCst);
+        SLOTS[i].in_flight.fetch_add(1, Ordering::SeqCst);
+        TIMER_SLOT.store(i, Ordering::SeqCst);
+        let _callback = TimerCallback { slot: i, stream };
+        // SAFETY: a timer of this thread, killed by its own proc.
+        let timer = unsafe { SetTimer(ptr::null_mut(), 0, 10, Some(callback_leaves)) };
+        assert_ne!(timer, 0, "SetTimer");
+        let mut d = WinAsioDevice::new();
+        d.slot = Some(i);
+        d.stream = stream;
+        d.close();
+        assert_eq!(
+            SLOTS[i].in_flight.load(Ordering::SeqCst),
+            0,
+            "the callback left"
+        );
+        assert!(
+            !SLOTS[i].claimed.load(Ordering::SeqCst),
+            "not parked: the slot is released"
+        );
+    })
+    .join()
+    .expect("the closing thread");
 }
