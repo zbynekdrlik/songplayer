@@ -289,3 +289,69 @@ fn a_device_does_not_load_a_driver_another_output_holds() {
     );
     assert!(!HELD.is_held(name), "a failed open holds nothing");
 }
+
+/// A callback that never returned: the test's own "driver thread", given
+/// back (and its stream freed) when the test ends, however it ends.
+struct StuckCallback {
+    slot: usize,
+    stream: *mut Stream,
+}
+
+impl Drop for StuckCallback {
+    fn drop(&mut self) {
+        SLOTS[self.slot].in_flight.fetch_sub(1, Ordering::SeqCst);
+        release(self.slot);
+        // SAFETY: the device never frees a stream a callback is inside; the
+        // slot no longer points to it and the "callback" is done.
+        drop(unsafe { Box::from_raw(self.stream) });
+    }
+}
+
+/// A callback still inside its stream after the 1 s bound PARKS everything
+/// it may touch (iemmixer `asio.rs:487-500`): the stream (leaked), the
+/// buffers it writes (never disposed), the driver (never released), the
+/// slot (never reused: its in-flight count is the stuck callback's) and the
+/// driver's hold (no other output of the process loads the driver). The
+/// device says so on its next open (review round 2).
+#[test]
+fn a_callback_stuck_past_the_bound_parks_its_slot_driver_and_hold() {
+    let _g = serial();
+    let i = 3;
+    claim(i);
+    let name = "Parked Card (songplayer test)";
+    let (_p, consumer) = rtrb::RingBuffer::<f32>::new(8);
+    let stream = Box::into_raw(Box::new(Stream {
+        ring: UnsafeCell::new(consumer),
+        scratch: UnsafeCell::new(vec![0.0; 8]),
+        buffers: Vec::new(),
+        frames: 4,
+        sample: AsioSample::Int32In24,
+        left: 0,
+        right: 1,
+    }));
+    SLOTS[i].stream.store(stream, Ordering::SeqCst);
+    SLOTS[i].in_flight.fetch_add(1, Ordering::SeqCst);
+    let _stuck = StuckCallback { slot: i, stream };
+    let mut d = WinAsioDevice::new();
+    d.slot = Some(i);
+    d.stream = stream;
+    d.hold = HELD.claim(name);
+    d.close();
+    assert!(
+        SLOTS[i].stream.load(Ordering::SeqCst).is_null(),
+        "the stream is unhooked"
+    );
+    assert!(
+        SLOTS[i].claimed.load(Ordering::SeqCst),
+        "the slot stays claimed: the stuck callback still counts on it"
+    );
+    match d.open(name, [0, 1]) {
+        Err(Reason::Failed(why)) => assert!(why.contains("parked"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    drop(d);
+    assert!(
+        HELD.is_held(name),
+        "the parked driver's hold stays for the process's life"
+    );
+}
