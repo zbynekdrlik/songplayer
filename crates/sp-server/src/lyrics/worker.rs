@@ -270,12 +270,13 @@ impl LyricsWorker {
         if let Some(parent) = self.script_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        tokio::fs::write(
-            &self.script_path,
-            include_str!("../../../../scripts/lyrics_worker.py"),
-        )
-        .await?;
-        tracing::info!("lyrics_worker: wrote {}", self.script_path.display());
+        // The worker and the module it imports at load (#233 release
+        // review: `audio_window.py`, shared with the stem worker).
+        for (name, content) in super::tool_scripts::embedded_tool_scripts() {
+            let path = self.tools_dir.join(name);
+            tokio::fs::write(&path, content).await?;
+            tracing::info!("lyrics_worker: wrote {}", path.display());
+        }
 
         // Deploy the quality measurement script alongside the worker so CI
         // can run it on win-resolume to snapshot baseline vs post-deploy state.

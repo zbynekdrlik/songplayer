@@ -39,6 +39,7 @@ pub mod sung_coverage;
 pub mod text_candidate;
 pub mod tier1;
 pub mod title_search;
+mod tool_scripts; // #233 release review: lyrics_worker.py + the audio_window.py it imports
 pub mod track_store;
 pub mod transcript_cache;
 pub mod translator;
