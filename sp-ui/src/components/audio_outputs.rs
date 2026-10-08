@@ -64,8 +64,8 @@ use sp_core::audio_outputs::{
     asio_waiting_text, new_asio, new_vban, validate_list,
 };
 use sp_core::audio_outputs_save::{
-    NOT_CHECKED, SAVED, first_unreadable, parse_whole, rate_to_send, remove_one, save_refusal,
-    shown_message, vban_waiting_text,
+    NOT_CHECKED, SAVED, first_unreadable, latency_sk, parse_whole, rate_to_send, remove_one,
+    save_refusal, shown_message, vban_waiting_text,
 };
 use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
 
@@ -262,14 +262,14 @@ fn live_text(live: &ProgramOutputs, id: &str, saved: bool) -> String {
     }
 }
 
-/// One output's state line: running = its latency (a running ASIO output
-/// is chips instead, `state_chips`); an output that waits = why, in Slovak
-/// (an ASIO output also when it tries again).
+/// One output's state line: running = its latency, labelled as an ASIO
+/// row's (a running ASIO output is chips instead, `state_chips`); an output
+/// that waits = why, in Slovak (an ASIO output also when it tries again).
 fn output_text(o: &OutputLive) -> String {
     let state = state_sk(&o.state);
     match (&o.asio, o.state.as_str()) {
         (Some(_), "running") => state.to_string(),
-        (None, "running") => format!("{state} · {:.0} ms", o.latency_ms),
+        (None, "running") => format!("{state} · {}", latency_sk(o.latency_ms)),
         (Some(a), _) => asio_waiting_text(state, a.reason_code.as_deref(), a.retry_in_s),
         (None, _) => vban_waiting_text(state, o.reason_code.as_deref()),
     }

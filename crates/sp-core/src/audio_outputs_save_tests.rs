@@ -1,7 +1,7 @@
 //! #233 release review: the dashboard's save decisions — the re-read check
 //! (a changed list, a changed rate, a pending migration), the rate sent only
 //! when changed, the unreadable number fields, "Uložené" after an edit, one
-//! row removed, a waiting VBAN row's Slovak.
+//! row removed, a waiting VBAN row's Slovak, every row's latency label.
 
 use std::collections::HashMap;
 
@@ -196,4 +196,15 @@ fn a_waiting_vban_output_reads_its_reason_in_slovak() {
         "čaká · cieľ sa nedá preložiť na adresu"
     );
     assert_eq!(vban_waiting_text("čaká", None), "čaká");
+}
+
+/// One latency label on every row (review round 2): whole ms, half away
+/// from zero; 0 (and a negative reading) is "meria sa".
+#[test]
+fn every_rows_latency_reads_oneskorenie_in_whole_ms() {
+    assert_eq!(latency_sk(66.6666), "oneskorenie 67 ms");
+    assert_eq!(latency_sk(70.5), "oneskorenie 71 ms");
+    assert_eq!(latency_sk(83.3333), "oneskorenie 83 ms");
+    assert_eq!(latency_sk(0.0), "oneskorenie: meria sa");
+    assert_eq!(latency_sk(-1.0), "oneskorenie: meria sa");
 }

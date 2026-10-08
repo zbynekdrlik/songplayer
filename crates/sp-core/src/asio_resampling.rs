@@ -15,6 +15,7 @@
 //! zero, and written the Slovak way (a decimal comma, a true minus sign).
 
 use crate::audio_outputs::PROGRAM_RATE;
+use crate::audio_outputs_save::latency_sk;
 
 /// One labelled figure: its test id, its text, its tooltip (`None`: the
 /// row's own tooltip shows through).
@@ -127,11 +128,7 @@ fn chip(key: &'static str, text: String, title: &str) -> Chip {
 /// The first line: the state, the latency ("meria sa" while the server reads
 /// it 0, before the servo's first window), the underruns, the faults.
 pub fn asio_state_chips(state: &str, f: &AsioFigures) -> Vec<Chip> {
-    let latency = if f.latency_ms > 0.0 {
-        format!("oneskorenie {} ms", f.latency_ms.round() as i64)
-    } else {
-        "oneskorenie: meria sa".to_string()
-    };
+    let latency = latency_sk(f.latency_ms);
     vec![
         Chip {
             key: "asio-state",

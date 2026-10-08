@@ -18,6 +18,8 @@
 //!   repeated id.
 //! - A waiting VBAN output's reason in Slovak ([`vban_reason_sk`],
 //!   [`vban_waiting_text`]), from the server's `reason_code`.
+//! - Every running row's latency reads the same ([`latency_sk`], review
+//!   round 2: a VBAN row read "67 ms", an ASIO row "oneskorenie 71 ms").
 
 use std::collections::HashMap;
 
@@ -171,6 +173,17 @@ pub fn vban_reason_sk(code: &str) -> &'static str {
         VBAN_UNRESOLVED => "cieľ sa nedá preložiť na adresu",
         VBAN_RESOLVING => "cieľ sa ešte prekladá na adresu",
         _ => "neznámy dôvod",
+    }
+}
+
+/// A running output's latency as its row reads it, VBAN's and ASIO's
+/// alike: whole ms, rounded half away from zero; "meria sa" while the
+/// server reads it 0 (an ASIO output before its servo's first window).
+pub fn latency_sk(latency_ms: f64) -> String {
+    if latency_ms > 0.0 {
+        format!("oneskorenie {} ms", latency_ms.round() as i64)
+    } else {
+        "oneskorenie: meria sa".to_string()
     }
 }
 
