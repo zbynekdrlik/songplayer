@@ -30,6 +30,7 @@ import {
   WINDOW_BLOCKS,
   asioGateFailures,
   gatedAsioOutputs,
+  waitingForClock,
   type OutputStatus,
 } from "./audio-outputs-gate";
 
@@ -79,8 +80,18 @@ test.describe("ASIO output (#233)", () => {
       const list = await readOutputs(request);
       return list === null ? null : gatedAsioOutputs(list);
     };
+    // The count, or (when it is off and an output waits for its driver's
+    // clock) the count with those outputs named, so a box expecting one
+    // says that its DVS has no clock rather than that it has no output.
+    const gatedCount = async () => {
+      const list = await readOutputs(request);
+      if (list === null) return -1;
+      const n = gatedAsioOutputs(list).length;
+      const waiting = waitingForClock(list).map((o) => o.id);
+      return n !== EXPECTED && waiting.length > 0 ? `${n} (waiting for a clock: ${waiting.join(", ")})` : n;
+    };
     await expect
-      .poll(async () => (await enabledAsio())?.length ?? -1, {
+      .poll(gatedCount, {
         message: "enabled ASIO outputs (SP_ASIO_OUTPUTS_EXPECTED)",
         timeout: 20_000,
       })
