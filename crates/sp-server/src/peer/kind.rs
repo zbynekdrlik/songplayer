@@ -113,7 +113,7 @@ impl Job {
     /// that very audio. Stems are the same model on every node, and the
     /// download fetches the song itself.
     pub fn waits_while_a_peer_has_the_song(self) -> bool {
-        false
+        matches!(self, Self::Lyrics)
     }
 
     /// The job that makes `kind` (the one whose [`Job::makes`] holds it);
