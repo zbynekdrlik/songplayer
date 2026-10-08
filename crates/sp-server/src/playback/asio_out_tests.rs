@@ -215,7 +215,7 @@ fn a_vanished_driver_stalls_and_closes_with_its_reason() {
     assert_eq!(
         t - t0,
         61 * SLOT,
-        "the first step 2 s after the last callback closes it (60 slots are 19.99998 s)"
+        "the first step 2 s after the last callback closes it (60 slots are 1.999998 s)"
     );
     assert_eq!((d.closes, snap.status.resets), (1, 1));
 }

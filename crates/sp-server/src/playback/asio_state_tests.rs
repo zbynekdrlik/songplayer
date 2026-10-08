@@ -291,8 +291,10 @@ fn every_reason_code_has_its_slovak_on_the_dashboard() {
         Reason::Failed(String::new()),
         Reason::Reset,
         Reason::RateChanged(0),
+        Reason::RateChanged(48_000),
         Reason::Stalled,
         Reason::WindowsOnly,
+        Reason::Held,
     ];
     for r in reasons {
         assert_ne!(
