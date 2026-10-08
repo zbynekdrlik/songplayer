@@ -5,7 +5,9 @@
 use std::time::Duration;
 
 use super::*;
-use crate::db::models_peer::{fetch_record, record_standin, start_wait};
+use crate::db::models_peer::{
+    due_standin, fetch_record, forget_standin, record_standin, start_wait,
+};
 use crate::peer::PeerStep;
 use crate::peer::ask::Ask;
 use crate::peer::client::PeerError;
@@ -253,6 +255,40 @@ async fn a_stand_in_with_no_row_left_is_dropped() {
 #[tokio::test]
 async fn with_no_exchange_nothing_is_superseded() {
     assert!(supersede_next(None).await.is_empty());
+}
+
+/// The stand-in due the longest is looked at first: the earliest
+/// `next_check_ms`, then the lower YouTube id; another job's stand-ins and
+/// those not due yet are not (review round 2: the order had no test).
+#[tokio::test]
+async fn the_stand_in_due_the_longest_comes_first() {
+    let pp = TestNode::start("pp", None).await;
+    for (yt, next) in [
+        ("ccccccccccc", 300),
+        ("bbbbbbbbbbb", 200),
+        ("aaaaaaaaaaa", 300),
+        ("ddddddddddd", 900),
+    ] {
+        record_standin(pp.pool(), yt, "lyrics", "snv", 7, next)
+            .await
+            .unwrap();
+    }
+    record_standin(pp.pool(), "eeeeeeeeeee", "stems", "snv", 7, 100)
+        .await
+        .unwrap();
+    let mut order = Vec::new();
+    while let Some((yt, peer, made)) = due_standin(pp.pool(), "lyrics", 500).await.unwrap() {
+        assert_eq!((peer.as_str(), made), ("snv", 7));
+        forget_standin(pp.pool(), &yt, "lyrics").await.unwrap();
+        order.push(yt);
+        assert!(order.len() <= 5, "{order:?}");
+    }
+    assert_eq!(order, ["bbbbbbbbbbb", "aaaaaaaaaaa", "ccccccccccc"]);
+    let (last, _, _) = due_standin(pp.pool(), "lyrics", 900)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(last, "ddddddddddd", "due at its own check");
 }
 
 #[test]
