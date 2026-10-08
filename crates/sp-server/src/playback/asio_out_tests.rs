@@ -747,3 +747,26 @@ fn a_latency_change_is_read_again_and_overloads_add_up_across_runs() {
     w.step(&o, &mut d, now + 2 * S + SLOT, None);
     assert_eq!(o.snapshot().status.overloads, 5);
 }
+
+/// #233 review round 3: a clock lost for longer than one retry still reads
+/// as a lost clock — the reopen finds the driver at 0 Hz.
+#[test]
+fn a_clock_still_lost_at_the_reopen_reads_as_a_lost_clock() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0)), Ok(dvs(0.0))]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    d.events.push_back(DeviceEvents {
+        rate_changed: Some(0.0),
+        ..Default::default()
+    });
+    w.step(&o, &mut d, T0 + SLOT, None);
+    assert_eq!(o.snapshot().status.reason_code, Some("clock_lost"));
+    w.step(&o, &mut d, T0 + SLOT + 2 * S, None);
+    assert_eq!(d.opened.len(), 2);
+    let snap = o.snapshot();
+    assert_eq!(
+        (snap.state, snap.status.reason_code),
+        ("waiting", Some("clock_lost"))
+    );
+}

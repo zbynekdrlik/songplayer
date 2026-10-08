@@ -185,7 +185,7 @@ fn the_rate_is_admitted_and_noted() {
     assert_eq!(admit_rate(44_100.4), Ok(44_100));
     assert_eq!(admit_rate(8_000.0), Ok(8_000));
     assert_eq!(admit_rate(384_000.0), Ok(384_000));
-    for bad in [7_999.0, 384_001.0, f64::NAN, f64::INFINITY, 0.0, -48_000.0] {
+    for bad in [7_999.0, 384_001.0, f64::NAN, f64::INFINITY, 1.0, -48_000.0] {
         assert_eq!(
             admit_rate(bad),
             Err(Reason::Refused(format!("the driver reports {bad} Hz"))),
@@ -328,4 +328,18 @@ fn a_lost_clock_and_a_held_driver_have_their_own_codes() {
             "{r:?}"
         );
     }
+}
+
+/// #233 review round 3: a driver reporting (under) 1 Hz has no clock — a
+/// reopen during a clock loss reads as one, not as a refused rate.
+#[test]
+fn a_rate_under_1_hz_is_a_lost_clock() {
+    for lost in [0.0, -0.0, 0.999, -0.5] {
+        assert_eq!(admit_rate(lost), Err(Reason::RateChanged(0)), "{lost}");
+    }
+    assert_eq!(
+        admit_rate(1.0),
+        Err(Reason::Refused("the driver reports 1 Hz".into())),
+        "1 Hz is a rate, refused as one"
+    );
 }
