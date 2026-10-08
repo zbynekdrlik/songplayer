@@ -681,6 +681,10 @@ fn every_asio_reason_code_reads_in_slovak() {
         ("rate_changed", "ovládač zmenil frekvenciu"),
         ("stalled", "ovládač neodpovedá"),
         ("windows_only", "ASIO funguje len vo Windows"),
+        (
+            "no_clock",
+            "ovládač nedáva hodiny — napr. DVS nebeží alebo chýbajú hodiny Dante PTP",
+        ),
         ("later", "neznámy dôvod"),
         ("", "neznámy dôvod"),
     ];

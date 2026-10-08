@@ -23,6 +23,14 @@ pub const BACKOFF_S: [i64; 4] = [2, 10, 30, 60];
 pub const STABLE_RUN_100NS: i64 = 600_000_000;
 /// No callback for this long while running: the driver is gone (2 s).
 pub const STALL_100NS: i64 = 20_000_000;
+/// No callback this long after an open: the driver gives no clock (a DVS
+/// that is not running, no Dante PTP clock on its network), and the output
+/// waits for it, calmly (2 s; the owner's ruling, #233, 8.10.2026).
+pub const NO_CLOCK_100NS: i64 = 20_000_000;
+/// Still no callback this long after an open: the driver is closed and
+/// opened again at once, every 60 s for as long as it gives no clock (no
+/// backoff: a fixed, slow cadence).
+pub const NO_CLOCK_REOPEN_100NS: i64 = 600_000_000;
 /// The worker steps at least this often (driver messages, 10 ms).
 pub const POLL_100NS: i64 = 100_000;
 pub const MIN_RATE: f64 = 8_000.0;
@@ -65,6 +73,10 @@ pub enum Reason {
     /// A driver callback never returned: the driver is parked until the
     /// process ends (`asio_win`), no open can succeed.
     Parked,
+    /// The driver opened but gives no clock (no callback since the open):
+    /// e.g. DVS is not running, or its network has no Dante PTP clock. A
+    /// calm wait, never a fault ([`clock_step`]).
+    NoClock,
 }
 
 impl Reason {
@@ -82,6 +94,7 @@ impl Reason {
             Self::WindowsOnly => "windows_only",
             Self::Held => "held",
             Self::Parked => "parked",
+            Self::NoClock => "no_clock",
         }
     }
 
@@ -106,6 +119,7 @@ impl Reason {
             Self::WindowsOnly => "ASIO runs on Windows only".into(),
             Self::Held => "another SongPlayer output still holds the driver (the output this one replaces is releasing it)".into(),
             Self::Parked => "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts".into(),
+            Self::NoClock => "the driver gives no clock (no callback since it opened): e.g. Dante Virtual Soundcard is not running, or there is no Dante PTP clock".into(),
         }
     }
 }
@@ -133,6 +147,44 @@ pub fn close_reason(ev: &DeviceEvents, opened_rate: f64) -> Option<Reason> {
     match ev.rate_changed {
         Some(r) if (r - opened_rate).abs() >= 1.0 => Some(rate_change(r)),
         _ => None,
+    }
+}
+
+/// What a running output's driver does about its clock, at one step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClockStep {
+    /// It ticks (a stall is the stall watch's, as before).
+    Ticking,
+    /// It ticks after a wait for its clock: the output runs (one INFO).
+    ClockArrived,
+    /// No callback yet, nothing to do now.
+    Quiet,
+    /// No callback [`NO_CLOCK_100NS`] after the open: the output waits for
+    /// its clock, the driver kept open (one WARN per wait).
+    StartsWaiting,
+    /// No callback [`NO_CLOCK_REOPEN_100NS`] after the open: closed and
+    /// opened again at once (a DEBUG; no reset, no backoff).
+    Reopen,
+}
+
+/// The clock decision of a running output whose driver made `callbacks`
+/// buffer switches since it opened `since_open_100ns` ago, `waiting` for its
+/// clock or not (the owner's ruling, #233, 8.10.2026: a driver that opens
+/// and does not tick is a calm, visible wait, never a fault loop).
+pub fn clock_step(callbacks: u64, waiting: bool, since_open_100ns: i64) -> ClockStep {
+    if callbacks > 0 {
+        return if waiting {
+            ClockStep::ClockArrived
+        } else {
+            ClockStep::Ticking
+        };
+    }
+    if since_open_100ns >= NO_CLOCK_REOPEN_100NS {
+        ClockStep::Reopen
+    } else if since_open_100ns >= NO_CLOCK_100NS && !waiting {
+        ClockStep::StartsWaiting
+    } else {
+        ClockStep::Quiet
     }
 }
 

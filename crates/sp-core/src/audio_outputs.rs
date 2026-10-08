@@ -754,6 +754,7 @@ pub fn asio_reason_sk(code: &str) -> &'static str {
         "windows_only" => "ASIO funguje len vo Windows",
         "held" => "predchádzajúci výstup ešte neuvoľnil ovládač",
         "parked" => "ovládač zamrzol — pomôže len reštart SongPlayera",
+        "no_clock" => "ovládač nedáva hodiny — napr. DVS nebeží alebo chýbajú hodiny Dante PTP",
         _ => "neznámy dôvod",
     }
 }

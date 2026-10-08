@@ -146,6 +146,10 @@ pub struct AsioStatus {
     pub retry_in_s: Option<f64>,
     /// While waiting: the reason's stable code (`Reason::code`).
     pub reason_code: Option<&'static str>,
+    /// The times the driver, giving no clock for 60 s after an open, was
+    /// closed and opened again (`Reason::NoClock`), since the output was
+    /// built: a calm wait, neither a reset nor a fault.
+    pub clock_waits: u64,
 }
 
 /// A hard re-centre as the status shows it.
@@ -771,6 +775,9 @@ pub(crate) mod fake;
 #[cfg(test)]
 #[path = "asio_out_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "asio_out_tests_clock.rs"]
+mod tests_clock;
 #[cfg(test)]
 #[path = "asio_out_tests_cushion.rs"]
 mod tests_cushion;

@@ -1,10 +1,11 @@
 //! #233, found live at PP (8.10.2026 13:10Z, 0.74.0): Dante Virtual
-//! Soundcard there (unlicensed) opens and never calls back. The worker went
-//! "no callback from the driver for 2 s" → reopen, and every run counted
-//! hard re-centres: the blocks after the priming piled up in a ring the card
-//! never took (an excess re-centre every 4 slots). Opening, priming and a
-//! card that has not called back yet are no fault: such a driver shows its
-//! resets and no hard re-centre.
+//! Soundcard there opens and never calls back (no Dante PTP clock on PP's
+//! network). The worker went "no callback from the driver for 2 s" → reopen
+//! with the 2 / 10 / 30 / 60 s backoff, and every run counted hard
+//! re-centres. The owner's ruling (#233, 8.10.2026): a driver that opens and
+//! does not tick is a calm, visible WAIT, never a fault loop, and the output
+//! starts by itself once it ticks (`asio_out_tests_clock.rs`). A driver
+//! that ticked and then stops is a stall, as before.
 
 use super::fake::FakeDevice;
 use super::*;
@@ -35,15 +36,76 @@ fn block_due(due_100ns: i64) -> ProgramBlock {
     }
 }
 
-/// A driver that opens and never calls back, four runs in a row. Each run's
-/// first block primes the ring (no re-centre) and the blocks after it wait
-/// for the card's first callback, so nothing piles up: no hard re-centre,
-/// no overflow, one block sent per run. No callback for 2 s closes the run:
-/// the first poll is block 1's, so at block 62, 61 slots later (60 slots
-/// are 2 µs short of 2 s). No run lasts the 60 s that resets the backoff,
-/// so the next try waits 2, 10, 30, then 60 s.
+/// A change of what the output shows: the block, its state, its reason
+/// code and its clock waits.
+type Seen = (i64, &'static str, Option<&'static str>, u64);
+
+/// A driver that opens and never calls back (the owner's ruling, #233,
+/// 8.10.2026):
+/// - its first 2 s read running (a driver normally ticks within ms), then
+///   waiting, reason `no_clock`, the driver kept open: block 60 (60 slots +
+///   5 ms after the open at T0 is 2.005 s; block 59 is 1.972 s);
+/// - with still no callback 60 s after an open, the driver is closed and
+///   opened again at once: block 1800 (60.005 s), the reopen on block
+///   1801's step (that block dropped), then every 1801 blocks (blocks 3602,
+///   5404, 7206), no backoff;
+/// - it reads waiting through every reopen, and `clock_waits` counts them;
+/// - every run primes the ring with its first block (no re-centre) and the
+///   rest wait for a callback: no reset, no hard re-centre, no overflow,
+///   one block sent per run (5 runs in 5 min).
 #[test]
-fn a_driver_that_never_calls_back_resets_with_no_hard_re_centre() {
+fn a_driver_that_never_calls_back_waits_calmly_for_its_clock() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    let mut seen: Vec<Seen> = Vec::new();
+    for k in 1..=9000 {
+        let due = T0 + k * SLOT;
+        w.step(&o, &mut d, due + 50_000, Some(block_due(due)));
+        let s = o.snapshot();
+        let now: Seen = (k, s.state, s.status.reason_code, s.status.clock_waits);
+        if seen
+            .last()
+            .is_none_or(|l| (l.1, l.2, l.3) != (now.1, now.2, now.3))
+        {
+            seen.push(now);
+        }
+    }
+    let no_clock = Some("no_clock");
+    assert_eq!(
+        seen,
+        [
+            (1, "running", None, 0),
+            (60, "waiting", no_clock, 0),
+            (1800, "waiting", no_clock, 1),
+            (3602, "waiting", no_clock, 2),
+            (5404, "waiting", no_clock, 3),
+            (7206, "waiting", no_clock, 4),
+        ]
+    );
+    let s = o.snapshot();
+    assert_eq!(
+        (
+            s.status.resets,
+            s.status.hard_recentres,
+            s.status.overflows,
+            s.blocks_sent
+        ),
+        (0, 0, 0, 5),
+        "{s:?}"
+    );
+    assert_eq!(s.status.retry_in_s, None, "the driver is open, waiting");
+    assert_eq!((d.starts, d.closes, d.callbacks), (5, 4, 0));
+}
+
+/// A driver that ticked and then stops is a stall, as before the ruling:
+/// four such runs in a row (each primes, the card plays one slot, then
+/// nothing), each closed 2 s after its last callback with the reason
+/// `stalled`, `resets` counting them, and the next try 2, 10, 30, then 60 s
+/// later (no run lasts the 60 s that resets the backoff).
+#[test]
+fn a_driver_that_ticked_and_stops_stalls_with_the_escalating_backoff() {
     let o = out();
     let mut d = FakeDevice::answering(vec![]);
     let mut w = AsioWorker::new(T0);
@@ -58,26 +120,19 @@ fn a_driver_that_never_calls_back_resets_with_no_hard_re_centre() {
             assert!(blocks <= 100, "run {n}: the stall never closed it");
             let due = t + blocks * SLOT;
             w.step(&o, &mut d, due + 50_000, Some(block_due(due)));
+            if blocks == 1 {
+                d.drain(25);
+            }
         }
-        assert_eq!(blocks, 62, "run {n}: 2 s with no callback");
         let s = o.snapshot();
-        assert_eq!(
-            (
-                s.status.resets,
-                s.status.hard_recentres,
-                s.status.overflows,
-                s.blocks_sent
-            ),
-            (n, 0, 0, n),
-            "run {n}: {s:?}"
-        );
+        assert_eq!(s.status.resets, n, "run {n}: {s:?}");
         assert_eq!(s.reason.as_ref().map(Reason::code), Some("stalled"));
         let retry = s.status.retry_in_s.expect("tried again");
         retries.push(retry);
         t += blocks * SLOT + 50_000 + (retry * 1e7) as i64;
     }
     assert_eq!(retries, [2.0, 10.0, 30.0, 60.0]);
-    assert_eq!((d.starts, d.callbacks), (4, 0));
+    assert_eq!(o.snapshot().status.clock_waits, 0, "no clock wait");
 }
 
 /// A card that starts late: block 2 comes before its first callback and

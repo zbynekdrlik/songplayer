@@ -3,6 +3,7 @@ import {
   WINDOW_BLOCKS,
   asioGateFailures,
   fohPathFailures,
+  gatedAsioOutputs,
   parseVbanHeader,
   receiverFailures,
   type AsioTelemetry,
@@ -195,6 +196,24 @@ test.describe("ASIO gate (#233)", () => {
     expect(asioGateFailures(dvs(100), dvs(1900, { rate: 0 }, { driver_rate: 0 }))).toEqual([
       "it runs at 0 Hz, the driver at 0 Hz",
     ]);
+  });
+
+  // The owner's ruling (#233, 8.10.2026): at PP, DVS opens but gives no
+  // clock while PP's network has no Dante PTP clock; its enabled output
+  // waits, calmly, and a box that expects no ASIO output
+  // (SP_ASIO_OUTPUTS_EXPECTED "0") must not fail on it. Any other waiting
+  // reason, a disabled entry and a VBAN output keep their old treatment.
+  test("an output waiting for its driver's clock is not counted or measured", () => {
+    const vban = foh(10);
+    const off = dvs(10, { id: "out-4", enabled: false });
+    const noClock = dvs(10, { id: "out-5", state: "waiting", reason: "the driver gives no clock" }, {
+      reason_code: "no_clock",
+    });
+    const reset = dvs(10, { id: "out-6", state: "waiting" }, { reason_code: "reset" });
+    const ids = (list: OutputStatus[]) => gatedAsioOutputs(list).map((o) => o.id);
+    expect(ids([vban, off, noClock]), "PP: nothing to gate").toEqual([]);
+    expect(ids([vban, dvs(10), noClock, reset, off])).toEqual(["out-3", "out-6"]);
+    expect(ids([dvs(10, {}, { reason_code: "no_clock" })]), "a running one is gated").toEqual(["out-3"]);
   });
 
   // #233 review round 1: an entry's delay (up to 2 s) is part of its

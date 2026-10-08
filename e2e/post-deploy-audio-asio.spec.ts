@@ -23,7 +23,13 @@
  */
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { DVS_DRIVER, WINDOW_BLOCKS, asioGateFailures, type OutputStatus } from "./audio-outputs-gate";
+import {
+  DVS_DRIVER,
+  WINDOW_BLOCKS,
+  asioGateFailures,
+  gatedAsioOutputs,
+  type OutputStatus,
+} from "./audio-outputs-gate";
 
 const EXPECTED = Number(process.env.SP_ASIO_OUTPUTS_EXPECTED ?? "0");
 
@@ -67,8 +73,10 @@ test.describe("ASIO output (#233)", () => {
     expect(Number.isInteger(EXPECTED) && EXPECTED >= 0, "SP_ASIO_OUTPUTS_EXPECTED").toBe(true);
     // A failed read is no count (never zero outputs: with EXPECTED "0" a
     // broken API would pass), so the poll reads -1 then and tries again.
-    const enabledAsio = async () =>
-      (await readOutputs(request))?.filter((o) => o.type === "asio" && o.enabled) ?? null;
+    const enabledAsio = async () => {
+      const list = await readOutputs(request);
+      return list === null ? null : gatedAsioOutputs(list);
+    };
     await expect
       .poll(async () => (await enabledAsio())?.length ?? -1, {
         message: "enabled ASIO outputs (SP_ASIO_OUTPUTS_EXPECTED)",
