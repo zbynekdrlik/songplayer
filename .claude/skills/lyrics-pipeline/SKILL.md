@@ -98,8 +98,10 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
    isolated vocals, verified against the song's one independent Gemini 3.5
    Transcribe transcript through the TWO-WAY `reference_gate::evaluate`:
    reference → transcript (≥60% of lines matched, whole-song sanity
-   `|median signed Δstart| ≤ 400ms` — catches mtl's wrong-repetition failure
-   mode — AND agreement ≥70% of matched lines within 400ms) and, since #144,
+   `|median signed Δstart| ≤ 400ms` — meant for mtl's wrong-repetition failure
+   mode, but observed 8.10.2026 the large medians come from the gate's own
+   line-anchor walk, see "Observed operational numbers" below — AND agreement
+   ≥70% of matched lines within 400ms) and, since #144,
    transcript → reference (`sung_coverage.rs`: an order-preserving LCS word
    alignment; the text must cover ≥ 0.55 of the sung words and leave no sung
    stretch > 25 s uncovered, else `Fail{Coverage}` — a partial description
@@ -139,6 +141,44 @@ is now **text gathering + two tiers**, one forced aligner (mtl), one ASR vendor
 
 3. **AutoSubProvider** — PERMANENTLY UNREGISTERED. Never register again.
    YouTube autosub produces wrong timing.
+
+### Observed operational numbers (#144 first-week review, read 8.10.2026)
+
+Source: SNV `0.74.0-dev.5`, GET only — `/api/v1/lyrics/songs` + every
+`/api/v1/lyrics/songs/{id}` (`audit_json` = the latest pass's
+`{yt}_alignment_audit.json`); window = the 30.9 → 4.10 targeted reprocess
+plus retries to 8.10. Full tables: #144 comment 6057577446.
+
+- **Tiers, 363 rows:** ★ **30 (8.3 %)** — lrclib 14, description 8, genius 5,
+  yt_subs 3; base tier **323 (89.0 %)**; no lyrics 9 (2.5 %: 5
+  `unsupported_source`, 4 `no_source`); 1 dabing row. ★ over time: 33 (19.9)
+  → 18 (22.9, isolation stall) → 46 (29.9) → 40 (30.9) → 30 (4.10, 8.10).
+- **Gate verdicts (latest audit per row):** pass 25 of 297 verdicts (8.4 %);
+  fail 272 = coverage 252 (one-way matched lines < 0.60: **201**; sung
+  direction: 51) + agreement 18 + **offset 2**; error 13 (mtl exit 1: 8 —
+  upstream `alignment_bdr` IndexError 5, our `run.py` word-filter guard 3;
+  stale pre-`inference_mode` `0xc0000005` audits 4; g35t 1); no audit 50
+  (43 base rows where no text reached the gate). PASS rows: within 400 ms
+  0.71–1.00, |median| ≤ 90 ms, sung coverage 0.76–0.985, gap ≤ 16 s.
+- **„Nesedí" marks:** 0 at the last DB reads (20.9, 22.9). The marks live in
+  `videos.lyrics_reference_rejected_at` / `lyrics_reference_note` and NO GET
+  returns them — a review must read the DB until the song list exposes them.
+- **The dominant fail is a gate artifact, not the text or mtl.**
+  `reference_gate::match_lines` walks each line's 3/2/1-word prefix forward
+  and never back; a 1-word fallback after an ASR mishearing jumps the cursor
+  far ahead and orphans every line in between. 134 rows fail although their
+  text covers what is sung (`sung_coverage_ok = true`); 166 failing rows
+  show |median| > 400 ms (91 > 60 s) — the "wrong-repetition" signature is
+  this jump (eval replay: same mtl lines, +102 s / +313 s / +444 s greedy →
+  +8 / −27 / −46 ms with an LCS line match; see
+  `.claude/rules/lyrics-eval-backends.md` § gate replay). Do not tune the
+  thresholds or add a second alignment on these numbers; re-measure after
+  the one-way half uses the LCS alignment `sung_coverage.rs` already has.
+- **Per-video files vs per-row flags:** `{yt}_lyrics.json` and
+  `{yt}_alignment_audit.json` are per YouTube id, while ★ and
+  `lyrics_source` are per row (15 ids shared by 32 rows). Read a shared id's
+  audit with care — one row's pass overwrites the other's (row 288 kept ★
+  over the base-tier file row 306 wrote).
 
 ## Gemini API discipline
 
