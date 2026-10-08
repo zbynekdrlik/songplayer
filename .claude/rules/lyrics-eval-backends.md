@@ -320,3 +320,30 @@ its window-error count.
   interpreter** — the real CPython is a child `C:\Program Files\Python312\
   python.exe`. So a containment fault sampler on the launcher pid sees 0 faults/s
   and Application-log crash events name the SYSTEM python path, not the venv one.
+
+## Gate replay on the eval set — the one-way line walk loses lines (#144 first-week review, 2026-10-08)
+
+- **What was replayed:** a Python port of `reference_gate::evaluate`
+  (`match_lines` + `sung_coverage`, the gate's own `normalize_word`) on the mtl
+  lines of `reports/2026-08-05-aligner-raw/lyrics-alignment-mtl_*.json`
+  against the real Gemini 3.5 Transcribe words of `reports/2026-09-12-raw`,
+  and on the current manifest gold lines against the same words (no mtl).
+  Leave out `JjgkhHlTROQ`: its 2026-09-12 g35t transcript has 6 words.
+- **Result (all inputs complete texts unless noted):**
+  - mtl lines, 21 fixtures: the current gate passes **4**, fails 15 on
+    matched lines < 0.60; with lines matched through the LCS word alignment
+    (a line counts when ≥ half its words are on it, its start = the ASR start
+    of its first aligned word) it passes **18**. The 3 left are correct
+    rejections: `Xvm4_fWkXe8` (poisoned) and `edZVnKxKEUU` / `xPkg_vW4yE0`,
+    whose 2026-08-05 texts were partial (53 / 13 lines; 90 / 68 today).
+  - gold lines, 18 fixtures: matched-lines fails 10 → **0**. (Their timing
+    checks then fail on LRCLIB gold timing noise, not on the walk.)
+- **Mechanism:** `match_lines` looks for each line's 3-, 2-, then 1-word
+  prefix at or after a cursor that never moves back. After an ASR mishearing
+  ("Can't take my worship" heard as "can …"), the 1-word fallback finds the
+  word minutes later and orphans every line in between. The same mtl lines
+  read median +102 s / +313 s / +444 s (KeZaADiRHVI / p74PDWAFk0A /
+  q5m09rqOoxE) through the walk and +8 / −27 / −46 ms through the LCS. So a
+  large `median_signed_ms` in an audit is first a walk artifact, not mtl's
+  wrong-repetition failure. The production numbers this explains are in the
+  `lyrics-pipeline` skill § "Observed operational numbers".
