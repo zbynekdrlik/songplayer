@@ -780,7 +780,15 @@ fn OutputRow(
             <button
                 type="button"
                 data-testid="audio-output-remove"
-                on:click=move |_| entries.update(|l| remove_one(l, &id.get_value()))
+                on:click=move |_| {
+                    // The id's marks go with its last row: a later row may
+                    // take the id again.
+                    let row = id.get_value();
+                    entries.update(|l| remove_one(l, &row));
+                    if entries.with_untracked(|l| l.iter().all(|e| e.id != row)) {
+                        bad.update(|b| b.retain(|(i, _, _)| *i != row));
+                    }
+                }
             >
                 "Odobrať"
             </button>
