@@ -195,10 +195,14 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
         );
         settings.insert(config::SETTING_GEMINI_API_KEY.to_string(), gemini_key.get());
         settings.insert(config::SETTING_GEMINI_MODEL.to_string(), gemini_model.get());
-        settings.insert(
-            config::SETTING_PAID_AI_ENABLED.to_string(),
-            paid_ai.get().to_string(),
-        );
+        // #229 item C: the switch only when it was changed here — a tab
+        // opened before it changed elsewhere never sends the old value back.
+        let loaded_paid_ai = store
+            .settings
+            .with_untracked(|s| s.get(config::SETTING_PAID_AI_ENABLED).cloned());
+        if let Some(value) = config::paid_ai_to_send(loaded_paid_ai.as_deref(), paid_ai.get()) {
+            settings.insert(config::SETTING_PAID_AI_ENABLED.to_string(), value);
+        }
         settings.insert(config::SETTING_CACHE_DIR.to_string(), cache_dir.get());
         settings.insert(config::SETTING_DUB_VOICE.to_string(), dub_voice.get());
         settings.insert(config::SETTING_DUB_MODEL.to_string(), dub_model.get());

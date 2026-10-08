@@ -333,8 +333,16 @@ impl ReprocessWorker {
         // start from stage 0 again.
         self.per_video_backoff.remove(&row.id);
 
-        self.apply_title(row, &meta.song, &meta.artist, meta.source.as_str())
-            .await
+        let outcome = self
+            .apply_title(row, &meta.song, &meta.artist, meta.source.as_str())
+            .await?;
+        // #229 item A: a repaired video waits for no peer any more.
+        if matches!(outcome, ReprocessOutcome::Success)
+            && let Some(ex) = peer.as_deref()
+        {
+            crate::peer::repair::end_wait(ex, &row.youtube_id).await;
+        }
+        Ok(outcome)
     }
 
     /// The ONE repair write: the row re-checked against the queue under

@@ -170,6 +170,14 @@ pub fn paid_ai_enabled(raw: Option<&str>) -> bool {
     }
 }
 
+/// #229 item C: what a Nastavenia save sends for the switch — `"true"` /
+/// `"false"` only when the checkbox differs from the value the page loaded
+/// (`loaded`, read by [`paid_ai_enabled`]), else nothing: a tab opened
+/// before the switch was changed elsewhere never sends the old one back.
+pub fn paid_ai_to_send(loaded: Option<&str>, checked: bool) -> Option<String> {
+    (paid_ai_enabled(loaded) != checked).then(|| checked.to_string())
+}
+
 /// #229: what a secret setting reads as outside the node (`GET /api/v1/settings`).
 /// A PATCH that sends it back keeps the stored value.
 pub const SECRET_MASK: &str = "********";
@@ -432,6 +440,20 @@ mod tests {
         assert!(!paid_ai_enabled(Some(" False ")));
         assert!(!paid_ai_enabled(Some("yes")), "a mangled value = OFF");
         assert!(!paid_ai_enabled(Some("1")));
+    }
+
+    /// #229 item C: a save sends the switch only when the checkbox changed
+    /// it from what the page loaded.
+    #[test]
+    fn a_save_sends_the_switch_only_when_it_changed() {
+        assert_eq!(paid_ai_to_send(None, true), None, "on as loaded");
+        assert_eq!(paid_ai_to_send(None, false).as_deref(), Some("false"));
+        assert_eq!(
+            paid_ai_to_send(Some("false"), true).as_deref(),
+            Some("true")
+        );
+        assert_eq!(paid_ai_to_send(Some("false"), false), None, "off as loaded");
+        assert_eq!(paid_ai_to_send(Some("true"), true), None);
     }
 
     /// #229: THE secret list, exactly; each one masked by name too.

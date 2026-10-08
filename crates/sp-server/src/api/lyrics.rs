@@ -544,8 +544,11 @@ pub async fn post_probe_sources(
         .unwrap_or_default();
     let client = reqwest::Client::new();
 
+    // #229 item C: the description probe asks Claude only while this
+    // node's paid AI is on (off: skipped, no call).
+    let paid_ai = crate::paid_ai::enabled(&state.pool).await;
     let report = crate::lyrics::probe::probe_sources_impl(
-        Some(&state.ai_client),
+        paid_ai.then_some(&*state.ai_client),
         &ytdlp_path,
         &state.cache_dir,
         &client,
