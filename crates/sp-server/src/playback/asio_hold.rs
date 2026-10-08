@@ -64,6 +64,8 @@ impl DriverHolds {
 impl DriverHold<'_> {
     /// Keep the driver held for the process's life, marked parked.
     pub fn park(self) {
+        lock(&self.holds.parked).push(self.driver.clone());
+        // Never dropped: its Drop would give the driver back.
         std::mem::forget(self);
     }
 }
