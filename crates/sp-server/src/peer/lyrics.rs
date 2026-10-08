@@ -26,7 +26,6 @@ use super::Exchange;
 use super::ask::{Ask, FetchPlan, PeerStep};
 use super::client::PeerError;
 use super::kind::{ArtifactKind, Job};
-use super::standin::STANDIN_MIN_RECHECK;
 use super::wire::{Artifact, PeerLyrics};
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 use crate::db::models::VideoLyricsRow;
@@ -55,12 +54,10 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
         Ask::Wait { recheck, .. } => ex.defer(job, row.id, recheck).await,
         Ask::Fetch(plan) => {
-            // A stand-in takes the copy into every row of the video: its own
-            // look (`peer::standin`), due now; this row is asked again after
-            // it (review round 3).
-            if ex.standin(job, &row.youtube_id).await.is_some() {
-                ex.standin_due_now(job, &row.youtube_id).await;
-                return ex.defer(job, row.id, STANDIN_MIN_RECHECK).await;
+            // A stand-in takes the copy into every row of the video through
+            // its own look (`peer::standin`; review rounds 3 and 4).
+            if let Some(s) = ex.standin(job, &row.youtube_id).await {
+                return ex.hand_to_standin(job, row.id, &row.youtube_id, &s).await;
             }
             if let Some(step) = ex
                 .unless_peers_audio(job, &plan, row.id, &row.youtube_id)

@@ -9,17 +9,20 @@
 //!   asking while the peer it took the song's audio from had the song:
 //!   `Exchange::ask` → waited the 2 h bound for that peer (its catalog
 //!   read now or not), or `Exchange::after_failed_fetch` giving up on that
-//!   peer's copy. While it stands in, the job's ask waits on the song no
-//!   more. V31 also back-filled the ones made before this record existed.
+//!   peer's copy. V31 also back-filled the ones made before this record
+//!   existed.
 //! - Kept as it was (`Exchange::keep_standing`, its age and next look) when
 //!   the job runs here again while it stands in: a run put back, a fetch
 //!   from another peer given up.
 //! - Over when the peer's copy is taken (`Exchange::fetched`) or the job
 //!   runs here for another reason (`Exchange::run_here`: an operator's ask,
 //!   another audio). The lyrics hook never takes a copy into one row of a
-//!   video that stands in: meeting a peer's copy it makes the stand-in due
-//!   now (`Exchange::standin_due_now`) and puts the row back, and the look
-//!   below takes the copy into every row.
+//!   video that stands in: meeting a peer's copy it hands it to the look
+//!   below (`Exchange::hand_to_standin`: the stand-in due now, the row put
+//!   back, counted against the 2 h bound, after which the job runs here,
+//!   still standing in), which takes the copy into every row.
+//! - While it stands in, the job's ask waits for no peer (it waited its
+//!   bound once): a peer's copy is still taken, a run here keeps it.
 //! - Looked at by the lyrics worker on each tick, after its kill switch
 //!   ([`supersede_next`]): one due stand-in, rescheduled FIRST
 //!   ([`standin_recheck`] of its age), then taken when a listed peer holds
@@ -37,11 +40,11 @@ use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use super::Exchange;
-use super::ask::FetchPlan;
+use super::ask::{FetchPlan, PeerStep};
 use super::audio::AudioVerdict;
 use super::client::PeerError;
 use super::config::NodeConfig;
-use super::decide::{holds, listed_audio};
+use super::decide::{gives_up, holds, listed_audio, recheck_after};
 use super::kind::{ArtifactKind, Job};
 use super::wire::now_ms;
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
@@ -126,6 +129,46 @@ impl Exchange {
         );
     }
 
+    /// The lyrics hook met a peer's copy for `youtube_id`, whose track here
+    /// stands in (`s`): the copy goes into every row of the video through
+    /// the stand-in's own look, made due now, and row `video_id` is put back
+    /// (`recheck_after`, no attempt). Counted as waiting (`peer_waits`, the
+    /// 2 h bound; review round 4): a look that keeps not taking the copy (a
+    /// refused track, an audio check that cannot tell) never keeps the row
+    /// out for good; once the job has waited the bound it runs here, still
+    /// standing in. `fetched` ends the wait when the look takes the copy.
+    pub(crate) async fn hand_to_standin(
+        &self,
+        job: Job,
+        video_id: i64,
+        youtube_id: &str,
+        s: &StandinRecord,
+    ) -> PeerStep {
+        let now = now_ms();
+        if let Err(e) = models_peer::start_wait(&self.pool, youtube_id, job.as_str(), now).await {
+            warn!(youtube_id, %e, "exchange: recording the wait failed");
+        }
+        let waited = models_peer::waited(&self.pool, youtube_id, job.as_str(), now)
+            .await
+            .inspect_err(|e| warn!(youtube_id, %e, "exchange: reading the wait failed"))
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        if gives_up(waited) {
+            info!(
+                youtube_id,
+                job = job.as_str(),
+                peer = %s.peer,
+                "exchange: a stand-in's copy was not taken for 2 h - processing here, still standing in"
+            );
+            let guard = self.run_here(job, youtube_id).await;
+            self.keep_standing(job, youtube_id, s).await;
+            return PeerStep::Local(Some(guard));
+        }
+        self.standin_due_now(job, youtube_id).await;
+        self.defer(job, video_id, recheck_after(waited)).await
+    }
+
     /// The stand-in of `job` of `youtube_id` is looked at on the lyrics
     /// worker's next tick (the hook met it while its peer has a copy).
     pub(crate) async fn standin_due_now(&self, job: Job, youtube_id: &str) {
@@ -180,7 +223,9 @@ pub async fn supersede_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
         }
     };
     // Rescheduled first: whatever happens below, it is not looked at again
-    // before its recheck (a peer that keeps failing is never hammered).
+    // before its recheck (a peer that keeps failing is never hammered; the
+    // lyrics hook makes it due again at most per its own recheck, within
+    // its 2 h bound: `hand_to_standin`).
     let age = Duration::from_millis(u64::try_from(now - made_at_ms).unwrap_or(0));
     let next = now.saturating_add(duration_ms(standin_recheck(age)));
     let rescheduled = models_peer::recheck_standin(&ex.pool, &youtube_id, job.as_str(), next).await;

@@ -21,8 +21,8 @@ use super::board::JobGuard;
 use super::client::PeerError;
 use super::config::{NodeConfig, PeerConfig};
 use super::decide::{
-    Decision, LocalWhy, PeerRead, SongFrom, WaitWhy, after_failure, decide, listed_audio,
-    recheck_after, song_source,
+    Decision, LocalWhy, MAX_PEER_WAIT, PeerRead, SongFrom, WaitWhy, after_failure, decide,
+    listed_audio, recheck_after, song_source,
 };
 use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, Catalog, now_ms};
@@ -108,14 +108,20 @@ impl Exchange {
             .ok()
             .flatten();
         // The lyrics wait on the peer this node took the song's audio from,
-        // unless what they make here already stands in for that peer's copy
-        // (they waited the bound once: a run here put back, e.g. for its
-        // stems, never starts a new 2 h wait on the song; review round 2).
+        // unless what they make here already stands in for that peer's copy.
+        // Such a job waited its bound once: it waits for no peer again (a
+        // run here put back, e.g. for its stems, a later reprocess; review
+        // rounds 2 and 4), a peer's copy still comes first.
         let waits_on_song = job.waits_while_a_peer_has_the_song();
         let standing = if waits_on_song {
             self.standin(job, youtube_id).await
         } else {
             None
+        };
+        let waited = if standing.is_some() {
+            Some(MAX_PEER_WAIT)
+        } else {
+            waited
         };
         let source = if waits_on_song && standing.is_none() {
             self.song_from(youtube_id).await
@@ -146,7 +152,9 @@ impl Exchange {
                 Ask::Wait { peer, recheck }
             }
             Decision::Local(why) => {
-                log_local(youtube_id, job, why);
+                if standing.is_none() {
+                    log_local(youtube_id, job, why);
+                }
                 let guard = self.run_here(job, youtube_id).await;
                 // A stand-in stays as it was while its job runs here again;
                 // else what runs here stands in for the copy of the peer this
