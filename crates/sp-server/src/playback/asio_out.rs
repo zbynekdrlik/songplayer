@@ -39,7 +39,7 @@ use crate::playback::asrc::{Asrc, Splice};
 use crate::playback::asrc_servo::{BASE_LATENCY_100NS, Observation, Servo, frames_from_100ns};
 use crate::playback::audio_out::{STATE_OPENING, STATE_RUNNING, STATE_WAITING};
 use crate::playback::audio_out_block::ProgramBlock;
-use crate::playback::audio_out_queue::{BlockQueue, Take, lock};
+use crate::playback::audio_out_queue::{BlockQueue, RunGuard, Take, lock};
 use crate::playback::vban_out::{VbanClock, queue_bound, should_log};
 use crate::playback::vban_packet::{VBAN_BLOCK_SAMPLES, VBAN_CHANNELS};
 
@@ -605,7 +605,9 @@ fn publish(run: &Run, out: &AsioOut, device: &dyn AsioDevice, closed: &Closed) {
 /// answer), step, until stopped; then release the driver.
 #[cfg_attr(test, mutants::skip)] // a blocking loop around AsioWorker::step (tested step by step)
 pub fn run_asio_worker(out: &AsioOut, device: &mut dyn AsioDevice, clock: &mut dyn VbanClock) {
-    out.running.store(true, Ordering::SeqCst);
+    // #233 release review: cleared at the end, and on a panic the start
+    // error names the stop, so the outputs task rebuilds the output.
+    let running = RunGuard::start(&out.running, &out.start_error, "ASIO");
     let mut worker = AsioWorker::new(clock.now_100ns());
     let mut wait_100ns = 0;
     loop {
@@ -618,7 +620,7 @@ pub fn run_asio_worker(out: &AsioOut, device: &mut dyn AsioDevice, clock: &mut d
         wait_100ns = worker.step(out, device, clock.now_100ns(), block);
     }
     worker.shutdown(device);
-    out.running.store(false, Ordering::SeqCst);
+    drop(running);
     info!(id = %out.id, driver = %out.driver, "asio output: stopped");
 }
 

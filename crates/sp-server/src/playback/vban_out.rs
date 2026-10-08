@@ -60,7 +60,7 @@ use sp_core::config::DEFAULT_VBAN_STREAM_NAME;
 use tracing::{info, warn};
 
 use crate::playback::audio_out_block::ProgramBlock;
-use crate::playback::audio_out_queue::{BlockQueue, lock};
+use crate::playback::audio_out_queue::{BlockQueue, RunGuard, lock};
 use crate::playback::loop_stats::percentile_ceil;
 use crate::playback::program_output_timing::utc_label;
 use crate::playback::vban_packet::{
@@ -773,13 +773,15 @@ fn warn_late_packet(stall: &VbanStallWarn, packet: usize, wait_100ns: i64) {
 
 /// The VBAN thread body: send every queued block on its schedule until the
 /// output is stopped and drained. Returns the sender (its frame counter).
+/// `running` is held by a [`RunGuard`]: cleared at the end, and on a panic
+/// the start error names the stop, so the outputs task rebuilds the output.
 pub fn run_vban_loop(
     out: &VbanOut,
     sink: &mut dyn VbanSink,
     clock: &mut dyn VbanClock,
 ) -> VbanSender {
     let mut sender = VbanSender::for_out(out);
-    out.running.store(true, Ordering::SeqCst);
+    let running = RunGuard::start(&out.running, &out.start_error, "VBAN");
     loop {
         let take = out.take_timeout(VBAN_IDLE_WAIT);
         // Read (= tick) the wall on every pass, also while nothing is sent
@@ -795,7 +797,7 @@ pub fn run_vban_loop(
             VbanTake::Stopped => break,
         }
     }
-    out.running.store(false, Ordering::SeqCst);
+    drop(running);
     info!(
         packets_sent = out.status().packets_sent,
         next_counter = sender.next_counter(),
