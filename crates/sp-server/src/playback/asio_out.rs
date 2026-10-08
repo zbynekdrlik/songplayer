@@ -264,6 +264,8 @@ struct Run {
     stall: StallWatch,
     driver_latency_frames: u32,
     overflows: u64,
+    /// The driver's overload count this run (its device counts per run).
+    overloads: u64,
     primed: bool,
 }
 
@@ -279,6 +281,8 @@ pub struct AsioWorker {
     resets: u64,
     /// The underruns of the runs already closed (a device counts per run).
     underruns_closed: u64,
+    /// The overloads of the runs already closed.
+    overloads_closed: u64,
 }
 
 impl AsioWorker {
@@ -291,6 +295,7 @@ impl AsioWorker {
             failures: 0,
             resets: 0,
             underruns_closed: 0,
+            overloads_closed: 0,
         }
     }
 
@@ -319,6 +324,15 @@ impl AsioWorker {
             process(run, out, device, now_100ns, b);
         }
         let ev = device.poll();
+        run.overloads = ev.overloads;
+        if ev.latencies_changed {
+            run.driver_latency_frames = device.output_latency_frames();
+            info!(
+                id = %out.id,
+                latency_frames = run.driver_latency_frames,
+                "asio output: the driver's latency changed (read again)"
+            );
+        }
         let reason = close_reason(&ev, run.opened.rate).or_else(|| {
             run.stall
                 .stalled(ev.callbacks, now_100ns)
@@ -327,9 +341,16 @@ impl AsioWorker {
         match reason {
             Some(reason) => {
                 let ran = now_100ns - run.opened_at_100ns;
+                self.overloads_closed += run.overloads;
                 self.close(out, device, now_100ns, reason, ran);
             }
-            None => publish(run, out, &*device, self.underruns_closed),
+            None => publish(
+                run,
+                out,
+                &*device,
+                self.underruns_closed,
+                self.overloads_closed,
+            ),
         }
         POLL_100NS
     }
@@ -458,6 +479,7 @@ fn build(out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) -> Result<R
         stall: StallWatch::default(),
         driver_latency_frames: started.output_latency_frames,
         overflows: 0,
+        overloads: 0,
         primed: false,
     })
 }
@@ -527,7 +549,13 @@ fn log_stale(id: &str, stale: usize) {
 
 /// The running output's numbers into its status (`underruns_closed`: the
 /// closed runs' underruns).
-fn publish(run: &Run, out: &AsioOut, device: &dyn AsioDevice, underruns_closed: u64) {
+fn publish(
+    run: &Run,
+    out: &AsioOut,
+    device: &dyn AsioDevice,
+    underruns_closed: u64,
+    overloads_closed: u64,
+) {
     let servo = run.servo.status();
     let latency = asio_latency_ms(
         servo.latency_ms,
@@ -543,6 +571,7 @@ fn publish(run: &Run, out: &AsioOut, device: &dyn AsioDevice, underruns_closed: 
         l.status.recentres = servo.recentres;
         l.status.underruns = underruns_closed + device.underruns();
         l.status.overflows = run.overflows;
+        l.status.overloads = overloads_closed + run.overloads;
     });
 }
 
