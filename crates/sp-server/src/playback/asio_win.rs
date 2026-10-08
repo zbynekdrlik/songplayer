@@ -28,7 +28,8 @@
 //!   after the last callback left it (iemmixer `asio.rs:570-600`), and a
 //!   slot is released only after the buffers are disposed and the driver
 //!   dropped, so a late driver message never counts into another output. A
-//!   callback still inside after 1 s PARKS the device (iemmixer
+//!   callback still inside after 1 s of waiting (pumping the thread's
+//!   messages, which a driver may need to finish it) PARKS the device (iemmixer
 //!   `asio.rs:487-500`): the stream, the buffers, the driver, the slot and
 //!   the driver's hold are never freed, disposed, released or reused until
 //!   the process ends, and the device refuses every later open.
@@ -580,16 +581,19 @@ impl AsioDevice for WinAsioDevice {
         if let Some(i) = self.slot {
             let s = &SLOTS[i];
             s.stream.store(ptr::null_mut(), Ordering::SeqCst);
-            // Bounded: a driver stuck inside a callback for a second parks
-            // the device instead of freeing anything under the callback. One
-            // read of 0 is enough: the slot is already unhooked, so a
-            // callback that enters after it sees no stream.
+            // Bounded, and pumping: a driver may need this thread's
+            // messages to finish a callback (iemmixer `asio.rs:483-497`). A
+            // driver stuck inside a callback for a second parks the device
+            // instead of freeing anything under the callback. One read of 0
+            // is enough: the slot is already unhooked, so a callback that
+            // enters after it sees no stream.
             let mut left = false;
             for _ in 0..1_000 {
                 if s.in_flight.load(Ordering::SeqCst) == 0 {
                     left = true;
                     break;
                 }
+                pump_messages();
                 std::thread::sleep(Duration::from_millis(1));
             }
             if !left {
