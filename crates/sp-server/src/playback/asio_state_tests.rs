@@ -295,7 +295,24 @@ fn every_reason_code_has_its_slovak_on_the_dashboard() {
         Reason::Stalled,
         Reason::WindowsOnly,
         Reason::Held,
+        Reason::Parked,
     ];
+    // One reason of every variant: a new variant fails to compile here (no
+    // wildcard) until it is listed above (review round 5).
+    let variant = |r: &Reason| match r {
+        Reason::NotFound { .. } => 0,
+        Reason::Busy(_) => 1,
+        Reason::Refused(_) => 2,
+        Reason::Failed(_) => 3,
+        Reason::Reset => 4,
+        Reason::RateChanged(_) => 5,
+        Reason::Stalled => 6,
+        Reason::WindowsOnly => 7,
+        Reason::Held => 8,
+        Reason::Parked => 9,
+    };
+    let listed: std::collections::BTreeSet<usize> = reasons.iter().map(variant).collect();
+    assert_eq!(listed.len(), 10, "every variant is listed");
     for r in reasons {
         assert_ne!(
             sp_core::audio_outputs::asio_reason_sk(r.code()),
