@@ -835,3 +835,25 @@ fn a_close_publishes_the_runs_counters() {
     assert_eq!(snap.state, "waiting");
     assert_eq!((snap.status.overflows, snap.status.recentres), (82_223, 1));
 }
+
+/// #233 review round 5: a parked driver is never retried — no next try in
+/// the status (the API's `retry_in_s` too, not only the dashboard), no open
+/// in the steps after it, one WARN.
+#[test]
+fn a_parked_driver_is_not_retried() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Err(Reason::Parked)]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    let snap = o.snapshot();
+    assert_eq!(
+        (snap.state, snap.status.reason_code, snap.status.retry_in_s),
+        ("waiting", Some("parked"), None)
+    );
+    assert_eq!(w.step(&o, &mut d, T0 + 3_600 * S, None), POLL_100NS);
+    assert_eq!(
+        (d.opened.len(), o.snapshot().status.retry_in_s),
+        (1, None),
+        "an hour later: no open, no next try"
+    );
+}
