@@ -77,3 +77,31 @@ async fn the_network_rate_is_checked() {
         "the refused value wrote nothing"
     );
 }
+
+/// #233 lane 3: an ASIO entry through the real router — stored normalized;
+/// a second entry on the same driver refuses the whole PATCH.
+#[tokio::test]
+async fn an_asio_entry_is_stored_and_one_driver_twice_is_refused() {
+    let state = test_state().await;
+    let dvs = r#"{"id":"out-2","name":"DVS","type":"asio","asio":{"driver":"Dante Virtual Soundcard (x64)","channels":[0,1]}}"#;
+    let one = format!("[{dvs}]");
+    let (status, _) = patch(&state, &body(&[(SETTING_AUDIO_OUTPUTS, &one)])).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let normalized = r#"[{"id":"out-2","name":"DVS","type":"asio","enabled":true,"rate":"network","delay_ms":0,"asio":{"driver":"Dante Virtual Soundcard (x64)","channels":[0,1]}}]"#;
+    assert_eq!(
+        stored(&state.pool, SETTING_AUDIO_OUTPUTS).await.unwrap(),
+        normalized
+    );
+    let twice = format!("[{dvs},{}]", dvs.replace("out-2", "out-3"));
+    let (status, text) = patch(&state, &body(&[(SETTING_AUDIO_OUTPUTS, &twice)])).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        text,
+        "entry 2 (id out-3): asio.driver is already used by an earlier ASIO entry (a driver takes one client)"
+    );
+    assert_eq!(
+        stored(&state.pool, SETTING_AUDIO_OUTPUTS).await.unwrap(),
+        normalized,
+        "the refused list wrote nothing"
+    );
+}

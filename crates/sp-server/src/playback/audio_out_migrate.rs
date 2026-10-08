@@ -4,8 +4,8 @@
 //! heard before. It acts only while NO list is stored and an old key exists,
 //! and it KEEPS the old keys (main-session ruling 4, 7.10.2026): the new code
 //! ignores them once the list exists, and a rollback to ≤ 0.72 still finds
-//! them, so FOH keeps its sound. Lane 3 deletes them once the list has run a
-//! release. The list is written only if still absent (`INSERT OR IGNORE`), so
+//! them, so FOH keeps its sound. A later lane deletes them once the list has
+//! run a main release. The list is written only if still absent (`INSERT OR IGNORE`), so
 //! a list a settings PATCH stored meanwhile is never replaced.
 
 use sp_core::audio_outputs::{

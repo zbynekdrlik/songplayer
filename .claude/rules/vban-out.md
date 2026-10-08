@@ -164,7 +164,8 @@ format, pinned against a copy of the 0.72.0 encoder by
   each destination is an entry of `audio_outputs` (`audio-outputs.md`) with
   its own format, delay and ONE target. The keys stay in the database (and
   their constants in `sp_core::config`) so a rollback to ≤ 0.72 still sends
-  to FOH (ruling 4); lane 3 deletes them. Stream name policy, not enforced by
+  to FOH (ruling 4); a later lane deletes them once the list has run a main
+  release (lane 3 kept them). Stream name policy, not enforced by
   code: never `cg` before B4.
 - The outputs task (`audio_out_task.rs`) re-reads the list every 5 s, so a
   dashboard save applies without a restart. It resolves an entry's target

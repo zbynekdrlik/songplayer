@@ -1,9 +1,17 @@
 import { test, expect } from "@playwright/test";
-import { fohPathFailures, parseVbanHeader, receiverFailures, type OutputStatus } from "./audio-outputs-gate";
+import {
+  WINDOW_BLOCKS,
+  asioGateFailures,
+  fohPathFailures,
+  parseVbanHeader,
+  receiverFailures,
+  type AsioTelemetry,
+  type OutputStatus,
+} from "./audio-outputs-gate";
 
 // #233: the post-deploy gate's pure functions (`audio-outputs-gate.ts`), run in
-// the mock suite: FOH's path through the output list, and a VBAN receiver's
-// verdict on a destination's packets.
+// the mock suite: FOH's path through the output list, a VBAN receiver's
+// verdict on a destination's packets, and (lane 3) an ASIO output's minute.
 
 const foh = (blocks: number, over: Partial<OutputStatus> = {}): OutputStatus => ({
   id: "out-1",
@@ -107,5 +115,82 @@ test.describe("audio outputs gate (#233)", () => {
     expect(receiverFailures(gap, want)).toEqual(["the frame counter jumps 1 -> 3"]);
     expect(receiverFailures(good.slice(0, 2), want)).toEqual(["2 packets, want at least 3"]);
     expect(receiverFailures([new Uint8Array(4), ...good], want)).toEqual(["a datagram is not VBAN"]);
+  });
+});
+
+const dvs = (blocks: number, over: Partial<OutputStatus> = {}, asio: Partial<AsioTelemetry> = {}): OutputStatus => ({
+  id: "out-3",
+  type: "asio",
+  name: "DVS",
+  enabled: true,
+  state: "running",
+  reason: null,
+  rate: 96000,
+  format: "Int32LSB",
+  channels: 2,
+  delay_ms: 0,
+  latency_ms: 70.7,
+  blocks_sent: blocks,
+  blocks_dropped: 0,
+  asio: {
+    driver: "Dante Virtual Soundcard (x64)",
+    channels: [0, 1],
+    driver_rate: 96000,
+    sample_type: "Int32LSB",
+    ppm: 3.2,
+    underruns: 0,
+    resets: 0,
+    latency_ms: 70.7,
+    ...asio,
+  },
+  ...over,
+});
+
+test.describe("ASIO gate (#233)", () => {
+  test("a minute at the driver's rate with no underrun passes", () => {
+    expect(WINDOW_BLOCKS).toBe(1800);
+    expect(asioGateFailures(dvs(100), dvs(1900))).toEqual([]);
+    expect(asioGateFailures(dvs(100), dvs(100 + WINDOW_BLOCKS)), "exactly a minute").toEqual([]);
+    expect(asioGateFailures(dvs(100), dvs(1900, {}, { ppm: -300 })), "the bound itself").toEqual([]);
+    expect(asioGateFailures(dvs(100), dvs(1900, { latency_ms: 999.9 }))).toEqual([]);
+  });
+
+  test("each failure is named", () => {
+    const bad = dvs(
+      1000,
+      { state: "waiting", reason: "the driver asked for a reset", rate: 48000, latency_ms: 0 },
+      { underruns: 4, resets: 1, ppm: 301 },
+    );
+    expect(asioGateFailures(dvs(100), bad)).toEqual([
+      "the ASIO output is waiting (the driver asked for a reset)",
+      "it runs at 48000 Hz, the driver at 96000 Hz",
+      "4 underruns in the window",
+      "the driver was reopened 1 times in the window",
+      "its correction is 301 ppm (bound 300)",
+      "its latency is 0 ms",
+      "only 900 blocks in the window, want 1800",
+    ]);
+    expect(asioGateFailures(dvs(100), dvs(1899))).toEqual(["only 1799 blocks in the window, want 1800"]);
+    expect(asioGateFailures(dvs(100), dvs(1900, { latency_ms: 1000 }))).toEqual(["its latency is 1000 ms"]);
+    expect(asioGateFailures(dvs(100), dvs(1900, { state: "opening" }))).toEqual(["the ASIO output is opening"]);
+  });
+
+  test("an output with no ASIO telemetry, or a driver at no rate, fails", () => {
+    const none = dvs(1900);
+    delete none.asio;
+    expect(asioGateFailures(dvs(100), none)).toEqual(["no ASIO telemetry"]);
+    expect(asioGateFailures(dvs(100), dvs(1900, { rate: 0 }, { driver_rate: 0 }))).toEqual([
+      "it runs at 0 Hz, the driver at 0 Hz",
+    ]);
+  });
+
+  // #233 review round 1: an entry's delay (up to 2 s) is part of its
+  // latency, so the bound is a second ABOVE the delay, not a second flat.
+  test("the latency bound is a second above the entry's delay", () => {
+    const delayed = (latency_ms: number) => dvs(1900, { delay_ms: 1500, latency_ms }, { latency_ms });
+    expect(asioGateFailures(dvs(100), delayed(1566.7)), "1.5 s of delay").toEqual([]);
+    expect(asioGateFailures(dvs(100), delayed(2499.9))).toEqual([]);
+    expect(asioGateFailures(dvs(100), delayed(2500))).toEqual(["its latency is 2500 ms"]);
+    expect(asioGateFailures(dvs(100), delayed(0))).toEqual(["its latency is 0 ms"]);
   });
 });

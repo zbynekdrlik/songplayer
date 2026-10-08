@@ -9,14 +9,21 @@
 //! The list is swapped whole by the outputs task (`audio_out_task.rs`): the
 //! program thread reads one `Arc` snapshot per boundary. `status()` is
 //! `GET /api/v1/program` → `outputs[]`, in list order, disabled entries too.
+//! Two transports: a VBAN output (`vban_out.rs`, one paced thread per
+//! destination) and an ASIO output (#233 lane 3, `asio_out.rs`, one worker
+//! per driver, its status under `asio` with a `note` when the driver's rate
+//! is not the network's or its buffer is over a third of a grid slot).
 
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use sp_core::audio_outputs::{DEFAULT_NETWORK_RATE, OutputEntry, OutputType};
 
+use crate::playback::asio_out::{AsioOut, AsioStatus};
+use crate::playback::asio_state::{Reason, buffer_note, rate_note};
 use crate::playback::audio_out_block::ProgramBlock;
+use crate::playback::audio_out_queue::lock;
 use crate::playback::vban_out::{VbanOut, VbanStatus};
 use crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS;
 use crate::playback::vban_rate::fft_delay_frames;
@@ -26,10 +33,11 @@ pub const STATE_OPENING: &str = "opening";
 pub const STATE_WAITING: &str = "waiting";
 pub const STATE_DISABLED: &str = "disabled";
 
-/// Where an output's blocks go (lane 3 adds `Asio`).
+/// Where an output's blocks go.
 #[derive(Clone)]
 pub enum OutputSink {
     Vban(Arc<VbanOut>),
+    Asio(Arc<AsioOut>),
 }
 
 impl OutputSink {
@@ -37,6 +45,7 @@ impl OutputSink {
     pub fn push(&self, block: ProgramBlock) {
         match self {
             Self::Vban(out) => out.push(block),
+            Self::Asio(out) => out.push(block),
         }
     }
 
@@ -44,6 +53,7 @@ impl OutputSink {
     pub fn stop(&self) {
         match self {
             Self::Vban(out) => out.stop(),
+            Self::Asio(out) => out.stop(),
         }
     }
 
@@ -52,6 +62,15 @@ impl OutputSink {
     pub fn discard(&self) {
         match self {
             Self::Vban(out) => out.discard(),
+            Self::Asio(out) => out.discard(),
+        }
+    }
+
+    /// Why the output's thread could not start, if it could not.
+    fn start_error(&self) -> Option<String> {
+        match self {
+            Self::Vban(out) => out.start_error(),
+            Self::Asio(out) => out.start_error(),
         }
     }
 }
@@ -87,6 +106,12 @@ pub struct OutputStatus {
     pub blocks_dropped: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vban: Option<VbanStatus>,
+    /// #233: a running ASIO driver whose rate is not the network's, or
+    /// whose buffer is over a third of a grid slot (a WARN once).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asio: Option<AsioStatus>,
 }
 
 /// A VBAN output's state: disabled, not built (the reason), its thread not
@@ -128,62 +153,104 @@ impl RunningOutput {
     pub fn start_failed(&self) -> bool {
         self.sink
             .as_ref()
-            .is_some_and(|OutputSink::Vban(out)| out.start_error().is_some())
+            .is_some_and(|sink| sink.start_error().is_some())
     }
 
-    /// This output's line of `outputs[]`.
-    pub fn status(&self) -> OutputStatus {
-        let e = &self.entry;
-        match e.kind {
-            OutputType::Vban => {
-                let st = self
-                    .sink
-                    .as_ref()
-                    .map(|OutputSink::Vban(out)| (out.status(), out.is_running()));
-                // A build error, else why the thread could not start (#233).
-                let not_started = self
-                    .sink
-                    .as_ref()
-                    .and_then(|OutputSink::Vban(out)| out.start_error());
-                let build_error = self.error.clone().or(not_started);
-                let addressed = st
-                    .as_ref()
-                    .is_some_and(|(s, _)| s.targets.iter().any(|t| t.addr.is_some()));
-                let resolve_error = st
-                    .as_ref()
-                    .and_then(|(s, _)| s.targets.first())
-                    .and_then(|t| t.error.clone());
-                let (state, reason) = vban_state(
-                    e.enabled,
-                    build_error.as_deref(),
-                    st.as_ref().is_some_and(|(_, running)| *running),
-                    addressed,
-                    resolve_error.as_deref(),
-                );
-                let telemetry = st.map(|(s, _)| s);
-                OutputStatus {
-                    id: e.id.clone(),
-                    kind: e.kind.as_str(),
-                    name: e.name.clone(),
-                    enabled: e.enabled,
-                    state,
-                    reason,
-                    rate: self.built_rate,
-                    format: e.vban.as_ref().map_or("int24", |v| v.format.as_str()),
-                    channels: 2,
-                    delay_ms: e.delay_ms,
-                    latency_ms: vban_latency_ms(e.delay_ms, self.built_rate),
-                    blocks_sent: telemetry.as_ref().map_or(0, |s| s.blocks_sent),
-                    blocks_dropped: telemetry.as_ref().map_or(0, |s| s.blocks_dropped),
-                    vban: telemetry,
-                }
-            }
+    /// This output's line of `outputs[]` on a network at `network_rate`.
+    pub fn status(&self, network_rate: u32) -> OutputStatus {
+        match (&self.sink, self.entry.kind) {
+            (Some(OutputSink::Asio(out)), _) => self.asio_status(Some(out), network_rate),
+            (Some(OutputSink::Vban(out)), _) => self.vban_status(Some(out)),
+            (None, OutputType::Asio) => self.asio_status(None, network_rate),
+            (None, OutputType::Vban) => self.vban_status(None),
         }
     }
-}
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|p| p.into_inner())
+    fn vban_status(&self, out: Option<&Arc<VbanOut>>) -> OutputStatus {
+        let e = &self.entry;
+        let st = out.map(|out| (out.status(), out.is_running()));
+        // A build error, else why the thread could not start (#233).
+        let not_started = out.and_then(|out| out.start_error());
+        let build_error = self.error.clone().or(not_started);
+        let addressed = st
+            .as_ref()
+            .is_some_and(|(s, _)| s.targets.iter().any(|t| t.addr.is_some()));
+        let resolve_error = st
+            .as_ref()
+            .and_then(|(s, _)| s.targets.first())
+            .and_then(|t| t.error.clone());
+        let (state, reason) = vban_state(
+            e.enabled,
+            build_error.as_deref(),
+            st.as_ref().is_some_and(|(_, running)| *running),
+            addressed,
+            resolve_error.as_deref(),
+        );
+        let telemetry = st.map(|(s, _)| s);
+        OutputStatus {
+            id: e.id.clone(),
+            kind: e.kind.as_str(),
+            name: e.name.clone(),
+            enabled: e.enabled,
+            state,
+            reason,
+            rate: self.built_rate,
+            format: e.vban.as_ref().map_or("int24", |v| v.format.as_str()),
+            channels: 2,
+            delay_ms: e.delay_ms,
+            latency_ms: vban_latency_ms(e.delay_ms, self.built_rate),
+            blocks_sent: telemetry.as_ref().map_or(0, |s| s.blocks_sent),
+            blocks_dropped: telemetry.as_ref().map_or(0, |s| s.blocks_dropped),
+            vban: telemetry,
+            note: None,
+            asio: None,
+        }
+    }
+
+    /// #233: an ASIO output's line: the driver's rate and sample type, its
+    /// state and reason from the worker (a build error or a failed spawn
+    /// first), the notes while it runs.
+    fn asio_status(&self, out: Option<&Arc<AsioOut>>, network_rate: u32) -> OutputStatus {
+        let e = &self.entry;
+        let snap = out.map(|out| out.snapshot());
+        let failed = self.error.clone().or(out.and_then(|out| out.start_error()));
+        let (state, reason) = match (&snap, failed) {
+            _ if !e.enabled => (STATE_DISABLED, None),
+            (_, Some(why)) => (STATE_WAITING, Some(why)),
+            (Some(s), None) => (s.state, s.reason.as_ref().map(Reason::text)),
+            (None, None) => (STATE_OPENING, None),
+        };
+        let status = snap.as_ref().map(|s| s.status.clone());
+        let rate = status.as_ref().map_or(0, |s| s.driver_rate);
+        let notes: Vec<String> = [
+            rate_note(rate, network_rate),
+            status
+                .as_ref()
+                .and_then(|s| buffer_note(s.buffer_frames, rate)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let running = state == STATE_RUNNING;
+        OutputStatus {
+            id: e.id.clone(),
+            kind: e.kind.as_str(),
+            name: e.name.clone(),
+            enabled: e.enabled,
+            state,
+            reason,
+            rate,
+            format: status.as_ref().map_or("", |s| s.sample_type),
+            channels: 2,
+            delay_ms: e.delay_ms,
+            latency_ms: status.as_ref().map_or(0.0, |s| s.latency_ms),
+            blocks_sent: snap.as_ref().map_or(0, |s| s.blocks_sent),
+            blocks_dropped: snap.as_ref().map_or(0, |s| s.blocks_dropped),
+            vban: None,
+            note: (running && !notes.is_empty()).then(|| notes.join("; ")),
+            asio: status,
+        }
+    }
 }
 
 /// The program's audio outputs (owned by `ProgramBus`).
@@ -252,9 +319,14 @@ impl AudioOutputs {
         *lock(&self.problems) = problems;
     }
 
-    /// `outputs[]`, in list order.
+    /// `outputs[]`, in list order, on the network rate the list was applied
+    /// with.
     pub fn status(&self) -> Vec<OutputStatus> {
-        self.running().iter().map(RunningOutput::status).collect()
+        let network_rate = self.network_rate();
+        self.running()
+            .iter()
+            .map(|o| o.status(network_rate))
+            .collect()
     }
 
     /// Tests: one VBAN output as the whole fan-out (#210's test seam).

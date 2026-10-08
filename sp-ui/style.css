@@ -510,6 +510,24 @@ body {
     font-size: 0.85rem;
 }
 
+/* #233 lane 3: the row's transport ("VBAN" / "ASIO") and an ASIO row's rate
+   note sit on the fields' baseline like the state line. */
+.audio-output-type,
+.audio-output-asio-rate {
+    align-self: center;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+}
+
+.audio-output-type {
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+.audio-output-asio-rate {
+    color: var(--text-dim);
+}
+
 .audio-output-row button {
     margin-bottom: 10px;
     background: transparent;

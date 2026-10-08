@@ -39,8 +39,8 @@ pub const SETTING_MIX_DUB_DABING: &str = "mix_dub_dabing";
 /// and lv1). `"true"` sends; anything else (or absent) = off, the default.
 /// #233: the three `vban_*` keys are read only by the one-time migration
 /// into [`SETTING_AUDIO_OUTPUTS`] (sp-server `audio_out_migrate.rs`), which
-/// KEEPS them, so a rollback to ≤ 0.72 still sends to FOH; lane 3 deletes
-/// the keys and these constants.
+/// KEEPS them, so a rollback to ≤ 0.72 still sends to FOH; a later lane
+/// deletes the keys and these constants once the list has run a main release.
 pub const SETTING_VBAN_ENABLED: &str = "vban_enabled";
 /// #210: the ASCII VBAN stream name, at most 16 chars
 /// ([`DEFAULT_VBAN_STREAM_NAME`] until the B4 switch-over, never cg OBS's `cg`).

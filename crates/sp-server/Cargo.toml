@@ -67,6 +67,12 @@ if-addrs = "0.15"
 # fixed ratio, `playback/vban_rate.rs`). Pure Rust, MIT OR Apache-2.0 (its MIT notice
 # ships in THIRD-PARTY-NOTICES.txt), pinned exactly.
 rubato = "=5.0.1"
+# #233 lane 3: the lock-free single-producer / single-consumer ring between
+# an ASIO output's worker and its driver's buffer-switch callback (the
+# callback only copies: no allocation, lock or syscall). No dependencies,
+# MIT OR Apache-2.0 (its MIT notice ships in THIRD-PARTY-NOTICES.txt),
+# pinned exactly.
+rtrb = "=0.4.0"
 
 # #162: the box-overload guard's Windows OS calls — GlobalMemoryStatusEx for the
 # pre-spawn memory-headroom read + a per-child Job Object (JOB_OBJECT_LIMIT_
@@ -83,7 +89,19 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_ProcessStatus",
     # #147 round 9: SetProcessWorkingSetSizeEx + QUOTA_LIMITS_HARDWS_* (hard min WS).
     "Win32_System_Memory",
+    # #233 lane 3: an ASIO output's worker pumps its driver's window messages
+    # (PeekMessageW / TranslateMessage / DispatchMessageW).
+    "Win32_UI_WindowsAndMessaging",
+    # #233 lane 3: the ASIO worker holds its thread's COM apartment
+    # (CoInitializeEx / CoUninitialize) for its device's life.
+    "Win32_System_Com",
 ] }
+# #233 lane 3: the ASIO output's host — azo, a pure-Rust COM ASIO host (MIT,
+# no Steinberg SDK, no LLVM; iemmixer's choice), 0.4.0 per main-session
+# ruling 10 (finding 6046530840). Without its default `host` feature (a
+# oneshot-based helper thread the output does not use). Pinned exactly; its
+# MIT notice and azo-sys's ship in THIRD-PARTY-NOTICES.txt.
+azo = { version = "=0.4.0", default-features = false }
 
 [dev-dependencies]
 tower = "0.5"

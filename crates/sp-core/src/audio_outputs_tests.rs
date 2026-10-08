@@ -87,7 +87,7 @@ fn the_names_of_the_types_and_formats() {
     assert_eq!(OutputType::Vban.as_str(), "vban");
     assert_eq!(OutputType::parse("vban"), Some(OutputType::Vban));
     assert_eq!(OutputType::parse("VBAN"), None);
-    assert_eq!(OutputType::NAMES, "vban");
+    assert_eq!(OutputType::NAMES, "vban or asio");
     for f in [
         VbanSampleFormat::Int16,
         VbanSampleFormat::Int24,
@@ -447,4 +447,370 @@ fn the_wire_stream_name_is_what_vban_puts_on_the_wire() {
     assert_eq!(wire_stream_name("sp-program"), "sp-program");
     assert_eq!(wire_stream_name("abcdefghijklmnopq"), "abcdefghijklmnop");
     assert_eq!(wire_stream_name("čo\tje"), "_o_je");
+}
+
+// #233 lane 3: ASIO entries.
+
+fn dvs(id: &str) -> OutputEntry {
+    OutputEntry::asio(
+        id,
+        "DVS",
+        AsioDest {
+            driver: "Dante Virtual Soundcard (x64)".into(),
+            channels: [0, 1],
+        },
+    )
+}
+
+fn asio_mut(e: &mut OutputEntry) -> &mut AsioDest {
+    e.asio.as_mut().unwrap()
+}
+
+#[test]
+fn an_asio_entry_serializes_in_the_spec_layout() {
+    let text = serde_json::to_string(&dvs("out-3")).unwrap();
+    assert_eq!(
+        text,
+        r#"{"id":"out-3","name":"DVS","type":"asio","enabled":true,"rate":"network","delay_ms":0,"asio":{"driver":"Dante Virtual Soundcard (x64)","channels":[0,1]}}"#
+    );
+    let back: OutputEntry = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, dvs("out-3"));
+    assert!(validate_entry(0, &dvs("out-3")).is_ok());
+    assert_eq!(OutputType::Asio.as_str(), "asio");
+    assert_eq!(OutputType::parse("asio"), Some(OutputType::Asio));
+    assert_eq!(OutputType::parse("ASIO"), None);
+    // A VBAN entry has no `asio` block, an ASIO entry no `vban` block.
+    assert!(!serde_json::to_string(&foh()).unwrap().contains("asio"));
+    assert_eq!(dvs("out-3").vban, None);
+}
+
+#[test]
+fn asio_limits_at_their_edges() {
+    let check = |f: &dyn Fn(&mut OutputEntry)| {
+        let mut e = dvs("out-3");
+        f(&mut e);
+        validate_entry(0, &e).map_err(|err| (err.field, err.problem))
+    };
+    assert!(check(&|e| asio_mut(e).driver = "d".repeat(128)).is_ok());
+    assert!(
+        check(&|e| asio_mut(e).driver = "ď".repeat(128)).is_ok(),
+        "counted in characters"
+    );
+    assert_eq!(
+        check(&|e| asio_mut(e).driver = "d".repeat(129)),
+        Err(("asio.driver", Problem::TooLong))
+    );
+    assert_eq!(
+        check(&|e| asio_mut(e).driver = String::new()),
+        Err(("asio.driver", Problem::Empty))
+    );
+    assert_eq!(
+        check(&|e| asio_mut(e).driver = "  ".into()),
+        Err(("asio.driver", Problem::Empty))
+    );
+    assert_eq!(
+        check(&|e| asio_mut(e).driver = "DVS\u{7}".into()),
+        Err(("asio.driver", Problem::BadCharacters))
+    );
+    assert!(check(&|e| asio_mut(e).channels = [511, 0]).is_ok());
+    assert!(check(&|e| asio_mut(e).channels = [0, 511]).is_ok());
+    assert_eq!(
+        check(&|e| asio_mut(e).channels = [0, 512]),
+        Err(("asio.channels", Problem::OutOfRange))
+    );
+    assert_eq!(
+        check(&|e| asio_mut(e).channels = [512, 1]),
+        Err(("asio.channels", Problem::OutOfRange))
+    );
+    assert_eq!(
+        check(&|e| asio_mut(e).channels = [3, 3]),
+        Err(("asio.channels", Problem::SameChannel))
+    );
+    assert_eq!(check(&|e| e.asio = None), Err(("asio", Problem::Missing)));
+    // The shared rules hold for an ASIO entry too.
+    assert_eq!(
+        check(&|e| e.delay_ms = 2_001),
+        Err(("delay_ms", Problem::TooLarge))
+    );
+}
+
+#[test]
+fn two_asio_entries_on_one_driver_are_refused() {
+    let err = validate_list(&[dvs("out-1"), dvs("out-2")]).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "entry 2 (id out-2): asio.driver is already used by an earlier ASIO entry (a driver takes one client)"
+    );
+    assert_eq!(
+        err.sk(),
+        "Výstup 2 (out-2): pole „ovládač“ je už použité iným výstupom ASIO (ovládač berie jedného klienta)"
+    );
+    let mut off = dvs("out-2");
+    off.enabled = false;
+    assert_eq!(
+        validate_list(&[dvs("out-1"), off]),
+        Err(err),
+        "a switched-off entry still names the driver"
+    );
+    // Another driver is fine, a VBAN entry between them too (foh is out-1).
+    let mut other = dvs("out-3");
+    asio_mut(&mut other).driver = "Blackmagic ASIO".into();
+    assert!(validate_list(&[dvs("out-2"), foh(), other]).is_ok());
+}
+
+#[test]
+fn at_most_four_asio_entries() {
+    let drivers = |n: u32| -> Vec<OutputEntry> {
+        (1..=n)
+            .map(|k| {
+                OutputEntry::asio(
+                    &format!("out-{k}"),
+                    "a",
+                    AsioDest {
+                        driver: format!("d{k}"),
+                        channels: [0, 1],
+                    },
+                )
+            })
+            .collect()
+    };
+    assert!(validate_list(&drivers(4)).is_ok());
+    let five = validate_list(&drivers(5)).unwrap_err();
+    assert_eq!(
+        five,
+        ListError::TooManyOfType {
+            kind: OutputType::Asio,
+            count: 5,
+            max: MAX_ASIO_OUTPUTS
+        }
+    );
+    assert_eq!(MAX_ASIO_OUTPUTS, 4);
+    assert_eq!(
+        five.to_string(),
+        "audio_outputs has 5 asio entries (at most 4)"
+    );
+    assert_eq!(five.sk(), "Výstupov ASIO je 5, najviac môže byť 4");
+    // 8 VBAN and 4 ASIO entries are a whole list.
+    let mut full: Vec<OutputEntry> = (1..=8)
+        .map(|n| OutputEntry::vban(&format!("v-{n}"), "v", dest("h", 6980)))
+        .collect();
+    full.extend(drivers(4));
+    assert!(validate_list(&full).is_ok());
+}
+
+#[test]
+fn the_asio_problems_and_fields_have_their_english_and_slovak_text() {
+    let cases = [
+        (
+            "asio",
+            Problem::Missing,
+            "asio is missing",
+            "pole „nastavenie ASIO“ chýba",
+        ),
+        (
+            "asio.driver",
+            Problem::Empty,
+            "asio.driver is empty",
+            "pole „ovládač“ je prázdne",
+        ),
+        (
+            "asio.driver",
+            Problem::DriverTaken,
+            "asio.driver is already used by an earlier ASIO entry (a driver takes one client)",
+            "pole „ovládač“ je už použité iným výstupom ASIO (ovládač berie jedného klienta)",
+        ),
+        (
+            "asio.channels",
+            Problem::OutOfRange,
+            "asio.channels must be 0-511",
+            "pole „kanály“ musí byť 1 až 512",
+        ),
+        (
+            "asio.channels",
+            Problem::SameChannel,
+            "asio.channels must name two different channels",
+            "pole „kanály“ musí obsahovať dva rôzne kanály",
+        ),
+    ];
+    for (field, problem, en, sk) in cases {
+        let e = EntryError {
+            index: 0,
+            id: "out-3".into(),
+            field,
+            problem,
+        };
+        assert_eq!(e.to_string(), format!("entry 1 (id out-3): {en}"));
+        assert_eq!(ListError::Entry(e).sk(), format!("Výstup 1 (out-3): {sk}"));
+    }
+}
+
+#[test]
+fn a_new_asio_entry_takes_the_next_id_and_channels_1_and_2() {
+    let e = new_asio(&[dvs("out-4")], "Blackmagic ASIO");
+    assert_eq!(
+        (e.id.as_str(), e.name.as_str(), e.kind),
+        ("out-5", "ASIO 5", OutputType::Asio)
+    );
+    assert!(e.enabled);
+    assert_eq!((e.rate, e.delay_ms), (RateChoice::Network, 0));
+    assert_eq!(e.vban, None);
+    assert_eq!(
+        e.asio.unwrap(),
+        AsioDest {
+            driver: "Blackmagic ASIO".into(),
+            channels: [0, 1]
+        }
+    );
+    let first = new_asio(&[], "");
+    assert_eq!(
+        (first.id.as_str(), first.name.as_str()),
+        ("out-1", "ASIO 1")
+    );
+}
+
+#[test]
+fn every_asio_reason_code_reads_in_slovak() {
+    let table = [
+        ("not_found", "ovládač nie je v systéme"),
+        ("busy", "ovládač používa iný program"),
+        ("refused", "ovládač sa nedá použiť"),
+        ("failed", "chyba ovládača"),
+        ("reset", "ovládač sa reštartuje"),
+        ("rate_changed", "ovládač zmenil frekvenciu"),
+        ("stalled", "ovládač neodpovedá"),
+        ("windows_only", "ASIO funguje len vo Windows"),
+        ("later", "neznámy dôvod"),
+        ("", "neznámy dôvod"),
+    ];
+    for (code, sk) in table {
+        assert_eq!(asio_reason_sk(code), sk, "{code}");
+    }
+}
+
+/// #233 review round 1: "(nenájdený)" only against a KNOWN list.
+#[test]
+fn the_driver_options_mark_a_stored_driver_only_a_known_list_lacks() {
+    let dvs = "Dante Virtual Soundcard (x64)";
+    let blackmagic = "Blackmagic ASIO";
+    let listed = vec![dvs.to_string(), blackmagic.to_string()];
+    let pair = |value: &str, label: &str| (value.to_string(), label.to_string());
+    let both = vec![pair(dvs, dvs), pair(blackmagic, blackmagic)];
+    assert_eq!(asio_driver_options(Some(&listed), blackmagic), both);
+    assert_eq!(asio_driver_options(Some(&listed), ""), both);
+    let mut with_old = both.clone();
+    with_old.push(pair("Old Card ASIO", "Old Card ASIO (nenájdený)"));
+    assert_eq!(
+        asio_driver_options(Some(&listed), "Old Card ASIO"),
+        with_old
+    );
+    assert_eq!(
+        asio_driver_options(Some(&[]), "Old Card ASIO"),
+        vec![pair("Old Card ASIO", "Old Card ASIO (nenájdený)")],
+        "a known empty list lacks it too"
+    );
+    assert_eq!(
+        asio_driver_options(None, "Old Card ASIO"),
+        vec![pair("Old Card ASIO", "Old Card ASIO")],
+        "an unknown list marks nothing"
+    );
+    assert_eq!(asio_driver_options(None, ""), Vec::new());
+}
+
+/// #233 review round 1: a shown 0 is refused, never channel 1.
+#[test]
+fn an_asio_channel_is_shown_1_based_and_a_shown_0_is_refused() {
+    assert_eq!(asio_channel_index(1), 0);
+    assert_eq!(asio_channel_index(512), 511);
+    assert_eq!(asio_channel_index(0), u32::MAX);
+    assert_eq!(asio_channel_shown(0), 1);
+    assert_eq!(asio_channel_shown(511), 512);
+    assert_eq!(asio_channel_shown(u32::MAX), 0, "a typed 0 reads back as 0");
+    for shown in [0, 1, 2, 512, 513, u32::MAX] {
+        assert_eq!(asio_channel_shown(asio_channel_index(shown)), shown);
+    }
+    let mut e = new_asio(&[], "Dante Virtual Soundcard (x64)");
+    e.asio.as_mut().expect("an ASIO entry").channels[0] = asio_channel_index(0);
+    let err = validate_list(&[e]).expect_err("a shown 0 is no channel");
+    assert_eq!(
+        err.sk(),
+        "Výstup 1 (out-1): pole „kanály“ musí byť 1 až 512"
+    );
+}
+
+/// #233 review round 2: the two codes added for a lost clock and a driver
+/// another output still holds.
+#[test]
+fn a_lost_clock_and_a_held_driver_read_in_slovak() {
+    assert_eq!(
+        asio_reason_sk("clock_lost"),
+        "ovládač stratil hodinový signál"
+    );
+    assert_eq!(
+        asio_reason_sk("held"),
+        "predchádzajúci výstup ešte neuvoľnil ovládač"
+    );
+}
+
+/// #233 review round 2: "Pridať výstup ASIO" is off while the list loads,
+/// after a failed read, and on a box that lists no driver.
+#[test]
+fn the_add_asio_button_says_why_it_is_off() {
+    let listed = vec!["Dante Virtual Soundcard (x64)".to_string()];
+    assert_eq!(asio_add_refusal(Some(&listed), false), None);
+    assert_eq!(
+        asio_add_refusal(Some(&listed), true),
+        None,
+        "a list was read"
+    );
+    assert_eq!(
+        asio_add_refusal(Some(&[]), false),
+        Some("V systéme nie je žiadny ovládač ASIO")
+    );
+    assert_eq!(
+        asio_add_refusal(None, true),
+        Some("Zoznam ovládačov ASIO sa nenačítal")
+    );
+    assert_eq!(asio_add_refusal(None, false), Some(""), "still loading");
+}
+
+/// #233 review round 4: a running ASIO output's line; "meria sa" until
+/// the server measured the latency.
+#[test]
+fn a_running_asio_output_reads_its_latency_or_that_it_is_measured() {
+    assert_eq!(
+        asio_running_text("beží", 70.625, 0.4, 0),
+        "beží · 71 ms · +0.4 ppm · výpadky 0"
+    );
+    assert_eq!(
+        asio_running_text("beží", 0.0, -1.26, 3),
+        "beží · meria sa · -1.3 ppm · výpadky 3"
+    );
+}
+
+/// #233 review round 4: a parked driver's Slovak says only a restart helps.
+#[test]
+fn a_parked_driver_reads_in_slovak() {
+    assert_eq!(
+        asio_reason_sk("parked"),
+        "ovládač zamrzol — pomôže len reštart SongPlayera"
+    );
+}
+
+/// #233 review round 4: a waiting ASIO output's line; no next try for a
+/// parked driver.
+#[test]
+fn a_waiting_asio_output_reads_its_reason_and_next_try() {
+    assert_eq!(
+        asio_waiting_text("čaká", Some("busy"), Some(10.0)),
+        "čaká · ovládač používa iný program · ďalší pokus o 10 s"
+    );
+    assert_eq!(
+        asio_waiting_text("čaká", Some("parked"), Some(60.0)),
+        "čaká · ovládač zamrzol — pomôže len reštart SongPlayera"
+    );
+    assert_eq!(
+        asio_waiting_text("čaká", None, Some(2.0)),
+        "čaká · ďalší pokus o 2 s"
+    );
+    assert_eq!(asio_waiting_text("otvára sa", None, None), "otvára sa");
 }

@@ -143,11 +143,12 @@ fn settings(entries: Vec<OutputEntry>, network_rate: u32) -> OutputsSettings {
 }
 
 /// The starter of the tests: no thread.
-fn no_thread(_: &Arc<VbanOut>, _: &str) {}
+fn no_thread(_: &OutputSink, _: &str) {}
 
 fn vban(o: &RunningOutput) -> Arc<VbanOut> {
     match &o.sink {
         Some(OutputSink::Vban(out)) => out.clone(),
+        Some(OutputSink::Asio(_)) => panic!("{} is an ASIO output", o.entry.id),
         None => panic!("{} has no output", o.entry.id),
     }
 }
@@ -420,7 +421,7 @@ async fn renaming_an_output_keeps_it_running_under_its_new_name() {
 async fn a_built_output_starts_its_thread_once_and_a_kept_one_never_again() {
     let started = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let seen = started.clone();
-    let start = move |_: &Arc<VbanOut>, id: &str| seen.lock().unwrap().push(id.to_string());
+    let start = move |_: &OutputSink, id: &str| seen.lock().unwrap().push(id.to_string());
     let outputs = AudioOutputs::new();
     let mut resolved = HashMap::new();
     let (a, b) = (entry("out-1", FIXED), entry("out-2", FIXED));
@@ -541,4 +542,87 @@ fn an_output_whose_thread_could_not_start_is_rebuilt_on_the_next_pass() {
             stop: vec![0]
         }
     );
+}
+
+// #233 lane 3: ASIO entries in the task.
+
+fn dvs(id: &str, driver: &str) -> OutputEntry {
+    OutputEntry::asio(
+        id,
+        "DVS",
+        sp_core::audio_outputs::AsioDest {
+            driver: driver.into(),
+            channels: [0, 1],
+        },
+    )
+}
+
+#[test]
+fn a_network_rate_change_never_rebuilds_an_asio_entry() {
+    let d = dvs("out-3", "Dante Virtual Soundcard (x64)");
+    assert_eq!(
+        build_rate(&d, 96_000),
+        0,
+        "the driver's rate, not the network's"
+    );
+    let p = plan(&[ran(&d, 0)], std::slice::from_ref(&d), 44_100);
+    assert_eq!(p.steps, vec![Step::Keep(0)]);
+    let mut moved = d.clone();
+    moved.asio.as_mut().unwrap().channels = [2, 3];
+    assert_eq!(
+        plan(&[ran(&d, 0)], &[moved], 96_000).stop,
+        vec![0],
+        "new channels rebuild it"
+    );
+}
+
+#[tokio::test]
+async fn an_asio_entry_is_built_and_its_worker_started_through_the_starter() {
+    let started = Arc::new(std::sync::Mutex::new(Vec::<(String, &'static str)>::new()));
+    let seen = started.clone();
+    let start = move |sink: &OutputSink, id: &str| {
+        let kind = match sink {
+            OutputSink::Vban(_) => "vban",
+            OutputSink::Asio(_) => "asio",
+        };
+        seen.lock().unwrap().push((id.to_string(), kind));
+    };
+    let outputs = AudioOutputs::new();
+    let mut resolved = HashMap::new();
+    let d = dvs("out-3", "Dante Virtual Soundcard (x64)");
+    apply(
+        &outputs,
+        settings(vec![entry("out-1", FIXED), d.clone()], 96_000),
+        &mut resolved,
+        &start,
+    )
+    .await;
+    assert_eq!(
+        *started.lock().unwrap(),
+        vec![("out-1".to_string(), "vban"), ("out-3".to_string(), "asio")]
+    );
+    let list = outputs.running();
+    assert!(matches!(list[1].sink, Some(OutputSink::Asio(_))));
+    assert_eq!((list[1].built_rate, list[1].error.as_deref()), (0, None));
+    assert!(
+        !resolved.contains_key("out-3"),
+        "an ASIO output resolves nothing"
+    );
+    // The same list again keeps it: not started twice.
+    apply(
+        &outputs,
+        settings(vec![entry("out-1", FIXED), d], 48_000),
+        &mut resolved,
+        &start,
+    )
+    .await;
+    assert_eq!(started.lock().unwrap().len(), 2);
+    // Removed: its worker is told to stop at once (its queue dropped).
+    let asio = match &outputs.running()[1].sink {
+        Some(OutputSink::Asio(out)) => out.clone(),
+        _ => panic!("no ASIO output"),
+    };
+    asio.push(ProgramBlock::silence(1));
+    apply(&outputs, settings(vec![], 48_000), &mut resolved, &start).await;
+    assert_eq!(asio.queued(), 0);
 }

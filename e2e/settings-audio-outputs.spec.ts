@@ -279,7 +279,7 @@ test("a saved entry the server does not run reads so, with the server's reason (
   await expect(rows.nth(0).locator('[data-testid="audio-output-state"]')).toContainText("beží", { timeout: 10000 });
   const skipped = rows.nth(1).locator('[data-testid="audio-output-state"]');
   await expect(skipped).toHaveText("uložený, nespustený", { timeout: 10000 });
-  await expect(skipped).toHaveAttribute("title", "Hlásenie servera: entry 2 (id out-2): type must be vban");
+  await expect(skipped).toHaveAttribute("title", "Hlásenie servera: entry 2 (id out-2): type must be vban or asio");
   // A row added here and not saved yet is still "neuložený".
   await page.locator('[data-testid="audio-outputs-add-vban"]').click();
   await expect(rows.nth(2).locator('[data-testid="audio-output-state"]')).toHaveText("neuložený");
@@ -409,6 +409,7 @@ test("a stored list the dashboard cannot read is never saved over (#233)", async
   const patches = settingsPatches(page);
   // The stored list holds an entry this dashboard cannot read (a later
   // version's type, after a rollback), served through the page's GET only.
+  // (An ASIO entry is readable since lane 3: a later transport stands in.)
   await page.route("**/api/v1/settings", async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
@@ -416,9 +417,7 @@ test("a stored list the dashboard cannot read is never saved over (#233)", async
     }
     const response = await route.fetch();
     const body = await response.json();
-    body.audio_outputs = JSON.stringify([
-      { id: "out-1", name: "DVS", type: "asio", asio: { driver: "Dante Virtual Soundcard (x64)", channels: [0, 1] } },
-    ]);
+    body.audio_outputs = JSON.stringify([{ id: "out-1", name: "AES67", type: "aes67" }]);
     await route.fulfill({ response, json: body });
   });
   try {
@@ -440,5 +439,290 @@ test("a stored list the dashboard cannot read is never saved over (#233)", async
   } finally {
     await page.unroute("**/api/v1/settings");
   }
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+// #233 lane 3: ASIO outputs. The mock lists two drivers
+// (`GET /api/v1/audio/asio-drivers`) and runs an enabled ASIO entry at the
+// network rate with its `asio` telemetry; `/__mock/asio-state {id,
+// reason_code, reason, retry_in_s}` holds one waiting (reset by
+// settings-reset).
+
+test("an ASIO output: pick the driver, channels 3 and 4, save; it runs and reloads as saved (#233)", async ({
+  page,
+  request,
+}) => {
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  await page.locator('[data-testid="audio-outputs-add-asio"]').click();
+  const row = page.locator('[data-testid="audio-output-row"]');
+  await expect(row).toHaveCount(1);
+  await expect(row.locator('[data-testid="audio-output-type"]')).toHaveText("ASIO");
+  await expect(row.locator('[data-testid="audio-output-name"]')).toHaveValue("ASIO 1");
+  // The VBAN fields are not an ASIO output's; its rate is the driver's.
+  await expect(row.locator('[data-testid="audio-output-vban-host"]')).toHaveCount(0);
+  await expect(row.locator('[data-testid="audio-output-rate"]')).toHaveCount(0);
+  await expect(row.locator('[data-testid="audio-output-asio-rate"]')).toHaveText("Frekvencia: podľa ovládača");
+  // The first listed driver, channels 1 and 2 (shown 1-based).
+  const driver = row.locator('[data-testid="audio-output-asio-driver"]');
+  await expect(driver).toHaveValue("Dante Virtual Soundcard (x64)");
+  await expect(row.locator('[data-testid="audio-output-asio-left"]')).toHaveValue("1");
+  await expect(row.locator('[data-testid="audio-output-asio-right"]')).toHaveValue("2");
+  await driver.selectOption("Blackmagic ASIO");
+  await row.locator('[data-testid="audio-output-asio-left"]').fill("3");
+  await row.locator('[data-testid="audio-output-asio-right"]').fill("4");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Uložené");
+  expect(patches).toHaveLength(1);
+  expect(JSON.parse(patches[0]["audio_outputs"] as string)).toEqual([
+    {
+      id: "out-1",
+      name: "ASIO 1",
+      type: "asio",
+      enabled: true,
+      rate: "network",
+      delay_ms: 0,
+      asio: { driver: "Blackmagic ASIO", channels: [2, 3] },
+    },
+  ]);
+  // Backend effect: the program lists it running with its telemetry.
+  const program = await (await request.get("/api/v1/program")).json();
+  expect(program.outputs[0].type).toBe("asio");
+  expect(program.outputs[0].asio.driver).toBe("Blackmagic ASIO");
+  await expect(page.locator('[data-testid="audio-output-state"]')).toContainText("ppm", { timeout: 10000 });
+  await expect(page.locator('[data-testid="audio-output-state"]')).toContainText("výpadky 0");
+
+  await page.reload();
+  await openSettings(page);
+  // The saved driver is not the select's first option: the reload must show it.
+  await expect(page.locator('[data-testid="audio-output-asio-driver"]')).toHaveValue("Blackmagic ASIO");
+  await expect(page.locator('[data-testid="audio-output-asio-left"]')).toHaveValue("3");
+  await expect(page.locator('[data-testid="audio-output-asio-right"]')).toHaveValue("4");
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("two ASIO outputs on one driver are refused in Slovak (#233)", async ({ page }) => {
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  await page.locator('[data-testid="audio-outputs-add-asio"]').click();
+  await page.locator('[data-testid="audio-outputs-add-asio"]').click();
+  await expect(page.locator('[data-testid="audio-output-row"]')).toHaveCount(2);
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText(
+    "Výstup 2 (out-2): pole „ovládač“ je už použité iným výstupom ASIO (ovládač berie jedného klienta)",
+  );
+  expect(patches).toHaveLength(0);
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("a VBAN and an ASIO output side by side, each with its own fields (#233)", async ({ page }) => {
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+  await page.locator('[data-testid="audio-outputs-add-asio"]').click();
+  const rows = page.locator('[data-testid="audio-output-row"]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0).locator('[data-testid="audio-output-type"]')).toHaveText("VBAN");
+  await expect(rows.nth(0).locator('[data-testid="audio-output-asio-driver"]')).toHaveCount(0);
+  await expect(rows.nth(1).locator('[data-testid="audio-output-type"]')).toHaveText("ASIO");
+  await expect(rows.nth(1)).toHaveAttribute("data-id", "out-2");
+  await rows.nth(0).locator('[data-testid="audio-output-vban-host"]').fill("dev1.lan");
+  // Typing in the VBAN row keeps the ASIO row's own values.
+  await expect(rows.nth(1).locator('[data-testid="audio-output-asio-driver"]')).toHaveValue(
+    "Dante Virtual Soundcard (x64)",
+  );
+  await rows.nth(1).locator('[data-testid="audio-output-delay"]').fill("40");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Uložené");
+  const saved = JSON.parse(patches[0]["audio_outputs"] as string);
+  expect(saved.map((e: { id: string; type: string }) => [e.id, e.type])).toEqual([
+    ["out-1", "vban"],
+    ["out-2", "asio"],
+  ]);
+  expect(saved[1].delay_ms).toBe(40);
+  expect(saved[1]).not.toHaveProperty("vban");
+  expect(saved[0]).not.toHaveProperty("asio");
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("a stored ASIO driver this box does not list is shown as not found (#233)", async ({ page, request }) => {
+  const stored = JSON.stringify([
+    { id: "out-4", name: "Old card", type: "asio", asio: { driver: "Old Card ASIO", channels: [0, 1] } },
+  ]);
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: stored } });
+  expect(seeded.status()).toBe(204);
+  await openSettings(page);
+  const driver = page.locator('[data-testid="audio-output-asio-driver"]');
+  await expect(driver).toHaveValue("Old Card ASIO");
+  await expect(driver.locator("option:checked")).toHaveText("Old Card ASIO (nenájdený)");
+  await expect(driver.locator("option")).toHaveCount(3);
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("a waiting ASIO output says why in Slovak, with its next try (#233)", async ({ page, request }) => {
+  const stored = JSON.stringify([
+    { id: "out-1", name: "DVS", type: "asio", asio: { driver: "Dante Virtual Soundcard (x64)", channels: [0, 1] } },
+  ]);
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: stored } });
+  expect(seeded.status()).toBe(204);
+  const held = await request.post("/__mock/asio-state", {
+    data: {
+      id: "out-1",
+      reason_code: "busy",
+      reason: "the driver refused to start (in use by another program?): init failed",
+      retry_in_s: 10,
+    },
+  });
+  expect(held.status()).toBe(200);
+  await openSettings(page);
+  const state = page.locator('[data-testid="audio-output-state"]');
+  await expect(state).toHaveText("čaká · ovládač používa iný program · ďalší pokus o 10 s", { timeout: 10000 });
+  await expect(state).toHaveAttribute(
+    "title",
+    "Hlásenie servera: the driver refused to start (in use by another program?): init failed",
+  );
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+// #233 review round 1: "(nenájdený)" is a claim about the box's list, made
+// only once the list was read (#225: the dashboard claims only what it was
+// told).
+const OLD_CARD = JSON.stringify([
+  { id: "out-4", name: "Old card", type: "asio", asio: { driver: "Old Card ASIO", channels: [0, 1] } },
+]);
+
+test("a stored ASIO driver is not called not found before the driver list is read (#233)", async ({
+  page,
+  request,
+}) => {
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: OLD_CARD } });
+  expect(seeded.status()).toBe(204);
+  // Hold the page's driver list until the test releases it.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/v1/audio/asio-drivers", async (route) => {
+    await held;
+    await route.continue();
+  });
+  try {
+    await openSettings(page);
+    const driver = page.locator('[data-testid="audio-output-asio-driver"]');
+    await expect(driver).toHaveValue("Old Card ASIO");
+    await expect(driver.locator("option")).toHaveCount(1);
+    await expect(driver.locator("option:checked")).toHaveText("Old Card ASIO");
+    await expect(page.locator('[data-testid="audio-outputs-add-asio"]')).toBeDisabled();
+    release();
+    await expect(driver.locator("option:checked")).toHaveText("Old Card ASIO (nenájdený)");
+    await expect(driver.locator("option")).toHaveCount(3);
+    await expect(page.locator('[data-testid="audio-outputs-add-asio"]')).toBeEnabled();
+  } finally {
+    release();
+    await page.unroute("**/api/v1/audio/asio-drivers");
+  }
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("a driver list that could not be read marks no driver and offers no ASIO output (#233)", async ({
+  page,
+  request,
+}) => {
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: OLD_CARD } });
+  expect(seeded.status()).toBe(204);
+  await request.post("/__mock/fail-mode", { data: { kind: "asio-drivers", enabled: true } });
+  try {
+    await openSettings(page);
+    const add = page.locator('[data-testid="audio-outputs-add-asio"]');
+    await expect(add).toHaveAttribute("title", "Zoznam ovládačov ASIO sa nenačítal", { timeout: 10000 });
+    await expect(add).toBeDisabled();
+    const driver = page.locator('[data-testid="audio-output-asio-driver"]');
+    await expect(driver).toHaveValue("Old Card ASIO");
+    await expect(driver.locator("option")).toHaveCount(1);
+    await expect(driver.locator("option:checked")).toHaveText("Old Card ASIO");
+  } finally {
+    await request.post("/__mock/fail-mode", { data: { kind: "asio-drivers", enabled: false } });
+  }
+  // The refused GET is the point of the test: the browser logs its 500.
+  expect(realConsoleErrors().filter((m) => !/Failed to load resource.*500/.test(m))).toEqual([]);
+});
+
+// #233 review round 1: the channels are shown 1-based; a typed 0 is no
+// channel and is refused in Slovak, never silently read as channel 1.
+test("an ASIO channel typed as 0 is refused, never read as channel 1 (#233)", async ({ page }) => {
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  await page.locator('[data-testid="audio-outputs-add-asio"]').click();
+  const left = page.locator('[data-testid="audio-output-asio-left"]');
+  await expect(left).toHaveValue("1");
+  await left.fill("0");
+  await expect(left).toHaveValue("0");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText(
+    "Výstup 1 (out-1): pole „kanály“ musí byť 1 až 512",
+  );
+  expect(patches).toHaveLength(0);
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+// #233 review round 2: a box that lists no ASIO driver offers no ASIO
+// output (a row with an empty driver select would only be refused).
+test("a box with no ASIO driver offers no ASIO output, and says why (#233)", async ({ page }) => {
+  await page.route("**/api/v1/audio/asio-drivers", (route) => route.fulfill({ json: { drivers: [] } }));
+  try {
+    await openSettings(page);
+    const add = page.locator('[data-testid="audio-outputs-add-asio"]');
+    await expect(add).toHaveAttribute("title", "V systéme nie je žiadny ovládač ASIO", { timeout: 10000 });
+    await expect(add).toBeDisabled();
+    await expect(page.locator('[data-testid="audio-outputs-add-vban"]')).toBeEnabled();
+  } finally {
+    await page.unroute("**/api/v1/audio/asio-drivers");
+  }
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+// #233 review round 4: right after an open the servo has measured no
+// window yet and the server reads the latency 0 — the row says it is being
+// measured, never "0 ms".
+test("a running ASIO output whose latency is not measured yet says so (#233)", async ({ page, request }) => {
+  const stored = JSON.stringify([
+    { id: "out-1", name: "DVS", type: "asio", asio: { driver: "Dante Virtual Soundcard (x64)", channels: [0, 1] } },
+  ]);
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: stored } });
+  expect(seeded.status()).toBe(204);
+  const measuring = await request.post("/__mock/asio-measuring", { data: { ids: ["out-1"] } });
+  expect(measuring.status()).toBe(200);
+  await openSettings(page);
+  await expect(page.locator('[data-testid="audio-output-state"]')).toHaveText(
+    "beží · meria sa · +0.4 ppm · výpadky 0",
+    { timeout: 10000 },
+  );
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+// #233 review round 4: a parked driver (a callback that never returned)
+// promises no next try: only a restart of SongPlayer helps.
+test("a parked ASIO driver says only a restart helps, with no next try (#233)", async ({ page, request }) => {
+  const stored = JSON.stringify([
+    { id: "out-1", name: "DVS", type: "asio", asio: { driver: "Dante Virtual Soundcard (x64)", channels: [0, 1] } },
+  ]);
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: stored } });
+  expect(seeded.status()).toBe(204);
+  const held = await request.post("/__mock/asio-state", {
+    data: {
+      id: "out-1",
+      reason_code: "parked",
+      reason: "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts",
+      // The server sends no retry for a parked driver (review round 5); a
+      // retry here pins the dashboard's own guard (`asio_waiting_text`).
+      retry_in_s: 60,
+    },
+  });
+  expect(held.status()).toBe(200);
+  await openSettings(page);
+  await expect(page.locator('[data-testid="audio-output-state"]')).toHaveText(
+    "čaká · ovládač zamrzol — pomôže len reštart SongPlayera",
+    { timeout: 10000 },
+  );
   expect(realConsoleErrors()).toEqual([]);
 });
