@@ -51,6 +51,9 @@ pub struct AsioFigures {
     pub ppm: f64,
     pub offset_ms: f64,
     pub slew_eta_s: Option<f64>,
+    /// The excess an underrun left, kept as a reserve over the target (#233
+    /// comment 6056680979, Q1), ms.
+    pub cushion_ms: f64,
     pub last_fault: Option<LastFault>,
 }
 
@@ -60,7 +63,7 @@ pub const FAULTS_TIP: &str = "Koľkokrát musel výstup skokom vložiť ticho al
 pub const CONVERSION_TIP: &str = "Prevod frekvencie: program SongPlayera má 48 kHz, karta (ovládač ASIO) beží na svojej frekvencii; prevádza ho pásmovo obmedzený sinc resampler (256 koeficientov, BlackmanHarris², tabuľka 256×).";
 pub const CARD_TIP: &str = "O koľko milióntin (ppm) tiknú hodiny karty rýchlejšie (+) alebo pomalšie (−) než hodiny SongPlayera. Odhad sa zamkne po minúte meraní (30 bodov).";
 pub const CORRECTION_TIP: &str = "O koľko milióntin (ppm) resampler práve mení počet vzoriek, aby zvuk zo SongPlayera držal krok s kartou: + pridáva vzorky, − uberá. Plynulo a nepočuteľne; rozpočet ±300 ppm (asi pol centu).";
-pub const SLEW_TIP: &str = "Trvalá odchýlka oneskorenia od cieľa (+ neskôr, − skôr), ktorú resampler plynule dorovnáva zmenou pomeru (najviac o 5 ppm za sekundu), a kedy bude v cieli. Bez skoku, nepočuteľne.";
+pub const SLEW_TIP: &str = "Trvalá odchýlka oneskorenia od cieľa (+ neskôr, − skôr), ktorú resampler plynule dorovnáva zmenou pomeru (najviac o 5 ppm za sekundu), a kedy bude v cieli. Bez skoku, nepočuteľne. Po výpadku si výstup ponechá zvuk, ktorý mu vtedy pribudol, ako rezervu (najviac 33,3 ms) a uvoľňuje ju len pomaly.";
 
 /// `v` to tenths, signed: `+0,4`, `−0,7`, `0,0` (half away from zero).
 pub fn tenths_sk(v: f64) -> String {
@@ -114,6 +117,16 @@ pub fn fault_cause_sk(cause: &str) -> &'static str {
         "deficit" => "v zásobníku chýbal zvuk",
         "excess" => "zásobník by pretiekol",
         _ => "neznámy dôvod",
+    }
+}
+
+/// The slew chip with nothing to drain: the reserve an underrun left
+/// (shown while its tenths are not zero), else the target.
+fn kept_sk(cushion_ms: f64) -> String {
+    if (cushion_ms * 10.0).round() as i64 > 0 {
+        format!("drží rezervu {} ms po výpadku", tenths_sk(cushion_ms))
+    } else {
+        "oneskorenie v cieli".to_string()
     }
 }
 
@@ -178,7 +191,7 @@ pub fn asio_resampling_chips(f: &AsioFigures) -> Vec<Chip> {
             tenths_sk(f.offset_ms),
             eta_sk(s)
         ),
-        None => "oneskorenie v cieli".to_string(),
+        None => kept_sk(f.cushion_ms),
     };
     let mut chips = vec![
         chip("asio-conversion", conversion, CONVERSION_TIP),

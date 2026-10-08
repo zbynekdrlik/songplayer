@@ -1360,6 +1360,7 @@ function mockAsioOutput(e, network) {
             latency_ms: latency,
             offset_ms: 0,
             slew_eta_s: null,
+            cushion_ms: 0,
             underruns: 0,
             resets: 0,
             hard_recentres: 0,
