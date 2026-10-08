@@ -747,7 +747,7 @@ fn a_lost_clock_and_a_held_driver_read_in_slovak() {
     );
     assert_eq!(
         asio_reason_sk("held"),
-        "ovládač ešte uvoľňuje predchádzajúci výstup"
+        "predchádzajúci výstup ešte neuvoľnil ovládač"
     );
 }
 
