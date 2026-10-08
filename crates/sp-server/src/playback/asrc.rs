@@ -46,7 +46,7 @@ use crate::playback::vban_packet::{VBAN_BLOCK_FRAMES, VBAN_BLOCK_SAMPLES, VBAN_C
 pub const ASRC_SINC_LEN: usize = 256;
 /// The sinc table's oversampling: rubato's documented highest-quality
 /// setting (its default is 128).
-pub const ASRC_OVERSAMPLING: usize = 128;
+pub const ASRC_OVERSAMPLING: usize = 256;
 /// The ratio's room around nominal: ±1000 ppm, well past the servo's ±300.
 pub const ASRC_MAX_RELATIVE: f64 = 1.001;
 /// A re-centre's fade, s.
