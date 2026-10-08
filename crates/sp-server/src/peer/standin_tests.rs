@@ -130,6 +130,28 @@ async fn a_parked_stand_in_takes_the_peers_copy_too() {
     );
 }
 
+/// Review round 1: the audio check reads a row whose audio is recorded
+/// (rows of a video share it), not just the lowest row: here the lowest
+/// records none, and the peer's copy is still taken, into every row.
+#[tokio::test]
+async fn a_stand_in_checks_the_audio_of_a_row_that_records_one() {
+    let (snv, pp, rows, _) = snv_and_pp_standin().await;
+    let snv_json = snv_lyrics(&snv).await;
+    sqlx::query("UPDATE videos SET audio_file_path = NULL WHERE id = ?")
+        .bind(rows[0])
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(supersede_next(Some(&pp.ex)).await, rows.to_vec());
+    assert_eq!(json_at(&pp), Some(snv_json));
+    for id in rows {
+        assert_eq!(
+            lyrics_source(&pp, id).await,
+            (1, Some("mtl+g35t".to_string()))
+        );
+    }
+}
+
 /// The peer has no lyrics of the song yet: nothing changes, and the
 /// stand-in is looked at again after its recheck — a quarter of its age,
 /// here 4 h → 1 h — not on the next tick.
