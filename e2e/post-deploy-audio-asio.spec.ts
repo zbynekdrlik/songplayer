@@ -1,8 +1,11 @@
 /**
  * #233 lane 3 post-deploy ASIO gate (SNV: post-deploy.config.ts; PP:
  * post-deploy-pp.config.ts), read-only:
- * 1. The box has Dante Virtual Soundcard registered as an ASIO driver
- *    (`GET /api/v1/audio/asio-drivers`, a registry read; no driver loaded).
+ * 1. The driver list reads (`GET /api/v1/audio/asio-drivers`, a registry
+ *    read; no driver loaded), and a box expected to run an ASIO output
+ *    (SP_ASIO_OUTPUTS_EXPECTED > 0) has Dante Virtual Soundcard among them,
+ *    by its exact name. A box with none expected (PP before its DVS work)
+ *    is not asked for DVS (#233 release review).
  * 2. Exactly SP_ASIO_OUTPUTS_EXPECTED enabled ASIO outputs exist (ci.yml /
  *    deploy-pp.yml; "0" until the main session adds the box's DVS entry,
  *    then "1"), and each one runs, then holds a minute of program blocks at
@@ -44,12 +47,16 @@ async function output(request: APIRequestContext, id: string): Promise<OutputSta
 }
 
 test.describe("ASIO output (#233)", () => {
-  test("the box has Dante Virtual Soundcard as an ASIO driver", async ({ request }) => {
+  test("the driver list reads, with Dante Virtual Soundcard on a box expected to run ASIO", async ({
+    request,
+  }) => {
     const resp = await request.get("/api/v1/audio/asio-drivers");
     expect(resp.status(), "GET /api/v1/audio/asio-drivers").toBe(200);
     const drivers = (await resp.json()).drivers as string[];
-    console.log(`[#233 asio] drivers: ${JSON.stringify(drivers)}`);
-    expect(drivers).toContain(DVS_DRIVER);
+    console.log(`[#233 asio] drivers: ${JSON.stringify(drivers)} (expected outputs: ${EXPECTED})`);
+    if (EXPECTED > 0) {
+      expect(drivers, "an ASIO output is expected: DVS must be registered").toContain(DVS_DRIVER);
+    }
   });
 
   test("every enabled ASIO output runs at its driver's rate with no underrun over a minute", async ({
