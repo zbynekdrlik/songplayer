@@ -264,3 +264,7 @@ impl SplitSyncedDecoder {
 #[cfg(test)]
 #[path = "split_sync_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "split_sync_tests_seek.rs"]
+mod tests_seek;
