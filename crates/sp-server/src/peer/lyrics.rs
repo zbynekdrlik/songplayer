@@ -21,7 +21,11 @@
 //!
 //! #229 item C: while this node's paid AI is off (`paid_ai`), every "run
 //! here" of this hook is a hold instead (`Exchange::local` / `hold`): only a
-//! peer's copy is taken, and the row is picked again later, no attempt.
+//! peer's copy is taken, and the row is picked again later, no attempt. The
+//! gate lives in the exchange: a lyrics worker with none (`peer` `None`, a
+//! unit test's harness) runs here unasked. Production always wires one
+//! (`lib.rs`: `LyricsWorker::with_peer`, every node, even with no peer
+//! listed), so the switch is asked on every node (review round 14).
 
 use std::sync::Arc;
 

@@ -7,9 +7,10 @@ paths:
   - "crates/sp-server/src/reprocess/**"
   - "crates/sp-server/src/peer/ask*.rs"
   - "crates/sp-server/src/peer/held_tests.rs"
+  - "crates/sp-server/src/peer/lyrics.rs"
   - "crates/sp-server/src/peer/queued*.rs"
   - "crates/sp-server/src/lyrics/worker*.rs"
-  - "crates/sp-server/src/dabing/worker.rs"
+  - "crates/sp-server/src/dabing/worker*.rs"
   - "crates/sp-server/src/api/lyrics_g35t.rs"
   - "crates/sp-server/src/api/lyrics.rs"
   - "crates/sp-server/src/api/metadata*.rs"
@@ -76,6 +77,10 @@ Every path:
     for; everything else is held (`Exchange::hold`): `paid_ai::hold`, plus
     a `HELD_RECHECK` (30 min) defer with no attempt counted.
   - The catalog announces no lyrics queued while OFF (`peer::queued`).
+  - The gate lives in the exchange, so it needs one: production wires it
+    into the lyrics worker on every node (`lib.rs`, `with_peer`, even with
+    no peer listed). A worker built without one (a unit test's harness,
+    `peer` `None`) runs here unasked (review round 14).
 - **Translation passes** and `translate_track` (Claude):
   `LyricsWorker::translation_allowed(youtube_id)`, asked after the pass
   picked a song, so only a song it would translate is held.
@@ -91,6 +96,8 @@ Every path:
 - **Dub** (Gemini Live-Translate): `DubWorker::may_dub` is checked every
   tick before a job is picked. The jobs wait where they are: no attempt, no
   failure mark; only the job that would run now is held (none without one).
+  The job's key is read before it is marked `synth` (`DubWorker::job_key`),
+  so a job held there keeps its status too (review round 14).
 - **Lyrics source probe** (`POST /api/v1/lyrics/probe-sources`, Claude on
   the YouTube description): the AI client is handed to it only while ON;
   OFF, the description probe reads "skipped".
@@ -145,7 +152,9 @@ round 13).
 - `api/lyrics_g35t.rs::probe_route_sends_nothing_while_paid_ai_is_off`,
   `api/lyrics_tests.rs::probe_sources_asks_no_claude_while_paid_ai_is_off`.
 - The log captures go through `crate::test_log` (one `Captured` writer +
-  `capturing(&cap)`, test-only).
+  `capturing(&cap)`, test-only). `capturing` installs a global no-op
+  default once, so a capture is never the only registered dispatcher
+  (review round 14, `rust-workspace.md`).
 - Mock: `e2e/settings-paid-ai.spec.ts`. Box: PP's `post-deploy-pp.spec.ts`
   asserts the switch OFF and the chip.
 

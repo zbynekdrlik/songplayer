@@ -250,6 +250,13 @@ impl DubWorker {
             return;
         }
 
+        // Gemini key (first entry, rotation-order preserved) — env-only for the
+        // child. Read before the job is marked synth (#229 review round 14): a
+        // job held for paid AI waits at the status it had.
+        let Some(key) = self.job_key(&job).await else {
+            return;
+        };
+
         // Advance to synth (stems ready, unsupported, or pending-but-not-waited).
         if job.dub_status != "synth"
             && let Err(e) = models_dabing::mark_dub_synth(&self.pool, job.video_id).await
@@ -257,11 +264,6 @@ impl DubWorker {
             warn!(%e, video_id = job.video_id, "dub worker: mark_dub_synth failed");
             return;
         }
-
-        // Gemini key (first entry, rotation-order preserved) — env-only for the child.
-        let Some(key) = self.job_key(&job).await else {
-            return;
-        };
 
         let script_path = match self.ensure_script().await {
             Ok(p) => p,
@@ -513,7 +515,8 @@ impl DubWorker {
     /// list), or `None`: with no key set the job is deferred (an attempt and
     /// `dub_error`, `record_dub_deferral`); with paid AI switched off since
     /// the tick's `may_dub` it is held where it is, never failed (#229 item
-    /// C, review round 13).
+    /// C, review round 13). `process_next` asks it before `mark_dub_synth`,
+    /// so a held job keeps its status (review round 14).
     async fn job_key(&self, job: &models_dabing::DubJob) -> Option<String> {
         if let Some(key) = self.first_gemini_key().await {
             return Some(key);
