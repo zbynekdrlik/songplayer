@@ -329,7 +329,7 @@ fn the_dashboards_tooltips_name_the_outputs_own_figures() {
         format!("s {} ms prelínaním", SPLICE_FADE_S * 1_000.0),
     );
     // Review round 4: a deficit is also a delayed output 4 slots early.
-    let edge_ms = HARD_EXCESS_100NS / 10_000;
+    let edge_ms = format!("{:.1}", HARD_EXCESS_100NS as f64 / 10_000.0).replace('.', ",");
     has(FAULTS_TIP, format!("o viac ako {edge_ms} ms skôr"));
     has(CORRECTION_TIP, format!("±{MAX_PPM} ppm"));
     has(SLEW_TIP, format!("o {MAX_SLEW_PPM_PER_S} ppm za sekundu"));
