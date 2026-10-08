@@ -157,8 +157,10 @@ impl SplitSyncedDecoder {
         self.video.frame_rate()
     }
 
-    /// Forward a seek to both readers. Audio first (sample-accurate), video
-    /// second (keyframe-aligned).
+    /// Forward a seek to both readers. Video first (keyframe-aligned, the one
+    /// a broken file refuses): a refused seek then moves nothing, so the
+    /// pipeline's report that the song plays on from where it was holds for
+    /// both streams (#217 review round 1); audio second (sample-accurate).
     ///
     /// The video reader lands on the previous keyframe (`< position_ms`), so
     /// record `position_ms` as a fast-forward target: [`next_synced`](Self::next_synced)
@@ -166,8 +168,8 @@ impl SplitSyncedDecoder {
     /// first delivered frame is at `>= position_ms` and the cushion refills like a
     /// fresh Play (#192 round 5).
     pub fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
-        self.audio.seek(position_ms)?;
         self.video.seek(position_ms)?;
+        self.audio.seek(position_ms)?;
         self.pending_audio.clear();
         self.pending_video_target_ms = Some(position_ms);
         Ok(())
