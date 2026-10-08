@@ -730,10 +730,15 @@ fn a_latency_change_is_read_again_and_overloads_add_up_across_runs() {
         "{s:?}"
     );
     assert_eq!(s.overloads, 3);
+    w.step(&o, &mut d, T0 + 151 * SLOT + POLL_100NS, None);
+    assert_eq!(
+        o.snapshot().status.overloads,
+        3,
+        "a run's count stays with no new overload"
+    );
     // A reset; the next run's driver counts from 0 again.
     d.events.push_back(DeviceEvents {
         reset: true,
-        overloads: 3,
         ..Default::default()
     });
     let now = T0 + 152 * SLOT;
