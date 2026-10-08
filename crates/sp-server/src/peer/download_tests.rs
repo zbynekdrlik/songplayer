@@ -391,8 +391,12 @@ async fn a_peers_operator_title_is_taken_as_an_operators() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
+/// #229 item A: a peer's parser title is not taken, and this node's
+/// providers (paid AI) are not asked either: SNV holds the song and names
+/// it too (its own repair). The pair is named by this node's title parser,
+/// marked for the repair, which takes SNV's title once SNV has one.
 #[tokio::test]
-async fn a_peers_parser_title_asks_this_nodes_providers() {
+async fn a_peers_parser_title_names_the_pair_by_the_parser_for_the_repair() {
     let (snv, pp, row) = snv_and_pp().await;
     sqlx::query(
         "UPDATE videos SET gemini_failed = 1, metadata_source = 'regex' WHERE youtube_id = ?",
@@ -406,21 +410,17 @@ async fn a_peers_parser_title_asks_this_nodes_providers() {
         first(Some(&pp.ex), &chain, &row).await,
         PeerStep::Done
     ));
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "no provider was asked");
     let now = row_now(&pp, row.id).await;
     assert_eq!(
-        (now.song.as_deref(), now.artist.as_deref()),
-        (Some("Chain Song"), Some("Chain Artist"))
-    );
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert!(
-        pp.cache()
-            .join(audio_filename("Chain Song", "Chain Artist", YT, false))
-            .exists()
+        (now.metadata_source.as_deref(), now.gemini_failed),
+        (Some("regex"), 1),
+        "the title parser's, in the repair queue"
     );
     assert_eq!(
         fetch_record(pp.pool(), YT, "metadata").await.unwrap(),
         None,
-        "this node's providers named it"
+        "no peer's title was taken"
     );
 }
 
