@@ -135,12 +135,16 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   latency is under 16.7 ms (`HARD_FLOOR_100NS`, the base target less 1.5
   slots: the ring then holds < 11.7 ms for a block on time, so most blocks
   of the 10–33 ms hand-off would underrun before the slew could restore it)
-  or more than four slots over the target (`HARD_EXCESS_100NS`, 133.3 ms:
-  the next block would overflow the ring, target + 4 slots + one block)
-  re-centres AT ONCE by its error, through the splice. The floor is
-  ABSOLUTE (review round 2): an entry's delay raises the target, never the
-  floor, so a delayed output 50 ms short still holds its delay in the ring
-  and is slewed (the old edge, relative to the target, spliced it). Whether
+  or more than four slots off the target either way (`HARD_EXCESS_100NS`,
+  133.3 ms: over it the next block would overflow the ring, target + 4
+  slots + one block; under it a delayed output would play that early for
+  many minutes, review round 3: an 8-slot resync at a 300 ms delay was
+  slewed for ~15 min) re-centres AT ONCE by its error, through the splice.
+  The floor is ABSOLUTE (review round 2): an entry's delay raises the
+  target, never the floor, so a delayed output 50 ms short still holds its
+  delay in the ring and is slewed (the old edge, relative to the target,
+  spliced it); at delay 0 the mirrored edge (−66.7 ms) is below the floor
+  and changes nothing. Whether
   the floor should move up to the splice's hold + one slot (≈ 38.3 ms), so
   that a missing boundary at delay 0 is one faded insert rather than a run
   of underruns, is the main session's call (#233 comment 6055539144, Q2).
@@ -197,7 +201,7 @@ comes while still muted fades nothing twice.
 
 **The ASRC** (`Asrc`): ONE rubato 5.0.1 `Async` band-limited sinc in the
 lane's measured setting (`asrc_params`, pinned by
-`the_resampler_runs_rubatos_highest_quality_sinc`; rubato documents no
+`the_resampler_runs_the_measured_sinc_setting`; rubato documents no
 "highest" setting, only cubic as its best quality per oversampling): 256
 taps, the sinc table oversampled 256× (`ASRC_OVERSAMPLING`; rubato's
 default is 128),
@@ -229,7 +233,8 @@ owner's ruling; since review round 2 the observation counts the splice's
 5 ms hold as buffered while the card plays only the ring, as the worker
 does): **0 hard re-centres** in every case — cards −50 / 0 / +50
 ppm (latency ≤ 2 ms after 70 s, |final − card| ≤ 5 ppm); ±1 ms steps at three
-window phases; ±33 ms steps (a date step's remainder) at three phases on a 0
+window phases; ±33 ms steps (+33 a date step's forward remainder, −33 a
+missing boundary; a remainder is forward only) at three phases on a 0
 and a 20 ppm card, back within ±2 ms in ≤ 150 s (model 138.9–148.2 s), 0
 underruns; a hand-off late WITHIN the cushion (singles 40–56 ms, clumps of 2:
 0 underruns, latency within the sawtooth, the correction never more than
@@ -238,13 +243,16 @@ hand-off (10–33 ms, singles 40–80 ms 1 in 900, clumps of 2 / 3): 97 / 33 /
 33 / 99 underrun callbacks in the four configurations, latency ≤ 22 ms
 off. Not all of them are physics: the stop curve drains the excess each
 underrun leaves at up to 300 ppm, which re-exposes the next late block —
-the reviewer's model keeping that excess as cushion instead gives ~20 and
-never 50 ppm off the card (#233 comment 6055539144, Q1, the main
+with the hold, review round 3's model has the correction more than
+50 ppm off the card ~75 % of the time after 120 s (73 % at 512 frames),
+while keeping that excess as cushion gives ~29 underruns (13 at 512) and
+never 50 ppm off (#233 comment 6055539144 + its correction, Q1, the main
 session's call); a callback period 128 → 512 mid-run with no reopen; a
-dropped callback; a 100 ms forward step and a 150 ms stall at four phases
-(slewed); a 1024-frame driver at 48 kHz with a 20 ms step; a 48 kHz card
-at +50 ppm. The ring-limit cases force exactly one each: a 300 ms worker
-stall at three phases (excess) and a 100 ms pause (deficit). A stall near
+dropped callback; a 100 ms forward step and a 150 ms stall at four
+distinct phases of the slot (0 / 8.3 / 16.7 / 25 ms; slewed); a
+1024-frame driver at 48 kHz with a 20 ms step; a 48 kHz card at +50 ppm.
+The ring-limit cases force exactly one each: a 300 ms worker stall at the
+same four phases (excess) and a 100 ms pause (deficit). A stall near
 200 ms is AT the ring's limit (its excess is 4 slots ± the phase: none at
 500.0 / .01 / .02 / .011 / .022 / .033 s, one at 500.03 s), so no test
 pins it. 900 s each;
@@ -542,7 +550,14 @@ guards past the buttons (`sp-ui-frontend.md`). The message span is
 `audio-outputs-status` (`.save-status` is the form's alone: five Nastavenia
 specs read it unscoped, Playwright strict mode). A stored entry missing from
 `outputs[]` reads "uložený, nespustený" with its `outputs_problems` line as
-the tooltip, marked "Hlásenie servera: …" (an unsaved one "neuložený"); a new row's id is above every
+the tooltip, marked "Hlásenie servera: …" (an unsaved one "neuložený").
+A running row's latency reads the same on every type,
+`sp_core::audio_outputs_save::latency_sk`: "oneskorenie N ms" (whole ms,
+half away from zero; "oneskorenie: meria sa" at 0), so a VBAN row reads
+"beží · oneskorenie 83 ms" and an ASIO row's chip "oneskorenie 71 ms"
+(review round 2; VBAN read "beží · 83 ms" before). The row is split into
+`OutputRow` + `AsioFields` / `VbanFields` / `LiveState` (no wrapper
+element: the same DOM). A new row's id is above every
 row AND every stored entry (a removed, unsaved row still runs under its id).
 `style.css` gives the section the form's fieldset look, one framed grid
 block per output. The mock refuses the cases the dashboard can send in the
