@@ -643,6 +643,19 @@ pub fn asio_channel_shown(index: u32) -> u32 {
     index.wrapping_add(1)
 }
 
+/// The dashboard's line for a running ASIO output (`state` is its Slovak
+/// state): its latency — "meria sa" while the server reads it 0, before
+/// the drift servo measured its first window — its correction and its
+/// underruns (#233 review round 4).
+pub fn asio_running_text(state: &str, latency_ms: f64, ppm: f64, underruns: u64) -> String {
+    let latency = if latency_ms > 0.0 {
+        format!("{latency_ms:.0} ms")
+    } else {
+        "meria sa".to_string()
+    };
+    format!("{state} · {latency} · {ppm:+.1} ppm · výpadky {underruns}")
+}
+
 /// Why the dashboard's "Pridať výstup ASIO" is off, or `None` when an ASIO
 /// output can be added: the driver list is still loading (an empty text),
 /// its read failed, or the box lists no driver (#233 review round 2: a row

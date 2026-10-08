@@ -48,7 +48,7 @@ use serde::Deserialize;
 use sp_core::audio_outputs::{
     OutputEntry, OutputType, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat,
     asio_add_refusal, asio_channel_index, asio_channel_shown, asio_driver_options, asio_reason_sk,
-    new_asio, new_vban, validate_list,
+    asio_running_text, new_asio, new_vban, validate_list,
 };
 use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
 
@@ -158,10 +158,7 @@ fn live_text(live: &ProgramOutputs, id: &str, saved: bool) -> String {
 fn output_text(o: &OutputLive) -> String {
     let state = state_sk(&o.state);
     match (&o.asio, o.state.as_str()) {
-        (Some(a), "running") => format!(
-            "{state} · {:.0} ms · {:+.1} ppm · výpadky {}",
-            o.latency_ms, a.ppm, a.underruns
-        ),
+        (Some(a), "running") => asio_running_text(state, o.latency_ms, a.ppm, a.underruns),
         (None, "running") => format!("{state} · {:.0} ms", o.latency_ms),
         (Some(a), _) => {
             let mut parts = vec![state.to_string()];
