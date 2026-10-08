@@ -353,3 +353,20 @@ fn a_rate_under_1_hz_is_a_lost_clock() {
 fn the_latency_is_0_until_the_servo_measured_a_window() {
     assert_eq!(asio_latency_ms(0.0, 256, 128, 96_000.0), 0.0);
 }
+
+/// #233 review round 4: a parked driver has its own reason (no retry can
+/// succeed; only a restart helps), with its Slovak on the dashboard.
+#[test]
+fn a_parked_driver_has_its_own_code() {
+    assert_eq!(
+        (Reason::Parked.code(), Reason::Parked.text().as_str()),
+        (
+            "parked",
+            "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts"
+        )
+    );
+    assert_ne!(
+        sp_core::audio_outputs::asio_reason_sk(Reason::Parked.code()),
+        "neznámy dôvod"
+    );
+}

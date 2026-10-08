@@ -699,3 +699,28 @@ test("a running ASIO output whose latency is not measured yet says so (#233)", a
   );
   expect(realConsoleErrors()).toEqual([]);
 });
+
+// #233 review round 4: a parked driver (a callback that never returned)
+// promises no next try: only a restart of SongPlayer helps.
+test("a parked ASIO driver says only a restart helps, with no next try (#233)", async ({ page, request }) => {
+  const stored = JSON.stringify([
+    { id: "out-1", name: "DVS", type: "asio", asio: { driver: "Dante Virtual Soundcard (x64)", channels: [0, 1] } },
+  ]);
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: stored } });
+  expect(seeded.status()).toBe(204);
+  const held = await request.post("/__mock/asio-state", {
+    data: {
+      id: "out-1",
+      reason_code: "parked",
+      reason: "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts",
+      retry_in_s: 60,
+    },
+  });
+  expect(held.status()).toBe(200);
+  await openSettings(page);
+  await expect(page.locator('[data-testid="audio-output-state"]')).toHaveText(
+    "čaká · ovládač zamrzol — pomôže len reštart SongPlayera",
+    { timeout: 10000 },
+  );
+  expect(realConsoleErrors()).toEqual([]);
+});

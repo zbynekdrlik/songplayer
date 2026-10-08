@@ -431,9 +431,7 @@ impl AsioDevice for WinAsioDevice {
         // This device's own parked driver, or one an earlier device parked
         // (the output this one replaces).
         if self.parked || HELD.is_parked(name) {
-            return Err(Reason::Failed(
-                "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts".into(),
-            ));
+            return Err(Reason::Parked);
         }
         // Before anything loads: a held driver (the output this one
         // replaces still releasing it) is held for now. On a failed open the

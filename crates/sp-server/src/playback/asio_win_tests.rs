@@ -345,10 +345,7 @@ fn a_callback_stuck_past_the_bound_parks_its_slot_driver_and_hold() {
         SLOTS[i].claimed.load(Ordering::SeqCst),
         "the slot stays claimed: the stuck callback still counts on it"
     );
-    match d.open(name, [0, 1]) {
-        Err(Reason::Failed(why)) => assert!(why.contains("parked"), "{why}"),
-        other => panic!("{other:?}"),
-    }
+    assert_eq!(d.open(name, [0, 1]), Err(Reason::Parked));
     drop(d);
     assert!(
         HELD.is_held(name),
@@ -391,8 +388,5 @@ fn a_successor_of_a_parked_device_is_told_the_driver_is_parked() {
     let (d, _stuck) = parked_device(4, name);
     drop(d);
     let mut successor = WinAsioDevice::new();
-    match successor.open(name, [0, 1]) {
-        Err(Reason::Failed(why)) => assert!(why.contains("parked"), "{why}"),
-        other => panic!("{other:?}"),
-    }
+    assert_eq!(successor.open(name, [0, 1]), Err(Reason::Parked));
 }

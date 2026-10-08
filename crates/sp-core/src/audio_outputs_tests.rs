@@ -786,3 +786,12 @@ fn a_running_asio_output_reads_its_latency_or_that_it_is_measured() {
         "beží · meria sa · -1.3 ppm · výpadky 3"
     );
 }
+
+/// #233 review round 4: a parked driver's Slovak says only a restart helps.
+#[test]
+fn a_parked_driver_reads_in_slovak() {
+    assert_eq!(
+        asio_reason_sk("parked"),
+        "ovládač zamrzol — pomôže len reštart SongPlayera"
+    );
+}

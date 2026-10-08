@@ -61,6 +61,9 @@ pub enum Reason {
     /// Another output of this process still holds the driver (a rebuilt
     /// entry's predecessor releasing it, `asio_hold`).
     Held,
+    /// A driver callback never returned: the driver is parked until the
+    /// process ends (`asio_win`), no open can succeed.
+    Parked,
 }
 
 impl Reason {
@@ -77,6 +80,7 @@ impl Reason {
             Self::Stalled => "stalled",
             Self::WindowsOnly => "windows_only",
             Self::Held => "held",
+            Self::Parked => "parked",
         }
     }
 
@@ -100,6 +104,7 @@ impl Reason {
             Self::Stalled => "no callback from the driver for 2 s".into(),
             Self::WindowsOnly => "ASIO runs on Windows only".into(),
             Self::Held => "another SongPlayer output still holds the driver (the output this one replaces is releasing it)".into(),
+            Self::Parked => "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts".into(),
         }
     }
 }
