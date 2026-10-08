@@ -204,7 +204,9 @@ impl Exchange {
             Some(recheck) => self.defer(job, video_id, recheck).await,
             None => {
                 let guard = self.run_here(job, youtube_id).await;
-                if job.waits_while_a_peer_has_the_song() {
+                if job.waits_while_a_peer_has_the_song()
+                    && self.song_from(youtube_id).await.as_deref() == Some(peer)
+                {
                     self.stand_in(job, youtube_id, peer).await;
                 }
                 PeerStep::Local(Some(guard))

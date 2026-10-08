@@ -168,13 +168,15 @@ pub fn listed_audio<'a>(catalog: &'a Catalog, youtube_id: &str) -> Option<&'a Ar
 pub fn song_holder<'a>(
     reads: &[PeerRead<'a>],
     youtube_id: &str,
-    _song_from: Option<&str>,
+    song_from: Option<&str>,
 ) -> Option<&'a str> {
+    let from = song_from?;
     reads
         .iter()
         .find(|r| {
-            r.catalog
-                .is_some_and(|c| listed_audio(c, youtube_id).is_some())
+            r.peer == from
+                && r.catalog
+                    .is_some_and(|c| listed_audio(c, youtube_id).is_some())
         })
         .map(|r| r.peer)
 }
