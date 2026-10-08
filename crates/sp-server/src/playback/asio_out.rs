@@ -12,9 +12,11 @@
 //!   splice's hold, the splice's pending skip, the hand-off lateness, the
 //!   card's consumed frames) → its correction to the resampler (an offset is
 //!   drained by the ratio, never spliced) → the ring. Only the first block's
-//!   priming and a hard re-centre (the ring would otherwise run dry or
-//!   overflow: a fault, WARNed at most once per 5 s with what it held back,
-//!   and shown as `last_hard_recentre`) go through the splice. Then the
+//!   priming and a hard re-centre (too little buffered — the ring would run
+//!   dry, or a delayed output played over 4 slots early — or too much, the
+//!   ring would overflow: a fault, WARNed at most once per 5 s with what it
+//!   held back, and shown as `last_hard_recentre`) go through the splice.
+//!   Then the
 //!   driver's messages: a reset
 //!   (or a size change), a rate change or 2 s without a callback closes the
 //!   output (`asio_state::close_reason`, `StallWatch`).
