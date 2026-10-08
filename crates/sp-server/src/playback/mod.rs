@@ -74,6 +74,8 @@ pub mod program_trace_log; // #147: the trace's once-a-minute clump summary (tas
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 pub mod program_transition_settings; // #221 L5: the transition settings → the bus's spec (task)
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
+#[cfg(test)]
+pub(crate) mod resample_quality; // #233: the resamplers' measured quality (THD+N, images), tests only
 mod runtime_pipeline;
 pub mod scene_catalog; // #221: which scene is a playlist's, from its NDI output name (no cg OBS lookup)
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
