@@ -489,8 +489,8 @@ own callback thread and has two slots of cushion):
   anything, and gives it back after the driver is released. A rebuilt
   entry's successor starts while its predecessor still releases the same
   driver (`apply` starts the new output before it discards the old), so it
-  is refused `Reason::Held` (code `held`, "ovládač ešte uvoľňuje
-  predchádzajúci výstup") and opens after the 2 s backoff: never two
+  is refused `Reason::Held` (code `held`, "predchádzajúci výstup ešte
+  neuvoľnil ovládač") and opens after the 2 s backoff: never two
   instances of one driver in one process (review round 1; before, it
   waited only if the driver happened to refuse the second init).
 - the process exit does not wait for the release: the box stops SongPlayer

@@ -692,7 +692,7 @@ pub fn asio_reason_sk(code: &str) -> &'static str {
         "clock_lost" => "ovládač stratil hodinový signál",
         "stalled" => "ovládač neodpovedá",
         "windows_only" => "ASIO funguje len vo Windows",
-        "held" => "ovládač ešte uvoľňuje predchádzajúci výstup",
+        "held" => "predchádzajúci výstup ešte neuvoľnil ovládač",
         _ => "neznámy dôvod",
     }
 }
