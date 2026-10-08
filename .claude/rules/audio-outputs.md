@@ -694,25 +694,48 @@ own callback thread and has two slots of cushion):
 - open drops the blocks queued while the driver opened (stale by the open's
   duration; an INFO, never `blocks_dropped`), so the servo's first block is
   fresh.
-- after the priming, a block goes to the servo and the ring only once the
-  card has called back in this run (`device.consumed_frames() > 0`; the
-  glue counts every buffer switch, primed or not); until then it is
-  dropped and the ring keeps its priming (`AsioWorker::step`). Found live
-  at PP (8.10.2026, 0.74.0): an unlicensed DVS opens and never calls back,
-  and every 2 s run piled blocks into a ring nobody took, so the servo
-  counted an excess hard re-centre every few slots (`hard_recentres` 25 →
-  49 in a minute). Now such a driver shows its resets (the stall closes
-  each run) with `hard_recentres` 0, `overflows` 0 and one block sent per
-  run; the backoff escalates 2 / 10 / 30 / 60 s over runs shorter than
-  60 s (`asio_out_tests_silent.rs`). Deliberately NOT "a callback since
-  the last block": a callback period over one slot (2048 frames at 48 kHz,
-  42.7 ms) would lose real blocks. A card that stops after it started is
-  the stall's (2 s), as before.
+- **a driver that gives no clock** (the owner's ruling, #233, 8.10.2026,
+  verbatim on the ticket: it must not get stuck, loop or crash, and must
+  work by itself once DVS runs). Found live at PP: DVS opens but never
+  calls back while PP's network has no Dante PTP clock. Before the fix
+  every 2 s "stall" run piled blocks into a ring nobody took (an excess
+  hard re-centre every few slots: `hard_recentres` 25 → 49 in a minute)
+  and reopened with the escalating backoff. Now (`asio_state::clock_step`,
+  pure, its edge table in `asio_state_tests.rs`; `AsioWorker::step`):
+  - the driver's TICKS count from the priming (`Run::consumed_at_prime`,
+    the frames the card had taken when the first block primed the ring;
+    the glue counts every buffer switch, primed or not): a burst of
+    callbacks at the open, then nothing, is no clock (review round 8);
+  - after the priming, a block goes to the servo and the ring only once
+    the driver ticked; until then it is dropped and the ring keeps its
+    priming (no re-centre, no overflow). Deliberately NOT "a tick since
+    the last block": a callback period over one slot (2048 frames at
+    48 kHz, 42.7 ms) would lose real blocks;
+  - no tick 2 s after the open (`NO_CLOCK_100NS`): `waiting`, reason
+    `no_clock` ("ovládač nedáva hodiny — napr. DVS nebeží alebo chýbajú
+    hodiny Dante PTP"), ONE WARN, the driver kept open, `retry_in_s` none;
+  - still no tick 60 s after an open (`NO_CLOCK_REOPEN_100NS`): closed and
+    opened again at once, every 60 s for as long as it lasts, a DEBUG each,
+    `clock_waits` counting them — never a reset, a backoff or a fault; a
+    reopen during the wait logs at DEBUG and keeps reading `waiting`;
+  - the first tick ends the wait: ONE INFO, `running`, and the servo starts
+    afresh (its run so far observed one block, up to a minute earlier; the
+    next block it observes primes it to the target);
+  - the stall watch runs only for a driver that ticked: one that ticked
+    and stops is a stall (2 s, `stalled`, `resets`, the 2 / 10 / 30 / 60 s
+    backoff), as before;
+  - tests: `asio_out_tests_silent.rs` (never ticks: waiting from block 60,
+    reopened at blocks 1800 / 3602 / 5404 / 7206; ticks only before the
+    priming; ticked then stops; a card that starts late) and
+    `asio_out_tests_clock.rs` (silent 5 min, then ticks: running from the
+    next block, 1 WARN + 2 INFO — the first open and the clock — read from
+    a scoped `tracing_subscriber` writer, the reopens at DEBUG).
 - close: a reset request or a buffer-size change (answered 0: never
   resized live), a rate change of 1 Hz or more (`sampleRateDidChange(0)` =
   a lost clock, code `clock_lost`, "ovládač stratil hodinový signál": a
   slot marks a report with its own flag, since 0.0's bits are 0), or 2 s
-  with no callback (`StallWatch`). "waiting", the reason and the retry are
+  with no callback from a driver that ticked (`StallWatch`; one that
+  never ticked waits for its clock, above). "waiting", the reason and the retry are
   published BEFORE the device is closed (a vanished driver can block its
   stop or release; review round 2), and the closed run's ppm, rate_ppm,
   lock and latency are cleared (the counters and the last open's driver
@@ -810,7 +833,8 @@ the servo measured its first 1 s window), `asio`
 sample_type, ppm, rate_ppm, locked, latency_ms, offset_ms, slew_eta_s,
 cushion_ms,
 underruns, resets, hard_recentres, last_hard_recentre {cause, ms,
-lateness_ms, ago_s}, overflows, overloads, retry_in_s, reason_code}` (the
+lateness_ms, ago_s}, overflows, overloads, retry_in_s, reason_code,
+clock_waits}` (the
 servo's fields: the owner's ruling above), and while it runs a `note`
 when the driver's rate is not `audio_network_rate` or its buffer is over a
 third of a grid slot (1/90 s, lane 2's envelope); the task WARNs a note once
@@ -884,8 +908,11 @@ pins the holds on Linux.
 subset): DVS is registered — checked only when `SP_ASIO_OUTPUTS_EXPECTED`
 is over 0 (release review: a box expected to run none need not have DVS);
 exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
-outputs (ci.yml / deploy-pp.yml, "0" until the main session adds each box's
-DVS entry, then "1"), each running, then a minute (1 800 blocks) at its
+outputs that are not waiting for their driver's clock (`gatedAsioOutputs`:
+an output waiting with reason `no_clock` is neither counted nor measured,
+so PP — "0", its DVS entry enabled while PP has no Dante PTP clock — does
+not fail on it; SNV — "1" — still fails when its DVS gives no clock, the
+count then 0; ci.yml / deploy-pp.yml), each running, then a minute (1 800 blocks) at its
 driver's rate with no underrun, no reopen, no hard re-centre (review
 round 2), |ppm| ≤ 300 and a latency
 over 0 and under the entry's delay + 1 s (`asioGateFailures`, unit-tested
