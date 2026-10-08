@@ -47,8 +47,8 @@ use leptos::prelude::*;
 use serde::Deserialize;
 use sp_core::audio_outputs::{
     OutputEntry, OutputType, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat,
-    asio_add_refusal, asio_channel_index, asio_channel_shown, asio_driver_options, asio_reason_sk,
-    asio_running_text, new_asio, new_vban, validate_list,
+    asio_add_refusal, asio_channel_index, asio_channel_shown, asio_driver_options,
+    asio_running_text, asio_waiting_text, new_asio, new_vban, validate_list,
 };
 use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
 
@@ -160,16 +160,7 @@ fn output_text(o: &OutputLive) -> String {
     match (&o.asio, o.state.as_str()) {
         (Some(a), "running") => asio_running_text(state, o.latency_ms, a.ppm, a.underruns),
         (None, "running") => format!("{state} · {:.0} ms", o.latency_ms),
-        (Some(a), _) => {
-            let mut parts = vec![state.to_string()];
-            if let Some(code) = &a.reason_code {
-                parts.push(asio_reason_sk(code).to_string());
-            }
-            if let Some(s) = a.retry_in_s {
-                parts.push(format!("ďalší pokus o {s:.0} s"));
-            }
-            parts.join(" · ")
-        }
+        (Some(a), _) => asio_waiting_text(state, a.reason_code.as_deref(), a.retry_in_s),
         (None, _) => state.to_string(),
     }
 }

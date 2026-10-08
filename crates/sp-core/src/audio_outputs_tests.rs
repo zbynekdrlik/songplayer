@@ -795,3 +795,22 @@ fn a_parked_driver_reads_in_slovak() {
         "ovládač zamrzol — pomôže len reštart SongPlayera"
     );
 }
+
+/// #233 review round 4: a waiting ASIO output's line; no next try for a
+/// parked driver.
+#[test]
+fn a_waiting_asio_output_reads_its_reason_and_next_try() {
+    assert_eq!(
+        asio_waiting_text("čaká", Some("busy"), Some(10.0)),
+        "čaká · ovládač používa iný program · ďalší pokus o 10 s"
+    );
+    assert_eq!(
+        asio_waiting_text("čaká", Some("parked"), Some(60.0)),
+        "čaká · ovládač zamrzol — pomôže len reštart SongPlayera"
+    );
+    assert_eq!(
+        asio_waiting_text("čaká", None, Some(2.0)),
+        "čaká · ďalší pokus o 2 s"
+    );
+    assert_eq!(asio_waiting_text("otvára sa", None, None), "otvára sa");
+}

@@ -656,6 +656,27 @@ pub fn asio_running_text(state: &str, latency_ms: f64, ppm: f64, underruns: u64)
     format!("{state} · {latency} · {ppm:+.1} ppm · výpadky {underruns}")
 }
 
+/// The dashboard's line for an ASIO output that is not running (`state` is
+/// its Slovak state): the reason in Slovak, then the next try — none for a
+/// parked driver, which no try can open (only a restart helps; #233 review
+/// round 4).
+pub fn asio_waiting_text(
+    state: &str,
+    reason_code: Option<&str>,
+    retry_in_s: Option<f64>,
+) -> String {
+    let mut parts = vec![state.to_string()];
+    if let Some(code) = reason_code {
+        parts.push(asio_reason_sk(code).to_string());
+    }
+    if let Some(s) = retry_in_s
+        && reason_code != Some("parked")
+    {
+        parts.push(format!("ďalší pokus o {s:.0} s"));
+    }
+    parts.join(" · ")
+}
+
 /// Why the dashboard's "Pridať výstup ASIO" is off, or `None` when an ASIO
 /// output can be added: the driver list is still loading (an empty text),
 /// its read failed, or the box lists no driver (#233 review round 2: a row
@@ -706,6 +727,7 @@ pub fn asio_reason_sk(code: &str) -> &'static str {
         "stalled" => "ovládač neodpovedá",
         "windows_only" => "ASIO funguje len vo Windows",
         "held" => "predchádzajúci výstup ešte neuvoľnil ovládač",
+        "parked" => "ovládač zamrzol — pomôže len reštart SongPlayera",
         _ => "neznámy dôvod",
     }
 }
