@@ -8,8 +8,12 @@
 //!   so the driver then asks a reset — iemmixer never resizes live), a rate
 //!   change of 1 Hz or more (Dante Controller re-clocked the card; a rate
 //!   under 1 Hz, or ASE_NoClock, is a lost clock: `lost_clock`), or no
-//!   callback for 2 s (a vanished driver: a DVS crash or reinstall; iemmixer
-//!   `reset.rs` STALL).
+//!   callback for 2 s from a driver that ticked (a vanished driver: a DVS
+//!   crash or reinstall; iemmixer `reset.rs` STALL).
+//! - A driver that opens and does not tick gives no clock (DVS not running,
+//!   no Dante PTP clock): no close, no reset, no backoff — the output waits
+//!   for it from 2 s after the open and the driver is opened again every
+//!   60 s (`clock_step`; the owner's ruling, #233, 8.10.2026).
 //! - asioMessage replies: iemmixer `telemetry.rs:79-99`.
 //! - The driver's rate, buffer and sample type are read, never set: the rate
 //!   is admitted (8–384 kHz) and noted when it is not the network's; a
@@ -167,12 +171,14 @@ pub enum ClockStep {
     Reopen,
 }
 
-/// The clock decision of a running output whose driver made `callbacks`
-/// buffer switches since it opened `since_open_100ns` ago, `waiting` for its
-/// clock or not (the owner's ruling, #233, 8.10.2026: a driver that opens
-/// and does not tick is a calm, visible wait, never a fault loop).
-pub fn clock_step(callbacks: u64, waiting: bool, since_open_100ns: i64) -> ClockStep {
-    if callbacks > 0 {
+/// The clock decision of a running output whose driver ticked `ticks` times
+/// (the worker passes the frames the card took since the priming: callbacks
+/// before it, a burst at the open, are no clock) since it opened
+/// `since_open_100ns` ago, `waiting` for its clock or not (the owner's
+/// ruling, #233, 8.10.2026: a driver that opens and does not tick is a
+/// calm, visible wait, never a fault loop).
+pub fn clock_step(ticks: u64, waiting: bool, since_open_100ns: i64) -> ClockStep {
+    if ticks > 0 {
         return if waiting {
             ClockStep::ClockArrived
         } else {

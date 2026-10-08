@@ -65,12 +65,18 @@ export const MAX_PPM = 300;
 export const LATENCY_OVER_DELAY_MS = 1000;
 
 /**
- * The ASIO outputs the gate counts and measures: the enabled ones. (The
- * owner's ruling, #233, 8.10.2026: one whose driver gives no clock waits,
- * calmly, and is not expected to run.)
+ * The ASIO outputs the gate counts and measures: the enabled ones, except
+ * one waiting for its driver's clock (reason `no_clock`). The owner's
+ * ruling, #233, 8.10.2026: at PP, DVS opens but gives no clock while PP's
+ * network has no Dante PTP clock; the output waits calmly and is not
+ * expected to run, so a box expecting no ASIO output does not fail on it.
+ * A box that expects one (SNV, "1") still fails when its DVS gives no
+ * clock: the count is then 0.
  */
 export function gatedAsioOutputs(list: OutputStatus[]): OutputStatus[] {
-  return list.filter((o) => o.type === "asio" && o.enabled);
+  return list.filter(
+    (o) => o.type === "asio" && o.enabled && !(o.state === "waiting" && o.asio?.reason_code === "no_clock"),
+  );
 }
 
 /** Why an ASIO output's minute (two reads of `outputs[i]`) fails. */
