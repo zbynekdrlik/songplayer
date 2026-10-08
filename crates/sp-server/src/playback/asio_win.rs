@@ -586,15 +586,19 @@ impl AsioDevice for WinAsioDevice {
         if let Some(i) = self.slot {
             let s = &SLOTS[i];
             s.stream.store(ptr::null_mut(), Ordering::SeqCst);
-            // Bounded: a driver stuck inside a callback for a second leaks
-            // its stream instead of freeing it under the callback.
+            // Bounded: a driver stuck inside a callback for a second parks
+            // the device instead of freeing anything under the callback. One
+            // read of 0 is enough: the slot is already unhooked, so a
+            // callback that enters after it sees no stream.
+            let mut left = false;
             for _ in 0..1_000 {
                 if s.in_flight.load(Ordering::SeqCst) == 0 {
+                    left = true;
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(1));
             }
-            if s.in_flight.load(Ordering::SeqCst) != 0 {
+            if !left {
                 // Everything the stuck callback may touch stays: the stream
                 // (leaked), the buffers it writes (not disposed), the driver
                 // (never released), this slot (its in-flight count is the
