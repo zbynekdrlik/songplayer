@@ -299,7 +299,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
 
             <fieldset data-testid="settings-paid-ai">
                 <legend>"Platené AI"</legend>
-                <label title="Vypnuté: tento uzol nevolá Gemini ani Claude — texty, metadáta, preklad a dabing berie len od susedného uzla">
+                <label title="Vypnuté: tento uzol nevolá Gemini ani Claude — texty a metadáta berie od susedného uzla, preklad a dabing čakajú, kým sa zapne">
                     <input
                         type="checkbox"
                         data-testid="settings-paid-ai-enabled"

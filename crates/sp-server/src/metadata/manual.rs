@@ -20,6 +20,7 @@
 
 use std::path::Path;
 
+use sp_core::metadata::VideoMetadata;
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
@@ -38,6 +39,19 @@ pub struct DownloadTitle {
     /// `metadata_source`: [`MANUAL_SOURCE`], or the chain's `MetadataSource`.
     pub source: &'static str,
     pub gemini_failed: bool,
+}
+
+impl From<VideoMetadata> for DownloadTitle {
+    /// A provider's or the title parser's name for the video, under its
+    /// `MetadataSource` label.
+    fn from(meta: VideoMetadata) -> Self {
+        Self {
+            song: meta.song,
+            artist: meta.artist,
+            source: meta.source.as_str(),
+            gemini_failed: meta.gemini_failed,
+        }
+    }
 }
 
 /// #136 (ROZHODNUTÉ 5908227964 item 2): the title a download of YouTube video
@@ -81,12 +95,7 @@ pub async fn download_title(
         Some(providers) => super::get_metadata(providers, youtube_id, title).await,
         None => super::parser_while_paid_ai_off(youtube_id, title),
     };
-    DownloadTitle {
-        song: meta.song,
-        artist: meta.artist,
-        source: meta.source.as_str(),
-        gemini_failed: meta.gemini_failed,
-    }
+    DownloadTitle::from(meta)
 }
 
 /// #136 (review round 1): record a finished download of row `video_db_id` of

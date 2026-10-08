@@ -119,7 +119,7 @@ pub fn hold(what: Held, key: &str) {
         info!(
             job = what.as_str(),
             key,
-            "paid AI is off on this node (paid_ai_enabled) - held: only a peer's copy is taken"
+            "paid AI is off on this node (paid_ai_enabled) - held: no paid AI call until it is on"
         );
     } else {
         debug!(job = what.as_str(), key, "paid AI is off - still held");

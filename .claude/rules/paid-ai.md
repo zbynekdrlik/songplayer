@@ -110,10 +110,22 @@ are DEBUG), never a WARN. A held lyrics pick logs only DEBUG in the worker
 (its "worker: processing" INFO comes once the song runs here), and the
 repair batch's row count is DEBUG.
 
+**Switching off stops NEW paid work, not work already running.** The
+switch is read where a job starts (a pick, a pass, a tick); what is already
+running finishes: a lyrics song picked before the switch-off still makes
+its gather calls (Claude's clean-up, the description, the Spotify
+resolution) and its g35t transcription keys were read at the song's start;
+a Live-Translate dub session already streaming keeps streaming to its end.
+The next pick of each is held.
+
 Known, kept: the switch is read again right before a call (the metadata
 repair's `try_providers`, the lyrics tiers' keys). A switch-off landing
-between two reads milliseconds apart costs that one row a WARN and a
-backoff stage (or one song a "no key" pass), never a paid call.
+between the two reads, milliseconds apart, costs that one row a WARN and a
+backoff stage (or one song a "no key" pass), never a paid call. The dub's
+key read is the exception that mattered: a job switched off between
+`may_dub` and its key read was failed as "gemini_api_key not set"; it is
+held now (`DubWorker::job_key` reads the switch again on no key; review
+round 13).
 
 ## Tests (0 calls while OFF, unchanged while ON)
 
@@ -126,8 +138,14 @@ backoff stage (or one song a "no key" pass), never a paid call.
   and both passes.
 - The metadata chain, the download title, the repair and the probe: each with
   a counting provider.
-- `dabing/worker.rs::no_dub_and_no_key_while_paid_ai_is_off` and
-  `api/lyrics_g35t.rs::probe_route_sends_nothing_while_paid_ai_is_off`.
+- `dabing/worker_tests.rs`: `no_dub_and_no_key_while_paid_ai_is_off`,
+  `only_a_dub_job_that_would_run_is_held`,
+  `a_dub_switched_off_after_its_pick_is_held_never_failed` (+ the guard
+  `a_dub_with_no_key_is_deferred`).
+- `api/lyrics_g35t.rs::probe_route_sends_nothing_while_paid_ai_is_off`,
+  `api/lyrics_tests.rs::probe_sources_asks_no_claude_while_paid_ai_is_off`.
+- The log captures go through `crate::test_log` (one `Captured` writer +
+  `capturing(&cap)`, test-only).
 - Mock: `e2e/settings-paid-ai.spec.ts`. Box: PP's `post-deploy-pp.spec.ts`
   asserts the switch OFF and the chip.
 

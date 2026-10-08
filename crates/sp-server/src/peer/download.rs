@@ -213,13 +213,7 @@ async fn title_for(
     }
     // Item A: the peer holds this very song and names it too (its own
     // repair): no provider here, the repair takes the peer's title later.
-    let meta = crate::metadata::parser_for_repair(&row.title);
-    let own = DownloadTitle {
-        song: meta.song,
-        artist: meta.artist,
-        source: meta.source.as_str(),
-        gemini_failed: meta.gemini_failed,
-    };
+    let own = DownloadTitle::from(crate::metadata::parser_for_repair(&row.title));
     (own, None)
 }
 

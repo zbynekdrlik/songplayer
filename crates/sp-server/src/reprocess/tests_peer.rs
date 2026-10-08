@@ -306,7 +306,8 @@ async fn the_repair_waits_for_a_peer_that_cannot_be_read() {
 }
 
 /// #229 item A: SNV holds ANOTHER audio than the one PP took (it downloaded
-/// the song again since): its title would name another encode, so PP's
+/// the song again since): the wait is keyed on the audio PP took (as the
+/// ruling asked: the peer the song came from, still holding it), so PP's
 /// providers repair the row at once.
 #[tokio::test]
 async fn the_repair_asks_its_providers_when_the_peer_holds_another_audio() {
