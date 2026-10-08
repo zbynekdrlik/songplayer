@@ -486,9 +486,15 @@ own callback thread and has two slots of cushion):
   closed run's into one `Closed` (review round 3). `kAsioLatenciesChanged`
   re-reads the driver's output latency
   (`AsioDevice::output_latency_frames`), so `latency_ms` follows it.
-- a lost clock stays a lost clock: a reopen that finds the driver under
-  1 Hz (`admit_rate`) or `getSampleRate` answering ASE_NoClock reads
-  `clock_lost` again, not a refused rate (review round 3).
+- a lost clock stays a lost clock: ONE predicate, `asio_state::lost_clock`
+  (under 1 Hz), names a rate report (`close_reason`, through `rate_change`)
+  and a read (`admit_rate`), and `getSampleRate`'s ASE_NoClock is one too
+  (`sample_rate_error`, pure; the glue only calls it): a reopen during the
+  outage reads `clock_lost` again, never a refused rate or "the rate
+  changed to 1 Hz" (review rounds 3–4). Its text: "the driver lost its
+  clock (no rate)".
+- a close publishes the run's counters with it (`Closed::write`): a driver
+  that never comes back still shows what the output did.
 - the backoff runs from the step that decided the close, not from the end
   of the release: a release that blocks for seconds reopens right after
   it; a driver still busy then is refused `busy` and the next wait is
@@ -529,8 +535,9 @@ the stream is leaked, the buffers are not disposed, the driver is
 forgotten (never released), the slot stays claimed (its in-flight count
 is the callback's) and the hold is kept for the process's life, marked
 parked (`DriverHold::park`, `DriverHolds::is_parked`); every later open of
-that driver — this device's, or the output that replaces it — is `Failed`
-("… parked until SongPlayer restarts"). It parks only when no read of the
+that driver — this device's, or the output that replaces it — is
+`Reason::Parked` (code `parked`, "ovládač zamrzol — pomôže len reštart
+SongPlayera", and the dashboard shows no next try for it). It parks only when no read of the
 in-flight count saw 0 within the bound (once 0 was read, the unhooked slot
 gives a later callback no stream).
 `outputReady` is not called: the plan allows it from the callback, but
@@ -570,25 +577,32 @@ failed read ("Zoznam ovládačov ASIO sa nenačítal", mock: `/__mock/fail-mode
 je žiadny ovládač ASIO"), its title from
 `sp_core::audio_outputs::asio_add_refusal`; the rate reads "podľa
 ovládača". A
-running ASIO row reads "beží · 71 ms · +0.4 ppm · výpadky 0"; a waiting one
-its reason in Slovak (`sp_core::audio_outputs::asio_reason_sk`, by the
-server's `reason_code`; every `Reason::code` has its text, pinned on the
-server) and its next try. Mock: two drivers (or a 500, the fail-mode above), the server's ASIO refusals,
-an enabled ASIO entry running at the network rate, `/__mock/asio-state
-{id, reason_code, reason, retry_in_s}` (reset by `/__mock/settings-reset`).
+running ASIO row reads "beží · 71 ms · +0.4 ppm · výpadky 0", "meria sa" in
+place of the latency while the server reads it 0
+(`sp_core::audio_outputs::asio_running_text`); a waiting one its reason in
+Slovak (`asio_reason_sk`, by the server's `reason_code`; every
+`Reason::code` has its text, pinned on the server) and its next try, none
+for `parked` (`asio_waiting_text`). Mock: two drivers (or a 500, the
+fail-mode above), the server's ASIO refusals, an enabled ASIO entry running
+at the network rate, `/__mock/asio-state {id, reason_code, reason,
+retry_in_s}` and `/__mock/asio-measuring {ids}` (latency 0), both reset by
+`/__mock/settings-reset`.
 
 **Tests.** The worker over a scripted `FakeDevice` (`asio_out_fake.rs`);
 every exact pin (the 5 436-frame ring after the card's callbacks, 8 636 after
 the first block, the 82 223-frame overflow of a block stamped a second ahead,
-133 underruns, the busy retries at 0 / 2 / 12 / 42 / 102 / 162 s) comes from
-a scratch model of the worker over lane 2's servo and rubato models. The
+133 underruns, the busy retries at 0 / 2 / 12 / 42 / 102 / 162 s, two
+overflowing runs reading 82 223 / 1 then 164 446 / 2, the 61-slot stall)
+comes from a scratch model of the worker over lane 2's servo and rubato
+models. The
 servo's own latency figure is 66.625 ms whether the held frames are added or
 subtracted: only the RING pin sees that mutant. The glue runs on the Windows
 job (`asio_win_tests.rs`: the copy-only buffer switch over heap buffers,
 every slot's four callbacks, messages, a 0 Hz report, a closed device
 releasing its slot, a held driver refused before the registry is read, a
 device holding its thread's STA until it is dropped, a callback stuck
-past 1 s parking the device). `asio_hold_tests.rs`
+past 1 s parking the device, its successor told the driver is parked).
+`asio_hold_tests.rs`
 pins the holds on Linux.
 
 **Live gate** (`e2e/post-deploy-audio-asio.spec.ts`, SNV's suite and PP's
