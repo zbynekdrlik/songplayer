@@ -351,8 +351,8 @@ fn a_mixed_boundarys_block_reaches_vban_while_its_ndi_submit_is_held() {
     );
     let vban = seen.block.samples.expect("the crossfaded block");
     assert_eq!(
-        vban,
-        interleaved(&seen.ndi_planar),
+        &vban[..],
+        &interleaved(&seen.ndi_planar)[..],
         "VBAN and NDI carry the same crossfaded block"
     );
     let (g_from, g_to) = crossfade_gains(4 * 1600, 9 * 1600);
