@@ -752,6 +752,7 @@ app.post("/__mock/settings-reset", (_req, res) => {
   failModes["asio-drivers"] = false;
   outputsSkipped.clear();
   asioHeld.clear();
+  asioMeasuring.clear();
   res.json({ status: "reset" });
 });
 
@@ -1280,8 +1281,15 @@ function mockOutputsProblems() {
   );
 }
 // #233 lane 3: ASIO outputs the mock holds waiting (`/__mock/asio-state
-// {id, reason_code, reason, retry_in_s}`, cleared by `/__mock/settings-reset`).
+// {id, reason_code, reason, retry_in_s}`), and running ones whose servo has
+// not measured a window yet (`/__mock/asio-measuring {ids}`: latency 0), all
+// cleared by `/__mock/settings-reset`.
 const asioHeld = new Map();
+const asioMeasuring = new Set();
+app.post("/__mock/asio-measuring", (req, res) => {
+  for (const id of (req.body || {}).ids || []) asioMeasuring.add(String(id));
+  res.json({ measuring: [...asioMeasuring] });
+});
 app.post("/__mock/asio-state", (req, res) => {
   const b = req.body || {};
   asioHeld.set(String(b.id), {
@@ -1297,7 +1305,7 @@ function mockAsioOutput(e, network) {
   const enabled = e.enabled !== false;
   const held = asioHeld.get(e.id);
   const running = enabled && !held;
-  const latency = running ? 70.7 + (e.delay_ms || 0) : 0;
+  const latency = running && !asioMeasuring.has(e.id) ? 70.7 + (e.delay_ms || 0) : 0;
   return {
     id: e.id,
     type: "asio",

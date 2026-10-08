@@ -680,3 +680,22 @@ test("a box with no ASIO driver offers no ASIO output, and says why (#233)", asy
   }
   expect(realConsoleErrors()).toEqual([]);
 });
+
+// #233 review round 4: right after an open the servo has measured no
+// window yet and the server reads the latency 0 — the row says it is being
+// measured, never "0 ms".
+test("a running ASIO output whose latency is not measured yet says so (#233)", async ({ page, request }) => {
+  const stored = JSON.stringify([
+    { id: "out-1", name: "DVS", type: "asio", asio: { driver: "Dante Virtual Soundcard (x64)", channels: [0, 1] } },
+  ]);
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: stored } });
+  expect(seeded.status()).toBe(204);
+  const measuring = await request.post("/__mock/asio-measuring", { data: { ids: ["out-1"] } });
+  expect(measuring.status()).toBe(200);
+  await openSettings(page);
+  await expect(page.locator('[data-testid="audio-output-state"]')).toHaveText(
+    "beží · meria sa · +0.4 ppm · výpadky 0",
+    { timeout: 10000 },
+  );
+  expect(realConsoleErrors()).toEqual([]);
+});
