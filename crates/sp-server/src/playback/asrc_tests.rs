@@ -235,9 +235,12 @@ fn the_installer_notice_carries_the_pinned_rubatos_license() {
     ));
 }
 
-/// rubato's documented highest-quality async sinc (#233 closing lane, the
-/// owner: a state-of-the-art resampler): 256 taps, the table oversampled
-/// 256×, BlackmanHarris², cubic between its rows, the cutoff automatic.
+/// The lane's measured choice of rubato's async sinc (#233 closing lane,
+/// the owner: a state-of-the-art resampler): 256 taps, the table
+/// oversampled 256× (rubato's own default is 128; the scratch model's images
+/// fall from −146 to −149 dBFS), BlackmanHarris², cubic between its rows
+/// (rubato's documented best quality-per-oversampling), the cutoff
+/// automatic.
 #[test]
 fn the_resampler_runs_rubatos_highest_quality_sinc() {
     let p = asrc_params();
@@ -302,4 +305,40 @@ fn a_20_khz_tone_leaves_nothing_over_minus_120_dbfs_from_24_to_48_khz() {
         .unwrap();
         assert!(db <= -120.0, "{ppm} ppm: {db:.1} dBFS at {hz:.0} Hz");
     }
+}
+
+/// The dashboard's tooltips (`sp_core::asio_resampling`, Slovak) name the
+/// output's own figures: the 66,7 ms target, the 5 ms splice, the ±300 ppm
+/// budget, the 5 ppm/s slew, the lock's 30 points in a minute, the
+/// resampler's 256 taps and 256× table. Any change here must change the
+/// text too (review round 2: they were written as literals).
+#[test]
+fn the_dashboards_tooltips_name_the_outputs_own_figures() {
+    use crate::playback::asrc_servo::{
+        BASE_LATENCY_100NS, MAX_PPM, MAX_SLEW_PPM_PER_S, REGRESSION_LOCK_SPAN_S,
+        REGRESSION_MIN_POINTS,
+    };
+    use sp_core::asio_resampling::{
+        CARD_TIP, CONVERSION_TIP, CORRECTION_TIP, FAULTS_TIP, LATENCY_TIP, SLEW_TIP,
+    };
+    let target_ms = format!("{:.1}", BASE_LATENCY_100NS as f64 / 10_000.0).replace('.', ",");
+    let has = |tip: &str, figure: String| assert!(tip.contains(&figure), "{figure:?} in {tip:?}");
+    has(LATENCY_TIP, format!("cieľ {target_ms} ms"));
+    has(
+        FAULTS_TIP,
+        format!("s {} ms prelínaním", SPLICE_FADE_S * 1_000.0),
+    );
+    has(CORRECTION_TIP, format!("±{MAX_PPM} ppm"));
+    has(SLEW_TIP, format!("o {MAX_SLEW_PPM_PER_S} ppm za sekundu"));
+    has(CARD_TIP, format!("({REGRESSION_MIN_POINTS} bodov)"));
+    assert_eq!(REGRESSION_LOCK_SPAN_S, 60.0, "CARD_TIP: po minúte");
+    has(CARD_TIP, "po minúte".to_string());
+    let p = asrc_params();
+    has(CONVERSION_TIP, format!("{} koeficientov", p.sinc_len));
+    has(
+        CONVERSION_TIP,
+        format!("tabuľka {}×", p.oversampling_factor),
+    );
+    assert_eq!(p.window, WindowFunction::BlackmanHarris2);
+    has(CONVERSION_TIP, "BlackmanHarris²".to_string());
 }

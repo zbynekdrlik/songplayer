@@ -2,10 +2,10 @@
 //!
 //! `Asrc`: ONE rubato `Async` band-limited sinc stage converts the 48 kHz
 //! program to the card's rate, fixed input of one 1600-frame program block.
-//! It runs rubato's documented highest-quality async-sinc setting
-//! ([`asrc_params`], pinned by a test):
+//! Its filter is the lane's measured choice ([`asrc_params`], pinned by a
+//! test; rubato documents no "highest" setting):
 //! - 256 taps;
-//! - the sinc table oversampled 256×;
+//! - the sinc table oversampled 256× (twice rubato's default);
 //! - BlackmanHarris²;
 //! - cubic interpolation between the table's rows;
 //! - the automatic cutoff: 0.947 of the lower Nyquist, 22.7 kHz at 48 → 96 kHz.
@@ -44,8 +44,10 @@ use crate::playback::vban_packet::{VBAN_BLOCK_FRAMES, VBAN_BLOCK_SAMPLES, VBAN_C
 
 /// The sinc length (rubato's default; ~2.7 ms at 96 kHz).
 pub const ASRC_SINC_LEN: usize = 256;
-/// The sinc table's oversampling: rubato's documented highest-quality
-/// setting (its default is 128).
+/// The sinc table's oversampling: the lane's measured choice, twice
+/// rubato's default of 128 (the scratch model: images −149 dBFS against
+/// −146 at 128; rubato documents cubic as the best quality per
+/// oversampling, not a highest setting).
 pub const ASRC_OVERSAMPLING: usize = 256;
 /// The ratio's room around nominal: ±1000 ppm, well past the servo's ±300.
 pub const ASRC_MAX_RELATIVE: f64 = 1.001;
