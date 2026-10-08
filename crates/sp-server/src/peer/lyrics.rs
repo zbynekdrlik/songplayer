@@ -86,8 +86,10 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
     }
 }
 
-/// `?1` = the YouTube id, `?2` = the Live-Translate source, `?3` = the
-/// current pipeline version (`LYRICS_NOT_PARKED`'s). The dub and the
+/// Binds, in text order: the YouTube id, the Live-Translate source, the
+/// current pipeline version (`LYRICS_NOT_PARKED`'s). Bare `?` only: sqlx
+/// binds by position, and a bare `?` after `?1` / `?2` would take the
+/// FIRST value (review round 9, `rust-workspace.md`). The dub and the
 /// Live-Translate track count on any row; an operator's mark only where the
 /// lyrics queue acts on it (review rounds 7-8): a text on a row of an
 /// active playlist (the worker makes no other row's lyrics), a reprocess
@@ -95,8 +97,8 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
 /// queue never takes another, so its flag is never cleared).
 fn local_only_sql() -> String {
     format!(
-        "SELECT EXISTS (SELECT 1 FROM videos v WHERE v.youtube_id = ?1 \
-         AND (v.dub_requested = 1 OR v.lyrics_source = ?2 \
+        "SELECT EXISTS (SELECT 1 FROM videos v WHERE v.youtube_id = ? \
+         AND (v.dub_requested = 1 OR v.lyrics_source = ? \
               OR (EXISTS (SELECT 1 FROM playlists p \
                           WHERE p.id = v.playlist_id AND p.is_active = 1) \
                   AND (TRIM(COALESCE(v.lyrics_override_text, '')) != '' \

@@ -466,11 +466,16 @@ impl AsioWorker {
         let ticks = device
             .consumed_frames()
             .saturating_sub(run.consumed_at_prime);
-        let clock = clock_step(
+        let clock = match clock_step(
             ticks,
             self.waiting_for_clock,
             now_100ns - run.opened_at_100ns,
-        );
+        ) {
+            // A tick before the priming is no clock (a burst at a reopen
+            // while the output waits; review round 9): the wait goes on.
+            ClockStep::ClockArrived if !run.primed => ClockStep::Quiet,
+            step => step,
+        };
         match clock {
             ClockStep::Ticking | ClockStep::Quiet => {}
             ClockStep::ClockArrived => {
