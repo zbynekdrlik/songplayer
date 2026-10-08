@@ -236,6 +236,7 @@ pub enum Problem {
     OutOfRange,
     SameChannel,
     DriverTaken,
+    DestinationTaken,
 }
 
 impl Problem {
@@ -253,6 +254,9 @@ impl Problem {
             Self::SameChannel => "must name two different channels",
             Self::DriverTaken => {
                 "is already used by an earlier ASIO entry (a driver takes one client)"
+            }
+            Self::DestinationTaken => {
+                "is already used by an earlier VBAN entry (the same host, port and stream name)"
             }
         }
     }
@@ -273,6 +277,9 @@ impl Problem {
             Self::OutOfRange => "musí byť 1 až 512",
             Self::SameChannel => "musí obsahovať dva rôzne kanály",
             Self::DriverTaken => "je už použité iným výstupom ASIO (ovládač berie jedného klienta)",
+            Self::DestinationTaken => {
+                "je už použité iným výstupom VBAN (rovnaký cieľ, port aj názov streamu)"
+            }
         }
     }
 }
@@ -525,6 +532,34 @@ pub fn asio_driver(e: &OutputEntry) -> Option<&str> {
 /// client; a switched-off entry still names its driver).
 pub fn driver_taken(earlier: &[OutputEntry], e: &OutputEntry) -> bool {
     asio_driver(e).is_some_and(|d| earlier.iter().any(|p| asio_driver(p) == Some(d)))
+}
+
+/// The destination of a VBAN entry (`None` for any other type).
+fn vban_dest(e: &OutputEntry) -> Option<&VbanDest> {
+    match e.kind {
+        OutputType::Vban => e.vban.as_ref(),
+        OutputType::Asio => None,
+    }
+}
+
+/// Two VBAN destinations are one receiver's one stream: the same port, the
+/// same host and the same stream name, ASCII case ignored in both (a host
+/// name is case-blind, and so is a VBAN receiver's stream name).
+fn same_destination(a: &VbanDest, b: &VbanDest) -> bool {
+    a.port == b.port
+        && a.host.eq_ignore_ascii_case(&b.host)
+        && a.stream_name.eq_ignore_ascii_case(&b.stream_name)
+}
+
+/// #233 release review: `e` sends to the destination of a VBAN entry in
+/// `earlier` (a switched-off entry still names its destination, like an
+/// ASIO driver): two senders of one stream to one receiver.
+pub fn destination_taken(earlier: &[OutputEntry], e: &OutputEntry) -> bool {
+    vban_dest(e).is_some_and(|d| {
+        earlier
+            .iter()
+            .any(|p| vban_dest(p).is_some_and(|q| same_destination(d, q)))
+    })
 }
 
 /// How many entries of a type the list may hold.

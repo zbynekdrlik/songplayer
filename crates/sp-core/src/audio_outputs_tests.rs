@@ -219,12 +219,14 @@ fn every_limit_is_pinned_at_its_edge() {
 
 #[test]
 fn the_list_counts_types_and_duplicates() {
+    // Each to its own port: one destination twice is refused (#233
+    // release review, `a_second_vban_entry_to_the_same_destination_is_refused`).
     let many: Vec<OutputEntry> = (1..=8)
-        .map(|n| OutputEntry::vban(&format!("out-{n}"), "v", dest("h", 6980)))
+        .map(|n| OutputEntry::vban(&format!("out-{n}"), "v", dest("h", 6980 + n)))
         .collect();
     assert!(validate_list(&many).is_ok(), "8 VBAN entries");
     let mut nine = many.clone();
-    nine.push(OutputEntry::vban("out-9", "v", dest("h", 6980)));
+    nine.push(OutputEntry::vban("out-9", "v", dest("h", 6989)));
     assert_eq!(
         validate_list(&nine).unwrap_err(),
         ListError::TooManyOfType {
@@ -234,7 +236,7 @@ fn the_list_counts_types_and_duplicates() {
         }
     );
     let sixteen: Vec<OutputEntry> = (1..=16)
-        .map(|n| OutputEntry::vban(&format!("out-{n}"), "v", dest("h", 6980)))
+        .map(|n| OutputEntry::vban(&format!("out-{n}"), "v", dest("h", 6980 + n)))
         .collect();
     assert_eq!(
         validate_list(&sixteen).unwrap_err(),
@@ -246,7 +248,7 @@ fn the_list_counts_types_and_duplicates() {
         "16 entries pass the total cap and stop at the VBAN cap"
     );
     let seventeen: Vec<OutputEntry> = (1..=17)
-        .map(|n| OutputEntry::vban(&format!("out-{n}"), "v", dest("h", 6980)))
+        .map(|n| OutputEntry::vban(&format!("out-{n}"), "v", dest("h", 6980 + n)))
         .collect();
     assert_eq!(
         validate_list(&seventeen).unwrap_err(),
@@ -592,7 +594,7 @@ fn at_most_four_asio_entries() {
     assert_eq!(five.sk(), "Výstupov ASIO je 5, najviac môže byť 4");
     // 8 VBAN and 4 ASIO entries are a whole list.
     let mut full: Vec<OutputEntry> = (1..=8)
-        .map(|n| OutputEntry::vban(&format!("v-{n}"), "v", dest("h", 6980)))
+        .map(|n| OutputEntry::vban(&format!("v-{n}"), "v", dest("h", 6980 + n)))
         .collect();
     full.extend(drivers(4));
     assert!(validate_list(&full).is_ok());
@@ -813,4 +815,70 @@ fn a_waiting_asio_output_reads_its_reason_and_next_try() {
         "čaká · ďalší pokus o 2 s"
     );
     assert_eq!(asio_waiting_text("otvára sa", None, None), "otvára sa");
+}
+
+/// #233 release review: a second VBAN entry to an earlier one's destination
+/// (the host and the stream name ASCII case ignored, the same port) is
+/// refused, a switched-off one too, like an ASIO driver; the id is checked
+/// first.
+#[test]
+fn a_second_vban_entry_to_the_same_destination_is_refused() {
+    let mut twin = OutputEntry::vban(
+        "out-2",
+        "FOH again",
+        VbanDest {
+            host: "FOHABL.lan".into(),
+            stream_name: "SP-Program".into(),
+            ..dest("fohabl.lan", 6980)
+        },
+    );
+    twin.enabled = false;
+    let err = validate_list(&[foh(), twin]).unwrap_err();
+    assert_eq!(
+        err,
+        ListError::Entry(EntryError {
+            index: 1,
+            id: "out-2".into(),
+            field: "vban",
+            problem: Problem::DestinationTaken,
+        })
+    );
+    assert_eq!(
+        err.to_string(),
+        "entry 2 (id out-2): vban is already used by an earlier VBAN entry (the same host, port and stream name)"
+    );
+    assert_eq!(
+        err.sk(),
+        "Výstup 2 (out-2): pole „nastavenie VBAN“ je už použité iným výstupom VBAN (rovnaký cieľ, port aj názov streamu)"
+    );
+}
+
+/// Another port, another host or another stream name is another
+/// destination; an ASIO entry has none.
+#[test]
+fn another_port_host_or_stream_name_is_another_destination() {
+    let others = [
+        dest("fohabl.lan", 6981),
+        dest("lv1.lan", 6980),
+        VbanDest {
+            stream_name: "sp-program-2".into(),
+            ..dest("fohabl.lan", 6980)
+        },
+    ];
+    for other in others {
+        let list = [foh(), OutputEntry::vban("out-2", "b", other.clone())];
+        assert_eq!(validate_list(&list), Ok(()), "{other:?}");
+        assert!(!destination_taken(&list[..1], &list[1]), "{other:?}");
+    }
+    let asio = OutputEntry::asio(
+        "out-3",
+        "DVS",
+        AsioDest {
+            driver: "fohabl.lan".into(),
+            channels: [0, 1],
+        },
+    );
+    assert!(!destination_taken(&[foh()], &asio));
+    assert!(!destination_taken(&[asio], &foh()));
+    assert!(destination_taken(&[foh()], &foh()));
 }
