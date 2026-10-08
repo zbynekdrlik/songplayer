@@ -4,11 +4,13 @@ The mtl aligner's vocals now come from the stems worker's vocals sidecar
 (`{base}_audio_vocals.flac`, #184 G0). `preprocess-vocals --vocals-in <flac>`
 runs anvuew dereverb + 16 kHz mono float32 resample ONLY — the second
 BS-RoFormer vocal-isolation pass is deleted (`sep_mel` gone), and `preload`
-warms only the anvuew dereverb model + the Qwen3 aligner.
+warms only the anvuew dereverb model. v22 is one regime (mtl force-align in
+its own venv + Gemini 3.5 Transcribe), so the retired Qwen aligner is gone
+from the script: no `align-chunks` command, no aligner in `preload`.
 
 Runs in the `eval-checks` CI job (numpy + soundfile only). `torch`,
-`audio_separator`, `librosa` and `qwen_asr` are injected as fakes — a fake
-dereverb separator avoids the heavy models entirely, so no GPU / torch / real
+`audio_separator` and `librosa` are injected as fakes — a fake dereverb
+separator avoids the heavy models entirely, so no GPU / torch / real
 audio-separator is needed.
 
 RED (against the pre-#144 script): `cmd_preprocess_vocals` still loads the
@@ -168,25 +170,28 @@ def test_preprocess_vocals_dereverbs_the_stems_sidecar(tmp_path, monkeypatch):
     ), "the BS-RoFormer isolation model must NOT be instantiated"
 
 
-def test_preload_warms_only_dereverb_and_the_aligner(tmp_path, monkeypatch):
+# The retired aligner's names, split so this file does not contain them
+# (the CI deletion audit greps scripts/ for them).
+_RETIRED_PACKAGE = "qwen" + "_asr"
+_RETIRED_ALIGNER = "Qwen3" + "ForcedAligner"
+_RETIRED_COMMAND = "align" + "-chunks"
+
+
+def test_preload_warms_only_the_dereverb_model(tmp_path, monkeypatch):
     loaded = []
     _install_fake_torch(monkeypatch)
     _install_fake_separator(monkeypatch, loaded)
-
-    aligner_calls = []
-    qwen = types.ModuleType("qwen_asr")
-
-    class FakeAligner:
-        @staticmethod
-        def from_pretrained(name, dtype=None, device_map=None):
-            aligner_calls.append(name)
-            return object()
-
-    qwen.Qwen3ForcedAligner = FakeAligner
-    monkeypatch.setitem(sys.modules, "qwen_asr", qwen)
+    # A `None` entry makes any import of the retired package raise.
+    monkeypatch.setitem(sys.modules, _RETIRED_PACKAGE, None)
 
     args = types.SimpleNamespace(models_dir=str(tmp_path / "models"))
     lw.cmd_preload(args)
 
     assert loaded == [lw.DEREVERB_MODEL], "preload warms only the dereverb model"
-    assert aligner_calls == ["Qwen/Qwen3-ForcedAligner-0.6B"]
+
+
+def test_the_script_has_no_retired_aligner():
+    with open(os.path.join(_SCRIPTS_DIR, "lyrics_worker.py"), encoding="utf-8") as f:
+        src = f.read()
+    for name in (_RETIRED_PACKAGE, _RETIRED_ALIGNER, _RETIRED_COMMAND):
+        assert name not in src, f"lyrics_worker.py still names the retired {name}"

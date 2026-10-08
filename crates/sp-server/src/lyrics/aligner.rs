@@ -454,11 +454,28 @@ mod tests {
             ["merge_word", "_timings"].concat(),
             ["ensure_progressive", "_words"].concat(),
             ["count_duplicate", "_start_ms"].concat(),
+            // #144: the retired Qwen3-ForcedAligner wrapper.
+            ["align", "_chunks"].concat(),
+            ["align", "-chunks"].concat(),
         ];
         for sym in &banned {
             assert!(
                 !src.contains(sym.as_str()),
                 "aligner.rs must not contain retired symbol `{sym}`"
+            );
+        }
+    }
+
+    /// #144: the chunk planner and the chunk assembler of the retired Qwen
+    /// aligner went with `align-chunks`, their only consumer.
+    #[test]
+    fn the_lyrics_module_declares_no_retired_chunk_modules() {
+        let src = include_str!("mod.rs");
+        for module in ["chunking", "assembly"] {
+            let decl = format!("pub mod {module};");
+            assert!(
+                !src.contains(&decl),
+                "lyrics/mod.rs must not declare `{decl}`"
             );
         }
     }

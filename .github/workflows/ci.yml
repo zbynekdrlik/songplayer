@@ -496,9 +496,13 @@ jobs:
             "retry_missing_alignment"
             "set_video_lyrics_source"
             "get_next_video_missing_alignment"
+            "align_chunks"
           )
           BANNED_LITERALS=(
             '"lrclib+qwen3"'
+            'qwen_asr'
+            'Qwen3ForcedAligner'
+            'align-chunks'
           )
           # No banned CLI args at this time. `--write-auto-subs` was
           # previously banned from the production pipeline but is now a
@@ -510,6 +514,7 @@ jobs:
             "def cmd_transcribe("
             "def cmd_download_models("
             "def _group_words_into_lines("
+            "def cmd_align_chunks("
           )
           FAIL=0
           SEARCH_PATHS=(crates src-tauri sp-ui scripts e2e)

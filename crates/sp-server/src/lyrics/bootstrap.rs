@@ -534,17 +534,36 @@ mod tests {
     }
 
     /// The `is_ready` Python probe must import every runtime dependency
-    /// the lyrics worker uses at alignment time. Each import is listed
-    /// separately so an unrelated formatting change does not silently
-    /// hide a missing package.
+    /// the venv's live scripts use (`preprocess-vocals`, `stem_worker.py`).
+    /// Each import is listed separately so an unrelated formatting change
+    /// does not silently hide a missing package.
     #[test]
     fn is_ready_probe_imports_every_required_package() {
-        for pkg in ["qwen_asr", "torch", "audio_separator"] {
+        for pkg in ["torch", "audio_separator", "numba", "librosa", "soundfile"] {
             assert!(
                 IS_READY_PROBE.contains(pkg),
                 "IS_READY_PROBE must import {pkg}, got: {IS_READY_PROBE:?}"
             );
         }
+    }
+
+    /// #144: v22 is one regime (mtl force-align in its own venv + Gemini 3.5
+    /// Transcribe). Nothing live imports the retired Qwen aligner package, so
+    /// a broken copy of it must never make the venv "not ready" (a full
+    /// reinstall), and the install never fetches it. The names are split so
+    /// this file does not contain what it looks for.
+    #[test]
+    fn the_venv_needs_no_retired_aligner_package() {
+        let retired = ["qw", "en"].concat();
+        assert!(
+            !IS_READY_PROBE.to_lowercase().contains(&retired),
+            "IS_READY_PROBE must not import the retired aligner, got: {IS_READY_PROBE:?}"
+        );
+        let pip_arg = ["\"qwen", "-asr\""].concat();
+        assert!(
+            !include_str!("bootstrap.rs").contains(&pip_arg),
+            "the bootstrap must not pip install the retired aligner"
+        );
     }
 
     /// The `is_ready` probe must also gate on `torch.cuda.is_available()`

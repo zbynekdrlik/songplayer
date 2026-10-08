@@ -194,7 +194,7 @@ mod tests {
                 song: "Hello".into(),
                 artist: "Adele".into(),
                 stage: "aligning".into(),
-                provider: Some("qwen3".into()),
+                provider: Some("mtl".into()),
                 started_at_unix_ms: 1718380800000,
             }),
         };
@@ -233,7 +233,7 @@ mod tests {
         let msg = ServerMsg::LyricsCompleted {
             video_id: 42,
             youtube_id: "abc".into(),
-            source: "ensemble:qwen3+autosub".into(),
+            source: "lrclib+mtl@rev1/g35t-ok".into(),
             quality_score: 0.82,
             provider_count: 2,
             duration_ms: 330_000,
