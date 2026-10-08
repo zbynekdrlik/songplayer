@@ -1,8 +1,10 @@
 //! #229: the download job (download + normalize + metadata) asks first. A
 //! peer's video + audio pair is fetched instead of yt-dlp + loudnorm and named
 //! after THIS node's title: an operator's correction here, else the peer's
-//! provider or operator title, else this node's own providers
-//! (`download_title`). It is recorded through
+//! provider or operator title, else the title parser's, marked for the
+//! repair (item A: the peer holds this very song and names it too, so no
+//! provider — paid AI — is asked here; the repair takes the peer's title
+//! once it has one, `peer::repair::waits_for_peer`). It is recorded through
 //! `metadata::manual::record_download`, the local download's own record path,
 //! which re-reads a correction made meanwhile under `cache::SONG_FILES` (#136,
 //! `.claude/rules/song-files.md`). `downloader/` is out of the mutation gate,
@@ -24,9 +26,7 @@ use crate::db::models_peer;
 use crate::downloader::VideoRow;
 use crate::downloader::cache::{audio_filename, video_filename};
 use crate::metadata::ProviderChain;
-use crate::metadata::manual::{
-    DownloadTitle, MANUAL_SOURCE, download_title, manual_title, record_download,
-};
+use crate::metadata::manual::{DownloadTitle, MANUAL_SOURCE, manual_title, record_download};
 
 /// A peer's title for a video, with where it came from: recorded in
 /// `peer_fetches` (kind `metadata`, [`record_title`]) once a download or the
@@ -193,7 +193,7 @@ fn written_title(taken: Option<PeerTitle>, recorded: &DownloadTitle) -> Option<P
 /// peer's title when that is the one.
 async fn title_for(
     ex: &Exchange,
-    chain: &ProviderChain,
+    _chain: &ProviderChain,
     row: &VideoRow,
     peer: &PeerConfig,
 ) -> (DownloadTitle, Option<PeerTitle>) {
@@ -215,10 +215,18 @@ async fn title_for(
         Err(e) => warn!(
             youtube_id = %row.youtube_id,
             %e,
-            "exchange: reading the peer's title failed - asking this node's providers"
+            "exchange: reading the peer's title failed - the title parser names it for the repair"
         ),
     }
-    let own = download_title(&ex.pool, chain, &row.youtube_id, &row.title).await;
+    // Item A: the peer holds this very song and names it too (its own
+    // repair): no provider here, the repair takes the peer's title later.
+    let meta = crate::metadata::parser_for_repair(&row.title);
+    let own = DownloadTitle {
+        song: meta.song,
+        artist: meta.artist,
+        source: meta.source.as_str(),
+        gemini_failed: meta.gemini_failed,
+    };
     (own, None)
 }
 

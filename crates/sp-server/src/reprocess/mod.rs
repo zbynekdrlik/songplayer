@@ -94,6 +94,9 @@ enum ReprocessOutcome {
     /// #229 item C: this node's paid AI is off and no peer had a title: no
     /// provider was asked, no backoff (one INFO per video, `paid_ai::hold`).
     Held,
+    /// #229 item A: the peer this node took the song's audio from names it
+    /// too: no provider was asked, no backoff (`peer::repair::waits_for_peer`).
+    WaitsForPeer,
 }
 
 impl ReprocessWorker {
@@ -225,6 +228,9 @@ impl ReprocessWorker {
                 }
                 // #229 item C: `paid_ai::hold` logged it (one INFO per video).
                 Ok(ReprocessOutcome::Held) => {}
+                Ok(ReprocessOutcome::WaitsForPeer) => {
+                    debug!(video_id = %row.youtube_id, "waits for the peer's title");
+                }
                 Ok(ReprocessOutcome::LeftQueue) => {
                     info!(
                         video_id = %row.youtube_id,
@@ -282,8 +288,15 @@ impl ReprocessWorker {
             let outcome = self.apply_title(row, &t.song, &t.artist, t.source).await?;
             if matches!(outcome, ReprocessOutcome::Success) {
                 crate::peer::download::record_title(ex, &row.youtube_id, &taken).await;
+                crate::peer::repair::end_wait(ex, &row.youtube_id).await;
             }
             return Ok(outcome);
+        }
+        // #229 item A: no provider while the peer the song came from names it.
+        if let Some(ex) = peer.as_deref()
+            && crate::peer::repair::waits_for_peer(ex, &row.youtube_id).await
+        {
+            return Ok(ReprocessOutcome::WaitsForPeer);
         }
         // #229 item C: while paid AI is off only a peer's title repairs it.
         if self.chain.providers().await.is_none() {

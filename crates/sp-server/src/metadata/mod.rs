@@ -130,6 +130,13 @@ pub async fn get_metadata(
 /// per video (`paid_ai::hold`).
 pub(crate) fn parser_while_paid_ai_off(video_id: &str, title: &str) -> VideoMetadata {
     crate::paid_ai::hold(crate::paid_ai::Held::Metadata, video_id);
+    parser_for_repair(title)
+}
+
+/// The title parser's name for `title`, marked for the repair
+/// (`gemini_failed`): no provider is asked (#229: while paid AI is off, or
+/// while the peer the pair came from names the song, `peer::download`).
+pub(crate) fn parser_for_repair(title: &str) -> VideoMetadata {
     fallback_from_title(title, true)
 }
 
