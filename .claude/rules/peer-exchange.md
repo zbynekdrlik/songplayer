@@ -580,7 +580,9 @@ wait for a peer that has the song", below).
   peer this node took the video's audio from (`decide::SongFrom`, the
   `peer_fetches` audio record's node and sha256, `Exchange::song_from`)
   still listing that very audio (`decide::song_holder`, review round 2:
-  the sha too) → Wait (`PeerHasTheSong`, same bound); a peer whose catalog
+  the sha too), or announcing the video's audio (a queued or running
+  download: re-hashing it after a rename, ~70 s unlisted, review round 8)
+  → Wait (`PeerHasTheSong`, same bound); a peer whose catalog
   could not be read (an outage, a refused key or token, its API off) →
   Wait, same bound; else Local (`NobodyHasIt`: nobody has or makes it, and
   for the lyrics the peer they took the song from does not list it). No
@@ -597,7 +599,8 @@ wait for a peer that has the song", below).
   `Exchange::run_here`: it ENDS the job's wait (`Exchange::end_wait`),
   forgets the `peer_fetches` records of what the job makes
   (`forget_origins`, the audio guard below), drops a stand-in of it
-  (`peer::standin`; the caller records it again when it still stands in),
+  (`peer::standin`; the caller records a new one when what it makes
+  stands in for a peer's copy),
   drops the parts a fetch of it left, then announces it (a later ask never
   inherits an old start and its spent bound). One exception: a lyrics job
   that stands in for a peer's copy runs here through
@@ -783,11 +786,17 @@ wait for a peer that has the song", below).
   one `{yt}_lyrics.json`; review round 5: the asked row only before), never
   for a video whose `{yt}_lyrics.json` here is a dub's subtitles (any row
   of it here dub-requested or `gemini-live-translate`), a failed read →
-  here; one query, `lyrics::kept_local`, which the stand-in's look and
-  V31's back-fill share. A reprocess flag counts only on a row of an
-  ACTIVE playlist (review round 7): the queue never takes another row, so
-  its flag is never cleared, and `reprocess-all-stale` /
-  `reprocess-catalog-with-new-gate` set it with no playlist filter. The
+  here; one query, `lyrics::kept_local`, which the stand-in's look shares
+  (V31's back-fill is a literal copy of it without the pipeline version: a
+  stand-in it made for a video whose stale row awaits a reprocess is
+  dropped by its first look). The dub and the Live-Translate track count
+  on any row; an operator's mark only where the lyrics queue acts on it
+  (review rounds 7-8): a text on a row of an ACTIVE playlist (the worker
+  makes no other row's lyrics), a reprocess flag on such a row that is not
+  parked (`queue_sql::LYRICS_NOT_PARKED`, bucket 1's own condition: the
+  queue never takes another, so its flag is never cleared;
+  `reprocess-all-stale` / `reprocess-catalog-with-new-gate` set it with no
+  playlist filter, and the Reprocess route leaves `asr_gap` in place). The
   peer's `/videos` row must match its catalog (pipeline version) and must
   not be `gemini-live-translate`; the same source at the same version as
   the row already serves = nothing newer → runs here (the daily full-mix
@@ -854,14 +863,16 @@ parked `no_source` by `fail_song`). Three rules:
   its audio), and two nodes listing each other (phase 2) never wait on
   each other's audio. And only while it lists that very audio (review
   round 2, the record's sha256): a source that downloaded the song again
-  lists another audio, whose lyrics the audio guard would refuse. The
-  stems do not wait on the song (the same model on every node: a local
+  lists another audio, whose lyrics the audio guard would refuse; one that
+  announces the video's audio (re-hashing it, or downloading it anew) is
+  waited for, bounded (review round 8: "nobody has it" then ran the job
+  here with no stand-in). The stems do not wait on the song (the same model on every node: a local
   separation is not degraded), nor does the download (it fetches the song
   itself).
 - **A track made here while a peer had the song STANDS IN for the peer's
   copy** (`peer_standins` `(youtube_id, job, peer, made_at_ms,
   next_check_ms)`, `models_peer::{record,due,recheck,forget}_standin`,
-  read back whole by `models_peer::standin` → `StandinRecord`):
+  its peer read by `models_peer::standin_peer` / `Exchange::standin_peer`):
   - recorded (`Exchange::stand_in`, INFO `exchange: made here while a peer
     has the song - its copy replaces this one once it has it`, first looked
     at 10 min later) when the lyrics job runs here after asking while the
@@ -959,7 +970,8 @@ parked `no_source` by `fail_song`). Three rules:
 - Tests: `queued_tests.rs::lyrics_waiting_on_their_queued_stems_are_queued`,
   `decide_tests.rs::{a_lyrics_job_waits_while_a_peer_has_the_song,
   a_lyrics_job_waits_only_on_the_peer_it_took_the_song_from,
-  a_lyrics_job_waits_only_for_the_audio_it_took}`,
+  a_lyrics_job_waits_only_for_the_audio_it_took,
+  a_lyrics_job_waits_while_its_source_announces_the_songs_audio}`,
   `kind_tests.rs::only_the_lyrics_wait_while_a_peer_has_the_song`,
   `lyrics_tests.rs::{lyrics_wait_while_a_peer_has_the_song,
   lyrics_of_a_song_downloaded_here_do_not_wait_for_a_peer,
@@ -967,7 +979,8 @@ parked `no_source` by `fail_song`). Three rules:
   a_stand_in_handed_the_copy_runs_here_after_the_bound,
   a_stand_ins_spent_bound_survives_a_pick_with_the_peer_unreachable,
   a_reprocess_left_on_an_inactive_playlists_row_does_not_keep_the_lyrics_here,
-  an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here}`,
+  an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here,
+  an_operators_mark_the_queue_never_acts_on_does_not_keep_the_lyrics_here}`,
   `standin_tests.rs` (the supersede over two real nodes: every row, a
   parked track, the check row with an audio, the recheck, another audio,
   an operator or a dub, no row, the order, the recheck curve, every row or
