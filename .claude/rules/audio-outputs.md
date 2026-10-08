@@ -480,10 +480,20 @@ own callback thread and has two slots of cushion):
   published BEFORE the device is closed (a vanished driver can block its
   stop or release; review round 2), and the closed run's ppm, rate_ppm,
   lock and latency are cleared (the counters and the last open's driver
-  rate / sample type stay). Underruns and the driver's overloads count
-  across reopens (`underruns_closed`, `overloads_closed`: a device counts
-  per run). `kAsioLatenciesChanged` re-reads the driver's output latency
+  rate / sample type stay). EVERY counter (underruns, overloads,
+  overflows, re-centres, resets) counts since the output was built: a
+  run's device, servo and ring count from 0 again, so the worker adds each
+  closed run's into one `Closed` (review round 3). `kAsioLatenciesChanged`
+  re-reads the driver's output latency
   (`AsioDevice::output_latency_frames`), so `latency_ms` follows it.
+- a lost clock stays a lost clock: a reopen that finds the driver under
+  1 Hz (`admit_rate`) or `getSampleRate` answering ASE_NoClock reads
+  `clock_lost` again, not a refused rate (review round 3).
+- the backoff runs from the step that decided the close, not from the end
+  of the release: a release that blocks for seconds reopens right after
+  it; a driver still busy then is refused `busy` and the next wait is
+  10 s. Kept (the worker step takes one instant; a busy driver costs one
+  retry).
 - one holder per driver in the process (`asio_hold`, `asio_win::HELD`): a
   device holds the driver's name before it reads the registry or loads
   anything, and gives it back after the driver is released. A rebuilt
@@ -517,8 +527,12 @@ the driver's hold back, THEN releases the slot. A callback still inside
 after 1 s PARKS the device (iemmixer `asio.rs:487-500`, review round 2):
 the stream is leaked, the buffers are not disposed, the driver is
 forgotten (never released), the slot stays claimed (its in-flight count
-is the callback's) and the hold is kept for the process's life; every
-later open is `Failed` ("… parked until SongPlayer restarts").
+is the callback's) and the hold is kept for the process's life, marked
+parked (`DriverHold::park`, `DriverHolds::is_parked`); every later open of
+that driver — this device's, or the output that replaces it — is `Failed`
+("… parked until SongPlayer restarts"). It parks only when no read of the
+in-flight count saw 0 within the bound (once 0 was read, the unhooked slot
+gives a later callback no stream).
 `outputReady` is not called: the plan allows it from the callback, but
 one driver buffer (1.3 ms at DVS's 128 frames / 96 kHz) is noise against
 the 66.7 ms target, and the call would go through a raw pointer to a
@@ -531,7 +545,8 @@ fails on the names `set_sample_rate` / `set_clock_source` /
 
 **Status** (`outputs[i]`): `rate` = the driver's, `format` = its sample type,
 `latency_ms` = the servo's + the resampler's + the driver's output latency
-(66.625 + 4 = 70.625 ms on the scripted 96 kHz / 128-frame driver), `asio`
+(66.625 + 4 = 70.625 ms on the scripted 96 kHz / 128-frame driver; 0 until
+the servo measured its first 1 s window), `asio`
 = `{driver, channels, driver_rate, buffer_frames, out_channels,
 sample_type, ppm, rate_ppm, locked, latency_ms, underruns, resets,
 recentres, overflows, overloads, retry_in_s, reason_code}`, and while it runs a `note`
@@ -583,7 +598,10 @@ DVS entry, then "1"), each running, then a minute (1 800 blocks) at its
 driver's rate with no underrun, no reopen, |ppm| ≤ 300 and a latency
 over 0 and under the entry's delay + 1 s (`asioGateFailures`, unit-tested
 in the mock suite; every output over the SAME minute, so the gate's time
-does not grow with the outputs; `rate` vs `driver_rate` is a consistency check of two
+does not grow with the outputs; the driver's `overloads` are logged with
+the two reads, not gated: a driver's CPU-overload report is the box's
+load, not the output's fault, and the gate fails only on what the output
+does — underruns, reopens, the correction, the latency; `rate` vs `driver_rate` is a consistency check of two
 fields the server fills from the same driver read). A failed read of
 `GET /api/v1/program` never counts as zero outputs.
 

@@ -96,14 +96,16 @@ pub struct AsioStatus {
     /// The card's rate against the program wall (the regression).
     pub rate_ppm: f64,
     pub locked: bool,
-    /// The output's latency from the boundary, ms (`asio_latency_ms`).
+    /// The output's latency from the boundary, ms (`asio_latency_ms`; 0
+    /// until the servo measured its first window, and while waiting).
     pub latency_ms: f64,
     /// Callbacks that found the ring short, since the output was built.
     pub underruns: u64,
     /// Closes (a reset, a rate change, a stall) since the output was built.
     pub resets: u64,
+    /// The servo's re-centres, since the output was built.
     pub recentres: u64,
-    /// Frames the ring had no room for.
+    /// Frames the ring had no room for, since the output was built.
     pub overflows: u64,
     /// The driver's `kAsioOverload` messages, since the output was built.
     pub overloads: u64,
