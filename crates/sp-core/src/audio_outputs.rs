@@ -643,6 +643,19 @@ pub fn asio_channel_shown(index: u32) -> u32 {
     index.wrapping_add(1)
 }
 
+/// Why the dashboard's "Pridať výstup ASIO" is off, or `None` when an ASIO
+/// output can be added: the driver list is still loading (an empty text),
+/// its read failed, or the box lists no driver (#233 review round 2: a row
+/// with no driver to pick would only be refused).
+pub fn asio_add_refusal(listed: Option<&[String]>, read_failed: bool) -> Option<&'static str> {
+    match listed {
+        Some([]) => Some("V systéme nie je žiadny ovládač ASIO"),
+        Some(_) => None,
+        None if read_failed => Some("Zoznam ovládačov ASIO sa nenačítal"),
+        None => Some(""),
+    }
+}
+
 /// The dashboard's driver choices for an ASIO entry, `(value, label)`: the
 /// box's listed drivers, then the entry's own driver when the list lacks
 /// it. That driver is marked "(nenájdený)" only when the list is KNOWN

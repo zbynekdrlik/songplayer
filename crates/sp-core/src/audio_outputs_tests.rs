@@ -750,3 +750,25 @@ fn a_lost_clock_and_a_held_driver_read_in_slovak() {
         "ovládač ešte uvoľňuje predchádzajúci výstup"
     );
 }
+
+/// #233 review round 2: "Pridať výstup ASIO" is off while the list loads,
+/// after a failed read, and on a box that lists no driver.
+#[test]
+fn the_add_asio_button_says_why_it_is_off() {
+    let listed = vec!["Dante Virtual Soundcard (x64)".to_string()];
+    assert_eq!(asio_add_refusal(Some(&listed), false), None);
+    assert_eq!(
+        asio_add_refusal(Some(&listed), true),
+        None,
+        "a list was read"
+    );
+    assert_eq!(
+        asio_add_refusal(Some(&[]), false),
+        Some("V systéme nie je žiadny ovládač ASIO")
+    );
+    assert_eq!(
+        asio_add_refusal(None, true),
+        Some("Zoznam ovládačov ASIO sa nenačítal")
+    );
+    assert_eq!(asio_add_refusal(None, false), Some(""), "still loading");
+}

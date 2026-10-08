@@ -47,8 +47,8 @@ use leptos::prelude::*;
 use serde::Deserialize;
 use sp_core::audio_outputs::{
     OutputEntry, OutputType, RateChoice, SUPPORTED_RATES, VbanDest, VbanSampleFormat,
-    asio_channel_index, asio_channel_shown, asio_driver_options, asio_reason_sk, new_asio,
-    new_vban, validate_list,
+    asio_add_refusal, asio_channel_index, asio_channel_shown, asio_driver_options, asio_reason_sk,
+    new_asio, new_vban, validate_list,
 };
 use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
 
@@ -293,9 +293,15 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
             l.push(fresh);
         });
     };
-    // An ASIO output on the first listed driver (none listed: an empty one,
-    // which validation refuses until a driver is picked).
+    // Why "Pridať výstup ASIO" is off (loading, a failed read, no driver).
+    let add_refusal =
+        Memo::new(move |_| drivers.with(|d| asio_add_refusal(d.as_deref(), drivers_failed.get())));
+    // An ASIO output on the first listed driver (only once a driver is
+    // listed: `add_refusal`).
     let add_asio = move |_: leptos::ev::MouseEvent| {
+        if add_refusal.get_untracked().is_some() {
+            return;
+        }
         let saved =
             stored.with_untracked(|(list, _)| stored_list(list.as_deref()).unwrap_or_default());
         let first = drivers
@@ -394,10 +400,8 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                 <button
                     type="button"
                     data-testid="audio-outputs-add-asio"
-                    prop:disabled=move || drivers.with(Option::is_none)
-                    title=move || {
-                        if drivers_failed.get() { "Zoznam ovládačov ASIO sa nenačítal" } else { "" }
-                    }
+                    prop:disabled=move || add_refusal.get().is_some()
+                    title=move || add_refusal.get().unwrap_or("")
                     on:click=add_asio
                 >
                     "Pridať výstup ASIO"
