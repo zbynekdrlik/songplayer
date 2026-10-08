@@ -997,7 +997,7 @@ test("while the ratio drains an offset and after a hard re-centre, the row says 
     ["asio-card", "karta voči SongPlayeru: odhad sa ešte meria"],
     ["asio-correction", "korekcia −0,7 ppm (uberá vzorky)"],
     ["asio-slew", "dorovnáva odchýlku +12,3 ms · ešte asi 45 s"],
-    ["asio-last-fault", "posledný núdzový skok pred 3 min: +65,0 ms (zásobník by vyschol)"],
+    ["asio-last-fault", "posledný núdzový skok pred 3 min: +65,0 ms (v zásobníku chýbal zvuk)"],
   ]) {
     await expect(chip(page, key)).toHaveText(text);
   }

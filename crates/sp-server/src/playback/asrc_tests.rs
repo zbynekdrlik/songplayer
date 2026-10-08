@@ -315,7 +315,7 @@ fn a_20_khz_tone_leaves_nothing_over_minus_120_dbfs_from_24_to_48_khz() {
 #[test]
 fn the_dashboards_tooltips_name_the_outputs_own_figures() {
     use crate::playback::asrc_servo::{
-        BASE_LATENCY_100NS, MAX_PPM, MAX_SLEW_PPM_PER_S, REGRESSION_LOCK_SPAN_S,
+        BASE_LATENCY_100NS, HARD_EXCESS_100NS, MAX_PPM, MAX_SLEW_PPM_PER_S, REGRESSION_LOCK_SPAN_S,
         REGRESSION_MIN_POINTS,
     };
     use sp_core::asio_resampling::{
@@ -328,6 +328,9 @@ fn the_dashboards_tooltips_name_the_outputs_own_figures() {
         FAULTS_TIP,
         format!("s {} ms prelínaním", SPLICE_FADE_S * 1_000.0),
     );
+    // Review round 4: a deficit is also a delayed output 4 slots early.
+    let edge_ms = HARD_EXCESS_100NS / 10_000;
+    has(FAULTS_TIP, format!("o viac ako {edge_ms} ms skôr"));
     has(CORRECTION_TIP, format!("±{MAX_PPM} ppm"));
     has(SLEW_TIP, format!("o {MAX_SLEW_PPM_PER_S} ppm za sekundu"));
     has(CARD_TIP, format!("({REGRESSION_MIN_POINTS} bodov)"));

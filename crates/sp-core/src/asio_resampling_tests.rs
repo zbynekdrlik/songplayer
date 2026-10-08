@@ -51,9 +51,12 @@ fn the_time_left_is_seconds_under_two_minutes_then_minutes() {
     assert_eq!(eta_sk(-1.0), "ešte asi 0 s");
 }
 
+/// A deficit is too little audio buffered: the ring would run dry, or a
+/// delayed output would play more than 4 slots early (review round 4: the
+/// text named only the first since the mirrored edge).
 #[test]
 fn a_faults_cause_reads_in_slovak() {
-    assert_eq!(fault_cause_sk("deficit"), "zásobník by vyschol");
+    assert_eq!(fault_cause_sk("deficit"), "v zásobníku chýbal zvuk");
     assert_eq!(fault_cause_sk("excess"), "zásobník by pretiekol");
     assert_eq!(fault_cause_sk("later"), "neznámy dôvod");
 }
@@ -175,7 +178,7 @@ fn a_slewing_output_with_a_fault_reads_what_works_and_what_failed() {
             ("asio-slew", "dorovnáva odchýlku +12,3 ms · ešte asi 45 s"),
             (
                 "asio-last-fault",
-                "posledný núdzový skok pred 3 min: +65,0 ms (zásobník by vyschol)"
+                "posledný núdzový skok pred 3 min: +65,0 ms (v zásobníku chýbal zvuk)"
             ),
         ]
     );
@@ -183,7 +186,7 @@ fn a_slewing_output_with_a_fault_reads_what_works_and_what_failed() {
         line[4].title.as_deref(),
         Some(
             &format!(
-                "Núdzový skok: +65,0 ms (+ vložené ticho, − preskočený zvuk), lebo zásobník by vyschol. Blok programu vtedy prišiel {MINUS}60,0 ms po svojej hranici."
+                "Núdzový skok: +65,0 ms (+ vložené ticho, − preskočený zvuk), lebo v zásobníku chýbal zvuk. Blok programu vtedy prišiel {MINUS}60,0 ms po svojej hranici."
             )[..]
         )
     );
