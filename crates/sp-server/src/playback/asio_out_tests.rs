@@ -857,3 +857,48 @@ fn a_parked_driver_is_not_retried() {
         "an hour later: no open, no next try"
     );
 }
+
+/// A driver whose open panics: the worker's thread dies on its first step.
+struct PanickingOpen;
+
+impl AsioDevice for PanickingOpen {
+    fn open(&mut self, _driver: &str, _channels: [u32; 2]) -> Result<Opened, Reason> {
+        panic!("a driver that dies");
+    }
+    fn start(&mut self, _ring: rtrb::Consumer<f32>) -> Result<Started, Reason> {
+        Err(Reason::Failed("never opened".into()))
+    }
+    fn poll(&mut self) -> DeviceEvents {
+        DeviceEvents::default()
+    }
+    fn consumed_frames(&self) -> u64 {
+        0
+    }
+    fn underruns(&self) -> u64 {
+        0
+    }
+    fn mark_primed(&mut self) {}
+    fn output_latency_frames(&self) -> u32 {
+        0
+    }
+    fn close(&mut self) {}
+}
+
+/// #233 release review: an ASIO worker that panics never reads "running"
+/// for good: the loop's guard clears `running` on the unwind and names why
+/// the thread stopped (`start_error`), so the outputs task rebuilds the
+/// output on its next pass (`RunningOutput::start_failed`).
+#[test]
+fn an_asio_worker_that_panics_is_not_running_and_says_why() {
+    let o = out();
+    let mut clock = FakeClock::at(T0);
+    let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_asio_worker(&o, &mut PanickingOpen, &mut clock);
+    }));
+    assert!(died.is_err(), "the driver's panic ends the worker");
+    assert!(!o.is_running(), "running is cleared on the unwind");
+    assert_eq!(
+        o.start_error().as_deref(),
+        Some("the ASIO thread stopped: it panicked")
+    );
+}
