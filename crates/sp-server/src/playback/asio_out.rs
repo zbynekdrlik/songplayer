@@ -364,7 +364,6 @@ impl AsioWorker {
                 self.state = State::Running(Box::new(run));
             }
             Err(reason) => {
-                device.close();
                 self.failures = self.failures.saturating_add(1);
                 self.wait(
                     out,
@@ -372,6 +371,8 @@ impl AsioWorker {
                     reason,
                     "asio output: opening the driver failed",
                 );
+                // Shown first: a vanished driver's release can block.
+                device.close();
             }
         }
     }
@@ -385,12 +386,15 @@ impl AsioWorker {
         ran_100ns: i64,
     ) {
         self.underruns_closed += device.underruns();
-        device.close();
         self.resets += 1;
         self.failures = failures_after_close(self.failures, ran_100ns);
         let resets = self.resets;
         out.update(|l| l.status.resets = resets);
-        self.wait(out, now_100ns, reason, "asio output: closed the driver");
+        // "waiting" and the reason are shown BEFORE the device is closed: a
+        // vanished driver can block its stop or release for seconds, and
+        // the output must not read "running" meanwhile.
+        self.wait(out, now_100ns, reason, "asio output: closing the driver");
+        device.close();
     }
 
     fn wait(&mut self, out: &AsioOut, now_100ns: i64, reason: Reason, what: &str) {
@@ -412,6 +416,12 @@ impl AsioWorker {
             l.status.retry_in_s = Some(retry_in_s);
             l.status.reason_code = Some(reason.code());
             l.reason = Some(reason);
+            // The closed run's figures go with it; the counters and the
+            // last open's driver facts stay.
+            l.status.ppm = 0.0;
+            l.status.rate_ppm = 0.0;
+            l.status.locked = false;
+            l.status.latency_ms = 0.0;
         });
     }
 
