@@ -74,14 +74,15 @@ export const LATENCY_OVER_DELAY_MS = 1000;
  * clock: the count is then 0.
  */
 export function gatedAsioOutputs(list: OutputStatus[]): OutputStatus[] {
-  return list.filter(
-    (o) => o.type === "asio" && o.enabled && !(o.state === "waiting" && o.asio?.reason_code === "no_clock"),
-  );
+  const waiting = waitingForClock(list);
+  return list.filter((o) => o.type === "asio" && o.enabled && !waiting.includes(o));
 }
 
 /** The enabled ASIO outputs waiting for their driver's clock (`no_clock`). */
 export function waitingForClock(list: OutputStatus[]): OutputStatus[] {
-  return list.filter(() => false);
+  return list.filter(
+    (o) => o.type === "asio" && o.enabled && o.state === "waiting" && o.asio?.reason_code === "no_clock",
+  );
 }
 
 /** Why an ASIO output's minute (two reads of `outputs[i]`) fails. */

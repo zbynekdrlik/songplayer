@@ -173,16 +173,19 @@ pub enum ClockStep {
 
 /// The clock decision of a running output whose driver ticked `ticks` times
 /// (the worker passes the frames the card took since the priming: callbacks
-/// before it, a burst at the open, are no clock) since it opened
-/// `since_open_100ns` ago, `waiting` for its clock or not (the owner's
-/// ruling, #233, 8.10.2026: a driver that opens and does not tick is a
-/// calm, visible wait, never a fault loop).
-pub fn clock_step(ticks: u64, _primed: bool, waiting: bool, since_open_100ns: i64) -> ClockStep {
+/// before it, a burst at the open, are no clock), whose first block
+/// `primed` the ring or not, since it opened `since_open_100ns` ago,
+/// `waiting` for its clock or not (the owner's ruling, #233, 8.10.2026: a
+/// driver that opens and does not tick is a calm, visible wait, never a
+/// fault loop). A tick before the priming while waiting (a burst at a
+/// reopen) is no clock (review rounds 9-10); before the priming of a first
+/// open it is a tick.
+pub fn clock_step(ticks: u64, primed: bool, waiting: bool, since_open_100ns: i64) -> ClockStep {
     if ticks > 0 {
-        return if waiting {
-            ClockStep::ClockArrived
-        } else {
-            ClockStep::Ticking
+        return match (waiting, primed) {
+            (false, _) => ClockStep::Ticking,
+            (true, true) => ClockStep::ClockArrived,
+            (true, false) => ClockStep::Quiet,
         };
     }
     if since_open_100ns >= NO_CLOCK_REOPEN_100NS {

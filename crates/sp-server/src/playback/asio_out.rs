@@ -466,17 +466,12 @@ impl AsioWorker {
         let ticks = device
             .consumed_frames()
             .saturating_sub(run.consumed_at_prime);
-        let clock = match clock_step(
+        let clock = clock_step(
             ticks,
             run.primed,
             self.waiting_for_clock,
             now_100ns - run.opened_at_100ns,
-        ) {
-            // A tick before the priming is no clock (a burst at a reopen
-            // while the output waits; review round 9): the wait goes on.
-            ClockStep::ClockArrived if !run.primed => ClockStep::Quiet,
-            step => step,
-        };
+        );
         match clock {
             ClockStep::Ticking | ClockStep::Quiet => {}
             ClockStep::ClockArrived => {
@@ -612,8 +607,18 @@ impl AsioWorker {
                     }
                 }
                 // Stale by the open's duration: the first block the servo
-                // sees is a fresh one.
-                log_stale(&out.id, out.queue.clear());
+                // sees is a fresh one. A reopen during a wait for the clock
+                // is a retry: its count logs at DEBUG (review round 10).
+                let stale = out.queue.clear();
+                if waiting {
+                    debug!(
+                        id = %out.id,
+                        stale,
+                        "asio output: dropped the blocks queued while the driver opened"
+                    );
+                } else {
+                    log_stale(&out.id, stale);
+                }
                 let (state, reason) = if waiting {
                     (STATE_WAITING, Some(Reason::NoClock))
                 } else {
