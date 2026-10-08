@@ -75,9 +75,9 @@ fn a_forwarded_or_filled_boundary_shows_its_owner() {
     );
 }
 
-/// A cut from A to B on b(2): A's last two boundaries are queued, then B's
-/// first, which prunes A's segment (nobody owns b(1) any more). Taken after
-/// that, A's still show A.
+/// A cut from A to B on b(2): A's last boundary b(1) is queued, which
+/// prunes A's segment at once (the next boundary is B's: nobody owns b(1)
+/// any more), then B's first. Taken after that, A's still show A.
 #[test]
 fn the_outgoing_source_s_last_boundaries_still_show_it_after_the_cut() {
     let mut core = ProgramCore::new();

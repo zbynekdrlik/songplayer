@@ -13,6 +13,7 @@ use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, NdiSender};
 
 use super::{CHECK_AFTER_BOUNDARY_100NS, ProgramOutput, run_program_loop};
+use crate::playback::fleet_shift;
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramBus, ProgramJob};
 use crate::playback::program_trace::{ProgramTrace, TraceKind, TraceRecord};
@@ -54,14 +55,17 @@ fn pair(stamp: i64, live: bool) -> SubmitJob {
     }
 }
 
-/// The record a served boundary should leave under K = 0: its instants
-/// `us` µs after it, its submit return's UTC.
+/// The record a served boundary should leave: its instants `us` µs after
+/// it, its wire stamp and its submit return's UTC under the process's
+/// fleet shift (`serve` reads it; tests never register into it, but never
+/// assume it is 0 either).
 fn expected(index: u64, stamp: i64, us: [i64; 4], source: Option<i64>) -> TraceRecord {
+    let k = fleet_shift::global().slots();
     TraceRecord {
         index,
         stamp_100ns: stamp,
-        wire_100ns: stamp,
-        utc_ms: (stamp + us[3] * 10) / 10_000,
+        wire_100ns: fleet_shift::wire_stamp_100ns(stamp, k),
+        utc_ms: (stamp + us[3] * 10 + fleet_shift::shift_100ns(k)).div_euclid(10_000),
         taken_us: us[0],
         fed_us: us[1],
         submit_start_us: us[2],

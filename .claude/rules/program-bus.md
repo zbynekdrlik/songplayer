@@ -612,10 +612,10 @@ per-boundary SEQUENCE. It fixes nothing: the cause is a later unit.
   forwarded boundary, a held window boundary's `from`, a mix's `to`; a
   fill names the side on air (`fill_source`: a window whose cue waits or
   was frozen names its `from`, as its held boundaries do; any other fill
-  its owner, none before a source is selected). Never `owner_of` at take time: a
-  segment is pruned once the next owner's first boundary is committed, so
-  the outgoing source's last boundaries would read as nobody's
-  (`program_trace_tests_bus.rs`).
+  its owner, none before a source is selected). Never `owner_of` at take
+  time: the outgoing source's segment is pruned as soon as its own last
+  boundary is committed (the next boundary is the new owner's), so its
+  last boundaries would read as nobody's (`program_trace_tests_bus.rs`).
 - **The song mark.** The engine's `Started` arm calls `trace_song_start`
   before any await (`handle_pipeline_event.rs`): a playlist in the
   authority's on-air set, not paused, with a `current_video_id` →

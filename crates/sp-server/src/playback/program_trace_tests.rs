@@ -547,7 +547,7 @@ fn a_boundary_submitted_under_10_ms_after_the_one_before_is_a_clump() {
     let at = |submitted_us| rec(1, S + 333_330, 0, submitted_us);
     assert!(ClumpFlags::of(Some(&prev), &at(6_666)).close, "9 999 µs");
     assert!(!ClumpFlags::of(Some(&prev), &at(6_667)).close, "10 000 µs");
-    assert!(!ClumpFlags::of(Some(&prev), &at(40_000)).close, "36 666 µs");
+    assert!(!ClumpFlags::of(Some(&prev), &at(40_000)).close, "43 333 µs");
     assert!(!ClumpFlags::of(None, &at(0)).close, "nothing before it");
     assert_eq!(at(6_666).submitted_at_100ns(), S + 399_990);
 }
