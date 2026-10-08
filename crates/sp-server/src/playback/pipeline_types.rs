@@ -116,37 +116,16 @@ pub enum PipelineEvent {
 
 /// #217: where a Play really starts, the position its `Started` reports:
 /// `start_position_ms` when the decoder's `seek` there worked; 0 when it
-/// failed (the song then plays from its start) or no position was asked (no
-/// seek is made). `who` names the decode path in its log line (the paced
-/// producer).
+/// failed (the song then plays from its start: [`real_seek_ms`] from 0) or
+/// no position was asked (no seek is made). `who` names the decode path in
+/// its log line (the paced producer).
 pub fn real_start_ms<E: std::fmt::Debug>(
     start_position_ms: Option<u64>,
     seek: impl FnOnce(u64) -> Result<(), E>,
     playlist_id: i64,
     who: &str,
 ) -> u64 {
-    let Some(ms) = start_position_ms else {
-        return 0;
-    };
-    match seek(ms) {
-        Ok(()) => {
-            info!(
-                playlist_id,
-                start_position_ms = ms,
-                "{who}: seeked to the start position"
-            );
-            ms
-        }
-        Err(e) => {
-            warn!(
-                playlist_id,
-                start_position_ms = ms,
-                ?e,
-                "{who}: seek to start_position_ms failed — playing from 0"
-            );
-            0
-        }
-    }
+    start_position_ms.map_or(0, |ms| real_seek_ms(ms, 0, seek, playlist_id, who))
 }
 
 /// #217: where the song plays from after the decoder is asked to seek to
@@ -174,7 +153,7 @@ pub fn real_seek_ms<E: std::fmt::Debug>(
                 ?e,
                 "{who}: the decoder refused the seek — playing on from where it was"
             );
-            position_ms
+            current_ms
         }
     }
 }
