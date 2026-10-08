@@ -694,6 +694,20 @@ own callback thread and has two slots of cushion):
 - open drops the blocks queued while the driver opened (stale by the open's
   duration; an INFO, never `blocks_dropped`), so the servo's first block is
   fresh.
+- after the priming, a block goes to the servo and the ring only once the
+  card has called back in this run (`device.consumed_frames() > 0`; the
+  glue counts every buffer switch, primed or not); until then it is
+  dropped and the ring keeps its priming (`AsioWorker::step`). Found live
+  at PP (8.10.2026, 0.74.0): an unlicensed DVS opens and never calls back,
+  and every 2 s run piled blocks into a ring nobody took, so the servo
+  counted an excess hard re-centre every few slots (`hard_recentres` 25 →
+  49 in a minute). Now such a driver shows its resets (the stall closes
+  each run) with `hard_recentres` 0, `overflows` 0 and one block sent per
+  run; the backoff escalates 2 / 10 / 30 / 60 s over runs shorter than
+  60 s (`asio_out_tests_silent.rs`). Deliberately NOT "a callback since
+  the last block": a callback period over one slot (2048 frames at 48 kHz,
+  42.7 ms) would lose real blocks. A card that stops after it started is
+  the stall's (2 s), as before.
 - close: a reset request or a buffer-size change (answered 0: never
   resized live), a rate change of 1 Hz or more (`sampleRateDidChange(0)` =
   a lost clock, code `clock_lost`, "ovládač stratil hodinový signál": a
