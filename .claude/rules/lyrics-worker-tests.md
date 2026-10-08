@@ -3,6 +3,7 @@ paths:
   - "scripts/lyrics_worker.py"
   - "scripts/tests/**"
   - "scripts/stem_worker.py"
+  - "scripts/audio_window.py"
 ---
 
 # Testing `scripts/lyrics_worker.py` in the `eval-checks` CI job
@@ -83,6 +84,15 @@ and `os.replace`s it. `_stitch_segments` stays as the reference. The tests:
   segment; reads and blocks alternate one to one;
 - local measure (tracemalloc, the fakes, 30 s / 2 s windows): a 12 min
   sidecar peaked at 678 MiB before, 29 MiB after, and 29 MiB at 3 min too.
+
+Since the #233 release review the header read, the window read and the
+streamed overlap-add are ONE module, `scripts/audio_window.py`
+(`audio_info`, `read_window`, `OverlapAdd`), shared by both workers: the
+lyrics worker's `_audio_info` / `_read_window` are its functions and
+`_stitched_blocks` feeds `OverlapAdd` one segment at a time; the stem
+writer accumulates through it too. Each worker ships it next to its script
+(`lyrics/tool_scripts.rs`, `stems/scripts.rs`). A helper both workers need
+goes there, never into a copy.
 
 `_stitched_blocks` handles any segment lengths the reference does (a gap,
 an overlap longer than the step); an earlier segment ending past the last

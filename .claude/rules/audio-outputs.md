@@ -1,6 +1,8 @@
 ---
 paths:
   - "crates/sp-core/src/audio_outputs*.rs"
+  - "crates/sp-core/src/asio_resampling*.rs"
+  - "crates/sp-server/src/playback/resample_quality.rs"
   - "crates/sp-server/src/playback/audio_out*.rs"
   - "crates/sp-server/src/playback/vban_rate*.rs"
   - "crates/sp-server/src/playback/vban_out_tests_dest.rs"
@@ -76,9 +78,12 @@ ruling 7).
 | `LEVEL_INTEGRAL_MAX_PPM` | 3 | 271 | 137 |
 | `MAX_SANE_WINDOW_PPM` (MAX_SANE_INSTANTANEOUS_PPM) | 100 000 | 447 | 109 |
 
-SongPlayer's own: `GROSS_STEP_100NS` = one grid slot (333 333),
-`RECENTRE_100NS` = 10 ms, `BASE_LATENCY_100NS` = `VBAN_SEND_LATENCY_100NS`
-(666 666), all literals pinned against their sources by the same test.
+SongPlayer's own: `SLOT_100NS` = one grid slot (333 333; was
+`GROSS_STEP_100NS`), `BASE_LATENCY_100NS` = `VBAN_SEND_LATENCY_100NS`
+(666 666), `HARD_DEFICIT_100NS` 500 000 (50 ms), `HARD_EXCESS_100NS`
+1 333 333 (4 slots + 1), `CALM_ZONE_MS` 1.0, all literals pinned against
+their sources by the same test. (`RECENTRE_100NS` / `RECENT_BLOCKS`, the
+window-mean re-centre, are gone with the owner's ruling below.)
 
 **Sign:** a POSITIVE correction makes MORE output per input (the card runs
 fast, or too little is buffered); rubato's relative ratio is `1 + ppm·1e-6`.
@@ -92,24 +97,53 @@ I, without P); clamp ±300, slew ≤ 5 ppm per second of wall (dt = the 100 ns
 between applied windows, floored at 0, not capped: after a forward wall
 step the slew may move 5·step ppm in one window).
 
-**Steps:** a block more than one slot off target RE-CENTRES at once by its
-own error. A window mean more than 10 ms off RE-CENTRES by the mean error of
-the last 8 blocks (`RECENT_BLOCKS`, a ring emptied by a re-centre) when that
-is also more than 10 ms off; otherwise the level loop takes the window as it
-is (a transient already passed splices nothing). The action's
-`recentre_100ns`: insert > 0, skip < 0; the window, the ring and the EMA
-restart; the regression is untouched (the card's consumed count did not
-move). Not by the window's mean: a step inside a window shows in its mean
-only in part (review round 1: 20–30 ms steps failed at 4–9 of 17 window
-phases). Not by one block either: a block's latency saws by one driver
-callback period (review round 2: 2048 frames at 48 kHz re-centred 118 times
-in 900 s). With the level at target the last 8 blocks lie after the step (a
-step under one slot moves a 32-block mean past 10 ms only with ≥ 30 % of the
-window behind it) and span ≥ 266 ms of the sawtooth. The trigger is the
-window's whole error, step plus any standing offset: a −10.5 ms step on a
-−45 ppm card whose level still stands 1.7 ms high from the start-up reads
-−8.8 ms and is left to the level loop (pinned among the honest bounds). A
-window whose wall goes back before its first point starts over (it would
+**The owner's ruling (8.10.2026, #233 comment 6053850076; design
+6054367985): the resampler absorbs a difference SMOOTHLY, by its ratio,
+never by a skip or an insert.** It reverses ruling 6 of the plan (which
+accepted a 5 ms fade → gap/skip → fade "re-centre" for a block one slot off
+or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
+(comment 6053745381), each audible. Now:
+
+- **Jitter never moves the output.** The latency reading is jitter-invariant
+  (before block k the ring holds target − 5 ms − L_k), so a late or clumped
+  block within the ring's cushion (~61.7 ms) reads the target and moves
+  nothing; the level loop reads the 1 s window's mean, never one block.
+- **A lasting offset is slewed by the ratio.** A window mean beyond the calm
+  zone adds `braking_ppm` = √(2 · 5 ppm/s · (|err| − calm)) (1 ms =
+  1000 ppm·s): the fastest correction that can still stop at the zone's edge
+  decelerating at the existing 5 ppm/s slew limit. A date step's remainder
+  (≤ one slot), a changed `delay_ms`, a driver buffer's sawtooth, the excess
+  an underrun leaves: all drained within ±300 ppm (≈ 0.5 cent). A 33 ms step
+  is back within ±2 ms in ≤ 148.2 s (model; the trapezoid optimum is
+  ~171 s to null it, ~150 s to reach 1 ms).
+- **The calm zone** (`calm_zone_ms`): 1 ms, or half the driver's callback
+  period when that is longer (2.67 ms at 512 frames / 96 kHz, SNV's DVS since
+  the owner's change): the window mean of a reading that saws by a period
+  wanders by a fraction of it, and the stop curve's steep gain near 0 would
+  otherwise kick the ratio ±5–30 ppm on that noise. Inside it camera-box's
+  level loop (P on the 10 s EMA, ±50; I ±3) acts alone, as before; its I
+  anti-windup counts the slew. The worker builds the servo
+  `.with_callback_frames(opened.buffer_frames)`.
+- **The last resort** (`hard_recentre`): a block more than 50 ms short
+  (`HARD_DEFICIT_100NS`, 1.5 slots: the ring then holds < 11.7 ms for a block
+  on time, so most blocks of the 10–33 ms hand-off would underrun before the
+  slew could restore it) or more than four slots over (`HARD_EXCESS_100NS`,
+  133.3 ms: the next block would overflow the ring, target + 4 slots + one
+  block) re-centres AT ONCE by its error, through the splice. It is a fault:
+  `hard_recentres` (renamed from `recentres`), a WARN at most once per 5 s
+  (`asio output: a hard re-centre (a fault)…` with cause, ms, the hand-off
+  lateness and the count held back), and `last_hard_recentre {cause, ms,
+  lateness_ms, ago_s}` in the status. A date-step remainder (< one slot) plus
+  a 1024-frame sawtooth stays under the deficit edge.
+- **The first block's priming** (`Recentre::Prime`) inserts to the target the
+  same way and is NO re-centre (an open or a reopen used to count one).
+- The status also shows `offset_ms` (the last window's latency − target,
+  positive = later) and `slew_eta_s` (`slew_eta_s`: accelerate / cruise /
+  brake within the room the card's rate leaves; `None` inside the calm zone).
+
+The action's `recentre_100ns`: insert > 0, skip < 0 (priming or hard only);
+the window and the EMA restart; the regression is untouched (the card's
+consumed count did not move). A window whose wall goes back before its first point starts over (it would
 otherwise stay open the step + 1 s). Known limit (review round 4, not fixed):
 a pure wall step of ≳ 110 ms landing mid-window makes that window read over
 100 000 ppm and FLUSHES the regression — the lock returns 60 s later, the
@@ -129,22 +163,38 @@ and the lock from the regression, so the flush shows at once. A whole step
 < 10 ms (a dropped callback, a 9 ms jump) enters the regression as a point —
 camera-box's design, and its blind spot: the rate bias is ≈ 1.5·step/span
 with the span growing from 60 s, so an early step weighs most (model, 20 ppm
-card: −9.9 ms at 75 s peaks the correction at 133 ppm, 3 re-centres, still
-9.5 ppm off at 900 s while P pays the level back; ±9 ms at 400 s ends 7–8 ppm
-off). A lower re-base residual for SongPlayer's absolute window-mean
+card, before the ruling: −9.9 ms at 75 s peaked the correction at 133 ppm,
+still 9.5 ppm off at 900 s; since the ruling the offset slew drains the level
+itself, so the bias only costs the I term's share). A lower re-base residual for SongPlayer's absolute window-mean
 readings (much less noisy than camera-box's cumulative increments) is a
 main-session decision, not taken here. A wall stepped back past the last window gives
 no time: `dt` is floored at 0, so the EMA and the integral do not move (an
 EMA over −10 s divides by zero, and the NaN would stay).
 
-**The splice** (`Splice`): 5 ms fade out of the held tail, the silence or the
-skipped frames (a skip may span blocks; nothing is emitted while it eats a
+**The splice** (`Splice`, the priming and a hard re-centre ONLY): 5 ms fade
+out of the held tail, the silence or the skipped frames (a skip may span blocks; nothing is emitted while it eats a
 whole block), 5 ms fade in; one silent frame where the fade out ends. It
 holds its last 5 ms back always (counted as buffered). A re-centre that
 comes while still muted fades nothing twice.
 
-**The ASRC** (`Asrc`): ONE rubato 5.0.1 `Async` sinc (256 taps,
-BlackmanHarris², `FixedAsync::Input` of 1600 frames, Cubic), ratio room
+**The ASRC** (`Asrc`): ONE rubato 5.0.1 `Async` band-limited sinc in
+rubato's documented highest-quality setting (`asrc_params`, pinned by
+`the_resampler_runs_rubatos_highest_quality_sinc`): 256 taps, the sinc table
+oversampled 256× (`ASRC_OVERSAMPLING`; rubato's default is 128),
+BlackmanHarris², cubic between the table's rows, the automatic cutoff (0.947
+of the lower Nyquist: 22.7 kHz at 48 → 96 kHz), `FixedAsync::Input` of 1600
+frames. 512 taps were not needed: the bar below holds with 22 dB to spare,
+and they would double the CPU and the 2.7 ms delay. **Measured** (the owner:
+"a SOTA resampler, never skip/copy a sample"), through the outputs' own code,
+48 → 96 kHz (`asrc_tests.rs`, `vban_rate_tests.rs`; each test writes its
+figure to the CI log, the instruments `playback/resample_quality.rs` are
+checked against known signals): a 1 kHz tone at −1 dBFS at −300 / 0 /
++300 ppm keeps a THD+N ≥ 120 dB, and a 20 kHz tone leaves nothing above
+−120 dBFS between 24 and 48 kHz (its image would be at 28 kHz). The scratch
+numpy model of rubato's two stages (sinc tables, cubic, the FFT filter;
+f32 emulated): `Asrc` ~142 dB THD+N (152 dB in f64, the f32 output's floor
+~150), images ≤ −149 dBFS (−146 at oversampling 128); the VBAN `Fft`
+converter ~148 dB and ~−178 dBFS. Ratio room
 ±1000 ppm (`ASRC_MAX_RELATIVE` 1.001: rubato accepts `1/1.001 ..= 1.001`, so
 −1000 ppm itself is refused), ramped across the next block. Delay
 `sinc_len·ratio/2` (256 frames at 96 kHz; it follows the ratio: 255 at
@@ -154,18 +204,23 @@ plus half a block of the first ramp — derive pins from a model of rubato's
 `calculate_output_size` / `step_index` (plain f64, exact), never a ±N guess
 (the plan's 300-block "±4" failed at +100 ppm by 1).
 
-**The closed-loop simulation** (`asrc_servo_sim_tests.rs`): card −50 / 0 /
-+50 ppm, ±1 ms steps, ±20 / ±30 ms steps at three window phases, ±44 ms, a
-100 ms forward step, a dropped callback, a 200 ms worker stall (underruns by
-physics, the skip asked once), a 48 kHz card with 256-frame buffers, a
-1024-frame driver at 48 kHz with a 20 ms step; 900 s each;
-asserts 0 underruns, |ppm| ≤ 300, slew, latency error ≤ 10 ms after 70 s
-(model: ≤ 4.1; + half a period for the 1024-frame driver), |final − card|
-≤ 5 ppm, re-centres 1 (2 for a step over 10 ms from a level at target), no
-re-centre asked while a skip runs. The sub-10 ms steps and the standing-offset
-case have their own honest bounds
-(`a_step_under_10_ms_enters_the_rate_and_is_paid_back`,
-`a_10_5_ms_step_on_a_standing_offset_is_left_to_the_level_loop`). **Envelope for
+**The closed-loop simulation** (`asrc_servo_sim_tests.rs`, since the
+owner's ruling): **0 hard re-centres** in every case — cards −50 / 0 / +50
+ppm (latency ≤ 2 ms after 70 s, |final − card| ≤ 5 ppm); ±1 ms steps at three
+window phases; ±33 ms steps (a date step's remainder) at three phases on a 0
+and a 20 ppm card, back within ±2 ms in ≤ 150 s (model 138.9–148.2 s), 0
+underruns; a hand-off late WITHIN the cushion (singles 40–56 ms, clumps of 2:
+0 underruns, latency within the sawtooth, the correction within 2.5 ppm of the
+card — no kick); the realistic hand-off (10–33 ms, singles 40–80 ms 1 in 900,
+clumps of 2 / 3 — the blocks past the cushion underrun, physics: 57 / 22 / 22
+/ 61 callbacks in the four configurations, and each one's excess is drained by
+the ratio); a driver buffer 128 → 512 mid-run; a dropped callback; a 100 ms
+forward step and a 200 ms stall (slewed); a 1024-frame driver at 48 kHz with a
+20 ms step; a 48 kHz card at +50 ppm. The ring-limit cases force exactly one
+each: a 300 ms worker stall (excess) and a 100 ms pause (deficit). 900 s each;
+every case also asserts |ppm| ≤ 300, the slew and no skip asked twice. The
+`Lateness` profiles draw from the same LCG as the scratch model, so the
+underrun counts are exact pins. **Envelope for
 lane 3:** a driver callback period well under one grid slot (≤ 512 frames
 at 48 kHz, ≤ 1024 at 96 kHz; 2048 at 48 kHz saws past the per-block
 threshold) — lane 3 reads the driver's preferred buffer and cannot change
@@ -183,13 +238,12 @@ here:
 - sweep a step over ≥ 3 window phases: the straddle bug passed at the one
   phase the plan pinned.
 
-The scratch model's fuzz (240 runs: cards ±120 ppm, jitter 0–30 ms, steps
-−35…+150 ms at random window phases, drops, 44.1–96 kHz, buffers 64–1024 up
-to 10.7 ms) held: no underrun within the budget, |ppm| ≤ 300, the slew, no
-skip asked twice, |final − card| ≤ 5 ppm when undisturbed. Re-centres reach
-4 only for a card beyond ±50 ppm (before the 60 s lock P saturates at 50 and
-the level drifts once) plus a dropped 512-frame buffer at 44.1 kHz (11.6 ms,
-a re-centre of its own).
+The pre-ruling scratch model's fuzz (240 runs: cards ±120 ppm, jitter
+0–30 ms, steps −35…+150 ms at random window phases, drops, 44.1–96 kHz,
+buffers 64–1024 up to 10.7 ms) held: no underrun within the budget,
+|ppm| ≤ 300, the slew, no skip asked twice, |final − card| ≤ 5 ppm when
+undisturbed. (Its re-centre counts no longer apply: the ruling's cases are
+listed above.)
 Outside the envelope, by physics: a backward step larger than the target
 minus the hand-off lateness (48 ms on 30 ms of jitter) can underrun (one
 event, phase-dependent) — the audio does not exist yet; `delay_ms` widens
@@ -523,7 +577,8 @@ own callback thread and has two slots of cushion):
   releases the driver and shows its reason.
 - running: each block → `Servo::observe` (the ring + the splice's 5 ms hold,
   the splice's pending skip, the hand-off lateness, the card's consumed
-  frames) → `Asrc::set_correction_ppm` + the re-centre through
+  frames) → `Asrc::set_correction_ppm` (the slew lives here) + the priming or
+  a hard re-centre through
   `frames_from_100ns` into `Splice::insert` / `skip` (an `Ordering` match:
   `if > 0` / `else if < 0` would give a `>=` mutant that inserts 0, an
   equivalent survivor) → the ring. A closed output drops the blocks it is
@@ -539,8 +594,9 @@ own callback thread and has two slots of cushion):
   published BEFORE the device is closed (a vanished driver can block its
   stop or release; review round 2), and the closed run's ppm, rate_ppm,
   lock and latency are cleared (the counters and the last open's driver
-  rate / sample type stay). EVERY counter (underruns, overloads,
-  overflows, re-centres, resets) counts since the output was built: a
+  rate / sample type stay; since the ruling `offset_ms` and `slew_eta_s`
+  are cleared too). EVERY counter (underruns, overloads,
+  overflows, hard re-centres, resets) counts since the output was built: a
   run's device, servo and ring count from 0 again, so the worker adds each
   closed run's into one `Closed` (review round 3). `kAsioLatenciesChanged`
   re-reads the driver's output latency
@@ -628,8 +684,10 @@ fails on the names `set_sample_rate` / `set_clock_source` /
 (66.625 + 4 = 70.625 ms on the scripted 96 kHz / 128-frame driver; 0 until
 the servo measured its first 1 s window), `asio`
 = `{driver, channels, driver_rate, buffer_frames, out_channels,
-sample_type, ppm, rate_ppm, locked, latency_ms, underruns, resets,
-recentres, overflows, overloads, retry_in_s, reason_code}`, and while it runs a `note`
+sample_type, ppm, rate_ppm, locked, latency_ms, offset_ms, slew_eta_s,
+underruns, resets, hard_recentres, last_hard_recentre {cause, ms,
+lateness_ms, ago_s}, overflows, overloads, retry_in_s, reason_code}` (the
+servo's fields: the owner's ruling above), and while it runs a `note`
 when the driver's rate is not `audio_network_rate` or its buffer is over a
 third of a grid slot (1/90 s, lane 2's envelope); the task WARNs a note once
 per change. Off Windows an ASIO output never opens: "ASIO runs on Windows
@@ -656,9 +714,19 @@ failed read ("Zoznam ovládačov ASIO sa nenačítal", mock: `/__mock/fail-mode
 je žiadny ovládač ASIO"), its title from
 `sp_core::audio_outputs::asio_add_refusal`; the rate reads "podľa
 ovládača". A
-running ASIO row reads "beží · 71 ms · +0.4 ppm · výpadky 0", "meria sa" in
-place of the latency while the server reads it 0
-(`sp_core::audio_outputs::asio_running_text`); a waiting one its reason in
+running ASIO row is two lines of chips (the owner, comment 6053701047: "chýba
+mi resample informácia"; pure in `sp_core::asio_resampling`, each figure
+with its own Slovak tooltip, " · " between them so a line also reads whole):
+"beží · oneskorenie 71 ms · výpadky 0 · núdzové skoky 0" ("oneskorenie:
+meria sa" while the server reads it 0), then the resampling — "48 → 96 kHz"
+("48 kHz bez prevodu" at the program's rate), "karta +0,4 ppm voči
+SongPlayeru (odhad zamknutý)" ("… odhad sa ešte meria" before the lock),
+"korekcia −0,7 ppm (uberá vzorky)" / "(pridáva vzorky)", "oneskorenie v
+cieli" or "dorovnáva odchýlku +12,3 ms · ešte asi 45 s", and "posledný
+núdzový skok pred 3 min: +65,0 ms (zásobník by vyschol)" after a fault.
+Numbers the Slovak way (tenths half away from zero, a decimal comma, a true
+minus). Mock knob `/__mock/asio-resampling {id, …}` (reset by settings-reset);
+a waiting one its reason in
 Slovak (`asio_reason_sk`, by the server's `reason_code`; every
 `Reason::code` has its text, pinned on the server) and its next try, none
 for `parked` (`asio_waiting_text`). Mock: two drivers (or a 500, the
@@ -708,7 +776,8 @@ identical LICENSE files) are in `THIRD-PARTY-NOTICES.txt`, each pinned
 against `Cargo.toml` by a test in `asio_out_tests.rs`.
 
 **Start-up underruns (release review, item 1 of the closing lane): not
-pinned from the code, no counter change.** Before block k the ring holds
+pinned from the code, no counter change** (the owner's slew ruling above
+answers SNV's other finding, the 45 re-centres). Before block k the ring holds
 target − 5 ms (the splice's hold) − L_k (block k's hand-off lateness), not
 anything the first block left: the resampler's first process (3 196
 frames at 96 kHz), the servo's start re-centre against `Splice::new`'s
@@ -717,7 +786,8 @@ leave that relation intact. An underrun then needs a block over ~61.7 ms
 late or a missing boundary. What a box measurement must show to name the
 cause (design comment 6053021913 on #233): `GET /api/v1/program/trace`
 rows that are late or missing, together with `outputs[i].asio.underruns /
-recentres / latency_ms / blocks_sent` and `health.resyncs` polled every
+hard_recentres / last_hard_recentre / latency_ms / blocks_sent` and
+`health.resyncs` polled every
 200 ms over the first 60 s after a restart.
 
 **Still open for a closing lane:** the `vban_*` keys and

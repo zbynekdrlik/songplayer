@@ -8564,6 +8564,13 @@ These are technical decisions. They bind the lane workers.
 4. **Changed for rollback safety:** Lane 1 migrates into `audio_outputs` but does **NOT delete** the `vban_*` keys. The new code ignores them once `audio_outputs` exists, so a rollback to ≤ 0.72 still finds them and FOH keeps sound. Lane 3 deletes them, once the list has run a release.
 5. **Accepted:** the top-level `vban` block moves into `outputs[i].vban`. Lane 1 updates every e2e/post-deploy reader of it in the same lane.
 6. **Accepted:** the 5 ms fade out / gap or skip / 5 ms fade in.
+   **Reversed 8.10.2026 by the owner** ("prečo sa tu bavíme o preskokoch, keď
+   sa má jednať o inteligentný resampling?", #233 comment 6053850076; design
+   6054367985): the resampler absorbs a difference smoothly, by its ratio
+   (a stop curve within ±300 ppm at ≤ 5 ppm/s); the fade / gap / fade is now
+   only the last resort when the ring would otherwise run dry (50 ms short) or
+   overflow (four slots over), counted as a fault (`hard_recentres`), and the
+   priming of an open, which is no re-centre (`.claude/rules/audio-outputs.md`).
 7. **Accepted:** `fill_ms` is the boundary-to-play latency. The raw ring fill is not exposed.
 8. **Accepted:** PP's ASIO gate rides #229 lane 6 (integrated 7.10.2026, runner `resolume-pp` online).
 9. **Resolved 7.10.2026:** no process holds `dvs_asio_x64.dll` at SNV (`tasklist /m`), so DVS's single ASIO client is free. Lane 3 still re-checks it before the entry is added.

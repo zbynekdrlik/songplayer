@@ -720,7 +720,9 @@ which is 61.8 min × 48 kHz, one channel as float64, with several copies alive.
 The host had ~35 GB of commit free at the time, so the per-child cap was the
 limit, not the box.
 
-**Now (all in `scripts/stem_worker.py`):**
+**Now (`scripts/stem_worker.py`; the header read, the window read and the
+overlap-add are `scripts/audio_window.py`'s since the #233 release review,
+shared with the lyrics worker and shipped next to both):**
 - **Input.** `_audio_info` reads only the header (rate, frames). The window
   plan trusts that count, so an empty or UNKNOWN count raises `ValueError`. A
   FLAC from a piped encoder has STREAMINFO total = 0, which libsndfile reports
@@ -779,7 +781,7 @@ the same wall first (#184 round F2, `dabing.md`).
   `.tmp` is removed.
 - **Shipping.** `stem_worker.py` imports `win_replace` at module load, so the
   stem worker writes `win_replace.py` next to it: `stems/scripts.rs::
-  embedded_tool_scripts` = `[stem_worker.py, win_replace.py]`, written by
+  embedded_tool_scripts` = `[stem_worker.py, win_replace.py, audio_window.py]`, written by
   `StemWorker::ensure_script` through the shared
   `embedded_scripts::materialise` (the dub worker uses the same helper).
   A missing `win_replace.py` would fail every separation at import.
