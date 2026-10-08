@@ -408,7 +408,12 @@ impl AsioWorker {
                 let at = *retry_at_100ns;
                 let left = at - now_100ns;
                 let retry_in_s = (at != NEVER).then_some(left as f64 / 1e7);
-                out.update(|l| l.status.retry_in_s = retry_in_s);
+                // The last hard re-centre ages while the output waits too.
+                let last_hard = self.last_hard.map(|h| h.status(now_100ns));
+                out.update(|l| {
+                    l.status.retry_in_s = retry_in_s;
+                    l.status.last_hard_recentre = last_hard;
+                });
                 return left.min(POLL_100NS);
             }
             State::Closed { .. } => {

@@ -564,7 +564,13 @@ impl Servo {
         let pi = self.level.update(err_ms, dt_s, base);
         let target = (base + pi).clamp(-MAX_PPM, MAX_PPM);
         self.applied_ppm = slew(self.applied_ppm, target, dt_s);
-        let room = MAX_PPM - rate.abs();
+        // The room the card's rate leaves on the side the slew works: a
+        // positive error asks for more output, up to +300 (review round 2).
+        let room = if err_ms.is_sign_positive() {
+            MAX_PPM - rate
+        } else {
+            MAX_PPM + rate
+        };
         self.slew_eta_s = slew_eta_s(err_ms, self.applied_ppm - rate, room, self.calm_ms);
         self.hold()
     }
@@ -596,7 +602,7 @@ impl Servo {
 /// A block's latency the slew cannot be left with: under
 /// [`HARD_FLOOR_100NS`], or more than [`HARD_EXCESS_100NS`] over `target`.
 pub fn hard_recentre(latency_100ns: i64, target_100ns: i64) -> Option<Recentre> {
-    if latency_100ns < HARD_FLOOR_100NS + (target_100ns - BASE_LATENCY_100NS) {
+    if latency_100ns < HARD_FLOOR_100NS {
         Some(Recentre::Deficit)
     } else if latency_100ns - target_100ns > HARD_EXCESS_100NS {
         Some(Recentre::Excess)
