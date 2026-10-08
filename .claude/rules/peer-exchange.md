@@ -601,10 +601,11 @@ wait for a peer that has the song", below).
   drops the parts a fetch of it left, then announces it (a later ask never
   inherits an old start and its spent bound). One exception: a lyrics job
   that stands in for a peer's copy runs here through
-  `Exchange::run_here_waited`, the same without ending the wait (its ask,
-  and its hand-off giving up): a spent bound its hand-off left survives a
-  pick that meets no peer copy, so a run put back runs here at once, never
-  a fresh 2 h (review rounds 5–6). The hooks' own Local paths use
+  `Exchange::run_here_standing` (its ask, its hand-off and a fetch given
+  up): only the fetch records, the parts and the announcement, neither the
+  wait nor the stand-in touched, so a spent bound its hand-off left
+  survives a pick that meets no peer copy and a run put back runs here at
+  once, never a fresh 2 h (review rounds 5–7). The hooks' own Local paths use
   it too (an operator's lyrics ask, nothing newer, a fetch that kept
   failing, another audio). The no-peers and bad-settings paths only announce
   (`ask` writes nothing; the download hook then forgets the pair's
@@ -782,10 +783,11 @@ wait for a peer that has the song", below).
   one `{yt}_lyrics.json`; review round 5: the asked row only before), never
   for a video whose `{yt}_lyrics.json` here is a dub's subtitles (any row
   of it here dub-requested or `gemini-live-translate`), a failed read →
-  here; one query, `lyrics::kept_local`, which the stand-in's look asks
-  too (a reprocess pending on a row the queue cannot take now, an inactive
-  playlist's, counts as well: the operator asked this node for the video).
-  The
+  here; one query, `lyrics::kept_local`, which the stand-in's look and
+  V31's back-fill share. A reprocess flag counts only on a row of an
+  ACTIVE playlist (review round 7): the queue never takes another row, so
+  its flag is never cleared, and `reprocess-all-stale` /
+  `reprocess-catalog-with-new-gate` set it with no playlist filter. The
   peer's `/videos` row must match its catalog (pipeline version) and must
   not be `gemini-live-translate`; the same source at the same version as
   the row already serves = nothing newer → runs here (the daily full-mix
@@ -799,7 +801,7 @@ wait for a peer that has the song", below).
   there is handed to the stand-in (`Exchange::hand_to_standin`: the
   stand-in due now, the row put back for `recheck_after`, no attempt,
   counted as waiting against the 2 h bound, review round 4; after the bound
-  the job runs here, still standing in, through `run_here_waited`: the
+  the job runs here, still standing in, through `run_here_standing`: the
   spent bound is KEPT, so a run put back runs here again at once, review
   round 5; the look's `fetched` ends it, so does a stand-in kept for good);
   the stand-in's own look takes the
@@ -870,10 +872,11 @@ parked `no_source` by `fail_song`). Three rules:
     `after_failed_fetch` giving up on that peer's copy (a peer the audio
     did not come from: no stand-in);
   - kept AS IT WAS while the job runs here again (`ask` → any `Local`,
-    or `after_failed_fetch` giving up on any peer, while it stands in:
-    `Exchange::keep_standing` writes back the record `run_here` dropped,
-    its age and next look, a DEBUG line; review round 3: an INFO and a
-    reset recheck curve per putting back before). Such an ask does not
+    the hand-off or `after_failed_fetch` giving up on any peer, while it
+    stands in: `Exchange::run_here_standing` never touches the record, its
+    age and next look stay, a DEBUG line; review rounds 3 and 7: an INFO
+    and a reset recheck curve per putting back before, then a drop and a
+    write-back). Such an ask does not
     read `song_from` and is decided with its bound spent (`waited` =
     `MAX_PEER_WAIT`: it waited once), so a local run put back after the
     bound (for its stems, memory, the wall) or a later reprocess waits for
@@ -940,7 +943,11 @@ parked `no_source` by `fail_song`). Three rules:
   OPEN for phase 2 (SNV listing PP): a stand-in at SNV whose song came from
   PP would take PP's copy whatever its tier, and PP's track is the degraded
   one (no AI proxy at PP); which node's lyrics may replace which is to be
-  decided with the phase-2 tie-break ("Kinds, versions, jobs").
+  decided with the phase-2 tie-break ("Kinds, versions, jobs"). Also OPEN
+  there (review round 7): the look takes the first listed peer that holds
+  the lyrics (`peers_lyrics`), not the stand-in's recorded peer first, so
+  another peer's copy of another audio drops the stand-in for good even
+  when the source's copy would fit (one peer in phase 1: no effect).
 - **The same gap elsewhere, checked (design record 6056986290):** the
   metadata repair has none (a failed provider call keeps the row in the
   repair queue, and `peer_title` is asked first on every pass; a provider
@@ -959,11 +966,13 @@ parked `no_source` by `fail_song`). Three rules:
   a_stand_in_met_by_the_hook_is_replaced_in_every_row,
   a_stand_in_handed_the_copy_runs_here_after_the_bound,
   a_stand_ins_spent_bound_survives_a_pick_with_the_peer_unreachable,
+  a_reprocess_left_on_an_inactive_playlists_row_does_not_keep_the_lyrics_here,
   an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here}`,
   `standin_tests.rs` (the supersede over two real nodes: every row, a
   parked track, the check row with an audio, the recheck, another audio,
   an operator or a dub, no row, the order, the recheck curve, every row or
-  none over; the stand-in recorded after the bound — its source read or
+  none over, an inactive playlist's reprocess flag no owner; the stand-in
+  recorded after the bound — its source read or
   unreachable — and after a failing fetch from that source only, kept as
   it was when the run is put back (no new wait on the song or on an
   announced job) or another peer's fetch fails, ended by `run_here` /
@@ -995,8 +1004,10 @@ parked `no_source` by `fail_song`). Three rules:
    logs the DEBUG `exchange: run here again - it still stands in for the
    peer's copy`). Then `exchange: done with a peer's copy` with
    `job=lyrics source=peer:snv`. The stand-in V31 back-filled for
-   `8ohdO2nINEI` is replaced at PP's first lyrics tick after the start
-   (`exchange: done with a peer's copy`, `job=lyrics`, for that id;
+   `8ohdO2nINEI` is replaced within PP's first lyrics ticks after the start
+   (the look takes ONE due stand-in per tick; the back-filled ones, all due
+   at 0, in YouTube-id order) (`exchange: done with a peer's copy`,
+   `job=lyrics`, for that id;
    `SELECT * FROM peer_standins` empty after it) once SNV lists that
    video's lyrics at PP's pipeline version and PP's audio check says it is
    SNV's audio; until then the DEBUG `exchange: a stand-in waits - …` names
