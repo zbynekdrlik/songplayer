@@ -305,6 +305,10 @@ impl Closed {
     }
 }
 
+/// A closed output's retry instant when it is never retried (a parked
+/// driver, a shutdown).
+const NEVER: i64 = i64::MAX;
+
 /// The worker's state machine ([`run_asio_worker`] loops on [`Self::step`]).
 pub struct AsioWorker {
     state: State,
@@ -337,8 +341,10 @@ impl AsioWorker {
     ) -> i64 {
         let run = match &mut self.state {
             State::Closed { retry_at_100ns } if now_100ns < *retry_at_100ns => {
-                let left = *retry_at_100ns - now_100ns;
-                out.update(|l| l.status.retry_in_s = Some(left as f64 / 1e7));
+                let at = *retry_at_100ns;
+                let left = at - now_100ns;
+                let retry_in_s = (at != NEVER).then_some(left as f64 / 1e7);
+                out.update(|l| l.status.retry_in_s = retry_in_s);
                 return left.min(POLL_100NS);
             }
             State::Closed { .. } => {
@@ -447,22 +453,23 @@ impl AsioWorker {
     }
 
     fn wait(&mut self, out: &AsioOut, now_100ns: i64, reason: Reason, what: &str) {
-        let wait = backoff_100ns(self.failures);
-        let retry_in_s = wait as f64 / 1e7;
+        // A parked driver never opens again in this process: no retry.
+        let wait = (reason != Reason::Parked).then(|| backoff_100ns(self.failures));
+        let retry_in_s = wait.map(|w| w as f64 / 1e7);
         warn!(
             id = %out.id,
             driver = %out.driver,
             reason = %reason.text(),
             failures = self.failures,
-            retry_in_s,
+            retry_in_s = ?retry_in_s,
             "{what}"
         );
         self.state = State::Closed {
-            retry_at_100ns: now_100ns + wait,
+            retry_at_100ns: wait.map_or(NEVER, |w| now_100ns + w),
         };
         out.update(|l| {
             l.state = STATE_WAITING;
-            l.status.retry_in_s = Some(retry_in_s);
+            l.status.retry_in_s = retry_in_s;
             l.status.reason_code = Some(reason.code());
             l.reason = Some(reason);
             // The closed run's figures go with it; the counters and the
@@ -478,7 +485,7 @@ impl AsioWorker {
     pub fn shutdown(&mut self, device: &mut dyn AsioDevice) {
         device.close();
         self.state = State::Closed {
-            retry_at_100ns: i64::MAX,
+            retry_at_100ns: NEVER,
         };
     }
 }
