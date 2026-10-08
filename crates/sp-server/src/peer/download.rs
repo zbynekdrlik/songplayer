@@ -25,7 +25,6 @@ use super::wire::{PeerMetadata, now_ms};
 use crate::db::models_peer;
 use crate::downloader::VideoRow;
 use crate::downloader::cache::{audio_filename, video_filename};
-use crate::metadata::ProviderChain;
 use crate::metadata::manual::{DownloadTitle, MANUAL_SOURCE, manual_title, record_download};
 
 /// A peer's title for a video, with where it came from: recorded in
@@ -82,15 +81,11 @@ pub async fn record_title(ex: &Exchange, youtube_id: &str, t: &PeerTitle) {
 /// it writes this node's own audio under the names a fetched pair had. That
 /// holds on the no-peers and bad-settings paths too, which never go through
 /// `run_here`.
-pub(crate) async fn first(
-    ex: Option<&Arc<Exchange>>,
-    chain: &ProviderChain,
-    row: &VideoRow,
-) -> PeerStep {
+pub(crate) async fn first(ex: Option<&Arc<Exchange>>, row: &VideoRow) -> PeerStep {
     let Some(ex) = ex else {
         return PeerStep::Local(None);
     };
-    let step = ask_or_fetch(ex, chain, row).await;
+    let step = ask_or_fetch(ex, row).await;
     if let PeerStep::Local(_) = &step {
         ex.forget_origins(Job::Download, &row.youtube_id).await;
     }
@@ -98,13 +93,13 @@ pub(crate) async fn first(
 }
 
 /// Ask the peers about the row's download and act on the answer.
-async fn ask_or_fetch(ex: &Exchange, chain: &ProviderChain, row: &VideoRow) -> PeerStep {
+async fn ask_or_fetch(ex: &Exchange, row: &VideoRow) -> PeerStep {
     let job = Job::Download;
     match ex.ask(job, &row.youtube_id).await {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
         Ask::Held => ex.hold(job, row.id, &row.youtube_id).await,
         Ask::Wait { recheck, .. } => ex.defer(job, row.id, recheck).await,
-        Ask::Fetch(plan) => match adopt(ex, chain, row, &plan).await {
+        Ask::Fetch(plan) => match adopt(ex, row, &plan).await {
             Ok(taken) => {
                 ex.fetched(job, &row.youtube_id, &plan.peer.name, &plan.artifacts)
                     .await;
@@ -127,7 +122,6 @@ async fn ask_or_fetch(ex: &Exchange, chain: &ProviderChain, row: &VideoRow) -> P
 /// provider.
 pub(crate) async fn adopt(
     ex: &Exchange,
-    chain: &ProviderChain,
     row: &VideoRow,
     plan: &FetchPlan,
 ) -> Result<Option<PeerTitle>, PeerError> {
@@ -135,7 +129,7 @@ pub(crate) async fn adopt(
     let audio_artifact = plan.artifact(ArtifactKind::Audio)?;
     let video_part = ex.fetch(&plan.peer, video_artifact).await?;
     let audio_part = ex.fetch(&plan.peer, audio_artifact).await?;
-    let (title, taken) = title_for(ex, chain, row, &plan.peer).await;
+    let (title, taken) = title_for(ex, row, &plan.peer).await;
     let gf = title.gemini_failed;
     let video = ex.cache_dir.join(video_filename(
         &title.song,
@@ -193,7 +187,6 @@ fn written_title(taken: Option<PeerTitle>, recorded: &DownloadTitle) -> Option<P
 /// peer's title when that is the one.
 async fn title_for(
     ex: &Exchange,
-    _chain: &ProviderChain,
     row: &VideoRow,
     peer: &PeerConfig,
 ) -> (DownloadTitle, Option<PeerTitle>) {
