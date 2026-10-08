@@ -110,13 +110,17 @@ pub struct AsioStatus {
     /// The output's latency from the boundary, ms (`asio_latency_ms`; 0
     /// until the servo measured its first window, and while waiting).
     pub latency_ms: f64,
-    /// The servo's last window: the latency less its target, ms — the
-    /// offset the resampler's ratio drains (positive = later than the
-    /// target; 0 while waiting).
+    /// The servo's last window: the offset the resampler's ratio drains,
+    /// ms — the latency outside [target, target + cushion] (positive =
+    /// later; 0 inside it and while waiting).
     pub offset_ms: f64,
     /// The seconds the drain still needs (`None` inside the calm zone, and
     /// while waiting).
     pub slew_eta_s: Option<f64>,
+    /// The excess the card's underruns left, kept over the target, ms (#233
+    /// comment 6056680979, Q1: at most one slot; it decays slowly through
+    /// the level loop; 0 while waiting).
+    pub cushion_ms: f64,
     /// Callbacks that found the ring short, since the output was built.
     pub underruns: u64,
     /// Closes (a reset, a rate change, a stall) since the output was built.
@@ -568,6 +572,7 @@ impl AsioWorker {
             l.status.latency_ms = 0.0;
             l.status.offset_ms = 0.0;
             l.status.slew_eta_s = None;
+            l.status.cushion_ms = 0.0;
         });
     }
 
@@ -625,6 +630,11 @@ fn process(
         buffered_frames: (ring_frames(&run.producer) + run.splice.held_frames()) as u64,
         pending_skip_frames: run.splice.pending_skip_frames() as u64,
         consumed_frames: device.consumed_frames(),
+        // A short callback counts as a whole buffer: an overcount of at
+        // most one buffer per event (#233 comment 6056680979, Q1).
+        underrun_frames: device
+            .underruns()
+            .saturating_mul(u64::from(run.opened.buffer_frames)),
     });
     if let Err(e) = run.asrc.set_correction_ppm(action.correction_ppm) {
         warn!(id = %out.id, %e, "asio output: the resampler refused the servo's correction");
@@ -717,6 +727,7 @@ fn publish(
         l.status.latency_ms = latency;
         l.status.offset_ms = servo.offset_ms;
         l.status.slew_eta_s = servo.slew_eta_s;
+        l.status.cushion_ms = servo.cushion_ms;
         l.status.last_hard_recentre = last_hard;
         counters.write(&mut l.status);
     });
@@ -751,3 +762,6 @@ pub(crate) mod fake;
 #[cfg(test)]
 #[path = "asio_out_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "asio_out_tests_cushion.rs"]
+mod tests_cushion;
