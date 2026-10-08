@@ -31,9 +31,10 @@ use sp_core::config::SETTING_PAID_AI_ENABLED;
 use sqlx::SqlitePool;
 use tracing::{debug, info, warn};
 
-/// How long held work waits before it is picked again: a peer's copy may
-/// have come meanwhile, or the switch is on again.
-pub const HELD_RECHECK: Duration = Duration::from_secs(30 * 60);
+/// How long held work waits before it is picked again (30 min): a peer's
+/// copy may have come meanwhile, or the switch is on again. A literal: a
+/// `30 * 60` would list two mutants nothing could tell apart.
+pub const HELD_RECHECK: Duration = Duration::from_secs(1_800);
 
 /// What a probe answers while paid AI is off: nothing was sent.
 pub const OFF_REASON: &str =

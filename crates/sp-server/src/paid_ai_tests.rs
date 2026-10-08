@@ -121,6 +121,17 @@ fn a_hold_logs_one_info_per_kind_and_song() {
     assert!(text.contains("job=dub"), "{text}");
 }
 
+/// Held work is picked again after 30 minutes; a probe says why it sent
+/// nothing.
+#[test]
+fn held_work_waits_30_minutes() {
+    assert_eq!(HELD_RECHECK, Duration::from_secs(30 * 60));
+    assert_eq!(
+        OFF_REASON,
+        "paid AI is off on this node (paid_ai_enabled = false): nothing was sent"
+    );
+}
+
 /// The status names the switch and, while off, the kinds it holds.
 #[tokio::test]
 async fn the_status_names_what_paid_ai_off_holds() {
