@@ -259,22 +259,8 @@ impl DubWorker {
         }
 
         // Gemini key (first entry, rotation-order preserved) — env-only for the child.
-        let key = match self.first_gemini_key().await {
-            Some(k) => k,
-            None => {
-                warn!(
-                    video_id = job.video_id,
-                    "dub worker: gemini_api_key not set — deferring"
-                );
-                let _ = models_dabing::record_dub_deferral(
-                    &self.pool,
-                    job.video_id,
-                    "gemini_api_key not set",
-                    DUB_BACKOFF,
-                )
-                .await;
-                return;
-            }
+        let Some(key) = self.job_key(&job).await else {
+            return;
         };
 
         let script_path = match self.ensure_script().await {
@@ -521,6 +507,27 @@ impl DubWorker {
         }
 
         Ok(out)
+    }
+
+    /// The Gemini key `job`'s Live-Translate child gets (the first of the
+    /// list), or `None`: with no key set the job is deferred (an attempt and
+    /// `dub_error`, `record_dub_deferral`).
+    async fn job_key(&self, job: &models_dabing::DubJob) -> Option<String> {
+        if let Some(key) = self.first_gemini_key().await {
+            return Some(key);
+        }
+        warn!(
+            video_id = job.video_id,
+            "dub worker: gemini_api_key not set — deferring"
+        );
+        let _ = models_dabing::record_dub_deferral(
+            &self.pool,
+            job.video_id,
+            "gemini_api_key not set",
+            DUB_BACKOFF,
+        )
+        .await;
+        None
     }
 
     /// First `gemini_api_key` CSV entry (rotation-order preserved), or `None` when

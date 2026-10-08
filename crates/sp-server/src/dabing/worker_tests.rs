@@ -362,3 +362,71 @@ async fn a_re_dub_finished_after_a_rename_replaces_the_old_dub_under_the_new_nam
             .unwrap();
     assert_eq!(recorded, Some(dub.to_string_lossy().into_owned()));
 }
+
+/// A dub worker over a fresh database with one dub job that would run now
+/// (`dubjob00002`), and the job.
+async fn worker_with_a_dub_job() -> (DubWorker, SqlitePool, models_dabing::DubJob) {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (playlist_id, youtube_id, normalized, audio_file_path, \
+                             dub_requested, dub_status) \
+         VALUES (1, 'dubjob00002', 1, '/x_audio.flac', 1, 'queued')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let job = models_dabing::get_next_dub_job(&pool)
+        .await
+        .unwrap()
+        .unwrap();
+    let worker = DubWorker::new(
+        pool.clone(),
+        PathBuf::from("."),
+        Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+        Arc::new(RwLock::new(crate::obs::ObsState::default())),
+    );
+    (worker, pool, job)
+}
+
+/// `(dub_status, dub_attempts)` of the job's row.
+async fn dub_state(pool: &SqlitePool, job: &models_dabing::DubJob) -> (String, i64) {
+    sqlx::query_as("SELECT dub_status, dub_attempts FROM videos WHERE id = ?")
+        .bind(job.video_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// #229 item C (review round 13): paid AI switched off after the tick's
+/// `may_dub` but before the job's key is read: the job is held where it
+/// is, never failed (no attempt, no failure mark).
+#[tokio::test]
+async fn a_dub_switched_off_after_its_pick_is_held_never_failed() {
+    let (worker, pool, job) = worker_with_a_dub_job().await;
+    crate::db::models::set_setting(&pool, "gemini_api_key", "k1")
+        .await
+        .unwrap();
+    crate::db::models::set_setting(&pool, "paid_ai_enabled", "false")
+        .await
+        .unwrap();
+    assert_eq!(worker.job_key(&job).await, None);
+    assert_eq!(dub_state(&pool, &job).await, ("queued".to_string(), 0));
+}
+
+/// With paid AI on and no key set, the job is deferred as before: an
+/// attempt and a failure mark naming the setting.
+#[tokio::test]
+async fn a_dub_with_no_key_is_deferred() {
+    let (worker, pool, job) = worker_with_a_dub_job().await;
+    assert_eq!(worker.job_key(&job).await, None);
+    assert_eq!(dub_state(&pool, &job).await, ("failed".to_string(), 1));
+    crate::db::models::set_setting(&pool, "gemini_api_key", "k1")
+        .await
+        .unwrap();
+    assert_eq!(worker.job_key(&job).await.as_deref(), Some("k1"));
+}
