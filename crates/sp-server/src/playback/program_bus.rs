@@ -560,8 +560,8 @@ impl ProgramCore {
                 continue;
             }
             self.health.filled += 1;
-            let (stamp_100ns, owner) = (expected, self.owner_of(expected));
-            self.commit(ProgramJob::Standby { stamp_100ns }, owner);
+            let (stamp_100ns, shows) = (expected, self.fill_source(expected));
+            self.commit(ProgramJob::Standby { stamp_100ns }, shows);
         }
     }
 

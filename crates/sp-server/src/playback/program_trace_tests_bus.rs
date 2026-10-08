@@ -126,3 +126,33 @@ fn a_held_window_boundary_shows_the_outgoing_source_a_mix_the_incoming_one() {
         ]
     );
 }
+
+/// A fill inside a window shows the side on air: A while B's cue waits (as
+/// a held boundary does, so A's next held pair is no cut), B once the fade
+/// runs (as a mix does). Neither side sent b(3), nor later b(5).
+#[test]
+fn a_fill_inside_a_window_shows_the_side_on_air() {
+    let mut core = ProgramCore::new();
+    assert!(core.set_transition(TransitionSpec::fade(300, SpecSource::Setting)));
+    core.select_initial(A);
+    core.offer(A, job(4, b(0), true));
+    core.cut(B, b(0));
+    core.offer(A, job(4, b(1), true));
+    core.offer(A, job(4, b(2), true));
+    core.offer(B, job(8, b(2), false));
+    core.release(b(3) + grace()); // the cue still waits
+    core.offer(A, job(4, b(4), true));
+    core.offer(B, job(8, b(4), true)); // B's first live pair: the fade starts
+    core.release(b(5) + grace()); // the fade runs
+    assert_eq!(
+        queued(&mut core),
+        [
+            ("A", b(0), Some(A)),
+            ("A", b(1), Some(A)),
+            ("A", b(2), Some(A)),
+            ("fill", b(3), Some(A)),
+            ("mix", b(4), Some(B)),
+            ("fill", b(5), Some(B))
+        ]
+    );
+}

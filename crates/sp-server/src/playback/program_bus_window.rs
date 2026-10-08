@@ -44,6 +44,14 @@ impl ProgramCore {
         self.windows.iter().find(|w| w.covers(stamp_100ns)).copied()
     }
 
+    /// #147: the source a filled boundary shows. A boundary of a window
+    /// whose cue waits or was frozen is held on its outgoing source (as
+    /// `commit_held` names it); any other is its owner's (a running fade's
+    /// is the incoming source, as a mix names it).
+    pub(super) fn fill_source(&self, boundary_100ns: i64) -> Option<i64> {
+        self.owner_of(boundary_100ns)
+    }
+
     /// The source on program just before a cut on `boundary`: the OUTGOING
     /// source of a window that holds it there at full level
     /// (`Window::holds_on_air`: its cue waits or was frozen, and its span
