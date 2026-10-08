@@ -116,6 +116,33 @@ test("paid AI is on by default; switched off and saved, the health bar names the
   expect(realConsoleErrors()).toEqual([]);
 });
 
+test("a Nastavenia tab opened before paid AI went off never turns it on again (#229 item C)", async ({
+  page,
+  request,
+}) => {
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  await expect(page.locator('[data-testid="settings-paid-ai-enabled"]')).toBeChecked();
+
+  // Switched off elsewhere (the main session's API) while this tab is open.
+  const off = await request.patch("/api/v1/settings", { data: { paid_ai_enabled: "false" } });
+  expect(off.status()).toBe(204);
+
+  // An unrelated edit saved in the stale tab.
+  const model = page.locator('[data-testid="settings-gemini-model"]');
+  await model.click();
+  await model.fill("gemini-x");
+  await save(page);
+  expect(patches).toHaveLength(1);
+  expect(patches[0]["gemini_model"]).toBe("gemini-x");
+  expect(patches[0]).not.toHaveProperty("paid_ai_enabled");
+
+  const status = await (await request.get("/api/v1/status")).json();
+  expect(status.paid_ai_enabled).toBe(false);
+
+  expect(realConsoleErrors()).toEqual([]);
+});
+
 test("a mangled paid-AI switch is refused whole, as the server does (#229 item C)", async ({
   request,
 }) => {

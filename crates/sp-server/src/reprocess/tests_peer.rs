@@ -331,3 +331,29 @@ async fn the_repair_asks_its_providers_when_the_peer_holds_another_audio() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(title(&pp, id).await.0, "Chain Song");
 }
+
+/// #229 item A (review round 12): a providers' repair past the bound ends
+/// the wait too, so a later re-queue of the video waits for its peer
+/// afresh.
+#[tokio::test]
+async fn a_providers_repair_ends_the_wait() {
+    let (_snv, pp, _id) = snv_parser_and_pp_from_snv().await;
+    let (chain, calls) = counting_chain();
+    let mut worker =
+        ReprocessWorker::new(pp.pool().clone(), Arc::new(chain), pp.cache().to_path_buf())
+            .with_peer(pp.ex.clone());
+    assert_eq!(worker.process_all().await.unwrap(), 0, "it waits");
+    let bound = i64::try_from(crate::peer::decide::MAX_PEER_WAIT.as_millis()).unwrap();
+    sqlx::query("UPDATE peer_waits SET since_ms = ?")
+        .bind(crate::peer::wire::now_ms() - bound - 60_000)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(worker.process_all().await.unwrap(), 1, "past the bound");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0, "the repair ended the wait");
+}
