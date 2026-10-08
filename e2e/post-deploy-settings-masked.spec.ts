@@ -13,7 +13,8 @@
  *   names the key, never the value. (`peers`, the exchange's peer list, masks
  *   the secrets INSIDE its JSON; this gate does not read into it.)
  * - `gemini_api_key` must read the mask: CI's "Seed settings" step stores a
- *   key on the box when none is there.
+ *   key on the box when none is there. A box with paid AI off (PP) holds no
+ *   paid key, so there it must be empty.
  * - The Nastavenia form's Gemini "API kľúč" field shows the mask in a
  *   password input.
  * - `GET /api/v1/exchange/status` (merged into the app's router) answers 200,
@@ -93,9 +94,17 @@ test.describe("settings secrets post-deploy verification (#229)", () => {
         `GET /api/v1/settings shows the secret setting "${key}" unmasked`,
       ).toBe(true);
     }
+    // A box with paid AI off (PP, #229 ROZHODNUTÉ 6062701584) holds NO paid
+    // key: its Gemini key must be empty. Every other box keeps CI's seeded key.
+    const status = (await (await request.get("/api/v1/status")).json()) as {
+      paid_ai_enabled?: boolean;
+    };
+    const paidAiOff = status.paid_ai_enabled === false;
     expect(
-      settings["gemini_api_key"] === SECRET_MASK,
-      "gemini_api_key must be stored (CI's Seed settings) and read as the mask",
+      settings["gemini_api_key"] === (paidAiOff ? "" : SECRET_MASK),
+      paidAiOff
+        ? "gemini_api_key must be empty on a box with paid AI off"
+        : "gemini_api_key must be stored (CI's Seed settings) and read as the mask",
     ).toBe(true);
     console.log(
       `settings secrets check: ${secretKeys.length} secret settings, all masked or empty (${secretKeys.join(", ")})`,
@@ -105,7 +114,7 @@ test.describe("settings secrets post-deploy verification (#229)", () => {
     await page.goto("/");
     await page.getByTestId("nav-settings").click();
     const geminiKey = page.getByLabel("API kľúč");
-    await expect(geminiKey).toHaveValue(SECRET_MASK, { timeout: 10_000 });
+    await expect(geminiKey).toHaveValue(paidAiOff ? "" : SECRET_MASK, { timeout: 10_000 });
     await expect(geminiKey).toHaveAttribute("type", "password");
 
     expect(consoleErrors).toEqual([]);

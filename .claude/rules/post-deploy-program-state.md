@@ -111,4 +111,4 @@ including `request` fixture API calls. Before #229 masked the settings API,
 put 8 clear credentials into run 37423917199's artifact. A spec that reads a
 secret-bearing endpoint sets `test.use({ trace: "off" })` and asserts
 without printing a value: a boolean `toBe(true)` with a message that names
-the key (`post-deploy-settings-secrets.spec.ts`).
+the key (`post-deploy-settings-masked.spec.ts`).
