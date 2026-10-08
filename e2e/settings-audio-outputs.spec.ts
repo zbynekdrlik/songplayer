@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 
 // #233: Nastavenia "Zvukové výstupy" — the program's audio outputs as ONE
 // list (`audio_outputs`) and the network rate. A real user adds a VBAN
@@ -259,7 +259,8 @@ test("neither section's save drops the other's unsaved edits (#233)", async ({ p
   await page.locator('[data-testid="audio-outputs-save"]').click();
   await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Uložené");
   expect(patches).toHaveLength(2);
-  expect(Object.keys(patches[1]).sort()).toEqual(["audio_network_rate", "audio_outputs"]);
+  // #233 release review: the rate was not touched, so it is not sent.
+  expect(Object.keys(patches[1])).toEqual(["audio_outputs"]);
   expect(JSON.parse(patches[1]["audio_outputs"] as string)).toHaveLength(3);
   await expect(page.locator('[data-testid="settings-gemini-model"]')).toHaveValue("gemini-unsaved");
   await expect(rows).toHaveCount(3);
@@ -724,5 +725,167 @@ test("a parked ASIO driver says only a restart helps, with no next try (#233)", 
     "čaká · ovládač zamrzol — pomôže len reštart SongPlayera",
     { timeout: 10000 },
   );
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+// #233 release review: the save re-reads the settings right before its PATCH
+// and never overwrites what changed on the server since the load; the rate
+// goes only when it changed; nothing is saved while the old VBAN keys wait
+// for their migration; a number field that is no whole number is refused;
+// "Uložené" goes at the next edit; a waiting VBAN row reads its reason in
+// Slovak. ("Odobrať" removing ONE row of a repeated id is the unit test of
+// `sp_core::audio_outputs_save::remove_one`: a keyed list of duplicate ids
+// is no state the page renders reliably.)
+
+const CHANGED =
+  "Výstupy sa medzičasom zmenili na serveri — obnovte stránku (F5) a upravte ich znova";
+
+async function storedOutputs(request: APIRequestContext) {
+  const all = await (await request.get("/api/v1/settings")).json();
+  return JSON.parse(all.audio_outputs || "[]") as { id: string; name: string; delay_ms: number }[];
+}
+
+test("a list changed on the server since the page loaded is never overwritten (#233 release review)", async ({
+  page,
+  request,
+}) => {
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: TWO } });
+  expect(seeded.status()).toBe(204);
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  const rows = page.locator('[data-testid="audio-output-row"]');
+  await expect(rows).toHaveCount(2);
+  // Elsewhere (the main session's API), after the page loaded: PP's DVS entry.
+  const three = JSON.stringify([
+    ...JSON.parse(TWO),
+    {
+      id: "out-3",
+      name: "DVS",
+      type: "asio",
+      enabled: true,
+      rate: "network",
+      delay_ms: 0,
+      asio: { driver: "Dante Virtual Soundcard (x64)", channels: [0, 1] },
+    },
+  ]);
+  expect((await request.patch("/api/v1/settings", { data: { audio_outputs: three } })).status()).toBe(204);
+  await rows.nth(1).locator('[data-testid="audio-output-name"]').fill("lv1 nový");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText(CHANGED);
+  expect(patches, "the page sent nothing").toHaveLength(0);
+  expect((await storedOutputs(request)).map((e) => e.id)).toEqual(["out-1", "out-2", "out-3"]);
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("an untouched network rate is not sent, a rate set elsewhere stays; a changed one is sent (#233 release review)", async ({
+  page,
+  request,
+}) => {
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+  const row = page.locator('[data-testid="audio-output-row"]');
+  await row.locator('[data-testid="audio-output-vban-host"]').fill("dev1.lan");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Uložené");
+  expect(Object.keys(patches[0])).toEqual(["audio_outputs"]);
+  // A rate set elsewhere meanwhile survives a save that did not touch it.
+  expect((await request.patch("/api/v1/settings", { data: { audio_network_rate: "96000" } })).status()).toBe(204);
+  await row.locator('[data-testid="audio-output-name"]').fill("dev1");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Uložené");
+  expect(Object.keys(patches[1])).toEqual(["audio_outputs"]);
+  const all = await (await request.get("/api/v1/settings")).json();
+  expect(all.audio_network_rate).toBe("96000");
+  // A fresh page that changes the rate sends it.
+  await page.reload();
+  await openSettings(page);
+  await expect(page.locator('[data-testid="settings-audio-network-rate"]')).toHaveValue("96000");
+  await page.locator('[data-testid="settings-audio-network-rate"]').selectOption("88200");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Uložené");
+  expect(Object.keys(patches[2]).sort()).toEqual(["audio_network_rate", "audio_outputs"]);
+  expect(patches[2]["audio_network_rate"]).toBe("88200");
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("nothing is saved while the old VBAN keys wait for their migration (#233 release review)", async ({
+  page,
+  request,
+}) => {
+  const seeded = await request.patch("/api/v1/settings", {
+    data: { vban_enabled: "true", vban_targets: "fohabl.lan:6980" },
+  });
+  expect(seeded.status()).toBe(204);
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+  await page.locator('[data-testid="audio-output-vban-host"]').fill("dev1.lan");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText(
+    "Výstupy sa ešte prenášajú zo starých nastavení VBAN — skúste uložiť o pár sekúnd",
+  );
+  expect(patches).toHaveLength(0);
+  const all = await (await request.get("/api/v1/settings")).json();
+  expect(all.audio_outputs).toBeUndefined();
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("a delay or a channel that is no whole number is refused in Slovak, never stored as 0 (#233 release review)", async ({
+  page,
+}) => {
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+  const rows = page.locator('[data-testid="audio-output-row"]');
+  await rows.nth(0).locator('[data-testid="audio-output-vban-host"]').fill("dev1.lan");
+  await rows.nth(0).locator('[data-testid="audio-output-delay"]').fill("40");
+  await rows.nth(0).locator('[data-testid="audio-output-delay"]').fill("");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText(
+    "Výstup 1 (out-1): pole „oneskorenie“ nie je celé číslo",
+  );
+  expect(patches).toHaveLength(0);
+  await rows.nth(0).locator('[data-testid="audio-output-delay"]').fill("25");
+  await expect(page.locator('[data-testid="audio-outputs-add-asio"]')).toBeEnabled();
+  await page.locator('[data-testid="audio-outputs-add-asio"]').click();
+  await rows.nth(1).locator('[data-testid="audio-output-asio-left"]').fill("");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText(
+    "Výstup 2 (out-2): pole „kanály“ nie je celé číslo",
+  );
+  expect(patches).toHaveLength(0);
+  await rows.nth(1).locator('[data-testid="audio-output-asio-left"]').fill("3");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Uložené");
+  const saved = JSON.parse(patches[0]["audio_outputs"] as string);
+  expect(saved[0].delay_ms).toBe(25);
+  expect(saved[1].asio.channels).toEqual([2, 1]);
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("Uložené goes away at the next edit (#233 release review)", async ({ page }) => {
+  await openSettings(page);
+  await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+  const row = page.locator('[data-testid="audio-output-row"]');
+  await row.locator('[data-testid="audio-output-vban-host"]').fill("dev1.lan");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  const message = page.locator('[data-testid="audio-outputs-message"]');
+  await expect(message).toHaveText("Uložené");
+  await row.locator('[data-testid="audio-output-name"]').fill("dev1 zmenený");
+  await expect(message).toHaveText("");
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("a waiting VBAN output reads its reason in Slovak (#233 release review)", async ({ page, request }) => {
+  const seeded = await request.patch("/api/v1/settings", { data: { audio_outputs: TWO } });
+  expect(seeded.status()).toBe(204);
+  await request.post("/__mock/vban-state", {
+    data: { id: "out-2", reason_code: "unresolved", reason: "failed to lookup address information" },
+  });
+  await openSettings(page);
+  const state = page.locator('[data-testid="audio-output-row"]').nth(1).locator('[data-testid="audio-output-state"]');
+  await expect(state).toHaveText("čaká · cieľ sa nedá preložiť na adresu", { timeout: 10000 });
+  await expect(state).toHaveAttribute("title", "Hlásenie servera: failed to lookup address information");
   expect(realConsoleErrors()).toEqual([]);
 });

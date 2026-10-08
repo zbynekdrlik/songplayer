@@ -758,6 +758,7 @@ app.post("/__mock/settings-reset", (_req, res) => {
   outputsSkipped.clear();
   asioHeld.clear();
   asioMeasuring.clear();
+  vbanHeld.clear();
   res.json({ status: "reset" });
 });
 
@@ -1304,6 +1305,15 @@ app.post("/__mock/asio-state", (req, res) => {
   });
   res.json({ held: [...asioHeld.keys()] });
 });
+// #233 release review: VBAN outputs the mock holds waiting (`/__mock/vban-state
+// {id, reason_code, reason}`, as the server's `vban_reason_code`), cleared by
+// `/__mock/settings-reset`.
+const vbanHeld = new Map();
+app.post("/__mock/vban-state", (req, res) => {
+  const b = req.body || {};
+  vbanHeld.set(String(b.id), { reason_code: b.reason_code ?? null, reason: b.reason ?? null });
+  res.json({ held: [...vbanHeld.keys()] });
+});
 // An ASIO entry as the server lists it: the driver "runs" at the network
 // rate (Int32LSB, 128 frames); a disabled one carries no `asio`.
 function mockAsioOutput(e, network) {
@@ -1357,13 +1367,15 @@ function mockOutputs() {
     if (e.type === "asio") return mockAsioOutput(e, network);
     const rate = e.rate === "network" || e.rate === undefined ? network : Number(e.rate);
     const enabled = e.enabled !== false;
+    const held = enabled ? vbanHeld.get(e.id) : undefined;
     return {
       id: e.id,
       type: e.type,
       name: e.name,
       enabled,
-      state: enabled ? "running" : "disabled",
-      reason: null,
+      state: !enabled ? "disabled" : held ? "waiting" : "running",
+      reason: held ? held.reason : null,
+      ...(held && held.reason_code ? { reason_code: held.reason_code } : {}),
       rate,
       format: (e.vban && e.vban.format) || "int24",
       channels: 2,
