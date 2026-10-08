@@ -494,6 +494,17 @@ CREATE TABLE peer_standins (
     next_check_ms INTEGER NOT NULL,
     PRIMARY KEY (youtube_id, job)
 );
+INSERT OR IGNORE INTO peer_standins (youtube_id, job, peer, made_at_ms, next_check_ms)
+SELECT f.youtube_id, 'lyrics', f.node, CAST(strftime('%s', 'now') AS INTEGER) * 1000, 0
+FROM peer_fetches f
+WHERE f.kind = 'audio'
+  AND EXISTS (SELECT 1 FROM videos v WHERE v.youtube_id = f.youtube_id
+      AND v.lyrics_source IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM peer_fetches l WHERE l.youtube_id = f.youtube_id
+      AND l.kind = 'lyrics')
+  AND NOT EXISTS (SELECT 1 FROM videos o WHERE o.youtube_id = f.youtube_id
+      AND (o.lyrics_manual_priority != 0 OR TRIM(COALESCE(o.lyrics_override_text, '')) != ''
+           OR o.dub_requested = 1 OR o.lyrics_source = 'gemini-live-translate'))
 ";
 
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).

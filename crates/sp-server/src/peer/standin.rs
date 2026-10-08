@@ -48,7 +48,7 @@ pub const STANDIN_MAX_RECHECK: Duration = Duration::from_secs(21_600);
 /// The next look at a stand-in made `age` ago: a quarter of its age, 10 min
 /// to 6 h.
 pub fn standin_recheck(age: Duration) -> Duration {
-    (age / 4).max(STANDIN_MIN_RECHECK)
+    (age / 4).clamp(STANDIN_MIN_RECHECK, STANDIN_MAX_RECHECK)
 }
 
 impl Exchange {
@@ -56,6 +56,14 @@ impl Exchange {
     /// makes stands in for the peer's copy (first looked at again after
     /// [`STANDIN_MIN_RECHECK`]).
     pub(crate) async fn stand_in(&self, job: Job, youtube_id: &str, peer: &str) {
+        let now = now_ms();
+        let next = now + duration_ms(STANDIN_MIN_RECHECK);
+        let recorded =
+            models_peer::record_standin(&self.pool, youtube_id, job.as_str(), peer, now, next)
+                .await;
+        if let Err(e) = recorded {
+            warn!(youtube_id, %e, "exchange: recording a stand-in failed");
+        }
         info!(
             youtube_id,
             job = job.as_str(),
@@ -216,7 +224,7 @@ async fn peers_lyrics(ex: &Exchange, youtube_id: &str) -> Option<FetchPlan> {
     let catalogs = ex.read_peers(&cfg.peers).await;
     cfg.peers.iter().zip(&catalogs).find_map(|(peer, catalog)| {
         let catalog = catalog.as_deref()?;
-        let artifacts = holds(catalog, Job::Stems, youtube_id)?;
+        let artifacts = holds(catalog, Job::Lyrics, youtube_id)?;
         Some(FetchPlan {
             peer: peer.clone(),
             artifacts,
