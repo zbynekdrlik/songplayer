@@ -40,23 +40,23 @@ use crate::playback::program_bus::ProgramJob;
 use crate::playback::program_output_timing::BoundaryMarks;
 
 /// Boundaries the trace holds: 10 min at the 30 fps grid.
-pub const TRACE_CAPACITY: usize = 1_800;
+pub const TRACE_CAPACITY: usize = 18_000;
 
 /// The longest window one `GET /api/v1/program/trace` answers (ms, 2 min).
-pub const TRACE_MAX_SPAN_MS: i64 = 60_000;
+pub const TRACE_MAX_SPAN_MS: i64 = 120_000;
 
 /// A boundary whose job was taken more than this after the boundary (µs,
 /// one grid slot) is a clump boundary (`late`).
-pub const CLUMP_LATE_US: i64 = 30_000;
+pub const CLUMP_LATE_US: i64 = 33_333;
 
 /// A boundary submitted less than this after the boundary before it (µs) is
 /// a clump boundary (`close`): two frames that close on the wire land in one
 /// receiver tick.
-pub const CLUMP_CLOSE_US: i64 = 5_000;
+pub const CLUMP_CLOSE_US: i64 = 10_000;
 
 /// A song mark not taken within this many boundaries (10 s) is dropped: its
 /// song's first live boundary went out without it.
-pub const SONG_MARK_MAX_BOUNDARIES: u64 = 30;
+pub const SONG_MARK_MAX_BOUNDARIES: u64 = 300;
 
 /// What `None` (no source, no song) is stored as.
 const NONE: i64 = i64::MIN;
