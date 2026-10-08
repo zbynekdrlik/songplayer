@@ -15,6 +15,15 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::config::DEFAULT_VBAN_STREAM_NAME;
 
+/// #233 ruling 4 (after release 0.74.0): the keys #210 kept its VBAN output
+/// in — `vban_enabled`, `vban_stream_name`, `vban_targets` — are no settings
+/// any more. Only the outputs' one-time move into the list reads them
+/// (sp-server `playback::audio_out_migrate`, which deletes them once it
+/// wrote the list; V32 deleted them on every box that had the list), and
+/// the dashboard's save waits while they are there with no list
+/// (`audio_outputs_save::migration_pending`).
+pub const LEGACY_VBAN_KEYS: [&str; 3] = ["vban_enabled", "vban_stream_name", "vban_targets"];
+
 /// The rates an output may run at, Hz (the VBAN rate indexes SongPlayer sends).
 pub const SUPPORTED_RATES: [u32; 5] = [44_100, 48_000, 88_200, 96_000, 192_000];
 /// The program's own rate (media is made 48 kHz offline, `normalize.rs`).

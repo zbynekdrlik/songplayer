@@ -164,12 +164,12 @@ format, pinned against a copy of the 0.72.0 encoder by
 
 - Since #233 nothing reads the `vban_*` keys but the one-time migration:
   each destination is an entry of `audio_outputs` (`audio-outputs.md`) with
-  its own format, delay and ONE target. The keys stay in the database (and
-  their constants in `sp_core::config`) so a rollback to ≤ 0.73.0 still
-  sends to FOH (ruling 4) what they held when the migration ran (a
-  dashboard edit of the migrated entry is not copied back); a later lane deletes them once the list has run a main
-  release (lane 3 kept them). Stream name policy, not enforced by
-  code: never `cg` before B4.
+  its own format, delay and ONE target. Ruling 4 (after release 0.74.0):
+  the keys are deleted — by the migration's own write of the list, and by
+  V32 on every box that already had it — and `sp_core::config::SETTING_VBAN_*`
+  are gone (`sp_core::audio_outputs::LEGACY_VBAN_KEYS` names them for the
+  migration). Stream name policy, not enforced by code: never `cg` before
+  B4.
 - The outputs task (`audio_out_task.rs`) re-reads the list every 5 s, so a
   dashboard save applies without a restart. It resolves an entry's target
   when it builds it and every 60 s while it is kept (`needs_resolve`), with

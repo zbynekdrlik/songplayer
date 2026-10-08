@@ -46,6 +46,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (29, MIGRATION_V29),
     (30, MIGRATION_V30),
     (31, MIGRATION_V31),
+    (32, MIGRATION_V32),
 ];
 
 const MIGRATION_V1: &str = "
@@ -515,6 +516,17 @@ WHERE f.kind = 'audio'
                              ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source')))))))
 ";
 
+// #233 ruling 4 (after release 0.74.0 put the output list on main, SNV and
+// PP): #210's three VBAN keys are no settings any more. Deleted where the
+// list exists (every box that ran the list's first start); a box with no
+// list keeps them for its outputs' one-time move
+// (`playback::audio_out_migrate`, which deletes them once it wrote the list).
+const MIGRATION_V32: &str = "
+DELETE FROM settings
+WHERE key IN ('vban_enabled', 'vban_stream_name', 'vban_targets')
+  AND EXISTS (SELECT 1 FROM settings WHERE key = 'audio_outputs')
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -679,6 +691,10 @@ mod tests_v30;
 #[path = "mod_tests_v31.rs"]
 #[cfg(test)]
 mod tests_v31;
+
+#[path = "mod_tests_v32.rs"]
+#[cfg(test)]
+mod tests_v32;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

@@ -37,19 +37,6 @@ pub const SETTING_MIX_DUB_PODKLAD: &str = "mix_dub_podklad";
 pub const SETTING_MIX_DUB_DABING: &str = "mix_dub_dabing";
 /// #210 (B2 of EPIC #174): the program's VBAN audio output (to FOH VB-Matrix
 /// and lv1). `"true"` sends; anything else (or absent) = off, the default.
-/// #233: the three `vban_*` keys are read only by the one-time migration
-/// into [`SETTING_AUDIO_OUTPUTS`] (sp-server `audio_out_migrate.rs`), which
-/// KEEPS them, so a rollback to ≤ 0.73.0 still sends to FOH (what the keys
-/// held when the migration ran: a dashboard edit of the migrated entry is
-/// not copied back); a later lane deletes the keys and these constants once
-/// the list has run a main release.
-pub const SETTING_VBAN_ENABLED: &str = "vban_enabled";
-/// #210: the ASCII VBAN stream name, at most 16 chars
-/// ([`DEFAULT_VBAN_STREAM_NAME`] until the B4 switch-over, never cg OBS's `cg`).
-pub const SETTING_VBAN_STREAM_NAME: &str = "vban_stream_name";
-/// #210: comma-separated `host:port` VBAN targets (default empty = send
-/// nothing), e.g. `fohabl.lan:6980, lv1.lan:6980`.
-pub const SETTING_VBAN_TARGETS: &str = "vban_targets";
 /// #212 (B3 of EPIC #174): the NDI input "OBS manuál" — one received NDI
 /// source offered to the program bus. `"true"` receives; anything else (or
 /// absent) = off, the default.
@@ -304,10 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn vban_setting_keys_and_default_stream_name() {
-        assert_eq!(SETTING_VBAN_ENABLED, "vban_enabled");
-        assert_eq!(SETTING_VBAN_STREAM_NAME, "vban_stream_name");
-        assert_eq!(SETTING_VBAN_TARGETS, "vban_targets");
+    fn the_default_vban_stream_name() {
         assert_eq!(DEFAULT_VBAN_STREAM_NAME, "sp-program");
     }
 

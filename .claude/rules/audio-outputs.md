@@ -465,16 +465,15 @@ or unreadable database) tries it again on the next pass (5 s), never only
 at the next restart (`a_failed_migration_is_tried_again_on_the_next_pass`).
 A target is read as #210's `ToSocketAddrs` read it (`split_target`: the
 whole target trimmed, nothing next to the colon), so "h : 1" is skipped,
-never migrated as h:1. **The `vban_*` keys are KEPT** (main-session
-ruling 4, 7.10.2026): the new code ignores them once the list exists, and a
-rollback to ≤ 0.73.0 (the last release without the list) still finds
-them, so FOH keeps its sound. A dashboard edit of a migrated entry (FOH's
-host, delay, stream name) is NOT copied back to the keys: a rollback sends
-what they held when the migration ran. A later lane
-deletes them (and `sp_core::config::SETTING_VBAN_*`) once the list has run a
-main release (lane 3 kept them: lane 1 had not been in a main release yet).
-A `vban_*` change made on a rolled-back ≤ 0.73.0 is NOT carried forward when
-the list version comes back (the list exists then).
+never migrated as h:1. **The `vban_*` keys are DELETED** (ruling 4, after
+release 0.74.0 put the list on main, SNV and PP): they are no settings any
+more (`sp_core::config::SETTING_VBAN_*` are gone; their names live once, as
+`sp_core::audio_outputs::LEGACY_VBAN_KEYS`, for this move and the
+dashboard's pending guard). The write that stores the list deletes them in
+the same transaction (`store_list_if_absent`; a list stored meanwhile leaves
+them, nothing written), and V32 deleted them on every box that already had
+the list (a box with no list keeps them for this move). A rollback to
+≤ 0.73.0 no longer finds them (until 0.74.0 they were kept for one).
 
 ## The fan-out (`audio_out.rs`)
 
@@ -958,6 +957,6 @@ hard_recentres / last_hard_recentre / latency_ms / blocks_sent` and
 `health.resyncs` polled every
 200 ms over the first 60 s after a restart.
 
-**Still open for a closing lane:** the `vban_*` keys and
-`sp_core::config::SETTING_VBAN_*` stay until the list has run one main
-release (ruling 4), then go.
+Ruling 4 closed (#233 lane B): the `vban_*` keys and
+`sp_core::config::SETTING_VBAN_*` are gone (the migration section above;
+V32, `db/mod_tests_v32.rs`).

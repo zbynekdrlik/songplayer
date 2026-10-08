@@ -1,23 +1,20 @@
-//! #233: the first start of the output list moves #210's three VBAN keys into
-//! it — one entry per target, `rate: 48000` (fixed, never "network"), INT24 and
-//! the stream name exactly as #210 put it on the wire — so FOH hears what it
-//! heard before. It acts only while NO list is stored and an old key exists,
-//! and it KEEPS the old keys (main-session ruling 4, 7.10.2026): the new code
-//! ignores them once the list exists, and a rollback to ≤ 0.73.0 (the last
-//! release without the list) still finds them, so FOH keeps its sound. A
-//! dashboard edit of a migrated entry (FOH's) is NOT copied back to the old
-//! keys: a rollback sends what they held when the migration ran. A later
-//! lane deletes them once the list has run a main release. The list is written only if still absent (`INSERT OR IGNORE`), so
-//! a list a settings PATCH stored meanwhile is never replaced.
+//! #233: the first start of the output list moves #210's three VBAN keys
+//! (`sp_core::audio_outputs::LEGACY_VBAN_KEYS`) into it — one entry per
+//! target, `rate: 48000` (fixed, never "network"), INT24 and the stream name
+//! exactly as #210 put it on the wire — so FOH hears what it heard before. It
+//! acts only while NO list is stored and an old key exists. The list is
+//! written only if still absent (`INSERT OR IGNORE`), so a list a settings
+//! PATCH stored meanwhile is never replaced. Ruling 4, after release 0.74.0
+//! put the list on main (SNV, PP): the old keys are no settings any more —
+//! the write that stores the list deletes them in the same transaction, and
+//! V32 deleted them on every box that already had the list (until then they
+//! were kept for a rollback to ≤ 0.73.0).
 
 use sp_core::audio_outputs::{
-    MAX_NAME_LEN, OutputEntry, PROGRAM_RATE, RateChoice, VbanDest, VbanSampleFormat,
-    validate_entry, wire_stream_name,
+    LEGACY_VBAN_KEYS, MAX_NAME_LEN, OutputEntry, PROGRAM_RATE, RateChoice, VbanDest,
+    VbanSampleFormat, validate_entry, wire_stream_name,
 };
-use sp_core::config::{
-    DEFAULT_VBAN_STREAM_NAME, SETTING_AUDIO_OUTPUTS, SETTING_VBAN_ENABLED,
-    SETTING_VBAN_STREAM_NAME, SETTING_VBAN_TARGETS,
-};
+use sp_core::config::{DEFAULT_VBAN_STREAM_NAME, SETTING_AUDIO_OUTPUTS};
 use sqlx::SqlitePool;
 
 /// #210's `VBAN_MAX_TARGETS`: the targets its sender used.
@@ -84,28 +81,42 @@ pub enum MigrationOutcome {
     /// A list is stored, or no old key exists: nothing to do (every start
     /// after the first, and a box that never had VBAN).
     Nothing,
-    /// The list was written from #210's keys (which stay).
+    /// The list was written from #210's keys (deleted with it).
     Migrated(Migrated),
 }
 
 /// Write `text` as the list unless one is stored (a settings PATCH may have
-/// written one since it was read). Whether it was written.
+/// written one since it was read) and, when it was written, delete #210's
+/// keys it was made from, in the same transaction. Whether it was written.
 pub async fn store_list_if_absent(pool: &SqlitePool, text: &str) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
     let done = sqlx::query("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)")
         .bind(SETTING_AUDIO_OUTPUTS)
         .bind(text)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-    Ok(done.rows_affected() > 0)
+    let written = done.rows_affected() > 0;
+    if written {
+        let [enabled, stream_name, targets] = LEGACY_VBAN_KEYS;
+        sqlx::query("DELETE FROM settings WHERE key IN (?, ?, ?)")
+            .bind(enabled)
+            .bind(stream_name)
+            .bind(targets)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(written)
 }
 
 /// The migration (see the module doc); the outputs task runs it at its start.
 pub async fn migrate_vban_settings(pool: &SqlitePool) -> Result<MigrationOutcome, sqlx::Error> {
+    let [enabled_key, stream_name_key, targets_key] = LEGACY_VBAN_KEYS;
     let rows: Vec<(String, String)> =
         sqlx::query_as("SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?)")
-            .bind(SETTING_VBAN_ENABLED)
-            .bind(SETTING_VBAN_STREAM_NAME)
-            .bind(SETTING_VBAN_TARGETS)
+            .bind(enabled_key)
+            .bind(stream_name_key)
+            .bind(targets_key)
             .bind(SETTING_AUDIO_OUTPUTS)
             .fetch_all(pool)
             .await?;
@@ -117,20 +128,14 @@ pub async fn migrate_vban_settings(pool: &SqlitePool) -> Result<MigrationOutcome
     if get(SETTING_AUDIO_OUTPUTS).is_some() {
         return Ok(MigrationOutcome::Nothing);
     }
-    let old = [
-        SETTING_VBAN_ENABLED,
-        SETTING_VBAN_STREAM_NAME,
-        SETTING_VBAN_TARGETS,
-    ]
-    .into_iter()
-    .any(|k| get(k).is_some());
+    let old = LEGACY_VBAN_KEYS.into_iter().any(|k| get(k).is_some());
     if !old {
         return Ok(MigrationOutcome::Nothing);
     }
     let m = entries_from_vban(
-        get(SETTING_VBAN_ENABLED).is_some_and(|v| v.trim() == "true"),
-        get(SETTING_VBAN_STREAM_NAME).unwrap_or(""),
-        get(SETTING_VBAN_TARGETS).unwrap_or(""),
+        get(enabled_key).is_some_and(|v| v.trim() == "true"),
+        get(stream_name_key).unwrap_or(""),
+        get(targets_key).unwrap_or(""),
     );
     let text =
         serde_json::to_string(&m.entries).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
