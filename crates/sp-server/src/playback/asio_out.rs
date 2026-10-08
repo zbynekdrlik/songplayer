@@ -274,15 +274,33 @@ enum State {
     Running(Box<Run>),
 }
 
+/// The counters of the runs already closed: a run's device, servo and ring
+/// count from 0 again, while `outputs[i].asio` counts since the output was
+/// built.
+#[derive(Clone, Copy, Debug, Default)]
+struct Closed {
+    underruns: u64,
+    overloads: u64,
+    overflows: u64,
+    recentres: u64,
+}
+
+impl Closed {
+    /// Add a run's counters (before its device closes).
+    fn add(&mut self, run: &Run, device: &dyn AsioDevice) {
+        self.underruns += device.underruns();
+        self.overloads += run.overloads;
+        self.overflows += run.overflows;
+        self.recentres += run.servo.status().recentres;
+    }
+}
+
 /// The worker's state machine ([`run_asio_worker`] loops on [`Self::step`]).
 pub struct AsioWorker {
     state: State,
     failures: u32,
     resets: u64,
-    /// The underruns of the runs already closed (a device counts per run).
-    underruns_closed: u64,
-    /// The overloads of the runs already closed.
-    overloads_closed: u64,
+    closed: Closed,
 }
 
 impl AsioWorker {
@@ -294,8 +312,7 @@ impl AsioWorker {
             },
             failures: 0,
             resets: 0,
-            underruns_closed: 0,
-            overloads_closed: 0,
+            closed: Closed::default(),
         }
     }
 
@@ -341,16 +358,10 @@ impl AsioWorker {
         match reason {
             Some(reason) => {
                 let ran = now_100ns - run.opened_at_100ns;
-                self.overloads_closed += run.overloads;
+                self.closed.add(run, &*device);
                 self.close(out, device, now_100ns, reason, ran);
             }
-            None => publish(
-                run,
-                out,
-                &*device,
-                self.underruns_closed,
-                self.overloads_closed,
-            ),
+            None => publish(run, out, &*device, &self.closed),
         }
         POLL_100NS
     }
@@ -411,7 +422,6 @@ impl AsioWorker {
         reason: Reason,
         ran_100ns: i64,
     ) {
-        self.underruns_closed += device.underruns();
         self.resets += 1;
         self.failures = failures_after_close(self.failures, ran_100ns);
         let resets = self.resets;
@@ -547,15 +557,9 @@ fn log_stale(id: &str, stale: usize) {
     }
 }
 
-/// The running output's numbers into its status (`underruns_closed`: the
-/// closed runs' underruns).
-fn publish(
-    run: &Run,
-    out: &AsioOut,
-    device: &dyn AsioDevice,
-    underruns_closed: u64,
-    overloads_closed: u64,
-) {
+/// The running output's numbers into its status (its counters: the closed
+/// runs' + this run's).
+fn publish(run: &Run, out: &AsioOut, device: &dyn AsioDevice, closed: &Closed) {
     let servo = run.servo.status();
     let latency = asio_latency_ms(
         servo.latency_ms,
@@ -568,10 +572,10 @@ fn publish(
         l.status.rate_ppm = servo.rate_ppm;
         l.status.locked = servo.locked;
         l.status.latency_ms = latency;
-        l.status.recentres = servo.recentres;
-        l.status.underruns = underruns_closed + device.underruns();
-        l.status.overflows = run.overflows;
-        l.status.overloads = overloads_closed + run.overloads;
+        l.status.recentres = closed.recentres + servo.recentres;
+        l.status.underruns = closed.underruns + device.underruns();
+        l.status.overflows = closed.overflows + run.overflows;
+        l.status.overloads = closed.overloads + run.overloads;
     });
 }
 

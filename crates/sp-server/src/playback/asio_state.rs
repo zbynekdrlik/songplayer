@@ -226,13 +226,17 @@ pub fn ring_capacity_frames(rate: f64, target_100ns: i64, max_block_frames: usiz
 }
 
 /// An ASIO output's latency, ms: the servo's (ring + splice + hand-off), the
-/// resampler's delay, the driver's output latency.
+/// resampler's delay, the driver's output latency. 0 (unknown) until the
+/// servo measured its first window: its latency reads 0 until then.
 pub fn asio_latency_ms(
     servo_latency_ms: f64,
     asrc_delay_frames: usize,
     driver_latency_frames: u32,
     rate: f64,
 ) -> f64 {
+    if servo_latency_ms == 0.0 {
+        return 0.0;
+    }
     servo_latency_ms
         + (asrc_delay_frames as f64 + f64::from(driver_latency_frames)) * 1_000.0 / rate
 }
