@@ -676,8 +676,10 @@ pub fn asio_reason_sk(code: &str) -> &'static str {
         "failed" => "chyba ovládača",
         "reset" => "ovládač sa reštartuje",
         "rate_changed" => "ovládač zmenil frekvenciu",
+        "clock_lost" => "ovládač stratil hodinový signál",
         "stalled" => "ovládač neodpovedá",
         "windows_only" => "ASIO funguje len vo Windows",
+        "held" => "ovládač ešte uvoľňuje predchádzajúci výstup",
         _ => "neznámy dôvod",
     }
 }
