@@ -47,6 +47,13 @@ pub enum PipelineEvent {
     /// from its start) or none was asked. The song's title clock counts
     /// from it.
     Started { duration_ms: u64, position_ms: u64 },
+    /// #217: a seek took effect, and the song plays on from `position_ms`
+    /// (`real_seek_ms`): the asked position when the decoder's seek worked,
+    /// where the decoder was when it refused it. The song's title clock
+    /// moves on this report, never on the asked position (`seek.rs`). Sent
+    /// by the decode producer right after its seek, so it always comes after
+    /// the song's `Started` and before the next song's.
+    Seeked { position_ms: u64 },
     /// Periodic position update.
     Position { position_ms: u64, duration_ms: u64 },
     /// Video reached its natural end.
@@ -138,6 +145,36 @@ pub fn real_start_ms<E: std::fmt::Debug>(
                 "{who}: seek to start_position_ms failed — playing from 0"
             );
             0
+        }
+    }
+}
+
+/// #217: where the song plays from after the decoder is asked to seek to
+/// `position_ms`, the position `PipelineEvent::Seeked` reports: the asked
+/// position when the `seek` worked; `current_ms` when it failed, since the
+/// decoder then plays on from where it was (a song just opened is at 0).
+/// `who` names the decode path in its log line.
+pub fn real_seek_ms<E: std::fmt::Debug>(
+    position_ms: u64,
+    current_ms: u64,
+    seek: impl FnOnce(u64) -> Result<(), E>,
+    playlist_id: i64,
+    who: &str,
+) -> u64 {
+    match seek(position_ms) {
+        Ok(()) => {
+            info!(playlist_id, position_ms, "{who}: seeked");
+            position_ms
+        }
+        Err(e) => {
+            warn!(
+                playlist_id,
+                position_ms,
+                current_ms,
+                ?e,
+                "{who}: the decoder refused the seek — playing on from where it was"
+            );
+            position_ms
         }
     }
 }
