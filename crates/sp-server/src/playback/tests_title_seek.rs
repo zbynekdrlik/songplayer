@@ -3,8 +3,8 @@
 //! when the pipeline reports where the song really plays from
 //! (`PipelineEvent::Seeked`): the asked position, or where the decoder was
 //! when it refused the seek. A resume whose seek failed (the song plays from
-//! 0) counts from where `Started` says the song really starts. A child of
-//! `tests_scene_change.rs`, reusing its rig.
+//! its start) counts from where `Started` says the song really starts. A
+//! child of `tests_scene_change.rs`, reusing its rig.
 
 use std::time::Duration;
 
