@@ -740,7 +740,9 @@ own callback thread and has two slots of cushion):
     a scoped `tracing_subscriber` writer, the reopens at DEBUG; a burst
     at every reopen stays waiting; the clock's arrival starts a fresh
     servo, so a ring left under the floor only primes; a reset during the
-    wait ends it, the reopen a fresh open).
+    wait ends it, the reopen a fresh open; a reopen during the wait logs
+    its stale blocks at DEBUG; a clock reopen keeps the closed run's
+    counters, review round 11).
 - close: a reset request or a buffer-size change (answered 0: never
   resized live), a rate change of 1 Hz or more (`sampleRateDidChange(0)` =
   a lost clock, code `clock_lost`, "ovládač stratil hodinový signál": a

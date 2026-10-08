@@ -151,7 +151,8 @@ pub struct AsioStatus {
     /// The driver's `kAsioOverload` messages, since the output was built.
     pub overloads: u64,
     /// While waiting: the seconds to the next open (None for a parked
-    /// driver, which is never reopened).
+    /// driver, which is never reopened, or for one waiting for its clock —
+    /// `no_clock`, the driver open, reopened each minute on its own).
     pub retry_in_s: Option<f64>,
     /// While waiting: the reason's stable code (`Reason::code`).
     pub reason_code: Option<&'static str>,
@@ -609,16 +610,7 @@ impl AsioWorker {
                 // Stale by the open's duration: the first block the servo
                 // sees is a fresh one. A reopen during a wait for the clock
                 // is a retry: its count logs at DEBUG (review round 10).
-                let stale = out.queue.clear();
-                if waiting {
-                    debug!(
-                        id = %out.id,
-                        stale,
-                        "asio output: dropped the blocks queued while the driver opened"
-                    );
-                } else {
-                    log_stale(&out.id, stale);
-                }
+                log_stale(&out.id, out.queue.clear(), waiting);
                 let (state, reason) = if waiting {
                     (STATE_WAITING, Some(Reason::NoClock))
                 } else {
@@ -827,10 +819,20 @@ fn log_hard(id: &str, h: &Hard, held_back: u64) {
     );
 }
 
-/// The blocks an open dropped, logged when there were any.
-#[cfg_attr(test, mutants::skip)] // logging only; the drop is pinned by its test
-fn log_stale(id: &str, stale: usize) {
-    if stale > 0 {
+/// The blocks an open dropped, logged when there were any: at DEBUG for a
+/// reopen during a wait for the clock (a retry, once a minute; review
+/// rounds 10-11), else at INFO.
+#[cfg_attr(test, mutants::skip)] // logging only; the drop and both levels are pinned by tests
+fn log_stale(id: &str, stale: usize, waiting: bool) {
+    if stale == 0 {
+        return;
+    }
+    if waiting {
+        debug!(
+            id,
+            stale, "asio output: dropped the blocks queued while the driver opened"
+        );
+    } else {
         info!(
             id,
             stale, "asio output: dropped the blocks queued while the driver opened"
