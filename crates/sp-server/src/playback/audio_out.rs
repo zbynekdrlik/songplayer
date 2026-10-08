@@ -19,6 +19,9 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use sp_core::audio_outputs::{DEFAULT_NETWORK_RATE, OutputEntry, OutputType};
+use sp_core::audio_outputs_save::{
+    VBAN_CONVERTER, VBAN_NOT_BUILT, VBAN_NOT_STARTED, VBAN_RESOLVING, VBAN_UNRESOLVED,
+};
 
 use crate::playback::asio_out::{AsioOut, AsioStatus};
 use crate::playback::asio_state::{Reason, buffer_note, rate_note};
@@ -97,6 +100,10 @@ pub struct OutputStatus {
     /// running | opening | waiting | disabled.
     pub state: &'static str,
     pub reason: Option<String>,
+    /// #233 release review: a waiting VBAN output's reason as a stable code
+    /// (`vban_reason_code`), which the dashboard shows in Slovak.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<&'static str>,
     pub rate: u32,
     pub format: &'static str,
     pub channels: u32,
@@ -139,6 +146,25 @@ pub fn vban_state(
     (STATE_WAITING, Some(reason.to_string()))
 }
 
+/// #233 release review: a waiting VBAN output's reason as a stable code:
+/// its `cause` (`not_built`, `not_started`, `converter`), else a target that
+/// does not resolve (`unresolved`) or is not resolved yet (`resolving`).
+/// `None` unless the output waits.
+pub fn vban_reason_code(
+    state: &str,
+    cause: Option<&'static str>,
+    resolve_failed: bool,
+) -> Option<&'static str> {
+    if state != STATE_WAITING {
+        return None;
+    }
+    Some(cause.unwrap_or(if resolve_failed {
+        VBAN_UNRESOLVED
+    } else {
+        VBAN_RESOLVING
+    }))
+}
+
 /// A VBAN output's latency from the boundary, ms: the send latency, the
 /// delay, the rate converter's delay.
 pub fn vban_latency_ms(delay_ms: u32, rate_hz: u32) -> f64 {
@@ -169,9 +195,17 @@ impl RunningOutput {
     fn vban_status(&self, out: Option<&Arc<VbanOut>>) -> OutputStatus {
         let e = &self.entry;
         let st = out.map(|out| (out.status(), out.is_running()));
-        // A build error, else why the thread could not start (#233).
+        // A build error, else why the thread could not start (#233), else
+        // what the running thread cannot do (a refused rate converter), each
+        // with its code (#233 release review).
         let not_started = out.and_then(|out| out.start_error());
-        let build_error = self.error.clone().or(not_started);
+        let fault = out.and_then(|out| out.fault());
+        let (build_error, cause) = match (self.error.clone(), not_started, fault) {
+            (Some(why), _, _) => (Some(why), Some(VBAN_NOT_BUILT)),
+            (None, Some(why), _) => (Some(why), Some(VBAN_NOT_STARTED)),
+            (None, None, Some(why)) => (Some(why), Some(VBAN_CONVERTER)),
+            (None, None, None) => (None, None),
+        };
         let addressed = st
             .as_ref()
             .is_some_and(|(s, _)| s.targets.iter().any(|t| t.addr.is_some()));
@@ -194,6 +228,7 @@ impl RunningOutput {
             enabled: e.enabled,
             state,
             reason,
+            reason_code: vban_reason_code(state, cause, resolve_error.is_some()),
             rate: self.built_rate,
             format: e.vban.as_ref().map_or("int24", |v| v.format.as_str()),
             channels: 2,
@@ -239,6 +274,7 @@ impl RunningOutput {
             enabled: e.enabled,
             state,
             reason,
+            reason_code: None,
             rate,
             format: status.as_ref().map_or("", |s| s.sample_type),
             channels: 2,

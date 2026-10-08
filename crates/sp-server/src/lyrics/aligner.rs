@@ -1,65 +1,15 @@
-//! Rust subprocess wrappers for `lyrics_worker.py`.
-//!
-//! Two entry points:
-//!   - `preprocess_vocals(vocals) → clean_wav`: anvuew dereverb + 16 kHz (the
-//!     vocals come from the stems sidecar, #144 — no BS-RoFormer isolation pass)
-//!   - `align_chunks(wav, chunks) → ChunkResults`: chunked Qwen3 alignment
-//!
-//! No post-processing, no band-aid, no duplicate-timing fixups. The
-//! assembly and quality modules in this crate own all data shaping.
+//! Rust subprocess wrapper for `lyrics_worker.py preprocess-vocals`:
+//! `preprocess_vocals(vocals) → clean_wav`, anvuew dereverb + 16 kHz (the
+//! vocals come from the stems sidecar, #144 — no BS-RoFormer isolation pass).
+//! The forced alignment is the mtl aligner's (`mtl_aligner.rs`, its own venv);
+//! the retired Qwen3 chunk-alignment wrapper is deleted (#144, v22 one regime).
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, warn};
-
-use crate::lyrics::assembly::{AlignedWord, ChunkResult};
-use crate::lyrics::chunking::ChunkRequest;
-
-// ---------------------------------------------------------------------------
-// On-disk JSON shapes shared with Python
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Serialize)]
-struct ChunkInRequest<'a> {
-    chunk_idx: usize,
-    /// Position within the source line's word stream where this chunk's
-    /// words begin. Round-tripped to Python unchanged so the Rust
-    /// assembly phase can slot sub-chunk outputs back into the right
-    /// slice of a split line's full word sequence.
-    word_offset: usize,
-    start_ms: u64,
-    end_ms: u64,
-    text: &'a str,
-    word_count: usize,
-}
-
-#[derive(Debug, Serialize)]
-struct ChunkRequestFile<'a> {
-    chunks: Vec<ChunkInRequest<'a>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChunkOutWord {
-    text: String,
-    start_ms: u64,
-    end_ms: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChunkOut {
-    chunk_idx: usize,
-    words: Vec<ChunkOutWord>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChunkResultFile {
-    chunks: Vec<ChunkOut>,
-}
 
 // ---------------------------------------------------------------------------
 // isolation_timeout
@@ -300,127 +250,6 @@ pub async fn preprocess_vocals(
 }
 
 // ---------------------------------------------------------------------------
-// align_chunks
-// ---------------------------------------------------------------------------
-
-/// Write `requests` to a temp file, invoke `lyrics_worker.py align-chunks`
-/// on the clean WAV, parse the result JSON, and return `ChunkResult`s.
-///
-/// `chunks_path` and `output_path` are caller-owned scratch files that
-/// this function writes and then removes on success.
-#[cfg_attr(test, mutants::skip)]
-pub async fn align_chunks(
-    python_path: &Path,
-    script_path: &Path,
-    audio_wav: &Path,
-    requests: &[ChunkRequest],
-    chunks_path: &Path,
-    output_path: &Path,
-) -> Result<Vec<ChunkResult>> {
-    let req_file = ChunkRequestFile {
-        chunks: requests
-            .iter()
-            .enumerate()
-            .map(|(idx, r)| ChunkInRequest {
-                chunk_idx: idx,
-                word_offset: r.word_offset,
-                start_ms: r.start_ms,
-                end_ms: r.end_ms,
-                text: &r.text,
-                word_count: r.word_count,
-            })
-            .collect(),
-    };
-    let json = serde_json::to_vec(&req_file)?;
-    fs::write(chunks_path, &json)
-        .await
-        .context("failed to write chunks request file")?;
-
-    let mut cmd = Command::new(python_path);
-    cmd.args([
-        script_path.as_os_str(),
-        "align-chunks".as_ref(),
-        "--audio".as_ref(),
-        audio_wav.as_os_str(),
-        "--chunks".as_ref(),
-        chunks_path.as_os_str(),
-        "--output".as_ref(),
-        output_path.as_os_str(),
-    ]);
-    // Same PATH injection as preprocess_vocals — align-chunks loads the
-    // Qwen3 aligner which depends on audio-separator's imports, which in
-    // turn may load ffmpeg. Keep the subprocess environment consistent.
-    if let Some(tools_dir) = script_path.parent() {
-        cmd.env(
-            "PATH",
-            crate::lyrics::bootstrap::prepend_path_with(tools_dir),
-        );
-    }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    debug!(
-        "running align-chunks with {} requests on {}",
-        requests.len(),
-        audio_wav.display()
-    );
-
-    let mut child = cmd.spawn().context("failed to spawn align-chunks")?;
-    let status = match tokio::time::timeout(std::time::Duration::from_secs(900), child.wait()).await
-    {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => anyhow::bail!("align-chunks wait failed: {e}"),
-        Err(_) => {
-            let _ = child.kill().await;
-            anyhow::bail!("align-chunks timed out after 900 s");
-        }
-    };
-    if !status.success() {
-        anyhow::bail!("align-chunks exited with status {status}");
-    }
-
-    let content = fs::read_to_string(output_path)
-        .await
-        .context("failed to read align-chunks output")?;
-    let parsed: ChunkResultFile =
-        serde_json::from_str(&content).context("failed to parse align-chunks output JSON")?;
-
-    let results = parsed
-        .chunks
-        .into_iter()
-        .map(|c| {
-            let (line_index, word_offset) = requests
-                .get(c.chunk_idx)
-                .map(|r| (r.line_index, r.word_offset))
-                .unwrap_or((usize::MAX, 0));
-            ChunkResult {
-                line_index,
-                word_offset,
-                words: c
-                    .words
-                    .into_iter()
-                    .map(|w| AlignedWord {
-                        text: w.text,
-                        start_ms: w.start_ms,
-                        end_ms: w.end_ms,
-                    })
-                    .collect(),
-            }
-        })
-        .filter(|r| r.line_index != usize::MAX)
-        .collect();
-
-    let _ = fs::remove_file(chunks_path).await;
-    let _ = fs::remove_file(output_path).await;
-
-    Ok(results)
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -454,6 +283,9 @@ mod tests {
             ["merge_word", "_timings"].concat(),
             ["ensure_progressive", "_words"].concat(),
             ["count_duplicate", "_start_ms"].concat(),
+            // #144: the retired Qwen3-ForcedAligner wrapper.
+            ["align", "_chunks"].concat(),
+            ["align", "-chunks"].concat(),
         ];
         for sym in &banned {
             assert!(
@@ -463,80 +295,18 @@ mod tests {
         }
     }
 
-    /// JSON-contract schema test: the request shape Rust writes to
-    /// `chunks.json` must round-trip cleanly through the Python
-    /// helper. We can't invoke Python in a unit test, but we can at
-    /// least prove the Rust-side serialize then parse using the
-    /// matching deserialize struct — this catches drift between the
-    /// `ChunkInRequest` producer and any future consumer that reads
-    /// the same file.
-    ///
-    /// Equally important: verify the output-side shape (`ChunkOut` +
-    /// `ChunkOutWord`) deserialises from the exact JSON the Python
-    /// helper writes. The fixture below is copy-pasted from
-    /// `lyrics_worker.py::cmd_align_chunks` docstring.
+    /// #144: the chunk planner and the chunk assembler of the retired Qwen
+    /// aligner went with its chunk-alignment command, their only consumer.
     #[test]
-    fn align_chunks_request_json_schema_roundtrips() {
-        let requests = vec![
-            ChunkInRequest {
-                chunk_idx: 0,
-                word_offset: 0,
-                start_ms: 500,
-                end_ms: 3500,
-                text: "hey there friend",
-                word_count: 3,
-            },
-            ChunkInRequest {
-                chunk_idx: 1,
-                word_offset: 3,
-                start_ms: 3500,
-                end_ms: 6500,
-                text: "goodbye now",
-                word_count: 2,
-            },
-        ];
-        let req_file = ChunkRequestFile { chunks: requests };
-        let json = serde_json::to_string(&req_file).expect("serialize");
-
-        // Shape the Python script reads (quoted from its docstring):
-        //   {"chunks": [{"chunk_idx": 0, "word_offset": 0,
-        //                "start_ms": 500, "end_ms": 3500,
-        //                "text": "hey there friend", "word_count": 3}, ...]}
-        assert!(json.contains("\"chunk_idx\""));
-        assert!(json.contains("\"word_offset\""));
-        assert!(json.contains("\"start_ms\""));
-        assert!(json.contains("\"end_ms\""));
-        assert!(json.contains("\"text\""));
-        assert!(json.contains("\"word_count\""));
-    }
-
-    #[test]
-    fn align_chunks_output_json_schema_matches_python_docstring() {
-        // Fixture verbatim from lyrics_worker.py::cmd_align_chunks docstring.
-        let fixture = r#"{
-            "chunks": [
-                {
-                    "chunk_idx": 0,
-                    "words": [
-                        {"text": "hey", "start_ms": 1000, "end_ms": 1200},
-                        {"text": "there", "start_ms": 1200, "end_ms": 1400},
-                        {"text": "friend", "start_ms": 1400, "end_ms": 1800}
-                    ]
-                },
-                {
-                    "chunk_idx": 1,
-                    "words": []
-                }
-            ]
-        }"#;
-        let parsed: ChunkResultFile =
-            serde_json::from_str(fixture).expect("Python docstring fixture must deserialize");
-        assert_eq!(parsed.chunks.len(), 2);
-        assert_eq!(parsed.chunks[0].chunk_idx, 0);
-        assert_eq!(parsed.chunks[0].words.len(), 3);
-        assert_eq!(parsed.chunks[0].words[0].text, "hey");
-        assert_eq!(parsed.chunks[0].words[0].start_ms, 1000);
-        assert_eq!(parsed.chunks[1].words.len(), 0);
+    fn the_lyrics_module_declares_no_retired_chunk_modules() {
+        let src = include_str!("mod.rs");
+        for module in ["chunking", "assembly"] {
+            let decl = format!("pub mod {module};");
+            assert!(
+                !src.contains(&decl),
+                "lyrics/mod.rs must not declare `{decl}`"
+            );
+        }
     }
 
     // ---- #162: --force-cpu argv, NOT CUDA_VISIBLE_DEVICES ----------------

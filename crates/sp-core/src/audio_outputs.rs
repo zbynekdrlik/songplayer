@@ -236,6 +236,7 @@ pub enum Problem {
     OutOfRange,
     SameChannel,
     DriverTaken,
+    DestinationTaken,
 }
 
 impl Problem {
@@ -253,6 +254,9 @@ impl Problem {
             Self::SameChannel => "must name two different channels",
             Self::DriverTaken => {
                 "is already used by an earlier ASIO entry (a driver takes one client)"
+            }
+            Self::DestinationTaken => {
+                "is already used by an earlier VBAN entry (the same host, port and stream name)"
             }
         }
     }
@@ -273,13 +277,16 @@ impl Problem {
             Self::OutOfRange => "musí byť 1 až 512",
             Self::SameChannel => "musí obsahovať dva rôzne kanály",
             Self::DriverTaken => "je už použité iným výstupom ASIO (ovládač berie jedného klienta)",
+            Self::DestinationTaken => {
+                "je už použité iným výstupom VBAN (rovnaký cieľ, port aj názov streamu)"
+            }
         }
     }
 }
 
 /// The Slovak name of a field, for the dashboard (shown as `pole „…“`, so
 /// every problem text agrees with the neuter "pole"); an unknown field as it is.
-fn field_sk(field: &'static str) -> &'static str {
+pub(crate) fn field_sk(field: &'static str) -> &'static str {
     match field {
         "id" => "identifikátor",
         "name" => "názov",
@@ -527,6 +534,34 @@ pub fn driver_taken(earlier: &[OutputEntry], e: &OutputEntry) -> bool {
     asio_driver(e).is_some_and(|d| earlier.iter().any(|p| asio_driver(p) == Some(d)))
 }
 
+/// The destination of a VBAN entry (`None` for any other type).
+fn vban_dest(e: &OutputEntry) -> Option<&VbanDest> {
+    match e.kind {
+        OutputType::Vban => e.vban.as_ref(),
+        OutputType::Asio => None,
+    }
+}
+
+/// Two VBAN destinations are one receiver's one stream: the same port, the
+/// same host and the same stream name, ASCII case ignored in both (a host
+/// name is case-blind, and so is a VBAN receiver's stream name).
+fn same_destination(a: &VbanDest, b: &VbanDest) -> bool {
+    a.port == b.port
+        && a.host.eq_ignore_ascii_case(&b.host)
+        && a.stream_name.eq_ignore_ascii_case(&b.stream_name)
+}
+
+/// #233 release review: `e` sends to the destination of a VBAN entry in
+/// `earlier` (a switched-off entry still names its destination, like an
+/// ASIO driver): two senders of one stream to one receiver.
+pub fn destination_taken(earlier: &[OutputEntry], e: &OutputEntry) -> bool {
+    vban_dest(e).is_some_and(|d| {
+        earlier
+            .iter()
+            .any(|p| vban_dest(p).is_some_and(|q| same_destination(d, q)))
+    })
+}
+
 /// How many entries of a type the list may hold.
 pub fn max_of_type(kind: OutputType) -> usize {
     match kind {
@@ -537,7 +572,9 @@ pub fn max_of_type(kind: OutputType) -> usize {
 
 /// The whole list: at most [`MAX_OUTPUTS`] entries, [`MAX_VBAN_OUTPUTS`]
 /// VBAN and [`MAX_ASIO_OUTPUTS`] ASIO ones, every entry valid, ids unique,
-/// each ASIO driver named once ([`driver_taken`]).
+/// each ASIO driver named once ([`driver_taken`]) and each VBAN destination
+/// once ([`destination_taken`]: the dashboard and a PATCH; the stored read
+/// does not skip it, so a list stored before keeps running as it was).
 pub fn validate_list(entries: &[OutputEntry]) -> Result<(), ListError> {
     if entries.len() > MAX_OUTPUTS {
         return Err(ListError::TooMany {
@@ -558,6 +595,8 @@ pub fn validate_list(entries: &[OutputEntry]) -> Result<(), ListError> {
             Some(("id", Problem::Duplicate))
         } else if driver_taken(earlier, e) {
             Some(("asio.driver", Problem::DriverTaken))
+        } else if destination_taken(earlier, e) {
+            Some(("vban", Problem::DestinationTaken))
         } else {
             None
         };
@@ -641,19 +680,6 @@ pub fn asio_channel_index(shown: u32) -> u32 {
 /// [`asio_channel_index`] for every `u32`).
 pub fn asio_channel_shown(index: u32) -> u32 {
     index.wrapping_add(1)
-}
-
-/// The dashboard's line for a running ASIO output (`state` is its Slovak
-/// state): its latency — "meria sa" while the server reads it 0, before
-/// the drift servo measured its first window — its correction and its
-/// underruns (#233 review round 4).
-pub fn asio_running_text(state: &str, latency_ms: f64, ppm: f64, underruns: u64) -> String {
-    let latency = if latency_ms > 0.0 {
-        format!("{latency_ms:.0} ms")
-    } else {
-        "meria sa".to_string()
-    };
-    format!("{state} · {latency} · {ppm:+.1} ppm · výpadky {underruns}")
 }
 
 /// The dashboard's line for an ASIO output that is not running (`state` is

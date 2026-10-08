@@ -4,10 +4,10 @@
 //!
 //! Before: `is_ready` answered a bare bool, so a 45 s timeout, a failed CUDA
 //! init and a missing package all read "not ready", and ANY "not ready" ran
-//! the full reinstall (qwen-asr, `audio-separator[gpu]`, the cu124 torch
-//! `--force-reinstall`, the numpy repair). From 28.9 every restart after a
-//! deploy did that (~6 min of pip on the live box) and raced the post-deploy
-//! A/V gate, which shared the venv's numpy.
+//! the full reinstall (`audio-separator[gpu]` and the retired aligner's
+//! package, the cu124 torch `--force-reinstall`, the numpy repair). From
+//! 28.9 every restart after a deploy did that (~6 min of pip on the live box)
+//! and raced the post-deploy A/V gate, which shared the venv's numpy.
 //!
 //! - `bootstrap::is_ready` answers a [`Readiness`]: `Ready`, `Missing` (no
 //!   interpreter), `Timeout`, or `Failed { code, stderr_tail }`.

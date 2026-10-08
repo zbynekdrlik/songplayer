@@ -5,8 +5,9 @@
 //! ignoring the constraints of already-installed packages, pulling numpy
 //! 2.5.2 next to numba 0.65 (which caps numpy at 2.4). Every
 //! `preprocess-vocals` run then died with "Numba needs NumPy 2.4 or less".
-//! `IS_READY_PROBE` only imported qwen_asr/torch/audio_separator, so the
-//! venv still reported "ready" while every song failed isolation.
+//! `IS_READY_PROBE` only imported torch, audio_separator and the (since
+//! retired) aligner package, so the venv still reported "ready" while every
+//! song failed isolation.
 //!
 //! Sibling file wired from `bootstrap.rs` via
 //! `#[path = "bootstrap_tests_numpy_pin.rs"] #[cfg(test)]

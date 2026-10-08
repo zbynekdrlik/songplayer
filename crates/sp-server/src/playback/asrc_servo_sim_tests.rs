@@ -1,36 +1,41 @@
 //! #233: the servo in a closed loop. A card consumes `buffer` frames per
 //! callback at `rate·(1 + card_ppm)`; the program hands one block per grid
-//! slot, `h ∈ [0, jitter]` late (a seeded LCG, one draw per block); the card's
-//! callbacks due before that hand-off run first; the servo's correction makes
+//! slot, `h ∈ [0, jitter]` late (a seeded LCG, one draw per block), or by a
+//! realistic hand-off profile (below); the card's callbacks due before that
+//! hand-off run first; the servo's correction makes
 //! `1600·rate/48000·(1 + ppm)` frames per block (fractional carry). A
 //! re-centre goes through `frames_from_100ns` like the worker's: an insert
 //! lands at once, a skip is taken from each later block's output (the splice
 //! skips at most one block per call) and counted in the observation as
-//! pending. A clock step shifts the program timeline against the card at
-//! `step_at_s` (forward = the program catches up, backward = it pauses); a
-//! dropped buffer is one callback the host missed. 900 s per case. The slew
-//! is checked on the 100 ns instants the servo saw (rounding the float wall
-//! would let a 1e-7 s quantum read as a 5e-7 ppm over-move).
+//! pending. The observation counts the splice's 5 ms hold as buffered, as
+//! the worker does (`asio_out.rs`: the ring + `Splice::held_frames`), while
+//! the card plays only the ring: its cushion is ~61.7 ms, not the target's
+//! 66.7 (review round 2: without the hold the harness had 5 ms more cushion
+//! than the worker, and fewer underruns). A clock step shifts the program
+//! timeline against the card at `step_at_s` (forward = the program catches
+//! up, backward = it pauses); a dropped buffer is one callback the host
+//! missed; `buffer_after` makes the card call back with another size from
+//! `buffer_after.0`, with no reopen (a real driver's buffer-size change
+//! resets it: the worker reopens and primes, no hard re-centre). 900 s per
+//! case. The slew is checked on the 100 ns instants the servo saw (rounding
+//! the float wall would let a 1e-7 s quantum read as a 5e-7 ppm over-move).
 //!
-//! A scratch model of this file gave, for the held cases: 0 underruns,
-//! latency error ≤ 4.1 ms after 70 s, |final − card| ≤ 4.1 ppm, re-centres
-//! 1, or 2 for a step over 10 ms (20 / 30 ms at three window phases, ±44 ms,
-//! a 100 ms forward step skipped once). Its fuzz (240 runs: cards ±120 ppm,
-//! jitter 0–30 ms, steps −35…+150 ms at random window phases, drops,
-//! 44.1–96 kHz, driver buffers 64–1024 frames up to 10.7 ms) held: no
-//! underrun within the budget, |ppm| ≤ 300, the slew, no skip asked twice,
-//! the latency error within 20 ms + half a callback period, |final − card|
-//! ≤ 5 ppm without a disturbance. Re-centres reached 4 only for a card
-//! beyond ±50 ppm (one drift before the lock) plus an 11.6 ms dropped buffer.
-//! A whole step under 10 ms is camera-box's blind spot: it enters the
-//! regression (rate bias ≈ 1.5·step/span, the span growing from 60 s) and
-//! the P term pays the level back over minutes — see the honest bounds of
-//! `a_step_under_10_ms_enters_the_rate_and_is_paid_back`. Outside the
-//! envelope by physics: a backward step larger than the 66.7 ms budget less
-//! the hand-off lateness can underrun (one event, phase-dependent) — the
-//! audio does not exist yet; a driver period over one grid slot (2048
-//! frames at 48 kHz) saws past the per-block threshold and re-centres
-//! often.
+//! The owner's ruling (8.10.2026, #233 comment 6053850076): the resampler
+//! absorbs a difference by its ratio, never by a skip or an insert. So every
+//! case below runs with **0 hard re-centres** — cards at ±50 ppm, ±1 ms and
+//! ±33 ms steps (+33: a date step's forward remainder; −33: a missing
+//! boundary) at three window phases, a realistic hand-off with clumps, a
+//! callback period that changes mid-run, a dropped buffer, a 100 ms step, a
+//! 150 ms worker stall at four phases of the slot — except the ring-limit
+//! cases, a 300 ms stall at four phases and a 100 ms pause, which force
+//! exactly one. A stall near 200 ms sits at the ring's
+//! limit: it leaves 4 slots over the target or just under, by phase (the
+//! model: none at 500.0 / 500.011 / 500.022 / 500.033 s, one at 500.03 s),
+//! so no test pins it. A ±33 ms step is back within ±2 ms of the target in
+//! at most 148.2 s (≤ 150 s asked): 60 s ramping to 300 ppm at 5 ppm/s, a
+//! cruise, the stop curve. Every figure pinned here comes from a scratch
+//! model of this file and the servo (`rust-workspace.md`, deriving pins),
+//! whose run of the old cases matched their earlier pins exactly.
 
 use super::*;
 
@@ -46,12 +51,32 @@ impl Lcg {
     }
 }
 
+/// How late each block is handed over.
+#[derive(Clone, Copy)]
+enum Lateness {
+    /// Uniform over `[0, jitter_s]` (one draw).
+    Uniform,
+    /// SP-program as measured (finding 5915907311, #147): 10–33 ms; one block
+    /// in 900 a single 40–80 ms late, one in 1 800 a clump of 2 (its first
+    /// block a slot + 10–33 ms late, the next with it), one in 3 600 a clump
+    /// of 3 (two slots + 0–10 ms). The ones past the ring's ~61.7 ms cushion
+    /// underrun the card (the audio is not there yet); the excess each such
+    /// underrun leaves is then drained by the stop curve, which re-exposes
+    /// the next late block (keeping it as cushion instead is the main
+    /// session's call, #233 comment 6055539144).
+    Realistic,
+    /// The same, but every late block within the cushion: singles 40–56 ms,
+    /// clumps of 2 only (a slot + 0–20 ms).
+    Absorbable,
+}
+
 #[derive(Clone, Copy)]
 struct Case {
     rate: f64,
     buffer: u64,
     card_ppm: f64,
     jitter_s: f64,
+    lateness: Lateness,
     step_s: f64,
     step_at_s: f64,
     drop_at_s: Option<f64>,
@@ -59,6 +84,8 @@ struct Case {
     /// are all handled at its end, back to back.
     stall_at_s: Option<f64>,
     stall_s: f64,
+    /// From this second on the card calls back with this many frames.
+    buffer_after: Option<(f64, u64)>,
 }
 
 const SNV: Case = Case {
@@ -66,14 +93,49 @@ const SNV: Case = Case {
     buffer: 128,
     card_ppm: 0.0,
     jitter_s: 0.015,
+    lateness: Lateness::Uniform,
     step_s: 0.0,
     step_at_s: 400.0,
     drop_at_s: None,
     stall_at_s: None,
     stall_s: 0.0,
+    buffer_after: None,
 };
 const RUN_S: f64 = 900.0;
-const SLOT_S: f64 = GROSS_STEP_100NS as f64 / 1e7;
+const SLOT_S: f64 = SLOT_100NS as f64 / 1e7;
+
+impl Lcg {
+    /// One block's lateness (s), drawn as the case says.
+    fn lateness(&mut self, c: &Case) -> f64 {
+        match c.lateness {
+            Lateness::Uniform => self.unit() * c.jitter_s,
+            Lateness::Realistic => {
+                let normal = 0.010 + self.unit() * 0.023;
+                let e = self.unit();
+                if e < 1.0 / 900.0 {
+                    0.040 + self.unit() * 0.040
+                } else if e < 1.0 / 900.0 + 1.0 / 1800.0 {
+                    SLOT_S + normal
+                } else if e < 1.0 / 900.0 + 1.0 / 1800.0 + 1.0 / 3600.0 {
+                    2.0 * SLOT_S + self.unit() * 0.010
+                } else {
+                    normal
+                }
+            }
+            Lateness::Absorbable => {
+                let normal = 0.010 + self.unit() * 0.023;
+                let e = self.unit();
+                if e < 1.0 / 900.0 {
+                    0.040 + self.unit() * 0.016
+                } else if e < 1.0 / 900.0 + 1.0 / 1800.0 {
+                    SLOT_S + self.unit() * 0.020
+                } else {
+                    normal
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 struct Outcome {
@@ -81,11 +143,20 @@ struct Outcome {
     max_abs_ppm: f64,
     final_ppm: f64,
     worst_slew_excess: f64,
-    recentres: u64,
+    hard_recentres: u64,
     worst_latency_err_ms: f64,
     /// Re-centres asked while a skip was still running (a skip asked twice).
     asked_while_pending: u64,
+    /// The last block after the step whose latency was more than 2 ms off
+    /// the target, s after the step (`None`: none was).
+    out_of_band_s: Option<f64>,
+    /// The correction's largest distance from the card after [`SETTLED_S`]
+    /// (a kick shows here; the final value alone hides it).
+    max_off_card_ppm: f64,
 }
+
+/// The rate is locked (60 s) and the correction has slewed to it by then.
+const SETTLED_S: f64 = 120.0;
 
 /// The card: frames waiting, frames taken, the next callback (s), the one
 /// callback to drop.
@@ -100,23 +171,27 @@ struct Card {
 impl Card {
     /// Every callback due by `until` (s); counts an underrun after 3 s.
     fn run_until(&mut self, until: f64, out: &mut Outcome) {
-        let period = self.c.buffer as f64 / (self.c.rate * (1.0 + self.c.card_ppm * 1e-6));
         while self.next_cb <= until {
+            let buffer = match self.c.buffer_after {
+                Some((at, b)) if self.next_cb >= at => b,
+                _ => self.c.buffer,
+            };
+            let period = buffer as f64 / (self.c.rate * (1.0 + self.c.card_ppm * 1e-6));
             let drop_now = self
                 .c
                 .drop_at_s
                 .is_some_and(|t| !self.dropped && self.next_cb >= t);
             if drop_now {
                 self.dropped = true; // the host missed it: nothing taken, nothing counted
-            } else if self.fill >= self.c.buffer as f64 {
-                self.fill -= self.c.buffer as f64;
-                self.consumed += self.c.buffer;
+            } else if self.fill >= buffer as f64 {
+                self.fill -= buffer as f64;
+                self.consumed += buffer;
             } else {
                 if self.next_cb > 3.0 {
                     out.underruns += 1;
                 }
                 self.fill = 0.0;
-                self.consumed += self.c.buffer;
+                self.consumed += buffer;
             }
             self.next_cb += period;
         }
@@ -124,7 +199,7 @@ impl Card {
 }
 
 fn run(c: Case) -> Outcome {
-    let mut servo = Servo::new(c.rate, BASE_LATENCY_100NS);
+    let mut servo = Servo::new(c.rate, BASE_LATENCY_100NS).with_callback_frames(c.buffer as u32);
     let mut rng = Lcg(7);
     let mut card = Card {
         c,
@@ -138,6 +213,8 @@ fn run(c: Case) -> Outcome {
     let mut pending: u64 = 0;
     let mut last_change: Option<(i64, f64)> = None;
     let per_block = 1600.0 * c.rate / 48_000.0;
+    // The splice's hold: buffered for the servo, not yet in the card's ring.
+    let hold = crate::playback::asrc::Splice::new(c.rate, 0, 0).held_frames() as u64;
     // A 900 s run is 27 000 blocks; the bound only stops a broken loop.
     for k in 0..40_000i64 {
         let stamp_s = k as f64 * SLOT_S;
@@ -145,7 +222,7 @@ fn run(c: Case) -> Outcome {
             shift -= c.step_s;
             stepped = true;
         }
-        let mut handled = (stamp_s + 0.5 + shift + rng.unit() * c.jitter_s).max(last_handled);
+        let mut handled = (stamp_s + 0.5 + shift + rng.lateness(&c)).max(last_handled);
         if let Some(at) = c.stall_at_s
             && (at..at + c.stall_s).contains(&stamp_s)
         {
@@ -161,19 +238,27 @@ fn run(c: Case) -> Outcome {
         let a = servo.observe(Observation {
             handled_100ns,
             stamp_100ns: (stamp_s * 1e7).round() as i64,
-            buffered_frames: card.fill.floor() as u64,
+            buffered_frames: card.fill.floor() as u64 + hold,
             pending_skip_frames: pending,
             consumed_frames: card.consumed,
         });
-        let latency_s = (card.fill - pending as f64) / c.rate + (wall_s - stamp_s);
+        let latency_s = (card.fill + hold as f64 - pending as f64) / c.rate + (wall_s - stamp_s);
+        let err_ms =
+            (latency_s + a.recentre_100ns as f64 / 1e7 - BASE_LATENCY_100NS as f64 / 1e7) * 1e3;
         let quiet = (handled - (c.step_at_s + 0.5)).abs() > 3.0
             && c.drop_at_s.is_none_or(|t| (handled - t).abs() > 3.0)
             && c.stall_at_s.is_none_or(|t| (handled - t).abs() > 3.0);
         if handled > 70.0 && quiet {
-            let err_s = latency_s + a.recentre_100ns as f64 / 1e7 - BASE_LATENCY_100NS as f64 / 1e7;
-            out.worst_latency_err_ms = out.worst_latency_err_ms.max(err_s.abs() * 1e3);
+            out.worst_latency_err_ms = out.worst_latency_err_ms.max(err_ms.abs());
+        }
+        if handled > c.step_at_s + 0.5 && err_ms.abs() > 2.0 {
+            out.out_of_band_s = Some(handled - (c.step_at_s + 0.5));
         }
         out.max_abs_ppm = out.max_abs_ppm.max(a.correction_ppm.abs());
+        if handled > SETTLED_S {
+            let off = (a.correction_ppm - c.card_ppm).abs();
+            out.max_off_card_ppm = out.max_off_card_ppm.max(off);
+        }
         if last_change.is_none_or(|(_, p)| p != a.correction_ppm) {
             if let Some((t, p)) = last_change {
                 let allowed = MAX_SLEW_PPM_PER_S * ((handled_100ns - t) as f64 / 1e7);
@@ -199,7 +284,7 @@ fn run(c: Case) -> Outcome {
         pending -= take as u64;
         card.fill += whole - take;
     }
-    out.recentres = servo.status().recentres;
+    out.hard_recentres = servo.status().hard_recentres;
     out
 }
 
@@ -212,57 +297,48 @@ struct Bounds {
 }
 
 const HELD: Bounds = Bounds {
-    latency_ms: 10.0,
+    latency_ms: 2.0,
     final_ppm: 5.0,
 };
 
-fn assert_held(o: &Outcome, card_ppm: f64, recentres: u64) {
-    assert_within(o, card_ppm, recentres, HELD);
+/// No underrun, the ±300 ppm budget, the slew, no skip asked twice, and no
+/// hard re-centre.
+fn assert_smooth(o: &Outcome) {
+    assert_eq!(o.underruns, 0, "{o:?}");
+    assert_ratio_only(o);
 }
 
-fn assert_within(o: &Outcome, card_ppm: f64, recentres: u64, b: Bounds) {
-    assert_eq!(o.underruns, 0, "{o:?}");
+/// The budget, the slew, no skip asked twice, no hard re-centre (underruns
+/// allowed: a hand-off later than the cushion).
+fn assert_ratio_only(o: &Outcome) {
     assert!(o.max_abs_ppm <= MAX_PPM, "{o:?}");
     assert!(o.worst_slew_excess <= 1e-9, "{o:?}");
+    assert_eq!(o.asked_while_pending, 0, "{o:?}");
+    assert_eq!(o.hard_recentres, 0, "{o:?}");
+}
+
+fn assert_within(o: &Outcome, card_ppm: f64, b: Bounds) {
+    assert_smooth(o);
     assert!(o.worst_latency_err_ms <= b.latency_ms, "{o:?}");
     assert!((o.final_ppm - card_ppm).abs() <= b.final_ppm, "{o:?}");
-    assert_eq!(o.recentres, recentres, "{o:?}");
-    assert_eq!(o.asked_while_pending, 0, "{o:?}");
 }
 
 #[test]
 fn a_card_at_minus_50_0_and_plus_50_ppm_is_followed() {
     for ppm in [-50.0, 0.0, 50.0] {
-        assert_held(
-            &run(Case {
-                card_ppm: ppm,
-                ..SNV
-            }),
-            ppm,
-            1,
-        );
-    }
-}
-
-#[test]
-fn a_1_ms_clock_step_either_way_is_absorbed_without_a_re_centre() {
-    for step in [0.001, -0.001] {
-        let c = Case {
-            card_ppm: 20.0,
-            step_s: step,
+        let o = run(Case {
+            card_ppm: ppm,
             ..SNV
-        };
-        assert_held(&run(c), 20.0, 1);
+        });
+        assert_within(&o, ppm, HELD);
     }
 }
 
-/// 20 and 30 ms: under one slot, over the 10 ms window threshold. Landing
-/// anywhere in a 1 s window, the step shows in that window's mean only in
-/// part; the re-centre still takes all of it and the rate keeps (three
-/// phases across a window: a pin at one phase can be phase-lucky).
+/// ±1 ms: inside the calm zone, the level loop takes it (three window
+/// phases: a pin at one phase can be phase-lucky).
 #[test]
-fn a_20_or_30_ms_clock_step_re_centres_once_at_any_window_phase() {
-    for step in [0.020, -0.020, 0.030, -0.030] {
+fn a_1_ms_clock_step_either_way_is_absorbed_by_the_ratio() {
+    for step in [0.001, -0.001] {
         for phase in [0.0, 0.35, 0.7] {
             let c = Case {
                 card_ppm: 20.0,
@@ -270,33 +346,114 @@ fn a_20_or_30_ms_clock_step_re_centres_once_at_any_window_phase() {
                 step_at_s: 400.0 + phase,
                 ..SNV
             };
-            assert_held(&run(c), 20.0, 2);
+            assert_within(&run(c), 20.0, HELD);
         }
     }
 }
 
+/// A whole slot: forward, a date step's remainder (the fleet relabels
+/// whole slots and moves the timeline forward by the rest, `genlock.md`);
+/// backward, a missing boundary. On a 0 and a 20 ppm card at three window
+/// phases: slewed, never spliced, and back within ±2 ms of the target in
+/// at most 150 s (the model: 138.9–148.2 s).
 #[test]
-fn a_44_ms_clock_step_either_way_re_centres_once() {
-    for step in [0.044, -0.044] {
-        let c = Case {
-            card_ppm: 20.0,
-            step_s: step,
-            ..SNV
-        };
-        assert_held(&run(c), 20.0, 2);
+fn a_33_ms_clock_step_is_slewed_back_within_2_ms_in_150_s() {
+    for card_ppm in [0.0, 20.0] {
+        for step in [0.033, -0.033] {
+            for phase in [0.0, 0.35, 0.7] {
+                let o = run(Case {
+                    card_ppm,
+                    step_s: step,
+                    step_at_s: 400.0 + phase,
+                    ..SNV
+                });
+                assert_smooth(&o);
+                let back = o.out_of_band_s.expect("the step moved the latency");
+                assert!(back <= 150.0, "{back} s: {o:?}");
+                assert!((o.final_ppm - card_ppm).abs() <= 5.0, "{o:?}");
+            }
+        }
     }
 }
 
-/// The program catches up 100 ms at once: three blocks' worth to skip, asked
-/// for once (the pending skip is counted out meanwhile).
+/// Jitter never moves the output: every late or clumped block within the
+/// ring's cushion leaves the latency and the ratio where they were — no
+/// underrun, the latency within half a callback period of the sawtooth, the
+/// correction never more than 1.3 / 2.5 / 1.8 ppm off the card once settled
+/// (no kick; the model: 1.28, 2.47, 1.74).
 #[test]
-fn a_100_ms_forward_step_is_skipped_once() {
-    let c = Case {
+fn a_hand_off_late_within_the_cushion_moves_nothing() {
+    for (rate, buffer, card_ppm, latency_ms, off_card_ppm) in [
+        (96_000.0, 128, 0.0, 1.4, 1.3),
+        (96_000.0, 512, 0.0, 3.9, 2.5),
+        (96_000.0, 128, -50.0, 1.7, 1.8),
+    ] {
+        let o = run(Case {
+            rate,
+            buffer,
+            card_ppm,
+            lateness: Lateness::Absorbable,
+            ..SNV
+        });
+        assert_smooth(&o);
+        assert!(o.worst_latency_err_ms <= latency_ms, "{o:?}");
+        assert!(o.max_off_card_ppm <= off_card_ppm, "{o:?}");
+        assert!((o.final_ppm - card_ppm).abs() <= 2.5, "{o:?}");
+    }
+}
+
+/// The realistic hand-off: blocks past the cushion underrun the card, and
+/// the excess each leaves is drained by the ratio — never a hard re-centre.
+/// The model's underrun callbacks with the splice's hold: 97, 33, 33, 99
+/// (part of them the drain's: it re-exposes the next late block, Lateness).
+#[test]
+fn a_realistic_hand_off_with_clumps_needs_no_hard_re_centre() {
+    for (rate, buffer, card_ppm, underruns) in [
+        (96_000.0, 128, 0.0, 97),
+        (96_000.0, 512, 0.0, 33),
+        (48_000.0, 256, 0.0, 33),
+        (96_000.0, 128, 50.0, 99),
+    ] {
+        let o = run(Case {
+            rate,
+            buffer,
+            card_ppm,
+            lateness: Lateness::Realistic,
+            ..SNV
+        });
+        assert_ratio_only(&o);
+        assert_eq!(o.underruns, underruns, "{o:?}");
+        assert!(o.worst_latency_err_ms <= 22.0, "{o:?}");
+    }
+}
+
+/// The card's callback period goes from 128 to 512 frames mid-run with no
+/// reopen (its sawtooth moves the mean reading by 2 ms): slewed, no
+/// underrun. A real driver's buffer-size change is a reset (the worker
+/// reopens and primes: `asio_state::close_reason`), never this path.
+#[test]
+fn a_callback_period_that_changes_mid_run_is_slewed() {
+    let o = run(Case {
+        buffer_after: Some((400.0, 512)),
+        ..SNV
+    });
+    assert_smooth(&o);
+    assert!(o.worst_latency_err_ms <= 4.5, "{o:?}");
+}
+
+/// The program catches up 100 ms at once: under the last resort's four
+/// slots, so the ratio drains it (in about 6 min) — no splice.
+#[test]
+fn a_100_ms_forward_step_is_slewed_without_a_re_centre() {
+    let o = run(Case {
         card_ppm: 20.0,
         step_s: 0.100,
         ..SNV
-    };
-    assert_held(&run(c), 20.0, 2);
+    });
+    assert_smooth(&o);
+    let back = o.out_of_band_s.expect("the step moved the latency");
+    assert!(back <= 360.0, "{back} s: {o:?}");
+    assert!((o.final_ppm - 20.0).abs() <= 5.0, "{o:?}");
 }
 
 #[test]
@@ -306,93 +463,30 @@ fn a_dropped_buffer_is_absorbed() {
         drop_at_s: Some(500.0),
         ..SNV
     };
-    assert_held(&run(c), -20.0, 1);
+    assert_within(
+        &run(c),
+        -20.0,
+        Bounds {
+            latency_ms: 3.0,
+            ..HELD
+        },
+    );
 }
 
-/// A 1024-frame driver at 48 kHz (a 21.3 ms callback period): each
-/// block's latency saws by a period, so a re-centre measures the last 8
-/// blocks. A 20 ms step still re-centres once. The per-block latency error
-/// read here carries the sawtooth itself: bounded by 10 ms + half a period.
+/// A 1024-frame driver at 48 kHz (a 21.3 ms callback period, a 10.7 ms calm
+/// zone): a 20 ms step is slewed; the per-block reading carries the
+/// sawtooth itself.
 #[test]
-fn a_1024_frame_driver_at_48k_re_centres_a_20_ms_step_once() {
-    let c = Case {
+fn a_1024_frame_driver_at_48k_slews_a_20_ms_step() {
+    let o = run(Case {
         rate: 48_000.0,
         buffer: 1024,
         card_ppm: 20.0,
         step_s: 0.020,
         ..SNV
-    };
-    let bounds = Bounds {
-        latency_ms: 20.7,
-        ..HELD
-    };
-    assert_within(&run(c), 20.0, 2, bounds);
-}
-
-/// A whole step under 10 ms (under the re-base residual and the window
-/// threshold) enters the regression as a point and the latency as a level
-/// error the P term pays back (camera-box's design): early (75 s, a short
-/// regression span) it biases the rate most. Honest bounds from the scratch
-/// model: |final − card| ≤ 9.5 ppm, up to 3 re-centres, peak 133 ppm.
-#[test]
-fn a_step_under_10_ms_enters_the_rate_and_is_paid_back() {
-    let bounds = Bounds {
-        latency_ms: 11.0,
-        final_ppm: 10.0,
-    };
-    for (step, at, recentres) in [
-        (0.0099, 75.0, 1),
-        (-0.0099, 75.0, 3),
-        (0.009, 400.0, 1),
-        (-0.009, 400.0, 1),
-    ] {
-        let c = Case {
-            card_ppm: 20.0,
-            step_s: step,
-            step_at_s: at,
-            ..SNV
-        };
-        assert_within(&run(c), 20.0, recentres, bounds);
-    }
-}
-
-/// The worker stalls 200 ms: the card runs dry (underruns: physics), then
-/// the late blocks come back to back. The skip they need is asked for once —
-/// while it runs, the frames still to skip outnumber the buffered ones.
-#[test]
-fn a_200_ms_worker_stall_is_skipped_once() {
-    let c = Case {
-        card_ppm: 20.0,
-        stall_at_s: Some(500.0),
-        stall_s: 0.200,
-        ..SNV
-    };
-    let o = run(c);
-    assert!(o.underruns > 0, "the ring ran dry: {o:?}");
-    assert_eq!((o.recentres, o.asked_while_pending), (2, 0), "{o:?}");
-    assert!(o.max_abs_ppm <= MAX_PPM, "{o:?}");
-    assert!(o.worst_slew_excess <= 1e-9, "{o:?}");
-    assert!(o.worst_latency_err_ms <= 10.0, "{o:?}");
-    assert!((o.final_ppm - 20.0).abs() <= 5.0, "{o:?}");
-}
-
-/// A −10.5 ms step on a −45 ppm card: the level still stands 1.7 ms high
-/// from the start-up (the level loop's ~500 s time constant), so the window
-/// mean reads −8.8 ms and nothing re-centres — the level loop pays it back
-/// (camera-box's blind spot; honest bounds from the model: 1 re-centre,
-/// |final − card| 6.2 ppm and the latency 2.7 ms short at 900 s).
-#[test]
-fn a_10_5_ms_step_on_a_standing_offset_is_left_to_the_level_loop() {
-    let c = Case {
-        card_ppm: -45.0,
-        step_s: -0.0105,
-        ..SNV
-    };
-    let bounds = Bounds {
-        latency_ms: 10.0,
-        final_ppm: 7.0,
-    };
-    assert_within(&run(c), -45.0, 1, bounds);
+    });
+    assert_smooth(&o);
+    assert!(o.worst_latency_err_ms <= 32.0, "{o:?}");
 }
 
 #[test]
@@ -403,5 +497,64 @@ fn a_48k_card_with_256_frame_buffers_is_followed() {
         card_ppm: 50.0,
         ..SNV
     };
-    assert_held(&run(c), 50.0, 1);
+    assert_within(
+        &run(c),
+        50.0,
+        Bounds {
+            latency_ms: 4.5,
+            ..HELD
+        },
+    );
+}
+
+/// The worker stalls 150 ms: the card runs dry (underruns: the audio is
+/// not there), the late blocks come back to back, and the excess they leave
+/// (the stall less the ring's cushion) is under the last resort's four
+/// slots — drained by the ratio, at four phases of the slot (review round
+/// 2: a single phase can be lucky).
+#[test]
+fn a_150_ms_worker_stall_is_slewed_at_every_phase() {
+    for phase in [0.0, 0.0083, 0.0167, 0.025] {
+        let o = run(Case {
+            card_ppm: 20.0,
+            stall_at_s: Some(500.0 + phase),
+            stall_s: 0.150,
+            ..SNV
+        });
+        assert!(o.underruns > 0, "the ring ran dry: {o:?}");
+        assert_ratio_only(&o);
+        assert!((o.final_ppm - 20.0).abs() <= 5.0, "{o:?}");
+    }
+}
+
+/// The ring-limit cases: a 300 ms stall leaves more than four slots over (the
+/// ring would overflow; four phases of the slot), a 100 ms pause a latency
+/// under the 16.7 ms floor (it would run dry on most blocks): exactly one
+/// hard re-centre each, the skip asked once.
+#[test]
+fn a_300_ms_stall_or_a_100_ms_pause_forces_one_hard_re_centre() {
+    let stall = |phase: f64| Case {
+        card_ppm: 20.0,
+        stall_at_s: Some(500.0 + phase),
+        stall_s: 0.300,
+        ..SNV
+    };
+    let pause = Case {
+        card_ppm: 20.0,
+        step_s: -0.100,
+        ..SNV
+    };
+    for c in [
+        stall(0.0),
+        stall(0.0083),
+        stall(0.0167),
+        stall(0.025),
+        pause,
+    ] {
+        let o = run(c);
+        assert_eq!((o.hard_recentres, o.asked_while_pending), (1, 0), "{o:?}");
+        assert!(o.max_abs_ppm <= MAX_PPM, "{o:?}");
+        assert!(o.worst_slew_excess <= 1e-9, "{o:?}");
+        assert!((o.final_ppm - 20.0).abs() <= 5.0, "{o:?}");
+    }
 }

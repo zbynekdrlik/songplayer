@@ -237,7 +237,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   a `const fn` too — don't avoid it there. The no-compile box can't see it; it
   cost #192 round 3 a whole review round (three ceil-divs in `audio_emitter.rs`
   `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
-  already uses `.div_ceil()` (`chunking.rs`, `loop_stats.rs`) — grep before
+  already uses `.div_ceil()` (`loop_stats.rs`) — grep before
   hand-rolling a ceil.
 - **`clippy::manual_clamp` on `x.min(CONST).max(CONST)`** (#233 lane 2,
   caught in review before CI): two constant bounds make clippy ask for
@@ -271,7 +271,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   addendum 3 review round 2). It is warn-by-default (complexity), so under
   `-D warnings` it fails the Lint job. Clippy's `METHODS_WITH_NEGATION`
   table maps a negated `is_some_and` to `is_none_or` from MSRV 1.82, and the
-  workspace is 1.85. Write `opt.is_none_or(|x| x.id != id)`: negate the
+  workspace is 1.87. Write `opt.is_none_or(|x| x.id != id)`: negate the
   closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
   the same table.
 - **`clippy::type_complexity` on a test's known-value table** (#223 S1a, CI
@@ -329,9 +329,16 @@ Lint job on code that passed a day earlier. The 1.99 drift that broke run
   nothing; dtolnay/async-trait#303). Never paper over it with allows on the
   traits.
 - **`Atomic*::fetch_update` deprecated (renamed `try_update`):** `try_update`
-  is newer than the workspace MSRV 1.85 (`clippy::incompatible_msrv`), so write
+  is newer than the workspace MSRV 1.87 (`clippy::incompatible_msrv`), so write
   the explicit `load` + `compare_exchange_weak` loop (`preview_stream.rs`
   `ViewerGuard::drop`).
+
+**The workspace MSRV is 1.87 (#233 release review: rubato 5.0.1 needs it).**
+Raising `rust-version` (root `Cargo.toml` and `src-tauri/Cargo.toml`) turns
+on clippy's MSRV-gated lints at the new version: `manual_is_multiple_of`
+(1.87) then rejects `x % n == 0` under `-D warnings`. Write
+`x.is_multiple_of(n)` (unsigned integers), and grep the tree for `% … == 0`
+in the same commit as the bump.
 
 When the Lint job fails on files the diff never touched, check the toolchain
 version in the job log first (`rust-1.99.0` in the clippy help URLs).
@@ -483,8 +490,8 @@ passing test, not direct writes to the stderr handle.
 
 **A `#[cfg(windows)]` OS-thread spawn reached from a unit-tested fn RUNS on
 the Windows job** (#233 review round 1). `audio_out_task::build` called
-`start_vban_thread`, whose Windows branch spawns the real `vban-output`
-thread, so `apply_keeps_an_unchanged_output_when_another_is_added` got a live
+`start_vban_thread`, whose Windows branch spawns the real VBAN output
+thread (then `vban-output`, `vban-<id>` since the release review), so `apply_keeps_an_unchanged_output_when_another_is_added` got a live
 thread there that took the block it had queued (green on Linux, red on
 Windows). Pass the spawn in as a parameter (`StartThread`: production passes
 the real starter, a test a no-op or a recorder, which also pins that the
@@ -785,7 +792,10 @@ the test that kills each one BEFORE CI's mutation gate runs.
   --body-file <abs path>` per issue (release 0.69.0 lane B). A bounded wait
   loop on `$SECONDS` arithmetic (`end=$((SECONDS+560)); while [ $SECONDS -lt
   $end ]`) is refused as well: put the loop in a scratch script (`date +%s`
-  deadline) and run `bash <scratch>/wait.sh <arg>` (#184).
+  deadline) and run `bash <scratch>/wait.sh <arg>` (#184). A command
+  that NAMES `eval/` (CI's ruff list starts with it) is refused too, read
+  as "runs a string through eval": put CI's exact ruff lint + format call
+  in a scratch script (`bash <scratch>/ci_ruff.sh`) (#233 closing lane).
 - **A recursive grep over the repo's `.claude` dir trips the credential-store
   hook** (`block-vault-store-read.sh` reads the command TEXT: a recursive
   read of that dir counts as a vault read, even inside an edit script's
@@ -852,7 +862,16 @@ the test that kills each one BEFORE CI's mutation gate runs.
   on block 101 at 50 ppm). When a result depends on where an event lands
   on a grid (packet spacing 41 666/41 667/41 668, the 100-tick resample),
   sweep the event over ≥ 3 consecutive phases in the test, and fuzz the
-  scratch model over all of them before pinning.
+  scratch model over all of them before pinning. "Phases" must be DISTINCT
+  modulo the grid: 0 / 11.1 / 22.2 / 33.3 ms over a 33.3 ms slot is three
+  (#233 closing lane round 3).
+- **A clamp or a cap's bound is visible only where it BINDS** (#233
+  closing lane round 3). `slew_eta_s` caps its peak at the room
+  `MAX_PPM + rate`; on the only downward test (a +40 ppm card) the ~308 ppm
+  peak stayed under 340 AND under the `*` mutant's 12 000, so `+` → `*` /
+  `/` survived. For every `min` / `max` / `clamp` / cap in the diff, give a
+  test whose value makes that bound the active one (there: a −40 ppm card,
+  room 260 < 308), and check both sides in the scratch model.
 - A match GUARD that is always true where it sits (`ShowTitle { .. } if
   self.recovery_sent_this_step` when the step has always fired an event by
   then) makes the guard→`true` mutant EQUIVALENT: it survives the gate. Drop

@@ -44,9 +44,9 @@ fn isolation_timeout_nonpositive_duration_uses_ceiling() {
 }
 
 /// Structural: the magic 600 s literal must be gone from `preprocess_vocals`
-/// and the ceiling must arrive as a parameter. Scoped to the function body
-/// (the `isolation_timeout` clamp legitimately keeps a `from_secs(600)`
-/// floor elsewhere in the file). CRLF-normalised for the Windows CI checkout.
+/// and the ceiling must arrive as a parameter. Scoped to the function and
+/// what follows it up to the tests (the `isolation_timeout` clamp before it
+/// is out of scope). CRLF-normalised for the Windows CI checkout.
 #[test]
 fn preprocess_vocals_takes_timeout_parameter_no_magic_600() {
     let src = include_str!("aligner.rs").replace("\r\n", "\n");
@@ -54,9 +54,7 @@ fn preprocess_vocals_takes_timeout_parameter_no_magic_600() {
         .find("pub async fn preprocess_vocals(")
         .expect("preprocess_vocals must exist");
     let after = &src[start..];
-    let end = after
-        .find("pub async fn align_chunks")
-        .unwrap_or(after.len());
+    let end = after.find("#[cfg(test)]").unwrap_or(after.len());
     let body = &after[..end];
     assert!(
         body.contains("timeout: std::time::Duration"),

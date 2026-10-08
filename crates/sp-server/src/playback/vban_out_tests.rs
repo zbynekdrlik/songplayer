@@ -705,3 +705,54 @@ fn resolve_and_log_cadences() {
 // #224 part 2: VBAN at a fleet date step (SlewRemainder).
 #[path = "vban_out_tests_regrid.rs"]
 mod regrid;
+
+/// A sink whose every send panics: the VBAN thread dies on its first packet.
+struct PanickingSink;
+
+impl VbanSink for PanickingSink {
+    fn send_packet(&mut self, _packet: &[u8], _addr: SocketAddr) -> io::Result<usize> {
+        panic!("a sink that dies");
+    }
+}
+
+/// #233 release review: a VBAN thread that panics never reads "running" for
+/// good: its loop's guard clears `running` on the unwind and names why the
+/// thread stopped (`start_error`), so the outputs task rebuilds the output
+/// on its next pass (`RunningOutput::start_failed`).
+#[test]
+fn a_vban_thread_that_panics_is_not_running_and_says_why() {
+    let out = out_with(active_config(&["10.0.0.1:6980"]));
+    out.push(block(D, 0.5));
+    let mut clock = FakeClock::at(D);
+    let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_vban_loop(&out, &mut PanickingSink, &mut clock);
+    }));
+    assert!(died.is_err(), "the sink's panic ends the loop");
+    assert!(!out.is_running(), "running is cleared on the unwind");
+    assert_eq!(
+        out.start_error().as_deref(),
+        Some("the VBAN thread stopped: it panicked")
+    );
+}
+
+/// #233 release review: each VBAN thread is named after its entry, and an
+/// output an entry made knows the entry's id (its queue WARN, on the
+/// program's thread, names it).
+#[test]
+fn a_vban_thread_and_its_output_carry_the_entry_s_id() {
+    assert_eq!(vban_thread_name("out-1"), "vban-out-1");
+    let entry = sp_core::audio_outputs::OutputEntry::vban(
+        "out-7",
+        "FOH",
+        sp_core::audio_outputs::VbanDest {
+            host: "fohabl.lan".into(),
+            port: 6980,
+            stream_name: "sp-program".into(),
+            format: sp_core::audio_outputs::VbanSampleFormat::Int24,
+        },
+    );
+    let out = VbanOut::for_entry(&entry, 48_000).unwrap();
+    assert_eq!(out.id(), "out-7");
+    assert_eq!(out.format(), VbanFormat::PROGRAM);
+    assert_eq!(VbanOut::new().id(), "");
+}

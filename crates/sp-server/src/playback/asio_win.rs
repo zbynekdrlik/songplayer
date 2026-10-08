@@ -58,7 +58,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::playback::asio_format::{AsioSample, fill_channel, source_of, unsupported_sample_text};
 use crate::playback::asio_hold::{DriverHold, DriverHolds};
 use crate::playback::asio_out::{AsioDevice, AsioOut, Opened, Started, run_asio_worker};
-use crate::playback::asio_state::{DeviceEvents, Reason, reply, sample_rate_error, selector};
+use crate::playback::asio_state::{
+    DeviceEvents, Reason, registry_key_absent, reply, sample_rate_error, selector,
+};
 
 /// Static callback slots: two per ASIO entry (`MAX_ASIO_OUTPUTS`).
 pub const ASIO_SLOTS: usize = 8;
@@ -260,11 +262,15 @@ static CALLBACKS: [Callbacks; ASIO_SLOTS] = [
 ];
 
 /// The registered ASIO drivers' descriptions (HKLM\SOFTWARE\ASIO, read
-/// only; no driver is loaded). None registered (or no such key) → empty.
-pub fn list_drivers() -> Vec<String> {
-    Metadata::enumerate()
-        .map(|d| d.iter().map(|m| m.description.to_string_lossy()).collect())
-        .unwrap_or_default()
+/// only; no driver is loaded). None registered (or no such key) → empty;
+/// any other failure of the read → its error (#233 release review,
+/// `asio_state::registry_key_absent`).
+pub fn list_drivers() -> Result<Vec<String>, String> {
+    match Metadata::enumerate() {
+        Ok(d) => Ok(d.iter().map(|m| m.description.to_string_lossy()).collect()),
+        Err(e) if registry_key_absent(e.code().0) => Ok(Vec::new()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn text(s: &CStr) -> String {

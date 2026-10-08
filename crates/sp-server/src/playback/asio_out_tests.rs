@@ -90,10 +90,14 @@ fn it_opens_at_the_drivers_rate_and_runs_without_an_underrun() {
     let s = &snap.status;
     assert!((s.latency_ms - 70.625).abs() < 1e-9, "{s:?}");
     assert!(s.ppm.abs() < 1.0, "{s:?}");
+    // The first block primed the ring: no re-centre. The window's mean is
+    // 0.0416 ms under the target: inside the calm zone, nothing to slew.
     assert_eq!(
-        (s.underruns, s.overflows, s.resets, s.recentres),
-        (0, 0, 0, 1)
+        (s.underruns, s.overflows, s.resets, s.hard_recentres),
+        (0, 0, 0, 0)
     );
+    assert_eq!((s.offset_ms, s.slew_eta_s), (-0.0416, None));
+    assert_eq!(s.last_hard_recentre, None);
     // The ring after the card's last callbacks: 66.67 ms − 5 ms − 5 ms at
     // 96 kHz, less the first block's 4 frames (rubato's start index).
     assert_eq!(d.ring_frames(), 5_436);
@@ -777,14 +781,14 @@ fn a_clock_still_lost_at_the_reopen_reads_as_a_lost_clock() {
 }
 
 /// #233 review round 3: every counter of `outputs[i].asio` counts since the
-/// output was built — the overflows and the re-centres add up across
-/// reopens like the underruns and the overloads (a run's servo and ring
-/// count from 0 again); and right after an open the latency is 0 (no window
-/// measured yet), not the resampler's and the driver's 4 ms. Two runs, each
-/// a block stamped a second ahead: 82 223 frames over the ring and the
-/// start re-centre each (scratch model).
+/// output was built — the overflows add up across reopens like the
+/// underruns and the overloads (a run's servo and ring count from 0 again);
+/// and right after an open the latency is 0 (no window measured yet), not
+/// the resampler's and the driver's 4 ms. Two runs, each a first block
+/// stamped a second ahead: 82 223 frames over the ring each (scratch
+/// model) — and its priming is no re-centre (the owner's ruling, 8.10.2026).
 #[test]
-fn the_overflows_and_recentres_add_up_across_runs() {
+fn the_overflows_add_up_across_runs_and_a_priming_is_no_re_centre() {
     let o = out();
     let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0)), Ok(dvs(96_000.0))]);
     let mut w = AsioWorker::new(T0);
@@ -799,7 +803,7 @@ fn the_overflows_and_recentres_add_up_across_runs() {
         };
         w.step(&o, &mut d, t + 50_000, Some(b));
         let s = o.snapshot().status;
-        seen.push((s.overflows, s.recentres, s.latency_ms));
+        seen.push((s.overflows, s.hard_recentres, s.latency_ms));
         d.events.push_back(DeviceEvents {
             reset: true,
             ..Default::default()
@@ -808,13 +812,13 @@ fn the_overflows_and_recentres_add_up_across_runs() {
         t += 60_000 + 2 * S;
     }
     assert_eq!(d.starts, 2);
-    assert_eq!(seen, vec![(82_223, 1, 0.0), (164_446, 2, 0.0)]);
+    assert_eq!(seen, vec![(82_223, 0, 0.0), (164_446, 0, 0.0)]);
 }
 
 /// #233 review round 4: a close publishes the run's counters with it — a
-/// reset in the same step as an overflowing block reads the overflow and
-/// the start re-centre while waiting (they would otherwise show only after
-/// a reopen, never if the driver does not come back).
+/// reset in the same step as an overflowing block reads the overflow while
+/// waiting (it would otherwise show only after a reopen, never if the
+/// driver does not come back); the block's priming is no re-centre.
 #[test]
 fn a_close_publishes_the_runs_counters() {
     let o = out();
@@ -833,7 +837,10 @@ fn a_close_publishes_the_runs_counters() {
     w.step(&o, &mut d, T0 + 50_000, Some(b));
     let snap = o.snapshot();
     assert_eq!(snap.state, "waiting");
-    assert_eq!((snap.status.overflows, snap.status.recentres), (82_223, 1));
+    assert_eq!(
+        (snap.status.overflows, snap.status.hard_recentres),
+        (82_223, 0)
+    );
 }
 
 /// #233 review round 5: a parked driver is never retried — no next try in
@@ -856,4 +863,117 @@ fn a_parked_driver_is_not_retried() {
         (1, None),
         "an hour later: no open, no next try"
     );
+}
+
+/// A driver whose open panics: the worker's thread dies on its first step.
+struct PanickingOpen;
+
+impl AsioDevice for PanickingOpen {
+    fn open(&mut self, _driver: &str, _channels: [u32; 2]) -> Result<Opened, Reason> {
+        panic!("a driver that dies");
+    }
+    fn start(&mut self, _ring: rtrb::Consumer<f32>) -> Result<Started, Reason> {
+        Err(Reason::Failed("never opened".into()))
+    }
+    fn poll(&mut self) -> DeviceEvents {
+        DeviceEvents::default()
+    }
+    fn consumed_frames(&self) -> u64 {
+        0
+    }
+    fn underruns(&self) -> u64 {
+        0
+    }
+    fn mark_primed(&mut self) {}
+    fn output_latency_frames(&self) -> u32 {
+        0
+    }
+    fn close(&mut self) {}
+}
+
+/// #233 release review: an ASIO worker that panics never reads "running"
+/// for good: the loop's guard clears `running` on the unwind and names why
+/// the thread stopped (`start_error`), so the outputs task rebuilds the
+/// output on its next pass (`RunningOutput::start_failed`).
+#[test]
+fn an_asio_worker_that_panics_is_not_running_and_says_why() {
+    let o = out();
+    let mut clock = FakeClock::at(T0);
+    let died = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run_asio_worker(&o, &mut PanickingOpen, &mut clock);
+    }));
+    assert!(died.is_err(), "the driver's panic ends the worker");
+    assert!(!o.is_running(), "running is cleared on the unwind");
+    assert_eq!(
+        o.start_error().as_deref(),
+        Some("the ASIO thread stopped: it panicked")
+    );
+}
+
+/// The owner's ruling (8.10.2026): a hard re-centre is the last resort, a
+/// fault — counted since the output was built, its cause, size, hand-off
+/// lateness and age shown. After 150 blocks the ring holds 5 436 frames
+/// (the first test's pin); a block whose boundary is 65 ms later than the
+/// others (60 ms "early") reads a latency of 1.625 ms, 65.0416 ms short:
+/// past the 50 ms edge, so 65.0416 ms of silence go in. The next block is
+/// 65 ms over the target: left to the ratio. A reset, a reopen 2 s later and
+/// the same again: two in all.
+#[test]
+fn a_hard_re_centre_is_counted_and_shown_across_runs() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0)), Ok(dvs(96_000.0))]);
+    let mut w = AsioWorker::new(T0);
+    let expected = |ago_s| HardRecentre {
+        cause: "deficit",
+        ms: 65.0416,
+        lateness_ms: -60.0,
+        ago_s,
+    };
+    for (run_no, from) in [(1, 1), (2, 215)] {
+        w.step(&o, &mut d, T0 + (from - 1) * SLOT, None);
+        run(&mut w, &o, &mut d, from, 150);
+        assert_eq!(d.ring_frames(), 5_436);
+        let k = from + 150;
+        let early = ProgramBlock {
+            due_100ns: T0 + k * SLOT + 650_000,
+            ..block(k)
+        };
+        w.step(&o, &mut d, T0 + k * SLOT + 50_000, Some(early));
+        d.drain(25);
+        let s = o.snapshot().status;
+        assert_eq!(s.hard_recentres, run_no, "{s:?}");
+        assert_eq!(s.last_hard_recentre, Some(expected(0.0)), "{s:?}");
+        // The next block, one slot on: 65 ms over — slewed, not spliced.
+        w.step(&o, &mut d, T0 + (k + 1) * SLOT + 50_000, Some(block(k + 1)));
+        d.drain(25);
+        let s = o.snapshot().status;
+        assert_eq!(s.hard_recentres, run_no, "{s:?}");
+        assert_eq!(s.last_hard_recentre, Some(expected(0.0333333)), "{s:?}");
+        if run_no == 1 {
+            d.events.push_back(DeviceEvents {
+                reset: true,
+                ..Default::default()
+            });
+            w.step(&o, &mut d, T0 + (k + 2) * SLOT, None);
+            let s = o.snapshot();
+            assert_eq!(s.state, "waiting");
+            assert_eq!(s.status.hard_recentres, 1, "the close keeps it");
+            assert_eq!(
+                (s.status.offset_ms, s.status.slew_eta_s),
+                (0.0, None),
+                "a closed run's offset goes with it"
+            );
+            // While the output waits, the last one keeps ageing (review
+            // round 2): a second later, still before the retry.
+            w.step(&o, &mut d, T0 + (k + 2) * SLOT + 10_000_000, None);
+            let s = o.snapshot();
+            assert_eq!(s.state, "waiting");
+            assert_eq!(
+                s.status.last_hard_recentre,
+                Some(expected(1.0616666)),
+                "{s:?}"
+            );
+        }
+    }
+    assert_eq!(d.starts, 2);
 }

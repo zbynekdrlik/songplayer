@@ -202,6 +202,8 @@ impl PlaybackEngine {
                 // #229: counted; from the 3rd failure in a row the next song waits.
                 self.video_failed(playlist_id, msg).await;
             }
+            // #217: the title clock follows where the song really plays on from.
+            PipelineEvent::Seeked { position_ms } => self.seeked(playlist_id, *position_ms).await,
             PipelineEvent::RetryDue(id) => self.retry_due(playlist_id, *id).await, // #229
             PipelineEvent::SceneOffDue(due) => self.scene_off_due(playlist_id, *due).await,
             PipelineEvent::OnProgram(on) => self.on_program(playlist_id, *on).await, // #221 L4b

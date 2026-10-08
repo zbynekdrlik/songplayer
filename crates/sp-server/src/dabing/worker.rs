@@ -281,7 +281,7 @@ impl DubWorker {
         };
 
         // Ensure the google-genai SDK is importable in the venv (idempotent, light
-        // — never triggers the heavy qwen/torch reinstall). Once per process.
+        // — never triggers the heavy torch reinstall). Once per process.
         if !self.genai_ready.load(Ordering::Relaxed) {
             match crate::lyrics::bootstrap::ensure_genai(&python).await {
                 Ok(v) => {

@@ -3,9 +3,11 @@
 //! the stream name exactly as #210 put it on the wire — so FOH hears what it
 //! heard before. It acts only while NO list is stored and an old key exists,
 //! and it KEEPS the old keys (main-session ruling 4, 7.10.2026): the new code
-//! ignores them once the list exists, and a rollback to ≤ 0.72 still finds
-//! them, so FOH keeps its sound. A later lane deletes them once the list has
-//! run a main release. The list is written only if still absent (`INSERT OR IGNORE`), so
+//! ignores them once the list exists, and a rollback to ≤ 0.73.0 (the last
+//! release without the list) still finds them, so FOH keeps its sound. A
+//! dashboard edit of a migrated entry (FOH's) is NOT copied back to the old
+//! keys: a rollback sends what they held when the migration ran. A later
+//! lane deletes them once the list has run a main release. The list is written only if still absent (`INSERT OR IGNORE`), so
 //! a list a settings PATCH stored meanwhile is never replaced.
 
 use sp_core::audio_outputs::{

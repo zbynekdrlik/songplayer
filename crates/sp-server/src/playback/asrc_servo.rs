@@ -25,19 +25,40 @@
 //!   ±50 ppm (camera-box #1335 follow-up 5); I 0.0002 ppm/(ms·s), ±3 ppm,
 //!   frozen while rate + P + I saturates (the plan's form: camera-box freezes
 //!   on its estimate + bias + I, without P).
-//! - output: clamp(rate + P + I, ±300 ppm), moved at most 5 ppm per second of
-//!   the wall (camera-box #803: inaudible).
-//! - steps: a block more than one slot off target re-centres at once by its
-//!   error; a window mean more than 10 ms off re-centres by the mean error of
-//!   the last 8 blocks when that too is more than 10 ms off (a step inside a
-//!   window shows in its mean only in part, the last 8 blocks lie after it and
-//!   average the driver's callback sawtooth; a transient already passed
-//!   splices nothing). The worker inserts or skips under fades
-//!   (`asrc::Splice`). A rate point more than 10 ms off the fit re-bases the
-//!   regression (#1335 follow-up 2): it stays out, and the next point moves
-//!   the line by the whole step (the same straddle splits a step across two
-//!   window means); a whole step under 10 ms enters it as a point
-//!   (camera-box's design).
+//! - the offset slew (the owner's ruling of 8.10.2026, #233 comment
+//!   6053850076: the resampler absorbs a difference SMOOTHLY, by its ratio,
+//!   never by a skip or an insert): a window mean beyond the calm zone
+//!   ([`calm_zone_ms`]: 1 ms, or half the driver's callback period when that
+//!   is longer — a 1 s mean of a reading that saws by a period wanders by a
+//!   fraction of it) adds [`braking_ppm`] — the fastest
+//!   correction that can still stop at the calm zone's edge decelerating at
+//!   the slew limit — so a lasting offset (a date step's remainder ≤ one
+//!   slot, a missing boundary, a callback period's sawtooth, the excess an
+//!   underrun leaves) is drained by the ratio, 33 ms in about 2.5 min within
+//!   ±300 ppm. Inside the calm zone only camera-box's level loop acts. (A
+//!   changed delay rebuilds the output and a driver's buffer change reopens
+//!   it: both start over with the priming.)
+//! - output: clamp(rate + slew + P + I, ±300 ppm), moved at most 5 ppm per
+//!   second of the wall (camera-box #803: inaudible).
+//! - jitter: a late or clumped block finds the ring that much emptier, so
+//!   the latency it reads is the same — nothing moves. Only a lasting offset
+//!   does, and a block's own reading never kicks the ratio: the level loop
+//!   reads the 1 s window's mean.
+//! - the last resort: a block whose latency is under [`HARD_FLOOR_100NS`]
+//!   (the ring would run dry on most blocks before the slew could restore
+//!   it; an absolute floor, so an entry's delay never moves it) or more than
+//!   [`HARD_EXCESS_100NS`] off the target either way (over it, the next
+//!   block would overflow the ring; under it, a delayed output would play
+//!   that early for many minutes) is a HARD re-centre at once, by its
+//!   error: a
+//!   fault, counted (`hard_recentres`), WARNed by the worker, which inserts
+//!   or skips under fades (`asrc::Splice`). The first block primes the ring
+//!   to the target the same way, and that is no re-centre.
+//! - a rate point more than 10 ms off the fit re-bases the regression
+//!   (#1335 follow-up 2): it stays out, and the next point moves the line by
+//!   the whole step (the same straddle splits a step across two window
+//!   means); a whole step under 10 ms enters it as a point (camera-box's
+//!   design).
 //!
 //! Integers (100 ns) where a boundary is pinned (latency, window span), f64
 //! for the regression. Sign: a POSITIVE correction makes MORE output per
@@ -75,21 +96,39 @@ pub const LEVEL_INTEGRAL_MAX_PPM: f64 = 3.0;
 /// A window measuring more than this is starved, not a clock
 /// (`MAX_SANE_INSTANTANEOUS_PPM`, `:447`, `.h:109`).
 pub const MAX_SANE_WINDOW_PPM: f64 = 100_000.0;
-/// SongPlayer's: one block this far off target re-centres at once — one grid
-/// slot (a literal, pinned against the genlock grid by a test).
-pub const GROSS_STEP_100NS: i64 = 333_333;
-/// SongPlayer's: a window mean this far off target re-centres (10 ms,
-/// camera-box's step residual).
-pub const RECENTRE_100NS: i64 = 100_000;
+/// SongPlayer's: one grid slot, one program block (a literal, pinned against
+/// the genlock grid by a test).
+pub const SLOT_100NS: i64 = 333_333;
 /// SongPlayer's: the latency target before the entry's delay — two grid
 /// slots, VBAN's send budget (`VBAN_SEND_LATENCY_100NS`, pinned by a test).
 pub const BASE_LATENCY_100NS: i64 = 666_666;
-/// SongPlayer's: the blocks whose mean error a window-mean re-centre moves
-/// by. With the level at target, a step under one slot moves a 32-block
-/// window's mean past 10 ms only with ≥ 30 % of the window behind it, so
-/// these 8 all lie after the step; over ≥ 266 ms they average a driver's
-/// callback sawtooth out.
-pub const RECENT_BLOCKS: usize = 8;
+/// SongPlayer's last resort for a deficit: a block whose latency is under
+/// 16.7 ms (the base target less 50 ms, 1.5 slots) is a hard re-centre. The
+/// ring then holds under 11.7 ms for a block on time, so most blocks of the
+/// normal 10–33 ms hand-off would find it dry before the slew could restore
+/// it. ABSOLUTE (review round 2): an entry's delay raises the target, never
+/// this floor — a delayed output 50 ms short still holds its delay in the
+/// ring.
+pub const HARD_FLOOR_100NS: i64 = 166_666;
+/// SongPlayer's last resort for an offset: a block more than four slots
+/// (133.3 ms) over the target is a hard re-centre — the ring holds the
+/// target + 4 slots + one block, so the next block would overflow it. The
+/// same edge under the target (review round 3): above a delay of 83.3 ms
+/// it lies above the floor (at or under that delay the floor alone is the
+/// edge), and slewing 4 slots takes ~8 min.
+pub const HARD_EXCESS_100NS: i64 = 1_333_333;
+/// SongPlayer's: a window mean within this of the target is left to
+/// camera-box's level loop; beyond it the offset slew drains it (at least;
+/// [`calm_zone_ms`]).
+pub const CALM_ZONE_MS: f64 = 1.0;
+
+/// The calm zone for a driver calling back every `callback_frames` at
+/// `rate_hz`: [`CALM_ZONE_MS`], or half the callback period when that is
+/// longer (512 frames at 96 kHz: 2.67 ms) — the block's reading saws by one
+/// period, and its window mean wanders by a fraction of it.
+pub fn calm_zone_ms(callback_frames: u32, rate_hz: f64) -> f64 {
+    (f64::from(callback_frames) / rate_hz * 1000.0 / 2.0).max(CALM_ZONE_MS)
+}
 
 /// What [`RateRegression::offer`] did with a point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,6 +281,49 @@ pub fn slew(applied: f64, target: f64, dt_s: f64) -> f64 {
     applied + (target - applied).clamp(-step, step)
 }
 
+/// The offset slew for a window-mean error `err_ms` (target − latency:
+/// positive = too little buffered = more output): beyond the calm zone
+/// (`calm_ms`), the fastest correction that still stops at its edge
+/// decelerating at the slew limit, `√(2 · 5 ppm/s · (|err| − calm))` (1 ms =
+/// 1000 ppm·s); 0 inside it.
+pub fn braking_ppm(err_ms: f64, calm_ms: f64) -> f64 {
+    let beyond_ms = (err_ms.abs() - calm_ms).max(0.0);
+    (2.0 * MAX_SLEW_PPM_PER_S * beyond_ms * 1000.0)
+        .sqrt()
+        .copysign(err_ms)
+}
+
+/// The seconds the offset slew still needs to bring a window-mean error
+/// `err_ms` into the calm zone (`calm_ms`): `share_ppm` of the correction already works
+/// on it (the applied correction less the card's rate; against it when its
+/// sign differs), at most `room_ppm` can (the ±300 budget less the rate),
+/// moving at most 5 ppm per second — accelerate to a peak (at most the
+/// room), cruise, brake. `None` inside the calm zone (nothing to slew).
+pub fn slew_eta_s(err_ms: f64, share_ppm: f64, room_ppm: f64, calm_ms: f64) -> Option<f64> {
+    let beyond_ms = err_ms.abs() - calm_ms;
+    if beyond_ms <= 0.0 {
+        return None;
+    }
+    let a = MAX_SLEW_PPM_PER_S;
+    let cap = room_ppm.max(a);
+    let toward = if err_ms.is_sign_positive() {
+        share_ppm
+    } else {
+        -share_ppm
+    };
+    // Working the wrong way: stop first, and win back what that adds.
+    let back = (-toward).max(0.0);
+    let distance = beyond_ms * 1000.0 + back * back / (2.0 * a);
+    let speed = toward.clamp(0.0, cap);
+    // A speed whose stop already covers the distance only brakes (the peak
+    // is the speed itself).
+    let peak = (a * distance + speed * speed / 2.0)
+        .sqrt()
+        .clamp(speed, cap);
+    let cruise = ((distance - (2.0 * peak * peak - speed * speed) / (2.0 * a)) / peak).max(0.0);
+    Some(back / a + (peak - speed) / a + cruise + peak / a)
+}
+
 /// One observation, taken by the worker as it handles a program block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Observation {
@@ -260,6 +342,29 @@ pub struct Observation {
     pub consumed_frames: u64,
 }
 
+/// Why the worker inserts or skips before a block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Recentre {
+    /// The first block: the ring primed to the target (no re-centre).
+    Prime,
+    /// A hard re-centre: the latency under [`HARD_FLOOR_100NS`], or more
+    /// than [`HARD_EXCESS_100NS`] under the target.
+    Deficit,
+    /// A hard re-centre: more than [`HARD_EXCESS_100NS`] over.
+    Excess,
+}
+
+impl Recentre {
+    /// The status's and the log's word.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Recentre::Prime => "prime",
+            Recentre::Deficit => "deficit",
+            Recentre::Excess => "excess",
+        }
+    }
+}
+
 /// What the worker does with the block.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ServoAction {
@@ -267,6 +372,8 @@ pub struct ServoAction {
     pub correction_ppm: f64,
     /// Insert (> 0) or skip (< 0) this much before the block, 100 ns.
     pub recentre_100ns: i64,
+    /// Why (`None`: nothing is inserted or skipped).
+    pub recentre: Option<Recentre>,
 }
 
 /// The servo's state for the status (`outputs[i].asio`).
@@ -278,7 +385,14 @@ pub struct ServoStatus {
     pub locked: bool,
     /// The last window's mean latency (boundary → leaving SongPlayer), ms.
     pub latency_ms: f64,
-    pub recentres: u64,
+    /// The last window's latency less the target, ms: the offset the slew
+    /// drains (positive = later than the target).
+    pub offset_ms: f64,
+    /// The seconds the slew still needs to bring the offset into the calm
+    /// zone ([`slew_eta_s`]); `None` inside it.
+    pub slew_eta_s: Option<f64>,
+    /// Hard re-centres (faults; the first block's priming is none).
+    pub hard_recentres: u64,
     pub rebases: u64,
 }
 
@@ -301,27 +415,6 @@ struct Window {
     sum_x_s: f64,
     sum_y_s: f64,
     sum_latency_100ns: i64,
-}
-
-/// The last [`RECENT_BLOCKS`] blocks' latency errors (100 ns), a ring;
-/// emptied by a re-centre.
-#[derive(Debug, Default)]
-struct Recent {
-    errs: [i64; RECENT_BLOCKS],
-    count: usize,
-}
-
-impl Recent {
-    fn push(&mut self, err_100ns: i64) {
-        self.errs[self.count % RECENT_BLOCKS] = err_100ns;
-        self.count += 1;
-    }
-
-    /// Their mean (of fewer when fewer came since the last re-centre).
-    fn mean_100ns(&self) -> i64 {
-        let n = self.count.clamp(1, RECENT_BLOCKS);
-        self.errs[..n].iter().sum::<i64>() / n as i64
-    }
 }
 
 /// A closed window.
@@ -372,13 +465,16 @@ pub struct Servo {
     target_100ns: i64,
     origin_100ns: Option<i64>,
     window: Window,
-    recent: Recent,
     regression: RateRegression,
     level: LevelLoop,
+    /// [`calm_zone_ms`] of the driver (1 ms until told its callback size).
+    calm_ms: f64,
     applied_ppm: f64,
     last_apply_100ns: Option<i64>,
     latency_ms: f64,
-    recentres: u64,
+    offset_ms: f64,
+    slew_eta_s: Option<f64>,
+    hard_recentres: u64,
     rebases: u64,
 }
 
@@ -391,19 +487,32 @@ impl Servo {
             target_100ns: target_latency_100ns,
             origin_100ns: None,
             window: Window::default(),
-            recent: Recent::default(),
             regression: RateRegression::default(),
             level: LevelLoop::default(),
+            calm_ms: CALM_ZONE_MS,
             applied_ppm: 0.0,
             last_apply_100ns: None,
             latency_ms: 0.0,
-            recentres: 0,
+            offset_ms: 0.0,
+            slew_eta_s: None,
+            hard_recentres: 0,
             rebases: 0,
         }
     }
 
+    /// The calm zone of a driver calling back every `callback_frames`
+    /// ([`calm_zone_ms`]).
+    pub fn with_callback_frames(mut self, callback_frames: u32) -> Self {
+        self.calm_ms = calm_zone_ms(callback_frames, self.rate_hz);
+        self
+    }
+
     pub fn target_100ns(&self) -> i64 {
         self.target_100ns
+    }
+
+    pub fn calm_ms(&self) -> f64 {
+        self.calm_ms
     }
 
     /// The rate and the lock are read from the regression itself, so a flush
@@ -414,7 +523,9 @@ impl Servo {
             rate_ppm: self.regression.rate_ppm(),
             locked: self.regression.locked(),
             latency_ms: self.latency_ms,
-            recentres: self.recentres,
+            offset_ms: self.offset_ms,
+            slew_eta_s: self.slew_eta_s,
+            hard_recentres: self.hard_recentres,
             rebases: self.rebases,
         }
     }
@@ -426,12 +537,11 @@ impl Servo {
         let err_100ns = self.target_100ns - latency_100ns;
         let Some(origin) = self.origin_100ns else {
             self.origin_100ns = Some(o.handled_100ns);
-            return self.recentre(err_100ns);
+            return self.recentre(err_100ns, Recentre::Prime);
         };
-        if err_100ns.abs() > GROSS_STEP_100NS {
-            return self.recentre(err_100ns);
+        if let Some(hard) = hard_recentre(latency_100ns, self.target_100ns) {
+            return self.recentre(err_100ns, hard);
         }
-        self.recent.push(err_100ns);
         let x_100ns = o.handled_100ns - origin;
         let y_s = o.consumed_frames as f64 / self.rate_hz - x_100ns as f64 / 1e7;
         let Some(w) = self.window.add(x_100ns, y_s, latency_100ns) else {
@@ -445,14 +555,8 @@ impl Servo {
             self.rebases += 1;
         }
         self.latency_ms = w.latency_mean_100ns as f64 / 10_000.0;
-        let mean_err_100ns = self.target_100ns - w.latency_mean_100ns;
-        // A step inside the window shows in its mean only in part: the last
-        // blocks' error is the whole of it (and a transient already passed is
-        // none of it — the level loop takes the window as it is).
-        let recent_100ns = self.recent.mean_100ns();
-        if mean_err_100ns.abs() > RECENTRE_100NS && recent_100ns.abs() > RECENTRE_100NS {
-            return self.recentre(recent_100ns);
-        }
+        let err_ms = (self.target_100ns - w.latency_mean_100ns) as f64 / 10_000.0;
+        self.offset_ms = -err_ms;
         let dt_100ns = self
             .last_apply_100ns
             .map_or(w.span_100ns, |prev| w.x_end_100ns - prev);
@@ -461,11 +565,21 @@ impl Servo {
         // already moves nothing; the EMA and the integral must not either).
         let dt_s = (dt_100ns as f64 / 1e7).max(0.0);
         let rate = self.regression.rate_ppm();
-        let pi = self
-            .level
-            .update(mean_err_100ns as f64 / 10_000.0, dt_s, rate);
-        let target = (rate + pi).clamp(-MAX_PPM, MAX_PPM);
+        // The card's rate plus the offset slew beyond the calm zone; the
+        // level loop's I freezes on the whole sum (its anti-windup counts the
+        // slew too).
+        let base = rate + braking_ppm(err_ms, self.calm_ms);
+        let pi = self.level.update(err_ms, dt_s, base);
+        let target = (base + pi).clamp(-MAX_PPM, MAX_PPM);
         self.applied_ppm = slew(self.applied_ppm, target, dt_s);
+        // The room the card's rate leaves on the side the slew works: a
+        // positive error asks for more output, up to +300 (review round 2).
+        let room = if err_ms.is_sign_positive() {
+            MAX_PPM - rate
+        } else {
+            MAX_PPM + rate
+        };
+        self.slew_eta_s = slew_eta_s(err_ms, self.applied_ppm - rate, room, self.calm_ms);
         self.hold()
     }
 
@@ -473,24 +587,47 @@ impl Servo {
         ServoAction {
             correction_ppm: self.applied_ppm,
             recentre_100ns: 0,
+            recentre: None,
         }
     }
 
-    fn recentre(&mut self, err_100ns: i64) -> ServoAction {
+    /// Insert or skip `err_100ns` at once: the priming, or a hard re-centre
+    /// (counted). The window and the level loop's error start over.
+    fn recentre(&mut self, err_100ns: i64, why: Recentre) -> ServoAction {
         self.window = Window::default();
-        self.recent = Recent::default();
         self.level.reset_error();
-        self.recentres += 1;
+        if why != Recentre::Prime {
+            self.hard_recentres += 1;
+        }
         ServoAction {
             correction_ppm: self.applied_ppm,
             recentre_100ns: err_100ns,
+            recentre: Some(why),
         }
+    }
+}
+
+/// A block's latency the slew cannot be left with: under
+/// [`HARD_FLOOR_100NS`], or more than [`HARD_EXCESS_100NS`] off `target`
+/// either way.
+pub fn hard_recentre(latency_100ns: i64, target_100ns: i64) -> Option<Recentre> {
+    let over = latency_100ns - target_100ns;
+    if latency_100ns < HARD_FLOOR_100NS || -over > HARD_EXCESS_100NS {
+        Some(Recentre::Deficit)
+    } else if over > HARD_EXCESS_100NS {
+        Some(Recentre::Excess)
+    } else {
+        None
     }
 }
 
 #[cfg(test)]
 #[path = "asrc_servo_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "asrc_servo_tests_regression.rs"]
+mod tests_regression;
 
 #[cfg(test)]
 #[path = "asrc_servo_sim_tests.rs"]

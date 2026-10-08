@@ -5,9 +5,10 @@
 //! `api/program_tests_outputs.rs` build their outputs with them.
 
 use super::*;
-use crate::playback::vban_out::VbanTake;
 use crate::playback::vban_out::tests::active_config;
+use crate::playback::vban_out::{VbanSender, VbanTake};
 use crate::playback::vban_packet::VbanFormat;
+use crate::playback::vban_rate::VbanRateConverter;
 use sp_core::audio_outputs::{RateChoice, VbanDest, VbanSampleFormat};
 use std::time::Duration;
 
@@ -470,4 +471,89 @@ fn an_asio_output_takes_the_shared_block_and_stops_or_discards() {
     let sink = OutputSink::Asio(out.clone());
     sink.discard();
     assert_eq!(out.queued(), 0, "a discard drops what is queued");
+}
+
+/// #233 release review: the code of a waiting VBAN output's reason.
+#[test]
+fn the_vban_reason_code_table() {
+    assert_eq!(vban_reason_code(STATE_RUNNING, None, false), None);
+    assert_eq!(
+        vban_reason_code(STATE_OPENING, Some("not_built"), true),
+        None
+    );
+    assert_eq!(vban_reason_code(STATE_DISABLED, None, true), None);
+    assert_eq!(
+        vban_reason_code(STATE_WAITING, Some("converter"), true),
+        Some("converter")
+    );
+    assert_eq!(
+        vban_reason_code(STATE_WAITING, None, true),
+        Some("unresolved")
+    );
+    assert_eq!(
+        vban_reason_code(STATE_WAITING, None, false),
+        Some("resolving")
+    );
+}
+
+/// Review round 1: every reason code a waiting VBAN output can carry has the
+/// dashboard's Slovak (sp-core's one vocabulary), never "neznámy dôvod" — a
+/// rename on either side fails here.
+#[test]
+fn every_vban_reason_code_has_its_dashboard_text() {
+    use sp_core::audio_outputs_save::vban_reason_sk;
+    let codes: Vec<&str> = [
+        vban_reason_code(STATE_WAITING, Some(VBAN_NOT_BUILT), false),
+        vban_reason_code(STATE_WAITING, Some(VBAN_NOT_STARTED), false),
+        vban_reason_code(STATE_WAITING, Some(VBAN_CONVERTER), false),
+        vban_reason_code(STATE_WAITING, None, true),
+        vban_reason_code(STATE_WAITING, None, false),
+    ]
+    .into_iter()
+    .map(Option::unwrap)
+    .collect();
+    for code in codes {
+        assert_ne!(vban_reason_sk(code), vban_reason_sk(""), "{code}");
+    }
+}
+
+/// #233 release review: a rate converter rubato refuses (it sends silence)
+/// makes the output read waiting with its reason, never running.
+#[test]
+fn a_refused_rate_converter_makes_the_output_wait_with_its_reason() {
+    let out = Arc::new(VbanOut::for_destination(
+        VbanFormat::new(96_000, VbanSampleFormat::Int24).unwrap(),
+        0,
+    ));
+    out.set_config(active_config(&["10.0.0.1:6980"]));
+    let _sender = VbanSender::with_converter(&out, VbanRateConverter::refused("no FFT plan"));
+    let status = running_vban("out-1", out).status(96_000);
+    assert_eq!(status.state, STATE_WAITING);
+    assert_eq!(
+        status.reason.as_deref(),
+        Some(
+            "the 96000 Hz rate converter could not be built (no FFT plan): the output sends silence"
+        )
+    );
+    assert_eq!(status.reason_code, Some("converter"));
+}
+
+/// #233 release review: an output that could not be built, and one whose
+/// thread did not start, each name their code.
+#[test]
+fn a_waiting_vban_output_names_its_reason_code() {
+    let not_built = RunningOutput {
+        entry: entry("out-1"),
+        built_rate: 32_000,
+        sink: None,
+        error: Some("VBAN carries no 32000 Hz".into()),
+    };
+    assert_eq!(not_built.status(48_000).reason_code, Some("not_built"));
+    let out = Arc::new(VbanOut::new());
+    out.set_start_error("the VBAN thread did not start: binding the UDP socket failed".into());
+    let not_started = running_vban("out-2", out).status(48_000);
+    assert_eq!(not_started.state, STATE_WAITING);
+    assert_eq!(not_started.reason_code, Some("not_started"));
+    let running = running_vban("out-3", Arc::new(VbanOut::new())).status(48_000);
+    assert_eq!(running.reason_code, None, "opening: no reason");
 }

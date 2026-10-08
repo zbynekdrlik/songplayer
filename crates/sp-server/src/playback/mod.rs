@@ -17,7 +17,7 @@ pub mod audio_out; // #233: the program audio's fan-out to its outputs (one queu
 pub mod audio_out_block; // #233: one program boundary's audio block for the outputs
 pub mod audio_out_config; // #233: the outputs' settings — strict PATCH parse, lenient stored read
 pub mod audio_out_migrate; // #233: vban_* → the output list, once (the old keys stay)
-pub mod audio_out_queue; // #233: a bounded drop-oldest block queue (the ASIO output's)
+pub mod audio_out_queue; // #233: every output's bounded drop-oldest block queue (VBAN and ASIO)
 pub mod audio_out_task; // #233: the outputs' settings task (keep / build / stop, DNS, migration)
 pub mod band_pool; // #223: the SP-program sender's persistent row-band workers (no thread per picture)
 mod clear_lyrics;
@@ -74,6 +74,8 @@ pub mod program_trace_log; // #147: the trace's once-a-minute clump summary (tas
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 pub mod program_transition_settings; // #221 L5: the transition settings → the bus's spec (task)
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
+#[cfg(test)]
+pub(crate) mod resample_quality; // #233: the resamplers' measured quality (THD+N, images), tests only
 mod runtime_pipeline;
 pub mod scene_catalog; // #221: which scene is a playlist's, from its NDI output name (no cg OBS lookup)
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source

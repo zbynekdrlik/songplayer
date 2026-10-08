@@ -1,8 +1,12 @@
-//! Bootstrap the Python environment used by Qwen3-ForcedAligner.
+//! Bootstrap the lyrics venv: the Python environment of `preprocess-vocals`
+//! (anvuew dereverb), the stems worker (`stem_worker.py`) and the dub worker.
 //!
-//! On Windows, ensures `{tools_dir}/lyrics_venv/` exists with `qwen-asr`
-//! installed and the Qwen3-ForcedAligner-0.6B model cached locally. On
-//! non-Windows, returns `Ok(None)` — alignment is a Windows-only feature.
+//! On Windows, ensures `{tools_dir}/lyrics_venv/` exists with
+//! `audio-separator[gpu]`, the cu124 torch triplet and the numeric stack, and
+//! the anvuew dereverb model cached locally. On non-Windows, returns
+//! `Ok(None)` — the heavy steps are a Windows-only feature. The forced
+//! aligner (mtl) has its own venv; #144 deleted the retired Qwen aligner
+//! package from this one (v22 one regime).
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -23,19 +27,22 @@ pub(crate) fn prepend_path_with(dir: &Path) -> std::ffi::OsString {
 }
 
 /// The `-c` script passed to the venv Python by `is_ready` to verify every
-/// Python package the aligner pipeline depends on is importable AND CUDA is
+/// Python package the venv's live scripts depend on is importable AND CUDA is
 /// available. Exit code 0 iff all conditions hold:
-///   1. `qwen_asr` importable (the Qwen3-ForcedAligner package)
-///   2. `torch` importable
-///   3. `audio_separator` importable (the Mel-Roformer vocal isolator)
-///   4. `numba` + `librosa` + `soundfile` importable — the numeric stack
+///   1. `torch` importable
+///   2. `audio_separator` importable (the anvuew dereverb and the stems
+///      worker's Kim separation)
+///   3. `numba` + `librosa` + `soundfile` importable — the numeric stack
 ///      `preprocess-vocals` runs on. A too-new numpy (>= 2.5) breaks numba's
 ///      import ("Numba needs NumPy 2.4 or less"), so importing them here is
 ///      what makes a broken pin report "not ready" and trigger the repair;
 ///      without it the venv reported ready while every song failed isolation
 ///      (win-resolume, 2026-09-11, #144).
-///   5. `torch.cuda.is_available()` returns True
-const IS_READY_PROBE: &str = "import qwen_asr, torch, audio_separator, numba, librosa, soundfile, sys; sys.exit(0 if torch.cuda.is_available() else 1)";
+///   4. `torch.cuda.is_available()` returns True
+///
+/// #144: the retired Qwen aligner package is not probed: nothing live
+/// imports it, so a broken copy left in an old venv must not reinstall it.
+const IS_READY_PROBE: &str = "import torch, audio_separator, numba, librosa, soundfile, sys; sys.exit(0 if torch.cuda.is_available() else 1)";
 
 /// `audio-separator[gpu]` pip package spec — Mel-Roformer vocal isolation
 /// plus ONNX Runtime GPU support. Quoted exactly because pip's shell
@@ -85,7 +92,7 @@ pub const GENAI_PACKAGE: &str = "google-genai==2.24.0";
 /// Ensure `google-genai` is importable in the lyrics venv (#183 D4). Idempotent
 /// and LIGHT: probes `import google.genai` first (a fast subprocess) and only
 /// pip-installs [`GENAI_PACKAGE`] when it is missing — so it never triggers the
-/// heavy qwen/torch reinstall the `is_ready` gate does. Returns the SDK version
+/// heavy torch reinstall the `is_ready` gate does. Returns the SDK version
 /// string on success (logged as the design's startup self-check). Called by the
 /// dub worker before its first synthesis, not by the main bootstrap gate.
 #[cfg_attr(test, mutants::skip)]
@@ -170,14 +177,14 @@ pub async fn is_ready(python_path: &Path) -> Readiness {
     // unknown (likely CUDA driver/context probing that depends on a console
     // handle), but the consequence is severe: `is_ready` returned false,
     // bootstrap concluded the venv was broken, and kicked off a 10-15 min
-    // pip reinstall of qwen-asr + audio-separator[gpu] + torch. That
+    // pip reinstall of the whole venv (audio-separator[gpu] + torch). That
     // repeated on every SongPlayer restart, stalling the lyrics worker.
     //
     // The `is_ready` probe is internal-only: there's no user-facing console
     // to hide. Keeping the flag off costs nothing and restores reliable
     // CUDA detection. The CREATE_NO_WINDOW flag remains on the longer-
-    // running subprocess calls (preprocess-vocals, align-chunks) where a
-    // brief window flicker during a 3-minute Demucs run would be visible.
+    // running subprocess calls (preprocess-vocals, the stem separation)
+    // where a brief window flicker during a long run would be visible.
     //
     // #221: stderr is captured (the reason: a traceback's last line names an
     // import failure), and a probe that runs out of time is killed
@@ -201,12 +208,13 @@ pub async fn is_ready(python_path: &Path) -> Readiness {
     }
 }
 
-/// Ensure the lyrics venv exists, `qwen-asr` is installed, and the
-/// Qwen3-ForcedAligner model is preloaded.
+/// Ensure the lyrics venv exists, its packages are installed, and the anvuew
+/// dereverb model is preloaded.
 ///
 /// On Windows:
 ///   1. Create `{tools_dir}/lyrics_venv/` via `python -m venv` (if missing).
-///   2. Run `{venv}/Scripts/python.exe -m pip install -U qwen-asr`.
+///   2. Install `audio-separator[gpu]`, then the cu124 torch triplet, then
+///      repair the numpy pin.
 ///   3. Run `{venv}/Scripts/python.exe {script_path} preload --models-dir ...`.
 ///
 /// Fast-paths return `Ok(venv_python)` when `bootstrap_probe::decide` says the
@@ -288,37 +296,15 @@ pub async fn ensure_ready(
             }
         }
 
-        // 2. Install qwen-asr into the venv. pip's exit code is NOT
-        // authoritative: in non-TTY mode it sometimes returns 1 for benign
-        // warnings (like leftover `~distribution` stubs from a prior partial
-        // install). We log but do not bail on non-zero; the final is_ready
-        // check at the end of bootstrap is the real success gate.
-        tracing::info!("lyrics bootstrap: installing qwen-asr (this may take several minutes)");
-        let mut pip = Command::new(&venv_python);
-        pip.args(["-m", "pip", "install", "-U", "qwen-asr"]);
         use std::os::windows::process::CommandExt;
-        pip.creation_flags(0x08000000);
-        let mut pip_child = pip.spawn().context("failed to spawn pip install")?;
-        let pip_status =
-            match tokio::time::timeout(std::time::Duration::from_secs(600), pip_child.wait()).await
-            {
-                Ok(Ok(s)) => s,
-                Ok(Err(e)) => anyhow::bail!("pip install qwen-asr spawn failed: {e}"),
-                Err(_) => {
-                    let _ = pip_child.kill().await;
-                    anyhow::bail!("pip install qwen-asr timed out after 10 minutes");
-                }
-            };
-        if !pip_status.success() {
-            tracing::warn!(
-                "lyrics bootstrap: pip install qwen-asr exited {pip_status} (tolerated, final is_ready check decides)"
-            );
-        }
 
-        // 2a. Install audio-separator[gpu] for Mel-Roformer vocal isolation.
-        // This preprocessing step runs before Qwen3-ForcedAligner; without
-        // vocal isolation the aligner produces degenerate timestamps on
-        // sung music (instruments mask phoneme boundaries).
+        // 2a. Install audio-separator[gpu] (the anvuew dereverb, the stems
+        // worker's Kim separation; it brings librosa, soundfile, numpy and
+        // scipy). pip's exit code is NOT authoritative: in non-TTY mode it
+        // sometimes returns 1 for benign warnings (like leftover
+        // `~distribution` stubs from a prior partial install). We log but do
+        // not bail on non-zero; the final is_ready check is the real success
+        // gate.
         //
         // Ordering: install BEFORE the CUDA torch force-reinstall below.
         // `audio-separator[gpu]` pulls onnxruntime-gpu plus its own torch
@@ -356,11 +342,10 @@ pub async fn ensure_ready(
             );
         }
 
-        // 2b. Force-reinstall torch with CUDA support. qwen-asr pulls the
-        // CPU-only torch wheel from PyPI by default, and `audio-separator[gpu]`
-        // in step 2a pulls its own sibling torch build that clobbers cu124
-        // unless we run this AFTER it. Qwen3-ForcedAligner inference on a
-        // 4-minute audio without CUDA takes minutes instead of seconds.
+        // 2b. Force-reinstall torch with CUDA support. `audio-separator[gpu]`
+        // in step 2a pulls its own sibling torch build (the CPU-only wheel
+        // from PyPI) that clobbers cu124 unless we run this AFTER it. GPU
+        // separation without CUDA takes minutes instead of seconds.
         // Install the cu124 variant from the PyTorch index LAST so it wins
         // — pip `--force-reinstall` on `torch` alone replaces whatever
         // torch build the earlier steps left behind.
@@ -368,7 +353,7 @@ pub async fn ensure_ready(
         // Pin the triplet: installing `torch` alone with --force-reinstall
         // on win-resolume produced torchvision 0.26 + torchaudio 2.11, which
         // bind against a torch 2.11 ABI that doesn't exist on the cu124
-        // index. Matched versions keep qwen_asr importable.
+        // index. Matched versions keep torchvision importable.
         tracing::info!("lyrics bootstrap: installing CUDA torch variant");
         let mut torch_pip = Command::new(&venv_python);
         torch_pip.args([
@@ -450,7 +435,7 @@ pub async fn ensure_ready(
         let verified = decide(|| is_ready(&venv_python), RETRY_PLAN).await;
         if !install_worked(verified.path) {
             anyhow::bail!(
-                "lyrics bootstrap: the post-install venv check failed after {} probe(s) — qwen_asr, the numeric stack or CUDA torch is not available (each probe's reason is in its WARN above)",
+                "lyrics bootstrap: the post-install venv check failed after {} probe(s) — audio_separator, the numeric stack or CUDA torch is not available (each probe's reason is in its WARN above)",
                 verified.probes
             );
         }
@@ -461,8 +446,9 @@ pub async fn ensure_ready(
             );
         }
 
-        // 3. Preload the model so the first song doesn't pay the 1.2GB download.
-        tracing::info!("lyrics bootstrap: preloading Qwen3-ForcedAligner model");
+        // 3. Preload the anvuew dereverb model so the first song doesn't pay
+        // its download inside the isolation's stall timeout.
+        tracing::info!("lyrics bootstrap: preloading the anvuew dereverb model");
         let mut preload = Command::new(&venv_python);
         preload
             .arg(script_path)
@@ -534,17 +520,36 @@ mod tests {
     }
 
     /// The `is_ready` Python probe must import every runtime dependency
-    /// the lyrics worker uses at alignment time. Each import is listed
-    /// separately so an unrelated formatting change does not silently
-    /// hide a missing package.
+    /// the venv's live scripts use (`preprocess-vocals`, `stem_worker.py`).
+    /// Each import is listed separately so an unrelated formatting change
+    /// does not silently hide a missing package.
     #[test]
     fn is_ready_probe_imports_every_required_package() {
-        for pkg in ["qwen_asr", "torch", "audio_separator"] {
+        for pkg in ["torch", "audio_separator", "numba", "librosa", "soundfile"] {
             assert!(
                 IS_READY_PROBE.contains(pkg),
                 "IS_READY_PROBE must import {pkg}, got: {IS_READY_PROBE:?}"
             );
         }
+    }
+
+    /// #144: v22 is one regime (mtl force-align in its own venv + Gemini 3.5
+    /// Transcribe). Nothing live imports the retired Qwen aligner package, so
+    /// a broken copy of it must never make the venv "not ready" (a full
+    /// reinstall), and the install never fetches it. The names are split so
+    /// this file does not contain what it looks for.
+    #[test]
+    fn the_venv_needs_no_retired_aligner_package() {
+        let retired = ["qw", "en"].concat();
+        assert!(
+            !IS_READY_PROBE.to_lowercase().contains(&retired),
+            "IS_READY_PROBE must not import the retired aligner, got: {IS_READY_PROBE:?}"
+        );
+        let pip_arg = ["\"qwen", "-asr\""].concat();
+        assert!(
+            !include_str!("bootstrap.rs").contains(&pip_arg),
+            "the bootstrap must not pip install the retired aligner"
+        );
     }
 
     /// The `is_ready` probe must also gate on `torch.cuda.is_available()`
@@ -574,7 +579,7 @@ mod tests {
     /// form a compatible ABI triplet. Observed on win-resolume: installing
     /// `torch` alone with --force-reinstall leaves torchvision at 0.26 and
     /// torchaudio at 2.11, which binds against a torch 2.11 ABI that
-    /// doesn't exist on the cu124 index — qwen_asr import fails with
+    /// doesn't exist on the cu124 index — importing torchvision fails with
     /// "operator torchvision::nms does not exist".
     #[test]
     fn bootstrap_pins_matched_torch_triplet() {

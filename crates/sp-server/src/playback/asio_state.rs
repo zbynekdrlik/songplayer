@@ -16,7 +16,7 @@
 //!   buffer over a third of a grid slot is noted (lane 2's envelope: the
 //!   servo's per-block latency saws by one callback period).
 
-use crate::playback::asrc_servo::{GROSS_STEP_100NS, frames_from_100ns};
+use crate::playback::asrc_servo::{SLOT_100NS, frames_from_100ns};
 
 pub const BACKOFF_S: [i64; 4] = [2, 10, 30, 60];
 /// A run this long resets the backoff (60 s).
@@ -202,6 +202,22 @@ fn rate_change(rate: f64) -> Reason {
     }
 }
 
+/// HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND): a registry key that does not
+/// exist.
+pub const HRESULT_FILE_NOT_FOUND: i32 = 0x8007_0002_u32 as i32;
+/// HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND): a registry path that does not
+/// exist.
+pub const HRESULT_PATH_NOT_FOUND: i32 = 0x8007_0003_u32 as i32;
+
+/// #233 release review: a failed read of `HKLM\SOFTWARE\ASIO` that only
+/// says the key is absent (no ASIO driver was ever installed) is an empty
+/// driver list; any other failure (access denied, a broken hive) is an error
+/// `GET /api/v1/audio/asio-drivers` answers with a 500, never an empty list
+/// the dashboard would read as "no driver on this box".
+pub fn registry_key_absent(hresult: i32) -> bool {
+    hresult == HRESULT_FILE_NOT_FOUND || hresult == HRESULT_PATH_NOT_FOUND
+}
+
 /// ASIO's ASE_NoClock (asio.h): the driver has no clock.
 pub const ASE_NO_CLOCK: i32 = -995;
 
@@ -254,7 +270,7 @@ pub fn buffer_note(buffer_frames: u32, rate: u32) -> Option<String> {
 /// The ring's capacity, frames: the target latency + four slots, + one
 /// block's output.
 pub fn ring_capacity_frames(rate: f64, target_100ns: i64, max_block_frames: usize) -> usize {
-    let span_100ns = target_100ns + 4 * GROSS_STEP_100NS;
+    let span_100ns = target_100ns + 4 * SLOT_100NS;
     frames_from_100ns(span_100ns, rate).max(0) as usize + max_block_frames
 }
 

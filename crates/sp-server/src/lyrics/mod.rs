@@ -1,12 +1,10 @@
 pub mod aligner;
-pub mod assembly;
 pub mod audit_ctx;
 pub mod backend;
 pub mod bootstrap;
 pub mod bootstrap_probe; // #221: the venv probe's reason + the fast-path retry decision
 pub mod bootstrap_venv_exe;
 pub mod child_output;
-pub mod chunking;
 pub mod claude_merge;
 pub mod description_provider;
 pub mod display_plan;
@@ -41,6 +39,7 @@ pub mod sung_coverage;
 pub mod text_candidate;
 pub mod tier1;
 pub mod title_search;
+mod tool_scripts; // #233 release review: lyrics_worker.py + the audio_window.py it imports
 pub mod track_store;
 pub mod transcript_cache;
 pub mod translator;

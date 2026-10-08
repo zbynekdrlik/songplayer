@@ -3,6 +3,9 @@
 //! keeps a tone's pitch, and reports its delay (half the block FFT).
 
 use super::*;
+use std::io::Write;
+
+use crate::playback::resample_quality as quality;
 
 fn tone(blocks: usize) -> Vec<Vec<f32>> {
     (0..blocks)
@@ -99,4 +102,35 @@ fn a_converter_rubato_refuses_sends_silence_and_says_why() {
     assert_eq!(c.convert(Some(&[0.5; 3200][..])), None);
     assert_eq!(c.convert(None), None);
     assert_eq!(c.delay_frames(), 0);
+}
+
+/// The VBAN converter, 48 → 96 kHz (rubato's `Fft`, BlackmanHarris², the
+/// block as one FFT): a 1 kHz tone at −1 dBFS keeps a THD+N of at least
+/// 120 dB (the scratch model: about 148 dB), and a 20 kHz tone leaves nothing
+/// over −120 dBFS between 24 and 48 kHz (the model: about −178 dBFS). The
+/// first two blocks (its 16.7 ms delay) are left out; the figures go to the
+/// CI log.
+#[test]
+fn the_96k_converter_keeps_a_thd_n_over_120_db_and_its_upper_band_clean() {
+    let converted = |hz: f64| {
+        let mut c = VbanRateConverter::new(96_000);
+        let mut out = Vec::new();
+        for (i, b) in quality::tone_blocks(hz, 8).iter().enumerate() {
+            let y = c.convert(Some(b.as_slice())).unwrap();
+            if i >= 2 {
+                out.extend_from_slice(y);
+            }
+        }
+        quality::left(&out)
+    };
+    let db = quality::thd_n_db(&converted(1_000.0), 1_000.0 / 96_000.0);
+    let (image, hz) =
+        quality::band_peak_dbfs(&converted(20_000.0)[..8_192], 96_000.0, 24_000.0, 48_000.0);
+    writeln!(
+        std::io::stderr(),
+        "vban 48 -> 96 kHz: THD+N {db:.1} dB, loudest in 24-48 kHz {image:.1} dBFS at {hz:.0} Hz"
+    )
+    .unwrap();
+    assert!(db >= 120.0, "{db:.1} dB");
+    assert!(image <= -120.0, "{image:.1} dBFS at {hz:.0} Hz");
 }

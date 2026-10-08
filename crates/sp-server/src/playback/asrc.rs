@@ -1,22 +1,42 @@
 //! #233: the ASIO output's resampler and its re-centre.
 //!
-//! `Asrc`: ONE rubato `Async` sinc stage (256 taps, BlackmanHarris², fixed
-//! input of one 1600-frame program block) converts the 48 kHz program to the
-//! card's rate; the servo (`asrc_servo.rs`) sets its relative ratio
-//! `1 + ppm·1e-6` once per block, ramped across the block. Allocation-free
-//! after `new` (`process_into_buffer` into its own buffer; rubato's `log`
-//! feature is off). Its delay is `sinc_len · ratio / 2` frames (256 at
-//! 96 kHz, 2.7 ms).
+//! `Asrc`: ONE rubato `Async` band-limited sinc stage converts the 48 kHz
+//! program to the card's rate, fixed input of one 1600-frame program block.
+//! Its filter is the lane's measured choice ([`asrc_params`], pinned by a
+//! test; rubato documents no "highest" setting):
+//! - 256 taps;
+//! - the sinc table oversampled 256× (twice rubato's default);
+//! - BlackmanHarris²;
+//! - cubic interpolation between the table's rows;
+//! - the automatic cutoff: 0.947 of the lower Nyquist, 22.7 kHz at 48 → 96 kHz.
 //!
-//! `Splice`: the servo's re-centre on the resampler's output (the card's
-//! rate): a 5 ms fade out, the inserted silence or the skipped frames, a 5 ms
-//! fade in — never a click. It holds back its last 5 ms so a fade-out can
-//! still reach audio not yet in the ring (a constant 5 ms of latency, counted
-//! in the servo's `buffered_frames`).
+//! The servo (`asrc_servo.rs`) sets its relative ratio `1 + ppm·1e-6` once
+//! per block, ramped across the block: that ratio absorbs every difference
+//! (the owner's ruling of 8.10.2026). The splice below is used only to prime
+//! the ring and for a hard re-centre.
+//!
+//! Its delay is `sinc_len · ratio / 2` frames: 256 at 96 kHz, 2.7 ms (the
+//! oversampling does not change it).
+//!
+//! Measured through it, 48 → 96 kHz (`asrc_tests.rs`, the figures in the CI
+//! log, the scratch model of rubato in brackets):
+//! - a 1 kHz tone at −1 dBFS, at −300, 0 and +300 ppm: THD+N ≥ 120 dB (about
+//!   142 dB);
+//! - a 20 kHz tone: nothing above −120 dBFS between 24 and 48 kHz (≤ −149 dBFS).
+//!
+//! Allocation-free after `new` (`process_into_buffer` into its own buffer;
+//! rubato's `log` feature is off).
+//!
+//! `Splice`: the priming and a hard re-centre on the resampler's output (the
+//! card's rate): a 5 ms fade out, the inserted silence or the skipped frames,
+//! a 5 ms fade in — never a click. It holds back its last 5 ms so a fade-out
+//! can still reach audio not yet in the ring (a constant 5 ms of latency,
+//! counted in the servo's `buffered_frames`).
 
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
-    Adjustable, Async, FixedAsync, Resampler, SincInterpolationParameters, WindowFunction,
+    Adjustable, Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
+    WindowFunction,
 };
 use sp_core::audio_outputs::PROGRAM_RATE;
 
@@ -24,10 +44,23 @@ use crate::playback::vban_packet::{VBAN_BLOCK_FRAMES, VBAN_BLOCK_SAMPLES, VBAN_C
 
 /// The sinc length (rubato's default; ~2.7 ms at 96 kHz).
 pub const ASRC_SINC_LEN: usize = 256;
+/// The sinc table's oversampling: the lane's measured choice, twice
+/// rubato's default of 128 (the scratch model: images −149 dBFS against
+/// −146 at 128; rubato documents cubic as the best quality per
+/// oversampling, not a highest setting).
+pub const ASRC_OVERSAMPLING: usize = 256;
 /// The ratio's room around nominal: ±1000 ppm, well past the servo's ±300.
 pub const ASRC_MAX_RELATIVE: f64 = 1.001;
 /// A re-centre's fade, s.
 pub const SPLICE_FADE_S: f64 = 0.005;
+
+/// The resampler's filter (the module doc): 256 taps, oversampled 256×,
+/// BlackmanHarris², cubic, the cutoff automatic.
+pub fn asrc_params() -> SincInterpolationParameters {
+    SincInterpolationParameters::new(ASRC_SINC_LEN, WindowFunction::BlackmanHarris2)
+        .oversampling_factor(ASRC_OVERSAMPLING)
+        .interpolation(SincInterpolationType::Cubic)
+}
 
 /// The program (48 kHz, stereo, one 1600-frame block per boundary) at the
 /// card's rate, with the servo's correction.
@@ -39,8 +72,7 @@ pub struct Asrc {
 impl Asrc {
     pub fn new(device_rate_hz: f64) -> Result<Self, String> {
         let ratio = device_rate_hz / f64::from(PROGRAM_RATE);
-        let params =
-            SincInterpolationParameters::new(ASRC_SINC_LEN, WindowFunction::BlackmanHarris2);
+        let params = asrc_params();
         let inner = Async::<f32>::new_sinc(
             ratio,
             ASRC_MAX_RELATIVE,

@@ -9,6 +9,10 @@
 //! 96 kHz: the sinc's start index is −255).
 
 use super::*;
+use std::io::Write;
+
+use crate::playback::resample_quality as quality;
+use rubato::{SincInterpolationType, WindowFunction};
 
 /// `blocks` program blocks of a 1 kHz tone (0.5 peak), both channels alike.
 fn tone(blocks: usize, hz: f32) -> Vec<Vec<f32>> {
@@ -229,4 +233,115 @@ fn the_installer_notice_carries_the_pinned_rubatos_license() {
         "The above copyright notice and this permission notice shall be included in all\n\
          copies or substantial portions of the Software."
     ));
+}
+
+/// The lane's measured choice of rubato's async sinc (#233 closing lane,
+/// the owner: a state-of-the-art resampler): 256 taps, the table
+/// oversampled 256× (rubato's own default is 128; the scratch model's images
+/// fall from −146 to −149 dBFS), BlackmanHarris², cubic between its rows
+/// (rubato's documented best quality-per-oversampling), the cutoff
+/// automatic.
+#[test]
+fn the_resampler_runs_the_measured_sinc_setting() {
+    let p = asrc_params();
+    assert_eq!((p.sinc_len, p.oversampling_factor), (256, 256));
+    assert_eq!(p.interpolation, SincInterpolationType::Cubic);
+    assert_eq!(p.window, WindowFunction::BlackmanHarris2);
+    assert_eq!(p.f_cutoff, None, "automatic");
+}
+
+/// Through the output's own resampler, 48 → 96 kHz: a 1 kHz tone at
+/// −1 dBFS, the correction at −300, 0 and +300 ppm: THD+N at least 120 dB
+/// (the scratch model of rubato: about 142 dB). The first two blocks (the
+/// sinc's start-up, the correction's ramp) are left out; the figure goes to
+/// the CI log.
+#[test]
+fn a_1_khz_tone_keeps_a_thd_n_over_120_db_across_300_ppm() {
+    let blocks = quality::tone_blocks(1_000.0, 10);
+    for ppm in [-300.0, 0.0, 300.0] {
+        let mut a = Asrc::new(96_000.0).unwrap();
+        a.set_correction_ppm(ppm).unwrap();
+        let mut out = Vec::new();
+        for (i, b) in blocks.iter().enumerate() {
+            let y = a.process(b).unwrap();
+            if i >= 2 {
+                out.extend_from_slice(y);
+            }
+        }
+        let f_norm = 1_000.0 / (96_000.0 * (1.0 + ppm * 1e-6));
+        let db = quality::thd_n_db(&quality::left(&out), f_norm);
+        writeln!(
+            std::io::stderr(),
+            "asrc 48 -> 96 kHz at {ppm:+} ppm: THD+N {db:.1} dB"
+        )
+        .unwrap();
+        assert!(db >= 120.0, "{ppm} ppm: {db:.1} dB");
+    }
+}
+
+/// A 20 kHz tone at −1 dBFS, 48 → 96 kHz: its image (28 kHz) and anything
+/// else between 24 and 48 kHz stays under −120 dBFS (the model: ≤ −149 dBFS),
+/// at 0 and +300 ppm.
+#[test]
+fn a_20_khz_tone_leaves_nothing_over_minus_120_dbfs_from_24_to_48_khz() {
+    let blocks = quality::tone_blocks(20_000.0, 8);
+    for ppm in [0.0, 300.0] {
+        let mut a = Asrc::new(96_000.0).unwrap();
+        a.set_correction_ppm(ppm).unwrap();
+        let mut out = Vec::new();
+        for (i, b) in blocks.iter().enumerate() {
+            let y = a.process(b).unwrap();
+            if i >= 2 {
+                out.extend_from_slice(y);
+            }
+        }
+        let y = quality::left(&out);
+        let fs = 96_000.0 * (1.0 + ppm * 1e-6);
+        let (db, hz) = quality::band_peak_dbfs(&y[..8_192], fs, 24_000.0, 48_000.0);
+        writeln!(
+            std::io::stderr(),
+            "asrc 48 -> 96 kHz at {ppm:+} ppm: loudest in 24-48 kHz {db:.1} dBFS at {hz:.0} Hz"
+        )
+        .unwrap();
+        assert!(db <= -120.0, "{ppm} ppm: {db:.1} dBFS at {hz:.0} Hz");
+    }
+}
+
+/// The dashboard's tooltips (`sp_core::asio_resampling`, Slovak) name the
+/// output's own figures: the 66,7 ms target, the 5 ms splice, the ±300 ppm
+/// budget, the 5 ppm/s slew, the lock's 30 points in a minute, the
+/// resampler's 256 taps and 256× table. Any change here must change the
+/// text too (review round 2: they were written as literals).
+#[test]
+fn the_dashboards_tooltips_name_the_outputs_own_figures() {
+    use crate::playback::asrc_servo::{
+        BASE_LATENCY_100NS, HARD_EXCESS_100NS, MAX_PPM, MAX_SLEW_PPM_PER_S, REGRESSION_LOCK_SPAN_S,
+        REGRESSION_MIN_POINTS,
+    };
+    use sp_core::asio_resampling::{
+        CARD_TIP, CONVERSION_TIP, CORRECTION_TIP, FAULTS_TIP, LATENCY_TIP, SLEW_TIP,
+    };
+    let target_ms = format!("{:.1}", BASE_LATENCY_100NS as f64 / 10_000.0).replace('.', ",");
+    let has = |tip: &str, figure: String| assert!(tip.contains(&figure), "{figure:?} in {tip:?}");
+    has(LATENCY_TIP, format!("cieľ {target_ms} ms"));
+    has(
+        FAULTS_TIP,
+        format!("s {} ms prelínaním", SPLICE_FADE_S * 1_000.0),
+    );
+    // Review round 4: a deficit is also a delayed output 4 slots early.
+    let edge_ms = format!("{:.1}", HARD_EXCESS_100NS as f64 / 10_000.0).replace('.', ",");
+    has(FAULTS_TIP, format!("o viac ako {edge_ms} ms skôr"));
+    has(CORRECTION_TIP, format!("±{MAX_PPM} ppm"));
+    has(SLEW_TIP, format!("o {MAX_SLEW_PPM_PER_S} ppm za sekundu"));
+    has(CARD_TIP, format!("({REGRESSION_MIN_POINTS} bodov)"));
+    assert_eq!(REGRESSION_LOCK_SPAN_S, 60.0, "CARD_TIP: po minúte");
+    has(CARD_TIP, "po minúte".to_string());
+    let p = asrc_params();
+    has(CONVERSION_TIP, format!("{} koeficientov", p.sinc_len));
+    has(
+        CONVERSION_TIP,
+        format!("tabuľka {}×", p.oversampling_factor),
+    );
+    assert_eq!(p.window, WindowFunction::BlackmanHarris2);
+    has(CONVERSION_TIP, "BlackmanHarris²".to_string());
 }

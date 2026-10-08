@@ -42,6 +42,7 @@ import tempfile
 # `os.replace` (MoveFileExW) fails with WinError 5 while SongPlayer holds the
 # old stem open, which it does whenever the song is loaded. stdlib only;
 # shipped next to this script by the Rust stem worker.
+import audio_window as aw
 import win_replace as wr
 
 # The chosen karaoke separator (MIT-licensed, best-measured 8 GB two-stem).
@@ -133,40 +134,11 @@ def _stitch_segments(segments, step_samples, overlap_samples):
 # block, holding only the crossfade tail of the previous segment.
 
 
-# A header frame count at or above this is libsndfile's "unknown length"
-# sentinel (e.g. a FLAC from a piped encoder has STREAMINFO total samples = 0).
-_UNKNOWN_FRAMES = 1 << 62
-
-
-def _audio_info(path):
-    """(sample_rate, frames) of an audio file, from its header — no samples
-    are read. The segment plan trusts this count, so an unknown or empty one
-    raises a clear ValueError instead of planning a bogus number of windows."""
-    import soundfile as sf
-
-    info = sf.info(path)
-    if info.samplerate <= 0 or info.frames <= 0 or info.frames >= _UNKNOWN_FRAMES:
-        raise ValueError(
-            f"unusable header in {path}: frame count {info.frames} "
-            f"at {info.samplerate} Hz (unknown or empty length)"
-        )
-    return info.samplerate, info.frames
-
-
-def _read_window(path, in_sr, start_s, end_s):
-    """Read ONE native-rate window `[start_s, end_s]` straight from the file.
-
-    Same sample bounds and layout as the old whole-mix slice
-    (`full[s0:s1]` / `full[:, s0:s1].T` of `librosa.load(sr=None, mono=False)`,
-    which is itself a soundfile float32 read): float32, `(n,)` for mono,
-    `(n, ch)` otherwise. soundfile clamps `stop` to the file length exactly
-    like the numpy slice did."""
-    import soundfile as sf
-
-    s0 = max(0, int(round(start_s * in_sr)))
-    s1 = int(round(end_s * in_sr))
-    data, _ = sf.read(path, start=s0, stop=s1, dtype="float32", always_2d=False)
-    return data
+# #233 release review: the header read, the window read and the streamed
+# overlap-add are `audio_window.py`'s, shared with the lyrics worker.
+_UNKNOWN_FRAMES = aw.UNKNOWN_FRAMES
+_audio_info = aw.audio_info
+_read_window = aw.read_window
 
 
 class _StreamingStitchWriter:
@@ -228,14 +200,7 @@ class _StreamingStitchWriter:
         self.step_samples = step_samples
         self.overlap_samples = overlap_samples
         self.channels = channels
-        self._added = 0
-        # Global sample index of acc[0] == number of samples already written.
-        self._base = 0
-        shape = (0,) if channels == 1 else (0, channels)
-        self._acc = np.zeros(shape, dtype=np.float64)
-        self._wsum = np.zeros(0, dtype=np.float64)
-        self.retained_samples = 0
-        self.max_retained_samples = 0
+        self._ola = aw.OverlapAdd(n_segments, step_samples, overlap_samples)
         # format= is REQUIRED: the atomic temp path ends in ".tmp".
         self._file = sf.SoundFile(
             self.tmp_path,
@@ -256,59 +221,20 @@ class _StreamingStitchWriter:
             self.abort()
         return False
 
-    def _weights(self, i, length):
-        # IDENTICAL to the weights in `_stitch_segments`.
-        np = self._np
-        w = np.ones(length, dtype=np.float64)
-        if self.overlap_samples > 0:
-            f = min(self.overlap_samples, length)
-            if i > 0:
-                w[:f] = np.linspace(0.0, 1.0, f, endpoint=False)
-            if i < self.n_segments - 1:
-                w[length - f :] = np.linspace(1.0, 0.0, f, endpoint=False)
-        return w
+    @property
+    def retained_samples(self):
+        return self._ola.retained_samples
 
-    def _grow_to(self, end):
-        """Extend the accumulator (zero-filled) so it covers up to global
-        sample `end`."""
-        np = self._np
-        extra = end - self._base - self._wsum.shape[0]
-        if extra <= 0:
-            return
-        pad_shape = (extra,) if self.channels == 1 else (extra, self.channels)
-        self._acc = np.concatenate([self._acc, np.zeros(pad_shape, dtype=np.float64)])
-        self._wsum = np.concatenate([self._wsum, np.zeros(extra, dtype=np.float64)])
-
-    def _flush_to(self, end):
-        """Normalise + write every sample before global index `end`; keep the
-        rest as the retained tail."""
-        np = self._np
-        self._grow_to(end)
-        k = end - self._base
-        if k > 0:
-            block = self._acc[:k].copy()
-            wsum = self._wsum[:k]
-            nz = wsum > 1e-9
-            if block.ndim == 2:
-                block[nz] /= wsum[nz][:, None]
-            else:
-                block[nz] /= wsum[nz]
-            out = np.clip(block.astype(np.float32), -1.0, 1.0)
-            self._file.write(out)
-            # Copy so the written head is actually released.
-            self._acc = self._acc[k:].copy()
-            self._wsum = self._wsum[k:].copy()
-            self._base = end
-        self.retained_samples = self._wsum.shape[0]
-        self.max_retained_samples = max(
-            self.max_retained_samples, self.retained_samples
-        )
+    @property
+    def max_retained_samples(self):
+        return self._ola.max_retained_samples
 
     def add_segment(self, segment):
         """Add the next segment (float, `(n,)` for 1 channel else `(n, ch)`)
-        and write every sample that no later segment can still touch."""
+        and write every sample that no later segment can still touch
+        (`audio_window.OverlapAdd`), clipped to [-1, 1]."""
         np = self._np
-        i = self._added
+        i = self._ola.added
         if i >= self.n_segments:
             raise RuntimeError(f"more than the declared {self.n_segments} segments")
         seg = np.asarray(segment, dtype=np.float64)
@@ -318,38 +244,17 @@ class _StreamingStitchWriter:
                 f"segment {i} has shape {seg.shape}, expected "
                 f"{'(n,)' if want_ndim == 1 else f'(n, {self.channels})'}"
             )
-        length = seg.shape[0]
-        start = i * self.step_samples
-        end = start + length
-        # Invariant: everything before this segment's start is already written.
-        assert start >= self._base, (start, self._base)
-        self._grow_to(end)
-        w = self._weights(i, length)
-        a, b = start - self._base, end - self._base
-        self._acc[a:b] += seg * (w[:, None] if seg.ndim == 2 else w)
-        self._wsum[a:b] += w
-        self._added += 1
-        if self._added < self.n_segments:
-            # No later segment starts before the next one: all of it is final.
-            self._flush_to(self._added * self.step_samples)
-        else:
-            held_end = self._base + self._wsum.shape[0]
-            if held_end > end:
-                # The reference sizes its output by the LAST segment; an
-                # earlier segment reaching past it does not fit there either.
-                raise ValueError(
-                    f"segment {i - 1} ends past the last segment "
-                    f"({held_end} > {end} samples)"
-                )
-            self._flush_to(end)
+        block = self._ola.add(seg)
+        if block.shape[0] > 0:
+            self._file.write(np.clip(block, -1.0, 1.0))
 
     def close(self):
         """Publish: requires every declared segment; atomic POSIX rename
         (`win_replace.replace_file`, #207)."""
-        if self._added != self.n_segments:
+        if self._ola.added != self.n_segments:
             self.abort()
             raise RuntimeError(
-                f"stitch incomplete: {self._added} of {self.n_segments} segments added"
+                f"stitch incomplete: {self._ola.added} of {self.n_segments} segments added"
             )
         try:
             self._file.close()

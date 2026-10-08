@@ -179,7 +179,7 @@ test.describe("Lyrics dashboard — song detail modal", () => {
     // <details><summary>Raw audit log</summary> — the summary is visible by default
     await expect(page.locator("details summary").filter({ hasText: "Surový audit" })).toBeVisible({ timeout: 5000 });
     await expect(page.locator(".modal p")).toContainText("Zdroj:");
-    await expect(page.locator(".modal p")).toContainText("ensemble:qwen3+autosub");
+    await expect(page.locator(".modal p")).toContainText("lrclib+mtl@rev1/g35t-ok");
     await expect(page.locator(".modal p")).toContainText("Kvalita:");
     await expect(page.locator(".modal p")).toContainText("0.82");
   });

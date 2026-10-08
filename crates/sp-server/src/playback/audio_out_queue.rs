@@ -4,10 +4,10 @@
 //! A stopped queue takes no more blocks; `stop` lets the thread drain what is
 //! queued (process shutdown), `discard` drops it (a runtime replace or
 //! removal, `audio_out_task::apply`). Also the outputs' one poison-tolerant
-//! [`lock`].
+//! [`lock`] and their threads' [`RunGuard`].
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -34,6 +34,45 @@ pub struct BlockQueue {
     ready: Condvar,
     bound: usize,
     dropped: AtomicU64,
+}
+
+/// #233 release review: held by an output's thread loop (`run_vban_loop`,
+/// `run_asio_worker`) for its whole run. Its drop clears the output's
+/// `running` flag, and on an unwind (the loop panicked) also records why the
+/// thread stopped in the output's start error, so the output never reads
+/// "running" for good and the outputs task rebuilds it on its next pass
+/// (`RunningOutput::start_failed`).
+pub(crate) struct RunGuard<'a> {
+    running: &'a AtomicBool,
+    start_error: &'a Mutex<Option<String>>,
+    /// The transport the stop names ("VBAN", "ASIO").
+    what: &'static str,
+}
+
+impl<'a> RunGuard<'a> {
+    /// Marks the output running until the guard drops.
+    pub(crate) fn start(
+        running: &'a AtomicBool,
+        start_error: &'a Mutex<Option<String>>,
+        what: &'static str,
+    ) -> Self {
+        running.store(true, Ordering::SeqCst);
+        Self {
+            running,
+            start_error,
+            what,
+        }
+    }
+}
+
+impl Drop for RunGuard<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            *lock(self.start_error) =
+                Some(format!("the {} thread stopped: it panicked", self.what));
+        }
+        self.running.store(false, Ordering::SeqCst);
+    }
 }
 
 /// A poisoned lock is taken anyway (its data is plain counters and queues).

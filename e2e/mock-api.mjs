@@ -719,7 +719,12 @@ function asioBlockRefusal(a, at) {
 // #233 lane 3: the box's registered ASIO drivers (two, so a test can pick
 // one that is not the first).
 app.get("/api/v1/audio/asio-drivers", (_req, res) => {
-  if (maybeFail("asio-drivers", res)) return;
+  // As the server (#233 release review): a list it could not read is a 500
+  // naming why, in plain text — never an empty list.
+  if (failModes["asio-drivers"]) {
+    res.status(500).type("text/plain").send("the ASIO driver list could not be read: mock fail-mode");
+    return;
+  }
   res.json({ drivers: ["Dante Virtual Soundcard (x64)", "Blackmagic ASIO"] });
 });
 
@@ -753,6 +758,8 @@ app.post("/__mock/settings-reset", (_req, res) => {
   outputsSkipped.clear();
   asioHeld.clear();
   asioMeasuring.clear();
+  asioResampling.clear();
+  vbanHeld.clear();
   res.json({ status: "reset" });
 });
 
@@ -1299,6 +1306,24 @@ app.post("/__mock/asio-state", (req, res) => {
   });
   res.json({ held: [...asioHeld.keys()] });
 });
+// #233 release review: VBAN outputs the mock holds waiting (`/__mock/vban-state
+// {id, reason_code, reason}`, as the server's `vban_reason_code`), cleared by
+// `/__mock/settings-reset`.
+const vbanHeld = new Map();
+app.post("/__mock/vban-state", (req, res) => {
+  const b = req.body || {};
+  vbanHeld.set(String(b.id), { reason_code: b.reason_code ?? null, reason: b.reason ?? null });
+  res.json({ held: [...vbanHeld.keys()] });
+});
+// #233 (the owner's resampling row): a running ASIO output's resampling
+// figures the mock serves instead of its defaults (`/__mock/asio-resampling
+// {id, ...fields of outputs[i].asio}`), cleared by `/__mock/settings-reset`.
+const asioResampling = new Map();
+app.post("/__mock/asio-resampling", (req, res) => {
+  const { id, ...fields } = req.body || {};
+  asioResampling.set(String(id), fields);
+  res.json({ set: [...asioResampling.keys()] });
+});
 // An ASIO entry as the server lists it: the driver "runs" at the network
 // rate (Int32LSB, 128 frames); a disabled one carries no `asio`.
 function mockAsioOutput(e, network) {
@@ -1333,13 +1358,17 @@ function mockAsioOutput(e, network) {
             rate_ppm: running ? 0.4 : 0,
             locked: running,
             latency_ms: latency,
+            offset_ms: 0,
+            slew_eta_s: null,
             underruns: 0,
             resets: 0,
-            recentres: running ? 1 : 0,
+            hard_recentres: 0,
+            last_hard_recentre: null,
             overflows: 0,
             overloads: 0,
             retry_in_s: held ? held.retry_in_s : null,
             reason_code: held ? held.reason_code : null,
+            ...(running ? asioResampling.get(e.id) || {} : {}),
           },
         }
       : {}),
@@ -1352,13 +1381,15 @@ function mockOutputs() {
     if (e.type === "asio") return mockAsioOutput(e, network);
     const rate = e.rate === "network" || e.rate === undefined ? network : Number(e.rate);
     const enabled = e.enabled !== false;
+    const held = enabled ? vbanHeld.get(e.id) : undefined;
     return {
       id: e.id,
       type: e.type,
       name: e.name,
       enabled,
-      state: enabled ? "running" : "disabled",
-      reason: null,
+      state: !enabled ? "disabled" : held ? "waiting" : "running",
+      reason: held ? held.reason : null,
+      ...(held && held.reason_code ? { reason_code: held.reason_code } : {}),
       rate,
       format: (e.vban && e.vban.format) || "int24",
       channels: 2,
@@ -1633,7 +1664,7 @@ app.get('/api/v1/lyrics/songs', (req, res) => {
       title: 'Song One',
       song: 'One',
       artist: 'Artist',
-      source: 'ensemble:qwen3+autosub',
+      source: 'lrclib+mtl@rev1/g35t-ok',
       pipeline_version: 2,
       quality_score: 0.82,
       has_lyrics: true,
@@ -1689,7 +1720,7 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
       youtube_id: 'abc',
       song: 'Song',
       artist: 'Artist',
-      source: 'ensemble:qwen3+autosub',
+      source: 'lrclib+mtl@rev1/g35t-ok',
       pipeline_version: 2,
       quality_score: 0.82,
       has_lyrics: true,
@@ -1697,9 +1728,9 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
       manual_priority: false,
       lyrics_reference: false,
     },
-    lyrics_json: { version: 2, source: 'ensemble:qwen3+autosub', lines: [] },
+    lyrics_json: { version: 2, source: 'lrclib+mtl@rev1/g35t-ok', lines: [] },
     audit_json: {
-      providers_run: ['qwen3', 'autosub'],
+      providers_run: ['mtl', 'gemini-3-5-transcribe'],
       quality_metrics: { avg_confidence: 0.82 },
     },
   });

@@ -47,7 +47,7 @@ fn release(i: usize) {
 
 #[test]
 fn listing_never_fails_and_an_unknown_driver_is_not_found_with_the_list() {
-    let names = list_drivers();
+    let names = list_drivers().expect("the runner's registry reads (no key = no driver)");
     let mut d = WinAsioDevice::new();
     match d.open("No Such Card (songplayer test)", [0, 1]) {
         Err(Reason::NotFound { present }) => assert_eq!(present, names),

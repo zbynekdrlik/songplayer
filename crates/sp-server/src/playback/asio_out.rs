@@ -10,8 +10,14 @@
 //!   driver and shows its reason.
 //! - running: each program block → the servo's observation (the ring + the
 //!   splice's hold, the splice's pending skip, the hand-off lateness, the
-//!   card's consumed frames) → its correction to the resampler, its
-//!   re-centre to the splice → the ring. Then the driver's messages: a reset
+//!   card's consumed frames) → its correction to the resampler (an offset is
+//!   drained by the ratio, never spliced) → the ring. Only the first block's
+//!   priming and a hard re-centre (too little buffered — the ring would run
+//!   dry, or a delayed output played over 4 slots early — or too much, the
+//!   ring would overflow: a fault, WARNed at most once per 5 s with what it
+//!   held back, and shown as `last_hard_recentre`) go through the splice.
+//!   Then the
+//!   driver's messages: a reset
 //!   (or a size change), a rate change or 2 s without a callback closes the
 //!   output (`asio_state::close_reason`, `StallWatch`).
 //! - parked (`Reason::Parked`, a driver callback that never returned): the
@@ -36,10 +42,13 @@ use crate::playback::asio_state::{
     buffer_note, close_reason, failures_after_close, ring_capacity_frames,
 };
 use crate::playback::asrc::{Asrc, Splice};
-use crate::playback::asrc_servo::{BASE_LATENCY_100NS, Observation, Servo, frames_from_100ns};
+use crate::playback::asrc_servo::{
+    BASE_LATENCY_100NS, Observation, Recentre, Servo, frames_from_100ns,
+};
 use crate::playback::audio_out::{STATE_OPENING, STATE_RUNNING, STATE_WAITING};
 use crate::playback::audio_out_block::ProgramBlock;
-use crate::playback::audio_out_queue::{BlockQueue, Take, lock};
+use crate::playback::audio_out_queue::{BlockQueue, RunGuard, Take, lock};
+use crate::playback::stat_window::WarnLimiter;
 use crate::playback::vban_out::{VbanClock, queue_bound, should_log};
 use crate::playback::vban_packet::{VBAN_BLOCK_SAMPLES, VBAN_CHANNELS};
 
@@ -101,12 +110,25 @@ pub struct AsioStatus {
     /// The output's latency from the boundary, ms (`asio_latency_ms`; 0
     /// until the servo measured its first window, and while waiting).
     pub latency_ms: f64,
+    /// The servo's last window: the latency less its target, ms — the
+    /// offset the resampler's ratio drains (positive = later than the
+    /// target; 0 while waiting).
+    pub offset_ms: f64,
+    /// The seconds the drain still needs (`None` inside the calm zone, and
+    /// while waiting).
+    pub slew_eta_s: Option<f64>,
     /// Callbacks that found the ring short, since the output was built.
     pub underruns: u64,
     /// Closes (a reset, a rate change, a stall) since the output was built.
     pub resets: u64,
-    /// The servo's re-centres, since the output was built.
-    pub recentres: u64,
+    /// Hard re-centres (a fade, then silence inserted or audio skipped,
+    /// because too little was buffered — the ring would run dry, or a
+    /// delayed output played more than 4 slots early — or too much, the ring
+    /// would overflow), since the output was built: faults. An open's
+    /// priming is none.
+    pub hard_recentres: u64,
+    /// The last hard re-centre, since the output was built.
+    pub last_hard_recentre: Option<HardRecentre>,
     /// Frames the ring had no room for, since the output was built.
     pub overflows: u64,
     /// The driver's `kAsioOverload` messages, since the output was built.
@@ -117,6 +139,45 @@ pub struct AsioStatus {
     /// While waiting: the reason's stable code (`Reason::code`).
     pub reason_code: Option<&'static str>,
 }
+
+/// A hard re-centre as the status shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct HardRecentre {
+    /// `deficit` (too little buffered: the ring would run dry, or a delayed
+    /// output played more than 4 slots early) or `excess` (the ring would
+    /// overflow).
+    pub cause: &'static str,
+    /// Inserted (> 0) or skipped (< 0), ms.
+    pub ms: f64,
+    /// The block's hand-off lateness (handled − its boundary), ms.
+    pub lateness_ms: f64,
+    /// How long ago, s (as of the status's last update).
+    pub ago_s: f64,
+}
+
+/// A hard re-centre as the worker keeps it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Hard {
+    cause: Recentre,
+    recentre_100ns: i64,
+    lateness_100ns: i64,
+    at_100ns: i64,
+}
+
+impl Hard {
+    /// As the status shows it, at `now_100ns`.
+    fn status(&self, now_100ns: i64) -> HardRecentre {
+        HardRecentre {
+            cause: self.cause.as_str(),
+            ms: self.recentre_100ns as f64 / 10_000.0,
+            lateness_ms: self.lateness_100ns as f64 / 10_000.0,
+            ago_s: (now_100ns - self.at_100ns) as f64 / 1e7,
+        }
+    }
+}
+
+/// At most one hard re-centre WARN per this much of the wall (100 ns).
+const HARD_WARN_EVERY_100NS: i64 = 50_000_000;
 
 /// One read of an ASIO output's shared side.
 #[derive(Clone, Debug, PartialEq)]
@@ -287,7 +348,7 @@ struct Closed {
     underruns: u64,
     overloads: u64,
     overflows: u64,
-    recentres: u64,
+    hard_recentres: u64,
 }
 
 impl Closed {
@@ -296,7 +357,7 @@ impl Closed {
         self.underruns += device.underruns();
         self.overloads += run.overloads;
         self.overflows += run.overflows;
-        self.recentres += run.servo.status().recentres;
+        self.hard_recentres += run.servo.status().hard_recentres;
     }
 
     /// These counts as the output's status counters.
@@ -304,7 +365,7 @@ impl Closed {
         s.underruns = self.underruns;
         s.overloads = self.overloads;
         s.overflows = self.overflows;
-        s.recentres = self.recentres;
+        s.hard_recentres = self.hard_recentres;
     }
 }
 
@@ -318,6 +379,9 @@ pub struct AsioWorker {
     failures: u32,
     resets: u64,
     closed: Closed,
+    /// The last hard re-centre (shown with its age), and its WARN's limit.
+    last_hard: Option<Hard>,
+    hard_warns: WarnLimiter,
 }
 
 impl AsioWorker {
@@ -330,6 +394,8 @@ impl AsioWorker {
             failures: 0,
             resets: 0,
             closed: Closed::default(),
+            last_hard: None,
+            hard_warns: WarnLimiter::default(),
         }
     }
 
@@ -347,7 +413,12 @@ impl AsioWorker {
                 let at = *retry_at_100ns;
                 let left = at - now_100ns;
                 let retry_in_s = (at != NEVER).then_some(left as f64 / 1e7);
-                out.update(|l| l.status.retry_in_s = retry_in_s);
+                // The last hard re-centre ages while the output waits too.
+                let last_hard = self.last_hard.map(|h| h.status(now_100ns));
+                out.update(|l| {
+                    l.status.retry_in_s = retry_in_s;
+                    l.status.last_hard_recentre = last_hard;
+                });
                 return left.min(POLL_100NS);
             }
             State::Closed { .. } => {
@@ -356,8 +427,11 @@ impl AsioWorker {
             }
             State::Running(run) => run,
         };
-        if let Some(b) = block {
-            process(run, out, device, now_100ns, b);
+        if let Some(hard) = block.and_then(|b| process(run, out, device, now_100ns, b)) {
+            if let Some(held_back) = self.hard_warns.admit(now_100ns, HARD_WARN_EVERY_100NS) {
+                log_hard(&out.id, &hard, held_back);
+            }
+            self.last_hard = Some(hard);
         }
         let ev = device.poll();
         run.overloads = ev.overloads;
@@ -378,12 +452,23 @@ impl AsioWorker {
             Some(reason) => {
                 let ran = now_100ns - run.opened_at_100ns;
                 self.closed.add(run, &*device);
-                // The run's counts go out with its close.
+                // The run's counts go out with its close, and its last hard
+                // re-centre.
                 let closed = self.closed;
-                out.update(|l| closed.write(&mut l.status));
+                let last_hard = self.last_hard.map(|h| h.status(now_100ns));
+                out.update(|l| {
+                    closed.write(&mut l.status);
+                    l.status.last_hard_recentre = last_hard;
+                });
                 self.close(out, device, now_100ns, reason, ran);
             }
-            None => publish(run, out, &*device, &self.closed),
+            None => publish(
+                run,
+                out,
+                &*device,
+                &self.closed,
+                self.last_hard.map(|h| h.status(now_100ns)),
+            ),
         }
         POLL_100NS
     }
@@ -481,6 +566,8 @@ impl AsioWorker {
             l.status.rate_ppm = 0.0;
             l.status.locked = false;
             l.status.latency_ms = 0.0;
+            l.status.offset_ms = 0.0;
+            l.status.slew_eta_s = None;
         });
     }
 
@@ -505,7 +592,7 @@ fn build(out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) -> Result<R
         opened: Opened { rate, ..opened },
         opened_at_100ns: now_100ns,
         producer,
-        servo: Servo::new(rate, out.target_100ns),
+        servo: Servo::new(rate, out.target_100ns).with_callback_frames(opened.buffer_frames),
         splice: Splice::new(rate, capacity, asrc.max_out_frames()),
         asrc,
         zeros: vec![0.0; VBAN_BLOCK_SAMPLES],
@@ -523,14 +610,15 @@ fn ring_frames(producer: &rtrb::Producer<f32>) -> usize {
     (producer.buffer().capacity() - producer.slots()) / VBAN_CHANNELS
 }
 
-/// One program block into the ring (see the module doc).
+/// One program block into the ring (see the module doc); a hard re-centre
+/// it made, if any.
 fn process(
     run: &mut Run,
     out: &AsioOut,
     device: &mut dyn AsioDevice,
     now_100ns: i64,
     block: ProgramBlock,
-) {
+) -> Option<Hard> {
     let action = run.servo.observe(Observation {
         handled_100ns: now_100ns,
         stamp_100ns: block.due_100ns,
@@ -541,6 +629,15 @@ fn process(
     if let Err(e) = run.asrc.set_correction_ppm(action.correction_ppm) {
         warn!(id = %out.id, %e, "asio output: the resampler refused the servo's correction");
     }
+    let hard = action
+        .recentre
+        .filter(|why| *why != Recentre::Prime)
+        .map(|cause| Hard {
+            cause,
+            recentre_100ns: action.recentre_100ns,
+            lateness_100ns: now_100ns - block.due_100ns,
+            at_100ns: now_100ns,
+        });
     let frames = frames_from_100ns(action.recentre_100ns, run.opened.rate);
     match frames.cmp(&0) {
         std::cmp::Ordering::Greater => run.splice.insert(frames.unsigned_abs() as usize),
@@ -556,7 +653,7 @@ fn process(
         Ok(r) => r,
         Err(e) => {
             warn!(id = %out.id, %e, "asio output: the resampler refused a block");
-            return;
+            return hard;
         }
     };
     let spliced = run.splice.process(resampled);
@@ -567,6 +664,21 @@ fn process(
         run.primed = true;
     }
     out.update(|l| l.blocks_sent += 1);
+    hard
+}
+
+/// A hard re-centre's WARN (`held_back`: those since the last WARN).
+#[cfg_attr(test, mutants::skip)] // logging only; the decision is WarnLimiter's (tested)
+fn log_hard(id: &str, h: &Hard, held_back: u64) {
+    let s = h.status(h.at_100ns);
+    warn!(
+        id,
+        cause = s.cause,
+        ms = s.ms,
+        lateness_ms = s.lateness_ms,
+        held_back,
+        "asio output: a hard re-centre (a fault) — too little buffered (deficit: the ring would run dry, or a delayed output played over 4 slots early) or too much (excess: the ring would overflow): silence inserted (+) or audio skipped (−) under fades"
+    );
 }
 
 /// The blocks an open dropped, logged when there were any.
@@ -582,7 +694,13 @@ fn log_stale(id: &str, stale: usize) {
 
 /// The running output's numbers into its status (its counters: the closed
 /// runs' + this run's).
-fn publish(run: &Run, out: &AsioOut, device: &dyn AsioDevice, closed: &Closed) {
+fn publish(
+    run: &Run,
+    out: &AsioOut,
+    device: &dyn AsioDevice,
+    closed: &Closed,
+    last_hard: Option<HardRecentre>,
+) {
     let servo = run.servo.status();
     let mut counters = *closed;
     counters.add(run, device);
@@ -597,6 +715,9 @@ fn publish(run: &Run, out: &AsioOut, device: &dyn AsioDevice, closed: &Closed) {
         l.status.rate_ppm = servo.rate_ppm;
         l.status.locked = servo.locked;
         l.status.latency_ms = latency;
+        l.status.offset_ms = servo.offset_ms;
+        l.status.slew_eta_s = servo.slew_eta_s;
+        l.status.last_hard_recentre = last_hard;
         counters.write(&mut l.status);
     });
 }
@@ -605,7 +726,9 @@ fn publish(run: &Run, out: &AsioOut, device: &dyn AsioDevice, closed: &Closed) {
 /// answer), step, until stopped; then release the driver.
 #[cfg_attr(test, mutants::skip)] // a blocking loop around AsioWorker::step (tested step by step)
 pub fn run_asio_worker(out: &AsioOut, device: &mut dyn AsioDevice, clock: &mut dyn VbanClock) {
-    out.running.store(true, Ordering::SeqCst);
+    // #233 release review: cleared at the end, and on a panic the start
+    // error names the stop, so the outputs task rebuilds the output.
+    let running = RunGuard::start(&out.running, &out.start_error, "ASIO");
     let mut worker = AsioWorker::new(clock.now_100ns());
     let mut wait_100ns = 0;
     loop {
@@ -618,7 +741,7 @@ pub fn run_asio_worker(out: &AsioOut, device: &mut dyn AsioDevice, clock: &mut d
         wait_100ns = worker.step(out, device, clock.now_100ns(), block);
     }
     worker.shutdown(device);
-    out.running.store(false, Ordering::SeqCst);
+    drop(running);
     info!(id = %out.id, driver = %out.driver, "asio output: stopped");
 }
 
