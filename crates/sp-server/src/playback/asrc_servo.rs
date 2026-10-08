@@ -554,11 +554,12 @@ impl Servo {
         // already moves nothing; the EMA and the integral must not either).
         let dt_s = (dt_100ns as f64 / 1e7).max(0.0);
         let rate = self.regression.rate_ppm();
-        // The offset slew beyond the calm zone; the level loop's I freezes
-        // on the whole sum (its anti-windup counts the slew too).
-        let drain = braking_ppm(err_ms, self.calm_ms);
-        let pi = self.level.update(err_ms, dt_s, rate + drain);
-        let target = (rate + drain + pi).clamp(-MAX_PPM, MAX_PPM);
+        // The card's rate plus the offset slew beyond the calm zone; the
+        // level loop's I freezes on the whole sum (its anti-windup counts the
+        // slew too).
+        let base = rate + braking_ppm(err_ms, self.calm_ms);
+        let pi = self.level.update(err_ms, dt_s, base);
+        let target = (base + pi).clamp(-MAX_PPM, MAX_PPM);
         self.applied_ppm = slew(self.applied_ppm, target, dt_s);
         self.slew_eta_s = slew_eta_s(
             err_ms,
