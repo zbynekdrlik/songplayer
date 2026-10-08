@@ -646,7 +646,7 @@ impl Drop for WinAsioDevice {
 /// shows to the servo as a step it re-centres). Not an MMCSS thread
 /// (`asio_out.rs`). A failed spawn is the output's start error (the outputs
 /// task rebuilds it on its next pass).
-#[cfg_attr(test, mutants::skip)]
+#[cfg_attr(test, mutants::skip)] // an OS thread around run_asio_worker (its step is tested); the file is out of the gate anyway
 pub fn spawn_asio_thread(out: Arc<AsioOut>, id: String) {
     let watched = out.clone();
     let spawned = std::thread::Builder::new()
