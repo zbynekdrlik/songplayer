@@ -18,6 +18,7 @@ pub mod metadata;
 pub mod now_playing;
 pub mod obs;
 mod obs_bridge;
+pub mod paid_ai; // #229 item C: the ONE gate of every paid AI call
 pub mod panic_hook;
 pub mod peer; // #229: the node exchange (serve what this node has, ask peers first)
 pub mod playback;

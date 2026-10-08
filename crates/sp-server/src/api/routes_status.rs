@@ -10,6 +10,8 @@
 //!   step 6; none while "OBS manuál" is on program) — the set the playback
 //!   authority plays.
 //!
+//! #229 item C: the node's name (`node_name`) is read here too.
+//!
 //! #136: `HeavyContainmentStatus` lives here too (re-exported by `routes`),
 //! which made room in `routes.rs` for `status.metadata`; #223 S3b moved
 //! `ToolsStatusResponse` here too, for `status.video_decode`.
@@ -42,6 +44,18 @@ pub struct ToolsStatusResponse {
     pub js_runtime_ok: bool,
     #[serde(default)]
     pub deno_version: Option<String>,
+}
+
+/// #229 item C: this node's exchange name for `/api/v1/status` (the health
+/// bar's node segment): the trimmed `node_name`, `None` when it is unset or
+/// blank (the exchange off) or cannot be read.
+pub async fn node_name(pool: &sqlx::SqlitePool) -> Option<String> {
+    crate::db::models::get_setting(pool, sp_core::config::SETTING_NODE_NAME)
+        .await
+        .ok()
+        .flatten()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
 }
 
 /// `(active_scene, active_playlist_ids)` of `/api/v1/status` (module doc).
