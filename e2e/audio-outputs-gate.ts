@@ -79,6 +79,11 @@ export function gatedAsioOutputs(list: OutputStatus[]): OutputStatus[] {
   );
 }
 
+/** The enabled ASIO outputs waiting for their driver's clock (`no_clock`). */
+export function waitingForClock(list: OutputStatus[]): OutputStatus[] {
+  return list.filter(() => false);
+}
+
 /** Why an ASIO output's minute (two reads of `outputs[i]`) fails. */
 export function asioGateFailures(first: OutputStatus, second: OutputStatus): string[] {
   const f: string[] = [];

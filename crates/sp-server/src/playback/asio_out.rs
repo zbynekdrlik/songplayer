@@ -468,6 +468,7 @@ impl AsioWorker {
             .saturating_sub(run.consumed_at_prime);
         let clock = match clock_step(
             ticks,
+            run.primed,
             self.waiting_for_clock,
             now_100ns - run.opened_at_100ns,
         ) {

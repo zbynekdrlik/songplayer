@@ -288,3 +288,37 @@ fn a_reset_during_a_wait_for_the_clock_ends_the_wait() {
     assert_eq!(infos.len(), 2, "two opens: {infos:#?}");
     assert!(infos[1].contains("opened the driver"), "{infos:#?}");
 }
+
+/// Review round 10: in production the program's blocks reach the worker
+/// through the output's queue, and an open that takes longer than a slot
+/// finds some queued, which it drops as stale. While the output waits for
+/// its clock a reopen is a retry: its stale count logs at DEBUG too, so a
+/// minute-by-minute wait writes no INFO (two blocks queued before each of
+/// the reopens at blocks 1801 and 3603).
+#[test]
+fn a_reopen_during_a_wait_logs_its_stale_blocks_at_debug() {
+    let cap = Captured::default();
+    let o = out();
+    let mut d = FakeDevice::answering(vec![]);
+    let mut w = AsioWorker::new(T0);
+    tracing::subscriber::with_default(capturing(&cap), || {
+        w.step(&o, &mut d, T0, None);
+        for k in 1..=4000 {
+            let due = T0 + k * SLOT;
+            if k == 1801 || k == 3603 {
+                o.push(block_due(due - SLOT));
+                o.push(block_due(due));
+            }
+            w.step(&o, &mut d, due + 50_000, Some(block_due(due)));
+        }
+    });
+    assert_eq!(d.starts, 3);
+    assert_eq!(o.queued(), 0, "each reopen dropped them");
+    let infos = lines_at(&cap, " INFO ");
+    assert_eq!(infos.len(), 1, "only the first open: {infos:#?}");
+    let stale = lines_at(&cap, "DEBUG")
+        .into_iter()
+        .filter(|l| l.contains("dropped the blocks queued while the driver opened"))
+        .count();
+    assert_eq!(stale, 2);
+}

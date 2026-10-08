@@ -177,7 +177,7 @@ pub enum ClockStep {
 /// `since_open_100ns` ago, `waiting` for its clock or not (the owner's
 /// ruling, #233, 8.10.2026: a driver that opens and does not tick is a
 /// calm, visible wait, never a fault loop).
-pub fn clock_step(ticks: u64, waiting: bool, since_open_100ns: i64) -> ClockStep {
+pub fn clock_step(ticks: u64, _primed: bool, waiting: bool, since_open_100ns: i64) -> ClockStep {
     if ticks > 0 {
         return if waiting {
             ClockStep::ClockArrived

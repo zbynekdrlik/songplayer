@@ -403,26 +403,32 @@ fn a_driver_that_does_not_tick_waits_for_its_clock_and_reopens_every_60_s() {
         (NO_CLOCK_100NS, NO_CLOCK_REOPEN_100NS),
         (20_000_000, 600_000_000)
     );
+    // (ticks, primed, waiting, since the open, the decision). Review round
+    // 10: a tick before the priming while waiting (a burst at a reopen) is
+    // no clock; before the priming of a first open it is a tick.
     let table = [
-        (1, false, 0, Ticking),
-        (1, false, 700_000_000, Ticking),
-        (1, true, 0, ClockArrived),
-        (u64::MAX, true, 700_000_000, ClockArrived),
-        (0, false, 0, Quiet),
-        (0, false, 19_999_999, Quiet),
-        (0, false, 20_000_000, StartsWaiting),
-        (0, false, 599_999_999, StartsWaiting),
-        (0, true, 20_000_000, Quiet),
-        (0, true, 599_999_999, Quiet),
-        (0, true, 600_000_000, Reopen),
-        (0, false, 600_000_000, Reopen),
-        (0, true, i64::MAX, Reopen),
+        (1, true, false, 0, Ticking),
+        (1, false, false, 0, Ticking),
+        (1, true, false, 700_000_000, Ticking),
+        (1, true, true, 0, ClockArrived),
+        (u64::MAX, true, true, 700_000_000, ClockArrived),
+        (1, false, true, 0, Quiet),
+        (u64::MAX, false, true, 700_000_000, Quiet),
+        (0, true, false, 0, Quiet),
+        (0, false, false, 19_999_999, Quiet),
+        (0, true, false, 20_000_000, StartsWaiting),
+        (0, false, false, 599_999_999, StartsWaiting),
+        (0, true, true, 20_000_000, Quiet),
+        (0, false, true, 599_999_999, Quiet),
+        (0, true, true, 600_000_000, Reopen),
+        (0, false, false, 600_000_000, Reopen),
+        (0, true, true, i64::MAX, Reopen),
     ];
-    for (callbacks, waiting, since, want) in table {
+    for (ticks, primed, waiting, since, want) in table {
         assert_eq!(
-            clock_step(callbacks, waiting, since),
+            clock_step(ticks, primed, waiting, since),
             want,
-            "{callbacks} {waiting} {since}"
+            "{ticks} {primed} {waiting} {since}"
         );
     }
 }
