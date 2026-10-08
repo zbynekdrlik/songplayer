@@ -140,6 +140,7 @@ const dvs = (blocks: number, over: Partial<OutputStatus> = {}, asio: Partial<Asi
     ppm: 3.2,
     underruns: 0,
     resets: 0,
+    hard_recentres: 0,
     latency_ms: 70.7,
     ...asio,
   },
@@ -159,13 +160,14 @@ test.describe("ASIO gate (#233)", () => {
     const bad = dvs(
       1000,
       { state: "waiting", reason: "the driver asked for a reset", rate: 48000, latency_ms: 0 },
-      { underruns: 4, resets: 1, ppm: 301 },
+      { underruns: 4, resets: 1, hard_recentres: 2, ppm: 301 },
     );
     expect(asioGateFailures(dvs(100), bad)).toEqual([
       "the ASIO output is waiting (the driver asked for a reset)",
       "it runs at 48000 Hz, the driver at 96000 Hz",
       "4 underruns in the window",
       "the driver was reopened 1 times in the window",
+      "2 hard re-centres in the window",
       "its correction is 301 ppm (bound 300)",
       "its latency is 0 ms",
       "only 900 blocks in the window, want 1800",
@@ -173,6 +175,17 @@ test.describe("ASIO gate (#233)", () => {
     expect(asioGateFailures(dvs(100), dvs(1899))).toEqual(["only 1799 blocks in the window, want 1800"]);
     expect(asioGateFailures(dvs(100), dvs(1900, { latency_ms: 1000 }))).toEqual(["its latency is 1000 ms"]);
     expect(asioGateFailures(dvs(100), dvs(1900, { state: "opening" }))).toEqual(["the ASIO output is opening"]);
+  });
+
+  // #233 review round 2: a hard re-centre is the owner's "fault" (a faded
+  // skip or insert); the gate fails on one inside the minute, never on the
+  // ones before it.
+  test("a hard re-centre inside the minute fails, an earlier one does not", () => {
+    const hard = (n: number) => ({ hard_recentres: n });
+    expect(asioGateFailures(dvs(100, {}, hard(3)), dvs(1900, {}, hard(3)))).toEqual([]);
+    expect(asioGateFailures(dvs(100, {}, hard(3)), dvs(1900, {}, hard(4)))).toEqual([
+      "1 hard re-centres in the window",
+    ]);
   });
 
   test("an output with no ASIO telemetry, or a driver at no rate, fails", () => {
