@@ -612,5 +612,9 @@ pub fn hard_recentre(err_100ns: i64) -> Option<Recentre> {
 mod tests;
 
 #[cfg(test)]
+#[path = "asrc_servo_tests_regression.rs"]
+mod tests_regression;
+
+#[cfg(test)]
 #[path = "asrc_servo_sim_tests.rs"]
 mod sim_tests;
