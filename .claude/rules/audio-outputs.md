@@ -143,8 +143,11 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   The floor is ABSOLUTE (review round 2): an entry's delay raises the
   target, never the floor, so a delayed output 50 ms short still holds its
   delay in the ring and is slewed (the old edge, relative to the target,
-  spliced it); at delay 0 the mirrored edge (−66.7 ms) is below the floor
-  and changes nothing. Whether
+  spliced it); up to a delay of 83.3 ms the mirrored edge is at or below
+  the floor and changes nothing (at delay 0 it is −66.7 ms). A deficit
+  therefore means too little buffered: the ring would run dry, or a
+  delayed output played over 4 slots early (its dashboard cause "v
+  zásobníku chýbal zvuk", review round 4). Whether
   the floor should move up to the splice's hold + one slot (≈ 38.3 ms), so
   that a missing boundary at delay 0 is one faded insert rather than a run
   of underruns, is the main session's call (#233 comment 6055539144, Q2).
@@ -772,7 +775,8 @@ meria sa" while the server reads it 0), then the resampling — "48 → 96 kHz"
 SongPlayeru (odhad zamknutý)" ("… odhad sa ešte meria" before the lock),
 "korekcia −0,7 ppm (uberá vzorky)" / "(pridáva vzorky)", "oneskorenie v
 cieli" or "dorovnáva odchýlku +12,3 ms · ešte asi 45 s", and "posledný
-núdzový skok pred 3 min: +65,0 ms (zásobník by vyschol)" after a fault.
+núdzový skok pred 3 min: +65,0 ms (v zásobníku chýbal zvuk)" after a fault
+("zásobník by pretiekol" for an excess).
 Numbers the Slovak way (tenths half away from zero, a decimal comma, a true
 minus). Mock knob `/__mock/asio-resampling {id, …}` (reset by settings-reset);
 a waiting one its reason in

@@ -113,8 +113,9 @@ pub const HARD_FLOOR_100NS: i64 = 166_666;
 /// SongPlayer's last resort for an offset: a block more than four slots
 /// (133.3 ms) over the target is a hard re-centre — the ring holds the
 /// target + 4 slots + one block, so the next block would overflow it. The
-/// same edge under the target (review round 3): a delayed output's deficit
-/// stays above the floor, and slewing 4 slots takes ~8 min.
+/// same edge under the target (review round 3): above a delay of 83.3 ms
+/// it lies above the floor (at or under that delay the floor alone is the
+/// edge), and slewing 4 slots takes ~8 min.
 pub const HARD_EXCESS_100NS: i64 = 1_333_333;
 /// SongPlayer's: a window mean within this of the target is left to
 /// camera-box's level loop; beyond it the offset slew drains it (at least;
