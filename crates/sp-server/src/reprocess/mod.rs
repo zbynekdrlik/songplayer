@@ -192,7 +192,8 @@ impl ReprocessWorker {
 
         // #229: no early return during the rate-limit cooldown: each row still
         // takes a peer's title (`reprocess_one` checks the cooldown after it).
-        info!(count = rows.len(), "found videos to reprocess");
+        // DEBUG: rows held or waiting for a peer repeat every 30 min.
+        debug!(count = rows.len(), "found videos to reprocess");
         let mut success_count = 0;
 
         for row in rows {

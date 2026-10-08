@@ -46,7 +46,7 @@ impl LyricsWorker {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
-        if !self.translation_allowed().await {
+        if !self.translation_allowed(youtube_id).await {
             return;
         }
         match translator::translate_via_claude(ai_client, track, gender).await {
@@ -55,15 +55,17 @@ impl LyricsWorker {
         }
     }
 
-    /// #229 item C: a translation calls Claude — paid AI — so it runs only
-    /// while this node's switch is on (`paid_ai::enabled`, read live); while
-    /// it is off the translation is held (`paid_ai::hold`, one INFO for the
-    /// whole pass): the SK lines come with a peer's copy, or once it is on.
-    pub(crate) async fn translation_allowed(&self) -> bool {
+    /// #229 item C: the translation of `youtube_id` calls Claude — paid AI
+    /// — so it runs only while this node's switch is on (`paid_ai::enabled`,
+    /// read live); while it is off the song's translation is held
+    /// (`paid_ai::hold`, one INFO per song): its SK lines come with a peer's
+    /// copy, or once the switch is on. Asked only for a song the pass would
+    /// translate, so the status names no translation that is not waiting.
+    pub(crate) async fn translation_allowed(&self, youtube_id: &str) -> bool {
         if crate::paid_ai::enabled(&self.pool).await {
             return true;
         }
-        crate::paid_ai::hold(crate::paid_ai::Held::Translation, "");
+        crate::paid_ai::hold(crate::paid_ai::Held::Translation, youtube_id);
         false
     }
 
@@ -89,9 +91,6 @@ impl LyricsWorker {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
-        if !self.translation_allowed().await {
-            return;
-        }
         {
             let backoff = self.retry_backoff.lock().await;
             if let Some(until) = backoff.silent_until
@@ -106,6 +105,9 @@ impl LyricsWorker {
         };
         let video_id = row.id;
         let youtube_id = row.youtube_id.clone();
+        if !self.translation_allowed(&youtube_id).await {
+            return;
+        }
         let lyrics_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
         let content = match tokio::fs::read_to_string(&lyrics_path).await {
             Ok(c) => c,

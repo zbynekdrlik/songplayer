@@ -535,13 +535,16 @@ impl DubWorker {
 
     /// #229 item C: whether a dub may run now — only while this node's paid
     /// AI is on (`paid_ai::enabled`, read every tick). While it is off every
-    /// dub job waits where it is: no attempt, no failure mark, one INFO
-    /// (`paid_ai::hold`).
+    /// dub job waits where it is: no attempt, no failure mark; the job that
+    /// would run now is held (`paid_ai::hold`, one INFO per video), none
+    /// when there is no job.
     async fn may_dub(&self) -> bool {
         if crate::paid_ai::enabled(&self.pool).await {
             return true;
         }
-        crate::paid_ai::hold(crate::paid_ai::Held::Dub, "");
+        if let Ok(Some(job)) = models_dabing::get_next_dub_job(&self.pool).await {
+            crate::paid_ai::hold(crate::paid_ai::Held::Dub, &job.youtube_id);
+        }
         false
     }
 
@@ -720,6 +723,77 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(worker.first_gemini_key().await.as_deref(), Some("k1"));
+    }
+
+    /// The lines a scoped subscriber wrote (this test's thread only).
+    #[derive(Clone, Default)]
+    struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// #229 item C (review round 12): with paid AI off only a dub job that
+    /// would run now is held (its video named), none when there is no job,
+    /// so the status names no dub that is not waiting.
+    #[tokio::test]
+    async fn only_a_dub_job_that_would_run_is_held() {
+        let cap = Captured::default();
+        let writer = cap.clone();
+        let _log = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || writer.clone())
+                .with_ansi(false)
+                .with_max_level(tracing::Level::DEBUG)
+                .finish(),
+        );
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        crate::db::models::set_setting(&pool, "paid_ai_enabled", "false")
+            .await
+            .unwrap();
+        let worker = DubWorker::new(
+            pool.clone(),
+            PathBuf::from("."),
+            Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+            Arc::new(RwLock::new(crate::obs::ObsState::default())),
+        );
+        let holds = || {
+            String::from_utf8(cap.0.lock().unwrap().clone())
+                .unwrap()
+                .lines()
+                .filter(|l| l.contains("paid AI is off"))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert!(!worker.may_dub().await);
+        assert_eq!(holds(), Vec::<String>::new(), "no job, nothing held");
+        sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO videos (playlist_id, youtube_id, normalized, audio_file_path, \
+                                 dub_requested, dub_status) \
+             VALUES (1, 'dubjob00001', 1, '/x_audio.flac', 1, 'queued')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(!worker.may_dub().await);
+        let held = holds();
+        assert!(
+            held.iter()
+                .any(|l| l.contains("job=\"dub\"") && l.contains("dubjob00001")),
+            "{held:?}"
+        );
     }
 
     /// #229 item C: while this node's paid AI is off no dub runs and no key

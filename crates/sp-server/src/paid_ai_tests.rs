@@ -244,3 +244,22 @@ async fn a_patch_of_a_mangled_switch_is_refused() {
     assert_eq!(stored.unwrap().as_deref(), Some("false"));
     assert!(!enabled(&pool).await);
 }
+
+/// A hold shows on the status for 40 min after its last hold, then not:
+/// held work holds again within that, finished work does not.
+#[test]
+fn a_hold_shows_for_40_minutes_after_its_last_hold() {
+    let t = Instant::now();
+    assert!(shown(t, t));
+    assert!(shown(t, t + HELD_SHOWN));
+    assert!(!shown(t, t + HELD_SHOWN + Duration::from_nanos(1)));
+    assert_eq!(HELD_SHOWN, Duration::from_secs(40 * 60));
+    hold(Held::Translation, "shown-test-1");
+    assert!(
+        held_kinds(Instant::now())
+            .iter()
+            .any(|k| k == "translation")
+    );
+    let tomorrow = Instant::now() + Duration::from_secs(86_400);
+    assert_eq!(held_kinds(tomorrow), Vec::<String>::new());
+}

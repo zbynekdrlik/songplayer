@@ -22,9 +22,9 @@
 //! logs ONE INFO per kind and song ([`hold`]), then DEBUG — never a WARN.
 //! `GET /api/v1/status` names the switch and what it holds ([`status`]).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sp_core::config::SETTING_PAID_AI_ENABLED;
@@ -89,20 +89,27 @@ pub async fn gemini_keys(pool: &SqlitePool) -> Option<Vec<String>> {
     Some(crate::gemini_api::gemini_keys_from_setting(&csv))
 }
 
-/// The work held since the process started, per kind: the songs' YouTube
-/// ids ("" for a whole pass). Never cleared: a song held again after the
-/// switch was on in between logs at DEBUG (its first hold had the INFO).
-static HOLDS: Mutex<BTreeMap<Held, BTreeSet<String>>> = Mutex::new(BTreeMap::new());
+/// How long a held kind shows on the status after its last hold: held work
+/// is picked again within [`HELD_RECHECK`] (a translation or a dub job at
+/// its worker's next tick), so a kind still holding work is held again
+/// within it.
+const HELD_SHOWN: Duration = Duration::from_secs(2_400);
 
-/// `what` of `key` (a song's YouTube id; "" for a whole pass) waits while
-/// paid AI is off: ONE INFO the first time, then DEBUG.
+/// The work held, per kind: the songs' YouTube ids and when each was last
+/// held. Kept for the process' life: a song held again after the switch
+/// was on in between logs at DEBUG (its first hold had the INFO).
+static HOLDS: Mutex<BTreeMap<Held, BTreeMap<String, Instant>>> = Mutex::new(BTreeMap::new());
+
+/// `what` of `key` (a song's YouTube id) waits while paid AI is off: ONE
+/// INFO the first time, then DEBUG.
 pub fn hold(what: Held, key: &str) {
     let first = HOLDS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .entry(what)
         .or_default()
-        .insert(key.to_string());
+        .insert(key.to_string(), Instant::now())
+        .is_none();
     if first {
         info!(
             job = what.as_str(),
@@ -114,13 +121,20 @@ pub fn hold(what: Held, key: &str) {
     }
 }
 
-/// The kinds holding work, in [`Held`] order.
-fn held_kinds() -> Vec<String> {
+/// Whether a hold made `held_at` still shows at `now` ([`HELD_SHOWN`]).
+fn shown(held_at: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(held_at) <= HELD_SHOWN
+}
+
+/// The kinds holding work at `now` (held within [`HELD_SHOWN`]), in
+/// [`Held`] order.
+fn held_kinds(now: Instant) -> Vec<String> {
     HOLDS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .keys()
-        .map(|kind| kind.as_str().to_string())
+        .iter()
+        .filter(|(_, keys)| keys.values().any(|at| shown(*at, now)))
+        .map(|(kind, _)| kind.as_str().to_string())
         .collect()
 }
 
@@ -128,14 +142,19 @@ fn held_kinds() -> Vec<String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaidAiStatus {
     pub enabled: bool,
-    /// The kinds holding work while off ([`Held::as_str`]); empty while on.
+    /// The kinds holding work while off ([`Held::as_str`]: held within the
+    /// last 40 min); empty while on.
     pub held: Vec<String>,
 }
 
 /// The switch now and, while it is off, the kinds of work it holds.
 pub async fn status(pool: &SqlitePool) -> PaidAiStatus {
     let enabled = enabled(pool).await;
-    let held = if enabled { Vec::new() } else { held_kinds() };
+    let held = if enabled {
+        Vec::new()
+    } else {
+        held_kinds(Instant::now())
+    };
     PaidAiStatus { enabled, held }
 }
 

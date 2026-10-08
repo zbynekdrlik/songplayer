@@ -91,7 +91,8 @@ impl Exchange {
                     youtube_id,
                     job = job.as_str(),
                     error = %e,
-                    "exchange: the settings do not hold - processing here"
+                    held = !may_run,
+                    "exchange: the settings do not hold - no peer is asked"
                 );
                 return self.unasked(job, youtube_id, may_run);
             }

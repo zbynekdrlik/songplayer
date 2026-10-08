@@ -440,12 +440,7 @@ impl LyricsWorker {
         };
         let video_id = row.id;
         let youtube_id = row.youtube_id.clone();
-        tracing::info!(
-            "worker: processing {} ({} - {})",
-            youtube_id,
-            row.artist,
-            row.song
-        );
+        debug!("worker: picked {youtube_id}");
         // #229: ask the peers first (`peer::lyrics`): a peer's lyrics are
         // taken, a peer's job waited for; else process here, announced until
         // this tick ends.
@@ -454,6 +449,13 @@ impl LyricsWorker {
             crate::peer::PeerStep::Done => return self.peer_lyrics_completed(video_id).await,
             crate::peer::PeerStep::Deferred => return,
         };
+        // Logged once it runs here (#229 item C: a held pick is not processing).
+        tracing::info!(
+            "worker: processing {} ({} - {})",
+            youtube_id,
+            row.artist,
+            row.song
+        );
         match self.process_song(row).await {
             Ok(SongOutcome::Done) => {}
             // #144: durable retry backoff (mirrors downloader #140) so the
@@ -775,7 +777,7 @@ impl LyricsWorker {
 
     #[cfg_attr(test, mutants::skip)]
     async fn retry_missing_translations(&self) {
-        if self.ai_client.is_none() || !self.translation_allowed().await {
+        if self.ai_client.is_none() {
             return;
         }
         {
@@ -791,6 +793,9 @@ impl LyricsWorker {
             Ok(Some(pair)) => pair,
             _ => return,
         };
+        if !self.translation_allowed(&youtube_id).await {
+            return;
+        }
         let lyrics_path = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
         let content = match tokio::fs::read_to_string(&lyrics_path).await {
             Ok(c) => c,

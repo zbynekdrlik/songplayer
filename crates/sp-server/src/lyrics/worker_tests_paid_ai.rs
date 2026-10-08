@@ -125,3 +125,69 @@ async fn the_translation_pass_calls_claude_while_the_switch_is_on() {
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
     assert_eq!(cached_sk(&pp).as_deref(), Some("Cestu robíš"));
 }
+
+/// The log lines a scoped subscriber wrote (this test's thread only).
+#[derive(Clone, Default)]
+struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The captured lines `paid_ai::hold` wrote (INFO or DEBUG).
+fn holds(cap: &Captured) -> Vec<String> {
+    String::from_utf8(cap.0.lock().unwrap().clone())
+        .unwrap()
+        .lines()
+        .filter(|l| l.contains("paid AI is off"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Review round 12: a translation pass holds only a song it would
+/// translate — with nothing to translate nothing is held, so the status
+/// names no translation that is not waiting.
+#[tokio::test]
+async fn a_translation_pass_holds_only_a_song_it_would_translate() {
+    let cap = Captured::default();
+    let writer = cap.clone();
+    let _log = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .finish(),
+    );
+    let server = claude().await;
+    let empty = TestNode::start("pp", None).await;
+    set(empty.pool(), "paid_ai_enabled", "false").await;
+    let (events, _) = broadcast::channel(16);
+    let mut idle =
+        LyricsWorker::new_for_test(empty.pool().clone(), empty.cache().to_path_buf(), events);
+    idle.ai_client = Some(Arc::new(AiClient::new(AiSettings {
+        api_url: format!("{}/v1", server.uri()),
+        api_key: None,
+        model: "claude-test".into(),
+        system_prompt_extra: None,
+    })));
+    idle.retry_missing_translations().await;
+    idle.retranslate_next_stale().await;
+    assert_eq!(holds(&cap), Vec::<String>::new(), "nothing to translate");
+    let (pp, worker, _todo) = pp_with_claude(&server).await;
+    set(pp.pool(), "paid_ai_enabled", "false").await;
+    worker.retry_missing_translations().await;
+    let held = holds(&cap);
+    assert!(
+        held.iter()
+            .any(|l| l.contains("job=\"translation\"") && l.contains(YT)),
+        "{held:?}"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 0);
+}

@@ -102,7 +102,7 @@ test("paid AI is on by default; switched off and saved, the health bar names the
   await expect(chip).toHaveText("Platené AI: vypnuté", { timeout: 10000 });
   await expect(chip).toHaveAttribute(
     "title",
-    "Čaká (len od susedného uzla): texty, metadáta",
+    "Čaká, kým sa platené AI zapne: texty, metadáta (texty a metadáta berie medzitým od susedného uzla)",
   );
   await expect(page.locator('[data-testid="settings-paid-ai-enabled"]')).not.toBeChecked();
 

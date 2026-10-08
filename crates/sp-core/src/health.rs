@@ -119,11 +119,10 @@ pub fn paid_ai_label(
         return None;
     }
     let tip = if held.is_empty() {
-        "Žiadne platené AI volanie — texty, metadáta, preklad a dabing len od susedného uzla"
-            .to_string()
+        format!("Tento uzol nevolá platené AI (Gemini, Claude) — {FROM_PEER}")
     } else {
         format!(
-            "Čaká (len od susedného uzla): {}",
+            "Čaká, kým sa platené AI zapne: {} ({FROM_PEER})",
             held.iter()
                 .map(|k| held_kind_sk(k.as_str()))
                 .collect::<Vec<_>>()
@@ -132,6 +131,9 @@ pub fn paid_ai_label(
     };
     Some((HealthTone::Warn, "Platené AI: vypnuté".to_string(), tip))
 }
+
+/// What a node with paid AI off still takes: a peer's lyrics and titles.
+const FROM_PEER: &str = "texty a metadáta berie medzitým od susedného uzla";
 
 /// A held kind (`paid_ai_held` on `GET /api/v1/status`) in Slovak.
 fn held_kind_sk(kind: &str) -> &str {
@@ -310,7 +312,8 @@ mod tests {
         );
         assert_eq!(
             tip,
-            "Žiadne platené AI volanie — texty, metadáta, preklad a dabing len od susedného uzla"
+            "Tento uzol nevolá platené AI (Gemini, Claude) — texty a metadáta berie medzitým \
+             od susedného uzla"
         );
         let held: Vec<String> = ["dub", "lyrics", "metadata", "translation", "x"]
             .iter()
@@ -319,7 +322,8 @@ mod tests {
         let (_, _, tip) = paid_ai_label(Some(false), &held).unwrap();
         assert_eq!(
             tip,
-            "Čaká (len od susedného uzla): dabing, texty, metadáta, preklad, x"
+            "Čaká, kým sa platené AI zapne: dabing, texty, metadáta, preklad, x (texty a \
+             metadáta berie medzitým od susedného uzla)"
         );
     }
 }
