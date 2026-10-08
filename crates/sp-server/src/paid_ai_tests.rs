@@ -118,7 +118,7 @@ fn a_hold_logs_one_info_per_kind_and_song() {
         (3, 1, 0),
         "{text}"
     );
-    assert!(text.contains("job=dub"), "{text}");
+    assert!(text.contains("job=\"dub\""), "{text}");
 }
 
 /// Held work is picked again after 30 minutes; a probe says why it sent
