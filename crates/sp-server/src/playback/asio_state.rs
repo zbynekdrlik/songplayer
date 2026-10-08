@@ -16,7 +16,7 @@
 //!   buffer over a third of a grid slot is noted (lane 2's envelope: the
 //!   servo's per-block latency saws by one callback period).
 
-use crate::playback::asrc_servo::{GROSS_STEP_100NS, frames_from_100ns};
+use crate::playback::asrc_servo::{SLOT_100NS, frames_from_100ns};
 
 pub const BACKOFF_S: [i64; 4] = [2, 10, 30, 60];
 /// A run this long resets the backoff (60 s).
@@ -270,7 +270,7 @@ pub fn buffer_note(buffer_frames: u32, rate: u32) -> Option<String> {
 /// The ring's capacity, frames: the target latency + four slots, + one
 /// block's output.
 pub fn ring_capacity_frames(rate: f64, target_100ns: i64, max_block_frames: usize) -> usize {
-    let span_100ns = target_100ns + 4 * GROSS_STEP_100NS;
+    let span_100ns = target_100ns + 4 * SLOT_100NS;
     frames_from_100ns(span_100ns, rate).max(0) as usize + max_block_frames
 }
 
