@@ -2,8 +2,10 @@
 //! nemalo dochadzat k ziadnemu platenemu ai spracovaniu dokial to
 //! nepovolim". The node's switch `paid_ai_enabled`
 //! (`sp_core::config::paid_ai_enabled`: ON when unset, so a node that never
-//! set it — SNV — is unchanged) is the ONE gate of every paid AI call this
-//! node makes, read live from the database at each call ([`enabled`]):
+//! set it — SNV — is unchanged) is the ONE switch every paid AI call this
+//! node makes asks at its call site, read live from the database at each
+//! call ([`enabled`]); there is no transport-level backstop, so a new call
+//! site asks it too (a test per path pins each one):
 //!
 //! - the lyrics job (Gemini 3.5 Transcribe, Claude's clean-up, the Spotify
 //!   resolution, the translation): `peer::Exchange::may_run_here`, asked at
@@ -16,11 +18,14 @@
 //!   asks no provider;
 //! - the dub (Gemini Live-Translate): the dub worker holds its job;
 //! - every Gemini key read: [`gemini_keys`] (none while off) — the lyrics
-//!   tiers, the dub worker, the g35t probe.
+//!   tiers, the dub worker, the g35t probe;
+//! - the lyrics source probe (`POST /api/v1/lyrics/probe-sources`): its
+//!   description probe asks Claude only while on.
 //!
 //! A new paid provider is gated here too. Held work counts no attempt and
 //! logs ONE INFO per kind and song ([`hold`]), then DEBUG — never a WARN.
-//! `GET /api/v1/status` names the switch and what it holds ([`status`]).
+//! `GET /api/v1/status` names the switch and the kinds holding work now
+//! ([`status`]: a hold under 40 min old).
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};

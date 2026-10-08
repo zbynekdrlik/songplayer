@@ -491,7 +491,7 @@ not re-create any of them beside the shared one.
 | one song row | `song_row.rs::SongRow` | `song-row`, `song-row-title`, `song-row-play` |
 | status vocabulary | `status_chips.rs::StatusChips` (pure `sp_core::status_chip`) | `status-chips`, `chip-file`/`chip-stems`/`chip-text`/`chip-dub` |
 | paste-URL import | `import_box.rs::ImportBox(ImportTarget)` | `import-box`, `import-input`, `import-btn`, `import-status` |
-| status strip (every page) | `health_bar.rs::HealthBar` (pure `sp_core::health`) | `health-ws`/`health-obs`/`health-genlock`/`health-resolume`/`health-tools`/`health-lan`/`health-version` (nests `version`) |
+| status strip (every page) | `health_bar.rs::HealthBar` (pure `sp_core::health`) | `health-ws`/`health-obs`/`health-genlock`/`health-resolume`/`health-tools`/`health-lan`/`health-node`/`health-paid-ai`/`health-version` (nests `version`; #229 item C: the node and the paid-AI chip read `/api/v1/status` once per load) |
 | loading / empty / error | `state_block.rs::StateBlock{Loading,Empty,Error}` | `state-loading`/`state-empty`/`state-error` |
 | playlist chooser (every page) | `playlist_picker.rs::PlaylistPicker(kinds?)` | `playlist-picker`, `playlist-picker-item`, `playlist-picker-select`, `playlist-picker-list` |
 | lyrics surface | `lyrics_view.rs::LyricsView(playlist_id?, video_id?)` | `lyrics-view` |

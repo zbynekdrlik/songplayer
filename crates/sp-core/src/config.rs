@@ -35,8 +35,6 @@ pub const SETTING_MIX_SONG_PODKLAD: &str = "mix_song_podklad";
 pub const SETTING_MIX_DUB_VOKALY: &str = "mix_dub_vokaly";
 pub const SETTING_MIX_DUB_PODKLAD: &str = "mix_dub_podklad";
 pub const SETTING_MIX_DUB_DABING: &str = "mix_dub_dabing";
-/// #210 (B2 of EPIC #174): the program's VBAN audio output (to FOH VB-Matrix
-/// and lv1). `"true"` sends; anything else (or absent) = off, the default.
 /// #212 (B3 of EPIC #174): the NDI input "OBS manuál" — one received NDI
 /// source offered to the program bus. `"true"` receives; anything else (or
 /// absent) = off, the default.

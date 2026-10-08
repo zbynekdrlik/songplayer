@@ -11,6 +11,7 @@ paths:
   - "crates/sp-server/src/lyrics/worker*.rs"
   - "crates/sp-server/src/dabing/worker.rs"
   - "crates/sp-server/src/api/lyrics_g35t.rs"
+  - "crates/sp-server/src/api/lyrics.rs"
   - "crates/sp-server/src/api/metadata*.rs"
   - "crates/sp-core/src/config.rs"
   - "crates/sp-core/src/health.rs"
@@ -36,18 +37,31 @@ dochadzat k ziadnemu platenemu ai spracovaniu dokial to nepovolim".
 - A settings PATCH takes only `true`, `false` or `""`, stored lowercase
   (`paid_ai::checked`); anything else refuses the whole PATCH (400).
 - Nastavenia "Platené AI" → "Povoliť platené AI spracovanie" (a checkbox).
+  A save sends the switch only when the checkbox differs from the value the
+  page loaded (`sp_core::config::paid_ai_to_send`), so a tab opened before
+  the switch changed elsewhere never turns paid AI back on (review round
+  12; mock spec "a Nastavenia tab opened before paid AI went off …").
 - `GET /api/v1/status` has three fields:
   - `paid_ai_enabled`;
-  - `paid_ai_held`: the kinds holding work while OFF;
+  - `paid_ai_held`: while OFF, the kinds with a hold under 40 min old
+    (`HELD_SHOWN`: held work is held again within `HELD_RECHECK`, a
+    translation or a dub at its worker's next tick; finished work drops
+    out);
   - `node_name`.
 - The health bar shows "Uzol: <name>". While the switch is OFF it also
   shows "Platené AI: vypnuté" (amber), with the held kinds in Slovak as the
-  tooltip (`sp_core::health::{node_label, paid_ai_label}`).
+  tooltip (`sp_core::health::{node_label, paid_ai_label}`). It reads the
+  status once per page load: after a save in Nastavenia the chip changes at
+  the next load.
 
-## The ONE gate: every paid call asks `paid_ai`
+## The ONE switch: every paid call site asks `paid_ai`
 
 Paid AI here means Gemini (metered, `gemini_api_key`) and Claude (through
-CLIProxyAPI, a paid plan). Every path:
+CLIProxyAPI, a paid plan). There is no transport-level backstop (the
+transports, `AiClient::chat` and `gemini_api::send_on_key`, have no
+database; a process-wide flag would let one test's switch refuse another
+test's calls): each call site asks the switch, and each path has its test.
+Every path:
 
 - **Lyrics job** (Gemini 3.5 Transcribe, Claude's clean-up, the Spotify
   resolution, the translation):
@@ -63,7 +77,8 @@ CLIProxyAPI, a paid plan). Every path:
     a `HELD_RECHECK` (30 min) defer with no attempt counted.
   - The catalog announces no lyrics queued while OFF (`peer::queued`).
 - **Translation passes** and `translate_track` (Claude):
-  `LyricsWorker::translation_allowed`.
+  `LyricsWorker::translation_allowed(youtube_id)`, asked after the pass
+  picked a song, so only a song it would translate is held.
 - **Metadata chain** (Claude, Gemini):
   - `ProviderChain::providers` is async and answers `None` while OFF. The
     production chain is `gated` on the node's DB (`provider_chain(&pool, …)`);
@@ -75,7 +90,10 @@ CLIProxyAPI, a paid plan). Every path:
   - The probe answers 409 with `paid_ai::OFF_REASON`.
 - **Dub** (Gemini Live-Translate): `DubWorker::may_dub` is checked every
   tick before a job is picked. The jobs wait where they are: no attempt, no
-  failure mark.
+  failure mark; only the job that would run now is held (none without one).
+- **Lyrics source probe** (`POST /api/v1/lyrics/probe-sources`, Claude on
+  the YouTube description): the AI client is handed to it only while ON;
+  OFF, the description probe reads "skipped".
 - **Every Gemini key read** goes through `paid_ai::gemini_keys` (`None`
   while OFF): the lyrics tiers, the dub worker's first key, and the g35t
   probe (which answers `ok:false` with `OFF_REASON` and sends nothing).
@@ -88,7 +106,14 @@ CLIProxyAPI, a paid plan). Every path:
 
 Held work counts no attempt and logs ONE INFO per kind and song
 (`paid_ai::hold`; the holds are kept for the process' life, later holds
-are DEBUG), never a WARN.
+are DEBUG), never a WARN. A held lyrics pick logs only DEBUG in the worker
+(its "worker: processing" INFO comes once the song runs here), and the
+repair batch's row count is DEBUG.
+
+Known, kept: the switch is read again right before a call (the metadata
+repair's `try_providers`, the lyrics tiers' keys). A switch-off landing
+between two reads milliseconds apart costs that one row a WARN and a
+backoff stage (or one song a "no key" pass), never a paid call.
 
 ## Tests (0 calls while OFF, unchanged while ON)
 
@@ -111,4 +136,7 @@ are DEBUG), never a WARN.
 Set `paid_ai_enabled=false` at PP BEFORE the release that carries this
 reaches it (`PATCH /api/v1/settings`; an older server stores the unknown
 key). Otherwise PP's post-deploy subset fails by design. Then PP's lyrics
-worker may be switched on again: it only takes SNV's copies.
+worker may be switched on again: it only takes SNV's copies. Nothing in
+`deploy-pp.yml` checks the ordering before it stops PP: a pre-stop read
+needs a running SongPlayer, and would block a deploy that restores a PP
+whose SongPlayer is down.
