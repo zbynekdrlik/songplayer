@@ -709,11 +709,12 @@ fn build(out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) -> Result<R
     let capacity = ring_capacity_frames(rate, out.target_100ns, asrc.max_out_frames());
     let (producer, consumer) = rtrb::RingBuffer::new(capacity * VBAN_CHANNELS);
     let started = device.start(consumer)?;
+    let opened = Opened { rate, ..opened };
     Ok(Run {
-        opened: Opened { rate, ..opened },
+        opened,
         opened_at_100ns: now_100ns,
         producer,
-        servo: new_servo(out, Opened { rate, ..opened }),
+        servo: new_servo(out, opened),
         splice: Splice::new(rate, capacity, asrc.max_out_frames()),
         asrc,
         zeros: vec![0.0; VBAN_BLOCK_SAMPLES],
