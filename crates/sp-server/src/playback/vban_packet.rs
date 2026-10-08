@@ -180,31 +180,52 @@ pub fn largest_divisor_at_most(n: usize, cap: usize) -> usize {
     (1..=cap.min(n)).rev().find(|d| n % d == 0).unwrap_or(1)
 }
 
-/// #233: one VBAN destination's wire format.
+/// #233: one VBAN destination's wire format. Its packet geometry is
+/// computed once, when it is made (`with_geometry`), never per packet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VbanFormat {
     rate_hz: u32,
     sr_index: u8,
     sample: VbanSampleFormat,
+    packet_frames: usize,
+    packets_per_block: usize,
+    packet_len: usize,
 }
 
 impl VbanFormat {
-    /// #210's format (FOH's): 48 kHz INT24, 8 packets of 200 frames.
+    /// #210's format (FOH's): 48 kHz INT24, 8 packets of 200 frames (1228
+    /// bytes each). Pinned against `new(48_000, Int24)`.
     pub const PROGRAM: Self = Self {
         rate_hz: 48_000,
         sr_index: VBAN_FORMAT_SR_48K_AUDIO,
         sample: VbanSampleFormat::Int24,
+        packet_frames: 200,
+        packets_per_block: 8,
+        packet_len: 1228,
     };
 
     /// A destination's format; a rate with no SR index is refused.
     pub fn new(rate_hz: u32, sample: VbanSampleFormat) -> Result<Self, String> {
         let sr_index =
             sr_index_of(rate_hz).ok_or_else(|| format!("VBAN carries no {rate_hz} Hz"))?;
-        Ok(Self {
+        Ok(Self::with_geometry(rate_hz, sr_index, sample))
+    }
+
+    /// The format with its packet geometry: packets of the largest divisor
+    /// of `rate / 30` frames that fits a packet. Its own fn, not inside
+    /// `new`: cargo-mutants never mutates a fn named `new`.
+    fn with_geometry(rate_hz: u32, sr_index: u8, sample: VbanSampleFormat) -> Self {
+        let block_frames = (i64::from(rate_hz) / GENLOCK_GRID_FPS) as usize;
+        let packet_frames =
+            largest_divisor_at_most(block_frames, max_packet_frames(bytes_of(sample)));
+        Self {
             rate_hz,
             sr_index,
             sample,
-        })
+            packet_frames,
+            packets_per_block: block_frames / packet_frames,
+            packet_len: VBAN_HEADER_LEN + packet_frames * VBAN_CHANNELS * bytes_of(sample),
+        }
     }
 
     pub fn rate_hz(self) -> u32 {
@@ -233,18 +254,15 @@ impl VbanFormat {
     }
 
     pub fn packet_frames(self) -> usize {
-        largest_divisor_at_most(
-            self.block_frames(),
-            max_packet_frames(self.bytes_per_sample()),
-        )
+        self.packet_frames
     }
 
     pub fn packets_per_block(self) -> usize {
-        self.block_frames() / self.packet_frames()
+        self.packets_per_block
     }
 
     pub fn packet_len(self) -> usize {
-        VBAN_HEADER_LEN + self.packet_frames() * VBAN_CHANNELS * self.bytes_per_sample()
+        self.packet_len
     }
 }
 
