@@ -343,6 +343,21 @@ in the same commit as the bump.
 When the Lint job fails on files the diff never touched, check the toolchain
 version in the job log first (`rust-1.99.0` in the clippy help URLs).
 
+## sqlx-sqlite: never mix a numbered `?NNN` with a bare `?` (#229 review round 9)
+
+SQLite numbers a bare `?` one above the largest number used so far, so a
+`?` after `?1` and `?2` is parameter 3. But it has no NAME, and sqlx-sqlite
+(0.8.6, `arguments.rs`) binds a nameless parameter from the FIRST value
+(`arg_i += 1` → `values[0]`). Round 8's `kept_local` spliced
+`queue_sql::LYRICS_NOT_PARKED` (`… lyrics_pipeline_version < ?`) after
+`?1` / `?2`: the version compare got the YouTube id (an integer vs a text
+compares true in SQLite), the parked-row rule did nothing, and its own RED
+tests stayed red on GREEN — no review round before the 9th saw it. Use
+bare `?` everywhere in a query that splices a shared fragment (they bind in
+text order), or number the fragment too. A scratch `python3 -c "import
+sqlite3"` of the exact query, with the binds sqlx would give, shows it
+before CI does.
+
 ## Two compile errors a no-compile review round cannot see (#218/#219 integration)
 
 Six fresh-context review rounds passed both of these, and the first CI run

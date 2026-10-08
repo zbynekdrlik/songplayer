@@ -705,7 +705,10 @@ own callback thread and has two slots of cushion):
   - the driver's TICKS count from the priming (`Run::consumed_at_prime`,
     the frames the card had taken when the first block primed the ring;
     the glue counts every buffer switch, primed or not): a burst of
-    callbacks at the open, then nothing, is no clock (review round 8);
+    callbacks at the open, then nothing, is no clock (review round 8), at
+    the first open and at every reopen during a wait (review round 9: a
+    `ClockArrived` before the run's priming reads `Quiet`, so the output
+    never flips to running for a burst);
   - after the priming, a block goes to the servo and the ring only once
     the driver ticked; until then it is dropped and the ring keeps its
     priming (no re-centre, no overflow). Deliberately NOT "a tick since
@@ -729,7 +732,10 @@ own callback thread and has two slots of cushion):
     priming; ticked then stops; a card that starts late) and
     `asio_out_tests_clock.rs` (silent 5 min, then ticks: running from the
     next block, 1 WARN + 2 INFO — the first open and the clock — read from
-    a scoped `tracing_subscriber` writer, the reopens at DEBUG).
+    a scoped `tracing_subscriber` writer, the reopens at DEBUG; a burst
+    at every reopen stays waiting; the clock's arrival starts a fresh
+    servo, so a ring left under the floor only primes; a reset during the
+    wait ends it, the reopen a fresh open).
 - close: a reset request or a buffer-size change (answered 0: never
   resized live), a rate change of 1 Hz or more (`sampleRateDidChange(0)` =
   a lost clock, code `clock_lost`, "ovládač stratil hodinový signál": a
