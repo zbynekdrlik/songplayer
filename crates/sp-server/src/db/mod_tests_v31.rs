@@ -30,7 +30,7 @@ async fn migration_v31_creates_the_stand_ins_and_back_fills_them() {
     .execute(&pool)
     .await
     .unwrap();
-    let cases: [Case; 9] = [
+    let cases: [Case; 10] = [
         (
             "served00001",
             &[(Some("gemini-3-5-transcribe"), "")],
@@ -71,6 +71,16 @@ async fn migration_v31_creates_the_stand_ins_and_back_fills_them() {
                 Some("gemini-3-5-transcribe"),
                 ", lyrics_manual_priority = 1",
             )],
+            true,
+            false,
+            false,
+        ),
+        (
+            "livetrans01",
+            &[
+                (Some("gemini-3-5-transcribe"), ""),
+                (Some("gemini-live-translate"), ""),
+            ],
             true,
             false,
             false,

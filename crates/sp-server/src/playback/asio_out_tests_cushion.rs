@@ -37,7 +37,7 @@ fn block(k: i64) -> ProgramBlock {
 /// the worker counts them (the true silence is 1 220). The block reads 80 ms
 /// (the ring empty + the hold + 75 ms late): 13.3 ms over the target, under
 /// the last resort's 4 slots, and kept as cushion — 13.3333 ms, 10 × 128
-/// frames.
+/// frames. A close clears it with the run's other figures.
 #[test]
 fn an_underruns_excess_shows_as_the_outputs_cushion() {
     let o = out();
@@ -55,4 +55,16 @@ fn an_underruns_excess_shows_as_the_outputs_cushion() {
     w.step(&o, &mut d, T0 + 151 * SLOT + 750_000, Some(block(151)));
     let s = o.snapshot().status;
     assert_eq!((s.cushion_ms, s.hard_recentres), (13.3333, 0), "{s:?}");
+    // A reset closes the run: its cushion goes with its other figures.
+    d.events.push_back(DeviceEvents {
+        reset: true,
+        ..Default::default()
+    });
+    w.step(&o, &mut d, T0 + 151 * SLOT + 760_000, None);
+    let snap = o.snapshot();
+    assert_eq!(
+        (snap.state, snap.status.cushion_ms),
+        ("waiting", 0.0),
+        "{snap:?}"
+    );
 }

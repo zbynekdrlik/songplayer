@@ -254,8 +254,9 @@ async fn lyrics_waiting_on_their_queued_stems_are_queued() {
         let set = format!("{DOWNLOADED}{wait}{extra}");
         row(&node, *playlist, youtube_id, &set).await;
     }
-    // Due now and waiting on queued stems: listed once.
-    row(&node, 1, "lyr_duestm1", DOWNLOADED).await;
+    // Due now and waiting on queued stems: listed once, in its place (it
+    // sorts last: the two queries' lists are merged, then sorted).
+    row(&node, 1, "lyr_zdue001", DOWNLOADED).await;
     let lyrics = |all: Vec<(String, Job)>| -> Vec<String> {
         all.into_iter()
             .filter(|(_, job)| *job == Job::Lyrics)
@@ -264,12 +265,12 @@ async fn lyrics_waiting_on_their_queued_stems_are_queued() {
     };
     assert_eq!(
         lyrics(queued(node.pool()).await.unwrap()),
-        ["lyr_duestm1", "lyr_stalewt", "lyr_stmfail", "lyr_stmwait"]
+        ["lyr_stalewt", "lyr_stmfail", "lyr_stmwait", "lyr_zdue001"]
     );
     set(node.pool(), STEM_WORKER_ENABLED, "false").await;
     assert_eq!(
         lyrics(queued(node.pool()).await.unwrap()),
-        ["lyr_duestm1"],
+        ["lyr_zdue001"],
         "the stems will not run here: only the lyrics due now"
     );
 }
