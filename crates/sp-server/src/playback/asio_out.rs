@@ -765,3 +765,6 @@ mod tests;
 #[cfg(test)]
 #[path = "asio_out_tests_cushion.rs"]
 mod tests_cushion;
+#[cfg(test)]
+#[path = "asio_out_tests_silent.rs"]
+mod tests_silent;
