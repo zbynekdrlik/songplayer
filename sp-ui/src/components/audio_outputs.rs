@@ -17,6 +17,16 @@
 //! entry the server does not run reads "uložený, nespustený" with the
 //! server's `outputs_problems` line as its tooltip.
 //!
+//! #233 release review (the decisions are `sp_core::audio_outputs_save`,
+//! unit-tested): right before its PATCH the save re-reads
+//! `GET /api/v1/settings` and refuses, in Slovak, a list changed on the
+//! server since the load (or a rate, when it would send one) and a save while
+//! the old `vban_*` keys still wait for their migration; it sends the rate
+//! only when it changed. A delay or channel field that holds no whole number
+//! is refused at save (never stored as 0 or ignored), "Uložené" goes away at
+//! the next edit, "Odobrať" removes one row, and a waiting VBAN row reads its
+//! reason in Slovak (the server's `reason_code`).
+//!
 //! #233 lane 3: an ASIO output ("Pridať výstup ASIO") picks a driver from
 //! `GET /api/v1/audio/asio-drivers` (loaded once; the add button waits for
 //! it) — a stored driver the box does not list stays, marked "(nenájdený)" —
@@ -50,6 +60,10 @@ use sp_core::audio_outputs::{
     asio_add_refusal, asio_channel_index, asio_channel_shown, asio_driver_options,
     asio_running_text, asio_waiting_text, new_asio, new_vban, validate_list,
 };
+use sp_core::audio_outputs_save::{
+    NOT_CHECKED, SAVED, first_unreadable, parse_whole, rate_to_send, remove_one, save_refusal,
+    shown_message, vban_waiting_text,
+};
 use sp_core::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
 
 use crate::api;
@@ -62,6 +76,10 @@ pub struct OutputLive {
     pub state: String,
     #[serde(default)]
     pub reason: Option<String>,
+    /// #233 release review: a waiting VBAN output's reason as a stable code
+    /// (`vban_waiting_text` shows it in Slovak).
+    #[serde(default)]
+    pub reason_code: Option<String>,
     #[serde(default)]
     pub latency_ms: f64,
     /// #233: a running ASIO driver off the network's rate or with a long
@@ -153,15 +171,15 @@ fn live_text(live: &ProgramOutputs, id: &str, saved: bool) -> String {
 }
 
 /// One output's state line: running = its latency (an ASIO output also its
-/// correction and underruns); an ASIO output that waits = why, in Slovak,
-/// and when it tries again.
+/// correction and underruns); an output that waits = why, in Slovak (an
+/// ASIO output also when it tries again).
 fn output_text(o: &OutputLive) -> String {
     let state = state_sk(&o.state);
     match (&o.asio, o.state.as_str()) {
         (Some(a), "running") => asio_running_text(state, o.latency_ms, a.ppm, a.underruns),
         (None, "running") => format!("{state} · {:.0} ms", o.latency_ms),
         (Some(a), _) => asio_waiting_text(state, a.reason_code.as_deref(), a.retry_in_s),
-        (None, _) => state.to_string(),
+        (None, _) => vban_waiting_text(state, o.reason_code.as_deref()),
     }
 }
 
@@ -201,6 +219,20 @@ fn edit(list: RwSignal<Vec<OutputEntry>>, id: &str, f: impl FnOnce(&mut OutputEn
     });
 }
 
+/// The number fields typed unreadable since their last good value: `(id,
+/// field, slot)` — the slot tells the two channels of one field apart.
+type Unreadable = RwSignal<Vec<(String, &'static str, u8)>>;
+
+/// Note (`unreadable`) or clear one number field of the row `id`.
+fn mark(bad: Unreadable, id: &str, field: &'static str, slot: u8, unreadable: bool) {
+    bad.update(|b| {
+        b.retain(|(i, f, s)| !(i == id && *f == field && *s == slot));
+        if unreadable {
+            b.push((id.to_string(), field, slot));
+        }
+    });
+}
+
 /// `loaded`: the Settings page's load of `GET /api/v1/settings` — `None`
 /// while it runs, `Some(false)` when it failed.
 #[component]
@@ -210,6 +242,10 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     let network_rate = RwSignal::new(audio_network_rate(None).to_string());
     let load_error = RwSignal::new(None::<String>);
     let message = RwSignal::new(String::new());
+    // What the last save sent (the rows, the rate): "Uložené" only while
+    // they are what the section holds (`shown_message`).
+    let saved = RwSignal::new(None::<(Vec<OutputEntry>, String)>);
+    let bad: Unreadable = RwSignal::new(Vec::new());
     let live = RwSignal::new(ProgramOutputs::default());
     // The box's ASIO drivers, once: `None` until they are read, and for
     // good when the read failed (`drivers_failed`) — never an empty list
@@ -309,6 +345,17 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
             return;
         }
         let list = entries.get();
+        let unreadable = bad.with(|b| {
+            let pairs: Vec<(String, &'static str)> = b
+                .iter()
+                .map(|(id, field, _)| (id.clone(), *field))
+                .collect();
+            first_unreadable(&list, &pairs)
+        });
+        if let Some(why) = unreadable {
+            message.set(why);
+            return;
+        }
         if let Err(e) = validate_list(&list) {
             message.set(e.sk());
             return;
@@ -316,19 +363,50 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
         let Ok(text) = serde_json::to_string(&list) else {
             return;
         };
-        let mut body = HashMap::new();
-        body.insert(SETTING_AUDIO_OUTPUTS.to_string(), text);
-        body.insert(SETTING_AUDIO_NETWORK_RATE.to_string(), network_rate.get());
+        // What the page loaded (the store after this section's last save).
+        let (loaded_list, loaded_rate) = stored.get_untracked();
+        let chosen = network_rate.get_untracked();
+        let rate = rate_to_send(loaded_rate.as_deref(), &chosen);
         leptos::task::spawn_local(async move {
             message.set("Ukladám…".into());
+            // The server NOW: a list or a rate changed elsewhere since the
+            // load, or a migration still pending, is never overwritten.
+            let Ok(now) = api::get::<HashMap<String, String>>("/api/v1/settings").await else {
+                message.set(NOT_CHECKED.into());
+                return;
+            };
+            if let Some(why) = save_refusal(
+                loaded_list.as_deref(),
+                loaded_rate.as_deref(),
+                &now,
+                rate.is_some(),
+            ) {
+                message.set(why.into());
+                return;
+            }
+            let mut body = HashMap::new();
+            body.insert(SETTING_AUDIO_OUTPUTS.to_string(), text);
+            if let Some(rate) = rate {
+                body.insert(SETTING_AUDIO_NETWORK_RATE.to_string(), rate);
+            }
             match api::patch_json_empty("/api/v1/settings", &body).await {
                 Ok(()) => {
-                    message.set("Uložené".into());
+                    saved.set(Some((list, chosen)));
+                    message.set(SAVED.into());
                     store.settings.update(move |s| s.extend(body));
                 }
                 Err(_) => message.set("Chyba pri ukladaní".into()),
             }
         });
+    };
+    // "Uložené" only while the rows and the rate are what was saved.
+    let message_shown = move || {
+        let unchanged = saved.with(|s| {
+            s.as_ref().is_some_and(|(list, rate)| {
+                entries.with(|e| e == list) && network_rate.with(|r| r == rate)
+            })
+        });
+        message.with(|m| shown_message(m, unchanged).to_string())
     };
 
     view! {
@@ -377,6 +455,7 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                             live=live
                             saved_ids=saved_ids
                             drivers=drivers
+                            bad=bad
                         />
                     }
                 }
@@ -403,7 +482,7 @@ pub fn AudioOutputs(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "Uložiť výstupy"
                 </button>
                 <span class="audio-outputs-status" data-testid="audio-outputs-message">
-                    {move || message.get()}
+                    {message_shown}
                 </span>
             </div>
         </fieldset>
@@ -417,6 +496,7 @@ fn OutputRow(
     live: RwSignal<ProgramOutputs>,
     saved_ids: Memo<Vec<String>>,
     drivers: RwSignal<Option<Vec<String>>>,
+    bad: Unreadable,
 ) -> impl IntoView {
     let row_id = id.clone();
     let id = StoredValue::new(id);
@@ -445,9 +525,13 @@ fn OutputRow(
                 .unwrap_or_default()
         })
     };
+    // A channel that is no whole number is noted, and refused at save.
     let set_channel = move |i: usize, text: String| {
-        if let Ok(n) = text.trim().parse::<u32>() {
-            edit(entries, &id.get_value(), |e| {
+        let row = id.get_value();
+        let parsed = parse_whole(&text);
+        mark(bad, &row, "asio.channels", i as u8, parsed.is_none());
+        if let Some(n) = parsed {
+            edit(entries, &row, |e| {
                 if let Some(a) = e.asio.as_mut() {
                     a.channels[i] = asio_channel_index(n);
                 }
@@ -500,8 +584,14 @@ fn OutputRow(
                     data-testid="audio-output-delay"
                     prop:value=move || read(entries, &id.get_value(), |e| e.delay_ms.to_string())
                     on:input=move |ev| {
-                        let v = event_target_value(&ev).trim().parse().unwrap_or(0);
-                        edit(entries, &id.get_value(), |e| e.delay_ms = v);
+                        // A delay that is no whole number is noted, and
+                        // refused at save (never stored as 0).
+                        let row = id.get_value();
+                        let parsed = parse_whole(&event_target_value(&ev));
+                        mark(bad, &row, "delay_ms", 0, parsed.is_none());
+                        if let Some(v) = parsed {
+                            edit(entries, &row, |e| e.delay_ms = v);
+                        }
                     }
                 />
             </label>
@@ -690,7 +780,7 @@ fn OutputRow(
             <button
                 type="button"
                 data-testid="audio-output-remove"
-                on:click=move |_| entries.update(|l| l.retain(|e| e.id != id.get_value()))
+                on:click=move |_| entries.update(|l| remove_one(l, &id.get_value()))
             >
                 "Odobrať"
             </button>

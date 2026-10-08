@@ -4,6 +4,7 @@
 
 pub mod audio_level;
 pub mod audio_outputs;
+pub mod audio_outputs_save; // #233 release review: the dashboard's save decisions
 pub mod blend;
 pub mod clock_health;
 pub mod config;

@@ -286,7 +286,7 @@ impl Problem {
 
 /// The Slovak name of a field, for the dashboard (shown as `pole „…“`, so
 /// every problem text agrees with the neuter "pole"); an unknown field as it is.
-fn field_sk(field: &'static str) -> &'static str {
+pub(crate) fn field_sk(field: &'static str) -> &'static str {
     match field {
         "id" => "identifikátor",
         "name" => "názov",
