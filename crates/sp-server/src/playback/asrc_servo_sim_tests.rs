@@ -23,11 +23,12 @@
 //! The owner's ruling (8.10.2026, #233 comment 6053850076): the resampler
 //! absorbs a difference by its ratio, never by a skip or an insert. So every
 //! case below runs with **0 hard re-centres** — cards at ±50 ppm, ±1 ms and
-//! ±33 ms clock steps (a date step's remainder) at three window phases, a
-//! realistic hand-off with clumps, a callback period that changes mid-run, a
-//! dropped buffer, a 100 ms step, a 150 ms worker stall at four phases —
-//! except the ring-limit cases, a 300 ms stall at three phases and a 100 ms
-//! pause, which force exactly one. A stall near 200 ms sits at the ring's
+//! ±33 ms steps (+33: a date step's forward remainder; −33: a missing
+//! boundary) at three window phases, a realistic hand-off with clumps, a
+//! callback period that changes mid-run, a dropped buffer, a 100 ms step, a
+//! 150 ms worker stall at four phases of the slot — except the ring-limit
+//! cases, a 300 ms stall at four phases and a 100 ms pause, which force
+//! exactly one. A stall near 200 ms sits at the ring's
 //! limit: it leaves 4 slots over the target or just under, by phase (the
 //! model: none at 500.0 / 500.011 / 500.022 / 500.033 s, one at 500.03 s),
 //! so no test pins it. A ±33 ms step is back within ±2 ms of the target in
@@ -350,8 +351,9 @@ fn a_1_ms_clock_step_either_way_is_absorbed_by_the_ratio() {
     }
 }
 
-/// A date step's remainder of a whole slot either way (the fleet relabels
-/// whole slots, `genlock.md`), on a 0 and a 20 ppm card at three window
+/// A whole slot: forward, a date step's remainder (the fleet relabels
+/// whole slots and moves the timeline forward by the rest, `genlock.md`);
+/// backward, a missing boundary. On a 0 and a 20 ppm card at three window
 /// phases: slewed, never spliced, and back within ±2 ms of the target in
 /// at most 150 s (the model: 138.9–148.2 s).
 #[test]
@@ -512,7 +514,7 @@ fn a_48k_card_with_256_frame_buffers_is_followed() {
 /// 2: a single phase can be lucky).
 #[test]
 fn a_150_ms_worker_stall_is_slewed_at_every_phase() {
-    for phase in [0.0, 0.0111, 0.0222, 0.0333] {
+    for phase in [0.0, 0.0083, 0.0167, 0.025] {
         let o = run(Case {
             card_ppm: 20.0,
             stall_at_s: Some(500.0 + phase),
@@ -526,9 +528,9 @@ fn a_150_ms_worker_stall_is_slewed_at_every_phase() {
 }
 
 /// The ring-limit cases: a 300 ms stall leaves more than four slots over (the
-/// ring would overflow; three phases), a 100 ms pause a latency under the
-/// 16.7 ms floor (it would run dry on most blocks): exactly one hard
-/// re-centre each, the skip asked once.
+/// ring would overflow; four phases of the slot), a 100 ms pause a latency
+/// under the 16.7 ms floor (it would run dry on most blocks): exactly one
+/// hard re-centre each, the skip asked once.
 #[test]
 fn a_300_ms_stall_or_a_100_ms_pause_forces_one_hard_re_centre() {
     let stall = |phase: f64| Case {
@@ -542,7 +544,13 @@ fn a_300_ms_stall_or_a_100_ms_pause_forces_one_hard_re_centre() {
         step_s: -0.100,
         ..SNV
     };
-    for c in [stall(0.0), stall(0.01), stall(0.02), pause] {
+    for c in [
+        stall(0.0),
+        stall(0.0083),
+        stall(0.0167),
+        stall(0.025),
+        pause,
+    ] {
         let o = run(c);
         assert_eq!((o.hard_recentres, o.asked_while_pending), (1, 0), "{o:?}");
         assert!(o.max_abs_ppm <= MAX_PPM, "{o:?}");

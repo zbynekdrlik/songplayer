@@ -744,6 +744,36 @@ fn the_time_left_downward_has_the_room_below_the_cards_rate() {
     );
 }
 
+/// A −40 ppm card with the level 20 ms HIGH: the room below its rate is
+/// 260 ppm, under the stop curve's ~308 ppm peak, so the time left is the
+/// capped trapezoid (review round 3: on the +40 card the peak stayed under
+/// the room, so a room of 300 × rate read the same; pins from two
+/// independent scratch models).
+#[test]
+fn the_time_left_downward_on_a_slow_card_is_capped_by_its_room() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(obs(0, 0, 6_400, 480_000));
+    let card = Feed {
+        ppm: -40.0,
+        offset: 480_000,
+        ..FEED
+    };
+    steady(&mut s, 1, 30 * 90, card);
+    let high = Feed {
+        buffered: 8_320,
+        ..card
+    };
+    let a = steady(&mut s, 30 * 90 + 1, 64, high);
+    let st = s.status();
+    assert!(st.locked, "{st:?}");
+    assert!((a.correction_ppm + 50.66677114500831).abs() < 1e-9, "{a:?}");
+    assert_eq!(st.offset_ms, 20.0001);
+    assert!(
+        (st.slew_eta_s.unwrap() - 122.98766299398923).abs() < 1e-9,
+        "{st:?}"
+    );
+}
+
 #[test]
 fn a_starved_window_flushes_the_rate_and_holds_the_correction() {
     let mut s = Servo::new(RATE, BASE_LATENCY_100NS);

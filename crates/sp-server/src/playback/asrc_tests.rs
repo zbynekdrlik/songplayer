@@ -242,7 +242,7 @@ fn the_installer_notice_carries_the_pinned_rubatos_license() {
 /// (rubato's documented best quality-per-oversampling), the cutoff
 /// automatic.
 #[test]
-fn the_resampler_runs_rubatos_highest_quality_sinc() {
+fn the_resampler_runs_the_measured_sinc_setting() {
     let p = asrc_params();
     assert_eq!((p.sinc_len, p.oversampling_factor), (256, 256));
     assert_eq!(p.interpolation, SincInterpolationType::Cubic);
