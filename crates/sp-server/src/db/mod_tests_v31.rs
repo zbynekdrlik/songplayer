@@ -17,20 +17,23 @@ type Case = (
 /// PP's state when V31 lands: a song whose pair came from SNV and whose
 /// lyrics PP made itself (served or parked) stands in for SNV's copy, due at
 /// once (`8ohdO2nINEI`). Not: lyrics taken from the peer, a song this node
-/// downloaded itself, no lyrics made yet, an operator's text or ask or a dub
-/// on any row of the video.
+/// downloaded itself, no lyrics made yet, an operator's text or a dub on any
+/// row of the video, or an operator's ask on a row of an ACTIVE playlist
+/// (review round 7: a flag on an inactive playlist's row is one the lyrics
+/// queue never takes). Playlist 2, every second row's, is inactive.
 #[tokio::test]
 async fn migration_v31_creates_the_stand_ins_and_back_fills_them() {
     let pool = create_memory_pool().await.unwrap();
     apply_first_n(&pool, 30).await;
     // A video's rows sit in different playlists (one row per playlist).
     sqlx::query(
-        "INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u'), (2, 'q', 'v')",
+        "INSERT INTO playlists (id, name, youtube_url, is_active) \
+         VALUES (1, 'p', 'u', 1), (2, 'q', 'v', 0)",
     )
     .execute(&pool)
     .await
     .unwrap();
-    let cases: [Case; 10] = [
+    let cases: [Case; 11] = [
         (
             "served00001",
             &[(Some("gemini-3-5-transcribe"), "")],
@@ -74,6 +77,16 @@ async fn migration_v31_creates_the_stand_ins_and_back_fills_them() {
             true,
             false,
             false,
+        ),
+        (
+            "manualoff01",
+            &[
+                (Some("gemini-3-5-transcribe"), ""),
+                (None, ", lyrics_manual_priority = 1"),
+            ],
+            true,
+            false,
+            true,
         ),
         (
             "livetrans01",

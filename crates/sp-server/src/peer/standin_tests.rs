@@ -245,6 +245,27 @@ async fn a_stand_in_of_a_video_an_operator_or_a_dub_owns_is_kept_for_good() {
     }
 }
 
+/// Review round 7: a reprocess flag left on a row of an INACTIVE playlist
+/// (`reprocess-all-stale` sets it with no playlist filter) is one the
+/// lyrics queue never takes: it keeps nothing local, so the peer's copy
+/// replaces the stand-in in every row.
+#[tokio::test]
+async fn a_reprocess_left_on_an_inactive_playlists_row_does_not_keep_the_stand_in() {
+    let (snv, pp, rows, _) = snv_and_pp_standin().await;
+    snv_lyrics(&snv).await;
+    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1 WHERE id = ?")
+        .bind(rows[1])
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = 2")
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(supersede_next(Some(&pp.ex)).await, rows.to_vec());
+    assert!(standins(&pp).await.is_empty());
+}
+
 /// No row of the video is left here (removed from its playlists): nothing
 /// to replace, the stand-in is dropped.
 #[tokio::test]
@@ -564,6 +585,12 @@ async fn a_failing_fetch_from_another_peer_keeps_the_stand_in() {
             .collect::<Vec<_>>(),
         [("snv", 1_000, 2_000)]
     );
+    // Review round 7: a job that stands in keeps its spent wait here too.
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 1, "the spent bound is kept");
 }
 
 /// Review round 2: a row that does not take the peer's copy (its write

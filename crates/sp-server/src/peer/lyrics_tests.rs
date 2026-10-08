@@ -305,6 +305,29 @@ async fn an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here() {
     }
 }
 
+/// Review round 7: a reprocess flag left on a row of an INACTIVE playlist
+/// is one the lyrics queue never takes, so it keeps nothing local: the row
+/// asked takes the peer's copy.
+#[tokio::test]
+async fn a_reprocess_left_on_an_inactive_playlists_row_does_not_keep_the_lyrics_here() {
+    let (_snv, pp, id, json) = snv_and_pp().await;
+    let two = pp.add_video_to(2, YT).await;
+    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1 WHERE id = ?")
+        .bind(two)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = 2")
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        first(Some(&pp.ex), &lyrics_row(&pp, id).await).await,
+        PeerStep::Done
+    ));
+    assert_eq!(json_at(&pp), Some(json), "the peer's copy is in place");
+}
+
 /// Review Focus 5 here: this node's `{yt}_lyrics.json` of a dubbed video is
 /// the dub's subtitles, never overwritten by a peer's lyrics.
 #[tokio::test]
