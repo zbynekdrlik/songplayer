@@ -358,6 +358,8 @@ async fn a_lyrics_job_run_here_after_a_failing_fetch_stands_in() {
         .await
         .unwrap();
     pp.audio_from(YT, "pp2").await;
+    // The run here above ended the wait: this one has waited the bound too.
+    start_wait(pp.pool(), YT, "lyrics", long_ago).await.unwrap();
     let step = pp
         .ex
         .after_failed_fetch(Job::Lyrics, rows[0], YT, "snv", &PeerError::NotFound)
