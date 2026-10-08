@@ -202,6 +202,22 @@ fn rate_change(rate: f64) -> Reason {
     }
 }
 
+/// HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND): a registry key that does not
+/// exist.
+pub const HRESULT_FILE_NOT_FOUND: i32 = 0x8007_0002_u32 as i32;
+/// HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND): a registry path that does not
+/// exist.
+pub const HRESULT_PATH_NOT_FOUND: i32 = 0x8007_0003_u32 as i32;
+
+/// #233 release review: a failed read of `HKLM\SOFTWARE\ASIO` that only
+/// says the key is absent (no ASIO driver was ever installed) is an empty
+/// driver list; any other failure (access denied, a broken hive) is an error
+/// `GET /api/v1/audio/asio-drivers` answers with a 500, never an empty list
+/// the dashboard would read as "no driver on this box".
+pub fn registry_key_absent(hresult: i32) -> bool {
+    hresult == HRESULT_FILE_NOT_FOUND || hresult == HRESULT_PATH_NOT_FOUND
+}
+
 /// ASIO's ASE_NoClock (asio.h): the driver has no clock.
 pub const ASE_NO_CLOCK: i32 = -995;
 

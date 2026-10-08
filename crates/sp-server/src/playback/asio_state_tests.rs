@@ -422,3 +422,22 @@ fn a_report_under_1_hz_closes_as_a_lost_clock_and_no_clock_is_one() {
         "ASE_HWMalfunction stays the glue's"
     );
 }
+
+/// #233 release review: only an absent `HKLM\SOFTWARE\ASIO` (a file or path
+/// not found) is an empty driver list; access denied or any other failure
+/// is not.
+#[test]
+fn only_an_absent_registry_key_is_an_empty_driver_list() {
+    assert_eq!(HRESULT_FILE_NOT_FOUND, -2_147_024_894);
+    assert_eq!(HRESULT_PATH_NOT_FOUND, -2_147_024_893);
+    assert!(registry_key_absent(HRESULT_FILE_NOT_FOUND));
+    assert!(registry_key_absent(HRESULT_PATH_NOT_FOUND));
+    for other in [
+        0,
+        0x8007_0005_u32 as i32,
+        0x8007_0001_u32 as i32,
+        0x8007_0004_u32 as i32,
+    ] {
+        assert!(!registry_key_absent(other), "{other:#x}");
+    }
+}

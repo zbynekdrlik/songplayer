@@ -260,11 +260,14 @@ static CALLBACKS: [Callbacks; ASIO_SLOTS] = [
 ];
 
 /// The registered ASIO drivers' descriptions (HKLM\SOFTWARE\ASIO, read
-/// only; no driver is loaded). None registered (or no such key) → empty.
-pub fn list_drivers() -> Vec<String> {
-    Metadata::enumerate()
-        .map(|d| d.iter().map(|m| m.description.to_string_lossy()).collect())
-        .unwrap_or_default()
+/// only; no driver is loaded). None registered (or no such key) → empty;
+/// any other failure of the read → its error (#233 release review,
+/// `asio_state::registry_key_absent`).
+pub fn list_drivers() -> Result<Vec<String>, String> {
+    match Metadata::enumerate() {
+        Ok(d) => Ok(d.iter().map(|m| m.description.to_string_lossy()).collect()),
+        Err(_) => Ok(Vec::new()),
+    }
 }
 
 fn text(s: &CStr) -> String {
