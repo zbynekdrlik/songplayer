@@ -8,8 +8,9 @@
 //! 0 Hz report too); a device releases its slot; a device holds its
 //! thread's COM apartment for its whole life; a held driver is refused
 //! before the registry is read; a callback stuck past the bound parks the
-//! device (its slot, driver and hold), and the output replacing it is told
-//! so; `close` pumps the thread's messages while a callback finishes.
+//! device (its slot and hold; the same branch keeps the driver loaded,
+//! which no driverless runner can observe), and the output replacing it is
+//! told so; `close` pumps the thread's messages while a callback finishes.
 
 use std::sync::{Mutex, MutexGuard};
 
@@ -429,7 +430,7 @@ impl Drop for TimerCallback {
 }
 
 /// A driver may need the closing thread's messages to finish a callback
-/// (iemmixer `asio.rs:483-497`): `close` pumps them while it waits, so such
+/// (iemmixer `asio.rs:484-504`): `close` pumps them while it waits, so such
 /// a callback leaves and the device is NOT parked (review round 5). The
 /// "callback" here leaves when a 10 ms thread timer's proc runs — only on a
 /// dispatch of the thread's messages.
