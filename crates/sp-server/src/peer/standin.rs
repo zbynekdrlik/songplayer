@@ -6,22 +6,26 @@
 //! node fetched. So the peer's copy replaces it once the peer has one.
 //!
 //! - Recorded (V31 `peer_standins`) when the lyrics job runs here after
-//!   asking while a peer had the song: `Exchange::ask` → waited the 2 h
-//!   bound with a peer that lists the video's audio, or
-//!   `Exchange::after_failed_fetch` giving up on a peer's copy. V31 also
+//!   asking while the peer it took the song's audio from had the song:
+//!   `Exchange::ask` → waited the 2 h bound for that peer (its catalog
+//!   read now or not), or `Exchange::after_failed_fetch` giving up on that
+//!   peer's copy. Kept (recorded again) when the job runs here again while
+//!   it stands in: its ask then waits on the song no more. V31 also
 //!   back-filled the ones made before this record existed.
-//! - Over when the peer's copy is taken (`Exchange::fetched`) or the job
-//!   runs here for another reason (`Exchange::run_here`: an operator's ask,
-//!   another audio, nothing newer).
+//! - Over when the peer's copy is taken (`Exchange::fetched`, the hook's
+//!   adoption, which takes the copy even of the source the track here
+//!   already has) or the job runs here for another reason
+//!   (`Exchange::run_here`: an operator's ask, another audio).
 //! - Looked at by the lyrics worker on each tick, after its kill switch
 //!   ([`supersede_next`]): one due stand-in, rescheduled FIRST
 //!   ([`standin_recheck`] of its age), then taken when a listed peer holds
 //!   lyrics at this node's version made from this node's audio
 //!   (`Exchange::audio_verdict`): the track replaces `{yt}_lyrics.json` and
-//!   every row of the video takes the peer's lyrics columns. Kept for good
-//!   (the record dropped) when the peer's copy is made from another audio,
-//!   when the video has an operator's text or ask or a dub, or when no row
-//!   of it is left. Else it waits for the next recheck.
+//!   every row of the video takes the peer's lyrics columns (a row that did
+//!   not keeps the stand-in, so the next look does it all again). Kept for
+//!   good (the record dropped) when the peer's copy is made from another
+//!   audio, when the video has an operator's text or ask or a dub, or when
+//!   no row of it is left. Else it waits for the next recheck.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -82,6 +86,17 @@ impl Exchange {
             .ok()
             .flatten()
             .map(|(node, _, sha256)| (node, sha256))
+    }
+
+    /// The peer whose copy what `job` made of `youtube_id` stands in for;
+    /// `None` when it stands in for none, or the record cannot be read
+    /// (WARNed).
+    pub(crate) async fn standin_peer(&self, job: Job, youtube_id: &str) -> Option<String> {
+        models_peer::standin_peer(&self.pool, youtube_id, job.as_str())
+            .await
+            .inspect_err(|e| warn!(youtube_id, %e, "exchange: reading a stand-in failed"))
+            .ok()
+            .flatten()
     }
 
     /// `job` of `youtube_id` stands in for no peer's copy any more.
@@ -211,15 +226,21 @@ async fn supersede(ex: &Exchange, youtube_id: &str) -> Superseded {
     if let Err(e) = placed {
         return not_taken(youtube_id, &plan, &e);
     }
-    let mut adopted = Vec::with_capacity(rows.len());
+    let all = rows.len();
+    let mut adopted = Vec::with_capacity(all);
     for (id, _) in rows {
         match models_peer::adopt_lyrics(&ex.pool, id, &lyrics).await {
             Ok(()) => adopted.push(id),
             Err(e) => warn!(video_id = id, %e, "exchange: a row did not take the peer's lyrics"),
         }
     }
-    ex.fetched(Job::Lyrics, youtube_id, &plan.peer.name, &plan.artifacts)
-        .await;
+    // Over once every row took the copy; else the stand-in stays (already
+    // rescheduled) and its next look places the copy into every row again
+    // (review round 2).
+    if adopted.len() == all {
+        ex.fetched(Job::Lyrics, youtube_id, &plan.peer.name, &plan.artifacts)
+            .await;
+    }
     Superseded::Taken(adopted)
 }
 
@@ -237,9 +258,16 @@ fn not_taken(youtube_id: &str, plan: &FetchPlan, e: &PeerError) -> Superseded {
 
 /// The first listed peer whose catalog holds the lyrics of `youtube_id` at
 /// this node's version, as a plan with the audio it lists; `None` when no
-/// listed peer does (or none is listed, or the settings do not hold).
+/// listed peer does (or none is listed, or the settings do not hold:
+/// WARNed).
 async fn peers_lyrics(ex: &Exchange, youtube_id: &str) -> Option<FetchPlan> {
-    let cfg = NodeConfig::load(&ex.pool).await.ok()?;
+    let cfg = match NodeConfig::load(&ex.pool).await {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            warn!(youtube_id, error = %e, "exchange: a stand-in waits - the settings do not hold");
+            return None;
+        }
+    };
     if !cfg.asking() {
         return None;
     }

@@ -22,7 +22,7 @@ use super::client::PeerError;
 use super::config::{NodeConfig, PeerConfig};
 use super::decide::{
     Decision, LocalWhy, PeerRead, SongFrom, WaitWhy, after_failure, decide, listed_audio,
-    recheck_after, song_holder,
+    recheck_after, song_source,
 };
 use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, Catalog, now_ms};
@@ -107,8 +107,17 @@ impl Exchange {
             .inspect_err(|e| warn!(youtube_id, %e, "exchange: reading the wait failed"))
             .ok()
             .flatten();
-        // The lyrics wait on the peer this node took the song's audio from.
-        let source = if job.waits_while_a_peer_has_the_song() {
+        // The lyrics wait on the peer this node took the song's audio from,
+        // unless what they make here already stands in for that peer's copy
+        // (they waited the bound once: a run here put back, e.g. for its
+        // stems, never starts a new 2 h wait on the song; review round 2).
+        let waits_on_song = job.waits_while_a_peer_has_the_song();
+        let standing = if waits_on_song {
+            self.standin_peer(job, youtube_id).await
+        } else {
+            None
+        };
+        let source = if waits_on_song && standing.is_none() {
             self.song_from(youtube_id).await
         } else {
             None
@@ -139,12 +148,15 @@ impl Exchange {
             Decision::Local(why) => {
                 log_local(youtube_id, job, why);
                 let guard = self.run_here(job, youtube_id).await;
-                // Waited the bound while a listed peer has the song: what
-                // this job makes stands in for the peer's copy.
-                if why == LocalWhy::WaitedLongEnough
-                    && job.waits_while_a_peer_has_the_song()
-                    && let Some(peer) = song_holder(&reads, youtube_id, song_from)
-                {
+                // What runs here stands in for the copy of the peer this node
+                // took the song from: once it waited the bound for that peer
+                // (read now or not), and on each run here while it stands in.
+                let gave_up = if why == LocalWhy::WaitedLongEnough {
+                    song_source(&reads, song_from)
+                } else {
+                    None
+                };
+                if let Some(peer) = standing.as_deref().or(gave_up) {
                     self.stand_in(job, youtube_id, peer).await;
                 }
                 Ask::Local(guard)

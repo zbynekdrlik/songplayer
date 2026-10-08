@@ -8,7 +8,9 @@
 //! The peer's row (`/videos`) must match its catalog and must
 //! not be the Live-Translate track; a copy of what the row already serves (the
 //! same source at the same version, e.g. the daily full-mix upgrade) is
-//! nothing newer: the job runs here. The track is parsed as a typed
+//! nothing newer: the job runs here, unless the track here stands in for
+//! that peer's copy (`peer::standin`: it is replaced whatever its source).
+//! The track is parsed as a typed
 //! `LyricsTrack` whose source must be the row's, renamed into
 //! `{yt}_lyrics.json`, and the row takes the peer's lyrics columns
 //! (`models_peer::adopt_lyrics`).
@@ -117,7 +119,12 @@ pub(crate) async fn adopt(
     plan: &FetchPlan,
 ) -> Result<Adopted, PeerError> {
     let (artifact, lyrics) = peer_row(ex, &row.youtube_id, plan).await?;
-    if serves_the_same(&ex.pool, row.id, &lyrics).await? {
+    if serves_the_same(&ex.pool, row.id, &lyrics).await?
+        && ex
+            .standin_peer(Job::Lyrics, &row.youtube_id)
+            .await
+            .is_none()
+    {
         return Ok(Adopted::NothingNewer);
     }
     place(ex, &row.youtube_id, plan, artifact, &lyrics).await?;
