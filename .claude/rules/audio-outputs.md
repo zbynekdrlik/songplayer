@@ -39,8 +39,11 @@ insert, negative = skip) `Splice::insert` / `skip`, and pushes
 **The observation** (per block, on the program wall, 100 ns): when the block
 was handled, its boundary (stamp), the frames buffered for the card (the
 ring + the splice's 5 ms hold), the frames the splice has still to skip
-(`Splice::pending_skip_frames`) and the frames the card consumed since the
-output opened. The pending skip is counted OUT of the buffered frames,
+(`Splice::pending_skip_frames`), the frames the card consumed since the
+output opened, and the frames it played silence for (`underrun_frames`,
+#233 comment 6056680979 Q1: the worker's underrun callbacks × the driver's
+buffer, a short callback counted whole — an overcount of at most one
+buffer per event, accepted). The pending skip is counted OUT of the buffered frames,
 SIGNED: the splice skips at most one block per call, so a 100 ms skip runs
 over three blocks, and without it the servo would ask for the rest again
 (review round 1: 150 ms of excess skipped 397 ms in 10 re-centres); after a
@@ -80,10 +83,11 @@ ruling 7).
 
 SongPlayer's own: `SLOT_100NS` = one grid slot (333 333; was
 `GROSS_STEP_100NS`), `BASE_LATENCY_100NS` = `VBAN_SEND_LATENCY_100NS`
-(666 666), `HARD_FLOOR_100NS` 166 666 (16.7 ms, the base target less
-50 ms; was `HARD_DEFICIT_100NS`, relative to the target), `HARD_EXCESS_100NS`
-1 333 333 (4 slots + 1), `CALM_ZONE_MS` 1.0, all literals pinned against
-their sources by the same test. (`RECENTRE_100NS` / `RECENT_BLOCKS`, the
+(666 666), `HARD_FLOOR_100NS` 383 333 (38.3 ms, the splice's hold
+`SPLICE_FADE_S` + one slot, Q2; 166 666 before, and `HARD_DEFICIT_100NS`,
+relative to the target, before that), `HARD_EXCESS_100NS` 1 333 333 (4
+slots + 1), `CUSHION_MAX_100NS` = `SLOT_100NS` (Q1), `CALM_ZONE_MS` 1.0,
+all pinned against their sources by the same test. (`RECENTRE_100NS` / `RECENT_BLOCKS`, the
 window-mean re-centre, are gone with the owner's ruling below.)
 
 **Sign:** a POSITIVE correction makes MORE output per input (the card runs
@@ -113,10 +117,12 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   zone adds `braking_ppm` = √(2 · 5 ppm/s · (|err| − calm)) (1 ms =
   1000 ppm·s): the fastest correction that can still stop at the zone's edge
   decelerating at the existing 5 ppm/s slew limit. A date step's remainder
-  (forward, ≤ one slot), a missing boundary, the sawtooth of a callback
-  period, the excess an underrun leaves: all drained within ±300 ppm
-  (≈ 0.5 cent). A 33 ms step is back within ±2 ms in ≤ 148.2 s (model; the
-  trapezoid optimum is ~171 s to null it, ~150 s to reach 1 ms). NOT
+  (forward, ≤ one slot) and the sawtooth of a callback period are drained
+  within ±300 ppm (≈ 0.5 cent); the excess an underrun leaves is KEPT up
+  to one slot (the cushion, below), and a missing boundary is a hard
+  re-centre since Q2. A +33 ms step is back within ±2 ms in ≤ 145.4 s
+  (model; the trapezoid optimum is ~171 s to null it, ~150 s to reach
+  1 ms). NOT
   slewed (review round 2): a changed `delay_ms` changes the entry, so the
   outputs task REBUILDS the output (`same_but_name`: a gap of ≥ 2 s while
   the old worker releases the driver, then the priming); a driver's buffer
@@ -131,10 +137,44 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   level loop (P on the 10 s EMA, ±50; I ±3) acts alone, as before; its I
   anti-windup counts the slew. The worker builds the servo
   `.with_callback_frames(opened.buffer_frames)`.
+- **The cushion** (the main session's ruling, #233 comment 6056680979, Q1:
+  KEEP an underrun's excess, bounded). An underrun makes the card play
+  silence, and the latency then stands that much over the target. Draining
+  it re-exposed the next late block (the closing lane's models: 97 / 33
+  underrun callbacks, the correction > 50 ppm off the card ~75 % of the
+  time). Now:
+  - each block's new `underrun_frames` (cumulative; the first block's count
+    is the start, a count that went back folds nothing) are folded into
+    `cushion_100ns` (`fold_cushion`: added, at most `CUSHION_MAX_100NS` =
+    one slot);
+  - the offset slew's error is the window mean's distance from the band
+    [target, target + cushion] (`slew_err_100ns`, branch-free: `(t − L)⁺ −
+    (L − top)⁺`; a comparison form has an equivalent `>=` mutant at the
+    top): a kept excess is not braked, what lies beyond the cap is drained
+    as before, a deficit is measured from the target itself;
+  - the level loop (P on the EMA, I) keeps the CONFIGURED target, so the
+    kept excess decays slowly through it (P ≤ 50 ppm: tens of minutes; the
+    sim's 150 ms stall still holds ~20 of its 33.3 ms 400 s later);
+  - at each window the cushion follows the mean down (`kept_cushion`:
+    never more than the mean held over the target, 0 at or under it); a
+    window that FOLDED an underrun keeps it whole, since its mean still
+    holds the blocks before the underrun (`folded`, taken at the close).
+    The next window cuts the overcount;
+  - a priming or a hard re-centre drops it (the latency is at the target
+    again); the hard edges stay on the configured target (the ring's
+    capacity is the target + 4 slots + one block);
+  - the status: `ServoStatus::cushion_ms` → `outputs[i].asio.cushion_ms`
+    (0 while waiting); `offset_ms` is now the distance from the band, so
+    0 while only a cushion is held, and the dashboard's slew chip reads
+    "drží rezervu +13,3 ms po výpadku" then (`sp_core::asio_resampling`,
+    shown while its tenths are not zero; a drain is named first).
 - **The last resort** (`hard_recentre(latency, target)`): a block whose
-  latency is under 16.7 ms (`HARD_FLOOR_100NS`, the base target less 1.5
-  slots: the ring then holds < 11.7 ms for a block on time, so most blocks
-  of the 10–33 ms hand-off would underrun before the slew could restore it)
+  latency is under 38.3 ms (`HARD_FLOOR_100NS`, the splice's 5 ms hold + one
+  slot, Q2: a missing program boundary at delay 0, −33.3 ms, which with
+  the sub-millisecond hand-off only a real stall makes, reads under it and
+  is ONE faded insert, counted and logged as a fault, instead of a run of
+  unfaded underruns while the slew restores the ring — the owner's "last
+  resort when the buffer would run dry", comment 6053850076)
   or more than four slots off the target either way (`HARD_EXCESS_100NS`,
   133.3 ms: over it the next block would overflow the ring, target + 4
   slots + one block; under it a delayed output would play that early for
@@ -143,15 +183,11 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   The floor is ABSOLUTE (review round 2): an entry's delay raises the
   target, never the floor, so a delayed output 50 ms short still holds its
   delay in the ring and is slewed (the old edge, relative to the target,
-  spliced it); up to a delay of 83.3 ms the mirrored edge is at or below
+  spliced it); up to a delay of 105 ms the mirrored edge is at or below
   the floor and changes nothing (at delay 0 it is −66.7 ms). A deficit
   therefore means too little buffered: the ring would run dry, or a
   delayed output played over 4 slots early (its dashboard cause "v
-  zásobníku chýbal zvuk", review round 4). Whether
-  the floor should move up to the splice's hold + one slot (≈ 38.3 ms), so
-  that a missing boundary at delay 0 is one faded insert rather than a run
-  of underruns, is the main session's call (#233 comment 6055539144, Q2).
-  It is a fault:
+  zásobníku chýbal zvuk", review round 4). It is a fault:
   `hard_recentres` (renamed from `recentres`), a WARN at most once per 5 s
   (`asio output: a hard re-centre (a fault)…` with cause, ms, the hand-off
   lateness and the count held back), and `last_hard_recentre {cause, ms,
@@ -160,8 +196,8 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   so it never reaches the floor.
 - **The first block's priming** (`Recentre::Prime`) inserts to the target the
   same way and is NO re-centre (an open or a reopen used to count one).
-- The status also shows `offset_ms` (the last window's latency − target,
-  positive = later) and `slew_eta_s` (`slew_eta_s`: accelerate / cruise /
+- The status also shows `offset_ms` (the last window's latency outside the
+  cushion's band, positive = later) and `slew_eta_s` (`slew_eta_s`: accelerate / cruise /
   brake within the room the card's rate leaves on the side the slew works:
   300 − rate for more output, 300 + rate for less; `None` inside the calm
   zone).
@@ -234,28 +270,46 @@ plus half a block of the first ramp — derive pins from a model of rubato's
 **The closed-loop simulation** (`asrc_servo_sim_tests.rs`, since the
 owner's ruling; since review round 2 the observation counts the splice's
 5 ms hold as buffered while the card plays only the ring, as the worker
-does): **0 hard re-centres** in every case — cards −50 / 0 / +50
-ppm (latency ≤ 2 ms after 70 s, |final − card| ≤ 5 ppm); ±1 ms steps at three
-window phases; ±33 ms steps (+33 a date step's forward remainder, −33 a
-missing boundary; a remainder is forward only) at three phases on a 0
-and a 20 ppm card, back within ±2 ms in ≤ 150 s (model 138.9–148.2 s), 0
-underruns; a hand-off late WITHIN the cushion (singles 40–56 ms, clumps of 2:
-0 underruns, latency within the sawtooth, the correction never more than
-1.3 / 2.5 / 1.8 ppm off the card after 120 s — no kick); the realistic
-hand-off (10–33 ms, singles 40–80 ms 1 in 900, clumps of 2 / 3): 97 / 33 /
-33 / 99 underrun callbacks in the four configurations, latency ≤ 22 ms
-off. Not all of them are physics: the stop curve drains the excess each
-underrun leaves at up to 300 ppm, which re-exposes the next late block —
-with the hold, review round 3's model has the correction more than
-50 ppm off the card ~75 % of the time after 120 s (73 % at 512 frames),
-while keeping that excess as cushion gives ~29 underruns (13 at 512) and
-never 50 ppm off (#233 comment 6055539144 + its correction, Q1, the main
-session's call); a callback period 128 → 512 mid-run with no reopen; a
-dropped callback; a 100 ms forward step and a 150 ms stall at four
-distinct phases of the slot (0 / 8.3 / 16.7 / 25 ms; slewed); a
-1024-frame driver at 48 kHz with a 20 ms step; a 48 kHz card at +50 ppm.
-The ring-limit cases force exactly one each: a 300 ms worker stall at the
-same four phases (excess) and a 100 ms pause (deficit). A stall near
+does; since Q1 the card counts its underrun frames as the worker does, a
+whole buffer per short callback once the first block primed the ring):
+**0 hard re-centres** in every case —
+- **the measured hand-off, the nominal case** (`Lateness::Measured`, #233
+  comment 6056680979: SP-program's 4 h trace, p50 70 µs, p99 141 µs,
+  p99.9 242 µs, max 9.36 ms, none over 10 ms; uniform between the
+  quantiles, from an assumed 30 µs): at 128 and 512 frames, 96 kHz, on a
+  0 and a 20 ppm card, 0 underruns, the latency within 1.6 / 1.4 / 4.7 /
+  5.2 ms, the correction within 2.9 / 1.4 / 3.1 / 3.4 ppm of the card
+  after 300 s (`STEADY_S`; model 2.79 / 1.32 / 3.00 / 3.35). Before the
+  lock settles (up to ~200 s) it can be 11–30 ppm off: a near-constant
+  hand-off sits at one phase of the callback grid, so the regression's
+  short early span sees the grid's beat;
+- cards −50 / 0 / +50 ppm (latency ≤ 2 ms after 70 s, |final − card| ≤
+  5 ppm); ±1 ms steps at three window phases;
+- a +33 ms step (a date step's forward remainder) at three phases on a 0
+  and a 20 ppm card, back within ±2 ms in ≤ 150 s (model 138.9–145.4 s),
+  0 underruns;
+- a hand-off late WITHIN the cushion (singles 40–56 ms, clumps of 2: 0
+  underruns, latency within the sawtooth, the correction never more than
+  1.3 / 2.5 / 1.8 ppm off the card after 120 s — no kick);
+- **the pessimistic hand-off, the stress case** (`Lateness::Realistic`:
+  the old sender's 10–33 ms, singles 40–80 ms 1 in 900, clumps of 2 / 3):
+  29 / 13 / 13 / 30 underrun callbacks in the four configurations (97 /
+  33 / 33 / 99 while the stop curve drained each excess), latency ≤ 22 ms
+  off, the correction never more than 38 ppm off the card after 120 s
+  (model ≤ 37.0), a cushion held;
+- a callback period 128 → 512 mid-run with no reopen; a dropped callback;
+  a 100 ms forward step; a 1024-frame driver at 48 kHz with a 20 ms step;
+  a 48 kHz card at +50 ppm;
+- a 150 ms stall at four distinct phases of the slot (0 / 8.3 / 16.7 /
+  25 ms): never a splice; ONE SLOT of its excess is kept (`max_cushion_ms`
+  33.3333, the rest slewed away), still 18–23 ms 400 s later (model
+  18.9–22.0), the correction under the card by P + I (≤ 53 ppm).
+
+The ring-limit cases force exactly one each: a missing boundary (−33 ms,
+under the floor since Q2; three phases on a 0 and a 20 ppm card: 0
+underruns, no block more than 2 ms off after the insert), a 300 ms worker
+stall at the same four phases (excess) and a 100 ms pause (deficit); the
+cushion their underruns left goes with the re-centre. A stall near
 200 ms is AT the ring's limit (its excess is 4 slots ± the phase: none at
 500.0 / .01 / .02 / .011 / .022 / .033 s, one at 500.03 s), so no test
 pins it. 900 s each;
@@ -774,7 +828,8 @@ meria sa" while the server reads it 0), then the resampling — "48 → 96 kHz"
 ("48 kHz bez prevodu" at the program's rate), "karta +0,4 ppm voči
 SongPlayeru (odhad zamknutý)" ("… odhad sa ešte meria" before the lock),
 "korekcia −0,7 ppm (uberá vzorky)" / "(pridáva vzorky)", "oneskorenie v
-cieli" or "dorovnáva odchýlku +12,3 ms · ešte asi 45 s", and "posledný
+cieli", "drží rezervu +13,3 ms po výpadku" (the cushion, Q1) or "dorovnáva
+odchýlku +12,3 ms · ešte asi 45 s", and "posledný
 núdzový skok pred 3 min: +65,0 ms (v zásobníku chýbal zvuk)" after a fault
 ("zásobník by pretiekol" for an excess).
 Numbers the Slovak way (tenths half away from zero, a decimal comma, a true
