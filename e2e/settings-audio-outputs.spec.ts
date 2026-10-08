@@ -664,3 +664,19 @@ test("an ASIO channel typed as 0 is refused, never read as channel 1 (#233)", as
   expect(patches).toHaveLength(0);
   expect(realConsoleErrors()).toEqual([]);
 });
+
+// #233 review round 2: a box that lists no ASIO driver offers no ASIO
+// output (a row with an empty driver select would only be refused).
+test("a box with no ASIO driver offers no ASIO output, and says why (#233)", async ({ page }) => {
+  await page.route("**/api/v1/audio/asio-drivers", (route) => route.fulfill({ json: { drivers: [] } }));
+  try {
+    await openSettings(page);
+    const add = page.locator('[data-testid="audio-outputs-add-asio"]');
+    await expect(add).toHaveAttribute("title", "V systéme nie je žiadny ovládač ASIO", { timeout: 10000 });
+    await expect(add).toBeDisabled();
+    await expect(page.locator('[data-testid="audio-outputs-add-vban"]')).toBeEnabled();
+  } finally {
+    await page.unroute("**/api/v1/audio/asio-drivers");
+  }
+  expect(realConsoleErrors()).toEqual([]);
+});
