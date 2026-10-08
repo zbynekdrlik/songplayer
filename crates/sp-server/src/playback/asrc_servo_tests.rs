@@ -834,6 +834,38 @@ fn a_level_held_5_ms_low_is_slewed_at_the_limit() {
         "{a:?}"
     );
     assert_eq!(s.status().hard_recentres, 0);
+    // 90 s more: the correction reaches its unclamped target — the card's
+    // rate (locked, ~0) + the stop curve's 200 ppm + P (~10) + I.
+    let a = steady(&mut s, 30 * 30 + 1, 30 * 90, low);
+    assert!((a.correction_ppm - 210.1185091994812).abs() < 1e-9, "{a:?}");
+}
+
+/// A 40 ppm card, locked, then the level 20 ms low for two windows: the
+/// slew's time left counts only the share above the card's rate and the room
+/// the rate leaves in the ±300 budget (pins from the scratch model).
+#[test]
+fn the_time_left_counts_from_the_cards_rate() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(obs(0, 0, 6_400, 480_000));
+    let card = Feed {
+        ppm: 40.0,
+        offset: 480_000,
+        ..FEED
+    };
+    steady(&mut s, 1, 30 * 90, card);
+    let low = Feed {
+        buffered: 4_480,
+        ..card
+    };
+    let a = steady(&mut s, 30 * 90 + 1, 64, low);
+    let st = s.status();
+    assert!(st.locked, "{st:?}");
+    assert!((a.correction_ppm - 50.66754506554876).abs() < 1e-9, "{a:?}");
+    assert_eq!(st.offset_ms, -19.9999);
+    assert!(
+        (st.slew_eta_s.unwrap() - 122.98701246771205).abs() < 1e-9,
+        "{st:?}"
+    );
 }
 
 #[test]
