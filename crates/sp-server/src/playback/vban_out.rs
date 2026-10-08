@@ -700,8 +700,15 @@ impl VbanSender {
     }
 
     /// #233 release review: the sender of `out`'s destination over
-    /// `converter`.
+    /// `converter`. A converter rubato refused is the output's fault: it
+    /// sends silence, and its status reads waiting with that reason.
     pub fn with_converter(out: &VbanOut, converter: VbanRateConverter) -> Self {
+        if let Some(why) = converter.failed() {
+            out.set_fault(format!(
+                "the {} Hz rate converter could not be built ({why}): the output sends silence",
+                out.format().rate_hz()
+            ));
+        }
         Self::build(out.format(), out.delay_100ns(), converter)
     }
 

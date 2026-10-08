@@ -192,9 +192,17 @@ impl RunningOutput {
     fn vban_status(&self, out: Option<&Arc<VbanOut>>) -> OutputStatus {
         let e = &self.entry;
         let st = out.map(|out| (out.status(), out.is_running()));
-        // A build error, else why the thread could not start (#233).
+        // A build error, else why the thread could not start (#233), else
+        // what the running thread cannot do (a refused rate converter), each
+        // with its code (#233 release review).
         let not_started = out.and_then(|out| out.start_error());
-        let build_error = self.error.clone().or(not_started);
+        let fault = out.and_then(|out| out.fault());
+        let (build_error, cause) = match (self.error.clone(), not_started, fault) {
+            (Some(why), _, _) => (Some(why), Some("not_built")),
+            (None, Some(why), _) => (Some(why), Some("not_started")),
+            (None, None, Some(why)) => (Some(why), Some("converter")),
+            (None, None, None) => (None, None),
+        };
         let addressed = st
             .as_ref()
             .is_some_and(|(s, _)| s.targets.iter().any(|t| t.addr.is_some()));
@@ -217,7 +225,7 @@ impl RunningOutput {
             enabled: e.enabled,
             state,
             reason,
-            reason_code: None,
+            reason_code: vban_reason_code(state, cause, resolve_error.is_some()),
             rate: self.built_rate,
             format: e.vban.as_ref().map_or("int24", |v| v.format.as_str()),
             channels: 2,
