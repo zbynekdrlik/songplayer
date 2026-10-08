@@ -277,6 +277,34 @@ async fn an_operators_ask_here_is_never_answered_by_a_peer() {
     );
 }
 
+/// Review round 5: the operator's ask or text on ANOTHER row of the video
+/// keeps the video's lyrics here too (its rows serve one `{yt}_lyrics.json`):
+/// the row asked runs here, no peer asked, nothing fetched.
+#[tokio::test]
+async fn an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here() {
+    for owner in [
+        "lyrics_manual_priority = 1",
+        "lyrics_override_text = 'Moj text'",
+    ] {
+        let (_snv, pp, id, _) = snv_and_pp().await;
+        let two = pp.add_video_to(2, YT).await;
+        sqlx::query(&format!("UPDATE videos SET {owner} WHERE id = ?"))
+            .bind(two)
+            .execute(pp.pool())
+            .await
+            .unwrap();
+        let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &lyrics_row(&pp, id).await).await
+        else {
+            panic!("{owner} on another row: runs here")
+        };
+        assert_eq!(json_at(&pp), None, "{owner}: nothing was fetched");
+        assert!(
+            pp.ex.client.last_reads().is_empty(),
+            "{owner}: no peer was asked"
+        );
+    }
+}
+
 /// Review Focus 5 here: this node's `{yt}_lyrics.json` of a dubbed video is
 /// the dub's subtitles, never overwritten by a peer's lyrics.
 #[tokio::test]
@@ -484,7 +512,8 @@ async fn a_stand_in_met_by_the_hook_is_replaced_in_every_row() {
 /// track, an audio check that cannot tell) never puts the row back for good.
 /// Under the bound the row is put back and the wait recorded; once the job
 /// has waited the bound, it runs here, still standing in (the stand-in as
-/// it was).
+/// it was). Review round 5: that run put back, the next pick runs here at
+/// once (the spent bound is kept, never a new 2 h per putting back).
 #[tokio::test]
 async fn a_stand_in_handed_the_copy_runs_here_after_the_bound() {
     let (_snv, pp, id, _) = snv_and_pp().await;
@@ -512,7 +541,7 @@ async fn a_stand_in_handed_the_copy_runs_here_after_the_bound() {
     crate::db::models_peer::record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, 2_000)
         .await
         .unwrap();
-    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
+    let PeerStep::Local(Some(guard)) = first(Some(&pp.ex), &row).await else {
         panic!("after the bound the job runs here")
     };
     let standin: (String, i64, i64) =
@@ -521,6 +550,15 @@ async fn a_stand_in_handed_the_copy_runs_here_after_the_bound() {
             .await
             .unwrap();
     assert_eq!(standin, ("snv".to_string(), 1_000, 2_000), "kept as it was");
+    drop(guard);
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("the run put back runs here again at once")
+    };
+    let standins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_standins")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(standins, 1, "still standing in");
 }
 
 #[tokio::test]

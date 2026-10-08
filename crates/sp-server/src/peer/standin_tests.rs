@@ -206,9 +206,16 @@ async fn a_stand_in_whose_peer_copy_is_of_another_audio_is_kept_for_good() {
         .await
         .unwrap();
     std::fs::write(&audio, crate::peer::rig::bytes(3_000, 9)).unwrap();
+    // A spent wait a hand-off left (review round 5) ends with the stand-in.
+    start_wait(pp.pool(), YT, "lyrics", 1_000).await.unwrap();
     assert!(supersede_next(Some(&pp.ex)).await.is_empty());
     assert_eq!(json_at(&pp), Some(json));
     assert!(standins(&pp).await.is_empty());
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0, "no spent wait left behind");
 }
 
 /// An operator's text or ask, or a dub, on any row of the video: the track
