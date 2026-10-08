@@ -26,7 +26,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::Exchange;
 use super::ask::FetchPlan;
@@ -157,19 +157,22 @@ const OPERATOR_OR_DUB: &str = "SELECT EXISTS (SELECT 1 FROM videos WHERE youtube
 
 /// The peer's copy in place of the stand-in of `youtube_id` (the module doc).
 async fn supersede(ex: &Exchange, youtube_id: &str) -> Superseded {
-    let rows: Vec<i64> =
-        match sqlx::query_scalar("SELECT id FROM videos WHERE youtube_id = ? ORDER BY id")
-            .bind(youtube_id)
-            .fetch_all(&ex.pool)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(youtube_id, %e, "exchange: reading a stand-in's rows failed");
-                return Superseded::NotYet;
-            }
-        };
-    let Some(&first) = rows.first() else {
+    let rows: Vec<(i64, bool)> = match sqlx::query_as(
+        "SELECT id, audio_file_path IS NOT NULL FROM videos WHERE youtube_id = ? ORDER BY id",
+    )
+    .bind(youtube_id)
+    .fetch_all(&ex.pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(youtube_id, %e, "exchange: reading a stand-in's rows failed");
+            return Superseded::NotYet;
+        }
+    };
+    // The audio check reads a row that records an audio (the video's rows
+    // share it, review round 1), else the lowest.
+    let Some(&(first, _)) = rows.iter().find(|(_, audio)| *audio).or(rows.first()) else {
         return Superseded::Never("no row of the video is left here");
     };
     let owned: Result<bool, sqlx::Error> = sqlx::query_scalar(OPERATOR_OR_DUB)
@@ -186,12 +189,19 @@ async fn supersede(ex: &Exchange, youtube_id: &str) -> Superseded {
         }
     }
     let Some(plan) = peers_lyrics(ex, youtube_id).await else {
+        debug!(
+            youtube_id,
+            "exchange: a stand-in waits - no listed peer has its lyrics yet"
+        );
         return Superseded::NotYet;
     };
     match ex.audio_verdict(&plan, first, youtube_id).await {
         AudioVerdict::Same => {}
         AudioVerdict::Other => return Superseded::Never("the peer's copy is of another audio"),
-        AudioVerdict::NotNow(_) => return Superseded::NotYet,
+        AudioVerdict::NotNow(why) => {
+            debug!(youtube_id, %why, "exchange: a stand-in waits - its audio check cannot tell now");
+            return Superseded::NotYet;
+        }
     }
     let (artifact, lyrics) = match super::lyrics::peer_row(ex, youtube_id, &plan).await {
         Ok(row) => row,
@@ -202,7 +212,7 @@ async fn supersede(ex: &Exchange, youtube_id: &str) -> Superseded {
         return not_taken(youtube_id, &plan, &e);
     }
     let mut adopted = Vec::with_capacity(rows.len());
-    for id in rows {
+    for (id, _) in rows {
         match models_peer::adopt_lyrics(&ex.pool, id, &lyrics).await {
             Ok(()) => adopted.push(id),
             Err(e) => warn!(video_id = id, %e, "exchange: a row did not take the peer's lyrics"),
