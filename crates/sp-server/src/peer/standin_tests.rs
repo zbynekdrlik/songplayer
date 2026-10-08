@@ -442,10 +442,11 @@ async fn a_lyrics_job_run_here_while_its_source_is_unreachable_stands_in() {
     );
 }
 
-/// Review round 2: the lyrics ran here after the bound (they stand in for
-/// SNV's copy) and the run was put back (e.g. for its stems): the next pick
-/// asks again, and it neither waits on the song again (a new 2 h wait per
-/// putting back) nor ends the stand-in.
+/// Review rounds 2-3: the lyrics ran here after the bound (they stand in
+/// for SNV's copy) and the run was put back (e.g. for its stems): the next
+/// pick asks again, and it neither waits on the song again (a new 2 h wait
+/// per putting back) nor touches the stand-in (its age and its next look
+/// stay as they were).
 #[tokio::test]
 async fn a_lyrics_job_put_back_after_the_bound_keeps_standing_in() {
     let snv = TestNode::start("snv", Some(SNV_KEY)).await;
@@ -463,21 +464,56 @@ async fn a_lyrics_job_put_back_after_the_bound_keeps_standing_in() {
         panic!("the lyrics run here after the bound")
     };
     drop(guard);
+    assert_eq!(standins(&pp).await.len(), 1, "it stands in");
+    // Aged, as if put back a while ago.
+    record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, 2_000)
+        .await
+        .unwrap();
     let Ask::Local(_guard) = pp.ex.ask(Job::Lyrics, YT).await else {
         panic!("put back, they run here again, with no new wait on the song")
     };
     let s = standins(&pp).await;
     assert_eq!(
         s.iter()
-            .map(|s| (s.job.as_str(), s.peer.as_str()))
+            .map(|s| (
+                s.job.as_str(),
+                s.peer.as_str(),
+                s.made_at_ms,
+                s.next_check_ms
+            ))
             .collect::<Vec<_>>(),
-        [("lyrics", "snv")]
+        [("lyrics", "snv", 1_000, 2_000)]
     );
     let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
         .fetch_one(pp.pool())
         .await
         .unwrap();
     assert_eq!(waits, 0, "no wait started");
+}
+
+/// Review round 3: a fetch of the lyrics from another peer than the one
+/// they stand in for (phase 2: two peers listing them) kept failing for the
+/// bound: the job runs here, and the stand-in stays as it was.
+#[tokio::test]
+async fn a_failing_fetch_from_another_peer_keeps_the_stand_in() {
+    let (_snv, pp, rows, _) = snv_and_pp_standin().await;
+    record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, 2_000)
+        .await
+        .unwrap();
+    let long_ago = crate::peer::wire::now_ms() - i64::try_from(MAX_PEER_WAIT.as_millis()).unwrap();
+    start_wait(pp.pool(), YT, "lyrics", long_ago).await.unwrap();
+    let step = pp
+        .ex
+        .after_failed_fetch(Job::Lyrics, rows[0], YT, "pp2", &PeerError::NotFound)
+        .await;
+    assert!(matches!(step, PeerStep::Local(Some(_))));
+    let s = standins(&pp).await;
+    assert_eq!(
+        s.iter()
+            .map(|s| (s.peer.as_str(), s.made_at_ms, s.next_check_ms))
+            .collect::<Vec<_>>(),
+        [("snv", 1_000, 2_000)]
+    );
 }
 
 /// Review round 2: a row that does not take the peer's copy (its write

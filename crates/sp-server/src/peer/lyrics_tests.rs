@@ -422,14 +422,21 @@ async fn the_same_track_already_served_here_is_nothing_newer() {
     assert_eq!(waits, 0, "running here ends the earlier wait");
 }
 
-/// Review round 2: the same track served here, but it stands in for SNV's
-/// copy (`peer::standin`): a stand-in is replaced whatever its source, so
-/// the hook takes SNV's copy rather than "nothing newer", and the stand-in
-/// is over.
+/// Review rounds 2-3: the hook meets a track that stands in for SNV's copy
+/// (here even of SNV's very source, as the daily full-mix upgrade re-picks
+/// it) while SNV has its copy. A stand-in is replaced whatever its source,
+/// and in EVERY row of the video (they serve the one file): the hook takes
+/// nothing into its one row, it makes the stand-in due now and puts the row
+/// back (`STANDIN_MIN_RECHECK`, no attempt); the stand-in's own look then
+/// takes SNV's copy into both rows, the ★ along, and the stand-in is over.
 #[tokio::test]
-async fn a_stand_in_of_the_same_source_is_replaced_by_the_peers_copy() {
+async fn a_stand_in_met_by_the_hook_is_replaced_in_every_row() {
     let (_snv, pp, id, snv_json) = snv_and_pp().await;
-    pp.give_lyrics(id, YT, "mtl+g35t").await;
+    let two = pp.add_video_to(2, YT).await;
+    pp.give_song(two, YT, "Way Maker", "Sinach").await;
+    for row in [id, two] {
+        pp.give_lyrics(row, YT, "mtl+g35t").await;
+    }
     std::fs::write(
         pp.cache().join(format!("{YT}_lyrics.json")),
         b"local-marker",
@@ -439,8 +446,32 @@ async fn a_stand_in_of_the_same_source_is_replaced_by_the_peers_copy() {
         .await
         .unwrap();
     let row = lyrics_row(&pp, id).await;
-    assert!(matches!(first(Some(&pp.ex), &row).await, PeerStep::Done));
+    assert!(matches!(
+        first(Some(&pp.ex), &row).await,
+        PeerStep::Deferred
+    ));
+    assert_eq!(
+        json_at(&pp),
+        Some(b"local-marker".to_vec()),
+        "nothing taken into the one row"
+    );
+    let now = lyrics_now(&pp, id).await;
+    assert_eq!(now.lyrics_attempts, 0);
+    assert!(now.lyrics_next_attempt_at.is_some(), "put back");
+    assert_eq!(
+        crate::peer::standin::supersede_next(Some(&pp.ex)).await,
+        vec![id, two],
+        "due now"
+    );
     assert_eq!(json_at(&pp), Some(snv_json), "SNV's copy is in place");
+    for row in [id, two] {
+        let now = lyrics_now(&pp, row).await;
+        assert_eq!(
+            (now.lyrics_reference, now.lyrics_alignment_model.as_deref()),
+            (1, Some("mtl")),
+            "row {row} took SNV's lyrics columns"
+        );
+    }
     let standins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_standins")
         .fetch_one(pp.pool())
         .await
