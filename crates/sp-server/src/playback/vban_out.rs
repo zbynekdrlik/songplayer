@@ -192,7 +192,7 @@ pub fn needs_resolve(changed: bool, enabled: bool, since_last: Option<Duration>)
 /// A repeating warning is logged on its first occurrence and every
 /// [`VBAN_LOG_EVERY`]th.
 pub fn should_log(count: u64) -> bool {
-    count == 1 || count % VBAN_LOG_EVERY == 0
+    count == 1 || count.is_multiple_of(VBAN_LOG_EVERY)
 }
 
 /// The configuration the VBAN thread sends with.

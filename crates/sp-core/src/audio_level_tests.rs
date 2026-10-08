@@ -13,7 +13,7 @@ fn assert_db(actual: f32, expected: f32, tol: f32) {
 /// `n` samples of a full-scale-`amp` square wave (+amp, −amp, +amp, …).
 fn square(n: usize, amp: f32) -> Vec<f32> {
     (0..n)
-        .map(|i| if i % 2 == 0 { amp } else { -amp })
+        .map(|i| if i.is_multiple_of(2) { amp } else { -amp })
         .collect()
 }
 

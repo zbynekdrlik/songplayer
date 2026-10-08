@@ -177,7 +177,10 @@ pub fn max_packet_frames(bytes_per_sample: usize) -> usize {
 
 /// #233: the largest divisor of `n` that is at most `cap` (1 when there is none).
 pub fn largest_divisor_at_most(n: usize, cap: usize) -> usize {
-    (1..=cap.min(n)).rev().find(|d| n % d == 0).unwrap_or(1)
+    (1..=cap.min(n))
+        .rev()
+        .find(|&d| n.is_multiple_of(d))
+        .unwrap_or(1)
 }
 
 /// #233: one VBAN destination's wire format. Its packet geometry is
