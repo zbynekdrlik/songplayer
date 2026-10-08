@@ -343,6 +343,21 @@ in the same commit as the bump.
 When the Lint job fails on files the diff never touched, check the toolchain
 version in the job log first (`rust-1.99.0` in the clippy help URLs).
 
+## sqlx-sqlite: never mix a numbered `?NNN` with a bare `?` (#229 review round 9)
+
+SQLite numbers a bare `?` one above the largest number used so far, so a
+`?` after `?1` and `?2` is parameter 3. But it has no NAME, and sqlx-sqlite
+(0.8.6, `arguments.rs`) binds a nameless parameter from the FIRST value
+(`arg_i += 1` → `values[0]`). Round 8's `kept_local` spliced
+`queue_sql::LYRICS_NOT_PARKED` (`… lyrics_pipeline_version < ?`) after
+`?1` / `?2`: the version compare got the YouTube id (an integer vs a text
+compares true in SQLite), the parked-row rule did nothing, and its own RED
+tests stayed red on GREEN — no review round before the 9th saw it. Use
+bare `?` everywhere in a query that splices a shared fragment (they bind in
+text order), or number the fragment too. A scratch `python3 -c "import
+sqlite3"` of the exact query, with the binds sqlx would give, shows it
+before CI does.
+
 ## Two compile errors a no-compile review round cannot see (#218/#219 integration)
 
 Six fresh-context review rounds passed both of these, and the first CI run
@@ -1335,6 +1350,23 @@ sees that. What held up across five review rounds:
     panics.
   - A 600 ms "must still work" sleep is exactly the window a ptrace stall
     fails on correct code.
+
+## A log-capture test: never the only registered dispatcher (#229 review round 14)
+
+tracing caches a callsite's interest the first time it is hit. While ONE
+scoped subscriber (`with_default` / `set_default`) is the only registered
+dispatcher and no global default is set, tracing-core asks only the CALLING
+thread's default (`Dispatchers::has_just_one`, tracing-core 0.1.36
+`callsite.rs`): a parallel test that hits the same `info!` first, on a
+thread with no default, caches it as `never`, and the capturing test
+misses its own line on correct code (a flake the no-compile box cannot
+see). With a second dispatcher registered every callsite is asked of all
+of them (`sometimes`), and registering a scoped default rebuilds every
+cached interest. So every capture goes through `crate::test_log::capturing`,
+which installs a global `NoSubscriber` once (`std::sync::Once`,
+`set_global_default`, its error ignored). Never build a capture subscriber
+by hand; never call a global `fmt().init()` in a test (it would panic on
+the global already set).
 
 ## A paused-clock test that awaits SQLite: hold auto-advance off (#229)
 

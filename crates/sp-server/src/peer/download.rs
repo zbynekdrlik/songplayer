@@ -1,8 +1,10 @@
 //! #229: the download job (download + normalize + metadata) asks first. A
 //! peer's video + audio pair is fetched instead of yt-dlp + loudnorm and named
 //! after THIS node's title: an operator's correction here, else the peer's
-//! provider or operator title, else this node's own providers
-//! (`download_title`). It is recorded through
+//! provider or operator title, else the title parser's, marked for the
+//! repair (item A: the peer holds this very song and names it too, so no
+//! provider — paid AI — is asked here; the repair takes the peer's title
+//! once it has one, `peer::repair::waits_for_peer`). It is recorded through
 //! `metadata::manual::record_download`, the local download's own record path,
 //! which re-reads a correction made meanwhile under `cache::SONG_FILES` (#136,
 //! `.claude/rules/song-files.md`). `downloader/` is out of the mutation gate,
@@ -23,10 +25,7 @@ use super::wire::{PeerMetadata, now_ms};
 use crate::db::models_peer;
 use crate::downloader::VideoRow;
 use crate::downloader::cache::{audio_filename, video_filename};
-use crate::metadata::ProviderChain;
-use crate::metadata::manual::{
-    DownloadTitle, MANUAL_SOURCE, download_title, manual_title, record_download,
-};
+use crate::metadata::manual::{DownloadTitle, MANUAL_SOURCE, manual_title, record_download};
 
 /// A peer's title for a video, with where it came from: recorded in
 /// `peer_fetches` (kind `metadata`, [`record_title`]) once a download or the
@@ -82,15 +81,11 @@ pub async fn record_title(ex: &Exchange, youtube_id: &str, t: &PeerTitle) {
 /// it writes this node's own audio under the names a fetched pair had. That
 /// holds on the no-peers and bad-settings paths too, which never go through
 /// `run_here`.
-pub(crate) async fn first(
-    ex: Option<&Arc<Exchange>>,
-    chain: &ProviderChain,
-    row: &VideoRow,
-) -> PeerStep {
+pub(crate) async fn first(ex: Option<&Arc<Exchange>>, row: &VideoRow) -> PeerStep {
     let Some(ex) = ex else {
         return PeerStep::Local(None);
     };
-    let step = ask_or_fetch(ex, chain, row).await;
+    let step = ask_or_fetch(ex, row).await;
     if let PeerStep::Local(_) = &step {
         ex.forget_origins(Job::Download, &row.youtube_id).await;
     }
@@ -98,12 +93,13 @@ pub(crate) async fn first(
 }
 
 /// Ask the peers about the row's download and act on the answer.
-async fn ask_or_fetch(ex: &Exchange, chain: &ProviderChain, row: &VideoRow) -> PeerStep {
+async fn ask_or_fetch(ex: &Exchange, row: &VideoRow) -> PeerStep {
     let job = Job::Download;
     match ex.ask(job, &row.youtube_id).await {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
+        Ask::Held => ex.hold(job, row.id, &row.youtube_id).await,
         Ask::Wait { recheck, .. } => ex.defer(job, row.id, recheck).await,
-        Ask::Fetch(plan) => match adopt(ex, chain, row, &plan).await {
+        Ask::Fetch(plan) => match adopt(ex, row, &plan).await {
             Ok(taken) => {
                 ex.fetched(job, &row.youtube_id, &plan.peer.name, &plan.artifacts)
                     .await;
@@ -126,7 +122,6 @@ async fn ask_or_fetch(ex: &Exchange, chain: &ProviderChain, row: &VideoRow) -> P
 /// provider.
 pub(crate) async fn adopt(
     ex: &Exchange,
-    chain: &ProviderChain,
     row: &VideoRow,
     plan: &FetchPlan,
 ) -> Result<Option<PeerTitle>, PeerError> {
@@ -134,7 +129,7 @@ pub(crate) async fn adopt(
     let audio_artifact = plan.artifact(ArtifactKind::Audio)?;
     let video_part = ex.fetch(&plan.peer, video_artifact).await?;
     let audio_part = ex.fetch(&plan.peer, audio_artifact).await?;
-    let (title, taken) = title_for(ex, chain, row, &plan.peer).await;
+    let (title, taken) = title_for(ex, row, &plan.peer).await;
     let gf = title.gemini_failed;
     let video = ex.cache_dir.join(video_filename(
         &title.song,
@@ -192,7 +187,6 @@ fn written_title(taken: Option<PeerTitle>, recorded: &DownloadTitle) -> Option<P
 /// peer's title when that is the one.
 async fn title_for(
     ex: &Exchange,
-    chain: &ProviderChain,
     row: &VideoRow,
     peer: &PeerConfig,
 ) -> (DownloadTitle, Option<PeerTitle>) {
@@ -214,18 +208,22 @@ async fn title_for(
         Err(e) => warn!(
             youtube_id = %row.youtube_id,
             %e,
-            "exchange: reading the peer's title failed - asking this node's providers"
+            "exchange: reading the peer's title failed - the title parser names it for the repair"
         ),
     }
-    let own = download_title(&ex.pool, chain, &row.youtube_id, &row.title).await;
+    // Item A: the peer holds this very song and names it too (its own
+    // repair): no provider here, the repair takes the peer's title later.
+    let own = DownloadTitle::from(crate::metadata::parser_for_repair(&row.title));
     (own, None)
 }
 
 /// A peer's title this node takes as its own: a provider's answer or an
 /// operator's correction (metadata version ≥ 1, `kind::metadata_version`)
 /// with a song, under the `metadata_source` this node writes for it. `None` =
-/// ask this node's providers (a parser's guess there is no better than one
-/// made here).
+/// no title this node takes (a parser's guess there is no better than one
+/// made here): a pair fetched from the peer is then named by the title
+/// parser, marked for the repair (`title_for`, item A), and the repair waits
+/// for the peer first (`peer::repair::waits_for_peer`).
 pub fn adopted_title(m: &PeerMetadata) -> Option<DownloadTitle> {
     if m.version() < METADATA_PROVIDER || m.song.trim().is_empty() {
         return None;

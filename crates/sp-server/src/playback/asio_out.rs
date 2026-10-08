@@ -23,7 +23,19 @@
 //! - parked (`Reason::Parked`, a driver callback that never returned): the
 //!   output stays closed for good, with no next try.
 //!
-//! A closed output drops the blocks it is handed (they would be stale).
+//! A closed output drops the blocks it is handed (they would be stale), and
+//! so does a running one after its priming until the driver's first tick
+//! since the priming (a driver that opens and never calls back would
+//! otherwise count a hard re-centre every few slots; #233, found at PP).
+//!
+//! A driver that opens and gives no clock (no tick since the priming: DVS
+//! not running, no Dante PTP clock on its network) is a calm, visible wait
+//! (the owner's ruling, #233, 8.10.2026; `asio_state::clock_step`): from 2 s
+//! after the open the output reads waiting, reason `no_clock` (one WARN),
+//! the driver kept open; 60 s after an open with still no tick it is closed
+//! and opened again at once (DEBUG, `clock_waits`, never a reset or a
+//! backoff), on and on; its first tick ends the wait (one INFO), the servo
+//! starting afresh. A driver that ticked and stops is a stall, as before.
 //! The worker is not an MMCSS thread (iemmixer: a helper never pre-empts the
 //! driver's own callback thread; it has two slots of cushion). Status:
 //! `AsioOut::snapshot` → `GET /api/v1/program` `outputs[i].asio`.
@@ -34,12 +46,13 @@ use std::time::Duration;
 
 use serde::Serialize;
 use sp_core::audio_outputs::OutputEntry;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::playback::asio_format::AsioSample;
 use crate::playback::asio_state::{
-    DeviceEvents, POLL_100NS, Reason, StallWatch, admit_rate, asio_latency_ms, backoff_100ns,
-    buffer_note, close_reason, failures_after_close, ring_capacity_frames,
+    ClockStep, DeviceEvents, POLL_100NS, Reason, StallWatch, admit_rate, asio_latency_ms,
+    backoff_100ns, buffer_note, clock_step, close_reason, failures_after_close,
+    ring_capacity_frames,
 };
 use crate::playback::asrc::{Asrc, Splice};
 use crate::playback::asrc_servo::{
@@ -110,13 +123,17 @@ pub struct AsioStatus {
     /// The output's latency from the boundary, ms (`asio_latency_ms`; 0
     /// until the servo measured its first window, and while waiting).
     pub latency_ms: f64,
-    /// The servo's last window: the latency less its target, ms — the
-    /// offset the resampler's ratio drains (positive = later than the
-    /// target; 0 while waiting).
+    /// The servo's last window: the offset the resampler's ratio drains,
+    /// ms — the latency outside [target, target + cushion] (positive =
+    /// later; 0 inside it and while waiting).
     pub offset_ms: f64,
     /// The seconds the drain still needs (`None` inside the calm zone, and
     /// while waiting).
     pub slew_eta_s: Option<f64>,
+    /// The excess the card's underruns left, kept over the target, ms (#233
+    /// comment 6056680979, Q1: at most one slot; it decays slowly through
+    /// the level loop; 0 while waiting).
+    pub cushion_ms: f64,
     /// Callbacks that found the ring short, since the output was built.
     pub underruns: u64,
     /// Closes (a reset, a rate change, a stall) since the output was built.
@@ -134,10 +151,15 @@ pub struct AsioStatus {
     /// The driver's `kAsioOverload` messages, since the output was built.
     pub overloads: u64,
     /// While waiting: the seconds to the next open (None for a parked
-    /// driver, which is never reopened).
+    /// driver, which is never reopened, or for one waiting for its clock —
+    /// `no_clock`, the driver open, reopened each minute on its own).
     pub retry_in_s: Option<f64>,
     /// While waiting: the reason's stable code (`Reason::code`).
     pub reason_code: Option<&'static str>,
+    /// The times the driver, giving no clock for 60 s after an open, was
+    /// closed and opened again (`Reason::NoClock`), since the output was
+    /// built: a calm wait, neither a reset nor a fault.
+    pub clock_waits: u64,
 }
 
 /// A hard re-centre as the status shows it.
@@ -333,6 +355,10 @@ struct Run {
     /// The driver's overload count this run (its device counts per run).
     overloads: u64,
     primed: bool,
+    /// The frames the card had taken when the first block primed the ring:
+    /// the driver's ticks count from there (a burst of callbacks at the
+    /// open, then nothing, is no clock).
+    consumed_at_prime: u64,
 }
 
 enum State {
@@ -382,6 +408,12 @@ pub struct AsioWorker {
     /// The last hard re-centre (shown with its age), and its WARN's limit.
     last_hard: Option<Hard>,
     hard_warns: WarnLimiter,
+    /// The driver gives no clock and the output waits for it (the owner's
+    /// ruling, #233, 8.10.2026; `asio_state::clock_step`), across the
+    /// reopens every 60 s, until it ticks or the output closes otherwise.
+    waiting_for_clock: bool,
+    /// Those reopens (`AsioStatus::clock_waits`).
+    clock_waits: u64,
 }
 
 impl AsioWorker {
@@ -396,6 +428,8 @@ impl AsioWorker {
             closed: Closed::default(),
             last_hard: None,
             hard_warns: WarnLimiter::default(),
+            waiting_for_clock: false,
+            clock_waits: 0,
         }
     }
 
@@ -427,6 +461,76 @@ impl AsioWorker {
             }
             State::Running(run) => run,
         };
+        // The driver's clock (the owner's ruling, #233, 8.10.2026): one that
+        // opens and does not tick is a calm wait, reopened every 60 s, and
+        // runs by itself once it ticks. Its ticks count from the priming.
+        let ticks = device
+            .consumed_frames()
+            .saturating_sub(run.consumed_at_prime);
+        let clock = clock_step(
+            ticks,
+            run.primed,
+            self.waiting_for_clock,
+            now_100ns - run.opened_at_100ns,
+        );
+        match clock {
+            ClockStep::Ticking | ClockStep::Quiet => {}
+            ClockStep::ClockArrived => {
+                self.waiting_for_clock = false;
+                // Its run so far observed one block, up to a minute ago: the
+                // servo starts afresh, primed by the next block it observes.
+                run.servo = new_servo(out, run.opened);
+                info!(
+                    id = %out.id,
+                    driver = %out.driver,
+                    "asio output: the driver gives a clock now - running"
+                );
+                out.update(|l| {
+                    l.state = STATE_RUNNING;
+                    l.reason = None;
+                    l.status.reason_code = None;
+                });
+            }
+            ClockStep::StartsWaiting => {
+                self.waiting_for_clock = true;
+                warn!(
+                    id = %out.id,
+                    driver = %out.driver,
+                    "asio output: no callback since the driver opened - the output waits for its clock (the driver stays open, opened again every 60 s); e.g. DVS is not running or there is no Dante PTP clock"
+                );
+                out.update(|l| {
+                    l.state = STATE_WAITING;
+                    l.status.reason_code = Some(Reason::NoClock.code());
+                    l.reason = Some(Reason::NoClock);
+                    l.status.retry_in_s = None;
+                });
+            }
+            ClockStep::Reopen => {
+                self.clock_waits += 1;
+                self.closed.add(run, &*device);
+                let (closed, waits) = (self.closed, self.clock_waits);
+                out.update(|l| {
+                    closed.write(&mut l.status);
+                    l.status.clock_waits = waits;
+                });
+                debug!(
+                    id = %out.id,
+                    driver = %out.driver,
+                    waits,
+                    "asio output: still no clock 60 s after the open - closing and opening the driver again"
+                );
+                self.state = State::Closed {
+                    retry_at_100ns: now_100ns,
+                };
+                device.close();
+                return POLL_100NS;
+            }
+        }
+        let ticking = matches!(clock, ClockStep::Ticking | ClockStep::ClockArrived);
+        // After the priming, a block waits for the driver's first tick: what
+        // a card that takes nothing would pile up is no fault of the output
+        // (#233, PP): neither observed nor pushed.
+        let block = block.filter(|_| !run.primed || ticking);
         if let Some(hard) = block.and_then(|b| process(run, out, device, now_100ns, b)) {
             if let Some(held_back) = self.hard_warns.admit(now_100ns, HARD_WARN_EVERY_100NS) {
                 log_hard(&out.id, &hard, held_back);
@@ -443,10 +547,10 @@ impl AsioWorker {
                 "asio output: the driver's latency changed (read again)"
             );
         }
+        // A stall is a driver that ticked and stops (a driver that never
+        // ticked waits for its clock, above).
         let reason = close_reason(&ev, run.opened.rate).or_else(|| {
-            run.stall
-                .stalled(ev.callbacks, now_100ns)
-                .then_some(Reason::Stalled)
+            (ticking && run.stall.stalled(ev.callbacks, now_100ns)).then_some(Reason::Stalled)
         });
         match reason {
             Some(reason) => {
@@ -478,32 +582,49 @@ impl AsioWorker {
             Ok(run) => {
                 let o = run.opened;
                 let rate = o.rate.round() as u32;
-                info!(
-                    id = %out.id,
-                    driver = %out.driver,
-                    rate,
-                    buffer_frames = o.buffer_frames,
-                    out_channels = o.out_channels,
-                    sample_type = o.sample.name(),
-                    latency_frames = run.driver_latency_frames,
-                    target_ms = out.target_100ns as f64 / 10_000.0,
-                    "asio output: opened the driver (its rate, buffer and sample type are the driver's own)"
-                );
-                if let Some(note) = buffer_note(o.buffer_frames, rate) {
-                    warn!(id = %out.id, driver = %out.driver, "asio output: {note}");
+                // While it waits for its clock, a reopen is a retry: DEBUG,
+                // and the output keeps reading waiting.
+                let waiting = self.waiting_for_clock;
+                if waiting {
+                    debug!(
+                        id = %out.id,
+                        driver = %out.driver,
+                        "asio output: opened the driver again - still waiting for its clock"
+                    );
+                } else {
+                    info!(
+                        id = %out.id,
+                        driver = %out.driver,
+                        rate,
+                        buffer_frames = o.buffer_frames,
+                        out_channels = o.out_channels,
+                        sample_type = o.sample.name(),
+                        latency_frames = run.driver_latency_frames,
+                        target_ms = out.target_100ns as f64 / 10_000.0,
+                        "asio output: opened the driver (its rate, buffer and sample type are the driver's own)"
+                    );
+                    if let Some(note) = buffer_note(o.buffer_frames, rate) {
+                        warn!(id = %out.id, driver = %out.driver, "asio output: {note}");
+                    }
                 }
                 // Stale by the open's duration: the first block the servo
-                // sees is a fresh one.
-                log_stale(&out.id, out.queue.clear());
+                // sees is a fresh one. A reopen during a wait for the clock
+                // is a retry: its count logs at DEBUG (review round 10).
+                log_stale(&out.id, out.queue.clear(), waiting);
+                let (state, reason) = if waiting {
+                    (STATE_WAITING, Some(Reason::NoClock))
+                } else {
+                    (STATE_RUNNING, None)
+                };
                 out.update(|l| {
-                    l.state = STATE_RUNNING;
-                    l.reason = None;
+                    l.state = state;
+                    l.status.reason_code = reason.as_ref().map(Reason::code);
+                    l.reason = reason;
                     l.status.driver_rate = rate;
                     l.status.buffer_frames = o.buffer_frames;
                     l.status.out_channels = o.out_channels;
                     l.status.sample_type = o.sample.name();
                     l.status.retry_in_s = None;
-                    l.status.reason_code = None;
                 });
                 self.state = State::Running(Box::new(run));
             }
@@ -541,6 +662,8 @@ impl AsioWorker {
     }
 
     fn wait(&mut self, out: &AsioOut, now_100ns: i64, reason: Reason, what: &str) {
+        // Another close ends a wait for the clock (its own WARN says why).
+        self.waiting_for_clock = false;
         // A parked driver never opens again in this process: no retry.
         let wait = (reason != Reason::Parked).then(|| backoff_100ns(self.failures));
         let retry_in_s = wait.map(|w| w as f64 / 1e7);
@@ -568,6 +691,7 @@ impl AsioWorker {
             l.status.latency_ms = 0.0;
             l.status.offset_ms = 0.0;
             l.status.slew_eta_s = None;
+            l.status.cushion_ms = 0.0;
         });
     }
 
@@ -588,11 +712,12 @@ fn build(out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) -> Result<R
     let capacity = ring_capacity_frames(rate, out.target_100ns, asrc.max_out_frames());
     let (producer, consumer) = rtrb::RingBuffer::new(capacity * VBAN_CHANNELS);
     let started = device.start(consumer)?;
+    let opened = Opened { rate, ..opened };
     Ok(Run {
-        opened: Opened { rate, ..opened },
+        opened,
         opened_at_100ns: now_100ns,
         producer,
-        servo: Servo::new(rate, out.target_100ns).with_callback_frames(opened.buffer_frames),
+        servo: new_servo(out, opened),
         splice: Splice::new(rate, capacity, asrc.max_out_frames()),
         asrc,
         zeros: vec![0.0; VBAN_BLOCK_SAMPLES],
@@ -601,7 +726,14 @@ fn build(out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) -> Result<R
         overflows: 0,
         overloads: 0,
         primed: false,
+        consumed_at_prime: 0,
     })
+}
+
+/// A drift servo for `out` on a driver opened as `opened` (its admitted
+/// rate and callback period).
+fn new_servo(out: &AsioOut, opened: Opened) -> Servo {
+    Servo::new(opened.rate, out.target_100ns).with_callback_frames(opened.buffer_frames)
 }
 
 /// Frames in the ring now (what the producer filled and the card did not
@@ -625,6 +757,11 @@ fn process(
         buffered_frames: (ring_frames(&run.producer) + run.splice.held_frames()) as u64,
         pending_skip_frames: run.splice.pending_skip_frames() as u64,
         consumed_frames: device.consumed_frames(),
+        // A short callback counts as a whole buffer: an overcount of at
+        // most one buffer per event (#233 comment 6056680979, Q1).
+        underrun_frames: device
+            .underruns()
+            .saturating_mul(u64::from(run.opened.buffer_frames)),
     });
     if let Err(e) = run.asrc.set_correction_ppm(action.correction_ppm) {
         warn!(id = %out.id, %e, "asio output: the resampler refused the servo's correction");
@@ -662,6 +799,7 @@ fn process(
     if !run.primed {
         device.mark_primed();
         run.primed = true;
+        run.consumed_at_prime = device.consumed_frames();
     }
     out.update(|l| l.blocks_sent += 1);
     hard
@@ -681,10 +819,20 @@ fn log_hard(id: &str, h: &Hard, held_back: u64) {
     );
 }
 
-/// The blocks an open dropped, logged when there were any.
-#[cfg_attr(test, mutants::skip)] // logging only; the drop is pinned by its test
-fn log_stale(id: &str, stale: usize) {
-    if stale > 0 {
+/// The blocks an open dropped, logged when there were any: at DEBUG for a
+/// reopen during a wait for the clock (a retry, once a minute; review
+/// rounds 10-11), else at INFO.
+#[cfg_attr(test, mutants::skip)] // logging only; the drop and both levels are pinned by tests
+fn log_stale(id: &str, stale: usize, waiting: bool) {
+    if stale == 0 {
+        return;
+    }
+    if waiting {
+        debug!(
+            id,
+            stale, "asio output: dropped the blocks queued while the driver opened"
+        );
+    } else {
         info!(
             id,
             stale, "asio output: dropped the blocks queued while the driver opened"
@@ -717,6 +865,7 @@ fn publish(
         l.status.latency_ms = latency;
         l.status.offset_ms = servo.offset_ms;
         l.status.slew_eta_s = servo.slew_eta_s;
+        l.status.cushion_ms = servo.cushion_ms;
         l.status.last_hard_recentre = last_hard;
         counters.write(&mut l.status);
     });
@@ -751,3 +900,12 @@ pub(crate) mod fake;
 #[cfg(test)]
 #[path = "asio_out_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "asio_out_tests_clock.rs"]
+mod tests_clock;
+#[cfg(test)]
+#[path = "asio_out_tests_cushion.rs"]
+mod tests_cushion;
+#[cfg(test)]
+#[path = "asio_out_tests_silent.rs"]
+mod tests_silent;

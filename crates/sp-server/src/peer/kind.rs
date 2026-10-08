@@ -105,6 +105,30 @@ impl Job {
         }
     }
 
+    /// The job waits while the listed peer this node took the song's audio
+    /// from still lists that audio, as for a job the peer announces
+    /// (`peer::decide`): only the lyrics (#229 PP audit, comment 6054582866).
+    /// A node's own lyrics stay at its pipeline version for good, and a node
+    /// with no AI proxy (PP) makes a degraded track, while the peer's lyrics
+    /// are made from that very audio. Stems are the same model on every
+    /// node, and the download fetches the song itself.
+    pub fn waits_while_a_peer_has_the_song(self) -> bool {
+        matches!(self, Self::Lyrics)
+    }
+
+    /// #229 item C: the paid AI this job calls when it runs here (the kind
+    /// `paid_ai` holds while the node's switch is off): only the lyrics
+    /// (Gemini 3.5 Transcribe, Claude's clean-up, the Spotify resolution,
+    /// the translation). A download names its song through the metadata
+    /// chain, gated on its own (`metadata::ProviderChain::providers`), and
+    /// the stems are a local model.
+    pub fn paid_ai(self) -> Option<crate::paid_ai::Held> {
+        match self {
+            Self::Lyrics => Some(crate::paid_ai::Held::Lyrics),
+            Self::Download | Self::Stems => None,
+        }
+    }
+
     /// The job that makes `kind` (the one whose [`Job::makes`] holds it);
     /// `None` for a kind this node does not know.
     pub fn making(kind: ArtifactKind) -> Option<Self> {

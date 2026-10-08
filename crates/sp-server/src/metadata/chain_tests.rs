@@ -15,9 +15,12 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 #[tokio::test]
 async fn the_production_chain_is_claude_then_gemini() {
     let proxy = MockServer::start().await;
-    let chain = provider_chain(ai_client_at(&proxy), "k1,k2", "gemini-test");
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let chain = provider_chain(&pool, ai_client_at(&proxy), "k1,k2", "gemini-test");
 
-    let names: Vec<&str> = chain.providers().iter().map(|p| p.name()).collect();
+    let providers = chain.providers().await.expect("paid AI on: the providers");
+    let names: Vec<&str> = providers.iter().map(|p| p.name()).collect();
     assert_eq!(names, ["claude", "gemini"]);
     let health = chain.health();
     let health_names: Vec<&str> = health.iter().map(|h| h.name.as_str()).collect();
@@ -51,7 +54,7 @@ async fn a_refusing_claude_falls_through_to_gemini_on_one_key_of_the_list() {
         &google.uri(),
     );
 
-    let meta = get_metadata(chain.providers(), VIDEO, TITLE).await;
+    let meta = get_metadata(chain.providers().await.unwrap(), VIDEO, TITLE).await;
 
     assert_eq!(meta.song, SONG);
     assert_eq!(meta.artist, ARTIST);
@@ -78,7 +81,7 @@ async fn an_answering_claude_is_asked_first_and_gemini_not_at_all() {
         .await;
     let chain = provider_chain_at(ai_client_at(&proxy), "k1", "gemini-test", &google.uri());
 
-    let meta = get_metadata(chain.providers(), VIDEO, TITLE).await;
+    let meta = get_metadata(chain.providers().await.unwrap(), VIDEO, TITLE).await;
 
     assert_eq!((meta.song.as_str(), meta.artist.as_str()), (SONG, ARTIST));
     assert!(!meta.gemini_failed);
@@ -114,7 +117,7 @@ async fn every_call_is_recorded_and_an_answer_clears_the_last_error() {
     let chain = ProviderChain::new(vec![Box::new(FailsOnce {
         failed: AtomicBool::new(false),
     })]);
-    let provider = &chain.providers()[0];
+    let provider = &chain.providers().await.unwrap()[0];
 
     assert!(provider.extract(VIDEO, TITLE).await.is_err());
     let health = &chain.health()[0];
@@ -135,4 +138,27 @@ async fn every_call_is_recorded_and_an_answer_clears_the_last_error() {
         (before..=after).contains(&at),
         "{before} <= {at} <= {after}"
     );
+}
+
+/// #229 item C: the production chain answers no provider while this node's
+/// paid AI is off, read at every walk; a test's chain is never gated.
+#[tokio::test]
+async fn the_production_chain_answers_no_provider_while_paid_ai_is_off() {
+    let proxy = MockServer::start().await;
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let chain = provider_chain(&pool, ai_client_at(&proxy), "k1", "gemini-test");
+    crate::db::models::set_setting(&pool, "paid_ai_enabled", "false")
+        .await
+        .unwrap();
+    assert!(chain.providers().await.is_none());
+    crate::db::models::set_setting(&pool, "paid_ai_enabled", "true")
+        .await
+        .unwrap();
+    assert_eq!(chain.providers().await.map(|p| p.len()), Some(2));
+    let ungated = provider_chain_at(ai_client_at(&proxy), "k1", "gemini-test", &proxy.uri());
+    crate::db::models::set_setting(&pool, "paid_ai_enabled", "false")
+        .await
+        .unwrap();
+    assert_eq!(ungated.providers().await.map(|p| p.len()), Some(2));
 }

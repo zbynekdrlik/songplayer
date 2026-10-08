@@ -46,10 +46,28 @@ impl LyricsWorker {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
+        if !self.translation_allowed(youtube_id).await {
+            return;
+        }
         match translator::translate_via_claude(ai_client, track, gender).await {
             Ok(translations) => Self::apply_translations(track, translations),
             Err(e) => warn!("worker: Claude translation failed for {youtube_id}: {e}"),
         }
+    }
+
+    /// #229 item C: the translation of `youtube_id` calls Claude — paid AI
+    /// — so it runs only while this node's switch is on (`paid_ai::enabled`,
+    /// read live); while it is off the song's translation is held
+    /// (`paid_ai::hold`, one INFO per song): its SK lines come with a peer's
+    /// copy, or once the switch is on. Asked only for a song the pass would
+    /// translate (picked, its track read), so the status names no
+    /// translation that is not waiting.
+    pub(crate) async fn translation_allowed(&self, youtube_id: &str) -> bool {
+        if crate::paid_ai::enabled(&self.pool).await {
+            return true;
+        }
+        crate::paid_ai::hold(crate::paid_ai::Held::Translation, youtube_id);
+        false
     }
 
     /// Resolve a video's translation gender (#152). `'f'` → Female; everything
@@ -109,6 +127,11 @@ impl LyricsWorker {
                 return;
             }
         };
+        // #229 item C: asked once the track is read (review round 15): an
+        // unreadable track is only stamped forward, never held.
+        if !self.translation_allowed(&youtube_id).await {
+            return;
+        }
         let gender = self.resolve_gender(video_id).await;
         info!(
             "lyrics_worker: retranslating {youtube_id} (gender={gender:?}, v{LYRICS_TRANSLATION_VERSION})"

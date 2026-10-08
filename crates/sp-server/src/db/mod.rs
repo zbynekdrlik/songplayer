@@ -45,6 +45,8 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (28, MIGRATION_V28),
     (29, MIGRATION_V29),
     (30, MIGRATION_V30),
+    (31, MIGRATION_V31),
+    (32, MIGRATION_V32),
 ];
 
 const MIGRATION_V1: &str = "
@@ -478,6 +480,53 @@ CREATE TABLE peer_fetches (
 );
 ";
 
+// V31 (#229 PP audit, comment 6054582866): a lyrics track a node made itself
+// while a listed peer had the song stands in for the peer's copy, which
+// replaces it once the peer has it (`peer::standin`). Back-filled once: a
+// video whose audio a peer gave (a `peer_fetches` audio record) with a lyrics
+// result made here (a lyrics source, no lyrics record), no dub on any row
+// and no operator's mark the lyrics queue acts on (a text on a row of an
+// active playlist, a reprocess flag on such a row that is not parked:
+// `peer::lyrics::kept_local`'s rule, here without the pipeline version — a
+// stand-in made for a video whose stale row awaits a reprocess is dropped
+// by its first look), is due at once.
+const MIGRATION_V31: &str = "
+CREATE TABLE peer_standins (
+    youtube_id TEXT NOT NULL,
+    job TEXT NOT NULL,
+    peer TEXT NOT NULL,
+    made_at_ms INTEGER NOT NULL,
+    next_check_ms INTEGER NOT NULL,
+    PRIMARY KEY (youtube_id, job)
+);
+INSERT OR IGNORE INTO peer_standins (youtube_id, job, peer, made_at_ms, next_check_ms)
+SELECT f.youtube_id, 'lyrics', f.node, CAST(strftime('%s', 'now') AS INTEGER) * 1000, 0
+FROM peer_fetches f
+WHERE f.kind = 'audio'
+  AND EXISTS (SELECT 1 FROM videos v WHERE v.youtube_id = f.youtube_id
+      AND v.lyrics_source IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM peer_fetches l WHERE l.youtube_id = f.youtube_id
+      AND l.kind = 'lyrics')
+  AND NOT EXISTS (SELECT 1 FROM videos o WHERE o.youtube_id = f.youtube_id
+      AND (o.dub_requested = 1 OR o.lyrics_source = 'gemini-live-translate'
+           OR (EXISTS (SELECT 1 FROM playlists p WHERE p.id = o.playlist_id AND p.is_active = 1)
+               AND (TRIM(COALESCE(o.lyrics_override_text, '')) != ''
+                    OR (o.lyrics_manual_priority != 0
+                        AND (o.lyrics_source IS NULL OR o.lyrics_source NOT IN
+                             ('failed', 'empty', 'no_source', 'asr_gap', 'unsupported_source')))))))
+";
+
+// #233 ruling 4 (after release 0.74.0 put the output list on main, SNV and
+// PP): #210's three VBAN keys are no settings any more. Deleted where the
+// list exists (every box that ran the list's first start); a box with no
+// list keeps them for its outputs' one-time move
+// (`playback::audio_out_migrate`, which deletes them once it wrote the list).
+const MIGRATION_V32: &str = "
+DELETE FROM settings
+WHERE key IN ('vban_enabled', 'vban_stream_name', 'vban_targets')
+  AND EXISTS (SELECT 1 FROM settings WHERE key = 'audio_outputs')
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -638,6 +687,14 @@ mod tests_v29;
 #[path = "mod_tests_v30.rs"]
 #[cfg(test)]
 mod tests_v30;
+
+#[path = "mod_tests_v31.rs"]
+#[cfg(test)]
+mod tests_v31;
+
+#[path = "mod_tests_v32.rs"]
+#[cfg(test)]
+mod tests_v32;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

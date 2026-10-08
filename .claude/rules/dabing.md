@@ -718,8 +718,9 @@ recorded only after `audio_stream_end`. `test_dub_worker.py`: placement,
 latency (SK + the H4 EN latency), transcripts shape, render, argv defaults,
 legacy cleanup, the event-log path and the whole `cmd_live_translate` with the
 session + ffmpeg seams faked (the fake logs input/output transcription events and
-the test reads them back from `<base>_dub_events.jsonl`). Rust: `worker.rs`
-tests (`dub_model_from`, `dub_voice_from`, `dub_input_audio`), `child.rs` (argv,
+the test reads them back from `<base>_dub_events.jsonl`). Rust: `worker_tests.rs`
+(`dub_model_from`, `dub_voice_from`, `dub_input_audio`; the #229 paid-AI holds;
+moved out of `worker.rs` for its 1000-line cap), `child.rs` (argv,
 session stats), `sp-core config` (keys, defaults, `dub_voice_label`),
 `subtitles_tests.rs::one_continuous_session_chunk_builds_a_monotonic_bilingual_track`.
 Trap: the staging secret-scan blocks a test literal `secret="…"` — the fake runner

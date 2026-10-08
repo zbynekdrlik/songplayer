@@ -76,6 +76,7 @@ fn running() -> AsioFigures {
         ppm: 0.4,
         offset_ms: 0.0,
         slew_eta_s: None,
+        cushion_ms: 0.0,
         last_fault: None,
     }
 }
@@ -150,6 +151,7 @@ fn a_slewing_output_with_a_fault_reads_what_works_and_what_failed() {
         ppm: -0.66,
         offset_ms: 12.34,
         slew_eta_s: Some(44.6),
+        cushion_ms: 0.0,
         last_fault: Some(LastFault {
             cause: "deficit".into(),
             ms: 65.04,
@@ -189,6 +191,34 @@ fn a_slewing_output_with_a_fault_reads_what_works_and_what_failed() {
                 "Núdzový skok: +65,0 ms (+ vložené ticho, − preskočený zvuk), lebo v zásobníku chýbal zvuk. Blok programu vtedy prišiel {MINUS}60,0 ms po svojej hranici."
             )[..]
         )
+    );
+}
+
+/// #233 (comment 6056680979, Q1): the excess an underrun left is kept as
+/// a reserve, not drained — the slew chip says so (from a reserve that
+/// shows in tenths) instead of "v cieli"; an offset the ratio drains is
+/// named first.
+#[test]
+fn a_kept_reserve_reads_as_one() {
+    let reserve = |cushion_ms| {
+        let f = AsioFigures {
+            cushion_ms,
+            ..running()
+        };
+        asio_resampling_chips(&f)[3].text.clone()
+    };
+    assert_eq!(reserve(13.33), "drží rezervu +13,3 ms po výpadku");
+    assert_eq!(reserve(0.06), "drží rezervu +0,1 ms po výpadku");
+    assert_eq!(reserve(0.04), "oneskorenie v cieli");
+    let draining = AsioFigures {
+        cushion_ms: 20.0,
+        offset_ms: 5.0,
+        slew_eta_s: Some(30.0),
+        ..running()
+    };
+    assert_eq!(
+        asio_resampling_chips(&draining)[3].text,
+        "dorovnáva odchýlku +5,0 ms · ešte asi 30 s"
     );
 }
 

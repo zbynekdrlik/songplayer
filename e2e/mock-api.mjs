@@ -294,6 +294,8 @@ const settings = {
   // #212: the ndi_input_* keys are absent too (the input is off, no source).
   // #213: the remote_ws_* keys are absent too (off, port 4456, no password).
   // #215: the program_* transition keys are absent too (the default 300 ms fade).
+  // #229 item C: node_name and paid_ai_enabled are absent too (no node
+  // segment, paid AI on).
 };
 // #210: the fixture as loaded, restored by `/__mock/settings-reset`.
 const settingsInitial = { ...settings };
@@ -728,11 +730,25 @@ app.get("/api/v1/audio/asio-drivers", (_req, res) => {
   res.json({ drivers: ["Dante Virtual Soundcard (x64)", "Blackmagic ASIO"] });
 });
 
+// #229 item C: as `sp_core::config::paid_ai_enabled` — unset or blank = on,
+// "true" = on (trimmed, any case), anything else = off.
+function paidAiEnabled(raw) {
+  if (raw === undefined || raw === null) return true;
+  const v = String(raw).trim().toLowerCase();
+  return v === "" || v === "true";
+}
+// As `paid_ai::checked`: true / false / "" only, stored lowercase.
+function paidAiRefusal(body) {
+  if (body.paid_ai_enabled === undefined) return null;
+  const v = String(body.paid_ai_enabled).trim().toLowerCase();
+  return ["", "true", "false"].includes(v) ? null : "paid_ai_enabled must be true or false";
+}
+
 // #229: as the server — a value exactly the mask for a secret setting keeps
 // the stored one (nothing written), any other value replaces it (`""` clears
 // it), and the answer is 204 with NO body.
 app.patch("/api/v1/settings", (req, res) => {
-  const refusal = outputsRefusal(req.body);
+  const refusal = outputsRefusal(req.body) ?? paidAiRefusal(req.body);
   if (refusal) {
     res.status(400).send(refusal);
     return;
@@ -741,7 +757,7 @@ app.patch("/api/v1/settings", (req, res) => {
     if (value === SECRET_MASK && isSecretSetting(key)) {
       continue;
     }
-    settings[key] = value;
+    settings[key] = key === "paid_ai_enabled" ? String(value).trim().toLowerCase() : value;
   }
   res.status(204).end();
 });
@@ -983,6 +999,12 @@ app.get("/api/v1/status", (_req, res) => {
     // reads these to show the offline-LAN URL + raw-IP fallback.
     lan_url: "http://sp.local:8920",
     lan_ip: "10.77.9.201",
+    // #229 item C: the node's name and its paid-AI switch, as the server
+    // (`paid_ai_held` = the kinds held while off; the mock's lyrics and
+    // metadata always are).
+    node_name: String(settings.node_name ?? "").trim() || null,
+    paid_ai_enabled: paidAiEnabled(settings.paid_ai_enabled),
+    paid_ai_held: paidAiEnabled(settings.paid_ai_enabled) ? [] : ["lyrics", "metadata"],
   });
 });
 
@@ -1360,6 +1382,7 @@ function mockAsioOutput(e, network) {
             latency_ms: latency,
             offset_ms: 0,
             slew_eta_s: null,
+            cushion_ms: 0,
             underruns: 0,
             resets: 0,
             hard_recentres: 0,

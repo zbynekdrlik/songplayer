@@ -134,7 +134,7 @@ async fn get(pool: &sqlx::SqlitePool, k: &str) -> Option<String> {
 }
 
 #[tokio::test]
-async fn the_first_start_writes_the_list_once_and_keeps_the_old_keys() {
+async fn the_first_start_writes_the_list_once_and_deletes_the_old_keys() {
     let pool = pool().await;
     set(&pool, "vban_enabled", "true").await;
     set(&pool, "vban_stream_name", "sp-program").await;
@@ -148,16 +148,10 @@ async fn the_first_start_writes_the_list_once_and_keeps_the_old_keys() {
         snv().entries,
         "the stored list parses back strictly"
     );
-    // Ruling 4: a rollback to <= 0.73.0 still finds #210's keys.
-    assert_eq!(get(&pool, "vban_enabled").await.as_deref(), Some("true"));
-    assert_eq!(
-        get(&pool, "vban_stream_name").await.as_deref(),
-        Some("sp-program")
-    );
-    assert_eq!(
-        get(&pool, "vban_targets").await.as_deref(),
-        Some("fohabl.lan:6980,lv1.lan:6980")
-    );
+    // Ruling 4, after release 0.74.0: #210's keys are no settings any more.
+    for key in ["vban_enabled", "vban_stream_name", "vban_targets"] {
+        assert_eq!(get(&pool, key).await, None, "{key}");
+    }
     assert_eq!(
         migrate_vban_settings(&pool).await.unwrap(),
         MigrationOutcome::Nothing
@@ -225,6 +219,9 @@ async fn a_list_written_meanwhile_is_never_replaced() {
     let pool = pool().await;
     assert!(store_list_if_absent(&pool, "[1]").await.unwrap());
     assert_eq!(get(&pool, "audio_outputs").await.unwrap(), "[1]");
+    // A list stored meanwhile: nothing written, #210's keys untouched.
+    set(&pool, "vban_targets", "h:1").await;
     assert!(!store_list_if_absent(&pool, "[2]").await.unwrap());
     assert_eq!(get(&pool, "audio_outputs").await.unwrap(), "[1]");
+    assert_eq!(get(&pool, "vban_targets").await.as_deref(), Some("h:1"));
 }

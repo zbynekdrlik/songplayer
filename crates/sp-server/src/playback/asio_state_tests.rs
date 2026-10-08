@@ -296,6 +296,7 @@ fn every_reason_code_has_its_slovak_on_the_dashboard() {
         Reason::WindowsOnly,
         Reason::Held,
         Reason::Parked,
+        Reason::NoClock,
     ];
     // One reason of every variant: a new variant fails to compile here (no
     // wildcard) until it is listed above (review round 5).
@@ -310,9 +311,10 @@ fn every_reason_code_has_its_slovak_on_the_dashboard() {
         Reason::WindowsOnly => 7,
         Reason::Held => 8,
         Reason::Parked => 9,
+        Reason::NoClock => 10,
     };
     let listed: std::collections::BTreeSet<usize> = reasons.iter().map(variant).collect();
-    assert_eq!(listed.len(), 10, "every variant is listed");
+    assert_eq!(listed.len(), 11, "every variant is listed");
     for r in reasons {
         assert_ne!(
             sp_core::audio_outputs::asio_reason_sk(r.code()),
@@ -369,6 +371,66 @@ fn a_rate_under_1_hz_is_a_lost_clock() {
 #[test]
 fn the_latency_is_0_until_the_servo_measured_a_window() {
     assert_eq!(asio_latency_ms(0.0, 256, 128, 96_000.0), 0.0);
+}
+
+/// The owner's ruling (#233, 8.10.2026): a driver that opens and gives no
+/// clock waits with its own reason, in Slovak on the dashboard: the driver
+/// gives no clock, e.g. DVS not running or no Dante PTP clock.
+#[test]
+fn a_driver_with_no_clock_has_its_own_code() {
+    assert_eq!(
+        (Reason::NoClock.code(), Reason::NoClock.text().as_str()),
+        (
+            "no_clock",
+            "the driver gives no clock (no callback since it opened): e.g. Dante Virtual Soundcard is not running, or there is no Dante PTP clock"
+        )
+    );
+    assert_eq!(
+        sp_core::audio_outputs::asio_reason_sk(Reason::NoClock.code()),
+        "ovládač nedáva hodiny — napr. DVS nebeží alebo chýbajú hodiny Dante PTP"
+    );
+}
+
+/// The owner's ruling (#233, 8.10.2026): a running output whose driver has
+/// not ticked since it opened waits for its clock from 2 s after the open
+/// (once per wait: `waiting` then holds it) and is opened again every 60 s
+/// after an open; the first tick ends a wait; a driver that ticks is the
+/// stall watch's. Every edge, both sides.
+#[test]
+fn a_driver_that_does_not_tick_waits_for_its_clock_and_reopens_every_60_s() {
+    use ClockStep::*;
+    assert_eq!(
+        (NO_CLOCK_100NS, NO_CLOCK_REOPEN_100NS),
+        (20_000_000, 600_000_000)
+    );
+    // (ticks, primed, waiting, since the open, the decision). Review round
+    // 10: a tick before the priming while waiting (a burst at a reopen) is
+    // no clock; before the priming of a first open it is a tick.
+    let table = [
+        (1, true, false, 0, Ticking),
+        (1, false, false, 0, Ticking),
+        (1, true, false, 700_000_000, Ticking),
+        (1, true, true, 0, ClockArrived),
+        (u64::MAX, true, true, 700_000_000, ClockArrived),
+        (1, false, true, 0, Quiet),
+        (u64::MAX, false, true, 700_000_000, Quiet),
+        (0, true, false, 0, Quiet),
+        (0, false, false, 19_999_999, Quiet),
+        (0, true, false, 20_000_000, StartsWaiting),
+        (0, false, false, 599_999_999, StartsWaiting),
+        (0, true, true, 20_000_000, Quiet),
+        (0, false, true, 599_999_999, Quiet),
+        (0, true, true, 600_000_000, Reopen),
+        (0, false, false, 600_000_000, Reopen),
+        (0, true, true, i64::MAX, Reopen),
+    ];
+    for (ticks, primed, waiting, since, want) in table {
+        assert_eq!(
+            clock_step(ticks, primed, waiting, since),
+            want,
+            "{ticks} {primed} {waiting} {since}"
+        );
+    }
 }
 
 /// #233 review round 4: a parked driver has its own reason (no retry can

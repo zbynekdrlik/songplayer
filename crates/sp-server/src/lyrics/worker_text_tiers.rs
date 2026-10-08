@@ -178,13 +178,12 @@ impl LyricsWorker {
             .map(crate::lyrics::tier1::CandidateText::from)
             .collect();
 
-        // The Gemini key list, parsed once for the transcript and the base tier.
-        let gemini_csv = crate::db::models::get_setting(&self.pool, "gemini_api_key")
+        // The Gemini key list, parsed once for the transcript and the base
+        // tier — none while this node's paid AI is off (#229 item C: the job
+        // is held before it gets here; a switch-off mid-song sends nothing).
+        let gemini_keys = crate::paid_ai::gemini_keys(&self.pool)
             .await
-            .ok()
-            .flatten()
             .unwrap_or_default();
-        let gemini_keys = crate::gemini_api::gemini_keys_from_setting(&gemini_csv);
 
         let reference_backend = crate::lyrics::orchestrator::RealReferenceStageBackend {
             mtl_cfg: crate::lyrics::mtl_aligner::MtlConfig::from_tools_dir(&self.tools_dir),

@@ -6,26 +6,28 @@
 //!
 //! The key list is read from the setting on every call, as the lyrics worker
 //! reads it per song, so the probe sees a key change without a restart.
+//! #229 item C: through `paid_ai::gemini_keys` — while this node's paid AI is
+//! off nothing is sent and the report says so (`paid_ai::OFF_REASON`).
 
 use axum::Json;
 use axum::extract::State;
 use tracing::{info, warn};
 
 use crate::AppState;
-use crate::gemini_api::{GEMINI_API_ROOT, gemini_keys_from_setting};
+use crate::gemini_api::GEMINI_API_ROOT;
 use crate::lyrics::g35t_probe::{G35tProbeReport, run_probe};
 
 /// `POST /api/v1/lyrics/g35t/probe` (module doc). Always 200: a failure is
 /// `ok: false` with its `error`.
 #[cfg_attr(test, mutants::skip)] // glue on Google's root; `run_probe` is tested, the route by `probe_route_*`
 pub async fn probe(State(state): State<AppState>) -> Json<G35tProbeReport> {
-    let csv = crate::db::models::get_setting(&state.pool, "gemini_api_key")
-        .await
-        .inspect_err(|e| warn!("g35t probe: reading gemini_api_key failed: {e}"))
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let keys = gemini_keys_from_setting(&csv);
+    let Some(keys) = crate::paid_ai::gemini_keys(&state.pool).await else {
+        info!("g35t probe: paid AI is off - nothing sent");
+        return Json(G35tProbeReport::refused(
+            crate::paid_ai::OFF_REASON.to_string(),
+            None,
+        ));
+    };
     let ffmpeg = state
         .tool_paths
         .read()
@@ -103,5 +105,36 @@ mod tests {
         assert_eq!(report.key_index, None);
         assert_eq!(report.word_count, 0);
         assert_eq!(report.clip, None);
+    }
+
+    /// #229 item C: while this node's paid AI is off the probe sends
+    /// nothing, a key set or not, and says why.
+    #[tokio::test]
+    async fn probe_route_sends_nothing_while_paid_ai_is_off() {
+        let state = test_state().await;
+        crate::db::models::set_setting(&state.pool, "gemini_api_key", "k1")
+            .await
+            .unwrap();
+        crate::db::models::set_setting(&state.pool, "paid_ai_enabled", "false")
+            .await
+            .unwrap();
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/lyrics/g35t/probe")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let report: G35tProbeReport = serde_json::from_slice(&body).unwrap();
+        assert!(!report.ok);
+        assert_eq!(report.error.as_deref(), Some(crate::paid_ai::OFF_REASON));
+        assert_eq!((report.key_index, report.clip), (None, None));
     }
 }

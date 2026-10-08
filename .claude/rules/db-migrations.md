@@ -34,3 +34,7 @@ keep `run_migrations` (it only checks `current_schema_version == MIGRATIONS.last
 When you add a migration that changes settings/rows an earlier `mod_tests_vN`
 asserts, GREP the earlier test files for those keys and switch them to `apply_upto`
 in the SAME commit.
+
+A version test pins its migration's place in the list as `assert!(latest >= N)`,
+never `assert_eq!(MIGRATIONS.last().unwrap().0, N)`: an exact pin fails the next
+lane's V(N+1) on correct code (#233 ruling 4's V32 shipped one; review round 15).

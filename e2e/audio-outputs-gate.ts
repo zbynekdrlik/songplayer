@@ -48,6 +48,8 @@ export interface AsioTelemetry {
   /** The owner's "fault": a faded skip or insert (#233 review round 2). */
   hard_recentres: number;
   latency_ms: number;
+  /** While waiting: the reason's stable code (`no_clock`: the driver gives no clock). */
+  reason_code?: string | null;
 }
 
 /** The driver SNV's and PP's ASIO outputs play on. */
@@ -61,6 +63,27 @@ export const MAX_PPM = 300;
  * output latency: it must stay under a second ABOVE the delay.
  */
 export const LATENCY_OVER_DELAY_MS = 1000;
+
+/**
+ * The ASIO outputs the gate counts and measures: the enabled ones, except
+ * one waiting for its driver's clock (reason `no_clock`). The owner's
+ * ruling, #233, 8.10.2026: at PP, DVS opens but gives no clock while PP's
+ * network has no Dante PTP clock; the output waits calmly and is not
+ * expected to run, so a box expecting no ASIO output does not fail on it.
+ * A box that expects one (SNV, "1") still fails when its DVS gives no
+ * clock: the count is then 0.
+ */
+export function gatedAsioOutputs(list: OutputStatus[]): OutputStatus[] {
+  const waiting = waitingForClock(list);
+  return list.filter((o) => o.type === "asio" && o.enabled && !waiting.includes(o));
+}
+
+/** The enabled ASIO outputs waiting for their driver's clock (`no_clock`). */
+export function waitingForClock(list: OutputStatus[]): OutputStatus[] {
+  return list.filter(
+    (o) => o.type === "asio" && o.enabled && o.state === "waiting" && o.asio?.reason_code === "no_clock",
+  );
+}
 
 /** Why an ASIO output's minute (two reads of `outputs[i]`) fails. */
 export function asioGateFailures(first: OutputStatus, second: OutputStatus): string[] {

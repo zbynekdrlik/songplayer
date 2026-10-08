@@ -9,9 +9,15 @@
 //! 2. Waited ≥ [`MAX_PEER_WAIT`] → Local.
 //! 3. A peer announcing a job (running or queued) that makes those kinds →
 //!    Wait.
-//! 4. A peer whose catalog could not be read → Wait (an outage or a refused
+//! 4. A job that waits while a peer has the song
+//!    ([`Job::waits_while_a_peer_has_the_song`]: the lyrics) and the peer
+//!    this node took the video's audio from, still listing that very audio
+//!    ([`song_holder`]) → Wait: that peer will make it from the audio this
+//!    node fetched (#229 PP audit, comment 6054582866).
+//! 5. A peer whose catalog could not be read → Wait (an outage or a refused
 //!    key or token is not "nobody has it"; the same bound applies).
-//! 5. Else → Local.
+//! 6. Else → Local: no listed peer has or makes it, nor has the song this
+//!    node took from it.
 //!
 //! Only the peers this node lists in its own `peers` setting are read, so a
 //! node waits only for those: SNV lists none in phase 1, and asks nobody.
@@ -60,6 +66,9 @@ pub enum Decision {
 pub enum WaitWhy {
     /// The peer announces the job, running or queued.
     PeerRunsIt,
+    /// The peer has the song (it lists the video's audio): it will make the
+    /// job from it.
+    PeerHasTheSong,
     /// The peer's catalog could not be read.
     PeerUnreadable,
 }
@@ -71,13 +80,25 @@ pub enum LocalWhy {
     WaitedLongEnough,
 }
 
+/// The song this node took from a peer: that peer and the sha256 of the
+/// audio it fetched (the video's `peer_fetches` audio record).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SongFrom<'a> {
+    pub peer: &'a str,
+    pub sha256: &'a str,
+}
+
 /// The decision for `job` of `youtube_id` given `reads` (one per listed
-/// peer) and how long the job has waited (`None` = not waiting).
+/// peer), how long the job has waited (`None` = not waiting) and the song
+/// this node took from a peer (`song_from`, the video's `peer_fetches`
+/// audio record; `None` = its own download, a copy, or a job that does not
+/// wait on the song).
 pub fn decide(
     job: Job,
     youtube_id: &str,
     reads: &[PeerRead<'_>],
     waited: Option<Duration>,
+    song_from: Option<SongFrom<'_>>,
 ) -> Decision {
     if reads.is_empty() {
         return Decision::Local(LocalWhy::NoPeers);
@@ -103,6 +124,14 @@ pub fn decide(
         return Decision::Wait {
             peer: r.peer.to_string(),
             why: WaitWhy::PeerRunsIt,
+        };
+    }
+    if job.waits_while_a_peer_has_the_song()
+        && let Some(peer) = song_holder(reads, youtube_id, song_from)
+    {
+        return Decision::Wait {
+            peer: peer.to_string(),
+            why: WaitWhy::PeerHasTheSong,
         };
     }
     if let Some(r) = reads.iter().find(|r| r.catalog.is_none()) {
@@ -138,6 +167,46 @@ pub fn listed_audio<'a>(catalog: &'a Catalog, youtube_id: &str) -> Option<&'a Ar
         .artifacts
         .iter()
         .find(|a| a.youtube_id == youtube_id && a.kind == ArtifactKind::Audio)
+}
+
+/// The listed peer that has the song this node took from it: the peer of
+/// `song_from` (the video's `peer_fetches` audio record) while its catalog
+/// still lists that very audio, the record's sha256 ([`listed_audio`]). A
+/// node whose audio is its own download or a copy waits on no peer's song:
+/// that peer's lyrics would not fit it, and two nodes listing each other
+/// (phase 2) would each wait on the other's audio (review round 1). Nor does
+/// it wait on a source that lists another audio now (it downloaded the song
+/// again): this node would refuse lyrics made from it (`same_audio`; review
+/// round 2). A source that announces the video's audio (a queued or running
+/// download: hashing it again after a rename, ~70 s unlisted, or fetching
+/// it anew) still has the song: waited for, within the bound (review
+/// round 8).
+pub fn song_holder<'a>(
+    reads: &[PeerRead<'a>],
+    youtube_id: &str,
+    song_from: Option<SongFrom<'_>>,
+) -> Option<&'a str> {
+    let from = song_from?;
+    reads
+        .iter()
+        .find(|r| {
+            r.peer == from.peer
+                && r.catalog.is_some_and(|c| {
+                    c.announces(youtube_id, &[ArtifactKind::Audio])
+                        || listed_audio(c, youtube_id).is_some_and(|a| a.sha256 == from.sha256)
+                })
+        })
+        .map(|r| r.peer)
+}
+
+/// The listed peer of `song_from`, its catalog read or not: what a job run
+/// here once it waited the bound for that peer's song stands in for
+/// (`peer::standin`). An outage at the bound is no reason to keep a
+/// degraded track for good; the stand-in's own look checks the audio again
+/// (review round 2).
+pub fn song_source<'a>(reads: &[PeerRead<'a>], song_from: Option<SongFrom<'_>>) -> Option<&'a str> {
+    let from = song_from?;
+    reads.iter().find(|r| r.peer == from.peer).map(|r| r.peer)
 }
 
 /// What this node knows of a row's audio file on disk, for [`same_audio`].

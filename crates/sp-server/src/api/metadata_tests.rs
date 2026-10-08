@@ -104,7 +104,12 @@ async fn status_reports_the_repair_queue_and_every_provider_of_the_chain() {
     insert_video(&state, "a2", 1).await;
     insert_video(&state, "a3", 0).await;
     let before = chrono::Utc::now().timestamp_millis();
-    get_metadata(state.metadata_chain.providers(), VIDEO, TITLE).await;
+    get_metadata(
+        state.metadata_chain.providers().await.unwrap(),
+        VIDEO,
+        TITLE,
+    )
+    .await;
 
     let (status, body) = send(
         state,
@@ -303,4 +308,26 @@ async fn a_probe_at_the_length_bounds_is_answered() {
     let (status, _) = send(state, probe_request(&id, &title)).await;
 
     assert_eq!(status, StatusCode::OK);
+}
+
+/// #229 item C: the probe asks no provider while this node's paid AI is
+/// off (409, the reason), and every provider once it is on.
+#[tokio::test]
+async fn the_probe_asks_no_provider_while_paid_ai_is_off() {
+    let mut state = test_state().await;
+    let (chain, calls) = crate::peer::rig::counting_chain();
+    state.metadata_chain = Arc::new(chain.gated(state.pool.clone()));
+    crate::db::models::set_setting(&state.pool, "paid_ai_enabled", "false")
+        .await
+        .unwrap();
+    let (status, body) = send(state.clone(), probe_request(VIDEO, TITLE)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body, crate::paid_ai::OFF_REASON.as_bytes());
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    crate::db::models::set_setting(&state.pool, "paid_ai_enabled", "true")
+        .await
+        .unwrap();
+    let (status, _) = send(state, probe_request(VIDEO, TITLE)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 }

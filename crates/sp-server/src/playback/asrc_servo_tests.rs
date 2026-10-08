@@ -2,7 +2,7 @@
 //! regression's own tests: `asrc_servo_tests_regression.rs`), the level loop's clamps and
 //! anti-windup, the slew; the offset slew's stop curve and its time left;
 //! then `Servo::observe`: the first block's priming (no re-centre), the hard
-//! re-centres' 16.7 ms floor / 133.3 ms edges, a window mean off target slewed
+//! re-centres' 38.3 ms floor / 133.3 ms edges, a window mean off target slewed
 //! never spliced, the window's 1 s and starvation edges, a fast card, the
 //! slew, a starved window, a jump of the card's position. Pins derived with a
 //! scratch model of this file (two independent runs agree).
@@ -36,12 +36,14 @@ fn the_constants_are_camera_boxs() {
         BASE_LATENCY_100NS,
         crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS
     );
-    assert_eq!(
-        HARD_FLOOR_100NS, 166_666,
-        "the base target less 50 ms, 1.5 slots"
-    );
-    assert_eq!(BASE_LATENCY_100NS - HARD_FLOOR_100NS, 500_000);
+    // The floor (#233 comment 6056680979, Q2): the splice's hold + one slot.
+    let hold_100ns = (crate::playback::asrc::SPLICE_FADE_S * 1e7).round() as i64;
+    assert_eq!(hold_100ns, 50_000);
+    assert_eq!(HARD_FLOOR_100NS, hold_100ns + SLOT_100NS);
+    assert_eq!(HARD_FLOOR_100NS, 383_333, "38.3 ms");
     assert_eq!(HARD_EXCESS_100NS, 4 * SLOT_100NS + 1, "four slots");
+    // The cushion an underrun leaves (Q1): at most one slot.
+    assert_eq!(CUSHION_MAX_100NS, SLOT_100NS);
     assert_eq!(CALM_ZONE_MS, 1.0);
 }
 
@@ -233,6 +235,7 @@ fn obs_at(t0: i64, k: i64, late_100ns: i64, buffered: u64, consumed: u64) -> Obs
         buffered_frames: buffered,
         pending_skip_frames: 0,
         consumed_frames: consumed,
+        underrun_frames: 0,
     }
 }
 
@@ -248,6 +251,7 @@ fn at(at: i64, buffered: u64, consumed: u64) -> Observation {
         buffered_frames: buffered,
         pending_skip_frames: 0,
         consumed_frames: consumed,
+        underrun_frames: 0,
     }
 }
 
@@ -291,38 +295,42 @@ fn the_first_block_primes_the_ring_and_is_no_re_centre() {
     assert_eq!(s.status().hard_recentres, 0);
 }
 
-/// A hard re-centre is a latency under the ABSOLUTE 16.7 ms floor (review
-/// round 2: an entry's delay never moves it), or more than 4 slots off the
-/// target either way (review round 3: a delayed output's deficit had no
-/// bound — an 8-slot resync at a 300 ms delay was slewed for 15 min).
+/// A hard re-centre is a latency under the ABSOLUTE 38.3 ms floor (the
+/// splice's hold + one slot, Q2; review round 2: an entry's delay never
+/// moves it), or more than 4 slots off the target either way (review round
+/// 3: a delayed output's deficit had no bound — an 8-slot resync at a
+/// 300 ms delay was slewed for 15 min).
 #[test]
 fn a_hard_re_centre_is_under_the_floor_or_4_slots_off_the_target() {
     let base = BASE_LATENCY_100NS;
     assert_eq!(hard_recentre(base, base), None);
-    assert_eq!(hard_recentre(166_666, base), None);
-    assert_eq!(hard_recentre(166_665, base), Some(Recentre::Deficit));
+    assert_eq!(hard_recentre(383_333, base), None);
+    assert_eq!(hard_recentre(383_332, base), Some(Recentre::Deficit));
     assert_eq!(hard_recentre(base + 1_333_333, base), None);
     assert_eq!(
         hard_recentre(base + 1_333_334, base),
         Some(Recentre::Excess)
     );
-    // A 50 ms delay: 4 slots under its target is below the floor, so the
-    // floor is the edge.
-    let d50 = base + 500_000;
-    assert_eq!(hard_recentre(166_666, d50), None);
-    assert_eq!(hard_recentre(166_665, d50), Some(Recentre::Deficit));
-    assert_eq!(hard_recentre(d50 + 1_333_333, d50), None);
-    assert_eq!(hard_recentre(d50 + 1_333_334, d50), Some(Recentre::Excess));
-    // A 100 ms delay: 4 slots under its target (33.3 ms) is above the floor.
+    // A 100 ms delay: 4 slots under its target (33.3 ms) is below the
+    // floor, so the floor is the edge (up to a delay of 105 ms).
     let d100 = base + 1_000_000;
-    assert_eq!(hard_recentre(d100 - 1_333_333, d100), None);
-    assert_eq!(
-        hard_recentre(d100 - 1_333_334, d100),
-        Some(Recentre::Deficit)
-    );
+    assert_eq!(hard_recentre(383_333, d100), None);
+    assert_eq!(hard_recentre(383_332, d100), Some(Recentre::Deficit));
     assert_eq!(hard_recentre(d100 + 1_333_333, d100), None);
     assert_eq!(
         hard_recentre(d100 + 1_333_334, d100),
+        Some(Recentre::Excess)
+    );
+    // A 150 ms delay: 4 slots under its target (83.3 ms) is above the floor.
+    let d150 = base + 1_500_000;
+    assert_eq!(hard_recentre(d150 - 1_333_333, d150), None);
+    assert_eq!(
+        hard_recentre(d150 - 1_333_334, d150),
+        Some(Recentre::Deficit)
+    );
+    assert_eq!(hard_recentre(d150 + 1_333_333, d150), None);
+    assert_eq!(
+        hard_recentre(d150 + 1_333_334, d150),
         Some(Recentre::Excess)
     );
     assert_eq!(
@@ -331,20 +339,20 @@ fn a_hard_re_centre_is_under_the_floor_or_4_slots_off_the_target() {
     );
 }
 
-/// After the priming: a block exactly 50 ms short is left to the slew, one
-/// 100 ns more is a hard insert; exactly 4 slots over is left, one more is a
-/// hard skip. Each counted as a fault.
+/// After the priming: a block exactly at the floor (38.3 ms) is left to the
+/// slew, one 100 ns less is a hard insert; exactly 4 slots over is left, one
+/// more is a hard skip. Each counted as a fault.
 #[test]
 fn a_block_past_the_last_resorts_edge_re_centres_hard() {
     let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
     s.observe(obs(0, 0, 0, 0)); // the priming
     // buffered 0: the latency is the hand-off lateness alone.
-    let a = s.observe(obs(1, 166_666, 0, 3_200));
+    let a = s.observe(obs(1, 383_333, 0, 3_200));
     assert_eq!((a.recentre_100ns, a.recentre), (0, None));
-    let b = s.observe(obs(2, 166_665, 0, 6_400));
+    let b = s.observe(obs(2, 383_332, 0, 6_400));
     assert_eq!(
         (b.recentre_100ns, b.recentre),
-        (500_001, Some(Recentre::Deficit))
+        (283_334, Some(Recentre::Deficit))
     );
     assert_eq!(s.status().hard_recentres, 1);
     let c = s.observe(obs(3, 1_999_999, 0, 9_600));
@@ -357,14 +365,14 @@ fn a_block_past_the_last_resorts_edge_re_centres_hard() {
     assert_eq!(s.status().hard_recentres, 2);
 }
 
-/// A delayed output (100 ms) whose block is 60 ms short of its target
-/// still holds 106.7 ms: slewed, never spliced (review round 2: the old
+/// A delayed output (150 ms) whose block is 60 ms short of its target
+/// still holds 156.7 ms: slewed, never spliced (review round 2: the old
 /// edge, 50 ms under the target, spliced it). Exactly 4 slots short it is
 /// still slewed; one 100 ns more is a hard insert (review round 3), as a
 /// block under the floor is at the base target.
 #[test]
 fn a_delayed_output_is_slewed_up_to_4_slots_short_then_re_centred_hard() {
-    let target = BASE_LATENCY_100NS + 1_000_000;
+    let target = BASE_LATENCY_100NS + 1_500_000;
     let mut s = Servo::new(RATE, target);
     s.observe(obs(0, 0, 0, 0)); // the priming
     // buffered 0: the latency is the hand-off lateness alone.
@@ -501,6 +509,7 @@ fn a_skip_after_a_stall_is_not_asked_again_while_it_outruns_the_ring() {
             buffered_frames: buffered,
             pending_skip_frames: pending,
             consumed_frames: 113_599,
+            underrun_frames: 0,
         });
         asked.push(a.recentre_100ns);
     }

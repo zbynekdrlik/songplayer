@@ -8,8 +8,12 @@
 //!   so the driver then asks a reset — iemmixer never resizes live), a rate
 //!   change of 1 Hz or more (Dante Controller re-clocked the card; a rate
 //!   under 1 Hz, or ASE_NoClock, is a lost clock: `lost_clock`), or no
-//!   callback for 2 s (a vanished driver: a DVS crash or reinstall; iemmixer
-//!   `reset.rs` STALL).
+//!   callback for 2 s from a driver that ticked (a vanished driver: a DVS
+//!   crash or reinstall; iemmixer `reset.rs` STALL).
+//! - A driver that opens and does not tick gives no clock (DVS not running,
+//!   no Dante PTP clock): no close, no reset, no backoff — the output waits
+//!   for it from 2 s after the open and the driver is opened again every
+//!   60 s (`clock_step`; the owner's ruling, #233, 8.10.2026).
 //! - asioMessage replies: iemmixer `telemetry.rs:79-99`.
 //! - The driver's rate, buffer and sample type are read, never set: the rate
 //!   is admitted (8–384 kHz) and noted when it is not the network's; a
@@ -23,6 +27,14 @@ pub const BACKOFF_S: [i64; 4] = [2, 10, 30, 60];
 pub const STABLE_RUN_100NS: i64 = 600_000_000;
 /// No callback for this long while running: the driver is gone (2 s).
 pub const STALL_100NS: i64 = 20_000_000;
+/// No callback this long after an open: the driver gives no clock (a DVS
+/// that is not running, no Dante PTP clock on its network), and the output
+/// waits for it, calmly (2 s; the owner's ruling, #233, 8.10.2026).
+pub const NO_CLOCK_100NS: i64 = 20_000_000;
+/// Still no callback this long after an open: the driver is closed and
+/// opened again at once, every 60 s for as long as it gives no clock (no
+/// backoff: a fixed, slow cadence).
+pub const NO_CLOCK_REOPEN_100NS: i64 = 600_000_000;
 /// The worker steps at least this often (driver messages, 10 ms).
 pub const POLL_100NS: i64 = 100_000;
 pub const MIN_RATE: f64 = 8_000.0;
@@ -65,6 +77,10 @@ pub enum Reason {
     /// A driver callback never returned: the driver is parked until the
     /// process ends (`asio_win`), no open can succeed.
     Parked,
+    /// The driver opened but gives no clock (no callback since the open):
+    /// e.g. DVS is not running, or its network has no Dante PTP clock. A
+    /// calm wait, never a fault ([`clock_step`]).
+    NoClock,
 }
 
 impl Reason {
@@ -82,6 +98,7 @@ impl Reason {
             Self::WindowsOnly => "windows_only",
             Self::Held => "held",
             Self::Parked => "parked",
+            Self::NoClock => "no_clock",
         }
     }
 
@@ -106,6 +123,7 @@ impl Reason {
             Self::WindowsOnly => "ASIO runs on Windows only".into(),
             Self::Held => "another SongPlayer output still holds the driver (the output this one replaces is releasing it)".into(),
             Self::Parked => "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts".into(),
+            Self::NoClock => "the driver gives no clock (no callback since it opened): e.g. Dante Virtual Soundcard is not running, or there is no Dante PTP clock".into(),
         }
     }
 }
@@ -133,6 +151,49 @@ pub fn close_reason(ev: &DeviceEvents, opened_rate: f64) -> Option<Reason> {
     match ev.rate_changed {
         Some(r) if (r - opened_rate).abs() >= 1.0 => Some(rate_change(r)),
         _ => None,
+    }
+}
+
+/// What a running output's driver does about its clock, at one step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClockStep {
+    /// It ticks (a stall is the stall watch's, as before).
+    Ticking,
+    /// It ticks after a wait for its clock: the output runs (one INFO).
+    ClockArrived,
+    /// No callback yet, nothing to do now.
+    Quiet,
+    /// No callback [`NO_CLOCK_100NS`] after the open: the output waits for
+    /// its clock, the driver kept open (one WARN per wait).
+    StartsWaiting,
+    /// No callback [`NO_CLOCK_REOPEN_100NS`] after the open: closed and
+    /// opened again at once (a DEBUG; no reset, no backoff).
+    Reopen,
+}
+
+/// The clock decision of a running output whose driver ticked `ticks` times
+/// (the worker passes the frames the card took since the priming: callbacks
+/// before it, a burst at the open, are no clock), whose first block
+/// `primed` the ring or not, since it opened `since_open_100ns` ago,
+/// `waiting` for its clock or not (the owner's ruling, #233, 8.10.2026: a
+/// driver that opens and does not tick is a calm, visible wait, never a
+/// fault loop). A tick before the priming while waiting (a burst at a
+/// reopen) is no clock (review rounds 9-10); before the priming of a first
+/// open it is a tick.
+pub fn clock_step(ticks: u64, primed: bool, waiting: bool, since_open_100ns: i64) -> ClockStep {
+    if ticks > 0 {
+        return match (waiting, primed) {
+            (false, _) => ClockStep::Ticking,
+            (true, true) => ClockStep::ClockArrived,
+            (true, false) => ClockStep::Quiet,
+        };
+    }
+    if since_open_100ns >= NO_CLOCK_REOPEN_100NS {
+        ClockStep::Reopen
+    } else if since_open_100ns >= NO_CLOCK_100NS && !waiting {
+        ClockStep::StartsWaiting
+    } else {
+        ClockStep::Quiet
     }
 }
 

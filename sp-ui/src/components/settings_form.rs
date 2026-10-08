@@ -1,4 +1,5 @@
-//! Settings form for OBS, Gemini, dub, the NDI input "OBS manuál" (#212), the
+//! Settings form for OBS, Gemini, paid AI (#229 item C), dub, the NDI input
+//! "OBS manuál" (#212), the
 //! Companion remote control (#213), the program transition (#215; #221 L5
 //! deleted the OBS follow and the "podľa OBS" transition) and cache
 //! configuration. #233: #210's VBAN fieldset moved to "Zvukové výstupy"
@@ -85,6 +86,8 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     let obs_password = RwSignal::new(String::new());
     let gemini_key = RwSignal::new(String::new());
     let gemini_model = RwSignal::new(String::new());
+    // #229 item C: this node's paid-AI switch (on unless it says off).
+    let paid_ai = RwSignal::new(true);
     let cache_dir = RwSignal::new(String::new());
     let dub_voice = RwSignal::new(config::DEFAULT_DUB_VOICE.to_string());
     let dub_model = RwSignal::new(config::DEFAULT_DUB_MODEL.to_string());
@@ -127,6 +130,11 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
             &settings,
             config::SETTING_GEMINI_MODEL,
             config::DEFAULT_GEMINI_MODEL,
+        ));
+        paid_ai.set(config::paid_ai_enabled(
+            settings
+                .get(config::SETTING_PAID_AI_ENABLED)
+                .map(String::as_str),
         ));
         cache_dir.set(setting_value(
             &settings,
@@ -187,6 +195,14 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
         );
         settings.insert(config::SETTING_GEMINI_API_KEY.to_string(), gemini_key.get());
         settings.insert(config::SETTING_GEMINI_MODEL.to_string(), gemini_model.get());
+        // #229 item C: the switch only when it was changed here — a tab
+        // opened before it changed elsewhere never sends the old value back.
+        let loaded_paid_ai = store
+            .settings
+            .with_untracked(|s| s.get(config::SETTING_PAID_AI_ENABLED).cloned());
+        if let Some(value) = config::paid_ai_to_send(loaded_paid_ai.as_deref(), paid_ai.get()) {
+            settings.insert(config::SETTING_PAID_AI_ENABLED.to_string(), value);
+        }
         settings.insert(config::SETTING_CACHE_DIR.to_string(), cache_dir.get());
         settings.insert(config::SETTING_DUB_VOICE.to_string(), dub_voice.get());
         settings.insert(config::SETTING_DUB_MODEL.to_string(), dub_model.get());
@@ -278,6 +294,19 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                         prop:value=move || gemini_model.get()
                         on:input=move |ev| gemini_model.set(event_target_value(&ev))
                     />
+                </label>
+            </fieldset>
+
+            <fieldset data-testid="settings-paid-ai">
+                <legend>"Platené AI"</legend>
+                <label title="Vypnuté: tento uzol nevolá Gemini ani Claude — texty a metadáta berie od susedného uzla, preklad a dabing čakajú, kým sa zapne">
+                    <input
+                        type="checkbox"
+                        data-testid="settings-paid-ai-enabled"
+                        prop:checked=move || paid_ai.get()
+                        on:change=move |ev| paid_ai.set(event_target_checked(&ev))
+                    />
+                    "Povoliť platené AI spracovanie"
                 </label>
             </fieldset>
 

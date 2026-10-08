@@ -28,6 +28,7 @@ pub async fn first(ex: Option<&Arc<Exchange>>, job: &StemJob) -> PeerStep {
     let kind = Job::Stems;
     match ex.ask(kind, &job.youtube_id).await {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
+        Ask::Held => ex.hold(kind, job.video_id, &job.youtube_id).await,
         Ask::Wait { recheck, .. } => ex.defer(kind, job.video_id, recheck).await,
         Ask::Fetch(plan) => {
             let input = job_input(

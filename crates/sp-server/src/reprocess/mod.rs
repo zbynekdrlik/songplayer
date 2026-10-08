@@ -91,6 +91,12 @@ enum ReprocessOutcome {
     /// The row left the repair queue while the batch ran (#136: the operator
     /// corrected its title): nothing was renamed or written.
     LeftQueue,
+    /// #229 item C: this node's paid AI is off and no peer had a title: no
+    /// provider was asked, no backoff (one INFO per video, `paid_ai::hold`).
+    Held,
+    /// #229 item A: the peer this node took the song's audio from names it
+    /// too: no provider was asked, no backoff (`peer::repair::waits_for_peer`).
+    WaitsForPeer,
 }
 
 impl ReprocessWorker {
@@ -186,7 +192,8 @@ impl ReprocessWorker {
 
         // #229: no early return during the rate-limit cooldown: each row still
         // takes a peer's title (`reprocess_one` checks the cooldown after it).
-        info!(count = rows.len(), "found videos to reprocess");
+        // DEBUG: rows held or waiting for a peer repeat every 30 min.
+        debug!(count = rows.len(), "found videos to reprocess");
         let mut success_count = 0;
 
         for row in rows {
@@ -219,6 +226,11 @@ impl ReprocessWorker {
                 }
                 Ok(ReprocessOutcome::Skipped) => {
                     debug!(video_id = %row.youtube_id, "in per-video backoff, skipped");
+                }
+                // #229 item C: `paid_ai::hold` logged it (one INFO per video).
+                Ok(ReprocessOutcome::Held) => {}
+                Ok(ReprocessOutcome::WaitsForPeer) => {
+                    debug!(video_id = %row.youtube_id, "waits for the peer's title");
                 }
                 Ok(ReprocessOutcome::LeftQueue) => {
                     info!(
@@ -277,8 +289,20 @@ impl ReprocessWorker {
             let outcome = self.apply_title(row, &t.song, &t.artist, t.source).await?;
             if matches!(outcome, ReprocessOutcome::Success) {
                 crate::peer::download::record_title(ex, &row.youtube_id, &taken).await;
+                crate::peer::repair::end_wait(ex, &row.youtube_id).await;
             }
             return Ok(outcome);
+        }
+        // #229 item A: no provider while the peer the song came from names it.
+        if let Some(ex) = peer.as_deref()
+            && crate::peer::repair::waits_for_peer(ex, &row.youtube_id).await
+        {
+            return Ok(ReprocessOutcome::WaitsForPeer);
+        }
+        // #229 item C: while paid AI is off only a peer's title repairs it.
+        if self.chain.providers().await.is_none() {
+            crate::paid_ai::hold(crate::paid_ai::Held::Metadata, &row.youtube_id);
+            return Ok(ReprocessOutcome::Held);
         }
         if self.in_global_cooldown() {
             return Ok(ReprocessOutcome::Skipped);
@@ -310,8 +334,16 @@ impl ReprocessWorker {
         // start from stage 0 again.
         self.per_video_backoff.remove(&row.id);
 
-        self.apply_title(row, &meta.song, &meta.artist, meta.source.as_str())
-            .await
+        let outcome = self
+            .apply_title(row, &meta.song, &meta.artist, meta.source.as_str())
+            .await?;
+        // #229 item A: a repaired video waits for no peer any more.
+        if matches!(outcome, ReprocessOutcome::Success)
+            && let Some(ex) = peer.as_deref()
+        {
+            crate::peer::repair::end_wait(ex, &row.youtube_id).await;
+        }
+        Ok(outcome)
     }
 
     /// The ONE repair write: the row re-checked against the queue under
@@ -389,7 +421,10 @@ impl ReprocessWorker {
         video_id: &str,
         title: &str,
     ) -> Result<VideoMetadata, ChainFailure> {
-        crate::metadata::first_answer(self.chain.providers(), video_id, title).await
+        // No provider while paid AI is off (#229 item C; `reprocess_one`
+        // holds such a row before it gets here).
+        let providers = self.chain.providers().await.unwrap_or_default();
+        crate::metadata::first_answer(providers, video_id, title).await
     }
 
     /// `(the backoff stage's wait in seconds, the stage)` of a video — for the

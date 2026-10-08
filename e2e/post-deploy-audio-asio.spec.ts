@@ -6,9 +6,11 @@
  *    (SP_ASIO_OUTPUTS_EXPECTED > 0) has Dante Virtual Soundcard among them,
  *    by its exact name. A box with none expected (PP before its DVS work)
  *    is not asked for DVS (#233 release review).
- * 2. Exactly SP_ASIO_OUTPUTS_EXPECTED enabled ASIO outputs exist (ci.yml /
- *    deploy-pp.yml; "0" until the main session adds the box's DVS entry,
- *    then "1"), and each one runs, then holds a minute of program blocks at
+ * 2. Exactly SP_ASIO_OUTPUTS_EXPECTED enabled ASIO outputs exist that are
+ *    not waiting for their driver's clock (`gatedAsioOutputs`: PP's DVS waits
+ *    calmly while PP has no Dante PTP clock, the owner's ruling, #233,
+ *    8.10.2026; ci.yml / deploy-pp.yml: "1" at SNV, "0" at PP until its DVS
+ *    has a clock), and each one runs, then holds a minute of program blocks at
  *    its driver's rate with no underrun, no reopen, no hard re-centre
  *    (#233 review round 2: the owner's fault, a faded skip or insert),
  *    |ppm| <= 300 and a latency (`asioGateFailures`). Every output is measured over the SAME
@@ -23,7 +25,14 @@
  */
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { DVS_DRIVER, WINDOW_BLOCKS, asioGateFailures, type OutputStatus } from "./audio-outputs-gate";
+import {
+  DVS_DRIVER,
+  WINDOW_BLOCKS,
+  asioGateFailures,
+  gatedAsioOutputs,
+  waitingForClock,
+  type OutputStatus,
+} from "./audio-outputs-gate";
 
 const EXPECTED = Number(process.env.SP_ASIO_OUTPUTS_EXPECTED ?? "0");
 
@@ -67,10 +76,22 @@ test.describe("ASIO output (#233)", () => {
     expect(Number.isInteger(EXPECTED) && EXPECTED >= 0, "SP_ASIO_OUTPUTS_EXPECTED").toBe(true);
     // A failed read is no count (never zero outputs: with EXPECTED "0" a
     // broken API would pass), so the poll reads -1 then and tries again.
-    const enabledAsio = async () =>
-      (await readOutputs(request))?.filter((o) => o.type === "asio" && o.enabled) ?? null;
+    const enabledAsio = async () => {
+      const list = await readOutputs(request);
+      return list === null ? null : gatedAsioOutputs(list);
+    };
+    // The count, or (when it is off and an output waits for its driver's
+    // clock) the count with those outputs named, so a box expecting one
+    // says that its DVS has no clock rather than that it has no output.
+    const gatedCount = async () => {
+      const list = await readOutputs(request);
+      if (list === null) return -1;
+      const n = gatedAsioOutputs(list).length;
+      const waiting = waitingForClock(list).map((o) => o.id);
+      return n !== EXPECTED && waiting.length > 0 ? `${n} (waiting for a clock: ${waiting.join(", ")})` : n;
+    };
     await expect
-      .poll(async () => (await enabledAsio())?.length ?? -1, {
+      .poll(gatedCount, {
         message: "enabled ASIO outputs (SP_ASIO_OUTPUTS_EXPECTED)",
         timeout: 20_000,
       })

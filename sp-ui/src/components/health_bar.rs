@@ -21,14 +21,24 @@ use crate::api;
 use crate::components::ndi_health::GlobalLockBadge;
 use crate::store::{DashboardStore, poll_into};
 
-/// The subset of `/api/v1/status` the LAN segment needs. Both optional, so an
-/// old server / a mock without them just renders `LAN: —`.
+/// The subset of `/api/v1/status` the LAN, node and paid-AI segments need.
+/// All optional, so an old server / a mock without them just renders
+/// `LAN: —` and no node or paid-AI segment.
 #[derive(Debug, Default, Clone, Deserialize)]
 struct LanInfo {
     #[serde(default)]
     lan_url: Option<String>,
     #[serde(default)]
     lan_ip: Option<String>,
+    /// #229 item C: this node's exchange name.
+    #[serde(default)]
+    node_name: Option<String>,
+    /// #229 item C: this node's paid-AI switch.
+    #[serde(default)]
+    paid_ai_enabled: Option<bool>,
+    /// #229 item C: the kinds of work held while it is off.
+    #[serde(default)]
+    paid_ai_held: Vec<String>,
 }
 
 /// The port the dashboard is served on (same-origin as the server) — used for
@@ -61,11 +71,18 @@ pub fn HealthBar() -> impl IntoView {
     // a disposed signal after navigation, per sp-ui-frontend.md).
     let lan_url = RwSignal::new(None::<String>);
     let lan_ip = RwSignal::new(None::<String>);
+    // #229 item C: the node's name and its paid-AI switch, from the same read.
+    let node = RwSignal::new(None::<String>);
+    let paid_ai = RwSignal::new(None::<bool>);
+    let paid_held = RwSignal::new(Vec::<String>::new());
     let _lan = Effect::new(move |_| {
         spawn_local(async move {
             if let Ok(info) = api::get::<LanInfo>("/api/v1/status").await {
                 let _ = lan_url.try_set(info.lan_url);
                 let _ = lan_ip.try_set(info.lan_ip);
+                let _ = node.try_set(health::node_label(info.node_name.as_deref()));
+                let _ = paid_ai.try_set(info.paid_ai_enabled);
+                let _ = paid_held.try_set(info.paid_ai_held);
             }
         });
     });
@@ -157,6 +174,21 @@ pub fn HealthBar() -> impl IntoView {
                     }
                 }}
             </span>
+            // #229 item C: the node's name, and a warning while its paid AI
+            // is off (the tooltip names what waits for a peer's copy).
+            {move || {
+                node.get().map(|text| {
+                    view! { <span class="health-seg health-off" data-testid="health-node">{text}</span> }
+                        .into_any()
+                })
+            }}
+            {move || {
+                health::paid_ai_label(paid_ai.get(), &paid_held.get()).map(|(tone, text, tip)| {
+                    let cls = format!("health-seg {}", tone.css_class());
+                    view! { <span class=cls title=tip data-testid="health-paid-ai">{text}</span> }
+                        .into_any()
+                })
+            }}
             // Version — nests the existing `version` testid (post-deploy +
             // version-assertion contract) inside the `health-version` wrapper.
             <span class="health-seg" data-testid="health-version">
