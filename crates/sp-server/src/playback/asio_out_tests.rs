@@ -591,3 +591,106 @@ fn an_open_drops_the_blocks_queued_while_it_opened() {
     assert_eq!(o.queued(), 0);
     assert_eq!(o.snapshot().blocks_dropped, 0, "no overflow");
 }
+
+/// A driver whose `close` reads the output's state, as a dashboard poll
+/// would while a vanished driver blocks the close for seconds.
+struct WatchedClose<'a> {
+    device: FakeDevice,
+    out: &'a AsioOut,
+    seen: Vec<(&'static str, Option<&'static str>)>,
+}
+
+impl AsioDevice for WatchedClose<'_> {
+    fn open(&mut self, driver: &str, channels: [u32; 2]) -> Result<Opened, Reason> {
+        self.device.open(driver, channels)
+    }
+
+    fn start(&mut self, ring: rtrb::Consumer<f32>) -> Result<Started, Reason> {
+        self.device.start(ring)
+    }
+
+    fn poll(&mut self) -> DeviceEvents {
+        self.device.poll()
+    }
+
+    fn consumed_frames(&self) -> u64 {
+        self.device.consumed_frames()
+    }
+
+    fn underruns(&self) -> u64 {
+        self.device.underruns()
+    }
+
+    fn mark_primed(&mut self) {
+        self.device.mark_primed()
+    }
+
+    fn close(&mut self) {
+        let s = self.out.snapshot();
+        self.seen.push((s.state, s.status.reason_code));
+        self.device.close();
+    }
+}
+
+/// A close that blocks in a vanished driver must not leave the dashboard
+/// reading "beží": "waiting" and the reason are published BEFORE the
+/// device is closed, after a run and after a refused open (review round 2).
+#[test]
+fn the_reason_is_shown_before_the_driver_is_closed() {
+    let o = out();
+    let opens = vec![Ok(dvs(96_000.0)), Err(Reason::Busy("init failed".into()))];
+    let mut d = WatchedClose {
+        device: FakeDevice::answering(opens),
+        out: &o,
+        seen: Vec::new(),
+    };
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    for k in 1..=30 {
+        w.step(&o, &mut d, T0 + k * SLOT + 50_000, Some(block(k)));
+        d.device.drain(25);
+    }
+    d.device.events.push_back(DeviceEvents {
+        reset: true,
+        ..Default::default()
+    });
+    let now = T0 + 31 * SLOT;
+    w.step(&o, &mut d, now, None);
+    w.step(&o, &mut d, now + 2 * S, None); // the reopen is refused
+    assert_eq!(
+        d.seen,
+        vec![("waiting", Some("reset")), ("waiting", Some("busy"))]
+    );
+}
+
+/// A waiting output carries no figures of the run that closed (the
+/// correction, the lock and the latency belong to a driver no longer
+/// open); its counters and the last open's driver facts stay.
+#[test]
+fn a_waiting_output_carries_no_figures_of_its_closed_run() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0))]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    run(&mut w, &o, &mut d, 1, 30 * 5);
+    let running = o.snapshot().status;
+    assert!(
+        running.latency_ms > 0.0 && running.ppm != 0.0,
+        "{running:?}"
+    );
+    d.events.push_back(DeviceEvents {
+        reset: true,
+        ..Default::default()
+    });
+    w.step(&o, &mut d, T0 + 151 * SLOT, None);
+    let s = o.snapshot().status;
+    assert_eq!(
+        (s.ppm, s.rate_ppm, s.locked, s.latency_ms),
+        (0.0, 0.0, false, 0.0)
+    );
+    assert_eq!(
+        (s.resets, s.driver_rate, s.sample_type),
+        (1, 96_000, "Int32LSB"),
+        "the counters and the last open's driver facts stay"
+    );
+}
