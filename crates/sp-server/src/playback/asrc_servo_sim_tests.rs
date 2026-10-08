@@ -7,25 +7,34 @@
 //! re-centre goes through `frames_from_100ns` like the worker's: an insert
 //! lands at once, a skip is taken from each later block's output (the splice
 //! skips at most one block per call) and counted in the observation as
-//! pending. A clock step shifts the program timeline against the card at
-//! `step_at_s` (forward = the program catches up, backward = it pauses); a
-//! dropped buffer is one callback the host missed; a buffer change makes the
-//! card call back with another size from `buffer_after.0`. 900 s per case.
-//! The slew is checked on the 100 ns instants the servo saw (rounding the
-//! float wall would let a 1e-7 s quantum read as a 5e-7 ppm over-move).
+//! pending. The observation counts the splice's 5 ms hold as buffered, as
+//! the worker does (`asio_out.rs`: the ring + `Splice::held_frames`), while
+//! the card plays only the ring: its cushion is ~61.7 ms, not the target's
+//! 66.7 (review round 2: without the hold the harness had 5 ms more cushion
+//! than the worker, and fewer underruns). A clock step shifts the program
+//! timeline against the card at `step_at_s` (forward = the program catches
+//! up, backward = it pauses); a dropped buffer is one callback the host
+//! missed; `buffer_after` makes the card call back with another size from
+//! `buffer_after.0`, with no reopen (a real driver's buffer-size change
+//! resets it: the worker reopens and primes, no hard re-centre). 900 s per
+//! case. The slew is checked on the 100 ns instants the servo saw (rounding
+//! the float wall would let a 1e-7 s quantum read as a 5e-7 ppm over-move).
 //!
 //! The owner's ruling (8.10.2026, #233 comment 6053850076): the resampler
 //! absorbs a difference by its ratio, never by a skip or an insert. So every
 //! case below runs with **0 hard re-centres** — cards at ±50 ppm, ±1 ms and
 //! ±33 ms clock steps (a date step's remainder) at three window phases, a
-//! realistic hand-off with clumps, a driver buffer change, a dropped buffer,
-//! a 100 ms step, a 200 ms worker stall — except the ring-limit cases, a
-//! 300 ms stall and a 100 ms pause, which force exactly one. A ±33 ms step
-//! is back within ±2 ms of the target in at most 148.2 s (≤ 150 s asked):
-//! 60 s ramping to 300 ppm at 5 ppm/s, a cruise, the stop curve. Every
-//! figure pinned here comes from a scratch model of this file and the servo
-//! (`rust-workspace.md`, deriving pins), whose run of the old cases matched
-//! their earlier pins exactly.
+//! realistic hand-off with clumps, a callback period that changes mid-run, a
+//! dropped buffer, a 100 ms step, a 150 ms worker stall at four phases —
+//! except the ring-limit cases, a 300 ms stall at three phases and a 100 ms
+//! pause, which force exactly one. A stall near 200 ms sits at the ring's
+//! limit: it leaves 4 slots over the target or just under, by phase (the
+//! model: none at 500.0 / 500.011 / 500.022 / 500.033 s, one at 500.03 s),
+//! so no test pins it. A ±33 ms step is back within ±2 ms of the target in
+//! at most 148.2 s (≤ 150 s asked): 60 s ramping to 300 ppm at 5 ppm/s, a
+//! cruise, the stop curve. Every figure pinned here comes from a scratch
+//! model of this file and the servo (`rust-workspace.md`, deriving pins),
+//! whose run of the old cases matched their earlier pins exactly.
 
 use super::*;
 
@@ -50,7 +59,10 @@ enum Lateness {
     /// in 900 a single 40–80 ms late, one in 1 800 a clump of 2 (its first
     /// block a slot + 10–33 ms late, the next with it), one in 3 600 a clump
     /// of 3 (two slots + 0–10 ms). The ones past the ring's ~61.7 ms cushion
-    /// underrun the card — physics: the audio is not there yet.
+    /// underrun the card (the audio is not there yet); the excess each such
+    /// underrun leaves is then drained by the stop curve, which re-exposes
+    /// the next late block (keeping it as cushion instead is the main
+    /// session's call, #233 comment 6055539144).
     Realistic,
     /// The same, but every late block within the cushion: singles 40–56 ms,
     /// clumps of 2 only (a slot + 0–20 ms).
@@ -137,7 +149,13 @@ struct Outcome {
     /// The last block after the step whose latency was more than 2 ms off
     /// the target, s after the step (`None`: none was).
     out_of_band_s: Option<f64>,
+    /// The correction's largest distance from the card after [`SETTLED_S`]
+    /// (a kick shows here; the final value alone hides it).
+    max_off_card_ppm: f64,
 }
+
+/// The rate is locked (60 s) and the correction has slewed to it by then.
+const SETTLED_S: f64 = 120.0;
 
 /// The card: frames waiting, frames taken, the next callback (s), the one
 /// callback to drop.
@@ -194,6 +212,8 @@ fn run(c: Case) -> Outcome {
     let mut pending: u64 = 0;
     let mut last_change: Option<(i64, f64)> = None;
     let per_block = 1600.0 * c.rate / 48_000.0;
+    // The splice's hold: buffered for the servo, not yet in the card's ring.
+    let hold = crate::playback::asrc::Splice::new(c.rate, 0, 0).held_frames() as u64;
     // A 900 s run is 27 000 blocks; the bound only stops a broken loop.
     for k in 0..40_000i64 {
         let stamp_s = k as f64 * SLOT_S;
@@ -217,11 +237,11 @@ fn run(c: Case) -> Outcome {
         let a = servo.observe(Observation {
             handled_100ns,
             stamp_100ns: (stamp_s * 1e7).round() as i64,
-            buffered_frames: card.fill.floor() as u64,
+            buffered_frames: card.fill.floor() as u64 + hold,
             pending_skip_frames: pending,
             consumed_frames: card.consumed,
         });
-        let latency_s = (card.fill - pending as f64) / c.rate + (wall_s - stamp_s);
+        let latency_s = (card.fill + hold as f64 - pending as f64) / c.rate + (wall_s - stamp_s);
         let err_ms =
             (latency_s + a.recentre_100ns as f64 / 1e7 - BASE_LATENCY_100NS as f64 / 1e7) * 1e3;
         let quiet = (handled - (c.step_at_s + 0.5)).abs() > 3.0
@@ -234,6 +254,10 @@ fn run(c: Case) -> Outcome {
             out.out_of_band_s = Some(handled - (c.step_at_s + 0.5));
         }
         out.max_abs_ppm = out.max_abs_ppm.max(a.correction_ppm.abs());
+        if handled > SETTLED_S {
+            let off = (a.correction_ppm - c.card_ppm).abs();
+            out.max_off_card_ppm = out.max_off_card_ppm.max(off);
+        }
         if last_change.is_none_or(|(_, p)| p != a.correction_ppm) {
             if let Some((t, p)) = last_change {
                 let allowed = MAX_SLEW_PPM_PER_S * ((handled_100ns - t) as f64 / 1e7);
@@ -353,13 +377,14 @@ fn a_33_ms_clock_step_is_slewed_back_within_2_ms_in_150_s() {
 /// Jitter never moves the output: every late or clumped block within the
 /// ring's cushion leaves the latency and the ratio where they were — no
 /// underrun, the latency within half a callback period of the sawtooth, the
-/// correction within 2.5 ppm of the card after the lock (no kick).
+/// correction never more than 1.3 / 2.5 / 1.8 ppm off the card once settled
+/// (no kick; the model: 1.28, 2.47, 1.74).
 #[test]
 fn a_hand_off_late_within_the_cushion_moves_nothing() {
-    for (rate, buffer, card_ppm, latency_ms) in [
-        (96_000.0, 128, 0.0, 1.4),
-        (96_000.0, 512, 0.0, 3.9),
-        (96_000.0, 128, -50.0, 1.7),
+    for (rate, buffer, card_ppm, latency_ms, off_card_ppm) in [
+        (96_000.0, 128, 0.0, 1.4, 1.3),
+        (96_000.0, 512, 0.0, 3.9, 2.5),
+        (96_000.0, 128, -50.0, 1.7, 1.8),
     ] {
         let o = run(Case {
             rate,
@@ -370,20 +395,22 @@ fn a_hand_off_late_within_the_cushion_moves_nothing() {
         });
         assert_smooth(&o);
         assert!(o.worst_latency_err_ms <= latency_ms, "{o:?}");
+        assert!(o.max_off_card_ppm <= off_card_ppm, "{o:?}");
         assert!((o.final_ppm - card_ppm).abs() <= 2.5, "{o:?}");
     }
 }
 
-/// The realistic hand-off: blocks past the cushion underrun the card
-/// (physics), and the lasting offset each leaves is drained by the ratio —
-/// never a hard re-centre. The model's underruns: 57, 22, 22, 61.
+/// The realistic hand-off: blocks past the cushion underrun the card, and
+/// the excess each leaves is drained by the ratio — never a hard re-centre.
+/// The model's underrun callbacks with the splice's hold: 97, 33, 33, 99
+/// (part of them the drain's: it re-exposes the next late block, Lateness).
 #[test]
 fn a_realistic_hand_off_with_clumps_needs_no_hard_re_centre() {
     for (rate, buffer, card_ppm, underruns) in [
-        (96_000.0, 128, 0.0, 57),
-        (96_000.0, 512, 0.0, 22),
-        (48_000.0, 256, 0.0, 22),
-        (96_000.0, 128, 50.0, 61),
+        (96_000.0, 128, 0.0, 97),
+        (96_000.0, 512, 0.0, 33),
+        (48_000.0, 256, 0.0, 33),
+        (96_000.0, 128, 50.0, 99),
     ] {
         let o = run(Case {
             rate,
@@ -394,14 +421,16 @@ fn a_realistic_hand_off_with_clumps_needs_no_hard_re_centre() {
         });
         assert_ratio_only(&o);
         assert_eq!(o.underruns, underruns, "{o:?}");
-        assert!(o.worst_latency_err_ms <= 17.0, "{o:?}");
+        assert!(o.worst_latency_err_ms <= 22.0, "{o:?}");
     }
 }
 
-/// The driver's buffer goes from 128 to 512 frames mid-run (its sawtooth
-/// moves the mean reading by 2 ms): slewed, no underrun.
+/// The card's callback period goes from 128 to 512 frames mid-run with no
+/// reopen (its sawtooth moves the mean reading by 2 ms): slewed, no
+/// underrun. A real driver's buffer-size change is a reset (the worker
+/// reopens and primes: `asio_state::close_reason`), never this path.
 #[test]
-fn a_driver_buffer_change_mid_run_is_slewed() {
+fn a_callback_period_that_changes_mid_run_is_slewed() {
     let o = run(Case {
         buffer_after: Some((400.0, 512)),
         ..SNV
@@ -476,39 +505,44 @@ fn a_48k_card_with_256_frame_buffers_is_followed() {
     );
 }
 
-/// The worker stalls 200 ms: the card runs dry (underruns: physics), the
-/// late blocks come back to back, and the ~100 ms they left over is under
-/// the last resort's four slots — drained by the ratio.
+/// The worker stalls 150 ms: the card runs dry (underruns: the audio is
+/// not there), the late blocks come back to back, and the excess they leave
+/// (the stall less the ring's cushion) is under the last resort's four
+/// slots — drained by the ratio, at four phases of the slot (review round
+/// 2: a single phase can be lucky).
 #[test]
-fn a_200_ms_worker_stall_is_slewed() {
-    let o = run(Case {
-        card_ppm: 20.0,
-        stall_at_s: Some(500.0),
-        stall_s: 0.200,
-        ..SNV
-    });
-    assert!(o.underruns > 0, "the ring ran dry: {o:?}");
-    assert_ratio_only(&o);
+fn a_150_ms_worker_stall_is_slewed_at_every_phase() {
+    for phase in [0.0, 0.0111, 0.0222, 0.0333] {
+        let o = run(Case {
+            card_ppm: 20.0,
+            stall_at_s: Some(500.0 + phase),
+            stall_s: 0.150,
+            ..SNV
+        });
+        assert!(o.underruns > 0, "the ring ran dry: {o:?}");
+        assert_ratio_only(&o);
+        assert!((o.final_ppm - 20.0).abs() <= 5.0, "{o:?}");
+    }
 }
 
 /// The ring-limit cases: a 300 ms stall leaves more than four slots over (the
-/// ring would overflow), a 100 ms pause more than 50 ms short (it would run
-/// dry on most blocks): exactly one hard re-centre each, the skip asked once.
+/// ring would overflow; three phases), a 100 ms pause a latency under the
+/// 16.7 ms floor (it would run dry on most blocks): exactly one hard
+/// re-centre each, the skip asked once.
 #[test]
 fn a_300_ms_stall_or_a_100_ms_pause_forces_one_hard_re_centre() {
-    for c in [
-        Case {
-            card_ppm: 20.0,
-            stall_at_s: Some(500.0),
-            stall_s: 0.300,
-            ..SNV
-        },
-        Case {
-            card_ppm: 20.0,
-            step_s: -0.100,
-            ..SNV
-        },
-    ] {
+    let stall = |phase: f64| Case {
+        card_ppm: 20.0,
+        stall_at_s: Some(500.0 + phase),
+        stall_s: 0.300,
+        ..SNV
+    };
+    let pause = Case {
+        card_ppm: 20.0,
+        step_s: -0.100,
+        ..SNV
+    };
+    for c in [stall(0.0), stall(0.01), stall(0.02), pause] {
         let o = run(c);
         assert_eq!((o.hard_recentres, o.asked_while_pending), (1, 0), "{o:?}");
         assert!(o.max_abs_ppm <= MAX_PPM, "{o:?}");
