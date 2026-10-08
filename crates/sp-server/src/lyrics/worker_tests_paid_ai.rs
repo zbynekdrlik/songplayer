@@ -165,3 +165,49 @@ async fn a_translation_pass_holds_only_a_song_it_would_translate() {
     );
     assert_eq!(server.received_requests().await.unwrap().len(), 0);
 }
+
+/// Review round 15: a stale translation whose track cannot be read is only
+/// stamped forward (nothing to translate, no paid call), and the pass does
+/// that while paid AI is off too. It holds nothing, so the status names no
+/// translation that is not waiting.
+#[tokio::test]
+async fn a_stale_translation_with_no_track_is_stamped_forward_not_held_while_off() {
+    let cap = Captured::default();
+    let _log = tracing::subscriber::set_default(capturing(&cap));
+    let server = claude().await;
+    let pp = TestNode::start("pp", None).await;
+    set(pp.pool(), "paid_ai_enabled", "false").await;
+    let id = pp.add_video("trn_paid_03").await;
+    // Stale (translation version 0) with lyrics recorded, but no JSON.
+    sqlx::query(
+        "UPDATE videos SET normalized = 1, has_lyrics = 1, lyrics_source = 'mtl+g35t' \
+         WHERE id = ?",
+    )
+    .bind(id)
+    .execute(pp.pool())
+    .await
+    .unwrap();
+    let (events, _) = broadcast::channel(16);
+    let mut worker =
+        LyricsWorker::new_for_test(pp.pool().clone(), pp.cache().to_path_buf(), events);
+    worker.ai_client = Some(Arc::new(AiClient::new(AiSettings {
+        api_url: format!("{}/v1", server.uri()),
+        api_key: None,
+        model: "claude-test".into(),
+        system_prompt_extra: None,
+    })));
+    worker.retranslate_next_stale().await;
+    let version: i64 =
+        sqlx::query_scalar("SELECT lyrics_translation_version FROM videos WHERE id = ?")
+            .bind(id)
+            .fetch_one(pp.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        version,
+        i64::from(crate::lyrics::LYRICS_TRANSLATION_VERSION),
+        "stamped forward: nothing to translate"
+    );
+    assert_eq!(holds(&cap), Vec::<String>::new(), "nothing held");
+    assert_eq!(server.received_requests().await.unwrap().len(), 0);
+}
