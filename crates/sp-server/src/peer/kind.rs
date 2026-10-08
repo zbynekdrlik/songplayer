@@ -116,6 +116,19 @@ impl Job {
         matches!(self, Self::Lyrics)
     }
 
+    /// #229 item C: the paid AI this job calls when it runs here (the kind
+    /// `paid_ai` holds while the node's switch is off): only the lyrics
+    /// (Gemini 3.5 Transcribe, Claude's clean-up, the Spotify resolution,
+    /// the translation). A download names its song through the metadata
+    /// chain, gated on its own (`metadata::ProviderChain::providers`), and
+    /// the stems are a local model.
+    pub fn paid_ai(self) -> Option<crate::paid_ai::Held> {
+        match self {
+            Self::Lyrics => Some(crate::paid_ai::Held::Lyrics),
+            Self::Download | Self::Stems => None,
+        }
+    }
+
     /// The job that makes `kind` (the one whose [`Job::makes`] holds it);
     /// `None` for a kind this node does not know.
     pub fn making(kind: ArtifactKind) -> Option<Self> {

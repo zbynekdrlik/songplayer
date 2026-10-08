@@ -102,6 +102,7 @@ async fn ask_or_fetch(ex: &Exchange, chain: &ProviderChain, row: &VideoRow) -> P
     let job = Job::Download;
     match ex.ask(job, &row.youtube_id).await {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
+        Ask::Held => ex.hold(job, row.id, &row.youtube_id).await,
         Ask::Wait { recheck, .. } => ex.defer(job, row.id, recheck).await,
         Ask::Fetch(plan) => match adopt(ex, chain, row, &plan).await {
             Ok(taken) => {

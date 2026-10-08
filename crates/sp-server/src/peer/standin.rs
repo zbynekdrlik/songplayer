@@ -132,6 +132,10 @@ impl Exchange {
             .flatten()
             .unwrap_or_default();
         if gives_up(waited) {
+            // #229 item C: held while it may not run here, quietly.
+            if !self.may_run_here(job).await {
+                return self.hold(job, video_id, youtube_id).await;
+            }
             info!(
                 youtube_id,
                 job = job.as_str(),

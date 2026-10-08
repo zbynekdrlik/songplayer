@@ -7,7 +7,8 @@
 //!   retry due);
 //! - lyrics: buckets 1–3 of `lyrics::reprocess` (`lyrics::queue_sql::
 //!   queued_where`: manual, null, stale), only while `lyrics_worker_enabled`
-//!   is on, and never for a video the catalog will not serve lyrics of (any
+//!   is on and this node's paid AI too (#229 item C: `paid_ai`), and
+//!   never for a video the catalog will not serve lyrics of (any
 //!   row of it dub-requested or Live-Translate, `catalog::LYRICS_ROWS`).
 //!   Also a row those buckets take once its own recheck time has come
 //!   (`queued_later_where`) whose stems are queued here (the stems'
@@ -46,7 +47,9 @@ pub async fn queued(pool: &SqlitePool) -> Result<Vec<(String, Job)>, sqlx::Error
     .await?;
     add(&mut jobs, downloads, Job::Download);
     let stems_on = worker_on(pool, STEM_WORKER_ENABLED).await?;
-    if worker_on(pool, LYRICS_WORKER_ENABLED).await? {
+    // #229 item C: lyrics this node may not make (paid AI off) are no job
+    // of its: a peer waits for none.
+    if worker_on(pool, LYRICS_WORKER_ENABLED).await? && crate::paid_ai::enabled(pool).await {
         let lyrics = lyrics_queued(pool, stems_on).await?;
         add(&mut jobs, lyrics, Job::Lyrics);
     }

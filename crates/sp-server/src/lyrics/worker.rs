@@ -775,7 +775,7 @@ impl LyricsWorker {
 
     #[cfg_attr(test, mutants::skip)]
     async fn retry_missing_translations(&self) {
-        if self.ai_client.is_none() {
+        if self.ai_client.is_none() || !self.translation_allowed().await {
             return;
         }
         {
@@ -951,3 +951,7 @@ mod tests_idle_gate;
 #[path = "worker_tests_peer.rs"]
 #[cfg(test)]
 mod tests_peer;
+
+#[path = "worker_tests_paid_ai.rs"]
+#[cfg(test)]
+mod tests_paid_ai;

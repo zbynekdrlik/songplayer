@@ -46,10 +46,25 @@ impl LyricsWorker {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
+        if !self.translation_allowed().await {
+            return;
+        }
         match translator::translate_via_claude(ai_client, track, gender).await {
             Ok(translations) => Self::apply_translations(track, translations),
             Err(e) => warn!("worker: Claude translation failed for {youtube_id}: {e}"),
         }
+    }
+
+    /// #229 item C: a translation calls Claude — paid AI — so it runs only
+    /// while this node's switch is on (`paid_ai::enabled`, read live); while
+    /// it is off the translation is held (`paid_ai::hold`, one INFO for the
+    /// whole pass): the SK lines come with a peer's copy, or once it is on.
+    pub(crate) async fn translation_allowed(&self) -> bool {
+        if crate::paid_ai::enabled(&self.pool).await {
+            return true;
+        }
+        crate::paid_ai::hold(crate::paid_ai::Held::Translation, "");
+        false
     }
 
     /// Resolve a video's translation gender (#152). `'f'` → Female; everything
@@ -74,6 +89,9 @@ impl LyricsWorker {
         let Some(ai_client) = &self.ai_client else {
             return;
         };
+        if !self.translation_allowed().await {
+            return;
+        }
         {
             let backoff = self.retry_backoff.lock().await;
             if let Some(until) = backoff.silent_until

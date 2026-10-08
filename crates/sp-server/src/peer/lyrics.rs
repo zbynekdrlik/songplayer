@@ -18,6 +18,10 @@
 //! `LyricsTrack` whose source must be the row's, renamed into
 //! `{yt}_lyrics.json`, and the row takes the peer's lyrics columns
 //! (`models_peer::adopt_lyrics`).
+//!
+//! #229 item C: while this node's paid AI is off (`paid_ai`), every "run
+//! here" of this hook is a hold instead (`Exchange::local` / `hold`): only a
+//! peer's copy is taken, and the row is picked again later, no attempt.
 
 use std::sync::Arc;
 
@@ -51,10 +55,11 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
     };
     let job = Job::Lyrics;
     if wants_local(&ex.pool, row).await {
-        return PeerStep::Local(Some(ex.run_here(job, &row.youtube_id).await));
+        return ex.local(job, row.id, &row.youtube_id).await;
     }
     match ex.ask(job, &row.youtube_id).await {
         Ask::Local(guard) => PeerStep::Local(Some(guard)),
+        Ask::Held => ex.hold(job, row.id, &row.youtube_id).await,
         Ask::Wait { recheck, .. } => ex.defer(job, row.id, recheck).await,
         Ask::Fetch(plan) => {
             // A stand-in takes the copy into every row of the video through
@@ -76,9 +81,7 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
                         .await;
                     PeerStep::Done
                 }
-                Ok(Adopted::NothingNewer) => {
-                    PeerStep::Local(Some(ex.run_here(job, &row.youtube_id).await))
-                }
+                Ok(Adopted::NothingNewer) => ex.local(job, row.id, &row.youtube_id).await,
                 Err(e) => {
                     ex.after_failed_fetch(job, row.id, &row.youtube_id, &plan.peer.name, &e)
                         .await

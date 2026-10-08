@@ -58,6 +58,11 @@ pub enum Ask {
     Wait { peer: String, recheck: Duration },
     /// Run the job here, announced while the guard lives.
     Local(JobGuard),
+    /// #229 item C: the job may not run here now (`Exchange::may_run_here`:
+    /// a lyrics job while this node's paid AI is off) and no peer's copy is
+    /// to be taken: hold it (`Exchange::hold`). Nothing is recorded about a
+    /// run here: a wait (a spent bound too) and a stand-in stay as they are.
+    Held,
 }
 
 /// What a worker's hook (`peer::{download, stems, lyrics}::first`) tells its
@@ -74,8 +79,11 @@ pub enum PeerStep {
 }
 
 impl Exchange {
-    /// Ask the peers about `job` for `youtube_id`.
+    /// Ask the peers about `job` for `youtube_id`. A job that may not run
+    /// here now (#229 item C) still takes a peer's copy and waits for a
+    /// peer's job; where it would run here it is [`Ask::Held`].
     pub async fn ask(&self, job: Job, youtube_id: &str) -> Ask {
+        let may_run = self.may_run_here(job).await;
         let cfg = match NodeConfig::load(&self.pool).await {
             Ok(cfg) => cfg,
             Err(e) => {
@@ -85,11 +93,11 @@ impl Exchange {
                     error = %e,
                     "exchange: the settings do not hold - processing here"
                 );
-                return Ask::Local(self.announce(youtube_id, job));
+                return self.unasked(job, youtube_id, may_run);
             }
         };
         if !cfg.asking() {
-            return Ask::Local(self.announce(youtube_id, job));
+            return self.unasked(job, youtube_id, may_run);
         }
         let catalogs = self.read_peers(&cfg.peers).await;
         let reads: Vec<PeerRead<'_>> = cfg
@@ -139,7 +147,7 @@ impl Exchange {
                     artifacts,
                     peer_audio: peer_audio(&reads, &peer, youtube_id),
                 }),
-                None => Ask::Local(self.run_here(job, youtube_id).await),
+                None => self.local_or_held(job, youtube_id, may_run).await,
             },
             Decision::Wait { peer, why } => {
                 if let Err(e) =
@@ -152,6 +160,11 @@ impl Exchange {
                 Ask::Wait { peer, recheck }
             }
             Decision::Local(why) => {
+                // #229 item C: held before anything about a run here is
+                // recorded (the wait, a stand-in, the announcement).
+                if !may_run {
+                    return Ask::Held;
+                }
                 // A job that stands in runs here keeping its stand-in and a
                 // spent bound its hand-off left (review rounds 5-7): its next
                 // pick, meeting the peer's copy, runs here at once.
@@ -170,6 +183,56 @@ impl Exchange {
                 }
                 Ask::Local(guard)
             }
+        }
+    }
+
+    /// #229 item C: whether `job` may run here now. A job that calls paid AI
+    /// (`Job::paid_ai`) only while this node's switch is on
+    /// (`paid_ai::enabled`, read live); any other job always.
+    pub(crate) async fn may_run_here(&self, job: Job) -> bool {
+        match job.paid_ai() {
+            Some(_) => crate::paid_ai::enabled(&self.pool).await,
+            None => true,
+        }
+    }
+
+    /// #229 item C: row `video_id` of `job` for `youtube_id` may not run here
+    /// now: it is picked again after `paid_ai::HELD_RECHECK`, no attempt
+    /// counted (`defer`), and nothing is recorded about a run here; one INFO
+    /// per song (`paid_ai::hold`).
+    pub(crate) async fn hold(&self, job: Job, video_id: i64, youtube_id: &str) -> PeerStep {
+        if let Some(what) = job.paid_ai() {
+            crate::paid_ai::hold(what, youtube_id);
+        }
+        self.defer(job, video_id, crate::paid_ai::HELD_RECHECK)
+            .await
+    }
+
+    /// `job` of `youtube_id` runs here (`run_here`), or, when it may not run
+    /// here now (#229 item C), row `video_id` is held.
+    pub(crate) async fn local(&self, job: Job, video_id: i64, youtube_id: &str) -> PeerStep {
+        if !self.may_run_here(job).await {
+            return self.hold(job, video_id, youtube_id).await;
+        }
+        PeerStep::Local(Some(self.run_here(job, youtube_id).await))
+    }
+
+    /// The job with no peer to ask (no peers, or settings that do not hold):
+    /// announced here, or held when it may not run here (`may_run`).
+    fn unasked(&self, job: Job, youtube_id: &str, may_run: bool) -> Ask {
+        if may_run {
+            Ask::Local(self.announce(youtube_id, job))
+        } else {
+            Ask::Held
+        }
+    }
+
+    /// `run_here` as an answer, or held when the job may not run here.
+    async fn local_or_held(&self, job: Job, youtube_id: &str, may_run: bool) -> Ask {
+        if may_run {
+            Ask::Local(self.run_here(job, youtube_id).await)
+        } else {
+            Ask::Held
         }
     }
 
@@ -251,6 +314,18 @@ impl Exchange {
         peer: &str,
         error: &PeerError,
     ) -> PeerStep {
+        // #229 item C: a job that may not run here now waits for the peer's
+        // copy with no bound, so no give-up WARN repeats at every pick.
+        if !self.may_run_here(job).await {
+            debug!(
+                youtube_id,
+                job = job.as_str(),
+                peer,
+                %error,
+                "exchange: a peer's copy was not taken - held (paid AI off)"
+            );
+            return self.hold(job, video_id, youtube_id).await;
+        }
         match self.fetch_failed(job, youtube_id, peer, error).await {
             Some(recheck) => self.defer(job, video_id, recheck).await,
             None => {
@@ -451,3 +526,7 @@ fn log_local(youtube_id: &str, job: Job, why: LocalWhy) {
 #[cfg(test)]
 #[path = "ask_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "held_tests.rs"]
+mod held_tests;

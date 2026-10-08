@@ -176,3 +176,11 @@ fn every_metadata_source_label_is_ranked() {
         );
     }
 }
+
+/// #229 item C: only the lyrics job calls paid AI when it runs here.
+#[test]
+fn only_the_lyrics_job_calls_paid_ai() {
+    assert_eq!(Job::Lyrics.paid_ai(), Some(crate::paid_ai::Held::Lyrics));
+    assert_eq!(Job::Download.paid_ai(), None);
+    assert_eq!(Job::Stems.paid_ai(), None);
+}
