@@ -706,9 +706,9 @@ own callback thread and has two slots of cushion):
     the frames the card had taken when the first block primed the ring;
     the glue counts every buffer switch, primed or not): a burst of
     callbacks at the open, then nothing, is no clock (review round 8), at
-    the first open and at every reopen during a wait (review round 9: a
-    `ClockArrived` before the run's priming reads `Quiet`, so the output
-    never flips to running for a burst);
+    the first open and at every reopen during a wait (review rounds 9-10:
+    `clock_step` takes `primed`, and a tick while waiting before the run's
+    priming is `Quiet`, so the output never flips to running for a burst);
   - after the priming, a block goes to the servo and the ring only once
     the driver ticked; until then it is dropped and the ring keeps its
     priming (no re-centre, no overflow). Deliberately NOT "a tick since
@@ -720,10 +720,15 @@ own callback thread and has two slots of cushion):
   - still no tick 60 s after an open (`NO_CLOCK_REOPEN_100NS`): closed and
     opened again at once, every 60 s for as long as it lasts, a DEBUG each,
     `clock_waits` counting them — never a reset, a backoff or a fault; a
-    reopen during the wait logs at DEBUG and keeps reading `waiting`;
+    reopen during the wait logs at DEBUG (its "opened again" line and the
+    count of stale queued blocks it drops; review round 10: that count was
+    an INFO, up to 1 440 a day) and keeps reading `waiting`;
   - the first tick ends the wait: ONE INFO, `running`, and the servo starts
     afresh (its run so far observed one block, up to a minute earlier; the
-    next block it observes primes it to the target);
+    next block it observes primes it to the target). Known limit (review
+    round 10): the card then first plays what the run's priming left in
+    the ring, ~62 ms of silence and the run's first block, up to 60 s old,
+    once per clock arrival;
   - the stall watch runs only for a driver that ticked: one that ticked
     and stops is a stall (2 s, `stalled`, `resets`, the 2 / 10 / 30 / 60 s
     backoff), as before;
@@ -918,7 +923,8 @@ outputs that are not waiting for their driver's clock (`gatedAsioOutputs`:
 an output waiting with reason `no_clock` is neither counted nor measured,
 so PP — "0", its DVS entry enabled while PP has no Dante PTP clock — does
 not fail on it; SNV — "1" — still fails when its DVS gives no clock, the
-count then 0; ci.yml / deploy-pp.yml), each running, then a minute (1 800 blocks) at its
+count then 0, and the poll names the waiting outputs (`waitingForClock`:
+"0 (waiting for a clock: out-2)"); ci.yml / deploy-pp.yml), each running, then a minute (1 800 blocks) at its
 driver's rate with no underrun, no reopen, no hard re-centre (review
 round 2), |ppm| ≤ 300 and a latency
 over 0 and under the entry's delay + 1 s (`asioGateFailures`, unit-tested

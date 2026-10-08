@@ -1,8 +1,10 @@
-//! #229: the lyrics job asks first. Never for an operator's own ask here (a
-//! reprocess or "Nesedí": `lyrics_manual_priority`; a `lyrics_override_text`)
-//! on any row of the video, and never for a video whose `{yt}_lyrics.json`
-//! here is a dub's subtitles (any row of it dub-requested or Live-Translate:
-//! the catalog's dub rule, Review Focus 5), and only when this node's audio IS the peer's
+//! #229: the lyrics job asks first. Never while an operator's mark here is
+//! one the lyrics queue acts on, on any row of the video (`kept_local`: a
+//! `lyrics_override_text` on a row of an active playlist, a reprocess or
+//! "Nesedí" flag on such a row that is not parked), and never for a video
+//! whose `{yt}_lyrics.json` here is a dub's subtitles (any row of it
+//! dub-requested or Live-Translate: the catalog's dub rule, Review
+//! Focus 5), and only when this node's audio IS the peer's
 //! (`peer::audio`): every track's line timings were measured on the peer's
 //! audio, so a song whose audio here is another encode is processed here.
 //! The peer's row (`/videos`) must match its catalog and must

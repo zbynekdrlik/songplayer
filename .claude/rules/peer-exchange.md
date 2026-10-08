@@ -902,8 +902,10 @@ parked `no_source` by `fail_song`). Three rules:
     `run_here` first, then records;
   - V31 back-filled it once: a video whose audio a peer gave (a
     `peer_fetches` audio record) with a lyrics result made here (a
-    `lyrics_source`, no lyrics record), no operator text or ask and no dub /
-    Live-Translate on any row, due at once (PP's `8ohdO2nINEI`; SNV fetches
+    `lyrics_source`, no lyrics record), no dub / Live-Translate on any row
+    and no operator's mark the lyrics queue acts on (`kept_local`'s rule as
+    a literal copy, without the pipeline version), due at once (PP's
+    `8ohdO2nINEI`; SNV fetches
     nothing). Known limit: an operator's reprocess made at PP before V31
     has the same shape (the manual flag is cleared at completion) and is
     superseded once;
