@@ -343,3 +343,11 @@ fn a_rate_under_1_hz_is_a_lost_clock() {
         "1 Hz is a rate, refused as one"
     );
 }
+
+/// #233 review round 3: before the servo measured its first window (its
+/// latency reads 0) the output's latency is unknown, 0 — never the
+/// resampler's and the driver's few ms alone.
+#[test]
+fn the_latency_is_0_until_the_servo_measured_a_window() {
+    assert_eq!(asio_latency_ms(0.0, 256, 128, 96_000.0), 0.0);
+}

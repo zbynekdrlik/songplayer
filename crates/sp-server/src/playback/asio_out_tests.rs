@@ -775,3 +775,38 @@ fn a_clock_still_lost_at_the_reopen_reads_as_a_lost_clock() {
         ("waiting", Some("clock_lost"))
     );
 }
+
+/// #233 review round 3: every counter of `outputs[i].asio` counts since the
+/// output was built — the overflows and the re-centres add up across
+/// reopens like the underruns and the overloads (a run's servo and ring
+/// count from 0 again); and right after an open the latency is 0 (no window
+/// measured yet), not the resampler's and the driver's 4 ms. Two runs, each
+/// a block stamped a second ahead: 82 223 frames over the ring and the
+/// start re-centre each (scratch model).
+#[test]
+fn the_overflows_and_recentres_add_up_across_runs() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0)), Ok(dvs(96_000.0))]);
+    let mut w = AsioWorker::new(T0);
+    let mut t = T0;
+    let mut seen = Vec::new();
+    for _ in 0..2 {
+        w.step(&o, &mut d, t, None);
+        let b = ProgramBlock {
+            due_100ns: t + S,
+            samples: None,
+            substituted: false,
+        };
+        w.step(&o, &mut d, t + 50_000, Some(b));
+        let s = o.snapshot().status;
+        seen.push((s.overflows, s.recentres, s.latency_ms));
+        d.events.push_back(DeviceEvents {
+            reset: true,
+            ..Default::default()
+        });
+        w.step(&o, &mut d, t + 60_000, None);
+        t += 60_000 + 2 * S;
+    }
+    assert_eq!(d.starts, 2);
+    assert_eq!(seen, vec![(82_223, 1, 0.0), (164_446, 2, 0.0)]);
+}
