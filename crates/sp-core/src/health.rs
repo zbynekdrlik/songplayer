@@ -100,6 +100,50 @@ pub fn ws_label(connected: bool) -> (HealthTone, &'static str) {
     (tone, "WS")
 }
 
+/// #229 item C: the node segment, `Uzol: <name>`; `None` (no segment) for
+/// a node with no name (the exchange off).
+pub fn node_label(name: Option<&str>) -> Option<String> {
+    name.map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(|n| format!("Uzol: {n}"))
+}
+
+/// #229 item C: the paid-AI segment, shown only while the node's switch is
+/// off (`Some(false)`): `Platené AI: vypnuté`, amber, with the kinds of work
+/// it holds as the tooltip. On, or unknown (an older server), shows nothing.
+pub fn paid_ai_label(
+    enabled: Option<bool>,
+    held: &[String],
+) -> Option<(HealthTone, String, String)> {
+    if enabled != Some(false) {
+        return None;
+    }
+    let tip = if held.is_empty() {
+        "Žiadne platené AI volanie — texty, metadáta, preklad a dabing len od susedného uzla"
+            .to_string()
+    } else {
+        format!(
+            "Čaká (len od susedného uzla): {}",
+            held.iter()
+                .map(|k| held_kind_sk(k.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    Some((HealthTone::Warn, "Platené AI: vypnuté".to_string(), tip))
+}
+
+/// A held kind (`paid_ai_held` on `GET /api/v1/status`) in Slovak.
+fn held_kind_sk(kind: &str) -> &str {
+    match kind {
+        "lyrics" => "texty",
+        "translation" => "preklad",
+        "metadata" => "metadáta",
+        "dub" => "dabing",
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +286,40 @@ mod tests {
         let (tone, text) = ws_label(false);
         assert_eq!(tone, HealthTone::Warn);
         assert_eq!(text, "WS");
+    }
+
+    /// #229 item C: the node's name, when it has one.
+    #[test]
+    fn node_label_names_the_node() {
+        assert_eq!(node_label(Some("pp")).as_deref(), Some("Uzol: pp"));
+        assert_eq!(node_label(Some(" snv ")).as_deref(), Some("Uzol: snv"));
+        assert_eq!(node_label(Some("  ")), None);
+        assert_eq!(node_label(None), None);
+    }
+
+    /// #229 item C: the segment shows only while paid AI is off, naming
+    /// what it holds in Slovak.
+    #[test]
+    fn paid_ai_label_shows_only_while_off() {
+        assert_eq!(paid_ai_label(Some(true), &[]), None);
+        assert_eq!(paid_ai_label(None, &["lyrics".to_string()]), None);
+        let (tone, text, tip) = paid_ai_label(Some(false), &[]).unwrap();
+        assert_eq!(
+            (tone, text.as_str()),
+            (HealthTone::Warn, "Platené AI: vypnuté")
+        );
+        assert_eq!(
+            tip,
+            "Žiadne platené AI volanie — texty, metadáta, preklad a dabing len od susedného uzla"
+        );
+        let held: Vec<String> = ["dub", "lyrics", "metadata", "translation", "x"]
+            .iter()
+            .map(|k| k.to_string())
+            .collect();
+        let (_, _, tip) = paid_ai_label(Some(false), &held).unwrap();
+        assert_eq!(
+            tip,
+            "Čaká (len od susedného uzla): dabing, texty, metadáta, preklad, x"
+        );
     }
 }

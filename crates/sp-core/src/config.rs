@@ -167,6 +167,22 @@ pub fn peer_serve_max_mbps(raw: Option<&str>) -> u32 {
 /// #229: the Genius lyrics token (read by the lyrics worker from the DB).
 pub const SETTING_GENIUS_ACCESS_TOKEN: &str = "genius_access_token";
 
+/// #229 item C (the owner's ruling, 8.10.2026): whether this node may call
+/// paid AI (Gemini, Claude) — the ONE switch sp-server's `paid_ai` gates
+/// every such call on. Not a secret.
+pub const SETTING_PAID_AI_ENABLED: &str = "paid_ai_enabled";
+
+/// #229 item C: the stored `paid_ai_enabled` read. Unset or blank = ON (a
+/// node that never set it, e.g. SNV, is unchanged); `"true"` = ON (trimmed,
+/// any case); `"false"` — or any other value, which only a write past the
+/// settings API can store — = OFF: the owner's money comes first.
+pub fn paid_ai_enabled(raw: Option<&str>) -> bool {
+    match raw.map(|v| v.trim().to_ascii_lowercase()) {
+        None => true,
+        Some(v) => v.is_empty() || v == "true",
+    }
+}
+
 /// #229: what a secret setting reads as outside the node (`GET /api/v1/settings`).
 /// A PATCH that sends it back keeps the stored value.
 pub const SECRET_MASK: &str = "********";
@@ -415,6 +431,23 @@ mod tests {
         assert_eq!(peer_serve_max_mbps(Some("0")), 20);
         assert_eq!(peer_serve_max_mbps(Some("-1")), 20);
         assert_eq!(peer_serve_max_mbps(Some("fast")), 20);
+    }
+
+    /// #229 item C: paid AI is ON unless the switch says off; a value the
+    /// API would refuse reads as off.
+    #[test]
+    fn paid_ai_is_on_unless_the_switch_says_off() {
+        assert_eq!(SETTING_PAID_AI_ENABLED, "paid_ai_enabled");
+        assert!(!is_secret_setting(SETTING_PAID_AI_ENABLED));
+        assert!(paid_ai_enabled(None), "unset = ON (SNV unchanged)");
+        assert!(paid_ai_enabled(Some("")), "blank = unset");
+        assert!(paid_ai_enabled(Some("  ")), "blank = unset");
+        assert!(paid_ai_enabled(Some("true")));
+        assert!(paid_ai_enabled(Some(" TRUE\n")), "trimmed, any case");
+        assert!(!paid_ai_enabled(Some("false")));
+        assert!(!paid_ai_enabled(Some(" False ")));
+        assert!(!paid_ai_enabled(Some("yes")), "a mangled value = OFF");
+        assert!(!paid_ai_enabled(Some("1")));
     }
 
     /// #229: THE secret list, exactly; each one masked by name too.
