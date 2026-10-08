@@ -72,16 +72,16 @@ impl Exchange {
         );
     }
 
-    /// The peer this node took `youtube_id`'s audio from (its
-    /// `peer_fetches` audio record); `None` for its own download, a copy, or
-    /// a record that cannot be read (WARNed).
-    pub(crate) async fn song_from(&self, youtube_id: &str) -> Option<String> {
+    /// The peer this node took `youtube_id`'s audio from and that audio's
+    /// sha256 (its `peer_fetches` audio record); `None` for its own
+    /// download, a copy, or a record that cannot be read (WARNed).
+    pub(crate) async fn song_from(&self, youtube_id: &str) -> Option<(String, String)> {
         models_peer::fetch_record(&self.pool, youtube_id, ArtifactKind::Audio.as_str())
             .await
             .inspect_err(|e| warn!(youtube_id, %e, "exchange: reading the audio's origin failed"))
             .ok()
             .flatten()
-            .map(|(node, _, _)| node)
+            .map(|(node, _, sha256)| (node, sha256))
     }
 
     /// `job` of `youtube_id` stands in for no peer's copy any more.

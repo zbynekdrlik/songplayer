@@ -21,8 +21,8 @@ use super::board::JobGuard;
 use super::client::PeerError;
 use super::config::{NodeConfig, PeerConfig};
 use super::decide::{
-    Decision, LocalWhy, PeerRead, WaitWhy, after_failure, decide, listed_audio, recheck_after,
-    song_holder,
+    Decision, LocalWhy, PeerRead, SongFrom, WaitWhy, after_failure, decide, listed_audio,
+    recheck_after, song_holder,
 };
 use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, Catalog, now_ms};
@@ -108,12 +108,16 @@ impl Exchange {
             .ok()
             .flatten();
         // The lyrics wait on the peer this node took the song's audio from.
-        let song_from = if job.waits_while_a_peer_has_the_song() {
+        let source = if job.waits_while_a_peer_has_the_song() {
             self.song_from(youtube_id).await
         } else {
             None
         };
-        match decide(job, youtube_id, &reads, waited, song_from.as_deref()) {
+        let song_from = source.as_ref().map(|(peer, sha256)| SongFrom {
+            peer: peer.as_str(),
+            sha256: sha256.as_str(),
+        });
+        match decide(job, youtube_id, &reads, waited, song_from) {
             Decision::Fetch { peer, artifacts } => match cfg.peer(&peer) {
                 Some(p) => Ask::Fetch(FetchPlan {
                     peer: p.clone(),
@@ -139,7 +143,7 @@ impl Exchange {
                 // this job makes stands in for the peer's copy.
                 if why == LocalWhy::WaitedLongEnough
                     && job.waits_while_a_peer_has_the_song()
-                    && let Some(peer) = song_holder(&reads, youtube_id, song_from.as_deref())
+                    && let Some(peer) = song_holder(&reads, youtube_id, song_from)
                 {
                     self.stand_in(job, youtube_id, peer).await;
                 }
@@ -205,7 +209,10 @@ impl Exchange {
             None => {
                 let guard = self.run_here(job, youtube_id).await;
                 if job.waits_while_a_peer_has_the_song()
-                    && self.song_from(youtube_id).await.as_deref() == Some(peer)
+                    && self
+                        .song_from(youtube_id)
+                        .await
+                        .is_some_and(|(node, _)| node == peer)
                 {
                     self.stand_in(job, youtube_id, peer).await;
                 }

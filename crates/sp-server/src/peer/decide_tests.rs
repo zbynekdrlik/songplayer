@@ -51,6 +51,12 @@ fn read<'a>(peer: &'a str, c: Option<&'a Catalog>) -> PeerRead<'a> {
     PeerRead { peer, catalog: c }
 }
 
+/// The song this node took from `peer`: an audio of sha256 `sha` ([`art`]
+/// lists [`sha`]).
+fn took<'a>(peer: &'a str, sha: &'a str) -> Option<SongFrom<'a>> {
+    Some(SongFrom { peer, sha256: sha })
+}
+
 #[test]
 fn no_peers_processes_here() {
     assert_eq!(
@@ -213,7 +219,8 @@ fn a_job_making_other_kinds_is_not_waited_for() {
 fn a_lyrics_job_waits_while_a_peer_has_the_song() {
     let snv = catalog(vec![art(Audio, MEDIA_VERSION)], &[]);
     let reads = [read("snv", Some(&snv))];
-    let from_snv = Some("snv");
+    let sha = sha();
+    let from_snv = took("snv", &sha);
     let has_the_song = Decision::Wait {
         peer: "snv".into(),
         why: WaitWhy::PeerHasTheSong,
@@ -278,6 +285,7 @@ fn a_lyrics_job_waits_while_a_peer_has_the_song() {
 /// once that no longer lists it.
 #[test]
 fn a_lyrics_job_waits_only_on_the_peer_it_took_the_song_from() {
+    let sha = sha();
     let with_audio = catalog(vec![art(Audio, MEDIA_VERSION)], &[]);
     let without = catalog(vec![], &[]);
     let local = Decision::Local(LocalWhy::NobodyHasIt);
@@ -288,7 +296,7 @@ fn a_lyrics_job_waits_only_on_the_peer_it_took_the_song_from() {
         "its own audio"
     );
     assert_eq!(
-        decide(Job::Lyrics, YT, &reads, None, Some("pp2")),
+        decide(Job::Lyrics, YT, &reads, None, took("pp2", &sha)),
         local,
         "taken from a peer that is not listed"
     );
@@ -297,7 +305,7 @@ fn a_lyrics_job_waits_only_on_the_peer_it_took_the_song_from() {
         read("snv", Some(&with_audio)),
     ];
     assert_eq!(
-        decide(Job::Lyrics, YT, &two, None, Some("snv")),
+        decide(Job::Lyrics, YT, &two, None, took("snv", &sha)),
         Decision::Wait {
             peer: "snv".into(),
             why: WaitWhy::PeerHasTheSong
@@ -306,21 +314,40 @@ fn a_lyrics_job_waits_only_on_the_peer_it_took_the_song_from() {
     );
     let gone = [read("snv", Some(&without)), read("pp2", Some(&with_audio))];
     assert_eq!(
-        decide(Job::Lyrics, YT, &gone, None, Some("snv")),
+        decide(Job::Lyrics, YT, &gone, None, took("snv", &sha)),
         local,
         "the source lists the song no more"
     );
-    assert_eq!(song_holder(&two, YT, Some("snv")), Some("snv"));
+    assert_eq!(song_holder(&two, YT, took("snv", &sha)), Some("snv"));
     assert_eq!(song_holder(&two, YT, None), None);
     assert_eq!(
         song_holder(
             &[read("down", None), read("snv", Some(&with_audio))],
             YT,
-            Some("snv")
+            took("snv", &sha)
         ),
         Some("snv")
     );
-    assert_eq!(song_holder(&reads, "bbbbbbbbbbb", Some("snv")), None);
+    assert_eq!(song_holder(&reads, "bbbbbbbbbbb", took("snv", &sha)), None);
+}
+
+/// Review round 2: the source must still list the very audio this node took
+/// from it (the sha256 of its `peer_fetches` record). A source that
+/// downloaded the song again lists another audio, whose lyrics this node
+/// would refuse (`same_audio`), so the lyrics do not wait for them.
+#[test]
+fn a_lyrics_job_waits_only_for_the_audio_it_took() {
+    let snv = catalog(vec![art(Audio, MEDIA_VERSION)], &[]);
+    let reads = [read("snv", Some(&snv))];
+    let other = "fedcba9876543210".repeat(4);
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, None, took("snv", &other)),
+        Decision::Local(LocalWhy::NobodyHasIt),
+        "the source lists another audio now"
+    );
+    assert_eq!(song_holder(&reads, YT, took("snv", &other)), None);
+    let sha = sha();
+    assert_eq!(song_holder(&reads, YT, took("snv", &sha)), Some("snv"));
 }
 
 #[test]

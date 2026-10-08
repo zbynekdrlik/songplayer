@@ -422,6 +422,32 @@ async fn the_same_track_already_served_here_is_nothing_newer() {
     assert_eq!(waits, 0, "running here ends the earlier wait");
 }
 
+/// Review round 2: the same track served here, but it stands in for SNV's
+/// copy (`peer::standin`): a stand-in is replaced whatever its source, so
+/// the hook takes SNV's copy rather than "nothing newer", and the stand-in
+/// is over.
+#[tokio::test]
+async fn a_stand_in_of_the_same_source_is_replaced_by_the_peers_copy() {
+    let (_snv, pp, id, snv_json) = snv_and_pp().await;
+    pp.give_lyrics(id, YT, "mtl+g35t").await;
+    std::fs::write(
+        pp.cache().join(format!("{YT}_lyrics.json")),
+        b"local-marker",
+    )
+    .unwrap();
+    crate::db::models_peer::record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, i64::MAX)
+        .await
+        .unwrap();
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(first(Some(&pp.ex), &row).await, PeerStep::Done));
+    assert_eq!(json_at(&pp), Some(snv_json), "SNV's copy is in place");
+    let standins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_standins")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(standins, 0, "the stand-in is over");
+}
+
 #[tokio::test]
 async fn a_stale_copy_here_is_replaced_by_the_peers_current_one() {
     let (_snv, pp, id, json) = snv_and_pp().await;

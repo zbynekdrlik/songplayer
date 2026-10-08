@@ -79,6 +79,14 @@ pub enum LocalWhy {
     WaitedLongEnough,
 }
 
+/// The song this node took from a peer: that peer and the sha256 of the
+/// audio it fetched (the video's `peer_fetches` audio record).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SongFrom<'a> {
+    pub peer: &'a str,
+    pub sha256: &'a str,
+}
+
 /// The decision for `job` of `youtube_id` given `reads` (one per listed
 /// peer), how long the job has waited (`None` = not waiting) and the peer
 /// this node took the video's audio from (`song_from`, its `peer_fetches`
@@ -88,7 +96,7 @@ pub fn decide(
     youtube_id: &str,
     reads: &[PeerRead<'_>],
     waited: Option<Duration>,
-    song_from: Option<&str>,
+    song_from: Option<SongFrom<'_>>,
 ) -> Decision {
     if reads.is_empty() {
         return Decision::Local(LocalWhy::NoPeers);
@@ -168,13 +176,13 @@ pub fn listed_audio<'a>(catalog: &'a Catalog, youtube_id: &str) -> Option<&'a Ar
 pub fn song_holder<'a>(
     reads: &[PeerRead<'a>],
     youtube_id: &str,
-    song_from: Option<&str>,
+    song_from: Option<SongFrom<'_>>,
 ) -> Option<&'a str> {
     let from = song_from?;
     reads
         .iter()
         .find(|r| {
-            r.peer == from
+            r.peer == from.peer
                 && r.catalog
                     .is_some_and(|c| listed_audio(c, youtube_id).is_some())
         })

@@ -371,9 +371,133 @@ async fn a_lyrics_job_run_here_after_a_failing_fetch_stands_in() {
     );
 }
 
+/// Review round 2: the peer the song's audio came from could not be read
+/// when the lyrics had waited the bound (an outage): they run here and still
+/// stand in for its copy. A song taken from a peer that is not listed any
+/// more stands in for nobody.
+#[tokio::test]
+async fn a_lyrics_job_run_here_while_its_source_is_unreachable_stands_in() {
+    let pp = TestNode::start("pp", None).await;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let gone = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let mut snv = pp.as_peer(SNV_KEY);
+    snv.name = "snv".into();
+    snv.base_url = gone;
+    pp.set_peers(&[snv]).await;
+    let long_ago = crate::peer::wire::now_ms() - i64::try_from(MAX_PEER_WAIT.as_millis()).unwrap();
+    for yt in [YT, "ccccccccccc"] {
+        start_wait(pp.pool(), yt, "lyrics", long_ago).await.unwrap();
+    }
+    pp.audio_from(YT, "snv").await;
+    pp.audio_from("ccccccccccc", "pp2").await;
+    let Ask::Local(_guard) = pp.ex.ask(Job::Lyrics, YT).await else {
+        panic!("the lyrics run here after the bound")
+    };
+    let Ask::Local(_guard) = pp.ex.ask(Job::Lyrics, "ccccccccccc").await else {
+        panic!("the lyrics run here after the bound")
+    };
+    let s = standins(&pp).await;
+    assert_eq!(
+        s.iter()
+            .map(|s| (s.youtube_id.as_str(), s.job.as_str(), s.peer.as_str()))
+            .collect::<Vec<_>>(),
+        [(YT, "lyrics", "snv")]
+    );
+}
+
+/// Review round 2: the lyrics ran here after the bound (they stand in for
+/// SNV's copy) and the run was put back (e.g. for its stems): the next pick
+/// asks again, and it neither waits on the song again (a new 2 h wait per
+/// putting back) nor ends the stand-in.
+#[tokio::test]
+async fn a_lyrics_job_put_back_after_the_bound_keeps_standing_in() {
+    let snv = TestNode::start("snv", Some(SNV_KEY)).await;
+    set(snv.pool(), "lyrics_worker_enabled", "false").await;
+    set(snv.pool(), "stem_worker_enabled", "false").await;
+    let id = snv.add_video(YT).await;
+    snv.give_song(id, YT, "Way Maker", "Sinach").await;
+    snv.hash_now().await;
+    let pp = TestNode::start("pp", None).await;
+    pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    pp.audio_from(YT, "snv").await;
+    let long_ago = crate::peer::wire::now_ms() - i64::try_from(MAX_PEER_WAIT.as_millis()).unwrap();
+    start_wait(pp.pool(), YT, "lyrics", long_ago).await.unwrap();
+    let Ask::Local(guard) = pp.ex.ask(Job::Lyrics, YT).await else {
+        panic!("the lyrics run here after the bound")
+    };
+    drop(guard);
+    let Ask::Local(_guard) = pp.ex.ask(Job::Lyrics, YT).await else {
+        panic!("put back, they run here again, with no new wait on the song")
+    };
+    let s = standins(&pp).await;
+    assert_eq!(
+        s.iter()
+            .map(|s| (s.job.as_str(), s.peer.as_str()))
+            .collect::<Vec<_>>(),
+        [("lyrics", "snv")]
+    );
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0, "no wait started");
+}
+
+/// Review round 2: a row that does not take the peer's copy (its write
+/// fails) keeps the stand-in, with no origin recorded; the next look places
+/// the copy again, into every row, and ends it.
+#[tokio::test]
+async fn a_stand_in_is_over_only_once_every_row_took_the_copy() {
+    let (snv, pp, rows, _) = snv_and_pp_standin().await;
+    let snv_json = snv_lyrics(&snv).await;
+    sqlx::query(&format!(
+        "CREATE TRIGGER no_write BEFORE UPDATE ON videos WHEN OLD.id = {} \
+         BEGIN SELECT RAISE(ABORT, 'test: no write'); END",
+        rows[1]
+    ))
+    .execute(pp.pool())
+    .await
+    .unwrap();
+    assert_eq!(supersede_next(Some(&pp.ex)).await, vec![rows[0]]);
+    assert!(
+        fetch_record(pp.pool(), YT, "lyrics")
+            .await
+            .unwrap()
+            .is_none(),
+        "no origin while a row lacks the copy"
+    );
+    let s = standins(&pp).await;
+    assert_eq!(s.len(), 1, "kept: {s:?}");
+    assert!(s[0].next_check_ms > 0, "rescheduled: {s:?}");
+    sqlx::query("DROP TRIGGER no_write")
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE peer_standins SET next_check_ms = 0")
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(supersede_next(Some(&pp.ex)).await, rows.to_vec());
+    assert_eq!(json_at(&pp), Some(snv_json));
+    for id in rows {
+        assert_eq!(
+            lyrics_source(&pp, id).await,
+            (1, Some("mtl+g35t".to_string()))
+        );
+    }
+    assert!(standins(&pp).await.is_empty());
+    assert!(
+        fetch_record(pp.pool(), YT, "lyrics")
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
 /// A job that runs here for another reason (an operator's ask, another
-/// audio, nothing newer: `run_here`) ends the stand-in; so does a peer's
-/// copy taken through the hooks (`fetched`).
+/// audio: `run_here`) ends the stand-in; so does a peer's copy taken through
+/// the hooks (`fetched`).
 #[tokio::test]
 async fn running_here_or_taking_the_peers_copy_ends_the_stand_in() {
     let (_snv, pp, _, _) = snv_and_pp_standin().await;
