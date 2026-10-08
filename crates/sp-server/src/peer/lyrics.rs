@@ -1,8 +1,8 @@
 //! #229: the lyrics job asks first. Never for an operator's own ask here (a
-//! reprocess or "Nesedí": `lyrics_manual_priority`; a `lyrics_override_text`),
-//! and never for a video whose `{yt}_lyrics.json` here is a dub's subtitles
-//! (any row of it dub-requested or Live-Translate: the catalog's dub rule,
-//! Review Focus 5), and only when this node's audio IS the peer's
+//! reprocess or "Nesedí": `lyrics_manual_priority`; a `lyrics_override_text`)
+//! on any row of the video, and never for a video whose `{yt}_lyrics.json`
+//! here is a dub's subtitles (any row of it dub-requested or Live-Translate:
+//! the catalog's dub rule, Review Focus 5), and only when this node's audio IS the peer's
 //! (`peer::audio`): every track's line timings were measured on the peer's
 //! audio, so a song whose audio here is another encode is processed here.
 //! The peer's row (`/videos`) must match its catalog and must
@@ -83,28 +83,28 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
     }
 }
 
-/// `?1` = the row, `?2` = its YouTube id, `?3` = the Live-Translate source.
-const LOCAL_ONLY: &str = "SELECT EXISTS (SELECT 1 FROM videos WHERE id = ?1 \
-         AND lyrics_manual_priority != 0) \
-     OR EXISTS (SELECT 1 FROM videos WHERE youtube_id = ?2 \
-         AND (dub_requested = 1 OR lyrics_source = ?3))";
+/// `?1` = the YouTube id, `?2` = the Live-Translate source.
+const LOCAL_ONLY: &str = "SELECT EXISTS (SELECT 1 FROM videos WHERE youtube_id = ?1 \
+     AND (lyrics_manual_priority != 0 OR TRIM(COALESCE(lyrics_override_text, '')) != '' \
+          OR dub_requested = 1 OR lyrics_source = ?2))";
 
-/// An operator asked THIS node (a reprocess, a "Nesedí") or gave it the
-/// text, or this node's `{yt}_lyrics.json` is a dub's subtitles. A failed
-/// read keeps the job here (the worker's own path, as before the exchange).
-async fn wants_local(pool: &SqlitePool, row: &VideoLyricsRow) -> bool {
-    if row
-        .lyrics_override_text
-        .as_deref()
-        .is_some_and(|t| !t.trim().is_empty())
-    {
-        return true;
-    }
-    sqlx::query_scalar::<_, bool>(LOCAL_ONLY)
-        .bind(row.id)
-        .bind(&row.youtube_id)
+/// The lyrics of `youtube_id` stay this node's own: an operator asked THIS
+/// node (a reprocess, a "Nesedí") or gave it the text, or its
+/// `{yt}_lyrics.json` is a dub's subtitles — on ANY row of the video, whose
+/// rows serve that one file (review round 5: the hook read the ask and the
+/// text on the asked row only). The hook and the stand-in's look ask it.
+pub(crate) async fn kept_local(pool: &SqlitePool, youtube_id: &str) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(LOCAL_ONLY)
+        .bind(youtube_id)
         .bind(SOURCE_LIVE_TRANSLATE)
         .fetch_one(pool)
+        .await
+}
+
+/// [`kept_local`] for the hook's row; a failed read keeps the job here (the
+/// worker's own path, as before the exchange).
+async fn wants_local(pool: &SqlitePool, row: &VideoLyricsRow) -> bool {
+    kept_local(pool, &row.youtube_id)
         .await
         .inspect_err(|e| warn!(video_id = row.id, %e, "exchange: reading the lyrics row failed"))
         .unwrap_or(true)

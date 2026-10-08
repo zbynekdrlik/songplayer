@@ -7,9 +7,9 @@
 //!
 //! - Recorded (V31 `peer_standins`) when the lyrics job runs here after
 //!   asking while the peer it took the song's audio from had the song:
-//!   `Exchange::ask` → waited the 2 h bound for that peer (its catalog
-//!   read now or not), or `Exchange::after_failed_fetch` giving up on that
-//!   peer's copy. V31 also back-filled the ones made before this record
+//!   `Exchange::ask` → waited the 2 h bound (on any peer) with that peer
+//!   listed (its catalog read now or not), or `Exchange::after_failed_fetch`
+//!   giving up on that peer's copy. V31 also back-filled the ones made before this record
 //!   existed.
 //! - Kept as it was (`Exchange::keep_standing`, its age and next look) when
 //!   the job runs here again while it stands in: a run put back, a fetch
@@ -20,7 +20,8 @@
 //!   video that stands in: meeting a peer's copy it hands it to the look
 //!   below (`Exchange::hand_to_standin`: the stand-in due now, the row put
 //!   back, counted against the 2 h bound, after which the job runs here,
-//!   still standing in), which takes the copy into every row.
+//!   still standing in, the spent bound kept until the look takes the copy
+//!   or the stand-in is kept for good), which takes the copy into every row.
 //! - While it stands in, the job's ask waits for no peer (it waited its
 //!   bound once): a peer's copy is still taken, a run here keeps it.
 //! - Looked at by the lyrics worker on each tick, after its kill switch
@@ -47,7 +48,6 @@ use super::config::NodeConfig;
 use super::decide::{gives_up, holds, listed_audio, recheck_after};
 use super::kind::{ArtifactKind, Job};
 use super::wire::now_ms;
-use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 use crate::db::models_peer::{self, StandinRecord};
 
 /// The shortest recheck of a stand-in…
@@ -161,7 +161,10 @@ impl Exchange {
                 peer = %s.peer,
                 "exchange: a stand-in's copy was not taken for 2 h - processing here, still standing in"
             );
-            let guard = self.run_here(job, youtube_id).await;
+            // The spent bound is kept: a run put back runs here again at
+            // once (review round 5); the look's `fetched`, or the stand-in
+            // kept for good, ends it.
+            let guard = self.run_here_waited(job, youtube_id).await;
             self.keep_standing(job, youtube_id, s).await;
             return PeerStep::Local(Some(guard));
         }
@@ -237,6 +240,8 @@ pub async fn supersede_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
         Superseded::Taken(rows) => rows,
         Superseded::NotYet => Vec::new(),
         Superseded::Never(why) => {
+            // A spent wait a hand-off kept goes with it (review round 5).
+            ex.end_wait(job, &youtube_id).await;
             ex.drop_standin(job, &youtube_id).await;
             info!(
                 youtube_id,
@@ -246,11 +251,6 @@ pub async fn supersede_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
         }
     }
 }
-
-/// `?1` = the YouTube id, `?2` = the Live-Translate source.
-const OPERATOR_OR_DUB: &str = "SELECT EXISTS (SELECT 1 FROM videos WHERE youtube_id = ?1 \
-     AND (lyrics_manual_priority != 0 OR TRIM(COALESCE(lyrics_override_text, '')) != '' \
-          OR dub_requested = 1 OR lyrics_source = ?2))";
 
 /// The peer's copy in place of the stand-in of `youtube_id` (the module doc).
 async fn supersede(ex: &Exchange, youtube_id: &str) -> Superseded {
@@ -272,12 +272,7 @@ async fn supersede(ex: &Exchange, youtube_id: &str) -> Superseded {
     let Some(&(first, _)) = rows.iter().find(|(_, audio)| *audio).or(rows.first()) else {
         return Superseded::Never("no row of the video is left here");
     };
-    let owned: Result<bool, sqlx::Error> = sqlx::query_scalar(OPERATOR_OR_DUB)
-        .bind(youtube_id)
-        .bind(SOURCE_LIVE_TRANSLATE)
-        .fetch_one(&ex.pool)
-        .await;
-    match owned {
+    match super::lyrics::kept_local(&ex.pool, youtube_id).await {
         Ok(false) => {}
         Ok(true) => return Superseded::Never("an operator's lyrics or a dub here"),
         Err(e) => {

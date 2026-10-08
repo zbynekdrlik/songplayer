@@ -188,13 +188,26 @@ impl Exchange {
     /// parts a fetch of it left are dropped (`drop_job_parts`), and the job
     /// is announced while the returned guard lives.
     pub(crate) async fn run_here(&self, job: Job, youtube_id: &str) -> JobGuard {
-        if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
-            warn!(youtube_id, %e, "exchange: ending the wait failed");
-        }
+        self.end_wait(job, youtube_id).await;
+        self.run_here_waited(job, youtube_id).await
+    }
+
+    /// [`Self::run_here`] keeping the job's wait: a hand-off to a stand-in
+    /// that gave up keeps its spent bound, so the run put back runs here
+    /// again at once (`peer::standin`, review round 5).
+    pub(crate) async fn run_here_waited(&self, job: Job, youtube_id: &str) -> JobGuard {
         self.forget_origins(job, youtube_id).await;
         self.drop_standin(job, youtube_id).await;
         self.drop_job_parts(job, youtube_id).await;
         self.announce(youtube_id, job)
+    }
+
+    /// The wait of `job` of `youtube_id` is over (WARNed when it cannot be
+    /// ended).
+    pub(crate) async fn end_wait(&self, job: Job, youtube_id: &str) {
+        if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
+            warn!(youtube_id, %e, "exchange: ending the wait failed");
+        }
     }
 
     /// Row `video_id` of `job` is picked again after `wait`, no attempt
