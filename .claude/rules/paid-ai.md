@@ -55,10 +55,14 @@ dochadzat k ziadnemu platenemu ai spracovaniu dokial to nepovolim".
   - `paid_ai_held`: while OFF, the kinds with a hold under 40 min old
     (`HELD_SHOWN`: held work is held again within `HELD_RECHECK`, a dub at
     its worker's next tick; finished work drops out). A translation is
-    held again at the next translation pass, which runs only while the
-    lyrics queue is idle: with more held lyrics songs than one per tick
-    clears in 30 min (~360) the queue stays busy, so "preklad" can drop out
-    of the list while the translation still waits (review round 15);
+    held again at the next translation pass of the lyrics tick, which runs
+    when the lyrics queue is empty or the tick defers for the wall
+    (`idle-only`), never while `lyrics_worker_enabled` is off or a dub
+    wants the heavy slot. With more held lyrics songs than one per tick
+    clears in 30 min (~360) the queue stays busy, and with the lyrics
+    worker off no pass runs at all: "preklad" can then be missing from the
+    list while the translation still waits (review rounds 15-16, display
+    only);
   - `node_name`.
 - The health bar shows "Uzol: <name>". While the switch is OFF it also
   shows "Platené AI: vypnuté" (amber), with the held kinds in Slovak as the
@@ -123,6 +127,13 @@ Every path:
     switch is read per walk.
 - A NEW paid provider reads its credential or decides its call through
   `paid_ai` too. Never add one that bypasses it.
+- Ask the switch where the paid call becomes certain: after the free steps
+  that can still end the job (the pick, a read, a parse) and before any
+  write the job makes on its way to the call (a priority raise, a status
+  mark). A hold then names only work that really waits, and a held job is
+  left as it was. Asked too early, it held a translation whose track could
+  not be read (review round 15); asked too late, a held dub had already
+  raised its stems and been marked `synth` (rounds 14-15).
 
 ## Calm while OFF
 
@@ -131,6 +142,13 @@ Held work counts no attempt and logs ONE INFO per kind and song
 are DEBUG), never a WARN. A held lyrics pick logs only DEBUG in the worker
 (its "worker: processing" INFO comes once the song runs here), and the
 repair batch's row count is DEBUG.
+
+One WARN that is not about paid AI stays: exchange settings that do not
+hold WARN at every ask (`exchange: the settings do not hold - no peer is
+asked`, with `held`), held or not, so while OFF each held lyrics song
+repeats it every `HELD_RECHECK`. The status's `config_error` names the
+cause; the settings PATCH refuses such settings, so only a hand edit or a
+copied database gets there (review round 16).
 
 **Switching off stops NEW paid work, not work already running.** The
 switch is read where a job starts (a pick, a pass, a tick); what is already

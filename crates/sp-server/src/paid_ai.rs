@@ -97,10 +97,12 @@ pub async fn gemini_keys(pool: &SqlitePool) -> Option<Vec<String>> {
 /// How long a held kind shows on the status after its last hold: held work
 /// is picked again within [`HELD_RECHECK`] (a dub job at its worker's next
 /// tick), so a kind still holding work is held again within it. A
-/// translation is held again at the next translation pass, which runs only
-/// while the lyrics queue is idle; with many lyrics held the queue stays
-/// busy, so a translation can drop out of the status while it still waits
-/// (review round 15; display only).
+/// translation is held again at the next translation pass of the lyrics
+/// tick, which runs when the lyrics queue is empty or the tick defers for
+/// the wall (`idle-only`), never while `lyrics_worker_enabled` is off or a
+/// dub wants the heavy slot: with many lyrics held the queue stays busy, so
+/// a translation can drop out of the status while it still waits (review
+/// rounds 15-16; display only).
 const HELD_SHOWN: Duration = Duration::from_secs(2_400);
 
 /// The work held, per kind: the songs' YouTube ids and when each was last
