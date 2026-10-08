@@ -45,6 +45,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (28, MIGRATION_V28),
     (29, MIGRATION_V29),
     (30, MIGRATION_V30),
+    (31, MIGRATION_V31),
 ];
 
 const MIGRATION_V1: &str = "
@@ -478,6 +479,23 @@ CREATE TABLE peer_fetches (
 );
 ";
 
+// V31 (#229 PP audit, comment 6054582866): a lyrics track a node made itself
+// while a listed peer had the song stands in for the peer's copy, which
+// replaces it once the peer has it (`peer::standin`). Back-filled once: a
+// video whose audio a peer gave (a `peer_fetches` audio record) with a lyrics
+// result made here (a lyrics source, no lyrics record), no operator's text
+// or ask and no dub on any row, is due at once.
+const MIGRATION_V31: &str = "
+CREATE TABLE peer_standins (
+    youtube_id TEXT NOT NULL,
+    job TEXT NOT NULL,
+    peer TEXT NOT NULL,
+    made_at_ms INTEGER NOT NULL,
+    next_check_ms INTEGER NOT NULL,
+    PRIMARY KEY (youtube_id, job)
+);
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -638,6 +656,10 @@ mod tests_v29;
 #[path = "mod_tests_v30.rs"]
 #[cfg(test)]
 mod tests_v30;
+
+#[path = "mod_tests_v31.rs"]
+#[cfg(test)]
+mod tests_v31;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

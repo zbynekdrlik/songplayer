@@ -22,7 +22,7 @@ use super::Exchange;
 use super::ask::{Ask, FetchPlan, PeerStep};
 use super::client::PeerError;
 use super::kind::{ArtifactKind, Job};
-use super::wire::PeerLyrics;
+use super::wire::{Artifact, PeerLyrics};
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 use crate::db::models::VideoLyricsRow;
 use crate::db::models_peer;
@@ -116,13 +116,30 @@ pub(crate) async fn adopt(
     row: &VideoLyricsRow,
     plan: &FetchPlan,
 ) -> Result<Adopted, PeerError> {
+    let (artifact, lyrics) = peer_row(ex, &row.youtube_id, plan).await?;
+    if serves_the_same(&ex.pool, row.id, &lyrics).await? {
+        return Ok(Adopted::NothingNewer);
+    }
+    place(ex, &row.youtube_id, plan, artifact, &lyrics).await?;
+    models_peer::adopt_lyrics(&ex.pool, row.id, &lyrics).await?;
+    Ok(Adopted::Track)
+}
+
+/// The plan's lyrics artifact and the peer's lyrics row of `youtube_id`,
+/// checked before any transfer: a track within [`MAX_LYRICS_BYTES`], a row
+/// at the artifact's pipeline version that is not the Live-Translate track.
+pub(crate) async fn peer_row<'p>(
+    ex: &Exchange,
+    youtube_id: &str,
+    plan: &'p FetchPlan,
+) -> Result<(&'p Artifact, PeerLyrics), PeerError> {
     let artifact = plan.artifact(ArtifactKind::Lyrics)?;
     if !lyrics_size_ok(artifact.size) {
         return Err(PeerError::BadResponse(format!(
             "a lyrics track over {MAX_LYRICS_BYTES} bytes"
         )));
     }
-    let video = ex.client.video(&plan.peer, &row.youtube_id).await?;
+    let video = ex.client.video(&plan.peer, youtube_id).await?;
     let lyrics = video
         .lyrics
         .ok_or_else(|| PeerError::BadResponse("the peer's row has no lyrics".into()))?;
@@ -131,9 +148,19 @@ pub(crate) async fn adopt(
             "the peer's lyrics row does not match its catalog".into(),
         ));
     }
-    if serves_the_same(&ex.pool, row.id, &lyrics).await? {
-        return Ok(Adopted::NothingNewer);
-    }
+    Ok((artifact, lyrics))
+}
+
+/// The peer's track fetched, parsed as a `LyricsTrack` whose source is the
+/// peer's row's (`lyrics`), and renamed into `{yt}_lyrics.json`. A refused
+/// part is deleted.
+pub(crate) async fn place(
+    ex: &Exchange,
+    youtube_id: &str,
+    plan: &FetchPlan,
+    artifact: &Artifact,
+    lyrics: &PeerLyrics,
+) -> Result<(), PeerError> {
     let part = ex.fetch(&plan.peer, artifact).await?;
     let bytes = tokio::fs::read(&part).await?;
     let source = match serde_json::from_slice::<sp_core::lyrics::LyricsTrack>(&bytes) {
@@ -156,10 +183,9 @@ pub(crate) async fn adopt(
         );
         return Err(PeerError::BadResponse(bounded_error(&text)));
     }
-    let json = ex.cache_dir.join(format!("{}_lyrics.json", row.youtube_id));
+    let json = ex.cache_dir.join(format!("{youtube_id}_lyrics.json"));
     tokio::fs::rename(&part, &json).await?;
-    models_peer::adopt_lyrics(&ex.pool, row.id, &lyrics).await?;
-    Ok(Adopted::Track)
+    Ok(())
 }
 
 /// The row already serves this very track: the same source, the same version.

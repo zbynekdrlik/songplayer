@@ -22,6 +22,7 @@ use super::client::PeerError;
 use super::config::{NodeConfig, PeerConfig};
 use super::decide::{
     Decision, LocalWhy, PeerRead, WaitWhy, after_failure, decide, listed_audio, recheck_after,
+    song_holder,
 };
 use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, Catalog, now_ms};
@@ -127,7 +128,16 @@ impl Exchange {
             }
             Decision::Local(why) => {
                 log_local(youtube_id, job, why);
-                Ask::Local(self.run_here(job, youtube_id).await)
+                let guard = self.run_here(job, youtube_id).await;
+                // Waited the bound while a listed peer has the song: what
+                // this job makes stands in for the peer's copy.
+                if why == LocalWhy::WaitedLongEnough
+                    && job.waits_while_a_peer_has_the_song()
+                    && let Some(peer) = song_holder(&reads, youtube_id)
+                {
+                    self.stand_in(job, youtube_id, peer).await;
+                }
+                Ask::Local(guard)
             }
         }
     }
@@ -143,14 +153,16 @@ impl Exchange {
     /// `job` of `youtube_id` runs here: a wait of it ends (a later ask starts
     /// a fresh one, never inheriting this one's spent bound), the records of
     /// a peer's copy of what it makes are dropped (`forget_origins`: the job
-    /// replaces them), the parts a fetch of it left are dropped
-    /// (`drop_job_parts`), and the job is announced while the returned guard
-    /// lives.
+    /// replaces them), so is a stand-in of it (`peer::standin`: the caller
+    /// records a new one when it still stands in for a peer's copy), the
+    /// parts a fetch of it left are dropped (`drop_job_parts`), and the job
+    /// is announced while the returned guard lives.
     pub(crate) async fn run_here(&self, job: Job, youtube_id: &str) -> JobGuard {
         if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
             warn!(youtube_id, %e, "exchange: ending the wait failed");
         }
         self.forget_origins(job, youtube_id).await;
+        self.drop_standin(job, youtube_id).await;
         self.drop_job_parts(job, youtube_id).await;
         self.announce(youtube_id, job)
     }
@@ -171,7 +183,8 @@ impl Exchange {
 
     /// A fetch of `job` for row `video_id` from `peer` failed: the row is
     /// deferred while the job has waited less than the bound, else the job
-    /// runs here (`fetch_failed`).
+    /// runs here (`fetch_failed`). The peer has the song then, so what a
+    /// job that waits on the song makes here stands in for its copy.
     pub(crate) async fn after_failed_fetch(
         &self,
         job: Job,
@@ -182,13 +195,19 @@ impl Exchange {
     ) -> PeerStep {
         match self.fetch_failed(job, youtube_id, peer, error).await {
             Some(recheck) => self.defer(job, video_id, recheck).await,
-            None => PeerStep::Local(Some(self.run_here(job, youtube_id).await)),
+            None => {
+                let guard = self.run_here(job, youtube_id).await;
+                if job.waits_while_a_peer_has_the_song() {
+                    self.stand_in(job, youtube_id, peer).await;
+                }
+                PeerStep::Local(Some(guard))
+            }
         }
     }
 
     /// Each peer's catalog (cached up to `CATALOG_TTL`), `None` where it could
     /// not be read; in `peers` order.
-    async fn read_peers(&self, peers: &[PeerConfig]) -> Vec<Option<Arc<Catalog>>> {
+    pub(crate) async fn read_peers(&self, peers: &[PeerConfig]) -> Vec<Option<Arc<Catalog>>> {
         let mut catalogs = Vec::with_capacity(peers.len());
         for peer in peers {
             let read = self.client.catalog(peer).await;
@@ -255,12 +274,14 @@ impl Exchange {
         Some(recheck)
     }
 
-    /// `job` is done with what `peer` had: the wait ends and each artifact's
-    /// origin is recorded (`source = peer:<node>`).
+    /// `job` is done with what `peer` had: the wait ends, a stand-in of it
+    /// is over (`peer::standin`), and each artifact's origin is recorded
+    /// (`source = peer:<node>`).
     pub async fn fetched(&self, job: Job, youtube_id: &str, peer: &str, artifacts: &[Artifact]) {
         if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
             warn!(youtube_id, %e, "exchange: ending the wait failed");
         }
+        self.drop_standin(job, youtube_id).await;
         self.record_origins(youtube_id, peer, artifacts).await;
         info!(
             youtube_id,

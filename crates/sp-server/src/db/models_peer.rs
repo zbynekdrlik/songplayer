@@ -223,6 +223,80 @@ pub async fn defer_download(
     Ok(())
 }
 
+/// `job` of `youtube_id` ran here while `peer` had the song: its result
+/// stands in for the peer's copy (`peer::standin`), looked at again from
+/// `next_check_ms`. The latest record wins.
+pub async fn record_standin(
+    pool: &SqlitePool,
+    youtube_id: &str,
+    job: &str,
+    peer: &str,
+    made_at_ms: i64,
+    next_check_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT OR REPLACE INTO peer_standins \
+             (youtube_id, job, peer, made_at_ms, next_check_ms) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(youtube_id)
+    .bind(job)
+    .bind(peer)
+    .bind(made_at_ms)
+    .bind(next_check_ms)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// The stand-in of `job` due at `now_ms` that has been due the longest:
+/// `(youtube_id, peer, made_at_ms)`.
+pub async fn due_standin(
+    pool: &SqlitePool,
+    job: &str,
+    now_ms: i64,
+) -> Result<Option<(String, String, i64)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT youtube_id, peer, made_at_ms FROM peer_standins \
+         WHERE job = ? AND next_check_ms <= ? ORDER BY next_check_ms, youtube_id LIMIT 1",
+    )
+    .bind(job)
+    .bind(now_ms)
+    .fetch_optional(pool)
+    .await
+}
+
+/// The stand-in of `job` of `youtube_id` is looked at again from
+/// `next_check_ms`.
+pub async fn recheck_standin(
+    pool: &SqlitePool,
+    youtube_id: &str,
+    job: &str,
+    next_check_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE peer_standins SET next_check_ms = ? WHERE youtube_id = ? AND job = ?")
+        .bind(next_check_ms)
+        .bind(youtube_id)
+        .bind(job)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// The result of `job` of `youtube_id` stands in for nobody's copy any
+/// more: a peer's copy replaced it, or the job runs here for another reason.
+pub async fn forget_standin(
+    pool: &SqlitePool,
+    youtube_id: &str,
+    job: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM peer_standins WHERE youtube_id = ? AND job = ?")
+        .bind(youtube_id)
+        .bind(job)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Row `video_id` takes a peer's lyrics row (its `{yt}_lyrics.json` is in
 /// place already). The lyrics columns go through the lyrics row's one writer
 /// (`models::mark_video_lyrics_complete`: the peer's source, version and

@@ -390,6 +390,11 @@ impl LyricsWorker {
             debug!("worker: lyrics_worker_enabled=false, skipping this tick");
             return;
         }
+        // #229: a track made here while a peer had the song stands in for
+        // the peer's copy, which replaces it once the peer has one.
+        for video_id in crate::peer::standin::supersede_next(self.peer.as_ref()).await {
+            self.peer_lyrics_completed(video_id).await;
+        }
 
         // #184 G0.1: a dub owns the heavy slot — skip this heavy lyrics tick while
         // one is queued (isolation/mtl are not mid-run yielded; they defer here).
