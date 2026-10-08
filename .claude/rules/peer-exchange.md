@@ -314,8 +314,10 @@ wait for a peer that has the song", below).
     and PP read "nobody has it". Stems that are done, unsupported, in a
     failure backoff or impossible (no audio) are no such wait. The window
     between the stems done and the lyrics' recheck (≤ 10 min) stays
-    unlisted: PP waits through it because SNV has the song (below). Two
-    queries, merged and sorted, each id once;
+    unlisted: PP waits through it because SNV has the song (below). A row
+    whose recheck is a lyrics FAILURE backoff (up to 24 h) is listed too
+    while its stems are queued (it will be taken, later): a peer then waits
+    up to its 2 h bound. Two queries, merged and sorted, each id once;
   - stems: `db::models_stems_priority::STEM_ELIGIBLE_PRED`, only while
     `stem_worker_enabled` is on.
 - A change to a worker's queue changes what the catalog announces: keep the
@@ -574,9 +576,11 @@ wait for a peer that has the song", below).
   (even after 2 h); waited ≥ `MAX_PEER_WAIT` (2 h) → Local; a peer
   announcing a job (running or queued) that makes those kinds → Wait
   (`PeerRunsIt`); a job that waits while a peer has the song
-  (`Job::waits_while_a_peer_has_the_song`: the lyrics alone) and a listed
-  peer that lists the video's audio (`decide::song_holder`) → Wait
-  (`PeerHasTheSong`, same bound); a peer whose catalog could not be read
+  (`Job::waits_while_a_peer_has_the_song`: the lyrics alone) and the listed
+  peer this node took the video's audio from (`song_from`, its
+  `peer_fetches` audio record, `Exchange::song_from`) still listing that
+  audio (`decide::song_holder`) → Wait (`PeerHasTheSong`, same bound); a
+  peer whose catalog could not be read
   (an outage, a refused key or token, its API off) → Wait, same bound;
   else Local (`NobodyHasIt`: for the lyrics, no listed peer has the song at
   all). No peer → Local, no read.
@@ -812,22 +816,26 @@ parked `no_source` by `fail_song`). Three rules:
 
 - **SNV announces lyrics that wait on its own queued stems** ("Queued jobs"
   above).
-- **A lyrics job waits while a listed peer has the song** (`decide`, above):
-  that peer makes the lyrics from the very audio this node fetched, while a
-  node's own track stays at its version for good (and PP's is degraded).
-  The stems do not wait on the song (the same model on every node: a local
-  separation is not degraded), nor does the download (it fetches the song
-  itself). Known limit: when this node's audio is its own encode, the lyrics
-  still wait, until the peer lists lyrics (the audio guard then runs the
-  job here at once) or 2 h.
+- **A lyrics job waits while the peer it took the song from has it**
+  (`decide`, above): that peer makes the lyrics from the very audio this
+  node fetched, while a node's own track stays at its version for good (and
+  PP's is degraded). Only THAT peer (review round 1): a node whose audio is
+  its own download or a copy (no `peer_fetches` audio record) waits on
+  nobody and processes its lyrics at once (a peer's lyrics would not fit
+  its audio), and two nodes listing each other (phase 2) never wait on
+  each other's audio. The stems do not wait on the song (the same model on
+  every node: a local separation is not degraded), nor does the download
+  (it fetches the song itself).
 - **A track made here while a peer had the song STANDS IN for the peer's
   copy** (`peer_standins` `(youtube_id, job, peer, made_at_ms,
   next_check_ms)`, `models_peer::{record,due,recheck,forget}_standin`):
   - recorded (`Exchange::stand_in`, INFO `exchange: made here while a peer
     has the song - its copy replaces this one once it has it`, first looked
-    at 10 min later) when the lyrics job runs here after asking while a
-    peer had the song: `ask` → `Local(WaitedLongEnough)` with a
-    `song_holder`, or `after_failed_fetch` giving up on a peer's copy;
+    at 10 min later) when the lyrics job runs here after asking while the
+    peer it took the song's audio from had it: `ask` →
+    `Local(WaitedLongEnough)` with a `song_holder`, or `after_failed_fetch`
+    giving up on that peer's copy (a peer the audio did not come from:
+    no stand-in);
   - over (`Exchange::drop_standin`) in `run_here` (an operator's ask,
     another audio, nothing newer: the job's own result is final) and
     `fetched` (the peer's copy is in place). The stand-in path calls
@@ -844,7 +852,10 @@ parked `no_source` by `fail_song`). Three rules:
     ONE due stand-in (the one due longest), RESCHEDULED FIRST to a quarter
     of its age, 10 min to 6 h (`standin_recheck`: a peer that never makes
     the lyrics costs four catalog lookups a day). Then:
-    - every row of the video read; none left → dropped;
+    - every row of the video read; none left → dropped. The audio check
+      reads a row that records an audio (rows share it), else the lowest
+      (review round 1: a lowest row with none kept the stand-in waiting
+      forever);
     - an operator's text or ask, a dub or a Live-Translate row on the video
       (`OPERATOR_OR_DUB`) → dropped, no peer asked;
     - the listed peers' catalogs (cached 60 s): the first holding the
@@ -866,7 +877,11 @@ parked `no_source` by `fail_song`). Three rules:
   The peer's copy replaces the stand-in whatever its source: unlike the
   hook's `NothingNewer`, no same-source check (two runs of the same tier
   are not the same track). INFO `exchange: a stand-in is kept for good -
-  the peer's copy is not taken` (`why`) for a dropped one.
+  the peer's copy is not taken` (`why`) for a dropped one; DEBUG `exchange:
+  a stand-in waits - …` for one asked again at its recheck. Known limit
+  (the hooks' too): an operator's Reprocess clicked during the transfer is
+  cleared by the adoption (`mark_video_lyrics_complete` sets the manual
+  flag to 0); the window is the transfer, a few seconds.
 - **The same gap elsewhere, checked (design record 6056986290):** the
   metadata repair has none (a failed provider call keeps the row in the
   repair queue, and `peer_title` is asked first on every pass; a provider

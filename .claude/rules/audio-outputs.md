@@ -138,7 +138,9 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   anti-windup counts the slew. The worker builds the servo
   `.with_callback_frames(opened.buffer_frames)`.
 - **The cushion** (the main session's ruling, #233 comment 6056680979, Q1:
-  KEEP an underrun's excess, bounded). An underrun makes the card play
+  KEEP an underrun's excess, bounded; the KEPT excess over the target, not
+  the ring's ~61.7 ms headroom that "within the ring's cushion" means
+  above). An underrun makes the card play
   silence, and the latency then stands that much over the target. Draining
   it re-exposed the next late block (the closing lane's models: 97 / 33
   underrun callbacks, the correction > 50 ppm off the card ~75 % of the
@@ -280,7 +282,7 @@ whole buffer per short callback once the first block primed the ring):
   0 and a 20 ppm card, 0 underruns, the latency within 1.6 / 1.4 / 4.7 /
   5.2 ms, the correction within 2.9 / 1.4 / 3.1 / 3.4 ppm of the card
   after 300 s (`STEADY_S`; model 2.79 / 1.32 / 3.00 / 3.35). Before the
-  lock settles (up to ~200 s) it can be 11–30 ppm off: a near-constant
+  lock settles (up to ~200 s) it can be up to ~39 ppm off: a near-constant
   hand-off sits at one phase of the callback grid, so the regression's
   short early span sees the grid's beat;
 - cards −50 / 0 / +50 ppm (latency ≤ 2 ms after 70 s, |final − card| ≤
@@ -296,7 +298,7 @@ whole buffer per short callback once the first block primed the ring):
   29 / 13 / 13 / 30 underrun callbacks in the four configurations (97 /
   33 / 33 / 99 while the stop curve drained each excess), latency ≤ 22 ms
   off, the correction never more than 38 ppm off the card after 120 s
-  (model ≤ 37.0), a cushion held;
+  (model ≤ 37.01), a cushion held;
 - a callback period 128 → 512 mid-run with no reopen; a dropped callback;
   a 100 ms forward step; a 1024-frame driver at 48 kHz with a 20 ms step;
   a 48 kHz card at +50 ppm;
@@ -700,7 +702,8 @@ own callback thread and has two slots of cushion):
   published BEFORE the device is closed (a vanished driver can block its
   stop or release; review round 2), and the closed run's ppm, rate_ppm,
   lock and latency are cleared (the counters and the last open's driver
-  rate / sample type stay; since the ruling `offset_ms` and `slew_eta_s`
+  rate / sample type stay; since the ruling `offset_ms` and `slew_eta_s`,
+  and since Q1 `cushion_ms`,
   are cleared too). EVERY counter (underruns, overloads,
   overflows, hard re-centres, resets) counts since the output was built: a
   run's device, servo and ring count from 0 again, so the worker adds each
@@ -791,6 +794,7 @@ fails on the names `set_sample_rate` / `set_clock_source` /
 the servo measured its first 1 s window), `asio`
 = `{driver, channels, driver_rate, buffer_frames, out_channels,
 sample_type, ppm, rate_ppm, locked, latency_ms, offset_ms, slew_eta_s,
+cushion_ms,
 underruns, resets, hard_recentres, last_hard_recentre {cause, ms,
 lateness_ms, ago_s}, overflows, overloads, retry_in_s, reason_code}` (the
 servo's fields: the owner's ruling above), and while it runs a `note`
