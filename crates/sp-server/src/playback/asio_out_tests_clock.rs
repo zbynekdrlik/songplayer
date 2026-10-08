@@ -354,3 +354,30 @@ fn a_clock_reopen_keeps_the_closed_runs_counters() {
     }
     assert_eq!((d.starts, o.snapshot().status.clock_waits), (2, 1));
 }
+
+/// Review round 11: a reopen during the wait that found nothing queued
+/// drops nothing, so it says nothing about stale blocks, at any level (the
+/// blocks reach the worker as the step's own block, never through the
+/// queue: the two reopens at blocks 1801 and 3603 drop 0).
+#[test]
+fn a_reopen_with_nothing_queued_logs_no_stale_count() {
+    let cap = Captured::default();
+    let o = out();
+    let mut d = FakeDevice::answering(vec![]);
+    let mut w = AsioWorker::new(T0);
+    tracing::subscriber::with_default(capturing(&cap), || {
+        w.step(&o, &mut d, T0, None);
+        for k in 1..=4000 {
+            let due = T0 + k * SLOT;
+            w.step(&o, &mut d, due + 50_000, Some(block_due(due)));
+        }
+    });
+    assert_eq!(d.starts, 3);
+    let stale: Vec<String> = String::from_utf8(cap.0.lock().unwrap().clone())
+        .unwrap()
+        .lines()
+        .filter(|l| l.contains("dropped the blocks queued while the driver opened"))
+        .map(str::to_string)
+        .collect();
+    assert!(stale.is_empty(), "{stale:#?}");
+}
