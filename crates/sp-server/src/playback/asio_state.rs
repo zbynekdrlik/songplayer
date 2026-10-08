@@ -185,8 +185,13 @@ pub fn reply(sel: i32, value: i32) -> i32 {
     }
 }
 
-/// The driver's rate, as the output follows it (never set).
+/// The driver's rate, as the output follows it (never set). Under 1 Hz the
+/// driver has no clock: a lost clock, the same reason a 0 Hz report closes
+/// a run with (#233 review round 3).
 pub fn admit_rate(rate: f64) -> Result<u32, Reason> {
+    if rate.abs() < 1.0 {
+        return Err(Reason::RateChanged(0));
+    }
     if rate.is_finite() && (MIN_RATE..=MAX_RATE).contains(&rate) {
         Ok(rate.round() as u32)
     } else {

@@ -360,9 +360,14 @@ impl WinAsioDevice {
     /// The driver's rate, preferred buffer, output channels and their one
     /// sample type (read, never set).
     fn read(driver: &SafeHandle, channels: [u32; 2]) -> Result<Opened, Reason> {
-        let rate = driver
-            .get_sample_rate()
-            .map_err(|e| failed(driver, "getSampleRate", e))?;
+        // ASE_NoClock: the driver has no clock (a lost clock, as a 0 Hz rate).
+        let rate = driver.get_sample_rate().map_err(|e| {
+            if e.code() == azo::sys::ResultCode::NO_CLOCK {
+                Reason::RateChanged(0)
+            } else {
+                failed(driver, "getSampleRate", e)
+            }
+        })?;
         let size = driver
             .buffer_size()
             .map_err(|e| failed(driver, "getBufferSize", e))?;
