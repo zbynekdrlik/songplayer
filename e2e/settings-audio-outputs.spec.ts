@@ -167,7 +167,11 @@ test("an empty list: add, fill and save one VBAN output; it survives a reload wi
   await expect(page.locator('[data-testid="audio-output-rate"]')).toHaveValue("96000");
   await expect(page.locator('[data-testid="audio-output-vban-format"]')).toHaveValue("int24");
   await expect(page.locator('[data-testid="settings-audio-network-rate"]')).toHaveValue("96000");
-  await expect(page.locator('[data-testid="audio-output-state"]')).toContainText("beží", { timeout: 10000 });
+  // #233 review round 2: a VBAN row's latency reads like an ASIO row's
+  // (66.7 ms + the 96 kHz converter's 16.7 ms).
+  await expect(page.locator('[data-testid="audio-output-state"]')).toHaveText("beží · oneskorenie 83 ms", {
+    timeout: 10000,
+  });
   expect(realConsoleErrors()).toEqual([]);
 });
 
