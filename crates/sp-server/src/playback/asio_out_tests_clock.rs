@@ -381,3 +381,25 @@ fn a_reopen_with_nothing_queued_logs_no_stale_count() {
         .collect();
     assert!(stale.is_empty(), "{stale:#?}");
 }
+
+/// Review round 11: an open outside a wait for the clock logs the stale
+/// blocks it dropped at INFO (two queued before the first open), once.
+#[test]
+fn an_open_logs_its_stale_blocks_at_info() {
+    let cap = Captured::default();
+    let o = out();
+    let mut d = FakeDevice::answering(vec![]);
+    let mut w = AsioWorker::new(T0);
+    o.push(block_due(T0 - SLOT));
+    o.push(block_due(T0));
+    tracing::subscriber::with_default(capturing(&cap), || {
+        w.step(&o, &mut d, T0, None);
+    });
+    assert_eq!(o.queued(), 0);
+    let stale: Vec<String> = lines_at(&cap, " INFO ")
+        .into_iter()
+        .filter(|l| l.contains("dropped the blocks queued while the driver opened"))
+        .collect();
+    assert_eq!(stale.len(), 1, "{stale:#?}");
+    assert!(stale[0].contains("stale=2"), "{stale:#?}");
+}
