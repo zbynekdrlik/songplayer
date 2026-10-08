@@ -27,7 +27,11 @@
 //!   successor starts. An in-flight counter lets `close` free a stream only
 //!   after the last callback left it (iemmixer `asio.rs:570-600`), and a
 //!   slot is released only after the buffers are disposed and the driver
-//!   dropped, so a late driver message never counts into another output.
+//!   dropped, so a late driver message never counts into another output. A
+//!   callback still inside after 1 s PARKS the device (iemmixer
+//!   `asio.rs:487-500`): the stream, the buffers, the driver, the slot and
+//!   the driver's hold are never freed, disposed, released or reused until
+//!   the process ends, and the device refuses every later open.
 //! - The buffer switch copies only: it pops its frames from the ring
 //!   (`rtrb`), writes L/R into the two configured channels and zeroes every
 //!   other one (`asio_format::fill_channel`), and counts in atomics — no
@@ -318,8 +322,7 @@ impl Drop for ComApartment {
 /// One ASIO output's driver, on its worker thread.
 pub struct WinAsioDevice {
     /// This device's hold on its driver's name, from before the load until
-    /// after the release (held only for its Drop).
-    #[allow(dead_code)]
+    /// after the release (kept for good when the device is parked).
     hold: Option<DriverHold<'static>>,
     driver: Option<SafeHandle>,
     channels: [usize; 2],
@@ -329,6 +332,9 @@ pub struct WinAsioDevice {
     buffers_created: bool,
     /// `start` succeeded: `close` stops only a started driver.
     started: bool,
+    /// A callback never left the stream: everything it may touch is kept
+    /// (see the module doc) and the device opens nothing again.
+    parked: bool,
     /// The thread's STA, for the device's whole life; declared last, so it
     /// drops last (after `Drop::drop` ran `close`, which releases the driver).
     com: ComApartment,
@@ -346,6 +352,7 @@ impl WinAsioDevice {
             stream: ptr::null_mut(),
             buffers_created: false,
             started: false,
+            parked: false,
             com: ComApartment::enter(),
         }
     }
@@ -416,6 +423,11 @@ impl Default for WinAsioDevice {
 impl AsioDevice for WinAsioDevice {
     fn open(&mut self, name: &str, channels: [u32; 2]) -> Result<Opened, Reason> {
         self.close();
+        if self.parked {
+            return Err(Reason::Failed(
+                "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts".into(),
+            ));
+        }
         // Before anything loads: a held driver (the output this one
         // replaces still releasing it) is busy for now. On a failed open the
         // hold drops after the driver (locals drop in reverse order).
@@ -554,6 +566,9 @@ impl AsioDevice for WinAsioDevice {
     }
 
     fn close(&mut self) {
+        if self.parked {
+            return;
+        }
         if self.started
             && let Some(d) = self.driver.as_ref()
             && let Err(e) = d.stop()
@@ -572,16 +587,27 @@ impl AsioDevice for WinAsioDevice {
                 }
                 std::thread::sleep(Duration::from_millis(1));
             }
+            if s.in_flight.load(Ordering::SeqCst) != 0 {
+                // Everything the stuck callback may touch stays: the stream
+                // (leaked), the buffers it writes (not disposed), the driver
+                // (never released), this slot (its in-flight count is the
+                // callback's) and the driver's hold.
+                error!(
+                    slot = i,
+                    "asio output: a callback is still running after 1 s — its stream, buffers, driver, slot and hold are parked until SongPlayer restarts"
+                );
+                self.parked = true;
+                self.stream = ptr::null_mut();
+                std::mem::forget(self.driver.take());
+                self.started = false;
+                self.buffers_created = false;
+                self.opened = None;
+                return;
+            }
             if !self.stream.is_null() {
-                if s.in_flight.load(Ordering::SeqCst) == 0 {
-                    // SAFETY: the slot no longer points to it and no callback
-                    // is inside it.
-                    drop(unsafe { Box::from_raw(self.stream) });
-                } else {
-                    error!(
-                        "asio output: a callback is still running after 1 s — its stream is leaked, not freed under it"
-                    );
-                }
+                // SAFETY: the slot no longer points to it and no callback is
+                // inside it.
+                drop(unsafe { Box::from_raw(self.stream) });
             }
         }
         self.stream = ptr::null_mut();
@@ -607,6 +633,11 @@ impl AsioDevice for WinAsioDevice {
 impl Drop for WinAsioDevice {
     fn drop(&mut self) {
         self.close();
+        if self.parked {
+            // The parked driver stays loaded: no other output of the
+            // process may load a second instance of it.
+            std::mem::forget(self.hold.take());
+        }
     }
 }
 
