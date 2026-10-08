@@ -123,17 +123,17 @@ pub const BASE_LATENCY_100NS: i64 = 666_666;
 /// restores the ring. ABSOLUTE (review round 2): an entry's delay raises the
 /// target, never this floor — a delayed output 50 ms short still holds its
 /// delay in the ring.
-pub const HARD_FLOOR_100NS: i64 = 166_666;
+pub const HARD_FLOOR_100NS: i64 = 383_333;
 /// SongPlayer's last resort for an offset: a block more than four slots
 /// (133.3 ms) over the target is a hard re-centre — the ring holds the
 /// target + 4 slots + one block, so the next block would overflow it. The
-/// same edge under the target (review round 3): above a delay of 83.3 ms
+/// same edge under the target (review round 3): above a delay of 105 ms
 /// it lies above the floor (at or under that delay the floor alone is the
 /// edge), and slewing 4 slots takes ~8 min.
 pub const HARD_EXCESS_100NS: i64 = 1_333_333;
 /// The most an underrun's excess is kept as cushion over the target (Q1):
 /// one slot. Beyond it the offset slew drains it.
-pub const CUSHION_MAX_100NS: i64 = 0;
+pub const CUSHION_MAX_100NS: i64 = SLOT_100NS;
 /// SongPlayer's: a window mean within this of the target is left to
 /// camera-box's level loop; beyond it the offset slew drains it (at least;
 /// [`calm_zone_ms`]).
