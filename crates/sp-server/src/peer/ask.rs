@@ -21,7 +21,8 @@ use super::board::JobGuard;
 use super::client::PeerError;
 use super::config::{NodeConfig, PeerConfig};
 use super::decide::{
-    Decision, LocalWhy, PeerRead, WaitWhy, after_failure, decide, listed_audio, recheck_after,
+    Decision, LocalWhy, MAX_PEER_WAIT, PeerRead, SongFrom, WaitWhy, after_failure, decide,
+    listed_audio, recheck_after, song_source,
 };
 use super::kind::{ArtifactKind, Job};
 use super::wire::{Artifact, Catalog, now_ms};
@@ -57,6 +58,11 @@ pub enum Ask {
     Wait { peer: String, recheck: Duration },
     /// Run the job here, announced while the guard lives.
     Local(JobGuard),
+    /// #229 item C: the job may not run here now (`Exchange::may_run_here`:
+    /// a lyrics job while this node's paid AI is off) and no peer's copy is
+    /// to be taken: hold it (`Exchange::hold`). Nothing is recorded about a
+    /// run here: a wait (a spent bound too) and a stand-in stay as they are.
+    Held,
 }
 
 /// What a worker's hook (`peer::{download, stems, lyrics}::first`) tells its
@@ -73,8 +79,11 @@ pub enum PeerStep {
 }
 
 impl Exchange {
-    /// Ask the peers about `job` for `youtube_id`.
+    /// Ask the peers about `job` for `youtube_id`. A job that may not run
+    /// here now (#229 item C) still takes a peer's copy and waits for a
+    /// peer's job; where it would run here it is [`Ask::Held`].
     pub async fn ask(&self, job: Job, youtube_id: &str) -> Ask {
+        let may_run = self.may_run_here(job).await;
         let cfg = match NodeConfig::load(&self.pool).await {
             Ok(cfg) => cfg,
             Err(e) => {
@@ -82,13 +91,14 @@ impl Exchange {
                     youtube_id,
                     job = job.as_str(),
                     error = %e,
-                    "exchange: the settings do not hold - processing here"
+                    held = !may_run,
+                    "exchange: the settings do not hold - no peer is asked"
                 );
-                return Ask::Local(self.announce(youtube_id, job));
+                return self.unasked(job, youtube_id, may_run);
             }
         };
         if !cfg.asking() {
-            return Ask::Local(self.announce(youtube_id, job));
+            return self.unasked(job, youtube_id, may_run);
         }
         let catalogs = self.read_peers(&cfg.peers).await;
         let reads: Vec<PeerRead<'_>> = cfg
@@ -106,14 +116,39 @@ impl Exchange {
             .inspect_err(|e| warn!(youtube_id, %e, "exchange: reading the wait failed"))
             .ok()
             .flatten();
-        match decide(job, youtube_id, &reads, waited) {
+        // The lyrics wait on the peer this node took the song's audio from,
+        // unless what they make here already stands in for that peer's copy.
+        // Such a job waited its bound once: it waits for no peer again (a
+        // run here put back, e.g. for its stems, a later reprocess; review
+        // rounds 2 and 4), a peer's copy still comes first.
+        let waits_on_song = job.waits_while_a_peer_has_the_song();
+        let standing = if waits_on_song {
+            self.standin_peer(job, youtube_id).await
+        } else {
+            None
+        };
+        let waited = if standing.is_some() {
+            Some(MAX_PEER_WAIT)
+        } else {
+            waited
+        };
+        let source = if waits_on_song && standing.is_none() {
+            self.song_from(youtube_id).await
+        } else {
+            None
+        };
+        let song_from = source.as_ref().map(|(peer, sha256)| SongFrom {
+            peer: peer.as_str(),
+            sha256: sha256.as_str(),
+        });
+        match decide(job, youtube_id, &reads, waited, song_from) {
             Decision::Fetch { peer, artifacts } => match cfg.peer(&peer) {
                 Some(p) => Ask::Fetch(FetchPlan {
                     peer: p.clone(),
                     artifacts,
                     peer_audio: peer_audio(&reads, &peer, youtube_id),
                 }),
-                None => Ask::Local(self.run_here(job, youtube_id).await),
+                None => self.local_or_held(job, youtube_id, may_run).await,
             },
             Decision::Wait { peer, why } => {
                 if let Err(e) =
@@ -126,9 +161,79 @@ impl Exchange {
                 Ask::Wait { peer, recheck }
             }
             Decision::Local(why) => {
+                // #229 item C: held before anything about a run here is
+                // recorded (the wait, a stand-in, the announcement).
+                if !may_run {
+                    return Ask::Held;
+                }
+                // A job that stands in runs here keeping its stand-in and a
+                // spent bound its hand-off left (review rounds 5-7): its next
+                // pick, meeting the peer's copy, runs here at once.
+                if standing.is_some() {
+                    return Ask::Local(self.run_here_standing(job, youtube_id).await);
+                }
                 log_local(youtube_id, job, why);
-                Ask::Local(self.run_here(job, youtube_id).await)
+                let guard = self.run_here(job, youtube_id).await;
+                // What runs here stands in for the copy of the peer this node
+                // took the song from once it waited the bound for that peer
+                // (read now or not).
+                if why == LocalWhy::WaitedLongEnough
+                    && let Some(peer) = song_source(&reads, song_from)
+                {
+                    self.stand_in(job, youtube_id, peer).await;
+                }
+                Ask::Local(guard)
             }
+        }
+    }
+
+    /// #229 item C: whether `job` may run here now. A job that calls paid AI
+    /// (`Job::paid_ai`) only while this node's switch is on
+    /// (`paid_ai::enabled`, read live); any other job always.
+    pub(crate) async fn may_run_here(&self, job: Job) -> bool {
+        match job.paid_ai() {
+            Some(_) => crate::paid_ai::enabled(&self.pool).await,
+            None => true,
+        }
+    }
+
+    /// #229 item C: row `video_id` of `job` for `youtube_id` may not run here
+    /// now: it is picked again after `paid_ai::HELD_RECHECK`, no attempt
+    /// counted (`defer`), and nothing is recorded about a run here; one INFO
+    /// per song (`paid_ai::hold`).
+    pub(crate) async fn hold(&self, job: Job, video_id: i64, youtube_id: &str) -> PeerStep {
+        if let Some(what) = job.paid_ai() {
+            crate::paid_ai::hold(what, youtube_id);
+        }
+        self.defer(job, video_id, crate::paid_ai::HELD_RECHECK)
+            .await
+    }
+
+    /// `job` of `youtube_id` runs here (`run_here`), or, when it may not run
+    /// here now (#229 item C), row `video_id` is held.
+    pub(crate) async fn local(&self, job: Job, video_id: i64, youtube_id: &str) -> PeerStep {
+        if !self.may_run_here(job).await {
+            return self.hold(job, video_id, youtube_id).await;
+        }
+        PeerStep::Local(Some(self.run_here(job, youtube_id).await))
+    }
+
+    /// The job with no peer to ask (no peers, or settings that do not hold):
+    /// announced here, or held when it may not run here (`may_run`).
+    fn unasked(&self, job: Job, youtube_id: &str, may_run: bool) -> Ask {
+        if may_run {
+            Ask::Local(self.announce(youtube_id, job))
+        } else {
+            Ask::Held
+        }
+    }
+
+    /// `run_here` as an answer, or held when the job may not run here.
+    async fn local_or_held(&self, job: Job, youtube_id: &str, may_run: bool) -> Ask {
+        if may_run {
+            Ask::Local(self.run_here(job, youtube_id).await)
+        } else {
+            Ask::Held
         }
     }
 
@@ -141,18 +246,45 @@ impl Exchange {
     }
 
     /// `job` of `youtube_id` runs here: a wait of it ends (a later ask starts
-    /// a fresh one, never inheriting this one's spent bound), the records of
-    /// a peer's copy of what it makes are dropped (`forget_origins`: the job
-    /// replaces them), the parts a fetch of it left are dropped
-    /// (`drop_job_parts`), and the job is announced while the returned guard
-    /// lives.
+    /// a fresh one, never inheriting this one's spent bound), a stand-in of
+    /// it is over (`peer::standin`: the caller records a new one when what
+    /// it makes stands in for a peer's copy), and [`Self::start_here`].
     pub(crate) async fn run_here(&self, job: Job, youtube_id: &str) -> JobGuard {
-        if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
-            warn!(youtube_id, %e, "exchange: ending the wait failed");
-        }
+        self.end_wait(job, youtube_id).await;
+        self.drop_standin(job, youtube_id).await;
+        self.start_here(job, youtube_id).await
+    }
+
+    /// `job` of `youtube_id` runs here while what it makes stands in for a
+    /// peer's copy (a run put back, a hand-off or a fetch given up): the
+    /// stand-in stays as it was (its age and next look), and so does a
+    /// spent bound its hand-off left, so the next pick that meets the
+    /// peer's copy runs here at once (`peer::standin`, review rounds 5-7).
+    pub(crate) async fn run_here_standing(&self, job: Job, youtube_id: &str) -> JobGuard {
+        debug!(
+            youtube_id,
+            job = job.as_str(),
+            "exchange: run here again - it still stands in for the peer's copy"
+        );
+        self.start_here(job, youtube_id).await
+    }
+
+    /// The records of a peer's copy of what `job` makes are dropped
+    /// (`forget_origins`: the job replaces them), so are the parts a fetch
+    /// of it left (`drop_job_parts`), and the job is announced while the
+    /// returned guard lives.
+    async fn start_here(&self, job: Job, youtube_id: &str) -> JobGuard {
         self.forget_origins(job, youtube_id).await;
         self.drop_job_parts(job, youtube_id).await;
         self.announce(youtube_id, job)
+    }
+
+    /// The wait of `job` of `youtube_id` is over (WARNed when it cannot be
+    /// ended).
+    pub(crate) async fn end_wait(&self, job: Job, youtube_id: &str) {
+        if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
+            warn!(youtube_id, %e, "exchange: ending the wait failed");
+        }
     }
 
     /// Row `video_id` of `job` is picked again after `wait`, no attempt
@@ -171,7 +303,10 @@ impl Exchange {
 
     /// A fetch of `job` for row `video_id` from `peer` failed: the row is
     /// deferred while the job has waited less than the bound, else the job
-    /// runs here (`fetch_failed`).
+    /// runs here (`fetch_failed`). What a job that waits on the song makes
+    /// here then stands in for the peer's copy when this node took the
+    /// song's audio from that peer; a stand-in it already had stays as it
+    /// was, with its spent wait (`run_here_standing`).
     pub(crate) async fn after_failed_fetch(
         &self,
         job: Job,
@@ -180,15 +315,44 @@ impl Exchange {
         peer: &str,
         error: &PeerError,
     ) -> PeerStep {
+        // #229 item C: a job that may not run here now waits for the peer's
+        // copy with no bound, so no give-up WARN repeats at every pick.
+        if !self.may_run_here(job).await {
+            debug!(
+                youtube_id,
+                job = job.as_str(),
+                peer,
+                %error,
+                "exchange: a peer's copy was not taken - held (paid AI off)"
+            );
+            return self.hold(job, video_id, youtube_id).await;
+        }
         match self.fetch_failed(job, youtube_id, peer, error).await {
             Some(recheck) => self.defer(job, video_id, recheck).await,
-            None => PeerStep::Local(Some(self.run_here(job, youtube_id).await)),
+            None => {
+                // Defensive: the lyrics hook hands a standing job's Fetch to
+                // the stand-in's look before any fetch (`peer::lyrics`), so
+                // no fetch of it fails today (review round 8).
+                if self.standin_peer(job, youtube_id).await.is_some() {
+                    return PeerStep::Local(Some(self.run_here_standing(job, youtube_id).await));
+                }
+                let guard = self.run_here(job, youtube_id).await;
+                if job.waits_while_a_peer_has_the_song()
+                    && self
+                        .song_from(youtube_id)
+                        .await
+                        .is_some_and(|(node, _)| node == peer)
+                {
+                    self.stand_in(job, youtube_id, peer).await;
+                }
+                PeerStep::Local(Some(guard))
+            }
         }
     }
 
     /// Each peer's catalog (cached up to `CATALOG_TTL`), `None` where it could
     /// not be read; in `peers` order.
-    async fn read_peers(&self, peers: &[PeerConfig]) -> Vec<Option<Arc<Catalog>>> {
+    pub(crate) async fn read_peers(&self, peers: &[PeerConfig]) -> Vec<Option<Arc<Catalog>>> {
         let mut catalogs = Vec::with_capacity(peers.len());
         for peer in peers {
             let read = self.client.catalog(peer).await;
@@ -255,12 +419,12 @@ impl Exchange {
         Some(recheck)
     }
 
-    /// `job` is done with what `peer` had: the wait ends and each artifact's
-    /// origin is recorded (`source = peer:<node>`).
+    /// `job` is done with what `peer` had: the wait ends, a stand-in of it
+    /// is over (`peer::standin`), and each artifact's origin is recorded
+    /// (`source = peer:<node>`).
     pub async fn fetched(&self, job: Job, youtube_id: &str, peer: &str, artifacts: &[Artifact]) {
-        if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
-            warn!(youtube_id, %e, "exchange: ending the wait failed");
-        }
+        self.end_wait(job, youtube_id).await;
+        self.drop_standin(job, youtube_id).await;
         self.record_origins(youtube_id, peer, artifacts).await;
         info!(
             youtube_id,
@@ -363,3 +527,7 @@ fn log_local(youtube_id: &str, job: Job, why: LocalWhy) {
 #[cfg(test)]
 #[path = "ask_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "held_tests.rs"]
+mod held_tests;

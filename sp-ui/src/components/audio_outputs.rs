@@ -117,6 +117,9 @@ pub struct AsioLive {
     pub offset_ms: f64,
     #[serde(default)]
     pub slew_eta_s: Option<f64>,
+    /// #233 Q1: the reserve an underrun left, ms.
+    #[serde(default)]
+    pub cushion_ms: f64,
     #[serde(default)]
     pub hard_recentres: u64,
     #[serde(default)]
@@ -148,6 +151,7 @@ fn asio_figures(o: &OutputLive, a: &AsioLive) -> AsioFigures {
         ppm: a.ppm,
         offset_ms: a.offset_ms,
         slew_eta_s: a.slew_eta_s,
+        cushion_ms: a.cushion_ms,
         last_fault: a.last_hard_recentre.as_ref().map(|h| LastFault {
             cause: h.cause.clone(),
             ms: h.ms,

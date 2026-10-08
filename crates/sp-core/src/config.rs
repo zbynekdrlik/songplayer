@@ -35,21 +35,6 @@ pub const SETTING_MIX_SONG_PODKLAD: &str = "mix_song_podklad";
 pub const SETTING_MIX_DUB_VOKALY: &str = "mix_dub_vokaly";
 pub const SETTING_MIX_DUB_PODKLAD: &str = "mix_dub_podklad";
 pub const SETTING_MIX_DUB_DABING: &str = "mix_dub_dabing";
-/// #210 (B2 of EPIC #174): the program's VBAN audio output (to FOH VB-Matrix
-/// and lv1). `"true"` sends; anything else (or absent) = off, the default.
-/// #233: the three `vban_*` keys are read only by the one-time migration
-/// into [`SETTING_AUDIO_OUTPUTS`] (sp-server `audio_out_migrate.rs`), which
-/// KEEPS them, so a rollback to ≤ 0.73.0 still sends to FOH (what the keys
-/// held when the migration ran: a dashboard edit of the migrated entry is
-/// not copied back); a later lane deletes the keys and these constants once
-/// the list has run a main release.
-pub const SETTING_VBAN_ENABLED: &str = "vban_enabled";
-/// #210: the ASCII VBAN stream name, at most 16 chars
-/// ([`DEFAULT_VBAN_STREAM_NAME`] until the B4 switch-over, never cg OBS's `cg`).
-pub const SETTING_VBAN_STREAM_NAME: &str = "vban_stream_name";
-/// #210: comma-separated `host:port` VBAN targets (default empty = send
-/// nothing), e.g. `fohabl.lan:6980, lv1.lan:6980`.
-pub const SETTING_VBAN_TARGETS: &str = "vban_targets";
 /// #212 (B3 of EPIC #174): the NDI input "OBS manuál" — one received NDI
 /// source offered to the program bus. `"true"` receives; anything else (or
 /// absent) = off, the default.
@@ -166,6 +151,30 @@ pub fn peer_serve_max_mbps(raw: Option<&str>) -> u32 {
 
 /// #229: the Genius lyrics token (read by the lyrics worker from the DB).
 pub const SETTING_GENIUS_ACCESS_TOKEN: &str = "genius_access_token";
+
+/// #229 item C (the owner's ruling, 8.10.2026): whether this node may call
+/// paid AI (Gemini, Claude) — the ONE switch sp-server's `paid_ai` gates
+/// every such call on. Not a secret.
+pub const SETTING_PAID_AI_ENABLED: &str = "paid_ai_enabled";
+
+/// #229 item C: the stored `paid_ai_enabled` read. Unset or blank = ON (a
+/// node that never set it, e.g. SNV, is unchanged); `"true"` = ON (trimmed,
+/// any case); `"false"` — or any other value, which only a write past the
+/// settings API can store — = OFF: the owner's money comes first.
+pub fn paid_ai_enabled(raw: Option<&str>) -> bool {
+    match raw.map(|v| v.trim().to_ascii_lowercase()) {
+        None => true,
+        Some(v) => v.is_empty() || v == "true",
+    }
+}
+
+/// #229 item C: what a Nastavenia save sends for the switch — `"true"` /
+/// `"false"` only when the checkbox differs from the value the page loaded
+/// (`loaded`, read by [`paid_ai_enabled`]), else nothing: a tab opened
+/// before the switch was changed elsewhere never sends the old one back.
+pub fn paid_ai_to_send(loaded: Option<&str>, checked: bool) -> Option<String> {
+    (paid_ai_enabled(loaded) != checked).then(|| checked.to_string())
+}
 
 /// #229: what a secret setting reads as outside the node (`GET /api/v1/settings`).
 /// A PATCH that sends it back keeps the stored value.
@@ -288,10 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn vban_setting_keys_and_default_stream_name() {
-        assert_eq!(SETTING_VBAN_ENABLED, "vban_enabled");
-        assert_eq!(SETTING_VBAN_STREAM_NAME, "vban_stream_name");
-        assert_eq!(SETTING_VBAN_TARGETS, "vban_targets");
+    fn the_default_vban_stream_name() {
         assert_eq!(DEFAULT_VBAN_STREAM_NAME, "sp-program");
     }
 
@@ -415,6 +421,37 @@ mod tests {
         assert_eq!(peer_serve_max_mbps(Some("0")), 20);
         assert_eq!(peer_serve_max_mbps(Some("-1")), 20);
         assert_eq!(peer_serve_max_mbps(Some("fast")), 20);
+    }
+
+    /// #229 item C: paid AI is ON unless the switch says off; a value the
+    /// API would refuse reads as off.
+    #[test]
+    fn paid_ai_is_on_unless_the_switch_says_off() {
+        assert_eq!(SETTING_PAID_AI_ENABLED, "paid_ai_enabled");
+        assert!(!is_secret_setting(SETTING_PAID_AI_ENABLED));
+        assert!(paid_ai_enabled(None), "unset = ON (SNV unchanged)");
+        assert!(paid_ai_enabled(Some("")), "blank = unset");
+        assert!(paid_ai_enabled(Some("  ")), "blank = unset");
+        assert!(paid_ai_enabled(Some("true")));
+        assert!(paid_ai_enabled(Some(" TRUE\n")), "trimmed, any case");
+        assert!(!paid_ai_enabled(Some("false")));
+        assert!(!paid_ai_enabled(Some(" False ")));
+        assert!(!paid_ai_enabled(Some("yes")), "a mangled value = OFF");
+        assert!(!paid_ai_enabled(Some("1")));
+    }
+
+    /// #229 item C: a save sends the switch only when the checkbox changed
+    /// it from what the page loaded.
+    #[test]
+    fn a_save_sends_the_switch_only_when_it_changed() {
+        assert_eq!(paid_ai_to_send(None, true), None, "on as loaded");
+        assert_eq!(paid_ai_to_send(None, false).as_deref(), Some("false"));
+        assert_eq!(
+            paid_ai_to_send(Some("false"), true).as_deref(),
+            Some("true")
+        );
+        assert_eq!(paid_ai_to_send(Some("false"), false), None, "off as loaded");
+        assert_eq!(paid_ai_to_send(Some("true"), true), None);
     }
 
     /// #229: THE secret list, exactly; each one masked by name too.

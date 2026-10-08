@@ -1,0 +1,14 @@
+# cargo-nextest configuration (songplayer). nextest runs only the mutation
+# gate's per-mutant test suites (`.cargo/mutants.toml` `test_tool = "nextest"`);
+# the plain Test job uses `cargo test`.
+#
+# A mutant that makes one test wait forever (a loop or a wait whose exit a
+# flipped comparison removes) is a DETECTED change in behaviour, but without a
+# per-test bound it only surfaces as cargo-mutants' 300 s TIMEOUT, which fails
+# the shard (exit 3) like a survivor (#229 lane, CI run 37827371905:
+# `peer/repair.rs` `waits_for_peer` and `audio_out_migrate.rs`
+# `store_list_if_absent`). Bounding each test at 3 x 60 s turns that hang into
+# a test failure, so the mutant counts as caught. The whole sp-server suite
+# takes ~70 s, so no healthy test comes near the bound.
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 3 }

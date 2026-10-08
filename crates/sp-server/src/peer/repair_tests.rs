@@ -110,3 +110,20 @@ async fn pp_peer(pp: &TestNode) -> crate::peer::config::PeerConfig {
         .unwrap()
         .clone()
 }
+
+/// #229 item A: a repaired video's wait for its peer's title ends (a later
+/// re-queue of it would otherwise inherit a spent bound).
+#[tokio::test]
+async fn a_repaired_videos_wait_ends() {
+    let (_snv, pp) = snv_and_pp().await;
+    let now = crate::peer::wire::now_ms();
+    crate::db::models_peer::start_wait(pp.pool(), YT, METADATA_WAIT, now)
+        .await
+        .unwrap();
+    end_wait(&pp.ex, YT).await;
+    let waited = crate::db::models_peer::waited(pp.pool(), YT, METADATA_WAIT, now)
+        .await
+        .unwrap();
+    assert_eq!(waited, None);
+    assert_eq!(METADATA_WAIT, "metadata");
+}

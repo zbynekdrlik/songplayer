@@ -30,6 +30,7 @@ pub mod mtl_aligner;
 pub mod orchestrator;
 pub mod probe;
 pub mod provider;
+pub mod queue_sql; // #229: the lyrics queue's shared predicates (selector + exchange)
 pub mod reference_gate;
 pub mod renderer;
 pub mod reprocess;

@@ -20,6 +20,7 @@
 
 use std::path::Path;
 
+use sp_core::metadata::VideoMetadata;
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
@@ -40,6 +41,19 @@ pub struct DownloadTitle {
     pub gemini_failed: bool,
 }
 
+impl From<VideoMetadata> for DownloadTitle {
+    /// A provider's or the title parser's name for the video, under its
+    /// `MetadataSource` label.
+    fn from(meta: VideoMetadata) -> Self {
+        Self {
+            song: meta.song,
+            artist: meta.artist,
+            source: meta.source.as_str(),
+            gemini_failed: meta.gemini_failed,
+        }
+    }
+}
+
 /// #136 (ROZHODNUTÉ 5908227964 item 2): the title a download of YouTube video
 /// `youtube_id` (YouTube title `title`) names it after. An operator's
 /// correction of the video (a row with `metadata_source = 'manual'` and a
@@ -47,6 +61,8 @@ pub struct DownloadTitle {
 /// is kept, and the provider chain is never asked over it. Any other video
 /// asks the chain (`get_metadata`: the first provider that answers, else the
 /// title parser). A title that cannot be read asks the chain too (WARN).
+/// #229 item C: while paid AI is off the chain answers no provider: the
+/// title parser's, marked for the repair (`parser_while_paid_ai_off`).
 pub async fn download_title(
     pool: &SqlitePool,
     chain: &ProviderChain,
@@ -75,13 +91,11 @@ pub async fn download_title(
             "metadata: reading the video's title failed — asking the providers"
         ),
     }
-    let meta = super::get_metadata(chain.providers(), youtube_id, title).await;
-    DownloadTitle {
-        song: meta.song,
-        artist: meta.artist,
-        source: meta.source.as_str(),
-        gemini_failed: meta.gemini_failed,
-    }
+    let meta = match chain.providers().await {
+        Some(providers) => super::get_metadata(providers, youtube_id, title).await,
+        None => super::parser_while_paid_ai_off(youtube_id, title),
+    };
+    DownloadTitle::from(meta)
 }
 
 /// #136 (review round 1): record a finished download of row `video_db_id` of

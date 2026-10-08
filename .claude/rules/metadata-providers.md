@@ -23,8 +23,15 @@ answered correctly), and nothing ever ran the real providers.
 
 ## The one chain
 
-- `metadata::provider_chain(ai_client, gemini_csv, gemini_model)` =
-  [Claude (CLIProxyAPI), Gemini]. `lib.rs` builds it ONCE; the same `Arc` goes
+- `metadata::provider_chain(&pool, ai_client, gemini_csv, gemini_model)` =
+  [Claude (CLIProxyAPI), Gemini], gated on the node's paid-AI switch (#229
+  item C, `paid-ai.md`): `ProviderChain::providers()` is async and answers
+  `None` while it is off — a download then takes the title parser's name
+  marked for the repair, the repair a peer's title only, and
+  `POST /api/v1/metadata/probe` answers 409; a test's chain
+  (`ProviderChain::new`, `provider_chain_at`) is never gated. A pair taken
+  from a peer whose title there is a parser's is named by the parser too
+  (`peer-exchange.md`). `lib.rs` builds it ONCE; the same `Arc` goes
   to `DownloadWorker`, `ReprocessWorker` and `AppState.metadata_chain` (the
   probe + `status.metadata`). Both workers take `Arc<ProviderChain>`; an
   ad-hoc provider list must not be wired in again (`ProviderChain::new` is

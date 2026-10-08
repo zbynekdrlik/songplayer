@@ -51,14 +51,20 @@ fn read<'a>(peer: &'a str, c: Option<&'a Catalog>) -> PeerRead<'a> {
     PeerRead { peer, catalog: c }
 }
 
+/// The song this node took from `peer`: an audio of sha256 `sha` ([`art`]
+/// lists [`sha`]).
+fn took<'a>(peer: &'a str, sha: &'a str) -> Option<SongFrom<'a>> {
+    Some(SongFrom { peer, sha256: sha })
+}
+
 #[test]
 fn no_peers_processes_here() {
     assert_eq!(
-        decide(Job::Download, YT, &[], None),
+        decide(Job::Download, YT, &[], None, None),
         Decision::Local(LocalWhy::NoPeers)
     );
     assert_eq!(
-        decide(Job::Download, YT, &[], Some(3 * MAX_PEER_WAIT)),
+        decide(Job::Download, YT, &[], Some(3 * MAX_PEER_WAIT), None),
         Decision::Local(LocalWhy::NoPeers),
         "no peer: never a wait"
     );
@@ -71,7 +77,7 @@ fn a_peer_with_every_needed_artifact_is_fetched_from() {
         &[],
     );
     assert_eq!(
-        decide(Job::Download, YT, &[read("snv", Some(&snv))], None),
+        decide(Job::Download, YT, &[read("snv", Some(&snv))], None, None),
         Decision::Fetch {
             peer: "snv".into(),
             artifacts: vec![art(Video, MEDIA_VERSION), art(Audio, MEDIA_VERSION)],
@@ -84,7 +90,7 @@ fn a_peer_with_every_needed_artifact_is_fetched_from() {
 fn a_peer_missing_one_needed_artifact_is_not_fetched_from() {
     let snv = catalog(vec![art(StemVocals, STEMS_VERSION)], &[]);
     assert_eq!(
-        decide(Job::Stems, YT, &[read("snv", Some(&snv))], None),
+        decide(Job::Stems, YT, &[read("snv", Some(&snv))], None, None),
         Decision::Local(LocalWhy::NobodyHasIt)
     );
     assert_eq!(holds(&snv, Job::Stems, YT), None);
@@ -118,7 +124,7 @@ fn a_format_this_node_does_not_take_is_not_fetched() {
         &[],
     );
     assert_eq!(
-        decide(Job::Download, YT, &[read("snv", Some(&newer))], None),
+        decide(Job::Download, YT, &[read("snv", Some(&newer))], None, None),
         Decision::Local(LocalWhy::NobodyHasIt)
     );
 }
@@ -135,6 +141,7 @@ fn a_peer_that_has_it_wins_over_one_running_it() {
         YT,
         &[read("a", Some(&runner)), read("b", Some(&haver))],
         None,
+        None,
     );
     assert!(
         matches!(d, Decision::Fetch { ref peer, .. } if peer == "b"),
@@ -146,7 +153,7 @@ fn a_peer_that_has_it_wins_over_one_running_it() {
 fn a_peer_running_the_job_is_waited_for() {
     let snv = catalog(vec![], &[StemInstrumental]);
     assert_eq!(
-        decide(Job::Stems, YT, &[read("snv", Some(&snv))], Some(MIN)),
+        decide(Job::Stems, YT, &[read("snv", Some(&snv))], Some(MIN), None),
         Decision::Wait {
             peer: "snv".into(),
             why: WaitWhy::PeerRunsIt
@@ -164,7 +171,7 @@ fn a_peer_with_the_job_queued_is_waited_for() {
         JobState::Queued,
     );
     assert_eq!(
-        decide(Job::Download, YT, &[read("snv", Some(&snv))], None),
+        decide(Job::Download, YT, &[read("snv", Some(&snv))], None, None),
         Decision::Wait {
             peer: "snv".into(),
             why: WaitWhy::PeerRunsIt
@@ -176,7 +183,7 @@ fn a_peer_with_the_job_queued_is_waited_for() {
 fn a_job_making_other_kinds_is_not_waited_for() {
     let snv = catalog(vec![], &[ArtifactKind::Lyrics]);
     assert_eq!(
-        decide(Job::Stems, YT, &[read("snv", Some(&snv))], None),
+        decide(Job::Stems, YT, &[read("snv", Some(&snv))], None, None),
         Decision::Local(LocalWhy::NobodyHasIt)
     );
     let other_video = Catalog {
@@ -190,17 +197,200 @@ fn a_job_making_other_kinds_is_not_waited_for() {
         ..catalog(vec![], &[])
     };
     assert_eq!(
-        decide(Job::Stems, YT, &[read("snv", Some(&other_video))], None),
+        decide(
+            Job::Stems,
+            YT,
+            &[read("snv", Some(&other_video))],
+            None,
+            None
+        ),
         Decision::Local(LocalWhy::NobodyHasIt),
         "a job of another video"
     );
+}
+
+/// #229 PP audit (comment 6054582866): SNV had the song PP fetched (its
+/// audio listed) but no lyrics job announced, and PP processed the lyrics
+/// itself. A lyrics job now waits while a listed peer has the song, within
+/// the same 2 h bound; it runs here only when no listed peer has it at all.
+/// A peer announcing the job is named first, a peer with the song before an
+/// unreadable one; the stems and the download do not wait on the song.
+#[test]
+fn a_lyrics_job_waits_while_a_peer_has_the_song() {
+    let snv = catalog(vec![art(Audio, MEDIA_VERSION)], &[]);
+    let reads = [read("snv", Some(&snv))];
+    let sha = sha();
+    let from_snv = took("snv", &sha);
+    let has_the_song = Decision::Wait {
+        peer: "snv".into(),
+        why: WaitWhy::PeerHasTheSong,
+    };
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, None, from_snv),
+        has_the_song
+    );
+    let just_under = MAX_PEER_WAIT - Duration::from_secs(1);
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, Some(just_under), from_snv),
+        has_the_song
+    );
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, Some(MAX_PEER_WAIT), from_snv),
+        Decision::Local(LocalWhy::WaitedLongEnough)
+    );
+    assert_eq!(
+        decide(Job::Lyrics, "bbbbbbbbbbb", &reads, None, from_snv),
+        Decision::Local(LocalWhy::NobodyHasIt),
+        "the audio of another video"
+    );
+    assert_eq!(
+        decide(Job::Stems, YT, &reads, None, from_snv),
+        Decision::Local(LocalWhy::NobodyHasIt)
+    );
+    assert_eq!(
+        decide(Job::Download, YT, &reads, None, from_snv),
+        Decision::Local(LocalWhy::NobodyHasIt)
+    );
+    let runner = catalog(vec![], &[ArtifactKind::Lyrics]);
+    assert_eq!(
+        decide(
+            Job::Lyrics,
+            YT,
+            &[read("snv", Some(&snv)), read("busy", Some(&runner))],
+            None,
+            from_snv
+        ),
+        Decision::Wait {
+            peer: "busy".into(),
+            why: WaitWhy::PeerRunsIt
+        }
+    );
+    assert_eq!(
+        decide(
+            Job::Lyrics,
+            YT,
+            &[read("down", None), read("snv", Some(&snv))],
+            None,
+            from_snv
+        ),
+        has_the_song
+    );
+}
+
+/// Review round 1: the song is the one this node took from a peer. A node
+/// whose audio is its own download (or a copy, no `peer_fetches` record)
+/// waits on no peer's song — that peer's lyrics would not fit it, and in
+/// phase 2 two nodes listing each other would wait on each other's audio.
+/// Nor does it wait on another peer that lists the audio, or on its source
+/// once that no longer lists it.
+#[test]
+fn a_lyrics_job_waits_only_on_the_peer_it_took_the_song_from() {
+    let sha = sha();
+    let with_audio = catalog(vec![art(Audio, MEDIA_VERSION)], &[]);
+    let without = catalog(vec![], &[]);
+    let local = Decision::Local(LocalWhy::NobodyHasIt);
+    let reads = [read("snv", Some(&with_audio))];
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, None, None),
+        local,
+        "its own audio"
+    );
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, None, took("pp2", &sha)),
+        local,
+        "taken from a peer that is not listed"
+    );
+    let two = [
+        read("pp2", Some(&with_audio)),
+        read("snv", Some(&with_audio)),
+    ];
+    assert_eq!(
+        decide(Job::Lyrics, YT, &two, None, took("snv", &sha)),
+        Decision::Wait {
+            peer: "snv".into(),
+            why: WaitWhy::PeerHasTheSong
+        },
+        "the source, not the first peer listing the audio"
+    );
+    let gone = [read("snv", Some(&without)), read("pp2", Some(&with_audio))];
+    assert_eq!(
+        decide(Job::Lyrics, YT, &gone, None, took("snv", &sha)),
+        local,
+        "the source lists the song no more"
+    );
+    assert_eq!(song_holder(&two, YT, took("snv", &sha)), Some("snv"));
+    assert_eq!(song_holder(&two, YT, None), None);
+    assert_eq!(
+        song_holder(
+            &[read("down", None), read("snv", Some(&with_audio))],
+            YT,
+            took("snv", &sha)
+        ),
+        Some("snv")
+    );
+    assert_eq!(song_holder(&reads, "bbbbbbbbbbb", took("snv", &sha)), None);
+}
+
+/// Review round 8: while the source peer hashes the song's audio again (a
+/// rename there leaves it unlisted for ~70 s) it announces it as a queued
+/// download (`catalog::unhashed`): the lyrics wait on it then too, bounded,
+/// never "nobody has it" (that would run here with no stand-in, degraded
+/// for good). Only the source; a node with its own audio waits on nobody.
+#[test]
+fn a_lyrics_job_waits_while_its_source_announces_the_songs_audio() {
+    let sha = sha();
+    let rehashing = catalog_with(vec![], &[Audio], JobState::Queued);
+    let reads = [read("snv", Some(&rehashing))];
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, None, took("snv", &sha)),
+        Decision::Wait {
+            peer: "snv".into(),
+            why: WaitWhy::PeerHasTheSong
+        }
+    );
+    assert_eq!(song_holder(&reads, YT, took("snv", &sha)), Some("snv"));
+    let other = [read("pp2", Some(&rehashing))];
+    assert_eq!(
+        song_holder(&other, YT, took("snv", &sha)),
+        None,
+        "only the source"
+    );
+    assert_eq!(
+        song_holder(&reads, "bbbbbbbbbbb", took("snv", &sha)),
+        None,
+        "another video's audio"
+    );
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, None, None),
+        Decision::Local(LocalWhy::NobodyHasIt),
+        "its own audio"
+    );
+}
+
+/// Review round 2: the source must still list the very audio this node took
+/// from it (the sha256 of its `peer_fetches` record). A source that
+/// downloaded the song again lists another audio, whose lyrics this node
+/// would refuse (`same_audio`), so the lyrics do not wait for them.
+#[test]
+fn a_lyrics_job_waits_only_for_the_audio_it_took() {
+    let snv = catalog(vec![art(Audio, MEDIA_VERSION)], &[]);
+    let reads = [read("snv", Some(&snv))];
+    let other = "fedcba9876543210".repeat(4);
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, None, took("snv", &other)),
+        Decision::Local(LocalWhy::NobodyHasIt),
+        "the source lists another audio now"
+    );
+    assert_eq!(song_holder(&reads, YT, took("snv", &other)), None);
+    let sha = sha();
+    assert_eq!(song_holder(&reads, YT, took("snv", &sha)), Some("snv"));
 }
 
 #[test]
 fn an_unreadable_peer_is_waited_for_after_the_readable_ones() {
     let busy = catalog(vec![], &[Video]);
     assert_eq!(
-        decide(Job::Download, YT, &[read("down", None)], None),
+        decide(Job::Download, YT, &[read("down", None)], None, None),
         Decision::Wait {
             peer: "down".into(),
             why: WaitWhy::PeerUnreadable
@@ -211,6 +401,7 @@ fn an_unreadable_peer_is_waited_for_after_the_readable_ones() {
             Job::Download,
             YT,
             &[read("down", None), read("busy", Some(&busy))],
+            None,
             None
         ),
         Decision::Wait {
@@ -224,6 +415,7 @@ fn an_unreadable_peer_is_waited_for_after_the_readable_ones() {
             Job::Download,
             YT,
             &[read("idle", Some(&idle)), read("down", None)],
+            None,
             None
         ),
         Decision::Wait {
@@ -240,15 +432,15 @@ fn the_wait_ends_at_two_hours_but_a_peers_copy_is_still_taken() {
     let reads = [read("snv", Some(&snv))];
     let just_under = MAX_PEER_WAIT - Duration::from_secs(1);
     assert!(matches!(
-        decide(Job::Download, YT, &reads, Some(just_under)),
+        decide(Job::Download, YT, &reads, Some(just_under), None),
         Decision::Wait { .. }
     ));
     assert_eq!(
-        decide(Job::Download, YT, &reads, Some(MAX_PEER_WAIT)),
+        decide(Job::Download, YT, &reads, Some(MAX_PEER_WAIT), None),
         Decision::Local(LocalWhy::WaitedLongEnough)
     );
     assert_eq!(
-        decide(Job::Download, YT, &reads, Some(3 * MAX_PEER_WAIT)),
+        decide(Job::Download, YT, &reads, Some(3 * MAX_PEER_WAIT), None),
         Decision::Local(LocalWhy::WaitedLongEnough),
         "past the bound too"
     );
@@ -257,7 +449,8 @@ fn the_wait_ends_at_two_hours_but_a_peers_copy_is_still_taken() {
             Job::Download,
             YT,
             &[read("down", None)],
-            Some(MAX_PEER_WAIT)
+            Some(MAX_PEER_WAIT),
+            None
         ),
         Decision::Local(LocalWhy::WaitedLongEnough),
         "an unreadable peer has the same bound"
@@ -271,6 +464,7 @@ fn the_wait_ends_at_two_hours_but_a_peers_copy_is_still_taken() {
         YT,
         &[read("snv", Some(&has))],
         Some(3 * MAX_PEER_WAIT),
+        None,
     );
     assert!(matches!(late, Decision::Fetch { .. }), "{late:?}");
     assert_eq!(MAX_PEER_WAIT, Duration::from_secs(7_200));

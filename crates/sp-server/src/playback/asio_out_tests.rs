@@ -915,7 +915,7 @@ fn an_asio_worker_that_panics_is_not_running_and_says_why() {
 /// lateness and age shown. After 150 blocks the ring holds 5 436 frames
 /// (the first test's pin); a block whose boundary is 65 ms later than the
 /// others (60 ms "early") reads a latency of 1.625 ms, 65.0416 ms short:
-/// past the 50 ms edge, so 65.0416 ms of silence go in. The next block is
+/// under the 38.3 ms floor, so 65.0416 ms of silence go in. The next block is
 /// 65 ms over the target: left to the ratio. A reset, a reopen 2 s later and
 /// the same again: two in all.
 #[test]

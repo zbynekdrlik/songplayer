@@ -256,15 +256,14 @@ impl DownloadWorker {
         // #229: ask the peers first (`peer::download`): a peer's pair is
         // taken, a peer's download waited for; else run it here, announced
         // until this function returns.
-        let _announced =
-            match crate::peer::download::first(self.peer.as_ref(), &self.metadata, &row).await {
-                crate::peer::PeerStep::Done => {
-                    let _ = self.event_tx.send(format!("processed:{}", row.youtube_id));
-                    return true;
-                }
-                crate::peer::PeerStep::Deferred => return false,
-                crate::peer::PeerStep::Local(guard) => guard,
-            };
+        let _announced = match crate::peer::download::first(self.peer.as_ref(), &row).await {
+            crate::peer::PeerStep::Done => {
+                let _ = self.event_tx.send(format!("processed:{}", row.youtube_id));
+                return true;
+            }
+            crate::peer::PeerStep::Deferred => return false,
+            crate::peer::PeerStep::Local(guard) => guard,
+        };
         let _ = self
             .event_tx
             .send(format!("downloading:{}", row.youtube_id));

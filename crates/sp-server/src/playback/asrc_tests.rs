@@ -315,8 +315,8 @@ fn a_20_khz_tone_leaves_nothing_over_minus_120_dbfs_from_24_to_48_khz() {
 #[test]
 fn the_dashboards_tooltips_name_the_outputs_own_figures() {
     use crate::playback::asrc_servo::{
-        BASE_LATENCY_100NS, HARD_EXCESS_100NS, MAX_PPM, MAX_SLEW_PPM_PER_S, REGRESSION_LOCK_SPAN_S,
-        REGRESSION_MIN_POINTS,
+        BASE_LATENCY_100NS, CUSHION_MAX_100NS, HARD_EXCESS_100NS, MAX_PPM, MAX_SLEW_PPM_PER_S,
+        REGRESSION_LOCK_SPAN_S, REGRESSION_MIN_POINTS,
     };
     use sp_core::asio_resampling::{
         CARD_TIP, CONVERSION_TIP, CORRECTION_TIP, FAULTS_TIP, LATENCY_TIP, SLEW_TIP,
@@ -333,6 +333,9 @@ fn the_dashboards_tooltips_name_the_outputs_own_figures() {
     has(FAULTS_TIP, format!("o viac ako {edge_ms} ms skôr"));
     has(CORRECTION_TIP, format!("±{MAX_PPM} ppm"));
     has(SLEW_TIP, format!("o {MAX_SLEW_PPM_PER_S} ppm za sekundu"));
+    // #233 Q1: the reserve an underrun leaves is kept up to one slot.
+    let cushion_ms = format!("{:.1}", CUSHION_MAX_100NS as f64 / 10_000.0).replace('.', ",");
+    has(SLEW_TIP, format!("najviac {cushion_ms} ms"));
     has(CARD_TIP, format!("({REGRESSION_MIN_POINTS} bodov)"));
     assert_eq!(REGRESSION_LOCK_SPAN_S, 60.0, "CARD_TIP: po minúte");
     has(CARD_TIP, "po minúte".to_string());

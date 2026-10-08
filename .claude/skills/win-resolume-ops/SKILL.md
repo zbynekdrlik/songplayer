@@ -508,3 +508,15 @@ Arena "bridge" takes `SP-program-MAX`, and cg OBS is only the "OBS manuál" inpu
 - **RemoteOS shell output must be ASCII.** A Python script printing UTF-8 under
   `PYTHONIOENCODING=utf-8` came back as "(no output)". Use
   `sys.stdout.reconfigure(encoding="ascii", errors="backslashreplace")`.
+- **Genlock at PP reads UNLOCKED, "clock not ok (NTP-only)", by design (#229
+  comment 6054631677).** This is not a SongPlayer fault.
+  - dantesync at PP (`http://resolume-pp.lan:8898/status`, read-only) runs
+    `mode NTP-only`, `is_locked=false`, `gm_source_ip=none`, with its NTP
+    healthy. It has never seen a Dante PTP leader on PP's segment.
+  - DVS alone cannot lead: as the only Dante device it would elect itself
+    from the very PC clock dantesync disciplines.
+  - A lock needs a HARDWARE Dante device on the PP rig LAN (a console card or
+    a Dante interface, as the AIC128-D is at SNV). That is an owner / venue
+    fact, asked by camera-box on camera-box #1361.
+  - Until then every PP output reads UNLOCKED. Do not chase it in SongPlayer;
+    check `:8898/status` first.

@@ -23,11 +23,8 @@
 
 use std::collections::HashMap;
 
-use crate::audio_outputs::{OutputEntry, field_sk, shown_id};
-use crate::config::{
-    SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, SETTING_VBAN_ENABLED,
-    SETTING_VBAN_STREAM_NAME, SETTING_VBAN_TARGETS, audio_network_rate,
-};
+use crate::audio_outputs::{LEGACY_VBAN_KEYS, OutputEntry, field_sk, shown_id};
+use crate::config::{SETTING_AUDIO_NETWORK_RATE, SETTING_AUDIO_OUTPUTS, audio_network_rate};
 
 /// The old keys still wait for their migration into the list.
 pub const MIGRATION_PENDING: &str =
@@ -62,17 +59,11 @@ pub fn same_list(a: Option<&str>, b: Option<&str>) -> bool {
 }
 
 /// The migration of the old keys has not run on the server: `audio_outputs`
-/// is absent (the key, as the server's migration reads it) and a `vban_*`
-/// key exists.
+/// is absent (the key, as the server's migration reads it) and one of
+/// [`LEGACY_VBAN_KEYS`] exists.
 pub fn migration_pending(now: &HashMap<String, String>) -> bool {
     !now.contains_key(SETTING_AUDIO_OUTPUTS)
-        && [
-            SETTING_VBAN_ENABLED,
-            SETTING_VBAN_STREAM_NAME,
-            SETTING_VBAN_TARGETS,
-        ]
-        .iter()
-        .any(|k| now.contains_key(*k))
+        && LEGACY_VBAN_KEYS.iter().any(|k| now.contains_key(*k))
 }
 
 /// Why the save must not send, from `now` (the settings the server holds,

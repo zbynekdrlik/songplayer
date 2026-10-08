@@ -969,6 +969,25 @@ test("a running ASIO output shows its resampling in Slovak, each figure with a t
   expect(realConsoleErrors()).toEqual([]);
 });
 
+test("the reserve an underrun left reads as one, not as the target (#233 Q1)", async ({
+  page,
+  request,
+}) => {
+  await seedAsio(request, "96000");
+  const set = await request.post("/__mock/asio-resampling", {
+    data: { id: "out-1", cushion_ms: 13.33, underruns: 4 },
+  });
+  expect(set.status()).toBe(200);
+  await openSettings(page);
+  await expect(page.locator('[data-testid="audio-output-state"]')).toHaveText(
+    "beží · oneskorenie 71 ms · výpadky 4 · núdzové skoky 0",
+    { timeout: 10000 },
+  );
+  await expect(chip(page, "asio-slew")).toHaveText("drží rezervu +13,3 ms po výpadku");
+  await expect(chip(page, "asio-slew")).toHaveAttribute("title", /ako rezervu \(najviac 33,3 ms\)/);
+  expect(realConsoleErrors()).toEqual([]);
+});
+
 test("while the ratio drains an offset and after a hard re-centre, the row says so (#233)", async ({
   page,
   request,

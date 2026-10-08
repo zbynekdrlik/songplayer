@@ -18,6 +18,7 @@ pub mod metadata;
 pub mod now_playing;
 pub mod obs;
 mod obs_bridge;
+pub mod paid_ai; // #229 item C: the ONE switch every paid AI call site asks
 pub mod panic_hook;
 pub mod peer; // #229: the node exchange (serve what this node has, ask peers first)
 pub mod playback;
@@ -32,6 +33,8 @@ mod song_input; // #136: a stem / dub job's input, re-read after the heavy slot
 mod song_relink; // #136: stems / dub left under an old name → the audio's name
 pub mod startup;
 pub mod stems;
+#[cfg(test)]
+mod test_log; // a scoped log capture shared by the tests
 mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
 
 pub use panic_hook::install_panic_hook;
@@ -310,7 +313,8 @@ pub async fn start(
     } else {
         gemini_model
     };
-    let metadata_chain = metadata::provider_chain(ai_client.clone(), &gemini_key, &gemini_model);
+    let metadata_chain =
+        metadata::provider_chain(&pool, ai_client.clone(), &gemini_key, &gemini_model);
 
     let state = AppState {
         pool: pool.clone(),

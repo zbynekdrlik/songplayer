@@ -20,6 +20,7 @@ pub mod lan;
 pub mod lyrics;
 pub mod queued;
 pub mod repair;
+pub mod standin;
 pub mod stems;
 pub mod throttle;
 pub mod transfer_probe;

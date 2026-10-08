@@ -32,6 +32,19 @@ use super::hasher::{HASH_BYTES_PER_S, hash_unchanged, stat};
 use super::kind::{ArtifactKind, Job};
 use crate::db::models_peer;
 
+/// Whether a peer's stems or lyrics fit this node's audio
+/// ([`Exchange::audio_verdict`]).
+#[derive(Debug)]
+pub(crate) enum AudioVerdict {
+    /// This node's audio IS the audio the peer lists now: take them.
+    Same,
+    /// Another audio: made here instead.
+    Other,
+    /// Not now (`why`): this node's transfers are paused, or it cannot tell
+    /// yet.
+    NotNow(PeerError),
+}
+
 /// A row's audio file on disk now: its path as the row records it, its
 /// size and its mtime (`hasher::stat`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,19 +69,49 @@ impl Exchange {
         youtube_id: &str,
     ) -> Option<PeerStep> {
         let peer = plan.peer.name.as_str();
+        match self.audio_verdict(plan, video_id, youtube_id).await {
+            AudioVerdict::Same => None,
+            AudioVerdict::NotNow(why) => {
+                Some(self.not_now(job, video_id, youtube_id, peer, why).await)
+            }
+            AudioVerdict::Other => {
+                // #229 item C: held while it may not run here, quietly.
+                if !self.may_run_here(job).await {
+                    return Some(self.hold(job, video_id, youtube_id).await);
+                }
+                info!(
+                    youtube_id,
+                    job = job.as_str(),
+                    peer,
+                    "exchange: the peer's copy is made from another audio than this node's - processing here"
+                );
+                Some(PeerStep::Local(Some(self.run_here(job, youtube_id).await)))
+            }
+        }
+    }
+
+    /// Whether `plan`'s stems or lyrics fit row `video_id`'s audio (the
+    /// module doc), with no side effect but an on-demand hash it stores: the
+    /// hooks (`unless_peers_audio`) and a stand-in's supersede
+    /// (`peer::standin`) act on it. This node's own pause is checked first:
+    /// nothing is read or hashed then.
+    pub(crate) async fn audio_verdict(
+        &self,
+        plan: &FetchPlan,
+        video_id: i64,
+        youtube_id: &str,
+    ) -> AudioVerdict {
+        let peer = plan.peer.name.as_str();
         if self.transfers_paused().await {
-            return Some(
-                self.not_now(job, video_id, youtube_id, peer, PeerError::Paused)
-                    .await,
-            );
+            return AudioVerdict::NotNow(PeerError::Paused);
         }
         let Some(listed) = plan.peer_audio.as_ref() else {
             let why = PeerError::NotYet("the peer lists no audio of the video now".into());
-            return Some(self.not_now(job, video_id, youtube_id, peer, why).await);
+            return AudioVerdict::NotNow(why);
         };
         let Some(row) = self.row_audio(video_id).await else {
             let why = PeerError::NotYet("no audio of the row is on disk here".into());
-            return Some(self.not_now(job, video_id, youtube_id, peer, why).await);
+            return AudioVerdict::NotNow(why);
         };
         let fetched =
             models_peer::fetch_record(&self.pool, youtube_id, ArtifactKind::Audio.as_str())
@@ -93,21 +136,16 @@ impl Exchange {
         } else {
             let Some(sha) = self.audio_sha(&row).await else {
                 let why = PeerError::NotYet("this node's audio could not be hashed now".into());
-                return Some(self.not_now(job, video_id, youtube_id, peer, why).await);
+                return AudioVerdict::NotNow(why);
             };
             Some(sha)
         };
         own.hashed = hashed.as_deref();
         if same_audio(peer, listed, own) {
-            return None;
+            AudioVerdict::Same
+        } else {
+            AudioVerdict::Other
         }
-        info!(
-            youtube_id,
-            job = job.as_str(),
-            peer,
-            "exchange: the peer's copy is made from another audio than this node's - processing here"
-        );
-        Some(PeerStep::Local(Some(self.run_here(job, youtube_id).await)))
     }
 
     /// The peer's copy is not taken now (`why`): the job waits like a

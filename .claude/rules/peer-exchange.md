@@ -5,6 +5,8 @@ paths:
   - "crates/sp-server/src/db/models_peer*.rs"
   - "crates/sp-server/src/db/mod_tests_v29.rs"
   - "crates/sp-server/src/db/mod_tests_v30.rs"
+  - "crates/sp-server/src/db/mod_tests_v31.rs"
+  - "crates/sp-server/src/lyrics/queue_sql.rs"
   - "crates/sp-server/src/downloader/mod.rs"
   - "crates/sp-server/src/downloader/mod_tests_peer.rs"
   - "crates/sp-server/src/stems/worker.rs"
@@ -41,6 +43,9 @@ and the peer client with the probe. Lane 6 ships the PP deploy
 Lanes 7–9, one combined lane (design record 6035823568), ship the ask-first
 core and its four hooks: the download, stem, lyrics and metadata-repair
 workers ask their peers before they run a job (below, from "Ask first").
+The PP lyrics lane (PP audit 6054582866, design record 6056986290) makes
+PP wait for SNV's lyrics and replace a track it made itself ("The lyrics
+wait for a peer that has the song", below).
 
 ## Settings (`peer::config::NodeConfig`, read live — no restart)
 
@@ -293,17 +298,36 @@ workers ask their peers before they run a job (below, from "Ask first").
   with the worker's own predicate, never a copy:
   - download: `downloader::DOWNLOAD_DUE` (`fetch_next_unprocessed`'s: not
     downloaded, active playlist, retry due);
-  - lyrics: `lyrics::reprocess::queued_where`, buckets 1–3 of the lyrics
+  - lyrics: `lyrics::queue_sql::queued_where`, buckets 1–3 of the lyrics
     queue (manual, null, stale; bucket 4, the full-mix upgrade, already
     serves lyrics at the current version), only while
-    `lyrics_worker_enabled` is on, and never for a video the catalog will
+    `lyrics_worker_enabled` is on and this node's paid AI too (#229 item
+    C), and never for a video the catalog will
     not serve lyrics of (the dub rule above: any row dub-requested or
-    Live-Translate);
+    Live-Translate). Also, while `stem_worker_enabled` is on, a row those
+    buckets take once its own recheck time has come
+    (`queued_later_where`, its recheck ignored) whose stems are queued
+    here (`STEM_ELIGIBLE_PRED` on the same row; a running stems job's row
+    still matches it): a new song's lyrics wait for its stems
+    (`WaitingForStems` puts the row back for 10 min,
+    `record_lyrics_wait`), and the worker WILL take it once they are done.
+    Before (PP audit), SNV listed no lyrics job for most of the stems' run
+    and PP read "nobody has it". Stems that are done, unsupported, in a
+    failure backoff or impossible (no audio) are no such wait. The window
+    between the stems done and the lyrics' recheck (≤ 10 min) stays
+    unlisted: PP waits through it because SNV has the song (below). A row
+    whose recheck is a lyrics FAILURE backoff (up to 24 h) is listed too
+    while its stems are queued (it will be taken, later): a peer then waits
+    up to its 2 h bound. Two queries, merged and sorted, each id once;
   - stems: `db::models_stems_priority::STEM_ELIGIBLE_PRED`, only while
     `stem_worker_enabled` is on.
 - A change to a worker's queue changes what the catalog announces: keep the
-  shared predicate the one truth (`LYRICS_DUE` / `LYRICS_NOT_PARKED` are
-  what the buckets and `queued_where` are built from).
+  shared predicate the one truth. The lyrics queue's predicates live in
+  `lyrics/queue_sql.rs` (`reprocess.rs` is near the cap): ONE text builds
+  `LYRICS_ELIGIBLE` and `LYRICS_DUE` (a `macro_rules!` + `concat!`),
+  `LYRICS_NOT_PARKED`, and buckets 1–3's conditions written once for
+  `queued_where` and `queued_later_where`; the selector's buckets read
+  `LYRICS_DUE` / `LYRICS_NOT_PARKED` from there.
 - One entry per kind the job makes (`Job::makes`), `started_at: null`.
 - A node waits on a peer's queued entry exactly as on a running one
   (`peer::decide`, bounded at 2 h), and only on its own listed peers'.
@@ -551,9 +575,21 @@ workers ask their peers before they run a job (below, from "Ask first").
 - `decide` (pure), the first case that applies: a peer holding EVERY
   needed artifact (`Job::needs`) at a version this node takes → Fetch
   (even after 2 h); waited ≥ `MAX_PEER_WAIT` (2 h) → Local; a peer
-  announcing a job (running or queued) that makes those kinds → Wait; a
-  peer whose catalog could not be read (an outage, a refused key or token,
-  its API off) → Wait, same bound; else Local. No peer → Local, no read.
+  announcing a job (running or queued) that makes those kinds → Wait
+  (`PeerRunsIt`); a job that waits while a peer has the song
+  (`Job::waits_while_a_peer_has_the_song`: the lyrics alone) and the listed
+  peer this node took the video's audio from (`decide::SongFrom`, the
+  `peer_fetches` audio record's node and sha256, `Exchange::song_from`)
+  still listing that very audio (`decide::song_holder`, review round 2:
+  the sha too), or announcing the video's audio (a queued or running
+  download: re-hashing it after a rename, ~70 s unlisted, review round 8)
+  → Wait (`PeerHasTheSong`, same bound); a peer whose catalog
+  could not be read (an outage, a refused key or token, its API off) →
+  Wait, same bound; else Local (`NobodyHasIt`: nobody has or makes it, and
+  for the lyrics the peer they took the song from does not list it). No
+  peer → Local, no read. `ask` reads `song_from` only for a lyrics job
+  whose result does not already stand in for a peer's copy; one that
+  stands in is decided with its 2 h bound spent (below).
 - `Exchange::ask(job, youtube_id)`: settings that do not hold → Local
   (WARN); not asking (no node name or no peer: SNV in phase 1) → Local with
   no network and no DB write; else the peers' catalogs (cached 60 s), the
@@ -561,10 +597,19 @@ workers ask their peers before they run a job (below, from "Ask first").
   announced in this node's catalog while the hook holds the guard. A Wait
   records its start (`peer_waits`, the FIRST start kept).
 - Every job that runs here after a peer read goes through
-  `Exchange::run_here`: it ENDS the job's wait, forgets the `peer_fetches`
-  records of what the job makes (`forget_origins`, the audio guard below),
+  `Exchange::run_here`: it ENDS the job's wait (`Exchange::end_wait`),
+  forgets the `peer_fetches` records of what the job makes
+  (`forget_origins`, the audio guard below), drops a stand-in of it
+  (`peer::standin`; the caller records a new one when what it makes
+  stands in for a peer's copy),
   drops the parts a fetch of it left, then announces it (a later ask never
-  inherits an old start and its spent bound). The hooks' own Local paths use
+  inherits an old start and its spent bound). One exception: a lyrics job
+  that stands in for a peer's copy runs here through
+  `Exchange::run_here_standing` (its ask, its hand-off and a fetch given
+  up): only the fetch records, the parts and the announcement, neither the
+  wait nor the stand-in touched, so a spent bound its hand-off left
+  survives a pick that meets no peer copy and a run put back runs here at
+  once, never a fresh 2 h (review rounds 5–7). The hooks' own Local paths use
   it too (an operator's lyrics ask, nothing newer, a fetch that kept
   failing, another audio). The no-peers and bad-settings paths only announce
   (`ask` writes nothing; the download hook then forgets the pair's
@@ -600,6 +645,16 @@ workers ask their peers before they run a job (below, from "Ask first").
   `lyrics_source` keep the PEER's real values (they drive
   `REPAIR_QUEUE_WHERE`, `alignment_model_for_source`, the ★ marker); never
   write `peer:<node>` into them.
+- #229 item C (`paid-ai.md`): while this node's paid AI is off, a job
+  that calls it (`Job::paid_ai`: the lyrics) never runs here.
+  `Exchange::may_run_here` is asked at every "run here" (`ask`'s Local,
+  no-peers and bad-settings paths → `Ask::Held`; the hooks' operator ask,
+  nothing newer, another audio, a stand-in past the bound, a failed fetch)
+  BEFORE the run's own records, and the row is held (`Exchange::hold`:
+  30 min, no attempt, nothing recorded about a run here: the wait, a spent
+  bound and a stand-in stay). A peer's copy is still taken, a peer's job
+  still waited for; a failed fetch of a held job waits with no bound (no
+  give-up WARN). `peer::queued` announces no lyrics queued while off.
 - Each hook returns `PeerStep`: `Done` (the artifacts are in place and
   recorded), `Deferred` (the row's own recheck column moved, NO attempt
   counted, `Exchange::defer`: `defer_download` → `next_attempt_at`,
@@ -619,8 +674,10 @@ workers ask their peers before they run a job (below, from "Ask first").
   `manual` correction, else the peer's title when it is a provider's or an
   operator's (`adopted_title`: metadata version ≥ 1, a song, the label this
   node writes — `manual` stays `manual`, a peer's operator correction is
-  final here too), else this node's providers (`download_title`). A failed
-  fetch never calls a provider. Recorded by `record_download` (the local
+  final here too), else the title parser's, marked for the repair
+  (`metadata::parser_for_repair`; #229 item A: the peer holds this very
+  song and names it too, so no provider — paid AI — is asked here; the
+  hook takes no provider chain). A failed fetch never calls a provider. Recorded by `record_download` (the local
   path's own, #136: it re-reads a correction made meanwhile, and answers
   the title it recorded); a peer's title is recorded in `peer_fetches` too
   (kind `metadata`, `download::record_title`, the repair's own), only when
@@ -738,9 +795,21 @@ workers ask their peers before they run a job (below, from "Ask first").
   has after its download; the guard's own tests change PP's bytes so that
   one branch alone decides (the record, a stored hash, a hash taken now).
 - Lyrics: never for an operator's ask here (`lyrics_manual_priority`, a
-  non-blank `lyrics_override_text`), never for a video whose
-  `{yt}_lyrics.json` here is a dub's subtitles (any row of it here
-  dub-requested or `gemini-live-translate`), a failed read → here. The
+  non-blank `lyrics_override_text`) on ANY row of the video (its rows serve
+  one `{yt}_lyrics.json`; review round 5: the asked row only before), never
+  for a video whose `{yt}_lyrics.json` here is a dub's subtitles (any row
+  of it here dub-requested or `gemini-live-translate`), a failed read →
+  here; one query, `lyrics::kept_local`, which the stand-in's look shares
+  (V31's back-fill is a literal copy of it without the pipeline version: a
+  stand-in it made for a video whose stale row awaits a reprocess is
+  dropped by its first look). The dub and the Live-Translate track count
+  on any row; an operator's mark only where the lyrics queue acts on it
+  (review rounds 7-8): a text on a row of an ACTIVE playlist (the worker
+  makes no other row's lyrics), a reprocess flag on such a row that is not
+  parked (`queue_sql::LYRICS_NOT_PARKED`, bucket 1's own condition: the
+  queue never takes another, so its flag is never cleared;
+  `reprocess-all-stale` / `reprocess-catalog-with-new-gate` set it with no
+  playlist filter, and the Reprocess route leaves `asr_gap` in place). The
   peer's `/videos` row must match its catalog (pipeline version) and must
   not be `gemini-live-translate`; the same source at the same version as
   the row already serves = nothing newer → runs here (the daily full-mix
@@ -748,7 +817,19 @@ workers ask their peers before they run a job (below, from "Ask first").
   upgrade: `NothingNewer` does not look at the peer's announcements, a known
   limit — once a day per full-mix song both nodes may try it). A track over
   16 MiB is refused before the transfer (`MAX_LYRICS_BYTES`: the part is
-  read whole). The JSON is parsed as a typed `LyricsTrack` whose
+  read whole). A video whose track here stands in for a peer's copy takes
+  no copy through the hook (review round 3: the hook adopted one row and
+  left the video's other rows on the stand-in's columns for good): a Fetch
+  there is handed to the stand-in (`Exchange::hand_to_standin`: the
+  stand-in due now, the row put back for `recheck_after`, no attempt,
+  counted as waiting against the 2 h bound, review round 4; after the bound
+  the job runs here, still standing in, through `run_here_standing`: the
+  spent bound is KEPT, so a run put back runs here again at once, review
+  round 5; the look's `fetched` ends it, so does a stand-in kept for good);
+  the stand-in's own look takes the
+  copy into every row, whatever its source ("The lyrics wait for a peer
+  that has the song" below). The JSON is parsed as a typed
+  `LyricsTrack` whose
   `source` must equal the row's (a refused part is deleted), renamed into
   `{yt}_lyrics.json`; `adopt_lyrics` writes source, version and alignment
   model through the lyrics row's one writer (`mark_video_lyrics_complete`),
@@ -764,7 +845,15 @@ workers ask their peers before they run a job (below, from "Ask first").
   asks no provider but still takes the peers' titles. The peer's catalog
   must list the video's metadata at version ≥ 1 (a parser's title there
   costs no `/videos` request) and `/videos` must match that entry's sha256
-  (`PeerMetadata::to_bytes`); `PeerTitle::of` (`adopted_title`) decides. `apply_title` is the
+  (`PeerMetadata::to_bytes`); `PeerTitle::of` (`adopted_title`) decides.
+  #229 item A: with no peer's title yet the repair WAITS
+  (`peer::repair::waits_for_peer`, `ReprocessOutcome::WaitsForPeer`: no
+  provider, no backoff) while the listed peer this node took the song's
+  audio from lists that same audio (sha256) or cannot be read, bounded at
+  2 h (`peer_waits` job `metadata`, `decide::gives_up`); a peer's title
+  taken ends the wait (`repair::end_wait`); past the bound, or for a song
+  this node downloaded itself or whose peer holds another audio, the
+  providers repair it. `apply_title` is the
   ONE repair write (#136 locked re-check + rename + record), from a peer's
   title or the providers'; the origin goes to `peer_fetches` (kind
   `metadata`, `download::record_title`) only once it wrote the title (a row that
@@ -773,6 +862,159 @@ workers ask their peers before they run a job (below, from "Ask first").
   the whole tick, the fetch included. The download and repair workers have
   none; `dub_worker_enabled` stays off at PP until the owner wants dabing
   there.
+
+## The lyrics wait for a peer that has the song (`peer::standin`, V31; PP audit 6054582866)
+
+The live case (8.10.2026): PP fetched `8ohdO2nINEI` from SNV, its stems
+waited for SNV (`PeerRunsIt`), and its lyrics logged `exchange: no peer has
+it - processing here … why=NobodyHasIt`. SNV listed no lyrics job (its
+lyrics waited on its stems), PP's AI calls failed (no AI proxy reachable
+from PP), and the degraded track at the current pipeline version was never
+replaced: a local result leaves the lyrics queue for good (served, or
+parked `no_source` by `fail_song`). Three rules:
+
+- **SNV announces lyrics that wait on its own queued stems** ("Queued jobs"
+  above).
+- **A lyrics job waits while the peer it took the song from has it**
+  (`decide`, above): that peer makes the lyrics from the very audio this
+  node fetched, while a node's own track stays at its version for good (and
+  PP's is degraded). Only THAT peer (review round 1): a node whose audio is
+  its own download or a copy (no `peer_fetches` audio record) waits on
+  nobody and processes its lyrics at once (a peer's lyrics would not fit
+  its audio), and two nodes listing each other (phase 2) never wait on
+  each other's audio. And only while it lists that very audio (review
+  round 2, the record's sha256): a source that downloaded the song again
+  lists another audio, whose lyrics the audio guard would refuse; one that
+  announces the video's audio (re-hashing it, or downloading it anew) is
+  waited for, bounded (review round 8: "nobody has it" then ran the job
+  here with no stand-in). The stems do not wait on the song (the same model on every node: a local
+  separation is not degraded), nor does the download (it fetches the song
+  itself).
+- **A track made here while a peer had the song STANDS IN for the peer's
+  copy** (`peer_standins` `(youtube_id, job, peer, made_at_ms,
+  next_check_ms)`, `models_peer::{record,due,recheck,forget}_standin`,
+  its peer read by `models_peer::standin_peer` / `Exchange::standin_peer`):
+  - recorded (`Exchange::stand_in`, INFO `exchange: made here while a peer
+    has the song - its copy replaces this one once it has it`, first looked
+    at 10 min later) when the lyrics job runs here after asking while the
+    peer it took the song's audio from had it: `ask` →
+    `Local(WaitedLongEnough)` for the listed peer `song_from` names, its
+    catalog read now or not (`decide::song_source`; review round 2: an
+    outage at the bound kept the degraded track for good), or
+    `after_failed_fetch` giving up on that peer's copy (a peer the audio
+    did not come from: no stand-in);
+  - kept AS IT WAS while the job runs here again (`ask` → any `Local`,
+    the hand-off or `after_failed_fetch` giving up on any peer, while it
+    stands in: `Exchange::run_here_standing` never touches the record, its
+    age and next look stay, a DEBUG line; review rounds 3 and 7: an INFO
+    and a reset recheck curve per putting back before, then a drop and a
+    write-back). Such an ask does not
+    read `song_from` and is decided with its bound spent (`waited` =
+    `MAX_PEER_WAIT`: it waited once), so a local run put back after the
+    bound (for its stems, memory, the wall) or a later reprocess waits for
+    no peer again — neither on the song (review round 2) nor on a peer's
+    announced job (review round 4: SNV lists the lyrics as queued while its
+    stems are, so that was a new 2 h per putting back); a peer holding the
+    copy still comes first, handed to the look below;
+  - over (`Exchange::drop_standin`) in `run_here` (an operator's ask,
+    another audio: the job's own result is final) and `fetched` (the
+    peer's copy is in place, through the look below; the hook never adopts
+    for a stand-in, it hands the copy to the look). The stand-in path calls
+    `run_here` first, then records;
+  - V31 back-filled it once: a video whose audio a peer gave (a
+    `peer_fetches` audio record) with a lyrics result made here (a
+    `lyrics_source`, no lyrics record), no dub / Live-Translate on any row
+    and no operator's mark the lyrics queue acts on (`kept_local`'s rule as
+    a literal copy, without the pipeline version), due at once (PP's
+    `8ohdO2nINEI`; SNV fetches
+    nothing). Known limit: an operator's reprocess made at PP before V31
+    has the same shape (the manual flag is cleared at completion) and is
+    superseded once;
+  - the lyrics worker's tick, right after its kill switch
+    (`supersede_next`, then `LyricsCompleted` for each row it adopted):
+    ONE due stand-in (the one due longest), RESCHEDULED FIRST to a quarter
+    of its age, 10 min to 6 h (`standin_recheck`: a peer that never makes
+    the lyrics costs four catalog lookups a day). Then:
+    - every row of the video read; none left → dropped. The audio check
+      reads a row that records an audio (rows share it), else the lowest
+      (review round 1: a lowest row with none kept the stand-in waiting
+      forever);
+    - an operator's text or ask, a dub or a Live-Translate row on the video
+      (`lyrics::kept_local`, the hook's own query) → dropped, no peer asked
+      (a dropped stand-in also ends a spent wait its hand-off kept);
+    - the listed peers' catalogs (cached 60 s): the first holding the
+      lyrics at this node's version (`holds`) → the audio guard's verdict
+      (`Exchange::audio_verdict`, the half of `unless_peers_audio` that
+      acts on nothing; its only side effect is the on-demand hash it
+      stores): another audio → dropped; this node's pause, or
+      it cannot tell yet → asked again at the recheck;
+    - `lyrics::peer_row` (the size bound, the peer's row against its
+      catalog, never the Live-Translate track) and `lyrics::place` (the
+      fetch, the typed parse, the source check, the rename into
+      `{yt}_lyrics.json`): a failure WARNs (`exchange: a peer's copy of a
+      stand-in was not taken - asking again later`) and waits for the
+      recheck;
+    - every row of the video takes the peer's lyrics columns
+      (`adopt_lyrics`: the file is the video's), then `fetched` (the
+      origin recorded, the wait ended, the stand-in dropped, INFO
+      `exchange: done with a peer's copy`) — only once EVERY row took it
+      (review round 2): a row whose write failed (WARNed) keeps the
+      stand-in, rescheduled, and its next look places the copy into every
+      row again;
+    - settings that do not hold WARN (`exchange: a stand-in waits - the
+      settings do not hold`) and wait for the recheck.
+
+  The peer's copy replaces the stand-in whatever its source: unlike the
+  hook's `NothingNewer`, no same-source check (two runs of the same tier
+  are not the same track). INFO `exchange: a stand-in is kept for good -
+  the peer's copy is not taken` (`why`) for a dropped one; DEBUG `exchange:
+  a stand-in waits - …` for one asked again at its recheck. Known limit
+  (the hooks' too): an operator's Reprocess clicked during the transfer is
+  cleared by the adoption (`mark_video_lyrics_complete` sets the manual
+  flag to 0); the window is the transfer, a few seconds. The supersede and
+  a local lyrics run never overlap: both run inside the lyrics worker's one
+  tick (the supersede first).
+  OPEN for phase 2 (SNV listing PP): a stand-in at SNV whose song came from
+  PP would take PP's copy whatever its tier, and PP's track is the degraded
+  one (no AI proxy at PP); which node's lyrics may replace which is to be
+  decided with the phase-2 tie-break ("Kinds, versions, jobs"). Also OPEN
+  there (review round 7): the look takes the first listed peer that holds
+  the lyrics (`peers_lyrics`), not the stand-in's recorded peer first, so
+  another peer's copy of another audio drops the stand-in for good even
+  when the source's copy would fit (one peer in phase 1: no effect).
+- **The same gap elsewhere, checked (design record 6056986290):** the
+  metadata repair has none (a failed provider call keeps the row in the
+  repair queue, and `peer_title` is asked first on every pass; a provider
+  title made here has the peer's rank, 1); the translation is part of the
+  lyrics track (adopted and superseded with it; `retry_missing_translations`
+  / the retranslate pass rewrite only this node's own track); the dub is
+  not exchanged (`dub_worker_enabled` off at PP, a dubbed video's lyrics
+  local by design).
+- Tests: `queued_tests.rs::lyrics_waiting_on_their_queued_stems_are_queued`,
+  `decide_tests.rs::{a_lyrics_job_waits_while_a_peer_has_the_song,
+  a_lyrics_job_waits_only_on_the_peer_it_took_the_song_from,
+  a_lyrics_job_waits_only_for_the_audio_it_took,
+  a_lyrics_job_waits_while_its_source_announces_the_songs_audio}`,
+  `kind_tests.rs::only_the_lyrics_wait_while_a_peer_has_the_song`,
+  `lyrics_tests.rs::{lyrics_wait_while_a_peer_has_the_song,
+  lyrics_of_a_song_downloaded_here_do_not_wait_for_a_peer,
+  a_stand_in_met_by_the_hook_is_replaced_in_every_row,
+  a_stand_in_handed_the_copy_runs_here_after_the_bound,
+  a_stand_ins_spent_bound_survives_a_pick_with_the_peer_unreachable,
+  a_reprocess_left_on_an_inactive_playlists_row_does_not_keep_the_lyrics_here,
+  an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here,
+  an_operators_mark_the_queue_never_acts_on_does_not_keep_the_lyrics_here}`,
+  `standin_tests.rs` (the supersede over two real nodes: every row, a
+  parked track, the check row with an audio, the recheck, another audio,
+  an operator or a dub, no row, the order, the recheck curve, every row or
+  none over, an inactive playlist's reprocess flag no owner; the stand-in
+  recorded after the bound — its source read or
+  unreachable — and after a failing fetch from that source only, kept as
+  it was when the run is put back (no new wait on the song or on an
+  announced job) or another peer's fetch fails, ended by `run_here` /
+  `fetched`, a spent wait ended with a stand-in kept for good),
+  `db/mod_tests_v31.rs` (the back-fill's cases),
+  `lyrics/worker_tests_peer.rs::the_worker_replaces_a_stand_in_with_the_peers_copy`.
 
 ## PP's workers on (MAIN SESSION OPS, after the release with lanes 7–9 reaches PP)
 
@@ -787,6 +1029,25 @@ workers ask their peers before they run a job (below, from "Ask first").
 4. Live check: a new video in a playlist both sites sync; once SNV has
    processed it, PP logs `exchange: done with a peer's copy` for its
    download, stems and lyrics, and no `stem worker: separating` for it.
+5. The PP lyrics lane (after the release that carries it reaches PP): while
+   SNV runs the new song's stems and lyrics, PP's lyrics log `exchange: a
+   peer will have it, or could not be asked - waiting` with `job=lyrics`
+   and `why=PeerRunsIt` (SNV announces lyrics waiting on its stems) or
+   `why=PeerHasTheSong`, and NEVER the DEBUG `exchange: no peer has it -
+   processing here … job=lyrics why=NobodyHasIt` for a song PP fetched
+   from SNV while SNV still lists the very audio PP took (a song SNV
+   downloaded again logs it by design; a run put back while it stands in
+   logs the DEBUG `exchange: run here again - it still stands in for the
+   peer's copy`). Then `exchange: done with a peer's copy` with
+   `job=lyrics source=peer:snv`. The stand-in V31 back-filled for
+   `8ohdO2nINEI` is replaced within PP's first lyrics ticks after the start
+   (the look takes ONE due stand-in per tick; the back-filled ones, all due
+   at 0, in YouTube-id order) (`exchange: done with a peer's copy`,
+   `job=lyrics`, for that id;
+   `SELECT * FROM peer_standins` empty after it) once SNV lists that
+   video's lyrics at PP's pipeline version and PP's audio check says it is
+   SNV's audio; until then the DEBUG `exchange: a stand-in waits - …` names
+   why, and it is looked at again 10 min to 6 h later.
 
 ## Tests
 
@@ -797,8 +1058,9 @@ workers ask their peers before they run a job (below, from "Ask first").
   chain that counts its calls. Two nodes talk over real HTTP
   (`client_tests.rs`, `fetch_tests.rs`, `lan_tests.rs`, `ask_tests.rs`,
   `download_tests.rs`, `stems_tests.rs`, `lyrics_tests.rs`,
-  `repair_tests.rs`, `audio_tests.rs`, `transfer_probe_tests.rs`, and the
-  workers' `*_tests_peer.rs`). To prove a write happens BEFORE a later
+  `repair_tests.rs`, `audio_tests.rs`, `transfer_probe_tests.rs`,
+  `held_tests.rs` (item C: paid AI off), and the workers'
+  `*_tests_peer.rs`). To prove a write happens BEFORE a later
   step, make that step fail: a test trigger `CREATE TRIGGER … BEFORE
   UPDATE ON videos BEGIN SELECT RAISE(ABORT, '…'); END` fails
   `record_download`, and the origin must already be recorded

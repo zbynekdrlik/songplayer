@@ -23,6 +23,9 @@
 //!   PATCH (400, the reason names the entry and the field, never the value),
 //!   a good one is stored normalized.
 //!
+//! - #229 item C: `paid_ai_enabled` takes `true`, `false` or `""` only
+//!   (`paid_ai::checked`); anything else refuses the PATCH (400).
+//!
 //! The workers read the settings from the database, never through this API,
 //! so they always see the secrets in clear.
 
@@ -89,6 +92,7 @@ pub async fn prepare(
     let mut writes = Vec::new();
     for key in keys {
         let value = crate::playback::audio_out_config::checked(key, &sent[key])?;
+        let value = crate::paid_ai::checked(key, &value)?;
         let value = crate::peer::config::checked(pool, key, &value, &sent).await?;
         writes.push((key.clone(), value));
     }

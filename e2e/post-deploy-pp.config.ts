@@ -3,7 +3,8 @@ import { defineConfig } from "@playwright/test";
 /**
  * #229: the post-deploy subset at the PP site, run by
  * .github/workflows/deploy-pp.yml after every main release:
- * `post-deploy-pp.spec.ts` + `post-deploy-max.spec.ts` (SP-program-MAX) +
+ * `post-deploy-pp.spec.ts` (#229 item C: paid AI off at PP, asserted there) +
+ * `post-deploy-max.spec.ts` (SP-program-MAX) +
  * `post-deploy-settings-secrets.spec.ts` (every secret masked, also at PP) +
  * `post-deploy-audio-asio.spec.ts` (#233: DVS registered; the ASIO outputs
  * SP_ASIO_OUTPUTS_EXPECTED names run a clean minute).

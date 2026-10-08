@@ -212,3 +212,149 @@ async fn a_peers_parser_title_leaves_the_repair_to_the_providers() {
         None
     );
 }
+
+/// #229 item C: while PP's paid AI is off the repair takes a peer's title
+/// and asks no provider; a row no peer has a title for is held: still in
+/// the queue, no provider call, no backoff. Once paid AI is on, the held
+/// row asks the providers.
+#[tokio::test]
+async fn paid_ai_off_takes_a_peers_title_and_holds_the_rest() {
+    let (_snv, pp) = snv_and_pp().await;
+    crate::peer::rig::set(pp.pool(), "paid_ai_enabled", "false").await;
+    let id = pp_with_a_parser_title(&pp).await;
+    let other = parser_row(&pp, "bbbbbbbbbbb").await;
+    let (chain, calls) = counting_chain();
+    let chain = Arc::new(chain.gated(pp.pool().clone()));
+    let mut worker = ReprocessWorker::new(pp.pool().clone(), chain, pp.cache().to_path_buf())
+        .with_peer(pp.ex.clone());
+    assert_eq!(worker.process_all().await.unwrap(), 1, "the peer's title");
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(title(&pp, id).await.0, "Way Maker");
+    assert_eq!(
+        title(&pp, other).await,
+        ("Guess".into(), "Unknown".into(), Some("regex".into()), 1),
+        "held in the repair queue"
+    );
+    assert!(worker.per_video_backoff.is_empty(), "no backoff");
+    crate::peer::rig::set(pp.pool(), "paid_ai_enabled", "true").await;
+    assert_eq!(worker.process_all().await.unwrap(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// SNV holds the song (hashed: its catalog lists the audio) under a parser
+/// title; PP took the song's audio from SNV and holds the row under a parser
+/// title too.
+async fn snv_parser_and_pp_from_snv() -> (TestNode, TestNode, i64) {
+    let (snv, pp) = snv_and_pp().await;
+    sqlx::query("UPDATE videos SET gemini_failed = 1, metadata_source = 'regex'")
+        .execute(snv.pool())
+        .await
+        .unwrap();
+    snv.hash_now().await;
+    let id = pp_with_a_parser_title(&pp).await;
+    pp.audio_from(YT, "snv").await;
+    (snv, pp, id)
+}
+
+/// #229 item A: the repair waits (no provider, no backoff) while the peer
+/// PP took the song's audio from still holds it: SNV names it too, and its
+/// title is taken then. Past the 2 h bound PP's providers repair it.
+#[tokio::test]
+async fn the_repair_waits_while_the_peer_it_took_the_audio_from_holds_it() {
+    let (_snv, pp, id) = snv_parser_and_pp_from_snv().await;
+    let (chain, calls) = counting_chain();
+    let mut worker =
+        ReprocessWorker::new(pp.pool().clone(), Arc::new(chain), pp.cache().to_path_buf())
+            .with_peer(pp.ex.clone());
+    assert_eq!(worker.process_all().await.unwrap(), 0);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "SNV names it: no provider here"
+    );
+    assert_eq!(title(&pp, id).await.3, 1, "still in the repair queue");
+    assert!(worker.per_video_backoff.is_empty(), "no backoff");
+    let bound = i64::try_from(crate::peer::decide::MAX_PEER_WAIT.as_millis()).unwrap();
+    sqlx::query("UPDATE peer_waits SET since_ms = ?")
+        .bind(crate::peer::wire::now_ms() - bound - 60_000)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(worker.process_all().await.unwrap(), 1, "past the bound");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(title(&pp, id).await.0, "Chain Song");
+}
+
+/// #229 item A: a peer that cannot be read is waited for too (bounded),
+/// as `peer::decide` waits for one.
+#[tokio::test]
+async fn the_repair_waits_for_a_peer_that_cannot_be_read() {
+    let (snv, pp, id) = snv_parser_and_pp_from_snv().await;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let gone = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let mut unreachable = snv.as_peer(SNV_KEY);
+    unreachable.base_url = gone;
+    pp.set_peers(&[unreachable]).await;
+    let (chain, calls) = counting_chain();
+    let mut worker =
+        ReprocessWorker::new(pp.pool().clone(), Arc::new(chain), pp.cache().to_path_buf())
+            .with_peer(pp.ex.clone());
+    assert_eq!(worker.process_all().await.unwrap(), 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(title(&pp, id).await.3, 1);
+}
+
+/// #229 item A: SNV holds ANOTHER audio than the one PP took (it downloaded
+/// the song again since): the wait is keyed on the audio PP took (as the
+/// ruling asked: the peer the song came from, still holding it), so PP's
+/// providers repair the row at once.
+#[tokio::test]
+async fn the_repair_asks_its_providers_when_the_peer_holds_another_audio() {
+    let (snv, pp) = snv_and_pp().await;
+    sqlx::query("UPDATE videos SET gemini_failed = 1, metadata_source = 'regex'")
+        .execute(snv.pool())
+        .await
+        .unwrap();
+    let audio: String = sqlx::query_scalar("SELECT audio_file_path FROM videos")
+        .fetch_one(snv.pool())
+        .await
+        .unwrap();
+    std::fs::write(&audio, bytes(4_000, 7)).unwrap();
+    snv.hash_now().await;
+    let id = pp_with_a_parser_title(&pp).await;
+    pp.audio_from(YT, "snv").await;
+    let (chain, calls) = counting_chain();
+    let mut worker =
+        ReprocessWorker::new(pp.pool().clone(), Arc::new(chain), pp.cache().to_path_buf())
+            .with_peer(pp.ex.clone());
+    assert_eq!(worker.process_all().await.unwrap(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(title(&pp, id).await.0, "Chain Song");
+}
+
+/// #229 item A (review round 12): a providers' repair past the bound ends
+/// the wait too, so a later re-queue of the video waits for its peer
+/// afresh.
+#[tokio::test]
+async fn a_providers_repair_ends_the_wait() {
+    let (_snv, pp, _id) = snv_parser_and_pp_from_snv().await;
+    let (chain, calls) = counting_chain();
+    let mut worker =
+        ReprocessWorker::new(pp.pool().clone(), Arc::new(chain), pp.cache().to_path_buf())
+            .with_peer(pp.ex.clone());
+    assert_eq!(worker.process_all().await.unwrap(), 0, "it waits");
+    let bound = i64::try_from(crate::peer::decide::MAX_PEER_WAIT.as_millis()).unwrap();
+    sqlx::query("UPDATE peer_waits SET since_ms = ?")
+        .bind(crate::peer::wire::now_ms() - bound - 60_000)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(worker.process_all().await.unwrap(), 1, "past the bound");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0, "the repair ended the wait");
+}

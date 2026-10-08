@@ -8,10 +8,9 @@ use crate::metadata::manual::{DownloadTitle, MANUAL_SOURCE};
 use crate::peer::ask::Ask;
 use crate::peer::config::NodeConfig;
 use crate::peer::kind::{ArtifactKind, Job};
-use crate::peer::rig::{SNV_KEY, TestNode, bytes, counting_chain};
+use crate::peer::rig::{SNV_KEY, TestNode, bytes};
 use crate::peer::wire::PeerMetadata;
 use sp_core::metadata::MetadataSource;
-use std::sync::atomic::Ordering;
 
 const YT: &str = "aaaaaaaaaaa";
 
@@ -141,8 +140,7 @@ fn a_peer_title_counts_as_taken_only_when_it_was_written() {
 #[tokio::test]
 async fn a_peers_pair_is_taken_and_nothing_runs_here() {
     let (_snv, pp, row) = snv_and_pp().await;
-    let (chain, calls) = counting_chain();
-    let step = first(Some(&pp.ex), &chain, &row).await;
+    let step = first(Some(&pp.ex), &row).await;
     assert!(matches!(step, PeerStep::Done));
     let now = row_now(&pp, row.id).await;
     assert_eq!(now.normalized, 1);
@@ -171,7 +169,6 @@ async fn a_peers_pair_is_taken_and_nothing_runs_here() {
     );
     assert_eq!(std::fs::read(&audio).unwrap(), bytes(3_000, 2));
     assert_eq!(std::fs::read(&video).unwrap(), bytes(2_000, 1));
-    assert_eq!(calls.load(Ordering::SeqCst), 0, "no provider was asked");
     let (node, _, _) = fetch_record(pp.pool(), YT, "audio").await.unwrap().unwrap();
     assert_eq!(node, "snv");
     assert!(
@@ -250,9 +247,8 @@ async fn a_video_that_cannot_take_its_name_touches_nothing() {
     let (_snv, pp, row) = snv_and_pp().await;
     let (video, audio) = final_pair(&pp);
     std::fs::create_dir_all(&video).unwrap();
-    let (chain, _calls) = counting_chain();
     assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
+        first(Some(&pp.ex), &row).await,
         PeerStep::Deferred
     ));
     assert!(!audio.exists(), "no audio under its final name");
@@ -260,10 +256,7 @@ async fn a_video_that_cannot_take_its_name_touches_nothing() {
     assert_eq!(parts_of(&pp), vec!["audio", "video"], "both parts stay");
     assert_eq!(fetch_record(pp.pool(), YT, "metadata").await.unwrap(), None);
     std::fs::remove_dir(&video).unwrap();
-    assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
-        PeerStep::Done
-    ));
+    assert!(matches!(first(Some(&pp.ex), &row).await, PeerStep::Done));
     assert_eq!(std::fs::read(&video).unwrap(), bytes(2_000, 1));
     assert_eq!(std::fs::read(&audio).unwrap(), bytes(3_000, 2));
     assert!(parts_of(&pp).is_empty());
@@ -278,9 +271,8 @@ async fn a_failed_video_rename_leaves_another_rows_audio_as_it_was() {
     let (video, audio) = final_pair(&pp);
     std::fs::write(&audio, b"another row's audio").unwrap();
     std::fs::create_dir_all(&video).unwrap();
-    let (chain, _calls) = counting_chain();
     assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
+        first(Some(&pp.ex), &row).await,
         PeerStep::Deferred
     ));
     assert_eq!(std::fs::read(&audio).unwrap(), b"another row's audio");
@@ -294,9 +286,8 @@ async fn an_audio_that_cannot_take_its_name_puts_the_video_back() {
     let (_snv, pp, row) = snv_and_pp().await;
     let (video, audio) = final_pair(&pp);
     std::fs::create_dir_all(&audio).unwrap();
-    let (chain, _calls) = counting_chain();
     assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
+        first(Some(&pp.ex), &row).await,
         PeerStep::Deferred
     ));
     assert!(!video.exists(), "no unrecorded video under its final name");
@@ -312,9 +303,8 @@ async fn an_audio_that_cannot_take_its_name_keeps_a_video_that_was_there() {
     let (video, audio) = final_pair(&pp);
     std::fs::write(&video, b"another row's video").unwrap();
     std::fs::create_dir_all(&audio).unwrap();
-    let (chain, _calls) = counting_chain();
     assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
+        first(Some(&pp.ex), &row).await,
         PeerStep::Deferred
     ));
     assert_eq!(
@@ -335,11 +325,7 @@ async fn an_operator_correction_here_names_the_pair() {
     .execute(pp.pool())
     .await
     .unwrap();
-    let (chain, calls) = counting_chain();
-    assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
-        PeerStep::Done
-    ));
+    assert!(matches!(first(Some(&pp.ex), &row).await, PeerStep::Done));
     let now = row_now(&pp, row.id).await;
     assert_eq!(
         (now.song.as_deref(), now.metadata_source.as_deref()),
@@ -355,7 +341,6 @@ async fn an_operator_correction_here_names_the_pair() {
             .join(audio_filename("Way Maker", "Sinach", YT, false))
             .exists()
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(
         fetch_record(pp.pool(), YT, "metadata").await.unwrap(),
         None,
@@ -373,11 +358,7 @@ async fn a_peers_operator_title_is_taken_as_an_operators() {
     .execute(snv.pool())
     .await
     .unwrap();
-    let (chain, calls) = counting_chain();
-    assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
-        PeerStep::Done
-    ));
+    assert!(matches!(first(Some(&pp.ex), &row).await, PeerStep::Done));
     let now = row_now(&pp, row.id).await;
     assert_eq!(
         (now.song.as_deref(), now.metadata_source.as_deref()),
@@ -388,11 +369,14 @@ async fn a_peers_operator_title_is_taken_as_an_operators() {
             .join(audio_filename("Opraveny", "Sinach", YT, false))
             .exists()
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
+/// #229 item A: a peer's parser title is not taken, and this node's
+/// providers (paid AI) are not asked either: SNV holds the song and names
+/// it too (its own repair). The pair is named by this node's title parser,
+/// marked for the repair, which takes SNV's title once SNV has one.
 #[tokio::test]
-async fn a_peers_parser_title_asks_this_nodes_providers() {
+async fn a_peers_parser_title_names_the_pair_by_the_parser_for_the_repair() {
     let (snv, pp, row) = snv_and_pp().await;
     sqlx::query(
         "UPDATE videos SET gemini_failed = 1, metadata_source = 'regex' WHERE youtube_id = ?",
@@ -401,26 +385,17 @@ async fn a_peers_parser_title_asks_this_nodes_providers() {
     .execute(snv.pool())
     .await
     .unwrap();
-    let (chain, calls) = counting_chain();
-    assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
-        PeerStep::Done
-    ));
+    assert!(matches!(first(Some(&pp.ex), &row).await, PeerStep::Done));
     let now = row_now(&pp, row.id).await;
     assert_eq!(
-        (now.song.as_deref(), now.artist.as_deref()),
-        (Some("Chain Song"), Some("Chain Artist"))
-    );
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert!(
-        pp.cache()
-            .join(audio_filename("Chain Song", "Chain Artist", YT, false))
-            .exists()
+        (now.metadata_source.as_deref(), now.gemini_failed),
+        (Some("regex"), 1),
+        "the title parser's, in the repair queue"
     );
     assert_eq!(
         fetch_record(pp.pool(), YT, "metadata").await.unwrap(),
         None,
-        "this node's providers named it"
+        "no peer's title was taken"
     );
 }
 
@@ -443,16 +418,10 @@ async fn a_failed_fetch_asks_no_provider() {
         .execute(snv.pool())
         .await
         .unwrap();
-    let (chain, calls) = counting_chain();
     assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
+        first(Some(&pp.ex), &row).await,
         PeerStep::Deferred
     ));
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        0,
-        "no provider for a failed fetch"
-    );
 }
 
 /// A peer's pair that keeps failing for 2 h is downloaded here: the spec's
@@ -472,8 +441,7 @@ async fn a_pair_failing_past_the_bound_is_downloaded_here() {
     crate::db::models_peer::start_wait(pp.pool(), YT, "download", past)
         .await
         .unwrap();
-    let (chain, _) = counting_chain();
-    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &chain, &row).await else {
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
         panic!("expected the download to run here")
     };
     let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
@@ -498,9 +466,8 @@ async fn a_sha_mismatch_defers_then_the_retry_takes_the_pair() {
         .execute(snv.pool())
         .await
         .unwrap();
-    let (chain, _) = counting_chain();
     assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
+        first(Some(&pp.ex), &row).await,
         PeerStep::Deferred
     ));
     let now = row_now(&pp, row.id).await;
@@ -516,10 +483,7 @@ async fn a_sha_mismatch_defers_then_the_retry_takes_the_pair() {
         .await
         .unwrap();
     snv.hash_now().await;
-    assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
-        PeerStep::Done
-    ));
+    assert!(matches!(first(Some(&pp.ex), &row).await, PeerStep::Done));
     assert_eq!(row_now(&pp, row.id).await.normalized, 1);
     let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
         .fetch_one(pp.pool())
@@ -539,9 +503,8 @@ async fn a_peer_downloading_it_is_waited_for_without_an_attempt() {
         youtube_id: "bbbbbbbbbbb".into(),
         title: "t".into(),
     };
-    let (chain, calls) = counting_chain();
     assert!(matches!(
-        first(Some(&pp.ex), &chain, &row).await,
+        first(Some(&pp.ex), &row).await,
         PeerStep::Deferred
     ));
     let now = row_now(&pp, id).await;
@@ -550,7 +513,6 @@ async fn a_peer_downloading_it_is_waited_for_without_an_attempt() {
         chrono::DateTime::parse_from_rfc3339(now.next_attempt_at.as_deref().unwrap()).unwrap();
     let ahead = (next.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
     assert!((100..=125).contains(&ahead), "{ahead}");
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
 /// The spec's "nobody has it, so the node processes and announces".
@@ -563,8 +525,7 @@ async fn nobody_has_it_so_it_runs_here_announced() {
         youtube_id: "ccccccccccc".into(),
         title: "t".into(),
     };
-    let (chain, _) = counting_chain();
-    let PeerStep::Local(Some(guard)) = first(Some(&pp.ex), &chain, &row).await else {
+    let PeerStep::Local(Some(guard)) = first(Some(&pp.ex), &row).await else {
         panic!("expected Local")
     };
     let running = pp.ex.board.snapshot("pp");
@@ -610,8 +571,7 @@ async fn a_download_here_with_no_peers_forgets_the_pairs_peer_origin() {
         youtube_id: YT.into(),
         title: "t".into(),
     };
-    let (chain, _) = counting_chain();
-    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &chain, &row).await else {
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
         panic!("expected Local")
     };
     for kind in ["video", "audio", "metadata"] {
@@ -647,8 +607,7 @@ async fn an_adopted_pair_records_its_origin_before_the_row_plays() {
     .execute(pp.pool())
     .await
     .unwrap();
-    let (chain, _) = counting_chain();
-    assert!(adopt(&pp.ex, &chain, &row, &plan).await.is_err());
+    assert!(adopt(&pp.ex, &row, &plan).await.is_err());
     assert_eq!(row_now(&pp, row.id).await.normalized, 0, "never recorded");
     let (node, version, sha) = fetch_record(pp.pool(), YT, "audio")
         .await
@@ -667,9 +626,5 @@ async fn with_no_exchange_the_worker_runs_as_before() {
         youtube_id: YT.into(),
         title: "t".into(),
     };
-    let (chain, _) = counting_chain();
-    assert!(matches!(
-        first(None, &chain, &row).await,
-        PeerStep::Local(None)
-    ));
+    assert!(matches!(first(None, &row).await, PeerStep::Local(None)));
 }

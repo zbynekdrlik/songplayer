@@ -617,3 +617,54 @@ async fn the_one_reprocess_path_keeps_the_served_lyrics_and_sets_manual_priority
         "the wall keeps the served lyrics while the song waits in the queue"
     );
 }
+
+/// #229 item C (review round 12): the probe asks Claude about the YouTube
+/// description only while this node's paid AI is on; while it is off that
+/// probe is skipped, no Claude call (empty song and artist keep the other
+/// probes off the network).
+#[tokio::test]
+async fn probe_sources_asks_no_claude_while_paid_ai_is_off() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let (state, _temp) = test_state_with_cache_dir().await;
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+             VALUES (1, 'p', 'u', 'n', 1)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, title, song, artist, normalized) \
+             VALUES (5, 1, 'ytidX', 't', '', '', 1)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    crate::db::models::set_setting(&state.pool, "paid_ai_enabled", "false")
+        .await
+        .unwrap();
+
+    let app = crate::api::router(state, None);
+    let req = Request::builder()
+        .uri("/api/v1/lyrics/probe-sources")
+        .method("POST")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"video_id": 5}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let body_bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    let probes = json["probes"].as_array().expect("probes array");
+    let description = probes
+        .iter()
+        .find(|p| p["provider"] == "description")
+        .expect("the description probe");
+    let note = description["note"].as_str().unwrap();
+    assert!(note.starts_with("skipped"), "{note}");
+}

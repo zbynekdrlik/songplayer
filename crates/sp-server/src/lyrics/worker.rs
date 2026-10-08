@@ -390,6 +390,11 @@ impl LyricsWorker {
             debug!("worker: lyrics_worker_enabled=false, skipping this tick");
             return;
         }
+        // #229: a track made here while a peer had the song stands in for
+        // the peer's copy, which replaces it once the peer has one.
+        for video_id in crate::peer::standin::supersede_next(self.peer.as_ref()).await {
+            self.peer_lyrics_completed(video_id).await;
+        }
 
         // #184 G0.1: a dub owns the heavy slot — skip this heavy lyrics tick while
         // one is queued (isolation/mtl are not mid-run yielded; they defer here).
@@ -435,12 +440,7 @@ impl LyricsWorker {
         };
         let video_id = row.id;
         let youtube_id = row.youtube_id.clone();
-        tracing::info!(
-            "worker: processing {} ({} - {})",
-            youtube_id,
-            row.artist,
-            row.song
-        );
+        debug!("worker: picked {youtube_id}");
         // #229: ask the peers first (`peer::lyrics`): a peer's lyrics are
         // taken, a peer's job waited for; else process here, announced until
         // this tick ends.
@@ -449,6 +449,13 @@ impl LyricsWorker {
             crate::peer::PeerStep::Done => return self.peer_lyrics_completed(video_id).await,
             crate::peer::PeerStep::Deferred => return,
         };
+        // Logged once it runs here (#229 item C: a held pick is not processing).
+        tracing::info!(
+            "worker: processing {} ({} - {})",
+            youtube_id,
+            row.artist,
+            row.song
+        );
         match self.process_song(row).await {
             Ok(SongOutcome::Done) => {}
             // #144: durable retry backoff (mirrors downloader #140) so the
@@ -801,6 +808,10 @@ impl LyricsWorker {
                 return;
             }
         };
+        // #229 item C: asked once the track is read (review round 15).
+        if !self.translation_allowed(&youtube_id).await {
+            return;
+        }
         info!("lyrics_worker: retrying translation for {youtube_id}");
 
         let Some(ai_client) = &self.ai_client else {
@@ -946,3 +957,7 @@ mod tests_idle_gate;
 #[path = "worker_tests_peer.rs"]
 #[cfg(test)]
 mod tests_peer;
+
+#[path = "worker_tests_paid_ai.rs"]
+#[cfg(test)]
+mod tests_paid_ai;

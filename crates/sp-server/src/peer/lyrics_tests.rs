@@ -4,7 +4,7 @@ use super::*;
 use crate::db::models::VideoLyricsRow;
 use crate::db::models_peer::fetch_record;
 use crate::peer::kind::Job;
-use crate::peer::rig::{SNV_KEY, TestNode};
+use crate::peer::rig::{SNV_KEY, TestNode, set};
 
 const YT: &str = "aaaaaaaaaaa";
 const ROW_SQL: &str = "SELECT v.id, v.youtube_id, COALESCE(v.song, '') AS song, \
@@ -277,6 +277,100 @@ async fn an_operators_ask_here_is_never_answered_by_a_peer() {
     );
 }
 
+/// Review round 5: the operator's ask or text on ANOTHER row of the video
+/// keeps the video's lyrics here too (its rows serve one `{yt}_lyrics.json`):
+/// the row asked runs here, no peer asked, nothing fetched.
+#[tokio::test]
+async fn an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here() {
+    for owner in [
+        "lyrics_manual_priority = 1",
+        "lyrics_override_text = 'Moj text'",
+    ] {
+        let (_snv, pp, id, _) = snv_and_pp().await;
+        let two = pp.add_video_to(2, YT).await;
+        sqlx::query(&format!("UPDATE videos SET {owner} WHERE id = ?"))
+            .bind(two)
+            .execute(pp.pool())
+            .await
+            .unwrap();
+        let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &lyrics_row(&pp, id).await).await
+        else {
+            panic!("{owner} on another row: runs here")
+        };
+        assert_eq!(json_at(&pp), None, "{owner}: nothing was fetched");
+        assert!(
+            pp.ex.client.last_reads().is_empty(),
+            "{owner}: no peer was asked"
+        );
+    }
+}
+
+/// Review round 7: a reprocess flag left on a row of an INACTIVE playlist
+/// is one the lyrics queue never takes, so it keeps nothing local: the row
+/// asked takes the peer's copy.
+#[tokio::test]
+async fn a_reprocess_left_on_an_inactive_playlists_row_does_not_keep_the_lyrics_here() {
+    let (_snv, pp, id, json) = snv_and_pp().await;
+    let two = pp.add_video_to(2, YT).await;
+    sqlx::query("UPDATE videos SET lyrics_manual_priority = 1 WHERE id = ?")
+        .bind(two)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = 2")
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        first(Some(&pp.ex), &lyrics_row(&pp, id).await).await,
+        PeerStep::Done
+    ));
+    assert_eq!(json_at(&pp), Some(json), "the peer's copy is in place");
+}
+
+/// Review round 8: an operator's mark the lyrics queue never acts on keeps
+/// nothing local either: a reprocess flag on a row parked at the current
+/// version (`asr_gap`: the Reprocess route leaves it; bucket 1 needs
+/// `LYRICS_NOT_PARKED`), or an operator's text on a row of an inactive
+/// playlist (the worker never makes that row's lyrics). The row asked takes
+/// the peer's copy.
+#[tokio::test]
+async fn an_operators_mark_the_queue_never_acts_on_does_not_keep_the_lyrics_here() {
+    for (mark, inactive) in [
+        (
+            format!(
+                "lyrics_manual_priority = 1, lyrics_source = 'asr_gap', \
+                 lyrics_pipeline_version = {}",
+                crate::lyrics::LYRICS_PIPELINE_VERSION
+            ),
+            false,
+        ),
+        ("lyrics_override_text = 'Moj text'".to_string(), true),
+    ] {
+        let (_snv, pp, id, json) = snv_and_pp().await;
+        let two = pp.add_video_to(2, YT).await;
+        sqlx::query(&format!("UPDATE videos SET {mark} WHERE id = ?"))
+            .bind(two)
+            .execute(pp.pool())
+            .await
+            .unwrap();
+        if inactive {
+            sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = 2")
+                .execute(pp.pool())
+                .await
+                .unwrap();
+        }
+        assert!(
+            matches!(
+                first(Some(&pp.ex), &lyrics_row(&pp, id).await).await,
+                PeerStep::Done
+            ),
+            "{mark}"
+        );
+        assert_eq!(json_at(&pp), Some(json), "{mark}: the peer's copy");
+    }
+}
+
 /// Review Focus 5 here: this node's `{yt}_lyrics.json` of a dubbed video is
 /// the dub's subtitles, never overwritten by a peer's lyrics.
 #[tokio::test]
@@ -422,6 +516,160 @@ async fn the_same_track_already_served_here_is_nothing_newer() {
     assert_eq!(waits, 0, "running here ends the earlier wait");
 }
 
+/// Review rounds 2-3: the hook meets a track that stands in for SNV's copy
+/// (here even of SNV's very source, as the daily full-mix upgrade re-picks
+/// it) while SNV has its copy. A stand-in is replaced whatever its source,
+/// and in EVERY row of the video (they serve the one file): the hook takes
+/// nothing into its one row, it makes the stand-in due now and puts the row
+/// back (no attempt); the stand-in's own look then takes SNV's copy into
+/// both rows, the ★ along, and the stand-in is over.
+#[tokio::test]
+async fn a_stand_in_met_by_the_hook_is_replaced_in_every_row() {
+    let (_snv, pp, id, snv_json) = snv_and_pp().await;
+    let two = pp.add_video_to(2, YT).await;
+    pp.give_song(two, YT, "Way Maker", "Sinach").await;
+    for row in [id, two] {
+        pp.give_lyrics(row, YT, "mtl+g35t").await;
+    }
+    std::fs::write(
+        pp.cache().join(format!("{YT}_lyrics.json")),
+        b"local-marker",
+    )
+    .unwrap();
+    crate::db::models_peer::record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, i64::MAX)
+        .await
+        .unwrap();
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        first(Some(&pp.ex), &row).await,
+        PeerStep::Deferred
+    ));
+    assert_eq!(
+        json_at(&pp),
+        Some(b"local-marker".to_vec()),
+        "nothing taken into the one row"
+    );
+    let now = lyrics_now(&pp, id).await;
+    assert_eq!(now.lyrics_attempts, 0);
+    assert!(now.lyrics_next_attempt_at.is_some(), "put back");
+    assert_eq!(
+        crate::peer::standin::supersede_next(Some(&pp.ex)).await,
+        vec![id, two],
+        "due now"
+    );
+    assert_eq!(json_at(&pp), Some(snv_json), "SNV's copy is in place");
+    for row in [id, two] {
+        let now = lyrics_now(&pp, row).await;
+        assert_eq!(
+            (now.lyrics_reference, now.lyrics_alignment_model.as_deref()),
+            (1, Some("mtl")),
+            "row {row} took SNV's lyrics columns"
+        );
+    }
+    let standins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_standins")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(standins, 0, "the stand-in is over");
+}
+
+/// Review round 4: handing a peer's copy to the stand-in's look counts as
+/// waiting, within the 2 h bound: a look that keeps not taking it (a refused
+/// track, an audio check that cannot tell) never puts the row back for good.
+/// Under the bound the row is put back and the wait recorded; once the job
+/// has waited the bound, it runs here, still standing in (the stand-in as
+/// it was). Review round 5: that run put back, the next pick runs here at
+/// once (the spent bound is kept, never a new 2 h per putting back).
+#[tokio::test]
+async fn a_stand_in_handed_the_copy_runs_here_after_the_bound() {
+    let (_snv, pp, id, _) = snv_and_pp().await;
+    pp.give_lyrics(id, YT, "mtl+g35t").await;
+    crate::db::models_peer::record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, i64::MAX)
+        .await
+        .unwrap();
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        first(Some(&pp.ex), &row).await,
+        PeerStep::Deferred
+    ));
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 1, "counted against the 2 h bound");
+    let long_ago = crate::peer::wire::now_ms()
+        - i64::try_from(crate::peer::decide::MAX_PEER_WAIT.as_millis()).unwrap();
+    sqlx::query("UPDATE peer_waits SET since_ms = ?")
+        .bind(long_ago)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    crate::db::models_peer::record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, 2_000)
+        .await
+        .unwrap();
+    let PeerStep::Local(Some(guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("after the bound the job runs here")
+    };
+    let standin: (String, i64, i64) =
+        sqlx::query_as("SELECT peer, made_at_ms, next_check_ms FROM peer_standins")
+            .fetch_one(pp.pool())
+            .await
+            .unwrap();
+    assert_eq!(standin, ("snv".to_string(), 1_000, 2_000), "kept as it was");
+    drop(guard);
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("the run put back runs here again at once")
+    };
+    let standins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_standins")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(standins, 1, "still standing in");
+}
+
+/// Review round 6: a stand-in whose hand-off gave up keeps its spent bound
+/// through a pick that meets no peer copy (SNV unreachable then): that run
+/// here keeps the wait too, so once SNV is back with its copy the next pick
+/// runs here at once (no fresh 2 h of putting back), still standing in.
+#[tokio::test]
+async fn a_stand_ins_spent_bound_survives_a_pick_with_the_peer_unreachable() {
+    let (snv, pp, id, _) = snv_and_pp().await;
+    pp.give_lyrics(id, YT, "mtl+g35t").await;
+    crate::db::models_peer::record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, i64::MAX)
+        .await
+        .unwrap();
+    let long_ago = crate::peer::wire::now_ms()
+        - i64::try_from(crate::peer::decide::MAX_PEER_WAIT.as_millis()).unwrap();
+    crate::db::models_peer::start_wait(pp.pool(), YT, "lyrics", long_ago)
+        .await
+        .unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let gone = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let mut down = snv.as_peer(SNV_KEY);
+    down.base_url = gone;
+    pp.set_peers(&[down]).await;
+    let row = lyrics_row(&pp, id).await;
+    let PeerStep::Local(Some(guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("standing in, with SNV unreachable: runs here")
+    };
+    drop(guard);
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 1, "the spent bound is kept");
+    pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("SNV back with its copy: runs here at once, the bound spent")
+    };
+    let standins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_standins")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(standins, 1, "still standing in");
+}
+
 #[tokio::test]
 async fn a_stale_copy_here_is_replaced_by_the_peers_current_one() {
     let (_snv, pp, id, json) = snv_and_pp().await;
@@ -514,6 +762,63 @@ async fn a_peer_running_the_lyrics_job_defers_the_row_without_an_attempt() {
     let next = chrono::DateTime::parse_from_rfc3339(&now.lyrics_next_attempt_at.unwrap()).unwrap();
     let ahead = (next.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
     assert!((100..=125).contains(&ahead), "{ahead}");
+}
+
+/// #229 PP audit (comment 6054582866): SNV has the song PP fetched from it
+/// (its audio listed) but announces no lyrics job (here its lyrics worker is
+/// off). PP waits for SNV's lyrics, within the 2 h bound, instead of making
+/// a degraded track of its own: no attempt, nothing runs here.
+#[tokio::test]
+async fn lyrics_wait_while_a_peer_has_the_song() {
+    let snv = TestNode::start("snv", Some(SNV_KEY)).await;
+    set(snv.pool(), "lyrics_worker_enabled", "false").await;
+    let snv_id = snv.add_video(YT).await;
+    snv.give_song(snv_id, YT, "Way Maker", "Sinach").await;
+    snv.hash_now().await;
+    let pp = TestNode::start("pp", None).await;
+    pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    let id = pp.add_video(YT).await;
+    pp.give_song(id, YT, "Way Maker", "Sinach").await;
+    pp.audio_from(YT, "snv").await;
+    let row = lyrics_row(&pp, id).await;
+    assert!(matches!(
+        first(Some(&pp.ex), &row).await,
+        PeerStep::Deferred
+    ));
+    assert!(pp.ex.board.snapshot("pp").is_empty(), "nothing runs here");
+    let now = lyrics_now(&pp, id).await;
+    assert_eq!((now.has_lyrics, now.lyrics_attempts), (0, 0));
+    assert!(now.lyrics_next_attempt_at.is_some(), "re-picked later");
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 1, "counted against the 2 h bound");
+}
+
+/// Review round 1: PP downloaded the song itself (no record of SNV's
+/// audio): SNV's lyrics would be measured on another audio, so PP does not
+/// wait for them, even while SNV lists the song — it processes them now.
+#[tokio::test]
+async fn lyrics_of_a_song_downloaded_here_do_not_wait_for_a_peer() {
+    let snv = TestNode::start("snv", Some(SNV_KEY)).await;
+    set(snv.pool(), "lyrics_worker_enabled", "false").await;
+    let snv_id = snv.add_video(YT).await;
+    snv.give_song(snv_id, YT, "Way Maker", "Sinach").await;
+    snv.hash_now().await;
+    let pp = TestNode::start("pp", None).await;
+    pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    let id = pp.add_video(YT).await;
+    pp.give_song(id, YT, "Way Maker", "Sinach").await;
+    let row = lyrics_row(&pp, id).await;
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("a song downloaded here runs here")
+    };
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0, "no wait");
 }
 
 #[tokio::test]

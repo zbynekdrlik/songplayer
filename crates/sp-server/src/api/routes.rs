@@ -96,6 +96,15 @@ pub struct StatusResponse {
     /// path did (`playback::video_decode::status`). Missing key → default.
     #[serde(default)]
     pub video_decode: crate::playback::video_decode::VideoDecodeStatus,
+    /// #229 item C: this node's exchange name (`node_name`, trimmed; `None`
+    /// with none) — the health bar names the node.
+    pub node_name: Option<String>,
+    /// #229 item C: this node's paid-AI switch (`paid_ai`, on when unset);
+    /// the PP post-deploy gate asserts it off.
+    pub paid_ai_enabled: bool,
+    /// #229 item C: while paid AI is off, the kinds of work it holds
+    /// (`paid_ai::Held`); empty while on.
+    pub paid_ai_held: Vec<String>,
 }
 
 // #136 / #223 S3b: moved to `routes_status` for the 1000-line cap.
@@ -667,6 +676,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         crate::lyrics::heavy_slot::logical_cores(),
     );
 
+    let paid_ai = crate::paid_ai::status(&state.pool).await;
     Json(StatusResponse {
         version: sp_core::config::VERSION.to_string(),
         obs_connected,
@@ -694,6 +704,9 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         commit: crate::lyrics::host_commit::read_status(),
         metadata: super::metadata::status_block(&state).await,
         video_decode: crate::playback::video_decode::status(),
+        node_name: super::routes_status::node_name(&state.pool).await,
+        paid_ai_enabled: paid_ai.enabled,
+        paid_ai_held: paid_ai.held,
     })
 }
 

@@ -511,6 +511,13 @@ is already pushed (history rewrite is banned), a LATER commit carrying
 
 ## Mutation-timeout trap: bounded windows pop with `if`, never `while`
 
+**Per-test bound (`.config/nextest.toml`, 8.10.2026):** nextest (the mutation
+gate's test tool) ends any test after 3 x 60 s and reports it FAILED, so a
+mutant that makes a test wait forever counts as caught instead of a 300 s
+TIMEOUT that fails the shard. It is no excuse for unbounded waits in tests:
+shape them as below, and keep healthy tests far under the bound.
+
+
 `while deque.len() > CAP { deque.pop_front(); }` is correct code that a
 `>`→`<` mutant turns into an infinite loop on an empty deque — cargo-mutants
 reports TIMEOUT (300 s), which fails the shard exactly like a MISSED mutant

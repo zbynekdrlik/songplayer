@@ -3,6 +3,10 @@
  * .github/workflows/deploy-pp.yml after every main release
  * (post-deploy-pp.config.ts):
  *  - the dashboard shows the deployed version, with a clean console;
+ *  - PP calls no paid AI (#229 item C, the owner's ruling): `paid_ai_enabled`
+ *    is off on the status (in PP's DB, which no deploy writes: the main
+ *    session set it), and the health bar says "Platené AI: vypnuté" next to
+ *    the node's name;
  *  - PP keeps its own identity (`node_name` `pp`, in PP's DB, which no
  *    deploy writes) and reads its peer `snv` through Cloudflare with a
  *    service token (`peer-probe-gate.ts::peerSetupFailures`);
@@ -119,6 +123,36 @@ test.describe("PP post-deploy (#229)", () => {
     await expect(page.locator('[data-testid="version"]')).toHaveText(`v${EXPECTED_VERSION}`, {
       timeout: 30_000,
     });
+    expect(consoleMessages, "a clean browser console").toEqual([]);
+  });
+
+  test("PP calls no paid AI: the switch is off and the dashboard says so (#229 item C)", async ({
+    page,
+    request,
+  }) => {
+    const consoleMessages: string[] = [];
+    page.on("console", (msg) => {
+      if (/integrity.*attribute.*ignored/i.test(msg.text())) return;
+      if (msg.type() === "error" || msg.type() === "warning") {
+        consoleMessages.push(`[${msg.type()}] ${msg.text()}`);
+      }
+    });
+    const status = await getJson<{ paid_ai_enabled: boolean; paid_ai_held: string[] }>(
+      request,
+      "/api/v1/status",
+    );
+    console.log(
+      `[#229 pp] paid AI: ${JSON.stringify({ enabled: status?.paid_ai_enabled, held: status?.paid_ai_held })}`,
+    );
+    expect(status?.paid_ai_enabled, "GET /api/v1/status → paid_ai_enabled (off at PP)").toBe(
+      false,
+    );
+    await page.goto("/");
+    await expect(page.locator('[data-testid="health-paid-ai"]')).toHaveText(
+      "Platené AI: vypnuté",
+      { timeout: 30_000 },
+    );
+    await expect(page.locator('[data-testid="health-node"]')).toHaveText(`Uzol: ${NODE}`);
     expect(consoleMessages, "a clean browser console").toEqual([]);
   });
 
