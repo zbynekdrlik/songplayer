@@ -184,6 +184,11 @@ impl DubWorker {
             crate::dabing::subtitles_store::backfill_missing_subtitles(&self.pool).await;
         }
 
+        // #229 item C: a dub calls Gemini Live-Translate — paid AI.
+        if !self.may_dub().await {
+            return;
+        }
+
         let python = crate::lyrics::bootstrap::venv_python_path(&self.tools_dir);
         if !python.exists() {
             if !self.warned_no_python.swap(true, Ordering::Relaxed) {
@@ -519,15 +524,25 @@ impl DubWorker {
     }
 
     /// First `gemini_api_key` CSV entry (rotation-order preserved), or `None` when
-    /// the setting is unset/empty.
+    /// the setting is unset/empty — or while this node's paid AI is off (#229
+    /// item C: the key is read through `paid_ai::gemini_keys`).
     async fn first_gemini_key(&self) -> Option<String> {
-        let csv = crate::db::models::get_setting(&self.pool, "gemini_api_key")
-            .await
-            .ok()
-            .flatten()?;
-        crate::gemini_api::gemini_keys_from_setting(&csv)
+        crate::paid_ai::gemini_keys(&self.pool)
+            .await?
             .into_iter()
             .next()
+    }
+
+    /// #229 item C: whether a dub may run now — only while this node's paid
+    /// AI is on (`paid_ai::enabled`, read every tick). While it is off every
+    /// dub job waits where it is: no attempt, no failure mark, one INFO
+    /// (`paid_ai::hold`).
+    async fn may_dub(&self) -> bool {
+        if crate::paid_ai::enabled(&self.pool).await {
+            return true;
+        }
+        crate::paid_ai::hold(crate::paid_ai::Held::Dub, "");
+        false
     }
 
     /// Materialise the dub tool scripts into `tools_dir` (embedded at compile
@@ -705,6 +720,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(worker.first_gemini_key().await.as_deref(), Some("k1"));
+    }
+
+    /// #229 item C: while this node's paid AI is off no dub runs and no key
+    /// reaches a Live-Translate child.
+    #[tokio::test]
+    async fn no_dub_and_no_key_while_paid_ai_is_off() {
+        let pool = crate::db::create_memory_pool().await.unwrap();
+        crate::db::run_migrations(&pool).await.unwrap();
+        let worker = DubWorker::new(
+            pool.clone(),
+            PathBuf::from("."),
+            Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+            Arc::new(RwLock::new(crate::obs::ObsState::default())),
+        );
+        crate::db::models::set_setting(&pool, "gemini_api_key", "k1")
+            .await
+            .unwrap();
+        assert!(worker.may_dub().await, "on by default");
+        crate::db::models::set_setting(&pool, "paid_ai_enabled", "false")
+            .await
+            .unwrap();
+        assert!(!worker.may_dub().await);
+        assert_eq!(worker.first_gemini_key().await, None);
     }
 
     /// #136 review round 2: the metadata repair renamed the song WHILE its dub
