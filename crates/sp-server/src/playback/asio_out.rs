@@ -58,6 +58,9 @@ pub trait AsioDevice {
     fn underruns(&self) -> u64;
     /// The first block is in the ring: a short ring is an underrun from now.
     fn mark_primed(&mut self);
+    /// The driver's output latency now, frames (read again after the
+    /// driver's `kAsioLatenciesChanged`).
+    fn output_latency_frames(&self) -> u32;
     /// Stop and release the driver (idempotent).
     fn close(&mut self);
 }
@@ -102,6 +105,8 @@ pub struct AsioStatus {
     pub recentres: u64,
     /// Frames the ring had no room for.
     pub overflows: u64,
+    /// The driver's `kAsioOverload` messages, since the output was built.
+    pub overloads: u64,
     /// While waiting: the seconds to the next open.
     pub retry_in_s: Option<f64>,
     /// While waiting: the reason's stable code (`Reason::code`).

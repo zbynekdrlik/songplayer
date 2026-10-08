@@ -625,6 +625,10 @@ impl AsioDevice for WatchedClose<'_> {
         self.device.mark_primed()
     }
 
+    fn output_latency_frames(&self) -> u32 {
+        self.device.output_latency_frames()
+    }
+
     fn close(&mut self) {
         let s = self.out.snapshot();
         self.seen.push((s.state, s.status.reason_code));
@@ -693,4 +697,47 @@ fn a_waiting_output_carries_no_figures_of_its_closed_run() {
         (1, 96_000, "Int32LSB"),
         "the counters and the last open's driver facts stay"
     );
+}
+
+/// `kAsioLatenciesChanged`: the driver's output latency is read again and
+/// the output's latency follows it; the driver's overloads are counted,
+/// across reopens like the underruns (a device counts per run).
+#[test]
+fn a_latency_change_is_read_again_and_overloads_add_up_across_runs() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0)), Ok(dvs(96_000.0))]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    run(&mut w, &o, &mut d, 1, 30 * 5);
+    assert!((o.snapshot().status.latency_ms - 70.625).abs() < 1e-9);
+    d.latency = 256;
+    d.events.push_back(DeviceEvents {
+        latencies_changed: true,
+        overloads: 3,
+        ..Default::default()
+    });
+    w.step(&o, &mut d, T0 + 151 * SLOT, None);
+    let s = o.snapshot().status;
+    // 128 more driver frames at 96 kHz: + 1.333 ms.
+    assert!(
+        (s.latency_ms - (70.625 + 128.0 / 96.0)).abs() < 1e-9,
+        "{s:?}"
+    );
+    assert_eq!(s.overloads, 3);
+    // A reset; the next run's driver counts from 0 again.
+    d.events.push_back(DeviceEvents {
+        reset: true,
+        overloads: 3,
+        ..Default::default()
+    });
+    let now = T0 + 152 * SLOT;
+    w.step(&o, &mut d, now, None);
+    w.step(&o, &mut d, now + 2 * S, None);
+    assert_eq!(d.starts, 2);
+    d.events.push_back(DeviceEvents {
+        overloads: 2,
+        ..Default::default()
+    });
+    w.step(&o, &mut d, now + 2 * S + SLOT, None);
+    assert_eq!(o.snapshot().status.overloads, 5);
 }

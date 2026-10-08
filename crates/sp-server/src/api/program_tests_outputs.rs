@@ -286,6 +286,7 @@ async fn an_asio_entry_off_windows_waits_and_says_why() {
         "resets",
         "recentres",
         "overflows",
+        "overloads",
         "retry_in_s",
     ] {
         assert!(a.get(key).is_some(), "asio.{key}");

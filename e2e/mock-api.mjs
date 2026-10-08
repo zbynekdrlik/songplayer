@@ -1329,6 +1329,7 @@ function mockAsioOutput(e, network) {
             resets: 0,
             recentres: running ? 1 : 0,
             overflows: 0,
+            overloads: 0,
             retry_in_s: held ? held.retry_in_s : null,
             reason_code: held ? held.reason_code : null,
           },

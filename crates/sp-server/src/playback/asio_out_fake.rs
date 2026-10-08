@@ -20,6 +20,8 @@ pub(crate) struct FakeDevice {
     pub starts: u32,
     pub closes: u32,
     pub played: Vec<f32>,
+    /// The driver's output latency, frames (a start reads it).
+    pub latency: u32,
 }
 
 /// Dante Virtual Soundcard as the box runs it: 128-frame buffers, Int32.
@@ -48,6 +50,7 @@ impl FakeDevice {
             starts: 0,
             closes: 0,
             played: Vec::new(),
+            latency: 128,
         }
     }
 
@@ -92,7 +95,7 @@ impl AsioDevice for FakeDevice {
         self.underruns = 0;
         self.primed = false;
         Ok(Started {
-            output_latency_frames: 128,
+            output_latency_frames: self.latency,
         })
     }
 
@@ -112,6 +115,10 @@ impl AsioDevice for FakeDevice {
 
     fn mark_primed(&mut self) {
         self.primed = true;
+    }
+
+    fn output_latency_frames(&self) -> u32 {
+        self.latency
     }
 
     fn close(&mut self) {

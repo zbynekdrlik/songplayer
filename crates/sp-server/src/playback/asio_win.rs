@@ -504,9 +504,8 @@ impl AsioDevice for WinAsioDevice {
         SLOTS[slot].stream.store(stream, Ordering::SeqCst);
         driver.start().map_err(|e| failed(driver, "start", e))?;
         self.started = true;
-        let latency = driver.latencies().map(|l| l.out).unwrap_or(0);
         Ok(Started {
-            output_latency_frames: u32::try_from(latency).unwrap_or(0),
+            output_latency_frames: self.output_latency_frames(),
         })
     }
 
@@ -547,6 +546,13 @@ impl AsioDevice for WinAsioDevice {
         if let Some(i) = self.slot {
             SLOTS[i].primed.store(true, Ordering::SeqCst);
         }
+    }
+
+    fn output_latency_frames(&self) -> u32 {
+        self.driver
+            .as_ref()
+            .and_then(|d| d.latencies().ok())
+            .map_or(0, |l| u32::try_from(l.out).unwrap_or(0))
     }
 
     fn close(&mut self) {
