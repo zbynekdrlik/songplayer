@@ -7,7 +7,7 @@ paths:
   - "sp-ui/src/api.rs"
   - "e2e/mock-api.mjs"
   - "e2e/settings-*.spec.ts"
-  - "e2e/post-deploy-settings-secrets.spec.ts"
+  - "e2e/post-deploy-settings-masked.spec.ts"
   - "eval/dubbing/voice_band_measure.py"
 ---
 
@@ -31,7 +31,7 @@ never shows a secret; only the database holds it in clear.
   it its own `is_secret_setting` test: otherwise only the list's exact-slice
   test (`the_secret_settings_list`) pins it. Update the two JS copies of the
   rule with it: `e2e/mock-api.mjs` (`SECRET_SETTINGS`,
-  `SECRET_SETTING_SUFFIXES`) and `e2e/post-deploy-settings-secrets.spec.ts`
+  `SECRET_SETTING_SUFFIXES`) and `e2e/post-deploy-settings-masked.spec.ts`
   (the same two lists).
 - `peers` (the exchange's peer list, `peer-exchange.md`) is not on the list:
   its secrets sit INSIDE its JSON, masked field by field.
@@ -124,7 +124,7 @@ never shows a secret; only the database holds it in clear.
 
 ## Post-deploy gate
 
-`e2e/post-deploy-settings-secrets.spec.ts`, read-only: on the box every
+`e2e/post-deploy-settings-masked.spec.ts`, read-only: on the box every
 secret setting in `GET /api/v1/settings` reads `""` or `********`,
 `gemini_api_key` reads the mask, and Nastavenia's Gemini "API kľúč" field
 shows the mask in a password input; `GET /api/v1/exchange/status` answers

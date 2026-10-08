@@ -231,7 +231,7 @@ raw outputs re-scored on the SAME manifest.
 **Run on win-resolume** (PowerShell, lyrics venv has google-genai 2.24.0; the
 key CSV goes ONLY into the process env — never echoed, never on argv; invalid
 key #1 and 429s rotate automatically). Since #229 `GET …/api/v1/settings`
-shows `gemini_api_key` as `********` (`settings-secrets.md`), so the key CSV
+shows `gemini_api_key` as `********` (`settings-masking.md`), so the key CSV
 is read read-only from SongPlayer's database inside Python, by
 `C:\ProgramData\SongPlayer\eval-run\read_gemini_key.py` (inline `python -c`
 breaks in PowerShell, above). First, as its own step: run

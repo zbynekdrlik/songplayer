@@ -77,7 +77,7 @@ wait for a peer that has the song", below).
 - Secrets: the settings API masks `peer_api_key` and each peer's `key` /
   `cf_client_secret`, keeps them on a masked PATCH, and refuses (400,
   nothing written) a PATCH whose exchange setting does not hold — see
-  `settings-secrets.md`.
+  `settings-masking.md`.
 - A masked peer secret stays where it was stored for
   (`peer::config::unmask_peers`): a masked `key` only with the stored
   `base_url`, a masked `cf_client_secret` only with the stored `base_url`
@@ -164,7 +164,7 @@ wait for a peer that has the song", below).
   over a migrated in-memory database; the merge exactly as `lib.rs` does it,
   `api::router` with a dist dir merged with `peer::router`, still serving
   the SPA), `peer/config_tests.rs`, `api/settings_tests.rs`. On the box:
-  `e2e/post-deploy-settings-secrets.spec.ts` reads the status read-only.
+  `e2e/post-deploy-settings-masked.spec.ts` reads the status read-only.
 
 ## Kinds, versions, jobs (`peer::kind`, `peer::wire`, `peer::board`)
 

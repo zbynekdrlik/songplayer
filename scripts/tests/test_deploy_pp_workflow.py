@@ -294,6 +294,6 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
     assert specs == [
         "**/post-deploy-pp.spec.ts",
         "**/post-deploy-max.spec.ts",
-        "**/post-deploy-settings-secrets.spec.ts",
+        "**/post-deploy-settings-masked.spec.ts",
         "**/post-deploy-audio-asio.spec.ts",
     ]

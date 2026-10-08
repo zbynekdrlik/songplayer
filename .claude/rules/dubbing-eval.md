@@ -11,7 +11,7 @@ eval time on dev1 + dev2. Every hard-won fact below was verified live 2026-09-18
 
 ## Reading the Gemini key (#229: the settings API shows `********`)
 
-Since #229 `GET …/api/v1/settings` masks every secret (`settings-secrets.md`):
+Since #229 `GET …/api/v1/settings` masks every secret (`settings-masking.md`):
 a key read through it is the literal `********`. Never read a key through the
 API; never put one on a command line, in a log or in a commit.
 

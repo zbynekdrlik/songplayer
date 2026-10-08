@@ -483,7 +483,7 @@ playlists on air) went with it.
   driver (`FACADE_WS_URL`) connects with.
   - The password gates the WebSocket only. It is stored in plain text in
     the database; since #229 the unauthenticated `GET /api/v1/settings`
-    shows it as `********` (`settings-secrets.md`). It still does not
+    shows it as `********` (`settings-masking.md`). It still does not
     protect against a hostile LAN (the database, the WebSocket without
     TLS).
   - `RemoteSettings`' `Debug` never prints the password.
