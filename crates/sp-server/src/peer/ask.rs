@@ -155,7 +155,14 @@ impl Exchange {
                 if standing.is_none() {
                     log_local(youtube_id, job, why);
                 }
-                let guard = self.run_here(job, youtube_id).await;
+                // A job that stands in keeps a spent bound its hand-off left
+                // (review round 6): its next pick, meeting the peer's copy,
+                // runs here at once, never a fresh 2 h.
+                let guard = if standing.is_some() {
+                    self.run_here_waited(job, youtube_id).await
+                } else {
+                    self.run_here(job, youtube_id).await
+                };
                 // A stand-in stays as it was while its job runs here again;
                 // else what runs here stands in for the copy of the peer this
                 // node took the song from once it waited the bound for that
@@ -192,9 +199,9 @@ impl Exchange {
         self.run_here_waited(job, youtube_id).await
     }
 
-    /// [`Self::run_here`] keeping the job's wait: a hand-off to a stand-in
-    /// that gave up keeps its spent bound, so the run put back runs here
-    /// again at once (`peer::standin`, review round 5).
+    /// [`Self::run_here`] keeping the job's wait: a job that stands in keeps
+    /// a spent bound its hand-off left, so a run put back runs here again at
+    /// once (`peer::standin`, review rounds 5 and 6).
     pub(crate) async fn run_here_waited(&self, job: Job, youtube_id: &str) -> JobGuard {
         self.forget_origins(job, youtube_id).await;
         self.drop_standin(job, youtube_id).await;
@@ -331,9 +338,7 @@ impl Exchange {
     /// is over (`peer::standin`), and each artifact's origin is recorded
     /// (`source = peer:<node>`).
     pub async fn fetched(&self, job: Job, youtube_id: &str, peer: &str, artifacts: &[Artifact]) {
-        if let Err(e) = models_peer::end_wait(&self.pool, youtube_id, job.as_str()).await {
-            warn!(youtube_id, %e, "exchange: ending the wait failed");
-        }
+        self.end_wait(job, youtube_id).await;
         self.drop_standin(job, youtube_id).await;
         self.record_origins(youtube_id, peer, artifacts).await;
         info!(
