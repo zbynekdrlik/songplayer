@@ -152,15 +152,24 @@ pub fn remove_one(entries: &mut Vec<OutputEntry>, id: &str) {
     }
 }
 
-/// A waiting VBAN output's reason in Slovak, by the server's `reason_code`
-/// (`sp-server` `audio_out::vban_reason_code`).
+/// A waiting VBAN output's reason codes (`outputs[i].reason_code`): ONE
+/// vocabulary, the server's (`sp-server` `audio_out::vban_reason_code`) and
+/// the dashboard's Slovak below (review round 1: two crates' bare literals
+/// could drift into "neznámy dôvod").
+pub const VBAN_NOT_BUILT: &str = "not_built";
+pub const VBAN_NOT_STARTED: &str = "not_started";
+pub const VBAN_CONVERTER: &str = "converter";
+pub const VBAN_UNRESOLVED: &str = "unresolved";
+pub const VBAN_RESOLVING: &str = "resolving";
+
+/// A waiting VBAN output's reason in Slovak, by the server's `reason_code`.
 pub fn vban_reason_sk(code: &str) -> &'static str {
     match code {
-        "not_built" => "výstup sa nedá zostaviť",
-        "not_started" => "vlákno výstupu nebeží — spustí sa znova",
-        "converter" => "prevod frekvencie zlyhal — posiela ticho",
-        "unresolved" => "cieľ sa nedá preložiť na adresu",
-        "resolving" => "cieľ sa ešte prekladá na adresu",
+        VBAN_NOT_BUILT => "výstup sa nedá zostaviť",
+        VBAN_NOT_STARTED => "vlákno výstupu nebeží — spustí sa znova",
+        VBAN_CONVERTER => "prevod frekvencie zlyhal — posiela ticho",
+        VBAN_UNRESOLVED => "cieľ sa nedá preložiť na adresu",
+        VBAN_RESOLVING => "cieľ sa ešte prekladá na adresu",
         _ => "neznámy dôvod",
     }
 }

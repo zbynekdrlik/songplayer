@@ -496,6 +496,27 @@ fn the_vban_reason_code_table() {
     );
 }
 
+/// Review round 1: every reason code a waiting VBAN output can carry has the
+/// dashboard's Slovak (sp-core's one vocabulary), never "neznámy dôvod" — a
+/// rename on either side fails here.
+#[test]
+fn every_vban_reason_code_has_its_dashboard_text() {
+    use sp_core::audio_outputs_save::vban_reason_sk;
+    let codes: Vec<&str> = [
+        vban_reason_code(STATE_WAITING, Some(VBAN_NOT_BUILT), false),
+        vban_reason_code(STATE_WAITING, Some(VBAN_NOT_STARTED), false),
+        vban_reason_code(STATE_WAITING, Some(VBAN_CONVERTER), false),
+        vban_reason_code(STATE_WAITING, None, true),
+        vban_reason_code(STATE_WAITING, None, false),
+    ]
+    .into_iter()
+    .map(Option::unwrap)
+    .collect();
+    for code in codes {
+        assert_ne!(vban_reason_sk(code), vban_reason_sk(""), "{code}");
+    }
+}
+
 /// #233 release review: a rate converter rubato refuses (it sends silence)
 /// makes the output read waiting with its reason, never running.
 #[test]

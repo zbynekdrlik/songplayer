@@ -19,6 +19,9 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use sp_core::audio_outputs::{DEFAULT_NETWORK_RATE, OutputEntry, OutputType};
+use sp_core::audio_outputs_save::{
+    VBAN_CONVERTER, VBAN_NOT_BUILT, VBAN_NOT_STARTED, VBAN_RESOLVING, VBAN_UNRESOLVED,
+};
 
 use crate::playback::asio_out::{AsioOut, AsioStatus};
 use crate::playback::asio_state::{Reason, buffer_note, rate_note};
@@ -156,9 +159,9 @@ pub fn vban_reason_code(
         return None;
     }
     Some(cause.unwrap_or(if resolve_failed {
-        "unresolved"
+        VBAN_UNRESOLVED
     } else {
-        "resolving"
+        VBAN_RESOLVING
     }))
 }
 
@@ -198,9 +201,9 @@ impl RunningOutput {
         let not_started = out.and_then(|out| out.start_error());
         let fault = out.and_then(|out| out.fault());
         let (build_error, cause) = match (self.error.clone(), not_started, fault) {
-            (Some(why), _, _) => (Some(why), Some("not_built")),
-            (None, Some(why), _) => (Some(why), Some("not_started")),
-            (None, None, Some(why)) => (Some(why), Some("converter")),
+            (Some(why), _, _) => (Some(why), Some(VBAN_NOT_BUILT)),
+            (None, Some(why), _) => (Some(why), Some(VBAN_NOT_STARTED)),
+            (None, None, Some(why)) => (Some(why), Some(VBAN_CONVERTER)),
             (None, None, None) => (None, None),
         };
         let addressed = st
