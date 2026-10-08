@@ -1,9 +1,8 @@
 //! #229 item C: the one paid-AI gate.
 
-use std::sync::{Arc, Mutex};
-
 use super::*;
 use crate::db::models::set_setting;
+use crate::test_log::{Captured, capturing};
 
 async fn pool() -> SqlitePool {
     let pool = crate::db::create_memory_pool().await.unwrap();
@@ -79,40 +78,19 @@ fn a_patch_of_the_switch_takes_true_false_or_blank() {
     assert_eq!(checked("gemini_model", " X "), Ok(" X ".into()));
 }
 
-/// The log lines a scoped subscriber wrote (this test's thread only).
-#[derive(Clone, Default)]
-struct Captured(Arc<Mutex<Vec<u8>>>);
-
-impl std::io::Write for Captured {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 /// Held work logs ONE INFO per kind and song, then DEBUG — never a WARN.
 /// The keys are this test's own: the holds are process-wide.
 #[test]
 fn a_hold_logs_one_info_per_kind_and_song() {
     let cap = Captured::default();
-    let writer = cap.clone();
-    let sub = tracing_subscriber::fmt()
-        .with_writer(move || writer.clone())
-        .with_ansi(false)
-        .with_max_level(tracing::Level::DEBUG)
-        .finish();
-    tracing::subscriber::with_default(sub, || {
+    tracing::subscriber::with_default(capturing(&cap), || {
         hold(Held::Lyrics, "hold-test-1");
         hold(Held::Lyrics, "hold-test-1");
         hold(Held::Dub, "hold-test-1");
         hold(Held::Lyrics, "hold-test-2");
     });
-    let text = String::from_utf8(cap.0.lock().unwrap().clone()).unwrap();
-    let count = |level: &str| text.lines().filter(|l| l.contains(level)).count();
+    let text = cap.text();
+    let count = |level: &str| cap.lines_with(level).len();
     assert_eq!(
         (count(" INFO "), count("DEBUG"), count(" WARN ")),
         (3, 1, 0),

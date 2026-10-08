@@ -5,11 +5,10 @@
 //! network has no Dante PTP clock: the output waits for it calmly, and runs
 //! by itself once the driver ticks.
 
-use std::sync::{Arc, Mutex};
-
 use super::fake::FakeDevice;
 use super::*;
 use crate::playback::audio_out_block::ProgramBlock;
+use crate::test_log::{Captured, capturing};
 use sp_core::audio_outputs::{AsioDest, OutputEntry};
 
 const T0: i64 = 17_900_000_000_000_000;
@@ -36,21 +35,6 @@ fn block_due(due_100ns: i64) -> ProgramBlock {
     }
 }
 
-/// The log lines a scoped subscriber wrote (this test's thread only).
-#[derive(Clone, Default)]
-struct Captured(Arc<Mutex<Vec<u8>>>);
-
-impl std::io::Write for Captured {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 /// DVS silent for 5 min (9 000 blocks: it waits for its clock from block
 /// 60 and is opened again at blocks 1801, 3603, 5405 and 7207), then it
 /// ticks from block 9001 on (the card plays one slot after each block). The
@@ -66,12 +50,7 @@ impl std::io::Write for Captured {
 #[test]
 fn a_driver_silent_for_5_min_runs_by_itself_once_it_ticks() {
     let cap = Captured::default();
-    let writer = cap.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(move || writer.clone())
-        .with_ansi(false)
-        .with_max_level(tracing::Level::DEBUG)
-        .finish();
+    let subscriber = capturing(&cap);
     let o = out();
     let mut d = FakeDevice::answering(vec![]);
     let mut w = AsioWorker::new(T0);
@@ -115,13 +94,7 @@ fn a_driver_silent_for_5_min_runs_by_itself_once_it_ticks() {
         (0, 0, 0, 4, 1_804),
         "{s:?}"
     );
-    let text = String::from_utf8(cap.0.lock().unwrap().clone()).unwrap();
-    let at = |level: &str| -> Vec<String> {
-        text.lines()
-            .filter(|l| l.contains(level))
-            .map(str::to_string)
-            .collect()
-    };
+    let at = |level: &str| cap.lines_with(level);
     let warns = at(" WARN ");
     assert_eq!(warns.len(), 1, "{warns:#?}");
     assert!(warns[0].contains("waits for its clock"), "{warns:#?}");
@@ -139,26 +112,6 @@ fn a_driver_silent_for_5_min_runs_by_itself_once_it_ticks() {
         .filter(|l| l.contains("opened the driver again"))
         .count();
     assert_eq!((reopens, opened_again), (4, 4), "{debugs:#?}");
-}
-
-/// A subscriber writing every event at DEBUG and above into `cap`.
-fn capturing(cap: &Captured) -> impl tracing::Subscriber + Send + Sync + 'static {
-    let writer = cap.clone();
-    tracing_subscriber::fmt()
-        .with_writer(move || writer.clone())
-        .with_ansi(false)
-        .with_max_level(tracing::Level::DEBUG)
-        .finish()
-}
-
-/// The lines `cap` holds at `level` (" WARN ", " INFO ", "DEBUG").
-fn lines_at(cap: &Captured, level: &str) -> Vec<String> {
-    String::from_utf8(cap.0.lock().unwrap().clone())
-        .unwrap()
-        .lines()
-        .filter(|l| l.contains(level))
-        .map(str::to_string)
-        .collect()
 }
 
 /// What the output shows: its state, reason code and clock waits.
@@ -205,9 +158,9 @@ fn a_burst_at_every_reopen_is_no_clock() {
         ]
     );
     assert_eq!(d.starts, 3);
-    let warns = lines_at(&cap, " WARN ");
+    let warns = cap.lines_with(" WARN ");
     assert_eq!(warns.len(), 1, "{warns:#?}");
-    let infos = lines_at(&cap, " INFO ");
+    let infos = cap.lines_with(" INFO ");
     assert_eq!(infos.len(), 1, "only the first open: {infos:#?}");
 }
 
@@ -284,7 +237,7 @@ fn a_reset_during_a_wait_for_the_clock_ends_the_wait() {
         ("running", None),
         "{s:?}"
     );
-    let infos = lines_at(&cap, " INFO ");
+    let infos = cap.lines_with(" INFO ");
     assert_eq!(infos.len(), 2, "two opens: {infos:#?}");
     assert!(infos[1].contains("opened the driver"), "{infos:#?}");
 }
@@ -314,9 +267,10 @@ fn a_reopen_during_a_wait_logs_its_stale_blocks_at_debug() {
     });
     assert_eq!(d.starts, 3);
     assert_eq!(o.queued(), 0, "each reopen dropped them");
-    let infos = lines_at(&cap, " INFO ");
+    let infos = cap.lines_with(" INFO ");
     assert_eq!(infos.len(), 1, "only the first open: {infos:#?}");
-    let stale = lines_at(&cap, "DEBUG")
+    let stale = cap
+        .lines_with("DEBUG")
         .into_iter()
         .filter(|l| l.contains("dropped the blocks queued while the driver opened"))
         .count();
@@ -373,12 +327,7 @@ fn a_reopen_with_nothing_queued_logs_no_stale_count() {
         }
     });
     assert_eq!(d.starts, 3);
-    let stale: Vec<String> = String::from_utf8(cap.0.lock().unwrap().clone())
-        .unwrap()
-        .lines()
-        .filter(|l| l.contains("dropped the blocks queued while the driver opened"))
-        .map(str::to_string)
-        .collect();
+    let stale = cap.lines_with("dropped the blocks queued while the driver opened");
     assert!(stale.is_empty(), "{stale:#?}");
 }
 
@@ -396,7 +345,8 @@ fn an_open_logs_its_stale_blocks_at_info() {
         w.step(&o, &mut d, T0, None);
     });
     assert_eq!(o.queued(), 0);
-    let stale: Vec<String> = lines_at(&cap, " INFO ")
+    let stale: Vec<String> = cap
+        .lines_with(" INFO ")
         .into_iter()
         .filter(|l| l.contains("dropped the blocks queued while the driver opened"))
         .collect();

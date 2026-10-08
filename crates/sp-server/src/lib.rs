@@ -33,6 +33,8 @@ mod song_input; // #136: a stem / dub job's input, re-read after the heavy slot
 mod song_relink; // #136: stems / dub left under an old name → the audio's name
 pub mod startup;
 pub mod stems;
+#[cfg(test)]
+mod test_log; // a scoped log capture shared by the tests
 mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
 
 pub use panic_hook::install_panic_hook;

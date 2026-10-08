@@ -13,6 +13,7 @@ use crate::ai::AiSettings;
 use crate::ai::client::AiClient;
 use crate::lyrics::translator::SpeakerGender;
 use crate::peer::rig::{TestNode, set};
+use crate::test_log::{Captured, capturing};
 use tokio::sync::broadcast;
 
 const YT: &str = "trn_paid_01";
@@ -126,29 +127,9 @@ async fn the_translation_pass_calls_claude_while_the_switch_is_on() {
     assert_eq!(cached_sk(&pp).as_deref(), Some("Cestu robíš"));
 }
 
-/// The log lines a scoped subscriber wrote (this test's thread only).
-#[derive(Clone, Default)]
-struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-
-impl std::io::Write for Captured {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 /// The captured lines `paid_ai::hold` wrote (INFO or DEBUG).
 fn holds(cap: &Captured) -> Vec<String> {
-    String::from_utf8(cap.0.lock().unwrap().clone())
-        .unwrap()
-        .lines()
-        .filter(|l| l.contains("paid AI is off"))
-        .map(str::to_string)
-        .collect()
+    cap.lines_with("paid AI is off")
 }
 
 /// Review round 12: a translation pass holds only a song it would
@@ -157,14 +138,7 @@ fn holds(cap: &Captured) -> Vec<String> {
 #[tokio::test]
 async fn a_translation_pass_holds_only_a_song_it_would_translate() {
     let cap = Captured::default();
-    let writer = cap.clone();
-    let _log = tracing::subscriber::set_default(
-        tracing_subscriber::fmt()
-            .with_writer(move || writer.clone())
-            .with_ansi(false)
-            .with_max_level(tracing::Level::DEBUG)
-            .finish(),
-    );
+    let _log = tracing::subscriber::set_default(capturing(&cap));
     let server = claude().await;
     let empty = TestNode::start("pp", None).await;
     set(empty.pool(), "paid_ai_enabled", "false").await;

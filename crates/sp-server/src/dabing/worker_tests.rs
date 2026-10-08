@@ -2,6 +2,7 @@
 //! the 1000-line cap).
 
 use super::*;
+use crate::test_log::{Captured, capturing};
 
 #[test]
 fn worker_enabled_defaults_on_and_parses_off_values() {
@@ -162,35 +163,13 @@ async fn the_dub_worker_uses_the_first_key_of_the_gemini_key_list() {
     assert_eq!(worker.first_gemini_key().await.as_deref(), Some("k1"));
 }
 
-/// The lines a scoped subscriber wrote (this test's thread only).
-#[derive(Clone, Default)]
-struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
-
-impl std::io::Write for Captured {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 /// #229 item C (review round 12): with paid AI off only a dub job that
 /// would run now is held (its video named), none when there is no job,
 /// so the status names no dub that is not waiting.
 #[tokio::test]
 async fn only_a_dub_job_that_would_run_is_held() {
     let cap = Captured::default();
-    let writer = cap.clone();
-    let _log = tracing::subscriber::set_default(
-        tracing_subscriber::fmt()
-            .with_writer(move || writer.clone())
-            .with_ansi(false)
-            .with_max_level(tracing::Level::DEBUG)
-            .finish(),
-    );
+    let _log = tracing::subscriber::set_default(capturing(&cap));
     let pool = crate::db::create_memory_pool().await.unwrap();
     crate::db::run_migrations(&pool).await.unwrap();
     crate::db::models::set_setting(&pool, "paid_ai_enabled", "false")
@@ -202,14 +181,7 @@ async fn only_a_dub_job_that_would_run_is_held() {
         Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
         Arc::new(RwLock::new(crate::obs::ObsState::default())),
     );
-    let holds = || {
-        String::from_utf8(cap.0.lock().unwrap().clone())
-            .unwrap()
-            .lines()
-            .filter(|l| l.contains("paid AI is off"))
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    };
+    let holds = || cap.lines_with("paid AI is off");
     assert!(!worker.may_dub().await);
     assert_eq!(holds(), Vec::<String>::new(), "no job, nothing held");
     sqlx::query("INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'p', 'u')")
