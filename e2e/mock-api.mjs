@@ -758,6 +758,7 @@ app.post("/__mock/settings-reset", (_req, res) => {
   outputsSkipped.clear();
   asioHeld.clear();
   asioMeasuring.clear();
+  asioResampling.clear();
   vbanHeld.clear();
   res.json({ status: "reset" });
 });
@@ -1314,6 +1315,15 @@ app.post("/__mock/vban-state", (req, res) => {
   vbanHeld.set(String(b.id), { reason_code: b.reason_code ?? null, reason: b.reason ?? null });
   res.json({ held: [...vbanHeld.keys()] });
 });
+// #233 (the owner's resampling row): a running ASIO output's resampling
+// figures the mock serves instead of its defaults (`/__mock/asio-resampling
+// {id, ...fields of outputs[i].asio}`), cleared by `/__mock/settings-reset`.
+const asioResampling = new Map();
+app.post("/__mock/asio-resampling", (req, res) => {
+  const { id, ...fields } = req.body || {};
+  asioResampling.set(String(id), fields);
+  res.json({ set: [...asioResampling.keys()] });
+});
 // An ASIO entry as the server lists it: the driver "runs" at the network
 // rate (Int32LSB, 128 frames); a disabled one carries no `asio`.
 function mockAsioOutput(e, network) {
@@ -1348,13 +1358,17 @@ function mockAsioOutput(e, network) {
             rate_ppm: running ? 0.4 : 0,
             locked: running,
             latency_ms: latency,
+            offset_ms: 0,
+            slew_eta_s: null,
             underruns: 0,
             resets: 0,
-            recentres: running ? 1 : 0,
+            hard_recentres: 0,
+            last_hard_recentre: null,
             overflows: 0,
             overloads: 0,
             retry_in_s: held ? held.retry_in_s : null,
             reason_code: held ? held.reason_code : null,
+            ...(running ? asioResampling.get(e.id) || {} : {}),
           },
         }
       : {}),

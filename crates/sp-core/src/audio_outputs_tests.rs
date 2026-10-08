@@ -775,20 +775,6 @@ fn the_add_asio_button_says_why_it_is_off() {
     assert_eq!(asio_add_refusal(None, false), Some(""), "still loading");
 }
 
-/// #233 review round 4: a running ASIO output's line; "meria sa" until
-/// the server measured the latency.
-#[test]
-fn a_running_asio_output_reads_its_latency_or_that_it_is_measured() {
-    assert_eq!(
-        asio_running_text("beží", 70.625, 0.4, 0),
-        "beží · 71 ms · +0.4 ppm · výpadky 0"
-    );
-    assert_eq!(
-        asio_running_text("beží", 0.0, -1.26, 3),
-        "beží · meria sa · -1.3 ppm · výpadky 3"
-    );
-}
-
 /// #233 review round 4: a parked driver's Slovak says only a restart helps.
 #[test]
 fn a_parked_driver_reads_in_slovak() {

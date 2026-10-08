@@ -490,7 +490,8 @@ test("an ASIO output: pick the driver, channels 3 and 4, save; it runs and reloa
   const program = await (await request.get("/api/v1/program")).json();
   expect(program.outputs[0].type).toBe("asio");
   expect(program.outputs[0].asio.driver).toBe("Blackmagic ASIO");
-  await expect(page.locator('[data-testid="audio-output-state"]')).toContainText("ppm", { timeout: 10000 });
+  // #233 (the owner): the correction is on the row's resampling line now.
+  await expect(page.locator('[data-testid="asio-correction"]')).toContainText("ppm", { timeout: 10000 });
   await expect(page.locator('[data-testid="audio-output-state"]')).toContainText("výpadky 0");
 
   await page.reload();
@@ -695,7 +696,7 @@ test("a running ASIO output whose latency is not measured yet says so (#233)", a
   expect(measuring.status()).toBe(200);
   await openSettings(page);
   await expect(page.locator('[data-testid="audio-output-state"]')).toHaveText(
-    "beží · meria sa · +0.4 ppm · výpadky 0",
+    "beží · oneskorenie: meria sa · výpadky 0 · núdzové skoky 0",
     { timeout: 10000 },
   );
   expect(realConsoleErrors()).toEqual([]);
@@ -907,5 +908,105 @@ test("a waiting VBAN output reads its reason in Slovak (#233 release review)", a
   const state = page.locator('[data-testid="audio-output-row"]').nth(1).locator('[data-testid="audio-output-state"]');
   await expect(state).toHaveText("čaká · cieľ sa nedá preložiť na adresu", { timeout: 10000 });
   await expect(state).toHaveAttribute("title", "Hlásenie servera: failed to lookup address information");
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+// #233 (the owner, 8.10.2026): "chýba mi resample informácia" — a running
+// ASIO output shows how hard its resampling works, in Slovak, each figure
+// with its own tooltip: the conversion, the card's clock against
+// SongPlayer's (and the lock), the correction and its sign, the offset the
+// ratio drains and its time left, the hard re-centres and the last one.
+
+const DVS_ENTRY = JSON.stringify([
+  { id: "out-1", name: "DVS", type: "asio", asio: { driver: "Dante Virtual Soundcard (x64)", channels: [0, 1] } },
+]);
+
+async function seedAsio(request: APIRequestContext, networkRate: string) {
+  const seeded = await request.patch("/api/v1/settings", {
+    data: { audio_outputs: DVS_ENTRY, audio_network_rate: networkRate },
+  });
+  expect(seeded.status()).toBe(204);
+}
+
+function chip(page: Page, key: string) {
+  return page.locator('[data-testid="audio-output-row"]').first().locator(`[data-testid="${key}"]`);
+}
+
+test("a running ASIO output shows its resampling in Slovak, each figure with a tooltip (#233)", async ({
+  page,
+  request,
+}) => {
+  await seedAsio(request, "96000");
+  await openSettings(page);
+  await expect(page.locator('[data-testid="audio-output-state"]')).toHaveText(
+    "beží · oneskorenie 71 ms · výpadky 0 · núdzové skoky 0",
+    { timeout: 10000 },
+  );
+  for (const [key, text] of [
+    ["asio-conversion", "48 → 96 kHz"],
+    ["asio-card", "karta +0,4 ppm voči SongPlayeru (odhad zamknutý)"],
+    ["asio-correction", "korekcia +0,4 ppm (pridáva vzorky)"],
+    ["asio-slew", "oneskorenie v cieli"],
+  ]) {
+    await expect(chip(page, key)).toHaveText(text);
+  }
+  for (const key of [
+    "asio-latency",
+    "asio-underruns",
+    "asio-faults",
+    "asio-conversion",
+    "asio-card",
+    "asio-correction",
+    "asio-slew",
+  ]) {
+    await expect(chip(page, key), key).toHaveAttribute("title", /\S{10,}/);
+  }
+  await expect(chip(page, "asio-last-fault")).toHaveCount(0);
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("while the ratio drains an offset and after a hard re-centre, the row says so (#233)", async ({
+  page,
+  request,
+}) => {
+  await seedAsio(request, "96000");
+  const set = await request.post("/__mock/asio-resampling", {
+    data: {
+      id: "out-1",
+      rate_ppm: -0.83,
+      locked: false,
+      ppm: -0.66,
+      offset_ms: 12.34,
+      slew_eta_s: 44.6,
+      underruns: 3,
+      hard_recentres: 2,
+      last_hard_recentre: { cause: "deficit", ms: 65.04, lateness_ms: -60, ago_s: 185 },
+    },
+  });
+  expect(set.status()).toBe(200);
+  await openSettings(page);
+  await expect(page.locator('[data-testid="audio-output-state"]')).toHaveText(
+    "beží · oneskorenie 71 ms · výpadky 3 · núdzové skoky 2",
+    { timeout: 10000 },
+  );
+  for (const [key, text] of [
+    ["asio-card", "karta voči SongPlayeru: odhad sa ešte meria"],
+    ["asio-correction", "korekcia −0,7 ppm (uberá vzorky)"],
+    ["asio-slew", "dorovnáva odchýlku +12,3 ms · ešte asi 45 s"],
+    ["asio-last-fault", "posledný núdzový skok pred 3 min: +65,0 ms (zásobník by vyschol)"],
+  ]) {
+    await expect(chip(page, key)).toHaveText(text);
+  }
+  await expect(chip(page, "asio-last-fault")).toHaveAttribute(
+    "title",
+    /Blok programu vtedy prišiel −60,0 ms po svojej hranici\./,
+  );
+  expect(realConsoleErrors()).toEqual([]);
+});
+
+test("an ASIO driver at the program's 48 kHz converts nothing (#233)", async ({ page, request }) => {
+  await seedAsio(request, "48000");
+  await openSettings(page);
+  await expect(chip(page, "asio-conversion")).toHaveText("48 kHz bez prevodu", { timeout: 10000 });
   expect(realConsoleErrors()).toEqual([]);
 });
