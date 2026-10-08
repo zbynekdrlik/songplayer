@@ -199,17 +199,23 @@ fn a_vanished_driver_stalls_and_closes_with_its_reason() {
     let mut w = AsioWorker::new(T0);
     w.step(&o, &mut d, T0, None);
     run(&mut w, &o, &mut d, 1, 30);
-    // no more callbacks: the card is gone
-    let mut t = T0 + 31 * SLOT;
-    while o.snapshot().state == "running" && t < T0 + 10 * S {
+    // No more callbacks: the card is gone. The step at t0 sees the last
+    // change of the callback count (the 30th block's drain).
+    let t0 = T0 + 31 * SLOT;
+    let mut t = t0;
+    loop {
         w.step(&o, &mut d, t, None);
+        if o.snapshot().state != "running" || t >= T0 + 10 * S {
+            break;
+        }
         t += SLOT;
     }
     let snap = o.snapshot();
     assert_eq!(snap.reason.as_ref().map(Reason::code), Some("stalled"));
-    assert!(
-        t - (T0 + 31 * SLOT) >= 2 * S,
-        "not before 2 s without a callback"
+    assert_eq!(
+        t - t0,
+        61 * SLOT,
+        "the first step 2 s after the last callback closes it (60 slots are 19.99998 s)"
     );
     assert_eq!((d.closes, snap.status.resets), (1, 1));
 }
