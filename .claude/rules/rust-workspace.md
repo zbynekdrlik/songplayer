@@ -237,7 +237,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   a `const fn` too — don't avoid it there. The no-compile box can't see it; it
   cost #192 round 3 a whole review round (three ceil-divs in `audio_emitter.rs`
   `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
-  already uses `.div_ceil()` (`chunking.rs`, `loop_stats.rs`) — grep before
+  already uses `.div_ceil()` (`loop_stats.rs`) — grep before
   hand-rolling a ceil.
 - **`clippy::manual_clamp` on `x.min(CONST).max(CONST)`** (#233 lane 2,
   caught in review before CI): two constant bounds make clippy ask for

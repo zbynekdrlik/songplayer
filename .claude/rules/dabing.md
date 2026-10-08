@@ -172,7 +172,7 @@ the child's last 8 stderr lines are logged at info on success
 `--audio --out --transcripts --work-dir --model --voice` (no `--chunk-plan`, no
 `--pace` — both DELETED). Key ONLY via `GEMINI_API_KEY` env (`bootstrap::
 ensure_genai` pins `google-genai==2.24.0`, idempotent, never triggers the heavy
-qwen/torch reinstall). The Rust worker ships FOUR scripts
+torch reinstall). The Rust worker ships FOUR scripts
 (`embedded_tool_scripts`): `dub_worker.py`, `dub_live_session.py`,
 `dub_loudness.py`, `win_replace.py` — all imported at module load, so a missing
 one fails every dub (pinned by `embedded_tool_scripts_ship_worker_and_helpers`).
