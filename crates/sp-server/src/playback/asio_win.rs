@@ -583,7 +583,7 @@ impl AsioDevice for WinAsioDevice {
             let s = &SLOTS[i];
             s.stream.store(ptr::null_mut(), Ordering::SeqCst);
             // Bounded, and pumping: a driver may need this thread's
-            // messages to finish a callback (iemmixer `asio.rs:483-497`). A
+            // messages to finish a callback (iemmixer `asio.rs:484-504`). A
             // driver stuck inside a callback for a second parks the device
             // instead of freeing anything under the callback. One read of 0
             // is enough: the slot is already unhooked, so a callback that
@@ -597,6 +597,8 @@ impl AsioDevice for WinAsioDevice {
                 pump_messages();
                 std::thread::sleep(Duration::from_millis(1));
             }
+            // The last pump may have let it leave: read once more.
+            left = left || s.in_flight.load(Ordering::SeqCst) == 0;
             if !left {
                 // Everything the stuck callback may touch stays: the stream
                 // (leaked), the buffers it writes (not disposed), the driver
