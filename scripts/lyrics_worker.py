@@ -97,6 +97,133 @@ def _stitch_segments(segments, step_samples, overlap_samples):
     return out.astype(np.float32)
 
 
+# #207: the heavy child runs under a 10 GiB per-process job cap, so
+# `preprocess-vocals` never holds a whole-song array: each window is read from
+# the vocals sidecar on demand (`_read_window`) and the 16 kHz segments are
+# stitched block by block (`_stitched_blocks` / `_stitch_to_wav`), the stem
+# worker's design (`stem_worker.py`, 7ff38c73). `_stitch_segments` above stays
+# as the reference the tests compare the streamed stitch against.
+
+# A header frame count at or above this is libsndfile's "unknown length"
+# sentinel (e.g. a FLAC from a piped encoder has STREAMINFO total samples = 0).
+_UNKNOWN_FRAMES = 1 << 62
+
+
+def _audio_info(path):
+    """(sample_rate, frames) of an audio file, from its header — no samples
+    are read. The segment plan trusts this count, so an unknown or empty one
+    raises a clear ValueError instead of planning a bogus number of windows."""
+    import soundfile as sf
+
+    info = sf.info(path)
+    if info.samplerate <= 0 or info.frames <= 0 or info.frames >= _UNKNOWN_FRAMES:
+        raise ValueError(
+            f"unusable header in {path}: frame count {info.frames} "
+            f"at {info.samplerate} Hz (unknown or empty length)"
+        )
+    return info.samplerate, info.frames
+
+
+def _read_window(path, in_sr, start_s, end_s):
+    """Read ONE native-rate window `[start_s, end_s]` straight from the file.
+
+    Same sample bounds and layout as the old whole-file slice
+    (`full[s0:s1]` / `full[:, s0:s1].T` of `librosa.load(sr=None, mono=False)`,
+    which is itself a soundfile float32 read): float32, `(n,)` for mono,
+    `(n, ch)` otherwise. soundfile clamps `stop` to the file length exactly
+    like the numpy slice did."""
+    import soundfile as sf
+
+    s0 = max(0, int(round(start_s * in_sr)))
+    s1 = int(round(end_s * in_sr))
+    data, _ = sf.read(path, start=s0, stop=s1, dtype="float32", always_2d=False)
+    return data
+
+
+def _stitched_blocks(read_segment, n_seg, step_samples, overlap_samples):
+    """Yield the samples of
+    `_stitch_segments([read_segment(i) for i in range(n_seg)], step_samples,
+    overlap_samples)` in order, ONE block per segment read, holding only the
+    tail the next segment still adds to — never the whole song.
+
+    The same arithmetic as the reference: mono segments, segment i starting at
+    global sample `i * step_samples`, accumulated in float64 in segment order
+    with the same linear crossfade weights, weight-normalised, cast to
+    float32. Once segment i is added, every sample before segment i + 1's
+    start is final, so it is yielded at once. An earlier segment that ends
+    past the last one raises ValueError, as the reference's broadcast does."""
+    import numpy as np
+
+    acc = np.zeros(0, dtype=np.float64)
+    wsum = np.zeros(0, dtype=np.float64)
+    base = 0  # global index of acc[0] == samples already yielded
+    for i in range(n_seg):
+        seg = np.asarray(read_segment(i), dtype=np.float64)
+        length = seg.shape[0]
+        end = i * step_samples + length
+        settle = (i + 1) * step_samples if i < n_seg - 1 else end
+        held_end = base + acc.shape[0]
+        if i == n_seg - 1 and held_end > end:
+            raise ValueError(
+                f"an earlier segment ends past the last one ({held_end} > {end} samples)"
+            )
+        grow = max(end, settle) - held_end
+        if grow > 0:
+            acc = np.concatenate([acc, np.zeros(grow, dtype=np.float64)])
+            wsum = np.concatenate([wsum, np.zeros(grow, dtype=np.float64)])
+        # IDENTICAL to the weights in `_stitch_segments`.
+        w = np.ones(length, dtype=np.float64)
+        if overlap_samples > 0:
+            f = min(overlap_samples, length)
+            if i > 0:
+                w[:f] = np.linspace(0.0, 1.0, f, endpoint=False)
+            if i < n_seg - 1:
+                w[length - f :] = np.linspace(1.0, 0.0, f, endpoint=False)
+        a = i * step_samples - base
+        acc[a : a + length] += seg * w
+        wsum[a : a + length] += w
+        k = settle - base
+        block = acc[:k].copy()
+        nz = wsum[:k] > 1e-9
+        block[nz] /= wsum[:k][nz]
+        # Copy so the yielded head is actually released.
+        acc = acc[k:].copy()
+        wsum = wsum[k:].copy()
+        base = settle
+        yield block.astype(np.float32)
+
+
+def _stitch_to_wav(read_segment, n_seg, step_samples, overlap_samples, out_path):
+    """Stream-stitch the `n_seg` 16 kHz mono segments (`read_segment(i)`)
+    into a FLOAT WAV at `out_path`: the samples of `_stitch_segments`, divided
+    by their global peak when it is over 1.0, exactly as the whole-array path
+    did. Two passes, each holding one segment and the overlap tail: the first
+    finds the peak, the second writes. Published atomically: `<out>.tmp`, then
+    `os.replace`; a failure removes the `.tmp` and leaves `out_path` alone.
+    Returns the peak."""
+    import numpy as np
+    import soundfile as sf
+
+    peak = 0.0
+    for block in _stitched_blocks(read_segment, n_seg, step_samples, overlap_samples):
+        if block.size:
+            peak = max(peak, float(np.max(np.abs(block))))
+    tmp = out_path + ".tmp"
+    try:
+        # format= is REQUIRED: the atomic temp path ends in ".tmp".
+        with sf.SoundFile(
+            tmp, "w", samplerate=16000, channels=1, format="WAV", subtype="FLOAT"
+        ) as f:
+            for block in _stitched_blocks(read_segment, n_seg, step_samples, overlap_samples):
+                f.write(block / peak if peak > 1.0 else block)
+        os.replace(tmp, out_path)
+    finally:
+        if os.path.exists(tmp):
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+    return peak
+
+
 def _pick_dereverbed_stem(out_files, fallback_dir):
     """Return the absolute path of the anvuew *(noreverb)* stem.
 
@@ -273,25 +400,24 @@ def _atomic_write_wav(path, audio, sr):
     os.replace(tmp, path)
 
 
-def _dereverb_one_segment(sep_dereverb, full, in_sr, start_s, end_s, out_path, stem_dir):
-    """Dereverb ONE native-rate window `[start_s, end_s]` of `full`, resample to
-    16 kHz mono float32, and write it ATOMICALLY to `out_path`.
+def _dereverb_one_segment(
+    sep_dereverb, vocals_path, in_sr, start_s, end_s, out_path, stem_dir
+):
+    """Dereverb ONE native-rate window `[start_s, end_s]` of the file at
+    `vocals_path`, resample to 16 kHz mono float32, and write it ATOMICALLY to
+    `out_path`.
 
-    #144: `full` is the stems worker's VOCALS sidecar (already isolated by the
-    Kim Mel-Band RoFormer), so there is no second isolation pass — just anvuew
-    dereverb + resample. `full` is (n,) mono or (ch, n) multi-channel at `in_sr`.
+    #144: the file is the stems worker's VOCALS sidecar (already isolated by
+    the Kim Mel-Band RoFormer), so there is no second isolation pass — just
+    anvuew dereverb + resample. #207: only this window is ever in memory
+    (`_read_window`, the same samples the old whole-file slice gave).
     `stem_dir` is a scratch dir the already-loaded separator writes into; it is
     cleared after each segment so it never grows across a long song."""
     import numpy as np
     import librosa
     import soundfile as sf
 
-    s0 = max(0, int(round(start_s * in_sr)))
-    s1 = int(round(end_s * in_sr))
-    if full.ndim == 1:
-        data = full[s0:s1]
-    else:
-        data = full[:, s0:s1].T  # (n, ch) for soundfile
+    data = _read_window(vocals_path, in_sr, start_s, end_s)  # (n[, ch]) float32
     seg_in = os.path.join(stem_dir, "segin_" + os.path.basename(out_path))
     sf.write(seg_in, data, in_sr, subtype="FLOAT")
 
@@ -329,13 +455,18 @@ def cmd_preprocess_vocals(args):
     written atomically to `--output`, and the work dir is removed. Writes a FLOAT
     WAV to --output. Exits 0 on success.
 
+    #207: memory is O(segment), independent of the song's length — each window
+    is read from the sidecar on demand (`_read_window`) and the segments are
+    stitched in two streamed passes (`_stitch_to_wav`). Never load the whole
+    sidecar or build a whole-length array here: the child runs under a 10 GiB
+    per-process job cap.
+
     GPU discipline (#154): `gpu_polite()` sets a BELOW_NORMAL WDDM scheduling
     priority + a per-process VRAM cap before any model loads. On a CUDA OOM the
     dereverb re-runs on CPU (same model + parameters → identical output, only
     slower) — the separator's model parameters are never changed.
     """
     import numpy as np
-    import librosa
     import soundfile as sf
     import torch
     from audio_separator.separator import Separator
@@ -351,11 +482,11 @@ def cmd_preprocess_vocals(args):
         f"preprocess-vocals: vocals from stems sidecar {args.vocals_in}",
         file=sys.stderr,
     )
-    # Native-rate load of the stems worker's vocals sidecar, so the dereverb sees
-    # the full-quality signal (the 16 kHz downsample happens only on each
-    # segment's dereverbed output).
-    full, in_sr = librosa.load(args.vocals_in, sr=None, mono=False)
-    total_samples = full.shape[0] if full.ndim == 1 else full.shape[1]
+    # #207: header only — each native-rate window is read from the sidecar on
+    # demand, so the dereverb sees the full-quality signal (the 16 kHz
+    # downsample happens only on each segment's dereverbed output) and the
+    # whole sidecar is never in memory (10 GiB per-child job cap).
+    in_sr, total_samples = _audio_info(args.vocals_in)
     total_s = total_samples / float(in_sr)
     bounds = _segment_bounds(total_s, ISOLATION_SEGMENT_SECONDS, ISOLATION_OVERLAP_SECONDS)
     n_seg = len(bounds)
@@ -389,7 +520,13 @@ def cmd_preprocess_vocals(args):
                     if done[i]:
                         continue
                     _dereverb_one_segment(
-                        sep_dereverb, full, in_sr, s_s, e_s, _seg_path(i), stem_dir
+                        sep_dereverb,
+                        args.vocals_in,
+                        in_sr,
+                        s_s,
+                        e_s,
+                        _seg_path(i),
+                        stem_dir,
                     )
                     done[i] = True
                     print(f"isolation chunk {i + 1}/{n_seg} done", file=sys.stderr)
@@ -415,20 +552,18 @@ def cmd_preprocess_vocals(args):
                 torch.cuda.empty_cache()
             _process_remaining(force_cpu=True)
 
-    # Stitch every segment (all 16 kHz mono) into the final WAV.
+    # Stitch every segment (all 16 kHz mono) into the final WAV, STREAMED
+    # segment by segment in two passes (#207) — never a whole-length array.
     step_samples = int(round((ISOLATION_SEGMENT_SECONDS - ISOLATION_OVERLAP_SECONDS) * 16000))
     overlap_samples = int(round(ISOLATION_OVERLAP_SECONDS * 16000))
-    segs = []
-    for i in range(n_seg):
+
+    def _read_segment(i):
         a, _ = sf.read(_seg_path(i), dtype="float32")
         if a.ndim > 1:
             a = np.mean(a, axis=1).astype("float32")
-        segs.append(a)
-    stitched = _stitch_segments(segs, step_samples, overlap_samples)
-    peak = float(np.max(np.abs(stitched))) if stitched.size else 0.0
-    if peak > 1.0:
-        stitched = stitched / peak
-    _atomic_write_wav(args.output, stitched, 16000)
+        return a
+
+    _stitch_to_wav(_read_segment, n_seg, step_samples, overlap_samples, args.output)
     shutil.rmtree(work_dir, ignore_errors=True)
 
     print(json.dumps({"output": args.output}))
