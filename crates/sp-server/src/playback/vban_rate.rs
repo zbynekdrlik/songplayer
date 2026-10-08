@@ -134,6 +134,19 @@ impl VbanRateConverter {
     pub fn failed(&self) -> Option<&str> {
         self.failed.as_deref()
     }
+
+    /// A converter rubato refused (`why`), for the tests: no supported rate
+    /// refuses one.
+    #[cfg(test)]
+    pub fn refused(why: &str) -> Self {
+        Self {
+            fft: None,
+            out: Vec::new(),
+            zeros: Vec::new(),
+            out_frames: 0,
+            failed: Some(why.to_string()),
+        }
+    }
 }
 
 #[cfg(test)]

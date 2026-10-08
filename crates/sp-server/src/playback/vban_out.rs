@@ -337,6 +337,9 @@ pub struct VbanOut {
     /// #233: why the output's thread could not start (Windows: the UDP bind
     /// or the spawn failed); shown as the output's reason.
     start_error: Mutex<Option<String>>,
+    /// #233 release review: what its running thread cannot do (a rate
+    /// converter rubato refused: it sends silence); shown as the reason.
+    fault: Mutex<Option<String>>,
 }
 
 impl Default for VbanOut {
@@ -361,6 +364,7 @@ impl VbanOut {
             format,
             delay_100ns,
             start_error: Mutex::new(None),
+            fault: Mutex::new(None),
         }
     }
 
@@ -405,6 +409,16 @@ impl VbanOut {
     /// #233: why the output's thread could not start, if it could not.
     pub fn start_error(&self) -> Option<String> {
         lock(&self.start_error).clone()
+    }
+
+    /// #233 release review: record what the running thread cannot do.
+    pub fn set_fault(&self, why: String) {
+        *lock(&self.fault) = Some(why);
+    }
+
+    /// #233 release review: what the running thread cannot do, if anything.
+    pub fn fault(&self) -> Option<String> {
+        lock(&self.fault).clone()
     }
 
     /// Hand one block over. Never blocks; over the bound (#233: [`queue_bound`]
@@ -654,7 +668,14 @@ impl Default for VbanSender {
 
 impl VbanSender {
     fn new(format: VbanFormat, delay_100ns: i64) -> Self {
-        let converter = VbanRateConverter::new(format.rate_hz());
+        Self::build(
+            format,
+            delay_100ns,
+            VbanRateConverter::new(format.rate_hz()),
+        )
+    }
+
+    fn build(format: VbanFormat, delay_100ns: i64, converter: VbanRateConverter) -> Self {
         if let Some(why) = converter.failed() {
             warn!(
                 rate = format.rate_hz(),
@@ -675,7 +696,13 @@ impl VbanSender {
 
     /// #233: the sender of `out`'s destination.
     pub fn for_out(out: &VbanOut) -> Self {
-        Self::new(out.format(), out.delay_100ns())
+        Self::with_converter(out, VbanRateConverter::new(out.format().rate_hz()))
+    }
+
+    /// #233 release review: the sender of `out`'s destination over
+    /// `converter`.
+    pub fn with_converter(out: &VbanOut, converter: VbanRateConverter) -> Self {
+        Self::build(out.format(), out.delay_100ns(), converter)
     }
 
     /// The `nuFrame` the next packet carries.

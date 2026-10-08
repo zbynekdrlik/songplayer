@@ -97,6 +97,10 @@ pub struct OutputStatus {
     /// running | opening | waiting | disabled.
     pub state: &'static str,
     pub reason: Option<String>,
+    /// #233 release review: a waiting VBAN output's reason as a stable code
+    /// (`vban_reason_code`), which the dashboard shows in Slovak.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<&'static str>,
     pub rate: u32,
     pub format: &'static str,
     pub channels: u32,
@@ -137,6 +141,25 @@ pub fn vban_state(
     }
     let reason = resolve_error.unwrap_or("the address is not resolved yet");
     (STATE_WAITING, Some(reason.to_string()))
+}
+
+/// #233 release review: a waiting VBAN output's reason as a stable code:
+/// its `cause` (`not_built`, `not_started`, `converter`), else a target that
+/// does not resolve (`unresolved`) or is not resolved yet (`resolving`).
+/// `None` unless the output waits.
+pub fn vban_reason_code(
+    state: &str,
+    cause: Option<&'static str>,
+    resolve_failed: bool,
+) -> Option<&'static str> {
+    if state != STATE_WAITING {
+        return None;
+    }
+    Some(cause.unwrap_or(if resolve_failed {
+        "unresolved"
+    } else {
+        "resolving"
+    }))
 }
 
 /// A VBAN output's latency from the boundary, ms: the send latency, the
@@ -194,6 +217,7 @@ impl RunningOutput {
             enabled: e.enabled,
             state,
             reason,
+            reason_code: None,
             rate: self.built_rate,
             format: e.vban.as_ref().map_or("int24", |v| v.format.as_str()),
             channels: 2,
@@ -239,6 +263,7 @@ impl RunningOutput {
             enabled: e.enabled,
             state,
             reason,
+            reason_code: None,
             rate,
             format: status.as_ref().map_or("", |s| s.sample_type),
             channels: 2,
