@@ -12,9 +12,10 @@
 //! - [`ProgramTrace`]: a preallocated ring of the last [`TRACE_CAPACITY`]
 //!   boundaries (10 min at 30 fps). ONE writer, the `SP-program` sender
 //!   thread ([`TraceWriter`], claimed once), writes each record after the
-//!   boundary's NDI submit returned: no allocation, no lock, no log. A reader
-//!   (the API, the minute summary) never blocks it: every slot is a seqlock
-//!   of atomics, and a slot written over while it is read is skipped.
+//!   boundary's NDI submit returned: no allocation, no log, and no lock it
+//!   could wait on (the song mark is only `try_lock`ed). A reader (the API,
+//!   the minute summary) never blocks it: every slot is a seqlock of
+//!   atomics, and a slot written over while it is read is skipped.
 //! - [`TraceRecord`]: the boundary, its wire stamp, the UTC (ms) of its
 //!   submit return, the four other instants as µs after the boundary, the
 //!   source the bus says it shows, what it was ([`TraceKind`]), whether its
@@ -69,8 +70,9 @@ const WORDS: usize = 12;
 pub enum TraceKind {
     /// A forwarded pair of the source on program before it.
     Source,
-    /// A forwarded pair of another source than the boundary before (a
-    /// cut's first boundary, or the program's first).
+    /// A forwarded pair of another source than the record before: where a
+    /// cut shows (unless the new source's first boundaries were fills, which
+    /// already named it), and the program's first forward.
     Cut,
     /// The program's standby pair for a missed boundary.
     Fill,
@@ -129,8 +131,9 @@ pub struct TraceRecord {
     pub index: u64,
     /// The boundary on the sender's timeline (100 ns).
     pub stamp_100ns: i64,
-    /// Its wire stamp, what a receiver sees (100 ns, under the K it was
-    /// sent with).
+    /// Its wire stamp, what a receiver sees (100 ns, under the fleet shift
+    /// K_F read when the record is written, just after the submit: only a
+    /// date step registered in between makes it differ from the sent one).
     pub wire_100ns: i64,
     /// UTC of the submit return (ms): the fleet label of that reading.
     pub utc_ms: i64,

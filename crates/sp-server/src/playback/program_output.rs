@@ -70,7 +70,8 @@
 //! #147: once a boundary's NDI submit returned, `serve` writes its record
 //! into the program trace (`program_trace.rs`): its five instants, the
 //! source the bus queued it with, what it was. The sender is the trace's
-//! one writer: no allocation, no lock, no log on that path.
+//! one writer: no allocation, no log and no lock it could wait on, on that
+//! path (the song mark is only `try_lock`ed).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

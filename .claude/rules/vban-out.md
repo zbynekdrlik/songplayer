@@ -193,7 +193,7 @@ format, pinned against a copy of the 0.72.0 encoder by
 What makes a FOH block late is named on the box, per boundary, by the
 `SP-program` sender (`playback/program_output_timing.rs`, pure):
 
-- `ProgramOutput::serve(job, now)` returns `BoundaryMarks`, four instants
+- `ProgramOutput::serve(job, source, now)` returns `BoundaryMarks`, four instants
   off the sender's own wall (the stamps' timeline): the job taken, the VBAN
   hand-off, the video side started (#223: the canvas fit or a fade's
   picture, then the NDI submit) and the NDI submit returned.

@@ -597,17 +597,22 @@ per-boundary SEQUENCE. It fixes nothing: the cause is a later unit.
   `TraceWriter` (a flag; dropping it frees it). The `SP-program` thread
   takes it (`ProgramOutput::with_trace(bus.trace())`; with another alive it
   writes nothing, WARNed), and `serve(job, source, now)` writes the record
-  AFTER the NDI submit returned: no allocation, no lock, no log.
+  AFTER the NDI submit returned: no allocation, no log, no lock it could
+  wait on (the song mark is only `try_lock`ed).
 - **A record:** the boundary (timeline), its wire stamp (under the K_F read
-  at the write), `utc_ms` = the fleet label of the submit return, the other
-  four `BoundaryMarks` instants as µs after the boundary (signed), the
-  source, `kind` (`src`; `cut` = a forward of another source than the
-  record before; `fill`; `fade`), `live`, and `song`.
+  at the write, just after the submit: only a date step registered in
+  between makes it differ from the sent stamp), `utc_ms` = the fleet label
+  of the submit return, the other four `BoundaryMarks` instants as µs
+  after the boundary (signed), the source, `kind` (`src`; `cut` = a
+  forward of another source than the record before; `fill`; `fade`),
+  `live`, and `song`.
 - **The source is decided when the bus COMMITS a boundary**
   (`ProgramCore::commit(job, source)`; the queue holds `(ProgramJob,
   Option<i64>)`, `take_queued`, `Take::Job(job, source)`): the owner of a
-  forwarded or filled boundary (none before a source is selected), a held
-  window boundary's `from`, a mix's `to`. Never `owner_of` at take time: a
+  forwarded boundary, a held window boundary's `from`, a mix's `to`; a
+  fill names the side on air (`fill_source`: a window whose cue waits or
+  was frozen names its `from`, as its held boundaries do; any other fill
+  its owner, none before a source is selected). Never `owner_of` at take time: a
   segment is pruned once the next owner's first boundary is committed, so
   the outgoing source's last boundaries would read as nobody's
   (`program_trace_tests_bus.rs`).
