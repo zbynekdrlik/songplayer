@@ -99,6 +99,40 @@ fn a_driver_that_never_calls_back_waits_calmly_for_its_clock() {
     assert_eq!((d.starts, d.closes, d.callbacks), (5, 4, 0));
 }
 
+/// Review round 8: a driver that calls back a few times at the open,
+/// before the first block primes the ring, and then never again gives no
+/// clock either (PP's logs cannot tell it from one that never calls back):
+/// its ticks count from the priming, so it waits calmly from block 60 — no
+/// stall, no reset, no hard re-centre, no overflow, one block sent.
+#[test]
+fn a_driver_that_ticks_only_before_the_priming_waits_for_its_clock() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    d.drain(3);
+    for k in 1..=200 {
+        let due = T0 + k * SLOT;
+        w.step(&o, &mut d, due + 50_000, Some(block_due(due)));
+    }
+    let s = o.snapshot();
+    assert_eq!(
+        (s.state, s.status.reason_code),
+        ("waiting", Some("no_clock")),
+        "{s:?}"
+    );
+    assert_eq!(
+        (
+            s.status.resets,
+            s.status.hard_recentres,
+            s.status.overflows,
+            s.blocks_sent
+        ),
+        (0, 0, 0, 1),
+        "{s:?}"
+    );
+}
+
 /// A driver that ticked and then stops is a stall, as before the ruling:
 /// four such runs in a row (each primes, the card plays one slot, then
 /// nothing), each closed 2 s after its last callback with the reason
