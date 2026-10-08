@@ -49,7 +49,10 @@ impl ProgramCore {
     /// `commit_held` names it); any other is its owner's (a running fade's
     /// is the incoming source, as a mix names it).
     pub(super) fn fill_source(&self, boundary_100ns: i64) -> Option<i64> {
-        self.owner_of(boundary_100ns)
+        match self.window_at(boundary_100ns) {
+            Some(w) if w.cue != Cue::Open => w.from,
+            _ => self.owner_of(boundary_100ns),
+        }
     }
 
     /// The source on program just before a cut on `boundary`: the OUTGOING
