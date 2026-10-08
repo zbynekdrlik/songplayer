@@ -33,9 +33,11 @@
 //!   fraction of it) adds [`braking_ppm`] — the fastest
 //!   correction that can still stop at the calm zone's edge decelerating at
 //!   the slew limit — so a lasting offset (a date step's remainder ≤ one
-//!   slot, a changed delay, a driver buffer's sawtooth) is drained by the
-//!   ratio, 33 ms in about 2.5 min within ±300 ppm. Inside the calm zone
-//!   only camera-box's level loop acts.
+//!   slot, a missing boundary, a callback period's sawtooth, the excess an
+//!   underrun leaves) is drained by the ratio, 33 ms in about 2.5 min within
+//!   ±300 ppm. Inside the calm zone only camera-box's level loop acts. (A
+//!   changed delay rebuilds the output and a driver's buffer change reopens
+//!   it: both start over with the priming.)
 //! - output: clamp(rate + slew + P + I, ±300 ppm), moved at most 5 ppm per
 //!   second of the wall (camera-box #803: inaudible).
 //! - jitter: a late or clumped block finds the ring that much emptier, so

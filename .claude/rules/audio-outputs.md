@@ -80,7 +80,8 @@ ruling 7).
 
 SongPlayer's own: `SLOT_100NS` = one grid slot (333 333; was
 `GROSS_STEP_100NS`), `BASE_LATENCY_100NS` = `VBAN_SEND_LATENCY_100NS`
-(666 666), `HARD_DEFICIT_100NS` 500 000 (50 ms), `HARD_EXCESS_100NS`
+(666 666), `HARD_FLOOR_100NS` 166 666 (16.7 ms, the base target less
+50 ms; was `HARD_DEFICIT_100NS`, relative to the target), `HARD_EXCESS_100NS`
 1 333 333 (4 slots + 1), `CALM_ZONE_MS` 1.0, all literals pinned against
 their sources by the same test. (`RECENTRE_100NS` / `RECENT_BLOCKS`, the
 window-mean re-centre, are gone with the owner's ruling below.)
@@ -112,10 +113,16 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   zone adds `braking_ppm` = √(2 · 5 ppm/s · (|err| − calm)) (1 ms =
   1000 ppm·s): the fastest correction that can still stop at the zone's edge
   decelerating at the existing 5 ppm/s slew limit. A date step's remainder
-  (≤ one slot), a changed `delay_ms`, a driver buffer's sawtooth, the excess
-  an underrun leaves: all drained within ±300 ppm (≈ 0.5 cent). A 33 ms step
-  is back within ±2 ms in ≤ 148.2 s (model; the trapezoid optimum is
-  ~171 s to null it, ~150 s to reach 1 ms).
+  (forward, ≤ one slot), a missing boundary, the sawtooth of a callback
+  period, the excess an underrun leaves: all drained within ±300 ppm
+  (≈ 0.5 cent). A 33 ms step is back within ±2 ms in ≤ 148.2 s (model; the
+  trapezoid optimum is ~171 s to null it, ~150 s to reach 1 ms). NOT
+  slewed (review round 2): a changed `delay_ms` changes the entry, so the
+  outputs task REBUILDS the output (`same_but_name`: a gap of ≥ 2 s while
+  the old worker releases the driver, then the priming); a driver's buffer
+  change is a reset (`close_reason`): a reopen and the priming. Whether a
+  delay change should retarget the running servo instead is the main
+  session's call (#233 comment 6055539144, Q3).
 - **The calm zone** (`calm_zone_ms`): 1 ms, or half the driver's callback
   period when that is longer (2.67 ms at 512 frames / 96 kHz, SNV's DVS since
   the owner's change): the window mean of a reading that saws by a period
@@ -124,22 +131,33 @@ or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
   level loop (P on the 10 s EMA, ±50; I ±3) acts alone, as before; its I
   anti-windup counts the slew. The worker builds the servo
   `.with_callback_frames(opened.buffer_frames)`.
-- **The last resort** (`hard_recentre`): a block more than 50 ms short
-  (`HARD_DEFICIT_100NS`, 1.5 slots: the ring then holds < 11.7 ms for a block
-  on time, so most blocks of the 10–33 ms hand-off would underrun before the
-  slew could restore it) or more than four slots over (`HARD_EXCESS_100NS`,
-  133.3 ms: the next block would overflow the ring, target + 4 slots + one
-  block) re-centres AT ONCE by its error, through the splice. It is a fault:
+- **The last resort** (`hard_recentre(latency, target)`): a block whose
+  latency is under 16.7 ms (`HARD_FLOOR_100NS`, the base target less 1.5
+  slots: the ring then holds < 11.7 ms for a block on time, so most blocks
+  of the 10–33 ms hand-off would underrun before the slew could restore it)
+  or more than four slots over the target (`HARD_EXCESS_100NS`, 133.3 ms:
+  the next block would overflow the ring, target + 4 slots + one block)
+  re-centres AT ONCE by its error, through the splice. The floor is
+  ABSOLUTE (review round 2): an entry's delay raises the target, never the
+  floor, so a delayed output 50 ms short still holds its delay in the ring
+  and is slewed (the old edge, relative to the target, spliced it). Whether
+  the floor should move up to the splice's hold + one slot (≈ 38.3 ms), so
+  that a missing boundary at delay 0 is one faded insert rather than a run
+  of underruns, is the main session's call (#233 comment 6055539144, Q2).
+  It is a fault:
   `hard_recentres` (renamed from `recentres`), a WARN at most once per 5 s
   (`asio output: a hard re-centre (a fault)…` with cause, ms, the hand-off
   lateness and the count held back), and `last_hard_recentre {cause, ms,
-  lateness_ms, ago_s}` in the status. A date-step remainder (< one slot) plus
-  a 1024-frame sawtooth stays under the deficit edge.
+  lateness_ms, ago_s}` in the status (`ago_s` keeps counting while the
+  output waits to reopen). A date-step remainder is forward (`genlock.md`),
+  so it never reaches the floor.
 - **The first block's priming** (`Recentre::Prime`) inserts to the target the
   same way and is NO re-centre (an open or a reopen used to count one).
 - The status also shows `offset_ms` (the last window's latency − target,
   positive = later) and `slew_eta_s` (`slew_eta_s`: accelerate / cruise /
-  brake within the room the card's rate leaves; `None` inside the calm zone).
+  brake within the room the card's rate leaves on the side the slew works:
+  300 − rate for more output, 300 + rate for less; `None` inside the calm
+  zone).
 
 The action's `recentre_100ns`: insert > 0, skip < 0 (priming or hard only);
 the window and the EMA restart; the regression is untouched (the card's
@@ -177,10 +195,12 @@ whole block), 5 ms fade in; one silent frame where the fade out ends. It
 holds its last 5 ms back always (counted as buffered). A re-centre that
 comes while still muted fades nothing twice.
 
-**The ASRC** (`Asrc`): ONE rubato 5.0.1 `Async` band-limited sinc in
-rubato's documented highest-quality setting (`asrc_params`, pinned by
-`the_resampler_runs_rubatos_highest_quality_sinc`): 256 taps, the sinc table
-oversampled 256× (`ASRC_OVERSAMPLING`; rubato's default is 128),
+**The ASRC** (`Asrc`): ONE rubato 5.0.1 `Async` band-limited sinc in the
+lane's measured setting (`asrc_params`, pinned by
+`the_resampler_runs_rubatos_highest_quality_sinc`; rubato documents no
+"highest" setting, only cubic as its best quality per oversampling): 256
+taps, the sinc table oversampled 256× (`ASRC_OVERSAMPLING`; rubato's
+default is 128),
 BlackmanHarris², cubic between the table's rows, the automatic cutoff (0.947
 of the lower Nyquist: 22.7 kHz at 48 → 96 kHz), `FixedAsync::Input` of 1600
 frames. 512 taps were not needed: the bar below holds with 22 dB to spare,
@@ -205,19 +225,29 @@ plus half a block of the first ramp — derive pins from a model of rubato's
 (the plan's 300-block "±4" failed at +100 ppm by 1).
 
 **The closed-loop simulation** (`asrc_servo_sim_tests.rs`, since the
-owner's ruling): **0 hard re-centres** in every case — cards −50 / 0 / +50
+owner's ruling; since review round 2 the observation counts the splice's
+5 ms hold as buffered while the card plays only the ring, as the worker
+does): **0 hard re-centres** in every case — cards −50 / 0 / +50
 ppm (latency ≤ 2 ms after 70 s, |final − card| ≤ 5 ppm); ±1 ms steps at three
 window phases; ±33 ms steps (a date step's remainder) at three phases on a 0
 and a 20 ppm card, back within ±2 ms in ≤ 150 s (model 138.9–148.2 s), 0
 underruns; a hand-off late WITHIN the cushion (singles 40–56 ms, clumps of 2:
-0 underruns, latency within the sawtooth, the correction within 2.5 ppm of the
-card — no kick); the realistic hand-off (10–33 ms, singles 40–80 ms 1 in 900,
-clumps of 2 / 3 — the blocks past the cushion underrun, physics: 57 / 22 / 22
-/ 61 callbacks in the four configurations, and each one's excess is drained by
-the ratio); a driver buffer 128 → 512 mid-run; a dropped callback; a 100 ms
-forward step and a 200 ms stall (slewed); a 1024-frame driver at 48 kHz with a
-20 ms step; a 48 kHz card at +50 ppm. The ring-limit cases force exactly one
-each: a 300 ms worker stall (excess) and a 100 ms pause (deficit). 900 s each;
+0 underruns, latency within the sawtooth, the correction never more than
+1.3 / 2.5 / 1.8 ppm off the card after 120 s — no kick); the realistic
+hand-off (10–33 ms, singles 40–80 ms 1 in 900, clumps of 2 / 3): 97 / 33 /
+33 / 99 underrun callbacks in the four configurations, latency ≤ 22 ms
+off. Not all of them are physics: the stop curve drains the excess each
+underrun leaves at up to 300 ppm, which re-exposes the next late block —
+the reviewer's model keeping that excess as cushion instead gives ~20 and
+never 50 ppm off the card (#233 comment 6055539144, Q1, the main
+session's call); a callback period 128 → 512 mid-run with no reopen; a
+dropped callback; a 100 ms forward step and a 150 ms stall at four phases
+(slewed); a 1024-frame driver at 48 kHz with a 20 ms step; a 48 kHz card
+at +50 ppm. The ring-limit cases force exactly one each: a 300 ms worker
+stall at three phases (excess) and a 100 ms pause (deficit). A stall near
+200 ms is AT the ring's limit (its excess is 4 slots ± the phase: none at
+500.0 / .01 / .02 / .011 / .022 / .033 s, one at 500.03 s), so no test
+pins it. 900 s each;
 every case also asserts |ppm| ≤ 300, the slew and no skip asked twice. The
 `Lateness` profiles draw from the same LCG as the scratch model, so the
 underrun counts are exact pins. **Envelope for
@@ -236,7 +266,11 @@ here:
   from each later block's output, the pending skip in the observation;
   an instant re-centre hides the double-skip;
 - sweep a step over ≥ 3 window phases: the straddle bug passed at the one
-  phase the plan pinned.
+  phase the plan pinned;
+- count what the worker counts: it observes the ring + the splice's hold,
+  the card plays the ring alone (a harness without the hold had 5 ms more
+  cushion: 57 underruns where the worker's model has 97, and a 200 ms
+  stall pinned at its one lucky phase).
 
 The pre-ruling scratch model's fuzz (240 runs: cards ±120 ppm, jitter
 0–30 ms, steps −35…+150 ms at random window phases, drops, 44.1–96 kHz,
@@ -760,7 +794,8 @@ is over 0 (release review: a box expected to run none need not have DVS);
 exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
 outputs (ci.yml / deploy-pp.yml, "0" until the main session adds each box's
 DVS entry, then "1"), each running, then a minute (1 800 blocks) at its
-driver's rate with no underrun, no reopen, |ppm| ≤ 300 and a latency
+driver's rate with no underrun, no reopen, no hard re-centre (review
+round 2), |ppm| ≤ 300 and a latency
 over 0 and under the entry's delay + 1 s (`asioGateFailures`, unit-tested
 in the mock suite; every output over the SAME minute, so the gate's time
 does not grow with the outputs; the driver's `overloads` are logged with
