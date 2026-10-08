@@ -572,7 +572,9 @@ pub fn max_of_type(kind: OutputType) -> usize {
 
 /// The whole list: at most [`MAX_OUTPUTS`] entries, [`MAX_VBAN_OUTPUTS`]
 /// VBAN and [`MAX_ASIO_OUTPUTS`] ASIO ones, every entry valid, ids unique,
-/// each ASIO driver named once ([`driver_taken`]).
+/// each ASIO driver named once ([`driver_taken`]) and each VBAN destination
+/// once ([`destination_taken`]: the dashboard and a PATCH; the stored read
+/// does not skip it, so a list stored before keeps running as it was).
 pub fn validate_list(entries: &[OutputEntry]) -> Result<(), ListError> {
     if entries.len() > MAX_OUTPUTS {
         return Err(ListError::TooMany {
@@ -593,6 +595,8 @@ pub fn validate_list(entries: &[OutputEntry]) -> Result<(), ListError> {
             Some(("id", Problem::Duplicate))
         } else if driver_taken(earlier, e) {
             Some(("asio.driver", Problem::DriverTaken))
+        } else if destination_taken(earlier, e) {
+            Some(("vban", Problem::DestinationTaken))
         } else {
             None
         };
