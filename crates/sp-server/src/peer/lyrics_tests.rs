@@ -561,6 +561,49 @@ async fn a_stand_in_handed_the_copy_runs_here_after_the_bound() {
     assert_eq!(standins, 1, "still standing in");
 }
 
+/// Review round 6: a stand-in whose hand-off gave up keeps its spent bound
+/// through a pick that meets no peer copy (SNV unreachable then): that run
+/// here keeps the wait too, so once SNV is back with its copy the next pick
+/// runs here at once (no fresh 2 h of putting back), still standing in.
+#[tokio::test]
+async fn a_stand_ins_spent_bound_survives_a_pick_with_the_peer_unreachable() {
+    let (snv, pp, id, _) = snv_and_pp().await;
+    pp.give_lyrics(id, YT, "mtl+g35t").await;
+    crate::db::models_peer::record_standin(pp.pool(), YT, "lyrics", "snv", 1_000, i64::MAX)
+        .await
+        .unwrap();
+    let long_ago = crate::peer::wire::now_ms()
+        - i64::try_from(crate::peer::decide::MAX_PEER_WAIT.as_millis()).unwrap();
+    crate::db::models_peer::start_wait(pp.pool(), YT, "lyrics", long_ago)
+        .await
+        .unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let gone = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let mut down = snv.as_peer(SNV_KEY);
+    down.base_url = gone;
+    pp.set_peers(&[down]).await;
+    let row = lyrics_row(&pp, id).await;
+    let PeerStep::Local(Some(guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("standing in, with SNV unreachable: runs here")
+    };
+    drop(guard);
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 1, "the spent bound is kept");
+    pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("SNV back with its copy: runs here at once, the bound spent")
+    };
+    let standins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_standins")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(standins, 1, "still standing in");
+}
+
 #[tokio::test]
 async fn a_stale_copy_here_is_replaced_by_the_peers_current_one() {
     let (_snv, pp, id, json) = snv_and_pp().await;
