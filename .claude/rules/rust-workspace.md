@@ -374,6 +374,22 @@ failed on them (`36438006665`):
   gained `fleet`, `audio_emitter_tests.rs` still built one without it).
   Before adding a field, grep the crate for `TypeName {` in every file,
   tests included, and add it (or `..Default::default()`) at each site.
+- **An enum variant that gains a field breaks every PATTERN of it: E0023**
+  (#147 review round 2). `Take::Job(job)` → `Take::Job(job, source)` left
+  eight one-field patterns in test files the lane never opened
+  (`program_bus_tests.rs`, `ndi_input_tests*.rs`), and the test target did
+  not compile. The grep that should have found them was cut short by a
+  `| head -30`. Grep `Variant(` across `crates/` with the Grep tool and
+  `head_limit: 0` (never a piped `head`), and fix each pattern (`_` for the
+  new field, `..` inside `matches!`).
+- **A single-writer ring that a reader must never block: a seqlock of
+  atomics per slot** (#147, `program_trace.rs`). Sequence odd while the
+  writer fills the words, +2 per record; the reader loads it (Acquire),
+  the words (Relaxed), fences (Acquire) and re-checks; an index word drops
+  a slot written over since. Test the protocol deterministically, no
+  threads: an `open`ed slot reads `None` (kills `seq + 1 → seq * 1`), and a
+  read whose `between` hook (run after the words, before the re-check)
+  writes the same slot again is dropped (kills `seq + 2 → seq * 2`).
 - **An opaque `impl Fn` bound to a local keeps its borrow to the end of
   the scope → E0505 on a later move** (#223 follow-up review round 1).
   `let record = recorder(&log);` (a helper returning `impl Fn(usize) +
