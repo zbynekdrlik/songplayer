@@ -597,9 +597,8 @@ wait for a peer that has the song", below).
   records of what the job makes (`forget_origins`, the audio guard below),
   drops the parts a fetch of it left, then announces it (a later ask never
   inherits an old start and its spent bound). The hooks' own Local paths use
-  it too (an operator's lyrics ask, nothing newer — never for a track that
-  stands in, below —, a fetch that kept failing, another audio). The
-  no-peers and bad-settings paths only announce
+  it too (an operator's lyrics ask, nothing newer, a fetch that kept
+  failing, another audio). The no-peers and bad-settings paths only announce
   (`ask` writes nothing; the download hook then forgets the pair's
   records, below): a wait recorded before
   the settings went bad survives them, so the first ask after the fix may
@@ -776,14 +775,19 @@ wait for a peer that has the song", below).
   dub-requested or `gemini-live-translate`), a failed read → here. The
   peer's `/videos` row must match its catalog (pipeline version) and must
   not be `gemini-live-translate`; the same source at the same version as
-  the row already serves = nothing newer → runs here, unless the track
-  here stands in for the peer's copy (`standin_peer`: then it is taken
-  whatever its source, review round 2) (the daily full-mix
+  the row already serves = nothing newer → runs here (the daily full-mix
   upgrade stays local, even while the peer runs or queues that same
   upgrade: `NothingNewer` does not look at the peer's announcements, a known
   limit — once a day per full-mix song both nodes may try it). A track over
   16 MiB is refused before the transfer (`MAX_LYRICS_BYTES`: the part is
-  read whole). The JSON is parsed as a typed `LyricsTrack` whose
+  read whole). A video whose track here stands in for a peer's copy takes
+  no copy through the hook (review round 3: the hook adopted one row and
+  left the video's other rows on the stand-in's columns for good): a Fetch
+  there makes the stand-in due now (`Exchange::standin_due_now`) and puts
+  the row back for `STANDIN_MIN_RECHECK` with no attempt; the stand-in's
+  own look takes the copy into every row, whatever its source ("The lyrics
+  wait for a peer that has the song" below). The JSON is parsed as a typed
+  `LyricsTrack` whose
   `source` must equal the row's (a refused part is deleted), renamed into
   `{yt}_lyrics.json`; `adopt_lyrics` writes source, version and alignment
   model through the lyrics row's one writer (`mark_video_lyrics_complete`),
@@ -846,18 +850,20 @@ parked `no_source` by `fail_song`). Three rules:
     outage at the bound kept the degraded track for good), or
     `after_failed_fetch` giving up on that peer's copy (a peer the audio
     did not come from: no stand-in);
-  - kept while the job runs here again (`ask` → any `Local` while it
-    stands in: recorded again for its peer). Such an ask does not read
-    `song_from`, so a local run put back after the bound (for its stems,
-    memory, the wall) never starts a new 2 h `PeerHasTheSong` wait (review
-    round 2: one per putting back); a Fetch still takes the peer's copy and
-    a peer's announced job is still waited for;
+  - kept AS IT WAS while the job runs here again (`ask` → any `Local`,
+    or `after_failed_fetch` giving up on any peer, while it stands in:
+    `Exchange::keep_standing` writes back the record `run_here` dropped,
+    its age and next look, a DEBUG line; review round 3: an INFO and a
+    reset recheck curve per putting back before). Such an ask does not
+    read `song_from`, so a local run put back after the bound (for its
+    stems, memory, the wall) never starts a new 2 h `PeerHasTheSong` wait
+    (review round 2: one per putting back); a peer's announced job is
+    still waited for, and a peer's copy is taken through the look below;
   - over (`Exchange::drop_standin`) in `run_here` (an operator's ask,
     another audio: the job's own result is final) and `fetched` (the
-    peer's copy is in place: the supersede, or the hook's adoption, which
-    takes it even of the source the track here already has — "nothing
-    newer" never applies to a track that stands in). The stand-in path
-    calls `run_here` first, then records;
+    peer's copy is in place, through the look below; the hook never adopts
+    for a stand-in, it makes it due now). The stand-in path calls
+    `run_here` first, then records;
   - V31 back-filled it once: a video whose audio a peer gave (a
     `peer_fetches` audio record) with a lyrics result made here (a
     `lyrics_source`, no lyrics record), no operator text or ask and no dub /
@@ -926,13 +932,14 @@ parked `no_source` by `fail_song`). Three rules:
   `kind_tests.rs::only_the_lyrics_wait_while_a_peer_has_the_song`,
   `lyrics_tests.rs::{lyrics_wait_while_a_peer_has_the_song,
   lyrics_of_a_song_downloaded_here_do_not_wait_for_a_peer,
-  a_stand_in_of_the_same_source_is_replaced_by_the_peers_copy}`,
+  a_stand_in_met_by_the_hook_is_replaced_in_every_row}`,
   `standin_tests.rs` (the supersede over two real nodes: every row, a
   parked track, the check row with an audio, the recheck, another audio,
   an operator or a dub, no row, the order, the recheck curve, every row or
   none over; the stand-in recorded after the bound — its source read or
-  unreachable — and after a failing fetch from that source only, kept when
-  the run is put back, ended by `run_here` / `fetched`),
+  unreachable — and after a failing fetch from that source only, kept as
+  it was when the run is put back or another peer's fetch fails, ended by
+  `run_here` / `fetched`),
   `db/mod_tests_v31.rs` (the back-fill's cases),
   `lyrics/worker_tests_peer.rs::the_worker_replaces_a_stand_in_with_the_peers_copy`.
 
@@ -953,9 +960,12 @@ parked `no_source` by `fail_song`). Three rules:
    SNV runs the new song's stems and lyrics, PP's lyrics log `exchange: a
    peer will have it, or could not be asked - waiting` with `job=lyrics`
    and `why=PeerRunsIt` (SNV announces lyrics waiting on its stems) or
-   `why=PeerHasTheSong`, and NEVER `exchange: no peer has it - processing
-   here … job=lyrics` for a song PP fetched from SNV. Then `exchange: done
-   with a peer's copy` with `job=lyrics source=peer:snv`. The stand-in V31
+   `why=PeerHasTheSong`, and NEVER the DEBUG `exchange: no peer has it -
+   processing here … job=lyrics why=NobodyHasIt` for a song PP fetched
+   from SNV that has no stand-in while SNV still lists the very audio PP
+   took (with a stand-in, a run put back logs it by design; so does a song
+   SNV downloaded again). Then `exchange: done with a peer's copy` with
+   `job=lyrics source=peer:snv`. The stand-in V31
    back-filled for `8ohdO2nINEI` is replaced at PP's first lyrics tick
    after the start (`exchange: done with a peer's copy`, `job=lyrics`, for
    that id; `SELECT * FROM peer_standins` empty after it).
