@@ -45,6 +45,8 @@ export interface AsioTelemetry {
   ppm: number;
   underruns: number;
   resets: number;
+  /** The owner's "fault": a faded skip or insert (#233 review round 2). */
+  hard_recentres: number;
   latency_ms: number;
 }
 
@@ -74,6 +76,9 @@ export function asioGateFailures(first: OutputStatus, second: OutputStatus): str
   }
   if (b.underruns > a.underruns) f.push(`${b.underruns - a.underruns} underruns in the window`);
   if (b.resets > a.resets) f.push(`the driver was reopened ${b.resets - a.resets} times in the window`);
+  if (b.hard_recentres > a.hard_recentres) {
+    f.push(`${b.hard_recentres - a.hard_recentres} hard re-centres in the window`);
+  }
   if (Math.abs(b.ppm) > MAX_PPM) f.push(`its correction is ${b.ppm} ppm (bound ${MAX_PPM})`);
   const latencyBound = second.delay_ms + LATENCY_OVER_DELAY_MS;
   if (!(second.latency_ms > 0 && second.latency_ms < latencyBound)) f.push(`its latency is ${second.latency_ms} ms`);

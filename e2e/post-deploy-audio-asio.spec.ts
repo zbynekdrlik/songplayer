@@ -9,8 +9,9 @@
  * 2. Exactly SP_ASIO_OUTPUTS_EXPECTED enabled ASIO outputs exist (ci.yml /
  *    deploy-pp.yml; "0" until the main session adds the box's DVS entry,
  *    then "1"), and each one runs, then holds a minute of program blocks at
- *    its driver's rate with no underrun, no reopen, |ppm| <= 300 and a
- *    latency (`asioGateFailures`). Every output is measured over the SAME
+ *    its driver's rate with no underrun, no reopen, no hard re-centre
+ *    (#233 review round 2: the owner's fault, a faded skip or insert),
+ *    |ppm| <= 300 and a latency (`asioGateFailures`). Every output is measured over the SAME
  *    minute, so the gate's time does not grow with the number of outputs
  *    (up to 4, `MAX_ASIO_OUTPUTS`).
  *
