@@ -7,7 +7,9 @@
  *    deploy-pp.yml; "0" until the main session adds the box's DVS entry,
  *    then "1"), and each one runs, then holds a minute of program blocks at
  *    its driver's rate with no underrun, no reopen, |ppm| <= 300 and a
- *    latency (`asioGateFailures`).
+ *    latency (`asioGateFailures`). Every output is measured over the SAME
+ *    minute, so the gate's time does not grow with the number of outputs
+ *    (up to 4, `MAX_ASIO_OUTPUTS`).
  *
  * No sleeps: every wait is an expect.poll. Right after a deploy the outputs
  * task applies the list on its first pass and a worker opens its driver
@@ -67,26 +69,35 @@ test.describe("ASIO output (#233)", () => {
       .toBe(EXPECTED);
     const enabled = await enabledAsio();
     expect(enabled, "GET /api/v1/program").not.toBeNull();
-    for (const listed of enabled as OutputStatus[]) {
-      const read = async () => (await readOutputs(request))?.find((o) => o.id === listed.id);
-      await expect
-        .poll(async () => (await read())?.state ?? "unread", {
-          message: `ASIO output ${listed.id} runs`,
-          timeout: 30_000,
-        })
-        .toBe("running");
-      const first = await output(request, listed.id);
-      console.log(`[#233 asio] first: ${JSON.stringify(first)}`);
-      await expect
-        .poll(async () => ((await read())?.blocks_sent ?? first.blocks_sent) - first.blocks_sent, {
-          message: `ASIO output ${first.id}: one minute of program blocks`,
-          timeout: 120_000,
-        })
-        .toBeGreaterThanOrEqual(WINDOW_BLOCKS);
-      const second = await output(request, first.id);
+    const ids = (enabled as OutputStatus[]).map((o) => o.id);
+    if (ids.length === 0) return;
+    // Every output's state in one read ("unread" for a failed read).
+    const states = async () => {
+      const list = await readOutputs(request);
+      return ids.map((id) => list?.find((o) => o.id === id)?.state ?? "unread");
+    };
+    await expect
+      .poll(states, { message: `ASIO outputs ${ids.join(", ")} run`, timeout: 30_000 })
+      .toEqual(ids.map(() => "running"));
+    const first: OutputStatus[] = [];
+    for (const id of ids) first.push(await output(request, id));
+    console.log(`[#233 asio] first: ${JSON.stringify(first)}`);
+    // The fewest blocks any output sent since its first read (a failed read
+    // counts none).
+    const fewest = async () => {
+      const list = await readOutputs(request);
+      return Math.min(
+        ...first.map((f) => (list?.find((o) => o.id === f.id)?.blocks_sent ?? f.blocks_sent) - f.blocks_sent),
+      );
+    };
+    await expect
+      .poll(fewest, { message: "one minute of program blocks on every ASIO output", timeout: 120_000 })
+      .toBeGreaterThanOrEqual(WINDOW_BLOCKS);
+    for (const f of first) {
+      const second = await output(request, f.id);
       console.log(`[#233 asio] second: ${JSON.stringify(second)}`);
       if (second.note) console.log(`[#233 asio] note: ${second.note}`);
-      expect(asioGateFailures(first, second), `ASIO output ${first.id}`).toEqual([]);
+      expect(asioGateFailures(f, second), `ASIO output ${f.id}`).toEqual([]);
     }
   });
 });
