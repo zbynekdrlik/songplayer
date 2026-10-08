@@ -23,7 +23,11 @@
 //! - parked (`Reason::Parked`, a driver callback that never returned): the
 //!   output stays closed for good, with no next try.
 //!
-//! A closed output drops the blocks it is handed (they would be stale).
+//! A closed output drops the blocks it is handed (they would be stale), and
+//! so does a running one after its priming until the card's first callback
+//! of the run (a driver that opens and never calls back, e.g. an unlicensed
+//! DVS, would otherwise count a hard re-centre every few slots until the
+//! stall closes it; #233, found at PP).
 //! The worker is not an MMCSS thread (iemmixer: a helper never pre-empts the
 //! driver's own callback thread; it has two slots of cushion). Status:
 //! `AsioOut::snapshot` → `GET /api/v1/program` `outputs[i].asio`.
@@ -431,6 +435,11 @@ impl AsioWorker {
             }
             State::Running(run) => run,
         };
+        // After the priming, a block waits for the card's first callback of
+        // the run (#233, PP: an unlicensed DVS opens and never calls back).
+        // What a card that takes nothing would pile up is no fault of the
+        // output (the stall closes the run): neither observed nor pushed.
+        let block = block.filter(|_| !run.primed || device.consumed_frames() > 0);
         if let Some(hard) = block.and_then(|b| process(run, out, device, now_100ns, b)) {
             if let Some(held_back) = self.hard_warns.admit(now_100ns, HARD_WARN_EVERY_100NS) {
                 log_hard(&out.id, &hard, held_back);
