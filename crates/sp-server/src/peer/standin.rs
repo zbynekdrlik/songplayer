@@ -9,13 +9,17 @@
 //!   asking while the peer it took the song's audio from had the song:
 //!   `Exchange::ask` → waited the 2 h bound for that peer (its catalog
 //!   read now or not), or `Exchange::after_failed_fetch` giving up on that
-//!   peer's copy. Kept (recorded again) when the job runs here again while
-//!   it stands in: its ask then waits on the song no more. V31 also
-//!   back-filled the ones made before this record existed.
-//! - Over when the peer's copy is taken (`Exchange::fetched`, the hook's
-//!   adoption, which takes the copy even of the source the track here
-//!   already has) or the job runs here for another reason
-//!   (`Exchange::run_here`: an operator's ask, another audio).
+//!   peer's copy. While it stands in, the job's ask waits on the song no
+//!   more. V31 also back-filled the ones made before this record existed.
+//! - Kept as it was (`Exchange::keep_standing`, its age and next look) when
+//!   the job runs here again while it stands in: a run put back, a fetch
+//!   from another peer given up.
+//! - Over when the peer's copy is taken (`Exchange::fetched`) or the job
+//!   runs here for another reason (`Exchange::run_here`: an operator's ask,
+//!   another audio). The lyrics hook never takes a copy into one row of a
+//!   video that stands in: meeting a peer's copy it makes the stand-in due
+//!   now (`Exchange::standin_due_now`) and puts the row back, and the look
+//!   below takes the copy into every row.
 //! - Looked at by the lyrics worker on each tick, after its kill switch
 //!   ([`supersede_next`]): one due stand-in, rescheduled FIRST
 //!   ([`standin_recheck`] of its age), then taken when a listed peer holds
@@ -41,7 +45,7 @@ use super::decide::{holds, listed_audio};
 use super::kind::{ArtifactKind, Job};
 use super::wire::now_ms;
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
-use crate::db::models_peer;
+use crate::db::models_peer::{self, StandinRecord};
 
 /// The shortest recheck of a stand-in…
 pub const STANDIN_MIN_RECHECK: Duration = Duration::from_secs(600);
@@ -88,15 +92,48 @@ impl Exchange {
             .map(|(node, _, sha256)| (node, sha256))
     }
 
-    /// The peer whose copy what `job` made of `youtube_id` stands in for;
-    /// `None` when it stands in for none, or the record cannot be read
-    /// (WARNed).
-    pub(crate) async fn standin_peer(&self, job: Job, youtube_id: &str) -> Option<String> {
-        models_peer::standin_peer(&self.pool, youtube_id, job.as_str())
+    /// The stand-in of `job` of `youtube_id`; `None` when what it made
+    /// stands in for no peer's copy, or the record cannot be read (WARNed).
+    pub(crate) async fn standin(&self, job: Job, youtube_id: &str) -> Option<StandinRecord> {
+        models_peer::standin(&self.pool, youtube_id, job.as_str())
             .await
             .inspect_err(|e| warn!(youtube_id, %e, "exchange: reading a stand-in failed"))
             .ok()
             .flatten()
+    }
+
+    /// `job` of `youtube_id` runs here again while it stands in (a run put
+    /// back, a fetch from another peer given up): the stand-in is written
+    /// back as it was (`run_here` dropped it), its age and next look kept.
+    pub(crate) async fn keep_standing(&self, job: Job, youtube_id: &str, s: &StandinRecord) {
+        let kept = models_peer::record_standin(
+            &self.pool,
+            youtube_id,
+            job.as_str(),
+            &s.peer,
+            s.made_at_ms,
+            s.next_check_ms,
+        )
+        .await;
+        if let Err(e) = kept {
+            warn!(youtube_id, %e, "exchange: keeping a stand-in failed");
+        }
+        debug!(
+            youtube_id,
+            job = job.as_str(),
+            peer = %s.peer,
+            "exchange: run here again - it still stands in for the peer's copy"
+        );
+    }
+
+    /// The stand-in of `job` of `youtube_id` is looked at on the lyrics
+    /// worker's next tick (the hook met it while its peer has a copy).
+    pub(crate) async fn standin_due_now(&self, job: Job, youtube_id: &str) {
+        let due =
+            models_peer::recheck_standin(&self.pool, youtube_id, job.as_str(), now_ms()).await;
+        if let Err(e) = due {
+            warn!(youtube_id, %e, "exchange: making a stand-in due failed");
+        }
     }
 
     /// `job` of `youtube_id` stands in for no peer's copy any more.

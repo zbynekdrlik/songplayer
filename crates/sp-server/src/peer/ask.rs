@@ -113,7 +113,7 @@ impl Exchange {
         // stems, never starts a new 2 h wait on the song; review round 2).
         let waits_on_song = job.waits_while_a_peer_has_the_song();
         let standing = if waits_on_song {
-            self.standin_peer(job, youtube_id).await
+            self.standin(job, youtube_id).await
         } else {
             None
         };
@@ -148,15 +148,15 @@ impl Exchange {
             Decision::Local(why) => {
                 log_local(youtube_id, job, why);
                 let guard = self.run_here(job, youtube_id).await;
-                // What runs here stands in for the copy of the peer this node
-                // took the song from: once it waited the bound for that peer
-                // (read now or not), and on each run here while it stands in.
-                let gave_up = if why == LocalWhy::WaitedLongEnough {
-                    song_source(&reads, song_from)
-                } else {
-                    None
-                };
-                if let Some(peer) = standing.as_deref().or(gave_up) {
+                // A stand-in stays as it was while its job runs here again;
+                // else what runs here stands in for the copy of the peer this
+                // node took the song from once it waited the bound for that
+                // peer (read now or not).
+                if let Some(s) = &standing {
+                    self.keep_standing(job, youtube_id, s).await;
+                } else if why == LocalWhy::WaitedLongEnough
+                    && let Some(peer) = song_source(&reads, song_from)
+                {
                     self.stand_in(job, youtube_id, peer).await;
                 }
                 Ask::Local(guard)
@@ -207,7 +207,8 @@ impl Exchange {
     /// deferred while the job has waited less than the bound, else the job
     /// runs here (`fetch_failed`). What a job that waits on the song makes
     /// here then stands in for the peer's copy when this node took the
-    /// song's audio from that peer.
+    /// song's audio from that peer; a stand-in it already had stays as it
+    /// was.
     pub(crate) async fn after_failed_fetch(
         &self,
         job: Job,
@@ -219,8 +220,11 @@ impl Exchange {
         match self.fetch_failed(job, youtube_id, peer, error).await {
             Some(recheck) => self.defer(job, video_id, recheck).await,
             None => {
+                let standing = self.standin(job, youtube_id).await;
                 let guard = self.run_here(job, youtube_id).await;
-                if job.waits_while_a_peer_has_the_song()
+                if let Some(s) = &standing {
+                    self.keep_standing(job, youtube_id, s).await;
+                } else if job.waits_while_a_peer_has_the_song()
                     && self
                         .song_from(youtube_id)
                         .await

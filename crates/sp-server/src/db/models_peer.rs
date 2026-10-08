@@ -248,18 +248,30 @@ pub async fn record_standin(
     Ok(())
 }
 
-/// The peer whose copy the result of `job` of `youtube_id` stands in for;
-/// `None` when it stands in for none.
-pub async fn standin_peer(
+/// A stand-in as recorded: whose copy it stands in for, when it was made,
+/// when it is looked at next.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct StandinRecord {
+    pub peer: String,
+    pub made_at_ms: i64,
+    pub next_check_ms: i64,
+}
+
+/// The stand-in of `job` of `youtube_id`; `None` when its result stands in
+/// for no peer's copy.
+pub async fn standin(
     pool: &SqlitePool,
     youtube_id: &str,
     job: &str,
-) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar("SELECT peer FROM peer_standins WHERE youtube_id = ? AND job = ?")
-        .bind(youtube_id)
-        .bind(job)
-        .fetch_optional(pool)
-        .await
+) -> Result<Option<StandinRecord>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT peer, made_at_ms, next_check_ms FROM peer_standins \
+         WHERE youtube_id = ? AND job = ?",
+    )
+    .bind(youtube_id)
+    .bind(job)
+    .fetch_optional(pool)
+    .await
 }
 
 /// The stand-in of `job` due at `now_ms` that has been due the longest:
