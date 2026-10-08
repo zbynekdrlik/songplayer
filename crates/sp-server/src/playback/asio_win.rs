@@ -20,7 +20,7 @@
 //!   driver's name before it loads the driver and `close` gives it back
 //!   after the release, so a rebuilt entry's successor never loads a second
 //!   instance while its predecessor still releases the first (it is refused
-//!   as busy and tries again after the 2 s backoff).
+//!   as `Reason::Held` and tries again after the 2 s backoff).
 //! - ASIO callbacks carry no user pointer: [`ASIO_SLOTS`] static slots, each
 //!   with its own four callbacks, hold the running streams. Two per ASIO
 //!   entry: a replaced output's old worker may still hold its slot while its
@@ -429,7 +429,7 @@ impl AsioDevice for WinAsioDevice {
             ));
         }
         // Before anything loads: a held driver (the output this one
-        // replaces still releasing it) is busy for now. On a failed open the
+        // replaces still releasing it) is held for now. On a failed open the
         // hold drops after the driver (locals drop in reverse order).
         let Some(hold) = HELD.claim(name) else {
             return Err(Reason::Held);

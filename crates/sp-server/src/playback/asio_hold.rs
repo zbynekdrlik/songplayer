@@ -4,8 +4,9 @@
 //! instance of one driver inside one process is something many ASIO drivers
 //! do not expect (one client each). So a device takes the driver's name here
 //! BEFORE it loads the driver, and gives it back only after the driver is
-//! released (`asio_win.rs`); a successor that finds it held is refused as
-//! busy and tries again after the backoff (2 s, `asio_state::BACKOFF_S`).
+//! released (`asio_win.rs`); a successor that finds it held is refused
+//! (`asio_state::Reason::Held`) and tries again after the backoff (2 s,
+//! `asio_state::BACKOFF_S`).
 
 use std::sync::Mutex;
 
