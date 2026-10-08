@@ -99,7 +99,7 @@ impl Reason {
             }
             Self::Refused(e) | Self::Failed(e) => e.clone(),
             Self::Reset => "the driver asked for a reset".into(),
-            Self::RateChanged(0) => "the driver lost its clock (it reports 0 Hz)".into(),
+            Self::RateChanged(0) => "the driver lost its clock (no rate)".into(),
             Self::RateChanged(r) => format!("the driver's rate changed to {r} Hz"),
             Self::Stalled => "no callback from the driver for 2 s".into(),
             Self::WindowsOnly => "ASIO runs on Windows only".into(),
@@ -129,7 +129,7 @@ pub fn close_reason(ev: &DeviceEvents, opened_rate: f64) -> Option<Reason> {
         return Some(Reason::Reset);
     }
     match ev.rate_changed {
-        Some(r) if (r - opened_rate).abs() >= 1.0 => Some(Reason::RateChanged(r.round() as u32)),
+        Some(r) if (r - opened_rate).abs() >= 1.0 => Some(rate_change(r)),
         _ => None,
     }
 }
@@ -187,6 +187,16 @@ pub fn reply(sel: i32, value: i32) -> i32 {
         ENGINE_VERSION => 2,
         RESET_REQUEST | RESYNC_REQUEST | LATENCIES_CHANGED | SUPPORTS_TIME_INFO => 1,
         _ => 0,
+    }
+}
+
+/// What a reported rate stands for: a lost clock under 1 Hz, else the new
+/// rate (rounded).
+fn rate_change(rate: f64) -> Reason {
+    if lost_clock(rate) {
+        Reason::RateChanged(0)
+    } else {
+        Reason::RateChanged(rate.round() as u32)
     }
 }
 
