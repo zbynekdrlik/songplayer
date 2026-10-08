@@ -120,8 +120,10 @@ pub struct AsioStatus {
     /// Closes (a reset, a rate change, a stall) since the output was built.
     pub resets: u64,
     /// Hard re-centres (a fade, then silence inserted or audio skipped,
-    /// because the ring would otherwise have run dry or overflowed), since
-    /// the output was built: faults. An open's priming is none.
+    /// because too little was buffered — the ring would run dry, or a
+    /// delayed output played more than 4 slots early — or too much, the ring
+    /// would overflow), since the output was built: faults. An open's
+    /// priming is none.
     pub hard_recentres: u64,
     /// The last hard re-centre, since the output was built.
     pub last_hard_recentre: Option<HardRecentre>,
@@ -139,8 +141,9 @@ pub struct AsioStatus {
 /// A hard re-centre as the status shows it.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct HardRecentre {
-    /// `deficit` (the ring would have run dry) or `excess` (it would have
-    /// overflowed).
+    /// `deficit` (too little buffered: the ring would run dry, or a delayed
+    /// output played more than 4 slots early) or `excess` (the ring would
+    /// overflow).
     pub cause: &'static str,
     /// Inserted (> 0) or skipped (< 0), ms.
     pub ms: f64,
@@ -672,7 +675,7 @@ fn log_hard(id: &str, h: &Hard, held_back: u64) {
         ms = s.ms,
         lateness_ms = s.lateness_ms,
         held_back,
-        "asio output: a hard re-centre (a fault) — the ring would otherwise have run dry (deficit) or overflowed (excess): silence inserted (+) or audio skipped (−) under fades"
+        "asio output: a hard re-centre (a fault) — too little buffered (deficit: the ring would run dry, or a delayed output played over 4 slots early) or too much (excess: the ring would overflow): silence inserted (+) or audio skipped (−) under fades"
     );
 }
 

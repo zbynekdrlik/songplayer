@@ -56,7 +56,7 @@ pub struct AsioFigures {
 
 pub const LATENCY_TIP: &str = "Čas od hranice programu SongPlayera po výstup z karty: cieľ 66,7 ms (+ nastavené oneskorenie výstupu), k tomu resampler a vlastné oneskorenie ovládača.";
 pub const UNDERRUNS_TIP: &str = "Koľkokrát karta nedostala zvuk včas (podtečenie zásobníka), odkedy výstup beží — každé je krátka medzera v zvuku.";
-pub const FAULTS_TIP: &str = "Koľkokrát musel výstup skokom vložiť ticho alebo preskočiť zvuk (s 5 ms prelínaním), lebo by inak zásobník karty vyschol alebo pretiekol. Je to porucha a je počuť; bežne 0 — rozdiely dorovnáva resampler plynule.";
+pub const FAULTS_TIP: &str = "Koľkokrát musel výstup skokom vložiť ticho alebo preskočiť zvuk (s 5 ms prelínaním), lebo v zásobníku karty bolo zvuku primálo (vyschol by, alebo by oneskorený výstup hral o viac ako 133 ms skôr) alebo priveľa (pretiekol by). Je to porucha a je počuť; bežne 0 — rozdiely dorovnáva resampler plynule.";
 pub const CONVERSION_TIP: &str = "Prevod frekvencie: program SongPlayera má 48 kHz, karta (ovládač ASIO) beží na svojej frekvencii; prevádza ho pásmovo obmedzený sinc resampler (256 koeficientov, BlackmanHarris², tabuľka 256×).";
 pub const CARD_TIP: &str = "O koľko milióntin (ppm) tiknú hodiny karty rýchlejšie (+) alebo pomalšie (−) než hodiny SongPlayera. Odhad sa zamkne po minúte meraní (30 bodov).";
 pub const CORRECTION_TIP: &str = "O koľko milióntin (ppm) resampler práve mení počet vzoriek, aby zvuk zo SongPlayera držal krok s kartou: + pridáva vzorky, − uberá. Plynulo a nepočuteľne; rozpočet ±300 ppm (asi pol centu).";
@@ -111,7 +111,7 @@ pub fn eta_sk(s: f64) -> String {
 /// What a hard re-centre's cause means.
 pub fn fault_cause_sk(cause: &str) -> &'static str {
     match cause {
-        "deficit" => "zásobník by vyschol",
+        "deficit" => "v zásobníku chýbal zvuk",
         "excess" => "zásobník by pretiekol",
         _ => "neznámy dôvod",
     }
