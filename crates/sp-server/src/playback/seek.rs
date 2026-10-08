@@ -18,8 +18,8 @@ impl PlaybackEngine {
     /// play on from where it was, so the song's title clock waits for the
     /// pipeline's report of where the song really plays from
     /// ([`seeked`](Self::seeked)), the same contract as a Play and its
-    /// `Started`.
-    pub async fn seek(&mut self, playlist_id: i64, position_ms: u64) {
+    /// `Started`. Not async: it only sends the command.
+    pub fn seek(&mut self, playlist_id: i64, position_ms: u64) {
         let Some(pp) = self.pipelines.get(&playlist_id) else {
             return;
         };
