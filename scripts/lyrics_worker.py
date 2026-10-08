@@ -5,9 +5,10 @@ lyrics_worker.py — narrow Python entry points for the lyrics pipeline.
 Commands:
   preprocess-vocals  anvuew dereverb + 16 kHz mono float32 WAV of the stems
                      worker's vocals sidecar (--vocals-in); no isolation pass
-  align-chunks       Chunked Qwen3-ForcedAligner alignment (loads model once,
-                     loops over all chunks from a JSON request file)
-  preload            Warm anvuew dereverb + Qwen3-ForcedAligner at boot
+  preload            Warm the anvuew dereverb model at boot
+
+#144: the forced alignment is the mtl aligner's (its own venv and script);
+the retired Qwen3 aligner and its chunk-alignment command are deleted.
 """
 
 import argparse
@@ -569,126 +570,20 @@ def cmd_preprocess_vocals(args):
     print(json.dumps({"output": args.output}))
 
 
-def cmd_align_chunks(args):
-    """Chunked Qwen3-ForcedAligner: loads the model ONCE, loops over all chunks.
-
-    --chunks is a path to JSON with shape:
-      {"chunks": [{"chunk_idx": 0, "word_offset": 0,
-                   "start_ms": 500, "end_ms": 3500,
-                   "text": "hey there friend", "word_count": 3}, ...]}
-
-    The `word_offset` field is metadata — Python ignores it and only the
-    Rust assembly phase uses it to slot sub-chunk output back into the
-    right position within a split-line's full word sequence.
-
-    Writes JSON to --output with shape:
-      {"chunks": [{"chunk_idx": 0, "words": [
-          {"text": "hey", "start_ms": 1000, "end_ms": 1200}, ...
-      ]}, ...]}
-
-    Word timestamps are absolute (start_ms of chunk + aligner offset).
-    """
-    import numpy as np
-    import soundfile as sf
-    import torch
-    from qwen_asr import Qwen3ForcedAligner
-
-    with open(args.chunks, "r", encoding="utf-8") as f:
-        request = json.load(f)
-    chunks_in = request["chunks"]
-
-    # preprocess_vocals is the only producer of --audio and always writes
-    # 16 kHz mono float32. Don't re-check the sample rate here — the
-    # previous guard was dead defense that hid resample bugs upstream
-    # behind a generic RuntimeError. If the WAV drifts from 16 kHz we
-    # want Qwen3's own assertion (it reads at 16 kHz internally) to
-    # surface the actual stack trace.
-    audio, _sr = sf.read(args.audio, dtype="float32")
-    if audio.ndim != 1:
-        audio = np.mean(audio, axis=1).astype("float32")
-
-    device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
-    model = Qwen3ForcedAligner.from_pretrained(
-        "Qwen/Qwen3-ForcedAligner-0.6B",
-        dtype=torch.bfloat16,
-        device_map=device_map,
-    )
-
-    results = []
-    total_samples = audio.shape[0]
-    for c in chunks_in:
-        start_s = int(round(c["start_ms"] * 16000 / 1000))
-        end_s = int(round(c["end_ms"] * 16000 / 1000))
-        start_s = max(0, start_s)
-        end_s = min(total_samples, end_s)
-        if end_s <= start_s:
-            results.append({"chunk_idx": c["chunk_idx"], "words": []})
-            continue
-        slice_ = audio[start_s:end_s]
-        fd, wav_path = tempfile.mkstemp(suffix="_chunk.wav")
-        os.close(fd)
-        try:
-            sf.write(wav_path, slice_, 16000, subtype="FLOAT")
-            aligned = model.align(
-                audio=wav_path,
-                text=c["text"],
-                language="English",
-            )
-            word_stream = aligned[0]
-            offset_ms = c["start_ms"]
-            words_out = [
-                {
-                    "text": w.text,
-                    "start_ms": int(round(w.start_time * 1000)) + offset_ms,
-                    "end_ms": int(round(w.end_time * 1000)) + offset_ms,
-                }
-                for w in word_stream
-            ]
-        finally:
-            try:
-                os.remove(wav_path)
-            except OSError:
-                pass
-        results.append({"chunk_idx": c["chunk_idx"], "words": words_out})
-
-    with open(args.output, "w", encoding="utf-8") as f:
-        json.dump({"chunks": results}, f, ensure_ascii=False)
-
-
 def cmd_preload(args):
-    """Warm anvuew dereverb + Qwen3-ForcedAligner at bootstrap.
+    """Warm the anvuew dereverb model at bootstrap.
 
-    Surfaces model-download failures before any real song is processed. #144:
+    Surfaces a model-download failure before any real song is processed. #144:
     the BS-RoFormer isolation model is no longer warmed — the mtl vocals come
-    from the stems worker's sidecar, so `preprocess-vocals` only dereverbs.
+    from the stems worker's sidecar, so `preprocess-vocals` only dereverbs —
+    and neither is the retired Qwen aligner (v22: mtl in its own venv).
     """
-    import torch
     from audio_separator.separator import Separator
-    from qwen_asr import Qwen3ForcedAligner
 
     dereverb = Separator(model_file_dir=args.models_dir, output_format="WAV")
     dereverb.load_model(DEREVERB_MODEL)
     _free_vram(dereverb)
-
-    device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
-    # `from_pretrained` downloads + instantiates the aligner. We don't poke
-    # `model.parameters()` afterwards — the Qwen3ForcedAligner wrapper isn't
-    # an nn.Module subclass and has no `.parameters()` method. Completing
-    # `from_pretrained` without raising is proof enough that weights loaded.
-    _model = Qwen3ForcedAligner.from_pretrained(
-        "Qwen/Qwen3-ForcedAligner-0.6B",
-        dtype=torch.bfloat16,
-        device_map=device_map,
-    )
-    print(
-        json.dumps(
-            {
-                "loaded": True,
-                "device": device_map,
-                "dereverb": DEREVERB_MODEL,
-            }
-        )
-    )
+    print(json.dumps({"loaded": True, "dereverb": DEREVERB_MODEL}))
 
 
 def main():
@@ -710,18 +605,12 @@ def main():
     # untouched for the live wall) instead of only as the CUDA-OOM fallback.
     p_pre.add_argument("--force-cpu", action="store_true")
 
-    p_ac = subparsers.add_parser("align-chunks")
-    p_ac.add_argument("--audio", required=True)
-    p_ac.add_argument("--chunks", required=True)
-    p_ac.add_argument("--output", required=True)
-
     p_pl = subparsers.add_parser("preload")
     p_pl.add_argument("--models-dir", required=True)
 
     args = parser.parse_args()
     dispatch = {
         "preprocess-vocals": cmd_preprocess_vocals,
-        "align-chunks": cmd_align_chunks,
         "preload": cmd_preload,
     }
     try:
