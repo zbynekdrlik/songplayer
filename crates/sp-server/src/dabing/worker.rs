@@ -511,10 +511,16 @@ impl DubWorker {
 
     /// The Gemini key `job`'s Live-Translate child gets (the first of the
     /// list), or `None`: with no key set the job is deferred (an attempt and
-    /// `dub_error`, `record_dub_deferral`).
+    /// `dub_error`, `record_dub_deferral`); with paid AI switched off since
+    /// the tick's `may_dub` it is held where it is, never failed (#229 item
+    /// C, review round 13).
     async fn job_key(&self, job: &models_dabing::DubJob) -> Option<String> {
         if let Some(key) = self.first_gemini_key().await {
             return Some(key);
+        }
+        if !crate::paid_ai::enabled(&self.pool).await {
+            crate::paid_ai::hold(crate::paid_ai::Held::Dub, &job.youtube_id);
+            return None;
         }
         warn!(
             video_id = job.video_id,
