@@ -444,7 +444,7 @@ fn a_slow_ndi_submit_is_timed_and_never_in_the_vban_hand_off() {
     };
 
     // Taken 1 ms after its boundary: handed to VBAN at once, 1 ms late.
-    let standby = out.serve(ProgramJob::Standby { stamp_100ns: at(0) }, now);
+    let standby = out.serve(ProgramJob::Standby { stamp_100ns: at(0) }, None, now);
     assert_eq!(standby, marks(at(0), 10_000));
     assert_eq!(
         BoundarySample::of(&standby),
@@ -458,7 +458,7 @@ fn a_slow_ndi_submit_is_timed_and_never_in_the_vban_hand_off() {
 
     clock.set(at(1) + 20_000);
     let source = ProgramJob::Source(pair(4, at(1), at(1), samples(0.25, 0.0)));
-    assert_eq!(out.serve(source, now), marks(at(1), 20_000));
+    assert_eq!(out.serve(source, None, now), marks(at(1), 20_000));
 
     clock.set(at(2) + 30_000);
     let mix = MixJob {
@@ -469,7 +469,7 @@ fn a_slow_ndi_submit_is_timed_and_never_in_the_vban_hand_off() {
         n_slots: 9,
     };
     assert_eq!(
-        out.serve(ProgramJob::Mix(mix), now),
+        out.serve(ProgramJob::Mix(mix), None, now),
         marks(at(2), 30_000),
         "a mixed boundary: VBAN had its block at the take and its 20 ms NDI call is submit_us \
          (the picture costs nothing on this wall, so this cannot see where it is painted)"

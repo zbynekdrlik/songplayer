@@ -69,6 +69,8 @@ pub mod program_on_air; // #221: what is on air (the bus's watch value) + the on
 pub mod program_output; // #209: the SP-program sender + its thread
 pub mod program_output_timing; // #210: the sender's per-boundary timing window (pure, health.timing)
 pub mod program_switch; // #221: the ONE switch path of a scene press (catalog, cut, manual forward)
+pub mod program_trace; // #147: SP-program's per-boundary trace ring + clump detector (pure)
+pub mod program_trace_log; // #147: the trace's once-a-minute clump summary (task)
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 pub mod program_transition_settings; // #221 L5: the transition settings → the bus's spec (task)
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns

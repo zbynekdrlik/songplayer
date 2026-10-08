@@ -532,7 +532,7 @@ fn a_source_change_on_program_offers_one_pair_per_boundary_off_the_grid_thread()
     let sender = thread::spawn(move || {
         loop {
             match sender_bus.take_timeout(Duration::from_millis(20)) {
-                Take::Job(job) => job_tx.send(job).unwrap(),
+                Take::Job(job, _) => job_tx.send(job).unwrap(),
                 Take::Idle => {}
                 Take::Stopped => break,
             }

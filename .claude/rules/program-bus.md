@@ -11,6 +11,8 @@ paths:
   - "crates/sp-server/src/playback/scene_catalog*.rs"
   - "crates/sp-server/src/playback/ndi_health_expect*.rs"
   - "crates/sp-server/src/playback/program_output*.rs"
+  - "crates/sp-server/src/playback/program_trace*.rs"
+  - "crates/sp-server/src/playback/handle_pipeline_event*.rs"
   - "crates/sp-server/src/playback/program_canvas*.rs"
   - "crates/sp-server/src/playback/band_pool*.rs"
   - "crates/sp-server/src/playback/paced_output*.rs"
@@ -576,6 +578,85 @@ itself: the OBS client no longer reads cg OBS's program at all
   + engine together — a paused playlist through cuts that did not press
   it), `tests_runtime_pipeline.rs`, `tests_play_video.rs` (the off-air ▶),
   `routes_tests.rs` (status: SP-program's playlist alone, none for -1).
+
+## The per-boundary trace (#147, design record 6051091817)
+
+The instrument for SP-program's clumped arrival at strih's receiver (bursts
+of empty 33 ms ticks and shed frames, mostly around an on-air song start).
+`health.timing` keeps only each figure's worst; the trace keeps the
+per-boundary SEQUENCE. It fixes nothing: the cause is a later unit.
+
+- **The ring** (`playback/program_trace.rs`, pure, Linux-tested):
+  `ProgramTrace` on `ProgramBus::trace()`, a preallocated ring of the last
+  `TRACE_CAPACITY` = 18 000 boundaries (10 min at 30 fps, ~1.9 MB). Every
+  slot is a seqlock of `AtomicU64`s: its sequence is odd while it is
+  written and grows by 2 per record. A reader drops a slot that is being
+  written or was written again while it read it, and a record whose index
+  is not the one asked (overwritten). So a reader never blocks the sender.
+- **One writer.** `ProgramTrace::writer()` hands out the only
+  `TraceWriter` (a flag; dropping it frees it). The `SP-program` thread
+  takes it (`ProgramOutput::with_trace(bus.trace())`; with another alive it
+  writes nothing, WARNed), and `serve(job, source, now)` writes the record
+  AFTER the NDI submit returned: no allocation, no log, no lock it could
+  wait on (the song mark is only `try_lock`ed).
+- **A record:** the boundary (timeline), its wire stamp (under the K_F read
+  at the write, just after the submit: only a date step registered in
+  between makes it differ from the sent stamp), `utc_ms` = the fleet label
+  of the submit return, the other four `BoundaryMarks` instants as µs
+  after the boundary (signed), the source, `kind` (`src`; `cut` = a
+  forward of another source than the record before; `fill`; `fade`),
+  `live`, and `song`.
+- **The source is decided when the bus COMMITS a boundary**
+  (`ProgramCore::commit(job, source)`; the queue holds `(ProgramJob,
+  Option<i64>)`, `take_queued`, `Take::Job(job, source)`): the owner of a
+  forwarded boundary, a held window boundary's `from`, a mix's `to`; a
+  fill names the side on air (`fill_source`: a window whose cue waits or
+  was frozen names its `from`, as its held boundaries do; any other fill
+  its owner, none before a source is selected). Never `owner_of` at take
+  time: the outgoing source's segment is pruned as soon as its own last
+  boundary is committed (the next boundary is the new owner's), so its
+  last boundaries would read as nobody's (`program_trace_tests_bus.rs`).
+- **The song mark.** The engine's `Started` arm calls `trace_song_start`
+  before any await (`handle_pipeline_event.rs`): a playlist in the
+  authority's on-air set, not paused, with a `current_video_id` →
+  `ProgramTrace::mark_song(pid, video_id)` (the DB `videos.id`). The writer
+  puts it on that source's next LIVE record (a live forward, or a fade whose
+  incoming pair is live), once. `pipeline_paced.rs` sends `Started` before
+  the song's first live emit, so that is normally its first boundary on
+  program. A resume (a Play from a position) answers with a `Started`
+  too, so it is marked the same way: `song` (and `clumps.songs`) is every
+  decoder open on program, not only a new song. A mark not taken within
+  300 boundaries (10 s) is dropped. The engine `lock`s the mark; the
+  writer only `try_lock`s it (a held mark goes on the next boundary).
+- **The API** `GET /api/v1/program/trace?from_utc_ms=&to_utc_ms=`
+  (`api/program.rs` → `TraceAnswer::build`): the records whose `utc_ms` is
+  in `[from, to)`, oldest first, as compact rows: `{from_utc_ms, to_utc_ms,
+  clamped, max_span_ms, capacity, held, oldest_utc_ms, newest_utc_ms,
+  clumps{boundaries, late, close, songs}, columns[12], rows[[…]]}`. `to`
+  defaults to now, `from` to 2 min before `to`. A window over 2 min ends at
+  `from` + 2 min with `clamped: true` (page on with `from` = the last
+  `to`). The bounds are taken as text and parsed there: a non-integer or a
+  `from` after `to` is a 400 with a fixed text, never the value sent. The
+  mock (`e2e/mock-api.mjs`) serves the same shape with no rows.
+- **The clump detector** (`ClumpFlags`): `late` = the job taken more than
+  one slot (33 333 µs) after its boundary; `close` = the submit returned
+  under 10 ms after the record before's (timeline instants, not the
+  offsets). A window's first row is compared with the record before it in
+  the ring.
+- **The minute line** (`playback/program_trace_log.rs`, a task started by
+  `start_program`): every 60 s it sums the records written since the last
+  summary (`MinuteLog`, which carries the last record across the edge) and
+  writes ONE INFO `program trace: a minute held clumped boundaries …`
+  (`boundaries`, `late`, `close`, `songs`, `from_utc`, `to_utc`) only when
+  one of them was late or close. Never a line on the boundary path.
+- **Reading it on the box** (main session ops): pull the 2 min around a
+  bursty strih 5 s audit line and find the song start (`song`). A run of
+  `late` rows followed by `close` ones is a clump the sender made:
+  `taken_us` large with `submitted_us − submit_start_us` small is upstream
+  of the sender (a late source or release); `submitted_us −
+  submit_start_us` large is the video side (a fit, a fade, the NDI call).
+  `wire_100ns` is the stamp strih's FIFO sees. Rows with no clump in a
+  bursty strih window put the cause after the sender.
 
 ## SP-program's receiver (#221 B4 step 6, `ndi_health_expect.rs`)
 

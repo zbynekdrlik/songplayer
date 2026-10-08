@@ -1510,6 +1510,62 @@ app.post("/api/v1/program/cut", (req, res) => {
   }
   res.json({ ...programBody(), input: inputBody(), remote: remoteBody() });
 });
+// #147: mirrors `GET /api/v1/program/trace` (`playback::program_trace::
+// TraceAnswer`): the mock runs no SP-program sender, so the trace holds no
+// record; the window, its clamp to 2 min and the 400 refusals (a fixed text,
+// never the value sent) are the server's.
+const TRACE_MAX_SPAN_MS = 120000;
+const TRACE_COLUMNS = [
+  "utc_ms",
+  "wire_100ns",
+  "source",
+  "kind",
+  "live",
+  "taken_us",
+  "fed_us",
+  "submit_start_us",
+  "submitted_us",
+  "late",
+  "close",
+  "song",
+];
+function traceBound(raw) {
+  if (raw === undefined) return { ok: true, value: null };
+  if (typeof raw !== "string" || !/^[+-]?\d+$/.test(raw)) return { ok: false };
+  return { ok: true, value: Number.parseInt(raw, 10) };
+}
+app.get("/api/v1/program/trace", (req, res) => {
+  const from = traceBound(req.query.from_utc_ms);
+  if (!from.ok) {
+    res.status(400).send("from_utc_ms must be an integer (UTC ms)");
+    return;
+  }
+  const to = traceBound(req.query.to_utc_ms);
+  if (!to.ok) {
+    res.status(400).send("to_utc_ms must be an integer (UTC ms)");
+    return;
+  }
+  const toMs = to.value ?? Date.now();
+  const fromMs = from.value ?? toMs - TRACE_MAX_SPAN_MS;
+  if (fromMs > toMs) {
+    res.status(400).send("from_utc_ms is after to_utc_ms");
+    return;
+  }
+  const clamped = toMs - fromMs > TRACE_MAX_SPAN_MS;
+  res.json({
+    from_utc_ms: fromMs,
+    to_utc_ms: clamped ? fromMs + TRACE_MAX_SPAN_MS : toMs,
+    clamped,
+    max_span_ms: TRACE_MAX_SPAN_MS,
+    capacity: 18000,
+    held: 0,
+    oldest_utc_ms: null,
+    newest_utc_ms: null,
+    clumps: { boundaries: 0, late: 0, close: 0, songs: 0 },
+    columns: TRACE_COLUMNS,
+    rows: [],
+  });
+});
 // Test-only: the last cut body the dashboard posted (backend-effect check).
 app.get("/__mock/program-last-cut", (_req, res) => {
   res.json({ body: programLastCut });

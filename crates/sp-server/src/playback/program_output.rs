@@ -66,6 +66,12 @@
 //! the weight, the standby as black — never the canvas. The offer is `Arc`
 //! bumps into a 2-deep coalescing queue; the `program-max` thread composes
 //! and sends on its own time, so it never delays VBAN or the NDI submit.
+//!
+//! #147: once a boundary's NDI submit returned, `serve` writes its record
+//! into the program trace (`program_trace.rs`): its five instants, the
+//! source the bus queued it with, what it was. The sender is the trace's
+//! one writer: no allocation, no log and no lock it could wait on, on that
+//! path (the song mark is only `try_lock`ed).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -90,6 +96,7 @@ use crate::playback::program_bus::{
 use crate::playback::program_canvas::{Canvas, FadeSide};
 use crate::playback::program_max::{MaxJob, MaxOut, MaxPicture};
 use crate::playback::program_output_timing::{BoundaryMarks, LateBoundary, utc_label};
+use crate::playback::program_trace::{JobShape, ProgramTrace, TraceWriter};
 use crate::playback::program_transition::{
     AudioFormat, Layout, MIX_THREAD_NAME, MixJob, mix_audio_block, mix_bands,
 };
@@ -151,6 +158,8 @@ pub struct ProgramOutput<B: NdiBackend> {
     /// #223 S2: the `SP-program-MAX` hand-off each boundary is offered to,
     /// after VBAN's block and before the video side.
     max: Option<Arc<MaxOut>>,
+    /// #147: the program trace's writer: one record per served boundary.
+    trace: Option<TraceWriter>,
 }
 
 /// #215: one run of mixed boundaries as the `SP-program` sender saw it: how
@@ -301,6 +310,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
             limiter: PeakLimiter::new(PROGRAM_AUDIO_RATE_HZ),
             limited_through: None,
             max: None,
+            trace: None,
         }
     }
 
@@ -325,6 +335,16 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// #223 S2: also offer every boundary to `SP-program-MAX`.
     pub fn with_max(mut self, max: Arc<MaxOut>) -> Self {
         self.max = Some(max);
+        self
+    }
+
+    /// #147: also write every served boundary into `trace`, as its one
+    /// writer (with another writer alive it writes nothing, WARNed).
+    pub fn with_trace(mut self, trace: &Arc<ProgramTrace>) -> Self {
+        self.trace = trace.writer();
+        if self.trace.is_none() {
+            warn!("program trace: another writer is alive — this output writes no trace");
+        }
         self
     }
 
@@ -359,10 +379,18 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// slots) late (#224). An unmixed boundary ends the run of mixed
     /// boundaries once it went out. Returns the instants the boundary was
     /// served at, read off `now` (the sender's wall: the stamps' timeline),
-    /// for `health.timing` (`program_output_timing.rs`).
-    pub fn serve(&mut self, job: ProgramJob, now: impl Fn() -> i64) -> BoundaryMarks {
+    /// for `health.timing` (`program_output_timing.rs`). #147: once the NDI
+    /// submit returned, the boundary is written into the trace with
+    /// `source`, the source the bus queued it with.
+    pub fn serve(
+        &mut self,
+        job: ProgramJob,
+        source: Option<i64>,
+        now: impl Fn() -> i64,
+    ) -> BoundaryMarks {
         let taken_100ns = now();
         let stamp_100ns = job.stamp_100ns();
+        let shape = JobShape::of(&job); // #147: read before the job is consumed
         let mut pair = self.split(job);
         self.limit(&mut pair, stamp_100ns);
         let fed_100ns = self.feed_outputs(pair.program_block(stamp_100ns), &now);
@@ -373,19 +401,24 @@ impl<B: NdiBackend> ProgramOutput<B> {
         if ends_run {
             self.end_mix_run();
         }
-        BoundaryMarks {
+        let marks = BoundaryMarks {
             stamp_100ns,
             taken_100ns,
             fed_100ns,
             submit_start_100ns,
             submitted_100ns,
+        };
+        if let Some(trace) = &mut self.trace {
+            let k = crate::playback::fleet_shift::global().slots();
+            trace.record(&marks, source, shape, k);
         }
+        marks
     }
 
     /// The tests' shorthand: [`serve`](Self::serve) with no clock; the stamp.
     #[cfg(test)]
     pub fn submit(&mut self, job: ProgramJob) -> i64 {
-        self.serve(job, || 0).stamp_100ns
+        self.serve(job, None, || 0).stamp_100ns
     }
 
     /// #210: the audio side of `job`, with no video work: a window
@@ -642,8 +675,8 @@ pub fn run_program_loop<B: NdiBackend>(
         }
         bus.release_due(now);
         match bus.take_timeout(next_check_wait(now)) {
-            Take::Job(job) => {
-                let marks = out.serve(job, || wall.now_100ns());
+            Take::Job(job, source) => {
+                let marks = out.serve(job, source, || wall.now_100ns());
                 bus.record_submitted(marks.stamp_100ns);
                 if let Some(late) = bus.record_timing(&marks) {
                     warn_late_boundary(&late);
@@ -729,6 +762,8 @@ impl super::PlaybackEngine {
             shutdown,
         );
         crate::remote::start_remote(self.pool.clone(), bus.clone(), upstream, shutdown);
+        // #147: the trace's once-a-minute clump summary.
+        crate::playback::program_trace_log::start(bus.trace().clone(), shutdown);
         tokio::spawn(async move {
             let _ = shutdown_rx.recv().await;
             bus.stop();
@@ -767,7 +802,8 @@ fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<Progr
             };
             let mut out = ProgramOutput::fhd(sender)
                 .with_outputs(bus.outputs().clone())
-                .with_max(bus.max().clone());
+                .with_max(bus.max().clone())
+                .with_trace(bus.trace());
             // #215 addendum 3 + #223 follow-up: how many threads paint a mixed
             // or fitted picture (this one + the persistent band workers).
             info!(
@@ -802,3 +838,6 @@ mod tests_max;
 #[cfg(test)]
 #[path = "program_output_tests_order.rs"]
 mod tests_order;
+#[cfg(test)]
+#[path = "program_output_tests_trace.rs"]
+mod tests_trace;
