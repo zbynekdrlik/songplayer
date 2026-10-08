@@ -34,7 +34,7 @@ use super::audio::AudioVerdict;
 use super::client::PeerError;
 use super::config::NodeConfig;
 use super::decide::{holds, listed_audio};
-use super::kind::Job;
+use super::kind::{ArtifactKind, Job};
 use super::wire::now_ms;
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 use crate::db::models_peer;
@@ -70,6 +70,18 @@ impl Exchange {
             peer,
             "exchange: made here while a peer has the song - its copy replaces this one once it has it"
         );
+    }
+
+    /// The peer this node took `youtube_id`'s audio from (its
+    /// `peer_fetches` audio record); `None` for its own download, a copy, or
+    /// a record that cannot be read (WARNed).
+    pub(crate) async fn song_from(&self, youtube_id: &str) -> Option<String> {
+        models_peer::fetch_record(&self.pool, youtube_id, ArtifactKind::Audio.as_str())
+            .await
+            .inspect_err(|e| warn!(youtube_id, %e, "exchange: reading the audio's origin failed"))
+            .ok()
+            .flatten()
+            .map(|(node, _, _)| node)
     }
 
     /// `job` of `youtube_id` stands in for no peer's copy any more.

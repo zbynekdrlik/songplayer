@@ -265,6 +265,7 @@ async fn a_lyrics_job_run_here_after_waiting_for_a_peer_with_the_song_stands_in(
     snv.hash_now().await;
     let pp = TestNode::start("pp", None).await;
     pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    pp.audio_from(YT, "snv").await;
     let long_ago = crate::peer::wire::now_ms() - i64::try_from(MAX_PEER_WAIT.as_millis()).unwrap();
     for job in ["lyrics", "stems"] {
         start_wait(pp.pool(), YT, job, long_ago).await.unwrap();
@@ -299,7 +300,8 @@ async fn a_lyrics_job_run_here_after_waiting_for_a_peer_with_the_song_stands_in(
 }
 
 /// A peer's copy that kept failing for the 2 h: the lyrics run here and
-/// stand in for it (the peer has the song); the stems do not.
+/// stand in for it (this node took the song's audio from that peer); the
+/// stems do not, nor do lyrics whose audio came from another peer.
 #[tokio::test]
 async fn a_lyrics_job_run_here_after_a_failing_fetch_stands_in() {
     let (_snv, pp, rows, _) = snv_and_pp_standin().await;
@@ -328,6 +330,20 @@ async fn a_lyrics_job_run_here_after_a_failing_fetch_stands_in() {
             .map(|s| (s.job.as_str(), s.peer.as_str()))
             .collect::<Vec<_>>(),
         [("lyrics", "snv")]
+    );
+    sqlx::query("DELETE FROM peer_standins")
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    pp.audio_from(YT, "pp2").await;
+    let step = pp
+        .ex
+        .after_failed_fetch(Job::Lyrics, rows[0], YT, "snv", &PeerError::NotFound)
+        .await;
+    assert!(matches!(step, PeerStep::Local(Some(_))));
+    assert!(
+        standins(&pp).await.is_empty(),
+        "the audio came from another peer"
     );
 }
 

@@ -107,7 +107,13 @@ impl Exchange {
             .inspect_err(|e| warn!(youtube_id, %e, "exchange: reading the wait failed"))
             .ok()
             .flatten();
-        match decide(job, youtube_id, &reads, waited) {
+        // The lyrics wait on the peer this node took the song's audio from.
+        let song_from = if job.waits_while_a_peer_has_the_song() {
+            self.song_from(youtube_id).await
+        } else {
+            None
+        };
+        match decide(job, youtube_id, &reads, waited, song_from.as_deref()) {
             Decision::Fetch { peer, artifacts } => match cfg.peer(&peer) {
                 Some(p) => Ask::Fetch(FetchPlan {
                     peer: p.clone(),
@@ -133,7 +139,7 @@ impl Exchange {
                 // this job makes stands in for the peer's copy.
                 if why == LocalWhy::WaitedLongEnough
                     && job.waits_while_a_peer_has_the_song()
-                    && let Some(peer) = song_holder(&reads, youtube_id)
+                    && let Some(peer) = song_holder(&reads, youtube_id, song_from.as_deref())
                 {
                     self.stand_in(job, youtube_id, peer).await;
                 }
@@ -183,8 +189,9 @@ impl Exchange {
 
     /// A fetch of `job` for row `video_id` from `peer` failed: the row is
     /// deferred while the job has waited less than the bound, else the job
-    /// runs here (`fetch_failed`). The peer has the song then, so what a
-    /// job that waits on the song makes here stands in for its copy.
+    /// runs here (`fetch_failed`). What a job that waits on the song makes
+    /// here then stands in for the peer's copy when this node took the
+    /// song's audio from that peer.
     pub(crate) async fn after_failed_fetch(
         &self,
         job: Job,

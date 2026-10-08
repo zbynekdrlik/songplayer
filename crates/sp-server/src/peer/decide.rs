@@ -10,9 +10,10 @@
 //! 3. A peer announcing a job (running or queued) that makes those kinds →
 //!    Wait.
 //! 4. A job that waits while a peer has the song
-//!    ([`Job::waits_while_a_peer_has_the_song`]: the lyrics) and a peer that
-//!    lists the video's audio → Wait: that peer will make it from the very
-//!    audio this node fetched (#229 PP audit, comment 6054582866).
+//!    ([`Job::waits_while_a_peer_has_the_song`]: the lyrics) and the peer
+//!    this node took the video's audio from, still listing it
+//!    ([`song_holder`]) → Wait: that peer will make it from the very audio
+//!    this node fetched (#229 PP audit, comment 6054582866).
 //! 5. A peer whose catalog could not be read → Wait (an outage or a refused
 //!    key or token is not "nobody has it"; the same bound applies).
 //! 6. Else → Local: no listed peer has the song at all.
@@ -79,12 +80,15 @@ pub enum LocalWhy {
 }
 
 /// The decision for `job` of `youtube_id` given `reads` (one per listed
-/// peer) and how long the job has waited (`None` = not waiting).
+/// peer), how long the job has waited (`None` = not waiting) and the peer
+/// this node took the video's audio from (`song_from`, its `peer_fetches`
+/// record; `None` = its own download or a copy).
 pub fn decide(
     job: Job,
     youtube_id: &str,
     reads: &[PeerRead<'_>],
     waited: Option<Duration>,
+    song_from: Option<&str>,
 ) -> Decision {
     if reads.is_empty() {
         return Decision::Local(LocalWhy::NoPeers);
@@ -113,7 +117,7 @@ pub fn decide(
         };
     }
     if job.waits_while_a_peer_has_the_song()
-        && let Some(peer) = song_holder(reads, youtube_id)
+        && let Some(peer) = song_holder(reads, youtube_id, song_from)
     {
         return Decision::Wait {
             peer: peer.to_string(),
@@ -155,9 +159,17 @@ pub fn listed_audio<'a>(catalog: &'a Catalog, youtube_id: &str) -> Option<&'a Ar
         .find(|a| a.youtube_id == youtube_id && a.kind == ArtifactKind::Audio)
 }
 
-/// The first listed peer that has the song: its catalog lists the video's
-/// audio ([`listed_audio`]).
-pub fn song_holder<'a>(reads: &[PeerRead<'a>], youtube_id: &str) -> Option<&'a str> {
+/// The listed peer that has the song this node took from it: `song_from`
+/// (the peer this node fetched the video's audio from, `peer_fetches`) while
+/// its catalog still lists the video's audio ([`listed_audio`]). A node whose
+/// audio is its own download or a copy waits on no peer's song: that peer's
+/// lyrics would not fit it, and two nodes listing each other (phase 2)
+/// would each wait on the other's audio (review round 1).
+pub fn song_holder<'a>(
+    reads: &[PeerRead<'a>],
+    youtube_id: &str,
+    _song_from: Option<&str>,
+) -> Option<&'a str> {
     reads
         .iter()
         .find(|r| {

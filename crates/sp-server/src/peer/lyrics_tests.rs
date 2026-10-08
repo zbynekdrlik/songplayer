@@ -548,6 +548,31 @@ async fn lyrics_wait_while_a_peer_has_the_song() {
     assert_eq!(waits, 1, "counted against the 2 h bound");
 }
 
+/// Review round 1: PP downloaded the song itself (no record of SNV's
+/// audio): SNV's lyrics would be measured on another audio, so PP does not
+/// wait for them, even while SNV lists the song — it processes them now.
+#[tokio::test]
+async fn lyrics_of_a_song_downloaded_here_do_not_wait_for_a_peer() {
+    let snv = TestNode::start("snv", Some(SNV_KEY)).await;
+    set(snv.pool(), "lyrics_worker_enabled", "false").await;
+    let snv_id = snv.add_video(YT).await;
+    snv.give_song(snv_id, YT, "Way Maker", "Sinach").await;
+    snv.hash_now().await;
+    let pp = TestNode::start("pp", None).await;
+    pp.set_peers(&[snv.as_peer(SNV_KEY)]).await;
+    let id = pp.add_video(YT).await;
+    pp.give_song(id, YT, "Way Maker", "Sinach").await;
+    let row = lyrics_row(&pp, id).await;
+    let PeerStep::Local(Some(_guard)) = first(Some(&pp.ex), &row).await else {
+        panic!("a song downloaded here runs here")
+    };
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_waits")
+        .fetch_one(pp.pool())
+        .await
+        .unwrap();
+    assert_eq!(waits, 0, "no wait");
+}
+
 #[tokio::test]
 async fn with_no_exchange_the_worker_runs_as_before() {
     let (_snv, pp, id, _) = snv_and_pp().await;
