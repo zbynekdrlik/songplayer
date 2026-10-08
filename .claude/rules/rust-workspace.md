@@ -1351,6 +1351,23 @@ sees that. What held up across five review rounds:
   - A 600 ms "must still work" sleep is exactly the window a ptrace stall
     fails on correct code.
 
+## A log-capture test: never the only registered dispatcher (#229 review round 14)
+
+tracing caches a callsite's interest the first time it is hit. While ONE
+scoped subscriber (`with_default` / `set_default`) is the only registered
+dispatcher and no global default is set, tracing-core asks only the CALLING
+thread's default (`Dispatchers::has_just_one`, tracing-core 0.1.36
+`callsite.rs`): a parallel test that hits the same `info!` first, on a
+thread with no default, caches it as `never`, and the capturing test
+misses its own line on correct code (a flake the no-compile box cannot
+see). With a second dispatcher registered every callsite is asked of all
+of them (`sometimes`), and registering a scoped default rebuilds every
+cached interest. So every capture goes through `crate::test_log::capturing`,
+which installs a global `NoSubscriber` once (`std::sync::Once`,
+`set_global_default`, its error ignored). Never build a capture subscriber
+by hand; never call a global `fmt().init()` in a test (it would panic on
+the global already set).
+
 ## A paused-clock test that awaits SQLite: hold auto-advance off (#229)
 
 Under `#[tokio::test(start_paused = true)]` the runtime AUTO-ADVANCES the
