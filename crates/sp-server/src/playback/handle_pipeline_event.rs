@@ -227,7 +227,9 @@ impl PlaybackEngine {
     /// song is marked on the program trace (`ProgramTrace::mark_song`): the
     /// sender puts the video id on that playlist's next live boundary. The
     /// pipeline sends `Started` before the song's first live pair, so
-    /// normally that is the song's first boundary on program.
+    /// normally that is the song's first boundary on program. A resume
+    /// (a Play from a position) answers with a `Started` too, so it is
+    /// marked the same way: every decoder open on program is.
     fn trace_song_start(&self, playlist_id: i64) {
         let Some(bus) = self.program.get() else {
             return;

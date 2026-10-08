@@ -623,9 +623,11 @@ per-boundary SEQUENCE. It fixes nothing: the cause is a later unit.
   puts it on that source's next LIVE record (a live forward, or a fade whose
   incoming pair is live), once. `pipeline_paced.rs` sends `Started` before
   the song's first live emit, so that is normally its first boundary on
-  program. A mark not taken within 300 boundaries (10 s) is dropped. The
-  engine `lock`s the mark; the writer only `try_lock`s it (a held mark goes
-  on the next boundary).
+  program. A resume (a Play from a position) answers with a `Started`
+  too, so it is marked the same way: `song` (and `clumps.songs`) is every
+  decoder open on program, not only a new song. A mark not taken within
+  300 boundaries (10 s) is dropped. The engine `lock`s the mark; the
+  writer only `try_lock`s it (a held mark goes on the next boundary).
 - **The API** `GET /api/v1/program/trace?from_utc_ms=&to_utc_ms=`
   (`api/program.rs` → `TraceAnswer::build`): the records whose `utc_ms` is
   in `[from, to)`, oldest first, as compact rows: `{from_utc_ms, to_utc_ms,

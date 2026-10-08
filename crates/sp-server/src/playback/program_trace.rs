@@ -19,8 +19,9 @@
 //! - [`TraceRecord`]: the boundary, its wire stamp, the UTC (ms) of its
 //!   submit return, the four other instants as µs after the boundary, the
 //!   source the bus says it shows, what it was ([`TraceKind`]), whether its
-//!   pair was the source's own content, and the video id of a new on-air
-//!   song on its first live boundary ([`ProgramTrace::mark_song`]).
+//!   pair was the source's own content, and the video id of a song that
+//!   starts (or resumes: every `Started` the engine acts on) on air, on its
+//!   first live boundary ([`ProgramTrace::mark_song`]).
 //! - [`TraceSpan`]: the window `GET /api/v1/program/trace` asks for, at most
 //!   [`TRACE_MAX_SPAN_MS`] (2 min) long; a longer one is clamped and says so.
 //! - [`ClumpFlags`]: the clump detector. A boundary taken more than one slot
@@ -148,7 +149,8 @@ pub struct TraceRecord {
     pub kind: TraceKind,
     /// The pair is the source's own content ([`JobShape::live`]).
     pub live: bool,
-    /// The video id of a new on-air song, on its first live boundary.
+    /// The video id of a song that started or resumed on air, on its first
+    /// live boundary.
     pub song: Option<i64>,
 }
 
@@ -261,7 +263,8 @@ impl Slot {
     }
 }
 
-/// A song that started on air, waiting for its first live boundary.
+/// A song that started or resumed on air, waiting for its first live
+/// boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SongMark {
     source: i64,
@@ -332,7 +335,8 @@ impl ProgramTrace {
         })
     }
 
-    /// The engine: `source`'s song `video_id` started on air. The writer
+    /// The engine: `source`'s song `video_id` started (or resumed) on air,
+    /// its `Started` answered the last Play. The writer
     /// puts it on `source`'s next live boundary (within
     /// [`SONG_MARK_MAX_BOUNDARIES`]); a later mark replaces it.
     pub fn mark_song(&self, source: i64, video_id: i64) {
@@ -552,7 +556,7 @@ pub struct ClumpCounts {
     /// Records flagged `late` / `close`.
     pub late: u64,
     pub close: u64,
-    /// Records that carry a song start.
+    /// Records that carry a song start (a resume counts too).
     pub songs: u64,
 }
 
