@@ -594,10 +594,17 @@ wait for a peer that has the song", below).
   announced in this node's catalog while the hook holds the guard. A Wait
   records its start (`peer_waits`, the FIRST start kept).
 - Every job that runs here after a peer read goes through
-  `Exchange::run_here`: it ENDS the job's wait, forgets the `peer_fetches`
-  records of what the job makes (`forget_origins`, the audio guard below),
+  `Exchange::run_here`: it ENDS the job's wait (`Exchange::end_wait`),
+  forgets the `peer_fetches` records of what the job makes
+  (`forget_origins`, the audio guard below), drops a stand-in of it
+  (`peer::standin`; the caller records it again when it still stands in),
   drops the parts a fetch of it left, then announces it (a later ask never
-  inherits an old start and its spent bound). The hooks' own Local paths use
+  inherits an old start and its spent bound). One exception: a lyrics job
+  that stands in for a peer's copy runs here through
+  `Exchange::run_here_waited`, the same without ending the wait (its ask,
+  and its hand-off giving up): a spent bound its hand-off left survives a
+  pick that meets no peer copy, so a run put back runs here at once, never
+  a fresh 2 h (review rounds 5–6). The hooks' own Local paths use
   it too (an operator's lyrics ask, nothing newer, a fetch that kept
   failing, another audio). The no-peers and bad-settings paths only announce
   (`ask` writes nothing; the download hook then forgets the pair's
@@ -776,7 +783,9 @@ wait for a peer that has the song", below).
   for a video whose `{yt}_lyrics.json` here is a dub's subtitles (any row
   of it here dub-requested or `gemini-live-translate`), a failed read →
   here; one query, `lyrics::kept_local`, which the stand-in's look asks
-  too. The
+  too (a reprocess pending on a row the queue cannot take now, an inactive
+  playlist's, counts as well: the operator asked this node for the video).
+  The
   peer's `/videos` row must match its catalog (pipeline version) and must
   not be `gemini-live-translate`; the same source at the same version as
   the row already serves = nothing newer → runs here (the daily full-mix
@@ -898,8 +907,9 @@ parked `no_source` by `fail_song`). Three rules:
       (a dropped stand-in also ends a spent wait its hand-off kept);
     - the listed peers' catalogs (cached 60 s): the first holding the
       lyrics at this node's version (`holds`) → the audio guard's verdict
-      (`Exchange::audio_verdict`, the side-effect-free half of
-      `unless_peers_audio`): another audio → dropped; this node's pause, or
+      (`Exchange::audio_verdict`, the half of `unless_peers_audio` that
+      acts on nothing; its only side effect is the on-demand hash it
+      stores): another audio → dropped; this node's pause, or
       it cannot tell yet → asked again at the recheck;
     - `lyrics::peer_row` (the size bound, the peer's row against its
       catalog, never the Live-Translate track) and `lyrics::place` (the
@@ -948,6 +958,7 @@ parked `no_source` by `fail_song`). Three rules:
   lyrics_of_a_song_downloaded_here_do_not_wait_for_a_peer,
   a_stand_in_met_by_the_hook_is_replaced_in_every_row,
   a_stand_in_handed_the_copy_runs_here_after_the_bound,
+  a_stand_ins_spent_bound_survives_a_pick_with_the_peer_unreachable,
   an_operators_ask_on_another_row_of_the_video_keeps_the_lyrics_here}`,
   `standin_tests.rs` (the supersede over two real nodes: every row, a
   parked track, the check row with an audio, the recheck, another audio,
