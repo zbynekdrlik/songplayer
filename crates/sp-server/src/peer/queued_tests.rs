@@ -198,3 +198,78 @@ async fn every_queue_is_read_with_the_workers_on_by_default() {
     want.extend(of(&["bbbbbbbbbbb"], Job::Stems));
     assert_eq!(queued(node.pool()).await.unwrap(), want);
 }
+
+/// #229 (PP audit, comment 6054582866): a new song's lyrics wait for its own
+/// stems (`WaitForStems` puts the row back for 10 min, `record_lyrics_wait`),
+/// so the lyrics worker WILL take the row once they are done. Its lyrics are
+/// queued while its stems are queued or running here (a running job's row
+/// still matches the stems' predicate), whatever its own recheck time says:
+/// else a peer reads "nobody has it" and processes the lyrics itself. Rows
+/// the lyrics worker would never take (parked, dubbed, inactive), and stems
+/// that are done, unsupported, in a backoff or impossible (no audio), are no
+/// wait on queued stems; with the stem worker off only the rows due now are
+/// queued.
+#[tokio::test]
+async fn lyrics_waiting_on_their_queued_stems_are_queued() {
+    let node = TestNode::start("snv", None).await;
+    inactive_playlist(&node).await;
+    let v = crate::lyrics::LYRICS_PIPELINE_VERSION;
+    let old = v - 1;
+    let wait = ", lyrics_next_attempt_at = '2999-01-01T00:00:00.000Z'";
+    let rows = [
+        (1, "lyr_stmwait", String::new()),
+        (
+            1,
+            "lyr_stmfail",
+            ", stem_status = 'failed', stem_next_attempt_at = '2000-01-01T00:00:00.000Z'"
+                .to_string(),
+        ),
+        (
+            1,
+            "lyr_stmback",
+            ", stem_status = 'failed', stem_next_attempt_at = '2999-01-01T00:00:00.000Z'"
+                .to_string(),
+        ),
+        (1, "lyr_stmdone", ", stem_status = 'done'".to_string()),
+        (
+            1,
+            "lyr_stmunsp",
+            ", stem_status = 'unsupported'".to_string(),
+        ),
+        (
+            1,
+            "lyr_parkwt1",
+            format!(", lyrics_source = 'no_source', lyrics_pipeline_version = {v}"),
+        ),
+        (1, "lyr_dubwt01", ", dub_requested = 1".to_string()),
+        (3, "lyr_inactw1", String::new()),
+        (1, "lyr_noaud01", ", audio_file_path = NULL".to_string()),
+        (
+            1,
+            "lyr_stalewt",
+            format!(", has_lyrics = 1, lyrics_source = 'mtl', lyrics_pipeline_version = {old}"),
+        ),
+    ];
+    for (playlist, youtube_id, extra) in &rows {
+        let set = format!("{DOWNLOADED}{wait}{extra}");
+        row(&node, *playlist, youtube_id, &set).await;
+    }
+    // Due now and waiting on queued stems: listed once.
+    row(&node, 1, "lyr_duestm1", DOWNLOADED).await;
+    let lyrics = |all: Vec<(String, Job)>| -> Vec<String> {
+        all.into_iter()
+            .filter(|(_, job)| *job == Job::Lyrics)
+            .map(|(id, _)| id)
+            .collect()
+    };
+    assert_eq!(
+        lyrics(queued(node.pool()).await.unwrap()),
+        ["lyr_duestm1", "lyr_stalewt", "lyr_stmfail", "lyr_stmwait"]
+    );
+    set(node.pool(), STEM_WORKER_ENABLED, "false").await;
+    assert_eq!(
+        lyrics(queued(node.pool()).await.unwrap()),
+        ["lyr_duestm1"],
+        "the stems will not run here: only the lyrics due now"
+    );
+}
