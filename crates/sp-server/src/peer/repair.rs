@@ -69,7 +69,9 @@ pub async fn end_wait(ex: &Exchange, youtube_id: &str) {
     }
 }
 
-/// A peer's title for `youtube_id`, or `None` (ask this node's providers).
+/// A peer's title for `youtube_id`, or `None`: the repair then waits while
+/// the peer the song came from holds it (`waits_for_peer`), else asks this
+/// node's providers (held while paid AI is off).
 /// The peers are asked in their configured order; the first one with a title
 /// this node takes wins.
 pub async fn peer_title(ex: &Exchange, youtube_id: &str) -> Option<PeerTitle> {

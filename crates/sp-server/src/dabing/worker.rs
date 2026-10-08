@@ -208,6 +208,14 @@ impl DubWorker {
             }
         };
 
+        // Gemini key (first entry, rotation-order preserved) — env-only for the
+        // child. Read right after the pick (#229 review rounds 14-15): a job
+        // held for paid AI is left as it was — no stems priority raised, no
+        // synth mark.
+        let Some(key) = self.job_key(&job).await else {
+            return;
+        };
+
         // #183 round 2: the dub chain NEVER waits for stems — long videos the stem
         // worker cannot separate (over the 120-min cap) must still be dubbed. The
         // pure `synth_ready` decides: proceed now; if the stems are merely pending
@@ -249,13 +257,6 @@ impl DubWorker {
             );
             return;
         }
-
-        // Gemini key (first entry, rotation-order preserved) — env-only for the
-        // child. Read before the job is marked synth (#229 review round 14): a
-        // job held for paid AI waits at the status it had.
-        let Some(key) = self.job_key(&job).await else {
-            return;
-        };
 
         // Advance to synth (stems ready, unsupported, or pending-but-not-waited).
         if job.dub_status != "synth"
@@ -515,8 +516,8 @@ impl DubWorker {
     /// list), or `None`: with no key set the job is deferred (an attempt and
     /// `dub_error`, `record_dub_deferral`); with paid AI switched off since
     /// the tick's `may_dub` it is held where it is, never failed (#229 item
-    /// C, review round 13). `process_next` asks it before `mark_dub_synth`,
-    /// so a held job keeps its status (review round 14).
+    /// C, review round 13). `process_next` asks it right after the pick, so a
+    /// held job is left as it was (review rounds 14-15).
     async fn job_key(&self, job: &models_dabing::DubJob) -> Option<String> {
         if let Some(key) = self.first_gemini_key().await {
             return Some(key);

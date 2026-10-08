@@ -4,20 +4,28 @@ paths:
   - "crates/sp-server/src/gemini_api*.rs"
   - "crates/sp-server/src/metadata/chain*.rs"
   - "crates/sp-server/src/metadata/manual*.rs"
+  - "crates/sp-server/src/metadata/mod.rs"
   - "crates/sp-server/src/reprocess/**"
   - "crates/sp-server/src/peer/ask*.rs"
   - "crates/sp-server/src/peer/held_tests.rs"
   - "crates/sp-server/src/peer/lyrics.rs"
+  - "crates/sp-server/src/peer/audio.rs"
+  - "crates/sp-server/src/peer/standin.rs"
+  - "crates/sp-server/src/peer/download.rs"
+  - "crates/sp-server/src/peer/stems.rs"
+  - "crates/sp-server/src/peer/repair.rs"
   - "crates/sp-server/src/peer/queued*.rs"
   - "crates/sp-server/src/lyrics/worker*.rs"
   - "crates/sp-server/src/dabing/worker*.rs"
   - "crates/sp-server/src/api/lyrics_g35t.rs"
   - "crates/sp-server/src/api/lyrics.rs"
   - "crates/sp-server/src/api/metadata*.rs"
+  - "crates/sp-server/src/api/routes*.rs"
   - "crates/sp-core/src/config.rs"
   - "crates/sp-core/src/health.rs"
   - "sp-ui/src/components/health_bar.rs"
   - "sp-ui/src/components/settings_form.rs"
+  - "e2e/mock-api.mjs"
   - "e2e/settings-paid-ai.spec.ts"
   - "e2e/post-deploy-pp.spec.ts"
 ---
@@ -45,9 +53,12 @@ dochadzat k ziadnemu platenemu ai spracovaniu dokial to nepovolim".
 - `GET /api/v1/status` has three fields:
   - `paid_ai_enabled`;
   - `paid_ai_held`: while OFF, the kinds with a hold under 40 min old
-    (`HELD_SHOWN`: held work is held again within `HELD_RECHECK`, a
-    translation or a dub at its worker's next tick; finished work drops
-    out);
+    (`HELD_SHOWN`: held work is held again within `HELD_RECHECK`, a dub at
+    its worker's next tick; finished work drops out). A translation is
+    held again at the next translation pass, which runs only while the
+    lyrics queue is idle: with more held lyrics songs than one per tick
+    clears in 30 min (~360) the queue stays busy, so "preklad" can drop out
+    of the list while the translation still waits (review round 15);
   - `node_name`.
 - The health bar shows "Uzol: <name>". While the switch is OFF it also
   shows "Platené AI: vypnuté" (amber), with the held kinds in Slovak as the
@@ -99,8 +110,9 @@ Every path:
 - **Dub** (Gemini Live-Translate): `DubWorker::may_dub` is checked every
   tick before a job is picked. The jobs wait where they are: no attempt, no
   failure mark; only the job that would run now is held (none without one).
-  The job's key is read before it is marked `synth` (`DubWorker::job_key`),
-  so a job held there keeps its status too (review round 14).
+  The job's key is read right after the pick (`DubWorker::job_key`), so a
+  job held there is left as it was too: no stems priority raised, no
+  `synth` mark (review rounds 14-15).
 - **Lyrics source probe** (`POST /api/v1/lyrics/probe-sources`, Claude on
   the YouTube description): the AI client is handed to it only while ON;
   OFF, the description probe reads "skipped".

@@ -220,8 +220,10 @@ async fn title_for(
 /// A peer's title this node takes as its own: a provider's answer or an
 /// operator's correction (metadata version ≥ 1, `kind::metadata_version`)
 /// with a song, under the `metadata_source` this node writes for it. `None` =
-/// ask this node's providers (a parser's guess there is no better than one
-/// made here).
+/// no title this node takes (a parser's guess there is no better than one
+/// made here): a pair fetched from the peer is then named by the title
+/// parser, marked for the repair (`title_for`, item A), and the repair waits
+/// for the peer first (`peer::repair::waits_for_peer`).
 pub fn adopted_title(m: &PeerMetadata) -> Option<DownloadTitle> {
     if m.version() < METADATA_PROVIDER || m.song.trim().is_empty() {
         return None;
