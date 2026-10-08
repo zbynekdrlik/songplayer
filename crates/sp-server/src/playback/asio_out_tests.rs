@@ -810,3 +810,28 @@ fn the_overflows_and_recentres_add_up_across_runs() {
     assert_eq!(d.starts, 2);
     assert_eq!(seen, vec![(82_223, 1, 0.0), (164_446, 2, 0.0)]);
 }
+
+/// #233 review round 4: a close publishes the run's counters with it — a
+/// reset in the same step as an overflowing block reads the overflow and
+/// the start re-centre while waiting (they would otherwise show only after
+/// a reopen, never if the driver does not come back).
+#[test]
+fn a_close_publishes_the_runs_counters() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0))]);
+    let mut w = AsioWorker::new(T0);
+    w.step(&o, &mut d, T0, None);
+    d.events.push_back(DeviceEvents {
+        reset: true,
+        ..Default::default()
+    });
+    let b = ProgramBlock {
+        due_100ns: T0 + S,
+        samples: None,
+        substituted: false,
+    };
+    w.step(&o, &mut d, T0 + 50_000, Some(b));
+    let snap = o.snapshot();
+    assert_eq!(snap.state, "waiting");
+    assert_eq!((snap.status.overflows, snap.status.recentres), (82_223, 1));
+}
