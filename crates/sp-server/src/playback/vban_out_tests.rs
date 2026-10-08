@@ -734,3 +734,25 @@ fn a_vban_thread_that_panics_is_not_running_and_says_why() {
         Some("the VBAN thread stopped: it panicked")
     );
 }
+
+/// #233 release review: each VBAN thread is named after its entry, and an
+/// output an entry made knows the entry's id (its queue WARN, on the
+/// program's thread, names it).
+#[test]
+fn a_vban_thread_and_its_output_carry_the_entry_s_id() {
+    assert_eq!(vban_thread_name("out-1"), "vban-out-1");
+    let entry = sp_core::audio_outputs::OutputEntry::vban(
+        "out-7",
+        "FOH",
+        sp_core::audio_outputs::VbanDest {
+            host: "fohabl.lan".into(),
+            port: 6980,
+            stream_name: "sp-program".into(),
+            format: sp_core::audio_outputs::VbanSampleFormat::Int24,
+        },
+    );
+    let out = VbanOut::for_entry(&entry, 48_000).unwrap();
+    assert_eq!(out.id(), "out-7");
+    assert_eq!(out.format(), VbanFormat::PROGRAM);
+    assert_eq!(VbanOut::new().id(), "");
+}
