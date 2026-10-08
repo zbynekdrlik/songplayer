@@ -30,6 +30,7 @@ use super::wire::{Artifact, PeerLyrics};
 use crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE;
 use crate::db::models::VideoLyricsRow;
 use crate::db::models_peer;
+use crate::lyrics::queue_sql::LYRICS_NOT_PARKED;
 use crate::metadata::health::bounded_error;
 
 /// What [`adopt`] did with the peer's lyrics.
@@ -56,8 +57,10 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
         Ask::Fetch(plan) => {
             // A stand-in takes the copy into every row of the video through
             // its own look (`peer::standin`; review rounds 3 and 4).
-            if let Some(s) = ex.standin(job, &row.youtube_id).await {
-                return ex.hand_to_standin(job, row.id, &row.youtube_id, &s).await;
+            if let Some(peer) = ex.standin_peer(job, &row.youtube_id).await {
+                return ex
+                    .hand_to_standin(job, row.id, &row.youtube_id, &peer)
+                    .await;
             }
             if let Some(step) = ex
                 .unless_peers_audio(job, &plan, row.id, &row.youtube_id)
@@ -83,25 +86,37 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
     }
 }
 
-/// `?1` = the YouTube id, `?2` = the Live-Translate source. A reprocess
-/// flag counts only on a row of an active playlist (review round 7): the
-/// lyrics queue never takes another, so its flag is never cleared.
-const LOCAL_ONLY: &str = "SELECT EXISTS (SELECT 1 FROM videos v WHERE v.youtube_id = ?1 \
-     AND (TRIM(COALESCE(v.lyrics_override_text, '')) != '' \
-          OR v.dub_requested = 1 OR v.lyrics_source = ?2 \
-          OR (v.lyrics_manual_priority != 0 AND EXISTS (SELECT 1 FROM playlists p \
-              WHERE p.id = v.playlist_id AND p.is_active = 1))))";
+/// `?1` = the YouTube id, `?2` = the Live-Translate source, `?3` = the
+/// current pipeline version (`LYRICS_NOT_PARKED`'s). The dub and the
+/// Live-Translate track count on any row; an operator's mark only where the
+/// lyrics queue acts on it (review rounds 7-8): a text on a row of an
+/// active playlist (the worker makes no other row's lyrics), a reprocess
+/// flag on such a row that is not parked (bucket 1's own condition: the
+/// queue never takes another, so its flag is never cleared).
+fn local_only_sql() -> String {
+    format!(
+        "SELECT EXISTS (SELECT 1 FROM videos v WHERE v.youtube_id = ?1 \
+         AND (v.dub_requested = 1 OR v.lyrics_source = ?2 \
+              OR (EXISTS (SELECT 1 FROM playlists p \
+                          WHERE p.id = v.playlist_id AND p.is_active = 1) \
+                  AND (TRIM(COALESCE(v.lyrics_override_text, '')) != '' \
+                       OR (v.lyrics_manual_priority != 0 AND {LYRICS_NOT_PARKED})))))"
+    )
+}
 
 /// The lyrics of `youtube_id` stay this node's own: an operator asked THIS
-/// node (a reprocess, a "Nesedí", on a row of an active playlist) or gave
-/// it the text, or its `{yt}_lyrics.json` is a dub's subtitles — on ANY row
-/// of the video, whose rows serve that one file (review round 5: the hook
-/// read the ask and the text on the asked row only). The hook and the
-/// stand-in's look ask it.
+/// node (a reprocess, a "Nesedí") or gave it the text, where the lyrics
+/// queue acts on it, or its `{yt}_lyrics.json` is a dub's subtitles — on
+/// ANY row of the video, whose rows serve that one file (review round 5:
+/// the hook read the ask and the text on the asked row only). The hook and
+/// the stand-in's look ask it (V31's back-fill is a literal copy, without
+/// the version: a stand-in it made for a video with a pending reprocess is
+/// dropped by the look).
 pub(crate) async fn kept_local(pool: &SqlitePool, youtube_id: &str) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(LOCAL_ONLY)
+    sqlx::query_scalar(&local_only_sql())
         .bind(youtube_id)
         .bind(SOURCE_LIVE_TRANSLATE)
+        .bind(i64::from(crate::lyrics::LYRICS_PIPELINE_VERSION))
         .fetch_one(pool)
         .await
 }

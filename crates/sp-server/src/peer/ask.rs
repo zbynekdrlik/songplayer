@@ -114,7 +114,7 @@ impl Exchange {
         // rounds 2 and 4), a peer's copy still comes first.
         let waits_on_song = job.waits_while_a_peer_has_the_song();
         let standing = if waits_on_song {
-            self.standin(job, youtube_id).await
+            self.standin_peer(job, youtube_id).await
         } else {
             None
         };
@@ -254,7 +254,10 @@ impl Exchange {
         match self.fetch_failed(job, youtube_id, peer, error).await {
             Some(recheck) => self.defer(job, video_id, recheck).await,
             None => {
-                if self.standin(job, youtube_id).await.is_some() {
+                // Defensive: the lyrics hook hands a standing job's Fetch to
+                // the stand-in's look before any fetch (`peer::lyrics`), so
+                // no fetch of it fails today (review round 8).
+                if self.standin_peer(job, youtube_id).await.is_some() {
                     return PeerStep::Local(Some(self.run_here_standing(job, youtube_id).await));
                 }
                 let guard = self.run_here(job, youtube_id).await;

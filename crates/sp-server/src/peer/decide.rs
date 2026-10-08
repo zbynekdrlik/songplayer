@@ -177,7 +177,10 @@ pub fn listed_audio<'a>(catalog: &'a Catalog, youtube_id: &str) -> Option<&'a Ar
 /// (phase 2) would each wait on the other's audio (review round 1). Nor does
 /// it wait on a source that lists another audio now (it downloaded the song
 /// again): this node would refuse lyrics made from it (`same_audio`; review
-/// round 2).
+/// round 2). A source that announces the video's audio (a queued or running
+/// download: hashing it again after a rename, ~70 s unlisted, or fetching
+/// it anew) still has the song: waited for, within the bound (review
+/// round 8).
 pub fn song_holder<'a>(
     reads: &[PeerRead<'a>],
     youtube_id: &str,
@@ -188,9 +191,10 @@ pub fn song_holder<'a>(
         .iter()
         .find(|r| {
             r.peer == from.peer
-                && r.catalog
-                    .and_then(|c| listed_audio(c, youtube_id))
-                    .is_some_and(|a| a.sha256 == from.sha256)
+                && r.catalog.is_some_and(|c| {
+                    c.announces(youtube_id, &[ArtifactKind::Audio])
+                        || listed_audio(c, youtube_id).is_some_and(|a| a.sha256 == from.sha256)
+                })
         })
         .map(|r| r.peer)
 }

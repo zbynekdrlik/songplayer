@@ -48,7 +48,7 @@ use super::config::NodeConfig;
 use super::decide::{gives_up, holds, listed_audio, recheck_after};
 use super::kind::{ArtifactKind, Job};
 use super::wire::now_ms;
-use crate::db::models_peer::{self, StandinRecord};
+use crate::db::models_peer;
 
 /// The shortest recheck of a stand-in…
 pub const STANDIN_MIN_RECHECK: Duration = Duration::from_secs(600);
@@ -95,10 +95,11 @@ impl Exchange {
             .map(|(node, _, sha256)| (node, sha256))
     }
 
-    /// The stand-in of `job` of `youtube_id`; `None` when what it made
-    /// stands in for no peer's copy, or the record cannot be read (WARNed).
-    pub(crate) async fn standin(&self, job: Job, youtube_id: &str) -> Option<StandinRecord> {
-        models_peer::standin(&self.pool, youtube_id, job.as_str())
+    /// The peer whose copy what `job` made of `youtube_id` stands in for;
+    /// `None` when it stands in for none, or the record cannot be read
+    /// (WARNed).
+    pub(crate) async fn standin_peer(&self, job: Job, youtube_id: &str) -> Option<String> {
+        models_peer::standin_peer(&self.pool, youtube_id, job.as_str())
             .await
             .inspect_err(|e| warn!(youtube_id, %e, "exchange: reading a stand-in failed"))
             .ok()
@@ -106,7 +107,7 @@ impl Exchange {
     }
 
     /// The lyrics hook met a peer's copy for `youtube_id`, whose track here
-    /// stands in (`s`): the copy goes into every row of the video through
+    /// stands in (for `peer`'s): the copy goes into every row of the video through
     /// the stand-in's own look, made due now, and row `video_id` is put back
     /// (`recheck_after`, no attempt). Counted as waiting (`peer_waits`, the
     /// 2 h bound; review round 4): a look that keeps not taking the copy (a
@@ -118,7 +119,7 @@ impl Exchange {
         job: Job,
         video_id: i64,
         youtube_id: &str,
-        s: &StandinRecord,
+        peer: &str,
     ) -> PeerStep {
         let now = now_ms();
         if let Err(e) = models_peer::start_wait(&self.pool, youtube_id, job.as_str(), now).await {
@@ -134,7 +135,7 @@ impl Exchange {
             info!(
                 youtube_id,
                 job = job.as_str(),
-                peer = %s.peer,
+                peer,
                 "exchange: a stand-in's copy was not taken for 2 h - processing here, still standing in"
             );
             // The spent bound is kept: a run put back runs here again at
