@@ -322,3 +322,35 @@ fn a_reopen_during_a_wait_logs_its_stale_blocks_at_debug() {
         .count();
     assert_eq!(stale, 2);
 }
+
+/// Review round 11: the counters of a run closed for a clock reopen carry
+/// over, like any close's. Two runs, each primed with a block stamped a
+/// second ahead (82 223 frames over the ring, the overflow test's pin),
+/// the first reopened after 60 s with no tick: 164 446 overflows.
+#[test]
+fn a_clock_reopen_keeps_the_closed_runs_counters() {
+    let o = out();
+    let mut d = FakeDevice::answering(vec![]);
+    let mut w = AsioWorker::new(T0);
+    let mut t = T0;
+    for run in 1..=2u64 {
+        w.step(&o, &mut d, t, None);
+        let ahead = ProgramBlock {
+            due_100ns: t + 10_000_000,
+            samples: None,
+            substituted: false,
+        };
+        w.step(&o, &mut d, t + 50_000, Some(ahead));
+        assert_eq!(o.snapshot().status.overflows, 82_223 * run, "run {run}");
+        if run == 1 {
+            let mut k = 0;
+            while o.snapshot().status.clock_waits == 0 {
+                k += 1;
+                assert!(k <= 2_000, "no clock reopen");
+                w.step(&o, &mut d, t + 50_000 + k * SLOT, None);
+            }
+            t += 50_000 + k * SLOT;
+        }
+    }
+    assert_eq!((d.starts, o.snapshot().status.clock_waits), (2, 1));
+}
