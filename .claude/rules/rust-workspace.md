@@ -144,6 +144,19 @@ counts, boundary show/hide times, what each mutant would do. Keep the model in
 the scratchpad, not the repo. When the Rust changes, update the model in the
 same step. Each fresh-context review pass should re-derive the pins with its own
 model; two independent models agreeing is the only local evidence available.
+A review dispatch's brief RESTATES the lane's machine bar ("never touch
+win-resolume, resolume-pp, fohabl or any `mcp__win-*` tool, not even a
+read"): a reviewer inherits none of the lane's dispatch rules, and #233
+lane 3's round-1 reviewer read SNV's registry to check a claim.
+
+**A counter kept across runs (a closed-run accumulator) needs a test with
+a non-zero count in EACH run** (#233 lane 3 rounds 2-4). With the first
+run's total 0, `closed + run` → `-` / `*` and `closed += run` → `*=` are
+equivalent on a one-run test; two runs with counts in both kill them all
+(`-` underflows: the `mutants` profile inherits `test`, so overflow
+checks stay on). A scripted fake must count like the real thing: a fake
+that passed each event's `overloads` through as the count read 0 on a
+quiet poll, while a real ASIO slot only grows during a run.
 
 **Python 3.12+ `sum()` of floats is compensated (Neumaier), Rust's is a
 plain left fold (#233 lane 2):** a model summing with `sum()` disagrees with
@@ -467,6 +480,16 @@ a `#[cfg(windows)] #[test]` next to the Linux tests runs on that job, e.g.
 private `spawn_program_thread(None, bus)` and reads the bus. Put
 `#[cfg(windows)]` on the test fn itself and use only imports the Linux tests
 already use, so the Linux target has no unused import.
+
+**Proving a wait PUMPS the thread's window messages, with no window**
+(#233 lane 3 round 5, `asio_win_tests.rs::close_pumps_the_threads_messages_while_a_callback_finishes`):
+arm a thread timer, `SetTimer(ptr::null_mut(), 0, 10, Some(proc))`
+(windows-sys `Win32_UI_WindowsAndMessaging`, `TIMERPROC = Option<unsafe
+extern "system" fn(HWND, u32, usize, u32)>`). Windows runs `proc` ONLY when
+that thread dispatches its WM_TIMER, so a wait that only sleeps never sees
+it (deterministic: `Sleep` dispatches nothing). Run it on a fresh
+`std::thread`, let `proc` `KillTimer` itself, and keep a drop guard that
+cleans up what the RED path leaves behind.
 
 **An engine test must not count the test pipeline's replies (release 0.68.0
 blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
