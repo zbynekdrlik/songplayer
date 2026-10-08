@@ -301,7 +301,8 @@ wait for a peer that has the song", below).
   - lyrics: `lyrics::queue_sql::queued_where`, buckets 1–3 of the lyrics
     queue (manual, null, stale; bucket 4, the full-mix upgrade, already
     serves lyrics at the current version), only while
-    `lyrics_worker_enabled` is on, and never for a video the catalog will
+    `lyrics_worker_enabled` is on and this node's paid AI too (#229 item
+    C), and never for a video the catalog will
     not serve lyrics of (the dub rule above: any row dub-requested or
     Live-Translate). Also, while `stem_worker_enabled` is on, a row those
     buckets take once its own recheck time has come
@@ -644,6 +645,16 @@ wait for a peer that has the song", below).
   `lyrics_source` keep the PEER's real values (they drive
   `REPAIR_QUEUE_WHERE`, `alignment_model_for_source`, the ★ marker); never
   write `peer:<node>` into them.
+- #229 item C (`paid-ai.md`): while this node's paid AI is off, a job
+  that calls it (`Job::paid_ai`: the lyrics) never runs here.
+  `Exchange::may_run_here` is asked at every "run here" (`ask`'s Local,
+  no-peers and bad-settings paths → `Ask::Held`; the hooks' operator ask,
+  nothing newer, another audio, a stand-in past the bound, a failed fetch)
+  BEFORE the run's own records, and the row is held (`Exchange::hold`:
+  30 min, no attempt, nothing recorded about a run here: the wait, a spent
+  bound and a stand-in stay). A peer's copy is still taken, a peer's job
+  still waited for; a failed fetch of a held job waits with no bound (no
+  give-up WARN). `peer::queued` announces no lyrics queued while off.
 - Each hook returns `PeerStep`: `Done` (the artifacts are in place and
   recorded), `Deferred` (the row's own recheck column moved, NO attempt
   counted, `Exchange::defer`: `defer_download` → `next_attempt_at`,
@@ -1037,8 +1048,9 @@ parked `no_source` by `fail_song`). Three rules:
   chain that counts its calls. Two nodes talk over real HTTP
   (`client_tests.rs`, `fetch_tests.rs`, `lan_tests.rs`, `ask_tests.rs`,
   `download_tests.rs`, `stems_tests.rs`, `lyrics_tests.rs`,
-  `repair_tests.rs`, `audio_tests.rs`, `transfer_probe_tests.rs`, and the
-  workers' `*_tests_peer.rs`). To prove a write happens BEFORE a later
+  `repair_tests.rs`, `audio_tests.rs`, `transfer_probe_tests.rs`,
+  `held_tests.rs` (item C: paid AI off), and the workers'
+  `*_tests_peer.rs`). To prove a write happens BEFORE a later
   step, make that step fail: a test trigger `CREATE TRIGGER … BEFORE
   UPDATE ON videos BEGIN SELECT RAISE(ABORT, '…'); END` fails
   `record_download`, and the origin must already be recorded
