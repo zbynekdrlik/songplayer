@@ -266,6 +266,36 @@ async fn a_reprocess_left_on_an_inactive_playlists_row_does_not_keep_the_stand_i
     assert!(standins(&pp).await.is_empty());
 }
 
+/// Review round 8: a reprocess flag on a row parked at the current version
+/// (`asr_gap`), or an operator's text on a row of an inactive playlist, is
+/// a mark the queue never acts on: the stand-in is replaced.
+#[tokio::test]
+async fn an_operators_mark_the_queue_never_acts_on_does_not_keep_the_stand_in() {
+    for (mark, inactive) in [
+        (
+            "lyrics_manual_priority = 1, lyrics_source = 'asr_gap'",
+            false,
+        ),
+        ("lyrics_override_text = 'Moj text'", true),
+    ] {
+        let (snv, pp, rows, _) = snv_and_pp_standin().await;
+        snv_lyrics(&snv).await;
+        sqlx::query(&format!("UPDATE videos SET {mark} WHERE id = ?"))
+            .bind(rows[1])
+            .execute(pp.pool())
+            .await
+            .unwrap();
+        if inactive {
+            sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = 2")
+                .execute(pp.pool())
+                .await
+                .unwrap();
+        }
+        assert_eq!(supersede_next(Some(&pp.ex)).await, rows.to_vec(), "{mark}");
+        assert!(standins(&pp).await.is_empty(), "{mark}");
+    }
+}
+
 /// No row of the video is left here (removed from its playlists): nothing
 /// to replace, the stand-in is dropped.
 #[tokio::test]

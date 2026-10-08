@@ -17,10 +17,13 @@ type Case = (
 /// PP's state when V31 lands: a song whose pair came from SNV and whose
 /// lyrics PP made itself (served or parked) stands in for SNV's copy, due at
 /// once (`8ohdO2nINEI`). Not: lyrics taken from the peer, a song this node
-/// downloaded itself, no lyrics made yet, an operator's text or a dub on any
-/// row of the video, or an operator's ask on a row of an ACTIVE playlist
-/// (review round 7: a flag on an inactive playlist's row is one the lyrics
-/// queue never takes). Playlist 2, every second row's, is inactive.
+/// downloaded itself, no lyrics made yet, a dub or a Live-Translate track
+/// on any row of the video, or an operator's mark the lyrics queue acts on:
+/// a text on a row of an ACTIVE playlist, or a reprocess flag on such a row
+/// that is not parked (review rounds 7-8: a flag on an inactive playlist's
+/// row or on a parked row, `asr_gap` here, is never taken, and the worker
+/// never makes an inactive row's lyrics). Playlist 2, every second row's,
+/// is inactive.
 #[tokio::test]
 async fn migration_v31_creates_the_stand_ins_and_back_fills_them() {
     let pool = create_memory_pool().await.unwrap();
@@ -33,7 +36,7 @@ async fn migration_v31_creates_the_stand_ins_and_back_fills_them() {
     .execute(&pool)
     .await
     .unwrap();
-    let cases: [Case; 11] = [
+    let cases: [Case; 13] = [
         (
             "served00001",
             &[(Some("gemini-3-5-transcribe"), "")],
@@ -61,12 +64,32 @@ async fn migration_v31_creates_the_stand_ins_and_back_fills_them() {
         (
             "override001",
             &[
+                (None, ", lyrics_override_text = 'Moj text'"),
+                (Some("gemini-3-5-transcribe"), ""),
+            ],
+            true,
+            false,
+            false,
+        ),
+        (
+            "overrideoff",
+            &[
                 (Some("gemini-3-5-transcribe"), ""),
                 (None, ", lyrics_override_text = 'Moj text'"),
             ],
             true,
             false,
+            true,
+        ),
+        (
+            "manualgap01",
+            &[
+                (Some("asr_gap"), ", lyrics_manual_priority = 1"),
+                (Some("gemini-3-5-transcribe"), ""),
+            ],
+            true,
             false,
+            true,
         ),
         (
             "manual00001",

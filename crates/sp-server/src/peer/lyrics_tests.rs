@@ -328,6 +328,49 @@ async fn a_reprocess_left_on_an_inactive_playlists_row_does_not_keep_the_lyrics_
     assert_eq!(json_at(&pp), Some(json), "the peer's copy is in place");
 }
 
+/// Review round 8: an operator's mark the lyrics queue never acts on keeps
+/// nothing local either: a reprocess flag on a row parked at the current
+/// version (`asr_gap`: the Reprocess route leaves it; bucket 1 needs
+/// `LYRICS_NOT_PARKED`), or an operator's text on a row of an inactive
+/// playlist (the worker never makes that row's lyrics). The row asked takes
+/// the peer's copy.
+#[tokio::test]
+async fn an_operators_mark_the_queue_never_acts_on_does_not_keep_the_lyrics_here() {
+    for (mark, inactive) in [
+        (
+            format!(
+                "lyrics_manual_priority = 1, lyrics_source = 'asr_gap', \
+                 lyrics_pipeline_version = {}",
+                crate::lyrics::LYRICS_PIPELINE_VERSION
+            ),
+            false,
+        ),
+        ("lyrics_override_text = 'Moj text'".to_string(), true),
+    ] {
+        let (_snv, pp, id, json) = snv_and_pp().await;
+        let two = pp.add_video_to(2, YT).await;
+        sqlx::query(&format!("UPDATE videos SET {mark} WHERE id = ?"))
+            .bind(two)
+            .execute(pp.pool())
+            .await
+            .unwrap();
+        if inactive {
+            sqlx::query("UPDATE playlists SET is_active = 0 WHERE id = 2")
+                .execute(pp.pool())
+                .await
+                .unwrap();
+        }
+        assert!(
+            matches!(
+                first(Some(&pp.ex), &lyrics_row(&pp, id).await).await,
+                PeerStep::Done
+            ),
+            "{mark}"
+        );
+        assert_eq!(json_at(&pp), Some(json), "{mark}: the peer's copy");
+    }
+}
+
 /// Review Focus 5 here: this node's `{yt}_lyrics.json` of a dubbed video is
 /// the dub's subtitles, never overwritten by a peer's lyrics.
 #[tokio::test]

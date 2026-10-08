@@ -331,6 +331,42 @@ fn a_lyrics_job_waits_only_on_the_peer_it_took_the_song_from() {
     assert_eq!(song_holder(&reads, "bbbbbbbbbbb", took("snv", &sha)), None);
 }
 
+/// Review round 8: while the source peer hashes the song's audio again (a
+/// rename there leaves it unlisted for ~70 s) it announces it as a queued
+/// download (`catalog::unhashed`): the lyrics wait on it then too, bounded,
+/// never "nobody has it" (that would run here with no stand-in, degraded
+/// for good). Only the source; a node with its own audio waits on nobody.
+#[test]
+fn a_lyrics_job_waits_while_its_source_announces_the_songs_audio() {
+    let sha = sha();
+    let rehashing = catalog_with(vec![], &[Audio], JobState::Queued);
+    let reads = [read("snv", Some(&rehashing))];
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, None, took("snv", &sha)),
+        Decision::Wait {
+            peer: "snv".into(),
+            why: WaitWhy::PeerHasTheSong
+        }
+    );
+    assert_eq!(song_holder(&reads, YT, took("snv", &sha)), Some("snv"));
+    let other = [read("pp2", Some(&rehashing))];
+    assert_eq!(
+        song_holder(&other, YT, took("snv", &sha)),
+        None,
+        "only the source"
+    );
+    assert_eq!(
+        song_holder(&reads, "bbbbbbbbbbb", took("snv", &sha)),
+        None,
+        "another video's audio"
+    );
+    assert_eq!(
+        decide(Job::Lyrics, YT, &reads, None, None),
+        Decision::Local(LocalWhy::NobodyHasIt),
+        "its own audio"
+    );
+}
+
 /// Review round 2: the source must still list the very audio this node took
 /// from it (the sha256 of its `peer_fetches` record). A source that
 /// downloaded the song again lists another audio, whose lyrics this node
