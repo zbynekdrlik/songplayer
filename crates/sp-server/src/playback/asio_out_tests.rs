@@ -963,6 +963,16 @@ fn a_hard_re_centre_is_counted_and_shown_across_runs() {
                 (0.0, None),
                 "a closed run's offset goes with it"
             );
+            // While the output waits, the last one keeps ageing (review
+            // round 2): a second later, still before the retry.
+            w.step(&o, &mut d, T0 + (k + 2) * SLOT + 10_000_000, None);
+            let s = o.snapshot();
+            assert_eq!(s.state, "waiting");
+            assert_eq!(
+                s.status.last_hard_recentre,
+                Some(expected(1.0616666)),
+                "{s:?}"
+            );
         }
     }
     assert_eq!(d.starts, 2);

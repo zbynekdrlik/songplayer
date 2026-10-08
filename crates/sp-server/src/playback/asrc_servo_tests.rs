@@ -2,7 +2,7 @@
 //! regression's own tests: `asrc_servo_tests_regression.rs`), the level loop's clamps and
 //! anti-windup, the slew; the offset slew's stop curve and its time left;
 //! then `Servo::observe`: the first block's priming (no re-centre), the hard
-//! re-centres' 50 ms / 133.3 ms edges, a window mean off target slewed
+//! re-centres' 16.7 ms floor / 133.3 ms edges, a window mean off target slewed
 //! never spliced, the window's 1 s and starvation edges, a fast card, the
 //! slew, a starved window, a jump of the card's position. Pins derived with a
 //! scratch model of this file (two independent runs agree).
@@ -36,7 +36,11 @@ fn the_constants_are_camera_boxs() {
         BASE_LATENCY_100NS,
         crate::playback::vban_packet::VBAN_SEND_LATENCY_100NS
     );
-    assert_eq!(HARD_DEFICIT_100NS, 500_000, "50 ms, 1.5 slots");
+    assert_eq!(
+        HARD_FLOOR_100NS, 166_666,
+        "the base target less 50 ms, 1.5 slots"
+    );
+    assert_eq!(BASE_LATENCY_100NS - HARD_FLOOR_100NS, 500_000);
     assert_eq!(HARD_EXCESS_100NS, 4 * SLOT_100NS + 1, "four slots");
     assert_eq!(CALM_ZONE_MS, 1.0);
 }
@@ -287,13 +291,27 @@ fn the_first_block_primes_the_ring_and_is_no_re_centre() {
     assert_eq!(s.status().hard_recentres, 0);
 }
 
+/// The deficit edge is an ABSOLUTE latency floor, 16.7 ms (review round 2):
+/// a delayed output's target moves the excess edge, never the floor.
 #[test]
-fn a_hard_re_centre_is_a_deficit_over_50_ms_or_an_excess_over_4_slots() {
-    assert_eq!(hard_recentre(0), None);
-    assert_eq!(hard_recentre(500_000), None);
-    assert_eq!(hard_recentre(500_001), Some(Recentre::Deficit));
-    assert_eq!(hard_recentre(-1_333_333), None);
-    assert_eq!(hard_recentre(-1_333_334), Some(Recentre::Excess));
+fn a_hard_re_centre_is_a_latency_under_16_7_ms_or_4_slots_over_the_target() {
+    let base = BASE_LATENCY_100NS;
+    assert_eq!(hard_recentre(base, base), None);
+    assert_eq!(hard_recentre(166_666, base), None);
+    assert_eq!(hard_recentre(166_665, base), Some(Recentre::Deficit));
+    assert_eq!(hard_recentre(base + 1_333_333, base), None);
+    assert_eq!(
+        hard_recentre(base + 1_333_334, base),
+        Some(Recentre::Excess)
+    );
+    let delayed = base + 1_000_000; // a 100 ms delay
+    assert_eq!(hard_recentre(166_666, delayed), None);
+    assert_eq!(hard_recentre(166_665, delayed), Some(Recentre::Deficit));
+    assert_eq!(hard_recentre(delayed + 1_333_333, delayed), None);
+    assert_eq!(
+        hard_recentre(delayed + 1_333_334, delayed),
+        Some(Recentre::Excess)
+    );
     assert_eq!(
         [Recentre::Prime, Recentre::Deficit, Recentre::Excess].map(Recentre::as_str),
         ["prime", "deficit", "excess"]
@@ -324,6 +342,28 @@ fn a_block_past_the_last_resorts_edge_re_centres_hard() {
         (-1_333_334, Some(Recentre::Excess))
     );
     assert_eq!(s.status().hard_recentres, 2);
+}
+
+/// A delayed output (100 ms) whose block is 60 ms short of its target
+/// still holds 106.7 ms: slewed, never spliced (review round 2: the old
+/// edge, 50 ms under the target, spliced it). Under the 16.7 ms floor it is
+/// a hard insert, as at the base target.
+#[test]
+fn a_delayed_outputs_deficit_edge_is_the_same_floor() {
+    let target = BASE_LATENCY_100NS + 1_000_000;
+    let mut s = Servo::new(RATE, target);
+    s.observe(obs(0, 0, 0, 0)); // the priming
+    // buffered 0: the latency is the hand-off lateness alone.
+    let a = s.observe(obs(1, target - 600_000, 0, 3_200));
+    assert_eq!((a.recentre_100ns, a.recentre), (0, None));
+    let b = s.observe(obs(2, HARD_FLOOR_100NS, 0, 6_400));
+    assert_eq!((b.recentre_100ns, b.recentre), (0, None));
+    let c = s.observe(obs(3, HARD_FLOOR_100NS - 1, 0, 9_600));
+    assert_eq!(
+        (c.recentre_100ns, c.recentre),
+        (1_500_001, Some(Recentre::Deficit))
+    );
+    assert_eq!(s.status().hard_recentres, 1);
 }
 
 /// How [`steady`] feeds the servo: blocks on a wall from `t0`, each handled
@@ -658,6 +698,34 @@ fn the_time_left_counts_from_the_cards_rate() {
     assert_eq!(st.offset_ms, -19.9999);
     assert!(
         (st.slew_eta_s.unwrap() - 122.98701246771205).abs() < 1e-9,
+        "{st:?}"
+    );
+}
+
+/// The same card with the level 20 ms HIGH: the slew works downward, so the
+/// room is 300 ppm below the card's +40, 340 ppm (review round 2: the time
+/// left read 300 − |rate| on both sides).
+#[test]
+fn the_time_left_downward_has_the_room_below_the_cards_rate() {
+    let mut s = Servo::new(RATE, BASE_LATENCY_100NS);
+    s.observe(obs(0, 0, 6_400, 480_000));
+    let card = Feed {
+        ppm: 40.0,
+        offset: 480_000,
+        ..FEED
+    };
+    steady(&mut s, 1, 30 * 90, card);
+    let high = Feed {
+        buffered: 8_320,
+        ..card
+    };
+    let a = steady(&mut s, 30 * 90 + 1, 64, high);
+    let st = s.status();
+    assert!(st.locked, "{st:?}");
+    assert!((a.correction_ppm - 29.33423306554875).abs() < 1e-9, "{a:?}");
+    assert_eq!(st.offset_ms, 20.0001);
+    assert!(
+        (st.slew_eta_s.unwrap() - 121.19220151806853).abs() < 1e-9,
         "{st:?}"
     );
 }

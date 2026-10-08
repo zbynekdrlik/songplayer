@@ -42,10 +42,11 @@
 //!   the latency it reads is the same — nothing moves. Only a lasting offset
 //!   does, and a block's own reading never kicks the ratio: the level loop
 //!   reads the 1 s window's mean.
-//! - the last resort: a block more than [`HARD_DEFICIT_100NS`] short of the
-//!   target (the ring would run dry on most blocks before the slew could
-//!   restore it) or more than [`HARD_EXCESS_100NS`] over it (the next block
-//!   would overflow the ring) is a HARD re-centre at once, by its error: a
+//! - the last resort: a block whose latency is under [`HARD_FLOOR_100NS`]
+//!   (the ring would run dry on most blocks before the slew could restore
+//!   it; an absolute floor, so an entry's delay never moves it) or more than
+//!   [`HARD_EXCESS_100NS`] over the target (the next block would overflow
+//!   the ring) is a HARD re-centre at once, by its error: a
 //!   fault, counted (`hard_recentres`), WARNed by the worker, which inserts
 //!   or skips under fades (`asrc::Splice`). The first block primes the ring
 //!   to the target the same way, and that is no re-centre.
@@ -97,12 +98,14 @@ pub const SLOT_100NS: i64 = 333_333;
 /// SongPlayer's: the latency target before the entry's delay — two grid
 /// slots, VBAN's send budget (`VBAN_SEND_LATENCY_100NS`, pinned by a test).
 pub const BASE_LATENCY_100NS: i64 = 666_666;
-/// SongPlayer's last resort for a deficit: a block more than 50 ms (1.5
-/// slots) short of the target is a hard re-centre. The ring then holds under
-/// 11.7 ms for a block on time, so most blocks of the normal 10–33 ms
-/// hand-off would find it dry before the slew could restore it; a date
-/// step's remainder (under one slot) plus a driver's sawtooth stays under it.
-pub const HARD_DEFICIT_100NS: i64 = 500_000;
+/// SongPlayer's last resort for a deficit: a block whose latency is under
+/// 16.7 ms (the base target less 50 ms, 1.5 slots) is a hard re-centre. The
+/// ring then holds under 11.7 ms for a block on time, so most blocks of the
+/// normal 10–33 ms hand-off would find it dry before the slew could restore
+/// it. ABSOLUTE (review round 2): an entry's delay raises the target, never
+/// this floor — a delayed output 50 ms short still holds its delay in the
+/// ring.
+pub const HARD_FLOOR_100NS: i64 = 166_666;
 /// SongPlayer's last resort for an excess: a block more than four slots
 /// (133.3 ms) over the target is a hard re-centre — the ring holds the
 /// target + 4 slots + one block, so the next block would overflow it.
@@ -337,7 +340,7 @@ pub struct Observation {
 pub enum Recentre {
     /// The first block: the ring primed to the target (no re-centre).
     Prime,
-    /// A hard re-centre: more than [`HARD_DEFICIT_100NS`] short.
+    /// A hard re-centre: the latency under [`HARD_FLOOR_100NS`].
     Deficit,
     /// A hard re-centre: more than [`HARD_EXCESS_100NS`] over.
     Excess,
@@ -528,7 +531,7 @@ impl Servo {
             self.origin_100ns = Some(o.handled_100ns);
             return self.recentre(err_100ns, Recentre::Prime);
         };
-        if let Some(hard) = hard_recentre(err_100ns) {
+        if let Some(hard) = hard_recentre(latency_100ns, self.target_100ns) {
             return self.recentre(err_100ns, hard);
         }
         let x_100ns = o.handled_100ns - origin;
@@ -561,12 +564,8 @@ impl Servo {
         let pi = self.level.update(err_ms, dt_s, base);
         let target = (base + pi).clamp(-MAX_PPM, MAX_PPM);
         self.applied_ppm = slew(self.applied_ppm, target, dt_s);
-        self.slew_eta_s = slew_eta_s(
-            err_ms,
-            self.applied_ppm - rate,
-            MAX_PPM - rate.abs(),
-            self.calm_ms,
-        );
+        let room = MAX_PPM - rate.abs();
+        self.slew_eta_s = slew_eta_s(err_ms, self.applied_ppm - rate, room, self.calm_ms);
         self.hold()
     }
 
@@ -594,13 +593,12 @@ impl Servo {
     }
 }
 
-/// A block's error (target − latency) that the slew cannot be left with:
-/// short by more than [`HARD_DEFICIT_100NS`], or over by more than
-/// [`HARD_EXCESS_100NS`].
-pub fn hard_recentre(err_100ns: i64) -> Option<Recentre> {
-    if err_100ns > HARD_DEFICIT_100NS {
+/// A block's latency the slew cannot be left with: under
+/// [`HARD_FLOOR_100NS`], or more than [`HARD_EXCESS_100NS`] over `target`.
+pub fn hard_recentre(latency_100ns: i64, target_100ns: i64) -> Option<Recentre> {
+    if latency_100ns < HARD_FLOOR_100NS + (target_100ns - BASE_LATENCY_100NS) {
         Some(Recentre::Deficit)
-    } else if err_100ns < -HARD_EXCESS_100NS {
+    } else if latency_100ns - target_100ns > HARD_EXCESS_100NS {
         Some(Recentre::Excess)
     } else {
         None
