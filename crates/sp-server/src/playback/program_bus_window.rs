@@ -165,6 +165,6 @@ impl ProgramCore {
             slot: w.slot(stamp).unwrap_or(0),
             n_slots: w.n_slots,
         };
-        self.commit(ProgramJob::Mix(mix), w.from); // #147: shows the incoming side
+        self.commit(ProgramJob::Mix(mix), Some(w.to)); // #147: shows the incoming side
     }
 }

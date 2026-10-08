@@ -384,7 +384,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
     pub fn serve(
         &mut self,
         job: ProgramJob,
-        _source: Option<i64>,
+        source: Option<i64>,
         now: impl Fn() -> i64,
     ) -> BoundaryMarks {
         let taken_100ns = now();
@@ -409,7 +409,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
         };
         if let Some(trace) = &mut self.trace {
             let k = crate::playback::fleet_shift::global().slots();
-            trace.record(&marks, None, shape, k);
+            trace.record(&marks, source, shape, k);
         }
         marks
     }

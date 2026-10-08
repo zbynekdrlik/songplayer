@@ -235,7 +235,7 @@ impl PlaybackEngine {
         let Some(pp) = self.pipelines.get(&playlist_id) else {
             return;
         };
-        if pp.paused_at.is_some() || self.on_air_contains(playlist_id) {
+        if pp.paused_at.is_some() || !self.on_air_contains(playlist_id) {
             return;
         }
         if let Some(video_id) = pp.current_video_id {
