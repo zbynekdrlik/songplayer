@@ -49,7 +49,7 @@ pub(crate) async fn dispatch(engine: &mut PlaybackEngine, cmd: EngineCommand) {
             playlist_id,
             position_ms,
         } => {
-            engine.seek(playlist_id, position_ms).await;
+            engine.seek(playlist_id, position_ms);
         }
         EngineCommand::ResolumeRecovered { host } => {
             engine.handle_resolume_recovery(&host).await;

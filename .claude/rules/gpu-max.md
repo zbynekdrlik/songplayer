@@ -357,7 +357,7 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
 
 ### What MAX shows, and where it is offered (`program_output.rs`)
 
-- `ProgramOutput::serve` = `split` → `limit` → `feed_vban` → **`offer_max`**
+- `ProgramOutput::serve` = `split` → `limit` → `feed_outputs` → **`offer_max`**
   → `submit_video`. VBAN has the boundary's block before ANY MAX work, and
   MAX has its job before the canvas fit and the NDI submit
   (`program_output_tests_max.rs`: a hook inside the offer sees VBAN's block
@@ -520,8 +520,10 @@ writes the same bytes).
   3840×2160, format 87, host path = the installed `SongPlayer.exe`;
 - SP-program's `health.timing` (`ready_late_us_max`,
   `vban_feed_late_us_max`, `submit_us_max`, the `_over_*` counts) and
-  `vban` (`late_sends`, `late_max_us`, `blocks_dropped`) are unchanged
-  against the pre-deploy numbers over the same window;
+  FOH's VBAN telemetry (#233: `outputs[i].vban` of the entry whose
+  `vban.targets[0].target` is `fohabl.lan:6980`; `late_sends`,
+  `late_max_us`, `blocks_dropped`) are unchanged against the pre-deploy
+  numbers over the same window;
 - the MAX p99s are within budget: `upload_us_p99 + draw_us_p99 +
   send_us_p99 < 10 000` µs, `max.coalesced` +0 and `failed` +0 outside a
   restart;

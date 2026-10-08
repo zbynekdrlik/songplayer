@@ -3,6 +3,7 @@ paths:
   - "scripts/lyrics_worker.py"
   - "scripts/tests/**"
   - "scripts/stem_worker.py"
+  - "scripts/audio_window.py"
 ---
 
 # Testing `scripts/lyrics_worker.py` in the `eval-checks` CI job
@@ -14,9 +15,9 @@ DELIBERATELY MINIMAL install (`.github/workflows/ci.yml`):
 pip install ruff pytest jsonschema requests numpy soundfile
 ```
 
-There is **NO `torch`, `librosa`, `audio_separator`, or `qwen_asr`** in that
-environment (they are heavy GPU/model deps that only live in `lyrics_venv` on the
-box). So a `scripts/tests/` test must run on **numpy + soundfile only**.
+There is **NO `torch`, `librosa` or `audio_separator`** in that environment
+(they are heavy GPU/model deps that only live in `lyrics_venv` on the box). So a
+`scripts/tests/` test must run on **numpy + soundfile only**.
 
 ## How the module stays testable
 
@@ -44,8 +45,12 @@ stack is faked. Pattern (see `test_lyrics_worker_vocals_in.py`):
   `audio_separator` and `audio_separator.separator` in `sys.modules`.
 - **`librosa.load`**: back it with real `soundfile.read` + a numpy linear
   resample — enough to exercise the 16 kHz-resample plumbing without real librosa.
-- **`qwen_asr.Qwen3ForcedAligner`**: a fake with a `from_pretrained` staticmethod
-  recording the model name.
+- **The retired Qwen aligner (#144):** the script no longer imports it.
+  `test_preload_warms_only_the_dereverb_model` puts a `None` entry for its
+  package in `sys.modules` (any import of it then raises), and
+  `test_the_script_has_no_retired_aligner` greps the script. Those tests split
+  the names (`"qwen" + "_asr"`): the CI deletion audit greps `scripts/` for
+  them.
 
 Use `monkeypatch.setitem(sys.modules, "<name>", fake)` so the injection auto-undoes
 between tests. FLAC round-trips through the bundled libsndfile in the job, so a
@@ -57,6 +62,43 @@ Some invariants of `lyrics_worker.py` are asserted by `include_str!`-ing the
 script into a Rust test and matching substrings (e.g. `use_soundfile=True` count,
 `gpu_polite(` present, no `from_secs(600)`). When you change the script's model
 structure, UPDATE those counts too — they are CRLF-normalised and body-scoped.
+
+## `preprocess-vocals` streams too (#207, `test_lyrics_worker_streaming.py`)
+
+The same design as the stems: the vocals sidecar is read one window at a
+time (`_audio_info` header + `_read_window`, exactly the old
+`librosa.load(sr=None, mono=False)` slice), and the 16 kHz segments are
+stitched by `_stitched_blocks` (one block per segment read, only the
+overlap tail kept) in TWO passes in `_stitch_to_wav`: the first takes the
+global peak, the second writes `<out>.tmp` (divided by the peak over 1.0)
+and `os.replace`s it. `_stitch_segments` stays as the reference. The tests:
+
+- the fake `librosa.load` refuses the vocals path, and `_stitch_segments`
+  is a trap in the end-to-end test (a whole-array path makes identical
+  samples, so only a trap catches a regression);
+- each dereverb input equals the old whole-file slice exactly, and the
+  output equals the reference stitch of the very segments written
+  (captured through `_atomic_write_wav`);
+- the streamed stitch equals the reference + normalisation + writer bit
+  for bit (FLOAT WAV), peaks under and over 1.0, a gap, a short last
+  segment; reads and blocks alternate one to one;
+- local measure (tracemalloc, the fakes, 30 s / 2 s windows): a 12 min
+  sidecar peaked at 678 MiB before, 29 MiB after, and 29 MiB at 3 min too.
+
+Since the #233 release review the header read, the window read and the
+streamed overlap-add are ONE module, `scripts/audio_window.py`
+(`audio_info`, `read_window`, `OverlapAdd`), shared by both workers: the
+lyrics worker's `_audio_info` / `_read_window` are its functions and
+`_stitched_blocks` feeds `OverlapAdd` one segment at a time; the stem
+writer accumulates through it too. Each worker ships it next to its script
+(`lyrics/tool_scripts.rs`, `stems/scripts.rs`). A helper both workers need
+goes there, never into a copy.
+
+`_stitched_blocks` handles any segment lengths the reference does (a gap,
+an overlap longer than the step); an earlier segment ending past the last
+one raises, like the reference's broadcast. Do not name a helper
+`*segment_size*`: `gpu_policy_script_guard_tests.rs` bans that substring in
+the script.
 
 ## `stem_worker.py` tests follow the same pattern (#207)
 

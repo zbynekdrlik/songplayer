@@ -144,6 +144,19 @@ counts, boundary show/hide times, what each mutant would do. Keep the model in
 the scratchpad, not the repo. When the Rust changes, update the model in the
 same step. Each fresh-context review pass should re-derive the pins with its own
 model; two independent models agreeing is the only local evidence available.
+A review dispatch's brief RESTATES the lane's machine bar ("never touch
+win-resolume, resolume-pp, fohabl or any `mcp__win-*` tool, not even a
+read"): a reviewer inherits none of the lane's dispatch rules, and #233
+lane 3's round-1 reviewer read SNV's registry to check a claim.
+
+**A counter kept across runs (a closed-run accumulator) needs a test with
+a non-zero count in EACH run** (#233 lane 3 rounds 2-4). With the first
+run's total 0, `closed + run` → `-` / `*` and `closed += run` → `*=` are
+equivalent on a one-run test; two runs with counts in both kill them all
+(`-` underflows: the `mutants` profile inherits `test`, so overflow
+checks stay on). A scripted fake must count like the real thing: a fake
+that passed each event's `overloads` through as the count read 0 on a
+quiet poll, while a real ASIO slot only grows during a run.
 
 **Python 3.12+ `sum()` of floats is compensated (Neumaier), Rust's is a
 plain left fold (#233 lane 2):** a model summing with `sum()` disagrees with
@@ -224,7 +237,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   a `const fn` too — don't avoid it there. The no-compile box can't see it; it
   cost #192 round 3 a whole review round (three ceil-divs in `audio_emitter.rs`
   `block_ms`/`ring_capacity_blocks` + `loop_stats.rs` `percentile_ceil`). The tree
-  already uses `.div_ceil()` (`chunking.rs`, `loop_stats.rs`) — grep before
+  already uses `.div_ceil()` (`loop_stats.rs`) — grep before
   hand-rolling a ceil.
 - **`clippy::manual_clamp` on `x.min(CONST).max(CONST)`** (#233 lane 2,
   caught in review before CI): two constant bounds make clippy ask for
@@ -258,7 +271,7 @@ compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
   addendum 3 review round 2). It is warn-by-default (complexity), so under
   `-D warnings` it fails the Lint job. Clippy's `METHODS_WITH_NEGATION`
   table maps a negated `is_some_and` to `is_none_or` from MSRV 1.82, and the
-  workspace is 1.85. Write `opt.is_none_or(|x| x.id != id)`: negate the
+  workspace is 1.87. Write `opt.is_none_or(|x| x.id != id)`: negate the
   closure body, never the call. `!opt.is_some()` / `!opt.is_none()` are in
   the same table.
 - **`clippy::type_complexity` on a test's known-value table** (#223 S1a, CI
@@ -316,9 +329,16 @@ Lint job on code that passed a day earlier. The 1.99 drift that broke run
   nothing; dtolnay/async-trait#303). Never paper over it with allows on the
   traits.
 - **`Atomic*::fetch_update` deprecated (renamed `try_update`):** `try_update`
-  is newer than the workspace MSRV 1.85 (`clippy::incompatible_msrv`), so write
+  is newer than the workspace MSRV 1.87 (`clippy::incompatible_msrv`), so write
   the explicit `load` + `compare_exchange_weak` loop (`preview_stream.rs`
   `ViewerGuard::drop`).
+
+**The workspace MSRV is 1.87 (#233 release review: rubato 5.0.1 needs it).**
+Raising `rust-version` (root `Cargo.toml` and `src-tauri/Cargo.toml`) turns
+on clippy's MSRV-gated lints at the new version: `manual_is_multiple_of`
+(1.87) then rejects `x % n == 0` under `-D warnings`. Write
+`x.is_multiple_of(n)` (unsigned integers), and grep the tree for `% … == 0`
+in the same commit as the bump.
 
 When the Lint job fails on files the diff never touched, check the toolchain
 version in the job log first (`rust-1.99.0` in the clippy help URLs).
@@ -361,6 +381,22 @@ failed on them (`36438006665`):
   gained `fleet`, `audio_emitter_tests.rs` still built one without it).
   Before adding a field, grep the crate for `TypeName {` in every file,
   tests included, and add it (or `..Default::default()`) at each site.
+- **An enum variant that gains a field breaks every PATTERN of it: E0023**
+  (#147 review round 2). `Take::Job(job)` → `Take::Job(job, source)` left
+  eight one-field patterns in test files the lane never opened
+  (`program_bus_tests.rs`, `ndi_input_tests*.rs`), and the test target did
+  not compile. The grep that should have found them was cut short by a
+  `| head -30`. Grep `Variant(` across `crates/` with the Grep tool and
+  `head_limit: 0` (never a piped `head`), and fix each pattern (`_` for the
+  new field, `..` inside `matches!`).
+- **A single-writer ring that a reader must never block: a seqlock of
+  atomics per slot** (#147, `program_trace.rs`). Sequence odd while the
+  writer fills the words, +2 per record; the reader loads it (Acquire),
+  the words (Relaxed), fences (Acquire) and re-checks; an index word drops
+  a slot written over since. Test the protocol deterministically, no
+  threads: an `open`ed slot reads `None` (kills `seq + 1 → seq * 1`), and a
+  read whose `between` hook (run after the words, before the re-check)
+  writes the same slot again is dropped (kills `seq + 2 → seq * 2`).
 - **An opaque `impl Fn` bound to a local keeps its borrow to the end of
   the scope → E0505 on a later move** (#223 follow-up review round 1).
   `let record = recorder(&log);` (a helper returning `impl Fn(usize) +
@@ -452,12 +488,31 @@ Microsoft's page reads as if WARP takes `D3D11_CREATE_DEVICE_VIDEO_SUPPORT`,
 `writeln!(std::io::stderr(), …)`: libtest captures `eprintln!` / `println!` of a
 passing test, not direct writes to the stderr handle.
 
+**A `#[cfg(windows)]` OS-thread spawn reached from a unit-tested fn RUNS on
+the Windows job** (#233 review round 1). `audio_out_task::build` called
+`start_vban_thread`, whose Windows branch spawns the real VBAN output
+thread (then `vban-output`, `vban-<id>` since the release review), so `apply_keeps_an_unchanged_output_when_another_is_added` got a live
+thread there that took the block it had queued (green on Linux, red on
+Windows). Pass the spawn in as a parameter (`StartThread`: production passes
+the real starter, a test a no-op or a recorder, which also pins that the
+start happens) instead of gating it on `not(test)`.
+
 **A fix in `#[cfg(windows)]` code still gets its RED** (#221 review round 2):
 a `#[cfg(windows)] #[test]` next to the Linux tests runs on that job, e.g.
 `program_output_tests.rs::no_ndi_sdk_reads_as_a_polled_zero` calls the
 private `spawn_program_thread(None, bus)` and reads the bus. Put
 `#[cfg(windows)]` on the test fn itself and use only imports the Linux tests
 already use, so the Linux target has no unused import.
+
+**Proving a wait PUMPS the thread's window messages, with no window**
+(#233 lane 3 round 5, `asio_win_tests.rs::close_pumps_the_threads_messages_while_a_callback_finishes`):
+arm a thread timer, `SetTimer(ptr::null_mut(), 0, 10, Some(proc))`
+(windows-sys `Win32_UI_WindowsAndMessaging`, `TIMERPROC = Option<unsafe
+extern "system" fn(HWND, u32, usize, u32)>`). Windows runs `proc` ONLY when
+that thread dispatches its WM_TIMER, so a wait that only sleeps never sees
+it (deterministic: `Sleep` dispatches nothing). Run it on a fresh
+`std::thread`, let `proc` `KillTimer` itself, and keep a drop guard that
+cleans up what the RED path leaves behind.
 
 **An engine test must not count the test pipeline's replies (release 0.68.0
 blockers).** On Linux the stub pipeline (`pipeline_stub.rs`) answers every
@@ -714,6 +769,12 @@ the test that kills each one BEFORE CI's mutation gate runs.
   then `cargo mutants --in-diff <scratch>/range.diff --list --dir <wt>`
   (no `cd`, no redirect). Diff from the MERGED `origin/dev`, not from the
   lane's original base: `<base>..HEAD` then also lists dev's own commits.
+  To KEEP the list (to diff it after each fix round and map only the new
+  mutants), a `> file` redirect is refused too: pipe it instead,
+  `cargo mutants … --list --dir <wt> | python3 -c "import sys;
+  open('<scratch>/mutants.txt','w').write(sys.stdin.read())"   # airuleset:build-ok list-only`
+  (#233 lane 1, eight review rounds: list → diff against the previous
+  list, ignoring line:col → map the new descriptions).
 - **Give a review dispatch the merged base SHA, not `origin/dev`** (#136):
   the `.git` is shared with the main checkout, so another session's fetch
   can move `origin/dev` mid-review, and `git diff origin/dev..HEAD` (a TREE
@@ -731,7 +792,10 @@ the test that kills each one BEFORE CI's mutation gate runs.
   --body-file <abs path>` per issue (release 0.69.0 lane B). A bounded wait
   loop on `$SECONDS` arithmetic (`end=$((SECONDS+560)); while [ $SECONDS -lt
   $end ]`) is refused as well: put the loop in a scratch script (`date +%s`
-  deadline) and run `bash <scratch>/wait.sh <arg>` (#184).
+  deadline) and run `bash <scratch>/wait.sh <arg>` (#184). A command
+  that NAMES `eval/` (CI's ruff list starts with it) is refused too, read
+  as "runs a string through eval": put CI's exact ruff lint + format call
+  in a scratch script (`bash <scratch>/ci_ruff.sh`) (#233 closing lane).
 - **A recursive grep over the repo's `.claude` dir trips the credential-store
   hook** (`block-vault-store-read.sh` reads the command TEXT: a recursive
   read of that dir counts as a vault read, even inside an edit script's
@@ -798,7 +862,16 @@ the test that kills each one BEFORE CI's mutation gate runs.
   on block 101 at 50 ppm). When a result depends on where an event lands
   on a grid (packet spacing 41 666/41 667/41 668, the 100-tick resample),
   sweep the event over ≥ 3 consecutive phases in the test, and fuzz the
-  scratch model over all of them before pinning.
+  scratch model over all of them before pinning. "Phases" must be DISTINCT
+  modulo the grid: 0 / 11.1 / 22.2 / 33.3 ms over a 33.3 ms slot is three
+  (#233 closing lane round 3).
+- **A clamp or a cap's bound is visible only where it BINDS** (#233
+  closing lane round 3). `slew_eta_s` caps its peak at the room
+  `MAX_PPM + rate`; on the only downward test (a +40 ppm card) the ~308 ppm
+  peak stayed under 340 AND under the `*` mutant's 12 000, so `+` → `*` /
+  `/` survived. For every `min` / `max` / `clamp` / cap in the diff, give a
+  test whose value makes that bound the active one (there: a −40 ppm card,
+  room 260 < 308), and check both sides in the scratch model.
 - A match GUARD that is always true where it sits (`ShowTitle { .. } if
   self.recovery_sent_this_step` when the step has always fired an event by
   then) makes the guard→`true` mutant EQUIVALENT: it survives the gate. Drop

@@ -7,8 +7,15 @@ paths:
 
 `lyrics/bootstrap.rs::ensure_ready` runs once per SongPlayer start (the
 lyrics worker waits for it). Its FAST PATH decides whether the ~6 min
-reinstall (qwen-asr, `audio-separator[gpu]`, the cu124 torch
-`--force-reinstall`, the numpy repair) runs.
+reinstall (`audio-separator[gpu]`, the cu124 torch `--force-reinstall`, the
+numpy repair) runs.
+
+#144 (v22 one regime): the venv serves `preprocess-vocals`, the stems worker
+and the dub worker; the forced aligner (mtl) has its own venv. The retired
+Qwen aligner's package is neither probed (`IS_READY_PROBE` imports torch,
+audio_separator, numba, librosa, soundfile) nor installed, and `preload`
+warms only the anvuew dereverb model. `audio-separator[gpu]` brings librosa
+and soundfile itself. A box's old venv keeps the package; nothing imports it.
 
 ## Why it is shaped like this (the 28.9.2026 blocker, #221 comment 5877957738)
 

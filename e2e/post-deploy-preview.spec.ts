@@ -286,6 +286,11 @@ test.describe("#178 live preview <video> post-deploy", () => {
     test.setTimeout(120_000);
 
     const { pid: dabingPid, videoId: sampleVideoId } = await readyDub(request);
+    // The dub memory as found, put back in `finally` (never a fixed value: a
+    // fixed (1, 1, 1) made every deploy play the original voice under the dub).
+    const foundDub = ((await (await request.get("/api/v1/mix")).json()) as {
+      dub: { vokaly: number; podklad: number; dabing: number };
+    }).dub;
 
     await page.goto("/dabing");
     await expect(page.getByTestId("player")).toBeVisible({ timeout: 30_000 });
@@ -372,12 +377,10 @@ test.describe("#178 live preview <video> post-deploy", () => {
         )
         .toBeGreaterThan(before + 0.5);
     } finally {
-      // Restore: full DUB memory, stop the preview, pause output (#184 round G2:
-      // the Dabing player edits the dub memory; kind is required).
+      // Restore: the dub memory as found, stop the preview, pause output
+      // (#184 round G2: the Dabing player edits the dub memory; kind is required).
       await request
-        .patch("/api/v1/mix", {
-          data: { kind: "dub", vokaly: 1.0, podklad: 1.0, dabing: 1.0 },
-        })
+        .patch("/api/v1/mix", { data: { kind: "dub", ...foundDub } })
         .catch(() => {});
       await page
         .getByTestId("preview-stop")

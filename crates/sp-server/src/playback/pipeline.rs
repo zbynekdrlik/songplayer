@@ -33,7 +33,7 @@ use tracing::{debug, error, info};
 // `pipeline::PipelineCommand` / `pipeline::PipelineEvent` path still resolves.
 #[path = "pipeline_types.rs"]
 mod pipeline_types;
-pub use pipeline_types::{PipelineCommand, PipelineEvent, real_start_ms};
+pub use pipeline_types::{PipelineCommand, PipelineEvent, real_seek_ms, real_start_ms};
 
 /// Handle to a playlist's background decode pipeline thread.
 pub struct PlaybackPipeline {
@@ -126,6 +126,23 @@ impl PlaybackPipeline {
     /// `ndi_output_name`): `playback::ndi_health` labels its snapshots with it.
     pub fn output_name(&self) -> &str {
         &self.output_name
+    }
+}
+
+#[cfg(test)]
+impl PlaybackPipeline {
+    /// A pipeline with no thread: the test reads the commands the engine
+    /// sends it (#217: a seek goes to the pipeline as a `Seek`).
+    pub(crate) fn detached_for_test(
+        output_name: &str,
+    ) -> (Self, crossbeam_channel::Receiver<PipelineCommand>) {
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
+        let pipeline = Self {
+            cmd_tx,
+            handle: None,
+            output_name: output_name.to_string(),
+        };
+        (pipeline, cmd_rx)
     }
 }
 

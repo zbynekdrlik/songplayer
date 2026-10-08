@@ -40,6 +40,9 @@ impl PlaybackEngine {
                     );
                     return;
                 }
+                // #147: before any await, so the mark is there for the
+                // song's first live boundary (sent after this `Started`).
+                self.trace_song_start(playlist_id);
                 // #229: a song opened — the run of failed opens is over, and
                 // a selected or picked song counts as played now.
                 self.song_started(playlist_id).await;
@@ -199,6 +202,8 @@ impl PlaybackEngine {
                 // #229: counted; from the 3rd failure in a row the next song waits.
                 self.video_failed(playlist_id, msg).await;
             }
+            // #217: the title clock follows where the song really plays on from.
+            PipelineEvent::Seeked { position_ms } => self.seeked(playlist_id, *position_ms).await,
             PipelineEvent::RetryDue(id) => self.retry_due(playlist_id, *id).await, // #229
             PipelineEvent::SceneOffDue(due) => self.scene_off_due(playlist_id, *due).await,
             PipelineEvent::OnProgram(on) => self.on_program(playlist_id, *on).await, // #221 L4b
@@ -218,4 +223,31 @@ impl PlaybackEngine {
             .get(&playlist_id)
             .map_or(0, |pp| pp.pending_plays.pending())
     }
+
+    /// #147: a `Started` of `playlist_id` answered its last Play. When the
+    /// playlist is on air (the authority's diffed set) and not paused, its
+    /// song is marked on the program trace (`ProgramTrace::mark_song`): the
+    /// sender puts the video id on that playlist's next live boundary. The
+    /// pipeline sends `Started` before the song's first live pair, so
+    /// normally that is the song's first boundary on program. A resume
+    /// (a Play from a position) answers with a `Started` too, so it is
+    /// marked the same way: every decoder open on program is.
+    fn trace_song_start(&self, playlist_id: i64) {
+        let Some(bus) = self.program.get() else {
+            return;
+        };
+        let Some(pp) = self.pipelines.get(&playlist_id) else {
+            return;
+        };
+        if pp.paused_at.is_some() || !self.on_air_contains(playlist_id) {
+            return;
+        }
+        if let Some(video_id) = pp.current_video_id {
+            bus.trace().mark_song(playlist_id, video_id);
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "handle_pipeline_event_tests_trace.rs"]
+mod tests_trace;

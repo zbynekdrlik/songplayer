@@ -189,8 +189,9 @@ come from `SP-program`, never from cg OBS.
     after its response (after a batch's response for a batch).
 - `remote/mod.rs` holds:
   - the settings;
-  - `RemoteShared` (the telemetry, on `ProgramBus::remote()` like `vban()` /
-    `input()`; `status(&settings, &on_air)` names `program_scene`);
+  - `RemoteShared` (the telemetry, on `ProgramBus::remote()` like
+    `outputs()` (#233; #210's `vban()`) / `input()`; `status(&settings,
+    &on_air)` names `program_scene`);
   - `Upstream`;
   - `Facade` (#221 L3: with `events`, the facade's own broadcast);
   - `serve` (the accept loop; sessions AND the listener's program feedback

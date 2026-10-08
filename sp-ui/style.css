@@ -449,7 +449,116 @@ body {
 }
 
 .form-actions button:hover { opacity: 0.9; }
+.form-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .save-status { color: var(--text-dim); font-size: 0.85rem; }
+
+/* #233: "Zvukové výstupy" — the look of the form's fieldsets, one framed
+   block per output, its cells in a grid that wraps on a narrow page. */
+.audio-outputs {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    margin-bottom: 14px;
+}
+
+.audio-outputs legend {
+    color: var(--accent);
+    font-weight: 600;
+    padding: 0 6px;
+}
+
+.audio-outputs label {
+    display: block;
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+}
+
+.audio-outputs input:not([type="checkbox"]),
+.audio-outputs select {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    padding: 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+.audio-outputs input:focus,
+.audio-outputs select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.audio-output-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0 12px;
+    align-items: end;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+.audio-output-state {
+    align-self: center;
+    margin-bottom: 10px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+}
+
+/* #233 (the owner): a running ASIO output's resampling, a line of its own
+   across the row; each figure carries its tooltip. */
+.audio-output-resampling {
+    grid-column: 1 / -1;
+    margin-bottom: 10px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+}
+
+.audio-output-resampling:empty {
+    display: none;
+}
+
+.audio-chip[title] {
+    cursor: help;
+    border-bottom: 1px dotted var(--border);
+}
+
+/* #233 lane 3: the row's transport ("VBAN" / "ASIO") and an ASIO row's rate
+   note sit on the fields' baseline like the state line. */
+.audio-output-type,
+.audio-output-asio-rate {
+    align-self: center;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+}
+
+.audio-output-type {
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+.audio-output-asio-rate {
+    color: var(--text-dim);
+}
+
+.audio-output-row button {
+    margin-bottom: 10px;
+    background: transparent;
+    color: var(--error);
+    border: 1px solid var(--error);
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.audio-outputs-error { color: var(--error); font-size: 0.85rem; margin-bottom: 10px; }
+.audio-outputs-status { color: var(--text-dim); font-size: 0.85rem; }
 
 /* ---- Resolume hosts ---- */
 

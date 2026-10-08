@@ -1,6 +1,22 @@
 ---
 paths:
+  - "crates/sp-core/src/audio_outputs*.rs"
+  - "crates/sp-core/src/asio_resampling*.rs"
+  - "crates/sp-server/src/playback/resample_quality.rs"
+  - "crates/sp-server/src/playback/audio_out*.rs"
+  - "crates/sp-server/src/playback/vban_rate*.rs"
+  - "crates/sp-server/src/playback/vban_out_tests_dest.rs"
+  - "crates/sp-server/src/playback/vban_packet_tests_format.rs"
+  - "crates/sp-server/src/playback/vban_packet_tests_legacy.rs"
   - "crates/sp-server/src/playback/asrc*.rs"
+  - "crates/sp-server/src/playback/asio_*.rs"
+  - "crates/sp-server/src/api/audio*.rs"
+  - "crates/sp-server/src/api/program_tests_outputs.rs"
+  - "crates/sp-server/src/api/settings_tests_audio.rs"
+  - "sp-ui/src/components/audio_outputs.rs"
+  - "e2e/settings-audio-outputs.spec.ts"
+  - "e2e/audio-outputs-gate*.ts"
+  - "e2e/post-deploy-audio-*.spec.ts"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
 ---
 
@@ -9,7 +25,8 @@ paths:
 Spec `docs/superpowers/specs/2026-10-07-audio-outputs-asio-design.md`, plan
 `docs/superpowers/plans/2026-10-07-audio-outputs-asio.md` (three lanes; lane
 1: the output list + VBAN per destination; lane 3: the ASIO output over
-`azo`). This file starts with lane 2; lanes 1 and 3 add their sections.
+`azo`). Lane 2's section (the drift servo, the ASRC) comes first, then lane
+1's, then lane 3's (the ASIO output).
 
 ## The drift servo and the ASRC (`asrc_servo.rs`, `asrc.rs`) — lane 2
 
@@ -61,9 +78,13 @@ ruling 7).
 | `LEVEL_INTEGRAL_MAX_PPM` | 3 | 271 | 137 |
 | `MAX_SANE_WINDOW_PPM` (MAX_SANE_INSTANTANEOUS_PPM) | 100 000 | 447 | 109 |
 
-SongPlayer's own: `GROSS_STEP_100NS` = one grid slot (333 333),
-`RECENTRE_100NS` = 10 ms, `BASE_LATENCY_100NS` = `VBAN_SEND_LATENCY_100NS`
-(666 666), all literals pinned against their sources by the same test.
+SongPlayer's own: `SLOT_100NS` = one grid slot (333 333; was
+`GROSS_STEP_100NS`), `BASE_LATENCY_100NS` = `VBAN_SEND_LATENCY_100NS`
+(666 666), `HARD_FLOOR_100NS` 166 666 (16.7 ms, the base target less
+50 ms; was `HARD_DEFICIT_100NS`, relative to the target), `HARD_EXCESS_100NS`
+1 333 333 (4 slots + 1), `CALM_ZONE_MS` 1.0, all literals pinned against
+their sources by the same test. (`RECENTRE_100NS` / `RECENT_BLOCKS`, the
+window-mean re-centre, are gone with the owner's ruling below.)
 
 **Sign:** a POSITIVE correction makes MORE output per input (the card runs
 fast, or too little is buffered); rubato's relative ratio is `1 + ppm·1e-6`.
@@ -77,24 +98,77 @@ I, without P); clamp ±300, slew ≤ 5 ppm per second of wall (dt = the 100 ns
 between applied windows, floored at 0, not capped: after a forward wall
 step the slew may move 5·step ppm in one window).
 
-**Steps:** a block more than one slot off target RE-CENTRES at once by its
-own error. A window mean more than 10 ms off RE-CENTRES by the mean error of
-the last 8 blocks (`RECENT_BLOCKS`, a ring emptied by a re-centre) when that
-is also more than 10 ms off; otherwise the level loop takes the window as it
-is (a transient already passed splices nothing). The action's
-`recentre_100ns`: insert > 0, skip < 0; the window, the ring and the EMA
-restart; the regression is untouched (the card's consumed count did not
-move). Not by the window's mean: a step inside a window shows in its mean
-only in part (review round 1: 20–30 ms steps failed at 4–9 of 17 window
-phases). Not by one block either: a block's latency saws by one driver
-callback period (review round 2: 2048 frames at 48 kHz re-centred 118 times
-in 900 s). With the level at target the last 8 blocks lie after the step (a
-step under one slot moves a 32-block mean past 10 ms only with ≥ 30 % of the
-window behind it) and span ≥ 266 ms of the sawtooth. The trigger is the
-window's whole error, step plus any standing offset: a −10.5 ms step on a
-−45 ppm card whose level still stands 1.7 ms high from the start-up reads
-−8.8 ms and is left to the level loop (pinned among the honest bounds). A
-window whose wall goes back before its first point starts over (it would
+**The owner's ruling (8.10.2026, #233 comment 6053850076; design
+6054367985): the resampler absorbs a difference SMOOTHLY, by its ratio,
+never by a skip or an insert.** It reverses ruling 6 of the plan (which
+accepted a 5 ms fade → gap/skip → fade "re-centre" for a block one slot off
+or a window mean 10 ms off). SNV's DVS had 45 such re-centres in 3.5 h
+(comment 6053745381), each audible. Now:
+
+- **Jitter never moves the output.** The latency reading is jitter-invariant
+  (before block k the ring holds target − 5 ms − L_k), so a late or clumped
+  block within the ring's cushion (~61.7 ms) reads the target and moves
+  nothing; the level loop reads the 1 s window's mean, never one block.
+- **A lasting offset is slewed by the ratio.** A window mean beyond the calm
+  zone adds `braking_ppm` = √(2 · 5 ppm/s · (|err| − calm)) (1 ms =
+  1000 ppm·s): the fastest correction that can still stop at the zone's edge
+  decelerating at the existing 5 ppm/s slew limit. A date step's remainder
+  (forward, ≤ one slot), a missing boundary, the sawtooth of a callback
+  period, the excess an underrun leaves: all drained within ±300 ppm
+  (≈ 0.5 cent). A 33 ms step is back within ±2 ms in ≤ 148.2 s (model; the
+  trapezoid optimum is ~171 s to null it, ~150 s to reach 1 ms). NOT
+  slewed (review round 2): a changed `delay_ms` changes the entry, so the
+  outputs task REBUILDS the output (`same_but_name`: a gap of ≥ 2 s while
+  the old worker releases the driver, then the priming); a driver's buffer
+  change is a reset (`close_reason`): a reopen and the priming. Whether a
+  delay change should retarget the running servo instead is the main
+  session's call (#233 comment 6055539144, Q3).
+- **The calm zone** (`calm_zone_ms`): 1 ms, or half the driver's callback
+  period when that is longer (2.67 ms at 512 frames / 96 kHz, SNV's DVS since
+  the owner's change): the window mean of a reading that saws by a period
+  wanders by a fraction of it, and the stop curve's steep gain near 0 would
+  otherwise kick the ratio ±5–30 ppm on that noise. Inside it camera-box's
+  level loop (P on the 10 s EMA, ±50; I ±3) acts alone, as before; its I
+  anti-windup counts the slew. The worker builds the servo
+  `.with_callback_frames(opened.buffer_frames)`.
+- **The last resort** (`hard_recentre(latency, target)`): a block whose
+  latency is under 16.7 ms (`HARD_FLOOR_100NS`, the base target less 1.5
+  slots: the ring then holds < 11.7 ms for a block on time, so most blocks
+  of the 10–33 ms hand-off would underrun before the slew could restore it)
+  or more than four slots off the target either way (`HARD_EXCESS_100NS`,
+  133.3 ms: over it the next block would overflow the ring, target + 4
+  slots + one block; under it a delayed output would play that early for
+  many minutes, review round 3: an 8-slot resync at a 300 ms delay was
+  slewed for ~15 min) re-centres AT ONCE by its error, through the splice.
+  The floor is ABSOLUTE (review round 2): an entry's delay raises the
+  target, never the floor, so a delayed output 50 ms short still holds its
+  delay in the ring and is slewed (the old edge, relative to the target,
+  spliced it); up to a delay of 83.3 ms the mirrored edge is at or below
+  the floor and changes nothing (at delay 0 it is −66.7 ms). A deficit
+  therefore means too little buffered: the ring would run dry, or a
+  delayed output played over 4 slots early (its dashboard cause "v
+  zásobníku chýbal zvuk", review round 4). Whether
+  the floor should move up to the splice's hold + one slot (≈ 38.3 ms), so
+  that a missing boundary at delay 0 is one faded insert rather than a run
+  of underruns, is the main session's call (#233 comment 6055539144, Q2).
+  It is a fault:
+  `hard_recentres` (renamed from `recentres`), a WARN at most once per 5 s
+  (`asio output: a hard re-centre (a fault)…` with cause, ms, the hand-off
+  lateness and the count held back), and `last_hard_recentre {cause, ms,
+  lateness_ms, ago_s}` in the status (`ago_s` keeps counting while the
+  output waits to reopen). A date-step remainder is forward (`genlock.md`),
+  so it never reaches the floor.
+- **The first block's priming** (`Recentre::Prime`) inserts to the target the
+  same way and is NO re-centre (an open or a reopen used to count one).
+- The status also shows `offset_ms` (the last window's latency − target,
+  positive = later) and `slew_eta_s` (`slew_eta_s`: accelerate / cruise /
+  brake within the room the card's rate leaves on the side the slew works:
+  300 − rate for more output, 300 + rate for less; `None` inside the calm
+  zone).
+
+The action's `recentre_100ns`: insert > 0, skip < 0 (priming or hard only);
+the window and the EMA restart; the regression is untouched (the card's
+consumed count did not move). A window whose wall goes back before its first point starts over (it would
 otherwise stay open the step + 1 s). Known limit (review round 4, not fixed):
 a pure wall step of ≳ 110 ms landing mid-window makes that window read over
 100 000 ppm and FLUSHES the regression — the lock returns 60 s later, the
@@ -114,22 +188,40 @@ and the lock from the regression, so the flush shows at once. A whole step
 < 10 ms (a dropped callback, a 9 ms jump) enters the regression as a point —
 camera-box's design, and its blind spot: the rate bias is ≈ 1.5·step/span
 with the span growing from 60 s, so an early step weighs most (model, 20 ppm
-card: −9.9 ms at 75 s peaks the correction at 133 ppm, 3 re-centres, still
-9.5 ppm off at 900 s while P pays the level back; ±9 ms at 400 s ends 7–8 ppm
-off). A lower re-base residual for SongPlayer's absolute window-mean
+card, before the ruling: −9.9 ms at 75 s peaked the correction at 133 ppm,
+still 9.5 ppm off at 900 s; since the ruling the offset slew drains the level
+itself, so the bias only costs the I term's share). A lower re-base residual for SongPlayer's absolute window-mean
 readings (much less noisy than camera-box's cumulative increments) is a
 main-session decision, not taken here. A wall stepped back past the last window gives
 no time: `dt` is floored at 0, so the EMA and the integral do not move (an
 EMA over −10 s divides by zero, and the NaN would stay).
 
-**The splice** (`Splice`): 5 ms fade out of the held tail, the silence or the
-skipped frames (a skip may span blocks; nothing is emitted while it eats a
+**The splice** (`Splice`, the priming and a hard re-centre ONLY): 5 ms fade
+out of the held tail, the silence or the skipped frames (a skip may span blocks; nothing is emitted while it eats a
 whole block), 5 ms fade in; one silent frame where the fade out ends. It
 holds its last 5 ms back always (counted as buffered). A re-centre that
 comes while still muted fades nothing twice.
 
-**The ASRC** (`Asrc`): ONE rubato 5.0.1 `Async` sinc (256 taps,
-BlackmanHarris², `FixedAsync::Input` of 1600 frames, Cubic), ratio room
+**The ASRC** (`Asrc`): ONE rubato 5.0.1 `Async` band-limited sinc in the
+lane's measured setting (`asrc_params`, pinned by
+`the_resampler_runs_the_measured_sinc_setting`; rubato documents no
+"highest" setting, only cubic as its best quality per oversampling): 256
+taps, the sinc table oversampled 256× (`ASRC_OVERSAMPLING`; rubato's
+default is 128),
+BlackmanHarris², cubic between the table's rows, the automatic cutoff (0.947
+of the lower Nyquist: 22.7 kHz at 48 → 96 kHz), `FixedAsync::Input` of 1600
+frames. 512 taps were not needed: the bar below holds with 22 dB to spare,
+and they would double the CPU and the 2.7 ms delay. **Measured** (the owner:
+"a SOTA resampler, never skip/copy a sample"), through the outputs' own code,
+48 → 96 kHz (`asrc_tests.rs`, `vban_rate_tests.rs`; each test writes its
+figure to the CI log, the instruments `playback/resample_quality.rs` are
+checked against known signals): a 1 kHz tone at −1 dBFS at −300 / 0 /
++300 ppm keeps a THD+N ≥ 120 dB, and a 20 kHz tone leaves nothing above
+−120 dBFS between 24 and 48 kHz (its image would be at 28 kHz). The scratch
+numpy model of rubato's two stages (sinc tables, cubic, the FFT filter;
+f32 emulated): `Asrc` ~142 dB THD+N (152 dB in f64, the f32 output's floor
+~150), images ≤ −149 dBFS (−146 at oversampling 128); the VBAN `Fft`
+converter ~148 dB and ~−178 dBFS. Ratio room
 ±1000 ppm (`ASRC_MAX_RELATIVE` 1.001: rubato accepts `1/1.001 ..= 1.001`, so
 −1000 ppm itself is refused), ramped across the next block. Delay
 `sinc_len·ratio/2` (256 frames at 96 kHz; it follows the ratio: 255 at
@@ -139,18 +231,37 @@ plus half a block of the first ramp — derive pins from a model of rubato's
 `calculate_output_size` / `step_index` (plain f64, exact), never a ±N guess
 (the plan's 300-block "±4" failed at +100 ppm by 1).
 
-**The closed-loop simulation** (`asrc_servo_sim_tests.rs`): card −50 / 0 /
-+50 ppm, ±1 ms steps, ±20 / ±30 ms steps at three window phases, ±44 ms, a
-100 ms forward step, a dropped callback, a 200 ms worker stall (underruns by
-physics, the skip asked once), a 48 kHz card with 256-frame buffers, a
-1024-frame driver at 48 kHz with a 20 ms step; 900 s each;
-asserts 0 underruns, |ppm| ≤ 300, slew, latency error ≤ 10 ms after 70 s
-(model: ≤ 4.1; + half a period for the 1024-frame driver), |final − card|
-≤ 5 ppm, re-centres 1 (2 for a step over 10 ms from a level at target), no
-re-centre asked while a skip runs. The sub-10 ms steps and the standing-offset
-case have their own honest bounds
-(`a_step_under_10_ms_enters_the_rate_and_is_paid_back`,
-`a_10_5_ms_step_on_a_standing_offset_is_left_to_the_level_loop`). **Envelope for
+**The closed-loop simulation** (`asrc_servo_sim_tests.rs`, since the
+owner's ruling; since review round 2 the observation counts the splice's
+5 ms hold as buffered while the card plays only the ring, as the worker
+does): **0 hard re-centres** in every case — cards −50 / 0 / +50
+ppm (latency ≤ 2 ms after 70 s, |final − card| ≤ 5 ppm); ±1 ms steps at three
+window phases; ±33 ms steps (+33 a date step's forward remainder, −33 a
+missing boundary; a remainder is forward only) at three phases on a 0
+and a 20 ppm card, back within ±2 ms in ≤ 150 s (model 138.9–148.2 s), 0
+underruns; a hand-off late WITHIN the cushion (singles 40–56 ms, clumps of 2:
+0 underruns, latency within the sawtooth, the correction never more than
+1.3 / 2.5 / 1.8 ppm off the card after 120 s — no kick); the realistic
+hand-off (10–33 ms, singles 40–80 ms 1 in 900, clumps of 2 / 3): 97 / 33 /
+33 / 99 underrun callbacks in the four configurations, latency ≤ 22 ms
+off. Not all of them are physics: the stop curve drains the excess each
+underrun leaves at up to 300 ppm, which re-exposes the next late block —
+with the hold, review round 3's model has the correction more than
+50 ppm off the card ~75 % of the time after 120 s (73 % at 512 frames),
+while keeping that excess as cushion gives ~29 underruns (13 at 512) and
+never 50 ppm off (#233 comment 6055539144 + its correction, Q1, the main
+session's call); a callback period 128 → 512 mid-run with no reopen; a
+dropped callback; a 100 ms forward step and a 150 ms stall at four
+distinct phases of the slot (0 / 8.3 / 16.7 / 25 ms; slewed); a
+1024-frame driver at 48 kHz with a 20 ms step; a 48 kHz card at +50 ppm.
+The ring-limit cases force exactly one each: a 300 ms worker stall at the
+same four phases (excess) and a 100 ms pause (deficit). A stall near
+200 ms is AT the ring's limit (its excess is 4 slots ± the phase: none at
+500.0 / .01 / .02 / .011 / .022 / .033 s, one at 500.03 s), so no test
+pins it. 900 s each;
+every case also asserts |ppm| ≤ 300, the slew and no skip asked twice. The
+`Lateness` profiles draw from the same LCG as the scratch model, so the
+underrun counts are exact pins. **Envelope for
 lane 3:** a driver callback period well under one grid slot (≤ 512 frames
 at 48 kHz, ≤ 1024 at 96 kHz; 2048 at 48 kHz saws past the per-block
 threshold) — lane 3 reads the driver's preferred buffer and cannot change
@@ -166,15 +277,18 @@ here:
   from each later block's output, the pending skip in the observation;
   an instant re-centre hides the double-skip;
 - sweep a step over ≥ 3 window phases: the straddle bug passed at the one
-  phase the plan pinned.
+  phase the plan pinned;
+- count what the worker counts: it observes the ring + the splice's hold,
+  the card plays the ring alone (a harness without the hold had 5 ms more
+  cushion: 57 underruns where the worker's model has 97, and a 200 ms
+  stall pinned at its one lucky phase).
 
-The scratch model's fuzz (240 runs: cards ±120 ppm, jitter 0–30 ms, steps
-−35…+150 ms at random window phases, drops, 44.1–96 kHz, buffers 64–1024 up
-to 10.7 ms) held: no underrun within the budget, |ppm| ≤ 300, the slew, no
-skip asked twice, |final − card| ≤ 5 ppm when undisturbed. Re-centres reach
-4 only for a card beyond ±50 ppm (before the 60 s lock P saturates at 50 and
-the level drifts once) plus a dropped 512-frame buffer at 44.1 kHz (11.6 ms,
-a re-centre of its own).
+The pre-ruling scratch model's fuzz (240 runs: cards ±120 ppm, jitter
+0–30 ms, steps −35…+150 ms at random window phases, drops, 44.1–96 kHz,
+buffers 64–1024 up to 10.7 ms) held: no underrun within the budget,
+|ppm| ≤ 300, the slew, no skip asked twice, |final − card| ≤ 5 ppm when
+undisturbed. (Its re-centre counts no longer apply: the ruling's cases are
+listed above.)
 Outside the envelope, by physics: a backward step larger than the target
 minus the hand-off lateness (48 ms on 30 ms of jitter) can underrun (one
 event, phase-dependent) — the audio does not exist yet; `delay_ms` widens
@@ -208,3 +322,528 @@ pinned against the `Cargo.toml` version by
 `the_installer_notice_carries_the_pinned_rubatos_license` — re-copy the
 notice when the pin moves. Added to the lock with `cargo update --workspace`
 (Tier-0-allowed, compiles nothing): it adds exactly the new tree.
+
+## The list (`audio_outputs`) and the network rate (`audio_network_rate`) — lane 1
+
+- ONE setting, a JSON list of `sp_core::audio_outputs::OutputEntry`:
+  `{id, name, type, enabled, rate ("network" | Hz), delay_ms (0..=2000),
+  vban: {host, port, stream_name, format: int16|int24|float32}}`. Limits: 16
+  outputs, 8 VBAN (the per-type caps sum under 16: a const assert in
+  `audio_out_config.rs`); ids `[a-z0-9-]{1,32}`, unique; `out-N` from the
+  dashboard (`next_id`, saturating). An entry is built by `OutputEntry::vban`
+  or the server parser only (a new transport's field touches only those).
+  Two VBAN entries may not send to the same destination: host (ignoring
+  case) + port + stream name (ignoring case), a switched-off one included
+  (`destination_taken`, "pole „nastavenie VBAN“ je už použité iným výstupom
+  VBAN (rovnaký cieľ, port aj názov streamu)"; release review): the PATCH
+  and the dashboard refuse it (`validate_list`); the lenient stored read
+  does not skip such an entry, so a list stored before the check keeps
+  running both.
+- `audio_network_rate`: 44100 / 48000 / 88200 / 96000 / 192000, default 48000;
+  SNV = 96000 (MAIN SESSION OPS after the deploy). An entry at `"network"`
+  runs at it.
+- A PATCH is parsed strictly (`audio_out_config::parse_list`, through
+  `Box<RawValue>` maps, never `serde_json::Value`): every error names the
+  entry, the sanitized id (`shown_id`: a-z 0-9 - else `?`) and the field,
+  never the value (serde's text can quote input); a value that is no list
+  gives line and column only (serde_json 1.0.149 counts a top-level object
+  as column 0). 400 refuses the whole PATCH, nothing written
+  (`api/settings.rs::prepare` runs `checked` before the exchange check).
+  Stored normalized (every default written out).
+- The same rules in Slovak for the dashboard: `ListError::sk()`
+  ("Výstup 1 (out-1): pole „cieľ“ je prázdne": the field as `pole „…“`, so
+  every problem text agrees with the neuter "pole"; #233 review round 2).
+- The outputs task (`audio_out_task.rs`) makes one pass (`tick`) every 5 s:
+  the migration until it has run (below), then the list, read leniently
+  (`parse_stored`): an entry this version cannot read is skipped and named
+  in `outputs_problems` (a WARN once per new problem); the rest run. A
+  stored value that is no list at all (`not_a_list`) changes NOTHING but the
+  problem: what runs keeps running (Review Focus 3, never "all outputs
+  off"; `a_stored_value_that_is_no_list_keeps_what_runs`).
+- An entry identical to a running one UP TO ITS NAME (`same_but_name`, and
+  built for the same rate) is KEPT: thread, queue, frame counter (`plan` →
+  `Step::Keep`); the kept output takes the new entry, so a rename only
+  relabels it. The exception: an output whose thread could not start
+  (`RunningOutput::start_failed`, a failed UDP bind or spawn) is rebuilt on
+  every pass until it starts. Only a new or changed entry is rebuilt; a network-rate
+  change rebuilds only the `"network"` entries. So a dashboard save, a
+  rename, or the post-deploy probe entry never disturbs FOH (Review Focus 2,
+  `apply_keeps_an_unchanged_output_when_another_is_added`,
+  `renaming_an_output_keeps_it_running_under_its_new_name`). A rebuilt
+  entry's new output starts its frame counter at 0 (a receiver sees one
+  jump). A replaced or removed output is stopped with `discard`: its queue
+  is dropped and a stopped output takes no later push (`apply` replaces the
+  list before it discards, so a boundary can still push into the old
+  snapshot), so a delay lowered from 2 s to 0 sends at most the ONE block
+  its thread already holds, on its OLD schedule (up to the old delay later),
+  next to its successor (same host and stream name), and nothing after it;
+  only the shutdown's `stop_all` drains
+  (#233 review rounds 4–5). The slew's ±100 ppm per packet interval holds
+  for FOH's 48 kHz INT24; its 100 ns steps are a larger share of a shorter
+  interval (up to ~±250 ppm at 192 kHz).
+- A built output's thread is started through a PARAMETER (`StartThread`):
+  `start_outputs` passes `start_vban_thread` (the MMCSS thread on Windows),
+  every unit test a no-op or a recorder. Before, `build` spawned the real
+  thread itself, so on the Windows test job (`cargo test --workspace` on
+  `windows-latest`) the apply tests got a live VBAN thread taking
+  their queued blocks. Any new `cfg(windows)` OS-thread spawn reached from a
+  unit-tested fn needs the same seam (`rust-workspace.md`).
+- An output's thread loop holds a `RunGuard` (`audio_out_queue.rs`) for its
+  whole run: its drop clears `running`, and on an unwind sets the start
+  error "the VBAN | ASIO thread stopped: it panicked", so a panicked output
+  reads "waiting" with that reason (never "running" for good) and the
+  outputs task rebuilds it on its next pass (`start_failed`; release
+  review, `a_vban_thread_that_panics_is_not_running_and_says_why`).
+
+## Migration (first start, `audio_out_migrate.rs`)
+
+`vban_enabled` / `vban_stream_name` / `vban_targets` → one entry per target
+(the first 8 non-empty ones #210 used), `rate: 48000` (fixed, NEVER
+"network"), `int24`, the stream name as #210 put it on the wire
+(`wire_stream_name`), `enabled` as #210 was (only `"true"`), named after its
+`host:port`. A target #210 could never have resolved is skipped and named.
+It runs on the outputs task's first pass, ONLY while `audio_outputs` is
+ABSENT and an old key exists, and writes the list with `INSERT OR IGNORE` (a
+list a PATCH stored meanwhile wins). A pass whose migration FAILED (a busy
+or unreadable database) tries it again on the next pass (5 s), never only
+at the next restart (`a_failed_migration_is_tried_again_on_the_next_pass`).
+A target is read as #210's `ToSocketAddrs` read it (`split_target`: the
+whole target trimmed, nothing next to the colon), so "h : 1" is skipped,
+never migrated as h:1. **The `vban_*` keys are KEPT** (main-session
+ruling 4, 7.10.2026): the new code ignores them once the list exists, and a
+rollback to ≤ 0.73.0 (the last release without the list) still finds
+them, so FOH keeps its sound. A dashboard edit of a migrated entry (FOH's
+host, delay, stream name) is NOT copied back to the keys: a rollback sends
+what they held when the migration ran. A later lane
+deletes them (and `sp_core::config::SETTING_VBAN_*`) once the list has run a
+main release (lane 3 kept them: lane 1 had not been in a main release yet).
+A `vban_*` change made on a rolled-back ≤ 0.73.0 is NOT carried forward when
+the list version comes back (the list exists then).
+
+## The fan-out (`audio_out.rs`)
+
+`ProgramOutput::serve` → `split` → `limit` → `feed_outputs` (ONE `Arc<[f32]>`
+copy of the limited block, `ProgramBlock`, `audio_out_block.rs`) → MAX →
+video side + NDI submit. `AudioOutputs` (owned by `ProgramBus`,
+`outputs()`) holds the running list as one `Arc` snapshot swapped whole by
+the task; `offer` pushes into every running output's own drop-oldest queue
+and never waits. Every output's queue is ONE type,
+`audio_out_queue::BlockQueue` (a `VbanOut`'s and an `AsioOut`'s; #210's
+VBAN queue moved there in lane 3's review round 1, `VbanTake` re-exports its
+`Take`), and `audio_out_queue::lock` is the outputs' one poison-tolerant
+lock helper. Pinned:
+`program_output_tests_order.rs::every_output_has_the_block_before_the_ndi_submit`
+and `audio_out_tests.rs` (no cross-output drops). `ProgramOutput::with_vban`
+is a `#[cfg(test)]` shim over `AudioOutputs::single_vban` (#210's tests).
+
+## VBAN per destination (`vban_out.rs`, `vban_packet.rs`, `vban_rate.rs`)
+
+- `VbanFormat`: SR index (48k=3, 96k=4, 192k=5, 44.1k=16, 88.2k=17), sample
+  type (INT16 0x01, INT24 0x02, FLOAT32 0x04), packets = the largest divisor
+  of `rate/30` within 256 frames and 1436 payload bytes (96k INT24: 16 × 200,
+  one every 1/480 s; 192k INT16: 25 × 256; 48k FLOAT32: 10 × 160). Packet k
+  at `due + L + delay + k·slot/packets`, floored. The geometry (frames per
+  packet, packets per block, packet length) is computed once in
+  `VbanFormat::new` and stored (`with_geometry`; `PROGRAM`'s literal
+  200 / 8 / 1228 pinned against it).
+- 48 kHz INT24 = `VbanFormat::PROGRAM`: no converter, #210's bytes — pinned
+  against a verbatim copy of the 0.72.0 encoder (`vban_packet_tests_legacy.rs`,
+  `vban_out_tests_dest.rs::a_migrated_foh_entry_sends_the_0_72_datagrams`).
+- Other rates: rubato `Fft` with `FixedSync::Both` (1600 in, `rate/30` out;
+  5.0.1 takes the whole block as ONE FFT, `fft_chunks = chunk / min_in`),
+  delay `rate/60` frames = 16.7 ms at every rate (`fft_delay_frames`). A
+  silent or malformed block goes through the filter as zeros.
+- The delay: the sender's send latency is `L + delay`, and its wait cap is
+  `VBAN_MAX_WAIT_100NS` (4 × L = 8 slots) PLUS the delay (`plan_wait_up_to`;
+  the 8-slot cap alone sent a delayed output's first packet early). That
+  wait is slept in steps of at most 7 slots (`VBAN_SLEEP_STEP_100NS`,
+  `sleep_until`, at most `VBAN_WAIT_STEPS` = 10), the clock read between two
+  of them and each next step planned from that read: a step plus an
+  oversleep of under a slot passes at most 8 boundaries, the wall's tick cap
+  per read (`BoundaryTicker`; an 8-slot step could pass a 9th, review round
+  2), and an oversleep never adds up. A FOH wait (≤ L) is one sleep, as in
+  #210
+  (`the_longest_delay_is_waited_for_whole_in_sleeps_the_wall_can_tick`,
+  `a_wait_is_slept_in_steps_the_wall_can_tick`). The queue bound grows with
+  the delay (`queue_bound`: the program queue's 10 + `ceil(delay / slot)`).
+- A converter rubato refuses (none of the supported rates) sends silence
+  and logs one WARN (`VbanSender::new` reads `failed()`); since the release
+  review it also sets the output's `fault`, "the {rate} Hz rate converter
+  could not be built ({why}): the output sends silence", so the output
+  reads "waiting" with that reason and `reason_code` `converter`.
+- Each output's thread is `vban-<id>` (`vban_thread_name`) and runs inside
+  `info_span!("vban_out", id, target)`; the push WARN names `id` and
+  `target` too (it was one `vban-output` name for every destination).
+- One `VbanOut` per entry, ONE target (`VbanConfig::for_dest`,
+  `resolve_dest`); `VbanStallLog`'s buckets count packets, so at 96 kHz
+  `late_max_us` covers 30–60 s (ruling 11).
+
+## Telemetry
+
+`GET /api/v1/program` → `outputs[]` `{id, type, name, enabled, state
+(running|opening|waiting|disabled, `vban_state`; a thread that could not
+start — Windows: the UDP bind or the spawn failed — is "waiting" with
+`VbanOut::start_error` as its reason, never "opening" for good, and is
+rebuilt — retried — on the outputs task's next pass, `RunningOutput::start_failed`), reason, rate, format,
+channels, delay_ms, latency_ms (L + delay + the converter,
+`vban_latency_ms`), blocks_sent, blocks_dropped, vban: {#210's VbanStatus +
+blocks_sent}}`, `audio_network_rate`, `outputs_problems`; the cut answer
+carries them too. A waiting VBAN output also carries `reason_code`
+(`vban_reason_code`, release review): its cause — `not_built`,
+`not_started` (a failed start or a panicked thread), `converter` — else
+`unresolved` (its target's resolve failed) or `resolving`; the dashboard
+reads it in Slovak (`sp_core::audio_outputs_save::vban_reason_sk`). An ASIO
+output's code stays under `asio.reason_code`. The top-level `vban` is gone (ruling 5). Its readers were
+the mock, `settings-vban.spec.ts` (deleted), `program_tests_max.rs` (now
+reads `outputs`) and the MAX box gate in `gpu-max.md` (now FOH's
+`outputs[i].vban`).
+
+## Dashboard (`sp-ui` `audio_outputs.rs`)
+
+Release review (the decisions pure in `sp_core::audio_outputs_save`,
+unit-tested; the mock specs in `settings-audio-outputs.spec.ts`):
+
+- right before its PATCH the save re-reads `GET /api/v1/settings` and
+  refuses in Slovak, sending nothing, (1) while the migration is pending
+  (`audio_outputs` absent and a `vban_*` key present: a stored list would
+  stop the migration for good, FOH with it), (2) when the stored list
+  changed since the page loaded it (compared as lists: the server stores it
+  normalized), (3) when the rate changed elsewhere and this save would send
+  one; a failed re-read refuses too (`NOT_CHECKED`). "Loaded" is the store
+  after this section's own last save;
+- the rate is sent only when it is not the one loaded (`rate_to_send`), so
+  an untouched select never overwrites a rate set elsewhere;
+- a delay or an ASIO channel typed as no whole number is marked per row id,
+  field and slot and refused at save ("Výstup 1 (out-1): pole „oneskorenie“
+  nie je celé číslo"), never stored as 0 or ignored; removing a row's last
+  entry of its id forgets its marks (the next added row may take the id);
+- "Uložené" shows only while the rows and the rate are what was saved
+  (`shown_message`);
+- "Odobrať" removes ONE entry of a repeated id (`remove_one`; a keyed list of
+  duplicate ids is no state the page renders reliably, so this is a unit
+  test only);
+- a waiting VBAN row reads its reason in Slovak by `reason_code`
+  (`vban_waiting_text`: "čaká · cieľ sa nedá preložiť na adresu"), the
+  server's English text staying the tooltip. Mock: `/__mock/vban-state {id,
+  reason_code, reason}`, reset by `/__mock/settings-reset`.
+
+
+Nastavenia "Zvukové výstupy", after the main form: its own PATCH of only the
+two keys (`patch_json_empty`), validated with
+`sp_core::audio_outputs::validate_list` and shown as `ListError::sk()`
+before anything is sent; rows keyed by id, every cell reading the list by
+id; each row's live state from `outputs[]` (polled every 2 s). The main form
+MERGES its save into `store.settings` (replacing it blanked the list:
+Review Focus 1, `settings-audio-outputs.spec.ts`). Each section re-reads
+only ITS keys through a `Memo` (the section the two output keys, the form
+every other key), so neither section's save resets the other's unsaved
+edits. Every `<option>` of a select carries a reactive `selected`: tachys
+sets `prop:value` BEFORE the options mount, so a row read back from the
+store showed its select's FIRST option ("podľa siete", "16 bitov") until
+#233 review round 1 (the playlist picker's pattern). Nothing is saved
+before the Settings page LOADED the settings (`loaded`: `None` while
+`GET /api/v1/settings` runs, `Some(false)` when it failed, passed to both
+sections): an empty list shown before the load would replace the stored one
+(FOH's entry with it), and the form's fields would hold defaults; a failed
+load shows "Nastavenia sa nenačítali — …" on both. The same holds over a
+stored list this dashboard cannot read (`load_error`, the rows reset to
+none). Each save is stopped twice: by its disabled button AND by its
+handler's own guard (`loaded` / `load_error`), the specs reaching the
+guards past the buttons (`sp-ui-frontend.md`). The message span is
+`audio-outputs-status` (`.save-status` is the form's alone: five Nastavenia
+specs read it unscoped, Playwright strict mode). A stored entry missing from
+`outputs[]` reads "uložený, nespustený" with its `outputs_problems` line as
+the tooltip, marked "Hlásenie servera: …" (an unsaved one "neuložený").
+A running row's latency reads the same on every type,
+`sp_core::audio_outputs_save::latency_sk`: "oneskorenie N ms" (whole ms,
+half away from zero; "oneskorenie: meria sa" at 0), so a VBAN row reads
+"beží · oneskorenie 83 ms" and an ASIO row's chip "oneskorenie 71 ms"
+(review round 2; VBAN read "beží · 83 ms" before). The row is split into
+`OutputRow` + `AsioFields` / `VbanFields` / `LiveState` (no wrapper
+element: the same DOM). A new row's id is above every
+row AND every stored entry (a removed, unsaved row still runs under its id).
+`style.css` gives the section the form's fieldset look, one framed grid
+block per output. The mock refuses the cases the dashboard can send in the
+server's order and words (every entry read first, then the counts, the host,
+the port and duplicates; the id through `shown_id`'s rule) — a SUBSET of
+the server's checks, never a stand-in for its tests, serves `outputs[]`
+from the stored list with a `vban` object per enabled entry, and has two
+knobs: `/__mock/fail-mode {kind: "settings"}` and `/__mock/outputs-skip
+{ids}` (both reset by `/__mock/settings-reset`).
+
+## Live gates (`e2e/post-deploy-audio-outputs.spec.ts`)
+
+FOH (`fohabl.lan:6980`) still 48 kHz INT24 `sp-program`, no delay, ≥ 25
+blocks between two reads, no send errors (`audio-outputs-gate.ts`, unit-
+tested in the mock suite), polled for first (after a restart FOH is listed
+only once the outputs task's first pass ran); a temporary `e2e-96k` entry to a UDP receiver on
+127.0.0.1 reads index 4, 200-frame INT24 packets, a contiguous counter
+(480/s); `finally` restores the list stored NOW (an operator may have
+saved one meanwhile) without the probe. The probe needs a STORED list first:
+with none its PATCH would store one and the migration (only while no list
+is stored) would never run, FOH off for good. Its loopback receiver takes a
+4 MiB buffer. The file records no trace (it reads the settings). PP's
+subset does not run it (PP has no FOH entry).
+
+## ASIO outputs (`asio_out.rs`, `asio_win.rs`, `asio_format.rs`, `asio_state.rs`) — lane 3
+
+**The entry.** `type: "asio"`, `asio: {driver, channels: [left, right]}`,
+0-based (the dashboard shows them 1-based through
+`sp_core::audio_outputs::{asio_channel_index, asio_channel_shown}`,
+wrapping: a typed 0 is stored as u32::MAX, refused "musí byť 1 až 512" and
+shown as 0 again, never read as channel 1). The driver is 1..=128
+characters with no control character; the channels are ≤ 511 and different.
+At most 4 ASIO entries (`MAX_ASIO_OUTPUTS`; the per-type caps sum under 16,
+the const assert). ONE entry per driver, a switched-off one included (DVS
+takes one ASIO client): `validate_list` / the stored read refuse a second
+(`driver_taken`, "pole „ovládač“ je už použité iným výstupom ASIO"). The
+entry's `rate` is kept as stored and unused: `build_rate` is 0, so a
+network-rate change never rebuilds an ASIO output.
+
+**azo 0.4.0** (main-session ruling 10, `default-features = false`: no
+`oneshot` host): `driver::Metadata::enumerate` reads HKLM\SOFTWARE\ASIO
+(no COM, `list_drivers`); `driver::SafeHandle::new(&clsid)` initialises COM
+as an STA on the calling thread and uninitialises it in its own `Drop`,
+which runs BEFORE its interface field is released (`!Send`: it lives on the
+output's worker). So the device holds the thread's STA itself
+(`asio_win::ComApartment`, its last field, from `new` until it is dropped):
+every driver release happens inside the device's apartment (review round
+1; azo's own host does the same, `host.rs:105-111`; azo 0.2.1's InitGuard,
+which iemmixer ran, dropped the driver first). A failed `SafeHandle::new`
+leaks azo's own init count; inside the device's STA that init cannot have
+failed, so `open` balances it. `use azo::driver::Driver` for the methods;
+`dispose_buffers`. azo-sys 0.3.2: the sample-type codes (Int16/24/32LSB
+16-18, Float32LSB 19, Int32LSB16/18/20/24 24-27), `Callbacks` = four
+context-less `unsafe extern "system"` fn pointers. azo-sys needs bitflags
+≥ 2.13.2, so the lock moved bitflags 2.11.1 → 2.13.2.
+
+**The worker** (`asio_out.rs`, `AsioWorker::step`, one thread per entry,
+`run_asio_worker`, NOT an MMCSS thread: it must never pre-empt the driver's
+own callback thread and has two slots of cushion):
+
+- closed: open when the backoff allows (2 / 10 / 30 / 60 / 60 … s, a run of
+  60 s resets it, the count saturates); the driver's rate (admitted 8–384 kHz),
+  preferred buffer, output channels and one sample type are READ (the
+  `AsioDevice` trait has no setter); a new servo, `Asrc` and `Splice` for
+  that rate; a ring of target + 4 slots + one block; start. A failed open
+  releases the driver and shows its reason.
+- running: each block → `Servo::observe` (the ring + the splice's 5 ms hold,
+  the splice's pending skip, the hand-off lateness, the card's consumed
+  frames) → `Asrc::set_correction_ppm` (the slew lives here) + the priming or
+  a hard re-centre through
+  `frames_from_100ns` into `Splice::insert` / `skip` (an `Ordering` match:
+  `if > 0` / `else if < 0` would give a `>=` mutant that inserts 0, an
+  equivalent survivor) → the ring. A closed output drops the blocks it is
+  handed.
+- open drops the blocks queued while the driver opened (stale by the open's
+  duration; an INFO, never `blocks_dropped`), so the servo's first block is
+  fresh.
+- close: a reset request or a buffer-size change (answered 0: never
+  resized live), a rate change of 1 Hz or more (`sampleRateDidChange(0)` =
+  a lost clock, code `clock_lost`, "ovládač stratil hodinový signál": a
+  slot marks a report with its own flag, since 0.0's bits are 0), or 2 s
+  with no callback (`StallWatch`). "waiting", the reason and the retry are
+  published BEFORE the device is closed (a vanished driver can block its
+  stop or release; review round 2), and the closed run's ppm, rate_ppm,
+  lock and latency are cleared (the counters and the last open's driver
+  rate / sample type stay; since the ruling `offset_ms` and `slew_eta_s`
+  are cleared too). EVERY counter (underruns, overloads,
+  overflows, hard re-centres, resets) counts since the output was built: a
+  run's device, servo and ring count from 0 again, so the worker adds each
+  closed run's into one `Closed` (review round 3). `kAsioLatenciesChanged`
+  re-reads the driver's output latency
+  (`AsioDevice::output_latency_frames`), so `latency_ms` follows it.
+- a lost clock stays a lost clock: ONE predicate, `asio_state::lost_clock`
+  (under 1 Hz), names a rate report (`close_reason`, through `rate_change`)
+  and a read (`admit_rate`), and `getSampleRate`'s ASE_NoClock is one too
+  (`sample_rate_error`, pure; the glue only calls it): a reopen during the
+  outage reads `clock_lost` again, never a refused rate or "the rate
+  changed to 1 Hz" (review rounds 3–4). Its text: "the driver lost its
+  clock (no rate)".
+- a close publishes the run's counters with it (`Closed::write`): a driver
+  that never comes back still shows what the output did.
+- the backoff runs from the step that decided the close, not from the end
+  of the release: a release that blocks for seconds reopens right after
+  it; a driver still busy then is refused `busy` and the next wait is
+  10 s. Kept (the worker step takes one instant; a busy driver costs one
+  retry).
+- one holder per driver in the process (`asio_hold`, `asio_win::HELD`): a
+  device holds the driver's name before it reads the registry or loads
+  anything, and gives it back after the driver is released. A rebuilt
+  entry's successor starts while its predecessor still releases the same
+  driver (`apply` starts the new output before it discards the old), so it
+  is refused `Reason::Held` (code `held`, "predchádzajúci výstup ešte
+  neuvoľnil ovládač") and opens after the 2 s backoff: never two
+  instances of one driver in one process (review round 1; before, it
+  waited only if the driver happened to refuse the second init).
+- the process exit does not wait for the release: the box stops SongPlayer
+  with `taskkill /F` (every deploy, the scheduled task), which no
+  in-process join could cover, so the driver is torn down with the process
+  and the next start opens it like any other open (busy → the backoff). Box
+  evidence for DVS: the MAIN SESSION OPS read the entry after the deploy
+  that follows its addition.
+- every open, failed open and close is logged with the reason and the retry.
+
+**The glue** (`asio_win.rs`, `#[cfg(windows)]`, excluded in
+`.cargo/mutants.toml`): 8 static callback slots, two per entry (a replaced
+output's old worker may still hold its slot while its successor starts).
+The buffer switch pops its frames from the `rtrb` ring into a scratch
+allocated at start, writes L/R into the two configured channels in the
+driver's type and zeroes every other channel and the frames the ring did not
+deliver (`asio_format::fill_channel`), counts an underrun only once primed,
+and only counts in atomics — no allocation, lock, log or syscall. Messages
+are counted and answered by `asio_state::reply` (iemmixer's table). `close`
+stops a STARTED driver (a driver whose start never ran is not stopped),
+unhooks the stream, frees it only once no callback is inside it, disposes
+the buffers, drops the driver (inside the device's COM apartment), gives
+the driver's hold back, THEN releases the slot. Its wait for the in-flight
+callback PUMPS the thread's messages (a driver may need them to finish a
+callback; iemmixer `asio.rs:484-504`, review round 5; the bound is 1 s,
+iemmixer's 2 s). A callback still inside after that second PARKS the
+device (iemmixer `asio.rs:487-500`, review round 2):
+the stream is leaked, the buffers are not disposed, the driver is
+forgotten (never released), the slot stays claimed (its in-flight count
+is the callback's) and the hold is kept for the process's life, marked
+parked (`DriverHold::park`, `DriverHolds::is_parked`); every later open of
+that driver — this device's, or the output that replaces it — is
+`Reason::Parked` (code `parked`, "ovládač zamrzol — pomôže len reštart
+SongPlayera"), never retried: the worker keeps the output closed for good
+(`NEVER`), `retry_in_s` is None and the WARN is logged once (review round
+5). It parks only when no read of the in-flight count saw 0 within the
+bound (once 0 was read, the unhooked slot gives a later callback no
+stream). Known limit (iemmixer's too): a driver whose `stop()` never
+returns (its callback stuck) hangs the worker before the park check; the
+row stays at its last waiting reason with a frozen "ďalší pokus o N s", an
+edited entry's successor reads `held`, and only a restart of SongPlayer
+helps. Two more edges, kept (review round 6): a device that parks INSIDE a
+close shows the close's normal countdown until its next open answers
+`Parked` (at most the backoff, ≤ 60 s); and a parked device's thread pumps
+no messages any more (the worker stays closed), so a callback blocked on
+this thread for good stays blocked — both inside a state only a restart
+ends.
+`outputReady` is not called: the plan allows it from the callback, but
+one driver buffer (1.3 ms at DVS's 128 frames / 96 kHz) is noise against
+the 66.7 ms target, and the call would go through a raw pointer to a
+`!Send` STA handle on the driver's thread, a path no CI runner can
+exercise (no driver). `poll` pumps the thread's window messages. The rate,
+the clock source and the panel are never touched: the Test Integrity job
+fails on the names `set_sample_rate` / `set_clock_source` /
+`open_control_panel` / azo-sys's raw `control_panel` anywhere under
+`crates/` (word boundaries: a method call, a UFCS call or a spaced one).
+
+**Status** (`outputs[i]`): `rate` = the driver's, `format` = its sample type,
+`latency_ms` = the servo's + the resampler's + the driver's output latency
+(66.625 + 4 = 70.625 ms on the scripted 96 kHz / 128-frame driver; 0 until
+the servo measured its first 1 s window), `asio`
+= `{driver, channels, driver_rate, buffer_frames, out_channels,
+sample_type, ppm, rate_ppm, locked, latency_ms, offset_ms, slew_eta_s,
+underruns, resets, hard_recentres, last_hard_recentre {cause, ms,
+lateness_ms, ago_s}, overflows, overloads, retry_in_s, reason_code}` (the
+servo's fields: the owner's ruling above), and while it runs a `note`
+when the driver's rate is not `audio_network_rate` or its buffer is over a
+third of a grid slot (1/90 s, lane 2's envelope); the task WARNs a note once
+per change. Off Windows an ASIO output never opens: "ASIO runs on Windows
+only" (`start_output_thread` → `start_asio_thread`). The task's
+`StartThread` takes the built `OutputSink`, so a unit test on the Windows job
+starts no real worker. `GET /api/v1/audio/asio-drivers` = `{drivers: […]}`
+(the registry, on the blocking pool; empty off Windows). An absent
+`HKLM\SOFTWARE\ASIO` key (HRESULT 0x80070002 / 0x80070003,
+`asio_state::registry_key_absent`) is an empty list; any other registry
+error answers 500 "the ASIO driver list could not be read: {why}"
+(`drivers_answer`, release review), so the dashboard's "Zoznam ovládačov
+ASIO sa nenačítal" names a real failure, never "no driver". The mock's
+`asio-drivers` fail-mode answers the same text.
+
+**Dashboard.** "Pridať výstup ASIO" (waits for the driver list) adds an ASIO
+row on the first listed driver, channels 1 / 2. Each row shows its type and
+only its own fields (`<Show>` on a `Memo` of the type); a stored driver the
+box does not list stays, marked "(nenájdený)" only once the list was READ
+(`sp_core::audio_outputs::asio_driver_options`: an unknown list — still
+loading, or its GET failed — marks nothing, #225's "claim only what you
+were told"); "Pridať výstup ASIO" is off while the list loads, after a
+failed read ("Zoznam ovládačov ASIO sa nenačítal", mock: `/__mock/fail-mode
+{kind: "asio-drivers"}`) and on a box that lists no driver ("V systéme nie
+je žiadny ovládač ASIO"), its title from
+`sp_core::audio_outputs::asio_add_refusal`; the rate reads "podľa
+ovládača". A
+running ASIO row is two lines of chips (the owner, comment 6053701047: "chýba
+mi resample informácia"; pure in `sp_core::asio_resampling`, each figure
+with its own Slovak tooltip, " · " between them so a line also reads whole):
+"beží · oneskorenie 71 ms · výpadky 0 · núdzové skoky 0" ("oneskorenie:
+meria sa" while the server reads it 0), then the resampling — "48 → 96 kHz"
+("48 kHz bez prevodu" at the program's rate), "karta +0,4 ppm voči
+SongPlayeru (odhad zamknutý)" ("… odhad sa ešte meria" before the lock),
+"korekcia −0,7 ppm (uberá vzorky)" / "(pridáva vzorky)", "oneskorenie v
+cieli" or "dorovnáva odchýlku +12,3 ms · ešte asi 45 s", and "posledný
+núdzový skok pred 3 min: +65,0 ms (v zásobníku chýbal zvuk)" after a fault
+("zásobník by pretiekol" for an excess).
+Numbers the Slovak way (tenths half away from zero, a decimal comma, a true
+minus). Mock knob `/__mock/asio-resampling {id, …}` (reset by settings-reset);
+a waiting one its reason in
+Slovak (`asio_reason_sk`, by the server's `reason_code`; every
+`Reason::code` has its text, pinned on the server) and its next try, none
+for `parked` (`asio_waiting_text`). Mock: two drivers (or a 500, the
+fail-mode above), the server's ASIO refusals, an enabled ASIO entry running
+at the network rate, `/__mock/asio-state {id, reason_code, reason,
+retry_in_s}` and `/__mock/asio-measuring {ids}` (latency 0), both reset by
+`/__mock/settings-reset`.
+
+**Tests.** The worker over a scripted `FakeDevice` (`asio_out_fake.rs`);
+every exact pin (the 5 436-frame ring after the card's callbacks, 8 636 after
+the first block, the 82 223-frame overflow of a block stamped a second ahead,
+133 underruns, the busy retries at 0 / 2 / 12 / 42 / 102 / 162 s, two
+overflowing runs reading 82 223 / 1 then 164 446 / 2, the 61-slot stall)
+comes from a scratch model of the worker over lane 2's servo and rubato
+models. The
+servo's own latency figure is 66.625 ms whether the held frames are added or
+subtracted: only the RING pin sees that mutant. The glue runs on the Windows
+job (`asio_win_tests.rs`: the copy-only buffer switch over heap buffers,
+every slot's four callbacks, messages, a 0 Hz report, a closed device
+releasing its slot, a held driver refused before the registry is read, a
+device holding its thread's STA until it is dropped, a callback stuck
+past 1 s parking the device, its successor told the driver is parked,
+`close` pumping the thread's messages while a callback finishes — a
+"callback" a 10 ms thread timer's proc lets leave).
+`asio_hold_tests.rs`
+pins the holds on Linux.
+
+**Live gate** (`e2e/post-deploy-audio-asio.spec.ts`, SNV's suite and PP's
+subset): DVS is registered — checked only when `SP_ASIO_OUTPUTS_EXPECTED`
+is over 0 (release review: a box expected to run none need not have DVS);
+exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
+outputs (ci.yml / deploy-pp.yml, "0" until the main session adds each box's
+DVS entry, then "1"), each running, then a minute (1 800 blocks) at its
+driver's rate with no underrun, no reopen, no hard re-centre (review
+round 2), |ppm| ≤ 300 and a latency
+over 0 and under the entry's delay + 1 s (`asioGateFailures`, unit-tested
+in the mock suite; every output over the SAME minute, so the gate's time
+does not grow with the outputs; the driver's `overloads` are logged with
+the two reads, not gated: a driver's CPU-overload report is the box's
+load, not the output's fault, and the gate fails only on what the output
+does — underruns, reopens, the correction, the latency; `rate` vs `driver_rate` is a consistency check of two
+fields the server fills from the same driver read). A failed read of
+`GET /api/v1/program` never counts as zero outputs.
+
+**Notices.** rtrb 0.4.0 (MIT OR Apache-2.0; its LICENSE-MIT has no copyright
+line, its Cargo.toml names the authors), azo 0.4.0 and azo-sys 0.3.2 (MIT,
+identical LICENSE files) are in `THIRD-PARTY-NOTICES.txt`, each pinned
+against `Cargo.toml` by a test in `asio_out_tests.rs`.
+
+**Start-up underruns (release review, item 1 of the closing lane): not
+pinned from the code, no counter change** (the owner's slew ruling above
+answers SNV's other finding, the 45 re-centres). Before block k the ring holds
+target − 5 ms (the splice's hold) − L_k (block k's hand-off lateness), not
+anything the first block left: the resampler's first process (3 196
+frames at 96 kHz), the servo's start re-centre against `Splice::new`'s
+max insert (the ring's capacity) and a late or bursty first block all
+leave that relation intact. An underrun then needs a block over ~61.7 ms
+late or a missing boundary. What a box measurement must show to name the
+cause (design comment 6053021913 on #233): `GET /api/v1/program/trace`
+rows that are late or missing, together with `outputs[i].asio.underruns /
+hard_recentres / last_hard_recentre / latency_ms / blocks_sent` and
+`health.resyncs` polled every
+200 ms over the first 60 s after a restart.
+
+**Still open for a closing lane:** the `vban_*` keys and
+`sp_core::config::SETTING_VBAN_*` stay until the list has run one main
+release (ruling 4), then go.

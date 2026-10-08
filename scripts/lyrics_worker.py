@@ -5,9 +5,10 @@ lyrics_worker.py — narrow Python entry points for the lyrics pipeline.
 Commands:
   preprocess-vocals  anvuew dereverb + 16 kHz mono float32 WAV of the stems
                      worker's vocals sidecar (--vocals-in); no isolation pass
-  align-chunks       Chunked Qwen3-ForcedAligner alignment (loads model once,
-                     loops over all chunks from a JSON request file)
-  preload            Warm anvuew dereverb + Qwen3-ForcedAligner at boot
+  preload            Warm the anvuew dereverb model at boot
+
+#144: the forced alignment is the mtl aligner's (its own venv and script);
+the retired Qwen3 aligner and its chunk-alignment command are deleted.
 """
 
 import argparse
@@ -18,6 +19,8 @@ import os
 import shutil
 import sys
 import tempfile
+
+import audio_window as aw
 
 
 # #144: one separation per video — the mtl aligner's vocals come from the stems
@@ -95,6 +98,60 @@ def _stitch_segments(segments, step_samples, overlap_samples):
     else:
         out[nz] /= wsum[nz]
     return out.astype(np.float32)
+
+
+# #207: the heavy child runs under a 10 GiB per-process job cap, so
+# `preprocess-vocals` never holds a whole-song array: each window is read from
+# the vocals sidecar on demand (`_read_window`) and the 16 kHz segments are
+# stitched block by block (`_stitched_blocks` / `_stitch_to_wav`). The header
+# read, the window read and the streamed overlap-add are `audio_window.py`'s,
+# shared with the stem worker (#233 release review); `_stitch_segments` above
+# stays as the reference the tests compare the streamed stitch against.
+_UNKNOWN_FRAMES = aw.UNKNOWN_FRAMES
+_audio_info = aw.audio_info
+_read_window = aw.read_window
+
+
+def _stitched_blocks(read_segment, n_seg, step_samples, overlap_samples):
+    """Yield the samples of
+    `_stitch_segments([read_segment(i) for i in range(n_seg)], step_samples,
+    overlap_samples)` in order, ONE block per segment read, holding only the
+    tail the next segment still adds to (`audio_window.OverlapAdd`) — never
+    the whole song."""
+    ola = aw.OverlapAdd(n_seg, step_samples, overlap_samples)
+    for i in range(n_seg):
+        yield ola.add(read_segment(i))
+
+
+def _stitch_to_wav(read_segment, n_seg, step_samples, overlap_samples, out_path):
+    """Stream-stitch the `n_seg` 16 kHz mono segments (`read_segment(i)`)
+    into a FLOAT WAV at `out_path`: the samples of `_stitch_segments`, divided
+    by their global peak when it is over 1.0, exactly as the whole-array path
+    did. Two passes, each holding one segment and the overlap tail: the first
+    finds the peak, the second writes. Published atomically: `<out>.tmp`, then
+    `os.replace`; a failure removes the `.tmp` and leaves `out_path` alone.
+    Returns the peak."""
+    import numpy as np
+    import soundfile as sf
+
+    peak = 0.0
+    for block in _stitched_blocks(read_segment, n_seg, step_samples, overlap_samples):
+        if block.size:
+            peak = max(peak, float(np.max(np.abs(block))))
+    tmp = out_path + ".tmp"
+    try:
+        # format= is REQUIRED: the atomic temp path ends in ".tmp".
+        with sf.SoundFile(
+            tmp, "w", samplerate=16000, channels=1, format="WAV", subtype="FLOAT"
+        ) as f:
+            for block in _stitched_blocks(read_segment, n_seg, step_samples, overlap_samples):
+                f.write(block / peak if peak > 1.0 else block)
+        os.replace(tmp, out_path)
+    finally:
+        if os.path.exists(tmp):
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+    return peak
 
 
 def _pick_dereverbed_stem(out_files, fallback_dir):
@@ -273,25 +330,24 @@ def _atomic_write_wav(path, audio, sr):
     os.replace(tmp, path)
 
 
-def _dereverb_one_segment(sep_dereverb, full, in_sr, start_s, end_s, out_path, stem_dir):
-    """Dereverb ONE native-rate window `[start_s, end_s]` of `full`, resample to
-    16 kHz mono float32, and write it ATOMICALLY to `out_path`.
+def _dereverb_one_segment(
+    sep_dereverb, vocals_path, in_sr, start_s, end_s, out_path, stem_dir
+):
+    """Dereverb ONE native-rate window `[start_s, end_s]` of the file at
+    `vocals_path`, resample to 16 kHz mono float32, and write it ATOMICALLY to
+    `out_path`.
 
-    #144: `full` is the stems worker's VOCALS sidecar (already isolated by the
-    Kim Mel-Band RoFormer), so there is no second isolation pass — just anvuew
-    dereverb + resample. `full` is (n,) mono or (ch, n) multi-channel at `in_sr`.
+    #144: the file is the stems worker's VOCALS sidecar (already isolated by
+    the Kim Mel-Band RoFormer), so there is no second isolation pass — just
+    anvuew dereverb + resample. #207: only this window is ever in memory
+    (`_read_window`, the same samples the old whole-file slice gave).
     `stem_dir` is a scratch dir the already-loaded separator writes into; it is
     cleared after each segment so it never grows across a long song."""
     import numpy as np
     import librosa
     import soundfile as sf
 
-    s0 = max(0, int(round(start_s * in_sr)))
-    s1 = int(round(end_s * in_sr))
-    if full.ndim == 1:
-        data = full[s0:s1]
-    else:
-        data = full[:, s0:s1].T  # (n, ch) for soundfile
+    data = _read_window(vocals_path, in_sr, start_s, end_s)  # (n[, ch]) float32
     seg_in = os.path.join(stem_dir, "segin_" + os.path.basename(out_path))
     sf.write(seg_in, data, in_sr, subtype="FLOAT")
 
@@ -329,13 +385,18 @@ def cmd_preprocess_vocals(args):
     written atomically to `--output`, and the work dir is removed. Writes a FLOAT
     WAV to --output. Exits 0 on success.
 
+    #207: memory is O(segment), independent of the song's length — each window
+    is read from the sidecar on demand (`_read_window`) and the segments are
+    stitched in two streamed passes (`_stitch_to_wav`). Never load the whole
+    sidecar or build a whole-length array here: the child runs under a 10 GiB
+    per-process job cap.
+
     GPU discipline (#154): `gpu_polite()` sets a BELOW_NORMAL WDDM scheduling
     priority + a per-process VRAM cap before any model loads. On a CUDA OOM the
     dereverb re-runs on CPU (same model + parameters → identical output, only
     slower) — the separator's model parameters are never changed.
     """
     import numpy as np
-    import librosa
     import soundfile as sf
     import torch
     from audio_separator.separator import Separator
@@ -351,11 +412,11 @@ def cmd_preprocess_vocals(args):
         f"preprocess-vocals: vocals from stems sidecar {args.vocals_in}",
         file=sys.stderr,
     )
-    # Native-rate load of the stems worker's vocals sidecar, so the dereverb sees
-    # the full-quality signal (the 16 kHz downsample happens only on each
-    # segment's dereverbed output).
-    full, in_sr = librosa.load(args.vocals_in, sr=None, mono=False)
-    total_samples = full.shape[0] if full.ndim == 1 else full.shape[1]
+    # #207: header only — each native-rate window is read from the sidecar on
+    # demand, so the dereverb sees the full-quality signal (the 16 kHz
+    # downsample happens only on each segment's dereverbed output) and the
+    # whole sidecar is never in memory (10 GiB per-child job cap).
+    in_sr, total_samples = _audio_info(args.vocals_in)
     total_s = total_samples / float(in_sr)
     bounds = _segment_bounds(total_s, ISOLATION_SEGMENT_SECONDS, ISOLATION_OVERLAP_SECONDS)
     n_seg = len(bounds)
@@ -389,7 +450,13 @@ def cmd_preprocess_vocals(args):
                     if done[i]:
                         continue
                     _dereverb_one_segment(
-                        sep_dereverb, full, in_sr, s_s, e_s, _seg_path(i), stem_dir
+                        sep_dereverb,
+                        args.vocals_in,
+                        in_sr,
+                        s_s,
+                        e_s,
+                        _seg_path(i),
+                        stem_dir,
                     )
                     done[i] = True
                     print(f"isolation chunk {i + 1}/{n_seg} done", file=sys.stderr)
@@ -415,145 +482,37 @@ def cmd_preprocess_vocals(args):
                 torch.cuda.empty_cache()
             _process_remaining(force_cpu=True)
 
-    # Stitch every segment (all 16 kHz mono) into the final WAV.
+    # Stitch every segment (all 16 kHz mono) into the final WAV, STREAMED
+    # segment by segment in two passes (#207) — never a whole-length array.
     step_samples = int(round((ISOLATION_SEGMENT_SECONDS - ISOLATION_OVERLAP_SECONDS) * 16000))
     overlap_samples = int(round(ISOLATION_OVERLAP_SECONDS * 16000))
-    segs = []
-    for i in range(n_seg):
+
+    def _read_segment(i):
         a, _ = sf.read(_seg_path(i), dtype="float32")
         if a.ndim > 1:
             a = np.mean(a, axis=1).astype("float32")
-        segs.append(a)
-    stitched = _stitch_segments(segs, step_samples, overlap_samples)
-    peak = float(np.max(np.abs(stitched))) if stitched.size else 0.0
-    if peak > 1.0:
-        stitched = stitched / peak
-    _atomic_write_wav(args.output, stitched, 16000)
+        return a
+
+    _stitch_to_wav(_read_segment, n_seg, step_samples, overlap_samples, args.output)
     shutil.rmtree(work_dir, ignore_errors=True)
 
     print(json.dumps({"output": args.output}))
 
 
-def cmd_align_chunks(args):
-    """Chunked Qwen3-ForcedAligner: loads the model ONCE, loops over all chunks.
-
-    --chunks is a path to JSON with shape:
-      {"chunks": [{"chunk_idx": 0, "word_offset": 0,
-                   "start_ms": 500, "end_ms": 3500,
-                   "text": "hey there friend", "word_count": 3}, ...]}
-
-    The `word_offset` field is metadata — Python ignores it and only the
-    Rust assembly phase uses it to slot sub-chunk output back into the
-    right position within a split-line's full word sequence.
-
-    Writes JSON to --output with shape:
-      {"chunks": [{"chunk_idx": 0, "words": [
-          {"text": "hey", "start_ms": 1000, "end_ms": 1200}, ...
-      ]}, ...]}
-
-    Word timestamps are absolute (start_ms of chunk + aligner offset).
-    """
-    import numpy as np
-    import soundfile as sf
-    import torch
-    from qwen_asr import Qwen3ForcedAligner
-
-    with open(args.chunks, "r", encoding="utf-8") as f:
-        request = json.load(f)
-    chunks_in = request["chunks"]
-
-    # preprocess_vocals is the only producer of --audio and always writes
-    # 16 kHz mono float32. Don't re-check the sample rate here — the
-    # previous guard was dead defense that hid resample bugs upstream
-    # behind a generic RuntimeError. If the WAV drifts from 16 kHz we
-    # want Qwen3's own assertion (it reads at 16 kHz internally) to
-    # surface the actual stack trace.
-    audio, _sr = sf.read(args.audio, dtype="float32")
-    if audio.ndim != 1:
-        audio = np.mean(audio, axis=1).astype("float32")
-
-    device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
-    model = Qwen3ForcedAligner.from_pretrained(
-        "Qwen/Qwen3-ForcedAligner-0.6B",
-        dtype=torch.bfloat16,
-        device_map=device_map,
-    )
-
-    results = []
-    total_samples = audio.shape[0]
-    for c in chunks_in:
-        start_s = int(round(c["start_ms"] * 16000 / 1000))
-        end_s = int(round(c["end_ms"] * 16000 / 1000))
-        start_s = max(0, start_s)
-        end_s = min(total_samples, end_s)
-        if end_s <= start_s:
-            results.append({"chunk_idx": c["chunk_idx"], "words": []})
-            continue
-        slice_ = audio[start_s:end_s]
-        fd, wav_path = tempfile.mkstemp(suffix="_chunk.wav")
-        os.close(fd)
-        try:
-            sf.write(wav_path, slice_, 16000, subtype="FLOAT")
-            aligned = model.align(
-                audio=wav_path,
-                text=c["text"],
-                language="English",
-            )
-            word_stream = aligned[0]
-            offset_ms = c["start_ms"]
-            words_out = [
-                {
-                    "text": w.text,
-                    "start_ms": int(round(w.start_time * 1000)) + offset_ms,
-                    "end_ms": int(round(w.end_time * 1000)) + offset_ms,
-                }
-                for w in word_stream
-            ]
-        finally:
-            try:
-                os.remove(wav_path)
-            except OSError:
-                pass
-        results.append({"chunk_idx": c["chunk_idx"], "words": words_out})
-
-    with open(args.output, "w", encoding="utf-8") as f:
-        json.dump({"chunks": results}, f, ensure_ascii=False)
-
-
 def cmd_preload(args):
-    """Warm anvuew dereverb + Qwen3-ForcedAligner at bootstrap.
+    """Warm the anvuew dereverb model at bootstrap.
 
-    Surfaces model-download failures before any real song is processed. #144:
+    Surfaces a model-download failure before any real song is processed. #144:
     the BS-RoFormer isolation model is no longer warmed — the mtl vocals come
-    from the stems worker's sidecar, so `preprocess-vocals` only dereverbs.
+    from the stems worker's sidecar, so `preprocess-vocals` only dereverbs —
+    and neither is the retired Qwen aligner (v22: mtl in its own venv).
     """
-    import torch
     from audio_separator.separator import Separator
-    from qwen_asr import Qwen3ForcedAligner
 
     dereverb = Separator(model_file_dir=args.models_dir, output_format="WAV")
     dereverb.load_model(DEREVERB_MODEL)
     _free_vram(dereverb)
-
-    device_map = "cuda:0" if torch.cuda.is_available() else "cpu"
-    # `from_pretrained` downloads + instantiates the aligner. We don't poke
-    # `model.parameters()` afterwards — the Qwen3ForcedAligner wrapper isn't
-    # an nn.Module subclass and has no `.parameters()` method. Completing
-    # `from_pretrained` without raising is proof enough that weights loaded.
-    _model = Qwen3ForcedAligner.from_pretrained(
-        "Qwen/Qwen3-ForcedAligner-0.6B",
-        dtype=torch.bfloat16,
-        device_map=device_map,
-    )
-    print(
-        json.dumps(
-            {
-                "loaded": True,
-                "device": device_map,
-                "dereverb": DEREVERB_MODEL,
-            }
-        )
-    )
+    print(json.dumps({"loaded": True, "dereverb": DEREVERB_MODEL}))
 
 
 def main():
@@ -575,18 +534,12 @@ def main():
     # untouched for the live wall) instead of only as the CUDA-OOM fallback.
     p_pre.add_argument("--force-cpu", action="store_true")
 
-    p_ac = subparsers.add_parser("align-chunks")
-    p_ac.add_argument("--audio", required=True)
-    p_ac.add_argument("--chunks", required=True)
-    p_ac.add_argument("--output", required=True)
-
     p_pl = subparsers.add_parser("preload")
     p_pl.add_argument("--models-dir", required=True)
 
     args = parser.parse_args()
     dispatch = {
         "preprocess-vocals": cmd_preprocess_vocals,
-        "align-chunks": cmd_align_chunks,
         "preload": cmd_preload,
     }
     try:

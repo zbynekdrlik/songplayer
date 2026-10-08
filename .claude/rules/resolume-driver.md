@@ -473,29 +473,47 @@ are the recovery's `on_program_lines`.
     from it, so a resume whose seek failed hides its title 3.5 s before the
     end of the WHOLE song. `play_start_ms` (the asked start) is only logged
     next to it.
-  - A dashboard seek re-anchors the clock: `PlaybackEngine::seek`
-    (`playback/seek.rs`) → `TitleClock::seeked(now, duration, position)`
-    (the hide point from the new position, at `now` when already past; the
-    show point kept), then `arm_title_timers` and `resync_after_play`. A
-    seek into the last 3.5 s takes the title down at once, and a seek back
-    reopens the window.
-  - A paused song is left alone (its resume's `Started` fixes a new
-    clock).
-  - The corners left (review round 1):
-    - a seek sent before the song's first `Started` (no clock yet, its
-      first ~0.3 s) is applied by the pipeline right after `Started`, and
-      the clock then counts from the Play's start;
-    - a mid-song seek the decoder REFUSES (`pipeline.rs` "pipeline: seek
-      failed", the paced producer's "seek failed") is only warned about,
-      and the song plays on, but the engine has already re-anchored the
-      clock to the asked position: the title then hides early or late by
-      the difference. The pipeline reports no seek result to the engine;
-      closing it means a `Seeked { position_ms }` event, the start seek's
-      class again.
+  - A dashboard seek moves the clock on the PIPELINE'S REPORT, never on
+    the asked position (#217 follow-up 5987205883, design 6052569298), the
+    same contract as a Play and its `Started`:
+    - `PlaybackEngine::seek` (`playback/seek.rs`) only sends
+      `PipelineCommand::Seek`;
+    - the paced producer seeks the decoder and reports where the song
+      really plays on from, `PipelineEvent::Seeked { position_ms }`, from
+      the pure `pipeline_types::real_seek_ms` (`real_start_ms` is its case
+      from 0): the asked position when the seek worked, the position of
+      the last frame it decoded when the decoder REFUSED it (the song
+      plays on from there). That position is also the producer's new PTS
+      origin (`ProducerPos`), so a refused seek no longer freezes the
+      picture (frames before an asked origin saturated to pts 0 going
+      forward; going back the first frame was parked for the seek
+      distance);
+    - the report goes out on a clone of the event channel right after the
+      decoder's seek returns, before the next frame; the emit thread joins
+      the producer before the next song opens, so it comes after its
+      song's `Started` and before the next song's;
+    - `seeked()` (the `Seeked` arm) → `TitleClock::seeked(now, duration,
+      position)` (the hide point from the reported position, at `now` when
+      already past; the show point kept), then `arm_title_timers` and
+      `resync_after_play`. A seek into the last 3.5 s takes the title down
+      at once, and a seek back reopens the window.
+  - Ignored, with nothing sent: the report of a paused song (its resume's
+    `Started` fixes a new clock) and a report with no clock (a newer Play
+    cleared it in `begin_play`: an earlier song's report).
+  - A seek sent before the song's first `Started` (no clock yet, its first
+    ~0.3 s) is applied by the pipeline right after `Started`, and its
+    report moves the new clock (the old corner, closed by the report).
+  - Residual: between a refused seek and the next frame, the emit loop's
+    `Position` may still carry the asked position (it sets
+    `last_decoded_ms` at the command) for at most one 500 ms report; the
+    clock does not read it.
   - The hide arithmetic is ONE helper, `title::hide_point`, shared by `new`
     and `seeked`. It is out of `new` on purpose: cargo-mutants never
     mutates inside a fn named `new`.
-  - Tests: `tests_title_seek.rs` (a child of `tests_scene_change.rs`) and
+  - Tests: `tests_title_seek.rs` (a child of `tests_scene_change.rs`; the
+    command reaches the pipeline through `PlaybackPipeline::detached_for_test`,
+    a pipeline with no thread whose commands the test reads),
+    `pipeline_types_tests.rs` (`real_seek_ms` Ok / refused) and
     `title_tests.rs::a_seek_moves_the_hide_point_and_keeps_the_show_point`.
 - **A title is due** when its pipeline plays on program with its own clock
   (`PlaylistPipeline::on_air_clock`) and that clock is `open_at(now)`:

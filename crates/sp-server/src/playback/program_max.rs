@@ -13,9 +13,9 @@
 //! - the program's standby → black.
 //!
 //! The `SP-program` sender (`program_output.rs`) offers each boundary as a
-//! [`MaxJob`] right AFTER it handed the boundary's audio to VBAN and BEFORE
+//! [`MaxJob`] right AFTER it handed the boundary's audio to the outputs and BEFORE
 //! its own canvas fit and NDI submit: `serve` = `split` → `limit` →
-//! `feed_vban` → the MAX offer → `submit_video`. The offer is `Arc` bumps
+//! `feed_outputs` → the MAX offer → `submit_video`. The offer is `Arc` bumps
 //! under one short lock ([`MaxOut::offer_with`]) into a 2-deep queue that
 //! drops the OLDEST job when it is full and counts it (the `SubmitQueue`
 //! hand-off of #168/#209). Nothing on the program thread, VBAN or the

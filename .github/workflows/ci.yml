@@ -131,9 +131,9 @@ jobs:
       - name: Install Python eval dependencies (ruff + pytest + jsonschema + requests + numpy + soundfile)
         run: pip install ruff==0.5.7 pytest==8.3.2 jsonschema==4.23.0 requests==2.32.3 numpy==2.1.1 soundfile==0.12.1
       - name: Lint with ruff
-        run: ruff check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py
+        run: ruff check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py
       - name: Format check with ruff
-        run: ruff format --check eval/ scripts/tests/ scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py
+        run: ruff format --check eval/ scripts/tests/ scripts/audio_window.py scripts/dub_worker.py scripts/dub_live_session.py scripts/dub_voice_check.py scripts/dub_loudness.py scripts/win_replace.py scripts/analyze_minidump.py scripts/stem_worker.py scripts/av_sync_check.py scripts/av_sync_drift.py scripts/av_sync_warp.py scripts/check_workflow_ps_ascii.py scripts/rig_lease_gate.py scripts/pp_deploy_pick.py
       - name: Run pytest
         run: pytest eval/lyrics/tests -v
       - name: Run scripts pytest (#171 segment stitch / additivity, #156 minidump helpers)
@@ -293,6 +293,11 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [build-wasm]
+    # The job takes ~9 min. Its browser install runs `apt-get update`, and on
+    # 7.10.2026 an Ubuntu mirror stalled it for 70 min (main run 37670589944)
+    # until it was cancelled by hand; with no bound it would have held the
+    # release for GitHub's 6 h default. A stall now fails the job.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -305,6 +310,14 @@ jobs:
           path: dist/
       - name: Install E2E dependencies
         run: cd e2e && npm ci
+      # `--with-deps` runs apt-get. On 7.10.2026 its `apt-get update` stalled
+      # on an Ubuntu mirror twice in a row (70 min, then 28 min+) with apt's
+      # defaults; explicit 30 s network timeouts and 3 retries make a stalled
+      # fetch fail over to a retry instead of waiting out the job bound.
+      - name: Bound apt's network waits
+        run: |
+          printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "3";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99-ci-network-timeouts
       - name: Install Playwright browsers
         run: cd e2e && npx playwright install chromium --with-deps
       - name: Install Google Chrome (H.264/AAC for the #178 preview MSE E2E)
@@ -371,6 +384,21 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+
+      - name: The ASIO host never sets the rate or the clock source, nor opens the panel (#233)
+        run: |
+          set -euo pipefail
+          # Dante Controller / SoundGrid own the rate, the clock and the
+          # buffer; an ASIO output follows the driver (spec section 3;
+          # iemmixer I2). azo's Driver has these calls: none may be made, in
+          # any call shape (a method call, or `Driver::set_sample_rate(&d, …)`),
+          # so the scan matches the bare names, and azo-sys's raw vtable call
+          # `control_panel` too.
+          if grep -rnE '\b(set_sample_rate|set_clock_source|open_control_panel|control_panel)\b' --include='*.rs' crates/; then
+            echo "FAIL: SongPlayer's ASIO host must never set the driver's rate or clock, nor open its panel"
+            exit 1
+          fi
+          echo "OK: no ASIO setter is called"
 
       - name: Scan for ignored tests
         run: |
@@ -468,9 +496,13 @@ jobs:
             "retry_missing_alignment"
             "set_video_lyrics_source"
             "get_next_video_missing_alignment"
+            "align_chunks"
           )
           BANNED_LITERALS=(
             '"lrclib+qwen3"'
+            'qwen_asr'
+            'Qwen3ForcedAligner'
+            'align-chunks'
           )
           # No banned CLI args at this time. `--write-auto-subs` was
           # previously banned from the production pipeline but is now a
@@ -482,6 +514,7 @@ jobs:
             "def cmd_transcribe("
             "def cmd_download_models("
             "def _group_words_into_lines("
+            "def cmd_align_chunks("
           )
           FAIL=0
           SEARCH_PATHS=(crates src-tauri sp-ui scripts e2e)
@@ -2262,6 +2295,10 @@ jobs:
           # bundled ffmpeg (the box has no ffprobe; none is needed).
           SP_AVSYNC_PYTHON: C:\ProgramData\SongPlayer\e2e\avsync_venv\Scripts\python.exe
           SP_FFMPEG: C:\ProgramData\SongPlayer\cache\tools\ffmpeg.exe
+          # #233 lane 3: how many enabled ASIO outputs the box must run
+          # (e2e/post-deploy-audio-asio.spec.ts). SNV runs one since
+          # 8.10.2026: "DVS (Dante)", Dante Virtual Soundcard TX 1/2.
+          SP_ASIO_OUTPUTS_EXPECTED: "1"
         run: |
           # Runs the committed e2e/post-deploy*.spec.ts against the
           # deployed SongPlayer + OBS. This suite exercises the click

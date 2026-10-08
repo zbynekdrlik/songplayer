@@ -2,7 +2,10 @@
 //!
 //! This crate is WASM-safe — no OS-specific dependencies.
 
+pub mod asio_resampling; // #233: a running ASIO output's chips (the owner's resampling row)
 pub mod audio_level;
+pub mod audio_outputs;
+pub mod audio_outputs_save; // #233 release review: the dashboard's save decisions
 pub mod blend;
 pub mod clock_health;
 pub mod config;

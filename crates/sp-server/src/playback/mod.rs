@@ -4,9 +4,21 @@
 //! transitions through the pure [`PlayState`] state machine.  Title timing
 //! (show after 1.5 s, hide 3.5 s before end) is handled via Tokio timers.
 
+pub mod asio_format; // #233: an ASIO driver's sample types + the L/R channel fill (pure)
+pub mod asio_hold; // #233: one holder per ASIO driver in the process (a rebuilt entry's successor waits)
+pub mod asio_out; // #233: the ASIO output — its worker over a driver trait (open / run / close / backoff)
+pub mod asio_state; // #233: the ASIO output's decisions (backoff, reasons, replies, stall), pure
+#[cfg(windows)]
+pub mod asio_win; // #233: the ASIO output's azo (COM) glue — Windows only, out of the mutation gate
 pub mod asrc; // #233: the ASIO output's resampler (rubato Async sinc) + the re-centre splice
 pub mod asrc_servo; // #233: the ASIO output's drift servo (camera-box's asrc-compensator, for an output), pure
 pub mod audio_grid;
+pub mod audio_out; // #233: the program audio's fan-out to its outputs (one queue + thread each)
+pub mod audio_out_block; // #233: one program boundary's audio block for the outputs
+pub mod audio_out_config; // #233: the outputs' settings — strict PATCH parse, lenient stored read
+pub mod audio_out_migrate; // #233: vban_* → the output list, once (the old keys stay)
+pub mod audio_out_queue; // #233: every output's bounded drop-oldest block queue (VBAN and ASIO)
+pub mod audio_out_task; // #233: the outputs' settings task (keep / build / stop, DNS, migration)
 pub mod band_pool; // #223: the SP-program sender's persistent row-band workers (no thread per picture)
 mod clear_lyrics;
 pub mod clock_health;
@@ -57,9 +69,13 @@ pub mod program_on_air; // #221: what is on air (the bus's watch value) + the on
 pub mod program_output; // #209: the SP-program sender + its thread
 pub mod program_output_timing; // #210: the sender's per-boundary timing window (pure, health.timing)
 pub mod program_switch; // #221: the ONE switch path of a scene press (catalog, cut, manual forward)
+pub mod program_trace; // #147: SP-program's per-boundary trace ring + clump detector (pure)
+pub mod program_trace_log; // #147: the trace's once-a-minute clump summary (task)
 pub mod program_transition; // #215: transition window + crossfade math (pure, Linux-tested)
 pub mod program_transition_settings; // #221 L5: the transition settings → the bus's spec (task)
 pub(crate) mod recovery; // + the RecoveryEvent → engine forwarder lib.rs spawns
+#[cfg(test)]
+pub(crate) mod resample_quality; // #233: the resamplers' measured quality (THD+N, images), tests only
 mod runtime_pipeline;
 pub mod scene_catalog; // #221: which scene is a playlist's, from its NDI output name (no cg OBS lookup)
 mod scene_off; // #215: the deferred scene-go-off pause of the program's outgoing source
@@ -76,6 +92,7 @@ mod transport_state; // #201 pure PlayState->TransportState mapping (Linux-teste
 pub mod vban_clock; // #224 part 2: VBAN's + the NDI input's wall clock, VBAN's date-step slew
 pub mod vban_out; // #210: the program's VBAN audio output (queue, paced thread, socket, stats)
 pub mod vban_packet; // #210: the pure VBAN packet encoder (header, INT24, 8×200 split)
+pub mod vban_rate; // #233: a VBAN destination's fixed-ratio rate conversion (rubato Fft)
 pub mod vban_stall; // #210 part 2: the VBAN thread's late packets (ring, window max, WARN)
 pub mod video_decode; // #223 S3b: `video_hw_decode` (read at each song open) + its status
 pub mod wallclock;

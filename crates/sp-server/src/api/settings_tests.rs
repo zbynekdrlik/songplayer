@@ -56,7 +56,7 @@ fn peers_text(peers: &[PeerConfig]) -> String {
 }
 
 /// A PATCH body.
-fn body(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+pub(super) fn body(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -69,7 +69,7 @@ async fn store(pool: &SqlitePool, key: &str, value: &str) {
         .unwrap();
 }
 
-async fn stored(pool: &SqlitePool, key: &str) -> Option<String> {
+pub(super) async fn stored(pool: &SqlitePool, key: &str) -> Option<String> {
     crate::db::models::get_setting(pool, key).await.unwrap()
 }
 
@@ -99,7 +99,7 @@ async fn get_all(state: &AppState) -> HashMap<String, String> {
 }
 
 /// `PATCH /api/v1/settings` with `map`: the status and the body text.
-async fn patch(state: &AppState, map: &HashMap<String, String>) -> (StatusCode, String) {
+pub(super) async fn patch(state: &AppState, map: &HashMap<String, String>) -> (StatusCode, String) {
     let req = Request::builder()
         .method("PATCH")
         .uri("/api/v1/settings")

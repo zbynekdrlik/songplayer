@@ -31,10 +31,10 @@ fn cuda_unavailable() -> Readiness {
 }
 
 /// An import failure of a required package (a Python traceback, CRLF).
-fn qwen_asr_missing() -> Readiness {
+fn a_package_missing() -> Readiness {
     Readiness::failed(
         Some(1),
-        "Traceback (most recent call last):\r\n  File \"<string>\", line 1, in <module>\r\nModuleNotFoundError: No module named 'qwen_asr'\r\n",
+        "Traceback (most recent call last):\r\n  File \"<string>\", line 1, in <module>\r\nModuleNotFoundError: No module named 'audio_separator'\r\n",
     )
 }
 
@@ -85,7 +85,7 @@ async fn a_cuda_failure_is_retried_before_any_install() {
 
 #[tokio::test(start_paused = true)]
 async fn a_probe_with_an_import_error_installs_at_once() {
-    let (verdict, took) = run(scripted(vec![qwen_asr_missing()]), RETRY_PLAN).await;
+    let (verdict, took) = run(scripted(vec![a_package_missing()]), RETRY_PLAN).await;
     assert_eq!(verdict, decision(FastPath::Install, 1));
     assert_eq!(took, Duration::ZERO);
     // numba refusing a too-new numpy is an ImportError too (the #144 repair).
@@ -106,7 +106,7 @@ async fn a_missing_interpreter_installs_at_once() {
 
 #[tokio::test(start_paused = true)]
 async fn a_timeout_then_an_import_error_installs() {
-    let probe = scripted(vec![Readiness::Timeout, qwen_asr_missing()]);
+    let probe = scripted(vec![Readiness::Timeout, a_package_missing()]);
     let (verdict, took) = run(probe, RETRY_PLAN).await;
     assert_eq!(verdict, decision(FastPath::Install, 2));
     assert_eq!(took, Duration::from_secs(5));
@@ -194,7 +194,7 @@ fn the_production_plan_retries_for_about_three_minutes() {
 fn every_answer_maps_to_its_action() {
     assert_eq!(Readiness::Ready.action(), ProbeAction::FastPath);
     assert_eq!(Readiness::Missing.action(), ProbeAction::Install);
-    assert_eq!(qwen_asr_missing().action(), ProbeAction::Install);
+    assert_eq!(a_package_missing().action(), ProbeAction::Install);
     assert_eq!(Readiness::Timeout.action(), ProbeAction::Retry);
     assert_eq!(cuda_unavailable().action(), ProbeAction::Retry);
     // A spawn error (no exit code) is retried too.
@@ -239,7 +239,7 @@ fn an_import_failure_is_the_last_line_of_the_traceback() {
     ));
     assert!(!Readiness::Timeout.is_import_failure());
     assert!(!Readiness::Missing.is_import_failure());
-    assert!(qwen_asr_missing().is_import_failure());
+    assert!(a_package_missing().is_import_failure());
 }
 
 #[test]
@@ -295,7 +295,7 @@ async fn after_the_install_a_timeout_is_never_a_failed_install() {
     assert_eq!(verdict, decision(FastPath::Ready, 3));
     assert!(install_worked(verdict.path), "slow, then ready");
 
-    let (verdict, _) = run(scripted(vec![qwen_asr_missing()]), RETRY_PLAN).await;
+    let (verdict, _) = run(scripted(vec![a_package_missing()]), RETRY_PLAN).await;
     assert!(!install_worked(verdict.path), "a proven import failure");
     let (verdict, _) = run(always(cuda_unavailable()), RETRY_PLAN).await;
     assert!(

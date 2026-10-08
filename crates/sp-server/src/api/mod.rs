@@ -1,6 +1,7 @@
 //! HTTP API and WebSocket — Axum router, REST endpoints, and dashboard WebSocket.
 
 pub mod ai;
+pub mod audio; // #233: GET /api/v1/audio/asio-drivers (the ASIO driver list)
 pub mod dabing; // #180 dubbing D1
 pub mod diag; // #223 S0: POST /api/v1/diag/decode-bench
 pub mod live;
@@ -159,6 +160,16 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/program/cut",
             axum::routing::post(program::post_program_cut),
+        )
+        // #147: the SP-program sender's per-boundary trace, by UTC window.
+        .route(
+            "/api/v1/program/trace",
+            axum::routing::get(program::get_program_trace),
+        )
+        // #233: the registered ASIO drivers (an ASIO output's driver list).
+        .route(
+            "/api/v1/audio/asio-drivers",
+            axum::routing::get(audio::get_asio_drivers),
         )
         // Lyrics
         .route(

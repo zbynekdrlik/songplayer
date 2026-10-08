@@ -289,8 +289,8 @@ const settings = {
   // `speaker` = the speaker's own voice. `dub_model` is deliberately absent so
   // the form shows its default.
   dub_voice: "speaker",
-  // #210: the vban_* keys are deliberately absent so the Nastavenia VBAN
-  // fieldset shows its defaults (off, `sp-program`, no targets).
+  // #233: audio_outputs / audio_network_rate are absent (an empty list,
+  // 48 kHz), as on a box that never had VBAN.
   // #212: the ndi_input_* keys are absent too (the input is off, no source).
   // #213: the remote_ws_* keys are absent too (off, port 4456, no password).
   // #215: the program_* transition keys are absent too (the default 300 ms fade).
@@ -482,6 +482,11 @@ const failModes = {
   previous: false,
   mode: false,
   preview: false,
+  // #233: GET /api/v1/settings (Nastavenia must save nothing it did not load).
+  settings: false,
+  // #233 lane 3: GET /api/v1/audio/asio-drivers (a list never read marks no
+  // stored driver "nenájdený").
+  "asio-drivers": false,
 };
 
 function maybeFail(kind, res) {
@@ -600,13 +605,138 @@ app.post("/api/v1/control", (_req, res) => {
 
 // Settings (#229: every secret masked, see `shownSettings`)
 app.get("/api/v1/settings", (_req, res) => {
+  if (maybeFail("settings", res)) return;
   res.json(shownSettings());
+});
+
+// #233: as the server (`audio_out_config::checked`) — a bad output list or
+// network rate refuses the whole PATCH with 400 and the server's text,
+// before anything is written (the cases the dashboard can send).
+const MOCK_RATES = [44100, 48000, 88200, 96000, 192000];
+// As `sp_core::audio_outputs::shown_id`: at most 32 characters, each one
+// outside a-z 0-9 - shown as `?` (an error never echoes junk input).
+function shownId(id) {
+  return [...String(id ?? "")]
+    .slice(0, 32)
+    .map((c) => (/^[a-z0-9-]$/.test(c) ? c : "?"))
+    .join("");
+}
+function outputsRefusal(body) {
+  if (
+    body.audio_network_rate !== undefined &&
+    !MOCK_RATES.includes(Number(String(body.audio_network_rate).trim()))
+  ) {
+    return `audio_network_rate must be one of ${MOCK_RATES.join(", ")}`;
+  }
+  if (body.audio_outputs === undefined || String(body.audio_outputs).trim() === "") {
+    return null;
+  }
+  let list;
+  try {
+    list = JSON.parse(body.audio_outputs);
+  } catch {
+    return "audio_outputs is not a JSON list (line 1, column 0)";
+  }
+  if (!Array.isArray(list)) return "audio_outputs is not a JSON list (line 1, column 0)";
+  // The cases the dashboard can send, in the server's order and words: first
+  // every entry read field by field (`audio_out_config::entry`: id, type,
+  // its type's block — vban: host, port; asio: driver, channels — then
+  // name; not vban.format, stream_name or the types of enabled / rate /
+  // delay_ms) …
+  for (const [i, e] of list.entries()) {
+    const first = `entry ${i + 1}`;
+    if (e === null || typeof e !== "object" || Array.isArray(e)) return `${first} is not a JSON object`;
+    if (e.id === undefined) return `${first}: id is missing`;
+    if (typeof e.id !== "string") return `${first}: id has the wrong type`;
+    const at = `${first} (id ${shownId(e.id)})`;
+    if (e.type === undefined) return `${at}: type is missing`;
+    if (typeof e.type !== "string") return `${at}: type has the wrong type`;
+    if (e.type !== "vban" && e.type !== "asio") return `${at}: type must be vban or asio`;
+    const block = e.type === "vban" ? vbanBlockRefusal(e.vban, at) : asioBlockRefusal(e.asio, at);
+    if (block) return block;
+    if (e.name === undefined) return `${at}: name is missing`;
+  }
+  // … then the shared validation (`validate_list`): the counts, then each
+  // entry's host and port (an ASIO entry's driver and channels) before its
+  // duplicate check, then a driver an earlier ASIO entry names (not the id,
+  // name, rate, delay or stream checks: the dashboard validates those).
+  if (list.length > 16) return `audio_outputs has ${list.length} entries (at most 16)`;
+  for (const [kind, max] of [
+    ["vban", 8],
+    ["asio", 4],
+  ]) {
+    const count = list.filter((e) => e.type === kind).length;
+    if (count > max) return `audio_outputs has ${count} ${kind} entries (at most ${max})`;
+  }
+  const seen = new Set();
+  const drivers = new Set();
+  for (const [i, e] of list.entries()) {
+    const at = `entry ${i + 1} (id ${shownId(e.id)})`;
+    if (e.type === "vban") {
+      if (!e.vban.host) return `${at}: vban.host is empty`;
+      if (e.vban.port === 0) return `${at}: vban.port must be 1-65535`;
+    } else {
+      if (!e.asio.driver.trim()) return `${at}: asio.driver is empty`;
+      if (e.asio.channels.some((c) => c > 511)) return `${at}: asio.channels must be 0-511`;
+      if (e.asio.channels[0] === e.asio.channels[1]) {
+        return `${at}: asio.channels must name two different channels`;
+      }
+    }
+    if (seen.has(e.id)) return `${at}: id is used by an earlier entry`;
+    seen.add(e.id);
+    if (e.type === "asio") {
+      if (drivers.has(e.asio.driver)) {
+        return `${at}: asio.driver is already used by an earlier ASIO entry (a driver takes one client)`;
+      }
+      drivers.add(e.asio.driver);
+    }
+  }
+  return null;
+}
+function vbanBlockRefusal(v, at) {
+  if (v === undefined) return `${at}: vban is missing`;
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return `${at}: vban is not a JSON object`;
+  if (v.host === undefined) return `${at}: vban.host is missing`;
+  if (typeof v.host !== "string") return `${at}: vban.host has the wrong type`;
+  if (v.port === undefined) return `${at}: vban.port is missing`;
+  if (!Number.isInteger(v.port) || v.port < 0 || v.port > 65535) return `${at}: vban.port has the wrong type`;
+  return null;
+}
+// #233 lane 3: as `audio_out_config::asio_dest` (channels = [u32; 2]).
+function asioBlockRefusal(a, at) {
+  if (a === undefined) return `${at}: asio is missing`;
+  if (a === null || typeof a !== "object" || Array.isArray(a)) return `${at}: asio is not a JSON object`;
+  if (a.driver === undefined) return `${at}: asio.driver is missing`;
+  if (typeof a.driver !== "string") return `${at}: asio.driver has the wrong type`;
+  if (a.channels === undefined) return `${at}: asio.channels is missing`;
+  const u32 = (c) => Number.isInteger(c) && c >= 0 && c <= 4294967295;
+  if (!Array.isArray(a.channels) || a.channels.length !== 2 || !a.channels.every(u32)) {
+    return `${at}: asio.channels has the wrong type`;
+  }
+  return null;
+}
+
+// #233 lane 3: the box's registered ASIO drivers (two, so a test can pick
+// one that is not the first).
+app.get("/api/v1/audio/asio-drivers", (_req, res) => {
+  // As the server (#233 release review): a list it could not read is a 500
+  // naming why, in plain text — never an empty list.
+  if (failModes["asio-drivers"]) {
+    res.status(500).type("text/plain").send("the ASIO driver list could not be read: mock fail-mode");
+    return;
+  }
+  res.json({ drivers: ["Dante Virtual Soundcard (x64)", "Blackmagic ASIO"] });
 });
 
 // #229: as the server — a value exactly the mask for a secret setting keeps
 // the stored one (nothing written), any other value replaces it (`""` clears
 // it), and the answer is 204 with NO body.
 app.patch("/api/v1/settings", (req, res) => {
+  const refusal = outputsRefusal(req.body);
+  if (refusal) {
+    res.status(400).send(refusal);
+    return;
+  }
   for (const [key, value] of Object.entries(req.body)) {
     if (value === SECRET_MASK && isSecretSetting(key)) {
       continue;
@@ -623,6 +753,13 @@ app.post("/__mock/settings-reset", (_req, res) => {
     delete settings[key];
   }
   Object.assign(settings, settingsInitial);
+  failModes.settings = false;
+  failModes["asio-drivers"] = false;
+  outputsSkipped.clear();
+  asioHeld.clear();
+  asioMeasuring.clear();
+  asioResampling.clear();
+  vbanHeld.clear();
   res.json({ status: "reset" });
 });
 
@@ -1097,31 +1234,12 @@ function programBody() {
       cue_wait_boundaries: 0,
       cue_timeouts: 0,
     },
-    // #210: the VBAN output's telemetry (mirrors `VbanStatus`), from the
-    // stored settings like the real settings task.
-    vban: {
-      enabled: settings.vban_enabled === "true",
-      running: false,
-      stream_name: settings.vban_stream_name || "sp-program",
-      packets_sent: 0,
-      send_errors: 0,
-      blocks_dropped: 0,
-      blocks_substituted: 0,
-      late_sends: 0,
-      // #210 part 2: the VBAN thread's late packets (`vban_stall.rs`); the
-      // mock sends nothing.
-      late_max_us: 0,
-      late_events: [],
-      send_interval_p99_us: 0,
-      frame_counter: 0,
-      slew_owed_us: 0, // #224 part 2 (was missing from the mock)
-      targets: (settings.vban_targets || "")
-        .split(",")
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0)
-        .slice(0, 8) // VBAN_MAX_TARGETS
-        .map((t) => ({ target: t, addr: null, error: null })),
-    },
+    // #233: every audio output (mirrors `audio_out::OutputStatus`) from the
+    // stored list, like the server's outputs task; the mock "runs" every
+    // enabled entry. #210's top-level `vban` block moved under each entry.
+    audio_network_rate: Number(settings.audio_network_rate || 48000),
+    outputs_problems: mockOutputsProblems(),
+    outputs: mockOutputs(),
     // #223 S2: SP-program-MAX (mirrors `MaxStatus`). The setting is ON unless
     // it says "false"; the mock has no GPU, like the Linux server: unsupported.
     max: {
@@ -1142,6 +1260,168 @@ function programBody() {
     },
   };
 }
+// #233: the outputs as `GET /api/v1/program` lists them, from the stored
+// list (an unreadable one lists nothing); an enabled VBAN entry carries its
+// `vban` telemetry like the server's (the fields the dashboard and the
+// gates read, no traffic).
+function mockStoredOutputs() {
+  let list = [];
+  try {
+    list = JSON.parse(settings.audio_outputs || "[]");
+  } catch {
+    list = [];
+  }
+  return Array.isArray(list) ? list : [];
+}
+// #233: stored entries the mock's "outputs task" skips (`/__mock/outputs-skip
+// {ids}`, cleared by `/__mock/settings-reset`): not in `outputs[]`, each named
+// in `outputs_problems` as the server names a skipped entry.
+const outputsSkipped = new Set();
+app.post("/__mock/outputs-skip", (req, res) => {
+  outputsSkipped.clear();
+  for (const id of (req.body && req.body.ids) || []) outputsSkipped.add(String(id));
+  res.json({ skipped: [...outputsSkipped] });
+});
+function mockOutputsProblems() {
+  return mockStoredOutputs().flatMap((e, i) =>
+    outputsSkipped.has(e.id) ? [`entry ${i + 1} (id ${shownId(e.id)}): type must be vban or asio`] : [],
+  );
+}
+// #233 lane 3: ASIO outputs the mock holds waiting (`/__mock/asio-state
+// {id, reason_code, reason, retry_in_s}`), and running ones whose servo has
+// not measured a window yet (`/__mock/asio-measuring {ids}`: latency 0), all
+// cleared by `/__mock/settings-reset`.
+const asioHeld = new Map();
+const asioMeasuring = new Set();
+app.post("/__mock/asio-measuring", (req, res) => {
+  for (const id of (req.body || {}).ids || []) asioMeasuring.add(String(id));
+  res.json({ measuring: [...asioMeasuring] });
+});
+app.post("/__mock/asio-state", (req, res) => {
+  const b = req.body || {};
+  asioHeld.set(String(b.id), {
+    reason_code: b.reason_code ?? null,
+    reason: b.reason ?? null,
+    retry_in_s: b.retry_in_s ?? null,
+  });
+  res.json({ held: [...asioHeld.keys()] });
+});
+// #233 release review: VBAN outputs the mock holds waiting (`/__mock/vban-state
+// {id, reason_code, reason}`, as the server's `vban_reason_code`), cleared by
+// `/__mock/settings-reset`.
+const vbanHeld = new Map();
+app.post("/__mock/vban-state", (req, res) => {
+  const b = req.body || {};
+  vbanHeld.set(String(b.id), { reason_code: b.reason_code ?? null, reason: b.reason ?? null });
+  res.json({ held: [...vbanHeld.keys()] });
+});
+// #233 (the owner's resampling row): a running ASIO output's resampling
+// figures the mock serves instead of its defaults (`/__mock/asio-resampling
+// {id, ...fields of outputs[i].asio}`), cleared by `/__mock/settings-reset`.
+const asioResampling = new Map();
+app.post("/__mock/asio-resampling", (req, res) => {
+  const { id, ...fields } = req.body || {};
+  asioResampling.set(String(id), fields);
+  res.json({ set: [...asioResampling.keys()] });
+});
+// An ASIO entry as the server lists it: the driver "runs" at the network
+// rate (Int32LSB, 128 frames); a disabled one carries no `asio`.
+function mockAsioOutput(e, network) {
+  const enabled = e.enabled !== false;
+  const held = asioHeld.get(e.id);
+  const running = enabled && !held;
+  const latency = running && !asioMeasuring.has(e.id) ? 70.7 + (e.delay_ms || 0) : 0;
+  return {
+    id: e.id,
+    type: "asio",
+    name: e.name,
+    enabled,
+    state: !enabled ? "disabled" : held ? "waiting" : "running",
+    reason: enabled && held ? held.reason : null,
+    rate: enabled ? network : 0,
+    format: enabled ? "Int32LSB" : "",
+    channels: 2,
+    delay_ms: e.delay_ms || 0,
+    latency_ms: latency,
+    blocks_sent: 0,
+    blocks_dropped: 0,
+    ...(enabled
+      ? {
+          asio: {
+            driver: e.asio.driver,
+            channels: e.asio.channels,
+            driver_rate: network,
+            buffer_frames: 128,
+            out_channels: 64,
+            sample_type: "Int32LSB",
+            ppm: running ? 0.4 : 0,
+            rate_ppm: running ? 0.4 : 0,
+            locked: running,
+            latency_ms: latency,
+            offset_ms: 0,
+            slew_eta_s: null,
+            underruns: 0,
+            resets: 0,
+            hard_recentres: 0,
+            last_hard_recentre: null,
+            overflows: 0,
+            overloads: 0,
+            retry_in_s: held ? held.retry_in_s : null,
+            reason_code: held ? held.reason_code : null,
+            ...(running ? asioResampling.get(e.id) || {} : {}),
+          },
+        }
+      : {}),
+  };
+}
+function mockOutputs() {
+  const list = mockStoredOutputs().filter((e) => !outputsSkipped.has(e.id));
+  const network = Number(settings.audio_network_rate || 48000);
+  return list.map((e) => {
+    if (e.type === "asio") return mockAsioOutput(e, network);
+    const rate = e.rate === "network" || e.rate === undefined ? network : Number(e.rate);
+    const enabled = e.enabled !== false;
+    const held = enabled ? vbanHeld.get(e.id) : undefined;
+    return {
+      id: e.id,
+      type: e.type,
+      name: e.name,
+      enabled,
+      state: !enabled ? "disabled" : held ? "waiting" : "running",
+      reason: held ? held.reason : null,
+      ...(held && held.reason_code ? { reason_code: held.reason_code } : {}),
+      rate,
+      format: (e.vban && e.vban.format) || "int24",
+      channels: 2,
+      delay_ms: e.delay_ms || 0,
+      latency_ms: 66.6666 + (e.delay_ms || 0) + (rate === 48000 ? 0 : 1000 / 60),
+      blocks_sent: 0,
+      blocks_dropped: 0,
+      ...(enabled && e.vban
+        ? {
+            vban: {
+              enabled: true,
+              running: true,
+              stream_name: e.vban.stream_name || "sp-program",
+              blocks_sent: 0,
+              packets_sent: 0,
+              send_errors: 0,
+              blocks_dropped: 0,
+              blocks_substituted: 0,
+              late_sends: 0,
+              late_max_us: 0,
+              late_events: [],
+              send_interval_p99_us: 0,
+              frame_counter: 0,
+              slew_owed_us: 0,
+              targets: [{ target: `${e.vban.host}:${e.vban.port}`, addr: null, error: null }],
+            },
+          }
+        : {}),
+    };
+  });
+}
+
 // #212: the NDI input "OBS manuál" — `MACHINE (stream)` → `stream`, like
 // the server's `extract_ndi_stream_name`.
 function ndiStreamName(full) {
@@ -1261,6 +1541,62 @@ app.post("/api/v1/program/cut", (req, res) => {
   }
   res.json({ ...programBody(), input: inputBody(), remote: remoteBody() });
 });
+// #147: mirrors `GET /api/v1/program/trace` (`playback::program_trace::
+// TraceAnswer`): the mock runs no SP-program sender, so the trace holds no
+// record; the window, its clamp to 2 min and the 400 refusals (a fixed text,
+// never the value sent) are the server's.
+const TRACE_MAX_SPAN_MS = 120000;
+const TRACE_COLUMNS = [
+  "utc_ms",
+  "wire_100ns",
+  "source",
+  "kind",
+  "live",
+  "taken_us",
+  "fed_us",
+  "submit_start_us",
+  "submitted_us",
+  "late",
+  "close",
+  "song",
+];
+function traceBound(raw) {
+  if (raw === undefined) return { ok: true, value: null };
+  if (typeof raw !== "string" || !/^[+-]?\d+$/.test(raw)) return { ok: false };
+  return { ok: true, value: Number.parseInt(raw, 10) };
+}
+app.get("/api/v1/program/trace", (req, res) => {
+  const from = traceBound(req.query.from_utc_ms);
+  if (!from.ok) {
+    res.status(400).send("from_utc_ms must be an integer (UTC ms)");
+    return;
+  }
+  const to = traceBound(req.query.to_utc_ms);
+  if (!to.ok) {
+    res.status(400).send("to_utc_ms must be an integer (UTC ms)");
+    return;
+  }
+  const toMs = to.value ?? Date.now();
+  const fromMs = from.value ?? toMs - TRACE_MAX_SPAN_MS;
+  if (fromMs > toMs) {
+    res.status(400).send("from_utc_ms is after to_utc_ms");
+    return;
+  }
+  const clamped = toMs - fromMs > TRACE_MAX_SPAN_MS;
+  res.json({
+    from_utc_ms: fromMs,
+    to_utc_ms: clamped ? fromMs + TRACE_MAX_SPAN_MS : toMs,
+    clamped,
+    max_span_ms: TRACE_MAX_SPAN_MS,
+    capacity: 18000,
+    held: 0,
+    oldest_utc_ms: null,
+    newest_utc_ms: null,
+    clumps: { boundaries: 0, late: 0, close: 0, songs: 0 },
+    columns: TRACE_COLUMNS,
+    rows: [],
+  });
+});
 // Test-only: the last cut body the dashboard posted (backend-effect check).
 app.get("/__mock/program-last-cut", (_req, res) => {
   res.json({ body: programLastCut });
@@ -1328,7 +1664,7 @@ app.get('/api/v1/lyrics/songs', (req, res) => {
       title: 'Song One',
       song: 'One',
       artist: 'Artist',
-      source: 'ensemble:qwen3+autosub',
+      source: 'lrclib+mtl@rev1/g35t-ok',
       pipeline_version: 2,
       quality_score: 0.82,
       has_lyrics: true,
@@ -1384,7 +1720,7 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
       youtube_id: 'abc',
       song: 'Song',
       artist: 'Artist',
-      source: 'ensemble:qwen3+autosub',
+      source: 'lrclib+mtl@rev1/g35t-ok',
       pipeline_version: 2,
       quality_score: 0.82,
       has_lyrics: true,
@@ -1392,9 +1728,9 @@ app.get('/api/v1/lyrics/songs/:id', (req, res) => {
       manual_priority: false,
       lyrics_reference: false,
     },
-    lyrics_json: { version: 2, source: 'ensemble:qwen3+autosub', lines: [] },
+    lyrics_json: { version: 2, source: 'lrclib+mtl@rev1/g35t-ok', lines: [] },
     audit_json: {
-      providers_run: ['qwen3', 'autosub'],
+      providers_run: ['mtl', 'gemini-3-5-transcribe'],
       quality_metrics: { avg_confidence: 0.82 },
     },
   });

@@ -214,7 +214,7 @@ async function expectServerFader(
 
 let consoleMessages: string[] = [];
 /** What afterEach must put back: set as soon as the test knows it. */
-let cleanup: { pid: number; foundDabing: number } | null = null;
+let cleanup: { pid: number; foundDub: MixMemory } | null = null;
 
 test.beforeEach(async ({ page }) => {
   consoleMessages = [];
@@ -226,15 +226,16 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-// Runs even when the test body failed or timed out: vokály + podklad full
-// (100 %), dabing as found (the #184 G2 restore rule), stop the preview this
-// test started and pause the Dabing output. Then (f) — zero
+// Runs even when the test body failed or timed out: the dub memory exactly as
+// found (all three faders; a fixed vokály 1 made every deploy play the original
+// voice under the dub), stop the preview this test started and pause the Dabing
+// output. Then (f) — zero
 // console errors / warnings — is the LAST assertion.
 test.afterEach(async ({ page, request }) => {
   if (cleanup) {
     await request
       .patch("/api/v1/mix", {
-        data: { kind: "dub", vokaly: 1.0, podklad: 1.0, dabing: cleanup.foundDabing },
+        data: { kind: "dub", ...cleanup.foundDub },
         timeout: 10000,
       })
       .catch(() => {});
@@ -282,7 +283,7 @@ test("the owner's path: Prehľad → Dabing → play → Živý náhľad → rea
     `[#184 G2] owner path on Dabing playlist ${pid}, video ${videoId}; dub mix as found ` +
       JSON.stringify(foundMix.dub),
   );
-  cleanup = { pid, foundDabing: foundMix.dub.dabing };
+  cleanup = { pid, foundDub: foundMix.dub };
   let kind = "";
 
   // ── The owner's clicks ─────────────────────────────────────────────────

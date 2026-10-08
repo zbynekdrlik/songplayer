@@ -85,7 +85,7 @@ fn black() -> Picture {
 /// (0 for the program's own standby).
 fn queued(bus: &ProgramBus) -> Vec<(i64, u32)> {
     let mut out = Vec::new();
-    while let Take::Job(job) = bus.take_timeout(Duration::ZERO) {
+    while let Take::Job(job, _) = bus.take_timeout(Duration::ZERO) {
         match job {
             ProgramJob::Source(j) => out.push((j.video_tc_100ns, j.width)),
             ProgramJob::Standby { stamp_100ns } => out.push((stamp_100ns, 0)),

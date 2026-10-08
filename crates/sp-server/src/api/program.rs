@@ -18,9 +18,13 @@
 //!   consumer takes SP-program, so the cut would black them all), recorded
 //!   as a keep.
 //!
-//! Both answer the program state plus `vban`, the #210 VBAN audio output's
-//! telemetry (`playback::vban_out::VbanStatus`), `input`, the #212 NDI
-//! input's (`playback::ndi_input::NdiInputStatus`), `remote`, the #213
+//! Both answer the program state plus `outputs` (#233): every audio output
+//! of the list in list order (`playback::audio_out::OutputStatus`: id, type,
+//! name, enabled, state + reason, rate, format, channels, delay, latency,
+//! blocks sent / dropped, and a VBAN entry's #210 telemetry under `vban` —
+//! the top-level `vban` block is gone), `audio_network_rate` and
+//! `outputs_problems` (stored entries this version could not run); `input`,
+//! the #212 NDI input's (`playback::ndi_input::NdiInputStatus`), `remote`, the #213
 //! Companion remote control's (`remote::RemoteStatus`, #221 L3: with
 //! `program_scene`, SP-program's scene name), and `degraded_reason` (#221
 //! B4 step 6: "no NDI receiver on SP-program" while a source is on program
@@ -36,7 +40,7 @@
 //! playlists cannot be read): the dashboard disables their buttons.
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
@@ -45,6 +49,7 @@ use tracing::{info, warn};
 use sp_core::config::PROGRAM_INPUT_ID;
 
 use crate::AppState;
+use crate::playback::audio_out::OutputStatus;
 use crate::playback::ndi_health_expect::program_degraded_reason;
 use crate::playback::ndi_input::{InputSettings, NdiInputStatus, load_input_settings};
 use crate::playback::program_bus::{ProgramBus, ProgramStatus};
@@ -52,7 +57,8 @@ use crate::playback::program_max::MaxStatus;
 use crate::playback::program_switch::{
     RefusedSource, SourceError, Via, refused_sources, switch_source,
 };
-use crate::playback::vban_out::VbanStatus;
+use crate::playback::program_trace::TraceAnswer;
+use crate::playback::wallclock::utc_now_100ns;
 use crate::remote::{RemoteSettings, RemoteStatus, load_remote_settings};
 
 /// Body of `POST /api/v1/program/cut`.
@@ -71,8 +77,9 @@ pub struct CutRefusedBody {
     pub error: &'static str,
 }
 
-/// The body of both program routes: the program state + the VBAN, NDI input
-/// and remote-control telemetry, and SP-program's receiver expectation.
+/// The body of both program routes: the program state + the audio outputs,
+/// NDI input and remote-control telemetry, and SP-program's receiver
+/// expectation.
 #[derive(Debug, Serialize)]
 pub struct ProgramResponse {
     #[serde(flatten)]
@@ -81,7 +88,12 @@ pub struct ProgramResponse {
     /// program and nothing receives `SP-program` (`null` otherwise, and
     /// before the sender polled its receivers).
     pub degraded_reason: Option<&'static str>,
-    pub vban: VbanStatus,
+    /// #233: every audio output, in list order.
+    pub outputs: Vec<OutputStatus>,
+    /// #233: the network sample rate an output at "network" runs at.
+    pub audio_network_rate: u32,
+    /// #233: stored entries this version could not run (named, skipped).
+    pub outputs_problems: Vec<String>,
     pub input: NdiInputStatus,
     pub remote: RemoteStatus,
     pub max: MaxStatus,
@@ -109,7 +121,9 @@ impl ProgramResponse {
         Self {
             program,
             degraded_reason,
-            vban: bus.vban().status(),
+            outputs: bus.outputs().status(),
+            audio_network_rate: bus.outputs().network_rate(),
+            outputs_problems: bus.outputs().problems(),
             input: bus.input().status(&stored.input),
             remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             max: bus.max().status(),
@@ -204,6 +218,34 @@ pub async fn post_program_cut(
     Json(ProgramResponse::new(bus, status, &stored, refused)).into_response()
 }
 
+/// The query of `GET /api/v1/program/trace` (#147), as text: parsed by
+/// `TraceAnswer::build`, so a refusal never repeats what was sent.
+#[derive(Debug, Deserialize)]
+pub struct TraceQuery {
+    pub from_utc_ms: Option<String>,
+    pub to_utc_ms: Option<String>,
+}
+
+/// `GET /api/v1/program/trace?from_utc_ms=&to_utc_ms=` (#147): the
+/// `SP-program` sender's per-boundary records whose submit returned in the
+/// window (`playback::program_trace::TraceAnswer`, compact rows). `to`
+/// defaults to now, `from` to 2 min before `to`; a window over 2 min ends 2
+/// min after `from` (`clamped`). `400` with a fixed text for a value that is
+/// not an integer, or a `from` after its `to`. Reads a snapshot of the ring:
+/// never waits for the sender.
+pub async fn get_program_trace(
+    State(state): State<AppState>,
+    Query(query): Query<TraceQuery>,
+) -> Response {
+    let now_ms = utc_now_100ns().div_euclid(10_000);
+    let from = query.from_utc_ms.as_deref();
+    let to = query.to_utc_ms.as_deref();
+    match TraceAnswer::build(state.program_bus.trace(), from, to, now_ms) {
+        Ok(answer) => Json(answer).into_response(),
+        Err(refusal) => (StatusCode::BAD_REQUEST, refusal).into_response(),
+    }
+}
+
 #[cfg(test)]
 #[path = "program_tests.rs"]
 mod tests;
@@ -211,5 +253,11 @@ mod tests;
 #[path = "program_tests_max.rs"]
 mod tests_max;
 #[cfg(test)]
+#[path = "program_tests_outputs.rs"]
+mod tests_outputs;
+#[cfg(test)]
 #[path = "program_tests_switch.rs"]
 mod tests_switch;
+#[cfg(test)]
+#[path = "program_tests_trace.rs"]
+mod tests_trace;

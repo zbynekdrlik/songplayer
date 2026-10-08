@@ -18,6 +18,10 @@
 //!   `peers`: `peer::config::checked`) refuses the whole PATCH with 400 and
 //!   the reason, before anything is written. The reason names keys, peers and
 //!   positions, never a secret.
+//! - #233: `audio_outputs` / `audio_network_rate` are checked by
+//!   `playback::audio_out_config::checked`: a bad value refuses the whole
+//!   PATCH (400, the reason names the entry and the field, never the value),
+//!   a good one is stored normalized.
 //!
 //! The workers read the settings from the database, never through this API,
 //! so they always see the secrets in clear.
@@ -84,7 +88,8 @@ pub async fn prepare(
     keys.sort();
     let mut writes = Vec::new();
     for key in keys {
-        let value = crate::peer::config::checked(pool, key, &sent[key], &sent).await?;
+        let value = crate::playback::audio_out_config::checked(key, &sent[key])?;
+        let value = crate::peer::config::checked(pool, key, &value, &sent).await?;
         writes.push((key.clone(), value));
     }
     Ok(writes)
@@ -140,3 +145,6 @@ pub async fn update_settings(
 #[cfg(test)]
 #[path = "settings_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "settings_tests_audio.rs"]
+mod tests_audio;

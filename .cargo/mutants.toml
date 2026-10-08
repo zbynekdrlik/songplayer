@@ -117,6 +117,16 @@ exclude_re = [
   #   proven on WARP
   #   (windows-latest) by tests/warp.rs and tests/spout.rs.
   'sp-gpu/src/win/',
+  # playback/asio_win.rs (+ its Windows-job tests, #233): the azo (COM) calls
+  #   of the ASIO output, a #[cfg(windows)] module: dead on the Linux
+  #   runner, so every mutant builds and survives. Its decisions live in the
+  #   Linux-tested asio_format (the sample types, the channel fill),
+  #   asio_state (backoff, close reasons, message replies, stall, notes),
+  #   asio_out (the worker's open / run / close over a scripted driver),
+  #   asrc_servo and asrc; the glue itself runs in the Windows job's
+  #   asio_win_tests.rs (the copy-only buffer switch, every slot's
+  #   callbacks, no driver needed) and the SNV / PP post-deploy ASIO gate.
+  'sp-server/src/playback/asio_win',
   # -- genlock #146–#151: Windows-only paced pipeline + Python MTL shell-out --
   # playback/pipeline_paced.rs + pipeline_paced_idle.rs: whole modules are
   #   #[cfg(windows)] (mod.rs) so they are NOT compiled on the Linux mutation
