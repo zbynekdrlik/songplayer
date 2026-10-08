@@ -864,6 +864,26 @@ test("a delay or a channel that is no whole number is refused in Slovak, never s
   expect(realConsoleErrors()).toEqual([]);
 });
 
+test("a removed row's unreadable field does not refuse the new row that takes its id (#233 release review)", async ({
+  page,
+}) => {
+  const patches = settingsPatches(page);
+  await openSettings(page);
+  const rows = page.locator('[data-testid="audio-output-row"]');
+  await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+  await rows.nth(0).locator('[data-testid="audio-output-delay"]').fill("");
+  await rows.nth(0).locator('[data-testid="audio-output-remove"]').click();
+  await expect(rows).toHaveCount(0);
+  // Nothing stored and no row: the new row is out-1 again.
+  await page.locator('[data-testid="audio-outputs-add-vban"]').click();
+  await expect(rows.nth(0)).toHaveAttribute("data-id", "out-1");
+  await rows.nth(0).locator('[data-testid="audio-output-vban-host"]').fill("dev1.lan");
+  await page.locator('[data-testid="audio-outputs-save"]').click();
+  await expect(page.locator('[data-testid="audio-outputs-message"]')).toHaveText("Uložené");
+  expect(JSON.parse(patches[0]["audio_outputs"] as string)[0].delay_ms).toBe(0);
+  expect(realConsoleErrors()).toEqual([]);
+});
+
 test("Uložené goes away at the next edit (#233 release review)", async ({ page }) => {
   await openSettings(page);
   await page.locator('[data-testid="audio-outputs-add-vban"]').click();
