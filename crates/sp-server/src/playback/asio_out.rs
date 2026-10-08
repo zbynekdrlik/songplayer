@@ -295,6 +295,14 @@ impl Closed {
         self.overflows += run.overflows;
         self.recentres += run.servo.status().recentres;
     }
+
+    /// These counts as the output's status counters.
+    fn write(&self, s: &mut AsioStatus) {
+        s.underruns = self.underruns;
+        s.overloads = self.overloads;
+        s.overflows = self.overflows;
+        s.recentres = self.recentres;
+    }
 }
 
 /// The worker's state machine ([`run_asio_worker`] loops on [`Self::step`]).
@@ -361,6 +369,9 @@ impl AsioWorker {
             Some(reason) => {
                 let ran = now_100ns - run.opened_at_100ns;
                 self.closed.add(run, &*device);
+                // The run's counts go out with its close.
+                let closed = self.closed;
+                out.update(|l| closed.write(&mut l.status));
                 self.close(out, device, now_100ns, reason, ran);
             }
             None => publish(run, out, &*device, &self.closed),
@@ -563,6 +574,8 @@ fn log_stale(id: &str, stale: usize) {
 /// runs' + this run's).
 fn publish(run: &Run, out: &AsioOut, device: &dyn AsioDevice, closed: &Closed) {
     let servo = run.servo.status();
+    let mut counters = *closed;
+    counters.add(run, device);
     let latency = asio_latency_ms(
         servo.latency_ms,
         run.asrc.delay_frames(),
@@ -574,10 +587,7 @@ fn publish(run: &Run, out: &AsioOut, device: &dyn AsioDevice, closed: &Closed) {
         l.status.rate_ppm = servo.rate_ppm;
         l.status.locked = servo.locked;
         l.status.latency_ms = latency;
-        l.status.recentres = closed.recentres + servo.recentres;
-        l.status.underruns = closed.underruns + device.underruns();
-        l.status.overflows = closed.overflows + run.overflows;
-        l.status.overloads = closed.overloads + run.overloads;
+        counters.write(&mut l.status);
     });
 }
 
