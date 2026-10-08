@@ -187,11 +187,11 @@ fn drain(bus: &ProgramBus) -> Vec<SubmitJob> {
     let mut out = Vec::new();
     for _ in 0..64 {
         match bus.take_timeout(Duration::ZERO) {
-            Take::Job(ProgramJob::Source(job)) => out.push(job),
-            Take::Job(ProgramJob::Standby { stamp_100ns }) => {
+            Take::Job(ProgramJob::Source(job), _) => out.push(job),
+            Take::Job(ProgramJob::Standby { stamp_100ns }, _) => {
                 panic!("the program filled boundary {stamp_100ns} — the input must own it")
             }
-            Take::Job(ProgramJob::Mix(_)) => panic!("a Cut spec never mixes"),
+            Take::Job(ProgramJob::Mix(_), _) => panic!("a Cut spec never mixes"),
             Take::Idle | Take::Stopped => break,
         }
     }

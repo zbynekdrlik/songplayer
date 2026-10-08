@@ -412,7 +412,7 @@ fn a_new_source_whose_first_frame_after_the_cut_is_slow_is_waited_for() {
     );
 
     let mut sent = Vec::new();
-    while let Take::Job(job) = bus.take_timeout(Duration::ZERO) {
+    while let Take::Job(job, _) = bus.take_timeout(Duration::ZERO) {
         let width = match &job {
             ProgramJob::Source(j) => j.width,
             ProgramJob::Standby { .. } => 0,
@@ -762,13 +762,13 @@ fn the_bus_wakes_the_sender_and_stops_after_draining() {
         "A can own a boundary"
     );
     match bus.take_timeout(Duration::ZERO) {
-        Take::Job(job) => assert_eq!(job.stamp_100ns(), b(1)),
+        Take::Job(job, _) => assert_eq!(job.stamp_100ns(), b(1)),
         _ => panic!("the forwarded boundary is queued"),
     }
     bus.release_due(b(2) + grace());
     bus.stop();
     match bus.take_timeout(Duration::ZERO) {
-        Take::Job(ProgramJob::Standby { stamp_100ns }) => assert_eq!(stamp_100ns, b(2)),
+        Take::Job(ProgramJob::Standby { stamp_100ns }, _) => assert_eq!(stamp_100ns, b(2)),
         _ => panic!("a stopped bus still hands out what is queued"),
     }
     assert!(matches!(bus.take_timeout(Duration::ZERO), Take::Stopped));
@@ -791,7 +791,7 @@ fn a_waiting_sender_wakes_on_a_queued_boundary_and_on_stop() {
         let bus = bus.clone();
         std::thread::spawn(move || {
             let t = std::time::Instant::now();
-            let got = matches!(bus.take_timeout(long), Take::Job(_));
+            let got = matches!(bus.take_timeout(long), Take::Job(..));
             (got, t.elapsed())
         })
     };
