@@ -91,6 +91,7 @@ use crate::playback::program_on_air::OnAir;
 use crate::playback::program_output_timing::{
     BoundaryMarks, BoundaryTiming, BoundaryTimingStatus, LateBoundary,
 };
+use crate::playback::program_trace::ProgramTrace;
 use crate::playback::program_transition::{
     ActiveWindow, Cue, MixJob, SpecSource, TransitionCounters, TransitionSpec, TransitionStatus,
     Window,
@@ -269,7 +270,8 @@ pub struct ProgramCore {
     counters: TransitionCounters,
     /// The last stamp each source touched or offered (its liveness + progress).
     last_offer: HashMap<i64, i64>,
-    queue: SubmitQueue<ProgramJob>,
+    /// Each queued job with the source it shows (#147: the trace's `source`).
+    queue: SubmitQueue<(ProgramJob, Option<i64>)>,
     health: ProgramHealth,
     /// #221: the last receiver poll found `SP-program` dark (a source on
     /// program, no receiver); its WARN is not repeated.
@@ -536,7 +538,7 @@ impl ProgramCore {
                 None => {
                     if let Some(job) = self.pending.remove(&expected) {
                         self.health.forwarded += 1;
-                        self.commit(ProgramJob::Source(job));
+                        self.commit(ProgramJob::Source(job), self.owner_of(expected));
                         continue;
                     }
                     match now_100ns {
@@ -558,9 +560,8 @@ impl ProgramCore {
                 continue;
             }
             self.health.filled += 1;
-            self.commit(ProgramJob::Standby {
-                stamp_100ns: expected,
-            });
+            let (stamp_100ns, owner) = (expected, self.owner_of(expected));
+            self.commit(ProgramJob::Standby { stamp_100ns }, owner);
         }
     }
 
@@ -577,10 +578,12 @@ impl ProgramCore {
         to.into_iter().chain(from).min()
     }
 
-    /// Queue one boundary for the `SP-program` sender and advance.
-    fn commit(&mut self, job: ProgramJob) {
+    /// Queue one boundary for the `SP-program` sender and advance. #147:
+    /// with the source it shows, decided now (a pruned segment no longer
+    /// names the owner of a boundary the sender takes later).
+    fn commit(&mut self, job: ProgramJob, source: Option<i64>) {
         self.last = Some(job.stamp_100ns());
-        if let HandoffOutcome::Coalesced { .. } = self.queue.offer(job) {
+        if let HandoffOutcome::Coalesced { .. } = self.queue.offer((job, source)) {
             self.health.coalesced += 1;
         }
         self.prune();
@@ -605,8 +608,15 @@ impl ProgramCore {
         self.counters.transitions_done += (before - self.windows.len()) as u64;
     }
 
-    /// The next queued program boundary for the sender.
+    /// The next queued program boundary (the tests' view of the queue).
     pub fn take(&mut self) -> Option<ProgramJob> {
+        self.take_queued().map(|(job, _)| job)
+    }
+
+    /// The next queued program boundary for the sender, and the source it
+    /// shows: the boundary's owner when it was queued, a held window
+    /// boundary's outgoing source, a mix's incoming one (#147).
+    pub fn take_queued(&mut self) -> Option<(ProgramJob, Option<i64>)> {
         self.queue.take()
     }
 
@@ -679,7 +689,8 @@ impl ProgramCore {
 
 /// What the `SP-program` sender thread got from [`ProgramBus::take_timeout`].
 pub enum Take {
-    Job(ProgramJob),
+    /// A queued boundary and the source it shows (#147).
+    Job(ProgramJob, Option<i64>),
     /// The wait timed out with nothing queued — check for missed boundaries.
     Idle,
     /// The bus was stopped and the queue is drained.
@@ -708,6 +719,8 @@ pub struct ProgramBus {
     remote: Arc<RemoteShared>,
     /// #223 S2: the `SP-program-MAX` hand-off + telemetry (`max`).
     max: Arc<MaxOut>,
+    /// #147: the sender's per-boundary trace (`GET /api/v1/program/trace`).
+    trace: Arc<ProgramTrace>,
     /// #213: serializes [`persist_and_cut`] — the API and the remote control
     /// can cut concurrently, and the persisted source must be the one cut last.
     cut_serial: tokio::sync::Mutex<()>,
@@ -737,6 +750,7 @@ impl ProgramBus {
             input: Arc::new(NdiInputShared::default()),
             remote: Arc::new(RemoteShared::default()),
             max: Arc::new(MaxOut::new()),
+            trace: Arc::new(ProgramTrace::new()),
             cut_serial: tokio::sync::Mutex::new(()),
             on_air: watch::channel(OnAir::default()).0,
             switch_order: tokio::sync::Mutex::new(()),
@@ -761,6 +775,11 @@ impl ProgramBus {
     /// #223 S2: the `SP-program-MAX` hand-off and its telemetry.
     pub fn max(&self) -> &Arc<MaxOut> {
         &self.max
+    }
+
+    /// #147: the sender's per-boundary trace.
+    pub fn trace(&self) -> &Arc<ProgramTrace> {
+        &self.trace
     }
 
     /// See [`ProgramCore::set_transition`].
@@ -852,8 +871,8 @@ impl ProgramBus {
             .ready
             .wait_timeout_while(st, wait, |s| s.core.queued() == 0 && !s.stop)
             .unwrap_or_else(|p| p.into_inner());
-        match st.core.take() {
-            Some(job) => Take::Job(job),
+        match st.core.take_queued() {
+            Some((job, source)) => Take::Job(job, source),
             None if st.stop => Take::Stopped,
             None => Take::Idle,
         }

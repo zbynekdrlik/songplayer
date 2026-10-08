@@ -720,3 +720,6 @@ impl MinuteLog {
 #[cfg(test)]
 #[path = "program_trace_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_trace_tests_bus.rs"]
+mod tests_bus;

@@ -161,6 +161,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/program/cut",
             axum::routing::post(program::post_program_cut),
         )
+        // #147: the SP-program sender's per-boundary trace, by UTC window.
+        .route(
+            "/api/v1/program/trace",
+            axum::routing::get(program::get_program_trace),
+        )
         // #233: the registered ASIO drivers (an ASIO output's driver list).
         .route(
             "/api/v1/audio/asio-drivers",

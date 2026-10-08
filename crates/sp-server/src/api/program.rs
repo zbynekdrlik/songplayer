@@ -40,7 +40,7 @@
 //! playlists cannot be read): the dashboard disables their buttons.
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
@@ -57,6 +57,8 @@ use crate::playback::program_max::MaxStatus;
 use crate::playback::program_switch::{
     RefusedSource, SourceError, Via, refused_sources, switch_source,
 };
+use crate::playback::program_trace::TraceAnswer;
+use crate::playback::wallclock::utc_now_100ns;
 use crate::remote::{RemoteSettings, RemoteStatus, load_remote_settings};
 
 /// Body of `POST /api/v1/program/cut`.
@@ -216,6 +218,34 @@ pub async fn post_program_cut(
     Json(ProgramResponse::new(bus, status, &stored, refused)).into_response()
 }
 
+/// The query of `GET /api/v1/program/trace` (#147), as text: parsed by
+/// `TraceAnswer::build`, so a refusal never repeats what was sent.
+#[derive(Debug, Deserialize)]
+pub struct TraceQuery {
+    pub from_utc_ms: Option<String>,
+    pub to_utc_ms: Option<String>,
+}
+
+/// `GET /api/v1/program/trace?from_utc_ms=&to_utc_ms=` (#147): the
+/// `SP-program` sender's per-boundary records whose submit returned in the
+/// window (`playback::program_trace::TraceAnswer`, compact rows). `to`
+/// defaults to now, `from` to 2 min before `to`; a window over 2 min ends 2
+/// min after `from` (`clamped`). `400` with a fixed text for a value that is
+/// not an integer, or a `from` after its `to`. Reads a snapshot of the ring:
+/// never waits for the sender.
+pub async fn get_program_trace(
+    State(state): State<AppState>,
+    Query(query): Query<TraceQuery>,
+) -> Response {
+    let now_ms = utc_now_100ns().div_euclid(10_000);
+    let from = query.from_utc_ms.as_deref();
+    let to = query.to_utc_ms.as_deref();
+    match TraceAnswer::build(state.program_bus.trace(), from, to, now_ms) {
+        Ok(answer) => Json(answer).into_response(),
+        Err(refusal) => (StatusCode::BAD_REQUEST, refusal).into_response(),
+    }
+}
+
 #[cfg(test)]
 #[path = "program_tests.rs"]
 mod tests;
@@ -228,3 +258,6 @@ mod tests_outputs;
 #[cfg(test)]
 #[path = "program_tests_switch.rs"]
 mod tests_switch;
+#[cfg(test)]
+#[path = "program_tests_trace.rs"]
+mod tests_trace;

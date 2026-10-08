@@ -95,7 +95,7 @@ impl ProgramCore {
             return WindowStep::Next;
         }
         if to_decided && (from_here || (to_here && (from_done || forced))) {
-            self.commit_held(expected);
+            self.commit_held(expected, w.from);
             return WindowStep::Next;
         }
         WindowStep::Missed(to_decided && from_done)
@@ -135,17 +135,17 @@ impl ProgramCore {
 
     /// A held window boundary: the outgoing source's own pair at full level,
     /// or the program's standby pair when it missed; the incoming side's pair
-    /// (never on program) is dropped.
-    fn commit_held(&mut self, stamp: i64) {
+    /// (never on program) is dropped. Either shows `from` (#147).
+    fn commit_held(&mut self, stamp: i64, from: Option<i64>) {
         self.pending.remove(&stamp);
         match self.from_pending.remove(&stamp) {
             Some(job) => {
                 self.health.forwarded += 1;
-                self.commit(ProgramJob::Source(job));
+                self.commit(ProgramJob::Source(job), from);
             }
             None => {
                 self.health.filled += 1;
-                self.commit(ProgramJob::Standby { stamp_100ns: stamp });
+                self.commit(ProgramJob::Standby { stamp_100ns: stamp }, from);
             }
         }
     }
@@ -158,12 +158,13 @@ impl ProgramCore {
         let side_missing = to.is_none() || (from.is_none() && w.from.is_some());
         self.counters.mixed_boundaries += 1;
         self.counters.side_fills += u64::from(side_missing);
-        self.commit(ProgramJob::Mix(MixJob {
+        let mix = MixJob {
             stamp_100ns: stamp,
             from,
             to,
             slot: w.slot(stamp).unwrap_or(0),
             n_slots: w.n_slots,
-        }));
+        };
+        self.commit(ProgramJob::Mix(mix), w.from); // #147: shows the incoming side
     }
 }
