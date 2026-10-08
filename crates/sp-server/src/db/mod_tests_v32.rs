@@ -71,5 +71,8 @@ async fn migration_v32_advances_schema_version() {
         .await
         .unwrap();
     assert_eq!(version, i64::from(MIGRATIONS.last().unwrap().0));
-    assert_eq!(MIGRATIONS.last().unwrap().0, 32);
+    assert!(
+        MIGRATIONS.last().unwrap().0 >= 32,
+        "V32 must be part of the migration list"
+    );
 }
