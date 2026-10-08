@@ -83,16 +83,21 @@ pub async fn first(ex: Option<&Arc<Exchange>>, row: &VideoLyricsRow) -> PeerStep
     }
 }
 
-/// `?1` = the YouTube id, `?2` = the Live-Translate source.
-const LOCAL_ONLY: &str = "SELECT EXISTS (SELECT 1 FROM videos WHERE youtube_id = ?1 \
-     AND (lyrics_manual_priority != 0 OR TRIM(COALESCE(lyrics_override_text, '')) != '' \
-          OR dub_requested = 1 OR lyrics_source = ?2))";
+/// `?1` = the YouTube id, `?2` = the Live-Translate source. A reprocess
+/// flag counts only on a row of an active playlist (review round 7): the
+/// lyrics queue never takes another, so its flag is never cleared.
+const LOCAL_ONLY: &str = "SELECT EXISTS (SELECT 1 FROM videos v WHERE v.youtube_id = ?1 \
+     AND (TRIM(COALESCE(v.lyrics_override_text, '')) != '' \
+          OR v.dub_requested = 1 OR v.lyrics_source = ?2 \
+          OR (v.lyrics_manual_priority != 0 AND EXISTS (SELECT 1 FROM playlists p \
+              WHERE p.id = v.playlist_id AND p.is_active = 1))))";
 
 /// The lyrics of `youtube_id` stay this node's own: an operator asked THIS
-/// node (a reprocess, a "Nesedí") or gave it the text, or its
-/// `{yt}_lyrics.json` is a dub's subtitles — on ANY row of the video, whose
-/// rows serve that one file (review round 5: the hook read the ask and the
-/// text on the asked row only). The hook and the stand-in's look ask it.
+/// node (a reprocess, a "Nesedí", on a row of an active playlist) or gave
+/// it the text, or its `{yt}_lyrics.json` is a dub's subtitles — on ANY row
+/// of the video, whose rows serve that one file (review round 5: the hook
+/// read the ask and the text on the asked row only). The hook and the
+/// stand-in's look ask it.
 pub(crate) async fn kept_local(pool: &SqlitePool, youtube_id: &str) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(LOCAL_ONLY)
         .bind(youtube_id)

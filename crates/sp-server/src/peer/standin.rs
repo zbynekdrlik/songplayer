@@ -11,9 +11,9 @@
 //!   listed (its catalog read now or not), or `Exchange::after_failed_fetch`
 //!   giving up on that peer's copy. V31 also back-filled the ones made before this record
 //!   existed.
-//! - Kept as it was (`Exchange::keep_standing`, its age and next look) when
-//!   the job runs here again while it stands in: a run put back, a fetch
-//!   from another peer given up.
+//! - Kept as it was (its age and next look, and a spent wait its hand-off
+//!   left: `Exchange::run_here_standing`) when the job runs here again while
+//!   it stands in: a run put back, a hand-off or a fetch given up.
 //! - Over when the peer's copy is taken (`Exchange::fetched`) or the job
 //!   runs here for another reason (`Exchange::run_here`: an operator's ask,
 //!   another audio). The lyrics hook never takes a copy into one row of a
@@ -105,30 +105,6 @@ impl Exchange {
             .flatten()
     }
 
-    /// `job` of `youtube_id` runs here again while it stands in (a run put
-    /// back, a fetch from another peer given up): the stand-in is written
-    /// back as it was (`run_here` dropped it), its age and next look kept.
-    pub(crate) async fn keep_standing(&self, job: Job, youtube_id: &str, s: &StandinRecord) {
-        let kept = models_peer::record_standin(
-            &self.pool,
-            youtube_id,
-            job.as_str(),
-            &s.peer,
-            s.made_at_ms,
-            s.next_check_ms,
-        )
-        .await;
-        if let Err(e) = kept {
-            warn!(youtube_id, %e, "exchange: keeping a stand-in failed");
-        }
-        debug!(
-            youtube_id,
-            job = job.as_str(),
-            peer = %s.peer,
-            "exchange: run here again - it still stands in for the peer's copy"
-        );
-    }
-
     /// The lyrics hook met a peer's copy for `youtube_id`, whose track here
     /// stands in (`s`): the copy goes into every row of the video through
     /// the stand-in's own look, made due now, and row `video_id` is put back
@@ -164,9 +140,7 @@ impl Exchange {
             // The spent bound is kept: a run put back runs here again at
             // once (review round 5); the look's `fetched`, or the stand-in
             // kept for good, ends it.
-            let guard = self.run_here_waited(job, youtube_id).await;
-            self.keep_standing(job, youtube_id, s).await;
-            return PeerStep::Local(Some(guard));
+            return PeerStep::Local(Some(self.run_here_standing(job, youtube_id).await));
         }
         self.standin_due_now(job, youtube_id).await;
         self.defer(job, video_id, recheck_after(waited)).await

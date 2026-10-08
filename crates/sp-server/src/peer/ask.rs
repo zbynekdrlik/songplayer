@@ -152,24 +152,18 @@ impl Exchange {
                 Ask::Wait { peer, recheck }
             }
             Decision::Local(why) => {
-                if standing.is_none() {
-                    log_local(youtube_id, job, why);
+                // A job that stands in runs here keeping its stand-in and a
+                // spent bound its hand-off left (review rounds 5-7): its next
+                // pick, meeting the peer's copy, runs here at once.
+                if standing.is_some() {
+                    return Ask::Local(self.run_here_standing(job, youtube_id).await);
                 }
-                // A job that stands in keeps a spent bound its hand-off left
-                // (review round 6): its next pick, meeting the peer's copy,
-                // runs here at once, never a fresh 2 h.
-                let guard = if standing.is_some() {
-                    self.run_here_waited(job, youtube_id).await
-                } else {
-                    self.run_here(job, youtube_id).await
-                };
-                // A stand-in stays as it was while its job runs here again;
-                // else what runs here stands in for the copy of the peer this
-                // node took the song from once it waited the bound for that
-                // peer (read now or not).
-                if let Some(s) = &standing {
-                    self.keep_standing(job, youtube_id, s).await;
-                } else if why == LocalWhy::WaitedLongEnough
+                log_local(youtube_id, job, why);
+                let guard = self.run_here(job, youtube_id).await;
+                // What runs here stands in for the copy of the peer this node
+                // took the song from once it waited the bound for that peer
+                // (read now or not).
+                if why == LocalWhy::WaitedLongEnough
                     && let Some(peer) = song_source(&reads, song_from)
                 {
                     self.stand_in(job, youtube_id, peer).await;
@@ -188,23 +182,35 @@ impl Exchange {
     }
 
     /// `job` of `youtube_id` runs here: a wait of it ends (a later ask starts
-    /// a fresh one, never inheriting this one's spent bound), the records of
-    /// a peer's copy of what it makes are dropped (`forget_origins`: the job
-    /// replaces them), so is a stand-in of it (`peer::standin`: the caller
-    /// records a new one when it still stands in for a peer's copy), the
-    /// parts a fetch of it left are dropped (`drop_job_parts`), and the job
-    /// is announced while the returned guard lives.
+    /// a fresh one, never inheriting this one's spent bound), a stand-in of
+    /// it is over (`peer::standin`: the caller records a new one when what
+    /// it makes stands in for a peer's copy), and [`Self::start_here`].
     pub(crate) async fn run_here(&self, job: Job, youtube_id: &str) -> JobGuard {
         self.end_wait(job, youtube_id).await;
-        self.run_here_waited(job, youtube_id).await
+        self.drop_standin(job, youtube_id).await;
+        self.start_here(job, youtube_id).await
     }
 
-    /// [`Self::run_here`] keeping the job's wait: a job that stands in keeps
-    /// a spent bound its hand-off left, so a run put back runs here again at
-    /// once (`peer::standin`, review rounds 5 and 6).
-    pub(crate) async fn run_here_waited(&self, job: Job, youtube_id: &str) -> JobGuard {
+    /// `job` of `youtube_id` runs here while what it makes stands in for a
+    /// peer's copy (a run put back, a hand-off or a fetch given up): the
+    /// stand-in stays as it was (its age and next look), and so does a
+    /// spent bound its hand-off left, so the next pick that meets the
+    /// peer's copy runs here at once (`peer::standin`, review rounds 5-7).
+    pub(crate) async fn run_here_standing(&self, job: Job, youtube_id: &str) -> JobGuard {
+        debug!(
+            youtube_id,
+            job = job.as_str(),
+            "exchange: run here again - it still stands in for the peer's copy"
+        );
+        self.start_here(job, youtube_id).await
+    }
+
+    /// The records of a peer's copy of what `job` makes are dropped
+    /// (`forget_origins`: the job replaces them), so are the parts a fetch
+    /// of it left (`drop_job_parts`), and the job is announced while the
+    /// returned guard lives.
+    async fn start_here(&self, job: Job, youtube_id: &str) -> JobGuard {
         self.forget_origins(job, youtube_id).await;
-        self.drop_standin(job, youtube_id).await;
         self.drop_job_parts(job, youtube_id).await;
         self.announce(youtube_id, job)
     }
@@ -236,7 +242,7 @@ impl Exchange {
     /// runs here (`fetch_failed`). What a job that waits on the song makes
     /// here then stands in for the peer's copy when this node took the
     /// song's audio from that peer; a stand-in it already had stays as it
-    /// was.
+    /// was, with its spent wait (`run_here_standing`).
     pub(crate) async fn after_failed_fetch(
         &self,
         job: Job,
@@ -248,11 +254,11 @@ impl Exchange {
         match self.fetch_failed(job, youtube_id, peer, error).await {
             Some(recheck) => self.defer(job, video_id, recheck).await,
             None => {
-                let standing = self.standin(job, youtube_id).await;
+                if self.standin(job, youtube_id).await.is_some() {
+                    return PeerStep::Local(Some(self.run_here_standing(job, youtube_id).await));
+                }
                 let guard = self.run_here(job, youtube_id).await;
-                if let Some(s) = &standing {
-                    self.keep_standing(job, youtube_id, s).await;
-                } else if job.waits_while_a_peer_has_the_song()
+                if job.waits_while_a_peer_has_the_song()
                     && self
                         .song_from(youtube_id)
                         .await

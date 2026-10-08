@@ -484,7 +484,9 @@ CREATE TABLE peer_fetches (
 // replaces it once the peer has it (`peer::standin`). Back-filled once: a
 // video whose audio a peer gave (a `peer_fetches` audio record) with a lyrics
 // result made here (a lyrics source, no lyrics record), no operator's text
-// or ask and no dub on any row, is due at once.
+// and no dub on any row, and no operator's ask on a row of an active
+// playlist (`peer::lyrics::kept_local`'s rule: a flag on an inactive
+// playlist's row is never taken), is due at once.
 const MIGRATION_V31: &str = "
 CREATE TABLE peer_standins (
     youtube_id TEXT NOT NULL,
@@ -503,8 +505,10 @@ WHERE f.kind = 'audio'
   AND NOT EXISTS (SELECT 1 FROM peer_fetches l WHERE l.youtube_id = f.youtube_id
       AND l.kind = 'lyrics')
   AND NOT EXISTS (SELECT 1 FROM videos o WHERE o.youtube_id = f.youtube_id
-      AND (o.lyrics_manual_priority != 0 OR TRIM(COALESCE(o.lyrics_override_text, '')) != ''
-           OR o.dub_requested = 1 OR o.lyrics_source = 'gemini-live-translate'))
+      AND (TRIM(COALESCE(o.lyrics_override_text, '')) != ''
+           OR o.dub_requested = 1 OR o.lyrics_source = 'gemini-live-translate'
+           OR (o.lyrics_manual_priority != 0 AND EXISTS (SELECT 1 FROM playlists p
+               WHERE p.id = o.playlist_id AND p.is_active = 1))))
 ";
 
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
