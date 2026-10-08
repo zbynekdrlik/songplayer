@@ -355,3 +355,44 @@ fn a_callback_stuck_past_the_bound_parks_its_slot_driver_and_hold() {
         "the parked driver's hold stays for the process's life"
     );
 }
+
+/// A device parked on slot `i` with `name` held (its callback stuck; the
+/// returned guard plays the callback's return when dropped).
+fn parked_device(i: usize, name: &str) -> (WinAsioDevice, StuckCallback) {
+    claim(i);
+    let (_p, consumer) = rtrb::RingBuffer::<f32>::new(8);
+    let stream = Box::into_raw(Box::new(Stream {
+        ring: UnsafeCell::new(consumer),
+        scratch: UnsafeCell::new(vec![0.0; 8]),
+        buffers: Vec::new(),
+        frames: 4,
+        sample: AsioSample::Int32In24,
+        left: 0,
+        right: 1,
+    }));
+    SLOTS[i].stream.store(stream, Ordering::SeqCst);
+    SLOTS[i].in_flight.fetch_add(1, Ordering::SeqCst);
+    let stuck = StuckCallback { slot: i, stream };
+    let mut d = WinAsioDevice::new();
+    d.slot = Some(i);
+    d.stream = stream;
+    d.hold = HELD.claim(name);
+    d.close();
+    (d, stuck)
+}
+
+/// The output that replaces a parked one (an edited entry on the same
+/// driver) is told the driver is parked, not that it is still being
+/// released (review round 3).
+#[test]
+fn a_successor_of_a_parked_device_is_told_the_driver_is_parked() {
+    let _g = serial();
+    let name = "Parked Card 2 (songplayer test)";
+    let (d, _stuck) = parked_device(4, name);
+    drop(d);
+    let mut successor = WinAsioDevice::new();
+    match successor.open(name, [0, 1]) {
+        Err(Reason::Failed(why)) => assert!(why.contains("parked"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+}

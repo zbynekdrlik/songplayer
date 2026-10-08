@@ -428,7 +428,9 @@ impl Default for WinAsioDevice {
 impl AsioDevice for WinAsioDevice {
     fn open(&mut self, name: &str, channels: [u32; 2]) -> Result<Opened, Reason> {
         self.close();
-        if self.parked {
+        // This device's own parked driver, or one an earlier device parked
+        // (the output this one replaces).
+        if self.parked || HELD.is_parked(name) {
             return Err(Reason::Failed(
                 "a driver callback did not return for 1 s: the driver is parked until SongPlayer restarts".into(),
             ));
@@ -638,10 +640,12 @@ impl AsioDevice for WinAsioDevice {
 impl Drop for WinAsioDevice {
     fn drop(&mut self) {
         self.close();
-        if self.parked {
+        if self.parked
+            && let Some(hold) = self.hold.take()
+        {
             // The parked driver stays loaded: no other output of the
             // process may load a second instance of it.
-            std::mem::forget(self.hold.take());
+            hold.park();
         }
     }
 }

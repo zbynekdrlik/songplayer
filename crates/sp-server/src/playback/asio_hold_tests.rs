@@ -31,3 +31,18 @@ fn each_driver_is_held_on_its_own() {
     drop(blackmagic);
     assert!(!holds.is_held(BLACKMAGIC));
 }
+
+/// #233 review round 3: a parked driver is never given back, and reads as
+/// parked (a held one does not).
+#[test]
+fn a_parked_driver_stays_held_and_reads_parked() {
+    let holds = DriverHolds::new();
+    holds.claim(DVS).expect("free").park();
+    assert!(holds.is_held(DVS), "a parked driver is never given back");
+    assert!(holds.is_parked(DVS));
+    assert!(holds.claim(DVS).is_none());
+    let other = holds.claim(BLACKMAGIC).expect("free");
+    assert!(!holds.is_parked(BLACKMAGIC), "held is not parked");
+    drop(other);
+    assert!(!holds.is_parked(BLACKMAGIC));
+}

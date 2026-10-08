@@ -6,7 +6,9 @@
 //! BEFORE it loads the driver, and gives it back only after the driver is
 //! released (`asio_win.rs`); a successor that finds it held is refused
 //! (`asio_state::Reason::Held`) and tries again after the backoff (2 s,
-//! `asio_state::BACKOFF_S`).
+//! `asio_state::BACKOFF_S`). A device that PARKED its driver (a callback
+//! never returned) keeps the hold for the process's life and marks it
+//! parked, so a successor is told so instead of "held" (review round 3).
 
 use std::sync::Mutex;
 
@@ -16,6 +18,8 @@ use crate::playback::audio_out_queue::lock;
 #[derive(Default)]
 pub struct DriverHolds {
     held: Mutex<Vec<String>>,
+    /// Held for good: their device parked them.
+    parked: Mutex<Vec<String>>,
 }
 
 /// One held driver, given back when dropped.
@@ -29,6 +33,7 @@ impl DriverHolds {
     pub const fn new() -> Self {
         Self {
             held: Mutex::new(Vec::new()),
+            parked: Mutex::new(Vec::new()),
         }
     }
 
@@ -48,6 +53,18 @@ impl DriverHolds {
     /// Whether `driver` is held now.
     pub fn is_held(&self, driver: &str) -> bool {
         lock(&self.held).iter().any(|h| h == driver)
+    }
+
+    /// Whether `driver`'s device parked it (held until the process ends).
+    pub fn is_parked(&self, driver: &str) -> bool {
+        lock(&self.parked).iter().any(|h| h == driver)
+    }
+}
+
+impl DriverHold<'_> {
+    /// Keep the driver held for the process's life, marked parked.
+    pub fn park(self) {
+        std::mem::forget(self);
     }
 }
 
