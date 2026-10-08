@@ -95,7 +95,8 @@ struct Slot {
     latencies: AtomicBool,
     overloads: AtomicU64,
     /// The last rate `sampleRateDidChange` reported (f64 bits), valid while
-    /// `rate_changed` is set: 0.0's bits are 0, and 0 Hz is a lost clock.
+    /// `rate_changed` is set: 0.0's bits are 0, and a 0 Hz report (a lost
+    /// clock) must be reported too.
     rate_bits: AtomicU64,
     rate_changed: AtomicBool,
 }

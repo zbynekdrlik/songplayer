@@ -6,9 +6,10 @@
 //!   virtual drivers stay busy for seconds after a release).
 //! - A close: a reset request (or a buffer-size change, which is answered 0
 //!   so the driver then asks a reset — iemmixer never resizes live), a rate
-//!   change of 1 Hz or more (Dante Controller re-clocked the card; 0 Hz is a
-//!   lost clock), or no callback for 2 s (a vanished driver: a DVS crash or
-//!   reinstall; iemmixer `reset.rs` STALL).
+//!   change of 1 Hz or more (Dante Controller re-clocked the card; a rate
+//!   under 1 Hz, or ASE_NoClock, is a lost clock: `lost_clock`), or no
+//!   callback for 2 s (a vanished driver: a DVS crash or reinstall; iemmixer
+//!   `reset.rs` STALL).
 //! - asioMessage replies: iemmixer `telemetry.rs:79-99`.
 //! - The driver's rate, buffer and sample type are read, never set: the rate
 //!   is admitted (8–384 kHz) and noted when it is not the network's; a
@@ -116,7 +117,8 @@ pub struct DeviceEvents {
     pub resync: bool,
     pub buffer_size_change: bool,
     pub latencies_changed: bool,
-    /// The last rate `sampleRateDidChange` reported (0 = a lost clock).
+    /// The last rate `sampleRateDidChange` reported (under 1 Hz: a lost
+    /// clock, `lost_clock`).
     pub rate_changed: Option<f64>,
     pub overloads: u64,
     /// Buffer switches since the output started (monotonic).
@@ -217,8 +219,8 @@ pub fn sample_rate_error(code: i32) -> Option<Reason> {
 }
 
 /// The driver's rate, as the output follows it (never set). Under 1 Hz the
-/// driver has no clock: a lost clock, the same reason a 0 Hz report closes
-/// a run with (#233 review round 3).
+/// driver has no clock: a lost clock, the same reason a report under 1 Hz
+/// closes a run with (#233 review rounds 3-4).
 pub fn admit_rate(rate: f64) -> Result<u32, Reason> {
     if lost_clock(rate) {
         return Err(Reason::RateChanged(0));
