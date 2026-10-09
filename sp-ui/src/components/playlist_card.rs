@@ -9,6 +9,7 @@ use sp_core::models::Playlist;
 
 use crate::components::ndi_health;
 use crate::components::player;
+use crate::components::playlist_audio;
 use crate::components::video_list;
 use crate::store::DashboardStore;
 
@@ -65,6 +66,9 @@ pub fn PlaylistCard(
             // transport, mode, preview, mixer AND the shared LyricsView (lyrics
             // now live inside the Player, identical on Live and Dabing).
             <player::Player playlist_id=pid />
+
+            // #242: the playlist's own volume + EQ (collapsed by default).
+            <playlist_audio::PlaylistAudio playlist_id=pid />
 
             <div class="playlist-songs">
                 <button

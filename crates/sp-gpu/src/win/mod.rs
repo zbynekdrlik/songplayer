@@ -15,6 +15,7 @@ mod receiver;
 mod spout_registry;
 mod spout_sender;
 mod textures;
+mod vblank;
 mod video_device;
 
 use std::marker::PhantomData;
@@ -30,6 +31,7 @@ pub use device::adapters;
 pub use receiver::read_shared_texture;
 pub use spout_registry::{spout_sender_info, spout_sender_names};
 pub use spout_sender::SpoutSender;
+pub use vblank::VblankTracker;
 pub use video_device::VideoDevice;
 
 use crate::adapter::AdapterInfo;
@@ -144,6 +146,12 @@ impl Compositor {
     /// The Direct3D 11 device (the [`SpoutSender`] opens on it).
     pub fn device(&self) -> &ID3D11Device {
         &self.device
+    }
+
+    /// The device's immediate context (the [`SpoutSender`] waits on it for
+    /// its copy).
+    pub(crate) fn context(&self) -> &ID3D11DeviceContext {
+        &self.context
     }
 
     /// The 3840×2160 BGRA render target (what the [`SpoutSender`] sends).

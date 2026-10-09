@@ -11,9 +11,12 @@ use tokio::sync::broadcast;
 
 use super::{
     MAX_HANDOFF_BOUND, MAX_NOT_RUNNING, MAX_SETTINGS_POLL, MaxJob, MaxNext, MaxOut, MaxPhase,
-    MaxPicture, load_max_enabled, run_max_settings_task, start_max, state_label,
+    MaxPicture, load_max_enabled, load_max_vblank_phase_us, run_max_settings_task, start_max,
+    state_label,
 };
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::program_max_send::SendTiming;
+use crate::playback::program_max_vblank::Aligned;
 use crate::playback::submit_handoff::SubmitJob;
 
 /// A black job stamped `stamp`.
@@ -26,7 +29,7 @@ fn black(stamp: i64) -> MaxJob {
 /// wrong step can hang the test binary.
 fn job_stamp(step: Option<MaxNext>) -> i64 {
     match step {
-        Some(MaxNext::Job(job)) => job.stamp_100ns(),
+        Some(MaxNext::Job(job, _)) => job.stamp_100ns(),
         other => panic!("expected a job, got {other:?}"),
     }
 }
@@ -312,12 +315,24 @@ fn the_max_block_has_its_api_names() {
             "enabled",
             "failed",
             "height",
+            "send_at_us_max",
+            "send_at_us_p50",
+            "send_at_us_p99",
+            "send_late",
+            "send_off_grid",
+            "send_phase_us_p50",
+            "send_phase_us_p99",
             "send_us_p99",
             "sender_backoffs",
+            "slot_repicks",
             "spout_name",
             "state",
             "submitted",
             "upload_us_p99",
+            "vblank_output",
+            "vblank_period_ns",
+            "vblank_phase_us",
+            "vblank_tracking",
             "width",
         ]
     );
@@ -393,6 +408,31 @@ async fn the_setting_is_on_by_default_and_off_only_for_false() {
     assert!(load_max_enabled(&pool).await.unwrap());
 }
 
+/// #223 follow-up: the vblank phase is read with `sp_core::config`'s rule.
+#[tokio::test]
+async fn the_vblank_phase_setting_is_read_in_microseconds() {
+    use crate::db::models::set_setting;
+    let pool = settings_pool().await;
+    assert_eq!(load_max_vblank_phase_us(&pool).await.unwrap(), 14_000);
+    set_setting(&pool, "program_max_vblank_phase_ms", "5.5")
+        .await
+        .unwrap();
+    assert_eq!(load_max_vblank_phase_us(&pool).await.unwrap(), 5_500);
+}
+
+/// #223 follow-up: the phase starts at the 14 ms default; applying a value
+/// says whether it changed.
+#[test]
+fn the_vblank_phase_is_applied_and_reports_a_change() {
+    let max = MaxOut::new();
+    assert_eq!(max.vblank_phase(), Duration::from_millis(14));
+    assert_eq!(max.status().vblank_phase_us, 14_000);
+    assert!(!max.set_vblank_phase_us(14_000), "the same value");
+    assert!(max.set_vblank_phase_us(2_500));
+    assert_eq!(max.vblank_phase(), Duration::from_micros(2_500));
+    assert_eq!(max.status().vblank_phase_us, 2_500);
+}
+
 /// Poll `done` on the runtime until it holds (bounded: 20 s).
 async fn eventually(what: &str, done: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -423,6 +463,13 @@ async fn the_settings_task_applies_every_change_and_stops_max_at_shutdown() {
         .await
         .unwrap();
     eventually("the switch-on applied", || max.enabled()).await;
+    set_setting(&pool, "program_max_vblank_phase_ms", "6")
+        .await
+        .unwrap();
+    eventually("the vblank phase applied", || {
+        max.vblank_phase() == Duration::from_millis(6)
+    })
+    .await;
 
     let _consumer = max.attach();
     assert!(max.accepting());
@@ -488,4 +535,113 @@ async fn on_windows_start_max_starts_the_thread_and_shutdown_ends_it() {
         max.status().state == format!("error: {MAX_NOT_RUNNING}")
     })
     .await;
+}
+
+/// #223 follow-up: each job carries the instant the program offered it
+/// (its Spout send is due `MAX_SEND_LEAD` later).
+#[test]
+fn an_offered_job_carries_the_instant_it_was_offered() {
+    let max = MaxOut::new();
+    let _consumer = taking(&max);
+    let before = Instant::now();
+    assert!(max.offer_with(|| black(7)));
+    let after = Instant::now();
+    match max.try_next(false) {
+        Some(MaxNext::Job(job, offered)) => {
+            assert_eq!(job.stamp_100ns(), 7);
+            assert!(
+                before <= offered && offered <= after,
+                "offered at the offer"
+            );
+        }
+        other => panic!("expected a job, got {other:?}"),
+    }
+}
+
+/// #223 follow-up: when the frames went out after their offer (p50, p99,
+/// max over the window) and how many were late.
+#[test]
+fn the_send_timing_reaches_the_telemetry() {
+    let max = MaxOut::new();
+    let status = max.status();
+    assert_eq!(
+        (
+            status.send_at_us_p50,
+            status.send_at_us_p99,
+            status.send_at_us_max,
+            status.send_late
+        ),
+        (0, 0, 0, 0),
+        "nothing sent yet"
+    );
+    let started = Instant::now();
+    for (at_us, late) in [(10_000, false), (12_000, true), (30_000, true)] {
+        max.record_send_timing(SendTiming {
+            at_us,
+            late,
+            started,
+        });
+    }
+    let status = max.status();
+    assert_eq!(
+        (
+            status.send_at_us_p50,
+            status.send_at_us_p99,
+            status.send_at_us_max,
+            status.send_late
+        ),
+        (12_000, 30_000, 30_000, 2)
+    );
+}
+
+/// #223 follow-up: how the sends were paced on the wall's refresh: its
+/// output, whether the last send was on the grid, the grid's period, the
+/// aligned sends' start after the vblank (p50 / p99) and the slot re-picks;
+/// a send at the constant lead ends the tracking and is counted off the
+/// grid.
+#[test]
+fn the_vblank_pacing_reaches_the_telemetry() {
+    let max = MaxOut::new();
+    let status = max.status();
+    assert_eq!(status.vblank_output, None);
+    assert_eq!(
+        (
+            status.vblank_tracking,
+            status.vblank_period_ns,
+            status.send_off_grid,
+            status.send_phase_us_p50,
+            status.send_phase_us_p99,
+            status.slot_repicks
+        ),
+        (false, 0, 0, 0, 0, 0)
+    );
+    max.record_vblank_output(r"\\.\DISPLAY2 7680x1080".to_string());
+    let period = Duration::from_nanos(16_666_700);
+    for (phase_us, repicked) in [(8_010, false), (8_002, true), (9_500, false), (8_004, true)] {
+        max.record_vblank(Some(Aligned {
+            period,
+            phase_us,
+            repicked,
+        }));
+    }
+    let status = max.status();
+    assert_eq!(
+        status.vblank_output.as_deref(),
+        Some(r"\\.\DISPLAY2 7680x1080")
+    );
+    assert_eq!(
+        (
+            status.vblank_tracking,
+            status.vblank_period_ns,
+            status.send_off_grid,
+            status.send_phase_us_p50,
+            status.send_phase_us_p99,
+            status.slot_repicks
+        ),
+        (true, 16_666_700, 0, 8_004, 9_500, 2)
+    );
+    max.record_vblank(None);
+    let status = max.status();
+    assert!(!status.vblank_tracking, "the last send was off the grid");
+    assert_eq!((status.send_off_grid, status.slot_repicks), (1, 2));
 }

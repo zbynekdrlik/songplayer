@@ -19,6 +19,7 @@ pub mod lyrics_view;
 pub mod lyrics_song_row;
 pub mod ndi_health;
 pub mod player;
+pub mod playlist_audio; // #242 a playlist's own volume + EQ
 pub mod playlist_card;
 pub mod preview_video;
 pub mod program_control; // #209 the Program control (NDI SP-program)

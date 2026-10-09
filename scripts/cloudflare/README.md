@@ -29,6 +29,25 @@ cookie). Policy: `decision: allow`, `precedence: 1`, `include` = the three owner
 Gmail addresses (not listed here — this repo is public; read the live list with
 the GET call in "Add or remove an allowed e-mail" below).
 
+## spsnv / sppp — the per-site names (9.10.2026, songplayer #229)
+
+The owner's naming, like `streamsnv` / `streampp`. `sp.newlevel.media` stays: PP's
+peer exchange reaches SNV through it with a service token.
+
+| Hostname | Tunnel | Connector | Origin | Access app |
+|---|---|---|---|---|
+| `spsnv.newlevel.media` | `sp-player` `0242c8d3-aa90-43e9-bbe3-897f53f86d03` (the one `sp.newlevel.media` uses) | win-resolume service `Cloudflared` | `http://localhost:8920` | `f60304f6-ccc1-440b-9330-78a23314b493` |
+| `sppp.newlevel.media` | `sp-player-pp` `72c060fd-bff8-4470-90cc-d55be2296f83` (created 9.10.2026) | resolume-pp service `Cloudflared` (winget `Cloudflare.cloudflared`, `C:\Program Files (x86)\cloudflared`; token in `C:\ProgramData\cloudflared_tunnel_token.txt`, `--protocol http2` like SNV) | `http://localhost:8920` | `d8ca9d07-a044-4167-9e2a-7862f45aeb82` |
+
+Both Access apps copy `sp.newlevel.media`'s settings and its policy's
+`include` (the same three owners). Tunnel routes and DNS need the account's
+full token (Cloudflare Tunnel + DNS edit), not the Access token below: the
+Access token answers DNS with 403 and lists no tunnel. A route is the tunnel's
+remote config (`GET`/`PUT /accounts/$ACC/cfd_tunnel/<id>/configurations`, insert
+before the catch-all `http_status:404`) plus a proxied CNAME
+`<id>.cfargotunnel.com`. Create the Access app FIRST, then the route and DNS.
+Check: each hostname answers `302` to `newlevelchurch.cloudflareaccess.com`.
+
 ## Credentials — never printed, never committed
 
 All calls use the account-owned API token (`cfat_` prefix) stored on the dev box

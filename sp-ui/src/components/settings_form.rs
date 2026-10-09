@@ -255,13 +255,14 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     };
 
     view! {
-        <form class="settings-form" on:submit=on_save>
+        <form autocomplete="off" class="settings-form" on:submit=on_save>
             <fieldset>
                 <legend>"OBS WebSocket"</legend>
                 <label>
                     "URL"
                     <input
                         type="text"
+                        autocomplete="off"
                         prop:value=move || obs_url.get()
                         on:input=move |ev| obs_url.set(event_target_value(&ev))
                     />
@@ -270,6 +271,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "Heslo"
                     <input
                         type="password"
+                        autocomplete="new-password"
                         prop:value=move || obs_password.get()
                         on:input=move |ev| obs_password.set(event_target_value(&ev))
                     />
@@ -282,6 +284,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "API kľúč"
                     <input
                         type="password"
+                        autocomplete="new-password"
                         prop:value=move || gemini_key.get()
                         on:input=move |ev| gemini_key.set(event_target_value(&ev))
                     />
@@ -290,6 +293,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "Model"
                     <input
                         type="text"
+                        autocomplete="off"
                         data-testid="settings-gemini-model"
                         prop:value=move || gemini_model.get()
                         on:input=move |ev| gemini_model.set(event_target_value(&ev))
@@ -331,6 +335,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "Model dabingu"
                     <input
                         type="text"
+                        autocomplete="off"
                         data-testid="settings-dub-model"
                         prop:value=move || dub_model.get()
                         on:input=move |ev| dub_model.set(event_target_value(&ev))
@@ -353,6 +358,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "Zdroj NDI (STROJ (stream))"
                     <input
                         type="text"
+                        autocomplete="off"
                         data-testid="settings-ndi-input-source"
                         placeholder="CG-OBS (manual)"
                         prop:value=move || ndi_input_source.get()
@@ -376,6 +382,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "Port"
                     <input
                         type="number"
+                        autocomplete="off"
                         min="1"
                         max="65535"
                         data-testid="settings-remote-port"
@@ -387,6 +394,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "Heslo (nepovinné)"
                     <input
                         type="password"
+                        autocomplete="new-password"
                         data-testid="settings-remote-password"
                         prop:value=move || remote_password.get()
                         on:input=move |ev| remote_password.set(event_target_value(&ev))
@@ -415,6 +423,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "Dĺžka prelínania (ms)"
                     <input
                         type="number"
+                        autocomplete="off"
                         min="1"
                         max=config::MAX_PROGRAM_TRANSITION_MS.to_string()
                         data-testid="settings-program-transition-ms"
@@ -430,6 +439,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     "Priečinok"
                     <input
                         type="text"
+                        autocomplete="off"
                         prop:value=move || cache_dir.get()
                         on:input=move |ev| cache_dir.set(event_target_value(&ev))
                     />

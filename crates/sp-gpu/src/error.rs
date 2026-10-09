@@ -90,6 +90,13 @@ pub enum GpuError {
     /// `SharedTextureInfo`).
     #[error("the map {map:?} is not one Spout wrote: {why}")]
     SpoutMap { map: String, why: &'static str },
+    /// No display output to pace `SP-program-MAX` on: no attached output
+    /// sits at the desktop origin (#223 follow-up, `vblank::pick_output`).
+    #[error("no primary display output attached")]
+    NoOutput,
+    /// A thread of the crate could not start, or ended before it reported.
+    #[error("the vblank thread failed: {0}")]
+    Thread(String),
 }
 
 impl GpuError {

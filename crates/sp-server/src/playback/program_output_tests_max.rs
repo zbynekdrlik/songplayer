@@ -81,7 +81,7 @@ fn taking() -> Arc<MaxOut> {
 fn next_job(max: &MaxOut) -> MaxJob {
     assert_eq!(max.queued(), 1, "one job offered");
     match max.try_next(false) {
-        Some(MaxNext::Job(job)) => job,
+        Some(MaxNext::Job(job, _)) => job,
         other => panic!("expected a job, got {other:?}"),
     }
 }

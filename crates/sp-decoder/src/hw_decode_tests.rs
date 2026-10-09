@@ -4,7 +4,7 @@
 use super::{
     D3D11_BIND_DECODER, DXGI_FORMAT_NV12, DecodeMode, DecodePath, FallbackGate, FallbackStage,
     HwCounters, HwDecodeStats, HwFallback, OnDecodeError, PathNote, PathTracker, Resume,
-    SurfaceError, SurfaceLayout, hw_counters, mapped_from_scanline0, on_decode_error,
+    SurfaceError, SurfaceLayout, hw_counters, mapped_from_scanline0, on_decode_error, visible_size,
 };
 use crate::error::DecoderError;
 
@@ -583,4 +583,34 @@ fn the_process_counters_are_one_instance() {
     hw_counters().requested();
     // Other tests never touch the process counters, but stay monotonic-safe.
     assert!(hw_counters().snapshot().requested > before);
+}
+
+// ---------------------------------------------------------------------------
+// The handed-over size of a D3D11 picture (#223 follow-up: the green strip)
+// ---------------------------------------------------------------------------
+
+/// The bug: NVDEC pads the surface and the current type's frame size to 16
+/// rows, and the padding was handed over as picture rows (Y = U = V = 0, a
+/// green strip at the bottom). Sizes measured on SNV with the decode bench.
+#[test]
+fn a_d3d_picture_is_the_streams_own_size_never_the_padded_surface() {
+    assert_eq!(visible_size((1920, 1088), Some((1920, 1080))), (1920, 1080));
+    assert_eq!(visible_size((2048, 864), Some((2048, 858))), (2048, 858));
+    assert_eq!(visible_size((2560, 1360), Some((2560, 1350))), (2560, 1350));
+    assert_eq!(
+        visible_size((1920, 1088), Some((1918, 1088))),
+        (1918, 1088),
+        "padded columns, full height"
+    );
+    assert_eq!(visible_size((2560, 1440), Some((2560, 1440))), (2560, 1440));
+}
+
+#[test]
+fn a_native_size_that_is_unknown_or_does_not_fit_keeps_the_decoded_size() {
+    let decoded = (1920, 1088);
+    assert_eq!(visible_size(decoded, None), decoded);
+    assert_eq!(visible_size(decoded, Some((0, 1080))), decoded);
+    assert_eq!(visible_size(decoded, Some((1920, 0))), decoded);
+    assert_eq!(visible_size(decoded, Some((1921, 1080))), decoded);
+    assert_eq!(visible_size(decoded, Some((1920, 1089))), decoded);
 }

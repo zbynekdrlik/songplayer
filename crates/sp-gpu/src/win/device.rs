@@ -65,7 +65,7 @@ fn info_of(desc: &DXGI_ADAPTER_DESC1) -> AdapterInfo {
 }
 
 /// Every DXGI adapter, in DXGI's order, with what `pick_adapter` reads.
-fn list() -> Result<Vec<(IDXGIAdapter1, AdapterInfo)>, GpuError> {
+pub(super) fn list() -> Result<Vec<(IDXGIAdapter1, AdapterInfo)>, GpuError> {
     let factory = unsafe { CreateDXGIFactory1::<IDXGIFactory1>() }
         .map_err(|e| failed("CreateDXGIFactory1", &e))?;
     let mut adapters = Vec::new();

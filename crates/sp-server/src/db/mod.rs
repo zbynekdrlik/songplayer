@@ -3,6 +3,7 @@
 pub mod models;
 pub mod models_dabing; // #180 dubbing D1 queries (own module, 1000-line cap)
 pub mod models_peer; // #229 the node exchange's tables (own module, models.rs is at the cap)
+pub mod models_playlist_fx; // #242 a playlist's own volume + EQ (V33 columns)
 pub mod models_playlists; // #225 every playlist id, for the WS on-connect replay (own module, 1000-line cap)
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 pub mod models_stems_priority; // #195 tiered in-use-first stems selector (own module, 1000-line cap)
@@ -47,6 +48,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (30, MIGRATION_V30),
     (31, MIGRATION_V31),
     (32, MIGRATION_V32),
+    (33, MIGRATION_V33),
 ];
 
 const MIGRATION_V1: &str = "
@@ -527,6 +529,14 @@ WHERE key IN ('vban_enabled', 'vban_stream_name', 'vban_targets')
   AND EXISTS (SELECT 1 FROM settings WHERE key = 'audio_outputs')
 ";
 
+// V33 (#242) — a playlist's own sound: its volume in dB and its parametric EQ
+// (`sp_core::audio_fx::EqBand` list as JSON), set by the owner per playlist
+// and node. The defaults leave every playlist's audio untouched.
+const MIGRATION_V33: &str = "
+ALTER TABLE playlists ADD COLUMN audio_gain_db REAL NOT NULL DEFAULT 0;
+ALTER TABLE playlists ADD COLUMN audio_eq TEXT NOT NULL DEFAULT '[]';
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -695,6 +705,10 @@ mod tests_v31;
 #[path = "mod_tests_v32.rs"]
 #[cfg(test)]
 mod tests_v32;
+
+#[path = "mod_tests_v33.rs"]
+#[cfg(test)]
+mod tests_v33;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

@@ -693,6 +693,8 @@ pub async fn start(
     let active_playlists = db::models::get_active_playlists(&pool)
         .await
         .unwrap_or_default();
+    // #242: every playlist's own sound, before a pipeline opens a song.
+    playback::playlist_fx::load_all(&pool, playback::playlist_fx::global()).await;
     engine.create_startup_pipelines(&active_playlists);
     engine.start_program(program_bus, &shutdown_tx).await;
 

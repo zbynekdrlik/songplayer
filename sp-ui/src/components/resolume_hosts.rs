@@ -102,21 +102,24 @@ pub fn ResolumeHosts() -> impl IntoView {
                 </tbody>
             </table>
 
-            <form class="add-host-form" on:submit=on_add>
+            <form autocomplete="off" class="add-host-form" on:submit=on_add>
                 <input
                     type="text"
+                    autocomplete="off"
                     placeholder="Názov"
                     prop:value=move || name_input.get()
                     on:input=move |ev| name_input.set(event_target_value(&ev))
                 />
                 <input
                     type="text"
+                    autocomplete="off"
                     placeholder="IP adresa"
                     prop:value=move || ip_input.get()
                     on:input=move |ev| ip_input.set(event_target_value(&ev))
                 />
                 <input
                     type="number"
+                    autocomplete="off"
                     placeholder="Port"
                     prop:value=move || port_input.get()
                     on:input=move |ev| port_input.set(event_target_value(&ev))

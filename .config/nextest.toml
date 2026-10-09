@@ -10,5 +10,16 @@
 # `store_list_if_absent`). Bounding each test at 3 x 60 s turns that hang into
 # a test failure, so the mutant counts as caught. The whole sp-server suite
 # takes ~70 s, so no healthy test comes near the bound.
+#
+# A caught mutant's run ends at its first failing test: `terminate =
+# "immediate"` (nextest >= 0.9.111) signals the tests still running instead of
+# waiting for them. With the default `wait`, a mutant that only a late test
+# kills sat until a slow test already in flight finished, and the whole run
+# passed cargo-mutants' 300 s bound: TIMEOUT, a failed shard, for a mutant
+# two tests had caught (#223 follow-up, CI run 37922642659 shard 27:
+# `program_max_vblank.rs` 157:45, its killers failed at test 2798 while
+# `asio_out::tests_clock::a_driver_silent_for_5_min_runs_by_itself_once_it_ticks`
+# ran 95-160 s under the `mutants` profile with two mutants in parallel).
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 3 }
+fail-fast = { max-fail = 1, terminate = "immediate" }

@@ -185,32 +185,43 @@ impl Pipeline {
     /// Flush the queued work and wait until the GPU has finished it (an
     /// event query), yielding the thread between polls.
     pub fn wait_until_done(&self, context: &ID3D11DeviceContext) -> Result<(), GpuError> {
-        let start = Instant::now();
+        wait_until_done_on(context, &self.done)
+    }
+}
+
+/// Flush the work queued on `context` and wait until the GPU has finished
+/// it, through the event query `done`, yielding the thread between polls:
+/// the compositor's frame wait, and the Spout sender's wait for its copy
+/// into Spout's shared texture (#223 follow-up).
+pub(super) fn wait_until_done_on(
+    context: &ID3D11DeviceContext,
+    done: &ID3D11Query,
+) -> Result<(), GpuError> {
+    let start = Instant::now();
+    unsafe {
+        context.End(done);
+        context.Flush();
+    }
+    loop {
+        let mut finished = FALSE;
+        // SAFETY: an event query's data is one BOOL, written into
+        // `finished` (S_FALSE leaves it FALSE: not done yet).
         unsafe {
-            context.End(&self.done);
-            context.Flush();
+            context.GetData(
+                done,
+                Some((&mut finished as *mut BOOL).cast::<c_void>()),
+                std::mem::size_of::<BOOL>() as u32,
+                0,
+            )
         }
-        loop {
-            let mut finished = FALSE;
-            // SAFETY: an event query's data is one BOOL, written into
-            // `finished` (S_FALSE leaves it FALSE: not done yet).
-            unsafe {
-                context.GetData(
-                    &self.done,
-                    Some((&mut finished as *mut BOOL).cast::<c_void>()),
-                    std::mem::size_of::<BOOL>() as u32,
-                    0,
-                )
-            }
-            .map_err(|e| failed("GetData", &e))?;
-            if finished.as_bool() {
-                return Ok(());
-            }
-            if start.elapsed() > FRAME_WAIT_LIMIT {
-                return Err(GpuError::Timeout(FRAME_WAIT_LIMIT.as_millis() as u64));
-            }
-            std::thread::yield_now();
+        .map_err(|e| failed("GetData", &e))?;
+        if finished.as_bool() {
+            return Ok(());
         }
+        if start.elapsed() > FRAME_WAIT_LIMIT {
+            return Err(GpuError::Timeout(FRAME_WAIT_LIMIT.as_millis() as u64));
+        }
+        std::thread::yield_now();
     }
 }
 
@@ -297,7 +308,7 @@ fn constants(device: &ID3D11Device) -> Result<ID3D11Buffer, GpuError> {
 }
 
 /// The event query that tells when the GPU has finished a frame.
-fn query(device: &ID3D11Device) -> Result<ID3D11Query, GpuError> {
+pub(super) fn query(device: &ID3D11Device) -> Result<ID3D11Query, GpuError> {
     let desc = D3D11_QUERY_DESC {
         Query: D3D11_QUERY_EVENT,
         MiscFlags: 0,

@@ -297,3 +297,10 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
         "**/post-deploy-settings-masked.spec.ts",
         "**/post-deploy-audio-asio.spec.ts",
     ]
+
+
+def test_pp_expects_its_one_running_asio_output():
+    # PP runs one ASIO output ("DVS (Dante)", out-2, read running on
+    # 9.10.2026 after the event): its post-deploy ASIO gate must expect 1.
+    step = _step(_deploy_pp(), "Post-deploy Playwright (PP subset)")
+    assert re.search(r'SP_ASIO_OUTPUTS_EXPECTED:\s*"1"', step), step

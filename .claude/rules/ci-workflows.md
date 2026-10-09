@@ -89,9 +89,21 @@ forever. So `ci.yml` now has a `mutation-plan` job (dev pushes only):
   check-runs all concluded `success` (skipped ones ignored); fallback =
   `github.event.before`. A cancelled / failed / timed-out mutation run is thereby
   re-covered by the next push automatically — never re-run an over-budget shard.
-- **shards** = `ceil(mutants / 6)` clamped 4..64 (was 24 until 26.9.2026: 335 mutants → 14 per shard ≈ 18 min, one attempt cancelled at the 20-min bound; shards beyond the runner concurrency just queue, and the per-job bound counts from job start), fed to the matrix via
+- **shards** = `ceil(mutants / 4)` clamped 4..64 (`/ 6` until 9.10.2026: with
+  #233's resampler tests in the suite a mutant killed late in the test order
+  costs ~4.5 min, build ~1.5-3.5 min + ~2.7 min of tests, two at a time, and
+  shard 19 of run 37924943623 ran its six past 20 min; was 24 until 26.9.2026: 335 mutants → 14 per shard ≈ 18 min, one attempt cancelled at the 20-min bound; shards beyond the runner concurrency just queue, and the per-job bound counts from job start), fed to the matrix via
   `fromJSON(needs.mutation-plan.outputs.shards)`; the 20-min per-shard bound is
   unchanged (never raise it). Job names become `Mutation Testing (i/N)`.
+- **sharding = round-robin** (`--sharding round-robin` on the shard's list AND
+  run, pinned by `scripts/tests/test_ci_mutation_sharding.py`): mutant i on
+  shard i % N. cargo-mutants' default `slice` hands each shard consecutive
+  mutants, and `--in-diff` lists them file by file, so a push with 351 cheap
+  sp-core mutants and 109 sp-server ones (~5 min each: build + the slow suite)
+  put eight sp-server mutants in each of shards 44-57 — 50-56 were cancelled at
+  the 20-min bound while the sp-core shards took 0.8 min (#242, CI run
+  37956682432). The per-shard cost is set by the slow crate's share, not the
+  count.
 - The Gate needs `mutation-plan` too (a failed plan must not read as "skipped").
 A mutant that turns a loop infinite costs a 300 s TIMEOUT and fails the step
 (exit 3) — shape loops so no single comparison flip can spin (`rest.is_empty()`
@@ -516,6 +528,17 @@ gate's test tool) ends any test after 3 x 60 s and reports it FAILED, so a
 mutant that makes a test wait forever counts as caught instead of a 300 s
 TIMEOUT that fails the shard. It is no excuse for unbounded waits in tests:
 shape them as below, and keep healthy tests far under the bound.
+
+**A caught mutant's run ends at its first failure (`fail-fast = { max-fail =
+1, terminate = "immediate" }`, #223 follow-up, 9.10.2026).** nextest's
+default `wait` stops scheduling but waits for the tests already running: a
+mutant killed only by a test late in the order (index 2798 of 3883) sat
+behind `asio_out::tests_clock::a_driver_silent_for_5_min_runs_by_itself_once_it_ticks`
+(95-160 s under the `mutants` profile, two mutants in parallel) until the
+run passed 300 s: TIMEOUT, a red shard for a caught mutant (CI run
+37922642659). Read the per-mutant log in the shard's `mutants-report-shard-N`
+artifact (`gh run download <run> -n mutants-report-shard-N`): a `FAIL` of the
+killing test followed by `SIGTERM` of another test is this case, not a hang.
 
 
 `while deque.len() > CAP { deque.pop_front(); }` is correct code that a

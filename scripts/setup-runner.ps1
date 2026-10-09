@@ -90,7 +90,19 @@ cd /d $RunnerDir
 .\run.cmd
 "@ | Set-Content "$RunnerDir\start-runner.bat"
 
+# The task below runs this every 5 minutes (and at logon): start the runner
+# only when this runner directory has none running. Every run used to start
+# another run.cmd, and two listeners of one directory collide on
+# _diag\pages ("The file ... already exists": a job fails in seconds).
 @"
+Set wmi = GetObject("winmgmts:\\.\root\cimv2")
+For Each p In wmi.ExecQuery("SELECT Name, ExecutablePath, CommandLine FROM Win32_Process WHERE Name='Runner.Listener.exe' OR Name='cmd.exe'")
+  If LCase(p.Name) = "runner.listener.exe" Then
+    If LCase(p.ExecutablePath & "") = LCase("$RunnerDir\bin\Runner.Listener.exe") Then WScript.Quit 0
+  ElseIf InStr(1, p.CommandLine & "", "$RunnerDir\start-runner.bat", vbTextCompare) > 0 Then
+    WScript.Quit 0
+  End If
+Next
 Set WshShell = CreateObject("WScript.Shell")
 WshShell.Run """$RunnerDir\start-runner.bat""", 0, False
 "@ | Set-Content "$RunnerDir\start-runner.vbs"

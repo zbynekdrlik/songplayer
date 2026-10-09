@@ -66,8 +66,21 @@ frame period in software); the anchors and MF facts (comment 5990523303).
   out of memory is `FrameAlloc`, as in software). The rows are packed by
   `sp_gpu::unpad_rows_into`, the compositor readback's own routine. A
   slice shorter than the checked `needed` is an error, never a panic.
-  Nothing downstream can tell the paths apart; `width` / `height` come from
-  the current media type per picture, as in software.
+  Nothing downstream can tell the paths apart.
+- **The picture's size is the STREAM's, never the current type's on the
+  D3D11 path** (#223 follow-up, 9.10.2026: a green strip at the bottom of
+  some songs on the wall and in Presenter). NVDEC pads the surface AND the
+  current type's `MF_MT_FRAME_SIZE` to 16 rows: the decode bench with
+  `"hw": true` gave 1920×1080 AV1 → 1920×1088, 2048×858 → 2048×864,
+  2560×1350 → 2560×1360 (software: the stream's size), and those rows are
+  no picture (Y = U = V = 0 = green). The reader reads the native
+  (compressed) type's `MF_MT_FRAME_SIZE` at open (`native_frame_size`) and
+  hands every D3D11 picture over at `hw_decode::visible_size(decoded,
+  native)`: the top-left native-size rect when it fits, else the decoded
+  size. Every height that is not a multiple of 16 was hit (AV1 1080p, the
+  1350 / 1098 / 1182 / 858 widescreen songs); 1440 / 1280 / 1072 / 720
+  were not. Check a fix on the box with the bench (`hw` true and false
+  must report the same size).
 
 ## Which path really decoded (read from the pictures, not from the mode)
 
