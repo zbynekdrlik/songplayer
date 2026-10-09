@@ -439,8 +439,11 @@ impl SurfaceCopy {
 /// (Y = U = V = 0: a green strip at the bottom of SP-program and
 /// SP-program-MAX, #223 follow-up). The software path hands over the
 /// stream's size already.
-pub fn visible_size(decoded: (u32, u32), _native: Option<(u32, u32)>) -> (u32, u32) {
-    decoded
+pub fn visible_size(decoded: (u32, u32), native: Option<(u32, u32)>) -> (u32, u32) {
+    match native {
+        Some((w, h)) if w > 0 && h > 0 && w <= decoded.0 && h <= decoded.1 => (w, h),
+        _ => decoded,
+    }
 }
 
 /// The bytes from scanline 0 to the end of a mapping that starts at `start`
