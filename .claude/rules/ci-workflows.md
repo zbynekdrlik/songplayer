@@ -95,6 +95,15 @@ forever. So `ci.yml` now has a `mutation-plan` job (dev pushes only):
   shard 19 of run 37924943623 ran its six past 20 min; was 24 until 26.9.2026: 335 mutants → 14 per shard ≈ 18 min, one attempt cancelled at the 20-min bound; shards beyond the runner concurrency just queue, and the per-job bound counts from job start), fed to the matrix via
   `fromJSON(needs.mutation-plan.outputs.shards)`; the 20-min per-shard bound is
   unchanged (never raise it). Job names become `Mutation Testing (i/N)`.
+- **sharding = round-robin** (`--sharding round-robin` on the shard's list AND
+  run, pinned by `scripts/tests/test_ci_mutation_sharding.py`): mutant i on
+  shard i % N. cargo-mutants' default `slice` hands each shard consecutive
+  mutants, and `--in-diff` lists them file by file, so a push with 351 cheap
+  sp-core mutants and 109 sp-server ones (~5 min each: build + the slow suite)
+  put eight sp-server mutants in each of shards 44-57 — 50-56 were cancelled at
+  the 20-min bound while the sp-core shards took 0.8 min (#242, CI run
+  37956682432). The per-shard cost is set by the slow crate's share, not the
+  count.
 - The Gate needs `mutation-plan` too (a failed plan must not read as "skipped").
 A mutant that turns a loop infinite costs a 300 s TIMEOUT and fails the step
 (exit 3) — shape loops so no single comparison flip can spin (`rest.is_empty()`

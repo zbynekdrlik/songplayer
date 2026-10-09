@@ -654,6 +654,11 @@ jobs:
     #             the sp-server suite runs ~160 s before a test late in the
     #             order, so six late-killed mutants (build ~1.5-3.5 min +
     #             ~2.7 min each, two at a time) ran past 20 min).
+    #  - sharding = round-robin (mutant i on shard i % N): the default slice
+    #             put a crate's mutants together, and with `--in-diff` listing
+    #             them file by file, eight ~5-min sp-server mutants landed in
+    #             one shard while the sp-core shards took 0.8 min (#242, CI run
+    #             37956682432: shards 50-56 cancelled at the bound).
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -763,7 +768,7 @@ jobs:
             exit 0
           fi
           echo "=== mutant list (in-diff, shard ${{ matrix.shard }}) ==="
-          cargo mutants --in-diff push.diff --shard ${{ matrix.shard }} --list 2>&1 || true
+          cargo mutants --in-diff push.diff --shard ${{ matrix.shard }} --sharding round-robin --list 2>&1 || true
           echo "=== end mutant list ==="
           # Diff-scoped, no baseline rebuild, nextest, 2 mutants in parallel; the
           # `mutants` profile drops debuginfo so peak memory stays under the 16 G
@@ -772,7 +777,7 @@ jobs:
           # shard, that is a "split the unit" signal, NOT a reason to raise the
           # cap (no-timeout-band-aids.md).
           cargo mutants --in-diff push.diff --shard ${{ matrix.shard }} \
-            --baseline=skip --test-tool=nextest \
+            --sharding round-robin --baseline=skip --test-tool=nextest \
             --jobs 2 --timeout 300 --build-timeout 600 --output mutants-out
       - name: Upload mutants report
         if: always()
