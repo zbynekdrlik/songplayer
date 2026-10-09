@@ -556,52 +556,41 @@ mod tests {
         assert!(cur_sk.is_some(), "current line has SK in test_track()");
     }
 
-    // ── #142 — ★ reference marker on the Resolume dual-line push ──────────
+    // ── #241 — no ★ on the wall: a reference song's lines equal any song's ──
 
     #[test]
-    fn resolume_lines_with_next_appends_star_to_all_four_when_reference() {
-        // is_reference=true: every non-empty EN/SK current+next line ends
-        // with " ★" so the LED wall shows which songs carry Claude's
-        // verified reference lyrics (#142).
+    fn a_reference_songs_wall_lines_carry_no_star() {
+        // #241 ROZHODNUTÉ: the ★ reference marker left the wall (Arena's
+        // SK subtitle font has no U+2605, so it showed as a box). A
+        // reference song's four wall lines equal a non-reference song's.
         let st = LyricsState::new(wall_track());
-        let (cur_en, next_en, cur_sk, next_sk) =
-            st.resolume_lines_with_next(1500, true).expect("on line 0");
-        assert_eq!(cur_en, "Hello world \u{2605}");
-        assert_eq!(next_en, "Goodbye \u{2605}");
-        assert_eq!(cur_sk, Some("Ahoj svet \u{2605}".to_string()));
-        assert_eq!(next_sk, Some("Zbohom \u{2605}".to_string()));
-    }
-
-    #[test]
-    fn resolume_lines_with_next_no_star_when_not_reference() {
-        // is_reference=false: behavior is byte-identical to before #142.
-        let st = LyricsState::new(wall_track());
-        let (cur_en, next_en, cur_sk, next_sk) =
-            st.resolume_lines_with_next(1500, false).expect("on line 0");
-        assert_eq!(cur_en, "Hello world");
-        assert_eq!(next_en, "Goodbye");
-        assert_eq!(cur_sk, Some("Ahoj svet".to_string()));
-        assert_eq!(next_sk, Some("Zbohom".to_string()));
-    }
-
-    #[test]
-    fn resolume_lines_with_next_no_star_on_empty_lines_when_reference() {
-        // Empty strings/None stay empty/None even when is_reference=true —
-        // a lone " ★" on an empty next-line slot would be worse than no
-        // marker at all.
-        let st = LyricsState::new(wall_track());
-        // Position 4500 is inside wall_track()'s last line (sung 4000..6000),
-        // so no next line exists.
-        let (cur_en, next_en, cur_sk, next_sk) = st
+        let plain = st.resolume_lines_with_next(1500, false).expect("on line 0");
+        let reference = st.resolume_lines_with_next(1500, true).expect("on line 0");
+        assert_eq!(reference, plain);
+        assert_eq!(
+            reference,
+            (
+                "Hello world".to_string(),
+                "Goodbye".to_string(),
+                Some("Ahoj svet".to_string()),
+                Some("Zbohom".to_string()),
+            )
+        );
+        let last = st
             .resolume_lines_with_next(4500, true)
             .expect("on last line");
         assert_eq!(
-            cur_en, "Goodbye \u{2605}",
-            "non-empty current line gets the star"
+            last,
+            (
+                "Goodbye".to_string(),
+                String::new(),
+                Some("Zbohom".to_string()),
+                None
+            )
         );
-        assert_eq!(next_en, "", "empty next_en must stay empty, no star");
-        assert_eq!(cur_sk, Some("Zbohom \u{2605}".to_string()));
-        assert_eq!(next_sk, None, "next_sk stays None, no star");
+        for line in [&reference.0, &reference.1, &last.0] {
+            assert!(!line.contains('\u{2605}'), "{line:?}");
+        }
     }
 
     #[test]
