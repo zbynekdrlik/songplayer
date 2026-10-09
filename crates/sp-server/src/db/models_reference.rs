@@ -1,26 +1,11 @@
 //! ★ reference-marker query functions (#142) — split out of `models.rs` to
 //! keep that file under the 1000-line airuleset cap. Re-exported from
-//! `models.rs` via `pub use models_reference::*;` so every existing call
-//! site (`crate::db::models::get_video_lyrics_reference`, etc.) keeps
-//! compiling unchanged.
+//! `models.rs` via `pub use models_reference::*;` so every call site
+//! (`crate::db::models::set_video_lyrics_reference`, etc.) keeps compiling
+//! unchanged. #241: the wall shows no ★ any more, so playback reads no
+//! reference flag (its per-song read is deleted).
 
 use sqlx::SqlitePool;
-
-/// Fast single-column read of `videos.lyrics_reference` by id (#142).
-/// Mirrors `get_video_suppress_resolume_en` — used by the playback engine
-/// hot path to decide whether the renderer should append the ★ marker to
-/// this song's displayed lyric lines. Returns false when the row doesn't
-/// exist.
-pub async fn get_video_lyrics_reference(
-    pool: &SqlitePool,
-    video_id: i64,
-) -> Result<bool, sqlx::Error> {
-    let v: Option<i64> = sqlx::query_scalar("SELECT lyrics_reference FROM videos WHERE id = ?")
-        .bind(video_id)
-        .fetch_optional(pool)
-        .await?;
-    Ok(v.map(|n| n != 0).unwrap_or(false))
-}
 
 /// Set (or clear) `videos.lyrics_reference` for a single video (#142,
 /// `POST /api/v1/lyrics/songs/{id}/reference` admin toggle). Does NOT touch

@@ -296,9 +296,9 @@ ALTER TABLE videos ADD COLUMN next_attempt_at TEXT;
 ";
 
 // V21 (#142) — ★ reference marker + owner feedback loop. `lyrics_reference`
-// flags a song as carrying Claude's verified "reference" lyrics; the LED
-// wall appends " ★" to every displayed line for such a song
-// (`lyrics::renderer::resolume_lines_with_next`). When the owner flags a
+// flags a song as carrying Claude's verified "reference" lyrics (the LED
+// wall showed " ★" on its lines until #241 removed it from the wall: Arena's
+// SK font had no U+2605; the dashboard keeps the ★). When the owner flags a
 // starred song as wrong from the dashboard ("Nesedí"), the feedback
 // endpoint clears the flag, stamps `lyrics_reference_rejected_at`, and
 // stores the owner's note in `lyrics_reference_note`. Existing rows default

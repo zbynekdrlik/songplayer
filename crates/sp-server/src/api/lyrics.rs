@@ -99,9 +99,9 @@ pub struct SongListItem {
     /// clips. The /live setlist UI renders a checkbox bound to this field.
     pub suppress_resolume_en: bool,
     /// `videos.lyrics_reference` (#142) — when true, this song carries
-    /// Claude's verified "reference" lyrics and the LED wall appends " ★"
-    /// to every displayed line. The lyrics dashboard renders a ★ badge and
-    /// a „Nesedí" feedback button bound to this field.
+    /// Claude's verified "reference" lyrics. The lyrics dashboard renders a
+    /// ★ badge and a „Nesedí" feedback button bound to this field (#241: the
+    /// LED wall no longer shows a ★).
     pub lyrics_reference: bool,
     /// `videos.lyrics_translation_gender` (#152) — the per-song SK translation
     /// gender override: `None` = auto (masculine default), `"m"`, or `"f"`.

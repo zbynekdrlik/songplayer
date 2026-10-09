@@ -175,12 +175,11 @@ impl LyricsState {
     ///
     /// The lookup is shifted forward by `self.lead_ms` (0 unless operator-overridden).
     ///
-    /// #241: a reference song's lines are no different (the ★ left the
-    /// wall: Arena's SK font has no U+2605); `_is_reference` is unused.
+    /// #241: no ★ reference marker (Arena's SK font has no U+2605; it showed
+    /// as a box): a reference song's lines are like any song's.
     pub fn resolume_lines_with_next(
         &self,
         position_ms: u64,
-        _is_reference: bool,
     ) -> Option<(String, String, Option<String>, Option<String>)> {
         let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
         let (idx, line) = self.plan.at(lookahead)?;
@@ -527,7 +526,7 @@ mod tests {
     fn resolume_lines_with_next_returns_all_four() {
         let st = LyricsState::new(wall_track());
         let (cur_en, next_en, cur_sk, _next_sk) =
-            st.resolume_lines_with_next(1500, false).expect("on line 0");
+            st.resolume_lines_with_next(1500).expect("on line 0");
         assert_eq!(cur_en, "Hello world");
         assert!(!next_en.is_empty(), "expected a next line text");
         assert!(cur_sk.is_some(), "current line has SK in test_track()");
@@ -538,14 +537,12 @@ mod tests {
     #[test]
     fn a_reference_songs_wall_lines_carry_no_star() {
         // #241 ROZHODNUTÉ: the ★ reference marker left the wall (Arena's
-        // SK subtitle font has no U+2605, so it showed as a box). A
-        // reference song's four wall lines equal a non-reference song's.
+        // SK subtitle font has no U+2605, so it showed as a box). The wall
+        // lines are the plan's lines, nothing appended.
         let st = LyricsState::new(wall_track());
-        let plain = st.resolume_lines_with_next(1500, false).expect("on line 0");
-        let reference = st.resolume_lines_with_next(1500, true).expect("on line 0");
-        assert_eq!(reference, plain);
+        let lines = st.resolume_lines_with_next(1500).expect("on line 0");
         assert_eq!(
-            reference,
+            lines,
             (
                 "Hello world".to_string(),
                 "Goodbye".to_string(),
@@ -553,9 +550,7 @@ mod tests {
                 Some("Zbohom".to_string()),
             )
         );
-        let last = st
-            .resolume_lines_with_next(4500, true)
-            .expect("on last line");
+        let last = st.resolume_lines_with_next(4500).expect("on last line");
         assert_eq!(
             last,
             (
@@ -565,7 +560,7 @@ mod tests {
                 None
             )
         );
-        for line in [&reference.0, &reference.1, &last.0] {
+        for line in [&lines.0, &lines.1, &last.0] {
             assert!(!line.contains('\u{2605}'), "{line:?}");
         }
     }
@@ -575,9 +570,8 @@ mod tests {
         let st = LyricsState::new(wall_track());
         // Position 4500 is inside wall_track()'s last line (sung 4000..6000).
         // test_track()'s unpunctuated lines would be ONE sentence under #217.
-        let (_cur, next_en, _cur_sk, next_sk) = st
-            .resolume_lines_with_next(4500, false)
-            .expect("on last line");
+        let (_cur, next_en, _cur_sk, next_sk) =
+            st.resolume_lines_with_next(4500).expect("on last line");
         assert!(next_en.is_empty(), "last-line next_en must be empty");
         assert!(next_sk.is_none(), "last-line next_sk must be None");
     }
@@ -673,8 +667,8 @@ mod tests {
         }
         for pos in [0u64, 199, 200, 3_999, 4_000, 4_500, 9_000] {
             assert_eq!(
-                st_new.resolume_lines_with_next(pos, false),
-                st_off.resolume_lines_with_next(pos, false),
+                st_new.resolume_lines_with_next(pos),
+                st_off.resolume_lines_with_next(pos),
                 "resolume_lines_with_next must match at position {pos}"
             );
         }
@@ -740,7 +734,7 @@ mod tests {
     fn wall_holds_the_line_through_a_normal_gap() {
         let st = LyricsState::new(two_line_track((1_000, 3_000), (7_000, 9_000)));
         assert_eq!(
-            st.resolume_lines_with_next(4_000, false),
+            st.resolume_lines_with_next(4_000),
             Some((
                 "Hello world".to_string(),
                 "Goodbye".to_string(),
@@ -765,8 +759,8 @@ mod tests {
     #[test]
     fn wall_blanks_only_in_a_long_break() {
         let st = LyricsState::new(two_line_track((1_000, 3_000), (11_001, 13_000)));
-        assert!(st.resolume_lines_with_next(5_999, false).is_some());
-        assert!(st.resolume_lines_with_next(6_000, false).is_none());
+        assert!(st.resolume_lines_with_next(5_999).is_some());
+        assert!(st.resolume_lines_with_next(6_000).is_none());
         assert!(st.presenter_lines(10_200).is_none());
         assert_eq!(
             st.presenter_lines(10_201).map(en_pair),
@@ -810,7 +804,7 @@ mod tests {
         };
         let st = LyricsState::new(track);
         assert_eq!(
-            st.resolume_lines_with_next(1_000, false),
+            st.resolume_lines_with_next(1_000),
             Some((
                 "What a God, what a God".to_string(),
                 "Angels bow before him".to_string(),
@@ -844,9 +838,9 @@ mod tests {
         }
         let st = LyricsState::new(track);
         assert_eq!(st.display_plan().profile(), DisplayProfile::Speech);
-        assert_eq!(st.resolume_lines_with_next(999, false), None);
+        assert_eq!(st.resolume_lines_with_next(999), None);
         assert_eq!(
-            st.resolume_lines_with_next(1_000, false),
+            st.resolume_lines_with_next(1_000),
             Some((
                 String::new(),
                 String::new(),
@@ -854,7 +848,7 @@ mod tests {
                 Some("Zbohom".to_string()),
             ))
         );
-        let sk_at = |pos| st.resolume_lines_with_next(pos, false).and_then(|l| l.2);
+        let sk_at = |pos| st.resolume_lines_with_next(pos).and_then(|l| l.2);
         assert_eq!(sk_at(3_999).as_deref(), Some("Ahoj svet"));
         assert_eq!(sk_at(4_000).as_deref(), Some("Zbohom"));
         assert_eq!(
