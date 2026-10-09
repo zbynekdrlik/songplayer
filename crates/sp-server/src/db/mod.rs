@@ -7,6 +7,7 @@ pub mod models_playlist_fx; // #242 a playlist's own volume + EQ (V33 columns)
 pub mod models_playlists; // #225 every playlist id, for the WS on-connect replay (own module, 1000-line cap)
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 pub mod models_stems_priority; // #195 tiered in-use-first stems selector (own module, 1000-line cap)
+pub mod startup_open; // #229 the startup open waits out a briefly locked database
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
