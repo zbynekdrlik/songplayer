@@ -893,6 +893,19 @@ Rust UI changes how the store reacts to a message, trace every existing
 spec that posts a mock message right after `page.goto` against the new
 logic, message by message, before calling the suite green.
 
+## A `>` inside an unbraced attribute value ENDS the tag (#242 review)
+
+The view! parser (rstml 0.12) ends an opening tag at the first top-level
+`>` token, and the first half of `>=` counts. `prop:disabled=move ||
+bands.get() >= MAX_BANDS` became `prop:disabled=move || bands.get()` (a
+`usize`, accepted) plus the text `= MAX_BANDS on:click=… >` inside the
+button: the click handler was gone and `trunk build` only warned about an
+unused variable. Brace every attribute value that holds a comparison or a
+generic: `prop:disabled=move || { bands.get() >= MAX_BANDS }`, or build the
+closure before `view!`. Any token holding `>` (`>`, `>=`, `->`,
+the close of `Vec<T>`) in an unbraced value ends the tag; braced values
+are parsed as one block.
+
 ## A `<select prop:value>` is set before its options mount: every option carries `selected` (#233)
 
 tachys (Leptos 0.7) builds an element's attributes BEFORE it mounts its

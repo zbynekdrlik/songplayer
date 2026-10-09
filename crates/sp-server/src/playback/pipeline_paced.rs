@@ -248,7 +248,9 @@ fn run_decode_producer(
         &audio_path,
         &crate::stems::control::global(),
     ) {
-        Ok(a) => a,
+        // #242: the playlist's own volume + EQ, after the stem mix and
+        // before the preview tap and the pacer.
+        Ok(a) => crate::playback::playlist_fx::wrap(a, playlist_id),
         Err(e) => {
             let _ = open_tx.send(Err(format!(
                 "failed to open audio {}: {e}",

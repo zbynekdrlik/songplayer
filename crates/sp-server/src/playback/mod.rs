@@ -56,6 +56,8 @@ pub(crate) mod pipeline_paced_idle;
 pub(crate) mod pipeline_paced_submit; // #168 the paced heartbeat over the output's snapshot
 #[cfg(not(windows))]
 pub(crate) mod pipeline_stub;
+pub mod playlist_fx; // #242: every playlist's live sound + the stream wrapper
+pub mod playlist_fx_dsp; // #242: the volume ramp + biquad EQ on the samples
 mod playlist_mode; // #225 unit 2: a mode the playlist's row holds — applied + told
 mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap

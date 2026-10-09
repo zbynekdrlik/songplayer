@@ -11,6 +11,7 @@ pub mod lyrics_g35t; // #144: POST /api/v1/lyrics/g35t/probe (the live g35t gate
 pub mod metadata; // #136: status.metadata + POST /api/v1/metadata/probe
 pub mod mix; // #184 round G — the ONE live mixer console
 pub mod mix_apply; // #184 live-first mix apply seam
+pub mod playlist_audio; // #242: GET/PUT /api/v1/playlists/{id}/audio (own volume + EQ)
 pub mod preview;
 pub mod program; // #209 program bus: GET /api/v1/program + POST /api/v1/program/cut
 pub mod routes;
@@ -50,6 +51,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/playlists/{id}/sync",
             axum::routing::post(routes::sync_playlist),
+        )
+        .route(
+            "/api/v1/playlists/{id}/audio",
+            axum::routing::get(playlist_audio::get_playlist_audio)
+                .put(playlist_audio::put_playlist_audio),
         )
         .route(
             "/api/v1/playlists/{id}/videos",

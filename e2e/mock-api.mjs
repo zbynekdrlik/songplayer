@@ -401,6 +401,89 @@ app.patch("/api/v1/videos/:id", (req, res) => {
   res.status(204).end();
 });
 
+// #242: a playlist's own volume + EQ. Mirrors the real handlers: GET
+// answers the row's settings + the live generation, PUT validates
+// (sp_core::audio_fx limits) and answers 204 with no body, an unknown
+// playlist is 404. `/__mock/playlist-audio` reads every PUT body sent
+// and the stored settings; `/__mock/playlist-audio-reset` clears both,
+// `/__mock/playlist-audio-set {id, fx}` seeds a row.
+const AUDIO_KINDS = ["high_pass", "low_shelf", "peak", "high_shelf", "low_pass"];
+let playlistAudio = new Map();
+let playlistAudioPuts = [];
+function playlistAudioOf(id) {
+  return playlistAudio.get(id) ?? { gain_db: 0, eq: [], generation: 0 };
+}
+function playlistAudioRefusal(body) {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return "audio body: expected an object";
+  }
+  for (const key of Object.keys(body)) {
+    if (key !== "gain_db" && key !== "eq") return `audio body: unknown field \`${key}\``;
+  }
+  const gain = body.gain_db ?? 0;
+  if (typeof gain !== "number" || gain < -30 || gain > 12) {
+    return `audio_gain_db ${gain} is outside -30..=12 dB`;
+  }
+  const eq = body.eq ?? [];
+  if (!Array.isArray(eq)) return "audio body: eq is no list";
+  if (eq.length > 8) return `audio_eq has ${eq.length} bands, at most 8`;
+  for (const [i, b] of eq.entries()) {
+    if (!AUDIO_KINDS.includes(b.kind)) return `audio body: band ${i} kind ${b.kind}`;
+    if (!(b.freq_hz >= 20 && b.freq_hz <= 20000)) {
+      return `audio_eq band ${i}: freq_hz ${b.freq_hz} is outside 20..=20000 Hz`;
+    }
+    const g = b.gain_db ?? 0;
+    if (!(g >= -30 && g <= 12)) return `audio_eq band ${i}: gain_db ${g} is outside -30..=12 dB`;
+    const q = b.q ?? Math.SQRT1_2;
+    if (!(q >= 0.1 && q <= 10)) return `audio_eq band ${i}: q ${q} is outside 0.1..=10`;
+  }
+  return null;
+}
+app.get("/api/v1/playlists/:id/audio", (req, res) => {
+  const id = Number(req.params.id);
+  if (!playlists.some((p) => p.id === id)) {
+    res.status(404).end();
+    return;
+  }
+  res.json(playlistAudioOf(id));
+});
+app.put("/api/v1/playlists/:id/audio", (req, res) => {
+  const id = Number(req.params.id);
+  playlistAudioPuts.push({ id, body: req.body });
+  const refusal = playlistAudioRefusal(req.body);
+  if (refusal) {
+    res.status(400).type("text/plain").send(refusal);
+    return;
+  }
+  if (!playlists.some((p) => p.id === id)) {
+    res.status(404).end();
+    return;
+  }
+  const eq = (req.body.eq ?? []).map((b) => ({
+    kind: b.kind,
+    freq_hz: b.freq_hz,
+    gain_db: b.gain_db ?? 0,
+    q: b.q ?? Math.SQRT1_2,
+    enabled: b.enabled ?? true,
+  }));
+  const generation = playlistAudioOf(id).generation + 1;
+  playlistAudio.set(id, { gain_db: req.body.gain_db ?? 0, eq, generation });
+  res.status(204).end();
+});
+app.get("/__mock/playlist-audio", (_req, res) => {
+  res.json({ puts: playlistAudioPuts, stored: Object.fromEntries(playlistAudio) });
+});
+app.post("/__mock/playlist-audio-reset", (_req, res) => {
+  playlistAudio = new Map();
+  playlistAudioPuts = [];
+  res.status(204).end();
+});
+app.post("/__mock/playlist-audio-set", (req, res) => {
+  const { id, fx } = req.body;
+  playlistAudio.set(Number(id), { gain_db: fx.gain_db ?? 0, eq: fx.eq ?? [], generation: 1 });
+  res.status(204).end();
+});
+
 // Playlist sync
 app.post("/api/v1/playlists/:id/sync", (_req, res) => {
   res.json({ status: "syncing" });

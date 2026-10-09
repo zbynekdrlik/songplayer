@@ -322,6 +322,46 @@ body {
 }
 .playlist-songs-toggle:hover { color: var(--text); }
 
+/* ---- #242 a playlist's own volume + EQ — collapsed like the song list.
+   The curve and the band rows scroll inside the card, never over the
+   next one. ---- */
+.playlist-audio { margin-top: 10px; overflow-x: auto; }
+.playlist-audio-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 4px 0;
+}
+.playlist-audio-toggle:hover { color: var(--text); }
+.playlist-audio-body { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
+.playlist-audio-body input[type="number"] { width: 5.5em; }
+.playlist-audio-curve {
+    max-width: 100%;
+    height: auto;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+.playlist-audio-curve .curve-grid { stroke: var(--border); stroke-width: 1; }
+.playlist-audio-curve .curve-zero { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 4 3; }
+.playlist-audio-curve .curve-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.curve-legend { color: var(--text-dim); font-size: 0.75rem; }
+.playlist-audio-bands { display: flex; flex-direction: column; gap: 6px; }
+.playlist-audio-band {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+.playlist-audio-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.playlist-audio-status { color: var(--text-dim); font-size: 0.85rem; }
+
 /* ---- Progress bar ---- */
 
 .progress-bar {
