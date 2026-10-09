@@ -60,7 +60,10 @@ separate one-song playlist in mode Single).
   nothing written on any refusal.
 - **Dashboard, `sp-ui/src/components/playlist_audio.rs`**: the collapsed
   "Zvuk playlistu" panel on the playlist card, under the Player. It loads
-  on first open; "Použiť" validates with `sp_core::audio_fx::validate`
+  on first open and shows its fields ONLY once the load landed
+  ("Načítavam…" before: an edit made earlier was overwritten by the load,
+  CI run 37975959175; `/__mock/playlist-audio-delay` reproduces it);
+  "Použiť" validates with `sp_core::audio_fx::validate`
   (Slovak `sk()` on the status line) and saves nothing before the load
   landed. The band rows are rebuilt only when the band COUNT changes
   (`Memo` of `eq.len()`); every field reads its band by index, so an edit
