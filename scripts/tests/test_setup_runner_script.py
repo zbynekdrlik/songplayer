@@ -56,6 +56,8 @@ def test_the_five_minute_start_never_starts_a_second_runner():
     guard = vbs[:run]
     assert "Win32_Process" in guard, "no process check before the start"
     assert "Runner.Listener.exe" in guard
-    assert "$RunnerDir\\bin\\Runner.Listener.exe" in guard, "only THIS runner's listener counts"
+    assert "$RunnerDir\\bin\\Runner.Listener.exe" in guard, (
+        "only THIS runner's listener counts"
+    )
     assert "$RunnerDir\\start-runner.bat" in guard, "the running wrapper counts too"
     assert "WScript.Quit" in guard
