@@ -151,7 +151,8 @@ test("turning the NDI input off saves `false`, keeps the source and drops OBS ma
   await expect(page.getByTestId("program-source")).toHaveText("Na programe: Worship", {
     timeout: 10000,
   });
-  await expect(page.getByTestId("program-cut")).toHaveCount(3);
+  // The three playlists and Blank (#245), no OBS manuál.
+  await expect(page.getByTestId("program-cut")).toHaveCount(4);
   await expect(inputCut).toHaveCount(0);
 
   expect(realConsoleErrors()).toEqual([]);

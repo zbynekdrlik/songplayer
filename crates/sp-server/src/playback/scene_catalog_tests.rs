@@ -30,11 +30,34 @@ fn the_ten_live_playlists_are_their_scenes() {
         assert_eq!(catalog.kind(&scene), SceneKind::Playlist(pid), "{scene}");
         assert_eq!(catalog.scene_of(pid), Some(scene.as_str()));
     }
-    // The 4 manual cg OBS scenes on the box show no SongPlayer input.
-    for manual in ["Blank", "Svedectvo", "Trailer", "CG Manual"] {
+    // The manual cg OBS scenes on the box show no SongPlayer input.
+    for manual in ["Svedectvo", "Trailer", "CG Manual"] {
         assert_eq!(catalog.kind(manual), SceneKind::Manual, "{manual}");
     }
+    // #245: cg OBS's "Blank" is SongPlayer's own black now.
+    assert_eq!(catalog.kind("Blank"), SceneKind::Blank);
     assert!(catalog.conflicts().is_empty());
+}
+
+/// #245: `Blank` in any ASCII case is SongPlayer's black, even when a
+/// playlist claims the name: that playlist names no scene, logged once.
+#[test]
+fn blank_is_songplayer_s_own_scene_and_no_playlist_takes_it() {
+    let catalog = SceneCatalog::new([(7, "SP-fast"), (13, "blank"), (14, "BLANK")]);
+    for scene in ["Blank", "blank", "BLANK"] {
+        assert_eq!(catalog.kind(scene), SceneKind::Blank, "{scene}");
+    }
+    assert_eq!(catalog.kind("sp-fast"), SceneKind::Playlist(7));
+    assert_eq!(catalog.scene_of(13), None);
+    assert_eq!(catalog.scene_of(14), None);
+    assert!(catalog.is_active(13), "an active playlist, with no scene");
+    assert_eq!(
+        catalog.conflicts(),
+        [
+            "playlist 13's NDI output name \"blank\" is SongPlayer's Blank scene",
+            "playlist 14's NDI output name \"BLANK\" is SongPlayer's Blank scene",
+        ]
+    );
 }
 
 #[test]
@@ -158,8 +181,18 @@ async fn the_stored_catalog_holds_only_the_active_playlists() {
         None,
         "the NDI input is named by the resolver, not the catalog"
     );
+    // #245: Blank is published with its own scene, even with no store.
+    let blank = sp_core::config::PROGRAM_BLANK_ID;
+    assert_eq!(
+        scene_of_source(&pool, blank).await.as_deref(),
+        Some("Blank")
+    );
     // An unreadable store: no scene name, never a panic.
     pool.close().await;
     assert!(load_catalog(&pool).await.is_err());
     assert_eq!(scene_of_source(&pool, 7).await, None);
+    assert_eq!(
+        scene_of_source(&pool, blank).await.as_deref(),
+        Some("Blank")
+    );
 }

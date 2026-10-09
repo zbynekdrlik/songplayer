@@ -28,7 +28,9 @@
 
 use std::collections::BTreeSet;
 
-use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
+use sp_core::config::{
+    PROGRAM_BLANK_ID, PROGRAM_BLANK_LABEL, PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL,
+};
 
 /// What the program shows, as the bus last published it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -62,6 +64,7 @@ pub fn program_scene_name(on_air: &OnAir) -> Option<String> {
     match (&on_air.scene, on_air.source) {
         (Some(scene), _) => Some(scene.clone()),
         (None, Some(PROGRAM_INPUT_ID)) => Some(PROGRAM_INPUT_LABEL.to_string()),
+        (None, Some(PROGRAM_BLANK_ID)) => Some(PROGRAM_BLANK_LABEL.to_string()),
         _ => None,
     }
 }
@@ -70,11 +73,14 @@ pub fn program_scene_name(on_air: &OnAir) -> Option<String> {
 /// owns the shared wall outputs — `#sp-subs*` (`ShowSubtitles`), the
 /// `#sp-title` clip (the title timers, a re-sync's title) and the Presenter
 /// stage display: `SP-program`'s source when it is a playlist, else none (the
-/// NDI input "OBS manuál" names no playlist, and nothing selected yet). B4
+/// NDI input "OBS manuál" and Blank (#245) name no playlist, and nothing
+/// selected yet). B4
 /// step 6 deleted the legacy mirror and SongPlayer's record of what it told
 /// cg OBS, so cg OBS's program owns nothing any more.
 pub fn wall_owner(on_air: &OnAir) -> Option<i64> {
-    on_air.source.filter(|&source| source != PROGRAM_INPUT_ID)
+    on_air
+        .source
+        .filter(|&source| source != PROGRAM_INPUT_ID && source != PROGRAM_BLANK_ID)
 }
 
 /// #221 L4b (design record 5873773896 §1e; B4 step 6): the playlists on air

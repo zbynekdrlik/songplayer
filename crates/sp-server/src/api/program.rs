@@ -8,7 +8,9 @@
 //!   persisted first (setting `program_source`) and restored at startup.
 //!   `{"source": -1}` (`PROGRAM_INPUT_ID`) cuts to the #212 NDI input "OBS
 //!   manuál" — accepted only while it is a source (`ndi_input_enabled` with a
-//!   non-empty `ndi_input_source`), else `404`.
+//!   non-empty `ndi_input_source`), else `404`. `{"source": -2}`
+//!   (`PROGRAM_BLANK_ID`, #245) cuts to Blank, SongPlayer's own black:
+//!   always accepted.
 //!   #221 L4a: the cut goes through the ONE switch path
 //!   (`program_switch::switch_source`, `via=dashboard`): under the bus's
 //!   `switch_order`, recorded as `remote.last_remote_cut`. #221 B4 step 6:
@@ -46,7 +48,7 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
-use sp_core::config::PROGRAM_INPUT_ID;
+use sp_core::config::{PROGRAM_BLANK_ID, PROGRAM_INPUT_ID};
 
 use crate::AppState;
 use crate::playback::audio_out::OutputStatus;
@@ -182,7 +184,7 @@ pub async fn post_program_cut(
             )
                 .into_response();
         }
-    } else {
+    } else if body.source != PROGRAM_BLANK_ID {
         let exists = sqlx::query("SELECT id FROM playlists WHERE id = ?")
             .bind(body.source)
             .fetch_optional(&state.pool)

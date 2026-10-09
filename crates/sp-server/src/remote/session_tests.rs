@@ -592,6 +592,10 @@ async fn the_scene_list_is_forwarded_to_cg_obs_with_songplayer_s_program() {
     let mut expected = scene_list();
     expected["currentProgramSceneName"] = Value::Null;
     expected["currentProgramSceneUuid"] = Value::Null;
+    // #245: cg OBS lists no Blank, so the facade appends SongPlayer's.
+    expected["scenes"].as_array_mut().unwrap().push(json!({
+        "sceneIndex": 4, "sceneName": "Blank", "sceneUuid": "songplayer-blank"
+    }));
     assert_eq!(d["responseData"], expected);
     let d = request(
         &mut ws,
@@ -722,6 +726,37 @@ async fn a_manual_scene_keeps_the_program_when_the_input_is_not_a_source() {
     assert_eq!(cut.source, None);
     assert_eq!(cut.reason, Some("input_inactive"));
     assert_eq!(last_cut_json(&rig)["cg_forward"], "ok");
+}
+
+/// #245: a press of Blank (any ASCII case) cuts SP-program to SongPlayer's
+/// own black (-2): persisted, published as `Blank`, recorded as `blank`,
+/// and NOTHING goes to cg OBS — no NDI input needed.
+#[tokio::test]
+async fn a_blank_press_cuts_to_songplayer_s_own_black_and_tells_cg_obs_nothing() {
+    let rig = rig().await;
+    enable_input(&rig.pool, false).await;
+    let mut ws = connect(rig.addr).await;
+    hello_identify(&mut ws, 0).await;
+    press(&mut ws, "sp-fast").await;
+    assert_eq!(rig.bus.status().source, Some(7));
+    let d = press(&mut ws, "blank").await;
+    assert_eq!(d["requestStatus"], json!({ "result": true, "code": 100 }));
+    assert_eq!(rig.bus.status().source, Some(-2));
+    assert_eq!(persisted_source(&rig.pool).await.as_deref(), Some("-2"));
+    assert_eq!(rig.bus.on_air_now().scene.as_deref(), Some("Blank"));
+    let cut = rig.remote().last_remote_cut.unwrap();
+    assert_eq!(
+        (cut.scene.as_str(), cut.action, cut.source),
+        ("blank", "blank", Some(-2))
+    );
+    assert_eq!(last_cut_json(&rig)["cg_forward"], Value::Null);
+    let d = request(&mut ws, "GetCurrentProgramScene", None).await;
+    assert_eq!(d["responseData"]["sceneName"], "Blank");
+    assert!(
+        rig.calls().is_empty(),
+        "cg OBS was told nothing: {:?}",
+        rig.calls()
+    );
 }
 
 #[tokio::test]

@@ -209,7 +209,8 @@ async fn companion_over_msgpack_presses_a_page_13_button_and_gets_every_event_as
         d["responseData"]["currentProgramSceneName"].is_null(),
         "{d}"
     );
-    assert_eq!(d["responseData"]["scenes"].as_array().unwrap().len(), 4);
+    // cg OBS's four, and SongPlayer's Blank (#245).
+    assert_eq!(d["responseData"]["scenes"].as_array().unwrap().len(), 5);
 
     // preview_scene(sp-slow): answered, then the preview event, as msgpack.
     let d = request_msgpack(

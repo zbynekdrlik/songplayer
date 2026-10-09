@@ -1630,7 +1630,8 @@ app.post("/api/v1/program/cut", (req, res) => {
       res.status(404).send("the NDI input is disabled or has no source");
       return;
     }
-  } else if (!activePlaylists().some((p) => p.id === source)) {
+  } else if (source !== -2 && !activePlaylists().some((p) => p.id === source)) {
+    // #245: -2 is Blank, SongPlayer's own black, always a source.
     res.status(404).send("unknown playlist");
     return;
   }
@@ -1639,7 +1640,7 @@ app.post("/api/v1/program/cut", (req, res) => {
   programLastCut = req.body;
   // #221 ROZHODNUTÉ 6022247729: an inactive or scene-less playlist is
   // refused (409), nothing changes, and it is recorded as a keep.
-  const refusal = source === -1 ? null : cutRefusal(source);
+  const refusal = source === -1 || source === -2 ? null : cutRefusal(source);
   if (refusal !== null) {
     programLastRemoteCut = {
       scene: String(source),
@@ -1656,8 +1657,9 @@ app.post("/api/v1/program/cut", (req, res) => {
   }
   const playlist = activePlaylists().find((p) => p.id === source);
   programLastRemoteCut = {
-    scene: source === -1 ? "OBS manuál" : asciiLower(playlist.ndi_output_name),
-    action: source === -1 ? "input" : "playlist",
+    scene:
+      source === -1 ? "OBS manuál" : source === -2 ? "Blank" : asciiLower(playlist.ndi_output_name),
+    action: source === -1 ? "input" : source === -2 ? "blank" : "playlist",
     source,
     reason: null,
     cut_boundary_100ns: null,

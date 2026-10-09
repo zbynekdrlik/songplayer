@@ -241,10 +241,11 @@ impl Window {
     /// The window a cut on `cut` opens (#215 cue gate): a Cut is open at once
     /// (zero boundaries); a Fade waits for the incoming source's first live
     /// pair, at most [`CUE_WAIT_MAX_SLOTS`] boundaries, so until its cue opens
-    /// it may end as late as the cut + that wait + `n_slots`.
+    /// it may end as late as the cut + that wait + `n_slots`. A fade INTO
+    /// Blank (#245) opens at once: its black is the standby, always ready.
     pub fn cued(from: Option<i64>, to: i64, cut_100ns: i64, spec: &TransitionSpec) -> Self {
         let mut window = Self::new(from, to, cut_100ns, spec);
-        if spec.n_slots > 0 {
+        if spec.n_slots > 0 && to != sp_core::config::PROGRAM_BLANK_ID {
             let cut_index = window.start_index;
             let at =
                 |slots: u32| grid_boundary_100ns(cut_index + i64::from(slots), GENLOCK_GRID_FPS);

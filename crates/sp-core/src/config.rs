@@ -233,6 +233,18 @@ pub fn is_secret_setting(key: &str) -> bool {
 pub const PROGRAM_INPUT_ID: i64 = -1;
 /// #212: the NDI input's label on the dashboard Program control.
 pub const PROGRAM_INPUT_LABEL: &str = "OBS manuál";
+/// #245: the program-bus source id of Blank, SongPlayer's own black: no
+/// source ever offers under it, so the bus fills every boundary with its
+/// standby pair (black + silence).
+pub const PROGRAM_BLANK_ID: i64 = -2;
+/// #245: Blank's scene name (the facade, Companion) and its dashboard label.
+pub const PROGRAM_BLANK_LABEL: &str = "Blank";
+
+/// #245: whether a pressed scene name is Blank (ASCII case ignored, like
+/// the playlist scenes).
+pub fn is_blank_scene(scene: &str) -> bool {
+    scene.eq_ignore_ascii_case(PROGRAM_BLANK_LABEL)
+}
 
 // Default values for settings that have sensible defaults.
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
@@ -330,6 +342,19 @@ mod tests {
         assert_eq!(SETTING_NDI_INPUT_SOURCE, "ndi_input_source");
         assert_eq!(PROGRAM_INPUT_ID, -1);
         assert_eq!(PROGRAM_INPUT_LABEL, "OBS manuál");
+    }
+
+    /// #245: Blank's id, label and scene match.
+    #[test]
+    fn blank_is_its_own_source_and_scene() {
+        assert_eq!(PROGRAM_BLANK_ID, -2);
+        assert_eq!(PROGRAM_BLANK_LABEL, "Blank");
+        for scene in ["Blank", "blank", "BLANK"] {
+            assert!(is_blank_scene(scene), "{scene}");
+        }
+        for scene in ["Blank ", "Blanks", "sp-blank", "", "OBS manuál"] {
+            assert!(!is_blank_scene(scene), "{scene:?}");
+        }
     }
 
     #[test]

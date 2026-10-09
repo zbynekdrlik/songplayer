@@ -291,6 +291,10 @@ come from `SP-program`, never from cg OBS.
 
 ## A scene press: the ONE switch path (`playback/program_switch.rs`)
 
+#245: a press of `Blank` (any ASCII case) is SongPlayer's own black (-2),
+never forwarded to cg OBS (`program-bus.md` "Blank"); cg OBS's own "Blank"
+scene is no longer used through the facade.
+
 `switch_scene(ctx, X, via)` runs under the bus's `switch_order` for the
 whole switch:
 

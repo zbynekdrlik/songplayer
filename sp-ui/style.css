@@ -144,6 +144,8 @@ body {
 .program-cut:hover:not(:disabled) { border-color: var(--text-dim); }
 /* #221: a playlist the server refuses to cut to (inactive / no scene). */
 .program-cut:disabled { opacity: 0.5; cursor: not-allowed; }
+/* #245: Blank, SongPlayer's own black — set apart from the sources. */
+.program-cut-blank { border-style: dashed; }
 .program-cut.program-cut-on {
     background: var(--error);
     border-color: var(--error);
