@@ -430,6 +430,19 @@ impl SurfaceCopy {
     }
 }
 
+/// The size a D3D11-decoded picture is handed over at: the stream's own
+/// size (the native media type's `MF_MT_FRAME_SIZE`, read at open), the
+/// top-left of the decoded surface, when it fits on both sides; else the
+/// decoded size. The hardware decoder pads its surface and the current
+/// type's frame size to 16 rows (NVDEC: a 1920×1080 AV1 decodes as
+/// 1920×1088, 2048×858 as 2048×864), and those rows are no picture
+/// (Y = U = V = 0: a green strip at the bottom of SP-program and
+/// SP-program-MAX, #223 follow-up). The software path hands over the
+/// stream's size already.
+pub fn visible_size(decoded: (u32, u32), _native: Option<(u32, u32)>) -> (u32, u32) {
+    decoded
+}
+
 /// The bytes from scanline 0 to the end of a mapping that starts at `start`
 /// and is `len` bytes long (`Lock2DSize`'s bounds). `None` when scanline 0
 /// lies outside it.

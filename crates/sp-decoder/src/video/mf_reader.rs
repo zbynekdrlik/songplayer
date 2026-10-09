@@ -37,7 +37,7 @@ use super::hw_session::{HwDevice, HwSession};
 use crate::error::DecoderError;
 use crate::hw_decode::{
     DecodeMode, DecodePath, FallbackGate, FallbackStage, HwFallback, OnDecodeError, PathNote,
-    PathTracker, Resume, hw_counters,
+    PathTracker, Resume, hw_counters, visible_size,
 };
 use crate::stream::{MediaStream, VideoStream};
 use crate::types::{DecodedVideoFrame, PixelFormat};
@@ -57,6 +57,10 @@ pub struct MediaFoundationVideoReader {
     /// The negotiated type carried `MF_MT_FRAME_RATE`; `false` = the
     /// 29.97 fps fallback.
     frame_rate_known: bool,
+    /// The stream's own size (the native type's `MF_MT_FRAME_SIZE`): a
+    /// D3D11 picture is handed over at it, never at the padded surface
+    /// (`hw_decode::visible_size`).
+    native: Option<(u32, u32)>,
     /// What the caller asked for.
     mode: DecodeMode,
     /// The device manager while the source reader runs on the D3D path;
@@ -92,6 +96,7 @@ struct Opened {
     frame_rate_num: u32,
     frame_rate_den: u32,
     frame_rate_known: bool,
+    native: Option<(u32, u32)>,
 }
 
 impl MediaFoundationVideoReader {
@@ -140,6 +145,8 @@ impl MediaFoundationVideoReader {
                 info!(
                     file = %path.display(),
                     adapter = session.adapter_name(),
+                    width = opened.width,
+                    height = opened.height,
                     "mf_reader: opened on the D3D11 path (hardware decode requested)"
                 );
                 let adapter = session.adapter_name().to_string();
@@ -178,6 +185,7 @@ impl MediaFoundationVideoReader {
             frame_rate_num: opened.frame_rate_num,
             frame_rate_den: opened.frame_rate_den,
             frame_rate_known: opened.frame_rate_known,
+            native: opened.native,
             mode,
             hw,
             adapter: None,
@@ -239,7 +247,11 @@ impl MediaFoundationVideoReader {
                 .GetCurrentMediaType(VIDEO_STREAM)
                 .map_err(|e| DecoderError::ReadSample(format!("GetCurrentMediaType video: {e}")))?
         };
-        let (width, height) = frame_size(&negotiated_video);
+        let native = native_frame_size(&reader);
+        let (width, height) = match hw {
+            Some(_) => visible_size(frame_size(&negotiated_video), native),
+            None => frame_size(&negotiated_video),
+        };
         let (frame_rate_num, frame_rate_den, frame_rate_known) = unsafe {
             match negotiated_video.GetUINT64(&MF_MT_FRAME_RATE) {
                 Ok(packed) => ((packed >> 32) as u32, packed as u32, true),
@@ -269,6 +281,7 @@ impl MediaFoundationVideoReader {
             frame_rate_num,
             frame_rate_den,
             frame_rate_known,
+            native,
         })
     }
 
@@ -489,7 +502,7 @@ impl MediaFoundationVideoReader {
                         .GetCurrentMediaType(VIDEO_STREAM)
                         .map_err(|e| DecoderError::ReadSample(e.to_string()))?
                 };
-                let (width, height) = frame_size(&media_type);
+                let (width, height) = visible_size(frame_size(&media_type), self.native);
                 let picture = surface.read(width, height)?;
                 (picture.data, width, height, picture.stride, picture.path)
             }
@@ -645,6 +658,14 @@ pub(super) fn com_startup() -> Result<(), DecoderError> {
             .map_err(|e| DecoderError::ComInit(format!("MFStartup: {e}")))?;
     }
     Ok(())
+}
+
+/// The stream's own size: the native (compressed) type's `MF_MT_FRAME_SIZE`,
+/// `None` when MF does not answer or reports none.
+fn native_frame_size(reader: &IMFSourceReader) -> Option<(u32, u32)> {
+    let native: IMFMediaType = unsafe { reader.GetNativeMediaType(VIDEO_STREAM, 0) }.ok()?;
+    let size = frame_size(&native);
+    (size != (0, 0)).then_some(size)
 }
 
 /// A media type's `MF_MT_FRAME_SIZE` (0×0 when it has none).
