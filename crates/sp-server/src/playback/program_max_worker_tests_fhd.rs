@@ -231,6 +231,30 @@ fn a_lost_fhd_device_drops_only_the_fhd_objects() {
     );
 }
 
+/// An FHD boundary that went out between two losses: the second rebuild
+/// does not wait (its own lost-device state, like MAX's).
+#[test]
+fn a_lost_fhd_device_after_a_sent_fhd_boundary_rebuilds_at_once_again() {
+    let max = fhd_on();
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let t0 = Instant::now();
+    gpu.script().fhd_send.push_back(device_lost());
+    worker.serve(&black(1), t0);
+    worker.serve(&black(2), t0);
+    assert_eq!(gpu.log().fhd_sent, 1, "rebuilt and sent");
+    gpu.script().fhd_send.push_back(device_lost());
+    worker.serve(&black(3), t0);
+    worker.serve(&black(4), t0);
+    let log = gpu.log();
+    assert_eq!(
+        (log.fhd_compositors_built, log.fhd_sent),
+        (3, 2),
+        "an FHD boundary went out between the two losses: no backoff"
+    );
+    assert_eq!(log.sent, 4);
+}
+
 #[test]
 fn switching_the_fhd_sender_off_drops_it_at_the_next_boundary() {
     let max = fhd_on();

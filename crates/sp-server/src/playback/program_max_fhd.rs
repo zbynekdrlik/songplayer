@@ -202,7 +202,7 @@ impl MaxOut {
         };
         let [submitted, failed, sender_backoffs] = counts;
         let reason = fhd_off_reason(fhd_setting, max_enabled);
-        let (listed_width, listed_height) = listed.unwrap_or((0, 0));
+        let (listed_width, listed_height) = listed.unwrap_or_default();
         FhdStatus {
             enabled: fhd_setting,
             state: state_label(&phase, reason.is_none()),

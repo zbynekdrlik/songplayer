@@ -7,6 +7,7 @@ paths:
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
   - "e2e/post-deploy-max.spec.ts"
   - "e2e/max-gate*.ts"
+  - "e2e/settings-spout.spec.ts"
 ---
 
 # The `SP-program-MAX` GPU compositor and Spout sender: `crates/sp-gpu` (#223 S1a, S1b) and its runtime wiring (S2)
@@ -17,7 +18,8 @@ fade costs ~40–45 ms on the CPU, over the 33.3 ms slot, so MAX is composed on
 the GPU. This crate is the compositor (device, upload, draw, readback) and,
 since S1b, its Spout sender (below); S2 wires both into the program output
 (sp-server `playback/program_max.rs` + `program_max_worker.rs`, "Runtime
-wiring" below).
+wiring" below). #239: the same thread also sends the FHD program as the
+Spout sender `SP-program` (1920×1080), "The FHD Spout sender" below.
 
 ## What one boundary draws (`composition.rs`)
 
@@ -32,6 +34,14 @@ wiring" below).
 - Placement: `sp_core::fit::aspect_fit` into 3840×2160. This is the same
   function `SP-program`'s canvas fit and the preview use. #223 S1a moved it
   from sp-server, and `playback::nv12_fit` re-exports it. Never copy the math.
+- #239: the target is the compositor's own size. `layers()` is
+  `layers_in(CANVAS_WIDTH, CANVAS_HEIGHT)` (MAX); `layers_in(w, h)` places
+  into any target (`FHD_WIDTH` × `FHD_HEIGHT` = 1920×1080 for
+  `SP-program`), and so do `QuadConstants::new(place, weight, w, h)`, the
+  viewport, the render target, the staging copy and the readback.
+  `reference.rs` needs no size: each layer carries its place in its own
+  target; its pins run at both sizes (a scratch model of `pixel` that
+  reproduces the 4K pins derived the FHD ones).
 - The draw:
   - clear to (0, 0, 0, 1);
   - each quad ADDS `saturate(rgb) · weight`: blend one/one, write mask RGB
@@ -551,7 +561,8 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   draw_us_p99, send_us_p99, send_at_us_p50/p99/max, send_late,
   vblank_output, vblank_tracking, vblank_period_ns, vblank_phase_us,
   send_off_grid, send_phase_us_p50/p99, slot_repicks, device_resets,
-  sender_backoffs, spout_name, adapter}` (`MaxStatus`;
+  sender_backoffs, spout_name, adapter, fhd}` (`MaxStatus`; `fhd` = #239,
+  "The FHD Spout sender" below;
   `send_at_us_*` = send done − offer over the window, `send_late` = composes
   that ran past their due instant; `vblank_output` = the tracker's output
   (`\\.\DISPLAY2 7680x1080`, `null` with no tracker), `vblank_tracking` =
@@ -610,6 +621,69 @@ after the second went out: the readback takes no Spout mutex, and the second
 draw's wait for the GPU proves the first send's copy done (the second copy
 writes the same bytes).
 
+### The FHD Spout sender `SP-program` (#239)
+
+Design: #239 "## Design" (the last comment). The FHD program goes out over
+Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
+1920×1080 program without NDI.
+
+- sp-gpu: `Compositor::with_size(w, h)` (the picked adapter, like `new`,
+  which is `with_size(CANVAS_*)`), doc-hidden `new_warp_with_size` for CI,
+  `size()`; `SpoutSender::new_fhd(&c)` = `SPOUT_FHD_SENDER_NAME` =
+  `SP-program` (Arena: `SPOUT_SP-program`). The sender shares whatever its
+  compositor draws: pair `new_fhd` with a 1920×1080 compositor.
+  `read_shared_texture` reads at the size the sender's map lists.
+- The `program-max` thread (`program_max_worker.rs`): while
+  `MaxOut::fhd_wanted` (the setting AND MAX on), each job also goes to a
+  second `Side` (compositor + sender, `MaxGpu::fhd_compositor` /
+  `fhd_sender`), built on the thread like MAX's. Both compose the SAME
+  labelled composition (one `PictureIds`: ids are global, so each
+  compositor's residency stays right), then MAX is sent at the due instant
+  and the FHD sender right after it (`send_at` again: a no-op wait), or
+  alone at that instant when MAX's boundary did not go out (`pace` once
+  per job). Each `Side` keeps its own backoff and lost-device state
+  (`Side::recover`, shared with MAX): a refused FHD sender, a failed FHD
+  build or a lost FHD device never stops MAX, and the other way round.
+  The pictures are labelled only when one side is built (`ready`).
+  Switched off (`fhd_wanted` false), the FHD side is dropped at the next
+  boundary and its backoff forgotten (`release_fhd`); MAX off releases
+  both (MAX first, each sender before its compositor).
+- After its first good boundary the thread reads Spout's registry entry of
+  the FHD sender once (`MaxSender::listed_size` →
+  `spout_sender_info(name)`, a receiver's read; `None` = read again next
+  boundary), so `max.fhd.listed_width/height` is what Spout lists, not a
+  constant. A dropped FHD sender clears it.
+- Setting `program_spout_fhd_enabled` (`sp_core::config`, ON unless
+  `"false"`), applied with MAX's (`start_max` first, then the 5 s task,
+  `program_max_fhd::apply_fhd_setting`). The one enable rule is
+  `fhd_off_reason(fhd_setting, max_enabled)`: MAX off first (`max_off`),
+  then its own setting (`setting_off`).
+- `GET /api/v1/program` → `max.fhd {enabled, state, reason, spout_name,
+  listed_width, listed_height, submitted, failed, sender_backoffs,
+  draw_us_p99, send_us_p99}` (`FhdStatus`, `program_max_fhd.rs`, a CHILD
+  module of `program_max.rs`: it reads the queue and the private `Window`).
+  `state` = MAX's `state_label` over the FHD side's own phase (attach /
+  end / unsupported follow MAX's) with `reason.is_none()` as "on". Its
+  own lock, never held with the queue's or MAX's stats lock.
+- Nastavenia: fieldset `settings-spout` "Výstupy Spout (Resolume)":
+  `settings-max-enabled` (`program_max_enabled`) and
+  `settings-spout-fhd-enabled` (disabled while MAX is unchecked, with the
+  note `settings-spout-fhd-hint`); a save sends both. Mock spec
+  `e2e/settings-spout.spec.ts`; the mock serves `max.fhd` with the same
+  reason rule and `state: "unsupported"`.
+- Live gate: `post-deploy-max.spec.ts` waits for both senders' first
+  boundary and the listing, then for 30 more on BOTH counts, and applies
+  `fhdGateFailures` (`max-gate.ts`, unit-tested in `max-gate.spec.ts`):
+  setting on, no reason, `running`, listed 1920×1080, ≥ 30 out, `failed`
+  and `sender_backoffs` +0. It runs on SNV and in PP's subset.
+- Tests: `program_max_fhd_tests.rs` (rule, records, JSON names, setting,
+  task), `program_max_worker_tests_fhd.rs` (fake GPU: the fake's objects
+  carry an FHD flag, `Log.fhd_*` / `sends` / `listed_reads`,
+  `Script.fhd_*` / `listed`), WARP: sp-gpu `tests/warp.rs` (a 1920×1080
+  compositor against the reference), `tests/spout.rs` (the `SP-program`
+  sender listed at 1920×1080, read back on a second device) and
+  sp-server `program_max_tests_warp.rs` (the real loop with both senders).
+
 ### The box gate after the deploy (the main session runs it)
 
 - the post-deploy spec above passed (`running`, `submitted` rising,
@@ -629,7 +703,10 @@ writes the same bytes).
 - a scratch Arena layer showing the Spout source holds Arena's FPS
   (composition saved and restored; Bridge.avc saved and restored);
 - the CI step proved the exe's embedded manifest (Common-Controls 6.0), and
-  the installer carries `resources/THIRD-PARTY-NOTICES.txt`.
+  the installer carries `resources/THIRD-PARTY-NOTICES.txt`;
+- #239: Arena lists `SPOUT_SP-program` too, `spout_sender_info("SP-program")`
+  reads 1920×1080 format 87, and MAX's budget and `coalesced` +0 hold with
+  both senders on.
 
 ## Telemetry (`ComposeStats`, behind `max.*_p99`)
 
@@ -707,4 +784,7 @@ build step, and WARP and the RTX run the same source. A compile error is
   on `Compositor` / `SpoutSender` (off Windows no compositor exists to call
   them on). `SpoutGpu::compositor` stays gated: off Windows it is
   `Unsupported`, which `off_windows_the_production_gpu_is_unsupported`
-  pins through the worker.
+  pins through the worker. #239: `SpoutGpu::fhd_sender` and the
+  `listed_size` impl on `SpoutSender` are glue too (`mutants::skip`);
+  `SpoutGpu::fhd_compositor` stays gated
+  (`off_windows_the_production_fhd_compositor_is_unsupported`).
