@@ -1,7 +1,8 @@
 //! Settings form for OBS, Gemini, paid AI (#229 item C), dub, the NDI input
 //! "OBS manuál" (#212), the
 //! Companion remote control (#213), the program transition (#215; #221 L5
-//! deleted the OBS follow and the "podľa OBS" transition) and cache
+//! deleted the OBS follow and the "podľa OBS" transition), the program's
+//! Spout outputs (#239: `SP-program-MAX` and `SP-program`) and cache
 //! configuration. #233: #210's VBAN fieldset moved to "Zvukové výstupy"
 //! (`audio_outputs.rs`, the output list), which saves its own two settings;
 //! this form MERGES what it saved into `store.settings`, so the list it does
@@ -101,6 +102,9 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     // #215: the program transition (a fade by default).
     let transition_mode = RwSignal::new("fade".to_string());
     let transition_ms = RwSignal::new(config::DEFAULT_PROGRAM_TRANSITION_MS.to_string());
+    // #239: the program's Spout outputs, both on unless they say "false".
+    let max_enabled = RwSignal::new(config::DEFAULT_PROGRAM_MAX_ENABLED);
+    let spout_fhd_enabled = RwSignal::new(config::DEFAULT_PROGRAM_SPOUT_FHD_ENABLED);
     let save_status = RwSignal::new(String::new());
 
     // Populate fields from store settings when THEIRS change: the outputs
@@ -180,6 +184,16 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
             config::SETTING_PROGRAM_TRANSITION_MS,
             "",
         )));
+        max_enabled.set(config::program_max_enabled(
+            settings
+                .get(config::SETTING_PROGRAM_MAX_ENABLED)
+                .map(String::as_str),
+        ));
+        spout_fhd_enabled.set(config::program_spout_fhd_enabled(
+            settings
+                .get(config::SETTING_PROGRAM_SPOUT_FHD_ENABLED)
+                .map(String::as_str),
+        ));
     });
 
     let on_save = move |ev: leptos::ev::SubmitEvent| {
@@ -233,6 +247,14 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
         settings.insert(
             config::SETTING_PROGRAM_TRANSITION_MS.to_string(),
             transition_ms.get().trim().to_string(),
+        );
+        settings.insert(
+            config::SETTING_PROGRAM_MAX_ENABLED.to_string(),
+            max_enabled.get().to_string(),
+        );
+        settings.insert(
+            config::SETTING_PROGRAM_SPOUT_FHD_ENABLED.to_string(),
+            spout_fhd_enabled.get().to_string(),
         );
 
         // #229: the server answers the settings PATCH 204 with no body, so it
@@ -431,6 +453,38 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                         on:input=move |ev| transition_ms.set(event_target_value(&ev))
                     />
                 </label>
+            </fieldset>
+
+            <fieldset data-testid="settings-spout">
+                <legend>"Výstupy Spout (Resolume)"</legend>
+                <label>
+                    <input
+                        type="checkbox"
+                        data-testid="settings-max-enabled"
+                        prop:checked=move || max_enabled.get()
+                        on:change=move |ev| max_enabled.set(event_target_checked(&ev))
+                    />
+                    "Posielať SP-program-MAX (3840×2160) cez Spout"
+                </label>
+                <label title="Obraz programu SP-program v rozlíšení 1920×1080, ten istý ako na NDI. Posiela sa len spolu s SP-program-MAX.">
+                    <input
+                        type="checkbox"
+                        data-testid="settings-spout-fhd-enabled"
+                        prop:checked=move || spout_fhd_enabled.get()
+                        prop:disabled=move || !max_enabled.get()
+                        on:change=move |ev| spout_fhd_enabled.set(event_target_checked(&ev))
+                    />
+                    "Posielať SP-program (1920×1080) cez Spout"
+                </label>
+                <span class="settings-hint" data-testid="settings-spout-fhd-hint">
+                    {move || {
+                        if max_enabled.get() {
+                            ""
+                        } else {
+                            "SP-program cez Spout beží len so zapnutým SP-program-MAX."
+                        }
+                    }}
+                </span>
             </fieldset>
 
             <fieldset>

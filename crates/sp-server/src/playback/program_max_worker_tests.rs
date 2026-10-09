@@ -2,7 +2,9 @@
 //! builds and when, the picture ids, what a lost device, a refused sender, a
 //! failed build or a lost frame cost, the backoff, the release, and the loop.
 //! The fake ([`FakeGpu`]) is `pub(crate)`: `program_output_tests_max.rs`
-//! holds its compose to stall the consumer.
+//! holds its compose to stall the consumer, and #239's
+//! `program_max_worker_tests_fhd.rs` drives its FHD side (every object
+//! knows whether it is the FHD sender's).
 //! Wired via `#[cfg(test)] #[path = "program_max_worker_tests.rs"] pub(crate) mod tests;`.
 
 use std::collections::VecDeque;
@@ -77,10 +79,19 @@ pub(crate) enum Drawn {
 pub(crate) struct Log {
     pub compositors_built: u32,
     pub senders_built: u32,
-    /// "sender" / "compositor", in drop order.
+    /// "sender" / "compositor" (MAX's), "fhd sender" / "fhd compositor"
+    /// (#239), in drop order.
     pub drops: Vec<&'static str>,
     pub drawn: Vec<Drawn>,
     pub sent: u32,
+    /// #239: the FHD sender's builds, draws and sends.
+    pub fhd_compositors_built: u32,
+    pub fhd_senders_built: u32,
+    pub fhd_drawn: Vec<Drawn>,
+    pub fhd_sent: u32,
+    /// #239: "max" / "fhd", in send order; and the registry reads.
+    pub sends: Vec<&'static str>,
+    pub listed_reads: u32,
 }
 
 /// The fake GPU's next results; an empty queue answers `Ok`.
@@ -90,6 +101,13 @@ pub(crate) struct Script {
     pub sender: VecDeque<GpuError>,
     pub compose: VecDeque<GpuError>,
     pub send: VecDeque<GpuError>,
+    /// #239: the FHD sender's, and what each registry read answers (an
+    /// empty queue: [`FAKE_LISTED`]).
+    pub fhd_compositor: VecDeque<GpuError>,
+    pub fhd_sender: VecDeque<GpuError>,
+    pub fhd_compose: VecDeque<GpuError>,
+    pub fhd_send: VecDeque<GpuError>,
+    pub listed: VecDeque<Option<(u32, u32)>>,
 }
 
 /// A held compose: it says it entered, then waits for the gate.
@@ -113,6 +131,14 @@ pub(crate) const UPLOAD_US: u64 = 11;
 pub(crate) const DRAW_US: u64 = 22;
 pub(crate) const SEND_US: u64 = 33;
 
+/// #239: the stats the fake FHD compose and send report (their own, so the
+/// FHD telemetry is never MAX's).
+pub(crate) const FHD_DRAW_US: u64 = 44;
+pub(crate) const FHD_SEND_US: u64 = 55;
+
+/// #239: where the fake registry lists a sender.
+pub(crate) const FAKE_LISTED: (u32, u32) = (1920, 1080);
+
 /// The fake GPU: its compositor and sender record into [`Log`] and answer
 /// from [`Script`]. Clones share one state.
 #[derive(Clone, Default)]
@@ -133,8 +159,9 @@ impl FakeGpu {
     }
 }
 
-pub(crate) struct FakeCompositor(Arc<FakeShared>);
-pub(crate) struct FakeSender(Arc<FakeShared>);
+/// The second field: the object is the FHD sender's (#239).
+pub(crate) struct FakeCompositor(Arc<FakeShared>, bool);
+pub(crate) struct FakeSender(Arc<FakeShared>, bool);
 
 fn log_of(shared: &FakeShared) -> MutexGuard<'_, Log> {
     shared.log.lock().unwrap_or_else(|p| p.into_inner())
@@ -153,13 +180,19 @@ fn next_error(
 
 impl Drop for FakeCompositor {
     fn drop(&mut self) {
-        log_of(&self.0).drops.push("compositor");
+        let what = if self.1 {
+            "fhd compositor"
+        } else {
+            "compositor"
+        };
+        log_of(&self.0).drops.push(what);
     }
 }
 
 impl Drop for FakeSender {
     fn drop(&mut self) {
-        log_of(&self.0).drops.push("sender");
+        let what = if self.1 { "fhd sender" } else { "sender" };
+        log_of(&self.0).drops.push(what);
     }
 }
 
@@ -171,22 +204,46 @@ impl MaxGpu for FakeGpu {
         log_of(&self.0).compositors_built += 1;
         match next_error(&self.0, |s| s.compositor.pop_front()) {
             Some(error) => Err(error),
-            None => Ok(FakeCompositor(self.0.clone())),
+            None => Ok(FakeCompositor(self.0.clone(), false)),
         }
     }
 
-    fn sender(&mut self, _compositor: &FakeCompositor) -> Result<FakeSender, GpuError> {
+    fn sender(&mut self, compositor: &FakeCompositor) -> Result<FakeSender, GpuError> {
+        assert!(!compositor.1, "MAX's sender on MAX's compositor");
         log_of(&self.0).senders_built += 1;
         match next_error(&self.0, |s| s.sender.pop_front()) {
             Some(error) => Err(error),
-            None => Ok(FakeSender(self.0.clone())),
+            None => Ok(FakeSender(self.0.clone(), false)),
+        }
+    }
+
+    fn fhd_compositor(&mut self) -> Result<FakeCompositor, GpuError> {
+        log_of(&self.0).fhd_compositors_built += 1;
+        match next_error(&self.0, |s| s.fhd_compositor.pop_front()) {
+            Some(error) => Err(error),
+            None => Ok(FakeCompositor(self.0.clone(), true)),
+        }
+    }
+
+    fn fhd_sender(&mut self, compositor: &FakeCompositor) -> Result<FakeSender, GpuError> {
+        assert!(compositor.1, "the FHD sender on the FHD compositor");
+        log_of(&self.0).fhd_senders_built += 1;
+        match next_error(&self.0, |s| s.fhd_sender.pop_front()) {
+            Some(error) => Err(error),
+            None => Ok(FakeSender(self.0.clone(), true)),
         }
     }
 }
 
 impl MaxCompositor for FakeCompositor {
     fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError> {
-        let hold = self.0.hold.lock().unwrap_or_else(|p| p.into_inner()).take();
+        let fhd = self.1;
+        // Only MAX's compose is held (the stalled-consumer test's).
+        let hold = if fhd {
+            None
+        } else {
+            self.0.hold.lock().unwrap_or_else(|p| p.into_inner()).take()
+        };
         if let Some(hold) = hold {
             let _ = hold.entered.send(());
             hold.gate.wait();
@@ -204,12 +261,26 @@ impl MaxCompositor for FakeCompositor {
                 *weight_q8,
             ),
         };
-        log_of(&self.0).drawn.push(drawn);
-        match next_error(&self.0, |s| s.compose.pop_front()) {
+        let mut log = log_of(&self.0);
+        let drawn_log = if fhd {
+            &mut log.fhd_drawn
+        } else {
+            &mut log.drawn
+        };
+        drawn_log.push(drawn);
+        drop(log);
+        let scripted = next_error(&self.0, |s| {
+            if fhd {
+                s.fhd_compose.pop_front()
+            } else {
+                s.compose.pop_front()
+            }
+        });
+        match scripted {
             Some(error) => Err(error),
             None => Ok(ComposeStats {
                 upload_us: UPLOAD_US,
-                draw_us: DRAW_US,
+                draw_us: if fhd { FHD_DRAW_US } else { DRAW_US },
                 uploads: 1,
             }),
         }
@@ -222,14 +293,41 @@ impl MaxCompositor for FakeCompositor {
 
 impl MaxSender for FakeSender {
     fn send(&mut self) -> Result<SpoutSendStats, GpuError> {
-        match next_error(&self.0, |s| s.send.pop_front()) {
-            Some(error) => Err(error),
-            None => {
-                log_of(&self.0).sent += 1;
-                Ok(SpoutSendStats { send_us: SEND_US })
+        let fhd = self.1;
+        let scripted = next_error(&self.0, |s| {
+            if fhd {
+                s.fhd_send.pop_front()
+            } else {
+                s.send.pop_front()
             }
+        });
+        if let Some(error) = scripted {
+            return Err(error);
+        }
+        let mut log = log_of(&self.0);
+        if fhd {
+            log.fhd_sent += 1;
+            log.sends.push("fhd");
+            Ok(SpoutSendStats {
+                send_us: FHD_SEND_US,
+            })
+        } else {
+            log.sent += 1;
+            log.sends.push("max");
+            Ok(SpoutSendStats { send_us: SEND_US })
         }
     }
+
+    fn listed_size(&self) -> Option<(u32, u32)> {
+        log_of(&self.0).listed_reads += 1;
+        next_listed(&self.0)
+    }
+}
+
+/// #239: the next scripted registry answer, else [`FAKE_LISTED`].
+fn next_listed(shared: &FakeShared) -> Option<(u32, u32)> {
+    let mut script = shared.script.lock().unwrap_or_else(|p| p.into_inner());
+    script.listed.pop_front().unwrap_or(Some(FAKE_LISTED))
 }
 
 /// A `width`×`height` NV12 picture (stride = width) of its own allocation.
@@ -242,14 +340,14 @@ pub(crate) fn picture(width: u32, height: u32) -> MaxPicture {
     }
 }
 
-fn plain(stamp: i64, picture: &MaxPicture) -> MaxJob {
+pub(crate) fn plain(stamp: i64, picture: &MaxPicture) -> MaxJob {
     MaxJob::Picture {
         stamp_100ns: stamp,
         picture: picture.clone(),
     }
 }
 
-fn pic(id: u64, picture: &MaxPicture) -> Pic {
+pub(crate) fn pic(id: u64, picture: &MaxPicture) -> Pic {
     Pic {
         id,
         width: picture.width,
@@ -259,14 +357,14 @@ fn pic(id: u64, picture: &MaxPicture) -> Pic {
     }
 }
 
-fn device_lost() -> GpuError {
+pub(crate) fn device_lost() -> GpuError {
     GpuError::DeviceLost {
         call: "Present",
         hresult: 0x887A_0005,
     }
 }
 
-fn not_registered() -> GpuError {
+pub(crate) fn not_registered() -> GpuError {
     GpuError::SpoutNotRegistered {
         name: "SP-program-MAX".into(),
         why: "test",

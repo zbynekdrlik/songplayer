@@ -1385,7 +1385,29 @@ function programBody() {
       sender_backoffs: 0,
       spout_name: "SP-program-MAX",
       adapter: null,
+      // #239: the SP-program Spout sender (1920x1080) next to MAX.
+      fhd: mockFhdStatus(),
     },
+  };
+}
+// #239: `max.fhd` (mirrors `FhdStatus`). Its setting is ON unless it says
+// "false"; it is off with a reason while MAX or its own setting is off (MAX
+// first, the server's `fhd_off_reason`); the mock has no GPU: unsupported.
+function mockFhdStatus() {
+  const maxOn = String(settings.program_max_enabled ?? "").trim() !== "false";
+  const fhdOn = String(settings.program_spout_fhd_enabled ?? "").trim() !== "false";
+  return {
+    enabled: fhdOn,
+    state: "unsupported",
+    reason: !maxOn ? "max_off" : !fhdOn ? "setting_off" : null,
+    spout_name: "SP-program",
+    listed_width: 0,
+    listed_height: 0,
+    submitted: 0,
+    failed: 0,
+    sender_backoffs: 0,
+    draw_us_p99: 0,
+    send_us_p99: 0,
   };
 }
 // #223 follow-up: `program_max_vblank_phase_ms` in µs by the server's rule

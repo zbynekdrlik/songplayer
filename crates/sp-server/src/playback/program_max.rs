@@ -36,6 +36,11 @@
 //! with it.
 //!
 //! Telemetry: [`MaxStatus`], served as `max` on `GET /api/v1/program`.
+//!
+//! #239: the same boundaries also go out as the `SP-program` Spout sender,
+//! drawn into the FHD program's 1920×1080 on the same thread, queue and
+//! pacing; its setting, enable rule and telemetry (`max.fhd`) are the child
+//! module `program_max_fhd.rs`.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -58,6 +63,10 @@ use crate::playback::loop_stats::percentile_ceil;
 use crate::playback::program_max_send::SendTiming;
 use crate::playback::program_max_vblank::Aligned;
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
+
+#[path = "program_max_fhd.rs"]
+mod fhd;
+pub use fhd::{FHD_OFF_MAX, FHD_OFF_SETTING, FhdStatus, fhd_off_reason, load_fhd_enabled};
 
 /// How many MAX jobs wait for the `program-max` thread: two, then the oldest
 /// is dropped (coalesced) — revision 2's D4 hand-off.
@@ -246,6 +255,9 @@ pub struct MaxStatus {
     /// box must name its RTX, never a virtual adapter or the Basic Render
     /// Driver); `None` before the first build.
     pub adapter: Option<String>,
+    /// #239: the `SP-program` Spout sender (1920×1080) the thread runs next
+    /// to MAX.
+    pub fhd: FhdStatus,
 }
 
 /// The hand-off's shared state (one lock, shared with the program thread).
@@ -256,6 +268,8 @@ struct Queue {
     enabled: bool,
     /// The setting `program_max_vblank_phase_ms`, as last applied, µs.
     vblank_phase_us: u64,
+    /// #239: the setting `program_spout_fhd_enabled`, as last applied.
+    fhd_enabled: bool,
     /// A `program-max` thread takes jobs.
     consumer: bool,
     stop: bool,
@@ -338,6 +352,8 @@ pub struct MaxOut {
     queue: Mutex<Queue>,
     ready: Condvar,
     stats: Mutex<Stats>,
+    /// #239: the FHD sender's telemetry (`program_max_fhd.rs`).
+    fhd: Mutex<fhd::FhdStats>,
     /// Tests: run inside every offer, before its lock — what the program
     /// thread has done by then.
     #[cfg(test)]
@@ -361,10 +377,14 @@ impl Drop for Consumer<'_> {
             queue.consumer = false;
             while queue.jobs.take().is_some() {}
         }
-        let mut stats = self.0.lock_stats();
-        if stats.phase != MaxPhase::Unsupported {
-            stats.phase = MaxPhase::Failed(MAX_NOT_RUNNING.to_string());
+        {
+            let mut stats = self.0.lock_stats();
+            if stats.phase != MaxPhase::Unsupported {
+                stats.phase = MaxPhase::Failed(MAX_NOT_RUNNING.to_string());
+            }
         }
+        self.0
+            .set_fhd_thread_phase(MaxPhase::Failed(MAX_NOT_RUNNING.to_string()));
     }
 }
 
@@ -376,6 +396,7 @@ impl MaxOut {
                 jobs: SubmitQueue::new(MAX_HANDOFF_BOUND),
                 enabled: false,
                 vblank_phase_us: DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US,
+                fhd_enabled: false,
                 consumer: false,
                 stop: false,
                 coalesced: 0,
@@ -400,6 +421,7 @@ impl MaxOut {
                 send_phase: Window::default(),
                 repicks: 0,
             }),
+            fhd: Mutex::new(fhd::FhdStats::new()),
             #[cfg(test)]
             on_offer: Mutex::new(None),
         }
@@ -516,10 +538,13 @@ impl MaxOut {
     /// guard drops).
     pub fn attach(&self) -> Consumer<'_> {
         self.lock_queue().consumer = true;
-        let mut stats = self.lock_stats();
-        if stats.phase != MaxPhase::Unsupported {
-            stats.phase = MaxPhase::Running;
+        {
+            let mut stats = self.lock_stats();
+            if stats.phase != MaxPhase::Unsupported {
+                stats.phase = MaxPhase::Running;
+            }
         }
+        self.set_fhd_thread_phase(MaxPhase::Running);
         Consumer(self)
     }
 
@@ -561,9 +586,10 @@ impl MaxOut {
         self.lock_stats().failed += 1;
     }
 
-    /// No Direct3D / Spout here: MAX does nothing.
+    /// No Direct3D / Spout here: MAX (and the FHD sender) do nothing.
     pub fn record_unsupported(&self) {
         self.lock_stats().phase = MaxPhase::Unsupported;
+        self.set_fhd_unsupported();
     }
 
     /// A lost device: the compositor and the sender are rebuilt.
@@ -605,9 +631,14 @@ impl MaxOut {
     /// The telemetry. The windows are copied under the lock and sorted
     /// after it, so the thread's next record never waits for a sort.
     pub fn status(&self) -> MaxStatus {
-        let (enabled, coalesced, vblank_phase_us) = {
+        let (enabled, coalesced, vblank_phase_us, fhd_enabled) = {
             let queue = self.lock_queue();
-            (queue.enabled, queue.coalesced, queue.vblank_phase_us)
+            (
+                queue.enabled,
+                queue.coalesced,
+                queue.vblank_phase_us,
+                queue.fhd_enabled,
+            )
         };
         let (phase, names, tracking, counts, upload, draw, send, send_at, send_phase) = {
             let stats = self.lock_stats();
@@ -670,6 +701,7 @@ impl MaxOut {
             sender_backoffs,
             spout_name: SPOUT_SENDER_NAME,
             adapter,
+            fhd: self.fhd_status(fhd_enabled, enabled),
         }
     }
 }
@@ -704,6 +736,7 @@ async fn apply_max_setting(pool: &SqlitePool, max: &MaxOut) {
         }
         Err(e) => warn!(%e, "program max: reading the vblank phase failed"),
     }
+    fhd::apply_fhd_setting(pool, max).await;
 }
 
 /// Re-read the setting every `poll` and apply a change; on shutdown, stop

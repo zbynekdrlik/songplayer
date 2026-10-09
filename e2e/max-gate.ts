@@ -1,8 +1,25 @@
 /**
  * The `SP-program-MAX` post-deploy gate's decision (#223 S2), pure so the
  * mock suite tests it without a box (`max-gate.spec.ts`); the box read is
- * `post-deploy-max.spec.ts`.
+ * `post-deploy-max.spec.ts`. #239: and the decision for the `SP-program`
+ * Spout sender (1920×1080) the same thread runs next to MAX
+ * (`fhdGateFailures`).
  */
+
+/** #239: `GET /api/v1/program` → `max.fhd` (sp-server `FhdStatus`). */
+export interface FhdStatus {
+  enabled: boolean;
+  state: string;
+  reason: string | null;
+  spout_name: string;
+  listed_width: number;
+  listed_height: number;
+  submitted: number;
+  failed: number;
+  sender_backoffs: number;
+  draw_us_p99: number;
+  send_us_p99: number;
+}
 
 /** `GET /api/v1/program` → `max` (sp-server `MaxStatus`). */
 export interface MaxStatus {
@@ -32,6 +49,7 @@ export interface MaxStatus {
   sender_backoffs: number;
   spout_name: string;
   adapter: string | null;
+  fhd: FhdStatus;
 }
 
 /** Boundaries that must go out between the two reads: one grid second (the
@@ -106,5 +124,37 @@ export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
   if (repicks > MAX_SLOT_REPICKS) {
     failures.push(`the send slot was picked anew ${repicks} times between the reads`);
   }
+  return failures;
+}
+
+/**
+ * #239: why the box fails the `SP-program` (1920×1080) Spout gate between
+ * two reads of `max.fhd` (`first` before `second`); empty when it passes:
+ * its setting on and no switch keeping it off, the sender `SP-program`
+ * `running`, Spout's registry listing it at 1920×1080 (the thread's own
+ * read, as a receiver reads it), at least `MIN_BOUNDARIES` more boundaries
+ * out, and in between none failed and no sender refused.
+ */
+export function fhdGateFailures(first: FhdStatus, second: FhdStatus): string[] {
+  const failures: string[] = [];
+  if (!second.enabled) failures.push("program_spout_fhd_enabled is off");
+  if (second.reason !== null) failures.push(`the SP-program sender is off: ${second.reason}`);
+  if (second.spout_name !== "SP-program") {
+    failures.push(`the FHD Spout name is ${second.spout_name}`);
+  }
+  if (second.state !== "running") failures.push(`the SP-program sender is ${second.state}`);
+  if (second.listed_width !== 1920 || second.listed_height !== 1080) {
+    failures.push(
+      `Spout lists SP-program at ${second.listed_width}x${second.listed_height}, not 1920x1080`,
+    );
+  }
+  const sent = second.submitted - first.submitted;
+  if (sent < MIN_BOUNDARIES) {
+    failures.push(`only ${sent} SP-program boundaries went out (at least ${MIN_BOUNDARIES})`);
+  }
+  const failed = second.failed - first.failed;
+  if (failed > 0) failures.push(`${failed} SP-program boundaries failed`);
+  const refused = second.sender_backoffs - first.sender_backoffs;
+  if (refused > 0) failures.push(`the SP-program sender was refused ${refused} times`);
   return failures;
 }
