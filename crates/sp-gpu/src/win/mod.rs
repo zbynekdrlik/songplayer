@@ -15,6 +15,7 @@ mod receiver;
 mod spout_registry;
 mod spout_sender;
 mod textures;
+mod vblank;
 mod video_device;
 
 use std::marker::PhantomData;
@@ -30,6 +31,7 @@ pub use device::adapters;
 pub use receiver::read_shared_texture;
 pub use spout_registry::{spout_sender_info, spout_sender_names};
 pub use spout_sender::SpoutSender;
+pub use vblank::VblankTracker;
 pub use video_device::VideoDevice;
 
 use crate::adapter::AdapterInfo;

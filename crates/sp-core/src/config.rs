@@ -92,6 +92,26 @@ pub fn program_max_enabled(raw: Option<&str>) -> bool {
     raw.map_or(DEFAULT_PROGRAM_MAX_ENABLED, |v| v.trim() != "false")
 }
 
+/// #223 follow-up: where after each vblank of the wall's display a
+/// `SP-program-MAX` send starts, in ms (decimals allowed): Resolume Arena
+/// takes the Spout texture at its own instant in each refresh, so a send
+/// must keep clear of it ([`program_max_vblank_phase_us`]).
+pub const SETTING_PROGRAM_MAX_VBLANK_PHASE_MS: &str = "program_max_vblank_phase_ms";
+/// #223 follow-up: the default phase, µs: mid-refresh at 60 Hz.
+pub const DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US: u64 = 8_000;
+
+/// #223 follow-up: a stored `program_max_vblank_phase_ms` in µs: a number of
+/// ms from 0 up to (not including) 1000, rounded to the µs; anything else
+/// (missing, not a number, negative, too large) is
+/// [`DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US`].
+pub fn program_max_vblank_phase_us(raw: Option<&str>) -> u64 {
+    raw.and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|ms| (0.0..1000.0).contains(ms))
+        .map_or(DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, |ms| {
+            (ms * 1000.0).round() as u64
+        })
+}
+
 /// #223 S3b: hardware video decode for playback — Media Foundation's decoder
 /// on the GPU (a Direct3D 11 device manager) instead of in software. The
 /// paced decode producer reads it when it opens a song, so a change applies
@@ -361,6 +381,29 @@ mod tests {
             "only an explicit false"
         );
         assert!(!program_max_enabled(Some(" false\n")), "trimmed");
+    }
+
+    /// #223 follow-up: the vblank phase is ms from 0 to under 1000, to the
+    /// µs; anything else is the 8 ms default.
+    #[test]
+    fn the_max_vblank_phase_is_ms_from_zero_to_under_a_second() {
+        assert_eq!(
+            SETTING_PROGRAM_MAX_VBLANK_PHASE_MS,
+            "program_max_vblank_phase_ms"
+        );
+        assert_eq!(DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, 8_000);
+        assert_eq!(program_max_vblank_phase_us(None), 8_000);
+        assert_eq!(program_max_vblank_phase_us(Some("6")), 6_000);
+        assert_eq!(program_max_vblank_phase_us(Some(" 2.5\n")), 2_500);
+        assert_eq!(program_max_vblank_phase_us(Some("0.0004")), 0, "rounded");
+        assert_eq!(program_max_vblank_phase_us(Some("0.0006")), 1, "rounded");
+        assert_eq!(program_max_vblank_phase_us(Some("0")), 0, "0 is a phase");
+        assert_eq!(program_max_vblank_phase_us(Some("999.9")), 999_900);
+        assert_eq!(program_max_vblank_phase_us(Some("1000")), 8_000);
+        assert_eq!(program_max_vblank_phase_us(Some("-1")), 8_000);
+        assert_eq!(program_max_vblank_phase_us(Some("NaN")), 8_000);
+        assert_eq!(program_max_vblank_phase_us(Some("8ms")), 8_000);
+        assert_eq!(program_max_vblank_phase_us(Some("")), 8_000);
     }
 
     /// #223 S3b: hardware decode is OFF unless the setting says exactly

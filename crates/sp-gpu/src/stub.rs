@@ -6,10 +6,12 @@
 //! accessors (`device`, `render_target`, `shared_handle`), the test
 //! constructors `new_on_listed_adapter` / `with_name`, `adapters()` and the
 //! tests' second-device readback `read_shared_texture` (#223 S2) are
-//! Windows-only.
+//! Windows-only. The vblank tracker (#223 follow-up) has no output to wait
+//! on here: `VblankTracker::start` reports `Unsupported`.
 
 use std::convert::Infallible;
 use std::marker::PhantomData;
+use std::time::Instant;
 
 use crate::adapter::AdapterInfo;
 use crate::composition::Composition;
@@ -17,6 +19,7 @@ use crate::error::GpuError;
 use crate::spout::SharedTextureInfo;
 use crate::spout_state::Registration;
 use crate::stats::{ComposeStats, SpoutSendStats};
+use crate::vblank::{OutputInfo, VblankGrid};
 
 /// Off Windows the compositor cannot be built: [`Compositor::new`] and
 /// [`Compositor::new_warp`] report [`GpuError::Unsupported`]. The type has
@@ -96,6 +99,31 @@ impl SpoutSender {
     }
 }
 
+/// Off Windows there is no DXGI output to wait on: [`VblankTracker::start`]
+/// reports [`GpuError::Unsupported`] and the type has no values.
+#[derive(Debug)]
+pub struct VblankTracker(Infallible);
+
+impl VblankTracker {
+    /// [`GpuError::Unsupported`]: no `WaitForVBlank` off Windows.
+    pub fn start() -> Result<Self, GpuError> {
+        Err(GpuError::Unsupported)
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: an uninhabited
+    /// receiver, so no test can call it.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn output(&self) -> &OutputInfo {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `output`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn grid(&self, _now: Instant) -> Option<VblankGrid> {
+        match self.0 {}
+    }
+}
+
 /// [`GpuError::Unsupported`]: no Spout off Windows.
 pub fn spout_sender_names() -> Result<Vec<String>, GpuError> {
     Err(GpuError::Unsupported)
@@ -108,13 +136,18 @@ pub fn spout_sender_info(_name: &str) -> Result<Option<SharedTextureInfo>, GpuEr
 
 #[cfg(test)]
 mod tests {
-    use super::{Compositor, spout_sender_info, spout_sender_names};
+    use super::{Compositor, VblankTracker, spout_sender_info, spout_sender_names};
     use crate::error::GpuError;
 
     #[test]
     fn off_windows_no_compositor_can_be_built() {
         assert_eq!(Compositor::new().unwrap_err(), GpuError::Unsupported);
         assert_eq!(Compositor::new_warp().unwrap_err(), GpuError::Unsupported);
+    }
+
+    #[test]
+    fn off_windows_no_vblank_tracker_starts() {
+        assert_eq!(VblankTracker::start().unwrap_err(), GpuError::Unsupported);
     }
 
     #[test]

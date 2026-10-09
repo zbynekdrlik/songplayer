@@ -848,7 +848,7 @@ pub(crate) fn spawn_loop(max: &Arc<MaxOut>, gpu: &FakeGpu) -> std::thread::JoinH
     let (max, gpu) = (max.clone(), gpu.clone());
     std::thread::Builder::new()
         .name("program-max-test".into())
-        .spawn(move || run_max_loop(&max, gpu))
+        .spawn(move || run_max_loop(&max, gpu, None))
         .expect("spawn the loop")
 }
 

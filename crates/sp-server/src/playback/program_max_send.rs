@@ -7,9 +7,11 @@
 //! before and sometimes after Arena's instant and shows for 1 or 3 output
 //! frames instead of 2 — the wall stutters. `SP-program`'s NDI submit is
 //! paced on the grid; this paces the Spout send the same way: each boundary
-//! goes out [`MAX_SEND_LEAD`] after the program offered it ([`send_due`]),
-//! whatever its compose cost. A compose that ends after that instant sends
-//! at once and is counted late.
+//! goes out at its due instant ([`send_at`]), whatever its compose cost —
+//! [`MAX_SEND_LEAD`] after the program offered it ([`send_due`]) when the
+//! wall's refresh is not measured, else a slot of that refresh
+//! (`program_max_vblank.rs`). A compose that ends after the due instant
+//! sends at once and is counted late.
 //!
 //! The wait is a [`SendClock`] so the decisions run on Linux with a fake
 //! that never sleeps; production waits on [`SpinClock`]: sleep to
@@ -101,24 +103,34 @@ pub struct SendTiming {
     pub at_us: u64,
     /// The compose ended after the due instant: sent at once.
     pub late: bool,
+    /// The instant the send started (the due one, unless late).
+    pub started: Instant,
 }
 
-/// Wait on `clock` for the due instant of a boundary offered at `offered`
-/// (unless it passed: late), run `send`, and time it.
-pub fn send_paced<T, E>(
+/// Wait on `clock` for `due` (unless it passed: late), run `send`, and time
+/// it against the boundary's offer at `offered`.
+pub fn send_at<T, E>(
     clock: &mut dyn SendClock,
+    due: Instant,
     offered: Instant,
     send: impl FnOnce() -> Result<T, E>,
 ) -> Result<(T, SendTiming), E> {
-    let due = send_due(offered);
     let late = clock.now() > due;
     if !late {
         clock.wait_until(due);
     }
+    let started = clock.now();
     let sent = send()?;
     let at = clock.now().saturating_duration_since(offered);
     let at_us = u64::try_from(at.as_micros()).unwrap_or(u64::MAX);
-    Ok((sent, SendTiming { at_us, late }))
+    Ok((
+        sent,
+        SendTiming {
+            at_us,
+            late,
+            started,
+        },
+    ))
 }
 
 #[cfg(test)]

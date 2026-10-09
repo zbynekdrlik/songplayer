@@ -224,7 +224,7 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
         let max = max.clone();
         std::thread::Builder::new()
             .name("program-max".into())
-            .spawn(move || run_max_loop(&max, WarpGpu))
+            .spawn(move || run_max_loop(&max, WarpGpu, None))
             .expect("spawn program-max")
     };
     wait_until("program-max takes jobs", || max.accepting());

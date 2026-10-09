@@ -1,5 +1,5 @@
 //! #223 follow-up: the constant-phase Spout send (`program_max_send.rs`):
-//! the due instant, the wait's sleep/spin decision, and `send_paced` on a
+//! the due instant, the wait's sleep/spin decision, and `send_at` on a
 //! clock that never sleeps ([`FakeClock`], also used by
 //! `program_max_worker_tests_send.rs`).
 //! Wired via `#[cfg(test)] #[path = "program_max_send_tests.rs"] pub(crate) mod tests;`.
@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::{
-    MAX_SEND_LEAD, SEND_SPIN_MARGIN, SendClock, SendTiming, WaitStep, send_due, send_paced,
+    MAX_SEND_LEAD, SEND_SPIN_MARGIN, SendClock, SendTiming, WaitStep, send_at, send_due,
     send_wait_step,
 };
 
@@ -88,7 +88,7 @@ fn an_early_compose_waits_for_the_due_instant_then_sends() {
     let offered = Instant::now();
     let (mut clock, list) = FakeClock::at(offered + 5 * MS);
     let mut waits_at_send = None;
-    let (sent, timing) = send_paced(&mut clock, offered, || {
+    let (sent, timing) = send_at(&mut clock, send_due(offered), offered, || {
         waits_at_send = Some(waits(&list).len());
         Ok::<_, ()>("sent")
     })
@@ -100,7 +100,8 @@ fn an_early_compose_waits_for_the_due_instant_then_sends() {
         timing,
         SendTiming {
             at_us: 12_000,
-            late: false
+            late: false,
+            started: offered + 12 * MS,
         }
     );
 }
@@ -109,13 +110,15 @@ fn an_early_compose_waits_for_the_due_instant_then_sends() {
 fn a_compose_done_exactly_at_the_due_instant_is_not_late() {
     let offered = Instant::now();
     let (mut clock, list) = FakeClock::at(offered + 12 * MS);
-    let (_, timing) = send_paced(&mut clock, offered, || Ok::<_, ()>(())).expect("sent");
+    let (_, timing) =
+        send_at(&mut clock, send_due(offered), offered, || Ok::<_, ()>(())).expect("sent");
     assert_eq!(waits(&list), [offered + 12 * MS]);
     assert_eq!(
         timing,
         SendTiming {
             at_us: 12_000,
-            late: false
+            late: false,
+            started: offered + 12 * MS,
         }
     );
 }
@@ -124,13 +127,15 @@ fn a_compose_done_exactly_at_the_due_instant_is_not_late() {
 fn a_compose_past_the_due_instant_sends_at_once_and_is_late() {
     let offered = Instant::now();
     let (mut clock, list) = FakeClock::at(offered + 15 * MS);
-    let (_, timing) = send_paced(&mut clock, offered, || Ok::<_, ()>(())).expect("sent");
+    let (_, timing) =
+        send_at(&mut clock, send_due(offered), offered, || Ok::<_, ()>(())).expect("sent");
     assert!(waits(&list).is_empty(), "no wait once the instant passed");
     assert_eq!(
         timing,
         SendTiming {
             at_us: 15_000,
-            late: true
+            late: true,
+            started: offered + 15 * MS,
         }
     );
 }
@@ -139,7 +144,9 @@ fn a_compose_past_the_due_instant_sends_at_once_and_is_late() {
 fn a_failed_send_is_the_callers_error() {
     let offered = Instant::now();
     let (mut clock, list) = FakeClock::at(offered);
-    let out = send_paced(&mut clock, offered, || Err::<(), _>("lost"));
+    let out = send_at(&mut clock, send_due(offered), offered, || {
+        Err::<(), _>("lost")
+    });
     assert_eq!(out, Err("lost"));
     assert_eq!(
         waits(&list),

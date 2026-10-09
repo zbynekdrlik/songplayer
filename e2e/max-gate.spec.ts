@@ -6,10 +6,10 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  MAX_SLOT_REPICKS,
   MIN_BOUNDARIES,
   MaxStatus,
   SEND_PHASE_SLACK_US,
-  SEND_PHASE_US,
   maxGateFailures,
 } from "./max-gate";
 
@@ -30,6 +30,14 @@ function running(submitted: number): MaxStatus {
     send_at_us_p99: 12_600,
     send_at_us_max: 19_000,
     send_late: 3,
+    vblank_output: "\\\\.\\DISPLAY2 7680x1080",
+    vblank_tracking: true,
+    vblank_period_ns: 16_666_700,
+    vblank_phase_us: 8_000,
+    send_off_grid: 40,
+    send_phase_us_p50: 8_003,
+    send_phase_us_p99: 8_090,
+    slot_repicks: 2,
     device_resets: 1,
     sender_backoffs: 0,
     spout_name: "SP-program-MAX",
@@ -92,16 +100,44 @@ test.describe("SP-program-MAX post-deploy gate (#223 S2)", () => {
     ]);
   });
 
-  test("the median Spout send must sit at its constant phase (#223 follow-up)", () => {
-    expect([SEND_PHASE_US, SEND_PHASE_SLACK_US]).toEqual([12_000, 1_500]);
-    const at = (send_at_us_p50: number) => ({ ...running(160), send_at_us_p50 });
-    expect(maxGateFailures(running(100), at(12_000))).toEqual([]);
-    expect(maxGateFailures(running(100), at(13_500))).toEqual([]);
-    expect(maxGateFailures(running(100), at(11_999))).toEqual([
-      "the Spout sends leave 11999 us after the offer (median), not at their 12000 us phase",
+  test("the median send must start at the phase setting after the wall's vblank (#223 follow-up)", () => {
+    expect(SEND_PHASE_SLACK_US).toBe(1_500);
+    const at = (send_phase_us_p50: number, vblank_phase_us = 8_000) => ({
+      ...running(160),
+      send_phase_us_p50,
+      vblank_phase_us,
+    });
+    expect(maxGateFailures(running(100), at(8_000))).toEqual([]);
+    expect(maxGateFailures(running(100), at(9_500))).toEqual([]);
+    expect(maxGateFailures(running(100), at(5_200, 5_000))).toEqual([]);
+    expect(maxGateFailures(running(100), at(7_999))).toEqual([
+      "the Spout sends start 7999 us after the wall's vblank (median), not at the 8000 us phase",
     ]);
-    expect(maxGateFailures(running(100), at(13_501))).toEqual([
-      "the Spout sends leave 13501 us after the offer (median), not at their 12000 us phase",
+    expect(maxGateFailures(running(100), at(9_501))).toEqual([
+      "the Spout sends start 9501 us after the wall's vblank (median), not at the 8000 us phase",
+    ]);
+  });
+
+  test("every boundary between the reads must go on the wall's refresh grid", () => {
+    const off = { ...running(160), send_off_grid: 43 };
+    expect(maxGateFailures(running(100), off)).toEqual([
+      "3 boundaries were sent off the wall's refresh grid",
+    ]);
+    const lost = { ...running(160), vblank_tracking: false };
+    expect(maxGateFailures(running(100), lost)).toEqual([
+      "0 boundaries were sent off the wall's refresh grid",
+    ]);
+    const none = { ...running(160), vblank_output: null };
+    expect(maxGateFailures(running(100), none)).toEqual([
+      "no display output paces the sends (no vblank tracker)",
+    ]);
+  });
+
+  test("at most one new slot pick between the reads", () => {
+    expect(MAX_SLOT_REPICKS).toBe(1);
+    expect(maxGateFailures(running(100), { ...running(160), slot_repicks: 3 })).toEqual([]);
+    expect(maxGateFailures(running(100), { ...running(160), slot_repicks: 4 })).toEqual([
+      "the send slot was picked anew 2 times between the reads",
     ]);
   });
 });

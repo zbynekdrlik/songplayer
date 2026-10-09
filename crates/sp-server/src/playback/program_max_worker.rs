@@ -13,8 +13,10 @@
 //!   its slot (a fade's incoming picture moves to the outgoing slot when the
 //!   fade ends, and is uploaded there once);
 //! - composes the boundary into the 3840×2160 render target and sends it at
-//!   a constant phase: `MAX_SEND_LEAD` after the program offered it, whatever
-//!   the compose cost (`program_max_send.rs`, the wall's 60 Hz render).
+//!   its due instant, whatever the compose cost: a slot of the wall's
+//!   refresh when a [`VblankSource`] measures it (`program_max_vblank.rs`),
+//!   else `MAX_SEND_LEAD` after the program offered it
+//!   (`program_max_send.rs`).
 //!
 //! Failures never panic the thread and never reach the program:
 //!
@@ -55,7 +57,8 @@ use tracing::{info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, MaxPicture};
-use crate::playback::program_max_send::{NoWait, SendClock, SendTiming, SpinClock, send_paced};
+use crate::playback::program_max_send::{NoWait, SendClock, SendTiming, SpinClock, send_at};
+use crate::playback::program_max_vblank::{Aligned, VblankPacer, VblankSource, phase_after_vblank};
 use crate::playback::stat_window::WarnLimiter;
 
 /// How long the thread waits before it builds again after a refused sender,
@@ -319,7 +322,13 @@ pub struct MaxWorker<'a, G: MaxGpu> {
     /// What the send waits on: [`NoWait`] unless [`with_clock`](Self::with_clock)
     /// gives another (the loop gives [`SpinClock`]).
     clock: Box<dyn SendClock>,
+    /// The wall's refresh, when measured ([`with_vblank`](Self::with_vblank)).
+    vblank: Option<Box<dyn VblankSource>>,
+    pacer: VblankPacer,
 }
+
+/// A sent boundary's costs and timing ([`MaxWorker::attempt`]).
+type Sent = (ComposeStats, SpoutSendStats, SendTiming, Option<Aligned>);
 
 impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     pub fn new(out: &'a MaxOut, gpu: G) -> Self {
@@ -336,12 +345,22 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             started: Instant::now(),
             log: LogGate::default(),
             clock: Box::new(NoWait),
+            vblank: None,
+            pacer: VblankPacer::default(),
         }
     }
 
     /// Send on `clock` (production: [`SpinClock`]).
     pub fn with_clock(mut self, clock: Box<dyn SendClock>) -> Self {
         self.clock = clock;
+        self
+    }
+
+    /// Send on the refresh grid of `source` (production:
+    /// `sp_gpu::VblankTracker`, the wall output's), and name its output.
+    pub fn with_vblank(mut self, source: Box<dyn VblankSource>) -> Self {
+        self.out.record_vblank_output(source.output());
+        self.vblank = Some(source);
         self
     }
 
@@ -366,11 +385,12 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         now: Instant,
     ) -> Option<LogLine> {
         match self.attempt(job, offered, now) {
-            Ok((compose, send, timing)) => {
+            Ok((compose, send, timing, aligned)) => {
                 self.lost_unsent = false;
                 self.failing = None;
                 self.out.record_sent(compose, send);
                 self.out.record_send_timing(timing);
+                self.out.record_vblank(aligned);
             }
             Err(Skip::Backoff) => self.out.record_skipped(),
             Err(Skip::Unsupported) => {
@@ -405,13 +425,10 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     }
 
     /// Build what is missing (unless a backoff runs), then compose `job`
-    /// and send it when it is due (`program_max_send::send_paced`).
-    fn attempt(
-        &mut self,
-        job: &MaxJob,
-        offered: Instant,
-        now: Instant,
-    ) -> Result<(ComposeStats, SpoutSendStats, SendTiming), Skip> {
+    /// and send it when it is due: in the slot [`VblankPacer`] picks on the
+    /// wall's grid (with the phase setting), else at the constant lead
+    /// (`program_max_send::send_at`).
+    fn attempt(&mut self, job: &MaxJob, offered: Instant, now: Instant) -> Result<Sent, Skip> {
         if self.unsupported {
             return Err(Skip::Unsupported);
         }
@@ -435,8 +452,17 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         let composition = self.ids.composition(job);
         let compose = compositor.compose(&composition).map_err(Skip::frame)?;
         let clock = self.clock.as_mut();
-        let (send, timing) = send_paced(clock, offered, || sender.send()).map_err(Skip::frame)?;
-        Ok((compose, send, timing))
+        let grid = self.vblank.as_ref().and_then(|v| v.grid(clock.now()));
+        let due = self.pacer.due(offered, grid, self.out.vblank_phase());
+        let (send, timing) =
+            send_at(clock, due.at, offered, || sender.send()).map_err(Skip::frame)?;
+        let aligned = grid.map(|grid| Aligned {
+            period: grid.period,
+            phase_us: u64::try_from(phase_after_vblank(&grid, timing.started).as_micros())
+                .unwrap_or(u64::MAX),
+            repicked: due.repicked,
+        });
+        Ok((compose, send, timing, aligned))
     }
 
     /// After a failure: a lost device drops both objects (rebuilt on the
@@ -478,11 +504,15 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
 }
 
 /// The `program-max` thread: take each job from `out` and serve it on
-/// `gpu`, each sent at its due instant on the real clock ([`SpinClock`]),
-/// release the GPU while MAX is off, exit on stop.
-pub fn run_max_loop<G: MaxGpu>(out: &MaxOut, gpu: G) {
+/// `gpu`, each sent at its due instant on the real clock ([`SpinClock`]) —
+/// on `vblank`'s refresh grid when one is given —, release the GPU while
+/// MAX is off, exit on stop.
+pub fn run_max_loop<G: MaxGpu>(out: &MaxOut, gpu: G, vblank: Option<Box<dyn VblankSource>>) {
     let _consumer = out.attach();
     let mut worker = MaxWorker::new(out, gpu).with_clock(Box::new(SpinClock));
+    if let Some(source) = vblank {
+        worker = worker.with_vblank(source);
+    }
     loop {
         match out.next(worker.holds_gpu()) {
             MaxNext::Job(job, offered) => {

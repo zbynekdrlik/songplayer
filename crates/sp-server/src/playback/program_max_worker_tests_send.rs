@@ -1,16 +1,20 @@
-//! #223 follow-up: the `program-max` thread sends each boundary at a
-//! constant phase, `MAX_SEND_LEAD` after the program offered it, whatever
-//! its compose cost — on the fake GPU and a clock that never sleeps, and
-//! once through the real loop on the real clock.
+//! #223 follow-up: the `program-max` thread sends each boundary at its due
+//! instant, whatever its compose cost — `MAX_SEND_LEAD` after the program
+//! offered it, or on a slot of the wall's refresh grid when a source
+//! measures it — on the fake GPU and a clock that never sleeps, and through
+//! the real loop on the real clock.
 //! Wired via `#[cfg(test)] #[path = "program_max_worker_tests_send.rs"] mod tests_send;`.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::MaxWorker;
+use sp_gpu::VblankGrid;
+
 use super::tests::{FakeGpu, picture, spawn_loop, wait_until};
+use super::{MaxWorker, run_max_loop};
 use crate::playback::program_max::{MaxJob, MaxOut};
 use crate::playback::program_max_send::tests::{FakeClock, waits};
+use crate::playback::program_max_vblank::VblankSource;
 
 const MS: Duration = Duration::from_millis(1);
 
@@ -95,6 +99,109 @@ fn the_loop_sends_no_boundary_before_its_due_instant() {
     assert!(
         status.send_at_us_p50 >= 12_000,
         "sent {} us after the offer, before its 12 ms phase",
+        status.send_at_us_p50
+    );
+    max.stop();
+    wait_until("the loop exits on stop", || thread.is_finished());
+    thread.join().expect("the loop");
+}
+
+/// A refresh grid the test sets (`None`: not measured).
+struct FakeVblank(Option<VblankGrid>);
+
+impl VblankSource for FakeVblank {
+    fn grid(&self, _now: Instant) -> Option<VblankGrid> {
+        self.0
+    }
+
+    fn output(&self) -> String {
+        "fake 7680x1080".to_string()
+    }
+}
+
+/// On the wall's grid (a vblank 1 ms before the offer, 16 ms apart) with
+/// the phase setting at 5 ms, the slots are 4 + 16k ms after the offer: the
+/// boundary goes in the first from 12 ms on (20 ms), 5 ms after its vblank.
+#[test]
+fn on_a_refresh_grid_the_worker_sends_in_its_slot_at_the_phase_setting() {
+    let max = MaxOut::new();
+    max.set_vblank_phase_us(5_000);
+    let gpu = FakeGpu::default();
+    let offered = Instant::now();
+    let grid = VblankGrid {
+        at: offered - MS,
+        period: 16 * MS,
+    };
+    let (clock, list) = FakeClock::at(offered + 4 * MS);
+    let mut worker = MaxWorker::new(&max, gpu.clone())
+        .with_clock(Box::new(clock))
+        .with_vblank(Box::new(FakeVblank(Some(grid))));
+    assert_eq!(
+        max.status().vblank_output.as_deref(),
+        Some("fake 7680x1080"),
+        "named when given"
+    );
+    worker.serve_offered(&job(1), offered, offered + 4 * MS);
+
+    assert_eq!(waits(&list), [offered + 20 * MS]);
+    assert_eq!(gpu.log().sent, 1);
+    let status = max.status();
+    assert_eq!(
+        (
+            status.vblank_tracking,
+            status.vblank_period_ns,
+            status.send_off_grid,
+            status.send_phase_us_p50,
+            status.slot_repicks,
+            status.send_at_us_p50
+        ),
+        (true, 16_000_000, 0, 5_000, 0, 20_000)
+    );
+}
+
+/// A source that measures nothing yet: the constant lead, off the grid.
+#[test]
+fn an_unmeasured_refresh_sends_at_the_constant_lead() {
+    let max = MaxOut::new();
+    let gpu = FakeGpu::default();
+    let offered = Instant::now();
+    let (clock, list) = FakeClock::at(offered + 4 * MS);
+    let mut worker = MaxWorker::new(&max, gpu.clone())
+        .with_clock(Box::new(clock))
+        .with_vblank(Box::new(FakeVblank(None)));
+    worker.serve_offered(&job(1), offered, offered + 4 * MS);
+
+    assert_eq!(waits(&list), [offered + 12 * MS]);
+    let status = max.status();
+    assert_eq!((status.vblank_tracking, status.send_off_grid), (false, 1));
+    assert_eq!(status.vblank_output.as_deref(), Some("fake 7680x1080"));
+}
+
+/// The loop given a refresh source sends on its grid (real clock: only
+/// that it went on the grid, and never before 12 ms after the offer).
+#[test]
+fn the_loop_sends_on_the_refresh_grid_it_is_given() {
+    let max = Arc::new(MaxOut::new());
+    max.set_enabled(true);
+    let gpu = FakeGpu::default();
+    let source = FakeVblank(Some(VblankGrid {
+        at: Instant::now(),
+        period: 16 * MS,
+    }));
+    let (out, loop_gpu) = (max.clone(), gpu.clone());
+    let thread = std::thread::Builder::new()
+        .name("program-max-test".into())
+        .spawn(move || run_max_loop(&out, loop_gpu, Some(Box::new(source))))
+        .expect("spawn the loop");
+    wait_until("the loop takes jobs", || max.accepting());
+    max.offer_with(|| job(1));
+    wait_until("the job went out", || max.status().submitted == 1);
+    let status = max.status();
+    assert_eq!(status.vblank_output.as_deref(), Some("fake 7680x1080"));
+    assert_eq!((status.vblank_tracking, status.send_off_grid), (true, 0));
+    assert!(
+        status.send_at_us_p50 >= 12_000,
+        "sent {} us after the offer, before the lead window",
         status.send_at_us_p50
     );
     max.stop();

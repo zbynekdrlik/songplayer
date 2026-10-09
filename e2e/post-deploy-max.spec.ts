@@ -11,6 +11,10 @@
  * grid second of boundaries out, and in between none coalesced (MAX kept up
  * with the program), none failed and no device lost.
  *
+ * #223 follow-up: every boundary between the reads goes on the wall
+ * output's refresh grid at the phase setting, and its slot is picked anew
+ * at most once (the drift between the wall's clock and SongPlayer's).
+ *
  * The cost p99s are logged, not gated here: the budget (upload + draw + send
  * under 10 ms) and Arena's side (its source list, a scratch layer's FPS) are
  * the main session's box gate (`.claude/rules/gpu-max.md`). API-level on
@@ -76,7 +80,11 @@ test.describe("SP-program-MAX (#223 S2)", () => {
         `${second.upload_us_p99 + second.draw_us_p99 + second.send_us_p99} us; ` +
         `sent after the offer p50/p99/max = ${second.send_at_us_p50}/` +
         `${second.send_at_us_p99}/${second.send_at_us_max} us, late ` +
-        `+${second.send_late - first.send_late}`,
+        `+${second.send_late - first.send_late}; on ${second.vblank_output} ` +
+        `(${second.vblank_period_ns} ns): start after the vblank p50/p99 = ` +
+        `${second.send_phase_us_p50}/${second.send_phase_us_p99} us ` +
+        `(phase ${second.vblank_phase_us}), slot re-picks ` +
+        `+${second.slot_repicks - first.slot_repicks}`,
     );
     expect(maxGateFailures(first, second), "the SP-program-MAX gate").toEqual([]);
   });

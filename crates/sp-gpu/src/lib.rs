@@ -44,6 +44,11 @@
 //! Foundation decodes video on (sp-decoder's hardware decode): the same
 //! adapter rule, the video API, multithread-protected
 //! (`tests/video_device.rs`).
+//!
+//! #223 follow-up: [`VblankTracker`] measures the refresh of the display
+//! Arena outputs to (the LED wall) on its own thread, `WaitForVBlank` on the
+//! output [`pick_output`] chooses, fitted by [`VblankFit`] into a
+//! [`VblankGrid`]; sp-server sends each MAX picture at a fixed point of it.
 
 mod adapter;
 mod color;
@@ -57,6 +62,7 @@ mod residency;
 mod spout;
 pub mod spout_state;
 mod stats;
+mod vblank;
 
 #[cfg(not(windows))]
 mod stub;
@@ -81,11 +87,15 @@ pub use spout::{
     SPOUT_SENDER_NAME, SharedTextureInfo, check_sender_name, parse_sender_names,
 };
 pub use stats::{ComposeStats, SpoutSendStats};
+pub use vblank::{
+    OutputInfo, Seen, VBLANK_BOOT_INTERVALS, VBLANK_MAX_PERIOD, VBLANK_MIN_FIT, VBLANK_MIN_PERIOD,
+    VBLANK_STALE, VBLANK_WINDOW, VblankFit, VblankGrid, grid_is_fresh, pick_output,
+};
 
 #[cfg(not(windows))]
-pub use stub::{Compositor, SpoutSender, spout_sender_info, spout_sender_names};
+pub use stub::{Compositor, SpoutSender, VblankTracker, spout_sender_info, spout_sender_names};
 #[cfg(windows)]
 pub use win::{
-    Compositor, SpoutSender, VideoDevice, adapters, read_shared_texture, spout_sender_info,
-    spout_sender_names,
+    Compositor, SpoutSender, VblankTracker, VideoDevice, adapters, read_shared_texture,
+    spout_sender_info, spout_sender_names,
 };

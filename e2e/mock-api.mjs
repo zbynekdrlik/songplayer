@@ -1279,12 +1279,29 @@ function programBody() {
       send_at_us_p99: 0,
       send_at_us_max: 0,
       send_late: 0,
+      // #223 follow-up: no GPU, no display output to pace on.
+      vblank_output: null,
+      vblank_tracking: false,
+      vblank_period_ns: 0,
+      vblank_phase_us: mockVblankPhaseUs(),
+      send_off_grid: 0,
+      send_phase_us_p50: 0,
+      send_phase_us_p99: 0,
+      slot_repicks: 0,
       device_resets: 0,
       sender_backoffs: 0,
       spout_name: "SP-program-MAX",
       adapter: null,
     },
   };
+}
+// #223 follow-up: `program_max_vblank_phase_ms` in µs by the server's rule
+// (`sp_core::config::program_max_vblank_phase_us`): ms from 0 to under
+// 1000, rounded to the µs, else 8000.
+function mockVblankPhaseUs() {
+  const raw = String(settings.program_max_vblank_phase_ms ?? "").trim();
+  const ms = raw === "" ? NaN : Number(raw);
+  return Number.isFinite(ms) && ms >= 0 && ms < 1000 ? Math.round(ms * 1000) : 8000;
 }
 // #233: the outputs as `GET /api/v1/program` lists them, from the stored
 // list (an unreadable one lists nothing); an enabled VBAN entry carries its

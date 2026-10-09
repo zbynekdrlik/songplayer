@@ -30,7 +30,9 @@
 //! `"false"`) is read before the thread starts ([`start_max`]) and every
 //! [`MAX_SETTINGS_POLL`] after ([`run_max_settings_task`]). While it is off
 //! the program offers nothing and the thread holds no compositor and no
-//! sender (the Spout name is unregistered).
+//! sender (the Spout name is unregistered). The setting
+//! `program_max_vblank_phase_ms` (where after each of the wall's vblanks a
+//! send starts, `program_max_vblank.rs`) is read with it.
 //!
 //! Telemetry: [`MaxStatus`], served as `max` on `GET /api/v1/program`.
 
@@ -39,7 +41,10 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use sp_core::config::{SETTING_PROGRAM_MAX_ENABLED, program_max_enabled};
+use sp_core::config::{
+    DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, SETTING_PROGRAM_MAX_ENABLED,
+    SETTING_PROGRAM_MAX_VBLANK_PHASE_MS, program_max_enabled, program_max_vblank_phase_us,
+};
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, SpoutSendStats,
 };
@@ -50,6 +55,7 @@ use tracing::{info, warn};
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::loop_stats::percentile_ceil;
 use crate::playback::program_max_send::SendTiming;
+use crate::playback::program_max_vblank::Aligned;
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 
 /// How many MAX jobs wait for the `program-max` thread: two, then the oldest
@@ -136,8 +142,8 @@ impl MaxJob {
 /// What the `program-max` thread does next ([`MaxOut::next`]).
 #[derive(Debug)]
 pub enum MaxNext {
-    /// Compose and send this boundary, offered at this instant: its Spout
-    /// send is due `program_max_send::MAX_SEND_LEAD` later.
+    /// Compose and send this boundary, offered at this instant (its Spout
+    /// send is due from it: `program_max_vblank::VblankPacer`).
     Job(MaxJob, Instant),
     /// MAX was switched off: drop the sender and the compositor.
     Release,
@@ -192,14 +198,38 @@ pub struct MaxStatus {
     pub send_us_p99: u64,
     /// When the frames were in Spout's shared texture after the program
     /// offered them (the GPU's copy done), µs, over the last
-    /// [`MAX_STAT_WINDOW`] sent frames: each is sent at a constant phase
-    /// (`program_max_send::MAX_SEND_LEAD`), so the spread of p50, p99 and
-    /// the max is the GPU's delay of the copy, unless a compose ran past it.
+    /// [`MAX_STAT_WINDOW`] sent frames. On the wall's refresh grid the lead
+    /// moves slowly over a window (`program_max_vblank::LEAD_MIN` + up to
+    /// one period + `LEAD_HYSTERESIS`); without it each frame is sent at the
+    /// constant `program_max_send::MAX_SEND_LEAD`.
     pub send_at_us_p50: u64,
     pub send_at_us_p99: u64,
     pub send_at_us_max: u64,
     /// Frames whose compose ended after their due instant (sent at once).
     pub send_late: u64,
+    /// #223 follow-up: the display output whose refresh paces the sends
+    /// (`\\.\DISPLAY2 7680x1080`), `None` when none is measured (no
+    /// tracker: off Windows, no output, its thread did not start).
+    pub vblank_output: Option<String>,
+    /// The last boundary was sent on that output's refresh grid (else at
+    /// the constant lead).
+    pub vblank_tracking: bool,
+    /// The grid's measured period at the last aligned send, ns (16 666 700
+    /// = 59.9999 Hz); 0 before one.
+    pub vblank_period_ns: u64,
+    /// The setting `program_max_vblank_phase_ms`, µs: where after each
+    /// vblank a send starts.
+    pub vblank_phase_us: u64,
+    /// Boundaries sent off the grid, at the constant lead (none measured).
+    pub send_off_grid: u64,
+    /// Where after the vblank those sends started, µs, over the last
+    /// [`MAX_STAT_WINDOW`] of them: the setting, unless a compose was late.
+    pub send_phase_us_p50: u64,
+    pub send_phase_us_p99: u64,
+    /// Times a boundary's slot was picked anew (its lead left the window: one
+    /// picture shown one refresh more or less); about one per drift cycle
+    /// between the wall's clock and SongPlayer's, hours apart.
+    pub slot_repicks: u64,
     /// Lost devices: each drops the compositor and the sender (a loss while
     /// building drops what was built). They are rebuilt on the next job, or
     /// after the backoff when the device is lost again before a boundary
@@ -222,6 +252,8 @@ struct Queue {
     jobs: SubmitQueue<(MaxJob, Instant)>,
     /// The setting, as last applied.
     enabled: bool,
+    /// The setting `program_max_vblank_phase_ms`, as last applied, µs.
+    vblank_phase_us: u64,
     /// A `program-max` thread takes jobs.
     consumer: bool,
     stop: bool,
@@ -289,6 +321,12 @@ struct Stats {
     send: Window,
     send_at: Window,
     late: u64,
+    vblank_output: Option<String>,
+    vblank_tracking: bool,
+    vblank_period_ns: u64,
+    off_grid: u64,
+    send_phase: Window,
+    repicks: u64,
 }
 
 /// The `SP-program-MAX` hand-off between the `SP-program` sender and the
@@ -335,6 +373,7 @@ impl MaxOut {
             queue: Mutex::new(Queue {
                 jobs: SubmitQueue::new(MAX_HANDOFF_BOUND),
                 enabled: false,
+                vblank_phase_us: DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US,
                 consumer: false,
                 stop: false,
                 coalesced: 0,
@@ -352,6 +391,12 @@ impl MaxOut {
                 send: Window::default(),
                 send_at: Window::default(),
                 late: 0,
+                vblank_output: None,
+                vblank_tracking: false,
+                vblank_period_ns: 0,
+                off_grid: 0,
+                send_phase: Window::default(),
+                repicks: 0,
             }),
             #[cfg(test)]
             on_offer: Mutex::new(None),
@@ -399,6 +444,19 @@ impl MaxOut {
     /// The setting, as last applied.
     pub fn enabled(&self) -> bool {
         self.lock_queue().enabled
+    }
+
+    /// Apply `program_max_vblank_phase_ms` (µs); returns whether it changed.
+    pub fn set_vblank_phase_us(&self, us: u64) -> bool {
+        let mut queue = self.lock_queue();
+        let changed = queue.vblank_phase_us != us;
+        queue.vblank_phase_us = us;
+        changed
+    }
+
+    /// Where after each of the wall's vblanks a send starts (the setting).
+    pub fn vblank_phase(&self) -> Duration {
+        Duration::from_micros(self.lock_queue().vblank_phase_us)
     }
 
     /// Whether an offer now would be taken: on, a thread takes jobs, not
@@ -521,32 +579,68 @@ impl MaxOut {
         self.lock_stats().adapter = Some(adapter);
     }
 
+    /// The sends are paced on the refresh of `output`.
+    pub fn record_vblank_output(&self, output: String) {
+        self.lock_stats().vblank_output = Some(output);
+    }
+
+    /// How a sent boundary was paced: on the grid (`Some`), or at the
+    /// constant lead (counted off the grid).
+    pub fn record_vblank(&self, aligned: Option<Aligned>) {
+        let mut stats = self.lock_stats();
+        stats.vblank_tracking = aligned.is_some();
+        let Some(aligned) = aligned else {
+            stats.off_grid += 1;
+            return;
+        };
+        stats.vblank_period_ns = u64::try_from(aligned.period.as_nanos()).unwrap_or(u64::MAX);
+        stats.send_phase.push(aligned.phase_us);
+        if aligned.repicked {
+            stats.repicks += 1;
+        }
+    }
+
     /// The telemetry. The windows are copied under the lock and sorted
     /// after it, so the thread's next record never waits for a sort.
     pub fn status(&self) -> MaxStatus {
-        let (enabled, coalesced) = {
+        let (enabled, coalesced, vblank_phase_us) = {
             let queue = self.lock_queue();
-            (queue.enabled, queue.coalesced)
+            (queue.enabled, queue.coalesced, queue.vblank_phase_us)
         };
-        let (phase, adapter, counts, upload, draw, send, send_at) = {
+        let (phase, names, tracking, counts, upload, draw, send, send_at, send_phase) = {
             let stats = self.lock_stats();
             (
                 stats.phase.clone(),
-                stats.adapter.clone(),
+                [stats.adapter.clone(), stats.vblank_output.clone()],
+                stats.vblank_tracking,
                 [
                     stats.submitted,
                     stats.failed,
                     stats.device_resets,
                     stats.sender_backoffs,
                     stats.late,
+                    stats.vblank_period_ns,
+                    stats.off_grid,
+                    stats.repicks,
                 ],
                 stats.upload.clone(),
                 stats.draw.clone(),
                 stats.send.clone(),
                 stats.send_at.clone(),
+                stats.send_phase.clone(),
             )
         };
-        let [submitted, failed, device_resets, sender_backoffs, send_late] = counts;
+        let [adapter, vblank_output] = names;
+        let [
+            submitted,
+            failed,
+            device_resets,
+            sender_backoffs,
+            send_late,
+            vblank_period_ns,
+            send_off_grid,
+            slot_repicks,
+        ] = counts;
         MaxStatus {
             enabled,
             state: state_label(&phase, enabled),
@@ -562,6 +656,14 @@ impl MaxOut {
             send_at_us_p99: send_at.p99(),
             send_at_us_max: send_at.max(),
             send_late,
+            vblank_output,
+            vblank_tracking: tracking,
+            vblank_period_ns,
+            vblank_phase_us,
+            send_off_grid,
+            send_phase_us_p50: send_phase.p50(),
+            send_phase_us_p99: send_phase.p99(),
+            slot_repicks,
             device_resets,
             sender_backoffs,
             spout_name: SPOUT_SENDER_NAME,
@@ -576,7 +678,13 @@ pub async fn load_max_enabled(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
     Ok(program_max_enabled(raw.as_deref()))
 }
 
-/// Apply the stored setting to `max` (an unreadable one changes nothing).
+/// Read `program_max_vblank_phase_ms`, µs (`sp_core::config`'s rule).
+pub async fn load_max_vblank_phase_us(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
+    let raw = crate::db::models::get_setting(pool, SETTING_PROGRAM_MAX_VBLANK_PHASE_MS).await?;
+    Ok(program_max_vblank_phase_us(raw.as_deref()))
+}
+
+/// Apply the stored settings to `max` (an unreadable one changes nothing).
 async fn apply_max_setting(pool: &SqlitePool, max: &MaxOut) {
     match load_max_enabled(pool).await {
         Ok(on) => {
@@ -585,6 +693,14 @@ async fn apply_max_setting(pool: &SqlitePool, max: &MaxOut) {
             }
         }
         Err(e) => warn!(%e, "program max: reading the setting failed"),
+    }
+    match load_max_vblank_phase_us(pool).await {
+        Ok(us) => {
+            if max.set_vblank_phase_us(us) {
+                info!(phase_us = us, "program max: vblank phase applied");
+            }
+        }
+        Err(e) => warn!(%e, "program max: reading the vblank phase failed"),
     }
 }
 
@@ -625,11 +741,14 @@ pub async fn start_max(pool: SqlitePool, max: Arc<MaxOut>, shutdown: &broadcast:
 }
 
 /// Windows: the `program-max` thread on the production GPU (the picked
-/// adapter, the sender `SP-program-MAX`). `mutants::skip`: Windows-only
-/// spawn glue; the loop is `run_max_loop`, tested with a fake GPU.
+/// adapter, the sender `SP-program-MAX`), paced on the wall output's refresh
+/// (`sp_gpu::VblankTracker`; without one, at the constant lead).
+/// `mutants::skip`: Windows-only spawn glue; the loop is `run_max_loop`,
+/// tested with a fake GPU and a fake refresh.
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 fn spawn_max_thread(max: Arc<MaxOut>) {
+    use crate::playback::program_max_vblank::VblankSource;
     use crate::playback::program_max_worker::{SpoutGpu, run_max_loop};
     let spawned = std::thread::Builder::new()
         .name("program-max".into())
@@ -640,7 +759,17 @@ fn spawn_max_thread(max: Arc<MaxOut>) {
                 height = CANVAS_HEIGHT,
                 "program max thread started"
             );
-            run_max_loop(&max, SpoutGpu);
+            let vblank: Option<Box<dyn VblankSource>> = match sp_gpu::VblankTracker::start() {
+                Ok(tracker) => {
+                    info!(output = %tracker.output().label(), "program max: paced on the output's refresh");
+                    Some(Box::new(tracker))
+                }
+                Err(e) => {
+                    warn!(%e, "program max: no refresh to pace on — the sends keep a constant lead");
+                    None
+                }
+            };
+            run_max_loop(&max, SpoutGpu, vblank);
         });
     if let Err(e) = spawned {
         tracing::error!(%e, "program max: spawning the thread failed — no SP-program-MAX");

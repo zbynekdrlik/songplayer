@@ -457,17 +457,50 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   the 30 fps grid and the wall showed frames for 1 or 3 output frames: a
   stutter, with ONE Spout layer too. Now `MaxOut::offer_with` stamps each
   job with its offer `Instant` (`MaxNext::Job(job, offered)`), the worker
-  composes at once and `send_paced` waits until offer + `MAX_SEND_LEAD`
-  (12 ms, above the compose p99) on its `SendClock`, then `SendTexture`; a
-  compose that ran past it sends at once and counts `send_late`. Production
-  waits on `SpinClock` (sleep to `SEND_SPIN_MARGIN` = 2 ms short, then
-  spin; the decision is the pure `send_wait_step`); `MaxWorker::new` uses
-  `NoWait` (tests pass made-up instants), `run_max_loop` gives it
-  `SpinClock`. Measure it on the box with
-  `C:\ProgramData\SongPlayer\ops\spout_timing.py SP-program-MAX 15`
-  (SpoutGL, ~500 polls/s: change intervals and the phase spread) and the
-  wall with `wall_aba.py 1 12 8` (DXGI duplication of output 1: run
-  lengths, 2 = a 30 fps frame shown twice).
+  composes at once and `send_at` waits until the due instant on its
+  `SendClock`, then `SendTexture`; a compose that ran past it sends at once
+  and counts `send_late`. Production waits on `SpinClock` (sleep to
+  `SEND_SPIN_MARGIN` = 2 ms short, then spin; the decision is the pure
+  `send_wait_step`); `MaxWorker::new` uses `NoWait` (tests pass made-up
+  instants), `run_max_loop` gives it `SpinClock`.
+- **The due instant is a slot of the WALL's refresh** (#223 follow-up,
+  9.10.2026, `program_max_vblank.rs` + sp-gpu `vblank.rs` /
+  `win/vblank.rs`). A constant 12 ms after the offer was not enough: the
+  wall (60.000 Hz, 0 missed vblanks) still showed bursts of
+  single-refresh pictures (`wall_runs.py`: 5–87 one-refresh runs per 15 s,
+  minutes apart), because our 30 fps PTP grid drifts a few ppm against
+  Arena's render and for minutes at a time each send lands next to the
+  instant Arena reads Spout. Spout's own advice is to match the sender's
+  rate to the receiver's; an ordinary sender renders in the display's
+  rhythm. So: `sp_gpu::VblankTracker` (a `program-max-vblank` thread,
+  time-critical) waits `IDXGIOutput::WaitForVBlank` on the output
+  `pick_output` chooses on `pick_adapter`'s adapter (attached, not the
+  primary desktop at (0,0), the larger area, then DXGI's order: SNV's
+  7680×1080 wall beats the equal-area 3840×2160 primary), and
+  `VblankFit` turns the wake-ups into a grid: the median of the first 15
+  intervals boots the count, each wake-up is counted to a refresh index
+  (n = round(gap / period), a gap of n counts n − 1 missed, a wake-up
+  under half a period is `Early` and left out), and a least-squares fit
+  over the last 240 refreshes gives the grid (reported from 60 counted,
+  periods 4–50 ms only, stale after 100 ms). `VblankPacer` then sends each
+  boundary in a slot `vblank + phase` (setting
+  `program_max_vblank_phase_ms`, default 8 ms) and KEEPS its lead (due −
+  offer) from one boundary to the next while it stays in
+  [`LEAD_MIN` 12 ms, 12 ms + one period + `LEAD_HYSTERESIS` 3 ms]: the
+  30 fps boundaries then sit on every second refresh, and only the slow
+  drift carrying the lead out of the window picks a new slot (one
+  `slot_repick` = one picture held one refresh more or less, hours apart;
+  the 3 ms hysteresis keeps a ±0.2 ms offer jitter at the edge from
+  flapping). No grid (no tracker, its output stalled) = the constant
+  `MAX_SEND_LEAD` (`send_due`), and the next grid starts afresh. The slot
+  maths is branch-free on purpose (`signed_ns` from the earlier instant,
+  `shifted` by max(±ns, 0)): an `if t >= origin` form had equivalent
+  mutants at the equal-instant edge. Tune the phase on the box: PATCH the
+  setting (re-read every 5 s, no restart) and measure the wall with
+  `C:\ProgramData\SongPlayer\ops\wall_runs.py` (DXGI duplication of
+  the wall, region x 400–5600 y 40–560 without texts: one-refresh runs and
+  change intervals; a 30 fps picture held 2 refreshes is clean) next to
+  `spout_timing.py SP-program-MAX 15` (SpoutGL, ~500 polls/s).
 
 ### The setting and the telemetry
 
@@ -484,9 +517,19 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
 - `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width:
   3840, height: 2160, submitted, coalesced, failed, upload_us_p99,
   draw_us_p99, send_us_p99, send_at_us_p50/p99/max, send_late,
-  device_resets, sender_backoffs, spout_name, adapter}` (`MaxStatus`;
+  vblank_output, vblank_tracking, vblank_period_ns, vblank_phase_us,
+  send_off_grid, send_phase_us_p50/p99, slot_repicks, device_resets,
+  sender_backoffs, spout_name, adapter}` (`MaxStatus`;
   `send_at_us_*` = send done − offer over the window, `send_late` = composes
-  that ran past their due instant; `adapter` = the adapter the last compositor was
+  that ran past their due instant; `vblank_output` = the tracker's output
+  (`\\.\DISPLAY2 7680x1080`, `null` with no tracker), `vblank_tracking` =
+  the LAST send was on the grid, `vblank_period_ns` = the grid's period at
+  the last aligned send, `vblank_phase_us` = the setting,
+  `send_off_grid` = sends at the constant lead (a separate counter, so a
+  read between `record_sent` and `record_vblank` can never make the gate
+  see an aligned count behind `submitted`), `send_phase_us_*` = where after
+  the vblank the aligned sends started, `slot_repicks` = new slot picks;
+  `adapter` = the adapter the last compositor was
   built on, `None` before the first build: R3-2 asks the box to name its
   RTX). R3-2 sketched `spout {frames, adapter}`; S2 ships the flat shape
   the S2 dispatch named, with `frames` = `submitted` and `adapter` at the
@@ -509,8 +552,10 @@ suite by `max-gate.spec.ts`): the setting on, 3840×2160 under
 `running`, at least `MIN_BOUNDARIES` = 30 more boundaries out (the program
 sends one per grid slot, standby pairs included), and `coalesced` (MAX
 kept up with the program), `failed` and `device_resets` +0 in between,
-and the median send at its phase (`send_at_us_p50` in 12 000–13 500 µs:
-paced, `SEND_PHASE_US` + `SEND_PHASE_SLACK_US`). The
+a `vblank_output`, `vblank_tracking` and `send_off_grid` +0 (every
+boundary on the wall's grid), the median start after the vblank
+(`send_phase_us_p50`) in [`vblank_phase_us`, + `SEND_PHASE_SLACK_US`
+1 500 µs], and `slot_repicks` +1 at most (`MAX_SLOT_REPICKS`). The
 first read comes after the first boundary went out, so the build's own
 time never counts. A coalesce can also come from the PROGRAM: after a
 program-side stall its thread serves several boundaries back to back, and
@@ -589,8 +634,16 @@ build step, and WARP and the RTX run the same source. A compile error is
   `adapter`, `picture`, `composition`, `quad`, `residency`, `color`,
   `reference`, `error`, `readback` (the mapped rows packed), `spout` (the
   sender name rule, the registry parsers, the shim's codes), `spout_state`
-  (the sender's registration: every refuse / confirm decision). Keep it that
-  way: logic added inside `win/` is untested by the gate.
+  (the sender's registration: every refuse / confirm decision), `vblank`
+  (the output pick, the refresh count and fit, the staleness bound). Keep
+  it that way: logic added inside `win/` is untested by the gate.
+  `win/vblank.rs` only calls DXGI / Win32 (`EnumOutputs`, `GetDesc`, which
+  needs the `Win32_Graphics_Gdi` feature, `WaitForVBlank`,
+  `SetThreadPriority`); the stub's `VblankTracker::start` is
+  `Unsupported`. The tracker starts inside the `program-max` thread
+  (`spawn_max_thread`, Windows glue), never in a unit-tested fn:
+  `run_max_loop` takes the source as a parameter (tests pass `None` or a
+  fake), so no test on the Windows job waits on a real vblank.
 - The off-Windows `Compositor` (`stub.rs`) is an uninhabited struct (it
   holds an `Infallible`) with a `PhantomData<*const ()>`, so it is neither
   `Send` nor `Sync`, like the Windows type: code moving it across threads
