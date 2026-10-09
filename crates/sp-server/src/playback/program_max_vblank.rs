@@ -1,8 +1,10 @@
-//! Each `SP-program-MAX` send at a fixed point of the wall's refresh (#223
-//! follow-up, 9.10.2026).
+//! Each `SP-program-MAX` send at a fixed point of the display refresh Arena
+//! renders in (#223 follow-up, 9.10.2026).
 //!
-//! Resolume Arena renders at the refresh of the wall (60.000 Hz on SNV) and
-//! takes Spout's shared texture at its own instant in each refresh. A send
+//! Resolume Arena renders in the desktop compositor's rhythm (DWM: the
+//! PRIMARY display's refresh, 60.000 Hz on SNV — not the wall's own
+//! 59.979 Hz vblank, measured, `sp_gpu`'s `vblank.rs`) and takes Spout's
+//! shared texture at its own instant in each frame. A send
 //! paced on SongPlayer's genlock grid (`program_max_send::MAX_SEND_LEAD`
 //! after the offer) drifts against that refresh by a few ppm, so for
 //! minutes at a time it lands next to Arena's instant and some pictures
@@ -10,7 +12,7 @@
 //! single-refresh pictures, none missed by Arena). An ordinary Spout sender
 //! renders in the display's rhythm; MAX now does the same:
 //!
-//! - `sp_gpu::VblankTracker` measures the wall output's refresh grid
+//! - `sp_gpu::VblankTracker` measures the primary display's refresh grid
 //!   ([`VblankSource`]);
 //! - each boundary is sent in a slot of that grid, `vblank + phase` (the
 //!   setting `program_max_vblank_phase_ms`, `sp_core::config`);
@@ -40,7 +42,8 @@ pub const LEAD_MIN: Duration = Duration::from_millis(12);
 /// above an offer's jitter (p99 0.19 ms on SNV), so the pick never flaps.
 pub const LEAD_HYSTERESIS: Duration = Duration::from_millis(3);
 
-/// The wall's refresh, as the `program-max` thread reads it.
+/// The display refresh Arena renders in, as the `program-max` thread reads
+/// it.
 pub trait VblankSource {
     /// The grid at `now`, or `None` while it is not measured.
     fn grid(&self, now: Instant) -> Option<VblankGrid>;

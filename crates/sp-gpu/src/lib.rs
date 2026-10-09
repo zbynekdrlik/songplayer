@@ -45,9 +45,9 @@
 //! adapter rule, the video API, multithread-protected
 //! (`tests/video_device.rs`).
 //!
-//! #223 follow-up: [`VblankTracker`] measures the refresh of the display
-//! Arena outputs to (the LED wall) on its own thread, `WaitForVBlank` on the
-//! output [`pick_output`] chooses, fitted by [`VblankFit`] into a
+//! #223 follow-up: [`VblankTracker`] measures the primary display's refresh
+//! (DWM's clock, which Arena renders in) on its own thread, `WaitForVBlank`
+//! on the output [`pick_output`] chooses, fitted by [`VblankFit`] into a
 //! [`VblankGrid`]; sp-server sends each MAX picture at a fixed point of it.
 
 mod adapter;

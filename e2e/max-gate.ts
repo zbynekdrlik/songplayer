@@ -38,13 +38,14 @@ export interface MaxStatus {
  *  program sends one per 30 fps slot, standby pairs included). */
 export const MIN_BOUNDARIES = 30;
 
-/** #223 follow-up: each Spout send starts in a slot of the wall's refresh,
+/** #223 follow-up: each Spout send starts in a slot of the display refresh
+ *  Arena renders in (the primary display's: DWM's clock),
  *  `vblank_phase_us` after its vblank (`program_max_vblank.rs`), so the
  *  median start lies in [phase, phase + `SEND_PHASE_SLACK_US`]: outside it
- *  the sends are not paced on the wall and Arena's render stutters. */
+ *  the sends are not paced on Arena's rhythm and the wall stutters. */
 export const SEND_PHASE_SLACK_US = 1_500;
 
-/** A slot is picked anew only when the drift between the wall's clock and
+/** A slot is picked anew only when the drift between the display's clock and
  *  SongPlayer's carries the lead out of its window (hours apart): more than
  *  one between two reads seconds apart means the pick flaps. */
 export const MAX_SLOT_REPICKS = 1;
@@ -57,7 +58,7 @@ export const MAX_SLOT_REPICKS = 1;
  * between none coalesced (the thread kept up with the program's 30
  * boundaries a second: a 2-deep queue drops the oldest only when it falls
  * behind), none failed and no device lost; and every boundary in between
- * sent on the wall output's refresh grid, the median at the phase setting,
+ * sent on the display's refresh grid, the median at the phase setting,
  * the slot picked anew at most `MAX_SLOT_REPICKS` times.
  */
 export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
@@ -92,13 +93,13 @@ export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
   }
   const offGrid = second.send_off_grid - first.send_off_grid;
   if (offGrid > 0 || !second.vblank_tracking) {
-    failures.push(`${offGrid} boundaries were sent off the wall's refresh grid`);
+    failures.push(`${offGrid} boundaries were sent off the display's refresh grid`);
   }
   const phase = second.send_phase_us_p50;
   const want = second.vblank_phase_us;
   if (phase < want || phase > want + SEND_PHASE_SLACK_US) {
     failures.push(
-      `the Spout sends start ${phase} us after the wall's vblank (median), not at the ${want} us phase`,
+      `the Spout sends start ${phase} us after the vblank (median), not at the ${want} us phase`,
     );
   }
   const repicks = second.slot_repicks - first.slot_repicks;

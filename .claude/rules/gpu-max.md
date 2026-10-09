@@ -463,10 +463,10 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   `SEND_SPIN_MARGIN` = 2 ms short, then spin; the decision is the pure
   `send_wait_step`); `MaxWorker::new` uses `NoWait` (tests pass made-up
   instants), `run_max_loop` gives it `SpinClock`.
-- **The due instant is a slot of the WALL's refresh** (#223 follow-up,
-  9.10.2026, `program_max_vblank.rs` + sp-gpu `vblank.rs` /
-  `win/vblank.rs`). A constant 12 ms after the offer was not enough: the
-  wall (60.000 Hz, 0 missed vblanks) still showed bursts of
+- **The due instant is a slot of the PRIMARY display's refresh, DWM's
+  clock** (#223 follow-up, 9.10.2026, `program_max_vblank.rs` + sp-gpu
+  `vblank.rs` / `win/vblank.rs`). A constant 12 ms after the offer was not
+  enough: the wall's composed frames (60.000 Hz, 0 missed) still showed bursts of
   single-refresh pictures (`wall_runs.py`: 5–87 one-refresh runs per 15 s,
   minutes apart), because our 30 fps PTP grid drifts a few ppm against
   Arena's render and for minutes at a time each send lands next to the
@@ -474,9 +474,19 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   rate to the receiver's; an ordinary sender renders in the display's
   rhythm. So: `sp_gpu::VblankTracker` (a `program-max-vblank` thread,
   time-critical) waits `IDXGIOutput::WaitForVBlank` on the output
-  `pick_output` chooses on `pick_adapter`'s adapter (attached, not the
-  primary desktop at (0,0), the larger area, then DXGI's order: SNV's
-  7680×1080 wall beats the equal-area 3840×2160 primary), and
+  `pick_output` chooses among every adapter's outputs: the attached one at
+  the desktop origin, the PRIMARY, never a second display. WHICH refresh
+  was measured, not assumed: the first cut picked the wall's own output
+  (DISPLAY1) and re-picked a slot every ~50 s (4 in 3 min), because the
+  LED processor's timing makes DISPLAY1's vblank 59.979 Hz while DWM
+  composes the wall's output at 60.0000 Hz, phase-locked 2.3 ms after the
+  primary's vblank (DISPLAY5, 60.0000 Hz) for 40 s
+  (`C:\ProgramData\SongPlayer\ops\phase_lock.py <display> <out> <s>`:
+  D3DKMTWaitForVerticalBlankEvent on a display + DXGI duplication of an
+  output, the composed frames' phase per third; `vblank_rates.py` = each
+  display's vblank rate). Arena renders in DWM's rhythm. DWM's own timing
+  API is no shortcut: `DwmGetCompositionTimingInfo(NULL)` reported 60.005
+  Hz and a `cRefresh` counting 235/s on SNV (`dwm_timing.py`). And
   `VblankFit` turns the wake-ups into a grid: the median of the first 15
   intervals boots the count, each wake-up is counted to a refresh index
   (n = round(gap / period), a gap of n counts n − 1 missed, a wake-up

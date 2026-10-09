@@ -13,8 +13,9 @@
 //!   its slot (a fade's incoming picture moves to the outgoing slot when the
 //!   fade ends, and is uploaded there once);
 //! - composes the boundary into the 3840×2160 render target and sends it at
-//!   its due instant, whatever the compose cost: a slot of the wall's
-//!   refresh when a [`VblankSource`] measures it (`program_max_vblank.rs`),
+//!   its due instant, whatever the compose cost: a slot of the display
+//!   refresh Arena renders in, when a [`VblankSource`] measures it
+//!   (`program_max_vblank.rs`),
 //!   else `MAX_SEND_LEAD` after the program offered it
 //!   (`program_max_send.rs`).
 //!
@@ -322,7 +323,7 @@ pub struct MaxWorker<'a, G: MaxGpu> {
     /// What the send waits on: [`NoWait`] unless [`with_clock`](Self::with_clock)
     /// gives another (the loop gives [`SpinClock`]).
     clock: Box<dyn SendClock>,
-    /// The wall's refresh, when measured ([`with_vblank`](Self::with_vblank)).
+    /// The display refresh, when measured ([`with_vblank`](Self::with_vblank)).
     vblank: Option<Box<dyn VblankSource>>,
     pacer: VblankPacer,
 }
@@ -357,7 +358,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     }
 
     /// Send on the refresh grid of `source` (production:
-    /// `sp_gpu::VblankTracker`, the wall output's), and name its output.
+    /// `sp_gpu::VblankTracker`, the primary display's), and name its output.
     pub fn with_vblank(mut self, source: Box<dyn VblankSource>) -> Self {
         self.out.record_vblank_output(source.output());
         self.vblank = Some(source);
@@ -426,7 +427,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
 
     /// Build what is missing (unless a backoff runs), then compose `job`
     /// and send it when it is due: in the slot [`VblankPacer`] picks on the
-    /// wall's grid (with the phase setting), else at the constant lead
+    /// refresh grid (with the phase setting), else at the constant lead
     /// (`program_max_send::send_at`).
     fn attempt(&mut self, job: &MaxJob, offered: Instant, now: Instant) -> Result<Sent, Skip> {
         if self.unsupported {

@@ -9,7 +9,7 @@
 //! paced on the grid; this paces the Spout send the same way: each boundary
 //! goes out at its due instant ([`send_at`]), whatever its compose cost —
 //! [`MAX_SEND_LEAD`] after the program offered it ([`send_due`]) when the
-//! wall's refresh is not measured, else a slot of that refresh
+//! display refresh is not measured, else a slot of that refresh
 //! (`program_max_vblank.rs`). A compose that ends after the due instant
 //! sends at once and is counted late.
 //!

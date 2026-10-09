@@ -1,9 +1,9 @@
-//! The thread that measures the wall output's refresh (#223 follow-up,
-//! 9.10.2026): `IDXGIOutput::WaitForVBlank` in a loop on the output
-//! `pick_output` chooses on the adapter `pick_adapter` chooses (the
-//! compositor's), every wake-up counted into a `VblankFit`, the fitted grid
-//! published for the `program-max` thread. Every decision is
-//! `crate::vblank`'s, tested on Linux; this file only calls DXGI and Win32.
+//! The thread that measures the primary display's refresh, DWM's clock
+//! (#223 follow-up, 9.10.2026): `IDXGIOutput::WaitForVBlank` in a loop on
+//! the output `pick_output` chooses among every adapter's outputs, every
+//! wake-up counted into a `VblankFit`, the fitted grid published for the
+//! `program-max` thread. Every decision is `crate::vblank`'s, tested on
+//! Linux; this file only calls DXGI and Win32.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -11,14 +11,14 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use tracing::{info, warn};
-use windows::Win32::Graphics::Dxgi::{DXGI_ERROR_NOT_FOUND, IDXGIOutput};
+use windows::Win32::Graphics::Dxgi::{DXGI_ERROR_NOT_FOUND, IDXGIAdapter1, IDXGIOutput};
 use windows::Win32::System::Threading::{
     GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
 };
 
 use super::device::list;
 use super::failed;
-use crate::adapter::{adapter_name, pick_adapter};
+use crate::adapter::adapter_name;
 use crate::error::GpuError;
 use crate::vblank::{OutputInfo, Seen, VblankFit, VblankGrid, grid_is_fresh, pick_output};
 
@@ -42,7 +42,7 @@ struct Shared {
     published: Mutex<Published>,
 }
 
-/// The wall output's refresh, measured on its own thread
+/// The primary display's refresh (DWM's clock), measured on its own thread
 /// (`program-max-vblank`, time-critical priority) until dropped.
 pub struct VblankTracker {
     shared: Arc<Shared>,
@@ -172,14 +172,28 @@ fn run(shared: &Shared, ready: &mpsc::Sender<Result<OutputInfo, GpuError>>) {
     );
 }
 
-/// The output `pick_output` chooses on the adapter `pick_adapter` chooses
-/// (the compositor's rule), with what it read; every output is logged.
+/// The output `pick_output` chooses among every adapter's outputs (the
+/// primary may hang on any adapter), with what it read; every output is
+/// logged.
 fn open_output() -> Result<(IDXGIOutput, OutputInfo), GpuError> {
-    let mut adapters = list()?;
-    let infos: Vec<_> = adapters.iter().map(|(_, info)| info.clone()).collect();
-    let picked = pick_adapter(&infos).ok_or(GpuError::NoAdapter)?;
-    let (adapter, adapter_info) = adapters.swap_remove(picked);
     let mut outputs = Vec::new();
+    for (adapter, adapter_info) in list()? {
+        // An adapter whose outputs cannot be listed costs only its own.
+        if let Err(e) = enum_outputs(&adapter, &adapter_info.name, &mut outputs) {
+            warn!(adapter = %adapter_info.name, error = %e, "program max: its outputs were not listed");
+        }
+    }
+    let infos: Vec<_> = outputs.iter().map(|(_, info)| info.clone()).collect();
+    let picked = pick_output(&infos).ok_or(GpuError::NoOutput)?;
+    Ok(outputs.swap_remove(picked))
+}
+
+/// Append `adapter`'s outputs (DXGI's order) with what each reads.
+fn enum_outputs(
+    adapter: &IDXGIAdapter1,
+    adapter_label: &str,
+    outputs: &mut Vec<(IDXGIOutput, OutputInfo)>,
+) -> Result<(), GpuError> {
     for index in 0u32.. {
         let output = match unsafe { adapter.EnumOutputs(index) } {
             Ok(output) => output,
@@ -202,12 +216,10 @@ fn open_output() -> Result<(IDXGIOutput, OutputInfo), GpuError> {
             left = info.left,
             top = info.top,
             attached = info.attached,
-            adapter = %adapter_info.name,
+            adapter = %adapter_label,
             "program max: display output"
         );
         outputs.push((output, info));
     }
-    let infos: Vec<_> = outputs.iter().map(|(_, info)| info.clone()).collect();
-    let picked = pick_output(&infos).ok_or(GpuError::NoOutput)?;
-    Ok(outputs.swap_remove(picked))
+    Ok(())
 }

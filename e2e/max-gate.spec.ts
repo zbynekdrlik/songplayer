@@ -100,7 +100,7 @@ test.describe("SP-program-MAX post-deploy gate (#223 S2)", () => {
     ]);
   });
 
-  test("the median send must start at the phase setting after the wall's vblank (#223 follow-up)", () => {
+  test("the median send must start at the phase setting after the vblank (#223 follow-up)", () => {
     expect(SEND_PHASE_SLACK_US).toBe(1_500);
     const at = (send_phase_us_p50: number, vblank_phase_us = 8_000) => ({
       ...running(160),
@@ -111,21 +111,21 @@ test.describe("SP-program-MAX post-deploy gate (#223 S2)", () => {
     expect(maxGateFailures(running(100), at(9_500))).toEqual([]);
     expect(maxGateFailures(running(100), at(5_200, 5_000))).toEqual([]);
     expect(maxGateFailures(running(100), at(7_999))).toEqual([
-      "the Spout sends start 7999 us after the wall's vblank (median), not at the 8000 us phase",
+      "the Spout sends start 7999 us after the vblank (median), not at the 8000 us phase",
     ]);
     expect(maxGateFailures(running(100), at(9_501))).toEqual([
-      "the Spout sends start 9501 us after the wall's vblank (median), not at the 8000 us phase",
+      "the Spout sends start 9501 us after the vblank (median), not at the 8000 us phase",
     ]);
   });
 
-  test("every boundary between the reads must go on the wall's refresh grid", () => {
+  test("every boundary between the reads must go on the display's refresh grid", () => {
     const off = { ...running(160), send_off_grid: 43 };
     expect(maxGateFailures(running(100), off)).toEqual([
-      "3 boundaries were sent off the wall's refresh grid",
+      "3 boundaries were sent off the display's refresh grid",
     ]);
     const lost = { ...running(160), vblank_tracking: false };
     expect(maxGateFailures(running(100), lost)).toEqual([
-      "0 boundaries were sent off the wall's refresh grid",
+      "0 boundaries were sent off the display's refresh grid",
     ]);
     const none = { ...running(160), vblank_output: null };
     expect(maxGateFailures(running(100), none)).toEqual([

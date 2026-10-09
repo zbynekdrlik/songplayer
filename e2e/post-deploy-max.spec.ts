@@ -11,9 +11,9 @@
  * grid second of boundaries out, and in between none coalesced (MAX kept up
  * with the program), none failed and no device lost.
  *
- * #223 follow-up: every boundary between the reads goes on the wall
+ * #223 follow-up: every boundary between the reads goes on the display
  * output's refresh grid at the phase setting, and its slot is picked anew
- * at most once (the drift between the wall's clock and SongPlayer's).
+ * at most once (the drift between the display's clock and SongPlayer's).
  *
  * The cost p99s are logged, not gated here: the budget (upload + draw + send
  * under 10 ms) and Arena's side (its source list, a scratch layer's FPS) are

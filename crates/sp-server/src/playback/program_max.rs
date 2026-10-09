@@ -31,8 +31,9 @@
 //! [`MAX_SETTINGS_POLL`] after ([`run_max_settings_task`]). While it is off
 //! the program offers nothing and the thread holds no compositor and no
 //! sender (the Spout name is unregistered). The setting
-//! `program_max_vblank_phase_ms` (where after each of the wall's vblanks a
-//! send starts, `program_max_vblank.rs`) is read with it.
+//! `program_max_vblank_phase_ms` (where after each vblank of the primary
+//! display, DWM's clock, a send starts, `program_max_vblank.rs`) is read
+//! with it.
 //!
 //! Telemetry: [`MaxStatus`], served as `max` on `GET /api/v1/program`.
 
@@ -198,7 +199,7 @@ pub struct MaxStatus {
     pub send_us_p99: u64,
     /// When the frames were in Spout's shared texture after the program
     /// offered them (the GPU's copy done), µs, over the last
-    /// [`MAX_STAT_WINDOW`] sent frames. On the wall's refresh grid the lead
+    /// [`MAX_STAT_WINDOW`] sent frames. On the refresh grid the lead
     /// moves slowly over a window (`program_max_vblank::LEAD_MIN` + up to
     /// one period + `LEAD_HYSTERESIS`); without it each frame is sent at the
     /// constant `program_max_send::MAX_SEND_LEAD`.
@@ -207,9 +208,10 @@ pub struct MaxStatus {
     pub send_at_us_max: u64,
     /// Frames whose compose ended after their due instant (sent at once).
     pub send_late: u64,
-    /// #223 follow-up: the display output whose refresh paces the sends
-    /// (`\\.\DISPLAY2 7680x1080`), `None` when none is measured (no
-    /// tracker: off Windows, no output, its thread did not start).
+    /// #223 follow-up: the display output whose refresh paces the sends,
+    /// the primary (`\\.\DISPLAY5 3840x2160`), `None` when none is
+    /// measured (no tracker: off Windows, no output, its thread did not
+    /// start).
     pub vblank_output: Option<String>,
     /// The last boundary was sent on that output's refresh grid (else at
     /// the constant lead).
@@ -228,7 +230,7 @@ pub struct MaxStatus {
     pub send_phase_us_p99: u64,
     /// Times a boundary's slot was picked anew (its lead left the window: one
     /// picture shown one refresh more or less); about one per drift cycle
-    /// between the wall's clock and SongPlayer's, hours apart.
+    /// between the display's clock and SongPlayer's, hours apart.
     pub slot_repicks: u64,
     /// Lost devices: each drops the compositor and the sender (a loss while
     /// building drops what was built). They are rebuilt on the next job, or
@@ -454,7 +456,7 @@ impl MaxOut {
         changed
     }
 
-    /// Where after each of the wall's vblanks a send starts (the setting).
+    /// Where after each vblank a send starts (the setting).
     pub fn vblank_phase(&self) -> Duration {
         Duration::from_micros(self.lock_queue().vblank_phase_us)
     }
@@ -741,7 +743,7 @@ pub async fn start_max(pool: SqlitePool, max: Arc<MaxOut>, shutdown: &broadcast:
 }
 
 /// Windows: the `program-max` thread on the production GPU (the picked
-/// adapter, the sender `SP-program-MAX`), paced on the wall output's refresh
+/// adapter, the sender `SP-program-MAX`), paced on the primary display's refresh
 /// (`sp_gpu::VblankTracker`; without one, at the constant lead).
 /// `mutants::skip`: Windows-only spawn glue; the loop is `run_max_loop`,
 /// tested with a fake GPU and a fake refresh.

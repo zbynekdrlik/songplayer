@@ -1,18 +1,23 @@
-//! The wall output's vertical blank (#223 follow-up, 9.10.2026).
+//! The refresh MAX is paced on: the primary display's vertical blank
+//! (#223 follow-up, 9.10.2026).
 //!
-//! Resolume Arena renders at the refresh of the display it outputs to (SNV:
-//! the 7680×1080 LED wall, measured 60.000 Hz) and takes whatever Spout's
-//! shared texture holds at its own instant in each refresh. A 30 fps
-//! `SP-program-MAX` paced on SongPlayer's genlock grid drifts against that
-//! refresh (a few ppm), so for minutes at a time its sends land next to
-//! Arena's instant and some pictures show for one refresh instead of two:
-//! the wall stutters. An ordinary Spout sender renders in the display's
-//! rhythm; MAX does the same by sending at a fixed point of the wall's
-//! refresh, measured here.
+//! Resolume Arena renders in the rhythm of the desktop compositor (DWM) and
+//! takes whatever Spout's shared texture holds at its own instant in each
+//! frame. A 30 fps `SP-program-MAX` paced on SongPlayer's genlock grid drifts
+//! against that rhythm (a few ppm), so for minutes at a time its sends land
+//! next to Arena's instant and some pictures show for one frame instead of
+//! two: the wall stutters. An ordinary Spout sender renders in the
+//! display's rhythm; MAX does the same by sending at a fixed point of it.
 //!
-//! - [`pick_output`]: the display output on the compositor's adapter whose
-//!   refresh paces MAX — an attached output that is not the primary
-//!   desktop (Arena's own screen), the largest one.
+//! WHICH refresh, measured on SNV (`ops/phase_lock.py`): DWM composes the
+//! wall's output at 60.0000 Hz, 2.3 ms after the PRIMARY display's vblank
+//! (DISPLAY5, 60.0000 Hz) for 40 s, while the wall's own vblank (DISPLAY1,
+//! 59.979 Hz: the LED processor's timing) drifts through the composed
+//! frames. DWM drives every output from the primary's refresh; pacing on the
+//! wall's own vblank re-picked a slot every ~50 s.
+//!
+//! - [`pick_output`]: the attached output at the desktop origin (the
+//!   primary), on whichever adapter drives it.
 //! - [`VblankFit`]: the instants a thread wakes from DXGI's `WaitForVBlank`
 //!   on it, counted into a refresh index and fitted by least squares over
 //!   the last [`VBLANK_WINDOW`] refreshes, so a wake-up's latency (tens of
@@ -64,31 +69,20 @@ impl OutputInfo {
         self.left == 0 && self.top == 0
     }
 
-    fn area(&self) -> u64 {
-        u64::from(self.width) * u64::from(self.height)
-    }
-
-    /// `\\.\DISPLAY2 7680x1080`: the telemetry's `vblank_output`.
+    /// `\\.\DISPLAY5 3840x2160`: the telemetry's `vblank_output`.
     pub fn label(&self) -> String {
         format!("{} {}x{}", self.name, self.width, self.height)
     }
 }
 
-/// The output whose refresh paces MAX, by its index in `outputs`: among the
-/// attached ones, one that is not the primary desktop wins (Arena's
-/// control screen is the primary, its output a second display), then the
-/// larger area, then DXGI's order. `None` when none is attached.
+/// The output whose refresh paces MAX, by its index in `outputs`: the
+/// attached primary display, DWM's clock (the module doc). `None` when no
+/// attached output sits at the desktop origin: never a second display's
+/// own refresh.
 pub fn pick_output(outputs: &[OutputInfo]) -> Option<usize> {
     outputs
         .iter()
-        .enumerate()
-        .filter(|(_, output)| output.attached)
-        .max_by(|(ia, a), (ib, b)| {
-            let rank_a = (!a.is_primary(), a.area());
-            let rank_b = (!b.is_primary(), b.area());
-            rank_a.cmp(&rank_b).then(ib.cmp(ia))
-        })
-        .map(|(index, _)| index)
+        .position(|output| output.attached && output.is_primary())
 }
 
 /// A display's refresh: `at` is a vertical blank, and every `at + k·period`
