@@ -517,6 +517,17 @@ mutant that makes a test wait forever counts as caught instead of a 300 s
 TIMEOUT that fails the shard. It is no excuse for unbounded waits in tests:
 shape them as below, and keep healthy tests far under the bound.
 
+**A caught mutant's run ends at its first failure (`fail-fast = { max-fail =
+1, terminate = "immediate" }`, #223 follow-up, 9.10.2026).** nextest's
+default `wait` stops scheduling but waits for the tests already running: a
+mutant killed only by a test late in the order (index 2798 of 3883) sat
+behind `asio_out::tests_clock::a_driver_silent_for_5_min_runs_by_itself_once_it_ticks`
+(95-160 s under the `mutants` profile, two mutants in parallel) until the
+run passed 300 s: TIMEOUT, a red shard for a caught mutant (CI run
+37922642659). Read the per-mutant log in the shard's `mutants-report-shard-N`
+artifact (`gh run download <run> -n mutants-report-shard-N`): a `FAIL` of the
+killing test followed by `SIGTERM` of another test is this case, not a hang.
+
 
 `while deque.len() > CAP { deque.pop_front(); }` is correct code that a
 `>`→`<` mutant turns into an infinite loop on an empty deque — cargo-mutants
