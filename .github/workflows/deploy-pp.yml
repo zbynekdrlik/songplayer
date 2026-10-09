@@ -328,9 +328,9 @@ jobs:
           OBS_WS_URL: ws://localhost:4455
           PP_MANUAL_SCENE: ${{ vars.PP_MANUAL_SCENE }}
           # #233 lane 3: how many enabled ASIO outputs PP must run
-          # (e2e/post-deploy-audio-asio.spec.ts). The main session adds PP's
-          # DVS entry once a release with lane 3 reaches PP, then sets "1".
-          SP_ASIO_OUTPUTS_EXPECTED: "0"
+          # (e2e/post-deploy-audio-asio.spec.ts): PP's "DVS (Dante)" (out-2),
+          # running since 9.10.2026.
+          SP_ASIO_OUTPUTS_EXPECTED: "1"
         run: |
           if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
             Write-Error "FAIL: Node.js (npm) is not installed at PP - the post-deploy suite needs it"

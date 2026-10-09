@@ -4,13 +4,13 @@
  * 1. The driver list reads (`GET /api/v1/audio/asio-drivers`, a registry
  *    read; no driver loaded), and a box expected to run an ASIO output
  *    (SP_ASIO_OUTPUTS_EXPECTED > 0) has Dante Virtual Soundcard among them,
- *    by its exact name. A box with none expected (PP before its DVS work)
- *    is not asked for DVS (#233 release review).
+ *    by its exact name. A box with none expected is not asked for DVS
+ *    (#233 release review).
  * 2. Exactly SP_ASIO_OUTPUTS_EXPECTED enabled ASIO outputs exist that are
  *    not waiting for their driver's clock (`gatedAsioOutputs`: PP's DVS waits
  *    calmly while PP has no Dante PTP clock, the owner's ruling, #233,
- *    8.10.2026; ci.yml / deploy-pp.yml: "1" at SNV, "0" at PP until its DVS
- *    has a clock), and each one runs, then holds a minute of program blocks at
+ *    8.10.2026; ci.yml / deploy-pp.yml: "1" at SNV, "1" at PP since its DVS
+ *    has a clock, 9.10.2026), and each one runs, then holds a minute of program blocks at
  *    its driver's rate with no underrun, no reopen, no hard re-centre
  *    (#233 review round 2: the owner's fault, a faded skip or insert),
  *    |ppm| <= 300 and a latency (`asioGateFailures`). Every output is measured over the SAME
