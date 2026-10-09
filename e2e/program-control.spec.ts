@@ -57,7 +57,8 @@ test("the Program control shows the on-program source and cuts on click", async 
     { timeout: 5000 },
   );
   const cuts = control.getByTestId("program-cut");
-  await expect(cuts).toHaveCount(3);
+  // The three playlists and Blank (#245).
+  await expect(cuts).toHaveCount(4);
   const worship = control.locator('[data-testid="program-cut"][data-playlist-id="1"]');
   const background = control.locator('[data-testid="program-cut"][data-playlist-id="2"]');
   await expect(worship).toHaveText("Worship");
@@ -428,7 +429,8 @@ test.describe("a playlist the cut refuses", () => {
       "Na programe: Worship",
       { timeout: 10000 },
     );
-    await expect(control.getByTestId("program-cut")).toHaveCount(5);
+    // The five playlists and Blank (#245).
+    await expect(control.getByTestId("program-cut")).toHaveCount(6);
     const cutButton = (id: number) =>
       control.locator(`[data-testid="program-cut"][data-playlist-id="${id}"]`);
     const archiv = cutButton(30);
