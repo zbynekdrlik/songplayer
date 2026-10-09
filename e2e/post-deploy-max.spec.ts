@@ -109,7 +109,8 @@ test.describe("SP-program-MAX (#223 S2)", () => {
         `(phase ${second.vblank_phase_us}), slot re-picks ` +
         `+${second.slot_repicks - first.slot_repicks}; SP-program (1920x1080) ` +
         `listed ${second.fhd.listed_width}x${second.fhd.listed_height}, ` +
-        `p99 draw+send = ${second.fhd.draw_us_p99 + second.fhd.send_us_p99} us`,
+        `p99 upload+draw+send = ` +
+        `${second.fhd.upload_us_p99 + second.fhd.draw_us_p99 + second.fhd.send_us_p99} us`,
     );
     expect(maxGateFailures(first, second), "the SP-program-MAX gate").toEqual([]);
     expect(

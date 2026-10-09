@@ -75,8 +75,10 @@ pub struct FhdStatus {
     /// `SP-program` senders refused (the name taken, not listed, not
     /// registered): each waits a backoff before a new one.
     pub sender_backoffs: u64,
-    /// The p99 over the last `MAX_STAT_WINDOW` sent frames, µs: the draw
-    /// until the GPU finished it, Spout's `SendTexture`.
+    /// The p99 over the last `MAX_STAT_WINDOW` sent frames, µs: the plane
+    /// uploads (onto the FHD compositor's own device: its extra cost next to
+    /// MAX), the draw until the GPU finished it, Spout's `SendTexture`.
+    pub upload_us_p99: u64,
     pub draw_us_p99: u64,
     pub send_us_p99: u64,
 }
@@ -88,6 +90,7 @@ pub(super) struct FhdStats {
     submitted: u64,
     failed: u64,
     sender_backoffs: u64,
+    upload: Window,
     draw: Window,
     send: Window,
     listed: Option<(u32, u32)>,
@@ -101,6 +104,7 @@ impl FhdStats {
             submitted: 0,
             failed: 0,
             sender_backoffs: 0,
+            upload: Window::default(),
             draw: Window::default(),
             send: Window::default(),
             listed: None,
@@ -152,6 +156,7 @@ impl MaxOut {
     pub fn record_fhd_sent(&self, compose: ComposeStats, send: SpoutSendStats) {
         let mut fhd = self.lock_fhd();
         fhd.submitted += 1;
+        fhd.upload.push(compose.upload_us);
         fhd.draw.push(compose.draw_us);
         fhd.send.push(send.send_us);
         fhd.phase = MaxPhase::Running;
@@ -190,16 +195,16 @@ impl MaxOut {
     /// (read by the caller under the queue lock). The windows are copied
     /// under the lock and sorted after it.
     pub(super) fn fhd_status(&self, fhd_setting: bool, max_enabled: bool) -> FhdStatus {
-        let (phase, counts, listed, draw, send) = {
+        let (phase, counts, listed, windows) = {
             let fhd = self.lock_fhd();
             (
                 fhd.phase.clone(),
                 [fhd.submitted, fhd.failed, fhd.sender_backoffs],
                 fhd.listed,
-                fhd.draw.clone(),
-                fhd.send.clone(),
+                [fhd.upload.clone(), fhd.draw.clone(), fhd.send.clone()],
             )
         };
+        let [upload, draw, send] = windows;
         let [submitted, failed, sender_backoffs] = counts;
         let reason = fhd_off_reason(fhd_setting, max_enabled);
         let (listed_width, listed_height) = listed.unwrap_or_default();
@@ -213,6 +218,7 @@ impl MaxOut {
             submitted,
             failed,
             sender_backoffs,
+            upload_us_p99: upload.p99(),
             draw_us_p99: draw.p99(),
             send_us_p99: send.p99(),
         }

@@ -61,10 +61,11 @@ fn a_new_max_has_the_fhd_sender_off_because_max_is_off() {
             fhd.submitted,
             fhd.failed,
             fhd.sender_backoffs,
+            fhd.upload_us_p99,
             fhd.draw_us_p99,
             fhd.send_us_p99
         ],
-        [0; 5]
+        [0; 6]
     );
 }
 
@@ -106,9 +107,9 @@ fn the_fhd_records_count_and_name_its_own_state() {
     let fhd = max.status().fhd;
     assert_eq!((fhd.state.as_str(), fhd.submitted), ("running", 1));
     assert_eq!(
-        (fhd.draw_us_p99, fhd.send_us_p99),
-        (22, 33),
-        "the draw and the send, never the upload"
+        (fhd.upload_us_p99, fhd.draw_us_p99, fhd.send_us_p99),
+        (11, 22, 33),
+        "each cost in its own window"
     );
 
     max.record_fhd_failed("why");
@@ -136,7 +137,10 @@ fn the_fhd_p99s_cover_the_last_900_frames() {
         max.record_fhd_sent(compose(5 * us, 2 * us), SpoutSendStats { send_us: 3 * us });
     }
     let fhd = max.status().fhd;
-    assert_eq!((fhd.draw_us_p99, fhd.send_us_p99), (1982, 2973));
+    assert_eq!(
+        (fhd.upload_us_p99, fhd.draw_us_p99, fhd.send_us_p99),
+        (4955, 1982, 2973)
+    );
 }
 
 #[test]
@@ -199,6 +203,7 @@ fn the_fhd_block_has_its_api_names() {
             "spout_name",
             "state",
             "submitted",
+            "upload_us_p99",
         ]
     );
     assert_eq!(json["fhd"]["reason"], "max_off");

@@ -638,10 +638,19 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   second `Side` (compositor + sender, `MaxGpu::fhd_compositor` /
   `fhd_sender`), built on the thread like MAX's. Both compose the SAME
   labelled composition (one `PictureIds`: ids are global, so each
-  compositor's residency stays right), then MAX is sent at the due instant
-  and the FHD sender right after it (`send_at` again: a no-op wait), or
-  alone at that instant when MAX's boundary did not go out (`pace` once
-  per job). Each `Side` keeps its own backoff and lost-device state
+  compositor's residency stays right). **MAX goes first, whole** (review
+  of #239): MAX composed, its paced wait, its send; only THEN is the FHD
+  side built, composed and sent (`fhd_boundary`), so the FHD upload / draw /
+  GPU wait never eat MAX's lead or make its send late (the #223 stutter
+  fix). The FHD send goes out at once after MAX's (its `send_at` meets a
+  passed instant), never paced on its own; when MAX's boundary is not
+  drawn at all (its build failed or waits a backoff), the FHD side is
+  built first (`fhd_first`, it decides the labelling) and sent at the due
+  instant (`pace` once per job). Pinned by
+  `max_is_sent_at_its_due_instant_before_the_fhd_sender_is_even_composed`
+  (fake clock, the fake's `order` log) and
+  `a_slow_fhd_compose_never_holds_max_back` (the real loop, the FHD compose
+  held behind a gate while MAX is already out). Each `Side` keeps its own backoff and lost-device state
   (`Side::recover`, shared with MAX): a refused FHD sender, a failed FHD
   build or a lost FHD device never stops MAX, and the other way round.
   The pictures are labelled only when one side is built (`ready`).
@@ -660,7 +669,9 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
   then its own setting (`setting_off`).
 - `GET /api/v1/program` → `max.fhd {enabled, state, reason, spout_name,
   listed_width, listed_height, submitted, failed, sender_backoffs,
-  draw_us_p99, send_us_p99}` (`FhdStatus`, `program_max_fhd.rs`, a CHILD
+  upload_us_p99, draw_us_p99, send_us_p99}` (`FhdStatus`; the uploads go
+  onto the FHD compositor's own device, so its extra cost is visible;
+  `program_max_fhd.rs`, a CHILD
   module of `program_max.rs`: it reads the queue and the private `Window`).
   `state` = MAX's `state_label` over the FHD side's own phase (attach /
   end / unsupported follow MAX's) with `reason.is_none()` as "on". Its
@@ -668,7 +679,10 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
 - Nastavenia: fieldset `settings-spout` "Výstupy Spout (Resolume)":
   `settings-max-enabled` (`program_max_enabled`) and
   `settings-spout-fhd-enabled` (disabled while MAX is unchecked, with the
-  note `settings-spout-fhd-hint`); a save sends both. Mock spec
+  note `settings-spout-fhd-hint`). A save sends a switch only when the
+  checkbox differs from the value the page loaded
+  (`sp_core::config::{program_max_to_send, program_spout_fhd_to_send}`,
+  #229's `paid_ai_to_send` rule): a stale tab never flips one back. Mock spec
   `e2e/settings-spout.spec.ts`; the mock serves `max.fhd` with the same
   reason rule and `state: "unsupported"`.
 - Live gate: `post-deploy-max.spec.ts` waits for both senders' first
@@ -679,7 +693,8 @@ Spout too, so a local consumer (Arena, OBS with the Spout plugin) takes the
 - Tests: `program_max_fhd_tests.rs` (rule, records, JSON names, setting,
   task), `program_max_worker_tests_fhd.rs` (fake GPU: the fake's objects
   carry an FHD flag, `Log.fhd_*` / `sends` / `listed_reads`,
-  `Script.fhd_*` / `listed`), WARP: sp-gpu `tests/warp.rs` (a 1920×1080
+  `Script.fhd_*` / `listed`, `order` = draws / sends / the FHD build in
+  order, `hold_next_fhd_compose`), WARP: sp-gpu `tests/warp.rs` (a 1920×1080
   compositor against the reference), `tests/spout.rs` (the `SP-program`
   sender listed at 1920×1080, read back on a second device) and
   sp-server `program_max_tests_warp.rs` (the real loop with both senders).

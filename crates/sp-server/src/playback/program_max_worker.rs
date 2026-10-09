@@ -49,12 +49,15 @@
 //! and MAX on, `MaxOut::fhd_wanted`), each job also goes out as
 //! `SP-program`: a second compositor of 1920×1080 and a second sender, built
 //! on this thread too, compose the same pictures at the same weight (the
-//! picture the NDI `SP-program` carries), and the FHD sender sends right
-//! after MAX at the same paced instant (alone at that instant when MAX's
-//! boundary did not go out). Each output keeps its own objects, backoff,
-//! lost-device state, telemetry and log ([`Side`]): a failure of one never
-//! stops the other. Switched off, the FHD sender's objects are dropped at
-//! the next boundary (Spout unregisters `SP-program`).
+//! picture the NDI `SP-program` carries). MAX goes first, whole: composed,
+//! sent at its paced instant; only THEN is the FHD sender built, composed
+//! and sent, so its cost never moves MAX's send (the #223 stutter fix). Its
+//! send lands a little after MAX's, never paced on its own (alone, at the
+//! due instant, when MAX's boundary did not go out). Each output keeps its
+//! own objects, backoff, lost-device state, telemetry and log ([`Side`]): a
+//! failure of one never stops the other. Switched off, the FHD sender's
+//! objects are dropped at the next boundary (Spout unregisters
+//! `SP-program`).
 //!
 //! The GPU is a trait ([`MaxGpu`]) so every decision here runs on Linux with
 //! a fake; the production one is [`SpoutGpu`] (`sp-gpu`'s `Compositor` on
@@ -673,11 +676,12 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         line
     }
 
-    /// Build what is missing (unless a backoff runs), compose `job` on each
-    /// output, then send it when it is due: in the slot [`VblankPacer`]
-    /// picks on the refresh grid (with the phase setting), else at the
-    /// constant lead (`program_max_send::send_at`); MAX first, then (#239)
-    /// the FHD sender at the same instant.
+    /// Build what is missing (unless a backoff runs), compose `job` and send
+    /// it when it is due: in the slot [`VblankPacer`] picks on the refresh
+    /// grid (with the phase setting), else at the constant lead
+    /// (`program_max_send::send_at`). MAX first, whole; then (#239) the FHD
+    /// sender ([`fhd_boundary`](Self::fhd_boundary)), built only after MAX's
+    /// send too, unless MAX's boundary is not drawn at all.
     fn attempt(&mut self, job: &MaxJob, offered: Instant, now: Instant, fhd_wanted: bool) -> Went {
         if self.unsupported {
             return (Err(Skip::Unsupported), None);
@@ -686,19 +690,19 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         if let Err(Skip::Unsupported) = max_built {
             return (Err(Skip::Unsupported), None);
         }
-        let fhd_built = fhd_wanted.then(|| self.build(Output::Fhd, now));
-        let ready = max_built.is_ok() || matches!(fhd_built, Some(Ok(())));
+        // With MAX's boundary not drawn there is no MAX send to delay: the
+        // FHD side is built now, and decides whether the pictures are
+        // labelled.
+        let fhd_first = (fhd_wanted && max_built.is_err()).then(|| self.build(Output::Fhd, now));
+        let ready = max_built.is_ok() || matches!(fhd_first, Some(Ok(())));
         // The pictures are labelled only for a boundary that is drawn.
         let composition = if ready {
             self.ids.composition(job)
         } else {
             Composition::Black
         };
-        let max_composed = max_built.and_then(|()| self.compose(Output::Max, &composition));
-        let fhd_composed =
-            fhd_built.map(|built| built.and_then(|()| self.compose(Output::Fhd, &composition)));
         let mut paced = None;
-        let max = match max_composed {
+        let max = match max_built.and_then(|()| self.compose(Output::Max, &composition)) {
             Ok(compose) => {
                 let pace = self.pace(offered);
                 paced = Some(pace);
@@ -706,11 +710,10 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             }
             Err(skip) => Err(skip),
         };
-        let fhd = match fhd_composed {
-            Some(Ok(compose)) => {
-                let (due, _) = paced.unwrap_or_else(|| self.pace(offered));
-                Some(self.send_fhd(compose, due.at, offered))
-            }
+        // MAX is out: the FHD sender's build, upload and draw come after it.
+        let fhd_built = fhd_first.or_else(|| fhd_wanted.then(|| self.build(Output::Fhd, now)));
+        let fhd = match fhd_built {
+            Some(Ok(())) => Some(self.fhd_boundary(&composition, paced, offered)),
             Some(Err(skip)) => Some(Err(skip)),
             None => None,
         };
@@ -797,20 +800,23 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         Ok((compose, send, timing, aligned))
     }
 
-    /// #239: send the FHD sender's composed boundary at `due`: right after
-    /// MAX's, whose send already waited for it (or alone, when MAX's
-    /// boundary did not go out).
-    fn send_fhd(
+    /// #239: compose the FHD sender's boundary and send it. After MAX's send
+    /// (`paced` = how MAX was paced), so it goes out at once, a little after
+    /// MAX's, never paced on its own; when MAX's boundary did not go out,
+    /// at the due instant.
+    fn fhd_boundary(
         &mut self,
-        compose: ComposeStats,
-        due: Instant,
+        composition: &Composition<'_>,
+        paced: Option<(Due, Option<VblankGrid>)>,
         offered: Instant,
     ) -> Result<FhdSent, Skip> {
+        let compose = self.compose(Output::Fhd, composition)?;
+        let (due, _) = paced.unwrap_or_else(|| self.pace(offered));
         let Some(sender) = self.fhd.sender.as_mut() else {
             return Err(Skip::frame(NO_SENDER));
         };
         let (send, _) =
-            send_at(self.clock.as_mut(), due, offered, || sender.send()).map_err(Skip::frame)?;
+            send_at(self.clock.as_mut(), due.at, offered, || sender.send()).map_err(Skip::frame)?;
         Ok((compose, send))
     }
 
@@ -873,3 +879,7 @@ mod tests_send;
 #[cfg(test)]
 #[path = "program_max_worker_tests_fhd.rs"]
 mod tests_fhd;
+
+#[cfg(test)]
+#[path = "program_max_worker_tests_log.rs"]
+mod tests_log;

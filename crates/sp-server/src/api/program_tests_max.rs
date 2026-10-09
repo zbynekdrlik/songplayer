@@ -64,6 +64,7 @@ async fn get_program_reports_the_max_block() {
             "submitted": 0,
             "failed": 0,
             "sender_backoffs": 0,
+            "upload_us_p99": 0,
             "draw_us_p99": 0,
             "send_us_p99": 0,
         })),
@@ -185,6 +186,7 @@ async fn get_program_reports_the_fhd_spout_sender() {
             &serde_json::json!(500)
         )
     );
+    assert_eq!(fhd["upload_us_p99"], 7, "its own uploads");
     assert_eq!(
         (&fhd["listed_width"], &fhd["listed_height"]),
         (&serde_json::json!(1920), &serde_json::json!(1080))

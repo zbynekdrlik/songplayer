@@ -17,6 +17,7 @@ export interface FhdStatus {
   submitted: number;
   failed: number;
   sender_backoffs: number;
+  upload_us_p99: number;
   draw_us_p99: number;
   send_us_p99: number;
 }

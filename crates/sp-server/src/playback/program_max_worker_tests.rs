@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use sp_gpu::{ComposeStats, Composition, GpuError, Nv12Picture, PictureError, SpoutSendStats};
 
 use super::{
-    LogGate, LogLine, MAX_LOG_EVERY_100NS, MAX_RETRY_BACKOFF, MaxCompositor, MaxGpu, MaxSender,
-    MaxWorker, PictureIds, elapsed_100ns, is_refusal, run_max_loop,
+    MAX_RETRY_BACKOFF, MaxCompositor, MaxGpu, MaxSender, MaxWorker, PictureIds, is_refusal,
+    run_max_loop,
 };
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::{MAX_NOT_RUNNING, MaxJob, MaxOut, MaxPicture};
@@ -89,8 +89,9 @@ pub(crate) struct Log {
     pub fhd_senders_built: u32,
     pub fhd_drawn: Vec<Drawn>,
     pub fhd_sent: u32,
-    /// #239: "max" / "fhd", in send order; and the registry reads.
-    pub sends: Vec<&'static str>,
+    /// #239: "max draw" / "max send" / "fhd build" / "fhd draw" / "fhd send",
+    /// in order; and the registry reads.
+    pub order: Vec<&'static str>,
     pub listed_reads: u32,
 }
 
@@ -121,6 +122,8 @@ pub(crate) struct FakeShared {
     log: Mutex<Log>,
     script: Mutex<Script>,
     hold: Mutex<Option<Hold>>,
+    /// #239: a held FHD compose.
+    fhd_hold: Mutex<Option<Hold>>,
 }
 
 /// The fake compositor's adapter.
@@ -156,6 +159,11 @@ impl FakeGpu {
     /// Hold the next compose behind `hold`.
     pub(crate) fn hold_next_compose(&self, hold: Hold) {
         *self.0.hold.lock().unwrap_or_else(|p| p.into_inner()) = Some(hold);
+    }
+
+    /// #239: hold the next FHD compose behind `hold`.
+    pub(crate) fn hold_next_fhd_compose(&self, hold: Hold) {
+        *self.0.fhd_hold.lock().unwrap_or_else(|p| p.into_inner()) = Some(hold);
     }
 }
 
@@ -218,7 +226,10 @@ impl MaxGpu for FakeGpu {
     }
 
     fn fhd_compositor(&mut self) -> Result<FakeCompositor, GpuError> {
-        log_of(&self.0).fhd_compositors_built += 1;
+        let mut log = log_of(&self.0);
+        log.fhd_compositors_built += 1;
+        log.order.push("fhd build");
+        drop(log);
         match next_error(&self.0, |s| s.fhd_compositor.pop_front()) {
             Some(error) => Err(error),
             None => Ok(FakeCompositor(self.0.clone(), true)),
@@ -238,12 +249,8 @@ impl MaxGpu for FakeGpu {
 impl MaxCompositor for FakeCompositor {
     fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError> {
         let fhd = self.1;
-        // Only MAX's compose is held (the stalled-consumer test's).
-        let hold = if fhd {
-            None
-        } else {
-            self.0.hold.lock().unwrap_or_else(|p| p.into_inner()).take()
-        };
+        let held = if fhd { &self.0.fhd_hold } else { &self.0.hold };
+        let hold = held.lock().unwrap_or_else(|p| p.into_inner()).take();
         if let Some(hold) = hold {
             let _ = hold.entered.send(());
             hold.gate.wait();
@@ -268,6 +275,7 @@ impl MaxCompositor for FakeCompositor {
             &mut log.drawn
         };
         drawn_log.push(drawn);
+        log.order.push(if fhd { "fhd draw" } else { "max draw" });
         drop(log);
         let scripted = next_error(&self.0, |s| {
             if fhd {
@@ -307,13 +315,13 @@ impl MaxSender for FakeSender {
         let mut log = log_of(&self.0);
         if fhd {
             log.fhd_sent += 1;
-            log.sends.push("fhd");
+            log.order.push("fhd send");
             Ok(SpoutSendStats {
                 send_us: FHD_SEND_US,
             })
         } else {
             log.sent += 1;
-            log.sends.push("max");
+            log.order.push("max send");
             Ok(SpoutSendStats { send_us: SEND_US })
         }
     }
@@ -560,103 +568,6 @@ fn a_lost_device_after_a_sent_boundary_rebuilds_at_once_again() {
         (log.compositors_built, log.sent),
         (3, 2),
         "a boundary went out between the two losses: the rebuild does not wait"
-    );
-}
-
-#[test]
-fn the_log_writes_each_change_once_per_window_and_never_loses_one() {
-    let s = 10_000_000; // one second, in 100 ns
-    assert_eq!(MAX_LOG_EVERY_100NS, 5 * s);
-    let mut gate = LogGate::default();
-    assert_eq!(gate.observe(0, None), None, "going out from the start");
-    assert_eq!(
-        gate.observe(0, Some("X")),
-        Some(LogLine::Failing { held_back: 0 })
-    );
-    assert_eq!(gate.observe(s, Some("X")), None, "the same failure again");
-    assert_eq!(
-        gate.observe(s, Some("Y")),
-        None,
-        "another failure inside the window: held back"
-    );
-    assert_eq!(gate.observe(2 * s, Some("Y")), None);
-    assert_eq!(
-        gate.observe(5 * s, Some("Y")),
-        Some(LogLine::Failing { held_back: 2 }),
-        "the held-back failure is written once the window is over"
-    );
-    assert_eq!(gate.observe(6 * s, None), None, "a recovery inside it");
-    assert_eq!(
-        gate.observe(10 * s, None),
-        Some(LogLine::Recovered { held_back: 1 })
-    );
-    assert_eq!(gate.observe(11 * s, Some("Z")), None, "held back");
-    assert_eq!(
-        gate.observe(16 * s, None),
-        None,
-        "a held-back change that reverted is not written: the log's last line is true again"
-    );
-}
-
-/// The worker's side: a change held back inside the window (the device
-/// lost, then no adapter for the rebuild) is written once the window is
-/// over, as the state is then, and the recovery after it.
-#[test]
-fn the_worker_logs_a_lasting_failure_held_back_inside_the_window() {
-    let max = MaxOut::new();
-    max.set_enabled(true);
-    let gpu = FakeGpu::default();
-    gpu.script().compose.push_back(device_lost());
-    let mut worker = MaxWorker::new(&max, gpu.clone());
-    let t0 = Instant::now();
-    let at = |ms: u64| t0 + Duration::from_millis(ms);
-    let black = |stamp: i64| MaxJob::Black { stamp_100ns: stamp };
-    assert_eq!(
-        worker.serve(&black(1), at(0)),
-        Some(LogLine::Failing { held_back: 0 }),
-        "the lost device"
-    );
-    // The rebuild (and the one after the backoff) finds no adapter.
-    gpu.script().compositor.push_back(GpuError::NoAdapter);
-    gpu.script().compositor.push_back(GpuError::NoAdapter);
-    assert_eq!(
-        worker.serve(&black(2), at(33)),
-        None,
-        "no adapter: held back"
-    );
-    assert_eq!(
-        worker.serve(&black(3), at(1_000)),
-        None,
-        "a skipped boundary"
-    );
-    assert_eq!(
-        worker.serve(&black(4), at(5_000)),
-        Some(LogLine::Failing { held_back: 2 }),
-        "the lasting failure is written once the window is over"
-    );
-    assert_eq!(
-        max.status().state,
-        format!("error: {}", GpuError::NoAdapter)
-    );
-    assert_eq!(
-        worker.serve(&black(5), at(10_000)),
-        Some(LogLine::Recovered { held_back: 0 })
-    );
-    assert_eq!(gpu.log().sent, 1);
-}
-
-#[test]
-fn the_log_time_is_the_threads_time_in_100ns() {
-    let t0 = Instant::now();
-    assert_eq!(elapsed_100ns(t0, t0), 0);
-    assert_eq!(
-        elapsed_100ns(t0, t0 + Duration::from_millis(1500)),
-        15_000_000
-    );
-    assert_eq!(
-        elapsed_100ns(t0 + Duration::from_secs(1), t0),
-        0,
-        "never negative"
     );
 }
 

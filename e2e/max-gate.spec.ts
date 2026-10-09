@@ -27,6 +27,7 @@ function fhd(submitted: number): FhdStatus {
     submitted,
     failed: 1,
     sender_backoffs: 1,
+    upload_us_p99: 200,
     draw_us_p99: 300,
     send_us_p99: 500,
   };

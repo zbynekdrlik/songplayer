@@ -248,14 +248,22 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
             config::SETTING_PROGRAM_TRANSITION_MS.to_string(),
             transition_ms.get().trim().to_string(),
         );
-        settings.insert(
-            config::SETTING_PROGRAM_MAX_ENABLED.to_string(),
-            max_enabled.get().to_string(),
-        );
-        settings.insert(
-            config::SETTING_PROGRAM_SPOUT_FHD_ENABLED.to_string(),
-            spout_fhd_enabled.get().to_string(),
-        );
+        // #239: each Spout switch only when it was changed here (#229's
+        // rule) — a tab opened before it changed elsewhere never sends the
+        // old value back.
+        let (loaded_max, loaded_fhd) = store.settings.with_untracked(|s| {
+            (
+                s.get(config::SETTING_PROGRAM_MAX_ENABLED).cloned(),
+                s.get(config::SETTING_PROGRAM_SPOUT_FHD_ENABLED).cloned(),
+            )
+        });
+        if let Some(value) = config::program_max_to_send(loaded_max.as_deref(), max_enabled.get()) {
+            settings.insert(config::SETTING_PROGRAM_MAX_ENABLED.to_string(), value);
+        }
+        let fhd_checked = spout_fhd_enabled.get();
+        if let Some(value) = config::program_spout_fhd_to_send(loaded_fhd.as_deref(), fhd_checked) {
+            settings.insert(config::SETTING_PROGRAM_SPOUT_FHD_ENABLED.to_string(), value);
+        }
 
         // #229: the server answers the settings PATCH 204 with no body, so it
         // is saved through the helper that reads no body.
@@ -466,7 +474,7 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     />
                     "Posielať SP-program-MAX (3840×2160) cez Spout"
                 </label>
-                <label title="Obraz programu SP-program v rozlíšení 1920×1080, ten istý ako na NDI. Posiela sa len spolu s SP-program-MAX.">
+                <label title="Obraz programu SP-program v rozlíšení 1920×1080, ten istý ako na NDI. Posiela sa len spolu so SP-program-MAX.">
                     <input
                         type="checkbox"
                         data-testid="settings-spout-fhd-enabled"

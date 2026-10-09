@@ -1406,6 +1406,7 @@ function mockFhdStatus() {
     submitted: 0,
     failed: 0,
     sender_backoffs: 0,
+    upload_us_p99: 0,
     draw_us_p99: 0,
     send_us_p99: 0,
   };

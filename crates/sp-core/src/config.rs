@@ -109,6 +109,22 @@ pub fn program_spout_fhd_enabled(raw: Option<&str>) -> bool {
     raw.map_or(DEFAULT_PROGRAM_SPOUT_FHD_ENABLED, |v| v.trim() != "false")
 }
 
+/// #239: what a Nastavenia save sends for `program_max_enabled` — `"true"` /
+/// `"false"` only when the checkbox differs from the value the page loaded
+/// (`loaded`, read by [`program_max_enabled`]), else nothing: a tab opened
+/// before the switch was changed elsewhere never sends the old one back
+/// (#229's [`paid_ai_to_send`] rule).
+pub fn program_max_to_send(loaded: Option<&str>, checked: bool) -> Option<String> {
+    (program_max_enabled(loaded) != checked).then(|| checked.to_string())
+}
+
+/// #239: what a Nastavenia save sends for `program_spout_fhd_enabled`, by
+/// the rule of [`program_max_to_send`] (the value loaded read by
+/// [`program_spout_fhd_enabled`]).
+pub fn program_spout_fhd_to_send(loaded: Option<&str>, checked: bool) -> Option<String> {
+    (program_spout_fhd_enabled(loaded) != checked).then(|| checked.to_string())
+}
+
 /// #223 follow-up: where after each vblank of the wall's display a
 /// `SP-program-MAX` send starts, in ms (decimals allowed): Resolume Arena
 /// takes the Spout texture at its own instant in each refresh, so a send
@@ -448,6 +464,21 @@ mod tests {
             "only an explicit false"
         );
         assert!(!program_spout_fhd_enabled(Some("\tfalse ")), "trimmed");
+    }
+
+    /// #239: a save sends each Spout switch only when the checkbox changed
+    /// it from what the page loaded (read by the switch's own rule).
+    #[test]
+    fn a_save_sends_a_spout_switch_only_when_it_changed() {
+        for to_send in [program_max_to_send, program_spout_fhd_to_send] {
+            assert_eq!(to_send(None, true), None, "on as loaded");
+            assert_eq!(to_send(None, false).as_deref(), Some("false"));
+            assert_eq!(to_send(Some("false"), true).as_deref(), Some("true"));
+            assert_eq!(to_send(Some(" false "), false), None, "off as loaded");
+            assert_eq!(to_send(Some("true"), true), None);
+            assert_eq!(to_send(Some("junk"), true), None, "a mangled value is ON");
+            assert_eq!(to_send(Some("true"), false).as_deref(), Some("false"));
+        }
     }
 
     /// #223 follow-up: the vblank phase is ms from 0 to under 1000, to the
