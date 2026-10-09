@@ -90,6 +90,25 @@ test("the panel shows the playlist's stored volume, bands and curve (#242)", asy
   expect(await puts(request)).toEqual([]);
 });
 
+/// The panel offers no field before the stored sound has loaded: an edit
+/// made then would be overwritten when the load lands (CI run 37975959175:
+/// the gain typed while GET …/audio was in flight was sent as 0).
+test("the panel shows its fields only once the stored sound is loaded (#242)", async ({
+  page,
+  request,
+}) => {
+  await request.post("/__mock/playlist-audio-set", {
+    data: { id: PID, fx: { gain_db: -5, eq: [] } },
+  });
+  await request.post("/__mock/playlist-audio-delay", { data: { ms: 1500 } });
+  await openPanel(page);
+  await expect(page.getByTestId("playlist-audio-loading")).toHaveText("Načítavam…");
+  await expect(page.getByTestId("playlist-audio-gain")).toHaveCount(0);
+  await expect(page.getByTestId("playlist-audio-add")).toHaveCount(0);
+  await expect(page.getByTestId("playlist-audio-gain")).toHaveValue("-5", { timeout: 10000 });
+  await expect(page.getByTestId("playlist-audio-loading")).toHaveCount(0);
+});
+
 test("editing and Použiť sends the operator's own values, focus stays put (#242)", async ({
   page,
   request,

@@ -410,6 +410,8 @@ app.patch("/api/v1/videos/:id", (req, res) => {
 const AUDIO_KINDS = ["high_pass", "low_shelf", "peak", "high_shelf", "low_pass"];
 let playlistAudio = new Map();
 let playlistAudioPuts = [];
+// How long GET …/audio waits before it answers (`/__mock/playlist-audio-delay`).
+let playlistAudioDelayMs = 0;
 function playlistAudioOf(id) {
   return playlistAudio.get(id) ?? { gain_db: 0, eq: [], generation: 0 };
 }
@@ -439,8 +441,11 @@ function playlistAudioRefusal(body) {
   }
   return null;
 }
-app.get("/api/v1/playlists/:id/audio", (req, res) => {
+app.get("/api/v1/playlists/:id/audio", async (req, res) => {
   const id = Number(req.params.id);
+  if (playlistAudioDelayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, playlistAudioDelayMs));
+  }
   if (!playlists.some((p) => p.id === id)) {
     res.status(404).end();
     return;
@@ -476,6 +481,11 @@ app.get("/__mock/playlist-audio", (_req, res) => {
 app.post("/__mock/playlist-audio-reset", (_req, res) => {
   playlistAudio = new Map();
   playlistAudioPuts = [];
+  playlistAudioDelayMs = 0;
+  res.status(204).end();
+});
+app.post("/__mock/playlist-audio-delay", (req, res) => {
+  playlistAudioDelayMs = Number(req.body.ms) || 0;
   res.status(204).end();
 });
 app.post("/__mock/playlist-audio-set", (req, res) => {
