@@ -607,6 +607,7 @@ fn OutputRow(
                 "Názov"
                 <input
                     type="text"
+                    autocomplete="off"
                     data-testid="audio-output-name"
                     prop:value=move || read(entries, &id.get_value(), |e| e.name.clone())
                     on:input=move |ev| {
@@ -631,6 +632,7 @@ fn OutputRow(
                 "Oneskorenie (ms)"
                 <input
                     type="number"
+                    autocomplete="off"
                     min="0"
                     max="2000"
                     data-testid="audio-output-delay"
@@ -760,6 +762,7 @@ fn AsioFields(
             "Kanál ľavý"
             <input
                 type="number"
+                autocomplete="off"
                 min="1"
                 max="512"
                 data-testid="audio-output-asio-left"
@@ -771,6 +774,7 @@ fn AsioFields(
             "Kanál pravý"
             <input
                 type="number"
+                autocomplete="off"
                 min="1"
                 max="512"
                 data-testid="audio-output-asio-right"
@@ -826,6 +830,7 @@ fn VbanFields(id: StoredValue<String>, entries: RwSignal<Vec<OutputEntry>>) -> i
             "Cieľ (host)"
             <input
                 type="text"
+                autocomplete="off"
                 data-testid="audio-output-vban-host"
                 placeholder="dev1.lan"
                 prop:value=move || vban(|v| v.host.clone())
@@ -843,6 +848,7 @@ fn VbanFields(id: StoredValue<String>, entries: RwSignal<Vec<OutputEntry>>) -> i
             "Port"
             <input
                 type="number"
+                autocomplete="off"
                 min="1"
                 max="65535"
                 data-testid="audio-output-vban-port"
@@ -861,6 +867,7 @@ fn VbanFields(id: StoredValue<String>, entries: RwSignal<Vec<OutputEntry>>) -> i
             "Názov streamu"
             <input
                 type="text"
+                autocomplete="off"
                 maxlength="16"
                 data-testid="audio-output-vban-stream"
                 prop:value=move || vban(|v| v.stream_name.clone())

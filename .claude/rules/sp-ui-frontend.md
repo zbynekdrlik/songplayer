@@ -893,6 +893,18 @@ Rust UI changes how the store reacts to a message, trace every existing
 spec that posts a mock message right after `page.goto` against the new
 logic, message by message, before calling the suite green.
 
+## Every Settings field carries an autofill hint (#244)
+
+Chrome's password manager read the Nastavenia form (three password fields,
+no hint) as a sign-in form and filled the operator's saved login into it:
+the password into the secret fields, which hold the `********` mask (#229),
+and the user name into OBS "URL". A save would then store those values.
+Every `type="password"` input is `autocomplete="new-password"` (Chrome
+ignores `off` on a password field, and never fills a stored credential into
+a new-password one); every other text / number input and every `<form>` on
+the page is `autocomplete="off"`. A new Settings field takes its hint, or
+`e2e/settings-no-autofill.spec.ts` fails.
+
 ## A `>` inside an unbraced attribute value ENDS the tag (#242 review)
 
 The view! parser (rstml 0.12) ends an opening tag at the first top-level
