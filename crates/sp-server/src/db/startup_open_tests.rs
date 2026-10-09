@@ -111,3 +111,46 @@ async fn a_free_database_opens_at_once() {
         .unwrap();
     assert_eq!(one, 1);
 }
+
+/// A real SQLite BUSY is retryable, a real "no such table" is not: one
+/// connection holds the database EXCLUSIVE and another, with no busy wait,
+/// tries to write (CI run 37995844762 found the Database arm untested).
+#[tokio::test]
+async fn a_real_busy_database_is_retryable_and_another_database_error_is_not() {
+    use sqlx::ConnectOptions;
+    use sqlx::sqlite::SqliteConnectOptions;
+    use std::str::FromStr;
+
+    let dir = tempfile::tempdir().unwrap();
+    let url = format!("sqlite:{}", dir.path().join("locked.db").display());
+    let opts = SqliteConnectOptions::from_str(&url)
+        .unwrap()
+        .create_if_missing(true)
+        .busy_timeout(Duration::ZERO);
+    // Both connections open first: a connection's own setup must not meet
+    // the lock.
+    let mut holder = opts.connect().await.unwrap();
+    let mut other = opts.connect().await.unwrap();
+    sqlx::query("CREATE TABLE t (x INTEGER)")
+        .execute(&mut holder)
+        .await
+        .unwrap();
+    sqlx::query("BEGIN EXCLUSIVE")
+        .execute(&mut holder)
+        .await
+        .unwrap();
+
+    let busy = sqlx::query("INSERT INTO t (x) VALUES (1)")
+        .execute(&mut other)
+        .await
+        .unwrap_err();
+    assert!(is_retryable(&busy), "{busy}");
+
+    // Lock released: the next error is the missing table, not a lock.
+    sqlx::query("COMMIT").execute(&mut holder).await.unwrap();
+    let missing = sqlx::query("SELECT x FROM no_such_table")
+        .execute(&mut other)
+        .await
+        .unwrap_err();
+    assert!(!is_retryable(&missing), "{missing}");
+}
