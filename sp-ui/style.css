@@ -493,6 +493,8 @@ body {
 .form-actions button:hover { opacity: 0.9; }
 .form-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .save-status { color: var(--text-dim); font-size: 0.85rem; }
+/* #239: a note under the Spout outputs (the FHD sender needs MAX on). */
+.settings-hint { color: var(--text-dim); font-size: 0.85rem; }
 
 /* #233: "Zvukové výstupy" — the look of the form's fieldsets, one framed
    block per output, its cells in a grid that wraps on a narrow page. */

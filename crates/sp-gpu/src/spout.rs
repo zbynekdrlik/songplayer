@@ -25,6 +25,11 @@ use crate::error::GpuError;
 /// sender as `SPOUT_SP-program-MAX` (category "Spout Servers", #223 M0).
 pub const SPOUT_SENDER_NAME: &str = "SP-program-MAX";
 
+/// #239: the Spout sender name of the FHD program, `SP-program` (the name of
+/// its NDI twin), drawn into a 1920×1080 target next to `SP-program-MAX`.
+/// Arena lists it as `SPOUT_SP-program`.
+pub const SPOUT_FHD_SENDER_NAME: &str = "SP-program";
+
 /// The longest sender name Spout can carry, in bytes. A sender Spout
 /// renames to `<name>_<n>` (up to 11 more bytes) gets
 /// `<name>_<n>_Count_Semaphore` (16 more) built in 256 bytes with

@@ -314,6 +314,7 @@ fn the_max_block_has_its_api_names() {
             "draw_us_p99",
             "enabled",
             "failed",
+            "fhd",
             "height",
             "send_at_us_max",
             "send_at_us_p50",

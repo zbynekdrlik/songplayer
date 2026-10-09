@@ -1,5 +1,6 @@
-//! The Spout sender of `SP-program-MAX` (#223 S1b): the compositor's render
-//! target, shared with Resolume Arena through the vendored Spout2 SDK
+//! The Spout sender of `SP-program-MAX` (#223 S1b), and of the FHD program
+//! `SP-program` (#239): the compositor's render target, shared with Resolume
+//! Arena through the vendored Spout2 SDK
 //! (SpoutDX `SendTexture`, via `spout_shim.cpp`). Every decision (the name
 //! check, refusing a taken name, confirming or refusing the first send) is
 //! `crate::spout` / `crate::spout_state`'s, tested on Linux; this file only
@@ -19,7 +20,7 @@ use windows::core::Interface;
 
 use super::{Compositor, micros_since};
 use crate::error::GpuError;
-use crate::spout::{SPOUT_SENDER_NAME, check_sender_name, status_result};
+use crate::spout::{SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, check_sender_name, status_result};
 use crate::spout_state::{
     AfterSend, BeforeSend, FirstSendFacts, Listed, Registration, after_send, before_send, claim,
 };
@@ -119,6 +120,14 @@ impl SpoutSender {
     /// name (Spout would have renamed this one).
     pub fn new(compositor: &Compositor) -> Result<Self, GpuError> {
         Self::with_name(compositor, SPOUT_SENDER_NAME)
+    }
+
+    /// #239: the sender `SP-program` ([`SPOUT_FHD_SENDER_NAME`]), on the
+    /// FHD program's 1920×1080 compositor (`Compositor::with_size`): it
+    /// shares whatever `compositor` draws, so pair it with that one.
+    /// [`GpuError::SpoutNameTaken`] when a live sender holds the name.
+    pub fn new_fhd(compositor: &Compositor) -> Result<Self, GpuError> {
+        Self::with_name(compositor, SPOUT_FHD_SENDER_NAME)
     }
 
     /// The sender under another name: tests run several at once, and the
@@ -226,7 +235,7 @@ impl SpoutSender {
     }
 
     /// The size Spout shares, as SpoutDX reports it: (0, 0) before the
-    /// first send and once refused, then the render target's 3840×2160.
+    /// first send and once refused, then the render target's size.
     pub fn size(&self) -> (u32, u32) {
         let (mut width, mut height) = (0, 0);
         // SAFETY: the shim sender is live until Drop; both out slots are

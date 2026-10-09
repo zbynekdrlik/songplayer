@@ -6,12 +6,32 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  FhdStatus,
   MAX_SLOT_REPICKS,
   MIN_BOUNDARIES,
   MaxStatus,
   SEND_PHASE_SLACK_US,
+  fhdGateFailures,
   maxGateFailures,
 } from "./max-gate";
+
+/** #239: the SP-program Spout sender running next to MAX, listed at 1080p. */
+function fhd(submitted: number): FhdStatus {
+  return {
+    enabled: true,
+    state: "running",
+    reason: null,
+    spout_name: "SP-program",
+    listed_width: 1920,
+    listed_height: 1080,
+    submitted,
+    failed: 1,
+    sender_backoffs: 1,
+    upload_us_p99: 200,
+    draw_us_p99: 300,
+    send_us_p99: 500,
+  };
+}
 
 /** A box where MAX runs: the RTX, 3840×2160, `running`. */
 function running(submitted: number): MaxStatus {
@@ -42,6 +62,7 @@ function running(submitted: number): MaxStatus {
     sender_backoffs: 0,
     spout_name: "SP-program-MAX",
     adapter: "NVIDIA GeForce RTX 3070 Ti",
+    fhd: fhd(submitted),
   };
 }
 
@@ -138,6 +159,67 @@ test.describe("SP-program-MAX post-deploy gate (#223 S2)", () => {
     expect(maxGateFailures(running(100), { ...running(160), slot_repicks: 3 })).toEqual([]);
     expect(maxGateFailures(running(100), { ...running(160), slot_repicks: 4 })).toEqual([
       "the send slot was picked anew 2 times between the reads",
+    ]);
+  });
+});
+
+test.describe("SP-program (1920x1080) Spout gate (#239)", () => {
+  test("a running SP-program sender with one grid second sent passes", () => {
+    expect(fhdGateFailures(fhd(100), fhd(130))).toEqual([]);
+    expect(fhdGateFailures(fhd(100), fhd(300))).toEqual([]);
+  });
+
+  test("fewer than one grid second of SP-program boundaries fails", () => {
+    expect(fhdGateFailures(fhd(100), fhd(129))).toEqual([
+      "only 29 SP-program boundaries went out (at least 30)",
+    ]);
+  });
+
+  test("a failed boundary or a refused sender between the reads fails", () => {
+    const later = { ...fhd(160), failed: 4, sender_backoffs: 3 };
+    expect(fhdGateFailures(fhd(100), later)).toEqual([
+      "3 SP-program boundaries failed",
+      "the SP-program sender was refused 2 times",
+    ]);
+  });
+
+  test("counts from before the first read do not fail it", () => {
+    const before = { ...fhd(100), failed: 9, sender_backoffs: 5 };
+    const after = { ...fhd(130), failed: 9, sender_backoffs: 5 };
+    expect(fhdGateFailures(before, after)).toEqual([]);
+  });
+
+  test("off, another state, another name or listing fails", () => {
+    const broken = {
+      ...fhd(160),
+      enabled: false,
+      reason: "setting_off",
+      state: "off",
+      spout_name: "SP-program_1",
+      listed_width: 3840,
+      listed_height: 2160,
+    };
+    expect(fhdGateFailures(fhd(100), broken)).toEqual([
+      "program_spout_fhd_enabled is off",
+      "the SP-program sender is off: setting_off",
+      "the FHD Spout name is SP-program_1",
+      "the SP-program sender is off",
+      "Spout lists SP-program at 3840x2160, not 1920x1080",
+    ]);
+  });
+
+  test("MAX off turns the SP-program sender off, and the gate names why", () => {
+    const off = { ...fhd(160), reason: "max_off", state: "off" };
+    expect(fhdGateFailures(fhd(100), off)).toEqual([
+      "the SP-program sender is off: max_off",
+      "the SP-program sender is off",
+    ]);
+  });
+
+  test("a sender Spout has not listed yet fails", () => {
+    const unlisted = { ...fhd(160), listed_width: 0, listed_height: 0 };
+    expect(fhdGateFailures(fhd(100), unlisted)).toEqual([
+      "Spout lists SP-program at 0x0, not 1920x1080",
     ]);
   });
 });

@@ -11,7 +11,6 @@
 use sp_core::fit::Placement;
 
 use crate::color::matrix_f32;
-use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH};
 
 /// The constant buffer's size: five float4 registers.
 pub const QUAD_CONSTANTS_BYTES: usize = 80;
@@ -28,11 +27,13 @@ pub struct QuadConstants {
 }
 
 impl QuadConstants {
-    /// The constants of a quad that draws a picture into `place` of the
-    /// canvas at `weight`.
-    pub fn new(place: Placement, weight: f32) -> Self {
+    /// The constants of a quad that draws a picture into `place` of a
+    /// `target_width`×`target_height` render target at `weight` (#239: the
+    /// compositor's own size, 3840×2160 for MAX, 1920×1080 for
+    /// `SP-program`).
+    pub fn new(place: Placement, weight: f32, target_width: u32, target_height: u32) -> Self {
         Self {
-            rect: ndc_rect(place, CANVAS_WIDTH, CANVAS_HEIGHT),
+            rect: ndc_rect(place, target_width, target_height),
             matrix: matrix_f32(),
             weight,
         }
