@@ -33,3 +33,29 @@ def test_a_failed_registration_stops_the_script():
     configured = after.find("Runner configured")
     assert check < configured, "the exit code must be checked before claiming success"
     assert "throw" in after[check:configured]
+
+
+def _start_vbs() -> str:
+    """The start-runner.vbs the script writes (its here-string)."""
+    s = _script()
+    end = s.index('"@ | Set-Content "$RunnerDir\\start-runner.vbs"')
+    start = s.rindex('@"', 0, end)
+    return s[start:end]
+
+
+def test_the_five_minute_start_never_starts_a_second_runner():
+    """#223 follow-up (9.10.2026): the auto-start task runs start-runner.vbs
+    every 5 minutes, and it started run.cmd every time. SNV had four
+    listeners of C:\\actions-runner at once; two jobs failed in seconds with
+    "The file 'C:\\actions-runner\\_diag\\pages\\...log' already exists".
+    The vbs must quit when this runner directory's listener, or the
+    start-runner.bat that runs it, is already running, before it runs the
+    bat."""
+    vbs = _start_vbs()
+    run = vbs.index("WshShell.Run")
+    guard = vbs[:run]
+    assert "Win32_Process" in guard, "no process check before the start"
+    assert "Runner.Listener.exe" in guard
+    assert "$RunnerDir\\bin\\Runner.Listener.exe" in guard, "only THIS runner's listener counts"
+    assert "$RunnerDir\\start-runner.bat" in guard, "the running wrapper counts too"
+    assert "WScript.Quit" in guard
