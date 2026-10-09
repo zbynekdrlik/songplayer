@@ -27,18 +27,6 @@ fn strip_display_punctuation(s: &str) -> String {
         .to_string()
 }
 
-/// Append ` ★` (U+2605) to `s` when `is_reference` and `s` is non-empty
-/// (#142). Called AFTER `strip_display_punctuation` so the star itself is
-/// never stripped as trailing punctuation. An empty string stays empty —
-/// a lone star on a blank display slot would be worse than no marker.
-fn append_reference_star(s: String, is_reference: bool) -> String {
-    if is_reference && !s.is_empty() {
-        format!("{s} \u{2605}")
-    } else {
-        s
-    }
-}
-
 /// #222: the lines of one Presenter push — the current and the next display
 /// line in EN and SK, each pair from the same plan line (`presenter_lines`).
 /// An SK is empty when its line has no translation; `next_*` are empty on the
@@ -187,35 +175,24 @@ impl LyricsState {
     ///
     /// The lookup is shifted forward by `self.lead_ms` (0 unless operator-overridden).
     ///
-    /// `is_reference` (#142) — when true, every non-empty returned line gets
-    /// ` ★` appended so the LED wall shows which songs carry Claude's
-    /// verified reference lyrics. Applied AFTER `strip_display_punctuation`
-    /// so the star is never stripped as trailing punctuation. An empty
-    /// string (or `None`) stays empty/`None` — no lone star on a blank slot.
+    /// #241: a reference song's lines are no different (the ★ left the
+    /// wall: Arena's SK font has no U+2605); `_is_reference` is unused.
     pub fn resolume_lines_with_next(
         &self,
         position_ms: u64,
-        is_reference: bool,
+        _is_reference: bool,
     ) -> Option<(String, String, Option<String>, Option<String>)> {
         let lookahead = effective_lookup(position_ms, self.lead_ms, self.offset_ms);
         let (idx, line) = self.plan.at(lookahead)?;
         let next_line = self.plan.lines().get(idx + 1);
-        let cur_en = append_reference_star(strip_display_punctuation(&line.en), is_reference);
-        let next_en = append_reference_star(
-            next_line
-                .map(|l| strip_display_punctuation(&l.en))
-                .unwrap_or_default(),
-            is_reference,
-        );
-        let cur_sk = line
-            .sk
-            .as_deref()
-            .map(strip_display_punctuation)
-            .map(|s| append_reference_star(s, is_reference));
+        let cur_en = strip_display_punctuation(&line.en);
+        let next_en = next_line
+            .map(|l| strip_display_punctuation(&l.en))
+            .unwrap_or_default();
+        let cur_sk = line.sk.as_deref().map(strip_display_punctuation);
         let next_sk = next_line
             .and_then(|l| l.sk.as_deref())
-            .map(strip_display_punctuation)
-            .map(|s| append_reference_star(s, is_reference));
+            .map(strip_display_punctuation);
         Some((cur_en, next_en, cur_sk, next_sk))
     }
 
