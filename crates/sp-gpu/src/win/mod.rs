@@ -62,8 +62,11 @@ fn micros_since(start: Instant) -> u64 {
 
 /// The `SP-program-MAX` compositor: one Direct3D 11 device, the fixed
 /// 3840×2160 BGRA render target, and two texture slots (a fade's outgoing
-/// and incoming side). Neither `Send` nor `Sync`: its immediate context is
-/// not thread-safe, and a [`SpoutSender`] made on it drives the same context
+/// and incoming side). #239: the `SP-program` sender's compositor is the
+/// same with a 1920×1080 target ([`Compositor::with_size`]); the size is
+/// fixed for the compositor's life. Neither `Send` nor `Sync`: its
+/// immediate context is not thread-safe, and a [`SpoutSender`] made on it
+/// drives the same context
 /// (#223 S1b), so both stay on the thread that made them (S2's
 /// `program-max`).
 pub struct Compositor {
@@ -80,20 +83,34 @@ pub struct Compositor {
 }
 
 impl Compositor {
-    /// The compositor on the hardware adapter [`pick_adapter`](crate::pick_adapter)
-    /// chooses (largest dedicated video memory, not software).
-    /// [`GpuError::NoAdapter`] when there is none: it never falls back to
-    /// WARP on its own.
+    /// MAX's compositor (3840×2160) on the hardware adapter
+    /// [`pick_adapter`](crate::pick_adapter) chooses (largest dedicated video
+    /// memory, not software). [`GpuError::NoAdapter`] when there is none: it
+    /// never falls back to WARP on its own.
     pub fn new() -> Result<Self, GpuError> {
-        let ((device, context), adapter) = device::create_on_picked(DeviceUse::Compose)?;
-        Self::build(device, context, adapter, "hardware")
+        Self::with_size(CANVAS_WIDTH, CANVAS_HEIGHT)
     }
 
-    /// The compositor on WARP, Direct3D's CPU rasterizer: for tests and CI
+    /// #239: a compositor whose render target is `width`×`height` (the
+    /// `SP-program` sender's 1920×1080), on the adapter [`Compositor::new`]
+    /// takes.
+    pub fn with_size(width: u32, height: u32) -> Result<Self, GpuError> {
+        let ((device, context), adapter) = device::create_on_picked(DeviceUse::Compose)?;
+        Self::build(device, context, adapter, "hardware", (width, height))
+    }
+
+    /// MAX's compositor on WARP, Direct3D's CPU rasterizer: for tests and CI
     /// (`windows-latest` has no GPU).
     pub fn new_warp() -> Result<Self, GpuError> {
+        Self::new_warp_with_size(CANVAS_WIDTH, CANVAS_HEIGHT)
+    }
+
+    /// #239: a `width`×`height` compositor on WARP, for tests and CI. Not
+    /// for production.
+    #[doc(hidden)]
+    pub fn new_warp_with_size(width: u32, height: u32) -> Result<Self, GpuError> {
         let ((device, context), adapter) = device::create_warp(DeviceUse::Compose)?;
-        Self::build(device, context, adapter, "warp")
+        Self::build(device, context, adapter, "warp", (width, height))
     }
 
     /// The compositor on DXGI's adapter `index` (the order of
@@ -104,7 +121,13 @@ impl Compositor {
     #[doc(hidden)]
     pub fn new_on_listed_adapter(index: usize) -> Result<Self, GpuError> {
         let ((device, context), adapter) = device::create_on_listed(index, DeviceUse::Compose)?;
-        Self::build(device, context, adapter, "listed")
+        Self::build(
+            device,
+            context,
+            adapter,
+            "listed",
+            (CANVAS_WIDTH, CANVAS_HEIGHT),
+        )
     }
 
     fn build(
@@ -112,9 +135,10 @@ impl Compositor {
         context: ID3D11DeviceContext,
         adapter: AdapterInfo,
         driver: &'static str,
+        (width, height): (u32, u32),
     ) -> Result<Self, GpuError> {
         let pipeline = Pipeline::new(&device)?;
-        let target = RenderTarget::new(&device)?;
+        let target = RenderTarget::new(&device, width, height)?;
         // D3D_FEATURE_LEVEL in hex, as the SDK writes it (0xb100 = 11.1).
         let feature_level = format!("{:#x}", unsafe { device.GetFeatureLevel() }.0);
         info!(
@@ -122,8 +146,8 @@ impl Compositor {
             adapter = %adapter.name,
             vram_mb = adapter.dedicated_video_memory / (1024 * 1024),
             feature_level = %feature_level,
-            width = CANVAS_WIDTH,
-            height = CANVAS_HEIGHT,
+            width,
+            height,
             "sp-gpu: compositor ready (render target B8G8R8A8, shared)"
         );
         Ok(Self {
@@ -143,6 +167,12 @@ impl Compositor {
         &self.adapter
     }
 
+    /// The render target's size, fixed for the compositor's life: 3840×2160
+    /// for MAX, #239 1920×1080 for the `SP-program` sender.
+    pub fn size(&self) -> (u32, u32) {
+        (self.target.width, self.target.height)
+    }
+
     /// The Direct3D 11 device (the [`SpoutSender`] opens on it).
     pub fn device(&self) -> &ID3D11Device {
         &self.device
@@ -154,7 +184,7 @@ impl Compositor {
         &self.context
     }
 
-    /// The 3840×2160 BGRA render target (what the [`SpoutSender`] sends).
+    /// The BGRA render target (what the [`SpoutSender`] sends).
     pub fn render_target(&self) -> &ID3D11Texture2D {
         &self.target.texture
     }
@@ -176,7 +206,8 @@ impl Compositor {
     /// render target keeps the last frame). A [`GpuError::DeviceLost`] means
     /// the compositor must be rebuilt.
     pub fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError> {
-        let layers = composition.layers();
+        let (width, height) = self.size();
+        let layers = composition.layers_in(width, height);
         let planes = layers
             .iter()
             .map(|layer| layer.picture.planes())
@@ -211,7 +242,7 @@ impl Compositor {
         for layer in &layers {
             let textures = self.slots[layer.slot.index()].as_ref().ok_or(NO_TEXTURES)?;
             quads.push(Quad {
-                constants: QuadConstants::new(layer.place, layer.weight),
+                constants: QuadConstants::new(layer.place, layer.weight, width, height),
                 textures,
             });
         }
@@ -227,17 +258,18 @@ impl Compositor {
         })
     }
 
-    /// The render target's pixels: 3840×2160 BGRA, row after row (for tests,
-    /// and later the NDI readback, R3-3).
+    /// The render target's pixels: [`size`](Self::size) BGRA, row after row
+    /// (for tests, and later the NDI readback, R3-3).
     pub fn read_back(&mut self) -> Result<Vec<u8>, GpuError> {
+        let (width, height) = self.size();
         let staging = match &self.staging {
             Some(staging) => staging.clone(),
             None => {
-                let staging = textures::staging(&self.device)?;
+                let staging = textures::staging(&self.device, width, height)?;
                 self.staging = Some(staging.clone());
                 staging
             }
         };
-        textures::read_back(&self.context, &self.target.texture, &staging)
+        textures::read_back(&self.context, &self.target.texture, &staging, width, height)
     }
 }

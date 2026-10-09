@@ -21,7 +21,6 @@ use windows::core::{PCSTR, s};
 
 use super::failed;
 use super::textures::{PlaneTextures, RenderTarget};
-use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH};
 use crate::error::GpuError;
 use crate::quad::{QUAD_CONSTANTS_BYTES, QuadConstants};
 
@@ -132,13 +131,14 @@ impl Pipeline {
     }
 
     /// Clear `target` to black (alpha 1), then draw each quad over it,
-    /// adding its weighted RGB.
+    /// adding its weighted RGB. The viewport is the whole target, whatever
+    /// its size (#239: MAX's 3840×2160 or `SP-program`'s 1920×1080).
     pub fn draw(&self, context: &ID3D11DeviceContext, target: &RenderTarget, quads: &[Quad<'_>]) {
         let viewport = D3D11_VIEWPORT {
             TopLeftX: 0.0,
             TopLeftY: 0.0,
-            Width: CANVAS_WIDTH as f32,
-            Height: CANVAS_HEIGHT as f32,
+            Width: target.width as f32,
+            Height: target.height as f32,
             MinDepth: 0.0,
             MaxDepth: 1.0,
         };

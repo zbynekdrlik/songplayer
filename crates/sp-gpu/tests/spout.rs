@@ -1,4 +1,5 @@
-//! WARP proof of the `SP-program-MAX` Spout sender (#223 S1b).
+//! WARP proof of the `SP-program-MAX` Spout sender (#223 S1b), and of the
+//! FHD program's `SP-program` sender on a 1920×1080 compositor (#239).
 //!
 //! Each test draws on WARP (windows-latest has no GPU), sends the render
 //! target through the vendored Spout2 SDK 2.007.017, and reads Spout's
@@ -9,9 +10,9 @@
 //!
 //! Spout's registry is machine-wide and a sender's first send races any
 //! other's clean-up of the list (Spout's own `CleanSenders`), so the tests
-//! take one lock and each uses its own sender name; only one uses the
-//! production name. Windows only; a capability that is missing FAILS here,
-//! nothing is skipped.
+//! take one lock and each uses its own sender name; only one test uses
+//! each production name. Windows only; a capability that is missing FAILS
+//! here, nothing is skipped.
 
 #![cfg(windows)]
 
@@ -21,11 +22,15 @@ use std::ffi::{CString, c_void};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
-use common::{BLACK, H, W, assert_matches_reference, pattern, picture, warp};
+use common::{
+    BLACK, H, W, assert_matches_reference, assert_matches_reference_in, pattern, picture, warp,
+    warp_fhd,
+};
 use sp_gpu::spout_state::{NOT_LISTED, Registration, TAKEN};
 use sp_gpu::{
-    Composition, Compositor, GpuError, NAME_SLOT_LEN, SENDER_NAMES_MAP, SPOUT_SENDER_NAME,
-    SharedTextureInfo, SpoutSender, mapped_len, spout_sender_info, spout_sender_names, unpad_rows,
+    Composition, Compositor, FHD_HEIGHT, FHD_WIDTH, GpuError, NAME_SLOT_LEN, SENDER_NAMES_MAP,
+    SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, SharedTextureInfo, SpoutSender, mapped_len,
+    read_shared_texture, spout_sender_info, spout_sender_names, unpad_rows,
 };
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE,
@@ -329,6 +334,61 @@ fn a_sent_frame_registers_sp_program_max_at_4k_and_drop_unregisters_it() {
     drop(sender);
     assert_eq!(listed(SPOUT_SENDER_NAME), 0, "{:?}", names());
     assert_eq!(info(SPOUT_SENDER_NAME), None, "the sender's map is gone");
+}
+
+/// #239: the FHD program's sender: a 1920×1080 compositor and the sender
+/// `SP-program` register at its first send, Spout lists it at 1920×1080
+/// (Arena: `SPOUT_SP-program`), its shared texture read on a second device
+/// holds the compositor's frame, and `Drop` unlists it.
+#[test]
+fn a_1920_by_1080_compositor_sends_as_sp_program() {
+    let _one = one_at_a_time();
+    let mut compositor = warp_fhd();
+    let mut sender = SpoutSender::new_fhd(&compositor).expect("the SP-program sender");
+    assert_eq!(sender.name(), SPOUT_FHD_SENDER_NAME);
+    assert_eq!(sender.name(), "SP-program");
+    assert_eq!(listed(SPOUT_FHD_SENDER_NAME), 0, "{:?}", names());
+    assert_eq!(info(SPOUT_FHD_SENDER_NAME), None);
+
+    // A 4:3 picture: bars left and right in the 1920×1080 target.
+    let (stride, data) = pattern(1440, 1080, 27);
+    let frame = Composition::Picture(picture(1, 1440, 1080, stride, &data));
+    compositor.compose(&frame).expect("compose on WARP");
+    let stats = sender.send().expect("send on WARP");
+    assert!(stats.send_us > 0, "{stats:?}");
+    assert_eq!(sender.registration(), Registration::Confirmed);
+    // The readback's Map waits for Spout's copy, queued on the same context.
+    let drawn = compositor.read_back().expect("read back");
+
+    assert_eq!(listed(SPOUT_FHD_SENDER_NAME), 1, "{:?}", names());
+    assert_eq!(listed(SPOUT_SENDER_NAME), 0, "the MAX name is not taken");
+    let entry = info(SPOUT_FHD_SENDER_NAME).expect("the sender's map exists");
+    assert_eq!(
+        (entry.width, entry.height),
+        (FHD_WIDTH, FHD_HEIGHT),
+        "{entry:?}"
+    );
+    assert_eq!(entry.format, BGRA, "{entry:?}");
+    assert_ne!(entry.share_handle, 0, "{entry:?}");
+    assert_eq!(sender.size(), (FHD_WIDTH, FHD_HEIGHT));
+
+    let received = read_shared_texture(&entry).expect("a second WARP device reads it");
+    assert_same_frame(&received, &drawn, "SP-program through Spout");
+    assert_matches_reference_in(
+        &received,
+        &frame.layers_in(FHD_WIDTH, FHD_HEIGHT),
+        (FHD_WIDTH, FHD_HEIGHT),
+        "SP-program through Spout",
+    );
+    assert_eq!(&received[..4], &BLACK, "the bar at (0, 0)");
+
+    drop(sender);
+    assert_eq!(listed(SPOUT_FHD_SENDER_NAME), 0, "{:?}", names());
+    assert_eq!(
+        info(SPOUT_FHD_SENDER_NAME),
+        None,
+        "the sender's map is gone"
+    );
 }
 
 #[test]

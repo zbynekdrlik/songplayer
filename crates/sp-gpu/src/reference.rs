@@ -2,6 +2,11 @@
 //! one canvas pixel, for the WARP pixel pins (`tests/warp.rs`) and for any
 //! later check of a GPU frame.
 //!
+//! The canvas is the compositor's own render target: each layer carries its
+//! place in it (`Composition::layers_in`), so the one model serves
+//! `SP-program-MAX`'s 3840×2160 and, #239, the `SP-program` sender's
+//! 1920×1080 alike.
+//!
 //! It follows the GPU's own semantics step by step, not the CPU NV12 fit
 //! (`sp-server`'s `nv12_mix`, which writes NV12 at the canvas's resolution):
 //!
