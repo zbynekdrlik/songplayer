@@ -89,7 +89,10 @@ forever. So `ci.yml` now has a `mutation-plan` job (dev pushes only):
   check-runs all concluded `success` (skipped ones ignored); fallback =
   `github.event.before`. A cancelled / failed / timed-out mutation run is thereby
   re-covered by the next push automatically — never re-run an over-budget shard.
-- **shards** = `ceil(mutants / 6)` clamped 4..64 (was 24 until 26.9.2026: 335 mutants → 14 per shard ≈ 18 min, one attempt cancelled at the 20-min bound; shards beyond the runner concurrency just queue, and the per-job bound counts from job start), fed to the matrix via
+- **shards** = `ceil(mutants / 4)` clamped 4..64 (`/ 6` until 9.10.2026: with
+  #233's resampler tests in the suite a mutant killed late in the test order
+  costs ~4.5 min, build ~1.5-3.5 min + ~2.7 min of tests, two at a time, and
+  shard 19 of run 37924943623 ran its six past 20 min; was 24 until 26.9.2026: 335 mutants → 14 per shard ≈ 18 min, one attempt cancelled at the 20-min bound; shards beyond the runner concurrency just queue, and the per-job bound counts from job start), fed to the matrix via
   `fromJSON(needs.mutation-plan.outputs.shards)`; the 20-min per-shard bound is
   unchanged (never raise it). Job names become `Mutation Testing (i/N)`.
 - The Gate needs `mutation-plan` too (a failed plan must not read as "skipped").
