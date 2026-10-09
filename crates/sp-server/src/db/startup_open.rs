@@ -39,7 +39,7 @@ pub fn sqlite_busy_code(code: &str) -> bool {
 /// database.
 pub fn is_retryable(e: &sqlx::Error) -> bool {
     match e {
-        sqlx::Error::PoolTimedOut => false,
+        sqlx::Error::PoolTimedOut => true,
         sqlx::Error::Database(db) => db.code().is_some_and(|c| sqlite_busy_code(&c)),
         _ => false,
     }

@@ -65,3 +65,17 @@ held across a slow await stalls the writer and every status read behind it.
   the buggy code. See `routes_tests.rs`
   (`the_status_route_holds_no_status_lock_while_it_waits_on_the_database`),
   `tools_ready.rs` and `websocket.rs`.
+
+## The startup DB open waits out a lock; a failed server never leaves the shell up (#229)
+
+A restart can start the new process while the old one still holds
+`songplayer.db` (its shutdown checkpoint). `start()` opens it through
+`db::startup_open::open`: a retryable error (the pool's 2 s acquire timing
+out, SQLite BUSY/LOCKED by the low byte of the code) waits 1, 2, 4, 8, 15,
+15, 15 s (60 s) and tries again, a WARN each; any other error is returned.
+Normal requests keep `pool_tuning`'s 2 s acquire timeout. If `start()`
+still fails, `src-tauri/src/lib.rs` logs it, waits 500 ms for the
+non-blocking log writer, and EXITS 1: a live shell with no server would
+keep the tray and the single-instance lock (a relaunch only focuses it)
+while `:8920` refuses everything (PP, 9.10.2026 18:57Z → 19:06Z).
+
