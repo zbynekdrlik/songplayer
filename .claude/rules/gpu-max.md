@@ -494,7 +494,7 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   over the last 240 refreshes gives the grid (reported from 60 counted,
   periods 4–50 ms only, stale after 100 ms). `VblankPacer` then sends each
   boundary in a slot `vblank + phase` (setting
-  `program_max_vblank_phase_ms`, default 8 ms) and KEEPS its lead (due −
+  `program_max_vblank_phase_ms`, default 14 ms: measured, see below) and KEEPS its lead (due −
   offer) from one boundary to the next while it stays in
   [`LEAD_MIN` 12 ms, 12 ms + one period + `LEAD_HYSTERESIS` 3 ms]: the
   30 fps boundaries then sit on every second refresh, and only the slow
@@ -511,6 +511,28 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   the wall, region x 400–5600 y 40–560 without texts: one-refresh runs and
   change intervals; a 30 fps picture held 2 refreshes is clean) next to
   `spout_timing.py SP-program-MAX 15` (SpoutGL, ~500 polls/s).
+  `ops\phase_sweep.py <s> <ms>…` PATCHes each phase, waits 8 s, runs
+  `wall_runs_t.py` on the wall and appends to `phase_sweep.log` (launch it
+  with `Start-Process … -WindowStyle Hidden`: an MCP shell drops a run's
+  output past its 300 s idle bound). **Measured 9.10.2026 (single-refresh
+  pictures):** 8 ms ~69 / min with 1/3 splits (Arena reads the texture
+  there), 0 ms 13 / 60 s, 16.3 ms 25 / 180 s (near the vblank is worse
+  too), 3 ms 13 / 180 s, 11 ms 8 / 60 s, **14 ms 7 / 60 s, 9 / 180 s, 0 /
+  30 s**: the default. The same 8-vs-14 contrast is the causal check that
+  Arena shows MAX at all: after an Arena relaunch (its clips reconnected)
+  16 + 39 vs 5 + 0, after a forced SongPlayer kill 25 + 41 vs 0 + 0.
+- **Restarts (owner's old Spout worry, verified 9.10.2026):** a SongPlayer
+  restart, clean (4 deploys) or forced (`Stop-Process -Force`), brings
+  `SP-program-MAX` back under its exact name in ~10 s (`sender_backoffs`
+  0; the shim's `CleanSenders` drops an orphaned name first), and the
+  running Arena shows it again with no step. An Arena kill + relaunch
+  (`SP-ArenaLaunch`; the hotkey script did NOT relaunch within 25 s)
+  reopened the composition with most clips DISCONNECTED, the Spout clip
+  (layer 5 "Yt music", source `SP-program-MAX`) and the text layers alike
+  (not Spout-specific); once reconnected through the REST API
+  (`POST /composition/layers/<n>/clips/<c>/connect`), the Spout clip showed
+  MAX at once. Before a relaunch, read the connected clips
+  (`ops\arena_layers.py`) so they can be restored.
 
 ### The setting and the telemetry
 

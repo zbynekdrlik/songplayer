@@ -97,8 +97,11 @@ pub fn program_max_enabled(raw: Option<&str>) -> bool {
 /// takes the Spout texture at its own instant in each refresh, so a send
 /// must keep clear of it ([`program_max_vblank_phase_us`]).
 pub const SETTING_PROGRAM_MAX_VBLANK_PHASE_MS: &str = "program_max_vblank_phase_ms";
-/// #223 follow-up: the default phase, µs: mid-refresh at 60 Hz.
-pub const DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US: u64 = 8_000;
+/// #223 follow-up: the default phase, µs: 14 ms after the primary display's
+/// vblank, the cleanest on SNV's wall (9.10.2026); Arena reads the Spout
+/// texture around 8 ms after it, and a send just before the vblank is
+/// worse too.
+pub const DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US: u64 = 14_000;
 
 /// #223 follow-up: a stored `program_max_vblank_phase_ms` in µs: a number of
 /// ms from 0 up to (not including) 1000, rounded to the µs; anything else

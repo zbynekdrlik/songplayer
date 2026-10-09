@@ -1297,11 +1297,11 @@ function programBody() {
 }
 // #223 follow-up: `program_max_vblank_phase_ms` in µs by the server's rule
 // (`sp_core::config::program_max_vblank_phase_us`): ms from 0 to under
-// 1000, rounded to the µs, else 8000.
+// 1000, rounded to the µs, else 14000.
 function mockVblankPhaseUs() {
   const raw = String(settings.program_max_vblank_phase_ms ?? "").trim();
   const ms = raw === "" ? NaN : Number(raw);
-  return Number.isFinite(ms) && ms >= 0 && ms < 1000 ? Math.round(ms * 1000) : 8000;
+  return Number.isFinite(ms) && ms >= 0 && ms < 1000 ? Math.round(ms * 1000) : 14000;
 }
 // #233: the outputs as `GET /api/v1/program` lists them, from the stored
 // list (an unreadable one lists nothing); an enabled VBAN entry carries its
