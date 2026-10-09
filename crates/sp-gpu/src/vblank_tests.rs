@@ -43,29 +43,17 @@ fn grid(base: Instant, at: u64, period: u64) -> Option<VblankGrid> {
     })
 }
 
-/// SNV: the primary 3840×2160 desktop and the 7680×1080 wall have the same
-/// area; the wall (not the primary) is picked, in either DXGI order.
+/// SNV, measured 9.10.2026 (`phase_lock.py`): DWM composes the wall's
+/// output on the PRIMARY display's refresh — its composed frames sit 2.3 ms
+/// after DISPLAY5's vblank for 40 s, while the wall's own vblank (DISPLAY1,
+/// 59.979 Hz) drifts through them — and Arena renders in DWM's rhythm. So
+/// the primary desktop is picked, in either DXGI order, never the wall.
 #[test]
-fn the_wall_is_picked_over_the_primary_desktop_of_the_same_area() {
-    let primary = output(r"\\.\DISPLAY1", 0, 0, 3840, 2160);
-    let wall = output(r"\\.\DISPLAY2", 3840, 0, 7680, 1080);
-    assert_eq!(pick_output(&[primary.clone(), wall.clone()]), Some(1));
-    assert_eq!(pick_output(&[wall, primary]), Some(0));
-}
-
-/// Among second displays the larger area wins (4000×100 is the longer
-/// side sum, 1000×1000 the larger area); equal ones take DXGI's order.
-#[test]
-fn a_larger_second_display_wins_and_a_tie_takes_dxgis_order() {
-    let primary = output("p", 0, 0, 1920, 1080);
-    let strip = output("strip", 1920, 0, 4000, 100);
-    let square = output("square", 5920, 0, 1000, 1000);
-    assert_eq!(
-        pick_output(&[primary.clone(), strip, square.clone()]),
-        Some(2)
-    );
-    let twin = output("twin", 6920, 0, 1000, 1000);
-    assert_eq!(pick_output(&[primary, square, twin]), Some(1));
+fn the_primary_desktop_is_picked_its_refresh_is_the_composition_clock() {
+    let primary = output(r"\\.\DISPLAY5", 0, 0, 3840, 2160);
+    let wall = output(r"\\.\DISPLAY1", 3840, 0, 7680, 1080);
+    assert_eq!(pick_output(&[primary.clone(), wall.clone()]), Some(0));
+    assert_eq!(pick_output(&[wall, primary]), Some(1));
 }
 
 /// Only (0, 0) is the primary: a display below it or beside it is not.
@@ -76,15 +64,15 @@ fn only_the_desktop_origin_is_the_primary() {
     assert!(!output("beside", 1920, 0, 1920, 1080).is_primary());
 }
 
+/// No attached display at the desktop origin (a detached one, or only
+/// second displays): no output, never a second display's refresh.
 #[test]
-fn a_detached_output_is_never_picked() {
-    let primary = output("p", 0, 0, 1920, 1080);
-    let mut wall = output("wall", 1920, 0, 7680, 1080);
-    wall.attached = false;
-    assert_eq!(pick_output(&[primary.clone(), wall.clone()]), Some(0));
-    let mut off = primary;
+fn without_an_attached_primary_no_output_is_picked() {
+    let mut off = output("p", 0, 0, 1920, 1080);
     off.attached = false;
-    assert_eq!(pick_output(&[off, wall]), None);
+    let wall = output("wall", 1920, 0, 7680, 1080);
+    assert_eq!(pick_output(&[off, wall.clone()]), None);
+    assert_eq!(pick_output(&[wall]), None);
     assert_eq!(pick_output(&[]), None);
 }
 
