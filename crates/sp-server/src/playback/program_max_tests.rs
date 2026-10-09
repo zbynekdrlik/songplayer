@@ -413,21 +413,21 @@ async fn the_setting_is_on_by_default_and_off_only_for_false() {
 async fn the_vblank_phase_setting_is_read_in_microseconds() {
     use crate::db::models::set_setting;
     let pool = settings_pool().await;
-    assert_eq!(load_max_vblank_phase_us(&pool).await.unwrap(), 8_000);
+    assert_eq!(load_max_vblank_phase_us(&pool).await.unwrap(), 14_000);
     set_setting(&pool, "program_max_vblank_phase_ms", "5.5")
         .await
         .unwrap();
     assert_eq!(load_max_vblank_phase_us(&pool).await.unwrap(), 5_500);
 }
 
-/// #223 follow-up: the phase starts at the 8 ms default; applying a value
+/// #223 follow-up: the phase starts at the 14 ms default; applying a value
 /// says whether it changed.
 #[test]
 fn the_vblank_phase_is_applied_and_reports_a_change() {
     let max = MaxOut::new();
-    assert_eq!(max.vblank_phase(), Duration::from_millis(8));
-    assert_eq!(max.status().vblank_phase_us, 8_000);
-    assert!(!max.set_vblank_phase_us(8_000), "the same value");
+    assert_eq!(max.vblank_phase(), Duration::from_millis(14));
+    assert_eq!(max.status().vblank_phase_us, 14_000);
+    assert!(!max.set_vblank_phase_us(14_000), "the same value");
     assert!(max.set_vblank_phase_us(2_500));
     assert_eq!(max.vblank_phase(), Duration::from_micros(2_500));
     assert_eq!(max.status().vblank_phase_us, 2_500);

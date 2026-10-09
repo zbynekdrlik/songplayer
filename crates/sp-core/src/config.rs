@@ -384,26 +384,27 @@ mod tests {
     }
 
     /// #223 follow-up: the vblank phase is ms from 0 to under 1000, to the
-    /// µs; anything else is the 8 ms default.
+    /// µs; anything else is the 14 ms default (the phase measured cleanest on
+    /// SNV's wall, 9.10.2026).
     #[test]
     fn the_max_vblank_phase_is_ms_from_zero_to_under_a_second() {
         assert_eq!(
             SETTING_PROGRAM_MAX_VBLANK_PHASE_MS,
             "program_max_vblank_phase_ms"
         );
-        assert_eq!(DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, 8_000);
-        assert_eq!(program_max_vblank_phase_us(None), 8_000);
+        assert_eq!(DEFAULT_PROGRAM_MAX_VBLANK_PHASE_US, 14_000);
+        assert_eq!(program_max_vblank_phase_us(None), 14_000);
         assert_eq!(program_max_vblank_phase_us(Some("6")), 6_000);
         assert_eq!(program_max_vblank_phase_us(Some(" 2.5\n")), 2_500);
         assert_eq!(program_max_vblank_phase_us(Some("0.0004")), 0, "rounded");
         assert_eq!(program_max_vblank_phase_us(Some("0.0006")), 1, "rounded");
         assert_eq!(program_max_vblank_phase_us(Some("0")), 0, "0 is a phase");
         assert_eq!(program_max_vblank_phase_us(Some("999.9")), 999_900);
-        assert_eq!(program_max_vblank_phase_us(Some("1000")), 8_000);
-        assert_eq!(program_max_vblank_phase_us(Some("-1")), 8_000);
-        assert_eq!(program_max_vblank_phase_us(Some("NaN")), 8_000);
-        assert_eq!(program_max_vblank_phase_us(Some("8ms")), 8_000);
-        assert_eq!(program_max_vblank_phase_us(Some("")), 8_000);
+        assert_eq!(program_max_vblank_phase_us(Some("1000")), 14_000);
+        assert_eq!(program_max_vblank_phase_us(Some("-1")), 14_000);
+        assert_eq!(program_max_vblank_phase_us(Some("NaN")), 14_000);
+        assert_eq!(program_max_vblank_phase_us(Some("8ms")), 14_000);
+        assert_eq!(program_max_vblank_phase_us(Some("")), 14_000);
     }
 
     /// #223 S3b: hardware decode is OFF unless the setting says exactly
