@@ -16,6 +16,10 @@ export interface MaxStatus {
   upload_us_p99: number;
   draw_us_p99: number;
   send_us_p99: number;
+  send_at_us_p50: number;
+  send_at_us_p99: number;
+  send_at_us_max: number;
+  send_late: number;
   device_resets: number;
   sender_backoffs: number;
   spout_name: string;
@@ -26,6 +30,14 @@ export interface MaxStatus {
  *  program sends one per 30 fps slot, standby pairs included). */
 export const MIN_BOUNDARIES = 30;
 
+/** #223 follow-up: each Spout send leaves `MAX_SEND_LEAD` (12 ms) after the
+ *  program offered its boundary, so the median send lands in
+ *  [`SEND_PHASE_US`, `SEND_PHASE_US + SEND_PHASE_SLACK_US`] (the wait, then
+ *  `SendTexture`'s copy): a median outside it means the sends are no longer
+ *  paced and Arena's 60 Hz render stutters. */
+export const SEND_PHASE_US = 12_000;
+export const SEND_PHASE_SLACK_US = 1_500;
+
 /**
  * Why the box fails the gate between two reads of `max` (`first` before
  * `second`); empty when it passes: the setting on, the 3840×2160 canvas under
@@ -33,7 +45,8 @@ export const MIN_BOUNDARIES = 30;
  * thread `running`, at least `MIN_BOUNDARIES` more boundaries out, and in
  * between none coalesced (the thread kept up with the program's 30
  * boundaries a second: a 2-deep queue drops the oldest only when it falls
- * behind), none failed and no device lost.
+ * behind), none failed and no device lost; and the median send at its
+ * constant phase (`SEND_PHASE_US`).
  */
 export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
   const failures: string[] = [];
@@ -62,5 +75,11 @@ export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
   if (failed > 0) failures.push(`${failed} boundaries failed`);
   const lost = second.device_resets - first.device_resets;
   if (lost > 0) failures.push(`the device was lost ${lost} times`);
+  const phase = second.send_at_us_p50;
+  if (phase < SEND_PHASE_US || phase > SEND_PHASE_US + SEND_PHASE_SLACK_US) {
+    failures.push(
+      `the Spout sends leave ${phase} us after the offer (median), not at their ${SEND_PHASE_US} us phase`,
+    );
+  }
   return failures;
 }

@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 /// How long after the program offered a boundary its Spout send is due:
 /// above the compose's p99 (upload ≤ 2.4 ms + draw ≤ 5.7 ms on SNV's RTX)
 /// with margin, well under the 33.3 ms slot.
-pub const MAX_SEND_LEAD: Duration = Duration::from_micros(1);
+pub const MAX_SEND_LEAD: Duration = Duration::from_millis(12);
 
 /// How close to the due instant the wait stops sleeping and spins: the
 /// paced threads' 1 ms timer can oversleep by about a ms.

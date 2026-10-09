@@ -450,6 +450,24 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
 - Dropping the GPU objects (a lost device, MAX off) also drops the held
   pictures (`PictureIds::forget`): no decoded frame stays pinned out of
   `frame_pool` while MAX is off.
+- **The send leaves at a constant phase** (#223 follow-up, 9.10.2026,
+  `program_max_send.rs`). Arena renders at 60 Hz and reads Spout's shared
+  texture at its own instant; a send made the moment the compose was done
+  (offer + upload 0–2.4 ms + draw up to 5.7 ms) spread 5.9 ms (p1–p99) on
+  the 30 fps grid and the wall showed frames for 1 or 3 output frames: a
+  stutter, with ONE Spout layer too. Now `MaxOut::offer_with` stamps each
+  job with its offer `Instant` (`MaxNext::Job(job, offered)`), the worker
+  composes at once and `send_paced` waits until offer + `MAX_SEND_LEAD`
+  (12 ms, above the compose p99) on its `SendClock`, then `SendTexture`; a
+  compose that ran past it sends at once and counts `send_late`. Production
+  waits on `SpinClock` (sleep to `SEND_SPIN_MARGIN` = 2 ms short, then
+  spin; the decision is the pure `send_wait_step`); `MaxWorker::new` uses
+  `NoWait` (tests pass made-up instants), `run_max_loop` gives it
+  `SpinClock`. Measure it on the box with
+  `C:\ProgramData\SongPlayer\ops\spout_timing.py SP-program-MAX 15`
+  (SpoutGL, ~500 polls/s: change intervals and the phase spread) and the
+  wall with `wall_aba.py 1 12 8` (DXGI duplication of output 1: run
+  lengths, 2 = a 30 fps frame shown twice).
 
 ### The setting and the telemetry
 
@@ -465,8 +483,10 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   reads it back); no restart.
 - `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width:
   3840, height: 2160, submitted, coalesced, failed, upload_us_p99,
-  draw_us_p99, send_us_p99, device_resets, sender_backoffs, spout_name,
-  adapter}` (`MaxStatus`; `adapter` = the adapter the last compositor was
+  draw_us_p99, send_us_p99, send_at_us_p50/p99/max, send_late,
+  device_resets, sender_backoffs, spout_name, adapter}` (`MaxStatus`;
+  `send_at_us_*` = send done − offer over the window, `send_late` = composes
+  that ran past their due instant; `adapter` = the adapter the last compositor was
   built on, `None` before the first build: R3-2 asks the box to name its
   RTX). R3-2 sketched `spout {frames, adapter}`; S2 ships the flat shape
   the S2 dispatch named, with `frames` = `submitted` and `adapter` at the
@@ -488,7 +508,9 @@ suite by `max-gate.spec.ts`): the setting on, 3840×2160 under
 `SP-program-MAX`, an adapter that is not the Basic Render Driver,
 `running`, at least `MIN_BOUNDARIES` = 30 more boundaries out (the program
 sends one per grid slot, standby pairs included), and `coalesced` (MAX
-kept up with the program), `failed` and `device_resets` +0 in between. The
+kept up with the program), `failed` and `device_resets` +0 in between,
+and the median send at its phase (`send_at_us_p50` in 12 000–13 500 µs:
+paced, `SEND_PHASE_US` + `SEND_PHASE_SLACK_US`). The
 first read comes after the first boundary went out, so the build's own
 time never counts. A coalesce can also come from the PROGRAM: after a
 program-side stall its thread serves several boundaries back to back, and

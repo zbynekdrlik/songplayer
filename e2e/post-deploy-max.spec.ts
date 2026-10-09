@@ -73,7 +73,10 @@ test.describe("SP-program-MAX (#223 S2)", () => {
     const second = secondRead.max;
     console.log(
       `${logLine("second", secondRead)}; p99 upload+draw+send = ` +
-        `${second.upload_us_p99 + second.draw_us_p99 + second.send_us_p99} us`,
+        `${second.upload_us_p99 + second.draw_us_p99 + second.send_us_p99} us; ` +
+        `sent after the offer p50/p99/max = ${second.send_at_us_p50}/` +
+        `${second.send_at_us_p99}/${second.send_at_us_max} us, late ` +
+        `+${second.send_late - first.send_late}`,
     );
     expect(maxGateFailures(first, second), "the SP-program-MAX gate").toEqual([]);
   });

@@ -5,7 +5,13 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { MIN_BOUNDARIES, MaxStatus, maxGateFailures } from "./max-gate";
+import {
+  MIN_BOUNDARIES,
+  MaxStatus,
+  SEND_PHASE_SLACK_US,
+  SEND_PHASE_US,
+  maxGateFailures,
+} from "./max-gate";
 
 /** A box where MAX runs: the RTX, 3840×2160, `running`. */
 function running(submitted: number): MaxStatus {
@@ -20,6 +26,10 @@ function running(submitted: number): MaxStatus {
     upload_us_p99: 900,
     draw_us_p99: 400,
     send_us_p99: 700,
+    send_at_us_p50: 12_200,
+    send_at_us_p99: 12_600,
+    send_at_us_max: 19_000,
+    send_late: 3,
     device_resets: 1,
     sender_backoffs: 0,
     spout_name: "SP-program-MAX",
@@ -79,6 +89,19 @@ test.describe("SP-program-MAX post-deploy gate (#223 S2)", () => {
     const warp = { ...running(160), adapter: "Microsoft Basic Render Driver" };
     expect(maxGateFailures(running(100), warp)).toEqual([
       "it composes on Microsoft Basic Render Driver, not a hardware GPU",
+    ]);
+  });
+
+  test("the median Spout send must sit at its constant phase (#223 follow-up)", () => {
+    expect([SEND_PHASE_US, SEND_PHASE_SLACK_US]).toEqual([12_000, 1_500]);
+    const at = (send_at_us_p50: number) => ({ ...running(160), send_at_us_p50 });
+    expect(maxGateFailures(running(100), at(12_000))).toEqual([]);
+    expect(maxGateFailures(running(100), at(13_500))).toEqual([]);
+    expect(maxGateFailures(running(100), at(11_999))).toEqual([
+      "the Spout sends leave 11999 us after the offer (median), not at their 12000 us phase",
+    ]);
+    expect(maxGateFailures(running(100), at(13_501))).toEqual([
+      "the Spout sends leave 13501 us after the offer (median), not at their 12000 us phase",
     ]);
   });
 });
