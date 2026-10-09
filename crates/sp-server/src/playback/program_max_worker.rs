@@ -12,7 +12,9 @@
 //!   same allocation as the last boundary's) is not uploaded again into
 //!   its slot (a fade's incoming picture moves to the outgoing slot when the
 //!   fade ends, and is uploaded there once);
-//! - composes the boundary into the 3840×2160 render target and sends it.
+//! - composes the boundary into the 3840×2160 render target and sends it at
+//!   a constant phase: `MAX_SEND_LEAD` after the program offered it, whatever
+//!   the compose cost (`program_max_send.rs`, the wall's 60 Hz render).
 //!
 //! Failures never panic the thread and never reach the program:
 //!
@@ -53,6 +55,7 @@ use tracing::{info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, MaxPicture};
+use crate::playback::program_max_send::{NoWait, SendClock, SendTiming, SpinClock, send_paced};
 use crate::playback::stat_window::WarnLimiter;
 
 /// How long the thread waits before it builds again after a refused sender,
@@ -313,6 +316,9 @@ pub struct MaxWorker<'a, G: MaxGpu> {
     /// Where the log's time starts.
     started: Instant,
     log: LogGate,
+    /// What the send waits on: [`NoWait`] unless [`with_clock`](Self::with_clock)
+    /// gives another (the loop gives [`SpinClock`]).
+    clock: Box<dyn SendClock>,
 }
 
 impl<'a, G: MaxGpu> MaxWorker<'a, G> {
@@ -329,7 +335,14 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             failing: None,
             started: Instant::now(),
             log: LogGate::default(),
+            clock: Box::new(NoWait),
         }
+    }
+
+    /// Send on `clock` (production: [`SpinClock`]).
+    pub fn with_clock(mut self, clock: Box<dyn SendClock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Whether it holds a compositor or a sender (an off setting makes it
@@ -338,14 +351,26 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         self.compositor.is_some() || self.sender.is_some()
     }
 
-    /// Compose and send one boundary at `now`, report it, and log what
-    /// changed ([`LogGate`]); returns the line it logged.
+    /// [`serve_offered`](Self::serve_offered) a job offered at `now`.
     pub fn serve(&mut self, job: &MaxJob, now: Instant) -> Option<LogLine> {
-        match self.attempt(job, now) {
-            Ok((compose, send)) => {
+        self.serve_offered(job, now, now)
+    }
+
+    /// Compose and send one boundary the program offered at `offered`, at
+    /// `now`, report it, and log what changed ([`LogGate`]); returns the
+    /// line it logged.
+    pub fn serve_offered(
+        &mut self,
+        job: &MaxJob,
+        offered: Instant,
+        now: Instant,
+    ) -> Option<LogLine> {
+        match self.attempt(job, offered, now) {
+            Ok((compose, send, timing)) => {
                 self.lost_unsent = false;
                 self.failing = None;
                 self.out.record_sent(compose, send);
+                self.out.record_send_timing(timing);
             }
             Err(Skip::Backoff) => self.out.record_skipped(),
             Err(Skip::Unsupported) => {
@@ -380,12 +405,13 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     }
 
     /// Build what is missing (unless a backoff runs), then compose `job`
-    /// and send it.
+    /// and send it when it is due (`program_max_send::send_paced`).
     fn attempt(
         &mut self,
         job: &MaxJob,
+        offered: Instant,
         now: Instant,
-    ) -> Result<(ComposeStats, SpoutSendStats), Skip> {
+    ) -> Result<(ComposeStats, SpoutSendStats, SendTiming), Skip> {
         if self.unsupported {
             return Err(Skip::Unsupported);
         }
@@ -408,8 +434,9 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         let sender = self.sender.insert(sender);
         let composition = self.ids.composition(job);
         let compose = compositor.compose(&composition).map_err(Skip::frame)?;
-        let send = sender.send().map_err(Skip::frame)?;
-        Ok((compose, send))
+        let clock = self.clock.as_mut();
+        let (send, timing) = send_paced(clock, offered, || sender.send()).map_err(Skip::frame)?;
+        Ok((compose, send, timing))
     }
 
     /// After a failure: a lost device drops both objects (rebuilt on the
@@ -451,14 +478,15 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
 }
 
 /// The `program-max` thread: take each job from `out` and serve it on
-/// `gpu`, release the GPU while MAX is off, exit on stop.
+/// `gpu`, each sent at its due instant on the real clock ([`SpinClock`]),
+/// release the GPU while MAX is off, exit on stop.
 pub fn run_max_loop<G: MaxGpu>(out: &MaxOut, gpu: G) {
     let _consumer = out.attach();
-    let mut worker = MaxWorker::new(out, gpu);
+    let mut worker = MaxWorker::new(out, gpu).with_clock(Box::new(SpinClock));
     loop {
         match out.next(worker.holds_gpu()) {
-            MaxNext::Job(job) => {
-                worker.serve(&job, Instant::now());
+            MaxNext::Job(job, offered) => {
+                worker.serve_offered(&job, offered, Instant::now());
             }
             MaxNext::Release => worker.release(),
             MaxNext::Stop => break,
@@ -471,3 +499,7 @@ pub fn run_max_loop<G: MaxGpu>(out: &MaxOut, gpu: G) {
 #[cfg(test)]
 #[path = "program_max_worker_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "program_max_worker_tests_send.rs"]
+mod tests_send;

@@ -64,6 +64,7 @@ mod program_authority; // #221 L4b: SP-program's playlist drives playback
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
 pub mod program_canvas; // #223: SP-program's ONE picture layout (FHD) + the fit into it
 pub mod program_max; // #223 S2: SP-program-MAX hand-off, setting + telemetry
+pub mod program_max_send; // #223 follow-up: the Spout send at a constant phase
 pub mod program_max_worker; // #223 S2: the program-max thread (GPU compose + Spout send)
 pub mod program_on_air; // #221: what is on air (the bus's watch value) + the one scene-name resolver
 pub mod program_output; // #209: the SP-program sender + its thread

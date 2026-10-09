@@ -36,7 +36,7 @@
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sp_core::config::{SETTING_PROGRAM_MAX_ENABLED, program_max_enabled};
@@ -49,6 +49,7 @@ use tracing::{info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::loop_stats::percentile_ceil;
+use crate::playback::program_max_send::SendTiming;
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 
 /// How many MAX jobs wait for the `program-max` thread: two, then the oldest
@@ -135,8 +136,9 @@ impl MaxJob {
 /// What the `program-max` thread does next ([`MaxOut::next`]).
 #[derive(Debug)]
 pub enum MaxNext {
-    /// Compose and send this boundary.
-    Job(MaxJob),
+    /// Compose and send this boundary, offered at this instant: its Spout
+    /// send is due `program_max_send::MAX_SEND_LEAD` later.
+    Job(MaxJob, Instant),
     /// MAX was switched off: drop the sender and the compositor.
     Release,
     /// The process stops: exit.
@@ -188,6 +190,15 @@ pub struct MaxStatus {
     pub upload_us_p99: u64,
     pub draw_us_p99: u64,
     pub send_us_p99: u64,
+    /// When the frames went out after the program offered them, µs, over
+    /// the last [`MAX_STAT_WINDOW`] sent frames: each is sent at a constant
+    /// phase (`program_max_send::MAX_SEND_LEAD`), so p50, p99 and the max
+    /// sit together unless a compose ran past it.
+    pub send_at_us_p50: u64,
+    pub send_at_us_p99: u64,
+    pub send_at_us_max: u64,
+    /// Frames whose compose ended after their due instant (sent at once).
+    pub send_late: u64,
     /// Lost devices: each drops the compositor and the sender (a loss while
     /// building drops what was built). They are rebuilt on the next job, or
     /// after the backoff when the device is lost again before a boundary
@@ -206,7 +217,8 @@ pub struct MaxStatus {
 
 /// The hand-off's shared state (one lock, shared with the program thread).
 struct Queue {
-    jobs: SubmitQueue<MaxJob>,
+    /// Each job with the instant it was offered.
+    jobs: SubmitQueue<(MaxJob, Instant)>,
     /// The setting, as last applied.
     enabled: bool,
     /// A `program-max` thread takes jobs.
@@ -230,7 +242,9 @@ impl Queue {
         if !self.enabled {
             return holding.then_some(MaxNext::Release);
         }
-        self.jobs.take().map(MaxNext::Job)
+        self.jobs
+            .take()
+            .map(|(job, offered)| MaxNext::Job(job, offered))
     }
 }
 
@@ -249,6 +263,14 @@ impl Window {
     fn p99(&self) -> u64 {
         percentile_ceil(&self.0, 99)
     }
+
+    fn p50(&self) -> u64 {
+        percentile_ceil(&self.0, 50)
+    }
+
+    fn max(&self) -> u64 {
+        self.0.iter().copied().max().unwrap_or(0)
+    }
 }
 
 /// What the thread reports, under its own lock: an API read takes the
@@ -264,6 +286,8 @@ struct Stats {
     upload: Window,
     draw: Window,
     send: Window,
+    send_at: Window,
+    late: u64,
 }
 
 /// The `SP-program-MAX` hand-off between the `SP-program` sender and the
@@ -325,6 +349,8 @@ impl MaxOut {
                 upload: Window::default(),
                 draw: Window::default(),
                 send: Window::default(),
+                send_at: Window::default(),
+                late: 0,
             }),
             #[cfg(test)]
             on_offer: Mutex::new(None),
@@ -397,7 +423,8 @@ impl MaxOut {
             if !queue.accepting() {
                 return false;
             }
-            if let HandoffOutcome::Coalesced { .. } = queue.jobs.offer(make()) {
+            let job = (make(), Instant::now());
+            if let HandoffOutcome::Coalesced { .. } = queue.jobs.offer(job) {
                 queue.coalesced += 1;
             }
         }
@@ -451,6 +478,15 @@ impl MaxOut {
         stats.phase = MaxPhase::Running;
     }
 
+    /// When a sent boundary went out ([`SendTiming`]).
+    pub fn record_send_timing(&self, timing: SendTiming) {
+        let mut stats = self.lock_stats();
+        stats.send_at.push(timing.at_us);
+        if timing.late {
+            stats.late += 1;
+        }
+    }
+
     /// A boundary did not go out because of `why`.
     pub fn record_failed(&self, why: &str) {
         let mut stats = self.lock_stats();
@@ -491,7 +527,7 @@ impl MaxOut {
             let queue = self.lock_queue();
             (queue.enabled, queue.coalesced)
         };
-        let (phase, adapter, counts, upload, draw, send) = {
+        let (phase, adapter, counts, upload, draw, send, send_at) = {
             let stats = self.lock_stats();
             (
                 stats.phase.clone(),
@@ -501,13 +537,15 @@ impl MaxOut {
                     stats.failed,
                     stats.device_resets,
                     stats.sender_backoffs,
+                    stats.late,
                 ],
                 stats.upload.clone(),
                 stats.draw.clone(),
                 stats.send.clone(),
+                stats.send_at.clone(),
             )
         };
-        let [submitted, failed, device_resets, sender_backoffs] = counts;
+        let [submitted, failed, device_resets, sender_backoffs, send_late] = counts;
         MaxStatus {
             enabled,
             state: state_label(&phase, enabled),
@@ -519,6 +557,10 @@ impl MaxOut {
             upload_us_p99: upload.p99(),
             draw_us_p99: draw.p99(),
             send_us_p99: send.p99(),
+            send_at_us_p50: send_at.p50(),
+            send_at_us_p99: send_at.p99(),
+            send_at_us_max: send_at.max(),
+            send_late,
             device_resets,
             sender_backoffs,
             spout_name: SPOUT_SENDER_NAME,

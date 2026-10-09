@@ -14,6 +14,7 @@ use super::{
     MaxPicture, load_max_enabled, run_max_settings_task, start_max, state_label,
 };
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::program_max_send::SendTiming;
 use crate::playback::submit_handoff::SubmitJob;
 
 /// A black job stamped `stamp`.
@@ -26,7 +27,7 @@ fn black(stamp: i64) -> MaxJob {
 /// wrong step can hang the test binary.
 fn job_stamp(step: Option<MaxNext>) -> i64 {
     match step {
-        Some(MaxNext::Job(job)) => job.stamp_100ns(),
+        Some(MaxNext::Job(job, _)) => job.stamp_100ns(),
         other => panic!("expected a job, got {other:?}"),
     }
 }
@@ -488,4 +489,56 @@ async fn on_windows_start_max_starts_the_thread_and_shutdown_ends_it() {
         max.status().state == format!("error: {MAX_NOT_RUNNING}")
     })
     .await;
+}
+
+/// #223 follow-up: each job carries the instant the program offered it
+/// (its Spout send is due `MAX_SEND_LEAD` later).
+#[test]
+fn an_offered_job_carries_the_instant_it_was_offered() {
+    let max = MaxOut::new();
+    let _consumer = taking(&max);
+    let before = Instant::now();
+    assert!(max.offer_with(|| black(7)));
+    let after = Instant::now();
+    match max.try_next(false) {
+        Some(MaxNext::Job(job, offered)) => {
+            assert_eq!(job.stamp_100ns(), 7);
+            assert!(
+                before <= offered && offered <= after,
+                "offered at the offer"
+            );
+        }
+        other => panic!("expected a job, got {other:?}"),
+    }
+}
+
+/// #223 follow-up: when the frames went out after their offer (p50, p99,
+/// max over the window) and how many were late.
+#[test]
+fn the_send_timing_reaches_the_telemetry() {
+    let max = MaxOut::new();
+    let status = max.status();
+    assert_eq!(
+        (
+            status.send_at_us_p50,
+            status.send_at_us_p99,
+            status.send_at_us_max,
+            status.send_late
+        ),
+        (0, 0, 0, 0),
+        "nothing sent yet"
+    );
+    for (at_us, late) in [(10_000, false), (12_000, true), (30_000, true)] {
+        max.record_send_timing(SendTiming { at_us, late });
+    }
+    let status = max.status();
+    assert_eq!(
+        (
+            status.send_at_us_p50,
+            status.send_at_us_p99,
+            status.send_at_us_max,
+            status.send_late
+        ),
+        (12_000, 30_000, 30_000, 2)
+    );
 }
