@@ -520,3 +520,39 @@ Arena "bridge" takes `SP-program-MAX`, and cg OBS is only the "OBS manuál" inpu
     fact, asked by camera-box on camera-box #1361.
   - Until then every PP output reads UNLOCKED. Do not chase it in SongPlayer;
     check `:8898/status` first.
+
+## Dante NIC on win-resolume (#240, 9.10.2026)
+
+DVS (`resolume-snv`) runs on its own USB NIC, alias **`Dante`**, static
+10.77.7.107/24 in the FOH Dante segment (no gateway, no DNS, NetBIOS off,
+only IPv4 + QoS + Npcap bound, metric 900; `Ethernet` metric 10). Before
+#240 DVS sat on `Ethernet` and its audio reached the Yamaha card's primary
+(10.77.7.104) through the MikroTik router → late packets at the card's
+250 µs latency → pops at FOH.
+
+- **Routing:** `10.77.7.0/24 via 10.77.8.1 on Ethernet` keeps every app's
+  FOH-subnet traffic (VBAN to fohabl / lv1) on the main NIC;
+  `10.77.7.104/32 on-link on Dante` sends only the card's traffic over the
+  Dante NIC. DVS's sockets bound to 10.77.7.107 use the Dante NIC (strong
+  host model).
+- **Firewall:** profiles enabled with default inbound/outbound **Allow**;
+  only Dante-NIC-scoped **Block** rules (group "SongPlayer Dante NIC": all
+  TCP, and svchost / obs64 / Arena / RustDesk / SongPlayer / Python /
+  dantesync). Original config: `C:\ProgramData\SongPlayer\ops\dante\fw-before.wfw`.
+- **Gotcha — never use default Block + `DisabledInterfaceAliases`:** the
+  exclusion did NOT exempt `Ethernet`'s outbound traffic. For ~5 min VBAN to
+  FOH and lv1 silently stopped (`sendto` succeeds, WFP drops, `send_errors`
+  stays 0). After ANY firewall change, prove the main NIC's OUTBOUND with a
+  pktmon capture of VBAN (`pktmon filter add -t UDP -p 6980`), not only the
+  API/MCP (inbound).
+- **NDI** is pinned to the main NIC: `C:\ProgramData\NDI\ndi-config.v1.json`
+  `adapters.allowed = ["10.77.9.201"]` (applies when OBS, Arena, SongPlayer
+  restart). With an empty list NDI opens mDNS/SSDP sockets on every NIC.
+- The USB NIC must stay in the same USB port: in another port Windows makes
+  a new adapter instance (DHCP with a gateway) and none of this applies.
+- Dante Controller on `Ethernet` still sees the card's secondary
+  (10.77.9.230 = `video-clock.lan`, dantesync's clock) and warns of a subnet
+  conflict; run it on the `Dante` interface to manage `resolume-snv`.
+- Measuring a Dante sender: `~/.claude/work-products/songplayer/dante/`
+  (`dante_tx_timing.py` reads each packet's media time, payload[1:5] seconds
+  + payload[5:9] samples; `icmp_pair.py` compares a routed and a direct path).
