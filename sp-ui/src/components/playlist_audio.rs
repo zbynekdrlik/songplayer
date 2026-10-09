@@ -1,10 +1,11 @@
 //! #242: a playlist's own sound — its volume and its EQ, with the curve.
 //!
 //! Collapsed under the Player on the playlist card. Opening it reads
-//! `GET /api/v1/playlists/{id}/audio`; "Použiť" checks the limits with
-//! `sp_core::audio_fx::validate` (the Slovak reason, `FxError::sk`) and
-//! sends `PUT …/audio`, which the playing song follows at its next audio
-//! chunk. The curve is `sp_core::audio_fx::curve_path`, the server's maths.
+//! `GET /api/v1/playlists/{id}/audio` ("Načítavam…" until it lands, the
+//! fields only after it, so no edit is overwritten by the load). "Použiť"
+//! checks the limits with `sp_core::audio_fx::validate` (the Slovak reason,
+//! `FxError::sk`) and sends `PUT …/audio`, which the playing song follows
+//! at its next audio chunk. The curve is `sp_core::audio_fx::curve_path`, the server's maths.
 //!
 //! The band rows are rebuilt only when the NUMBER of bands changes; each
 //! field reads its band by index, so an edit never re-creates the input
@@ -283,8 +284,23 @@ pub fn PlaylistAudio(playlist_id: i64) -> impl IntoView {
             >
                 {move || if open.get() { "▼ Zvuk playlistu" } else { "▶ Zvuk playlistu" }}
             </button>
+            // The fields only once the stored sound is here: an edit made
+            // before would be overwritten by the load (CI run 37975959175).
             {move || {
-                open.get()
+                (open.get() && !loaded.get())
+                    .then(|| {
+                        view! {
+                            <span class="playlist-audio-status" data-testid="playlist-audio-loading">
+                                {move || {
+                                    let text = status.get();
+                                    if text.is_empty() { "Načítavam…".to_string() } else { text }
+                                }}
+                            </span>
+                        }
+                    })
+            }}
+            {move || {
+                (open.get() && loaded.get())
                     .then(|| {
                         view! {
                             <div class="playlist-audio-body">
