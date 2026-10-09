@@ -12,7 +12,9 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use tracing::{info, warn};
-use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D};
+use windows::Win32::Graphics::Direct3D11::{
+    ID3D11Device, ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D,
+};
 use windows::core::Interface;
 
 use super::{Compositor, micros_since};
@@ -105,6 +107,10 @@ pub struct SpoutSender {
     registration: Registration,
     device: ID3D11Device,
     texture: ID3D11Texture2D,
+    /// The compositor's immediate context and an event query: each send
+    /// waits until the GPU has done its copy into Spout's shared texture.
+    context: ID3D11DeviceContext,
+    copied: ID3D11Query,
 }
 
 impl SpoutSender {
@@ -122,6 +128,8 @@ impl SpoutSender {
         let c_name = check_sender_name(name)?;
         let device = compositor.device().clone();
         let texture = compositor.render_target().clone();
+        let context = compositor.context().clone();
+        let copied = super::pipeline::query(&device)?;
         // Not OK until the shim says so.
         let mut code: c_int = -1;
         // SAFETY: `device` is a live ID3D11Device, kept alive until after the
@@ -151,6 +159,8 @@ impl SpoutSender {
             registration: Registration::Fresh,
             device,
             texture,
+            context,
+            copied,
         })
     }
 
@@ -189,6 +199,10 @@ impl SpoutSender {
         // compositor's render target, on the device the sender opened on.
         let texture = self.texture.as_raw();
         let code = sdk(|| unsafe { spout_sender_send(raw, texture) });
+        // #223 follow-up: return once the GPU has done the copy, so the
+        // caller's timing is when Spout's shared texture really holds the
+        // frame (Arena reads it on its own clock), not when it was queued.
+        super::pipeline::wait_until_done_on(&self.context, &self.copied)?;
         let send_us = micros_since(start);
         unsafe { self.device.GetDeviceRemovedReason() }
             .map_err(|e| GpuError::removed(e.code().0 as u32))?;

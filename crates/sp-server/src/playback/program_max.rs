@@ -190,10 +190,11 @@ pub struct MaxStatus {
     pub upload_us_p99: u64,
     pub draw_us_p99: u64,
     pub send_us_p99: u64,
-    /// When the frames went out after the program offered them, µs, over
-    /// the last [`MAX_STAT_WINDOW`] sent frames: each is sent at a constant
-    /// phase (`program_max_send::MAX_SEND_LEAD`), so p50, p99 and the max
-    /// sit together unless a compose ran past it.
+    /// When the frames were in Spout's shared texture after the program
+    /// offered them (the GPU's copy done), µs, over the last
+    /// [`MAX_STAT_WINDOW`] sent frames: each is sent at a constant phase
+    /// (`program_max_send::MAX_SEND_LEAD`), so the spread of p50, p99 and
+    /// the max is the GPU's delay of the copy, unless a compose ran past it.
     pub send_at_us_p50: u64,
     pub send_at_us_p99: u64,
     pub send_at_us_max: u64,

@@ -19,9 +19,10 @@ pub struct ComposeStats {
 /// thread.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SpoutSendStats {
-    /// The CPU time of Spout's `SendTexture`, µs: the wait for the sender's
-    /// named mutex (Spout gives up after 67 ms), the queued copy into
-    /// Spout's shared texture and the flush; at the first send also the
-    /// shared texture's creation and the registration.
+    /// Spout's `SendTexture` until the GPU has done its copy, µs: the wait
+    /// for the sender's named mutex (Spout gives up after 67 ms), the copy
+    /// into Spout's shared texture, the flush and the wait for the GPU to
+    /// finish it (#223 follow-up); at the first send also the shared
+    /// texture's creation and the registration.
     pub send_us: u64,
 }

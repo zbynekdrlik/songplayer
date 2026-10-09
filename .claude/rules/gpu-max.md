@@ -565,9 +565,14 @@ writes the same bytes).
   cost, it can read the query a boundary later instead: Spout's copy is
   ordered after the draw on the same context and needs no wait.
 - `uploads`: 0, 1 or 2 pictures uploaded.
-- `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): the CPU time of
-  `SendTexture`: the sender-mutex wait, the queued copy and the flush (at
-  the first send also the shared texture's creation and the registration).
+- `SpoutSendStats::send_us` (S1b, for `max.send_us_p99`): `SendTexture`
+  (the sender-mutex wait, the copy, the flush; at the first send also the
+  shared texture's creation and the registration) and, since the #223
+  follow-up, the wait until the GPU has DONE that copy (an event query on
+  the compositor's context, `pipeline::wait_until_done_on`), so
+  `max.send_at_us_*` is when Spout's shared texture really holds the frame,
+  relative to the program's offer: its spread is the GPU's delay of the
+  copy (Arena reads the texture on its own 60 Hz clock).
 
 ## HLSL at runtime
 
