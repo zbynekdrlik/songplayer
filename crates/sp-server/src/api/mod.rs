@@ -172,6 +172,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/program/trace",
             axum::routing::get(program::get_program_trace),
         )
+        // #228: the 911014 burn on SP-program (in memory, default off).
+        .route(
+            "/api/v1/program/burn",
+            axum::routing::post(program::post_program_burn),
+        )
         // #233: the registered ASIO drivers (an ASIO output's driver list).
         .route(
             "/api/v1/audio/asio-drivers",

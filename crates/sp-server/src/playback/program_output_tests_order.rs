@@ -271,6 +271,7 @@ fn pair(width: u32, stamp: i64, audio_tc: i64, data: Vec<f32>) -> SubmitJob {
         video_tc_100ns: stamp,
         audio_tc_100ns: audio_tc,
         live: true,
+        media_pts_100ns: None,
     }
 }
 
