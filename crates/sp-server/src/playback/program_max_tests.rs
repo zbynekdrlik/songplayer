@@ -333,6 +333,7 @@ fn the_max_block_has_its_api_names() {
             "vblank_output",
             "vblank_period_ns",
             "vblank_phase_us",
+            "vblank_state",
             "vblank_tracking",
             "width",
         ]
@@ -646,4 +647,28 @@ fn the_vblank_pacing_reaches_the_telemetry() {
     let status = max.status();
     assert!(!status.vblank_tracking, "the last send was off the grid");
     assert_eq!((status.send_off_grid, status.slot_repicks), (1, 2));
+}
+
+/// #243: the display output's state reaches the telemetry — `None` while no
+/// tracker reported one — and a record says what to log (entering and
+/// leaving `not_ticking`, `program_max_vblank::vblank_log`).
+#[test]
+fn the_vblank_state_reaches_the_telemetry() {
+    use crate::playback::program_max_vblank::VblankLog;
+    use sp_gpu::VblankState;
+    let max = MaxOut::new();
+    assert_eq!(max.status().vblank_state, None);
+    assert_eq!(max.record_vblank_state(VblankState::Measuring), None);
+    assert_eq!(max.status().vblank_state, Some("measuring"));
+    assert_eq!(
+        max.record_vblank_state(VblankState::NotTicking),
+        Some(VblankLog::StoppedTicking)
+    );
+    assert_eq!(max.record_vblank_state(VblankState::NotTicking), None);
+    assert_eq!(max.status().vblank_state, Some("not_ticking"));
+    assert_eq!(
+        max.record_vblank_state(VblankState::Ticking),
+        Some(VblankLog::TicksAgain)
+    );
+    assert_eq!(max.status().vblank_state, Some("ticking"));
 }

@@ -52,6 +52,7 @@ function running(submitted: number): MaxStatus {
     send_late: 3,
     vblank_output: "\\\\.\\DISPLAY2 7680x1080",
     vblank_tracking: true,
+    vblank_state: "ticking",
     vblank_period_ns: 16_666_700,
     vblank_phase_us: 8_000,
     send_off_grid: 40,
@@ -151,6 +152,19 @@ test.describe("SP-program-MAX post-deploy gate (#223 S2)", () => {
     const none = { ...running(160), vblank_output: null };
     expect(maxGateFailures(running(100), none)).toEqual([
       "no display output paces the sends (no vblank tracker)",
+    ]);
+  });
+
+  test("an output that does not tick is named (#243)", () => {
+    const dark = {
+      ...running(160),
+      send_off_grid: 43,
+      vblank_tracking: false,
+      vblank_state: "not_ticking",
+    };
+    expect(maxGateFailures(running(100), dark)).toEqual([
+      "3 boundaries were sent off the display's refresh grid",
+      "the display output \\\\.\\DISPLAY2 7680x1080 does not tick (vblank_state not_ticking): WaitForVBlank does not wait",
     ]);
   });
 

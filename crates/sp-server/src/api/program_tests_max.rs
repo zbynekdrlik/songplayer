@@ -38,6 +38,7 @@ async fn get_program_reports_the_max_block() {
             "send_at_us_max": 0,
             "send_late": 0,
             "vblank_output": null,
+            "vblank_state": null,
             "vblank_tracking": false,
             "vblank_period_ns": 0,
             "vblank_phase_us": 14000,

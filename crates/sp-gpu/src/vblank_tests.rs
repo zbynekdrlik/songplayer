@@ -6,7 +6,10 @@
 
 use std::time::{Duration, Instant};
 
-use super::{OutputInfo, Seen, VBLANK_STALE, VblankFit, VblankGrid, grid_is_fresh, pick_output};
+use super::{
+    OutputInfo, Seen, VBLANK_NOT_TICKING, VBLANK_RESTART, VBLANK_STALE, VblankFit, VblankGrid,
+    VblankState, grid_is_fresh, not_waiting_sleep, pick_output, vblank_state, waited,
+};
 
 /// The SNV wall's measured period, ns (59.99988 Hz).
 const P: u64 = 16_666_700;
@@ -219,4 +222,88 @@ fn a_boot_with_two_spurious_wakeups_takes_the_displays_period() {
     assert_eq!(seen.iter().filter(|s| **s == Seen::Booting).count(), 16);
     assert_eq!(seen.iter().filter(|s| **s == Seen::Counted).count(), 59);
     assert_eq!(fit.grid(), grid(base, 72 * P, P));
+}
+
+/// #243, PP 9.10.2026: with the laptop panel dark, `WaitForVBlank` returned
+/// at once and the time-critical thread spun a core for hours. A wait that
+/// returned in under a millisecond did not wait (one ms is far below any
+/// display's period, `VBLANK_MIN_PERIOD`).
+#[test]
+fn a_wait_under_a_millisecond_did_not_wait() {
+    assert!(!waited(Duration::ZERO));
+    assert!(!waited(ns(999_999)));
+    assert!(waited(ns(1_000_000)));
+    assert!(waited(ns(P)));
+}
+
+/// #243: every wait that did not wait is followed by a sleep — never none —
+/// 1 ms doubling per one in a row, capped at 250 ms (a dark output costs
+/// ~4 calls a second and is picked up within ~250 ms once it presents).
+#[test]
+fn a_wait_that_did_not_wait_is_always_followed_by_a_sleep() {
+    let ms: Vec<u128> = (1..=11).map(|n| not_waiting_sleep(n).as_millis()).collect();
+    assert_eq!(ms, [1, 2, 4, 8, 16, 32, 64, 128, 250, 250, 250]);
+    assert_eq!(not_waiting_sleep(0), Duration::from_millis(1));
+    assert_eq!(not_waiting_sleep(u32::MAX), Duration::from_millis(250));
+}
+
+/// #243: a fresh grid is `ticking`; without one the output is `measuring`
+/// for [`VBLANK_NOT_TICKING`] (2 s) from the last wait that blocked — or
+/// from the start, before any — and `not_ticking` after it.
+#[test]
+fn the_state_is_ticking_measuring_or_not_ticking() {
+    assert_eq!(VBLANK_NOT_TICKING, Duration::from_secs(2));
+    let start = Instant::now();
+    let at = |ms: u64| start + Duration::from_millis(ms);
+    let state = |fresh, waited_at, now| vblank_state(fresh, waited_at, start, now);
+    assert_eq!(state(true, None, at(60_000)), VblankState::Ticking);
+    assert_eq!(state(true, Some(at(1)), at(60_000)), VblankState::Ticking);
+    assert_eq!(state(false, None, at(2_000)), VblankState::Measuring);
+    assert_eq!(state(false, None, at(2_001)), VblankState::NotTicking);
+    assert_eq!(
+        state(false, Some(at(5_000)), at(7_000)),
+        VblankState::Measuring
+    );
+    assert_eq!(
+        state(false, Some(at(5_000)), at(7_001)),
+        VblankState::NotTicking
+    );
+}
+
+/// The API's words for the state.
+#[test]
+fn the_states_names() {
+    assert_eq!(VblankState::Measuring.as_str(), "measuring");
+    assert_eq!(VblankState::Ticking.as_str(), "ticking");
+    assert_eq!(VblankState::NotTicking.as_str(), "not_ticking");
+}
+
+/// #243: a refresh more than [`VBLANK_RESTART`] (1 s) after the last
+/// counted one boots the fit afresh — the refresh index is never carried
+/// across a long gap (a dark panel, a stalled wait), where its rounding
+/// could be off by one — and it measures again from there.
+#[test]
+fn a_gap_over_a_second_boots_the_fit_afresh() {
+    assert_eq!(VBLANK_RESTART, Duration::from_secs(1));
+    let base = Instant::now();
+    let (mut fit, _) = fed(base, (0..75).map(|k| k * P));
+    assert!(fit.grid().is_some());
+    let back = 74 * P + 1_000_000_001;
+    assert_eq!(fit.observe(base + ns(back)), Seen::Booting);
+    assert_eq!(fit.grid(), None, "the old grid is gone");
+    for k in 1..=75 {
+        fit.observe(base + ns(back + k * P));
+    }
+    assert_eq!(fit.grid(), grid(base, back + 75 * P, P));
+    assert_eq!(fit.missed(), 0, "a restart counts no missed refresh");
+}
+
+/// Up to one second the gap is missed refreshes and the fit is kept.
+#[test]
+fn a_gap_of_under_a_second_is_missed_refreshes() {
+    let base = Instant::now();
+    let (mut fit, _) = fed(base, (0..75).map(|k| k * P));
+    assert_eq!(fit.observe(base + ns(74 * P + 59 * P)), Seen::Counted);
+    assert_eq!(fit.missed(), 58);
+    assert_eq!(fit.grid(), grid(base, 133 * P, P));
 }

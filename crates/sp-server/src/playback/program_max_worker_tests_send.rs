@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use sp_gpu::VblankGrid;
+use sp_gpu::{VblankGrid, VblankState};
 
 use super::tests::{FakeGpu, picture, spawn_loop, wait_until};
 use super::{MaxWorker, run_max_loop};
@@ -106,12 +106,21 @@ fn the_loop_sends_no_boundary_before_its_due_instant() {
     thread.join().expect("the loop");
 }
 
-/// A refresh grid the test sets (`None`: not measured).
+/// A refresh grid the test sets (`None`: not measured — then its output
+/// does not tick, #243).
 struct FakeVblank(Option<VblankGrid>);
 
 impl VblankSource for FakeVblank {
     fn grid(&self, _now: Instant) -> Option<VblankGrid> {
         self.0
+    }
+
+    fn state(&self, _now: Instant) -> VblankState {
+        if self.0.is_some() {
+            VblankState::Ticking
+        } else {
+            VblankState::NotTicking
+        }
     }
 
     fn output(&self) -> String {
@@ -157,6 +166,7 @@ fn on_a_refresh_grid_the_worker_sends_in_its_slot_at_the_phase_setting() {
         ),
         (true, 16_000_000, 0, 5_000, 0, 20_000)
     );
+    assert_eq!(status.vblank_state, Some("ticking"));
 }
 
 /// A source that measures nothing yet: the constant lead, off the grid.
@@ -175,6 +185,11 @@ fn an_unmeasured_refresh_sends_at_the_constant_lead() {
     let status = max.status();
     assert_eq!((status.vblank_tracking, status.send_off_grid), (false, 1));
     assert_eq!(status.vblank_output.as_deref(), Some("fake 7680x1080"));
+    assert_eq!(
+        status.vblank_state,
+        Some("not_ticking"),
+        "#243: the source's state is recorded at each boundary"
+    );
 }
 
 /// The loop given a refresh source sends on its grid (real clock: only
