@@ -61,14 +61,19 @@ pub struct WrongFileBody {
     pub found: String,
 }
 
-/// The test item, or the `404` / `500` a route answers without it.
-async fn imported(state: &AppState) -> Result<TestItem, Response> {
+/// The test item, or the `404` / `500` a route answers without it (boxed:
+/// a `Response` is too large for an `Err`, clippy's `result_large_err`).
+async fn imported(state: &AppState) -> Result<TestItem, Box<Response>> {
     match test_item::find(&state.pool).await {
         Ok(Some(item)) => Ok(item),
-        Ok(None) => Err((StatusCode::NOT_FOUND, "the test item is not imported").into_response()),
+        Ok(None) => Err(Box::new(
+            (StatusCode::NOT_FOUND, "the test item is not imported").into_response(),
+        )),
         Err(e) => {
             warn!(%e, "test item: reading it failed");
-            Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+            Err(Box::new(
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            ))
         }
     }
 }
@@ -169,7 +174,7 @@ pub async fn post_import(
 pub async fn post_start(State(state): State<AppState>) -> Response {
     let item = match imported(&state).await {
         Ok(item) => item,
-        Err(answer) => return answer,
+        Err(answer) => return *answer,
     };
     info!(
         playlist_id = item.playlist_id,
@@ -189,7 +194,7 @@ pub async fn post_start(State(state): State<AppState>) -> Response {
 pub async fn post_stop(State(state): State<AppState>) -> Response {
     let item = match imported(&state).await {
         Ok(item) => item,
-        Err(answer) => return answer,
+        Err(answer) => return *answer,
     };
     info!(playlist_id = item.playlist_id, "test item: stop");
     let pause = EngineCommand::Pause {
