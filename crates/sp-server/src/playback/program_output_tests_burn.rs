@@ -94,7 +94,10 @@ fn pair(video: &SharedFrame, k: u32, media_pts_100ns: Option<i64>) -> SubmitJob 
 
 /// The picture the sender put on the wire last (the async holdover).
 fn wire(out: &ProgramOutput<MockNdiBackend>) -> SharedFrame {
-    out.submitter.held_frame().expect("a picture was sent")
+    out.submitter
+        .held_frame()
+        .cloned()
+        .expect("a picture was sent")
 }
 
 /// The burn of item frame `frame` on boundary `k`, painted on `picture`.

@@ -46,7 +46,7 @@ impl Transcoder for Fake {
                 return Err("ffmpeg failed (exit 1): no such stream".to_string());
             }
             let body: &[u8] = if flac { b"audio" } else { b"video" };
-            std::fs::write(&out, body).map_err(|e| e.to_string())
+            std::fs::write(out, body).map_err(|e| e.to_string())
         })
     }
 }

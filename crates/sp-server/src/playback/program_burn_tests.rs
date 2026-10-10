@@ -276,7 +276,9 @@ fn the_longest_payload_still_fits_the_fixed_qr() {
 /// A checkerboard of modules, so every module's place is visible.
 fn checkerboard() -> Vec<bool> {
     let n = BURN_MODULES as usize;
-    (0..n * n).map(|i| (i / n + i % n) % 2 == 0).collect()
+    (0..n * n)
+        .map(|i| (i / n + i % n).is_multiple_of(2))
+        .collect()
 }
 
 /// What `paint` must leave: `before` with the square's luma set by module
