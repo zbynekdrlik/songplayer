@@ -23,20 +23,46 @@
 //! is exactly when [`PooledBuf`]'s `Drop` runs. Recycling is therefore
 //! release-point-agnostic: holdover replacement, pacer-repeat replacement, a
 //! handoff coalesce and a seek flush all recycle through the same `Drop`.
+//!
+//! #223 S9b (D8): a size class no frame took for [`IDLE_CLASS_EVICT`] is
+//! freed whole at the next recycle — the resolution of a song that no longer
+//! plays (a 4K class keeps 6 × 12.4 MB). A class in use is taken every frame,
+//! so it is never freed under the wall. Freed buffers are dropped after the
+//! lock is released, like a fresh allocation is made without it.
 
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 /// Max recycled buffers kept per exact-capacity size class. Beyond this,
 /// [`recycle`] drops the buffer so the pool cannot grow without bound (6 covers
 /// the deepest look-ahead + holdover + handoff a single resolution keeps live).
 pub const POOL_CAP_PER_CLASS: usize = 6;
 
-/// The free-list: buffers keyed by their EXACT `Vec` capacity, so one frame
-/// resolution is one size class and a `take` never hands back a wrong-sized
-/// buffer.
-type FreeList = BTreeMap<usize, Vec<Vec<u8>>>;
+/// A size class no frame took for this long is freed whole (#223 S9b).
+pub const IDLE_CLASS_EVICT: Duration = Duration::from_secs(60);
+
+/// One size class: its free buffers and when a frame of its size was last
+/// taken.
+struct Class {
+    bufs: Vec<Vec<u8>>,
+    last_taken: Instant,
+}
+
+impl Class {
+    fn new(now: Instant) -> Self {
+        Self {
+            bufs: Vec::new(),
+            last_taken: now,
+        }
+    }
+}
+
+/// The free-list: classes keyed by their buffers' EXACT `Vec` capacity, so
+/// one frame resolution is one size class and a `take` never hands back a
+/// wrong-sized buffer.
+type FreeList = BTreeMap<usize, Class>;
 
 /// The process-global pool. `BTreeMap::new` and `Mutex::new` are both `const`,
 /// so no lazy initialisation is needed.
@@ -64,7 +90,7 @@ fn pool() -> MutexGuard<'static, FreeList> {
 pub fn take(len: usize) -> Vec<u8> {
     // Pop under the lock, then drop the guard at the `let` semicolon so a fresh
     // allocation never holds it. `recycled` owns the popped buffer (or `None`).
-    let recycled = pool().get_mut(&len).and_then(Vec::pop);
+    let recycled = take_from(&mut pool(), len, Instant::now());
     match recycled {
         Some(mut buf) => {
             buf.clear();
@@ -115,7 +141,7 @@ fn alloc_exact(len: usize) -> Result<Vec<u8>, FrameAllocFailed> {
 pub fn try_take(len: usize) -> Result<Vec<u8>, FrameAllocFailed> {
     // Pop under the lock, then drop the guard at the `let` semicolon so a fresh
     // allocation never holds it.
-    let recycled = pool().get_mut(&len).and_then(Vec::pop);
+    let recycled = take_from(&mut pool(), len, Instant::now());
     match recycled {
         Some(mut buf) => {
             buf.clear();
@@ -125,19 +151,53 @@ pub fn try_take(len: usize) -> Result<Vec<u8>, FrameAllocFailed> {
     }
 }
 
+/// Pop a recycled buffer of exactly `len` bytes, marking the class taken at
+/// `now` — a miss too: the buffer allocated for it comes back to this class.
+fn take_from(pool: &mut FreeList, len: usize, now: Instant) -> Option<Vec<u8>> {
+    let class = pool.entry(len).or_insert_with(|| Class::new(now));
+    class.last_taken = now;
+    class.bufs.pop()
+}
+
+/// Keep `buf` in its class (at most [`POOL_CAP_PER_CLASS`]) and free every
+/// class no frame took for [`IDLE_CLASS_EVICT`] by `now`. Returns what to
+/// drop — a buffer over the cap and the freed classes' buffers — for the
+/// caller to drop after the lock.
+fn recycle_into(pool: &mut FreeList, buf: Vec<u8>, now: Instant) -> Vec<Vec<u8>> {
+    let mut dropped = Vec::new();
+    let class = pool
+        .entry(buf.capacity())
+        .or_insert_with(|| Class::new(now));
+    if class.bufs.len() < POOL_CAP_PER_CLASS {
+        class.bufs.push(buf);
+    } else {
+        dropped.push(buf);
+    }
+    let idle: Vec<usize> = pool
+        .iter()
+        .filter(|(_, class)| now.saturating_duration_since(class.last_taken) >= IDLE_CLASS_EVICT)
+        .map(|(&cap, _)| cap)
+        .collect();
+    for cap in idle {
+        if let Some(class) = pool.remove(&cap) {
+            dropped.extend(class.bufs);
+        }
+    }
+    dropped
+}
+
 /// Return a buffer to its exact-capacity size class for reuse. Keeps at most
 /// [`POOL_CAP_PER_CLASS`] buffers per class; beyond the cap (or for an empty,
-/// unallocated buffer) the buffer is dropped. Called from [`PooledBuf`]'s `Drop`.
+/// unallocated buffer) the buffer is dropped, and every class no frame took
+/// for [`IDLE_CLASS_EVICT`] is freed. Called from [`PooledBuf`]'s `Drop`.
 pub fn recycle(buf: Vec<u8>) {
-    let cap = buf.capacity();
-    if cap == 0 {
+    if buf.capacity() == 0 {
         return; // no allocation to recycle
     }
-    let mut pool = pool();
-    let class = pool.entry(cap).or_default();
-    if class.len() < POOL_CAP_PER_CLASS {
-        class.push(buf);
-    }
+    // The guard drops at the `let` semicolon: the freed buffers are dropped
+    // (their memory returned) with the lock released.
+    let dropped = recycle_into(&mut pool(), buf, Instant::now());
+    drop(dropped);
 }
 
 /// An owned pixel buffer whose `Drop` returns its allocation to the pool for
@@ -188,7 +248,7 @@ impl Drop for PooledBuf {
 /// item is invisible across crates.
 #[doc(hidden)]
 pub fn pool_len(cap: usize) -> usize {
-    pool().get(&cap).map_or(0, Vec::len)
+    pool().get(&cap).map_or(0, |class| class.bufs.len())
 }
 
 /// Test/diagnostic reset: empty the whole pool so a test starts hermetic.
@@ -398,6 +458,73 @@ mod tests {
         assert!(
             err.to_string().contains(&len.to_string()),
             "Display carries the byte count for the pipeline WARN"
+        );
+    }
+
+    // ---- #223 S9b: idle size classes are freed (pure, injected time) ----
+
+    fn buf(cap: usize) -> Vec<u8> {
+        Vec::with_capacity(cap)
+    }
+
+    #[test]
+    fn a_class_no_frame_took_for_a_minute_is_freed_whole() {
+        let t0 = Instant::now();
+        let mut pool = FreeList::new();
+        let _ = take_from(&mut pool, 64, t0);
+        assert!(recycle_into(&mut pool, buf(64), t0).is_empty());
+        assert!(recycle_into(&mut pool, buf(64), t0).is_empty());
+        // Another resolution plays now; the 64-byte class is never taken again.
+        let later = t0 + IDLE_CLASS_EVICT;
+        let _ = take_from(&mut pool, 128, later);
+        let dropped = recycle_into(&mut pool, buf(128), later);
+        assert_eq!(
+            dropped.len(),
+            2,
+            "both idle buffers are handed back to drop"
+        );
+        assert!(dropped.iter().all(|b| b.capacity() == 64));
+        assert!(!pool.contains_key(&64), "the idle class is gone");
+        assert_eq!(pool.get(&128).map(|c| c.bufs.len()), Some(1));
+    }
+
+    #[test]
+    fn a_class_taken_within_the_minute_keeps_its_buffers() {
+        let t0 = Instant::now();
+        let mut pool = FreeList::new();
+        let _ = take_from(&mut pool, 64, t0);
+        assert!(recycle_into(&mut pool, buf(64), t0).is_empty());
+        let just_before = t0 + IDLE_CLASS_EVICT - Duration::from_millis(1);
+        assert!(recycle_into(&mut pool, buf(64), just_before).is_empty());
+        assert_eq!(pool.get(&64).map(|c| c.bufs.len()), Some(2));
+    }
+
+    #[test]
+    fn a_take_keeps_its_class_alive() {
+        let t0 = Instant::now();
+        let mut pool = FreeList::new();
+        assert!(take_from(&mut pool, 64, t0).is_none(), "a miss");
+        assert!(recycle_into(&mut pool, buf(64), t0).is_empty());
+        let t1 = t0 + Duration::from_secs(50);
+        assert_eq!(take_from(&mut pool, 64, t1).map(|b| b.capacity()), Some(64));
+        // 70 s after the first take, 20 s after the last: still in use.
+        let t2 = t0 + Duration::from_secs(70);
+        assert!(recycle_into(&mut pool, buf(64), t2).is_empty());
+        assert_eq!(pool.get(&64).map(|c| c.bufs.len()), Some(1));
+    }
+
+    #[test]
+    fn a_buffer_over_the_cap_is_handed_back_to_drop() {
+        let t0 = Instant::now();
+        let mut pool = FreeList::new();
+        for _ in 0..POOL_CAP_PER_CLASS {
+            assert!(recycle_into(&mut pool, buf(64), t0).is_empty());
+        }
+        let dropped = recycle_into(&mut pool, buf(64), t0);
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(
+            pool.get(&64).map(|c| c.bufs.len()),
+            Some(POOL_CAP_PER_CLASS)
         );
     }
 }
