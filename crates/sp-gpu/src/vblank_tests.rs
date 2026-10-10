@@ -307,3 +307,15 @@ fn a_gap_of_under_a_second_is_missed_refreshes() {
     assert_eq!(fit.missed(), 58);
     assert_eq!(fit.grid(), grid(base, 133 * P, P));
 }
+
+/// The restart's bound: a gap of exactly [`VBLANK_RESTART`] is still
+/// missed refreshes (1 s / P rounds to 60: 59 missed), the fit kept.
+#[test]
+fn a_gap_of_exactly_a_second_keeps_the_fit() {
+    let base = Instant::now();
+    let (mut fit, _) = fed(base, (0..75).map(|k| k * P));
+    let back = 74 * P + 1_000_000_000;
+    assert_eq!(fit.observe(base + ns(back)), Seen::Counted);
+    assert_eq!(fit.missed(), 59);
+    assert!(fit.grid().is_some());
+}
