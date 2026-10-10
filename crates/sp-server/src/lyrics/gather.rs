@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 use crate::lyrics::{
     genius, lrclib, lyrics_ovh,
     spotify_proxy::SpotifyLyricsFetcher,
-    text_candidate::{cleaned_text_candidate, timed_candidate},
+    text_candidate::{cleaned_text_candidate, cleanup_candidate, timed_candidate},
     youtube_subs,
 };
 
@@ -215,23 +215,16 @@ pub(crate) async fn gather_sources_impl(
             // made by the prompt that deduped them (v2 itself invalidated the
             // pre-2026-05-11 description-prompt caches).
             let cache_path = cache_dir.join(format!("{youtube_id}_lrclib_cleaned_v3.json"));
-            match cleaned_text_candidate(ai, &row.song, &row.artist, "lrclib", t, &cache_path).await
-            {
-                Ok(Some(cleaned)) => {
-                    info!(
-                        %youtube_id,
-                        raw_count = t.lines.len(),
-                        cleaned_count = cleaned.lines.len(),
-                        "gather: lrclib-plain Claude cleanup complete"
-                    );
-                    candidate_texts.push(cleaned);
-                }
-                Ok(None) => anyhow::bail!(
-                    "gather: lrclib-plain cleanup returned no lyrics for {youtube_id}"
-                ),
-                Err(e) => {
-                    anyhow::bail!("gather: lrclib-plain cleanup failed for {youtube_id}: {e}")
-                }
+            let answer =
+                cleaned_text_candidate(ai, &row.song, &row.artist, "lrclib", t, &cache_path).await;
+            if let Some(cleaned) = cleanup_candidate(answer, "lrclib-plain", &youtube_id)? {
+                info!(
+                    %youtube_id,
+                    raw_count = t.lines.len(),
+                    cleaned_count = cleaned.lines.len(),
+                    "gather: lrclib-plain Claude cleanup complete"
+                );
+                candidate_texts.push(cleaned);
             }
         }
     }
@@ -260,20 +253,16 @@ pub(crate) async fn gather_sources_impl(
             );
         };
         let cache_path = cache_dir.join(format!("{youtube_id}_genius_cleaned_v3.json"));
-        match cleaned_text_candidate(ai, &row.song, &row.artist, "genius", t, &cache_path).await {
-            Ok(Some(cleaned)) => {
-                info!(
-                    %youtube_id,
-                    raw_count = t.lines.len(),
-                    cleaned_count = cleaned.lines.len(),
-                    "gather: genius fallback Claude cleanup complete"
-                );
-                candidate_texts.push(cleaned);
-            }
-            Ok(None) => {
-                anyhow::bail!("gather: genius fallback cleanup returned no lyrics for {youtube_id}")
-            }
-            Err(e) => anyhow::bail!("gather: genius fallback cleanup failed for {youtube_id}: {e}"),
+        let answer =
+            cleaned_text_candidate(ai, &row.song, &row.artist, "genius", t, &cache_path).await;
+        if let Some(cleaned) = cleanup_candidate(answer, "genius fallback", &youtube_id)? {
+            info!(
+                %youtube_id,
+                raw_count = t.lines.len(),
+                cleaned_count = cleaned.lines.len(),
+                "gather: genius fallback Claude cleanup complete"
+            );
+            candidate_texts.push(cleaned);
         }
     }
 

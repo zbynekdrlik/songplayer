@@ -353,6 +353,35 @@ mod tests {
         assert!(err.contains("auth_unavailable"), "{err}");
     }
 
+    /// #144: Claude's upstream content filter refuses the same output every
+    /// time, and each refusal puts the proxy's one credential into its
+    /// cooldown (every AI call refused for ~60 s): it is final, never retried.
+    #[tokio::test]
+    async fn chat_does_not_retry_a_content_filter_refusal() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(502).set_body_string(
+                r#"{"error":{"message":"claude executor: upstream returned error event: Output blocked by content filtering policy","type":"server_error"}}"#,
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "test".into(),
+            system_prompt_extra: None,
+        })
+        .with_retry_policy(RetryPolicy::NO_WAIT);
+        let err = client.chat("", "user").await.unwrap_err().to_string();
+        assert!(err.contains("content filtering policy"), "{err}");
+    }
+
     #[tokio::test]
     async fn chat_fails_on_400_without_retry() {
         use wiremock::matchers::{method, path};
