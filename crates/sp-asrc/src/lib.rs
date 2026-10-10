@@ -11,7 +11,11 @@
 //! tens of ms per 1600-frame block, and the ASIO tests that push thousands
 //! of blocks took 20–110 s each (#233). sp-server calls these functions as
 //! ordinary ones, so its own builds (a mutant's included) never recompile
-//! them: nothing here is `#[inline]` or generic, on purpose.
+//! them: nothing here is `#[inline]` or generic, on purpose. The other half
+//! is rubato's own: its AVX / SSE / NEON dot kernels are plain functions,
+//! compiled in rubato, which the workspace optimizes too
+//! (`[profile.dev.package.rubato]`; measured: sp-asrc alone took the slowest
+//! ASIO test only from 46 s to 31 s).
 //!
 //! What the stage is for, its filter and its measurements are sp-server's
 //! `playback::asrc::Asrc`'s to say; this crate only carries it. The

@@ -94,7 +94,7 @@ songplayer/
 | `sp-ndi` | NDI SDK integration via `libloading`. Loads the NDI shared library at runtime to avoid compile-time dependency. |
 | `sp-decoder` | Windows Media Foundation video decoder. Entire crate is `cfg(windows)` — will not compile on Linux. |
 | `sp-gpu` | The `SP-program-MAX` compositor and its Spout sender (#223): Direct3D 11 + the vendored Spout2 SDK on Windows (WARP in tests), a stub reporting "unsupported" elsewhere. Pure decisions (adapter, layers, colour, CPU reference) are Linux-tested. |
-| `sp-asrc` | The ASIO output's rubato `Async` sinc stage behind one non-generic type (#233). rubato is generic, so its code compiles here, at `opt-level = 3` in every profile (`[profile.dev.package.sp-asrc]`): the ASIO tests stay fast. |
+| `sp-asrc` | The ASIO output's rubato `Async` sinc stage behind one non-generic type (#233). rubato's generic glue compiles here and its dot kernels in rubato, both at `opt-level = 3` in every profile (`[profile.dev.package.sp-asrc]`, `[profile.dev.package.rubato]`): the ASIO tests stay fast. |
 | `sp-server` | Axum 0.8 server with HTTP REST + WebSocket. Runs yt-dlp and FFmpeg as subprocesses. Main async binary. |
 | `sp-ui` | Leptos 0.7 CSR frontend compiled to WASM via Trunk. Communicates with sp-server via HTTP/WebSocket. |
 | `src-tauri` | Tauri 2 application shell. Embeds `dist/` from sp-ui build and spawns sp-server in background. |

@@ -60,10 +60,17 @@ panic = "abort"
 inherits = "test"
 debug = "none"
 
-# #233: rubato's sinc stage is generic, so it is compiled in sp-asrc, the one
-# crate that names it — optimized in the dev profile and in those that
-# inherit it (test, mutants), so the ASIO tests that push thousands of blocks
-# through a 256-tap cubic stage take seconds, not minutes. Same results at
-# any opt-level (no float contraction). sp-server's builds never recompile it.
+# #233: the ASIO output's 256-tap cubic sinc stage, optimized in the dev
+# profile and in those that inherit it (test, mutants), so the ASIO tests
+# that push thousands of blocks through it take seconds, not minutes. Two
+# halves: rubato's generic glue (`Async<T>`, the interpolators, the adapters)
+# is compiled in sp-asrc, the one crate that names it; its AVX / SSE / NEON
+# dot kernels (`dot_avx_f32_dyn`, `impl AvxSample for f32`) are plain
+# functions, compiled in rubato itself. Same results at any opt-level (no
+# float contraction; the kernel is picked at run time). Neither is rebuilt
+# by a sp-server build (a mutant's included).
 [profile.dev.package.sp-asrc]
+opt-level = 3
+
+[profile.dev.package.rubato]
 opt-level = 3

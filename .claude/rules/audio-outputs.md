@@ -44,7 +44,13 @@ sp-asrc at `opt-level = 3` in the dev profile (test and mutants inherit it).
 Named from sp-server, the 256-tap cubic stage ran unoptimized in tests: tens
 of ms a block, 20–110 s per ASIO test, ~330 s of the suite. Keep every
 rubato `Async` call in sp-asrc and nothing there `#[inline]` or generic, or
-the cost moves back into sp-server's builds. `asrc_params()` (the filter)
+the cost moves back into sp-server's builds. rubato itself is optimized too
+(`[profile.dev.package.rubato]`): its AVX / SSE / NEON dot kernels
+(`dot_avx_f32_dyn`, `impl AvxSample for f32`) are NOT generic, so they
+compile in rubato — sp-asrc alone took the slowest ASIO test only from 46 s
+to 31 s (nextest, mutation shard logs, CI 38041182285). Read a slow test's
+time in the `mutants-report-shard-*` artifact's per-mutant logs (`PASS [
+31.123s]`); the Test job's `cargo test` prints only the binary's total. `asrc_params()` (the filter)
 stays in sp-server's `asrc.rs`. VBAN's `Fft` (`vban_rate.rs`) is still
 compiled in sp-server.
 
