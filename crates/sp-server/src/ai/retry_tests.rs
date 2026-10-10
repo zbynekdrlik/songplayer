@@ -118,16 +118,25 @@ fn a_content_filter_refusal_is_told_apart() {
     assert!(!is_content_filtered(""));
 }
 
-/// #144: a refusal is found in an error's causes too (the cleanup adds its
-/// context on top of the client's error).
+/// #144: a refusal is found by TYPE in an error's causes (the cleanup adds
+/// its context on top of the client's error), never by an error's text: a
+/// malformed answer quoting the phrase is no refusal.
 #[test]
-fn a_content_filter_refusal_is_found_in_an_errors_causes() {
-    let refused = anyhow::anyhow!(
-        "chat completion failed (HTTP 502): Output blocked by content filtering policy"
-    )
+fn a_content_filter_refusal_is_found_by_type_in_an_errors_causes() {
+    let refused = anyhow::Error::new(ContentFiltered {
+        detail: "HTTP 502: Output blocked by content filtering policy".into(),
+    })
     .context("Claude clean_lyrics chat failed");
     assert!(content_filtered(&refused));
+    assert!(
+        refused
+            .chain()
+            .any(|c| c.to_string().contains("upstream content filter"))
+    );
     let outage = anyhow::anyhow!("chat completion failed (HTTP 503): auth_unavailable")
         .context("Claude clean_lyrics chat failed");
     assert!(!content_filtered(&outage));
+    let quoting = anyhow::anyhow!("malformed answer: Output blocked by content filtering policy")
+        .context("Claude response malformed");
+    assert!(!content_filtered(&quoting));
 }

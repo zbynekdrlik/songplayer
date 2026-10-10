@@ -117,11 +117,30 @@ pub fn is_content_filtered(body: &str) -> bool {
     body.contains("content filtering policy")
 }
 
-/// #144: whether `error`, or one of its causes, is such a refusal.
+/// #144: a call Claude's upstream content filter refused
+/// ([`is_content_filtered`]): the client's error for it, typed so a caller
+/// asks [`content_filtered`] by type, never by an error's text.
+#[derive(Debug)]
+pub struct ContentFiltered {
+    /// The refusal: its status and the proxy's body (or why it was not sent).
+    pub detail: String,
+}
+
+impl std::fmt::Display for ContentFiltered {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "chat completion refused by the upstream content filter ({})",
+            self.detail
+        )
+    }
+}
+
+impl std::error::Error for ContentFiltered {}
+
+/// #144: whether `error`, or one of its causes, is a [`ContentFiltered`].
 pub fn content_filtered(error: &anyhow::Error) -> bool {
-    error
-        .chain()
-        .any(|cause| is_content_filtered(&cause.to_string()))
+    error.chain().any(|cause| cause.is::<ContentFiltered>())
 }
 
 /// The first [`BODY_EXCERPT_CHARS`] characters of a refused call's body

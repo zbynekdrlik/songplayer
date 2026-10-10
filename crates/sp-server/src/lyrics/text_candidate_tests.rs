@@ -129,13 +129,12 @@ fn cleaned() -> CandidateText {
 
 /// The error a cleanup refused by Claude's upstream content filter carries
 /// up to `gather`, as `AiClient::chat` and `clean_lyrics_via_claude` build it
-/// (SNV log 10.10.2026).
+/// (SNV log 10.10.2026): the client's typed refusal, under the cleanup's
+/// context.
 fn content_filtered() -> anyhow::Error {
-    anyhow::anyhow!(
-        "chat completion failed (HTTP 502 Bad Gateway): {{\"error\":{{\"message\":\"claude \
-         executor: upstream returned error event: Output blocked by content filtering \
-         policy\",\"type\":\"server_error\"}}}}"
-    )
+    anyhow::Error::new(crate::ai::retry::ContentFiltered {
+        detail: "HTTP 502 Bad Gateway: Output blocked by content filtering policy".into(),
+    })
     .context("Claude clean_lyrics chat failed")
 }
 

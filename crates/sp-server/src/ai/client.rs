@@ -117,7 +117,10 @@ impl AiClient {
                     body = %body_excerpt(&body_text),
                     "chat completion refused by the upstream content filter — final, not retried"
                 );
-                anyhow::bail!("chat completion failed (HTTP {status}): {body_text}");
+                return Err(super::retry::ContentFiltered {
+                    detail: format!("HTTP {status}: {body_text}"),
+                }
+                .into());
             }
             if is_retried(status.as_u16()) {
                 log_refusal(status, retry, delay, &body_text);

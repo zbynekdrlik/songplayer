@@ -561,11 +561,14 @@ pub async fn get_lyrics_status(pool: &SqlitePool) -> Result<(i64, i64, i64), sql
     Ok((total, processed, pending))
 }
 
-/// Get next video that has lyrics but is missing SK translation.
+/// Get next video that has lyrics but is missing SK translation, leaving
+/// out `skip` (#144: the songs whose translation Claude's content filter
+/// refused this run).
 #[cfg_attr(test, mutants::skip)]
 pub async fn get_next_video_missing_translation(
     pool: &SqlitePool,
     cache_dir: &std::path::Path,
+    skip: &std::collections::HashSet<String>,
 ) -> Result<Option<(i64, String)>, sqlx::Error> {
     let rows = sqlx::query_as::<_, (i64, String)>(
         "SELECT v.id, v.youtube_id \
@@ -578,6 +581,9 @@ pub async fn get_next_video_missing_translation(
     .await?;
 
     for (id, youtube_id) in rows {
+        if skip.contains(&youtube_id) {
+            continue;
+        }
         let path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
