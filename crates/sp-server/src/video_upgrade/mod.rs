@@ -55,7 +55,9 @@ pub(crate) struct VideoFacts {
 }
 
 /// The facts of an opened video: its first picture, its rate and length,
-/// then one picture [`NEAR_END_MS`] before the end.
+/// then one picture [`NEAR_END_MS`] before the end. Its one production
+/// caller is the Windows reader's (`steps.rs`).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn facts_of<V: VideoStream + ?Sized>(video: &mut V) -> Result<VideoFacts, String> {
     let first = video
         .next_frame()

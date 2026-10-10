@@ -14,7 +14,7 @@ use crate::downloader::format::{self, DownloadedFormat};
 use crate::downloader::{probe, ytdlp_cmd, ytdlp_lock, ytdlp_video_args};
 
 /// The longest an upgrade's download may take before it is killed.
-const DOWNLOAD_BOUND: Duration = Duration::from_secs(30 * 60);
+const DOWNLOAD_BOUND: Duration = Duration::from_secs(1800); // 30 min
 /// The most of yt-dlp's error text an answer carries.
 const ERROR_MAX_CHARS: usize = 400;
 

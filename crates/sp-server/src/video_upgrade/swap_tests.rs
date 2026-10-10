@@ -41,6 +41,25 @@ fn a_stale_prev_is_replaced_by_the_video_just_swapped_out() {
     assert_eq!(read(&prev_path(&video)), "old");
 }
 
+/// A stale `.prev` that cannot be removed (here a directory) refuses the
+/// swap before anything is linked or renamed.
+#[test]
+fn a_stale_prev_that_cannot_be_removed_refuses_the_swap() {
+    let dir = tempfile::tempdir().unwrap();
+    let video = dir.path().join("a_video.mp4");
+    let temp = dir.path().join("t.mp4");
+    std::fs::write(&video, "old").unwrap();
+    std::fs::write(&temp, "new").unwrap();
+    std::fs::create_dir(prev_path(&video)).unwrap();
+    let out = replace(&video, &temp);
+    assert!(
+        matches!(&out, Swapped::Refused(why) if why.starts_with("the stale")),
+        "{out:?}"
+    );
+    assert_eq!(read(&video), "old");
+    assert_eq!(read(&temp), "new");
+}
+
 /// A refused rename (here: no temp) changes nothing and leaves no `.prev`.
 #[test]
 fn a_refused_rename_is_busy_and_removes_the_link_again() {
@@ -122,8 +141,9 @@ async fn the_swap_is_refused_when_the_rows_moved_on() {
     std::fs::write(&video, "old").unwrap();
     std::fs::write(&temp, "new").unwrap();
     let name = video.to_str().unwrap();
-    for paths in [vec![Some(name), Some("/c/b_video.mp4")], vec![None]] {
-        let pool = rows(&paths).await;
+    let cases: [&[Option<&str>]; 2] = [&[Some(name), Some("/c/b_video.mp4")], &[None]];
+    for paths in cases {
+        let pool = rows(paths).await;
         let out = swap(&pool, "PySFfTurafA", &video, &temp).await;
         assert!(
             matches!(&out, Swapped::Refused(why) if why.contains("no longer name")),
