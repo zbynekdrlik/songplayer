@@ -78,14 +78,25 @@ struct ArtistRef {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Fetch plain-text lyrics lines from Genius for the given artist + song.
-/// Returns `None` when:
+/// Fetch plain-text lyrics lines from Genius for the given artist + song
+/// ([`fetch_lyrics_at`] on [`GENIUS_SEARCH_URL`]).
+#[cfg_attr(test, mutants::skip)] // the production URL only; the logic is fetch_lyrics_at's
+pub async fn fetch_lyrics(
+    client: &Client,
+    access_token: &str,
+    artist: &str,
+    song: &str,
+) -> Result<Option<LyricsTrack>> {
+    fetch_lyrics_at(client, GENIUS_SEARCH_URL, access_token, artist, song).await
+}
+
+/// [`fetch_lyrics`] against `search_url`. Returns `None` when:
 ///   - `access_token` is empty (caller hasn't configured the setting)
 ///   - the `/search` call fails or returns no song hits
 ///   - the public lyrics page yields no recognisable lyric regions
-#[cfg_attr(test, mutants::skip)]
-pub async fn fetch_lyrics(
+pub(crate) async fn fetch_lyrics_at(
     client: &Client,
+    search_url: &str,
     access_token: &str,
     artist: &str,
     song: &str,
@@ -99,7 +110,7 @@ pub async fn fetch_lyrics(
     }
 
     let q = format!("{} {}", artist.trim(), song.trim());
-    let url = format!("{}?q={}", GENIUS_SEARCH_URL, urlencoding::encode(&q));
+    let url = format!("{search_url}?q={}", urlencoding::encode(&q));
     debug!(%url, "Genius search request");
 
     let resp = client
@@ -540,3 +551,7 @@ mod tests;
 #[cfg(test)]
 #[path = "genius_title_tests.rs"]
 mod title_tests;
+
+#[cfg(test)]
+#[path = "genius_fetch_tests.rs"]
+mod fetch_tests;
