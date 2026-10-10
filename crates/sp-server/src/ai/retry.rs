@@ -15,7 +15,10 @@
 //!   disabled) the waits are [`RetryPolicy::fallback`] (5 s, 20 s, 60 s; its
 //!   length is the retry budget): 85 s in all outlasts the default 60 s
 //!   cooldown.
-//! - Only 429 and 5xx are retried; anything else fails at once.
+//! - Only 429 and 5xx are retried; anything else fails at once. So does a
+//!   refusal by Claude's upstream content filter (#144,
+//!   [`is_content_filtered`]): the same output is refused again, and each
+//!   refusal costs the proxy's cooldown — ~60 s of every AI call refused.
 //!
 //! Every caller today is background work (lyrics, translation, metadata), so
 //! the client uses [`RetryPolicy::SPANNING`]; a caller that cannot wait sets
@@ -103,6 +106,22 @@ impl RetryPolicy {
 /// Whether a status is retried: 429 or any 5xx.
 pub fn is_retried(status: u16) -> bool {
     status == 429 || (500..600).contains(&status)
+}
+
+/// #144: whether a refused call's body is Claude's upstream content filter
+/// ("Output blocked by content filtering policy", relayed by CLIProxyAPI as
+/// a 502). The same request is refused again, and every refusal puts the
+/// proxy's one credential into its cooldown, so the client never retries
+/// it.
+pub fn is_content_filtered(body: &str) -> bool {
+    body.contains("content filtering policy")
+}
+
+/// #144: whether `error`, or one of its causes, is such a refusal.
+pub fn content_filtered(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| is_content_filtered(&cause.to_string()))
 }
 
 /// The first [`BODY_EXCERPT_CHARS`] characters of a refused call's body

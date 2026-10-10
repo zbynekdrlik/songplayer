@@ -2014,16 +2014,42 @@ jobs:
             exit 1
           }
           $req = @{ model = $model; max_tokens = 16; messages = @(@{ role = "user"; content = "Reply with exactly: OK" }) } | ConvertTo-Json -Depth 4
-          try {
-            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:18787/v1/chat/completions" -Method Post -ContentType "application/json" -Body $req -UseBasicParsing -TimeoutSec 60
-          } catch {
-            $detail = ""
-            if ($_.Exception.Response) {
-              $detail = (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd()
+          function Send-Completion {
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:18787/v1/chat/completions" -Method Post -ContentType "application/json" -Body $req -UseBasicParsing -TimeoutSec 60
+              return @{ resp = $r }
+            } catch {
+              $out = @{ error = $_.Exception.Message; status = 0; retryAfter = $null; detail = "" }
+              if ($_.Exception.Response) {
+                $out.status = [int]$_.Exception.Response.StatusCode
+                $out.retryAfter = $_.Exception.Response.Headers["Retry-After"]
+                $out.detail = (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd()
+              }
+              return $out
             }
-            Write-Error "FAIL: a completion with $model failed: $($_.Exception.Message) $detail"
+          }
+          $try = Send-Completion
+          # #144: the proxy's credential cooldown after a transient upstream
+          # error (e.g. Claude's content filter refusing a lyrics cleanup the
+          # worker just sent) is a 503 auth_unavailable whose Retry-After is
+          # the cooldown left (60 s by default). Waited out ONCE, bounded at
+          # 120 s exactly as the worker's client does (ai/retry.rs); then one
+          # more completion must answer. A quota cooldown (429
+          # model_cooldown), a longer Retry-After or a second failure still
+          # fails the gate.
+          if ($try.error -and $try.status -eq 503 -and $try.detail -match 'auth_unavailable') {
+            $wait = 0
+            if ([int]::TryParse("$($try.retryAfter)", [ref]$wait) -and $wait -ge 0 -and $wait -le 120) {
+              Write-Host "the proxy's credential cools down for $wait s (auth_unavailable: $($try.detail)): waiting it out once"
+              Start-Sleep -Seconds ($wait + 2)
+              $try = Send-Completion
+            }
+          }
+          if ($try.error) {
+            Write-Error "FAIL: a completion with $model failed: $($try.error) $($try.detail)"
             exit 1
           }
+          $resp = $try.resp
           $answer = (($resp.Content | ConvertFrom-Json).choices[0].message.content)
           Write-Host "completion with ${model}: HTTP $($resp.StatusCode) '$answer'"
           if (-not $answer) {

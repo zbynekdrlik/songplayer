@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use tracing::{debug, warn};
 
 use super::AiSettings;
-use super::retry::{RetryPolicy, body_excerpt, is_retried};
+use super::retry::{RetryPolicy, body_excerpt, is_content_filtered, is_retried};
 
 pub struct AiClient {
     http: reqwest::Client,
@@ -109,6 +109,16 @@ impl AiClient {
             let retry = attempt + 1;
             let delay = self.retry.after_response(status, resp.headers(), retry);
             let body_text = resp.text().await.unwrap_or_default();
+            // #144: final — the same output is refused again, and each
+            // refusal puts the proxy's credential into its cooldown.
+            if is_content_filtered(&body_text) {
+                warn!(
+                    status = %status,
+                    body = %body_excerpt(&body_text),
+                    "chat completion refused by the upstream content filter — final, not retried"
+                );
+                anyhow::bail!("chat completion failed (HTTP {status}): {body_text}");
+            }
             if is_retried(status.as_u16()) {
                 log_refusal(status, retry, delay, &body_text);
             }
