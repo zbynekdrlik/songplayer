@@ -531,6 +531,25 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   30 s**: the default. The same 8-vs-14 contrast is the causal check that
   Arena shows MAX at all: after an Arena relaunch (its clips reconnected)
   16 + 39 vs 5 + 0, after a forced SongPlayer kill 25 + 41 vs 0 + 0.
+- **A dark output never spins the thread** (#243, PP 9.10.2026: the laptop
+  panel DISPLAY1 stopped presenting while still attached, `WaitForVBlank`
+  returned at once, the fit's boot never ended and the time-critical
+  thread spun a core for hours, unexplained on the API). Now
+  `win/vblank.rs` times each wait: under `VBLANK_MIN_WAIT` (1 ms,
+  `vblank::waited`) it did not wait — never fed to the fit — and the
+  thread sleeps `not_waiting_sleep(streak)` (1 ms doubling to
+  `VBLANK_IDLE_MAX` 250 ms, never none), logging one WARN at the 10th in a
+  row and one INFO when a wait waits again. A refresh over
+  `VBLANK_RESTART` (1 s) after the last counted one boots the fit afresh
+  (the index is never carried across a long gap). The tracker's
+  `state(now)` = `vblank_state`: `ticking` with a fresh grid, else
+  `measuring` until `VBLANK_NOT_TICKING` (2 s) after the last wait that
+  waited (or the start), then `not_ticking`; the worker records it per
+  boundary (`MaxOut::record_vblank_state`) and logs only entering /
+  leaving `not_ticking` (`program_max_vblank::vblank_log`, one WARN / one
+  INFO). The fallback stays the constant lead: pacing on another output
+  was rejected (DWM composes every output on the primary's refresh, the
+  measurement above).
 - **Restarts (owner's old Spout worry, verified 9.10.2026):** a SongPlayer
   restart, clean (4 deploys) or forced (`Stop-Process -Force`), brings
   `SP-program-MAX` back under its exact name in ~10 s (`sender_backoffs`
@@ -559,13 +578,15 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
 - `GET /api/v1/program` (and the cut answer) → `max {enabled, state, width:
   3840, height: 2160, submitted, coalesced, failed, upload_us_p99,
   draw_us_p99, send_us_p99, send_at_us_p50/p99/max, send_late,
-  vblank_output, vblank_tracking, vblank_period_ns, vblank_phase_us,
+  vblank_output, vblank_state, vblank_tracking, vblank_period_ns, vblank_phase_us,
   send_off_grid, send_phase_us_p50/p99, slot_repicks, device_resets,
   sender_backoffs, spout_name, adapter, fhd}` (`MaxStatus`; `fhd` = #239,
   "The FHD Spout sender" below;
   `send_at_us_*` = send done − offer over the window, `send_late` = composes
   that ran past their due instant; `vblank_output` = the tracker's output
-  (`\\.\DISPLAY2 7680x1080`, `null` with no tracker), `vblank_tracking` =
+  (`\\.\DISPLAY2 7680x1080`, `null` with no tracker), `vblank_state` =
+  #243's `measuring` / `ticking` / `not_ticking` (`null` with no tracker),
+  `vblank_tracking` =
   the LAST send was on the grid, `vblank_period_ns` = the grid's period at
   the last aligned send, `vblank_phase_us` = the setting,
   `send_off_grid` = sends at the constant lead (a separate counter, so a
@@ -596,7 +617,8 @@ suite by `max-gate.spec.ts`): the setting on, 3840×2160 under
 sends one per grid slot, standby pairs included), and `coalesced` (MAX
 kept up with the program), `failed` and `device_resets` +0 in between,
 a `vblank_output`, `vblank_tracking` and `send_off_grid` +0 (every
-boundary on the wall's grid), the median start after the vblank
+boundary on the wall's grid; a `vblank_state` `not_ticking` is named as a
+dark output, #243), the median start after the vblank
 (`send_phase_us_p50`) in [`vblank_phase_us`, + `SEND_PHASE_SLACK_US`
 1 500 µs], and `slot_repicks` +1 at most (`MAX_SLOT_REPICKS`). The
 first read comes after the first boundary went out, so the build's own
