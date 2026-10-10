@@ -111,9 +111,13 @@ the NDI runtime hands each `send_create` the next free TCP port in creation
 order. `SP-program` is the only sender, so on Windows `start_program` first
 waits (≤ 10 s) until the previous instance has released the span
 (`startup_pipelines::wait_for_program_ports` → `wait_for_ports_free` +
-`ndi_ports_free` over `ndi_port_range(NDI_SENDERS)` = 5960..5962), then
-creates it: a restart gets the same port again. A span still busy after the
-bound is a WARN, never a blocked start. The pure pieces are Linux-tested in
+`ndi_ports_free` over `ndi_port_range(NDI_SENDERS)` = 5960..5961, the ports
+SongPlayer's own process listens on), then creates it: a restart gets the
+same port again. A span still busy after the bound is a WARN naming the
+busy ports, never a blocked start. #240: never add a "margin" port past
+them — cg OBS's own NDI sender listens on 5962 + 5963, so the old
+`base..=base+N+1` span never came free and every start since 8.10.2026
+waited the full 10 s before SP-program, VBAN and ASIO started. The pure pieces are Linux-tested in
 `startup_pipelines.rs`. The port moves ONCE, at the 0.71.0-dev.16 deploy that
 retires the per-playlist senders (they took the ports before it): see "The
 cutover" below.

@@ -38,14 +38,15 @@ pub const NDI_PORT_BASE: u16 = 5960;
 /// The NDI senders SongPlayer creates: `SP-program` alone (#221 lane 3).
 pub const NDI_SENDERS: usize = 1;
 
-/// The port range to probe-bind before creating the first sender: the base
-/// plus one port per sender plus a small margin (`base..=base+N+1`), so an
-/// immediate restart waits until the previous instance released the whole
-/// span it could have used.
+/// The port range to probe-bind before creating the first sender: the ports
+/// SongPlayer's own process holds — the base plus one port per sender
+/// (`base..=base+N`; SNV, 10.10.2026: SongPlayer listens on 5960 + 5961 with
+/// SP-program alone) — so an immediate restart waits until the previous
+/// instance released them. No margin past them (#240): the next ports belong
+/// to the box's other NDI senders (cg OBS's on 5962 + 5963), which never
+/// free them, so a span naming one waited the full bound at every start.
 pub fn ndi_port_range(n_outputs: usize) -> Vec<u16> {
-    let last = NDI_PORT_BASE
-        .saturating_add(u16::try_from(n_outputs).unwrap_or(u16::MAX))
-        .saturating_add(1);
+    let last = NDI_PORT_BASE.saturating_add(u16::try_from(n_outputs).unwrap_or(u16::MAX));
     (NDI_PORT_BASE..=last).collect()
 }
 
@@ -116,16 +117,20 @@ where
 }
 
 /// Real port prober: a port is "free" iff a TCP listener can bind it on all
-/// interfaces. Binds and immediately drops each listener.
+/// interfaces. Binds and immediately drops the listener.
 ///
 /// mutants::skip — I/O over the real network stack; not exercised on the
 /// mutation runner. The pure wait loop it feeds (`wait_for_ports_free`) is
 /// unit-tested with a fake prober.
 #[cfg_attr(test, mutants::skip)]
+pub fn ndi_port_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("0.0.0.0", port)).is_ok()
+}
+
+/// Every port of `ports` free ([`ndi_port_free`]).
+#[cfg_attr(test, mutants::skip)] // I/O, as above
 pub fn ndi_ports_free(ports: &[u16]) -> bool {
-    ports
-        .iter()
-        .all(|&p| std::net::TcpListener::bind(("0.0.0.0", p)).is_ok())
+    ports.iter().all(|&p| ndi_port_free(p))
 }
 
 /// #196: wait (≤ 10 s, on a blocking thread so the async startup is never
@@ -156,11 +161,20 @@ pub async fn wait_for_program_ports() {
             ?ports,
             polls, "ndi: the SP-program port span freed after waiting for the previous instance"
         ),
-        PortWaitOutcome::TimedOut(polls) => warn!(
-            ?ports,
-            polls,
-            "ndi: the SP-program port span still busy after the wait — proceeding (its port may shift this restart)"
-        ),
+        PortWaitOutcome::TimedOut(polls) => {
+            // #240: name the ports still held, so a WARN shows WHICH one.
+            let busy: Vec<u16> = ports
+                .iter()
+                .copied()
+                .filter(|&p| !ndi_port_free(p))
+                .collect();
+            warn!(
+                ?ports,
+                ?busy,
+                polls,
+                "ndi: the SP-program port span still busy after the wait — proceeding (its port may shift this restart)"
+            )
+        }
     }
 }
 

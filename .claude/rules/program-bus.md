@@ -153,7 +153,7 @@ output of its own and feeds this bus alone (`pipeline-testability.md`).
   (`startup_pipelines.rs`). #221 lane 3: `SP-program` is the only NDI
   sender, so on Windows `start_program` first waits (≤ 10 s, #196) until the
   previous instance released the sender port span
-  (`startup_pipelines::wait_for_program_ports`, 5960..5962), then creates it:
+  (`startup_pipelines::wait_for_program_ports`, 5960..5961, #240), then creates it:
   a restart gives it the same port (the first one the NDI runtime hands
   out), the one DistroAV's receivers reconnect to by URL. (Its port moved
   once, at the 0.71.0-dev.16 deploy that retired the per-playlist senders,
