@@ -1405,9 +1405,7 @@ jobs:
           } else {
             Write-Host "Preserving existing gemini_api_key (set; the API shows it masked, #229)"
           }
-          # Seed the target model directly — seeding 'gemini-2.0-flash' here
-          # used to bounce through the stale-model migration at server startup,
-          # producing confusing logs. Write the correct value the first time.
+          # Seed the current metadata model (sp_core DEFAULT_GEMINI_MODEL).
           if ([string]::IsNullOrEmpty($current.gemini_model)) {
             $seed.gemini_model = "gemini-3.1-pro-preview"
           }

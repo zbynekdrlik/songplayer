@@ -56,6 +56,12 @@ absence. `auth-dir` / `host` / `port` / `request-retry` / `claude-api-key` uncha
   (`translator::classify_zero_translation`), so it is never a silent "parse
   returned 0" again.
 
+## The providers table (#232)
+
+`docs/ai-providers.md` lists every external AI / lyrics provider, its
+model, its credential setting and the post-deploy gate that checks it
+live. A change of provider, model or gate updates it in the same push.
+
 ## A refused call waits out the proxy's credential cooldown (#145, `ai/retry.rs`)
 
 CLIProxyAPI (8.0.4 source, read on #145 comment 5909663225) cools its one

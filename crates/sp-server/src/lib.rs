@@ -306,15 +306,6 @@ pub async fn start(
         .await?
         .unwrap_or_else(|| sp_core::config::DEFAULT_GEMINI_MODEL.to_string());
 
-    // Migrate stale gemini_model setting from old defaults.
-    let gemini_model = if gemini_model == "gemini-2.0-flash" || gemini_model == "gemini-2.5-flash" {
-        let new_model = sp_core::config::DEFAULT_GEMINI_MODEL;
-        tracing::info!("upgrading gemini_model setting from {gemini_model} to {new_model}");
-        db::models::set_setting(&pool, "gemini_model", new_model).await?;
-        new_model.to_string()
-    } else {
-        gemini_model
-    };
     let metadata_chain =
         metadata::provider_chain(&pool, ai_client.clone(), &gemini_key, &gemini_model);
 
