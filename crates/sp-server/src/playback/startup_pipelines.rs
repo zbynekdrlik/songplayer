@@ -214,21 +214,24 @@ mod tests {
         assert_eq!(startup_mode(&playlists, 9), PlaybackMode::Continuous);
     }
 
+    /// #240: the span is the ports SongPlayer's own process holds — 5960
+    /// and SP-program's 5961 (measured on SNV, 10.10.2026) — never a
+    /// "margin" port: cg OBS's own NDI sender listens on 5962, so a span
+    /// that named it never came free and every start waited the full 10 s.
     #[test]
-    fn the_program_s_port_span_is_the_base_pair_plus_one() {
-        // SP-program alone: 5960 (its port) .. 5962 (the margin).
+    fn the_program_s_port_span_is_its_own_pair() {
         assert_eq!(NDI_SENDERS, 1);
-        assert_eq!(ndi_port_range(NDI_SENDERS), vec![5960, 5961, 5962]);
+        assert_eq!(ndi_port_range(NDI_SENDERS), vec![5960, 5961]);
     }
 
     #[test]
-    fn port_range_is_base_through_base_plus_n_plus_one() {
-        assert_eq!(ndi_port_range(3), vec![5960, 5961, 5962, 5963, 5964]);
+    fn port_range_is_base_through_base_plus_n() {
+        assert_eq!(ndi_port_range(3), vec![5960, 5961, 5962, 5963]);
     }
 
     #[test]
-    fn port_range_zero_outputs_still_covers_base_pair() {
-        assert_eq!(ndi_port_range(0), vec![5960, 5961]);
+    fn port_range_zero_outputs_is_the_base_alone() {
+        assert_eq!(ndi_port_range(0), vec![5960]);
     }
 
     #[test]
