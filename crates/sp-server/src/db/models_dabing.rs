@@ -310,7 +310,7 @@ pub enum SynthDecision {
 /// not terminal (`dub_status` not `none`/`ready`), and past any failure backoff.
 /// Returns `None` when nothing is due.
 pub async fn get_next_dub_job(pool: &SqlitePool) -> Result<Option<DubJob>, sqlx::Error> {
-    let row = sqlx::query(
+    let row = sqlx::query(concat!(
         "SELECT id, youtube_id, audio_file_path, duration_ms, dub_status, \
                 vocals_file_path, instrumental_file_path, \
                 stem_status, dub_attempts \
@@ -321,9 +321,11 @@ pub async fn get_next_dub_job(pool: &SqlitePool) -> Result<Option<DubJob>, sqlx:
            AND dub_status NOT IN ('none', 'ready') \
            AND (dub_next_attempt_at IS NULL \
                 OR dub_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-         ORDER BY dub_requested_at DESC, id DESC \
+           AND ",
+        crate::test_item::not_test_item!(), // #228
+        " ORDER BY dub_requested_at DESC, id DESC \
          LIMIT 1",
-    )
+    ))
     .fetch_optional(pool)
     .await?;
 

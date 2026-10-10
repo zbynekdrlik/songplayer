@@ -19,9 +19,12 @@ use sqlx::{Row, SqlitePool};
 /// rows and `failed_videos` counts exactly these, so the count drains to 0 as
 /// the worker repairs them. A row the operator corrected on the dashboard
 /// (`metadata_source = 'manual'`, set by `PATCH /api/v1/videos/{id}`) is
-/// never in it: the repair would write over the correction (#136).
-pub const REPAIR_QUEUE_WHERE: &str =
-    "gemini_failed = 1 AND normalized = 1 AND metadata_source IS NOT 'manual'";
+/// never in it: the repair would write over the correction (#136), nor is
+/// the #228 test item.
+pub const REPAIR_QUEUE_WHERE: &str = concat!(
+    "gemini_failed = 1 AND normalized = 1 AND metadata_source IS NOT 'manual' AND ",
+    crate::test_item::not_test_item!()
+);
 
 /// Characters of a provider error kept on the status / in a probe answer: a
 /// Claude error carries the proxy's whole reply, an LLM answer can be long.

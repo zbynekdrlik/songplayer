@@ -493,6 +493,7 @@ fn a_layout_is_read_from_the_sources_job() {
         video_tc_100ns: T0,
         audio_tc_100ns: T0,
         live: true,
+        media_pts_100ns: None,
     };
     assert_eq!(
         Layout::of(&job),

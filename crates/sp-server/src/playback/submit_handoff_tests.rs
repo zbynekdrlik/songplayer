@@ -247,6 +247,7 @@ fn submit_job_stamp_boundary_is_the_video_tc() {
         video_tc_100ns: 3_333_300,
         audio_tc_100ns: 3_333_311,
         live: true,
+        media_pts_100ns: None,
     };
     assert_eq!(job.stamp_boundary_100ns(), 3_333_300);
 }
@@ -283,4 +284,22 @@ fn from_paced_arc_clones_the_frame_without_copying_pixels() {
     assert_eq!(job.stride, 4, "stride propagated");
     assert_eq!(job.stamp_boundary_100ns(), 3_333_300);
     assert_eq!(job.audio_tc_100ns, 3_333_311);
+}
+
+/// #228: a live pair carries its frame's media time (the pacer's pts, in 100 ns),
+/// a standby pair none: only a decoded frame of the item is one.
+#[test]
+fn only_a_live_pair_carries_the_frame_s_media_time() {
+    let paced = PacedFrame {
+        pts_ns: 33_000_000,
+        width: 4,
+        height: 2,
+        stride: 4,
+        video: SharedFrame::new(vec![9u8; 12]),
+        audio: Vec::new(),
+    };
+    let live = SubmitJob::from_paced(&paced, &[], 3_333_300, 3_333_300, true);
+    assert_eq!(live.media_pts_100ns, Some(330_000));
+    let standby = SubmitJob::from_paced(&paced, &[], 3_333_300, 3_333_300, false);
+    assert_eq!(standby.media_pts_100ns, None);
 }

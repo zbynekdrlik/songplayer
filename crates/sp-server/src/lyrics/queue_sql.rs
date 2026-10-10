@@ -7,12 +7,16 @@
 /// The rows every selector bucket draws from, apart from their own recheck
 /// time: on an active playlist, downloaded, and never a dub-requested video
 /// (#182: a dubbed talk gets its EN/SK subtitles from the Live-session
-/// transcript, `dabing::subtitles`, not the song-lyrics pipeline). A macro so
+/// transcript, `dabing::subtitles`, not the song-lyrics pipeline), nor the
+/// #228 test item (`test_item::not_test_item!`). A macro so
 /// [`LYRICS_ELIGIBLE`] and [`LYRICS_DUE`] are built from one text.
 macro_rules! lyrics_eligible {
     () => {
-        "p.is_active = 1 AND v.normalized = 1 \
-         AND (v.dub_requested IS NULL OR v.dub_requested = 0)"
+        concat!(
+            "p.is_active = 1 AND v.normalized = 1 \
+             AND (v.dub_requested IS NULL OR v.dub_requested = 0) AND ",
+            crate::test_item::not_test_item!()
+        )
     };
 }
 

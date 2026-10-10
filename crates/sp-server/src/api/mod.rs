@@ -21,6 +21,7 @@ pub mod routes_seek; // #194 unified seek route
 pub mod routes_status; // #221 L4b: /api/v1/status's program fields from SongPlayer's own program
 pub mod settings; // #229: GET/PATCH /api/v1/settings (secrets masked)
 pub mod stems;
+pub mod test_item; // #228: /api/v1/test-item (camera-box's measurement clip as the test item)
 pub mod videos;
 pub mod websocket;
 
@@ -144,6 +145,24 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/diag/decode-bench",
             axum::routing::post(diag::post_decode_bench),
         )
+        // #228: the local test item (camera-box's measurement clip): its ids,
+        // its import from the sample dir, its start from 0 and its stop.
+        .route(
+            "/api/v1/test-item",
+            axum::routing::get(test_item::get_test_item),
+        )
+        .route(
+            "/api/v1/test-item/import",
+            axum::routing::post(test_item::post_import),
+        )
+        .route(
+            "/api/v1/test-item/start",
+            axum::routing::post(test_item::post_start),
+        )
+        .route(
+            "/api/v1/test-item/stop",
+            axum::routing::post(test_item::post_stop),
+        )
         // Resolume hosts
         .route(
             "/api/v1/resolume/hosts",
@@ -171,6 +190,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/program/trace",
             axum::routing::get(program::get_program_trace),
+        )
+        // #228: the 911014 burn on SP-program (in memory, default off).
+        .route(
+            "/api/v1/program/burn",
+            axum::routing::post(program::post_program_burn),
         )
         // #233: the registered ASIO drivers (an ASIO output's driver list).
         .route(

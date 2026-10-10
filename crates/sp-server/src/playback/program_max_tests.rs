@@ -375,6 +375,7 @@ fn a_picture_is_the_jobs_own_frame_and_layout() {
         video_tc_100ns: 5,
         audio_tc_100ns: 5,
         live: true,
+        media_pts_100ns: None,
     };
     let picture = MaxPicture::of(&job);
     assert_eq!((picture.width, picture.height, picture.stride), (6, 4, 8));

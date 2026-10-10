@@ -63,8 +63,10 @@ mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
 mod program_authority; // #221 L4b: SP-program's playlist drives playback
+pub mod program_burn; // #228: SP-program's burn-id QR 911014 (payload, place, paint; pure)
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
 pub mod program_canvas; // #223: SP-program's ONE picture layout (FHD) + the fit into it
+pub mod program_item; // #228: the item on air (marks, the sender's track) + the burn switch
 pub mod program_max; // #223 S2: SP-program-MAX hand-off, setting + telemetry
 pub mod program_max_send; // #223 follow-up: the Spout send at its due instant
 pub mod program_max_vblank; // #223 follow-up: the sends on the wall's refresh grid

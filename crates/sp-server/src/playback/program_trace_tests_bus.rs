@@ -38,6 +38,7 @@ fn job(w: u32, stamp: i64, live: bool) -> SubmitJob {
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp,
         live,
+        media_pts_100ns: None,
     }
 }
 

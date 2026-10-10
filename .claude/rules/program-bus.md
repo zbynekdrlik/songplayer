@@ -302,6 +302,10 @@ included, is comment 5872871751).
   SP-program, so the cut would black them all; `remote-control.md` "The
   dashboard cut on the same path"). Source `-1` is the #212 NDI input "OBS
   manuál" (404 unless it is enabled with a source) — see `ndi-input.md`.
+- #228: both answers also carry `burn_on`, `burned_boundaries` and
+  `on_air_item` (the item the sender last put on the wire); `POST
+  /api/v1/program/burn {"on"}` switches the 911014 burn —
+  `test-item-burn.md`.
 - `cut_refused` (both answers): every playlist a cut refuses now, in id
   order, `reason` `playlist_inactive` / `no_scene`
   (`program_switch::refused_sources`, the cut's own `cut_scene` rule;

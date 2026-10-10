@@ -721,6 +721,8 @@ pub struct ProgramBus {
     max: Arc<MaxOut>,
     /// #147: the sender's per-boundary trace (`GET /api/v1/program/trace`).
     trace: Arc<ProgramTrace>,
+    /// #228: the item on air + the 911014 burn switch (`program_item.rs`).
+    item: Arc<crate::playback::program_item::ProgramItem>,
     /// #213: serializes [`persist_and_cut`] — the API and the remote control
     /// can cut concurrently, and the persisted source must be the one cut last.
     cut_serial: tokio::sync::Mutex<()>,
@@ -751,6 +753,7 @@ impl ProgramBus {
             remote: Arc::new(RemoteShared::default()),
             max: Arc::new(MaxOut::new()),
             trace: Arc::new(ProgramTrace::new()),
+            item: Arc::default(),
             cut_serial: tokio::sync::Mutex::new(()),
             on_air: watch::channel(OnAir::default()).0,
             switch_order: tokio::sync::Mutex::new(()),
@@ -780,6 +783,11 @@ impl ProgramBus {
     /// #147: the sender's per-boundary trace.
     pub fn trace(&self) -> &Arc<ProgramTrace> {
         &self.trace
+    }
+
+    /// #228: the item on air and the burn switch.
+    pub fn item(&self) -> &Arc<crate::playback::program_item::ProgramItem> {
+        &self.item
     }
 
     /// See [`ProgramCore::set_transition`].

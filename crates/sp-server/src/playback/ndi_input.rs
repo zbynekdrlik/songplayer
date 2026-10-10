@@ -573,6 +573,7 @@ impl NdiInput {
             video_tc_100ns: boundary_100ns,
             audio_tc_100ns: boundary_100ns,
             live,
+            media_pts_100ns: None,
         };
         bus.offer(PROGRAM_INPUT_ID, job);
     }

@@ -73,6 +73,11 @@ rubato = "=5.0.1"
 # MIT OR Apache-2.0 (its MIT notice ships in THIRD-PARTY-NOTICES.txt),
 # pinned exactly.
 rtrb = "=0.4.0"
+# #228: the SP-program burn-id QR (911014, #151's payload). Pure-Rust
+# encoder; `default-features = false` drops the optional image / svg / pic
+# renderers (the module matrix needs none). MIT OR Apache-2.0 (its MIT notice
+# ships in THIRD-PARTY-NOTICES.txt), pinned exactly.
+qrcode = { version = "=0.14.1", default-features = false }
 
 # #162: the box-overload guard's Windows OS calls — GlobalMemoryStatusEx for the
 # pre-spawn memory-headroom read + a per-child Job Object (JOB_OBJECT_LIMIT_
@@ -105,6 +110,9 @@ azo = { version = "=0.4.0", default-features = false }
 
 [dev-dependencies]
 tower = "0.5"
+# #228: camera-box's own QR decoder (its recording-verdict reads the burn
+# with it): the burn's round trip, decoded from the painted picture.
+rqrr = { version = "=0.9.3", default-features = false }
 wiremock = "0.6"
 serial_test = "3"
 tokio = { version = "1", features = ["full", "test-util"] }

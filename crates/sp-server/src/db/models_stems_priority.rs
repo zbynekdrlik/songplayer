@@ -26,11 +26,15 @@ use crate::db::models_stems::StemJob;
 /// The queue-eligibility predicate, byte-identical to
 /// `get_next_video_for_stems` / `queue_position`: normalized with an audio
 /// sidecar, not already `done`/`unsupported`, and (if previously `failed`) past
-/// its backoff. Kept as one const so every tier query gates on the same rows.
-pub(crate) const STEM_ELIGIBLE_PRED: &str = "normalized = 1 AND audio_file_path IS NOT NULL \
+/// its backoff, never the #228 test item. Kept as one const so every tier
+/// query gates on the same rows.
+pub(crate) const STEM_ELIGIBLE_PRED: &str = concat!(
+    "normalized = 1 AND audio_file_path IS NOT NULL \
      AND (stem_status IS NULL OR stem_status = 'failed') \
      AND (stem_next_attempt_at IS NULL \
-          OR stem_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+          OR stem_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) AND ",
+    crate::test_item::not_test_item!()
+);
 
 /// Tier index for the manual-priority tier (any playlist).
 const MANUAL_TIER: i64 = 0;
