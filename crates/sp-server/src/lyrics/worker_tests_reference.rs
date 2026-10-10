@@ -761,8 +761,8 @@ async fn run_mtl_reference_stage_pass_writes_the_audit_with_the_sung_coverage() 
             .enumerate()
             .map(|(i, t)| MtlLine {
                 text: t.to_string(),
-                start_ms: 1_000 + i as u64 * 2_000,
-                end_ms: 2_500 + i as u64 * 2_000,
+                start_ms: Some(1_000 + i as u64 * 2_000),
+                end_ms: Some(2_500 + i as u64 * 2_000),
             })
             .collect(),
         device: "cuda".into(),
