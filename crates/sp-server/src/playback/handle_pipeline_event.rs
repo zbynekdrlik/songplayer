@@ -43,6 +43,8 @@ impl PlaybackEngine {
                 // #147: before any await, so the mark is there for the
                 // song's first live boundary (sent after this `Started`).
                 self.trace_song_start(playlist_id);
+                // #228: the play's media clock starts here (the item record).
+                self.mark_item(playlist_id, *position_ms);
                 // #229: a song opened — the run of failed opens is over, and
                 // a selected or picked song counts as played now.
                 self.song_started(playlist_id).await;
@@ -203,7 +205,10 @@ impl PlaybackEngine {
                 self.video_failed(playlist_id, msg).await;
             }
             // #217: the title clock follows where the song really plays on from.
-            PipelineEvent::Seeked { position_ms } => self.seeked(playlist_id, *position_ms).await,
+            PipelineEvent::Seeked { position_ms } => {
+                self.mark_item(playlist_id, *position_ms); // #228: the pts start again
+                self.seeked(playlist_id, *position_ms).await
+            }
             PipelineEvent::RetryDue(id) => self.retry_due(playlist_id, *id).await, // #229
             PipelineEvent::SceneOffDue(due) => self.scene_off_due(playlist_id, *due).await,
             PipelineEvent::OnProgram(on) => self.on_program(playlist_id, *on).await, // #221 L4b
@@ -246,8 +251,29 @@ impl PlaybackEngine {
             bus.trace().mark_song(playlist_id, video_id);
         }
     }
+
+    /// #228: `playlist_id`'s play of its current video (re)started its media
+    /// clock at `start_ms` (a `Started` that answered its last Play, a
+    /// `Seeked`): marked on the program's item record, on air or not, so
+    /// the `SP-program` sender counts the item's frames from its frame 0 at
+    /// that playlist's next live boundary (`program_item.rs`).
+    fn mark_item(&self, playlist_id: i64, start_ms: u64) {
+        let Some(bus) = self.program.get() else {
+            return;
+        };
+        let video = self
+            .pipelines
+            .get(&playlist_id)
+            .and_then(|pp| pp.current_video_id);
+        if let Some(video_id) = video {
+            bus.item().mark(playlist_id, video_id, start_ms);
+        }
+    }
 }
 
+#[cfg(test)]
+#[path = "handle_pipeline_event_tests_item.rs"]
+mod tests_item;
 #[cfg(test)]
 #[path = "handle_pipeline_event_tests_trace.rs"]
 mod tests_trace;

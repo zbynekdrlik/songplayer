@@ -24,7 +24,11 @@
 //!    restored at startup) is the NDI input: cut to -1 while it is a source,
 //!    with no scene to send to cg OBS (it keeps what it shows, like a
 //!    dashboard cut to -1); else keep ([`INPUT_INACTIVE`]).
-//! 5. The cut uses the bus's current transition spec unchanged. A manual →
+//! 5. #245: `Blank` (any ASCII case) is SongPlayer's own black, the source
+//!    `PROGRAM_BLANK_ID` (-2) that nobody offers, so the bus fills every
+//!    boundary with its standby pair (black, silence). It is cut with the
+//!    scene `Blank`; cg OBS is told nothing.
+//! 6. The cut uses the bus's current transition spec unchanged. A manual →
 //!    manual press keeps -1 (no mix) and publishes the new scene name.
 //!
 //! Every switch is recorded as `remote.last_remote_cut`, with `via` (what
@@ -33,8 +37,8 @@
 //!
 //! #221 L4a: `POST /api/v1/program/cut` switches a SOURCE through the same
 //! path ([`switch_source`], `via=dashboard`): a playlist is cut with its
-//! catalog scene, -1 ("OBS manuál") with none; neither tells cg OBS
-//! anything. ROZHODNUTÉ 6022247729: a playlist whose catalog names no scene
+//! catalog scene, -1 ("OBS manuál") with none, -2 (Blank) with `Blank`;
+//! none tells cg OBS anything. ROZHODNUTÉ 6022247729: a playlist whose catalog names no scene
 //! (inactive, or no / a shared NDI output name) is REFUSED ([`cut_scene`],
 //! recorded as a keep, 409): every consumer takes `SP-program`, so such a
 //! cut would black them all at once. [`refused_sources`] lists those
@@ -43,7 +47,9 @@
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
+use sp_core::config::{
+    PROGRAM_BLANK_ID, PROGRAM_BLANK_LABEL, PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL,
+};
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
@@ -239,10 +245,10 @@ fn cut_done(
 ) -> RemoteCut {
     RemoteCut {
         scene: clip(pressed),
-        action: if source == PROGRAM_INPUT_ID {
-            "input"
-        } else {
-            "playlist"
+        action: match source {
+            PROGRAM_INPUT_ID => "input",
+            PROGRAM_BLANK_ID => "blank",
+            _ => "playlist",
         },
         source: Some(source),
         reason: None,
@@ -277,6 +283,14 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
                 Err(e) => Switched::StoreFailed(e),
             }
         }
+        SceneKind::Blank => {
+            let blank = Some(PROGRAM_BLANK_LABEL);
+            let cut = cut_and_record(ctx.pool, ctx.bus, scene, via, PROGRAM_BLANK_ID, blank, None);
+            match cut.await {
+                Ok(_) => Switched::Cut,
+                Err(e) => Switched::StoreFailed(e),
+            }
+        }
         SceneKind::Manual if scene == PROGRAM_INPUT_LABEL => switch_input(ctx, scene, via).await,
         SceneKind::Manual => switch_manual(ctx, scene, via).await,
     }
@@ -290,7 +304,8 @@ pub async fn switch_scene(ctx: &SwitchCtx<'_>, scene: &str, via: Via) -> Switche
 /// - one whose catalog names no scene is REFUSED ([`cut_scene`]: inactive,
 ///   or no / a shared NDI output name), recorded as a keep with its reason
 ///   (#221 ROZHODNUTÉ 6022247729; it was cut with no scene before);
-/// - -1 ("OBS manuál") is cut with no scene, which the resolver names.
+/// - -1 ("OBS manuál") is cut with no scene, which the resolver names;
+/// - -2 (Blank, #245) is cut with the scene `Blank`.
 ///
 /// cg OBS is told nothing (#221 B4 step 6: no mirror). Returns the program
 /// state of THIS cut (a later switch may already run when the caller reads
@@ -306,6 +321,11 @@ pub async fn switch_source(
     let _order = bus.switch_order().lock().await;
     if source == PROGRAM_INPUT_ID {
         let cut = cut_and_record(pool, bus, PROGRAM_INPUT_LABEL, via, source, None, None);
+        return cut.await.map_err(SourceError::Store);
+    }
+    if source == PROGRAM_BLANK_ID {
+        let blank = Some(PROGRAM_BLANK_LABEL);
+        let cut = cut_and_record(pool, bus, PROGRAM_BLANK_LABEL, via, source, blank, None);
         return cut.await.map_err(SourceError::Store);
     }
     let catalog = match load_catalog(pool).await {

@@ -493,6 +493,7 @@ fn a_layout_is_read_from_the_sources_job() {
         video_tc_100ns: T0,
         audio_tc_100ns: T0,
         live: true,
+        media_pts_100ns: None,
     };
     assert_eq!(
         Layout::of(&job),
@@ -776,6 +777,37 @@ fn a_fade_waits_for_its_cue_at_most_fifteen_boundaries_and_a_cut_never_waits() {
         (Cue::Open, b(3), b(3)),
         "a Cut is open at once and mixes nothing"
     );
+}
+
+/// #245: a fade INTO Blank opens at once (its black is the standby, always
+/// ready): no cue wait, the mix over its 9 slots from the cut. A fade OUT
+/// of Blank waits for the playlist's cue like any fade, and a cut into
+/// Blank stays a zero-length window.
+#[test]
+fn a_fade_into_blank_never_waits_for_a_cue() {
+    let blank = sp_core::config::PROGRAM_BLANK_ID;
+    let fade = TransitionSpec::fade(300, SpecSource::Setting);
+    let into = Window::cued(Some(1), blank, b(3), &fade);
+    assert_eq!(
+        (into.cue, into.start_100ns, into.end_100ns),
+        (Cue::Open, b(3), b(12)),
+        "open at once, the fade over b(3)..b(12)"
+    );
+    assert_eq!(into.slot(b(3)), Some(0), "the first boundary already mixes");
+    let out_of = Window::cued(Some(blank), 2, b(3), &fade);
+    assert_eq!(
+        out_of.cue,
+        Cue::Waiting {
+            deadline_100ns: b(18)
+        }
+    );
+    let cut = Window::cued(
+        Some(1),
+        blank,
+        b(3),
+        &TransitionSpec::cut(SpecSource::Setting),
+    );
+    assert_eq!((cut.cue, cut.end_100ns), (Cue::Open, b(3)));
 }
 
 #[test]

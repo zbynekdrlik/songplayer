@@ -72,6 +72,14 @@
 //! source the bus queued it with, what it was. The sender is the trace's
 //! one writer: no allocation, no log and no lock it could wait on, on that
 //! path (the song mark is only `try_lock`ed).
+//!
+//! #228: every served boundary also tells the item record what it showed of
+//! the item on air (`program_item.rs`: its source, the frame's media time,
+//! its wire stamp; marks and the publish only `try_lock`ed), and while the
+//! burn switch is on, a boundary that shows a frame of the item carries the
+//! 911014 burn-id QR (`program_burn.rs`): painted into a copy of its canvas
+//! picture just before the NDI submit — never into the picture
+//! `SP-program-MAX` and the Spout FHD sender got.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -94,6 +102,7 @@ use crate::playback::program_bus::{
     PROGRAM_NDI_NAME, ProgramBus, ProgramJob, Take, install, restore_selected_source,
 };
 use crate::playback::program_canvas::{Canvas, FadeSide};
+use crate::playback::program_item::{ItemFrame, ItemTrack, ProgramItem};
 use crate::playback::program_max::{MaxJob, MaxOut, MaxPicture};
 use crate::playback::program_output_timing::{BoundaryMarks, LateBoundary, utc_label};
 use crate::playback::program_trace::{JobShape, ProgramTrace, TraceWriter};
@@ -160,6 +169,10 @@ pub struct ProgramOutput<B: NdiBackend> {
     max: Option<Arc<MaxOut>>,
     /// #147: the program trace's writer: one record per served boundary.
     trace: Option<TraceWriter>,
+    /// #228: the item record (marks in, the item on air out) and the burn
+    /// switch, and this sender's own view of the item on air.
+    item: Option<Arc<ProgramItem>>,
+    track: ItemTrack,
 }
 
 /// #215: one run of mixed boundaries as the `SP-program` sender saw it: how
@@ -270,6 +283,16 @@ impl Pair {
         }
     }
 
+    /// #228: the media time of the item frame this boundary shows: a
+    /// forwarded live pair's, a fade's incoming side's; none for a standby.
+    fn media_pts_100ns(&self) -> Option<i64> {
+        match self {
+            Pair::Source(job) => job.media_pts_100ns,
+            Pair::Standby => None,
+            Pair::Mix { mix, .. } => mix.to.as_ref().and_then(|job| job.media_pts_100ns),
+        }
+    }
+
     /// What the audio outputs get for the boundary on `stamp_100ns`: the
     /// pair's own block, COPIED once (its NDI submit still borrows it), or
     /// the standby silence.
@@ -311,6 +334,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
             limited_through: None,
             max: None,
             trace: None,
+            item: None,
+            track: ItemTrack::default(),
         }
     }
 
@@ -346,6 +371,57 @@ impl<B: NdiBackend> ProgramOutput<B> {
             warn!("program trace: another writer is alive — this output writes no trace");
         }
         self
+    }
+
+    /// #228: also follow the item on air (`item`'s marks in, the item out)
+    /// and burn it while `item`'s switch is on.
+    pub fn with_item(mut self, item: Arc<ProgramItem>) -> Self {
+        self.item = Some(item);
+        self
+    }
+
+    /// #228: what the boundary on `stamp_100ns` of `source` shows of the item
+    /// on air (`ItemTrack::observe`, the source's newest mark, the wire
+    /// stamp), published for the API; `None` without an item record.
+    fn observe_item(
+        &mut self,
+        pair: &Pair,
+        source: Option<i64>,
+        stamp_100ns: i64,
+    ) -> Option<ItemFrame> {
+        let item = self.item.as_ref()?;
+        let mark = source.and_then(|pid| item.mark_of(pid));
+        let wire_100ns = crate::playback::fleet_shift::wire_100ns(stamp_100ns);
+        let shown = self
+            .track
+            .observe(source, pair.media_pts_100ns(), wire_100ns, mark);
+        item.publish(self.track.status());
+        shown
+    }
+
+    /// #228: the canvas picture `video` with the 911014 burn of the item
+    /// frame it shows, painted into a copy, while the switch is on; else
+    /// `video` itself. Counts every boundary that went out burned.
+    fn burn(&self, video: SharedFrame, shown: Option<ItemFrame>) -> SharedFrame {
+        let Some(item) = self.item.as_ref().filter(|item| item.burn_on()) else {
+            return video;
+        };
+        let Some(shown) = shown else {
+            return video;
+        };
+        let gen_ts_ns = shown.wire_100ns * 100;
+        match crate::playback::program_burn::burned(
+            &video,
+            self.canvas.layout(),
+            shown.frame,
+            gen_ts_ns,
+        ) {
+            Some(burned) => {
+                item.count_burned();
+                burned
+            }
+            None => video,
+        }
     }
 
     /// #223 S2: offer the boundary to `SP-program-MAX` (never waits for the
@@ -396,7 +472,8 @@ impl<B: NdiBackend> ProgramOutput<B> {
         let fed_100ns = self.feed_outputs(pair.program_block(stamp_100ns), &now);
         self.offer_max(&pair, stamp_100ns);
         let ends_run = !matches!(pair, Pair::Mix { .. });
-        let submit_start_100ns = self.submit_video(pair, stamp_100ns, &now);
+        let shown = self.observe_item(&pair, source, stamp_100ns); // #228
+        let submit_start_100ns = self.submit_video(pair, stamp_100ns, shown, &now);
         let submitted_100ns = now();
         if ends_run {
             self.end_mix_run();
@@ -484,14 +561,22 @@ impl<B: NdiBackend> ProgramOutput<B> {
     /// crossfaded block, both stamped on the window boundary (#224: the
     /// program's own block). Returns when the video side started, read off
     /// `now` BEFORE the picture is made (#223), so `health.timing.submit_us`
-    /// is the fit or the fade's picture plus the NDI submit.
-    fn submit_video(&mut self, pair: Pair, stamp_100ns: i64, now: &impl Fn() -> i64) -> i64 {
+    /// is the fit or the fade's picture plus the NDI submit. #228: a picture
+    /// that `shown`s an item frame carries its burn while the switch is on.
+    fn submit_video(
+        &mut self,
+        pair: Pair,
+        stamp_100ns: i64,
+        shown: Option<ItemFrame>,
+        now: &impl Fn() -> i64,
+    ) -> i64 {
         let start = now();
         let canvas = self.canvas.layout();
         match pair {
             Pair::Source(job) => {
                 let layout = Layout::of(&job);
                 let video = self.canvas.fit(layout, &job.video, &self.bands);
+                let video = self.burn(video, shown);
                 let audio_tc = job.audio_tc_100ns;
                 send(
                     &mut self.submitter,
@@ -519,6 +604,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
                 let picture_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
                 self.mix_run.boundaries += 1;
                 self.mix_run.max_picture_us = self.mix_run.max_picture_us.max(picture_us);
+                let video = self.burn(video, shown);
                 send(
                     &mut self.submitter,
                     canvas,
@@ -803,6 +889,7 @@ fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<Progr
             let mut out = ProgramOutput::fhd(sender)
                 .with_outputs(bus.outputs().clone())
                 .with_max(bus.max().clone())
+                .with_item(bus.item().clone())
                 .with_trace(bus.trace());
             // #215 addendum 3 + #223 follow-up: how many threads paint a mixed
             // or fitted picture (this one + the persistent band workers).
@@ -826,6 +913,9 @@ fn spawn_program_thread(backend: Option<super::SharedNdiBackend>, bus: Arc<Progr
 #[cfg(test)]
 #[path = "program_output_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_output_tests_burn.rs"]
+mod tests_burn;
 #[cfg(test)]
 #[path = "program_output_tests_fhd.rs"]
 mod tests_fhd;

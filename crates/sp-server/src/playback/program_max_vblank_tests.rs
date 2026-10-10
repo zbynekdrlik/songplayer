@@ -6,10 +6,11 @@
 
 use std::time::{Duration, Instant};
 
-use sp_gpu::VblankGrid;
+use sp_gpu::{VblankGrid, VblankState};
 
 use super::{
-    Due, LEAD_HYSTERESIS, LEAD_MIN, Slots, VblankPacer, phase_after_vblank, shifted, signed_ns,
+    Due, LEAD_HYSTERESIS, LEAD_MIN, Slots, VblankLog, VblankPacer, phase_after_vblank, shifted,
+    signed_ns, vblank_log,
 };
 
 fn ms(n: u64) -> Duration {
@@ -213,4 +214,29 @@ fn a_new_phase_moves_the_slot_without_a_repick() {
     assert_eq!(first.at, b + ms(24));
     let moved = pacer.due(b + ms(32), Some(g), ms(10));
     assert_eq!((moved.at, moved.repicked), (b + ms(58), false));
+}
+
+/// #243: the output's state is logged only where it turns `not_ticking`
+/// (one WARN, from any other state or none) and where it leaves it (one
+/// INFO); every other change and every repeat logs nothing.
+#[test]
+fn only_entering_and_leaving_not_ticking_is_logged() {
+    use VblankState::{Measuring, NotTicking, Ticking};
+    let stopped = Some(VblankLog::StoppedTicking);
+    let again = Some(VblankLog::TicksAgain);
+    for (before, now, logged) in [
+        (None, NotTicking, stopped),
+        (Some(Measuring), NotTicking, stopped),
+        (Some(Ticking), NotTicking, stopped),
+        (Some(NotTicking), NotTicking, None),
+        (Some(NotTicking), Measuring, again),
+        (Some(NotTicking), Ticking, again),
+        (None, Measuring, None),
+        (None, Ticking, None),
+        (Some(Measuring), Ticking, None),
+        (Some(Ticking), Measuring, None),
+        (Some(Ticking), Ticking, None),
+    ] {
+        assert_eq!(vblank_log(before, now), logged, "{before:?} -> {now:?}");
+    }
 }

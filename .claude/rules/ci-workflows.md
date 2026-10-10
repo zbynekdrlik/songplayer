@@ -223,8 +223,8 @@ delete the files.
 ## push + pull_request de-dup (#124)
 
 Shared build/test jobs run **once, on the `push` event** (`if: github.event_name ==
-'push'`); only the PR-specific gates (`version-check`, `mutation-testing`,
-`red-green-order`) run on `pull_request`. The required checks `Gate` / `Deploy to
+'push'`); only the PR-specific gates (`version-check`, `mutation-testing`) run on
+`pull_request` (`red-green-order` runs on both: the PR and every dev push). The required checks `Gate` / `Deploy to
 win-resolume` / `E2E Tests (win-resolume)` are produced on push and satisfy the
 dev→main PR by **commit-SHA match** (GitHub matches required checks by SHA, not
 event) — so no branch-protection change is needed. The `gate` job runs on both
@@ -241,10 +241,14 @@ times out, re-run ONLY the failed PR Gate job once the push Gate is green
 (`gh run rerun <pr-run> --failed`).
 
 ## RED-GREEN gate: retroactive `[no-test: <sha> <reason>]` (release PR #160)
-`scripts/check-red-green-order.sh` runs on the PR event over the whole
-`main..dev` range, so a `fix(#N):` commit that landed on dev without a
-`[no-test:]` marker (a merge-integration compile fix, a clippy allow) fails the
-release PR weeks later. History rewrite is banned — declare the LOGGED bypass
+`scripts/check-red-green-order.sh` runs over the whole `main..dev` range on
+the PR event AND (since release PR #247) on every dev push (base =
+`merge-base origin/main HEAD`). Run on the PR alone, a `fix(#N):` commit that
+landed on dev without a `[no-test:]` marker (a merge-integration compile fix,
+a clippy allow, a review round's `fix(#239)` on an unreleased feature) failed
+the release PR hours or weeks later; now the dev push that brings it is red.
+A review round's change to an unreleased feature is `feat(#N)` /
+`refactor(#N)`, never `fix(#N)`. History rewrite is banned — declare the LOGGED bypass
 from a LATER commit instead: an empty `chore(red-green): …` commit whose body
 carries one `[no-test: <sha7> <reason>]` per covered commit; the script prints
 `bypass: … (declared by <sha7>)`. Only the leading `fix(#N):` form is gated;

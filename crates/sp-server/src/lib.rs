@@ -33,6 +33,7 @@ mod song_input; // #136: a stem / dub job's input, re-read after the heavy slot
 mod song_relink; // #136: stems / dub left under an old name → the audio's name
 pub mod startup;
 pub mod stems;
+pub mod test_item; // #228: camera-box's measurement clip as a one-item test playlist
 #[cfg(test)]
 mod test_log; // a scoped log capture shared by the tests
 mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
@@ -184,7 +185,7 @@ pub async fn start(
     crate::install_panic_hook(config.data_dir().join("songplayer-panic.log"));
 
     // 1. Database
-    let pool = db::create_pool(&format!("sqlite:{}", config.db_path.display())).await?;
+    let pool = db::startup_open::open(&config.db_path).await?; // #229: waits out a lock
     db::run_migrations(&pool).await?;
     startup::ensure_live_playlist_exists(&pool).await?;
     startup::ensure_dabing_playlist_exists(&pool).await?; // #180 dubbing D1

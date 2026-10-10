@@ -37,6 +37,7 @@
 //! are SongPlayer's own (#221 L3, `remote::studio_events`).
 
 use serde_json::{Value, json};
+use sp_core::config::{PROGRAM_BLANK_LABEL, is_blank_scene};
 
 use crate::obs::compute_auth;
 
@@ -641,6 +642,33 @@ pub fn with_songplayer_scenes(data: &mut Value, program: Option<&str>, preview: 
     fields.insert("currentProgramSceneUuid".into(), program_uuid);
     fields.insert("currentPreviewSceneName".into(), json!(preview));
     fields.insert("currentPreviewSceneUuid".into(), preview_uuid);
+}
+
+/// #245: the uuid the facade gives Blank when cg OBS lists no scene of
+/// that name.
+pub const BLANK_SCENE_UUID: &str = "songplayer-blank";
+
+/// #245: a forwarded `GetSceneList` answer's `scenes` with Blank in it, so
+/// Companion can always pick SongPlayer's own black (cg OBS at PP may list
+/// no "Blank"). A list that already holds it (any ASCII case) is left as it
+/// is; else `{sceneIndex: <count>, sceneName: "Blank", sceneUuid:
+/// "songplayer-blank"}` is appended. Data with no `scenes` list is left as
+/// it is.
+pub fn with_blank_scene(data: &mut Value) {
+    let Some(scenes) = data.get_mut("scenes").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let listed = scenes
+        .iter()
+        .any(|scene| scene["sceneName"].as_str().is_some_and(is_blank_scene));
+    if !listed {
+        let index = scenes.len();
+        scenes.push(json!({
+            "sceneIndex": index,
+            "sceneName": PROGRAM_BLANK_LABEL,
+            "sceneUuid": BLANK_SCENE_UUID,
+        }));
+    }
 }
 
 /// The `sceneUuid` of the scene named `name` in a `GetSceneList` answer's

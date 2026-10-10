@@ -374,7 +374,8 @@ impl Session<'_> {
         match protocol::route(request_type) {
             Route::Native(reply) => reply,
             Route::Forward => forward(facade, request_type, item.request_data.clone()).await,
-            // #221 lane 2: cg OBS's list, SongPlayer's program and preview.
+            // #221 lane 2: cg OBS's list, SongPlayer's program and preview;
+            // #245: with Blank in it.
             Route::SceneList => {
                 let mut reply = forward(facade, request_type, item.request_data.clone()).await;
                 if reply.succeeded()
@@ -382,6 +383,7 @@ impl Session<'_> {
                 {
                     let program = program_scene_name(&facade.bus.on_air_now());
                     let preview = self.preview_given(program.clone());
+                    protocol::with_blank_scene(data);
                     protocol::with_songplayer_scenes(data, program.as_deref(), preview.as_deref());
                 }
                 reply

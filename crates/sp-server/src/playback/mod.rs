@@ -63,8 +63,10 @@ mod position_update;
 pub mod preview; // #15 part 2: live low-res video preview tap
 pub mod proc_mem; // #147 r9: SongPlayer's own page faults/min + working set on the paced loop-stats line
 mod program_authority; // #221 L4b: SP-program's playlist drives playback
+pub mod program_burn; // #228: SP-program's burn-id QR 911014 (payload, place, paint; pure)
 pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI SP-program)
 pub mod program_canvas; // #223: SP-program's ONE picture layout (FHD) + the fit into it
+pub mod program_item; // #228: the item on air (marks, the sender's track) + the burn switch
 pub mod program_max; // #223 S2: SP-program-MAX hand-off, setting + telemetry
 pub mod program_max_send; // #223 follow-up: the Spout send at its due instant
 pub mod program_max_vblank; // #223 follow-up: the sends on the wall's refresh grid
@@ -196,9 +198,6 @@ struct PlaylistPipeline {
     cached_duration_ms: u64,
     /// v0.22.0: skip EN Resolume when true (baked-in video lyrics).
     cached_suppress_en: bool,
-    /// #142: song carries Claude's verified "reference" lyrics — the
-    /// renderer appends " ★" to every displayed line on the LED wall.
-    cached_lyrics_reference: bool,
     /// Timestamp of the last `NowPlaying` broadcast — used to throttle
     /// position updates to `POSITION_BROADCAST_INTERVAL_MS`.
     last_now_playing_broadcast: Option<Instant>,
@@ -741,16 +740,12 @@ impl PlaybackEngine {
         let suppress_en = crate::db::models::get_video_suppress_resolume_en(&self.pool, video_id)
             .await
             .unwrap_or(false);
-        let lyrics_reference = crate::db::models::get_video_lyrics_reference(&self.pool, video_id)
-            .await
-            .unwrap_or(false);
 
         if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
             pp.cached_song = song.clone();
             pp.cached_artist = artist.clone();
             pp.cached_duration_ms = duration_ms;
             pp.cached_suppress_en = suppress_en;
-            pp.cached_lyrics_reference = lyrics_reference;
             pp.last_now_playing_broadcast = Some(Instant::now());
         }
 

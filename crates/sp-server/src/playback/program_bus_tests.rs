@@ -68,6 +68,7 @@ pub(super) fn job(w: u32, video: &SharedFrame, stamp: i64, level: f32) -> Submit
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp + 2 * MS,
         live: true,
+        media_pts_100ns: None,
     }
 }
 
@@ -321,6 +322,35 @@ fn a_cut_to_an_idle_source_carries_its_standby_pair() {
         "one audio + one video per boundary"
     );
     assert_eq!(core.status().health.filled, 0, "no program fill was needed");
+}
+
+/// #245: Blank is a source nobody offers. From its cut boundary on, every
+/// boundary is the program's own standby pair, filled on time on the
+/// sender's wall, while the playlist cut away keeps offering its frames.
+#[test]
+fn a_cut_to_blank_fills_every_later_boundary_with_the_standby_pair() {
+    let blank = sp_core::config::PROGRAM_BLANK_ID;
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    let (backend, mut out) = program();
+    let fa = frame(4, 2);
+    for k in 1..=10 {
+        let now = b(k) + 5 * MS;
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1));
+        if k == 5 {
+            core.cut(blank, now);
+        }
+        core.release(now);
+        drain(&mut core, &mut out);
+    }
+    assert_eq!(backend.video_timecodes(), stamps(1..=10));
+    assert_eq!(shown_dims(&out), dims(&[("4x2", 6), (STANDBY, 4)]));
+    assert!(
+        backend.last_audio_planar().iter().all(|&s| s == 0.0),
+        "the standby's silent block"
+    );
+    let status = core.status();
+    assert_eq!((status.source, status.health.filled), (Some(blank), 4));
 }
 
 #[test]

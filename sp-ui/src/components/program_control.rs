@@ -12,6 +12,10 @@
 //! rule) it is listed after the playlists, cut with `{"source": -1}`
 //! (`PROGRAM_INPUT_ID`).
 //!
+//! #245: "Blank", SongPlayer's own black (`PROGRAM_BLANK_ID`), is always
+//! listed last, cut with `{"source": -2}`: no playlist, no cg OBS, no NDI
+//! input needed.
+//!
 //! #215: the "Prechod" line shows the transition every cut uses (a crossfade of
 //! N ms or a hard cut, and where it comes from: the Nastavenia choice, or the
 //! default fade when none is chosen — #221 L5 deleted cg OBS's transition as a
@@ -31,13 +35,15 @@
 //! Testids (set here, never by a caller): `program-control`, `program-source`
 //! (the "Na programe: …" line), `program-transition` (the "Prechod: …" line),
 //! `program-cut` (one button per source, with `data-playlist-id` (`-1` for the
-//! input) + `aria-pressed` on the on-program one, `disabled` + the reason's
+//! input, `-2` for Blank) + `aria-pressed` on the on-program one, `disabled` + the reason's
 //! `title` on a refused playlist), `program-error`.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
-use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
+use sp_core::config::{
+    PROGRAM_BLANK_ID, PROGRAM_BLANK_LABEL, PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL,
+};
 use sp_core::program_refusal::{cut_button_title, refusal_text};
 
 use crate::components::selection;
@@ -171,6 +177,7 @@ pub fn ProgramControl() -> impl IntoView {
     let transition_label = Memo::new(move |_| program.get().transition.label());
     let on_program_name = move || match on_program.get() {
         Some(PROGRAM_INPUT_ID) => PROGRAM_INPUT_LABEL.to_string(),
+        Some(PROGRAM_BLANK_ID) => PROGRAM_BLANK_LABEL.to_string(),
         Some(id) => store
             .playlists
             .get()
@@ -262,6 +269,17 @@ pub fn ProgramControl() -> impl IntoView {
                         {PROGRAM_INPUT_LABEL}
                     </button>
                 </Show>
+                <button
+                    class="program-cut program-cut-blank"
+                    class:program-cut-on=move || on_program.get() == Some(PROGRAM_BLANK_ID)
+                    data-testid="program-cut"
+                    data-playlist-id=PROGRAM_BLANK_ID.to_string()
+                    aria-pressed=move || (on_program.get() == Some(PROGRAM_BLANK_ID)).to_string()
+                    title="Strih na program — čierna, bez zvuku"
+                    on:click=move |_| cut(PROGRAM_BLANK_ID)
+                >
+                    {PROGRAM_BLANK_LABEL}
+                </button>
             </div>
             <div class="program-error" data-testid="program-error">
                 {move || error.get().unwrap_or_default()}

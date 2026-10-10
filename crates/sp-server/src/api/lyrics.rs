@@ -42,26 +42,28 @@ pub(crate) async fn fetch_queue_counts(
     pool: &sqlx::SqlitePool,
     current_version: u32,
 ) -> Result<(i64, i64, i64), sqlx::Error> {
-    let b0: i64 = sqlx::query_scalar(
+    let b0: i64 = sqlx::query_scalar(concat!(
         "SELECT COUNT(*) FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.lyrics_manual_priority = 1 \
                AND (v.lyrics_source IS NULL \
                     OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap') \
                     OR v.lyrics_pipeline_version < ?) \
-               AND p.is_active = 1 AND v.normalized = 1",
-    )
+               AND p.is_active = 1 AND v.normalized = 1 AND ",
+        crate::test_item::not_test_item!(), // #228
+    ))
     .bind(current_version as i64)
     .fetch_one(pool)
     .await?;
-    let b1: i64 = sqlx::query_scalar(
+    let b1: i64 = sqlx::query_scalar(concat!(
         "SELECT COUNT(*) FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE (v.has_lyrics IS NULL OR v.has_lyrics = 0) \
                AND (v.lyrics_source IS NULL \
                     OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap') \
                     OR v.lyrics_pipeline_version < ?) \
                AND v.lyrics_manual_priority = 0 \
-               AND p.is_active = 1 AND v.normalized = 1",
-    )
+               AND p.is_active = 1 AND v.normalized = 1 AND ",
+        crate::test_item::not_test_item!(), // #228: the test item never waits for lyrics
+    ))
     .bind(current_version as i64)
     .fetch_one(pool)
     .await?;
@@ -99,9 +101,9 @@ pub struct SongListItem {
     /// clips. The /live setlist UI renders a checkbox bound to this field.
     pub suppress_resolume_en: bool,
     /// `videos.lyrics_reference` (#142) — when true, this song carries
-    /// Claude's verified "reference" lyrics and the LED wall appends " ★"
-    /// to every displayed line. The lyrics dashboard renders a ★ badge and
-    /// a „Nesedí" feedback button bound to this field.
+    /// Claude's verified "reference" lyrics. The lyrics dashboard renders a
+    /// ★ badge and a „Nesedí" feedback button bound to this field (#241: the
+    /// LED wall no longer shows a ★).
     pub lyrics_reference: bool,
     /// `videos.lyrics_translation_gender` (#152) — the per-song SK translation
     /// gender override: `None` = auto (masculine default), `"m"`, or `"f"`.

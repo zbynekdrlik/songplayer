@@ -59,7 +59,13 @@ pub fn run() {
             dist_dir,
         };
         if let Err(e) = sp_server::start(config, server_shutdown).await {
-            tracing::error!("Server error: {e}");
+            // #229: a server that failed must not leave the shell up without
+            // it — the tray and the single-instance lock would hide the
+            // failure and turn a relaunch into a focus of this window. Log,
+            // give the non-blocking log writer a moment, and exit 1.
+            tracing::error!("Server error: {e} — SongPlayer exits so a relaunch starts afresh");
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            std::process::exit(1);
         }
     });
     let server_join = std::sync::Arc::new(std::sync::Mutex::new(Some(server_join)));

@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use sp_core::config::{PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
+use sp_core::config::{PROGRAM_BLANK_ID, PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
 use sqlx::SqlitePool;
 
 use super::*;
@@ -47,6 +47,11 @@ fn the_resolver_names_the_scene_else_the_input_else_nothing() {
         program_scene_name(&OnAir::default()),
         None,
         "nothing on air"
+    );
+    // #245: Blank is named "Blank" even when published with no scene.
+    assert_eq!(
+        program_scene_name(&on_air(7, Some(PROGRAM_BLANK_ID), None)).as_deref(),
+        Some("Blank")
     );
 }
 
@@ -184,6 +189,25 @@ async fn a_restored_input_is_named_by_the_resolver() {
     assert_eq!(program_scene_name(&now).as_deref(), Some("OBS manuál"));
 }
 
+/// #245: a persisted Blank is restored, published as `Blank`, with no
+/// playlist and no NDI input needed.
+#[tokio::test]
+async fn a_restored_blank_is_published_as_blank() {
+    let pool = pool().await;
+    crate::db::models::set_setting(&pool, SETTING_PROGRAM_SOURCE, "-2")
+        .await
+        .unwrap();
+    let bus = ProgramBus::new();
+    assert_eq!(
+        restore_selected_source(&pool, &bus).await,
+        Some(PROGRAM_BLANK_ID)
+    );
+    assert_eq!(
+        bus.on_air_now(),
+        on_air(1, Some(PROGRAM_BLANK_ID), Some("Blank"))
+    );
+}
+
 fn set(pids: &[i64]) -> BTreeSet<i64> {
     pids.iter().copied().collect()
 }
@@ -198,6 +222,19 @@ fn on_air_is_sp_program_s_playlist_alone_and_it_owns_the_wall() {
     let manual = on_air(3, Some(PROGRAM_INPUT_ID), Some("Slido"));
     assert_eq!(on_air_set(&manual), set(&[]), "OBS manuál");
     assert_eq!(wall_owner(&manual), None);
+    // #245: Blank is no playlist either: nothing on air, nobody owns the
+    // wall, and a cut from a playlist to it turns that playlist OFF.
+    let blank = on_air(4, Some(PROGRAM_BLANK_ID), Some("Blank"));
+    assert_eq!(on_air_set(&blank), set(&[]), "Blank");
+    assert_eq!(wall_owner(&blank), None);
+    assert_eq!(
+        on_air_changes(
+            &on_air_set(&fast),
+            &on_air_set(&blank),
+            Some(PROGRAM_BLANK_ID)
+        ),
+        vec![(7, false)]
+    );
     let input = on_air(4, Some(PROGRAM_INPUT_ID), None);
     assert_eq!((on_air_set(&input), wall_owner(&input)), (set(&[]), None));
     assert_eq!(on_air_set(&OnAir::default()), set(&[]), "nothing yet");

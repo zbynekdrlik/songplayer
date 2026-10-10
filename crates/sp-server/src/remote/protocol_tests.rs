@@ -670,6 +670,36 @@ fn cg_scene_list() -> Value {
     })
 }
 
+/// #245: Blank is appended to a list that lacks it, with the facade's own
+/// uuid, so a Blank program reads that uuid; a list that has it (any ASCII
+/// case) and data with no scene list are left as they are.
+#[test]
+fn the_scene_list_always_holds_blank() {
+    let mut data = cg_scene_list();
+    with_blank_scene(&mut data);
+    let mut expected = cg_scene_list();
+    expected["scenes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "sceneIndex": 3, "sceneName": "Blank", "sceneUuid": "songplayer-blank" }));
+    assert_eq!(data, expected);
+    with_songplayer_scenes(&mut data, Some("Blank"), None);
+    assert_eq!(data["currentProgramSceneUuid"], BLANK_SCENE_UUID);
+
+    let mut own = cg_scene_list();
+    own["scenes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "sceneIndex": 3, "sceneName": "blank", "sceneUuid": "u-cg-blank" }));
+    let before = own.clone();
+    with_blank_scene(&mut own);
+    assert_eq!(own, before, "cg OBS's own Blank is kept as it is");
+
+    let mut odd = json!({ "scenes": "nope" });
+    with_blank_scene(&mut odd);
+    assert_eq!(odd, json!({ "scenes": "nope" }));
+}
+
 #[test]
 fn the_scene_list_names_sp_program_s_scene_and_the_preview_with_cg_obs_uuids() {
     let mut data = cg_scene_list();

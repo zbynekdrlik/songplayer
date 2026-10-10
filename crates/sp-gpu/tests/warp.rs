@@ -17,8 +17,13 @@
 
 mod common;
 
-use common::{BLACK, H, W, assert_matches_reference, at, pattern, picture, warp};
-use sp_gpu::{Composition, Compositor, GpuError, Layer, PictureError, pick_adapter};
+use common::{
+    BLACK, H, W, assert_matches_reference, assert_matches_reference_in, at, at_in, pattern,
+    picture, warp, warp_fhd,
+};
+use sp_gpu::{
+    Composition, Compositor, FHD_HEIGHT, FHD_WIDTH, GpuError, Layer, PictureError, pick_adapter,
+};
 use windows::Win32::Graphics::Direct3D11::{D3D11_RESOURCE_MISC_SHARED, D3D11_TEXTURE2D_DESC};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 
@@ -284,4 +289,56 @@ fn an_invalid_picture_is_refused_before_anything_is_drawn() {
     );
     let after = compositor.read_back().expect("read back after the refusal");
     assert!(after == before, "a refused picture leaves the last frame");
+}
+
+/// #239: the `SP-program` sender's compositor has a shared 1920×1080 BGRA
+/// target, and fits each picture into IT: a 1440p picture scaled down, a
+/// 4:3 one with its bars, then a fade of the two, each against the
+/// reference in its own target.
+#[test]
+fn a_1920_by_1080_compositor_draws_into_its_own_target() {
+    let mut compositor = warp_fhd();
+    assert_eq!(compositor.size(), (FHD_WIDTH, FHD_HEIGHT));
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    unsafe { compositor.render_target().GetDesc(&mut desc) };
+    assert_eq!((desc.Width, desc.Height), (1920, 1080));
+    assert_eq!(desc.Format, DXGI_FORMAT_B8G8R8A8_UNORM);
+    assert_ne!(
+        desc.MiscFlags & D3D11_RESOURCE_MISC_SHARED.0 as u32,
+        0,
+        "the render target is shared (Spout)"
+    );
+    let size = (FHD_WIDTH, FHD_HEIGHT);
+    let (big_stride, big) = pattern(2560, 1440, 7);
+    let (narrow_stride, narrow) = pattern(1440, 1080, 120);
+
+    let scaled = Composition::Picture(picture(1, 2560, 1440, big_stride, &big));
+    compositor
+        .compose(&scaled)
+        .expect("compose 1440p into 1080p");
+    let frame = compositor.read_back().expect("read back");
+    assert_eq!(frame.len(), 1920 * 1080 * 4, "a 1080p frame");
+    let layers = scaled.layers_in(FHD_WIDTH, FHD_HEIGHT);
+    assert_matches_reference_in(&frame, &layers, size, "2560x1440 in 1920x1080");
+    assert_opaque(&frame, "2560x1440 in 1920x1080");
+
+    let pillarbox = Composition::Picture(picture(2, 1440, 1080, narrow_stride, &narrow));
+    let layers = pillarbox.layers_in(FHD_WIDTH, FHD_HEIGHT);
+    assert_eq!((layers[0].place.off_x, layers[0].place.w), (240, 1440));
+    compositor.compose(&pillarbox).expect("compose 4:3");
+    let frame = compositor.read_back().expect("read back");
+    assert_eq!(at_in(&frame, FHD_WIDTH, 239, 540), BLACK, "the left bar");
+    assert_eq!(at_in(&frame, FHD_WIDTH, 1680, 540), BLACK, "the right bar");
+    assert_matches_reference_in(&frame, &layers, size, "1440x1080 in 1920x1080");
+
+    let fade = Composition::Fade {
+        from: Some(picture(1, 2560, 1440, big_stride, &big)),
+        to: Some(picture(2, 1440, 1080, narrow_stride, &narrow)),
+        weight_q8: 128,
+    };
+    compositor.compose(&fade).expect("compose the fade");
+    let frame = compositor.read_back().expect("read back");
+    let layers = fade.layers_in(FHD_WIDTH, FHD_HEIGHT);
+    assert_matches_reference_in(&frame, &layers, size, "fade 50 % in 1920x1080");
+    assert_opaque(&frame, "fade 50 % in 1920x1080");
 }

@@ -57,7 +57,8 @@ test("the Program control shows the on-program source and cuts on click", async 
     { timeout: 5000 },
   );
   const cuts = control.getByTestId("program-cut");
-  await expect(cuts).toHaveCount(3);
+  // The three playlists and Blank (#245).
+  await expect(cuts).toHaveCount(4);
   const worship = control.locator('[data-testid="program-cut"][data-playlist-id="1"]');
   const background = control.locator('[data-testid="program-cut"][data-playlist-id="2"]');
   await expect(worship).toHaveText("Worship");
@@ -131,7 +132,8 @@ test("with the NDI input disabled the Program control offers no OBS manuál", as
     "Na programe: Worship",
     { timeout: 10000 },
   );
-  await expect(page.getByTestId("program-cut")).toHaveCount(3);
+  // The three playlists and Blank (#245), no OBS manuál.
+  await expect(page.getByTestId("program-cut")).toHaveCount(4);
   await expect(
     page.locator('[data-testid="program-cut"][data-playlist-id="-1"]'),
   ).toHaveCount(0);
@@ -155,7 +157,8 @@ test("an enabled NDI input with no source name is not offered and cannot be cut 
   );
   // Let at least one program poll land (it carries input.enabled = true).
   await page.waitForResponse((r) => r.url().endsWith("/api/v1/program"));
-  await expect(page.getByTestId("program-cut")).toHaveCount(3);
+  // The three playlists and Blank (#245), no OBS manuál.
+  await expect(page.getByTestId("program-cut")).toHaveCount(4);
   await expect(
     page.locator('[data-testid="program-cut"][data-playlist-id="-1"]'),
   ).toHaveCount(0);
@@ -187,8 +190,10 @@ test("the Program control lists OBS manuál after the playlists and cuts to it a
   await expect(input).toHaveText("OBS manuál");
   await expect(input).toHaveAttribute("aria-pressed", "false");
   const cuts = control.getByTestId("program-cut");
-  await expect(cuts).toHaveCount(4);
-  await expect(cuts.last()).toHaveAttribute("data-playlist-id", "-1");
+  // The playlists, OBS manuál, then Blank (#245), always last.
+  await expect(cuts).toHaveCount(5);
+  await expect(cuts.nth(3)).toHaveAttribute("data-playlist-id", "-1");
+  await expect(cuts.last()).toHaveAttribute("data-playlist-id", "-2");
 
   // Cut to OBS manuál with the real mouse.
   let box = await input.boundingBox();
@@ -225,6 +230,48 @@ test("the Program control lists OBS manuál after the playlists and cuts to it a
   expect(program.source).toBe(1);
   expect(program.previous).toBe(-1);
   expect(program.health.cuts).toBe(2);
+
+  // Zero console errors — the last assertion.
+  expect(realConsoleErrors(consoleMessages)).toEqual([]);
+});
+
+// #245: Blank, SongPlayer's own black, is always offered (no NDI input, no
+// playlist needed), last; a click cuts to it ({"source": -2}) and back.
+test("the Program control cuts to Blank and back", async ({ page, request }) => {
+  const consoleMessages = collectConsole(page);
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto("/");
+  await expect(page.getByTestId("program-source")).toHaveText("Na programe: Worship", {
+    timeout: 10000,
+  });
+  const control = page.getByTestId("program-control");
+  const blank = control.locator('[data-testid="program-cut"][data-playlist-id="-2"]');
+  await expect(blank).toHaveText("Blank");
+  await expect(blank).toHaveAttribute("aria-pressed", "false");
+  await expect(control.getByTestId("program-cut").last()).toHaveAttribute("data-playlist-id", "-2");
+
+  let box = await blank.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect(page.getByTestId("program-source")).toHaveText("Na programe: Blank");
+  await expect(blank).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("program-error")).toHaveText("");
+  let last = await (await request.get("/__mock/program-last-cut")).json();
+  expect(last.body).toEqual({ source: -2 });
+  let program = await (await request.get("/api/v1/program")).json();
+  expect([program.source, program.previous]).toEqual([-2, 1]);
+  expect(program.remote.last_remote_cut).toMatchObject({ scene: "Blank", action: "blank" });
+
+  const worship = control.locator('[data-testid="program-cut"][data-playlist-id="1"]');
+  box = await worship.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect(page.getByTestId("program-source")).toHaveText("Na programe: Worship");
+  await expect(blank).toHaveAttribute("aria-pressed", "false");
+  last = await (await request.get("/__mock/program-last-cut")).json();
+  expect(last.body).toEqual({ source: 1 });
+  program = await (await request.get("/api/v1/program")).json();
+  expect([program.source, program.previous]).toEqual([1, -2]);
 
   // Zero console errors — the last assertion.
   expect(realConsoleErrors(consoleMessages)).toEqual([]);
@@ -382,7 +429,8 @@ test.describe("a playlist the cut refuses", () => {
       "Na programe: Worship",
       { timeout: 10000 },
     );
-    await expect(control.getByTestId("program-cut")).toHaveCount(5);
+    // The five playlists and Blank (#245).
+    await expect(control.getByTestId("program-cut")).toHaveCount(6);
     const cutButton = (id: number) =>
       control.locator(`[data-testid="program-cut"][data-playlist-id="${id}"]`);
     const archiv = cutButton(30);

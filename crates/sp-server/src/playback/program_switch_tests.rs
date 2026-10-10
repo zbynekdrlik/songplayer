@@ -88,6 +88,11 @@ fn the_records_of_a_cut_and_of_a_kept_program() {
         ("playlist", Some(7), "SP-fast")
     );
     assert_eq!(to_playlist.via, "program");
+    let to_blank = cut_done("blank", Via::Program, -2, &status, None);
+    assert_eq!(
+        (to_blank.action, to_blank.source, to_blank.scene.as_str()),
+        ("blank", Some(-2), "blank")
+    );
     assert_eq!(to_playlist.cg_forward, None, "cg OBS is told nothing");
     let long = "S".repeat(100);
     let held = kept(&long, Via::Dashboard, PERSIST_FAILED, None);

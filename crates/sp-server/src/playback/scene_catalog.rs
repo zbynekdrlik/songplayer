@@ -6,6 +6,9 @@
 //!   `ndi_output_name` lowercased (`SP-fast` → `sp-fast`, the scene cg OBS
 //!   shows the playlist in; all 10 live playlists follow this, read
 //!   28.9.2026).
+//! - #245: `Blank` (ASCII case ignored) is SongPlayer's own black, the
+//!   program source `PROGRAM_BLANK_ID`; a playlist whose NDI output name is
+//!   "Blank" names no scene (a logged conflict), so the name stays Blank's.
 //! - Every other name is a MANUAL scene (cg OBS's media, browser, Slido…).
 //! - A playlist with an empty `ndi_output_name`, or one whose name another
 //!   active playlist shares, names no scene. Each such conflict is logged
@@ -22,6 +25,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, PoisonError};
 
+use sp_core::config::{PROGRAM_BLANK_ID, PROGRAM_BLANK_LABEL, is_blank_scene};
 use sp_core::models::Playlist;
 use sqlx::SqlitePool;
 use tracing::warn;
@@ -31,6 +35,8 @@ use tracing::warn;
 pub enum SceneKind {
     /// The scene of this playlist.
     Playlist(i64),
+    /// #245: SongPlayer's own black (`PROGRAM_BLANK_ID`).
+    Blank,
     /// Not a playlist's scene (a manual cg OBS scene).
     Manual,
 }
@@ -57,6 +63,10 @@ impl SceneCatalog {
             active.insert(pid);
             if ndi_name.trim().is_empty() {
                 conflicts.push(format!("playlist {pid} has no NDI output name"));
+            } else if is_blank_scene(ndi_name) {
+                conflicts.push(format!(
+                    "playlist {pid}'s NDI output name {ndi_name:?} is SongPlayer's Blank scene"
+                ));
             } else {
                 let scene = ndi_name.to_ascii_lowercase();
                 named.entry(scene).or_default().push(pid);
@@ -87,6 +97,9 @@ impl SceneCatalog {
 
     /// What `scene` is, ignoring ASCII case.
     pub fn kind(&self, scene: &str) -> SceneKind {
+        if is_blank_scene(scene) {
+            return SceneKind::Blank;
+        }
         match self.scenes.get(&scene.to_ascii_lowercase()) {
             Some(&pid) => SceneKind::Playlist(pid),
             None => SceneKind::Manual,
@@ -144,11 +157,14 @@ pub async fn load_catalog(pool: &SqlitePool) -> Result<SceneCatalog, sqlx::Error
 }
 
 /// The scene a program source is published with when nobody pressed one
-/// (the startup restore): the playlist's catalog scene.
-/// `None` for the NDI input (the resolver names it "OBS manuál"), for a
-/// playlist that names no scene, and when the playlists cannot be read
-/// (WARN).
+/// (the startup restore): the playlist's catalog scene, `Blank` for Blank
+/// (#245). `None` for the NDI input (the resolver names it "OBS manuál"),
+/// for a playlist that names no scene, and when the playlists cannot be
+/// read (WARN).
 pub async fn scene_of_source(pool: &SqlitePool, source: i64) -> Option<String> {
+    if source == PROGRAM_BLANK_ID {
+        return Some(PROGRAM_BLANK_LABEL.to_string());
+    }
     match load_catalog(pool).await {
         Ok(catalog) => catalog.scene_of(source).map(str::to_string),
         Err(e) => {

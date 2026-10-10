@@ -49,6 +49,85 @@ pub const VBLANK_MAX_PERIOD: Duration = Duration::from_millis(50);
 /// waiting thread stalled or its output went away.
 pub const VBLANK_STALE: Duration = Duration::from_millis(100);
 
+/// #243: a `WaitForVBlank` that returned sooner did not wait — far below
+/// any display's period ([`VBLANK_MIN_PERIOD`]). PP, 9.10.2026: with the
+/// laptop panel dark (still attached), every wait returned at once.
+pub const VBLANK_MIN_WAIT: Duration = Duration::from_millis(1);
+
+/// The longest sleep after a wait that did not wait ([`not_waiting_sleep`]).
+pub const VBLANK_IDLE_MAX: Duration = Duration::from_millis(250);
+
+/// No refresh counted for this long: the output does not tick
+/// ([`vblank_state`]).
+pub const VBLANK_NOT_TICKING: Duration = Duration::from_secs(2);
+
+/// A refresh this long after the last counted one boots the fit afresh
+/// ([`VblankFit::observe`]): the refresh index is never carried across a
+/// long gap, where its rounding could be off by one.
+pub const VBLANK_RESTART: Duration = Duration::from_secs(1);
+
+/// Whether a `WaitForVBlank` that took `wait` waited for a refresh
+/// ([`VBLANK_MIN_WAIT`]). A wake-up that did not wait is never fed to the
+/// fit.
+pub fn waited(wait: Duration) -> bool {
+    wait >= VBLANK_MIN_WAIT
+}
+
+/// The sleep after the `streak`-th wait in a row that did not wait: 1 ms
+/// doubling to [`VBLANK_IDLE_MAX`], never none — a dark output never spins
+/// the time-critical thread (#243), and is picked up within
+/// [`VBLANK_IDLE_MAX`] once it presents.
+pub fn not_waiting_sleep(streak: u32) -> Duration {
+    let shift = streak.saturating_sub(1).min(8);
+    Duration::from_millis(1u64 << shift).min(VBLANK_IDLE_MAX)
+}
+
+/// The paced output's state (#243): `GET /api/v1/program` `max.vblank_state`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VblankState {
+    /// No fresh grid, but a refresh was counted within
+    /// [`VBLANK_NOT_TICKING`] (or the tracker started within it): the fit
+    /// is booting, or its last refresh is a moment old.
+    Measuring,
+    /// A fresh grid: the sends go on the output's refresh.
+    Ticking,
+    /// No refresh counted for [`VBLANK_NOT_TICKING`]: the output does not
+    /// present (dark, off: its waits return at once), its waits fail, or
+    /// its period is no display's. The sends go at the constant lead.
+    NotTicking,
+}
+
+impl VblankState {
+    /// The API's word.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Measuring => "measuring",
+            Self::Ticking => "ticking",
+            Self::NotTicking => "not_ticking",
+        }
+    }
+}
+
+/// The state at `now`: [`VblankState::Ticking`] with a fresh grid, else
+/// measuring until [`VBLANK_NOT_TICKING`] after the last counted refresh
+/// (`counted_at`; before any, the tracker's start), then not ticking.
+pub fn vblank_state(
+    grid_fresh: bool,
+    counted_at: Option<Instant>,
+    started: Instant,
+    now: Instant,
+) -> VblankState {
+    if grid_fresh {
+        return VblankState::Ticking;
+    }
+    let since = counted_at.unwrap_or(started);
+    if now.saturating_duration_since(since) > VBLANK_NOT_TICKING {
+        VblankState::NotTicking
+    } else {
+        VblankState::Measuring
+    }
+}
+
 /// One display output, as DXGI describes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputInfo {
@@ -128,8 +207,20 @@ pub struct VblankFit {
 }
 
 impl VblankFit {
-    /// Count a wake-up at `at` (monotonic: never before the last one).
+    /// Count a wake-up at `at` (monotonic: never before the last one). One
+    /// more than [`VBLANK_RESTART`] after the last counted refresh boots
+    /// the fit afresh (the counters kept).
     pub fn observe(&mut self, at: Instant) -> Seen {
+        if let (Some(base), Some((_, last_t))) = (self.base, self.last) {
+            let t = at.saturating_duration_since(base).as_nanos() as f64;
+            if t - last_t > VBLANK_RESTART.as_nanos() as f64 {
+                *self = Self {
+                    early: self.early,
+                    missed: self.missed,
+                    ..Self::default()
+                };
+            }
+        }
         let base = *self.base.get_or_insert(at);
         let t = at.saturating_duration_since(base).as_nanos() as f64;
         let (Some(period), Some((index, last_t))) = (self.period(), self.last) else {

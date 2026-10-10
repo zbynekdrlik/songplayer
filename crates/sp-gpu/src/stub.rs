@@ -1,10 +1,11 @@
 //! The compositor and the Spout sender off Windows: there is no Direct3D 11
 //! and no Spout, so neither is ever built. They have the portable part of
-//! the Windows API (`new`, `new_warp`, `compose`, `read_back`, `adapter`;
-//! the sender's `new`, `send`, `size`, `name`, `registration`; the registry
-//! readers), so a cross-platform caller compiles everywhere. The Direct3D
-//! accessors (`device`, `render_target`, `shared_handle`), the test
-//! constructors `new_on_listed_adapter` / `with_name`, `adapters()` and the
+//! the Windows API (`new`, `with_size`, `new_warp`, `compose`, `read_back`,
+//! `adapter`, `size`; the sender's `new`, `new_fhd`, `send`, `size`, `name`,
+//! `registration`; the registry readers), so a cross-platform caller
+//! compiles everywhere. The Direct3D accessors (`device`, `render_target`,
+//! `shared_handle`), the test constructors `new_on_listed_adapter` /
+//! `new_warp_with_size` / `with_name`, `adapters()` and the
 //! tests' second-device readback `read_shared_texture` (#223 S2) are
 //! Windows-only. The vblank tracker (#223 follow-up) has no output to wait
 //! on here: `VblankTracker::start` reports `Unsupported`.
@@ -19,7 +20,7 @@ use crate::error::GpuError;
 use crate::spout::SharedTextureInfo;
 use crate::spout_state::Registration;
 use crate::stats::{ComposeStats, SpoutSendStats};
-use crate::vblank::{OutputInfo, VblankGrid};
+use crate::vblank::{OutputInfo, VblankGrid, VblankState};
 
 /// Off Windows the compositor cannot be built: [`Compositor::new`] and
 /// [`Compositor::new_warp`] report [`GpuError::Unsupported`]. The type has
@@ -32,6 +33,12 @@ pub struct Compositor(Infallible, PhantomData<*const ()>);
 impl Compositor {
     /// [`GpuError::Unsupported`]: no Direct3D 11 off Windows.
     pub fn new() -> Result<Self, GpuError> {
+        Err(GpuError::Unsupported)
+    }
+
+    /// [`GpuError::Unsupported`]: no Direct3D 11 off Windows (#239: the
+    /// `SP-program` sender's 1920×1080 compositor neither).
+    pub fn with_size(_width: u32, _height: u32) -> Result<Self, GpuError> {
         Err(GpuError::Unsupported)
     }
 
@@ -58,6 +65,12 @@ impl Compositor {
     pub fn adapter(&self) -> &AdapterInfo {
         match self.0 {}
     }
+
+    /// Never runs (no value exists). `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn size(&self) -> (u32, u32) {
+        match self.0 {}
+    }
 }
 
 /// Off Windows there is no Spout sender: it needs a [`Compositor`], which
@@ -71,6 +84,13 @@ impl SpoutSender {
     /// uninhabited argument, so no test can call it.
     #[cfg_attr(test, mutants::skip)]
     pub fn new(compositor: &Compositor) -> Result<Self, GpuError> {
+        match compositor.0 {}
+    }
+
+    /// Never runs: no [`Compositor`] exists to pass. `mutants::skip`: as
+    /// `new`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn new_fhd(compositor: &Compositor) -> Result<Self, GpuError> {
         match compositor.0 {}
     }
 
@@ -122,6 +142,12 @@ impl VblankTracker {
     pub fn grid(&self, _now: Instant) -> Option<VblankGrid> {
         match self.0 {}
     }
+
+    /// Never runs (no value exists). `mutants::skip`: as `output`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn state(&self, _now: Instant) -> VblankState {
+        match self.0 {}
+    }
 }
 
 /// [`GpuError::Unsupported`]: no Spout off Windows.
@@ -143,6 +169,11 @@ mod tests {
     fn off_windows_no_compositor_can_be_built() {
         assert_eq!(Compositor::new().unwrap_err(), GpuError::Unsupported);
         assert_eq!(Compositor::new_warp().unwrap_err(), GpuError::Unsupported);
+        assert_eq!(
+            Compositor::with_size(crate::FHD_WIDTH, crate::FHD_HEIGHT).unwrap_err(),
+            GpuError::Unsupported,
+            "#239: nor the SP-program sender's"
+        );
     }
 
     #[test]

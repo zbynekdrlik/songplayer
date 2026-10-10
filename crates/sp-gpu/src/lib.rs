@@ -45,6 +45,12 @@
 //! adapter rule, the video API, multithread-protected
 //! (`tests/video_device.rs`).
 //!
+//! #239: the FHD program goes out over Spout too, as `SP-program`
+//! ([`SPOUT_FHD_SENDER_NAME`], `SpoutSender::new_fhd`): a second compositor
+//! whose render target is [`FHD_WIDTH`] × [`FHD_HEIGHT`]
+//! (`Compositor::with_size`; the layers, the quads and the CPU reference
+//! take the target's size, [`Composition::layers_in`]).
+//!
 //! #223 follow-up: [`VblankTracker`] measures the primary display's refresh
 //! (DWM's clock, which Arena renders in) on its own thread, `WaitForVBlank`
 //! on the output [`pick_output`] chooses, fitted by [`VblankFit`] into a
@@ -73,7 +79,9 @@ pub use adapter::{
     AdapterInfo, BASIC_RENDER_DEVICE_ID, MICROSOFT_VENDOR_ID, adapter_name, pick_adapter,
 };
 pub use color::{BT709_LIMITED_TO_FULL, KB, KR, matrix_f32};
-pub use composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Layer, Q8_ONE, Slot};
+pub use composition::{
+    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_HEIGHT, FHD_WIDTH, Layer, Q8_ONE, Slot,
+};
 pub use error::{
     DXGI_ERROR_DEVICE_HUNG, DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_RESET,
     DXGI_ERROR_DRIVER_INTERNAL_ERROR, GpuError, is_device_lost,
@@ -83,13 +91,16 @@ pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect};
 pub use readback::{mapped_len, unpad_rows, unpad_rows_into};
 pub use residency::{Resident, Upload, upload_for};
 pub use spout::{
-    NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN, SPOUT_NAME_MAX_LEN,
-    SPOUT_SENDER_NAME, SharedTextureInfo, check_sender_name, parse_sender_names,
+    NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN, SPOUT_FHD_SENDER_NAME,
+    SPOUT_NAME_MAX_LEN, SPOUT_SENDER_NAME, SharedTextureInfo, check_sender_name,
+    parse_sender_names,
 };
 pub use stats::{ComposeStats, SpoutSendStats};
 pub use vblank::{
-    OutputInfo, Seen, VBLANK_BOOT_INTERVALS, VBLANK_MAX_PERIOD, VBLANK_MIN_FIT, VBLANK_MIN_PERIOD,
-    VBLANK_STALE, VBLANK_WINDOW, VblankFit, VblankGrid, grid_is_fresh, pick_output,
+    OutputInfo, Seen, VBLANK_BOOT_INTERVALS, VBLANK_IDLE_MAX, VBLANK_MAX_PERIOD, VBLANK_MIN_FIT,
+    VBLANK_MIN_PERIOD, VBLANK_MIN_WAIT, VBLANK_NOT_TICKING, VBLANK_RESTART, VBLANK_STALE,
+    VBLANK_WINDOW, VblankFit, VblankGrid, VblankState, grid_is_fresh, not_waiting_sleep,
+    pick_output, vblank_state, waited,
 };
 
 #[cfg(not(windows))]

@@ -172,7 +172,8 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
     let studio = request(&mut ws, "GetStudioModeEnabled", None).await;
     assert_eq!(studio["responseData"]["studioModeEnabled"], true);
 
-    // The scene list is cg OBS's, 1:1 (its program scene SongPlayer's).
+    // The scene list is cg OBS's (its program scene SongPlayer's), with
+    // SongPlayer's own Blank appended when cg OBS lists none (#245).
     let list = request(&mut ws, "GetSceneList", None).await;
     assert_eq!(list["requestStatus"]["code"], 100);
     let names: Vec<&str> = list["responseData"]["scenes"]
@@ -181,7 +182,7 @@ async fn companion_lists_cg_obs_scenes_and_a_scene_press_cuts_sp_program() {
         .iter()
         .map(|s| s["sceneName"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["sp-fast", "sp-slow", "Slido"]);
+    assert_eq!(names, vec!["sp-fast", "sp-slow", "Slido", "Blank"]);
     // #221 lane 2: its program scene is SP-program's, never cg OBS's own
     // (sp-slow): nothing is on SP-program yet.
     assert!(

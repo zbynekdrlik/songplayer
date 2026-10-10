@@ -77,6 +77,12 @@ pub struct SubmitJob {
     /// picture, a held seek frame, the input's standby). The program bus's
     /// cue gate starts a fade on the incoming source's first live pair.
     pub live: bool,
+    /// #228: the picture's media time, 100 ns from where its play started
+    /// (the pacer's 0-based pts) — on a live paced pair only (a decoded
+    /// frame of the item, a starvation repeat included); `None` on every
+    /// standby, fill and NDI input pair. `SP-program` turns it into the
+    /// item's frame index (`program_item.rs`, the 911014 burn).
+    pub media_pts_100ns: Option<i64>,
 }
 
 impl SubmitJob {
@@ -90,7 +96,8 @@ impl SubmitJob {
     /// video by `Arc` CLONE — a refcount bump, NO pixel copy (#203 2b, D6). The
     /// pacer keeps its own clone of the SAME allocation for the starvation
     /// repeat, so the handoff no longer needs to copy the pixels off it.
-    /// `live` = a decoder pair (the pacer's `emit`), not a standby pair.
+    /// `live` = a decoder pair (the pacer's `emit`), not a standby pair; only
+    /// a live pair carries the frame's media time (#228).
     pub fn from_paced(
         frame: &PacedFrame,
         audio: &[AudioFrame],
@@ -107,6 +114,7 @@ impl SubmitJob {
             video_tc_100ns,
             audio_tc_100ns,
             live,
+            media_pts_100ns: live.then_some(frame.pts_ns / 100),
         }
     }
 }

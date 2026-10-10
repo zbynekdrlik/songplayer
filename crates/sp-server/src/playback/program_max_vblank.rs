@@ -26,11 +26,14 @@
 //!   offer's jitter at the window's edge from picking back and forth.
 //!
 //! No grid (no tracker, or its output stalled) → the constant lead
-//! (`program_max_send::send_due`).
+//! (`program_max_send::send_due`). #243: the tracker also says WHY
+//! (`sp_gpu::VblankState`, `max.vblank_state`); [`vblank_log`] decides the
+//! one WARN where the output stops ticking and the one INFO where it
+//! ticks again.
 
 use std::time::{Duration, Instant};
 
-use sp_gpu::VblankGrid;
+use sp_gpu::{VblankGrid, VblankState};
 
 use crate::playback::program_max_send::send_due;
 
@@ -47,6 +50,8 @@ pub const LEAD_HYSTERESIS: Duration = Duration::from_millis(3);
 pub trait VblankSource {
     /// The grid at `now`, or `None` while it is not measured.
     fn grid(&self, now: Instant) -> Option<VblankGrid>;
+    /// The output's state at `now` (#243).
+    fn state(&self, now: Instant) -> VblankState;
     /// The output it measures (the telemetry's `vblank_output`).
     fn output(&self) -> String;
 }
@@ -61,8 +66,35 @@ impl VblankSource for sp_gpu::VblankTracker {
 
     /// `mutants::skip`: as `grid`.
     #[cfg_attr(test, mutants::skip)]
+    fn state(&self, now: Instant) -> VblankState {
+        sp_gpu::VblankTracker::state(self, now)
+    }
+
+    /// `mutants::skip`: as `grid`.
+    #[cfg_attr(test, mutants::skip)]
     fn output(&self) -> String {
         sp_gpu::VblankTracker::output(self).label()
+    }
+}
+
+/// What a change of the paced output's state logs (#243).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VblankLog {
+    /// It turned `not_ticking`: one WARN, the sends go at the constant lead.
+    StoppedTicking,
+    /// It left `not_ticking`: one INFO.
+    TicksAgain,
+}
+
+/// The log line for the state going from `before` (`None`: none recorded
+/// yet) to `now`: only entering and leaving `not_ticking` is logged.
+pub fn vblank_log(before: Option<VblankState>, now: VblankState) -> Option<VblankLog> {
+    let was_dark = before == Some(VblankState::NotTicking);
+    let is_dark = now == VblankState::NotTicking;
+    match (was_dark, is_dark) {
+        (false, true) => Some(VblankLog::StoppedTicking),
+        (true, false) => Some(VblankLog::TicksAgain),
+        _ => None,
     }
 }
 

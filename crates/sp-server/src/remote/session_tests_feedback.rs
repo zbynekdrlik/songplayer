@@ -299,7 +299,8 @@ async fn get_scene_list_names_sp_program_s_scene_and_this_session_s_preview() {
         .iter()
         .map(|s| s["sceneName"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["sp-fast", "sp-slow", "Slido", "Trailer"]);
+    // cg OBS's list, and SongPlayer's Blank it lacks (#245).
+    assert_eq!(names, ["sp-fast", "sp-slow", "Slido", "Trailer", "Blank"]);
 
     // This session's own preview.
     let set = request(

@@ -226,6 +226,53 @@ fn a_composed_fade_adds_each_side_where_its_quad_reaches() {
     assert_eq!(pixel(&layers, 3839, 2159), [0, 0, 0, 255], "neither");
 }
 
+/// #239: each layer carries its place in its own target
+/// (`Composition::layers_in`), so the model pins `SP-program`'s 1920×1080
+/// like MAX's canvas: the same 2:1 picture letterboxed at row 60, its
+/// corners and centre the same texels as in 4K.
+#[test]
+fn a_composed_picture_is_letterboxed_in_the_fhd_target() {
+    // 4×2 (2:1) → 1920×960 at row 60.
+    let layers = Composition::Picture(picture_a()).layers_in(1920, 1080);
+    assert_eq!(pixel(&layers, 0, 0), [0, 0, 0, 255]);
+    assert_eq!(pixel(&layers, 0, 59), [0, 0, 0, 255], "the last bar row");
+    assert_eq!(pixel(&layers, 0, 60), [0, 0, 39, 255], "texel (0, 0)");
+    assert_eq!(pixel(&layers, 960, 540), [165, 126, 77, 255]);
+    assert_eq!(
+        pixel(&layers, 1919, 1019),
+        [168, 37, 0, 255],
+        "texel (3, 1)"
+    );
+    assert_eq!(pixel(&layers, 0, 1020), [0, 0, 0, 255], "the first bar row");
+    assert_eq!(tolerance(&layers, 0, 59), 0, "a bar: exact");
+    assert_eq!(tolerance(&layers, 0, 60), 1, "the picture");
+}
+
+/// #239: a fade in the 1920×1080 target samples on its own pixel grid: a
+/// pixel between texels reads other filter weights than its 4K twin.
+#[test]
+fn a_composed_fade_in_the_fhd_target_samples_its_own_grid() {
+    // A (4×2) at 1 − 64/256 over rows 60..1020; B (2×2) at 64/256 over
+    // columns 420..1500.
+    let layers = Composition::Fade {
+        from: Some(picture_a()),
+        to: Some(picture_b()),
+        weight_q8: 64,
+    }
+    .layers_in(1920, 1080);
+    assert_eq!(pixel(&layers, 50, 25), [0, 0, 0, 255], "neither");
+    assert_eq!(pixel(&layers, 500, 25), [33, 50, 64, 255], "to only");
+    assert_eq!(pixel(&layers, 50, 500), [0, 4, 38, 255], "from only");
+    assert_eq!(pixel(&layers, 500, 500), [24, 67, 120, 255], "both");
+    assert_eq!(pixel(&layers, 1499, 1019), [210, 128, 64, 255], "both");
+    // 4K's (3000, 1000) reads green 134: another sample point.
+    assert_eq!(pixel(&layers, 1500, 500), [191, 133, 26, 255], "from only");
+    assert_eq!(pixel(&layers, 1919, 1079), [0, 0, 0, 255], "neither");
+    assert_eq!(pixel(&layers, 420, 60), [33, 60, 108, 255], "both, first");
+    assert_eq!(tolerance(&layers, 420, 60), 2, "both, at their first pixel");
+    assert_eq!(tolerance(&layers, 419, 59), 0, "neither, just outside");
+}
+
 #[test]
 fn the_tolerance_is_one_code_per_layer_covering_the_pixel() {
     // The same fade: A over rows 120..2040, B over columns 840..3000.

@@ -7,6 +7,7 @@ pub mod models_playlist_fx; // #242 a playlist's own volume + EQ (V33 columns)
 pub mod models_playlists; // #225 every playlist id, for the WS on-connect replay (own module, 1000-line cap)
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 pub mod models_stems_priority; // #195 tiered in-use-first stems selector (own module, 1000-line cap)
+pub mod startup_open; // #229 the startup open waits out a briefly locked database
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
@@ -296,9 +297,9 @@ ALTER TABLE videos ADD COLUMN next_attempt_at TEXT;
 ";
 
 // V21 (#142) — ★ reference marker + owner feedback loop. `lyrics_reference`
-// flags a song as carrying Claude's verified "reference" lyrics; the LED
-// wall appends " ★" to every displayed line for such a song
-// (`lyrics::renderer::resolume_lines_with_next`). When the owner flags a
+// flags a song as carrying Claude's verified "reference" lyrics (the LED
+// wall showed " ★" on its lines until #241 removed it from the wall: Arena's
+// SK font had no U+2605; the dashboard keeps the ★). When the owner flags a
 // starred song as wrong from the dashboard ("Nesedí"), the feedback
 // endpoint clears the flag, stamps `lyrics_reference_rejected_at`, and
 // stores the owner's note in `lyrics_reference_note`. Existing rows default

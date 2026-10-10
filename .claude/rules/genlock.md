@@ -37,7 +37,9 @@ per-playlist senders (0.71.0-dev.16) — the history below still names them:
   (`audio_emitter.rs`, `audio_edge_fade.rs`, `pipeline_audio.rs`,
   `av_catchup.rs`, `sp_ndi::AudioSink`);
 - the #151 burn-id overlay (`burn_overlay.rs`, `ndi_burn.rs`,
-  `sp_core::genlock::burn`, `POST /api/v1/ndi/burn`, `burn_on`);
+  `sp_core::genlock::burn`, `POST /api/v1/ndi/burn`, `burn_on`) — #228
+  brought its payload back on `SP-program` alone, at a new place
+  (`test-item-burn.md`);
 - the per-playlist submit side: `submitter_paced.rs` (`paced_handoff`),
   `NdiSender::twin`, the `send_video_async` call gauge
   (`submit_call_us_max` / `_p99`, `SubmitHist`, `drain_window`,

@@ -92,6 +92,39 @@ pub fn program_max_enabled(raw: Option<&str>) -> bool {
     raw.map_or(DEFAULT_PROGRAM_MAX_ENABLED, |v| v.trim() != "false")
 }
 
+/// #239: the `SP-program` Spout sender — the FHD program's 1920×1080
+/// picture, composed on the `program-max` thread next to `SP-program-MAX`.
+/// ON unless the setting says exactly `"false"`
+/// ([`program_spout_fhd_enabled`]); it runs only while MAX is on too.
+pub const SETTING_PROGRAM_SPOUT_FHD_ENABLED: &str = "program_spout_fhd_enabled";
+/// #239: the FHD Spout sender is ON by default (the owner asked for it).
+pub const DEFAULT_PROGRAM_SPOUT_FHD_ENABLED: bool = true;
+
+/// #239: whether a stored `program_spout_fhd_enabled` turns the `SP-program`
+/// Spout sender on: OFF only for an explicit `"false"` (trimmed), else
+/// [`DEFAULT_PROGRAM_SPOUT_FHD_ENABLED`] — the rule of
+/// [`program_max_enabled`]. The ONE rule the startup read, the settings
+/// task and the Nastavenia form share.
+pub fn program_spout_fhd_enabled(raw: Option<&str>) -> bool {
+    raw.map_or(DEFAULT_PROGRAM_SPOUT_FHD_ENABLED, |v| v.trim() != "false")
+}
+
+/// #239: what a Nastavenia save sends for `program_max_enabled` — `"true"` /
+/// `"false"` only when the checkbox differs from the value the page loaded
+/// (`loaded`, read by [`program_max_enabled`]), else nothing: a tab opened
+/// before the switch was changed elsewhere never sends the old one back
+/// (#229's [`paid_ai_to_send`] rule).
+pub fn program_max_to_send(loaded: Option<&str>, checked: bool) -> Option<String> {
+    (program_max_enabled(loaded) != checked).then(|| checked.to_string())
+}
+
+/// #239: what a Nastavenia save sends for `program_spout_fhd_enabled`, by
+/// the rule of [`program_max_to_send`] (the value loaded read by
+/// [`program_spout_fhd_enabled`]).
+pub fn program_spout_fhd_to_send(loaded: Option<&str>, checked: bool) -> Option<String> {
+    (program_spout_fhd_enabled(loaded) != checked).then(|| checked.to_string())
+}
+
 /// #223 follow-up: where after each vblank of the wall's display a
 /// `SP-program-MAX` send starts, in ms (decimals allowed): Resolume Arena
 /// takes the Spout texture at its own instant in each refresh, so a send
@@ -233,6 +266,18 @@ pub fn is_secret_setting(key: &str) -> bool {
 pub const PROGRAM_INPUT_ID: i64 = -1;
 /// #212: the NDI input's label on the dashboard Program control.
 pub const PROGRAM_INPUT_LABEL: &str = "OBS manuál";
+/// #245: the program-bus source id of Blank, SongPlayer's own black: no
+/// source ever offers under it, so the bus fills every boundary with its
+/// standby pair (black + silence).
+pub const PROGRAM_BLANK_ID: i64 = -2;
+/// #245: Blank's scene name (the facade, Companion) and its dashboard label.
+pub const PROGRAM_BLANK_LABEL: &str = "Blank";
+
+/// #245: whether a pressed scene name is Blank (ASCII case ignored, like
+/// the playlist scenes).
+pub fn is_blank_scene(scene: &str) -> bool {
+    scene.eq_ignore_ascii_case(PROGRAM_BLANK_LABEL)
+}
 
 // Default values for settings that have sensible defaults.
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
@@ -332,6 +377,19 @@ mod tests {
         assert_eq!(PROGRAM_INPUT_LABEL, "OBS manuál");
     }
 
+    /// #245: Blank's id, label and scene match.
+    #[test]
+    fn blank_is_its_own_source_and_scene() {
+        assert_eq!(PROGRAM_BLANK_ID, -2);
+        assert_eq!(PROGRAM_BLANK_LABEL, "Blank");
+        for scene in ["Blank", "blank", "BLANK"] {
+            assert!(is_blank_scene(scene), "{scene}");
+        }
+        for scene in ["Blank ", "Blanks", "sp-blank", "", "OBS manuál"] {
+            assert!(!is_blank_scene(scene), "{scene:?}");
+        }
+    }
+
     #[test]
     fn remote_ws_setting_keys_and_default_port() {
         assert_eq!(SETTING_REMOTE_WS_ENABLED, "remote_ws_enabled");
@@ -384,6 +442,43 @@ mod tests {
             "only an explicit false"
         );
         assert!(!program_max_enabled(Some(" false\n")), "trimmed");
+    }
+
+    /// #239: the `SP-program` Spout sender is ON unless its setting says
+    /// exactly "false" — the rule of `program_max_enabled`.
+    #[test]
+    fn the_fhd_spout_sender_is_on_unless_the_setting_says_false() {
+        assert_eq!(
+            SETTING_PROGRAM_SPOUT_FHD_ENABLED,
+            "program_spout_fhd_enabled"
+        );
+        assert!(program_spout_fhd_enabled(None), "no setting = ON");
+        assert!(program_spout_fhd_enabled(Some("true")));
+        assert!(program_spout_fhd_enabled(Some("")), "an empty value = ON");
+        assert!(
+            program_spout_fhd_enabled(Some("off?")),
+            "a mangled value = ON"
+        );
+        assert!(
+            !program_spout_fhd_enabled(Some("false")),
+            "only an explicit false"
+        );
+        assert!(!program_spout_fhd_enabled(Some("\tfalse ")), "trimmed");
+    }
+
+    /// #239: a save sends each Spout switch only when the checkbox changed
+    /// it from what the page loaded (read by the switch's own rule).
+    #[test]
+    fn a_save_sends_a_spout_switch_only_when_it_changed() {
+        for to_send in [program_max_to_send, program_spout_fhd_to_send] {
+            assert_eq!(to_send(None, true), None, "on as loaded");
+            assert_eq!(to_send(None, false).as_deref(), Some("false"));
+            assert_eq!(to_send(Some("false"), true).as_deref(), Some("true"));
+            assert_eq!(to_send(Some(" false "), false), None, "off as loaded");
+            assert_eq!(to_send(Some("true"), true), None);
+            assert_eq!(to_send(Some("junk"), true), None, "a mangled value is ON");
+            assert_eq!(to_send(Some("true"), false).as_deref(), Some("false"));
+        }
     }
 
     /// #223 follow-up: the vblank phase is ms from 0 to under 1000, to the

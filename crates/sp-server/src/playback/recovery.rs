@@ -187,9 +187,10 @@ impl super::PlaybackEngine {
             {
                 continue;
             }
-            let lines = pp.lyrics_state.as_ref().and_then(|state| {
-                state.resolume_lines_with_next(pp.cached_position_ms, pp.cached_lyrics_reference)
-            });
+            let lines = pp
+                .lyrics_state
+                .as_ref()
+                .and_then(|state| state.resolume_lines_with_next(pp.cached_position_ms));
             if let Some((en, next_en, sk, next_sk)) = lines {
                 let cmd = ResolumeCommand::ShowSubtitles {
                     en,

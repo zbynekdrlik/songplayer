@@ -302,6 +302,10 @@ included, is comment 5872871751).
   SP-program, so the cut would black them all; `remote-control.md` "The
   dashboard cut on the same path"). Source `-1` is the #212 NDI input "OBS
   manuál" (404 unless it is enabled with a source) — see `ndi-input.md`.
+- #228: both answers also carry `burn_on`, `burned_boundaries` and
+  `on_air_item` (the item the sender last put on the wire); `POST
+  /api/v1/program/burn {"on"}` switches the 911014 burn —
+  `test-item-burn.md`.
 - `cut_refused` (both answers): every playlist a cut refuses now, in id
   order, `reason` `playlist_inactive` / `no_scene`
   (`program_switch::refused_sources`, the cut's own `cut_scene` rule;
@@ -390,6 +394,28 @@ included, is comment 5872871751).
 - `ProgramBus::switch_order` (a `tokio::sync::Mutex`) orders the scene
   switches of the #221 switch path (`remote-control.md`). It is separate
   from `cut_serial`, which only orders persist + cut.
+
+### Blank, SongPlayer's own black (#245)
+
+- `PROGRAM_BLANK_ID` = -2, scene and label `PROGRAM_BLANK_LABEL` = "Blank"
+  (`sp_core::config`, `is_blank_scene`: ASCII case ignored). NOTHING ever
+  offers under -2, so the bus's standby fill does it all, on time
+  (`fill_due`: never offered → missed once reached): the canvas black on
+  `SP-program`, `MaxJob::Black` on MAX, silence to every audio output. No
+  producer, no thread — never add one.
+- A press of `Blank` (facade) or `{"source": -2}` (dashboard, always
+  accepted) cuts with the scene `Blank`, action `blank`; cg OBS is told
+  nothing. The catalog's `SceneKind::Blank` wins over a playlist whose NDI
+  name is "Blank" (that playlist names no scene, a logged conflict).
+- Blank owns no wall (`wall_owner` filters -1 and -2): the playlist cut
+  away gets its OFF (held / paused), nobody writes lines, title, Presenter.
+- A fade INTO Blank never waits for a cue (`Window::cued`: black is always
+  ready); a fade out of it waits for the playlist's cue as usual.
+- The restore publishes a persisted -2 as `Blank` (`scene_of_source`, no
+  store read). The facade appends `Blank` to cg OBS's `GetSceneList` when
+  cg OBS lists none (`protocol::with_blank_scene`, uuid
+  `songplayer-blank`). The dashboard's Program control lists it last,
+  always (`program-cut` `data-playlist-id="-2"`).
 
 ## The playback authority (#221 L4b, design record 5873773896 §1e)
 

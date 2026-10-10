@@ -8,7 +8,9 @@
 //!   persisted first (setting `program_source`) and restored at startup.
 //!   `{"source": -1}` (`PROGRAM_INPUT_ID`) cuts to the #212 NDI input "OBS
 //!   manuál" — accepted only while it is a source (`ndi_input_enabled` with a
-//!   non-empty `ndi_input_source`), else `404`.
+//!   non-empty `ndi_input_source`), else `404`. `{"source": -2}`
+//!   (`PROGRAM_BLANK_ID`, #245) cuts to Blank, SongPlayer's own black:
+//!   always accepted.
 //!   #221 L4a: the cut goes through the ONE switch path
 //!   (`program_switch::switch_source`, `via=dashboard`): under the bus's
 //!   `switch_order`, recorded as `remote.last_remote_cut`. #221 B4 step 6:
@@ -38,6 +40,15 @@
 //! playlists a cut refuses now, `{source, reason}` in id order
 //! (`program_switch::refused_sources`, the cut's own rule; `null` when the
 //! playlists cannot be read): the dashboard disables their buttons.
+//!
+//! #228: both answers also carry `burn_on` (the 911014 burn switch, default
+//! off, never persisted), `burned_boundaries` (since the start) and
+//! `on_air_item`: the item the `SP-program` sender put on the wire last
+//! (`playback::program_item::ItemStatus`: playlist, video, `started_at_utc_ns`,
+//! `position_ms`, `frame`, `frame_utc_ns`) with the video's `youtube_id` and
+//! `title` from the store, `null` while no item frame of the source on
+//! program went out. `POST /api/v1/program/burn {"on": bool}` turns the burn
+//! on or off: `200 {"burn_on": bool}`.
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -46,13 +57,14 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
-use sp_core::config::PROGRAM_INPUT_ID;
+use sp_core::config::{PROGRAM_BLANK_ID, PROGRAM_INPUT_ID};
 
 use crate::AppState;
 use crate::playback::audio_out::OutputStatus;
 use crate::playback::ndi_health_expect::program_degraded_reason;
 use crate::playback::ndi_input::{InputSettings, NdiInputStatus, load_input_settings};
 use crate::playback::program_bus::{ProgramBus, ProgramStatus};
+use crate::playback::program_item::ItemStatus;
 use crate::playback::program_max::MaxStatus;
 use crate::playback::program_switch::{
     RefusedSource, SourceError, Via, refused_sources, switch_source,
@@ -100,6 +112,34 @@ pub struct ProgramResponse {
     /// #221 ROZHODNUTÉ 6022247729: the playlists a cut refuses now (`null`
     /// when the playlists cannot be read).
     pub cut_refused: Option<Vec<RefusedSource>>,
+    /// #228: the 911014 burn switch, and the boundaries burned since start.
+    pub burn_on: bool,
+    pub burned_boundaries: u64,
+    /// #228: the item on the wire (`null`: none).
+    pub on_air_item: Option<OnAirItem>,
+}
+
+/// #228: the item on `SP-program`, as the sender last put it on the wire,
+/// with its video's YouTube id and title from the store (`null` when the
+/// row cannot be read).
+#[derive(Debug, Serialize)]
+pub struct OnAirItem {
+    #[serde(flatten)]
+    pub item: ItemStatus,
+    pub youtube_id: Option<String>,
+    pub title: Option<String>,
+}
+
+/// The body of `POST /api/v1/program/burn`.
+#[derive(Debug, Deserialize)]
+pub struct BurnRequest {
+    pub on: bool,
+}
+
+/// The answer of `POST /api/v1/program/burn`: the switch as it is now.
+#[derive(Debug, Serialize)]
+pub struct BurnAnswer {
+    pub burn_on: bool,
 }
 
 /// The STORED settings the telemetry blocks report next to their live state.
@@ -114,6 +154,7 @@ impl ProgramResponse {
         program: ProgramStatus,
         stored: &StoredSettings,
         cut_refused: Option<Vec<RefusedSource>>,
+        on_air_item: Option<OnAirItem>,
     ) -> Self {
         let health = &program.health;
         let polled = health.receivers_polled.then_some(health.connections);
@@ -128,8 +169,34 @@ impl ProgramResponse {
             remote: bus.remote().status(&stored.remote, &bus.on_air_now()),
             max: bus.max().status(),
             cut_refused,
+            burn_on: bus.item().burn_on(),
+            burned_boundaries: bus.item().burned(),
+            on_air_item,
         }
     }
+}
+
+/// #228: the item on the wire, with its video's YouTube id and title (both
+/// `null` when the row cannot be read: WARNed).
+async fn on_air_item(state: &AppState) -> Option<OnAirItem> {
+    let item = state.program_bus.item().on_air()?;
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT youtube_id, title FROM videos WHERE id = ?",
+    )
+    .bind(item.video_id)
+    .fetch_optional(&state.pool)
+    .await
+    .inspect_err(
+        |e| warn!(%e, video_id = item.video_id, "program: reading the on-air item's video failed"),
+    )
+    .ok()
+    .flatten();
+    let (youtube_id, title) = row.map_or((None, None), |(id, title)| (Some(id), title));
+    Some(OnAirItem {
+        item,
+        youtube_id,
+        title,
+    })
 }
 
 /// The playlists a cut refuses now; `None` (WARN) when they cannot be read.
@@ -159,8 +226,33 @@ async fn stored_settings(state: &AppState) -> StoredSettings {
 pub async fn get_program(State(state): State<AppState>) -> Json<ProgramResponse> {
     let stored = stored_settings(&state).await;
     let refused = cut_refused(&state).await;
+    let item = on_air_item(&state).await;
     let bus = &state.program_bus;
-    Json(ProgramResponse::new(bus, bus.status(), &stored, refused))
+    Json(ProgramResponse::new(
+        bus,
+        bus.status(),
+        &stored,
+        refused,
+        item,
+    ))
+}
+
+/// `POST /api/v1/program/burn {"on": bool}` (#228): turn the 911014 burn on
+/// `SP-program` on or off — in memory only, a restart starts it off. `200`
+/// with the switch as it is now.
+pub async fn post_program_burn(
+    State(state): State<AppState>,
+    Json(body): Json<BurnRequest>,
+) -> Json<BurnAnswer> {
+    let item = state.program_bus.item();
+    item.set_burn(body.on);
+    info!(
+        on = body.on,
+        "program: the 911014 burn on SP-program switched"
+    );
+    Json(BurnAnswer {
+        burn_on: item.burn_on(),
+    })
 }
 
 /// `POST /api/v1/program/cut` — `200` + the new program state, `404` for an
@@ -182,7 +274,7 @@ pub async fn post_program_cut(
             )
                 .into_response();
         }
-    } else {
+    } else if body.source != PROGRAM_BLANK_ID {
         let exists = sqlx::query("SELECT id FROM playlists WHERE id = ?")
             .bind(body.source)
             .fetch_optional(&state.pool)
@@ -215,7 +307,8 @@ pub async fn post_program_cut(
         "program cut"
     );
     let refused = cut_refused(&state).await;
-    Json(ProgramResponse::new(bus, status, &stored, refused)).into_response()
+    let item = on_air_item(&state).await;
+    Json(ProgramResponse::new(bus, status, &stored, refused, item)).into_response()
 }
 
 /// The query of `GET /api/v1/program/trace` (#147), as text: parsed by
@@ -249,6 +342,9 @@ pub async fn get_program_trace(
 #[cfg(test)]
 #[path = "program_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "program_tests_burn.rs"]
+mod tests_burn;
 #[cfg(test)]
 #[path = "program_tests_max.rs"]
 mod tests_max;

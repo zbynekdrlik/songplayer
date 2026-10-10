@@ -13,9 +13,11 @@ use super::{device, failed, textures};
 use crate::error::GpuError;
 use crate::spout::SharedTextureInfo;
 
-/// The 3840×2160 BGRA pixels of the shared texture `info` names (a sender's
-/// map, `spout_sender_info`), opened from its handle on a new WARP device
-/// and read back: rows packed, as `Compositor::read_back` returns them.
+/// The BGRA pixels of the shared texture `info` names (a sender's map,
+/// `spout_sender_info`), at the size the map lists (#239: 3840×2160 for
+/// `SP-program-MAX`, 1920×1080 for `SP-program`), opened from its handle on
+/// a new WARP device and read back: rows packed, as `Compositor::read_back`
+/// returns them.
 ///
 /// It takes no Spout mutex and no keyed mutex (Spout's texture has none):
 /// the caller makes sure the sender's copy is complete, e.g. by reading after
@@ -31,6 +33,6 @@ pub fn read_shared_texture(info: &SharedTextureInfo) -> Result<Vec<u8>, GpuError
     let texture = texture.ok_or(GpuError::NoObject {
         call: "OpenSharedResource",
     })?;
-    let staging = textures::staging(&device)?;
-    textures::read_back(&context, &texture, &staging)
+    let staging = textures::staging(&device, info.width, info.height)?;
+    textures::read_back(&context, &texture, &staging, info.width, info.height)
 }

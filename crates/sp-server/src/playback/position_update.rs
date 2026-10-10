@@ -88,9 +88,7 @@ impl super::PlaybackEngine {
 
         // Resolume — gated on scene_active.
         if pp.scene_active.load(Ordering::Acquire) {
-            let resolume_signature = match lyrics
-                .resolume_lines_with_next(position_ms, pp.cached_lyrics_reference)
-            {
+            let resolume_signature = match lyrics.resolume_lines_with_next(position_ms) {
                 Some((en, next_en, sk, next_sk)) => {
                     let sig = format!(
                         "show|{}|{}|{}|{}|{}",

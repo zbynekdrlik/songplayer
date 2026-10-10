@@ -75,6 +75,47 @@ async fn a_dashboard_playlist_cut_is_published_and_recorded_with_its_catalog_sce
     assert_eq!(record["cut_boundary_100ns"], json["cut_boundary_100ns"]);
 }
 
+/// #245: `{"source": -2}` cuts to Blank, SongPlayer's own black — with no
+/// playlist row and no NDI input needed — persisted, published and
+/// recorded as `Blank`, and nothing goes to cg OBS.
+#[tokio::test]
+async fn a_dashboard_cut_to_blank_needs_no_playlist_and_no_input() {
+    let state = test_state().await;
+    let fast = add_playlist(&state.pool, "fast").await;
+    assert_eq!(cut(&state, fast).await.0, StatusCode::OK);
+    let (status, json) = cut(&state, -2).await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    // (Both cuts land in the same slot in this rig, so the second replaces
+    // the first: `previous` says nothing here.)
+    assert_eq!(json["source"], json!(-2));
+    assert_eq!(
+        state.program_bus.on_air_now().scene.as_deref(),
+        Some("Blank")
+    );
+    let persisted = get_setting(&state.pool, SETTING_PROGRAM_SOURCE)
+        .await
+        .unwrap();
+    assert_eq!(persisted.as_deref(), Some("-2"));
+    let record = last_cut(&state);
+    assert_eq!(
+        (
+            &record["scene"],
+            &record["action"],
+            &record["source"],
+            &record["via"]
+        ),
+        (
+            &json!("Blank"),
+            &json!("blank"),
+            &json!(-2),
+            &json!("dashboard")
+        )
+    );
+    assert_eq!(record["cg_forward"], Value::Null, "nothing went to cg OBS");
+    // Another negative id is no source.
+    assert_eq!(cut(&state, -3).await.0, StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn a_dashboard_cut_to_the_input_is_a_cut_only() {
     let state = test_state().await;

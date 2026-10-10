@@ -706,6 +706,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "g2gen"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5a7e0eb46f83a20260b850117d204366674e85d3a908d90865c78df9a6b1dfc"
+dependencies = [
+ "g2poly",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "g2p"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "539e2644c030d3bf4cd208cb842d2ce2f80e82e6e8472390bcef83ceba0d80ad"
+dependencies = [
+ "g2gen",
+ "g2poly",
+]
+
+[[package]]
+name = "g2poly"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "312d2295c7302019c395cfb90dacd00a82a2eabd700429bba9c7a3f38dbbe11b"
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1241,6 +1269,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "lru"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
+dependencies = [
+ "hashbrown 0.15.5",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1546,6 +1583,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
+
+[[package]]
 name = "quinn"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1834,6 +1877,16 @@ checksum = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155"
 dependencies = [
  "rmp",
  "serde",
+]
+
+[[package]]
+name = "rqrr"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2260da7f69877ba68c49a0c2d9946829848236c708dd40d2a6baf8c868ee887"
+dependencies = [
+ "g2p",
+ "lru",
 ]
 
 [[package]]
@@ -2177,7 +2230,7 @@ dependencies = [
 
 [[package]]
 name = "sp-core"
-version = "0.76.0"
+version = "0.77.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2186,7 +2239,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.76.0"
+version = "0.77.0"
 dependencies = [
  "mutants",
  "sp-core",
@@ -2199,7 +2252,7 @@ dependencies = [
 
 [[package]]
 name = "sp-gpu"
-version = "0.76.0"
+version = "0.77.0"
 dependencies = [
  "cc",
  "mutants",
@@ -2211,7 +2264,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.76.0"
+version = "0.77.0"
 dependencies = [
  "libloading",
  "mutants",
@@ -2222,7 +2275,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.76.0"
+version = "0.77.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2236,10 +2289,12 @@ dependencies = [
  "jpeg-encoder",
  "mdns-sd",
  "mutants",
+ "qrcode",
  "rand 0.8.5",
  "regex",
  "reqwest",
  "rmp-serde",
+ "rqrr",
  "rtrb",
  "rubato",
  "serde",

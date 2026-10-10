@@ -6,7 +6,7 @@ use sqlx::{Row, SqlitePool};
 // ★ reference-marker functions (#142) split into a sibling module
 // (models_reference.rs) so this file stays under the 1000-line airuleset
 // cap. Re-exported so every existing call site
-// (`crate::db::models::get_video_lyrics_reference`, etc.) keeps compiling
+// (`crate::db::models::set_video_lyrics_reference`, etc.) keeps compiling
 // unchanged.
 #[path = "models_reference.rs"]
 mod models_reference;

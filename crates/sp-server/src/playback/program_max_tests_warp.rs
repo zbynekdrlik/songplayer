@@ -5,7 +5,11 @@
 //! registry lists the sender at 3840×2160, and its shared texture, opened
 //! and read on a SECOND WARP device as Arena opens it, shows the fitted
 //! picture and then the fade within S1a's tolerance (`reference.rs`: one
-//! code per quad that covers a pixel).
+//! code per quad that covers a pixel). #239: the same thread runs the FHD
+//! sender too (a 1920×1080 WARP compositor and a sender under its own test
+//! name): Spout lists it at 1920×1080 (the thread's own registry read,
+//! `max.fhd.listed_*`, says so too) and its texture holds the same pictures
+//! fitted into 1920×1080.
 //!
 //! The readback takes no Spout mutex, so each picture is served TWICE and
 //! read after the second one went out: its draw waited for the GPU, which
@@ -19,8 +23,8 @@ use std::time::{Duration, Instant};
 
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
 use sp_gpu::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Compositor, GpuError, Layer, Nv12Picture,
-    SpoutSender, read_shared_texture, reference, spout_sender_info,
+    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Compositor, FHD_HEIGHT, FHD_WIDTH, GpuError, Layer,
+    Nv12Picture, SpoutSender, read_shared_texture, reference, spout_sender_info,
 };
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, NdiSender};
@@ -36,7 +40,11 @@ use crate::playback::submit_handoff::SubmitJob;
 /// The sender's name here: never the production `SP-program-MAX`.
 const TEST_SENDER: &str = "SP-program-MAX-s2-warp-test";
 
-/// The WARP GPU: `Compositor::new_warp` and the sender under [`TEST_SENDER`].
+/// #239: the FHD sender's name here: never the production `SP-program`.
+const TEST_FHD_SENDER: &str = "SP-program-fhd-warp-test";
+
+/// The WARP GPU: `Compositor::new_warp` and the sender under [`TEST_SENDER`];
+/// a 1920×1080 WARP compositor and the sender under [`TEST_FHD_SENDER`].
 struct WarpGpu;
 
 impl MaxGpu for WarpGpu {
@@ -49,6 +57,14 @@ impl MaxGpu for WarpGpu {
 
     fn sender(&mut self, compositor: &Compositor) -> Result<SpoutSender, GpuError> {
         SpoutSender::with_name(compositor, TEST_SENDER)
+    }
+
+    fn fhd_compositor(&mut self) -> Result<Compositor, GpuError> {
+        Compositor::new_warp_with_size(FHD_WIDTH, FHD_HEIGHT)
+    }
+
+    fn fhd_sender(&mut self, compositor: &Compositor) -> Result<SpoutSender, GpuError> {
+        SpoutSender::with_name(compositor, TEST_FHD_SENDER)
     }
 }
 
@@ -104,6 +120,7 @@ fn source(width: u32, height: u32, seed: u32, stamp: i64) -> SubmitJob {
         video_tc_100ns: stamp,
         audio_tc_100ns: stamp,
         live: true,
+        media_pts_100ns: None,
     }
 }
 
@@ -134,17 +151,17 @@ fn wait_until(what: &str, done: impl Fn() -> bool) {
     }
 }
 
-/// The frame's BGRA at (`x`, `y`).
-fn bgra(frame: &[u8], x: u32, y: u32) -> [u8; 4] {
-    let i = ((y * CANVAS_WIDTH + x) * 4) as usize;
+/// The BGRA at (`x`, `y`) of a frame `width` pixels wide.
+fn bgra(frame: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
+    let i = ((y * width + x) * 4) as usize;
     [frame[i], frame[i + 1], frame[i + 2], frame[i + 3]]
 }
 
-/// Compare `frame` with the CPU reference of `layers` on a grid of points
-/// (every 7th column, every 9th row, the corners, and both sides of every
-/// quad edge): each colour within `reference::tolerance`, alpha exact.
-fn assert_matches(frame: &[u8], layers: &[Layer<'_>], what: &str) {
-    let (w, h) = (CANVAS_WIDTH, CANVAS_HEIGHT);
+/// Compare a `(w, h)` `frame` with the CPU reference of `layers` on a grid
+/// of points (every 7th column, every 9th row, the corners, and both sides
+/// of every quad edge): each colour within `reference::tolerance`, alpha
+/// exact.
+fn assert_matches(frame: &[u8], layers: &[Layer<'_>], (w, h): (u32, u32), what: &str) {
     assert_eq!(frame.len(), (w * h * 4) as usize, "{what}: frame size");
     let mut points: Vec<(u32, u32)> = (0..h)
         .step_by(9)
@@ -178,7 +195,7 @@ fn assert_matches(frame: &[u8], layers: &[Layer<'_>], what: &str) {
     let over: Vec<String> = points
         .iter()
         .filter_map(|&(x, y)| {
-            let got = bgra(frame, x, y);
+            let got = bgra(frame, w, x, y);
             let want = reference::pixel(layers, x, y);
             let tolerance = reference::tolerance(layers, x, y);
             if want[..3] != [0, 0, 0] {
@@ -199,8 +216,8 @@ fn assert_matches(frame: &[u8], layers: &[Layer<'_>], what: &str) {
     );
 }
 
-/// Serve `job` on boundaries `first` and `first + 1`, each once MAX sent
-/// the one before (so the 2-deep queue never drops one).
+/// Serve `job` on boundaries `first` and `first + 1`, each once MAX and
+/// the FHD sender sent the one before (so the 2-deep queue never drops one).
 fn serve_twice(
     out: &mut ProgramOutput<MockNdiBackend>,
     max: &MaxOut,
@@ -208,18 +225,22 @@ fn serve_twice(
     first: usize,
 ) {
     for k in [first, first + 1] {
-        let before = max.status().submitted;
+        let before = max.status();
         out.submit(job(at(k)));
-        wait_until("MAX sent the boundary", || max.status().submitted > before);
+        wait_until("MAX and the FHD sender sent the boundary", || {
+            let now = max.status();
+            now.submitted > before.submitted && now.fhd.submitted > before.fhd.submitted
+        });
     }
     let status = max.status();
-    assert_eq!(status.failed, 0, "{status:?}");
+    assert_eq!((status.failed, status.fhd.failed), (0, 0), "{status:?}");
 }
 
 #[test]
 fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
     let max = Arc::new(MaxOut::new());
     max.set_enabled(true);
+    max.set_fhd_enabled(true);
     let thread = {
         let max = max.clone();
         std::thread::Builder::new()
@@ -253,10 +274,31 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
         "SP-program-MAX's canvas, B8G8R8A8_UNORM"
     );
     let frame = read_shared_texture(&info).expect("a second WARP device reads Spout's texture");
+    let size = (CANVAS_WIDTH, CANVAS_HEIGHT);
+    let fhd_size = (FHD_WIDTH, FHD_HEIGHT);
+    let plain = Composition::Picture(nv12(&one));
+    assert_matches(&frame, &plain.layers(), size, "the Source boundary");
+    let fhd_info = spout_sender_info(TEST_FHD_SENDER)
+        .expect("Spout's registry reads")
+        .expect("the FHD sender is listed after its first send");
+    assert_eq!(
+        (fhd_info.width, fhd_info.height, fhd_info.format),
+        (1920, 1080, 87),
+        "SP-program's 1920x1080, B8G8R8A8_UNORM"
+    );
+    let fhd = max.status().fhd;
+    assert_eq!(
+        (fhd.listed_width, fhd.listed_height),
+        (1920, 1080),
+        "the thread's own registry read"
+    );
+    let frame = read_shared_texture(&fhd_info).expect("a second WARP device reads it");
+    let layers = plain.layers_in(FHD_WIDTH, FHD_HEIGHT);
     assert_matches(
         &frame,
-        &Composition::Picture(nv12(&one)).layers(),
-        "the Source boundary",
+        &layers,
+        fhd_size,
+        "the Source boundary in 1920x1080",
     );
 
     // A fade from a 21:9 picture (bars) to the 720p one, slot 4 of 9.
@@ -284,7 +326,10 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
         to: Some(nv12(&one)),
         weight_q8: weight_q8(4, 9),
     };
-    assert_matches(&frame, &fade.layers(), "the Mix boundary");
+    assert_matches(&frame, &fade.layers(), size, "the Mix boundary");
+    let frame = read_shared_texture(&fhd_info).expect("a second WARP device reads it");
+    let layers = fade.layers_in(FHD_WIDTH, FHD_HEIGHT);
+    assert_matches(&frame, &layers, fhd_size, "the Mix boundary in 1920x1080");
 
     max.stop();
     wait_until("program-max exits on stop", || thread.is_finished());
@@ -293,5 +338,10 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
         spout_sender_info(TEST_SENDER).expect("Spout's registry reads"),
         None,
         "the sender unregistered when the thread released it"
+    );
+    assert_eq!(
+        spout_sender_info(TEST_FHD_SENDER).expect("Spout's registry reads"),
+        None,
+        "so did the FHD sender"
     );
 }

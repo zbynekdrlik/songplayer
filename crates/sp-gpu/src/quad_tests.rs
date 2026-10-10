@@ -44,10 +44,26 @@ fn an_off_centre_quad_maps_each_edge_on_its_own_axis() {
 
 #[test]
 fn a_quad_s_constants_are_its_canvas_rect_the_matrix_and_its_weight() {
-    let constants = QuadConstants::new(place(2880, 2160, 480, 0), 0.25);
+    let constants = QuadConstants::new(place(2880, 2160, 480, 0), 0.25, 3840, 2160);
     assert_eq!(constants.rect, [-0.75, 1.0, 0.75, -1.0]);
     assert_eq!(constants.matrix, matrix_f32());
     assert_eq!(constants.weight, 0.25);
+}
+
+/// #239: the rectangle is in the compositor's own target, x across its
+/// width and y down its height (a 4:3 picture in `SP-program`'s 1920×1080,
+/// then the same place read in another target).
+#[test]
+fn a_quad_s_rect_is_in_its_own_target() {
+    let pillarbox = place(1440, 1080, 240, 0);
+    let fhd = QuadConstants::new(pillarbox, 0.5, 1920, 1080);
+    assert_eq!(fhd.rect, [-0.75, 1.0, 0.75, -1.0]);
+    assert_eq!(fhd.weight, 0.5);
+    let wide = QuadConstants::new(place(960, 270, 480, 135), 1.0, 1920, 1080);
+    assert_eq!(wide.rect, [-0.5, 0.75, 0.5, 0.25]);
+    // The same place in MAX's 3840×2160 canvas lies in its upper left.
+    let max = QuadConstants::new(pillarbox, 0.5, 3840, 2160);
+    assert_eq!(max.rect, [-0.875, 1.0, -0.125, 0.0]);
 }
 
 #[test]

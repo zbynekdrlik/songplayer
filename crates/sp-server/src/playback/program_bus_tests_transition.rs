@@ -449,6 +449,37 @@ fn a_fade_up_from_nothing_mixes_the_new_source_against_the_standby() {
     );
 }
 
+/// #245: a fade into Blank starts ON its cut boundary (no cue wait: Blank
+/// never offers a live pair). Each of its 9 boundaries mixes A against the
+/// standby, A is held playing through it, then the program carries the
+/// standby pair alone.
+#[test]
+fn a_fade_into_blank_mixes_from_the_cut_boundary_then_fills() {
+    let blank = sp_core::config::PROGRAM_BLANK_ID;
+    let mut core = fade_core();
+    let fa = frame(4, 2);
+    let mut sent = Vec::new();
+    for k in 1..=17 {
+        core.offer(SRC_A, job(4, &fa, b(k), LEVEL_A));
+        if k == 5 {
+            assert!(core.cut(blank, b(5) + 5 * MS));
+            assert!(core.hold_for(SRC_A).is_some(), "A plays through the fade");
+        }
+        core.release(b(k) + 5 * MS);
+        sent.extend(take_all(&mut core));
+    }
+    let mut want = run(1..=6, |_| "src 4".to_string());
+    want.extend(run(7..=15, |k| format!("mix {}/9 4>-", k - 7)));
+    want.extend(run(16..=17, |_| "fill".to_string()));
+    assert_eq!(sent, want);
+    let c = core.status().transition.counters;
+    assert_eq!(
+        (c.cue_timeouts, c.cue_wait_boundaries, c.transitions_done),
+        (0, 0, 1),
+        "no cue wait"
+    );
+}
+
 #[test]
 fn a_cut_is_the_zero_length_window_the_209_cut_unchanged() {
     assert_eq!(

@@ -473,6 +473,7 @@ impl<O: BoundaryOut> PacedConsumer<O> {
             video_tc_100ns: stamp_100ns,
             audio_tc_100ns: stamp_100ns,
             live: false,
+            media_pts_100ns: None,
         }
     }
 

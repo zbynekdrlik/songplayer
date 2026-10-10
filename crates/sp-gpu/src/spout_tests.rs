@@ -4,8 +4,8 @@
 
 use super::{
     HRESULT_FILE_NOT_FOUND, NAME_SLOT_LEN, SENDER_NAMES_MAP, SHARED_TEXTURE_INFO_LEN,
-    SPOUT_NAME_MAX_LEN, SPOUT_SENDER_NAME, SharedTextureInfo, check_sender_name, is_not_found,
-    map_mutex_name, parse_sender_names, status, status_result,
+    SPOUT_FHD_SENDER_NAME, SPOUT_NAME_MAX_LEN, SPOUT_SENDER_NAME, SharedTextureInfo,
+    check_sender_name, is_not_found, map_mutex_name, parse_sender_names, status, status_result,
 };
 use crate::error::GpuError;
 
@@ -35,6 +35,16 @@ fn the_sender_is_sp_program_max_and_spout_can_carry_it() {
     assert_eq!(SPOUT_SENDER_NAME, "SP-program-MAX");
     let name = check_sender_name(SPOUT_SENDER_NAME).expect("the production name");
     assert_eq!(name.as_bytes(), b"SP-program-MAX");
+}
+
+/// #239: the FHD program's sender is `SP-program` (Arena: `SPOUT_SP-program`),
+/// a name of its own that Spout can carry.
+#[test]
+fn the_fhd_sender_is_sp_program_and_spout_can_carry_it() {
+    assert_eq!(SPOUT_FHD_SENDER_NAME, "SP-program");
+    assert_ne!(SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME);
+    let name = check_sender_name(SPOUT_FHD_SENDER_NAME).expect("the FHD name");
+    assert_eq!(name.as_bytes(), b"SP-program");
 }
 
 #[test]

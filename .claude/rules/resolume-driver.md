@@ -18,6 +18,18 @@ jitter. The ~14 MB `GET /api/v1/composition` (the clip map) runs only when the
 pure `FullRefreshReason::decide` asks for it (#157). Inside a not-ready
 episode's fast window the driver ticks every 2 s instead (#217 addendum 2).
 
+## SongPlayer never triggers an Arena clip (owner's ruling, #223, 9.10.2026)
+
+Which clips run is the OPERATOR's, through the Stream Deck scenes. The
+driver only `PUT`s text params (`set_text`) and clip opacity
+(`set_clip_opacity`, the title fade); it never triggers, connects or
+disconnects a clip, after an Arena restart or ever, and neither does a
+script or CI (CI reads `/composition` and `/product` only). Arena does not
+save which clips are connected (the `.avc` holds no such state), so after
+a relaunch the layers are empty until the operator runs a scene. A test
+or dev check that needs clips running sets them up itself, in that test
+only, never in a production path.
+
 ## Arena's REST answers before its composition has loaded (#217)
 
 After an Arena restart (the owner's hotkey, a crash relaunch, SP-ArenaLaunch),

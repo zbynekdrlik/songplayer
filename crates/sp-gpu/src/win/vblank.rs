@@ -20,7 +20,10 @@ use super::device::list;
 use super::failed;
 use crate::adapter::adapter_name;
 use crate::error::GpuError;
-use crate::vblank::{OutputInfo, Seen, VblankFit, VblankGrid, grid_is_fresh, pick_output};
+use crate::vblank::{
+    OutputInfo, Seen, VblankFit, VblankGrid, VblankState, grid_is_fresh, not_waiting_sleep,
+    pick_output, vblank_state, waited,
+};
 
 /// The wait after a failed `WaitForVBlank` before the next one.
 const RETRY_AFTER_ERROR: Duration = Duration::from_secs(1);
@@ -35,6 +38,10 @@ struct Published {
     grid: Option<VblankGrid>,
     /// When it last counted a refresh.
     seen: Option<Instant>,
+    /// When it last counted a refresh as `Seen::Counted` (#243:
+    /// `VblankState`). Never a lone wait that happened to block: on a dark
+    /// output a preempted call would flip the state for 2 s.
+    counted_at: Option<Instant>,
 }
 
 struct Shared {
@@ -48,6 +55,8 @@ pub struct VblankTracker {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
     output: OutputInfo,
+    /// When it started: the state counts from it before any wait waited.
+    started: Instant,
 }
 
 impl VblankTracker {
@@ -58,6 +67,7 @@ impl VblankTracker {
             stop: AtomicBool::new(false),
             published: Mutex::new(Published::default()),
         });
+        let started = Instant::now();
         let (ready_tx, ready_rx) = mpsc::channel();
         let thread_shared = shared.clone();
         let thread = std::thread::Builder::new()
@@ -69,6 +79,7 @@ impl VblankTracker {
                 shared,
                 thread: Some(thread),
                 output,
+                started,
             }),
             Ok(Err(e)) => {
                 let _ = thread.join();
@@ -103,6 +114,19 @@ impl VblankTracker {
             None
         }
     }
+
+    /// The output's state at `now` (#243): ticking with a fresh grid, else
+    /// measuring, or not ticking once no wait waited for 2 s.
+    pub fn state(&self, now: Instant) -> VblankState {
+        let published = self
+            .shared
+            .published
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let fresh =
+            published.grid.is_some() && published.seen.is_some_and(|seen| grid_is_fresh(seen, now));
+        vblank_state(fresh, published.counted_at, self.started, now)
+    }
 }
 
 impl Drop for VblankTracker {
@@ -134,7 +158,9 @@ fn run(shared: &Shared, ready: &mpsc::Sender<Result<OutputInfo, GpuError>>) {
     let mut fit = VblankFit::default();
     let mut failing = false;
     let mut measured = false;
+    let mut not_waiting = 0u32;
     while !shared.stop.load(Ordering::Relaxed) {
+        let before = Instant::now();
         if let Err(e) = unsafe { output.WaitForVBlank() } {
             if !failing {
                 warn!(output = %label, error = %e, "program max: WaitForVBlank failed");
@@ -148,7 +174,18 @@ fn run(shared: &Shared, ready: &mpsc::Sender<Result<OutputInfo, GpuError>>) {
             failing = false;
         }
         let now = Instant::now();
-        if fit.observe(now) == Seen::Early {
+        // #243: a dark output's waits return at once — never fed to the
+        // fit, never a spin.
+        // The state's WARN / INFO come from sp-server's `vblank_log` (one per
+        // change, on counted refreshes only), never from here.
+        if !waited(now.saturating_duration_since(before)) {
+            not_waiting = not_waiting.saturating_add(1);
+            std::thread::sleep(not_waiting_sleep(not_waiting));
+            continue;
+        }
+        not_waiting = 0;
+        let seen = fit.observe(now);
+        if seen == Seen::Early {
             std::thread::sleep(AFTER_EARLY);
             continue;
         }
@@ -158,11 +195,15 @@ fn run(shared: &Shared, ready: &mpsc::Sender<Result<OutputInfo, GpuError>>) {
         {
             let hz = 1e9 / grid.period.as_nanos() as f64;
             info!(output = %label, hz, "program max: the output's refresh is measured");
-            measured = true;
         }
+        // Again after the fit restarts (#243: a gap over a second).
+        measured = grid.is_some();
         let mut published = shared.published.lock().unwrap_or_else(|p| p.into_inner());
         published.grid = grid;
         published.seen = Some(now);
+        if seen == Seen::Counted {
+            published.counted_at = Some(now);
+        }
     }
     info!(
         output = %label,

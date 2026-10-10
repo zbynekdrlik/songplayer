@@ -45,6 +45,20 @@
 //! switch-off or a stop inside the window can leave it one change behind;
 //! the telemetry's `state` is always current).
 //!
+//! #239: while the FHD Spout sender is wanted (`program_spout_fhd_enabled`
+//! and MAX on, `MaxOut::fhd_wanted`), each job also goes out as
+//! `SP-program`: a second compositor of 1920×1080 and a second sender, built
+//! on this thread too, compose the same pictures at the same weight (the
+//! picture the NDI `SP-program` carries). MAX goes first, whole: composed,
+//! sent at its paced instant; only THEN is the FHD sender built, composed
+//! and sent, so its cost never moves MAX's send (the #223 stutter fix). Its
+//! send lands a little after MAX's, never paced on its own (alone, at the
+//! due instant, when MAX's boundary did not go out). Each output keeps its
+//! own objects, backoff, lost-device state, telemetry and log ([`Side`]): a
+//! failure of one never stops the other. Switched off, the FHD sender's
+//! objects are dropped at the next boundary (Spout unregisters
+//! `SP-program`).
+//!
 //! The GPU is a trait ([`MaxGpu`]) so every decision here runs on Linux with
 //! a fake; the production one is [`SpoutGpu`] (`sp-gpu`'s `Compositor` on
 //! the picked adapter and its `SpoutSender`). Off Windows `sp-gpu` has no
@@ -53,13 +67,18 @@
 
 use std::time::{Duration, Instant};
 
-use sp_gpu::{ComposeStats, Composition, GpuError, Nv12Picture, SpoutSendStats};
+use sp_gpu::{
+    ComposeStats, Composition, FHD_HEIGHT, FHD_WIDTH, GpuError, Nv12Picture, SpoutSendStats,
+    VblankGrid,
+};
 use tracing::{info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, MaxPicture};
 use crate::playback::program_max_send::{NoWait, SendClock, SendTiming, SpinClock, send_at};
-use crate::playback::program_max_vblank::{Aligned, VblankPacer, VblankSource, phase_after_vblank};
+use crate::playback::program_max_vblank::{
+    Aligned, Due, VblankLog, VblankPacer, VblankSource, phase_after_vblank,
+};
 use crate::playback::stat_window::WarnLimiter;
 
 /// How long the thread waits before it builds again after a refused sender,
@@ -127,18 +146,28 @@ pub trait MaxCompositor {
 /// The Spout half: share the render target as it is now.
 pub trait MaxSender {
     fn send(&mut self) -> Result<SpoutSendStats, GpuError>;
+    /// #239: the size Spout's registry lists the sender at (what a receiver
+    /// opens); `None` before its first send went out or while the registry
+    /// cannot be read.
+    fn listed_size(&self) -> Option<(u32, u32)>;
 }
 
-/// What builds the compositor and its sender, on the `program-max` thread.
+/// What builds the compositors and their senders, on the `program-max`
+/// thread: MAX's, and (#239) the `SP-program` sender's.
 pub trait MaxGpu {
     type Compositor: MaxCompositor;
     type Sender: MaxSender;
     fn compositor(&mut self) -> Result<Self::Compositor, GpuError>;
     fn sender(&mut self, compositor: &Self::Compositor) -> Result<Self::Sender, GpuError>;
+    /// #239: the 1920×1080 compositor of the FHD Spout sender.
+    fn fhd_compositor(&mut self) -> Result<Self::Compositor, GpuError>;
+    /// #239: the sender `SP-program` on it.
+    fn fhd_sender(&mut self, compositor: &Self::Compositor) -> Result<Self::Sender, GpuError>;
 }
 
 /// The production GPU: `sp_gpu::Compositor::new` (the largest hardware
-/// adapter, never WARP) and the sender `SP-program-MAX`.
+/// adapter, never WARP) and the sender `SP-program-MAX`; #239: a 1920×1080
+/// compositor on the same adapter and the sender `SP-program`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SpoutGpu;
 
@@ -155,6 +184,19 @@ impl MaxGpu for SpoutGpu {
     #[cfg_attr(test, mutants::skip)]
     fn sender(&mut self, compositor: &sp_gpu::Compositor) -> Result<sp_gpu::SpoutSender, GpuError> {
         sp_gpu::SpoutSender::new(compositor)
+    }
+
+    fn fhd_compositor(&mut self) -> Result<sp_gpu::Compositor, GpuError> {
+        sp_gpu::Compositor::with_size(FHD_WIDTH, FHD_HEIGHT)
+    }
+
+    /// `mutants::skip`: as `sender`.
+    #[cfg_attr(test, mutants::skip)]
+    fn fhd_sender(
+        &mut self,
+        compositor: &sp_gpu::Compositor,
+    ) -> Result<sp_gpu::SpoutSender, GpuError> {
+        sp_gpu::SpoutSender::new_fhd(compositor)
     }
 }
 
@@ -178,6 +220,14 @@ impl MaxSender for sp_gpu::SpoutSender {
     #[cfg_attr(test, mutants::skip)]
     fn send(&mut self) -> Result<SpoutSendStats, GpuError> {
         sp_gpu::SpoutSender::send(self)
+    }
+
+    /// Spout's registry entry of the sender's name, read as a receiver
+    /// does. `mutants::skip`: as `compose`.
+    #[cfg_attr(test, mutants::skip)]
+    fn listed_size(&self) -> Option<(u32, u32)> {
+        let info = sp_gpu::spout_sender_info(self.name()).ok()??;
+        Some((info.width, info.height))
     }
 }
 
@@ -294,32 +344,140 @@ impl Skip {
         }
     }
 
+    /// #239: the FHD sender's build failed (MAX's platform decides
+    /// `Unsupported`, so any error here is a failed build).
+    fn fhd_build(error: GpuError) -> Self {
+        Skip::Failed(Failure::Build(error))
+    }
+
     fn frame(error: GpuError) -> Self {
         Skip::Failed(Failure::Frame(error))
     }
 }
 
+/// An output with no compositor after its build step: a worker bug,
+/// reported as a failed boundary, never a panic.
+const NO_COMPOSITOR: GpuError = GpuError::NoObject {
+    call: "the program-max compositor",
+};
+
+/// An output with no sender after its build step (see [`NO_COMPOSITOR`]).
+const NO_SENDER: GpuError = GpuError::NoObject {
+    call: "the program-max Spout sender",
+};
+
+/// The thread's outputs (#239).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Output {
+    /// `SP-program-MAX`, 3840×2160.
+    Max,
+    /// `SP-program`, 1920×1080.
+    Fhd,
+}
+
+/// What a failure did to an output's objects ([`Side::recover`]).
+#[derive(Debug, PartialEq, Eq)]
+enum Recovery {
+    /// The device is gone: the compositor and the sender were dropped.
+    DeviceLost,
+    /// The sender is refused for good: it was dropped.
+    SenderRefused,
+    /// Nothing was dropped (a failed build of something else, one lost
+    /// frame, a refused picture).
+    Other,
+}
+
+/// One output's GPU objects and their recovery: MAX's, or (#239) the FHD
+/// sender's. Each output keeps its own backoff and lost-device state, so a
+/// failure of one never stops the other.
+struct Side<C, S> {
+    // Dropped first (declaration order): the sender holds references into
+    // the compositor's device and render target.
+    sender: Option<S>,
+    compositor: Option<C>,
+    /// No build before this instant.
+    retry_at: Option<Instant>,
+    /// A device was lost and no boundary of this output went out since.
+    lost_unsent: bool,
+}
+
+impl<C, S> Side<C, S> {
+    fn new() -> Self {
+        Self {
+            sender: None,
+            compositor: None,
+            retry_at: None,
+            lost_unsent: false,
+        }
+    }
+
+    fn holds(&self) -> bool {
+        self.compositor.is_some() || self.sender.is_some()
+    }
+
+    /// Drop the sender (Spout unregisters its name), then the compositor.
+    fn drop_gpu(&mut self) {
+        self.sender = None;
+        self.compositor = None;
+    }
+
+    /// After `failure`: a lost device drops both objects (rebuilt on the
+    /// next job), a refused sender drops the sender; a build failure, a
+    /// refusal or a second lost device before a boundary went out waits
+    /// [`MAX_RETRY_BACKOFF`] before the next build. Returns what it dropped,
+    /// for the caller's telemetry.
+    fn recover(&mut self, failure: &Failure, now: Instant) -> Recovery {
+        let error = failure.error();
+        let refused = is_refusal(error);
+        let lost = error.is_device_lost();
+        let lost_again = lost && self.lost_unsent;
+        let recovery = if lost {
+            self.drop_gpu();
+            self.lost_unsent = true;
+            Recovery::DeviceLost
+        } else if refused {
+            self.sender = None;
+            Recovery::SenderRefused
+        } else {
+            Recovery::Other
+        };
+        if matches!(failure, Failure::Build(_)) || refused || lost_again {
+            self.retry_at = Some(now + MAX_RETRY_BACKOFF);
+        }
+        recovery
+    }
+}
+
+/// The log lines one boundary wrote ([`MaxWorker::serve_lines`]).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Lines {
+    /// `SP-program-MAX`'s.
+    pub max: Option<LogLine>,
+    /// #239: the FHD sender's (`None` too while it is not wanted).
+    pub fhd: Option<LogLine>,
+}
+
 /// The `program-max` thread's state: the GPU objects it built, the picture
-/// ids and the backoff. It reports every boundary to `out`.
+/// ids and the backoffs. It reports every boundary to `out`.
 pub struct MaxWorker<'a, G: MaxGpu> {
     out: &'a MaxOut,
     gpu: G,
-    // Dropped first (declaration order): the sender holds references into
-    // the compositor's device and render target.
-    sender: Option<G::Sender>,
-    compositor: Option<G::Compositor>,
+    /// MAX's objects (dropped before the FHD sender's: declaration order).
+    max: Side<G::Compositor, G::Sender>,
+    /// #239: the `SP-program` sender's objects, built only while it is
+    /// wanted.
+    fhd: Side<G::Compositor, G::Sender>,
     ids: PictureIds,
-    /// No build before this instant.
-    retry_at: Option<Instant>,
     /// The GPU said `Unsupported`: never build again.
     unsupported: bool,
-    /// A device was lost and no boundary went out since.
-    lost_unsent: bool,
-    /// Why boundaries do not go out now (`None`: they do).
+    /// Why MAX's boundaries do not go out now (`None`: they do).
     failing: Option<String>,
+    /// #239: why the FHD sender's boundaries do not go out now.
+    fhd_failing: Option<String>,
     /// Where the log's time starts.
     started: Instant,
     log: LogGate,
+    fhd_log: LogGate,
     /// What the send waits on: [`NoWait`] unless [`with_clock`](Self::with_clock)
     /// gives another (the loop gives [`SpinClock`]).
     clock: Box<dyn SendClock>,
@@ -331,20 +489,27 @@ pub struct MaxWorker<'a, G: MaxGpu> {
 /// A sent boundary's costs and timing ([`MaxWorker::attempt`]).
 type Sent = (ComposeStats, SpoutSendStats, SendTiming, Option<Aligned>);
 
+/// #239: a sent FHD boundary's costs.
+type FhdSent = (ComposeStats, SpoutSendStats);
+
+/// What one job did on each output: MAX's boundary, and the FHD sender's
+/// (`None` while it is not wanted, or the platform is unsupported).
+type Went = (Result<Sent, Skip>, Option<Result<FhdSent, Skip>>);
+
 impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     pub fn new(out: &'a MaxOut, gpu: G) -> Self {
         Self {
             out,
             gpu,
-            sender: None,
-            compositor: None,
+            max: Side::new(),
+            fhd: Side::new(),
             ids: PictureIds::default(),
-            retry_at: None,
             unsupported: false,
-            lost_unsent: false,
             failing: None,
+            fhd_failing: None,
             started: Instant::now(),
             log: LogGate::default(),
+            fhd_log: LogGate::default(),
             clock: Box::new(NoWait),
             vblank: None,
             pacer: VblankPacer::default(),
@@ -365,10 +530,10 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         self
     }
 
-    /// Whether it holds a compositor or a sender (an off setting makes it
-    /// drop them).
+    /// Whether it holds a compositor or a sender, MAX's or the FHD
+    /// sender's (an off setting makes it drop them).
     pub fn holds_gpu(&self) -> bool {
-        self.compositor.is_some() || self.sender.is_some()
+        self.max.holds() || self.fhd.holds()
     }
 
     /// [`serve_offered`](Self::serve_offered) a job offered at `now`.
@@ -378,16 +543,42 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
 
     /// Compose and send one boundary the program offered at `offered`, at
     /// `now`, report it, and log what changed ([`LogGate`]); returns the
-    /// line it logged.
+    /// line MAX's log wrote ([`serve_lines`](Self::serve_lines)).
     pub fn serve_offered(
         &mut self,
         job: &MaxJob,
         offered: Instant,
         now: Instant,
     ) -> Option<LogLine> {
-        match self.attempt(job, offered, now) {
+        self.serve_lines(job, offered, now).max
+    }
+
+    /// Compose and send one boundary the program offered at `offered`, at
+    /// `now`, on MAX and (#239) on the FHD sender while it is wanted; report
+    /// each and log what changed on each ([`LogGate`]); returns the lines
+    /// logged. An FHD sender no longer wanted is dropped first.
+    pub fn serve_lines(&mut self, job: &MaxJob, offered: Instant, now: Instant) -> Lines {
+        let fhd_wanted = self.out.fhd_wanted();
+        if !fhd_wanted && self.fhd.holds() {
+            self.release_fhd();
+        }
+        let (max, fhd) = self.attempt(job, offered, now, fhd_wanted);
+        let max = self.finish_max(max, job, now);
+        let fhd = fhd.and_then(|went| self.finish_fhd(went, job, now));
+        Lines { max, fhd }
+    }
+
+    /// Report MAX's boundary, recover from its failure, and log what
+    /// changed; returns the line it logged.
+    fn finish_max(
+        &mut self,
+        went: Result<Sent, Skip>,
+        job: &MaxJob,
+        now: Instant,
+    ) -> Option<LogLine> {
+        match went {
             Ok((compose, send, timing, aligned)) => {
-                self.lost_unsent = false;
+                self.max.lost_unsent = false;
                 self.failing = None;
                 self.out.record_sent(compose, send);
                 self.out.record_send_timing(timing);
@@ -403,7 +594,16 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
                 let why = failure.error().to_string();
                 self.out.record_failed(&why);
                 self.failing = Some(why);
-                self.recover(&failure, now);
+                match self.max.recover(&failure, now) {
+                    Recovery::DeviceLost => {
+                        // No decoded frame stays pinned for a compositor
+                        // that is gone.
+                        self.ids.forget();
+                        self.out.record_device_reset();
+                    }
+                    Recovery::SenderRefused => self.out.record_sender_backoff(),
+                    Recovery::Other => {}
+                }
             }
         }
         let at = elapsed_100ns(self.started, now);
@@ -425,38 +625,175 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         line
     }
 
-    /// Build what is missing (unless a backoff runs), then compose `job`
-    /// and send it when it is due: in the slot [`VblankPacer`] picks on the
-    /// refresh grid (with the phase setting), else at the constant lead
-    /// (`program_max_send::send_at`).
-    fn attempt(&mut self, job: &MaxJob, offered: Instant, now: Instant) -> Result<Sent, Skip> {
-        if self.unsupported {
-            return Err(Skip::Unsupported);
+    /// #239: report the FHD sender's boundary, recover from its failure,
+    /// read where Spout lists it after its first boundary, and log what
+    /// changed; returns the line it logged.
+    fn finish_fhd(
+        &mut self,
+        went: Result<FhdSent, Skip>,
+        job: &MaxJob,
+        now: Instant,
+    ) -> Option<LogLine> {
+        match went {
+            Ok((compose, send)) => {
+                self.fhd.lost_unsent = false;
+                self.fhd_failing = None;
+                self.out.record_fhd_sent(compose, send);
+                if self.out.fhd_listed().is_none() {
+                    let listed = self.fhd.sender.as_ref().and_then(|s| s.listed_size());
+                    self.out.record_fhd_listed(listed);
+                }
+            }
+            Err(Skip::Backoff | Skip::Unsupported) => self.out.record_fhd_skipped(),
+            Err(Skip::Failed(failure)) => {
+                let why = failure.error().to_string();
+                self.out.record_fhd_failed(&why);
+                self.fhd_failing = Some(why);
+                if self.fhd.recover(&failure, now) == Recovery::SenderRefused {
+                    self.out.record_fhd_sender_backoff();
+                }
+                if self.fhd.sender.is_none() {
+                    self.out.record_fhd_listed(None);
+                }
+            }
         }
-        if self.retry_at.is_some_and(|at| now < at) {
+        let at = elapsed_100ns(self.started, now);
+        let line = self.fhd_log.observe(at, self.fhd_failing.as_deref());
+        match &line {
+            Some(LogLine::Failing { held_back }) => warn!(
+                error = self.fhd_failing.as_deref().unwrap_or_default(),
+                held_back = *held_back,
+                stamp_100ns = job.stamp_100ns(),
+                "program max: the SP-program (1920x1080) Spout boundaries do not go out"
+            ),
+            Some(LogLine::Recovered { held_back }) => info!(
+                held_back = *held_back,
+                stamp_100ns = job.stamp_100ns(),
+                "program max: the SP-program (1920x1080) Spout boundaries go out"
+            ),
+            None => {}
+        }
+        line
+    }
+
+    /// Build what is missing (unless a backoff runs), compose `job` and send
+    /// it when it is due: in the slot [`VblankPacer`] picks on the refresh
+    /// grid (with the phase setting), else at the constant lead
+    /// (`program_max_send::send_at`). MAX first, whole; then (#239) the FHD
+    /// sender ([`fhd_boundary`](Self::fhd_boundary)), built only after MAX's
+    /// send too, unless MAX's boundary is not drawn at all.
+    fn attempt(&mut self, job: &MaxJob, offered: Instant, now: Instant, fhd_wanted: bool) -> Went {
+        if self.unsupported {
+            return (Err(Skip::Unsupported), None);
+        }
+        let max_built = self.build(Output::Max, now);
+        if let Err(Skip::Unsupported) = max_built {
+            return (Err(Skip::Unsupported), None);
+        }
+        // With MAX's boundary not drawn there is no MAX send to delay: the
+        // FHD side is built now, and decides whether the pictures are
+        // labelled.
+        let fhd_first = (fhd_wanted && max_built.is_err()).then(|| self.build(Output::Fhd, now));
+        let ready = max_built.is_ok() || matches!(fhd_first, Some(Ok(())));
+        // The pictures are labelled only for a boundary that is drawn.
+        let composition = if ready {
+            self.ids.composition(job)
+        } else {
+            Composition::Black
+        };
+        let mut paced = None;
+        let max = match max_built.and_then(|()| self.compose(Output::Max, &composition)) {
+            Ok(compose) => {
+                let pace = self.pace(offered);
+                paced = Some(pace);
+                self.send_max(compose, pace, offered)
+            }
+            Err(skip) => Err(skip),
+        };
+        // MAX is out: the FHD sender's build, upload and draw come after it.
+        let fhd_built = fhd_first.or_else(|| fhd_wanted.then(|| self.build(Output::Fhd, now)));
+        let fhd = match fhd_built {
+            Some(Ok(())) => Some(self.fhd_boundary(&composition, paced, offered)),
+            Some(Err(skip)) => Some(Err(skip)),
+            None => None,
+        };
+        (max, fhd)
+    }
+
+    /// Build what `output` misses, unless its backoff runs: its compositor
+    /// (MAX's records its adapter), then its sender.
+    fn build(&mut self, output: Output, now: Instant) -> Result<(), Skip> {
+        let side = match output {
+            Output::Max => &mut self.max,
+            Output::Fhd => &mut self.fhd,
+        };
+        if side.retry_at.is_some_and(|at| now < at) {
             return Err(Skip::Backoff);
         }
-        let compositor = match self.compositor.take() {
+        let compositor = match side.compositor.take() {
             Some(compositor) => compositor,
-            None => {
-                let built = self.gpu.compositor().map_err(Skip::build)?;
-                self.out.record_adapter(built.adapter());
-                built
-            }
+            None => match output {
+                Output::Max => {
+                    let built = self.gpu.compositor().map_err(Skip::build)?;
+                    self.out.record_adapter(built.adapter());
+                    built
+                }
+                Output::Fhd => self.gpu.fhd_compositor().map_err(Skip::fhd_build)?,
+            },
         };
-        let compositor = self.compositor.insert(compositor);
-        let sender = match self.sender.take() {
-            Some(sender) => sender,
-            None => self.gpu.sender(compositor).map_err(Skip::build)?,
+        let compositor = side.compositor.insert(compositor);
+        if side.sender.is_none() {
+            let sender = match output {
+                Output::Max => self.gpu.sender(compositor).map_err(Skip::build)?,
+                Output::Fhd => self.gpu.fhd_sender(compositor).map_err(Skip::fhd_build)?,
+            };
+            side.sender = Some(sender);
+        }
+        Ok(())
+    }
+
+    /// Draw `composition` on `output`'s compositor (built by
+    /// [`build`](Self::build)).
+    fn compose(
+        &mut self,
+        output: Output,
+        composition: &Composition<'_>,
+    ) -> Result<ComposeStats, Skip> {
+        let side = match output {
+            Output::Max => &mut self.max,
+            Output::Fhd => &mut self.fhd,
         };
-        let sender = self.sender.insert(sender);
-        let composition = self.ids.composition(job);
-        let compose = compositor.compose(&composition).map_err(Skip::frame)?;
-        let clock = self.clock.as_mut();
-        let grid = self.vblank.as_ref().and_then(|v| v.grid(clock.now()));
+        let Some(compositor) = side.compositor.as_mut() else {
+            return Err(Skip::frame(NO_COMPOSITOR));
+        };
+        compositor.compose(composition).map_err(Skip::frame)
+    }
+
+    /// When the boundary offered at `offered` is due: [`VblankPacer`]'s slot
+    /// on the refresh grid, else the constant lead; and that grid.
+    fn pace(&mut self, offered: Instant) -> (Due, Option<VblankGrid>) {
+        let now = self.clock.as_mut().now();
+        let grid = self.vblank.as_ref().and_then(|v| {
+            log_vblank(self.out.record_vblank_state(v.state(now)), &**v);
+            v.grid(now)
+        });
         let due = self.pacer.due(offered, grid, self.out.vblank_phase());
+        (due, grid)
+    }
+
+    /// Send MAX's composed boundary at its due instant, and how it was
+    /// paced on the grid.
+    fn send_max(
+        &mut self,
+        compose: ComposeStats,
+        (due, grid): (Due, Option<VblankGrid>),
+        offered: Instant,
+    ) -> Result<Sent, Skip> {
+        let Some(sender) = self.max.sender.as_mut() else {
+            return Err(Skip::frame(NO_SENDER));
+        };
         let (send, timing) =
-            send_at(clock, due.at, offered, || sender.send()).map_err(Skip::frame)?;
+            send_at(self.clock.as_mut(), due.at, offered, || sender.send()).map_err(Skip::frame)?;
         let aligned = grid.map(|grid| Aligned {
             period: grid.period,
             phase_us: u64::try_from(phase_after_vblank(&grid, timing.started).as_micros())
@@ -466,41 +803,65 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         Ok((compose, send, timing, aligned))
     }
 
-    /// After a failure: a lost device drops both objects (rebuilt on the
-    /// next job), a refused sender drops the sender; a build failure, a
-    /// refusal or a second lost device before a boundary went out waits
-    /// [`MAX_RETRY_BACKOFF`] before the next build.
-    fn recover(&mut self, failure: &Failure, now: Instant) {
-        let error = failure.error();
-        let refused = is_refusal(error);
-        let lost_again = error.is_device_lost() && self.lost_unsent;
-        if error.is_device_lost() {
-            self.drop_gpu();
-            self.out.record_device_reset();
-            self.lost_unsent = true;
-        } else if refused {
-            self.sender = None;
-            self.out.record_sender_backoff();
-        }
-        if matches!(failure, Failure::Build(_)) || refused || lost_again {
-            self.retry_at = Some(now + MAX_RETRY_BACKOFF);
-        }
+    /// #239: compose the FHD sender's boundary and send it. After MAX's send
+    /// (`paced` = how MAX was paced), so it goes out at once, a little after
+    /// MAX's, never paced on its own; when MAX's boundary did not go out,
+    /// at the due instant.
+    fn fhd_boundary(
+        &mut self,
+        composition: &Composition<'_>,
+        paced: Option<(Due, Option<VblankGrid>)>,
+        offered: Instant,
+    ) -> Result<FhdSent, Skip> {
+        let compose = self.compose(Output::Fhd, composition)?;
+        let (due, _) = paced.unwrap_or_else(|| self.pace(offered));
+        let Some(sender) = self.fhd.sender.as_mut() else {
+            return Err(Skip::frame(NO_SENDER));
+        };
+        let (send, _) =
+            send_at(self.clock.as_mut(), due.at, offered, || sender.send()).map_err(Skip::frame)?;
+        Ok((compose, send))
     }
 
-    /// MAX is off, or the thread stops: drop the sender (Spout unregisters
-    /// the name), then the compositor, and forget any backoff.
+    /// MAX is off, or the thread stops: drop the senders (Spout unregisters
+    /// the names), then the compositors, and forget any backoff.
     pub fn release(&mut self) {
-        if self.holds_gpu() {
+        if self.max.holds() {
             info!("program max: the Spout sender and the compositor are released");
         }
-        self.drop_gpu();
-        self.retry_at = None;
+        self.max.drop_gpu();
+        self.max.retry_at = None;
+        self.ids.forget();
+        self.release_fhd();
     }
 
-    fn drop_gpu(&mut self) {
-        self.sender = None;
-        self.compositor = None;
-        self.ids.forget();
+    /// #239: drop the FHD sender's objects (Spout unregisters `SP-program`)
+    /// and forget its backoff: it was switched off, MAX is off, or the
+    /// thread stops.
+    fn release_fhd(&mut self) {
+        if self.fhd.holds() {
+            info!("program max: the SP-program Spout sender and its compositor are released");
+        }
+        self.fhd.drop_gpu();
+        self.fhd.retry_at = None;
+        self.out.record_fhd_listed(None);
+    }
+}
+
+/// #243: the one WARN where the paced output stops ticking and the one
+/// INFO where it ticks again (the decision is `vblank_log`'s, tested).
+/// `mutants::skip`: it only writes the log line.
+#[cfg_attr(test, mutants::skip)]
+fn log_vblank(log: Option<VblankLog>, source: &dyn VblankSource) {
+    match log {
+        Some(VblankLog::StoppedTicking) => warn!(
+            output = %source.output(),
+            "program max: the display output does not tick (its waits do not wait) — sends at the constant lead"
+        ),
+        Some(VblankLog::TicksAgain) => {
+            info!(output = %source.output(), "program max: the display output ticks again");
+        }
+        None => {}
     }
 }
 
@@ -534,3 +895,11 @@ pub(crate) mod tests;
 #[cfg(test)]
 #[path = "program_max_worker_tests_send.rs"]
 mod tests_send;
+
+#[cfg(test)]
+#[path = "program_max_worker_tests_fhd.rs"]
+mod tests_fhd;
+
+#[cfg(test)]
+#[path = "program_max_worker_tests_log.rs"]
+mod tests_log;

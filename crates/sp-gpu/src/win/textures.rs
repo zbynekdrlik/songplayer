@@ -1,5 +1,6 @@
-//! The textures: the shared 3840×2160 BGRA render target, a slot's two
-//! plane textures (Y as R8, UV as R8G8), and the staging copy for readback.
+//! The textures: the shared BGRA render target (3840×2160 for MAX; #239:
+//! 1920×1080 for the `SP-program` sender), a slot's two plane textures (Y as
+//! R8, UV as R8G8), and the staging copy for readback.
 
 use std::ffi::c_void;
 
@@ -15,7 +16,6 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 
 use super::failed;
-use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH};
 use crate::error::GpuError;
 use crate::picture::{Nv12Picture, Planes};
 use crate::readback::{mapped_len, unpad_rows};
@@ -74,23 +74,25 @@ fn shader_view(
     })
 }
 
-/// The 3840×2160 `B8G8R8A8_UNORM` render target. Created
+/// The `width`×`height` `B8G8R8A8_UNORM` render target. Created
 /// `D3D11_RESOURCE_MISC_SHARED`, not keyed: the description Spout2's own
 /// sender texture has (`spoutDirectX::CreateSharedDX11Texture`, keyed =
 /// false), so S1b may hand its handle to Spout or `SendTexture` it.
 pub(super) struct RenderTarget {
     pub texture: ID3D11Texture2D,
     pub view: ID3D11RenderTargetView,
+    pub width: u32,
+    pub height: u32,
 }
 
 impl RenderTarget {
-    pub fn new(device: &ID3D11Device) -> Result<Self, GpuError> {
+    pub fn new(device: &ID3D11Device, width: u32, height: u32) -> Result<Self, GpuError> {
         let bind = (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32;
         let texture = texture(
             device,
             &desc(
-                CANVAS_WIDTH,
-                CANVAS_HEIGHT,
+                width,
+                height,
                 DXGI_FORMAT_B8G8R8A8_UNORM,
                 D3D11_USAGE_DEFAULT,
                 bind,
@@ -104,7 +106,12 @@ impl RenderTarget {
         let view = view.ok_or(GpuError::NoObject {
             call: "CreateRenderTargetView",
         })?;
-        Ok(Self { texture, view })
+        Ok(Self {
+            texture,
+            view,
+            width,
+            height,
+        })
     }
 }
 
@@ -178,13 +185,18 @@ impl PlaneTextures {
     }
 }
 
-/// The CPU-readable copy of the render target.
-pub(super) fn staging(device: &ID3D11Device) -> Result<ID3D11Texture2D, GpuError> {
+/// A CPU-readable `width`×`height` BGRA copy (of the render target, or of a
+/// sender's shared texture).
+pub(super) fn staging(
+    device: &ID3D11Device,
+    width: u32,
+    height: u32,
+) -> Result<ID3D11Texture2D, GpuError> {
     texture(
         device,
         &desc(
-            CANVAS_WIDTH,
-            CANVAS_HEIGHT,
+            width,
+            height,
             DXGI_FORMAT_B8G8R8A8_UNORM,
             D3D11_USAGE_STAGING,
             0,
@@ -194,17 +206,19 @@ pub(super) fn staging(device: &ID3D11Device) -> Result<ID3D11Texture2D, GpuError
     )
 }
 
-/// Copy `source` (a 3840×2160 BGRA texture on `context`'s device: the render
-/// target, or Spout's shared texture opened by a receiver) into `staging`
-/// and read it: 3840×2160 BGRA rows, tightly packed (the mapped rows may be
-/// padded).
+/// Copy `source` (a `width`×`height` BGRA texture on `context`'s device: the
+/// render target, or Spout's shared texture opened by a receiver) into
+/// `staging` (of the same size) and read it: `width`×`height` BGRA rows,
+/// tightly packed (the mapped rows may be padded).
 pub(super) fn read_back(
     context: &ID3D11DeviceContext,
     source: &ID3D11Texture2D,
     staging: &ID3D11Texture2D,
+    width: u32,
+    height: u32,
 ) -> Result<Vec<u8>, GpuError> {
-    let row = CANVAS_WIDTH as usize * 4;
-    let rows = CANVAS_HEIGHT as usize;
+    let row = width as usize * 4;
+    let rows = height as usize;
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
     unsafe {
         context.CopyResource(staging, source);

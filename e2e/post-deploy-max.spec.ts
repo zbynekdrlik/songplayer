@@ -15,6 +15,12 @@
  * output's refresh grid at the phase setting, and its slot is picked anew
  * at most once (the drift between the display's clock and SongPlayer's).
  *
+ * #239: the same thread sends the FHD program as the Spout sender
+ * `SP-program` (1920×1080) right after each MAX boundary. The same two
+ * reads gate `max.fhd` (`fhdGateFailures`): its setting on, `running`,
+ * Spout's registry listing `SP-program` at 1920×1080, at least one grid
+ * second of its boundaries out, none failed and no sender refused.
+ *
  * The cost p99s are logged, not gated here: the budget (upload + draw + send
  * under 10 ms) and Arena's side (its source list, a scratch layer's FPS) are
  * the main session's box gate (`.claude/rules/gpu-max.md`). API-level on
@@ -22,7 +28,7 @@
  */
 
 import { test, expect, APIRequestContext } from "@playwright/test";
-import { MIN_BOUNDARIES, MaxStatus, maxGateFailures } from "./max-gate";
+import { MIN_BOUNDARIES, MaxStatus, fhdGateFailures, maxGateFailures } from "./max-gate";
 
 /** The fields of `GET /api/v1/program` this spec reads: MAX, and the
  *  program's own coalesces and late takes (a burst after a program-side
@@ -55,23 +61,40 @@ test.describe("SP-program-MAX (#223 S2)", () => {
   test("composes on the GPU and keeps up with every boundary", async ({ request }) => {
     test.setTimeout(60_000);
 
-    // The thread builds its compositor and sender at the first boundary
-    // after the start: wait for the first one to go out.
+    // The thread builds its compositors and senders at the first boundary
+    // after the start: wait for the first one of each to go out (and, #239,
+    // for the SP-program sender's listing, read after its first boundary).
     await expect
-      .poll(async () => (await readMax(request)).submitted, {
-        message: "SP-program-MAX sends its first boundary",
-        timeout: 30_000,
-      })
+      .poll(
+        async () => {
+          const max = await readMax(request);
+          return Math.min(max.submitted, max.fhd.submitted, max.fhd.listed_width);
+        },
+        {
+          message: "SP-program-MAX and SP-program send their first boundary",
+          timeout: 30_000,
+        },
+      )
       .toBeGreaterThan(0);
     const firstRead = await readProgram(request);
     const first = firstRead.max;
     console.log(logLine("first", firstRead));
 
+    // Both counts: the FHD sender's boundary is recorded right after MAX's.
     await expect
-      .poll(async () => (await readMax(request)).submitted - first.submitted, {
-        message: `${MIN_BOUNDARIES} more boundaries go out (one grid second)`,
-        timeout: 20_000,
-      })
+      .poll(
+        async () => {
+          const max = await readMax(request);
+          return Math.min(
+            max.submitted - first.submitted,
+            max.fhd.submitted - first.fhd.submitted,
+          );
+        },
+        {
+          message: `${MIN_BOUNDARIES} more boundaries go out on both (one grid second)`,
+          timeout: 20_000,
+        },
+      )
       .toBeGreaterThanOrEqual(MIN_BOUNDARIES);
     const secondRead = await readProgram(request);
     const second = secondRead.max;
@@ -84,8 +107,15 @@ test.describe("SP-program-MAX (#223 S2)", () => {
         `(${second.vblank_period_ns} ns): start after the vblank p50/p99 = ` +
         `${second.send_phase_us_p50}/${second.send_phase_us_p99} us ` +
         `(phase ${second.vblank_phase_us}), slot re-picks ` +
-        `+${second.slot_repicks - first.slot_repicks}`,
+        `+${second.slot_repicks - first.slot_repicks}; SP-program (1920x1080) ` +
+        `listed ${second.fhd.listed_width}x${second.fhd.listed_height}, ` +
+        `p99 upload+draw+send = ` +
+        `${second.fhd.upload_us_p99 + second.fhd.draw_us_p99 + second.fhd.send_us_p99} us`,
     );
     expect(maxGateFailures(first, second), "the SP-program-MAX gate").toEqual([]);
+    expect(
+      fhdGateFailures(first.fhd, second.fhd),
+      "the SP-program (1920x1080) Spout gate",
+    ).toEqual([]);
   });
 });

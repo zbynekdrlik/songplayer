@@ -2,10 +2,14 @@
 //! (pure).
 //!
 //! The canvas is fixed: 3840×2160, the owner's rule (#223 revision 3: "4k",
-//! "both outputs static"). A boundary is the black (a genuine standby), one
-//! picture, or a fade of two. Each picture is placed by
-//! `sp_core::fit::aspect_fit` into the canvas, the rule of `SP-program`'s
-//! 1920×1080 canvas, and drawn as one quad over the black canvas with
+//! "both outputs static"). #239: the same boundary also goes out as the
+//! `SP-program` Spout sender, drawn into a fixed 1920×1080 target
+//! ([`FHD_WIDTH`] × [`FHD_HEIGHT`], `SP-program`'s NDI canvas), so the
+//! layers take their target's size ([`Composition::layers_in`]). A boundary
+//! is the black (a genuine standby), one picture, or a fade of two. Each
+//! picture is placed by `sp_core::fit::aspect_fit` into the target, the rule
+//! of `SP-program`'s 1920×1080 canvas, and drawn as one quad over the black
+//! target with
 //! additive blending at its weight: the outgoing side at 1 − w first, then
 //! the incoming one at w, with w the boundary's Q8 weight from `SP-program`
 //! (`program_transition::weight_q8`). Where a side's quad does not reach
@@ -21,6 +25,14 @@ pub const CANVAS_WIDTH: u32 = 3840;
 
 /// The canvas height of `SP-program-MAX`.
 pub const CANVAS_HEIGHT: u32 = 2160;
+
+/// #239: the target width of the `SP-program` Spout sender: the FHD
+/// program's fixed canvas (sp-server's `program_canvas.rs`, the picture the
+/// NDI `SP-program` carries).
+pub const FHD_WIDTH: u32 = 1920;
+
+/// #239: the target height of the `SP-program` Spout sender.
+pub const FHD_HEIGHT: u32 = 1080;
 
 // A Q8 weight of 1, all of the incoming side: `SP-program`'s fade weight
 // unit, the one `sp_core::blend` constant both outputs use.
@@ -67,18 +79,26 @@ impl Slot {
 pub struct Layer<'a> {
     pub slot: Slot,
     pub picture: Nv12Picture<'a>,
-    /// Where the picture goes in the canvas.
+    /// Where the picture goes in the target.
     pub place: Placement,
     /// Its blend weight: the shader's RGB is multiplied by it and ADDED to
-    /// the canvas.
+    /// the target.
     pub weight: f32,
 }
 
 impl<'a> Composition<'a> {
-    /// The quads to draw over the black canvas, in draw order: the outgoing
-    /// side, then the incoming one. A side of weight 0 is not drawn (and not
-    /// uploaded): the black has no layer, a plain picture one at weight 1.
+    /// The quads that draw it into `SP-program-MAX`'s 3840×2160 canvas:
+    /// [`layers_in`](Self::layers_in) [`CANVAS_WIDTH`] × [`CANVAS_HEIGHT`].
     pub fn layers(&self) -> Vec<Layer<'a>> {
+        self.layers_in(CANVAS_WIDTH, CANVAS_HEIGHT)
+    }
+
+    /// The quads to draw over a black `width`×`height` target, in draw
+    /// order: the outgoing side, then the incoming one, each placed by
+    /// `aspect_fit` into that target. A side of weight 0 is not drawn (and
+    /// not uploaded): the black has no layer, a plain picture one at
+    /// weight 1.
+    pub fn layers_in(&self, width: u32, height: u32) -> Vec<Layer<'a>> {
         let (from, to, to_q8) = match *self {
             Composition::Black => (None, None, 0),
             Composition::Picture(picture) => (Some(picture), None, 0),
@@ -98,7 +118,7 @@ impl<'a> Composition<'a> {
             picture.map(|picture| Layer {
                 slot,
                 picture,
-                place: aspect_fit(picture.width, picture.height, CANVAS_WIDTH, CANVAS_HEIGHT),
+                place: aspect_fit(picture.width, picture.height, width, height),
                 weight: q8 as f32 / Q8_ONE as f32,
             })
         })
