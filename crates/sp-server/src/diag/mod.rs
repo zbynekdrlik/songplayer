@@ -4,3 +4,4 @@
 pub mod decode_bench;
 #[cfg(windows)]
 mod decode_bench_mf;
+pub mod fit_bench; // #223 S10a: the program canvas fit of a 4K picture (G3)

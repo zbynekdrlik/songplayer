@@ -187,6 +187,29 @@ failed`).
   refusal, and one WARN `decode-bench: the run failed` for a 500 without a
   report.
 
+## `POST /api/v1/diag/fit-bench`: what the program canvas fit costs (#223 S10a)
+
+- `{"width", "height", "frames"}`: an even size from 2×2 to 3840×2160, 1 to
+  600 frames. It fits a synthetic NV12 picture of that size into SP-program's
+  1920×1080 canvas `frames` times (`program_canvas::Canvas::fit`), then fades
+  it into itself `frames` times (`Canvas::fade`, both sides fitted), on a
+  `BandPool` of the sender's band count (`mix_bands` of the logical
+  processors) built for the run, on a blocking thread at normal priority
+  while SongPlayer plays: an upper bound of the sender's own cost.
+- Answers 200 `{width, height, canvas_width, canvas_height, bands, frames,
+  fit_us, fade_us {mean,p50,p99,max}, budget_us: 16666, over_budget}`;
+  400 out of range (axum's 400/415/422 before the handler as for the decode
+  bench); 409 while ANY bench runs (it takes the decode bench's slot: one
+  bench at a time); 500 when its thread failed. INFO `fit-bench: start` /
+  `done`, INFO `fit-bench: no report` for a refusal.
+- G3 (#223 S10): `over_budget` false at 3840×2160 = a p99 of both the fit and
+  the fade within half a 30 fps slot. Record the result on #223.
+
+```bash
+curl -s -X POST http://10.77.9.201:8920/api/v1/diag/fit-bench \
+  -H 'content-type: application/json' -d '{"width":3840,"height":2160,"frames":300}'
+```
+
 ## Code map
 
 - `diag/decode_bench.rs`: the cross-platform core.
@@ -207,7 +230,9 @@ failed`).
     hardware.
   - `BenchReport::with_decode` (Linux-tested) applies the decode facts;
     the adapter rule (named only on a hardware path) lives there.
-- `api/diag.rs`: the handler.
+- `diag/fit_bench.rs`: the fit bench (`check`, `synthetic`, `report` tested;
+  `run` the timed loops); route tests `api/diag_tests_fit.rs`.
+- `api/diag.rs`: the handlers.
   - `AppState.decode_bench` holds the dir and the gate.
   - Every test state builds its own, so the 409 test cannot race another
     test.

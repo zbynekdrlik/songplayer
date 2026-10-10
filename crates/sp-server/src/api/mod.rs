@@ -151,6 +151,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/diag/decode-bench",
             axum::routing::post(diag::post_decode_bench),
         )
+        // #223 S10a: what the program canvas fit of a picture costs (G3)
+        .route(
+            "/api/v1/diag/fit-bench",
+            axum::routing::post(diag::post_fit_bench),
+        )
         // #228: the local test item (camera-box's measurement clip): its ids,
         // its import from the sample dir, its start from 0 and its stop.
         .route(
