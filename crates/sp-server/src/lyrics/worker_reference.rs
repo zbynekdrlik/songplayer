@@ -21,6 +21,11 @@ use tracing::{info, warn};
 use super::worker::{LyricsWorker, align_track_to_lyrics_track};
 use crate::lyrics::LYRICS_PIPELINE_VERSION;
 
+/// #144 F1: the suffix of a lyrics source that passed the reference gate
+/// (`<candidate>+mtl@rev1/g35t-ok`): `mark_video_lyrics_complete` sets ★
+/// exactly for it, on every row of the video, with the persisted track.
+pub(crate) const REFERENCE_SOURCE_SUFFIX: &str = "/g35t-ok";
+
 impl LyricsWorker {
     /// Lever 2 (#143): forced-alignment reference stage. See
     /// `orchestrator::run_reference_stage` for the mtl-align → gate decision
@@ -42,7 +47,7 @@ impl LyricsWorker {
     /// NEVER degrades to the base tier — the next pick re-runs mtl to identical ★.
     pub(crate) async fn run_mtl_reference_stage(
         &self,
-        video_id: i64,
+        _video_id: i64,
         youtube_id: &str,
         best: Option<&crate::lyrics::tier1::CandidateText>,
         clean_vocal: Option<&Path>,
@@ -148,14 +153,11 @@ impl LyricsWorker {
                     ),
                 )
                 .await;
-                if let Err(e) =
-                    crate::db::models::set_video_lyrics_reference(&self.pool, video_id, true).await
-                {
-                    warn!(youtube_id = %youtube_id, %e, "reference_stage: failed to set lyrics_reference=1");
-                }
+                // #144 F1: no ★ here — the persist writes it WITH the track
+                // (`REFERENCE_SOURCE_SUFFIX`), on every row of the video.
                 let aligned = crate::lyrics::backend::AlignedTrack {
                     lines,
-                    provenance: format!("{}+mtl@rev1/g35t-ok", best.source),
+                    provenance: format!("{}+mtl@rev1{REFERENCE_SOURCE_SUFFIX}", best.source),
                     raw_confidence: 1.0,
                 };
                 Ok(Some(align_track_to_lyrics_track(
@@ -191,8 +193,6 @@ impl LyricsWorker {
                     ),
                 )
                 .await;
-                let _ = crate::db::models::set_video_lyrics_reference(&self.pool, video_id, false)
-                    .await;
                 Ok(None)
             }
             crate::lyrics::orchestrator::ReferenceStageResult::Error { stage, message } => {
@@ -208,8 +208,6 @@ impl LyricsWorker {
                     &reference_gate_audit_json("error", Some(&reason), None, None, None, 0),
                 )
                 .await;
-                let _ = crate::db::models::set_video_lyrics_reference(&self.pool, video_id, false)
-                    .await;
                 Ok(None)
             }
             crate::lyrics::orchestrator::ReferenceStageResult::WallAborted { detail } => {

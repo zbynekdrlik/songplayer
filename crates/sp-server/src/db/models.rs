@@ -472,13 +472,14 @@ pub async fn mark_video_lyrics(
     // future meaning. Without clearing it, audit queries report dangling
     // queue entries (10 rows observed in production after the 2026-05-16
     // catalog reprocess).
+    // #144 F1: every row of the video (the lyrics file is the video's).
     sqlx::query(
         "UPDATE videos SET has_lyrics = ?, lyrics_source = ?, lyrics_pipeline_version = ?, \
          lyrics_manual_priority = 0, \
          lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
          lyrics_alignment_model = NULL \
-         WHERE id = ?",
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
     )
     .bind(has_lyrics as i32)
     .bind(lyrics_source)
@@ -516,19 +517,24 @@ pub async fn mark_video_lyrics_complete(
     // For raw line-timed ship-through (yt_subs / lrclib / spotify, no whisperx),
     // callers MUST pass Some(ALIGNMENT_MODEL_NONE) so the DB records the
     // explicit literal "none" rather than the ambiguous NULL.
+    //
+    // #144 F1: every row of the video (the lyrics file is the video's), and
+    // ★ WITH the track: set exactly when the persisted source is a gate PASS.
+    let reference = source.ends_with(crate::lyrics::worker_reference::REFERENCE_SOURCE_SUFFIX);
     sqlx::query(
         "UPDATE videos SET has_lyrics = 1, lyrics_source = ?, \
          lyrics_pipeline_version = ?, lyrics_quality_score = ?, \
          lyrics_manual_priority = 0, \
          lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-         lyrics_alignment_model = ? \
-         WHERE id = ?",
+         lyrics_alignment_model = ?, lyrics_reference = ? \
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
     )
     .bind(source)
     .bind(pipeline_version as i64)
     .bind(quality_score.map(|q| q as f64))
     .bind(alignment_model)
+    .bind(i64::from(reference))
     .bind(video_id)
     .execute(pool)
     .await?;
@@ -883,12 +889,13 @@ pub async fn quarantine_video_lyrics(
         .try_get::<Option<String>, _>("lyrics_source")
         .unwrap_or(None);
 
+    // #144 F1: every row of the video — the file it deletes is the video's.
     sqlx::query(
         "UPDATE videos SET has_lyrics = 0, lyrics_source = 'asr_gap', \
          lyrics_pipeline_version = ?, lyrics_manual_priority = 0, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-         lyrics_alignment_model = NULL \
-         WHERE id = ?",
+         lyrics_alignment_model = NULL, lyrics_reference = 0 \
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
     )
     .bind(current_pipeline_version as i64)
     .bind(video_id)
@@ -943,13 +950,14 @@ pub async fn mark_unsupported_source(
     video_id: i64,
     current_pipeline_version: u32,
 ) -> Result<(), sqlx::Error> {
+    // #144 F1: every row of the video.
     sqlx::query(
         "UPDATE videos SET has_lyrics = 0, lyrics_source = 'unsupported_source', \
          lyrics_pipeline_version = ?, lyrics_manual_priority = 0, \
          lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
          lyrics_alignment_model = NULL \
-         WHERE id = ?",
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
     )
     .bind(current_pipeline_version as i64)
     .bind(video_id)

@@ -338,7 +338,7 @@ pub async fn adopt_lyrics(
              lyrics_translation_version = CASE WHEN lyrics_translation_gender IS NULL \
                  OR lyrics_translation_gender IS ?3 THEN ?2 ELSE 0 END, \
              lyrics_translation_gender = COALESCE(lyrics_translation_gender, ?3) \
-         WHERE id = ?4",
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?4)",
     )
     .bind(i64::from(l.reference))
     .bind(i64::from(l.translation_version))

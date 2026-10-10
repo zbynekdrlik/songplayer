@@ -1,4 +1,6 @@
-//! Per-row lyrics retry backoff (#144) — split out of `models.rs` to keep
+//! Lyrics retry backoff (#144) — per VIDEO since F1: every row of the
+//! video takes it (one `{yt}_lyrics.json`, one queue entry in effect). Split
+//! out of `models.rs` to keep
 //! that file under the 1000-line airuleset cap. Re-exported from `models.rs`
 //! via `pub use models_lyrics_backoff::*;` so call sites use
 //! `crate::db::models::record_lyrics_deferral`.
@@ -37,7 +39,7 @@ pub async fn record_lyrics_deferral(
          SET lyrics_attempts = ?, \
              lyrics_next_attempt_at = \
                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) \
-         WHERE id = ?",
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
     )
     .bind(new_attempts)
     .bind(secs)
@@ -68,7 +70,7 @@ pub async fn record_lyrics_wait(
         "UPDATE videos \
          SET lyrics_next_attempt_at = \
                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('+%d seconds', ?)) \
-         WHERE id = ?",
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
     )
     .bind(secs)
     .bind(video_id)
@@ -112,7 +114,7 @@ pub async fn record_served_lyrics_failure(
          lyrics_manual_priority = CASE WHEN lyrics_attempts >= ? THEN 0 \
              ELSE lyrics_manual_priority END, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
-         WHERE id = ?",
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
     )
     .bind(i64::from(SERVED_RERUN_MAX_ATTEMPTS))
     .bind(video_id)

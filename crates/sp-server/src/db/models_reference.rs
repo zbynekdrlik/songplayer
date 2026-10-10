@@ -18,11 +18,15 @@ pub async fn set_video_lyrics_reference(
     video_id: i64,
     reference: bool,
 ) -> sqlx::Result<u64> {
-    let res = sqlx::query("UPDATE videos SET lyrics_reference = ?1 WHERE id = ?2")
-        .bind(reference as i32)
-        .bind(video_id)
-        .execute(pool)
-        .await?;
+    // #144 F1: ★ describes the video's one lyrics file: every row.
+    let res = sqlx::query(
+        "UPDATE videos SET lyrics_reference = ?1 \
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?2)",
+    )
+    .bind(reference as i32)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
     Ok(res.rows_affected())
 }
 
@@ -45,7 +49,7 @@ pub async fn record_reference_feedback(
          lyrics_reference_rejected_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
          lyrics_reference_note = ?1, lyrics_manual_priority = 1, \
          lyrics_attempts = 0, lyrics_next_attempt_at = NULL \
-         WHERE id = ?2",
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?2)",
     )
     .bind(note)
     .bind(video_id)

@@ -82,7 +82,7 @@ non-alphabetical order CI's rustfmt accepts). So running `cargo fmt --all`
 locally rewrites those `mod` lines into a different order — a FALSE positive that
 CI does NOT want. After any `cargo fmt --all`, `git checkout --
 crates/sp-server/src/db/models.rs` if you didn't intend to touch it, and confirm
-`cargo fmt --all --check` then flags ONLY models.rs (ignore that one). Never let
+`cargo fmt --all --check` then flags ONLY models.rs (ignore that one). **When YOUR change edits `models.rs` itself, never `git checkout` it after the fmt** (#144 F1: the checkout silently threw away the GREEN edits of `mark_video_lyrics*`): run the fmt, then `git diff crates/sp-server/src/db/models.rs | grep -E '^[-+](mod|#\[path|pub use)'` — revert only a module-block reorder, if any shows (on 10.10.2026 the local rustfmt no longer reordered it). Never let
 the models.rs reorder ride in an unrelated diff — CI's newer rustfmt would fail
 `--check` on it. (TIER-0: `cargo fmt` is the only local cargo command allowed;
 CI compiles everything else.)

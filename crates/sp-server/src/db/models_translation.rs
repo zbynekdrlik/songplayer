@@ -39,7 +39,7 @@ pub async fn set_translation_gender(
 ) -> Result<bool, sqlx::Error> {
     let res = sqlx::query(
         "UPDATE videos SET lyrics_translation_gender = ?1, lyrics_translation_version = 0 \
-         WHERE id = ?2",
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?2)",
     )
     .bind(gender)
     .bind(video_id)
@@ -57,11 +57,15 @@ pub async fn stamp_translation_version(
     video_id: i64,
     version: u32,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE videos SET lyrics_translation_version = ?1 WHERE id = ?2")
-        .bind(version as i64)
-        .bind(video_id)
-        .execute(pool)
-        .await?;
+    // #144 F1: the SK lines are in the video's one file: every row.
+    sqlx::query(
+        "UPDATE videos SET lyrics_translation_version = ?1 \
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?2)",
+    )
+    .bind(version as i64)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
