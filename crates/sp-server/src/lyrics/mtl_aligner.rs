@@ -560,5 +560,9 @@ mod tests {
 }
 
 #[cfg(test)]
+#[path = "mtl_untimed_tests.rs"]
+mod untimed_tests;
+
+#[cfg(test)]
 #[path = "mtl_encoding_guard_tests.rs"]
 mod mtl_encoding_guard_tests;
