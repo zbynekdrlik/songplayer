@@ -278,7 +278,7 @@ pub struct StemJob {
 /// `done`/`unsupported`, and (if previously `failed`) have passed their backoff
 /// window. Returns `None` when nothing is due.
 pub async fn get_next_video_for_stems(pool: &SqlitePool) -> Result<Option<StemJob>, sqlx::Error> {
-    let row = sqlx::query(
+    let row = sqlx::query(concat!(
         "SELECT id, youtube_id, audio_file_path, duration_ms, song, artist \
          FROM videos \
          WHERE normalized = 1 \
@@ -286,9 +286,11 @@ pub async fn get_next_video_for_stems(pool: &SqlitePool) -> Result<Option<StemJo
            AND (stem_status IS NULL OR stem_status = 'failed') \
            AND (stem_next_attempt_at IS NULL \
                 OR stem_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-         ORDER BY stem_manual_priority DESC, id ASC \
+           AND ",
+        crate::test_item::not_test_item!(), // #228
+        " ORDER BY stem_manual_priority DESC, id ASC \
          LIMIT 1",
-    )
+    ))
     .fetch_optional(pool)
     .await?;
 
@@ -371,11 +373,12 @@ pub async fn mark_stems_unsupported(pool: &SqlitePool, video_id: i64) -> Result<
 /// normalized song with an audio sidecar that is not yet `done`/`unsupported`
 /// (NULL or `failed`); `done` counts songs with both stems written.
 pub async fn count_stems_progress(pool: &SqlitePool) -> Result<(i64, i64), sqlx::Error> {
-    let pending: i64 = sqlx::query_scalar(
+    let pending: i64 = sqlx::query_scalar(concat!(
         "SELECT COUNT(*) FROM videos \
          WHERE normalized = 1 AND audio_file_path IS NOT NULL \
-           AND (stem_status IS NULL OR stem_status = 'failed')",
-    )
+           AND (stem_status IS NULL OR stem_status = 'failed') AND ",
+        crate::test_item::not_test_item!(), // #228: never queued, never pending
+    ))
     .fetch_one(pool)
     .await?;
     let done: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM videos WHERE stem_status = 'done'")

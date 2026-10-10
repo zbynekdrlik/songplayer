@@ -480,8 +480,11 @@ impl DownloadWorker {
 /// playlist whose `next_attempt_at` is NULL (never failed) or already due
 /// (`v.` / `p.` aliases). Binds ONE `?`: now, `chrono::Utc::now().to_rfc3339()`.
 /// The node exchange lists these rows as queued downloads (#229, `peer::queued`).
-pub(crate) const DOWNLOAD_DUE: &str = "v.normalized = 0 AND p.is_active = 1 \
-     AND (v.next_attempt_at IS NULL OR v.next_attempt_at <= ?)";
+pub(crate) const DOWNLOAD_DUE: &str = concat!(
+    "v.normalized = 0 AND p.is_active = 1 \
+     AND (v.next_attempt_at IS NULL OR v.next_attempt_at <= ?) AND ",
+    crate::test_item::not_test_item!() // #228: the test item is imported, never downloaded
+);
 
 /// Fetch the next video that needs processing ([`DOWNLOAD_DUE`]). Rows with
 /// a NULL `next_attempt_at` sort before due-now rows so a fresh video is never

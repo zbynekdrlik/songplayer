@@ -117,7 +117,7 @@ pub use super::routes_status::{HeavyContainmentStatus, ToolsStatusResponse};
 pub async fn list_playlists(State(state): State<AppState>) -> impl IntoResponse {
     let rows = sqlx::query(
         "SELECT id, name, youtube_url, ndi_output_name, playback_mode, is_active, created_at, updated_at, kind
-         FROM playlists ORDER BY id",
+         FROM playlists WHERE kind IS NOT 'test' ORDER BY id",
     )
     .fetch_all(&state.pool)
     .await;
