@@ -64,6 +64,7 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
         orphans = scan.orphans.len(),
         duplicates = scan.duplicates.len(),
         lyrics = scan.lyrics_files.len(),
+        temps = scan.temps.len(),
         "self-heal cache scan"
     );
 
@@ -90,6 +91,19 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
         );
         if let Err(e) = std::fs::remove_file(&orphan.path) {
             tracing::warn!("failed to remove orphan {}: {e}", orphan.path.display());
+        }
+    }
+
+    // #223 S9b (D8): a crashed download's temps — the download worker does
+    // not run yet. A file a row records is never one (kept, like a half).
+    for temp in &scan.temps {
+        if cache::recorded_by_a_row(pool, temp).await? {
+            tracing::warn!("keeping a download temp a row records: {}", temp.display());
+            continue;
+        }
+        tracing::info!("removing a crashed download's temp: {}", temp.display());
+        if let Err(e) = std::fs::remove_file(temp) {
+            tracing::warn!("failed to remove the temp {}: {e}", temp.display());
         }
     }
 

@@ -70,6 +70,10 @@ pub struct ScanResult {
     /// `songs` keeps the newest pair per id; these are removed by
     /// [`remove_duplicates`] at startup.
     pub duplicates: Vec<CachedSong>,
+    /// #223 S9b (D8): a crashed download's temps (`{id}_video_temp.mp4`,
+    /// `{id}_audio_temp.*`, `{id}_video_upgrade_temp.*`), removed at startup
+    /// before the download worker runs.
+    pub temps: Vec<PathBuf>,
 }
 
 static VIDEO_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_-]{11}$").unwrap());
@@ -87,6 +91,12 @@ static LYRICS_RE: LazyLock<Regex> =
 
 static VOCALS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^([a-zA-Z0-9_-]{11})_vocals16k\.wav$").unwrap());
+
+/// A download's temp (`downloader::DownloadWorker`'s `{id}_video_temp.mp4`
+/// and `{id}_audio_temp.%(ext)s`, and the in-place upgrade's).
+static TEMP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[a-zA-Z0-9_-]{11}_(?:video|audio)(?:_upgrade)?_temp(?:\..+)?$").unwrap()
+});
 
 /// A file named after an audio sidecar ([`derived_files`]): captures the base
 /// name (`{song}_{artist}_{id}_normalized[_gf]`) and the YouTube id.
@@ -661,6 +671,7 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
     let mut legacy: Vec<LegacyFile> = Vec::new();
     let mut lyrics_files: Vec<(String, PathBuf)> = Vec::new();
     let mut vocals_files: Vec<(String, PathBuf)> = Vec::new();
+    let mut temps: Vec<PathBuf> = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -719,6 +730,11 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
             vocals_files.push((caps[1].to_string(), path));
             continue;
         }
+
+        if TEMP_RE.is_match(filename) {
+            temps.push(path);
+            continue;
+        }
     }
 
     // Pair video + audio halves of the same base; a lone half is an orphan.
@@ -767,6 +783,7 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
         lyrics_files,
         vocals_files,
         duplicates,
+        temps,
     }
 }
 

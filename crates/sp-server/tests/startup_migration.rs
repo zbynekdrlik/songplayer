@@ -437,3 +437,30 @@ async fn self_heal_leaves_stems_in_place_alone() {
         }
     );
 }
+
+/// #223 S9b (D8): a crashed download's temps (53 MB of `q_T_-Lh8AFI_video_temp.mp4`
+/// sat next to its song on the box) are removed at startup; the song's own
+/// pair stays.
+#[tokio::test]
+async fn self_heal_removes_a_crashed_downloads_temps() {
+    let pool = sp_server::db::create_memory_pool().await.unwrap();
+    sp_server::db::run_migrations(&pool).await.unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let video_temp = tmp.path().join("q_T_-Lh8AFI_video_temp.mp4");
+    let audio_temp = tmp.path().join("q_T_-Lh8AFI_audio_temp.webm");
+    let video = tmp
+        .path()
+        .join("Song_Artist_q_T_-Lh8AFI_normalized_video.mp4");
+    let audio = tmp
+        .path()
+        .join("Song_Artist_q_T_-Lh8AFI_normalized_audio.flac");
+    for path in [&video_temp, &audio_temp, &video, &audio] {
+        fs::write(path, b"x").unwrap();
+    }
+
+    self_heal_cache(&pool, tmp.path()).await.unwrap();
+
+    assert!(!video_temp.exists(), "the video temp is removed");
+    assert!(!audio_temp.exists(), "the audio temp is removed");
+    assert!(video.exists() && audio.exists(), "the song's pair stays");
+}

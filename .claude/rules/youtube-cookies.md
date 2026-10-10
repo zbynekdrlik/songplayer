@@ -142,3 +142,7 @@ the box.
   1080), `PySFfTurafA` (AV1 to 2160) and `xrhVLX6vwPk` (THE DEEP).
 - `--force-overwrites` + the song's temps removed before the spawn: a
   crashed run's `{yt}_video_temp.mp4` never stays next to the song.
+- At startup, before the download worker runs, `self_heal_cache` removes
+  every download temp `scan_cache` finds (`ScanResult::temps`, `TEMP_RE`:
+  `{11-char id}_(video|audio)[_upgrade]_temp[.ext]`), except a file a row
+  records (`cache::recorded_by_a_row`, like a half-sidecar).
