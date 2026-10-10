@@ -82,39 +82,40 @@ impl LyricsWorker {
             info!(youtube_id = %youtube_id, "reference_stage: empty transcript — skipping (#144)");
             return Ok(None);
         }
-        // #144 F3: a text that covers too little of the singing fails the
-        // gate whatever mtl times (`uncovered_before_timing`), so no mtl is
-        // spent on it. Upstream's DP loops such a text (written once, sung
-        // many times: its first phone can step from column -1, the last) and
-        // its backtrack raised `IndexError` on 5 SNV songs.
+        // #144 F3: the gate's Coverage verdict reads only the text, and mtl
+        // returns every line with its text unchanged, so a text that fails it
+        // is failed here, before mtl (`coverage_fail_before_timing`): no
+        // heavy slot, no mtl minutes. Such a text is often written once and
+        // sung many times, which upstream's DP loops on (its first phone can
+        // step from column -1, the last): its backtrack raised `IndexError`
+        // on 5 SNV songs.
         if let Some(stats) =
-            crate::lyrics::reference_gate::uncovered_before_timing(&best.lines, words)
+            crate::lyrics::reference_gate::coverage_fail_before_timing(&best.lines, words)
         {
             warn!(
                 youtube_id = %youtube_id,
                 reason = "coverage",
+                matched_frac = stats.matched_frac,
                 sung_covered_frac = stats.sung_covered_frac,
-                sung_words = stats.sung_words,
-                "reference_stage: gate FAIL before mtl — the text covers too little of what is sung (#144 F3)"
+                max_uncovered_sung_ms = stats.max_uncovered_sung_ms,
+                "reference_stage: gate FAIL before mtl — the text does not cover the singing (#144 F3)"
             );
             let audit_ctx = crate::lyrics::audit_ctx::AuditContext {
                 cache_dir: &self.cache_dir,
                 youtube_id,
             };
-            crate::lyrics::audit_ctx::write_alignment_audit(
-                Some(&audit_ctx),
-                &reference_gate_audit_json(
-                    "fail",
-                    Some(gate_fail_reason_str(
-                        &crate::lyrics::reference_gate::GateFailReason::Coverage,
-                    )),
-                    Some(&stats),
-                    None,
-                    None,
-                    words.len(),
-                ),
-            )
-            .await;
+            let mut audit = reference_gate_audit_json(
+                "fail",
+                Some(gate_fail_reason_str(
+                    &crate::lyrics::reference_gate::GateFailReason::Coverage,
+                )),
+                Some(&stats),
+                None,
+                None,
+                words.len(),
+            );
+            audit["before_mtl"] = serde_json::Value::Bool(true);
+            crate::lyrics::audit_ctx::write_alignment_audit(Some(&audit_ctx), &audit).await;
             return Ok(None);
         }
 
@@ -334,6 +335,8 @@ fn reference_gate_audit_json(
         "mtl_device": mtl_device,
         "mtl_elapsed_s": mtl_elapsed_s,
         "asr_words": asr_words,
+        // #144 F3: true only for a Coverage FAIL decided before mtl ran.
+        "before_mtl": false,
     })
 }
 

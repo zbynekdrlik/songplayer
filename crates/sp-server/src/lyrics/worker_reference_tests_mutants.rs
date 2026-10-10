@@ -52,6 +52,8 @@ fn the_audit_carries_the_sung_coverage_and_its_verdict() {
     assert_eq!(fail["max_uncovered_sung_ms"], 48_200);
     assert_eq!(fail["sung_coverage_ok"], false);
     assert_eq!(fail["matched_frac"], 0.9);
+    // #144 F3: only the stage's own pre-mtl FAIL sets it.
+    assert_eq!(fail["before_mtl"], false);
 
     let pass = reference_gate_audit_json("pass", None, Some(&stats(0.9, 800)), None, None, 1);
     assert_eq!(pass["sung_coverage_ok"], true);

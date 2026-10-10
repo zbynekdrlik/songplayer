@@ -849,8 +849,8 @@ fn hymn_candidate() -> crate::lyrics::tier1::CandidateText {
 const HYMN: &str = "amazing grace how sweet the sound that saved a wretch like";
 
 /// #144 F3: a text that covers under `MIN_SUNG_COVERED_FRAC` of the sung
-/// words fails the gate BEFORE mtl. The gate's sung half reads no timings
-/// and mtl only drops lines, so no mtl timing can lift the covered share.
+/// words fails the gate BEFORE mtl. The gate's Coverage verdict reads only
+/// the text, and mtl returns every line with its text unchanged.
 /// Such a text (written once, sung many times) is what upstream's DP loops
 /// on: its backtrack raised `IndexError: index -462 is out of bounds` on 5
 /// SNV songs (text 9–23 % of the sung words). No mtl, no heavy slot: the
@@ -901,6 +901,7 @@ async fn a_text_that_covers_too_little_of_the_singing_fails_the_gate_before_mtl(
     assert_eq!(audit["asr_words"], 21);
     assert!(audit["mtl_device"].is_null(), "no mtl ran: {audit}");
     assert!(audit["mtl_elapsed_s"].is_null(), "no mtl ran: {audit}");
+    assert_eq!(audit["before_mtl"], true, "{audit}");
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
 
@@ -948,5 +949,6 @@ async fn a_text_that_covers_the_minimum_share_of_the_singing_still_reaches_mtl()
     )
     .unwrap();
     assert_eq!(audit["verdict"], "error");
+    assert_eq!(audit["before_mtl"], false, "{audit}");
     let _ = std::fs::remove_dir_all(&cache_dir);
 }

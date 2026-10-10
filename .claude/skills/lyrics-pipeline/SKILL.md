@@ -157,13 +157,16 @@ plus retries to 8.10. Full tables: #144 comment 6057577446.
 - **Gate verdicts (latest audit per row):** pass 25 of 297 verdicts (8.4 %);
   fail 272 = coverage 252 (one-way matched lines < 0.60: **201**; sung
   direction: 51) + agreement 18 + **offset 2**; error 13 (mtl exit 1: 8 —
-  upstream `alignment_bdr` IndexError 5, our `run.py` word-filter guard 3;
+  upstream `alignment_bdr` IndexError 5, our `run.py` word-filter guard 3 —
+  both handled on 10.10.2026, #144 F3: the guard by splitting words exactly
+  as upstream does, the IndexError texts by failing Coverage before mtl;
   stale pre-`inference_mode` `0xc0000005` audits 4; g35t 1); no audit 50
   (43 base rows where no text reached the gate). PASS rows: within 400 ms
   0.71–1.00, |median| ≤ 90 ms, sung coverage 0.76–0.985, gap ≤ 16 s.
 - **„Nesedí" marks:** 0 at the last DB reads (20.9, 22.9). The marks live in
-  `videos.lyrics_reference_rejected_at` / `lyrics_reference_note` and NO GET
-  returns them — a review must read the DB until the song list exposes them.
+  `videos.lyrics_reference_rejected_at` / `lyrics_reference_note`; since
+  #144 F4 (10.10.2026) `GET /api/v1/lyrics/songs` carries them as
+  `reference_rejected_at` / `reference_note`.
 - **The dominant fail WAS a gate artifact, not the text or mtl (fixed on
   dev 10.10.2026, `754a2f3f` + the review round).** The former
   `reference_gate::match_lines` walked each line's 3/2/1-word prefix forward

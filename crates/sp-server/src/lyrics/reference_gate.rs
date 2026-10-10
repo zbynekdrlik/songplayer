@@ -175,15 +175,73 @@ pub(crate) fn covers_what_is_sung(sung: &crate::lyrics::sung_coverage::SungCover
     sung.covered_frac >= MIN_SUNG_COVERED_FRAC && sung.max_uncovered_ms <= MAX_UNCOVERED_SUNG_MS
 }
 
-/// #144 F3: the gate's FAIL that needs no timings, for the candidate's own
-/// `lines` before mtl. The sung half reads only the words and their order,
-/// and mtl only drops lines (one upstream filters to no word), never adds a
-/// word: the share mtl's lines cover is at most the share `lines` cover (the
-/// LCS with a subsequence is no longer). Under `MIN_SUNG_COVERED_FRAC` the
-/// gate fails whatever mtl times, and this returns its stats (no line
-/// timed). Only the share is decided here: the longest uncovered stretch
-/// could move with a different LCS of fewer lines.
-pub(crate) fn uncovered_before_timing(lines: &[String], words: &[AsrWord]) -> Option<GateStats> {
+/// #144: what the gate decides from the lines' TEXT alone, read from the
+/// one word alignment: which lines are matched (the line matching's share)
+/// and what the text covers of the singing. No timing plays a part.
+struct TextVerdict {
+    alignment: Alignment,
+    lines_total: usize,
+    lines_matched: usize,
+    matched_frac: f64,
+}
+
+impl TextVerdict {
+    fn of(lines: &[AlignedLine], words: &[AsrWord]) -> Self {
+        let alignment = align(lines, words);
+        let with_words = || alignment.lines.iter().filter(|on| on.words > 0);
+        let lines_total = with_words().count();
+        let lines_matched = with_words()
+            .filter(|on| line_matched(on.aligned, on.words))
+            .count();
+        let matched_frac = if lines_total > 0 {
+            lines_matched as f64 / lines_total as f64
+        } else {
+            0.0
+        };
+        Self {
+            alignment,
+            lines_total,
+            lines_matched,
+            matched_frac,
+        }
+    }
+
+    /// The gate's Coverage FAIL: no line with a word, under
+    /// `MIN_MATCHED_FRAC` of them matched, or the text does not cover what
+    /// is sung (`covers_what_is_sung`).
+    fn fails_coverage(&self) -> bool {
+        self.lines_total == 0
+            || self.matched_frac < MIN_MATCHED_FRAC
+            || !covers_what_is_sung(&self.alignment.coverage)
+    }
+
+    /// The gate's stats with these text numbers and the given timing ones.
+    fn stats(&self, lines_timed: usize, median_signed_ms: i64, within_400_frac: f64) -> GateStats {
+        let sung = self.alignment.coverage;
+        GateStats {
+            lines_total: self.lines_total,
+            lines_matched: self.lines_matched,
+            lines_timed,
+            matched_frac: self.matched_frac,
+            median_signed_ms,
+            within_400_frac,
+            sung_words: sung.sung_words,
+            sung_covered_frac: sung.covered_frac,
+            max_uncovered_sung_ms: sung.max_uncovered_ms,
+        }
+    }
+}
+
+/// #144 F3: the gate's Coverage FAIL for the candidate's own `lines`,
+/// BEFORE mtl. mtl returns every line it is given, with its text unchanged
+/// (`run.py`; a line upstream cannot time comes back untimed, never
+/// dropped), and the Coverage verdict reads only the text
+/// (`TextVerdict`): it is the same before mtl as after it. A text that fails
+/// it gets these stats (no line timed) and costs no mtl run.
+pub(crate) fn coverage_fail_before_timing(
+    lines: &[String],
+    words: &[AsrWord],
+) -> Option<GateStats> {
     let untimed: Vec<AlignedLine> = lines
         .iter()
         .map(|text| AlignedLine {
@@ -191,56 +249,26 @@ pub(crate) fn uncovered_before_timing(lines: &[String], words: &[AsrWord]) -> Op
             start_ms: 0,
         })
         .collect();
-    let alignment = align(&untimed, words);
-    let sung = alignment.coverage;
-    if sung.covered_frac >= MIN_SUNG_COVERED_FRAC {
-        return None;
-    }
-    let with_words = || alignment.lines.iter().filter(|on| on.words > 0);
-    let lines_total = with_words().count();
-    let lines_matched = with_words()
-        .filter(|on| line_matched(on.aligned, on.words))
-        .count();
-    Some(GateStats {
-        lines_total,
-        lines_matched,
-        lines_timed: 0,
-        matched_frac: if lines_total > 0 {
-            lines_matched as f64 / lines_total as f64
-        } else {
-            0.0
-        },
-        median_signed_ms: 0,
-        within_400_frac: 0.0,
-        sung_words: sung.sung_words,
-        sung_covered_frac: sung.covered_frac,
-        max_uncovered_sung_ms: sung.max_uncovered_ms,
-    })
+    let text = TextVerdict::of(&untimed, words);
+    text.fails_coverage().then(|| text.stats(0, 0, 0.0))
 }
 
 /// Verify `lines` (forced-alignment output) against `words` (independent
-/// ASR). Verdict order: Coverage (`matched_frac < 0.60`, incl. zero
-/// lines) → Coverage of what is sung (#144: `sung_covered_frac < 0.55` or
-/// `max_uncovered_sung_ms > 25 000`) → Offset (`|median_signed_ms| > 400`)
-/// → Agreement (`within_400_frac < 0.70`) → Pass.
+/// ASR). Verdict order: Coverage (`TextVerdict::fails_coverage`: no line
+/// with a word, `matched_frac < 0.60`, or #144 the text does not cover what
+/// is sung — `sung_covered_frac < 0.55` or `max_uncovered_sung_ms >
+/// 25 000`) → Offset (`|median_signed_ms| > 400`) → Agreement
+/// (`within_400_frac < 0.70`) → Pass.
 pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
     // #144: one alignment for both halves.
-    let alignment = align(lines, words);
+    let text = TextVerdict::of(lines, words);
 
-    let mut lines_total = 0usize;
-    let mut lines_matched = 0usize;
     let mut deltas: Vec<i64> = Vec::new();
     let mut within_count = 0usize;
-
-    for (line, on) in lines.iter().zip(&alignment.lines) {
-        if on.words == 0 {
-            continue;
-        }
-        lines_total += 1;
+    for (line, on) in lines.iter().zip(&text.alignment.lines) {
         if !line_matched(on.aligned, on.words) {
             continue;
         }
-        lines_matched += 1;
         // A misheard first word: matched, but its start is a later word's.
         let Some(sung_start) = on.first_sung_start_ms.filter(|_| on.first_word_aligned) else {
             continue;
@@ -252,39 +280,15 @@ pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
         }
     }
     let lines_timed = deltas.len();
-
-    let matched_frac = if lines_total > 0 {
-        lines_matched as f64 / lines_total as f64
-    } else {
-        0.0
-    };
     let median_signed_ms = median_i64(&deltas);
     let within_400_frac = if lines_timed > 0 {
         within_count as f64 / lines_timed as f64
     } else {
         0.0
     };
+    let stats = text.stats(lines_timed, median_signed_ms, within_400_frac);
 
-    let sung = alignment.coverage;
-    let stats = GateStats {
-        lines_total,
-        lines_matched,
-        lines_timed,
-        matched_frac,
-        median_signed_ms,
-        within_400_frac,
-        sung_words: sung.sung_words,
-        sung_covered_frac: sung.covered_frac,
-        max_uncovered_sung_ms: sung.max_uncovered_ms,
-    };
-
-    if lines_total == 0 || matched_frac < MIN_MATCHED_FRAC {
-        return GateVerdict::Fail {
-            reason: GateFailReason::Coverage,
-            stats,
-        };
-    }
-    if !covers_what_is_sung(&sung) {
+    if text.fails_coverage() {
         return GateVerdict::Fail {
             reason: GateFailReason::Coverage,
             stats,

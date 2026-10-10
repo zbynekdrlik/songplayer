@@ -348,8 +348,11 @@ second jump the backtrack's `y` passes `-(2L+1)` and raises
 `IndexError: index -462 is out of bounds for axis 0 with size 461` (the row
 `opt[x]` has 2L+1 columns). SNV hit it on 5 songs whose texts held 9–23 % of
 the sung words (#144 F3). SongPlayer's reference stage no longer sends such a
-text: it fails the gate's sung share before mtl
-(`reference_gate::uncovered_before_timing`). The upstream code is used as is.
+text: the gate's Coverage verdict reads only the text, and `run.py` returns
+every line it is given with its text unchanged (a line upstream cannot time
+comes back untimed, never dropped), so the stage decides that verdict before
+mtl (`reference_gate::coverage_fail_before_timing`) and spends no mtl on a
+text that fails it. The upstream code is used as is.
 
 ## Word-to-line remapping — why it's safe
 
@@ -374,10 +377,10 @@ the words split at upstream's own separators only (`WORD_SEPARATORS`: the
 ASCII space and the `str.splitlines()` line boundaries it reads the file
 with); `eval/lyrics/tests/test_mtl_word_map.py` checks it against a verbatim
 port of upstream's function
-— proven equivalent to upstream's per-LINE-then-split approach because the
-filter only ever *removes* characters, so it can never merge two
-whitespace-separated words together and never invents a new internal
-space. `align_fixture()` then asserts, AT RUNTIME on every single fixture
+— equivalent to upstream's per-LINE-then-split approach because the filter
+only ever *removes* characters, so it never merges two words separated by a
+`WORD_SEPARATORS` character and never invents a new internal space (two
+words separated by any OTHER whitespace merge on both sides alike). `align_fixture()` then asserts, AT RUNTIME on every single fixture
 run, that our independently-derived word list is *byte-identical* to
 upstream's own `words` return value (`if words != filtered_words: raise
 RuntimeError(...)`) — this is not a one-time manual check, it is re-verified
