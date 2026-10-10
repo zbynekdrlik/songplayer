@@ -74,6 +74,10 @@ Before it, no post-deploy check sent a Gemini 3.5 Transcribe request: a dead or 
 - The HTTP helpers of `g35t_client.rs` stay `mutants::skip`, and so do the probe's ffmpeg shell-out `g35t_probe::cut_clip` (its arguments are the tested `clip_args`) and its route glue `api/lyrics_g35t.rs::probe` (Google's root; the route is tested through the real router). `transcribe_at`, `on_key`, `failure` and every other probe function are gated.
 - `e2e/post-deploy-g35t.spec.ts` first polls `GET /api/v1/status` until `tools.ffmpeg_available` (a read that throws counts as "not yet"), so it does not rely on earlier specs for ffmpeg readiness. The status answers while the startup follow-ups (the yt-dlp self-update, the sample-rate sweep) run: they start only after `tools_ready::publish_then` released the `tools_status` lock (`server-startup.md`).
 
+## The owner's „Nesedí" mark is readable (#144 F4)
+
+- `GET /api/v1/lyrics/songs` and `GET /api/v1/lyrics/songs/{id}` (`list_item`) carry `reference_rejected_at` (RFC 3339 UTC) and `reference_note` from `videos.lyrics_reference_rejected_at` / `lyrics_reference_note` (written only by the „Nesedí" button, `record_reference_feedback`), so a review counts the owner's marks without opening the DB. Both routes read a row through ONE reader, `api/lyrics.rs::list_item_from` with `SONG_COLUMNS`; a new list field goes there once.
+
 ## The title search (covers)
 
 - A cover's metadata names the COVER artist, so the artist+title lookups miss the original's text.

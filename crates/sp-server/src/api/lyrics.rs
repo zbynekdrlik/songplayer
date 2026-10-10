@@ -109,6 +109,55 @@ pub struct SongListItem {
     /// gender override: `None` = auto (masculine default), `"m"`, or `"f"`.
     /// The song row renders a ♂/♀ toggle bound to this value.
     pub translation_gender: Option<String>,
+    /// #144 F4: when the owner marked this song's ★ text „Nesedí"
+    /// (`lyrics_reference_rejected_at`, RFC 3339 UTC); `None` if never.
+    pub reference_rejected_at: Option<String>,
+    /// #144 F4: the owner's note with that mark (`lyrics_reference_note`).
+    pub reference_note: Option<String>,
+}
+
+/// The `videos` columns a [`SongListItem`] is read from.
+const SONG_COLUMNS: &str = "id, youtube_id, title, song, artist, lyrics_source, \
+     lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
+     suppress_resolume_en, lyrics_reference, lyrics_translation_gender, \
+     lyrics_reference_rejected_at, lyrics_reference_note";
+
+/// One `videos` row (read with [`SONG_COLUMNS`]) as the lyrics song list
+/// shows it — the list and the detail route share it.
+fn list_item_from(r: &sqlx::sqlite::SqliteRow) -> SongListItem {
+    use crate::lyrics::LYRICS_PIPELINE_VERSION;
+    let pv: i64 = r.get("lyrics_pipeline_version");
+    let hl: i64 = r.get("has_lyrics");
+    let mp: i64 = r.get("lyrics_manual_priority");
+    let sre: i64 = r.get("suppress_resolume_en");
+    let lref: i64 = r.get("lyrics_reference");
+    SongListItem {
+        video_id: r.get("id"),
+        youtube_id: r.get("youtube_id"),
+        title: r.try_get("title").ok(),
+        song: r.try_get("song").ok(),
+        artist: r.try_get("artist").ok(),
+        source: r.try_get("lyrics_source").ok(),
+        pipeline_version: pv,
+        quality_score: r.try_get("lyrics_quality_score").ok(),
+        has_lyrics: hl == 1,
+        is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
+        manual_priority: mp == 1,
+        suppress_resolume_en: sre != 0,
+        lyrics_reference: lref != 0,
+        translation_gender: r
+            .try_get::<Option<String>, _>("lyrics_translation_gender")
+            .ok()
+            .flatten(),
+        reference_rejected_at: r
+            .try_get::<Option<String>, _>("lyrics_reference_rejected_at")
+            .ok()
+            .flatten(),
+        reference_note: r
+            .try_get::<Option<String>, _>("lyrics_reference_note")
+            .ok()
+            .flatten(),
+    }
 }
 
 // HTTP handler: behavior covered by integration tests in Task 14 Playwright + is_stale/manual_priority cast logic verified via API shape tests.
@@ -117,13 +166,7 @@ pub async fn list_songs(
     State(state): State<AppState>,
     Query(q): Query<ListSongsQuery>,
 ) -> impl IntoResponse {
-    use crate::lyrics::LYRICS_PIPELINE_VERSION;
-    let mut sql = String::from(
-        "SELECT id, youtube_id, title, song, artist, lyrics_source, \
-         lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
-         suppress_resolume_en, lyrics_reference, lyrics_translation_gender \
-         FROM videos WHERE normalized = 1",
-    );
+    let mut sql = format!("SELECT {SONG_COLUMNS} FROM videos WHERE normalized = 1");
     if q.playlist_id.is_some() {
         sql.push_str(" AND playlist_id = ?");
     }
@@ -140,35 +183,7 @@ pub async fn list_songs(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    let items: Vec<SongListItem> = rows
-        .iter()
-        .map(|r| {
-            let pv: i64 = r.get("lyrics_pipeline_version");
-            let hl: i64 = r.get("has_lyrics");
-            let mp: i64 = r.get("lyrics_manual_priority");
-            let sre: i64 = r.get("suppress_resolume_en");
-            let lref: i64 = r.get("lyrics_reference");
-            SongListItem {
-                video_id: r.get("id"),
-                youtube_id: r.get("youtube_id"),
-                title: r.try_get("title").ok(),
-                song: r.try_get("song").ok(),
-                artist: r.try_get("artist").ok(),
-                source: r.try_get("lyrics_source").ok(),
-                pipeline_version: pv,
-                quality_score: r.try_get("lyrics_quality_score").ok(),
-                has_lyrics: hl == 1,
-                is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
-                manual_priority: mp == 1,
-                suppress_resolume_en: sre != 0,
-                lyrics_reference: lref != 0,
-                translation_gender: r
-                    .try_get::<Option<String>, _>("lyrics_translation_gender")
-                    .ok()
-                    .flatten(),
-            }
-        })
-        .collect();
+    let items: Vec<SongListItem> = rows.iter().map(list_item_from).collect();
     Json(items).into_response()
 }
 
@@ -185,16 +200,11 @@ pub async fn get_song_detail(
     State(state): State<AppState>,
     Path(video_id): Path<i64>,
 ) -> impl IntoResponse {
-    use crate::lyrics::LYRICS_PIPELINE_VERSION;
-    let row = match sqlx::query(
-        "SELECT id, youtube_id, title, song, artist, lyrics_source, \
-         lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
-         suppress_resolume_en, lyrics_reference, lyrics_translation_gender \
-         FROM videos WHERE id = ? AND normalized = 1",
-    )
-    .bind(video_id)
-    .fetch_optional(&state.pool)
-    .await
+    let sql = format!("SELECT {SONG_COLUMNS} FROM videos WHERE id = ? AND normalized = 1");
+    let row = match sqlx::query(&sql)
+        .bind(video_id)
+        .fetch_optional(&state.pool)
+        .await
     {
         Ok(Some(r)) => r,
         Ok(None) => return (StatusCode::NOT_FOUND, "video not found").into_response(),
@@ -203,31 +213,8 @@ pub async fn get_song_detail(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
     };
-    let pv: i64 = row.get("lyrics_pipeline_version");
-    let hl: i64 = row.get("has_lyrics");
-    let mp: i64 = row.get("lyrics_manual_priority");
-    let sre: i64 = row.get("suppress_resolume_en");
-    let lref: i64 = row.get("lyrics_reference");
-    let youtube_id: String = row.get("youtube_id");
-    let list_item = SongListItem {
-        video_id: row.get("id"),
-        youtube_id: youtube_id.clone(),
-        title: row.try_get("title").ok(),
-        song: row.try_get("song").ok(),
-        artist: row.try_get("artist").ok(),
-        source: row.try_get("lyrics_source").ok(),
-        pipeline_version: pv,
-        quality_score: row.try_get("lyrics_quality_score").ok(),
-        has_lyrics: hl == 1,
-        is_stale: hl == 1 && pv < LYRICS_PIPELINE_VERSION as i64,
-        manual_priority: mp == 1,
-        suppress_resolume_en: sre != 0,
-        lyrics_reference: lref != 0,
-        translation_gender: row
-            .try_get::<Option<String>, _>("lyrics_translation_gender")
-            .ok()
-            .flatten(),
-    };
+    let list_item = list_item_from(&row);
+    let youtube_id = list_item.youtube_id.clone();
     let lyrics_path = state.cache_dir.join(format!("{youtube_id}_lyrics.json"));
     let audit_path = state
         .cache_dir
