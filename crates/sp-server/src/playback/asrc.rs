@@ -2,9 +2,10 @@
 //!
 //! `Asrc`: ONE rubato `Async` band-limited sinc stage converts the 48 kHz
 //! program to the card's rate, fixed input of one 1600-frame program block.
-//! The stage itself is `sp_asrc::SincStage`: rubato is generic, so its code
-//! is compiled in the crate that names it, and that crate is compiled
-//! optimized even in tests (the ASIO tests push thousands of blocks).
+//! The stage itself is `sp_asrc::SincStage`: rubato's generic glue is
+//! compiled in the crate that names it (sp-asrc) and its dot kernels in
+//! rubato; the workspace optimizes both even in tests (the ASIO tests push
+//! thousands of blocks).
 //! Its filter is the lane's measured choice ([`asrc_params`], pinned by a
 //! test; rubato documents no "highest" setting):
 //! - 256 taps;

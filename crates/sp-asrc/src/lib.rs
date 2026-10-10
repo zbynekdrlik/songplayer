@@ -67,9 +67,18 @@ impl SincStage {
             .map_err(|e| e.to_string())
     }
 
-    /// Resamples `input` (`frames_in` interleaved frames) into `output`
-    /// (room for `max_out_frames` frames), returning the frames written.
+    /// Resamples `input` (exactly `frames_in` interleaved frames) into
+    /// `output` (room for `max_out_frames` frames), returning the frames
+    /// written. Any other input length is refused (rubato would read only
+    /// the start of a longer one).
     pub fn process(&mut self, input: &[f32], output: &mut [f32]) -> Result<usize, String> {
+        let samples = self.frames_in * self.channels;
+        if input.len() != samples {
+            return Err(format!(
+                "an input of {} samples, not {samples}",
+                input.len()
+            ));
+        }
         let frames_out = self.inner.output_frames_max();
         let input = InterleavedSlice::new(input, self.channels, self.frames_in)
             .map_err(|e| e.to_string())?;

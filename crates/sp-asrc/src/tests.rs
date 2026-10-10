@@ -50,14 +50,22 @@ fn a_tone_comes_out_at_the_output_rate() {
     s.process(&block(0), &mut out).unwrap();
     let n = s.process(&block(1), &mut out).unwrap();
     // Past the delay, both channels carry the tone, opposite in sign.
-    let peak = out[..n * 2]
-        .iter()
-        .step_by(2)
-        .fold(0f32, |m, v| m.max(v.abs()));
+    let left: Vec<f32> = out[..n * 2].iter().step_by(2).copied().collect();
+    let peak = left.iter().fold(0f32, |m, v| m.max(v.abs()));
     assert!((0.49..0.51).contains(&peak), "{peak}");
     for frame in out[..n * 2].chunks(2) {
         assert!((frame[0] + frame[1]).abs() < 1e-6, "{frame:?}");
     }
+    // At 96 kHz: 1 kHz crosses zero twice per 96 output frames.
+    let crossings = left
+        .windows(2)
+        .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
+        .count();
+    let expected = 2.0 * 1000.0 * n as f64 / 96_000.0;
+    assert!(
+        (crossings as f64 - expected).abs() <= 1.5,
+        "{crossings} vs {expected}"
+    );
 }
 
 #[test]
@@ -91,6 +99,12 @@ fn a_short_buffer_is_refused() {
     assert!(s.process(&[0.0; 3200], &mut short_out).is_err());
     let mut out = vec![0.0; s.max_out_frames() * 2];
     assert!(s.process(&[0.0; 100], &mut out).is_err());
+    // A longer one too: rubato would silently read only its start.
+    assert_eq!(
+        s.process(&[0.0; 3202], &mut out),
+        Err("an input of 3202 samples, not 3200".to_string())
+    );
+    assert_eq!(s.process(&[0.0; 3200], &mut out), Ok(3196));
 }
 
 #[test]
