@@ -47,7 +47,6 @@ impl LyricsWorker {
     /// NEVER degrades to the base tier — the next pick re-runs mtl to identical ★.
     pub(crate) async fn run_mtl_reference_stage(
         &self,
-        _video_id: i64,
         youtube_id: &str,
         best: Option<&crate::lyrics::tier1::CandidateText>,
         clean_vocal: Option<&Path>,

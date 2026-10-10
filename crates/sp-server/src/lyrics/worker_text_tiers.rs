@@ -263,7 +263,6 @@ impl LyricsWorker {
 
         let mtl_track = match self
             .run_mtl_reference_stage(
-                video_id,
                 youtube_id,
                 best_candidate.as_ref(),
                 clean_vocal,

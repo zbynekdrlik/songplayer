@@ -238,7 +238,6 @@ async fn run_mtl_reference_stage_skips_when_tooling_unavailable() {
     let cand = ref_candidate("description", 6);
     let result = worker
         .run_mtl_reference_stage(
-            1,
             "yt1",
             Some(&cand),
             Some(Path::new("/x.wav")),
@@ -266,14 +265,7 @@ async fn run_mtl_reference_stage_skips_when_no_vocals_wav() {
     );
     let cand = ref_candidate("description", 6);
     let result = worker
-        .run_mtl_reference_stage(
-            1,
-            "yt1",
-            Some(&cand),
-            None,
-            &one_word(),
-            &UnreachableBackend,
-        )
+        .run_mtl_reference_stage("yt1", Some(&cand), None, &one_word(), &UnreachableBackend)
         .await;
     assert!(result.unwrap().is_none());
     let _ = std::fs::remove_dir_all(&cache_dir);
@@ -295,7 +287,6 @@ async fn run_mtl_reference_stage_skips_when_no_candidate() {
     );
     let result = worker
         .run_mtl_reference_stage(
-            1,
             "yt1",
             None,
             Some(Path::new("/x.wav")),
@@ -324,7 +315,6 @@ async fn run_mtl_reference_stage_skips_when_candidate_too_short() {
     let cand = ref_candidate("description", 3); // below the 4-line floor
     let result = worker
         .run_mtl_reference_stage(
-            1,
             "yt1",
             Some(&cand),
             Some(Path::new("/x.wav")),
@@ -358,7 +348,6 @@ async fn run_mtl_reference_stage_skips_when_the_transcript_is_empty() {
     let cand = ref_candidate("description", 6);
     let result = worker
         .run_mtl_reference_stage(
-            1,
             "yt1",
             Some(&cand),
             Some(Path::new("/x.wav")),
@@ -511,7 +500,6 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_leaves_the_star_to_the_p
 
     let result = worker
         .run_mtl_reference_stage(
-            video_id,
             "yt_pass",
             Some(&cand),
             Some(Path::new("/x.wav")),
@@ -687,7 +675,6 @@ async fn run_mtl_reference_stage_fail_leaves_the_star_to_the_persist_and_writes_
 
     let result = worker
         .run_mtl_reference_stage(
-            video_id,
             "yt_fail",
             Some(&cand),
             Some(Path::new("/x.wav")),
@@ -736,11 +723,11 @@ async fn run_mtl_reference_stage_pass_writes_the_audit_with_the_sung_coverage() 
     .execute(&pool)
     .await
     .unwrap();
-    let video_id: i64 = sqlx::query_scalar(
+    sqlx::query(
         "INSERT INTO videos (playlist_id, youtube_id, title, song, artist, normalized) \
-         VALUES (1, 'yt_pass_audit', 'T', 'S', 'A', 1) RETURNING id",
+         VALUES (1, 'yt_pass_audit', 'T', 'S', 'A', 1)",
     )
-    .fetch_one(&pool)
+    .execute(&pool)
     .await
     .unwrap();
     let cache_dir = std::env::temp_dir().join("sp_reference_stage_pass_audit_test");
@@ -807,7 +794,6 @@ async fn run_mtl_reference_stage_pass_writes_the_audit_with_the_sung_coverage() 
 
     let result = worker
         .run_mtl_reference_stage(
-            video_id,
             "yt_pass_audit",
             Some(&cand),
             Some(Path::new("/x.wav")),
