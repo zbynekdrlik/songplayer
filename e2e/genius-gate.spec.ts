@@ -5,14 +5,14 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { GENIUS_ROWS, LyricsSongRow, ProbeReport, geniusGateFailures, geniusRows } from "./genius-gate";
+import { GENIUS_ROWS, LyricsSongRow, ProbeReport, geniusGateFailures, geniusHit, geniusRows } from "./genius-gate";
 
 function row(video_id: number, source: string | null): LyricsSongRow {
   return { video_id, youtube_id: `yt${video_id}`, song: `Song ${video_id}`, source };
 }
 
 /** A probe answer whose Genius line is `available` with `lines`, and `note`
- * (the live SNV answers of 10.10.2026). */
+ * (the notes the worker's fetch gives). */
 function report(video_id: number, available: boolean, lines: number, note: string): ProbeReport {
   return {
     video_id,
@@ -43,7 +43,7 @@ test.describe("Genius live gate (#232)", () => {
     expect(GENIUS_ROWS).toBe(6);
   });
 
-  test("one song Genius answers with lyrics passes, though another left Genius", () => {
+  test("one song Genius answers with lyrics passes, though another has no artist match", () => {
     const asked = [row(129, "genius"), row(174, "genius")];
     const reports = [
       report(174, false, 0, "no matching-artist song hit"),
@@ -52,25 +52,53 @@ test.describe("Genius live gate (#232)", () => {
     expect(geniusGateFailures(asked, reports)).toEqual([]);
   });
 
-  test("no song answered from Genius fails, naming each probe's note", () => {
+  test("no artist match on every song passes: each search answered, so the token works", () => {
+    const asked = [row(1, "genius"), row(2, "genius")];
+    const reports = [
+      report(1, false, 0, "no matching-artist song hit"),
+      report(2, false, 0, "no matching-artist song hit"),
+    ];
+    expect(geniusGateFailures(asked, reports)).toEqual([]);
+  });
+
+  test("a refused search fails, naming each error", () => {
     const asked = [row(129, "genius"), row(136, "genius")];
     const reports = [
-      report(129, false, 0, "error: HTTP 401 Unauthorized"),
-      report(136, false, 0, "error: HTTP 401 Unauthorized"),
+      report(129, false, 0, "error: Genius search answered 401 Unauthorized"),
+      report(136, false, 0, "error: Genius search answered 401 Unauthorized"),
     ];
     expect(geniusGateFailures(asked, reports)).toEqual([
-      'yt129 "Song 129": error: HTTP 401 Unauthorized',
-      'yt136 "Song 136": error: HTTP 401 Unauthorized',
+      'yt129 "Song 129": error: Genius search answered 401 Unauthorized',
+      'yt136 "Song 136": error: Genius search answered 401 Unauthorized',
     ]);
   });
 
-  test("an available line with no lines is no hit", () => {
-    expect(geniusGateFailures([row(1, "genius")], [report(1, true, 0, "hit (0 lines)")])).toHaveLength(1);
+  test("an error fails even next to a hit", () => {
+    const asked = [row(1, "genius"), row(2, "genius")];
+    const reports = [
+      report(1, false, 0, "error: Genius song page holds no lyric: https://genius.com/x-lyrics"),
+      report(2, true, 12, "hit (12 lines, strict artist match)"),
+    ];
+    expect(geniusGateFailures(asked, reports)).toEqual([
+      'yt1 "Song 1": error: Genius song page holds no lyric: https://genius.com/x-lyrics',
+    ]);
   });
 
-  test("a catalog with no Genius song fails: the gate checks nothing", () => {
+  test("a probe with no Genius line fails", () => {
+    const missing: ProbeReport = { ...report(3, false, 0, ""), probes: [] };
+    expect(geniusGateFailures([row(3, "genius")], [missing])).toEqual([
+      'yt3 "Song 3": no genius line in the probe',
+    ]);
+  });
+
+  test("a hit needs lines: an available line with none is no hit", () => {
+    expect(geniusHit(report(1, true, 0, "hit (0 lines)"))).toBe(false);
+    expect(geniusHit(report(1, true, 3, "hit (3 lines)"))).toBe(true);
+  });
+
+  test("a catalog with no genius-labelled song fails: the gate checks nothing", () => {
     expect(geniusGateFailures([], [])).toEqual([
-      "no catalog song's served lyrics came from Genius: nothing to ask",
+      "no catalog song's lyrics carry the genius label: nothing to ask",
     ]);
   });
 });

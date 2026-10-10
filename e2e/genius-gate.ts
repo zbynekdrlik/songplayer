@@ -9,12 +9,17 @@
  * unnoticed with CI green (the owner's rule, 29.9.2026: every external
  * provider gets a live post-deploy check).
  *
- * The gate takes up to [`GENIUS_ROWS`] catalog songs whose served lyrics
- * came from Genius (`source` `genius…`) and asks
+ * The gate takes up to [`GENIUS_ROWS`] catalog songs whose lyrics carry the
+ * `genius` label (`source` `genius…`) and asks
  * `POST /api/v1/lyrics/probe-sources` about each: the lyrics worker's own
- * Genius fetch with the box's token. It passes on the first song Genius
- * answers with lyrics; a song that has since left Genius is only skipped.
- * A dead token or an unreachable Genius fails every one of them.
+ * Genius fetch with the box's token. `gather` labels lyrics.ovh text
+ * `genius` too, so some of them were never served from Genius: a song with
+ * no artist-matched Genius hit is therefore no failure (the search answered,
+ * so the token works). The gate fails on an ERROR, which the worker's fetch
+ * reports for everything that keeps Genius from answering (#232 review): a
+ * refused search (a revoked token, a block, a limit), an unreadable answer,
+ * a refused song page, or a matched page with no lyric (a changed layout).
+ * A hit proves the whole path, so the asking stops at the first one.
  */
 
 /** How many Genius songs the gate asks at most: a song served from the
@@ -49,7 +54,7 @@ export interface ProbeReport {
   probes: ProviderProbe[];
 }
 
-/** The songs to ask: those whose served lyrics came from Genius, lowest
+/** The songs to ask: those whose lyrics carry the `genius` label, lowest
  * row first, at most [`GENIUS_ROWS`]. */
 export function geniusRows(songs: LyricsSongRow[]): LyricsSongRow[] {
   return songs
@@ -64,17 +69,17 @@ export function geniusHit(report: ProbeReport): boolean {
   return genius !== undefined && genius.available && genius.line_count > 0;
 }
 
-/** Why the gate fails (empty = it passes): no Genius song to ask, or no
- * asked song answered from Genius — each with its probe's note. */
+/** Why the gate fails (empty = it passes): no song to ask, or a probe
+ * whose Genius line is an error or missing — each with its note. */
 export function geniusGateFailures(asked: LyricsSongRow[], reports: ProbeReport[]): string[] {
   if (asked.length === 0) {
-    return ["no catalog song's served lyrics came from Genius: nothing to ask"];
+    return ["no catalog song's lyrics carry the genius label: nothing to ask"];
   }
-  if (reports.some(geniusHit)) {
-    return [];
-  }
-  return reports.map((r) => {
+  return reports.flatMap((r) => {
     const genius = r.probes.find((p) => p.provider === "genius");
-    return `${r.youtube_id} "${r.song}": ${genius ? genius.note : "no genius line in the probe"}`;
+    if (genius === undefined) {
+      return [`${r.youtube_id} "${r.song}": no genius line in the probe`];
+    }
+    return genius.note.startsWith("error:") ? [`${r.youtube_id} "${r.song}": ${genius.note}`] : [];
   });
 }

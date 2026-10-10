@@ -1405,7 +1405,10 @@ jobs:
           } else {
             Write-Host "Preserving existing gemini_api_key (set; the API shows it masked, #229)"
           }
-          # Seed the current metadata model (sp_core DEFAULT_GEMINI_MODEL).
+          # Seed the metadata model when none is stored. A literal, not read
+          # from sp_core DEFAULT_GEMINI_MODEL, and a stored value wins over
+          # the constant: a new default reaches SNV / PP (both store it) only
+          # through a settings PATCH (docs/ai-providers.md).
           if ([string]::IsNullOrEmpty($current.gemini_model)) {
             $seed.gemini_model = "gemini-3.1-pro-preview"
           }
