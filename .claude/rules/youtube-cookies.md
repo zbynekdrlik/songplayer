@@ -151,6 +151,15 @@ the box.
   `video_fps`): yt-dlp's `--print format::FORMAT_PRINT` (`after_move:`, a
   later stage, so it still downloads; it implies `--quiet`, the progress
   lines stay through `--progress`) prints a `SPFMT|…` line that
-  `parse_downloaded_format` reads (`NA` = unknown). NULL for songs fetched
-  before or from a peer. Box check 10.10.2026: `SPFMT|243|vp9|640|360|25`,
-  exit 0, the file in place.
+  `parse_downloaded_format` reads (`NA` = unknown, stored NULL). Every
+  recorded download writes them (`format::record`, all NULL when yt-dlp
+  printed no line), and a peer adoption sets them NULL (`peer::download::adopt`:
+  the files are the peer's, of an unknown format), so no row keeps the format
+  of files that were replaced. NULL for songs downloaded before V34. Box
+  check 10.10.2026: `SPFMT|243|vp9|640|360|25`, exit 0, the file in place.
+- The tiers lean on YouTube serving HLS (it did on 10.10.2026): a video with
+  a low AV1 / VP9 and its high rows only as H.264 DASH, and no HLS, lands at
+  the low AV1 / VP9 — deliberately, since that H.264 DASH may stop early in
+  MF (THE DEEP). `--force-overwrites` and the `--print` pair are pinned by
+  `mod_tests.rs::ytdlp_video_args_keeps_existing_fixed_flags` (the
+  downloader is out of the mutation gate).

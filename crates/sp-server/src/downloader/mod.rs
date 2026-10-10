@@ -350,10 +350,9 @@ impl DownloadWorker {
             return false;
         }
 
-        // #223 S9b: what was really fetched (a failed write is only logged).
-        if let Some(fetched) = &fetched
-            && let Err(e) = format::record(&self.pool, row.id, fetched).await
-        {
+        // #223 S9b: what was really fetched, NULL when yt-dlp printed no
+        // format line (a failed write is only logged).
+        if let Err(e) = format::record(&self.pool, row.id, fetched.as_ref()).await {
             tracing::warn!(video_id = %row.youtube_id, "download: recording the video format failed: {e}");
         }
 
@@ -427,7 +426,7 @@ impl DownloadWorker {
             Some(f) => tracing::info!(
                 video_id,
                 format_id = %f.format_id,
-                codec = %f.codec,
+                codec = ?f.codec,
                 width = ?f.width,
                 height = ?f.height,
                 fps = ?f.fps,

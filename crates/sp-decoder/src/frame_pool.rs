@@ -26,9 +26,11 @@
 //!
 //! #223 S9b (D8): a size class no frame took for [`IDLE_CLASS_EVICT`] is
 //! freed whole at the next recycle — the resolution of a song that no longer
-//! plays (a 4K class keeps 6 × 12.4 MB). A class in use is taken every frame,
-//! so it is never freed under the wall. Freed buffers are dropped after the
-//! lock is released, like a fresh allocation is made without it.
+//! plays (a 4K class keeps 6 × 12.4 MB). A class a source decodes into is
+//! taken every frame and stays; a source paused over a minute loses its
+//! class's spare buffers, and its first frames after the pause allocate
+//! afresh (a speed cost, never a wrong picture). Freed buffers are dropped
+//! after the lock is released, like a fresh allocation is made without it.
 
 use std::collections::BTreeMap;
 use std::ops::Deref;

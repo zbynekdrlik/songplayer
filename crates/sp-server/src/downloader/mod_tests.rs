@@ -87,12 +87,19 @@ fn ytdlp_video_args_keeps_existing_fixed_flags() {
 
     let args = ytdlp_video_args(format_spec, ffmpeg_dir, output, url, None);
 
-    for flag in ["-f", "--no-part", "--remux-video"] {
+    for flag in ["-f", "--no-part", "--remux-video", "--force-overwrites"] {
         assert!(
             args.iter().any(|a| a.to_str() == Some(flag)),
             "existing flag {flag} must still be present"
         );
     }
+    // #223 S9b: the fetched format is printed after the move, right after
+    // `--print` (the downloader is out of the mutation gate).
+    let print = args
+        .iter()
+        .position(|a| a.to_str() == Some("--print"))
+        .expect("--print present");
+    assert_eq!(args[print + 1].to_str(), Some(format::FORMAT_PRINT));
     // The JS-runtime flag moved OUT of the per-call arg builder into
     // `ytdlp_command` (#189) — and it must never be the old `node` value.
     assert!(

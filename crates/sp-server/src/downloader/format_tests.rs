@@ -98,7 +98,7 @@ fn the_fetched_format_is_read_from_the_marked_line() {
         parse_downloaded_format(stdout),
         Some(DownloadedFormat {
             format_id: "401".into(),
-            codec: "av01.0.12M.08".into(),
+            codec: Some("av01.0.12M.08".into()),
             width: Some(3840),
             height: Some(2160),
             fps: Some(25.0),
@@ -116,6 +116,12 @@ fn the_fetched_format_is_read_from_the_marked_line() {
 fn an_unknown_field_reads_none_and_no_line_reads_none() {
     let f = parse_downloaded_format("SPFMT|313|vp9|NA|NA|NA").unwrap();
     assert_eq!((f.width, f.height, f.fps), (None, None, None));
+    assert_eq!(f.codec.as_deref(), Some("vp9"));
+    let unknown_codec = parse_downloaded_format("SPFMT|313|NA|3840|2160|25").unwrap();
+    assert_eq!(
+        (unknown_codec.codec, unknown_codec.height),
+        (None, Some(2160))
+    );
     assert_eq!(
         parse_downloaded_format("SPFMT|NA|vp9|1|2|3"),
         None,
@@ -149,12 +155,12 @@ async fn the_format_is_recorded_on_every_row_of_the_video() {
     .unwrap();
     let format = DownloadedFormat {
         format_id: "400".into(),
-        codec: "av01.0.12M.08".into(),
+        codec: Some("av01.0.12M.08".into()),
         width: Some(2560),
         height: Some(1440),
         fps: Some(24.0),
     };
-    record(&pool, 10, &format).await.unwrap();
+    record(&pool, 10, Some(&format)).await.unwrap();
     let rows: Vec<(i64, Option<String>, Option<i64>)> =
         sqlx::query_as("SELECT id, video_format_id, video_height FROM videos ORDER BY id")
             .fetch_all(&pool)
@@ -166,6 +172,61 @@ async fn the_format_is_recorded_on_every_row_of_the_video() {
             (10, Some("400".to_string()), Some(1440)),
             (11, Some("400".to_string()), Some(1440)),
             (12, None, None),
+        ]
+    );
+}
+
+/// A row's id and four of its V34 columns.
+type FormatRow = (
+    i64,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<f64>,
+);
+
+/// No format known (no line, or a peer's copy): every column of the video
+/// goes NULL, so no row keeps the format of files that were replaced.
+#[tokio::test]
+async fn an_unknown_format_clears_every_column_of_the_video() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'a', 'u1'), (2, 'b', 'u2')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, video_format_id, video_codec, \
+         video_width, video_height, video_fps) VALUES \
+         (10, 1, 'PySFfTurafA', '400', 'av01', 2560, 1440, 24.0), \
+         (11, 2, 'PySFfTurafA', '400', 'av01', 2560, 1440, 24.0), \
+         (12, 1, 'otherotheri', '248', 'vp9', 1920, 1080, 25.0)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    record(&pool, 11, None).await.unwrap();
+    let rows: Vec<FormatRow> = sqlx::query_as(
+        "SELECT id, video_format_id, video_codec, video_height, video_fps \
+             FROM videos ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        [
+            (10, None, None, None, None),
+            (11, None, None, None, None),
+            (
+                12,
+                Some("248".into()),
+                Some("vp9".into()),
+                Some(1080),
+                Some(25.0)
+            ),
         ]
     );
 }
