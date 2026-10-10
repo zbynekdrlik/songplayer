@@ -19,12 +19,13 @@ fn main() {
     println!("cargo:rustc-env=SP_GIT_SHA={sha}");
     // Best-effort: re-run when HEAD moves so the embedded sha stays current.
     // Only while that file exists: a rerun-if-changed path that is missing
-    // (cargo-mutants' copy of the tree has no `.git`, nor does a worktree's
-    // gitdir file or a tarball) makes cargo re-run this script on EVERY
-    // build, and a re-run script rebuilds sp-server — each mutant's test
-    // phase recompiled it (~100 s of its 300 s bound, #228: CI run
-    // 38011003676 shard 27 timed out before its killing tests ran). Without
-    // the file the sha is "unknown" and stays so: watch this script alone.
+    // makes cargo re-run this script on EVERY build, and a re-run script
+    // rebuilds sp-server — each mutant's test phase recompiled it (~100 s of
+    // its 300 s bound, #228: CI run 38011003676 shard 27 timed out before
+    // its killing tests ran). It is missing in cargo-mutants' copy of the
+    // tree and in a tarball (the sha reads "unknown" there) and in a git
+    // worktree, whose `.git` is a file (the sha is then the one of the
+    // first build): watch this script alone. CI's checkout has the file.
     if std::path::Path::new("../../.git/HEAD").exists() {
         println!("cargo:rerun-if-changed=../../.git/HEAD");
     } else {

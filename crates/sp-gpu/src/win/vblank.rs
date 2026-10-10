@@ -32,19 +32,16 @@ const RETRY_AFTER_ERROR: Duration = Duration::from_secs(1);
 /// wait that keeps returning at once never spins a core.
 const AFTER_EARLY: Duration = Duration::from_millis(1);
 
-/// Waits in a row that did not wait before the thread logs it (#243): one
-/// alone is a call made just before a refresh; ten (~0.5 s with the
-/// backoff) is an output that does not present.
-const NOT_WAITING_LOG_STREAK: u32 = 10;
-
 /// What the thread last measured.
 #[derive(Default)]
 struct Published {
     grid: Option<VblankGrid>,
     /// When it last counted a refresh.
     seen: Option<Instant>,
-    /// When a `WaitForVBlank` last waited (#243: `VblankState`).
-    waited_at: Option<Instant>,
+    /// When it last counted a refresh as `Seen::Counted` (#243:
+    /// `VblankState`). Never a lone wait that happened to block: on a dark
+    /// output a preempted call would flip the state for 2 s.
+    counted_at: Option<Instant>,
 }
 
 struct Shared {
@@ -128,7 +125,7 @@ impl VblankTracker {
             .unwrap_or_else(|p| p.into_inner());
         let fresh =
             published.grid.is_some() && published.seen.is_some_and(|seen| grid_is_fresh(seen, now));
-        vblank_state(fresh, published.waited_at, self.started, now)
+        vblank_state(fresh, published.counted_at, self.started, now)
     }
 }
 
@@ -179,24 +176,16 @@ fn run(shared: &Shared, ready: &mpsc::Sender<Result<OutputInfo, GpuError>>) {
         let now = Instant::now();
         // #243: a dark output's waits return at once — never fed to the
         // fit, never a spin.
+        // The state's WARN / INFO come from sp-server's `vblank_log` (one per
+        // change, on counted refreshes only), never from here.
         if !waited(now.saturating_duration_since(before)) {
             not_waiting = not_waiting.saturating_add(1);
-            if not_waiting == NOT_WAITING_LOG_STREAK {
-                warn!(output = %label, "program max: WaitForVBlank returns without waiting (the output does not present)");
-            }
             std::thread::sleep(not_waiting_sleep(not_waiting));
             continue;
         }
-        if not_waiting >= NOT_WAITING_LOG_STREAK {
-            info!(output = %label, "program max: WaitForVBlank waits again");
-        }
         not_waiting = 0;
-        shared
-            .published
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .waited_at = Some(now);
-        if fit.observe(now) == Seen::Early {
+        let seen = fit.observe(now);
+        if seen == Seen::Early {
             std::thread::sleep(AFTER_EARLY);
             continue;
         }
@@ -212,6 +201,9 @@ fn run(shared: &Shared, ready: &mpsc::Sender<Result<OutputInfo, GpuError>>) {
         let mut published = shared.published.lock().unwrap_or_else(|p| p.into_inner());
         published.grid = grid;
         published.seen = Some(now);
+        if seen == Seen::Counted {
+            published.counted_at = Some(now);
+        }
     }
     info!(
         output = %label,

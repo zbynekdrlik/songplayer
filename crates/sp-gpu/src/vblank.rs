@@ -57,7 +57,7 @@ pub const VBLANK_MIN_WAIT: Duration = Duration::from_millis(1);
 /// The longest sleep after a wait that did not wait ([`not_waiting_sleep`]).
 pub const VBLANK_IDLE_MAX: Duration = Duration::from_millis(250);
 
-/// No wait blocked for this long: the output does not tick
+/// No refresh counted for this long: the output does not tick
 /// ([`vblank_state`]).
 pub const VBLANK_NOT_TICKING: Duration = Duration::from_secs(2);
 
@@ -85,14 +85,15 @@ pub fn not_waiting_sleep(streak: u32) -> Duration {
 /// The paced output's state (#243): `GET /api/v1/program` `max.vblank_state`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VblankState {
-    /// No grid yet, but a wait blocked within [`VBLANK_NOT_TICKING`] (or the
-    /// tracker started within it): the fit is booting.
+    /// No fresh grid, but a refresh was counted within
+    /// [`VBLANK_NOT_TICKING`] (or the tracker started within it): the fit
+    /// is booting, or its last refresh is a moment old.
     Measuring,
     /// A fresh grid: the sends go on the output's refresh.
     Ticking,
-    /// No wait blocked for [`VBLANK_NOT_TICKING`]: the output does not
-    /// present (dark, off), or its waits fail. The sends go at the constant
-    /// lead.
+    /// No refresh counted for [`VBLANK_NOT_TICKING`]: the output does not
+    /// present (dark, off: its waits return at once), its waits fail, or
+    /// its period is no display's. The sends go at the constant lead.
     NotTicking,
 }
 
@@ -108,18 +109,18 @@ impl VblankState {
 }
 
 /// The state at `now`: [`VblankState::Ticking`] with a fresh grid, else
-/// measuring until [`VBLANK_NOT_TICKING`] after the last wait that blocked
-/// (`waited_at`; before any, the tracker's start), then not ticking.
+/// measuring until [`VBLANK_NOT_TICKING`] after the last counted refresh
+/// (`counted_at`; before any, the tracker's start), then not ticking.
 pub fn vblank_state(
     grid_fresh: bool,
-    waited_at: Option<Instant>,
+    counted_at: Option<Instant>,
     started: Instant,
     now: Instant,
 ) -> VblankState {
     if grid_fresh {
         return VblankState::Ticking;
     }
-    let since = waited_at.unwrap_or(started);
+    let since = counted_at.unwrap_or(started);
     if now.saturating_duration_since(since) > VBLANK_NOT_TICKING {
         VblankState::NotTicking
     } else {

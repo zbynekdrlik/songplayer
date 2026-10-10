@@ -538,13 +538,15 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   `win/vblank.rs` times each wait: under `VBLANK_MIN_WAIT` (1 ms,
   `vblank::waited`) it did not wait — never fed to the fit — and the
   thread sleeps `not_waiting_sleep(streak)` (1 ms doubling to
-  `VBLANK_IDLE_MAX` 250 ms, never none), logging one WARN at the 10th in a
-  row and one INFO when a wait waits again. A refresh over
-  `VBLANK_RESTART` (1 s) after the last counted one boots the fit afresh
-  (the index is never carried across a long gap). The tracker's
-  `state(now)` = `vblank_state`: `ticking` with a fresh grid, else
-  `measuring` until `VBLANK_NOT_TICKING` (2 s) after the last wait that
-  waited (or the start), then `not_ticking`; the worker records it per
+  `VBLANK_IDLE_MAX` 250 ms, never none; the thread logs nothing for it). A
+  refresh over `VBLANK_RESTART` (1 s) after the last counted one boots the
+  fit afresh (the index is never carried across a long gap). The
+  tracker's `state(now)` = `vblank_state`: `ticking` with a fresh grid,
+  else `measuring` until `VBLANK_NOT_TICKING` (2 s) after the last
+  refresh the fit COUNTED (`Seen::Counted`, or the start), then
+  `not_ticking` — never reset by a lone wait that blocked (on a dark
+  panel a preempted call would flip the state and its logs for 2 s,
+  review); the worker records it per
   boundary (`MaxOut::record_vblank_state`) and logs only entering /
   leaving `not_ticking` (`program_max_vblank::vblank_log`, one WARN / one
   INFO). The fallback stays the constant lead: pacing on another output
