@@ -93,6 +93,7 @@ pub async fn prepare(
     for key in keys {
         let value = crate::playback::audio_out_config::checked(key, &sent[key])?;
         let value = crate::paid_ai::checked(key, &value)?;
+        let value = crate::downloader::format::checked(key, &value)?;
         let value = crate::peer::config::checked(pool, key, &value, &sent).await?;
         writes.push((key.clone(), value));
     }

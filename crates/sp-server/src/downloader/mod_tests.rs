@@ -32,40 +32,6 @@ fn apply_utf8_env_sets_pythonutf8_and_ioencoding() {
     );
 }
 
-#[test]
-fn format_spec_orders_av1_then_hls_then_dash() {
-    let spec = format_spec();
-    // AV1 first — highest quality per byte, MF hardware-transform safe.
-    let av1_pos = spec.find("vcodec^=av01").expect("AV1 alternative present");
-    // HLS H.264 second — different encoder path from DASH, MF-compatible
-    // for the THE-DEEP class of broken 1080p DASH encodes.
-    let hls_pos = spec
-        .find("protocol*=m3u8")
-        .expect("HLS alternative present");
-    // Unconstrained `bv*` last — plain bestvideo fallback.
-    let fallback_pos = spec.rfind("bv*").expect("final fallback present");
-    assert!(
-        av1_pos < hls_pos,
-        "AV1 must precede HLS in the fallback chain"
-    );
-    assert!(
-        hls_pos < fallback_pos,
-        "HLS must precede the unconstrained fallback"
-    );
-}
-
-#[test]
-fn format_spec_applies_max_resolution() {
-    let spec = format_spec();
-    let needle = format!("height<={MAX_RESOLUTION}");
-    // Every alternative must cap at MAX_RESOLUTION so we never pull 4K.
-    assert_eq!(
-        spec.matches(&needle).count(),
-        3,
-        "each of the 3 alternatives must carry the height cap; spec: {spec}"
-    );
-}
-
 /// RED (#141): yt-dlp answers every anonymous download with "Sign in
 /// to confirm you're not a bot". A verified Netscape cookie file on
 /// disk must be threaded through as `--cookies <path>`, right before

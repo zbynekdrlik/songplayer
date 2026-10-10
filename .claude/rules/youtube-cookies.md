@@ -119,3 +119,26 @@ maps to the main monitor's click space with factor **5.766** (3840 logical px �
 666 image px), NOT 4.8 — the virtual desktop is wider than the image suggests.
 Zoom the page (`ctrl+=` ×6) before clicking small buttons; there is no OCR on
 the box.
+
+## The video format selector and its cap (#223 S9a, `downloader/format.rs`)
+
+- yt-dlp's `/` takes the FIRST alternative that matches ANY format; it never
+  weighs one alternative against the next. A codec-first chain therefore
+  downgrades resolution: D8's `[https][vcodec!^=avc1]` first picked THE DEEP
+  (`xrhVLX6vwPk`) at 360p, its only VP9, over H.264 1080p via HLS. The
+  selector walks resolution TIERS (2160 → 1440 → 1080 → 720, those ≤ the
+  cap), and within a tier tries AV1/VP9 over HTTPS (DASH; default sort =
+  resolution, then av01 > vp9) before H.264 over HLS. H.264 is only ever
+  asked over HLS (THE DEEP's 1080p H.264 DASH encode returns EOS in MF's
+  hardware transform). SDR wherever it can (the reader is NV12 8-bit).
+- The cap is the `max_resolution` setting, read at EVERY download (one INFO
+  names it): 480..=2160, unset/unreadable = `DEFAULT_MAX_RESOLUTION` (1440,
+  until #223 S10 passes the 4K gate). A settings PATCH refuses anything but
+  480..=2160 or "" (`format::checked`).
+- Check a selector change through the box's own yt-dlp and cookies before
+  the push: `yt-dlp --cookies C:\ProgramData\SongPlayer\cookies.txt
+  --simulate -f "<spec>" --print "%(format_id)s %(vcodec)s
+  %(width)sx%(height)s %(protocol)s" <url>` on `4JzLgdRJLYA` (VP9 only above
+  1080), `PySFfTurafA` (AV1 to 2160) and `xrhVLX6vwPk` (THE DEEP).
+- `--force-overwrites` + the song's temps removed before the spawn: a
+  crashed run's `{yt}_video_temp.mp4` never stays next to the song.

@@ -9,6 +9,7 @@
 //! cache directory.
 
 pub mod cache;
+pub mod format;
 pub mod normalize;
 pub mod tools;
 pub mod ytdlp_cmd;
@@ -48,30 +49,6 @@ pub fn apply_utf8_env(cmd: &mut tokio::process::Command) {
     cmd.env("PYTHONIOENCODING", "utf-8");
 }
 
-/// Maximum video resolution height for downloads.
-const MAX_RESOLUTION: u32 = 1440;
-
-/// yt-dlp format selector. Uses `/` fallback chain so yt-dlp walks each
-/// option in order and picks the first one YouTube actually serves.
-///
-/// Order:
-/// 1. AV1 MP4 (highest quality per byte, decoded fine by MF's AV1 transform).
-/// 2. H.264 via HLS (`protocol*=m3u8`). Different encoder/muxer path than
-///    DASH. Some H.264 1080p DASH variants (observed on `xrhVLX6vwPk` THE
-///    DEEP on 2026-04-23) generate an SPS that Windows Media Foundation's
-///    hardware transform rejects — every `ReadSample` returns EOS on the
-///    first call, producing `frame_count=0`. The HLS 1080p MP4 for the same
-///    video is a distinct encode that MF decodes cleanly.
-/// 3. Plain `bestvideo` as last-resort.
-fn format_spec() -> String {
-    format!(
-        "bv*[height<={max}][vcodec^=av01]/\
-         bv*[height<={max}][protocol*=m3u8][vcodec^=avc1]/\
-         bv*[height<={max}]",
-        max = MAX_RESOLUTION
-    )
-}
-
 /// Download timeout in seconds.
 const DOWNLOAD_TIMEOUT: u64 = 600;
 
@@ -101,6 +78,9 @@ pub(crate) fn ytdlp_video_args(
         "--remux-video".into(),
         "mp4".into(),
         "--no-part".into(),
+        // #223 S9a: a leftover temp of a crashed run is overwritten, never
+        // taken for the download.
+        "--force-overwrites".into(),
         "-o".into(),
         output.into(),
     ];
@@ -280,6 +260,8 @@ impl DownloadWorker {
         let audio_temp_base = self
             .cache_dir
             .join(format!("{}_audio_temp", row.youtube_id));
+        // #223 S9a: a crashed run's temps never stay next to the song.
+        cleanup_temps(&video_temp, &self.cache_dir, &row.youtube_id);
 
         if let Err(e) = self
             .download_video_stream(&row.youtube_id, &video_temp)
@@ -386,7 +368,16 @@ impl DownloadWorker {
         output: &Path,
     ) -> Result<(), anyhow::Error> {
         let url = format!("https://www.youtube.com/watch?v={video_id}");
-        let format_spec = format_spec();
+        // #223 S9a: the cap is read live at every download.
+        let cap = format::max_resolution(
+            crate::db::models::get_setting(&self.pool, sp_core::config::SETTING_MAX_RESOLUTION)
+                .await
+                .ok()
+                .flatten()
+                .as_deref(),
+        );
+        tracing::info!(video_id, cap, "download: video stream at most {cap} rows");
+        let format_spec = format::format_spec(cap);
         let ffmpeg_dir = self
             .tools
             .ffmpeg
