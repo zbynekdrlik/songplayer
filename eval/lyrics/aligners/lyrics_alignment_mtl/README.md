@@ -341,7 +341,9 @@ word_file=None)` — that's the entire input-shaping step.
 ## Word-to-line remapping — why it's safe
 
 `wrapper.preprocess_lyrics()` internally **lowercases and filters** every
-line to the character set `{a-z, ', space}` before deriving its word list
+line to the character set `{a-z, ', ~, ASCII space}` (#144 F3: the `~` was
+missed here, and every OTHER whitespace — a non-breaking or thin space, a tab
+— is filtered OUT, so the words around it merge) before deriving its word list
 (`words_lines`) — any digit, punctuation mark other than apostrophe, or
 non-ASCII letter is stripped outright (not replaced by a space). When no
 `word_file` is given, the returned `words` list is simply
@@ -354,7 +356,11 @@ lines it belongs to and (b) which of our original words (with real
 capitalization/punctuation preserved) it corresponds to.
 
 `run.py::build_line_word_map()` does this by **independently replicating**
-the exact same per-character filter, applied per-WORD instead of per-line
+the exact same per-character filter, applied per-WORD instead of per-line —
+the words split at upstream's own separators only (`WORD_SEPARATORS`: the
+ASCII space and the `str.splitlines()` line boundaries it reads the file
+with); `eval/lyrics/tests/test_mtl_word_map.py` checks it against a verbatim
+port of upstream's function
 — proven equivalent to upstream's per-LINE-then-split approach because the
 filter only ever *removes* characters, so it can never merge two
 whitespace-separated words together and never invents a new internal

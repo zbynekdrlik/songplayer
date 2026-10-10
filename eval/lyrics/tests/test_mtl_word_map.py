@@ -76,3 +76,17 @@ def test_a_non_ascii_space_merges_the_words_around_it_as_upstream_does() -> None
     assert words == ["i", "believein", "it"]
     assert origin == [(0, "I"), (0, "believe in"), (0, "it")]
     assert counts == [3]
+
+
+def test_a_line_break_inside_a_line_splits_its_words_as_upstream_does() -> None:
+    """Upstream reads the lyric file with ``str.splitlines()``, so a line
+    separator INSIDE a text (``\\u2028``, a vertical tab) ends a line there:
+    the words around it stay two words."""
+    run = _load_run_py()
+    lines = ["foo bar baz", "one\x0btwo", "x\x85y"]
+    words, origin, counts = run.build_line_word_map(lines)
+    assert (
+        words == upstream_words(lines) == ["foo", "bar", "baz", "one", "two", "x", "y"]
+    )
+    assert counts == [3, 2, 2]
+    assert origin[0] == (0, "foo")
