@@ -182,6 +182,16 @@ real time AND by its timer `late` after each deadline, swept over ≥ 3 phases
 (0 / 2 / 15.6 ms, `preview_video_clock_tests.rs::one_second_late`), and assert
 the output does not depend on `late`.
 
+## A field type change on the TIER-0 box: rewrite EVERY value form (#144, 10.10.2026)
+
+Changing a struct field's type (`u64` → `Option<u64>`) means rewriting every
+literal site of the struct with no compiler to list them. A script that
+wraps only number literals (`start_ms: 1000` → `Some(1000)`) misses a
+computed value (`start_ms: 1_000 + i as u64 * 2_000`): CI 38046486771 broke
+on exactly that. After the rewrite, list each `Type {` block's field values
+that are NOT in the new form (a scan over every file that names the type,
+non-literals included) and fix each one before the push.
+
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
 compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
