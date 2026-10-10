@@ -65,10 +65,12 @@ export function playlistNames(rows: PlaylistRow[]): Set<string> {
  * playlist is not refused (`GET /api/v1/program` → `cut_refused`), not the
  * Dabing one, and has a playable video (`playable`: playlist id → its
  * normalized videos; missing = none). Among those, the SNV suites' baseline
- * discipline (`pickBaselineScene`): `sp-slow`, else any `sp-*` but `sp-fast`
- * and `sp-warmup`, else a catalog scene that is not `sp-*`, else the first
- * (so `sp-fast` or `sp-warmup` when they are all that is left: a playlist is
- * still tested). `null` when there is none.
+ * discipline (`pickBaselineScene`): `sp-slow`, else any `sp-*` but `sp-fast`,
+ * `sp-warmup` and `sp-90s` (#230: a cut to it holds the node's background
+ * jobs for 4 h), else a catalog scene that is not `sp-*`, else the first that
+ * is not `sp-90s` (so `sp-fast` or `sp-warmup` when they are all that is
+ * left: a playlist is still tested; `sp-90s` only when it is the one there
+ * is). `null` when there is none.
  */
 export function pickPlaylistScene(
   rows: PlaylistRow[],

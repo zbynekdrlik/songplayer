@@ -36,5 +36,6 @@ export function pickBaselineScene(scenes: string[]): string {
   // scene (#221 lane 3): it shows SP-program, i.e. the program itself.
   const nonSp = scenes.find((s) => !s.startsWith("sp-") && s !== AV_PROBE_SCENE);
   if (nonSp) return nonSp;
-  return scenes[0];
+  // #230: even then, sp-90s only when it is the one scene there is.
+  return scenes.find((s) => s !== "sp-90s") ?? scenes[0];
 }

@@ -12,6 +12,7 @@ use tokio::sync::broadcast;
 use super::*;
 use crate::playback::program_bus::ProgramBus;
 use crate::playback::wallclock::utc_now_100ns;
+use crate::test_log::{Captured, capturing};
 
 /// The tests that read or clear the process-wide held-job set (the
 /// watcher's arm / release clear it) run one at a time. Other modules' gate tests may add jobs meanwhile, so these tests
@@ -93,6 +94,7 @@ fn every_job_has_its_stable_name() {
 #[tokio::test]
 async fn nothing_is_held_with_no_end_a_past_end_or_a_mangled_one() {
     let _g = SERIAL.lock().await;
+    held_jobs().clear();
     let pool = pool().await;
     assert!(!held(&pool).await);
     assert!(!holds(&pool, Job::YtdlpUpdate).await);
@@ -114,6 +116,7 @@ async fn nothing_is_held_with_no_end_a_past_end_or_a_mangled_one() {
 #[tokio::test]
 async fn a_future_end_holds_and_the_held_job_shows_on_the_status() {
     let _g = SERIAL.lock().await;
+    held_jobs().clear();
     let pool = pool().await;
     let until = now_ms() + 60_000;
     store(&pool, until).await;
@@ -147,6 +150,7 @@ async fn a_future_end_holds_and_the_held_job_shows_on_the_status() {
 #[tokio::test]
 async fn arming_stores_the_end_and_forgets_the_held_jobs() {
     let _g = SERIAL.lock().await;
+    held_jobs().clear();
     let pool = pool().await;
     held_jobs().insert(Job::YtdlpUpdate);
     let until = arm(&pool, 1_000, Duration::from_secs(HOLD_FOR_S)).await;
@@ -158,10 +162,11 @@ async fn arming_stores_the_end_and_forgets_the_held_jobs() {
 #[tokio::test]
 async fn releasing_deletes_the_end_and_forgets_the_held_jobs() {
     let _g = SERIAL.lock().await;
+    held_jobs().clear();
     let pool = pool().await;
     store(&pool, now_ms() + 60_000).await;
     assert!(holds(&pool, Job::YtdlpUpdate).await);
-    release(&pool, "test").await;
+    release(&pool, "test", false).await;
     assert_eq!(stored(&pool).await, None);
     assert!(!held(&pool).await);
     assert!(!noted(Job::YtdlpUpdate));
@@ -189,6 +194,7 @@ fn watcher(
 #[tokio::test]
 async fn the_watcher_arms_on_sp_90s_re_arms_and_releases_on_sp_slow() {
     let _g = SERIAL.lock().await;
+    held_jobs().clear();
     let pool = pool().await;
     let bus = Arc::new(ProgramBus::new());
     bus.select_initial(5, Some("sp-90s"));
@@ -235,10 +241,15 @@ async fn the_watcher_arms_on_sp_90s_re_arms_and_releases_on_sp_slow() {
         .unwrap();
 }
 
-/// With no release, the hold ends at its end instant: the end is deleted.
+/// With no release, the hold ends at its end instant: the end is deleted,
+/// and the end is logged at INFO (a read at the end no longer counts it as
+/// held, so the timed release says so itself).
 #[tokio::test]
 async fn the_hold_ends_by_itself_when_its_time_passes() {
     let _g = SERIAL.lock().await;
+    held_jobs().clear();
+    let cap = Captured::default();
+    let _log = tracing::subscriber::set_default(capturing(&cap));
     let pool = pool().await;
     let bus = Arc::new(ProgramBus::new());
     let (_shutdown, _task) = watcher(&pool, &bus, Duration::from_millis(2_000));
@@ -247,6 +258,12 @@ async fn the_hold_ends_by_itself_when_its_time_passes() {
     assert!(held(&pool).await);
     wait_for(&pool, "the end of the hold", |u| u.is_none()).await;
     assert!(!held(&pool).await);
+    let off = cap.lines_with("background hold: off");
+    assert!(
+        off.iter()
+            .any(|l| l.contains("INFO") && l.contains("hold time passed")),
+        "{off:?}"
+    );
 }
 
 /// An end already stored when the watcher starts (a restart during the
@@ -254,6 +271,7 @@ async fn the_hold_ends_by_itself_when_its_time_passes() {
 #[tokio::test]
 async fn a_stored_end_from_before_a_restart_still_ends_the_hold() {
     let _g = SERIAL.lock().await;
+    held_jobs().clear();
     let pool = pool().await;
     store(&pool, now_ms() + 2_000).await;
     let bus = Arc::new(ProgramBus::new());
@@ -266,6 +284,7 @@ async fn a_stored_end_from_before_a_restart_still_ends_the_hold() {
 #[tokio::test]
 async fn sp_slow_with_nothing_held_changes_nothing() {
     let _g = SERIAL.lock().await;
+    held_jobs().clear();
     let pool = pool().await;
     let bus = Arc::new(ProgramBus::new());
     let (_shutdown, task) = watcher(&pool, &bus, Duration::from_secs(HOLD_FOR_S));

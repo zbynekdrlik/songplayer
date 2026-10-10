@@ -201,6 +201,8 @@ test.describe("baseline scene picker (CLAUDE.md OBS discipline)", () => {
   test("never picks sp-90s, the background-hold scene", () => {
     expect(pickBaselineScene(["sp-90s", "sp-fast", "sp-worship"])).toBe("sp-worship");
     expect(pickBaselineScene(["sp-90s", "sp-warmup", "QR test"])).toBe("QR test");
+    expect(pickBaselineScene(["sp-90s", "sp-fast", "sp-warmup"])).toBe("sp-fast");
+    expect(pickBaselineScene(["sp-90s"])).toBe("sp-90s");
   });
 
   test("falls back to a non-sp scene only when no other sp-* exists", () => {

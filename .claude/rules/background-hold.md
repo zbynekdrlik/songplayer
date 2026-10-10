@@ -57,6 +57,21 @@ already runs finishes ("blokne ďalšie spracovanie").
   every other module's gate test arms its own pool with
   `background_hold::hold_for_a_minute` and releases with `end_hold`, and
   shows the tick starts nothing held, then runs after the release.
-- **No gate ever parks on `sp-90s`:** `e2e/obs-baseline-scene.ts`
-  `DISALLOWED_BASELINE_SCENES` lists it (the SNV / PP post-deploy pickers
-  share it), so a deploy never holds a node's processing for 4 h.
+- **The exchange shows why it pauses:** `Exchange::pause_reason` = the
+  operator's `peer_transfers_paused` ("operator") or the hold
+  ("background-hold"); the peer API's 503 names it in `x-sp-paused`, the
+  exchange status keeps `transfers_paused` = the operator's own pause and
+  adds `background_hold`. PP's peer gate therefore FAILS while SNV is held
+  (no transfer is possible), with "paused there (HTTP 503)" — a held peer
+  is a real "cannot transfer now", never skipped.
+- **The gates keep off `sp-90s`:** `e2e/obs-baseline-scene.ts` disallows it
+  as a baseline and its last resort takes any other scene first; PP's
+  `pickPlaylistScene` shares it, so `sp-90s` is pressed only when it is the
+  one playable scene. A suite's afterAll that restores the start scene
+  re-presses `sp-90s` only if it was on program at the start (and the
+  `sp-slow` baseline released a running hold in between).
+- **Known limit:** the on-air watch keeps only the newest value; two cuts
+  inside one watcher wake (`sp-90s`, then another within a DB round trip)
+  count as the last one only.
+- **The timed end logs INFO** itself (`release(.., timed: true)`): a read
+  at the end instant no longer counts the hold as held.

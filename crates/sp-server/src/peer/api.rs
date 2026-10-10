@@ -40,6 +40,8 @@ use crate::downloader::cache::is_valid_video_id;
 pub const PEER_KEY_HEADER: &str = "x-sp-peer-key";
 /// How long a paused node asks a peer to wait, in seconds.
 const PAUSED_RETRY_AFTER: &str = "600";
+/// #230: why a 503 pauses (`super::PAUSED_BY_OPERATOR` / `PAUSED_BY_HOLD`).
+pub const PAUSED_WHY_HEADER: &str = "x-sp-paused";
 
 pub fn router(ex: Arc<Exchange>) -> Router {
     Router::new()
@@ -81,11 +83,14 @@ async fn guard(State(ex): State<Arc<Exchange>>, req: Request, next: Next) -> Res
         warn!(path = %req.uri().path(), "peer API: refused a request without this node's key");
         return no_store(StatusCode::UNAUTHORIZED.into_response());
     }
-    if ex.transfers_paused().await {
-        info!(path = %req.uri().path(), "peer API: transfers are paused - answering 503");
+    if let Some(why) = ex.pause_reason().await {
+        info!(path = %req.uri().path(), why, "peer API: transfers are paused - answering 503");
         let paused = (
             StatusCode::SERVICE_UNAVAILABLE,
-            [(RETRY_AFTER, PAUSED_RETRY_AFTER)],
+            [
+                (RETRY_AFTER.as_str(), PAUSED_RETRY_AFTER),
+                (PAUSED_WHY_HEADER, why),
+            ],
         );
         return no_store(paused.into_response());
     }

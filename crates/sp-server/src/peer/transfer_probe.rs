@@ -114,8 +114,8 @@ impl Exchange {
         tmp_parent: &Path,
         probe: &mut TransferProbe,
     ) -> Result<(), String> {
-        if self.transfers_paused().await {
-            return Err("transfers are paused on this node (peer_transfers_paused)".into());
+        if let Some(why) = self.pause_reason().await {
+            return Err(format!("transfers are paused on this node ({why})"));
         }
         let catalog = self
             .client

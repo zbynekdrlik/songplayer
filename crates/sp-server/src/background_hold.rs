@@ -151,8 +151,10 @@ async fn arm(pool: &SqlitePool, now: i64, hold_for: Duration) -> Option<i64> {
 }
 
 /// End the hold (`why` for the log): the end deleted, the held jobs
-/// forgotten. INFO when it was holding, DEBUG for a stale end.
-async fn release(pool: &SqlitePool, why: &str) {
+/// forgotten. INFO when it was holding or `timed` (its end instant came: a
+/// read at or after the end no longer counts it as held), DEBUG for a
+/// stale end.
+async fn release(pool: &SqlitePool, why: &str, timed: bool) {
     let was_held = held(pool).await;
     let deleted = sqlx::query("DELETE FROM settings WHERE key = ?")
         .bind(SETTING_BACKGROUND_HOLD_UNTIL)
@@ -163,7 +165,7 @@ async fn release(pool: &SqlitePool, why: &str) {
         return;
     }
     held_jobs().clear();
-    if was_held {
+    if was_held || timed {
         info!(why, "background hold: off - background jobs start again");
     } else {
         debug!(why, "background hold: a stale end deleted");
@@ -208,14 +210,14 @@ pub(crate) async fn run(
                     }
                     Press::Release => {
                         if stored_until(&pool).await.is_some() {
-                            release(&pool, "release scene on program").await;
+                            release(&pool, "release scene on program", false).await;
                         }
                     }
                     Press::Other => {}
                 }
             }
             _ = tokio::time::sleep(left.unwrap_or_default()), if left.is_some() => {
-                release(&pool, "hold time passed").await;
+                release(&pool, "hold time passed", true).await;
             }
         }
     }
@@ -230,10 +232,16 @@ pub(crate) async fn hold_for_a_minute(pool: &SqlitePool) {
         .unwrap();
 }
 
-/// Tests: end `pool`'s hold as `sp-slow` would.
+/// Tests: end `pool`'s hold (the stored end deleted; the process-wide
+/// held-job set is left alone, so a parallel test reading it is not
+/// disturbed).
 #[cfg(test)]
 pub(crate) async fn end_hold(pool: &SqlitePool) {
-    release(pool, "test").await;
+    sqlx::query("DELETE FROM settings WHERE key = ?")
+        .bind(SETTING_BACKGROUND_HOLD_UNTIL)
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 #[cfg(test)]
