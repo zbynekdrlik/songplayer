@@ -163,3 +163,25 @@ the box.
   MF (THE DEEP). `--force-overwrites` and the `--print` pair are pinned by
   `mod_tests.rs::ytdlp_video_args_keeps_existing_fixed_flags` (the
   downloader is out of the mutation gate).
+
+## The live YouTube gate (#232, `downloader/probe.rs`)
+
+- `POST /api/v1/youtube/probe` (`api/youtube_probe.rs`) runs the box's
+  yt-dlp on ONE fixed video (`probe::PROBE_VIDEO` = `gq-4FVRr_ow`, the
+  metadata gate's, 1080p) exactly as a download: `ytdlp_command`, the
+  production `format_spec` at the live `max_resolution`, the data dir's
+  `cookies.txt` when present, `--print format::FORMAT_PROBE_PRINT` (the
+  video stage: it only simulates). Always 200: `{ok, youtube_id, cap,
+  cookies, format, error, elapsed_ms}`; `error` = yt-dlp's last `ERROR:`
+  line (≤ 400 chars). Bounded at 120 s, `kill_on_drop`. No yt-dlp lock
+  (playlist sync, captions and the import run beside a download too; only
+  the self-update swap needs it).
+- `e2e/post-deploy-youtube.spec.ts` (decision: pure `e2e/youtube-gate.ts`,
+  mock suite `youtube-gate.spec.ts`) fails on no format, no cookie file, or
+  a pick under 720 rows. It exists because `tools.js_runtime_ok` passes on
+  a bot check (`js_runtime_verdict` reads only the n-challenge). SNV only:
+  PP's subset lists its specs (`post-deploy-pp.config.ts`).
+- `FORMAT_PRINT` and `FORMAT_PROBE_PRINT` share one field list
+  (`format_fields!`); a new field goes there once.
+- Box check before the gate (10.10.2026): `SPFMT|399|av01.0.08M.08|1920|1080|30`,
+  exit 0, 2.6 s.

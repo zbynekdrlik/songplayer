@@ -80,15 +80,26 @@ pub(crate) fn checked(key: &str, value: &str) -> Result<String, String> {
     }
 }
 
+/// The marked line naming a video stream (`parse_downloaded_format` reads it).
+macro_rules! format_fields {
+    () => {
+        "SPFMT|%(format_id)s|%(vcodec)s|%(width)s|%(height)s|%(fps)s"
+    };
+}
+
 /// #223 S9b: what yt-dlp prints once the video stream is in place (its
 /// `--print`, a later stage than the download, so it downloads as before): a
 /// marked line the worker finds among the progress lines.
-pub(crate) const FORMAT_PRINT: &str =
-    "after_move:SPFMT|%(format_id)s|%(vcodec)s|%(width)s|%(height)s|%(fps)s";
+pub(crate) const FORMAT_PRINT: &str = concat!("after_move:", format_fields!());
+
+/// #232: the same line at yt-dlp's video stage, which only resolves the
+/// format (`--print` there simulates): the YouTube probe's
+/// (`downloader::probe`).
+pub(crate) const FORMAT_PROBE_PRINT: &str = format_fields!();
 
 /// The video stream a download really fetched (V34 columns; `None` =
 /// yt-dlp did not know it).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub(crate) struct DownloadedFormat {
     pub format_id: String,
     pub codec: Option<String>,

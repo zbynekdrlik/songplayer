@@ -11,6 +11,7 @@
 pub mod cache;
 pub mod format;
 pub mod normalize;
+pub mod probe; // #232: POST /api/v1/youtube/probe (the live YouTube gate)
 pub mod tools;
 pub mod ytdlp_cmd;
 

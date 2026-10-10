@@ -23,7 +23,7 @@ key NAMES only.
 | Genius | community lyrics (gather's fallback, the title search) | `genius_access_token` | `e2e/post-deploy-genius.spec.ts` (#232, through `POST /api/v1/lyrics/probe-sources`): fails on any error answer — a refused search (a dead token, a block, a limit), an unreadable answer, a refused song page, a matched page with no lyric |
 | LRCLIB | synced / plain lyrics | none | none (public; outages are common, a gate would block deploys on a third party) |
 | lyrics.ovh | plain lyrics | none | none (public) |
-| YouTube (yt-dlp) | captions, descriptions, downloads | the cookie file (`.claude/rules/youtube-cookies.md`) | none yet: only the deno check (`tools.js_runtime_ok`), which passes on a bot check; a download / cookie gate is the next #232 unit |
+| YouTube (yt-dlp) | captions, descriptions, downloads | the cookie file (`.claude/rules/youtube-cookies.md`) | `e2e/post-deploy-youtube.spec.ts` (`POST /api/v1/youtube/probe`: the box's yt-dlp resolves one fixed video with the cookies and the production selector, ≥ 720 rows, nothing downloaded; the deno check `tools.js_runtime_ok` alone passes on a bot check) |
 | Spotify lyrics proxy | line-synced lyrics: the worker resolves each song's track id through Claude by itself (above), then fetches the proxy | none | none (a public, unauthenticated third-party proxy; a gate would block deploys on its outages, like LRCLIB) |
 
 ## Stored but unused (delete with the key rotation, #232 / #229; not before 21.10.2026)

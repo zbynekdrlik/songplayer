@@ -24,6 +24,7 @@ pub mod stems;
 pub mod test_item; // #228: /api/v1/test-item (camera-box's measurement clip as the test item)
 pub mod videos;
 pub mod websocket;
+pub mod youtube_probe; // #232: POST /api/v1/youtube/probe (the live YouTube gate)
 
 use std::path::PathBuf;
 
@@ -267,6 +268,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/lyrics/g35t/probe",
             axum::routing::post(lyrics_g35t::probe),
+        )
+        // #232: the box's yt-dlp resolves one fixed video (the post-deploy gate)
+        .route(
+            "/api/v1/youtube/probe",
+            axum::routing::post(youtube_probe::probe),
         )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
