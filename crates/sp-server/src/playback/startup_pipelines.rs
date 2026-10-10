@@ -31,23 +31,28 @@ const PORT_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// Max polls (≤ 10 s at 250 ms) before startup proceeds regardless (#196).
 const PORT_WAIT_MAX_POLLS: u32 = 40;
 
-/// The first TCP port the NDI runtime assigns to a sender on this box. NDI
-/// hands out ports sequentially from here in sender-creation order (#196).
+/// The first port of this process's NDI runtime: `NDIlib_initialize` listens
+/// on it, and the senders take the ports after it in creation order (#196,
+/// #240: SongPlayer listens on 5960 + SP-program's 5961; 10 senders once
+/// ended at 5970).
 pub const NDI_PORT_BASE: u16 = 5960;
 
 /// The NDI senders SongPlayer creates: `SP-program` alone (#221 lane 3).
 pub const NDI_SENDERS: usize = 1;
 
-/// The port range to probe-bind before creating the first sender: the ports
-/// SongPlayer's own process holds — the base plus one port per sender
-/// (`base..=base+N`; SNV, 10.10.2026: SongPlayer listens on 5960 + 5961 with
-/// SP-program alone) — so an immediate restart waits until the previous
-/// instance released them. No margin past them (#240): the next ports belong
-/// to the box's other NDI senders (cg OBS's on 5962 + 5963), which never
-/// free them, so a span naming one waited the full bound at every start.
+/// The port range to probe-bind before creating the first sender: the
+/// senders' own ports, `base+1..=base+N`, so an immediate restart waits until
+/// the previous instance released them. Not the base (#240): this process's
+/// own runtime already holds it — `NDIlib_initialize` runs when the engine
+/// starts, before the wait — so it is never free to probe (SNV 10.10.2026:
+/// `busy=[5960]`, 5961 free). Not a "margin" past them either: the next ports
+/// belong to the box's other NDI processes (cg OBS's runtime + sender on
+/// 5962 + 5963), which never free them, so a span naming one waited the full
+/// bound at every start.
 pub fn ndi_port_range(n_outputs: usize) -> Vec<u16> {
+    let first = NDI_PORT_BASE.saturating_add(1);
     let last = NDI_PORT_BASE.saturating_add(u16::try_from(n_outputs).unwrap_or(u16::MAX));
-    (NDI_PORT_BASE..=last).collect()
+    (first..=last).collect()
 }
 
 /// The active playlists to create pipelines for, in DETERMINISTIC creation
