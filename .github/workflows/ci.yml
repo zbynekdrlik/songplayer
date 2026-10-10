@@ -2032,18 +2032,21 @@ jobs:
           # #144: the proxy's credential cooldown after a transient upstream
           # error (e.g. Claude's content filter refusing a lyrics cleanup the
           # worker just sent) is a 503 auth_unavailable whose Retry-After is
-          # the cooldown left (60 s by default). Waited out ONCE, bounded at
-          # 120 s exactly as the worker's client does (ai/retry.rs); then one
-          # more completion must answer. A quota cooldown (429
-          # model_cooldown), a longer Retry-After or a second failure still
-          # fails the gate.
-          if ($try.error -and $try.status -eq 503 -and $try.detail -match 'auth_unavailable') {
+          # the cooldown left (60 s by default). Each such cooldown is waited
+          # out (Retry-After <= 120 s, the worker's own bound, ai/retry.rs),
+          # 300 s in all at most — a worker call woken at the same moment can
+          # start the next one — then the completion must answer. A quota
+          # cooldown (429 model_cooldown), a longer Retry-After or the 300 s
+          # spent still fail the gate.
+          $waited = 0
+          while ($try.error -and $try.status -eq 503 -and $try.detail -match 'auth_unavailable') {
             $wait = 0
-            if ([int]::TryParse("$($try.retryAfter)", [ref]$wait) -and $wait -ge 0 -and $wait -le 120) {
-              Write-Host "the proxy's credential cools down for $wait s (auth_unavailable: $($try.detail)): waiting it out once"
-              Start-Sleep -Seconds ($wait + 2)
-              $try = Send-Completion
-            }
+            if (-not ([int]::TryParse("$($try.retryAfter)", [ref]$wait) -and $wait -ge 0 -and $wait -le 120)) { break }
+            if ($waited + $wait + 2 -gt 300) { break }
+            Write-Host "the proxy's credential cools down for $wait s (auth_unavailable: $($try.detail)): waiting it out"
+            Start-Sleep -Seconds ($wait + 2)
+            $waited += $wait + 2
+            $try = Send-Completion
           }
           if ($try.error) {
             Write-Error "FAIL: a completion with $model failed: $($try.error) $($try.detail)"

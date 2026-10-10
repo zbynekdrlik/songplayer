@@ -148,3 +148,23 @@ fn the_star_track_says_how_many_untimed_lines_it_left_out() {
     assert_eq!(all.len(), 1);
     assert!(quiet.lines_with("could not time").is_empty());
 }
+
+/// #144 F3: the pre-mtl Coverage verdict holds only while mtl returns every
+/// line it was given with its text unchanged — a changed count or text is an
+/// mtl error, never gated.
+#[test]
+fn mtl_must_return_the_lines_it_was_given() {
+    use crate::lyrics::orchestrator::lines_changed;
+    let given: Vec<String> = vec!["a b".into(), "c d".into()];
+    let same = vec![mtl_line("a b", Some((1, 2))), mtl_line("c d", None)];
+    assert_eq!(lines_changed(&given, &same), None);
+    assert_eq!(
+        lines_changed(&given, &same[..1]),
+        Some("mtl returned 1 lines for the 2 it was given".into())
+    );
+    let edited = vec![mtl_line("a b", Some((1, 2))), mtl_line("c e", Some((3, 4)))];
+    assert_eq!(
+        lines_changed(&given, &edited),
+        Some("mtl changed line 2 of the text".into())
+    );
+}

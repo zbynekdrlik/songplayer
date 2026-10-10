@@ -79,12 +79,21 @@ failed 502 → 503 in 4 ms → fail).
   is refused again, and EVERY refusal puts the credential into the 60 s
   cooldown, so retrying it held every AI call (metadata, translation, the
   post-deploy gate) refused for ~3 min (CI 38046650500). A caller asks
-  `retry::content_filtered(&err)` (the error's causes too): gather's
+  `retry::content_filtered(&err)` — by TYPE (`ContentFiltered`) in the
+  error's causes, never by text (keep a caller's `map_err` from stringifying
+  the client's error: the translator wraps it with `.context`): gather's
   scraped-lyrics cleanup then leaves out only that candidate
   (`text_candidate::cleanup_candidate`), never the whole song.
-- The post-deploy gate waits out ONE such cooldown: a `503` whose body says
-  `auth_unavailable` with `Retry-After` ≤ 120 s (the worker's own bound), then
-  one more completion must answer. A `429 model_cooldown` (quota), a longer
+  A refused cleanup is remembered in its cache file for that raw text's
+  sha256 (`lyrics::cleanup_refusal`, no `lines` key) and never sent again
+  until the text changes; a refused translation keeps the song's English
+  lines, the missing pass skips it for the run
+  (`LyricsWorker::translation_refused`), the stale pass stamps it, and no
+  backoff holds the next song.
+- The post-deploy gate waits out such cooldowns: each a `503` whose body says
+  `auth_unavailable` with `Retry-After` ≤ 120 s (the worker's own bound), 300 s
+  in all at most (a worker call woken at the same moment can start the next),
+  then the completion must answer. A `429 model_cooldown` (quota), a longer
   wait or a second failure still fail it — the gate stays a live check of the
   credential and the model.
 - Every 429 / 5xx is WARNed with its status, the next wait (or "no retry

@@ -98,7 +98,7 @@ impl LyricsWorker {
                 matched_frac = stats.matched_frac,
                 sung_covered_frac = stats.sung_covered_frac,
                 max_uncovered_sung_ms = stats.max_uncovered_sung_ms,
-                "reference_stage: gate FAIL before mtl — the text does not cover the singing (#144 F3)"
+                "reference_stage: gate FAIL before mtl — Coverage (#144 F3: the fields tell which)"
             );
             let audit_ctx = crate::lyrics::audit_ctx::AuditContext {
                 cache_dir: &self.cache_dir,
@@ -115,6 +115,9 @@ impl LyricsWorker {
                 words.len(),
             );
             audit["before_mtl"] = serde_json::Value::Bool(true);
+            // No line was timed: no offset and no agreement, never a "0 ms".
+            audit["median_signed_ms"] = serde_json::Value::Null;
+            audit["within_400_frac"] = serde_json::Value::Null;
             crate::lyrics::audit_ctx::write_alignment_audit(Some(&audit_ctx), &audit).await;
             return Ok(None);
         }

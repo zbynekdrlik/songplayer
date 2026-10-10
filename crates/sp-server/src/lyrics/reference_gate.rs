@@ -16,7 +16,9 @@
 //! alignment is timed (offset, agreement): a misheard first word leaves a
 //! later word's start, which leaned the timing late (review: 9.5 % of the
 //! matched lines of the eval fixtures, 38 % of those beyond 400 ms). The alignment is monotonic, so a repeated chorus line
-//! binds to one sung repetition each, in order, never backwards.
+//! binds to one sung repetition each, in order, never backwards. A line the
+//! forced alignment could not time (`start_ms: None`) counts for the text
+//! only, never for the timing.
 //!
 //! #144 first-week review: the anchor walk this replaced searched each
 //! line's first 3 → 2 → 1 words at or after a forward-only cursor. A
@@ -45,8 +47,9 @@ pub struct AlignedLine {
 pub struct GateStats {
     pub lines_total: usize,
     pub lines_matched: usize,
-    /// #144: the matched lines whose own first word is on the alignment; the
-    /// median offset and `within_400_frac` read only them.
+    /// #144: the matched lines whose own first word is on the alignment and
+    /// that the forced alignment timed; the median offset and
+    /// `within_400_frac` read only them.
     pub lines_timed: usize,
     pub matched_frac: f64,
     pub median_signed_ms: i64,

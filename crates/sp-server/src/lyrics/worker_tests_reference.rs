@@ -902,6 +902,8 @@ async fn a_text_that_covers_too_little_of_the_singing_fails_the_gate_before_mtl(
     assert!(audit["mtl_device"].is_null(), "no mtl ran: {audit}");
     assert!(audit["mtl_elapsed_s"].is_null(), "no mtl ran: {audit}");
     assert_eq!(audit["before_mtl"], true, "{audit}");
+    assert!(audit["median_signed_ms"].is_null(), "{audit}");
+    assert!(audit["within_400_frac"].is_null(), "{audit}");
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
 
