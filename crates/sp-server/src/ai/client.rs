@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use tracing::{debug, warn};
 
 use super::AiSettings;
-use super::retry::{RetryPolicy, body_excerpt, is_retried};
+use super::retry::{RetryPolicy, body_excerpt, is_content_filtered, is_retried};
 
 pub struct AiClient {
     http: reqwest::Client,
@@ -109,6 +109,19 @@ impl AiClient {
             let retry = attempt + 1;
             let delay = self.retry.after_response(status, resp.headers(), retry);
             let body_text = resp.text().await.unwrap_or_default();
+            // #144: final — the same output is refused again, and each
+            // refusal puts the proxy's credential into its cooldown.
+            if is_content_filtered(&body_text) {
+                warn!(
+                    status = %status,
+                    body = %body_excerpt(&body_text),
+                    "chat completion refused by the upstream content filter — final, not retried"
+                );
+                return Err(super::retry::ContentFiltered {
+                    detail: format!("HTTP {status}: {body_text}"),
+                }
+                .into());
+            }
             if is_retried(status.as_u16()) {
                 log_refusal(status, retry, delay, &body_text);
             }
@@ -351,6 +364,35 @@ mod tests {
         let err = client.chat("", "user").await.unwrap_err().to_string();
         assert!(err.contains("HTTP 503"), "{err}");
         assert!(err.contains("auth_unavailable"), "{err}");
+    }
+
+    /// #144: Claude's upstream content filter refuses the same output every
+    /// time, and each refusal puts the proxy's one credential into its
+    /// cooldown (every AI call refused for ~60 s): it is final, never retried.
+    #[tokio::test]
+    async fn chat_does_not_retry_a_content_filter_refusal() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(502).set_body_string(
+                r#"{"error":{"message":"claude executor: upstream returned error event: Output blocked by content filtering policy","type":"server_error"}}"#,
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "test".into(),
+            system_prompt_extra: None,
+        })
+        .with_retry_policy(RetryPolicy::NO_WAIT);
+        let err = client.chat("", "user").await.unwrap_err().to_string();
+        assert!(err.contains("content filtering policy"), "{err}");
     }
 
     #[tokio::test]

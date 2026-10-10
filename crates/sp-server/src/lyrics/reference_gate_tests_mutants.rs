@@ -1,5 +1,5 @@
 //! Mutation-killing unit tests for `reference_gate.rs` pure helpers
-//! (`normalize_word`, `find_ngram`, `match_lines`, `median_i64`, `evaluate`).
+//! (`normalize_word`, `match_lines`, `median_i64`, `evaluate`).
 //!
 //! Wired into `reference_gate.rs` as a sibling `#[path]` test module. Each
 //! test asserts an EXACT value at the precise input that flips under one
@@ -11,7 +11,7 @@ use super::*;
 fn line(text: &str, start_ms: u64) -> AlignedLine {
     AlignedLine {
         text: text.to_string(),
-        start_ms,
+        start_ms: Some(start_ms),
     }
 }
 
@@ -33,10 +33,6 @@ fn push_phrase(words: &mut Vec<AsrWord>, phrase: &str, start: u64) {
     }
 }
 
-fn norms(items: &[&str]) -> Vec<String> {
-    items.iter().map(|s| s.to_string()).collect()
-}
-
 // -------------------------------------------------------------------------
 // normalize_word — line 68: `*c == '\''`
 // -------------------------------------------------------------------------
@@ -50,42 +46,12 @@ fn normalize_word_keeps_apostrophe_exact() {
 }
 
 // -------------------------------------------------------------------------
-// find_ngram — line 87: `if n == 0 || cursor + n > word_norms.len()`
+// match_lines
 // -------------------------------------------------------------------------
 
-/// Kills `87:15 || -> &&`. With an empty ngram (n == 0) the unmutated guard
-/// short-circuits to `None`. Under `&&` the guard is `0 == 0 && 0 > 5` =
-/// false, so the search runs and an empty ngram matches at position 0 →
-/// `Some(0)`.
-#[test]
-fn find_ngram_empty_ngram_is_none_not_some() {
-    let w = norms(&["a", "b", "c", "d", "e"]);
-    let empty: Vec<String> = Vec::new();
-    assert_eq!(find_ngram(&w, 0, &empty), None);
-}
-
-/// Kills three co-located mutants on line 87 with one exact-fit boundary
-/// case: cursor = 3, n = 2, len = 5, ngram = ["d","e"] at position 3.
-///   - `87:25 + -> *`: `3 * 2 = 6 > 5` → early `None`.
-///   - `87:29 > -> ==`: `3 + 2 == 5` → early `None`.
-///   - `87:29 > -> >=`: `3 + 2 >= 5` → early `None`.
-///     The unmutated guard is `5 > 5` = false, so it finds the match → `Some(3)`.
-#[test]
-fn find_ngram_exact_fit_at_end_matches_some() {
-    let w = norms(&["a", "b", "c", "d", "e"]);
-    let ngram = norms(&["d", "e"]);
-    assert_eq!(find_ngram(&w, 3, &ngram), Some(3));
-}
-
-// -------------------------------------------------------------------------
-// match_lines — line 125: `cursor = pos + 1;`
-// -------------------------------------------------------------------------
-
-/// Kills `125:30 + -> *` (`pos * 1` == `pos`, cursor never advances past the
-/// matched anchor). Two identical lines; the phrase appears twice in the
-/// ASR stream. The unmutated cursor advances past the first occurrence so
-/// the SECOND line binds to the later ASR start (5000). Under `pos * 1` the
-/// cursor stays at 0 and the second line re-binds to the earlier 1000.
+/// Two identical lines and the phrase sung twice: the alignment is
+/// monotonic, so the SECOND line binds to the later sung start (5000),
+/// never back onto the first one's 1000.
 #[test]
 fn match_lines_repeated_line_binds_second_occurrence_forward() {
     let lines = vec![line("we lift you", 1000), line("we lift you", 5000)];

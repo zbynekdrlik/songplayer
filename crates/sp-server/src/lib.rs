@@ -3,6 +3,7 @@
 pub mod ai;
 mod ai_proxy_watchdog;
 pub mod api;
+pub mod background_hold; // #230: a sp-90s press holds the background jobs
 pub mod dabing;
 pub mod db;
 pub mod diag; // #223 S0: /api/v1/diag/* measurement benches
@@ -481,6 +482,7 @@ pub async fn start(
                         std::sync::Arc::new(tokio::sync::Mutex::new(()));
                     let ytdlp_interval_secs = ytdlp_update_interval_secs();
                     tokio::spawn(periodic_ytdlp_update(
+                        dl_pool.clone(),
                         tools_mgr,
                         paths.ytdlp.clone(),
                         ytdlp_interval_secs,
@@ -610,6 +612,10 @@ pub async fn start(
     let sync_tool_paths = tool_paths.clone();
     tokio::spawn(async move {
         while let Some(req) = sync_rx.recv().await {
+            // #230: held — dropped; the periodic sync re-enqueues after the hold.
+            if background_hold::holds(&sync_pool, background_hold::Job::Sync).await {
+                continue;
+            }
             let paths = sync_tool_paths.read().await;
             let Some(ref tp) = *paths else {
                 warn!(
@@ -868,6 +874,7 @@ fn ytdlp_update_interval_secs() -> u64 {
 /// [`periodic_playlist_sync`]. Never fatal — a failed update just leaves
 /// the current binary in place. Exits on shutdown broadcast.
 async fn periodic_ytdlp_update(
+    pool: SqlitePool,
     tools_mgr: downloader::tools::ToolsManager,
     ytdlp_path: PathBuf,
     interval_secs: u64,
@@ -881,6 +888,10 @@ async fn periodic_ytdlp_update(
         tokio::select! {
             _ = shutdown.recv() => return,
             _ = interval.tick() => {
+                // #230: a held background skips this day's update.
+                if background_hold::holds(&pool, background_hold::Job::YtdlpUpdate).await {
+                    continue;
+                }
                 // Wait for any in-flight download before touching the binary.
                 let _ytdlp_guard = ytdlp_lock.lock().await;
                 match tools_mgr.update_ytdlp().await {

@@ -110,15 +110,19 @@ impl LyricsWorker {
 
     /// #144: whether the row serves lyrics on the wall now: `has_lyrics = 1`
     /// AND its `<yt>_lyrics.json` exists (what `playback/lyrics_loader.rs`
-    /// loads). A row that cannot be read counts as not served.
+    /// loads). F1: the file is the VIDEO's, so any row of the video with
+    /// `has_lyrics = 1` serves it. A row that cannot be read counts as not
+    /// served.
     async fn serves_lyrics(&self, video_id: i64, youtube_id: &str) -> bool {
-        let has_lyrics: Option<i64> =
-            sqlx::query_scalar("SELECT COALESCE(has_lyrics, 0) FROM videos WHERE id = ?")
-                .bind(video_id)
-                .fetch_optional(&self.pool)
-                .await
-                .ok()
-                .flatten();
+        let has_lyrics: Option<i64> = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(has_lyrics), 0) FROM videos \
+             WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
+        )
+        .bind(video_id)
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten();
         let file = self.cache_dir.join(format!("{youtube_id}_lyrics.json"));
         has_lyrics == Some(1) && tokio::fs::try_exists(&file).await.unwrap_or(false)
     }

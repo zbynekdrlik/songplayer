@@ -92,7 +92,8 @@ wait for a peer that has the song", below).
 
 ## `GET /api/v1/exchange/status` (`peer::lan`, LAN API, no peer key)
 
-- Answers `{node_name, serving, transfers_paused, config_error, peers:
+- Answers `{node_name, serving, transfers_paused (the operator's own
+  pause), background_hold (#230), config_error, peers:
   [{name, base_url, has_key, cf_access, last_read}], catalog: {files,
   listed, queued}, jobs}` — never a key or a Cloudflare secret. `serving` =
   a node name and a key (the peer API answers); `cf_access` = a Cloudflare
@@ -340,8 +341,10 @@ wait for a peer that has the song", below).
   serve (no name, no key, or settings that do not hold, WARNed); 401
   without `X-SP-Peer-Key` = this node's `peer_api_key` (sha256 digests
   compared; WARN with the path, never the key); 503 `Retry-After: 600`
-  while `peer_transfers_paused` (on EVERY route, the design record
-  6032086364; after the key, so a caller without it learns nothing). Every
+  while `peer_transfers_paused` or #230's background hold (on EVERY route,
+  the design record 6032086364; after the key, so a caller without it
+  learns nothing), `x-sp-paused: operator | background-hold` naming which
+  (`Exchange::pause_reason`, `background-hold.md`). Every
   answer is `Cache-Control: no-store`. On the public path Cloudflare Access
   is in front as well (a service-token policy, MAIN SESSION OPS).
 - `videos/{id}` = `wire::PeerVideo {metadata, duration_ms, lyrics:

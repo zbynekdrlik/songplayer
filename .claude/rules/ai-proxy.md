@@ -73,6 +73,29 @@ failed 502 → 503 in 4 ms → fail).
   capped at 120 s; without one (the upstream's 5xx relayed, an older proxy,
   cooling off) the waits are 5 s, 20 s, 60 s — 3 retries, 85 s in all,
   past the default cooldown. Any other `Retry-After` form falls back.
+- **Claude's upstream content filter is final (#144, 10.10.2026).** A body
+  naming it (`… Output blocked by content filtering policy`, a 502 through
+  the proxy; `retry::is_content_filtered`) is never retried: the same output
+  is refused again, and EVERY refusal puts the credential into the 60 s
+  cooldown, so retrying it held every AI call (metadata, translation, the
+  post-deploy gate) refused for ~3 min (CI 38046650500). A caller asks
+  `retry::content_filtered(&err)` — by TYPE (`ContentFiltered`) in the
+  error's causes, never by text (keep a caller's `map_err` from stringifying
+  the client's error: the translator wraps it with `.context`): gather's
+  scraped-lyrics cleanup then leaves out only that candidate
+  (`text_candidate::cleanup_candidate`), never the whole song.
+  A refused cleanup is remembered in its cache file for that raw text's
+  sha256 (`lyrics::cleanup_refusal`, no `lines` key) and never sent again
+  until the text changes; a refused translation keeps the song's English
+  lines, the missing pass skips it for the run
+  (`LyricsWorker::translation_refused`), the stale pass stamps it, and no
+  backoff holds the next song.
+- The post-deploy gate waits out such cooldowns: each a `503` whose body says
+  `auth_unavailable` with `Retry-After` ≤ 120 s (the worker's own bound), 300 s
+  in all at most (a worker call woken at the same moment can start the next),
+  then the completion must answer. A `429 model_cooldown` (quota), a longer
+  wait or a second failure still fail it — the gate stays a live check of the
+  credential and the model.
 - Every 429 / 5xx is WARNed with its status, the next wait (or "no retry
   left") and the first 300 characters of its body (`body_excerpt`), so the
   refusal's reason is in the log: `auth_unavailable` = the cooldown,

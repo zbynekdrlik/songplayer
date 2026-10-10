@@ -625,7 +625,10 @@ async fn a_failing_fetch_from_another_peer_keeps_the_stand_in() {
 
 /// Review round 2: a row that does not take the peer's copy (its write
 /// fails) keeps the stand-in, with no origin recorded; the next look places
-/// the copy again, into every row, and ends it.
+/// the copy again, into every row, and ends it. #144 F1: the lyrics columns
+/// are the video's, written for every row in one statement, so a row that
+/// refuses the write keeps the copy out of EVERY row (no row is left on a
+/// state its sibling lacks).
 #[tokio::test]
 async fn a_stand_in_is_over_only_once_every_row_took_the_copy() {
     let (snv, pp, rows, _) = snv_and_pp_standin().await;
@@ -638,7 +641,7 @@ async fn a_stand_in_is_over_only_once_every_row_took_the_copy() {
     .execute(pp.pool())
     .await
     .unwrap();
-    assert_eq!(supersede_next(Some(&pp.ex)).await, vec![rows[0]]);
+    assert_eq!(supersede_next(Some(&pp.ex)).await, Vec::<i64>::new());
     assert!(
         fetch_record(pp.pool(), YT, "lyrics")
             .await

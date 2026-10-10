@@ -6,6 +6,7 @@ pub mod bootstrap_probe; // #221: the venv probe's reason + the fast-path retry 
 pub mod bootstrap_venv_exe;
 pub mod child_output;
 pub mod claude_merge;
+pub mod cleanup_refusal; // #144: a content-filter refusal of a cleanup, remembered per text
 pub mod description_provider;
 pub mod display_plan;
 pub mod g35t_client;
@@ -93,6 +94,12 @@ use sp_core::lyrics::LyricsTrack;
 ///   pre-v22 row re-queues (no smart-skip — that was the v18 trap); v21
 ///   mtl rows re-run to identical output and re-★.
 pub const LYRICS_PIPELINE_VERSION: u32 = 22;
+
+/// #144 F1: the suffix of a lyrics source that passed the reference gate
+/// (`<candidate>+mtl@rev1/g35t-ok`): `db::models::mark_video_lyrics_complete`
+/// sets ★ exactly for it, on every row of the video, with the persisted
+/// track.
+pub const REFERENCE_SOURCE_SUFFIX: &str = "/g35t-ok";
 
 /// Monotonic version of the SK **translation** output (#152), INDEPENDENT of
 /// `LYRICS_PIPELINE_VERSION`. Bump ONLY when the translation prompt changes in

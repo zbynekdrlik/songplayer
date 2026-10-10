@@ -69,9 +69,26 @@ impl Exchange {
         self.board.announce(youtube_id, job)
     }
 
-    /// `peer_transfers_paused` = "true": no new transfer either way, no
-    /// hashing. A failed read is WARNed and reads as not paused.
+    /// No new transfer either way, no hashing: [`Self::pause_reason`] names
+    /// one.
     pub(crate) async fn transfers_paused(&self) -> bool {
+        self.pause_reason().await.is_some()
+    }
+
+    /// Why transfers wait now: the operator's `peer_transfers_paused`
+    /// ([`PAUSED_BY_OPERATOR`]) or #230's background hold
+    /// ([`PAUSED_BY_HOLD`]); `None` while they run.
+    pub(crate) async fn pause_reason(&self) -> Option<&'static str> {
+        if self.operator_paused().await {
+            return Some(PAUSED_BY_OPERATOR);
+        }
+        let held = crate::background_hold::holds(&self.pool, crate::background_hold::Job::Peer);
+        held.await.then_some(PAUSED_BY_HOLD)
+    }
+
+    /// `peer_transfers_paused` = "true" (the operator's own pause). A failed
+    /// read is WARNed and reads as not paused.
+    pub(crate) async fn operator_paused(&self) -> bool {
         let raw = crate::db::models::get_setting(&self.pool, SETTING_PEER_TRANSFERS_PAUSED)
             .await
             .inspect_err(|e| warn!("exchange: reading {SETTING_PEER_TRANSFERS_PAUSED} failed: {e}"))
@@ -80,6 +97,10 @@ impl Exchange {
         sp_core::config::peer_transfers_paused(raw.as_deref())
     }
 }
+
+/// The pause reasons (the peer API's 503 names one in `x-sp-paused`).
+pub const PAUSED_BY_OPERATOR: &str = "operator";
+pub const PAUSED_BY_HOLD: &str = "background-hold";
 
 /// Every route of the exchange: the LAN status (no key) and the peer API
 /// (`X-SP-Peer-Key`); `lib.rs` merges it into the app's router.

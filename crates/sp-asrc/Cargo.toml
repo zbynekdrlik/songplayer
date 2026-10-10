@@ -1,0 +1,16 @@
+[package]
+name = "sp-asrc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# #233: rubato's `Async` sinc stage behind one non-generic type. It lives in
+# its own crate so the workspace can compile it optimized in every profile
+# (`[profile.dev.package.sp-asrc]` in the workspace Cargo.toml): rubato's
+# generic glue is compiled HERE; its dot kernels are plain functions compiled
+# in rubato, optimized by `[profile.dev.package.rubato]`.
+[dependencies]
+# Pure Rust, MIT OR Apache-2.0 (its MIT notice ships in
+# THIRD-PARTY-NOTICES.txt), pinned exactly — the same pin as sp-server's.
+rubato = "=5.0.1"

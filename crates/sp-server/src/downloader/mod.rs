@@ -243,6 +243,10 @@ impl DownloadWorker {
 
     /// Try to process the next un-normalized video.
     async fn process_next(&self) -> bool {
+        // #230: a held background starts no new job (a running one finishes).
+        if crate::background_hold::holds(&self.pool, crate::background_hold::Job::Download).await {
+            return false;
+        }
         let row = match fetch_next_unprocessed(&self.pool).await {
             Ok(Some(r)) => r,
             Ok(None) => return false,

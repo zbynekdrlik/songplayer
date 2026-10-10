@@ -120,7 +120,12 @@ pub async fn translate_via_claude(
     let response = ai_client
         .chat("", &user)
         .await
-        .map_err(|e| anyhow!("Claude translation failed: {e}"))?;
+        // #144: the client's error stays the cause (a content-filter refusal
+        // is told apart by type, `ai::retry::content_filtered`).
+        .map_err(|e| {
+            let msg = format!("Claude translation failed: {e}");
+            e.context(msg)
+        })?;
 
     let translations = parse_translation_response(&response, line_count);
 

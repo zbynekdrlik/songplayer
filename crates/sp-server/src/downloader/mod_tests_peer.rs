@@ -95,3 +95,21 @@ async fn a_peer_downloading_it_defers_the_row_without_an_attempt() {
         "the deferred row is not picked again at once"
     );
 }
+
+/// #230: while the background is held the worker starts no download (no
+/// peer asked, nothing run, no attempt); after the release it runs it.
+#[tokio::test]
+async fn a_held_background_starts_no_download_until_released() {
+    let pp = TestNode::start("pp", None).await;
+    let id = pp.add_video(YT).await;
+    let w = worker(&pp);
+    let mut events = w.event_tx.subscribe();
+    crate::background_hold::hold_for_a_minute(pp.pool()).await;
+    assert!(!w.process_next().await);
+    assert_eq!(state(&pp, id).await, (0, 0), "held: nothing ran");
+    assert!(events.try_recv().is_err(), "held: no downloading event");
+    crate::background_hold::end_hold(pp.pool()).await;
+    assert!(!w.process_next().await, "yt-dlp is missing here");
+    assert_eq!(state(&pp, id).await, (0, 1), "released: the local path ran");
+    assert_eq!(events.try_recv().unwrap(), format!("downloading:{YT}"));
+}

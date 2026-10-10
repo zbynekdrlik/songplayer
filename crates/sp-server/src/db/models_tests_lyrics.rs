@@ -348,3 +348,7 @@ async fn quarantine_video_lyrics_writes_processed_at_and_null_model() {
         "quarantine must leave alignment_model NULL"
     );
 }
+
+#[cfg(test)]
+#[path = "models_tests_video_lyrics.rs"]
+mod video_lyrics;

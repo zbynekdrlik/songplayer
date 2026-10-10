@@ -166,9 +166,25 @@ async fn a_paused_node_answers_503_retry_after() {
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{uri}");
         assert_eq!(headers["retry-after"], "600");
         assert_eq!(headers["cache-control"], "no-store");
+        assert_eq!(headers["x-sp-paused"], "operator");
     }
     let (status, _, _) = call(&node, &artifact("audio"), None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// #230: a held background pauses the exchange like `peer_transfers_paused`
+/// (every peer route 503); the release serves again.
+#[tokio::test]
+async fn a_held_background_answers_503_until_released() {
+    let node = snv_with_song().await;
+    crate::background_hold::hold_for_a_minute(node.pool()).await;
+    let (status, headers, _) = call(&node, "/api/v1/peer/catalog", Some(SNV_KEY), None).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(headers["retry-after"], "600");
+    assert_eq!(headers["x-sp-paused"], "background-hold");
+    crate::background_hold::end_hold(node.pool()).await;
+    let (status, _, _) = call(&node, "/api/v1/peer/catalog", Some(SNV_KEY), None).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]

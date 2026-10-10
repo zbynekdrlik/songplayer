@@ -534,7 +534,15 @@ pub async fn patch_video(
     } else {
         None
     };
-    match q.execute(&state.pool).await {
+    let result = q.execute(&state.pool).await;
+    // #144 F1: the override text is the video's: every row of it.
+    if req.lyrics_override_text.is_some()
+        && matches!(&result, Ok(r) if r.rows_affected() > 0)
+        && let Err(e) = crate::db::models::spread_lyrics_override(&state.pool, video_id).await
+    {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+    match result {
         Ok(res) if res.rows_affected() == 0 => (
             StatusCode::NOT_FOUND,
             format!("no video with id {video_id}"),

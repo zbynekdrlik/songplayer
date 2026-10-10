@@ -6,7 +6,8 @@
 //! the best text candidate via mtl, verifies it against the song's one Gemini
 //! ASR transcript through the two-way reference gate
 //! (`orchestrator::run_reference_stage`), and on gate PASS ships
-//! the mtl line timings directly while stamping `videos.lyrics_reference`.
+//! the mtl line timings directly, under a `…/g35t-ok` source (#144 F1: the
+//! persist sets `videos.lyrics_reference` from it, on every row of the video).
 //! Every PASS/FAIL/ERROR writes the `{youtube_id}_alignment_audit.json`
 //! sidecar (#144: a PASS too, so the gate's numbers — the sung coverage
 //! included — are on disk for every ★ row, and a stale FAIL audit of an
@@ -19,15 +20,14 @@ use sp_core::lyrics::LyricsTrack;
 use tracing::{info, warn};
 
 use super::worker::{LyricsWorker, align_track_to_lyrics_track};
-use crate::lyrics::LYRICS_PIPELINE_VERSION;
+use crate::lyrics::{LYRICS_PIPELINE_VERSION, REFERENCE_SOURCE_SUFFIX};
 
 impl LyricsWorker {
     /// Lever 2 (#143): forced-alignment reference stage. See
     /// `orchestrator::run_reference_stage` for the mtl-align → gate decision
     /// against `words`, the song's one g35t transcript (#144); this wraps it
     /// with the skip conditions (an empty transcript is one: no gate can pass
-    /// on it, so no mtl is spent), the
-    /// `videos.lyrics_reference` flag update, and the
+    /// on it, so no mtl is spent) and the
     /// `_alignment_audit.json` sidecar of every gate outcome. `backend` is
     /// the injection seam (`orchestrator::ReferenceStageBackend`) —
     /// production passes `RealReferenceStageBackend`, tests pass a fake.
@@ -42,7 +42,6 @@ impl LyricsWorker {
     /// NEVER degrades to the base tier — the next pick re-runs mtl to identical ★.
     pub(crate) async fn run_mtl_reference_stage(
         &self,
-        video_id: i64,
         youtube_id: &str,
         best: Option<&crate::lyrics::tier1::CandidateText>,
         clean_vocal: Option<&Path>,
@@ -81,6 +80,45 @@ impl LyricsWorker {
         }
         if words.is_empty() {
             info!(youtube_id = %youtube_id, "reference_stage: empty transcript — skipping (#144)");
+            return Ok(None);
+        }
+        // #144 F3: the gate's Coverage verdict reads only the text, and mtl
+        // returns every line with its text unchanged, so a text that fails it
+        // is failed here, before mtl (`coverage_fail_before_timing`): no
+        // heavy slot, no mtl minutes. Such a text is often written once and
+        // sung many times, which upstream's DP loops on (its first phone can
+        // step from column -1, the last): its backtrack raised `IndexError`
+        // on 5 SNV songs.
+        if let Some(stats) =
+            crate::lyrics::reference_gate::coverage_fail_before_timing(&best.lines, words)
+        {
+            warn!(
+                youtube_id = %youtube_id,
+                reason = "coverage",
+                matched_frac = stats.matched_frac,
+                sung_covered_frac = stats.sung_covered_frac,
+                max_uncovered_sung_ms = stats.max_uncovered_sung_ms,
+                "reference_stage: gate FAIL before mtl — Coverage (#144 F3: the fields tell which)"
+            );
+            let audit_ctx = crate::lyrics::audit_ctx::AuditContext {
+                cache_dir: &self.cache_dir,
+                youtube_id,
+            };
+            let mut audit = reference_gate_audit_json(
+                "fail",
+                Some(gate_fail_reason_str(
+                    &crate::lyrics::reference_gate::GateFailReason::Coverage,
+                )),
+                Some(&stats),
+                None,
+                None,
+                words.len(),
+            );
+            audit["before_mtl"] = serde_json::Value::Bool(true);
+            // No line was timed: no offset and no agreement, never a "0 ms".
+            audit["median_signed_ms"] = serde_json::Value::Null;
+            audit["within_400_frac"] = serde_json::Value::Null;
+            crate::lyrics::audit_ctx::write_alignment_audit(Some(&audit_ctx), &audit).await;
             return Ok(None);
         }
 
@@ -134,7 +172,7 @@ impl LyricsWorker {
                     within_400_frac = stats.within_400_frac,
                     sung_covered_frac = stats.sung_covered_frac,
                     max_uncovered_sung_ms = stats.max_uncovered_sung_ms,
-                    "reference_stage: gate PASS — stamping ★ reference (#143)"
+                    "reference_stage: gate PASS — the track is the ★ tier (#143; the persist writes ★)"
                 );
                 crate::lyrics::audit_ctx::write_alignment_audit(
                     Some(&audit_ctx),
@@ -148,14 +186,11 @@ impl LyricsWorker {
                     ),
                 )
                 .await;
-                if let Err(e) =
-                    crate::db::models::set_video_lyrics_reference(&self.pool, video_id, true).await
-                {
-                    warn!(youtube_id = %youtube_id, %e, "reference_stage: failed to set lyrics_reference=1");
-                }
+                // #144 F1: no ★ here — the persist writes it WITH the track
+                // (`REFERENCE_SOURCE_SUFFIX`), on every row of the video.
                 let aligned = crate::lyrics::backend::AlignedTrack {
                     lines,
-                    provenance: format!("{}+mtl@rev1/g35t-ok", best.source),
+                    provenance: format!("{}+mtl@rev1{REFERENCE_SOURCE_SUFFIX}", best.source),
                     raw_confidence: 1.0,
                 };
                 Ok(Some(align_track_to_lyrics_track(
@@ -191,8 +226,6 @@ impl LyricsWorker {
                     ),
                 )
                 .await;
-                let _ = crate::db::models::set_video_lyrics_reference(&self.pool, video_id, false)
-                    .await;
                 Ok(None)
             }
             crate::lyrics::orchestrator::ReferenceStageResult::Error { stage, message } => {
@@ -208,8 +241,6 @@ impl LyricsWorker {
                     &reference_gate_audit_json("error", Some(&reason), None, None, None, 0),
                 )
                 .await;
-                let _ = crate::db::models::set_video_lyrics_reference(&self.pool, video_id, false)
-                    .await;
                 Ok(None)
             }
             crate::lyrics::orchestrator::ReferenceStageResult::WallAborted { detail } => {
@@ -296,6 +327,7 @@ fn reference_gate_audit_json(
         "reason": reason,
         "lines_total": stats.map(|s| s.lines_total).unwrap_or(0),
         "lines_matched": stats.map(|s| s.lines_matched).unwrap_or(0),
+        "lines_timed": stats.map(|s| s.lines_timed).unwrap_or(0),
         "matched_frac": stats.map(|s| s.matched_frac).unwrap_or(0.0),
         "median_signed_ms": stats.map(|s| s.median_signed_ms).unwrap_or(0),
         "within_400_frac": stats.map(|s| s.within_400_frac).unwrap_or(0.0),
@@ -306,6 +338,8 @@ fn reference_gate_audit_json(
         "mtl_device": mtl_device,
         "mtl_elapsed_s": mtl_elapsed_s,
         "asr_words": asr_words,
+        // #144 F3: true only for a Coverage FAIL decided before mtl ran.
+        "before_mtl": false,
     })
 }
 

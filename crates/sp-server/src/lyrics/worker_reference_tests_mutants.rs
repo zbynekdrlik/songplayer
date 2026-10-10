@@ -24,6 +24,7 @@ fn stats(sung_covered_frac: f64, max_uncovered_sung_ms: u64) -> GateStats {
     GateStats {
         lines_total: 10,
         lines_matched: 9,
+        lines_timed: 8,
         matched_frac: 0.9,
         median_signed_ms: 12,
         within_400_frac: 0.8,
@@ -51,6 +52,8 @@ fn the_audit_carries_the_sung_coverage_and_its_verdict() {
     assert_eq!(fail["max_uncovered_sung_ms"], 48_200);
     assert_eq!(fail["sung_coverage_ok"], false);
     assert_eq!(fail["matched_frac"], 0.9);
+    // #144 F3: only the stage's own pre-mtl FAIL sets it.
+    assert_eq!(fail["before_mtl"], false);
 
     let pass = reference_gate_audit_json("pass", None, Some(&stats(0.9, 800)), None, None, 1);
     assert_eq!(pass["sung_coverage_ok"], true);

@@ -117,3 +117,64 @@ async fn an_empty_cleanup_gives_no_candidate() {
         .unwrap();
     assert_eq!(got.map(|c| c.lines), None);
 }
+
+fn cleaned() -> CandidateText {
+    CandidateText {
+        source: "genius".into(),
+        lines: vec!["amazing grace".into()],
+        has_timing: false,
+        line_timings: None,
+    }
+}
+
+/// The error a cleanup refused by Claude's upstream content filter carries
+/// up to `gather`, as `AiClient::chat` and `clean_lyrics_via_claude` build it
+/// (SNV log 10.10.2026): the client's typed refusal, under the cleanup's
+/// context.
+fn content_filtered() -> anyhow::Error {
+    anyhow::Error::new(crate::ai::retry::ContentFiltered {
+        detail: "HTTP 502 Bad Gateway: Output blocked by content filtering policy".into(),
+    })
+    .context("Claude clean_lyrics chat failed")
+}
+
+/// #144: a cleanup Claude's upstream content filter refuses leaves out THAT
+/// candidate — the pass goes on with the other sources. It failed the whole
+/// pass before, so h-A1Tzkjsi4, ejDeQIA677g and UU9ctYCtkFk left the
+/// reprocess queue after 3 attempts without a pass (SNV, 10.10.2026).
+#[test]
+fn a_cleanup_the_content_filter_refuses_leaves_out_only_its_candidate() {
+    let fate = cleanup_candidate(Err(content_filtered()), "genius fallback", "yt1");
+    assert!(matches!(fate, Ok(None)), "{fate:?}");
+}
+
+/// #144: any other failure (an outage) still fails the pass, which the
+/// backoff waits out; a cleanup that finds no lyric fails it too.
+#[test]
+fn a_failed_or_empty_cleanup_still_fails_the_pass() {
+    let outage = cleanup_candidate(
+        Err(anyhow::anyhow!(
+            "chat completion failed (HTTP 503): auth_unavailable"
+        )),
+        "genius fallback",
+        "yt1",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        outage.contains("gather: genius fallback cleanup failed for yt1"),
+        "{outage}"
+    );
+    let empty = cleanup_candidate(Ok(None), "lrclib-plain", "yt2")
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        empty,
+        "gather: lrclib-plain cleanup returned no lyrics for yt2"
+    );
+    let kept = cleanup_candidate(Ok(Some(cleaned())), "genius fallback", "yt1").unwrap();
+    assert_eq!(
+        kept.map(|c| c.lines),
+        Some(vec!["amazing grace".to_string()])
+    );
+}

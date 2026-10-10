@@ -246,16 +246,15 @@ impl LyricsWorker {
         // the wall is busy now, defer the WHOLE song (WaitingForWall): the
         // isolated vocal WAV and the transcript are kept on disk, so the next
         // idle pick is a cache-hit isolation + mtl (only the title search, if
-        // it runs, asks again). No mtl runs on an empty transcript, so nothing
-        // defers for one. We do NOT fall
+        // it runs, asks again). No mtl runs on an empty transcript, nor on a
+        // text that fails the gate's Coverage verdict (#144 F3, failed before
+        // mtl), so nothing defers for either (`mtl_would_run`). We do NOT fall
         // through to the g35t base tier — that would degrade the ★ mtl tier
         // (owner's quality-first rule). In LOW-PRIORITY mode there is no gate #2:
         // mtl runs at reduced priority instead (the backend picks the plan and
         // re-runs on CPU if a GPU job is aborted).
         if mode == crate::lyrics::heavy_plan::ProcessingMode::IdleOnly
-            && best_candidate.is_some()
-            && clean_vocal.is_some()
-            && !words.is_empty()
+            && mtl_would_run(best_candidate.as_ref(), clean_vocal.is_some(), words)
             && self.defer_before_mtl().await
         {
             return Ok(TierOutcome::Return(SongOutcome::WaitingForWall));
@@ -263,7 +262,6 @@ impl LyricsWorker {
 
         let mtl_track = match self
             .run_mtl_reference_stage(
-                video_id,
                 youtube_id,
                 best_candidate.as_ref(),
                 clean_vocal,
@@ -344,6 +342,23 @@ impl LyricsWorker {
             )
             .await
     }
+}
+
+/// #144 F3: whether the reference stage would spend an mtl run on `best`:
+/// an isolated vocal, a transcript, and a text that passes the gate's
+/// Coverage verdict (a text that fails it is failed before mtl,
+/// `reference_gate::coverage_fail_before_timing`). The idle-only mode defers
+/// a song for the wall only then.
+pub(crate) fn mtl_would_run(
+    best: Option<&crate::lyrics::tier1::CandidateText>,
+    has_vocal: bool,
+    words: &[crate::lyrics::g35t_client::AsrWord],
+) -> bool {
+    has_vocal
+        && !words.is_empty()
+        && best.is_some_and(|c| {
+            crate::lyrics::reference_gate::coverage_fail_before_timing(&c.lines, words).is_none()
+        })
 }
 
 #[cfg(test)]

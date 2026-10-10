@@ -1,6 +1,8 @@
 //! The dub worker's tests (moved out of `worker.rs`, #229 review round 13:
 //! the 1000-line cap).
 
+use std::sync::atomic::Ordering;
+
 use super::*;
 use crate::test_log::{Captured, capturing};
 
@@ -161,6 +163,29 @@ async fn the_dub_worker_uses_the_first_key_of_the_gemini_key_list() {
         .await
         .unwrap();
     assert_eq!(worker.first_gemini_key().await.as_deref(), Some("k1"));
+}
+
+/// #230: while the background is held the dub tick starts nothing — not
+/// even its one-shot subtitle backfill; after the release it runs.
+#[tokio::test]
+async fn a_held_background_starts_no_dub_work_until_released() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let worker = DubWorker::new(
+        pool.clone(),
+        PathBuf::from("."),
+        Arc::new(crate::playback::ndi_health::NdiHealthRegistry::new()),
+        Arc::new(RwLock::new(crate::obs::ObsState::default())),
+    );
+    crate::background_hold::hold_for_a_minute(&pool).await;
+    worker.process_next().await;
+    assert!(!worker.subtitles_backfilled.load(Ordering::Relaxed), "held");
+    crate::background_hold::end_hold(&pool).await;
+    worker.process_next().await;
+    assert!(
+        worker.subtitles_backfilled.load(Ordering::Relaxed),
+        "released"
+    );
 }
 
 /// #229 item C (review round 12): with paid AI off only a dub job that

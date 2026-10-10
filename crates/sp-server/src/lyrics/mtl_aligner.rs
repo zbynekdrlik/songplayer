@@ -58,8 +58,11 @@ impl MtlConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MtlLine {
     pub text: String,
-    pub start_ms: u64,
-    pub end_ms: u64,
+    /// `None` (with `end_ms`): mtl could not time the line — upstream
+    /// filters every word of it away ("1 2 3 4", "24/7"). Kept, so the gate
+    /// reads every candidate line's text; never shipped (#144).
+    pub start_ms: Option<u64>,
+    pub end_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -251,8 +254,8 @@ fn parse_output_str(content: &str) -> Result<MtlOutput> {
         .into_iter()
         .map(|l| MtlLine {
             text: l.text,
-            start_ms: l.start_ms.unwrap_or(0),
-            end_ms: l.end_ms.unwrap_or(0),
+            start_ms: l.start_ms,
+            end_ms: l.end_ms,
         })
         .collect();
     Ok(MtlOutput {
@@ -535,21 +538,22 @@ mod tests {
         let out = parse_output_str(fixture).unwrap();
         assert_eq!(out.lines.len(), 2);
         assert_eq!(out.lines[0].text, "amazing grace");
-        assert_eq!(out.lines[0].start_ms, 1000);
-        assert_eq!(out.lines[0].end_ms, 2500);
+        assert_eq!(out.lines[0].start_ms, Some(1000));
+        assert_eq!(out.lines[0].end_ms, Some(2500));
         assert_eq!(out.device, "cuda");
         assert_eq!(out.elapsed_s, 106.4);
     }
 
     #[test]
-    fn parse_output_str_defaults_null_timing_to_zero() {
+    fn parse_output_str_keeps_a_null_timing_untimed() {
         let fixture = r#"{
             "lines": [{"text": "untimeable", "start_ms": null, "end_ms": null, "text_sk": null, "words": null}],
             "metadata": {"runtime_sec": 1.0, "device": "cpu", "cuda_oom_retried": true, "aligner": "x", "checkpoint": "x", "granularity": "word", "preprocess_sec": 0.1, "method": "MTL_BDR"}
         }"#;
         let out = parse_output_str(fixture).unwrap();
-        assert_eq!(out.lines[0].start_ms, 0);
-        assert_eq!(out.lines[0].end_ms, 0);
+        // #144: never 0 ms — an untimed line is never shipped at the start.
+        assert_eq!(out.lines[0].start_ms, None);
+        assert_eq!(out.lines[0].end_ms, None);
         assert_eq!(out.device, "cpu");
     }
 
@@ -558,6 +562,10 @@ mod tests {
         assert!(parse_output_str("not json").is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "mtl_untimed_tests.rs"]
+mod untimed_tests;
 
 #[cfg(test)]
 #[path = "mtl_encoding_guard_tests.rs"]

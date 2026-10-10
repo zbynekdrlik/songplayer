@@ -68,6 +68,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import time
@@ -87,13 +88,20 @@ CHECKPOINT_DESC = (
 )
 
 # The exact character set wrapper.py's preprocess_lyrics() keeps when
-# lowercasing+filtering raw lyric lines (a-z, apostrophe, space — everything
-# else, including digits and punctuation other than ', is stripped). This is
-# copied VERBATIM from LyricsAlignment-MTL/wrapper.py::preprocess_lyrics —
-# not reinterpreted — so our independent replication in
-# build_line_word_map() below produces byte-identical output to the
-# upstream function; see README "Word-to-line remapping".
-FILTER_CHARS = set("abcdefghijklmnopqrstuvwxyz' ")
+# lowercasing+filtering raw lyric lines (a-z, apostrophe, the ASCII space and
+# `~` — everything else, including digits, punctuation other than ', and every
+# other whitespace character, is stripped). This is the set
+# LyricsAlignment-MTL/wrapper.py::preprocess_lyrics keeps (its `d` dict) — #144
+# F3: the `~` was missing here — so build_line_word_map() below produces
+# byte-identical output to the upstream function; see README "Word-to-line
+# remapping".
+FILTER_CHARS = set("abcdefghijklmnopqrstuvwxyz' ~")
+
+# #144 F3: what separates two of upstream's words: its kept ASCII space, and
+# every line boundary of the `str.splitlines()` it reads the lyric file with.
+# Any OTHER whitespace (a non-breaking or thin space, a tab) is filtered out,
+# so the words around it merge.
+WORD_SEPARATORS = re.compile("[ \n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 
 # seconds per model output frame — copied VERBATIM from wrapper.py / model.py
 # (256 = maxpool-reduced CNN stride product, 22050 = the model's fixed
@@ -172,13 +180,12 @@ def gpu_polite() -> None:
 
 def filter_word(word: str) -> str:
     """Same per-character filter as upstream preprocess_lyrics(), applied to
-    a single already-whitespace-split word instead of a whole line. Filtering
-    a word in isolation vs. filtering the enclosing line then re-splitting on
-    whitespace produces IDENTICAL results, because the filter only ever
-    REMOVES characters — it never merges two words separated by real
-    whitespace (whitespace itself is a kept character) and never invents a
-    new internal space. See README for the full argument + the runtime
-    assertion that confirms it empirically for every fixture."""
+    a single word split at upstream's own separators (`WORD_SEPARATORS`)
+    instead of a whole line. Filtering such a word in isolation vs. filtering
+    the enclosing line then re-splitting produces IDENTICAL results: the
+    filter only ever REMOVES characters, and the only characters that
+    separate words after it are the ones split at here. See README for the
+    full argument + the runtime assertion that confirms it on every run."""
     return "".join(c for c in word.lower() if c in FILTER_CHARS)
 
 
@@ -188,7 +195,9 @@ def build_line_word_map(
     """Independently replicates the word list that
     LyricsAlignment-MTL/wrapper.py::preprocess_lyrics() derives when called
     WITHOUT a word_file (our usage — see README): each original line is
-    whitespace-split, each word is filtered via filter_word(), and any word
+    split at upstream's separators (`WORD_SEPARATORS`, #144 F3: never at a
+    non-breaking space or a tab, which upstream drops and so merges the
+    words around it), each word is filtered via filter_word(), and any word
     that filters down to the empty string (observed exactly once across the
     22 fixtures: a bare "20") is silently dropped — matching upstream's own
     behaviour of filtering a whole line then collapsing whitespace.
@@ -206,7 +215,7 @@ def build_line_word_map(
     line_word_counts: list[int] = []
     for line_idx, text in enumerate(lines_text):
         count = 0
-        for w in (text or "").split():
+        for w in WORD_SEPARATORS.split(text or ""):
             fw = filter_word(w)
             if fw:
                 filtered_words.append(fw)

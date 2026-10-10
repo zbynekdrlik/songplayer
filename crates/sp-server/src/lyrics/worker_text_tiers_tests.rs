@@ -339,3 +339,46 @@ fn a_track_or_a_finished_song_ends_the_pass_a_deferral_does_not() {
         assert!(!ends_the_pass(&TierOutcome::Return(waiting)), "{waiting:?}");
     }
 }
+
+/// #144 F3: the idle-only mode defers a song for the wall only when mtl
+/// would really run — never for a text the gate fails before mtl.
+#[test]
+fn mtl_runs_only_for_a_text_that_passes_the_coverage_verdict() {
+    let hymn = crate::lyrics::tier1::CandidateText {
+        source: "description".into(),
+        lines: vec!["amazing grace".into(), "how sweet the sound".into()],
+        line_timings: None,
+        has_timing: false,
+    };
+    let sung: Vec<AsrWord> = "amazing grace how sweet the sound"
+        .split_whitespace()
+        .zip(0u64..)
+        .map(|(w, i)| AsrWord {
+            text: w.into(),
+            start_ms: i * 300,
+            end_ms: i * 300 + 280,
+        })
+        .collect();
+    assert!(mtl_would_run(Some(&hymn), true, &sung));
+    assert!(
+        !mtl_would_run(Some(&hymn), false, &sung),
+        "no isolated vocal"
+    );
+    assert!(!mtl_would_run(Some(&hymn), true, &[]), "no transcript");
+    assert!(!mtl_would_run(None, true, &sung), "no candidate");
+    let mut unsung = sung.clone();
+    unsung.extend(sung.iter().map(|w| AsrWord {
+        text: "hallelujah".into(),
+        start_ms: w.start_ms + 3_000,
+        end_ms: w.end_ms + 3_000,
+    }));
+    unsung.extend(sung.iter().map(|w| AsrWord {
+        text: "oh".into(),
+        start_ms: w.start_ms + 6_000,
+        end_ms: w.end_ms + 6_000,
+    }));
+    assert!(
+        !mtl_would_run(Some(&hymn), true, &unsung),
+        "6 of 18 sung words fails Coverage before mtl"
+    );
+}

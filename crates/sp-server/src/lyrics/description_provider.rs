@@ -179,7 +179,10 @@ pub(crate) async fn fetch_raw_description(
 ///
 /// Cache contract matches `write_lyrics_cache`: on success the result is
 /// persisted so subsequent reprocesses skip Claude. On `Err`, no cache is
-/// written so the next attempt retries.
+/// written so the next attempt retries — except a refusal by Claude's
+/// content filter (#144, `ai::retry::ContentFiltered`): remembered for this
+/// raw text (`cleanup_refusal`), and answered from the cache, with no call,
+/// until the text changes.
 pub async fn clean_lyrics_via_claude(
     ai: &AiClient,
     title: &str,
@@ -188,8 +191,19 @@ pub async fn clean_lyrics_via_claude(
     cache_path: &Path,
     mode: CleanupMode,
 ) -> Result<Option<Vec<String>>> {
-    // Fast path: cache already records a decision.
-    if let Some(cached) = read_lyrics_cache(cache_path).await? {
+    // #144: a refusal of THIS text by Claude's content filter is final —
+    // never sent again (a changed text is asked again).
+    if crate::lyrics::cleanup_refusal::refused_earlier(cache_path, raw_blob).await {
+        return Err(crate::ai::retry::ContentFiltered {
+            detail: format!("refused earlier for this text ({})", cache_path.display()),
+        }
+        .into());
+    }
+    // Fast path: cache already records a decision (a refusal of ANOTHER
+    // text is none for this one: it is asked).
+    if !crate::lyrics::cleanup_refusal::records_a_refusal(cache_path).await
+        && let Some(cached) = read_lyrics_cache(cache_path).await?
+    {
         debug!(
             cache_path = %cache_path.display(),
             "clean_lyrics_via_claude: cache hit"
@@ -201,10 +215,15 @@ pub async fn clean_lyrics_via_claude(
         CleanupMode::Description => build_description_extraction_prompt(title, artist, raw_blob),
         CleanupMode::ScrapedLyrics => build_scraped_lyrics_cleanup_prompt(title, artist, raw_blob),
     };
-    let raw = ai
-        .chat_with_timeout(&system, &user, 180)
-        .await
-        .context("Claude clean_lyrics chat failed")?;
+    let raw = match ai.chat_with_timeout(&system, &user, 180).await {
+        Ok(raw) => raw,
+        Err(e) => {
+            if crate::ai::retry::content_filtered(&e) {
+                crate::lyrics::cleanup_refusal::remember(cache_path, raw_blob).await;
+            }
+            return Err(e.context("Claude clean_lyrics chat failed"));
+        }
+    };
     let parsed = parse_claude_response(&raw).context("Claude response malformed")?;
 
     write_lyrics_cache(cache_path, parsed.as_deref()).await?;

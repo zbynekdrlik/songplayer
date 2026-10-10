@@ -134,8 +134,25 @@ async fn a_named_node_with_its_key_serves_and_lists_no_peer() {
     assert_eq!(s.node_name.as_deref(), Some("snv"));
     assert!(s.serving);
     assert!(!s.transfers_paused);
+    assert!(!s.background_hold);
     assert_eq!(s.config_error, None);
     assert_eq!(s.peers, Vec::<PeerStatus>::new());
+}
+
+/// #230: the background hold shows as its own field; `transfers_paused`
+/// stays the operator's own pause.
+#[tokio::test]
+async fn a_held_node_shows_the_hold_apart_from_the_operators_pause() {
+    let (ex, _dir) = exchange().await;
+    store(&ex.pool, SETTING_NODE_NAME, "snv").await;
+    store(&ex.pool, SETTING_PEER_API_KEY, KEY).await;
+    crate::background_hold::hold_for_a_minute(&ex.pool).await;
+    let (code, body) = get_status(&ex).await;
+    assert_eq!(code, StatusCode::OK);
+    let s: ExchangeStatus = serde_json::from_str(&body).unwrap();
+    assert!(s.background_hold);
+    assert!(!s.transfers_paused, "the operator did not pause");
+    assert!(ex.transfers_paused().await, "the hold pauses the transfers");
 }
 
 /// `GET uri` on `app`: the status code and the body.

@@ -7,6 +7,7 @@ pub mod audio_fx; // #242: a playlist's own volume + parametric EQ (model, filte
 pub mod audio_level;
 pub mod audio_outputs;
 pub mod audio_outputs_save; // #233 release review: the dashboard's save decisions
+pub mod background_hold; // #230: a sp-90s press holds the background work 4 h / until sp-slow
 pub mod blend;
 pub mod clock_health;
 pub mod config;

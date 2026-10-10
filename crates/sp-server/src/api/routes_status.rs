@@ -64,3 +64,15 @@ pub fn on_air_fields(bus: &ProgramBus) -> (Option<String>, Vec<i64>) {
     let playlists = on_air_set(&on_air);
     (program_scene_name(&on_air), playlists.into_iter().collect())
 }
+
+/// #230: `GET /api/v1/background-hold` — the hold the health bar shows
+/// (`crate::background_hold::status`).
+pub async fn background_hold(
+    axum::extract::State(state): axum::extract::State<crate::AppState>,
+) -> axum::Json<sp_core::background_hold::BackgroundHold> {
+    axum::Json(crate::background_hold::status(&state.pool).await)
+}
+
+#[cfg(test)]
+#[path = "routes_status_tests.rs"]
+mod tests;

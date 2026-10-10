@@ -82,7 +82,7 @@ non-alphabetical order CI's rustfmt accepts). So running `cargo fmt --all`
 locally rewrites those `mod` lines into a different order — a FALSE positive that
 CI does NOT want. After any `cargo fmt --all`, `git checkout --
 crates/sp-server/src/db/models.rs` if you didn't intend to touch it, and confirm
-`cargo fmt --all --check` then flags ONLY models.rs (ignore that one). Never let
+`cargo fmt --all --check` then flags ONLY models.rs (ignore that one). **When YOUR change edits `models.rs` itself, never `git checkout` it after the fmt** (#144 F1: the checkout silently threw away the GREEN edits of `mark_video_lyrics*`): run the fmt, then `git diff crates/sp-server/src/db/models.rs | grep -E '^[-+](mod|#\[path|pub use)'` — revert only a module-block reorder, if any shows (on 10.10.2026 the local rustfmt no longer reordered it). Never let
 the models.rs reorder ride in an unrelated diff — CI's newer rustfmt would fail
 `--check` on it. (TIER-0: `cargo fmt` is the only local cargo command allowed;
 CI compiles everything else.)
@@ -181,6 +181,25 @@ already due. Model the consumer as the OS runs it: woken by each input at its
 real time AND by its timer `late` after each deadline, swept over ≥ 3 phases
 (0 / 2 / 15.6 ms, `preview_video_clock_tests.rs::one_second_late`), and assert
 the output does not depend on `late`.
+
+## A field type change on the TIER-0 box: rewrite EVERY value form (#144, 10.10.2026)
+
+Changing a struct field's type (`u64` → `Option<u64>`) means rewriting every
+literal site of the struct with no compiler to list them. A script that
+wraps only number literals (`start_ms: 1000` → `Some(1000)`) misses a
+computed value (`start_ms: 1_000 + i as u64 * 2_000`): CI 38046486771 broke
+on exactly that. After the rewrite, list each `Type {` block's field values
+that are NOT in the new form (a scan over every file that names the type,
+non-literals included) and fix each one before the push.
+
+## Moving a string or a call: grep the source-scan tests first (#144, 10.10.2026)
+
+Some tests read a source file with `include_str!` and assert it CONTAINS a
+literal (`worker_tests.rs::gather_uses_lyrics_ovh_primary_with_genius_fallback`
+pins gather.rs's calls and bail messages). A refactor that moves such a
+literal fails them with no behaviour change (CI 38048742066). Before moving a
+message or a call, `grep -rn '<the literal>' crates/*/src --include='*tests*'`
+and repoint the scan in the same push.
 
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these

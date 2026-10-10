@@ -55,6 +55,24 @@ impl LyricsWorker {
         }
     }
 
+    /// #144: `e` is Claude's content filter refusing this song's translation
+    /// (`ai::retry::content_filtered`)? Then it is final — the same text is
+    /// refused again and every refusal costs the proxy's 60 s cooldown — so
+    /// the song keeps its English lines, is skipped by the missing pass for
+    /// the rest of this run, and no backoff holds the next song (one WARN).
+    pub(crate) async fn translation_refused(&self, youtube_id: &str, e: &anyhow::Error) -> bool {
+        if !crate::ai::retry::content_filtered(e) {
+            return false;
+        }
+        warn!(
+            youtube_id,
+            "lyrics_worker: Claude's content filter refused this song's translation — it keeps its English lines, the next song goes on"
+        );
+        let mut backoff = self.retry_backoff.lock().await;
+        backoff.refused_translations.insert(youtube_id.to_string());
+        true
+    }
+
     /// #229 item C: the translation of `youtube_id` calls Claude — paid AI
     /// — so it runs only while this node's switch is on (`paid_ai::enabled`,
     /// read live); while it is off the song's translation is held
@@ -152,6 +170,13 @@ impl LyricsWorker {
                     backoff.silent_until = None;
                 }
                 info!("lyrics_worker: retranslation done for {youtube_id}");
+            }
+            Err(e) if crate::ai::retry::content_filtered(&e) => {
+                // #144: final — stamped forward like a done one, so the
+                // stale pass moves on; no backoff.
+                self.translation_refused(&youtube_id, &e).await;
+                let _ = stamp_translation_version(&self.pool, video_id, LYRICS_TRANSLATION_VERSION)
+                    .await;
             }
             Err(e) => {
                 // Leave the version unstamped (retry after backoff). Mirrors

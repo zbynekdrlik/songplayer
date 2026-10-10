@@ -25,7 +25,11 @@ pub struct ExchangeStatus {
     pub node_name: Option<String>,
     /// Serving = `node_name` + `peer_api_key` are set: the peer API answers.
     pub serving: bool,
+    /// The operator's own pause (`peer_transfers_paused`).
     pub transfers_paused: bool,
+    /// #230: the background hold pauses transfers too (`background_hold`).
+    #[serde(default)]
+    pub background_hold: bool,
     /// Why the exchange settings do not hold (the exchange then acts as off).
     /// It names settings and peers, never a secret (`peer::config`).
     pub config_error: Option<String>,
@@ -72,7 +76,8 @@ pub fn router(ex: Arc<Exchange>) -> Router {
 }
 
 pub async fn status(State(ex): State<Arc<Exchange>>) -> Json<ExchangeStatus> {
-    let transfers_paused = ex.transfers_paused().await;
+    let transfers_paused = ex.operator_paused().await;
+    let background_hold = crate::background_hold::held(&ex.pool).await;
     let (cfg, config_error) = match NodeConfig::load(&ex.pool).await {
         Ok(cfg) => (cfg, None),
         Err(e) => (NodeConfig::default(), Some(e)),
@@ -87,6 +92,7 @@ pub async fn status(State(ex): State<Arc<Exchange>>) -> Json<ExchangeStatus> {
         node_name: cfg.node_name.clone(),
         serving: cfg.serving(),
         transfers_paused,
+        background_hold,
         config_error,
         peers: cfg
             .peers

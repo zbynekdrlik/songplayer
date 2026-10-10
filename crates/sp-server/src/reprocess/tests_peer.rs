@@ -358,3 +358,27 @@ async fn a_providers_repair_ends_the_wait() {
         .unwrap();
     assert_eq!(waits, 0, "the repair ended the wait");
 }
+
+/// #230: while the background is held the repair starts on no row — no
+/// provider called, the row as it was; after the release it repairs it.
+#[tokio::test]
+async fn a_held_background_repairs_nothing_until_released() {
+    let pp = TestNode::start("pp", None).await;
+    let id = pp_with_a_parser_title(&pp).await;
+    let (chain, calls) = counting_chain();
+    let mut worker =
+        ReprocessWorker::new(pp.pool().clone(), Arc::new(chain), pp.cache().to_path_buf())
+            .with_peer(pp.ex.clone());
+    crate::background_hold::hold_for_a_minute(pp.pool()).await;
+    assert_eq!(worker.process_all().await.unwrap(), 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        title(&pp, id).await,
+        ("Guess".into(), "Unknown".into(), Some("regex".into()), 1),
+        "held: the row is untouched"
+    );
+    crate::background_hold::end_hold(pp.pool()).await;
+    assert_eq!(worker.process_all().await.unwrap(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(title(&pp, id).await.0, "Chain Song");
+}

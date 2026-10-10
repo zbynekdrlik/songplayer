@@ -186,7 +186,8 @@ pub const SETTING_NODE_NAME: &str = "node_name";
 pub const SETTING_PEER_API_KEY: &str = "peer_api_key";
 /// The peers this node asks before a heavy job: a JSON list (sp-server `peer::config`).
 pub const SETTING_PEERS: &str = "peers";
-/// "true" stops new peer transfers both ways (an operator's pause, later #230's).
+/// "true" stops new peer transfers both ways (an operator's pause; #230's background hold
+/// pauses them too, `Exchange::transfers_paused`).
 pub const SETTING_PEER_TRANSFERS_PAUSED: &str = "peer_transfers_paused";
 /// The most this node SENDS to its peers, in Mbit/s (its uplink also carries the live stream).
 pub const SETTING_PEER_SERVE_MAX_MBPS: &str = "peer_serve_max_mbps";

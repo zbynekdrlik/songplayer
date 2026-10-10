@@ -11,7 +11,7 @@ use crate::lyrics::g35t_client::AsrWord;
 fn line(text: &str, start_ms: u64) -> AlignedLine {
     AlignedLine {
         text: text.to_string(),
-        start_ms,
+        start_ms: Some(start_ms),
     }
 }
 
@@ -316,4 +316,167 @@ fn the_thresholds_separate_the_measured_catalog() {
             "partial text {m:?} must fail"
         );
     }
+}
+
+fn texts(lines: &[&str]) -> Vec<String> {
+    lines.iter().map(|l| l.to_string()).collect()
+}
+
+/// #144 F3: before mtl the gate's stats count the candidate's lines with a
+/// word (a dash line has none), the matched ones by the same half rule, and
+/// time none of them.
+#[test]
+fn before_timing_a_text_covering_too_little_gets_the_gates_stats() {
+    let mut words = Vec::new();
+    push_phrase(&mut words, "amazing grace how sweet like", 0);
+    push_phrase(&mut words, &"hallelujah ".repeat(10), 5_000);
+    let stats = coverage_fail_before_timing(
+        &texts(&[
+            "amazing grace",
+            "—",
+            "how sweet zzz qqq",
+            "like yyy xxx www",
+        ]),
+        &words,
+    )
+    .expect("5 of 15 sung words is under the floor");
+    assert_eq!(stats.lines_total, 3);
+    assert_eq!(stats.lines_matched, 2);
+    assert_eq!(stats.matched_frac, 2.0 / 3.0);
+    assert_eq!(stats.lines_timed, 0);
+    assert_eq!(stats.median_signed_ms, 0);
+    assert_eq!(stats.within_400_frac, 0.0);
+    assert_eq!(stats.sung_words, 15);
+    assert_eq!(stats.sung_covered_frac, 5.0 / 15.0);
+    assert_eq!(stats.max_uncovered_sung_ms, 5_000 + 9 * 300 + 300 - 5_000);
+}
+
+/// #144 F3: a text with no word covers nothing: under the floor, with a
+/// matched share of 0 (never 0 / 0).
+#[test]
+fn before_timing_a_text_with_no_word_fails_with_no_line() {
+    let mut words = Vec::new();
+    push_phrase(&mut words, "amazing grace", 0);
+    let stats = coverage_fail_before_timing(&texts(&["—", "..."]), &words).unwrap();
+    assert_eq!(stats.lines_total, 0);
+    assert_eq!(stats.lines_matched, 0);
+    assert_eq!(stats.matched_frac, 0.0);
+    assert_eq!(stats.sung_covered_frac, 0.0);
+}
+
+/// #144 F3 review round: the whole Coverage verdict is decided before mtl,
+/// the 25 s stretch included — a text covering 6 of 9 sung words (over the
+/// floor) still fails on the 80 s it leaves uncovered.
+#[test]
+fn before_timing_a_long_uncovered_stretch_fails_too() {
+    let mut words = Vec::new();
+    push_phrase(&mut words, "amazing grace how sweet the sound", 0);
+    push_phrase(&mut words, "oh", 10_000);
+    push_phrase(&mut words, "oh", 50_000);
+    push_phrase(&mut words, "oh", 90_000);
+    let stats =
+        coverage_fail_before_timing(&texts(&["amazing grace", "how sweet the sound"]), &words)
+            .expect("80 s uncovered is over the 25 s bound");
+    assert_eq!(stats.sung_covered_frac, 6.0 / 9.0);
+    assert_eq!(stats.max_uncovered_sung_ms, 90_300 - 10_000);
+    assert_eq!(stats.matched_frac, 1.0);
+}
+
+/// #144 F3 review round: under 0.60 of the lines matched fails before mtl
+/// too, though the text covers every sung word.
+#[test]
+fn before_timing_too_few_matched_lines_fail_too() {
+    let mut words = Vec::new();
+    push_phrase(&mut words, "amazing grace how sweet the sound", 0);
+    let stats = coverage_fail_before_timing(
+        &texts(&["amazing grace", "how sweet the sound", "zzz qqq", "yyy www"]),
+        &words,
+    )
+    .expect("2 of 4 lines matched is under 0.60");
+    assert_eq!(stats.sung_covered_frac, 1.0);
+    assert_eq!((stats.lines_total, stats.lines_matched), (4, 2));
+}
+
+/// #144 F3: a text that passes the Coverage verdict is left to mtl.
+#[test]
+fn before_timing_a_covering_text_is_left_to_mtl() {
+    let mut words = Vec::new();
+    push_phrase(&mut words, "amazing grace how sweet the sound", 0);
+    push_phrase(&mut words, "oh", 10_000);
+    let lines = texts(&["amazing grace", "how sweet the sound"]);
+    assert!(coverage_fail_before_timing(&lines, &words).is_none());
+}
+
+/// #144 F3 review round: the pre-check is the gate's own Coverage verdict —
+/// for the same texts, whatever mtl's timings, it fails before mtl exactly
+/// when `evaluate` fails on Coverage after it (mtl returns every line with
+/// its text unchanged).
+#[test]
+fn before_timing_decides_exactly_as_the_gate_does() {
+    let mut sung = Vec::new();
+    push_phrase(&mut sung, "amazing grace how sweet the sound", 0);
+    push_phrase(&mut sung, "that saved a wretch like me", 3_000);
+    push_phrase(&mut sung, "oh", 40_000);
+    let cases: [&[&str]; 6] = [
+        &[
+            "amazing grace",
+            "how sweet the sound",
+            "that saved a wretch",
+            "like me",
+        ],
+        &["amazing grace", "how sweet the sound"],
+        &["amazing grace", "zzz qqq", "yyy www", "how sweet the sound"],
+        &["—", "..."],
+        &[
+            "amazing grace",
+            "how sweet the sound",
+            "that saved a wretch like me oh",
+        ],
+        &["oh"],
+    ];
+    for case in cases {
+        let lines = texts(case);
+        for timing in [0, 1_500, 90_000] {
+            let timed: Vec<AlignedLine> = lines.iter().map(|t| line(t, timing)).collect();
+            let gate_fails_coverage = matches!(
+                evaluate(&timed, &sung),
+                GateVerdict::Fail {
+                    reason: GateFailReason::Coverage,
+                    ..
+                }
+            );
+            assert_eq!(
+                coverage_fail_before_timing(&lines, &sung).is_some(),
+                gate_fails_coverage,
+                "{case:?} at {timing} ms"
+            );
+        }
+    }
+}
+
+/// #144: a line the forced alignment could not time ("24/7": upstream mtl
+/// keeps no digit) counts for the text verdict — matched here — and never
+/// for the timing (it was compared against 0 ms before).
+#[test]
+fn an_untimed_line_counts_for_the_text_never_for_the_timing() {
+    let mut words = Vec::new();
+    push_phrase(&mut words, "amazing grace how sweet the sound", 1_000);
+    push_phrase(&mut words, "247 that saved a wretch", 3_000);
+    let lines = vec![
+        line("amazing grace", 1_000),
+        line("how sweet the sound", 1_600),
+        AlignedLine {
+            text: "24/7".into(),
+            start_ms: None,
+        },
+        line("that saved a wretch", 3_300),
+    ];
+    let GateVerdict::Pass(stats) = evaluate(&lines, &words) else {
+        panic!("every timed line is on the singing");
+    };
+    assert_eq!(
+        (stats.lines_total, stats.lines_matched, stats.lines_timed),
+        (4, 4, 3)
+    );
+    assert_eq!((stats.median_signed_ms, stats.within_400_frac), (0, 1.0));
 }

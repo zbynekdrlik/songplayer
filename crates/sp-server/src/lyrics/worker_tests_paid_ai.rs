@@ -211,3 +211,28 @@ async fn a_stale_translation_with_no_track_is_stamped_forward_not_held_while_off
     assert_eq!(holds(&cap), Vec::<String>::new(), "nothing held");
     assert_eq!(server.received_requests().await.unwrap().len(), 0);
 }
+
+/// #230: while the background is held the lyrics tick starts nothing — not
+/// a song, not a translation pass (Claude hears nothing); after the release
+/// the same tick translates the song.
+#[tokio::test]
+async fn a_held_background_starts_no_lyrics_work_until_released() {
+    let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
+    crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
+    let server = claude().await;
+    let (pp, worker, todo) = pp_with_claude(&server).await;
+    // The queue empty: an unheld tick runs the translation passes.
+    sqlx::query("DELETE FROM videos WHERE id = ?")
+        .bind(todo)
+        .execute(pp.pool())
+        .await
+        .unwrap();
+    crate::background_hold::hold_for_a_minute(pp.pool()).await;
+    worker.process_next().await;
+    assert_eq!(server.received_requests().await.unwrap().len(), 0);
+    assert_eq!(cached_sk(&pp), None, "held: nothing translated");
+    crate::background_hold::end_hold(pp.pool()).await;
+    worker.process_next().await;
+    assert!(!server.received_requests().await.unwrap().is_empty());
+    assert_eq!(cached_sk(&pp).as_deref(), Some("Cestu robíš"));
+}

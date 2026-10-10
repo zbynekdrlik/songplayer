@@ -8,23 +8,27 @@
 //! cover what is sung (`sung_coverage.rs`)? A partial lyric passes the
 //! first alone, and mtl then holds its lines over the singing it lacks.
 //!
-//! Matching is a monotonic n-gram anchor search: it borrows the "cursor
-//! only ever moves forward" idea from `eval/lyrics/combine_lines_times.py`
-//! (that file's `difflib`-based whole-stream alignment is NOT ported here
-//! — this is a simpler, purpose-built matcher for a single yes/no gate,
-//! not a full line/word recombination), so a repeated chorus line always
-//! binds to the NEXT occurrence in the ASR stream, never rebinding
-//! backwards onto an earlier line's match.
+//! Both halves read ONE alignment (`sung_coverage::align`): the
+//! order-preserving longest common subsequence of all the reference words
+//! against all the sung words. A line is matched when at least half of its
+//! words are on it (`line_matched`); its start is the sung start of its
+//! first aligned word. Only a matched line whose OWN first word is on the
+//! alignment is timed (offset, agreement): a misheard first word leaves a
+//! later word's start, which leaned the timing late (review: 9.5 % of the
+//! matched lines of the eval fixtures, 38 % of those beyond 400 ms). The alignment is monotonic, so a repeated chorus line
+//! binds to one sung repetition each, in order, never backwards. A line the
+//! forced alignment could not time (`start_ms: None`) counts for the text
+//! only, never for the timing.
 //!
-//! For each line, in order: take its first `min(3, line_len)` normalized
-//! words and search the ASR word stream for that exact n-gram starting at
-//! the cursor (the word right after the previous line's matched anchor
-//! word). If not found, fall back to a shorter n-gram (3 → 2 → 1 words) —
-//! this recovers a line whose 3rd word the ASR mis-transcribed while its
-//! first word(s) still match. No match at all → the line is unmatched and
-//! the cursor does not move.
+//! #144 first-week review: the anchor walk this replaced searched each
+//! line's first 3 → 2 → 1 words at or after a forward-only cursor. A
+//! misheard first word sent the 1-word fallback to a later occurrence, the
+//! cursor jumped there and every line in between was lost: the catalog's
+//! +102 / +313 / +444 s medians were that jump, not mtl (the eval fixtures
+//! went from 4 to 18 of 21 passing on the same mtl lines).
 
 use crate::lyrics::g35t_client::AsrWord;
+use crate::lyrics::sung_coverage::{Alignment, align};
 
 /// One forced-alignment (mtl) line under verification. Deliberately
 /// separate from `crate::lyrics::backend::AlignedLine` (which carries
@@ -33,13 +37,20 @@ use crate::lyrics::g35t_client::AsrWord;
 #[derive(Debug, Clone)]
 pub struct AlignedLine {
     pub text: String,
-    pub start_ms: u64,
+    /// `None`: the forced alignment could not time the line (#144: upstream
+    /// mtl filters every word of "1 2 3 4" away). It counts for the text
+    /// verdict, never for the timing.
+    pub start_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GateStats {
     pub lines_total: usize,
     pub lines_matched: usize,
+    /// #144: the matched lines whose own first word is on the alignment and
+    /// that the forced alignment timed; the median offset and
+    /// `within_400_frac` read only them.
+    pub lines_timed: usize,
     pub matched_frac: f64,
     pub median_signed_ms: i64,
     pub within_400_frac: f64,
@@ -114,54 +125,33 @@ pub(crate) fn normalized_words(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// First position >= `cursor` where `word_norms` contains `ngram`
-/// contiguously, or `None`.
-fn find_ngram(word_norms: &[String], cursor: usize, ngram: &[String]) -> Option<usize> {
-    let n = ngram.len();
-    if n == 0 || cursor + n > word_norms.len() {
-        return None;
-    }
-    for start in cursor..=(word_norms.len() - n) {
-        if &word_norms[start..start + n] == ngram {
-            return Some(start);
-        }
-    }
-    None
+/// #144: a line of `words` words with `aligned` of them on the alignment is
+/// matched when at least half of them are (a line with no word never is).
+pub(crate) fn line_matched(aligned: usize, words: usize) -> bool {
+    words > 0 && aligned * 2 >= words
+}
+
+/// Per-line matched sung `start_ms` of `alignment`, in the lines' order:
+/// the first aligned word's start, or `None` for a line under half on it.
+fn line_starts(alignment: &Alignment) -> Vec<Option<u64>> {
+    alignment
+        .lines
+        .iter()
+        .map(|l| {
+            if line_matched(l.aligned, l.words) {
+                l.first_sung_start_ms
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Per-line matched ASR `start_ms`, in the SAME order as `lines`. `None`
-/// means no match was found for that line (its normalized word list was
-/// empty, or no n-gram fallback found it in the ASR stream).
+/// means the line is not matched: it has no word, or under half of its
+/// words are on the alignment.
 pub fn match_lines(lines: &[AlignedLine], words: &[AsrWord]) -> Vec<Option<u64>> {
-    let word_norms: Vec<String> = words.iter().map(|w| normalize_word(&w.text)).collect();
-    let mut cursor: usize = 0;
-    let mut out = Vec::with_capacity(lines.len());
-
-    for line in lines {
-        let line_words = normalized_words(&line.text);
-        if line_words.is_empty() {
-            out.push(None);
-            continue;
-        }
-
-        let max_n = line_words.len().min(3);
-        let mut found: Option<usize> = None;
-        for n in (1..=max_n).rev() {
-            if let Some(pos) = find_ngram(&word_norms, cursor, &line_words[..n]) {
-                found = Some(pos);
-                break;
-            }
-        }
-
-        match found {
-            Some(pos) => {
-                out.push(Some(words[pos].start_ms));
-                cursor = pos + 1;
-            }
-            None => out.push(None),
-        }
-    }
-    out
+    line_starts(&align(lines, words))
 }
 
 /// Median of an i64 slice (average of the two middle values, rounded, for
@@ -191,65 +181,124 @@ pub(crate) fn covers_what_is_sung(sung: &crate::lyrics::sung_coverage::SungCover
     sung.covered_frac >= MIN_SUNG_COVERED_FRAC && sung.max_uncovered_ms <= MAX_UNCOVERED_SUNG_MS
 }
 
-/// Verify `lines` (forced-alignment output) against `words` (independent
-/// ASR). Verdict order: Coverage (`matched_frac < 0.60`, incl. zero
-/// lines) → Coverage of what is sung (#144: `sung_covered_frac < 0.55` or
-/// `max_uncovered_sung_ms > 25 000`) → Offset (`|median_signed_ms| > 400`)
-/// → Agreement (`within_400_frac < 0.70`) → Pass.
-pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
-    let matches = match_lines(lines, words);
+/// #144: what the gate decides from the lines' TEXT alone, read from the
+/// one word alignment: which lines are matched (the line matching's share)
+/// and what the text covers of the singing. No timing plays a part.
+struct TextVerdict {
+    alignment: Alignment,
+    lines_total: usize,
+    lines_matched: usize,
+    matched_frac: f64,
+}
 
-    let mut lines_total = 0usize;
-    let mut lines_matched = 0usize;
+impl TextVerdict {
+    fn of(lines: &[AlignedLine], words: &[AsrWord]) -> Self {
+        let alignment = align(lines, words);
+        let with_words = || alignment.lines.iter().filter(|on| on.words > 0);
+        let lines_total = with_words().count();
+        let lines_matched = with_words()
+            .filter(|on| line_matched(on.aligned, on.words))
+            .count();
+        let matched_frac = if lines_total > 0 {
+            lines_matched as f64 / lines_total as f64
+        } else {
+            0.0
+        };
+        Self {
+            alignment,
+            lines_total,
+            lines_matched,
+            matched_frac,
+        }
+    }
+
+    /// The gate's Coverage FAIL: no line with a word, under
+    /// `MIN_MATCHED_FRAC` of them matched, or the text does not cover what
+    /// is sung (`covers_what_is_sung`).
+    fn fails_coverage(&self) -> bool {
+        self.lines_total == 0
+            || self.matched_frac < MIN_MATCHED_FRAC
+            || !covers_what_is_sung(&self.alignment.coverage)
+    }
+
+    /// The gate's stats with these text numbers and the given timing ones.
+    fn stats(&self, lines_timed: usize, median_signed_ms: i64, within_400_frac: f64) -> GateStats {
+        let sung = self.alignment.coverage;
+        GateStats {
+            lines_total: self.lines_total,
+            lines_matched: self.lines_matched,
+            lines_timed,
+            matched_frac: self.matched_frac,
+            median_signed_ms,
+            within_400_frac,
+            sung_words: sung.sung_words,
+            sung_covered_frac: sung.covered_frac,
+            max_uncovered_sung_ms: sung.max_uncovered_ms,
+        }
+    }
+}
+
+/// #144 F3: the gate's Coverage FAIL for the candidate's own `lines`,
+/// BEFORE mtl. mtl returns every line it is given, with its text unchanged
+/// (`run.py`; a line upstream cannot time comes back untimed, never
+/// dropped), and the Coverage verdict reads only the text
+/// (`TextVerdict`): it is the same before mtl as after it. A text that fails
+/// it gets these stats (no line timed) and costs no mtl run.
+pub(crate) fn coverage_fail_before_timing(
+    lines: &[String],
+    words: &[AsrWord],
+) -> Option<GateStats> {
+    let untimed: Vec<AlignedLine> = lines
+        .iter()
+        .map(|text| AlignedLine {
+            text: text.clone(),
+            start_ms: None,
+        })
+        .collect();
+    let text = TextVerdict::of(&untimed, words);
+    text.fails_coverage().then(|| text.stats(0, 0, 0.0))
+}
+
+/// Verify `lines` (forced-alignment output) against `words` (independent
+/// ASR). Verdict order: Coverage (`TextVerdict::fails_coverage`: no line
+/// with a word, `matched_frac < 0.60`, or #144 the text does not cover what
+/// is sung — `sung_covered_frac < 0.55` or `max_uncovered_sung_ms >
+/// 25 000`) → Offset (`|median_signed_ms| > 400`) → Agreement
+/// (`within_400_frac < 0.70`) → Pass.
+pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
+    // #144: one alignment for both halves.
+    let text = TextVerdict::of(lines, words);
+
     let mut deltas: Vec<i64> = Vec::new();
     let mut within_count = 0usize;
-
-    for (line, matched_start) in lines.iter().zip(matches.iter()) {
-        if normalized_words(&line.text).is_empty() {
+    for (line, on) in lines.iter().zip(&text.alignment.lines) {
+        if !line_matched(on.aligned, on.words) {
             continue;
         }
-        lines_total += 1;
-        if let Some(asr_start) = matched_start {
-            lines_matched += 1;
-            let delta = *asr_start as i64 - line.start_ms as i64;
-            deltas.push(delta);
-            if delta.abs() <= WITHIN_MS {
-                within_count += 1;
-            }
+        // A misheard first word: matched, but its start is a later word's.
+        let Some(sung_start) = on.first_sung_start_ms.filter(|_| on.first_word_aligned) else {
+            continue;
+        };
+        // A line the forced alignment could not time is not timed here.
+        let Some(start_ms) = line.start_ms else {
+            continue;
+        };
+        let delta = sung_start as i64 - start_ms as i64;
+        deltas.push(delta);
+        if delta.abs() <= WITHIN_MS {
+            within_count += 1;
         }
     }
-
-    let matched_frac = if lines_total > 0 {
-        lines_matched as f64 / lines_total as f64
-    } else {
-        0.0
-    };
+    let lines_timed = deltas.len();
     let median_signed_ms = median_i64(&deltas);
-    let within_400_frac = if lines_matched > 0 {
-        within_count as f64 / lines_matched as f64
+    let within_400_frac = if lines_timed > 0 {
+        within_count as f64 / lines_timed as f64
     } else {
         0.0
     };
+    let stats = text.stats(lines_timed, median_signed_ms, within_400_frac);
 
-    let sung = crate::lyrics::sung_coverage::sung_coverage(lines, words);
-    let stats = GateStats {
-        lines_total,
-        lines_matched,
-        matched_frac,
-        median_signed_ms,
-        within_400_frac,
-        sung_words: sung.sung_words,
-        sung_covered_frac: sung.covered_frac,
-        max_uncovered_sung_ms: sung.max_uncovered_ms,
-    };
-
-    if lines_total == 0 || matched_frac < MIN_MATCHED_FRAC {
-        return GateVerdict::Fail {
-            reason: GateFailReason::Coverage,
-            stats,
-        };
-    }
-    if !covers_what_is_sung(&sung) {
+    if text.fails_coverage() {
         return GateVerdict::Fail {
             reason: GateFailReason::Coverage,
             stats,
@@ -277,7 +326,7 @@ mod tests {
     fn line(text: &str, start_ms: u64) -> AlignedLine {
         AlignedLine {
             text: text.to_string(),
-            start_ms,
+            start_ms: Some(start_ms),
         }
     }
 
@@ -310,7 +359,7 @@ mod tests {
         ];
         let mut words = Vec::new();
         for l in &lines {
-            push_phrase(&mut words, &l.text, l.start_ms);
+            push_phrase(&mut words, &l.text, l.start_ms.unwrap());
         }
 
         match evaluate(&lines, &words) {
@@ -479,7 +528,7 @@ mod tests {
             .iter()
             .map(|l| AlignedLine {
                 text: l["text"].as_str().expect("line.text").to_string(),
-                start_ms: l["start_ms"].as_u64().expect("line.start_ms"),
+                start_ms: Some(l["start_ms"].as_u64().expect("line.start_ms")),
             })
             .collect();
 
@@ -517,7 +566,7 @@ mod tests {
     fn real_fixture_shifted_30s_fails_offset() {
         let (mut aligned_lines, words) = load_fixture_lines_and_words();
         for l in &mut aligned_lines {
-            l.start_ms += 30_000;
+            l.start_ms = l.start_ms.map(|s| s + 30_000);
         }
         match evaluate(&aligned_lines, &words) {
             GateVerdict::Fail {
@@ -538,3 +587,7 @@ mod reference_gate_tests_mutants;
 #[cfg(test)]
 #[path = "reference_gate_tests_sung.rs"]
 mod reference_gate_tests_sung;
+
+#[cfg(test)]
+#[path = "reference_gate_tests_lcs.rs"]
+mod reference_gate_tests_lcs;

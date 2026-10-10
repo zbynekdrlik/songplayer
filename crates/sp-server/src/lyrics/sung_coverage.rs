@@ -13,10 +13,16 @@
 //! subsequence) of ALL the reference words against ALL the transcript words,
 //! with the gate's own `normalize_word`. It stays monotonic, so a repeated
 //! chorus in the text binds to one sung repetition each and never twice.
-//! It is deliberately not the gate's line-anchor walk: measured on #144, a
-//! one-word fallback anchor that jumps forward (the ASR heard "Where is our
-//! angel" for "We raise our hands up") orphans every line in between, which
+//! It was never the gate's former line-anchor walk: measured on #144, a
+//! one-word fallback anchor that jumped forward (the ASR heard "Where is our
+//! angel" for "We raise our hands up") orphaned every line in between, which
 //! reported a false 32 s uncovered stretch on a complete ★ text.
+//!
+//! The first-week review (#144) made it the gate's ONE alignment: `align`
+//! computes it once and both halves read it — the sung coverage here, and
+//! the reference → transcript line match in `reference_gate::match_lines`
+//! (a line's share of words on the alignment and its first aligned word's
+//! sung start).
 //!
 //! Pure; the thresholds that turn these numbers into a verdict live next to
 //! the other gate constants in `reference_gate.rs`.
@@ -37,8 +43,33 @@ pub struct SungCoverage {
     pub max_uncovered_ms: u64,
 }
 
-/// `covered[j]` is true when sung word `j` is aligned to a reference word by
-/// a longest common subsequence of `reference` and `sung`.
+/// One reference line on the alignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LineOnAlignment {
+    /// The line's words (normalized, non-empty).
+    pub words: usize,
+    /// How many of them the alignment holds.
+    pub aligned: usize,
+    /// The sung start of the first of them; `None` when none is aligned.
+    pub first_sung_start_ms: Option<u64>,
+    /// Whether the line's OWN first word is on the alignment: only then is
+    /// `first_sung_start_ms` where the line starts (a misheard first word
+    /// leaves a later word's start).
+    pub first_word_aligned: bool,
+}
+
+/// ONE order-preserving word alignment of a reference text against the sung
+/// transcript, read by both halves of the gate.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Alignment {
+    /// Per reference line, in the lines' order.
+    pub lines: Vec<LineOnAlignment>,
+    /// What the text covers of the sung words.
+    pub coverage: SungCoverage,
+}
+
+/// The pairs `(r, s)` — reference word `r` aligned to sung word `s` — of a
+/// longest common subsequence of `reference` and `sung`, in order of both.
 ///
 /// Fill: `suffix[at(i, j)]` = LCS length of `reference[i..]` and `sung[j..]`.
 /// Walk: for each sung word, skip the reference words an optimal alignment
@@ -49,7 +80,7 @@ pub struct SungCoverage {
 /// (`suffix[at(r, j)] > suffix[at(r + 1, j)]`); where both drops keep the
 /// optimum, the walk drops the reference word and keeps the sung word for
 /// the next reference word.
-pub(crate) fn covered_words(reference: &[String], sung: &[String]) -> Vec<bool> {
+pub(crate) fn aligned_pairs(reference: &[String], sung: &[String]) -> Vec<(usize, usize)> {
     let n = reference.len();
     let width = sung.len() + 1;
     let at = |i: usize, j: usize| i * width + j;
@@ -63,42 +94,96 @@ pub(crate) fn covered_words(reference: &[String], sung: &[String]) -> Vec<bool> 
             };
         }
     }
-    let mut covered = vec![false; sung.len()];
+    let mut pairs = Vec::new();
     let mut i = 0;
     for (j, sung_word) in sung.iter().enumerate() {
         i = (i..n)
             .find(|&r| reference[r] == *sung_word || suffix[at(r, j)] > suffix[at(r + 1, j)])
             .unwrap_or(n);
         if i < n && reference[i] == *sung_word {
-            covered[j] = true;
+            pairs.push((i, j));
             i += 1;
         }
+    }
+    pairs
+}
+
+/// `covered[j]` is true when sung word `j` is on the alignment
+/// (`aligned_pairs`). Tests read the walk through it; production reads the
+/// pairs in `align`.
+#[cfg(test)]
+pub(crate) fn covered_words(reference: &[String], sung: &[String]) -> Vec<bool> {
+    let mut covered = vec![false; sung.len()];
+    for (_, j) in aligned_pairs(reference, sung) {
+        covered[j] = true;
     }
     covered
 }
 
-/// Measure how much of `words` (the sung transcript) the text of `lines`
-/// covers. Line timing plays no part: only the words and their order.
-pub fn sung_coverage(
+/// Align the text of `lines` with `words` (the sung transcript) once: per
+/// line its words on the alignment, and what the text covers of the sung
+/// words. Line timing plays no part: only the words and their order.
+pub(crate) fn align(
     lines: &[crate::lyrics::reference_gate::AlignedLine],
     words: &[AsrWord],
-) -> SungCoverage {
-    let reference: Vec<String> = lines
-        .iter()
-        .flat_map(|l| normalized_words(&l.text))
-        .collect();
+) -> Alignment {
+    let mut reference: Vec<String> = Vec::new();
+    let mut owner: Vec<usize> = Vec::new();
+    // Each line's first word's index in `reference`.
+    let mut first_word: Vec<usize> = Vec::with_capacity(lines.len());
+    let mut per_line = Vec::with_capacity(lines.len());
+    for (index, line) in lines.iter().enumerate() {
+        let line_words = normalized_words(&line.text);
+        first_word.push(reference.len());
+        per_line.push(LineOnAlignment {
+            words: line_words.len(),
+            aligned: 0,
+            first_sung_start_ms: None,
+            first_word_aligned: false,
+        });
+        owner.extend(std::iter::repeat_n(index, line_words.len()));
+        reference.extend(line_words);
+    }
     let sung: Vec<(&AsrWord, String)> = words
         .iter()
         .map(|w| (w, normalize_word(&w.text)))
         .filter(|(_, norm)| !norm.is_empty())
         .collect();
     let norms: Vec<String> = sung.iter().map(|(_, norm)| norm.clone()).collect();
-    let covered = covered_words(&reference, &norms);
+    let mut covered = vec![false; sung.len()];
+    for (r, s) in aligned_pairs(&reference, &norms) {
+        covered[s] = true;
+        let on = &mut per_line[owner[r]];
+        on.aligned += 1;
+        if on.first_sung_start_ms.is_none() {
+            on.first_sung_start_ms = Some(sung[s].0.start_ms);
+        }
+        if r == first_word[owner[r]] {
+            on.first_word_aligned = true;
+        }
+    }
+    Alignment {
+        lines: per_line,
+        coverage: coverage_of(&sung, &covered),
+    }
+}
 
+/// Measure how much of `words` (the sung transcript) the text of `lines`
+/// covers (`align`'s coverage).
+pub fn sung_coverage(
+    lines: &[crate::lyrics::reference_gate::AlignedLine],
+    words: &[AsrWord],
+) -> SungCoverage {
+    align(lines, words).coverage
+}
+
+/// The coverage numbers of the sung words `sung` whose alignment marks are
+/// `covered`.
+fn coverage_of(sung: &[(&AsrWord, String)], covered: &[bool]) -> SungCoverage {
     let covered_count = covered.iter().filter(|&&c| c).count();
     let mut max_uncovered_ms = 0;
     let mut run_start: Option<u64> = None;
-    for ((word, _), &is_covered) in sung.iter().zip(&covered) {
+    for ((word, _), &is_covered) in sung.iter().zip(covered) {
         if is_covered {
             run_start = None;
             continue;

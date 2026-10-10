@@ -134,6 +134,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         )
         // Status
         .route("/api/v1/status", axum::routing::get(routes::status))
+        // #230: the background hold (a sp-90s press → no new background job)
+        .route(
+            "/api/v1/background-hold",
+            axum::routing::get(routes_status::background_hold),
+        )
         // #136: run each metadata provider of the production chain on one video
         .route(
             "/api/v1/metadata/probe",

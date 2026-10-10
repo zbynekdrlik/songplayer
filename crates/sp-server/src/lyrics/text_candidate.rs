@@ -61,6 +61,33 @@ pub(crate) async fn cleaned_text_candidate(
         }))
 }
 
+/// #144: what a scraped-lyrics cleanup's answer (`cleaned_text_candidate`)
+/// makes of its candidate in `gather`: the cleaned candidate; `None` when
+/// Claude's upstream content filter refused the cleanup (the same text is
+/// refused every time, so only THIS candidate is left out and the pass goes
+/// on with the other sources); else an error that fails the pass — the
+/// cleanup found no lyric, or it failed (an outage, which the backoff waits
+/// out). `what` names the candidate ("genius fallback", "lrclib-plain").
+pub(crate) fn cleanup_candidate(
+    answer: anyhow::Result<Option<CandidateText>>,
+    what: &str,
+    youtube_id: &str,
+) -> anyhow::Result<Option<CandidateText>> {
+    match answer {
+        Ok(Some(cleaned)) => Ok(Some(cleaned)),
+        Ok(None) => anyhow::bail!("gather: {what} cleanup returned no lyrics for {youtube_id}"),
+        Err(e) if crate::ai::retry::content_filtered(&e) => {
+            tracing::warn!(
+                youtube_id,
+                what,
+                "gather: Claude's content filter refused the cleanup — this candidate is left out, the pass goes on"
+            );
+            Ok(None)
+        }
+        Err(e) => anyhow::bail!("gather: {what} cleanup failed for {youtube_id}: {e}"),
+    }
+}
+
 #[cfg(test)]
 #[path = "text_candidate_tests.rs"]
 mod tests;

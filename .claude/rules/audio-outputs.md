@@ -9,6 +9,7 @@ paths:
   - "crates/sp-server/src/playback/vban_packet_tests_format.rs"
   - "crates/sp-server/src/playback/vban_packet_tests_legacy.rs"
   - "crates/sp-server/src/playback/asrc*.rs"
+  - "crates/sp-asrc/**"
   - "crates/sp-server/src/playback/asio_*.rs"
   - "crates/sp-server/src/api/audio*.rs"
   - "crates/sp-server/src/api/program_tests_outputs.rs"
@@ -35,6 +36,23 @@ calls `Servo::observe` once per program block, gives the answer to
 `Asrc::set_correction_ppm` and (through `frames_from_100ns`: positive =
 insert, negative = skip) `Splice::insert` / `skip`, and pushes
 `Splice::process(Asrc::process(block))` into the card's ring.
+
+**The stage lives in `crates/sp-asrc`** (#233, 10.10.2026): `SincStage`, a
+non-generic wrapper of rubato's `Async<f32>` sinc. rubato is generic, so its
+code compiles in the crate that names `Async::<f32>`; the workspace compiles
+sp-asrc at `opt-level = 3` in the dev profile (test and mutants inherit it).
+Named from sp-server, the 256-tap cubic stage ran unoptimized in tests: tens
+of ms a block, 20–110 s per ASIO test, ~330 s of the suite. Keep every
+rubato `Async` call in sp-asrc and nothing there `#[inline]` or generic, or
+the cost moves back into sp-server's builds. rubato itself is optimized too
+(`[profile.dev.package.rubato]`): its AVX / SSE / NEON dot kernels
+(`dot_avx_f32_dyn`, `impl AvxSample for f32`) are NOT generic, so they
+compile in rubato — sp-asrc alone took the slowest ASIO test only from 46 s
+to 31 s (nextest, mutation shard logs, CI 38041182285). Read a slow test's
+time in the `mutants-report-shard-*` artifact's per-mutant logs (`PASS [
+31.123s]`); the Test job's `cargo test` prints only the binary's total. `asrc_params()` (the filter)
+stays in sp-server's `asrc.rs`. VBAN's `Fft` (`vban_rate.rs`) is still
+compiled in sp-server.
 
 **The observation** (per block, on the program wall, 100 ns): when the block
 was handled, its boundary (stamp), the frames buffered for the card (the

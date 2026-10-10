@@ -735,13 +735,22 @@ fn gather_uses_lyrics_ovh_primary_with_genius_fallback() {
         helper.contains("CleanupMode::ScrapedLyrics"),
         "the lrclib-plain cleanup (text_candidate.rs) must pass CleanupMode::ScrapedLyrics"
     );
+    // #144: the cleanup's answer goes through `cleanup_candidate`, which
+    // fails the pass on an empty cleanup or an outage and leaves out only a
+    // content-filtered candidate (its messages and that fate are pinned in
+    // text_candidate_tests.rs).
     assert!(
-        src.contains("lrclib-plain cleanup returned no lyrics"),
-        "gather.rs must bail with 'lrclib-plain cleanup returned no lyrics' on Ok(None)/empty"
+        src.contains("cleanup_candidate(answer, \"lrclib-plain\", &youtube_id)?"),
+        "gather.rs must route the lrclib-plain cleanup's answer through cleanup_candidate"
     );
     assert!(
-        src.contains("lrclib-plain cleanup failed"),
-        "gather.rs must bail with 'lrclib-plain cleanup failed' on Err"
+        src.contains("cleanup_candidate(answer, \"genius fallback\", &youtube_id)?"),
+        "gather.rs must route the genius fallback cleanup's answer through cleanup_candidate"
+    );
+    assert!(
+        helper.contains("cleanup returned no lyrics for {youtube_id}")
+            && helper.contains("cleanup failed for {youtube_id}: {e}"),
+        "cleanup_candidate must fail the pass on an empty cleanup and on an outage"
     );
     // Synced-lrclib arm: must call the detection helper.
     assert!(

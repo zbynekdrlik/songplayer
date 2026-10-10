@@ -177,6 +177,10 @@ impl DubWorker {
         if !worker_enabled(enabled.as_deref()) {
             return;
         }
+        // #230: a held background starts no new job (a running one finishes).
+        if crate::background_hold::holds(&self.pool, crate::background_hold::Job::Dub).await {
+            return;
+        }
 
         // #182: once per process, give every finished dub that still lacks the
         // subtitle track (finished before D3 shipped) its EN/SK subtitles.

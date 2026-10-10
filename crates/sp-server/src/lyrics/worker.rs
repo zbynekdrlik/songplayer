@@ -78,6 +78,9 @@ pub struct LyricsWorker {
 pub(crate) struct RetryBackoff {
     pub(crate) silent_until: Option<Instant>,
     pub(crate) consecutive_failures: u32,
+    /// #144: songs whose translation Claude's content filter refused this
+    /// run: skipped by the missing-translation pass (`translation_refused`).
+    pub(crate) refused_translations: std::collections::HashSet<String>,
 }
 
 /// Re-export so `worker_tests` can keep importing from
@@ -388,6 +391,10 @@ impl LyricsWorker {
             .unwrap_or(true);
         if !enabled {
             debug!("worker: lyrics_worker_enabled=false, skipping this tick");
+            return;
+        }
+        // #230: a held background starts no new job (a running one finishes).
+        if crate::background_hold::holds(&self.pool, crate::background_hold::Job::Lyrics).await {
             return;
         }
         // #229: a track made here while a peer had the song stands in for
@@ -788,7 +795,8 @@ impl LyricsWorker {
                 return;
             }
         }
-        let result = get_next_video_missing_translation(&self.pool, &self.cache_dir).await;
+        let skip = self.retry_backoff.lock().await.refused_translations.clone();
+        let result = get_next_video_missing_translation(&self.pool, &self.cache_dir, &skip).await;
         let (video_id, youtube_id) = match result {
             Ok(Some(pair)) => pair,
             _ => return,
@@ -847,6 +855,9 @@ impl LyricsWorker {
                 backoff.silent_until = None;
             }
             Err(e) => {
+                if self.translation_refused(&youtube_id, &e).await {
+                    return;
+                }
                 debug!("lyrics_worker: translation retry failed for {youtube_id}: {e}");
                 let mut backoff = self.retry_backoff.lock().await;
                 backoff.consecutive_failures = backoff.consecutive_failures.saturating_add(1);
@@ -961,3 +972,6 @@ mod tests_peer;
 #[path = "worker_tests_paid_ai.rs"]
 #[cfg(test)]
 mod tests_paid_ai;
+#[path = "worker_tests_translation_refused.rs"]
+#[cfg(test)]
+mod tests_translation_refused;
