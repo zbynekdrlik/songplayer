@@ -181,3 +181,65 @@ async fn the_translation_gender_and_version_reach_every_row_of_the_video() {
     assert_eq!(translation(&pool, 1).await, (Some("f".to_string()), 0));
     assert_eq!(translation(&pool, 3).await, (None, 0), "another video");
 }
+
+/// A terminal pass leaves no ★: a parked video serves no ★ text.
+#[tokio::test]
+async fn a_terminal_pass_clears_the_star_on_every_row_of_the_video() {
+    let pool = siblings().await;
+    mark_video_lyrics_complete(&pool, 1, "lrclib+mtl@rev1/g35t-ok", 22, None, None)
+        .await
+        .unwrap();
+    mark_video_lyrics(&pool, 2, false, Some("no_source"), 22)
+        .await
+        .unwrap();
+    assert_eq!((state(&pool, 1).await.3, state(&pool, 2).await.3), (0, 0));
+    mark_video_lyrics_complete(&pool, 1, "lrclib+mtl@rev1/g35t-ok", 22, None, None)
+        .await
+        .unwrap();
+    mark_unsupported_source(&pool, 1, 22).await.unwrap();
+    assert_eq!((state(&pool, 1).await.3, state(&pool, 2).await.3), (0, 0));
+}
+
+/// The operator's override text is the video's lyrics input: it reaches
+/// every row (a pass of any row serves every row).
+#[tokio::test]
+async fn the_override_text_spreads_to_every_row_of_the_video() {
+    let pool = siblings().await;
+    sqlx::query("UPDATE videos SET lyrics_override_text = 'Moj text' WHERE id = 2")
+        .execute(&pool)
+        .await
+        .unwrap();
+    spread_lyrics_override(&pool, 2).await.unwrap();
+    let texts: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT lyrics_override_text FROM videos ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        texts,
+        vec![
+            Some("Moj text".to_string()),
+            Some("Moj text".to_string()),
+            None
+        ]
+    );
+}
+
+/// A video with a dub-requested row in any playlist is never a lyrics job:
+/// its one `{yt}_lyrics.json` is the dub's subtitles.
+#[tokio::test]
+async fn a_video_dubbed_in_another_playlist_is_no_lyrics_job() {
+    let pool = siblings().await;
+    sqlx::query("UPDATE videos SET dub_requested = 1 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let next = crate::lyrics::reprocess::get_next_video_for_lyrics(
+        &pool,
+        crate::lyrics::LYRICS_PIPELINE_VERSION,
+    )
+    .await
+    .unwrap()
+    .expect("another video is due");
+    assert_eq!(next.id, 3);
+}

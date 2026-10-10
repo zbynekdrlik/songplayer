@@ -325,3 +325,51 @@ async fn the_song_list_reads_each_flag_from_its_row() {
     assert_eq!(flags(2), [true, false, false, false, false]);
     assert_eq!(flags(3), [false, false, false, false, false]);
 }
+
+/// #144 F1: the operator's override text, PATCHed on one row, reaches every
+/// row of the video (a pass of any row serves every row); a blank one clears
+/// every row.
+#[tokio::test]
+async fn an_override_text_patched_on_one_row_reaches_every_row_of_the_video() {
+    let state = test_state().await;
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, is_active) VALUES \
+         (1, 'p', 'u', 1), (2, 'q', 'u2', 1)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized) VALUES \
+         (1, 1, 'yt-shared', 1), (2, 2, 'yt-shared', 1), (3, 1, 'yt-other', 1)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    for (text, want) in [("Moj text", Some("Moj text")), ("  ", None)] {
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/videos/2")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"lyrics_override_text": text}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT, "{text:?}");
+        let texts: Vec<Option<String>> =
+            sqlx::query_scalar("SELECT lyrics_override_text FROM videos ORDER BY id")
+                .fetch_all(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            texts,
+            vec![want.map(str::to_string), want.map(str::to_string), None],
+            "{text:?}"
+        );
+    }
+}

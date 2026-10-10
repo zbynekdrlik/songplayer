@@ -30,6 +30,22 @@ pub async fn set_video_lyrics_reference(
     Ok(res.rows_affected())
 }
 
+/// #144 F1: copy `video_id`'s `lyrics_override_text` to every row of its
+/// video — the override is the video's lyrics input (one
+/// `{yt}_lyrics.json`), and a pass of any row serves every row, so a text
+/// left on one row only would be lost to a sibling's pass.
+pub async fn spread_lyrics_override(pool: &SqlitePool, video_id: i64) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE videos SET lyrics_override_text = \
+             (SELECT lyrics_override_text FROM videos WHERE id = ?1) \
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?1)",
+    )
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Record the owner's "Nesedí" feedback on a reference-flagged song (#142,
 /// `POST /api/v1/lyrics/songs/{id}/reference-feedback`). Clears
 /// `lyrics_reference`, stamps `lyrics_reference_rejected_at` (RFC3339 UTC),

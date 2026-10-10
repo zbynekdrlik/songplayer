@@ -478,7 +478,7 @@ pub async fn mark_video_lyrics(
          lyrics_manual_priority = 0, \
          lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-         lyrics_alignment_model = NULL \
+         lyrics_alignment_model = NULL, lyrics_reference = 0 \
          WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
     )
     .bind(has_lyrics as i32)
@@ -520,7 +520,7 @@ pub async fn mark_video_lyrics_complete(
     //
     // #144 F1: every row of the video (the lyrics file is the video's), and
     // ★ WITH the track: set exactly when the persisted source is a gate PASS.
-    let reference = source.ends_with(crate::lyrics::worker_reference::REFERENCE_SOURCE_SUFFIX);
+    let reference = source.ends_with(crate::lyrics::REFERENCE_SOURCE_SUFFIX);
     sqlx::query(
         "UPDATE videos SET has_lyrics = 1, lyrics_source = ?, \
          lyrics_pipeline_version = ?, lyrics_quality_score = ?, \
@@ -956,7 +956,7 @@ pub async fn mark_unsupported_source(
          lyrics_pipeline_version = ?, lyrics_manual_priority = 0, \
          lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-         lyrics_alignment_model = NULL \
+         lyrics_alignment_model = NULL, lyrics_reference = 0 \
          WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
     )
     .bind(current_pipeline_version as i64)

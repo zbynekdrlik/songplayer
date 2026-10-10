@@ -94,6 +94,12 @@ use sp_core::lyrics::LyricsTrack;
 ///   mtl rows re-run to identical output and re-★.
 pub const LYRICS_PIPELINE_VERSION: u32 = 22;
 
+/// #144 F1: the suffix of a lyrics source that passed the reference gate
+/// (`<candidate>+mtl@rev1/g35t-ok`): `db::models::mark_video_lyrics_complete`
+/// sets ★ exactly for it, on every row of the video, with the persisted
+/// track.
+pub const REFERENCE_SOURCE_SUFFIX: &str = "/g35t-ok";
+
 /// Monotonic version of the SK **translation** output (#152), INDEPENDENT of
 /// `LYRICS_PIPELINE_VERSION`. Bump ONLY when the translation prompt changes in
 /// a way that alters the Slovak wording (e.g. the gender framing added in

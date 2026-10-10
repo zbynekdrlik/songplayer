@@ -137,7 +137,8 @@ pub async fn self_heal_cache(pool: &SqlitePool, cache_dir: &Path) -> Result<(), 
         let json_path = cache_dir.join(format!("{youtube_id}_lyrics.json"));
         if !json_path.exists() {
             sqlx::query(
-                "UPDATE videos SET has_lyrics = 0, lyrics_source = NULL WHERE youtube_id = ?",
+                "UPDATE videos SET has_lyrics = 0, lyrics_source = NULL, lyrics_reference = 0 \
+                 WHERE youtube_id = ?",
             )
             .bind(&youtube_id)
             .execute(pool)

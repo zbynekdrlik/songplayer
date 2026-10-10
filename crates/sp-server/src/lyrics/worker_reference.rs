@@ -6,7 +6,8 @@
 //! the best text candidate via mtl, verifies it against the song's one Gemini
 //! ASR transcript through the two-way reference gate
 //! (`orchestrator::run_reference_stage`), and on gate PASS ships
-//! the mtl line timings directly while stamping `videos.lyrics_reference`.
+//! the mtl line timings directly, under a `…/g35t-ok` source (#144 F1: the
+//! persist sets `videos.lyrics_reference` from it, on every row of the video).
 //! Every PASS/FAIL/ERROR writes the `{youtube_id}_alignment_audit.json`
 //! sidecar (#144: a PASS too, so the gate's numbers — the sung coverage
 //! included — are on disk for every ★ row, and a stale FAIL audit of an
@@ -19,20 +20,14 @@ use sp_core::lyrics::LyricsTrack;
 use tracing::{info, warn};
 
 use super::worker::{LyricsWorker, align_track_to_lyrics_track};
-use crate::lyrics::LYRICS_PIPELINE_VERSION;
-
-/// #144 F1: the suffix of a lyrics source that passed the reference gate
-/// (`<candidate>+mtl@rev1/g35t-ok`): `mark_video_lyrics_complete` sets ★
-/// exactly for it, on every row of the video, with the persisted track.
-pub(crate) const REFERENCE_SOURCE_SUFFIX: &str = "/g35t-ok";
+use crate::lyrics::{LYRICS_PIPELINE_VERSION, REFERENCE_SOURCE_SUFFIX};
 
 impl LyricsWorker {
     /// Lever 2 (#143): forced-alignment reference stage. See
     /// `orchestrator::run_reference_stage` for the mtl-align → gate decision
     /// against `words`, the song's one g35t transcript (#144); this wraps it
     /// with the skip conditions (an empty transcript is one: no gate can pass
-    /// on it, so no mtl is spent), the
-    /// `videos.lyrics_reference` flag update, and the
+    /// on it, so no mtl is spent) and the
     /// `_alignment_audit.json` sidecar of every gate outcome. `backend` is
     /// the injection seam (`orchestrator::ReferenceStageBackend`) —
     /// production passes `RealReferenceStageBackend`, tests pass a fake.
@@ -138,7 +133,7 @@ impl LyricsWorker {
                     within_400_frac = stats.within_400_frac,
                     sung_covered_frac = stats.sung_covered_frac,
                     max_uncovered_sung_ms = stats.max_uncovered_sung_ms,
-                    "reference_stage: gate PASS — stamping ★ reference (#143)"
+                    "reference_stage: gate PASS — the track is the ★ tier (#143; the persist writes ★)"
                 );
                 crate::lyrics::audit_ctx::write_alignment_audit(
                     Some(&audit_ctx),

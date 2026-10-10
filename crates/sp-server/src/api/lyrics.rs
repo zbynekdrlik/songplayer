@@ -289,7 +289,7 @@ pub async fn post_reprocess(
                             WHEN lyrics_source IN ('failed', 'empty', 'no_source', 'unsupported_source') THEN NULL \
                             ELSE lyrics_source \
                         END \
-                 WHERE id IN ({})",
+                 WHERE youtube_id IN (SELECT youtube_id FROM videos WHERE id IN ({}))",
                 placeholders.join(",")
             );
             let mut q = sqlx::query(&sql);

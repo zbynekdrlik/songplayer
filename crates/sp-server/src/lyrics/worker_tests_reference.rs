@@ -544,8 +544,8 @@ async fn run_mtl_reference_stage_fail_leaves_the_star_to_the_persist_and_writes_
     .execute(&pool)
     .await
     .unwrap();
-    // Starts with lyrics_reference = 1 to prove a Fail actively CLEARS it,
-    // not merely leaves the default at 0.
+    // Starts with lyrics_reference = 1 to prove the gate leaves ★ alone
+    // (#144 F1: the persisted base-tier track clears it).
     let video_id: i64 = sqlx::query_scalar(
         "INSERT INTO videos (playlist_id, youtube_id, title, song, artist, normalized, \
          lyrics_reference) VALUES (1, 'yt_fail', 'T', 'S', 'A', 1, 1) RETURNING id",
