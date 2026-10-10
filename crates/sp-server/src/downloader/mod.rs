@@ -134,6 +134,13 @@ pub(crate) fn ytdlp_audio_args(
 /// swap — instead of the update silently failing on a file lock.
 pub type YtdlpLock = std::sync::Arc<tokio::sync::Mutex<()>>;
 
+/// The process's one [`YtdlpLock`] (#223 S11: the video upgrade takes it
+/// too, so it is no longer only the startup task's).
+pub fn ytdlp_lock() -> YtdlpLock {
+    static LOCK: std::sync::OnceLock<YtdlpLock> = std::sync::OnceLock::new();
+    LOCK.get_or_init(YtdlpLock::default).clone()
+}
+
 /// Background worker that downloads, extracts metadata, and normalizes videos.
 pub struct DownloadWorker {
     pool: SqlitePool,

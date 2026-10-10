@@ -51,6 +51,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (32, MIGRATION_V32),
     (33, MIGRATION_V33),
     (34, MIGRATION_V34),
+    (35, MIGRATION_V35),
 ];
 
 const MIGRATION_V1: &str = "
@@ -551,6 +552,16 @@ ALTER TABLE videos ADD COLUMN video_height INTEGER;
 ALTER TABLE videos ADD COLUMN video_fps REAL;
 ";
 
+/// #223 S11: a song's in-place video upgrade, written on every row of the
+/// video (`video_upgrade::record`): the cap it was checked at, what came of
+/// it (`upgraded`, `no_better`, `failed: …`) and when (ms since the epoch).
+/// NULL = never checked.
+const MIGRATION_V35: &str = "
+ALTER TABLE videos ADD COLUMN video_upgrade_cap INTEGER;
+ALTER TABLE videos ADD COLUMN video_upgrade_state TEXT;
+ALTER TABLE videos ADD COLUMN video_upgrade_at INTEGER;
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -726,6 +737,9 @@ mod tests_v33;
 #[path = "mod_tests_v34.rs"]
 #[cfg(test)]
 mod tests_v34;
+#[path = "mod_tests_v35.rs"]
+#[cfg(test)]
+mod tests_v35;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

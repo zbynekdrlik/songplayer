@@ -38,6 +38,7 @@ pub mod test_item; // #228: camera-box's measurement clip as a one-item test pla
 #[cfg(test)]
 mod test_log; // a scoped log capture shared by the tests
 mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
+pub mod video_upgrade; // #223 S11: a cached song's video upgraded in place
 
 pub use panic_hook::install_panic_hook;
 
@@ -467,10 +468,9 @@ pub async fn start(
                         }
                         Err(e) => warn!("yt-dlp self-update: startup check failed: {e}"),
                     }
-                    // Shared with the download worker below: an update never
-                    // runs while a song is downloading and vice versa.
-                    let ytdlp_lock: downloader::YtdlpLock =
-                        std::sync::Arc::new(tokio::sync::Mutex::new(()));
+                    // Shared with the download worker below and the video
+                    // upgrade: an update never runs while one runs yt-dlp.
+                    let ytdlp_lock: downloader::YtdlpLock = downloader::ytdlp_lock();
                     let ytdlp_interval_secs = ytdlp_update_interval_secs();
                     tokio::spawn(periodic_ytdlp_update(
                         dl_pool.clone(),

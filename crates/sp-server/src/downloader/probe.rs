@@ -139,9 +139,22 @@ fn yt_dlp_error(stderr: &str) -> String {
 }
 
 /// Run the probe with the box's yt-dlp (module doc).
-#[cfg_attr(test, mutants::skip)] // spawns yt-dlp; `probe_args` and `report` are tested
+#[cfg_attr(test, mutants::skip)] // one call; `resolve` is the spawn
 pub(crate) async fn run(ytdlp: &Path, cookies: Option<&Path>, cap: u32) -> YoutubeProbeReport {
-    let url = format!("https://www.youtube.com/watch?v={PROBE_VIDEO}");
+    resolve(ytdlp, cookies, PROBE_VIDEO, cap).await
+}
+
+/// What a download of `youtube_id` at `cap` would fetch, downloading
+/// nothing (the probe's video, or a song the video upgrade checks, #223
+/// S11).
+#[cfg_attr(test, mutants::skip)] // spawns yt-dlp; `probe_args` and `report` are tested
+pub(crate) async fn resolve(
+    ytdlp: &Path,
+    cookies: Option<&Path>,
+    youtube_id: &str,
+    cap: u32,
+) -> YoutubeProbeReport {
+    let url = format!("https://www.youtube.com/watch?v={youtube_id}");
     let mut cmd = super::ytdlp_cmd::ytdlp_command(ytdlp);
     cmd.args(probe_args(&format::format_spec(cap), cookies, &url))
         .stdout(std::process::Stdio::piped())
@@ -151,7 +164,7 @@ pub(crate) async fn run(ytdlp: &Path, cookies: Option<&Path>, cap: u32) -> Youtu
     let has_cookies = cookies.is_some();
     match tokio::time::timeout(PROBE_TIMEOUT, cmd.output()).await {
         Ok(Ok(out)) => report(
-            PROBE_VIDEO,
+            youtube_id,
             cap,
             has_cookies,
             out.status.success(),
@@ -160,13 +173,13 @@ pub(crate) async fn run(ytdlp: &Path, cookies: Option<&Path>, cap: u32) -> Youtu
             u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         ),
         Ok(Err(e)) => refused(
-            PROBE_VIDEO,
+            youtube_id,
             cap,
             has_cookies,
             format!("yt-dlp did not start: {e}"),
         ),
         Err(_) => refused(
-            PROBE_VIDEO,
+            youtube_id,
             cap,
             has_cookies,
             format!("yt-dlp did not answer in {} s", PROBE_TIMEOUT.as_secs()),

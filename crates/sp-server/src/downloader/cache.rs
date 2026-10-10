@@ -98,6 +98,12 @@ static TEMP_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[a-zA-Z0-9_-]{11}_(?:video|audio)(?:_upgrade)?_temp(?:\..+)?$").unwrap()
 });
 
+/// Whether `filename` is a download's temp, which the startup self-heal
+/// removes ([`TEMP_RE`]).
+pub(crate) fn is_download_temp(filename: &str) -> bool {
+    TEMP_RE.is_match(filename)
+}
+
 /// A file named after an audio sidecar ([`derived_files`]): captures the base
 /// name (`{song}_{artist}_{id}_normalized[_gf]`) and the YouTube id.
 static DERIVED_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -731,7 +737,7 @@ pub fn scan_cache(cache_dir: &Path) -> ScanResult {
             continue;
         }
 
-        if TEMP_RE.is_match(filename) {
+        if is_download_temp(filename) {
             temps.push(path);
             continue;
         }
