@@ -604,23 +604,31 @@ jobs:
           echo "OK: All Rust files are within the 1000-line limit."
 
   red-green-order:
-    # Enforces regression-test-first.md commit ordering on PRs: every
-    # `fix(#N)` commit in the PR must be preceded by a `test(#N)` commit
-    # with the same issue number. See scripts/check-red-green-order.sh
-    # and issue #92.
+    # Enforces regression-test-first.md commit ordering: every `fix(#N)`
+    # commit must be preceded by a `test(#N)` commit with the same issue
+    # number. See scripts/check-red-green-order.sh and issue #92. It runs on
+    # the release PR (main..dev) AND on every dev push over the same range
+    # (dev's commits not yet on main): run on the PR alone, a `fix(#N)` that
+    # landed on dev without its test was found only at release time (release
+    # PRs #160 and #247), when the retroactive declaration costs a full cycle.
     name: RED-GREEN Commit Order
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev'
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Self-test the check script
         run: scripts/check-red-green-order.sh --self-test
-      - name: Check PR commit ordering
+      - name: Check commit ordering
         run: |
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            HEAD_SHA="$(git rev-parse HEAD)"
+            BASE_SHA="$(git merge-base origin/main "$HEAD_SHA")"
+          fi
           scripts/check-red-green-order.sh "$BASE_SHA..$HEAD_SHA"
 
   coverage:
@@ -815,8 +823,9 @@ jobs:
           results='${{ toJSON(needs) }}'
           echo "Job results: $results"
           # De-dup (#124): the shared build/test jobs run on the `push` event, the
-          # PR-specific gates (version-check and red-green-order on pull_request;
-          # mutation-testing on the dev push, pushed-range scoped). So on EITHER
+          # PR-specific gates (version-check on pull_request; red-green-order on
+          # pull_request and the dev push; mutation-testing on the dev push,
+          # pushed-range scoped). So on EITHER
           # event some needed jobs are SKIPPED here —
           # they ran (and gated) on the sibling event for the same commit SHA. The
           # invariant that holds on both events: no needed job may FAIL/cancel;
