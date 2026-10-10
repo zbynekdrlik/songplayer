@@ -192,6 +192,15 @@ on exactly that. After the rewrite, list each `Type {` block's field values
 that are NOT in the new form (a scan over every file that names the type,
 non-literals included) and fix each one before the push.
 
+## Moving a string or a call: grep the source-scan tests first (#144, 10.10.2026)
+
+Some tests read a source file with `include_str!` and assert it CONTAINS a
+literal (`worker_tests.rs::gather_uses_lyrics_ovh_primary_with_genius_fallback`
+pins gather.rs's calls and bail messages). A refactor that moves such a
+literal fails them with no behaviour change (CI 38048742066). Before moving a
+message or a call, `grep -rn '<the literal>' crates/*/src --include='*tests*'`
+and repoint the scan in the same push.
+
 ## Linux clippy `-D warnings` traps a no-compile box can't catch locally (#162)
 The ubuntu job runs `clippy --workspace --all-targets -D warnings`, so these
 compile CLEAN on Windows but FAIL on Linux — reason them out before pushing:
