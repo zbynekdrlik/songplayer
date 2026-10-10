@@ -81,6 +81,9 @@ pub(crate) fn ytdlp_video_args(
         // #223 S9a: a leftover temp of a crashed run is overwritten, never
         // taken for the download.
         "--force-overwrites".into(),
+        // #223 S9b: what was really fetched, printed once it is in place.
+        "--print".into(),
+        format::FORMAT_PRINT.into(),
         "-o".into(),
         output.into(),
     ];
@@ -263,16 +266,19 @@ impl DownloadWorker {
         // #223 S9a: a crashed run's temps never stay next to the song.
         cleanup_temps(&video_temp, &self.cache_dir, &row.youtube_id);
 
-        if let Err(e) = self
+        let fetched = match self
             .download_video_stream(&row.youtube_id, &video_temp)
             .await
         {
-            tracing::error!(video_id = %row.youtube_id, "video download failed: {e}");
-            cleanup_temps(&video_temp, &self.cache_dir, &row.youtube_id);
-            self.record_failure(row.id, &row.youtube_id, &e.to_string())
-                .await;
-            return false;
-        }
+            Ok(fetched) => fetched,
+            Err(e) => {
+                tracing::error!(video_id = %row.youtube_id, "video download failed: {e}");
+                cleanup_temps(&video_temp, &self.cache_dir, &row.youtube_id);
+                self.record_failure(row.id, &row.youtube_id, &e.to_string())
+                    .await;
+                return false;
+            }
+        };
 
         let audio_temp = match self
             .download_audio_stream(&row.youtube_id, &audio_temp_base)
@@ -344,6 +350,13 @@ impl DownloadWorker {
             return false;
         }
 
+        // #223 S9b: what was really fetched (a failed write is only logged).
+        if let Some(fetched) = &fetched
+            && let Err(e) = format::record(&self.pool, row.id, fetched).await
+        {
+            tracing::warn!(video_id = %row.youtube_id, "download: recording the video format failed: {e}");
+        }
+
         let _ = self.event_tx.send(format!("processed:{}", row.youtube_id));
         tracing::info!(video_id = %row.youtube_id, "video processed successfully");
         true
@@ -361,12 +374,13 @@ impl DownloadWorker {
         }
     }
 
-    /// Download the video stream only via yt-dlp.
+    /// Download the video stream only via yt-dlp; what it really fetched
+    /// (`None` when yt-dlp printed no format line).
     async fn download_video_stream(
         &self,
         video_id: &str,
         output: &Path,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<Option<format::DownloadedFormat>, anyhow::Error> {
         let url = format!("https://www.youtube.com/watch?v={video_id}");
         // #223 S9a: the cap is read live at every download.
         let cap = format::max_resolution(
@@ -407,7 +421,21 @@ impl DownloadWorker {
                 stderr
             );
         }
-        Ok(())
+        let stdout = String::from_utf8_lossy(&child_output.stdout);
+        let fetched = format::parse_downloaded_format(&stdout);
+        match &fetched {
+            Some(f) => tracing::info!(
+                video_id,
+                format_id = %f.format_id,
+                codec = %f.codec,
+                width = ?f.width,
+                height = ?f.height,
+                fps = ?f.fps,
+                "download: the video stream fetched"
+            ),
+            None => tracing::warn!(video_id, "download: yt-dlp printed no format line"),
+        }
+        Ok(fetched)
     }
 
     /// Download the best audio stream only via yt-dlp. Returns the actual

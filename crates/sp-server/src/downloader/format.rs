@@ -75,6 +75,67 @@ pub(crate) fn checked(key: &str, value: &str) -> Result<String, String> {
     }
 }
 
+/// #223 S9b: what yt-dlp prints once the video stream is in place (its
+/// `--print`, a later stage than the download, so it downloads as before): a
+/// marked line the worker finds among the progress lines.
+pub(crate) const FORMAT_PRINT: &str =
+    "after_move:SPFMT|%(format_id)s|%(vcodec)s|%(width)s|%(height)s|%(fps)s";
+
+/// The video stream a download really fetched (V34 columns).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DownloadedFormat {
+    pub format_id: String,
+    pub codec: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub fps: Option<f64>,
+}
+
+/// The [`FORMAT_PRINT`] line in yt-dlp's stdout (its last one), or `None`
+/// when there is none (an older yt-dlp, a print that failed): a field yt-dlp
+/// does not know reads `NA`.
+pub(crate) fn parse_downloaded_format(stdout: &str) -> Option<DownloadedFormat> {
+    let line = stdout
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix("SPFMT|"))?;
+    let fields: Vec<&str> = line.split('|').collect();
+    let [format_id, codec, width, height, fps] = fields.as_slice() else {
+        return None;
+    };
+    let known = |field: &str| (field != "NA" && !field.is_empty()).then(|| field.to_string());
+    Some(DownloadedFormat {
+        format_id: known(format_id)?,
+        codec: known(codec).unwrap_or_default(),
+        width: width.parse().ok(),
+        height: height.parse().ok(),
+        fps: fps.parse().ok(),
+    })
+}
+
+/// Record `format` on every row of the video `video_id` (a row id) belongs
+/// to: the files are the video's, shared by its rows.
+pub(crate) async fn record(
+    pool: &sqlx::SqlitePool,
+    video_id: i64,
+    format: &DownloadedFormat,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE videos SET video_format_id = ?, video_codec = ?, video_width = ?, \
+         video_height = ?, video_fps = ? \
+         WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
+    )
+    .bind(&format.format_id)
+    .bind(&format.codec)
+    .bind(format.width.map(i64::from))
+    .bind(format.height.map(i64::from))
+    .bind(format.fps)
+    .bind(video_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "format_tests.rs"]
 mod tests;

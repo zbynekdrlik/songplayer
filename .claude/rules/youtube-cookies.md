@@ -146,3 +146,11 @@ the box.
   every download temp `scan_cache` finds (`ScanResult::temps`, `TEMP_RE`:
   `{11-char id}_(video|audio)[_upgrade]_temp[.ext]`), except a file a row
   records (`cache::recorded_by_a_row`, like a half-sidecar).
+- What a download really fetched is recorded on every row of the video
+  (V34 `video_format_id` / `video_codec` / `video_width` / `video_height` /
+  `video_fps`): yt-dlp's `--print format::FORMAT_PRINT` (`after_move:`, a
+  later stage, so it still downloads; it implies `--quiet`, the progress
+  lines stay through `--progress`) prints a `SPFMT|…` line that
+  `parse_downloaded_format` reads (`NA` = unknown). NULL for songs fetched
+  before or from a peer. Box check 10.10.2026: `SPFMT|243|vp9|640|360|25`,
+  exit 0, the file in place.

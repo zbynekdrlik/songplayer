@@ -87,3 +87,85 @@ fn a_patch_of_max_resolution_takes_480_to_2160_or_empty() {
     }
     assert_eq!(checked("gemini_model", "abc"), Ok("abc".to_string()));
 }
+
+/// The format line among yt-dlp's progress lines (its last one counts).
+#[test]
+fn the_fetched_format_is_read_from_the_marked_line() {
+    let stdout = "[download] 100% of 52.31MiB\n\
+                  SPFMT|401|av01.0.12M.08|3840|2160|25\n\
+                  [download] done\n";
+    assert_eq!(
+        parse_downloaded_format(stdout),
+        Some(DownloadedFormat {
+            format_id: "401".into(),
+            codec: "av01.0.12M.08".into(),
+            width: Some(3840),
+            height: Some(2160),
+            fps: Some(25.0),
+        })
+    );
+    let twice = "SPFMT|270|avc1.640028|1920|1080|25.0\nSPFMT|271|vp9|2560|1440|29.97\n";
+    let last = parse_downloaded_format(twice).unwrap();
+    assert_eq!(
+        (last.format_id.as_str(), last.height, last.fps),
+        ("271", Some(1440), Some(29.97))
+    );
+}
+
+#[test]
+fn an_unknown_field_reads_none_and_no_line_reads_none() {
+    let f = parse_downloaded_format("SPFMT|313|vp9|NA|NA|NA").unwrap();
+    assert_eq!((f.width, f.height, f.fps), (None, None, None));
+    assert_eq!(
+        parse_downloaded_format("SPFMT|NA|vp9|1|2|3"),
+        None,
+        "no format id"
+    );
+    assert_eq!(
+        parse_downloaded_format("SPFMT|401|av01|3840|2160"),
+        None,
+        "a field short"
+    );
+    assert_eq!(parse_downloaded_format("[download] 100%\n"), None);
+    assert!(FORMAT_PRINT.starts_with("after_move:SPFMT|"));
+}
+
+#[tokio::test]
+async fn the_format_is_recorded_on_every_row_of_the_video() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url) VALUES (1, 'a', 'u1'), (2, 'b', 'u2')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id) VALUES \
+         (10, 1, 'PySFfTurafA'), (11, 2, 'PySFfTurafA'), (12, 1, 'otherotheri')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let format = DownloadedFormat {
+        format_id: "400".into(),
+        codec: "av01.0.12M.08".into(),
+        width: Some(2560),
+        height: Some(1440),
+        fps: Some(24.0),
+    };
+    record(&pool, 10, &format).await.unwrap();
+    let rows: Vec<(i64, Option<String>, Option<i64>)> =
+        sqlx::query_as("SELECT id, video_format_id, video_height FROM videos ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        rows,
+        [
+            (10, Some("400".to_string()), Some(1440)),
+            (11, Some("400".to_string()), Some(1440)),
+            (12, None, None),
+        ]
+    );
+}

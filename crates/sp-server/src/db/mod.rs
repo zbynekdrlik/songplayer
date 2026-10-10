@@ -50,6 +50,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (31, MIGRATION_V31),
     (32, MIGRATION_V32),
     (33, MIGRATION_V33),
+    (34, MIGRATION_V34),
 ];
 
 const MIGRATION_V1: &str = "
@@ -538,6 +539,18 @@ ALTER TABLE playlists ADD COLUMN audio_gain_db REAL NOT NULL DEFAULT 0;
 ALTER TABLE playlists ADD COLUMN audio_eq TEXT NOT NULL DEFAULT '[]';
 ";
 
+// V34 (#223 S9b, D8) — what a download really fetched: yt-dlp's format id,
+// the codec, the size and the frame rate of the video stream (its
+// `--print after_move:`). NULL for every song downloaded before, or fetched
+// from a peer.
+const MIGRATION_V34: &str = "
+ALTER TABLE videos ADD COLUMN video_format_id TEXT;
+ALTER TABLE videos ADD COLUMN video_codec TEXT;
+ALTER TABLE videos ADD COLUMN video_width INTEGER;
+ALTER TABLE videos ADD COLUMN video_height INTEGER;
+ALTER TABLE videos ADD COLUMN video_fps REAL;
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -710,6 +723,9 @@ mod tests_v32;
 #[path = "mod_tests_v33.rs"]
 #[cfg(test)]
 mod tests_v33;
+#[path = "mod_tests_v34.rs"]
+#[cfg(test)]
+mod tests_v34;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]
