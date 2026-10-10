@@ -124,10 +124,14 @@ async fn the_stem_queue_never_takes_the_test_item() {
         .await
         .unwrap();
     assert_eq!(next.map(|j| j.video_id), Some(rows.normal));
-    let (pending, _) = crate::db::models_stems::count_stems_progress(&rows.pool)
+    let counts = crate::db::models_stems::count_stems_progress(&rows.pool)
         .await
         .unwrap();
-    assert_eq!(pending, 1, "the dashboard's stems count");
+    assert_eq!(
+        counts,
+        (1, 0),
+        "the dashboard's stems counts: pending, done"
+    );
 
     rows.drop_normal().await;
     let next = crate::db::models_stems_priority::get_next_stem_job(&rows.pool, &on_program, &[])
