@@ -40,6 +40,8 @@ export interface MaxStatus {
   send_late: number;
   vblank_output: string | null;
   vblank_tracking: boolean;
+  /** #243: `measuring` | `ticking` | `not_ticking`, `null` with no tracker. */
+  vblank_state: string | null;
   vblank_period_ns: number;
   vblank_phase_us: number;
   send_off_grid: number;
@@ -113,6 +115,11 @@ export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
   const offGrid = second.send_off_grid - first.send_off_grid;
   if (offGrid > 0 || !second.vblank_tracking) {
     failures.push(`${offGrid} boundaries were sent off the display's refresh grid`);
+  }
+  if (second.vblank_state === "not_ticking") {
+    failures.push(
+      `the display output ${second.vblank_output} does not tick (vblank_state not_ticking): WaitForVBlank does not wait`,
+    );
   }
   const phase = second.send_phase_us_p50;
   const want = second.vblank_phase_us;

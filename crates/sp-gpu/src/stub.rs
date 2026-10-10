@@ -20,7 +20,7 @@ use crate::error::GpuError;
 use crate::spout::SharedTextureInfo;
 use crate::spout_state::Registration;
 use crate::stats::{ComposeStats, SpoutSendStats};
-use crate::vblank::{OutputInfo, VblankGrid};
+use crate::vblank::{OutputInfo, VblankGrid, VblankState};
 
 /// Off Windows the compositor cannot be built: [`Compositor::new`] and
 /// [`Compositor::new_warp`] report [`GpuError::Unsupported`]. The type has
@@ -140,6 +140,12 @@ impl VblankTracker {
     /// Never runs (no value exists). `mutants::skip`: as `output`.
     #[cfg_attr(test, mutants::skip)]
     pub fn grid(&self, _now: Instant) -> Option<VblankGrid> {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `output`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn state(&self, _now: Instant) -> VblankState {
         match self.0 {}
     }
 }

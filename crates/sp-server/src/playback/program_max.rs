@@ -53,6 +53,7 @@ use sp_core::config::{
 };
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, ComposeStats, Nv12Picture, SPOUT_SENDER_NAME, SpoutSendStats,
+    VblankState,
 };
 use sqlx::SqlitePool;
 use tokio::sync::broadcast;
@@ -61,7 +62,7 @@ use tracing::{info, warn};
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::loop_stats::percentile_ceil;
 use crate::playback::program_max_send::SendTiming;
-use crate::playback::program_max_vblank::Aligned;
+use crate::playback::program_max_vblank::{Aligned, VblankLog, vblank_log};
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 
 #[path = "program_max_fhd.rs"]
@@ -222,6 +223,10 @@ pub struct MaxStatus {
     /// measured (no tracker: off Windows, no output, its thread did not
     /// start).
     pub vblank_output: Option<String>,
+    /// #243: that output's state at the last boundary — `measuring`,
+    /// `ticking`, `not_ticking` (its waits do not wait: a dark panel) —
+    /// `None` with no tracker.
+    pub vblank_state: Option<&'static str>,
     /// The last boundary was sent on that output's refresh grid (else at
     /// the constant lead).
     pub vblank_tracking: bool,
@@ -338,6 +343,7 @@ struct Stats {
     send_at: Window,
     late: u64,
     vblank_output: Option<String>,
+    vblank_state: Option<VblankState>,
     vblank_tracking: bool,
     vblank_period_ns: u64,
     off_grid: u64,
@@ -415,6 +421,7 @@ impl MaxOut {
                 send_at: Window::default(),
                 late: 0,
                 vblank_output: None,
+                vblank_state: None,
                 vblank_tracking: false,
                 vblank_period_ns: 0,
                 off_grid: 0,
@@ -612,6 +619,15 @@ impl MaxOut {
         self.lock_stats().vblank_output = Some(output);
     }
 
+    /// #243: the paced output's state at a boundary; the log line its
+    /// change asks for ([`vblank_log`]).
+    pub fn record_vblank_state(&self, state: VblankState) -> Option<VblankLog> {
+        let mut stats = self.lock_stats();
+        let log = vblank_log(stats.vblank_state, state);
+        stats.vblank_state = Some(state);
+        log
+    }
+
     /// How a sent boundary was paced: on the grid (`Some`), or at the
     /// constant lead (counted off the grid).
     pub fn record_vblank(&self, aligned: Option<Aligned>) {
@@ -645,7 +661,7 @@ impl MaxOut {
             (
                 stats.phase.clone(),
                 [stats.adapter.clone(), stats.vblank_output.clone()],
-                stats.vblank_tracking,
+                (stats.vblank_tracking, stats.vblank_state),
                 [
                     stats.submitted,
                     stats.failed,
@@ -664,6 +680,7 @@ impl MaxOut {
             )
         };
         let [adapter, vblank_output] = names;
+        let (tracking, vblank_state) = tracking;
         let [
             submitted,
             failed,
@@ -690,6 +707,7 @@ impl MaxOut {
             send_at_us_max: send_at.max(),
             send_late,
             vblank_output,
+            vblank_state: vblank_state.map(VblankState::as_str),
             vblank_tracking: tracking,
             vblank_period_ns,
             vblank_phase_us,

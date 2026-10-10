@@ -77,7 +77,7 @@ use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, MaxPicture};
 use crate::playback::program_max_send::{NoWait, SendClock, SendTiming, SpinClock, send_at};
 use crate::playback::program_max_vblank::{
-    Aligned, Due, VblankPacer, VblankSource, phase_after_vblank,
+    Aligned, Due, VblankLog, VblankPacer, VblankSource, phase_after_vblank,
 };
 use crate::playback::stat_window::WarnLimiter;
 
@@ -772,8 +772,11 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     /// When the boundary offered at `offered` is due: [`VblankPacer`]'s slot
     /// on the refresh grid, else the constant lead; and that grid.
     fn pace(&mut self, offered: Instant) -> (Due, Option<VblankGrid>) {
-        let clock = self.clock.as_mut();
-        let grid = self.vblank.as_ref().and_then(|v| v.grid(clock.now()));
+        let now = self.clock.as_mut().now();
+        let grid = self.vblank.as_ref().and_then(|v| {
+            log_vblank(self.out.record_vblank_state(v.state(now)), &**v);
+            v.grid(now)
+        });
         let due = self.pacer.due(offered, grid, self.out.vblank_phase());
         (due, grid)
     }
@@ -842,6 +845,23 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         self.fhd.drop_gpu();
         self.fhd.retry_at = None;
         self.out.record_fhd_listed(None);
+    }
+}
+
+/// #243: the one WARN where the paced output stops ticking and the one
+/// INFO where it ticks again (the decision is `vblank_log`'s, tested).
+/// `mutants::skip`: it only writes the log line.
+#[cfg_attr(test, mutants::skip)]
+fn log_vblank(log: Option<VblankLog>, source: &dyn VblankSource) {
+    match log {
+        Some(VblankLog::StoppedTicking) => warn!(
+            output = %source.output(),
+            "program max: the display output does not tick (its waits do not wait) — sends at the constant lead"
+        ),
+        Some(VblankLog::TicksAgain) => {
+            info!(output = %source.output(), "program max: the display output ticks again");
+        }
+        None => {}
     }
 }
 

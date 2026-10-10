@@ -97,8 +97,10 @@ pub use spout::{
 };
 pub use stats::{ComposeStats, SpoutSendStats};
 pub use vblank::{
-    OutputInfo, Seen, VBLANK_BOOT_INTERVALS, VBLANK_MAX_PERIOD, VBLANK_MIN_FIT, VBLANK_MIN_PERIOD,
-    VBLANK_STALE, VBLANK_WINDOW, VblankFit, VblankGrid, grid_is_fresh, pick_output,
+    OutputInfo, Seen, VBLANK_BOOT_INTERVALS, VBLANK_IDLE_MAX, VBLANK_MAX_PERIOD, VBLANK_MIN_FIT,
+    VBLANK_MIN_PERIOD, VBLANK_MIN_WAIT, VBLANK_NOT_TICKING, VBLANK_RESTART, VBLANK_STALE,
+    VBLANK_WINDOW, VblankFit, VblankGrid, VblankState, grid_is_fresh, not_waiting_sleep,
+    pick_output, vblank_state, waited,
 };
 
 #[cfg(not(windows))]

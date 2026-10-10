@@ -1374,6 +1374,7 @@ function programBody() {
       send_late: 0,
       // #223 follow-up: no GPU, no display output to pace on.
       vblank_output: null,
+      vblank_state: null,
       vblank_tracking: false,
       vblank_period_ns: 0,
       vblank_phase_us: mockVblankPhaseUs(),
