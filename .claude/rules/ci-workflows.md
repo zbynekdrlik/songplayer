@@ -248,7 +248,10 @@ landed on dev without a `[no-test:]` marker (a merge-integration compile fix,
 a clippy allow, a review round's `fix(#239)` on an unreleased feature) failed
 the release PR hours or weeks later; now the dev push that brings it is red.
 A review round's change to an unreleased feature is `feat(#N)` /
-`refactor(#N)`, never `fix(#N)`. History rewrite is banned — declare the LOGGED bypass
+`refactor(#N)`, never `fix(#N)`. So is a CI lint fix of a test (10.10.2026:
+`fix(#223): name the V34 test's row type` reddened the push; write it
+`test(#N)`). Run the script before EVERY dev push, not only before the
+release PR. History rewrite is banned — declare the LOGGED bypass
 from a LATER commit instead: an empty `chore(red-green): …` commit whose body
 carries one `[no-test: <sha7> <reason>]` per covered commit; the script prints
 `bypass: … (declared by <sha7>)`. Only the leading `fix(#N):` form is gated;
