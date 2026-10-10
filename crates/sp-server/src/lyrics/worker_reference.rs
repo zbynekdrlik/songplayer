@@ -82,6 +82,41 @@ impl LyricsWorker {
             info!(youtube_id = %youtube_id, "reference_stage: empty transcript — skipping (#144)");
             return Ok(None);
         }
+        // #144 F3: a text that covers too little of the singing fails the
+        // gate whatever mtl times (`uncovered_before_timing`), so no mtl is
+        // spent on it. Upstream's DP loops such a text (written once, sung
+        // many times: its first phone can step from column -1, the last) and
+        // its backtrack raised `IndexError` on 5 SNV songs.
+        if let Some(stats) =
+            crate::lyrics::reference_gate::uncovered_before_timing(&best.lines, words)
+        {
+            warn!(
+                youtube_id = %youtube_id,
+                reason = "coverage",
+                sung_covered_frac = stats.sung_covered_frac,
+                sung_words = stats.sung_words,
+                "reference_stage: gate FAIL before mtl — the text covers too little of what is sung (#144 F3)"
+            );
+            let audit_ctx = crate::lyrics::audit_ctx::AuditContext {
+                cache_dir: &self.cache_dir,
+                youtube_id,
+            };
+            crate::lyrics::audit_ctx::write_alignment_audit(
+                Some(&audit_ctx),
+                &reference_gate_audit_json(
+                    "fail",
+                    Some(gate_fail_reason_str(
+                        &crate::lyrics::reference_gate::GateFailReason::Coverage,
+                    )),
+                    Some(&stats),
+                    None,
+                    None,
+                    words.len(),
+                ),
+            )
+            .await;
+            return Ok(None);
+        }
 
         // #167: no heavy step for the first 60 s after engine start — the wall
         // pipelines must come up on a quiet box. No backoff; re-picked next tick.

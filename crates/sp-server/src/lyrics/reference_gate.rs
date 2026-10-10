@@ -175,6 +175,49 @@ pub(crate) fn covers_what_is_sung(sung: &crate::lyrics::sung_coverage::SungCover
     sung.covered_frac >= MIN_SUNG_COVERED_FRAC && sung.max_uncovered_ms <= MAX_UNCOVERED_SUNG_MS
 }
 
+/// #144 F3: the gate's FAIL that needs no timings, for the candidate's own
+/// `lines` before mtl. The sung half reads only the words and their order,
+/// and mtl only drops lines (one upstream filters to no word), never adds a
+/// word: the share mtl's lines cover is at most the share `lines` cover (the
+/// LCS with a subsequence is no longer). Under `MIN_SUNG_COVERED_FRAC` the
+/// gate fails whatever mtl times, and this returns its stats (no line
+/// timed). Only the share is decided here: the longest uncovered stretch
+/// could move with a different LCS of fewer lines.
+pub(crate) fn uncovered_before_timing(lines: &[String], words: &[AsrWord]) -> Option<GateStats> {
+    let untimed: Vec<AlignedLine> = lines
+        .iter()
+        .map(|text| AlignedLine {
+            text: text.clone(),
+            start_ms: 0,
+        })
+        .collect();
+    let alignment = align(&untimed, words);
+    let sung = alignment.coverage;
+    if sung.covered_frac >= MIN_SUNG_COVERED_FRAC {
+        return None;
+    }
+    let with_words = || alignment.lines.iter().filter(|on| on.words > 0);
+    let lines_total = with_words().count();
+    let lines_matched = with_words()
+        .filter(|on| line_matched(on.aligned, on.words))
+        .count();
+    Some(GateStats {
+        lines_total,
+        lines_matched,
+        lines_timed: 0,
+        matched_frac: if lines_total > 0 {
+            lines_matched as f64 / lines_total as f64
+        } else {
+            0.0
+        },
+        median_signed_ms: 0,
+        within_400_frac: 0.0,
+        sung_words: sung.sung_words,
+        sung_covered_frac: sung.covered_frac,
+        max_uncovered_sung_ms: sung.max_uncovered_ms,
+    })
+}
+
 /// Verify `lines` (forced-alignment output) against `words` (independent
 /// ASR). Verdict order: Coverage (`matched_frac < 0.60`, incl. zero
 /// lines) → Coverage of what is sung (#144: `sung_covered_frac < 0.55` or

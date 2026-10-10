@@ -338,6 +338,19 @@ Upstream's own quick-start (`example.ipynb`) calls
 temp `.raw.txt` file and calls `preprocess_from_file(wav, temp_txt,
 word_file=None)` — that's the entire input-shaping step.
 
+## Upstream's DP loops a text that is sung more often than written
+
+`utils.alignment_bdr` (and `alignment`) compute the first phone's "previous
+phone" step from `s[audio_pos-1][ch_pos-2]`, i.e. column `-1`, which Python
+wraps to the LAST column (end of the lyrics). The optimal path can therefore
+run through the text, jump back to its start and run through it again. On a
+second jump the backtrack's `y` passes `-(2L+1)` and raises
+`IndexError: index -462 is out of bounds for axis 0 with size 461` (the row
+`opt[x]` has 2L+1 columns). SNV hit it on 5 songs whose texts held 9–23 % of
+the sung words (#144 F3). SongPlayer's reference stage no longer sends such a
+text: it fails the gate's sung share before mtl
+(`reference_gate::uncovered_before_timing`). The upstream code is used as is.
+
 ## Word-to-line remapping — why it's safe
 
 `wrapper.preprocess_lyrics()` internally **lowercases and filters** every
