@@ -60,7 +60,7 @@ pub fn check(width: u32, height: u32, frames: u32) -> Result<(), &'static str> {
     if !(2..=MAX_WIDTH).contains(&width) || !(2..=MAX_HEIGHT).contains(&height) {
         return Err("width must be 2..=3840 and height 2..=2160");
     }
-    if width % 2 != 0 || height % 2 != 0 {
+    if !(width.is_multiple_of(2) && height.is_multiple_of(2)) {
         return Err("width and height must be even (NV12)");
     }
     if !(1..=MAX_FRAMES).contains(&frames) {
