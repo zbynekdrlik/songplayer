@@ -3,8 +3,9 @@
 //!
 //! yt-dlp's `/` takes the FIRST alternative that matches any format; one
 //! alternative is never weighed against the next. So the selector walks the
-//! resolution tiers from the cap down (2160, 1440, 1080, 720 — those at or
-//! under the cap) and, within a tier, tries AV1 / VP9 over HTTPS (the DASH
+//! resolution tiers from the cap down (1440, 1080, 720 — those at or under
+//! the cap; S10b: above 1440 rows first, below) and, within a tier, tries
+//! AV1 / VP9 over HTTPS (the DASH
 //! path Media Foundation plays; yt-dlp's default sort puts resolution first,
 //! then av01 before vp9) before H.264 over HLS. H.264 is taken over HLS
 //! first: a 1080p H.264 DASH encode (THE DEEP, `xrhVLX6vwPk`) returns EOS in
@@ -17,8 +18,21 @@
 //! video with a low AV1 / VP9 and its high rows only as H.264 DASH, and no
 //! HLS, still lands at the low AV1 / VP9 (`dash("")` comes before the plain
 //! height fallbacks) — deliberately, since that H.264 DASH may stop early.
+//!
+//! #223 S10b (comment 6102705701): at a cap above 1440 the first two
+//! alternatives take a picture taller than 1440 rows at
+//! [`TALL_MAX_FPS`] or less (strict: no known rate, not taken), and every
+//! later one is capped at [`ANY_FPS_MAX_HEIGHT`]. NVDEC decodes a 4K
+//! picture with its readback in 17.7–19.6 ms whatever its rate: 42–49 % of
+//! a 24/25 fps period, over D2's 50 % from 30 fps on, beyond real time at
+//! 50/60. Each alternative's ceiling is the cap, so a bound on a 2160 tier
+//! alone would let 4K60 through the 1440 tier. A 4K30/60 video lands at
+//! 1440 rows, as before S10b.
 
-use sp_core::config::{DEFAULT_MAX_RESOLUTION, SETTING_MAX_RESOLUTION};
+use sp_core::config::{
+    DEFAULT_MAX_RESOLUTION, DEFAULT_MAX_RESOLUTION_SOFTWARE, SETTING_MAX_RESOLUTION,
+    SETTING_VIDEO_HW_DECODE, video_hw_decode,
+};
 
 /// The lowest cap a download takes.
 pub const MIN_RESOLUTION: u32 = 480;
@@ -26,37 +40,68 @@ pub const MIN_RESOLUTION: u32 = 480;
 pub const MAX_RESOLUTION: u32 = 2160;
 
 /// The resolution tiers the selector walks down from the cap.
-const TIERS: [u32; 4] = [2160, 1440, 1080, 720];
+const TIERS: [u32; 3] = [1440, 1080, 720];
+
+/// #223 S10b: the tallest picture taken at any frame rate (module doc).
+pub const ANY_FPS_MAX_HEIGHT: u32 = 1440;
+/// #223 S10b: the highest frame rate of a picture taller than
+/// [`ANY_FPS_MAX_HEIGHT`] (module doc).
+pub const TALL_MAX_FPS: u32 = 25;
 
 /// The `-f` selector of a video download capped at `cap` rows (module doc).
 pub(crate) fn format_spec(cap: u32) -> String {
-    let dash = |floor: &str| {
-        format!("bv*[height<={cap}]{floor}[dynamic_range=SDR][protocol=https][vcodec!^=avc1]")
+    let dash = |top: u32, floor: &str| {
+        format!("bv*[height<={top}]{floor}[dynamic_range=SDR][protocol=https][vcodec!^=avc1]")
     };
-    let hls = |floor: &str| {
-        format!("bv*[height<={cap}]{floor}[dynamic_range=SDR][protocol*=m3u8][vcodec^=avc1]")
+    let hls = |top: u32, floor: &str| {
+        format!("bv*[height<={top}]{floor}[dynamic_range=SDR][protocol*=m3u8][vcodec^=avc1]")
     };
     let mut alternatives = Vec::new();
-    for tier in TIERS.into_iter().filter(|&tier| tier <= cap) {
-        let floor = format!("[height>={tier}]");
-        alternatives.push(dash(&floor));
-        alternatives.push(hls(&floor));
+    if cap > ANY_FPS_MAX_HEIGHT {
+        let tall = format!("[height>{ANY_FPS_MAX_HEIGHT}][fps<={TALL_MAX_FPS}]");
+        alternatives.push(dash(cap, &tall));
+        alternatives.push(hls(cap, &tall));
     }
-    alternatives.push(dash(""));
-    alternatives.push(hls(""));
-    alternatives.push(format!("bv*[height<={cap}][dynamic_range=SDR]"));
-    alternatives.push(format!("bv*[height<={cap}]"));
+    let top = cap.min(ANY_FPS_MAX_HEIGHT);
+    for tier in TIERS.into_iter().filter(|&tier| tier <= top) {
+        let floor = format!("[height>={tier}]");
+        alternatives.push(dash(top, &floor));
+        alternatives.push(hls(top, &floor));
+    }
+    alternatives.push(dash(top, ""));
+    alternatives.push(hls(top, ""));
+    alternatives.push(format!("bv*[height<={top}][dynamic_range=SDR]"));
+    alternatives.push(format!("bv*[height<={top}]"));
     alternatives.join("/")
 }
 
 /// The cap of a download from the stored `max_resolution`: a whole number,
 /// clamped to [`MIN_RESOLUTION`]..=[`MAX_RESOLUTION`]; unset or unreadable
-/// is [`DEFAULT_MAX_RESOLUTION`].
-pub(crate) fn max_resolution(raw: Option<&str>) -> u32 {
+/// is [`DEFAULT_MAX_RESOLUTION`] while hardware video decode is on, else
+/// [`DEFAULT_MAX_RESOLUTION_SOFTWARE`] (#223 S10b, comment 6102693285).
+pub(crate) fn max_resolution(raw: Option<&str>, hw_decode: bool) -> u32 {
+    let default = if hw_decode {
+        DEFAULT_MAX_RESOLUTION
+    } else {
+        DEFAULT_MAX_RESOLUTION_SOFTWARE
+    };
     raw.and_then(|value| value.trim().parse::<u32>().ok())
-        .map_or(DEFAULT_MAX_RESOLUTION, |height| {
+        .map_or(default, |height| {
             height.clamp(MIN_RESOLUTION, MAX_RESOLUTION)
         })
+}
+
+/// The cap a download takes now: the stored `max_resolution` and
+/// `video_hw_decode` ([`max_resolution`]). A setting that cannot be read
+/// counts as unset (hardware decode then off, the producer's own rule).
+/// The download and the YouTube probe both read it here.
+pub(crate) async fn live_cap(pool: &sqlx::SqlitePool) -> u32 {
+    let stored = crate::db::models::get_setting(pool, SETTING_MAX_RESOLUTION).await;
+    let hw = crate::db::models::get_setting(pool, SETTING_VIDEO_HW_DECODE).await;
+    max_resolution(
+        stored.ok().flatten().as_deref(),
+        video_hw_decode(hw.ok().flatten().as_deref()),
+    )
 }
 
 /// A settings PATCH value of `key`: `max_resolution` takes "" (back to the
@@ -75,7 +120,8 @@ pub(crate) fn checked(key: &str, value: &str) -> Result<String, String> {
         Ok(height) if (MIN_RESOLUTION..=MAX_RESOLUTION).contains(&height) => Ok(height.to_string()),
         _ => Err(format!(
             "{SETTING_MAX_RESOLUTION} must be a whole number of pixels from {MIN_RESOLUTION} to \
-             {MAX_RESOLUTION}, or empty for the default {DEFAULT_MAX_RESOLUTION}"
+             {MAX_RESOLUTION}, or empty for the default ({DEFAULT_MAX_RESOLUTION} with hardware \
+             video decode, else {DEFAULT_MAX_RESOLUTION_SOFTWARE})"
         )),
     }
 }

@@ -204,6 +204,10 @@ failed`).
   `done`, INFO `fit-bench: no report` for a refusal.
 - G3 (#223 S10): `over_budget` false at 3840×2160 = a p99 of both the fit and
   the fade within half a 30 fps slot. Record the result on #223.
+- Passed on SNV 11.10.2026 (comment 6102650616): 4K fit p99 3.2 ms, fade
+  p99 6.5 ms; 1440p 3.1 / 5.8 ms. The fused kernel's work follows the
+  1920×1080 canvas it writes, so a 4K source costs about what a 1440p one
+  does. PP (a laptop CPU) is measured once a release brings it the bench.
 
 ```bash
 curl -s -X POST http://10.77.9.201:8920/api/v1/diag/fit-bench \

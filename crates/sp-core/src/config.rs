@@ -284,7 +284,12 @@ pub fn is_blank_scene(scene: &str) -> bool {
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 pub const DEFAULT_CACHE_DIR: &str = "cache";
-pub const DEFAULT_MAX_RESOLUTION: u32 = 1440;
+/// #223 S10b: a download's height cap when `max_resolution` is unset and
+/// hardware video decode is on (G3, comment 6102650616).
+pub const DEFAULT_MAX_RESOLUTION: u32 = 2160;
+/// #223 S10b: the cap when `max_resolution` is unset and hardware video
+/// decode is off: software decodes 4K at 77–85 % of the period.
+pub const DEFAULT_MAX_RESOLUTION_SOFTWARE: u32 = 1440;
 /// The `dub_voice` value meaning "the speaker's own voice" (no `speech_config`).
 pub const DUB_VOICE_SPEAKER: &str = "speaker";
 /// The default dub voice — the speaker's own voice (#184 round H step 2).

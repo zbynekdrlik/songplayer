@@ -126,15 +126,30 @@ the box.
   weighs one alternative against the next. A codec-first chain therefore
   downgrades resolution: D8's `[https][vcodec!^=avc1]` first picked THE DEEP
   (`xrhVLX6vwPk`) at 360p, its only VP9, over H.264 1080p via HLS. The
-  selector walks resolution TIERS (2160 → 1440 → 1080 → 720, those ≤ the
+  selector walks resolution TIERS (1440 → 1080 → 720, those ≤ the
   cap), and within a tier tries AV1/VP9 over HTTPS (DASH; default sort =
   resolution, then av01 > vp9) before H.264 over HLS. H.264 is only ever
   asked over HLS (THE DEEP's 1080p H.264 DASH encode returns EOS in MF's
   hardware transform). SDR wherever it can (the reader is NV12 8-bit).
+- **Above 1440 rows, 25 fps at most** (#223 S10b, comment 6102705701): at
+  a cap above 1440 the first two alternatives are `[height<=cap]
+  [height>1440][fps<=25]` (DASH, HLS; strict, an unknown rate is not
+  taken), and EVERY later one is capped at 1440
+  (`format::ANY_FPS_MAX_HEIGHT`, `TALL_MAX_FPS`). NVDEC + readback costs
+  17.7–19.6 ms per 4K picture whatever its rate: 42–49 % of a 24/25 fps
+  period, over D2's 50 % at 30, beyond real time at 50/60. Each
+  alternative's ceiling used to be the cap, so a bound on one 2160 tier
+  would have let 4K60 in through the 1440 tier. A 4K30/60 video lands at
+  1440 rows (box check 11.10.2026: `LXb3EKWsInQ`, 4K60 → VP9 1440p60;
+  `PySFfTurafA` → AV1 2160p24, `4JzLgdRJLYA` → VP9 2160p25). At a cap ≤
+  1440 the selector is S9a's, byte for byte.
 - The cap is the `max_resolution` setting, read at EVERY download (one INFO
-  names it): 480..=2160, unset/unreadable = `DEFAULT_MAX_RESOLUTION` (1440,
-  until #223 S10 passes the 4K gate). A settings PATCH refuses anything but
-  480..=2160 or "" (`format::checked`).
+  names it) and by the YouTube probe, both through `format::live_cap`:
+  480..=2160; unset/unreadable = `DEFAULT_MAX_RESOLUTION` (2160, #223
+  S10b after G3) while the stored `video_hw_decode` is ON, else
+  `DEFAULT_MAX_RESOLUTION_SOFTWARE` (1440: software decodes 4K at 77–85 %
+  of the period), comment 6102693285. A stored cap wins either way. A
+  settings PATCH refuses anything but 480..=2160 or "" (`format::checked`).
 - Check a selector change through the box's own yt-dlp and cookies before
   the push: `yt-dlp --cookies C:\ProgramData\SongPlayer\cookies.txt
   --simulate -f "<spec>" --print "%(format_id)s %(vcodec)s

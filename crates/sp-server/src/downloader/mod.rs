@@ -382,14 +382,9 @@ impl DownloadWorker {
         output: &Path,
     ) -> Result<Option<format::DownloadedFormat>, anyhow::Error> {
         let url = format!("https://www.youtube.com/watch?v={video_id}");
-        // #223 S9a: the cap is read live at every download.
-        let cap = format::max_resolution(
-            crate::db::models::get_setting(&self.pool, sp_core::config::SETTING_MAX_RESOLUTION)
-                .await
-                .ok()
-                .flatten()
-                .as_deref(),
-        );
+        // #223 S9a: the cap is read live at every download (S10b: with the
+        // decode path).
+        let cap = format::live_cap(&self.pool).await;
         tracing::info!(video_id, cap, "download: video stream at most {cap} rows");
         let format_spec = format::format_spec(cap);
         let ffmpeg_dir = self

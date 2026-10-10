@@ -41,11 +41,50 @@ fn a_higher_h264_over_hls_beats_a_lower_vp9() {
     assert!(hls_1080 < dash_any, "{spec}");
 }
 
+/// #223 S10b: at 2160, any picture taller than 1440 rows at 25 fps or less
+/// first, then the 1440 selector exactly, every later alternative capped at
+/// 1440 rows (comment 6102705701).
+#[test]
+fn at_2160_a_taller_picture_than_1440_rows_is_taken_only_at_25_fps_or_less() {
+    let tall = "[height>1440][fps<=25]";
+    let expected = [
+        format!("bv*[height<=2160]{tall}{DASH}"),
+        format!("bv*[height<=2160]{tall}{HLS}"),
+        format_spec(1440),
+    ]
+    .join("/");
+    assert_eq!(format_spec(2160), expected);
+}
+
+/// A 4K60 format matches no alternative: the tall ones ask 25 fps or less,
+/// every other one at most 1440 rows (the ceiling was the cap before S10b,
+/// so the 1440 tier took 4K60).
+#[test]
+fn no_alternative_takes_a_taller_picture_than_1440_rows_at_any_rate() {
+    for cap in [1441, 1800, 2160] {
+        let spec = format_spec(cap);
+        let alternatives: Vec<&str> = spec.split('/').collect();
+        assert_eq!(alternatives.len(), 12, "{spec}");
+        for (i, alternative) in alternatives.iter().enumerate() {
+            if i < 2 {
+                assert!(
+                    alternative.starts_with(&format!("bv*[height<={cap}][height>1440][fps<=25]")),
+                    "{alternative}"
+                );
+            } else {
+                assert!(
+                    alternative.starts_with("bv*[height<=1440]"),
+                    "{alternative}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn only_the_tiers_under_the_cap_are_walked() {
-    assert!(format_spec(2160).starts_with(&format!("bv*[height<=2160][height>=2160]{DASH}/")));
     let at_1080 = format_spec(1080);
-    assert!(!at_1080.contains("[height>=1440]") && !at_1080.contains("[height>=2160]"));
+    assert!(!at_1080.contains("[height>=1440]") && !at_1080.contains("fps"));
     assert!(at_1080.starts_with(&format!("bv*[height<=1080][height>=1080]{DASH}/")));
     let at_480 = format_spec(480);
     assert!(!at_480.contains("[height>="), "{at_480}");
@@ -61,16 +100,55 @@ fn h264_is_only_ever_asked_over_hls() {
     }
 }
 
+/// #223 S10b: unset or unreadable = 2160 with hardware decode, 1440
+/// without; a stored cap wins either way (comment 6102693285).
 #[test]
-fn the_cap_is_the_setting_clamped_or_1440() {
-    assert_eq!(max_resolution(None), 1440);
-    assert_eq!(max_resolution(Some("")), 1440);
-    assert_eq!(max_resolution(Some("abc")), 1440);
-    assert_eq!(max_resolution(Some("2160")), 2160);
-    assert_eq!(max_resolution(Some(" 1080 ")), 1080);
-    assert_eq!(max_resolution(Some("4320")), 2160);
-    assert_eq!(max_resolution(Some("100")), 480);
-    assert_eq!(max_resolution(Some("480")), 480);
+fn the_cap_is_the_setting_clamped_or_the_decode_paths_default() {
+    for raw in [None, Some(""), Some("abc")] {
+        assert_eq!(max_resolution(raw, true), 2160, "{raw:?}");
+        assert_eq!(max_resolution(raw, false), 1440, "{raw:?}");
+    }
+    for hw in [true, false] {
+        assert_eq!(max_resolution(Some("2160"), hw), 2160);
+        assert_eq!(max_resolution(Some(" 1080 "), hw), 1080);
+        assert_eq!(max_resolution(Some("4320"), hw), 2160);
+        assert_eq!(max_resolution(Some("100"), hw), 480);
+        assert_eq!(max_resolution(Some("480"), hw), 480);
+    }
+}
+
+/// The download's and the probe's cap read from the database: both
+/// settings, each read as `max_resolution` reads it.
+#[tokio::test]
+async fn the_live_cap_follows_the_stored_settings() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let set = |key: &'static str, value: &'static str| {
+        let pool = pool.clone();
+        async move {
+            crate::db::models::set_setting(&pool, key, value)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        live_cap(&pool).await,
+        1440,
+        "nothing stored: hardware decode off"
+    );
+    set("video_hw_decode", "true").await;
+    assert_eq!(live_cap(&pool).await, 2160);
+    set("max_resolution", "1080").await;
+    assert_eq!(live_cap(&pool).await, 1080, "a stored cap wins");
+    set("video_hw_decode", "false").await;
+    set("max_resolution", "2160").await;
+    assert_eq!(
+        live_cap(&pool).await,
+        2160,
+        "a stored cap wins with decode off too"
+    );
+    set("max_resolution", "").await;
+    assert_eq!(live_cap(&pool).await, 1440);
 }
 
 #[test]

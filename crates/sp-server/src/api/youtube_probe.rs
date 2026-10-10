@@ -20,13 +20,7 @@ use crate::downloader::probe::{PROBE_VIDEO, YoutubeProbeReport, refused, run};
 /// `ok: false` with its `error`.
 #[cfg_attr(test, mutants::skip)] // glue around `probe::run`; the route is tested by `probe_route_*`
 pub(crate) async fn probe(State(state): State<AppState>) -> Json<YoutubeProbeReport> {
-    let cap = format::max_resolution(
-        crate::db::models::get_setting(&state.pool, sp_core::config::SETTING_MAX_RESOLUTION)
-            .await
-            .ok()
-            .flatten()
-            .as_deref(),
-    );
+    let cap = format::live_cap(&state.pool).await;
     let cookies_path = state
         .cache_dir
         .parent()
