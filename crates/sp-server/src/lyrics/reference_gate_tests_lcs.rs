@@ -14,7 +14,7 @@ use crate::lyrics::g35t_client::AsrWord;
 fn line(text: &str, start_ms: u64) -> AlignedLine {
     AlignedLine {
         text: text.to_string(),
-        start_ms,
+        start_ms: Some(start_ms),
     }
 }
 

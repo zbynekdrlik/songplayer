@@ -35,7 +35,10 @@ use crate::lyrics::sung_coverage::{Alignment, align};
 #[derive(Debug, Clone)]
 pub struct AlignedLine {
     pub text: String,
-    pub start_ms: u64,
+    /// `None`: the forced alignment could not time the line (#144: upstream
+    /// mtl filters every word of "1 2 3 4" away). It counts for the text
+    /// verdict, never for the timing.
+    pub start_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -246,7 +249,7 @@ pub(crate) fn coverage_fail_before_timing(
         .iter()
         .map(|text| AlignedLine {
             text: text.clone(),
-            start_ms: 0,
+            start_ms: None,
         })
         .collect();
     let text = TextVerdict::of(&untimed, words);
@@ -273,7 +276,11 @@ pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
         let Some(sung_start) = on.first_sung_start_ms.filter(|_| on.first_word_aligned) else {
             continue;
         };
-        let delta = sung_start as i64 - line.start_ms as i64;
+        // A line the forced alignment could not time is not timed here.
+        let Some(start_ms) = line.start_ms else {
+            continue;
+        };
+        let delta = sung_start as i64 - start_ms as i64;
         deltas.push(delta);
         if delta.abs() <= WITHIN_MS {
             within_count += 1;
@@ -316,7 +323,7 @@ mod tests {
     fn line(text: &str, start_ms: u64) -> AlignedLine {
         AlignedLine {
             text: text.to_string(),
-            start_ms,
+            start_ms: Some(start_ms),
         }
     }
 
@@ -349,7 +356,7 @@ mod tests {
         ];
         let mut words = Vec::new();
         for l in &lines {
-            push_phrase(&mut words, &l.text, l.start_ms);
+            push_phrase(&mut words, &l.text, l.start_ms.unwrap());
         }
 
         match evaluate(&lines, &words) {
@@ -518,7 +525,7 @@ mod tests {
             .iter()
             .map(|l| AlignedLine {
                 text: l["text"].as_str().expect("line.text").to_string(),
-                start_ms: l["start_ms"].as_u64().expect("line.start_ms"),
+                start_ms: Some(l["start_ms"].as_u64().expect("line.start_ms")),
             })
             .collect();
 
@@ -556,7 +563,7 @@ mod tests {
     fn real_fixture_shifted_30s_fails_offset() {
         let (mut aligned_lines, words) = load_fixture_lines_and_words();
         for l in &mut aligned_lines {
-            l.start_ms += 30_000;
+            l.start_ms = l.start_ms.map(|s| s + 30_000);
         }
         match evaluate(&aligned_lines, &words) {
             GateVerdict::Fail {

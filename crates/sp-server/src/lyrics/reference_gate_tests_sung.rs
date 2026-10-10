@@ -11,7 +11,7 @@ use crate::lyrics::g35t_client::AsrWord;
 fn line(text: &str, start_ms: u64) -> AlignedLine {
     AlignedLine {
         text: text.to_string(),
-        start_ms,
+        start_ms: Some(start_ms),
     }
 }
 
@@ -452,4 +452,31 @@ fn before_timing_decides_exactly_as_the_gate_does() {
             );
         }
     }
+}
+
+/// #144: a line the forced alignment could not time ("24/7": upstream mtl
+/// keeps no digit) counts for the text verdict — matched here — and never
+/// for the timing (it was compared against 0 ms before).
+#[test]
+fn an_untimed_line_counts_for_the_text_never_for_the_timing() {
+    let mut words = Vec::new();
+    push_phrase(&mut words, "amazing grace how sweet the sound", 1_000);
+    push_phrase(&mut words, "247 that saved a wretch", 3_000);
+    let lines = vec![
+        line("amazing grace", 1_000),
+        line("how sweet the sound", 1_600),
+        AlignedLine {
+            text: "24/7".into(),
+            start_ms: None,
+        },
+        line("that saved a wretch", 3_300),
+    ];
+    let GateVerdict::Pass(stats) = evaluate(&lines, &words) else {
+        panic!("every timed line is on the singing");
+    };
+    assert_eq!(
+        (stats.lines_total, stats.lines_matched, stats.lines_timed),
+        (4, 4, 3)
+    );
+    assert_eq!((stats.median_signed_ms, stats.within_400_frac), (0, 1.0));
 }

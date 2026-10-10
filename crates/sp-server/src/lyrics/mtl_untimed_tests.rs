@@ -105,3 +105,46 @@ async fn a_line_mtl_cannot_time_never_ships_at_the_songs_start() {
         "{shipped:?}"
     );
 }
+
+fn mtl_line(text: &str, timing: Option<(u64, u64)>) -> MtlLine {
+    MtlLine {
+        text: text.into(),
+        start_ms: timing.map(|t| t.0),
+        end_ms: timing.map(|t| t.1),
+    }
+}
+
+/// #144: the ★ track keeps mtl's timed lines in order and says, once, how
+/// many it left out; a fully timed track says nothing.
+#[test]
+fn the_star_track_says_how_many_untimed_lines_it_left_out() {
+    use crate::lyrics::orchestrator::timed_lines;
+    use crate::test_log::{Captured, capturing};
+
+    let cap = Captured::default();
+    let shipped = tracing::subscriber::with_default(capturing(&cap), || {
+        timed_lines(
+            vec![
+                mtl_line("a", Some((100, 900))),
+                mtl_line("24/7", None),
+                mtl_line("b", Some((1_000, 1_800))),
+            ],
+            "yt_one",
+        )
+    });
+    let got: Vec<(&str, u32, u32)> = shipped
+        .iter()
+        .map(|l| (l.text.as_str(), l.start_ms, l.end_ms))
+        .collect();
+    assert_eq!(got, [("a", 100, 900), ("b", 1_000, 1_800)]);
+    let infos = cap.lines_with("could not time");
+    assert_eq!(infos.len(), 1, "{infos:#?}");
+    assert!(infos[0].contains("untimed=1"), "{infos:#?}");
+
+    let quiet = Captured::default();
+    let all = tracing::subscriber::with_default(capturing(&quiet), || {
+        timed_lines(vec![mtl_line("a", Some((100, 900)))], "yt_all")
+    });
+    assert_eq!(all.len(), 1);
+    assert!(quiet.lines_with("could not time").is_empty());
+}

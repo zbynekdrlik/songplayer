@@ -215,6 +215,40 @@ pub enum ReferenceStageResult {
     WallAborted { detail: String },
 }
 
+/// The ★ track's lines: mtl's timed lines, in order. A line mtl could not
+/// time (#144: upstream filtered every word of it away) is left out, never
+/// shipped at 0 ms (the song's start) — the wall shows nothing for it.
+pub(crate) fn timed_lines(
+    lines: Vec<crate::lyrics::mtl_aligner::MtlLine>,
+    video_id: &str,
+) -> Vec<crate::lyrics::backend::AlignedLine> {
+    let total = lines.len();
+    let timed: Vec<_> = lines
+        .into_iter()
+        .filter_map(|l| {
+            let (Some(start_ms), Some(end_ms)) = (l.start_ms, l.end_ms) else {
+                return None;
+            };
+            Some(crate::lyrics::backend::AlignedLine {
+                text: l.text,
+                start_ms: start_ms as u32,
+                end_ms: end_ms as u32,
+                // Per feedback_line_timing_only.md: never synthesize
+                // word timings; mtl ships line-level timing only.
+                words: None,
+            })
+        })
+        .collect();
+    if timed.len() < total {
+        tracing::info!(
+            video_id,
+            untimed = total - timed.len(),
+            "reference_stage: lines mtl could not time are left out of the ★ track (#144)"
+        );
+    }
+    timed
+}
+
 /// Runs the mtl-align → gate chain for one song's chosen candidate text,
 /// verified against `words` (the song's one g35t transcript, #144). All I/O
 /// is behind the injected `backend`; everything else here is pure decision
@@ -257,18 +291,7 @@ pub async fn run_reference_stage(
             mtl_device: mtl.device,
             mtl_elapsed_s: mtl.elapsed_s,
             asr_word_count,
-            lines: mtl
-                .lines
-                .into_iter()
-                .map(|l| crate::lyrics::backend::AlignedLine {
-                    text: l.text,
-                    start_ms: l.start_ms as u32,
-                    end_ms: l.end_ms as u32,
-                    // Per feedback_line_timing_only.md: never synthesize
-                    // word timings; mtl ships line-level timing only.
-                    words: None,
-                })
-                .collect(),
+            lines: timed_lines(mtl.lines, video_id),
             stats,
         },
         crate::lyrics::reference_gate::GateVerdict::Fail { reason, stats } => {

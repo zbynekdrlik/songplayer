@@ -406,23 +406,23 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_leaves_the_star_to_the_p
         lines: vec![
             MtlLine {
                 text: "amazing grace".into(),
-                start_ms: 1000,
-                end_ms: 2000,
+                start_ms: Some(1000),
+                end_ms: Some(2000),
             },
             MtlLine {
                 text: "how sweet the sound".into(),
-                start_ms: 2100,
-                end_ms: 3500,
+                start_ms: Some(2100),
+                end_ms: Some(3500),
             },
             MtlLine {
                 text: "that saved a wretch".into(),
-                start_ms: 3600,
-                end_ms: 4900,
+                start_ms: Some(3600),
+                end_ms: Some(4900),
             },
             MtlLine {
                 text: "like me".into(),
-                start_ms: 5000,
-                end_ms: 6000,
+                start_ms: Some(5000),
+                end_ms: Some(6000),
             },
         ],
         device: "cuda".into(),
@@ -580,23 +580,23 @@ async fn run_mtl_reference_stage_fail_leaves_the_star_to_the_persist_and_writes_
         lines: vec![
             MtlLine {
                 text: "amazing grace".into(),
-                start_ms: 1000,
-                end_ms: 2000,
+                start_ms: Some(1000),
+                end_ms: Some(2000),
             },
             MtlLine {
                 text: "how sweet the sound".into(),
-                start_ms: 2100,
-                end_ms: 3500,
+                start_ms: Some(2100),
+                end_ms: Some(3500),
             },
             MtlLine {
                 text: "that saved a wretch".into(),
-                start_ms: 3600,
-                end_ms: 4900,
+                start_ms: Some(3600),
+                end_ms: Some(4900),
             },
             MtlLine {
                 text: "like me".into(),
-                start_ms: 5000,
-                end_ms: 6000,
+                start_ms: Some(5000),
+                end_ms: Some(6000),
             },
         ],
         device: "cpu".into(),

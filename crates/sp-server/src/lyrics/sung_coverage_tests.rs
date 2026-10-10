@@ -17,7 +17,7 @@ fn mask(reference: &str, sung: &str) -> Vec<bool> {
 fn line(text: &str) -> AlignedLine {
     AlignedLine {
         text: text.to_string(),
-        start_ms: 0,
+        start_ms: None,
     }
 }
 
