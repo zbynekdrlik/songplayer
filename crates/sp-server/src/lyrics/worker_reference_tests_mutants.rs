@@ -24,6 +24,7 @@ fn stats(sung_covered_frac: f64, max_uncovered_sung_ms: u64) -> GateStats {
     GateStats {
         lines_total: 10,
         lines_matched: 9,
+        lines_timed: 8,
         matched_frac: 0.9,
         median_signed_ms: 12,
         within_400_frac: 0.8,

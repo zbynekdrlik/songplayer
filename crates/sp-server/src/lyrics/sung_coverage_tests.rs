@@ -189,8 +189,9 @@ fn the_covered_share_is_covered_over_sung() {
 }
 
 /// #144: `align` records per line its words, how many of them are on the
-/// alignment and the sung start of the FIRST of them (a wordless line has
-/// none), and the same coverage `sung_coverage` reports.
+/// alignment, the sung start of the FIRST of them (a wordless line has
+/// none) and whether the line's own first word is one of them, and the same
+/// coverage `sung_coverage` reports.
 #[test]
 fn align_counts_each_lines_words_on_the_alignment() {
     let lines = vec![
@@ -207,18 +208,19 @@ fn align_counts_each_lines_words_on_the_alignment() {
         word("foxtrot", 900, 1_000),
     ];
     let got = align(&lines, &sung);
-    let on = |words, aligned, first_sung_start_ms| LineOnAlignment {
+    let on = |words, aligned, first_sung_start_ms, first_word_aligned| LineOnAlignment {
         words,
         aligned,
         first_sung_start_ms,
+        first_word_aligned,
     };
     assert_eq!(
         got.lines,
         vec![
-            on(3, 2, Some(300)),
-            on(2, 1, Some(700)),
-            on(0, 0, None),
-            on(1, 1, Some(900)),
+            on(3, 2, Some(300), false),
+            on(2, 1, Some(700), true),
+            on(0, 0, None, false),
+            on(1, 1, Some(900), true),
         ]
     );
     assert_eq!(

@@ -296,6 +296,7 @@ fn reference_gate_audit_json(
         "reason": reason,
         "lines_total": stats.map(|s| s.lines_total).unwrap_or(0),
         "lines_matched": stats.map(|s| s.lines_matched).unwrap_or(0),
+        "lines_timed": stats.map(|s| s.lines_timed).unwrap_or(0),
         "matched_frac": stats.map(|s| s.matched_frac).unwrap_or(0.0),
         "median_signed_ms": stats.map(|s| s.median_signed_ms).unwrap_or(0),
         "within_400_frac": stats.map(|s| s.within_400_frac).unwrap_or(0.0),

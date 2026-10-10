@@ -13,12 +13,12 @@
 //! subsequence) of ALL the reference words against ALL the transcript words,
 //! with the gate's own `normalize_word`. It stays monotonic, so a repeated
 //! chorus in the text binds to one sung repetition each and never twice.
-//! It is deliberately not the gate's line-anchor walk: measured on #144, a
-//! one-word fallback anchor that jumps forward (the ASR heard "Where is our
-//! angel" for "We raise our hands up") orphans every line in between, which
+//! It was never the gate's former line-anchor walk: measured on #144, a
+//! one-word fallback anchor that jumped forward (the ASR heard "Where is our
+//! angel" for "We raise our hands up") orphaned every line in between, which
 //! reported a false 32 s uncovered stretch on a complete ★ text.
 //!
-//! The first-week review (#144) made it the gate's ONE alignment: [`align`]
+//! The first-week review (#144) made it the gate's ONE alignment: `align`
 //! computes it once and both halves read it — the sung coverage here, and
 //! the reference → transcript line match in `reference_gate::match_lines`
 //! (a line's share of words on the alignment and its first aligned word's
@@ -52,6 +52,10 @@ pub(crate) struct LineOnAlignment {
     pub aligned: usize,
     /// The sung start of the first of them; `None` when none is aligned.
     pub first_sung_start_ms: Option<u64>,
+    /// Whether the line's OWN first word is on the alignment: only then is
+    /// `first_sung_start_ms` where the line starts (a misheard first word
+    /// leaves a later word's start).
+    pub first_word_aligned: bool,
 }
 
 /// ONE order-preserving word alignment of a reference text against the sung
@@ -105,8 +109,8 @@ pub(crate) fn aligned_pairs(reference: &[String], sung: &[String]) -> Vec<(usize
 }
 
 /// `covered[j]` is true when sung word `j` is on the alignment
-/// ([`aligned_pairs`]). Tests read the walk through it; production reads the
-/// pairs in [`align`].
+/// (`aligned_pairs`). Tests read the walk through it; production reads the
+/// pairs in `align`.
 #[cfg(test)]
 pub(crate) fn covered_words(reference: &[String], sung: &[String]) -> Vec<bool> {
     let mut covered = vec![false; sung.len()];
@@ -125,13 +129,17 @@ pub(crate) fn align(
 ) -> Alignment {
     let mut reference: Vec<String> = Vec::new();
     let mut owner: Vec<usize> = Vec::new();
+    // Each line's first word's index in `reference`.
+    let mut first_word: Vec<usize> = Vec::with_capacity(lines.len());
     let mut per_line = Vec::with_capacity(lines.len());
     for (index, line) in lines.iter().enumerate() {
         let line_words = normalized_words(&line.text);
+        first_word.push(reference.len());
         per_line.push(LineOnAlignment {
             words: line_words.len(),
             aligned: 0,
             first_sung_start_ms: None,
+            first_word_aligned: false,
         });
         owner.extend(std::iter::repeat_n(index, line_words.len()));
         reference.extend(line_words);
@@ -150,6 +158,9 @@ pub(crate) fn align(
         if on.first_sung_start_ms.is_none() {
             on.first_sung_start_ms = Some(sung[s].0.start_ms);
         }
+        if r == first_word[owner[r]] {
+            on.first_word_aligned = true;
+        }
     }
     Alignment {
         lines: per_line,
@@ -158,7 +169,7 @@ pub(crate) fn align(
 }
 
 /// Measure how much of `words` (the sung transcript) the text of `lines`
-/// covers ([`align`]'s coverage).
+/// covers (`align`'s coverage).
 pub fn sung_coverage(
     lines: &[crate::lyrics::reference_gate::AlignedLine],
     words: &[AsrWord],

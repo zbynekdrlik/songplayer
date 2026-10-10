@@ -11,8 +11,11 @@
 //! Both halves read ONE alignment (`sung_coverage::align`): the
 //! order-preserving longest common subsequence of all the reference words
 //! against all the sung words. A line is matched when at least half of its
-//! words are on it ([`line_matched`]); its start is the sung start of its
-//! first aligned word. The alignment is monotonic, so a repeated chorus line
+//! words are on it (`line_matched`); its start is the sung start of its
+//! first aligned word. Only a matched line whose OWN first word is on the
+//! alignment is timed (offset, agreement): a misheard first word leaves a
+//! later word's start, which leaned the timing late (review: 9.5 % of the
+//! matched lines of the eval fixtures, 38 % of those beyond 400 ms). The alignment is monotonic, so a repeated chorus line
 //! binds to one sung repetition each, in order, never backwards.
 //!
 //! #144 first-week review: the anchor walk this replaced searched each
@@ -39,6 +42,9 @@ pub struct AlignedLine {
 pub struct GateStats {
     pub lines_total: usize,
     pub lines_matched: usize,
+    /// #144: the matched lines whose own first word is on the alignment; the
+    /// median offset and `within_400_frac` read only them.
+    pub lines_timed: usize,
     pub matched_frac: f64,
     pub median_signed_ms: i64,
     pub within_400_frac: f64,
@@ -177,27 +183,32 @@ pub(crate) fn covers_what_is_sung(sung: &crate::lyrics::sung_coverage::SungCover
 pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
     // #144: one alignment for both halves.
     let alignment = align(lines, words);
-    let matches = line_starts(&alignment);
 
     let mut lines_total = 0usize;
     let mut lines_matched = 0usize;
     let mut deltas: Vec<i64> = Vec::new();
     let mut within_count = 0usize;
 
-    for (line, matched_start) in lines.iter().zip(matches.iter()) {
-        if normalized_words(&line.text).is_empty() {
+    for (line, on) in lines.iter().zip(&alignment.lines) {
+        if on.words == 0 {
             continue;
         }
         lines_total += 1;
-        if let Some(asr_start) = matched_start {
-            lines_matched += 1;
-            let delta = *asr_start as i64 - line.start_ms as i64;
-            deltas.push(delta);
-            if delta.abs() <= WITHIN_MS {
-                within_count += 1;
-            }
+        if !line_matched(on.aligned, on.words) {
+            continue;
+        }
+        lines_matched += 1;
+        // A misheard first word: matched, but its start is a later word's.
+        let Some(sung_start) = on.first_sung_start_ms.filter(|_| on.first_word_aligned) else {
+            continue;
+        };
+        let delta = sung_start as i64 - line.start_ms as i64;
+        deltas.push(delta);
+        if delta.abs() <= WITHIN_MS {
+            within_count += 1;
         }
     }
+    let lines_timed = deltas.len();
 
     let matched_frac = if lines_total > 0 {
         lines_matched as f64 / lines_total as f64
@@ -205,8 +216,8 @@ pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
         0.0
     };
     let median_signed_ms = median_i64(&deltas);
-    let within_400_frac = if lines_matched > 0 {
-        within_count as f64 / lines_matched as f64
+    let within_400_frac = if lines_timed > 0 {
+        within_count as f64 / lines_timed as f64
     } else {
         0.0
     };
@@ -215,6 +226,7 @@ pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
     let stats = GateStats {
         lines_total,
         lines_matched,
+        lines_timed,
         matched_frac,
         median_signed_ms,
         within_400_frac,

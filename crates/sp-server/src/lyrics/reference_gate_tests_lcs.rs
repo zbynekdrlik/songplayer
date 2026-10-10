@@ -133,13 +133,14 @@ fn fixture_from(mtl: &str, g35t: &str) -> (Vec<AlignedLine>, Vec<AsrWord>) {
     (lines, words)
 }
 
-/// `(lines_total, lines_matched, median_signed_ms, lines within 400 ms)` of a
-/// passing verdict.
-fn passing(verdict: GateVerdict) -> (usize, usize, i64, f64) {
+/// `(lines_total, lines_matched, lines_timed, median_signed_ms,
+/// within_400_frac)` of a passing verdict.
+fn passing(verdict: GateVerdict) -> (usize, usize, usize, i64, f64) {
     match verdict {
         GateVerdict::Pass(s) => (
             s.lines_total,
             s.lines_matched,
+            s.lines_timed,
             s.median_signed_ms,
             s.within_400_frac,
         ),
@@ -149,20 +150,24 @@ fn passing(verdict: GateVerdict) -> (usize, usize, i64, f64) {
 
 /// The three fixtures the review named: the forward walk failed them on
 /// matched lines with medians of +102 / +313 / +444 s. On the alignment they
-/// pass on time (pins from the scratch port of `evaluate`).
+/// pass on time (pins from the scratch port of `evaluate`); the matched lines
+/// whose own first word was misheard (6, 28 and 15) are not timed.
 #[test]
 fn the_eval_fixtures_the_forward_walk_lost_pass_on_time() {
     let (lines, words) = fixture!("KeZaADiRHVI");
-    assert_eq!(passing(evaluate(&lines, &words)), (53, 44, 8, 35.0 / 44.0));
+    assert_eq!(
+        passing(evaluate(&lines, &words)),
+        (53, 44, 38, -4, 33.0 / 38.0)
+    );
     let (lines, words) = fixture!("p74PDWAFk0A");
     assert_eq!(
         passing(evaluate(&lines, &words)),
-        (162, 145, -27, 125.0 / 145.0)
+        (162, 145, 117, -33, 111.0 / 117.0)
     );
     let (lines, words) = fixture!("q5m09rqOoxE");
     assert_eq!(
         passing(evaluate(&lines, &words)),
-        (214, 187, -46, 159.0 / 187.0)
+        (214, 187, 172, -49, 152.0 / 172.0)
     );
 }
 
@@ -203,4 +208,22 @@ fn a_line_is_matched_from_half_of_its_words() {
     for ((aligned, words), want) in cases {
         assert_eq!(line_matched(aligned, words), want, "{aligned} of {words}");
     }
+}
+
+/// A line whose own first word the ASR misheard ("can" for "Can't", the rest
+/// sung 2 s later) is matched but not timed: its first aligned word starts
+/// 2 000 ms after the line, which would have read as a late line. Timing it
+/// gave a median of +1 000 ms (Offset); untimed, the gate passes.
+#[test]
+fn a_line_with_a_misheard_first_word_is_matched_but_not_timed() {
+    let lines = vec![
+        line("Can't take my worship", 1_000),
+        line("Lord you are holy", 6_000),
+    ];
+    let mut words = Vec::new();
+    push_phrase(&mut words, "can", 1_000);
+    push_phrase(&mut words, "take my worship", 3_000);
+    push_phrase(&mut words, "Lord you are holy", 6_000);
+    assert_eq!(match_lines(&lines, &words), vec![Some(3_000), Some(6_000)]);
+    assert_eq!(passing(evaluate(&lines, &words)), (2, 2, 1, 0, 1.0));
 }
