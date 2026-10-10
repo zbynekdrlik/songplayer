@@ -90,10 +90,13 @@ pub async fn fetch_lyrics(
     fetch_lyrics_at(client, GENIUS_SEARCH_URL, access_token, artist, song).await
 }
 
-/// [`fetch_lyrics`] against `search_url`. Returns `None` when:
-///   - `access_token` is empty (caller hasn't configured the setting)
-///   - the `/search` call fails or returns no song hits
-///   - the public lyrics page yields no recognisable lyric regions
+/// [`fetch_lyrics`] against `search_url`. `Ok(None)` is "Genius has no song
+/// of this artist": no token configured, an empty artist or song, or no
+/// artist-matched song hit. #232: everything that keeps Genius from
+/// answering is an `Err` naming why, so the probe (and the live gate) shows
+/// it: a refused search (401 a revoked token, 403 blocked, 429 limited), an
+/// unreadable search answer, a refused song page, or a matched page with no
+/// lyric (a changed page layout).
 pub(crate) async fn fetch_lyrics_at(
     client: &Client,
     search_url: &str,
@@ -122,32 +125,26 @@ pub(crate) async fn fetch_lyrics_at(
         .await?;
 
     if !resp.status().is_success() {
-        warn!(
-            status = %resp.status(),
-            artist,
-            song,
-            "Genius search non-success"
-        );
-        return Ok(None);
+        anyhow::bail!("Genius search answered {}", resp.status());
     }
-
-    let body: SearchResponse = match resp.json().await {
-        Ok(b) => b,
-        Err(e) => {
-            warn!(error = %e, "Genius search JSON parse failed");
-            return Ok(None);
-        }
-    };
+    let body: SearchResponse = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("Genius search answer unreadable: {e}"))?;
 
     let Some(hit_url) = pick_song_url(&body, artist) else {
         debug!(artist, song, "Genius: no song hit matched");
         return Ok(None);
     };
-    fetch_page_lyrics(client, &hit_url).await
+    match fetch_page_lyrics(client, &hit_url).await? {
+        Some(track) => Ok(Some(track)),
+        None => anyhow::bail!("Genius song page holds no lyric: {hit_url}"),
+    }
 }
 
-/// Fetch one public Genius song page and extract its lyric. `Ok(None)` for
-/// a non-success status or a page with no lyric container.
+/// Fetch one public Genius song page and extract its lyric. `Ok(None)` for a
+/// page with no lyric container; a refused page is an `Err` naming its
+/// status (#232).
 async fn fetch_page_lyrics(client: &Client, url: &str) -> Result<Option<LyricsTrack>> {
     debug!(%url, "Genius: fetching lyrics page");
     let page_resp = client
@@ -158,8 +155,7 @@ async fn fetch_page_lyrics(client: &Client, url: &str) -> Result<Option<LyricsTr
         .await?;
 
     if !page_resp.status().is_success() {
-        warn!(status = %page_resp.status(), "Genius lyrics page non-success");
-        return Ok(None);
+        anyhow::bail!("Genius song page answered {}: {url}", page_resp.status());
     }
 
     let html = page_resp.text().await?;
