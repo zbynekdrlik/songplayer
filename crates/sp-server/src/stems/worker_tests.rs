@@ -333,6 +333,42 @@ async fn process_next_marks_overlong_song_unsupported() {
     );
 }
 
+/// #230: while the background is held the stem tick starts no job — the
+/// overlong row is not even looked at; after the release the tick marks it.
+#[tokio::test]
+async fn a_held_background_starts_no_stem_job_until_released() {
+    let _lk = crate::lyrics::heavy_slot::DUB_FLAG_SERIAL.lock().await;
+    crate::lyrics::heavy_slot::set_dub_slot_wanted(false);
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    seed_pending_stem_row(&pool, 1).await;
+    sqlx::query("UPDATE videos SET duration_ms = ? WHERE id = 1")
+        .bind(7_260_000i64) // 121 min
+        .execute(&pool)
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let worker = worker_with_stub_venv(pool.clone(), dir.path());
+    let before = stem_status(&pool).await;
+    crate::background_hold::hold_for_a_minute(&pool).await;
+    worker.process_next().await;
+    assert_eq!(
+        stem_status(&pool).await,
+        before,
+        "held: the row is untouched"
+    );
+    crate::background_hold::end_hold(&pool).await;
+    worker.process_next().await;
+    assert_eq!(stem_status(&pool).await.as_deref(), Some("unsupported"));
+}
+
+async fn stem_status(pool: &SqlitePool) -> Option<String> {
+    sqlx::query_scalar::<_, Option<String>>("SELECT stem_status FROM videos WHERE id = 1")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 /// A normal-length (4-min) row is never touched by the terminal-skip path.
 /// No stub venv is provided here — `process_next` stops at the missing
 /// venv-python gate before reaching the duration check at all (same as

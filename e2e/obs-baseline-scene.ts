@@ -11,11 +11,15 @@
  * machine. So the picker chooses another sp-* scene instead: any one that is
  * not sp-fast (under test) and not sp-warmup (also disturbing, per the
  * operator). It falls back to a non-sp scene only if no other sp-* exists.
+ *
+ * #230: never sp-90s either — a cut to it holds every background job of the
+ * node for 4 h (until sp-slow is cut), so a gate that parked on it would
+ * stop the box's downloads and processing after each deploy.
  */
 
 import { AV_PROBE_SCENE } from "./av-sync-probe";
 
-export const DISALLOWED_BASELINE_SCENES = new Set(["sp-fast", "sp-warmup"]);
+export const DISALLOWED_BASELINE_SCENES = new Set(["sp-fast", "sp-warmup", "sp-90s"]);
 
 export function pickBaselineScene(scenes: string[]): string {
   // Prefer sp-slow specifically — it's a quiet music scene operators

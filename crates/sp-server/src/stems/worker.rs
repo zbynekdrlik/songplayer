@@ -255,6 +255,10 @@ impl StemWorker {
         if !worker_enabled(enabled.as_deref()) {
             return;
         }
+        // #230: a held background starts no new job (a running one finishes).
+        if crate::background_hold::holds(&self.pool, crate::background_hold::Job::Stems).await {
+            return;
+        }
 
         // #229: a node with no lyrics venv that asks its peers still takes a
         // peer's stems (the plan's decisions: the fetch runs before the venv

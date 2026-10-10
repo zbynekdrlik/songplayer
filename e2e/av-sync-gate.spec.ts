@@ -194,7 +194,13 @@ test.describe("baseline scene picker (CLAUDE.md OBS discipline)", () => {
   });
 
   test("never picks sp-fast or sp-warmup while another sp-* exists", () => {
-    expect(pickBaselineScene(["sp-fast", "sp-warmup", "sp-90s", "QR test"])).toBe("sp-90s");
+    expect(pickBaselineScene(["sp-fast", "sp-warmup", "sp-worship", "QR test"])).toBe("sp-worship");
+  });
+
+  // #230: a cut to sp-90s holds the node's background jobs for 4 h.
+  test("never picks sp-90s, the background-hold scene", () => {
+    expect(pickBaselineScene(["sp-90s", "sp-fast", "sp-worship"])).toBe("sp-worship");
+    expect(pickBaselineScene(["sp-90s", "sp-warmup", "QR test"])).toBe("QR test");
   });
 
   test("falls back to a non-sp scene only when no other sp-* exists", () => {

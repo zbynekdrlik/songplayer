@@ -121,6 +121,21 @@ async fn a_paused_node_hashes_nothing() {
     assert!(all_hashes(node.pool()).await.unwrap().is_empty());
 }
 
+/// #230: a held background hashes nothing; the release hashes again.
+#[tokio::test]
+async fn a_held_background_hashes_nothing_until_released() {
+    let node = TestNode::start("snv", None).await;
+    let id = node.add_video(YT).await;
+    node.give_song(id, YT, "Way Maker", "Sinach").await;
+    crate::background_hold::hold_for_a_minute(node.pool()).await;
+    let pass = node.hash_now().await;
+    assert_eq!((pass.hashed, pass.paused), (0, true));
+    assert!(all_hashes(node.pool()).await.unwrap().is_empty());
+    crate::background_hold::end_hold(node.pool()).await;
+    let pass = node.hash_now().await;
+    assert_eq!((pass.hashed, pass.paused), (2, false));
+}
+
 /// stat → hash → stat: a file whose mtime moves while it is read (every few
 /// ms, during the ~1.5 s a 2 000 B/s pass reads the 3 000-byte audio) is not
 /// stored; the next pass hashes it.

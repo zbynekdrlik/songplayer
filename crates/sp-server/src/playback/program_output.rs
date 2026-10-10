@@ -811,6 +811,8 @@ impl super::PlaybackEngine {
             .await;
         let mut shutdown_rx = shutdown.subscribe();
         restore_selected_source(&self.pool, &bus).await;
+        // #230: after the restored source, so it presses nothing.
+        crate::background_hold::start(self.pool.clone(), &bus, shutdown);
         if !install(bus.clone()) {
             warn!("program bus: a bus was already installed — keeping the first one");
         }

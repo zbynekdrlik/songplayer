@@ -1126,6 +1126,30 @@ app.get("/api/v1/resolume/health", (_req, res) => {
   res.json([]);
 });
 
+// #230: the background hold the health bar polls every 5 s. Not held by
+// default; `POST /__mock/background-hold {…}` sets the fields sent (over
+// the idle value), `POST /__mock/background-hold-reset` clears it.
+const HOLD_IDLE = {
+  held: false,
+  until_utc_ms: null,
+  remaining_s: 0,
+  hold_scene: "sp-90s",
+  release_scene: "sp-slow",
+  held_jobs: [],
+};
+let backgroundHold = { ...HOLD_IDLE };
+app.get("/api/v1/background-hold", (_req, res) => {
+  res.json(backgroundHold);
+});
+app.post("/__mock/background-hold", (req, res) => {
+  backgroundHold = { ...HOLD_IDLE, ...req.body };
+  res.json(backgroundHold);
+});
+app.post("/__mock/background-hold-reset", (_req, res) => {
+  backgroundHold = { ...HOLD_IDLE };
+  res.json(backgroundHold);
+});
+
 // NDI genlock health (#150) — polled every 1 s by the dashboard's
 // GlobalLockBadge (which fills store.ndi_health for the per-card LockBadges).
 // Mirrors the real `GET /api/v1/ndi/health` array of PipelineHealthSnapshot:

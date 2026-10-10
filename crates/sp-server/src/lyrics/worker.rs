@@ -390,6 +390,10 @@ impl LyricsWorker {
             debug!("worker: lyrics_worker_enabled=false, skipping this tick");
             return;
         }
+        // #230: a held background starts no new job (a running one finishes).
+        if crate::background_hold::holds(&self.pool, crate::background_hold::Job::Lyrics).await {
+            return;
+        }
         // #229: a track made here while a peer had the song stands in for
         // the peer's copy, which replaces it once the peer has one.
         for video_id in crate::peer::standin::supersede_next(self.peer.as_ref()).await {

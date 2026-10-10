@@ -11,10 +11,14 @@
 //! the `genlock-global-badge` testid + the fleet LOCKED/DEGRADED/UNLOCKED
 //! vocabulary), and `lan_address.rs`. The pure label/tone vocabulary is in
 //! `sp_core::health` (unit-tested; sp-ui has no test job).
+//!
+//! #230: while a `sp-90s` press holds the background jobs, an amber
+//! segment says so (`sp_core::background_hold::label`), polled every 5 s.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
+use sp_core::background_hold::{self, BackgroundHold};
 use sp_core::health;
 
 use crate::api;
@@ -65,6 +69,12 @@ pub fn HealthBar() -> impl IntoView {
             cancelled,
             store.resolume_health,
         );
+    });
+    // #230: the background hold, polled every 5 s (it arms and ends while
+    // the page is open).
+    let hold = RwSignal::new(BackgroundHold::default());
+    let _hold_poll = Effect::new(move |_| {
+        poll_into("/api/v1/background-hold", 5_000, cancelled, hold);
     });
 
     // LAN address — one-shot fetch of `/api/v1/status` (no loop → never touches
@@ -186,6 +196,14 @@ pub fn HealthBar() -> impl IntoView {
                 health::paid_ai_label(paid_ai.get(), &paid_held.get()).map(|(tone, text, tip)| {
                     let cls = format!("health-seg {}", tone.css_class());
                     view! { <span class=cls title=tip data-testid="health-paid-ai">{text}</span> }
+                        .into_any()
+                })
+            }}
+            // #230: only while a sp-90s press holds the background jobs.
+            {move || {
+                background_hold::label(&hold.get()).map(|(tone, text, tip)| {
+                    let cls = format!("health-seg {}", tone.css_class());
+                    view! { <span class=cls title=tip data-testid="health-background-hold">{text}</span> }
                         .into_any()
                 })
             }}

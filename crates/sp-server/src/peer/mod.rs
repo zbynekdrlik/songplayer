@@ -69,9 +69,13 @@ impl Exchange {
         self.board.announce(youtube_id, job)
     }
 
-    /// `peer_transfers_paused` = "true": no new transfer either way, no
-    /// hashing. A failed read is WARNed and reads as not paused.
+    /// `peer_transfers_paused` = "true", or #230's background hold: no new
+    /// transfer either way, no hashing. A failed read is WARNed and reads
+    /// as not paused.
     pub(crate) async fn transfers_paused(&self) -> bool {
+        if crate::background_hold::holds(&self.pool, crate::background_hold::Job::Peer).await {
+            return true;
+        }
         let raw = crate::db::models::get_setting(&self.pool, SETTING_PEER_TRANSFERS_PAUSED)
             .await
             .inspect_err(|e| warn!("exchange: reading {SETTING_PEER_TRANSFERS_PAUSED} failed: {e}"))

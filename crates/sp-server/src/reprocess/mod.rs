@@ -197,6 +197,13 @@ impl ReprocessWorker {
         let mut success_count = 0;
 
         for row in rows {
+            // #230: a held background starts no new repair (the rest waits
+            // for the next 30 min pass).
+            if crate::background_hold::holds(&self.pool, crate::background_hold::Job::Metadata)
+                .await
+            {
+                break;
+            }
             match self.reprocess_one(&row).await {
                 Ok(ReprocessOutcome::Success) => {
                     info!(video_id = %row.youtube_id, "reprocessed successfully");
