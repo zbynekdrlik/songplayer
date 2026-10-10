@@ -228,30 +228,31 @@ mod tests {
         assert_eq!(startup_mode(&playlists, 9), PlaybackMode::Continuous);
     }
 
-    /// #240: the span is the ports SongPlayer's own process holds — 5960
-    /// and SP-program's 5961 (measured on SNV, 10.10.2026) — never a
-    /// "margin" port: cg OBS's own NDI sender listens on 5962, so a span
-    /// that named it never came free and every start waited the full 10 s.
+    /// #240: the span is SP-program's own sender port, 5961: 5960 is this
+    /// process's own NDI runtime listener, taken at `NDIlib_initialize`
+    /// (before the wait), so it is never free to probe (SNV, 10.10.2026:
+    /// `busy=[5960]` while 5961 was free); and never a "margin" port past
+    /// the senders — cg OBS's runtime + sender listen on 5962 + 5963.
     #[test]
-    fn the_program_s_port_span_is_its_own_pair() {
+    fn the_program_s_port_span_is_its_sender_port() {
         assert_eq!(NDI_SENDERS, 1);
-        assert_eq!(ndi_port_range(NDI_SENDERS), vec![5960, 5961]);
+        assert_eq!(ndi_port_range(NDI_SENDERS), vec![5961]);
     }
 
     #[test]
-    fn port_range_is_base_through_base_plus_n() {
-        assert_eq!(ndi_port_range(3), vec![5960, 5961, 5962, 5963]);
+    fn port_range_is_the_ports_after_the_runtime_s() {
+        assert_eq!(ndi_port_range(3), vec![5961, 5962, 5963]);
     }
 
     #[test]
-    fn port_range_zero_outputs_is_the_base_alone() {
-        assert_eq!(ndi_port_range(0), vec![5960]);
+    fn port_range_zero_outputs_is_empty() {
+        assert_eq!(ndi_port_range(0), Vec::<u16>::new());
     }
 
     #[test]
     fn port_range_saturates_instead_of_overflowing_u16() {
         let ports = ndi_port_range(usize::MAX);
-        assert_eq!(ports.first(), Some(&NDI_PORT_BASE));
+        assert_eq!(ports.first(), Some(&(NDI_PORT_BASE + 1)));
         assert_eq!(ports.last(), Some(&u16::MAX));
     }
 
