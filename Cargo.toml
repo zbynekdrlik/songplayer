@@ -5,6 +5,7 @@ members = [
     "crates/sp-decoder",
     "crates/sp-gpu",
     "crates/sp-server",
+    "crates/sp-asrc",
 ]
 exclude = [
     "sp-ui",
@@ -58,3 +59,11 @@ panic = "abort"
 [profile.mutants]
 inherits = "test"
 debug = "none"
+
+# #233: rubato's sinc stage is generic, so it is compiled in sp-asrc, the one
+# crate that names it — optimized in the dev profile and in those that
+# inherit it (test, mutants), so the ASIO tests that push thousands of blocks
+# through a 256-tap cubic stage take seconds, not minutes. Same results at
+# any opt-level (no float contraction). sp-server's builds never recompile it.
+[profile.dev.package.sp-asrc]
+opt-level = 3

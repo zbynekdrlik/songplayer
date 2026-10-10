@@ -16,6 +16,9 @@ sp-decoder = { path = "../sp-decoder" }
 # #223 S2: the SP-program-MAX GPU compositor + its Spout sender (Windows; the
 # off-Windows stub reports `Unsupported`), driven by `playback/program_max*.rs`.
 sp-gpu = { path = "../sp-gpu" }
+# #233: the ASIO output's rubato sinc stage, in its own crate so it is
+# compiled optimized in tests too (`playback/asrc.rs`).
+sp-asrc = { path = "../sp-asrc" }
 
 tokio = { workspace = true }
 axum = { workspace = true }
@@ -62,7 +65,8 @@ jpeg-encoder = "0.6"
 mdns-sd = "0.21"
 if-addrs = "0.15"
 # #233: the program audio outputs' sample-rate conversion — rubato's `Async`
-# sinc (an ASIO output's drift-servo ratio, `playback/asrc.rs`) and its
+# sinc (an ASIO output's drift-servo ratio, `playback/asrc.rs`: its filter
+# here, the stage itself in sp-asrc) and its
 # synchronous `Fft` (default `fft_resampler` feature: a VBAN destination's
 # fixed ratio, `playback/vban_rate.rs`). Pure Rust, MIT OR Apache-2.0 (its MIT notice
 # ships in THIRD-PARTY-NOTICES.txt), pinned exactly.

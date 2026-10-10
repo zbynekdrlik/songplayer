@@ -67,11 +67,11 @@ SongPlayer is a standalone Windows desktop application that plays YouTube playli
 
 ## Workspace Structure
 
-The Cargo workspace root manages 5 crates. Two additional crates are excluded from the workspace because they have different build toolchains.
+The Cargo workspace root manages 6 crates. Two additional crates are excluded from the workspace because they have different build toolchains.
 
 ```
 songplayer/
-├── Cargo.toml              # Workspace root (members: sp-core, sp-ndi, sp-decoder, sp-gpu, sp-server)
+├── Cargo.toml              # Workspace root (members: sp-core, sp-ndi, sp-decoder, sp-gpu, sp-server, sp-asrc)
 ├── VERSION                 # Single source of truth for version (e.g. 0.1.0-dev.1)
 ├── scripts/
 │   └── sync-version.sh    # Reads VERSION, updates all Cargo.toml + tauri.conf.json + both Cargo.lock files
@@ -80,6 +80,7 @@ songplayer/
 │   ├── sp-ndi/           # NDI output via libloading (runtime-linked, no compile-time dep)
 │   ├── sp-decoder/       # Windows Media Foundation decoder (cfg(windows) only)
 │   ├── sp-gpu/           # SP-program-MAX D3D11 compositor + Spout sender (Windows; Linux stub)
+│   ├── sp-asrc/          # The ASIO output's rubato sinc stage (compiled optimized even in tests)
 │   └── sp-server/        # Axum HTTP + WebSocket server, yt-dlp/FFmpeg orchestration
 ├── sp-ui/                # Leptos 0.7 WASM frontend (excluded from workspace, built with Trunk)
 └── src-tauri/             # Tauri 2 shell (excluded from workspace, built with cargo tauri)
@@ -93,6 +94,7 @@ songplayer/
 | `sp-ndi` | NDI SDK integration via `libloading`. Loads the NDI shared library at runtime to avoid compile-time dependency. |
 | `sp-decoder` | Windows Media Foundation video decoder. Entire crate is `cfg(windows)` — will not compile on Linux. |
 | `sp-gpu` | The `SP-program-MAX` compositor and its Spout sender (#223): Direct3D 11 + the vendored Spout2 SDK on Windows (WARP in tests), a stub reporting "unsupported" elsewhere. Pure decisions (adapter, layers, colour, CPU reference) are Linux-tested. |
+| `sp-asrc` | The ASIO output's rubato `Async` sinc stage behind one non-generic type (#233). rubato is generic, so its code compiles here, at `opt-level = 3` in every profile (`[profile.dev.package.sp-asrc]`): the ASIO tests stay fast. |
 | `sp-server` | Axum 0.8 server with HTTP REST + WebSocket. Runs yt-dlp and FFmpeg as subprocesses. Main async binary. |
 | `sp-ui` | Leptos 0.7 CSR frontend compiled to WASM via Trunk. Communicates with sp-server via HTTP/WebSocket. |
 | `src-tauri` | Tauri 2 application shell. Embeds `dist/` from sp-ui build and spawns sp-server in background. |
@@ -158,7 +160,7 @@ Two branches: `dev` + `main`. After merge: recreate `dev` with next `-dev.N` ver
 3. Before PR merge: change VERSION to `0.1.0`, run sync-version.sh
 4. After merge: recreate dev with `0.2.0-dev.1`
 
-Note: The 5 workspace crates use `version.workspace = true` — only the root `Cargo.toml`, `src-tauri/Cargo.toml`, `sp-ui/Cargo.toml`, and `src-tauri/tauri.conf.json` need updating.
+Note: The 6 workspace crates use `version.workspace = true` — only the root `Cargo.toml`, `src-tauri/Cargo.toml`, `sp-ui/Cargo.toml`, and `src-tauri/tauri.conf.json` need updating.
 
 ## Database
 
