@@ -4,6 +4,15 @@
 use super::test_helpers::{apply_first_n, apply_upto};
 use super::*;
 
+/// The five V34 columns of one row.
+type FormatColumns = (
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+    Option<f64>,
+);
+
 #[tokio::test]
 async fn v34_adds_the_video_format_columns_null_for_old_rows() {
     let pool = create_memory_pool().await.unwrap();
@@ -19,13 +28,7 @@ async fn v34_adds_the_video_format_columns_null_for_old_rows() {
     .await
     .unwrap();
     apply_upto(&pool, 34).await;
-    let row: (
-        Option<String>,
-        Option<String>,
-        Option<i64>,
-        Option<i64>,
-        Option<f64>,
-    ) = sqlx::query_as(
+    let row: FormatColumns = sqlx::query_as(
         "SELECT video_format_id, video_codec, video_width, video_height, video_fps \
              FROM videos WHERE id = 34001",
     )
