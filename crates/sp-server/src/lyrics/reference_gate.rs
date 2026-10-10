@@ -538,3 +538,7 @@ mod reference_gate_tests_mutants;
 #[cfg(test)]
 #[path = "reference_gate_tests_sung.rs"]
 mod reference_gate_tests_sung;
+
+#[cfg(test)]
+#[path = "reference_gate_tests_lcs.rs"]
+mod reference_gate_tests_lcs;
