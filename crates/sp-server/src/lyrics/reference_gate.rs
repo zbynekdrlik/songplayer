@@ -8,23 +8,22 @@
 //! cover what is sung (`sung_coverage.rs`)? A partial lyric passes the
 //! first alone, and mtl then holds its lines over the singing it lacks.
 //!
-//! Matching is a monotonic n-gram anchor search: it borrows the "cursor
-//! only ever moves forward" idea from `eval/lyrics/combine_lines_times.py`
-//! (that file's `difflib`-based whole-stream alignment is NOT ported here
-//! — this is a simpler, purpose-built matcher for a single yes/no gate,
-//! not a full line/word recombination), so a repeated chorus line always
-//! binds to the NEXT occurrence in the ASR stream, never rebinding
-//! backwards onto an earlier line's match.
+//! Both halves read ONE alignment (`sung_coverage::align`): the
+//! order-preserving longest common subsequence of all the reference words
+//! against all the sung words. A line is matched when at least half of its
+//! words are on it ([`line_matched`]); its start is the sung start of its
+//! first aligned word. The alignment is monotonic, so a repeated chorus line
+//! binds to one sung repetition each, in order, never backwards.
 //!
-//! For each line, in order: take its first `min(3, line_len)` normalized
-//! words and search the ASR word stream for that exact n-gram starting at
-//! the cursor (the word right after the previous line's matched anchor
-//! word). If not found, fall back to a shorter n-gram (3 → 2 → 1 words) —
-//! this recovers a line whose 3rd word the ASR mis-transcribed while its
-//! first word(s) still match. No match at all → the line is unmatched and
-//! the cursor does not move.
+//! #144 first-week review: the anchor walk this replaced searched each
+//! line's first 3 → 2 → 1 words at or after a forward-only cursor. A
+//! misheard first word sent the 1-word fallback to a later occurrence, the
+//! cursor jumped there and every line in between was lost: the catalog's
+//! +102 / +313 / +444 s medians were that jump, not mtl (the eval fixtures
+//! went from 4 to 18 of 21 passing on the same mtl lines).
 
 use crate::lyrics::g35t_client::AsrWord;
+use crate::lyrics::sung_coverage::{Alignment, align};
 
 /// One forced-alignment (mtl) line under verification. Deliberately
 /// separate from `crate::lyrics::backend::AlignedLine` (which carries
@@ -114,54 +113,33 @@ pub(crate) fn normalized_words(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// First position >= `cursor` where `word_norms` contains `ngram`
-/// contiguously, or `None`.
-fn find_ngram(word_norms: &[String], cursor: usize, ngram: &[String]) -> Option<usize> {
-    let n = ngram.len();
-    if n == 0 || cursor + n > word_norms.len() {
-        return None;
-    }
-    for start in cursor..=(word_norms.len() - n) {
-        if &word_norms[start..start + n] == ngram {
-            return Some(start);
-        }
-    }
-    None
+/// #144: a line of `words` words with `aligned` of them on the alignment is
+/// matched when at least half of them are (a line with no word never is).
+pub(crate) fn line_matched(aligned: usize, words: usize) -> bool {
+    words > 0 && aligned * 2 >= words
+}
+
+/// Per-line matched sung `start_ms` of `alignment`, in the lines' order:
+/// the first aligned word's start, or `None` for a line under half on it.
+fn line_starts(alignment: &Alignment) -> Vec<Option<u64>> {
+    alignment
+        .lines
+        .iter()
+        .map(|l| {
+            if line_matched(l.aligned, l.words) {
+                l.first_sung_start_ms
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Per-line matched ASR `start_ms`, in the SAME order as `lines`. `None`
-/// means no match was found for that line (its normalized word list was
-/// empty, or no n-gram fallback found it in the ASR stream).
+/// means the line is not matched: it has no word, or under half of its
+/// words are on the alignment.
 pub fn match_lines(lines: &[AlignedLine], words: &[AsrWord]) -> Vec<Option<u64>> {
-    let word_norms: Vec<String> = words.iter().map(|w| normalize_word(&w.text)).collect();
-    let mut cursor: usize = 0;
-    let mut out = Vec::with_capacity(lines.len());
-
-    for line in lines {
-        let line_words = normalized_words(&line.text);
-        if line_words.is_empty() {
-            out.push(None);
-            continue;
-        }
-
-        let max_n = line_words.len().min(3);
-        let mut found: Option<usize> = None;
-        for n in (1..=max_n).rev() {
-            if let Some(pos) = find_ngram(&word_norms, cursor, &line_words[..n]) {
-                found = Some(pos);
-                break;
-            }
-        }
-
-        match found {
-            Some(pos) => {
-                out.push(Some(words[pos].start_ms));
-                cursor = pos + 1;
-            }
-            None => out.push(None),
-        }
-    }
-    out
+    line_starts(&align(lines, words))
 }
 
 /// Median of an i64 slice (average of the two middle values, rounded, for
@@ -197,7 +175,9 @@ pub(crate) fn covers_what_is_sung(sung: &crate::lyrics::sung_coverage::SungCover
 /// `max_uncovered_sung_ms > 25 000`) → Offset (`|median_signed_ms| > 400`)
 /// → Agreement (`within_400_frac < 0.70`) → Pass.
 pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
-    let matches = match_lines(lines, words);
+    // #144: one alignment for both halves.
+    let alignment = align(lines, words);
+    let matches = line_starts(&alignment);
 
     let mut lines_total = 0usize;
     let mut lines_matched = 0usize;
@@ -231,7 +211,7 @@ pub fn evaluate(lines: &[AlignedLine], words: &[AsrWord]) -> GateVerdict {
         0.0
     };
 
-    let sung = crate::lyrics::sung_coverage::sung_coverage(lines, words);
+    let sung = alignment.coverage;
     let stats = GateStats {
         lines_total,
         lines_matched,

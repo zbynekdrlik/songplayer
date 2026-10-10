@@ -187,3 +187,47 @@ fn the_covered_share_is_covered_over_sung() {
     assert_eq!(got.covered_frac, 0.75);
     assert_eq!(got.max_uncovered_ms, 100);
 }
+
+/// #144: `align` records per line its words, how many of them are on the
+/// alignment and the sung start of the FIRST of them (a wordless line has
+/// none), and the same coverage `sung_coverage` reports.
+#[test]
+fn align_counts_each_lines_words_on_the_alignment() {
+    let lines = vec![
+        line("alpha bravo charlie"),
+        line("delta echo"),
+        line("!!"),
+        line("foxtrot"),
+    ];
+    let sung = vec![
+        word("zulu", 100, 200),
+        word("bravo", 300, 400),
+        word("charlie", 500, 600),
+        word("delta", 700, 800),
+        word("foxtrot", 900, 1_000),
+    ];
+    let got = align(&lines, &sung);
+    let on = |words, aligned, first_sung_start_ms| LineOnAlignment {
+        words,
+        aligned,
+        first_sung_start_ms,
+    };
+    assert_eq!(
+        got.lines,
+        vec![
+            on(3, 2, Some(300)),
+            on(2, 1, Some(700)),
+            on(0, 0, None),
+            on(1, 1, Some(900)),
+        ]
+    );
+    assert_eq!(
+        got.coverage,
+        SungCoverage {
+            sung_words: 5,
+            covered_frac: 0.8,
+            max_uncovered_ms: 100,
+        }
+    );
+    assert_eq!(sung_coverage(&lines, &sung), got.coverage);
+}

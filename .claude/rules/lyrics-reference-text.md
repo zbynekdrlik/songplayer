@@ -30,14 +30,14 @@ paths:
 
 ## The gate is two-way
 
-- `reference_gate::evaluate` checks BOTH directions:
-  - reference → transcript: `match_lines`, `matched_frac` ≥ 0.60, median offset ≤ 400 ms, agreement ≥ 0.70;
-  - transcript → reference: `sung_coverage.rs`, an order-preserving LCS of ALL words.
+- `reference_gate::evaluate` checks BOTH directions on ONE alignment (`sung_coverage::align`: the order-preserving LCS of ALL reference words against ALL sung words, computed once):
+  - reference → transcript: `match_lines` — a line is matched when at least half of its words are on the alignment (`line_matched`: `aligned * 2 >= words`), at the sung start of its first aligned word; `matched_frac` ≥ 0.60, median offset ≤ 400 ms, agreement ≥ 0.70;
+  - transcript → reference: the same alignment's coverage of the sung words.
+- The first-week review (8.10.2026) replaced the line-anchor walk (first 3 → 2 → 1 words after a forward-only cursor): a misheard first word sent the 1-word fallback to a later occurrence and every line in between was lost — the catalog's +102 / +313 / +444 s medians were that jump. On the 21 in-repo eval fixtures (mtl 2026-08-05 vs g35t 2026-09-12) 4 → 18 pass; the 3 that fail are the poisoned and two partial texts (`reference_gate_tests_lcs.rs` pins three of them exactly). A matcher change is re-checked the same way: a scratch Python port of `evaluate` over those fixtures, both matchers side by side.
 - A text must cover ≥ 0.55 of the sung words (`MIN_SUNG_COVERED_FRAC`) and leave no uncovered sung run over 25 s (`MAX_UNCOVERED_SUNG_MS`). Otherwise the result is `Fail{Coverage}`, and the audit's `sung_coverage_ok` tells the two coverage failures apart.
 - The thresholds are MEASURED (#144 comment 5899043518):
   - complete texts: 0.64–0.977 coverage (0.64–0.97 against g35t transcripts), runs ≤ 20.6 s;
   - ★ rows whose wall held one line over other singing: runs ≥ 34.9 s.
-- The LCS is used, not the line-anchor walk. A 1-word fallback anchor that jumps forward orphans every line in between, and gave a complete text a false 32 s run.
 - To re-measure, use the gate's own transcripts: `{yt}_g35t_words.json` (kept) and `{yt}_g35t_words_used.json` (retired) in the box cache. The v20 WhisperX `{yt}_whisperx_track.json` files are a fallback. `eval/lyrics/reports/2026-09-12-raw/` has real g35t transcripts plus the eval gold texts.
 - On the box, run a read-only Python script: write it to `%TEMP%` with the win-resolume MCP `FileWrite`, open the DB `file:...songplayer.db?mode=ro`, print only a compact table, then delete the script and its `__pycache__`.
 

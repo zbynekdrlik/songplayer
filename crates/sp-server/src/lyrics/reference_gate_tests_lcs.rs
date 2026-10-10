@@ -184,3 +184,23 @@ fn the_eval_fixtures_with_poisoned_or_partial_texts_still_fail_coverage() {
         }
     }
 }
+
+/// `line_matched`'s table: at least half of a line's words; a line with no
+/// word never. Each row is a boundary one mutation of the rule gets wrong.
+#[test]
+fn a_line_is_matched_from_half_of_its_words() {
+    let cases = [
+        ((0, 0), false),
+        ((0, 1), false),
+        ((1, 1), true),
+        ((1, 2), true),
+        ((1, 3), false),
+        ((2, 3), true),
+        ((1, 4), false),
+        ((2, 4), true),
+        ((3, 4), true),
+    ];
+    for ((aligned, words), want) in cases {
+        assert_eq!(line_matched(aligned, words), want, "{aligned} of {words}");
+    }
+}
