@@ -218,6 +218,49 @@ async fn an_empty_transcript_keeps_the_lyrics_the_wall_serves() {
     assert_served_kept(&rig, 2, "yt_served02", 1, 300).await;
 }
 
+/// #144 F1: a video in two playlists has two rows and ONE `<yt>_lyrics.json`.
+/// A row whose SIBLING serves the file serves it too: its empty transcript
+/// records only the attempt and never deletes the file the wall plays for
+/// the other playlist (before, the unserved row was quarantined and the
+/// shared file deleted).
+#[tokio::test]
+async fn an_empty_transcript_never_deletes_the_file_a_sibling_row_serves() {
+    let rig = rig().await;
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (2, 'q', 'u2', 'SP-other', 1)",
+    )
+    .execute(&rig.pool)
+    .await
+    .unwrap();
+    queued_song(&rig, 5, "yt_shared05", 0, 0).await;
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized, has_lyrics, \
+         lyrics_source, lyrics_pipeline_version) VALUES (6, 2, 'yt_shared05', 1, 1, ?, ?)",
+    )
+    .bind(SERVED_SOURCE)
+    .bind(LYRICS_PIPELINE_VERSION as i64)
+    .execute(&rig.pool)
+    .await
+    .unwrap();
+    std::fs::write(rig.lyrics_file("yt_shared05"), SERVED_BYTES).unwrap();
+
+    rig.worker
+        .quarantine_empty_transcript(5, "yt_shared05")
+        .await;
+
+    assert_eq!(
+        std::fs::read(rig.lyrics_file("yt_shared05")).unwrap(),
+        SERVED_BYTES,
+        "the file the sibling serves stays"
+    );
+    assert_eq!(
+        row(&rig.pool, 6).await.0,
+        1,
+        "the sibling still serves its lyrics"
+    );
+}
+
 /// Pin: a song with NO served lyrics still takes today's terminal state.
 #[tokio::test]
 async fn a_failing_run_of_an_unserved_song_is_marked_no_source() {

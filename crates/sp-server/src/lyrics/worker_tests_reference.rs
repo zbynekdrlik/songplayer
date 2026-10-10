@@ -371,7 +371,7 @@ async fn run_mtl_reference_stage_skips_when_the_transcript_is_empty() {
 }
 
 #[tokio::test]
-async fn run_mtl_reference_stage_pass_stamps_source_and_sets_reference_flag() {
+async fn run_mtl_reference_stage_pass_stamps_source_and_leaves_the_star_to_the_persist() {
     use crate::lyrics::g35t_client::AsrWord;
     use crate::lyrics::mtl_aligner::{MtlLine, MtlOutput};
 
@@ -535,13 +535,16 @@ async fn run_mtl_reference_stage_pass_stamps_source_and_sets_reference_flag() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(reference, 1, "lyrics_reference must be set on gate PASS");
+    assert_eq!(
+        reference, 0,
+        "#144 F1: the gate writes no ★ — it comes with the persisted track, on every row"
+    );
 
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
 
 #[tokio::test]
-async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
+async fn run_mtl_reference_stage_fail_leaves_the_star_to_the_persist_and_writes_audit() {
     use crate::lyrics::g35t_client::AsrWord;
     use crate::lyrics::mtl_aligner::{MtlLine, MtlOutput};
 
@@ -703,8 +706,8 @@ async fn run_mtl_reference_stage_fail_clears_reference_flag_and_writes_audit() {
         .await
         .unwrap();
     assert_eq!(
-        reference, 0,
-        "lyrics_reference must be cleared on gate FAIL"
+        reference, 1,
+        "#144 F1: the gate leaves ★ alone — the persisted base-tier track clears it"
     );
 
     let audit_path = cache_dir.join("yt_fail_alignment_audit.json");
