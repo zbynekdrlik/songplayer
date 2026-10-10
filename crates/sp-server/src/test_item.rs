@@ -21,7 +21,7 @@
 //!   bed and the markers reach `SP-program` as the clip carries them. Both
 //!   are renamed under `cache::SONG_FILES` and the row is upserted. A row
 //!   that already records both files on disk is left as it is (`already`).
-//! - **Never processed.** [`not_test_item!`] is the ONE SQL fragment every
+//! - **Never processed.** `not_test_item!` is the ONE SQL fragment every
 //!   worker queue (lyrics, stems, dub, metadata repair, download) and its
 //!   dashboard count adds: no worker takes a test item, no paid AI is asked.
 //! - **Not an operator playlist.** `GET /api/v1/playlists` leaves it out
@@ -82,7 +82,7 @@ macro_rules! not_test_item {
 }
 pub(crate) use not_test_item;
 
-/// The text of [`not_test_item!`].
+/// The text of `not_test_item!`.
 pub const NOT_TEST_ITEM: &str = not_test_item!();
 
 /// `bytes` as lowercase hex.
