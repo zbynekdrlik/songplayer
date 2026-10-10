@@ -161,8 +161,10 @@ fn a_wakeup_within_half_a_period_is_early_and_left_out() {
 }
 
 /// From the sixtieth counted refresh the count uses the fitted period, not
-/// the boot's: booted on 16.5 ms, then the display's P, a gap of 120
-/// refreshes is 120 (the boot period would count 121).
+/// the boot's: booted on 16.5 ms, then the display's P, a gap of 59
+/// refreshes is 59 (the boot period would count 60). #243: the gap stays
+/// under `VBLANK_RESTART` (1 s), past which the fit boots afresh; it was
+/// 120 refreshes (2 s) before the restart existed.
 #[test]
 fn the_count_uses_the_fit_from_the_sixtieth_refresh() {
     let base = Instant::now();
@@ -173,9 +175,9 @@ fn the_count_uses_the_fit_from_the_sixtieth_refresh() {
         .chain((1..60).map(|k| t15 + k * P));
     let (mut fit, _) = fed(base, times);
     assert_eq!(fit.grid(), grid(base, t15 + 59 * P, P));
-    assert_eq!(fit.observe(base + ns(t15 + 179 * P)), Seen::Counted);
-    assert_eq!(fit.missed(), 119);
-    assert_eq!(fit.grid(), grid(base, t15 + 179 * P, P));
+    assert_eq!(fit.observe(base + ns(t15 + 118 * P)), Seen::Counted);
+    assert_eq!(fit.missed(), 58);
+    assert_eq!(fit.grid(), grid(base, t15 + 118 * P, P));
 }
 
 /// The fit covers the last 240 refreshes: after a switch from P to 50 Hz,
@@ -318,4 +320,23 @@ fn a_gap_of_exactly_a_second_keeps_the_fit() {
     assert_eq!(fit.observe(base + ns(back)), Seen::Counted);
     assert_eq!(fit.missed(), 59);
     assert!(fit.grid().is_some());
+}
+
+/// #243: a restart keeps the counters — one early wake-up and one missed
+/// refresh before it read (1, 1) after it — and counts no missed refresh
+/// for the gap itself.
+#[test]
+fn a_restart_keeps_the_counters() {
+    let base = Instant::now();
+    let (mut fit, _) = fed(base, (0..75).map(|k| k * P));
+    assert_eq!(fit.observe(base + ns(74 * P + 1_000_000)), Seen::Early);
+    assert_eq!(fit.observe(base + ns(76 * P)), Seen::Counted);
+    assert_eq!((fit.missed(), fit.early()), (1, 1));
+    let back = 76 * P + 1_000_000_001;
+    assert_eq!(fit.observe(base + ns(back)), Seen::Booting);
+    for k in 1..=75 {
+        fit.observe(base + ns(back + k * P));
+    }
+    assert_eq!(fit.grid(), grid(base, back + 75 * P, P));
+    assert_eq!((fit.missed(), fit.early()), (1, 1));
 }
