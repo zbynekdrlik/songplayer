@@ -864,7 +864,9 @@ sample_type, ppm, rate_ppm, locked, latency_ms, offset_ms, slew_eta_s,
 cushion_ms,
 underruns, resets, hard_recentres, last_hard_recentre {cause, ms,
 lateness_ms, ago_s}, overflows, overloads, retry_in_s, reason_code,
-clock_waits}` (the
+clock_waits, resyncs, callback_gap_max_ms, late_callbacks, fast_callbacks,
+last_late_callback {gap_ms, ago_s}}` (the last five: "Resync requests and
+the callback timing" below; the
 servo's fields: the owner's ruling above), and while it runs a `note`
 when the driver's rate is not `audio_network_rate` or its buffer is over a
 third of a grid slot (1/90 s, lane 2's envelope); the task WARNs a note once
@@ -879,6 +881,49 @@ error answers 500 "the ASIO driver list could not be read: {why}"
 (`drivers_answer`, release review), so the dashboard's "Zoznam ovládačov
 ASIO sa nenačítal" names a real failure, never "no driver". The mock's
 `asio-drivers` fail-mode answers the same text.
+
+**Resync requests and the callback timing** (PP's Waves SoundGrid output
+pops, #233 design comment on the ticket; `asio_out_events.rs`, a child
+module of `asio_out.rs` for its 1000-line cap):
+
+- `kAsioResyncRequest` (answered 1 by `asio_state::reply`; the slot's
+  `resync` flag, `DeviceEvents::resync`) REBASES the drift servo:
+  `run.servo = new_servo(out, run.opened)`, as at a clock's arrival. The
+  driver's sample position jumped, so the regression, the window and the
+  level loop are stale. The next block primes the ring to the target (a
+  `Recentre::Prime`, no hard re-centre counted: a splice of the small
+  error, a few frames when the ring sat at the target), and the first
+  window measures the latency again (`latency_ms` and `offset_ms` read 0
+  until then). NEVER a close and a reopen: a SoundGrid driver takes ~10 s
+  to open again. The old servo's hard re-centres are folded into `Closed`
+  first, so `hard_recentres` keeps them. `resyncs` counts them since the
+  output was built (a worker counter, like `resets`); one WARN per resync,
+  at most one per 5 s with the count held back (`WarnLimiter`). Tests:
+  `asio_out_tests_resync.rs` (the rebase, no close or reopen, the count
+  and the hard re-centres across two runs with a resync in each).
+- The buffer switch times itself (`asio_win.rs`, atomics only): an
+  `Instant` (QueryPerformanceCounter) read against `CALLBACK_EPOCH`, a
+  `OnceLock` the first `start` sets OUTSIDE any callback (the callback only
+  `get`s it); `note_callback` swaps the slot's `last_callback` (`-1` =
+  none yet this run, set by `clear_counters`), keeps the gap as the poll's
+  max (`fetch_max`, swapped to 0 by `poll`) and counts its kind by the pure
+  `asio_state::callback_gap_kind(gap, period)`: over TWO buffer periods
+  `Late`, under a QUARTER `Fast` (a catch-up burst), both bounds `Normal`
+  (pinned at 10 000 and at DVS's 13 333 = 128 frames / 96 kHz). The period
+  is `frames_to_100ns(buffer_frames, rate)`, stored by `start`.
+  `DeviceEvents` carries `callback_gap_max_100ns` (per poll),
+  `late_callbacks` / `fast_callbacks` (per run, monotonic; the fake counts
+  scripted ones per run like a slot).
+- The worker (`CallbackTiming`, `Run::count`): `callback_gap_max_ms` = the
+  longest gap since the output was built; `late_callbacks` /
+  `fast_callbacks` add each closed run's like the overloads (`Closed`);
+  `last_late_callback` = the longest gap of the last poll that saw a new
+  late buffer switch, and its age, which keeps counting while the output
+  waits — to line it up with a pop. Tests: `asio_out_tests_timing.rs`, the
+  glue's on the Windows job (`asio_win_tests.rs`).
+- The dashboard's first ASIO line shows "resynchronizácie ovládača N"
+  (`asio-resyncs`, `sp_core::asio_resampling::RESYNCS_TIP`) once N > 0;
+  the callback timing is API-only.
 
 **Dashboard.** "Pridať výstup ASIO" (waits for the driver list) adds an ASIO
 row on the first listed driver, channels 1 / 2. Each row shows its type and
