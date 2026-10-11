@@ -85,3 +85,18 @@ Probe it live on SNV through the real proxy (`proxy_probe.py`, the
 
 Check two things: no refusal, and no correction of a line that was right.
 Each content-filter refusal cools the proxy's credential down for 60 s.
+
+**Probe of 11.10.2026 (the wording shipped).** Through `claude-opus-5-5`
+on 11 tracks there were no refusals, at 3–10 s per track.
+
+- The first wording ("the lines where the recognition most likely misheard
+  such a phrase") also "fixed" odd but harmless base-tier lines, e.g. "Stuck
+  in the bed" → "Step in the building".
+- The shipped wording asks ONLY for (a) a clearly misheard well-known
+  biblical or devotional phrase and (b) vulgar or indecent lines, and to
+  leave every other line alone.
+- With it, "We Raise" got exactly its 11 wrong lines fixed. Of the 5 ★ and
+  5 base-tier tracks, 9 answered NONE. One ★ line was given its Romans 8:31
+  reading; a ★ line is only flagged.
+- The details are on #250.
+

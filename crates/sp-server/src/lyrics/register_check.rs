@@ -60,12 +60,13 @@ pub fn build_prompt(numbered: &str) -> String {
          recognition of contemporary Christian worship music, followed by \
          \" || \" and its Slovak rendering. Biblical and devotional phrasing is \
          expected (for example \"I will dwell in the house of the Lord\"). Find \
-         the lines where the recognition most likely misheard such a phrase, or \
-         where the English or the Slovak reads as vulgar, crude or indecent. For \
-         each such line output one line \"N | corrected English | corrected \
-         Slovak\"; when you cannot tell what was meant, output \"N | ? | ?\". If \
-         every line reads correctly, output only {ALL_FINE}. Output nothing \
-         else.\n\n{numbered}"
+         ONLY (a) the lines where the recognition clearly misheard a well-known \
+         biblical or devotional phrase, and (b) the lines whose English or Slovak \
+         reads as vulgar, crude or indecent. Leave every other line alone, even \
+         when it reads oddly. For each such line output one line \"N | corrected \
+         English | corrected Slovak\"; when you cannot tell what was meant, output \
+         \"N | ? | ?\". If every line reads correctly, output only {ALL_FINE}. \
+         Output nothing else.\n\n{numbered}"
     )
 }
 

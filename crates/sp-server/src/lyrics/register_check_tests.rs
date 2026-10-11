@@ -56,6 +56,15 @@ fn the_prompt_numbers_each_line_with_its_slovak() {
     assert!(prompt.ends_with(&format!("\n\n{numbered}")));
     assert!(prompt.contains("\"N | corrected English | corrected Slovak\""));
     assert!(prompt.contains("output only NONE"));
+    // The wording probed live on SNV (#250, 11.10.2026): only a misheard
+    // biblical / devotional phrase or an indecent line, every other line left.
+    assert!(prompt.contains(
+        "Find ONLY (a) the lines where the recognition clearly misheard a \
+         well-known biblical or devotional phrase, and (b) the lines whose English \
+         or Slovak reads as vulgar, crude or indecent. Leave every other line \
+         alone, even when it reads oddly. For each such line"
+    ));
+    assert!(!prompt.contains("  "), "no doubled space in the prompt");
 }
 
 #[test]
