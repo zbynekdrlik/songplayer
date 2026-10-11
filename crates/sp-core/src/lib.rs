@@ -26,6 +26,7 @@ pub mod preview_lag;
 pub mod program_refusal;
 pub mod seek_model;
 pub mod status_chip;
+pub mod video_upgrade_view; // #223 S13: Nastavenia's view of the 4K upgrade
 pub mod ws;
 
 #[cfg(test)]

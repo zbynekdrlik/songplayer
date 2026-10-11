@@ -3,6 +3,9 @@ paths:
   - "crates/sp-server/src/video_upgrade/**"
   - "crates/sp-server/src/api/video_upgrade*.rs"
   - "crates/sp-server/src/db/mod_tests_v35.rs"
+  - "crates/sp-core/src/video_upgrade_view*.rs"
+  - "sp-ui/src/components/video_settings.rs"
+  - "e2e/settings-video.spec.ts"
 ---
 
 # The in-place video upgrade (#223 S11, design comment 6103060545)
@@ -149,6 +152,28 @@ Logs: INFO `video upgrade: start` and `video upgrade: done`, or a WARN
   changes nothing. Test:
   `failure_retry_tests.rs::a_failed_open_of_an_upgraded_song_puts_its_old_video_back`.
 - `GET /api/v1/video-upgrade` counts `rolled_back` too.
+
+## Nastavenia "Video: sťahovanie a 4K" (S13, design comment 6104191449)
+
+- `sp-ui/src/components/video_settings.rs`, inside the main settings form
+  and saved by its Save. It has three controls:
+  - the cap select `settings-max-resolution`: `""` = "Automaticky (4K s
+    dekódovaním na GPU, inak 1440)", then 2160 / 1440 / 1080 / 720; a value
+    set through the API shows as "N (vlastné)", never as automatic;
+  - `settings-video-hw-decode` → `video_hw_decode`;
+  - `settings-video-upgrade` → `video_upgrade_enabled`.
+- Each control is sent only when it differs from what the page loaded
+  (`sp_core::config::{max_resolution_to_send, video_hw_decode_to_send,
+  video_upgrade_to_send}`, #229's rule).
+- The status line `settings-video-upgrade-status` comes from `GET
+  /api/v1/video-upgrade`, read once:
+  `sp_core::video_upgrade_view::VideoUpgradeView::summary_sk`, with the
+  Slovak `waiting_sk`; the cap labels come from `cap_label`.
+- Mock: `e2e/mock-api.mjs` serves the status route (the switch and the cap
+  follow the stored settings) and refuses a bad `max_resolution` like
+  `format::checked`. Spec: `e2e/settings-video.spec.ts`.
+- The outputs' half of S13 was already there: "Výstupy Spout (Resolume)",
+  #239. Both outputs have fixed sizes since S1a.
 
 ## The exchange
 
