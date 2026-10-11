@@ -1,7 +1,8 @@
 /**
  * #233 post-deploy gates on SNV:
  * 1. FOH's path is unchanged by the output list: the migrated VBAN output to
- *    fohabl.lan:6980 runs at 48 kHz INT24, stream `sp-program`, no delay,
+ *    fohabl.lan:6980 runs at 96 kHz INT24 (the owner's ruling of 11.10.2026,
+ *    #233; 48 kHz before), stream `sp-program`, no delay,
  *    blocks going out, no send errors (two reads, `fohPathFailures`).
  * 2. A VBAN destination at 96 kHz: a receiver ON THE BOX (a UDP socket on
  *    127.0.0.1) reads rate index 4, 200-frame INT24 packets, a contiguous
@@ -33,7 +34,7 @@ function fohBlocks(list: OutputStatus[]): number {
 }
 
 test.describe("audio outputs (#233)", () => {
-  test("FOH still gets 48 kHz INT24 sp-program", async ({ request }) => {
+  test("FOH gets 96 kHz INT24 sp-program", async ({ request }) => {
     test.setTimeout(45_000);
     // Right after a restart FOH is listed once the outputs task's first pass
     // ran (the migration, every entry's DNS): poll for it. A read that throws

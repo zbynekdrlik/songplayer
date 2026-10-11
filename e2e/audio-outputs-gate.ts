@@ -1,6 +1,6 @@
 /**
  * #233 post-deploy gates (pure; unit-tested in the mock suite by
- * audio-outputs-gate.spec.ts): FOH still gets SongPlayer's 48 kHz INT24
+ * audio-outputs-gate.spec.ts): FOH gets SongPlayer's `FOH_RATE` INT24
  * `sp-program` through the output list (the migration kept it byte-identical),
  * a VBAN destination at another rate carries that rate's index with a
  * contiguous frame counter, and (lane 3) an ASIO output runs a minute at its
@@ -112,6 +112,9 @@ export function asioGateFailures(first: OutputStatus, second: OutputStatus): str
 
 /** SNV's FOH destination (#210's first target, migrated as out-1). */
 export const FOH_TARGET = "fohabl.lan:6980";
+/** FOH's rate: 96 kHz since the owner's ruling of 11.10.2026 (#233: one
+ * 96 kHz rule for the whole network; 48 kHz before). */
+export const FOH_RATE = 96000;
 /** Blocks that must go out between the two reads (30 per second). */
 export const MIN_BLOCKS = 25;
 
@@ -126,7 +129,7 @@ export function fohPathFailures(first: OutputStatus[], second: OutputStatus[]): 
   if (!a || !b) return [`no VBAN output to ${FOH_TARGET}`];
   const f: string[] = [];
   if (b.state !== "running") f.push(`the FOH output is ${b.state}${b.reason ? ` (${b.reason})` : ""}`);
-  if (b.rate !== 48000) f.push(`the FOH output runs at ${b.rate} Hz, not 48000`);
+  if (b.rate !== FOH_RATE) f.push(`the FOH output runs at ${b.rate} Hz, not ${FOH_RATE}`);
   if (b.format !== "int24") f.push(`the FOH output sends ${b.format}, not int24`);
   if (b.vban?.stream_name !== "sp-program") f.push(`the FOH stream is ${b.vban?.stream_name}, not sp-program`);
   if (b.delay_ms !== 0) f.push(`the FOH output is delayed ${b.delay_ms} ms`);
