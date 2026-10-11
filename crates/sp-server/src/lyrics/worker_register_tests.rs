@@ -388,3 +388,73 @@ fn the_worker_checks_a_fresh_track_between_its_translation_and_its_persist() {
         "the wall-wait tick and the empty-queue tick both run the stale pass"
     );
 }
+
+/// A worker whose Claude answers every request with HTTP 500, retried with
+/// no real wait.
+async fn node_with_a_broken_proxy() -> (MockServer, TestNode, LyricsWorker, i64) {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("upstream down"))
+        .mount(&server)
+        .await;
+    let (node, mut worker, id) = node(&server, Some(&served())).await;
+    worker.ai_client = Some(Arc::new(
+        AiClient::new(AiSettings {
+            api_url: format!("{}/v1", server.uri()),
+            api_key: None,
+            model: "claude-test".into(),
+            system_prompt_extra: None,
+        })
+        .with_retry_policy(crate::ai::retry::RetryPolicy::NO_WAIT),
+    ));
+    (server, node, worker, id)
+}
+
+#[tokio::test]
+async fn a_proxy_outage_never_gives_a_song_up() {
+    let (server, node, worker, id) = node_with_a_broken_proxy().await;
+    for _ in 0..(MAX_FAILED_CHECKS + 2) {
+        worker.retry_backoff.lock().await.silent_until = None;
+        worker.recheck_next_stale_register().await;
+    }
+    assert!(requests(&server).await > 0, "the check was asked");
+    assert_eq!(
+        stamped(&node, id).await,
+        (0, None),
+        "checked once the proxy answers"
+    );
+    let backoff = worker.retry_backoff.lock().await;
+    assert!(
+        backoff.register_failures.is_empty(),
+        "an outage counts nothing"
+    );
+    assert!(backoff.silent_until.is_some(), "it backs off");
+}
+
+#[tokio::test]
+async fn a_track_that_cannot_be_written_backs_off_and_is_given_up() {
+    let server = claude("NONE").await;
+    let (node, worker, id) = node(&server, Some(&served())).await;
+    let file = node.cache().join(format!("{YT}_lyrics.json"));
+    let mut perms = std::fs::metadata(&file).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&file, perms.clone()).unwrap();
+    worker.recheck_next_stale_register().await;
+    assert_eq!(requests(&server).await, 1);
+    worker.recheck_next_stale_register().await;
+    assert_eq!(requests(&server).await, 1, "no new call within the backoff");
+    for _ in 1..MAX_FAILED_CHECKS {
+        worker.retry_backoff.lock().await.silent_until = None;
+        worker.recheck_next_stale_register().await;
+    }
+    assert_eq!(requests(&server).await, MAX_FAILED_CHECKS as usize);
+    assert_eq!(
+        stamped(&node, id).await,
+        (i64::from(REGISTER_CHECK_VERSION), None),
+        "given up: the pass moves on"
+    );
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&file, perms).unwrap();
+}

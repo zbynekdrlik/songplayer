@@ -22,8 +22,12 @@ pub(crate) enum CheckOutcome {
     Checked,
     /// No AI client, or this node's paid AI is off: nothing asked.
     NotAsked,
-    /// The call failed for another reason: asked again later.
+    /// The call failed (the proxy down, a 5xx): asked again later, never
+    /// counted toward giving the song up.
     Failed,
+    /// Claude answered in a shape the check cannot read: asked again later,
+    /// given up after [`MAX_FAILED_CHECKS`].
+    Unreadable,
 }
 
 /// Is `track`'s stored check already the current one?
@@ -85,7 +89,11 @@ impl LyricsWorker {
                     youtube_id,
                     "register check failed - checked again later: {e:#}"
                 );
-                CheckOutcome::Failed
+                if register_check::unreadable(&e) {
+                    CheckOutcome::Unreadable
+                } else {
+                    CheckOutcome::Failed
+                }
             }
         }
     }
@@ -154,7 +162,10 @@ impl LyricsWorker {
             CheckOutcome::Checked => {
                 let json = serde_json::to_vec(&track).unwrap_or_default();
                 if let Err(e) = tokio::fs::write(&path, &json).await {
+                    // Never a new Claude call every tick for a file that
+                    // cannot be written: it backs off and counts.
                     warn!(youtube_id, "register check: write failed: {e}");
+                    self.count_failed_check(video_id, &youtube_id).await;
                     return;
                 }
                 self.stamp_register_of(video_id, &track).await;
@@ -174,21 +185,26 @@ impl LyricsWorker {
                 }
             }
             CheckOutcome::NotAsked => {}
-            CheckOutcome::Failed => {
-                let mut backoff = self.retry_backoff.lock().await;
-                back_off(&mut backoff);
-                let failures = backoff.register_failures.entry(video_id).or_insert(0);
-                *failures += 1;
-                if gives_up(*failures) {
-                    backoff.register_failures.remove(&video_id);
-                    warn!(
-                        youtube_id,
-                        "register check: no answer it could read in {MAX_FAILED_CHECKS} tries - left unchecked"
-                    );
-                    let _ =
-                        stamp_register(&self.pool, video_id, REGISTER_CHECK_VERSION, None).await;
-                }
-            }
+            CheckOutcome::Failed => back_off(&mut self.retry_backoff.lock().await),
+            CheckOutcome::Unreadable => self.count_failed_check(video_id, &youtube_id).await,
+        }
+    }
+
+    /// A check of `video_id` that came to nothing (an answer it could not
+    /// read, a write that failed): back off, and after [`MAX_FAILED_CHECKS`]
+    /// stamp the song forward with no verdict so the pass moves on.
+    async fn count_failed_check(&self, video_id: i64, youtube_id: &str) {
+        let mut backoff = self.retry_backoff.lock().await;
+        back_off(&mut backoff);
+        let failures = backoff.register_failures.entry(video_id).or_insert(0);
+        *failures += 1;
+        if gives_up(*failures) {
+            backoff.register_failures.remove(&video_id);
+            warn!(
+                youtube_id,
+                "register check: came to nothing {MAX_FAILED_CHECKS} times - left unchecked"
+            );
+            let _ = stamp_register(&self.pool, video_id, REGISTER_CHECK_VERSION, None).await;
         }
     }
 

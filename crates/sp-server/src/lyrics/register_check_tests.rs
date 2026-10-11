@@ -4,7 +4,7 @@ use sp_core::lyrics::{LyricsLine, LyricsTrack, LyricsWord, RegisterLine, Registe
 
 use super::{
     Finding, REGISTER_CHECK_VERSION, apply, build_prompt, max_fixes, may_fix, numbered_lines,
-    parse_response, read_answer, refused,
+    parse_response, read_answer, refused, unreadable,
 };
 
 fn line(en: &str, sk: Option<&str>) -> LyricsLine {
@@ -346,6 +346,12 @@ fn an_answer_is_findings_a_refusal_or_an_error() {
     assert_eq!(read_answer("I can't help with that.", 4).unwrap(), None);
     let err = read_answer("Here is my review of the text", 4).unwrap_err();
     assert!(err.to_string().contains("Here is my review"));
+    assert!(unreadable(&err), "an answer in another shape is told apart");
+    assert!(!unreadable(&anyhow::anyhow!("the proxy answered 503")));
+    assert!(
+        unreadable(&err.context("the stale pass")),
+        "through a context too"
+    );
 }
 
 #[test]

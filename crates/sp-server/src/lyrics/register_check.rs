@@ -21,7 +21,7 @@
 //! out, nothing else (`translator.rs` "Prompt design" — the content-policy
 //! classifier of Claude via CLIProxyAPI is why).
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use sp_core::lyrics::{LyricsTrack, RegisterCheck, RegisterLine, RegisterVerdict};
 
 /// The check's version. A served track checked under an older one (or never)
@@ -231,10 +231,26 @@ pub fn read_answer(text: &str, line_count: usize) -> Result<Option<Vec<Finding>>
     if crate::lyrics::translator::is_refusal_shaped(text) {
         return Ok(None);
     }
-    let snippet: String = text.chars().take(300).collect();
-    Err(anyhow!(
-        "register check: an answer in another shape: {snippet}"
-    ))
+    Err(UnreadableAnswer(text.chars().take(300).collect()).into())
+}
+
+/// The model answered, in a shape the check cannot read (its first 300
+/// characters). Told apart from a failed call ([`unreadable`]): only this
+/// counts toward giving a song up — a proxy outage never does.
+#[derive(Debug)]
+pub struct UnreadableAnswer(pub String);
+
+impl std::fmt::Display for UnreadableAnswer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "register check: an answer in another shape: {}", self.0)
+    }
+}
+
+impl std::error::Error for UnreadableAnswer {}
+
+/// Is `error` (or one of its causes) an [`UnreadableAnswer`]?
+pub fn unreadable(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| cause.is::<UnreadableAnswer>())
 }
 
 /// Ask Claude and apply its answer to `track`. A refusal (in its answer, or
