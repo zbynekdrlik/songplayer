@@ -17,7 +17,15 @@
  *    minute, so the gate's time does not grow with the number of outputs
  *    (up to 4, `MAX_ASIO_OUTPUTS`).
  *
- * No sleeps: every wait is an expect.poll. Right after a deploy the outputs
+ * 3. #233 (the spawn finding): a child process SongPlayer spawns (one yt-dlp,
+ *    `POST /api/v1/youtube/probe`) moves no gated ASIO output's `resyncs` or
+ *    `hard_recentres`, and no output stops or restarts: every ASIO output
+ *    runs in the ASIO host process `sp-audio-host`, which spawns nothing
+ *    (`asio-spawn-gate.ts`, unit-tested in the mock suite).
+ *
+ * No sleeps but one: every wait is an expect.poll, except the bounded
+ * settle after the spawn (`SETTLE_AFTER_SPAWN_MS`, 5 s: the absence of a
+ * resync cannot be polled for). Right after a deploy the outputs
  * task applies the list on its first pass and a worker opens its driver
  * within a second or two, so the count, the running state and the blocks
  * are polled; a poll's read never throws (`expect.poll` does not retry a
@@ -33,6 +41,7 @@ import {
   waitingForClock,
   type OutputStatus,
 } from "./audio-outputs-gate";
+import { SETTLE_AFTER_SPAWN_MS, spawnCounters, spawnDisturbances } from "./asio-spawn-gate";
 
 const EXPECTED = Number(process.env.SP_ASIO_OUTPUTS_EXPECTED ?? "0");
 
@@ -128,5 +137,33 @@ test.describe("ASIO output (#233)", () => {
       if (second.note) console.log(`[#233 asio] note: ${second.note}`);
       expect(asioGateFailures(f, second), `ASIO output ${f.id}`).toEqual([]);
     }
+  });
+
+  test("a child process SongPlayer spawns disturbs no ASIO output (#233)", async ({ request }) => {
+    test.setTimeout(240_000);
+    // Every gated output running, read strictly (a failed read is no count).
+    const running = async () => {
+      const list = await readOutputs(request);
+      return list === null ? -1 : spawnCounters(list).length;
+    };
+    await expect
+      .poll(running, { message: "the gated ASIO outputs run before the spawn", timeout: 30_000 })
+      .toBe(EXPECTED);
+    if (EXPECTED === 0) return;
+    const first = await readOutputs(request);
+    expect(first, "GET /api/v1/program").not.toBeNull();
+    const before = spawnCounters(first as OutputStatus[]);
+    console.log(`[#233 spawn] before: ${JSON.stringify(before)}`);
+    // One yt-dlp, spawned by SongPlayer (the probe answers 200 whatever
+    // YouTube says: the spawn is what the gate needs).
+    const probe = await request.post("/api/v1/youtube/probe", { timeout: 180_000 });
+    expect(probe.status(), "POST /api/v1/youtube/probe").toBe(200);
+    console.log(`[#233 spawn] probe: ${JSON.stringify(await probe.json())}`);
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_AFTER_SPAWN_MS));
+    const second = await readOutputs(request);
+    expect(second, "GET /api/v1/program").not.toBeNull();
+    const after = spawnCounters(second as OutputStatus[]);
+    console.log(`[#233 spawn] after: ${JSON.stringify(after)}`);
+    expect(spawnDisturbances(before, after), "the ASIO outputs across a SongPlayer-spawned child").toEqual([]);
   });
 });

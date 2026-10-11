@@ -143,6 +143,7 @@ const dvs = (blocks: number, over: Partial<OutputStatus> = {}, asio: Partial<Asi
     underruns: 0,
     resets: 0,
     hard_recentres: 0,
+    resyncs: 0,
     latency_ms: 70.7,
     ...asio,
   },

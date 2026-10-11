@@ -47,6 +47,8 @@ export interface AsioTelemetry {
   resets: number;
   /** The owner's "fault": a faded skip or insert (#233 review round 2). */
   hard_recentres: number;
+  /** The driver's resync requests since the output was built (#233). */
+  resyncs: number;
   latency_ms: number;
   /** While waiting: the reason's stable code (`no_clock`: the driver gives no clock). */
   reason_code?: string | null;
