@@ -137,3 +137,41 @@ GUI); PP's and SNV's settings of 11.10.2026 are on the ticket.
   outputs.
 - The glue's VALUES are first checked on a real box by the post-deploy gate
   (SNV / PP); the Windows CI job proves only that every read succeeds.
+
+## Diagnosing an audio disturbance on a box: the method that found this
+
+- **Measure on the driver, not by ear:** the ASIO output's `resyncs`,
+  `hard_recentres`, `callback_gap_max_ms`, `late_callbacks` and
+  `fast_callbacks` on `GET /api/v1/program` `outputs[i].asio`. Read them
+  before and after a single trigger (`POST /api/v1/youtube/probe` spawns one
+  yt-dlp), and repeat 3–4 times: one sample proves nothing (one probe in
+  four read 0).
+- **A/B/A, or it is a guess:** the Defender verdict held only once the
+  change (a Defender `ExclusionProcess`), its removal and the change again
+  all read as predicted. Two earlier "proofs" (the driver sharing
+  SongPlayer's process, handle inheritance) were single comparisons and
+  were wrong.
+- **The MCP shell is a confounded control:** `mcp__win-*__Shell` runs at
+  **BelowNormal** (its python parent is BelowNormal) and its children
+  inherit it. A shell-launched process is therefore not a like-for-like
+  stand-in for one SongPlayer launches (Normal). Raise the shell first
+  (`[Diagnostics.Process]::GetCurrentProcess().PriorityClass='Normal'`) and
+  still treat the result with care: Defender treated the two launches
+  differently anyway.
+- **The kernel trace that pinned it:** the Windows Performance Toolkit is on
+  PP (`C:\Program Files (x86)\Windows Kits\10\Windows Performance
+  Toolkit\xperf.exe`, installed 11.10.2026).
+  - Record: `xperf -on PROC_THREAD+LOADER+DPC+INTERRUPT+CSWITCH+DISPATCHER+PROFILE
+    -stackwalk CSwitch+Profile -BufferSize 1024 -MaxBuffers 1024 -f k.etl`,
+    trigger, then `xperf -stop -d trace.etl`.
+  - Close LatencyMon first: it holds the NT Kernel Logger.
+  - Starting or stopping a kernel trace itself causes SG resyncs, so do not
+    time a measurement across it.
+  - `-a tracestats` gives the absolute start, which lines the trace up with
+    the host log's WARN times.
+  - `-a process` gives the process starts. Never print the command lines:
+    `-a dumper` includes them.
+  - `-a dpcisr -range` gives per-module DPC/ISR time.
+  - `-a dumper -range` gives CSwitch/ReadyThread per thread: the SG audio
+    thread's wake-ups turned 13 / 7.5 / 4.2 / 3.4 / 16.5 ms instead of
+    10.7, ~60 ms after the process start.
