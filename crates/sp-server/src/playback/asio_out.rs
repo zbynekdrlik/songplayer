@@ -16,10 +16,10 @@
 //!   dry, or a delayed output played over 4 slots early — or too much, the
 //!   ring would overflow: a fault, WARNed at most once per 5 s with what it
 //!   held back, and shown as `last_hard_recentre`) go through the splice.
-//!   Then the
-//!   driver's messages: a reset
-//!   (or a size change), a rate change or 2 s without a callback closes the
-//!   output (`asio_state::close_reason`, `StallWatch`).
+//!   Then the driver's messages: a reset (or a size change), a rate change
+//!   or 2 s without a callback closes the output (`asio_state::close_reason`,
+//!   `StallWatch`); a resync request only rebases the drift servo, counted
+//!   (`asio_out_events.rs`).
 //! - parked (`Reason::Parked`, a driver callback that never returned): the
 //!   output stays closed for good, with no next try.
 //!
@@ -418,6 +418,8 @@ pub struct AsioWorker {
     waiting_for_clock: bool,
     /// Those reopens (`AsioStatus::clock_waits`).
     clock_waits: u64,
+    /// The driver's resync requests (`asio_out_events.rs`).
+    resyncs: events::Resyncs,
 }
 
 impl AsioWorker {
@@ -434,6 +436,7 @@ impl AsioWorker {
             hard_warns: WarnLimiter::default(),
             waiting_for_clock: false,
             clock_waits: 0,
+            resyncs: events::Resyncs::default(),
         }
     }
 
@@ -543,6 +546,9 @@ impl AsioWorker {
         }
         let ev = device.poll();
         run.overloads = ev.overloads;
+        if ev.resync {
+            events::resync(run, out, &mut self.closed, &mut self.resyncs, now_100ns);
+        }
         if ev.latencies_changed {
             run.driver_latency_frames = device.output_latency_frames();
             info!(
@@ -897,6 +903,9 @@ pub fn run_asio_worker(out: &AsioOut, device: &mut dyn AsioDevice, clock: &mut d
     drop(running);
     info!(id = %out.id, driver = %out.driver, "asio output: stopped");
 }
+
+#[path = "asio_out_events.rs"]
+mod events;
 
 #[cfg(test)]
 #[path = "asio_out_fake.rs"]
