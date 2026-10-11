@@ -266,6 +266,19 @@ fn query_defender() -> windows::core::Result<Option<bool>> {
             WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
             None,
         )?;
+        // The enumerator is a proxy of its own: impersonate there too. Not
+        // every enumerator is a proxy (E_NOINTERFACE then), so a refusal
+        // here is no failure.
+        let _ = CoSetProxyBlanket(
+            &rows,
+            RPC_C_AUTHN_WINNT,
+            RPC_C_AUTHZ_NONE,
+            PCWSTR::null(),
+            RPC_C_AUTHN_LEVEL_CALL,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+        );
         let mut row: [Option<IWbemClassObject>; 1] = [None];
         let mut returned: u32 = 0;
         let next = rows.Next(WMI_NEXT_TIMEOUT_MS, &mut row, &mut returned);
