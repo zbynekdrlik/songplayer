@@ -208,7 +208,11 @@ impl HostClient {
         why
     }
 
-    async fn read_reports<R: AsyncRead + Unpin>(&self, reader: &mut R, silence: Duration) -> String {
+    async fn read_reports<R: AsyncRead + Unpin>(
+        &self,
+        reader: &mut R,
+        silence: Duration,
+    ) -> String {
         loop {
             // A timeout drops a read in the middle of a frame: the session
             // ends there anyway.

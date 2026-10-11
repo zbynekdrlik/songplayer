@@ -18,7 +18,10 @@ const HOST_PATH: [(&str, &str); 34] = [
     ("audio_host/host_win.rs", include_str!("host_win.rs")),
     ("audio_host/protocol.rs", include_str!("protocol.rs")),
     ("audio_host/wire_status.rs", include_str!("wire_status.rs")),
-    ("audio_host/remote_clock.rs", include_str!("remote_clock.rs")),
+    (
+        "audio_host/remote_clock.rs",
+        include_str!("remote_clock.rs"),
+    ),
     ("audio_host/mono.rs", include_str!("mono.rs")),
     ("audio_host/log_forward.rs", include_str!("log_forward.rs")),
     ("audio_host/launch.rs", include_str!("launch.rs")),
@@ -84,12 +87,18 @@ const HOST_PATH: [(&str, &str); 34] = [
         "playback/pipeline_paced.rs",
         include_str!("../playback/pipeline_paced.rs"),
     ),
-    ("playback/vban_out.rs", include_str!("../playback/vban_out.rs")),
+    (
+        "playback/vban_out.rs",
+        include_str!("../playback/vban_out.rs"),
+    ),
     (
         "playback/vban_packet.rs",
         include_str!("../playback/vban_packet.rs"),
     ),
-    ("playback/audio_out.rs", include_str!("../playback/audio_out.rs")),
+    (
+        "playback/audio_out.rs",
+        include_str!("../playback/audio_out.rs"),
+    ),
     (
         "playback/program_output.rs",
         include_str!("../playback/program_output.rs"),

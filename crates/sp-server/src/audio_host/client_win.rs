@@ -81,8 +81,12 @@ fn start_link(client: &Arc<HostClient>) {
             .name("asio-host-link".into())
             .spawn(move || run_link(client));
         match spawned {
-            Ok(_) => info!("asio host: link thread started - ASIO outputs run in sp-audio-host.exe"),
-            Err(e) => error!(%e, "asio host: spawning the link thread failed - no ASIO output runs"),
+            Ok(_) => {
+                info!("asio host: link thread started - ASIO outputs run in sp-audio-host.exe")
+            }
+            Err(e) => {
+                error!(%e, "asio host: spawning the link thread failed - no ASIO output runs")
+            }
         }
     });
 }
