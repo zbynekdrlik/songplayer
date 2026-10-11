@@ -1004,14 +1004,16 @@ test("while the ratio drains an offset and after a hard re-centre, the row says 
       underruns: 3,
       hard_recentres: 2,
       last_hard_recentre: { cause: "deficit", ms: 65.04, lateness_ms: -60, ago_s: 185 },
+      resyncs: 5,
     },
   });
   expect(set.status()).toBe(200);
   await openSettings(page);
   await expect(page.locator('[data-testid="audio-output-state"]')).toHaveText(
-    "beží · oneskorenie 71 ms · výpadky 3 · núdzové skoky 2",
+    "beží · oneskorenie 71 ms · výpadky 3 · núdzové skoky 2 · resynchronizácie ovládača 5",
     { timeout: 10000 },
   );
+  await expect(chip(page, "asio-resyncs")).toHaveAttribute("title", /požiadal o resynchronizáciu/);
   for (const [key, text] of [
     ["asio-card", "karta voči SongPlayeru: odhad sa ešte meria"],
     ["asio-correction", "korekcia −0,7 ppm (uberá vzorky)"],

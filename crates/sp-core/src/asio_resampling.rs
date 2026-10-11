@@ -3,7 +3,8 @@
 //! them, in Slovak, each a labelled chip with its own tooltip.
 //!
 //! The first line: the state, the latency, the underruns and the hard
-//! re-centres (faults). The second line, the resampling:
+//! re-centres (faults), and the driver's resyncs once there was one. The
+//! second line, the resampling:
 //! - the conversion (the program's 48 kHz → the driver's rate);
 //! - the card's clock against SongPlayer's (`rate_ppm`), and whether the
 //!   estimate is locked;
@@ -55,11 +56,15 @@ pub struct AsioFigures {
     /// comment 6056680979, Q1), ms.
     pub cushion_ms: f64,
     pub last_fault: Option<LastFault>,
+    /// The driver's resync requests (`kAsioResyncRequest`) since the output
+    /// was built: each started the output's drift servo afresh.
+    pub resyncs: u64,
 }
 
 pub const LATENCY_TIP: &str = "Čas od hranice programu SongPlayera po výstup z karty: cieľ 66,7 ms (+ nastavené oneskorenie výstupu), k tomu resampler a vlastné oneskorenie ovládača.";
 pub const UNDERRUNS_TIP: &str = "Koľkokrát karta nedostala zvuk včas (podtečenie zásobníka), odkedy výstup beží — každé je krátka medzera v zvuku.";
 pub const FAULTS_TIP: &str = "Koľkokrát musel výstup skokom vložiť ticho alebo preskočiť zvuk (s 5 ms prelínaním), lebo v zásobníku karty bolo zvuku primálo (vyschol by, alebo by oneskorený výstup hral o viac ako 133,3 ms skôr) alebo priveľa (pretiekol by). Je to porucha a je počuť; bežne 0 — rozdiely dorovnáva resampler plynule.";
+pub const RESYNCS_TIP: &str = "Koľkokrát ovládač karty (ASIO) požiadal o resynchronizáciu — jeho pozícia vo zvuku skočila (napr. stratený alebo zopakovaný blok). Výstup vtedy začne merať hodiny karty odznova a zásobník nastaví na cieľ; ovládač sa nezatvára. Môže byť počuť; bežne 0.";
 pub const CONVERSION_TIP: &str = "Prevod frekvencie: program SongPlayera má 48 kHz, karta (ovládač ASIO) beží na svojej frekvencii; prevádza ho pásmovo obmedzený sinc resampler (256 koeficientov, BlackmanHarris², tabuľka 256×).";
 pub const CARD_TIP: &str = "O koľko milióntin (ppm) tiknú hodiny karty rýchlejšie (+) alebo pomalšie (−) než hodiny SongPlayera. Odhad sa zamkne po minúte meraní (30 bodov).";
 pub const CORRECTION_TIP: &str = "O koľko milióntin (ppm) resampler práve mení počet vzoriek, aby zvuk zo SongPlayera držal krok s kartou: + pridáva vzorky, − uberá. Plynulo a nepočuteľne; rozpočet ±300 ppm (asi pol centu).";
@@ -139,10 +144,11 @@ fn chip(key: &'static str, text: String, title: &str) -> Chip {
 }
 
 /// The first line: the state, the latency ("meria sa" while the server reads
-/// it 0, before the servo's first window), the underruns, the faults.
+/// it 0, before the servo's first window), the underruns, the faults, and
+/// the driver's resyncs once there was one.
 pub fn asio_state_chips(state: &str, f: &AsioFigures) -> Vec<Chip> {
     let latency = latency_sk(f.latency_ms);
-    vec![
+    let mut chips = vec![
         Chip {
             key: "asio-state",
             text: state.to_string(),
@@ -159,7 +165,15 @@ pub fn asio_state_chips(state: &str, f: &AsioFigures) -> Vec<Chip> {
             format!("núdzové skoky {}", f.hard_recentres),
             FAULTS_TIP,
         ),
-    ]
+    ];
+    if f.resyncs > 0 {
+        chips.push(chip(
+            "asio-resyncs",
+            format!("resynchronizácie ovládača {}", f.resyncs),
+            RESYNCS_TIP,
+        ));
+    }
+    chips
 }
 
 /// The second line: the conversion, the card's clock, the correction, the
