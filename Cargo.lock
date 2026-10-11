@@ -2325,6 +2325,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+ "windows",
  "windows-sys 0.59.0",
  "wiremock",
  "zip",

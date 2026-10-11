@@ -27,6 +27,7 @@ pub mod playback;
 pub mod playlist;
 pub mod presenter;
 pub mod process_start; // #196: process-start instant for /api/v1/status.uptime_s
+pub mod prod_env; // #233: the production environment (edition, Defender, firewall) guard
 pub mod remote; // #213: the Companion remote control (obs-websocket 5 subset → program bus)
 pub mod reprocess;
 pub mod resolume;
@@ -437,6 +438,7 @@ pub async fn start(
     tokio::spawn(crate::lyrics::host_commit::run_host_commit_logger(
         shutdown_tx.subscribe(),
     )); // #207: per-minute host commit/pagefile logger (Windows only)
+    tokio::spawn(crate::prod_env::run(shutdown_tx.subscribe())); // #233: checked now + every minute
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {
