@@ -764,7 +764,6 @@ pub fn asio_reason_sk(code: &str) -> &'static str {
         "held" => "predchádzajúci výstup ešte neuvoľnil ovládač",
         "parked" => "ovládač zamrzol — pomôže len reštart SongPlayera",
         "no_clock" => "ovládač nedáva hodiny — napr. DVS nebeží alebo chýbajú hodiny Dante PTP",
-        "host_down" => "zvukový proces ASIO (sp-audio-host) nebeží — SongPlayer ho spúšťa znova",
         _ => "neznámy dôvod",
     }
 }

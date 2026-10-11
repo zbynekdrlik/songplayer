@@ -18,7 +18,7 @@
 //! pop (`outputs[i].asio.callback_gap_max_ms`, `late_callbacks`,
 //! `fast_callbacks`, `last_late_callback`).
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tracing::warn;
 
 use super::{AsioOut, AsioStatus, Run};
@@ -26,7 +26,7 @@ use crate::playback::asio_state::DeviceEvents;
 use crate::playback::stat_window::WarnLimiter;
 
 /// The last late buffer switch as the status shows it.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct LateCallback {
     /// The longest gap between two buffer switches in the poll that saw it,
     /// ms.
