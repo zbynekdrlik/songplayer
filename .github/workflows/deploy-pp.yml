@@ -175,6 +175,9 @@ jobs:
           Write-Host "=== Stopping SongPlayer ==="
           Stop-ScheduledTask -TaskName "SongPlayer" -ErrorAction SilentlyContinue
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
+          # #233: the ASIO host dies with SongPlayer (its kill-on-close Job
+          # object); killed by name too, so the installer never meets it.
+          taskkill /F /IM "sp-audio-host.exe" 2>&1 | Out-Null
           $deadline = (Get-Date).AddSeconds(20)
           while ((Get-Date) -lt $deadline) {
             $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
