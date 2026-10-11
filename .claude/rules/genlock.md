@@ -1588,3 +1588,31 @@ submit consumer, `SP-program`, NDI input, VBAN).
   has 0 bursts and 0 gaps over ~5.2 ms; camera-box reports
   `released=followed` with a residual ≈ r and relocks unchanged; an A/V gate
   take spanning the step passes with 0 dropouts.
+
+## A source the grid does not divide is BLENDED, never repeated (#251)
+
+The owner's ruling (11.10.2026, #251, PP: a 25 fps Planetshakers song
+juddered on the LED wall): a boundary between two source frames shows both.
+
+- The pacer only DECIDES it (`pacer_blend.rs`, a child of `pacer`): at a
+  boundary between the shown frame and the parked next one (`pending`),
+  `blend_weight_q8(into, gap, interval)` = `into · 256 / gap`, floored.
+  `None` inside `BLEND_DEAD_BAND_100NS` (2 ms: a 30 fps source's
+  millisecond pts sits ≤ 1 ms before its boundary, so it is NEVER blended),
+  at or past the next frame, or for a gap over two slots (a stall, a seek,
+  a ≤ 15 fps source keeps its held frames). A next frame of another size is
+  not blended. 25 fps on 30: plain, 213, 170, 128, 85, 42, plain, …
+- It emits through `PacedSink::emit_blended(video, FrameBlend, …)`, whose
+  DEFAULT is `emit` (a sink that only shows frames sees what it always
+  saw). `HandoffSink` puts the blend on `SubmitJob::blend` (an `Arc` bump of
+  the next frame, live like any decoder pair).
+- The PROGRAM paints it (`program-transition.md`'s fade machinery, no new
+  kernel): `ProgramOutput::source_picture` = `Canvas::fade(shown, next, w)`
+  (one fused pass on the band pool), MAX = `MaxJob::Fade { from: shown, to:
+  next }` (the GPU's two quads). A transition window ignores the partners.
+- `repeats` still counts the boundaries with no fresh frame (the lock
+  rule's 25/30 conversion allowance is unchanged); a blended repeat is no
+  longer a frozen picture.
+- Box check on a 25 fps song: `/api/v1/ndi/health` `source_fps 25`, MAX's
+  `upload_us_p99` (two pictures per boundary now) and `send_late`, and the
+  wall's one-refresh runs (`ops\wall_runs.py`) against a 30 fps song.

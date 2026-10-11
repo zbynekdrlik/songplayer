@@ -493,6 +493,7 @@ fn source_job(stamp: i64, v: f32) -> ProgramJob {
         audio_tc_100ns: stamp + 5,
         live: true,
         media_pts_100ns: None,
+        blend: None,
     })
 }
 

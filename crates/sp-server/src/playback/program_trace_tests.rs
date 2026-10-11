@@ -326,6 +326,7 @@ fn submit_job(live: bool) -> SubmitJob {
         audio_tc_100ns: b(0),
         live,
         media_pts_100ns: None,
+        blend: None,
     }
 }
 

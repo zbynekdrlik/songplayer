@@ -69,6 +69,7 @@ fn job(stamp: i64) -> SubmitJob {
         audio_tc_100ns: stamp,
         live: true,
         media_pts_100ns: None,
+        blend: None,
     }
 }
 

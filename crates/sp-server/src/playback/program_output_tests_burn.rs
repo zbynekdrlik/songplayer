@@ -89,6 +89,7 @@ fn pair(video: &SharedFrame, k: u32, media_pts_100ns: Option<i64>) -> SubmitJob 
         audio_tc_100ns: boundary(k),
         live: media_pts_100ns.is_some(),
         media_pts_100ns,
+        blend: None,
     }
 }
 

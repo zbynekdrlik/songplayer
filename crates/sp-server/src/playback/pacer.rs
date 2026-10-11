@@ -116,6 +116,18 @@ pub trait PacedSink {
         self.emit(video, audio, video_tc_100ns, audio_tc_100ns);
     }
 
+    /// #251: `video` blended toward the next frame (`pacer_blend.rs`); DEFAULT: `video` alone.
+    fn emit_blended(
+        &mut self,
+        video: &PacedFrame,
+        _blend: FrameBlend,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        self.emit(video, audio, video_tc_100ns, audio_tc_100ns);
+    }
+
     /// Emit one boundary from an already-shared frame (#203). The DEFAULT builds
     /// a one-shot [`PacedFrame`] over the borrowed pixels and delegates to
     /// [`emit_standby`](Self::emit_standby), so an `emit`-only sink still works (the
@@ -574,13 +586,13 @@ impl Pacer {
         let outcome = if let Some(frame) = due {
             self.on_emit(emit_now, stamp_boundary);
             self.count_settled_seek(); // #150
-            sink.emit(&frame, &audio_frames, stamp_boundary, stamp_boundary);
+            self.emit_shown(sink, &frame, &audio_frames, boundary, stamp_boundary);
             self.last_frame = Some(frame);
             ServiceOutcome::Emitted
         } else if let Some(lf) = self.last_frame.take() {
             self.on_emit(emit_now, stamp_boundary);
             self.repeats += 1;
-            sink.emit(&lf, &audio_frames, stamp_boundary, stamp_boundary);
+            self.emit_shown(sink, &lf, &audio_frames, boundary, stamp_boundary);
             self.last_frame = Some(lf);
             ServiceOutcome::Repeated
         } else {
@@ -947,6 +959,10 @@ pub use pacer_preroll::{PrerollGate, StandbyBlack};
 #[path = "pacer_av_align.rs"]
 mod pacer_av_align;
 pub use pacer_av_align::{PACED_AUDIO_LEAD_MS, open_paced_decoder};
+
+#[path = "pacer_blend.rs"] // #251: a boundary between two frames shows both
+mod pacer_blend;
+pub use pacer_blend::FrameBlend;
 
 #[cfg(test)]
 #[path = "pacer_tests.rs"]

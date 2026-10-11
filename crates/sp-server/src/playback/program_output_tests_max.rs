@@ -14,6 +14,7 @@ use sp_ndi::{AudioFrame, NdiSender};
 
 use super::ProgramOutput;
 use crate::playback::frame_buf::SharedFrame;
+use crate::playback::pacer::FrameBlend;
 use crate::playback::program_bus::{PROGRAM_NDI_NAME, ProgramJob};
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, MaxPicture};
 use crate::playback::program_max_worker::tests::{
@@ -52,6 +53,7 @@ fn source(width: u32, stamp: i64) -> SubmitJob {
         audio_tc_100ns: stamp,
         live: true,
         media_pts_100ns: None,
+        blend: None,
     }
 }
 
@@ -325,4 +327,66 @@ fn a_stalled_max_thread_never_delays_vban_or_the_ndi_submit() {
     max.stop();
     wait_until("the program-max thread exits", || consumer.is_finished());
     consumer.join().expect("the program-max thread");
+}
+
+/// #251: a pair the pacer blended toward the next frame — a 2×2 canvas
+/// picture, so the canvas reads both frames as they are.
+fn blended(stamp: i64, next: &SharedFrame, weight_q8: u32) -> SubmitJob {
+    let mut job = source(2, stamp);
+    job.blend = Some(FrameBlend {
+        video: next.clone(),
+        weight_q8,
+    });
+    job
+}
+
+#[test]
+fn a_blended_pair_offers_its_two_frames_as_a_fade_on_max() {
+    let backend = Arc::new(MockNdiBackend::new());
+    let (vban, max) = (Arc::new(VbanOut::new()), taking());
+    let mut out = output(&backend, &vban, &max);
+    let next = SharedFrame::new(vec![200u8; 6]);
+    let job = blended(at(0), &next, 85);
+    out.submit(ProgramJob::Source(job.clone()));
+    let MaxJob::Fade {
+        stamp_100ns,
+        from: Some(from),
+        to: Some(to),
+        weight_q8,
+    } = next_job(&max)
+    else {
+        panic!("a blended pair is a fade of its two frames on MAX");
+    };
+    assert_eq!(stamp_100ns, at(0));
+    assert!(same_picture(&from, &job), "the shown frame, an Arc bump");
+    assert!(to.video.ptr_eq(&next), "the next frame, an Arc bump");
+    assert_eq!(
+        (to.width, to.height, to.stride),
+        (2, 2, 2),
+        "the next frame in the shown frame's layout"
+    );
+    assert_eq!(weight_q8, 85, "the pacer's weight");
+}
+
+#[test]
+fn a_blended_pair_goes_out_on_ndi_as_one_mixed_canvas_picture() {
+    let backend = Arc::new(MockNdiBackend::new());
+    let (vban, max) = (Arc::new(VbanOut::new()), taking());
+    let mut out = output(&backend, &vban, &max);
+    let next = SharedFrame::new(vec![200u8; 6]);
+    out.submit(ProgramJob::Source(blended(at(0), &next, 128)));
+    let held = out.submitter.held_frame().expect("a picture was sent");
+    assert_eq!(
+        &held[..],
+        [145u8; 6],
+        "(90·128 + 200·128 + 128) >> 8 on every byte"
+    );
+
+    let plain = source(2, at(1));
+    out.submit(ProgramJob::Source(plain.clone()));
+    let held = out.submitter.held_frame().expect("a picture was sent");
+    assert!(
+        held.ptr_eq(&plain.video),
+        "an unblended canvas picture still goes out as it is"
+    );
 }

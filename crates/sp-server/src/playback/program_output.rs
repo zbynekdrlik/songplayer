@@ -269,9 +269,21 @@ impl Pair {
     /// `stamp_100ns`: the native picture(s) (`Arc` bumps), never the canvas.
     fn max_job(&self, stamp_100ns: i64) -> MaxJob {
         match self {
-            Pair::Source(job) => MaxJob::Picture {
-                stamp_100ns,
-                picture: MaxPicture::of(job),
+            // #251: a pair the pacer blended is a fade of its two frames.
+            Pair::Source(job) => match &job.blend {
+                Some(blend) => MaxJob::Fade {
+                    stamp_100ns,
+                    from: Some(MaxPicture::of(job)),
+                    to: Some(MaxPicture {
+                        video: blend.video.clone(),
+                        ..MaxPicture::of(job)
+                    }),
+                    weight_q8: blend.weight_q8,
+                },
+                None => MaxJob::Picture {
+                    stamp_100ns,
+                    picture: MaxPicture::of(job),
+                },
             },
             Pair::Standby => MaxJob::Black { stamp_100ns },
             Pair::Mix { mix, .. } => MaxJob::Fade {
@@ -574,8 +586,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
         let canvas = self.canvas.layout();
         match pair {
             Pair::Source(job) => {
-                let layout = Layout::of(&job);
-                let video = self.canvas.fit(layout, &job.video, &self.bands);
+                let video = self.source_picture(&job);
                 let video = self.burn(video, shown);
                 let audio_tc = job.audio_tc_100ns;
                 send(
@@ -616,6 +627,22 @@ impl<B: NdiBackend> ProgramOutput<B> {
             }
         }
         start
+    }
+
+    /// #223 + #251: a forwarded pair's canvas picture: fitted (or passed
+    /// through), or — blended by the pacer toward the next frame — both
+    /// frames in ONE pass (`Canvas::fade`, the next one at its weight).
+    fn source_picture(&mut self, job: &SubmitJob) -> SharedFrame {
+        let layout = Layout::of(job);
+        match &job.blend {
+            Some(blend) => self.canvas.fade(
+                Some((layout, &job.video[..])),
+                Some((layout, &blend.video[..])),
+                blend.weight_q8,
+                &self.bands,
+            ),
+            None => self.canvas.fit(layout, &job.video, &self.bands),
+        }
     }
 
     /// #223: the canvas's studio black — the standby picture

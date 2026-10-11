@@ -53,6 +53,7 @@ fn pair(stamp: i64, live: bool) -> SubmitJob {
         audio_tc_100ns: stamp,
         live,
         media_pts_100ns: None,
+        blend: None,
     }
 }
 
