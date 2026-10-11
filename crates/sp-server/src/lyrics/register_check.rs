@@ -92,7 +92,11 @@ pub fn parse_response(text: &str, line_count: usize) -> Option<Vec<Finding>> {
     let mut all_fine = false;
     for raw in text.lines() {
         let line = raw.trim();
-        if line.eq_ignore_ascii_case(ALL_FINE) {
+        // A trailing full stop is still the answer ("NONE.").
+        if line
+            .trim_end_matches(['.', '!'])
+            .eq_ignore_ascii_case(ALL_FINE)
+        {
             all_fine = true;
             continue;
         }
@@ -138,8 +142,20 @@ pub fn max_fixes(line_count: usize) -> usize {
     (line_count / 4).max(3)
 }
 
+/// May the check rewrite `track`'s lines? Not an operator's own text (the
+/// `lyrics_override_text` sources) nor a ★ text (a scraped lyric the
+/// transcript verified, `REFERENCE_SOURCE_SUFFIX`): their lines are only
+/// flagged.
+pub fn may_fix(track: &LyricsTrack) -> bool {
+    !(track.source.contains("override")
+        || track
+            .source
+            .ends_with(crate::lyrics::REFERENCE_SOURCE_SUFFIX))
+}
+
 /// Apply `findings` to `track` and return the check to store with it. A fix
-/// that equals the line as it is changes nothing and is not listed.
+/// that equals the line as it is changes nothing and is not listed. A track
+/// the check may not rewrite ([`may_fix`]) has every finding flagged.
 pub fn apply(track: &mut LyricsTrack, findings: Vec<Finding>) -> RegisterCheck {
     fn line_of(track: &LyricsTrack, index: usize) -> RegisterLine {
         let line = &track.lines[index];
@@ -161,12 +177,13 @@ pub fn apply(track: &mut LyricsTrack, findings: Vec<Finding>) -> RegisterCheck {
         .iter()
         .filter(|f| matches!(f, Finding::Fix { .. }))
         .count();
-    let rewrite = fix_count > max_fixes(track.lines.len());
+    // A rewrite, or a text the check may not touch: every finding is flagged.
+    let flag_all = fix_count > max_fixes(track.lines.len()) || !may_fix(track);
     let mut fixed = Vec::new();
     let mut flagged = Vec::new();
     for finding in findings {
         match finding {
-            Finding::Fix { index, en, sk } if !rewrite => {
+            Finding::Fix { index, en, sk } if !flag_all => {
                 fixed.push(line_of(track, index));
                 let line = &mut track.lines[index];
                 line.en = en;

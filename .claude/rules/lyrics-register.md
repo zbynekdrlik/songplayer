@@ -39,11 +39,19 @@ ROZHODNUTÉ 6106231933: no tokens per showing.
   - A `?` line is flagged for the operator.
   - More fixes than `max_fixes` (a quarter of the lines, at least 3) is a
     rewrite. Then nothing is applied and every listed line is flagged.
+  - An operator's own text (`override` sources) or a ★ text (`/g35t-ok`)
+    is never rewritten, only flagged (`may_fix`).
+  - `NONE.` / `NONE!` read as `NONE`.
 - **Refusals and failures.**
   - A refusal (in the answer, or Claude's content filter) is verdict
-    `refused`. The track stays as it is.
-  - Any other failure leaves no check in the track, and the stale pass
-    asks again after the shared translation backoff.
+    `refused`. The track stays as it is. The next song waits out the
+    shared translation backoff, because each content-filter refusal cools
+    the proxy's credential down for 60 s.
+  - Any other failure leaves no check in the track. The stale pass asks
+    again after that backoff, and after `MAX_FAILED_CHECKS` (3) failures
+    stamps the song forward with no verdict and moves on.
+  - Every new track for the video resets the columns to unchecked
+    (`mark_video_lyrics_complete`: a reprocess, an upgrade, a peer's copy).
 - **Where the verdict lives.**
   - In the track: `{yt}_lyrics.json` `register` (`sp_core::lyrics::RegisterCheck`).
   - On every row of the video: V36 `lyrics_register_version` /
@@ -54,10 +62,14 @@ ROZHODNUTÉ 6106231933: no tokens per showing.
     tick that was never checked, or was checked under an older
     `REGISTER_CHECK_VERSION`.
   - It rewrites the JSON in place.
-  - A track that already carries the current check (a peer's copy, PP)
-    is only stamped, with no call.
-- **Paid AI.** The check is paid AI: it is held with the translation
-  (`translation_allowed`).
+  - A track that already carries the current check (a peer's copy) is
+    only stamped, with no call.
+- **Paid AI.** The check is paid AI. The fresh path holds it with the
+  translation (`translation_allowed`).
+  - A node that checks nothing itself (paid AI off or no AI client,
+    i.e. PP) never asks or holds.
+  - Every 10 minutes it stamps the stale songs whose track already carries
+    a peer's check (`stamp_peer_checks`, `scan_due`).
 - **Versions.** No `LYRICS_PIPELINE_VERSION` bump. Bump
   `REGISTER_CHECK_VERSION` when the prompt or the apply rules change what
   the check does.

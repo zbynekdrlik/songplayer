@@ -520,6 +520,7 @@ pub async fn mark_video_lyrics_complete(
     //
     // #144 F1: every row of the video (the lyrics file is the video's), and
     // ★ WITH the track: set exactly when the persisted source is a gate PASS.
+    // #250: a new track is unchecked until its own check is stamped.
     let reference = source.ends_with(crate::lyrics::REFERENCE_SOURCE_SUFFIX);
     sqlx::query(
         "UPDATE videos SET has_lyrics = 1, lyrics_source = ?, \
@@ -527,7 +528,8 @@ pub async fn mark_video_lyrics_complete(
          lyrics_manual_priority = 0, \
          lyrics_attempts = 0, lyrics_next_attempt_at = NULL, \
          lyrics_processed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-         lyrics_alignment_model = ?, lyrics_reference = ? \
+         lyrics_alignment_model = ?, lyrics_reference = ?, \
+         lyrics_register_version = 0, lyrics_register_verdict = NULL \
          WHERE youtube_id = (SELECT youtube_id FROM videos WHERE id = ?)",
     )
     .bind(source)

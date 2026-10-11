@@ -81,6 +81,10 @@ pub(crate) struct RetryBackoff {
     /// #144: songs whose translation Claude's content filter refused this
     /// run: skipped by the missing-translation pass (`translation_refused`).
     pub(crate) refused_translations: std::collections::HashSet<String>,
+    /// #250: the register stale pass — failed checks per video, and when a
+    /// node that checks nothing itself last stamped its peers' checks.
+    pub(crate) register_failures: std::collections::HashMap<i64, u32>,
+    pub(crate) register_scan_at: Option<Instant>,
 }
 
 /// Re-export so `worker_tests` can keep importing from

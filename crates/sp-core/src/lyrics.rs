@@ -422,4 +422,21 @@ mod tests {
         // position 999 is before the first word
         assert!(track.word_index_at(line, 999).is_none());
     }
+
+    /// #250: the verdict's stored name is its JSON name (the server stores
+    /// it in `lyrics_register_verdict`).
+    #[test]
+    fn a_register_verdict_is_stored_by_its_json_name() {
+        for verdict in [
+            RegisterVerdict::Ok,
+            RegisterVerdict::Fixed,
+            RegisterVerdict::Flagged,
+            RegisterVerdict::Refused,
+        ] {
+            let json = serde_json::to_string(&verdict).unwrap();
+            assert_eq!(json, format!("\"{}\"", verdict.as_str()));
+        }
+        assert_eq!(RegisterVerdict::Flagged.as_str(), "flagged");
+        assert_eq!(RegisterVerdict::Ok.as_str(), "ok");
+    }
 }

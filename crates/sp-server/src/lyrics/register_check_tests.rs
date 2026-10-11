@@ -3,7 +3,7 @@
 use sp_core::lyrics::{LyricsLine, LyricsTrack, LyricsWord, RegisterLine, RegisterVerdict};
 
 use super::{
-    Finding, REGISTER_CHECK_VERSION, apply, build_prompt, max_fixes, numbered_lines,
+    Finding, REGISTER_CHECK_VERSION, apply, build_prompt, max_fixes, may_fix, numbered_lines,
     parse_response, read_answer, refused,
 };
 
@@ -366,4 +366,36 @@ fn the_verdicts_have_their_stored_names() {
     assert_eq!(RegisterVerdict::Fixed.as_str(), "fixed");
     assert_eq!(RegisterVerdict::Flagged.as_str(), "flagged");
     assert_eq!(RegisterVerdict::Refused.as_str(), "refused");
+}
+
+#[test]
+fn none_with_a_full_stop_is_still_none() {
+    assert_eq!(parse_response("NONE.", 4), Some(vec![]));
+    assert_eq!(parse_response("None!", 4), Some(vec![]));
+    assert_eq!(parse_response("NONE, all fine", 4), None);
+}
+
+#[test]
+fn an_operators_text_or_a_star_text_is_never_rewritten() {
+    let with_source = |source: &str| {
+        let mut track = we_raise();
+        track.source = source.into();
+        track
+    };
+    assert!(may_fix(&with_source("gemini-3-5-transcribe")));
+    assert!(may_fix(&with_source("lrclib")));
+    assert!(!may_fix(&with_source("override")));
+    assert!(!may_fix(&with_source("genius+mtl@rev1/g35t-ok")));
+    // A ★ track's misheard line is flagged, its text left as it is.
+    let mut track = with_source("genius+mtl@rev1/g35t-ok");
+    let before = track.clone();
+    let check = apply(&mut track, vec![fix(1, "I will dwell", "Budem prebývať")]);
+    assert_eq!(check.verdict, RegisterVerdict::Flagged);
+    assert!(check.fixed.is_empty());
+    assert_eq!(check.flagged.len(), 1);
+    assert_eq!(track, before);
+    // An operator's text too.
+    let mut track = with_source("override");
+    let check = apply(&mut track, vec![fix(1, "I will dwell", "Budem prebývať")]);
+    assert_eq!(check.verdict, RegisterVerdict::Flagged);
 }

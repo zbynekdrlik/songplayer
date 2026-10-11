@@ -8,7 +8,7 @@ use tokio::sync::broadcast;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::{CheckOutcome, checked_now};
+use super::{CheckOutcome, MAX_FAILED_CHECKS, PEER_SCAN_EVERY, checked_now, gives_up, scan_due};
 use crate::ai::AiSettings;
 use crate::ai::client::AiClient;
 use crate::lyrics::register_check::REGISTER_CHECK_VERSION;
@@ -229,4 +229,162 @@ fn a_track_is_checked_now_only_under_the_current_version() {
     assert!(checked_now(&track));
     track.register = Some(check(REGISTER_CHECK_VERSION + 1));
     assert!(checked_now(&track));
+}
+
+/// Another served song on `node` with `track` as its JSON.
+async fn add_served(node: &TestNode, yt: &str, track: &LyricsTrack) -> i64 {
+    let id = node.add_video(yt).await;
+    sqlx::query("UPDATE videos SET normalized = 1, has_lyrics = 1 WHERE id = ?")
+        .bind(id)
+        .execute(node.pool())
+        .await
+        .unwrap();
+    let json = serde_json::to_vec(track).unwrap();
+    std::fs::write(node.cache().join(format!("{yt}_lyrics.json")), json).unwrap();
+    id
+}
+
+fn peer_checked() -> LyricsTrack {
+    let mut track = served();
+    track.register = Some(RegisterCheck {
+        version: REGISTER_CHECK_VERSION,
+        verdict: RegisterVerdict::Fixed,
+        fixed: vec![],
+        flagged: vec![],
+    });
+    track
+}
+
+#[tokio::test]
+async fn with_paid_ai_off_only_a_peers_check_is_stamped_and_nothing_is_asked() {
+    let server = claude("NONE").await;
+    // The lowest row has no check: it must not hold up the rows behind it.
+    let (node, worker, unchecked) = node(&server, Some(&served())).await;
+    let from_peer = add_served(&node, "reg_check_2", &peer_checked()).await;
+    set(node.pool(), "paid_ai_enabled", "false").await;
+    worker.recheck_next_stale_register().await;
+    assert_eq!(requests(&server).await, 0);
+    assert_eq!(stamped(&node, unchecked).await, (0, None));
+    assert_eq!(
+        stamped(&node, from_peer).await,
+        (i64::from(REGISTER_CHECK_VERSION), Some("fixed".into()))
+    );
+    // Within the scan interval the next tick reads nothing: a check that
+    // arrives meanwhile is stamped at the next scan.
+    let late = add_served(&node, "reg_check_3", &peer_checked()).await;
+    worker.recheck_next_stale_register().await;
+    assert_eq!(stamped(&node, late).await, (0, None));
+    worker.retry_backoff.lock().await.register_scan_at = None;
+    worker.recheck_next_stale_register().await;
+    assert_eq!(
+        stamped(&node, late).await,
+        (i64::from(REGISTER_CHECK_VERSION), Some("fixed".into()))
+    );
+    assert_eq!(requests(&server).await, 0);
+}
+
+#[tokio::test]
+async fn a_node_with_no_ai_client_stamps_its_peers_checks() {
+    let server = claude("NONE").await;
+    let (node, mut worker, id) = node(&server, Some(&peer_checked())).await;
+    worker.ai_client = None;
+    worker.recheck_next_stale_register().await;
+    assert_eq!(
+        stamped(&node, id).await,
+        (i64::from(REGISTER_CHECK_VERSION), Some("fixed".into()))
+    );
+}
+
+#[tokio::test]
+async fn after_a_refusal_the_next_song_waits_out_the_backoff() {
+    let server = claude("I can't help with reviewing this text.").await;
+    let (node, worker, _id) = node(&server, Some(&served())).await;
+    let next = add_served(&node, "reg_check_2", &served()).await;
+    worker.recheck_next_stale_register().await;
+    assert_eq!(requests(&server).await, 1);
+    worker.recheck_next_stale_register().await;
+    assert_eq!(
+        requests(&server).await,
+        1,
+        "a refusal backs off like a failure"
+    );
+    assert_eq!(stamped(&node, next).await, (0, None));
+}
+
+#[tokio::test]
+async fn a_song_whose_answers_cannot_be_read_is_left_unchecked_after_three_tries() {
+    let server = claude("Here is my review of the text.").await;
+    let (node, worker, id) = node(&server, Some(&served())).await;
+    for attempt in 1..=MAX_FAILED_CHECKS {
+        assert_eq!(stamped(&node, id).await, (0, None), "before try {attempt}");
+        worker.retry_backoff.lock().await.silent_until = None;
+        worker.recheck_next_stale_register().await;
+    }
+    assert_eq!(requests(&server).await, MAX_FAILED_CHECKS as usize);
+    assert_eq!(
+        stamped(&node, id).await,
+        (i64::from(REGISTER_CHECK_VERSION), None),
+        "stamped forward with no verdict: the pass moves on"
+    );
+    assert!(
+        worker
+            .retry_backoff
+            .lock()
+            .await
+            .register_failures
+            .is_empty()
+    );
+    assert_eq!(cached(&node), served());
+}
+
+#[test]
+fn a_song_is_given_up_from_its_third_failed_check() {
+    assert_eq!(MAX_FAILED_CHECKS, 3);
+    assert!(!gives_up(2));
+    assert!(gives_up(3));
+    assert!(gives_up(4));
+}
+
+#[test]
+fn a_peer_check_scan_is_due_first_and_then_every_ten_minutes() {
+    let t0 = std::time::Instant::now();
+    assert_eq!(PEER_SCAN_EVERY, std::time::Duration::from_secs(600));
+    assert!(scan_due(None, t0));
+    assert!(!scan_due(Some(t0), t0));
+    assert!(!scan_due(
+        Some(t0),
+        t0 + PEER_SCAN_EVERY - std::time::Duration::from_millis(1)
+    ));
+    assert!(scan_due(Some(t0), t0 + PEER_SCAN_EVERY));
+    assert!(scan_due(
+        Some(t0),
+        t0 + PEER_SCAN_EVERY + std::time::Duration::from_secs(1)
+    ));
+    // A clock read before the last scan is no scan due.
+    assert!(!scan_due(Some(t0 + PEER_SCAN_EVERY), t0));
+}
+
+/// The fresh path (`process_song` needs the whole pipeline): the check runs
+/// after the translation and before the persist, the stamp after it, and
+/// both translation passes run the stale pass.
+#[test]
+fn the_worker_checks_a_fresh_track_between_its_translation_and_its_persist() {
+    let src = include_str!("worker.rs");
+    let at = |needle: &str| {
+        src.find(needle)
+            .unwrap_or_else(|| panic!("worker.rs no longer has `{needle}`"))
+    };
+    let translate = at("self.translate_track(&mut track, &youtube_id, gender).await;");
+    let check = at("self.check_register(&mut track, &youtube_id).await;");
+    let persist = at("persist_lyrics_track(");
+    let stamp = at("self.stamp_register_of(video_id, &track).await;");
+    assert!(translate < check, "checked after its translation");
+    assert!(check < persist, "checked before it is persisted");
+    assert!(persist < stamp, "stamped once persisted");
+    assert_eq!(
+        src.matches("self.recheck_next_stale_register().await;")
+            .count(),
+        2,
+        "the wall-wait tick and the empty-queue tick both run the stale pass"
+    );
 }

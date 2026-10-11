@@ -25,24 +25,39 @@ pub async fn stamp_register(
     Ok(())
 }
 
-/// The next served song whose track was not checked under `current_version`
-/// (`(id, youtube_id)`): a row with lyrics, of an active playlist, downloaded,
-/// never a dub's Live-Translate subtitles; lowest id first.
+/// A served song whose track was not checked under the version bound as the
+/// first parameter: a row with lyrics, of an active playlist, downloaded,
+/// never a dub's Live-Translate subtitles (the second parameter).
+const STALE_REGISTER: &str = "SELECT v.id, v.youtube_id FROM videos v JOIN playlists p ON p.id = v.playlist_id \
+     WHERE v.has_lyrics = 1 AND v.lyrics_register_version < ? \
+           AND p.is_active = 1 AND v.normalized = 1 \
+           AND (v.lyrics_source IS NULL OR v.lyrics_source != ?) \
+     ORDER BY v.id ASC";
+
+/// The next song the stale pass checks (`(id, youtube_id)`, lowest id first).
 pub async fn fetch_next_stale_register(
     pool: &SqlitePool,
     current_version: u32,
 ) -> Result<Option<(i64, String)>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT v.id, v.youtube_id FROM videos v JOIN playlists p ON p.id = v.playlist_id \
-         WHERE v.has_lyrics = 1 AND v.lyrics_register_version < ? \
-               AND p.is_active = 1 AND v.normalized = 1 \
-               AND (v.lyrics_source IS NULL OR v.lyrics_source != ?) \
-         ORDER BY v.id ASC LIMIT 1",
-    )
-    .bind(current_version as i64)
-    .bind(crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE)
-    .fetch_optional(pool)
-    .await
+    sqlx::query_as(&format!("{STALE_REGISTER} LIMIT 1"))
+        .bind(current_version as i64)
+        .bind(crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE)
+        .fetch_optional(pool)
+        .await
+}
+
+/// Every song the stale pass would check, lowest id first: a node that
+/// checks nothing itself (paid AI off, PP) stamps the ones whose track
+/// already carries a peer's check.
+pub async fn fetch_stale_registers(
+    pool: &SqlitePool,
+    current_version: u32,
+) -> Result<Vec<(i64, String)>, sqlx::Error> {
+    sqlx::query_as(STALE_REGISTER)
+        .bind(current_version as i64)
+        .bind(crate::dabing::subtitles::SOURCE_LIVE_TRANSLATE)
+        .fetch_all(pool)
+        .await
 }
 
 #[cfg(test)]

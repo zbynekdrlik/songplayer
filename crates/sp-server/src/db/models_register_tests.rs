@@ -2,7 +2,7 @@
 
 use sqlx::SqlitePool;
 
-use super::{fetch_next_stale_register, stamp_register};
+use super::{fetch_next_stale_register, fetch_stale_registers, stamp_register};
 use crate::db;
 
 /// An active playlist 1 (and an inactive 2) and no video yet.
@@ -110,5 +110,39 @@ async fn the_stale_pass_leaves_rows_with_nothing_to_check() {
     assert_eq!(
         fetch_next_stale_register(&pool, 1).await.unwrap(),
         Some((dub, "ytDub".to_string()))
+    );
+}
+
+#[tokio::test]
+async fn a_new_track_written_for_the_video_is_unchecked_again() {
+    let pool = pool().await;
+    let a = video(&pool, 1, "ytA", 1, 1).await;
+    let a_again = video(&pool, 2, "ytA", 1, 1).await;
+    stamp_register(&pool, a, 1, Some("ok")).await.unwrap();
+    crate::db::models::mark_video_lyrics_complete(
+        &pool,
+        a_again,
+        "gemini-3-5-transcribe",
+        22,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(columns(&pool, a).await, (0, None));
+    assert_eq!(columns(&pool, a_again).await, (0, None));
+}
+
+#[tokio::test]
+async fn every_stale_row_is_listed_lowest_first() {
+    let pool = pool().await;
+    let first = video(&pool, 1, "ytA", 1, 1).await;
+    let checked = video(&pool, 1, "ytB", 1, 1).await;
+    let third = video(&pool, 1, "ytC", 1, 1).await;
+    video(&pool, 2, "ytInactive", 1, 1).await;
+    stamp_register(&pool, checked, 1, Some("ok")).await.unwrap();
+    assert_eq!(
+        fetch_stale_registers(&pool, 1).await.unwrap(),
+        vec![(first, "ytA".to_string()), (third, "ytC".to_string())]
     );
 }
