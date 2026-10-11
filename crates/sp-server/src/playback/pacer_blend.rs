@@ -12,11 +12,13 @@
 //! `SP-program-MAX` draws it on the GPU (two quads), exactly as a scene
 //! fade's two sources.
 //!
-//! A source the grid divides is never blended: a 30 fps frame is due on
-//! its boundary (its millisecond pts sits at most 1 ms before it, under
-//! [`BLEND_DEAD_BAND_100NS`]). Neither is a frame next to a gap over two
-//! slots (a stall, a seek, a sparse source), nor a next frame of another
-//! size.
+//! Only a source SLOWER than the grid and faster than half of it (20–25
+//! fps on 30) is blended: its gap between frames lies between one slot and
+//! two, each [`BLEND_DEAD_BAND_100NS`] inside. A 29.97 / 30 / 50 / 59.94 fps
+//! source keeps its sharp frames (blending one drifts through every weight,
+//! review of #251: 95 % of a 29.97 fps song's boundaries); a 15 fps one keeps
+//! its even 2-slot hold; a stall or a seek is never bridged; a next frame of
+//! another size is not blended.
 
 use sp_ndi::AudioFrame;
 
@@ -42,11 +44,12 @@ pub struct FrameBlend {
 /// shown frame's present time, the next frame presenting `gap_100ns` after
 /// it, on a grid of `interval_100ns`: `into · 256 / gap`, floored. `None`
 /// (show the frame alone) inside the dead band, at or past the next frame,
-/// or when the gap is over two grid slots.
+/// or for a gap not strictly inside (one slot, two slots) by the dead band.
 pub fn blend_weight_q8(into_100ns: i64, gap_100ns: i64, interval_100ns: i64) -> Option<u32> {
     if into_100ns < BLEND_DEAD_BAND_100NS
         || into_100ns >= gap_100ns
-        || gap_100ns > 2 * interval_100ns
+        || gap_100ns <= interval_100ns + BLEND_DEAD_BAND_100NS
+        || gap_100ns >= 2 * interval_100ns - BLEND_DEAD_BAND_100NS
     {
         return None;
     }

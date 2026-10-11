@@ -1597,11 +1597,17 @@ juddered on the LED wall): a boundary between two source frames shows both.
 - The pacer only DECIDES it (`pacer_blend.rs`, a child of `pacer`): at a
   boundary between the shown frame and the parked next one (`pending`),
   `blend_weight_q8(into, gap, interval)` = `into · 256 / gap`, floored.
-  `None` inside `BLEND_DEAD_BAND_100NS` (2 ms: a 30 fps source's
-  millisecond pts sits ≤ 1 ms before its boundary, so it is NEVER blended),
-  at or past the next frame, or for a gap over two slots (a stall, a seek,
-  a ≤ 15 fps source keeps its held frames). A next frame of another size is
-  not blended. 25 fps on 30: plain, 213, 170, 128, 85, 42, plain, …
+  `None` inside `BLEND_DEAD_BAND_100NS` (2 ms) after the shown frame, at
+  or past the next frame, and for any gap not strictly inside (one slot,
+  two slots) by that dead band: only a source SLOWER than the grid and
+  faster than half of it (20–25 fps) is blended. Review round 1: with only
+  an upper bound a 29.97 fps source (ms pts drifting through the whole
+  gap) was blended on 95 % of its boundaries — permanent ghosting on a song
+  that never juddered; 50 / 59.94 fps likewise. A 15 fps source keeps its
+  even 2-slot hold; a stall or seek is never bridged; a next frame of
+  another size is not blended. 25 fps on 30: plain, 213, 170, 128, 85, 42,
+  plain, … (1000 of 1200 boundaries; 24 fps 960; 29.97 / 50 / 59.94 / 15
+  fps 0, `pacer_blend_tests.rs`).
 - It emits through `PacedSink::emit_blended(video, FrameBlend, …)`, whose
   DEFAULT is `emit` (a sink that only shows frames sees what it always
   saw). `HandoffSink` puts the blend on `SubmitJob::blend` (an `Arc` bump of
@@ -1613,6 +1619,17 @@ juddered on the LED wall): a boundary between two source frames shows both.
 - `repeats` still counts the boundaries with no fresh frame (the lock
   rule's 25/30 conversion allowance is unchanged); a blended repeat is no
   longer a frozen picture.
+- Known costs to read on the box (review round 1): MAX's residency is per
+  slot, so a blended boundary re-uploads the previous boundary's incoming
+  picture into the outgoing slot (≈ 55 uploads/s instead of 25, on MAX and
+  on the FHD Spout compositor); swapping the two slots' textures would save
+  it if `upload_us_p99` shows it. `SP-program` paints a two-sided fade on
+  most boundaries of such a song (a 1080p song loses its pass-through):
+  read `health.timing.submit_us_max`. The picture now shows the content at
+  the boundary instant instead of the newest frame (≈ T/2 behind the
+  audio), so a 24/25 fps take of the A/V gate reads `av_ms` ≈ T/2 lower
+  than before, and `av_frame_offset` (the shown frame's pts) overstates the
+  picture lag by that much.
 - Box check on a 25 fps song: `/api/v1/ndi/health` `source_fps 25`, MAX's
   `upload_us_p99` (two pictures per boundary now) and `send_late`, and the
   wall's one-refresh runs (`ops\wall_runs.py`) against a 30 fps song.

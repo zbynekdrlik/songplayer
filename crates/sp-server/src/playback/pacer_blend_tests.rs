@@ -103,10 +103,11 @@ fn serve<S: PacedSink>(frames: Vec<PacedFrame>, n: i64, sink: &mut S) {
     }
 }
 
-/// `count` frames at `interval` (100 ns) apart, `width` wide, ids 0, 1, …
-fn stream(count: u8, interval: impl Fn(i64) -> i64, width: u32) -> Vec<PacedFrame> {
+/// `count` frames, frame k at `pts(k)` (100 ns), `width` wide, ids k
+/// (wrapping at 256).
+fn stream(count: i64, pts: impl Fn(i64) -> i64, width: u32) -> Vec<PacedFrame> {
     (0..count)
-        .map(|id| frame(id, interval(i64::from(id)), width))
+        .map(|k| frame((k % 256) as u8, pts(k), width))
         .collect()
 }
 
@@ -143,13 +144,19 @@ fn a_boundary_on_the_frame_or_just_after_it_shows_the_frame_alone() {
 }
 
 #[test]
-fn a_gap_over_two_slots_is_never_blended() {
+fn only_a_gap_between_one_slot_and_two_is_blended() {
     assert_eq!(
-        blend_weight_q8(333_333, 666_666, SLOT),
-        Some(128),
-        "two slots: 15 fps"
+        blend_weight_q8(200_000, 353_333, SLOT),
+        None,
+        "29.97 fps and faster"
     );
-    assert_eq!(blend_weight_q8(333_333, 666_667, SLOT), None);
+    assert_eq!(blend_weight_q8(200_000, 353_334, SLOT), Some(144));
+    assert_eq!(blend_weight_q8(200_000, 646_665, SLOT), Some(79));
+    assert_eq!(
+        blend_weight_q8(200_000, 646_666, SLOT),
+        None,
+        "15 fps and slower"
+    );
     assert_eq!(
         blend_weight_q8(200_000, 1_000_000, SLOT),
         None,
@@ -240,4 +247,47 @@ fn a_sink_that_only_shows_frames_gets_every_boundary() {
     let mut sink = PlainOnly::default();
     serve(stream(20, |k| k * 400_000, 4), 8, &mut sink);
     assert_eq!(sink.shown, [0, 0, 1, 2, 3, 4, 5, 5]);
+}
+
+/// How many of the boundaries b(1)..=b(n) of `frames` were blended.
+fn blended_count(frames: Vec<PacedFrame>, n: i64) -> usize {
+    let mut rec = Rec::default();
+    serve(frames, n, &mut rec);
+    assert_eq!(rec.shown.len() as i64, n, "every boundary shows a frame");
+    rec.shown
+        .iter()
+        .filter(|s| matches!(s, Shown::Blended(..)))
+        .count()
+}
+
+/// A source's frame k at its Media Foundation time `k · period` (100 ns),
+/// truncated to whole milliseconds as `to_paced_frame` gets it.
+fn ms_pts(period_100ns: i64) -> impl Fn(i64) -> i64 {
+    move |k| k * period_100ns / 10_000 * 10_000
+}
+
+#[test]
+fn a_source_at_or_above_the_grid_rate_is_never_blended() {
+    // Over 40 s: a 29.97 fps source's ms pts drift through the whole gap.
+    for (fps, period, count) in [
+        ("29.97", 333_667, 1_300),
+        ("50", 200_000, 2_600),
+        ("59.94", 166_833, 2_600),
+        ("15", 666_667, 700),
+    ] {
+        assert_eq!(
+            blended_count(stream(count, ms_pts(period), 4), 1_200),
+            0,
+            "{fps} fps keeps its own frames"
+        );
+    }
+}
+
+#[test]
+fn a_24_or_25_fps_source_is_blended_wherever_it_lies_between_frames() {
+    assert_eq!(
+        blended_count(stream(1_300, ms_pts(400_000), 4), 1_200),
+        1_000
+    );
+    assert_eq!(blended_count(stream(1_300, ms_pts(416_667), 4), 1_200), 960);
 }
