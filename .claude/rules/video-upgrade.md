@@ -124,13 +124,31 @@ Logs: INFO `video upgrade: start` and `video upgrade: done`, or a WARN
 - Tests: `worker_tests.rs`, with the shared `test_rig.rs` (the cached song
   and the scripted `Fake` steps that `mod_tests.rs` uses too).
 
-## Not yet (S12b)
+## The safety net (S12b)
 
-- `.prev` retention: until the first `Started` after the upgrade, or 14
-  days, within a 15 GiB budget (oldest first). Until then, `.prev` files
-  stay in the cache.
-- Rollback on an open failure of an upgraded song (`.prev` back under the
-  name, `rolled_back`, settled).
+- **Retention** (`retention.rs`). The worker sweeps every tick, switch on or
+  off. A `.prev` is deleted when:
+  - it is an orphan: no row's video is its name without `.prev`, because
+    of a rename since;
+  - the song has `Started` since its upgrade: `play_history.played_at`
+    (recorded at `Started`) ≥ `video_upgrade_at`, compared in whole seconds;
+  - 14 days have passed since the upgrade;
+  - it is among the oldest while all kept `.prev` files exceed 15 GiB.
+
+  The pure `plan` decides; `sweep` deletes under `SONG_FILES`. The startup
+  cache scan leaves `.prev` files alone: none of its patterns match one.
+- **Rollback** (`rollback.rs`). The engine's `video_failed` spawns
+  `after_failed_open(row)`; the engine never waits on the file lock. If the
+  row's state is `upgraded` and its `.prev` exists:
+  - `.prev` is renamed back over the name under `SONG_FILES`;
+  - V35 on every row becomes `rolled_back`, settled at the live cap (never
+    upgraded again at it);
+  - V34 becomes NULL.
+
+  The engine's own retry then plays the old video. Any other failed open
+  changes nothing. Test:
+  `failure_retry_tests.rs::a_failed_open_of_an_upgraded_song_puts_its_old_video_back`.
+- `GET /api/v1/video-upgrade` counts `rolled_back` too.
 
 ## The exchange
 

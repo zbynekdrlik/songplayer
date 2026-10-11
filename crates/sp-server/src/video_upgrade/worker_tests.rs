@@ -347,6 +347,14 @@ async fn the_counts_are_per_video() {
     )
     .await;
     song(&pool, 9, 3, "testitemaaa", NEVER).await;
+    song(
+        &pool,
+        10,
+        1,
+        "hhhhhhhhhhh",
+        (Some(2160), Some("rolled_back"), Some(T)),
+    )
+    .await;
     let at_2160 = counts(&pool, 2160).await.unwrap();
     assert_eq!(
         at_2160,
@@ -357,6 +365,7 @@ async fn the_counts_are_per_video() {
             refused: 1,
             failed: 1,
             busy: 1,
+            rolled_back: 1,
         }
     );
     assert_eq!(counts(&pool, 1440).await.unwrap().pending, 3);

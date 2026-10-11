@@ -18,8 +18,9 @@
 //! 7. recorded on every row of the video: V34's format and V35's check.
 //!
 //! The steps that run yt-dlp and the readers are a [`Steps`]: production's
-//! is `steps::Real`, the tests script one. S12 adds the worker that runs
-//! this by itself, the `.prev` retention and the rollback.
+//! is `steps::Real`, the tests script one. S12: `worker` runs this by
+//! itself, `retention` deletes a `.prev` once it is not needed, `rollback`
+//! puts it back after a failed open.
 
 use std::path::{Path, PathBuf};
 
@@ -30,6 +31,8 @@ use sqlx::SqlitePool;
 use crate::downloader::format::{self, DownloadedFormat};
 
 pub(crate) mod disk;
+pub(crate) mod retention;
+pub(crate) mod rollback;
 pub(crate) mod steps;
 pub(crate) mod swap;
 #[cfg(test)]

@@ -288,6 +288,8 @@ pub(crate) struct Counts {
     pub refused: i64,
     pub failed: i64,
     pub busy: i64,
+    /// #223 S12b: put back after a failed open.
+    pub rolled_back: i64,
 }
 
 /// [`Counts`] at `cap`.
@@ -300,7 +302,8 @@ pub(crate) async fn counts(pool: &SqlitePool, cap: u32) -> Result<Counts, sqlx::
            COUNT(*) FILTER (WHERE state = 'no_better') AS no_better, \
            COUNT(*) FILTER (WHERE state LIKE 'refused:%') AS refused, \
            COUNT(*) FILTER (WHERE state LIKE 'failed:%') AS failed, \
-           COUNT(*) FILTER (WHERE state = 'busy') AS busy \
+           COUNT(*) FILTER (WHERE state = 'busy') AS busy, \
+           COUNT(*) FILTER (WHERE state = 'rolled_back') AS rolled_back \
          FROM (SELECT youtube_id, MAX(video_upgrade_cap) AS cap, \
                       MAX(video_upgrade_state) AS state \
                FROM videos WHERE normalized = 1 AND file_path IS NOT NULL AND {} \
@@ -329,6 +332,8 @@ pub(crate) async fn run(
             _ = tokio::time::sleep(wait) => {}
         }
         wait = TICK;
+        // #223 S12b: the old videos no song needs any more, switch on or off.
+        super::retention::sweep(&pool, &cache_dir, crate::peer::wire::now_ms()).await;
         let tools = tool_paths.read().await.clone();
         let ticked = match tools {
             None => Ticked::Skipped(Skip::NoTools),
