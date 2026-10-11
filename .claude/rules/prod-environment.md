@@ -55,8 +55,8 @@ otherwise. **Ruling of the same night:** Windows 11 IoT Enterprise
 - **Defender real-time**: WMI `root\Microsoft\Windows\Defender`
   `MSFT_MpComputerStatus.RealTimeProtectionEnabled`, over COM, on a thread
   of its own (MTA, never the blocking pool's apartment), the services proxy
-  set to impersonate with `CoSetProxyBlanket` (never `CoInitializeSecurity`:
-  it is process-wide). `WBEM_E_INVALID_NAMESPACE` / `WBEM_E_INVALID_CLASS`
+  and its enumerator set to impersonate with `CoSetProxyBlanket` (never
+  `CoInitializeSecurity`: it is process-wide). `WBEM_E_INVALID_NAMESPACE` / `WBEM_E_INVALID_CLASS`
   = Defender not installed = off; no instance, no value, a WMI timeout
   (10 s, `WBEM_S_TIMEDOUT`) or any other error = unreadable
   (`defender_realtime`).
