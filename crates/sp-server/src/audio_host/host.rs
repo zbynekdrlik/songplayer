@@ -140,7 +140,7 @@ pub fn status_reports(outs: &Outputs) -> Vec<Report> {
         .iter()
         .map(|(&handle, out)| Report::Status {
             handle,
-            snapshot: WireSnapshot::from(&out.snapshot()),
+            snapshot: Box::new(WireSnapshot::from(&out.snapshot())),
         })
         .collect()
 }

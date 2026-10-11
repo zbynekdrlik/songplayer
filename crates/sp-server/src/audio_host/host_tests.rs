@@ -386,7 +386,7 @@ fn the_host_adds_replaces_and_removes_outputs() {
         reports[0],
         Report::Status {
             handle: 7,
-            snapshot: WireSnapshot::from(&second.snapshot()),
+            snapshot: Box::new(WireSnapshot::from(&second.snapshot())),
         }
     );
     on_frame(&mut s, &env, Frame::Control(Control::Remove { handle: 7 })).unwrap();

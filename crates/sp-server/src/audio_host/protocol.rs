@@ -77,8 +77,16 @@ pub enum HostLevel {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Report {
-    Status { handle: u64, snapshot: WireSnapshot },
-    Log { level: HostLevel, line: String },
+    /// Boxed: a status is ~400 bytes, a log line ~30
+    /// (`clippy::large_enum_variant`).
+    Status {
+        handle: u64,
+        snapshot: Box<WireSnapshot>,
+    },
+    Log {
+        level: HostLevel,
+        line: String,
+    },
 }
 
 /// One program block for one output.
