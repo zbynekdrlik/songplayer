@@ -14,12 +14,18 @@
 //!
 //! #230: while a `sp-90s` press holds the background jobs, an amber
 //! segment says so (`sp_core::background_hold::label`), polled every 5 s.
+//!
+//! #233: while the box violates the production environment (an edition that
+//! is neither LTSC nor IoT Enterprise, Defender's real-time protection on, a
+//! firewall profile on, or a fact that cannot be read), a red segment names
+//! it (`sp_core::prod_env::label`), polled every 10 s.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use sp_core::background_hold::{self, BackgroundHold};
 use sp_core::health;
+use sp_core::prod_env::{self, EnvironmentStatus};
 
 use crate::api;
 use crate::components::ndi_health::GlobalLockBadge;
@@ -75,6 +81,12 @@ pub fn HealthBar() -> impl IntoView {
     let hold = RwSignal::new(BackgroundHold::default());
     let _hold_poll = Effect::new(move |_| {
         poll_into("/api/v1/background-hold", 5_000, cancelled, hold);
+    });
+    // #233: the production environment, polled every 10 s (the server checks
+    // it every minute; a box that turns Defender on shows up with no reload).
+    let environment = RwSignal::new(EnvironmentStatus::default());
+    let _env_poll = Effect::new(move |_| {
+        poll_into("/api/v1/environment", 10_000, cancelled, environment);
     });
 
     // LAN address — one-shot fetch of `/api/v1/status` (no loop → never touches
@@ -196,6 +208,14 @@ pub fn HealthBar() -> impl IntoView {
                 health::paid_ai_label(paid_ai.get(), &paid_held.get()).map(|(tone, text, tip)| {
                     let cls = format!("health-seg {}", tone.css_class());
                     view! { <span class=cls title=tip data-testid="health-paid-ai">{text}</span> }
+                        .into_any()
+                })
+            }}
+            // #233: only while the production environment is violated.
+            {move || {
+                prod_env::label(&environment.get()).map(|(tone, text, tip)| {
+                    let cls = format!("health-seg {}", tone.css_class());
+                    view! { <span class=cls title=tip data-testid="health-environment">{text}</span> }
                         .into_any()
                 })
             }}
