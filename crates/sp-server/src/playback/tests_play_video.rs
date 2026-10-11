@@ -952,6 +952,15 @@ async fn a_loop_playlist_plays_its_song_again_after_a_restart() {
     // The operator's pick is remembered.
     engine.handle_play_video(10, 113, None).await;
     assert_eq!(remembered(pool.clone()).await, Some(113));
+    // Previous is remembered too: 114, then back to 113.
+    engine.handle_play_video(10, 114, None).await;
+    assert_eq!(remembered(pool.clone()).await, Some(114));
+    engine.handle_previous(10).await;
+    assert_eq!(
+        engine.pipelines.get(&10).unwrap().current_video_id,
+        Some(113)
+    );
+    assert_eq!(remembered(pool.clone()).await, Some(113));
     drop(engine);
 
     // The restart: a fresh engine in Loop has no current song in memory.

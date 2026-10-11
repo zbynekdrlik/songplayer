@@ -618,8 +618,6 @@ impl PlaybackEngine {
 
         match crate::db::models::get_song_paths(&self.pool, video_id).await {
             Ok(Some((video_path, audio_path))) => {
-                crate::playlist::loop_memory::remember_logged(&self.pool, playlist_id, video_id)
-                    .await;
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.current_video_id = Some(video_id);
                     pp.state = PlayState::Playing { video_id };
@@ -636,6 +634,14 @@ impl PlaybackEngine {
                         start_position_ms: None,
                     });
 
+                    // #229 follow-up: Loop plays it after a restart too
+                    // (written after the Play went out: never on its way).
+                    crate::playlist::loop_memory::remember_logged(
+                        &self.pool,
+                        playlist_id,
+                        video_id,
+                    )
+                    .await;
                     // Broadcast the state change so the dashboard updates: an
                     // off-program Previous shows WaitingForScene (#170), with
                     // the raw transport (#201).
@@ -797,12 +803,6 @@ impl PlaybackEngine {
                         debug!(playlist_id, video_id, "selected video");
                         match crate::db::models::get_song_paths(&self.pool, video_id).await {
                             Ok(Some((video_path, audio_path))) => {
-                                crate::playlist::loop_memory::remember_logged(
-                                    &self.pool,
-                                    playlist_id,
-                                    video_id,
-                                )
-                                .await;
                                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                                     // Push the previous video to the
                                     // per-playlist history stack before
@@ -830,6 +830,14 @@ impl PlaybackEngine {
                                     });
                                     // #229: played once it starts (`song_started`).
                                     pp.record_on_start = Some(video_id);
+                                    // #229 follow-up: Loop's song after a restart,
+                                    // written after the Play went out.
+                                    crate::playlist::loop_memory::remember_logged(
+                                        &self.pool,
+                                        playlist_id,
+                                        video_id,
+                                    )
+                                    .await;
                                 }
                                 self.resync_after_play(playlist_id).await;
                             }
