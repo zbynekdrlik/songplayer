@@ -21,6 +21,9 @@ pub enum HealthTone {
     Warn,
     /// Not applicable / unknown yet — grey.
     Off,
+    /// #233: a box that must not run like this (the production environment
+    /// is violated) — red.
+    Error,
 }
 
 impl HealthTone {
@@ -30,6 +33,7 @@ impl HealthTone {
             HealthTone::Ok => "health-ok",
             HealthTone::Warn => "health-warn",
             HealthTone::Off => "health-off",
+            HealthTone::Error => "health-error",
         }
     }
 }
@@ -157,6 +161,7 @@ mod tests {
         assert_eq!(HealthTone::Ok.css_class(), "health-ok");
         assert_eq!(HealthTone::Warn.css_class(), "health-warn");
         assert_eq!(HealthTone::Off.css_class(), "health-off");
+        assert_eq!(HealthTone::Error.css_class(), "health-error");
     }
 
     // ---- obs_label ----

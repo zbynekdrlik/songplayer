@@ -23,6 +23,7 @@ pub mod nv12;
 pub mod playback;
 pub mod player_view;
 pub mod preview_lag;
+pub mod prod_env; // #233: the production environment's problems, status and health segment
 pub mod program_refusal;
 pub mod seek_model;
 pub mod status_chip;
