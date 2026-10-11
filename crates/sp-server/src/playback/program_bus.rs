@@ -688,6 +688,8 @@ impl ProgramCore {
 }
 
 /// What the `SP-program` sender thread got from [`ProgramBus::take_timeout`].
+/// Moved once per boundary, never stored: a `Box` would allocate per boundary.
+#[allow(clippy::large_enum_variant)]
 pub enum Take {
     /// A queued boundary and the source it shows (#147).
     Job(ProgramJob, Option<i64>),
