@@ -229,6 +229,8 @@ struct Live {
     reason: Option<Reason>,
     status: AsioStatus,
     blocks_sent: u64,
+    /// The ASIO host's own queue drops (SongPlayer's side only).
+    remote_dropped: u64,
 }
 
 /// One ASIO entry's shared side: its queue and its status.
@@ -250,26 +252,38 @@ impl AsioOut {
             .asio
             .as_ref()
             .ok_or_else(|| "not an ASIO entry".to_string())?;
-        let delay_100ns = i64::from(entry.delay_ms) * 10_000;
-        Ok(Self {
+        Ok(Self::from_spec(&AsioSpec {
             id: entry.id.clone(),
-            queue: BlockQueue::new(queue_bound(delay_100ns)),
             driver: a.driver.clone(),
             channels: a.channels,
+            delay_ms: entry.delay_ms,
+        }))
+    }
+
+    /// The output of `spec`: SongPlayer's side of an ASIO entry, or the
+    /// ASIO host's (`audio_host`, `asio_out_remote.rs`).
+    pub fn from_spec(spec: &AsioSpec) -> Self {
+        let delay_100ns = i64::from(spec.delay_ms) * 10_000;
+        Self {
+            id: spec.id.clone(),
+            queue: BlockQueue::new(queue_bound(delay_100ns)),
+            driver: spec.driver.clone(),
+            channels: spec.channels,
             target_100ns: BASE_LATENCY_100NS + delay_100ns,
             live: Mutex::new(Live {
                 state: STATE_OPENING,
                 reason: None,
                 status: AsioStatus {
-                    driver: a.driver.clone(),
-                    channels: a.channels,
+                    driver: spec.driver.clone(),
+                    channels: spec.channels,
                     ..AsioStatus::default()
                 },
                 blocks_sent: 0,
+                remote_dropped: 0,
             }),
             running: AtomicBool::new(false),
             start_error: Mutex::new(None),
-        })
+        }
     }
 
     /// The servo's latency target: two grid slots + the entry's delay.
@@ -331,7 +345,7 @@ impl AsioOut {
             reason: live.reason.clone(),
             status: live.status.clone(),
             blocks_sent: live.blocks_sent,
-            blocks_dropped: self.queue.dropped(),
+            blocks_dropped: self.queue.dropped() + live.remote_dropped,
         }
     }
 
@@ -937,6 +951,9 @@ pub fn run_asio_worker(out: &AsioOut, device: &mut dyn AsioDevice, clock: &mut d
 #[path = "asio_out_events.rs"]
 mod events;
 pub use events::LateCallback;
+#[path = "asio_out_remote.rs"]
+mod remote;
+pub use remote::AsioSpec;
 
 #[cfg(test)]
 #[path = "asio_out_fake.rs"]

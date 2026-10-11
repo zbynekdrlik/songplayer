@@ -20,6 +20,8 @@
 //!   buffer over a third of a grid slot is noted (lane 2's envelope: the
 //!   servo's per-block latency saws by one callback period).
 
+use serde::{Deserialize, Serialize};
+
 use crate::playback::asrc_servo::{SLOT_100NS, frames_from_100ns};
 
 pub const BACKOFF_S: [i64; 4] = [2, 10, 30, 60];
@@ -58,8 +60,9 @@ pub fn failures_after_close(failures: u32, ran_100ns: i64) -> u32 {
     }
 }
 
-/// Why an ASIO output is not running.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Why an ASIO output is not running. Serialized whole on the ASIO host's
+/// pipe (`audio_host::protocol`, a typed decode).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Reason {
     NotFound {
         present: Vec<String>,
@@ -81,6 +84,11 @@ pub enum Reason {
     /// e.g. DVS is not running, or its network has no Dante PTP clock. A
     /// calm wait, never a fault ([`clock_step`]).
     NoClock,
+    /// The ASIO host process (`sp-audio-host.exe`, which runs every ASIO
+    /// output since #233's spawn finding) is not running or not reachable:
+    /// why (its exe is missing, it did not start, it ended). SongPlayer
+    /// starts it again after the backoff.
+    HostDown(String),
 }
 
 impl Reason {
@@ -99,6 +107,7 @@ impl Reason {
             Self::Held => "held",
             Self::Parked => "parked",
             Self::NoClock => "no_clock",
+            Self::HostDown(_) => "host_down",
         }
     }
 
@@ -116,6 +125,7 @@ impl Reason {
                 format!("the driver refused to start (in use by another program?): {e}")
             }
             Self::Refused(e) | Self::Failed(e) => e.clone(),
+            Self::HostDown(why) => format!("the ASIO host process (sp-audio-host) is not running: {why}"),
             Self::Reset => "the driver asked for a reset".into(),
             Self::RateChanged(0) => "the driver lost its clock (no rate)".into(),
             Self::RateChanged(r) => format!("the driver's rate changed to {r} Hz"),

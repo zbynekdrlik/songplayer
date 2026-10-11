@@ -3,6 +3,7 @@
 pub mod ai;
 mod ai_proxy_watchdog;
 pub mod api;
+pub mod audio_host; // #233: every ASIO output runs in the sp-audio-host process (spawns nothing)
 pub mod background_hold; // #230: a sp-90s press holds the background jobs
 pub mod dabing;
 pub mod db;
