@@ -503,3 +503,25 @@ fn only_an_absent_registry_key_is_an_empty_driver_list() {
         assert!(!registry_key_absent(other), "{other:#x}");
     }
 }
+
+/// #233 (PP's SoundGrid pops): a buffer switch more than two periods after
+/// the one before is late, one under a quarter of a period after it fast (a
+/// catch-up burst); both bounds are normal.
+#[test]
+fn a_callback_gap_is_late_over_two_periods_and_fast_under_a_quarter() {
+    use crate::playback::asrc_servo::frames_to_100ns;
+    let p = 10_000;
+    assert_eq!(callback_gap_kind(20_001, p), GapKind::Late);
+    assert_eq!(callback_gap_kind(20_000, p), GapKind::Normal);
+    assert_eq!(callback_gap_kind(10_000, p), GapKind::Normal);
+    assert_eq!(callback_gap_kind(2_500, p), GapKind::Normal);
+    assert_eq!(callback_gap_kind(2_499, p), GapKind::Fast);
+    assert_eq!(callback_gap_kind(0, p), GapKind::Fast);
+    // DVS's 128 frames at 96 kHz: a period of 1.3333 ms.
+    let dvs = frames_to_100ns(128, 96_000.0);
+    assert_eq!(dvs, 13_333);
+    assert_eq!(callback_gap_kind(26_667, dvs), GapKind::Late);
+    assert_eq!(callback_gap_kind(26_666, dvs), GapKind::Normal);
+    assert_eq!(callback_gap_kind(3_334, dvs), GapKind::Normal);
+    assert_eq!(callback_gap_kind(3_333, dvs), GapKind::Fast);
+}

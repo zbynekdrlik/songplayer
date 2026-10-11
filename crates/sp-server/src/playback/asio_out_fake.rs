@@ -25,6 +25,11 @@ pub(crate) struct FakeDevice {
     /// The driver's overloads this run, as a slot counts them (a scripted
     /// event's `overloads` are NEW ones).
     pub overloads: u64,
+    /// The late and fast buffer switches this run, as a slot counts them
+    /// (a scripted event's are NEW ones; its `callback_gap_max_100ns` is the
+    /// poll's own, passed as scripted).
+    pub late_callbacks: u64,
+    pub fast_callbacks: u64,
 }
 
 /// Dante Virtual Soundcard as the box runs it: 128-frame buffers, Int32.
@@ -55,6 +60,8 @@ impl FakeDevice {
             played: Vec::new(),
             latency: 128,
             overloads: 0,
+            late_callbacks: 0,
+            fast_callbacks: 0,
         }
     }
 
@@ -98,6 +105,8 @@ impl AsioDevice for FakeDevice {
         self.callbacks = 0;
         self.underruns = 0;
         self.overloads = 0;
+        self.late_callbacks = 0;
+        self.fast_callbacks = 0;
         self.primed = false;
         Ok(Started {
             output_latency_frames: self.latency,
@@ -108,6 +117,10 @@ impl AsioDevice for FakeDevice {
         let mut ev = self.events.pop_front().unwrap_or_default();
         self.overloads += ev.overloads;
         ev.overloads = self.overloads;
+        self.late_callbacks += ev.late_callbacks;
+        ev.late_callbacks = self.late_callbacks;
+        self.fast_callbacks += ev.fast_callbacks;
+        ev.fast_callbacks = self.fast_callbacks;
         ev.callbacks = self.callbacks;
         ev
     }

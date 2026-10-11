@@ -141,6 +141,15 @@ pub struct DeviceEvents {
     pub overloads: u64,
     /// Buffer switches since the output started (monotonic).
     pub callbacks: u64,
+    /// The longest time between two buffer switches since the last poll,
+    /// 100 ns (0 when none came after another).
+    pub callback_gap_max_100ns: i64,
+    /// Buffer switches that came [`GapKind::Late`] after the one before,
+    /// since the output started (monotonic).
+    pub late_callbacks: u64,
+    /// Buffer switches that came [`GapKind::Fast`] after the one before (a
+    /// catch-up burst), since the output started (monotonic).
+    pub fast_callbacks: u64,
 }
 
 /// Whether the events close an output opened at `opened_rate`.
@@ -214,6 +223,32 @@ impl StallWatch {
                 false
             }
         }
+    }
+}
+
+/// How a buffer switch came after the one before, against the driver's
+/// buffer period (#233: PP's SoundGrid pops; the callback timing names
+/// when the driver itself was late).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GapKind {
+    /// Under a quarter of a period: a catch-up burst.
+    Fast,
+    Normal,
+    /// Over two periods: the driver called back late (the card may have
+    /// played on without a buffer from this output).
+    Late,
+}
+
+/// The kind of a gap of `gap_100ns` between two buffer switches of a
+/// driver whose buffer lasts `period_100ns`: over two periods late, under a
+/// quarter fast, both bounds themselves normal.
+pub fn callback_gap_kind(gap_100ns: i64, period_100ns: i64) -> GapKind {
+    if gap_100ns > 2 * period_100ns {
+        GapKind::Late
+    } else if 4 * gap_100ns < period_100ns {
+        GapKind::Fast
+    } else {
+        GapKind::Normal
     }
 }
 

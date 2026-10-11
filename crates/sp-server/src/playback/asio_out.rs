@@ -164,6 +164,15 @@ pub struct AsioStatus {
     /// position jumped), since the output was built: each starts the drift
     /// servo afresh, never a reopen.
     pub resyncs: u64,
+    /// The longest time between two buffer switches since the output was
+    /// built, ms (`asio_out_events.rs`).
+    pub callback_gap_max_ms: f64,
+    /// Buffer switches over two buffer periods after the one before, and
+    /// under a quarter of one (a catch-up burst), since the output was built.
+    pub late_callbacks: u64,
+    pub fast_callbacks: u64,
+    /// The last late buffer switch and how long ago (to line up with a pop).
+    pub last_late_callback: Option<LateCallback>,
 }
 
 /// A hard re-centre as the status shows it.
@@ -356,8 +365,11 @@ struct Run {
     stall: StallWatch,
     driver_latency_frames: u32,
     overflows: u64,
-    /// The driver's overload count this run (its device counts per run).
+    /// The driver's overload, late and fast buffer switch counts this run
+    /// (its device counts per run).
     overloads: u64,
+    late_callbacks: u64,
+    fast_callbacks: u64,
     primed: bool,
     /// The frames the card had taken when the first block primed the ring:
     /// the driver's ticks count from there (a burst of callbacks at the
@@ -379,6 +391,8 @@ struct Closed {
     overloads: u64,
     overflows: u64,
     hard_recentres: u64,
+    late_callbacks: u64,
+    fast_callbacks: u64,
 }
 
 impl Closed {
@@ -388,6 +402,8 @@ impl Closed {
         self.overloads += run.overloads;
         self.overflows += run.overflows;
         self.hard_recentres += run.servo.status().hard_recentres;
+        self.late_callbacks += run.late_callbacks;
+        self.fast_callbacks += run.fast_callbacks;
     }
 
     /// These counts as the output's status counters.
@@ -396,6 +412,8 @@ impl Closed {
         s.overloads = self.overloads;
         s.overflows = self.overflows;
         s.hard_recentres = self.hard_recentres;
+        s.late_callbacks = self.late_callbacks;
+        s.fast_callbacks = self.fast_callbacks;
     }
 }
 
@@ -418,8 +436,9 @@ pub struct AsioWorker {
     waiting_for_clock: bool,
     /// Those reopens (`AsioStatus::clock_waits`).
     clock_waits: u64,
-    /// The driver's resync requests (`asio_out_events.rs`).
+    /// The driver's resync requests and callback timing (`asio_out_events.rs`).
     resyncs: events::Resyncs,
+    timing: events::CallbackTiming,
 }
 
 impl AsioWorker {
@@ -437,6 +456,7 @@ impl AsioWorker {
             waiting_for_clock: false,
             clock_waits: 0,
             resyncs: events::Resyncs::default(),
+            timing: events::CallbackTiming::default(),
         }
     }
 
@@ -454,11 +474,14 @@ impl AsioWorker {
                 let at = *retry_at_100ns;
                 let left = at - now_100ns;
                 let retry_in_s = (at != NEVER).then_some(left as f64 / 1e7);
-                // The last hard re-centre ages while the output waits too.
-                let last_hard = self.last_hard.map(|h| h.status(now_100ns));
+                // The last hard re-centre (and late callback) ages while the
+                // output waits too.
+                let (last_hard, timing) =
+                    (self.last_hard.map(|h| h.status(now_100ns)), self.timing);
                 out.update(|l| {
                     l.status.retry_in_s = retry_in_s;
                     l.status.last_hard_recentre = last_hard;
+                    timing.write(&mut l.status, now_100ns);
                 });
                 return left.min(POLL_100NS);
             }
@@ -545,7 +568,8 @@ impl AsioWorker {
             self.last_hard = Some(hard);
         }
         let ev = device.poll();
-        run.overloads = ev.overloads;
+        self.timing.observe(run.late_callbacks, &ev, now_100ns);
+        run.count(&ev);
         if ev.resync {
             events::resync(run, out, &mut self.closed, &mut self.resyncs, now_100ns);
         }
@@ -568,11 +592,12 @@ impl AsioWorker {
                 self.closed.add(run, &*device);
                 // The run's counts go out with its close, and its last hard
                 // re-centre.
-                let closed = self.closed;
+                let (closed, timing) = (self.closed, self.timing);
                 let last_hard = self.last_hard.map(|h| h.status(now_100ns));
                 out.update(|l| {
                     closed.write(&mut l.status);
                     l.status.last_hard_recentre = last_hard;
+                    timing.write(&mut l.status, now_100ns);
                 });
                 self.close(out, device, now_100ns, reason, ran);
             }
@@ -582,6 +607,7 @@ impl AsioWorker {
                 &*device,
                 &self.closed,
                 self.last_hard.map(|h| h.status(now_100ns)),
+                (&self.timing, now_100ns),
             ),
         }
         POLL_100NS
@@ -735,6 +761,8 @@ fn build(out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) -> Result<R
         driver_latency_frames: started.output_latency_frames,
         overflows: 0,
         overloads: 0,
+        late_callbacks: 0,
+        fast_callbacks: 0,
         primed: false,
         consumed_at_prime: 0,
     })
@@ -851,13 +879,14 @@ fn log_stale(id: &str, stale: usize, waiting: bool) {
 }
 
 /// The running output's numbers into its status (its counters: the closed
-/// runs' + this run's).
+/// runs' + this run's; the callback timing as of the step's instant).
 fn publish(
     run: &Run,
     out: &AsioOut,
     device: &dyn AsioDevice,
     closed: &Closed,
     last_hard: Option<HardRecentre>,
+    (timing, now_100ns): (&events::CallbackTiming, i64),
 ) {
     let servo = run.servo.status();
     let mut counters = *closed;
@@ -878,6 +907,7 @@ fn publish(
         l.status.cushion_ms = servo.cushion_ms;
         l.status.last_hard_recentre = last_hard;
         counters.write(&mut l.status);
+        timing.write(&mut l.status, now_100ns);
     });
 }
 
@@ -906,6 +936,7 @@ pub fn run_asio_worker(out: &AsioOut, device: &mut dyn AsioDevice, clock: &mut d
 
 #[path = "asio_out_events.rs"]
 mod events;
+pub use events::LateCallback;
 
 #[cfg(test)]
 #[path = "asio_out_fake.rs"]
@@ -925,3 +956,6 @@ mod tests_resync;
 #[cfg(test)]
 #[path = "asio_out_tests_silent.rs"]
 mod tests_silent;
+#[cfg(test)]
+#[path = "asio_out_tests_timing.rs"]
+mod tests_timing;

@@ -36,15 +36,19 @@
 //! - The buffer switch copies only: it pops its frames from the ring
 //!   (`rtrb`), writes L/R into the two configured channels and zeroes every
 //!   other one (`asio_format::fill_channel`), and counts in atomics — no
-//!   allocation, lock, log or syscall (iemmixer I7). Driver messages are
-//!   answered by `asio_state::reply` and counted for `poll`.
+//!   allocation, lock, log or syscall (iemmixer I7). It also times itself
+//!   (#233: a QueryPerformanceCounter read against [`CALLBACK_EPOCH`]): the
+//!   longest gap between two buffer switches per poll, and the late (over
+//!   two buffer periods) and fast (under a quarter) ones counted
+//!   (`asio_state::callback_gap_kind`). Driver messages are answered by
+//!   `asio_state::reply` and counted for `poll`.
 
 use std::cell::UnsafeCell;
 use std::ffi::{CStr, c_long, c_void};
 use std::ptr;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use azo::driver::{Driver, Metadata, SafeHandle};
 use azo::dto::ChannelId;
@@ -59,8 +63,10 @@ use crate::playback::asio_format::{AsioSample, fill_channel, source_of, unsuppor
 use crate::playback::asio_hold::{DriverHold, DriverHolds};
 use crate::playback::asio_out::{AsioDevice, AsioOut, Opened, Started, run_asio_worker};
 use crate::playback::asio_state::{
-    DeviceEvents, Reason, registry_key_absent, reply, sample_rate_error, selector,
+    DeviceEvents, GapKind, Reason, callback_gap_kind, registry_key_absent, reply,
+    sample_rate_error, selector,
 };
+use crate::playback::asrc_servo::frames_to_100ns;
 
 /// Static callback slots: two per ASIO entry (`MAX_ASIO_OUTPUTS`).
 pub const ASIO_SLOTS: usize = 8;
@@ -101,7 +107,19 @@ struct Slot {
     /// clock) must be reported too.
     rate_bits: AtomicU64,
     rate_changed: AtomicBool,
+    /// The driver's buffer period, 100 ns (set by `start`).
+    period: AtomicI64,
+    /// The last buffer switch, 100 ns on [`CALLBACK_EPOCH`]
+    /// ([`NO_CALLBACK`] before the first of the run).
+    last_callback: AtomicI64,
+    /// The longest gap between two buffer switches since the last poll.
+    gap_max: AtomicI64,
+    late_callbacks: AtomicU64,
+    fast_callbacks: AtomicU64,
 }
+
+/// A slot's `last_callback` before its run's first buffer switch.
+const NO_CALLBACK: i64 = -1;
 
 impl Slot {
     const fn new() -> Self {
@@ -120,6 +138,11 @@ impl Slot {
             overloads: AtomicU64::new(0),
             rate_bits: AtomicU64::new(0),
             rate_changed: AtomicBool::new(false),
+            period: AtomicI64::new(0),
+            last_callback: AtomicI64::new(NO_CALLBACK),
+            gap_max: AtomicI64::new(0),
+            late_callbacks: AtomicU64::new(0),
+            fast_callbacks: AtomicU64::new(0),
         }
     }
 
@@ -130,9 +153,13 @@ impl Slot {
             &self.underruns,
             &self.overloads,
             &self.rate_bits,
+            &self.late_callbacks,
+            &self.fast_callbacks,
         ] {
             a.store(0, Ordering::SeqCst);
         }
+        self.gap_max.store(0, Ordering::SeqCst);
+        self.last_callback.store(NO_CALLBACK, Ordering::SeqCst);
         for f in [
             &self.primed,
             &self.reset,
@@ -150,6 +177,38 @@ static SLOTS: [Slot; ASIO_SLOTS] = [const { Slot::new() }; ASIO_SLOTS];
 
 /// The ASIO drivers this process holds (`asio_hold`).
 static HELD: DriverHolds = DriverHolds::new();
+
+/// The epoch of every slot's buffer switch instants, set by the first
+/// `start` (outside any callback: a callback only reads it, `OnceLock::get`
+/// is a load).
+static CALLBACK_EPOCH: OnceLock<Instant> = OnceLock::new();
+
+/// 100 ns since `epoch`. `Instant` is QueryPerformanceCounter: a read with
+/// no allocation, lock or log.
+fn since_epoch_100ns(epoch: Instant) -> i64 {
+    i64::try_from(epoch.elapsed().as_nanos() / 100).unwrap_or(i64::MAX)
+}
+
+/// A buffer switch of `slot` at `now_100ns`: the gap since the one before
+/// is kept as the poll's max and counted by its kind
+/// (`asio_state::callback_gap_kind`). Atomics only.
+fn note_callback(slot: &Slot, now_100ns: i64) {
+    let before = slot.last_callback.swap(now_100ns, Ordering::Relaxed);
+    if before == NO_CALLBACK {
+        return;
+    }
+    let gap = now_100ns - before;
+    slot.gap_max.fetch_max(gap, Ordering::Relaxed);
+    match callback_gap_kind(gap, slot.period.load(Ordering::Relaxed)) {
+        GapKind::Late => {
+            slot.late_callbacks.fetch_add(1, Ordering::Relaxed);
+        }
+        GapKind::Fast => {
+            slot.fast_callbacks.fetch_add(1, Ordering::Relaxed);
+        }
+        GapKind::Normal => {}
+    }
+}
 
 /// The buffer switch of `slot`: copy, convert, count — nothing else.
 fn on_buffer(slot: &Slot, second: bool) {
@@ -182,6 +241,9 @@ fn on_buffer(slot: &Slot, second: bool) {
         slot.consumed
             .fetch_add(stream.frames as u64, Ordering::Relaxed);
         slot.callbacks.fetch_add(1, Ordering::Relaxed);
+        if let Some(&epoch) = CALLBACK_EPOCH.get() {
+            note_callback(slot, since_epoch_100ns(epoch));
+        }
     }
     slot.in_flight.fetch_sub(1, Ordering::SeqCst);
 }
@@ -491,6 +553,11 @@ impl AsioDevice for WinAsioDevice {
             })
             .ok_or_else(|| Reason::Refused("every ASIO callback slot is in use".into()))?;
         SLOTS[slot].clear_counters();
+        // The buffer switch times itself against these (set before any
+        // callback can come: the driver starts below).
+        CALLBACK_EPOCH.get_or_init(Instant::now);
+        let period = frames_to_100ns(i64::from(opened.buffer_frames), opened.rate);
+        SLOTS[slot].period.store(period, Ordering::SeqCst);
         self.slot = Some(slot);
         let frames = opened.buffer_frames as usize;
         let ids = (0..opened.out_channels as c_long).map(|index| ChannelId {
@@ -548,6 +615,9 @@ impl AsioDevice for WinAsioDevice {
             rate_changed,
             overloads: s.overloads.load(Ordering::Relaxed),
             callbacks: s.callbacks.load(Ordering::Relaxed),
+            callback_gap_max_100ns: s.gap_max.swap(0, Ordering::Relaxed),
+            late_callbacks: s.late_callbacks.load(Ordering::Relaxed),
+            fast_callbacks: s.fast_callbacks.load(Ordering::Relaxed),
         }
     }
 

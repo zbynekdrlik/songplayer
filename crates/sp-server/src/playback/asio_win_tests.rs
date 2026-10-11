@@ -13,6 +13,7 @@
 //! told so; `close` pumps the thread's messages while a callback finishes.
 
 use std::sync::{Mutex, MutexGuard};
+use std::time::Instant;
 
 use super::*;
 use sp_core::audio_outputs::MAX_ASIO_OUTPUTS;
@@ -76,6 +77,8 @@ fn the_buffer_switch_writes_left_right_zeroes_the_rest_and_only_counts() {
     let _g = serial();
     let i = 0;
     claim(i);
+    // As a `start` sets it: the buffer switch times itself against it.
+    CALLBACK_EPOCH.get_or_init(Instant::now);
     let frames = 4;
     let bytes = frames * 4; // Int32LSB24: a 32-bit container
     // Three output channels, both halves of each, filled with junk.
@@ -139,6 +142,11 @@ fn the_buffer_switch_writes_left_right_zeroes_the_rest_and_only_counts() {
             s.in_flight.load(Ordering::SeqCst),
         ),
         (1, 8, 2, 0)
+    );
+    assert_ne!(
+        s.last_callback.load(Ordering::SeqCst),
+        NO_CALLBACK,
+        "the buffer switch times itself"
     );
     release(i);
     // SAFETY: the slot no longer points to it and no callback runs.
@@ -218,6 +226,9 @@ fn a_driver_message_is_counted_answered_and_polled_once() {
             rate_changed: Some(48_000.0),
             overloads: 1,
             callbacks: 0,
+            callback_gap_max_100ns: 0,
+            late_callbacks: 0,
+            fast_callbacks: 0,
         }
     );
     let again = d.poll();
@@ -231,6 +242,57 @@ fn a_driver_message_is_counted_answered_and_polled_once() {
         !SLOTS[i].claimed.load(Ordering::SeqCst),
         "a closed device releases its slot"
     );
+}
+
+/// #233 (PP's SoundGrid pops): each buffer switch's gap from the one before
+/// is timed — the poll takes the longest since the last poll — and counted
+/// late over two buffer periods, fast under a quarter of one; a slot cleared
+/// for a new run has no buffer switch before its first.
+#[test]
+fn the_buffer_switch_gaps_are_timed_counted_and_polled() {
+    let _g = serial();
+    let i = 2;
+    claim(i);
+    SLOTS[i].period.store(10_000, Ordering::SeqCst);
+    note_callback(&SLOTS[i], 1_000); // the run's first: no gap
+    note_callback(&SLOTS[i], 31_000); // 3 ms: over two periods, late
+    note_callback(&SLOTS[i], 33_000); // 0.2 ms: under a quarter, fast
+    note_callback(&SLOTS[i], 43_000); // one period: normal
+    // A device that holds the slot (it implements Drop: no struct update).
+    let mut d = WinAsioDevice::new();
+    d.slot = Some(i);
+    let ev = d.poll();
+    assert_eq!(
+        (
+            ev.callback_gap_max_100ns,
+            ev.late_callbacks,
+            ev.fast_callbacks
+        ),
+        (30_000, 1, 1)
+    );
+    let again = d.poll();
+    assert_eq!(
+        (
+            again.callback_gap_max_100ns,
+            again.late_callbacks,
+            again.fast_callbacks
+        ),
+        (0, 1, 1),
+        "the longest gap is the poll's, the counts the run's"
+    );
+    SLOTS[i].clear_counters();
+    note_callback(&SLOTS[i], 500_000);
+    let fresh = d.poll();
+    assert_eq!(
+        (
+            fresh.callback_gap_max_100ns,
+            fresh.late_callbacks,
+            fresh.fast_callbacks
+        ),
+        (0, 0, 0),
+        "a new run's first buffer switch has no gap"
+    );
+    d.close();
 }
 
 /// azo 0.4.0's `SafeHandle` uninitialises COM in its own `Drop`, BEFORE its
