@@ -227,7 +227,7 @@ fn every_problem_is_listed_in_order() {
 
 #[test]
 fn a_firewall_policy_wins_over_the_local_value() {
-    use RegDword::{Absent, Failed, Value};
+    use super::RegDword::{Absent, Failed, Value};
     let d = FirewallProfile::Domain;
     assert_eq!(firewall_on(d, Value(0), Value(1)), Ok(false));
     assert_eq!(firewall_on(d, Value(1), Value(0)), Ok(true));
@@ -237,7 +237,7 @@ fn a_firewall_policy_wins_over_the_local_value() {
 
 #[test]
 fn with_no_policy_the_local_value_decides() {
-    use RegDword::{Absent, Value};
+    use super::RegDword::{Absent, Value};
     let p = FirewallProfile::Private;
     assert_eq!(firewall_on(p, Absent, Value(0)), Ok(false));
     assert_eq!(firewall_on(p, Absent, Value(1)), Ok(true));
@@ -246,7 +246,7 @@ fn with_no_policy_the_local_value_decides() {
 
 #[test]
 fn a_firewall_that_cannot_be_read_says_why() {
-    use RegDword::{Absent, Failed, Value};
+    use super::RegDword::{Absent, Failed, Value};
     assert_eq!(
         firewall_on(FirewallProfile::Domain, Failed(5), Value(0)),
         Err("the domain firewall policy could not be read (error 5)".to_string())
