@@ -123,7 +123,10 @@ GUI); PP's and SNV's settings of 11.10.2026 are on the ticket.
   private store, the bounded reader (a gated read: unreadable, waited for
   again, never started twice; a panicking read), `next_check`, and both
   routes through the real router (serialized on `GLOBAL`: they publish into
-  the process store).
+  the process store). On the Windows CI job
+  `the_windows_glue_reads_every_fact` runs the real registry + WMI reads on
+  the runner (every fact present, the facts written to the job's log; the
+  values are the runner's, so not asserted).
 
 ## Known limits
 
@@ -132,5 +135,5 @@ GUI); PP's and SNV's settings of 11.10.2026 are on the ticket.
   registered ones on client SKUs). The spawn gate
   (`post-deploy-audio-asio.spec.ts`) still catches its effect on the ASIO
   outputs.
-- The Windows glue is compiled and run only on the boxes and the Windows CI
-  job's build; its first live evidence is the post-deploy gate on SNV / PP.
+- The glue's VALUES are first checked on a real box by the post-deploy gate
+  (SNV / PP); the Windows CI job proves only that every read succeeds.
