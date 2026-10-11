@@ -160,6 +160,10 @@ pub struct AsioStatus {
     /// closed and opened again (`Reason::NoClock`), since the output was
     /// built: a calm wait, neither a reset nor a fault.
     pub clock_waits: u64,
+    /// The driver's resync requests (`kAsioResyncRequest`: its sample
+    /// position jumped), since the output was built: each starts the drift
+    /// servo afresh, never a reopen.
+    pub resyncs: u64,
 }
 
 /// A hard re-centre as the status shows it.
@@ -906,6 +910,9 @@ mod tests_clock;
 #[cfg(test)]
 #[path = "asio_out_tests_cushion.rs"]
 mod tests_cushion;
+#[cfg(test)]
+#[path = "asio_out_tests_resync.rs"]
+mod tests_resync;
 #[cfg(test)]
 #[path = "asio_out_tests_silent.rs"]
 mod tests_silent;
