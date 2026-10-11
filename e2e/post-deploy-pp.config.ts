@@ -8,7 +8,9 @@ import { defineConfig } from "@playwright/test";
  * `post-deploy-settings-masked.spec.ts` (every secret masked, also at PP) +
  * `post-deploy-audio-asio.spec.ts` (#233: DVS registered; the ASIO outputs
  * SP_ASIO_OUTPUTS_EXPECTED names run a clean minute, and a child process
- * SongPlayer spawns disturbs none of them: the ASIO host process).
+ * SongPlayer spawns disturbs none of them: the ASIO host process) +
+ * `post-deploy-environment.spec.ts` (#233: Windows LTSC or IoT Enterprise,
+ * Defender real-time and every firewall profile off).
  * The SNV suite is post-deploy.config.ts; it ignores post-deploy-pp*.
  */
 export default defineConfig({
@@ -18,6 +20,7 @@ export default defineConfig({
     "**/post-deploy-max.spec.ts",
     "**/post-deploy-settings-masked.spec.ts",
     "**/post-deploy-audio-asio.spec.ts",
+    "**/post-deploy-environment.spec.ts",
   ],
   timeout: 90_000,
   retries: 0,
