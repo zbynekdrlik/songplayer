@@ -247,55 +247,33 @@ jobs:
           Get-ChildItem $dest | Format-Table Name, Length
       - name: Build Tauri app
         run: cargo tauri build
-      - name: Check SongPlayer.exe and sp-audio-host.exe declare Common-Controls 6.0 (#223 S2, #233)
+      - name: Check SongPlayer.exe declares Common-Controls 6.0 (#223 S2)
         # SongPlayer.exe links the Spout2 SDK (sp-gpu), whose SpoutUtils imports
         # TaskDialogIndirect from comctl32 at load time. Only Common-Controls 6.0
         # exports it, and Windows binds v6 only when the exe's manifest asks for
         # it; otherwise the exe does not start (0xC0000139). tauri-build embeds
         # its default manifest, which declares it, as resource #1. Read it back
         # with the Windows SDK's mt.exe and fail if the declaration is missing.
-        # #233: sp-audio-host.exe (the ASIO host process, a second binary of the
-        # Tauri package) links the same sp-server library and gets the same
-        # manifest (tauri-build links it into every binary): checked too.
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $exe = 'src-tauri\target\release\SongPlayer.exe'
+          if (-not (Test-Path $exe)) { throw "$exe was not built" }
           $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
           $mt = Get-ChildItem -Path $kits -Recurse -Filter 'mt.exe' |
             Where-Object { $_.FullName -like '*\x64\mt.exe' } |
             Sort-Object FullName | Select-Object -Last 1
           if (-not $mt) { throw "mt.exe (Windows SDK) not found under $kits" }
-          foreach ($name in @('SongPlayer.exe', 'sp-audio-host.exe')) {
-            $exe = "src-tauri\target\release\$name"
-            if (-not (Test-Path $exe)) { throw "$exe was not built" }
-            & $mt.FullName -nologo "-inputresource:$exe;#1" '-out:embedded.manifest'
-            if ($LASTEXITCODE -ne 0) { throw "mt.exe read no embedded manifest from $exe (exit $LASTEXITCODE)" }
-            $manifest = Get-Content 'embedded.manifest' -Raw
-            Write-Host $manifest
-            $ids = [regex]::Matches($manifest, '<(?:\w+:)?assemblyIdentity\b[^>]*>') | ForEach-Object { $_.Value }
-            $cc6 = $ids | Where-Object {
-              $_ -match 'name=["'']Microsoft\.Windows\.Common-Controls["'']' -and $_ -match 'version=["'']6\.0\.0\.0["'']'
-            }
-            if (-not $cc6) { throw "$exe's embedded manifest does not declare Microsoft.Windows.Common-Controls 6.0.0.0" }
-            Write-Host "${name}: the embedded manifest declares Common-Controls 6.0."
+          & $mt.FullName -nologo "-inputresource:$exe;#1" '-out:embedded.manifest'
+          if ($LASTEXITCODE -ne 0) { throw "mt.exe read no embedded manifest from $exe (exit $LASTEXITCODE)" }
+          $manifest = Get-Content 'embedded.manifest' -Raw
+          Write-Host $manifest
+          $ids = [regex]::Matches($manifest, '<(?:\w+:)?assemblyIdentity\b[^>]*>') | ForEach-Object { $_.Value }
+          $cc6 = $ids | Where-Object {
+            $_ -match 'name=["'']Microsoft\.Windows\.Common-Controls["'']' -and $_ -match 'version=["'']6\.0\.0\.0["'']'
           }
-      - name: Check the installer ships sp-audio-host.exe (#233)
-        # #233: every ASIO output runs in the ASIO host process, which
-        # SongPlayer starts from next to its own exe. Tauri's NSIS bundle
-        # installs every non-main binary of the package there; read the
-        # installer's file list with 7-Zip (it lists NSIS installers) and fail
-        # when the host is missing, so a box can never be deployed without it.
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $installer = Get-ChildItem 'src-tauri\target\release\bundle\nsis\*.exe' | Select-Object -First 1
-          if (-not $installer) { throw 'no NSIS installer was built' }
-          $listing = & 7z l $installer.FullName
-          if ($LASTEXITCODE -ne 0) { throw "7z could not list $($installer.Name) (exit $LASTEXITCODE)" }
-          $hits = @($listing | Select-String -Pattern 'sp-audio-host\.exe')
-          if ($hits.Count -lt 1) { throw "$($installer.Name) does not ship sp-audio-host.exe" }
-          $hits | ForEach-Object { Write-Host $_.Line }
-          Write-Host "$($installer.Name) ships sp-audio-host.exe."
+          if (-not $cc6) { throw "$exe's embedded manifest does not declare Microsoft.Windows.Common-Controls 6.0.0.0" }
+          Write-Host 'The embedded manifest declares Common-Controls 6.0.'
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
@@ -1027,9 +1005,6 @@ jobs:
 
           Write-Host "=== Stopping SongPlayer ==="
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
-          # #233: the ASIO host dies with SongPlayer (its kill-on-close Job
-          # object); killed by name too, so the installer never meets it.
-          taskkill /F /IM "sp-audio-host.exe" 2>&1 | Out-Null
           $elapsed = 0
           while ($elapsed -lt 10) {
             $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
