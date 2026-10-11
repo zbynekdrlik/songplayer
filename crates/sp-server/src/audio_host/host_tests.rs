@@ -19,7 +19,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::audio_host::client::{HostClient, run_forwarder};
+use crate::audio_host::client::{DATA_QUEUE, HostClient, run_forwarder};
 use crate::audio_host::host::{
     HostEnd, HostEnv, HostState, REPORT_QUEUE, on_frame, serve, status_reports,
 };
@@ -187,7 +187,11 @@ fn blocks_reach_the_hosts_output_in_order_on_songplayers_timeline() {
         let Take::Block(b) = host_out.take_block(WAIT) else {
             panic!("block {k} did not reach the host");
         };
-        assert_eq!(b.due_100ns, 1_000_000 + k, "block {k}: its boundary as sent");
+        assert_eq!(
+            b.due_100ns,
+            1_000_000 + k,
+            "block {k}: its boundary as sent"
+        );
         assert_eq!(b.samples, (k != 2).then(|| ramp(k)), "block {k}");
         assert_eq!(b.substituted, k == 4, "block {k}");
     }
@@ -474,6 +478,37 @@ fn a_block_no_session_takes_is_dropped_on_its_output() {
     assert_eq!(out.snapshot().blocks_dropped, 3);
 }
 
+/// A host that stops reading (its pipe full: the session's writer stuck in
+/// the hello) never holds a forwarder: the data queue takes its
+/// `DATA_QUEUE` blocks, every later one is dropped and counted at once, so
+/// the forwarder takes all 300 (the session runs on its own link thread in
+/// production, the forwarders on theirs).
+#[test]
+fn a_stalled_host_pipe_never_blocks_a_forwarder() {
+    let rt = runtime();
+    let (sp, host) = tokio::io::duplex(16);
+    let client = Arc::new(HostClient::default());
+    let out = Arc::new(AsioOut::from_spec(&spec()));
+    let handle = client.attach(out.clone());
+    let _session = spawn_session(&rt, &client, tokio::io::split(sp), counting_anchors(), WAIT);
+    wait_until("the session is linked", || {
+        client.send_block(handle, ProgramBlock::silence(0))
+    });
+    let forwarder = spawn_forwarder(&client, handle, &out);
+    for k in 0..300 {
+        out.push(ProgramBlock::silence(k));
+    }
+    // The probe above took one place in the data queue.
+    let dropped = 300 - (DATA_QUEUE as u64 - 1);
+    wait_until("the forwarder took every block", || {
+        out.snapshot().blocks_dropped == dropped
+    });
+    out.stop();
+    forwarder.join().unwrap();
+    assert_eq!(out.snapshot().blocks_dropped, dropped);
+    drop(host);
+}
+
 fn hello(anchor: Anchor) -> Frame {
     Frame::Control(Control::Hello {
         protocol: PROTOCOL,
@@ -511,7 +546,9 @@ fn the_host_refuses_a_frame_out_of_the_protocol() {
     });
     assert_eq!(
         on_frame(&mut s, &env, other),
-        Err(format!("SongPlayer speaks protocol 1, this host {PROTOCOL}"))
+        Err(format!(
+            "SongPlayer speaks protocol 1, this host {PROTOCOL}"
+        ))
     );
     assert_eq!(on_frame(&mut s, &env, hello(Anchor::default())), Ok(()));
     assert_eq!(
@@ -692,9 +729,8 @@ fn the_hosts_worker_plays_songplayers_blocks_on_the_card() {
     let wall = TestWall(base);
     let mut pushed = 0;
     let deadline = Instant::now() + WAIT;
-    let played_them = || {
-        out.snapshot().blocks_sent >= 20 && played.lock().unwrap().iter().any(|s| s.abs() > 0.2)
-    };
+    let played_them =
+        || out.snapshot().blocks_sent >= 20 && played.lock().unwrap().iter().any(|s| s.abs() > 0.2);
     while !played_them() {
         assert!(
             Instant::now() < deadline,
