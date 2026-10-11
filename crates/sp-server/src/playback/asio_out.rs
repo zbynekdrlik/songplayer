@@ -18,7 +18,7 @@
 //!   held back, and shown as `last_hard_recentre`) go through the splice.
 //!   Then the driver's messages: a reset (or a size change), a rate change
 //!   or 2 s without a callback closes the output (`asio_state::close_reason`,
-//!   `StallWatch`); a resync request only rebases the drift servo, counted
+//!   `StallWatch`); a resync request is only counted and WARNed
 //!   (`asio_out_events.rs`).
 //! - parked (`Reason::Parked`, a driver callback that never returned): the
 //!   output stays closed for good, with no next try.
@@ -161,8 +161,8 @@ pub struct AsioStatus {
     /// built: a calm wait, neither a reset nor a fault.
     pub clock_waits: u64,
     /// The driver's resync requests (`kAsioResyncRequest`: its sample
-    /// position jumped), since the output was built: each starts the drift
-    /// servo afresh, never a reopen.
+    /// position jumped), since the output was built: counted only (the
+    /// servo and the driver run on; #233 measures them first).
     pub resyncs: u64,
     /// The longest time between two buffer switches since the output was
     /// built, ms (`asio_out_events.rs`).
@@ -571,7 +571,7 @@ impl AsioWorker {
         self.timing.observe(run.late_callbacks, &ev, now_100ns);
         run.count(&ev);
         if ev.resync {
-            events::resync(run, out, &mut self.closed, &mut self.resyncs, now_100ns);
+            self.resyncs.note(out, now_100ns);
         }
         if ev.latencies_changed {
             run.driver_latency_frames = device.output_latency_frames();

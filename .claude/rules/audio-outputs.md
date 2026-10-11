@@ -887,20 +887,21 @@ pops, #233 design comment on the ticket; `asio_out_events.rs`, a child
 module of `asio_out.rs` for its 1000-line cap):
 
 - `kAsioResyncRequest` (answered 1 by `asio_state::reply`; the slot's
-  `resync` flag, `DeviceEvents::resync`) REBASES the drift servo:
-  `run.servo = new_servo(out, run.opened)`, as at a clock's arrival. The
-  driver's sample position jumped, so the regression, the window and the
-  level loop are stale. The next block primes the ring to the target (a
-  `Recentre::Prime`, no hard re-centre counted: a splice of the small
-  error, a few frames when the ring sat at the target), and the first
-  window measures the latency again (`latency_ms` and `offset_ms` read 0
-  until then). NEVER a close and a reopen: a SoundGrid driver takes ~10 s
-  to open again. The old servo's hard re-centres are folded into `Closed`
-  first, so `hard_recentres` keeps them. `resyncs` counts them since the
-  output was built (a worker counter, like `resets`); one WARN per resync,
-  at most one per 5 s with the count held back (`WarnLimiter`). Tests:
-  `asio_out_tests_resync.rs` (the rebase, no close or reopen, the count
-  and the hard re-centres across two runs with a resync in each).
+  `resync` flag, `DeviceEvents::resync`) is COUNTED and WARNed only
+  (`Resyncs::note`): `resyncs` since the output was built (a worker
+  counter, like `resets`; several requests inside one 10 ms poll are one),
+  one WARN per resync, at most one per 5 s with the count held back
+  (`WarnLimiter`). The drift servo, the ring and the driver run on
+  untouched: no rebase, no priming, never a close and a reopen (a
+  SoundGrid driver takes ~10 s to open again). The main session's
+  decision (#233, measurement first, "no change ships on a guess"): a
+  rebase was built and dropped, because a fresh servo's priming splices
+  the small error (a ~10 ms fade dip per resync). What to do about a
+  resync is decided on PP's measured evidence (`resyncs` next to the pops,
+  `last_late_callback`, the underruns). Tests: `asio_out_tests_resync.rs`
+  (the count; a twin worker fed the same blocks with no resync: the same
+  status but the count and the same samples played; no close or reopen;
+  two runs with a resync in each, no other counter moved).
 - The buffer switch times itself (`asio_win.rs`, atomics only): an
   `Instant` (QueryPerformanceCounter) read against `CALLBACK_EPOCH`, a
   `OnceLock` the first `start` sets OUTSIDE any callback (the callback only
@@ -985,8 +986,10 @@ is over 0 (release review: a box expected to run none need not have DVS);
 exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
 outputs that are not waiting for their driver's clock (`gatedAsioOutputs`:
 an output waiting with reason `no_clock` is neither counted nor measured,
-so PP — "0", its DVS entry enabled while PP has no Dante PTP clock — does
-not fail on it; SNV — "1" — still fails when its DVS gives no clock, the
+so a box whose DVS entry is enabled while its network has no Dante PTP
+clock does not fail on it at "0" (PP's value while it had none); PP — "2"
+since 11.10.2026: out-2 Waves SoundGrid + out-3 Dante, both enabled — and
+SNV — "1" — still fail when a gated driver gives no clock, the
 count then 0, and the poll names the waiting outputs (`waitingForClock`:
 "0 (waiting for a clock: out-2)"); ci.yml / deploy-pp.yml), each running, then a minute (1 800 blocks) at its
 driver's rate with no underrun, no reopen, no hard re-centre (review

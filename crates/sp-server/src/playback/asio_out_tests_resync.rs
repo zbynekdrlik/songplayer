@@ -1,9 +1,9 @@
-//! #233 (PP's Waves SoundGrid output pops): a driver's resync request
-//! (`kAsioResyncRequest`, answered "supported") is acted on — the drift
-//! servo starts afresh and its next block primes the ring, as at an open —
-//! and counted since the output was built; it never closes the output (a
-//! SoundGrid reopen takes ~10 s). The old servo's hard re-centres stay
-//! counted.
+//! #233 (PP's Waves SoundGrid output pops), measurement first: a driver's
+//! resync request (`kAsioResyncRequest`, answered "supported") is counted
+//! since the output was built and WARNed, and changes nothing else: the
+//! drift servo, the ring and the driver run on (no rebase, no priming,
+//! never a close or a reopen). What to do about one is decided on PP's
+//! measured evidence.
 
 use super::fake::{FakeDevice, dvs};
 use super::*;
@@ -51,22 +51,28 @@ fn resync() -> DeviceEvents {
 }
 
 /// After 150 blocks the servo reads 70.625 ms with an offset of −0.0416 ms
-/// (the worker tests' pins). A resync starts it afresh: no window measured
-/// yet, so the latency and the offset read 0, while the output keeps
-/// running on the same open. Its next block primes the ring (no re-centre
-/// counted) and the next windows measure the target again.
+/// (the worker tests' pins). A resync is counted, and the output runs on
+/// as if it had not come: the same open, the same servo figures at once,
+/// and — against a twin worker fed the same blocks with no resync — the
+/// same status (but the count) and the same samples played 60 blocks on.
 #[test]
-fn a_resync_request_rebases_the_servo_and_never_reopens() {
+fn a_resync_request_is_counted_and_leaves_the_running_output_untouched() {
     let o = out();
+    let twin_out = out();
     let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0))]);
+    let mut twin = FakeDevice::answering(vec![Ok(dvs(96_000.0))]);
     let mut w = AsioWorker::new(T0);
+    let mut tw = AsioWorker::new(T0);
     w.step(&o, &mut d, T0, None);
+    tw.step(&twin_out, &mut twin, T0, None);
     run(&mut w, &o, &mut d, 1, 150);
+    run(&mut tw, &twin_out, &mut twin, 1, 150);
     let s = o.snapshot().status;
     assert!((s.latency_ms - 70.625).abs() < 1e-9, "{s:?}");
     assert_eq!((s.offset_ms, s.resyncs), (-0.0416, 0), "{s:?}");
     d.events.push_back(resync());
     w.step(&o, &mut d, T0 + 151 * SLOT, None);
+    tw.step(&twin_out, &mut twin, T0 + 151 * SLOT, None);
     let snap = o.snapshot();
     assert_eq!((snap.state, snap.reason.clone()), ("running", None));
     assert_eq!(snap.status.resyncs, 1, "{snap:?}");
@@ -75,34 +81,42 @@ fn a_resync_request_rebases_the_servo_and_never_reopens() {
         (0, 1, 1),
         "a resync never closes or reopens the driver"
     );
+    assert!(
+        (snap.status.latency_ms - 70.625).abs() < 1e-9,
+        "the servo is not reset: {snap:?}"
+    );
     assert_eq!(
-        (snap.status.latency_ms, snap.status.offset_ms),
-        (0.0, 0.0),
-        "the servo starts afresh: {snap:?}"
+        (snap.status.offset_ms, snap.status.slew_eta_s),
+        (-0.0416, None),
+        "{snap:?}"
     );
     run(&mut w, &o, &mut d, 151, 60);
+    run(&mut tw, &twin_out, &mut twin, 151, 60);
     let snap = o.snapshot();
-    let s = &snap.status;
     assert_eq!(snap.state, "running");
     assert_eq!(
-        (s.hard_recentres, s.underruns, s.resets, s.resyncs),
-        (0, 0, 0, 1),
-        "the priming is no re-centre: {s:?}"
+        AsioStatus {
+            resyncs: 0,
+            ..snap.status.clone()
+        },
+        twin_out.snapshot().status,
+        "nothing but the count differs from the twin"
     );
-    assert!(
-        (s.latency_ms - 70.625).abs() < 0.1,
-        "measured at the target again: {s:?}"
+    assert_eq!(snap.status.resyncs, 1);
+    assert!(d.played == twin.played, "the card played the same samples");
+    assert_eq!(
+        (snap.status.hard_recentres, snap.status.underruns, d.closes),
+        (0, 0, 0)
     );
-    assert_eq!(d.closes, 0);
 }
 
-/// The count adds up across runs, with a resync in each, and the hard
-/// re-centre each run made before its resync stays counted (the rebased
-/// servo counts from 0). Each run: 150 blocks, a block 65 ms "early" (a
-/// deficit re-centre, `asio_out_tests.rs::a_hard_re_centre_is_counted_and_shown_across_runs`),
-/// then a resync; a reset between the runs.
+/// The count adds up across runs, with a resync in each (a reset between
+/// them), and moves no other counter: each run makes one hard re-centre
+/// before its resync (150 blocks, then a block 65 ms "early", a deficit,
+/// `asio_out_tests.rs::a_hard_re_centre_is_counted_and_shown_across_runs`)
+/// and none after it.
 #[test]
-fn resyncs_add_up_across_runs_and_keep_the_hard_re_centres() {
+fn resyncs_add_up_across_runs_and_move_no_other_counter() {
     let o = out();
     let mut d = FakeDevice::answering(vec![Ok(dvs(96_000.0)), Ok(dvs(96_000.0))]);
     let mut w = AsioWorker::new(T0);
@@ -127,7 +141,7 @@ fn resyncs_add_up_across_runs_and_keep_the_hard_re_centres() {
             (run_no, run_no),
             "{snap:?}"
         );
-        // The rebased servo's first block primes: still no new re-centre.
+        // The next block, 65 ms over the target: left to the ratio.
         run(&mut w, &o, &mut d, k + 1, 1);
         assert_eq!(o.snapshot().status.hard_recentres, run_no);
         if run_no == 1 {
