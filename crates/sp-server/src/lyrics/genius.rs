@@ -373,6 +373,7 @@ pub fn extract_lyrics_from_html(html: &str) -> Option<LyricsTrack> {
             language_source: "en".into(),
             language_translation: String::new(),
             lines,
+            register: None,
         })
     }
 }

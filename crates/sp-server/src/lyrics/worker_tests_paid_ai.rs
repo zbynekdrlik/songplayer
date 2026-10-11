@@ -32,6 +32,7 @@ fn untranslated() -> LyricsTrack {
             sk: None,
             words: None,
         }],
+        register: None,
     }
 }
 

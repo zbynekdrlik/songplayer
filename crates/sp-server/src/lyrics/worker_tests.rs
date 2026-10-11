@@ -636,6 +636,7 @@ fn lrclib_track_has_real_timing_detects_synced_vs_plain() {
                 words: None,
             })
             .collect(),
+        register: None,
     };
 
     // Plain mode: all-zero timing.

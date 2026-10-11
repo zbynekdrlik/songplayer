@@ -190,6 +190,7 @@ pub fn parse_lrc(lrc_text: &str) -> Option<LyricsTrack> {
         language_source: "en".to_string(),
         language_translation: String::new(),
         lines,
+        register: None,
     })
 }
 
@@ -261,6 +262,7 @@ pub fn parse_plain(text: &str) -> Option<LyricsTrack> {
         language_source: "en".to_string(),
         language_translation: String::new(),
         lines,
+        register: None,
     })
 }
 

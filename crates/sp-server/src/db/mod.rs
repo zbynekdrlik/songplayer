@@ -5,6 +5,7 @@ pub mod models_dabing; // #180 dubbing D1 queries (own module, 1000-line cap)
 pub mod models_peer; // #229 the node exchange's tables (own module, models.rs is at the cap)
 pub mod models_playlist_fx; // #242 a playlist's own volume + EQ (V33 columns)
 pub mod models_playlists; // #225 every playlist id, for the WS on-connect replay (own module, 1000-line cap)
+pub mod models_register; // #250 a lyrics track's register check (V36 columns)
 pub mod models_stems; // #14 karaoke stem-separation queries (own module, 1000-line cap)
 pub mod models_stems_priority; // #195 tiered in-use-first stems selector (own module, 1000-line cap)
 pub mod startup_open; // #229 the startup open waits out a briefly locked database
@@ -52,6 +53,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (33, MIGRATION_V33),
     (34, MIGRATION_V34),
     (35, MIGRATION_V35),
+    (36, MIGRATION_V36),
 ];
 
 const MIGRATION_V1: &str = "
@@ -562,6 +564,15 @@ ALTER TABLE videos ADD COLUMN video_upgrade_state TEXT;
 ALTER TABLE videos ADD COLUMN video_upgrade_at INTEGER;
 ";
 
+/// #250: the register check of a video's lyrics track, on every row of the
+/// video (`models_register::stamp_register`): the check's version (0 = never
+/// checked, so the stale pass checks it) and its verdict (`ok`, `fixed`,
+/// `flagged`, `refused`; NULL = none recorded).
+const MIGRATION_V36: &str = "
+ALTER TABLE videos ADD COLUMN lyrics_register_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE videos ADD COLUMN lyrics_register_verdict TEXT;
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -740,6 +751,9 @@ mod tests_v34;
 #[path = "mod_tests_v35.rs"]
 #[cfg(test)]
 mod tests_v35;
+#[path = "mod_tests_v36.rs"]
+#[cfg(test)]
+mod tests_v36;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

@@ -27,6 +27,7 @@ fn lyrics(lines: &[&str]) -> LyricsTrack {
                 words: None,
             })
             .collect(),
+        register: None,
     }
 }
 

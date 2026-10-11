@@ -202,6 +202,7 @@ impl TestNode {
                 sk: Some("Cestu robíš".into()),
                 words: None,
             }],
+            register: None,
         };
         let json = serde_json::to_vec(&track).unwrap();
         let path = self.cache().join(format!("{youtube_id}_lyrics.json"));

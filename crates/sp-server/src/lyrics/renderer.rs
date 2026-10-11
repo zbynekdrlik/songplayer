@@ -315,6 +315,7 @@ mod tests {
                     ]),
                 },
             ],
+            register: None,
         }
     }
 
@@ -512,6 +513,7 @@ mod tests {
                 sk: None,
                 words: None,
             }],
+            register: None,
         };
         let st = LyricsState::new(track);
         assert!(st.presenter_lines(0).is_none());
@@ -599,6 +601,7 @@ mod tests {
                 sk: None,
                 words: None,
             }],
+            register: None,
         };
         let st = LyricsState::with_lead_and_offset(track, 0, 500);
         assert!(
@@ -635,6 +638,7 @@ mod tests {
                 sk: None,
                 words: None,
             }],
+            register: None,
         };
         let st = LyricsState::with_lead_and_offset(track, 0, -1_800);
         assert!(
@@ -724,6 +728,7 @@ mod tests {
                     words: None,
                 },
             ],
+            register: None,
         }
     }
 
@@ -801,6 +806,7 @@ mod tests {
                     words: None,
                 },
             ],
+            register: None,
         };
         let st = LyricsState::new(track);
         assert_eq!(

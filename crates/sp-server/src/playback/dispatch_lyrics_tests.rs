@@ -49,6 +49,7 @@ fn make_track() -> LyricsTrack {
                 words: None,
             },
         ],
+        register: None,
     }
 }
 

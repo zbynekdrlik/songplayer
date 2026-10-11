@@ -425,6 +425,7 @@ impl LyricsWorker {
             // it keeps the SK backfill moving while the wall is in use.
             self.retry_missing_translations().await;
             self.retranslate_next_stale().await;
+            self.recheck_next_stale_register().await;
             return;
         }
         // Not deferring (low-priority always; idle-only when the wall is idle) —
@@ -437,6 +438,7 @@ impl LyricsWorker {
                 self.retry_missing_translations().await;
                 // #152: queue empty → advance one stale-translation row (no alignment).
                 self.retranslate_next_stale().await;
+                self.recheck_next_stale_register().await; // #250
                 debug!("worker: nothing in priority queue");
                 return;
             }
@@ -724,6 +726,7 @@ impl LyricsWorker {
         // #152: gender picks masculine (default) / feminine Slovak first-person forms.
         let gender = self.resolve_gender(video_id).await;
         self.translate_track(&mut track, &youtube_id, gender).await;
+        self.check_register(&mut track, &youtube_id).await; // #250, once per track
 
         self.broadcast_stage(
             video_id,
@@ -759,6 +762,7 @@ impl LyricsWorker {
             crate::lyrics::LYRICS_TRANSLATION_VERSION,
         )
         .await;
+        self.stamp_register_of(video_id, &track).await;
 
         tracing::info!(
             "worker: persisted {} (source={}, version={})",
@@ -918,6 +922,7 @@ pub fn align_track_to_lyrics_track(
         language_source: "en".into(),
         language_translation: String::new(),
         lines,
+        register: None,
     }
 }
 

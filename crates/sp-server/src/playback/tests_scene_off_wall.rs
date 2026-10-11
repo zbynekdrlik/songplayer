@@ -27,6 +27,7 @@ fn a_line_at_sixty_seconds() -> crate::lyrics::renderer::LyricsState {
         language_source: "en".into(),
         language_translation: "sk".into(),
         lines: vec![line],
+        register: None,
     })
 }
 

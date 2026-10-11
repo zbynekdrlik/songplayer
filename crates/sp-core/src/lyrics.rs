@@ -27,6 +27,64 @@ pub struct LyricsTrack {
     #[serde(default)]
     pub language_translation: String,
     pub lines: Vec<LyricsLine>,
+    /// #250: the register check made ONCE when the track was processed (a
+    /// track from before it, or a dub's subtitles, has none). Playback only
+    /// reads the lines; nothing checks a track again at display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub register: Option<RegisterCheck>,
+}
+
+/// #250: what the one register check found. Christian worship songs are
+/// expected in a worship register; a line a transcript misheard into an
+/// indecent or absurd reading ("I will dwell" → "I won't swell") is either
+/// FIXED in the processing pass (its old text kept here) or FLAGGED for the
+/// operator.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RegisterCheck {
+    /// The check's version (`REGISTER_CHECK_VERSION` on the server).
+    pub version: u32,
+    pub verdict: RegisterVerdict,
+    /// Lines the check rewrote, each with its text BEFORE the fix.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixed: Vec<RegisterLine>,
+    /// Lines left as they are, marked for the operator.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flagged: Vec<RegisterLine>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RegisterVerdict {
+    /// Every line reads right.
+    Ok,
+    /// Some lines were rewritten, none is left flagged.
+    Fixed,
+    /// At least one line is marked for the operator.
+    Flagged,
+    /// The model refused the check; the track is kept as it was.
+    Refused,
+}
+
+impl RegisterVerdict {
+    /// The verdict's wire name, as stored in the database.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Fixed => "fixed",
+            Self::Flagged => "flagged",
+            Self::Refused => "refused",
+        }
+    }
+}
+
+/// One line of a [`RegisterCheck`]: its 0-based index in the track and its
+/// text (for a fixed line, the text before the fix).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RegisterLine {
+    pub index: usize,
+    pub en: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sk: Option<String>,
 }
 
 impl LyricsTrack {
@@ -101,6 +159,7 @@ mod tests {
                     words: None,
                 },
             ],
+            register: None,
         }
     }
 
@@ -128,6 +187,7 @@ mod tests {
             language_source: String::new(),
             language_translation: String::new(),
             lines: vec![],
+            register: None,
         };
         assert_eq!(empty.current_line_index(1000), None);
     }
@@ -194,6 +254,7 @@ mod tests {
                 sk: None,
                 words: None,
             }],
+            register: None,
         };
         let json = serde_json::to_string(&track).unwrap();
         let back: LyricsTrack = serde_json::from_str(&json).unwrap();
@@ -256,6 +317,7 @@ mod tests {
             language_source: String::new(),
             language_translation: String::new(),
             lines: vec![],
+            register: None,
         };
         assert!(track.line_at(1000).is_none());
     }

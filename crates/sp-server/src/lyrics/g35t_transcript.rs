@@ -49,6 +49,7 @@ pub fn build_track(words: &[AsrWord], version: u32) -> Option<LyricsTrack> {
         language_source: "en".into(),
         language_translation: String::new(),
         lines,
+        register: None,
     })
 }
 

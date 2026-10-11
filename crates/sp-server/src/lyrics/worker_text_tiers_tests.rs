@@ -321,6 +321,7 @@ fn track() -> sp_core::lyrics::LyricsTrack {
         language_source: "en".into(),
         language_translation: String::new(),
         lines: Vec::new(),
+        register: None,
     }
 }
 

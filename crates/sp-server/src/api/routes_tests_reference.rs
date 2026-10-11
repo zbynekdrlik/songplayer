@@ -373,3 +373,52 @@ async fn an_override_text_patched_on_one_row_reaches_every_row_of_the_video() {
         );
     }
 }
+
+/// #250: the verdict of a song's one register check reads through the song
+/// list and the detail; a song never checked shows none.
+#[tokio::test]
+async fn the_lyrics_song_routes_expose_the_register_verdict() {
+    let state = test_state().await;
+    sqlx::query("INSERT INTO playlists (id, name, youtube_url, is_active) VALUES (1, 'p', 'u', 1)")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO videos (id, playlist_id, youtube_id, normalized) \
+         VALUES (1, 1, 'yt-flagged', 1), (2, 1, 'yt-unchecked', 1)",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    crate::db::models_register::stamp_register(&state.pool, 1, 1, Some("flagged"))
+        .await
+        .unwrap();
+    let get = |uri: &'static str| {
+        let app = app(state.clone());
+        async move {
+            let resp = app
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+            let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+        }
+    };
+    let items = get("/api/v1/lyrics/songs").await;
+    let verdict_of = |id: i64| {
+        items
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["video_id"] == id)
+            .expect("a row")["register_verdict"]
+            .clone()
+    };
+    assert_eq!(verdict_of(1), "flagged");
+    assert!(verdict_of(2).is_null());
+    let detail = get("/api/v1/lyrics/songs/1").await;
+    assert_eq!(detail["list_item"]["register_verdict"], "flagged");
+}
