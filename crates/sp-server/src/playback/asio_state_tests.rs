@@ -274,6 +274,11 @@ fn every_reason_has_a_code_and_a_text() {
             "windows_only",
             "ASIO runs on Windows only",
         ),
+        (
+            Reason::HostDown("it exited".into()),
+            "host_down",
+            "the ASIO host process (sp-audio-host) is not running: it exited",
+        ),
     ];
     for (r, code, text) in reasons {
         assert_eq!((r.code(), r.text().as_str()), (code, text));
@@ -297,6 +302,7 @@ fn every_reason_code_has_its_slovak_on_the_dashboard() {
         Reason::Held,
         Reason::Parked,
         Reason::NoClock,
+        Reason::HostDown(String::new()),
     ];
     // One reason of every variant: a new variant fails to compile here (no
     // wildcard) until it is listed above (review round 5).
@@ -312,9 +318,10 @@ fn every_reason_code_has_its_slovak_on_the_dashboard() {
         Reason::Held => 8,
         Reason::Parked => 9,
         Reason::NoClock => 10,
+        Reason::HostDown(_) => 11,
     };
     let listed: std::collections::BTreeSet<usize> = reasons.iter().map(variant).collect();
-    assert_eq!(listed.len(), 11, "every variant is listed");
+    assert_eq!(listed.len(), 12, "every variant is listed");
     for r in reasons {
         assert_ne!(
             sp_core::audio_outputs::asio_reason_sk(r.code()),

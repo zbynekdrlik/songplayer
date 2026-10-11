@@ -16,9 +16,10 @@
 //! keeps the last good address. The thread starter is a parameter, so a unit
 //! test on the Windows job starts no real thread. An ASIO entry (#233 lane 3)
 //! follows its driver's rate (`build_rate` 0: a network-rate change never
-//! rebuilds it), resolves nothing, and starts its worker through the same
-//! starter; a running driver off the network's rate or with a buffer over a
-//! third of a grid slot is WARNed once (`OutputStatus::note`).
+//! rebuilds it), resolves nothing, and starts it through the same starter
+//! (its worker runs in the ASIO host process, `audio_host`); a running
+//! driver off the network's rate or with a buffer over a third of a grid
+//! slot is WARNed once (`OutputStatus::note`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -253,11 +254,13 @@ pub fn start_output_thread(sink: &OutputSink, id: &str) {
     }
 }
 
-/// #233: an ASIO output's worker thread on Windows (`asio_win`); elsewhere
-/// it never opens and says why.
+/// #233: an ASIO output on Windows runs in the ASIO host process
+/// (`audio_host`: SongPlayer spawns children, and a child spawned from the
+/// process that holds a SoundGrid driver resyncs it), fed by its forwarder
+/// thread; elsewhere it never opens and says why.
 pub fn start_asio_thread(out: &Arc<AsioOut>, id: &str) {
     #[cfg(windows)]
-    crate::playback::asio_win::spawn_asio_thread(out.clone(), id.to_string());
+    crate::audio_host::client_win::start_remote(out.clone(), id.to_string());
     #[cfg(not(windows))]
     {
         let _ = id;

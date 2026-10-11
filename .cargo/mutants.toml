@@ -127,6 +127,18 @@ exclude_re = [
   #   asio_win_tests.rs (the copy-only buffer switch, every slot's
   #   callbacks, no driver needed) and the SNV / PP post-deploy ASIO gate.
   'sp-server/src/playback/asio_win',
+  # audio_host/client_win.rs + host_win.rs (#233, the ASIO host process):
+  #   SongPlayer's start of sp-audio-host.exe (the process, its kill-on-close
+  #   Job object, the named pipe) and the host's own glue (its pipe, its
+  #   priority, its log setup), #[cfg(windows)] modules: dead on the Linux
+  #   runner, so every mutant builds and survives. Their decisions live in
+  #   the Linux-tested audio_host modules (client: the session, the
+  #   forwarder; host: the frame loop; launch: the exe, the pipe name, the
+  #   data dir; restart: the backoff; protocol, stamp, wire_status), which
+  #   host_tests.rs runs end to end over an in-memory pipe; the glue runs in
+  #   the SNV / PP post-deploy ASIO gates.
+  'sp-server/src/audio_host/client_win',
+  'sp-server/src/audio_host/host_win',
   # -- genlock #146–#151: Windows-only paced pipeline + Python MTL shell-out --
   # playback/pipeline_paced.rs + pipeline_paced_idle.rs: whole modules are
   #   #[cfg(windows)] (mod.rs) so they are NOT compiled on the Linux mutation
