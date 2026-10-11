@@ -141,6 +141,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/background-hold",
             axum::routing::get(routes_status::background_hold),
         )
+        // #233: the production environment (edition, Defender, firewall)
+        .route(
+            "/api/v1/environment",
+            axum::routing::get(routes_status::environment),
+        )
         // #136: run each metadata provider of the production chain on one video
         .route(
             "/api/v1/metadata/probe",

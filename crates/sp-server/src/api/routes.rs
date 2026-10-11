@@ -105,6 +105,10 @@ pub struct StatusResponse {
     /// #229 item C: while paid AI is off, the kinds of work it holds
     /// (`paid_ai::Held`); empty while on.
     pub paid_ai_held: Vec<String>,
+    /// #233: the production environment (`crate::prod_env`: the edition,
+    /// Defender's real-time protection, the firewall). Missing key → not checked.
+    #[serde(default)]
+    pub environment: sp_core::prod_env::EnvironmentStatus,
 }
 
 // #136 / #223 S3b: moved to `routes_status` for the 1000-line cap.
@@ -656,6 +660,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     let obs_connected = state.obs_state.read().await.connected;
     let tools = state.tools_status.read().await.clone();
     let lan = state.lan_status.read().await.clone();
+    let environment = crate::prod_env::global().current(); // #233: a copy, no lock held
     let playlist_count = sqlx::query("SELECT COUNT(*) AS c FROM playlists")
         .fetch_one(&state.pool)
         .await
@@ -715,6 +720,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         node_name: super::routes_status::node_name(&state.pool).await,
         paid_ai_enabled: paid_ai.enabled,
         paid_ai_held: paid_ai.held,
+        environment,
     })
 }
 

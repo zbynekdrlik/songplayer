@@ -73,6 +73,12 @@ pub async fn background_hold(
     axum::Json(crate::background_hold::status(&state.pool).await)
 }
 
+/// #233: `GET /api/v1/environment` — the production environment the health
+/// bar polls (`crate::prod_env`, the same status as `/api/v1/status`).
+pub async fn environment() -> axum::Json<sp_core::prod_env::EnvironmentStatus> {
+    axum::Json(crate::prod_env::global().current())
+}
+
 #[cfg(test)]
 #[path = "routes_status_tests.rs"]
 mod tests;

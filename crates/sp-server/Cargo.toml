@@ -111,6 +111,19 @@ windows-sys = { version = "0.59", features = [
     # that the host's pipe was opened by the host (GetNamedPipeClientProcessId).
     "Win32_System_Performance",
     "Win32_System_Pipes",
+    # #233: the production-environment guard reads the Windows edition and
+    # the firewall profiles from the registry (RegGetValueW, `prod_env_win.rs`).
+    "Win32_System_Registry",
+] }
+# #233: the production-environment guard reads Defender's real-time protection
+# through WMI over COM (`prod_env_win.rs`: IWbemLocator, CoSetProxyBlanket),
+# with no process spawned. The same `windows` 0.58 sp-decoder and sp-gpu use
+# (already in the lock); windows-sys has no COM interfaces.
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Rpc",
+    "Win32_System_Wmi",
 ] }
 # #233 lane 3: the ASIO output's host — azo, a pure-Rust COM ASIO host (MIT,
 # no Steinberg SDK, no LLVM; iemmixer's choice), 0.4.0 per main-session
