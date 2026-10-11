@@ -50,6 +50,8 @@ test("the environment segment appears red while violated, names the problems, an
   page,
   request,
 }) => {
+  // Three changes, each seen at the bar's next 10 s poll.
+  test.setTimeout(90_000);
   await page.goto("/");
   await expect(page.getByTestId("health-bar")).toBeVisible({ timeout: 10000 });
   await expect(page.getByTestId("health-version")).toBeVisible();

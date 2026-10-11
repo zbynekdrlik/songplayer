@@ -296,6 +296,7 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
         "**/post-deploy-max.spec.ts",
         "**/post-deploy-settings-masked.spec.ts",
         "**/post-deploy-audio-asio.spec.ts",
+        "**/post-deploy-environment.spec.ts",
     ]
 
 
