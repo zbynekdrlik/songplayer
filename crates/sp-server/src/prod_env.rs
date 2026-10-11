@@ -311,7 +311,7 @@ fn log_step(step: LogStep, status: &EnvironmentStatus, problems: &[EnvProblem]) 
             Some(note) => info!(note = %note, "production environment: not checked"),
             None => info!(
                 edition = ?status.edition_id,
-                "production environment: holds (allowed edition, Defender real-time off, firewall off)"
+                "production environment: holds (edition allowed, Defender and firewall off)"
             ),
         },
         LogStep::Problems => {
