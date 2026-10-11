@@ -106,6 +106,11 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Com",
     # #223 S12a: the video upgrade's disk floor (GetDiskFreeSpaceExW).
     "Win32_Storage_FileSystem",
+    # #233: the box's one monotonic counter that SongPlayer and the ASIO host
+    # both read (QueryPerformanceCounter, `audio_host/mono.rs`) and the check
+    # that the host's pipe was opened by the host (GetNamedPipeClientProcessId).
+    "Win32_System_Performance",
+    "Win32_System_Pipes",
 ] }
 # #233 lane 3: the ASIO output's host — azo, a pure-Rust COM ASIO host (MIT,
 # no Steinberg SDK, no LLVM; iemmixer's choice), 0.4.0 per main-session

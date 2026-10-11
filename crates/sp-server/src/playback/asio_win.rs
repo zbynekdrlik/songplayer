@@ -731,13 +731,17 @@ impl Drop for WinAsioDevice {
     }
 }
 
-/// The ASIO output's worker thread (`asio-<id>`): its own driver, its own
-/// program-wall clock (`WallVbanClock::new`, following the wall: a date step
-/// shows to the servo as a step it re-centres). Not an MMCSS thread
-/// (`asio_out.rs`). A failed spawn is the output's start error (the outputs
-/// task rebuilds it on its next pass).
+/// The ASIO output's worker thread (`asio-<id>`): its own driver, on
+/// `clock` — #233: SongPlayer's program timeline as the ASIO host reads it
+/// (`audio_host::remote_clock::RemoteClock`; the host has no wall of its
+/// own). Not an MMCSS thread (`asio_out.rs`). A failed spawn is the output's
+/// start error (the host reports it; SongPlayer's outputs task rebuilds the
+/// output).
 #[cfg_attr(test, mutants::skip)] // an OS thread around run_asio_worker (its step is tested); the file is out of the gate anyway
-pub fn spawn_asio_thread(out: Arc<AsioOut>, id: String) {
+pub fn spawn_asio_thread<C>(out: Arc<AsioOut>, id: String, mut clock: C)
+where
+    C: crate::playback::vban_out::VbanClock + Send + 'static,
+{
     let watched = out.clone();
     let spawned = std::thread::Builder::new()
         .name(format!("asio-{id}"))
@@ -745,8 +749,6 @@ pub fn spawn_asio_thread(out: Arc<AsioOut>, id: String) {
             crate::playback::pipeline_paced::request_high_res_timer();
             info!(id = %id, "asio output thread started");
             let mut device = WinAsioDevice::new();
-            let wall = crate::playback::wallclock::WallClock::system();
-            let mut clock = crate::playback::vban_out::WallVbanClock::new(wall);
             run_asio_worker(&out, &mut device, &mut clock);
         });
     if let Err(e) = spawned {

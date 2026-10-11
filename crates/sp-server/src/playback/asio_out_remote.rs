@@ -19,6 +19,7 @@
 //!   pipe's blocks are pushed into its queue and `run_asio_worker` plays
 //!   them on the driver.
 
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -85,6 +86,13 @@ impl AsioOut {
     /// most `wait` (the forwarder, `audio_host::client::run_forwarder`).
     pub fn take_block(&self, wait: Duration) -> Take {
         self.queue.take_timeout(wait)
+    }
+
+    /// SongPlayer's side: one more block the host's link did not take (the
+    /// host down, or its queue full); counted in `blocks_dropped`. Returns
+    /// the count so far.
+    pub fn note_unsent(&self) -> u64 {
+        self.unsent.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// Marks the output's thread running until the guard drops (the

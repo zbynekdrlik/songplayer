@@ -11,6 +11,12 @@
 //! (`Reason::code`). Every float is sent finite (a non-finite one as 0):
 //! JSON has no NaN, serde_json would write `null` and the typed decode would
 //! refuse the whole frame.
+//!
+//! #233 review: the host's output also sends its START ERROR (a worker that
+//! could not be spawned, or panicked: `RunGuard` names it). SongPlayer sets
+//! it as its own output's start error, so `RunningOutput::start_failed`
+//! rebuilds the output — a new worker in the host — instead of showing it
+//! "running" with frozen figures for good.
 
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +34,8 @@ pub struct WireSnapshot {
     pub status: WireStatus,
     pub blocks_sent: u64,
     pub blocks_dropped: u64,
+    /// The host's worker could not start or stopped on a panic: why.
+    pub start_error: Option<String>,
 }
 
 /// `AsioStatus` on the pipe (its fields, the fixed words as text).
@@ -134,14 +142,16 @@ impl WireCause {
     }
 }
 
-impl From<&AsioSnapshot> for WireSnapshot {
-    fn from(s: &AsioSnapshot) -> Self {
+impl WireSnapshot {
+    /// The host's output as it reads now: its snapshot and its start error.
+    pub fn of(s: &AsioSnapshot, start_error: Option<String>) -> Self {
         let t = &s.status;
         Self {
             state: s.state.to_string(),
             reason: s.reason.clone(),
             blocks_sent: s.blocks_sent,
             blocks_dropped: s.blocks_dropped,
+            start_error,
             status: WireStatus {
                 driver: t.driver.clone(),
                 channels: t.channels,
@@ -183,7 +193,8 @@ impl From<&AsioSnapshot> for WireSnapshot {
 }
 
 impl WireSnapshot {
-    /// The snapshot the host read (the reason's code from the reason).
+    /// The snapshot the host read (the reason's code from the reason); the
+    /// start error is read from its own field.
     pub fn into_snapshot(self) -> AsioSnapshot {
         let t = self.status;
         let reason_code = self.reason.as_ref().map(Reason::code);

@@ -41,7 +41,7 @@
 //! `AsioOut::snapshot` → `GET /api/v1/program` `outputs[i].asio`.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -242,6 +242,8 @@ pub struct AsioOut {
     target_100ns: i64,
     live: Mutex<Live>,
     running: AtomicBool,
+    /// Blocks the ASIO host's link did not take (SongPlayer's side only).
+    unsent: AtomicU64,
     start_error: Mutex<Option<String>>,
 }
 
@@ -282,6 +284,7 @@ impl AsioOut {
                 remote_dropped: 0,
             }),
             running: AtomicBool::new(false),
+            unsent: AtomicU64::new(0),
             start_error: Mutex::new(None),
         }
     }
@@ -345,7 +348,9 @@ impl AsioOut {
             reason: live.reason.clone(),
             status: live.status.clone(),
             blocks_sent: live.blocks_sent,
-            blocks_dropped: self.queue.dropped() + live.remote_dropped,
+            blocks_dropped: self.queue.dropped()
+                + live.remote_dropped
+                + self.unsent.load(Ordering::Relaxed),
         }
     }
 

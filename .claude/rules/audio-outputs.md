@@ -1050,27 +1050,41 @@ before (`AudioOutputs::offer`), the host's side is the worker's.
   output with the process-wide `HostClient` under a numeric HANDLE (never
   the id: a rebuilt entry's successor, same id, is added before its
   predecessor is removed) and starts its forwarder thread `asio-fwd-<id>`
-  (`run_forwarder`: the output's queue in order, `RunGuard` like the
-  worker; its stop — a removal, a replace, the shutdown — detaches it and
-  the host discards its side). `send_block` never waits: a down host or a
-  full data queue (256 frames) drops the block, counted
-  (`unsent_blocks`, a WARN first and every 1000th). The host's status
-  reports (`Report::Status`, ~2 Hz) land in the output's live state
-  (`AsioOut::apply_remote`: state, reason, `AsioStatus`, `blocks_sent`; the
-  host's queue drops add to SongPlayer's), so `GET /api/v1/program`
-  `outputs[i]`, the notes and the dashboard read as before; the host's log
-  lines are re-logged at their level under the target `sp_audio_host`.
+  (TIME_CRITICAL; `run_forwarder`: the output's queue in order, `RunGuard`
+  like the worker; its stop — a removal, a replace, the shutdown — detaches
+  it and the host discards its side). `send_block` never waits: a down host
+  or a full data queue (256 frames) drops the block, counted ON THE OUTPUT
+  (`AsioOut::note_unsent` → `blocks_dropped`, a WARN first and every 1000th;
+  review round 1: a client-wide count the API never showed). The session
+  (supervisor, writer, reader) runs on its OWN thread `asio-host-link`
+  (TIME_CRITICAL, the 1 ms timer, a current-thread runtime of its own: a
+  stall of SongPlayer's shared runtime never delays a block; review round
+  1). The host's status reports (`Report::Status`, ~2 Hz) land in the
+  output's live state (`AsioOut::apply_remote`: state, reason,
+  `AsioStatus`, `blocks_sent`; the host's queue drops add to SongPlayer's),
+  so `GET /api/v1/program` `outputs[i]`, the notes and the dashboard read
+  as before; a host worker's START ERROR (a failed spawn, a panic: its
+  `RunGuard`) crosses too and becomes the output's start error
+  (`sp-audio-host: …`), so `RunningOutput::start_failed` rebuilds the
+  output — a fresh worker in the host — never "running" with frozen
+  figures (review round 1). The host's log lines are re-logged at their
+  level under the target `sp_audio_host` (the line carries no level of its
+  own: `.with_level(false)`).
 - **The host** (`audio_host/host.rs`): reads SongPlayer's frames ONE at a
   time, in order (a read is never raced in a `select!`: `read_exact` is not
   cancel-safe), the hello first (its protocol must match, else the session
   fails), an add → `AsioOut::from_spec` + the worker
-  (`asio_win::spawn_asio_thread`, as SongPlayer started it before; a second
-  add under a handle discards the first), a block → the output's queue with
-  its stamp mapped (below), a remove → `discard`. A status task reports
-  every output every 500 ms; ONE writer task sends the statuses and the log
-  lines. At the pipe's end (SongPlayer gone) or a protocol error every
-  output is discarded and `serve` returns them: the host's main gives the
-  workers 2 s to release their drivers, then exits. The host runs at
+  (`asio_win::spawn_asio_thread(out, id, clock)` on a `RemoteClock`, below;
+  a second add under a handle discards the first), a block → the output's
+  queue with its boundary UNTOUCHED and its anchor taken as the session's,
+  a remove → `discard`. A status task sends `Alive` and every output's
+  status (with its start error) every 500 ms; ONE writer task sends the
+  statuses and the log lines. At the pipe's end (SongPlayer gone) or a
+  protocol error every output is discarded and `serve` returns them — a
+  protocol error first sends `Ending {why}` (bounded at 1 s), so
+  SongPlayer's session names the cause: the host's main gives the workers
+  2 s to release their drivers, then exits. Its log filter is SongPlayer's
+  (`info,sp_server=debug`, or `RUST_LOG`). The host runs at
   HIGH_PRIORITY_CLASS (like SongPlayer, #203), installs the panic hook
   (`sp-audio-host-panic.log`) and logs to `sp-audio-host.log` (both in
   `%ProgramData%\SongPlayer`, `launch::host_data_dir`; the log is started
@@ -1084,45 +1098,54 @@ rejected; the host opens it, retrying a busy pipe for 5 s). Frames =
 a little-endian `u32` body length, 1 ..= 65 536 (`check_len`, BEFORE the
 body is allocated), then the body, its first byte the kind:
 
-- 1 control (SongPlayer → host), typed JSON `Control`: `hello {protocol}`,
-  `add {handle, spec}`, `remove {handle}`;
-- 2 a block (SongPlayer → host), binary: handle `u64`, the boundary `i64`
-  (SongPlayer's timeline), SongPlayer's fleet relabel `i64`
-  (`fleet_shift::global().slots()`), flags `u8` (1 samples, 2 substituted;
-  `KNOWN_FLAGS` = 0x03, a literal pinned by a test), then exactly 3 200
-  LE `f32` when samples follow and nothing when not (anything else is
-  refused); a block whose samples are not one program block is sent as
-  silence, marked substituted (`BlockFrame::of`; the worker plays it as
-  silence anyway);
+- 1 control (SongPlayer → host), typed JSON `Control`: `hello {protocol,
+  anchor}` (protocol 2), `add {handle, spec}`, `remove {handle}`;
+- 2 a block (SongPlayer → host), binary, built in ONE buffer (12 838 bytes
+  with its prefix, `BLOCK_FRAME_BYTES`): handle `u64`, the boundary `i64`
+  (SongPlayer's timeline, untouched), SongPlayer's time anchor (`i64`
+  timeline + `i64` counter, written by the session's writer), flags `u8` (1
+  samples, 2 substituted; `KNOWN_FLAGS` = 0x03, a literal pinned by a
+  test), then exactly 3 200 LE `f32` when samples follow and nothing when
+  not (anything else is refused); a block whose samples are not one
+  program block is sent as silence, marked substituted (`BlockFrame::of`;
+  the worker plays it as silence anyway);
 - 3 a report (host → SongPlayer), typed JSON `Report`: `status {handle,
   snapshot}` (`wire_status.rs`: `AsioSnapshot` with its fixed words as
   text, read back against the known sets — an unknown state reads waiting,
   an unknown sample type "", the cause typed — the reason code taken from
   the decoded reason, every float sent finite: serde_json writes NaN as
-  `null`, which the typed decode would refuse with the whole frame) or
-  `log {level, line}` (one formatted event, ≤ 4 KiB cut on a character).
+  `null`, which the typed decode would refuse with the whole frame; plus
+  the host worker's `start_error`), `log {level, line}` (one formatted
+  event, ≤ 4 KiB cut on a character), `alive` (every 500 ms: a session
+  that hears nothing for 5 s, `REPORT_SILENCE`, ends — a hung host is
+  restarted) or `ending {why}` (the host ends the session; its last
+  frame).
 
 Never `serde_json::Value` (the `raw_value` rule): every JSON body is a typed
 struct; `Reason` derives `Serialize`/`Deserialize`. A malformed frame ends
 the session (the stream cannot be trusted after it). A clean end between
 frames is `None`, a cut header or body `Truncated`.
 
-**The clock across the pipe** (`audio_host/stamp.rs`, pure). Both
-processes read the same clocks, and every wall's timeline is UTC − D(K), K
-the process's fleet relabel (`fleet_shift.rs`, #224 part 2) — per PROCESS.
-A host started after SongPlayer followed a date step runs at K 0 while
-SongPlayer runs at K: the same instant reads D(K_sp) − D(K_host) apart. So
-the host adds that offset to every stamp, SETTLED: the first block takes it
-at once; a different one is adopted only once it has held 1 s
-(`SETTLE_100NS`). At a later date step each side follows at its own wall's
-tick and moves its timeline by the remainder only (the transient two walls
-of ONE process have, ≤ one slot), so the split second between the two
-follows never adds whole slots to a stamp; a label-based mapping (stamp +
-D(K_sp) − D(K_host) read per block) would carry the whole step S there, and
-a block S ahead is a hard re-centre. Two sides that disagree for good (one
-followed an epoch the other did not) settle on the new offset after that
-second. The worker's own clock stays `WallVbanClock::new(WallClock::system())`
-in the host.
+**The clock across the pipe** (`audio_host/remote_clock.rs` +
+`mono.rs`, review round 1: ONE source of truth). Every wall's timeline is
+UTC − D(K), K the fleet relabel (`fleet_shift.rs`, #224 part 2), and K is
+per PROCESS: a host with walls of its own would follow each date step
+itself and could register an N one apart from SongPlayer's — every block a
+slot off, a ~33 ms deficit under the 38.3 ms floor, a pop (the first
+round's settled-offset `stamp.rs` was deleted for that). So the host makes
+NO wall and reads NO relabel (`host_tests::the_host_makes_no_wall_and_reads_no_relabel`
+scans `host.rs`, `host_win.rs`, `remote_clock.rs`, `asio_win.rs`):
+SongPlayer pairs a reading of its own timeline (the link thread's
+`WallVbanClock::new(WallClock::system())`, ticked at every write — the
+in-process worker's old clock) with the box's ONE monotonic counter
+(`mono::mono_100ns`: QueryPerformanceCounter, the same in every process)
+— an `Anchor` — in the hello and on every block its writer sends; the host
+keeps the latest (`SharedAnchor`) and every worker's `RemoteClock` reads
+`anchor.timeline + (counter now − anchor.counter)`, never back (through a
+wall's hold it waits for the line). The block's boundary crosses
+untouched. A date step, a slew or a hold of SongPlayer's wall reaches the
+host's "now" with the next anchor (a jump of the remainder r, as the old
+worker's wall jumped), never whole slots.
 
 **Lifecycle** (`client.rs::supervise`, `client_win.rs`, `restart.rs`).
 SongPlayer starts the host when its FIRST ASIO output is built (a box with
@@ -1131,8 +1154,12 @@ own exe (missing → a waiting reason that names the path, never a crash), no
 window (`CREATE_NO_WINDOW`), null stdio, at once into a Job object with
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE (it dies with SongPlayer, `taskkill /F`
 included; the deploy steps also kill `sp-audio-host.exe` by name before the
-installer runs), then its connect, bounded at 10 s. A start that fails or a
-session that ends (the host died or closed its pipe; a protocol error) →
+installer runs), then its connect, bounded at 10 s, and the pipe's client
+checked to be that process (`GetNamedPipeClientProcessId`,
+`launch::pipe_client_is_host`: any other is refused). Ending a host is a
+kill and the job's close, never a wait on the link thread. A start that
+fails or a session that ends (the host died, closed its pipe, said
+`ending`, or sent nothing for 5 s; a protocol error) →
 every output reads waiting, reason `host_down` (`Reason::HostDown(why)`:
 "the ASIO host process (sp-audio-host) is not running: …", Slovak "zvukový
 proces ASIO (sp-audio-host) nebeží — SongPlayer ho spúšťa znova", no
@@ -1147,20 +1174,24 @@ helper process would then fail to open — a main-session decision.
 
 **The host spawns nothing** — `audio_host/no_spawn_tests.rs` scans the
 host's code path (the bin, `mod.rs`, `host.rs`, `host_win.rs`, the protocol
-and status, `log_forward.rs`, `launch.rs`, `panic_hook.rs`, the ASIO output
-and its glue, the servo, the ASRC, the queue, the clocks, sp-asrc; comments
-are not scanned) for `Command::new`, `process::Command`, `tokio::process`,
+and status, `remote_clock.rs`, `mono.rs`, `log_forward.rs`, `launch.rs`,
+`panic_hook.rs`, the ASIO output and its glue, the servo, the ASRC, the
+queue, the clocks, `pipeline_paced.rs`, `vban_out.rs`, `vban_packet.rs`,
+`audio_out.rs`, `program_output.rs`, `mmcss.rs`, sp-asrc; comments are not
+scanned) for `Command::new`, `process::Command`, `tokio::process`,
 `CreateProcess`, `ShellExecute`, `WinExec`, `posix_spawn`. A new file the
 host runs goes on that list; `client_win.rs` (SongPlayer starting the host)
 is deliberately not on it.
 
 **Tests.** `protocol_tests.rs` (every frame round-trips; malformed blocks,
 unknown kinds and JSON refused; the length checked before a read; a clean
-end vs a cut frame; the log line cut), `wire_status_tests.rs` (a full
-snapshot unchanged through the JSON, every fixed word, the reason's code, a
-non-finite figure as 0), `stamp_tests.rs` (exact pins: the first block's
-offset, a second under / at 1 s, a catch-up cancelling it, a second
-different offset restarting the wait), `restart.rs` (2 / 10 / 30 / 60 / 60,
+end vs a cut frame, a failed read; the log line cut; the block frame's
+size), `wire_status_tests.rs` (a full snapshot unchanged through the JSON,
+the start error, every fixed word, the reason's code, a non-finite figure
+as 0), `remote_clock_tests.rs` (the anchor carried on the counter;
+SongPlayer at K 5 where a host of its own would read K 4: the host reads
+SongPlayer's timeline; a follow's jump, a hold never back; the sleep),
+`restart.rs` (2 / 10 / 30 / 60 / 60,
 the 60 s reset), `launch.rs` (the exe beside SongPlayer's, the pipe name
 per start, `--pipe`, the data dir), `log_forward.rs` (one event = one
 report at its level, through a real fmt layer; a full queue drops it),
@@ -1168,26 +1199,33 @@ report at its level, through a real fmt layer; a full queue drops it),
 both sides' drops, host-down clears the run's figures and keeps the
 counters), `host_tests.rs` — SongPlayer's client and the host's frame loop
 over `tokio::io::duplex` on a multi-thread runtime, the test thread making
-the blocking reads: blocks reach the host's output in order on the mapped
-timeline, the stop removes it there; the host's status IS the output's
-status; SongPlayer's end ends the host and discards its outputs; the host's
-end leaves every output waiting `host_down` (and one attached after); a
-host frame only SongPlayer sends ends the session; the hello / protocol /
-report refusals and add / replace / remove on `on_frame`; and the REAL
+the blocking reads: blocks reach the host's output in order with their
+boundary untouched and the host's clock on SongPlayer's latest anchor, the
+stop removes it there; the host's status IS the output's status and its
+start error makes `start_failed`; SongPlayer's end ends the host and
+discards its outputs; the host's end leaves every output waiting
+`host_down` (and one attached after); a silent host ends the session; a
+host's `ending` names why, and the host sends it on a protocol error; a
+host frame only SongPlayer sends ends the session; a block no session
+takes is dropped on its output; the hello / protocol / report refusals,
+the session clock and add / replace / remove on `on_frame`; and the REAL
 worker in the host over the scripted driver (`AutoCard`, draining on every
-poll) playing SongPlayer's blocks, SongPlayer's output reading it running
-at 96 kHz Int32LSB.
+poll) on a `RemoteClock`, playing SongPlayer's blocks, SongPlayer's output
+reading it running at 96 kHz Int32LSB.
 
 **The live gate** (`e2e/post-deploy-audio-asio.spec.ts`, SNV and PP, third
 test; the decision in `e2e/asio-spawn-gate.ts`, unit-tested in the mock
 suite by `asio-spawn-gate.spec.ts`): every gated ASIO output running
 (`spawnCounters`: enabled, not waiting for a clock, running), its
-`resyncs` + `hard_recentres` read, `POST /api/v1/youtube/probe` (one
-SongPlayer-spawned yt-dlp, 200 whatever YouTube answers), ONE bounded 5 s
+`resyncs` + `hard_recentres` + `blocks_sent` read, `POST
+/api/v1/youtube/probe` (one SongPlayer-spawned yt-dlp, 200 whatever
+YouTube answers; it FAILS when the answer says yt-dlp is not ready yet,
+`probeSpawnFailures`: nothing was spawned), ONE bounded 5 s
 settle (`SETTLE_AFTER_SPAWN_MS`: the host reports every 500 ms, the spawn's
 resyncs came within ~2 s on PP; an absence cannot be polled), read again:
-FAIL when any output's resyncs or hard re-centres grew, its counters went
-back (the host restarted) or it no longer runs (`spawnDisturbances`).
+FAIL when any output's resyncs or hard re-centres grew, its counters or
+its `blocks_sent` went back (the host restarted: a restart with 0 / 0
+counters shows only there) or it no longer runs (`spawnDisturbances`).
 
 **CI / packaging.** Build Tauri checks BOTH exes' embedded manifest for
 Common-Controls 6.0 and lists the NSIS installer with 7-Zip: no

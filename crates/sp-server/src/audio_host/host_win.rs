@@ -9,9 +9,11 @@
 //! pipe (`log_forward.rs`), and stays in the file while the pipe is down —,
 //! runs at HIGH priority (like SongPlayer, #203) with every output's worker
 //! on its own thread as before (`asio_win::spawn_asio_thread`, the driver's
-//! callback thread its own), opens SongPlayer's pipe and serves it. At the
-//! pipe's end every output is discarded and its worker given up to 2 s to
-//! release its driver before the process exits.
+//! callback thread its own) on SongPlayer's timeline (`remote_clock.rs`: the
+//! host makes no wall, so it never relabels on its own), opens SongPlayer's
+//! pipe and serves it. Its log filter is SongPlayer's (`info,sp_server=debug`,
+//! or `RUST_LOG`). At the pipe's end every output is discarded and its
+//! worker given up to 2 s to release its driver before the process exits.
 
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -21,7 +23,7 @@ use std::time::{Duration, Instant};
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
-use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -29,7 +31,9 @@ use tracing_subscriber::util::SubscriberInitExt;
 use crate::audio_host::host::{HostEnd, HostEnv, REPORT_QUEUE, STATUS_EVERY, serve};
 use crate::audio_host::launch::{HOST_LOG, HOST_PANIC_LOG, host_data_dir};
 use crate::audio_host::log_forward::PipeLogs;
+use crate::audio_host::mono::mono_100ns;
 use crate::audio_host::protocol::Report;
+use crate::audio_host::remote_clock::RemoteClock;
 use crate::playback::asio_out::AsioOut;
 
 /// How long the host keeps trying to open a busy pipe.
@@ -91,18 +95,14 @@ pub fn run(pipe: &str) -> i32 {
     }
 }
 
-/// The real worker starter and clocks.
+/// The real worker starter and the box's counter.
 fn env() -> HostEnv {
-    let started = Instant::now();
     HostEnv {
-        start: Box::new(|out: Arc<AsioOut>| {
+        start: Box::new(|out: Arc<AsioOut>, clock: RemoteClock| {
             let id = out.id().to_string();
-            crate::playback::asio_win::spawn_asio_thread(out, id);
+            crate::playback::asio_win::spawn_asio_thread(out, id, clock);
         }),
-        now_100ns: Box::new(move || {
-            i64::try_from(started.elapsed().as_nanos() / 100).unwrap_or(i64::MAX)
-        }),
-        fleet_slots: Box::new(|| crate::playback::fleet_shift::global().slots()),
+        mono: Arc::new(mono_100ns),
         status_every: STATUS_EVERY,
     }
 }
@@ -137,12 +137,16 @@ fn init_logging(path: &Path, reports: mpsc::Sender<Report>) {
     let file_layer = file
         .ok()
         .map(|f: File| fmt::layer().with_writer(Mutex::new(f)).with_ansi(false));
+    // SongPlayer re-logs a pipe line at its level: the line carries none.
     let pipe_layer = fmt::layer()
         .with_writer(PipeLogs::new(reports))
         .with_ansi(false)
+        .with_level(false)
         .without_time();
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,sp_server=debug"));
     let _ = tracing_subscriber::registry()
-        .with(LevelFilter::INFO)
+        .with(filter)
         .with(file_layer)
         .with(pipe_layer)
         .try_init();

@@ -17,14 +17,16 @@
 //! - `protocol.rs`: the pipe's length-prefixed frames (typed JSON control
 //!   and reports, binary blocks), bounded before anything is allocated;
 //! - `wire_status.rs`: an output's status on the pipe;
-//! - `stamp.rs`: a block's boundary moved onto the host's timeline;
+//! - `remote_clock.rs` + `mono.rs`: SongPlayer's timeline read in the host
+//!   (SongPlayer's anchors on the box's one monotonic counter: the host has
+//!   no wall, so it never relabels a date step on its own);
 //! - `host.rs`: the host's frame loop; `log_forward.rs`: its log lines to
 //!   SongPlayer;
 //! - `client.rs`: SongPlayer's side (each ASIO output's forwarder, the
 //!   session, the supervisor); `restart.rs`: the restart backoff;
 //! - `launch.rs`: the exe, the pipe's name, the host's files;
 //! - `client_win.rs` / `host_win.rs`: the Windows glue (process + Job object,
-//!   pipe, priority), out of the mutation gate.
+//!   pipe, the link thread, priority), out of the mutation gate.
 //!
 //! **Lifecycle.** SongPlayer starts the host when its first ASIO output is
 //! built, in a Job object that kills it with SongPlayer; the host exits at
@@ -40,9 +42,10 @@ pub mod host;
 pub mod host_win;
 pub mod launch;
 pub mod log_forward;
+pub mod mono;
 pub mod protocol;
+pub mod remote_clock;
 pub mod restart;
-pub mod stamp;
 pub mod wire_status;
 
 /// The ASIO host's `main` (`src-tauri/src/bin/sp-audio-host.rs`): the exit

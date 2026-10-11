@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
 use super::*;
+use crate::audio_host::remote_clock::Anchor;
 use crate::audio_host::wire_status::WireSnapshot;
 use crate::playback::asio_out::{AsioSnapshot, AsioSpec, AsioStatus};
 use crate::playback::audio_out_block::ProgramBlock;
@@ -24,6 +25,13 @@ fn ramp() -> Arc<[f32]> {
     (0..3200).map(|i| i as f32 * 0.25 - 400.0).collect()
 }
 
+fn anchor() -> Anchor {
+    Anchor {
+        timeline_100ns: 17_900_000_000_000_007,
+        mono_100ns: -123_456_789,
+    }
+}
+
 fn round_trip(frame: &Frame) -> Frame {
     let bytes = encode(frame);
     let len = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
@@ -34,7 +42,10 @@ fn round_trip(frame: &Frame) -> Frame {
 #[test]
 fn control_frames_round_trip() {
     for c in [
-        Control::Hello { protocol: PROTOCOL },
+        Control::Hello {
+            protocol: PROTOCOL,
+            anchor: anchor(),
+        },
         Control::Add {
             handle: 9,
             spec: spec(),
@@ -51,25 +62,33 @@ fn a_block_round_trips_with_its_samples_or_as_silence() {
     let with = Frame::Block(BlockFrame {
         handle: 0x0102_0304_0506_0708,
         due_100ns: -17_900_000_000_000_123,
-        fleet_slots: -5,
+        anchor: anchor(),
         samples: Some(ramp()),
         substituted: false,
     });
     let bytes = encode(&with);
-    assert_eq!(bytes.len(), 4 + 1 + 25 + 12_800);
+    assert_eq!(bytes.len(), 4 + 1 + 33 + 12_800);
+    assert_eq!(bytes.len(), BLOCK_FRAME_BYTES);
+    assert_eq!(
+        BLOCK_FRAME_BYTES,
+        PREFIX_BYTES + 1 + BLOCK_HEAD_BYTES + SAMPLES_BYTES
+    );
     assert_eq!(round_trip(&with), with);
     let silence = Frame::Block(BlockFrame {
         handle: 3,
         due_100ns: 42,
-        fleet_slots: 7,
+        anchor: Anchor {
+            timeline_100ns: 9,
+            mono_100ns: 8,
+        },
         samples: None,
         substituted: true,
     });
-    assert_eq!(encode(&silence).len(), 4 + 1 + 25);
+    assert_eq!(encode(&silence).len(), 4 + 1 + 33);
     assert_eq!(round_trip(&silence), silence);
     let plain = Frame::Block(BlockFrame {
         substituted: false,
-        ..BlockFrame::of(3, ProgramBlock::silence(42), 7)
+        ..BlockFrame::of(3, ProgramBlock::silence(42))
     });
     assert_eq!(round_trip(&plain), plain);
 }
@@ -83,31 +102,25 @@ fn a_block_of_the_wrong_length_travels_as_marked_silence() {
         samples: Some(vec![0.5; 3198].into()),
         substituted: false,
     };
-    let f = BlockFrame::of(1, short, 2);
+    let f = BlockFrame::of(1, short);
     assert_eq!(
-        (
-            f.handle,
-            f.due_100ns,
-            f.fleet_slots,
-            f.samples,
-            f.substituted
-        ),
-        (1, 5, 2, None, true)
+        (f.handle, f.due_100ns, f.anchor, f.samples, f.substituted),
+        (1, 5, Anchor::default(), None, true)
     );
     let whole = ProgramBlock {
         due_100ns: 6,
         samples: Some(ramp()),
         substituted: false,
     };
-    let f = BlockFrame::of(1, whole, 2);
+    let f = BlockFrame::of(1, whole);
     assert_eq!((f.samples, f.substituted), (Some(ramp()), false));
     let marked = ProgramBlock {
         substituted: true,
         ..ProgramBlock::silence(7)
     };
-    let f = BlockFrame::of(1, marked, 2);
+    let f = BlockFrame::of(1, marked);
     assert_eq!((f.samples, f.substituted), (None, true));
-    let f = BlockFrame::of(1, ProgramBlock::silence(8), 2);
+    let f = BlockFrame::of(1, ProgramBlock::silence(8));
     assert_eq!((f.samples, f.substituted), (None, false));
 }
 
@@ -129,11 +142,15 @@ fn reports_round_trip() {
     for r in [
         Report::Status {
             handle: 2,
-            snapshot: Box::new(WireSnapshot::from(&snapshot)),
+            snapshot: Box::new(WireSnapshot::of(&snapshot, Some("it panicked".into()))),
         },
         Report::Log {
             level: HostLevel::Warn,
             line: "asio output: a resync".into(),
+        },
+        Report::Alive,
+        Report::Ending {
+            why: "a frame before the hello".into(),
         },
     ] {
         let frame = Frame::Report(r);
@@ -150,7 +167,7 @@ fn the_known_flags_are_the_two_flags() {
 /// A block body with its flags byte set to `flags` and `tail` after it.
 fn block_body(flags: u8, tail: usize) -> Vec<u8> {
     let mut b = vec![2u8];
-    b.extend_from_slice(&[0u8; 24]);
+    b.extend_from_slice(&[0u8; 32]);
     b.push(flags);
     b.extend(std::iter::repeat_n(0u8, tail));
     b
@@ -158,7 +175,7 @@ fn block_body(flags: u8, tail: usize) -> Vec<u8> {
 
 #[test]
 fn a_malformed_block_is_refused() {
-    let short = [2u8; 25];
+    let short = [2u8; 33];
     assert_eq!(
         decode_body(&short),
         Err(ProtoError::BadBlock("its head is short"))
@@ -241,8 +258,11 @@ async fn the_reader_bounds_a_frame_and_tells_a_clean_end_from_a_cut_one() {
     drop(tx);
 
     let (mut tx, mut rx) = tokio::io::duplex(1 << 16);
-    let hello = Frame::Control(Control::Hello { protocol: PROTOCOL });
-    let block = Frame::Block(BlockFrame::of(4, ProgramBlock::silence(1), 0));
+    let hello = Frame::Control(Control::Hello {
+        protocol: PROTOCOL,
+        anchor: anchor(),
+    });
+    let block = Frame::Block(BlockFrame::of(4, ProgramBlock::silence(1)));
     write_frame(&mut tx, &hello).await.unwrap();
     write_frame(&mut tx, &block).await.unwrap();
     drop(tx);

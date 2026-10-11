@@ -22,11 +22,23 @@ import { gatedAsioOutputs, type OutputStatus } from "./audio-outputs-gate";
  * settle, not a poll. */
 export const SETTLE_AFTER_SPAWN_MS = 5000;
 
-/** One gated ASIO output's disturbance counters. */
+/** One gated ASIO output's disturbance counters, and the blocks it sent
+ * (they only grow while the same host runs it: a host restart starts them
+ * at 0 again, even when the other two read 0 before and after). */
 export interface SpawnCounters {
   id: string;
   resyncs: number;
   hard_recentres: number;
+  blocks_sent: number;
+}
+
+/** The probe's error when SongPlayer spawned nothing: yt-dlp is not
+ * installed yet (`api/youtube_probe.rs`). */
+export const PROBE_NOT_SPAWNED = "yt-dlp is not ready yet on this server";
+
+/** Why the probe did not make SongPlayer spawn a child (empty = it did). */
+export function probeSpawnFailures(answer: { error?: string | null }): string[] {
+  return answer.error === PROBE_NOT_SPAWNED ? [`the probe spawned nothing: ${PROBE_NOT_SPAWNED}`] : [];
 }
 
 /** The counters of every gated ASIO output that runs (`gatedAsioOutputs`:
@@ -38,6 +50,7 @@ export function spawnCounters(list: OutputStatus[]): SpawnCounters[] {
       id: o.id,
       resyncs: o.asio?.resyncs ?? 0,
       hard_recentres: o.asio?.hard_recentres ?? 0,
+      blocks_sent: o.blocks_sent,
     }));
 }
 
@@ -56,7 +69,7 @@ export function spawnDisturbances(before: SpawnCounters[], after: SpawnCounters[
     if (a.hard_recentres > b.hard_recentres) {
       f.push(`${b.id}: ${a.hard_recentres - b.hard_recentres} hard re-centres after the spawn`);
     }
-    if (a.resyncs < b.resyncs || a.hard_recentres < b.hard_recentres) {
+    if (a.resyncs < b.resyncs || a.hard_recentres < b.hard_recentres || a.blocks_sent < b.blocks_sent) {
       f.push(`${b.id}: its counters went back (the ASIO host restarted?)`);
     }
   }

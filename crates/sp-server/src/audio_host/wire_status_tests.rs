@@ -56,7 +56,7 @@ fn full() -> AsioSnapshot {
 }
 
 fn through_json(s: &AsioSnapshot) -> AsioSnapshot {
-    let json = serde_json::to_string(&WireSnapshot::from(s)).unwrap();
+    let json = serde_json::to_string(&WireSnapshot::of(s, None)).unwrap();
     serde_json::from_str::<WireSnapshot>(&json)
         .unwrap()
         .into_snapshot()
@@ -65,6 +65,24 @@ fn through_json(s: &AsioSnapshot) -> AsioSnapshot {
 #[test]
 fn a_full_snapshot_crosses_the_pipe_unchanged() {
     assert_eq!(through_json(&full()), full());
+}
+
+/// The host worker's start error crosses with the snapshot (SongPlayer
+/// rebuilds the output on it).
+#[test]
+fn the_start_error_crosses_the_pipe() {
+    let wire = WireSnapshot::of(&full(), Some("the ASIO thread stopped: it panicked".into()));
+    let json = serde_json::to_string(&wire).unwrap();
+    let back: WireSnapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        back.start_error.as_deref(),
+        Some("the ASIO thread stopped: it panicked")
+    );
+    assert_eq!(back.into_snapshot(), full());
+    let none: WireSnapshot =
+        serde_json::from_str(&serde_json::to_string(&WireSnapshot::of(&full(), None)).unwrap())
+            .unwrap();
+    assert_eq!(none.start_error, None);
 }
 
 /// Every state, sample type and cause reads back as itself.

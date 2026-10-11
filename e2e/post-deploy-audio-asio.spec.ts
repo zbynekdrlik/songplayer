@@ -41,7 +41,12 @@ import {
   waitingForClock,
   type OutputStatus,
 } from "./audio-outputs-gate";
-import { SETTLE_AFTER_SPAWN_MS, spawnCounters, spawnDisturbances } from "./asio-spawn-gate";
+import {
+  SETTLE_AFTER_SPAWN_MS,
+  probeSpawnFailures,
+  spawnCounters,
+  spawnDisturbances,
+} from "./asio-spawn-gate";
 
 const EXPECTED = Number(process.env.SP_ASIO_OUTPUTS_EXPECTED ?? "0");
 
@@ -155,10 +160,14 @@ test.describe("ASIO output (#233)", () => {
     const before = spawnCounters(first as OutputStatus[]);
     console.log(`[#233 spawn] before: ${JSON.stringify(before)}`);
     // One yt-dlp, spawned by SongPlayer (the probe answers 200 whatever
-    // YouTube says: the spawn is what the gate needs).
+    // YouTube says: the spawn is what the gate needs — unless yt-dlp is not
+    // installed yet, when SongPlayer spawned nothing and the gate proves
+    // nothing).
     const probe = await request.post("/api/v1/youtube/probe", { timeout: 180_000 });
     expect(probe.status(), "POST /api/v1/youtube/probe").toBe(200);
-    console.log(`[#233 spawn] probe: ${JSON.stringify(await probe.json())}`);
+    const answer = await probe.json();
+    console.log(`[#233 spawn] probe: ${JSON.stringify(answer)}`);
+    expect(probeSpawnFailures(answer), "the probe spawned a child").toEqual([]);
     await new Promise((resolve) => setTimeout(resolve, SETTLE_AFTER_SPAWN_MS));
     const second = await readOutputs(request);
     expect(second, "GET /api/v1/program").not.toBeNull();

@@ -8,7 +8,7 @@
 //! (`client_win.rs`, which starts the host) is deliberately not listed.
 
 /// The host's code path, by file (comments are not scanned).
-const HOST_PATH: [(&str, &str); 27] = [
+const HOST_PATH: [(&str, &str); 34] = [
     (
         "src-tauri/src/bin/sp-audio-host.rs",
         include_str!("../../../../src-tauri/src/bin/sp-audio-host.rs"),
@@ -18,7 +18,8 @@ const HOST_PATH: [(&str, &str); 27] = [
     ("audio_host/host_win.rs", include_str!("host_win.rs")),
     ("audio_host/protocol.rs", include_str!("protocol.rs")),
     ("audio_host/wire_status.rs", include_str!("wire_status.rs")),
-    ("audio_host/stamp.rs", include_str!("stamp.rs")),
+    ("audio_host/remote_clock.rs", include_str!("remote_clock.rs")),
+    ("audio_host/mono.rs", include_str!("mono.rs")),
     ("audio_host/log_forward.rs", include_str!("log_forward.rs")),
     ("audio_host/launch.rs", include_str!("launch.rs")),
     ("panic_hook.rs", include_str!("../panic_hook.rs")),
@@ -79,6 +80,21 @@ const HOST_PATH: [(&str, &str); 27] = [
         "playback/fleet_shift.rs",
         include_str!("../playback/fleet_shift.rs"),
     ),
+    (
+        "playback/pipeline_paced.rs",
+        include_str!("../playback/pipeline_paced.rs"),
+    ),
+    ("playback/vban_out.rs", include_str!("../playback/vban_out.rs")),
+    (
+        "playback/vban_packet.rs",
+        include_str!("../playback/vban_packet.rs"),
+    ),
+    ("playback/audio_out.rs", include_str!("../playback/audio_out.rs")),
+    (
+        "playback/program_output.rs",
+        include_str!("../playback/program_output.rs"),
+    ),
+    ("playback/mmcss.rs", include_str!("../playback/mmcss.rs")),
     (
         "playback/stat_window.rs",
         include_str!("../playback/stat_window.rs"),

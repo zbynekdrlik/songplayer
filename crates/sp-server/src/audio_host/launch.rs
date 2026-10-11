@@ -8,7 +8,9 @@
 //! - The pipe: `\\.\pipe\songplayer-audio-host-<SongPlayer's pid>-<start>`,
 //!   one per start (a new name for every restart, so a dying host's pipe
 //!   never takes the next one), passed as `--pipe <name>`; SongPlayer makes
-//!   the pipe (the only instance, local clients only) and the host opens it.
+//!   the pipe (the only instance, local clients only) and the host opens it;
+//!   a pipe opened by any other process than the host SongPlayer started is
+//!   refused (#233 review).
 //! - The host's own files: `%ProgramData%\SongPlayer` (the box's data dir)
 //!   `sp-audio-host.log` and `sp-audio-host-panic.log`, else next to its exe.
 
@@ -47,6 +49,19 @@ pub fn pipe_arg(args: &[String]) -> Option<String> {
         .and_then(|at| args.get(at + 1))
         .filter(|name| !name.is_empty())
         .cloned()
+}
+
+/// Whether the process that opened the host's pipe is the host SongPlayer
+/// started (`expected`); `got` is its pid, `None` when Windows cannot tell.
+/// Anything else is refused: the session never serves another process.
+pub fn pipe_client_is_host(expected: u32, got: Option<u32>) -> Result<(), String> {
+    match got {
+        Some(pid) if pid == expected => Ok(()),
+        Some(pid) => Err(format!(
+            "process {pid} opened the host's pipe, not the host (process {expected}): refused"
+        )),
+        None => Err("the process that opened the host's pipe cannot be read: refused".into()),
+    }
 }
 
 /// The host's data dir: `<ProgramData>\SongPlayer`, else `exe_dir`.
@@ -98,6 +113,19 @@ mod tests {
         assert_eq!(pipe_arg(&args(&["--pipe", ""])), None);
         assert_eq!(pipe_arg(&args(&["p"])), None);
         assert_eq!(pipe_arg(&[]), None);
+    }
+
+    #[test]
+    fn only_the_started_host_may_open_its_pipe() {
+        assert_eq!(pipe_client_is_host(4321, Some(4321)), Ok(()));
+        assert_eq!(
+            pipe_client_is_host(4321, Some(77)),
+            Err("process 77 opened the host's pipe, not the host (process 4321): refused".into())
+        );
+        assert_eq!(
+            pipe_client_is_host(4321, None),
+            Err("the process that opened the host's pipe cannot be read: refused".into())
+        );
     }
 
     #[test]

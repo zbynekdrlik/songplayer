@@ -57,7 +57,7 @@ fn running_status() -> AsioStatus {
 }
 
 /// SongPlayer's side shows the host's report; the host's queue drops add
-/// to its own.
+/// to its own queue's and to the blocks its link did not take.
 #[test]
 fn the_hosts_report_is_the_outputs_status_with_both_sides_drops() {
     let out = AsioOut::from_spec(&spec());
@@ -66,6 +66,10 @@ fn the_hosts_report_is_the_outputs_status_with_both_sides_drops() {
         out.push(ProgramBlock::silence(i));
     }
     assert_eq!(out.snapshot().blocks_dropped, 2);
+    // Two the host's link did not take, counted on the output too.
+    assert_eq!(out.note_unsent(), 1);
+    assert_eq!(out.note_unsent(), 2);
+    assert_eq!(out.snapshot().blocks_dropped, 4);
     out.apply_remote(AsioSnapshot {
         state: "running",
         reason: None,
@@ -76,7 +80,7 @@ fn the_hosts_report_is_the_outputs_status_with_both_sides_drops() {
     let s = out.snapshot();
     assert_eq!(
         (s.state, s.reason, s.blocks_sent, s.blocks_dropped),
-        ("running", None, 41, 7)
+        ("running", None, 41, 9)
     );
     assert_eq!(s.status, running_status());
 }

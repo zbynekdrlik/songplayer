@@ -1,12 +1,24 @@
 import { test, expect } from "@playwright/test";
 import type { OutputStatus } from "./audio-outputs-gate";
-import { SETTLE_AFTER_SPAWN_MS, spawnCounters, spawnDisturbances } from "./asio-spawn-gate";
+import {
+  PROBE_NOT_SPAWNED,
+  SETTLE_AFTER_SPAWN_MS,
+  probeSpawnFailures,
+  spawnCounters,
+  spawnDisturbances,
+} from "./asio-spawn-gate";
 
 // #233 (the spawn finding): the live gate's pure decision — a child
 // SongPlayer spawns must leave every ASIO output's resyncs and hard
 // re-centres where they were (`asio-spawn-gate.ts`), run in the mock suite.
 
-const asio = (id: string, resyncs: number, hard: number, over: Partial<OutputStatus> = {}): OutputStatus => ({
+const asio = (
+  id: string,
+  resyncs: number,
+  hard: number,
+  over: Partial<OutputStatus> = {},
+  blocks = 100,
+): OutputStatus => ({
   id,
   type: "asio",
   name: id,
@@ -18,7 +30,7 @@ const asio = (id: string, resyncs: number, hard: number, over: Partial<OutputSta
   channels: 2,
   delay_ms: 0,
   latency_ms: 70.7,
-  blocks_sent: 100,
+  blocks_sent: blocks,
   blocks_dropped: 0,
   asio: {
     driver: "Waves SoundGrid",
@@ -47,9 +59,9 @@ test.describe("ASIO spawn gate (#233)", () => {
     noClock.asio!.reason_code = "no_clock";
     const off = asio("out-4", 1, 1, { enabled: false, state: "disabled" });
     const reopening = asio("out-6", 9, 9, { state: "waiting" });
-    expect(spawnCounters([vban, asio("out-2", 35, 4), asio("out-3", 0, 0), noClock, off, reopening])).toEqual([
-      { id: "out-2", resyncs: 35, hard_recentres: 4 },
-      { id: "out-3", resyncs: 0, hard_recentres: 0 },
+    expect(spawnCounters([vban, asio("out-2", 35, 4), asio("out-3", 0, 0, {}, 7), noClock, off, reopening])).toEqual([
+      { id: "out-2", resyncs: 35, hard_recentres: 4, blocks_sent: 100 },
+      { id: "out-3", resyncs: 0, hard_recentres: 0, blocks_sent: 7 },
     ]);
     expect(spawnCounters([])).toEqual([]);
   });
@@ -72,6 +84,30 @@ test.describe("ASIO spawn gate (#233)", () => {
       "out-2: 1 driver resyncs after the spawn",
       "out-2: 1 hard re-centres after the spawn",
     ]);
+  });
+
+  // #233 review: a host that restarted between the reads starts every
+  // counter at 0 again — with no resync or re-centre before or after, only
+  // the blocks it sent tell.
+  test("a restarted host fails even with all its counters at 0", () => {
+    const before = spawnCounters([asio("out-3", 0, 0, {}, 900)]);
+    const restarted = spawnCounters([asio("out-3", 0, 0, {}, 40)]);
+    expect(spawnDisturbances(before, restarted)).toEqual([
+      "out-3: its counters went back (the ASIO host restarted?)",
+    ]);
+    const onwards = spawnCounters([asio("out-3", 0, 0, {}, 1050)]);
+    expect(spawnDisturbances(before, onwards)).toEqual([]);
+    const same = spawnCounters([asio("out-3", 0, 0, {}, 900)]);
+    expect(spawnDisturbances(before, same)).toEqual([]);
+  });
+
+  test("a probe that spawned nothing fails, any other answer passes", () => {
+    expect(probeSpawnFailures({ error: PROBE_NOT_SPAWNED })).toEqual([
+      "the probe spawned nothing: yt-dlp is not ready yet on this server",
+    ]);
+    expect(probeSpawnFailures({ error: null })).toEqual([]);
+    expect(probeSpawnFailures({ error: "Sign in to confirm you're not a bot" })).toEqual([]);
+    expect(probeSpawnFailures({})).toEqual([]);
   });
 
   test("an output that stopped or whose host restarted fails", () => {
