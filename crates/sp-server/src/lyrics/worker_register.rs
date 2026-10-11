@@ -185,7 +185,10 @@ impl LyricsWorker {
                 }
             }
             CheckOutcome::NotAsked => {}
-            CheckOutcome::Failed => back_off(&mut self.retry_backoff.lock().await),
+            CheckOutcome::Failed => {
+                let mut backoff = self.retry_backoff.lock().await;
+                back_off(&mut backoff);
+            }
             CheckOutcome::Unreadable => self.count_failed_check(video_id, &youtube_id).await,
         }
     }
