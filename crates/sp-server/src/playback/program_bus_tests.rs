@@ -69,6 +69,7 @@ pub(super) fn job(w: u32, video: &SharedFrame, stamp: i64, level: f32) -> Submit
         audio_tc_100ns: stamp + 2 * MS,
         live: true,
         media_pts_100ns: None,
+        blend: None,
     }
 }
 

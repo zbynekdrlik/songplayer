@@ -8,6 +8,8 @@ paths:
   - "crates/sp-server/src/playback/ndi_health.rs"
   - "crates/sp-server/src/api/routes_tests_clock.rs"
   - "crates/sp-server/src/playlist/selector.rs"
+  - "crates/sp-server/src/playlist/loop_memory*.rs"
+  - "crates/sp-server/src/playback/mod.rs"
   - "crates/sp-core/src/player_view.rs"
   - "crates/sp-core/src/playback.rs"
   - "sp-ui/src/components/player.rs"
@@ -196,3 +198,23 @@ the review finding on the selection: 6028419694.
 - Adding a field to `PlaylistPipeline`: THREE literals build it
   (`runtime_pipeline.rs`, `tests.rs`, `dispatch_lyrics_tests.rs`); grep
   `PlaylistPipeline {` across the crate.
+
+## Loop's song survives a restart (#229 follow-up, 11.10.2026)
+
+- **The problem.** Loop repeats the pipeline's `current_video_id`, and that
+  lives only in memory. After a restart PP's yt90s ("We Raise" only) played
+  a random song.
+- **Remembering.** Every place that sets a new current song calls
+  `playlist::loop_memory::remember_logged`, which writes V37
+  `playlists.loop_video_id`. The three places are SelectAndPlay in
+  `mod.rs`, play-video in `engine_play.rs`, and Previous. Each writes it
+  AFTER its Play went out, so a busy database never delays the picture.
+- **Selecting.** When Loop has no current song, the selector takes
+  `loop_memory::remembered`, but only while that song is still a
+  downloaded video of the playlist (for a custom playlist, one of its
+  items). Otherwise a youtube playlist picks at random as before, and a
+  custom one plays nothing.
+- **Rule for new code.** A new place that sets `current_video_id` calls
+  `remember_logged` too.
+- **Tests.** The pins are `tests_play_video.rs::a_loop_playlist_plays_its_song_again_after_a_restart`
+  and the selector's `loop_after_a_restart_*` tests.

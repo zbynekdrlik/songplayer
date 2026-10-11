@@ -105,6 +105,7 @@ fn source(w: usize, h: usize, stride: usize, video: &SharedFrame) -> SubmitJob {
         audio_tc_100ns: stamp + 77,
         live: true,
         media_pts_100ns: None,
+        blend: None,
     }
 }
 

@@ -211,6 +211,7 @@ pub fn transcripts_to_track(t: &DubTranscripts) -> LyricsTrack {
         language_source: "en".to_string(),
         language_translation: "sk".to_string(),
         lines,
+        register: None,
     }
 }
 

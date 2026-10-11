@@ -15,7 +15,9 @@
 
 use super::*;
 use crate::playback::frame_buf::SharedFrame;
-use crate::playback::pacer::{PacedFrame, PacedSink, Pacer, ServiceOutcome, Standby, StandbyBlack};
+use crate::playback::pacer::{
+    FrameBlend, PacedFrame, PacedSink, Pacer, ServiceOutcome, Standby, StandbyBlack,
+};
 use crate::playback::submit_handoff::{SUBMIT_HANDOFF_BOUND, SubmitCounters, SubmitJob};
 use crate::playback::wallclock::{SettableClock, WallClock};
 use sp_core::genlock::floor_boundary_100ns;
@@ -82,6 +84,7 @@ fn job(stamp: i64, w: u32, channels: Option<u32>) -> SubmitJob {
         audio_tc_100ns: stamp,
         live: true,
         media_pts_100ns: None,
+        blend: None,
     }
 }
 
@@ -773,6 +776,34 @@ fn the_live_consumer_thread_services_detached_boundaries_on_its_own() {
     }
     drop(handoff);
     drop(output);
+}
+
+#[test]
+fn a_blended_decoder_pair_is_live_and_carries_its_blend() {
+    // #251: the pacer blends a boundary between two frames of a source the
+    // grid does not divide; the job carries the next frame + its weight to
+    // `SP-program` and MAX, and stays the song's own (live) pair.
+    let handoff = SharedHandoff::new(SUBMIT_HANDOFF_BOUND);
+    let mut sink = HandoffSink::new(&handoff);
+    let (shown, next) = (frame(8, 0), frame(8, 40_000_000));
+    let blend = FrameBlend {
+        video: next.video.clone(),
+        weight_q8: 170,
+    };
+    sink.emit_blended(&shown, blend, &shown.audio, b(1), b(1));
+    sink.emit(&shown, &shown.audio, b(2), b(2));
+    let ConsumerStep::Submit(job) = handoff.step_now(b(10)) else {
+        panic!("a queued job");
+    };
+    assert_eq!((job.video_tc_100ns, job.live), (b(1), true));
+    assert!(job.video.ptr_eq(&shown.video), "the shown frame");
+    let got = job.blend.expect("the blend rides the job");
+    assert!(got.video.ptr_eq(&next.video), "the next frame, an Arc bump");
+    assert_eq!(got.weight_q8, 170);
+    let ConsumerStep::Submit(job) = handoff.step_now(b(10)) else {
+        panic!("a queued job");
+    };
+    assert!(job.blend.is_none(), "a plain emit shows its frame alone");
 }
 
 #[test]

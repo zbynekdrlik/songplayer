@@ -33,6 +33,7 @@ pub mod probe;
 pub mod provider;
 pub mod queue_sql; // #229: the lyrics queue's shared predicates (selector + exchange)
 pub mod reference_gate;
+pub mod register_check; // #250: the worship-register check, once per track
 pub mod renderer;
 pub mod reprocess;
 pub mod spotify_proxy;
@@ -49,6 +50,7 @@ pub mod worker;
 pub mod worker_g35t;
 pub mod worker_outcome;
 pub mod worker_reference;
+pub mod worker_register; // #250
 pub mod worker_text_tiers;
 pub mod worker_translation;
 pub mod youtube_subs;
@@ -263,6 +265,7 @@ mod tests {
                     words: None,
                 },
             ],
+            register: None,
         };
         clean_lyrics_track(&mut track);
         assert_eq!(track.lines.len(), 1);

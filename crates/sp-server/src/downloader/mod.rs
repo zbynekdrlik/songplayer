@@ -9,7 +9,9 @@
 //! cache directory.
 
 pub mod cache;
+pub mod format;
 pub mod normalize;
+pub mod probe; // #232: POST /api/v1/youtube/probe (the live YouTube gate)
 pub mod tools;
 pub mod ytdlp_cmd;
 
@@ -48,30 +50,6 @@ pub fn apply_utf8_env(cmd: &mut tokio::process::Command) {
     cmd.env("PYTHONIOENCODING", "utf-8");
 }
 
-/// Maximum video resolution height for downloads.
-const MAX_RESOLUTION: u32 = 1440;
-
-/// yt-dlp format selector. Uses `/` fallback chain so yt-dlp walks each
-/// option in order and picks the first one YouTube actually serves.
-///
-/// Order:
-/// 1. AV1 MP4 (highest quality per byte, decoded fine by MF's AV1 transform).
-/// 2. H.264 via HLS (`protocol*=m3u8`). Different encoder/muxer path than
-///    DASH. Some H.264 1080p DASH variants (observed on `xrhVLX6vwPk` THE
-///    DEEP on 2026-04-23) generate an SPS that Windows Media Foundation's
-///    hardware transform rejects — every `ReadSample` returns EOS on the
-///    first call, producing `frame_count=0`. The HLS 1080p MP4 for the same
-///    video is a distinct encode that MF decodes cleanly.
-/// 3. Plain `bestvideo` as last-resort.
-fn format_spec() -> String {
-    format!(
-        "bv*[height<={max}][vcodec^=av01]/\
-         bv*[height<={max}][protocol*=m3u8][vcodec^=avc1]/\
-         bv*[height<={max}]",
-        max = MAX_RESOLUTION
-    )
-}
-
 /// Download timeout in seconds.
 const DOWNLOAD_TIMEOUT: u64 = 600;
 
@@ -101,6 +79,12 @@ pub(crate) fn ytdlp_video_args(
         "--remux-video".into(),
         "mp4".into(),
         "--no-part".into(),
+        // #223 S9a: a leftover temp of a crashed run is overwritten, never
+        // taken for the download.
+        "--force-overwrites".into(),
+        // #223 S9b: what was really fetched, printed once it is in place.
+        "--print".into(),
+        format::FORMAT_PRINT.into(),
         "-o".into(),
         output.into(),
     ];
@@ -149,6 +133,13 @@ pub(crate) fn ytdlp_audio_args(
 /// turn — an update waits for the in-flight song, a download waits for the
 /// swap — instead of the update silently failing on a file lock.
 pub type YtdlpLock = std::sync::Arc<tokio::sync::Mutex<()>>;
+
+/// The process's one [`YtdlpLock`] (#223 S11: the video upgrade takes it
+/// too, so it is no longer only the startup task's).
+pub fn ytdlp_lock() -> YtdlpLock {
+    static LOCK: std::sync::OnceLock<YtdlpLock> = std::sync::OnceLock::new();
+    LOCK.get_or_init(YtdlpLock::default).clone()
+}
 
 /// Background worker that downloads, extracts metadata, and normalizes videos.
 pub struct DownloadWorker {
@@ -280,17 +271,22 @@ impl DownloadWorker {
         let audio_temp_base = self
             .cache_dir
             .join(format!("{}_audio_temp", row.youtube_id));
+        // #223 S9a: a crashed run's temps never stay next to the song.
+        cleanup_temps(&video_temp, &self.cache_dir, &row.youtube_id);
 
-        if let Err(e) = self
+        let fetched = match self
             .download_video_stream(&row.youtube_id, &video_temp)
             .await
         {
-            tracing::error!(video_id = %row.youtube_id, "video download failed: {e}");
-            cleanup_temps(&video_temp, &self.cache_dir, &row.youtube_id);
-            self.record_failure(row.id, &row.youtube_id, &e.to_string())
-                .await;
-            return false;
-        }
+            Ok(fetched) => fetched,
+            Err(e) => {
+                tracing::error!(video_id = %row.youtube_id, "video download failed: {e}");
+                cleanup_temps(&video_temp, &self.cache_dir, &row.youtube_id);
+                self.record_failure(row.id, &row.youtube_id, &e.to_string())
+                    .await;
+                return false;
+            }
+        };
 
         let audio_temp = match self
             .download_audio_stream(&row.youtube_id, &audio_temp_base)
@@ -362,6 +358,12 @@ impl DownloadWorker {
             return false;
         }
 
+        // #223 S9b: what was really fetched, NULL when yt-dlp printed no
+        // format line (a failed write is only logged).
+        if let Err(e) = format::record(&self.pool, row.id, fetched.as_ref()).await {
+            tracing::warn!(video_id = %row.youtube_id, "download: recording the video format failed: {e}");
+        }
+
         let _ = self.event_tx.send(format!("processed:{}", row.youtube_id));
         tracing::info!(video_id = %row.youtube_id, "video processed successfully");
         true
@@ -379,14 +381,19 @@ impl DownloadWorker {
         }
     }
 
-    /// Download the video stream only via yt-dlp.
+    /// Download the video stream only via yt-dlp; what it really fetched
+    /// (`None` when yt-dlp printed no format line).
     async fn download_video_stream(
         &self,
         video_id: &str,
         output: &Path,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<Option<format::DownloadedFormat>, anyhow::Error> {
         let url = format!("https://www.youtube.com/watch?v={video_id}");
-        let format_spec = format_spec();
+        // #223 S9a: the cap is read live at every download (S10b: with the
+        // decode path).
+        let cap = format::live_cap(&self.pool).await;
+        tracing::info!(video_id, cap, "download: video stream at most {cap} rows");
+        let format_spec = format::format_spec(cap);
         let ffmpeg_dir = self
             .tools
             .ffmpeg
@@ -416,7 +423,21 @@ impl DownloadWorker {
                 stderr
             );
         }
-        Ok(())
+        let stdout = String::from_utf8_lossy(&child_output.stdout);
+        let fetched = format::parse_downloaded_format(&stdout);
+        match &fetched {
+            Some(f) => tracing::info!(
+                video_id,
+                format_id = %f.format_id,
+                codec = ?f.codec,
+                width = ?f.width,
+                height = ?f.height,
+                fps = ?f.fps,
+                "download: the video stream fetched"
+            ),
+            None => tracing::warn!(video_id, "download: yt-dlp printed no format line"),
+        }
+        Ok(fetched)
     }
 
     /// Download the best audio stream only via yt-dlp. Returns the actual

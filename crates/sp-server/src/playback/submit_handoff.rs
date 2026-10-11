@@ -29,7 +29,7 @@ use sp_ndi::AudioFrame;
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::PacingStats;
-use crate::playback::pacer::PacedFrame;
+use crate::playback::pacer::{FrameBlend, PacedFrame};
 
 /// Handoff depth (grid slots the submit thread may fall behind before a
 /// coalesce). Box test 5: median submit 25 ms < the 33.3 ms slot, p99 ~90 ms
@@ -83,6 +83,10 @@ pub struct SubmitJob {
     /// standby, fill and NDI input pair. `SP-program` turns it into the
     /// item's frame index (`program_item.rs`, the 911014 burn).
     pub media_pts_100ns: Option<i64>,
+    /// #251: the next decoded frame this boundary's picture is blended toward
+    /// (the pacer's `emit_blended`, a source the grid does not divide); `None`
+    /// shows `video` alone. `SP-program` paints it in its canvas, MAX draws it.
+    pub blend: Option<FrameBlend>,
 }
 
 impl SubmitJob {
@@ -115,6 +119,7 @@ impl SubmitJob {
             audio_tc_100ns,
             live,
             media_pts_100ns: live.then_some(frame.pts_ns / 100),
+            blend: None,
         }
     }
 }

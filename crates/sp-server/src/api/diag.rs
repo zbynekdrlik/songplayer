@@ -87,6 +87,68 @@ pub async fn post_decode_bench(
     }
 }
 
+/// The body of `POST /api/v1/diag/fit-bench` (#223 S10a).
+#[derive(Debug, Deserialize)]
+pub struct FitBenchRequest {
+    /// The source picture's size: even, up to 3840×2160.
+    pub width: u32,
+    pub height: u32,
+    /// Fits (and fades) to time, 1 to 600.
+    pub frames: u32,
+}
+
+/// `POST /api/v1/diag/fit-bench` (#223 S10a, `diag::fit_bench`): the program
+/// canvas fit and fade of a `width`×`height` picture on the box. 200 with the
+/// report; 400 for a size or count out of range; 409 while a bench (this one
+/// or the decode bench: one at a time) runs; 500 when its thread failed.
+pub async fn post_fit_bench(
+    State(state): State<AppState>,
+    Json(req): Json<FitBenchRequest>,
+) -> Response {
+    use crate::diag::fit_bench;
+    let refuse = |status: StatusCode, why: String| {
+        info!(width = req.width, height = req.height, frames = req.frames, %status, %why, "fit-bench: no report");
+        (status, why).into_response()
+    };
+    if let Err(why) = fit_bench::check(req.width, req.height, req.frames) {
+        return refuse(StatusCode::BAD_REQUEST, why.to_string());
+    }
+    let Some(slot) = state.decode_bench.try_start() else {
+        return refuse(
+            StatusCode::CONFLICT,
+            "a bench run is in progress".to_string(),
+        );
+    };
+    let bands =
+        crate::playback::program_transition::mix_bands(crate::lyrics::heavy_slot::logical_cores());
+    let (width, height, frames) = (req.width, req.height, req.frames);
+    info!(width, height, frames, bands, "fit-bench: start");
+    let run = tokio::task::spawn_blocking(move || {
+        let report = fit_bench::run(width, height, frames, bands);
+        drop(slot);
+        report
+    })
+    .await;
+    match run {
+        Ok(report) => {
+            info!(
+                width, height, frames, bands = report.bands,
+                fit_us = ?report.fit_us, fade_us = ?report.fade_us,
+                over_budget = report.over_budget, "fit-bench: done"
+            );
+            Json(report).into_response()
+        }
+        Err(e) => {
+            warn!(%e, "fit-bench: the run failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("fit-bench failed: {e}"),
+            )
+                .into_response()
+        }
+    }
+}
+
 /// A report's status: 500 when the decoder failed (the body still carries
 /// the report), else 200.
 fn report_status(report: &BenchReport) -> StatusCode {
@@ -100,3 +162,6 @@ fn report_status(report: &BenchReport) -> StatusCode {
 #[cfg(test)]
 #[path = "diag_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "diag_tests_fit.rs"]
+mod tests_fit;

@@ -166,6 +166,46 @@ pub fn video_hw_decode(raw: Option<&str>) -> bool {
     raw.map_or(DEFAULT_VIDEO_HW_DECODE, |v| v.trim() == "true")
 }
 
+/// #223 S12: the automatic in-place video upgrade (`video_upgrade::worker`).
+/// OFF until its safety net is on the box; read at every tick.
+pub const SETTING_VIDEO_UPGRADE_ENABLED: &str = "video_upgrade_enabled";
+
+/// #223 S12: whether a stored `video_upgrade_enabled` turns the worker on:
+/// ON only for an explicit `"true"` (trimmed).
+pub fn video_upgrade_enabled(raw: Option<&str>) -> bool {
+    raw.is_some_and(|v| v.trim() == "true")
+}
+
+/// #223 S13: what Nastavenia's "Najvyššie rozlíšenie sťahovania" offers;
+/// `""` = automatic (2160 with GPU decoding, else 1440).
+pub const MAX_RESOLUTION_CHOICES: [&str; 5] = ["", "2160", "1440", "1080", "720"];
+
+/// #223 S13: the select's value for a stored `max_resolution`: the stored
+/// value trimmed (a value set through the API that is no choice is shown as
+/// itself, never as "automatic"), unset = `""`.
+pub fn max_resolution_choice(loaded: Option<&str>) -> String {
+    loaded.map_or(String::new(), |v| v.trim().to_string())
+}
+
+/// #223 S13: the `max_resolution` a Nastavenia save sends: only a choice
+/// that differs from the value the page loaded (#229's rule).
+pub fn max_resolution_to_send(loaded: Option<&str>, chosen: &str) -> Option<String> {
+    let chosen = chosen.trim();
+    (max_resolution_choice(loaded) != chosen).then(|| chosen.to_string())
+}
+
+/// #223 S13: the `video_hw_decode` a Nastavenia save sends: only when the
+/// checkbox differs from the value the page loaded.
+pub fn video_hw_decode_to_send(loaded: Option<&str>, checked: bool) -> Option<String> {
+    (video_hw_decode(loaded) != checked).then(|| checked.to_string())
+}
+
+/// #223 S13: the `video_upgrade_enabled` a Nastavenia save sends: only
+/// when the checkbox differs from the value the page loaded.
+pub fn video_upgrade_to_send(loaded: Option<&str>, checked: bool) -> Option<String> {
+    (video_upgrade_enabled(loaded) != checked).then(|| checked.to_string())
+}
+
 /// #233: the program's audio outputs, one JSON list (`crate::audio_outputs`).
 pub const SETTING_AUDIO_OUTPUTS: &str = "audio_outputs";
 /// #233: the audio network's sample rate, Hz; an output whose rate is
@@ -284,7 +324,12 @@ pub fn is_blank_scene(scene: &str) -> bool {
 pub const DEFAULT_OBS_WEBSOCKET_URL: &str = "ws://127.0.0.1:4455";
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-pro-preview";
 pub const DEFAULT_CACHE_DIR: &str = "cache";
-pub const DEFAULT_MAX_RESOLUTION: u32 = 1440;
+/// #223 S10b: a download's height cap when `max_resolution` is unset and
+/// hardware video decode is on (G3, comment 6102650616).
+pub const DEFAULT_MAX_RESOLUTION: u32 = 2160;
+/// #223 S10b: the cap when `max_resolution` is unset and hardware video
+/// decode is off: software decodes 4K at 77–85 % of the period.
+pub const DEFAULT_MAX_RESOLUTION_SOFTWARE: u32 = 1440;
 /// The `dub_voice` value meaning "the speaker's own voice" (no `speech_config`).
 pub const DUB_VOICE_SPEAKER: &str = "speaker";
 /// The default dub voice — the speaker's own voice (#184 round H step 2).
@@ -519,6 +564,55 @@ mod tests {
         assert!(!video_hw_decode(Some("")), "an empty value = OFF");
         assert!(!video_hw_decode(Some("TRUE")), "only the exact word");
         assert!(!video_hw_decode(Some("yes")), "a mangled value = OFF");
+    }
+
+    #[test]
+    fn the_cap_choice_shows_the_stored_value_and_sends_only_a_change() {
+        assert_eq!(MAX_RESOLUTION_CHOICES, ["", "2160", "1440", "1080", "720"]);
+        assert_eq!(max_resolution_choice(None), "");
+        assert_eq!(max_resolution_choice(Some(" 1440 ")), "1440");
+        assert_eq!(max_resolution_choice(Some("1800")), "1800", "an API value");
+        assert_eq!(max_resolution_to_send(None, ""), None);
+        assert_eq!(max_resolution_to_send(Some("1440"), " 1440"), None);
+        assert_eq!(
+            max_resolution_to_send(None, "1080"),
+            Some("1080".to_string())
+        );
+        assert_eq!(
+            max_resolution_to_send(Some("2160"), ""),
+            Some(String::new())
+        );
+    }
+
+    #[test]
+    fn the_video_switches_are_sent_only_when_changed() {
+        assert_eq!(video_hw_decode_to_send(None, false), None);
+        assert_eq!(video_hw_decode_to_send(Some("true"), true), None);
+        assert_eq!(
+            video_hw_decode_to_send(None, true),
+            Some("true".to_string())
+        );
+        assert_eq!(
+            video_hw_decode_to_send(Some("true"), false),
+            Some("false".to_string())
+        );
+        assert_eq!(video_upgrade_to_send(None, false), None);
+        assert_eq!(video_upgrade_to_send(Some("true"), true), None);
+        assert_eq!(video_upgrade_to_send(None, true), Some("true".to_string()));
+        assert_eq!(
+            video_upgrade_to_send(Some("true"), false),
+            Some("false".to_string())
+        );
+    }
+
+    #[test]
+    fn video_upgrade_is_off_unless_the_setting_says_true() {
+        assert_eq!(SETTING_VIDEO_UPGRADE_ENABLED, "video_upgrade_enabled");
+        assert!(!video_upgrade_enabled(None), "no setting = OFF");
+        assert!(video_upgrade_enabled(Some(" true\n")), "trimmed");
+        for off in ["false", "", "TRUE", "yes"] {
+            assert!(!video_upgrade_enabled(Some(off)), "{off:?}");
+        }
     }
 
     #[test]

@@ -31,22 +31,28 @@ const PORT_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// Max polls (≤ 10 s at 250 ms) before startup proceeds regardless (#196).
 const PORT_WAIT_MAX_POLLS: u32 = 40;
 
-/// The first TCP port the NDI runtime assigns to a sender on this box. NDI
-/// hands out ports sequentially from here in sender-creation order (#196).
+/// The first port of this process's NDI runtime: `NDIlib_initialize` listens
+/// on it, and the senders take the ports after it in creation order (#196,
+/// #240: SongPlayer listens on 5960 + SP-program's 5961; 10 senders once
+/// ended at 5970).
 pub const NDI_PORT_BASE: u16 = 5960;
 
 /// The NDI senders SongPlayer creates: `SP-program` alone (#221 lane 3).
 pub const NDI_SENDERS: usize = 1;
 
-/// The port range to probe-bind before creating the first sender: the base
-/// plus one port per sender plus a small margin (`base..=base+N+1`), so an
-/// immediate restart waits until the previous instance released the whole
-/// span it could have used.
+/// The port range to probe-bind before creating the first sender: the
+/// senders' own ports, `base+1..=base+N`, so an immediate restart waits until
+/// the previous instance released them. Not the base (#240): this process's
+/// own runtime already holds it — `NDIlib_initialize` runs when the engine
+/// starts, before the wait — so it is never free to probe (SNV 10.10.2026:
+/// `busy=[5960]`, 5961 free). Not a "margin" past them either: the next ports
+/// belong to the box's other NDI processes (cg OBS's runtime + sender on
+/// 5962 + 5963), which never free them, so a span naming one waited the full
+/// bound at every start.
 pub fn ndi_port_range(n_outputs: usize) -> Vec<u16> {
-    let last = NDI_PORT_BASE
-        .saturating_add(u16::try_from(n_outputs).unwrap_or(u16::MAX))
-        .saturating_add(1);
-    (NDI_PORT_BASE..=last).collect()
+    let first = NDI_PORT_BASE.saturating_add(1);
+    let last = NDI_PORT_BASE.saturating_add(u16::try_from(n_outputs).unwrap_or(u16::MAX));
+    (first..=last).collect()
 }
 
 /// The active playlists to create pipelines for, in DETERMINISTIC creation
@@ -116,16 +122,20 @@ where
 }
 
 /// Real port prober: a port is "free" iff a TCP listener can bind it on all
-/// interfaces. Binds and immediately drops each listener.
+/// interfaces. Binds and immediately drops the listener.
 ///
 /// mutants::skip — I/O over the real network stack; not exercised on the
 /// mutation runner. The pure wait loop it feeds (`wait_for_ports_free`) is
 /// unit-tested with a fake prober.
 #[cfg_attr(test, mutants::skip)]
+pub fn ndi_port_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("0.0.0.0", port)).is_ok()
+}
+
+/// Every port of `ports` free ([`ndi_port_free`]).
+#[cfg_attr(test, mutants::skip)] // I/O, as above
 pub fn ndi_ports_free(ports: &[u16]) -> bool {
-    ports
-        .iter()
-        .all(|&p| std::net::TcpListener::bind(("0.0.0.0", p)).is_ok())
+    ports.iter().all(|&p| ndi_port_free(p))
 }
 
 /// #196: wait (≤ 10 s, on a blocking thread so the async startup is never
@@ -156,11 +166,20 @@ pub async fn wait_for_program_ports() {
             ?ports,
             polls, "ndi: the SP-program port span freed after waiting for the previous instance"
         ),
-        PortWaitOutcome::TimedOut(polls) => warn!(
-            ?ports,
-            polls,
-            "ndi: the SP-program port span still busy after the wait — proceeding (its port may shift this restart)"
-        ),
+        PortWaitOutcome::TimedOut(polls) => {
+            // #240: name the ports still held, so a WARN shows WHICH one.
+            let busy: Vec<u16> = ports
+                .iter()
+                .copied()
+                .filter(|&p| !ndi_port_free(p))
+                .collect();
+            warn!(
+                ?ports,
+                ?busy,
+                polls,
+                "ndi: the SP-program port span still busy after the wait — proceeding (its port may shift this restart)"
+            )
+        }
     }
 }
 
@@ -214,27 +233,31 @@ mod tests {
         assert_eq!(startup_mode(&playlists, 9), PlaybackMode::Continuous);
     }
 
+    /// #240: the span is SP-program's own sender port, 5961: 5960 is this
+    /// process's own NDI runtime listener, taken at `NDIlib_initialize`
+    /// (before the wait), so it is never free to probe (SNV, 10.10.2026:
+    /// `busy=[5960]` while 5961 was free); and never a "margin" port past
+    /// the senders — cg OBS's runtime + sender listen on 5962 + 5963.
     #[test]
-    fn the_program_s_port_span_is_the_base_pair_plus_one() {
-        // SP-program alone: 5960 (its port) .. 5962 (the margin).
+    fn the_program_s_port_span_is_its_sender_port() {
         assert_eq!(NDI_SENDERS, 1);
-        assert_eq!(ndi_port_range(NDI_SENDERS), vec![5960, 5961, 5962]);
+        assert_eq!(ndi_port_range(NDI_SENDERS), vec![5961]);
     }
 
     #[test]
-    fn port_range_is_base_through_base_plus_n_plus_one() {
-        assert_eq!(ndi_port_range(3), vec![5960, 5961, 5962, 5963, 5964]);
+    fn port_range_is_the_ports_after_the_runtime_s() {
+        assert_eq!(ndi_port_range(3), vec![5961, 5962, 5963]);
     }
 
     #[test]
-    fn port_range_zero_outputs_still_covers_base_pair() {
-        assert_eq!(ndi_port_range(0), vec![5960, 5961]);
+    fn port_range_zero_outputs_is_empty() {
+        assert_eq!(ndi_port_range(0), Vec::<u16>::new());
     }
 
     #[test]
     fn port_range_saturates_instead_of_overflowing_u16() {
         let ports = ndi_port_range(usize::MAX);
-        assert_eq!(ports.first(), Some(&NDI_PORT_BASE));
+        assert_eq!(ports.first(), Some(&(NDI_PORT_BASE + 1)));
         assert_eq!(ports.last(), Some(&u16::MAX));
     }
 

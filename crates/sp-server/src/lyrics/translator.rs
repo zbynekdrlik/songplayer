@@ -281,6 +281,7 @@ mod tests {
                     words: None,
                 })
                 .collect(),
+            register: None,
         }
     }
 

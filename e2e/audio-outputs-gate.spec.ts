@@ -22,7 +22,7 @@ const foh = (blocks: number, over: Partial<OutputStatus> = {}): OutputStatus => 
   enabled: true,
   state: "running",
   reason: null,
-  rate: 48000,
+  rate: 96000,
   format: "int24",
   channels: 2,
   delay_ms: 0,
@@ -47,7 +47,7 @@ function packet(sr: number, frames: number, bit: number, name: string, counter: 
 }
 
 test.describe("audio outputs gate (#233)", () => {
-  test("FOH sending 48 kHz INT24 sp-program passes", () => {
+  test("FOH sending 96 kHz INT24 sp-program passes", () => {
     expect(fohPathFailures([foh(100)], [foh(130)])).toEqual([]);
     expect(fohPathFailures([foh(100)], [foh(125)]), "exactly 25 blocks").toEqual([]);
   });
@@ -60,11 +60,11 @@ test.describe("audio outputs gate (#233)", () => {
     expect(fohPathFailures([foh(100)], [lv1])).toEqual(["no VBAN output to fohabl.lan:6980"]);
   });
 
-  test("a FOH output moved off 48 kHz INT24 fails with each reason", () => {
-    const moved = foh(130, { rate: 96000, format: "int16", state: "waiting", reason: "no IPv4 address" });
+  test("a FOH output moved off 96 kHz INT24 fails with each reason", () => {
+    const moved = foh(130, { rate: 48000, format: "int16", state: "waiting", reason: "no IPv4 address" });
     expect(fohPathFailures([foh(100)], [moved])).toEqual([
       "the FOH output is waiting (no IPv4 address)",
-      "the FOH output runs at 96000 Hz, not 48000",
+      "the FOH output runs at 48000 Hz, not 96000",
       "the FOH output sends int16, not int24",
     ]);
     const renamed = foh(130, { delay_ms: 20, state: "opening" });

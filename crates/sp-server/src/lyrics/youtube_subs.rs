@@ -161,6 +161,7 @@ pub fn parse_json3(content: &str) -> Result<Option<LyricsTrack>> {
         language_source: "en".to_string(),
         language_translation: String::new(),
         lines,
+        register: None,
     }))
 }
 

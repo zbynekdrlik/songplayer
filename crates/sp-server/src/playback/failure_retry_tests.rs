@@ -862,3 +862,29 @@ async fn a_retry_still_pending_after_its_playlist_came_on_program_says_so() {
         "it is SP-program's source now: {failures}"
     );
 }
+
+/// #223 S12b: a failed open of an upgraded song puts its old video back
+/// (`video_upgrade::rollback`, run as a task the engine does not wait on).
+#[tokio::test]
+async fn a_failed_open_of_an_upgraded_song_puts_its_old_video_back() {
+    let mut rig = rig_with(&[SONGS[0]]).await;
+    let dir = tempfile::tempdir().unwrap();
+    let video = dir.path().join("S_A_yt22911aaaa_normalized_video.mp4");
+    let prev = crate::video_upgrade::swap::prev_path(&video);
+    std::fs::write(&video, "new").unwrap();
+    std::fs::write(&prev, "old").unwrap();
+    sqlx::query("UPDATE videos SET file_path = ?, video_upgrade_state = 'upgraded' WHERE id = ?")
+        .bind(video.to_str().unwrap())
+        .bind(SONGS[0])
+        .execute(&rig.engine.pool)
+        .await
+        .unwrap();
+    start(&mut rig.engine).await;
+    fail(&mut rig.engine).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while prev.exists() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(std::fs::read_to_string(&video).unwrap(), "old");
+    assert!(!prev.exists());
+}

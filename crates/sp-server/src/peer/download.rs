@@ -174,6 +174,11 @@ pub(crate) async fn adopt(
         &audio,
     )
     .await?;
+    // #223 S9b: the files are the peer's now; what this node once recorded
+    // about its own download's format no longer describes them.
+    if let Err(e) = crate::downloader::format::record(&ex.pool, row.id, None).await {
+        warn!(youtube_id = %row.youtube_id, %e, "exchange: forgetting the replaced files' video format failed");
+    }
     Ok(written_title(taken, &recorded))
 }
 

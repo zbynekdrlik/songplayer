@@ -887,3 +887,91 @@ async fn a_play_off_air_that_goes_on_program_is_broadcast_on_program() {
         "once, by the pause"
     );
 }
+
+/// An engine on `pool` with a pipeline for playlist 10 (SP-fast).
+fn loop_engine(pool: sqlx::SqlitePool) -> PlaybackEngine {
+    let (obs_tx, _) = broadcast::channel(16);
+    let (resolume_tx, _) = mpsc::channel(16);
+    let (ws_tx, _) = broadcast::channel::<ServerMsg>(64);
+    let mut engine = PlaybackEngine::new(PlaybackEngineConfig {
+        pool,
+        cache_dir: std::path::PathBuf::from("/tmp/test-cache"),
+        obs_event_tx: obs_tx,
+        obs_cmd_tx: None,
+        resolume_tx,
+        ws_event_tx: ws_tx,
+        presenter_client: None,
+        ndi_health_registry: std::sync::Arc::new(
+            crate::playback::ndi_health::NdiHealthRegistry::new(),
+        ),
+    });
+    engine.ensure_pipeline(10, "SP-fast");
+    engine
+}
+
+/// #229 follow-up (PP's yt90s, 11.10.2026): the song an operator picked
+/// for a Loop playlist is still its song after a restart. The engine
+/// remembers every new current song (a pick, a selection); a fresh engine
+/// (the restart) in Loop plays that one, out of twenty.
+#[tokio::test]
+async fn a_loop_playlist_plays_its_song_again_after_a_restart() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO playlists (id, name, youtube_url, ndi_output_name, is_active) \
+         VALUES (10, 'p', 'u', 'SP-fast', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    for id in 100..120_i64 {
+        sqlx::query(
+            "INSERT INTO videos (id, playlist_id, youtube_id, normalized, file_path, audio_file_path) \
+             VALUES (?, 10, ?, 1, '/cache/v_video.mp4', '/cache/v_audio.flac')",
+        )
+        .bind(id)
+        .bind(format!("yt{id}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let remembered = |pool: sqlx::SqlitePool| async move {
+        sqlx::query_scalar::<_, Option<i64>>("SELECT loop_video_id FROM playlists WHERE id = 10")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    // A selection (a ▶ with nothing paused) is remembered.
+    let mut engine = loop_engine(pool.clone());
+    engine.handle_engine_play(10).await;
+    let selected = engine.pipelines.get(&10).unwrap().current_video_id;
+    assert!(selected.is_some());
+    assert_eq!(remembered(pool.clone()).await, selected);
+
+    // The operator's pick is remembered.
+    engine.handle_play_video(10, 113, None).await;
+    assert_eq!(remembered(pool.clone()).await, Some(113));
+    // Previous is remembered too: 114, then back to 113.
+    engine.handle_play_video(10, 114, None).await;
+    assert_eq!(remembered(pool.clone()).await, Some(114));
+    engine.handle_previous(10).await;
+    assert_eq!(
+        engine.pipelines.get(&10).unwrap().current_video_id,
+        Some(113)
+    );
+    assert_eq!(remembered(pool.clone()).await, Some(113));
+    drop(engine);
+
+    // The restart: a fresh engine in Loop has no current song in memory.
+    for _ in 0..5 {
+        let mut engine = loop_engine(pool.clone());
+        engine.pipelines.get_mut(&10).unwrap().mode = PlaybackMode::Loop;
+        engine.handle_engine_play(10).await;
+        assert_eq!(
+            engine.pipelines.get(&10).unwrap().current_video_id,
+            Some(113),
+            "Loop after a restart plays the picked song, not a random one"
+        );
+    }
+}

@@ -44,7 +44,7 @@ exclude_re = [
   #   shutdown test, which is all a terminating test can observe of it.
   'reprocess/mod\.rs:[0-9]+:[0-9]+:.*ReprocessWorker::run',
   'sp-server/src/api/websocket',          # WS upgrade flow, integration-tested
-  'sp-server/src/playlist/',              # shells out to yt-dlp
+  'sp-server/src/playlist/mod\.rs',        # the sync shells out to yt-dlp (selector.rs + loop_memory.rs are gated)
   # dabing/worker.rs::process_next: the dub worker's per-tick orchestrator —
   #   venv-python gate + google-genai probe + the Gemini Live-Translate child
   #   (tokio::process) + a 60 s #167 startup floor + the heavy-slot memory guard.

@@ -56,6 +56,12 @@ absence. `auth-dir` / `host` / `port` / `request-retry` / `claude-api-key` uncha
   (`translator::classify_zero_translation`), so it is never a silent "parse
   returned 0" again.
 
+## The providers table (#232)
+
+`docs/ai-providers.md` lists every external AI / lyrics provider, its
+model, its credential setting and the post-deploy gate that checks it
+live. A change of provider, model or gate updates it in the same push.
+
 ## A refused call waits out the proxy's credential cooldown (#145, `ai/retry.rs`)
 
 CLIProxyAPI (8.0.4 source, read on #145 comment 5909663225) cools its one
@@ -110,3 +116,40 @@ failed 502 → 503 in 4 ms → fail).
   largest `Retry-After`) before it fails. The metadata probe bounds each
   provider at 180 s, so a Claude that keeps being refused reports there as
   a timeout.
+
+## A refused login: `auth_unavailable … last upstream error: token: …` (#232, 11.10.2026)
+
+The post-deploy "Verify AI proxy healthy" step fails with a 503 whose body
+does NOT say `auth_unavailable` in the parsed detail. `proxy_probe.py
+claude-opus-5-5` then reads `auth_unavailable: no auth available … last
+upstream error: token: [REDACTED] "error_description":`. That is the OAuth
+refresh being refused, not the 60 s cooldown the step waits out.
+
+- **Read the facts without secrets:** each `cache/.cli-proxy-api/*.json`
+  file's `type`, `expired` and `last_refresh` only. Never print a token,
+  an address or a file name; the file names hold the account address.
+  `expired` in the past plus the 503 means the access token ran out and its
+  refresh failed.
+- **Transient or permanent:** kill the proxy's pid. The SongPlayer
+  watchdog respawns it within ~30 s, and it refreshes every credential at
+  start. The same 503 after the respawn means permanent: the stored refresh
+  token is dead.
+- **Rule out a second refresher:** Anthropic rotates refresh tokens, so
+  another proxy refreshing the same account kills this one's token. Check
+  PP's `GET /api/v1/ai/status` (`running`), and that no backup auth dir is
+  served.
+- **The fix is the owner's browser re-login, through SongPlayer's own
+  routes:**
+  1. `POST /api/v1/ai/proxy/login` starts `CLIProxyAPI -claude-login
+     -no-browser` and answers Claude's authorize URL (no secret in it).
+  2. The owner logs in through that URL. His browser lands on
+     `http://localhost:54545/callback?code=…&state=…`, which fails because
+     the proxy is on SNV, and he copies that address.
+  3. The address carries a one-time code, so it comes in through
+     `airuleset.py secret request <NAME>` (the page holds at most 1 h).
+  4. `secret exec <NAME> -- <script>` posts it to `POST
+     /api/v1/ai/proxy/complete-login {"callback_url"}`, which forwards it to
+     the login process and restarts the proxy.
+  5. Verify with `proxy_probe.py` → 200, then re-run the CI E2E job.
+- Until then, every CI E2E on win-resolume stops at that step, and the
+  post-deploy specs after it do not run: a release waits for the re-login.

@@ -127,6 +127,9 @@ impl PlaybackEngine {
             // played by hand. #229: it is recorded when it really starts
             // (`song_started`), so a song that never opened is not played.
             pp.record_on_start = Some(video_id);
+            // #229 follow-up: Loop plays this song after a restart too
+            // (written after the Play went out: never on its way).
+            crate::playlist::loop_memory::remember_logged(&self.pool, playlist_id, video_id).await;
 
             // #170: a PlayVideo on an off-program playlist shows
             // WaitingForScene (the WS replay re-tells it, #225); #201: the

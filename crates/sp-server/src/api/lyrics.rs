@@ -114,13 +114,17 @@ pub struct SongListItem {
     pub reference_rejected_at: Option<String>,
     /// #144 F4: the owner's note with that mark (`lyrics_reference_note`).
     pub reference_note: Option<String>,
+    /// #250: the verdict of the track's one register check
+    /// (`lyrics_register_verdict`: `ok`, `fixed`, `flagged`, `refused`);
+    /// `None` = not checked yet. `flagged` = lines marked for the operator.
+    pub register_verdict: Option<String>,
 }
 
 /// The `videos` columns a [`SongListItem`] is read from.
 const SONG_COLUMNS: &str = "id, youtube_id, title, song, artist, lyrics_source, \
      lyrics_pipeline_version, lyrics_quality_score, has_lyrics, lyrics_manual_priority, \
      suppress_resolume_en, lyrics_reference, lyrics_translation_gender, \
-     lyrics_reference_rejected_at, lyrics_reference_note";
+     lyrics_reference_rejected_at, lyrics_reference_note, lyrics_register_verdict";
 
 /// One `videos` row (read with [`SONG_COLUMNS`]) as the lyrics song list
 /// shows it — the list and the detail route share it.
@@ -155,6 +159,10 @@ fn list_item_from(r: &sqlx::sqlite::SqliteRow) -> SongListItem {
             .flatten(),
         reference_note: r
             .try_get::<Option<String>, _>("lyrics_reference_note")
+            .ok()
+            .flatten(),
+        register_verdict: r
+            .try_get::<Option<String>, _>("lyrics_register_verdict")
             .ok()
             .flatten(),
     }

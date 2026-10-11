@@ -344,3 +344,20 @@ async fn a_masked_peer_key_cannot_follow_a_new_base_url() {
         serde_json::from_str(&stored(&state.pool, SETTING_PEERS).await.unwrap()).unwrap();
     assert_eq!(kept, vec![snv()], "the stored peer is untouched");
 }
+
+/// #223 S9a: `max_resolution` takes 480..=2160 (stored trimmed) or "" —
+/// anything else is refused and nothing is written.
+#[tokio::test]
+async fn max_resolution_takes_480_to_2160_and_refuses_the_rest() {
+    let state = test_state().await;
+    let key = sp_core::config::SETTING_MAX_RESOLUTION;
+
+    let (status, text) = patch(&state, &body(&[(key, "4320")])).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{text}");
+    assert!(text.contains(key), "the reason names the setting: {text}");
+    assert_eq!(stored(&state.pool, key).await, None);
+
+    let (status, text) = patch(&state, &body(&[(key, " 2160 ")])).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{text}");
+    assert_eq!(stored(&state.pool, key).await.as_deref(), Some("2160"));
+}

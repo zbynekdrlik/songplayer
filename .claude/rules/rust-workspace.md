@@ -395,6 +395,12 @@ failed on them (`36438006665`):
   generic `R: Fn(&Path, &Path)` seam: write `.as_path()`. A small private
   trait seam (`downloader::cache::FileOps`, #136) avoids the trap
   entirely, because trait method calls DO coerce their arguments.
+- **`f(&mut x.lock().await)` does NOT deref-coerce a guard → E0308** (#250,
+  CI 38144806669). `back_off(&mut self.retry_backoff.lock().await)` with
+  `fn back_off(b: &mut RetryBackoff)` failed: "expected `RetryBackoff`,
+  found `MutexGuard<'_, RetryBackoff>`", while `let mut g = …lock().await;
+  back_off(&mut g);` in the same file compiled. Bind the guard to a local
+  first.
 - **Splitting a fn: a `String` param that becomes `&str` leaves
   `f(&req_id)` behind → `clippy::needless_borrow`** (#221, caught in
   review before CI). When a moved body now receives `req_id: &str`, write

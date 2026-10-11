@@ -450,6 +450,7 @@ fn track() -> LyricsTrack {
             line(4000, 6000, "beta."),
             line(7000, 9000, "gamma."),
         ],
+        register: None,
     }
 }
 

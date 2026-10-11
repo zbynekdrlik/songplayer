@@ -38,6 +38,7 @@ pub mod test_item; // #228: camera-box's measurement clip as a one-item test pla
 #[cfg(test)]
 mod test_log; // a scoped log capture shared by the tests
 mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
+pub mod video_upgrade; // #223 S11: a cached song's video upgraded in place
 
 pub use panic_hook::install_panic_hook;
 
@@ -306,15 +307,6 @@ pub async fn start(
         .await?
         .unwrap_or_else(|| sp_core::config::DEFAULT_GEMINI_MODEL.to_string());
 
-    // Migrate stale gemini_model setting from old defaults.
-    let gemini_model = if gemini_model == "gemini-2.0-flash" || gemini_model == "gemini-2.5-flash" {
-        let new_model = sp_core::config::DEFAULT_GEMINI_MODEL;
-        tracing::info!("upgrading gemini_model setting from {gemini_model} to {new_model}");
-        db::models::set_setting(&pool, "gemini_model", new_model).await?;
-        new_model.to_string()
-    } else {
-        gemini_model
-    };
     let metadata_chain =
         metadata::provider_chain(&pool, ai_client.clone(), &gemini_key, &gemini_model);
 
@@ -348,6 +340,15 @@ pub async fn start(
     // its hasher fills the catalog's sha256 cache while the node serves.
     let exchange = peer::Exchange::new(pool.clone(), config.cache_dir.clone());
     tokio::spawn(peer::hasher::run(exchange.clone(), shutdown_tx.subscribe()));
+    // #223 S12a: the in-place video upgrade, behind `video_upgrade_enabled`.
+    let upgrade_dir = config.cache_dir.clone();
+    let upgrade = video_upgrade::worker::run(
+        pool.clone(),
+        upgrade_dir,
+        tool_paths.clone(),
+        shutdown_tx.subscribe(),
+    );
+    tokio::spawn(upgrade);
 
     // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
     // the LAN with no internet. Reads `lan_mdns_enabled` (default on); a
@@ -476,10 +477,9 @@ pub async fn start(
                         }
                         Err(e) => warn!("yt-dlp self-update: startup check failed: {e}"),
                     }
-                    // Shared with the download worker below: an update never
-                    // runs while a song is downloading and vice versa.
-                    let ytdlp_lock: downloader::YtdlpLock =
-                        std::sync::Arc::new(tokio::sync::Mutex::new(()));
+                    // Shared with the download worker below and the video
+                    // upgrade: an update never runs while one runs yt-dlp.
+                    let ytdlp_lock: downloader::YtdlpLock = downloader::ytdlp_lock();
                     let ytdlp_interval_secs = ytdlp_update_interval_secs();
                     tokio::spawn(periodic_ytdlp_update(
                         dl_pool.clone(),

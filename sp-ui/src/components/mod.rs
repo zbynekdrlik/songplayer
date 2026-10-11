@@ -29,4 +29,5 @@ pub mod selection;
 pub mod resolume_hosts;
 pub mod settings_form;
 pub mod video_list;
+pub mod video_settings; // #223 S13 Nastavenia "Video: sťahovanie a 4K"
 pub mod video_list_stems;

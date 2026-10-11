@@ -119,3 +119,84 @@ maps to the main monitor's click space with factor **5.766** (3840 logical px �
 666 image px), NOT 4.8 — the virtual desktop is wider than the image suggests.
 Zoom the page (`ctrl+=` ×6) before clicking small buttons; there is no OCR on
 the box.
+
+## The video format selector and its cap (#223 S9a, `downloader/format.rs`)
+
+- yt-dlp's `/` takes the FIRST alternative that matches ANY format; it never
+  weighs one alternative against the next. A codec-first chain therefore
+  downgrades resolution: D8's `[https][vcodec!^=avc1]` first picked THE DEEP
+  (`xrhVLX6vwPk`) at 360p, its only VP9, over H.264 1080p via HLS. The
+  selector walks resolution TIERS (1440 → 1080 → 720, those ≤ the
+  cap), and within a tier tries AV1/VP9 over HTTPS (DASH; default sort =
+  resolution, then av01 > vp9) before H.264 over HLS. H.264 is only ever
+  asked over HLS (THE DEEP's 1080p H.264 DASH encode returns EOS in MF's
+  hardware transform). SDR wherever it can (the reader is NV12 8-bit).
+- **Above 1440 rows, 25 fps at most** (#223 S10b, comment 6102705701): at
+  a cap above 1440 the first two alternatives are `[height<=cap]
+  [height>1440][fps<=25]` (DASH, HLS; strict, an unknown rate is not
+  taken), and EVERY later one is capped at 1440
+  (`format::ANY_FPS_MAX_HEIGHT`, `TALL_MAX_FPS`). NVDEC + readback costs
+  17.7–19.6 ms per 4K picture whatever its rate: 42–49 % of a 24/25 fps
+  period, over D2's 50 % at 30, beyond real time at 50/60. Each
+  alternative's ceiling used to be the cap, so a bound on one 2160 tier
+  would have let 4K60 in through the 1440 tier. A 4K30/60 video lands at
+  1440 rows (box check 11.10.2026: `LXb3EKWsInQ`, 4K60 → VP9 1440p60;
+  `PySFfTurafA` → AV1 2160p24, `4JzLgdRJLYA` → VP9 2160p25). At a cap ≤
+  1440 the selector is S9a's, byte for byte.
+- The cap is the `max_resolution` setting, read at EVERY download (one INFO
+  names it) and by the YouTube probe, both through `format::live_cap`:
+  480..=2160; unset/unreadable = `DEFAULT_MAX_RESOLUTION` (2160, #223
+  S10b after G3) while the stored `video_hw_decode` is ON, else
+  `DEFAULT_MAX_RESOLUTION_SOFTWARE` (1440: software decodes 4K at 77–85 %
+  of the period), comment 6102693285. A stored cap wins either way. A
+  settings PATCH refuses anything but 480..=2160 or "" (`format::checked`).
+- Check a selector change through the box's own yt-dlp and cookies before
+  the push: `yt-dlp --cookies C:\ProgramData\SongPlayer\cookies.txt
+  --simulate -f "<spec>" --print "%(format_id)s %(vcodec)s
+  %(width)sx%(height)s %(protocol)s" <url>` on `4JzLgdRJLYA` (VP9 only above
+  1080), `PySFfTurafA` (AV1 to 2160) and `xrhVLX6vwPk` (THE DEEP).
+- `--force-overwrites` + the song's temps removed before the spawn: a
+  crashed run's `{yt}_video_temp.mp4` never stays next to the song.
+- At startup, before the download worker runs, `self_heal_cache` removes
+  every download temp `scan_cache` finds (`ScanResult::temps`, `TEMP_RE`:
+  `{11-char id}_(video|audio)[_upgrade]_temp[.ext]`), except a file a row
+  records (`cache::recorded_by_a_row`, like a half-sidecar).
+- What a download really fetched is recorded on every row of the video
+  (V34 `video_format_id` / `video_codec` / `video_width` / `video_height` /
+  `video_fps`): yt-dlp's `--print format::FORMAT_PRINT` (`after_move:`, a
+  later stage, so it still downloads; it implies `--quiet`, the progress
+  lines stay through `--progress`) prints a `SPFMT|…` line that
+  `parse_downloaded_format` reads (`NA` = unknown, stored NULL). Every
+  recorded download writes them (`format::record`, all NULL when yt-dlp
+  printed no line), and a peer adoption sets them NULL (`peer::download::adopt`:
+  the files are the peer's, of an unknown format), so no row keeps the format
+  of files that were replaced. NULL for songs downloaded before V34. Box
+  check 10.10.2026: `SPFMT|243|vp9|640|360|25`, exit 0, the file in place.
+- The tiers lean on YouTube serving HLS (it did on 10.10.2026): a video with
+  a low AV1 / VP9 and its high rows only as H.264 DASH, and no HLS, lands at
+  the low AV1 / VP9 — deliberately, since that H.264 DASH may stop early in
+  MF (THE DEEP). `--force-overwrites` and the `--print` pair are pinned by
+  `mod_tests.rs::ytdlp_video_args_keeps_existing_fixed_flags` (the
+  downloader is out of the mutation gate).
+
+## The live YouTube gate (#232, `downloader/probe.rs`)
+
+- `POST /api/v1/youtube/probe` (`api/youtube_probe.rs`) runs the box's
+  yt-dlp on ONE fixed video (`probe::PROBE_VIDEO` = `gq-4FVRr_ow`, the
+  metadata gate's, 1080p) exactly as a download: `ytdlp_command`, the
+  production `format_spec` at the live `max_resolution`, the data dir's
+  `cookies.txt` when present, `--print format::FORMAT_PROBE_PRINT` (the
+  video stage: it only simulates). Always 200: `{ok, youtube_id, cap,
+  cookies, format, error, elapsed_ms}`; `error` = yt-dlp's last `ERROR:`
+  line (≤ 400 chars). Bounded at 120 s, `kill_on_drop`. No yt-dlp lock
+  (playlist sync, captions and the import run beside a download too; only
+  the self-update swap needs it).
+- `e2e/post-deploy-youtube.spec.ts` (decision: pure `e2e/youtube-gate.ts`,
+  mock suite `youtube-gate.spec.ts`) fails on no format, no cookie file, or
+  a pick under 720 rows. It exists because `tools.js_runtime_ok` passes on
+  a bot check (`js_runtime_verdict` reads only the n-challenge). SNV only:
+  PP's subset lists its specs (`post-deploy-pp.config.ts`).
+- `FORMAT_PRINT` and `FORMAT_PROBE_PRINT` share one field list
+  (`format_fields!`); a new field goes there once.
+- Box check before the gate (10.10.2026): `SPFMT|399|av01.0.08M.08|1920|1080|30`,
+  exit 0, 2.6 s.

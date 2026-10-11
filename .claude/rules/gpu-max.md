@@ -377,7 +377,10 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   (its own `SharedFrame`, an `Arc` bump, its own width/height/stride); a
   fade boundary → `Fade { from, to, weight_q8 }` (both native pictures, a
   missing side `None` = black, the weight `MixJob::weight_q8`); the
-  program's standby → `Black`. Every job carries `SP-program`'s stamp (Spout
+  program's standby → `Black`. #251: a forwarded pair the pacer BLENDED
+  (`SubmitJob::blend`, a source the grid does not divide, `genlock.md`) →
+  `Fade { from: the shown frame, to: the next frame, weight_q8 }`, so such
+  a song uploads two pictures per boundary. Every job carries `SP-program`'s stamp (Spout
   has no timecode; the stamp names the boundary). Held / paused / seek /
   starve pictures reach MAX as whatever picture their source pair carries;
   the `MaxSide` plumbing that keeps them native is S3.

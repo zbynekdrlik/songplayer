@@ -304,3 +304,39 @@ fn remove_duplicates_deletes_the_pair_and_its_stems_only() {
         assert!(p.exists(), "{} kept", p.display());
     }
 }
+
+/// #223 S9b (D8): a crashed download's temps are their own class, and
+/// nothing else is one (a song's sidecars, a name with no 11-char id).
+#[test]
+fn scan_cache_finds_a_crashed_downloads_temps() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in [
+        "q_T_-Lh8AFI_video_temp.mp4",
+        "q_T_-Lh8AFI_audio_temp.webm",
+        "abcdefghijk_video_upgrade_temp.mp4",
+        "Song_Artist_q_T_-Lh8AFI_normalized_video.mp4",
+        "Song_Artist_q_T_-Lh8AFI_normalized_audio.flac",
+        "short_video_temp.mp4",
+        "q_T_-Lh8AFI_lyrics.json",
+    ] {
+        fs::write(dir.path().join(name), "x").unwrap();
+    }
+
+    let result = scan_cache(dir.path());
+    let mut temps: Vec<String> = result
+        .temps
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    temps.sort();
+    assert_eq!(
+        temps,
+        [
+            "abcdefghijk_video_upgrade_temp.mp4",
+            "q_T_-Lh8AFI_audio_temp.webm",
+            "q_T_-Lh8AFI_video_temp.mp4",
+        ]
+    );
+    assert_eq!(result.songs.len(), 1, "the song's pair stays a song");
+    assert_eq!(result.lyrics_files.len(), 1);
+}

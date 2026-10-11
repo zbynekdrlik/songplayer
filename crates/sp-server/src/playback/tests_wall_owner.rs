@@ -48,6 +48,7 @@ fn one_line(en: &str) -> LyricsState {
             sk: Some(format!("{en} sk")),
             words: None,
         }],
+        register: None,
     })
 }
 

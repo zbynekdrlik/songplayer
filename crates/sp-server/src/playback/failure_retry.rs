@@ -120,6 +120,19 @@ impl PlaybackEngine {
     /// event goes through the state machine as before.
     pub(super) async fn video_failed(&mut self, playlist_id: i64, error: &str) {
         let event = PlayEvent::VideoError(error.to_owned());
+        // #223 S12b: an upgraded song gets its old video back (a task: the
+        // engine never waits on the file lock).
+        if let Some(video_id) = self
+            .pipelines
+            .get(&playlist_id)
+            .and_then(|pp| pp.current_video_id)
+        {
+            let pool = self.pool.clone();
+            tokio::spawn(async move {
+                let now = crate::peer::wire::now_ms();
+                crate::video_upgrade::rollback::after_failed_open(&pool, video_id, now).await
+            });
+        }
         let backoff = {
             let Some(pp) = self.pipelines.get_mut(&playlist_id) else {
                 warn!(playlist_id, "a failed open of a playlist with no pipeline");

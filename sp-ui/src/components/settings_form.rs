@@ -2,8 +2,9 @@
 //! "OBS manuál" (#212), the
 //! Companion remote control (#213), the program transition (#215; #221 L5
 //! deleted the OBS follow and the "podľa OBS" transition), the program's
-//! Spout outputs (#239: `SP-program-MAX` and `SP-program`) and cache
-//! configuration. #233: #210's VBAN fieldset moved to "Zvukové výstupy"
+//! Spout outputs (#239: `SP-program-MAX` and `SP-program`), the downloads'
+//! cap, GPU decoding and the 4K upgrade (#223 S13, `video_settings.rs`) and
+//! cache configuration. #233: #210's VBAN fieldset moved to "Zvukové výstupy"
 //! (`audio_outputs.rs`, the output list), which saves its own two settings;
 //! this form MERGES what it saved into `store.settings`, so the list it does
 //! not carry survives its save, and it re-reads only the OTHER settings (a
@@ -15,6 +16,7 @@ use leptos::prelude::*;
 use sp_core::config;
 
 use crate::api;
+use crate::components::video_settings::VideoSettings;
 use crate::store::DashboardStore;
 
 /// Helper: find a setting value or return a default.
@@ -105,6 +107,10 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
     // #239: the program's Spout outputs, both on unless they say "false".
     let max_enabled = RwSignal::new(config::DEFAULT_PROGRAM_MAX_ENABLED);
     let spout_fhd_enabled = RwSignal::new(config::DEFAULT_PROGRAM_SPOUT_FHD_ENABLED);
+    // #223 S13: the downloads' cap ("" = automatic), GPU decoding, the 4K upgrade.
+    let max_resolution = RwSignal::new(String::new());
+    let hw_decode = RwSignal::new(false);
+    let upgrade_enabled = RwSignal::new(false);
     let save_status = RwSignal::new(String::new());
 
     // Populate fields from store settings when THEIRS change: the outputs
@@ -194,6 +200,21 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                 .get(config::SETTING_PROGRAM_SPOUT_FHD_ENABLED)
                 .map(String::as_str),
         ));
+        max_resolution.set(config::max_resolution_choice(
+            settings
+                .get(config::SETTING_MAX_RESOLUTION)
+                .map(String::as_str),
+        ));
+        hw_decode.set(config::video_hw_decode(
+            settings
+                .get(config::SETTING_VIDEO_HW_DECODE)
+                .map(String::as_str),
+        ));
+        upgrade_enabled.set(config::video_upgrade_enabled(
+            settings
+                .get(config::SETTING_VIDEO_UPGRADE_ENABLED)
+                .map(String::as_str),
+        ));
     });
 
     let on_save = move |ev: leptos::ev::SubmitEvent| {
@@ -263,6 +284,26 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
         let fhd_checked = spout_fhd_enabled.get();
         if let Some(value) = config::program_spout_fhd_to_send(loaded_fhd.as_deref(), fhd_checked) {
             settings.insert(config::SETTING_PROGRAM_SPOUT_FHD_ENABLED.to_string(), value);
+        }
+        // #223 S13: each video setting only when it was changed here (#229's rule).
+        let (loaded_cap, loaded_hw, loaded_upgrade) = store.settings.with_untracked(|s| {
+            (
+                s.get(config::SETTING_MAX_RESOLUTION).cloned(),
+                s.get(config::SETTING_VIDEO_HW_DECODE).cloned(),
+                s.get(config::SETTING_VIDEO_UPGRADE_ENABLED).cloned(),
+            )
+        });
+        let cap = max_resolution.get();
+        if let Some(value) = config::max_resolution_to_send(loaded_cap.as_deref(), &cap) {
+            settings.insert(config::SETTING_MAX_RESOLUTION.to_string(), value);
+        }
+        if let Some(value) = config::video_hw_decode_to_send(loaded_hw.as_deref(), hw_decode.get())
+        {
+            settings.insert(config::SETTING_VIDEO_HW_DECODE.to_string(), value);
+        }
+        let upgrade = upgrade_enabled.get();
+        if let Some(value) = config::video_upgrade_to_send(loaded_upgrade.as_deref(), upgrade) {
+            settings.insert(config::SETTING_VIDEO_UPGRADE_ENABLED.to_string(), value);
         }
 
         // #229: the server answers the settings PATCH 204 with no body, so it
@@ -494,6 +535,12 @@ pub fn SettingsForm(loaded: RwSignal<Option<bool>>) -> impl IntoView {
                     }}
                 </span>
             </fieldset>
+
+            <VideoSettings
+                max_resolution=max_resolution
+                hw_decode=hw_decode
+                upgrade_enabled=upgrade_enabled
+            />
 
             <fieldset>
                 <legend>"Vyrovnávacia pamäť"</legend>

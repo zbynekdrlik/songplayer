@@ -41,7 +41,7 @@ use sp_ndi::AudioFrame;
 use crate::playback::fleet_shift;
 use crate::playback::frame_buf::{BlackNv12, SharedFrame};
 use crate::playback::paced_grid::{GridStep, PacedGrid};
-use crate::playback::pacer::{PacedFrame, PacedSink};
+use crate::playback::pacer::{FrameBlend, PacedFrame, PacedSink};
 use crate::playback::program_bus::{self, ProgramBus};
 use crate::playback::submit_handoff::{
     HandoffOutcome, SUBMIT_HANDOFF_BOUND, SubmitCounters, SubmitJob, SubmitQueue, submit_late_100ns,
@@ -337,6 +337,21 @@ impl PacedSink for HandoffSink<'_> {
         self.handoff.offer(job);
     }
 
+    /// #251: a decoder pair blended toward the next frame — live, and the
+    /// job carries the blend for `SP-program` and MAX to paint.
+    fn emit_blended(
+        &mut self,
+        video: &PacedFrame,
+        blend: FrameBlend,
+        audio: &[AudioFrame],
+        video_tc_100ns: i64,
+        audio_tc_100ns: i64,
+    ) {
+        let mut job = SubmitJob::from_paced(video, audio, video_tc_100ns, audio_tc_100ns, true);
+        job.blend = Some(blend);
+        self.handoff.offer(job);
+    }
+
     fn emit_standby(
         &mut self,
         video: &PacedFrame,
@@ -474,6 +489,7 @@ impl<O: BoundaryOut> PacedConsumer<O> {
             audio_tc_100ns: stamp_100ns,
             live: false,
             media_pts_100ns: None,
+            blend: None,
         }
     }
 

@@ -248,6 +248,7 @@ fn submit_job_stamp_boundary_is_the_video_tc() {
         audio_tc_100ns: 3_333_311,
         live: true,
         media_pts_100ns: None,
+        blend: None,
     };
     assert_eq!(job.stamp_boundary_100ns(), 3_333_300);
 }

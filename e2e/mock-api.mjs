@@ -840,8 +840,51 @@ function paidAiRefusal(body) {
 // #229: as the server — a value exactly the mask for a secret setting keeps
 // the stored one (nothing written), any other value replaces it (`""` clears
 // it), and the answer is 204 with NO body.
+// #223 S13: GET /api/v1/video-upgrade — the in-place 4K upgrade's status as
+// the server answers it (`video_upgrade::worker::counts` + its state): the
+// switch and the live cap follow the stored settings (unset cap = 2160 with
+// GPU decoding, else 1440), the counts are a fixed fixture.
+app.get("/api/v1/video-upgrade", (_req, res) => {
+  const enabled = String(settings.video_upgrade_enabled ?? "").trim() === "true";
+  const hw = String(settings.video_hw_decode ?? "").trim() === "true";
+  const stored = String(settings.max_resolution ?? "").trim();
+  const cap = stored === "" ? (hw ? 2160 : 1440) : Math.min(2160, Math.max(480, Number(stored)));
+  res.json({
+    enabled,
+    cap,
+    pending: 339,
+    upgraded: 3,
+    no_better: 4,
+    refused: 0,
+    failed: 0,
+    busy: 0,
+    rolled_back: 0,
+    paused_until_ms: null,
+    waiting: enabled ? null : "off",
+    last: null,
+  });
+});
+
+// #223 S9a: the server refuses a `max_resolution` that is not "" or a whole
+// number from 480 to 2160 (`format::checked`), and writes nothing.
+function maxResolutionRefusal(body) {
+  if (!Object.hasOwn(body, "max_resolution")) {
+    return null;
+  }
+  const value = String(body.max_resolution).trim();
+  if (value === "") {
+    return null;
+  }
+  const height = Number(value);
+  if (/^[0-9]+$/.test(value) && height >= 480 && height <= 2160) {
+    return null;
+  }
+  return "max_resolution must be a whole number of pixels from 480 to 2160, or empty for the default";
+}
+
 app.patch("/api/v1/settings", (req, res) => {
-  const refusal = outputsRefusal(req.body) ?? paidAiRefusal(req.body);
+  const refusal =
+    outputsRefusal(req.body) ?? paidAiRefusal(req.body) ?? maxResolutionRefusal(req.body);
   if (refusal) {
     res.status(400).send(refusal);
     return;
@@ -850,7 +893,13 @@ app.patch("/api/v1/settings", (req, res) => {
     if (value === SECRET_MASK && isSecretSetting(key)) {
       continue;
     }
-    settings[key] = key === "paid_ai_enabled" ? String(value).trim().toLowerCase() : value;
+    if (key === "paid_ai_enabled") {
+      settings[key] = String(value).trim().toLowerCase();
+    } else if (key === "max_resolution") {
+      settings[key] = String(value).trim(); // stored trimmed, as `format::checked` does
+    } else {
+      settings[key] = value;
+    }
   }
   res.status(204).end();
 });

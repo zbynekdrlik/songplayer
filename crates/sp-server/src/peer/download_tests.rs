@@ -195,6 +195,30 @@ async fn a_peers_pair_is_taken_and_nothing_runs_here() {
     assert!(pp.ex.board.snapshot("pp").is_empty(), "nothing announced");
 }
 
+/// #223 S9b: the adopted files are the peer's, so the format this node once
+/// recorded for its own download of the video no longer describes them.
+#[tokio::test]
+async fn an_adopted_pair_forgets_the_format_of_the_files_it_replaced() {
+    let (_snv, pp, row) = snv_and_pp().await;
+    sqlx::query(
+        "UPDATE videos SET video_format_id = '400', video_codec = 'av01', \
+         video_width = 2560, video_height = 1440, video_fps = 24.0 WHERE id = ?",
+    )
+    .bind(row.id)
+    .execute(pp.pool())
+    .await
+    .unwrap();
+    assert!(matches!(first(Some(&pp.ex), &row).await, PeerStep::Done));
+    let format: (Option<String>, Option<String>, Option<i64>) = sqlx::query_as(
+        "SELECT video_format_id, video_codec, video_height FROM videos WHERE id = ?",
+    )
+    .bind(row.id)
+    .fetch_one(pp.pool())
+    .await
+    .unwrap();
+    assert_eq!(format, (None, None, None));
+}
+
 /// The sha256 SNV's catalog lists for the title of `YT`.
 async fn snv_title_sha(pp: &TestNode) -> String {
     let cfg = NodeConfig::load(pp.pool()).await.unwrap();

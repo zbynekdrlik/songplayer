@@ -121,6 +121,7 @@ fn source(width: u32, height: u32, seed: u32, stamp: i64) -> SubmitJob {
         audio_tc_100ns: stamp,
         live: true,
         media_pts_100ns: None,
+        blend: None,
     }
 }
 

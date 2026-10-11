@@ -470,7 +470,7 @@ pub fn extract_youtube_id(url: &str) -> Option<String> {
     None
 }
 
-fn is_yt_id(s: &str) -> bool {
+pub(crate) fn is_yt_id(s: &str) -> bool {
     s.len() == 11
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')

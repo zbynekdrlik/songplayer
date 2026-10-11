@@ -22,8 +22,10 @@ pub mod routes_status; // #221 L4b: /api/v1/status's program fields from SongPla
 pub mod settings; // #229: GET/PATCH /api/v1/settings (secrets masked)
 pub mod stems;
 pub mod test_item; // #228: /api/v1/test-item (camera-box's measurement clip as the test item)
+pub mod video_upgrade; // #223 S11: POST /api/v1/video-upgrade (one song's in-place upgrade)
 pub mod videos;
 pub mod websocket;
+pub mod youtube_probe; // #232: POST /api/v1/youtube/probe (the live YouTube gate)
 
 use std::path::PathBuf;
 
@@ -150,6 +152,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/diag/decode-bench",
             axum::routing::post(diag::post_decode_bench),
         )
+        // #223 S10a: what the program canvas fit of a picture costs (G3)
+        .route(
+            "/api/v1/diag/fit-bench",
+            axum::routing::post(diag::post_fit_bench),
+        )
         // #228: the local test item (camera-box's measurement clip): its ids,
         // its import from the sample dir, its start from 0 and its stop.
         .route(
@@ -267,6 +274,16 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/lyrics/g35t/probe",
             axum::routing::post(lyrics_g35t::probe),
+        )
+        // #232: the box's yt-dlp resolves one fixed video (the post-deploy gate)
+        .route(
+            "/api/v1/youtube/probe",
+            axum::routing::post(youtube_probe::probe),
+        )
+        // #223 S11: one cached song's video upgraded in place (the pilot)
+        .route(
+            "/api/v1/video-upgrade",
+            axum::routing::get(video_upgrade::status).post(video_upgrade::upgrade),
         )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))
