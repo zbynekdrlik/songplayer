@@ -618,6 +618,8 @@ impl PlaybackEngine {
 
         match crate::db::models::get_song_paths(&self.pool, video_id).await {
             Ok(Some((video_path, audio_path))) => {
+                crate::playlist::loop_memory::remember_logged(&self.pool, playlist_id, video_id)
+                    .await;
                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                     pp.current_video_id = Some(video_id);
                     pp.state = PlayState::Playing { video_id };
@@ -795,6 +797,12 @@ impl PlaybackEngine {
                         debug!(playlist_id, video_id, "selected video");
                         match crate::db::models::get_song_paths(&self.pool, video_id).await {
                             Ok(Some((video_path, audio_path))) => {
+                                crate::playlist::loop_memory::remember_logged(
+                                    &self.pool,
+                                    playlist_id,
+                                    video_id,
+                                )
+                                .await;
                                 if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
                                     // Push the previous video to the
                                     // per-playlist history stack before

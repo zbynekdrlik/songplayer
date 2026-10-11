@@ -40,6 +40,10 @@ impl VideoSelector {
                     if let Some(id) = current_video_id {
                         return Ok(Some(id));
                     }
+                    // #229 follow-up: after a restart, the song it looped.
+                    if let Some(id) = super::loop_memory::remembered(pool, playlist_id).await? {
+                        return Ok(Some(id));
+                    }
                     Self::select_random_unplayed(pool, playlist_id, avoid).await
                 }
                 PlaybackMode::Continuous | PlaybackMode::Single => {
@@ -57,7 +61,11 @@ impl VideoSelector {
         current_video_id: Option<i64>,
     ) -> Result<Option<i64>, sqlx::Error> {
         match mode {
-            PlaybackMode::Loop => Ok(current_video_id),
+            PlaybackMode::Loop => match current_video_id {
+                Some(id) => Ok(Some(id)),
+                // #229 follow-up: after a restart, the song it looped.
+                None => super::loop_memory::remembered(pool, playlist_id).await,
+            },
             PlaybackMode::Single => Ok(None),
             PlaybackMode::Continuous => {
                 let cur_pos: i64 =

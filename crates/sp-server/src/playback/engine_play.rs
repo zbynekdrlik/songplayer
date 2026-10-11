@@ -95,6 +95,8 @@ impl PlaybackEngine {
 
         // Send the pipeline command and update engine bookkeeping.
         let (video_path, audio_path) = paths;
+        // #229 follow-up: Loop plays this song after a restart too.
+        crate::playlist::loop_memory::remember_logged(&self.pool, playlist_id, video_id).await;
         if let Some(pp) = self.pipelines.get_mut(&playlist_id) {
             if let Some(prev) = pp.current_video_id {
                 if prev != video_id {
