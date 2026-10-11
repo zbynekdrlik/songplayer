@@ -546,3 +546,20 @@ async fn both_routes_answer_the_published_status() {
     assert_eq!(status["environment"], expected);
     global().publish(EnvironmentStatus::default());
 }
+
+// ---- the Windows glue, on the Windows CI job ----
+
+/// The registry and WMI reads run on a real Windows (the CI runner): every
+/// fact is read (its values are the runner's, so only their presence is
+/// asserted) and written to the job's log as evidence.
+#[cfg(windows)]
+#[test]
+fn the_windows_glue_reads_every_fact() {
+    use std::io::Write;
+    let facts = super::win::read_facts();
+    let _ = writeln!(std::io::stderr(), "[#233 prod_env on the runner] {facts:?}");
+    assert!(facts.read_errors.is_empty(), "{:?}", facts.read_errors);
+    assert!(facts.edition_id.is_some(), "{facts:?}");
+    assert!(facts.defender_realtime.is_some(), "{facts:?}");
+    assert!(facts.firewall.iter().all(Option::is_some), "{facts:?}");
+}
