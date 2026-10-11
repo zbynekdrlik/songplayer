@@ -1,5 +1,6 @@
 //! Playlist sync — fetch video IDs from YouTube via yt-dlp and upsert to DB.
 
+pub mod loop_memory; // #229 follow-up: Loop's song across a restart
 pub mod selector;
 
 use sqlx::SqlitePool;

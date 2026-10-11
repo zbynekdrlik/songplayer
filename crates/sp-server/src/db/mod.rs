@@ -54,6 +54,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (34, MIGRATION_V34),
     (35, MIGRATION_V35),
     (36, MIGRATION_V36),
+    (37, MIGRATION_V37),
 ];
 
 const MIGRATION_V1: &str = "
@@ -573,6 +574,12 @@ ALTER TABLE videos ADD COLUMN lyrics_register_version INTEGER NOT NULL DEFAULT 0
 ALTER TABLE videos ADD COLUMN lyrics_register_verdict TEXT;
 ";
 
+/// #229 follow-up: a playlist's current song, remembered across a restart
+/// for Loop mode (`playlist::loop_memory`). NULL = none yet.
+const MIGRATION_V37: &str = "
+ALTER TABLE playlists ADD COLUMN loop_video_id INTEGER;
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -754,6 +761,9 @@ mod tests_v35;
 #[path = "mod_tests_v36.rs"]
 #[cfg(test)]
 mod tests_v36;
+#[path = "mod_tests_v37.rs"]
+#[cfg(test)]
+mod tests_v37;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

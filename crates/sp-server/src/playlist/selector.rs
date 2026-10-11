@@ -408,4 +408,69 @@ mod tests {
             .unwrap();
         assert_eq!(v, None);
     }
+
+    /// #229 follow-up: after a restart (no current song in memory) Loop plays
+    /// the remembered song, never a random one. PP's yt90s, set to loop "We
+    /// Raise", played another song after a restart (owner, 11.10.2026). Ten
+    /// picks out of twenty songs: a random pick cannot pass by luck.
+    #[tokio::test]
+    async fn loop_after_a_restart_plays_the_remembered_song() {
+        let (pool, playlist_id, video_ids) = setup_with_videos(20).await;
+        crate::playlist::loop_memory::remember(&pool, playlist_id, video_ids[13])
+            .await
+            .unwrap();
+        for _ in 0..10 {
+            let vid = VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Loop, None, &[])
+                .await
+                .unwrap();
+            assert_eq!(vid, Some(video_ids[13]));
+        }
+        // A current song in memory still wins.
+        let vid = VideoSelector::select_next(
+            &pool,
+            playlist_id,
+            PlaybackMode::Loop,
+            Some(video_ids[2]),
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(vid, Some(video_ids[2]));
+    }
+
+    /// A remembered song that can no longer play there (not downloaded any
+    /// more) is not taken: Loop picks one as before.
+    #[tokio::test]
+    async fn loop_after_a_restart_with_a_song_that_cannot_play_picks_one() {
+        let (pool, playlist_id, video_ids) = setup_with_videos(3).await;
+        crate::playlist::loop_memory::remember(&pool, playlist_id, video_ids[1])
+            .await
+            .unwrap();
+        sqlx::query("UPDATE videos SET normalized = 0 WHERE id = ?")
+            .bind(video_ids[1])
+            .execute(&pool)
+            .await
+            .unwrap();
+        for _ in 0..10 {
+            let vid = VideoSelector::select_next(&pool, playlist_id, PlaybackMode::Loop, None, &[])
+                .await
+                .unwrap()
+                .expect("a song is picked");
+            assert_ne!(vid, video_ids[1]);
+        }
+    }
+
+    /// The same for a custom playlist, which played nothing in Loop after a
+    /// restart.
+    #[tokio::test]
+    async fn custom_loop_after_a_restart_plays_the_remembered_song() {
+        let (pool, custom_id) = setup_custom_playlist_with_items(&[10, 20, 30]).await;
+        crate::playlist::loop_memory::remember(&pool, custom_id, 20)
+            .await
+            .unwrap();
+        let v = VideoSelector::select_next(&pool, custom_id, PlaybackMode::Loop, None, &[])
+            .await
+            .unwrap();
+        assert_eq!(v, Some(20));
+    }
 }
