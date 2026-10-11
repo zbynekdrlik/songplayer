@@ -479,9 +479,9 @@ fn a_block_no_session_takes_is_dropped_on_its_output() {
 }
 
 /// A host that stops reading (its pipe full: the session's writer stuck in
-/// the hello) never holds a forwarder: the data queue takes its
-/// `DATA_QUEUE` blocks, every later one is dropped and counted at once, so
-/// the forwarder takes all 300 (the session runs on its own link thread in
+/// a frame) never holds a forwarder: the data queue takes its `DATA_QUEUE`
+/// blocks, every later one is dropped and counted at once, so the
+/// forwarder takes all 300 (the session runs on its own link thread in
 /// production, the forwarders on theirs).
 #[test]
 fn a_stalled_host_pipe_never_blocks_a_forwarder() {
@@ -498,14 +498,18 @@ fn a_stalled_host_pipe_never_blocks_a_forwarder() {
     for k in 0..300 {
         out.push(ProgramBlock::silence(k));
     }
-    // The probe above took one place in the data queue.
-    let dropped = 300 - (DATA_QUEUE as u64 - 1);
-    wait_until("the forwarder took every block", || {
-        out.snapshot().blocks_dropped == dropped
-    });
+    // The data queue takes DATA_QUEUE blocks; the link's writer holds the
+    // probe mid-write (the duplex is 16 bytes), or has not taken it out of
+    // the queue yet, which then holds it in one of those places. Every other
+    // block is dropped and counted, whether the output's own queue or the
+    // link dropped it.
+    let (all, cap) = (300, DATA_QUEUE as u64);
+    let settled = |d: u64| d == all - cap || d == all - (cap - 1);
+    wait_until("the forwarder took every block", || out.queued() == 0);
     out.stop();
     forwarder.join().unwrap();
-    assert_eq!(out.snapshot().blocks_dropped, dropped);
+    let dropped = out.snapshot().blocks_dropped;
+    assert!(settled(dropped), "{dropped} blocks dropped of {all}");
     drop(host);
 }
 
