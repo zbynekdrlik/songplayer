@@ -1620,6 +1620,8 @@ body {
 .health-ok { color: var(--success); }
 .health-warn { color: var(--warning); }
 .health-off { color: var(--text-dim); }
+/* #233: the production environment is violated (Defender, firewall, edition). */
+.health-error { color: var(--error); font-weight: 600; }
 
 /* #194 r3b — ONE loading / empty / error renderer (sp_core StateBlock). */
 .state-block {

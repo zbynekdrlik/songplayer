@@ -78,7 +78,33 @@ fn running() -> AsioFigures {
         slew_eta_s: None,
         cushion_ms: 0.0,
         last_fault: None,
+        resyncs: 0,
     }
+}
+
+/// #233 (PP's SoundGrid pops): a driver that asked for resyncs shows how
+/// many on the first line, with its own tooltip; none, no chip.
+#[test]
+fn the_drivers_resyncs_show_on_the_first_line_once_there_was_one() {
+    let f = AsioFigures {
+        resyncs: 3,
+        ..running()
+    };
+    let chips = asio_state_chips("beží", &f);
+    assert_eq!(
+        texts(&chips)[3..],
+        [
+            ("asio-faults", "núdzové skoky 0"),
+            ("asio-resyncs", "resynchronizácie ovládača 3"),
+        ]
+    );
+    assert_eq!(chips[4].title.as_deref(), Some(RESYNCS_TIP));
+    let one = AsioFigures {
+        resyncs: 1,
+        ..running()
+    };
+    assert_eq!(asio_state_chips("beží", &one).len(), 5);
+    assert_eq!(asio_state_chips("beží", &running()).len(), 4);
 }
 
 /// The owner's example: `48 → 96 kHz`, the card's clock against
@@ -158,6 +184,7 @@ fn a_slewing_output_with_a_fault_reads_what_works_and_what_failed() {
             lateness_ms: -60.0,
             ago_s: 185.0,
         }),
+        resyncs: 0,
     };
     assert_eq!(
         texts(&asio_state_chips("beží", &f))[1..],

@@ -1128,6 +1128,38 @@ app.post("/__mock/dabing-reset", (_req, res) => {
   res.json({ ok: true });
 });
 
+// #233: the production environment the health bar polls every 10 s (and
+// `/api/v1/status.environment`), as `sp_core::prod_env::EnvironmentStatus`.
+// The mock is no Windows box, so by default it holds the way the server does
+// off Windows (checked, ok, a note); `POST /__mock/environment {…}` sends
+// those fields over that, `POST /__mock/environment-reset` restores it.
+const ENV_HOLDS = {
+  checked: true,
+  ok: true,
+  note: "not Windows: the production environment is checked on Windows only",
+  edition_id: null,
+  product_name: null,
+  ltsc: null,
+  edition_allowed: null,
+  defender_realtime: null,
+  firewall: { domain: null, private: null, public: null },
+  problems: [],
+  read_errors: [],
+  checked_at_ms: null,
+};
+let environment = { ...ENV_HOLDS };
+app.get("/api/v1/environment", (_req, res) => {
+  res.json(environment);
+});
+app.post("/__mock/environment", (req, res) => {
+  environment = { ...ENV_HOLDS, ...req.body };
+  res.json(environment);
+});
+app.post("/__mock/environment-reset", (_req, res) => {
+  environment = { ...ENV_HOLDS };
+  res.json(environment);
+});
+
 // Status
 app.get("/api/v1/status", (_req, res) => {
   res.json({
@@ -1147,6 +1179,8 @@ app.get("/api/v1/status", (_req, res) => {
     node_name: String(settings.node_name ?? "").trim() || null,
     paid_ai_enabled: paidAiEnabled(settings.paid_ai_enabled),
     paid_ai_held: paidAiEnabled(settings.paid_ai_enabled) ? [] : ["lyrics", "metadata"],
+    // #233: the production environment, as `/api/v1/environment`.
+    environment,
   });
 });
 
@@ -1598,6 +1632,11 @@ function mockAsioOutput(e, network) {
             resets: 0,
             hard_recentres: 0,
             last_hard_recentre: null,
+            resyncs: 0,
+            callback_gap_max_ms: 1.3,
+            late_callbacks: 0,
+            fast_callbacks: 0,
+            last_late_callback: null,
             overflows: 0,
             overloads: 0,
             retry_in_s: held ? held.retry_in_s : null,

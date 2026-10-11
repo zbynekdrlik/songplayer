@@ -685,6 +685,10 @@ fn every_asio_reason_code_reads_in_slovak() {
             "no_clock",
             "ovládač nedáva hodiny — napr. DVS nebeží alebo chýbajú hodiny Dante PTP",
         ),
+        (
+            "host_down",
+            "zvukový proces ASIO (sp-audio-host) nebeží — SongPlayer ho spúšťa znova",
+        ),
         ("later", "neznámy dôvod"),
         ("", "neznámy dôvod"),
     ];

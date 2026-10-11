@@ -175,6 +175,9 @@ jobs:
           Write-Host "=== Stopping SongPlayer ==="
           Stop-ScheduledTask -TaskName "SongPlayer" -ErrorAction SilentlyContinue
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
+          # #233: the ASIO host dies with SongPlayer (its kill-on-close Job
+          # object); killed by name too, so the installer never meets it.
+          taskkill /F /IM "sp-audio-host.exe" 2>&1 | Out-Null
           $deadline = (Get-Date).AddSeconds(20)
           while ((Get-Date) -lt $deadline) {
             $proc = Get-Process -Name "SongPlayer" -ErrorAction SilentlyContinue
@@ -328,9 +331,9 @@ jobs:
           OBS_WS_URL: ws://localhost:4455
           PP_MANUAL_SCENE: ${{ vars.PP_MANUAL_SCENE }}
           # #233 lane 3: how many enabled ASIO outputs PP must run
-          # (e2e/post-deploy-audio-asio.spec.ts): PP's "DVS (Dante)" (out-2),
-          # running since 9.10.2026.
-          SP_ASIO_OUTPUTS_EXPECTED: "1"
+          # (e2e/post-deploy-audio-asio.spec.ts): since 11.10.2026 two,
+          # out-2 Waves SoundGrid and out-3 Dante, both enabled.
+          SP_ASIO_OUTPUTS_EXPECTED: "2"
         run: |
           if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
             Write-Error "FAIL: Node.js (npm) is not installed at PP - the post-deploy suite needs it"

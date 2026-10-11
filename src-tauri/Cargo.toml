@@ -1,13 +1,22 @@
 [package]
 name = "sp-tauri"
-version = "0.79.0"
+version = "0.80.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.87"
+# #233: two binaries, so Tauri's bundler needs the main one named; every
+# other one (`sp-audio-host`) is installed next to it by the NSIS installer.
+default-run = "SongPlayer"
 
 [[bin]]
 name = "SongPlayer"
 path = "src/main.rs"
+
+# #233: the ASIO host process (`sp_server::audio_host`): every ASIO output
+# runs in it, so no child process SongPlayer spawns can disturb a driver.
+[[bin]]
+name = "sp-audio-host"
+path = "src/bin/sp-audio-host.rs"
 
 [lib]
 name = "sp_tauri_lib"

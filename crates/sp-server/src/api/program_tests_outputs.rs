@@ -293,6 +293,11 @@ async fn an_asio_entry_off_windows_waits_and_says_why() {
         "overloads",
         "retry_in_s",
         "clock_waits",
+        "resyncs",
+        "callback_gap_max_ms",
+        "late_callbacks",
+        "fast_callbacks",
+        "last_late_callback",
     ] {
         assert!(a.get(key).is_some(), "asio.{key}");
     }

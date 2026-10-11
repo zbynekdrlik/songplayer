@@ -16,10 +16,10 @@
 //!   dry, or a delayed output played over 4 slots early — or too much, the
 //!   ring would overflow: a fault, WARNed at most once per 5 s with what it
 //!   held back, and shown as `last_hard_recentre`) go through the splice.
-//!   Then the
-//!   driver's messages: a reset
-//!   (or a size change), a rate change or 2 s without a callback closes the
-//!   output (`asio_state::close_reason`, `StallWatch`).
+//!   Then the driver's messages: a reset (or a size change), a rate change
+//!   or 2 s without a callback closes the output (`asio_state::close_reason`,
+//!   `StallWatch`); a resync request is only counted and WARNed
+//!   (`asio_out_events.rs`).
 //! - parked (`Reason::Parked`, a driver callback that never returned): the
 //!   output stays closed for good, with no next try.
 //!
@@ -41,7 +41,7 @@
 //! `AsioOut::snapshot` → `GET /api/v1/program` `outputs[i].asio`.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -160,6 +160,19 @@ pub struct AsioStatus {
     /// closed and opened again (`Reason::NoClock`), since the output was
     /// built: a calm wait, neither a reset nor a fault.
     pub clock_waits: u64,
+    /// The driver's resync requests (`kAsioResyncRequest`: its sample
+    /// position jumped), since the output was built: counted only (the
+    /// servo and the driver run on; #233 measures them first).
+    pub resyncs: u64,
+    /// The longest time between two buffer switches since the output was
+    /// built, ms (`asio_out_events.rs`).
+    pub callback_gap_max_ms: f64,
+    /// Buffer switches over two buffer periods after the one before, and
+    /// under a quarter of one (a catch-up burst), since the output was built.
+    pub late_callbacks: u64,
+    pub fast_callbacks: u64,
+    /// The last late buffer switch and how long ago (to line up with a pop).
+    pub last_late_callback: Option<LateCallback>,
 }
 
 /// A hard re-centre as the status shows it.
@@ -216,6 +229,8 @@ struct Live {
     reason: Option<Reason>,
     status: AsioStatus,
     blocks_sent: u64,
+    /// The ASIO host's own queue drops (SongPlayer's side only).
+    remote_dropped: u64,
 }
 
 /// One ASIO entry's shared side: its queue and its status.
@@ -227,6 +242,8 @@ pub struct AsioOut {
     target_100ns: i64,
     live: Mutex<Live>,
     running: AtomicBool,
+    /// Blocks the ASIO host's link did not take (SongPlayer's side only).
+    unsent: AtomicU64,
     start_error: Mutex<Option<String>>,
 }
 
@@ -237,26 +254,39 @@ impl AsioOut {
             .asio
             .as_ref()
             .ok_or_else(|| "not an ASIO entry".to_string())?;
-        let delay_100ns = i64::from(entry.delay_ms) * 10_000;
-        Ok(Self {
+        Ok(Self::from_spec(&AsioSpec {
             id: entry.id.clone(),
-            queue: BlockQueue::new(queue_bound(delay_100ns)),
             driver: a.driver.clone(),
             channels: a.channels,
+            delay_ms: entry.delay_ms,
+        }))
+    }
+
+    /// The output of `spec`: SongPlayer's side of an ASIO entry, or the
+    /// ASIO host's (`audio_host`, `asio_out_remote.rs`).
+    pub fn from_spec(spec: &AsioSpec) -> Self {
+        let delay_100ns = i64::from(spec.delay_ms) * 10_000;
+        Self {
+            id: spec.id.clone(),
+            queue: BlockQueue::new(queue_bound(delay_100ns)),
+            driver: spec.driver.clone(),
+            channels: spec.channels,
             target_100ns: BASE_LATENCY_100NS + delay_100ns,
             live: Mutex::new(Live {
                 state: STATE_OPENING,
                 reason: None,
                 status: AsioStatus {
-                    driver: a.driver.clone(),
-                    channels: a.channels,
+                    driver: spec.driver.clone(),
+                    channels: spec.channels,
                     ..AsioStatus::default()
                 },
                 blocks_sent: 0,
+                remote_dropped: 0,
             }),
             running: AtomicBool::new(false),
+            unsent: AtomicU64::new(0),
             start_error: Mutex::new(None),
-        })
+        }
     }
 
     /// The servo's latency target: two grid slots + the entry's delay.
@@ -318,7 +348,9 @@ impl AsioOut {
             reason: live.reason.clone(),
             status: live.status.clone(),
             blocks_sent: live.blocks_sent,
-            blocks_dropped: self.queue.dropped(),
+            blocks_dropped: self.queue.dropped()
+                + live.remote_dropped
+                + self.unsent.load(Ordering::Relaxed),
         }
     }
 
@@ -352,8 +384,11 @@ struct Run {
     stall: StallWatch,
     driver_latency_frames: u32,
     overflows: u64,
-    /// The driver's overload count this run (its device counts per run).
+    /// The driver's overload, late and fast buffer switch counts this run
+    /// (its device counts per run).
     overloads: u64,
+    late_callbacks: u64,
+    fast_callbacks: u64,
     primed: bool,
     /// The frames the card had taken when the first block primed the ring:
     /// the driver's ticks count from there (a burst of callbacks at the
@@ -375,6 +410,8 @@ struct Closed {
     overloads: u64,
     overflows: u64,
     hard_recentres: u64,
+    late_callbacks: u64,
+    fast_callbacks: u64,
 }
 
 impl Closed {
@@ -384,6 +421,8 @@ impl Closed {
         self.overloads += run.overloads;
         self.overflows += run.overflows;
         self.hard_recentres += run.servo.status().hard_recentres;
+        self.late_callbacks += run.late_callbacks;
+        self.fast_callbacks += run.fast_callbacks;
     }
 
     /// These counts as the output's status counters.
@@ -392,6 +431,8 @@ impl Closed {
         s.overloads = self.overloads;
         s.overflows = self.overflows;
         s.hard_recentres = self.hard_recentres;
+        s.late_callbacks = self.late_callbacks;
+        s.fast_callbacks = self.fast_callbacks;
     }
 }
 
@@ -414,6 +455,9 @@ pub struct AsioWorker {
     waiting_for_clock: bool,
     /// Those reopens (`AsioStatus::clock_waits`).
     clock_waits: u64,
+    /// The driver's resync requests and callback timing (`asio_out_events.rs`).
+    resyncs: events::Resyncs,
+    timing: events::CallbackTiming,
 }
 
 impl AsioWorker {
@@ -430,6 +474,8 @@ impl AsioWorker {
             hard_warns: WarnLimiter::default(),
             waiting_for_clock: false,
             clock_waits: 0,
+            resyncs: events::Resyncs::default(),
+            timing: events::CallbackTiming::default(),
         }
     }
 
@@ -447,11 +493,14 @@ impl AsioWorker {
                 let at = *retry_at_100ns;
                 let left = at - now_100ns;
                 let retry_in_s = (at != NEVER).then_some(left as f64 / 1e7);
-                // The last hard re-centre ages while the output waits too.
-                let last_hard = self.last_hard.map(|h| h.status(now_100ns));
+                // The last hard re-centre (and late callback) ages while the
+                // output waits too.
+                let (last_hard, timing) =
+                    (self.last_hard.map(|h| h.status(now_100ns)), self.timing);
                 out.update(|l| {
                     l.status.retry_in_s = retry_in_s;
                     l.status.last_hard_recentre = last_hard;
+                    timing.write(&mut l.status, now_100ns);
                 });
                 return left.min(POLL_100NS);
             }
@@ -538,7 +587,11 @@ impl AsioWorker {
             self.last_hard = Some(hard);
         }
         let ev = device.poll();
-        run.overloads = ev.overloads;
+        self.timing.observe(run.late_callbacks, &ev, now_100ns);
+        run.count(&ev);
+        if ev.resync {
+            self.resyncs.note(out, now_100ns);
+        }
         if ev.latencies_changed {
             run.driver_latency_frames = device.output_latency_frames();
             info!(
@@ -558,11 +611,12 @@ impl AsioWorker {
                 self.closed.add(run, &*device);
                 // The run's counts go out with its close, and its last hard
                 // re-centre.
-                let closed = self.closed;
+                let (closed, timing) = (self.closed, self.timing);
                 let last_hard = self.last_hard.map(|h| h.status(now_100ns));
                 out.update(|l| {
                     closed.write(&mut l.status);
                     l.status.last_hard_recentre = last_hard;
+                    timing.write(&mut l.status, now_100ns);
                 });
                 self.close(out, device, now_100ns, reason, ran);
             }
@@ -572,6 +626,7 @@ impl AsioWorker {
                 &*device,
                 &self.closed,
                 self.last_hard.map(|h| h.status(now_100ns)),
+                (&self.timing, now_100ns),
             ),
         }
         POLL_100NS
@@ -725,6 +780,8 @@ fn build(out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) -> Result<R
         driver_latency_frames: started.output_latency_frames,
         overflows: 0,
         overloads: 0,
+        late_callbacks: 0,
+        fast_callbacks: 0,
         primed: false,
         consumed_at_prime: 0,
     })
@@ -841,13 +898,14 @@ fn log_stale(id: &str, stale: usize, waiting: bool) {
 }
 
 /// The running output's numbers into its status (its counters: the closed
-/// runs' + this run's).
+/// runs' + this run's; the callback timing as of the step's instant).
 fn publish(
     run: &Run,
     out: &AsioOut,
     device: &dyn AsioDevice,
     closed: &Closed,
     last_hard: Option<HardRecentre>,
+    (timing, now_100ns): (&events::CallbackTiming, i64),
 ) {
     let servo = run.servo.status();
     let mut counters = *closed;
@@ -868,6 +926,7 @@ fn publish(
         l.status.cushion_ms = servo.cushion_ms;
         l.status.last_hard_recentre = last_hard;
         counters.write(&mut l.status);
+        timing.write(&mut l.status, now_100ns);
     });
 }
 
@@ -894,6 +953,13 @@ pub fn run_asio_worker(out: &AsioOut, device: &mut dyn AsioDevice, clock: &mut d
     info!(id = %out.id, driver = %out.driver, "asio output: stopped");
 }
 
+#[path = "asio_out_events.rs"]
+mod events;
+pub use events::LateCallback;
+#[path = "asio_out_remote.rs"]
+mod remote;
+pub use remote::AsioSpec;
+
 #[cfg(test)]
 #[path = "asio_out_fake.rs"]
 pub(crate) mod fake;
@@ -907,5 +973,11 @@ mod tests_clock;
 #[path = "asio_out_tests_cushion.rs"]
 mod tests_cushion;
 #[cfg(test)]
+#[path = "asio_out_tests_resync.rs"]
+mod tests_resync;
+#[cfg(test)]
 #[path = "asio_out_tests_silent.rs"]
 mod tests_silent;
+#[cfg(test)]
+#[path = "asio_out_tests_timing.rs"]
+mod tests_timing;

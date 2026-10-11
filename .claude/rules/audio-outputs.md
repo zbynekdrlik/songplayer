@@ -19,6 +19,9 @@ paths:
   - "e2e/audio-outputs-gate*.ts"
   - "e2e/post-deploy-audio-*.spec.ts"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
+  - "crates/sp-server/src/audio_host/**"
+  - "src-tauri/src/bin/sp-audio-host.rs"
+  - "e2e/asio-spawn-gate*.ts"
 ---
 
 # Program audio outputs (#233)
@@ -864,7 +867,9 @@ sample_type, ppm, rate_ppm, locked, latency_ms, offset_ms, slew_eta_s,
 cushion_ms,
 underruns, resets, hard_recentres, last_hard_recentre {cause, ms,
 lateness_ms, ago_s}, overflows, overloads, retry_in_s, reason_code,
-clock_waits}` (the
+clock_waits, resyncs, callback_gap_max_ms, late_callbacks, fast_callbacks,
+last_late_callback {gap_ms, ago_s}}` (the last five: "Resync requests and
+the callback timing" below; the
 servo's fields: the owner's ruling above), and while it runs a `note`
 when the driver's rate is not `audio_network_rate` or its buffer is over a
 third of a grid slot (1/90 s, lane 2's envelope); the task WARNs a note once
@@ -879,6 +884,50 @@ error answers 500 "the ASIO driver list could not be read: {why}"
 (`drivers_answer`, release review), so the dashboard's "Zoznam ovládačov
 ASIO sa nenačítal" names a real failure, never "no driver". The mock's
 `asio-drivers` fail-mode answers the same text.
+
+**Resync requests and the callback timing** (PP's Waves SoundGrid output
+pops, #233 design comment on the ticket; `asio_out_events.rs`, a child
+module of `asio_out.rs` for its 1000-line cap):
+
+- `kAsioResyncRequest` (answered 1 by `asio_state::reply`; the slot's
+  `resync` flag, `DeviceEvents::resync`) is COUNTED and WARNed only
+  (`Resyncs::note`): `resyncs` since the output was built (a worker
+  counter, like `resets`; several requests inside one 10 ms poll are one),
+  one WARN per resync, at most one per 5 s with the count held back
+  (`WarnLimiter`). The drift servo, the ring and the driver run on
+  untouched: no rebase, no priming, never a close and a reopen (a
+  SoundGrid driver takes ~10 s to open again). The main session's
+  decision (#233, measurement first, "no change ships on a guess"): a
+  rebase was built and dropped, because a fresh servo's priming splices
+  the small error (a ~10 ms fade dip per resync). What to do about a
+  resync is decided on PP's measured evidence (`resyncs` next to the pops,
+  `last_late_callback`, the underruns). Tests: `asio_out_tests_resync.rs`
+  (the count; a twin worker fed the same blocks with no resync: the same
+  status but the count and the same samples played; no close or reopen;
+  two runs with a resync in each, no other counter moved).
+- The buffer switch times itself (`asio_win.rs`, atomics only): an
+  `Instant` (QueryPerformanceCounter) read against `CALLBACK_EPOCH`, a
+  `OnceLock` the first `start` sets OUTSIDE any callback (the callback only
+  `get`s it); `note_callback` swaps the slot's `last_callback` (`-1` =
+  none yet this run, set by `clear_counters`), keeps the gap as the poll's
+  max (`fetch_max`, swapped to 0 by `poll`) and counts its kind by the pure
+  `asio_state::callback_gap_kind(gap, period)`: over TWO buffer periods
+  `Late`, under a QUARTER `Fast` (a catch-up burst), both bounds `Normal`
+  (pinned at 10 000 and at DVS's 13 333 = 128 frames / 96 kHz). The period
+  is `frames_to_100ns(buffer_frames, rate)`, stored by `start`.
+  `DeviceEvents` carries `callback_gap_max_100ns` (per poll),
+  `late_callbacks` / `fast_callbacks` (per run, monotonic; the fake counts
+  scripted ones per run like a slot).
+- The worker (`CallbackTiming`, `Run::count`): `callback_gap_max_ms` = the
+  longest gap since the output was built; `late_callbacks` /
+  `fast_callbacks` add each closed run's like the overloads (`Closed`);
+  `last_late_callback` = the longest gap of the last poll that saw a new
+  late buffer switch, and its age, which keeps counting while the output
+  waits — to line it up with a pop. Tests: `asio_out_tests_timing.rs`, the
+  glue's on the Windows job (`asio_win_tests.rs`).
+- The dashboard's first ASIO line shows "resynchronizácie ovládača N"
+  (`asio-resyncs`, `sp_core::asio_resampling::RESYNCS_TIP`) once N > 0;
+  the callback timing is API-only.
 
 **Dashboard.** "Pridať výstup ASIO" (waits for the driver list) adds an ASIO
 row on the first listed driver, channels 1 / 2. Each row shows its type and
@@ -940,8 +989,10 @@ is over 0 (release review: a box expected to run none need not have DVS);
 exactly `SP_ASIO_OUTPUTS_EXPECTED` enabled ASIO
 outputs that are not waiting for their driver's clock (`gatedAsioOutputs`:
 an output waiting with reason `no_clock` is neither counted nor measured,
-so PP — "0", its DVS entry enabled while PP has no Dante PTP clock — does
-not fail on it; SNV — "1" — still fails when its DVS gives no clock, the
+so a box whose DVS entry is enabled while its network has no Dante PTP
+clock does not fail on it at "0" (PP's value while it had none); PP — "2"
+since 11.10.2026: out-2 Waves SoundGrid + out-3 Dante, both enabled — and
+SNV — "1" — still fail when a gated driver gives no clock, the
 count then 0, and the poll names the waiting outputs (`waitingForClock`:
 "0 (waiting for a clock: out-2)"); ci.yml / deploy-pp.yml), each running, then a minute (1 800 blocks) at its
 driver's rate with no underrun, no reopen, no hard re-centre (review
@@ -954,6 +1005,254 @@ load, not the output's fault, and the gate fails only on what the output
 does — underruns, reopens, the correction, the latency; `rate` vs `driver_rate` is a consistency check of two
 fields the server fills from the same driver read). A failed read of
 `GET /api/v1/program` never counts as zero outputs.
+
+## The ASIO host process (`sp-audio-host.exe`, `crates/sp-server/src/audio_host/`) — #233, the spawn finding
+
+**Why.** Measured on PP (11.10.2026, the ticket's ROOT CAUSE comment): every
+child process SongPlayer spawned — the 10-min playlist sync's yt-dlp, a
+`POST /api/v1/youtube/probe`, ffmpeg, the python workers — made the Waves
+SoundGrid driver, loaded IN SongPlayer's process by its ASIO output, send
+`kAsioResyncRequest` (+2…+5 resyncs per spawn, the deficit hard re-centres
+= the pops, LV1's error counter). The same yt-dlp spawned from a shell: 0.
+The owner's ruling: a systemic fix, "impossible in principle", never "spawn
+less". ROZHODNUTÉ: no ASIO driver lives in SongPlayer any more; EVERY ASIO
+output runs in the ASIO host process, which spawns nothing, whatever the
+in-process mechanism was (handle inheritance was the leading hypothesis).
+VBAN outputs stay in SongPlayer (no driver).
+
+**The cause, measured after the host shipped** (0.80.0-dev, PP): with the
+SoundGrid driver only in `sp-audio-host` (its module list), a
+SongPlayer-spawned yt-dlp still caused 1–3 resyncs on out-2 every time —
+the live spawn gate below caught it. An A/B/A run with a kernel trace
+proved Windows Defender's scan of each process SongPlayer launches as the
+cause, not the driver's process; Defender is off on PP and SNV, and a
+separate production-environment guard (Defender / firewall / edition)
+covers it. The owner kept the separate audio engine as the architecture:
+no ASIO driver in the process that launches children, and the spawn gate
+stays.
+
+**Shape.** `sp-audio-host.exe` is a second `[[bin]]` of the Tauri package
+(`src-tauri/src/bin/sp-audio-host.rs`, three lines: `sp_server::audio_host::
+run_host_main`), so it links the same sp-server library and runs the
+existing ASIO output UNCHANGED — `AsioWorker` / `run_asio_worker`, the
+`asio_win` device and its callback slots, the servo, the ASRC, the splice,
+the ring, `asio_hold`, the parked-driver rule. Only the block source and the
+status sink are new. Why a Tauri bin and not an sp-server one: Tauri's NSIS
+bundle installs every non-main bin of its package next to `SongPlayer.exe`
+(tauri-cli 2.12 `get_binaries`: every `[[bin]]` + `src/bin/*.rs`;
+tauri-bundler 2.10 `generate_binaries_data`: every non-main one into
+`$INSTDIR`), it is built by the same `cargo tauri build` with SongPlayer's
+own profile (unwind, line tables: `crash-diagnostics.md`) and gets the same
+manifest (tauri-build links its resource into every bin,
+`rustc-link-arg-bins`, so Common-Controls 6.0 for the Spout imports holds
+too). `default-run = "SongPlayer"` names the main one (with two bins Tauri
+marks none main otherwise). An sp-server bin would need its own release
+build in CI (the root profile's LTO) and an `externalBin` with a target-
+triple name.
+
+Each ASIO entry has an `AsioOut` on BOTH sides, built from one `AsioSpec`
+(`asio_out_remote.rs`, a child module of `asio_out.rs` for its cap: id,
+driver, channels, delay; `AsioOut::from_spec`, `for_entry` builds one):
+SongPlayer's side takes the program's blocks into its queue exactly as
+before (`AudioOutputs::offer`), the host's side is the worker's.
+
+- **SongPlayer** (`audio_host/client.rs`): the outputs task's ASIO starter
+  (`start_asio_thread` → `client_win::start_remote`, Windows) registers the
+  output with the process-wide `HostClient` under a numeric HANDLE (never
+  the id: a rebuilt entry's successor, same id, is added before its
+  predecessor is removed) and starts its forwarder thread `asio-fwd-<id>`
+  (TIME_CRITICAL; `run_forwarder`: the output's queue in order, `RunGuard`
+  like the worker; its stop — a removal, a replace, the shutdown — detaches
+  it and the host discards its side). `send_block` never waits: a down host
+  or a full data queue (256 frames) drops the block, counted ON THE OUTPUT
+  (`AsioOut::note_unsent` → `blocks_dropped`, a WARN first and every 1000th;
+  review round 1: a client-wide count the API never showed). The session
+  (supervisor, writer, reader) runs on its OWN thread `asio-host-link`
+  (TIME_CRITICAL, the 1 ms timer, a current-thread runtime of its own: a
+  stall of SongPlayer's shared runtime never delays a block; review round
+  1). The host's status reports (`Report::Status`, ~2 Hz) land in the
+  output's live state (`AsioOut::apply_remote`: state, reason,
+  `AsioStatus`, `blocks_sent`; the host's queue drops add to SongPlayer's),
+  so `GET /api/v1/program` `outputs[i]`, the notes and the dashboard read
+  as before; a host worker's START ERROR (a failed spawn, a panic: its
+  `RunGuard`) crosses too and becomes the output's start error
+  (`sp-audio-host: …`), so `RunningOutput::start_failed` rebuilds the
+  output — a fresh worker in the host — never "running" with frozen
+  figures (review round 1). The host's log lines are re-logged at their
+  level under the target `sp_audio_host` (the line carries no level of its
+  own: `.with_level(false)`).
+- **The host** (`audio_host/host.rs`): reads SongPlayer's frames ONE at a
+  time, in order (a read is never raced in a `select!`: `read_exact` is not
+  cancel-safe), the hello first (its protocol must match, else the session
+  fails), an add → `AsioOut::from_spec` + the worker
+  (`asio_win::spawn_asio_thread(out, id, clock)` on a `RemoteClock`, below;
+  a second add under a handle discards the first), a block → the output's
+  queue with its boundary UNTOUCHED and its anchor taken as the session's,
+  a remove → `discard`. A status task sends `Alive` and every output's
+  status (with its start error) every 500 ms; ONE writer task sends the
+  statuses and the log lines. At the pipe's end (SongPlayer gone) or a
+  protocol error every output is discarded and `serve` returns them — a
+  protocol error first sends `Ending {why}` (bounded at 1 s), so
+  SongPlayer's session names the cause: the host's main gives the workers
+  2 s to release their drivers, then exits. Its log filter is SongPlayer's
+  (`info,sp_server=debug`, or `RUST_LOG`). The host runs at
+  HIGH_PRIORITY_CLASS (like SongPlayer, #203), installs the panic hook
+  (`sp-audio-host-panic.log`) and logs to `sp-audio-host.log` (both in
+  `%ProgramData%\SongPlayer`, `launch::host_data_dir`; the log is started
+  afresh over 10 MiB) AND over the pipe, so a host whose pipe is down still
+  leaves its log.
+
+**The protocol** (`audio_host/protocol.rs`): one local named pipe per host
+start, `\\.\pipe\songplayer-audio-host-<SongPlayer's pid>-<start>` (a new name
+per restart; created by SongPlayer as the ONLY instance with remote clients
+rejected; the host opens it, retrying a busy pipe for 5 s). Frames =
+a little-endian `u32` body length, 1 ..= 65 536 (`check_len`, BEFORE the
+body is allocated), then the body, its first byte the kind:
+
+- 1 control (SongPlayer → host), typed JSON `Control`: `hello {protocol,
+  anchor}` (protocol 2), `add {handle, spec}`, `remove {handle}`;
+- 2 a block (SongPlayer → host), binary, built in ONE buffer (12 838 bytes
+  with its prefix, `BLOCK_FRAME_BYTES`): handle `u64`, the boundary `i64`
+  (SongPlayer's timeline, untouched), SongPlayer's time anchor (`i64`
+  timeline + `i64` counter, written by the session's writer), flags `u8` (1
+  samples, 2 substituted; `KNOWN_FLAGS` = 0x03, a literal pinned by a
+  test), then exactly 3 200 LE `f32` when samples follow and nothing when
+  not (anything else is refused); a block whose samples are not one
+  program block is sent as silence, marked substituted (`BlockFrame::of`;
+  the worker plays it as silence anyway);
+- 3 a report (host → SongPlayer), typed JSON `Report`: `status {handle,
+  snapshot}` (`wire_status.rs`: `AsioSnapshot` with its fixed words as
+  text, read back against the known sets — an unknown state reads waiting,
+  an unknown sample type "", the cause typed — the reason code taken from
+  the decoded reason, every float sent finite: serde_json writes NaN as
+  `null`, which the typed decode would refuse with the whole frame; plus
+  the host worker's `start_error`), `log {level, line}` (one formatted
+  event, ≤ 4 KiB cut on a character), `alive` (every 500 ms: a session
+  that hears nothing for 5 s, `REPORT_SILENCE`, ends — a hung host is
+  restarted) or `ending {why}` (the host ends the session; its last
+  frame).
+
+Never `serde_json::Value` (the `raw_value` rule): every JSON body is a typed
+struct; `Reason` derives `Serialize`/`Deserialize`. A malformed frame ends
+the session (the stream cannot be trusted after it). A clean end between
+frames is `None`, a cut header or body `Truncated`.
+
+**The clock across the pipe** (`audio_host/remote_clock.rs` +
+`mono.rs`, review round 1: ONE source of truth). Every wall's timeline is
+UTC − D(K), K the fleet relabel (`fleet_shift.rs`, #224 part 2), and K is
+per PROCESS: a host with walls of its own would follow each date step
+itself and could register an N one apart from SongPlayer's — every block a
+slot off, a ~33 ms deficit under the 38.3 ms floor, a pop (the first
+round's settled-offset `stamp.rs` was deleted for that). So the host makes
+NO wall and reads NO relabel (`host_tests::the_host_makes_no_wall_and_reads_no_relabel`
+scans `host.rs`, `host_win.rs`, `remote_clock.rs`, `asio_win.rs`):
+SongPlayer pairs a reading of its own timeline (the link thread's
+`WallVbanClock::new(WallClock::system())`, ticked at every write — the
+in-process worker's old clock) with the box's ONE monotonic counter
+(`mono::mono_100ns`: QueryPerformanceCounter, the same in every process)
+— an `Anchor` — in the hello and on every block its writer sends; the host
+keeps the latest (`SharedAnchor`) and every worker's `RemoteClock` reads
+`anchor.timeline + (counter now − anchor.counter)`, never back (through a
+wall's hold it waits for the line). The block's boundary crosses
+untouched. A date step, a slew or a hold of SongPlayer's wall reaches the
+host's "now" with the next anchor (a jump of the remainder r, as the old
+worker's wall jumped), never whole slots.
+
+**Lifecycle** (`client.rs::supervise`, `client_win.rs`, `restart.rs`).
+SongPlayer starts the host when its FIRST ASIO output is built (a box with
+no ASIO entry never starts it): `sp-audio-host.exe` next to SongPlayer's
+own exe (missing → a waiting reason that names the path, never a crash), no
+window (`CREATE_NO_WINDOW`), null stdio, at once into a Job object with
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE (it dies with SongPlayer, `taskkill /F`
+included; the deploy steps also kill `sp-audio-host.exe` by name before the
+installer runs), then its connect, bounded at 10 s, and the pipe's client
+checked to be that process (`GetNamedPipeClientProcessId`,
+`launch::pipe_client_is_host`: any other is refused). Ending a host is a
+kill and the job's close, never a wait on the link thread. A start that
+fails or a session that ends (the host died, closed its pipe, said
+`ending`, or sent nothing for 5 s; a protocol error) →
+every output reads waiting, reason `host_down` (`Reason::HostDown(why)`:
+"the ASIO host process (sp-audio-host) is not running: …", Slovak "zvukový
+proces ASIO (sp-audio-host) nebeží — SongPlayer ho spúšťa znova", no
+`retry_in_s` shown), an output attached meanwhile too, and the host is
+started again after the outputs' own backoff (`after_host_end` =
+`failures_after_close` + `backoff_100ns`: 2 / 10 / 30 / 60 / 60 … s, a
+session of 60 s resets it). The counters count since the HOST's output was
+built: a host restart starts them at 0 (the spawn gate below reads that as
+a failure). Not set on the Job: `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` = 1 would
+make a spawn impossible at the OS level, but an ASIO driver that starts a
+helper process would then fail to open — a main-session decision.
+
+**The host spawns nothing** — `audio_host/no_spawn_tests.rs` scans the
+host's code path (the bin, `mod.rs`, `host.rs`, `host_win.rs`, the protocol
+and status, `remote_clock.rs`, `mono.rs`, `log_forward.rs`, `launch.rs`,
+`panic_hook.rs`, the ASIO output and its glue, the servo, the ASRC, the
+queue, the clocks, `pipeline_paced.rs`, `vban_out.rs`, `vban_packet.rs`,
+`audio_out.rs`, `program_output.rs`, `mmcss.rs`, sp-asrc; comments are not
+scanned) for `Command::new`, `process::Command`, `tokio::process`,
+`CreateProcess`, `ShellExecute`, `WinExec`, `posix_spawn`. A new file the
+host runs goes on that list; `client_win.rs` (SongPlayer starting the host)
+is deliberately not on it.
+
+**Tests.** `protocol_tests.rs` (every frame round-trips; malformed blocks,
+unknown kinds and JSON refused; the length checked before a read; a clean
+end vs a cut frame, a failed read; the log line cut; the block frame's
+size), `wire_status_tests.rs` (a full snapshot unchanged through the JSON,
+the start error, every fixed word, the reason's code, a non-finite figure
+as 0), `remote_clock_tests.rs` (the anchor carried on the counter;
+SongPlayer at K 5 where a host of its own would read K 4: the host reads
+SongPlayer's timeline; a follow's jump, a hold never back; the sleep),
+`restart.rs` (2 / 10 / 30 / 60 / 60,
+the 60 s reset), `launch.rs` (the exe beside SongPlayer's, the pipe name
+per start, `--pipe`, the data dir), `log_forward.rs` (one event = one
+report at its level, through a real fmt layer; a full queue drops it),
+`asio_out_remote_tests.rs` (the spec round trip, the host's report with
+both sides' drops, host-down clears the run's figures and keeps the
+counters), `host_tests.rs` — SongPlayer's client and the host's frame loop
+over `tokio::io::duplex` on a multi-thread runtime, the test thread making
+the blocking reads: blocks reach the host's output in order with their
+boundary untouched and the host's clock on SongPlayer's latest anchor, the
+stop removes it there; the host's status IS the output's status and its
+start error makes `start_failed`; SongPlayer's end ends the host and
+discards its outputs; the host's end leaves every output waiting
+`host_down` (and one attached after); a silent host ends the session; a
+host's `ending` names why, and the host sends it on a protocol error; a
+host frame only SongPlayer sends ends the session; a block no session
+takes is dropped on its output, and a stalled host pipe (the writer stuck)
+never holds a forwarder: past the data queue's 256 every block is dropped
+and counted at once; the hello / protocol / report refusals,
+the session clock and add / replace / remove on `on_frame`; and the REAL
+worker in the host over the scripted driver (`AutoCard`, draining on every
+poll) on a `RemoteClock`, playing SongPlayer's blocks, SongPlayer's output
+reading it running at 96 kHz Int32LSB.
+
+**The live gate** (`e2e/post-deploy-audio-asio.spec.ts`, SNV and PP, third
+test; the decision in `e2e/asio-spawn-gate.ts`, unit-tested in the mock
+suite by `asio-spawn-gate.spec.ts`): every gated ASIO output running
+(`spawnCounters`: enabled, not waiting for a clock, running), its
+`resyncs` + `hard_recentres` + `blocks_sent` read, `POST
+/api/v1/youtube/probe` (one SongPlayer-spawned yt-dlp, 200 whatever
+YouTube answers; it FAILS when the answer says yt-dlp is not ready yet,
+`probeSpawnFailures`: nothing was spawned), ONE bounded 5 s
+settle (`SETTLE_AFTER_SPAWN_MS`: the host reports every 500 ms, the spawn's
+resyncs came within ~2 s on PP; an absence cannot be polled), read again:
+FAIL when any output's resyncs or hard re-centres grew, its counters or
+its `blocks_sent` went back (the host restarted: a restart with 0 / 0
+counters shows only there) or it no longer runs (`spawnDisturbances`).
+
+**CI / packaging.** Build Tauri checks BOTH exes' embedded manifest for
+Common-Controls 6.0 and lists the NSIS installer with 7-Zip: no
+`sp-audio-host.exe` in it fails the build. `.cargo/mutants.toml` excludes
+`audio_host/client_win` and `audio_host/host_win` (Windows glue); every
+decision is in the Linux-tested modules.
+
+**Box acceptance (MAIN SESSION OPS, PP; Defender off, above).** With the
+0.80.0-dev.1 counters:
+a `POST /api/v1/youtube/probe` and a `POST /api/v1/playlists/<id>/sync`
+cause 0 resyncs and 0 hard re-centres on out-2 (Waves SoundGrid), the
+10-min periodic sync passes silently on LV1, Dante out-3 stays clean;
+`Get-Process sp-audio-host` runs at High, is gone after
+`taskkill /F /IM SongPlayer.exe`.
 
 **Notices.** rtrb 0.4.0 (MIT OR Apache-2.0; its LICENSE-MIT has no copyright
 line, its Cargo.toml names the authors), azo 0.4.0 and azo-sys 0.3.2 (MIT,

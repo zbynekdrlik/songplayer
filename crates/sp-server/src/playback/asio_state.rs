@@ -20,6 +20,8 @@
 //!   buffer over a third of a grid slot is noted (lane 2's envelope: the
 //!   servo's per-block latency saws by one callback period).
 
+use serde::{Deserialize, Serialize};
+
 use crate::playback::asrc_servo::{SLOT_100NS, frames_from_100ns};
 
 pub const BACKOFF_S: [i64; 4] = [2, 10, 30, 60];
@@ -58,8 +60,9 @@ pub fn failures_after_close(failures: u32, ran_100ns: i64) -> u32 {
     }
 }
 
-/// Why an ASIO output is not running.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Why an ASIO output is not running. Serialized whole on the ASIO host's
+/// pipe (`audio_host::protocol`, a typed decode).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Reason {
     NotFound {
         present: Vec<String>,
@@ -81,6 +84,11 @@ pub enum Reason {
     /// e.g. DVS is not running, or its network has no Dante PTP clock. A
     /// calm wait, never a fault ([`clock_step`]).
     NoClock,
+    /// The ASIO host process (`sp-audio-host.exe`, which runs every ASIO
+    /// output since #233's spawn finding) is not running or not reachable:
+    /// why (its exe is missing, it did not start, it ended). SongPlayer
+    /// starts it again after the backoff.
+    HostDown(String),
 }
 
 impl Reason {
@@ -99,6 +107,7 @@ impl Reason {
             Self::Held => "held",
             Self::Parked => "parked",
             Self::NoClock => "no_clock",
+            Self::HostDown(_) => "host_down",
         }
     }
 
@@ -116,6 +125,7 @@ impl Reason {
                 format!("the driver refused to start (in use by another program?): {e}")
             }
             Self::Refused(e) | Self::Failed(e) => e.clone(),
+            Self::HostDown(why) => format!("the ASIO host process (sp-audio-host) is not running: {why}"),
             Self::Reset => "the driver asked for a reset".into(),
             Self::RateChanged(0) => "the driver lost its clock (no rate)".into(),
             Self::RateChanged(r) => format!("the driver's rate changed to {r} Hz"),
@@ -141,6 +151,15 @@ pub struct DeviceEvents {
     pub overloads: u64,
     /// Buffer switches since the output started (monotonic).
     pub callbacks: u64,
+    /// The longest time between two buffer switches since the last poll,
+    /// 100 ns (0 when none came after another).
+    pub callback_gap_max_100ns: i64,
+    /// Buffer switches that came [`GapKind::Late`] after the one before,
+    /// since the output started (monotonic).
+    pub late_callbacks: u64,
+    /// Buffer switches that came [`GapKind::Fast`] after the one before (a
+    /// catch-up burst), since the output started (monotonic).
+    pub fast_callbacks: u64,
 }
 
 /// Whether the events close an output opened at `opened_rate`.
@@ -214,6 +233,32 @@ impl StallWatch {
                 false
             }
         }
+    }
+}
+
+/// How a buffer switch came after the one before, against the driver's
+/// buffer period (#233: PP's SoundGrid pops; the callback timing names
+/// when the driver itself was late).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GapKind {
+    /// Under a quarter of a period: a catch-up burst.
+    Fast,
+    Normal,
+    /// Over two periods: the driver called back late (the card may have
+    /// played on without a buffer from this output).
+    Late,
+}
+
+/// The kind of a gap of `gap_100ns` between two buffer switches of a
+/// driver whose buffer lasts `period_100ns`: over two periods late, under a
+/// quarter fast, both bounds themselves normal.
+pub fn callback_gap_kind(gap_100ns: i64, period_100ns: i64) -> GapKind {
+    if gap_100ns > 2 * period_100ns {
+        GapKind::Late
+    } else if 4 * gap_100ns < period_100ns {
+        GapKind::Fast
+    } else {
+        GapKind::Normal
     }
 }
 

@@ -124,6 +124,9 @@ pub struct AsioLive {
     pub hard_recentres: u64,
     #[serde(default)]
     pub last_hard_recentre: Option<HardRecentreLive>,
+    /// #233: the driver's resync requests (each rebased the drift servo).
+    #[serde(default)]
+    pub resyncs: u64,
 }
 
 /// `outputs[i].asio.last_hard_recentre`.
@@ -158,6 +161,7 @@ fn asio_figures(o: &OutputLive, a: &AsioLive) -> AsioFigures {
             lateness_ms: h.lateness_ms,
             ago_s: h.ago_s,
         }),
+        resyncs: a.resyncs,
     }
 }
 
