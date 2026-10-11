@@ -74,16 +74,16 @@ test.describe("ASIO spawn gate (#233)", () => {
     ]);
   });
 
-  test("an output that stopped or whose host restarted fails", () => {
+  test("an output that stopped or was rebuilt fails", () => {
     const before = spawnCounters([asio("out-2", 35, 4), asio("out-3", 2, 0)]);
     const after = spawnCounters([asio("out-2", 0, 0), asio("out-3", 2, 0, { state: "waiting" })]);
     expect(spawnDisturbances(before, after)).toEqual([
-      "out-2: its counters went back (the ASIO host restarted?)",
+      "out-2: its counters went back (the output was rebuilt?)",
       "out-3 does not run after the spawn",
     ]);
     const fewerRecentres = spawnCounters([asio("out-2", 35, 3)]);
     expect(spawnDisturbances(spawnCounters([asio("out-2", 35, 4)]), fewerRecentres)).toEqual([
-      "out-2: its counters went back (the ASIO host restarted?)",
+      "out-2: its counters went back (the output was rebuilt?)",
     ]);
   });
 });

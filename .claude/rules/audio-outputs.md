@@ -17,6 +17,7 @@ paths:
   - "sp-ui/src/components/audio_outputs.rs"
   - "e2e/settings-audio-outputs.spec.ts"
   - "e2e/audio-outputs-gate*.ts"
+  - "e2e/asio-spawn-gate*.ts"
   - "e2e/post-deploy-audio-*.spec.ts"
   - "src-tauri/resources/THIRD-PARTY-NOTICES.txt"
 ---
@@ -1002,6 +1003,35 @@ load, not the output's fault, and the gate fails only on what the output
 does — underruns, reopens, the correction, the latency; `rate` vs `driver_rate` is a consistency check of two
 fields the server fills from the same driver read). A failed read of
 `GET /api/v1/program` never counts as zero outputs.
+
+The same spec's third test is the **spawn gate** (decision
+`e2e/asio-spawn-gate.ts`, unit-tested in the mock suite by
+`asio-spawn-gate.spec.ts`): every gated ASIO output running
+(`spawnCounters`: enabled, not waiting for a clock, running), its
+`resyncs` + `hard_recentres` read, `POST /api/v1/youtube/probe` (one
+SongPlayer-spawned yt-dlp, 200 whatever YouTube answers), ONE bounded 5 s
+settle (`SETTLE_AFTER_SPAWN_MS`: an absence cannot be polled; the spawn's
+resyncs came within ~2 s on PP), read again: FAIL when any output's
+resyncs or hard re-centres grew, its counters went back (the output was
+rebuilt) or it no longer runs (`spawnDisturbances`).
+
+**The spawn finding (PP, 11.10.2026; the last comments of #233).** Every
+child SongPlayer spawned (the 10-min sync's yt-dlp, `/youtube/probe`)
+made PP's Waves SoundGrid driver send `kAsioResyncRequest` (+2…+3 per
+spawn: the pops, LV1's error counter). An ASIO host process
+(`sp-audio-host.exe`, every ASIO output out of SongPlayer's process) was
+built, deployed to PP and FALSIFIED there: with the driver loaded only in
+the host the probes still gave +1 / +2 / +3 resyncs, so it was reverted
+(it addressed no cause). The cause, proven A/B/A on PP with a kernel
+trace: Windows Defender's real-time scan of the launched yt-dlp / deno
+(MsMpEng.exe busy on the CPUs whose DPCs wake the driver's audio thread;
+its wake-ups went irregular, 16.5 ms instead of 10.7 ms) — a Defender
+process exclusion gave 0 resyncs, removing it +2…+3 again. The protection
+is the box itself (the owner's rule: production PCs run Windows LTSC with
+Defender, antivirus and firewall OFF), which SongPlayer checks and the
+post-deploy gate enforces (`prod-environment.md`); the spawn gate above is
+the regression check that the box really stays quiet. Never re-introduce
+a host process or a "spawn less" workaround for this.
 
 **Notices.** rtrb 0.4.0 (MIT OR Apache-2.0; its LICENSE-MIT has no copyright
 line, its Cargo.toml names the authors), azo 0.4.0 and azo-sys 0.3.2 (MIT,

@@ -19,9 +19,11 @@
  *
  * 3. #233 (the spawn finding): a child process SongPlayer spawns (one yt-dlp,
  *    `POST /api/v1/youtube/probe`) moves no gated ASIO output's `resyncs` or
- *    `hard_recentres`, and no output stops or restarts: every ASIO output
- *    runs in the ASIO host process `sp-audio-host`, which spawns nothing
- *    (`asio-spawn-gate.ts`, unit-tested in the mock suite).
+ *    `hard_recentres`, and no output stops or is rebuilt. PP's resyncs came
+ *    from Windows Defender scanning the launched processes; the box's
+ *    environment (LTSC, Defender and firewall off,
+ *    `post-deploy-environment.spec.ts`) is the protection, and this is its
+ *    regression check (`asio-spawn-gate.ts`, unit-tested in the mock suite).
  *
  * No sleeps but one: every wait is an expect.poll, except the bounded
  * settle after the spawn (`SETTLE_AFTER_SPAWN_MS`, 5 s: the absence of a
