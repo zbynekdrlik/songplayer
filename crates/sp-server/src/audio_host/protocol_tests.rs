@@ -129,7 +129,7 @@ fn reports_round_trip() {
     for r in [
         Report::Status {
             handle: 2,
-            snapshot: Box::new(WireSnapshot::from(&snapshot)),
+            snapshot: WireSnapshot::from(&snapshot),
         },
         Report::Log {
             level: HostLevel::Warn,
