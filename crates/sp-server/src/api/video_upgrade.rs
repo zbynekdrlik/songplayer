@@ -1,3 +1,7 @@
+//! #223 S12a: `GET /api/v1/video-upgrade` — the worker's state: the switch,
+//! the live cap, the songs per check state, a bot-check pause, why it waits,
+//! its last upgrade.
+//!
 //! #223 S11: `POST /api/v1/video-upgrade {"youtube_id"}` — upgrade ONE
 //! cached song's video in place now (`video_upgrade::run`, design comment
 //! 6103060545). The pilot's route: S12's worker runs the same upgrade by
@@ -21,6 +25,7 @@ use tracing::{info, warn};
 
 use crate::AppState;
 use crate::downloader::{format, tools::is_yt_id};
+use crate::video_upgrade::worker::{self, Counts, Last, Skip};
 use crate::video_upgrade::{self, UpgradeReport, steps::Real};
 
 /// One upgrade at a time per process.
@@ -36,6 +41,54 @@ struct Answer {
     #[serde(flatten)]
     report: UpgradeReport,
     elapsed_ms: u64,
+}
+
+#[derive(Serialize)]
+struct Status {
+    enabled: bool,
+    cap: u32,
+    #[serde(flatten)]
+    counts: Counts,
+    paused_until_ms: Option<i64>,
+    /// Why the worker's last tick ran no upgrade.
+    waiting: Option<Skip>,
+    last: Option<Last>,
+}
+
+/// `GET /api/v1/video-upgrade` (module doc).
+pub(crate) async fn status(State(state): State<AppState>) -> Response {
+    let stored =
+        crate::db::models::get_setting(&state.pool, sp_core::config::SETTING_VIDEO_UPGRADE_ENABLED)
+            .await
+            .ok()
+            .flatten();
+    let cap = format::live_cap(&state.pool).await;
+    let counts = match worker::counts(&state.pool, cap).await {
+        Ok(counts) => counts,
+        Err(e) => {
+            warn!("video upgrade: the status rows could not be read: {e}");
+            return refusal(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the rows could not be read",
+            );
+        }
+    };
+    let (paused_until_ms, waiting, last) = {
+        let state = worker::global();
+        let s = state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (s.paused_until_ms, s.skip, s.last.clone())
+    };
+    Json(Status {
+        enabled: sp_core::config::video_upgrade_enabled(stored.as_deref()),
+        cap,
+        counts,
+        paused_until_ms,
+        waiting,
+        last,
+    })
+    .into_response()
 }
 
 fn refusal(status: StatusCode, error: &str) -> Response {
@@ -71,21 +124,7 @@ pub(crate) async fn upgrade(
         return refusal(StatusCode::CONFLICT, "another video upgrade runs");
     };
     let cap = format::live_cap(&state.pool).await;
-    let cookies = state
-        .cache_dir
-        .parent()
-        .unwrap_or(state.cache_dir.as_path())
-        .join("cookies.txt");
-    let steps = Real {
-        ytdlp: tools.ytdlp.clone(),
-        ffmpeg_dir: tools
-            .ffmpeg
-            .parent()
-            .unwrap_or(std::path::Path::new("."))
-            .to_path_buf(),
-        cookies: cookies.exists().then_some(cookies),
-        mode: crate::playback::video_decode::global().mode(),
-    };
+    let steps = Real::new(&tools, &state.cache_dir);
     let pool = state.pool.clone();
     let cache_dir = state.cache_dir.clone();
     let task = tokio::spawn(async move {

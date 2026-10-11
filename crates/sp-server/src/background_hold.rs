@@ -48,6 +48,8 @@ pub enum Job {
     Metadata,
     Peer,
     YtdlpUpdate,
+    /// #223 S12: the in-place video upgrade.
+    VideoUpgrade,
 }
 
 impl Job {
@@ -63,6 +65,7 @@ impl Job {
             Self::Metadata => "metadata",
             Self::Peer => "peer",
             Self::YtdlpUpdate => "ytdlp_update",
+            Self::VideoUpgrade => "video_upgrade",
         }
     }
 }

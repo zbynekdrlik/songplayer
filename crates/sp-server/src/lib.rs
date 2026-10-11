@@ -340,6 +340,15 @@ pub async fn start(
     // its hasher fills the catalog's sha256 cache while the node serves.
     let exchange = peer::Exchange::new(pool.clone(), config.cache_dir.clone());
     tokio::spawn(peer::hasher::run(exchange.clone(), shutdown_tx.subscribe()));
+    // #223 S12a: the in-place video upgrade, behind `video_upgrade_enabled`.
+    let upgrade_dir = config.cache_dir.clone();
+    let upgrade = video_upgrade::worker::run(
+        pool.clone(),
+        upgrade_dir,
+        tool_paths.clone(),
+        shutdown_tx.subscribe(),
+    );
+    tokio::spawn(upgrade);
 
     // #51: advertise `sp.local` over mDNS so the dashboard stays reachable on
     // the LAN with no internet. Reads `lan_mdns_enabled` (default on); a

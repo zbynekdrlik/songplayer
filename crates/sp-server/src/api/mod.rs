@@ -283,7 +283,7 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         // #223 S11: one cached song's video upgraded in place (the pilot)
         .route(
             "/api/v1/video-upgrade",
-            axum::routing::post(video_upgrade::upgrade),
+            axum::routing::get(video_upgrade::status).post(video_upgrade::upgrade),
         )
         // WebSocket
         .route("/api/v1/ws", axum::routing::get(websocket::ws_handler))

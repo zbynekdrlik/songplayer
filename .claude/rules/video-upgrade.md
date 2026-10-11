@@ -82,21 +82,55 @@ curl -s -m 2000 -X POST http://10.77.9.201:8920/api/v1/video-upgrade \
 Logs: INFO `video upgrade: start` and `video upgrade: done`, or a WARN
 `video upgrade: not upgraded: <why>`.
 
-## Not yet (S12)
+## The worker (S12a, `video_upgrade/worker.rs`, design comment 6103547599)
 
-S12 adds:
+- **Switch:** `video_upgrade_enabled`, ON only for exactly `"true"`
+  (`sp_core::config::video_upgrade_enabled`), read at every tick. OFF by
+  default on every node; it goes ON at SNV only once S12b (the safety net)
+  is there.
+- **Tick:** every 60 s; the first comes 5 min after the start. The switch is
+  read FIRST: while it is off, nothing else is asked (no hold noted, no
+  query). Then the pure `decide` checks, in order:
+  - the background hold (`Job::VideoUpgrade`, "video_upgrade");
+  - a due download (`DOWNLOAD_DUE`: new songs come first);
+  - a bot-check pause;
+  - 120 s since the last START;
+  - the cache volume's free space ≥ 50 GiB (`disk::free_bytes`,
+    `GetDiskFreeSpaceExW`; none off Windows).
+- **Pick:** `next_song` takes one YouTube id that is downloaded and whose
+  `video_upgrade_cap` is NULL or under the live cap:
+  - a `busy` one only 10 min after its `video_upgrade_at`, a `failed: …`
+    one only after 6 h;
+  - active playlists first, then the lowest row;
+  - never the test item.
+- **Run:** S11's `run`, its yt-dlp at BELOW_NORMAL (ffmpeg inherits the
+  class).
+- **Outcomes:**
+  - a video that fails `verify` is `refused: …` and settled at the cap:
+    never downloaded again at it, since the same stream fails the same way;
+  - `failed: …` (a step, the rows) stays transient;
+  - a failure whose text names YouTube's bot check (`bot_check`: sign in,
+    HTTP 429, try again later) pauses every upgrade for 6 h, in memory.
+- **`GET /api/v1/video-upgrade`:** `{enabled, cap, pending, upgraded,
+  no_better, refused, failed, busy, paused_until_ms, waiting, last}`.
+  - The counts are per YouTube id (`worker::counts`).
+  - `waiting` is the last tick's `Skip`: `off`, `held`, `download_due`,
+    `paused`, `spacing`, `low_disk`, `no_disk_reading`, `no_tools`,
+    `nothing_to_do`.
+  - The loop and the route share ONE `worker::global()` state.
+- Logs: INFO `video upgrade worker: waiting` when the reason changes, DEBUG
+  while it stays; INFO `start` / `done`; WARN `not upgraded: <why>`, or the
+  bot-check WARN.
+- Tests: `worker_tests.rs`, with the shared `test_rig.rs` (the cached song
+  and the scripted `Fake` steps that `mod_tests.rs` uses too).
 
-- the worker that runs this by itself, behind `video_upgrade_enabled` (OFF
-  by default). It picks rows whose `video_upgrade_cap` is NULL or under the
-  live cap; runs ≥ 120 s apart, only with no download waiting; respects the
-  background hold; pauses 6 h on a bot check;
-- `.prev` retention: until the first `Started` or 14 days, within a 15 GiB
-  budget;
-- rollback on a play error;
-- the 50 GiB disk floor;
-- `status.video_upgrade`.
+## Not yet (S12b)
 
-Until S12, `.prev` files stay in the cache.
+- `.prev` retention: until the first `Started` after the upgrade, or 14
+  days, within a 15 GiB budget (oldest first). Until then, `.prev` files
+  stay in the cache.
+- Rollback on an open failure of an upgraded song (`.prev` back under the
+  name, `rolled_back`, settled).
 
 ## The exchange
 

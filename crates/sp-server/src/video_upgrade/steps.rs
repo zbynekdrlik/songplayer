@@ -11,7 +11,14 @@ use sp_decoder::{DecodeMode, MediaStream};
 
 use super::{Steps, VideoFacts};
 use crate::downloader::format::{self, DownloadedFormat};
+use crate::downloader::tools::ToolPaths;
 use crate::downloader::{probe, ytdlp_cmd, ytdlp_lock, ytdlp_video_args};
+
+/// `CreateProcess` flags of the download: no console window, below normal.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
 /// The longest an upgrade's download may take before it is killed.
 const DOWNLOAD_BOUND: Duration = Duration::from_secs(1800); // 30 min
@@ -24,6 +31,25 @@ pub(crate) struct Real {
     pub ffmpeg_dir: PathBuf,
     pub cookies: Option<PathBuf>,
     pub mode: DecodeMode,
+}
+
+impl Real {
+    /// The box's steps: its tools, the cookie file in the data dir
+    /// (`cache_dir`'s parent, as the probe and the download find it) when
+    /// present, and the mode playback decodes in now.
+    pub(crate) fn new(tools: &ToolPaths, cache_dir: &Path) -> Self {
+        let cookies = cache_dir.parent().unwrap_or(cache_dir).join("cookies.txt");
+        Self {
+            ytdlp: tools.ytdlp.clone(),
+            ffmpeg_dir: tools
+                .ffmpeg
+                .parent()
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
+            cookies: cookies.exists().then_some(cookies),
+            mode: crate::playback::video_decode::global().mode(),
+        }
+    }
 }
 
 impl Steps for Real {
@@ -59,6 +85,9 @@ impl Steps for Real {
             self.cookies.as_deref(),
         );
         let mut cmd = ytdlp_cmd::ytdlp_command(&self.ytdlp);
+        // #223 S12a: below playback; its ffmpeg child inherits the class.
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
         cmd.args(&args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())

@@ -29,8 +29,12 @@ use sqlx::SqlitePool;
 
 use crate::downloader::format::{self, DownloadedFormat};
 
+pub(crate) mod disk;
 pub(crate) mod steps;
 pub(crate) mod swap;
+#[cfg(test)]
+mod test_rig;
+pub(crate) mod worker;
 
 /// Rows Media Foundation may pad a picture's height by (its 16-row blocks: a
 /// 1080-row stream can read 1088).
@@ -220,25 +224,35 @@ pub(crate) enum Outcome {
     NoBetter,
     /// A player holds the file: nothing changed, try again later.
     Busy,
-    /// Something failed: nothing changed.
+    /// #223 S12: the downloaded video failed the check ([`verify`]):
+    /// nothing changed, and the same stream would fail the same way, so the
+    /// check is settled at its cap.
+    Refused,
+    /// Something failed on the way (a step, the rows): nothing changed, try
+    /// again later.
     Failed,
 }
 
 impl Outcome {
-    /// The V35 state, `failed: <why>` for a failure.
+    /// The V35 state: `refused: <why>` / `failed: <why>` for those.
     pub(crate) fn state(self, error: Option<&str>) -> String {
+        let why = error.unwrap_or("unknown");
         match self {
             Outcome::Upgraded => "upgraded".to_string(),
             Outcome::NoBetter => "no_better".to_string(),
             Outcome::Busy => "busy".to_string(),
-            Outcome::Failed => format!("failed: {}", error.unwrap_or("unknown")),
+            Outcome::Refused => format!("refused: {why}"),
+            Outcome::Failed => format!("failed: {why}"),
         }
     }
 
-    /// Whether the check is done at its cap (S12 then picks the song again
+    /// Whether the check is done at its cap (the worker picks the song again
     /// only once the cap rises); a busy or failed one is checked again.
     pub(crate) fn settled(self) -> bool {
-        matches!(self, Outcome::Upgraded | Outcome::NoBetter)
+        matches!(
+            self,
+            Outcome::Upgraded | Outcome::NoBetter | Outcome::Refused
+        )
     }
 }
 
@@ -342,7 +356,7 @@ async fn attempt<S: Steps>(
         Err(e) => return report.ended(Outcome::Failed, Some(format!("the audio: {e}"))),
     };
     if let Err(why) = verify(height, &old, &new, audio_ms) {
-        return report.ended(Outcome::Failed, Some(why));
+        return report.ended(Outcome::Refused, Some(why));
     }
     match swap::swap(pool, youtube_id, &song.video, temp).await {
         swap::Swapped::Done => {}

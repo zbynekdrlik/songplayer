@@ -27,6 +27,44 @@ async fn post(body: &str) -> (StatusCode, serde_json::Value) {
     (status, serde_json::from_slice(&bytes).unwrap())
 }
 
+/// #223 S12a: the status on a node with no switch and no hardware decode:
+/// off, cap 1440, nothing downloaded to count.
+#[tokio::test]
+async fn the_status_reads_the_switch_the_cap_and_the_counts() {
+    let state = test_state().await;
+    let pool = state.pool.clone();
+    let get = |state| async move {
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/video-upgrade")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+    };
+    let body = get(state.clone()).await;
+    assert_eq!(body["enabled"], false);
+    assert_eq!(body["cap"], 1440);
+    assert_eq!(body["pending"], 0);
+    assert_eq!(body["upgraded"], 0);
+    crate::db::models::set_setting(&pool, "video_upgrade_enabled", "true")
+        .await
+        .unwrap();
+    crate::db::models::set_setting(&pool, "video_hw_decode", "true")
+        .await
+        .unwrap();
+    let body = get(state).await;
+    assert_eq!(body["enabled"], true);
+    assert_eq!(body["cap"], 2160);
+}
+
 #[tokio::test]
 async fn a_value_that_is_not_a_youtube_id_is_refused() {
     for bad in [

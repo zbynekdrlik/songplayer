@@ -166,6 +166,16 @@ pub fn video_hw_decode(raw: Option<&str>) -> bool {
     raw.map_or(DEFAULT_VIDEO_HW_DECODE, |v| v.trim() == "true")
 }
 
+/// #223 S12: the automatic in-place video upgrade (`video_upgrade::worker`).
+/// OFF until its safety net is on the box; read at every tick.
+pub const SETTING_VIDEO_UPGRADE_ENABLED: &str = "video_upgrade_enabled";
+
+/// #223 S12: whether a stored `video_upgrade_enabled` turns the worker on:
+/// ON only for an explicit `"true"` (trimmed).
+pub fn video_upgrade_enabled(raw: Option<&str>) -> bool {
+    raw.is_some_and(|v| v.trim() == "true")
+}
+
 /// #233: the program's audio outputs, one JSON list (`crate::audio_outputs`).
 pub const SETTING_AUDIO_OUTPUTS: &str = "audio_outputs";
 /// #233: the audio network's sample rate, Hz; an output whose rate is
@@ -524,6 +534,16 @@ mod tests {
         assert!(!video_hw_decode(Some("")), "an empty value = OFF");
         assert!(!video_hw_decode(Some("TRUE")), "only the exact word");
         assert!(!video_hw_decode(Some("yes")), "a mangled value = OFF");
+    }
+
+    #[test]
+    fn video_upgrade_is_off_unless_the_setting_says_true() {
+        assert_eq!(SETTING_VIDEO_UPGRADE_ENABLED, "video_upgrade_enabled");
+        assert!(!video_upgrade_enabled(None), "no setting = OFF");
+        assert!(video_upgrade_enabled(Some(" true\n")), "trimmed");
+        for off in ["false", "", "TRUE", "yes"] {
+            assert!(!video_upgrade_enabled(Some(off)), "{off:?}");
+        }
     }
 
     #[test]
