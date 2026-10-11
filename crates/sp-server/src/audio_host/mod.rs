@@ -7,7 +7,11 @@
 //! the same yt-dlp spawned from a shell never did. SongPlayer must spawn
 //! children, so no ASIO driver lives in SongPlayer any more: EVERY ASIO
 //! output runs in this host process, which spawns nothing (a source scan in
-//! CI, `no_spawn_tests.rs`), whatever the in-process mechanism was.
+//! CI, `no_spawn_tests.rs`), whatever the in-process mechanism was. (Later
+//! measured, A/B/A with a kernel trace: Windows Defender scanning each
+//! process SongPlayer launches caused the resyncs, with the driver in this
+//! host too; Defender is off on the boxes. The owner kept this separate
+//! audio engine as the architecture.)
 //!
 //! **Shape.** The host links this crate and runs the existing ASIO output
 //! unchanged — `AsioWorker`, the `asio_win` device, the servo, the

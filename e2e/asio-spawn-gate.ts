@@ -4,7 +4,10 @@
  * made PP's Waves SoundGrid driver ask for a resync (its output popped,
  * LV1 counted errors) while the driver was loaded in SongPlayer's process;
  * since then every ASIO output runs in the ASIO host process
- * `sp-audio-host`, which spawns nothing.
+ * `sp-audio-host`, which spawns nothing. This gate then caught the same
+ * resyncs with the driver in the host: Windows Defender's scan of each
+ * launched process was the cause (A/B/A + a kernel trace), now off on the
+ * boxes; the gate keeps watching for any spawn side effect.
  *
  * The live gate (`post-deploy-audio-asio.spec.ts`) reads every gated ASIO
  * output's `resyncs` and `hard_recentres` (`outputs[i].asio`), makes

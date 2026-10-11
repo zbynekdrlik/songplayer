@@ -1017,8 +1017,19 @@ SoundGrid driver, loaded IN SongPlayer's process by its ASIO output, send
 The owner's ruling: a systemic fix, "impossible in principle", never "spawn
 less". ROZHODNUTÉ: no ASIO driver lives in SongPlayer any more; EVERY ASIO
 output runs in the ASIO host process, which spawns nothing, whatever the
-in-process mechanism was (handle inheritance is the leading hypothesis).
+in-process mechanism was (handle inheritance was the leading hypothesis).
 VBAN outputs stay in SongPlayer (no driver).
+
+**The cause, measured after the host shipped** (0.80.0-dev, PP): with the
+SoundGrid driver only in `sp-audio-host` (its module list), a
+SongPlayer-spawned yt-dlp still caused 1–3 resyncs on out-2 every time —
+the live spawn gate below caught it. An A/B/A run with a kernel trace
+proved Windows Defender's scan of each process SongPlayer launches as the
+cause, not the driver's process; Defender is off on PP and SNV, and a
+separate production-environment guard (Defender / firewall / edition)
+covers it. The owner kept the separate audio engine as the architecture:
+no ASIO driver in the process that launches children, and the spawn gate
+stays.
 
 **Shape.** `sp-audio-host.exe` is a second `[[bin]]` of the Tauri package
 (`src-tauri/src/bin/sp-audio-host.rs`, three lines: `sp_server::audio_host::
@@ -1207,7 +1218,9 @@ discards its outputs; the host's end leaves every output waiting
 `host_down` (and one attached after); a silent host ends the session; a
 host's `ending` names why, and the host sends it on a protocol error; a
 host frame only SongPlayer sends ends the session; a block no session
-takes is dropped on its output; the hello / protocol / report refusals,
+takes is dropped on its output, and a stalled host pipe (the writer stuck)
+never holds a forwarder: past the data queue's 256 every block is dropped
+and counted at once; the hello / protocol / report refusals,
 the session clock and add / replace / remove on `on_frame`; and the REAL
 worker in the host over the scripted driver (`AutoCard`, draining on every
 poll) on a `RemoteClock`, playing SongPlayer's blocks, SongPlayer's output
@@ -1233,7 +1246,8 @@ Common-Controls 6.0 and lists the NSIS installer with 7-Zip: no
 `audio_host/client_win` and `audio_host/host_win` (Windows glue); every
 decision is in the Linux-tested modules.
 
-**Box acceptance (MAIN SESSION OPS, PP).** With the 0.80.0-dev.1 counters:
+**Box acceptance (MAIN SESSION OPS, PP; Defender off, above).** With the
+0.80.0-dev.1 counters:
 a `POST /api/v1/youtube/probe` and a `POST /api/v1/playlists/<id>/sync`
 cause 0 resyncs and 0 hard re-centres on out-2 (Waves SoundGrid), the
 10-min periodic sync passes silently on LV1, Dante out-3 stays clean;
