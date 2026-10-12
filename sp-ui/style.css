@@ -1636,6 +1636,7 @@ body {
 .audio-faults-panel {
     flex-basis: 100%;
     min-width: 0;
+    overflow-x: hidden; /* an axis label at an edge never widens the page */
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius);

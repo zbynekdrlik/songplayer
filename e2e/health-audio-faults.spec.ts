@@ -290,6 +290,18 @@ test("an older loss reads amber; a window without it says so", async ({ page }) 
   await expect(row(panel, "program").getByTestId("audio-path-clean")).toHaveText("bez chyby viac ako 1 h");
 });
 
+test("on a phone the open panel never makes the page scroll sideways", async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 844 });
+  await scenario(page, "recent");
+  await page.goto("/");
+  await expect(page.getByTestId("health-audio")).toHaveAttribute("data-level", "recent", { timeout: 15000 });
+  const panel = await openPanel(page);
+  await expect(panel.getByTestId("audio-fault-event")).toHaveCount(5);
+  await expect(panel.getByTestId("audio-path-row")).toHaveCount(5);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow, "horizontal overflow in px at 400px width").toBeLessThanOrEqual(0);
+});
+
 test("frames read as milliseconds at their output's rate", async ({ page, request }) => {
   const outputs = [
     {
