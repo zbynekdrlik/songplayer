@@ -31,14 +31,18 @@ fn the_host_down_code_is_the_reasons_own() {
     assert_eq!(HOST_DOWN_CODE, Reason::HostDown(String::new()).code());
 }
 
+/// Review round 1: a coalesced boundary was never served (the sender's
+/// full queue dropped the oldest unsent one; VBAN has no gap detection), a
+/// loss (🟡 1); a resync counts only over a real source (🔵 11).
 #[test]
-fn the_program_counts_its_fills_and_resyncs_as_losses_the_rest_as_risks() {
+fn the_program_loses_its_owned_fills_and_resyncs_and_coalesced_boundaries() {
     let mut status = ProgramBus::new().status();
     let h = &mut status.health;
     h.submitted = 900;
     h.filled = 50;
     h.filled_owned = 3;
     h.resyncs = 4;
+    h.resyncs_owned = 2;
     h.late_dropped = 5;
     h.coalesced = 6;
     h.timing.vban_feed_late_over_budget = 7;
@@ -51,9 +55,9 @@ fn the_program_counts_its_fills_and_resyncs_as_losses_the_rest_as_risks() {
             gated_in: true,
             counters: vec![
                 Counter::loss(kinds::FILLED, 3),
-                Counter::loss(kinds::RESYNC, 4),
+                Counter::loss(kinds::RESYNC, 2),
                 Counter::risk(kinds::LATE_DROPPED, 5),
-                Counter::risk(kinds::COALESCED, 6),
+                Counter::loss(kinds::COALESCED, 6),
                 Counter::risk(kinds::VBAN_FEED_LATE, 7),
                 Counter::risk(kinds::LIMITED, 8),
                 Counter::risk(kinds::NDI_LATE, 9),
@@ -144,19 +148,49 @@ fn a_vban_output_loses_its_drops_substitutions_and_send_errors_and_risks_a_late_
     );
 }
 
+/// Review round 1: an output is gated in only while it runs (🟡 4: an
+/// ASIO output's start-up and driver open drop blocks), and the
+/// post-deploy probe's own `e2e-…` outputs are no path (🔵 13).
 #[test]
-fn a_disabled_output_is_no_path_and_a_waiting_one_counts_its_drops() {
-    let probes = output_probes(&[output("off", false, 0, 0), output("waiting", true, 0, 4)]);
+fn a_disabled_or_probe_output_is_no_path_and_only_a_running_one_is_gated_in() {
+    let waiting = OutputStatus {
+        state: "waiting",
+        ..output("waiting", true, 0, 4)
+    };
+    let opening = OutputStatus {
+        state: "opening",
+        ..output("opening", true, 0, 2)
+    };
+    let probes = output_probes(&[
+        output("off", false, 0, 0),
+        output("e2e-96k", true, 10, 1),
+        waiting,
+        opening,
+        output("out-1", true, 30, 0),
+    ]);
+    let paths: Vec<(&str, bool)> = probes
+        .iter()
+        .map(|p| (p.path.as_str(), p.gated_in))
+        .collect();
     assert_eq!(
-        probes,
-        vec![Probe {
+        paths,
+        vec![
+            ("out:waiting", false),
+            ("out:opening", false),
+            ("out:out-1", true)
+        ]
+    );
+    assert_eq!(
+        probes[0],
+        Probe {
             path: "out:waiting".to_string(),
             detail: "Výstup waiting".to_string(),
             run: 0,
-            gated_in: true,
+            gated_in: false,
             counters: vec![Counter::loss(kinds::BLOCKS_DROPPED, 4)],
             ..Probe::default()
-        }]
+        },
+        "its drops are read: the ledger takes them, never records them"
     );
 }
 
@@ -177,6 +211,8 @@ fn an_asio_output_loses_its_faults_risks_its_late_callbacks_and_its_host_down_is
         resyncs: 14,
         overflows: 15,
         late_callbacks: 16,
+        overloads: 17,
+        fast_callbacks: 18,
         reason_code: Some(HOST_DOWN_CODE),
         ..AsioStatus::default()
     };
@@ -195,6 +231,8 @@ fn an_asio_output_loses_its_faults_risks_its_late_callbacks_and_its_host_down_is
                 Counter::loss(kinds::RESYNC, 14),
                 Counter::loss(kinds::OVERFLOW, 15),
                 Counter::risk(kinds::LATE_CALLBACK, 16),
+                Counter::risk(kinds::FAST_CALLBACK, 18),
+                Counter::risk(kinds::OVERLOAD, 17),
             ],
             states: vec![StateFlag {
                 kind: kinds::HOST_DOWN,
@@ -214,14 +252,14 @@ fn an_asio_output_loses_its_faults_risks_its_late_callbacks_and_its_host_down_is
 }
 
 #[test]
-fn a_loop_check_that_ran_is_its_own_path() {
+fn a_loop_check_that_ran_is_its_own_path_gated_like_its_output() {
     let event = |kind, utc_ms, frames| LoopEvent {
         kind,
         utc_ms,
         ago_s: 1.0,
         frames,
     };
-    let asio = AsioStatus {
+    let asio = || AsioStatus {
         loop_status: LoopStatus {
             state: LoopState::NoReturn,
             checked_s: 61.25,
@@ -235,7 +273,7 @@ fn a_loop_check_that_ran_is_its_own_path() {
         },
         ..AsioStatus::default()
     };
-    let probes = output_probes(&[asio_output(asio)]);
+    let probes = output_probes(&[asio_output(asio())]);
     assert_eq!(probes.len(), 2, "the output, then its loop check");
     let loss = |kind, utc_ms, amount| Event {
         kind,
@@ -273,6 +311,13 @@ fn a_loop_check_that_ran_is_its_own_path() {
             ..Probe::default()
         }
     );
+    let waiting = OutputStatus {
+        state: "waiting",
+        ..asio_output(asio())
+    };
+    let probes = output_probes(&[waiting]);
+    assert_eq!(probes[1].path, "loop:out-2");
+    assert!(!probes[1].gated_in, "its output waits");
 }
 
 #[test]
@@ -309,6 +354,7 @@ fn snapshot(
     underruns: u64,
     resyncs: u64,
     unserviced: u64,
+    overflows: u64,
 ) -> PipelineHealthSnapshot {
     PipelineHealthSnapshot {
         playlist_id,
@@ -334,6 +380,7 @@ fn snapshot(
         },
         audio: AudioStats {
             underruns,
+            overflows,
             ..AudioStats::default()
         },
         lock_state: sp_core::genlock::lock_state::LockState::Unlocked,
@@ -343,11 +390,14 @@ fn snapshot(
     }
 }
 
+/// Review round 1 (🟡 3): an overflow drops the oldest audio of the
+/// pipeline's grid (`audio_grid.rs` `enforce_cap`): samples lost while on
+/// program.
 #[test]
-fn a_pipeline_loses_its_underruns_resyncs_and_unserviced_slots_gated_on_program() {
+fn a_pipeline_loses_its_underruns_resyncs_unserviced_slots_and_overflows_gated_on_program() {
     let on_air = BTreeSet::from([3]);
     let probes = pipeline_probes(
-        &[snapshot(3, 500, 1, 2, 4), snapshot(4, 9, 0, 0, 0)],
+        &[snapshot(3, 500, 1, 2, 4, 6), snapshot(4, 9, 0, 0, 0, 0)],
         &on_air,
     );
     assert_eq!(
@@ -361,6 +411,7 @@ fn a_pipeline_loses_its_underruns_resyncs_and_unserviced_slots_gated_on_program(
                 Counter::loss(kinds::UNDERRUN, 1),
                 Counter::loss(kinds::RESYNC, 2),
                 Counter::loss(kinds::UNSERVICED, 4),
+                Counter::loss(kinds::OVERFLOW, 6),
             ],
             ..Probe::default()
         },
@@ -414,8 +465,8 @@ fn read_takes_every_path_from_the_bus_and_the_registry() {
     bus.select_initial(3, None);
     bus.outputs().note_limiter_overs(4);
     let registry = NdiHealthRegistry::new();
-    registry.update(snapshot(3, 10, 2, 0, 0));
-    registry.update(snapshot(4, 10, 5, 0, 0));
+    registry.update(snapshot(3, 10, 2, 0, 0, 0));
+    registry.update(snapshot(4, 10, 5, 0, 0, 0));
     let mut tally = TraceTally::default();
     let probes = read(&bus, &registry, &mut tally);
     let mut paths: Vec<(&str, bool)> = probes
