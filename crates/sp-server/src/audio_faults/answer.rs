@@ -4,16 +4,21 @@
 //! Per path: `clean_since_ms` = its last `loss` row in the window, else its
 //! latest `start` row in it, else the window's start (a path with no row
 //! in the window was clean for all of it); `last_loss_ms` / `last_risk_ms`;
+//! `losses` / `risks` = the window's loss / risk rows (each one fault the
+//! ledger recorded at its time: the dashboard's count);
 //! `counts` = the faults per kind (loss and risk rows: a counter's steps
 //! summed, one per event or state row, `model::occurrences`); `events` =
 //! its rows that are no meter, oldest first; a loop check's `loop`
 //! `{checked_s, blind_s}` from its meters. At most [`MAX_EVENTS`] events in
 //! the whole answer, the newest (`truncated`). `worst` = the path with the
 //! most recent loss.
+//!
+//! The answer's types are `sp_core::audio_faults`'s (lane 2): the dashboard
+//! reads the very structs the server writes.
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+pub use sp_core::audio_faults::{FaultEvent, FaultsAnswer, LoopSeconds, PathFaults};
 
 use super::model::{Severity, kinds, occurrences};
 
@@ -71,51 +76,6 @@ pub struct StoredEvent {
     pub amount: i64,
 }
 
-/// An event of a path's answer.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct FaultEvent {
-    pub ts_ms: i64,
-    pub kind: String,
-    pub severity: String,
-    pub amount: i64,
-}
-
-/// A loop check's time in the window.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct LoopSeconds {
-    pub checked_s: f64,
-    pub blind_s: f64,
-}
-
-/// One path of the answer.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct PathFaults {
-    pub path: String,
-    pub detail: String,
-    /// The path runs now.
-    pub live: bool,
-    pub clean_since_ms: i64,
-    pub last_loss_ms: Option<i64>,
-    pub last_risk_ms: Option<i64>,
-    pub counts: BTreeMap<String, i64>,
-    pub events: Vec<FaultEvent>,
-    #[serde(rename = "loop", skip_serializing_if = "Option::is_none")]
-    pub loop_check: Option<LoopSeconds>,
-}
-
-/// `GET /api/v1/audio/faults`.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct FaultsAnswer {
-    pub now_ms: i64,
-    pub from_ms: i64,
-    pub hours: u32,
-    /// The path with the most recent loss (`null`: none in the window).
-    pub worst: Option<String>,
-    /// More events than [`MAX_EVENTS`]: the oldest are left out.
-    pub truncated: bool,
-    pub paths: Vec<PathFaults>,
-}
-
 /// What one path gathers before it is answered.
 #[derive(Debug, Default)]
 struct PathAcc {
@@ -124,6 +84,8 @@ struct PathAcc {
     last_loss_ms: Option<i64>,
     last_risk_ms: Option<i64>,
     last_start_ms: Option<i64>,
+    losses: i64,
+    risks: i64,
     counts: BTreeMap<String, i64>,
     events: Vec<FaultEvent>,
     checked_ms: i64,
@@ -136,9 +98,11 @@ impl PathAcc {
         let faults = occurrences(&t.kind, t.rows, t.amount);
         if t.severity == Severity::Loss.as_str() {
             self.last_loss_ms = newest(self.last_loss_ms);
+            self.losses += t.rows;
             *self.counts.entry(t.kind.clone()).or_default() += faults;
         } else if t.severity == Severity::Risk.as_str() {
             self.last_risk_ms = newest(self.last_risk_ms);
+            self.risks += t.rows;
             *self.counts.entry(t.kind.clone()).or_default() += faults;
         } else if t.kind == kinds::START {
             self.last_start_ms = newest(self.last_start_ms);
@@ -161,6 +125,8 @@ impl PathAcc {
             live: self.live,
             last_loss_ms: self.last_loss_ms,
             last_risk_ms: self.last_risk_ms,
+            losses: self.losses,
+            risks: self.risks,
             counts: self.counts,
             events: self.events,
             loop_check,

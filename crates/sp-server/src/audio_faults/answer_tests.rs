@@ -100,6 +100,8 @@ fn a_live_path_with_no_row_is_clean_since_the_window_starts() {
                 clean_since_ms: NOW - 86_400_000,
                 last_loss_ms: None,
                 last_risk_ms: None,
+                losses: 0,
+                risks: 0,
                 counts: BTreeMap::new(),
                 events: Vec::new(),
                 loop_check: None,
@@ -133,6 +135,31 @@ fn clean_since_is_the_last_loss_else_the_latest_start() {
     );
     assert_eq!(answer.worst, Some("out:a".to_string()));
     assert!(!a.live && !b.live, "no path runs now");
+}
+
+/// #257 lane 2: the dashboard's count is the window's loss / risk rows,
+/// every kind of each summed (a counter's step of 5 is one row, as is an
+/// event); a start or a meter is neither.
+#[test]
+fn losses_and_risks_count_the_windows_rows_per_severity() {
+    let totals = [
+        total("out:a", "underrun", "loss", 5, 2, NOW - 4_000),
+        total("out:a", "overflow", "loss", 4_096, 1, NOW - 3_000),
+        total("out:a", "late_callback", "risk", 7, 3, NOW - 2_000),
+        total("out:a", "start", "info", 1, 1, NOW - 9_000),
+        total("loop:a", "no_return", "risk", 1, 1, NOW - 1_000),
+        total("loop:a", "checked", "meter", 60_000, 4, NOW - 1_000),
+    ];
+    let answer = build_answer(NOW, 1, &totals, Vec::new(), &[], &[]);
+    let rows: Vec<(&str, i64, i64)> = answer
+        .paths
+        .iter()
+        .map(|p| (p.path.as_str(), p.losses, p.risks))
+        .collect();
+    assert_eq!(rows, [("loop:a", 0, 1), ("out:a", 3, 3)]);
+    let json = serde_json::to_value(&answer).unwrap();
+    assert_eq!(json["paths"][1]["losses"], 3);
+    assert_eq!(json["paths"][1]["risks"], 3);
 }
 
 #[test]

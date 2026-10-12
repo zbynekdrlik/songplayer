@@ -30,6 +30,9 @@ export interface PathFaults {
   clean_since_ms: number;
   last_loss_ms: number | null;
   last_risk_ms: number | null;
+  /** #257 lane 2: the window's loss / risk rows (the dashboard's count). */
+  losses?: number;
+  risks?: number;
   counts: Record<string, number>;
   events: FaultEvent[];
   loop?: { checked_s: number; blind_s: number };
