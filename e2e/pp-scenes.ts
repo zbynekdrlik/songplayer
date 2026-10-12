@@ -30,6 +30,12 @@ import { isDabing, type PlaylistRow } from "./program-state";
  *  scene resolver, not a cg OBS scene. */
 export const OBS_MANUAL = "OBS manuál";
 
+/** #245: "Blank" (sp-core `PROGRAM_BLANK_LABEL`, any ASCII case,
+ *  `is_blank_scene`): SongPlayer's own black. A facade press of it cuts
+ *  SP-program to source -2 and tells cg OBS nothing, even when cg OBS has a
+ *  scene of that name. */
+export const SONGPLAYER_BLANK = "blank";
+
 /** Rust's `to_ascii_lowercase` (the catalog's case rule). */
 function asciiLower(s: string): string {
   return s.replace(/[A-Z]/g, (c) => c.toLowerCase());
@@ -101,13 +107,15 @@ export interface ManualSceneInput {
 }
 
 /** A manual scene: not blank, none of the active playlists' names
- *  (`playlistNames`), not the A/V gate's probe scene, not "OBS manuál". */
+ *  (`playlistNames`), not the A/V gate's probe scene, not "OBS manuál", not
+ *  SongPlayer's own "Blank" (#245, any ASCII case). */
 export function isManualScene(scene: string, playlistNames: Set<string>): boolean {
   return (
     scene.trim() !== "" &&
     !playlistNames.has(asciiLower(scene)) &&
     scene !== AV_PROBE_SCENE &&
-    scene !== OBS_MANUAL
+    scene !== OBS_MANUAL &&
+    asciiLower(scene) !== SONGPLAYER_BLANK
   );
 }
 
@@ -129,7 +137,7 @@ export function pickManualScene(o: ManualSceneInput): { scene: string } | { erro
     }
     if (!manual(configured)) {
       return {
-        error: `PP_MANUAL_SCENE "${configured}" is not a manual scene (a playlist's, the A/V probe's or "${OBS_MANUAL}")`,
+        error: `PP_MANUAL_SCENE "${configured}" is not a manual scene (a playlist's, the A/V probe's, "${OBS_MANUAL}" or SongPlayer's "Blank")`,
       };
     }
     return { scene: configured };
