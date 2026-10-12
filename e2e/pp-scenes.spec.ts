@@ -278,10 +278,10 @@ test.describe("how cg OBS goes back after the PP gate (#229)", () => {
     expect(cgRestoreVia({ ...via, backIsManual: false })).toBe("cg");
   });
 
-  test("a manual scene: not a playlist's name, the probe's or OBS manual", () => {
+  test("a manual scene: not a playlist's name, the probe's, OBS manual or Blank", () => {
     const names = playlistNames(ROWS);
-    expect(isManualScene("Blank", names)).toBe(true);
-    for (const s of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, " "]) {
+    expect(isManualScene("Svedectvo", names)).toBe(true);
+    for (const s of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, "Blank", " "]) {
       expect(isManualScene(s, names), s).toBe(false);
     }
   });
