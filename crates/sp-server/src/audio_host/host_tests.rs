@@ -254,6 +254,7 @@ fn the_hosts_status_and_start_error_are_the_outputs_in_songplayer() {
             sp_core::audio_outputs::AsioDest {
                 driver: "Waves SoundGrid".into(),
                 channels: [0, 1],
+                loop_check: false,
             },
         ),
         built_rate: 0,

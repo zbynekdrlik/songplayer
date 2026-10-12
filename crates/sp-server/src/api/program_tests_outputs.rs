@@ -245,6 +245,7 @@ async fn an_asio_entry_off_windows_waits_and_says_why() {
         sp_core::audio_outputs::AsioDest {
             driver: "Dante Virtual Soundcard (x64)".into(),
             channels: [0, 1],
+            loop_check: false,
         },
     );
     let settings = crate::playback::audio_out_config::OutputsSettings {

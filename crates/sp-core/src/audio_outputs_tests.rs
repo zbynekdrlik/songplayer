@@ -460,6 +460,7 @@ fn dvs(id: &str) -> OutputEntry {
         AsioDest {
             driver: "Dante Virtual Soundcard (x64)".into(),
             channels: [0, 1],
+            loop_check: false,
         },
     )
 }
@@ -484,6 +485,33 @@ fn an_asio_entry_serializes_in_the_spec_layout() {
     // A VBAN entry has no `asio` block, an ASIO entry no `vban` block.
     assert!(!serde_json::to_string(&foh()).unwrap().contains("asio"));
     assert_eq!(dvs("out-3").vban, None);
+}
+
+/// #233 (the SoundGrid loop check): `asio.loop_check` is written only when
+/// it is on, read as off when absent, so a list stored before it reads and
+/// writes back byte for byte; on, it survives a round trip.
+#[test]
+fn the_loop_check_is_written_only_when_on() {
+    let mut e = dvs("out-2");
+    assert!(!asio_mut(&mut e).loop_check, "off by default");
+    asio_mut(&mut e).loop_check = true;
+    let text = serde_json::to_string(&e).unwrap();
+    assert_eq!(
+        text,
+        r#"{"id":"out-2","name":"DVS","type":"asio","enabled":true,"rate":"network","delay_ms":0,"asio":{"driver":"Dante Virtual Soundcard (x64)","channels":[0,1],"loop_check":true}}"#
+    );
+    let back: OutputEntry = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, e);
+    assert!(validate_entry(0, &e).is_ok());
+    // Absent reads as off; an explicit off is written as nothing.
+    let old = r#"{"id":"out-2","name":"DVS","type":"asio","asio":{"driver":"d","channels":[0,1]}}"#;
+    let read: OutputEntry = serde_json::from_str(old).unwrap();
+    assert!(!read.asio.as_ref().unwrap().loop_check);
+    let off = r#"{"id":"out-2","name":"DVS","type":"asio","asio":{"driver":"d","channels":[0,1],"loop_check":false}}"#;
+    let read: OutputEntry = serde_json::from_str(off).unwrap();
+    assert!(!serde_json::to_string(&read).unwrap().contains("loop_check"));
+    // The two entries differ only in the flag: an edit of it is a change.
+    assert_ne!(dvs("out-2"), e);
 }
 
 #[test]
@@ -571,6 +599,7 @@ fn at_most_four_asio_entries() {
                     AsioDest {
                         driver: format!("d{k}"),
                         channels: [0, 1],
+                        loop_check: false,
                     },
                 )
             })
@@ -660,7 +689,8 @@ fn a_new_asio_entry_takes_the_next_id_and_channels_1_and_2() {
         e.asio.unwrap(),
         AsioDest {
             driver: "Blackmagic ASIO".into(),
-            channels: [0, 1]
+            channels: [0, 1],
+            loop_check: false,
         }
     );
     let first = new_asio(&[], "");
@@ -870,6 +900,7 @@ fn another_port_host_or_stream_name_is_another_destination() {
         AsioDest {
             driver: "fohabl.lan".into(),
             channels: [0, 1],
+            loop_check: false,
         },
     );
     assert!(!destination_taken(&[foh()], &asio));
