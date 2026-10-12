@@ -831,6 +831,8 @@ function audioFaultsFixture(now, hours) {
     clean_since_ms: start,
     last_loss_ms: null,
     last_risk_ms: null,
+    losses: 0,
+    risks: 0,
     counts: {},
     events: [{ ts_ms: start, kind: "start", severity: "info", amount: 1 }, ...events],
   });
@@ -845,12 +847,14 @@ function audioFaultsFixture(now, hours) {
       {
         ...clean("out:out-1", "FOH", [{ ts_ms: risk, kind: "late_packet", severity: "risk", amount: 12500 }]),
         last_risk_ms: risk,
+        risks: 1,
         counts: { late_packet: 1 },
       },
       {
         ...clean("out:out-2", "Waves SoundGrid", [{ ts_ms: loss, kind: "underrun", severity: "loss", amount: 2 }]),
         clean_since_ms: loss,
         last_loss_ms: loss,
+        losses: 1,
         counts: { underrun: 2 },
       },
       clean("pipeline:1", "SP-fast"),
@@ -870,7 +874,162 @@ app.get("/api/v1/audio/faults", (req, res) => {
     }
     hours = n;
   }
-  res.json(audioFaultsFixture(Date.now(), hours));
+  const answer = () => {
+    const rows = audioScenarioRows(audioFaultsScenario);
+    const now = Date.now();
+    res.json(rows ? audioAnswerFromRows(rows, now, hours) : audioFaultsFixture(now, hours));
+  };
+  if (audioFaultsDelayMs > 0) setTimeout(answer, audioFaultsDelayMs);
+  else answer();
+});
+
+// #257 lane 2: the ledger's scenarios for the dashboard's specs. `POST
+// /__mock/audio-faults {scenario}` picks one: "fixture" (lane 1's fixed
+// answer above, the default), "clean", "risk", "recent" (a loss 3 min ago
+// on SoundGrid, two older losses, two risks), "old" (one loss 3 h ago);
+// `POST /__mock/audio-faults-reset` = "fixture", no delay. `delay_ms` holds
+// every answer back (a spec proves the dashboard never has two requests in
+// flight). A scenario is ledger rows,
+// answered over the asked window as the server answers them
+// (`audio_faults::answer::build_answer`). Every live path started 2 h 14 min
+// 30 s ago (a deploy); the offsets sit mid-minute, so a text in whole minutes
+// holds for 30 s.
+let audioFaultsScenario = "fixture";
+let audioFaultsDelayMs = 0;
+const AUDIO_LIVE = [
+  ["program", "SP-program"],
+  ["pipeline:1", "SP-worship"],
+  ["out:out-1", "FOH"],
+  ["out:out-2", "Waves SoundGrid"],
+  ["loop:out-2", "Waves SoundGrid"],
+];
+// As `model::row_counted`: one per row, the amount a magnitude.
+const AUDIO_ROW_COUNTED = new Set(["late_packet", "host_down", "mismatch", "dropout", "slip", "no_return"]);
+const MOCK_MIN = 60_000;
+const MOCK_HOUR = 3_600_000;
+// The rows of a scenario: [path, kind, severity, amount, ms before now].
+function audioScenarioRows(name) {
+  const started = 2 * MOCK_HOUR + 14 * MOCK_MIN + 30_000;
+  const base = [
+    ...AUDIO_LIVE.map(([path]) => [path, "start", "info", 1, started]),
+    ["loop:out-2", "checked", "meter", 3_540_000, MOCK_MIN],
+    ["loop:out-2", "blind", "meter", 60_000, MOCK_MIN],
+  ];
+  const lateFoh = ["out:out-1", "late_packet", "risk", 12_500, 20 * MOCK_MIN + 30_000];
+  switch (name) {
+    case "clean":
+      return base;
+    case "risk":
+      return [...base, lateFoh];
+    case "recent":
+      return [
+        ...base,
+        ["out:out-2", "underrun", "loss", 2, 3 * MOCK_MIN + 30_000],
+        ["loop:out-2", "dropout", "loss", 480, 40 * MOCK_MIN + 30_000],
+        ["program", "filled", "loss", 3, 5 * MOCK_HOUR + 30_000],
+        lateFoh,
+        ["out:out-1", "late_packet", "risk", 11_000, 2 * MOCK_HOUR + 30_000],
+      ];
+    case "old":
+      return [...base, ["program", "filled", "loss", 1, 3 * MOCK_HOUR + 30_000]];
+    default:
+      return null;
+  }
+}
+// As the server's `build_answer`: per path in the window its last loss /
+// risk / start, its loss and risk rows, its counts per kind, its rows that
+// are no meter (oldest first), a loop check's meters; paths in the
+// server's (string) order; `worst` = the latest loss, the later path on a
+// tie.
+function audioAnswerFromRows(rows, now, hours) {
+  const from = now - hours * MOCK_HOUR;
+  const paths = new Map();
+  const acc = (path) => {
+    if (!paths.has(path)) {
+      paths.set(path, {
+        path,
+        detail: "",
+        live: false,
+        last_loss_ms: null,
+        last_risk_ms: null,
+        last_start: null,
+        losses: 0,
+        risks: 0,
+        counts: {},
+        events: [],
+        checked: 0,
+        blind: 0,
+      });
+    }
+    return paths.get(path);
+  };
+  for (const [path, detail] of AUDIO_LIVE) {
+    const a = acc(path);
+    a.detail = detail;
+    a.live = true;
+  }
+  const inWindow = rows
+    .map(([path, kind, severity, amount, ago]) => ({ ts_ms: now - ago, path, kind, severity, amount }))
+    .filter((r) => r.ts_ms >= from)
+    .sort((x, y) => x.ts_ms - y.ts_ms);
+  for (const r of inWindow) {
+    const a = acc(r.path);
+    if (r.severity === "loss" || r.severity === "risk") {
+      const last = r.severity === "loss" ? "last_loss_ms" : "last_risk_ms";
+      a[last] = Math.max(a[last] ?? r.ts_ms, r.ts_ms);
+      if (r.severity === "loss") a.losses += 1;
+      else a.risks += 1;
+      a.counts[r.kind] = (a.counts[r.kind] || 0) + (AUDIO_ROW_COUNTED.has(r.kind) ? 1 : r.amount);
+    } else if (r.kind === "start") {
+      a.last_start = Math.max(a.last_start ?? r.ts_ms, r.ts_ms);
+    } else if (r.kind === "checked") {
+      a.checked += r.amount;
+    } else if (r.kind === "blind") {
+      a.blind += r.amount;
+    }
+    if (r.severity !== "meter") {
+      a.events.push({ ts_ms: r.ts_ms, kind: r.kind, severity: r.severity, amount: r.amount });
+    }
+  }
+  const out = [...paths.values()]
+    .sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0))
+    .map((a) => ({
+      path: a.path,
+      detail: a.detail,
+      live: a.live,
+      clean_since_ms: a.last_loss_ms ?? a.last_start ?? from,
+      last_loss_ms: a.last_loss_ms,
+      last_risk_ms: a.last_risk_ms,
+      losses: a.losses,
+      risks: a.risks,
+      counts: a.counts,
+      events: a.events,
+      ...(a.path.startsWith("loop:") ? { loop: { checked_s: a.checked / 1000, blind_s: a.blind / 1000 } } : {}),
+    }));
+  let worst = null;
+  let newest = null;
+  for (const p of out) {
+    if (p.last_loss_ms !== null && (newest === null || p.last_loss_ms >= newest)) {
+      newest = p.last_loss_ms;
+      worst = p.path;
+    }
+  }
+  return { now_ms: now, from_ms: from, hours, worst, truncated: false, paths: out };
+}
+app.post("/__mock/audio-faults", (req, res) => {
+  const scenario = String((req.body || {}).scenario || "fixture");
+  if (scenario !== "fixture" && audioScenarioRows(scenario) === null) {
+    res.status(400).type("text/plain").send(`unknown scenario: ${scenario}`);
+    return;
+  }
+  audioFaultsScenario = scenario;
+  audioFaultsDelayMs = Number((req.body || {}).delay_ms || 0);
+  res.json({ scenario, delay_ms: audioFaultsDelayMs });
+});
+app.post("/__mock/audio-faults-reset", (_req, res) => {
+  audioFaultsScenario = "fixture";
+  audioFaultsDelayMs = 0;
+  res.json({ scenario: audioFaultsScenario, delay_ms: audioFaultsDelayMs });
 });
 
 app.get("/api/v1/audio/asio-drivers", (_req, res) => {
