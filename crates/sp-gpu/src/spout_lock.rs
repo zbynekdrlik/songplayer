@@ -94,7 +94,7 @@ pub(crate) enum SentinelStep {
 pub(crate) fn sentinel_step(wait: u32, stop: bool) -> SentinelStep {
     match wait {
         WAIT_TOOK => SentinelStep::GiveBack { abandoned: false },
-        WAIT_TOOK_ABANDONED => SentinelStep::WaitAgain,
+        WAIT_TOOK_ABANDONED => SentinelStep::GiveBack { abandoned: true },
         WAIT_TIMED_OUT if stop => SentinelStep::Stop,
         WAIT_TIMED_OUT => SentinelStep::WaitAgain,
         _ => SentinelStep::Fail,

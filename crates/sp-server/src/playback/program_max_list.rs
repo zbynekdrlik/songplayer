@@ -43,7 +43,7 @@ use crate::playback::program_max_worker::MAX_RETRY_BACKOFF;
 /// How long one program must keep Spout's list, on every read, before it
 /// is named and the sentinel starts: one sender backoff
 /// (`MAX_RETRY_BACKOFF`), the time a refused sender waits anyway.
-pub const LIST_HELD_AFTER: Duration = Duration::from_secs(MAX_RETRY_BACKOFF.as_secs() * 1_200);
+pub const LIST_HELD_AFTER: Duration = MAX_RETRY_BACKOFF;
 
 /// `GET /api/v1/program` → `max.list_holder`: the program that keeps
 /// Spout's sender list, once it kept it [`LIST_HELD_AFTER`].
