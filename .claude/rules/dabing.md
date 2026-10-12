@@ -676,6 +676,20 @@ and 5797708129 (freeze this state, the model is a setting).
   (`dropped_silence_s` in the summary). The WAV is at least the input's length;
   the body is a memmap and the raw file is read per chunk (a 36-min talk never
   sits in memory). A failed run removes `live_output.raw` / `dub_placed.wav`.
+- **The WAV ends at the input's end or the last VOICED output, whichever is
+  later (#257, `placed_length`).** The drain streams silence until 8 s with no
+  voiced output (`dls.QUIET_S`); every placed chunk used to lengthen the WAV,
+  that silence included, so a dub ran seconds past its video (SNV: a 35.9-min
+  sermon's dub 7.8 s longer, `split_sync: video/audio duration mismatch`).
+  The player plays a song's audio to its end (`genlock.md` "Audio past the
+  picture plays on the held last frame"), so that silence would hold the
+  wall's last frame for nothing. Now a silent chunk never lengthens it
+  (`render_placed_wav` cuts it at the end); real translated speech past the
+  original's end (the last sentence, by the placement latency) stays whole.
+  A dub made before #257 keeps its tail until it is re-dubbed (below); it
+  plays whole now, on the held frame. Tests: `test_dub_worker.py`
+  (`test_the_placed_dub_ends_with_its_last_voiced_output_not_the_drain_silence`,
+  `test_placed_length_takes_the_input_or_the_last_voiced_end`).
 - Transcriptions carry their arrival time and connection (`(arrival_s, text,
   conn)`, input AND output since round H3); EN, SK, `en_timed` and `sk_timed`
   are ordered BY CONNECTION (the old connection's trailing text arrives after

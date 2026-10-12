@@ -12,6 +12,7 @@ paths:
   - "crates/sp-server/src/playback/fmp4_relay.rs"
   - "crates/sp-server/src/playback/pipeline.rs"
   - "crates/sp-server/src/playback/pipeline_paced.rs"
+  - "crates/sp-server/src/playback/paced_producer*.rs"
   - "crates/sp-server/src/api/preview.rs"
   - "sp-ui/src/components/playlist_card.rs"
   - "sp-ui/src/components/preview_video.rs"
@@ -49,10 +50,15 @@ tap-parameter slot through `PlaybackPipeline::spawn` → `run_loop` →
 `run_loop_windows` → the decode producer.
 
 The decode makes exactly ONE `taps.offer_frame(&video_frame, &audio_frames)`
-call per frame: `pipeline_paced::run_decode_producer` offers on the PRODUCER
-thread (off the emit / delivery path entirely), before `to_paced_frame`. (#221
-lane 3 deleted the SDK-clocked `pipeline::decode_and_send`, the other offer
-site.)
+call per frame: `paced_producer::DecodeProducer::next_item` offers on the
+PRODUCER thread (`pipeline_paced::run_decode_producer`, off the emit /
+delivery path entirely), before `to_paced_frame`. Past the video's end
+(#257) each held step offers the HELD last frame and its audio through
+`DecodeTaps::offer_picture` (`offer_frame`'s own body), so the preview keeps
+its picture and its sound through a song's audio tail and its video feeder
+gets a new canvas every frame period (it would restart the encoder after
+10 s without one). (#221 lane 3 deleted the SDK-clocked
+`pipeline::decode_and_send`, the other offer site.)
 
 `offer_frame` fans out to: the JPEG tap (`preview.try_offer`), the stream video
 tap (`stream.try_offer_video` → NV12→NV12 letterbox into a fixed 640×360 canvas),
@@ -209,7 +215,8 @@ input.
    letterbox into a RECYCLED buffer (the H.264 encode is in the ffmpeg CHILD).
    Never move an encoder onto the decode thread.
 3. **`pacer.rs` / `paced_output.rs` / FLAC / genlock stay byte-for-byte.**
-   The preview adds exactly ONE `offer_frame` call per decoded frame.
+   The preview adds exactly ONE `offer_frame` call per decoded frame (one
+   `offer_picture` per held step past the video's end, #257).
 4. **A full channel DROPS the frame, never blocks.** The stream video/audio
    bounded channels drop-on-full (the video feeder writes the newest canvas
    per 40 ms slot of the monotonic clock, #221); a lagging WS viewer is

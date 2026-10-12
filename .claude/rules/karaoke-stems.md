@@ -174,10 +174,15 @@ sets `audio_eos` when the reader returns end-of-stream (a `StemMixReader`
 does once every stem drained), and `audio_ended()` = that with nothing in
 `pending_audio`; a seek clears it. The paced producer puts it on every
 queued frame, and the pacer then treats a short block as the song's own
-end, never an underrun (`genlock.md` "A song's natural end"). It stays
-`false` when the VIDEO ends first: `next_synced` returns `None` at the
-video's end and never reads the audio past the last frame's deadline, so
-such a song counts one `underrun_end`. Tests: `split_sync_tests_end.rs`.
+end, never an underrun (`genlock.md` "A song's natural end"). When the
+VIDEO ends first, `next_synced` returns `None` (and reads the video no more
+until a seek) and the audio past the last frame goes out with `next_held`,
+the held last frame's steps on the source cadence, each through the SAME
+G5-gated take (`take_audio_until`: never a read ahead of a step's deadline
++ one chunk), until the audio ended or `AUDIO_PAST_VIDEO_MAX_MS` (15 s);
+only past that bound does a song count one `underrun_end` (`genlock.md`
+"Audio past the picture plays on the held last frame"). Tests:
+`split_sync_tests_end.rs`, `split_sync_tests_held.rs`.
 
 ## #184 round G2 — each reader FAMILY owns its memory; NO global "active kind" (SUPERSEDES round G1)
 

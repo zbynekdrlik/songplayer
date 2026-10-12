@@ -84,7 +84,7 @@ VBAN receive side), box work.
 | `out:<id>` (enabled outputs, never the post-deploy probe's `e2e-…`) | `blocks_dropped`; VBAN `blocks_substituted`, `send_error`; ASIO `underrun`, `hard_recentre`, `reset`, `resync`, `overflow` (frames), `host_down` (state: `asio.reason_code == "host_down"`) | VBAN `late_packet` (each `late_events` entry over 10 ms, amount µs); ASIO `late_callback`, `fast_callback`, `overload` | gated in while `state == "running"`; run = `blocks_sent` |
 | `loop:<id>` (an ASIO output whose loop check ran: not `off`, or it has time) | each recent `mismatch` / `dropout` / `slip` event (amount = frames, a slip signed) | `no_return` (state: the check cannot tell) | gated like its output; meters `checked`, `blind`; run = checked + blind ms |
 | `input` (the NDI input "OBS manuál", while its thread runs) | `resync`, `no_source` (standby boundaries: no receiver, disconnected, no video yet), `unsupported` (standby: the format) — each a silent block | — | gated in while -1 is on program; run = `boundaries` |
-| `pipeline:<playlist id>` | `underrun_start` (`audio.underruns_start`: a song's, seek's or resume's audio cut short before its first full block), `underrun` (`audio.underruns_mid`: cut short mid-song, the decode behind the cushion), `underrun_end` (`audio.underruns_end`: a song that ended before the decoder reached its audio's end), `resync` (`pacing.resyncs`), `unserviced` (`pacing.song_change_unserviced_slots`), `overflow` (`audio.overflows`: times its audio grid dropped its oldest samples over the 2 s cap) | — | gated in while on program; run = `pacing.seq` |
+| `pipeline:<playlist id>` | `underrun_start` (`audio.underruns_start`: a song's, seek's or resume's audio cut short before its first full block), `underrun` (`audio.underruns_mid`: cut short mid-song, the decode behind the cushion), `underrun_end` (`audio.underruns_end`: a song that ended before the decoder reached its audio's end — since #257 step 2 only audio more than 15 s past the picture, a decode error or a dead producer: a shorter tail plays on the held last frame), `resync` (`pacing.resyncs`), `unserviced` (`pacing.song_change_unserviced_slots`), `overflow` (`audio.overflows`: times its audio grid dropped its oldest samples over the 2 s cap) | — | gated in while on program; run = `pacing.seq` |
 
 **On program** (`probe::on_program`, from the bus's status, no longer the
 authority's on-air set) = the selected source and the outgoing side of a
@@ -104,7 +104,10 @@ first SNV run, 12.10.2026, 21:35:59Z) and a tail longer than one block was
 dropped; the song summary's `audio_underruns` was then the pipeline's
 LIFETIME count, so per-song averages read from it (the "~9 per ended song")
 were running totals. Mechanism, fix and box check: `genlock.md` "A song's
-natural end".
+natural end". Step 2: audio that runs past the picture (a dub's tail) plays
+on the held last frame up to 15 s, so its end is no `underrun_end` either
+(`genlock.md` "Audio past the picture plays on the held last frame"; the dub
+worker no longer writes drain silence past the content, `dabing.md`).
 
 Not faults, by design: `pacing.repeats` (a 24/25 fps song's conversion, a
 paused standby), `pacing.dropped` (60→30 decimation), `late_frames`, an
@@ -116,17 +119,40 @@ receiver closes after the probe; `PROBE_OUTPUT_PREFIX`).
 ### Owned fills and resyncs (`program_bus_window.rs`)
 
 ONE predicate, `ProgramCore::owned(stamp, shows)`: inside an OPEN window
-either side's source is real (`real_source`: a playlist or the NDI input
--1; never Blank -2 or none), so a fade INTO Blank whose playlist missed a
+either side's source DELIVERS, so a fade INTO Blank whose playlist missed a
 boundary is an owned fill (review round 1, 🟡 2: the fill shows Blank);
-anywhere else the source the boundary shows. `count_fill(stamp, shows)`
+anywhere else the source the boundary shows. `delivering(source)` = a REAL
+source (`real_source`: a playlist or the NDI input -1; never Blank -2 or
+none) that touched or offered a boundary since it became the owner (a cut
+to it) or since the bus started (`ProgramCore.delivered`, filled by
+`note_progress` — `touch` and `offer` both go through it — and a cut's new
+owner taken out of it, so a touch from BEFORE the cut does not count).
+
+- **A fill of a source that has delivered nothing yet is a WAIT, never a
+  loss** (#257, SNV 12.10.2026, the deploy of 26a5508d: the restore of
+  source 4 at 23:17:00.768, the ledger's baseline at .770, its Play at .830,
+  and the next tick wrote a `program` `filled` loss — the bus filled the
+  restored owner's boundaries before its pipeline offered anything; the
+  HealthBar would read "Zvuk: 1 chyba za 24 h … Program" for a day after
+  every deploy). The startup restore, and a cut to a source that has not
+  reached the bus yet, count in the plain `filled` / `resyncs` only.
+- A source that delivered and then missed a boundary (its pipeline fell
+  behind, a coalesce gap) still counts: `filled_owned`, `resyncs_owned`, a
+  fade's missing side.
+- In practice every paced source (and the NDI input) touches on every
+  boundary, playing or not, so a source cut to is delivering again within
+  about one boundary; only one that stopped reaching the bus reads as a
+  wait. `count_fill(stamp, shows)`
 (the sender's wall fill and a held window boundary) → `filled_owned`;
 `count_resync(stamp)` (the release path's > 8-slot skip, from its first
 skipped boundary) → `resyncs_owned`; a fade's missing real side
 (`commit_mix`, at its weight) → `filled_owned`. `filled` / `resyncs` keep
 their meaning (every fill, every resync). `program_bus.rs` is at the
 1000-line cap: the counting lives in the window child; each call site is
-one line. Tests: `program_bus_window_tests.rs`.
+one line. Tests: `program_bus_window_tests.rs`
+(`the_restored_selection_owes_nothing_before_it_delivered`,
+`a_source_cut_to_owes_its_misses_only_once_it_delivered_since_the_cut`; the
+older cases deliver b(1) first).
 
 ### Limiter overs (`sp_decoder::PeakLimiter::over_frames`)
 
