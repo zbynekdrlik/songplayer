@@ -28,9 +28,12 @@
 //! - `input` (the NDI input "OBS manuál", while its thread runs): `resync`,
 //!   `no_source` and `unsupported` (boundaries it offered as standby, i.e.
 //!   silence) are losses, gated in while it is on program.
-//! - `pipeline:<playlist id>`: `underrun`, `resync`, `unserviced`,
-//!   `overflow` (its audio grid dropped its oldest samples) are losses,
-//!   gated in while the playlist is on program.
+//! - `pipeline:<playlist id>`: `underrun_start` / `underrun` /
+//!   `underrun_end` (#257: a song's audio late at its start, short
+//!   mid-song, cut before its end; the block a song's audio ends in is no
+//!   underrun), `resync`, `unserviced`, `overflow` (its audio grid dropped
+//!   its oldest samples) are losses, gated in while the playlist is on
+//!   program.
 //!
 //! On program ([`on_program`]) = the program's selected source and the
 //! outgoing side of a running fade (mixed until it ends, up to ~10.5 s).
@@ -253,7 +256,9 @@ pub fn pipeline_probes(snaps: &[PipelineHealthSnapshot], on_program: &BTreeSet<i
             run: s.pacing.seq,
             gated_in: on_program.contains(&s.playlist_id),
             counters: vec![
-                Counter::loss(kinds::UNDERRUN, s.audio.underruns),
+                Counter::loss(kinds::UNDERRUN_START, s.audio.underruns_start),
+                Counter::loss(kinds::UNDERRUN, s.audio.underruns_mid),
+                Counter::loss(kinds::UNDERRUN_END, s.audio.underruns_end),
                 Counter::loss(kinds::RESYNC, s.pacing.resyncs),
                 Counter::loss(kinds::UNSERVICED, s.pacing.song_change_unserviced_slots),
                 Counter::loss(kinds::OVERFLOW, s.audio.overflows),

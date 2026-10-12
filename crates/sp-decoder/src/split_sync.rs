@@ -57,6 +57,9 @@ pub struct SplitSyncedDecoder {
     /// realign exactly like a fresh Play (#192 round 5). Cleared on the first
     /// delivered frame.
     pending_video_target_ms: Option<u64>,
+    /// The audio reader returned end-of-stream (#257): every audio sample of
+    /// the song has been read. Cleared by a seek.
+    audio_eos: bool,
 }
 
 impl std::fmt::Debug for SplitSyncedDecoder {
@@ -129,12 +132,23 @@ impl SplitSyncedDecoder {
             audio_lead_ms,
             duration_ms: a_dur,
             pending_video_target_ms: None,
+            audio_eos: false,
         })
     }
 
     /// The audio read-ahead deadline past each video frame (ms).
     pub fn audio_lead_ms(&self) -> u64 {
         self.audio_lead_ms
+    }
+
+    /// Every audio sample of the song has been handed out with a frame
+    /// (#257): the audio reader returned end-of-stream and no chunk waits.
+    /// The paced producer passes it on with the frame, so the pacer knows that
+    /// a block cut short from then on is the song's own end, not an underrun.
+    /// A seek clears it. It stays `false` when the video ends first: the audio
+    /// past the last frame's deadline is never read.
+    pub fn audio_ended(&self) -> bool {
+        self.audio_eos && self.pending_audio.is_empty()
     }
 
     /// Master-clock duration (audio).
@@ -172,6 +186,7 @@ impl SplitSyncedDecoder {
         self.audio.seek(position_ms)?;
         self.pending_audio.clear();
         self.pending_video_target_ms = Some(position_ms);
+        self.audio_eos = false;
         Ok(())
     }
 
@@ -210,7 +225,12 @@ impl SplitSyncedDecoder {
         // so that read-ahead was fader latency (#184 G5). The read-ahead stays
         // bounded at `audio_lead_ms` plus one chunk.
         if self.pending_audio.is_empty() {
-            while let Some(af) = self.audio.next_samples()? {
+            loop {
+                let Some(af) = self.audio.next_samples()? else {
+                    // #257: the audio ended; `audio_ended` says so.
+                    self.audio_eos = true;
+                    break;
+                };
                 if af.timestamp_ms <= deadline {
                     audio_frames.push(af);
                 } else {
@@ -270,3 +290,7 @@ mod tests;
 #[cfg(test)]
 #[path = "split_sync_tests_seek.rs"]
 mod tests_seek;
+
+#[cfg(test)]
+#[path = "split_sync_tests_end.rs"]
+mod tests_end;

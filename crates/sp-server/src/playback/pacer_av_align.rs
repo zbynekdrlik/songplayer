@@ -386,14 +386,16 @@ impl Pacer {
         }]
     }
 
-    /// Hold the song's EOS audio tail ([`take_eos_tail`](Pacer::take_eos_tail),
-    /// the last partial boundary zero-filled, #148 rework item 4) for the NEXT
-    /// standby boundary (#147). At a natural song end the paced pipeline then
-    /// services one more boundary with the held last frame, so the tail leaves
-    /// as that boundary's one audio block instead of an audio-only send, and the
-    /// receiver keeps exactly one audio block per video boundary into the idle
-    /// fill. Nothing is held when nothing was buffered. A new map
-    /// ([`anchor`](Pacer::anchor), a lag re-anchor) drops a held tail.
+    /// Hold the next block of the song's EOS audio
+    /// ([`take_eos_tail`](Pacer::take_eos_tail), zero-filled to a boundary,
+    /// #148 rework item 4) for the NEXT standby boundary (#147). At a natural
+    /// song end [`play_out_audio`](Pacer::play_out_audio) serves one boundary
+    /// per held block with the last frame (#257: until nothing is buffered), so
+    /// the tail leaves as those boundaries' audio blocks instead of an
+    /// audio-only send, and the receiver keeps exactly one audio block per
+    /// video boundary into the idle fill. Nothing is held when nothing was
+    /// buffered. A new map ([`anchor`](Pacer::anchor), a lag re-anchor) drops
+    /// a held tail.
     pub fn hold_eos_tail_for_standby(&mut self) {
         let tail = self.take_eos_tail();
         self.av.standby_tail = (!tail.is_empty()).then_some(tail);

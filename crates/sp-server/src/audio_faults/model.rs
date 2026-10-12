@@ -59,8 +59,16 @@ pub mod kinds {
     pub const SEND_ERROR: &str = "send_error";
     /// VBAN output: one packet sent over 10 ms late (an event).
     pub const LATE_PACKET: &str = "late_packet";
-    /// ASIO output / pipeline: an underrun.
+    /// ASIO output: an underrun. Pipeline: a block cut short mid-song (the
+    /// decode fell behind the cushion, #257 `underruns_mid`).
     pub const UNDERRUN: &str = "underrun";
+    /// Pipeline: a block cut short before a song's (a seek's, a resume's)
+    /// first full block: its audio did not start on time (#257).
+    pub const UNDERRUN_START: &str = "underrun_start";
+    /// Pipeline: a song that ended before the decoder reached its audio's end
+    /// (a decode error, a producer gone, audio past the last frame's
+    /// read-ahead): the rest of its audio never played (#257).
+    pub const UNDERRUN_END: &str = "underrun_end";
     /// ASIO output: a hard re-centre.
     pub const HARD_RECENTRE: &str = "hard_recentre";
     /// ASIO output: a close (a reset, a rate change, a stall).

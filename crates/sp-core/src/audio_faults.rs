@@ -349,6 +349,9 @@ pub fn kind_sk(kind: &str) -> &str {
         "mismatch" => "nesedí zvuk",
         "slip" => "posun",
         "underrun" => "podtečenie",
+        // #257: a pipeline's underrun at a song's start / at its end.
+        "underrun_start" => "podtečenie na začiatku",
+        "underrun_end" => "podtečenie na konci",
         "resync" => "resync",
         "hard_recentre" => "tvrdé re-centrovanie",
         "reset" => "reset",

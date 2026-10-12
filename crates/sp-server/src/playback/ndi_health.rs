@@ -97,8 +97,23 @@ pub struct AudioStats {
     pub enabled: bool,
     /// Samples delivered per grid boundary (1600 @ 48 kHz / 30 fps).
     pub samples_per_boundary: u64,
-    /// Boundary chunks that ran the FIFO dry and were zero-filled (cumulative).
+    /// Underruns of every phase (cumulative): `underruns_start` +
+    /// `underruns_mid` + `underruns_end` (#257).
     pub underruns: u64,
+    /// Blocks cut short before a song's (or seek's, or resume's) first full
+    /// block: its audio did not start on time (#257).
+    #[serde(default)]
+    pub underruns_start: u64,
+    /// Blocks cut short once the audio flowed, before the decoder handed out
+    /// the song's last sample: the decode fell behind the cushion.
+    #[serde(default)]
+    pub underruns_mid: u64,
+    /// Songs that ended before the decoder reached their audio's end (a decode
+    /// error, a producer gone, audio past the last frame's read-ahead): the
+    /// rest of the audio never played. A block in which the song's own audio
+    /// ends is no underrun.
+    #[serde(default)]
+    pub underruns_end: u64,
     /// Times the 2 s cap dropped the oldest audio (cumulative).
     pub overflows: u64,
     /// Current buffered audio (ms) after the last take — no setpoint: the

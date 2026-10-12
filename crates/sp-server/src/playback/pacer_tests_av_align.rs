@@ -811,3 +811,7 @@ mod pacer_tests_wall_anchor;
 // emitted audio-block − frame-pts relation), on the same media-encoded helpers.
 #[path = "pacer_tests_av_offset.rs"]
 mod pacer_tests_av_offset;
+
+// #257: a song played to its natural end plays every sample, no underrun.
+#[path = "pacer_tests_song_end.rs"]
+mod pacer_tests_song_end;

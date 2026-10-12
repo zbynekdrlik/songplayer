@@ -22,11 +22,22 @@
 //! the A/V offset with it).
 //!
 //! Underrun → the available samples are played, the missing tail is
-//! zero-filled and `underruns` is bumped; the head advances only by the real
+//! zero-filled and an underrun is counted; the head advances only by the real
 //! samples consumed, so the deficit shows up as an A/V error the correction
 //! then removes. Overflow past a hard 2 s cap → the oldest audio is dropped
 //! (the head advances with it), `overflows` is bumped, and a one-per-song WARN
 //! is armed (`take_overflow_warning`).
+//!
+//! **Underruns by phase (#257).** A block cut short is counted by where the
+//! song is: `start` before the map's first full block (the audio has not
+//! flowed yet), `mid` once it flowed. Once the source ENDED
+//! ([`end_source`](AudioGridBuffer::end_source): the decoder handed out the
+//! song's last audio sample) a short block is the song's own end: its real
+//! samples play, the rest is padding, and nothing is counted, because no
+//! sample is missing. A song stopped before its source ended
+//! ([`end_song`](AudioGridBuffer::end_song)) counts one `end` underrun: the
+//! audio after what was buffered never plays. Before #257 every short block
+//! counted, so each natural song end read as a loss.
 //!
 //! Pure: no clock calls, no I/O. Fully unit-tested on Linux CI.
 
@@ -87,7 +98,17 @@ pub struct AudioGridBuffer {
     head: Option<i64>,
     /// Hard cap (samples/channel) = 2 s; oldest audio is dropped past it.
     cap_samples: usize,
-    underruns: u64,
+    /// Blocks cut short before the map's first full block (#257).
+    underruns_start: u64,
+    /// Blocks cut short once the audio flowed, before its source ended.
+    underruns_mid: u64,
+    /// Songs stopped before their source ended ([`end_song`](Self::end_song)).
+    underruns_end: u64,
+    /// A full block has been taken since the last clear: the audio flows.
+    flowing: bool,
+    /// The source pushes no more audio until the next clear
+    /// ([`end_source`](Self::end_source)).
+    source_ended: bool,
     overflows: u64,
     /// True once an overflow WARN has been emitted this song; a latch so the log
     /// carries at most one overflow warning per song. Cleared by [`clear`].
@@ -103,7 +124,11 @@ impl AudioGridBuffer {
             fifo: Vec::new(),
             head: None,
             cap_samples: (rate_hz as usize) * 2,
-            underruns: 0,
+            underruns_start: 0,
+            underruns_mid: 0,
+            underruns_end: 0,
+            flowing: false,
+            source_ended: false,
             overflows: 0,
             warned_overflow: false,
         }
@@ -151,7 +176,8 @@ impl AudioGridBuffer {
     /// the last output is input `m−1`; `extra == 0` reproduces the input
     /// exactly. With fewer than `m` samples buffered the correction is skipped:
     /// up to `n` real samples are played, and a shortfall zero-fills the tail
-    /// and counts one underrun. The head advances by the input consumed.
+    /// and is counted by phase (an underrun, or the song's end once its source
+    /// ended, #257). The head advances by the input consumed.
     /// Returns the planar block (empty when no channels have been seen) and the
     /// `extra` actually applied.
     pub fn take_block(&mut self, n: usize, extra: i64) -> (Vec<Vec<f32>>, i64) {
@@ -166,7 +192,9 @@ impl AudioGridBuffer {
             // there, bit-exact, and zero-fill a shortfall.
             let k = n.min(level);
             if k < n {
-                self.underruns += 1;
+                self.note_shortfall();
+            } else {
+                self.flowing = true;
             }
             for (c, out_ch) in out.iter_mut().enumerate() {
                 for (dst, &src) in out_ch.iter_mut().zip(self.fifo[c].iter().take(k)) {
@@ -191,7 +219,39 @@ impl AudioGridBuffer {
             }
         }
         self.drain_front(m);
+        self.flowing = true;
         (out, extra)
+    }
+
+    /// One block cut short (#257). Once the source ended the song's audio ends
+    /// inside it: every sample left has played, the rest is padding, nothing is
+    /// missing. Before that it is an underrun: at the start of the map while
+    /// no full block has played yet, else mid-song.
+    fn note_shortfall(&mut self) {
+        if self.flowing {
+            self.underruns_mid += 1;
+        } else {
+            self.underruns_start += 1;
+        }
+    }
+
+    /// The source pushes no more audio until the next [`clear`](Self::clear)
+    /// (#257): the paced decoder handed out the song's last audio sample. A
+    /// block cut short from now on is the song's end, not an underrun.
+    pub fn end_source(&mut self) {
+        self.source_ended = true;
+    }
+
+    /// The song stops here (#257, its natural end: the play-out of what is
+    /// buffered follows). A source that had not ended leaves audio that never
+    /// plays (a decode error, a producer gone, audio the decoder never read):
+    /// one `end` underrun. Then the source counts as ended, so the play-out's
+    /// last short block is not counted a second time.
+    pub fn end_song(&mut self) {
+        if !self.source_ended {
+            self.underruns_end += 1;
+        }
+        self.source_ended = true;
     }
 
     /// Take exactly `n` samples per channel with no correction (EOS tail,
@@ -284,8 +344,24 @@ impl AudioGridBuffer {
         self.cap_samples
     }
 
+    /// Every underrun: start + mid + end (#257).
     pub fn underruns(&self) -> u64 {
-        self.underruns
+        self.underruns_start + self.underruns_mid + self.underruns_end
+    }
+
+    /// Blocks cut short before the map's first full block (#257).
+    pub fn underruns_start(&self) -> u64 {
+        self.underruns_start
+    }
+
+    /// Blocks cut short once the audio flowed, before its source ended.
+    pub fn underruns_mid(&self) -> u64 {
+        self.underruns_mid
+    }
+
+    /// Songs stopped before their source ended.
+    pub fn underruns_end(&self) -> u64 {
+        self.underruns_end
     }
 
     pub fn overflows(&self) -> u64 {
@@ -305,14 +381,17 @@ impl AudioGridBuffer {
     }
 
     /// Empty the FIFO and forget the media head (called on play / seek / new
-    /// song via the pacer's `anchor`, and on Resume). Cumulative `underruns` /
+    /// song via the pacer's `anchor`, and on Resume). Cumulative underruns /
     /// `overflows` survive — they are lifetime telemetry, like the pacing
-    /// counters.
+    /// counters. A new map starts in the start phase with a live source
+    /// (#257).
     pub fn clear(&mut self) {
         self.channels = 0;
         self.fifo = Vec::new();
         self.head = None;
         self.warned_overflow = false;
+        self.flowing = false;
+        self.source_ended = false;
     }
 }
 
@@ -323,3 +402,7 @@ mod audio_grid_tests;
 #[cfg(test)]
 #[path = "audio_grid_tests_mutants.rs"]
 mod audio_grid_tests_mutants;
+
+#[cfg(test)]
+#[path = "audio_grid_tests_phases.rs"]
+mod audio_grid_tests_phases;

@@ -389,10 +389,11 @@ fn probes_no_return(status: &LoopStatus) -> bool {
     output_probes(&[asio_output(asio)])[1].states[0].active
 }
 
+/// A pipeline's health row; `underruns` = (start, mid, end) (#257).
 fn snapshot(
     playlist_id: i64,
     seq: u64,
-    underruns: u64,
+    underruns: (u64, u64, u64),
     resyncs: u64,
     unserviced: u64,
     overflows: u64,
@@ -420,7 +421,10 @@ fn snapshot(
             ..PacingStats::default()
         },
         audio: AudioStats {
-            underruns,
+            underruns: underruns.0 + underruns.1 + underruns.2,
+            underruns_start: underruns.0,
+            underruns_mid: underruns.1,
+            underruns_end: underruns.2,
             overflows,
             ..AudioStats::default()
         },
@@ -433,12 +437,15 @@ fn snapshot(
 
 /// Review round 1 (🟡 3): an overflow drops the oldest audio of the
 /// pipeline's grid (`audio_grid.rs` `enforce_cap`): samples lost while on
-/// program.
+/// program. #257: its underruns by phase, each its own kind.
 #[test]
 fn a_pipeline_loses_its_underruns_resyncs_unserviced_slots_and_overflows_gated_on_program() {
     let on_air = BTreeSet::from([3]);
     let probes = pipeline_probes(
-        &[snapshot(3, 500, 1, 2, 4, 6), snapshot(4, 9, 0, 0, 0, 0)],
+        &[
+            snapshot(3, 500, (3, 1, 5), 2, 4, 6),
+            snapshot(4, 9, (0, 0, 0), 0, 0, 0),
+        ],
         &on_air,
     );
     assert_eq!(
@@ -449,7 +456,9 @@ fn a_pipeline_loses_its_underruns_resyncs_unserviced_slots_and_overflows_gated_o
             run: 500,
             gated_in: true,
             counters: vec![
+                Counter::loss(kinds::UNDERRUN_START, 3),
                 Counter::loss(kinds::UNDERRUN, 1),
+                Counter::loss(kinds::UNDERRUN_END, 5),
                 Counter::loss(kinds::RESYNC, 2),
                 Counter::loss(kinds::UNSERVICED, 4),
                 Counter::loss(kinds::OVERFLOW, 6),
@@ -544,8 +553,8 @@ fn read_takes_every_path_from_the_bus_and_the_registry() {
     bus.select_initial(3, None);
     bus.outputs().note_limiter_overs(4);
     let registry = NdiHealthRegistry::new();
-    registry.update(snapshot(3, 10, 2, 0, 0, 0));
-    registry.update(snapshot(4, 10, 5, 0, 0, 0));
+    registry.update(snapshot(3, 10, (0, 2, 0), 0, 0, 0));
+    registry.update(snapshot(4, 10, (0, 5, 0), 0, 0, 0));
     let mut tally = TraceTally::default();
     let probes = read(&bus, &registry, &mut tally);
     let mut paths: Vec<(&str, bool)> = probes

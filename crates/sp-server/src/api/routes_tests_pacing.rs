@@ -60,6 +60,9 @@ async fn ndi_health_endpoint_includes_pacing() {
             enabled: true,
             samples_per_boundary: 1600,
             underruns: 4,
+            underruns_start: 1,
+            underruns_mid: 2,
+            underruns_end: 1,
             overflows: 1,
             buffer_ms: 66,
         },
@@ -129,6 +132,10 @@ async fn ndi_health_endpoint_includes_pacing() {
     );
     assert_eq!(arr[0]["audio"]["samples_per_boundary"].as_u64(), Some(1600));
     assert_eq!(arr[0]["audio"]["underruns"].as_u64(), Some(4));
+    // #257: the underruns by phase serialise next to the total.
+    assert_eq!(arr[0]["audio"]["underruns_start"].as_u64(), Some(1));
+    assert_eq!(arr[0]["audio"]["underruns_mid"].as_u64(), Some(2));
+    assert_eq!(arr[0]["audio"]["underruns_end"].as_u64(), Some(1));
     assert_eq!(arr[0]["audio"]["overflows"].as_u64(), Some(1));
     assert_eq!(arr[0]["audio"]["buffer_ms"].as_u64(), Some(66));
     // The PLL level trim is gone (#148 v2): its ppm fields are not published.
