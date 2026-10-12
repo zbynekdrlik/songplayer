@@ -419,18 +419,43 @@ abandoned 41 ms later and released it). A receiver cannot be fixed, so:
 
 1. **Quiesce before the kill.** `POST /api/v1/program/spout/quiesce`
    (`api/program.rs`, `202 {state}`) → `MaxOut::quiesce`: nothing is
-   offered any more, and the `program-max` thread's next step is
+   offered while it holds, and the `program-max` thread's next step is
    `MaxNext::Quiesce` (after a stop, before everything else, whatever the
-   setting). `MaxWorker::quiesce` drops both senders (MAX, then
-   `SP-program`, each before its compositor), stops the list sentinel, and
-   the thread ends: no Spout call runs when the kill lands. `max.state` and
-   `max.fhd.state` read `quiesced` (`MaxPhase::Quiesced`, settled like
-   `Unsupported`: it wins over `off` and survives the thread's end) until
-   the process ends; only a restart brings the senders back. Every workflow
-   step that kills SongPlayer runs `scripts/spout-quiesce.ps1` first
-   (`ci-workflows.md`). Not limited to loopback callers: no route of this
-   API checks its caller, and the box's cloudflared tunnel connects from
-   127.0.0.1 anyway.
+   setting), once per quiesce. `MaxWorker::quiesce` drops both senders
+   (MAX, then `SP-program`, each before its compositor), stops the list
+   sentinel and reports `quiesced`; the thread then waits: no Spout call
+   runs when the kill lands. Every workflow step that kills SongPlayer
+   runs `scripts/spout-quiesce.ps1` first (`ci-workflows.md`). Not limited
+   to loopback callers: no route of this API checks its caller, and the
+   box's cloudflared tunnel connects from 127.0.0.1 anyway.
+   - **It expires** (review round 1 of the follow-up;
+     `program_max_quiesce.rs`, a child of `program_max.rs`). It holds
+     `QUIESCE_EXPIRY` = 60 s from its LAST ask (`Queue::quiesced_until`;
+     an ask while it holds renews it, the thread does not quiesce again).
+     A deploy kills the process within seconds; one that does not (a run
+     cancelled between the ask and the kill, a kill that failed) must not
+     leave MAX dark until a restart. At the deadline the thread's step is
+     `MaxNext::Resume`: `MaxWorker::resume` records `running` and one WARN
+     `the quiesce expired - the process was not stopped; the Spout senders
+     resume`; the next job builds both senders again. `MaxOut::next` waits
+     with a timeout up to the deadline, so it wakes by itself (nothing
+     notifies it then). A thread that sees the ask only after its deadline
+     still quiesces once, then resumes.
+   - `max.state` and `max.fhd.state` read `quiesced` (`MaxPhase::Quiesced`)
+     only while it holds: it wins over `off`; the resume, or the thread's
+     end, ends it. No phase is "settled" any more but `Unsupported`.
+   - Every decision takes its instant (`MaxOut::quiesce_at`,
+     `MaxOut::try_next_at`); `set_quiesce_expiry` (tests) shortens it for
+     the real-loop tests. Tests: `program_max_quiesce_tests.rs`.
+   - **A normal shutdown waits for the thread** (the tray's Exit awaits
+     `sp_server::start`'s join handle, 30 s): `start` ends with
+     `program_max::stop_and_wait(max, MAX_STOP_WAIT)` (3 s) after its
+     shutdown broadcast: stop, then `MaxOut::wait_ended` on the `ended`
+     condvar (notified by the `Consumer` guard's drop, after the loop's
+     final `release`) on the blocking pool. One INFO when it ended, one
+     WARN with `bound_ms` when it did not; the process ends either way. The
+     thread's stop path unregisters both senders, which takes Spout's list
+     lock: the process must not end under it.
 2. **Win the lock back: the sentinel.** After every boundary, after both
    sends, the `program-max` thread reads who holds Spout's list
    (`program_max_list.rs` `ListSide::boundary` → `SpoutList::holder` →
@@ -439,18 +464,33 @@ abandoned 41 ms later and released it). A receiver cannot be fixed, so:
    on every read for `LIST_HELD_AFTER` = `MAX_RETRY_BACKOFF` (3 s) is named
    once per holding (`ListWatch`, pure): one WARN `another program keeps
    Spout's sender list`, and a sentinel starts, one at a time
-   (`ListSentinel`, thread `spout-list-sentinel`, `win/spout_lock.rs`). It
-   waits on the list's mutex in `SENTINEL_WAIT_MS` (500 ms) waits and reads
-   its stop flag after each (`sentinel_step`, pure: 0x0 or 0x80 → give it
-   back at once and end, 0x102 → wait again or stop, anything else → end);
-   it never spins and never holds the lock past the release. When the
-   holder exits, Windows hands the lock to its next waiter, the sentinel,
-   queued before a relaunched Arena: one INFO (`abandoned`), and the next
-   sender after its backoff reads the list again. A free read, this
-   process or another pid starts the count again; a sentinel that ended
-   (or did not start) lets the next naming start one; MAX off forgets the
-   holder (the sentinel keeps waiting); a quiesce stops it (joined, at
-   most one wait).
+   (`ListSentinel`, thread `spout-list-sentinel`, `win/spout_lock.rs`).
+   - **It stays queued for its whole life** (review round 1 of the
+     follow-up: bounded 500 ms waits left the lock's wait queue between
+     them, so a relaunched Arena's wait could queue first). ONE
+     `WaitForMultipleObjects([stop event, list lock], any, INFINITE)`; the
+     stop event is unnamed and manual-reset (`CreateEventW`, its handle
+     kept as a number, `StopEvent`, closed on drop after the join), and
+     `ListSentinel::stop` sets it and joins: it ends at once. It never
+     spins and never holds the lock past the release.
+   - `sentinel_step(wait)` (pure) reads the answer: `WAIT_OBJECT_0 + 0`
+     (0x0, the stop) → `Stopped`, the lock not taken; `+ 1` (0x1) → give it
+     back, `abandoned: false`; `WAIT_ABANDONED_0 + 1` (0x81, its holder
+     died) → give it back, `abandoned: true`; anything else (`WAIT_FAILED`,
+     a timeout it cannot have, 0x80 for the event) → `Failed`.
+   - The give-back (`give_back_taken`) tries `ReleaseMutex`
+     `SENTINEL_RELEASE_TRIES` (3) times (the release of a mutex the thread
+     was just handed is not expected to fail); still failing, one WARN
+     names the error and it ends `Failed` holding the lock, which its end
+     leaves abandoned again for the next waiter.
+   - When the holder exits, Windows hands the lock to its next waiter, the
+     sentinel, queued before a relaunched Arena (Windows does not promise a
+     FIFO wait queue: a kernel APC can move a waiter back): one INFO
+     (`abandoned`), and the next sender after its backoff reads the list
+     again. A free read, this process or another pid starts the count
+     again; a sentinel that ended (or did not start) lets the next naming
+     start one; MAX off forgets the holder (the sentinel keeps waiting); a
+     quiesce stops it (joined, at once).
 3. **Visible.** `GET /api/v1/program` → `max.list_holder`: `null`, or
    `{image, pid, since_s}` once named (`since_s` from the first read that
    saw it). That program is the one to restart.
@@ -470,9 +510,11 @@ helpers live in `tests/common/locks.rs` (both binaries use them;
   a mutex until `die`, then ends without releasing it; the sentinel queued
   on it is handed it abandoned, gives it back, and another thread then
   takes it with 0x0 (an `_alive` handle keeps the mutex object, so a fresh
-  mutex can never pass the check). A stopped sentinel ends `Stopped` within
-  one wait and leaves the lock to its holder; a released lock is given back
-  `abandoned: false`. `mutex_holder` names another thread's holder (pid +
+  mutex can never pass the check). A stopped sentinel ends `Stopped` at
+  once and leaves the lock to its holder; a released lock is given back
+  `abandoned: false`. The stop runs on a helper thread under a 10 s
+  bound, so a sentinel that ignores it fails the test instead of hanging
+  it. `mutex_holder` names another thread's holder (pid +
   the test exe), none for a free lock, the caller's own or no such mutex;
   `spout_list_holder` reads Spout's own list lock (under the one-at-a-time
   lock).
@@ -762,8 +804,9 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   RTX). R3-2 sketched `spout {frames, adapter}`; S2 ships the flat shape
   the S2 dispatch named, with `frames` = `submitted` and `adapter` at the
   top level. `state` (`state_label`): `unsupported` (off Windows: no
-  thread) wins, then `quiesced` (#243 follow-up: the deploy's quiesce, for
-  the rest of the process), then `off` (the setting), then the thread:
+  thread) wins, then `quiesced` (#243 follow-up: while the deploy's
+  quiesce holds, 60 s from its last ask), then `off` (the setting), then
+  the thread:
   `running` (it
   takes jobs and its last boundary went out), `error: <why>` (its last
   boundary did not; `error: the program-max thread is not running` before
