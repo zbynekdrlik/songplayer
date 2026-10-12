@@ -117,6 +117,7 @@ fn a_production_box_reads_as_its_facts() {
         EnvFacts {
             edition_id: Some("IoTEnterpriseS".to_string()),
             product_name: Some("Windows 10 IoT Enterprise LTSC 2024".to_string()),
+            build_number: Some(26100),
             defender_realtime: Some(false),
             firewall: [Some(false); 3],
             read_errors: Vec::new(),
@@ -144,6 +145,35 @@ fn each_registry_fact_says_why_it_is_missing() {
             "the private firewall setting is missing",
         ]
     );
+}
+
+#[test]
+fn the_build_number_is_read_or_says_why() {
+    for (read, build, why) in [
+        (Ok(Some(" 22631 ".to_string())), Some(22631), None),
+        (Ok(None), None, Some("CurrentBuildNumber is missing")),
+        (
+            Err(2),
+            None,
+            Some("CurrentBuildNumber could not be read (error 2)"),
+        ),
+        (
+            Ok(Some("22H2".to_string())),
+            None,
+            Some("CurrentBuildNumber reads \"22H2\""),
+        ),
+    ] {
+        let facts = facts_from(
+            &DirectRead {
+                build: read.clone(),
+                ..direct()
+            },
+            &Ok(wmi()),
+        );
+        assert_eq!(facts.build_number, build, "{read:?}");
+        let whys: Vec<&str> = why.into_iter().collect();
+        assert_eq!(facts.read_errors, whys, "{read:?}");
+    }
 }
 
 #[test]

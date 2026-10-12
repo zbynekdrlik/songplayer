@@ -176,6 +176,7 @@ async fn a_check_reads_the_platform_or_says_not_windows() {
         unreachable!()
     };
     assert_eq!(facts.edition_id, Some("IoTEnterprise".to_string()));
+    assert_eq!(facts.build_number, Some(22631));
     assert_eq!(facts.defender_realtime, Some(true));
     assert_eq!(facts.firewall, [Some(false), Some(true), Some(false)]);
 }

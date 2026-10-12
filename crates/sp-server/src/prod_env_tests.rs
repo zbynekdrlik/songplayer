@@ -18,23 +18,33 @@ fn production() -> EnvFacts {
     EnvFacts {
         edition_id: Some("IoTEnterpriseS".to_string()),
         product_name: Some("Windows 10 IoT Enterprise LTSC 2024".to_string()),
+        build_number: Some(26100),
         defender_realtime: Some(false),
         firewall: [Some(false); 3],
         read_errors: Vec::new(),
     }
 }
 
-fn with_edition(edition: &str) -> EnvFacts {
+/// Production but for the edition and the build.
+fn with_edition(edition: &str, build: Option<u32>) -> EnvFacts {
     EnvFacts {
         edition_id: Some(edition.to_string()),
+        build_number: build,
         ..production()
     }
 }
 
-// ---- the edition rule (the owner's ruling, 11.10.2026) ----
+fn not_allowed(edition: &str, build: Option<u32>) -> EnvProblem {
+    EnvProblem::EditionNotAllowed {
+        edition: edition.to_string(),
+        build,
+    }
+}
+
+// ---- the edition rule (the owner's rulings, 11.10.2026) ----
 
 #[test]
-fn every_ltsc_edition_and_iot_enterprise_are_allowed() {
+fn every_ltsc_edition_is_allowed_at_any_build() {
     for e in [
         "EnterpriseS",
         "EnterpriseSN",
@@ -42,34 +52,55 @@ fn every_ltsc_edition_and_iot_enterprise_are_allowed() {
         "IoTEnterpriseSK",
     ] {
         assert!(is_ltsc(e), "{e} is LTSC");
-        assert!(is_allowed_edition(e), "{e} is allowed");
+        assert!(!is_iot_enterprise(e), "{e} is no plain IoT Enterprise");
+        for build in [None, Some(17763), Some(19045), Some(26100)] {
+            assert_eq!(edition_allowed(e, build), Some(true), "{e} {build:?}");
+        }
     }
-    assert!(!is_ltsc("IoTEnterprise"), "IoT Enterprise is no LTSC");
-    assert!(
-        is_allowed_edition("IoTEnterprise"),
-        "IoT Enterprise is allowed"
-    );
     // As Windows writes them or not, padded or not.
     assert!(is_ltsc("iotenterprises"));
     assert!(is_ltsc(" EnterpriseS "));
-    assert!(is_allowed_edition("IOTENTERPRISE"));
-    assert!(is_allowed_edition(" IoTEnterprise "));
 }
 
 #[test]
-fn every_other_edition_is_not_allowed() {
+fn iot_enterprise_is_allowed_on_windows_11_only() {
+    for e in [
+        "IoTEnterprise",
+        "IoTEnterpriseK",
+        "IOTENTERPRISE",
+        " iotenterprisek ",
+    ] {
+        assert!(!is_ltsc(e), "{e} is no LTSC");
+        assert!(is_iot_enterprise(e), "{e}");
+        assert_eq!(
+            edition_allowed(e, Some(WINDOWS_11_BUILD)),
+            Some(true),
+            "{e}"
+        );
+        assert_eq!(edition_allowed(e, Some(22631)), Some(true), "{e}");
+        assert_eq!(edition_allowed(e, Some(21_999)), Some(false), "{e}");
+        assert_eq!(edition_allowed(e, Some(19045)), Some(false), "{e}");
+        assert_eq!(edition_allowed(e, None), None, "{e}: the build decides");
+    }
+    assert_eq!(WINDOWS_11_BUILD, 22_000);
+}
+
+#[test]
+fn every_other_edition_is_not_allowed_at_any_build() {
     for e in [
         "Enterprise",
         "Professional",
         "Core",
         "Education",
-        "IoTEnterpriseK",
         "EnterpriseSEval",
         "ServerStandard",
         "",
     ] {
         assert!(!is_ltsc(e), "{e:?} is no LTSC");
-        assert!(!is_allowed_edition(e), "{e:?} is not allowed");
+        assert!(!is_iot_enterprise(e), "{e:?} is no IoT Enterprise");
+        for build in [None, Some(22631)] {
+            assert_eq!(edition_allowed(e, build), Some(false), "{e:?} {build:?}");
+        }
     }
 }
 
@@ -90,8 +121,8 @@ fn a_production_box_holds() {
 }
 
 #[test]
-fn iot_enterprise_holds_and_is_no_ltsc() {
-    let v = verdict(&with_edition("IoTEnterprise"));
+fn windows_11_iot_enterprise_holds_and_is_no_ltsc() {
+    let v = verdict(&with_edition("IoTEnterprise", Some(22631)));
     assert_eq!(
         v,
         EnvVerdict {
@@ -104,27 +135,38 @@ fn iot_enterprise_holds_and_is_no_ltsc() {
 }
 
 #[test]
+fn windows_10_iot_enterprise_is_not_allowed_and_names_its_build() {
+    let v = verdict(&with_edition("IoTEnterprise", Some(19045)));
+    assert!(!v.ok);
+    assert_eq!((v.ltsc, v.edition_allowed), (Some(false), Some(false)));
+    assert_eq!(v.problems, [not_allowed("IoTEnterprise", Some(19045))]);
+}
+
+#[test]
+fn iot_enterprise_with_no_build_cannot_be_verified() {
+    let v = verdict(&with_edition("IoTEnterpriseK", None));
+    assert!(!v.ok);
+    assert_eq!((v.ltsc, v.edition_allowed), (Some(false), None));
+    assert_eq!(v.problems, [EnvProblem::Unreadable(Unreadable::Build)]);
+    // An LTSC edition needs no build.
+    assert!(verdict(&with_edition("IoTEnterpriseS", None)).ok);
+}
+
+#[test]
 fn an_edition_that_is_not_allowed_is_named() {
     for e in ["Enterprise", "Professional", "Core"] {
-        let v = verdict(&with_edition(e));
+        let v = verdict(&with_edition(e, Some(22631)));
         assert!(!v.ok, "{e}");
         assert_eq!(
             (v.ltsc, v.edition_allowed),
             (Some(false), Some(false)),
             "{e}"
         );
-        assert_eq!(
-            v.problems,
-            [EnvProblem::EditionNotAllowed(e.to_string())],
-            "{e}"
-        );
+        assert_eq!(v.problems, [not_allowed(e, Some(22631))], "{e}");
     }
     // Named trimmed, as compared.
-    let v = verdict(&with_edition(" Professional "));
-    assert_eq!(
-        v.problems,
-        [EnvProblem::EditionNotAllowed("Professional".to_string())]
-    );
+    let v = verdict(&with_edition(" Professional ", None));
+    assert_eq!(v.problems, [not_allowed("Professional", None)]);
 }
 
 #[test]
@@ -194,13 +236,13 @@ fn every_problem_is_listed_in_order() {
         product_name: None,
         defender_realtime: Some(true),
         firewall: [Some(true), None, Some(true)],
-        read_errors: Vec::new(),
+        ..production()
     });
     assert!(!v.ok);
     assert_eq!(
         v.problems,
         [
-            EnvProblem::EditionNotAllowed("Professional".to_string()),
+            not_allowed("Professional", Some(26100)),
             EnvProblem::DefenderRealtimeOn,
             EnvProblem::FirewallOn(FirewallProfile::Domain),
             EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Private)),
@@ -243,13 +285,14 @@ fn the_status_carries_every_fact_and_problem() {
     let facts = EnvFacts {
         edition_id: Some("Professional".to_string()),
         product_name: Some("Windows 11 Pro".to_string()),
+        build_number: Some(22631),
         defender_realtime: Some(true),
         firewall: [Some(true), None, Some(false)],
         read_errors: vec!["the private firewall setting is missing".to_string()],
     };
     let (status, problems) = status_of(&Check::Read(facts), 2_000);
     let expected_problems = vec![
-        EnvProblem::EditionNotAllowed("Professional".to_string()),
+        not_allowed("Professional", Some(22631)),
         EnvProblem::DefenderRealtimeOn,
         EnvProblem::FirewallOn(FirewallProfile::Domain),
         EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Private)),
@@ -263,6 +306,7 @@ fn the_status_carries_every_fact_and_problem() {
             note: None,
             edition_id: Some("Professional".to_string()),
             product_name: Some("Windows 11 Pro".to_string()),
+            build_number: Some(22631),
             ltsc: Some(false),
             edition_allowed: Some(false),
             defender_realtime: Some(true),
@@ -287,7 +331,7 @@ fn the_status_carries_every_fact_and_problem() {
 
 #[test]
 fn each_change_is_logged_once() {
-    let edition = |e: &str| EnvProblem::EditionNotAllowed(e.to_string());
+    let edition = |e: &str| not_allowed(e, Some(22631));
     let mut r = Reporter::default();
     assert_eq!(r.step(&[], &[]), LogStep::Holds);
     assert_eq!(r.step(&[], &[]), LogStep::Quiet);

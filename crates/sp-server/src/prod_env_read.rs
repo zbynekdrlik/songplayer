@@ -173,12 +173,25 @@ fn string_fact(read: &RegString, what: &str, errors: &mut Vec<String>) -> Option
     }
 }
 
+/// The build number (`CurrentBuildNumber`), or `None` and why.
+fn build_fact(read: &RegString, errors: &mut Vec<String>) -> Option<u32> {
+    let text = string_fact(read, "CurrentBuildNumber", errors)?;
+    match text.trim().parse::<u32>() {
+        Ok(build) => Some(build),
+        Err(_) => {
+            note(errors, format!("CurrentBuildNumber reads {text:?}"));
+            None
+        }
+    }
+}
+
 /// The facts of one check: the registry as read now, WMI as read within
 /// the bound or why not (`wmi`'s `Err`).
 pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFacts {
     let mut errors = Vec::new();
     let edition_id = string_fact(&direct.edition_id, "EditionID", &mut errors);
     let product_name = string_fact(&direct.product_name, "ProductName", &mut errors);
+    let build_number = build_fact(&direct.build, &mut errors);
     let mut firewall = [None; 3];
     for (i, profile) in FirewallProfile::ALL.into_iter().enumerate() {
         firewall[i] =
@@ -207,6 +220,7 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
     EnvFacts {
         edition_id,
         product_name,
+        build_number,
         defender_realtime,
         firewall,
         read_errors: errors,

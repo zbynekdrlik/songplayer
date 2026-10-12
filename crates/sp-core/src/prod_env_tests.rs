@@ -7,13 +7,21 @@ use crate::health::HealthTone;
 /// Every problem, one of each kind and profile.
 fn every_problem() -> Vec<EnvProblem> {
     let mut all = vec![
-        EnvProblem::EditionNotAllowed("Professional".to_string()),
+        EnvProblem::EditionNotAllowed {
+            edition: "Professional".to_string(),
+            build: Some(22631),
+        },
+        EnvProblem::EditionNotAllowed {
+            edition: "IoTEnterprise".to_string(),
+            build: None,
+        },
         EnvProblem::DefenderRealtimeOn,
     ];
     for p in FirewallProfile::ALL {
         all.push(EnvProblem::FirewallOn(p));
     }
     all.push(EnvProblem::Unreadable(Unreadable::Edition));
+    all.push(EnvProblem::Unreadable(Unreadable::Build));
     all.push(EnvProblem::Unreadable(Unreadable::Defender));
     for p in FirewallProfile::ALL {
         all.push(EnvProblem::Unreadable(Unreadable::Firewall(p)));
@@ -28,11 +36,13 @@ fn every_problem_has_its_stable_code() {
         codes,
         [
             "edition_not_allowed",
+            "edition_not_allowed",
             "defender_realtime_on",
             "firewall_on:domain",
             "firewall_on:private",
             "firewall_on:public",
             "unreadable:edition",
+            "unreadable:build",
             "unreadable:defender",
             "unreadable:firewall:domain",
             "unreadable:firewall:private",
@@ -47,13 +57,16 @@ fn every_problem_reads_in_slovak() {
     assert_eq!(
         texts,
         [
-            "edícia Windows „Professional“ nie je povolená (povolené sú len Windows LTSC a \
-             Windows IoT Enterprise)",
+            "edícia Windows „Professional“ (zostava 22631) nie je povolená (povolené sú len \
+             Windows LTSC a Windows 11 IoT Enterprise)",
+            "edícia Windows „IoTEnterprise“ nie je povolená (povolené sú len Windows LTSC a \
+             Windows 11 IoT Enterprise)",
             "ochrana Windows Defender v reálnom čase je zapnutá",
             "brána firewall je zapnutá (doménový profil)",
             "brána firewall je zapnutá (súkromný profil)",
             "brána firewall je zapnutá (verejný profil)",
             "edíciu Windows sa nepodarilo zistiť",
+            "zostavu Windows sa nepodarilo zistiť",
             "stav ochrany Windows Defender v reálnom čase sa nepodarilo zistiť",
             "stav brány firewall (doménový profil) sa nepodarilo zistiť",
             "stav brány firewall (súkromný profil) sa nepodarilo zistiť",
@@ -89,6 +102,7 @@ fn the_status_serializes_every_field_by_name() {
         note: None,
         edition_id: Some("IoTEnterpriseS".to_string()),
         product_name: Some("Windows 10 IoT Enterprise LTSC".to_string()),
+        build_number: Some(26100),
         ltsc: Some(true),
         edition_allowed: Some(true),
         defender_realtime: Some(true),
@@ -110,6 +124,7 @@ fn the_status_serializes_every_field_by_name() {
             "note": null,
             "edition_id": "IoTEnterpriseS",
             "product_name": "Windows 10 IoT Enterprise LTSC",
+            "build_number": 26100,
             "ltsc": true,
             "edition_allowed": true,
             "defender_realtime": true,

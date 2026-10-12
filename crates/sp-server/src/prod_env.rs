@@ -43,8 +43,15 @@ pub const LTSC_EDITIONS: [&str; 4] = [
     "IoTEnterpriseSK",
 ];
 
-/// Windows IoT Enterprise, allowed next to LTSC (the owner's ruling, 11.10.2026).
-pub const IOT_ENTERPRISE: &str = "IoTEnterprise";
+/// Windows IoT Enterprise and its subscription edition, allowed next to LTSC
+/// (the owner's ruling, 11.10.2026: "11 IoT Enterprise") from
+/// [`WINDOWS_11_BUILD`] on.
+pub const IOT_ENTERPRISE_EDITIONS: [&str; 2] = ["IoTEnterprise", "IoTEnterpriseK"];
+
+/// The first Windows 11 build: an IoT Enterprise edition below it is
+/// Windows 10 IoT Enterprise, which is not allowed (an LTSC edition is, at
+/// any build).
+pub const WINDOWS_11_BUILD: u32 = 22_000;
 
 /// The status note off Windows.
 pub const NOT_WINDOWS: &str = "not Windows: the production environment is checked on Windows only";
@@ -62,6 +69,8 @@ pub struct EnvFacts {
     pub edition_id: Option<String>,
     /// The same key's `ProductName` (shown only).
     pub product_name: Option<String>,
+    /// The same key's `CurrentBuildNumber`.
+    pub build_number: Option<u32>,
     /// Defender's real-time protection (WMI `MSFT_MpComputerStatus`); off
     /// when Defender is not installed.
     pub defender_realtime: Option<bool>,
@@ -88,7 +97,8 @@ pub struct EnvVerdict {
     pub ok: bool,
     /// The edition is an LTSC edition (`None`: not read).
     pub ltsc: Option<bool>,
-    /// The edition is allowed (`None`: not read).
+    /// The edition is allowed (`None`: it, or the build an IoT Enterprise
+    /// edition needs, was not read).
     pub edition_allowed: Option<bool>,
     /// Every problem: the edition, Defender, then each firewall profile.
     pub problems: Vec<EnvProblem>,
@@ -100,9 +110,27 @@ pub fn is_ltsc(edition_id: &str) -> bool {
     LTSC_EDITIONS.iter().any(|l| l.eq_ignore_ascii_case(e))
 }
 
-/// An edition allowed in production: LTSC, or IoT Enterprise.
-pub fn is_allowed_edition(edition_id: &str) -> bool {
-    is_ltsc(edition_id) || edition_id.trim().eq_ignore_ascii_case(IOT_ENTERPRISE)
+/// An IoT Enterprise edition that is no LTSC ([`IOT_ENTERPRISE_EDITIONS`],
+/// ASCII case ignored).
+pub fn is_iot_enterprise(edition_id: &str) -> bool {
+    let e = edition_id.trim();
+    IOT_ENTERPRISE_EDITIONS
+        .iter()
+        .any(|i| i.eq_ignore_ascii_case(e))
+}
+
+/// Whether an edition is allowed in production: an LTSC edition at any
+/// build, an IoT Enterprise edition on Windows 11 (`build` from
+/// [`WINDOWS_11_BUILD`]), nothing else. `None`: an IoT Enterprise edition
+/// whose build was not read.
+pub fn edition_allowed(edition_id: &str, build: Option<u32>) -> Option<bool> {
+    if is_ltsc(edition_id) {
+        return Some(true);
+    }
+    if !is_iot_enterprise(edition_id) {
+        return Some(false);
+    }
+    build.map(|b| b >= WINDOWS_11_BUILD)
 }
 
 /// The verdict: every fact that is wrong, or cannot be read, is a problem.
@@ -113,12 +141,15 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
         .as_deref()
         .map(str::trim)
         .filter(|e| !e.is_empty());
-    match edition {
-        None => problems.push(EnvProblem::Unreadable(Unreadable::Edition)),
-        Some(e) if !is_allowed_edition(e) => {
-            problems.push(EnvProblem::EditionNotAllowed(e.to_string()))
-        }
-        Some(_) => {}
+    let allowed = edition.and_then(|e| edition_allowed(e, facts.build_number));
+    match (edition, allowed) {
+        (None, _) => problems.push(EnvProblem::Unreadable(Unreadable::Edition)),
+        (Some(_), None) => problems.push(EnvProblem::Unreadable(Unreadable::Build)),
+        (Some(e), Some(false)) => problems.push(EnvProblem::EditionNotAllowed {
+            edition: e.to_string(),
+            build: facts.build_number,
+        }),
+        (Some(_), Some(true)) => {}
     }
     match facts.defender_realtime {
         None => problems.push(EnvProblem::Unreadable(Unreadable::Defender)),
@@ -135,7 +166,7 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
     EnvVerdict {
         ok: problems.is_empty(),
         ltsc: edition.map(is_ltsc),
-        edition_allowed: edition.map(is_allowed_edition),
+        edition_allowed: allowed,
         problems,
     }
 }
@@ -172,6 +203,7 @@ pub fn status_of(check: &Check, now_ms: i64) -> (EnvironmentStatus, Vec<EnvProbl
         note: None,
         edition_id: facts.edition_id.clone(),
         product_name: facts.product_name.clone(),
+        build_number: facts.build_number,
         ltsc: v.ltsc,
         edition_allowed: v.edition_allowed,
         defender_realtime: facts.defender_realtime,
