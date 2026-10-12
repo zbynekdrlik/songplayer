@@ -64,6 +64,24 @@ async fn count(pool: &SqlitePool, sql: &str) -> i64 {
     sqlx::query_scalar(sql).fetch_one(pool).await.unwrap()
 }
 
+/// `start` spawns the task: its first tick (at once) writes the program's
+/// start row; the shutdown ends it.
+#[tokio::test]
+async fn start_runs_the_ledger_until_shutdown() {
+    let pool = crate::db::create_memory_pool().await.unwrap();
+    crate::db::run_migrations(&pool).await.unwrap();
+    let (tx, _rx) = broadcast::channel(1);
+    let bus = Arc::new(ProgramBus::new());
+    start(pool.clone(), bus, Arc::new(NdiHealthRegistry::new()), &tx);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let sql = "SELECT COUNT(*) FROM audio_faults WHERE path = 'program' AND kind = 'start'";
+    while count(&pool, sql).await == 0 {
+        assert!(Instant::now() < deadline, "no start row");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tx.send(()).unwrap();
+}
+
 /// The task writes the program's start, prunes a row past 90 days (and only
 /// that one) on its first tick, and ends on shutdown.
 #[tokio::test]
