@@ -508,7 +508,11 @@ wait for a peer that has the song", below).
     characters, `recordedScene`). The
     scene (`pickManualScene`) is the repo variable `PP_MANUAL_SCENE` when set
     (a manual cg OBS scene, else the test fails saying why), else the scene
-    cg OBS already has on program (nothing changes on cg OBS). When cg OBS's
+    cg OBS already has on program (nothing changes on cg OBS). Never
+    `Blank` in any case (#245: a facade press of it is SongPlayer's own
+    black, source -2, cg OBS told nothing, so it can never land as "OBS
+    manuál" even when cg OBS has a scene of that name; PP's variable said
+    `Blank` until 12.10.2026 and its gate polled 15 s for nothing). When cg OBS's
     program is not a manual scene, the test fails naming `PP_MANUAL_SCENE`:
     the gate never picks another cg OBS scene by itself. The spec reads cg
     OBS on `OBS_WS_URL` (:4455). Precondition (nothing checks it): that
