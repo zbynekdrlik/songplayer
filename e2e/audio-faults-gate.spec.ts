@@ -3,6 +3,7 @@ import {
   FAULTS_URL,
   audioFaultFailures,
   audioFaultRisks,
+  audioFaultSummary,
   type FaultsAnswer,
   type PathFaults,
 } from "./audio-faults-gate";
@@ -84,6 +85,23 @@ test("the risks inside the window are listed for the log", () => {
   });
   expect(audioFaultRisks(answer([risky]), START)).toEqual([
     "out:out-1 (FOH): late_packet ×15000 at 2025-10-09T08:53:20.002Z",
+  ]);
+});
+
+test("the evidence names every path's last loss, last risk and counts", () => {
+  const risky = path({ last_risk_ms: START + 5, counts: { late_packet: 1 } });
+  const lossy = path({
+    path: "out:out-2",
+    detail: "SoundGrid",
+    clean_since_ms: START + 10,
+    last_loss_ms: START + 10,
+    counts: { underrun: 2 },
+  });
+  expect(audioFaultSummary(answer([risky, lossy]))).toEqual([
+    "out:out-1 (FOH): clean since 2025-10-09T07:53:20.000Z, last loss none, " +
+      'last risk 2025-10-09T08:53:20.005Z, counts {"late_packet":1}',
+    "out:out-2 (SoundGrid): clean since 2025-10-09T08:53:20.010Z, last loss 2025-10-09T08:53:20.010Z, " +
+      'last risk none, counts {"underrun":2}',
   ]);
 });
 
