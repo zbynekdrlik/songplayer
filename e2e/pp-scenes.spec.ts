@@ -88,7 +88,8 @@ test.describe("PP's playlist scene (#229)", () => {
 });
 
 test.describe("PP's manual scene (#229)", () => {
-  const scenes = ["Blank", "Svedectvo", "sp-slow", AV_PROBE_SCENE, OBS_MANUAL];
+  const scenes = ["Blank", "Svedectvo", "trailer", "sp-slow", AV_PROBE_SCENE, OBS_MANUAL];
+  const notManual = `(a playlist's, the A/V probe's, "${OBS_MANUAL}" or SongPlayer's "Blank")`;
   const names = playlistNames(ROWS);
 
   test("the active playlists' names, lowercased", () => {
@@ -101,9 +102,9 @@ test.describe("PP's manual scene (#229)", () => {
     expect(pick).toEqual({ scene: "Svedectvo" });
   });
 
-  test("cg OBS on a playlist's, the probe's or an unlisted scene: no guess, PP_MANUAL_SCENE is named", () => {
+  test("cg OBS on a playlist's, the probe's, Blank or an unlisted scene: no guess, PP_MANUAL_SCENE is named", () => {
     // Pressing some other cg OBS scene would change what PP's wall shows.
-    for (const cgProgram of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, "gone"]) {
+    for (const cgProgram of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, "Blank", "gone"]) {
       const pick = pickManualScene({ configured: "", cgProgram, scenes, playlistNames: names });
       expect(pick, cgProgram).toEqual({
         error:
@@ -115,12 +116,24 @@ test.describe("PP's manual scene (#229)", () => {
 
   test("PP_MANUAL_SCENE wins when it is a manual cg OBS scene", () => {
     const pick = pickManualScene({
-      configured: " Blank ",
+      configured: " trailer ",
       cgProgram: "Svedectvo",
       scenes,
       playlistNames: names,
     });
-    expect(pick).toEqual({ scene: "Blank" });
+    expect(pick).toEqual({ scene: "trailer" });
+  });
+
+  test("Blank in any case is SongPlayer's own scene, never a manual one (#245)", () => {
+    // A press of "Blank" through the facade cuts SP-program to SongPlayer's
+    // black (source -2) and tells cg OBS nothing, so it never lands as
+    // "OBS manuál" even when cg OBS has a scene of that name (PP, 12.10.2026).
+    for (const scene of ["Blank", "blank", "BLANK"]) {
+      expect(isManualScene(scene, names), scene).toBe(false);
+    }
+    for (const scene of ["Blank ", "Blanks", "sp-blank", "Svedectvo"]) {
+      expect(isManualScene(scene, names), scene).toBe(true);
+    }
   });
 
   test("a PP_MANUAL_SCENE cg OBS does not have fails", () => {
@@ -130,11 +143,11 @@ test.describe("PP's manual scene (#229)", () => {
     });
   });
 
-  test("a PP_MANUAL_SCENE that is a playlist's, the probe's or OBS manual fails", () => {
-    for (const configured of ["sp-slow", AV_PROBE_SCENE, OBS_MANUAL]) {
-      const pick = pickManualScene({ configured, cgProgram: "Blank", scenes, playlistNames: names });
+  test("a PP_MANUAL_SCENE that is a playlist's, the probe's, OBS manual or Blank fails", () => {
+    for (const configured of ["sp-slow", AV_PROBE_SCENE, OBS_MANUAL, "Blank"]) {
+      const pick = pickManualScene({ configured, cgProgram: "Svedectvo", scenes, playlistNames: names });
       expect(pick, configured).toEqual({
-        error: `PP_MANUAL_SCENE "${configured}" is not a manual scene (a playlist's, the A/V probe's or "${OBS_MANUAL}")`,
+        error: `PP_MANUAL_SCENE "${configured}" is not a manual scene ${notManual}`,
       });
     }
   });
