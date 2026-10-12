@@ -9,6 +9,10 @@
  * the worst path; none → green "Zvuk: bez chyby …". One click must list a
  * row for every path the ledger answers, the program's among them. Nothing
  * is written: the spec reads `GET /api/v1/audio/faults` and the dashboard.
+ *
+ * The ledger is read once before the page and once after its segment
+ * renders (#257 review): a fault recorded between the two reads changes
+ * what the segment may say, so the segment must agree with EITHER read.
  */
 
 import { test, expect } from "@playwright/test";
@@ -20,6 +24,25 @@ const CLEAN = /^(ok|risk)$/;
 interface PathFaults {
   path: string;
   last_loss_ms: number | null;
+}
+
+interface Answer {
+  worst: string | null;
+  paths: PathFaults[];
+}
+
+/** One line of a read for the log and the failure message. */
+function summary(a: Answer): string {
+  const lossy = a.paths.filter((p) => p.last_loss_ms !== null).length;
+  return `${a.paths.length} paths, ${lossy} with a loss in 24 h, worst ${a.worst}`;
+}
+
+/** Whether the segment's level and text agree with one read of the ledger. */
+function agrees(a: Answer, level: string, text: string): boolean {
+  if (a.paths.some((p) => p.last_loss_ms !== null)) {
+    return LOSSY.test(level) && /^Zvuk: \d+ (chyba|chyby|chýb) za 24 h · posledná pred .+ · .+$/.test(text);
+  }
+  return CLEAN.test(level) && /^Zvuk: bez chyby .+$/.test(text);
 }
 
 test.describe("audio fault history on the dashboard (#257)", () => {
@@ -44,33 +67,36 @@ test.describe("audio fault history on the dashboard (#257)", () => {
     page,
     request,
   }) => {
-    const resp = await request.get("/api/v1/audio/faults?hours=24", { timeout: 15_000 });
-    expect(resp.status(), "GET /api/v1/audio/faults?hours=24").toBe(200);
-    const answer = (await resp.json()) as { worst: string | null; paths: PathFaults[] };
-    const lossy = answer.paths.filter((p) => p.last_loss_ms !== null);
-    console.log(
-      `[#257 dashboard] ${answer.paths.length} paths, ${lossy.length} with a loss in 24 h, worst ${answer.worst}`,
-    );
+    const read = async (): Promise<Answer> => {
+      const resp = await request.get("/api/v1/audio/faults?hours=24", { timeout: 15_000 });
+      expect(resp.status(), "GET /api/v1/audio/faults?hours=24").toBe(200);
+      return (await resp.json()) as Answer;
+    };
+    const before = await read();
+    console.log(`[#257 dashboard] before: ${summary(before)}`);
 
     await page.goto("/");
     const segment = page.getByTestId("health-audio");
-    await expect(segment).toHaveAttribute("data-level", lossy.length > 0 ? LOSSY : CLEAN, {
-      timeout: 30_000,
-    });
+    // Rendered from an answer (the program is always listed, so a read
+    // answer is never "unknown"; "Zvuk: nedostupné" is, and fails here).
+    await expect(segment).toHaveAttribute("data-level", /^(ok|risk|loss|recent)$/, { timeout: 30_000 });
+    const level = (await segment.getAttribute("data-level")) ?? "";
     const text = ((await segment.textContent()) ?? "").trim();
-    console.log(`[#257 dashboard] segment: ${text}`);
-    if (lossy.length > 0) {
-      expect(text).toMatch(/^Zvuk: \d+ (chyba|chyby|chýb) za 24 h · posledná pred .+ · .+$/);
-    } else {
-      expect(text).toMatch(/^Zvuk: bez chyby .+$/);
-    }
+    const after = await read();
+    console.log(`[#257 dashboard] segment: ${level} · ${text}`);
+    console.log(`[#257 dashboard] after: ${summary(after)}`);
+    expect(
+      [before, after].some((a) => agrees(a, level, text)),
+      `the segment (${level}, "${text}") agrees with neither read: before ${summary(before)}; after ${summary(after)}`,
+    ).toBe(true);
 
     await segment.click();
     const panel = page.getByTestId("audio-faults-panel");
     await expect(panel).toBeVisible();
-    await expect(panel.getByTestId("audio-path-row")).toHaveCount(answer.paths.length, {
-      timeout: 30_000,
-    });
+    const rows = panel.getByTestId("audio-path-row");
+    await expect(rows.first()).toBeVisible({ timeout: 30_000 });
+    const counts = [before.paths.length, after.paths.length];
+    expect(counts, "a row per path of either read").toContain(await rows.count());
     await expect(panel.locator('[data-testid="audio-path-row"][data-path="program"]')).toHaveCount(1);
     expect(consoleErrors, "browser console").toEqual([]);
   });
