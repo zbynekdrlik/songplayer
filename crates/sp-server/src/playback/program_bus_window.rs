@@ -63,7 +63,7 @@ impl ProgramCore {
     /// (SNV 12.10.2026: a `program` loss after every deploy), a cut to a
     /// source that has not reached the bus yet.
     fn delivering(&self, source: Option<i64>) -> bool {
-        real_source(source)
+        real_source(source) && source.is_some_and(|s| self.delivered.contains(&s))
     }
 
     /// Boundary `stamp_100ns` filled with the program's standby pair,
