@@ -74,7 +74,8 @@ pub struct EnvFacts {
     /// Defender's real-time protection (WMI `MSFT_MpComputerStatus`); off
     /// when Defender is not installed.
     pub defender_realtime: Option<bool>,
-    /// The domain, private and public firewall profile (`read::firewall_on`).
+    /// The domain, private and public firewall profile (the active policy
+    /// store, `read::active_firewall`; the registry when it cannot be read).
     pub firewall: [Option<bool>; 3],
     /// Why a fact could not be read.
     pub read_errors: Vec<String>,
@@ -438,7 +439,7 @@ pub async fn run(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
 pub mod read;
 pub use read::{
     AvProduct, DefenderRow, DirectRead, FirewallRow, RegDword, RegString, ServiceRead, WmiRead,
-    defender_realtime, facts_from, firewall_on,
+    active_firewall, defender_realtime, facts_from, firewall_from_registry,
 };
 
 #[cfg(windows)]

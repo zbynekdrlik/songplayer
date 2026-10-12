@@ -143,7 +143,7 @@ fn fake_direct() -> DirectRead {
         build: Ok(Some("22631".to_string())),
         firewall_policy: [RegDword::Absent; 3],
         firewall_legacy_policy: RegDword::Absent,
-        firewall_local: [RegDword::Value(0), RegDword::Value(1), RegDword::Value(0)],
+        firewall_local: [RegDword::Value(0); 3],
         defender_service: ServiceRead::State(4),
     }
 }
@@ -155,7 +155,20 @@ fn fake_wmi() -> WmiRead {
             mode: Some("Normal".to_string()),
             antivirus_enabled: Some(true),
         })),
-        firewall: Ok(Vec::new()),
+        firewall: Ok(vec![
+            FirewallRow {
+                name: "Domain".to_string(),
+                enabled: Some(0),
+            },
+            FirewallRow {
+                name: "Private".to_string(),
+                enabled: Some(1),
+            },
+            FirewallRow {
+                name: "Public".to_string(),
+                enabled: Some(0),
+            },
+        ]),
         antivirus: Ok(Vec::new()),
     }
 }

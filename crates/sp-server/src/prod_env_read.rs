@@ -108,14 +108,37 @@ impl WmiRead {
     }
 }
 
-/// Whether a firewall profile is on: the group-policy value wins when it is
-/// set (`HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\<profile>`), else
-/// the local one (`…\SharedAccess\Parameters\FirewallPolicy\<profile>`). Any
+/// Whether a firewall profile is on as it applies now: its row in the
+/// active policy store (`Enabled` 0 off, 1 on). A missing row, no value, or
+/// any other value (2: not configured) cannot be verified (`Err`, why).
+pub fn active_firewall(rows: &[FirewallRow], profile: FirewallProfile) -> Result<bool, String> {
+    let name = profile.name();
+    let row = rows
+        .iter()
+        .find(|row| row.name.trim().eq_ignore_ascii_case(name))
+        .ok_or_else(|| format!("the active firewall store has no {name} profile"))?;
+    match row.enabled {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        Some(other) => Err(format!(
+            "the {name} firewall profile reads {other} in the active store"
+        )),
+        None => Err(format!(
+            "the {name} firewall profile has no state in the active store"
+        )),
+    }
+}
+
+/// Whether a firewall profile is on by the registry (the fallback when the
+/// active store cannot be read): the group-policy value wins when it is set
+/// (`HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\<profile>`), else the
+/// local one (`…\SharedAccess\Parameters\FirewallPolicy\<profile>`). Any
 /// value but 0 is on. A policy that cannot be read, or a local value that is
 /// missing or cannot be read, cannot be verified (`Err`, why).
-pub fn firewall_on(
+pub fn firewall_from_registry(
     profile: FirewallProfile,
     policy: RegDword,
+    _legacy: RegDword,
     local: RegDword,
 ) -> Result<bool, String> {
     let name = profile.name();
@@ -194,14 +217,19 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
     let build_number = build_fact(&direct.build, &mut errors);
     let mut firewall = [None; 3];
     for (i, profile) in FirewallProfile::ALL.into_iter().enumerate() {
-        firewall[i] =
-            match firewall_on(profile, direct.firewall_policy[i], direct.firewall_local[i]) {
-                Ok(on) => Some(on),
-                Err(why) => {
-                    note(&mut errors, why);
-                    None
-                }
-            };
+        let registry = firewall_from_registry(
+            profile,
+            direct.firewall_policy[i],
+            direct.firewall_legacy_policy,
+            direct.firewall_local[i],
+        );
+        firewall[i] = match registry {
+            Ok(on) => Some(on),
+            Err(why) => {
+                note(&mut errors, why);
+                None
+            }
+        };
     }
     let defender = match wmi {
         Ok(read) => defender_realtime(match &read.defender {

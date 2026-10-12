@@ -1,45 +1,162 @@
-//! #233: the raw reads made into facts — the registry's firewall values,
-//! Defender's WMI read, and every fact of one check (`facts_from`).
+//! #233: the raw reads made into facts — the firewall's active store and
+//! the registry's fallback, Defender's WMI read, and every fact of one check
+//! (`facts_from`).
 
 use sp_core::prod_env::FirewallProfile;
 
 use super::*;
 use crate::prod_env::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
 
-// ---- the firewall: the policy wins over the local value ----
+// ---- the firewall: the active store decides ----
+
+fn row(name: &str, enabled: Option<u32>) -> FirewallRow {
+    FirewallRow {
+        name: name.to_string(),
+        enabled,
+    }
+}
+
+/// The active store's three profiles, each `Enabled` value as given.
+fn store(domain: u32, private: u32, public: u32) -> Vec<FirewallRow> {
+    vec![
+        row("Domain", Some(domain)),
+        row("Private", Some(private)),
+        row("Public", Some(public)),
+    ]
+}
+
+#[test]
+fn each_profile_reads_its_own_row_in_the_active_store() {
+    let rows = store(0, 1, 0);
+    assert_eq!(active_firewall(&rows, FirewallProfile::Domain), Ok(false));
+    assert_eq!(active_firewall(&rows, FirewallProfile::Private), Ok(true));
+    assert_eq!(active_firewall(&rows, FirewallProfile::Public), Ok(false));
+    // The provider's names, whatever their case or padding.
+    let named = vec![row(" PUBLIC ", Some(1))];
+    assert_eq!(active_firewall(&named, FirewallProfile::Public), Ok(true));
+}
+
+#[test]
+fn an_active_store_profile_that_cannot_be_told_says_why() {
+    let rows = vec![row("Domain", Some(2)), row("Private", None)];
+    assert_eq!(
+        active_firewall(&rows, FirewallProfile::Domain),
+        Err("the domain firewall profile reads 2 in the active store".to_string())
+    );
+    assert_eq!(
+        active_firewall(&rows, FirewallProfile::Private),
+        Err("the private firewall profile has no state in the active store".to_string())
+    );
+    assert_eq!(
+        active_firewall(&rows, FirewallProfile::Public),
+        Err("the active firewall store has no public profile".to_string())
+    );
+}
+
+/// Review finding 1: the older Administrative-Templates policy
+/// (`WindowsFirewall\StandardProfile`) applies to the private and public
+/// profiles, so a policy that turns them on while the local value is off
+/// reads on (the gate passed such a box before).
+#[test]
+fn the_older_standard_profile_policy_turns_private_and_public_on() {
+    use super::RegDword::{Absent, Failed, Value};
+    for p in [FirewallProfile::Private, FirewallProfile::Public] {
+        assert_eq!(
+            firewall_from_registry(p, Absent, Value(1), Value(0)),
+            Ok(true),
+            "{p:?}"
+        );
+        assert_eq!(
+            firewall_from_registry(p, Value(0), Value(1), Value(0)),
+            Ok(true),
+            "{p:?}"
+        );
+        assert_eq!(
+            firewall_from_registry(p, Absent, Value(0), Value(1)),
+            Ok(false),
+            "{p:?}"
+        );
+        assert_eq!(
+            firewall_from_registry(p, Value(1), Value(0), Value(0)),
+            Ok(true),
+            "{p:?}"
+        );
+        assert_eq!(
+            firewall_from_registry(p, Absent, Failed(5), Value(0)),
+            Err(format!(
+                "the {} firewall older policy (StandardProfile) could not be read (error 5)",
+                p.name()
+            )),
+            "{p:?}"
+        );
+    }
+    // Not the domain profile's.
+    let d = FirewallProfile::Domain;
+    assert_eq!(
+        firewall_from_registry(d, Absent, Value(1), Value(0)),
+        Ok(false)
+    );
+    assert_eq!(
+        firewall_from_registry(d, Absent, Failed(5), Value(0)),
+        Ok(false)
+    );
+}
+
+// ---- the firewall's registry fallback: the policy wins over the local value ----
 
 #[test]
 fn a_firewall_policy_wins_over_the_local_value() {
     use super::RegDword::{Absent, Failed, Value};
     let d = FirewallProfile::Domain;
-    assert_eq!(firewall_on(d, Value(0), Value(1)), Ok(false));
-    assert_eq!(firewall_on(d, Value(1), Value(0)), Ok(true));
-    assert_eq!(firewall_on(d, Value(2), Absent), Ok(true));
-    assert_eq!(firewall_on(d, Value(0), Failed(5)), Ok(false));
+    assert_eq!(
+        firewall_from_registry(d, Value(0), Absent, Value(1)),
+        Ok(false)
+    );
+    assert_eq!(
+        firewall_from_registry(d, Value(1), Absent, Value(0)),
+        Ok(true)
+    );
+    assert_eq!(
+        firewall_from_registry(d, Value(2), Absent, Absent),
+        Ok(true)
+    );
+    assert_eq!(
+        firewall_from_registry(d, Value(0), Absent, Failed(5)),
+        Ok(false)
+    );
 }
 
 #[test]
 fn with_no_policy_the_local_value_decides() {
     use super::RegDword::{Absent, Value};
     let p = FirewallProfile::Private;
-    assert_eq!(firewall_on(p, Absent, Value(0)), Ok(false));
-    assert_eq!(firewall_on(p, Absent, Value(1)), Ok(true));
-    assert_eq!(firewall_on(p, Absent, Value(7)), Ok(true));
+    assert_eq!(
+        firewall_from_registry(p, Absent, Absent, Value(0)),
+        Ok(false)
+    );
+    assert_eq!(
+        firewall_from_registry(p, Absent, Absent, Value(1)),
+        Ok(true)
+    );
+    assert_eq!(
+        firewall_from_registry(p, Absent, Absent, Value(7)),
+        Ok(true)
+    );
 }
 
 #[test]
 fn a_firewall_that_cannot_be_read_says_why() {
     use super::RegDword::{Absent, Failed, Value};
     assert_eq!(
-        firewall_on(FirewallProfile::Domain, Failed(5), Value(0)),
+        firewall_from_registry(FirewallProfile::Domain, Failed(5), Absent, Value(0)),
         Err("the domain firewall policy could not be read (error 5)".to_string())
     );
     assert_eq!(
-        firewall_on(FirewallProfile::Private, Absent, Absent),
+        firewall_from_registry(FirewallProfile::Private, Absent, Absent, Absent),
         Err("the private firewall setting is missing".to_string())
     );
     assert_eq!(
-        firewall_on(FirewallProfile::Public, Absent, Failed(1630)),
+        firewall_from_registry(FirewallProfile::Public, Absent, Absent, Failed(1630)),
         Err("the public firewall setting could not be read (error 1630)".to_string())
     );
 }
@@ -105,7 +222,7 @@ fn wmi() -> WmiRead {
             mode: Some("Normal".to_string()),
             antivirus_enabled: Some(true),
         })),
-        firewall: Ok(Vec::new()),
+        firewall: Ok(store(0, 0, 0)),
         antivirus: Ok(Vec::new()),
     }
 }
@@ -130,20 +247,66 @@ fn each_registry_fact_says_why_it_is_missing() {
     let read = DirectRead {
         edition_id: Ok(None),
         product_name: Err(5),
-        firewall_local: [RegDword::Value(1), RegDword::Absent, RegDword::Value(0)],
         ..direct()
     };
     let facts = facts_from(&read, &Ok(wmi()));
     assert_eq!(facts.edition_id, None);
     assert_eq!(facts.product_name, None);
-    assert_eq!(facts.firewall, [Some(true), None, Some(false)]);
     assert_eq!(
         facts.read_errors,
         [
             "EditionID is missing",
             "ProductName could not be read (error 5)",
+        ]
+    );
+}
+
+/// Review finding 1: the active store decides each profile, whatever the
+/// registry says (the policy that turned a profile on lives there).
+#[test]
+fn the_active_store_decides_the_firewall() {
+    let on = WmiRead {
+        firewall: Ok(store(1, 0, 1)),
+        ..wmi()
+    };
+    // The registry says every profile is off.
+    let facts = facts_from(&direct(), &Ok(on));
+    assert_eq!(facts.firewall, [Some(true), Some(false), Some(true)]);
+    assert!(facts.read_errors.is_empty(), "{:?}", facts.read_errors);
+}
+
+/// The active store not read: the registry decides, and says so; a profile
+/// neither can tell is unread, with both reasons.
+#[test]
+fn a_failed_active_store_leaves_the_registry_to_decide_and_says_so() {
+    let refused = WmiRead {
+        firewall: Err(0x8007_0005_u32 as i32),
+        ..wmi()
+    };
+    let read = DirectRead {
+        firewall_local: [RegDword::Value(1), RegDword::Absent, RegDword::Value(0)],
+        ..direct()
+    };
+    let facts = facts_from(&read, &Ok(refused));
+    assert_eq!(facts.firewall, [Some(true), None, Some(false)]);
+    assert_eq!(
+        facts.read_errors,
+        [
+            "the active firewall store could not be read (0x80070005): the registry decided",
+            "the active firewall store could not be read (0x80070005)",
             "the private firewall setting is missing",
         ]
+    );
+    // A store with no row for a profile: that profile alone falls back.
+    let partial = WmiRead {
+        firewall: Ok(vec![row("Domain", Some(0)), row("Public", Some(1))]),
+        ..wmi()
+    };
+    let facts = facts_from(&direct(), &Ok(partial));
+    assert_eq!(facts.firewall, [Some(false), Some(false), Some(true)]);
+    assert_eq!(
+        facts.read_errors,
+        ["the active firewall store has no private profile: the registry decided"]
     );
 }
 
@@ -181,9 +344,13 @@ fn a_wmi_read_that_did_not_finish_leaves_the_registry_facts() {
     let why = "the WMI check did not finish within 30s".to_string();
     let facts = facts_from(&direct(), &Err(why.clone()));
     assert_eq!(facts.edition_id, Some("IoTEnterpriseS".to_string()));
+    // The registry decides the firewall while the active store is not read.
     assert_eq!(facts.firewall, [Some(false); 3]);
     assert_eq!(facts.defender_realtime, None);
-    assert_eq!(facts.read_errors, [why]);
+    assert_eq!(
+        facts.read_errors,
+        [format!("{why}: the registry decided"), why]
+    );
 }
 
 #[test]
