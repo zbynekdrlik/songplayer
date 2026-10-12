@@ -1,35 +1,31 @@
 //! The program bus (#209, B1 of EPIC #174): SongPlayer is the master switcher.
 //!
-//! One process-wide [`ProgramBus`] feeds SongPlayer's own program output, the
-//! NDI sender [`PROGRAM_NDI_NAME`] (`SP-program`). Every paced playlist output
-//! already emits ONE video frame + ONE 1600-sample audio block per boundary of
-//! the shared 30 fps genlock grid, idle or playing (#147). Right after its own
-//! submit, each paced submit thread OFFERS the SAME boundary job to the bus: the
-//! same `SharedFrame` (an `Arc` bump, zero pixel copy) and the same audio block,
-//! with the same stamps. The bus forwards it only when that source OWNS the
-//! boundary, so the program frame at boundary B IS the selected source's frame
-//! at B — no NDI re-receive, no second decode, no second clock.
+//! One process-wide [`ProgramBus`] feeds SongPlayer's own program output, the NDI sender
+//! [`PROGRAM_NDI_NAME`] (`SP-program`). Every paced playlist output already emits ONE video
+//! frame + ONE 1600-sample audio block per boundary of the shared 30 fps genlock grid, idle or
+//! playing (#147). Right after its own submit, each paced submit thread OFFERS the SAME boundary
+//! job to the bus: the same `SharedFrame` (an `Arc` bump, zero pixel copy) and the same audio
+//! block, with the same stamps. The bus forwards it only when that source OWNS the boundary, so
+//! the program frame at boundary B IS the selected source's frame at B — no NDI re-receive, no
+//! second decode, no second clock.
 //!
-//! **Ownership.** The cut state is a short list of `(first_stamp, pid)`
-//! segments. After a cut from `from` to `to` at `cut_boundary`, `to` owns every
-//! stamp `>= cut_boundary` and `from` owns every stamp `< cut_boundary`. A cut
-//! lands on the NEXT boundary + [`CUT_LEAD_SLOTS`] slot: far enough ahead that
-//! both sources emit it after the cut is recorded, so exactly one frame per
-//! boundary reaches the program — no hole, no double.
+//! **Ownership.** The cut state is a short list of `(first_stamp, pid)` segments. After a cut
+//! from `from` to `to` at `cut_boundary`, `to` owns every stamp `>= cut_boundary` and `from`
+//! owns every stamp `< cut_boundary`. A cut lands on the NEXT boundary + [`CUT_LEAD_SLOTS`]
+//! slot: far enough ahead that both sources emit it after the cut is recorded, so exactly one
+//! frame per boundary reaches the program — no hole, no double.
 //!
-//! **One clock domain: the sources' stamps.** The API's realtime clock and a
-//! submit thread's per-song wall can both sit off the stamp walls after a UTC
-//! step (the pacer walls slew it in at ≤ 1 ms per resample). So "next" for a
-//! cut is measured from the newest stamp the program sources, the source cut
-//! to, or the program itself reached (the caller's clock is only the fallback
-//! when nothing was seen), and a missed boundary is declared by TIME only on
-//! the `SP-program` sender's own long-lived wall (`release`), which it ticks
-//! once per grid boundary like the pacer walls (`program_output::BoundaryTicker`)
-//! so both slew a UTC step in at the same rate. The offer path (`offer`) never
-//! reads a clock: it forwards, fills only a gap the owner is already past (or
-//! the missing boundary when the reorder buffer overflows), and measures a
-//! resync against the waiting frame. Every paced source reports its progress on every boundary
-//! (`touch`), so the source cut to is known live before its first owned frame arrives.
+//! **One clock domain: the sources' stamps.** The API's realtime clock and a submit thread's
+//! per-song wall can both sit off the stamp walls after a UTC step (the pacer walls slew it in at
+//! ≤ 1 ms per resample). So "next" for a cut is measured from the newest stamp the program
+//! sources, the source cut to, or the program itself reached (the caller's clock is only the
+//! fallback when nothing was seen), and a missed boundary is declared by TIME only on the
+//! `SP-program` sender's own long-lived wall (`release`), which it ticks once per grid boundary
+//! like the pacer walls (`program_output::BoundaryTicker`) so both slew a UTC step in at the
+//! same rate. The offer path (`offer`) never reads a clock: it forwards, fills only a gap the
+//! owner is already past (or the missing boundary when the reorder buffer overflows), and
+//! measures a resync against the waiting frame. Every paced source reports its progress on every
+//! boundary (`touch`), so the source cut to is known live before its first owned frame arrives.
 //!
 //! **Order.** Two sources offer from two submit threads, so the new source's
 //! first frame can arrive before the old source's last one. The bus keeps a
@@ -62,12 +58,12 @@
 //! half: `program_bus_window.rs`). [`ProgramCore::hold_for`] tells the engine
 //! whether a source that left program keeps playing through a window ([`Hold`]).
 //!
-//! This file is the PURE, Linux-tested decision layer ([`ProgramCore`]) plus
-//! its `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the selected source's
-//! persistence. The `SP-program` sender lives in `program_output.rs`, the
-//! offer hook in each pipeline's paced consumer (`paced_output.rs`).
+//! This file is the PURE, Linux-tested decision layer ([`ProgramCore`]) plus its
+//! `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the selected source's persistence. The
+//! `SP-program` sender lives in `program_output.rs`, the offer hook in each pipeline's paced
+//! consumer (`paced_output.rs`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
@@ -127,8 +123,8 @@ pub const PROGRAM_PENDING_BOUND: usize = 2 * GENLOCK_MAX_CATCHUP_INTERVALS as us
 /// Upper bound on release steps per call: a release is always bounded work.
 const MAX_RELEASE_STEPS: usize = 64;
 
-// #215: what a boundary inside a transition window becomes (the mix, the cue
-// gate's held boundaries) — an `impl ProgramCore` child for the 1000-line cap.
+// #215: what a boundary inside a transition window becomes (the mix, the held boundaries),
+// #257: what a fill owes — an `impl ProgramCore` child for the 1000-line cap.
 #[path = "program_bus_window.rs"]
 mod window;
 use window::WindowStep;
@@ -270,6 +266,8 @@ pub struct ProgramCore {
     counters: TransitionCounters,
     /// The last stamp each source touched or offered (its liveness + progress).
     last_offer: HashMap<i64, i64>,
+    /// #257: the sources that touched or offered since they became the owner.
+    delivered: HashSet<i64>,
     /// Each queued job with the source it shows (#147: the trace's `source`).
     queue: SubmitQueue<(ProgramJob, Option<i64>)>,
     health: ProgramHealth,
@@ -299,6 +297,7 @@ impl ProgramCore {
             spec: TransitionSpec::cut(SpecSource::Fallback),
             counters: TransitionCounters::default(),
             last_offer: HashMap::new(),
+            delivered: HashSet::new(),
             queue: SubmitQueue::new(PROGRAM_QUEUE_BOUND),
             health: ProgramHealth::default(),
             receivers_dark: false,
@@ -417,6 +416,7 @@ impl ProgramCore {
         // waiting cue kept on air takes the boundaries over with no window.
         if outgoing != Some(pid) {
             self.segments.push((boundary, pid));
+            self.delivered.remove(&pid); // #257: a new owner delivers anew
             let window = Window::cued(outgoing, pid, boundary, &self.spec);
             self.windows.push(window);
         } else if self.selected() != Some(pid) {
@@ -432,7 +432,7 @@ impl ProgramCore {
     /// that is cut to is already known to be live. Returns whether `pid` can
     /// own a boundary.
     pub fn touch(&mut self, pid: i64, stamp_100ns: i64) -> bool {
-        self.last_offer.insert(pid, stamp_100ns);
+        self.note_progress(pid, stamp_100ns);
         self.is_candidate(pid)
     }
 
@@ -443,7 +443,7 @@ impl ProgramCore {
     /// not the stamps' wall, so time-based misses are the sender's call.
     pub fn offer(&mut self, pid: i64, job: SubmitJob) -> OfferOutcome {
         let stamp = job.video_tc_100ns;
-        self.last_offer.insert(pid, stamp);
+        self.note_progress(pid, stamp);
         // #215: inside a window the outgoing source contributes too.
         let from_side = self.window_at(stamp).is_some_and(|w| w.from == Some(pid));
         if !from_side && self.owner_of(stamp) != Some(pid) {

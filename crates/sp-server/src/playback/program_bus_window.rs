@@ -47,6 +47,25 @@ pub(super) enum WindowStep {
 }
 
 impl ProgramCore {
+    /// A source touched or offered boundary `stamp_100ns`: its progress (its
+    /// liveness for the fills), and #257: it delivers since it became the
+    /// owner ([`Self::delivering`]).
+    pub(super) fn note_progress(&mut self, pid: i64, stamp_100ns: i64) {
+        self.last_offer.insert(pid, stamp_100ns);
+        self.delivered.insert(pid);
+    }
+
+    /// #257: whether `source` is a real source that touched or offered a
+    /// boundary since it became the owner (a cut to it), or since the bus
+    /// started: only then is a boundary it misses its audio gone. A fill of a
+    /// source that has delivered nothing yet is a WAIT, never a loss: the
+    /// selection restored at a SongPlayer start before its pipeline offers
+    /// (SNV 12.10.2026: a `program` loss after every deploy), a cut to a
+    /// source that has not reached the bus yet.
+    fn delivering(&self, source: Option<i64>) -> bool {
+        real_source(source)
+    }
+
     /// Boundary `stamp_100ns` filled with the program's standby pair,
     /// showing `shows` (`fill_source`): `filled`, and #257's `filled_owned`
     /// when a real source's audio went missing there ([`Self::owned`]).
@@ -64,13 +83,14 @@ impl ProgramCore {
         self.health.resyncs_owned += u64::from(self.owned(stamp_100ns, shows));
     }
 
-    /// #257: whether boundary `stamp_100ns`, showing `shows`, carries a real
-    /// source's audio. In a running fade either side's: a fade INTO Blank
-    /// shows Blank but still mixes the outgoing playlist (review round 1).
+    /// #257: whether boundary `stamp_100ns`, showing `shows`, carries the
+    /// audio of a real source that delivers ([`Self::delivering`]). In a
+    /// running fade either side's: a fade INTO Blank shows Blank but still
+    /// mixes the outgoing playlist (review round 1).
     fn owned(&self, stamp_100ns: i64, shows: Option<i64>) -> bool {
         match self.window_at(stamp_100ns) {
-            Some(w) if w.cue == Cue::Open => real_source(Some(w.to)) || real_source(w.from),
-            _ => real_source(shows),
+            Some(w) if w.cue == Cue::Open => self.delivering(Some(w.to)) || self.delivering(w.from),
+            _ => self.delivering(shows),
         }
     }
 
@@ -202,9 +222,9 @@ impl ProgramCore {
         let to = self.pending.remove(&stamp);
         let from = self.from_pending.remove(&stamp);
         let side_missing = to.is_none() || (from.is_none() && w.from.is_some());
-        // #257: a real source's side missing is its audio gone at its weight.
-        let owned_missing =
-            (to.is_none() && real_source(Some(w.to))) || (from.is_none() && real_source(w.from));
+        // #257: a delivering source's side missing is its audio gone at its weight.
+        let owned_missing = (to.is_none() && self.delivering(Some(w.to)))
+            || (from.is_none() && self.delivering(w.from));
         self.counters.mixed_boundaries += 1;
         self.counters.side_fills += u64::from(side_missing);
         self.health.filled_owned += u64::from(owned_missing);
