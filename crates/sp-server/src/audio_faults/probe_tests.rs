@@ -4,6 +4,8 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use sp_core::config::{PROGRAM_BLANK_ID, PROGRAM_INPUT_ID, PROGRAM_INPUT_LABEL};
+
 use super::*;
 use crate::audio_faults::model::{Counter, Event, Meter, Probe, Severity, StateFlag, kinds};
 use crate::playback::asio_loop::{LoopEvent, LoopEventKind, LoopState, LoopStatus};
@@ -13,9 +15,11 @@ use crate::playback::audio_out::OutputStatus;
 use crate::playback::ndi_health::{
     AudioStats, NdiHealthRegistry, PacingStats, PipelineHealthSnapshot, PlaybackStateLabel,
 };
+use crate::playback::ndi_input::{InputSettings, NdiInputStatus};
 use crate::playback::program_bus::ProgramBus;
 use crate::playback::program_output_timing::BoundaryMarks;
 use crate::playback::program_trace::{JobShape, ProgramTrace, TraceKind};
+use crate::playback::program_transition::ActiveWindow;
 use crate::playback::vban_out::VbanStatus;
 use crate::playback::vban_stall::VbanLateEvent;
 
@@ -29,6 +33,43 @@ fn seconds_read_as_whole_ms() {
 #[test]
 fn the_host_down_code_is_the_reasons_own() {
     assert_eq!(HOST_DOWN_CODE, Reason::HostDown(String::new()).code());
+}
+
+/// A running fade from `from` to `to`.
+fn fade(from: Option<i64>, to: i64) -> ActiveWindow {
+    ActiveWindow {
+        from,
+        to,
+        start_boundary_100ns: 0,
+        n_slots: 9,
+        served_slots: 4,
+        progress: 44,
+    }
+}
+
+/// Review round 1 (🔵 10): the outgoing side of a running fade is still
+/// mixed into the program (up to ~10.5 s), so its faults count.
+#[test]
+fn on_program_is_the_selected_source_and_a_running_fades_outgoing_side() {
+    let mut status = ProgramBus::new().status();
+    assert_eq!(on_program(&status), BTreeSet::new(), "nothing selected");
+    status.source = Some(5);
+    assert_eq!(on_program(&status), BTreeSet::from([5]));
+    status.transition.active = Some(fade(Some(3), 5));
+    assert_eq!(on_program(&status), BTreeSet::from([3, 5]));
+    status.transition.active = Some(fade(None, 5));
+    assert_eq!(
+        on_program(&status),
+        BTreeSet::from([5]),
+        "a fade up from nothing"
+    );
+    status.source = Some(PROGRAM_BLANK_ID);
+    status.transition.active = Some(fade(Some(PROGRAM_INPUT_ID), PROGRAM_BLANK_ID));
+    assert_eq!(
+        on_program(&status),
+        BTreeSet::from([PROGRAM_BLANK_ID, PROGRAM_INPUT_ID]),
+        "the NDI input fading out to Blank"
+    );
 }
 
 /// Review round 1: a coalesced boundary was never served (the sender's
@@ -418,6 +459,44 @@ fn a_pipeline_loses_its_underruns_resyncs_unserviced_slots_and_overflows_gated_o
         "repeats and dropped frames are no fault (a 24 fps song, a 60 fps one)"
     );
     assert!(!probes[1].gated_in, "off program");
+}
+
+/// The NDI input's status, its thread running or not, with counters.
+fn input(running: bool) -> NdiInputStatus {
+    let mut status = ProgramBus::new().input().status(&InputSettings::default());
+    status.running = running;
+    status.boundaries = 900;
+    status.resyncs = 2;
+    status.no_source_boundaries = 7;
+    status.unsupported_boundaries = 8;
+    status.frames_received = 880;
+    status
+}
+
+/// Review round 1 (🟡 5): the NDI input "OBS manuál" (-1) is an audio path:
+/// on program, a resync and every boundary it offered as standby (silence:
+/// disconnected, no video yet, an unsupported format) are losses.
+#[test]
+fn the_ndi_input_loses_its_resyncs_and_standby_boundaries_gated_on_program() {
+    let on = BTreeSet::from([PROGRAM_INPUT_ID]);
+    assert_eq!(input_probe(&input(false), &on), None, "no thread, no path");
+    assert_eq!(
+        input_probe(&input(true), &on),
+        Some(Probe {
+            path: "input".to_string(),
+            detail: PROGRAM_INPUT_LABEL.to_string(),
+            run: 900,
+            gated_in: true,
+            counters: vec![
+                Counter::loss(kinds::RESYNC, 2),
+                Counter::loss(kinds::NO_SOURCE, 7),
+                Counter::loss(kinds::UNSUPPORTED, 8),
+            ],
+            ..Probe::default()
+        })
+    );
+    let off = input_probe(&input(true), &BTreeSet::from([5])).expect("its thread runs");
+    assert!(!off.gated_in, "a playlist on program");
 }
 
 /// One traced boundary, taken `late_ms` after it.
