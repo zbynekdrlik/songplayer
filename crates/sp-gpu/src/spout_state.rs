@@ -209,6 +209,31 @@ pub fn after_send(
     }
 }
 
+/// What one send's look at the texture lock leads to (#243).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessHeld {
+    /// Keep sending; the number of sends in a row another program held it.
+    Streak(u32),
+    /// Refuse the sender for good, and why.
+    Refuse(&'static str),
+}
+
+/// After a send that was not refused: `held_elsewhere` = another program's
+/// thread held the sender's texture lock just after it, `streak` = how many
+/// sends in a row it did before. Refused at [`MAX_ACCESS_HELD`] in a row;
+/// a send with the lock free starts the count again.
+pub fn access_held(streak: u32, held_elsewhere: bool) -> AccessHeld {
+    if !held_elsewhere {
+        return AccessHeld::Streak(0);
+    }
+    let next = streak + 1;
+    if next < MAX_ACCESS_HELD {
+        AccessHeld::Streak(next)
+    } else {
+        AccessHeld::Refuse(ACCESS_HELD)
+    }
+}
+
 #[cfg(test)]
 #[path = "spout_state_tests.rs"]
 mod tests;

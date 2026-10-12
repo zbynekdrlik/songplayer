@@ -66,6 +66,7 @@ mod readback;
 pub mod reference;
 mod residency;
 mod spout;
+mod spout_lock;
 pub mod spout_state;
 mod stats;
 mod vblank;

@@ -18,11 +18,17 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::core::Interface;
 
+use super::spout_lock::{give_back, give_back_listed, held_elsewhere};
 use super::{Compositor, micros_since};
 use crate::error::GpuError;
-use crate::spout::{SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, check_sender_name, status_result};
+use crate::spout::{
+    SENDER_NAMES_MAP, SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, check_sender_name, map_mutex_name,
+    status_result,
+};
+use crate::spout_lock::access_mutex_name;
 use crate::spout_state::{
-    AfterSend, BeforeSend, FirstSendFacts, Listed, Registration, after_send, before_send, claim,
+    AccessHeld, AfterSend, BeforeSend, FirstSendFacts, Listed, Registration, UNREADABLE,
+    access_held, after_send, before_send, claim,
 };
 use crate::stats::SpoutSendStats;
 
@@ -48,47 +54,59 @@ unsafe extern "C" {
 /// never run it at once. Each shim call takes it alone (never nested).
 static SDK: Mutex<()> = Mutex::new(());
 
-/// Run one shim call under [`SDK`].
-fn sdk<T>(call: impl FnOnce() -> T) -> T {
+/// Run one shim call of the sender `sender` under [`SDK`], then give back
+/// any Spout lock the call left this thread holding (#243: Spout keeps a
+/// lock it was handed abandoned, `crate::spout_lock`).
+fn sdk<T>(sender: &str, call: impl FnOnce() -> T) -> T {
     let _one = SDK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    call()
+    let out = call();
+    give_back(sender);
+    out
 }
 
 /// The shim's sender object, released when dropped: `~spoutDX` unregisters
 /// it. A `SpoutSender` declares it before the device, so it is released
-/// while the device (which spoutDX does not AddRef) still lives.
-struct Shim(NonNull<c_void>);
+/// while the device (which spoutDX does not AddRef) still lives. It keeps
+/// the sender's name for the locks its calls give back.
+struct Shim {
+    raw: NonNull<c_void>,
+    name: String,
+}
 
 impl Shim {
     fn raw(&self) -> *mut c_void {
-        self.0.as_ptr()
+        self.raw.as_ptr()
     }
 }
 
 impl Drop for Shim {
     fn drop(&mut self) {
-        let raw = self.0.as_ptr();
+        let raw = self.raw.as_ptr();
         // SAFETY: the pointer came from `spout_sender_open` and is released
         // once, here.
-        sdk(|| unsafe { spout_sender_release(raw) });
+        sdk(&self.name, || unsafe { spout_sender_release(raw) });
     }
 }
 
 /// What Spout's list says about the sender's name now.
-fn listed_now(raw: *mut c_void) -> Listed {
+fn listed_now(shim: &Shim) -> Listed {
+    let raw = shim.raw();
     // SAFETY: `raw` is a live shim sender (its `Shim` outlives the call).
-    Listed::from_code(sdk(|| unsafe { spout_sender_listed(raw) }))
+    Listed::from_code(sdk(&shim.name, || unsafe { spout_sender_listed(raw) }))
 }
 
 /// What spoutDX holds after a send of a sender not yet confirmed.
-fn first_send_facts(raw: *mut c_void) -> FirstSendFacts {
+fn first_send_facts(shim: &Shim) -> FirstSendFacts {
     let (mut initialized, mut name_matches): (c_int, c_int) = (0, 0);
+    let raw = shim.raw();
     // SAFETY: `raw` is a live shim sender; both out slots are valid.
-    sdk(|| unsafe { spout_sender_state(raw, &mut initialized, &mut name_matches) });
+    sdk(&shim.name, || unsafe {
+        spout_sender_state(raw, &mut initialized, &mut name_matches)
+    });
     FirstSendFacts {
         initialized: initialized != 0,
         name_matches: name_matches != 0,
-        listed: listed_now(raw),
+        listed: listed_now(shim),
     }
 }
 
@@ -106,6 +124,9 @@ pub struct SpoutSender {
     shim: Shim,
     name: String,
     registration: Registration,
+    /// #243: sends in a row after which another program held the sender's
+    /// texture lock (`spout_state::access_held`).
+    access_held: u32,
     device: ID3D11Device,
     texture: ID3D11Texture2D,
     /// The compositor's immediate context and an event query: each send
@@ -141,20 +162,30 @@ impl SpoutSender {
         let copied = super::pipeline::query(&device)?;
         // Not OK until the shim says so.
         let mut code: c_int = -1;
-        // SAFETY: `device` is a live ID3D11Device, kept alive until after the
-        // shim object is released (see `Shim`); `c_name` is NUL-terminated
-        // and outlives the call; `code` is a valid out slot.
-        let raw = sdk(|| unsafe { spout_sender_open(device.as_raw(), c_name.as_ptr(), &mut code) });
+        // The open runs Spout's `CleanSenders`, which takes every listed
+        // sender's info-map lock: give back any of them it was handed
+        // abandoned too (#243).
+        let raw = sdk(name, || {
+            // SAFETY: `device` is a live ID3D11Device, kept alive until after
+            // the shim object is released (see `Shim`); `c_name` is
+            // NUL-terminated and outlives the call; `code` is a valid out slot.
+            let raw = unsafe { spout_sender_open(device.as_raw(), c_name.as_ptr(), &mut code) };
+            give_back_listed();
+            raw
+        });
         status_result(code, "spout_sender_open", name)?;
-        let shim = Shim(NonNull::new(raw).ok_or(GpuError::NoObject {
-            call: "spout_sender_open",
-        })?);
+        let shim = Shim {
+            raw: NonNull::new(raw).ok_or(GpuError::NoObject {
+                call: "spout_sender_open",
+            })?,
+            name: name.to_owned(),
+        };
+        let listed = listed_now(&shim);
         let raw = shim.raw();
-        let listed = listed_now(raw);
         // SAFETY: `shim` is a live shim sender.
         claim(
             listed,
-            || sdk(|| unsafe { spout_sender_claim_name(raw) }),
+            || sdk(name, || unsafe { spout_sender_claim_name(raw) }),
             name,
         )?;
         info!(
@@ -166,6 +197,7 @@ impl SpoutSender {
             shim,
             name: name.to_owned(),
             registration: Registration::Fresh,
+            access_held: 0,
             device,
             texture,
             context,
@@ -195,19 +227,21 @@ impl SpoutSender {
     ///
     /// Spout skips the copy, and still reports success, when a receiver
     /// holds the sender's mutex for over 67 ms: `send_us` then shows the
-    /// wait.
+    /// wait. #243: a receiver that keeps it for good (handed it abandoned)
+    /// gets the sender refused after `spout_state::MAX_ACCESS_HELD` sends,
+    /// [`GpuError::SpoutNotRegistered`] naming it.
     pub fn send(&mut self) -> Result<SpoutSendStats, GpuError> {
         let raw = self.shim.raw();
-        match before_send(self.registration, || listed_now(raw)) {
+        match before_send(self.registration, || listed_now(&self.shim)) {
             BeforeSend::Send => {}
-            BeforeSend::Refused(why) => return Err(self.not_registered(why)),
-            BeforeSend::Refuse(why) => return Err(self.refuse(why)),
+            BeforeSend::Refused(why) => return Err(self.not_registered(why, None)),
+            BeforeSend::Refuse(why) => return Err(self.refuse(why, None)),
         }
         let start = Instant::now();
         // SAFETY: the shim sender is live until Drop; the texture is the
         // compositor's render target, on the device the sender opened on.
         let texture = self.texture.as_raw();
-        let code = sdk(|| unsafe { spout_sender_send(raw, texture) });
+        let code = sdk(&self.name, || unsafe { spout_sender_send(raw, texture) });
         // #223 follow-up: return once the GPU has done the copy, so the
         // caller's timing is when Spout's shared texture really holds the
         // frame (Arena reads it on its own clock), not when it was queued.
@@ -215,8 +249,9 @@ impl SpoutSender {
         let send_us = micros_since(start);
         unsafe { self.device.GetDeviceRemovedReason() }
             .map_err(|e| GpuError::removed(e.code().0 as u32))?;
-        match after_send(self.registration, code, || first_send_facts(raw)) {
+        match after_send(self.registration, code, || first_send_facts(&self.shim)) {
             AfterSend::Shared(next) => {
+                self.check_texture_lock()?;
                 if next == Registration::Confirmed && self.registration != next {
                     info!(name = %self.name, "sp-gpu: Spout lists the sender");
                 }
@@ -224,13 +259,35 @@ impl SpoutSender {
                 Ok(SpoutSendStats { send_us })
             }
             AfterSend::Lost { code, next } => {
+                self.check_texture_lock()?;
                 self.registration = next;
                 Err(GpuError::Spout {
                     call: "spout_sender_send",
                     code: code as u32,
                 })
             }
-            AfterSend::Refuse(why) => Err(self.refuse(why)),
+            AfterSend::Refuse(why) => {
+                let holder = self.list_holder(why);
+                Err(self.refuse(why, holder))
+            }
+        }
+    }
+
+    /// #243: after a send that was not refused, whether another program
+    /// keeps the sender's texture lock. Such a program was handed the lock
+    /// abandoned and never gives it back, so Spout skips every copy and the
+    /// receivers show a frozen picture: at `spout_state::MAX_ACCESS_HELD`
+    /// sends in a row the sender is refused (named holder, off the list),
+    /// and the next sender gets a fresh lock once that program's receiver
+    /// has let go.
+    fn check_texture_lock(&mut self) -> Result<(), GpuError> {
+        let holder = held_elsewhere(&access_mutex_name(&self.name));
+        match access_held(self.access_held, holder.is_some()) {
+            AccessHeld::Streak(streak) => {
+                self.access_held = streak;
+                Ok(())
+            }
+            AccessHeld::Refuse(why) => Err(self.refuse(why, holder)),
         }
     }
 
@@ -241,28 +298,41 @@ impl SpoutSender {
         // SAFETY: the shim sender is live until Drop; both out slots are
         // valid.
         let raw = self.shim.raw();
-        sdk(|| unsafe { spout_sender_size(raw, &mut width, &mut height) });
+        sdk(&self.name, || unsafe {
+            spout_sender_size(raw, &mut width, &mut height)
+        });
         (width, height)
     }
 
-    /// Refuse the sender for good: release what it registered.
-    fn refuse(&mut self, why: &'static str) -> GpuError {
+    /// #243: who holds Spout's list, for a refusal because it stayed
+    /// unreadable.
+    fn list_holder(&self, why: &'static str) -> Option<String> {
+        if why == UNREADABLE {
+            held_elsewhere(&map_mutex_name(SENDER_NAMES_MAP))
+        } else {
+            None
+        }
+    }
+
+    /// Refuse the sender for good: release what it registered. `holder`
+    /// names the program that kept the lock the refusal is about.
+    fn refuse(&mut self, why: &'static str, holder: Option<String>) -> GpuError {
         // SAFETY: the shim sender is live until Drop.
         let raw = self.shim.raw();
-        let code = sdk(|| unsafe { spout_sender_refuse(raw) });
+        let code = sdk(&self.name, || unsafe { spout_sender_refuse(raw) });
         if let Err(error) = status_result(code, "spout_sender_refuse", &self.name) {
             warn!(name = %self.name, %error, "sp-gpu: releasing a refused Spout sender failed");
         }
-        warn!(name = %self.name, why, "sp-gpu: Spout sender refused for good");
+        warn!(name = %self.name, why, holder = ?holder, "sp-gpu: Spout sender refused for good");
         self.registration = Registration::Refused(why);
-        self.not_registered(why)
+        self.not_registered(why, holder)
     }
 
-    fn not_registered(&self, why: &'static str) -> GpuError {
+    fn not_registered(&self, why: &'static str, holder: Option<String>) -> GpuError {
         GpuError::SpoutNotRegistered {
             name: self.name.clone(),
             why,
-            holder: None,
+            holder,
         }
     }
 }

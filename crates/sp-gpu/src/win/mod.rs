@@ -12,6 +12,7 @@
 mod device;
 mod pipeline;
 mod receiver;
+mod spout_lock;
 mod spout_registry;
 mod spout_sender;
 mod textures;

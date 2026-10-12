@@ -1,8 +1,9 @@
 //! Tests for the Spout sender's registration state machine (#223 S1b).
 
 use super::{
-    AfterSend, BeforeSend, FirstSendFacts, Listed, MAX_UNREADABLE, NOT_LISTED, REGISTRATION_FAILED,
-    Registration, TAKEN, UNREADABLE, after_send, before_send, claim,
+    ACCESS_HELD, AccessHeld, AfterSend, BeforeSend, FirstSendFacts, Listed, MAX_ACCESS_HELD,
+    MAX_UNREADABLE, NOT_LISTED, REGISTRATION_FAILED, Registration, TAKEN, UNREADABLE, access_held,
+    after_send, before_send, claim,
 };
 use crate::error::GpuError;
 
@@ -268,4 +269,43 @@ fn a_failed_send_after_the_registration_loses_only_the_frame() {
 /// a lost frame, so it says listed here.
 fn registered_facts() -> FirstSendFacts {
     facts(true, true, Listed::Yes)
+}
+
+/// #243: a send whose texture lock was free starts the count again.
+#[test]
+fn a_free_texture_lock_resets_the_streak() {
+    assert_eq!(access_held(0, false), AccessHeld::Streak(0));
+    assert_eq!(access_held(5, false), AccessHeld::Streak(0));
+    assert_eq!(access_held(29, false), AccessHeld::Streak(0));
+}
+
+/// #243: each send another program held the lock after counts one more.
+#[test]
+fn a_texture_lock_held_elsewhere_counts_up() {
+    assert_eq!(access_held(0, true), AccessHeld::Streak(1));
+    assert_eq!(access_held(1, true), AccessHeld::Streak(2));
+    assert_eq!(access_held(27, true), AccessHeld::Streak(28));
+}
+
+/// #243: the 30th send in a row with the lock held elsewhere refuses the
+/// sender; the 29th does not.
+#[test]
+fn a_texture_lock_held_elsewhere_for_thirty_sends_refuses_the_sender() {
+    assert_eq!(MAX_ACCESS_HELD, 30);
+    assert_eq!(access_held(28, true), AccessHeld::Streak(29));
+    assert_eq!(access_held(29, true), AccessHeld::Refuse(ACCESS_HELD));
+    // Walked from a free lock: refused exactly at the 30th held send.
+    let mut streak = 0;
+    for send in 1..=MAX_ACCESS_HELD {
+        match access_held(streak, true) {
+            AccessHeld::Streak(next) => {
+                assert!(send < MAX_ACCESS_HELD, "send {send} must refuse");
+                streak = next;
+            }
+            AccessHeld::Refuse(why) => {
+                assert_eq!(send, MAX_ACCESS_HELD, "refused early at send {send}");
+                assert_eq!(why, ACCESS_HELD);
+            }
+        }
+    }
 }
