@@ -4,7 +4,8 @@
 //! The registry is read directly ([`DirectRead`]): it is fast and never
 //! hangs. WMI is read behind the bounded reader ([`WmiRead`],
 //! `super::Reader`): a WMI hang makes only the WMI facts unreadable, never
-//! the registry's.
+//! the registry's. The firewall is decided by the active policy store (WMI,
+//! the policy as it applies), the registry only when that cannot be read.
 
 use sp_core::prod_env::FirewallProfile;
 
@@ -132,26 +133,51 @@ pub fn active_firewall(rows: &[FirewallRow], profile: FirewallProfile) -> Result
 /// Whether a firewall profile is on by the registry (the fallback when the
 /// active store cannot be read): the group-policy value wins when it is set
 /// (`HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\<profile>`), else the
-/// local one (`…\SharedAccess\Parameters\FirewallPolicy\<profile>`). Any
-/// value but 0 is on. A policy that cannot be read, or a local value that is
-/// missing or cannot be read, cannot be verified (`Err`, why).
+/// local one (`…\SharedAccess\Parameters\FirewallPolicy\<profile>`). The
+/// older Administrative-Templates policy (`…\WindowsFirewall\StandardProfile`,
+/// `legacy`) is a policy for the private and public profiles too: with
+/// either policy set, the profile is on when any set policy says on (a
+/// fallback never reads a box off that a policy turns on). Any value but 0
+/// is on. A policy that cannot be read, or (with no policy) a local value
+/// that is missing or cannot be read, cannot be verified (`Err`, why).
 pub fn firewall_from_registry(
     profile: FirewallProfile,
     policy: RegDword,
-    _legacy: RegDword,
+    legacy: RegDword,
     local: RegDword,
 ) -> Result<bool, String> {
     let name = profile.name();
-    match (policy, local) {
-        (RegDword::Value(v), _) => Ok(v != 0),
-        (RegDword::Failed(code), _) => Err(format!(
-            "the {name} firewall policy could not be read (error {code})"
-        )),
-        (RegDword::Absent, RegDword::Value(v)) => Ok(v != 0),
-        (RegDword::Absent, RegDword::Absent) => {
-            Err(format!("the {name} firewall setting is missing"))
+    let legacy = if profile == FirewallProfile::Domain {
+        RegDword::Absent
+    } else {
+        legacy
+    };
+    let mut set = false;
+    let mut on = false;
+    for (what, value) in [
+        ("policy", policy),
+        ("older policy (StandardProfile)", legacy),
+    ] {
+        match value {
+            RegDword::Value(v) => {
+                set = true;
+                on |= v != 0;
+            }
+            RegDword::Absent => {}
+            RegDword::Failed(code) => {
+                return Err(format!(
+                    "the {name} firewall {what} could not be read (error {code})"
+                ));
+            }
         }
-        (RegDword::Absent, RegDword::Failed(code)) => Err(format!(
+    }
+    if set {
+        return Ok(on);
+    }
+    match local {
+        RegDword::Value(v) => Ok(v != 0),
+        RegDword::Absent => Err(format!("the {name} firewall setting is missing")),
+        RegDword::Failed(code) => Err(format!(
             "the {name} firewall setting could not be read (error {code})"
         )),
     }
@@ -217,6 +243,23 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
     let build_number = build_fact(&direct.build, &mut errors);
     let mut firewall = [None; 3];
     for (i, profile) in FirewallProfile::ALL.into_iter().enumerate() {
+        let active = match wmi {
+            Ok(read) => match &read.firewall {
+                Ok(rows) => active_firewall(rows, profile),
+                Err(code) => Err(format!(
+                    "the active firewall store could not be read (0x{:08X})",
+                    *code as u32
+                )),
+            },
+            Err(why) => Err(why.clone()),
+        };
+        let why = match active {
+            Ok(on) => {
+                firewall[i] = Some(on);
+                continue;
+            }
+            Err(why) => why,
+        };
         let registry = firewall_from_registry(
             profile,
             direct.firewall_policy[i],
@@ -224,9 +267,13 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
             direct.firewall_local[i],
         );
         firewall[i] = match registry {
-            Ok(on) => Some(on),
-            Err(why) => {
+            Ok(on) => {
+                note(&mut errors, format!("{why}: the registry decided"));
+                Some(on)
+            }
+            Err(registry_why) => {
                 note(&mut errors, why);
+                note(&mut errors, registry_why);
                 None
             }
         };
