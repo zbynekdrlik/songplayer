@@ -140,7 +140,9 @@ impl PathAcc {
 
     fn answer(self, path: String, now_ms: i64, kept_from_ms: i64) -> PathFaults {
         let unseen = if self.seen { kept_from_ms } else { now_ms };
-        let first_start = self.first_start_ms;
+        // A first start older than the 90 days kept reads the ledger's edge:
+        // "more than 90 d", never a time no loss row can still disprove.
+        let first_start = self.first_start_ms.map(|s| s.max(kept_from_ms));
         let loop_check = path.starts_with("loop:").then(|| LoopSeconds {
             checked_s: self.checked_ms as f64 / 1000.0,
             blind_s: self.blind_ms as f64 / 1000.0,
@@ -171,11 +173,17 @@ impl PathAcc {
 /// The whole chain's clean time: the newest loss of any path the ledger
 /// keeps (a path gone since counts too), else the first start it recorded
 /// (no older than `kept_from_ms`), else `unseen`.
-fn chain_since(paths: &[PathFaults], marks: &[CleanMark], _kept_from_ms: i64, unseen: i64) -> i64 {
+fn chain_since(paths: &[PathFaults], marks: &[CleanMark], kept_from_ms: i64, unseen: i64) -> i64 {
     let kept = marks.iter().filter_map(|m| m.last_loss_ms).max();
     let window = paths.iter().filter_map(|p| p.last_loss_ms).max();
     kept.max(window)
-        .or_else(|| marks.iter().filter_map(|m| m.first_start_ms).min())
+        .or_else(|| {
+            marks
+                .iter()
+                .filter_map(|m| m.first_start_ms)
+                .min()
+                .map(|s| s.max(kept_from_ms))
+        })
         .unwrap_or(unseen)
 }
 
@@ -261,27 +269,32 @@ pub struct BucketCount {
 /// The (re)starts a path's timeline carries at most (the newest).
 pub const MAX_STARTS: usize = 100;
 
-/// Each path's timeline, still from its listed events (RED: the capped
-/// list, as the dashboard drew it).
-pub fn add_timeline(answer: &mut FaultsAnswer, _counts: &[BucketCount], _starts: &[(String, i64)]) {
-    let (from, to) = (answer.from_ms, answer.now_ms);
+/// Each path's timeline (#257 review: the bars and marks never come from
+/// the capped event list): its loss and risk rows per bucket of the window
+/// (`counts`, every row), and its (re)starts in it (`starts`, the newest
+/// [`MAX_STARTS`], oldest first). A path no count names reads zeros; a
+/// bucket outside 0..BUCKETS is no bucket.
+pub fn add_timeline(answer: &mut FaultsAnswer, counts: &[BucketCount], starts: &[(String, i64)]) {
     for p in &mut answer.paths {
         let mut loss = vec![0u32; BUCKETS];
         let mut risk = vec![0u32; BUCKETS];
-        let mut mine: Vec<i64> = Vec::new();
-        for e in &p.events {
-            let Some(slot) = sp_core::audio_faults_timeline::bucket_of(e.ts_ms, from, to, BUCKETS)
-            else {
+        for c in counts.iter().filter(|c| c.path == p.path) {
+            let Some(slot) = usize::try_from(c.bucket).ok().filter(|b| *b < BUCKETS) else {
                 continue;
             };
-            if e.severity == Severity::Loss.as_str() {
-                loss[slot] += 1;
-            } else if e.severity == Severity::Risk.as_str() {
-                risk[slot] += 1;
-            } else if e.severity == Severity::Info.as_str() {
-                mine.push(e.ts_ms);
+            let rows = u32::try_from(c.rows).unwrap_or(u32::MAX);
+            if c.severity == Severity::Loss.as_str() {
+                loss[slot] = loss[slot].saturating_add(rows);
+            } else if c.severity == Severity::Risk.as_str() {
+                risk[slot] = risk[slot].saturating_add(rows);
             }
         }
+        let mut mine: Vec<i64> = starts
+            .iter()
+            .filter(|(path, _)| *path == p.path)
+            .map(|(_, at)| *at)
+            .collect();
+        mine.sort_unstable();
         p.starts = mine.split_off(mine.len().saturating_sub(MAX_STARTS));
         p.loss_buckets = loss;
         p.risk_buckets = risk;

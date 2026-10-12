@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use sp_core::audio_faults_timeline::{BUCKETS, bucket_edges};
 
 use super::answer::{BucketCount, CleanMark, KindTotal, StoredEvent};
-use super::model::{FaultRow, Severity, kinds};
+use super::model::{FaultRow, Severity};
 
 /// Write `rows`, all or none (one transaction).
 pub async fn insert(pool: &SqlitePool, rows: &[FaultRow]) -> Result<(), sqlx::Error> {
@@ -37,10 +37,16 @@ pub async fn insert(pool: &SqlitePool, rows: &[FaultRow]) -> Result<(), sqlx::Er
 /// (a handful of rows): a path's first start bounds its clean time for
 /// good, so a pruned deploy never resets it (#257 review); how many.
 pub async fn prune(pool: &SqlitePool, before_ms: i64) -> Result<u64, sqlx::Error> {
-    let done = sqlx::query("DELETE FROM audio_faults WHERE ts_ms < ?")
-        .bind(before_ms)
-        .execute(pool)
-        .await?;
+    let done = sqlx::query(
+        "DELETE FROM audio_faults WHERE ts_ms < ? AND NOT (severity = ? AND ts_ms = \
+         (SELECT MIN(f.ts_ms) FROM audio_faults f \
+         WHERE f.path = audio_faults.path AND f.severity = ?))",
+    )
+    .bind(before_ms)
+    .bind(Severity::Info.as_str())
+    .bind(Severity::Info.as_str())
+    .execute(pool)
+    .await?;
     Ok(done.rows_affected())
 }
 
@@ -103,12 +109,14 @@ pub async fn newest_events(
 pub async fn clean_marks(pool: &SqlitePool, since_ms: i64) -> Result<Vec<CleanMark>, sqlx::Error> {
     let rows: Vec<(String, Option<i64>, Option<i64>)> = sqlx::query_as(
         "SELECT path, MAX(CASE WHEN severity = ? THEN ts_ms END), \
-         MIN(CASE WHEN kind = ? THEN ts_ms END) FROM audio_faults \
-         WHERE severity IN (?, ?) AND ts_ms >= ? GROUP BY path ORDER BY path",
+         MIN(CASE WHEN severity = ? THEN ts_ms END) FROM audio_faults \
+         WHERE severity IN (?, ?) AND (severity = ? OR ts_ms >= ?) \
+         GROUP BY path ORDER BY path",
     )
     .bind(Severity::Loss.as_str())
-    .bind(kinds::START)
+    .bind(Severity::Info.as_str())
     .bind(Severity::Loss.as_str())
+    .bind(Severity::Info.as_str())
     .bind(Severity::Info.as_str())
     .bind(since_ms)
     .fetch_all(pool)

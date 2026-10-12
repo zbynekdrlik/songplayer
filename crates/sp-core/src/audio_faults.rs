@@ -389,8 +389,9 @@ pub enum Unit {
 /// The unit of `kind`'s amount on `path`: an ASIO output's `overflow`
 /// counts frames, a pipeline's counts the times its audio grid dropped
 /// its oldest samples.
-pub fn unit_of(_path: &str, kind: &str) -> Unit {
+pub fn unit_of(path: &str, kind: &str) -> Unit {
     match kind {
+        "overflow" if path.starts_with("pipeline:") => Unit::Count,
         "mismatch" | "dropout" | "slip" | "overflow" | "limited" => Unit::Frames,
         "late_packet" => Unit::Micros,
         "host_down" | "no_return" | "start" => Unit::Nothing,

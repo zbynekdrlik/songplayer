@@ -355,13 +355,7 @@ fn path_row(
     let risks = faults::risks_sk(p.risks);
     let clean = faults::clean_sk(p.clean_since_ms, a, local(p.clean_since_ms));
     let loop_line = p.loop_check.as_ref().map(faults::loop_sk);
-    let starts: Vec<i64> = p
-        .events
-        .iter()
-        .filter(|e| e.kind == faults::START)
-        .map(|e| e.ts_ms)
-        .collect();
-    let svg = timeline_svg(a, &starts, buckets, max);
+    let svg = timeline_svg(a, &p.starts, buckets, max);
     view! {
         <div class="audio-path-row" data-testid="audio-path-row" data-path=p.path.clone()>
             <div class="audio-path-info">
@@ -401,20 +395,7 @@ fn path_rows(a: &FaultsAnswer, names: &dyn Fn(i64) -> Option<String>) -> AnyView
     let paths = faults::ordered_paths(a);
     let buckets: Vec<Vec<Bucket>> = paths
         .iter()
-        .map(|p| {
-            let mut loss = vec![0u32; BUCKETS];
-            let mut risk = vec![0u32; BUCKETS];
-            for e in &p.events {
-                if let Some(i) = timeline::bucket_of(e.ts_ms, a.from_ms, a.now_ms, BUCKETS) {
-                    if e.severity == faults::LOSS {
-                        loss[i] += 1;
-                    } else if e.severity == faults::RISK {
-                        risk[i] += 1;
-                    }
-                }
-            }
-            timeline::buckets_of(&loss, &risk)
-        })
+        .map(|p| timeline::buckets_of(&p.loss_buckets, &p.risk_buckets))
         .collect();
     let max = timeline::shared_max(&buckets);
     paths

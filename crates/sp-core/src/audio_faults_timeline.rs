@@ -198,7 +198,7 @@ pub fn axis_ticks(from: i64, to: i64, offset_at: &dyn Fn(i64) -> i32) -> Vec<Tic
     let days = step >= DAY_MS;
     let mut ticks: Vec<Tick> = Vec::new();
     for local in (0..MAX_TICKS).map(|k| first + k * step) {
-        let at_ms = local - from_shift;
+        let at_ms = local - shift(local - from_shift);
         if at_ms > to {
             break;
         }
