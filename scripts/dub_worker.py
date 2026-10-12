@@ -169,6 +169,21 @@ def place_output(
     return starts
 
 
+def placed_length(chunks: list, starts: list[int | None], input_samples: int) -> int:
+    """Samples of the placed WAV: the input's length, or longer when VOICED
+    output (the translation of the last words) is placed past it (#257). The
+    session drains until `dls.QUIET_S` with no voiced output and streams
+    silence meanwhile; that silence after the content is not part of the
+    dub, so a chunk that is not voiced never lengthens it (it is cut at the
+    end, `render_placed_wav`). A dub ran 7.8 s past its video on SNV, all of
+    it drain silence, and the player cut every play of it at the video's end.
+    A dropped chunk (None start) places nothing."""
+    voiced_ends = [
+        s + c.n_bytes // 2 for s, c in zip(starts, chunks) if s is not None and c.voiced
+    ]
+    return max([input_samples] + voiced_ends)
+
+
 def _by_connection(parts: list, conn_of) -> list:
     """`parts` stably ordered by connection: the old connection translates
     EARLIER input than the next one, even when its trailing text arrives after
@@ -588,9 +603,9 @@ def _translate(args: argparse.Namespace, raw_path: str, wav_path: str) -> dict:
         f"{en_latency} ms (measured {en_measured} ms), dropped silence "
         f"{summary['dropped_silence_s']}s, drain {summary['drain_end_reason']}"
     )
-    input_samples = int(round(input_s * OUTPUT_SR))
-    ends = [s + c.n_bytes // 2 for s, c in zip(starts, state.chunks) if s is not None]
-    total = max([input_samples] + ends)
+    # #257: up to the input's end or the last VOICED output, never the drain's
+    # silence after it.
+    total = placed_length(state.chunks, starts, int(round(input_s * OUTPUT_SR)))
     _heartbeat(args.work_dir)
     render_placed_wav(raw_path, state.chunks, starts, total, wav_path)
 
