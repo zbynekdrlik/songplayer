@@ -628,3 +628,32 @@ fn the_range_is_half_a_second_in_whole_coarse_steps() {
     assert_eq!((s.state, s.delay_frames), (LoopState::Locked, Some(22_000)));
     assert_eq!(s.inputs, [Some(0), None]);
 }
+
+/// A drain that holds many blocks judges each in turn, at its own time:
+/// 10 blocks in one drain, the 4th of them bad.
+#[test]
+fn many_blocks_in_one_drain_are_each_judged_in_turn() {
+    let base = console(|_| 1_234);
+    let mut rig = Rig::new(14_800, 3, |i, t, l: &[f32], r: &[f32]| {
+        let v = base(i, t, l, r);
+        if i == 2 && (13_050..13_060).contains(&t) {
+            v + 0.5
+        } else {
+            v
+        }
+    });
+    rig.feed_to(12_240);
+    assert_eq!(rig.status().state, LoopState::Locked);
+    rig.an.ingest(
+        &rig.back[12_240 * 3..],
+        &rig.sent[12_240 * 2..],
+        0,
+        now_of(14_800),
+    );
+    let s = rig.an.status(now_of(14_800));
+    assert_eq!(events(&s), [event(LoopEventKind::Mismatch, 1_626, 256)]);
+    assert!(close(s.checked_s, 10.0 * 0.032), "{}", s.checked_s);
+    // The next drain goes on after the 10th block, judging none twice.
+    rig.an.ingest(&[], &[], 0, now_of(14_800));
+    assert!(close(rig.an.status(now_of(14_800)).checked_s, 10.0 * 0.032));
+}

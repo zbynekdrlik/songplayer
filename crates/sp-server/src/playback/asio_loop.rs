@@ -295,7 +295,6 @@ impl LoopAnalyzer {
             search_every: frames_of(SEARCH_EVERY_S, rate),
             no_return_frames: frames_of(NO_RETURN_S, rate),
             recv: vec![VecDeque::new(); inputs],
-            search_work: self.search_work,
             totals: std::mem::take(&mut self.totals),
             ..Self::default()
         };
@@ -341,7 +340,7 @@ impl LoopAnalyzer {
         std::mem::take(&mut self.totals.fresh)
     }
 
-    /// The multiply-adds every search so far took.
+    /// The multiply-adds every search of this run took.
     pub fn search_work(&self) -> u64 {
         self.search_work
     }
@@ -508,32 +507,33 @@ impl LoopAnalyzer {
     /// as far as the returned one: the taps push it first and the core
     /// drains it last, so its frames `delay` earlier are always there).
     fn judge(&mut self, now_ms: i64) {
+        let Some(lock) = self.lock else {
+            return;
+        };
+        let delay = lock.delay as u64;
+        let first = lock
+            .judged_to
+            .max(self.recv_base)
+            .max(self.sent_base + delay);
         let whole = self.recv_end.min(self.sent_end);
-        while let Some(lock) = self.lock {
-            let delay = lock.delay as u64;
-            let j = lock
-                .judged_to
-                .max(self.recv_base)
-                .max(self.sent_base + delay);
-            let next = j + BLOCK as u64;
-            if next > whole {
-                self.lock = Some(Locked {
-                    judged_to: j,
-                    ..lock
-                });
-                return;
-            }
+        // A count of blocks, never a cursor: the loop always ends.
+        let blocks = whole.saturating_sub(first) / BLOCK as u64;
+        for j in (0..blocks).map(|k| first + k * BLOCK as u64) {
             let verdict = (0..2)
                 .filter_map(|c| lock.taps[c].map(|tap| self.block_verdict(c, tap, j, delay)))
                 .max()
                 .unwrap_or(Verdict::Blind);
-            self.lock = Some(Locked {
-                judged_to: next,
-                ..lock
-            });
             let utc = event_utc_ms(now_ms, self.recv_end - j, self.rate);
             self.note(verdict, utc);
+            if self.lock.is_none() {
+                // 8 bad blocks: searching again.
+                return;
+            }
         }
+        self.lock = Some(Locked {
+            judged_to: first + blocks * BLOCK as u64,
+            ..lock
+        });
     }
 
     /// One block of sent channel `channel` against its tap.

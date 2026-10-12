@@ -261,3 +261,21 @@ fn the_best_lags_are_kept_one_per_neighbourhood() {
     );
     assert_eq!(top.len(), CANDIDATES);
 }
+
+/// A program with no time structure (DC, exactly representable: every lag
+/// correlates exactly 1) locks at the FIRST of its equal lags, on the first
+/// of two equal inputs — a later equal one never replaces it (the known
+/// limit of a periodic program, `asio_loop.rs`).
+#[test]
+fn equal_lags_and_equal_inputs_keep_the_first() {
+    let lag = 64;
+    let dc = [vec![0.25f32; WINDOW + lag], vec![0.25f32; WINDOW + lag]];
+    let recv = vec![vec![0.25f32; WINDOW], vec![0.25f32; WINDOW]];
+    assert_eq!(
+        run(&dc, &recv, lag).0,
+        Some(Found {
+            delay: 0,
+            taps: [tap(0, 1.0), tap(0, 1.0)],
+        })
+    );
+}
