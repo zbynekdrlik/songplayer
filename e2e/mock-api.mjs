@@ -811,8 +811,6 @@ function asioBlockRefusal(a, at) {
   return null;
 }
 
-// #233 lane 3: the box's registered ASIO drivers (two, so a test can pick
-// one that is not the first).
 // #257: GET /api/v1/audio/faults — a fixed fixture of the audio fault
 // ledger's answer (`audio_faults::answer::FaultsAnswer`), so the UI can be
 // built against it: the program and a pipeline clean, FOH with one late
@@ -1032,6 +1030,8 @@ app.post("/__mock/audio-faults-reset", (_req, res) => {
   res.json({ scenario: audioFaultsScenario, delay_ms: audioFaultsDelayMs });
 });
 
+// #233 lane 3: the box's registered ASIO drivers (two, so a test can pick
+// one that is not the first).
 app.get("/api/v1/audio/asio-drivers", (_req, res) => {
   // As the server (#233 release review): a list it could not read is a 500
   // naming why, in plain text — never an empty list.

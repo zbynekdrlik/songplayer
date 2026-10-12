@@ -1,7 +1,8 @@
 //! #257: `health.filled_owned` — a fill of a REAL source's boundary (a
 //! playlist or the NDI input), and a fade's missing real side: the audio
 //! that source should have had went missing, which the audio fault ledger
-//! records as a loss. Blank's fills and those of nothing selected are
+//! records as a loss; likewise `health.resyncs_owned`, a resync over a real
+//! source's boundaries. Blank's fills and those of nothing selected are
 //! silence by design and never count. Reuses the #209 rig
 //! (`program_bus_tests.rs`) and its #215 fade (`program_bus_tests_transition.rs`).
 //! Wired via `#[cfg(test)] #[path = "program_bus_window_tests.rs"] mod tests;`
@@ -124,4 +125,53 @@ fn a_fade_into_blank_misses_no_owned_side() {
     let status = core.status();
     assert_eq!(status.transition.counters.side_fills, 1, "b(7) was mixed");
     assert_eq!(status.health.filled_owned, 0);
+}
+
+/// A fade INTO Blank whose playlist sent nothing for b(8): Blank never
+/// offers, so neither side is there and the boundary is filled. The fill
+/// shows Blank, but the window's outgoing side is A's: its audio went
+/// missing (#257 review), an owned fill.
+#[test]
+fn a_fade_into_blank_whose_playlist_missed_a_boundary_is_an_owned_fill() {
+    let mut core = ProgramCore::new();
+    core.select_initial(SRC_A);
+    assert!(core.set_transition(fade_300()));
+    let fa = frame(4, 2);
+    for k in 1..=5 {
+        core.offer(SRC_A, job(4, &fa, b(k), 0.1));
+    }
+    assert!(core.cut(PROGRAM_BLANK_ID, b(5) + 5 * MS));
+    core.offer(SRC_A, job(4, &fa, b(6), 0.1));
+    core.offer(SRC_A, job(4, &fa, b(7), 0.1));
+    core.release(b(8) + grace() + MS);
+    let status = core.status();
+    let h = status.health;
+    assert_eq!((h.filled, h.filled_owned), (1, 1));
+    assert_eq!(status.transition.counters.side_fills, 1, "b(7) was mixed");
+}
+
+/// `selected` (if any) on program; the sender's wall jumps from b(1) to
+/// b(21), so b(2) to b(20) go in ONE resync.
+fn one_resync(selected: Option<i64>) -> ProgramHealth {
+    let mut core = ProgramCore::new();
+    if let Some(pid) = selected {
+        core.select_initial(pid);
+    }
+    core.release(b(1) + MS);
+    core.release(b(21) + MS);
+    core.status().health
+}
+
+#[test]
+fn a_resync_is_owned_only_over_a_real_sources_boundaries() {
+    let cases = [
+        (Some(SRC_A), 1),
+        (Some(PROGRAM_INPUT_ID), 1),
+        (Some(PROGRAM_BLANK_ID), 0),
+        (None, 0),
+    ];
+    for (selected, owned) in cases {
+        let h = one_resync(selected);
+        assert_eq!((h.resyncs, h.resyncs_owned), (1, owned), "{selected:?}");
+    }
 }

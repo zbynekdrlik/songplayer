@@ -22,15 +22,18 @@
  *    `hard_recentres`, and no output stops or restarts: every ASIO output
  *    runs in the ASIO host process `sp-audio-host`, which spawns nothing
  *    (`asio-spawn-gate.ts`, unit-tested in the mock suite).
- * 4. #257: no audio path (the program, every output, a loop check, the
- *    playlist pipelines) records a `loss` in the audio fault ledger from the
- *    moment every gated ASIO output runs to the file's end, read from
- *    `GET /api/v1/audio/faults` after one ledger tick (`audio-faults-gate.ts`,
- *    unit-tested in the mock suite); its `risk` rows are logged.
+ * 4. #257: no audio path (the program, every output, a loop check, the NDI
+ *    input, the playlist pipelines) records a `loss` in the audio fault
+ *    ledger from one settle after every gated ASIO output runs to the file's
+ *    end, read from `GET /api/v1/audio/faults` after another settle
+ *    (`audio-faults-read.ts`; the decision `audio-faults-gate.ts`,
+ *    unit-tested in the mock suite); every path and its `risk` rows are
+ *    logged first, also when the window never opened.
  *
- * No sleeps but one: every wait is an expect.poll, except the bounded
+ * No sleeps but three: every wait is an expect.poll, except the bounded
  * settle after the spawn (`SETTLE_AFTER_SPAWN_MS`, 5 s: the absence of a
- * resync cannot be polled for). Right after a deploy the outputs
+ * resync cannot be polled for) and the ledger's two settles
+ * (`LEDGER_SETTLE_MS`, 11 s, idem). Right after a deploy the outputs
  * task applies the list on its first pass and a worker opens its driver
  * within a second or two, so the count, the running state and the blocks
  * are polled; a poll's read never throws (`expect.poll` does not retry a
@@ -52,26 +55,17 @@ import {
   spawnCounters,
   spawnDisturbances,
 } from "./asio-spawn-gate";
-import {
-  FAULTS_URL,
-  LEDGER_SETTLE_MS,
-  audioFaultFailures,
-  audioFaultRisks,
-  type FaultsAnswer,
-} from "./audio-faults-gate";
+import { expectNoLossSince, fileStartOrNull, openFaultWindow } from "./audio-faults-read";
 
 const EXPECTED = Number(process.env.SP_ASIO_OUTPUTS_EXPECTED ?? "0");
 
-/** #257: the audio fault ledger's answer over the last hour, read strictly. */
-async function readFaults(request: APIRequestContext): Promise<FaultsAnswer> {
-  const resp = await request.get(FAULTS_URL, { timeout: 10_000 });
-  expect(resp.status(), `GET ${FAULTS_URL}`).toBe(200);
-  return (await resp.json()) as FaultsAnswer;
-}
-
-/** #257: where this file's audio window opened (the server's clock), once
- * its outputs run; `null` until then. */
+/** #257: where this file's audio window opened (the server's clock), one
+ * settle after its outputs run; `null` until then. */
 let faultWindowStart: number | null = null;
+
+/** #257: the server's clock when this worker began the file: the window's
+ * fallback start when an earlier test failed before it opened. */
+let fileStart: number | null = null;
 
 /** `outputs[]` now, or null when the read failed (a poll tries again). */
 async function readOutputs(request: APIRequestContext): Promise<OutputStatus[] | null> {
@@ -94,6 +88,10 @@ async function output(request: APIRequestContext, id: string): Promise<OutputSta
 }
 
 test.describe("ASIO output (#233)", () => {
+  test.beforeAll(async ({ request }) => {
+    fileStart = await fileStartOrNull(request);
+  });
+
   test("the driver list reads, with Dante Virtual Soundcard on a box expected to run ASIO", async ({
     request,
   }) => {
@@ -137,7 +135,7 @@ test.describe("ASIO output (#233)", () => {
     expect(enabled, "GET /api/v1/program").not.toBeNull();
     const ids = (enabled as OutputStatus[]).map((o) => o.id);
     if (ids.length === 0) {
-      faultWindowStart = (await readFaults(request)).now_ms;
+      faultWindowStart = await openFaultWindow(request);
       return;
     }
     // Every output's state in one read ("unread" for a failed read).
@@ -148,8 +146,9 @@ test.describe("ASIO output (#233)", () => {
     await expect
       .poll(states, { message: `ASIO outputs ${ids.join(", ")} run`, timeout: 30_000 })
       .toEqual(ids.map(() => "running"));
-    // #257: the audio window opens once every gated ASIO output runs.
-    faultWindowStart = (await readFaults(request)).now_ms;
+    // #257: the audio window opens one settle after every gated ASIO output
+    // runs (a fault from before is stamped before it).
+    faultWindowStart = await openFaultWindow(request);
     const first: OutputStatus[] = [];
     for (const id of ids) first.push(await output(request, id));
     console.log(`[#233 asio] first: ${JSON.stringify(first)}`);
@@ -206,11 +205,6 @@ test.describe("ASIO output (#233)", () => {
 
   test("no audio path lost a sample in this file's window (#257)", async ({ request }) => {
     test.setTimeout(60_000);
-    expect(faultWindowStart, "the window opened (its outputs ran)").not.toBeNull();
-    const start = faultWindowStart as number;
-    await new Promise((resolve) => setTimeout(resolve, LEDGER_SETTLE_MS));
-    const answer = await readFaults(request);
-    for (const line of audioFaultRisks(answer, start)) console.log(`[#257 faults] risk: ${line}`);
-    expect(audioFaultFailures(answer, start), "a loss row of any audio path in the window").toEqual([]);
+    await expectNoLossSince(request, faultWindowStart, fileStart);
   });
 });

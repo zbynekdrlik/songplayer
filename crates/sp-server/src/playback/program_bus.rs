@@ -29,8 +29,7 @@
 //! reads a clock: it forwards, fills only a gap the owner is already past (or
 //! the missing boundary when the reorder buffer overflows), and measures a
 //! resync against the waiting frame. Every paced source reports its progress on every boundary
-//! (`touch`), so the source cut to is known to be live before its first owned
-//! frame arrives.
+//! (`touch`), so the source cut to is known live before its first owned frame arrives.
 //!
 //! **Order.** Two sources offer from two submit threads, so the new source's
 //! first frame can arrive before the old source's last one. The bus keeps a
@@ -59,10 +58,9 @@
 //! against the standby). It then queues ONE [`ProgramJob::Mix`], which the
 //! sender crossfades. A Cut is a zero-length window, the #209 behaviour above,
 //! unchanged. A fade first waits for the incoming source's first LIVE pair
-//! (the cue gate), with the outgoing source held on program at full level —
-//! the window half lives in the child module `program_bus_window.rs`. The
-//! engine asks [`ProgramCore::hold_for`] whether a source that left program
-//! must keep playing through a window ([`Hold`]).
+//! (the cue gate), the outgoing one held on program at full level (the window
+//! half: `program_bus_window.rs`). [`ProgramCore::hold_for`] tells the engine
+//! whether a source that left program keeps playing through a window ([`Hold`]).
 //!
 //! This file is the PURE, Linux-tested decision layer ([`ProgramCore`]) plus
 //! its `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the selected source's
@@ -184,6 +182,8 @@ pub struct ProgramHealth {
     pub late_dropped: u64,
     /// Runs of more than 8 missed slots skipped instead of burst-filled.
     pub resyncs: u64,
+    /// #257: resyncs that skipped a real source's boundaries.
+    pub resyncs_owned: u64,
     /// Program jobs dropped because the program sender fell a full queue behind.
     pub coalesced: u64,
     /// Cuts recorded.
@@ -556,11 +556,11 @@ impl ProgramCore {
             if lag_slots_100ns(expected, horizon, self.fps) > GENLOCK_MAX_CATCHUP_INTERVALS {
                 let target = first_pending.map_or(horizon, |first| first.min(horizon));
                 self.last = Some(floor_boundary_100ns(target - 1, self.fps));
-                self.health.resyncs += 1;
+                self.count_resync(expected);
                 continue;
             }
             let (stamp_100ns, shows) = (expected, self.fill_source(expected));
-            self.count_fill(shows);
+            self.count_fill(expected, shows);
             self.commit(ProgramJob::Standby { stamp_100ns }, shows);
         }
     }

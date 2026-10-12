@@ -30,12 +30,16 @@ impl Severity {
 /// The row kinds (`audio_faults.kind`), one vocabulary for the ledger, the
 /// API and the gate.
 pub mod kinds {
-    /// A path seen for the first time, or rebuilt (severity info).
+    /// A path seen for the first time, or rebuilt (severity info): its
+    /// counters' baseline.
     pub const START: &str = "start";
+    /// A path rebuilt while it counted (an ASIO host restarted, an entry or
+    /// a pipeline was rebuilt): its audio broke off there (a loss, 1).
+    pub const INTERRUPTED: &str = "interrupted";
     /// Program: a boundary of a real source filled with standby (or a
     /// fade's missing side): `health.filled_owned`.
     pub const FILLED: &str = "filled";
-    /// Program / ASIO output / pipeline: a resync.
+    /// Program / ASIO output / NDI input / pipeline: a resync.
     pub const RESYNC: &str = "resync";
     /// Program: an owned frame that came after its boundary went out.
     pub const LATE_DROPPED: &str = "late_dropped";
@@ -61,10 +65,16 @@ pub mod kinds {
     pub const HARD_RECENTRE: &str = "hard_recentre";
     /// ASIO output: a close (a reset, a rate change, a stall).
     pub const RESET: &str = "reset";
-    /// ASIO output: frames the ring had no room for.
+    /// ASIO output: frames the ring had no room for. Pipeline: the times
+    /// its audio grid dropped its oldest samples over the 2 s cap.
     pub const OVERFLOW: &str = "overflow";
     /// ASIO output: a buffer switch over two periods late.
     pub const LATE_CALLBACK: &str = "late_callback";
+    /// ASIO output: a buffer switch under a quarter period after the one
+    /// before (a catch-up burst).
+    pub const FAST_CALLBACK: &str = "fast_callback";
+    /// ASIO output: the driver reported a CPU overload.
+    pub const OVERLOAD: &str = "overload";
     /// ASIO output: its host process went down (a state).
     pub const HOST_DOWN: &str = "host_down";
     /// Loop check: a returned block unlike the one sent (an event).
@@ -81,6 +91,12 @@ pub mod kinds {
     pub const BLIND: &str = "blind";
     /// Pipeline: grid slots nobody serviced between two scopes.
     pub const UNSERVICED: &str = "unserviced";
+    /// NDI input: a boundary offered as standby (silence) with no source:
+    /// no receiver, disconnected, no video yet.
+    pub const NO_SOURCE: &str = "no_source";
+    /// NDI input: a boundary offered as standby (silence), the source's
+    /// format unsupported.
+    pub const UNSUPPORTED: &str = "unsupported";
 }
 
 /// Whether one row of `kind` is ONE occurrence (an event or a state: its
@@ -171,14 +187,15 @@ pub struct Meter {
 /// One audio path as a tick reads it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Probe {
-    /// `program`, `pipeline:<playlist id>`, `out:<output id>`,
+    /// `program`, `input`, `pipeline:<playlist id>`, `out:<output id>`,
     /// `loop:<output id>`.
     pub path: String,
     pub detail: String,
     /// Grows while the path runs: lower than at the last tick = rebuilt.
     pub run: u64,
-    /// `false`: a fault now is by design (a pipeline off program), so it is
-    /// not recorded (the tick before and this one both off).
+    /// Its faults count now (a pipeline or the NDI input on program, an
+    /// output running). A tick records a step only when the path was gated
+    /// in at the tick before (`ledger.rs`).
     pub gated_in: bool,
     pub counters: Vec<Counter>,
     pub events: Vec<Event>,
