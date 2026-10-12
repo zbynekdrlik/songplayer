@@ -155,28 +155,46 @@ async fn a_paths_detail_is_its_newest_rows() {
 }
 
 #[tokio::test]
-async fn a_prune_deletes_only_the_rows_before_its_time() {
+/// #257 review: the prune keeps each path's EARLIEST start, so a path's
+/// first start bounds its clean time for good (a pruned deploy never
+/// resets it); every other row before its time goes.
+async fn a_prune_deletes_the_rows_before_its_time_but_each_paths_first_start() {
     let pool = pool().await;
     insert(
         &pool,
         &[
-            row(99, "out:a", kinds::START, Severity::Info, 1),
+            row(50, "out:a", kinds::START, Severity::Info, 1),
+            row(70, "loop:a", kinds::CHECKED, Severity::Meter, 60_000),
+            row(80, "out:a", kinds::START, Severity::Info, 1),
+            row(90, "out:a", kinds::UNDERRUN, Severity::Loss, 1),
+            row(60, "out:b", kinds::START, Severity::Info, 1),
             row(100, "out:a", kinds::UNDERRUN, Severity::Loss, 1),
-            row(101, "out:a", kinds::UNDERRUN, Severity::Loss, 1),
+            row(120, "out:a", kinds::START, Severity::Info, 1),
         ],
     )
     .await
     .unwrap();
-    assert_eq!(prune(&pool, 100).await.unwrap(), 1);
-    let left: Vec<i64> = sqlx::query_scalar("SELECT ts_ms FROM audio_faults ORDER BY ts_ms")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-    assert_eq!(left, [100, 101]);
+    assert_eq!(prune(&pool, 100).await.unwrap(), 3);
+    let left: Vec<(i64, String)> =
+        sqlx::query_as("SELECT ts_ms, path FROM audio_faults ORDER BY ts_ms")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let left: Vec<(i64, &str)> = left.iter().map(|(t, p)| (*t, p.as_str())).collect();
+    assert_eq!(
+        left,
+        [(50, "out:a"), (60, "out:b"), (100, "out:a"), (120, "out:a")]
+    );
+    assert_eq!(
+        prune(&pool, 100).await.unwrap(),
+        0,
+        "a second prune keeps them"
+    );
 }
 
-/// #257 lane 2: every path's newest loss and first start over the rows
-/// kept from `since` on — beyond any window; risks and meters never count.
+/// #257 lane 2: every path's newest loss from `since` on (the 90 days
+/// kept) and its first start ever (#257 review: the prune keeps it) —
+/// beyond any window; risks and meters never count.
 #[tokio::test]
 async fn clean_marks_take_each_paths_newest_loss_and_first_start() {
     let pool = pool().await;
@@ -217,7 +235,113 @@ async fn clean_marks_take_each_paths_newest_loss_and_first_start() {
     );
     assert_eq!(
         clean_marks(&pool, 61).await.unwrap()[0],
-        mark("out:a", Some(90), Some(80)),
-        "the first start kept from 61 on"
+        mark("out:a", Some(90), Some(60)),
+        "#257 review: a loss counts from `since` on, the first start ever"
+    );
+    assert_eq!(
+        clean_marks(&pool, 95).await.unwrap(),
+        vec![mark("out:a", None, Some(60)), mark("out:b", None, Some(65))],
+        "no loss since 95: the first starts still"
+    );
+}
+
+#[test]
+fn the_bucket_case_numbers_a_row_by_its_inner_edges() {
+    assert_eq!(
+        bucket_case(2),
+        "CASE WHEN ts_ms < ? THEN 0 WHEN ts_ms < ? THEN 1 ELSE 2 END"
+    );
+    assert_eq!(
+        bucket_case(59).matches("WHEN ts_ms < ? THEN").count(),
+        59,
+        "one edge per inner boundary of the timeline's 60 buckets"
+    );
+    assert!(bucket_case(59).ends_with(" ELSE 59 END"));
+}
+
+/// #257 review: the timeline counts EVERY row of the window (here 1001
+/// losses, far over the answer's 500 events), each in the bucket sp-core's
+/// `bucket_of` names — the query numbers them by sp-core's own edges.
+#[tokio::test]
+async fn bucket_counts_number_every_row_by_the_timelines_edges() {
+    use sp_core::audio_faults_timeline::{BUCKETS, bucket_of};
+    let pool = pool().await;
+    let mut rows: Vec<FaultRow> = (1_000..=2_000)
+        .map(|t| row(t, "out:a", kinds::UNDERRUN, Severity::Loss, 1))
+        .collect();
+    rows.push(row(999, "out:a", kinds::UNDERRUN, Severity::Loss, 1));
+    rows.push(row(2_001, "out:a", kinds::UNDERRUN, Severity::Loss, 1));
+    rows.push(row(1_500, "out:a", kinds::START, Severity::Info, 1));
+    rows.push(row(
+        1_500,
+        "loop:a",
+        kinds::CHECKED,
+        Severity::Meter,
+        60_000,
+    ));
+    rows.push(row(1_016, "out:a", kinds::LATE_CALLBACK, Severity::Risk, 1));
+    rows.push(row(1_017, "out:a", kinds::LATE_CALLBACK, Severity::Risk, 1));
+    rows.push(row(2_000, "out:b", kinds::LATE_CALLBACK, Severity::Risk, 1));
+    insert(&pool, &rows).await.unwrap();
+    let counts = bucket_counts(&pool, 1_000, 2_000).await.unwrap();
+    let mut expected = vec![0i64; BUCKETS];
+    for t in 1_000..=2_000 {
+        expected[bucket_of(t, 1_000, 2_000, BUCKETS).unwrap()] += 1;
+    }
+    let losses: Vec<(i64, i64)> = counts
+        .iter()
+        .filter(|c| c.path == "out:a" && c.severity == "loss")
+        .map(|c| (c.bucket, c.rows))
+        .collect();
+    assert_eq!(
+        losses,
+        expected
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (i as i64, *n))
+            .collect::<Vec<_>>(),
+        "every bucket, its rows by sp-core's edges; nothing outside the window"
+    );
+    assert_eq!((losses[0].1, losses[1].1, losses[59].1), (17, 17, 17));
+    let risks: Vec<(String, i64, i64)> = counts
+        .iter()
+        .filter(|c| c.severity == "risk")
+        .map(|c| (c.path.clone(), c.bucket, c.rows))
+        .collect();
+    assert_eq!(
+        risks,
+        [
+            ("out:a".to_string(), 0, 1),
+            ("out:a".to_string(), 1, 1),
+            ("out:b".to_string(), 59, 1)
+        ],
+        "1016 and 1017 split at the edge; a start and a meter are no count"
+    );
+    assert_eq!(counts.len(), BUCKETS + 3);
+}
+
+#[tokio::test]
+async fn window_starts_list_each_paths_starts_in_the_window() {
+    let pool = pool().await;
+    insert(
+        &pool,
+        &[
+            row(900, "out:a", kinds::START, Severity::Info, 1),
+            row(1_200, "out:b", kinds::START, Severity::Info, 1),
+            row(1_100, "out:a", kinds::START, Severity::Info, 1),
+            row(1_300, "out:a", kinds::UNDERRUN, Severity::Loss, 1),
+            row(2_000, "out:a", kinds::START, Severity::Info, 1),
+            row(2_100, "out:a", kinds::START, Severity::Info, 1),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        window_starts(&pool, 1_000, 2_000).await.unwrap(),
+        [
+            ("out:a".to_string(), 1_100),
+            ("out:a".to_string(), 2_000),
+            ("out:b".to_string(), 1_200)
+        ]
     );
 }

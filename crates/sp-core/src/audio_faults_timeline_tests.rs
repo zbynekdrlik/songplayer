@@ -2,27 +2,27 @@
 //! scale, the shared axis's ticks.
 
 use super::*;
-use crate::audio_faults::{FaultEvent, LocalTime};
+use crate::audio_faults::LocalTime;
 
 const NOW: i64 = 1_760_000_000_000; // 2025-10-09 08:53:20 UTC
 const HOUR: i64 = 3_600_000;
 const DAY: i64 = 86_400_000;
 
-fn event(ts_ms: i64, severity: &str) -> FaultEvent {
-    FaultEvent {
-        ts_ms,
-        kind: "underrun".to_string(),
-        severity: severity.to_string(),
-        amount: 1,
-    }
+/// A zone at a fixed offset (minutes east of UTC).
+fn fixed(minutes: i32) -> impl Fn(i64) -> i32 {
+    move |_| minutes
 }
 
-fn start(ts_ms: i64) -> FaultEvent {
-    FaultEvent {
-        ts_ms,
-        kind: "start".to_string(),
-        severity: "info".to_string(),
-        amount: 1,
+/// Europe/Bratislava in 2026: CEST (+120) from 29.3. 01:00 UTC until 25.10.
+/// 01:00 UTC, else CET (+60) — checked against the zone database.
+const SPRING: i64 = 1_774_746_000_000;
+const AUTUMN: i64 = 1_792_890_000_000;
+
+fn bratislava(utc: i64) -> i32 {
+    if (SPRING..AUTUMN).contains(&utc) {
+        120
+    } else {
+        60
     }
 }
 
@@ -78,23 +78,39 @@ fn an_instant_outside_the_window_or_an_empty_window_has_no_bucket() {
     assert_eq!(bucket_of(1_000, 1_000, 900, 60), None);
 }
 
+/// The server's bucket query numbers its rows by these edges: bucket i
+/// = [edge i, edge i + 1), the same split [`bucket_of`] makes.
 #[test]
-fn the_buckets_count_loss_and_risk_rows_and_nothing_else() {
-    let events = [
-        event(1_000, "loss"),
-        event(1_000, "risk"),
-        event(1_017, "risk"),
-        event(1_500, "info"),
-        event(999, "loss"),
-        event(2_000, "loss"),
-        event(2_000, "loss"),
-    ];
-    let got = buckets(&events, 1_000, 2_000, 60);
-    let mut want = vec![Bucket::default(); 60];
-    want[0] = b(1, 1);
-    want[1] = b(0, 1);
-    want[59] = b(2, 0);
-    assert_eq!(got, want);
+fn the_inner_edges_are_the_buckets_first_instants() {
+    let edges = bucket_edges(1_000, 2_000, 60);
+    assert_eq!(edges.len(), 59);
+    assert_eq!(
+        [edges[0], edges[1], edges[2], edges[58]],
+        [1_017, 1_034, 1_050, 1_984]
+    );
+    for (i, edge) in edges.iter().enumerate() {
+        assert_eq!(*edge, bucket_start(1_000, 2_000, 60, i + 1), "{i}");
+        assert_eq!(bucket_of(*edge, 1_000, 2_000, 60), Some(i + 1));
+        assert_eq!(bucket_of(*edge - 1, 1_000, 2_000, 60), Some(i));
+    }
+}
+
+#[test]
+fn a_paths_buckets_read_its_answer_and_pad_with_zeros() {
+    let got = buckets_of(&[1, 0, 2], &[0, 3]);
+    assert_eq!(got.len(), BUCKETS);
+    assert_eq!(&got[..3], &[b(1, 0), b(0, 3), b(2, 0)]);
+    assert!(got[3..].iter().all(|x| *x == Bucket::default()));
+    let mut long = vec![0; BUCKETS + 5];
+    long[BUCKETS - 1] = 7;
+    long[BUCKETS] = 9;
+    let got = buckets_of(&long, &[]);
+    assert_eq!(got.len(), BUCKETS);
+    assert_eq!(
+        got[BUCKETS - 1],
+        b(7, 0),
+        "never more than the timeline's buckets"
+    );
 }
 
 #[test]
@@ -185,7 +201,7 @@ fn ticks(first: i64, step: i64, count: i64, days: bool) -> Vec<Tick> {
 fn an_hours_ticks_fall_on_whole_local_10_minutes() {
     // 09:53:20 – 10:53:20 local (UTC+2): 10:00, 10:10 … 10:50.
     assert_eq!(
-        axis_ticks(NOW - HOUR, NOW, 120),
+        axis_ticks(NOW - HOUR, NOW, &fixed(120)),
         ticks(NOW - 3_200_000, 600_000, 6, false)
     );
 }
@@ -194,7 +210,7 @@ fn an_hours_ticks_fall_on_whole_local_10_minutes() {
 fn a_days_ticks_fall_on_whole_local_3_hours() {
     // 8.10. 10:53:20 – 9.10. 10:53:20 local (UTC+2): 12:00, 15:00 … 9:00.
     assert_eq!(
-        axis_ticks(NOW - DAY, NOW, 120),
+        axis_ticks(NOW - DAY, NOW, &fixed(120)),
         ticks(NOW - 82_400_000, 10_800_000, 8, false)
     );
 }
@@ -203,7 +219,7 @@ fn a_days_ticks_fall_on_whole_local_3_hours() {
 fn a_weeks_ticks_fall_on_local_midnights_labelled_by_the_day() {
     // UTC+1: 3.10. 00:00 … 9.10. 00:00 local = 23:00 UTC the day before.
     assert_eq!(
-        axis_ticks(NOW - 7 * DAY, NOW, 60),
+        axis_ticks(NOW - 7 * DAY, NOW, &fixed(60)),
         ticks(NOW - 554_000_000, DAY, 7, true)
     );
 }
@@ -212,7 +228,7 @@ fn a_weeks_ticks_fall_on_local_midnights_labelled_by_the_day() {
 fn a_months_ticks_fall_on_every_fifth_midnight() {
     // UTC: 14.9., 19.9., 24.9., 29.9., 4.10., 9.10.
     assert_eq!(
-        axis_ticks(NOW - 30 * DAY, NOW, 0),
+        axis_ticks(NOW - 30 * DAY, NOW, &fixed(0)),
         ticks(NOW - 2_192_000_000, 5 * DAY, 6, true)
     );
 }
@@ -221,7 +237,7 @@ fn a_months_ticks_fall_on_every_fifth_midnight() {
 fn a_window_on_whole_ticks_shows_both_its_ends() {
     let from = NOW - 200_000; // 08:50:00 UTC
     assert_eq!(
-        axis_ticks(from, from + HOUR, 0),
+        axis_ticks(from, from + HOUR, &fixed(0)),
         ticks(from, 600_000, 7, false)
     );
 }
@@ -239,15 +255,8 @@ fn an_instant_sits_at_its_share_of_the_axis() {
 /// timeline, never a bar; only the starts inside the window are marked.
 #[test]
 fn every_start_inside_the_window_is_a_mark_at_its_place() {
-    let events = [
-        start(999),
-        start(1_000),
-        event(1_250, "loss"),
-        start(1_500),
-        start(2_000),
-        start(2_001),
-    ];
-    let marks = start_marks(&events, 1_000, 2_000);
+    let starts = [999, 1_000, 1_500, 2_000, 2_001];
+    let marks = start_marks(&starts, 1_000, 2_000);
     assert_eq!(
         marks,
         vec![
@@ -265,15 +274,6 @@ fn every_start_inside_the_window_is_a_mark_at_its_place() {
             },
         ]
     );
-    assert_eq!(
-        buckets(&events, 1_000, 2_000, 60),
-        {
-            let mut b = vec![Bucket::default(); 60];
-            b[15] = Bucket { loss: 1, risk: 0 };
-            b
-        },
-        "a start is no bar"
-    );
 }
 
 #[test]
@@ -286,4 +286,109 @@ fn a_start_marks_tooltip_names_its_local_time() {
         second: 7,
     };
     assert_eq!(start_tip(at), "spustenie 12.10. 14:05:07");
+}
+
+fn day_ticks(first: i64, offsets: &[i64]) -> Vec<Tick> {
+    offsets
+        .iter()
+        .map(|o| Tick {
+            at_ms: first + o,
+            days: true,
+        })
+        .collect()
+}
+
+/// #257 review: a day tick is snapped with the zone's offset AT that tick,
+/// so every one is a local midnight across the spring change (29.3.).
+#[test]
+fn day_ticks_stay_on_local_midnights_across_the_spring_change() {
+    let from = 1_774_526_400_000; // 26.3. 12:00 UTC
+    assert_eq!(
+        axis_ticks(from, from + 7 * DAY, &bratislava),
+        day_ticks(
+            from,
+            &[
+                39_600_000,
+                126_000_000,
+                212_400_000,
+                295_200_000,
+                381_600_000,
+                468_000_000,
+                554_400_000
+            ]
+        ),
+        "27.3. … 2.4. 00:00 local: 23:00 UTC before the change, 22:00 UTC after"
+    );
+}
+
+#[test]
+fn day_ticks_stay_on_local_midnights_across_the_autumn_change() {
+    let from = 1_792_584_000_000; // 21.10. 12:00 UTC
+    assert_eq!(
+        axis_ticks(from, from + 7 * DAY, &bratislava),
+        day_ticks(
+            from,
+            &[
+                36_000_000,
+                122_400_000,
+                208_800_000,
+                295_200_000,
+                385_200_000,
+                471_600_000,
+                558_000_000
+            ]
+        ),
+        "22.10. … 28.10. 00:00 local: 22:00 UTC before the change, 23:00 UTC after"
+    );
+}
+
+/// Hour ticks across the changes: the skipped local hour (2:00 in spring)
+/// gives no tick of its own, the repeated one (2:00 in autumn) one tick.
+#[test]
+fn hour_ticks_across_the_changes_name_each_local_hour_once() {
+    let spring = SPRING - 4 * HOUR - 1_800_000;
+    let hours: Vec<i64> = axis_ticks(spring, SPRING + 6 * HOUR, &bratislava)
+        .iter()
+        .map(|t| t.at_ms - spring)
+        .collect();
+    assert_eq!(
+        hours,
+        [
+            1_800_000, 5_400_000, 9_000_000, 12_600_000, 16_200_000, 19_800_000, 23_400_000,
+            27_000_000, 30_600_000, 34_200_000, 37_800_000
+        ],
+        "22:00 … 1:00, then 3:00 … 9:00 local"
+    );
+    let autumn = AUTUMN - 4 * HOUR - 1_800_000;
+    let hours: Vec<i64> = axis_ticks(autumn, AUTUMN + 6 * HOUR, &bratislava)
+        .iter()
+        .map(|t| t.at_ms - autumn)
+        .collect();
+    assert_eq!(
+        hours,
+        [
+            1_800_000, 5_400_000, 9_000_000, 12_600_000, 19_800_000, 23_400_000, 27_000_000,
+            30_600_000, 34_200_000, 37_800_000
+        ],
+        "23:00 … 2:00 summer time, then 3:00 … 8:00 winter time"
+    );
+}
+
+/// 10-minute ticks across the spring change: 2:00 … 2:50 local do not
+/// exist (they read as 1:00 … 1:50 again), so 1:50 is followed by 3:00
+/// local, 10 minutes later — never a tick back in time.
+#[test]
+fn ten_minute_ticks_across_the_spring_change_only_move_forward() {
+    let from = SPRING - 1_800_000; // 1:30 local (CET)
+    let at: Vec<i64> = axis_ticks(from, SPRING + 1_800_000, &bratislava)
+        .iter()
+        .map(|t| t.at_ms - from)
+        .collect();
+    assert_eq!(
+        at,
+        [
+            0, 600_000, 1_200_000, 1_800_000, 2_400_000, 3_000_000, 3_600_000
+        ],
+        "1:30, 1:40, 1:50 CET, then 3:00 … 3:30 CEST"
+    );
 }

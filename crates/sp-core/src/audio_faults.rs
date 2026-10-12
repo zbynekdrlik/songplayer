@@ -94,9 +94,22 @@ pub struct PathFaults {
     /// Faults per kind: a counter's steps summed, one per event or state.
     #[serde(default)]
     pub counts: BTreeMap<String, i64>,
-    /// The rows that are no meter, oldest first.
+    /// The rows that are no meter, oldest first (capped: the newest
+    /// rows of the whole answer, `truncated`); the event list only.
     #[serde(default)]
     pub events: Vec<FaultEvent>,
+    /// The window cut into `audio_faults_timeline::BUCKETS` buckets (edges
+    /// `bucket_edges`): each bucket's loss rows, ALL of them — the
+    /// timeline's bars never come from the capped `events`.
+    #[serde(default)]
+    pub loss_buckets: Vec<u32>,
+    /// Each bucket's risk rows, the same way.
+    #[serde(default)]
+    pub risk_buckets: Vec<u32>,
+    /// The path's (re)starts in the window (UTC ms, oldest first; the
+    /// newest the server keeps per path): the timeline's marks.
+    #[serde(default)]
+    pub starts: Vec<i64>,
     #[serde(rename = "loop", default, skip_serializing_if = "Option::is_none")]
     pub loop_check: Option<LoopSeconds>,
 }
@@ -373,8 +386,10 @@ pub enum Unit {
     Nothing,
 }
 
-/// The unit of `kind`'s amount.
-pub fn unit_of(kind: &str) -> Unit {
+/// The unit of `kind`'s amount on `path`: an ASIO output's `overflow`
+/// counts frames, a pipeline's counts the times its audio grid dropped
+/// its oldest samples.
+pub fn unit_of(_path: &str, kind: &str) -> Unit {
     match kind {
         "mismatch" | "dropout" | "slip" | "overflow" | "limited" => Unit::Frames,
         "late_packet" => Unit::Micros,
@@ -388,11 +403,11 @@ fn ms_sk(ms: f64) -> String {
     format!("{ms:.1} ms").replace('.', ",")
 }
 
-/// An event's amount with its unit: `×2` (a count of 1 says nothing),
-/// `12,5 ms`, frames as ms at `rate_hz` (a slip keeps its sign), else
-/// `480 vzoriek`; `None` for a state.
-pub fn amount_sk(kind: &str, amount: i64, rate_hz: Option<u32>) -> Option<String> {
-    match unit_of(kind) {
+/// An event's amount on `path` with its unit: `×2` (a count of 1 says
+/// nothing), `12,5 ms`, frames as ms at `rate_hz` (a slip keeps its sign),
+/// else `480 vzoriek`; `None` for a state.
+pub fn amount_sk(path: &str, kind: &str, amount: i64, rate_hz: Option<u32>) -> Option<String> {
+    match unit_of(path, kind) {
         Unit::Nothing => None,
         Unit::Count => (amount != 1).then(|| format!("×{amount}")),
         Unit::Micros => Some(ms_sk(amount as f64 / 1000.0)),

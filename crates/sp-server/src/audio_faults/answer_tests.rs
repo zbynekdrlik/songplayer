@@ -112,6 +112,9 @@ fn a_live_path_the_ledger_has_never_seen_is_clean_since_now() {
                 risks: 0,
                 counts: BTreeMap::new(),
                 events: Vec::new(),
+                loss_buckets: Vec::new(),
+                risk_buckets: Vec::new(),
+                starts: Vec::new(),
                 loop_check: None,
             }],
         }
@@ -401,4 +404,93 @@ fn the_answer_serializes_with_its_loop_block_named_loop() {
     );
     assert_eq!(json["kept_from_ms"], NOW - KEPT);
     assert_eq!(json["clean_since_ms"], NOW);
+}
+
+/// #257 review: a first start older than the 90 days kept reads the
+/// ledger's edge — "more than 90 d" — for the path and the chain, never a
+/// time the pruned loss rows can no longer disprove.
+#[test]
+fn a_first_start_older_than_the_ledger_keeps_reads_its_edge() {
+    let totals = [total("out:a", "start", "info", 1, 1, NOW - 2_000)];
+    let marks = [
+        mark("out:a", None, Some(NOW - 200 * DAY)),
+        mark("out:b", None, Some(NOW - 100 * DAY)),
+    ];
+    let live = [named("out:b", "lv1")];
+    let answer = build_answer(NOW, 24, &totals, Vec::new(), &[], &live, &marks);
+    assert_eq!(answer.paths[0].clean_since_ms, NOW - KEPT, "out:a");
+    assert_eq!(answer.paths[1].clean_since_ms, NOW - KEPT, "out:b");
+    assert_eq!(answer.clean_since_ms, NOW - KEPT, "the chain");
+    let recent = [mark("out:a", None, Some(NOW - 10 * DAY))];
+    let answer = build_answer(NOW, 24, &totals, Vec::new(), &[], &live, &recent);
+    assert_eq!(
+        answer.paths[0].clean_since_ms,
+        NOW - 10 * DAY,
+        "inside the 90 days"
+    );
+    assert_eq!(answer.clean_since_ms, NOW - 10 * DAY);
+}
+
+fn count(path: &str, severity: &str, bucket: i64, rows: i64) -> BucketCount {
+    BucketCount {
+        path: path.to_string(),
+        severity: severity.to_string(),
+        bucket,
+        rows,
+    }
+}
+
+/// #257 review: each path's bars and marks come from the counts of every
+/// row and the starts in the window — never from the capped event list.
+#[test]
+fn the_timeline_carries_every_rows_bucket_and_the_windows_starts() {
+    let live = [
+        named("out:a", "FOH"),
+        named("out:b", "lv1"),
+        named("program", "SP"),
+    ];
+    let mut answer = build_answer(NOW, 24, &[], Vec::new(), &[], &live, &[]);
+    let counts = [
+        count("out:a", "loss", 0, 2),
+        count("out:a", "risk", 0, 1),
+        count("out:a", "loss", 59, 600),
+        count("out:a", "loss", 60, 9),
+        count("out:a", "loss", -1, 9),
+        count("out:a", "info", 3, 9),
+        count("out:b", "risk", 7, 4),
+        count("out:gone", "loss", 5, 1),
+    ];
+    let mut starts: Vec<(String, i64)> = (0..(MAX_STARTS as i64 + 5))
+        .map(|i| ("out:a".to_string(), NOW - 1_000 + i))
+        .collect();
+    starts.push(("out:b".to_string(), NOW - 50));
+    starts.push(("out:b".to_string(), NOW - 70));
+    add_timeline(&mut answer, &counts, &starts);
+    let a = &answer.paths[0];
+    assert_eq!(a.path, "out:a");
+    assert_eq!(a.loss_buckets.len(), 60);
+    assert_eq!((a.loss_buckets[0], a.loss_buckets[59]), (2, 600));
+    assert_eq!(
+        a.loss_buckets.iter().sum::<u32>(),
+        602,
+        "no bucket outside 0..60"
+    );
+    assert_eq!(
+        (a.risk_buckets[0], a.risk_buckets.iter().sum::<u32>()),
+        (1, 1)
+    );
+    assert_eq!(a.starts.len(), MAX_STARTS, "the newest MAX_STARTS");
+    assert_eq!(
+        (a.starts[0], a.starts[MAX_STARTS - 1]),
+        (NOW - 1_000 + 5, NOW - 1_000 + MAX_STARTS as i64 + 4)
+    );
+    let b = &answer.paths[1];
+    assert_eq!(
+        (b.risk_buckets[7], b.loss_buckets.iter().sum::<u32>()),
+        (4, 0)
+    );
+    assert_eq!(b.starts, [NOW - 70, NOW - 50], "oldest first");
+    let program = &answer.paths[2];
+    assert_eq!(program.loss_buckets, vec![0; 60], "no count: zeros");
+    assert!(program.starts.is_empty());
 }

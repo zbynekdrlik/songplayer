@@ -14,7 +14,7 @@ use tracing::warn;
 
 use crate::AppState;
 use crate::audio_faults::answer::{
-    FaultsAnswer, MAX_EVENTS, build_answer, kept_from, parse_hours, window_start,
+    FaultsAnswer, MAX_EVENTS, add_timeline, build_answer, kept_from, parse_hours, window_start,
 };
 use crate::audio_faults::{probe, store, utc_now_ms};
 
@@ -33,10 +33,12 @@ async fn answer(state: &AppState, hours: u32, now_ms: i64) -> Result<FaultsAnswe
     let newest = store::newest_events(&state.pool, from_ms, limit).await?;
     let details = store::details(&state.pool, from_ms).await?;
     let marks = store::clean_marks(&state.pool, kept_from(now_ms)).await?;
+    let buckets = store::bucket_counts(&state.pool, from_ms, now_ms).await?;
+    let starts = store::window_starts(&state.pool, from_ms, now_ms).await?;
     let live = probe::live_paths(&state.program_bus, &state.ndi_health_registry);
-    Ok(build_answer(
-        now_ms, hours, &totals, newest, &details, &live, &marks,
-    ))
+    let mut answer = build_answer(now_ms, hours, &totals, newest, &details, &live, &marks);
+    add_timeline(&mut answer, &buckets, &starts);
+    Ok(answer)
 }
 
 /// `GET /api/v1/audio/faults?hours=N`.

@@ -26,6 +26,9 @@ fn path(name: &str) -> PathFaults {
         risks: 0,
         counts: BTreeMap::new(),
         events: Vec::new(),
+        loss_buckets: Vec::new(),
+        risk_buckets: Vec::new(),
+        starts: Vec::new(),
         loop_check: None,
     }
 }
@@ -402,47 +405,53 @@ fn every_kind_reads_in_slovak_an_unknown_one_as_sent() {
     }
 }
 
+/// #257 review: `overflow` counts frames on an ASIO output and the times
+/// its audio grid dropped its oldest samples on a pipeline.
 #[test]
-fn each_kind_measures_its_amount_in_its_unit() {
+fn each_kind_measures_its_amount_in_its_unit_on_its_path() {
     let table = [
-        ("mismatch", Unit::Frames),
-        ("dropout", Unit::Frames),
-        ("slip", Unit::Frames),
-        ("overflow", Unit::Frames),
-        ("limited", Unit::Frames),
-        ("late_packet", Unit::Micros),
-        ("host_down", Unit::Nothing),
-        ("no_return", Unit::Nothing),
-        ("start", Unit::Nothing),
-        ("underrun", Unit::Count),
-        ("filled", Unit::Count),
-        ("brand_new_kind", Unit::Count),
+        ("loop:out-2", "mismatch", Unit::Frames),
+        ("loop:out-2", "dropout", Unit::Frames),
+        ("loop:out-2", "slip", Unit::Frames),
+        ("out:out-2", "overflow", Unit::Frames),
+        ("pipeline:3", "overflow", Unit::Count),
+        ("pipeline:x", "overflow", Unit::Count),
+        ("pipeline:3", "underrun", Unit::Count),
+        ("program", "limited", Unit::Frames),
+        ("out:out-1", "late_packet", Unit::Micros),
+        ("out:out-2", "host_down", Unit::Nothing),
+        ("loop:out-2", "no_return", Unit::Nothing),
+        ("program", "start", Unit::Nothing),
+        ("out:out-2", "underrun", Unit::Count),
+        ("program", "filled", Unit::Count),
+        ("program", "brand_new_kind", Unit::Count),
     ];
-    for (kind, unit) in table {
-        assert_eq!(unit_of(kind), unit, "{kind}");
+    for (path, kind, unit) in table {
+        assert_eq!(unit_of(path, kind), unit, "{path} {kind}");
     }
 }
 
 #[test]
 fn an_amount_reads_with_its_unit() {
     let table = [
-        ("underrun", 2, None, Some("×2")),
-        ("underrun", 1, None, None),
-        ("late_packet", 12_500, None, Some("12,5 ms")),
-        ("dropout", 480, Some(48_000), Some("10,0 ms")),
-        ("slip", -96, Some(96_000), Some("-1,0 ms")),
-        ("limited", 72, Some(48_000), Some("1,5 ms")),
-        ("overflow", 4096, None, Some("4096 vzoriek")),
-        ("overflow", 4096, Some(0), Some("4096 vzoriek")),
-        ("mismatch", 1, None, Some("1 vzorka")),
-        ("slip", -3, None, Some("-3 vzorky")),
-        ("host_down", 1, Some(48_000), None),
+        ("out:a", "underrun", 2, None, Some("×2")),
+        ("out:a", "underrun", 1, None, None),
+        ("out:a", "late_packet", 12_500, None, Some("12,5 ms")),
+        ("loop:a", "dropout", 480, Some(48_000), Some("10,0 ms")),
+        ("loop:a", "slip", -96, Some(96_000), Some("-1,0 ms")),
+        ("program", "limited", 72, Some(48_000), Some("1,5 ms")),
+        ("out:a", "overflow", 4096, None, Some("4096 vzoriek")),
+        ("out:a", "overflow", 4096, Some(0), Some("4096 vzoriek")),
+        ("pipeline:3", "overflow", 3, Some(48_000), Some("×3")),
+        ("loop:a", "mismatch", 1, None, Some("1 vzorka")),
+        ("loop:a", "slip", -3, None, Some("-3 vzorky")),
+        ("out:a", "host_down", 1, Some(48_000), None),
     ];
-    for (kind, amount, rate, text) in table {
+    for (path, kind, amount, rate, text) in table {
         assert_eq!(
-            amount_sk(kind, amount, rate).as_deref(),
+            amount_sk(path, kind, amount, rate).as_deref(),
             text,
-            "{kind} {amount} {rate:?}"
+            "{path} {kind} {amount} {rate:?}"
         );
     }
 }

@@ -24,8 +24,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use sp_core::audio_faults::{
-    self as faults, FaultEvent, FaultsAnswer, Fetch, LocalTime, PathFaults, Polls, SEGMENT_HOURS,
-    WINDOW_HOURS,
+    self as faults, FaultsAnswer, Fetch, LocalTime, PathFaults, Polls, SEGMENT_HOURS, WINDOW_HOURS,
 };
 use sp_core::audio_faults_timeline::{
     self as timeline, BAR_HEIGHT, BAR_WIDTH, BUCKETS, Bucket, SLOT,
@@ -250,7 +249,7 @@ fn event_rows(
         .map(|(p, e)| {
             let rate = faults::rate_of(&p.path, &rate_by_output);
             let name = faults::name_of(p, names);
-            let amount = faults::amount_sk(&e.kind, e.amount, rate).unwrap_or_default();
+            let amount = faults::amount_sk(&p.path, &e.kind, e.amount, rate).unwrap_or_default();
             let base = format!(
                 "{}|{}|{}|{}|{}|{}",
                 e.ts_ms, p.path, e.kind, e.severity, amount, name
@@ -273,9 +272,9 @@ fn event_rows(
 
 /// A path's timeline: one bar per bucket that holds a fault, to scale,
 /// and a dashed mark at each (re)start (a planned restart is no fault).
-fn timeline_svg(a: &FaultsAnswer, events: &[FaultEvent], buckets: &[Bucket], max: u32) -> AnyView {
+fn timeline_svg(a: &FaultsAnswer, starts: &[i64], buckets: &[Bucket], max: u32) -> AnyView {
     let width = BUCKETS as u32 * SLOT;
-    let marks = timeline::start_marks(events, a.from_ms, a.now_ms)
+    let marks = timeline::start_marks(starts, a.from_ms, a.now_ms)
         .into_iter()
         .map(|m| {
             let x = m.pct * f64::from(width) / 100.0;
@@ -356,7 +355,13 @@ fn path_row(
     let risks = faults::risks_sk(p.risks);
     let clean = faults::clean_sk(p.clean_since_ms, a, local(p.clean_since_ms));
     let loop_line = p.loop_check.as_ref().map(faults::loop_sk);
-    let svg = timeline_svg(a, &p.events, buckets, max);
+    let starts: Vec<i64> = p
+        .events
+        .iter()
+        .filter(|e| e.kind == faults::START)
+        .map(|e| e.ts_ms)
+        .collect();
+    let svg = timeline_svg(a, &starts, buckets, max);
     view! {
         <div class="audio-path-row" data-testid="audio-path-row" data-path=p.path.clone()>
             <div class="audio-path-info">
@@ -396,7 +401,20 @@ fn path_rows(a: &FaultsAnswer, names: &dyn Fn(i64) -> Option<String>) -> AnyView
     let paths = faults::ordered_paths(a);
     let buckets: Vec<Vec<Bucket>> = paths
         .iter()
-        .map(|p| timeline::buckets(&p.events, a.from_ms, a.now_ms, BUCKETS))
+        .map(|p| {
+            let mut loss = vec![0u32; BUCKETS];
+            let mut risk = vec![0u32; BUCKETS];
+            for e in &p.events {
+                if let Some(i) = timeline::bucket_of(e.ts_ms, a.from_ms, a.now_ms, BUCKETS) {
+                    if e.severity == faults::LOSS {
+                        loss[i] += 1;
+                    } else if e.severity == faults::RISK {
+                        risk[i] += 1;
+                    }
+                }
+            }
+            timeline::buckets_of(&loss, &risk)
+        })
         .collect();
     let max = timeline::shared_max(&buckets);
     paths
@@ -409,7 +427,7 @@ fn path_rows(a: &FaultsAnswer, names: &dyn Fn(i64) -> Option<String>) -> AnyView
 
 /// The shared time axis under the rows, its ticks on whole local times.
 fn axis(a: &FaultsAnswer) -> AnyView {
-    let ticks = timeline::axis_ticks(a.from_ms, a.now_ms, offset_east(a.now_ms))
+    let ticks = timeline::axis_ticks(a.from_ms, a.now_ms, &offset_east)
         .into_iter()
         .map(|t| {
             let at = local(t.at_ms);

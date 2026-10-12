@@ -342,6 +342,38 @@ test("a chain clean across a restart reads since its last loss, never since the 
   await expect(segment).toHaveText("Zvuk: bez chyby 3 d 4 h");
 });
 
+test("a loss older than the newest 500 events keeps its bar; every risk row is drawn", async ({
+  page,
+}) => {
+  // #257 review: 600 FOH risks in five clusters (1 / 3 / 5 / 7 / 9 h ago)
+  // and a program loss 20 h ago. The answer lists only its newest 500
+  // events, so the loss is not in the list: the bars come from the
+  // answer's bucket counts of EVERY row, the marks from its starts.
+  await scenario(page, "flood");
+  await page.goto("/");
+  const segment = page.getByTestId("health-audio");
+  await expect(segment).toHaveAttribute("data-level", "loss", { timeout: 15000 });
+  await expect(segment).toHaveText("Zvuk: 1 chyba za 24 h · posledná pred 20 h · Program");
+
+  const panel = await openPanel(page);
+  await expect(panel.getByTestId("audio-faults-truncated")).toBeVisible();
+  // 500 events: 6 starts (no line of the list) and 494 risks.
+  await expect(panel.getByTestId("audio-fault-event")).toHaveCount(494);
+  await expect(panel.locator('[data-testid="audio-fault-event"][data-path="program"]')).toHaveCount(0);
+  const programBars = row(panel, "program").getByTestId("audio-bar");
+  await expect(programBars).toHaveCount(1);
+  await expect(programBars).toHaveAttribute("data-loss", "1");
+  await expect(row(panel, "program").getByTestId("audio-path-losses")).toHaveText("1 chyba");
+  const fohBars = row(panel, "out:out-1").getByTestId("audio-bar");
+  await expect(fohBars).toHaveCount(5);
+  for (const bar of await fohBars.all()) {
+    await expect(bar).toHaveAttribute("data-risk", "120");
+  }
+  await expect(row(panel, "out:out-1").getByTestId("audio-path-risks")).toHaveText("600 rizík");
+  // The deploy 2 h 14 min ago is a mark on every row.
+  await expect(panel.getByTestId("audio-start-mark")).toHaveCount(6);
+});
+
 test("on a phone the open panel never makes the page scroll sideways", async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 844 });
   await scenario(page, "recent");

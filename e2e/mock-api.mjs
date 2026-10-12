@@ -861,8 +861,34 @@ function audioFaultsFixture(now, hours) {
       },
       clean("pipeline:1", "SP-fast"),
       clean("program", "SP-program"),
-    ],
+    ].map((path) => ({ ...path, ...audioTimeline(path.events, now - hours * 3_600_000, now) })),
   };
+}
+
+// #257 review: the timeline's 60 buckets, as sp-core's
+// `audio_faults_timeline`: bucket i = [from + ceil(i * span / 60), …), an
+// instant's bucket floor((t - from) * 60 / span), `to` in the last.
+const AUDIO_BUCKETS = 60;
+function audioBucketOf(t, from, to) {
+  if (t < from || t > to || to <= from) return null;
+  return Math.min(Math.floor(((t - from) * AUDIO_BUCKETS) / (to - from)), AUDIO_BUCKETS - 1);
+}
+// A path's timeline as the server sends it: loss and risk rows per bucket
+// (every row of the window, never the capped event list) and its starts
+// in the window (the newest 100, oldest first).
+function audioTimeline(rows, from, to) {
+  const loss_buckets = new Array(AUDIO_BUCKETS).fill(0);
+  const risk_buckets = new Array(AUDIO_BUCKETS).fill(0);
+  const starts = [];
+  for (const r of rows) {
+    const bucket = audioBucketOf(r.ts_ms, from, to);
+    if (bucket === null) continue;
+    if (r.severity === "loss") loss_buckets[bucket] += 1;
+    else if (r.severity === "risk") risk_buckets[bucket] += 1;
+    else if (r.severity === "info") starts.push(r.ts_ms);
+  }
+  starts.sort((x, y) => x - y);
+  return { loss_buckets, risk_buckets, starts: starts.slice(-100) };
 }
 
 app.get("/api/v1/audio/faults", (req, res) => {
@@ -890,7 +916,11 @@ app.get("/api/v1/audio/faults", (req, res) => {
 // answer above, the default), "clean", "risk", "recent" (a loss 3 min ago
 // on SoundGrid, two older losses, two risks), "old" (one loss 3 h ago),
 // "restart" (every path first started 10 d ago, the program lost samples
-// 3 d 4 h ago, a deploy restarted every path 2 h 14 min ago);
+// 3 d 4 h ago, a deploy restarted every path 2 h 14 min ago), "flood" (600
+// FOH risks in five clusters 1 / 3 / 5 / 7 / 9 h ago and a program loss
+// 20 h ago: more than the answer's 500 events, so the loss is only on the
+// timeline). `fail: true` answers every read 500 (the dashboard keeps its
+// last answer, then reads "Zvuk: nedostupné");
 // `POST /__mock/audio-faults-reset` = "fixture", no delay. `delay_ms` holds
 // every answer back (a spec proves the dashboard never has two requests in
 // flight). A scenario is ledger rows,
@@ -944,6 +974,20 @@ function audioScenarioRows(name) {
         ["program", "filled", "loss", 2, (3 * 24 + 4) * MOCK_HOUR + 30_000],
         ...base,
       ];
+    case "flood":
+      return [
+        ...base,
+        ...[1, 3, 5, 7, 9].flatMap((h) =>
+          Array.from({ length: 120 }, (_, i) => [
+            "out:out-1",
+            "late_packet",
+            "risk",
+            12_500,
+            h * MOCK_HOUR + 30_000 + i * 1_000,
+          ]),
+        ),
+        ["program", "filled", "loss", 1, 20 * MOCK_HOUR + 30_000],
+      ];
     default:
       return null;
   }
@@ -952,20 +996,21 @@ function audioScenarioRows(name) {
 // risk, its loss and risk rows, its counts per kind, its rows that are no
 // meter (oldest first), a loop check's meters; paths in the server's
 // (string) order; `worst` = the latest loss, the later path on a tie.
-// `clean_since_ms` looks beyond the window over the 90 days kept: a path's
-// newest loss, else its FIRST start (a restart is no fault), else the
-// ledger's oldest instant when the window has rows of it, else now; the
-// answer's own = the newest loss of any path kept, else the first start.
+// `clean_since_ms` looks beyond the window: a path's newest loss over the
+// 90 days kept, else its FIRST start ever (a restart is no fault; the prune
+// keeps it), no older than the 90 days, else the ledger's oldest instant
+// when the window has rows of it, else now; the answer's own = the newest
+// loss of any path kept, else the first start. At most 500 events in the
+// whole answer, the newest (`truncated`); the timeline holds every row.
 function audioAnswerFromRows(rows, now, hours) {
   const from = now - hours * MOCK_HOUR;
   const kept = now - AUDIO_KEPT_MS;
   const marks = new Map();
   for (const [path, kind, severity, , ago] of rows) {
     const ts = now - ago;
-    if (ts < kept) continue;
     const m = marks.get(path) ?? { loss: null, start: null };
-    if (severity === "loss") m.loss = Math.max(m.loss ?? ts, ts);
-    if (kind === "start") m.start = Math.min(m.start ?? ts, ts);
+    if (severity === "loss" && ts >= kept) m.loss = Math.max(m.loss ?? ts, ts);
+    if (kind === "start") m.start = Math.max(Math.min(m.start ?? ts, ts), kept);
     marks.set(path, m);
   }
   const paths = new Map();
@@ -982,6 +1027,7 @@ function audioAnswerFromRows(rows, now, hours) {
         risks: 0,
         counts: {},
         events: [],
+        rows: [],
         checked: 0,
         blind: 0,
       });
@@ -1012,9 +1058,14 @@ function audioAnswerFromRows(rows, now, hours) {
       a.blind += r.amount;
     }
     if (r.severity !== "meter") {
-      a.events.push({ ts_ms: r.ts_ms, kind: r.kind, severity: r.severity, amount: r.amount });
+      a.rows.push({ ts_ms: r.ts_ms, kind: r.kind, severity: r.severity, amount: r.amount });
     }
   }
+  const listed = [...paths.values()]
+    .flatMap((a) => a.rows.map((e) => ({ a, e })))
+    .sort((x, y) => y.e.ts_ms - x.e.ts_ms);
+  const truncated = listed.length > 500;
+  for (const { a, e } of listed.slice(0, 500).reverse()) a.events.push(e);
   const anySeen = [...paths.values()].some((a) => a.seen);
   const newer = (x, y) => (x === null ? y : y === null ? x : Math.max(x, y));
   const out = [...paths.values()]
@@ -1033,6 +1084,7 @@ function audioAnswerFromRows(rows, now, hours) {
       risks: a.risks,
       counts: a.counts,
       events: a.events,
+      ...audioTimeline(a.rows, from, now),
       ...(a.path.startsWith("loop:") ? { loop: { checked_s: a.checked / 1000, blind_s: a.blind / 1000 } } : {}),
     }));
   let worst = null;
@@ -1055,7 +1107,7 @@ function audioAnswerFromRows(rows, now, hours) {
     kept_from_ms: kept,
     clean_since_ms,
     worst,
-    truncated: false,
+    truncated,
     paths: out,
   };
 }

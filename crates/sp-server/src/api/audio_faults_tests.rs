@@ -215,6 +215,66 @@ async fn clean_since_looks_beyond_the_window_and_across_restarts() {
     );
 }
 
+/// #257 review: a window full of risks (600 rows, over the answer's 500
+/// events) still shows an old loss on its timeline: the bars come from
+/// every row, the events stay the capped list.
+#[tokio::test]
+async fn an_old_loss_beyond_the_newest_500_events_keeps_its_bar() {
+    use sp_core::audio_faults_timeline::{BUCKETS, bucket_of};
+    let state = test_state().await;
+    let now = utc_now_ms();
+    let mut rows: Vec<FaultRow> = (0..600)
+        .map(|i| {
+            fault(
+                now - 1_000 - i * 1_000,
+                "out:a",
+                kinds::LATE_CALLBACK,
+                Severity::Risk,
+                1,
+            )
+        })
+        .collect();
+    let old = now - 20 * 3_600_000;
+    rows.push(fault(old, "program", kinds::FILLED, Severity::Loss, 1));
+    rows.push(fault(
+        now - 2 * 3_600_000,
+        "out:a",
+        kinds::START,
+        Severity::Info,
+        1,
+    ));
+    store::insert(&state.pool, &rows).await.unwrap();
+    let answer = json(state, "/api/v1/audio/faults").await;
+    assert_eq!(answer["truncated"], true);
+    let program = path(&answer, "program");
+    assert_eq!(
+        program["events"],
+        serde_json::json!([]),
+        "the loss is past the newest 500 events"
+    );
+    let from = answer["from_ms"].as_i64().unwrap();
+    let to = answer["now_ms"].as_i64().unwrap();
+    let bucket = bucket_of(old, from, to, BUCKETS).unwrap();
+    let losses: Vec<i64> = program["loss_buckets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_i64().unwrap())
+        .collect();
+    assert_eq!(losses.len(), BUCKETS);
+    assert_eq!(losses[bucket], 1, "its bar");
+    assert_eq!(losses.iter().sum::<i64>(), 1);
+    let out = path(&answer, "out:a");
+    let risks: i64 = out["risk_buckets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_i64().unwrap())
+        .sum();
+    assert_eq!(risks, 600, "every risk row, not the 500 listed");
+    assert_eq!(out["starts"], serde_json::json!([now - 2 * 3_600_000]));
+}
+
 #[tokio::test]
 async fn over_500_events_answer_the_newest_500_and_say_so() {
     let state = test_state().await;

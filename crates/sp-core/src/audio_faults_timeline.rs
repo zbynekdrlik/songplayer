@@ -4,9 +4,7 @@
 //! at the bottom, risk on it); every row shares one time axis whose ticks
 //! fall on whole local times. Pure; sp-ui draws the SVG.
 
-use crate::audio_faults::{
-    FaultEvent, LOSS, LocalTime, RISK, START, dm_hm_sk, losses_sk, risks_sk, time_sk,
-};
+use crate::audio_faults::{LocalTime, dm_hm_sk, losses_sk, risks_sk, time_sk};
 
 /// Buckets per timeline, whatever the window (1 h → 1 min each, 24 h →
 /// 24 min, 7 d → 2.8 h, 30 d → 12 h).
@@ -75,21 +73,23 @@ pub fn bucket_of(t: i64, from: i64, to: i64, n: usize) -> Option<usize> {
     Some((i as usize).min(n - 1))
 }
 
-/// The loss and risk rows of `events` per bucket (a start or a meter
-/// counts nowhere; a row outside the window is left out).
-pub fn buckets(events: &[FaultEvent], from: i64, to: i64, n: usize) -> Vec<Bucket> {
-    let mut out = vec![Bucket::default(); n];
-    for e in events {
-        let Some(i) = bucket_of(e.ts_ms, from, to, n) else {
-            continue;
-        };
-        if e.severity == LOSS {
-            out[i].loss += 1;
-        } else if e.severity == RISK {
-            out[i].risk += 1;
-        }
-    }
-    out
+/// The inner edges of `n` buckets over `[from, to]`: bucket `i`'s first
+/// instant for `i` in `1..n` ([`bucket_start`]). The server's bucket query
+/// numbers its rows by these very edges, so a row lies in the bucket
+/// [`bucket_of`] names.
+pub fn bucket_edges(from: i64, to: i64, n: usize) -> Vec<i64> {
+    (1..n).map(|i| bucket_start(from, to, n, i)).collect()
+}
+
+/// A path's [`BUCKETS`] buckets from its answer's `loss_buckets` /
+/// `risk_buckets` (one missing reads 0).
+pub fn buckets_of(loss: &[u32], risk: &[u32]) -> Vec<Bucket> {
+    (0..BUCKETS)
+        .map(|i| Bucket {
+            loss: loss.get(i).copied().unwrap_or(0),
+            risk: risk.get(i).copied().unwrap_or(0),
+        })
+        .collect()
 }
 
 /// The largest bucket (loss + risk) of every row: the panel's one scale.
@@ -143,14 +143,15 @@ pub struct StartMark {
     pub pct: f64,
 }
 
-/// The start rows of `events` inside `[from, to]`, as marks.
-pub fn start_marks(events: &[FaultEvent], from: i64, to: i64) -> Vec<StartMark> {
-    events
+/// The (re)starts (UTC ms, the answer's `starts`) inside `[from, to]`, as
+/// marks.
+pub fn start_marks(starts: &[i64], from: i64, to: i64) -> Vec<StartMark> {
+    starts
         .iter()
-        .filter(|e| e.kind == START && e.ts_ms >= from && e.ts_ms <= to)
-        .map(|e| StartMark {
-            at_ms: e.ts_ms,
-            pct: axis_pct(e.ts_ms, from, to),
+        .filter(|t| **t >= from && **t <= to)
+        .map(|t| StartMark {
+            at_ms: *t,
+            pct: axis_pct(*t, from, to),
         })
         .collect()
 }
@@ -178,22 +179,34 @@ pub struct Tick {
     pub days: bool,
 }
 
-/// The ticks of the window `[from, to]`: the local instants (`offset_min`
-/// east of UTC, the zone's offset now) that are whole multiples of
-/// [`tick_step`] — whole 10 minutes, hours, 3 hours, local midnights; for
-/// the longest windows every 5th day counted from 1.1.1970.
-pub fn axis_ticks(from: i64, to: i64, offset_min: i32) -> Vec<Tick> {
+/// The ticks of the window `[from, to]`: the local instants that are whole
+/// multiples of [`tick_step`] — whole 10 minutes, hours, 3 hours, local
+/// midnights; for the longest windows every 5th day counted from 1.1.1970.
+/// Each is snapped with the zone's offset AT that tick (`offset_at`:
+/// minutes east of UTC at an instant; the browser's), so a midnight stays
+/// a midnight across a daylight-saving change. A local time the spring
+/// change skips maps to an instant already ticked, and the autumn's
+/// repeated hour is ticked once (its summer reading): the ticks only ever
+/// move forward.
+pub fn axis_ticks(from: i64, to: i64, offset_at: &dyn Fn(i64) -> i32) -> Vec<Tick> {
     let step = tick_step(to - from);
-    let shift = i64::from(offset_min) * MINUTE_MS;
-    let local_from = from + shift;
+    let shift = |utc: i64| i64::from(offset_at(utc)) * MINUTE_MS;
+    let from_shift = shift(from);
+    let local_from = from + from_shift;
     let rem = local_from.rem_euclid(step);
     let first = local_from - rem + if rem > 0 { step } else { 0 };
     let days = step >= DAY_MS;
-    (0..MAX_TICKS)
-        .map(|k| first + k * step - shift)
-        .take_while(|at| *at <= to)
-        .map(|at_ms| Tick { at_ms, days })
-        .collect()
+    let mut ticks: Vec<Tick> = Vec::new();
+    for local in (0..MAX_TICKS).map(|k| first + k * step) {
+        let at_ms = local - from_shift;
+        if at_ms > to {
+            break;
+        }
+        if at_ms >= from && ticks.last().is_none_or(|t| at_ms > t.at_ms) {
+            ticks.push(Tick { at_ms, days });
+        }
+    }
+    ticks
 }
 
 /// An instant's place on the axis of `[from, to]`, in percent.

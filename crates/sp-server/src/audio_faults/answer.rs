@@ -24,6 +24,7 @@
 use std::collections::BTreeMap;
 
 pub use sp_core::audio_faults::{FaultEvent, FaultsAnswer, LoopSeconds, PathFaults};
+use sp_core::audio_faults_timeline::BUCKETS;
 
 use super::model::{Severity, kinds, occurrences};
 
@@ -63,8 +64,9 @@ pub fn kept_from(now_ms: i64) -> i64 {
     now_ms - super::RETENTION_MS
 }
 
-/// One path's marks over every row the ledger keeps
-/// (`store::clean_marks`): its newest loss and its first start.
+/// One path's marks (`store::clean_marks`): its newest loss over the 90
+/// days kept and its first start ever (the prune keeps each path's
+/// earliest start).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CleanMark {
     pub path: String,
@@ -138,6 +140,7 @@ impl PathAcc {
 
     fn answer(self, path: String, now_ms: i64, kept_from_ms: i64) -> PathFaults {
         let unseen = if self.seen { kept_from_ms } else { now_ms };
+        let first_start = self.first_start_ms;
         let loop_check = path.starts_with("loop:").then(|| LoopSeconds {
             checked_s: self.checked_ms as f64 / 1000.0,
             blind_s: self.blind_ms as f64 / 1000.0,
@@ -146,7 +149,7 @@ impl PathAcc {
             clean_since_ms: self
                 .kept_loss_ms
                 .max(self.last_loss_ms)
-                .or(self.first_start_ms)
+                .or(first_start)
                 .unwrap_or(unseen),
             path,
             detail: self.detail,
@@ -157,15 +160,18 @@ impl PathAcc {
             risks: self.risks,
             counts: self.counts,
             events: self.events,
+            loss_buckets: Vec::new(),
+            risk_buckets: Vec::new(),
+            starts: Vec::new(),
             loop_check,
         }
     }
 }
 
 /// The whole chain's clean time: the newest loss of any path the ledger
-/// keeps (a path gone since counts too), else the first start it recorded,
-/// else `unseen`.
-fn chain_since(paths: &[PathFaults], marks: &[CleanMark], unseen: i64) -> i64 {
+/// keeps (a path gone since counts too), else the first start it recorded
+/// (no older than `kept_from_ms`), else `unseen`.
+fn chain_since(paths: &[PathFaults], marks: &[CleanMark], _kept_from_ms: i64, unseen: i64) -> i64 {
     let kept = marks.iter().filter_map(|m| m.last_loss_ms).max();
     let window = paths.iter().filter_map(|p| p.last_loss_ms).max();
     kept.max(window)
@@ -229,7 +235,7 @@ pub fn build_answer(
         .filter_map(|p| p.last_loss_ms.map(|t| (t, &p.path)))
         .max_by_key(|(t, _)| *t)
         .map(|(_, path)| path.clone());
-    let clean_since_ms = chain_since(&paths, marks, unseen);
+    let clean_since_ms = chain_since(&paths, marks, kept_from_ms, unseen);
     FaultsAnswer {
         now_ms,
         from_ms,
@@ -239,6 +245,46 @@ pub fn build_answer(
         worst,
         truncated,
         paths,
+    }
+}
+
+/// One `(path, severity, bucket)` count of the window
+/// (`store::bucket_counts`): `bucket` 0..BUCKETS by sp-core's edges.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BucketCount {
+    pub path: String,
+    pub severity: String,
+    pub bucket: i64,
+    pub rows: i64,
+}
+
+/// The (re)starts a path's timeline carries at most (the newest).
+pub const MAX_STARTS: usize = 100;
+
+/// Each path's timeline, still from its listed events (RED: the capped
+/// list, as the dashboard drew it).
+pub fn add_timeline(answer: &mut FaultsAnswer, _counts: &[BucketCount], _starts: &[(String, i64)]) {
+    let (from, to) = (answer.from_ms, answer.now_ms);
+    for p in &mut answer.paths {
+        let mut loss = vec![0u32; BUCKETS];
+        let mut risk = vec![0u32; BUCKETS];
+        let mut mine: Vec<i64> = Vec::new();
+        for e in &p.events {
+            let Some(slot) = sp_core::audio_faults_timeline::bucket_of(e.ts_ms, from, to, BUCKETS)
+            else {
+                continue;
+            };
+            if e.severity == Severity::Loss.as_str() {
+                loss[slot] += 1;
+            } else if e.severity == Severity::Risk.as_str() {
+                risk[slot] += 1;
+            } else if e.severity == Severity::Info.as_str() {
+                mine.push(e.ts_ms);
+            }
+        }
+        p.starts = mine.split_off(mine.len().saturating_sub(MAX_STARTS));
+        p.loss_buckets = loss;
+        p.risk_buckets = risk;
     }
 }
 
