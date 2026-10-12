@@ -196,13 +196,38 @@ async fn a_check_reads_the_platform_or_says_not_windows() {
 
 // ---- the Windows glue, on the Windows CI job ----
 
-/// The registry and WMI reads run on a real Windows (the CI runner): every
-/// fact is read (its values are the runner's, so only their presence is
-/// asserted) and written to the job's log as evidence.
+/// One reading the CI step "Read the runner's Defender, firewall and build
+/// for the glue test" (`ci.yml`, Build (Windows)) wrote: Windows' own
+/// cmdlets' answer, independent of the glue.
+#[cfg(windows)]
+fn expected(name: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_| {
+        panic!("{name} is set by ci.yml's step before the tests (Windows' own reading)")
+    })
+}
+
+/// A `True` / `False` the step wrote.
+#[cfg(windows)]
+fn expected_bool(text: &str, what: &str) -> bool {
+    match text.trim().to_ascii_lowercase().as_str() {
+        "true" => true,
+        "false" => false,
+        other => panic!("{what} reads {other:?}"),
+    }
+}
+
+/// Review finding 4: the registry and WMI reads run on a real Windows (the
+/// CI runner), and each fact equals what Windows' own cmdlets report there:
+/// `Get-MpComputerStatus` (real-time, mode), `Get-NetFirewallProfile
+/// -PolicyStore ActiveStore` (each profile), `Win32_OperatingSystem` (the
+/// build). The runner is never changed: whatever its Defender and firewall
+/// are, the glue must read the same. Its reads go to the job's log.
 #[cfg(windows)]
 #[test]
-fn the_windows_glue_reads_every_fact() {
+fn the_windows_glue_reads_what_windows_itself_reports() {
+    use sp_core::prod_env::FirewallProfile;
     use std::io::Write;
+
     let direct = super::win::read_direct();
     let wmi = super::win::read_wmi();
     let _ = writeln!(
@@ -212,6 +237,35 @@ fn the_windows_glue_reads_every_fact() {
     let facts = facts_from(&direct, &Ok(wmi));
     assert!(facts.read_errors.is_empty(), "{:?}", facts.read_errors);
     assert!(facts.edition_id.is_some(), "{facts:?}");
-    assert!(facts.defender_realtime.is_some(), "{facts:?}");
-    assert!(facts.firewall.iter().all(Option::is_some), "{facts:?}");
+    let realtime = expected("SP_ENV_EXPECT_DEFENDER_REALTIME");
+    assert_eq!(
+        facts.defender_realtime,
+        Some(expected_bool(&realtime, "SP_ENV_EXPECT_DEFENDER_REALTIME")),
+        "Get-MpComputerStatus RealTimeProtectionEnabled"
+    );
+    let mode = expected("SP_ENV_EXPECT_DEFENDER_MODE");
+    assert_eq!(
+        facts.defender_mode.as_deref(),
+        Some(mode.trim()),
+        "Get-MpComputerStatus AMRunningMode"
+    );
+    let firewall = expected("SP_ENV_EXPECT_FIREWALL");
+    for (i, profile) in FirewallProfile::ALL.into_iter().enumerate() {
+        let on = firewall
+            .split(';')
+            .filter_map(|pair| pair.split_once('='))
+            .find(|(name, _)| name.trim().eq_ignore_ascii_case(profile.name()))
+            .map(|(_, on)| expected_bool(on, "SP_ENV_EXPECT_FIREWALL"))
+            .unwrap_or_else(|| panic!("SP_ENV_EXPECT_FIREWALL {firewall:?} has no {profile:?}"));
+        assert_eq!(
+            facts.firewall[i],
+            Some(on),
+            "{profile:?} in the active store"
+        );
+    }
+    let build: u32 = expected("SP_ENV_EXPECT_BUILD")
+        .trim()
+        .parse()
+        .expect("SP_ENV_EXPECT_BUILD is a number");
+    assert_eq!(facts.build_number, Some(build), "Win32_OperatingSystem");
 }
