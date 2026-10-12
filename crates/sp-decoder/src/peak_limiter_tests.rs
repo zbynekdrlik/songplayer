@@ -153,3 +153,23 @@ fn reset_drops_the_release_tail() {
     assert_eq!(quiet[0].to_bits(), 0.5_f32.to_bits());
     assert_eq!(l.limited_frames(), 1, "reset keeps the count");
 }
+
+/// #257: an over is a frame whose OWN peak is over the ceiling. The release
+/// tail after it scales frames but counts no over, and neither does a frame
+/// at the ceiling exactly or a silent one; a reset keeps the count.
+#[test]
+fn an_over_is_a_frame_over_the_ceiling_never_its_release_tail() {
+    let mut l = PeakLimiter::new(1_000);
+    let mut block = release_fixture();
+    l.process(&mut block, 1);
+    assert_eq!(l.over_frames(), 1, "the one 1.96 frame");
+    assert!(
+        l.limited_frames() > 1,
+        "its tail is scaled: {}",
+        l.limited_frames()
+    );
+    l.reset();
+    let mut more = [0.98_f32, -0.98, 0.0, 2.0, -3.0];
+    l.process(&mut more, 1);
+    assert_eq!(l.over_frames(), 3, "2.0 and -3.0 only, after the first one");
+}

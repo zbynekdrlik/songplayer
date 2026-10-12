@@ -24,10 +24,18 @@
 //! be the live pair that opens the cue); with neither side here and both
 //! missed, it is filled like any boundary (the core's fill + resync path).
 
+use sp_core::config::PROGRAM_BLANK_ID;
 use tracing::{info, warn};
 
 use super::{ProgramCore, ProgramJob};
 use crate::playback::program_transition::{CUE_WAIT_MAX_SLOTS, Cue, MixJob, Window};
+
+/// #257: whether a boundary that shows `source` carries a real source's
+/// audio: a playlist, or the NDI input (-1). Blank (-2) and nothing
+/// selected are silence by design, so their fills are no fault.
+pub(super) fn real_source(source: Option<i64>) -> bool {
+    source.is_some_and(|s| s != PROGRAM_BLANK_ID)
+}
 
 /// What a window boundary did (see [`ProgramCore::window_step`]).
 pub(super) enum WindowStep {
@@ -39,6 +47,14 @@ pub(super) enum WindowStep {
 }
 
 impl ProgramCore {
+    /// A boundary filled with the program's standby pair, showing `shows`
+    /// (`fill_source`): `filled`, and #257's `filled_owned` when that is a
+    /// real source's boundary (its audio went missing).
+    pub(super) fn count_fill(&mut self, shows: Option<i64>) {
+        self.health.filled += 1;
+        self.health.filled_owned += u64::from(real_source(shows));
+    }
+
     /// The window whose range covers boundary `stamp_100ns`, if any.
     pub(super) fn window_at(&self, stamp_100ns: i64) -> Option<Window> {
         self.windows.iter().find(|w| w.covers(stamp_100ns)).copied()
@@ -155,7 +171,7 @@ impl ProgramCore {
                 self.commit(ProgramJob::Source(job), from);
             }
             None => {
-                self.health.filled += 1;
+                self.count_fill(from);
                 self.commit(ProgramJob::Standby { stamp_100ns: stamp }, from);
             }
         }
@@ -167,8 +183,12 @@ impl ProgramCore {
         let to = self.pending.remove(&stamp);
         let from = self.from_pending.remove(&stamp);
         let side_missing = to.is_none() || (from.is_none() && w.from.is_some());
+        // #257: a real source's side missing is its audio gone at its weight.
+        let owned_missing =
+            (to.is_none() && real_source(Some(w.to))) || (from.is_none() && real_source(w.from));
         self.counters.mixed_boundaries += 1;
         self.counters.side_fills += u64::from(side_missing);
+        self.health.filled_owned += u64::from(owned_missing);
         let mix = MixJob {
             stamp_100ns: stamp,
             from,
@@ -179,3 +199,7 @@ impl ProgramCore {
         self.commit(ProgramJob::Mix(mix), Some(w.to)); // #147: shows the incoming side
     }
 }
+
+#[cfg(test)]
+#[path = "program_bus_window_tests.rs"]
+mod tests;

@@ -59,6 +59,8 @@ pub struct PeakLimiter {
     reduction: f32,
     /// Frames this limiter has scaled (gain below 1.0) since it was built.
     limited_frames: u64,
+    /// #257: frames whose own peak was over the ceiling, since it was built.
+    over_frames: u64,
 }
 
 impl PeakLimiter {
@@ -68,6 +70,7 @@ impl PeakLimiter {
             release: release_factor(sample_rate),
             reduction: 0.0,
             limited_frames: 0,
+            over_frames: 0,
         }
     }
 
@@ -83,6 +86,13 @@ impl PeakLimiter {
         self.limited_frames
     }
 
+    /// #257: frames whose own peak was over the ceiling, so the limiter
+    /// engaged on them (the release tail after them is not counted), since
+    /// it was built: a source hotter than the ceiling.
+    pub fn over_frames(&self) -> u64 {
+        self.over_frames
+    }
+
     /// Limit an interleaved block in place, frame by frame (`channels`
     /// samples per frame, one gain each; `channels` ≥ 1).
     pub fn process(&mut self, block: &mut [f32], channels: usize) {
@@ -90,6 +100,7 @@ impl PeakLimiter {
             let peak = frame.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
             // A silent frame gives `ceiling / 0 = inf`, so it needs nothing.
             let needed = 1.0 - LIMIT_CEILING / peak;
+            self.over_frames += u64::from(needed > 0.0);
             let reduction = (self.reduction * self.release).max(needed);
             let gain = 1.0 - reduction;
             if gain < 1.0 {

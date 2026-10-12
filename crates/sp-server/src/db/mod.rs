@@ -55,6 +55,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (35, MIGRATION_V35),
     (36, MIGRATION_V36),
     (37, MIGRATION_V37),
+    (38, MIGRATION_V38),
 ];
 
 const MIGRATION_V1: &str = "
@@ -580,6 +581,24 @@ const MIGRATION_V37: &str = "
 ALTER TABLE playlists ADD COLUMN loop_video_id INTEGER;
 ";
 
+/// #257: the audio fault ledger (`crate::audio_faults`): one row per fault
+/// step of an audio path (`path` = `program`, `out:<id>`, `loop:<id>`,
+/// `pipeline:<id>`), `severity` `loss` / `risk` / `info` (a start) /
+/// `meter`, `amount` its count or magnitude, `detail` the path's name. Kept
+/// 90 days, read by time and by path.
+const MIGRATION_V38: &str = "
+CREATE TABLE IF NOT EXISTS audio_faults (
+    ts_ms INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    detail TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_audio_faults_ts ON audio_faults (ts_ms);
+CREATE INDEX IF NOT EXISTS idx_audio_faults_path_ts ON audio_faults (path, ts_ms);
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -764,6 +783,9 @@ mod tests_v36;
 #[path = "mod_tests_v37.rs"]
 #[cfg(test)]
 mod tests_v37;
+#[path = "mod_tests_v38.rs"]
+#[cfg(test)]
+mod tests_v38;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

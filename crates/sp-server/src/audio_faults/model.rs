@@ -1,0 +1,187 @@
+//! #257: what the audio fault ledger reads and writes — a path's counters,
+//! events, states and meters as one tick reads them ([`Probe`]), and the row
+//! it writes ([`FaultRow`]). Pure data, no I/O.
+
+/// How a row weighs (`audio_faults.severity`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Severity {
+    /// Samples lost, inserted or wrong.
+    Loss,
+    /// Late or squeezed, the samples still whole.
+    Risk,
+    /// A path's (re)start: no fault, it bounds "clean since".
+    Info,
+    /// A loop check's checked / blind time (ms): no fault.
+    Meter,
+}
+
+impl Severity {
+    /// The stored text.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Loss => "loss",
+            Self::Risk => "risk",
+            Self::Info => "info",
+            Self::Meter => "meter",
+        }
+    }
+}
+
+/// The row kinds (`audio_faults.kind`), one vocabulary for the ledger, the
+/// API and the gate.
+pub mod kinds {
+    /// A path seen for the first time, or rebuilt (severity info).
+    pub const START: &str = "start";
+    /// Program: a boundary of a real source filled with standby (or a
+    /// fade's missing side): `health.filled_owned`.
+    pub const FILLED: &str = "filled";
+    /// Program / ASIO output / pipeline: a resync.
+    pub const RESYNC: &str = "resync";
+    /// Program: an owned frame that came after its boundary went out.
+    pub const LATE_DROPPED: &str = "late_dropped";
+    /// Program: a boundary the sender's full queue dropped.
+    pub const COALESCED: &str = "coalesced";
+    /// Program: a block handed to VBAN after its first packet was due.
+    pub const VBAN_FEED_LATE: &str = "vban_feed_late";
+    /// Program: frames the limiter engaged on outside a fade.
+    pub const LIMITED: &str = "limited";
+    /// Program: `SP-program` boundaries taken over a slot late (the trace).
+    pub const NDI_LATE: &str = "ndi_late";
+    /// Output: blocks dropped (a full queue, an ASIO host that is down).
+    pub const BLOCKS_DROPPED: &str = "blocks_dropped";
+    /// VBAN output: blocks sent as silence.
+    pub const BLOCKS_SUBSTITUTED: &str = "blocks_substituted";
+    /// VBAN output: datagrams whose send failed.
+    pub const SEND_ERROR: &str = "send_error";
+    /// VBAN output: one packet sent over 10 ms late (an event).
+    pub const LATE_PACKET: &str = "late_packet";
+    /// ASIO output / pipeline: an underrun.
+    pub const UNDERRUN: &str = "underrun";
+    /// ASIO output: a hard re-centre.
+    pub const HARD_RECENTRE: &str = "hard_recentre";
+    /// ASIO output: a close (a reset, a rate change, a stall).
+    pub const RESET: &str = "reset";
+    /// ASIO output: frames the ring had no room for.
+    pub const OVERFLOW: &str = "overflow";
+    /// ASIO output: a buffer switch over two periods late.
+    pub const LATE_CALLBACK: &str = "late_callback";
+    /// ASIO output: its host process went down (a state).
+    pub const HOST_DOWN: &str = "host_down";
+    /// Loop check: a returned block unlike the one sent (an event).
+    pub const MISMATCH: &str = "mismatch";
+    /// Loop check: a returned block missing (an event).
+    pub const DROPOUT: &str = "dropout";
+    /// Loop check: the round trip moved (an event).
+    pub const SLIP: &str = "slip";
+    /// Loop check: nothing came back (a state).
+    pub const NO_RETURN: &str = "no_return";
+    /// Loop check: ms judged (a meter).
+    pub const CHECKED: &str = "checked";
+    /// Loop check: ms too quiet to judge (a meter).
+    pub const BLIND: &str = "blind";
+    /// Pipeline: grid slots nobody serviced between two scopes.
+    pub const UNSERVICED: &str = "unserviced";
+}
+
+/// Whether one row of `kind` is ONE occurrence (an event or a state: its
+/// amount is a magnitude, or 1), not a counter's step (its amount is the
+/// count).
+pub fn row_counted(kind: &str) -> bool {
+    matches!(
+        kind,
+        kinds::LATE_PACKET
+            | kinds::HOST_DOWN
+            | kinds::MISMATCH
+            | kinds::DROPOUT
+            | kinds::SLIP
+            | kinds::NO_RETURN
+    )
+}
+
+/// How many faults `rows` rows of `kind` holding `amount` in total are.
+pub fn occurrences(kind: &str, rows: i64, amount: i64) -> i64 {
+    if row_counted(kind) { rows } else { amount }
+}
+
+/// One `audio_faults` row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FaultRow {
+    /// UTC, ms: the tick that saw it, or an event's own time.
+    pub ts_ms: i64,
+    pub path: String,
+    pub kind: &'static str,
+    pub severity: Severity,
+    /// A counter's step, an event's magnitude (frames, µs), 1 for a state or
+    /// a start, ms for a meter.
+    pub amount: i64,
+    /// The path's name as shown (an output's name, a pipeline's NDI name).
+    pub detail: String,
+}
+
+/// A counter that only grows while its path runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Counter {
+    pub kind: &'static str,
+    pub severity: Severity,
+    pub value: u64,
+}
+
+impl Counter {
+    pub fn loss(kind: &'static str, value: u64) -> Self {
+        Self {
+            kind,
+            severity: Severity::Loss,
+            value,
+        }
+    }
+
+    pub fn risk(kind: &'static str, value: u64) -> Self {
+        Self {
+            kind,
+            severity: Severity::Risk,
+            value,
+        }
+    }
+}
+
+/// An event with its own UTC time, kept in a short list by its path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Event {
+    pub kind: &'static str,
+    pub severity: Severity,
+    pub utc_ms: i64,
+    pub amount: i64,
+}
+
+/// A state that is a fault while it holds: one row when it starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StateFlag {
+    pub kind: &'static str,
+    pub severity: Severity,
+    pub active: bool,
+}
+
+/// A time that only grows while its path runs (ms).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Meter {
+    pub kind: &'static str,
+    pub value_ms: u64,
+}
+
+/// One audio path as a tick reads it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Probe {
+    /// `program`, `pipeline:<playlist id>`, `out:<output id>`,
+    /// `loop:<output id>`.
+    pub path: String,
+    pub detail: String,
+    /// Grows while the path runs: lower than at the last tick = rebuilt.
+    pub run: u64,
+    /// `false`: a fault now is by design (a pipeline off program), so it is
+    /// not recorded (the tick before and this one both off).
+    pub gated_in: bool,
+    pub counters: Vec<Counter>,
+    pub events: Vec<Event>,
+    pub states: Vec<StateFlag>,
+    pub meters: Vec<Meter>,
+}

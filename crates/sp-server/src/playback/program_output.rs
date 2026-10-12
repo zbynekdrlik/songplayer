@@ -557,6 +557,7 @@ impl<B: NdiBackend> ProgramOutput<B> {
         }
         self.limited_through = Some(stamp_100ns);
         let before = self.limiter.limited_frames();
+        let overs = self.limiter.over_frames();
         for frame in pair.audio_mut(&mut self.silence) {
             if is_program_block(frame) {
                 let channels = frame.channels as usize;
@@ -564,6 +565,12 @@ impl<B: NdiBackend> ProgramOutput<B> {
             }
         }
         self.mix_run.limited += self.limiter.limited_frames() - before;
+        // #257: a source over the ceiling outside a fade (a fade's sum is
+        // the crossfade's own, by design) is the audio fault ledger's risk.
+        let fade = matches!(pair, Pair::Mix { .. });
+        if !fade && let Some(outputs) = &self.outputs {
+            outputs.note_limiter_overs(self.limiter.over_frames() - overs);
+        }
     }
 
     /// #210: the video side of a boundary VBAN already has, then its NDI
@@ -879,6 +886,9 @@ impl super::PlaybackEngine {
         crate::remote::start_remote(self.pool.clone(), bus.clone(), upstream, shutdown);
         // #147: the trace's once-a-minute clump summary.
         crate::playback::program_trace_log::start(bus.trace().clone(), shutdown);
+        // #257: the audio fault ledger reads every audio path every 5 s.
+        let registry = self.ndi_health_registry.clone();
+        crate::audio_faults::start(self.pool.clone(), bus.clone(), registry, shutdown);
         tokio::spawn(async move {
             let _ = shutdown_rx.recv().await;
             bus.stop();

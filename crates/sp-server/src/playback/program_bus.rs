@@ -65,10 +65,9 @@
 //! must keep playing through a window ([`Hold`]).
 //!
 //! This file is the PURE, Linux-tested decision layer ([`ProgramCore`]) plus
-//! its `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the settings persistence
-//! of the selected source. The `SP-program` sender + its thread live in
-//! `program_output.rs`; the offer hook sits in each playlist pipeline's paced
-//! consumer (`paced_output.rs`, its only output since #221 lane 3).
+//! its `Mutex`/`Condvar` wrapper ([`ProgramBus`]) and the selected source's
+//! persistence. The `SP-program` sender lives in `program_output.rs`, the
+//! offer hook in each pipeline's paced consumer (`paced_output.rs`).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
@@ -127,8 +126,7 @@ pub const PROGRAM_QUEUE_BOUND: usize = GENLOCK_MAX_CATCHUP_INTERVALS as usize + 
 /// boundary force that boundary to be filled.
 pub const PROGRAM_PENDING_BOUND: usize = 2 * GENLOCK_MAX_CATCHUP_INTERVALS as usize;
 
-/// Upper bound on release steps per call (fills + forwards + a resync), so a
-/// release is always bounded work.
+/// Upper bound on release steps per call: a release is always bounded work.
 const MAX_RELEASE_STEPS: usize = 64;
 
 // #215: what a boundary inside a transition window becomes (the mix, the cue
@@ -180,6 +178,8 @@ pub struct ProgramHealth {
     pub forwarded: u64,
     /// Missed boundaries filled with the program's standby pair.
     pub filled: u64,
+    /// #257: fills (and a fade's missing sides) of a real source's boundary.
+    pub filled_owned: u64,
     /// Owned source frames that arrived after their boundary was served.
     pub late_dropped: u64,
     /// Runs of more than 8 missed slots skipped instead of burst-filled.
@@ -559,8 +559,8 @@ impl ProgramCore {
                 self.health.resyncs += 1;
                 continue;
             }
-            self.health.filled += 1;
             let (stamp_100ns, shows) = (expected, self.fill_source(expected));
+            self.count_fill(shows);
             self.commit(ProgramJob::Standby { stamp_100ns }, shows);
         }
     }
