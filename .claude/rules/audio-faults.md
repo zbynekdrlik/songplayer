@@ -84,7 +84,7 @@ VBAN receive side), box work.
 | `out:<id>` (enabled outputs, never the post-deploy probe's `e2e-…`) | `blocks_dropped`; VBAN `blocks_substituted`, `send_error`; ASIO `underrun`, `hard_recentre`, `reset`, `resync`, `overflow` (frames), `host_down` (state: `asio.reason_code == "host_down"`) | VBAN `late_packet` (each `late_events` entry over 10 ms, amount µs); ASIO `late_callback`, `fast_callback`, `overload` | gated in while `state == "running"`; run = `blocks_sent` |
 | `loop:<id>` (an ASIO output whose loop check ran: not `off`, or it has time) | each recent `mismatch` / `dropout` / `slip` event (amount = frames, a slip signed) | `no_return` (state: the check cannot tell) | gated like its output; meters `checked`, `blind`; run = checked + blind ms |
 | `input` (the NDI input "OBS manuál", while its thread runs) | `resync`, `no_source` (standby boundaries: no receiver, disconnected, no video yet), `unsupported` (standby: the format) — each a silent block | — | gated in while -1 is on program; run = `boundaries` |
-| `pipeline:<playlist id>` | `underrun` (`audio.underruns`), `resync` (`pacing.resyncs`), `unserviced` (`pacing.song_change_unserviced_slots`), `overflow` (`audio.overflows`: times its audio grid dropped its oldest samples over the 2 s cap) | — | gated in while on program; run = `pacing.seq` |
+| `pipeline:<playlist id>` | `underrun_start` (`audio.underruns_start`: a song's, seek's or resume's audio cut short before its first full block), `underrun` (`audio.underruns_mid`: cut short mid-song, the decode behind the cushion), `underrun_end` (`audio.underruns_end`: a song that ended before the decoder reached its audio's end), `resync` (`pacing.resyncs`), `unserviced` (`pacing.song_change_unserviced_slots`), `overflow` (`audio.overflows`: times its audio grid dropped its oldest samples over the 2 s cap) | — | gated in while on program; run = `pacing.seq` |
 
 **On program** (`probe::on_program`, from the bus's status, no longer the
 authority's on-air set) = the selected source and the outgoing side of a
@@ -93,6 +93,18 @@ running fade (`transition.active.from`: mixed until the fade ends, up to
 
 `overflow` counts frames on an ASIO output and events on a pipeline:
 `counts` are per path, so the units never mix.
+
+**A song's natural end is no underrun (#257).** The block a song's audio
+ends in, and a block after it (a picture that outlasts its audio), plays
+every sample the song has and pads the rest: once the decoder handed out
+the song's last sample (`SplitSyncedDecoder::audio_ended` → the pacer's
+`audio_source_ended`), a short block counts nothing. Before the fix every
+natural end on program wrote a `pipeline:<id>` `underrun` loss (the gate's
+first SNV run, 12.10.2026, 21:35:59Z) and a tail longer than one block was
+dropped; the song summary's `audio_underruns` was then the pipeline's
+LIFETIME count, so per-song averages read from it (the "~9 per ended song")
+were running totals. Mechanism, fix and box check: `genlock.md` "A song's
+natural end".
 
 Not faults, by design: `pacing.repeats` (a 24/25 fps song's conversion, a
 paused standby), `pacing.dropped` (60→30 decimation), `late_frames`, an
@@ -289,7 +301,9 @@ every service, so it is at first glance; the details are one click away.
     lane 1's kinds `coalesced` "zahodený blok programu", `interrupted`
     "prerušenie", `fast_callback` "predčasné volanie", `overload`
     "preťaženie", `no_source` "bez zdroja", `unsupported` "nepodporovaný
-    formát";
+    formát"; a pipeline's `underrun_start` "podtečenie na začiatku" and
+    `underrun_end` "podtečenie na konci" (#257, `underrun` stays
+    "podtečenie");
     frames as ms at the path's rate: the program's 48 kHz, an output's
     driver / output rate from `GET /api/v1/program` read when the panel
     opens, else `480 vzoriek`). A keyed `<For>` (the key holds every shown

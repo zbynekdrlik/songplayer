@@ -169,6 +169,16 @@ when a frame is DECODED, not when it is emitted.
 - **Box check.** On a paced output, `stem-mix level samples` per second still ≈
   `preview-tap level samples`; the cushion shifts the start, not the rate.
 
+**The audio's end (#257): `SplitSyncedDecoder::audio_ended`.** The read loop
+sets `audio_eos` when the reader returns end-of-stream (a `StemMixReader`
+does once every stem drained), and `audio_ended()` = that with nothing in
+`pending_audio`; a seek clears it. The paced producer puts it on every
+queued frame, and the pacer then treats a short block as the song's own
+end, never an underrun (`genlock.md` "A song's natural end"). It stays
+`false` when the VIDEO ends first: `next_synced` returns `None` at the
+video's end and never reads the audio past the last frame's deadline, so
+such a song counts one `underrun_end`. Tests: `split_sync_tests_end.rs`.
+
 ## #184 round G2 — each reader FAMILY owns its memory; NO global "active kind" (SUPERSEDES round G1)
 
 The ONE console keeps **TWO** remembered fader triples (`sp_core::mixer_model::

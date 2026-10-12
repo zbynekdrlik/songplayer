@@ -1177,13 +1177,14 @@ whatever the state:
 
   The video stamp comes from `resolve_emit_boundary`, exactly as for a playing
   repeat; a resync stamps `floor(now)`.
-- **The EOS tail rides a standby boundary, never an audio-only send.** At a
-  natural song end `decode_and_send_paced` calls
-  `Pacer::hold_eos_tail_for_standby`, which holds the last partial boundary
-  (`take_eos_tail`, #148 rework item 4). It then serves ONE more
-  `FrozenLast` boundary (`serve_one_standby_boundary`); that boundary's block
-  is the tail. The receiver therefore gets exactly one audio block per video
-  boundary into the idle fill.
+- **The EOS tail rides standby boundaries, never an audio-only send.** At a
+  natural song end `decode_and_send_paced` calls `Pacer::play_out_audio`
+  (#257, `pacer_play_out.rs`): per boundary `hold_eos_tail_for_standby` holds
+  the next buffered block (`take_eos_tail`, #148 rework item 4) and ONE
+  `FrozenLast` boundary carries it, until nothing is buffered (at least one
+  boundary, as before #257, when it was exactly one and the rest was
+  dropped). The receiver therefore gets exactly one audio block per video
+  boundary into the idle fill. See "A song's natural end" below.
   - Removed with this: the old audio-only tail (`SharedHandoff` `eos_tail` and
     `submit_audio_tail`). Kept with it, it gave n+1 blocks per n boundaries at
     every song end.
@@ -1193,8 +1194,9 @@ whatever the state:
   - A song that ends with no frame ever shown (`Starved`, e.g. a seek at EOS)
     has no frozen frame to pair with. Its tail rides the first idle `Black`
     boundary instead, or a new map drops it. It is still one block per boundary.
-  - The song summary is logged BEFORE the tail boundary, so its frozen repeat
-    is not counted as the song's.
+  - The song summary's pacing counters are read BEFORE the play-out, so its
+    frozen repeats are not counted as the song's; the line itself is logged
+    after it, so it carries the song's end underrun (#257).
   - `SharedHandoff`'s stop API is now just `stop()`; the queue, snapshot and
     counters are unchanged.
 - **The idle fill uses the playing path's submit thread.**
@@ -1445,6 +1447,82 @@ stamp). Tests pin it: `pacer_tests.rs` (the mixed
 catch-up/resync run, with the never-future-dated check read from the
 settable wall at each emit), `pacer_tests_lane4.rs`, `pacer_tests_standby.rs`,
 `program_output_tests.rs`, `program_bus_tests.rs`, `ndi_input_tests*.rs`.
+
+## A song's natural end plays out every sample; underruns by phase (#257)
+
+**The finding (SNV 12.10.2026, the #257 ledger's first deploy):** the gate
+`post-deploy-audio-asio.spec.ts` failed on `pipeline:4 underrun ×1` at a
+natural song end. Two things were wrong, and one was a misreading:
+
+- **Every natural end counted an underrun, with nothing missing.** The
+  block the song's audio ends in (the last frame's aligned take, or the
+  EOS tail) was zero-filled after the song's last sample, and
+  `AudioGridBuffer::take_block` counted every short block as an underrun.
+  A picture that outlasts its audio added one per empty block. A scratch
+  model of the decoder pairing + pacer + grid over 160 natural ends
+  (23.976 / 25 / 30 / 60 fps, audio −50…+45 ms off the picture): 0–3 per
+  end (29 zero, 80 one, 43 two, 8 three), never a start underrun.
+- **A tail longer than one block was dropped.** Only ONE standby block
+  went out after the last frame; audio still buffered "went with the
+  song": 20 of the 160 ends (audio 30–45 ms longer than the picture) lost
+  38–880 samples (0.8–18 ms).
+- **The "~9 per song, up to 54" figure was a lifetime counter.** The song
+  summary's `audio_underruns` was the PIPELINE's cumulative count (the pacer
+  lives for the pipeline, `pipeline.rs`), while every other field of the
+  line was a per-song delta. So the 1 124 summaries' "9 per ended song"
+  read a running total (every underrun since the pipeline's start, a deploy
+  restarts it; 0–3 per natural end in the model), not 0.3 s lost per song.
+  That is read from the code (`pipeline.rs` builds one `Pacer` per
+  pipeline, `clear()` keeps the counters), not re-read from SNV's logs.
+
+**The fix:**
+
+- `SplitSyncedDecoder::audio_ended` (sp-decoder, set when the audio reader
+  returns end-of-stream with nothing pending, cleared by a seek) rides
+  every queued frame (`QueuedFrame = (PacedFrame, u64, bool)`); once a
+  popped frame says so the emit loop calls `Pacer::audio_source_ended` →
+  `AudioGridBuffer::end_source` (after `prepare`, before `service`, again
+  after a Resume's flush; a Seek resets the loop's flag).
+- After the source ended, a short block is the song's END: its real
+  samples play, the rest is padding, nothing is counted
+  (`AudioGridBuffer::note_shortfall`).
+- `Pacer::play_out_audio` (natural end, the producer-died end too) serves
+  frozen standby boundaries until the grid is empty (`PLAY_OUT_MAX_BOUNDARIES`
+  = 61 bounds the loop: the 2 s cap is 60 blocks). Audio is the master
+  clock: the song ends once its audio played.
+- `AudioGridBuffer::end_song` (the play-out's first step): a source that had
+  NOT ended counts one `end` underrun (a decode error, a dead producer, or
+  audio past the last frame's 250 ms read-ahead the decoder never reads),
+  then the source counts as ended so the play-out's own short block is not
+  counted twice.
+
+**Phases** (`AudioStats.underruns_start` / `_mid` / `_end`, `underruns` = the
+sum; `/api/v1/ndi/health` `audio`, the ledger's `underrun_start` /
+`underrun` / `underrun_end`, the song summary per song):
+
+- `start`: a block cut short before the map's first full block (after a
+  clear: play, seek, new song, Resume);
+- `mid`: cut short once the audio flowed, before the source ended (the
+  decode fell behind the 250 ms cushion);
+- `end`: a song that ended before its source did (above).
+
+**Known bound (documented, not fixed):** the decoder reads audio only up to
+the last frame's pts + `PACED_AUDIO_LEAD_MS` (+ one packet). A file whose
+audio outlasts its picture by more than that loses the rest; that now reads
+as one `underrun_end` (and the open's `video/audio duration mismatch` WARN
+names the file at > 100 ms). Feeding audio-only frames past the video's end
+is a separate change.
+
+**Tests:** `pacer_tests_song_end.rs` (the real `open_paced_decoder` over
+mock readers + the emit loop's order: 23.976 / 25 / 60 fps equal lengths,
+audio +45 ms, picture +50 ms, audio +1 s; every sample once, in order, then
+silence; block counts from the model), `audio_grid_tests_phases.rs`,
+`split_sync_tests_end.rs`.
+
+**Box check after the deploy:** every `paced: song summary … reason="ended"`
+reads `audio_underruns=0 underruns_start=0 underruns_mid=0 underruns_end=0`
+(the fields are per song now); the ledger shows no `pipeline:<id>` loss at
+a natural end; the post-deploy audio gates pass across song ends.
 
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path
