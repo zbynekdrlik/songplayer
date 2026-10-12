@@ -30,8 +30,8 @@
 //! RECEIVER, Arena, which then keeps the list for good. That program's
 //! holding is read ([`LockHolder`]), and a sentinel thread queued on the
 //! list's lock is handed it when the holder exits, and gives it back at
-//! once ([`sentinel_step`] decides each of its waits, [`SentinelEnd`] says
-//! how it ended). sp-server decides when to start it.
+//! once ([`sentinel_step`] decides what its one wait answered,
+//! [`SentinelEnd`] says how it ended). sp-server decides when to start it.
 
 use crate::spout::{SENDER_NAMES_MAP, map_mutex_name};
 
@@ -42,15 +42,19 @@ pub(crate) const ACTIVE_SENDER_MAP: &str = "ActiveSenderName";
 /// thread between SDK calls takes a bug; past this the next check goes on.
 pub(crate) const MAX_RELEASES: u32 = 64;
 
-/// How long one wait of the list sentinel lasts before it looks at its stop
-/// flag again, ms: a stop ends it within one wait, and it never spins.
+/// How often the list sentinel tries to give back a lock it was handed
+/// before it ends still holding it (the release of a mutex this thread
+/// just acquired does not fail; a failure is logged).
 #[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) const SENTINEL_WAIT_MS: u32 = 500;
+pub(crate) const SENTINEL_RELEASE_TRIES: u32 = 3;
 
-/// `WaitForSingleObject`'s answers the sentinel tells apart.
+/// What the sentinel's one wait, `WaitForMultipleObjects([stop, list
+/// lock], any, INFINITE)`, answers: its stop event (`WAIT_OBJECT_0 + 0`),
+/// the list's lock let go of (`WAIT_OBJECT_0 + 1`) or left by a holder
+/// that died (`WAIT_ABANDONED_0 + 1`).
+const WAIT_STOPPED: u32 = 0x102;
 const WAIT_TOOK: u32 = 0x0;
 const WAIT_TOOK_ABANDONED: u32 = 0x80;
-const WAIT_TIMED_OUT: u32 = 0x102;
 
 /// #243 follow-up: a program holding a Spout lock: its pid, and its
 /// program's file name (`Arena.exe`), `None` when its image cannot be read.
@@ -66,37 +70,36 @@ pub enum SentinelEnd {
     /// It was handed the lock and gave it back at once. `abandoned`: its
     /// holder died holding it (else the holder let go of it).
     GivenBack { abandoned: bool },
-    /// It was asked to stop while the lock was still kept.
+    /// It was asked to stop, the lock not taken.
     Stopped,
-    /// It could not wait (the mutex did not open, or a wait failed).
+    /// It could not wait (the mutex did not open, the wait failed), or the
+    /// lock it was handed would not be given back (it ended holding it).
     Failed(String),
 }
 
-/// What the sentinel does after one wait ([`sentinel_step`]).
+/// What the sentinel does after its one wait ([`sentinel_step`]).
 #[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SentinelStep {
     /// It was handed the lock: give it back at once and end.
     GiveBack { abandoned: bool },
-    /// The lock is still kept: wait again.
-    WaitAgain,
-    /// The lock is still kept and it was asked to stop: end.
+    /// Its stop event: end, the lock not taken.
     Stop,
     /// The wait failed: end.
     Fail,
 }
 
-/// The sentinel's step after a wait that answered `wait` (`stop`: it was
-/// asked to stop): a lock it was handed (`WAIT_OBJECT_0`, or
-/// `WAIT_ABANDONED`: its holder died) is given back whatever `stop` says;
-/// a timeout waits again unless asked to stop; anything else failed.
+/// The sentinel's step after its wait answered `wait`. The wait never
+/// times out: the sentinel stays queued on the lock for its whole life, so
+/// a program that waits on it later (a relaunched Arena) queues behind it.
+/// Its stop event (index 0) ends it without the lock; the lock (index 1),
+/// let go of or abandoned, is given back; anything else failed.
 #[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) fn sentinel_step(wait: u32, stop: bool) -> SentinelStep {
+pub(crate) fn sentinel_step(wait: u32) -> SentinelStep {
     match wait {
+        WAIT_STOPPED => SentinelStep::Stop,
         WAIT_TOOK => SentinelStep::GiveBack { abandoned: false },
         WAIT_TOOK_ABANDONED => SentinelStep::GiveBack { abandoned: true },
-        WAIT_TIMED_OUT if stop => SentinelStep::Stop,
-        WAIT_TIMED_OUT => SentinelStep::WaitAgain,
         _ => SentinelStep::Fail,
     }
 }

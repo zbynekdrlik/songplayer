@@ -1,7 +1,7 @@
 //! #243 follow-up: Spout's sender list kept by another program, and the
 //! sentinel that wins it back (the design of #243's FINDING of 12.10.2026
 //! ~12:58, parts 2 and 3; part 1, the deploy's quiesce, is
-//! `program_max.rs`).
+//! `program_max_quiesce.rs`).
 //!
 //! Spout 2.007.017 never releases a named mutex it was handed with
 //! `WAIT_ABANDONED` (`gpu-max.md`). SongPlayer gives back what ITS threads
@@ -67,8 +67,8 @@ pub trait SpoutList {
     /// How the started sentinel ended, once (`None`: none started, or it
     /// still waits).
     fn sentinel_ended(&mut self) -> Option<SentinelEnd>;
-    /// Stop the sentinel and wait until it ended (at most one of its
-    /// bounded waits).
+    /// Stop the sentinel and wait until it ended (its stop event ends its
+    /// one wait at once).
     fn stop_sentinel(&mut self);
 }
 
@@ -82,7 +82,7 @@ pub struct SpoutListLock {
 impl SpoutList for SpoutListLock {
     /// `mutants::skip`: one call; off Windows (the mutation runner) the
     /// reader is unsupported, read as `None` either way. The read is proven
-    /// on WARP (sp-gpu `tests/spout.rs`).
+    /// on the Windows job by sp-gpu `tests/spout_list.rs` (no GPU needed).
     #[cfg_attr(test, mutants::skip)]
     fn holder(&mut self) -> Option<LockHolder> {
         sp_gpu::spout_list_holder().ok().flatten()
@@ -94,7 +94,8 @@ impl SpoutList for SpoutListLock {
     }
 
     /// `mutants::skip`: off Windows no sentinel can start, so there is
-    /// never one to ask; proven on WARP (sp-gpu `tests/spout.rs`).
+    /// never one to ask; the sentinel is proven on the Windows job by sp-gpu
+    /// `tests/spout_list.rs`.
     #[cfg_attr(test, mutants::skip)]
     fn sentinel_ended(&mut self) -> Option<SentinelEnd> {
         let ended = self.sentinel.as_ref()?.ended();

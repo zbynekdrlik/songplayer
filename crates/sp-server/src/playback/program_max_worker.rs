@@ -856,14 +856,25 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     }
 
     /// #243 follow-up: a deploy is about to kill the process: drop both
-    /// senders (Spout unregisters them) and the compositors, and report
-    /// `quiesced`. The thread ends after it, so no Spout call runs any
-    /// more and the kill can never leave a Spout lock abandoned.
+    /// senders (Spout unregisters them) and the compositors, stop the list
+    /// sentinel, and report `quiesced`. Nothing is offered while the
+    /// quiesce holds, so no Spout call runs and the kill can never leave a
+    /// Spout lock abandoned.
     pub fn quiesce(&mut self) {
         self.release();
         self.list.stop(self.out);
         self.out.record_quiesced();
-        info!("program max: quiesced - no Spout call until the process ends");
+        info!("program max: quiesced - no Spout call while the quiesce holds");
+    }
+
+    /// #243 follow-up: the quiesce expired and the process is still alive
+    /// (the deploy did not kill it): serve again; the next job builds the
+    /// senders.
+    pub fn resume(&mut self) {
+        self.out.record_resumed();
+        warn!(
+            "program max: the quiesce expired - the process was not stopped; the Spout senders resume"
+        );
     }
 
     /// #239: drop the FHD sender's objects (Spout unregisters `SP-program`)
@@ -899,8 +910,8 @@ fn log_vblank(log: Option<VblankLog>, source: &dyn VblankSource) {
 /// The `program-max` thread: take each job from `out` and serve it on
 /// `gpu`, each sent at its due instant on the real clock ([`SpinClock`]) —
 /// on `vblank`'s refresh grid when one is given —, release the GPU while
-/// MAX is off, exit on stop, or (#243 follow-up) once quiesced; `list` =
-/// Spout's sender list to watch ([`MaxWorker::with_list`]).
+/// MAX is off, quiesce and resume (#243 follow-up), exit on stop; `list`
+/// = Spout's sender list to watch ([`MaxWorker::with_list`]).
 pub fn run_max_loop<G: MaxGpu>(
     out: &MaxOut,
     gpu: G,
@@ -921,10 +932,8 @@ pub fn run_max_loop<G: MaxGpu>(
                 worker.serve_offered(&job, offered, Instant::now());
             }
             MaxNext::Release => worker.release(),
-            MaxNext::Quiesce => {
-                worker.quiesce();
-                break;
-            }
+            MaxNext::Quiesce => worker.quiesce(),
+            MaxNext::Resume => worker.resume(),
             MaxNext::Stop => break,
         }
     }

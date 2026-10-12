@@ -1,11 +1,12 @@
 //! #243 follow-up: `POST /api/v1/program/spout/quiesce`. A deploy asks it
 //! right before it kills SongPlayer: the `program-max` thread (the only
 //! thread that calls Spout) drops both Spout senders and makes no Spout call
-//! any more, so the kill can never leave one of Spout's locks abandoned (PP,
-//! 12.10.2026: a `taskkill /F` mid-lock left Spout's sender list to Arena
-//! for good). Through the real axum router, over a real `run_max_loop` on
-//! the fake GPU; the deploy polls `GET /api/v1/program` until `max.state`
-//! reads `quiesced`.
+//! while the quiesce holds (a minute from the last ask), so the kill can
+//! never leave one of Spout's locks abandoned (PP, 12.10.2026: a
+//! `taskkill /F` mid-lock left Spout's sender list to Arena for good).
+//! Through the real axum router, over a real `run_max_loop` on the fake
+//! GPU; the deploy polls `GET /api/v1/program` until `max.state` reads
+//! `quiesced`.
 //! Wired via `#[cfg(test)] #[path = "program_tests_quiesce.rs"] mod tests_quiesce;`.
 
 use std::sync::Arc;
@@ -77,8 +78,9 @@ async fn states_once_quiesced(state: &crate::AppState) -> (serde_json::Value, se
 }
 
 /// Both senders went out once; the quiesce drops both (each before its
-/// compositor), `max.state` and `max.fhd.state` read `quiesced`, the thread
-/// ends, and nothing is offered, built or sent after it.
+/// compositor), `max.state` and `max.fhd.state` read `quiesced`, and while
+/// it holds (a minute) the thread lives on with nothing offered, built or
+/// sent.
 #[tokio::test]
 async fn a_quiesce_drops_both_spout_senders_and_ends_every_spout_call() {
     let state = test_state().await;
@@ -105,8 +107,7 @@ async fn a_quiesce_drops_both_spout_senders_and_ends_every_spout_call() {
         ["sender", "compositor", "fhd sender", "fhd compositor"],
         "both Spout senders dropped, each before its compositor"
     );
-    wait_until("the thread ended", || running.finished());
-
+    assert!(!running.finished(), "the thread lives on, quiesced");
     assert!(
         !max.offer_with(|| plain(2, &a)),
         "a quiesced MAX takes no job"
@@ -133,7 +134,7 @@ async fn a_quiesce_drops_both_spout_senders_and_ends_every_spout_call() {
     let (_, json) = call(state, "GET", "/api/v1/program", None).await;
     assert_eq!(
         json["max"]["state"], "quiesced",
-        "it stays quiesced until the process ends"
+        "it stays quiesced while the quiesce holds"
     );
 }
 
@@ -146,7 +147,7 @@ async fn a_quiesce_with_max_switched_off_reads_quiesced_too() {
     let gpu = FakeGpu::default();
     // Whether the thread attached before the ask or after it, its first
     // step is the quiesce.
-    let running = Loop::spawn(&max, &gpu);
+    let _running = Loop::spawn(&max, &gpu);
     let (_, json) = call(state.clone(), "GET", "/api/v1/program", None).await;
     assert_eq!(json["max"]["state"], "off", "MAX is off before");
 
@@ -154,6 +155,5 @@ async fn a_quiesce_with_max_switched_off_reads_quiesced_too() {
     assert_eq!(status, StatusCode::ACCEPTED);
     let (max_state, _) = states_once_quiesced(&state).await;
     assert_eq!(max_state, "quiesced", "quiesced wins over off");
-    wait_until("the thread ended", || running.finished());
     assert_eq!(gpu.log().compositors_built, 0, "nothing was ever built");
 }

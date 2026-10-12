@@ -349,7 +349,7 @@ fn the_worker_reads_the_list_after_every_boundary() {
 }
 
 /// The loop watches the list it is given, and its quiesce stops the
-/// sentinel before it ends.
+/// sentinel.
 #[test]
 fn the_loop_watches_the_list_it_is_given() {
     let max = Arc::new(MaxOut::new());
@@ -368,10 +368,12 @@ fn the_loop_watches_the_list_it_is_given() {
         list.state().reads == 1
     });
     max.quiesce();
-    wait_until("the loop ended", || thread.is_finished());
-    thread.join().expect("the loop");
+    // `record_quiesced` comes after the sentinel's stop.
+    wait_until("quiesced", || max.status().state == "quiesced");
     assert_eq!(list.state().stops, 1, "the quiesce stopped the sentinel");
-    assert_eq!(max.status().state, "quiesced");
+    max.stop();
+    wait_until("the loop exits on stop", || thread.is_finished());
+    thread.join().expect("the loop");
 }
 
 /// Off Windows Spout's list is neither read nor waited on.

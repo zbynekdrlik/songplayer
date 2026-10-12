@@ -53,7 +53,8 @@
 //! #243 follow-up: `POST /api/v1/program/spout/quiesce` — a deploy asks it
 //! right before it kills SongPlayer (`scripts/spout-quiesce.ps1`); the
 //! `program-max` thread drops both Spout senders and makes no Spout call
-//! any more, and `max.state` reads `quiesced` (`202 {"state"}`).
+//! while the quiesce holds (60 s from the last ask), and `max.state` reads
+//! `quiesced` (`202 {"state"}`).
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -272,12 +273,15 @@ pub async fn post_program_burn(
 /// `POST /api/v1/program/spout/quiesce` (#243 follow-up): a deploy step asks
 /// it right before it kills SongPlayer (`scripts/spout-quiesce.ps1`). The
 /// `program-max` thread, the only thread that calls Spout, drops both Spout
-/// senders (`SP-program-MAX`, `SP-program`) and ends, so no Spout call runs
-/// when the kill lands. A kill mid-call can leave one of Spout's locks
-/// abandoned: Spout 2.007.017 never gives such a lock back, and the
-/// receiver it is handed to (Arena) keeps Spout's sender list for good
-/// (PP, 12.10.2026). For the rest of the process: only a restart brings
-/// the senders back. `202` with `max.state` now.
+/// senders (`SP-program-MAX`, `SP-program`) and makes no Spout call while
+/// the quiesce holds, so none runs when the kill lands. A kill mid-call can
+/// leave one of Spout's locks abandoned: Spout 2.007.017 never gives such a
+/// lock back, and the receiver it is handed to (Arena) keeps Spout's sender
+/// list for good (PP, 12.10.2026). The quiesce holds
+/// `program_max::QUIESCE_EXPIRY` (60 s) from the last ask (a repeated ask
+/// renews it); a process the deploy did not stop (a cancelled run, a
+/// failed kill) then serves again, with one WARN. `202` with `max.state`
+/// now.
 ///
 /// Not limited to loopback callers: no route of this API checks its caller
 /// (a LAN page can already switch MAX off through the settings PATCH, or

@@ -1,7 +1,7 @@
 //! Tests for the Spout locks a thread can be handed abandoned (#243).
 
 use super::{
-    ACTIVE_SENDER_MAP, MAX_RELEASES, SENTINEL_WAIT_MS, SentinelStep, access_mutex_name,
+    ACTIVE_SENDER_MAP, MAX_RELEASES, SENTINEL_RELEASE_TRIES, SentinelStep, access_mutex_name,
     holder_text, program_name, releases_owed, sender_lock_names, sentinel_step,
 };
 
@@ -100,40 +100,37 @@ fn a_program_is_named_by_its_image_s_file_name() {
     assert_eq!(program_name(Some(r"C:\odd\")), None);
 }
 
-/// #243 follow-up: whatever the sentinel is handed it gives back, asked to
-/// stop or not: `WAIT_OBJECT_0` (its holder let go) and `WAIT_ABANDONED`
-/// (its holder died holding it: the case it exists for).
+/// #243 follow-up: the sentinel's one wait is on [its stop event, the
+/// list's lock]. The lock it is handed it gives back: let go of
+/// (`WAIT_OBJECT_0 + 1`) or left by a holder that died
+/// (`WAIT_ABANDONED_0 + 1`, the case it exists for).
 #[test]
 fn the_sentinel_gives_back_a_lock_it_was_handed() {
-    for stop in [false, true] {
-        assert_eq!(
-            sentinel_step(0x0, stop),
-            SentinelStep::GiveBack { abandoned: false },
-            "stop {stop}"
-        );
-        assert_eq!(
-            sentinel_step(0x80, stop),
-            SentinelStep::GiveBack { abandoned: true },
-            "stop {stop}: an abandoned lock is given back, never kept"
-        );
-    }
+    assert_eq!(
+        sentinel_step(0x1),
+        SentinelStep::GiveBack { abandoned: false }
+    );
+    assert_eq!(
+        sentinel_step(0x81),
+        SentinelStep::GiveBack { abandoned: true },
+        "an abandoned lock is given back, never kept"
+    );
+    assert_eq!(SENTINEL_RELEASE_TRIES, 3);
 }
 
-/// #243 follow-up: while the lock stays kept the sentinel waits again, one
-/// bounded wait at a time, until it is asked to stop.
+/// #243 follow-up: its stop event (index 0) ends it, the lock not taken.
 #[test]
-fn the_sentinel_waits_again_on_a_timeout_until_asked_to_stop() {
-    assert_eq!(SENTINEL_WAIT_MS, 500);
-    assert_eq!(sentinel_step(0x102, false), SentinelStep::WaitAgain);
-    assert_eq!(sentinel_step(0x102, true), SentinelStep::Stop);
+fn the_sentinel_s_stop_event_ends_it() {
+    assert_eq!(sentinel_step(0x0), SentinelStep::Stop);
 }
 
-/// #243 follow-up: any other answer (`WAIT_FAILED`, a second object's
-/// index, an I/O completion) ends the sentinel.
+/// #243 follow-up: anything else ends it: `WAIT_FAILED`, a timeout (its
+/// wait has none: it never leaves the lock's queue), an abandoned stop
+/// event (an event cannot be), an index past its two handles, an I/O
+/// completion.
 #[test]
-fn a_failed_wait_ends_the_sentinel() {
-    for wait in [0xFFFF_FFFF, 0x1, 0x81, 0xC0, 0x101] {
-        assert_eq!(sentinel_step(wait, false), SentinelStep::Fail, "{wait:#x}");
-        assert_eq!(sentinel_step(wait, true), SentinelStep::Fail, "{wait:#x}");
+fn any_other_answer_ends_the_sentinel() {
+    for wait in [0xFFFF_FFFF, 0x102, 0x80, 0x2, 0x82, 0xC0] {
+        assert_eq!(sentinel_step(wait), SentinelStep::Fail, "{wait:#x}");
     }
 }

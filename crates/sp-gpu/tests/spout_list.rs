@@ -13,7 +13,8 @@
 
 mod common;
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, mpsc};
+use std::time::Duration;
 
 use common::locks::{Doomed, Hold, TestMutex, end_of, took, wait_elsewhere};
 use sp_gpu::{ListSentinel, SENDER_NAMES_MAP, SentinelEnd, mutex_holder, spout_list_holder};
@@ -60,17 +61,26 @@ fn the_list_sentinel_is_handed_a_dead_holder_s_lock_and_gives_it_back() {
 }
 
 /// #243 follow-up: the sentinel never keeps what it was not handed: asked
-/// to stop while the lock is kept, it ends within one wait and the holder
-/// still has the lock; a holder that lets go hands it over, and it is given
-/// back at once.
+/// to stop while the lock is kept, it ends at once (its stop event; the
+/// stop runs on a helper thread under a 10 s bound, so a sentinel that
+/// ignores it fails the test instead of hanging it) and the holder still
+/// has the lock; a holder that lets go hands it over, and it is given back
+/// at once.
 #[test]
 fn the_list_sentinel_stops_when_asked_and_gives_back_a_released_lock() {
     let name = "SP-gpu-test-sentinel-released_mutex";
     let _alive = TestMutex::open(name);
     let hold = Hold::take(name);
     let mut sentinel = ListSentinel::on(name).expect("the sentinel starts");
-    sentinel.stop();
-    assert_eq!(sentinel.ended(), Some(SentinelEnd::Stopped));
+    let (stopped, stopped_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        sentinel.stop();
+        let _ = stopped.send(sentinel.ended());
+    });
+    let end = stopped_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the stop ends the sentinel at once");
+    assert_eq!(end, Some(SentinelEnd::Stopped));
     assert_eq!(
         wait_elsewhere(name),
         WAIT_TIMEOUT.0,

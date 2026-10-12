@@ -6,23 +6,24 @@
 //! Win32 and ntdll's `NtQueryMutant`.
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use std::thread::JoinHandle;
 
 use tracing::warn;
-use windows::Win32::Foundation::{CloseHandle, FALSE, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, FALSE, HANDLE, TRUE};
 use windows::Win32::System::Threading::{
-    GetCurrentProcessId, GetCurrentThreadId, MUTEX_MODIFY_STATE, OpenMutexW, OpenProcess,
-    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
-    ReleaseMutex, SYNCHRONIZATION_SYNCHRONIZE, WaitForSingleObject,
+    CreateEventW, GetCurrentProcessId, GetCurrentThreadId, INFINITE, MUTEX_MODIFY_STATE,
+    OpenMutexW, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW, ReleaseMutex, SYNCHRONIZATION_SYNCHRONIZE, SetEvent,
+    WaitForMultipleObjects,
 };
-use windows::core::{HSTRING, PWSTR};
+use windows::core::{HSTRING, PCWSTR, PWSTR};
 
+use super::failed;
 use crate::error::GpuError;
 use crate::spout::{SENDER_NAMES_MAP, map_mutex_name};
 use crate::spout_lock::{
-    LockHolder, SENTINEL_WAIT_MS, SentinelEnd, SentinelStep, holder_text, program_name,
+    LockHolder, SENTINEL_RELEASE_TRIES, SentinelEnd, SentinelStep, holder_text, program_name,
     releases_owed, sender_lock_names, sentinel_step,
 };
 
@@ -196,17 +197,45 @@ pub fn spout_list_holder() -> Result<Option<LockHolder>, GpuError> {
 }
 
 /// #243 follow-up: a thread queued on Spout's sender list
-/// (`SpoutSenderNames_mutex`) while another program keeps it. When that
-/// program exits, Windows hands the lock to its next waiter — this thread,
-/// queued before any program started later (a relaunched Arena) — which
-/// gives it back at once and ends. It waits in bounded waits
-/// ([`SENTINEL_WAIT_MS`]) and looks at its stop flag after each: it never
-/// spins and never holds the lock past the release. Every step is
-/// `crate::spout_lock::sentinel_step`'s.
+/// (`SpoutSenderNames_mutex`) while another program keeps it. It makes ONE
+/// wait, with no timeout, on its stop event and the list's lock
+/// (`WaitForMultipleObjects`), so it stays in the lock's wait queue for its
+/// whole life: a program that waits on the lock later (a relaunched Arena,
+/// another receiver's 67 ms waits) queues behind it. When the holder exits,
+/// Windows hands the lock to the sentinel, which gives it back at once and
+/// ends; it never spins and never holds the lock past the release. Its
+/// stop sets the event: it ends at once, the lock not taken. What the wait
+/// answered is `crate::spout_lock::sentinel_step`'s to read.
 pub struct ListSentinel {
-    stop: Arc<AtomicBool>,
+    // Declared first: dropped (closed) after `Drop::drop` joined the thread.
+    stop: StopEvent,
     ended: mpsc::Receiver<SentinelEnd>,
     thread: Option<JoinHandle<()>>,
+}
+
+/// The sentinel's stop: an unnamed manual-reset event, closed when dropped.
+/// Its handle is kept as a number (a `HANDLE` is not `Send`).
+struct StopEvent(isize);
+
+impl StopEvent {
+    fn new() -> Result<Self, GpuError> {
+        // SAFETY: a plain create: no attributes, manual reset, not set, no
+        // name.
+        let event = unsafe { CreateEventW(None, TRUE, FALSE, PCWSTR::null()) }
+            .map_err(|e| failed("CreateEventW", &e))?;
+        Ok(Self(event.0 as isize))
+    }
+
+    fn handle(&self) -> HANDLE {
+        HANDLE(self.0 as *mut c_void)
+    }
+}
+
+impl Drop for StopEvent {
+    fn drop(&mut self) {
+        // SAFETY: the handle is this value's own, open, and closed once.
+        let _ = unsafe { CloseHandle(self.handle()) };
+    }
 }
 
 impl ListSentinel {
@@ -220,13 +249,14 @@ impl ListSentinel {
     #[doc(hidden)]
     pub fn on(name: &str) -> Result<Self, GpuError> {
         let name = name.to_owned();
-        let stop = Arc::new(AtomicBool::new(false));
-        let flag = stop.clone();
+        let stop = StopEvent::new()?;
+        let event = stop.0;
         let (report, ended) = mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("spout-list-sentinel".into())
             .spawn(move || {
-                let _ = report.send(wait_and_give_back(&name, &flag));
+                let stop = HANDLE(event as *mut c_void);
+                let _ = report.send(wait_and_give_back(&name, stop));
             })
             .map_err(|e| GpuError::Thread(format!("the Spout list sentinel did not start: {e}")))?;
         Ok(Self {
@@ -241,10 +271,11 @@ impl ListSentinel {
         self.ended.try_recv().ok()
     }
 
-    /// Stop it and wait until it ended: at most one wait. A lock it was
-    /// handed in that wait is given back first.
+    /// Stop it and wait until it ended: it ends at once. A lock it was
+    /// handed before the stop is given back first.
     pub fn stop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
+        // SAFETY: the event is open until `self` is dropped.
+        let _ = unsafe { SetEvent(self.stop.handle()) };
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -257,30 +288,43 @@ impl Drop for ListSentinel {
     }
 }
 
-/// The sentinel's thread: wait on the mutex `name` until it is handed the
-/// lock (given back at once), asked to stop, or a wait fails.
-fn wait_and_give_back(name: &str, stop: &AtomicBool) -> SentinelEnd {
+/// The sentinel's thread: one wait on its stop event and the mutex `name`;
+/// a lock it is handed is given back at once.
+fn wait_and_give_back(name: &str, stop: HANDLE) -> SentinelEnd {
     let Some(mutex) = Named::open(name) else {
         return SentinelEnd::Failed(format!("the mutex {name} did not open"));
     };
-    loop {
-        // SAFETY: `mutex.0` is an open mutex handle with SYNCHRONIZE access.
-        let wait = unsafe { WaitForSingleObject(mutex.0, SENTINEL_WAIT_MS) }.0;
-        match sentinel_step(wait, stop.load(Ordering::SeqCst)) {
-            SentinelStep::GiveBack { abandoned } => {
-                // SAFETY: the wait just gave this thread the mutex.
-                return match unsafe { ReleaseMutex(mutex.0) } {
-                    Ok(()) => SentinelEnd::GivenBack { abandoned },
-                    Err(e) => SentinelEnd::Failed(format!("ReleaseMutex: {e}")),
-                };
-            }
-            SentinelStep::WaitAgain => {}
-            SentinelStep::Stop => return SentinelEnd::Stopped,
-            SentinelStep::Fail => {
-                return SentinelEnd::Failed(format!("the wait answered {wait:#x}"));
-            }
+    // SAFETY: both handles are open for the whole wait: the event until the
+    // `ListSentinel` joined this thread, the mutex until `mutex` drops.
+    let wait = unsafe { WaitForMultipleObjects(&[stop, mutex.0], FALSE, INFINITE) }.0;
+    match sentinel_step(wait) {
+        SentinelStep::GiveBack { abandoned } => give_back_taken(&mutex, abandoned),
+        SentinelStep::Stop => SentinelEnd::Stopped,
+        SentinelStep::Fail => SentinelEnd::Failed(format!("the wait answered {wait:#x}")),
+    }
+}
+
+/// Give back the lock the sentinel's wait was handed, tried
+/// `SENTINEL_RELEASE_TRIES` times (the release of a mutex this thread just
+/// acquired is not expected to fail). If it still fails, a WARN names the
+/// error and the sentinel ends holding the lock, which its end leaves
+/// abandoned again for the next waiter.
+fn give_back_taken(mutex: &Named, abandoned: bool) -> SentinelEnd {
+    let mut last = String::new();
+    for _ in 0..SENTINEL_RELEASE_TRIES {
+        // SAFETY: the wait gave this thread the mutex.
+        match unsafe { ReleaseMutex(mutex.0) } {
+            Ok(()) => return SentinelEnd::GivenBack { abandoned },
+            Err(e) => last = e.to_string(),
         }
     }
+    warn!(
+        error = %last,
+        "sp-gpu: the Spout list sentinel could not give the lock back - it ends holding it"
+    );
+    SentinelEnd::Failed(format!(
+        "ReleaseMutex failed {SENTINEL_RELEASE_TRIES} times: {last}"
+    ))
 }
 
 /// The full path of process `pid`'s image, if it can be read.
