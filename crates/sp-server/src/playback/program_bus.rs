@@ -556,11 +556,11 @@ impl ProgramCore {
             if lag_slots_100ns(expected, horizon, self.fps) > GENLOCK_MAX_CATCHUP_INTERVALS {
                 let target = first_pending.map_or(horizon, |first| first.min(horizon));
                 self.last = Some(floor_boundary_100ns(target - 1, self.fps));
-                self.health.resyncs += 1;
+                self.count_resync(expected);
                 continue;
             }
             let (stamp_100ns, shows) = (expected, self.fill_source(expected));
-            self.count_fill(shows);
+            self.count_fill(expected, shows);
             self.commit(ProgramJob::Standby { stamp_100ns }, shows);
         }
     }

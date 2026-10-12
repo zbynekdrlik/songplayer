@@ -47,12 +47,31 @@ pub(super) enum WindowStep {
 }
 
 impl ProgramCore {
-    /// A boundary filled with the program's standby pair, showing `shows`
-    /// (`fill_source`): `filled`, and #257's `filled_owned` when that is a
-    /// real source's boundary (its audio went missing).
-    pub(super) fn count_fill(&mut self, shows: Option<i64>) {
+    /// Boundary `stamp_100ns` filled with the program's standby pair,
+    /// showing `shows` (`fill_source`): `filled`, and #257's `filled_owned`
+    /// when a real source's audio went missing there ([`Self::owned`]).
+    pub(super) fn count_fill(&mut self, stamp_100ns: i64, shows: Option<i64>) {
         self.health.filled += 1;
-        self.health.filled_owned += u64::from(real_source(shows));
+        self.health.filled_owned += u64::from(self.owned(stamp_100ns, shows));
+    }
+
+    /// A resync: the missed boundaries from `stamp_100ns` on are skipped.
+    /// `resyncs`, and #257's `resyncs_owned` when a real source's audio went
+    /// missing there.
+    pub(super) fn count_resync(&mut self, stamp_100ns: i64) {
+        self.health.resyncs += 1;
+        let shows = self.fill_source(stamp_100ns);
+        self.health.resyncs_owned += u64::from(self.owned(stamp_100ns, shows));
+    }
+
+    /// #257: whether boundary `stamp_100ns`, showing `shows`, carries a real
+    /// source's audio. In a running fade either side's: a fade INTO Blank
+    /// shows Blank but still mixes the outgoing playlist (review round 1).
+    fn owned(&self, stamp_100ns: i64, shows: Option<i64>) -> bool {
+        match self.window_at(stamp_100ns) {
+            Some(w) if w.cue == Cue::Open => real_source(Some(w.to)) || real_source(w.from),
+            _ => real_source(shows),
+        }
     }
 
     /// The window whose range covers boundary `stamp_100ns`, if any.
@@ -171,7 +190,7 @@ impl ProgramCore {
                 self.commit(ProgramJob::Source(job), from);
             }
             None => {
-                self.count_fill(from);
+                self.count_fill(stamp, from);
                 self.commit(ProgramJob::Standby { stamp_100ns: stamp }, from);
             }
         }
