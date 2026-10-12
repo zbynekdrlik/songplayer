@@ -43,6 +43,7 @@ pub mod ndi_input; // #212: the NDI input "OBS manuál" on the genlock grid → 
 pub mod nv12_fit; // #215: aspect-kept NV12 placement (preview letterbox + program fit)
 pub mod paced_grid; // #147 the paced output's own boundary clock (pure, Linux-tested)
 pub mod paced_output; // #168/#147 a playlist's paced output: handoff + consumer → the program bus (cross-platform)
+pub mod paced_producer; // #147/#257 the decode producer's items: frames, then the held last frame to the audio's end
 pub mod pacer;
 pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame queue
 pub mod pacer_sink; // #203 pacer scheduling + shared-frame standby submit helpers

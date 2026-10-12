@@ -17,12 +17,11 @@ use crossbeam_channel::{Receiver, TryRecvError};
 use tracing::{debug, error, info, warn};
 
 use crate::playback::decode_thread::spawn_decode_thread;
-use crate::playback::frame_buf::SharedFrame;
 use crate::playback::ndi_health::{AudioStats, PacingStats, PlaybackStateLabel};
 use crate::playback::paced_output::{InstalledBus, PacedFeed, PipelineOutput, SharedHandoff};
+use crate::playback::paced_producer::{DecodeProducer, QueuedFrame};
 use crate::playback::pacer::{
-    PacedFrame, Pacer, PrerollGate, ServiceOutcome, Standby, StandbyBlack, open_paced_decoder,
-    plan_sleep_100ns,
+    Pacer, PrerollGate, ServiceOutcome, Standby, StandbyBlack, open_paced_decoder, plan_sleep_100ns,
 };
 use crate::playback::pacer_queue::{ProducerAction, SharedQueue};
 use crate::playback::pacer_spin::spin_to_boundary;
@@ -32,24 +31,6 @@ use crate::playback::pipeline::{
 // The song-start pre-roll's standby black: the idle fill's 1080p size (#147).
 use crate::playback::pipeline_paced_idle::{IDLE_H as STANDBY_H, IDLE_W as STANDBY_W};
 use crate::playback::pipeline_paced_submit::emit_heartbeat_paced;
-
-/// A frame handed from the decode producer to the emit consumer (#147): the paced
-/// frame, the ABSOLUTE decoded position (ms) for the pipeline's Position
-/// events, and whether the decoder had handed out the song's last audio sample
-/// with it (#257, `SplitSyncedDecoder::audio_ended`).
-type QueuedFrame = (PacedFrame, u64, bool);
-
-/// The decode producer's position (#217).
-struct ProducerPos {
-    /// The PTS origin: where the song really plays from since its start or
-    /// its last seek, so the decoded PTS is 0-based.
-    pts_offset_ms: u64,
-    /// The position of the last frame decoded (the origin before one is):
-    /// where a refused seek leaves the decoder.
-    current_ms: u64,
-    /// The seek generation the producer pushes under.
-    epoch: u64,
-}
 
 /// Look-ahead depth of the decode queue (#147 box test 4 fix). ≥ 8 frames ≈
 /// 330 ms at 24 fps (> 3× the observed 93–111 ms decode p99), so a decode-tail
@@ -78,42 +59,6 @@ pub(crate) fn request_high_res_timer() {
         timeBeginPeriod(1);
     }
     info!("requested 1 ms system timer (timeBeginPeriod) for genlock pacing");
-}
-
-/// Convert an MF-decoded video frame + its audio chunks into a [`PacedFrame`].
-/// `pts_offset_ms` is subtracted so the PTS is measured from playback start
-/// (0-based) — the origin the pacer maps onto the wall grid. Each audio chunk
-/// keeps its MEDIA time on the same 0-based origin (in `timecode_100ns`), which
-/// the pacer uses to align the audio to the picture (#148 design v2).
-fn to_paced_frame(
-    video: sp_decoder::DecodedVideoFrame,
-    audio: Vec<sp_decoder::DecodedAudioFrame>,
-    pts_offset_ms: u64,
-) -> PacedFrame {
-    let rel_ms = video.timestamp_ms.saturating_sub(pts_offset_ms);
-    let pts_ns = (rel_ms as i64).saturating_mul(1_000_000);
-    let ndi_audio: Vec<sp_ndi::AudioFrame> = audio
-        .into_iter()
-        .map(|af| sp_ndi::AudioFrame {
-            // 0-based media time (100 ns). Only the pacer reads it; the boundary
-            // chunk it submits is stamped on its boundary (#224).
-            timecode_100ns: Some((af.timestamp_ms as i64 - pts_offset_ms as i64) * 10_000),
-            data: af.data,
-            channels: af.channels,
-            sample_rate: af.sample_rate,
-        })
-        .collect();
-    PacedFrame {
-        pts_ns,
-        width: video.width,
-        height: video.height,
-        stride: video.stride,
-        // Wrap the decoded NV12 buffer ONCE on the producer thread (#203 2b);
-        // every downstream hop (pacer repeat, handoff, submit holdover) is an
-        // `Arc` bump of this allocation, recycled to the frame pool on last drop.
-        video: SharedFrame::new(video.data),
-        audio: ndi_audio,
-    }
 }
 
 /// Sleep the monotonic clock until ~2 ms before `until_100ns` (wall-clock
@@ -202,10 +147,12 @@ fn log_song_summary(
 /// duration, the source fps and where the song really starts (#217: 0 when the
 /// start seek failed), or an open error, back over `open_tx`, and where the song
 /// plays on from after each seek to the engine (`PipelineEvent::Seeked`, #217).
-/// Preview sampling happens HERE — off the time-critical emit/submit path
-/// (`preview.md`). Exits on a Stop from the consumer, dropping the decoder on this
-/// thread. #223 S3b: the reader opens in the `video_hw_decode` mode applied when
-/// the song opens (`video_decode.rs`).
+/// What it pushes (each frame, then past the video's end the held last frame
+/// with the audio still to play, #257) and the preview offers are built by
+/// [`DecodeProducer`] (`paced_producer.rs`, Linux-tested) — off the
+/// time-critical emit/submit path (`preview.md`). Exits on a Stop from the
+/// consumer, dropping the decoder on this thread. #223 S3b: the reader opens in
+/// the `video_hw_decode` mode applied when the song opens (`video_decode.rs`).
 #[cfg_attr(test, mutants::skip)]
 #[allow(clippy::too_many_arguments)]
 fn run_decode_producer(
@@ -268,11 +215,7 @@ fn run_decode_producer(
         playlist_id,
         "paced producer",
     );
-    let mut pos = ProducerPos {
-        pts_offset_ms: start_ms,
-        current_ms: start_ms,
-        epoch: 0,
-    };
+    let mut items = DecodeProducer::new(start_ms);
 
     let duration_ms = decoder.duration_ms();
     // #168 r6b: report the DECODER's source fps alongside the duration so the
@@ -285,51 +228,39 @@ fn run_decode_producer(
         num as f32 / den as f32
     };
     if open_tx
-        .send(Ok((duration_ms, source_fps, pos.pts_offset_ms)))
+        .send(Ok((duration_ms, source_fps, start_ms)))
         .is_err()
     {
         return; // the emit thread is already gone
     }
 
     loop {
-        match decoder.next_synced() {
-            Ok(Some((video_frame, audio_frames))) => {
-                // #15/#178: offer video + post-mix audio to BOTH preview taps on
-                // the PRODUCER thread — off the time-critical emit/submit path
-                // (`preview.md`). No viewer => a couple of relaxed atomic loads.
-                taps.offer_frame(&video_frame, &audio_frames);
-                let decoded_ms = video_frame.timestamp_ms;
-                pos.current_ms = decoded_ms;
-                // #257: whether the song's last audio sample rides this frame.
-                let item = (
-                    to_paced_frame(video_frame, audio_frames, pos.pts_offset_ms),
-                    decoded_ms,
-                    decoder.audio_ended(),
-                );
-                match shared.producer_push(item, pos.epoch) {
-                    ProducerAction::Continue => {}
-                    ProducerAction::Seek {
-                        position_ms,
-                        epoch: new_epoch,
-                    } => producer_seek(
-                        &mut decoder,
-                        &mut pos,
-                        position_ms,
-                        new_epoch,
-                        &event_tx,
-                        playlist_id,
-                    ),
-                    ProducerAction::Stop => return,
-                }
-            }
+        // #15/#178: each item is offered to BOTH preview taps here, on the
+        // PRODUCER thread. No viewer => a couple of relaxed atomic loads.
+        match items.next_item(&mut decoder, &taps) {
+            Ok(Some(item)) => match shared.producer_push(item, items.epoch()) {
+                ProducerAction::Continue => {}
+                ProducerAction::Seek {
+                    position_ms,
+                    epoch: new_epoch,
+                } => producer_seek(
+                    &mut decoder,
+                    &mut items,
+                    position_ms,
+                    new_epoch,
+                    &event_tx,
+                    playlist_id,
+                ),
+                ProducerAction::Stop => return,
+            },
             Ok(None) => {
-                if producer_drain_wait(&mut decoder, &shared, &mut pos, &event_tx, playlist_id) {
+                if producer_drain_wait(&mut decoder, &shared, &mut items, &event_tx, playlist_id) {
                     return;
                 }
             }
             Err(e) => {
                 error!(playlist_id, %e, "paced producer: decode error");
-                if producer_drain_wait(&mut decoder, &shared, &mut pos, &event_tx, playlist_id) {
+                if producer_drain_wait(&mut decoder, &shared, &mut items, &event_tx, playlist_id) {
                     return;
                 }
             }
@@ -337,44 +268,35 @@ fn run_decode_producer(
     }
 }
 
-/// Apply a producer-side seek: seek the decoder, adopt where the song really
-/// plays on from (#217, `real_seek_ms`: the asked position, or where the decoder
-/// was when it refused the seek) as the new PTS origin, and the new epoch. Then
-/// report that position to the engine (`PipelineEvent::Seeked`): the song's
-/// title clock moves on it. Sent before the next frame is decoded, and the
-/// emit thread joins this producer before the next song opens, so the report
-/// comes after this song's `Started` and before the next song's.
+/// Apply a producer-side seek ([`DecodeProducer::seek`]: the decoder, the new
+/// PTS origin where the song really plays on from, #217, and the new epoch),
+/// then report that position to the engine (`PipelineEvent::Seeked`): the
+/// song's title clock moves on it. Sent before the next frame is decoded, and
+/// the emit thread joins this producer before the next song opens, so the
+/// report comes after this song's `Started` and before the next song's.
 #[cfg_attr(test, mutants::skip)]
 fn producer_seek(
     decoder: &mut sp_decoder::SplitSyncedDecoder,
-    pos: &mut ProducerPos,
+    items: &mut DecodeProducer,
     position_ms: u64,
     new_epoch: u64,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
 ) {
-    let real = super::pipeline::real_seek_ms(
-        position_ms,
-        pos.current_ms,
-        |ms| decoder.seek(ms),
-        playlist_id,
-        "paced producer",
-    );
-    pos.pts_offset_ms = real;
-    pos.current_ms = real;
-    pos.epoch = new_epoch;
+    let real = items.seek(decoder, position_ms, new_epoch, playlist_id);
     let seeked = PipelineEvent::Seeked { position_ms: real };
     let _ = event_tx.send((playlist_id, seeked));
 }
 
-/// EOS / decode-error: mark end-of-stream, then BLOCK until the consumer requests
-/// a seek (scrub after end) or a stop. Returns `true` when the producer should
-/// exit its thread. `Continue` is never returned by `wait_after_eos`.
+/// The song's end (its audio played, #257) / a decode error: mark
+/// end-of-stream, then BLOCK until the consumer requests a seek (scrub after
+/// end) or a stop. Returns `true` when the producer should exit its thread.
+/// `Continue` is never returned by `wait_after_eos`.
 #[cfg_attr(test, mutants::skip)]
 fn producer_drain_wait(
     decoder: &mut sp_decoder::SplitSyncedDecoder,
     shared: &Arc<SharedQueue<QueuedFrame>>,
-    pos: &mut ProducerPos,
+    items: &mut DecodeProducer,
     event_tx: &tokio::sync::mpsc::UnboundedSender<(i64, PipelineEvent)>,
     playlist_id: i64,
 ) -> bool {
@@ -385,7 +307,14 @@ fn producer_drain_wait(
             position_ms,
             epoch: new_epoch,
         } => {
-            producer_seek(decoder, pos, position_ms, new_epoch, event_tx, playlist_id);
+            producer_seek(
+                decoder,
+                items,
+                position_ms,
+                new_epoch,
+                event_tx,
+                playlist_id,
+            );
             false
         }
         ProducerAction::Continue => false,

@@ -15,7 +15,7 @@
 //! * aligned input is never corrected, and a deep buffer is never servoed
 //!   toward a level target (no PLL level trim remains).
 //!
-//! Frames are built like `pipeline_paced::to_paced_frame` builds them: each
+//! Frames are built like `paced_producer::to_paced_frame` builds them: each
 //! audio chunk carries its 0-based media time in `timecode_100ns`.
 //! `super::super::*` resolves to the `pacer` module under test.
 
@@ -138,20 +138,28 @@ fn ahead_frame(j: i64, ahead: i64) -> PacedFrame {
     frame(b(j), vec![a])
 }
 
-/// Records, per emitted boundary, the video stamp and channel 0 of the audio.
+/// Records, per emitted boundary, the video stamp and channel 0 of the audio,
+/// and the picture shown: its first two bytes as a little-endian mark (#257:
+/// which frame a boundary held; 0 for the helpers' blank frames).
 #[derive(Default)]
 struct Rec {
     blocks: Vec<(i64, Vec<f32>)>,
+    shown: Vec<u16>,
 }
 
 impl PacedSink for Rec {
     fn emit(
         &mut self,
-        _video: &PacedFrame,
+        video: &PacedFrame,
         audio: &[AudioFrame],
         video_tc_100ns: i64,
         _audio_tc_100ns: i64,
     ) {
+        let mark = video
+            .video
+            .get(..2)
+            .map_or(0, |b| u16::from_le_bytes([b[0], b[1]]));
+        self.shown.push(mark);
         let mut ch0 = Vec::new();
         for a in audio {
             let c = a.channels as usize;

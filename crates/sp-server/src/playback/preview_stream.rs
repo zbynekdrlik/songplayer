@@ -712,10 +712,24 @@ impl DecodeTaps {
         video: &sp_decoder::DecodedVideoFrame,
         audio: &[sp_decoder::DecodedAudioFrame],
     ) {
-        self.preview
-            .try_offer(video.width, video.height, video.stride, &video.data);
-        self.stream
-            .try_offer_video(video.width, video.height, video.stride, &video.data);
+        self.offer_picture(video.width, video.height, video.stride, &video.data, audio);
+    }
+
+    /// [`offer_frame`](Self::offer_frame) for a picture given by its parts:
+    /// past the video's end the producer offers the HELD last frame with the
+    /// audio still playing (#257), so the preview keeps its picture and its
+    /// sound through the song's tail.
+    #[inline]
+    pub fn offer_picture(
+        &self,
+        width: u32,
+        height: u32,
+        stride: u32,
+        nv12: &[u8],
+        audio: &[sp_decoder::DecodedAudioFrame],
+    ) {
+        self.preview.try_offer(width, height, stride, nv12);
+        self.stream.try_offer_video(width, height, stride, nv12);
         for a in audio {
             self.stream
                 .try_offer_audio(&a.data, a.sample_rate, a.channels);
