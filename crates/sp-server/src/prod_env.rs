@@ -7,8 +7,9 @@
 //! real-time protection and every firewall profile OFF, and no startup check
 //! or test may let a box run otherwise.
 //!
-//! This module turns the facts read from the box ([`EnvFacts`], read by
-//! `prod_env_win.rs` on Windows with no process spawned) into a verdict
+//! This module turns the facts read from the box ([`EnvFacts`]: the raw
+//! reads of `prod_env_win.rs`, on Windows with no process spawned, made into
+//! facts by `prod_env_read.rs`; only the WMI reads are bounded) into a verdict
 //! ([`verdict`]), publishes it ([`EnvStore`], `GET /api/v1/status.environment`
 //! and `GET /api/v1/environment`) and logs it: one ERROR when a problem
 //! appears or changes, one INFO when it clears ([`Reporter`]). [`run`] checks
@@ -28,8 +29,8 @@ use tracing::{error, info};
 /// How often the box is checked again.
 pub const CHECK_EVERY: Duration = Duration::from_secs(60);
 
-/// How long one read may take before it counts as unreadable (a hung WMI or
-/// registry read never freezes the published status).
+/// How long the WMI reads may take before they count as unreadable (a hung
+/// WMI never freezes the published status; the registry is read directly).
 pub const READ_BOUND: Duration = Duration::from_secs(30);
 
 /// The LTSC editions (`EditionID`): Enterprise LTSC, its N edition, IoT
@@ -64,7 +65,7 @@ pub struct EnvFacts {
     /// Defender's real-time protection (WMI `MSFT_MpComputerStatus`); off
     /// when Defender is not installed.
     pub defender_realtime: Option<bool>,
-    /// The domain, private and public firewall profile ([`firewall_on`]).
+    /// The domain, private and public firewall profile (`read::firewall_on`).
     pub firewall: [Option<bool>; 3],
     /// Why a fact could not be read.
     pub read_errors: Vec<String>,
@@ -136,58 +137,6 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
         ltsc: edition.map(is_ltsc),
         edition_allowed: edition.map(is_allowed_edition),
         problems,
-    }
-}
-
-/// A registry DWORD as read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RegDword {
-    Value(u32),
-    /// The key or the value does not exist.
-    Absent,
-    /// The read failed with this Win32 error.
-    Failed(u32),
-}
-
-/// Whether a firewall profile is on: the group-policy value wins when it is
-/// set (`HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\<profile>`), else
-/// the local one (`…\SharedAccess\Parameters\FirewallPolicy\<profile>`). Any
-/// value but 0 is on. A policy that cannot be read, or a local value that is
-/// missing or cannot be read, cannot be verified (`Err`, why).
-pub fn firewall_on(
-    profile: FirewallProfile,
-    policy: RegDword,
-    local: RegDword,
-) -> Result<bool, String> {
-    let name = profile.name();
-    match (policy, local) {
-        (RegDword::Value(v), _) => Ok(v != 0),
-        (RegDword::Failed(code), _) => Err(format!(
-            "the {name} firewall policy could not be read (error {code})"
-        )),
-        (RegDword::Absent, RegDword::Value(v)) => Ok(v != 0),
-        (RegDword::Absent, RegDword::Absent) => {
-            Err(format!("the {name} firewall setting is missing"))
-        }
-        (RegDword::Absent, RegDword::Failed(code)) => Err(format!(
-            "the {name} firewall setting could not be read (error {code})"
-        )),
-    }
-}
-
-/// Defender's real-time protection from its WMI read: the property
-/// (`Ok(Some)`), no instance or no value (`Ok(None)`: cannot be verified), or
-/// the query's HRESULT. A missing namespace or class means Defender is not
-/// installed: off.
-pub fn defender_realtime(read: Result<Option<bool>, i32>) -> Result<bool, String> {
-    match read {
-        Ok(Some(on)) => Ok(on),
-        Ok(None) => Err("Defender's status names no real-time protection".to_string()),
-        Err(WBEM_E_INVALID_NAMESPACE | WBEM_E_INVALID_CLASS) => Ok(false),
-        Err(code) => Err(format!(
-            "Defender's status could not be read (0x{:08X})",
-            code as u32
-        )),
     }
 }
 
@@ -335,56 +284,77 @@ fn log_step(step: LogStep, status: &EnvironmentStatus, problems: &[EnvProblem]) 
 /// Runs a blocking read with a bound: a read that does not finish within it
 /// reads as unreadable, and the next call waits for that SAME read again
 /// instead of starting another (a hung read never piles up threads).
-pub struct Reader {
-    read: fn() -> EnvFacts,
-    pending: Option<tokio::task::JoinHandle<EnvFacts>>,
+pub struct Reader<T> {
+    read: fn() -> T,
+    pending: Option<tokio::task::JoinHandle<T>>,
 }
 
-impl Reader {
+impl<T: Send + 'static> Reader<T> {
     /// A reader of `read`, run on the blocking pool.
-    pub fn new(read: fn() -> EnvFacts) -> Self {
+    pub fn new(read: fn() -> T) -> Self {
         Self {
             read,
             pending: None,
         }
     }
 
-    /// The facts, or why they could not be read within `bound`.
-    pub async fn next(&mut self, bound: Duration) -> EnvFacts {
+    /// The read's value, or why it could not be had within `bound`.
+    pub async fn next(&mut self, bound: Duration) -> Result<T, String> {
         let mut handle = match self.pending.take() {
             Some(running) => running,
             None => tokio::task::spawn_blocking(self.read),
         };
         match tokio::time::timeout(bound, &mut handle).await {
-            Ok(Ok(facts)) => facts,
-            Ok(Err(e)) => EnvFacts::unread(format!("the check failed: {e}")),
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(e)) => Err(format!("the WMI check failed: {e}")),
             Err(_) => {
                 self.pending = Some(handle);
-                EnvFacts::unread(format!("the check did not finish within {bound:?}"))
+                Err(format!("the WMI check did not finish within {bound:?}"))
             }
         }
     }
 }
 
-/// This check's input: the facts through `reader` on Windows, none elsewhere.
-pub async fn next_check(reader: Option<&mut Reader>, bound: Duration) -> Check {
-    match reader {
-        Some(reader) => Check::Read(reader.next(bound).await),
-        None => Check::NotWindows,
+/// The Windows reads: the registry directly, WMI through the bounded reader.
+pub struct Platform {
+    direct: fn() -> DirectRead,
+    wmi: Reader<WmiRead>,
+}
+
+impl Platform {
+    /// The reads `direct` (at each check) and `wmi` (bounded).
+    pub fn new(direct: fn() -> DirectRead, wmi: fn() -> WmiRead) -> Self {
+        Self {
+            direct,
+            wmi: Reader::new(wmi),
+        }
     }
 }
 
-/// The platform's reader: Windows reads the facts (`prod_env_win.rs`).
-#[cfg(windows)]
-#[cfg_attr(test, mutants::skip)] // platform wiring; the reader's logic is tested
-fn platform_reader() -> Option<Reader> {
-    Some(Reader::new(win::read_facts))
+/// This check's input: the facts on Windows (WMI within `bound`, the
+/// registry as read now), none elsewhere.
+pub async fn next_check(platform: Option<&mut Platform>, bound: Duration) -> Check {
+    let Some(platform) = platform else {
+        return Check::NotWindows;
+    };
+    let wmi = platform.wmi.next(bound).await;
+    match tokio::task::spawn_blocking(platform.direct).await {
+        Ok(direct) => Check::Read(facts_from(&direct, &wmi)),
+        Err(e) => Check::Read(EnvFacts::unread(format!("the registry check failed: {e}"))),
+    }
 }
 
-/// The platform's reader: nothing to read off Windows.
+/// The platform's reads: Windows reads the facts (`prod_env_win.rs`).
+#[cfg(windows)]
+#[cfg_attr(test, mutants::skip)] // platform wiring; the reader's logic is tested
+fn platform() -> Option<Platform> {
+    Some(Platform::new(win::read_direct, win::read_wmi))
+}
+
+/// The platform's reads: nothing to read off Windows.
 #[cfg(not(windows))]
 #[cfg_attr(test, mutants::skip)] // platform wiring; `next_check(None, ..)` is tested
-fn platform_reader() -> Option<Reader> {
+fn platform() -> Option<Platform> {
     None
 }
 
@@ -392,19 +362,26 @@ fn platform_reader() -> Option<Reader> {
 /// [`global`], until the shutdown.
 #[cfg_attr(test, mutants::skip)] // the loop; `apply`, `next_check` and `Reader` are tested
 pub async fn run(mut shutdown: tokio::sync::broadcast::Receiver<()>) {
-    let mut reader = platform_reader();
+    let mut platform = platform();
     let mut reporter = Reporter::default();
     let mut tick = tokio::time::interval(CHECK_EVERY);
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                let check = next_check(reader.as_mut(), READ_BOUND).await;
+                let check = next_check(platform.as_mut(), READ_BOUND).await;
                 apply(global(), &mut reporter, &check, chrono::Utc::now().timestamp_millis());
             }
             _ = shutdown.recv() => break,
         }
     }
 }
+
+#[path = "prod_env_read.rs"]
+pub mod read;
+pub use read::{
+    AvProduct, DefenderRow, DirectRead, FirewallRow, RegDword, RegString, ServiceRead, WmiRead,
+    defender_realtime, facts_from, firewall_on,
+};
 
 #[cfg(windows)]
 #[path = "prod_env_win.rs"]
@@ -413,3 +390,7 @@ mod win;
 #[cfg(test)]
 #[path = "prod_env_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "prod_env_reader_tests.rs"]
+mod reader_tests;

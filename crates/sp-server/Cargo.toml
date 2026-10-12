@@ -114,6 +114,9 @@ windows-sys = { version = "0.59", features = [
     # #233: the production-environment guard reads the Windows edition and
     # the firewall profiles from the registry (RegGetValueW, `prod_env_win.rs`).
     "Win32_System_Registry",
+    # #233 review: the WinDefend service's state (OpenSCManagerW,
+    # QueryServiceStatusEx): Defender stopped or uninstalled reads off.
+    "Win32_System_Services",
 ] }
 # #233: the production-environment guard reads Defender's real-time protection
 # through WMI over COM (`prod_env_win.rs`: IWbemLocator, CoSetProxyBlanket),

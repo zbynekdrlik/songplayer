@@ -1,10 +1,7 @@
 //! #233: the production-environment guard — the edition rule, the verdict
-//! table, the firewall and Defender reads, the published status, the log
-//! steps, the bounded reader and both routes.
-
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Condvar, Mutex};
-use std::time::Duration;
+//! table, the published status, the log steps and both routes (the raw
+//! reads: `prod_env_read_tests.rs`; the bounded reader:
+//! `prod_env_reader_tests.rs`).
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -223,82 +220,6 @@ fn every_problem_is_listed_in_order() {
     );
 }
 
-// ---- the firewall: the policy wins over the local value ----
-
-#[test]
-fn a_firewall_policy_wins_over_the_local_value() {
-    use super::RegDword::{Absent, Failed, Value};
-    let d = FirewallProfile::Domain;
-    assert_eq!(firewall_on(d, Value(0), Value(1)), Ok(false));
-    assert_eq!(firewall_on(d, Value(1), Value(0)), Ok(true));
-    assert_eq!(firewall_on(d, Value(2), Absent), Ok(true));
-    assert_eq!(firewall_on(d, Value(0), Failed(5)), Ok(false));
-}
-
-#[test]
-fn with_no_policy_the_local_value_decides() {
-    use super::RegDword::{Absent, Value};
-    let p = FirewallProfile::Private;
-    assert_eq!(firewall_on(p, Absent, Value(0)), Ok(false));
-    assert_eq!(firewall_on(p, Absent, Value(1)), Ok(true));
-    assert_eq!(firewall_on(p, Absent, Value(7)), Ok(true));
-}
-
-#[test]
-fn a_firewall_that_cannot_be_read_says_why() {
-    use super::RegDword::{Absent, Failed, Value};
-    assert_eq!(
-        firewall_on(FirewallProfile::Domain, Failed(5), Value(0)),
-        Err("the domain firewall policy could not be read (error 5)".to_string())
-    );
-    assert_eq!(
-        firewall_on(FirewallProfile::Private, Absent, Absent),
-        Err("the private firewall setting is missing".to_string())
-    );
-    assert_eq!(
-        firewall_on(FirewallProfile::Public, Absent, Failed(1630)),
-        Err("the public firewall setting could not be read (error 1630)".to_string())
-    );
-}
-
-// ---- Defender ----
-
-#[test]
-fn the_wmi_status_codes_are_wmis() {
-    assert_eq!(WBEM_E_INVALID_NAMESPACE as u32, 0x8004_100E);
-    assert_eq!(WBEM_E_INVALID_CLASS as u32, 0x8004_1010);
-}
-
-#[test]
-fn defenders_real_time_protection_is_read_from_its_status() {
-    assert_eq!(defender_realtime(Ok(Some(true))), Ok(true));
-    assert_eq!(defender_realtime(Ok(Some(false))), Ok(false));
-}
-
-#[test]
-fn defender_not_installed_is_off() {
-    assert_eq!(defender_realtime(Err(WBEM_E_INVALID_NAMESPACE)), Ok(false));
-    assert_eq!(defender_realtime(Err(WBEM_E_INVALID_CLASS)), Ok(false));
-}
-
-#[test]
-fn a_defender_status_that_cannot_be_read_says_why() {
-    assert_eq!(
-        defender_realtime(Ok(None)),
-        Err("Defender's status names no real-time protection".to_string())
-    );
-    // E_ACCESSDENIED
-    assert_eq!(
-        defender_realtime(Err(0x8007_0005_u32 as i32)),
-        Err("Defender's status could not be read (0x80070005)".to_string())
-    );
-    // WBEM_S_TIMEDOUT, a success code the glue hands over as a failure.
-    assert_eq!(
-        defender_realtime(Err(0x0004_0004)),
-        Err("Defender's status could not be read (0x00040004)".to_string())
-    );
-}
-
 // ---- the published status ----
 
 #[test]
@@ -412,98 +333,6 @@ fn a_check_publishes_its_status_and_logs_each_change() {
     assert!(store.current().ok);
 }
 
-// ---- the bounded reader ----
-
-static GATE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
-static GATED_READS: AtomicUsize = AtomicUsize::new(0);
-
-/// A read that waits until the gate opens (only the reader test uses it).
-fn gated_read() -> EnvFacts {
-    GATED_READS.fetch_add(1, Ordering::SeqCst);
-    let (open, opened) = &GATE;
-    let mut is_open = open.lock().unwrap_or_else(|e| e.into_inner());
-    while !*is_open {
-        is_open = opened.wait(is_open).unwrap_or_else(|e| e.into_inner());
-    }
-    production()
-}
-
-/// Opens the gate when dropped, so a failing test never leaves the read
-/// blocked (the runtime's drop waits for its blocking tasks).
-struct OpenGate;
-
-impl Drop for OpenGate {
-    fn drop(&mut self) {
-        let (open, opened) = &GATE;
-        *open.lock().unwrap_or_else(|e| e.into_inner()) = true;
-        opened.notify_all();
-    }
-}
-
-#[tokio::test]
-async fn a_hung_read_is_unreadable_and_waited_for_never_started_again() {
-    let gate = OpenGate;
-    let mut reader = Reader::new(gated_read);
-    // The read cannot finish while the gate is shut: the bound passes.
-    let first = reader.next(Duration::from_millis(50)).await;
-    assert_eq!(
-        first,
-        EnvFacts::unread("the check did not finish within 50ms")
-    );
-    let second = reader.next(Duration::from_millis(50)).await;
-    assert_eq!(second, first);
-    // Released: the next call takes that same read's facts. Had the second
-    // call started another read, two would have run by now (each counts
-    // before it waits at the gate).
-    drop(gate);
-    let third = reader.next(Duration::from_secs(60)).await;
-    assert_eq!(third, production());
-    assert_eq!(
-        GATED_READS.load(Ordering::SeqCst),
-        1,
-        "one read, waited for twice"
-    );
-    // Done with it: the next call reads again.
-    let fourth = reader.next(Duration::from_secs(60)).await;
-    assert_eq!(fourth, production());
-    assert_eq!(GATED_READS.load(Ordering::SeqCst), 2);
-}
-
-fn panicking_read() -> EnvFacts {
-    panic!("the registry read panicked");
-}
-
-#[tokio::test]
-async fn a_read_that_panics_is_unreadable() {
-    let mut reader = Reader::new(panicking_read);
-    let facts = reader.next(Duration::from_secs(60)).await;
-    assert_eq!(facts.edition_id, None);
-    assert_eq!(facts.read_errors.len(), 1);
-    assert!(
-        facts.read_errors[0].starts_with("the check failed: "),
-        "{:?}",
-        facts.read_errors
-    );
-    assert!(!verdict(&facts).ok);
-}
-
-fn quick_read() -> EnvFacts {
-    with_edition("IoTEnterprise")
-}
-
-#[tokio::test]
-async fn a_check_reads_through_the_reader_or_says_not_windows() {
-    assert_eq!(
-        next_check(None, Duration::from_secs(60)).await,
-        Check::NotWindows
-    );
-    let mut reader = Reader::new(quick_read);
-    assert_eq!(
-        next_check(Some(&mut reader), Duration::from_secs(60)).await,
-        Check::Read(with_edition("IoTEnterprise"))
-    );
-}
-
 // ---- the routes (the process's store, through the real router) ----
 
 /// Serializes the tests that publish into the process's store.
@@ -545,21 +374,4 @@ async fn both_routes_answer_the_published_status() {
     let status = get_json(state, "/api/v1/status").await;
     assert_eq!(status["environment"], expected);
     global().publish(EnvironmentStatus::default());
-}
-
-// ---- the Windows glue, on the Windows CI job ----
-
-/// The registry and WMI reads run on a real Windows (the CI runner): every
-/// fact is read (its values are the runner's, so only their presence is
-/// asserted) and written to the job's log as evidence.
-#[cfg(windows)]
-#[test]
-fn the_windows_glue_reads_every_fact() {
-    use std::io::Write;
-    let facts = super::win::read_facts();
-    let _ = writeln!(std::io::stderr(), "[#233 prod_env on the runner] {facts:?}");
-    assert!(facts.read_errors.is_empty(), "{:?}", facts.read_errors);
-    assert!(facts.edition_id.is_some(), "{facts:?}");
-    assert!(facts.defender_realtime.is_some(), "{facts:?}");
-    assert!(facts.firewall.iter().all(Option::is_some), "{facts:?}");
 }
