@@ -47,19 +47,82 @@ async fn a_hung_read_is_unreadable_and_waited_for_never_started_again() {
     );
     let second = reader.next(Duration::from_millis(50)).await;
     assert_eq!(second, first);
-    // Released: the next call takes that same read's value. Had the second
-    // call started another read, two would have run by now (each counts
-    // before it waits at the gate).
-    drop(gate);
-    assert_eq!(reader.next(Duration::from_secs(60)).await, Ok(1));
+    // The third call finds the read still running and waits for it; the
+    // gate opens only once that call has started waiting (`join!` polls
+    // the call first, the opener sleeps first), so it takes that same
+    // read's value. Had a call started another read, its number would be
+    // 2 or more.
+    let opener = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(gate);
+    };
+    let (third, ()) = tokio::join!(reader.next(Duration::from_secs(60)), opener);
+    assert_eq!(third, Ok(1));
     assert_eq!(
         GATED_READS.load(Ordering::SeqCst),
         1,
-        "one read, waited for twice"
+        "one read, waited for three times"
     );
     // Done with it: the next call reads again.
     assert_eq!(reader.next(Duration::from_secs(60)).await, Ok(2));
     assert_eq!(GATED_READS.load(Ordering::SeqCst), 2);
+}
+
+static LATE_GATE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
+static LATE_READS: AtomicUsize = AtomicUsize::new(0);
+
+/// A read that waits until `LATE_GATE` opens (only the stale-read test uses
+/// it): the number of the read.
+fn late_read() -> usize {
+    let n = LATE_READS.fetch_add(1, Ordering::SeqCst) + 1;
+    let (open, opened) = &LATE_GATE;
+    let mut is_open = open.lock().unwrap_or_else(|e| e.into_inner());
+    while !*is_open {
+        is_open = opened.wait(is_open).unwrap_or_else(|e| e.into_inner());
+    }
+    n
+}
+
+/// Opens `LATE_GATE` when dropped.
+struct OpenLateGate;
+
+impl Drop for OpenLateGate {
+    fn drop(&mut self) {
+        let (open, opened) = &LATE_GATE;
+        *open.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        opened.notify_all();
+    }
+}
+
+impl<T> Reader<T> {
+    /// The read a call gave up on has finished since.
+    fn late_read_done(&self) -> bool {
+        self.pending.as_ref().is_some_and(|read| read.is_finished())
+    }
+}
+
+/// Review finding 7: a read that finished after its call gave up is stale;
+/// the next call reads afresh and never hands it over as this check's.
+#[tokio::test]
+async fn a_read_that_finished_late_is_dropped_and_read_afresh() {
+    let gate = OpenLateGate;
+    let mut reader = Reader::new(late_read);
+    assert_eq!(
+        reader.next(Duration::from_millis(50)).await,
+        Err("the WMI check did not finish within 50ms".to_string())
+    );
+    // The first read finishes now, between two checks.
+    drop(gate);
+    for _ in 0..4_000 {
+        if reader.late_read_done() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(reader.late_read_done(), "the first read never finished");
+    // The next check reads again: read 2's value, not the stale read 1's.
+    assert_eq!(reader.next(Duration::from_secs(60)).await, Ok(2));
+    assert_eq!(LATE_READS.load(Ordering::SeqCst), 2);
 }
 
 fn panicking_read() -> usize {

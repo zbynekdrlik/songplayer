@@ -283,7 +283,10 @@ fn log_step(step: LogStep, status: &EnvironmentStatus, problems: &[EnvProblem]) 
 
 /// Runs a blocking read with a bound: a read that does not finish within it
 /// reads as unreadable, and the next call waits for that SAME read again
-/// instead of starting another (a hung read never piles up threads).
+/// instead of starting another (a hung read never piles up threads). A read
+/// that finished only after its call gave up is stale by then (up to a whole
+/// check period old): the next call drops it and reads afresh, so a late
+/// read is never published as a fresh one.
 pub struct Reader<T> {
     read: fn() -> T,
     pending: Option<tokio::task::JoinHandle<T>>,
@@ -301,6 +304,7 @@ impl<T: Send + 'static> Reader<T> {
     /// The read's value, or why it could not be had within `bound`.
     pub async fn next(&mut self, bound: Duration) -> Result<T, String> {
         let mut handle = match self.pending.take() {
+            Some(late) if late.is_finished() => tokio::task::spawn_blocking(self.read),
             Some(running) => running,
             None => tokio::task::spawn_blocking(self.read),
         };
