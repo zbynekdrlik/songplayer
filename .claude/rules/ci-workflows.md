@@ -4,6 +4,8 @@ paths:
   - ".cargo/mutants.toml"
   - "scripts/rig_lease_gate.py"
   - "scripts/tests/test_rig_lease_gate.py"
+  - "scripts/spout-quiesce.ps1"
+  - "scripts/tests/test_spout_quiesce_workflows.py"
 ---
 
 # CI workflows — self-hosted runner shell traps, mutation gate, event de-dup
@@ -54,6 +56,38 @@ config `.github/actionlint.yaml` declares the `resolume` runner label and PP's
 `resolume-pp`, #229). Note: CI
 has **no** actionlint gate, and a pre-existing SC2034 (`i` unused) in the
 frontend-e2e mock-API wait loop makes actionlint exit 1 — that is not your diff.
+
+## Every step that kills SongPlayer quiesces its Spout senders first (#243 follow-up)
+
+A kill that lands while a SongPlayer thread holds one of Spout's locks
+leaves it abandoned, and the receiver it is handed to (Arena) keeps Spout's
+sender list for good (PP, 12.10.2026, deploy-pp 38239301748; `gpu-max.md`
+"Spout locks handed over abandoned"). `Stop-ScheduledTask` ends the task's
+process the same way as `taskkill /F`.
+
+- `scripts/spout-quiesce.ps1` (ASCII; `& "$env:GITHUB_WORKSPACE\scripts\spout-quiesce.ps1"`):
+  `POST /api/v1/program/spout/quiesce` (3 s), then `GET /api/v1/program`
+  every 100 ms until `max.state` is `quiesced`, at most `$TimeoutSec` = 5 s.
+  Best effort: a SongPlayer that is not running, does not answer, answers
+  404 (a build before the route) or is not quiesced in time is reported
+  with `Write-Host` and killed anyway. It never throws and never sets an
+  exit code, so the step's `$ErrorActionPreference = "Continue"` and its
+  own checks decide as before.
+- It runs right before the first stop of each kill: ci.yml "Deploy
+  SongPlayer" (before its `taskkill`), "Restart SongPlayer" (before its
+  `Stop-ScheduledTask`, and again before the fallback's `taskkill` of the
+  relaunched process), deploy-pp.yml "Stop SongPlayer" (before its
+  `Stop-ScheduledTask`). deploy-pp's "Start SongPlayer" ends a task instance
+  only when no SongPlayer process exists: nothing to quiesce there.
+- A deploy-pp dispatch of a build older than the script checks out no
+  `scripts/spout-quiesce.ps1`: the call writes a "not recognized" error
+  line and the step (Continue) stops SongPlayer as before.
+- Guard: `scripts/tests/test_spout_quiesce_workflows.py` (Eval Checks
+  pytest): in every PowerShell step that kills `SongPlayer.exe`, each
+  `taskkill` / `Stop-ScheduledTask` of SongPlayer has a quiesce call before
+  it with no relaunch (`schtasks /run`, `Start-ScheduledTask`) in between;
+  no other workflow kills SongPlayer; the script's URL, bound and
+  never-fail shape.
 
 ## Mutation gate (`.cargo/mutants.toml` + ci.yml `mutation-testing`)
 

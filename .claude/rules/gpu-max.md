@@ -408,7 +408,56 @@ MUTANT_QUERY_STATE, "SpoutSenderNames_mutex"), 1, …)` gives the owner's
 pid/tid; a `WaitOne(300)` from another process times out while it is kept.
 The PowerShell `Add-Type` probe used on PP is in #243 (comment of 12.10.2026).
 
-**WARP tests (`tests/spout.rs`):**
+**When SongPlayer itself dies mid-lock (#243 follow-up, FINDING of
+12.10.2026 ~12:58).** deploy-pp 38239301748 stopped SongPlayer with
+`taskkill /F` while one of its threads held `SpoutSenderNames_mutex`. The
+next waiter was Arena "Songs PP": handed the mutex abandoned, it kept it, and
+every new SongPlayer sender was refused `UNREADABLE` (holder named) until a
+manual rescue (`C:\ProgramData\SongPlayer\diag\spout_list_rescue.ps1`
+queued on the mutex, then Arena was killed: the helper was handed it
+abandoned 41 ms later and released it). A receiver cannot be fixed, so:
+
+1. **Quiesce before the kill.** `POST /api/v1/program/spout/quiesce`
+   (`api/program.rs`, `202 {state}`) → `MaxOut::quiesce`: nothing is
+   offered any more, and the `program-max` thread's next step is
+   `MaxNext::Quiesce` (after a stop, before everything else, whatever the
+   setting). `MaxWorker::quiesce` drops both senders (MAX, then
+   `SP-program`, each before its compositor), stops the list sentinel, and
+   the thread ends: no Spout call runs when the kill lands. `max.state` and
+   `max.fhd.state` read `quiesced` (`MaxPhase::Quiesced`, settled like
+   `Unsupported`: it wins over `off` and survives the thread's end) until
+   the process ends; only a restart brings the senders back. Every workflow
+   step that kills SongPlayer runs `scripts/spout-quiesce.ps1` first
+   (`ci-workflows.md`). Not limited to loopback callers: no route of this
+   API checks its caller, and the box's cloudflared tunnel connects from
+   127.0.0.1 anyway.
+2. **Win the lock back: the sentinel.** After every boundary, after both
+   sends, the `program-max` thread reads who holds Spout's list
+   (`program_max_list.rs` `ListSide::boundary` → `SpoutList::holder` →
+   sp-gpu `spout_list_holder` / `mutex_holder`: another thread's holder,
+   pid + program file name). The same program (pid), never this process,
+   on every read for `LIST_HELD_AFTER` = `MAX_RETRY_BACKOFF` (3 s) is named
+   once per holding (`ListWatch`, pure): one WARN `another program keeps
+   Spout's sender list`, and a sentinel starts, one at a time
+   (`ListSentinel`, thread `spout-list-sentinel`, `win/spout_lock.rs`). It
+   waits on the list's mutex in `SENTINEL_WAIT_MS` (500 ms) waits and reads
+   its stop flag after each (`sentinel_step`, pure: 0x0 or 0x80 → give it
+   back at once and end, 0x102 → wait again or stop, anything else → end);
+   it never spins and never holds the lock past the release. When the
+   holder exits, Windows hands the lock to its next waiter, the sentinel,
+   queued before a relaunched Arena: one INFO (`abandoned`), and the next
+   sender after its backoff reads the list again. A free read, this
+   process or another pid starts the count again; a sentinel that ended
+   (or did not start) lets the next naming start one; MAX off forgets the
+   holder (the sentinel keeps waiting); a quiesce stops it (joined, at
+   most one wait).
+3. **Visible.** `GET /api/v1/program` → `max.list_holder`: `null`, or
+   `{image, pid, since_s}` once named (`since_s` from the first read that
+   saw it). That program is the one to restart.
+
+**WARP tests (`tests/spout.rs`, `tests/spout_list.rs`).** The named-mutex
+helpers live in `tests/common/locks.rs` (both binaries use them;
+`tests/spout.rs` was at the 1000-line cap).
 
 - A helper thread takes the mutex and ENDS: that is an abandoned lock.
 - Another thread's 300 ms wait then tells free (0x0), kept (0x102) and
@@ -417,6 +466,16 @@ The PowerShell `Add-Type` probe used on PP is in #243 (comment of 12.10.2026).
   text is the test exe with ", this process".
 - `GiveBack` releases whatever the test thread still owns when dropped, so a
   failing test never poisons the next one.
+- #243 follow-up (`tests/spout_list.rs`, their own mutexes): `Doomed` holds
+  a mutex until `die`, then ends without releasing it; the sentinel queued
+  on it is handed it abandoned, gives it back, and another thread then
+  takes it with 0x0 (an `_alive` handle keeps the mutex object, so a fresh
+  mutex can never pass the check). A stopped sentinel ends `Stopped` within
+  one wait and leaves the lock to its holder; a released lock is given back
+  `abandoned: false`. `mutex_holder` names another thread's holder (pid +
+  the test exe), none for a free lock, the caller's own or no such mutex;
+  `spout_list_holder` reads Spout's own list lock (under the one-at-a-time
+  lock).
 
 ### WARP proof (`tests/spout.rs`, Windows only)
 
@@ -663,6 +722,9 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   (`POST /composition/layers/<n>/clips/<c>/connect`), the Spout clip showed
   MAX at once. Before a relaunch, read the connected clips
   (`ops\arena_layers.py`) so they can be restored.
+- **A forced kill can leave Spout's list to a receiver for good** (#243
+  follow-up, PP 12.10.2026): hence the deploy's quiesce, the list sentinel
+  and `max.list_holder` ("Spout locks handed over abandoned" above).
 
 ### The setting and the telemetry
 
@@ -681,7 +743,8 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   draw_us_p99, send_us_p99, send_at_us_p50/p99/max, send_late,
   vblank_output, vblank_state, vblank_tracking, vblank_period_ns, vblank_phase_us,
   send_off_grid, send_phase_us_p50/p99, slot_repicks, device_resets,
-  sender_backoffs, spout_name, adapter, fhd}` (`MaxStatus`; `fhd` = #239,
+  sender_backoffs, spout_name, adapter, list_holder, fhd}` (`MaxStatus`;
+  `list_holder` = #243 follow-up, above; `fhd` = #239,
   "The FHD Spout sender" below;
   `send_at_us_*` = send done − offer over the window, `send_late` = composes
   that ran past their due instant; `vblank_output` = the tracker's output
@@ -699,7 +762,9 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   RTX). R3-2 sketched `spout {frames, adapter}`; S2 ships the flat shape
   the S2 dispatch named, with `frames` = `submitted` and `adapter` at the
   top level. `state` (`state_label`): `unsupported` (off Windows: no
-  thread) wins, then `off` (the setting), then the thread: `running` (it
+  thread) wins, then `quiesced` (#243 follow-up: the deploy's quiesce, for
+  the rest of the process), then `off` (the setting), then the thread:
+  `running` (it
   takes jobs and its last boundary went out), `error: <why>` (its last
   boundary did not; `error: the program-max thread is not running` before
   it attached or after it ended). `submitted + failed` = the jobs it took
@@ -881,7 +946,9 @@ build step, and WARP and the RTX run the same source. A compile error is
   `adapter`, `picture`, `composition`, `quad`, `residency`, `color`,
   `reference`, `error`, `readback` (the mapped rows packed), `spout` (the
   sender name rule, the registry parsers, the shim's codes), `spout_state`
-  (the sender's registration: every refuse / confirm decision), `vblank`
+  (the sender's registration: every refuse / confirm decision), `spout_lock`
+  (#243: the lock names, the releases owed, the holder's text and program
+  name, the list sentinel's steps), `vblank`
   (the output pick, the refresh count and fit, the staleness bound). Keep
   it that way: logic added inside `win/` is untested by the gate.
   `win/vblank.rs` only calls DXGI / Win32 (`EnumOutputs`, `GetDesc`, which
@@ -925,4 +992,9 @@ build step, and WARP and the RTX run the same source. A compile error is
   pins through the worker. #239: `SpoutGpu::fhd_sender` and the
   `listed_size` impl on `SpoutSender` are glue too (`mutants::skip`);
   `SpoutGpu::fhd_compositor` stays gated
-  (`off_windows_the_production_fhd_compositor_is_unsupported`).
+  (`off_windows_the_production_fhd_compositor_is_unsupported`). #243
+  follow-up: `SpoutListLock`'s `holder`, `sentinel_ended` and
+  `stop_sentinel` are glue too (`mutants::skip`); its `start_sentinel`
+  stays gated (`off_windows_the_production_list_is_neither_read_nor_waited_on`),
+  and `ListWatch` / `ListSide` carry every decision
+  (`program_max_list_tests.rs`, over `FakeList`).
