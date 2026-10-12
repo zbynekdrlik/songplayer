@@ -402,3 +402,15 @@ fn a_marks_place_is_a_whole_unit_of_the_timeline() {
     assert_eq!(mark_x(0.09), 1, "0.54 rounds up");
     assert_eq!(mark_x(0.08), 0, "0.48 rounds down");
 }
+
+/// A zone west of UTC (UTC−5): its whole local hours, from the window's
+/// start on — the window's local start is `from` moved by the offset WEST.
+#[test]
+fn a_zone_west_of_utc_ticks_on_its_own_whole_hours() {
+    // 8.10. 20:53:20 – 9.10. 08:53:20 UTC = 15:53:20 – 3:53:20 local:
+    // 16:00 … 3:00 local.
+    assert_eq!(
+        axis_ticks(NOW - 12 * HOUR, NOW, &fixed(-300)),
+        ticks(NOW - 12 * HOUR + 400_000, HOUR, 12, false)
+    );
+}
