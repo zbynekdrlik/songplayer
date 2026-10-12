@@ -316,6 +316,7 @@ fn the_max_block_has_its_api_names() {
             "failed",
             "fhd",
             "height",
+            "list_holder",
             "send_at_us_max",
             "send_at_us_p50",
             "send_at_us_p99",

@@ -111,22 +111,25 @@ async fn a_quiesce_drops_both_spout_senders_and_ends_every_spout_call() {
         !max.offer_with(|| plain(2, &a)),
         "a quiesced MAX takes no job"
     );
-    let log = gpu.log();
-    assert_eq!(
-        (log.compositors_built, log.senders_built, log.sent),
-        (1, 1, 1),
-        "MAX: nothing built or sent after the quiesce"
-    );
-    assert_eq!(
-        (
-            log.fhd_compositors_built,
-            log.fhd_senders_built,
-            log.fhd_sent
-        ),
-        (1, 1, 1),
-        "SP-program: nothing built or sent after the quiesce"
-    );
-    drop(log);
+    {
+        // A block, not `drop(log)`: clippy's await_holding_lock does not
+        // see an explicit drop before the await below.
+        let log = gpu.log();
+        assert_eq!(
+            (log.compositors_built, log.senders_built, log.sent),
+            (1, 1, 1),
+            "MAX: nothing built or sent after the quiesce"
+        );
+        assert_eq!(
+            (
+                log.fhd_compositors_built,
+                log.fhd_senders_built,
+                log.fhd_sent
+            ),
+            (1, 1, 1),
+            "SP-program: nothing built or sent after the quiesce"
+        );
+    }
     let (_, json) = call(state, "GET", "/api/v1/program", None).await;
     assert_eq!(
         json["max"]["state"], "quiesced",
