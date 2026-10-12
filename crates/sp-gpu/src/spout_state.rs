@@ -50,11 +50,19 @@ pub const MAX_UNREADABLE: u32 = 30;
 /// a fresh one.
 pub const ACCESS_HELD: &str = "another program kept its texture lock, so Spout skipped every copy";
 
-/// How many sends in a row another program may hold the sender's texture
-/// lock before the sender is refused. A receiver holds it only while it
-/// copies a frame, so 30 sends in a row (each waiting 67 ms for it, about
-/// 2 s) is a lock that program never gives back.
+/// How many sends in a row another program may keep the sender's texture
+/// lock before the sender is refused: 30 sends in a row that each waited
+/// out Spout's 67 ms for it (about 2 s) is a lock that program never gives
+/// back. A send counts only when it cost that wait ([`ACCESS_TIMEOUT_US`]).
 pub const MAX_ACCESS_HELD: u32 = 30;
+
+/// #243 review: the send time (µs) at which a send waited out Spout's 67 ms
+/// texture-lock timeout (`spoutFrameCount::CheckAccess`), so Spout really
+/// skipped its copy. A receiver that takes the lock right after a send
+/// (Spout's own `ReceiveImage` maps a staging copy under it, 7–12 ms at
+/// 1920×1080) is seen holding it at the look, but cost the send nothing:
+/// such a send is not counted.
+pub const ACCESS_TIMEOUT_US: u64 = 60_000;
 
 /// What Spout's names list says about a name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,11 +226,13 @@ pub enum AccessHeld {
     Refuse(&'static str),
 }
 
-/// After a send that was not refused: `held_elsewhere` = another program's
-/// thread held the sender's texture lock just after it, `streak` = how many
-/// sends in a row it did before. Refused at [`MAX_ACCESS_HELD`] in a row;
-/// a send with the lock free starts the count again.
-pub fn access_held(streak: u32, held_elsewhere: bool) -> AccessHeld {
+/// After a send that was not refused: `held_elsewhere` = another thread held
+/// the sender's texture lock just after it, `send_us` = what the send took,
+/// `streak` = how many sends in a row counted before. A send counts when the
+/// lock was held elsewhere AND the send waited out Spout's timeout
+/// ([`ACCESS_TIMEOUT_US`]); refused at [`MAX_ACCESS_HELD`] in a row; any
+/// other send starts the count again.
+pub fn access_held(streak: u32, held_elsewhere: bool, _send_us: u64) -> AccessHeld {
     if !held_elsewhere {
         return AccessHeld::Streak(0);
     }

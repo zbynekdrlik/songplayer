@@ -726,8 +726,12 @@ impl Hold {
 impl Drop for Hold {
     fn drop(&mut self) {
         drop(self.release.take());
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+        if let Some(thread) = self.thread.take()
+            && let Err(panic) = thread.join()
+            && !std::thread::panicking()
+        {
+            // The holding thread failed (its release): the test fails too.
+            std::panic::resume_unwind(panic);
         }
     }
 }
@@ -760,6 +764,36 @@ fn a_list_lock_handed_over_abandoned_is_given_back() {
          sender's thread kept it, 0x80 = nothing took the abandoned lock)"
     );
     drop(sender);
+}
+
+/// #243 review: Spout's `CleanSenders` (a sender's open, and its name
+/// claim) reads every listed sender's info map under that map's lock; a
+/// lock it meets abandoned makes it drop that sender off the list, and
+/// this thread then owns the lock. It is given back, though the name is
+/// off the list by the time the call returns.
+#[test]
+fn a_listed_senders_map_lock_handed_over_abandoned_is_given_back() {
+    let _one = one_at_a_time();
+    let mut compositor = warp();
+    let listed_name = "SP-gpu-test-abandoned-map";
+    let mut listed_sender = SpoutSender::with_name(&compositor, listed_name).expect("a sender");
+    compose(&mut compositor, &Composition::Black);
+    listed_sender.send().expect("its first send lists it");
+    assert_eq!(listed(listed_name), 1, "{:?}", names());
+    let map_lock = format!("{listed_name}_mutex");
+    let _alive = abandon(&map_lock);
+    let _cleanup = GiveBack(TestMutex::open(&map_lock));
+    // The next open's CleanSenders reads the listed sender's map.
+    let opener = SpoutSender::with_name(&compositor, "SP-gpu-test-map-opener")
+        .expect("a sender opens on an abandoned map lock");
+    assert_eq!(
+        wait_elsewhere(&map_lock),
+        WAIT_OBJECT_0.0,
+        "another thread must take the listed sender's map lock at once (0x102 \
+         = the opener's thread kept it, 0x80 = nothing took the abandoned lock)"
+    );
+    drop(opener);
+    drop(listed_sender);
 }
 
 /// #243: the same for a sender's texture lock: a receiver that died

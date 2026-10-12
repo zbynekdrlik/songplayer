@@ -1,9 +1,9 @@
 //! Tests for the Spout sender's registration state machine (#223 S1b).
 
 use super::{
-    ACCESS_HELD, AccessHeld, AfterSend, BeforeSend, FirstSendFacts, Listed, MAX_ACCESS_HELD,
-    MAX_UNREADABLE, NOT_LISTED, REGISTRATION_FAILED, Registration, TAKEN, UNREADABLE, access_held,
-    after_send, before_send, claim,
+    ACCESS_HELD, ACCESS_TIMEOUT_US, AccessHeld, AfterSend, BeforeSend, FirstSendFacts, Listed,
+    MAX_ACCESS_HELD, MAX_UNREADABLE, NOT_LISTED, REGISTRATION_FAILED, Registration, TAKEN,
+    UNREADABLE, access_held, after_send, before_send, claim,
 };
 use crate::error::GpuError;
 
@@ -274,17 +274,26 @@ fn registered_facts() -> FirstSendFacts {
 /// #243: a send whose texture lock was free starts the count again.
 #[test]
 fn a_free_texture_lock_resets_the_streak() {
-    assert_eq!(access_held(0, false), AccessHeld::Streak(0));
-    assert_eq!(access_held(5, false), AccessHeld::Streak(0));
-    assert_eq!(access_held(29, false), AccessHeld::Streak(0));
+    assert_eq!(access_held(0, false, 70_000), AccessHeld::Streak(0));
+    assert_eq!(access_held(5, false, 70_000), AccessHeld::Streak(0));
+    assert_eq!(access_held(29, false, 70_000), AccessHeld::Streak(0));
 }
 
 /// #243: each send another program held the lock after counts one more.
 #[test]
 fn a_texture_lock_held_elsewhere_counts_up() {
-    assert_eq!(access_held(0, true), AccessHeld::Streak(1));
-    assert_eq!(access_held(1, true), AccessHeld::Streak(2));
-    assert_eq!(access_held(27, true), AccessHeld::Streak(28));
+    assert_eq!(
+        access_held(0, true, ACCESS_TIMEOUT_US),
+        AccessHeld::Streak(1)
+    );
+    assert_eq!(
+        access_held(1, true, ACCESS_TIMEOUT_US),
+        AccessHeld::Streak(2)
+    );
+    assert_eq!(
+        access_held(27, true, ACCESS_TIMEOUT_US),
+        AccessHeld::Streak(28)
+    );
 }
 
 /// #243: the 30th send in a row with the lock held elsewhere refuses the
@@ -292,12 +301,18 @@ fn a_texture_lock_held_elsewhere_counts_up() {
 #[test]
 fn a_texture_lock_held_elsewhere_for_thirty_sends_refuses_the_sender() {
     assert_eq!(MAX_ACCESS_HELD, 30);
-    assert_eq!(access_held(28, true), AccessHeld::Streak(29));
-    assert_eq!(access_held(29, true), AccessHeld::Refuse(ACCESS_HELD));
+    assert_eq!(
+        access_held(28, true, ACCESS_TIMEOUT_US),
+        AccessHeld::Streak(29)
+    );
+    assert_eq!(
+        access_held(29, true, ACCESS_TIMEOUT_US),
+        AccessHeld::Refuse(ACCESS_HELD)
+    );
     // Walked from a free lock: refused exactly at the 30th held send.
     let mut streak = 0;
     for send in 1..=MAX_ACCESS_HELD {
-        match access_held(streak, true) {
+        match access_held(streak, true, ACCESS_TIMEOUT_US) {
             AccessHeld::Streak(next) => {
                 assert!(send < MAX_ACCESS_HELD, "send {send} must refuse");
                 streak = next;
@@ -308,4 +323,26 @@ fn a_texture_lock_held_elsewhere_for_thirty_sends_refuses_the_sender() {
             }
         }
     }
+}
+
+/// #243 review: a receiver that takes the texture lock right after a send
+/// (Spout's `ReceiveImage` maps a staging copy under it) is seen holding it,
+/// but the send never waited for it: such a send is not counted, and it
+/// starts the count again.
+#[test]
+fn a_texture_lock_held_without_costing_the_send_its_wait_is_not_counted() {
+    assert_eq!(ACCESS_TIMEOUT_US, 60_000);
+    assert_eq!(
+        access_held(0, true, ACCESS_TIMEOUT_US - 1),
+        AccessHeld::Streak(0)
+    );
+    assert_eq!(access_held(29, true, 12_000), AccessHeld::Streak(0));
+    assert_eq!(
+        access_held(0, true, ACCESS_TIMEOUT_US),
+        AccessHeld::Streak(1)
+    );
+    assert_eq!(
+        access_held(29, true, 67_500),
+        AccessHeld::Refuse(ACCESS_HELD)
+    );
 }

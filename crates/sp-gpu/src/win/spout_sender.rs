@@ -251,7 +251,7 @@ impl SpoutSender {
             .map_err(|e| GpuError::removed(e.code().0 as u32))?;
         match after_send(self.registration, code, || first_send_facts(&self.shim)) {
             AfterSend::Shared(next) => {
-                self.check_texture_lock()?;
+                self.check_texture_lock(send_us)?;
                 if next == Registration::Confirmed && self.registration != next {
                     info!(name = %self.name, "sp-gpu: Spout lists the sender");
                 }
@@ -259,7 +259,7 @@ impl SpoutSender {
                 Ok(SpoutSendStats { send_us })
             }
             AfterSend::Lost { code, next } => {
-                self.check_texture_lock()?;
+                self.check_texture_lock(send_us)?;
                 self.registration = next;
                 Err(GpuError::Spout {
                     call: "spout_sender_send",
@@ -280,9 +280,9 @@ impl SpoutSender {
     /// sends in a row the sender is refused (named holder, off the list),
     /// and the next sender gets a fresh lock once that program's receiver
     /// has let go.
-    fn check_texture_lock(&mut self) -> Result<(), GpuError> {
+    fn check_texture_lock(&mut self, send_us: u64) -> Result<(), GpuError> {
         let holder = held_elsewhere(&access_mutex_name(&self.name));
-        match access_held(self.access_held, holder.is_some()) {
+        match access_held(self.access_held, holder.is_some(), send_us) {
             AccessHeld::Streak(streak) => {
                 self.access_held = streak;
                 Ok(())
