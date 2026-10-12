@@ -813,6 +813,66 @@ function asioBlockRefusal(a, at) {
 
 // #233 lane 3: the box's registered ASIO drivers (two, so a test can pick
 // one that is not the first).
+// #257: GET /api/v1/audio/faults — a fixed fixture of the audio fault
+// ledger's answer (`audio_faults::answer::FaultsAnswer`), so the UI can be
+// built against it: the program and a pipeline clean, FOH with one late
+// packet (a risk), SoundGrid with two underruns (a loss, the worst) and its
+// loop check's time. The server's `hours` rule (1..=2160, default 24) and
+// its refusal text.
+const AUDIO_FAULTS_REFUSAL = "hours must be a whole number from 1 to 2160";
+function audioFaultsFixture(now, hours) {
+  const start = now - 30 * 60_000;
+  const risk = now - 20 * 60_000;
+  const loss = now - 10 * 60_000;
+  const clean = (path, detail, events = []) => ({
+    path,
+    detail,
+    live: true,
+    clean_since_ms: start,
+    last_loss_ms: null,
+    last_risk_ms: null,
+    counts: {},
+    events: [{ ts_ms: start, kind: "start", severity: "info", amount: 1 }, ...events],
+  });
+  return {
+    now_ms: now,
+    from_ms: now - hours * 3_600_000,
+    hours,
+    worst: "out:out-2",
+    truncated: false,
+    paths: [
+      { ...clean("loop:out-2", "Waves SoundGrid"), loop: { checked_s: 3540, blind_s: 60 } },
+      {
+        ...clean("out:out-1", "FOH", [{ ts_ms: risk, kind: "late_packet", severity: "risk", amount: 12500 }]),
+        last_risk_ms: risk,
+        counts: { late_packet: 1 },
+      },
+      {
+        ...clean("out:out-2", "Waves SoundGrid", [{ ts_ms: loss, kind: "underrun", severity: "loss", amount: 2 }]),
+        clean_since_ms: loss,
+        last_loss_ms: loss,
+        counts: { underrun: 2 },
+      },
+      clean("pipeline:1", "SP-fast"),
+      clean("program", "SP-program"),
+    ],
+  };
+}
+
+app.get("/api/v1/audio/faults", (req, res) => {
+  const raw = req.query.hours;
+  let hours = 24;
+  if (raw !== undefined) {
+    const n = typeof raw === "string" && /^[0-9]+$/.test(raw) ? Number(raw) : NaN;
+    if (!(n >= 1 && n <= 2160)) {
+      res.status(400).type("text/plain").send(AUDIO_FAULTS_REFUSAL);
+      return;
+    }
+    hours = n;
+  }
+  res.json(audioFaultsFixture(Date.now(), hours));
+});
+
 app.get("/api/v1/audio/asio-drivers", (_req, res) => {
   // As the server (#233 release review): a list it could not read is a 500
   // naming why, in plain text — never an empty list.

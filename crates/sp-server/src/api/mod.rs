@@ -2,6 +2,7 @@
 
 pub mod ai;
 pub mod audio; // #233: GET /api/v1/audio/asio-drivers (the ASIO driver list)
+pub mod audio_faults; // #257: GET /api/v1/audio/faults (the audio fault ledger)
 pub mod dabing; // #180 dubbing D1
 pub mod diag; // #223 S0: POST /api/v1/diag/decode-bench
 pub mod live;
@@ -222,6 +223,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
         .route(
             "/api/v1/audio/asio-drivers",
             axum::routing::get(audio::get_asio_drivers),
+        )
+        // #257: every audio path's faults over the last N hours (the ledger).
+        .route(
+            "/api/v1/audio/faults",
+            axum::routing::get(audio_faults::get_audio_faults),
         )
         // Lyrics
         .route(
