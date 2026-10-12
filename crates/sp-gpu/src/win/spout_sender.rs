@@ -262,6 +262,7 @@ impl SpoutSender {
         GpuError::SpoutNotRegistered {
             name: self.name.clone(),
             why,
+            holder: None,
         }
     }
 }

@@ -376,6 +376,7 @@ pub(crate) fn not_registered() -> GpuError {
     GpuError::SpoutNotRegistered {
         name: "SP-program-MAX".into(),
         why: "test",
+        holder: None,
     }
 }
 

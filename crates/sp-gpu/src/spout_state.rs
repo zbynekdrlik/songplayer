@@ -42,6 +42,20 @@ pub const UNREADABLE: &str = "Spout's list stayed unreadable, so its listing was
 /// a stuck list can cost: up to 30 sends × 67 ms, about 2 s.
 pub const MAX_UNREADABLE: u32 = 30;
 
+/// Why a sender is refused (#243): another program kept its texture lock
+/// (`<name>_SpoutAccessMutex`) for [`MAX_ACCESS_HELD`] sends in a row, so
+/// Spout skipped every copy and the receivers show a frozen picture. That
+/// program was handed the lock abandoned and never gives it back; once the
+/// sender is gone its receiver lets go of the lock, and a new sender gets
+/// a fresh one.
+pub const ACCESS_HELD: &str = "another program kept its texture lock, so Spout skipped every copy";
+
+/// How many sends in a row another program may hold the sender's texture
+/// lock before the sender is refused. A receiver holds it only while it
+/// copies a frame, so 30 sends in a row (each waiting 67 ms for it, about
+/// 2 s) is a lock that program never gives back.
+pub const MAX_ACCESS_HELD: u32 = 30;
+
 /// What Spout's names list says about a name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Listed {
