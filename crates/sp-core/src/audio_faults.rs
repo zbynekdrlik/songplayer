@@ -648,28 +648,50 @@ pub fn next_fetch(polls: Polls, now_ms: u64, panel: Option<u32>) -> Option<Fetch
 /// forgets its window, so it is asked at once when the panel opens again
 /// (#257 review; the dashboard drops that window's answer with it, so a
 /// reopened panel never shows a stale one).
-pub fn polls_for(polls: Polls, _open: bool) -> Polls {
-    polls
+pub fn polls_for(polls: Polls, open: bool) -> Polls {
+    if open {
+        polls
+    } else {
+        Polls {
+            window: None,
+            ..polls
+        }
+    }
 }
 
 /// The failed requests in a row after one more request: an answer ends
 /// the run.
-pub fn failed_after(failed: u32, _answered: bool) -> u32 {
-    failed
+pub fn failed_after(failed: u32, answered: bool) -> u32 {
+    if answered {
+        0
+    } else {
+        failed.saturating_add(1)
+    }
 }
 
 /// The segment while the ledger does not answer: after
 /// [`MAX_FAILED_POLLS`] failed requests in a row the last answer is no
 /// longer shown as current (`None`: the answer's own segment).
-pub fn unavailable(_failed: u32) -> Option<Segment> {
-    None
+pub fn unavailable(failed: u32) -> Option<Segment> {
+    (failed >= MAX_FAILED_POLLS).then(|| Segment {
+        level: AudioLevel::Unknown,
+        text: "Zvuk: nedostupné".to_string(),
+        risks: None,
+        tip: format!("História chýb zvuku sa nedá načítať ({failed}× po sebe)."),
+    })
 }
 
 /// The panel's note while the ledger does not answer: how old the answer
 /// it shows is (`age_ms` by the page's clock since that answer landed;
 /// `None`: no answer landed yet).
-pub fn stale_sk(_failed: u32, _age_ms: Option<u64>) -> Option<String> {
-    None
+pub fn stale_sk(failed: u32, age_ms: Option<u64>) -> Option<String> {
+    (failed >= MAX_FAILED_POLLS).then(|| match age_ms {
+        Some(age) => format!(
+            "Server neodpovedá ({failed}× po sebe) — údaje sú z poslednej odpovede {}.",
+            ago_sk(i64::try_from(age).unwrap_or(i64::MAX))
+        ),
+        None => format!("Server neodpovedá ({failed}× po sebe) — história sa ešte nenačítala."),
+    })
 }
 
 #[cfg(test)]

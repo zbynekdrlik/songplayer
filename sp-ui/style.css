@@ -1672,6 +1672,7 @@ body {
     cursor: pointer;
 }
 .audio-faults-note { color: var(--text-dim); margin: 6px 0; }
+.audio-faults-stale { color: var(--warning); }
 .audio-path-row,
 .audio-axis-row {
     display: grid;
