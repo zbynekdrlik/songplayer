@@ -111,6 +111,10 @@ touched: `rustfmt --edition 2024 --check src/components/foo.rs
 src/components/bar.rs`. Same idea for clippy — scope to what you changed
 (`cargo clippy --target wasm32-unknown-unknown` and grep the output for your
 files) rather than treating pre-existing warnings elsewhere as yours to fix.
+Never pass `src/components/mod.rs` (or `lib.rs`) to `rustfmt` either, not
+even with `--check`: rustfmt follows every `mod` to its file, so the check
+reports (and a write rewrites) the whole crate's drift (#257 lane 2). Name
+the leaf files you touched; a one-line `mod` addition needs no format run.
 
 ## Layout-stable cards: reserve space, never conditionally render a container above other content
 
