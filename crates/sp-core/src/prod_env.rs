@@ -228,6 +228,21 @@ pub struct EnvironmentStatus {
     pub checked_at_ms: Option<i64>,
 }
 
+/// The health bar's `data-environment` marker of the last poll: `unchecked`
+/// (no check yet, or no answer yet: the default status), `ok` (checked,
+/// no problem), `violated` (anything else). A spec asserts it before it
+/// asserts the red segment's ABSENCE, so a page whose poll has not landed
+/// cannot pass for one that holds (review finding 5).
+pub fn marker(status: &EnvironmentStatus) -> &'static str {
+    if !status.checked {
+        "unchecked"
+    } else if status.ok && status.problems.is_empty() {
+        "ok"
+    } else {
+        "violated"
+    }
+}
+
 /// What the health bar's tooltip says before the problems.
 pub const RULE_SK: &str = "Produkčný počítač musí bežať na Windows LTSC alebo Windows 11 IoT \
      Enterprise, s vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), \

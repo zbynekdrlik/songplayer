@@ -178,6 +178,34 @@ fn status_with(problems: &[EnvProblem]) -> EnvironmentStatus {
 }
 
 #[test]
+fn the_marker_says_unchecked_ok_or_violated() {
+    assert_eq!(marker(&EnvironmentStatus::default()), "unchecked");
+    assert_eq!(marker(&status_with(&[])), "ok");
+    assert_eq!(
+        marker(&status_with(&[EnvProblem::DefenderRealtimeOn])),
+        "violated"
+    );
+    // Not ok with no problem named, or ok beside a problem: never "ok".
+    let not_ok = EnvironmentStatus {
+        checked: true,
+        ok: false,
+        ..EnvironmentStatus::default()
+    };
+    assert_eq!(marker(&not_ok), "violated");
+    let ok_with_a_problem = EnvironmentStatus {
+        ok: true,
+        ..status_with(&[EnvProblem::DefenderRealtimeOn])
+    };
+    assert_eq!(marker(&ok_with_a_problem), "violated");
+    // Not checked wins over anything else.
+    let unchecked = EnvironmentStatus {
+        checked: false,
+        ..status_with(&[EnvProblem::DefenderRealtimeOn])
+    };
+    assert_eq!(marker(&unchecked), "unchecked");
+}
+
+#[test]
 fn no_segment_before_the_first_check_or_while_the_box_holds() {
     assert_eq!(label(&EnvironmentStatus::default()), None);
     assert_eq!(label(&status_with(&[])), None);
