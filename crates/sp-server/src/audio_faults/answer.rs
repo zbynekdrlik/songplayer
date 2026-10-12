@@ -1,9 +1,14 @@
 //! #257: `GET /api/v1/audio/faults?hours=N` — the answer, built purely from
 //! what the store read (`store.rs`) and the paths that run now.
 //!
-//! Per path: `clean_since_ms` = its last `loss` row in the window, else its
-//! latest `start` row in it, else the window's start (a path with no row
-//! in the window was clean for all of it); `last_loss_ms` / `last_risk_ms`;
+//! Per path: `clean_since_ms` = its newest `loss` row the ledger keeps,
+//! looked up BEYOND the asked window (`store::clean_marks`), else its FIRST
+//! `start` row it keeps (a planned restart is no fault: the main session's
+//! ruling on #257), else the ledger's oldest instant (`kept_from_ms`) when
+//! the window has rows of the path, else now (the ledger has not seen it
+//! yet); the answer's own `clean_since_ms` is the whole chain's (the newest
+//! loss of any path kept, else the first start kept); `last_loss_ms` /
+//! `last_risk_ms` (the window's);
 //! `losses` / `risks` = the window's loss / risk rows (each one fault the
 //! ledger recorded at its time: the dashboard's count);
 //! `counts` = the faults per kind (loss and risk rows: a counter's steps
@@ -97,7 +102,12 @@ struct PathAcc {
     live: bool,
     last_loss_ms: Option<i64>,
     last_risk_ms: Option<i64>,
-    last_start_ms: Option<i64>,
+    /// The window has a row of the path.
+    seen: bool,
+    /// Its newest loss the ledger keeps (`CleanMark`).
+    kept_loss_ms: Option<i64>,
+    /// Its first start the ledger keeps (`CleanMark`).
+    first_start_ms: Option<i64>,
     losses: i64,
     risks: i64,
     counts: BTreeMap<String, i64>,
@@ -110,6 +120,7 @@ impl PathAcc {
     fn add(&mut self, t: &KindTotal) {
         let newest = |kept: Option<i64>| Some(kept.map_or(t.last_ms, |k| k.max(t.last_ms)));
         let faults = occurrences(&t.kind, t.rows, t.amount);
+        self.seen = true;
         if t.severity == Severity::Loss.as_str() {
             self.last_loss_ms = newest(self.last_loss_ms);
             self.losses += t.rows;
@@ -118,8 +129,6 @@ impl PathAcc {
             self.last_risk_ms = newest(self.last_risk_ms);
             self.risks += t.rows;
             *self.counts.entry(t.kind.clone()).or_default() += faults;
-        } else if t.kind == kinds::START {
-            self.last_start_ms = newest(self.last_start_ms);
         } else if t.kind == kinds::CHECKED {
             self.checked_ms += t.amount;
         } else if t.kind == kinds::BLIND {
@@ -127,13 +136,18 @@ impl PathAcc {
         }
     }
 
-    fn answer(self, path: String, from_ms: i64) -> PathFaults {
+    fn answer(self, path: String, now_ms: i64, kept_from_ms: i64) -> PathFaults {
+        let unseen = if self.seen { kept_from_ms } else { now_ms };
         let loop_check = path.starts_with("loop:").then(|| LoopSeconds {
             checked_s: self.checked_ms as f64 / 1000.0,
             blind_s: self.blind_ms as f64 / 1000.0,
         });
         PathFaults {
-            clean_since_ms: self.last_loss_ms.or(self.last_start_ms).unwrap_or(from_ms),
+            clean_since_ms: self
+                .kept_loss_ms
+                .max(self.last_loss_ms)
+                .or(self.first_start_ms)
+                .unwrap_or(unseen),
             path,
             detail: self.detail,
             live: self.live,
@@ -148,10 +162,21 @@ impl PathAcc {
     }
 }
 
+/// The whole chain's clean time: the newest loss of any path the ledger
+/// keeps (a path gone since counts too), else the first start it recorded,
+/// else `unseen`.
+fn chain_since(paths: &[PathFaults], marks: &[CleanMark], unseen: i64) -> i64 {
+    let kept = marks.iter().filter_map(|m| m.last_loss_ms).max();
+    let window = paths.iter().filter_map(|p| p.last_loss_ms).max();
+    kept.max(window)
+        .or_else(|| marks.iter().filter_map(|m| m.first_start_ms).min())
+        .unwrap_or(unseen)
+}
+
 /// The answer at `now_ms` over `hours`, from the window's totals, its
 /// newest events (newest first, up to [`MAX_EVENTS`] + 1), the name each
-/// stored path's newest row carries, and the paths that run now (their own
-/// name wins).
+/// stored path's newest row carries, the paths that run now (their own
+/// name wins), and every path's marks over all the ledger keeps.
 pub fn build_answer(
     now_ms: i64,
     hours: u32,
@@ -159,9 +184,10 @@ pub fn build_answer(
     newest: Vec<StoredEvent>,
     details: &[(String, String)],
     live: &[(String, String)],
-    _marks: &[CleanMark],
+    marks: &[CleanMark],
 ) -> FaultsAnswer {
     let from_ms = window_start(now_ms, hours);
+    let kept_from_ms = kept_from(now_ms);
     let mut paths: BTreeMap<String, PathAcc> = BTreeMap::new();
     for (path, detail) in details {
         paths.entry(path.clone()).or_default().detail = detail.clone();
@@ -183,21 +209,33 @@ pub fn build_answer(
             amount: e.amount,
         });
     }
+    for m in marks {
+        if let Some(acc) = paths.get_mut(&m.path) {
+            acc.kept_loss_ms = m.last_loss_ms;
+            acc.first_start_ms = m.first_start_ms;
+        }
+    }
+    let unseen = if paths.values().any(|a| a.seen) {
+        kept_from_ms
+    } else {
+        now_ms
+    };
     let paths: Vec<PathFaults> = paths
         .into_iter()
-        .map(|(path, acc)| acc.answer(path, from_ms))
+        .map(|(path, acc)| acc.answer(path, now_ms, kept_from_ms))
         .collect();
     let worst = paths
         .iter()
         .filter_map(|p| p.last_loss_ms.map(|t| (t, &p.path)))
         .max_by_key(|(t, _)| *t)
         .map(|(_, path)| path.clone());
+    let clean_since_ms = chain_since(&paths, marks, unseen);
     FaultsAnswer {
         now_ms,
         from_ms,
         hours,
-        kept_from_ms: kept_from(now_ms),
-        clean_since_ms: from_ms,
+        kept_from_ms,
+        clean_since_ms,
         worst,
         truncated,
         paths,

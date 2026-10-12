@@ -457,12 +457,7 @@ pub fn segment(
             ago_sk(a.now_ms - at),
             name_of(p, playlist_name)
         ),
-        None => match chain_clean_since(a) {
-            Some(since) if since > a.from_ms => {
-                format!("Zvuk: bez chyby {}", duration_sk(a.now_ms - since))
-            }
-            _ => format!("Zvuk: bez chyby viac ako {window}"),
-        },
+        None => format!("Zvuk: bez chyby {}", clean_span_sk(a.clean_since_ms, a)),
     };
     let suffix = (worst.is_none() && risks > 0).then(|| format!(" · riziká: {risks}"));
     Segment {
@@ -523,14 +518,14 @@ pub fn clean_span_sk(clean_since_ms: i64, answer: &FaultsAnswer) -> String {
 /// window counts, a restart does not), or `bez chyby viac ako 90 d` when it
 /// reaches the oldest instant the ledger keeps.
 pub fn clean_sk(clean_since_ms: i64, answer: &FaultsAnswer, since: LocalTime) -> String {
-    if clean_since_ms > answer.from_ms {
+    if clean_since_ms > answer.kept_from_ms {
         format!(
             "bez chyby od {} ({})",
             dm_hm_sk(since),
             duration_sk(answer.now_ms - clean_since_ms)
         )
     } else {
-        format!("bez chyby viac ako {}", window_label(answer.hours))
+        format!("bez chyby {}", clean_span_sk(clean_since_ms, answer))
     }
 }
 
