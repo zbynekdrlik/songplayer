@@ -367,11 +367,99 @@ fn defenders_query_decides_its_fact() {
         defender: Err(0x8007_0005_u32 as i32),
         ..wmi()
     };
+    // The WinDefend service runs (state 4), so it cannot tell either.
     let facts = facts_from(&direct(), &Ok(refused));
     assert_eq!(facts.defender_realtime, None);
     assert_eq!(
         facts.read_errors,
-        ["Defender's status could not be read (0x80070005)"]
+        [
+            "Defender's status could not be read (0x80070005); the WinDefend service is \
+          not stopped (state 4)"
+        ]
+    );
+}
+
+// ---- Defender switched off entirely (review finding 3) ----
+
+#[test]
+fn the_service_says_off_when_stopped_or_not_installed() {
+    assert_eq!(SERVICE_STOPPED, 1);
+    assert_eq!(ERROR_SERVICE_DOES_NOT_EXIST, 1060);
+    assert_eq!(defender_service_off(ServiceRead::State(1)), Ok(()));
+    assert_eq!(defender_service_off(ServiceRead::Failed(1060)), Ok(()));
+    for (state, why) in [
+        (2, "the WinDefend service is not stopped (state 2)"),
+        (4, "the WinDefend service is not stopped (state 4)"),
+    ] {
+        assert_eq!(
+            defender_service_off(ServiceRead::State(state)),
+            Err(why.to_string())
+        );
+    }
+    assert_eq!(
+        defender_service_off(ServiceRead::Failed(5)),
+        Err("the WinDefend service could not be read (error 5)".to_string())
+    );
+    // A stopped-state number read as an error code is no stop.
+    assert!(defender_service_off(ServiceRead::Failed(1)).is_err());
+}
+
+/// Review finding 3: Defender's status cannot be read (no instance, an
+/// error, the WMI read timed out) while the WinDefend service is stopped
+/// or not installed: Defender is off, not "cannot be verified".
+#[test]
+fn defender_switched_off_entirely_reads_off() {
+    let stopped = DirectRead {
+        defender_service: ServiceRead::State(SERVICE_STOPPED),
+        ..direct()
+    };
+    let missing = DirectRead {
+        defender_service: ServiceRead::Failed(ERROR_SERVICE_DOES_NOT_EXIST),
+        ..direct()
+    };
+    let no_instance = WmiRead {
+        defender: Ok(None),
+        ..wmi()
+    };
+    let refused = WmiRead {
+        defender: Err(0x8007_0005_u32 as i32),
+        ..wmi()
+    };
+    let incomplete = WmiRead {
+        defender: Ok(Some(DefenderRow::default())),
+        ..wmi()
+    };
+    for read in [&stopped, &missing] {
+        for status in [&no_instance, &refused, &incomplete] {
+            let facts = facts_from(read, &Ok(status.clone()));
+            assert_eq!(facts.defender_realtime, Some(false), "{status:?}");
+            assert!(facts.read_errors.is_empty(), "{:?}", facts.read_errors);
+        }
+    }
+    // The WMI read itself timed out: the service still tells.
+    let why = "the WMI check did not finish within 30s".to_string();
+    let facts = facts_from(&stopped, &Err(why));
+    assert_eq!(facts.defender_realtime, Some(false));
+}
+
+#[test]
+fn a_running_defender_that_cannot_be_read_stays_unread() {
+    let refused = WmiRead {
+        defender: Err(0x8007_0005_u32 as i32),
+        ..wmi()
+    };
+    let unreadable_service = DirectRead {
+        defender_service: ServiceRead::Failed(5),
+        ..direct()
+    };
+    let facts = facts_from(&unreadable_service, &Ok(refused));
+    assert_eq!(facts.defender_realtime, None);
+    assert_eq!(
+        facts.read_errors,
+        [
+            "Defender's status could not be read (0x80070005); the WinDefend service could \
+          not be read (error 5)"
+        ]
     );
 }
 

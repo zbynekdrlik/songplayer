@@ -25,6 +25,12 @@ pub enum RegDword {
     Failed(u32),
 }
 
+/// `SERVICE_STOPPED`: a service's current state when it does not run.
+pub const SERVICE_STOPPED: u32 = 1;
+
+/// `ERROR_SERVICE_DOES_NOT_EXIST`: the service is not installed.
+pub const ERROR_SERVICE_DOES_NOT_EXIST: u32 = 1060;
+
 /// A service's state as the service manager reports it: its current state
 /// (`SERVICE_STOPPED` = 1, …), or the Win32 error of the read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,6 +201,23 @@ pub fn defender_realtime(read: Result<Option<bool>, i32>) -> Result<bool, String
         Err(code) => Err(format!(
             "Defender's status could not be read (0x{:08X})",
             code as u32
+        )),
+    }
+}
+
+/// Whether the `WinDefend` service says Defender is off, when its status
+/// cannot be read: stopped (a disabled service is stopped), or not
+/// installed. Running, starting, stopping or unreadable: it cannot tell.
+pub fn defender_service_off(service: ServiceRead) -> Result<(), String> {
+    match service {
+        ServiceRead::State(SERVICE_STOPPED) | ServiceRead::Failed(ERROR_SERVICE_DOES_NOT_EXIST) => {
+            Ok(())
+        }
+        ServiceRead::State(state) => Err(format!(
+            "the WinDefend service is not stopped (state {state})"
+        )),
+        ServiceRead::Failed(code) => Err(format!(
+            "the WinDefend service could not be read (error {code})"
         )),
     }
 }
