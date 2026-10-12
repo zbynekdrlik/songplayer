@@ -43,7 +43,7 @@ pub(crate) fn is_duration_mismatch(v_dur: u64, a_dur: u64) -> bool {
 /// a broken pair (a truncated video) never freezes the wall on one picture
 /// for minutes: the audio past the bound is never read, and the pacer counts
 /// that song's end as ONE `underrun_end`, so the ledger names the file.
-pub const AUDIO_PAST_VIDEO_MAX_MS: u64 = 1;
+pub const AUDIO_PAST_VIDEO_MAX_MS: u64 = 15_000;
 
 /// The cadence of the held steps when the video reports no frame rate (#257).
 const HELD_FALLBACK_FPS: u64 = 30;
