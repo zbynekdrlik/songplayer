@@ -525,10 +525,16 @@ wait for a peer that has the song", below).
     (`programRestoreTarget`): the latest recorded switch
     (`remote.last_remote_cut`) is the gate's own last press (its scene,
     recorded at or after the instant the gate sent it; the runner and
-    SongPlayer share PP's clock) and the program is on that press's source
-    — or, when that last press was refused (a keep: the NDI input inactive,
-    cg OBS refusing), on the source of the press before it, so a refused
-    manual press never leaves the test playlist on air. A playlist start
+    SongPlayer share PP's clock). A press that switched is the gate's
+    wherever it landed: every switch through SongPlayer replaces
+    `last_remote_cut`, so nobody moved the program since (12.10.2026: a
+    press of "Blank" landed on SongPlayer's own Blank, -2, not the predicted
+    "OBS manuál" -1, and the old "on that press's source" check left PP
+    silent for 2 h). When that last press was refused (a keep: the NDI
+    input inactive, cg OBS refusing) the program must be on the source of
+    the press before it (an operator's cut between the presses is kept), so
+    a refused manual press never leaves the test playlist on air. A test
+    never leaves the program silent: the owner watches SoundGrid by ear. A playlist start
     source is re-kicked to its next song, as at SNV. cg OBS goes back on
     its own scene only when the manual press moved it and it is still there
     (`cgRestoreTarget`), through the facade when SP-program stays on "OBS
