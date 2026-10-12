@@ -144,7 +144,24 @@ test.describe("audio outputs (#233)", () => {
       }
       const restore = JSON.stringify(current.filter((e) => !e.id.startsWith("e2e-")));
       const back = await request.patch("/api/v1/settings", { data: { audio_outputs: restore } });
-      socket.close();
+      try {
+        // #257: the probe output stops before its receiver closes: a send to
+        // a closed port is a send error, a loss on the audio fault ledger.
+        if (back.status() === 204) {
+          const probeRuns = async () => {
+            try {
+              return (await outputs(request)).some((o) => o.id.startsWith("e2e-"));
+            } catch {
+              return true;
+            }
+          };
+          await expect
+            .poll(probeRuns, { message: "the probe output is gone (the list is re-read every 5 s)", timeout: 20_000 })
+            .toBe(false);
+        }
+      } finally {
+        socket.close();
+      }
       expect(back.status(), "the stored list is restored").toBe(204);
     }
   });
