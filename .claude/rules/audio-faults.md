@@ -33,7 +33,10 @@ VBAN receive side), box work.
   lane 2: `store::clean_marks` reads the loss and start rows only, never a
   loop check's meters). `severity` = `loss` | `risk` | `info` (a
   path's start) | `meter` (a loop check's checked / blind ms). Kept 90 days
-  (`RETENTION_MS`), pruned at the first tick and then once a day.
+  (`RETENTION_MS`), pruned at the first tick and then once a day — except
+  each path's EARLIEST `start` row (#257 review, `store::prune`: a path's
+  first start bounds its clean time for good, so a pruned deploy never
+  resets it; a handful of rows).
 - ONE task (`audio_faults::run`, started in `start_program`, every
   `TICK` = 5 s, a tick at once) reads every path IN PROCESS
   (`probe::read`: `ProgramBus::status()`, `outputs().status()`,
@@ -129,7 +132,8 @@ mix (`Pair::Mix`: a fade's sum is the crossfade's own) on
 `{now_ms, from_ms, hours, kept_from_ms, clean_since_ms, worst, truncated,
 paths[{path, detail, live, clean_since_ms, last_loss_ms, last_risk_ms,
 losses, risks, counts{kind: n}, events[{ts_ms, kind, severity, amount}],
-loop?{checked_s, blind_s}}]}`:
+loss_buckets[60], risk_buckets[60], starts[ts_ms], loop?{checked_s,
+blind_s}}]}`:
 
 - the paths: every path that runs now (`probe::live_paths`, its own name)
   and every path with a row in the window (its newest row's `detail`);
@@ -142,14 +146,17 @@ loop?{checked_s, blind_s}}]}`:
   session's ruling on #257: the owner asks how long the audio has been free
   of losses): the path's newest `loss` row the ledger KEEPS (90 days),
   looked up BEYOND the asked window (`store::clean_marks` over
-  `kept_from(now)`, ONE extra grouped query on V39's index, the window's
-  own losses too), else its FIRST `start` row kept (never the latest: a
-  deploy does not reset it), else `kept_from_ms` when the window has rows
-  of the path (its start was pruned: clean for all the ledger keeps), else
-  now (the ledger has not seen it yet: no claim). `interrupted` stays a
+  `kept_from(now)`, ONE extra grouped query that reads V39's index alone:
+  `CASE WHEN severity = 'info'`, the window's own losses too), else its
+  FIRST `start` row EVER (never the latest: a deploy does not reset it;
+  the prune keeps it, #257 review; one older than the 90 days reads
+  `kept_from_ms`, "viac ako 90 d", for the path and the chain: no loss row
+  that old is left to disprove it), else `kept_from_ms` when the window
+  has rows of the path, else now (the ledger has not seen it yet: no
+  claim). `interrupted` stays a
   loss. The answer's own `clean_since_ms` is the whole CHAIN's: the newest
   loss of ANY path kept (a path gone since counts), else the first start
-  kept, else the same fallback. `kept_from_ms` = now − 90 d. `last_loss_ms`
+  ever (no older than `kept_from_ms`), else the same fallback. `kept_from_ms` = now − 90 d. `last_loss_ms`
   and `worst` stay the window's (the gate reads `last_loss_ms`);
 - `losses` / `risks` (lane 2) = the window's loss / risk ROWS: each one
   fault recorded at its time (a counter that grew in one tick, an event, a
@@ -162,6 +169,16 @@ loop?{checked_s, blind_s}}]}`:
 - `events` = the path's rows that are no meter, oldest first; at most
   `MAX_EVENTS` = 500 in the whole answer, the newest (`truncated`); the
   counts and `last_loss_ms` hold every row;
+- `loss_buckets` / `risk_buckets` (#257 review) = the window cut into
+  `BUCKETS` = 60 buckets by sp-core's `bucket_edges` (bucket i = [from +
+  ⌈i·span/60⌉, …), the edges the timeline's `bucket_of` uses), each
+  bucket's loss / risk ROWS — EVERY row of the window, never the capped
+  `events` (`store::bucket_counts`: one `GROUP BY path, severity, bucket`
+  whose `CASE` binds the edges, `bucket_case`); `starts` = the path's start
+  rows in the window, the newest `MAX_STARTS` = 100, oldest first
+  (`store::window_starts`); both put on by `answer::add_timeline`. The
+  dashboard draws its bars and marks from these only, so a loss older
+  than the newest 500 events keeps its bar;
 - `loop` on every `loop:` path (0 with no meter);
 - `worst` = the path with the most recent loss (`null`: none).
 
@@ -243,19 +260,32 @@ every service, so it is at first glance; the details are one click away.
   - a timeline per row: an SVG of `BUCKETS` = 60 buckets, bucket i =
     `[from + ⌈i·span/60⌉, …)` so an instant's bucket is `⌊(t − from)·60 /
     span⌋` exactly; a bar (`audio-bar`, `data-loss` / `data-risk`) only for
-    a bucket with a loss or risk ROW, loss red at the bottom, risk amber on
-    it, to scale against the panel's largest bucket, a part that is not
-    empty at least `MIN_BAR` = 2 of 24 units; each `start` row in the
-    window a dashed MARK at its exact place (`audio-start-mark`, `data-ts`,
-    tooltip `spustenie 12.10. 14:05:07`; `start_marks`), never a bar (an
-    `interrupted` restart is a loss and has its bar); one shared axis
-    (`audio-axis-tick`) on whole LOCAL times (10 min, 1 h, 3 h, midnights,
-    every 5th midnight), the zone's offset now;
+    a bucket with a loss or risk ROW, read from the answer's
+    `loss_buckets` / `risk_buckets` (`buckets_of`), loss red at the
+    bottom, risk amber on it, to scale against the panel's largest bucket,
+    a part that is not empty at least `MIN_BAR` = 2 of 24 units; each of
+    the answer's `starts` a dashed MARK at its place, in whole SVG units
+    (`mark_x`; `audio-start-mark`, `data-ts`, tooltip `spustenie 12.10.
+    14:05:07`; `start_marks`), never a bar (an `interrupted` restart is a
+    loss and has its bar); one shared axis (`audio-axis-tick`) on whole
+    LOCAL times (10 min, 1 h, 3 h, midnights, every 5th midnight), each
+    tick snapped with the zone's offset AT that tick (`axis_ticks(from,
+    to, &offset_east)`, #257 review): a midnight stays a midnight across a
+    daylight-saving change and the ticks only move forward (a local time
+    the spring change skips maps to an instant already ticked; the
+    autumn's repeated hour is ticked once, its summer reading);
+  - the rows are a `<For>` keyed on their whole shown content (`RowView`:
+    the texts, the bars, the marks), so a poll that changes nothing in a
+    row keeps its element and a hovered tooltip (#257 review); a row whose
+    clean span (whole minutes) or a bar's tooltip (its bucket's minutes)
+    changes is drawn anew, at most about once a minute;
   - the event list (`audio-fault-event`, `data-ts` / `data-path` /
     `data-severity`): every loss and risk row (no start, no meter), newest
     first, one instant's rows in row order; time `12.10. 14:05:07`, the
     path's name, the kind in Slovak (`kind_sk`, an unknown kind as sent),
-    the amount in its unit (`×2`; a count of 1 nothing; µs as `12,5 ms`;
+    the amount in its unit on its path (`unit_of(path, kind)`: `overflow`
+    is frames on an ASIO output and a count on a pipeline, `×3`; `×2`; a
+    count of 1 nothing; µs as `12,5 ms`;
     lane 1's kinds `coalesced` "zahodený blok programu", `interrupted`
     "prerušenie", `fast_callback` "predčasné volanie", `overload`
     "preťaženie", `no_source` "bez zdroja", `unsupported` "nepodporovaný
@@ -268,7 +298,15 @@ every service, so it is at first glance; the details are one click away.
   `next_fetch`): the 24 h answer every 10 s; while the panel is open on
   another window, that window at once on a switch, then every 10 s; else a
   250 ms nap. A failed request keeps the last answer and is asked again 10 s
-  later.
+  later; after `MAX_FAILED_POLLS` = 3 failed requests in a row
+  (`failed_after`) the segment reads grey `Zvuk: nedostupné` (`data-level`
+  unknown, `unavailable`) and the open panel names its answer's age by the
+  page's clock (`audio-faults-stale`, "Server neodpovedá (3× po sebe) —
+  údaje sú z poslednej odpovede pred 1 min.", `stale_sk`); the next answer
+  ends it. A closed panel forgets its window (`polls_for`) and drops that
+  window's answer (`AudioFaults::set_open`; one landing after the close is
+  dropped by the poll before any render), so a reopened panel reads
+  "Načítavam…" until a fresh answer lands, never a stale week.
 - **Local time comes from the browser's `Date`** (a `wasm_bindgen` extern in
   `audio_faults.rs`: day, month, hour, minute, second, the zone's offset; no
   `js-sys` dependency); sp-core formats the parts (`LocalTime`, `hm_sk`,
@@ -281,18 +319,25 @@ every service, so it is at first glance; the details are one click away.
   `recent` (a loss 3 min ago on SoundGrid, losses 40 min and 5 h ago, two
   FOH risks), `old` (one program loss 3 h ago), `restart` (every path first
   started 10 d ago, a program loss 3 d 4 h ago, a deploy 2 h 14 min ago:
-  "Zvuk: bez chyby 3 d 4 h"); the live paths are program, `input`, FOH,
+  "Zvuk: bez chyby 3 d 4 h"), `flood` (600 FOH risks in five clusters 1 /
+  3 / 5 / 7 / 9 h ago and a program loss 20 h ago: past the newest 500
+  events, so only the timeline shows it); `fail: true` answers every read
+  500, `freeze: true` answers at one fixed `now` (two answers differ only
+  where the ledger does: the keyed-rows test); the live paths are program,
+  `input`, FOH,
   SoundGrid + its loop and `pipeline:1`; every live path (re)started 2 h
   14 min 30 s ago, offsets mid-minute so a minute text holds 30 s; the mock
   answers a scenario's rows as `build_answer` does (any window, the clean
   times over its 90 days).
   Reset with `/__mock/audio-faults-reset` in `beforeEach` / `afterEach`.
 - **Post-deploy** (`e2e/post-deploy-audio-faults-ui.spec.ts`, SNV's suite
-  and PP's subset, read-only): one `?hours=24` read of the box's ledger, then
-  the dashboard's `data-level` must agree (a path with a loss → `loss` |
-  `recent`, its text `Zvuk: N chyb… za 24 h · posledná pred … · …`; none →
-  `ok` | `risk`, `Zvuk: bez chyby …`), and one click lists a row per path
-  of that answer, `program` among them; a clean console. It logs the
+  and PP's subset, read-only): a `?hours=24` read of the box's ledger before
+  the page and one after its segment renders; the segment's `data-level`
+  and text must agree with EITHER read (#257 review: a fault recorded
+  between them; a path with a loss → `loss` | `recent`, its text `Zvuk: N
+  chyb… za 24 h · posledná pred … · …`; none → `ok` | `risk`, `Zvuk: bez
+  chyby …`; `Zvuk: nedostupné` agrees with neither), and one click lists a
+  row per path of either read, `program` among them; a clean console. It logs the
   segment's text: the owner's acceptance ("after the deploy the segment
   reads the time since the last real fault") is read from that line.
 
@@ -300,8 +345,10 @@ every service, so it is at first glance; the details are one click away.
 
 - `clean_since_ms` never restarts at a deploy (the main session's ruling,
   lane 2 merge round): a planned restart is no fault; only a loss (an
-  `interrupted` one included) or the ledger's first sight of a path bounds
-  it, looked up over the 90 days kept. A start is drawn as a mark.
+  `interrupted` one included, looked up over the 90 days kept) or the
+  ledger's first sight of a path (its first start, which the prune keeps
+  for good: #257 review, no saw-tooth once it ages past 90 days) bounds
+  it. A start is drawn as a mark.
 
 - `coalesced` is a LOSS (the sender dropped the oldest unsent boundary,
   `submit_handoff.rs`; it never reached VBAN or NDI). `late_dropped` stays

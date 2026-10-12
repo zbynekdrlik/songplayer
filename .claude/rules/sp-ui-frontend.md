@@ -72,7 +72,11 @@ rebuilds the whole subtree on every change. **Caveat for the key-on-content
 fix:** it is safe only while the list is never mutated DURING an active edit — a
 key change mid-typing recreates the `<tr>` and drops input focus. If you add
 live/WebSocket refresh to a list with an inline editor, key on identity and make
-cells reactive instead.
+cells reactive instead. A POLLED read-only list whose rows carry tooltips
+keys each row on its whole shown content (#257's audio panel: a pure
+`RowView`, `key=|r| format!("{r:?}")`), so a poll that changes nothing in
+a row keeps its element and a hovered `<title>` stays up; keep floats out
+of such a key (round them to the units drawn: `mark_x`).
 
 ## A wide `<table>` inside a fixed-width card paints over the NEXT card and steals its clicks
 
