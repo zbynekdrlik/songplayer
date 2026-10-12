@@ -76,7 +76,7 @@ impl MaxOut {
         let first = {
             let mut queue = self.lock_queue();
             let first = queue.quiesced_until.is_none();
-            queue.quiesced_until = Some(now + queue.quiesce_expiry * 1_000);
+            queue.quiesced_until = Some(now + queue.quiesce_expiry);
             while queue.jobs.take().is_some() {}
             first
         };
@@ -122,7 +122,7 @@ impl MaxOut {
 /// did not end in time). Returns whether it ended.
 pub async fn stop_and_wait(max: Arc<MaxOut>, bound: Duration) -> bool {
     max.stop();
-    let waited = tokio::task::spawn_blocking(move || max.wait_ended(Duration::ZERO)).await;
+    let waited = tokio::task::spawn_blocking(move || max.wait_ended(bound)).await;
     let ended = waited.unwrap_or(false);
     if ended {
         info!("program max: the thread ended before the process - no Spout lock is left held");

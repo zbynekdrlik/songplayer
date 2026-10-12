@@ -10,8 +10,10 @@
 # manual rescue).
 #
 # So SongPlayer is asked first to drop both Spout senders and make no Spout
-# call any more: POST /api/v1/program/spout/quiesce, then GET /api/v1/program
-# until max.state reads "quiesced", at most $TimeoutSec seconds.
+# call while the quiesce holds (60 s; the kill comes long before):
+# POST /api/v1/program/spout/quiesce (at most 3 s), then GET /api/v1/program
+# until max.state reads "quiesced", at most $TimeoutSec seconds (no read
+# outlasts them). So the script takes at most ~8 s.
 #
 # Best effort: the caller kills SongPlayer whatever happens here. A
 # SongPlayer that is not running, does not answer, answers 404 (a version
@@ -41,11 +43,21 @@ try {
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     $state = "unread"
     while ((Get-Date) -lt $deadline) {
+        # Each read is bounded by the time left: whole seconds (-TimeoutSec
+        # takes an int, and 0 would mean no limit at all), at most 2. With
+        # under a second left no read starts, so no read outlasts the
+        # deadline: the whole call takes at most the POST's 3 s plus
+        # $TimeoutSec.
+        $left = ($deadline - (Get-Date)).TotalSeconds
+        $readFor = [int][Math]::Min(2, [Math]::Floor($left))
+        if ($readFor -lt 1) {
+            break
+        }
         try {
-            $program = Invoke-RestMethod -Uri "$BaseUrl/api/v1/program" -TimeoutSec 2 -ErrorAction Stop
+            $program = Invoke-RestMethod -Uri "$BaseUrl/api/v1/program" -TimeoutSec $readFor -ErrorAction Stop
             $state = $program.max.state
             if ($state -eq "quiesced") {
-                Write-Host "Spout quiesce: done - its Spout senders are dropped, no Spout call until it stops"
+                Write-Host "Spout quiesce: done - its Spout senders are dropped, no Spout call for the next 60 s"
                 return
             }
         } catch {

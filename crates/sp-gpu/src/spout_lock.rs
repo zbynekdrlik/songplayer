@@ -52,9 +52,9 @@ pub(crate) const SENTINEL_RELEASE_TRIES: u32 = 3;
 /// lock], any, INFINITE)`, answers: its stop event (`WAIT_OBJECT_0 + 0`),
 /// the list's lock let go of (`WAIT_OBJECT_0 + 1`) or left by a holder
 /// that died (`WAIT_ABANDONED_0 + 1`).
-const WAIT_STOPPED: u32 = 0x102;
-const WAIT_TOOK: u32 = 0x0;
-const WAIT_TOOK_ABANDONED: u32 = 0x80;
+const WAIT_STOPPED: u32 = 0x0;
+const WAIT_TOOK: u32 = 0x1;
+const WAIT_TOOK_ABANDONED: u32 = 0x81;
 
 /// #243 follow-up: a program holding a Spout lock: its pid, and its
 /// program's file name (`Arena.exe`), `None` when its image cannot be read.
