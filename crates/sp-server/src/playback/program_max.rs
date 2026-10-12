@@ -67,6 +67,7 @@ use tracing::{info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::loop_stats::percentile_ceil;
+use crate::playback::program_max_list::ListHolderStatus;
 use crate::playback::program_max_send::SendTiming;
 use crate::playback::program_max_vblank::{Aligned, VblankLog, vblank_log};
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
@@ -283,6 +284,9 @@ pub struct MaxStatus {
     /// box must name its RTX, never a virtual adapter or the Basic Render
     /// Driver); `None` before the first build.
     pub adapter: Option<String>,
+    /// #243 follow-up: the program that keeps Spout's sender list, once it
+    /// kept it a sender backoff (`program_max_list.rs`); `None` otherwise.
+    pub list_holder: Option<ListHolderStatus>,
     /// #239: the `SP-program` Spout sender (1920×1080) the thread runs next
     /// to MAX.
     pub fhd: FhdStatus,
@@ -378,6 +382,7 @@ struct Stats {
     off_grid: u64,
     send_phase: Window,
     repicks: u64,
+    list_holder: Option<ListHolderStatus>,
 }
 
 /// The `SP-program-MAX` hand-off between the `SP-program` sender and the
@@ -457,6 +462,7 @@ impl MaxOut {
                 off_grid: 0,
                 send_phase: Window::default(),
                 repicks: 0,
+                list_holder: None,
             }),
             fhd: Mutex::new(fhd::FhdStats::new()),
             #[cfg(test)]
@@ -668,6 +674,11 @@ impl MaxOut {
         self.lock_stats().adapter = Some(adapter);
     }
 
+    /// #243 follow-up: who keeps Spout's sender list (`max.list_holder`).
+    pub fn record_list_holder(&self, holder: Option<ListHolderStatus>) {
+        self.lock_stats().list_holder = holder;
+    }
+
     /// The sends are paced on the refresh of `output`.
     pub fn record_vblank_output(&self, output: String) {
         self.lock_stats().vblank_output = Some(output);
@@ -713,7 +724,7 @@ impl MaxOut {
         let (phase, names, tracking, counts, upload, draw, send, send_at, send_phase) = {
             let stats = self.lock_stats();
             (
-                stats.phase.clone(),
+                (stats.phase.clone(), stats.list_holder.clone()),
                 [stats.adapter.clone(), stats.vblank_output.clone()],
                 (stats.vblank_tracking, stats.vblank_state),
                 [
@@ -733,7 +744,7 @@ impl MaxOut {
                 stats.send_phase.clone(),
             )
         };
-        let [adapter, vblank_output] = names;
+        let ((phase, list_holder), [adapter, vblank_output]) = (phase, names);
         let (tracking, vblank_state) = tracking;
         let [
             submitted,
@@ -773,6 +784,7 @@ impl MaxOut {
             sender_backoffs,
             spout_name: SPOUT_SENDER_NAME,
             adapter,
+            list_holder,
             fhd: self.fhd_status(fhd_enabled, enabled),
         }
     }
@@ -855,6 +867,7 @@ pub async fn start_max(pool: SqlitePool, max: Arc<MaxOut>, shutdown: &broadcast:
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 fn spawn_max_thread(max: Arc<MaxOut>) {
+    use crate::playback::program_max_list::{SpoutList, SpoutListLock};
     use crate::playback::program_max_vblank::VblankSource;
     use crate::playback::program_max_worker::{SpoutGpu, run_max_loop};
     let spawned = std::thread::Builder::new()
@@ -876,7 +889,9 @@ fn spawn_max_thread(max: Arc<MaxOut>) {
                     None
                 }
             };
-            run_max_loop(&max, SpoutGpu, vblank);
+            // #243 follow-up: the list's holder and its sentinel.
+            let list: Box<dyn SpoutList> = Box::new(SpoutListLock::default());
+            run_max_loop(&max, SpoutGpu, vblank, Some(list));
         });
     if let Err(e) = spawned {
         tracing::error!(%e, "program max: spawning the thread failed — no SP-program-MAX");

@@ -20,10 +20,9 @@ mod common;
 
 use std::ffi::{CString, c_void};
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard, mpsc};
-use std::thread::JoinHandle;
-use std::time::Duration;
+use std::sync::{Mutex, MutexGuard};
 
+use common::locks::{GiveBack, Hold, TestMutex, abandon, this_process_holder, wait_elsewhere};
 use common::{
     BLACK, H, W, assert_matches_reference, assert_matches_reference_in, pattern, picture, warp,
     warp_fhd,
@@ -37,8 +36,7 @@ use sp_gpu::{
     read_shared_texture, spout_sender_info, spout_sender_names, unpad_rows,
 };
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, FALSE, HANDLE, INVALID_HANDLE_VALUE,
-    WAIT_ABANDONED, WAIT_OBJECT_0,
+    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
 };
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0};
 use windows::Win32::Graphics::Direct3D11::{
@@ -52,8 +50,7 @@ use windows::Win32::System::Memory::{
     PAGE_READWRITE, UnmapViewOfFile,
 };
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueA};
-use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
-use windows::core::{HSTRING, PCSTR, s};
+use windows::core::{PCSTR, s};
 
 /// `DXGI_FORMAT_B8G8R8A8_UNORM` (87), as Spout's registry stores it.
 const BGRA: u32 = DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32;
@@ -619,128 +616,6 @@ fn a_sender_that_never_existed_has_no_map() {
     let _one = one_at_a_time();
     assert_eq!(info("sp-gpu test never registered"), None);
     assert_eq!(listed("sp-gpu test never registered"), 0);
-}
-
-/// #243: the named mutex `name`, opened (or made, as Spout's `CreateMutexA`
-/// does), closed when dropped.
-struct TestMutex(HANDLE);
-
-impl TestMutex {
-    fn open(name: &str) -> Self {
-        let mutex = unsafe { CreateMutexW(None, FALSE, &HSTRING::from(name)) }
-            .unwrap_or_else(|e| panic!("the mutex {name}: {e}"));
-        Self(mutex)
-    }
-}
-
-impl Drop for TestMutex {
-    fn drop(&mut self) {
-        let _ = unsafe { CloseHandle(self.0) };
-    }
-}
-
-/// Whether a wait's result means the waiter took the mutex.
-fn took(wait: u32) -> bool {
-    wait == WAIT_OBJECT_0.0 || wait == WAIT_ABANDONED.0
-}
-
-/// #243: leave the mutex `name` ABANDONED, as a program that died holding a
-/// Spout lock leaves it: a helper thread takes it and ends without
-/// releasing it. The returned handle keeps the mutex alive.
-fn abandon(name: &str) -> TestMutex {
-    let mutex = TestMutex::open(name);
-    // A HANDLE is not Send: the thread gets the number.
-    let raw = mutex.0.0 as isize;
-    let wait = std::thread::spawn(move || {
-        unsafe { WaitForSingleObject(HANDLE(raw as *mut c_void), 5_000) }.0
-    })
-    .join()
-    .expect("the thread that dies holding the lock");
-    assert!(took(wait), "it took the lock: {wait:#x}");
-    mutex
-}
-
-/// Releases its mutex as often as THIS thread holds it, when dropped: a
-/// failing test never leaves its thread holding a Spout lock for the next.
-struct GiveBack(TestMutex);
-
-impl Drop for GiveBack {
-    fn drop(&mut self) {
-        for _ in 0..64 {
-            if unsafe { ReleaseMutex((self.0).0) }.is_err() {
-                break;
-            }
-        }
-    }
-}
-
-/// What another thread meets when it waits up to 300 ms for the mutex
-/// `name`: `WAIT_OBJECT_0` = free (given back at once), `WAIT_TIMEOUT` = a
-/// thread keeps it, `WAIT_ABANDONED` = left abandoned (nothing took it).
-fn wait_elsewhere(name: &str) -> u32 {
-    let name = name.to_owned();
-    std::thread::spawn(move || {
-        let mutex = TestMutex::open(&name);
-        let wait = unsafe { WaitForSingleObject(mutex.0, 300) }.0;
-        if took(wait) {
-            unsafe { ReleaseMutex(mutex.0) }.expect("give it back");
-        }
-        wait
-    })
-    .join()
-    .expect("the waiting thread")
-}
-
-/// #243: another thread of this process holds the mutex `name` until this
-/// value is dropped, as a program that keeps a Spout lock does.
-struct Hold {
-    release: Option<mpsc::Sender<()>>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl Hold {
-    fn take(name: &str) -> Self {
-        let name = name.to_owned();
-        let (taken, taken_rx) = mpsc::channel();
-        let (release, release_rx) = mpsc::channel::<()>();
-        let thread = std::thread::spawn(move || {
-            let mutex = TestMutex::open(&name);
-            let wait = unsafe { WaitForSingleObject(mutex.0, 5_000) }.0;
-            taken.send(wait).expect("the test waits for the take");
-            let _ = release_rx.recv();
-            if took(wait) {
-                unsafe { ReleaseMutex(mutex.0) }.expect("release the held lock");
-            }
-        });
-        let wait = taken_rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("the holding thread took its lock");
-        assert!(took(wait), "the lock was taken: {wait:#x}");
-        Self {
-            release: Some(release),
-            thread: Some(thread),
-        }
-    }
-}
-
-impl Drop for Hold {
-    fn drop(&mut self) {
-        drop(self.release.take());
-        if let Some(thread) = self.thread.take()
-            && let Err(panic) = thread.join()
-            && !std::thread::panicking()
-        {
-            // The holding thread failed (its release): the test fails too.
-            std::panic::resume_unwind(panic);
-        }
-    }
-}
-
-/// How a refusal names this test process as a lock's holder, lowercased.
-fn this_process_holder() -> String {
-    let exe = std::env::current_exe().expect("the test's exe");
-    let file = exe.file_name().expect("its file name").to_string_lossy();
-    format!("{file} (pid {}, this process)", std::process::id()).to_ascii_lowercase()
 }
 
 /// #243: a Spout list lock left abandoned (a program died holding it) is

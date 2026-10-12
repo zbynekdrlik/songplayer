@@ -69,6 +69,7 @@ pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI
 pub mod program_canvas; // #223: SP-program's ONE picture layout (FHD) + the fit into it
 pub mod program_item; // #228: the item on air (marks, the sender's track) + the burn switch
 pub mod program_max; // #223 S2: SP-program-MAX hand-off, setting + telemetry
+pub mod program_max_list; // #243 follow-up: Spout's list kept by another program, the sentinel
 pub mod program_max_send; // #223 follow-up: the Spout send at its due instant
 pub mod program_max_vblank; // #223 follow-up: the sends on the wall's refresh grid
 pub mod program_max_worker; // #223 S2: the program-max thread (GPU compose + Spout send)

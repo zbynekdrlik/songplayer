@@ -1498,6 +1498,8 @@ function programBody() {
       sender_backoffs: 0,
       spout_name: "SP-program-MAX",
       adapter: null,
+      // #243 follow-up: the program that keeps Spout's sender list (none).
+      list_holder: null,
       // #239: the SP-program Spout sender (1920x1080) next to MAX.
       fhd: mockFhdStatus(),
     },

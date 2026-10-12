@@ -59,6 +59,11 @@
 //! objects are dropped at the next boundary (Spout unregisters
 //! `SP-program`).
 //!
+//! #243 follow-up: after each boundary the thread also reads who holds
+//! Spout's sender list, names a program that keeps it and starts the
+//! sentinel that wins it back (`program_max_list.rs`, [`MaxWorker::with_list`]);
+//! a quiesce stops that sentinel too.
+//!
 //! The GPU is a trait ([`MaxGpu`]) so every decision here runs on Linux with
 //! a fake; the production one is [`SpoutGpu`] (`sp-gpu`'s `Compositor` on
 //! the picked adapter and its `SpoutSender`). Off Windows `sp-gpu` has no
@@ -75,6 +80,7 @@ use tracing::{info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::program_max::{MaxJob, MaxNext, MaxOut, MaxPicture};
+use crate::playback::program_max_list::{ListSide, SpoutList};
 use crate::playback::program_max_send::{NoWait, SendClock, SendTiming, SpinClock, send_at};
 use crate::playback::program_max_vblank::{
     Aligned, Due, VblankLog, VblankPacer, VblankSource, phase_after_vblank,
@@ -484,6 +490,9 @@ pub struct MaxWorker<'a, G: MaxGpu> {
     /// The display refresh, when measured ([`with_vblank`](Self::with_vblank)).
     vblank: Option<Box<dyn VblankSource>>,
     pacer: VblankPacer,
+    /// #243 follow-up: Spout's sender list, read after each boundary
+    /// ([`with_list`](Self::with_list); none by default).
+    list: ListSide,
 }
 
 /// A sent boundary's costs and timing ([`MaxWorker::attempt`]).
@@ -513,7 +522,16 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
             clock: Box::new(NoWait),
             vblank: None,
             pacer: VblankPacer::default(),
+            list: ListSide::new(None, std::process::id()),
         }
+    }
+
+    /// #243 follow-up: read who holds Spout's sender list through `list`
+    /// after each boundary, and wait on it with its sentinel (production:
+    /// `program_max_list::SpoutListLock`).
+    pub fn with_list(mut self, list: Box<dyn SpoutList>) -> Self {
+        self.list = ListSide::new(Some(list), std::process::id());
+        self
     }
 
     /// Send on `clock` (production: [`SpinClock`]).
@@ -565,6 +583,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         let (max, fhd) = self.attempt(job, offered, now, fhd_wanted);
         let max = self.finish_max(max, job, now);
         let fhd = fhd.and_then(|went| self.finish_fhd(went, job, now));
+        self.list.boundary(now, self.out);
         Lines { max, fhd }
     }
 
@@ -833,6 +852,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         self.max.retry_at = None;
         self.ids.forget();
         self.release_fhd();
+        self.list.forget(self.out);
     }
 
     /// #243 follow-up: a deploy is about to kill the process: drop both
@@ -841,6 +861,7 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     /// more and the kill can never leave a Spout lock abandoned.
     pub fn quiesce(&mut self) {
         self.release();
+        self.list.stop(self.out);
         self.out.record_quiesced();
         info!("program max: quiesced - no Spout call until the process ends");
     }
@@ -878,12 +899,21 @@ fn log_vblank(log: Option<VblankLog>, source: &dyn VblankSource) {
 /// The `program-max` thread: take each job from `out` and serve it on
 /// `gpu`, each sent at its due instant on the real clock ([`SpinClock`]) —
 /// on `vblank`'s refresh grid when one is given —, release the GPU while
-/// MAX is off, exit on stop, or (#243 follow-up) once quiesced.
-pub fn run_max_loop<G: MaxGpu>(out: &MaxOut, gpu: G, vblank: Option<Box<dyn VblankSource>>) {
+/// MAX is off, exit on stop, or (#243 follow-up) once quiesced; `list` =
+/// Spout's sender list to watch ([`MaxWorker::with_list`]).
+pub fn run_max_loop<G: MaxGpu>(
+    out: &MaxOut,
+    gpu: G,
+    vblank: Option<Box<dyn VblankSource>>,
+    list: Option<Box<dyn SpoutList>>,
+) {
     let _consumer = out.attach();
     let mut worker = MaxWorker::new(out, gpu).with_clock(Box::new(SpinClock));
     if let Some(source) = vblank {
         worker = worker.with_vblank(source);
+    }
+    if let Some(list) = list {
+        worker = worker.with_list(list);
     }
     loop {
         match out.next(worker.holds_gpu()) {

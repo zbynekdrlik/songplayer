@@ -100,8 +100,9 @@ pub enum GpuError {
     /// sits at the desktop origin (#223 follow-up, `vblank::pick_output`).
     #[error("no primary display output attached")]
     NoOutput,
-    /// A thread of the crate could not start, or ended before it reported.
-    #[error("the vblank thread failed: {0}")]
+    /// A thread of the crate (the vblank tracker's, #243's list sentinel)
+    /// could not start, or ended before it reported; the text names it.
+    #[error("{0}")]
     Thread(String),
 }
 
