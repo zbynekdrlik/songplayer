@@ -835,6 +835,16 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
         self.release_fhd();
     }
 
+    /// #243 follow-up: a deploy is about to kill the process: drop both
+    /// senders (Spout unregisters them) and the compositors, and report
+    /// `quiesced`. The thread ends after it, so no Spout call runs any
+    /// more and the kill can never leave a Spout lock abandoned.
+    pub fn quiesce(&mut self) {
+        self.release();
+        self.out.record_quiesced();
+        info!("program max: quiesced - no Spout call until the process ends");
+    }
+
     /// #239: drop the FHD sender's objects (Spout unregisters `SP-program`)
     /// and forget its backoff: it was switched off, MAX is off, or the
     /// thread stops.
@@ -868,7 +878,7 @@ fn log_vblank(log: Option<VblankLog>, source: &dyn VblankSource) {
 /// The `program-max` thread: take each job from `out` and serve it on
 /// `gpu`, each sent at its due instant on the real clock ([`SpinClock`]) —
 /// on `vblank`'s refresh grid when one is given —, release the GPU while
-/// MAX is off, exit on stop.
+/// MAX is off, exit on stop, or (#243 follow-up) once quiesced.
 pub fn run_max_loop<G: MaxGpu>(out: &MaxOut, gpu: G, vblank: Option<Box<dyn VblankSource>>) {
     let _consumer = out.attach();
     let mut worker = MaxWorker::new(out, gpu).with_clock(Box::new(SpinClock));
@@ -881,6 +891,10 @@ pub fn run_max_loop<G: MaxGpu>(out: &MaxOut, gpu: G, vblank: Option<Box<dyn Vbla
                 worker.serve_offered(&job, offered, Instant::now());
             }
             MaxNext::Release => worker.release(),
+            MaxNext::Quiesce => {
+                worker.quiesce();
+                break;
+            }
             MaxNext::Stop => break,
         }
     }

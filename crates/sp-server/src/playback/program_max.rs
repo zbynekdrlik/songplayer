@@ -41,6 +41,12 @@
 //! drawn into the FHD program's 1920×1080 on the same thread, queue and
 //! pacing; its setting, enable rule and telemetry (`max.fhd`) are the child
 //! module `program_max_fhd.rs`.
+//!
+//! #243 follow-up: a deploy QUIESCES the thread before it kills the process
+//! ([`MaxOut::quiesce`], `POST /api/v1/program/spout/quiesce`): it drops
+//! both senders and ends, so no Spout call runs when the kill lands. A kill
+//! mid-call can leave one of Spout's locks abandoned, and the receiver it is
+//! handed to (Arena) keeps Spout's sender list for good (PP, 12.10.2026).
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -158,6 +164,9 @@ pub enum MaxNext {
     Job(MaxJob, Instant),
     /// MAX was switched off: drop the sender and the compositor.
     Release,
+    /// #243 follow-up: the process is about to be killed: drop both
+    /// senders, report `quiesced` and exit; no Spout call after it.
+    Quiesce,
     /// The process stops: exit.
     Stop,
 }
@@ -171,13 +180,26 @@ pub enum MaxPhase {
     Failed(String),
     /// No Direct3D / Spout here (off Windows): it does nothing.
     Unsupported,
+    /// #243 follow-up: it dropped both senders and ended before the
+    /// process is killed; it makes no Spout call until the process ends.
+    Quiesced,
+}
+
+impl MaxPhase {
+    /// A phase the thread's start and end leave as it is: the platform's
+    /// `Unsupported`, and `Quiesced` (for the rest of the process).
+    fn settled(&self) -> bool {
+        matches!(self, MaxPhase::Unsupported | MaxPhase::Quiesced)
+    }
 }
 
 /// The `state` of [`MaxStatus`]: `unsupported` wins (the platform), then
-/// `off` (the setting), then the thread's phase (`running`, or `error: …`).
+/// `quiesced` (#243 follow-up: for good), then `off` (the setting), then
+/// the thread's phase (`running`, or `error: …`).
 pub fn state_label(phase: &MaxPhase, enabled: bool) -> String {
     match phase {
         MaxPhase::Unsupported => "unsupported".to_string(),
+        MaxPhase::Quiesced => "quiesced".to_string(),
         _ if !enabled => "off".to_string(),
         MaxPhase::Running => "running".to_string(),
         MaxPhase::Failed(why) => format!("error: {why}"),
@@ -189,7 +211,8 @@ pub fn state_label(phase: &MaxPhase, enabled: bool) -> String {
 pub struct MaxStatus {
     /// The setting `program_max_enabled`, as last applied.
     pub enabled: bool,
-    /// `running`, `off`, `unsupported` or `error: <why>` ([`state_label`]).
+    /// `running`, `off`, `unsupported`, `quiesced` (#243 follow-up) or
+    /// `error: <why>` ([`state_label`]).
     pub state: String,
     /// The fixed canvas: 3840×2160.
     pub width: u32,
@@ -278,20 +301,26 @@ struct Queue {
     /// A `program-max` thread takes jobs.
     consumer: bool,
     stop: bool,
+    /// #243 follow-up: a deploy asked the thread to quiesce.
+    quiesce: bool,
     coalesced: u64,
 }
 
 impl Queue {
     /// Whether an offered job would be taken.
     fn accepting(&self) -> bool {
-        self.enabled && self.consumer && !self.stop
+        self.enabled && self.consumer && !self.stop && !self.quiesce
     }
 
-    /// The thread's next step, if one is ready now: a stop wins; while off,
-    /// `Release` when it holds GPU objects; else the oldest job.
+    /// The thread's next step, if one is ready now: a stop wins, then a
+    /// quiesce; while off, `Release` when it holds GPU objects; else the
+    /// oldest job.
     fn step(&mut self, holding: bool) -> Option<MaxNext> {
         if self.stop {
             return Some(MaxNext::Stop);
+        }
+        if self.quiesce {
+            return Some(MaxNext::Quiesce);
         }
         if !self.enabled {
             return holding.then_some(MaxNext::Release);
@@ -385,7 +414,7 @@ impl Drop for Consumer<'_> {
         }
         {
             let mut stats = self.0.lock_stats();
-            if stats.phase != MaxPhase::Unsupported {
+            if !stats.phase.settled() {
                 stats.phase = MaxPhase::Failed(MAX_NOT_RUNNING.to_string());
             }
         }
@@ -405,6 +434,7 @@ impl MaxOut {
                 fhd_enabled: false,
                 consumer: false,
                 stop: false,
+                quiesce: false,
                 coalesced: 0,
             }),
             ready: Condvar::new(),
@@ -547,7 +577,7 @@ impl MaxOut {
         self.lock_queue().consumer = true;
         {
             let mut stats = self.lock_stats();
-            if stats.phase != MaxPhase::Unsupported {
+            if !stats.phase.settled() {
                 stats.phase = MaxPhase::Running;
             }
         }
@@ -559,6 +589,30 @@ impl MaxOut {
     pub fn stop(&self) {
         self.lock_queue().stop = true;
         self.ready.notify_all();
+    }
+
+    /// #243 follow-up: the process is about to be killed (a deploy): the
+    /// thread drops both Spout senders and ends ([`MaxNext::Quiesce`]), so
+    /// no Spout call runs any more, and `max.state` reads `quiesced` once it
+    /// did. Nothing is offered from now on, and nothing undoes it short of
+    /// a restart. Returns whether this was the first ask.
+    pub fn quiesce(&self) -> bool {
+        let first = {
+            let mut queue = self.lock_queue();
+            let first = !queue.quiesce;
+            queue.quiesce = true;
+            while queue.jobs.take().is_some() {}
+            first
+        };
+        self.ready.notify_all();
+        first
+    }
+
+    /// #243 follow-up: the thread quiesced: both senders are dropped and it
+    /// ended (MAX and the FHD sender read `quiesced`).
+    pub fn record_quiesced(&self) {
+        self.lock_stats().phase = MaxPhase::Quiesced;
+        self.set_fhd_settled(MaxPhase::Quiesced);
     }
 
     /// A boundary went out: its costs, and `running`.
@@ -596,7 +650,7 @@ impl MaxOut {
     /// No Direct3D / Spout here: MAX (and the FHD sender) do nothing.
     pub fn record_unsupported(&self) {
         self.lock_stats().phase = MaxPhase::Unsupported;
-        self.set_fhd_unsupported();
+        self.set_fhd_settled(MaxPhase::Unsupported);
     }
 
     /// A lost device: the compositor and the sender are rebuilt.

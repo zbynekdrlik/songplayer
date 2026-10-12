@@ -1044,6 +1044,11 @@ jobs:
           $ErrorActionPreference = "Continue"
 
           Write-Host "=== Stopping SongPlayer ==="
+          # #243: first SongPlayer drops its Spout senders and makes no Spout
+          # call any more: a kill mid-call can leave a Spout lock abandoned,
+          # and Arena then keeps Spout's sender list for good. Best effort
+          # (it is killed anyway), at most ~8 s; scripts/spout-quiesce.ps1.
+          & "$env:GITHUB_WORKSPACE\scripts\spout-quiesce.ps1"
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
           # #233: the ASIO host dies with SongPlayer (its kill-on-close Job
           # object); killed by name too, so the installer never meets it.
@@ -1327,6 +1332,9 @@ jobs:
           # IgnoreNew, and after a bare taskkill Task Scheduler can still report the
           # instance Running, so `schtasks /run` below is ignored ("currently
           # running") and the relaunch never happens (26.9.2026, job 108408085281).
+          # #243: quiesce its Spout senders before the kill (the deploy step's
+          # note, scripts/spout-quiesce.ps1).
+          & "$env:GITHUB_WORKSPACE\scripts\spout-quiesce.ps1"
           try { Stop-ScheduledTask -TaskName SongPlayer -ErrorAction Stop } catch { Write-Warning "Stop-ScheduledTask: $($_.Exception.Message)" }
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
           $taskDeadline = (Get-Date).AddSeconds(15)
@@ -1377,6 +1385,7 @@ jobs:
           # recovery (Start-ScheduledTask) so the box is NOT left dark, then FAIL
           # loudly with the reason — never exit green on a failed relaunch.
           Write-Warning "SongPlayer did not come up after 'schtasks /run'; running Start-ScheduledTask fallback..."
+          & "$env:GITHUB_WORKSPACE\scripts\spout-quiesce.ps1"
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
           Start-Sleep -Seconds 2
           try {

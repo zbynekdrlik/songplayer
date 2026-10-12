@@ -139,17 +139,19 @@ impl MaxOut {
     }
 
     /// The thread attached (`Running`) or ended (not running): the FHD
-    /// sender's phase follows MAX's, and an `Unsupported` platform keeps it.
+    /// sender's phase follows MAX's, and a settled phase (`Unsupported`,
+    /// #243's `Quiesced`) stays.
     pub(super) fn set_fhd_thread_phase(&self, phase: MaxPhase) {
         let mut fhd = self.lock_fhd();
-        if fhd.phase != MaxPhase::Unsupported {
+        if !fhd.phase.settled() {
             fhd.phase = phase;
         }
     }
 
-    /// No Direct3D / Spout here: the FHD sender does nothing either.
-    pub(super) fn set_fhd_unsupported(&self) {
-        self.lock_fhd().phase = MaxPhase::Unsupported;
+    /// No Direct3D / Spout here, or (#243 follow-up) the thread quiesced:
+    /// the FHD sender does nothing either.
+    pub(super) fn set_fhd_settled(&self, phase: MaxPhase) {
+        self.lock_fhd().phase = phase;
     }
 
     /// An FHD boundary went out: its costs, and `running`.

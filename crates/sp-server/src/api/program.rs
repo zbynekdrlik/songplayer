@@ -49,6 +49,11 @@
 //! `title` from the store, `null` while no item frame of the source on
 //! program went out. `POST /api/v1/program/burn {"on": bool}` turns the burn
 //! on or off: `200 {"burn_on": bool}`.
+//!
+//! #243 follow-up: `POST /api/v1/program/spout/quiesce` — a deploy asks it
+//! right before it kills SongPlayer (`scripts/spout-quiesce.ps1`); the
+//! `program-max` thread drops both Spout senders and makes no Spout call
+//! any more, and `max.state` reads `quiesced` (`202 {"state"}`).
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -140,6 +145,15 @@ pub struct BurnRequest {
 #[derive(Debug, Serialize)]
 pub struct BurnAnswer {
     pub burn_on: bool,
+}
+
+/// The answer of `POST /api/v1/program/spout/quiesce` (#243 follow-up):
+/// `max.state` as it is when the answer is made. The thread quiesces on its
+/// own time (its boundary in flight first): poll `GET /api/v1/program`
+/// until `max.state` reads `quiesced`.
+#[derive(Debug, Serialize)]
+pub struct QuiesceAnswer {
+    pub state: String,
 }
 
 /// The STORED settings the telemetry blocks report next to their live state.
@@ -253,6 +267,33 @@ pub async fn post_program_burn(
     Json(BurnAnswer {
         burn_on: item.burn_on(),
     })
+}
+
+/// `POST /api/v1/program/spout/quiesce` (#243 follow-up): a deploy step asks
+/// it right before it kills SongPlayer (`scripts/spout-quiesce.ps1`). The
+/// `program-max` thread, the only thread that calls Spout, drops both Spout
+/// senders (`SP-program-MAX`, `SP-program`) and ends, so no Spout call runs
+/// when the kill lands. A kill mid-call can leave one of Spout's locks
+/// abandoned: Spout 2.007.017 never gives such a lock back, and the
+/// receiver it is handed to (Arena) keeps Spout's sender list for good
+/// (PP, 12.10.2026). For the rest of the process: only a restart brings
+/// the senders back. `202` with `max.state` now.
+///
+/// Not limited to loopback callers: no route of this API checks its caller
+/// (a LAN page can already switch MAX off through the settings PATCH, or
+/// cut the program to Blank), and a loopback check would not make it
+/// local-only either: the box's cloudflared tunnel connects from 127.0.0.1.
+pub async fn post_spout_quiesce(
+    State(state): State<AppState>,
+) -> (StatusCode, Json<QuiesceAnswer>) {
+    let max = state.program_bus.max();
+    if max.quiesce() {
+        info!("program max: quiesce asked (the process is about to be stopped)");
+    }
+    let answer = QuiesceAnswer {
+        state: max.status().state,
+    };
+    (StatusCode::ACCEPTED, Json(answer))
 }
 
 /// `POST /api/v1/program/cut` — `200` + the new program state, `404` for an

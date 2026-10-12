@@ -465,6 +465,30 @@ fn the_loop_releases_both_while_max_is_off() {
     thread.join().expect("the loop");
 }
 
+/// #243 follow-up: a quiesce drops both senders (each before its
+/// compositor), holds nothing more and reports `quiesced` for both.
+#[test]
+fn a_quiesce_drops_both_senders_and_reports_quiesced() {
+    let max = fhd_on();
+    let _consumer = max.attach();
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    worker.serve(&plain(1, &picture(4, 2)), Instant::now());
+    assert_eq!(max.status().fhd.submitted, 1, "both went out");
+    worker.quiesce();
+    assert!(!worker.holds_gpu());
+    assert_eq!(
+        gpu.log().drops,
+        ["sender", "compositor", "fhd sender", "fhd compositor"]
+    );
+    let status = max.status();
+    assert_eq!(
+        (status.state.as_str(), status.fhd.state.as_str()),
+        ("quiesced", "quiesced")
+    );
+    assert_eq!(status.fhd.listed_width, 0, "no listing kept");
+}
+
 /// Off Windows the production GPU's FHD compositor has no Direct3D either.
 #[cfg(not(windows))]
 #[test]

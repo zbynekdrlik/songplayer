@@ -213,6 +213,11 @@ pub fn router(state: AppState, dist_dir: Option<PathBuf>) -> Router {
             "/api/v1/program/burn",
             axum::routing::post(program::post_program_burn),
         )
+        // #243: a deploy quiesces the Spout senders before it kills SongPlayer.
+        .route(
+            "/api/v1/program/spout/quiesce",
+            axum::routing::post(program::post_spout_quiesce),
+        )
         // #233: the registered ASIO drivers (an ASIO output's driver list).
         .route(
             "/api/v1/audio/asio-drivers",

@@ -673,3 +673,80 @@ fn the_vblank_state_reaches_the_telemetry() {
     );
     assert_eq!(max.status().vblank_state, Some("ticking"));
 }
+
+/// #243 follow-up: a quiesce drops what waits, takes no job any more and
+/// is the thread's next step whatever the setting; a stop still wins. Only
+/// the first ask says so.
+#[test]
+fn a_quiesce_is_the_next_step_and_nothing_is_offered_after_it() {
+    let max = MaxOut::new();
+    let _consumer = taking(&max);
+    max.offer_with(|| black(1));
+    assert!(max.quiesce(), "the first ask");
+    assert!(!max.quiesce(), "a second ask is no news");
+    assert_eq!(max.queued(), 0, "what waited is dropped");
+    assert!(!max.accepting());
+    assert!(
+        !max.offer_with(|| panic!("no job is made for a quiesced MAX")),
+        "nothing is offered"
+    );
+    assert!(matches!(max.try_next(false), Some(MaxNext::Quiesce)));
+    max.set_enabled(false);
+    assert!(
+        matches!(max.try_next(true), Some(MaxNext::Quiesce)),
+        "over a release while off"
+    );
+    assert!(
+        matches!(max.try_next(false), Some(MaxNext::Quiesce)),
+        "off and holding nothing: still its step, not a wait"
+    );
+    max.stop();
+    assert!(matches!(max.try_next(false), Some(MaxNext::Stop)));
+}
+
+/// #243 follow-up: a thread waiting for its next step wakes for a quiesce.
+#[test]
+fn a_waiting_thread_wakes_for_a_quiesce() {
+    let max = Arc::new(MaxOut::new());
+    let _consumer = taking(&max);
+    let next = next_on_thread(&max, false);
+    assert!(
+        next.recv_timeout(Duration::from_millis(100)).is_err(),
+        "nothing to do: it waits"
+    );
+    max.quiesce();
+    let step = next.recv_timeout(Duration::from_secs(20)).expect("woken");
+    assert!(matches!(step, MaxNext::Quiesce), "{step:?}");
+}
+
+/// #243 follow-up: `quiesced` wins over the setting, for MAX and the FHD
+/// sender; the thread's end and a later attach leave it.
+#[test]
+fn quiesced_wins_over_the_setting_and_the_thread_s_end() {
+    assert_eq!(state_label(&MaxPhase::Quiesced, false), "quiesced");
+    assert_eq!(state_label(&MaxPhase::Quiesced, true), "quiesced");
+    let max = MaxOut::new();
+    let consumer = taking(&max);
+    max.set_fhd_enabled(true);
+    max.record_quiesced();
+    let status = max.status();
+    assert_eq!(
+        (status.state.as_str(), status.fhd.state.as_str()),
+        ("quiesced", "quiesced")
+    );
+    drop(consumer);
+    max.set_enabled(false);
+    let status = max.status();
+    assert_eq!(
+        (status.state.as_str(), status.fhd.state.as_str()),
+        ("quiesced", "quiesced"),
+        "the thread's end and an off setting leave it"
+    );
+    let _again = max.attach();
+    let status = max.status();
+    assert_eq!(
+        (status.state.as_str(), status.fhd.state.as_str()),
+        ("quiesced", "quiesced"),
+        "for the rest of the process"
+    );
+}
