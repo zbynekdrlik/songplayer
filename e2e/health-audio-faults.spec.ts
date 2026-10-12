@@ -144,9 +144,10 @@ test("a loss 3 minutes ago: red, every path's row with its counts, timeline and 
   const panel = await openPanel(page);
   await expect(panel.locator('[data-testid="audio-window"][data-hours="24"]')).toHaveClass(/selected/);
   const rows = panel.getByTestId("audio-path-row");
-  await expect(rows).toHaveCount(5);
+  await expect(rows).toHaveCount(6);
   expect(await rows.evaluateAll((els) => els.map((e) => e.getAttribute("data-path")))).toEqual([
     "program",
+    "input",
     "out:out-1",
     "out:out-2",
     "loop:out-2",
@@ -155,6 +156,7 @@ test("a loss 3 minutes ago: red, every path's row with its counts, timeline and 
   // name, losses, risks, the "bez chyby" span in brackets, bars.
   const expected: Array<[string, string, string, string, string, number]> = [
     ["program", "Program", "1 chyba", "0 rizík", "5 h", 1],
+    ["input", "Vstup OBS manuál", "0 chýb", "0 rizík", "2 h 14 min", 0],
     ["out:out-1", "FOH", "0 chýb", "2 riziká", "2 h 14 min", 2],
     ["out:out-2", "Waves SoundGrid", "1 chyba", "0 rizík", "3 min", 1],
     ["loop:out-2", "Slučka – Waves SoundGrid", "1 chyba", "0 rizík", "40 min", 1],
@@ -169,7 +171,12 @@ test("a loss 3 minutes ago: red, every path's row with its counts, timeline and 
       new RegExp(`^bez chyby od \\d{1,2}\\.\\d{1,2}\\. \\d{2}:\\d{2} \\(${since}\\)$`),
     );
     await expect(r.getByTestId("audio-bar"), path).toHaveCount(bars);
+    // The deploy 2 h 14 min ago: one start mark per row, never a bar.
+    await expect(r.getByTestId("audio-start-mark"), path).toHaveCount(1);
   }
+  const mark = row(panel, "program").getByTestId("audio-start-mark");
+  const markTs = Number(await mark.getAttribute("data-ts"));
+  await expect(mark.locator("title")).toHaveText(`spustenie ${eventTime(markTs)}`);
   await expect(row(panel, "out:out-2").getByTestId("audio-path-losses")).toHaveClass(/has-loss/);
   await expect(row(panel, "out:out-1").getByTestId("audio-path-risks")).toHaveClass(/has-risk/);
   await expect(row(panel, "loop:out-2").getByTestId("audio-path-loop")).toHaveText(
@@ -252,6 +259,7 @@ test("the window selector re-reads the history over 1 h and 7 d", async ({ page 
   await expect(row(panel, "out:out-1").getByTestId("audio-path-risks")).toHaveText("1 riziko");
   for (const [path, bars] of [
     ["program", 0],
+    ["input", 0],
     ["out:out-1", 1],
     ["out:out-2", 1],
     ["loop:out-2", 1],
@@ -259,6 +267,7 @@ test("the window selector re-reads the history over 1 h and 7 d", async ({ page 
   ] as const) {
     await expect(row(panel, path).getByTestId("audio-bar"), path).toHaveCount(bars);
   }
+  await expect(panel.getByTestId("audio-start-mark"), "no start in the last hour").toHaveCount(0);
   const hourTicks = await panel.getByTestId("audio-axis-tick").allTextContents();
   expect(hourTicks.length).toBeGreaterThanOrEqual(6);
   expect(hourTicks.length).toBeLessThanOrEqual(7);
@@ -314,15 +323,21 @@ test("a chain clean across a restart reads since its last loss, never since the 
   await expect(row(panel, "program").getByTestId("audio-path-clean")).toHaveText(cleanSince("3 d 4 h"));
   await expect(row(panel, "out:out-1").getByTestId("audio-path-clean")).toHaveText(cleanSince("10 d"));
   await expect(row(panel, "loop:out-2").getByTestId("audio-path-clean")).toHaveText(cleanSince("10 d"));
+  await expect(row(panel, "input").getByTestId("audio-path-name")).toHaveText("Vstup OBS manuál");
+  await expect(row(panel, "input").getByTestId("audio-path-clean")).toHaveText(cleanSince("10 d"));
   await expect(panel.getByTestId("audio-faults-no-events")).toHaveText(
     "V tomto období žiadna chyba ani riziko.",
   );
   await expect(panel.getByTestId("audio-bar")).toHaveCount(0);
+  // The deploy is a mark on every row (6 paths), never a bar or an event.
+  await expect(panel.getByTestId("audio-start-mark")).toHaveCount(6);
 
   await pickWindow(panel, 168);
   await expect(panel.getByTestId("audio-fault-event")).toHaveCount(1);
   await expect(row(panel, "program").getByTestId("audio-path-losses")).toHaveText("1 chyba");
   await expect(row(panel, "program").getByTestId("audio-bar")).toHaveCount(1);
+  // The first starts 10 d ago are before this week; the deploy is in it.
+  await expect(row(panel, "program").getByTestId("audio-start-mark")).toHaveCount(1);
   // The segment keeps its own answer.
   await expect(segment).toHaveText("Zvuk: bez chyby 3 d 4 h");
 });
@@ -334,7 +349,7 @@ test("on a phone the open panel never makes the page scroll sideways", async ({ 
   await expect(page.getByTestId("health-audio")).toHaveAttribute("data-level", "recent", { timeout: 15000 });
   const panel = await openPanel(page);
   await expect(panel.getByTestId("audio-fault-event")).toHaveCount(5);
-  await expect(panel.getByTestId("audio-path-row")).toHaveCount(5);
+  await expect(panel.getByTestId("audio-path-row")).toHaveCount(6);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow, "horizontal overflow in px at 400px width").toBeLessThanOrEqual(0);
 });

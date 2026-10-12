@@ -24,7 +24,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use sp_core::audio_faults::{
-    self as faults, FaultsAnswer, Fetch, LocalTime, PathFaults, Polls, SEGMENT_HOURS, WINDOW_HOURS,
+    self as faults, FaultEvent, FaultsAnswer, Fetch, LocalTime, PathFaults, Polls, SEGMENT_HOURS,
+    WINDOW_HOURS,
 };
 use sp_core::audio_faults_timeline::{
     self as timeline, BAR_HEIGHT, BAR_WIDTH, BUCKETS, Bucket, SLOT,
@@ -270,9 +271,30 @@ fn event_rows(
         .collect()
 }
 
-/// A path's timeline: one bar per bucket that holds a fault, to scale.
-fn timeline_svg(a: &FaultsAnswer, buckets: &[Bucket], max: u32) -> AnyView {
+/// A path's timeline: one bar per bucket that holds a fault, to scale,
+/// and a dashed mark at each (re)start (a planned restart is no fault).
+fn timeline_svg(a: &FaultsAnswer, events: &[FaultEvent], buckets: &[Bucket], max: u32) -> AnyView {
     let width = BUCKETS as u32 * SLOT;
+    let marks = timeline::start_marks(events, a.from_ms, a.now_ms)
+        .into_iter()
+        .map(|m| {
+            let x = m.pct * f64::from(width) / 100.0;
+            let tip = timeline::start_tip(local(m.at_ms));
+            view! {
+                <g data-testid="audio-start-mark" data-ts=m.at_ms>
+                    <title>{tip}</title>
+                    <line
+                        class="audio-start-mark"
+                        x1=x
+                        y1=0
+                        x2=x
+                        y2=BAR_HEIGHT
+                        vector-effect="non-scaling-stroke"
+                    />
+                </g>
+            }
+        })
+        .collect_view();
     let bars = buckets
         .iter()
         .enumerate()
@@ -303,6 +325,7 @@ fn timeline_svg(a: &FaultsAnswer, buckets: &[Bucket], max: u32) -> AnyView {
         >
             <line class="audio-timeline-base" x1=0 y1=BAR_HEIGHT x2=width y2=BAR_HEIGHT />
             {bars}
+            {marks}
         </svg>
     }
     .into_any()
@@ -333,7 +356,7 @@ fn path_row(
     let risks = faults::risks_sk(p.risks);
     let clean = faults::clean_sk(p.clean_since_ms, a, local(p.clean_since_ms));
     let loop_line = p.loop_check.as_ref().map(faults::loop_sk);
-    let svg = timeline_svg(a, buckets, max);
+    let svg = timeline_svg(a, &p.events, buckets, max);
     view! {
         <div class="audio-path-row" data-testid="audio-path-row" data-path=p.path.clone()>
             <div class="audio-path-info">

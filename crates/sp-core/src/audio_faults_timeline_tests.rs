@@ -17,6 +17,15 @@ fn event(ts_ms: i64, severity: &str) -> FaultEvent {
     }
 }
 
+fn start(ts_ms: i64) -> FaultEvent {
+    FaultEvent {
+        ts_ms,
+        kind: "start".to_string(),
+        severity: "info".to_string(),
+        amount: 1,
+    }
+}
+
 fn b(loss: u32, risk: u32) -> Bucket {
     Bucket { loss, risk }
 }
@@ -224,4 +233,57 @@ fn an_instant_sits_at_its_share_of_the_axis() {
     assert_eq!(axis_pct(2_000, 1_000, 2_000), 100.0);
     assert_eq!(axis_pct(1_000, 1_000, 1_000), 0.0, "an empty window");
     assert_eq!(axis_pct(1_000, 1_000, 900), 0.0);
+}
+
+/// #257: a planned restart is no fault, so a start is a mark on its
+/// timeline, never a bar; only the starts inside the window are marked.
+#[test]
+fn every_start_inside_the_window_is_a_mark_at_its_place() {
+    let events = [
+        start(999),
+        start(1_000),
+        event(1_250, "loss"),
+        start(1_500),
+        start(2_000),
+        start(2_001),
+    ];
+    let marks = start_marks(&events, 1_000, 2_000);
+    assert_eq!(
+        marks,
+        vec![
+            StartMark {
+                at_ms: 1_000,
+                pct: 0.0
+            },
+            StartMark {
+                at_ms: 1_500,
+                pct: 50.0
+            },
+            StartMark {
+                at_ms: 2_000,
+                pct: 100.0
+            },
+        ]
+    );
+    assert_eq!(
+        buckets(&events, 1_000, 2_000, 60),
+        {
+            let mut b = vec![Bucket::default(); 60];
+            b[15] = Bucket { loss: 1, risk: 0 };
+            b
+        },
+        "a start is no bar"
+    );
+}
+
+#[test]
+fn a_start_marks_tooltip_names_its_local_time() {
+    let at = LocalTime {
+        day: 12,
+        month: 10,
+        hour: 14,
+        minute: 5,
+        second: 7,
+    };
+    assert_eq!(start_tip(at), "spustenie 12.10. 14:05:07");
 }

@@ -4,7 +4,9 @@
 //! at the bottom, risk on it); every row shares one time axis whose ticks
 //! fall on whole local times. Pure; sp-ui draws the SVG.
 
-use crate::audio_faults::{FaultEvent, LOSS, LocalTime, RISK, dm_hm_sk, losses_sk, risks_sk};
+use crate::audio_faults::{
+    FaultEvent, LOSS, LocalTime, RISK, START, dm_hm_sk, losses_sk, risks_sk, time_sk,
+};
 
 /// Buckets per timeline, whatever the window (1 h → 1 min each, 24 h →
 /// 24 min, 7 d → 2.8 h, 30 d → 12 h).
@@ -129,6 +131,33 @@ pub fn bucket_tip(start: LocalTime, end: LocalTime, b: Bucket) -> String {
         losses_sk(i64::from(b.loss)),
         risks_sk(i64::from(b.risk))
     )
+}
+
+/// A path's (re)start on its timeline: a mark, never a bar (a planned
+/// restart is no fault; an `interrupted` one is a loss and has its bar).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StartMark {
+    /// The instant (UTC ms).
+    pub at_ms: i64,
+    /// Its place on the axis, percent ([`axis_pct`]).
+    pub pct: f64,
+}
+
+/// The start rows of `events` inside `[from, to]`, as marks.
+pub fn start_marks(events: &[FaultEvent], from: i64, to: i64) -> Vec<StartMark> {
+    events
+        .iter()
+        .filter(|e| e.kind == START && e.ts_ms >= from && e.ts_ms <= to)
+        .map(|e| StartMark {
+            at_ms: e.ts_ms,
+            pct: axis_pct(e.ts_ms, from, to),
+        })
+        .collect()
+}
+
+/// A start mark's tooltip: `spustenie 12.10. 14:05:07`.
+pub fn start_tip(at: LocalTime) -> String {
+    format!("spustenie {}", time_sk(at))
 }
 
 /// The step between the axis's ticks for a window `span_ms` long (4 to 12

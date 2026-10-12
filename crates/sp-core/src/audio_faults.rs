@@ -39,6 +39,9 @@ pub const LOSS: &str = "loss";
 /// A row's severity: late or squeezed, the samples still whole.
 pub const RISK: &str = "risk";
 
+/// A path's (re)start row's kind: no fault, a mark on the timeline.
+pub const START: &str = "start";
+
 const MINUTE_MS: i64 = 60_000;
 const HOUR_MS: i64 = 3_600_000;
 
@@ -255,9 +258,10 @@ pub fn risks_sk(n: i64) -> String {
     counted(n, "riziko", "riziká", "rizík")
 }
 
-/// A path's name for the operator: `Program`, an output's configured name,
-/// `Slučka – <output name>`, a playlist's name (`playlist`, when the
-/// dashboard knows it) or `Playlist <id>`; an unknown path its `detail`.
+/// A path's name for the operator: `Program`, `Vstup OBS manuál` (the NDI
+/// input), an output's configured name, `Slučka – <output name>`, a
+/// playlist's name (`playlist`, when the dashboard knows it) or `Playlist
+/// <id>`; an unknown path its `detail`.
 pub fn path_name(path: &str, detail: &str, playlist: Option<&str>) -> String {
     let named = |fallback: &str| {
         if detail.trim().is_empty() {
@@ -268,6 +272,8 @@ pub fn path_name(path: &str, detail: &str, playlist: Option<&str>) -> String {
     };
     if path == "program" {
         "Program".to_string()
+    } else if path == "input" {
+        "Vstup OBS manuál".to_string()
     } else if let Some(id) = path.strip_prefix("loop:") {
         format!("Slučka – {}", named(id))
     } else if let Some(id) = path.strip_prefix("out:") {
@@ -339,12 +345,17 @@ pub fn kind_sk(kind: &str) -> &str {
         "host_down" => "hostiteľ ASIO nebeží",
         "no_return" => "slučka sa nevracia",
         "late_dropped" => "neskoro zahodené",
-        "coalesced" => "preskočený blok",
+        "coalesced" => "zahodený blok programu",
+        "interrupted" => "prerušenie",
+        "fast_callback" => "predčasné volanie",
+        "overload" => "preťaženie",
+        "no_source" => "bez zdroja",
+        "unsupported" => "nepodporovaný formát",
         "vban_feed_late" => "VBAN dodaný neskoro",
         "limited" => "limiter",
         "ndi_late" => "NDI neskoro",
         "unserviced" => "neobslúžený slot",
-        "start" => "spustenie",
+        START => "spustenie",
         other => other,
     }
 }
@@ -535,11 +546,14 @@ pub fn loop_sk(l: &LoopSeconds) -> String {
     )
 }
 
-/// The order of the panel's rows: the program, each output followed by its
-/// loop (by id), the pipelines (by playlist id), then anything else.
+/// The order of the panel's rows: the program, the NDI input, each output
+/// followed by its loop (by id), the pipelines (by playlist id), then
+/// anything else.
 pub fn row_order(path: &str) -> (u8, i64, String, u8) {
     if path == "program" {
         (0, 0, String::new(), 0)
+    } else if path == "input" {
+        (0, 1, String::new(), 0)
     } else if let Some(id) = path.strip_prefix("out:") {
         (1, 0, id.to_string(), 0)
     } else if let Some(id) = path.strip_prefix("loop:") {

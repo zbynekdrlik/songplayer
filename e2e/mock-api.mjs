@@ -902,6 +902,8 @@ let audioFaultsScenario = "fixture";
 let audioFaultsDelayMs = 0;
 const AUDIO_LIVE = [
   ["program", "SP-program"],
+  // Lane 1's NDI input path ("OBS manuál"), which runs on every box with the SDK.
+  ["input", "OBS manuál"],
   ["pipeline:1", "SP-worship"],
   ["out:out-1", "FOH"],
   ["out:out-2", "Waves SoundGrid"],

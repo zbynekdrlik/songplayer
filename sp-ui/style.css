@@ -1690,6 +1690,8 @@ body {
 .audio-timeline-base { stroke: var(--border); stroke-width: 1; }
 .audio-bar-loss { fill: var(--error); }
 .audio-bar-risk { fill: var(--warning); }
+/* A path's (re)start: a dashed mark, never a bar (a planned restart is no fault). */
+.audio-start-mark { stroke: var(--text-dim); stroke-width: 1.5; stroke-dasharray: 3 2; }
 .audio-axis { position: relative; height: 1.4em; color: var(--text-dim); font-size: 0.75rem; }
 .audio-axis-tick { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
 .audio-events {

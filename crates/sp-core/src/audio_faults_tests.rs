@@ -310,6 +310,8 @@ fn a_path_reads_by_its_name() {
         ("pipeline:3", "SP-worship", None, "Playlist 3"),
         ("other:x", "Niečo", None, "Niečo"),
         ("other:x", "", None, "other:x"),
+        ("input", "OBS manuál", None, "Vstup OBS manuál"),
+        ("input", "", Some("Worship"), "Vstup OBS manuál"),
     ];
     for (p, detail, playlist, name) in table {
         assert_eq!(path_name(p, detail, playlist), name, "{p} {detail:?}");
@@ -382,7 +384,12 @@ fn every_kind_reads_in_slovak_an_unknown_one_as_sent() {
         ("host_down", "hostiteľ ASIO nebeží"),
         ("no_return", "slučka sa nevracia"),
         ("late_dropped", "neskoro zahodené"),
-        ("coalesced", "preskočený blok"),
+        ("coalesced", "zahodený blok programu"),
+        ("interrupted", "prerušenie"),
+        ("fast_callback", "predčasné volanie"),
+        ("overload", "preťaženie"),
+        ("no_source", "bez zdroja"),
+        ("unsupported", "nepodporovaný formát"),
         ("vban_feed_late", "VBAN dodaný neskoro"),
         ("limited", "limiter"),
         ("ndi_late", "NDI neskoro"),
@@ -670,6 +677,7 @@ fn the_rows_go_program_outputs_with_their_loops_pipelines_then_the_rest() {
         "loop:b",
         "weird",
         "out:b",
+        "input",
         "pipeline:3",
         "program",
         "out:a",
@@ -682,6 +690,7 @@ fn the_rows_go_program_outputs_with_their_loops_pipelines_then_the_rest() {
         order,
         [
             "program",
+            "input",
             "out:a",
             "out:b",
             "loop:b",
