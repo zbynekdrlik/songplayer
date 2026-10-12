@@ -200,18 +200,6 @@ pub fn level(answer: Option<&FaultsAnswer>) -> AudioLevel {
     }
 }
 
-/// Since when the whole chain is without a loss: the oldest `clean_since`
-/// of the paths that run now (of every path when none runs).
-pub fn chain_clean_since(answer: &FaultsAnswer) -> Option<i64> {
-    let live = answer
-        .paths
-        .iter()
-        .filter(|p| p.live)
-        .map(|p| p.clean_since_ms)
-        .min();
-    live.or_else(|| answer.paths.iter().map(|p| p.clean_since_ms).min())
-}
-
 /// A span in Slovak, rounded down: `menej ako minútu`, `12 min`,
 /// `2 h 14 min`, `2 h`, `3 d 4 h`, `3 d`.
 pub fn duration_sk(ms: i64) -> String {

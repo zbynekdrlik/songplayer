@@ -228,36 +228,6 @@ fn the_worst_path_has_the_newest_loss_the_later_one_on_a_tie() {
 }
 
 #[test]
-fn the_chain_is_clean_since_the_oldest_clean_since_of_the_live_paths() {
-    let gone = PathFaults {
-        live: false,
-        clean_since_ms: NOW - 20 * HOUR,
-        ..path("out:gone")
-    };
-    let a = day(vec![
-        PathFaults {
-            clean_since_ms: NOW - 2 * HOUR,
-            ..path("program")
-        },
-        gone.clone(),
-        PathFaults {
-            clean_since_ms: NOW - 5 * HOUR,
-            ..path("out:a")
-        },
-    ]);
-    assert_eq!(chain_clean_since(&a), Some(NOW - 5 * HOUR));
-    let none_live = day(vec![
-        gone,
-        PathFaults {
-            live: false,
-            ..path("out:b")
-        },
-    ]);
-    assert_eq!(chain_clean_since(&none_live), Some(NOW - DAY));
-    assert_eq!(chain_clean_since(&day(Vec::new())), None);
-}
-
-#[test]
 fn a_span_reads_in_whole_minutes_hours_and_days() {
     let table = [
         (-5, "menej ako minútu"),
