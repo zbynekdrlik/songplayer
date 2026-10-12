@@ -11,7 +11,9 @@ import { defineConfig } from "@playwright/test";
  * SongPlayer spawns disturbs none of them: the ASIO host process; #257: no
  * audio path records a loss in the audio fault ledger meanwhile) +
  * `post-deploy-environment.spec.ts` (#233: Windows LTSC or IoT Enterprise,
- * Defender real-time and every firewall profile off).
+ * Defender real-time and every firewall profile off) +
+ * `post-deploy-audio-faults-ui.spec.ts` (#257: the dashboard's audio
+ * segment reads PP's own fault ledger, its panel lists every path).
  * The SNV suite is post-deploy.config.ts; it ignores post-deploy-pp*.
  */
 export default defineConfig({
@@ -22,6 +24,7 @@ export default defineConfig({
     "**/post-deploy-settings-masked.spec.ts",
     "**/post-deploy-audio-asio.spec.ts",
     "**/post-deploy-environment.spec.ts",
+    "**/post-deploy-audio-faults-ui.spec.ts",
   ],
   timeout: 90_000,
   retries: 0,

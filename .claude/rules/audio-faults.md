@@ -213,6 +213,14 @@ every service, so it is at first glance; the details are one click away.
   2 h 14 min 30 s ago, offsets mid-minute so a minute text holds 30 s; the
   mock answers a scenario's rows as `build_answer` does (any window).
   Reset with `/__mock/audio-faults-reset` in `beforeEach` / `afterEach`.
+- **Post-deploy** (`e2e/post-deploy-audio-faults-ui.spec.ts`, SNV's suite
+  and PP's subset, read-only): one `?hours=24` read of the box's ledger, then
+  the dashboard's `data-level` must agree (a path with a loss → `loss` |
+  `recent`, its text `Zvuk: N chyb… za 24 h · posledná pred … · …`; none →
+  `ok` | `risk`, `Zvuk: bez chyby …`), and one click lists a row per path
+  of that answer, `program` among them; a clean console. It logs the
+  segment's text: the owner's acceptance ("after the deploy the segment
+  reads the time since the last real fault") is read from that line.
 
 ## Decisions made in lane 1 (main session may revisit)
 
