@@ -26,9 +26,14 @@ export interface EnvironmentStatus {
   note?: string | null;
   edition_id?: string | null;
   product_name?: string | null;
+  build_number?: number | null;
   ltsc?: boolean | null;
   edition_allowed?: boolean | null;
   defender_realtime?: boolean | null;
+  defender_passive?: boolean | null;
+  defender_mode?: string | null;
+  defender_antivirus_enabled?: boolean | null;
+  antivirus_on?: string[] | null;
   firewall?: { domain?: boolean | null; private?: boolean | null; public?: boolean | null };
   problems: EnvProblemView[];
   read_errors?: string[];
