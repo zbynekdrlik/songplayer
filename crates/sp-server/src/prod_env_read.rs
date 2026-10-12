@@ -226,7 +226,12 @@ pub fn defender_service_off(service: ServiceRead) -> Result<(), String> {
 /// while another product leads: passive, EDR in block mode, side-by-side
 /// passive (Microsoft's `Get-MpComputerStatus` documentation). `Normal` and
 /// `Not running` are no such mode.
-pub const PASSIVE_MODES: [&str; 1] = ["Passive"];
+pub const PASSIVE_MODES: [&str; 4] = [
+    "Passive Mode",
+    "Passive",
+    "EDR Block Mode",
+    "SxS Passive Mode",
+];
 
 /// A running mode in which Defender still scans files ([`PASSIVE_MODES`],
 /// ASCII case ignored).
@@ -258,7 +263,7 @@ pub fn is_defender_product(product: &AvProduct) -> bool {
 /// expired), bits 0-7 the definitions (0x00 up to date, 0x10 out of date).
 /// For example 0x061100 (397568) is Defender on, 0x060100 (393472) Defender
 /// off, 0x041000 (266240) a product on and up to date.
-pub const AV_STATE_ON: u32 = 0x0010;
+pub const AV_STATE_ON: u32 = 0x1000;
 
 /// An antivirus product's `productState` says it is on ([`AV_STATE_ON`]).
 pub fn av_product_on(state: u32) -> bool {
