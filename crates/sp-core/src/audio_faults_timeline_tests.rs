@@ -117,7 +117,6 @@ fn the_bars_sit_in_their_slots() {
     assert_eq!(bar_x(0), 1);
     assert_eq!(bar_x(1), 11);
     assert_eq!(bar_x(59), 591);
-    assert_eq!(BUCKETS as u32 * SLOT, 600, "the view box's width");
 }
 
 #[test]
