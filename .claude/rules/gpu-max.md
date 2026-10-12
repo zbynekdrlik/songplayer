@@ -332,8 +332,9 @@ with `WAIT_ABANDONED`:
 
 The waiting thread then OWNS the mutex: Windows hands an abandoned mutex to
 its next waiter. Nothing ever unlocks it, so that thread keeps it until it
-exits. Inside that process the mutex is recursive and the thread works on.
-Every other program's wait times out at 67 ms.
+exits. Only that one thread can keep using it (a mutex is recursive for its
+owning thread). Every other thread's wait times out at 67 ms, the other
+threads of the same process included.
 
 **Any Spout program that dies mid-lock poisons the box.** That includes
 SongPlayer at a deploy's `Stop-Process`, a crashed Arena, and an OBS with the
@@ -359,17 +360,37 @@ SongPlayer at a deploy's `Stop-Process`, a crashed Arena, and an OBS with the
   as it holds the mutex (`spout_lock::releases_owed`, at most 64).
   - Spout's own locks are balanced within a call, so between calls the
     thread owns one only when it was handed it abandoned.
-  - The open (Spout's `CleanSenders`) also gives back every listed sender's
-    info-map lock.
+  - The open and the name claim run Spout's `CleanSenders`, which reads every
+    listed sender's info map under `<name>_mutex`. When it meets one of those
+    abandoned, it drops that sender off the list and keeps the lock.
+    `sdk_cleaning` therefore gives back the map locks of the senders listed
+    BEFORE or after the call. A list read after the call alone never sees
+    the dropped name (review round 1).
+  - Exceptions to "balanced within a call":
+    - A C++ exception the shim catches can leave a lock taken. The OS mutex
+      is then given back, but Spout's object still counts it as locked and
+      reads its map unlocked afterwards. That is no worse than keeping the
+      lock.
+    - A renamed sender (`<name>_1`, refused at once `TAKEN`) locks names
+      that are not on the list.
   - Our registry reader `read_map` releases an abandoned wait itself.
 - **It refuses a sender whose texture lock is kept elsewhere.** After each
-  send that was not refused, the sender looks at its texture lock. When a
-  thread other than the sender's owns it for `MAX_ACCESS_HELD` (30) sends in
-  a row, the sender is refused `ACCESS_HELD` (`spout_state::access_held`).
-  It leaves the list. The `program-max` thread makes a new sender after its
-  3 s backoff, and the new one gets a fresh lock once the holder's receiver
-  has let go. A receiver legitimately holds that lock only while it copies a
-  frame.
+  send that was not refused, the sender looks at its texture lock.
+  - A send COUNTS when another thread owns that lock AND the send took at
+    least `ACCESS_TIMEOUT_US` (60 ms). That means Spout's 67 ms
+    `CheckAccess` timed out, so the copy really was skipped.
+  - At `MAX_ACCESS_HELD` (30) counted sends in a row, the sender is refused
+    `ACCESS_HELD` (`spout_state::access_held`) and leaves the list.
+  - Why the 60 ms condition (review round 1): a receiver may take the lock
+    right after our send. Spout's own `ReceiveImage` maps a staging copy
+    under it, 7–12 ms at FHD. That receiver shows up as the owner at the
+    look, but it cost the send nothing, and counting it would refuse a
+    healthy sender every 30 sends.
+  - The `program-max` thread makes a new sender after its 3 s backoff. The
+    old mutex object, and with it the kept lock, goes away only once every
+    handle to it is closed, that is once every receiver has let go of the
+    sender. Until then each rebuild repeats the cycle: 3 s off, then ~2 s of
+    sends that each wait 67 ms.
 - **It names the holder.** A refusal about a kept lock (`UNREADABLE` for the
   list, `ACCESS_HELD` for the texture) carries `holder` on
   `GpuError::SpoutNotRegistered`. It comes from `MutantOwnerInformation`,

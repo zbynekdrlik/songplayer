@@ -14,7 +14,12 @@
 //! So the sender gives back every Spout lock its thread holds after each
 //! SDK call (`win/spout_lock.rs`): Spout's own locks are balanced within a
 //! call, so between calls the thread holds one only when it was handed it
-//! abandoned. A lock another program keeps cannot be given back from here:
+//! abandoned, or when a C++ exception the shim caught left a lock taken
+//! (Spout's `SpoutSharedMemory` object then still counts it as locked and
+//! reads its map unlocked afterwards: no worse than keeping the lock). A
+//! sender Spout renamed (`<name>_1`, refused at once as `TAKEN`) locks
+//! names this module does not list. A lock another program keeps cannot be
+//! given back from here:
 //! a refusal names its holder ([`holder_text`]), and a sender whose texture
 //! lock another program keeps is refused
 //! ([`crate::spout_state::access_held`]), so it is made anew once that

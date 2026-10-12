@@ -232,8 +232,8 @@ pub enum AccessHeld {
 /// lock was held elsewhere AND the send waited out Spout's timeout
 /// ([`ACCESS_TIMEOUT_US`]); refused at [`MAX_ACCESS_HELD`] in a row; any
 /// other send starts the count again.
-pub fn access_held(streak: u32, held_elsewhere: bool, _send_us: u64) -> AccessHeld {
-    if !held_elsewhere {
+pub fn access_held(streak: u32, held_elsewhere: bool, send_us: u64) -> AccessHeld {
+    if !held_elsewhere || send_us < ACCESS_TIMEOUT_US {
         return AccessHeld::Streak(0);
     }
     let next = streak + 1;

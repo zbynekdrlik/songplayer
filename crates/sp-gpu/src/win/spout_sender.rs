@@ -18,7 +18,7 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::core::Interface;
 
-use super::spout_lock::{give_back, give_back_listed, held_elsewhere};
+use super::spout_lock::{give_back, give_back_maps, held_elsewhere, listed_senders};
 use super::{Compositor, micros_since};
 use crate::error::GpuError;
 use crate::spout::{
@@ -61,6 +61,21 @@ fn sdk<T>(sender: &str, call: impl FnOnce() -> T) -> T {
     let _one = SDK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let out = call();
     give_back(sender);
+    out
+}
+
+/// [`sdk`] for a call that runs Spout's `CleanSenders` (the open, the name
+/// claim). It reads every listed sender's info map under that map's lock,
+/// and a lock it meets abandoned makes it drop that sender off the list
+/// while this thread keeps the lock (#243 review): so the info-map locks of
+/// every sender listed before OR after the call are given back too.
+fn sdk_cleaning<T>(sender: &str, call: impl FnOnce() -> T) -> T {
+    let _one = SDK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let before = listed_senders();
+    let out = call();
+    give_back(sender);
+    let after = listed_senders();
+    give_back_maps(before.iter().chain(&after));
     out
 }
 
@@ -162,16 +177,12 @@ impl SpoutSender {
         let copied = super::pipeline::query(&device)?;
         // Not OK until the shim says so.
         let mut code: c_int = -1;
-        // The open runs Spout's `CleanSenders`, which takes every listed
-        // sender's info-map lock: give back any of them it was handed
-        // abandoned too (#243).
-        let raw = sdk(name, || {
-            // SAFETY: `device` is a live ID3D11Device, kept alive until after
-            // the shim object is released (see `Shim`); `c_name` is
-            // NUL-terminated and outlives the call; `code` is a valid out slot.
-            let raw = unsafe { spout_sender_open(device.as_raw(), c_name.as_ptr(), &mut code) };
-            give_back_listed();
-            raw
+        // The open runs Spout's `CleanSenders` (#243: `sdk_cleaning`).
+        // SAFETY: `device` is a live ID3D11Device, kept alive until after the
+        // shim object is released (see `Shim`); `c_name` is NUL-terminated
+        // and outlives the call; `code` is a valid out slot.
+        let raw = sdk_cleaning(name, || unsafe {
+            spout_sender_open(device.as_raw(), c_name.as_ptr(), &mut code)
         });
         status_result(code, "spout_sender_open", name)?;
         let shim = Shim {
@@ -185,7 +196,7 @@ impl SpoutSender {
         // SAFETY: `shim` is a live shim sender.
         claim(
             listed,
-            || sdk(name, || unsafe { spout_sender_claim_name(raw) }),
+            || sdk_cleaning(name, || unsafe { spout_sender_claim_name(raw) }),
             name,
         )?;
         info!(

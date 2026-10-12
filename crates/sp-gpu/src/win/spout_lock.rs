@@ -37,6 +37,9 @@ struct MutantBasic {
     /// 1 = free, 0 = owned once, −n = owned n + 1 times.
     count: i32,
     owned_by_caller: u8,
+    /// Part of the layout only: a wait that takes an abandoned mutex clears
+    /// it, so it reads 0 for every mutex this thread owns.
+    #[allow(dead_code)]
     abandoned: u8,
 }
 
@@ -100,14 +103,17 @@ pub(super) fn give_back(sender: &str) {
     }
 }
 
-/// Give back the info-map lock of every sender Spout lists, which Spout's
-/// `CleanSenders` takes one by one (at a sender's open).
-pub(super) fn give_back_listed() {
-    let Ok(listed) = super::spout_sender_names() else {
-        return;
-    };
-    for sender in listed {
-        give_back_one(&map_mutex_name(&sender));
+/// The senders Spout lists now (none when the list cannot be read: our own
+/// reader gives back an abandoned list lock it meets, `read_map`).
+pub(super) fn listed_senders() -> Vec<String> {
+    super::spout_sender_names().unwrap_or_default()
+}
+
+/// Give back the info-map lock of each of `senders`, which Spout's
+/// `CleanSenders` takes one by one.
+pub(super) fn give_back_maps<'a>(senders: impl IntoIterator<Item = &'a String>) {
+    for sender in senders {
+        give_back_one(&map_mutex_name(sender));
     }
 }
 
@@ -132,7 +138,6 @@ fn give_back_one(name: &str) -> u32 {
         warn!(
             mutex = name,
             released,
-            abandoned = basic.abandoned,
             "sp-gpu: gave back a Spout lock this thread was handed abandoned \
              (a program died holding it, #243)"
         );
@@ -141,8 +146,9 @@ fn give_back_one(name: &str) -> u32 {
 }
 
 /// Who holds the mutex `name` now, as `holder_text` names it, when a thread
-/// other than this one does; `None` when it is free, gone, or this
-/// thread's own.
+/// other than this one does (another program's, or another of this
+/// process's: then ", this process"); `None` when it is free, gone, or
+/// this thread's own.
 pub(super) fn held_elsewhere(name: &str) -> Option<String> {
     let owner = Named::open(name)?.query::<MutantOwner>(1)?;
     // SAFETY: plain reads of the calling thread's and process's ids.
