@@ -508,7 +508,11 @@ wait for a peer that has the song", below).
     characters, `recordedScene`). The
     scene (`pickManualScene`) is the repo variable `PP_MANUAL_SCENE` when set
     (a manual cg OBS scene, else the test fails saying why), else the scene
-    cg OBS already has on program (nothing changes on cg OBS). When cg OBS's
+    cg OBS already has on program (nothing changes on cg OBS). Never
+    `Blank` in any case (#245: a facade press of it is SongPlayer's own
+    black, source -2, cg OBS told nothing, so it can never land as "OBS
+    manuál" even when cg OBS has a scene of that name; PP's variable said
+    `Blank` until 12.10.2026 and its gate polled 15 s for nothing). When cg OBS's
     program is not a manual scene, the test fails naming `PP_MANUAL_SCENE`:
     the gate never picks another cg OBS scene by itself. The spec reads cg
     OBS on `OBS_WS_URL` (:4455). Precondition (nothing checks it): that
@@ -521,10 +525,16 @@ wait for a peer that has the song", below).
     (`programRestoreTarget`): the latest recorded switch
     (`remote.last_remote_cut`) is the gate's own last press (its scene,
     recorded at or after the instant the gate sent it; the runner and
-    SongPlayer share PP's clock) and the program is on that press's source
-    — or, when that last press was refused (a keep: the NDI input inactive,
-    cg OBS refusing), on the source of the press before it, so a refused
-    manual press never leaves the test playlist on air. A playlist start
+    SongPlayer share PP's clock). A press that switched is the gate's
+    wherever it landed: every switch through SongPlayer replaces
+    `last_remote_cut`, so nobody moved the program since (12.10.2026: a
+    press of "Blank" landed on SongPlayer's own Blank, -2, not the predicted
+    "OBS manuál" -1, and the old "on that press's source" check left PP
+    silent for 2 h). When that last press was refused (a keep: the NDI
+    input inactive, cg OBS refusing) the program must be on the source of
+    the press before it (an operator's cut between the presses is kept), so
+    a refused manual press never leaves the test playlist on air. A test
+    never leaves the program silent: the owner watches SoundGrid by ear. A playlist start
     source is re-kicked to its next song, as at SNV. cg OBS goes back on
     its own scene only when the manual press moved it and it is still there
     (`cgRestoreTarget`), through the facade when SP-program stays on "OBS

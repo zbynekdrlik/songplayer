@@ -20,20 +20,25 @@ mod common;
 
 use std::ffi::{CString, c_void};
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, mpsc};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use common::{
     BLACK, H, W, assert_matches_reference, assert_matches_reference_in, pattern, picture, warp,
     warp_fhd,
 };
-use sp_gpu::spout_state::{NOT_LISTED, Registration, TAKEN};
+use sp_gpu::spout_state::{
+    ACCESS_HELD, MAX_ACCESS_HELD, MAX_UNREADABLE, NOT_LISTED, Registration, TAKEN, UNREADABLE,
+};
 use sp_gpu::{
     Composition, Compositor, FHD_HEIGHT, FHD_WIDTH, GpuError, NAME_SLOT_LEN, SENDER_NAMES_MAP,
     SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, SharedTextureInfo, SpoutSender, mapped_len,
     read_shared_texture, spout_sender_info, spout_sender_names, unpad_rows,
 };
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE,
+    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, FALSE, HANDLE, INVALID_HANDLE_VALUE,
+    WAIT_ABANDONED, WAIT_OBJECT_0,
 };
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0};
 use windows::Win32::Graphics::Direct3D11::{
@@ -47,7 +52,8 @@ use windows::Win32::System::Memory::{
     PAGE_READWRITE, UnmapViewOfFile,
 };
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueA};
-use windows::core::{PCSTR, s};
+use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
+use windows::core::{HSTRING, PCSTR, s};
 
 /// `DXGI_FORMAT_B8G8R8A8_UNORM` (87), as Spout's registry stores it.
 const BGRA: u32 = DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32;
@@ -493,9 +499,14 @@ fn a_sender_whose_name_was_listed_since_it_was_made_is_refused_before_it_registe
     let renamed = format!("{name}_1");
     for attempt in ["first", "second"] {
         match loser.send() {
-            Err(GpuError::SpoutNotRegistered { name: asked, why }) => {
+            Err(GpuError::SpoutNotRegistered {
+                name: asked,
+                why,
+                holder,
+            }) => {
                 assert_eq!(asked, name);
                 assert_eq!(why, TAKEN);
+                assert_eq!(holder, None, "a taken name is no kept lock");
             }
             other => panic!("the {attempt} send of the loser must be refused, got {other:?}"),
         }
@@ -562,9 +573,14 @@ fn a_sender_spout_does_not_list_is_refused_and_leaves_the_list_alone() {
     );
     for attempt in ["first", "second"] {
         match sender.send() {
-            Err(GpuError::SpoutNotRegistered { name: asked, why }) => {
+            Err(GpuError::SpoutNotRegistered {
+                name: asked,
+                why,
+                holder,
+            }) => {
                 assert_eq!(asked, name);
                 assert_eq!(why, NOT_LISTED);
+                assert_eq!(holder, None, "a full list is no kept lock");
             }
             other => {
                 panic!("the {attempt} send of an unlisted sender must be refused, got {other:?}")
@@ -603,4 +619,284 @@ fn a_sender_that_never_existed_has_no_map() {
     let _one = one_at_a_time();
     assert_eq!(info("sp-gpu test never registered"), None);
     assert_eq!(listed("sp-gpu test never registered"), 0);
+}
+
+/// #243: the named mutex `name`, opened (or made, as Spout's `CreateMutexA`
+/// does), closed when dropped.
+struct TestMutex(HANDLE);
+
+impl TestMutex {
+    fn open(name: &str) -> Self {
+        let mutex = unsafe { CreateMutexW(None, FALSE, &HSTRING::from(name)) }
+            .unwrap_or_else(|e| panic!("the mutex {name}: {e}"));
+        Self(mutex)
+    }
+}
+
+impl Drop for TestMutex {
+    fn drop(&mut self) {
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// Whether a wait's result means the waiter took the mutex.
+fn took(wait: u32) -> bool {
+    wait == WAIT_OBJECT_0.0 || wait == WAIT_ABANDONED.0
+}
+
+/// #243: leave the mutex `name` ABANDONED, as a program that died holding a
+/// Spout lock leaves it: a helper thread takes it and ends without
+/// releasing it. The returned handle keeps the mutex alive.
+fn abandon(name: &str) -> TestMutex {
+    let mutex = TestMutex::open(name);
+    // A HANDLE is not Send: the thread gets the number.
+    let raw = mutex.0.0 as isize;
+    let wait = std::thread::spawn(move || {
+        unsafe { WaitForSingleObject(HANDLE(raw as *mut c_void), 5_000) }.0
+    })
+    .join()
+    .expect("the thread that dies holding the lock");
+    assert!(took(wait), "it took the lock: {wait:#x}");
+    mutex
+}
+
+/// Releases its mutex as often as THIS thread holds it, when dropped: a
+/// failing test never leaves its thread holding a Spout lock for the next.
+struct GiveBack(TestMutex);
+
+impl Drop for GiveBack {
+    fn drop(&mut self) {
+        for _ in 0..64 {
+            if unsafe { ReleaseMutex((self.0).0) }.is_err() {
+                break;
+            }
+        }
+    }
+}
+
+/// What another thread meets when it waits up to 300 ms for the mutex
+/// `name`: `WAIT_OBJECT_0` = free (given back at once), `WAIT_TIMEOUT` = a
+/// thread keeps it, `WAIT_ABANDONED` = left abandoned (nothing took it).
+fn wait_elsewhere(name: &str) -> u32 {
+    let name = name.to_owned();
+    std::thread::spawn(move || {
+        let mutex = TestMutex::open(&name);
+        let wait = unsafe { WaitForSingleObject(mutex.0, 300) }.0;
+        if took(wait) {
+            unsafe { ReleaseMutex(mutex.0) }.expect("give it back");
+        }
+        wait
+    })
+    .join()
+    .expect("the waiting thread")
+}
+
+/// #243: another thread of this process holds the mutex `name` until this
+/// value is dropped, as a program that keeps a Spout lock does.
+struct Hold {
+    release: Option<mpsc::Sender<()>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Hold {
+    fn take(name: &str) -> Self {
+        let name = name.to_owned();
+        let (taken, taken_rx) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel::<()>();
+        let thread = std::thread::spawn(move || {
+            let mutex = TestMutex::open(&name);
+            let wait = unsafe { WaitForSingleObject(mutex.0, 5_000) }.0;
+            taken.send(wait).expect("the test waits for the take");
+            let _ = release_rx.recv();
+            if took(wait) {
+                unsafe { ReleaseMutex(mutex.0) }.expect("release the held lock");
+            }
+        });
+        let wait = taken_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the holding thread took its lock");
+        assert!(took(wait), "the lock was taken: {wait:#x}");
+        Self {
+            release: Some(release),
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        drop(self.release.take());
+        if let Some(thread) = self.thread.take()
+            && let Err(panic) = thread.join()
+            && !std::thread::panicking()
+        {
+            // The holding thread failed (its release): the test fails too.
+            std::panic::resume_unwind(panic);
+        }
+    }
+}
+
+/// How a refusal names this test process as a lock's holder, lowercased.
+fn this_process_holder() -> String {
+    let exe = std::env::current_exe().expect("the test's exe");
+    let file = exe.file_name().expect("its file name").to_string_lossy();
+    format!("{file} (pid {}, this process)", std::process::id()).to_ascii_lowercase()
+}
+
+/// #243: a Spout list lock left abandoned (a program died holding it) is
+/// handed to the next waiter, and Spout 2.007.017 never releases a lock it
+/// got that way. The sender's thread gives it back after the call, so other
+/// programs read the list again.
+#[test]
+fn a_list_lock_handed_over_abandoned_is_given_back() {
+    let _one = one_at_a_time();
+    let compositor = warp();
+    let list = format!("{SENDER_NAMES_MAP}_mutex");
+    let _alive = abandon(&list);
+    let _cleanup = GiveBack(TestMutex::open(&list));
+    // The open's CleanSenders is the first to wait for the list's lock.
+    let sender = SpoutSender::with_name(&compositor, "SP-gpu-test-abandoned-list")
+        .expect("a sender opens on an abandoned list lock");
+    assert_eq!(
+        wait_elsewhere(&list),
+        WAIT_OBJECT_0.0,
+        "another thread must take Spout's list lock at once (0x102 = the \
+         sender's thread kept it, 0x80 = nothing took the abandoned lock)"
+    );
+    drop(sender);
+}
+
+/// #243 review: Spout's `CleanSenders` (a sender's open, and its name
+/// claim) reads every listed sender's info map under that map's lock; a
+/// lock it meets abandoned makes it drop that sender off the list, and
+/// this thread then owns the lock. It is given back, though the name is
+/// off the list by the time the call returns.
+#[test]
+fn a_listed_senders_map_lock_handed_over_abandoned_is_given_back() {
+    let _one = one_at_a_time();
+    let mut compositor = warp();
+    let listed_name = "SP-gpu-test-abandoned-map";
+    let mut listed_sender = SpoutSender::with_name(&compositor, listed_name).expect("a sender");
+    compose(&mut compositor, &Composition::Black);
+    listed_sender.send().expect("its first send lists it");
+    assert_eq!(listed(listed_name), 1, "{:?}", names());
+    let map_lock = format!("{listed_name}_mutex");
+    let _alive = abandon(&map_lock);
+    let _cleanup = GiveBack(TestMutex::open(&map_lock));
+    // The next open's CleanSenders reads the listed sender's map.
+    let opener = SpoutSender::with_name(&compositor, "SP-gpu-test-map-opener")
+        .expect("a sender opens on an abandoned map lock");
+    assert_eq!(
+        wait_elsewhere(&map_lock),
+        WAIT_OBJECT_0.0,
+        "another thread must take the listed sender's map lock at once (0x102 \
+         = the opener's thread kept it, 0x80 = nothing took the abandoned lock)"
+    );
+    drop(opener);
+    drop(listed_sender);
+}
+
+/// #243: the same for a sender's texture lock: a receiver that died
+/// holding it hands it to the sender's next send, which gives it back, so
+/// the next receiver can read the texture.
+#[test]
+fn a_texture_lock_handed_over_abandoned_is_given_back() {
+    let _one = one_at_a_time();
+    let mut compositor = warp();
+    let name = "SP-gpu-test-abandoned-texture";
+    let mut sender = SpoutSender::with_name(&compositor, name).expect("a sender");
+    compose(&mut compositor, &Composition::Black);
+    sender
+        .send()
+        .expect("the first send makes the texture lock");
+    assert_eq!(sender.registration(), Registration::Confirmed);
+    let access = format!("{name}_SpoutAccessMutex");
+    let _alive = abandon(&access);
+    let _cleanup = GiveBack(TestMutex::open(&access));
+    sender
+        .send()
+        .expect("a send that meets the abandoned lock still returns");
+    assert_eq!(
+        wait_elsewhere(&access),
+        WAIT_OBJECT_0.0,
+        "a receiver must take the texture lock at once (0x102 = the sender's \
+         thread kept it, 0x80 = the send never waited for it)"
+    );
+    drop(sender);
+}
+
+/// #243: a texture lock another program keeps (handed to it abandoned)
+/// freezes the receivers' picture, since Spout then skips every copy. The
+/// sender is refused at the `MAX_ACCESS_HELD`-th such send in a row, the
+/// refusal names the holder, and the sender is off Spout's list: a new one
+/// gets a fresh lock once that program's receiver lets go.
+#[test]
+fn a_sender_whose_texture_lock_another_thread_keeps_is_refused_naming_it() {
+    let _one = one_at_a_time();
+    let mut compositor = warp();
+    let name = "SP-gpu-test-kept-texture";
+    let mut sender = SpoutSender::with_name(&compositor, name).expect("a sender");
+    compose(&mut compositor, &Composition::Black);
+    sender.send().expect("the first send");
+    assert_eq!(listed(name), 1, "{:?}", names());
+    let hold = Hold::take(&format!("{name}_SpoutAccessMutex"));
+    let mut refusal = None;
+    for send in 1..=MAX_ACCESS_HELD + 1 {
+        match sender.send() {
+            Ok(_) => assert!(send < MAX_ACCESS_HELD, "send {send} must be refused"),
+            Err(GpuError::SpoutNotRegistered {
+                name: asked,
+                why,
+                holder,
+            }) => {
+                assert_eq!(asked, name);
+                refusal = Some((send, why, holder));
+                break;
+            }
+            Err(other) => panic!("send {send}: {other}"),
+        }
+    }
+    drop(hold);
+    let (send, why, holder) = refusal.expect("refused while the lock is kept");
+    assert_eq!(send, MAX_ACCESS_HELD, "refused at the 30th kept send");
+    assert_eq!(why, ACCESS_HELD);
+    assert_eq!(
+        holder.map(|holder| holder.to_ascii_lowercase()),
+        Some(this_process_holder())
+    );
+    assert_eq!(sender.registration(), Registration::Refused(ACCESS_HELD));
+    assert_eq!(listed(name), 0, "the refused sender is off Spout's list");
+}
+
+/// #243: a sender refused because Spout's list stayed unreadable names the
+/// program that keeps the list's lock (on PP: Arena, for 8 hours).
+#[test]
+fn a_sender_refused_on_a_kept_list_names_its_holder() {
+    let _one = one_at_a_time();
+    let mut compositor = warp();
+    let name = "SP-gpu-test-kept-list";
+    let mut sender = SpoutSender::with_name(&compositor, name).expect("a sender");
+    compose(&mut compositor, &Composition::Black);
+    let hold = Hold::take(&format!("{SENDER_NAMES_MAP}_mutex"));
+    let mut refusal = None;
+    // A lost frame (`GpuError::Spout`) does not count an unreadable read.
+    for send in 1..=2 * MAX_UNREADABLE + 2 {
+        match sender.send() {
+            Ok(_) | Err(GpuError::Spout { .. }) => {}
+            Err(GpuError::SpoutNotRegistered { why, holder, .. }) => {
+                refusal = Some((send, why, holder));
+                break;
+            }
+            Err(other) => panic!("send {send}: {other}"),
+        }
+    }
+    drop(hold);
+    let (send, why, holder) = refusal.expect("refused while the list is kept");
+    assert_eq!(why, UNREADABLE, "send {send}");
+    assert_eq!(
+        holder.map(|holder| holder.to_ascii_lowercase()),
+        Some(this_process_holder())
+    );
+    drop(sender);
+    assert_eq!(listed(name), 0, "{:?}", names());
 }

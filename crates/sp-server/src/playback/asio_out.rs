@@ -44,11 +44,11 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
-use serde::Serialize;
 use sp_core::audio_outputs::OutputEntry;
 use tracing::{debug, info, warn};
 
 use crate::playback::asio_format::AsioSample;
+use crate::playback::asio_loop::{LoopFeed, LoopLink, LoopTaps, StartLoop, spawn_loop_thread};
 use crate::playback::asio_state::{
     ClockStep, DeviceEvents, POLL_100NS, Reason, StallWatch, admit_rate, asio_latency_ms,
     backoff_100ns, buffer_note, clock_step, close_reason, failures_after_close,
@@ -87,6 +87,9 @@ pub trait AsioDevice {
     fn output_latency_frames(&self) -> u32;
     /// Stop and release the driver (idempotent).
     fn close(&mut self);
+    /// #233 loop check: the next `start` also taps what the outputs play
+    /// and the driver's first inputs into `taps` (`asio_loop.rs`).
+    fn tap_loop(&mut self, _taps: LoopTaps) {}
 }
 
 /// What an open read from the driver.
@@ -102,92 +105,8 @@ pub struct Opened {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Started {
     pub output_latency_frames: u32,
-}
-
-/// `outputs[i].asio`.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
-pub struct AsioStatus {
-    pub driver: String,
-    /// 0-based (the dashboard shows them 1-based).
-    pub channels: [u32; 2],
-    pub driver_rate: u32,
-    pub buffer_frames: u32,
-    pub out_channels: u32,
-    /// The driver's sample type (`AsioSample::name`), "" before the first open.
-    pub sample_type: &'static str,
-    /// The correction applied to the resampler.
-    pub ppm: f64,
-    /// The card's rate against the program wall (the regression).
-    pub rate_ppm: f64,
-    pub locked: bool,
-    /// The output's latency from the boundary, ms (`asio_latency_ms`; 0
-    /// until the servo measured its first window, and while waiting).
-    pub latency_ms: f64,
-    /// The servo's last window: the offset the resampler's ratio drains,
-    /// ms — the latency outside [target, target + cushion] (positive =
-    /// later; 0 inside it and while waiting).
-    pub offset_ms: f64,
-    /// The seconds the drain still needs (`None` inside the calm zone, and
-    /// while waiting).
-    pub slew_eta_s: Option<f64>,
-    /// The excess the card's underruns left, kept over the target, ms (#233
-    /// comment 6056680979, Q1: at most one slot; it decays slowly through
-    /// the level loop; 0 while waiting).
-    pub cushion_ms: f64,
-    /// Callbacks that found the ring short, since the output was built.
-    pub underruns: u64,
-    /// Closes (a reset, a rate change, a stall) since the output was built.
-    pub resets: u64,
-    /// Hard re-centres (a fade, then silence inserted or audio skipped,
-    /// because too little was buffered — the ring would run dry, or a
-    /// delayed output played more than 4 slots early — or too much, the ring
-    /// would overflow), since the output was built: faults. An open's
-    /// priming is none.
-    pub hard_recentres: u64,
-    /// The last hard re-centre, since the output was built.
-    pub last_hard_recentre: Option<HardRecentre>,
-    /// Frames the ring had no room for, since the output was built.
-    pub overflows: u64,
-    /// The driver's `kAsioOverload` messages, since the output was built.
-    pub overloads: u64,
-    /// While waiting: the seconds to the next open (None for a parked
-    /// driver, which is never reopened, or for one waiting for its clock —
-    /// `no_clock`, the driver open, reopened each minute on its own).
-    pub retry_in_s: Option<f64>,
-    /// While waiting: the reason's stable code (`Reason::code`).
-    pub reason_code: Option<&'static str>,
-    /// The times the driver, giving no clock for 60 s after an open, was
-    /// closed and opened again (`Reason::NoClock`), since the output was
-    /// built: a calm wait, neither a reset nor a fault.
-    pub clock_waits: u64,
-    /// The driver's resync requests (`kAsioResyncRequest`: its sample
-    /// position jumped), since the output was built: counted only (the
-    /// servo and the driver run on; #233 measures them first).
-    pub resyncs: u64,
-    /// The longest time between two buffer switches since the output was
-    /// built, ms (`asio_out_events.rs`).
-    pub callback_gap_max_ms: f64,
-    /// Buffer switches over two buffer periods after the one before, and
-    /// under a quarter of one (a catch-up burst), since the output was built.
-    pub late_callbacks: u64,
-    pub fast_callbacks: u64,
-    /// The last late buffer switch and how long ago (to line up with a pop).
-    pub last_late_callback: Option<LateCallback>,
-}
-
-/// A hard re-centre as the status shows it.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
-pub struct HardRecentre {
-    /// `deficit` (too little buffered: the ring would run dry, or a delayed
-    /// output played more than 4 slots early) or `excess` (the ring would
-    /// overflow).
-    pub cause: &'static str,
-    /// Inserted (> 0) or skipped (< 0), ms.
-    pub ms: f64,
-    /// The block's hand-off lateness (handled − its boundary), ms.
-    pub lateness_ms: f64,
-    /// How long ago, s (as of the status's last update).
-    pub ago_s: f64,
+    /// The driver inputs the loop check taps (0 when none was asked).
+    pub loop_inputs: u32,
 }
 
 /// A hard re-centre as the worker keeps it.
@@ -240,6 +159,8 @@ pub struct AsioOut {
     driver: String,
     channels: [u32; 2],
     target_100ns: i64,
+    /// Compare what it sends with what returns (`asio_loop.rs`).
+    loop_check: bool,
     live: Mutex<Live>,
     running: AtomicBool,
     /// Blocks the ASIO host's link did not take (SongPlayer's side only).
@@ -259,6 +180,7 @@ impl AsioOut {
             driver: a.driver.clone(),
             channels: a.channels,
             delay_ms: entry.delay_ms,
+            loop_check: a.loop_check,
         }))
     }
 
@@ -272,6 +194,7 @@ impl AsioOut {
             driver: spec.driver.clone(),
             channels: spec.channels,
             target_100ns: BASE_LATENCY_100NS + delay_100ns,
+            loop_check: spec.loop_check,
             live: Mutex::new(Live {
                 state: STATE_OPENING,
                 reason: None,
@@ -458,6 +381,10 @@ pub struct AsioWorker {
     /// The driver's resync requests and callback timing (`asio_out_events.rs`).
     resyncs: events::Resyncs,
     timing: events::CallbackTiming,
+    /// The loop check's analyzer thread: how it starts (`asio_loop`'s
+    /// spawner; a recorder in the tests) and, once started, its link.
+    loop_start: StartLoop,
+    loop_link: Option<LoopLink>,
 }
 
 impl AsioWorker {
@@ -476,6 +403,8 @@ impl AsioWorker {
             clock_waits: 0,
             resyncs: events::Resyncs::default(),
             timing: events::CallbackTiming::default(),
+            loop_start: Box::new(spawn_loop_thread),
+            loop_link: None,
         }
     }
 
@@ -502,6 +431,7 @@ impl AsioWorker {
                     l.status.last_hard_recentre = last_hard;
                     timing.write(&mut l.status, now_100ns);
                 });
+                self.publish_loop(out);
                 return left.min(POLL_100NS);
             }
             State::Closed { .. } => {
@@ -629,12 +559,13 @@ impl AsioWorker {
                 (&self.timing, now_100ns),
             ),
         }
+        self.publish_loop(out);
         POLL_100NS
     }
 
     fn open(&mut self, out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) {
         match build(out, device, now_100ns) {
-            Ok(run) => {
+            Ok((run, feed)) => {
                 let o = run.opened;
                 let rate = o.rate.round() as u32;
                 // While it waits for its clock, a reopen is a retry: DEBUG,
@@ -682,6 +613,7 @@ impl AsioWorker {
                     l.status.retry_in_s = None;
                 });
                 self.state = State::Running(Box::new(run));
+                self.run_loop(out, feed);
             }
             Err(reason) => {
                 self.failures = self.failures.saturating_add(1);
@@ -759,16 +691,23 @@ impl AsioWorker {
     }
 }
 
-/// Open, admit the rate, build the resampler, the ring and the servo, start.
-fn build(out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) -> Result<Run, Reason> {
+/// Open, admit the rate, build the resampler, the ring and the servo, start
+/// (with the loop check's taps, for an entry that asks for it).
+fn build(
+    out: &AsioOut,
+    device: &mut dyn AsioDevice,
+    now_100ns: i64,
+) -> Result<(Run, Option<LoopFeed>), Reason> {
     let opened = device.open(&out.driver, out.channels)?;
     let rate = f64::from(admit_rate(opened.rate)?);
     let asrc = Asrc::new(rate).map_err(Reason::Failed)?;
     let capacity = ring_capacity_frames(rate, out.target_100ns, asrc.max_out_frames());
     let (producer, consumer) = rtrb::RingBuffer::new(capacity * VBAN_CHANNELS);
+    let feed = loop_check::tap(out, device, rate);
     let started = device.start(consumer)?;
     let opened = Opened { rate, ..opened };
-    Ok(Run {
+    let feed = feed.map(|f| f.with_inputs(started.loop_inputs));
+    let run = Run {
         opened,
         opened_at_100ns: now_100ns,
         producer,
@@ -784,7 +723,8 @@ fn build(out: &AsioOut, device: &mut dyn AsioDevice, now_100ns: i64) -> Result<R
         fast_callbacks: 0,
         primed: false,
         consumed_at_prime: 0,
-    })
+    };
+    Ok((run, feed))
 }
 
 /// A drift servo for `out` on a driver opened as `opened` (its admitted
@@ -956,6 +896,11 @@ pub fn run_asio_worker(out: &AsioOut, device: &mut dyn AsioDevice, clock: &mut d
 #[path = "asio_out_events.rs"]
 mod events;
 pub use events::LateCallback;
+#[path = "asio_out_loop.rs"]
+mod loop_check;
+#[path = "asio_out_status.rs"]
+mod status;
+pub use status::{AsioStatus, HardRecentre};
 #[path = "asio_out_remote.rs"]
 mod remote;
 pub use remote::AsioSpec;
@@ -972,6 +917,9 @@ mod tests_clock;
 #[cfg(test)]
 #[path = "asio_out_tests_cushion.rs"]
 mod tests_cushion;
+#[cfg(test)]
+#[path = "asio_out_tests_loop.rs"]
+mod tests_loop;
 #[cfg(test)]
 #[path = "asio_out_tests_resync.rs"]
 mod tests_resync;

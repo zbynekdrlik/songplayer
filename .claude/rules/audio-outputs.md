@@ -1277,3 +1277,99 @@ hard_recentres / last_hard_recentre / latency_ms / blocks_sent` and
 Ruling 4 closed (#233 lane B): the `vban_*` keys and
 `sp_core::config::SETTING_VBAN_*` are gone (the migration section above;
 V32, `db/mod_tests_v32.rs`).
+
+## The SoundGrid loop check (`asio_loop.rs`, `asio_loop_search.rs`) — #233, 12.10.2026
+
+**Why.** The owner's ruling (design comment "a SoundGrid loop check" on
+#233): PP's LV1 loops PP's SoundGrid outputs back to PP's SoundGrid inputs,
+and the driver's own resync requests proved no sufficient error detector
+(LV1 counted errors while `resyncs` stood still). So an ASIO output can
+compare what it sends with what returns, sample by sample, and name every
+difference with its UTC time.
+
+- **The entry:** `asio.loop_check: bool`, off when absent; sp-core's
+  `AsioDest` writes it ONLY when on (`skip_serializing_if`), so every list
+  stored before it, and the dashboard's PATCH bodies, stay byte for byte;
+  the strict parser reads it (`asio.loop_check has the wrong type`). A
+  changed value is a changed entry: the outputs task rebuilds the output
+  (one driver reopen). It crosses the host's pipe in `AsioSpec`
+  (`#[serde(default)]`, protocol unchanged). No dashboard control: PP's
+  out-2 gets it through the API (MAIN SESSION OPS).
+- **The taps** (`asio_win.rs`): `AsioDevice::tap_loop(LoopTaps)` (default
+  no-op; the fake and the glue keep them) before `start`; the glue's start
+  also creates the buffers of the driver's first `min(inputs, 8)` inputs
+  (one supported sample type, else ONE WARN and the output plays
+  unchecked) and says how many (`Started::loop_inputs`). The buffer switch,
+  after the outputs, copies what it wrote (`copy_played`: the ring's frames
+  through `clean_f32`, zeros for the frames it did not deliver) and each
+  input read back (`asio_format::read_channel`, the inverse of
+  `fill_channel`; `AsioSample::decode`, unclamped, a non-finite float
+  silent) into buffers allocated at start, and pushes BOTH rings or
+  NEITHER (`LoopTaps::push`, a full ring counts an overflow): the streams
+  stay frame-aligned, still no allocation, lock, log or syscall. The rings
+  are 1 s each (`loop_rings`, the received one sized for 8 inputs); a
+  closed run's taps go with the device's stream (the analyzer sees them
+  abandoned and its run ends).
+- **The thread** `loop-<id>` (`spawn_loop_thread`), started ONCE per
+  output by the worker through its seam (`AsioWorker::with_loop_start`; a
+  recorder in every unit test), never the worker or the driver's thread;
+  each driver start's rings reach it over a channel (`LoopLink::run`), and
+  every worker step copies its status (`LoopLink::status`) into
+  `outputs[i].asio.loop` (`asio_out_loop.rs`, running and waiting). It
+  drains the rings every 10 ms (`LoopCore::tick`) and ends when the worker
+  drops its link.
+- **The search** (pure): which input carries the sent L and which the sent
+  R, the round trip to the exact frame (≤ 0.5 s, rounded down to a whole
+  coarse step: 22 048 frames at 44.1 kHz) and each least-squares gain, its
+  polarity included. Coarse to fine: box sums over 16 frames at every
+  16th lag (normalized correlation), the best 4 lags kept one per ±32
+  frames (`offer`), refined at full rate ±32 frames, then the assignment;
+  only lags whose sent window is over −50 dBFS (`has_energy`); a lock only
+  on a window the judge reads `Ok`. One attempt per 0.5 s of returned
+  audio while searching, over the last 8 192 returned frames, its range
+  what the sent history holds: ≤ ~27 M multiply-adds an attempt at 96 kHz
+  with 8 inputs (`search_work`), none while locked. A lock at a new round
+  trip after a search the bad run started is a `slip` of the change
+  (positive = the return comes later); a new driver run starts afresh (its
+  first lock is no slip).
+- **The judge** (`verdict`, one predicate for the search and the blocks):
+  a 256-frame block is blind when every tapped channel's sent side is at
+  or under −50 dBFS (mean square 1e-5); a return at or under 40 dB below
+  what was expected (gain² · Σ sent²) is a `dropout`, a residual (return −
+  gain · sent) over it a `mismatch`. A run of one kind is ONE event (its
+  frames = the run's length, its UTC time its first block's); 8 bad blocks
+  in a row search again (`RESEARCH_AFTER`). `no_return` = 10 s of sent
+  energy with no lock. The judge walks a COUNT of whole blocks (never a
+  cursor: a mutant cannot hang it). An overflow drops this drain and the
+  next on both sides and keeps the lock (the stream counts stay aligned;
+  the judge resumes where both sides are whole).
+- **UTC:** an event's time is the drain's UTC less the frames after its
+  first block, at the driver's rate — it lags the real moment by the input
+  latency and up to one driver buffer. One WARN per event, at most one per
+  5 s with the count held back (`WarnLimiter`, keyed on the event's time).
+- **Status** `outputs[i].asio.loop` = `{state: off|searching|locked|
+  no_return, inputs: [l, r] (0-based, null = none), delay_frames, gain_db:
+  [l, r], checked_s, blind_s, mismatches, dropouts, slips, overflows,
+  last_event {kind, utc_ms, ago_s, frames}, recent: [≤ 32]}`; the counters
+  count since the output was built (across its driver's reopens). `gain_db`
+  is per channel (the spec's one figure cannot hold two fitted gains).
+  Across the pipe it is typed (`WireStatus::loop_status`, every float
+  through `finite_loop`, `#[serde(default)]`).
+- **Known limits:** a strictly periodic program (a test tone) can lock a
+  period off (the search keeps the first of equal lags), and the next
+  sound that is not periodic re-locks as a slip; a gain changed on the
+  console reads as a mismatch run, then a lock at the same round trip; a
+  parked driver keeps its taps, so the analyzer keeps its last state.
+- **Tests:** `asio_loop_tests.rs` (a scripted loop at 8 kHz fed 10 ms a
+  drain: the schedule, the lock, every verdict, runs, the slip, no_return,
+  an overflow, a new run, the 32-event list, a multi-block drain, the
+  44.1 kHz range), `asio_loop_search_tests.rs` (the edges, between coarse
+  steps, one channel, no lock on a foreign or mismatched return, shapes,
+  the exact work, the 96 kHz bound, DC ties), `asio_out_tests_loop.rs` (the
+  worker: taps per start, one thread per output, the status running and
+  waiting, the closed run's taps), `asio_format_tests.rs` (decode /
+  `read_channel` per sample type), `wire_status_tests.rs`, the glue's
+  `the_buffer_switch_taps_what_it_wrote_and_the_inputs_it_read` (Windows
+  job). Pins from a scratch Python model of the analyzer and the search.
+- **Follow-up (owner, once measured):** PP's ASIO gate fails on any loop
+  event during its minute.

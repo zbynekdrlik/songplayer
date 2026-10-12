@@ -30,6 +30,7 @@ fn entry() -> OutputEntry {
         AsioDest {
             driver: DVS.into(),
             channels: [0, 1],
+            loop_check: false,
         },
     )
 }

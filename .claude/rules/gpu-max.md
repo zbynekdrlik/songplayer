@@ -322,6 +322,102 @@ error. A map that is not committed memory, or a sender's map shorter than a
   `LongToHandle((long)shareHandle)`: the 32 bits SIGN-EXTENDED
   (`share_handle_value`).
 
+### Spout locks handed over abandoned (#243)
+
+**The bug is upstream.** Spout 2.007.017 never releases a named mutex it got
+with `WAIT_ABANDONED`:
+
+- `SpoutSharedMemory::Lock` returns nullptr on anything but `WAIT_OBJECT_0`;
+- `spoutFrameCount::CheckAccess` returns false on it.
+
+The waiting thread then OWNS the mutex: Windows hands an abandoned mutex to
+its next waiter. Nothing ever unlocks it, so that thread keeps it until it
+exits. Only that one thread can keep using it (a mutex is recursive for its
+owning thread). Every other thread's wait times out at 67 ms, the other
+threads of the same process included.
+
+**Any Spout program that dies mid-lock poisons the box.** That includes
+SongPlayer at a deploy's `Stop-Process`, a crashed Arena, and an OBS with the
+`win-spout` plugin. What PP showed on 11-12.10.2026:
+
+- Arena held `SpoutSenderNames_mutex` for 8 hours.
+- Every SongPlayer sender was refused `UNREADABLE` (12 172 times), so MAX
+  never went out.
+- Arena crashed at 01:04:48 UTC.
+- The SongPlayer that was retrying then got the lock, and kept it across the
+  next deploy. Owner pid 8492 was read with `NtQueryMutant`.
+- A receiver keeping a sender's `<name>_SpoutAccessMutex` makes Spout skip
+  every copy. Arena then shows a frozen picture (#243's event freeze), and
+  each send waits 67 ms (PP's `send_us_p99` ~72 ms).
+
+**What SongPlayer does:**
+
+- **It gives back what it was handed.** Every shim call runs in
+  `sdk(sender, ..)`. After the call it releases each Spout lock the CALLING
+  thread owns: `SpoutSenderNames_mutex`, `ActiveSenderName_mutex`,
+  `<name>_mutex` and `<name>_SpoutAccessMutex`. The check is `NtQueryMutant`
+  `MutantBasicInformation` (`OwnedByCaller`); the thread releases as often
+  as it holds the mutex (`spout_lock::releases_owed`, at most 64).
+  - Spout's own locks are balanced within a call, so between calls the
+    thread owns one only when it was handed it abandoned.
+  - The open and the name claim run Spout's `CleanSenders`, which reads every
+    listed sender's info map under `<name>_mutex`. When it meets one of those
+    abandoned, it drops that sender off the list and keeps the lock.
+    `sdk_cleaning` therefore gives back the map locks of the senders listed
+    BEFORE or after the call. A list read after the call alone never sees
+    the dropped name (review round 1).
+  - Exceptions to "balanced within a call":
+    - A C++ exception the shim catches can leave a lock taken. The OS mutex
+      is then given back, but Spout's object still counts it as locked and
+      reads its map unlocked afterwards. That is no worse than keeping the
+      lock.
+    - A renamed sender (`<name>_1`, refused at once `TAKEN`) locks names
+      that are not on the list.
+  - Our registry reader `read_map` releases an abandoned wait itself.
+- **It refuses a sender whose texture lock is kept elsewhere.** After each
+  send that was not refused, the sender looks at its texture lock.
+  - A send COUNTS when another thread owns that lock AND the send took at
+    least `ACCESS_TIMEOUT_US` (60 ms). That means Spout's 67 ms
+    `CheckAccess` timed out, so the copy really was skipped.
+  - At `MAX_ACCESS_HELD` (30) counted sends in a row, the sender is refused
+    `ACCESS_HELD` (`spout_state::access_held`) and leaves the list.
+  - Why the 60 ms condition (review round 1): a receiver may take the lock
+    right after our send. Spout's own `ReceiveImage` maps a staging copy
+    under it, 7–12 ms at FHD. That receiver shows up as the owner at the
+    look, but it cost the send nothing, and counting it would refuse a
+    healthy sender every 30 sends.
+  - The `program-max` thread makes a new sender after its 3 s backoff. The
+    old mutex object, and with it the kept lock, goes away only once every
+    handle to it is closed, that is once every receiver has let go of the
+    sender. Until then each rebuild repeats the cycle: 3 s off, then ~2 s of
+    sends that each wait 67 ms.
+- **It names the holder.** A refusal about a kept lock (`UNREADABLE` for the
+  list, `ACCESS_HELD` for the texture) carries `holder` on
+  `GpuError::SpoutNotRegistered`. It comes from `MutantOwnerInformation`,
+  then the owner's image via `QueryFullProcessImageNameW`, formatted by
+  `spout_lock::holder_text`.
+  - `max.state` and the WARN then read "… (held by Arena.exe (pid 1500))".
+  - That is the program to restart. A lock another process keeps cannot be
+    released from outside.
+- **The glue is small.** `win/spout_lock.rs` only queries and releases; it
+  links ntdll with `raw-dylib`, since the windows crate has no
+  `NtQueryMutant`.
+
+**Reading it on a box:** `NtQueryMutant(OpenMutexW(SYNCHRONIZE |
+MUTANT_QUERY_STATE, "SpoutSenderNames_mutex"), 1, …)` gives the owner's
+pid/tid; a `WaitOne(300)` from another process times out while it is kept.
+The PowerShell `Add-Type` probe used on PP is in #243 (comment of 12.10.2026).
+
+**WARP tests (`tests/spout.rs`):**
+
+- A helper thread takes the mutex and ENDS: that is an abandoned lock.
+- Another thread's 300 ms wait then tells free (0x0), kept (0x102) and
+  "nothing took the abandoned lock" (0x80) apart.
+- A held lock is a helper thread blocking on a channel (`Hold`). Its holder
+  text is the test exe with ", this process".
+- `GiveBack` releases whatever the test thread still owns when dropped, so a
+  failing test never poisons the next one.
+
 ### WARP proof (`tests/spout.rs`, Windows only)
 
 - the first send lists `SP-program-MAX`, its map says 3840×2160, format 87

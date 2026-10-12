@@ -8,7 +8,7 @@
 //! (`client_win.rs`, which starts the host) is deliberately not listed.
 
 /// The host's code path, by file (comments are not scanned).
-const HOST_PATH: [(&str, &str); 34] = [
+const HOST_PATH: [(&str, &str); 38] = [
     (
         "src-tauri/src/bin/sp-audio-host.rs",
         include_str!("../../../../src-tauri/src/bin/sp-audio-host.rs"),
@@ -37,6 +37,22 @@ const HOST_PATH: [(&str, &str); 34] = [
     (
         "playback/asio_out_remote.rs",
         include_str!("../playback/asio_out_remote.rs"),
+    ),
+    (
+        "playback/asio_out_loop.rs",
+        include_str!("../playback/asio_out_loop.rs"),
+    ),
+    (
+        "playback/asio_out_status.rs",
+        include_str!("../playback/asio_out_status.rs"),
+    ),
+    (
+        "playback/asio_loop.rs",
+        include_str!("../playback/asio_loop.rs"),
+    ),
+    (
+        "playback/asio_loop_search.rs",
+        include_str!("../playback/asio_loop_search.rs"),
     ),
     (
         "playback/asio_win.rs",

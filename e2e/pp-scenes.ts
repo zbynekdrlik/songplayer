@@ -30,6 +30,12 @@ import { isDabing, type PlaylistRow } from "./program-state";
  *  scene resolver, not a cg OBS scene. */
 export const OBS_MANUAL = "OBS manuál";
 
+/** #245: "Blank" (sp-core `PROGRAM_BLANK_LABEL`, any ASCII case,
+ *  `is_blank_scene`): SongPlayer's own black. A facade press of it cuts
+ *  SP-program to source -2 and tells cg OBS nothing, even when cg OBS has a
+ *  scene of that name. */
+export const SONGPLAYER_BLANK = "blank";
+
 /** Rust's `to_ascii_lowercase` (the catalog's case rule). */
 function asciiLower(s: string): string {
   return s.replace(/[A-Z]/g, (c) => c.toLowerCase());
@@ -101,13 +107,15 @@ export interface ManualSceneInput {
 }
 
 /** A manual scene: not blank, none of the active playlists' names
- *  (`playlistNames`), not the A/V gate's probe scene, not "OBS manuál". */
+ *  (`playlistNames`), not the A/V gate's probe scene, not "OBS manuál", not
+ *  SongPlayer's own "Blank" (#245, any ASCII case). */
 export function isManualScene(scene: string, playlistNames: Set<string>): boolean {
   return (
     scene.trim() !== "" &&
     !playlistNames.has(asciiLower(scene)) &&
     scene !== AV_PROBE_SCENE &&
-    scene !== OBS_MANUAL
+    scene !== OBS_MANUAL &&
+    asciiLower(scene) !== SONGPLAYER_BLANK
   );
 }
 
@@ -129,7 +137,7 @@ export function pickManualScene(o: ManualSceneInput): { scene: string } | { erro
     }
     if (!manual(configured)) {
       return {
-        error: `PP_MANUAL_SCENE "${configured}" is not a manual scene (a playlist's, the A/V probe's or "${OBS_MANUAL}")`,
+        error: `PP_MANUAL_SCENE "${configured}" is not a manual scene (a playlist's, the A/V probe's, "${OBS_MANUAL}" or SongPlayer's "Blank")`,
       };
     }
     return { scene: configured };
@@ -194,12 +202,17 @@ export function gateIsLatest(presses: GatePress[], cut: LastCutView | null): boo
  * The source SP-program goes back to after the gate (`POST
  * /api/v1/program/cut`, which tells cg OBS nothing): the start source, only
  * while the program is still what the gate left — the latest recorded
- * switch is the gate's own last press (`gateIsLatest`) and the program is on
- * that press's source, or, when that last press was refused (a keep: the NDI
- * input inactive, cg OBS refusing), on the source of the press before it —
- * and the program is not on the start source already. `null` otherwise: no
- * press, nothing was on program at the start, or someone switched since (an
- * operator's press or cut is kept).
+ * switch is the gate's own last press (`gateIsLatest`) — and the program is
+ * not on the start source already. A press that switched is the gate's
+ * wherever it landed: every switch through SongPlayer replaces
+ * `last_remote_cut`, so nobody moved the program since (12.10.2026 on PP a
+ * press of "Blank" landed on SongPlayer's own Blank, -2, not the predicted
+ * "OBS manuál", and the old source check left the program silent). A
+ * refused last press (a keep: the NDI input inactive, cg OBS refusing)
+ * moved nothing, so the program is the gate's only while it is on the
+ * source of the press before it (an operator's cut between the two presses
+ * is kept). `null` otherwise: no press, nothing was on program at the
+ * start, or someone switched since.
  */
 export function programRestoreTarget(
   start: number | null,
@@ -208,8 +221,10 @@ export function programRestoreTarget(
 ): number | null {
   const cut = now.last_remote_cut;
   if (start === null || cut === null || !gateIsLatest(presses, cut)) return null;
-  const left = cut.action === "keep" ? presses.at(-2) : presses.at(-1);
-  if (left === undefined || now.source !== left.source) return null;
+  if (cut.action === "keep") {
+    const before = presses.at(-2);
+    if (before === undefined || now.source !== before.source) return null;
+  }
   return now.source === start ? null : start;
 }
 

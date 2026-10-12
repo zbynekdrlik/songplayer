@@ -97,12 +97,14 @@ fn vban_dest(raw: &RawValue, at: &str) -> Result<VbanDest, String> {
     })
 }
 
-/// An ASIO entry's `asio` block (`[u32; 2]` refuses a third channel).
+/// An ASIO entry's `asio` block (`[u32; 2]` refuses a third channel;
+/// `loop_check`, a bool, is off when absent).
 fn asio_dest(raw: &RawValue, at: &str) -> Result<AsioDest, String> {
     let r = Reader::of(raw, at, "asio.", &format!("{at}: asio"))?;
     Ok(AsioDest {
         driver: r.req("driver")?,
         channels: r.req("channels")?,
+        loop_check: r.opt("loop_check")?.unwrap_or(false),
     })
 }
 

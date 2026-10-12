@@ -8,7 +8,8 @@
 //! callback (`asio_win.rs`) calls [`fill_channel`] once per output channel;
 //! the encode follows iemmixer's model (`iem-audio-io/src/format.rs`). The
 //! codes are azo-sys 0.3.2's `SampleType` constants (`PCM_I16_LSB` 16 …
-//! `PCM_I32_LSB_24` 27).
+//! `PCM_I32_LSB_24` 27). The loop check (`asio_loop.rs`) reads the driver's
+//! inputs back the other way ([`AsioSample::decode`], [`read_channel`]).
 
 use crate::playback::vban_packet::clean_f32;
 
@@ -101,6 +102,29 @@ impl AsioSample {
             }
         }
     }
+
+    /// One sample of this type (`src` holds at least [`Self::bytes`]) as
+    /// f32, the inverse of [`Self::encode`]: an integer over its symmetric
+    /// full scale (a 24-bit one sign-extended), a float as it is — never
+    /// clamped, so an over-range return reads as what it is — and a
+    /// non-finite float as silence.
+    pub fn decode(self, src: &[u8]) -> f32 {
+        let word = |b: &[u8]| [b[0], b[1], b[2], b[3]];
+        match (self, self.full_scale()) {
+            (_, None) => {
+                let x = f32::from_le_bytes(word(src));
+                if x.is_finite() { x } else { 0.0 }
+            }
+            (Self::Int16, Some(full)) => {
+                (f64::from(i16::from_le_bytes([src[0], src[1]])) / full) as f32
+            }
+            (Self::Int24, Some(full)) => {
+                let v = i32::from_le_bytes([0, src[0], src[1], src[2]]) >> 8;
+                (f64::from(v) / full) as f32
+            }
+            (_, Some(full)) => (f64::from(i32::from_le_bytes(word(src))) / full) as f32,
+        }
+    }
 }
 
 /// Why a driver whose sample type is `code` is refused.
@@ -133,6 +157,30 @@ pub fn fill_channel(sample: AsioSample, stereo: &[f32], source: Option<usize>, d
         None => 0,
     };
     dst[written..].fill(0);
+}
+
+/// #233 (the SoundGrid loop check, `asio_loop.rs`): the inverse of
+/// [`fill_channel`] — one input channel's half-buffer `src` (the driver's
+/// samples of `sample`) into slot `channel` of each frame of the
+/// interleaved `dst` (`stride` ≥ 1 channels a frame, `channel` < `stride`),
+/// as many frames as both hold; the frames `src` does not hold read as
+/// silence (an input whose buffer is missing: `&[]`). Pure and
+/// allocation-free: the driver's buffer switch calls it once per tapped
+/// input.
+pub fn read_channel(
+    sample: AsioSample,
+    src: &[u8],
+    dst: &mut [f32],
+    channel: usize,
+    stride: usize,
+) {
+    let mut frames = dst.chunks_exact_mut(stride);
+    for (bytes, frame) in src.chunks_exact(sample.bytes()).zip(frames.by_ref()) {
+        frame[channel] = sample.decode(bytes);
+    }
+    for frame in frames {
+        frame[channel] = 0.0;
+    }
 }
 
 #[cfg(test)]

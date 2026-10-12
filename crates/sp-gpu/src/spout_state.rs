@@ -42,6 +42,28 @@ pub const UNREADABLE: &str = "Spout's list stayed unreadable, so its listing was
 /// a stuck list can cost: up to 30 sends × 67 ms, about 2 s.
 pub const MAX_UNREADABLE: u32 = 30;
 
+/// Why a sender is refused (#243): another program kept its texture lock
+/// (`<name>_SpoutAccessMutex`) for [`MAX_ACCESS_HELD`] sends in a row, so
+/// Spout skipped every copy and the receivers show a frozen picture. That
+/// program was handed the lock abandoned and never gives it back; once the
+/// sender is gone its receiver lets go of the lock, and a new sender gets
+/// a fresh one.
+pub const ACCESS_HELD: &str = "another program kept its texture lock, so Spout skipped every copy";
+
+/// How many sends in a row another program may keep the sender's texture
+/// lock before the sender is refused: 30 sends in a row that each waited
+/// out Spout's 67 ms for it (about 2 s) is a lock that program never gives
+/// back. A send counts only when it cost that wait ([`ACCESS_TIMEOUT_US`]).
+pub const MAX_ACCESS_HELD: u32 = 30;
+
+/// #243 review: the send time (µs) at which a send waited out Spout's 67 ms
+/// texture-lock timeout (`spoutFrameCount::CheckAccess`), so Spout really
+/// skipped its copy. A receiver that takes the lock right after a send
+/// (Spout's own `ReceiveImage` maps a staging copy under it, 7–12 ms at
+/// 1920×1080) is seen holding it at the look, but cost the send nothing:
+/// such a send is not counted.
+pub const ACCESS_TIMEOUT_US: u64 = 60_000;
+
 /// What Spout's names list says about a name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Listed {
@@ -192,6 +214,33 @@ pub fn after_send(
             AfterSend::Shared(Registration::Unconfirmed(unreadable + 1))
         }
         Listed::Unknown => AfterSend::Refuse(UNREADABLE),
+    }
+}
+
+/// What one send's look at the texture lock leads to (#243).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessHeld {
+    /// Keep sending; the number of sends in a row another program held it.
+    Streak(u32),
+    /// Refuse the sender for good, and why.
+    Refuse(&'static str),
+}
+
+/// After a send that was not refused: `held_elsewhere` = another thread held
+/// the sender's texture lock just after it, `send_us` = what the send took,
+/// `streak` = how many sends in a row counted before. A send counts when the
+/// lock was held elsewhere AND the send waited out Spout's timeout
+/// ([`ACCESS_TIMEOUT_US`]); refused at [`MAX_ACCESS_HELD`] in a row; any
+/// other send starts the count again.
+pub fn access_held(streak: u32, held_elsewhere: bool, send_us: u64) -> AccessHeld {
+    if !held_elsewhere || send_us < ACCESS_TIMEOUT_US {
+        return AccessHeld::Streak(0);
+    }
+    let next = streak + 1;
+    if next < MAX_ACCESS_HELD {
+        AccessHeld::Streak(next)
+    } else {
+        AccessHeld::Refuse(ACCESS_HELD)
     }
 }
 

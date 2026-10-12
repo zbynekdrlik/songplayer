@@ -378,6 +378,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build workspace
         run: cargo build --workspace
+      # #233 review finding 4: the production-environment glue test
+      # (sp-server prod_env_reader_tests.rs, cfg(windows)) compares its own
+      # registry / WMI reads with an independent reading of this runner by
+      # Windows' own cmdlets, taken here before the tests. Read only:
+      # nothing on the runner is changed (Defender is never toggled).
+      - name: Read the runner's Defender, firewall and build for the glue test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $mp = Get-MpComputerStatus
+          $profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore)
+          $firewall = ($profiles | ForEach-Object { "$($_.Name)=$($_.Enabled)" }) -join ';'
+          $build = (Get-CimInstance -ClassName Win32_OperatingSystem).BuildNumber
+          Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_DEFENDER_REALTIME=$($mp.RealTimeProtectionEnabled)"
+          Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_DEFENDER_MODE=$($mp.AMRunningMode)"
+          Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_FIREWALL=$firewall"
+          Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_BUILD=$build"
+          Write-Host "Defender real-time $($mp.RealTimeProtectionEnabled), mode $($mp.AMRunningMode); firewall $firewall; build $build"
       # --no-fail-fast: run every test binary even after one fails, so one
       # CI run reports every failure (#223 S3b: sp-decoder's failing
       # mf_hw_decode binary stopped the run before sp-gpu's and sp-server's

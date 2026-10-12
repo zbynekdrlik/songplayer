@@ -31,13 +31,17 @@ use crate::playback::audio_out::STATE_WAITING;
 use crate::playback::audio_out_queue::{RunGuard, Take};
 
 /// What an ASIO output is built from, on either side of the host's pipe:
-/// its entry's id, driver, 0-based channels and delay.
+/// its entry's id, driver, 0-based channels, delay and loop check.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AsioSpec {
     pub id: String,
     pub driver: String,
     pub channels: [u32; 2],
     pub delay_ms: u32,
+    /// Compare what it sends with what returns (`asio_loop.rs`); off when
+    /// a SongPlayer that predates it sends no such field.
+    #[serde(default)]
+    pub loop_check: bool,
 }
 
 impl AsioOut {
@@ -48,6 +52,7 @@ impl AsioOut {
             driver: self.driver.clone(),
             channels: self.channels,
             delay_ms: ((self.target_100ns - BASE_LATENCY_100NS) / 10_000) as u32,
+            loop_check: self.loop_check,
         }
     }
 

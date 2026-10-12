@@ -2,10 +2,14 @@
 //! ASIO driver): scripted open answers and messages; `drain` plays the card,
 //! taking `buffer` frames per callback from the ring like the real callback
 //! (`asio_win.rs`: a short ring is silence, an underrun once primed).
+//! #233 loop check: with taps given before a start, each callback taps
+//! what it played and an instant loop (every tapped input returns the
+//! played L) as the glue does.
 
 use std::collections::VecDeque;
 
 use super::*;
+use crate::playback::asio_loop::{LoopTaps, copy_played};
 
 pub(crate) struct FakeDevice {
     pub opens: VecDeque<Result<Opened, Reason>>,
@@ -30,6 +34,11 @@ pub(crate) struct FakeDevice {
     /// poll's own, passed as scripted).
     pub late_callbacks: u64,
     pub fast_callbacks: u64,
+    /// The loop check's taps the next start takes, and the running
+    /// ones; the inputs a start with taps says it taps.
+    pub pending_taps: Option<LoopTaps>,
+    pub taps: Option<LoopTaps>,
+    pub loop_inputs: u32,
 }
 
 /// Dante Virtual Soundcard as the box runs it: 128-frame buffers, Int32.
@@ -62,6 +71,9 @@ impl FakeDevice {
             overloads: 0,
             late_callbacks: 0,
             fast_callbacks: 0,
+            pending_taps: None,
+            taps: None,
+            loop_inputs: 2,
         }
     }
 
@@ -73,6 +85,16 @@ impl FakeDevice {
                 let mut got = vec![0.0f32; want];
                 let n_got = ring.pop_partial_slice(&mut got).0.len();
                 self.played.extend_from_slice(&got[..n_got]);
+                if let Some(taps) = self.taps.as_mut() {
+                    let mut played = vec![0.0f32; want];
+                    copy_played(&got[..n_got], &mut played);
+                    let k = self.loop_inputs as usize;
+                    let back: Vec<f32> = played
+                        .chunks_exact(2)
+                        .flat_map(|f| std::iter::repeat_n(f[0], k))
+                        .collect();
+                    taps.push(&played, &back);
+                }
                 if n_got < want && self.primed {
                     self.underruns += 1;
                 }
@@ -100,6 +122,7 @@ impl AsioDevice for FakeDevice {
 
     fn start(&mut self, ring: rtrb::Consumer<f32>) -> Result<Started, Reason> {
         self.ring = Some(ring);
+        self.taps = self.pending_taps.take();
         self.starts += 1;
         self.consumed = 0;
         self.callbacks = 0;
@@ -110,6 +133,11 @@ impl AsioDevice for FakeDevice {
         self.primed = false;
         Ok(Started {
             output_latency_frames: self.latency,
+            loop_inputs: if self.taps.is_some() {
+                self.loop_inputs
+            } else {
+                0
+            },
         })
     }
 
@@ -143,6 +171,13 @@ impl AsioDevice for FakeDevice {
 
     fn close(&mut self) {
         self.ring = None;
+        // The run's taps go with it: the analyzer sees them abandoned.
+        self.taps = None;
+        self.pending_taps = None;
         self.closes += 1;
+    }
+
+    fn tap_loop(&mut self, taps: LoopTaps) {
+        self.pending_taps = Some(taps);
     }
 }

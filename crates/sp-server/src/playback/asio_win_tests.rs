@@ -100,6 +100,7 @@ fn the_buffer_switch_writes_left_right_zeroes_the_rest_and_only_counts() {
         sample: AsioSample::Int32In24,
         left: 2,
         right: 0,
+        taps: None,
     }));
     SLOTS[i].stream.store(stream, Ordering::SeqCst);
     // Three frames of L 0.5 / R −0.5: the fourth is missing (an underrun).
@@ -396,6 +397,7 @@ fn a_callback_stuck_past_the_bound_parks_its_slot_driver_and_hold() {
         sample: AsioSample::Int32In24,
         left: 0,
         right: 1,
+        taps: None,
     }));
     SLOTS[i].stream.store(stream, Ordering::SeqCst);
     SLOTS[i].in_flight.fetch_add(1, Ordering::SeqCst);
@@ -434,6 +436,7 @@ fn parked_device(i: usize, name: &str) -> (WinAsioDevice, StuckCallback) {
         sample: AsioSample::Int32In24,
         left: 0,
         right: 1,
+        taps: None,
     }));
     SLOTS[i].stream.store(stream, Ordering::SeqCst);
     SLOTS[i].in_flight.fetch_add(1, Ordering::SeqCst);
@@ -511,6 +514,7 @@ fn close_pumps_the_threads_messages_while_a_callback_finishes() {
             sample: AsioSample::Int32In24,
             left: 0,
             right: 1,
+            taps: None,
         }));
         SLOTS[i].stream.store(stream, Ordering::SeqCst);
         SLOTS[i].in_flight.fetch_add(1, Ordering::SeqCst);
@@ -535,4 +539,84 @@ fn close_pumps_the_threads_messages_while_a_callback_finishes() {
     })
     .join()
     .expect("the closing thread");
+}
+
+/// Each buffer's two halves as the driver hands them over.
+fn halves_of(memory: &mut [Vec<u8>], bytes: usize) -> Vec<[*mut c_void; 2]> {
+    memory
+        .iter_mut()
+        .map(|m| {
+            let p = m.as_mut_ptr();
+            // SAFETY: `bytes` is half of the allocation.
+            [p.cast(), unsafe { p.add(bytes) }.cast()]
+        })
+        .collect()
+}
+
+/// #233 (the SoundGrid loop check): with taps, the buffer switch pushes
+/// what it wrote (the delivered frames, the missing one silent) and each
+/// input read back from the half the driver named, into both rings; a
+/// callback the rings have no room for is an overflow, in neither.
+#[test]
+fn the_buffer_switch_taps_what_it_wrote_and_the_inputs_it_read() {
+    let _g = serial();
+    let i = 1;
+    claim(i);
+    CALLBACK_EPOCH.get_or_init(Instant::now);
+    let frames = 4;
+    let bytes = frames * 4; // Int32LSB24: a 32-bit container
+    let mut outputs: Vec<Vec<u8>> = (0..2).map(|_| vec![0xAA; 2 * bytes]).collect();
+    let words = |v: [i32; 4]| -> Vec<u8> { v.iter().flat_map(|w| w.to_le_bytes()).collect() };
+    // Input 1 holds a ramp in the half the driver names, junk in the other.
+    let mut inputs: Vec<Vec<u8>> = vec![
+        [
+            vec![0x55; bytes],
+            words([4_194_304, -4_194_304, 0, 8_388_607]),
+        ]
+        .concat(),
+        [vec![0x55; bytes], words([1, 1, 1, 1])].concat(),
+    ];
+    let (mut producer, consumer) = rtrb::RingBuffer::<f32>::new(64);
+    // Rings of 4 frames (4 Hz for one second): one callback fills the sent one.
+    let (taps, mut feed) = crate::playback::asio_loop::loop_rings(4.0);
+    let stream = Box::into_raw(Box::new(Stream {
+        ring: UnsafeCell::new(consumer),
+        scratch: UnsafeCell::new(vec![0.0; frames * 2]),
+        buffers: halves_of(&mut outputs, bytes),
+        frames,
+        sample: AsioSample::Int32In24,
+        left: 0,
+        right: 1,
+        taps: Some(UnsafeCell::new(StreamTaps {
+            taps,
+            inputs: halves_of(&mut inputs, bytes),
+            sample: AsioSample::Int32In24,
+            sent: vec![0.0; frames * 2],
+            received: vec![0.0; frames * 2],
+        })),
+    }));
+    SLOTS[i].stream.store(stream, Ordering::SeqCst);
+    // Three frames of L 0.5 / R −1.5 (clamped as the encoder clamps it).
+    let (pushed, _) = producer.push_partial_slice(&[0.5, -1.5, 0.5, -1.5, 0.5, -1.5]);
+    assert_eq!(pushed.len(), 6);
+    on_buffer(&SLOTS[i], true);
+    let (sent, received, overflows) = feed.drained();
+    assert_eq!(sent, vec![0.5, -1.0, 0.5, -1.0, 0.5, -1.0, 0.0, 0.0]);
+    let tiny = (1.0f64 / 8_388_607.0) as f32;
+    let half = (4_194_304.0f64 / 8_388_607.0) as f32;
+    assert_eq!(
+        received,
+        vec![half, tiny, -half, tiny, 0.0, tiny, 1.0, tiny],
+        "both inputs, interleaved, from the half the driver named"
+    );
+    assert_eq!(overflows, 0);
+    // The sent ring holds four frames: two callbacks without a drain are
+    // one in both rings and one overflow.
+    on_buffer(&SLOTS[i], false);
+    on_buffer(&SLOTS[i], true);
+    let (sent, received, overflows) = feed.drained();
+    assert_eq!((sent.len(), received.len(), overflows), (8, 8, 1));
+    release(i);
+    // SAFETY: the slot no longer points to it and no callback runs.
+    drop(unsafe { Box::from_raw(stream) });
 }

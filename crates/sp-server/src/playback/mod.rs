@@ -6,6 +6,7 @@
 
 pub mod asio_format; // #233: an ASIO driver's sample types + the L/R channel fill (pure)
 pub mod asio_hold; // #233: one holder per ASIO driver in the process (a rebuilt entry's successor waits)
+pub mod asio_loop; // #233: the ASIO output's loop check (what it sends against what returns), its own thread
 pub mod asio_out; // #233: the ASIO output — its worker over a driver trait (open / run / close / backoff)
 pub mod asio_state; // #233: the ASIO output's decisions (backoff, reasons, replies, stall), pure
 #[cfg(windows)]

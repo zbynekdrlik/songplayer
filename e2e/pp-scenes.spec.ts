@@ -88,7 +88,8 @@ test.describe("PP's playlist scene (#229)", () => {
 });
 
 test.describe("PP's manual scene (#229)", () => {
-  const scenes = ["Blank", "Svedectvo", "sp-slow", AV_PROBE_SCENE, OBS_MANUAL];
+  const scenes = ["Blank", "Svedectvo", "trailer", "sp-slow", AV_PROBE_SCENE, OBS_MANUAL];
+  const notManual = `(a playlist's, the A/V probe's, "${OBS_MANUAL}" or SongPlayer's "Blank")`;
   const names = playlistNames(ROWS);
 
   test("the active playlists' names, lowercased", () => {
@@ -101,9 +102,9 @@ test.describe("PP's manual scene (#229)", () => {
     expect(pick).toEqual({ scene: "Svedectvo" });
   });
 
-  test("cg OBS on a playlist's, the probe's or an unlisted scene: no guess, PP_MANUAL_SCENE is named", () => {
+  test("cg OBS on a playlist's, the probe's, Blank or an unlisted scene: no guess, PP_MANUAL_SCENE is named", () => {
     // Pressing some other cg OBS scene would change what PP's wall shows.
-    for (const cgProgram of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, "gone"]) {
+    for (const cgProgram of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, "Blank", "gone"]) {
       const pick = pickManualScene({ configured: "", cgProgram, scenes, playlistNames: names });
       expect(pick, cgProgram).toEqual({
         error:
@@ -115,12 +116,24 @@ test.describe("PP's manual scene (#229)", () => {
 
   test("PP_MANUAL_SCENE wins when it is a manual cg OBS scene", () => {
     const pick = pickManualScene({
-      configured: " Blank ",
+      configured: " trailer ",
       cgProgram: "Svedectvo",
       scenes,
       playlistNames: names,
     });
-    expect(pick).toEqual({ scene: "Blank" });
+    expect(pick).toEqual({ scene: "trailer" });
+  });
+
+  test("Blank in any case is SongPlayer's own scene, never a manual one (#245)", () => {
+    // A press of "Blank" through the facade cuts SP-program to SongPlayer's
+    // black (source -2) and tells cg OBS nothing, so it never lands as
+    // "OBS manuál" even when cg OBS has a scene of that name (PP, 12.10.2026).
+    for (const scene of ["Blank", "blank", "BLANK"]) {
+      expect(isManualScene(scene, names), scene).toBe(false);
+    }
+    for (const scene of ["Blank ", "Blanks", "sp-blank", "Svedectvo"]) {
+      expect(isManualScene(scene, names), scene).toBe(true);
+    }
   });
 
   test("a PP_MANUAL_SCENE cg OBS does not have fails", () => {
@@ -130,11 +143,11 @@ test.describe("PP's manual scene (#229)", () => {
     });
   });
 
-  test("a PP_MANUAL_SCENE that is a playlist's, the probe's or OBS manual fails", () => {
-    for (const configured of ["sp-slow", AV_PROBE_SCENE, OBS_MANUAL]) {
-      const pick = pickManualScene({ configured, cgProgram: "Blank", scenes, playlistNames: names });
+  test("a PP_MANUAL_SCENE that is a playlist's, the probe's, OBS manual or Blank fails", () => {
+    for (const configured of ["sp-slow", AV_PROBE_SCENE, OBS_MANUAL, "Blank"]) {
+      const pick = pickManualScene({ configured, cgProgram: "Svedectvo", scenes, playlistNames: names });
       expect(pick, configured).toEqual({
-        error: `PP_MANUAL_SCENE "${configured}" is not a manual scene (a playlist's, the A/V probe's or "${OBS_MANUAL}")`,
+        error: `PP_MANUAL_SCENE "${configured}" is not a manual scene ${notManual}`,
       });
     }
   });
@@ -191,8 +204,22 @@ test.describe("SP-program's restore after the PP gate (#229)", () => {
     expect(programRestoreTarget(4, [press], { source: -1, last_remote_cut: operator })).toBeNull();
   });
 
-  test("a program on another source than the gate's press left is not the gate's", () => {
-    expect(programRestoreTarget(-1, [press], { source: 7, last_remote_cut: ours })).toBeNull();
+  test("the gate's own press, still the latest switch, is the gate's wherever it landed", () => {
+    // Every switch through SongPlayer (facade, dashboard, Stream Deck)
+    // replaces last_remote_cut, so with the gate's own press still the
+    // latest one nobody moved the program since: a source other than the
+    // press's predicted one means the prediction was wrong, and the program
+    // still goes back to the start source.
+    expect(programRestoreTarget(-1, [press], { source: 7, last_remote_cut: ours })).toBe(-1);
+  });
+
+  test("12.10 on PP: a press that landed on SongPlayer's Blank still puts the start back", () => {
+    // 06:07 UTC: the gate cut sp-slow (4), then pressed "Blank" as its manual
+    // scene expecting "OBS manuál" (-1); since #245 that is SongPlayer's own
+    // black + silence (-2). The restore left the program silent until 08:24.
+    const blank = { scene: "Blank", sentAtMs: 2_000, source: -1 };
+    const landed = { scene: "Blank", action: "blank", at_ms: 2_050 };
+    expect(programRestoreTarget(7, [press, blank], { source: -2, last_remote_cut: landed })).toBe(7);
   });
 
   test("a lone refused press changed nothing: nothing to put back", () => {
@@ -265,10 +292,10 @@ test.describe("how cg OBS goes back after the PP gate (#229)", () => {
     expect(cgRestoreVia({ ...via, backIsManual: false })).toBe("cg");
   });
 
-  test("a manual scene: not a playlist's name, the probe's or OBS manual", () => {
+  test("a manual scene: not a playlist's name, the probe's, OBS manual or Blank", () => {
     const names = playlistNames(ROWS);
-    expect(isManualScene("Blank", names)).toBe(true);
-    for (const s of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, " "]) {
+    expect(isManualScene("Svedectvo", names)).toBe(true);
+    for (const s of ["SP-Slow", AV_PROBE_SCENE, OBS_MANUAL, "Blank", " "]) {
       expect(isManualScene(s, names), s).toBe(false);
     }
   });

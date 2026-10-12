@@ -18,7 +18,9 @@
 //! #233: while the box violates the production environment (an edition that
 //! is neither LTSC nor IoT Enterprise, Defender's real-time protection on, a
 //! firewall profile on, or a fact that cannot be read), a red segment names
-//! it (`sp_core::prod_env::label`), polled every 10 s.
+//! it (`sp_core::prod_env::label`), polled every 10 s; the bar's
+//! `data-environment` says what the last poll said
+//! (`sp_core::prod_env::marker`).
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -110,7 +112,14 @@ pub fn HealthBar() -> impl IntoView {
     });
 
     view! {
-        <div class="health-bar" data-testid="health-bar">
+        // #233 review finding 5: what the last environment poll said
+        // (`unchecked` / `ok` / `violated`), so a spec can tell "the box
+        // holds" from "the poll has not landed".
+        <div
+            class="health-bar"
+            data-testid="health-bar"
+            data-environment=move || prod_env::marker(&environment.get())
+        >
             // WS
             {move || {
                 let (tone, text) = health::ws_label(store.ws_connected.get());
