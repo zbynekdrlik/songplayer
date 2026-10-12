@@ -53,6 +53,20 @@ pub fn window_start(now_ms: i64, hours: u32) -> i64 {
     now_ms - i64::from(hours) * HOUR_MS
 }
 
+/// The oldest instant the ledger keeps at `now_ms` (its 90 days).
+pub fn kept_from(now_ms: i64) -> i64 {
+    now_ms - super::RETENTION_MS
+}
+
+/// One path's marks over every row the ledger keeps
+/// (`store::clean_marks`): its newest loss and its first start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CleanMark {
+    pub path: String,
+    pub last_loss_ms: Option<i64>,
+    pub first_start_ms: Option<i64>,
+}
+
 /// One `(path, kind, severity)` group of the window (`store::totals`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KindTotal {
@@ -145,6 +159,7 @@ pub fn build_answer(
     newest: Vec<StoredEvent>,
     details: &[(String, String)],
     live: &[(String, String)],
+    _marks: &[CleanMark],
 ) -> FaultsAnswer {
     let from_ms = window_start(now_ms, hours);
     let mut paths: BTreeMap<String, PathAcc> = BTreeMap::new();
@@ -181,6 +196,8 @@ pub fn build_answer(
         now_ms,
         from_ms,
         hours,
+        kept_from_ms: kept_from(now_ms),
+        clean_since_ms: from_ms,
         worst,
         truncated,
         paths,

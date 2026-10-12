@@ -74,8 +74,10 @@ pub struct PathFaults {
     pub detail: String,
     /// The path runs now.
     pub live: bool,
-    /// The last loss in the window, else the path's latest start in it,
-    /// else the window's start.
+    /// The path's last loss the ledger keeps (looked up beyond the asked
+    /// window), else its first start the ledger keeps (a planned restart is
+    /// no fault: it never resets this), else the ledger's oldest instant
+    /// (`kept_from_ms`) when it has rows of the path, else now.
     pub clean_since_ms: i64,
     pub last_loss_ms: Option<i64>,
     pub last_risk_ms: Option<i64>,
@@ -104,6 +106,15 @@ pub struct FaultsAnswer {
     pub now_ms: i64,
     pub from_ms: i64,
     pub hours: u32,
+    /// The oldest instant the ledger keeps (its 90 days): a clean time that
+    /// reaches it is "more than" it.
+    #[serde(default)]
+    pub kept_from_ms: i64,
+    /// Since when the whole chain has lost no sample: the newest loss of any
+    /// path the ledger keeps (beyond the asked window), else the first start
+    /// it recorded. A planned restart (a deploy) never resets it.
+    #[serde(default)]
+    pub clean_since_ms: i64,
     /// The path with the most recent loss (`null`: none in the window).
     pub worst: Option<String>,
     /// More events than the answer carries: the oldest are left out.
@@ -494,9 +505,23 @@ pub fn time_sk(t: LocalTime) -> String {
     format!("{}:{:02}", dm_hm_sk(t), t.second)
 }
 
-/// A path's "clean since" line: `bez chyby od 12.10. 14:05 (2 h 14 min)`
-/// (`since` is `clean_since_ms` read in local time), or `bez chyby viac ako
-/// 24 h` when the path was clean for the whole window.
+/// How long a clean time since `clean_since_ms` is: `3 d 4 h`, or `viac
+/// ako 90 d` when it reaches the oldest instant the ledger keeps.
+pub fn clean_span_sk(clean_since_ms: i64, answer: &FaultsAnswer) -> String {
+    if clean_since_ms > answer.kept_from_ms {
+        duration_sk(answer.now_ms - clean_since_ms)
+    } else {
+        format!(
+            "viac ako {}",
+            duration_sk(answer.now_ms - answer.kept_from_ms)
+        )
+    }
+}
+
+/// A path's "clean since" line: `bez chyby od 9.10. 14:05 (3 d 4 h)`
+/// (`since` is `clean_since_ms` read in local time; a loss before the asked
+/// window counts, a restart does not), or `bez chyby viac ako 90 d` when it
+/// reaches the oldest instant the ledger keeps.
 pub fn clean_sk(clean_since_ms: i64, answer: &FaultsAnswer, since: LocalTime) -> String {
     if clean_since_ms > answer.from_ms {
         format!(

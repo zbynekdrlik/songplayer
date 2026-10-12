@@ -10,6 +10,8 @@ const NOW: i64 = 1_760_000_000_000;
 const MIN: i64 = 60_000;
 const HOUR: i64 = 3_600_000;
 const DAY: i64 = 86_400_000;
+/// The ledger's 90 days.
+const KEPT: i64 = 7_776_000_000;
 
 /// A live path, clean for the whole day.
 fn path(name: &str) -> PathFaults {
@@ -53,6 +55,8 @@ fn day(paths: Vec<PathFaults>) -> FaultsAnswer {
         now_ms: NOW,
         from_ms: NOW - DAY,
         hours: 24,
+        kept_from_ms: NOW - KEPT,
+        clean_since_ms: NOW - DAY,
         worst: None,
         truncated: false,
         paths,
@@ -88,7 +92,8 @@ fn local(day: u32, month: u32, hour: u32, minute: u32, second: u32) -> LocalTime
 
 #[test]
 fn the_wire_shape_reads_the_servers_answer_and_writes_its_loop_block_as_loop() {
-    let text = r#"{"now_ms":5000,"from_ms":1000,"hours":1,"worst":"loop:out-2","truncated":true,
+    let text = r#"{"now_ms":5000,"from_ms":1000,"hours":1,"kept_from_ms":100,"clean_since_ms":900,
+        "worst":"loop:out-2","truncated":true,
         "paths":[{"path":"loop:out-2","detail":"SG","live":true,"clean_since_ms":4000,
         "last_loss_ms":4000,"last_risk_ms":null,"losses":2,"risks":0,"counts":{"dropout":2},
         "events":[{"ts_ms":4000,"kind":"dropout","severity":"loss","amount":480}],
@@ -97,6 +102,7 @@ fn the_wire_shape_reads_the_servers_answer_and_writes_its_loop_block_as_loop() {
         "last_loss_ms":null,"last_risk_ms":null}]}"#;
     let a: FaultsAnswer = serde_json::from_str(text).unwrap();
     assert_eq!((a.now_ms, a.from_ms, a.hours), (5000, 1000, 1));
+    assert_eq!((a.kept_from_ms, a.clean_since_ms), (100, 900));
     assert_eq!(a.worst.as_deref(), Some("loop:out-2"));
     assert!(a.truncated);
     let looped = &a.paths[0];
@@ -122,6 +128,16 @@ fn the_wire_shape_reads_the_servers_answer_and_writes_its_loop_block_as_loop() {
     assert!(json["paths"][1].get("loop").is_none());
     assert_eq!(json["paths"][0]["losses"], 2);
     assert_eq!(json["worst"], "loop:out-2");
+    assert_eq!(json["kept_from_ms"], 100);
+    assert_eq!(json["clean_since_ms"], 900);
+    let older: FaultsAnswer =
+        serde_json::from_str(r#"{"now_ms":5000,"from_ms":1000,"hours":1,"worst":null,"paths":[]}"#)
+            .unwrap();
+    assert_eq!(
+        (older.kept_from_ms, older.clean_since_ms, older.truncated),
+        (0, 0, false),
+        "an older server's answer"
+    );
 }
 
 #[test]
@@ -472,23 +488,29 @@ fn the_segment_waits_for_its_first_answer() {
     );
 }
 
+/// #257 (main session's ruling): a planned restart is no fault. The paths
+/// restarted 2 h 14 min ago (a deploy), the chain's last loss was 3 d 4 h
+/// ago: the chain is clean since the loss, across the deploy.
 #[test]
-fn a_clean_chain_reads_how_long_it_is_without_a_loss() {
-    let a = day(vec![
-        PathFaults {
-            clean_since_ms: NOW - (2 * HOUR + 14 * MIN + 30_000),
-            ..path("program")
-        },
-        PathFaults {
-            clean_since_ms: NOW - HOUR,
-            ..path("out:a")
-        },
-    ]);
+fn a_clean_chain_reads_how_long_it_is_without_a_loss_across_a_restart() {
+    let a = FaultsAnswer {
+        clean_since_ms: NOW - (3 * DAY + 4 * HOUR + 30_000),
+        ..day(vec![
+            PathFaults {
+                clean_since_ms: NOW - (2 * HOUR + 14 * MIN + 30_000),
+                ..path("program")
+            },
+            PathFaults {
+                clean_since_ms: NOW - HOUR,
+                ..path("out:a")
+            },
+        ])
+    };
     assert_eq!(
         segment(Some(&a), &no_playlist),
         Segment {
             level: AudioLevel::Ok,
-            text: "Zvuk: bez chyby 2 h 14 min".to_string(),
+            text: "Zvuk: bez chyby 3 d 4 h".to_string(),
             risks: None,
             tip: "Všetky zvukové cesty za posledných 24 h: 0 chýb, 0 rizík. Kliknutím zobrazíte \
                   podrobnosti."
@@ -498,12 +520,27 @@ fn a_clean_chain_reads_how_long_it_is_without_a_loss() {
 }
 
 #[test]
-fn a_chain_clean_for_the_whole_window_says_more_than_it() {
-    let s = segment(Some(&day(vec![path("program")])), &no_playlist);
-    assert_eq!(s.text, "Zvuk: bez chyby viac ako 24 h");
+fn a_chain_clean_for_all_the_ledger_keeps_says_more_than_it() {
+    let kept = FaultsAnswer {
+        clean_since_ms: NOW - KEPT,
+        ..day(vec![path("program")])
+    };
+    assert_eq!(
+        segment(Some(&kept), &no_playlist).text,
+        "Zvuk: bez chyby viac ako 90 d"
+    );
+    let just_after = FaultsAnswer {
+        clean_since_ms: NOW - KEPT + 1,
+        ..day(vec![path("program")])
+    };
+    assert_eq!(
+        segment(Some(&just_after), &no_playlist).text,
+        "Zvuk: bez chyby 89 d 23 h"
+    );
     let one = FaultsAnswer {
         from_ms: NOW - HOUR,
         hours: 1,
+        clean_since_ms: NOW - 5 * HOUR,
         ..day(vec![PathFaults {
             clean_since_ms: NOW - HOUR + 1,
             ..path("program")
@@ -511,25 +548,47 @@ fn a_chain_clean_for_the_whole_window_says_more_than_it() {
     };
     assert_eq!(
         segment(Some(&one), &no_playlist).text,
-        "Zvuk: bez chyby 59 min"
+        "Zvuk: bez chyby 5 h",
+        "a loss before the asked window still bounds it"
+    );
+}
+
+#[test]
+fn a_clean_span_reads_its_length_or_more_than_the_ledger_keeps() {
+    let a = day(Vec::new());
+    assert_eq!(clean_span_sk(NOW - (3 * DAY + 4 * HOUR), &a), "3 d 4 h");
+    assert_eq!(clean_span_sk(NOW - KEPT + 1, &a), "89 d 23 h");
+    assert_eq!(clean_span_sk(NOW - KEPT, &a), "viac ako 90 d");
+    assert_eq!(clean_span_sk(NOW - KEPT - DAY, &a), "viac ako 90 d");
+    let older = FaultsAnswer {
+        kept_from_ms: 0,
+        ..day(Vec::new())
+    };
+    assert_eq!(
+        clean_span_sk(NOW - 5 * HOUR, &older),
+        "5 h",
+        "an older server's answer keeps nothing it could name"
     );
 }
 
 #[test]
 fn risks_alone_keep_the_green_text_and_count_beside_it() {
-    let a = day(vec![
-        PathFaults {
-            clean_since_ms: NOW - 30 * MIN,
-            ..path("program")
-        },
-        PathFaults {
-            clean_since_ms: NOW - 3 * HOUR,
-            ..risky("out:a", 3)
-        },
-    ]);
+    let a = FaultsAnswer {
+        clean_since_ms: NOW - 3 * HOUR,
+        ..day(vec![
+            PathFaults {
+                clean_since_ms: NOW - 30 * MIN,
+                ..path("program")
+            },
+            PathFaults {
+                clean_since_ms: NOW - 30 * MIN,
+                ..risky("out:a", 3)
+            },
+        ])
+    };
     let s = segment(Some(&a), &no_playlist);
     assert_eq!(s.level, AudioLevel::Risk);
-    assert_eq!(s.text, "Zvuk: bez chyby 3 h");
+    assert_eq!(s.text, "Zvuk: bez chyby 3 h", "the chain's own clean time");
     assert_eq!(s.risks.as_deref(), Some(" · riziká: 3"));
     assert!(s.tip.contains(": 0 chýb, 3 riziká."), "{}", s.tip);
 }
@@ -595,8 +654,21 @@ fn a_paths_clean_line_names_when_and_how_long() {
         "bez chyby od 11.10. 16:19 (23 h 59 min)"
     );
     assert_eq!(
-        clean_sk(NOW - DAY, &a, local(1, 1, 0, 0, 0)),
-        "bez chyby viac ako 24 h"
+        clean_sk(NOW - DAY, &a, local(8, 10, 8, 53, 0)),
+        "bez chyby od 8.10. 08:53 (1 d)",
+        "the window's start is no bound any more"
+    );
+    assert_eq!(
+        clean_sk(NOW - (3 * DAY + 4 * HOUR), &a, local(6, 10, 4, 53, 0)),
+        "bez chyby od 6.10. 04:53 (3 d 4 h)"
+    );
+    assert_eq!(
+        clean_sk(NOW - KEPT + 1, &a, local(11, 7, 8, 53, 0)),
+        "bez chyby od 11.7. 08:53 (89 d 23 h)"
+    );
+    assert_eq!(
+        clean_sk(NOW - KEPT, &a, local(11, 7, 8, 53, 0)),
+        "bez chyby viac ako 90 d"
     );
     let hour = FaultsAnswer {
         from_ms: NOW - HOUR,
@@ -604,8 +676,9 @@ fn a_paths_clean_line_names_when_and_how_long() {
         ..day(Vec::new())
     };
     assert_eq!(
-        clean_sk(NOW - HOUR, &hour, local(1, 1, 0, 0, 0)),
-        "bez chyby viac ako 1 h"
+        clean_sk(NOW - 5 * HOUR, &hour, local(9, 10, 3, 53, 0)),
+        "bez chyby od 9.10. 03:53 (5 h)",
+        "a loss before the asked window"
     );
 }
 

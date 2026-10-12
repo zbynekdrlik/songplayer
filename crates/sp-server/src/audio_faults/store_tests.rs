@@ -4,7 +4,7 @@
 use sqlx::SqlitePool;
 
 use super::*;
-use crate::audio_faults::answer::{KindTotal, StoredEvent};
+use crate::audio_faults::answer::{CleanMark, KindTotal, StoredEvent};
 use crate::audio_faults::model::{FaultRow, Severity, kinds};
 
 async fn pool() -> SqlitePool {
@@ -173,4 +173,51 @@ async fn a_prune_deletes_only_the_rows_before_its_time() {
         .await
         .unwrap();
     assert_eq!(left, [100, 101]);
+}
+
+/// #257 lane 2: every path's newest loss and first start over the rows
+/// kept from `since` on — beyond any window; risks and meters never count.
+#[tokio::test]
+async fn clean_marks_take_each_paths_newest_loss_and_first_start() {
+    let pool = pool().await;
+    insert(
+        &pool,
+        &[
+            row(40, "out:a", kinds::UNDERRUN, Severity::Loss, 1),
+            row(60, "out:a", kinds::START, Severity::Info, 1),
+            row(70, "out:a", kinds::RESYNC, Severity::Loss, 1),
+            row(80, "out:a", kinds::START, Severity::Info, 1),
+            row(90, "out:a", kinds::UNDERRUN, Severity::Loss, 1),
+            row(95, "out:a", kinds::LATE_CALLBACK, Severity::Risk, 1),
+            row(65, "out:b", kinds::START, Severity::Info, 1),
+            row(85, "out:b", kinds::START, Severity::Info, 1),
+            row(99, "out:b", kinds::LATE_CALLBACK, Severity::Risk, 1),
+            row(75, "loop:a", kinds::CHECKED, Severity::Meter, 60_000),
+            row(76, "loop:a", kinds::BLIND, Severity::Meter, 1_000),
+        ],
+    )
+    .await
+    .unwrap();
+    let mark = |path: &str, loss: Option<i64>, start: Option<i64>| CleanMark {
+        path: path.to_string(),
+        last_loss_ms: loss,
+        first_start_ms: start,
+    };
+    assert_eq!(
+        clean_marks(&pool, 50).await.unwrap(),
+        vec![
+            mark("out:a", Some(90), Some(60)),
+            mark("out:b", None, Some(65)),
+        ],
+        "a risk is no loss, a meter no mark; the loss before 50 is not kept"
+    );
+    assert_eq!(
+        clean_marks(&pool, 0).await.unwrap()[0],
+        mark("out:a", Some(90), Some(60))
+    );
+    assert_eq!(
+        clean_marks(&pool, 61).await.unwrap()[0],
+        mark("out:a", Some(90), Some(80)),
+        "the first start kept from 61 on"
+    );
 }

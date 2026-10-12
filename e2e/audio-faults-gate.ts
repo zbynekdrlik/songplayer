@@ -44,6 +44,10 @@ export interface FaultsAnswer {
   now_ms: number;
   from_ms: number;
   hours: number;
+  /** #257 lane 2: the oldest instant the ledger keeps (its 90 days). */
+  kept_from_ms?: number;
+  /** #257 lane 2: since when the whole chain lost no sample (beyond the window). */
+  clean_since_ms?: number;
   worst: string | null;
   truncated: boolean;
   paths: PathFaults[];

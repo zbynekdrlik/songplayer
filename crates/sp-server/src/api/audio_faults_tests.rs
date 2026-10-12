@@ -59,10 +59,15 @@ async fn an_empty_ledger_answers_the_program_clean_for_the_default_day() {
     assert_eq!(answer["from_ms"], now - 86_400_000);
     assert_eq!(answer["worst"], serde_json::Value::Null);
     assert_eq!(answer["truncated"], false);
+    assert_eq!(answer["kept_from_ms"], now - 7_776_000_000);
+    assert_eq!(
+        answer["clean_since_ms"], now,
+        "a ledger with no row claims no clean time"
+    );
     let program = path(&answer, "program");
     assert_eq!(program["detail"], "SP-program");
     assert_eq!(program["live"], true);
-    assert_eq!(program["clean_since_ms"], now - 86_400_000);
+    assert_eq!(program["clean_since_ms"], now);
     assert_eq!(program["counts"], serde_json::json!({}));
     assert_eq!(program["events"], serde_json::json!([]));
 }
@@ -151,6 +156,63 @@ async fn the_window_holds_its_rows_counts_and_the_last_loss() {
         "a meter is no event"
     );
     assert_eq!(answer["worst"], "loop:2", "the most recent loss");
+}
+
+/// #257 (main session's ruling): a planned restart is no fault, so a
+/// path's clean time and the chain's look beyond the asked window: the
+/// newest loss the ledger keeps, else its first start.
+#[tokio::test]
+async fn clean_since_looks_beyond_the_window_and_across_restarts() {
+    let state = test_state().await;
+    let now = utc_now_ms();
+    const DAY: i64 = 86_400_000;
+    let rows = [
+        fault(now - 10 * DAY, "program", kinds::START, Severity::Info, 1),
+        fault(now - 10 * DAY, "out:b", kinds::START, Severity::Info, 1),
+        fault(now - 3 * DAY, "program", kinds::FILLED, Severity::Loss, 2),
+        fault(
+            now - 2 * DAY,
+            "out:b",
+            kinds::LATE_CALLBACK,
+            Severity::Risk,
+            1,
+        ),
+        fault(now - 3_600_000, "program", kinds::START, Severity::Info, 1),
+        fault(now - 3_600_000, "out:b", kinds::START, Severity::Info, 1),
+        fault(
+            now - 91 * DAY,
+            "out:old",
+            kinds::UNDERRUN,
+            Severity::Loss,
+            1,
+        ),
+    ];
+    store::insert(&state.pool, &rows).await.unwrap();
+    let answer = json(state, "/api/v1/audio/faults?hours=2").await;
+    assert_eq!(
+        path(&answer, "program")["clean_since_ms"],
+        now - 3 * DAY,
+        "the loss three days back, across the restart an hour ago"
+    );
+    assert_eq!(
+        path(&answer, "program")["last_loss_ms"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        path(&answer, "out:b")["clean_since_ms"],
+        now - 10 * DAY,
+        "no loss: its FIRST start kept"
+    );
+    assert_eq!(
+        answer["clean_since_ms"],
+        now - 3 * DAY,
+        "the chain: the newest loss kept; a loss past the 90 days is gone"
+    );
+    assert_eq!(
+        answer["worst"],
+        serde_json::Value::Null,
+        "no loss in the window"
+    );
 }
 
 #[tokio::test]

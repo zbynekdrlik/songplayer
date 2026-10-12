@@ -82,6 +82,11 @@ function row(panel: Locator, path: string): Locator {
   return panel.locator(`[data-testid="audio-path-row"][data-path="${path}"]`);
 }
 
+/** A path's "bez chyby od <local d.m. HH:MM> (<span>)" line. */
+function cleanSince(span: string): RegExp {
+  return new RegExp(`^bez chyby od \\d{1,2}\\.\\d{1,2}\\. \\d{2}:\\d{2} \\(${span}\\)$`);
+}
+
 async function pickWindow(panel: Locator, hours: number) {
   const button = panel.locator(`[data-testid="audio-window"][data-hours="${hours}"]`);
   await button.click();
@@ -241,7 +246,9 @@ test("the window selector re-reads the history over 1 h and 7 d", async ({ page 
   const events = panel.getByTestId("audio-fault-event");
   await expect(events).toHaveCount(3);
   await expect(row(panel, "program").getByTestId("audio-path-losses")).toHaveText("0 chýb");
-  await expect(row(panel, "program").getByTestId("audio-path-clean")).toHaveText("bez chyby viac ako 1 h");
+  // #257 (main session's ruling): the program's loss 5 h ago, before this
+  // window, still bounds its clean time.
+  await expect(row(panel, "program").getByTestId("audio-path-clean")).toHaveText(cleanSince("5 h"));
   await expect(row(panel, "out:out-1").getByTestId("audio-path-risks")).toHaveText("1 riziko");
   for (const [path, bars] of [
     ["program", 0],
@@ -287,7 +294,37 @@ test("an older loss reads amber; a window without it says so", async ({ page }) 
   );
   await expect(panel.getByTestId("audio-fault-event")).toHaveCount(0);
   await expect(panel.getByTestId("audio-bar")).toHaveCount(0);
-  await expect(row(panel, "program").getByTestId("audio-path-clean")).toHaveText("bez chyby viac ako 1 h");
+  await expect(row(panel, "program").getByTestId("audio-path-clean")).toHaveText(cleanSince("3 h"));
+});
+
+test("a chain clean across a restart reads since its last loss, never since the deploy", async ({
+  page,
+}) => {
+  // Every path first started 10 d ago, the program lost samples 3 d 4 h
+  // ago, a deploy restarted every path 2 h 14 min ago: a planned restart is
+  // no fault (the main session's ruling on #257).
+  await scenario(page, "restart");
+  await page.goto("/");
+  const segment = page.getByTestId("health-audio");
+  await expect(segment).toHaveAttribute("data-level", "ok", { timeout: 15000 });
+  await expect(segment).toHaveText("Zvuk: bez chyby 3 d 4 h");
+  await expect(segment).toHaveClass(/health-ok/);
+
+  const panel = await openPanel(page);
+  await expect(row(panel, "program").getByTestId("audio-path-clean")).toHaveText(cleanSince("3 d 4 h"));
+  await expect(row(panel, "out:out-1").getByTestId("audio-path-clean")).toHaveText(cleanSince("10 d"));
+  await expect(row(panel, "loop:out-2").getByTestId("audio-path-clean")).toHaveText(cleanSince("10 d"));
+  await expect(panel.getByTestId("audio-faults-no-events")).toHaveText(
+    "V tomto období žiadna chyba ani riziko.",
+  );
+  await expect(panel.getByTestId("audio-bar")).toHaveCount(0);
+
+  await pickWindow(panel, 168);
+  await expect(panel.getByTestId("audio-fault-event")).toHaveCount(1);
+  await expect(row(panel, "program").getByTestId("audio-path-losses")).toHaveText("1 chyba");
+  await expect(row(panel, "program").getByTestId("audio-bar")).toHaveCount(1);
+  // The segment keeps its own answer.
+  await expect(segment).toHaveText("Zvuk: bez chyby 3 d 4 h");
 });
 
 test("on a phone the open panel never makes the page scroll sideways", async ({ page }) => {
@@ -348,9 +385,9 @@ test("the dashboard never has two history requests in flight", async ({ page }) 
   for (const hours of [1, 168, 720, 1]) {
     await panel.locator(`[data-testid="audio-window"][data-hours="${hours}"]`).click();
   }
-  await expect(row(panel, "program").getByTestId("audio-path-clean")).toHaveText("bez chyby viac ako 1 h", {
-    timeout: 10000,
-  });
+  // The last answer asked is the hour's: three events in it.
+  await expect(panel.getByTestId("audio-fault-event")).toHaveCount(3, { timeout: 10000 });
+  await expect(panel.locator('[data-testid="audio-window"][data-hours="1"]')).toHaveClass(/selected/);
   expect(most).toBe(1);
   expect(asked[0]).toBe("24");
   expect(asked).toContain("1");

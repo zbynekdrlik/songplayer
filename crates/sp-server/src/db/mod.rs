@@ -56,6 +56,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (36, MIGRATION_V36),
     (37, MIGRATION_V37),
     (38, MIGRATION_V38),
+    (39, MIGRATION_V39),
 ];
 
 const MIGRATION_V1: &str = "
@@ -599,6 +600,15 @@ CREATE INDEX IF NOT EXISTS idx_audio_faults_ts ON audio_faults (ts_ms);
 CREATE INDEX IF NOT EXISTS idx_audio_faults_path_ts ON audio_faults (path, ts_ms);
 ";
 
+/// #257 lane 2: a path's `clean_since_ms` looks beyond the asked window,
+/// at its newest loss and first start over the 90 days kept
+/// (`audio_faults::store::clean_marks`): read by severity, so the query
+/// touches the loss and start rows only, never a loop check's meters.
+const MIGRATION_V39: &str = "
+CREATE INDEX IF NOT EXISTS idx_audio_faults_severity_path_ts
+    ON audio_faults (severity, path, ts_ms);
+";
+
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).
 ///
 /// WAL + NORMAL synchronous remove reader/writer blocking for this
@@ -786,6 +796,9 @@ mod tests_v37;
 #[path = "mod_tests_v38.rs"]
 #[cfg(test)]
 mod tests_v38;
+#[path = "mod_tests_v39.rs"]
+#[cfg(test)]
+mod tests_v39;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]

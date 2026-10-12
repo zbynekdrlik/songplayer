@@ -3,8 +3,8 @@
 
 use sqlx::SqlitePool;
 
-use super::answer::{KindTotal, StoredEvent};
-use super::model::{FaultRow, Severity};
+use super::answer::{CleanMark, KindTotal, StoredEvent};
+use super::model::{FaultRow, Severity, kinds};
 
 /// Write `rows`, all or none (one transaction).
 pub async fn insert(pool: &SqlitePool, rows: &[FaultRow]) -> Result<(), sqlx::Error> {
@@ -85,6 +85,33 @@ pub async fn newest_events(
             kind,
             severity,
             amount,
+        })
+        .collect())
+}
+
+/// Every path's newest loss and first start over every row kept from
+/// `since_ms` on (the ledger's 90 days): `clean_since_ms` looks beyond the
+/// asked window, so a planned restart never resets it. It reads the loss
+/// and start rows only (V39's index by severity), never the meters.
+pub async fn clean_marks(pool: &SqlitePool, since_ms: i64) -> Result<Vec<CleanMark>, sqlx::Error> {
+    let rows: Vec<(String, Option<i64>, Option<i64>)> = sqlx::query_as(
+        "SELECT path, MAX(CASE WHEN severity = ? THEN ts_ms END), \
+         MIN(CASE WHEN kind = ? THEN ts_ms END) FROM audio_faults \
+         WHERE severity IN (?, ?) AND ts_ms >= ? GROUP BY path ORDER BY path",
+    )
+    .bind(Severity::Loss.as_str())
+    .bind(kinds::START)
+    .bind(Severity::Loss.as_str())
+    .bind(Severity::Info.as_str())
+    .bind(since_ms)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(path, last_loss_ms, first_start_ms)| CleanMark {
+            path,
+            last_loss_ms,
+            first_start_ms,
         })
         .collect())
 }

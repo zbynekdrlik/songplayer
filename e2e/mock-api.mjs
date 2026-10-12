@@ -818,6 +818,8 @@ function asioBlockRefusal(a, at) {
 // loop check's time. The server's `hours` rule (1..=2160, default 24) and
 // its refusal text.
 const AUDIO_FAULTS_REFUSAL = "hours must be a whole number from 1 to 2160";
+// The ledger's 90 days (`audio_faults::RETENTION_MS`).
+const AUDIO_KEPT_MS = 7_776_000_000;
 function audioFaultsFixture(now, hours) {
   const start = now - 30 * 60_000;
   const risk = now - 20 * 60_000;
@@ -838,6 +840,8 @@ function audioFaultsFixture(now, hours) {
     now_ms: now,
     from_ms: now - hours * 3_600_000,
     hours,
+    kept_from_ms: now - AUDIO_KEPT_MS,
+    clean_since_ms: loss,
     worst: "out:out-2",
     truncated: false,
     paths: [
@@ -884,7 +888,9 @@ app.get("/api/v1/audio/faults", (req, res) => {
 // #257 lane 2: the ledger's scenarios for the dashboard's specs. `POST
 // /__mock/audio-faults {scenario}` picks one: "fixture" (lane 1's fixed
 // answer above, the default), "clean", "risk", "recent" (a loss 3 min ago
-// on SoundGrid, two older losses, two risks), "old" (one loss 3 h ago);
+// on SoundGrid, two older losses, two risks), "old" (one loss 3 h ago),
+// "restart" (every path first started 10 d ago, the program lost samples
+// 3 d 4 h ago, a deploy restarted every path 2 h 14 min ago);
 // `POST /__mock/audio-faults-reset` = "fixture", no delay. `delay_ms` holds
 // every answer back (a spec proves the dashboard never has two requests in
 // flight). A scenario is ledger rows,
@@ -930,17 +936,36 @@ function audioScenarioRows(name) {
       ];
     case "old":
       return [...base, ["program", "filled", "loss", 1, 3 * MOCK_HOUR + 30_000]];
+    case "restart":
+      return [
+        ...AUDIO_LIVE.map(([path]) => [path, "start", "info", 1, 10 * 24 * MOCK_HOUR + 30_000]),
+        ["program", "filled", "loss", 2, (3 * 24 + 4) * MOCK_HOUR + 30_000],
+        ...base,
+      ];
     default:
       return null;
   }
 }
 // As the server's `build_answer`: per path in the window its last loss /
-// risk / start, its loss and risk rows, its counts per kind, its rows that
-// are no meter (oldest first), a loop check's meters; paths in the
-// server's (string) order; `worst` = the latest loss, the later path on a
-// tie.
+// risk, its loss and risk rows, its counts per kind, its rows that are no
+// meter (oldest first), a loop check's meters; paths in the server's
+// (string) order; `worst` = the latest loss, the later path on a tie.
+// `clean_since_ms` looks beyond the window over the 90 days kept: a path's
+// newest loss, else its FIRST start (a restart is no fault), else the
+// ledger's oldest instant when the window has rows of it, else now; the
+// answer's own = the newest loss of any path kept, else the first start.
 function audioAnswerFromRows(rows, now, hours) {
   const from = now - hours * MOCK_HOUR;
+  const kept = now - AUDIO_KEPT_MS;
+  const marks = new Map();
+  for (const [path, kind, severity, , ago] of rows) {
+    const ts = now - ago;
+    if (ts < kept) continue;
+    const m = marks.get(path) ?? { loss: null, start: null };
+    if (severity === "loss") m.loss = Math.max(m.loss ?? ts, ts);
+    if (kind === "start") m.start = Math.min(m.start ?? ts, ts);
+    marks.set(path, m);
+  }
   const paths = new Map();
   const acc = (path) => {
     if (!paths.has(path)) {
@@ -950,7 +975,7 @@ function audioAnswerFromRows(rows, now, hours) {
         live: false,
         last_loss_ms: null,
         last_risk_ms: null,
-        last_start: null,
+        seen: false,
         losses: 0,
         risks: 0,
         counts: {},
@@ -972,14 +997,13 @@ function audioAnswerFromRows(rows, now, hours) {
     .sort((x, y) => x.ts_ms - y.ts_ms);
   for (const r of inWindow) {
     const a = acc(r.path);
+    a.seen = true;
     if (r.severity === "loss" || r.severity === "risk") {
       const last = r.severity === "loss" ? "last_loss_ms" : "last_risk_ms";
       a[last] = Math.max(a[last] ?? r.ts_ms, r.ts_ms);
       if (r.severity === "loss") a.losses += 1;
       else a.risks += 1;
       a.counts[r.kind] = (a.counts[r.kind] || 0) + (AUDIO_ROW_COUNTED.has(r.kind) ? 1 : r.amount);
-    } else if (r.kind === "start") {
-      a.last_start = Math.max(a.last_start ?? r.ts_ms, r.ts_ms);
     } else if (r.kind === "checked") {
       a.checked += r.amount;
     } else if (r.kind === "blind") {
@@ -989,13 +1013,18 @@ function audioAnswerFromRows(rows, now, hours) {
       a.events.push({ ts_ms: r.ts_ms, kind: r.kind, severity: r.severity, amount: r.amount });
     }
   }
+  const anySeen = [...paths.values()].some((a) => a.seen);
+  const newer = (x, y) => (x === null ? y : y === null ? x : Math.max(x, y));
   const out = [...paths.values()]
     .sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0))
     .map((a) => ({
       path: a.path,
       detail: a.detail,
       live: a.live,
-      clean_since_ms: a.last_loss_ms ?? a.last_start ?? from,
+      clean_since_ms:
+        newer(marks.get(a.path)?.loss ?? null, a.last_loss_ms) ??
+        marks.get(a.path)?.start ??
+        (a.seen ? kept : now),
       last_loss_ms: a.last_loss_ms,
       last_risk_ms: a.last_risk_ms,
       losses: a.losses,
@@ -1012,7 +1041,21 @@ function audioAnswerFromRows(rows, now, hours) {
       worst = p.path;
     }
   }
-  return { now_ms: now, from_ms: from, hours, worst, truncated: false, paths: out };
+  const lossKept = [...marks.values()].map((m) => m.loss).filter((t) => t !== null);
+  const startKept = [...marks.values()].map((m) => m.start).filter((t) => t !== null);
+  const chainLoss = newer(lossKept.length ? Math.max(...lossKept) : null, newest);
+  const clean_since_ms =
+    chainLoss ?? (startKept.length ? Math.min(...startKept) : anySeen ? kept : now);
+  return {
+    now_ms: now,
+    from_ms: from,
+    hours,
+    kept_from_ms: kept,
+    clean_since_ms,
+    worst,
+    truncated: false,
+    paths: out,
+  };
 }
 app.post("/__mock/audio-faults", (req, res) => {
   const scenario = String((req.body || {}).scenario || "fixture");
