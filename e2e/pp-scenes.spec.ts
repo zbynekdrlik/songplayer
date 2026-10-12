@@ -204,8 +204,22 @@ test.describe("SP-program's restore after the PP gate (#229)", () => {
     expect(programRestoreTarget(4, [press], { source: -1, last_remote_cut: operator })).toBeNull();
   });
 
-  test("a program on another source than the gate's press left is not the gate's", () => {
-    expect(programRestoreTarget(-1, [press], { source: 7, last_remote_cut: ours })).toBeNull();
+  test("the gate's own press, still the latest switch, is the gate's wherever it landed", () => {
+    // Every switch through SongPlayer (facade, dashboard, Stream Deck)
+    // replaces last_remote_cut, so with the gate's own press still the
+    // latest one nobody moved the program since: a source other than the
+    // press's predicted one means the prediction was wrong, and the program
+    // still goes back to the start source.
+    expect(programRestoreTarget(-1, [press], { source: 7, last_remote_cut: ours })).toBe(-1);
+  });
+
+  test("12.10 on PP: a press that landed on SongPlayer's Blank still puts the start back", () => {
+    // 06:07 UTC: the gate cut sp-slow (4), then pressed "Blank" as its manual
+    // scene expecting "OBS manuál" (-1); since #245 that is SongPlayer's own
+    // black + silence (-2). The restore left the program silent until 08:24.
+    const blank = { scene: "Blank", sentAtMs: 2_000, source: -1 };
+    const landed = { scene: "Blank", action: "blank", at_ms: 2_050 };
+    expect(programRestoreTarget(7, [press, blank], { source: -2, last_remote_cut: landed })).toBe(7);
   });
 
   test("a lone refused press changed nothing: nothing to put back", () => {
