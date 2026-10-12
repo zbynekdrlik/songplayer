@@ -289,28 +289,67 @@ fn the_status_carries_every_fact_and_problem() {
 fn each_change_is_logged_once() {
     let edition = |e: &str| EnvProblem::EditionNotAllowed(e.to_string());
     let mut r = Reporter::default();
-    assert_eq!(r.step(&[]), LogStep::Holds);
-    assert_eq!(r.step(&[]), LogStep::Quiet);
-    assert_eq!(r.step(&[EnvProblem::DefenderRealtimeOn]), LogStep::Problems);
-    assert_eq!(r.step(&[EnvProblem::DefenderRealtimeOn]), LogStep::Quiet);
+    assert_eq!(r.step(&[], &[]), LogStep::Holds);
+    assert_eq!(r.step(&[], &[]), LogStep::Quiet);
+    assert_eq!(
+        r.step(&[EnvProblem::DefenderRealtimeOn], &[]),
+        LogStep::Problems
+    );
+    assert_eq!(
+        r.step(&[EnvProblem::DefenderRealtimeOn], &[]),
+        LogStep::Quiet
+    );
     let two = [
         EnvProblem::DefenderRealtimeOn,
         EnvProblem::FirewallOn(FirewallProfile::Public),
     ];
-    assert_eq!(r.step(&two), LogStep::Problems);
-    assert_eq!(r.step(&two), LogStep::Quiet);
-    assert_eq!(r.step(&[edition("Core")]), LogStep::Problems);
+    assert_eq!(r.step(&two, &[]), LogStep::Problems);
+    assert_eq!(r.step(&two, &[]), LogStep::Quiet);
+    assert_eq!(r.step(&[edition("Core")], &[]), LogStep::Problems);
     // The same code, another edition: a change.
-    assert_eq!(r.step(&[edition("Professional")]), LogStep::Problems);
-    assert_eq!(r.step(&[]), LogStep::Cleared);
-    assert_eq!(r.step(&[]), LogStep::Quiet);
+    assert_eq!(r.step(&[edition("Professional")], &[]), LogStep::Problems);
+    assert_eq!(r.step(&[], &[]), LogStep::Cleared);
+    assert_eq!(r.step(&[], &[]), LogStep::Quiet);
 }
 
 #[test]
 fn a_first_check_with_problems_logs_them() {
     let mut r = Reporter::default();
-    assert_eq!(r.step(&[EnvProblem::DefenderRealtimeOn]), LogStep::Problems);
-    assert_eq!(r.step(&[]), LogStep::Cleared);
+    assert_eq!(
+        r.step(&[EnvProblem::DefenderRealtimeOn], &[]),
+        LogStep::Problems
+    );
+    assert_eq!(r.step(&[], &[]), LogStep::Cleared);
+}
+
+/// Review finding 8: the same problems with another reason a fact could not
+/// be read is a change too (one WARN), and that reason staying is quiet.
+#[test]
+fn a_changed_read_error_is_warned_once() {
+    let unread = [EnvProblem::Unreadable(Unreadable::Defender)];
+    let timeout = ["the WMI check did not finish within 30s".to_string()];
+    let refused = ["Defender's status could not be read (0x80070005)".to_string()];
+    let mut r = Reporter::default();
+    assert_eq!(r.step(&unread, &timeout), LogStep::Problems);
+    assert_eq!(r.step(&unread, &timeout), LogStep::Quiet);
+    assert_eq!(r.step(&unread, &refused), LogStep::ReadErrors);
+    assert_eq!(r.step(&unread, &refused), LogStep::Quiet);
+    // A problem change wins over a reason change.
+    assert_eq!(r.step(&[], &timeout), LogStep::Cleared);
+    // No problem: a reason that goes (or comes) is still a change.
+    assert_eq!(r.step(&[], &[]), LogStep::ReadErrors);
+    assert_eq!(r.step(&[], &timeout), LogStep::ReadErrors);
+    assert_eq!(r.step(&[], &timeout), LogStep::Quiet);
+}
+
+#[test]
+fn a_first_check_logs_its_problems_whatever_its_read_errors() {
+    let why = ["ProductName is missing".to_string()];
+    assert_eq!(Reporter::default().step(&[], &why), LogStep::Holds);
+    assert_eq!(
+        Reporter::default().step(&[EnvProblem::DefenderRealtimeOn], &why),
+        LogStep::Problems
+    );
 }
 
 #[test]

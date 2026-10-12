@@ -24,7 +24,7 @@ use std::time::Duration;
 use sp_core::prod_env::{
     EnvProblem, EnvironmentStatus, FirewallProfile, FirewallState, Unreadable,
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// How often the box is checked again.
 pub const CHECK_EVERY: Duration = Duration::from_secs(60);
@@ -198,23 +198,40 @@ pub enum LogStep {
     Problems,
     /// The last problem cleared: one INFO.
     Cleared,
+    /// The same problems, but a reason a fact could not be read changed (or
+    /// a new one appeared, or one went): one WARN naming them.
+    ReadErrors,
 }
 
-/// Remembers the last check's problems, so each change is logged once.
+/// Remembers the last check's problems and read errors, so each change is
+/// logged once.
 #[derive(Debug, Default)]
 pub struct Reporter {
-    last: Option<Vec<EnvProblem>>,
+    last: Option<(Vec<EnvProblem>, Vec<String>)>,
 }
 
 impl Reporter {
     /// What this check logs, given the last one.
-    pub fn step(&mut self, problems: &[EnvProblem]) -> LogStep {
-        match self.last.replace(problems.to_vec()) {
-            None if problems.is_empty() => LogStep::Holds,
-            None => LogStep::Problems,
-            Some(last) if last.as_slice() == problems => LogStep::Quiet,
-            Some(_) if problems.is_empty() => LogStep::Cleared,
-            Some(_) => LogStep::Problems,
+    pub fn step(&mut self, problems: &[EnvProblem], read_errors: &[String]) -> LogStep {
+        let now = (problems.to_vec(), read_errors.to_vec());
+        let Some((last_problems, last_errors)) = self.last.replace(now) else {
+            return if problems.is_empty() {
+                LogStep::Holds
+            } else {
+                LogStep::Problems
+            };
+        };
+        if last_problems.as_slice() != problems {
+            return if problems.is_empty() {
+                LogStep::Cleared
+            } else {
+                LogStep::Problems
+            };
+        }
+        if last_errors.as_slice() != read_errors {
+            LogStep::ReadErrors
+        } else {
+            LogStep::Quiet
         }
     }
 }
@@ -245,7 +262,7 @@ pub fn global() -> &'static EnvStore {
 /// One check: publishes its status into `store` and logs what changed.
 pub fn apply(store: &EnvStore, reporter: &mut Reporter, check: &Check, now_ms: i64) -> LogStep {
     let (status, problems) = status_of(check, now_ms);
-    let step = reporter.step(&problems);
+    let step = reporter.step(&problems, &status.read_errors);
     log_step(step, &status, &problems);
     store.publish(status);
     step
@@ -276,7 +293,12 @@ fn log_step(step: LogStep, status: &EnvironmentStatus, problems: &[EnvProblem]) 
         }
         LogStep::Cleared => info!(
             edition = ?status.edition_id,
+            read_errors = ?status.read_errors,
             "production environment: holds again (every problem cleared)"
+        ),
+        LogStep::ReadErrors => warn!(
+            read_errors = ?status.read_errors,
+            "production environment: what could not be read changed"
         ),
     }
 }
