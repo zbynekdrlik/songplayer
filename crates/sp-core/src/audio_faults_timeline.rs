@@ -201,7 +201,10 @@ pub fn axis_ticks(from: i64, to: i64, offset_at: &dyn Fn(i64) -> i32) -> Vec<Tic
     let from_shift = shift(from);
     let local_from = from + from_shift;
     let rem = local_from.rem_euclid(step);
-    let first = local_from - rem + if rem > 0 { step } else { 0 };
+    // The whole step at or before the window's local start: the loop
+    // skips what falls before `from` anyway (a tick snapped with a later
+    // offset can too).
+    let first = local_from - rem;
     let days = step >= DAY_MS;
     let mut ticks: Vec<Tick> = Vec::new();
     for local in (0..MAX_TICKS).map(|k| first + k * step) {
