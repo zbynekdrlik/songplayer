@@ -782,3 +782,22 @@ def test_the_placed_dub_ends_with_its_last_voiced_output_not_the_drain_silence(
     assert (frames[26_400:28_800] == 1001).all()
     assert (frames[96_000:98_400] == 1002).all()
     assert (frames[28_800:96_000] == 0).all()
+
+
+def test_placed_length_takes_the_input_or_the_last_voiced_end():
+    # Two connections overlap: the OLD one's trailing voiced chunk ends later
+    # than the new one's last voiced chunk, so the latest voiced END counts,
+    # not the last voiced chunk in the list.
+    chunks = [
+        chunk(1.0, conn=1, n_samples=2400),
+        chunk(1.1, conn=2, n_samples=1000),
+        chunk(1.2, conn=2, n_samples=500, voiced=False),
+    ]
+    assert dw.placed_length(chunks, [10_000, 9_000, 12_000], 5_000) == 12_400
+    # Voiced output inside the input: the input's length.
+    assert dw.placed_length(chunks, [1_000, 2_000, 30_000], 20_000) == 20_000
+    # A silent chunk past everything never lengthens it; a dropped one
+    # (None) places nothing.
+    silent = [chunk(1.0, n_samples=2400, voiced=False), chunk(1.1, n_samples=2400)]
+    assert dw.placed_length(silent, [50_000, None], 20_000) == 20_000
+    assert dw.placed_length([], [], 7) == 7
