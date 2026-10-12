@@ -21,6 +21,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::playback::asio_format::AsioSample;
+use crate::playback::asio_loop::{LoopEvent, LoopStatus};
 use crate::playback::asio_out::{AsioSnapshot, AsioStatus, HardRecentre, LateCallback};
 use crate::playback::asio_state::Reason;
 use crate::playback::asrc_servo::Recentre;
@@ -67,6 +68,10 @@ pub struct WireStatus {
     pub late_callbacks: u64,
     pub fast_callbacks: u64,
     pub last_late_callback: Option<LateCallback>,
+    /// The loop check (`asio_loop.rs`), typed as it is (its words are
+    /// enums); off from a host that predates it.
+    #[serde(default)]
+    pub loop_status: LoopStatus,
 }
 
 /// `HardRecentre` on the pipe.
@@ -105,6 +110,22 @@ const STATES: [&str; 4] = [STATE_RUNNING, STATE_OPENING, STATE_WAITING, STATE_DI
 /// `x`, or 0 when it is not finite (JSON has no NaN).
 pub fn finite(x: f64) -> f64 {
     if x.is_finite() { x } else { 0.0 }
+}
+
+/// The loop check's status with every figure finite (JSON has no NaN).
+pub fn finite_loop(s: &LoopStatus) -> LoopStatus {
+    let event = |e: &LoopEvent| LoopEvent {
+        ago_s: finite(e.ago_s),
+        ..*e
+    };
+    LoopStatus {
+        gain_db: s.gain_db.map(|g| g.map(finite)),
+        checked_s: finite(s.checked_s),
+        blind_s: finite(s.blind_s),
+        last_event: s.last_event.as_ref().map(event),
+        recent: s.recent.iter().map(event).collect(),
+        ..s.clone()
+    }
 }
 
 /// The known state named `s`; an unknown one reads waiting.
@@ -187,6 +208,7 @@ impl WireSnapshot {
                     gap_ms: finite(l.gap_ms),
                     ago_s: finite(l.ago_s),
                 }),
+                loop_status: finite_loop(&t.loop_status),
             },
         }
     }
@@ -236,6 +258,7 @@ impl WireSnapshot {
                 late_callbacks: t.late_callbacks,
                 fast_callbacks: t.fast_callbacks,
                 last_late_callback: t.last_late_callback,
+                loop_status: t.loop_status,
             },
         }
     }

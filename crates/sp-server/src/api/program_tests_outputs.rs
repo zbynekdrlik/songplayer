@@ -299,7 +299,25 @@ async fn an_asio_entry_off_windows_waits_and_says_why() {
         "late_callbacks",
         "fast_callbacks",
         "last_late_callback",
+        "loop",
     ] {
         assert!(a.get(key).is_some(), "asio.{key}");
+    }
+    // #233 (the SoundGrid loop check): off for an entry that does not ask.
+    assert_eq!(a["loop"]["state"], "off");
+    assert_eq!(a["loop"]["recent"], serde_json::json!([]));
+    for key in [
+        "inputs",
+        "delay_frames",
+        "gain_db",
+        "checked_s",
+        "blind_s",
+        "mismatches",
+        "dropouts",
+        "slips",
+        "overflows",
+        "last_event",
+    ] {
+        assert!(a["loop"].get(key).is_some(), "asio.loop.{key}");
     }
 }

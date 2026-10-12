@@ -42,6 +42,14 @@
 //!   two buffer periods) and fast (under a quarter) ones counted
 //!   (`asio_state::callback_gap_kind`). Driver messages are answered by
 //!   `asio_state::reply` and counted for `poll`.
+//! - The loop check (#233, an entry with `asio.loop_check`,
+//!   `asio_loop.rs`): `start` also creates the buffers of the driver's
+//!   first `min(inputs, 8)` inputs (one supported sample type, else the
+//!   output plays unchecked, a WARN), and the buffer switch, after the
+//!   outputs, pushes what it wrote and each input read back
+//!   (`asio_format::read_channel`) into the run's taps — copies into
+//!   buffers allocated at start, both rings or neither (`LoopTaps::push`),
+//!   still no allocation, lock, log or syscall.
 
 use std::cell::UnsafeCell;
 use std::ffi::{CStr, c_long, c_void};
@@ -59,8 +67,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, TranslateMessage,
 };
 
-use crate::playback::asio_format::{AsioSample, fill_channel, source_of, unsupported_sample_text};
+use crate::playback::asio_format::{
+    AsioSample, fill_channel, read_channel, source_of, unsupported_sample_text,
+};
 use crate::playback::asio_hold::{DriverHold, DriverHolds};
+use crate::playback::asio_loop::{LoopTaps, MAX_LOOP_INPUTS, copy_played};
 use crate::playback::asio_out::{AsioDevice, AsioOut, Opened, Started, run_asio_worker};
 use crate::playback::asio_state::{
     DeviceEvents, GapKind, Reason, callback_gap_kind, registry_key_absent, reply,
@@ -85,6 +96,21 @@ struct Stream {
     sample: AsioSample,
     left: usize,
     right: usize,
+    /// The loop check's taps (an entry with `loop_check` whose driver
+    /// has inputs to tap); read only by this slot's callbacks.
+    taps: Option<UnsafeCell<StreamTaps>>,
+}
+
+/// A running stream's loop taps (`asio_loop.rs`): the rings' ends and
+/// the buffers one buffer switch fills (allocated at start).
+struct StreamTaps {
+    taps: LoopTaps,
+    /// The tapped inputs' two half-buffers, in input order.
+    inputs: Vec<[*mut c_void; 2]>,
+    sample: AsioSample,
+    /// What the outputs played (stereo), and the inputs (interleaved).
+    sent: Vec<f32>,
+    received: Vec<f32>,
 }
 
 /// A slot's stream pointer and counters (static: a message that comes before
@@ -234,6 +260,26 @@ fn on_buffer(slot: &Slot, second: bool) {
             let dst = unsafe { std::slice::from_raw_parts_mut(p.cast::<u8>(), bytes) };
             let source = source_of(ch, stream.left, stream.right);
             fill_channel(stream.sample, &scratch[..got], source, dst);
+        }
+        if let Some(cell) = stream.taps.as_ref() {
+            // SAFETY: only this slot's callbacks touch the taps, and one
+            // driver's callbacks never overlap.
+            let t = unsafe { &mut *cell.get() };
+            copy_played(&scratch[..got], &mut t.sent);
+            let k = t.inputs.len();
+            let in_bytes = stream.frames * t.sample.bytes();
+            for (ch, halves) in t.inputs.iter().enumerate() {
+                let p = halves[usize::from(second)];
+                let src: &[u8] = if p.is_null() {
+                    &[]
+                } else {
+                    // SAFETY: the driver's input half-buffer of `frames`
+                    // samples of its type, filled before this callback.
+                    unsafe { std::slice::from_raw_parts(p.cast::<u8>(), in_bytes) }
+                };
+                read_channel(t.sample, src, &mut t.received, ch, k);
+            }
+            t.taps.push(&t.sent, &t.received);
         }
         if got < want && slot.primed.load(Ordering::Relaxed) {
             slot.underruns.fetch_add(1, Ordering::Relaxed);
@@ -405,6 +451,8 @@ pub struct WinAsioDevice {
     /// A callback never left the stream: everything it may touch is kept
     /// (see the module doc) and the device opens nothing again.
     parked: bool,
+    /// The loop check's taps the next `start` takes.
+    pending_taps: Option<LoopTaps>,
     /// The thread's STA, for the device's whole life; declared last, so it
     /// drops last (after `Drop::drop` ran `close`, which releases the driver).
     com: ComApartment,
@@ -423,6 +471,7 @@ impl WinAsioDevice {
             buffers_created: false,
             started: false,
             parked: false,
+            pending_taps: None,
             com: ComApartment::enter(),
         }
     }
@@ -482,6 +531,28 @@ impl WinAsioDevice {
             out_channels,
             sample,
         })
+    }
+}
+
+impl WinAsioDevice {
+    /// The inputs a loop check taps: the driver's first `min(inputs, 8)`
+    /// and their one sample type; `None` when it has none, or they mix
+    /// sample types or use one this output cannot read.
+    fn loop_inputs(driver: &SafeHandle) -> Option<(usize, AsioSample)> {
+        let counts = driver.channel_counts().ok()?;
+        let k = usize::try_from(counts.in_)
+            .unwrap_or(0)
+            .min(MAX_LOOP_INPUTS);
+        let mut sample: Option<AsioSample> = None;
+        for index in 0..k as c_long {
+            let info = driver.channel_info(ChannelId { input: true, index }).ok()?;
+            let this = AsioSample::from_code(info.sample_type.0).ok()?;
+            if sample.is_some_and(|s| s != this) {
+                return None;
+            }
+            sample = Some(this);
+        }
+        sample.map(|s| (k, s))
     }
 }
 
@@ -560,16 +631,28 @@ impl AsioDevice for WinAsioDevice {
         SLOTS[slot].period.store(period, Ordering::SeqCst);
         self.slot = Some(slot);
         let frames = opened.buffer_frames as usize;
-        let ids = (0..opened.out_channels as c_long).map(|index| ChannelId {
-            input: false,
-            index,
+        // The loop check's inputs (none asked, or none to tap: none).
+        let tapped = self.pending_taps.take().and_then(|taps| {
+            let inputs = Self::loop_inputs(driver);
+            if inputs.is_none() {
+                warn!("asio output: the loop check has no input to tap (none, mixed or unsupported sample types) - the output plays unchecked");
+            }
+            inputs.map(|(k, sample)| (taps, k, sample))
         });
+        let k = tapped.as_ref().map_or(0, |t| t.1);
+        let ids = (0..opened.out_channels as c_long)
+            .map(|index| ChannelId {
+                input: false,
+                index,
+            })
+            .chain((0..k as c_long).map(|index| ChannelId { input: true, index }));
         // SAFETY: CALLBACKS is a static, so it outlives the buffers; the
         // buffers are written only by this slot's callback (between start and
         // stop) and are zeroed below before the start.
         let created = unsafe { driver.create_buffers(ids, frames as c_long, &CALLBACKS[slot]) }
             .map_err(|e| failed(driver, "createBuffers", e))?;
-        let buffers: Vec<[*mut c_void; 2]> = created.collect();
+        let mut buffers: Vec<[*mut c_void; 2]> = created.collect();
+        let inputs = buffers.split_off((opened.out_channels as usize).min(buffers.len()));
         self.buffers_created = true;
         let bytes = frames * opened.sample.bytes();
         for half in buffers.iter().flatten().filter(|p| !p.is_null()) {
@@ -585,6 +668,15 @@ impl AsioDevice for WinAsioDevice {
             sample: opened.sample,
             left: self.channels[0],
             right: self.channels[1],
+            taps: tapped.map(|(taps, k, sample)| {
+                UnsafeCell::new(StreamTaps {
+                    taps,
+                    inputs,
+                    sample,
+                    sent: vec![0.0; frames * 2],
+                    received: vec![0.0; frames * k],
+                })
+            }),
         }));
         self.stream = stream;
         SLOTS[slot].stream.store(stream, Ordering::SeqCst);
@@ -592,6 +684,7 @@ impl AsioDevice for WinAsioDevice {
         self.started = true;
         Ok(Started {
             output_latency_frames: self.output_latency_frames(),
+            loop_inputs: k as u32,
         })
     }
 
@@ -644,7 +737,13 @@ impl AsioDevice for WinAsioDevice {
             .map_or(0, |l| u32::try_from(l.out).unwrap_or(0))
     }
 
+    fn tap_loop(&mut self, taps: LoopTaps) {
+        self.pending_taps = Some(taps);
+    }
+
     fn close(&mut self) {
+        // Taps a start never took go now (a running stream's go with it).
+        self.pending_taps = None;
         if self.parked {
             return;
         }
