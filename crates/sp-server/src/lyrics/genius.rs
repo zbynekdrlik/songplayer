@@ -90,13 +90,15 @@ pub async fn fetch_lyrics(
     fetch_lyrics_at(client, GENIUS_SEARCH_URL, access_token, artist, song).await
 }
 
-/// [`fetch_lyrics`] against `search_url`. `Ok(None)` is "Genius has no song
-/// of this artist": no token configured, an empty artist or song, or no
-/// artist-matched song hit. #232: everything that keeps Genius from
-/// answering is an `Err` naming why, so the probe (and the live gate) shows
-/// it: a refused search (401 a revoked token, 403 blocked, 429 limited), an
-/// unreadable search answer, a refused song page, or a matched page with no
-/// lyric (a changed page layout).
+/// [`fetch_lyrics`] against `search_url`. `Ok(None)` is "Genius has no
+/// lyric of this song": no token configured, an empty artist or song, no
+/// artist-matched song hit, or a matched page Genius has not transcribed yet
+/// (its own placeholder, [`is_untranscribed_page`]). #232: everything that
+/// keeps Genius from answering is an `Err` naming why, so the probe (and the
+/// live gate) shows it: a refused search (401 a revoked token, 403 blocked,
+/// 429 limited), an unreadable search answer, a refused song page, or a
+/// matched page with neither a lyric nor the placeholder (a changed page
+/// layout).
 pub(crate) async fn fetch_lyrics_at(
     client: &Client,
     search_url: &str,
@@ -137,15 +139,36 @@ pub(crate) async fn fetch_lyrics_at(
         return Ok(None);
     };
     match fetch_page_lyrics(client, &hit_url).await? {
-        Some(track) => Ok(Some(track)),
-        None => anyhow::bail!("Genius song page holds no lyric: {hit_url}"),
+        PageLyrics::Lyric(track) => Ok(Some(track)),
+        PageLyrics::NotTranscribed => {
+            debug!(%hit_url, "Genius: the song page has no transcribed lyric yet");
+            Ok(None)
+        }
+        PageLyrics::Missing => anyhow::bail!("Genius song page holds no lyric: {hit_url}"),
     }
 }
 
-/// Fetch one public Genius song page and extract its lyric. `Ok(None)` for a
-/// page with no lyric container; a refused page is an `Err` naming its
-/// status (#232).
-async fn fetch_page_lyrics(client: &Client, url: &str) -> Result<Option<LyricsTrack>> {
+/// What one Genius song page holds (#232).
+#[derive(Debug, PartialEq)]
+enum PageLyrics {
+    Lyric(LyricsTrack),
+    /// Genius's own placeholder: the lyric is not transcribed yet.
+    NotTranscribed,
+    /// Neither a lyric container nor the placeholder: a changed layout.
+    Missing,
+}
+
+/// Whether a song page shows Genius's placeholder for a song whose lyric is
+/// not transcribed yet ("Lyrics for this song have yet to be transcribed").
+/// The class attribute, not the text: the page's style sheet names the class
+/// too, but only a rendered placeholder carries it as `class="…"`.
+pub(crate) fn is_untranscribed_page(html: &str) -> bool {
+    html.contains("class=\"LyricsPlaceholder__")
+}
+
+/// Fetch one public Genius song page and extract its lyric. A refused page
+/// is an `Err` naming its status (#232).
+async fn fetch_page_lyrics(client: &Client, url: &str) -> Result<PageLyrics> {
     debug!(%url, "Genius: fetching lyrics page");
     let page_resp = client
         .get(url)
@@ -159,7 +182,11 @@ async fn fetch_page_lyrics(client: &Client, url: &str) -> Result<Option<LyricsTr
     }
 
     let html = page_resp.text().await?;
-    Ok(extract_lyrics_from_html(&html))
+    Ok(match extract_lyrics_from_html(&html) {
+        Some(track) => PageLyrics::Lyric(track),
+        None if is_untranscribed_page(&html) => PageLyrics::NotTranscribed,
+        None => PageLyrics::Missing,
+    })
 }
 
 /// Genius song pages fetched per title search (#144): each hit is one page
@@ -215,12 +242,12 @@ pub(crate) async fn search_by_title_at(
     let mut hits = Vec::new();
     for (url, artist) in title_hit_pages(&body) {
         match fetch_page_lyrics(client, &url).await {
-            Ok(Some(lyrics)) => hits.push(GeniusTitleHit {
+            Ok(PageLyrics::Lyric(lyrics)) => hits.push(GeniusTitleHit {
                 url,
                 artist,
                 lyrics,
             }),
-            Ok(None) => debug!(%url, "Genius: title hit page holds no lyric"),
+            Ok(_) => debug!(%url, "Genius: title hit page holds no lyric"),
             Err(e) => warn!(%url, error = %e, "Genius: title hit page fetch failed"),
         }
     }
