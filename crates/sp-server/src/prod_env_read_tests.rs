@@ -351,9 +351,15 @@ fn a_wmi_read_that_did_not_finish_leaves_the_registry_facts() {
     // The registry decides the firewall while the active store is not read.
     assert_eq!(facts.firewall, [Some(false); 3]);
     assert_eq!(facts.defender_realtime, None);
+    // Defender stays unread: the fixture's WinDefend service runs (state 4),
+    // so the service manager cannot say it is off (finding 3's fallback).
     assert_eq!(
         facts.read_errors,
-        [format!("{why}: the registry decided"), why]
+        [
+            format!("{why}: the registry decided"),
+            format!("{why}; the WinDefend service is not stopped (state 4)"),
+            why,
+        ]
     );
 }
 
