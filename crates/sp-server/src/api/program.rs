@@ -352,6 +352,9 @@ mod tests_max;
 #[path = "program_tests_outputs.rs"]
 mod tests_outputs;
 #[cfg(test)]
+#[path = "program_tests_quiesce.rs"]
+mod tests_quiesce;
+#[cfg(test)]
 #[path = "program_tests_switch.rs"]
 mod tests_switch;
 #[cfg(test)]
