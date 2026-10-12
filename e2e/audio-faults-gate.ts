@@ -1,0 +1,90 @@
+/**
+ * #257: the post-deploy audio gate on the audio fault ledger. The owner
+ * (12.10.2026): "akékoľvek puknutie, strata samplu je neakceptovateľná" —
+ * any fault of any audio path inside a post-deploy audio window fails the
+ * deploy, on SNV and PP.
+ *
+ * SongPlayer records every audio path's faults (`GET /api/v1/audio/faults`,
+ * the persisted ledger; `.claude/rules/audio-faults.md`). A post-deploy
+ * audio spec opens its window by reading the answer's `now_ms` (the
+ * server's clock, once its outputs run), does its work, waits one ledger
+ * tick (`LEDGER_SETTLE_MS`: a counter's step is written at the next 5 s
+ * tick), reads again and fails on any `loss` row stamped at or after the
+ * window's start; `risk` rows are logged. These pure helpers make the
+ * decision (unit-tested in the mock suite, `audio-faults-gate.spec.ts`).
+ */
+
+/** One row of a path's answer. */
+export interface FaultEvent {
+  ts_ms: number;
+  kind: string;
+  severity: string;
+  amount: number;
+}
+
+/** One audio path of the answer. */
+export interface PathFaults {
+  path: string;
+  detail: string;
+  live: boolean;
+  clean_since_ms: number;
+  last_loss_ms: number | null;
+  last_risk_ms: number | null;
+  counts: Record<string, number>;
+  events: FaultEvent[];
+  loop?: { checked_s: number; blind_s: number };
+}
+
+/** `GET /api/v1/audio/faults?hours=N`. */
+export interface FaultsAnswer {
+  now_ms: number;
+  from_ms: number;
+  hours: number;
+  worst: string | null;
+  truncated: boolean;
+  paths: PathFaults[];
+}
+
+/** The gate reads the last hour (a spec file runs minutes, never an hour). */
+export const FAULTS_URL = "/api/v1/audio/faults?hours=1";
+
+/** The ledger writes a counter's step at its next tick (every 5 s): the
+ * gate waits one tick and a second more after its window's work before
+ * the last read. An absence cannot be polled for, so this is one bounded
+ * settle, not a poll. */
+export const LEDGER_SETTLE_MS = 6000;
+
+/** A row's time, readable in the log. */
+function at(ms: number): string {
+  return new Date(ms).toISOString();
+}
+
+/** The rows of `severity` stamped at or after `startMs`, one line each. */
+function rowsSince(path: PathFaults, severity: string, startMs: number): string[] {
+  return path.events
+    .filter((e) => e.severity === severity && e.ts_ms >= startMs)
+    .map((e) => `${e.kind} ×${e.amount} at ${at(e.ts_ms)}`);
+}
+
+/** Why the window from `startMs` fails: a line per path with a `loss` row in
+ * it (its last loss, and its loss rows when the answer still lists them), and
+ * an answer that does not cover the window. Empty = no sample lost. */
+export function audioFaultFailures(answer: FaultsAnswer, startMs: number): string[] {
+  const failures: string[] = [];
+  if (answer.from_ms > startMs) {
+    failures.push(`the answer starts at ${at(answer.from_ms)}, after the window (${at(startMs)})`);
+  }
+  for (const p of answer.paths) {
+    if (p.last_loss_ms === null || p.last_loss_ms < startMs) continue;
+    const rows = rowsSince(p, "loss", startMs);
+    const listed = rows.length > 0 ? rows.join(", ") : "(its rows are past the answer's 500 events)";
+    failures.push(`${p.path} (${p.detail}): a loss at ${at(p.last_loss_ms)}: ${listed}`);
+  }
+  return failures;
+}
+
+/** The `risk` rows stamped at or after `startMs`, one line each (logged,
+ * never a failure). */
+export function audioFaultRisks(answer: FaultsAnswer, startMs: number): string[] {
+  return answer.paths.flatMap((p) => rowsSince(p, "risk", startMs).map((r) => `${p.path} (${p.detail}): ${r}`));
+}
