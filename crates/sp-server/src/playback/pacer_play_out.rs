@@ -31,7 +31,7 @@ use crate::playback::ndi_health::AudioStats;
 /// The most standby boundaries a play-out serves: the one a song end always
 /// served, plus one per block the grid's 2 s cap can hold (60 of 1600
 /// samples). It never cuts a play-out short.
-const PLAY_OUT_MAX_BOUNDARIES: usize = 1;
+const PLAY_OUT_MAX_BOUNDARIES: usize = 61;
 
 impl Pacer {
     /// The decoder handed out the song's last audio sample (#257): a block cut

@@ -228,6 +228,9 @@ impl AudioGridBuffer {
     /// missing. Before that it is an underrun: at the start of the map while
     /// no full block has played yet, else mid-song.
     fn note_shortfall(&mut self) {
+        if self.source_ended {
+            return;
+        }
         if self.flowing {
             self.underruns_mid += 1;
         } else {
