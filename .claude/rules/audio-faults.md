@@ -3,6 +3,7 @@ paths:
   - "crates/sp-server/src/audio_faults/**"
   - "crates/sp-server/src/api/audio_faults*.rs"
   - "crates/sp-server/src/db/mod_tests_v38.rs"
+  - "crates/sp-server/src/db/mod_tests_v39.rs"
   - "crates/sp-server/src/playback/program_bus_window*.rs"
   - "crates/sp-decoder/src/peak_limiter*.rs"
   - "e2e/audio-faults-gate*.ts"
@@ -25,10 +26,12 @@ history per stage). Lane 1 = the ledger, the API, the gate; lane 2 = the UI
 (HealthBar segment + per-path rows); lane 3 = more loops (Dante DVS tx→rx,
 VBAN receive side), box work.
 
-## The table (V38) and the writer
+## The table (V38, V39) and the writer
 
 - `audio_faults(ts_ms, path, kind, severity, amount, detail)`, indexes on
-  `(ts_ms)` and `(path, ts_ms)`. `severity` = `loss` | `risk` | `info` (a
+  `(ts_ms)` and `(path, ts_ms)` (V38) and `(severity, path, ts_ms)` (V39,
+  lane 2: `store::clean_marks` reads the loss and start rows only, never a
+  loop check's meters). `severity` = `loss` | `risk` | `info` (a
   path's start) | `meter` (a loop check's checked / blind ms). Kept 90 days
   (`RETENTION_MS`), pruned at the first tick and then once a day.
 - ONE task (`audio_faults::run`, started in `start_program`, every
@@ -123,9 +126,10 @@ mix (`Pair::Mix`: a fade's sum is the crossfade's own) on
 `GET /api/v1/audio/faults?hours=N` (1..=2160, default 24; anything else —
 `0`, `2161`, `+5`, `1.5`, empty — is a 400 with the fixed text
 `HOURS_REFUSAL`, never the value sent; a store error a 500 naming why) →
-`{now_ms, from_ms, hours, worst, truncated, paths[{path, detail, live,
-clean_since_ms, last_loss_ms, last_risk_ms, counts{kind: n}, events[{ts_ms,
-kind, severity, amount}], loop?{checked_s, blind_s}}]}`:
+`{now_ms, from_ms, hours, kept_from_ms, clean_since_ms, worst, truncated,
+paths[{path, detail, live, clean_since_ms, last_loss_ms, last_risk_ms,
+losses, risks, counts{kind: n}, events[{ts_ms, kind, severity, amount}],
+loop?{checked_s, blind_s}}]}`:
 
 - the paths: every path that runs now (`probe::live_paths`, its own name)
   and every path with a row in the window (its newest row's `detail`);
@@ -134,10 +138,19 @@ kind, severity, amount}], loop?{checked_s, blind_s}}]}`:
   (`probe::watched`), so they have no row and no live path (review round
   1, 🔵 13; one predicate at the source instead of a filter in three
   queries);
-- `clean_since_ms` = the path's last `loss` row in the window, else its
-  latest `start` row in it, else the window's start (#257 acceptance: after
-  a deploy it still reads the last REAL fault); `last_loss_ms` is what the
-  gate reads;
+- `clean_since_ms` — **a planned restart is no fault** (the main
+  session's ruling on #257: the owner asks how long the audio has been free
+  of losses): the path's newest `loss` row the ledger KEEPS (90 days),
+  looked up BEYOND the asked window (`store::clean_marks` over
+  `kept_from(now)`, ONE extra grouped query on V39's index, the window's
+  own losses too), else its FIRST `start` row kept (never the latest: a
+  deploy does not reset it), else `kept_from_ms` when the window has rows
+  of the path (its start was pruned: clean for all the ledger keeps), else
+  now (the ledger has not seen it yet: no claim). `interrupted` stays a
+  loss. The answer's own `clean_since_ms` is the whole CHAIN's: the newest
+  loss of ANY path kept (a path gone since counts), else the first start
+  kept, else the same fallback. `kept_from_ms` = now − 90 d. `last_loss_ms`
+  and `worst` stay the window's (the gate reads `last_loss_ms`);
 - `losses` / `risks` (lane 2) = the window's loss / risk ROWS: each one
   fault recorded at its time (a counter that grew in one tick, an event, a
   state that began). This is the dashboard's "N chýb", never `counts`
@@ -159,8 +172,9 @@ the dashboard reads the very type the server writes. A new field takes
 
 The mock (`e2e/mock-api.mjs`) serves a FIXED fixture by default (program and
 `pipeline:1` clean, FOH one `late_packet`, SoundGrid `out:out-2` two
-underruns = worst, `loop:out-2` 3540 / 60 s) with the server's `hours`
-rule and refusal text; the gate's mock test pins it. Lane 2's scenarios
+underruns = worst, `loop:out-2` 3540 / 60 s; `kept_from_ms` and the chain's
+`clean_since_ms` = that loss) with the server's `hours` rule and refusal
+text; the gate's mock test pins it. Lane 2's scenarios
 (below) replace it until `/__mock/audio-faults-reset`.
 
 ## The gate (`e2e/audio-faults-gate.ts` pure, `e2e/audio-faults-read.ts` the box reads)
@@ -204,11 +218,13 @@ every service, so it is at first glance; the details are one click away.
   | `ok` | `risk` | `loss` | `recent` (`sp_core::audio_faults::level`, from
   the 24 h answer, against the answer's own `now_ms`, never the browser's
   clock):
-  - no loss: green `Zvuk: bez chyby 2 h 14 min` = since the OLDEST
-    `clean_since` of the live paths (`chain_clean_since`), rounded down
-    (`menej ako minútu`, `3 d 4 h`); clean for the whole window = `Zvuk:
-    bez chyby viac ako 24 h`; risks only: the same green text and a
-    `health-audio-risks` ` · riziká: N` (a risk is no loss, never hidden);
+  - no loss in the 24 h: green `Zvuk: bez chyby 3 d 4 h` = since the
+    answer's own (the chain's) `clean_since_ms`, ACROSS deploys (a loss
+    before the window counts, a restart never resets it), rounded down
+    (`menej ako minútu`, `2 h 14 min`, `3 d 4 h`; `clean_span_sk`); clean
+    for all the ledger keeps = `Zvuk: bez chyby viac ako 90 d`; risks only:
+    the same green text and a `health-audio-risks` ` · riziká: N` (a risk
+    is no loss, never hidden);
   - a loss: amber `Zvuk: 3 chyby za 24 h · posledná pred 5 min · <path>`
     (the losses' rows, the worst path = the newest loss), red when it is
     under `RECENT_MS` = 10 min old (10 min itself is amber);
@@ -217,18 +233,22 @@ every service, so it is at first glance; the details are one click away.
   flex item), windows `audio-window` `data-hours` 1 / 24 / 168 / 720 (24 h
   = the segment's own answer, no second request):
   - a row per path (`audio-path-row`, `data-path`) in `row_order`
-    (program, each output then its loop, pipelines by id, the rest): its
-    name (`Program`, the output's configured name, `Slučka – <output>`, the
-    playlist's name or `Playlist <id>`, ` (nebeží)` when not live), losses
-    / risks in Slovak plural (`has-loss` / `has-risk`), `bez chyby od
-    12.10. 14:05 (2 h 14 min)` or `… viac ako <window>`, a loop's
-    `skontrolované 59 min · ticho 1 min`;
+    (program, the NDI input, each output then its loop, pipelines by id,
+    the rest): its name (`Program`, `Vstup OBS manuál`, the output's
+    configured name, `Slučka – <output>`, the playlist's name or
+    `Playlist <id>`, ` (nebeží)` when not live), losses / risks in Slovak
+    plural (`has-loss` / `has-risk`), `bez chyby od 9.10. 14:05 (3 d 4 h)`
+    (its own `clean_since_ms`, beyond the window) or `bez chyby viac ako
+    90 d`, a loop's `skontrolované 59 min · ticho 1 min`;
   - a timeline per row: an SVG of `BUCKETS` = 60 buckets, bucket i =
     `[from + ⌈i·span/60⌉, …)` so an instant's bucket is `⌊(t − from)·60 /
     span⌋` exactly; a bar (`audio-bar`, `data-loss` / `data-risk`) only for
     a bucket with a loss or risk ROW, loss red at the bottom, risk amber on
     it, to scale against the panel's largest bucket, a part that is not
-    empty at least `MIN_BAR` = 2 of 24 units; one shared axis
+    empty at least `MIN_BAR` = 2 of 24 units; each `start` row in the
+    window a dashed MARK at its exact place (`audio-start-mark`, `data-ts`,
+    tooltip `spustenie 12.10. 14:05:07`; `start_marks`), never a bar (an
+    `interrupted` restart is a loss and has its bar); one shared axis
     (`audio-axis-tick`) on whole LOCAL times (10 min, 1 h, 3 h, midnights,
     every 5th midnight), the zone's offset now;
   - the event list (`audio-fault-event`, `data-ts` / `data-path` /
@@ -236,6 +256,10 @@ every service, so it is at first glance; the details are one click away.
     first, one instant's rows in row order; time `12.10. 14:05:07`, the
     path's name, the kind in Slovak (`kind_sk`, an unknown kind as sent),
     the amount in its unit (`×2`; a count of 1 nothing; µs as `12,5 ms`;
+    lane 1's kinds `coalesced` "zahodený blok programu", `interrupted`
+    "prerušenie", `fast_callback` "predčasné volanie", `overload`
+    "preťaženie", `no_source` "bez zdroja", `unsupported` "nepodporovaný
+    formát";
     frames as ms at the path's rate: the program's 48 kHz, an output's
     driver / output rate from `GET /api/v1/program` read when the panel
     opens, else `480 vzoriek`). A keyed `<For>` (the key holds every shown
@@ -255,9 +279,13 @@ every service, so it is at first glance; the details are one click away.
   and the mock E2E `e2e/health-audio-faults.spec.ts` (Europe/Bratislava):
   `POST /__mock/audio-faults {scenario, delay_ms}` — `clean`, `risk`,
   `recent` (a loss 3 min ago on SoundGrid, losses 40 min and 5 h ago, two
-  FOH risks), `old` (one program loss 3 h ago); every live path started
-  2 h 14 min 30 s ago, offsets mid-minute so a minute text holds 30 s; the
-  mock answers a scenario's rows as `build_answer` does (any window).
+  FOH risks), `old` (one program loss 3 h ago), `restart` (every path first
+  started 10 d ago, a program loss 3 d 4 h ago, a deploy 2 h 14 min ago:
+  "Zvuk: bez chyby 3 d 4 h"); the live paths are program, `input`, FOH,
+  SoundGrid + its loop and `pipeline:1`; every live path (re)started 2 h
+  14 min 30 s ago, offsets mid-minute so a minute text holds 30 s; the mock
+  answers a scenario's rows as `build_answer` does (any window, the clean
+  times over its 90 days).
   Reset with `/__mock/audio-faults-reset` in `beforeEach` / `afterEach`.
 - **Post-deploy** (`e2e/post-deploy-audio-faults-ui.spec.ts`, SNV's suite
   and PP's subset, read-only): one `?hours=24` read of the box's ledger, then
@@ -269,6 +297,11 @@ every service, so it is at first glance; the details are one click away.
   reads the time since the last real fault") is read from that line.
 
 ## Decisions (review round 1; the main session may revisit)
+
+- `clean_since_ms` never restarts at a deploy (the main session's ruling,
+  lane 2 merge round): a planned restart is no fault; only a loss (an
+  `interrupted` one included) or the ledger's first sight of a path bounds
+  it, looked up over the 90 days kept. A start is drawn as a mark.
 
 - `coalesced` is a LOSS (the sender dropped the oldest unsent boundary,
   `submit_handoff.rs`; it never reached VBAN or NDI). `late_dropped` stays
