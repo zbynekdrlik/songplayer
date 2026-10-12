@@ -705,3 +705,80 @@ def test_the_overlap_cap_covers_every_later_connection():
         {"t_ms": 7500, "text": "late2 "},
         {"t_ms": 7500, "text": "N3 "},
     ]
+
+
+# ── #257: no drain silence past the content ────────────────────────────────────
+
+
+def test_the_placed_dub_ends_with_its_last_voiced_output_not_the_drain_silence(
+    tmp_path, monkeypatch
+):
+    # The session drains until 8 s with no voiced output and streams silence
+    # meanwhile. A dub on SNV ran 7.8 s past its video, all of it that drain
+    # silence, and the player cut it at the video's end (one `underrun_end`
+    # at every end, #257). The placed WAV now ends at the input's length or
+    # the last VOICED chunk, whichever is later: here the last voiced chunk
+    # (arrival 17.0 s, video 4.0 s) runs 1.1 s past the 3 s input, and the
+    # three silent drain chunks after it are not part of the dub.
+    import numpy as np
+
+    silence = np.zeros(16000, dtype="<i2").tobytes()
+    speech = np.full(32000, 4000, dtype="<i2").tobytes()
+    monkeypatch.setattr(dw, "_decode_input", lambda audio: silence + speech)
+
+    def fake_session(frames, model, voice, work_dir, sink, events):
+        state = dls.SessionState(frames_sent=len(frames), t0_s=10.0)
+        state.drain_end_reason = "quiet"
+        timeline = [
+            (14.0, True),
+            (14.1, True),
+            (17.0, True),  # the last voiced output: video 4.0-4.1 s
+            (17.1, False),  # the drain's streamed silence
+            (17.2, False),
+            (17.3, False),
+        ]
+        for i, (arrival, voiced) in enumerate(timeline):
+            data = np.full(2400, 1000 + i if voiced else 3, dtype="<i2").tobytes()
+            state.chunks.append(
+                dls.OutputChunk(
+                    arrival_s=arrival,
+                    conn=1,
+                    offset=sink.append(data),
+                    n_bytes=len(data),
+                    voiced=voiced,
+                    active=True,
+                )
+            )
+        return state
+
+    placed = {}
+
+    def fake_assemble(audio, wav, out_path, work_dir):
+        with wave.open(wav, "rb") as w:
+            placed["frames"] = np.frombuffer(
+                w.readframes(w.getnframes()), dtype="<i2"
+            ).copy()
+        with open(out_path, "w") as f:
+            f.write("DUB")
+        return {}
+
+    monkeypatch.setattr(dw, "_run_session", fake_session)
+    monkeypatch.setattr(dw, "_assemble_dub", fake_assemble)
+    args = SimpleNamespace(
+        audio="vocals.flac",
+        out=str(tmp_path / "x_dub.flac"),
+        transcripts=str(tmp_path / "x_dub_transcripts.json"),
+        work_dir=str(tmp_path / "w"),
+        model=dw.MODEL,
+        voice="speaker",
+    )
+    dw.cmd_live_translate(args)
+
+    frames = placed["frames"]
+    # latency = (14.0 - 10.0) s - the 1.0 s input onset = 3 s: the last voiced
+    # chunk lands at 4.0 s and ends at 4.1 s = 98 400 samples at 24 kHz.
+    assert frames.size == 98_400
+    assert (frames[24_000:26_400] == 1000).all()
+    assert (frames[26_400:28_800] == 1001).all()
+    assert (frames[96_000:98_400] == 1002).all()
+    assert (frames[28_800:96_000] == 0).all()
