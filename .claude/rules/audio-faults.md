@@ -7,6 +7,11 @@ paths:
   - "crates/sp-decoder/src/peak_limiter*.rs"
   - "e2e/audio-faults-gate*.ts"
   - "e2e/post-deploy-audio-*.spec.ts"
+  - "crates/sp-core/src/audio_faults*.rs"
+  - "sp-ui/src/components/audio_faults.rs"
+  - "sp-ui/src/components/health_bar.rs"
+  - "e2e/health-audio-faults.spec.ts"
+  - "e2e/mock-api.mjs"
 ---
 
 # The audio fault ledger (#257)
@@ -98,6 +103,10 @@ kind, severity, amount}], loop?{checked_s, blind_s}}]}`:
   latest `start` row in it, else the window's start (#257 acceptance: after
   a deploy it still reads the last REAL fault); `last_loss_ms` is what the
   gate reads;
+- `losses` / `risks` (lane 2) = the window's loss / risk ROWS: each one
+  fault recorded at its time (a counter that grew in one tick, an event, a
+  state that began). This is the dashboard's "N chýb", never `counts`
+  (a kind measured in frames, `overflow` / `limited`, sums frames there);
 - `counts` = loss and risk faults per kind: a counter's steps summed, ONE
   per event or state row (`model::row_counted`: `late_packet`, `host_down`,
   `mismatch`, `dropout`, `slip`, `no_return` — their amount is a
@@ -108,10 +117,16 @@ kind, severity, amount}], loop?{checked_s, blind_s}}]}`:
 - `loop` on every `loop:` path (0 with no meter);
 - `worst` = the path with the most recent loss (`null`: none).
 
-The mock (`e2e/mock-api.mjs`) serves a FIXED fixture (program and
+The answer's structs are `sp_core::audio_faults`'s (`FaultsAnswer`,
+`PathFaults`, `FaultEvent`, `LoopSeconds`, re-exported by `answer.rs`):
+the dashboard reads the very type the server writes. A new field takes
+`#[serde(default)]` there.
+
+The mock (`e2e/mock-api.mjs`) serves a FIXED fixture by default (program and
 `pipeline:1` clean, FOH one `late_packet`, SoundGrid `out:out-2` two
 underruns = worst, `loop:out-2` 3540 / 60 s) with the server's `hours`
-rule and refusal text, for lane 2's UI.
+rule and refusal text; the gate's mock test pins it. Lane 2's scenarios
+(below) replace it until `/__mock/audio-faults-reset`.
 
 ## The gate (`e2e/audio-faults-gate.ts`)
 
@@ -132,6 +147,72 @@ A spec that adds an output inside the window must take it away before its
 receiver goes: the 96 kHz probe (`e2e-96k` to a loopback socket) waits
 until `outputs[]` no longer lists it, THEN closes its socket — a VBAN send
 to a closed port is a `send_error`, a loss that would fail the window.
+
+## The dashboard (lane 2: `sp_core::audio_faults*`, `sp-ui` `audio_faults.rs`)
+
+The owner's frequency rule (#248 ROZHODNUTÉ): the chain's health is used
+every service, so it is at first glance; the details are one click away.
+
+- **First glance: ONE HealthBar segment** right after WS, a `<button>`
+  `health-audio` with `data-level` = `unknown` (no answer yet, or no path)
+  | `ok` | `risk` | `loss` | `recent` (`sp_core::audio_faults::level`, from
+  the 24 h answer, against the answer's own `now_ms`, never the browser's
+  clock):
+  - no loss: green `Zvuk: bez chyby 2 h 14 min` = since the OLDEST
+    `clean_since` of the live paths (`chain_clean_since`), rounded down
+    (`menej ako minútu`, `3 d 4 h`); clean for the whole window = `Zvuk:
+    bez chyby viac ako 24 h`; risks only: the same green text and a
+    `health-audio-risks` ` · riziká: N` (a risk is no loss, never hidden);
+  - a loss: amber `Zvuk: 3 chyby za 24 h · posledná pred 5 min · <path>`
+    (the losses' rows, the worst path = the newest loss), red when it is
+    under `RECENT_MS` = 10 min old (10 min itself is amber);
+  - the tooltip counts the window's losses and risks.
+- **One click: the panel** `audio-faults-panel` under the bar (a full-width
+  flex item), windows `audio-window` `data-hours` 1 / 24 / 168 / 720 (24 h
+  = the segment's own answer, no second request):
+  - a row per path (`audio-path-row`, `data-path`) in `row_order`
+    (program, each output then its loop, pipelines by id, the rest): its
+    name (`Program`, the output's configured name, `Slučka – <output>`, the
+    playlist's name or `Playlist <id>`, ` (nebeží)` when not live), losses
+    / risks in Slovak plural (`has-loss` / `has-risk`), `bez chyby od
+    12.10. 14:05 (2 h 14 min)` or `… viac ako <window>`, a loop's
+    `skontrolované 59 min · ticho 1 min`;
+  - a timeline per row: an SVG of `BUCKETS` = 60 buckets, bucket i =
+    `[from + ⌈i·span/60⌉, …)` so an instant's bucket is `⌊(t − from)·60 /
+    span⌋` exactly; a bar (`audio-bar`, `data-loss` / `data-risk`) only for
+    a bucket with a loss or risk ROW, loss red at the bottom, risk amber on
+    it, to scale against the panel's largest bucket, a part that is not
+    empty at least `MIN_BAR` = 2 of 24 units; one shared axis
+    (`audio-axis-tick`) on whole LOCAL times (10 min, 1 h, 3 h, midnights,
+    every 5th midnight), the zone's offset now;
+  - the event list (`audio-fault-event`, `data-ts` / `data-path` /
+    `data-severity`): every loss and risk row (no start, no meter), newest
+    first, one instant's rows in row order; time `12.10. 14:05:07`, the
+    path's name, the kind in Slovak (`kind_sk`, an unknown kind as sent),
+    the amount in its unit (`×2`; a count of 1 nothing; µs as `12,5 ms`;
+    frames as ms at the path's rate: the program's 48 kHz, an output's
+    driver / output rate from `GET /api/v1/program` read when the panel
+    opens, else `480 vzoriek`). A keyed `<For>` (the key holds every shown
+    field), so a poll never resets the list's scroll.
+- **ONE poll, one request in flight** (`AudioFaults::start`,
+  `next_fetch`): the 24 h answer every 10 s; while the panel is open on
+  another window, that window at once on a switch, then every 10 s; else a
+  250 ms nap. A failed request keeps the last answer and is asked again 10 s
+  later.
+- **Local time comes from the browser's `Date`** (a `wasm_bindgen` extern in
+  `audio_faults.rs`: day, month, hour, minute, second, the zone's offset; no
+  `js-sys` dependency); sp-core formats the parts (`LocalTime`, `hm_sk`,
+  `dm_sk`, `time_sk`).
+- **Tests:** `audio_faults_tests.rs` / `audio_faults_timeline_tests.rs`
+  (every text, level, boundary, bar, tick and poll decision; every listed
+  mutant mapped), `answer_tests.rs::losses_and_risks_count_the_windows_rows_per_severity`,
+  and the mock E2E `e2e/health-audio-faults.spec.ts` (Europe/Bratislava):
+  `POST /__mock/audio-faults {scenario, delay_ms}` — `clean`, `risk`,
+  `recent` (a loss 3 min ago on SoundGrid, losses 40 min and 5 h ago, two
+  FOH risks), `old` (one program loss 3 h ago); every live path started
+  2 h 14 min 30 s ago, offsets mid-minute so a minute text holds 30 s; the
+  mock answers a scenario's rows as `build_answer` does (any window).
+  Reset with `/__mock/audio-faults-reset` in `beforeEach` / `afterEach`.
 
 ## Decisions made in lane 1 (main session may revisit)
 
