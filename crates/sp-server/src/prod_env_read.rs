@@ -308,6 +308,11 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
         }),
         Err(why) => Err(why.clone()),
     };
+    // Its status cannot be read: the WinDefend service may still say off.
+    let defender = defender.or_else(|why| match defender_service_off(direct.defender_service) {
+        Ok(()) => Ok(false),
+        Err(service) => Err(format!("{why}; {service}")),
+    });
     let defender_realtime = match defender {
         Ok(on) => Some(on),
         Err(why) => {
