@@ -880,3 +880,31 @@ fn the_panel_says_how_old_its_answer_is_while_the_ledger_does_not_answer() {
         Some("Server neodpovedá (3× po sebe) — história sa ešte nenačítala.")
     );
 }
+
+/// #257, CI 38305196432: a close and a reopen inside one of the poll's
+/// naps is never seen as closed; the reopen alone makes the poll forget its
+/// window, so the reopened panel asks it at once.
+#[test]
+fn a_panel_reopened_between_two_looks_forgets_its_window() {
+    let asked = Polls {
+        day_at: Some(5_000),
+        window: Some((168, 4_000)),
+    };
+    let forgot = Polls {
+        day_at: Some(5_000),
+        window: None,
+    };
+    assert_eq!(polls_seen(asked, true, true), forgot);
+    assert_eq!(
+        next_fetch(polls_seen(asked, true, true), 6_000, Some(168)),
+        Some(Fetch::Window(168))
+    );
+    // Not reopened: what `polls_for` keeps or forgets.
+    assert_eq!(polls_seen(asked, true, false), asked);
+    assert_eq!(polls_seen(asked, false, false), forgot);
+    assert_eq!(
+        next_fetch(polls_seen(asked, true, false), 6_000, Some(168)),
+        None,
+        "an open panel asked 2 s ago waits for its 10 s"
+    );
+}

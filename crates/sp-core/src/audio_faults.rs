@@ -659,6 +659,22 @@ pub fn polls_for(polls: Polls, open: bool) -> Polls {
     }
 }
 
+/// The poll's memory when it looks again: [`polls_for`], and a panel
+/// OPENED AGAIN since the poll last looked forgets its window too. A close
+/// and a reopen inside one of the poll's naps is never seen as closed, so
+/// without this the reopened panel would wait out the old window's 10 s
+/// while its answer was already dropped (#257, CI 38305196432).
+pub fn polls_seen(polls: Polls, open: bool, reopened: bool) -> Polls {
+    if reopened {
+        Polls {
+            window: None,
+            ..polls
+        }
+    } else {
+        polls_for(polls, open)
+    }
+}
+
 /// The failed requests in a row after one more request: an answer ends
 /// the run.
 pub fn failed_after(failed: u32, answered: bool) -> u32 {

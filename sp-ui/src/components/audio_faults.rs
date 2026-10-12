@@ -116,6 +116,9 @@ pub struct AudioFaults {
     /// The panel's own window's last answer.
     window_answer: RwSignal<Option<FaultsAnswer>>,
     open: RwSignal<bool>,
+    /// How many times the panel was opened: the poll forgets its window
+    /// when this moved since it last looked (`polls_seen`).
+    opened: RwSignal<u64>,
     /// The panel's window (hours).
     window: RwSignal<u32>,
     /// Each output's sample rate, by id (read when the panel opens).
@@ -132,6 +135,7 @@ impl AudioFaults {
             day: RwSignal::new(None),
             window_answer: RwSignal::new(None),
             open: RwSignal::new(false),
+            opened: RwSignal::new(0),
             window: RwSignal::new(SEGMENT_HOURS),
             rates: RwSignal::new(BTreeMap::new()),
             failed: RwSignal::new(0),
@@ -143,7 +147,9 @@ impl AudioFaults {
     /// (#257 review): reopened, it reads "Načítavam…" until a fresh answer
     /// lands, never a stale one.
     fn set_open(self, open: bool) {
-        if !open {
+        if open {
+            self.opened.update(|n| *n = n.wrapping_add(1));
+        } else {
             self.window_answer.set(None);
         }
         self.open.set(open);
@@ -179,19 +185,24 @@ impl AudioFaults {
     pub fn start(self, cancelled: RwSignal<bool>) {
         spawn_local(async move {
             let mut polls = Polls::default();
+            let mut seen_opened = 0;
             loop {
                 if cancelled.try_get_untracked() != Some(false) {
                     break;
                 }
-                let (Some(open), Some(hours)) = (
+                let (Some(open), Some(hours), Some(opened)) = (
                     self.open.try_get_untracked(),
                     self.window.try_get_untracked(),
+                    self.opened.try_get_untracked(),
                 ) else {
                     break;
                 };
-                // A closed panel forgets its window, and an answer that
-                // landed after the close is dropped here, before any render.
-                polls = faults::polls_for(polls, open);
+                // A closed panel forgets its window, so does one opened again
+                // since the last look (a close and reopen inside one nap), and
+                // an answer that landed after the close is dropped here,
+                // before any render.
+                polls = faults::polls_seen(polls, open, opened != seen_opened);
+                seen_opened = opened;
                 if !open
                     && self.window_answer.try_with_untracked(Option::is_some) == Some(true)
                     && self.window_answer.try_set(None).is_some()
