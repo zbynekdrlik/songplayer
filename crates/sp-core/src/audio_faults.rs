@@ -33,6 +33,10 @@ pub const RECENT_MS: i64 = 600_000;
 /// How often the HealthBar asks the ledger (ms, the page's clock).
 pub const POLL_EVERY_MS: u64 = 10_000;
 
+/// Failed requests in a row after which the segment no longer shows its
+/// last answer as current: grey `Zvuk: nedostupné` (#257 review).
+pub const MAX_FAILED_POLLS: u32 = 3;
+
 /// A row's severity: samples lost, inserted or wrong.
 pub const LOSS: &str = "loss";
 
@@ -638,6 +642,34 @@ pub fn next_fetch(polls: Polls, now_ms: u64, panel: Option<u32>) -> Option<Fetch
         (Some(h), Some((_, at))) if due(at) => Some(Fetch::Window(h)),
         _ => None,
     }
+}
+
+/// The poll's memory for an open or a closed panel: a closed panel
+/// forgets its window, so it is asked at once when the panel opens again
+/// (#257 review; the dashboard drops that window's answer with it, so a
+/// reopened panel never shows a stale one).
+pub fn polls_for(polls: Polls, _open: bool) -> Polls {
+    polls
+}
+
+/// The failed requests in a row after one more request: an answer ends
+/// the run.
+pub fn failed_after(failed: u32, _answered: bool) -> u32 {
+    failed
+}
+
+/// The segment while the ledger does not answer: after
+/// [`MAX_FAILED_POLLS`] failed requests in a row the last answer is no
+/// longer shown as current (`None`: the answer's own segment).
+pub fn unavailable(_failed: u32) -> Option<Segment> {
+    None
+}
+
+/// The panel's note while the ledger does not answer: how old the answer
+/// it shows is (`age_ms` by the page's clock since that answer landed;
+/// `None`: no answer landed yet).
+pub fn stale_sk(_failed: u32, _age_ms: Option<u64>) -> Option<String> {
+    None
 }
 
 #[cfg(test)]

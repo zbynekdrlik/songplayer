@@ -156,6 +156,13 @@ pub fn start_marks(starts: &[i64], from: i64, to: i64) -> Vec<StartMark> {
         .collect()
 }
 
+/// A mark's x in the timeline's units ([`BUCKETS`] · [`SLOT`] wide),
+/// whole: the panel's keyed rows are rebuilt only when a mark moves by a
+/// unit (#257 review: a hovered tooltip survives a poll).
+pub fn mark_x(pct: f64) -> u32 {
+    (pct * f64::from(BUCKETS as u32 * SLOT) / 100.0) as u32
+}
+
 /// A start mark's tooltip: `spustenie 12.10. 14:05:07`.
 pub fn start_tip(at: LocalTime) -> String {
     format!("spustenie {}", time_sk(at))

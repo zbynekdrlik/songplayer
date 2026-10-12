@@ -802,3 +802,81 @@ fn an_asked_window_is_asked_again_every_10_s_after_the_day() {
         "a closed panel asks nothing"
     );
 }
+
+/// #257 review: a closed panel forgets its window, so the reopened panel
+/// asks it at once; an open one keeps what it asked.
+#[test]
+fn a_closed_panel_forgets_its_window() {
+    let asked = Polls {
+        day_at: Some(5_000),
+        window: Some((168, 4_000)),
+    };
+    assert_eq!(polls_for(asked, true), asked);
+    let closed = polls_for(asked, false);
+    assert_eq!(
+        closed,
+        Polls {
+            day_at: Some(5_000),
+            window: None,
+        }
+    );
+    assert_eq!(
+        next_fetch(closed, 6_000, Some(168)),
+        Some(Fetch::Window(168)),
+        "reopened: asked at once"
+    );
+    assert_eq!(next_fetch(asked, 6_000, Some(168)), None, "kept: not due");
+}
+
+#[test]
+fn failed_requests_count_in_a_row_until_an_answer() {
+    assert_eq!(failed_after(0, false), 1);
+    assert_eq!(failed_after(2, false), 3);
+    assert_eq!(failed_after(u32::MAX, false), u32::MAX);
+    assert_eq!(failed_after(5, true), 0);
+}
+
+/// #257 review: after three failed requests in a row the segment stops
+/// showing its last answer as current.
+#[test]
+fn the_segment_reads_unavailable_after_three_failed_requests_in_a_row() {
+    assert_eq!(unavailable(0), None);
+    assert_eq!(unavailable(2), None);
+    let segment = unavailable(3).unwrap();
+    assert_eq!(segment.level, AudioLevel::Unknown);
+    assert_eq!(segment.level.marker(), "unknown");
+    assert_eq!(segment.level.tone(), HealthTone::Off);
+    assert_eq!(segment.text, "Zvuk: nedostupné");
+    assert_eq!(segment.risks, None);
+    assert_eq!(
+        segment.tip,
+        "História chýb zvuku sa nedá načítať (3× po sebe)."
+    );
+    assert_eq!(
+        unavailable(7).map(|s| s.tip).as_deref(),
+        Some("História chýb zvuku sa nedá načítať (7× po sebe).")
+    );
+}
+
+#[test]
+fn the_panel_says_how_old_its_answer_is_while_the_ledger_does_not_answer() {
+    assert_eq!(stale_sk(2, Some(90_000)), None);
+    assert_eq!(
+        stale_sk(3, Some(90_000)).as_deref(),
+        Some("Server neodpovedá (3× po sebe) — údaje sú z poslednej odpovede pred 1 min.")
+    );
+    assert_eq!(
+        stale_sk(4, Some(30_000)).as_deref(),
+        Some(
+            "Server neodpovedá (4× po sebe) — údaje sú z poslednej odpovede pred menej ako minútou."
+        )
+    );
+    assert_eq!(
+        stale_sk(9, Some(7_500_000)).as_deref(),
+        Some("Server neodpovedá (9× po sebe) — údaje sú z poslednej odpovede pred 2 h 5 min.")
+    );
+    assert_eq!(
+        stale_sk(3, None).as_deref(),
+        Some("Server neodpovedá (3× po sebe) — história sa ešte nenačítala.")
+    );
+}

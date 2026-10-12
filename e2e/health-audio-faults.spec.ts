@@ -374,6 +374,82 @@ test("a loss older than the newest 500 events keeps its bar; every risk row is d
   await expect(panel.getByTestId("audio-start-mark")).toHaveCount(6);
 });
 
+test("a closed panel forgets its window: reopened, it reads the history anew", async ({ page }) => {
+  await scenario(page, "recent");
+  await page.goto("/");
+  await expect(page.getByTestId("health-audio")).toHaveAttribute("data-level", "recent", { timeout: 15000 });
+  let panel = await openPanel(page);
+  await pickWindow(panel, 168);
+  await expect(panel.getByTestId("audio-fault-event")).toHaveCount(5);
+  await panel.getByTestId("audio-faults-close").click();
+  await expect(page.getByTestId("audio-faults-panel")).toHaveCount(0);
+
+  // Another ledger from now on, each answer 1.5 s late: the reopened panel
+  // shows nothing of the old week meanwhile.
+  await scenario(page, "old", 1500);
+  panel = await openPanel(page);
+  await expect(panel.locator('[data-testid="audio-window"][data-hours="168"]')).toHaveClass(/selected/);
+  await expect(panel.getByTestId("audio-faults-loading")).toBeVisible();
+  await expect(panel.getByTestId("audio-fault-event")).toHaveCount(0);
+  await expect(panel.getByTestId("audio-fault-event")).toHaveCount(1, { timeout: 10000 });
+  await expect(panel.getByTestId("audio-faults-loading")).toHaveCount(0);
+});
+
+test("three failed reads in a row turn the segment grey; the panel says how old its answer is", async ({
+  page,
+}) => {
+  // One read every 10 s: the third failure in a row comes ≤ 30 s after the
+  // ledger stops answering.
+  test.setTimeout(120_000);
+  await scenario(page, "clean");
+  await page.goto("/");
+  const segment = page.getByTestId("health-audio");
+  await expect(segment).toHaveAttribute("data-level", "ok", { timeout: 15000 });
+  const failing = await page.request.post("/__mock/audio-faults", { data: { scenario: "clean", fail: true } });
+  expect(failing.status()).toBe(200);
+  await expect(segment).toHaveAttribute("data-level", "unknown", { timeout: 45_000 });
+  await expect(segment).toHaveText("Zvuk: nedostupné");
+  await expect(segment).toHaveClass(/health-off/);
+
+  const panel = await openPanel(page);
+  await expect(panel.getByTestId("audio-faults-stale")).toHaveText(
+    /^Server neodpovedá \(\d+× po sebe\) — údaje sú z poslednej odpovede pred (menej ako minútou|\d+ min)\.$/,
+  );
+  // The last answer stays readable.
+  await expect(panel.getByTestId("audio-path-row")).toHaveCount(6);
+
+  await scenario(page, "clean");
+  await expect(segment).toHaveAttribute("data-level", "ok", { timeout: 15000 });
+  await expect(segment).toHaveText(/^Zvuk: bez chyby /);
+  await expect(panel.getByTestId("audio-faults-stale")).toHaveCount(0);
+  // The failed reads are this test's point, never a console fault.
+  consoleMessages = consoleMessages.filter((m) => !/Failed to load resource.*500/.test(m));
+});
+
+test("a poll keeps every row whose content did not change, so its tooltips survive", async ({ page }) => {
+  // One fixed `now`: two answers differ only where the ledger does.
+  const frozen = await page.request.post("/__mock/audio-faults", { data: { scenario: "risk", freeze: true } });
+  expect(frozen.status()).toBe(200);
+  await page.goto("/");
+  await expect(page.getByTestId("health-audio")).toHaveAttribute("data-level", "risk", { timeout: 15000 });
+  const panel = await openPanel(page);
+  await expect(row(panel, "out:out-1").getByTestId("audio-path-risks")).toHaveText("1 riziko");
+  const input = await row(panel, "input").elementHandle();
+  const mark = await row(panel, "input").getByTestId("audio-start-mark").elementHandle();
+  const foh = await row(panel, "out:out-1").elementHandle();
+  expect(input && mark && foh).toBeTruthy();
+
+  const changed = await page.request.post("/__mock/audio-faults", { data: { scenario: "recent", freeze: true } });
+  expect(changed.status()).toBe(200);
+  // The next poll (≤ 10 s): FOH's row changed and is drawn anew; the NDI
+  // input's did not, so it stays the same element with its mark (a hovered
+  // tooltip stays up).
+  await expect(row(panel, "out:out-1").getByTestId("audio-path-risks")).toHaveText("2 riziká", { timeout: 15000 });
+  expect(await foh!.evaluate((e) => e.isConnected), "FOH's changed row").toBe(false);
+  expect(await input!.evaluate((e) => e.isConnected), "the input's unchanged row").toBe(true);
+  expect(await mark!.evaluate((e) => e.isConnected), "its start mark").toBe(true);
+});
+
 test("on a phone the open panel never makes the page scroll sideways", async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 844 });
   await scenario(page, "recent");

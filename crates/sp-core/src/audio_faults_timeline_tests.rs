@@ -392,3 +392,13 @@ fn ten_minute_ticks_across_the_spring_change_only_move_forward() {
         "1:30, 1:40, 1:50 CET, then 3:00 … 3:30 CEST"
     );
 }
+
+#[test]
+fn a_marks_place_is_a_whole_unit_of_the_timeline() {
+    assert_eq!(mark_x(0.0), 0);
+    assert_eq!(mark_x(50.0), 300);
+    assert_eq!(mark_x(100.0), 600);
+    assert_eq!(mark_x(12.5), 75);
+    assert_eq!(mark_x(0.09), 1, "0.54 rounds up");
+    assert_eq!(mark_x(0.08), 0, "0.48 rounds down");
+}

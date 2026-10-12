@@ -903,8 +903,12 @@ app.get("/api/v1/audio/faults", (req, res) => {
     hours = n;
   }
   const answer = () => {
+    if (audioFaultsFail) {
+      res.status(500).type("text/plain").send("audio fault ledger: the mock's fail knob");
+      return;
+    }
     const rows = audioScenarioRows(audioFaultsScenario);
-    const now = Date.now();
+    const now = audioFaultsNow ?? Date.now();
     res.json(rows ? audioAnswerFromRows(rows, now, hours) : audioFaultsFixture(now, hours));
   };
   if (audioFaultsDelayMs > 0) setTimeout(answer, audioFaultsDelayMs);
@@ -920,7 +924,9 @@ app.get("/api/v1/audio/faults", (req, res) => {
 // FOH risks in five clusters 1 / 3 / 5 / 7 / 9 h ago and a program loss
 // 20 h ago: more than the answer's 500 events, so the loss is only on the
 // timeline). `fail: true` answers every read 500 (the dashboard keeps its
-// last answer, then reads "Zvuk: nedostupné");
+// last answer, then reads "Zvuk: nedostupné"); `freeze: true` answers at
+// one fixed `now` from then on (taken at the first frozen post), so two
+// answers differ only where the scenario does;
 // `POST /__mock/audio-faults-reset` = "fixture", no delay. `delay_ms` holds
 // every answer back (a spec proves the dashboard never has two requests in
 // flight). A scenario is ledger rows,
@@ -930,6 +936,8 @@ app.get("/api/v1/audio/faults", (req, res) => {
 // holds for 30 s.
 let audioFaultsScenario = "fixture";
 let audioFaultsDelayMs = 0;
+let audioFaultsFail = false;
+let audioFaultsNow = null;
 const AUDIO_LIVE = [
   ["program", "SP-program"],
   // Lane 1's NDI input path ("OBS manuál"), which runs on every box with the SDK.
@@ -1119,12 +1127,16 @@ app.post("/__mock/audio-faults", (req, res) => {
   }
   audioFaultsScenario = scenario;
   audioFaultsDelayMs = Number((req.body || {}).delay_ms || 0);
-  res.json({ scenario, delay_ms: audioFaultsDelayMs });
+  audioFaultsFail = (req.body || {}).fail === true;
+  audioFaultsNow = (req.body || {}).freeze === true ? (audioFaultsNow ?? Date.now()) : null;
+  res.json({ scenario, delay_ms: audioFaultsDelayMs, fail: audioFaultsFail, now_ms: audioFaultsNow });
 });
 app.post("/__mock/audio-faults-reset", (_req, res) => {
   audioFaultsScenario = "fixture";
   audioFaultsDelayMs = 0;
-  res.json({ scenario: audioFaultsScenario, delay_ms: audioFaultsDelayMs });
+  audioFaultsFail = false;
+  audioFaultsNow = null;
+  res.json({ scenario: audioFaultsScenario, delay_ms: audioFaultsDelayMs, fail: audioFaultsFail });
 });
 
 // #233 lane 3: the box's registered ASIO drivers (two, so a test can pick
