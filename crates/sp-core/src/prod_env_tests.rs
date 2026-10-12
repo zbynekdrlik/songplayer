@@ -16,6 +16,8 @@ fn every_problem() -> Vec<EnvProblem> {
             build: None,
         },
         EnvProblem::DefenderRealtimeOn,
+        EnvProblem::DefenderPassive("EDR Block Mode".to_string()),
+        EnvProblem::AntivirusOn("ESET Security".to_string()),
     ];
     for p in FirewallProfile::ALL {
         all.push(EnvProblem::FirewallOn(p));
@@ -23,6 +25,7 @@ fn every_problem() -> Vec<EnvProblem> {
     all.push(EnvProblem::Unreadable(Unreadable::Edition));
     all.push(EnvProblem::Unreadable(Unreadable::Build));
     all.push(EnvProblem::Unreadable(Unreadable::Defender));
+    all.push(EnvProblem::Unreadable(Unreadable::Antivirus));
     for p in FirewallProfile::ALL {
         all.push(EnvProblem::Unreadable(Unreadable::Firewall(p)));
     }
@@ -38,12 +41,15 @@ fn every_problem_has_its_stable_code() {
             "edition_not_allowed",
             "edition_not_allowed",
             "defender_realtime_on",
+            "defender_passive_mode",
+            "antivirus_on",
             "firewall_on:domain",
             "firewall_on:private",
             "firewall_on:public",
             "unreadable:edition",
             "unreadable:build",
             "unreadable:defender",
+            "unreadable:antivirus",
             "unreadable:firewall:domain",
             "unreadable:firewall:private",
             "unreadable:firewall:public",
@@ -62,12 +68,15 @@ fn every_problem_reads_in_slovak() {
             "edícia Windows „IoTEnterprise“ nie je povolená (povolené sú len Windows LTSC a \
              Windows 11 IoT Enterprise)",
             "ochrana Windows Defender v reálnom čase je zapnutá",
+            "Windows Defender beží v režime „EDR Block Mode“ a súbory stále kontroluje",
+            "antivírus „ESET Security“ je zapnutý",
             "brána firewall je zapnutá (doménový profil)",
             "brána firewall je zapnutá (súkromný profil)",
             "brána firewall je zapnutá (verejný profil)",
             "edíciu Windows sa nepodarilo zistiť",
             "zostavu Windows sa nepodarilo zistiť",
             "stav ochrany Windows Defender v reálnom čase sa nepodarilo zistiť",
+            "zoznam antivírusových programov sa nepodarilo zistiť",
             "stav brány firewall (doménový profil) sa nepodarilo zistiť",
             "stav brány firewall (súkromný profil) sa nepodarilo zistiť",
             "stav brány firewall (verejný profil) sa nepodarilo zistiť",
@@ -106,6 +115,10 @@ fn the_status_serializes_every_field_by_name() {
         ltsc: Some(true),
         edition_allowed: Some(true),
         defender_realtime: Some(true),
+        defender_passive: Some(false),
+        defender_mode: Some("Normal".to_string()),
+        defender_antivirus_enabled: Some(true),
+        antivirus_on: Some(vec!["ESET Security".to_string()]),
         firewall: FirewallState {
             domain: Some(false),
             private: None,
@@ -128,6 +141,10 @@ fn the_status_serializes_every_field_by_name() {
             "ltsc": true,
             "edition_allowed": true,
             "defender_realtime": true,
+            "defender_passive": false,
+            "defender_mode": "Normal",
+            "defender_antivirus_enabled": true,
+            "antivirus_on": ["ESET Security"],
             "firewall": {"domain": false, "private": null, "public": true},
             "problems": [{
                 "code": "defender_realtime_on",

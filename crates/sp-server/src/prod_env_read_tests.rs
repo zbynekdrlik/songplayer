@@ -236,6 +236,10 @@ fn a_production_box_reads_as_its_facts() {
             product_name: Some("Windows 10 IoT Enterprise LTSC 2024".to_string()),
             build_number: Some(26100),
             defender_realtime: Some(false),
+            defender_passive: Some(false),
+            defender_mode: Some("Normal".to_string()),
+            defender_antivirus_enabled: Some(true),
+            antivirus_on: Some(Vec::new()),
             firewall: [Some(false); 3],
             read_errors: Vec::new(),
         }
@@ -358,7 +362,8 @@ fn defenders_query_decides_its_fact() {
     let on = WmiRead {
         defender: Ok(Some(DefenderRow {
             realtime: Some(true),
-            ..DefenderRow::default()
+            mode: Some("Normal".to_string()),
+            antivirus_enabled: Some(true),
         })),
         ..wmi()
     };
@@ -461,6 +466,185 @@ fn a_running_defender_that_cannot_be_read_stays_unread() {
           not be read (error 5)"
         ]
     );
+}
+
+// ---- Defender passive, other antivirus products (review finding 2) ----
+
+#[test]
+fn the_modes_that_still_scan_are_passive() {
+    for mode in [
+        "Passive Mode",
+        "Passive",
+        "EDR Block Mode",
+        "SxS Passive Mode",
+        " passive mode ",
+    ] {
+        assert!(is_passive_mode(mode), "{mode}");
+    }
+    for mode in ["Normal", "Not running", ""] {
+        assert!(!is_passive_mode(mode), "{mode}");
+    }
+}
+
+fn defender_in(mode: Option<&str>, realtime: bool) -> WmiRead {
+    WmiRead {
+        defender: Ok(Some(DefenderRow {
+            realtime: Some(realtime),
+            mode: mode.map(str::to_string),
+            antivirus_enabled: Some(true),
+        })),
+        ..wmi()
+    }
+}
+
+/// Review finding 2: in passive / EDR block mode Defender's real-time
+/// protection can read off while it still scans every file.
+#[test]
+fn a_passive_or_edr_block_defender_still_scans() {
+    for mode in ["Passive Mode", "EDR Block Mode", "SxS Passive Mode"] {
+        let facts = facts_from(&direct(), &Ok(defender_in(Some(mode), false)));
+        assert_eq!(facts.defender_realtime, Some(false), "{mode}");
+        assert_eq!(facts.defender_passive, Some(true), "{mode}");
+        assert_eq!(facts.defender_mode.as_deref(), Some(mode));
+        assert_eq!(facts.defender_antivirus_enabled, Some(true));
+    }
+    let normal = facts_from(&direct(), &Ok(defender_in(Some("Normal"), false)));
+    assert_eq!(normal.defender_passive, Some(false));
+}
+
+#[test]
+fn a_defender_status_with_no_mode_cannot_be_verified() {
+    let facts = facts_from(&direct(), &Ok(defender_in(None, false)));
+    assert_eq!(
+        (facts.defender_realtime, facts.defender_passive),
+        (None, None)
+    );
+    assert_eq!(
+        facts.read_errors,
+        [
+            "Defender's status names no running mode; the WinDefend service is not stopped \
+          (state 4)"
+        ]
+    );
+    // Not installed (no namespace): neither on nor passive.
+    let absent = WmiRead {
+        defender: Err(WBEM_E_INVALID_NAMESPACE),
+        ..wmi()
+    };
+    let facts = facts_from(&direct(), &Ok(absent));
+    assert_eq!(
+        (
+            facts.defender_realtime,
+            facts.defender_passive,
+            facts.defender_mode
+        ),
+        (Some(false), Some(false), None)
+    );
+}
+
+#[test]
+fn the_product_state_decodes_its_enabled_bit() {
+    // Defender on / off, a product on and up to date, on with old
+    // definitions, off, snoozed.
+    for (state, on) in [
+        (0x06_1100, true),
+        (0x06_0100, false),
+        (0x04_1000, true),
+        (0x04_1010, true),
+        (0x04_0000, false),
+        (0x04_0010, false),
+        (0x04_0100, false),
+    ] {
+        assert_eq!(av_product_on(state), on, "{state:#08x}");
+    }
+}
+
+fn product(name: &str, guid: &str, state: Option<u32>) -> AvProduct {
+    AvProduct {
+        name: name.to_string(),
+        guid: guid.to_string(),
+        state,
+    }
+}
+
+fn with_products(products: Vec<AvProduct>) -> Result<WmiRead, String> {
+    Ok(WmiRead {
+        antivirus: Ok(products),
+        ..wmi()
+    })
+}
+
+/// Review finding 2: another antivirus product that is on scans what
+/// SongPlayer launches just like Defender did; it is named.
+#[test]
+fn an_enabled_third_party_antivirus_is_named() {
+    let read = with_products(vec![
+        product("Windows Defender", DEFENDER_AV_GUID, Some(0x06_1100)),
+        product("ESET Security", "{1}", Some(0x04_1000)),
+        product("Old Scanner", "{2}", Some(0x04_0000)),
+        product("Second AV", "{3}", Some(0x04_1010)),
+    ]);
+    assert_eq!(
+        antivirus_on(&read),
+        Ok(vec!["ESET Security".to_string(), "Second AV".to_string()])
+    );
+    assert_eq!(
+        facts_from(&direct(), &read).antivirus_on,
+        Some(vec!["ESET Security".to_string(), "Second AV".to_string()])
+    );
+}
+
+#[test]
+fn defenders_own_entry_is_never_another_product() {
+    let guid_only = product("Renamed", &DEFENDER_AV_GUID.to_lowercase(), Some(0x06_1100));
+    let name_only = product(" Microsoft Defender Antivirus ", "{9}", Some(0x06_1100));
+    assert!(is_defender_product(&guid_only));
+    assert!(is_defender_product(&name_only));
+    assert!(!is_defender_product(&product(
+        "ESET Security",
+        "{1}",
+        Some(0)
+    )));
+    assert_eq!(
+        antivirus_on(&with_products(vec![guid_only, name_only])),
+        Ok(Vec::new())
+    );
+}
+
+#[test]
+fn the_antivirus_list_that_cannot_be_read_says_why() {
+    let no_state = with_products(vec![product("ESET Security", "{1}", None)]);
+    assert_eq!(
+        antivirus_on(&no_state),
+        Err("the state of the antivirus product \"ESET Security\" could not be read".to_string())
+    );
+    let refused = Ok(WmiRead {
+        antivirus: Err(0x8007_0005_u32 as i32),
+        ..wmi()
+    });
+    assert_eq!(
+        antivirus_on(&refused),
+        Err("the registered antivirus products could not be read (0x80070005)".to_string())
+    );
+    let facts = facts_from(&direct(), &refused);
+    assert_eq!(facts.antivirus_on, None);
+    assert_eq!(
+        facts.read_errors,
+        ["the registered antivirus products could not be read (0x80070005)"]
+    );
+    let why = "the WMI check did not finish within 30s".to_string();
+    assert_eq!(antivirus_on(&Err(why.clone())), Err(why));
+}
+
+#[test]
+fn no_security_center_lists_no_product() {
+    for code in [WBEM_E_INVALID_NAMESPACE, WBEM_E_INVALID_CLASS] {
+        let server = Ok(WmiRead {
+            antivirus: Err(code),
+            ..wmi()
+        });
+        assert_eq!(antivirus_on(&server), Ok(Vec::new()));
+    }
 }
 
 #[test]

@@ -20,6 +20,10 @@ fn production() -> EnvFacts {
         product_name: Some("Windows 10 IoT Enterprise LTSC 2024".to_string()),
         build_number: Some(26100),
         defender_realtime: Some(false),
+        defender_passive: Some(false),
+        defender_mode: Some("Normal".to_string()),
+        defender_antivirus_enabled: Some(true),
+        antivirus_on: Some(Vec::new()),
         firewall: [Some(false); 3],
         read_errors: Vec::new(),
     }
@@ -205,6 +209,68 @@ fn defender_on_or_unread_is_a_problem() {
     );
 }
 
+/// Review finding 2: Defender passive, or another antivirus product on.
+#[test]
+fn a_scanning_defender_or_antivirus_is_a_problem() {
+    let passive = verdict(&EnvFacts {
+        defender_passive: Some(true),
+        defender_mode: Some("EDR Block Mode".to_string()),
+        ..production()
+    });
+    assert!(!passive.ok);
+    assert_eq!(
+        passive.problems,
+        [EnvProblem::DefenderPassive("EDR Block Mode".to_string())]
+    );
+    let both = verdict(&EnvFacts {
+        defender_realtime: Some(true),
+        defender_passive: Some(true),
+        defender_mode: None,
+        ..production()
+    });
+    assert_eq!(
+        both.problems,
+        [
+            EnvProblem::DefenderRealtimeOn,
+            EnvProblem::DefenderPassive(String::new()),
+        ]
+    );
+    let antivirus = verdict(&EnvFacts {
+        antivirus_on: Some(vec!["ESET Security".to_string(), "Other".to_string()]),
+        ..production()
+    });
+    assert!(!antivirus.ok);
+    assert_eq!(
+        antivirus.problems,
+        [
+            EnvProblem::AntivirusOn("ESET Security".to_string()),
+            EnvProblem::AntivirusOn("Other".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn a_defender_mode_or_antivirus_list_not_read_is_a_problem() {
+    let no_passive = verdict(&EnvFacts {
+        defender_passive: None,
+        ..production()
+    });
+    assert!(!no_passive.ok);
+    assert_eq!(
+        no_passive.problems,
+        [EnvProblem::Unreadable(Unreadable::Defender)]
+    );
+    let no_list = verdict(&EnvFacts {
+        antivirus_on: None,
+        ..production()
+    });
+    assert!(!no_list.ok);
+    assert_eq!(
+        no_list.problems,
+        [EnvProblem::Unreadable(Unreadable::Antivirus)]
+    );
+}
+
 #[test]
 fn each_firewall_profile_on_or_unread_is_named_by_its_profile() {
     for (i, profile) in FirewallProfile::ALL.into_iter().enumerate() {
@@ -255,6 +321,7 @@ fn every_problem_is_listed_in_order() {
         [
             EnvProblem::Unreadable(Unreadable::Edition),
             EnvProblem::Unreadable(Unreadable::Defender),
+            EnvProblem::Unreadable(Unreadable::Antivirus),
             EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Domain)),
             EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Private)),
             EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Public)),
@@ -287,6 +354,10 @@ fn the_status_carries_every_fact_and_problem() {
         product_name: Some("Windows 11 Pro".to_string()),
         build_number: Some(22631),
         defender_realtime: Some(true),
+        defender_passive: Some(true),
+        defender_mode: Some("Passive Mode".to_string()),
+        defender_antivirus_enabled: Some(false),
+        antivirus_on: Some(vec!["ESET Security".to_string()]),
         firewall: [Some(true), None, Some(false)],
         read_errors: vec!["the private firewall setting is missing".to_string()],
     };
@@ -294,6 +365,8 @@ fn the_status_carries_every_fact_and_problem() {
     let expected_problems = vec![
         not_allowed("Professional", Some(22631)),
         EnvProblem::DefenderRealtimeOn,
+        EnvProblem::DefenderPassive("Passive Mode".to_string()),
+        EnvProblem::AntivirusOn("ESET Security".to_string()),
         EnvProblem::FirewallOn(FirewallProfile::Domain),
         EnvProblem::Unreadable(Unreadable::Firewall(FirewallProfile::Private)),
     ];
@@ -310,6 +383,10 @@ fn the_status_carries_every_fact_and_problem() {
             ltsc: Some(false),
             edition_allowed: Some(false),
             defender_realtime: Some(true),
+            defender_passive: Some(true),
+            defender_mode: Some("Passive Mode".to_string()),
+            defender_antivirus_enabled: Some(false),
+            antivirus_on: Some(vec!["ESET Security".to_string()]),
             firewall: FirewallState {
                 domain: Some(true),
                 private: None,

@@ -222,6 +222,83 @@ pub fn defender_service_off(service: ServiceRead) -> Result<(), String> {
     }
 }
 
+/// Defender's running modes (`AMRunningMode`) in which it still scans files
+/// while another product leads: passive, EDR in block mode, side-by-side
+/// passive (Microsoft's `Get-MpComputerStatus` documentation). `Normal` and
+/// `Not running` are no such mode.
+pub const PASSIVE_MODES: [&str; 1] = ["Passive"];
+
+/// A running mode in which Defender still scans files ([`PASSIVE_MODES`],
+/// ASCII case ignored).
+pub fn is_passive_mode(mode: &str) -> bool {
+    let m = mode.trim();
+    PASSIVE_MODES.iter().any(|p| p.eq_ignore_ascii_case(m))
+}
+
+/// Defender's own entry in the Security Center (`instanceGuid`): it is
+/// checked through its own status ([`defender_realtime`]), never as
+/// another product.
+pub const DEFENDER_AV_GUID: &str = "{D68DDC3A-831F-4fae-9E44-DA132C1ACF46}";
+
+/// Defender's own entry by name, should its GUID ever differ.
+pub const DEFENDER_AV_NAMES: [&str; 2] = ["Windows Defender", "Microsoft Defender Antivirus"];
+
+/// Defender's own entry in the Security Center (by GUID or name).
+pub fn is_defender_product(product: &AvProduct) -> bool {
+    product.guid.trim().eq_ignore_ascii_case(DEFENDER_AV_GUID)
+        || DEFENDER_AV_NAMES
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(product.name.trim()))
+}
+
+/// The "on" bit of an antivirus product's `productState`. Microsoft does
+/// not document the word, but it is stable since Windows Vista and every
+/// tool decodes it the same way: bits 16-23 the provider kind, bits 8-15 the
+/// scanner (0x10 on, i.e. 0x1000 in the word; 0x00 off; 0x01 snoozed or
+/// expired), bits 0-7 the definitions (0x00 up to date, 0x10 out of date).
+/// For example 0x061100 (397568) is Defender on, 0x060100 (393472) Defender
+/// off, 0x041000 (266240) a product on and up to date.
+pub const AV_STATE_ON: u32 = 0x0010;
+
+/// An antivirus product's `productState` says it is on ([`AV_STATE_ON`]).
+pub fn av_product_on(state: u32) -> bool {
+    state & AV_STATE_ON != 0
+}
+
+/// The antivirus products that are on, but Defender's own entry: their
+/// names. No Security Center (a server SKU has no `root\SecurityCenter2`)
+/// lists none. A product whose state cannot be read, or a query that
+/// failed, cannot be verified (`Err`, why).
+pub fn antivirus_on(wmi: &Result<WmiRead, String>) -> Result<Vec<String>, String> {
+    let products = match wmi {
+        Err(why) => return Err(why.clone()),
+        Ok(read) => match &read.antivirus {
+            Ok(products) => products,
+            Err(WBEM_E_INVALID_NAMESPACE | WBEM_E_INVALID_CLASS) => return Ok(Vec::new()),
+            Err(code) => {
+                return Err(format!(
+                    "the registered antivirus products could not be read (0x{:08X})",
+                    *code as u32
+                ));
+            }
+        },
+    };
+    let mut on = Vec::new();
+    for product in products.iter().filter(|p| !is_defender_product(p)) {
+        match product.state {
+            Some(state) if av_product_on(state) => on.push(product.name.clone()),
+            Some(_) => {}
+            None => {
+                return Err(format!(
+                    "the state of the antivirus product {:?} could not be read",
+                    product.name
+                ));
+            }
+        }
+    }
+    Ok(on)
+}
+
 /// Adds `why` to the read errors once (one WMI failure can explain several
 /// facts).
 fn note(errors: &mut Vec<String>, why: String) {
@@ -308,13 +385,34 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
         }),
         Err(why) => Err(why.clone()),
     };
+    // The status row, when Defender's query gave one.
+    let row = match wmi {
+        Ok(read) => read.defender.as_ref().ok().and_then(Option::as_ref),
+        Err(_) => None,
+    };
+    // Real-time from the row, and whether its mode still scans; not
+    // installed (no row) is neither.
+    let defender = defender.and_then(|realtime| match row {
+        Some(row) => match row.mode.as_deref() {
+            Some(mode) => Ok((realtime, is_passive_mode(mode))),
+            None => Err("Defender's status names no running mode".to_string()),
+        },
+        None => Ok((realtime, false)),
+    });
     // Its status cannot be read: the WinDefend service may still say off.
     let defender = defender.or_else(|why| match defender_service_off(direct.defender_service) {
-        Ok(()) => Ok(false),
+        Ok(()) => Ok((false, false)),
         Err(service) => Err(format!("{why}; {service}")),
     });
-    let defender_realtime = match defender {
-        Ok(on) => Some(on),
+    let (defender_realtime, defender_passive) = match defender {
+        Ok((realtime, passive)) => (Some(realtime), Some(passive)),
+        Err(why) => {
+            note(&mut errors, why);
+            (None, None)
+        }
+    };
+    let antivirus_on = match antivirus_on(wmi) {
+        Ok(names) => Some(names),
         Err(why) => {
             note(&mut errors, why);
             None
@@ -325,6 +423,10 @@ pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFact
         product_name,
         build_number,
         defender_realtime,
+        defender_passive,
+        defender_mode: row.and_then(|row| row.mode.clone()),
+        defender_antivirus_enabled: row.and_then(|row| row.antivirus_enabled),
+        antivirus_on,
         firewall,
         read_errors: errors,
     }

@@ -72,8 +72,16 @@ pub struct EnvFacts {
     /// The same key's `CurrentBuildNumber`.
     pub build_number: Option<u32>,
     /// Defender's real-time protection (WMI `MSFT_MpComputerStatus`); off
-    /// when Defender is not installed.
+    /// when Defender is not installed or its service is stopped.
     pub defender_realtime: Option<bool>,
+    /// Defender runs in a passive / EDR block mode (it still scans).
+    pub defender_passive: Option<bool>,
+    /// Defender's running mode (`AMRunningMode`, shown only).
+    pub defender_mode: Option<String>,
+    /// Defender's antivirus engine is on (`AntivirusEnabled`, shown only).
+    pub defender_antivirus_enabled: Option<bool>,
+    /// The other antivirus products that are on (`read::antivirus_on`).
+    pub antivirus_on: Option<Vec<String>>,
     /// The domain, private and public firewall profile (the active policy
     /// store, `read::active_firewall`; the registry when it cannot be read).
     pub firewall: [Option<bool>; 3],
@@ -101,7 +109,8 @@ pub struct EnvVerdict {
     /// The edition is allowed (`None`: it, or the build an IoT Enterprise
     /// edition needs, was not read).
     pub edition_allowed: Option<bool>,
-    /// Every problem: the edition, Defender, then each firewall profile.
+    /// Every problem: the edition, Defender, the other antivirus products,
+    /// then each firewall profile.
     pub problems: Vec<EnvProblem>,
 }
 
@@ -152,10 +161,25 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
         }),
         (Some(_), Some(true)) => {}
     }
-    match facts.defender_realtime {
-        None => problems.push(EnvProblem::Unreadable(Unreadable::Defender)),
-        Some(true) => problems.push(EnvProblem::DefenderRealtimeOn),
-        Some(false) => {}
+    match (facts.defender_realtime, facts.defender_passive) {
+        (Some(realtime), Some(passive)) => {
+            if realtime {
+                problems.push(EnvProblem::DefenderRealtimeOn);
+            }
+            if passive {
+                let mode = facts.defender_mode.clone().unwrap_or_default();
+                problems.push(EnvProblem::DefenderPassive(mode));
+            }
+        }
+        _ => problems.push(EnvProblem::Unreadable(Unreadable::Defender)),
+    }
+    match &facts.antivirus_on {
+        None => problems.push(EnvProblem::Unreadable(Unreadable::Antivirus)),
+        Some(names) => {
+            for name in names {
+                problems.push(EnvProblem::AntivirusOn(name.clone()));
+            }
+        }
     }
     for (profile, on) in FirewallProfile::ALL.into_iter().zip(facts.firewall) {
         match on {
@@ -208,6 +232,10 @@ pub fn status_of(check: &Check, now_ms: i64) -> (EnvironmentStatus, Vec<EnvProbl
         ltsc: v.ltsc,
         edition_allowed: v.edition_allowed,
         defender_realtime: facts.defender_realtime,
+        defender_passive: facts.defender_passive,
+        defender_mode: facts.defender_mode.clone(),
+        defender_antivirus_enabled: facts.defender_antivirus_enabled,
+        antivirus_on: facts.antivirus_on.clone(),
         firewall: FirewallState {
             domain,
             private,
