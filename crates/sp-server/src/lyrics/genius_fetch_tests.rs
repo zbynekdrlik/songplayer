@@ -142,6 +142,31 @@ async fn a_matched_page_with_no_lyric_is_an_error() {
     assert!(err.contains("Genius song page holds no lyric"), "{err}");
 }
 
+/// A matched page Genius has not transcribed yet: Genius's own placeholder
+/// ("Lyrics for this song have yet to be transcribed"), as on
+/// https://genius.com/Planetshakers-the-love-of-my-life-live-at-chapel-lyrics
+/// (12.10.2026, the live gate's red). The song simply has no lyric there
+/// yet: no hit, not an error.
+#[tokio::test]
+async fn a_matched_page_genius_has_not_transcribed_yet_is_no_hit_not_an_error() {
+    let server = MockServer::start().await;
+    search_finds(&server, "Hillsong Worship").await;
+    Mock::given(method("GET"))
+        .and(path("/song-lyrics"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(concat!(
+            "<html><body><div class=\"Lyrics__Container-sc-12f9e8d3-1 fLgRCX\">",
+            "<div class=\"LyricsPlaceholder__Container-sc-b9eb355f-0 YFPVz\">",
+            "<div class=\"LyricsPlaceholder__Message-sc-b9eb355f-2 bBIsZz\">",
+            "Lyrics for this song have yet to be transcribed. ",
+            "Please check back once the song has been released.",
+            "</div></div></div></body></html>"
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    assert!(fetch(&server).await.unwrap().is_none());
+}
+
 /// No token, or no artist / song: nothing is asked.
 #[tokio::test]
 async fn no_token_or_no_names_asks_nothing() {
