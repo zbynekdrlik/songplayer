@@ -296,6 +296,30 @@ fn a_refused_seek_plays_on_from_where_the_producer_was() {
 }
 
 #[test]
+fn a_refused_seek_after_two_frames_plays_on_from_the_second_frame() {
+    // Review: a frame handed out moves the producer's position. Two frames
+    // out (0, 100), then a refused seek: the song plays on from 100 (the
+    // pipeline reports `Seeked{100}`), never from its start.
+    let mut dec = decoder(&[0, 100, 200], &every(0, 500, 100), true);
+    let mut p = DecodeProducer::new(0);
+    let taps = taps();
+    for _ in 0..2 {
+        p.next_item(&mut dec, &taps).unwrap().expect("a frame");
+    }
+    assert_eq!(p.seek(&mut dec, 400, 2, 1), 100);
+    let shapes: Vec<_> = items(&mut p, &mut dec).iter().map(shape).collect();
+    assert_eq!(
+        shapes,
+        vec![
+            (100, 200, vec![100], false, 3),
+            (200, 300, vec![200], false, 3),
+            (300, 400, vec![300], false, 3),
+            (400, 500, vec![400], true, 3),
+        ]
+    );
+}
+
+#[test]
 fn a_seek_past_the_last_frame_holds_that_frame_from_the_seek() {
     // Frames 0 … 500, keyframes 0 and 300; chunks every 50 ms to 900. A
     // seek to 650 lands on keyframe 300 and decodes 300, 400, 500 before the
