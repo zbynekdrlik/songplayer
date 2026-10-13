@@ -25,9 +25,12 @@
 //! - ONE song per look: an operator's lyrics or a dub (`lyrics::kept_local`)
 //!   or a copy of another audio (`Exchange::audio_verdict`) is passed over;
 //!   else the copy goes into every row of the video
-//!   (`lyrics::take_into_rows`: the old track is served until the new one
-//!   is in place), and only once every row took it is its origin recorded.
-//!   A song passed over, or whose take failed, is looked at again after
+//!   (`lyrics::take_into_rows`: the old track is served until the
+//!   verified copy is renamed over it), and only once every row took it
+//!   is its origin recorded. A row that refuses its columns after the
+//!   rename serves the new file under its old columns until the retry.
+//!   A song passed over, whose take failed, or just taken (a record that
+//!   failed is not fetched again on every tick) is looked at again after
 //!   [`FOLLOW_KEPT`] / [`FOLLOW_RETRY`], or at once when the peer lists
 //!   another copy.
 //! - The next look is the next tick while a look finds work, else
@@ -458,6 +461,10 @@ fn settle(ex: &Exchange, c: &Candidate, outcome: Outcome, now_ms: i64) -> Vec<i6
     match outcome {
         Outcome::Taken(rows) => {
             state.followed(c, now_ms);
+            // Once its origin is recorded the copy is wanted no more; when
+            // the record failed (WARNed by `took`), it waits like a failed
+            // take instead of being fetched again on every tick.
+            state.pass(c, now_ms, FOLLOW_RETRY);
             log_followed(c, rows.len());
             rows
         }

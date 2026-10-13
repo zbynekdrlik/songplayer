@@ -1090,12 +1090,17 @@ record: #264 comment 6146849106.
   now" `FOLLOW_RETRY` (30 min); then `lyrics::take_into_rows` (shared with
   the stand-in's look: `peer_row` + `place` + `adopt_lyrics` into EVERY row
   of the video). The old `{yt}_lyrics.json` is served until the verified
-  part is renamed over it, and stays when anything before fails. Only once
-  every row took it does `Exchange::took` record the origin (the new sha),
-  end a lyrics wait and drop a stand-in; a row that refused it leaves no
-  record, so the next look after `FOLLOW_RETRY` takes it again. A failed
-  take WARNs (`exchange: a peer's newer lyrics were not taken - asking again
-  later`) and waits `FOLLOW_RETRY`.
+  part is renamed over it, and stays when anything before the rename
+  fails (the peer's row, the fetch, the parse, the source check). Only
+  once every row took it does `Exchange::took` record the origin (the new
+  sha), end a lyrics wait and drop a stand-in; a row that refused its
+  columns AFTER the rename leaves no record and serves the new file under
+  its old columns (source, ★, translation version) until the next look
+  after `FOLLOW_RETRY` takes it again (the stand-in's look behaves the
+  same). A failed take WARNs (`exchange: a peer's newer lyrics were not
+  taken - asking again later`) and waits `FOLLOW_RETRY`; so does a song
+  just taken (review round 1: `took` only WARNs a failed record, and the
+  copy would otherwise be fetched again on every tick).
 - **Passed over** songs are kept in memory against the peer's sha256: a
   new copy at the peer is looked at at once; a restart forgets them.
 - **No paid AI:** it only fetches. `adopt_lyrics` gives a row that asks
@@ -1113,6 +1118,12 @@ record: #264 comment 6146849106.
   outside the repair queue: a follow-up candidate); a ★ toggled at SNV
   without a new track (the admin toggle; „Nesedí" queues a reprocess, whose
   new track is followed): it reaches PP with the next track.
+- Known limit (the hooks' and the stand-in's too): an operator's Reprocess
+  clicked at this node during a take is cleared by the adoption
+  (`mark_video_lyrics_complete` sets the manual flag to 0); the window is
+  the transfer. Each look also scans the peer's catalog once per video
+  (`decide::holds`): ~6 000 entries × the catalog's videos, milliseconds
+  per tick while a node catches up, every 15 min after.
 - OPEN for phase 2 (SNV listing PP): SNV would follow PP's copies of the
   same audio too; which node's lyrics may replace which is the phase-2
   tie-break ("Kinds, versions, jobs").
@@ -1120,7 +1131,8 @@ record: #264 comment 6146849106.
   row with the record and the status through the router, the copy taken
   not fetched again, another audio never, the operator's pause and the
   hold, parked rows filled, a failed take keeps the old track, a row that
-  refused leaves no record, one song per look and the idle wait, untracked
+  refused leaves no record, a record that failed is not fetched every
+  tick, one song per look and the idle wait, untracked
   only with paid AI off, a node with no peer, the queue and a stand-in left
   alone, an operator's lyrics or a dub kept; the pure `wants`,
   `candidates`, `FollowState`), `lyrics/worker_tests_peer.rs::
