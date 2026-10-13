@@ -9,7 +9,9 @@ name: Deploy to PP
 # live in PP's DB and no deploy step writes it (the server does: its
 # migrations, and the gate's presses save the program source and a started
 # song's play history, as any press does), nor the phase-0 scheduled task,
-# ACL or firewall.
+# ACL or firewall rules. #255 lane 2: one step applies the production PC
+# profile (scripts/setup-prod-pc.ps1: system settings only, firewall
+# profiles off included) while SongPlayer is stopped.
 # The rules: .claude/rules/peer-exchange.md, "PP deploy".
 on:
   workflow_run:
@@ -226,8 +228,30 @@ jobs:
           Copy-Item -Path "artifacts\dist" -Destination $distTarget -Recurse -Force
           Write-Host "Dashboard deployed to $distTarget"
 
-      # This step runs whatever happened before it: a failed install or a
-      # cancelled run ("produkcia bezi" at PP). Once SongPlayer was stopped,
+      # #255 lane 2: the production PC profile (Windows Update, MMCSS, the
+      # SoundGrid adapter, power, Defender, firewall profiles;
+      # prod-environment.md), applied while SongPlayer is stopped: an
+      # adapter restart costs nothing then. It changes only what differs
+      # (PP holds the whole profile since 13.10.2026: it plans nothing) and
+      # verifies it; it never touches PP's DB, settings, task, ACL or a
+      # firewall rule. A child process with its own bound: a throw or a
+      # hang only fails this step, and the always() Start step below brings
+      # SongPlayer back. A dispatch of a build older than the script checks
+      # out no scripts/setup-prod-pc.ps1: this step then fails, PP still
+      # starts.
+      - name: Apply the production PC profile (scripts/setup-prod-pc.ps1)
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\setup-prod-pc.ps1"
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Error "FAIL: scripts/setup-prod-pc.ps1 exited $code - the production PC profile is not applied (see its lines above); SongPlayer is started anyway"
+            exit 1
+          }
+
+      # This step runs whatever happened before it: a failed install, a
+      # failed profile step or a cancelled run ("produkcia bezi" at PP). Once SongPlayer was stopped,
       # it must come back, or PP's wall stays dark. always() is right for
       # THIS step only; the jobs keep the default success(). With SongPlayer
       # still running (nothing was stopped) it does nothing. It proves

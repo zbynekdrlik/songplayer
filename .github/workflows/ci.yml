@@ -1175,6 +1175,7 @@ jobs:
           }
 
       - name: Deploy SongPlayer
+        id: deploy
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
@@ -1261,7 +1262,31 @@ jobs:
           icacls $DataDir /grant "Resolume:(OI)(CI)F"
           Write-Host "=== Data directory permissions set ==="
 
+      # #255 lane 2: the production PC profile (Windows Update, MMCSS, the
+      # SoundGrid adapter, power, Defender, firewall; prod-environment.md),
+      # applied while SongPlayer is stopped, before it starts: the
+      # post-deploy environment gate then reads the applied box. The script
+      # changes only what differs and verifies it. It runs in a child
+      # process with its own bound, so neither a throw nor a hang can keep
+      # SongPlayer from starting: the launch below runs after a failed
+      # profile step too (only a failed stop or install skips it), and the
+      # job still fails here.
+      - name: Apply the production PC profile (scripts/setup-prod-pc.ps1)
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\scripts\setup-prod-pc.ps1"
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Error "FAIL: scripts/setup-prod-pc.ps1 exited $code - the production PC profile is not applied (see its lines above); SongPlayer is started anyway"
+            exit 1
+          }
+
       - name: Configure auto-start and launch
+        # #255 lane 2: also after a failed profile step above (never leave
+        # the box without SongPlayer), but not after a failed stop or
+        # install, and never on a cancelled run.
+        if: ${{ !cancelled() && steps.deploy.outcome == 'success' }}
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
@@ -1484,6 +1509,17 @@ jobs:
           taskkill /F /IM "CLIProxyAPI.exe" 2>&1 | Out-Null
           Start-Sleep -Seconds 3
 
+          # #255 lane 2: the production PC profile while SongPlayer is
+          # stopped, as the deploy does (scripts/setup-prod-pc.ps1). A child
+          # process (no window: it shares this console) waited for at most
+          # 5 min: neither a throw nor a hang in it can skip the relaunch
+          # below (this step has no bound of its own); its failure fails
+          # this step once SongPlayer is back.
+          $setupRun = New-Object System.Diagnostics.ProcessStartInfo('powershell.exe', "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$env:GITHUB_WORKSPACE\scripts\setup-prod-pc.ps1`"")
+          $setupRun.UseShellExecute = $false
+          $setup = [System.Diagnostics.Process]::Start($setupRun)
+          if ($setup.WaitForExit(300000)) { $prodPcExit = $setup.ExitCode } else { $setup.Kill(); $prodPcExit = 124; Write-Warning "scripts/setup-prod-pc.ps1 still ran after 5 min - killed" }
+
           # #127: VERIFY the relaunch actually comes up (process + /api/v1/status),
           # early-exiting the moment it does. A bare `schtasks /run` that silently
           # fails to launch left the box dark on 2026-09-13 (15:48-15:56): the
@@ -1513,6 +1549,10 @@ jobs:
           Write-Host "Relaunching SongPlayer via schtasks /run..."
           schtasks.exe /run /tn SongPlayer
           if (Wait-SongPlayerUp -TimeoutSec 90) {
+            if ($prodPcExit -ne 0) {
+              Write-Error "FAIL: SongPlayer relaunched, but scripts/setup-prod-pc.ps1 exited $prodPcExit - the production PC profile is not applied (see its lines above)"
+              exit 1
+            }
             Write-Host "OK: SongPlayer relaunched and API is responding"
             exit 0
           }
@@ -1523,6 +1563,11 @@ jobs:
           Write-Warning "SongPlayer did not come up after 'schtasks /run'; running Start-ScheduledTask fallback..."
           & "$env:GITHUB_WORKSPACE\scripts\spout-quiesce.ps1"
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
+          # #255 lane 2: stopped again, so the profile again, bounded the
+          # same way (after the run above it only reads; this step fails
+          # below anyway).
+          $setup = [System.Diagnostics.Process]::Start($setupRun)
+          if ($setup.WaitForExit(300000)) { Write-Host "scripts/setup-prod-pc.ps1 exited $($setup.ExitCode) (the first run: $prodPcExit)" } else { $setup.Kill(); Write-Warning "scripts/setup-prod-pc.ps1 still ran after 5 min - killed" }
           Start-Sleep -Seconds 2
           try {
             Start-ScheduledTask -TaskName SongPlayer
