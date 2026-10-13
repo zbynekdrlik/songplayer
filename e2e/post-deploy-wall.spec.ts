@@ -6,16 +6,18 @@
  * rule (ROZHODNUTÉ 13.10.2026): SongPlayer never enforces a display or
  * Resolume configuration, so the wall's state — the screens off, Resolume
  * closed, a display missing — is LOGGED here and never fails a deploy. This
- * spec (SNV's suite and PP's subset, read-only) fails only when the report
- * cannot read the box (`unknown`, no answer, never run:
- * `wall-gate.ts`), then checks the dashboard shows the state it read, with a
+ * spec (SNV's suite and PP's subset, read-only) polls the report until a
+ * check reads the box, and fails only when it cannot for the whole window
+ * (`unknown` throughout, no answer, never run: `wall-gate.ts`); then the
+ * dashboard's marker and its segment must agree, read in one poll, with a
  * clean console.
  */
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import {
   FIRST_CHECK_WAIT_MS,
-  wallChecked,
+  pollWall,
+  wallDashboardMismatch,
   wallFailures,
   wallSummary,
   type WallStatus,
@@ -31,9 +33,6 @@ async function readWall(request: APIRequestContext): Promise<WallStatus | null> 
     return null;
   }
 }
-
-/** The states the health bar shows no segment for. */
-const NO_SEGMENT = ["simple_output", "no_display_output"];
 
 test.describe("LED wall report post-deploy verification (#259)", () => {
   let consoleErrors: string[] = [];
@@ -58,41 +57,49 @@ test.describe("LED wall report post-deploy verification (#259)", () => {
     request,
   }) => {
     test.setTimeout(FIRST_CHECK_WAIT_MS + 60_000);
-    // The report the poll saw checked is the one judged.
-    let wall: WallStatus | null = null;
-    await expect
-      .poll(
-        async () => {
-          wall = await readWall(request);
-          return wallChecked(wall);
-        },
-        { message: "SongPlayer's first wall check", timeout: FIRST_CHECK_WAIT_MS },
-      )
-      .toBe(true);
+    // Polled until a check reads the box; the read the poll ended on is the
+    // one judged (`unknown` fails only when it held the whole window).
+    const wall = await pollWall(
+      () => readWall(request),
+      FIRST_CHECK_WAIT_MS,
+      (ms) => page.waitForTimeout(ms),
+    );
     // The wall's state is information, never a failure (the operator's
     // setup is the truth): logged for the reader of the run.
     console.log(`[#259 wall] ${wallSummary(wall)}`);
     console.log(`[#259 wall] ${JSON.stringify(wall)}`);
     expect(wallFailures(wall), "the wall report").toEqual([]);
 
-    // The dashboard: its poll landed (the marker), and a state with a
-    // segment shows it with the same state.
+    // The dashboard: its marker and its segment, read in ONE poll so both
+    // are the same moment's (the bar re-polls every 5 s).
     await page.goto("/");
     const bar = page.getByTestId("health-bar");
     await expect(bar).toBeVisible({ timeout: 15_000 });
-    await expect(bar).not.toHaveAttribute("data-wall", "unchecked", { timeout: 30_000 });
     await expect(page.getByTestId("health-version")).toBeVisible();
-    const marker = (await bar.getAttribute("data-wall")) ?? "";
-    console.log(`[#259 wall] dashboard data-wall=${marker}`);
     const segment = page.getByTestId("health-wall");
-    if (NO_SEGMENT.includes(marker)) {
-      await expect(segment).toHaveCount(0);
-    } else {
-      await expect(segment).toBeVisible({ timeout: 15_000 });
-      // The segment follows the same poll as the marker.
-      await expect(segment).toHaveAttribute("data-state", marker, { timeout: 15_000 });
-      await expect(segment).toContainText("Stena: ");
-    }
+    // The last poll's reads (an object: a closure's writes stay visible).
+    const seen: { marker: string; segment: string | null } = { marker: "", segment: null };
+    await expect
+      .poll(
+        async () => {
+          // A read that throws (the page mid-render) is one more poll:
+          // `expect.poll` does not retry a generator that throws.
+          try {
+            seen.marker = (await bar.getAttribute("data-wall", { timeout: 1_000 })) ?? "";
+            seen.segment =
+              (await segment.count()) === 0
+                ? null
+                : await segment.getAttribute("data-state", { timeout: 1_000 });
+          } catch (e) {
+            return `read failed: ${e}`;
+          }
+          return wallDashboardMismatch(seen.marker, seen.segment);
+        },
+        { message: "the dashboard's wall marker and segment agree", timeout: 30_000 },
+      )
+      .toBeNull();
+    console.log(`[#259 wall] dashboard data-wall=${seen.marker} segment=${seen.segment ?? "none"}`);
+    if (seen.segment !== null) await expect(segment).toContainText("Stena: ");
     expect(consoleErrors, "browser console").toEqual([]);
   });
 });

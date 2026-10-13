@@ -1,8 +1,13 @@
 import { test, expect } from "@playwright/test";
 import {
   FIRST_CHECK_WAIT_MS,
+  NO_SEGMENT_STATES,
+  POLL_INTERVAL_MS,
+  pollWall,
   wallChecked,
+  wallDashboardMismatch,
   wallFailures,
+  wallReadable,
   wallSummary,
   type WallStatus,
 } from "./wall-gate";
@@ -25,6 +30,7 @@ const snv = (over: Partial<WallStatus> = {}): WallStatus => ({
     arena_output: {
       advanced: true,
       preset: "snv surround 7680",
+      preset_found: true,
       displays: [
         { name: "Display 1", device_id: SPAN_KEY, width: 7680, height: 1080, fullscreen: true },
       ],
@@ -51,13 +57,10 @@ const snv = (over: Partial<WallStatus> = {}): WallStatus => ({
         hz: 60,
       },
     ],
-    nvidia: true,
-    connected: [
-      { id: "0x80061083", connector: "HDMI" },
-      { id: "0x80061086", connector: "DisplayPort" },
-      { id: "0x80061087", connector: "DisplayPort" },
-    ],
-    grids: [{ rows: 1, columns: 3, displays: ["0x80061086", "0x80061087", "0x80061083"] }],
+    // A healthy wall never asks NVAPI.
+    nvidia: "not_read",
+    connected: null,
+    grids: null,
   },
   read_errors: [],
   checked_at_ms: 1_791_608_681_366,
@@ -69,6 +72,7 @@ test("every state the wall can be in passes: it is the operator's setup", () => 
     "ok",
     "arena_off",
     "simple_output",
+    "no_preset",
     "no_display_output",
     "screens_off",
     "display_missing",
@@ -88,12 +92,14 @@ test("a report that cannot read the box fails, naming why", () => {
         text_sk: "uložený výstup Resolume Arena sa nepodarilo zistiť",
       },
     ],
-    read_errors: ["C:\\Users\\Resolume\\Documents\\Resolume Arena\\Presets\\x.xml does not exist"],
+    read_errors: [
+      "C:\\Users\\Resolume\\Documents\\Resolume Arena\\Presets\\Advanced Output\\x.xml: <OutputDeviceDisplay> has no width",
+    ],
   });
   expect(wallFailures(unknown)).toEqual([
     "the wall report could not read the box (state unknown)",
     "unreadable:arena_output: uložený výstup Resolume Arena sa nepodarilo zistiť",
-    "read error: C:\\Users\\Resolume\\Documents\\Resolume Arena\\Presets\\x.xml does not exist",
+    "read error: C:\\Users\\Resolume\\Documents\\Resolume Arena\\Presets\\Advanced Output\\x.xml: <OutputDeviceDisplay> has no width",
   ]);
   expect(wallFailures(null)).toEqual([
     "/api/v1/wall did not answer (a server without the #259 report?)",
@@ -101,24 +107,115 @@ test("a report that cannot read the box fails, naming why", () => {
   expect(wallFailures(snv({ checked: false }))).toEqual(["the wall report has not run yet"]);
 });
 
-test("the gate polls until the first check ran", () => {
+test("the gate polls until a check read the box", () => {
   expect(wallChecked(null)).toBe(false);
   expect(wallChecked(undefined)).toBe(false);
   expect(wallChecked(snv({ checked: false }))).toBe(false);
   expect(wallChecked(snv())).toBe(true);
+  expect(wallReadable(null)).toBe(false);
+  expect(wallReadable(snv({ checked: false }))).toBe(false);
+  expect(wallReadable(snv({ state: "unknown" }))).toBe(false);
+  expect(wallReadable(snv({ state: "no_preset" }))).toBe(true);
+  expect(wallReadable(snv())).toBe(true);
   expect(FIRST_CHECK_WAIT_MS).toBeGreaterThanOrEqual(15_000);
+});
+
+/** A fake clock and a script of reads: each read answers the next status
+ * (the last repeated), each wait moves the clock. */
+function scripted(reads: (WallStatus | null)[]) {
+  let clock = 0;
+  let asked = 0;
+  const waits: number[] = [];
+  return {
+    read: async () => reads[Math.min(asked++, reads.length - 1)],
+    wait: async (ms: number) => {
+      waits.push(ms);
+      clock += ms;
+    },
+    now: () => clock,
+    asked: () => asked,
+    waits,
+  };
+}
+
+test("an unknown read is polled past; only a whole window of unknown is judged", async () => {
+  const unknown = snv({ state: "unknown" });
+  // One failed read, then the box read: the readable one is judged.
+  const once = scripted([null, unknown, snv()]);
+  const read = await pollWall(once.read, 30_000, once.wait, once.now);
+  expect(read?.state).toBe("ok");
+  expect(wallFailures(read)).toEqual([]);
+  expect(once.asked()).toBe(3);
+  expect(once.waits).toEqual([POLL_INTERVAL_MS, POLL_INTERVAL_MS]);
+  // A first read that reads is taken at once.
+  const first = scripted([snv({ state: "screens_off" })]);
+  expect((await pollWall(first.read, 30_000, first.wait, first.now))?.state).toBe("screens_off");
+  expect(first.asked()).toBe(1);
+  // Unknown for the whole window: read until the deadline, then judged.
+  const always = scripted([unknown]);
+  const last = await pollWall(always.read, 10_000, always.wait, always.now, 2_000);
+  expect(last?.state).toBe("unknown");
+  expect(always.asked()).toBe(6);
+  expect(always.now()).toBe(10_000);
+  expect(wallFailures(last)).toEqual(["the wall report could not read the box (state unknown)"]);
+});
+
+test("the dashboard agrees when its marker and its segment are one state", () => {
+  expect(NO_SEGMENT_STATES).toEqual(["simple_output", "no_display_output"]);
+  expect(wallDashboardMismatch("ok", "ok")).toBeNull();
+  expect(wallDashboardMismatch("no_preset", "no_preset")).toBeNull();
+  expect(wallDashboardMismatch("simple_output", null)).toBeNull();
+  expect(wallDashboardMismatch("no_display_output", null)).toBeNull();
+  expect(wallDashboardMismatch("unchecked", null)).toBe(
+    'data-wall="unchecked": the bar\'s first wall poll has not landed',
+  );
+  expect(wallDashboardMismatch("", null)).toBe(
+    'data-wall="": the bar\'s first wall poll has not landed',
+  );
+  expect(wallDashboardMismatch("ok", "screens_off")).toBe(
+    "data-wall=ok but the segment shows screens_off",
+  );
+  expect(wallDashboardMismatch("ok", null)).toBe("data-wall=ok but no segment");
+  expect(wallDashboardMismatch("simple_output", "ok")).toBe(
+    "data-wall=simple_output but a segment shows ok",
+  );
 });
 
 test("the summary line tells what Resolume wants and what the box shows", () => {
   expect(wallSummary(snv())).toBe(
     'state=ok arena=true advanced preset="snv surround 7680" wants=[Display 1 7680x1080] ' +
       "windows=[\\\\.\\DISPLAY5 3840x2160@0,0, \\\\.\\DISPLAY1 7680x1080@3840,0] " +
-      "nvidia=3 connected, grids=[1x3]",
+      "nvidia=not read",
+  );
+  // The span gone: NVAPI read, both its reads; or the grids unread.
+  const spanGone = snv({
+    state: "display_missing",
+    read: {
+      arena_running: true,
+      displays: null,
+      nvidia: "read",
+      connected: [
+        { id: "0x80061083", connector: "HDMI" },
+        { id: "0x80061086", connector: "DisplayPort" },
+        { id: "0x80061087", connector: "DisplayPort" },
+      ],
+      grids: [{ rows: 1, columns: 3, displays: ["0x80061086", "0x80061087", "0x80061083"] }],
+    },
+  });
+  expect(wallSummary(spanGone)).toBe(
+    "state=display_missing arena=true output=? windows=? nvidia=3 connected, grids=[1x3]",
+  );
+  const gridsUnread = snv({
+    state: "display_missing",
+    read: { ...spanGone.read, grids: null },
+  });
+  expect(wallSummary(gridsUnread)).toBe(
+    "state=display_missing arena=true output=? windows=? nvidia=3 connected, grids=?",
   );
   const night = snv({
     state: "screens_off",
     problems: [{ code: "screens_off", short_sk: "obrazovky vypnuté", text_sk: "…" }],
-    read: { arena_running: true, displays: null, nvidia: false },
+    read: { arena_running: true, displays: null, nvidia: "no_driver" },
   });
   expect(wallSummary(night)).toBe(
     "state=screens_off arena=true output=? windows=? nvidia=none problems=[screens_off]",

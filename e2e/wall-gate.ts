@@ -7,7 +7,8 @@
  * operator's own setup is the truth, and the screens may be off, Resolume
  * closed or re-arranged at any time. So the wall's state never fails a
  * deploy: it is logged. The gate fails only when SongPlayer's own readers
- * are broken: the report did not answer, never ran, or reads `unknown`.
+ * are broken: the report did not answer, never ran, or reads `unknown` for
+ * its whole window (a read can fail once; the gate polls on).
  */
 
 /** One problem as the server names it (`sp_core::wall::WallProblemView`). */
@@ -46,9 +47,16 @@ export interface WallStatus {
   read?: {
     arena_running?: boolean | null;
     arena_windows?: { title: string; visible: boolean }[] | null;
-    arena_output?: { advanced: boolean; preset?: string | null; displays: WantedDisplay[] } | null;
+    arena_output?: {
+      advanced: boolean;
+      preset?: string | null;
+      preset_found?: boolean;
+      displays: WantedDisplay[];
+    } | null;
     displays?: WindowsDisplay[] | null;
-    nvidia?: boolean | null;
+    /** How far NVAPI was read: only when a display Resolume wants is gone
+     * or has another size (`sp_core::wall::NvidiaRead`). */
+    nvidia?: "not_read" | "no_driver" | "read" | null;
     connected?: { id: string; connector: string }[] | null;
     grids?: { rows: number; columns: number; displays: string[] }[] | null;
   };
@@ -60,9 +68,55 @@ export interface WallStatus {
  * restart, ms (a check runs at once, every 5 s, a read is bounded at 10 s). */
 export const FIRST_CHECK_WAIT_MS = 30_000;
 
-/** The first check has run (the gate polls for it). */
+/** How often the gate reads the report while it waits, ms. */
+export const POLL_INTERVAL_MS = 2_000;
+
+/** The states the health bar shows no segment for (Resolume drives no
+ * physical display: nothing to report). */
+export const NO_SEGMENT_STATES = ["simple_output", "no_display_output"];
+
+/** The first check has run. */
 export function wallChecked(status: WallStatus | null | undefined): boolean {
   return status !== null && status !== undefined && status.checked === true;
+}
+
+/** A check ran and read the box (any state but `unknown`): what the gate
+ * polls for. */
+export function wallReadable(status: WallStatus | null | undefined): boolean {
+  return wallChecked(status) && status?.state !== "unknown";
+}
+
+/** Reads the report every `intervalMs` until a read is readable or
+ * `timeoutMs` passed; answers that read, else the last one (judged by
+ * `wallFailures`: `unknown` fails only when it held the whole window). */
+export async function pollWall(
+  read: () => Promise<WallStatus | null>,
+  timeoutMs: number,
+  wait: (ms: number) => Promise<void>,
+  now: () => number = Date.now,
+  intervalMs: number = POLL_INTERVAL_MS,
+): Promise<WallStatus | null> {
+  const deadline = now() + timeoutMs;
+  let status = await read();
+  while (!wallReadable(status) && now() < deadline) {
+    await wait(intervalMs);
+    status = await read();
+  }
+  return status;
+}
+
+/** Why the dashboard disagrees with itself, or null when it agrees: the
+ * bar's `data-wall` marker and the segment's `data-state` (null: no
+ * segment) are read in one poll, so they are one moment's. */
+export function wallDashboardMismatch(marker: string, segmentState: string | null): string | null {
+  if (marker === "" || marker === "unchecked") {
+    return `data-wall=${JSON.stringify(marker)}: the bar's first wall poll has not landed`;
+  }
+  if (NO_SEGMENT_STATES.includes(marker)) {
+    return segmentState === null ? null : `data-wall=${marker} but a segment shows ${segmentState}`;
+  }
+  if (segmentState === null) return `data-wall=${marker} but no segment`;
+  return segmentState === marker ? null : `data-wall=${marker} but the segment shows ${segmentState}`;
 }
 
 /** Why the gate fails; [] = SongPlayer read the box (whatever the wall's
@@ -96,11 +150,13 @@ export function wallSummary(status: WallStatus | null | undefined): string {
     ? `windows=[${read.displays.map((d) => `${d.name} ${d.width}x${d.height}@${d.x},${d.y}`).join(", ")}]`
     : "windows=?";
   const nvidia =
-    read.nvidia === false
-      ? "nvidia=none"
-      : `nvidia=${read.connected?.length ?? "?"} connected, grids=[${(read.grids ?? [])
-          .map((g) => `${g.rows}x${g.columns}`)
-          .join(", ")}]`;
+    read.nvidia === "not_read"
+      ? "nvidia=not read"
+      : read.nvidia === "no_driver"
+        ? "nvidia=none"
+        : `nvidia=${read.connected?.length ?? "?"} connected, grids=${
+            read.grids ? `[${read.grids.map((g) => `${g.rows}x${g.columns}`).join(", ")}]` : "?"
+          }`;
   const problems = (status.problems ?? []).map((p) => p.code).join(", ");
   return (
     `state=${status.state} arena=${read.arena_running ?? "?"} ${wanted} ${windows} ${nvidia}` +

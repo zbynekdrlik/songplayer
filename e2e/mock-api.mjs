@@ -1523,9 +1523,9 @@ const WALL_DEFAULT = {
   read: {
     arena_running: true,
     arena_windows: [],
-    arena_output: { advanced: false, preset: null, displays: [] },
+    arena_output: { advanced: false, preset: null, preset_found: false, displays: [] },
     displays: [],
-    nvidia: false,
+    nvidia: "not_read",
     connected: null,
     grids: null,
   },

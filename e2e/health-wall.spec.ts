@@ -2,7 +2,8 @@ import { test, expect } from "@playwright/test";
 
 // #259 — the LED wall report on the shared HealthBar: `Stena: …`, green
 // while Resolume draws on every display its own saved output wants, grey
-// while the screens are off (or Resolume does not run), red while a display
+// while the screens are off (or Resolume does not run, or keeps no saved
+// output), red while a display
 // Resolume wants is missing or it does not draw on it, with the rule, what
 // Resolume wants and every problem as the tooltip. Nothing while Resolume
 // drives no physical display (the mock's default: its simple output). The
@@ -31,14 +32,15 @@ const READ = {
   arena_output: {
     advanced: true,
     preset: "snv surround 7680",
+    preset_found: true,
     displays: [
       { name: "Display 1", device_id: SPAN_KEY, width: 7680, height: 1080, fullscreen: true },
     ],
   },
   displays: [],
-  nvidia: true,
-  connected: [],
-  grids: [],
+  nvidia: "not_read",
+  connected: null,
+  grids: null,
 };
 
 const SCREENS_OFF = {
@@ -153,7 +155,7 @@ test("the wall segment shows on every page's health bar", async ({ page, request
   }
 });
 
-test("Resolume not running reads grey, the read failing reads grey too", async ({
+test("Resolume not running or with no saved output reads grey, the read failing too", async ({
   page,
   request,
 }) => {
@@ -163,17 +165,34 @@ test("Resolume not running reads grey, the read failing reads grey too", async (
   const segment = page.getByTestId("health-wall");
   await expect(segment).toHaveText("Stena: Resolume nebeží", { timeout: 10000 });
   await expect(segment).toHaveClass(/health-off/);
+  // The advanced output on with no preset saved: the operator's setup,
+  // calm grey (never "nedá sa overiť").
+  await request.post("/__mock/wall", {
+    data: {
+      state: "no_preset",
+      read: {
+        arena_running: true,
+        arena_output: { advanced: true, preset: null, preset_found: false, displays: [] },
+      },
+    },
+  });
+  await expect(segment).toHaveText("Stena: Resolume nemá uložený výstup", { timeout: 15000 });
+  await expect(segment).toHaveClass(/health-off/);
+  await expect(segment).toHaveAttribute("data-state", "no_preset");
+  await expect(segment).toHaveAttribute("title", RULE);
   await request.post("/__mock/wall", {
     data: {
       state: "unknown",
       problems: [
         {
-          code: "unreadable:displays",
+          code: "unreadable:arena_output",
           short_sk: "nedá sa overiť",
-          text_sk: "zoznam obrazoviek Windows sa nepodarilo zistiť",
+          text_sk: "uložený výstup Resolume Arena sa nepodarilo zistiť",
         },
       ],
-      read_errors: ["EnumDisplaySettingsW failed for \\\\.\\DISPLAY1"],
+      read_errors: [
+        "C:\\Users\\Resolume\\Documents\\Resolume Arena\\Preferences\\AdvancedOutput.xml: not XML: …",
+      ],
     },
   });
   await expect(segment).toHaveText("Stena: nedá sa overiť", { timeout: 15000 });
@@ -181,6 +200,6 @@ test("Resolume not running reads grey, the read failing reads grey too", async (
   await expect(segment).toHaveAttribute("data-state", "unknown");
   await expect(segment).toHaveAttribute(
     "title",
-    `${RULE} Zistené: zoznam obrazoviek Windows sa nepodarilo zistiť.`,
+    `${RULE} Zistené: uložený výstup Resolume Arena sa nepodarilo zistiť.`,
   );
 });
