@@ -117,9 +117,10 @@ def fit_rate(rec: np.ndarray, orig: np.ndarray, lag: int, sr: int) -> dict:
     """Least-squares ``dev(i) = a + b·i`` over the measurable windows.
 
     Returns ``a`` (samples), ``b`` (dimensionless rate), ``rate_ppm``
-    (``b·1e6``), ``fit_residual_ms`` (the max |residual| of a window, in ms)
-    and ``windows`` (used). With fewer than ``FIT_MIN_WINDOWS`` windows the
-    fit is ``None`` throughout.
+    (``b·1e6``), ``fit_residual_ms`` (the max |residual| of a window, in ms),
+    ``fit_residual_median_ms`` (the median one: a single false peak does not
+    move it, a step does) and ``windows`` (used). With fewer than
+    ``FIT_MIN_WINDOWS`` windows the fit is ``None`` throughout.
     """
     t, dev, _ = local_lags(rec, orig, lag, sr)
     if len(t) < FIT_MIN_WINDOWS:
@@ -128,16 +129,18 @@ def fit_rate(rec: np.ndarray, orig: np.ndarray, lag: int, sr: int) -> dict:
             "b": None,
             "rate_ppm": None,
             "fit_residual_ms": None,
+            "fit_residual_median_ms": None,
             "windows": len(t),
         }
     design = np.vstack([np.ones_like(t), t]).T
     (a, b), *_ = np.linalg.lstsq(design, dev, rcond=None)
-    resid = dev - (a + b * t)
+    resid = np.abs(dev - (a + b * t))
     return {
         "a": float(a),
         "b": float(b),
         "rate_ppm": float(b * 1e6),
-        "fit_residual_ms": float(np.max(np.abs(resid)) * 1000.0 / sr),
+        "fit_residual_ms": float(np.max(resid) * 1000.0 / sr),
+        "fit_residual_median_ms": float(np.median(resid) * 1000.0 / sr),
         "windows": len(t),
     }
 
@@ -177,8 +180,8 @@ def compensate(rec: np.ndarray, orig: np.ndarray, lag: int, sr: int) -> dict:
     ``lag`` and warp the original onto the recording when the fit allows it.
 
     Always returns ``aligned`` (``len(rec)`` samples of the original heard at
-    each recording sample), ``warped``, ``rate_ppm``, ``fit_residual_ms`` and
-    ``fit_windows``. When warped it also returns ``corr`` (the normalized
+    each recording sample), ``warped``, ``rate_ppm``, ``fit_residual_ms``,
+    ``fit_residual_median_ms`` and ``fit_windows``. When warped it also returns ``corr`` (the normalized
     correlation against the warped original) and ``mid_lag`` (the original
     position of the recording's midpoint minus the midpoint index, in samples).
     Unwarped, ``aligned`` is the plain slice at ``lag``, which is the old
@@ -192,6 +195,7 @@ def compensate(rec: np.ndarray, orig: np.ndarray, lag: int, sr: int) -> dict:
         "warped": False,
         "rate_ppm": fit["rate_ppm"],
         "fit_residual_ms": fit["fit_residual_ms"],
+        "fit_residual_median_ms": fit["fit_residual_median_ms"],
         "fit_windows": fit["windows"],
         "aligned": orig[lag : lag + n],
     }
