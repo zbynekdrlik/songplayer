@@ -17,6 +17,14 @@ ffmpeg -y \
   -c:a flac -compression_level 5 \
   silent_3s.flac
 
+# The same, exactly 4.000 seconds (192000 frames): audio that outlasts the
+# 3 s video by 1 s (#257, `split_synced.rs`: a seek past the video's end).
+ffmpeg -y \
+  -f lavfi -i "anullsrc=r=48000:cl=stereo" \
+  -t 4 \
+  -c:a flac -compression_level 5 \
+  silent_4s.flac
+
 # 160x120 testsrc2 H.264 video, exactly 3.000 seconds, no audio track.
 #
 # The original intent was a 32x32 all-black fixture (smaller file) but

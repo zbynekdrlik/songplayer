@@ -19,13 +19,24 @@ fn picture(mark: u8) -> Vec<u8> {
     vec![mark; 12]
 }
 
+/// How the mock video answers a seek.
+#[derive(Clone, Copy)]
+enum SeekAnswer {
+    /// Lands on the last keyframe (every 3rd frame) at or before the position.
+    Lands,
+    /// Refuses every seek.
+    Refuses,
+    /// Lands at end-of-stream: no frame after any seek (a reader that lost
+    /// its file).
+    LosesTheFile,
+}
+
 /// A video reader of frames at the given ms (frame `k`'s bytes all `k + 1`),
-/// 10 fps, landing a seek on the last keyframe (every 3rd frame) at or
-/// before the position; `refuse` refuses every seek.
+/// 10 fps, answering a seek as `seeks`.
 struct Video {
     ms: Vec<u64>,
     next: usize,
-    refuse: bool,
+    seeks: SeekAnswer,
 }
 
 impl MediaStream for Video {
@@ -33,11 +44,12 @@ impl MediaStream for Video {
         self.ms.last().copied().unwrap_or(0)
     }
     fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
-        if self.refuse {
-            return Err(DecoderError::Seek("refused".into()));
-        }
         let at_or_before = self.ms.iter().take_while(|&&m| m <= position_ms).count();
-        self.next = at_or_before.saturating_sub(1) / 3 * 3;
+        self.next = match self.seeks {
+            SeekAnswer::Lands => at_or_before.saturating_sub(1) / 3 * 3,
+            SeekAnswer::Refuses => return Err(DecoderError::Seek("refused".into())),
+            SeekAnswer::LosesTheFile => self.ms.len(),
+        };
         Ok(())
     }
 }
@@ -114,11 +126,21 @@ fn chunk(ms: u64) -> DecodedAudioFrame {
 
 /// A decoder (40 ms pairing) over frames and chunks at the given ms.
 fn decoder(video: &[u64], audio: &[u64], refuse_seeks: bool) -> SplitSyncedDecoder {
+    let seeks = if refuse_seeks {
+        SeekAnswer::Refuses
+    } else {
+        SeekAnswer::Lands
+    };
+    decoder_answering(video, audio, seeks)
+}
+
+/// [`decoder`] with the video answering a seek as `seeks`.
+fn decoder_answering(video: &[u64], audio: &[u64], seeks: SeekAnswer) -> SplitSyncedDecoder {
     SplitSyncedDecoder::new(
         Box::new(Video {
             ms: video.to_vec(),
             next: 0,
-            refuse: refuse_seeks,
+            seeks,
         }),
         Box::new(Audio {
             ms: audio.to_vec(),
@@ -339,6 +361,29 @@ fn a_seek_past_the_last_frame_holds_that_frame_from_the_seek() {
             (200, 850, vec![150, 200], false, 6),
             (300, 950, vec![250], true, 6),
         ]
+    );
+}
+
+#[test]
+fn a_seek_drops_the_held_picture_from_before_it() {
+    // Review: a seek that lands no frame and decoded nothing before the
+    // video's end (a reader that lost its file) leaves no picture to hold:
+    // the song ends there. Frame 200, held from before the seek, is never
+    // shown with the audio from the seek's position on.
+    let mut dec = decoder_answering(
+        &[0, 100, 200],
+        &every(0, 900, 100),
+        SeekAnswer::LosesTheFile,
+    );
+    let mut p = DecodeProducer::new(0);
+    let taps = taps();
+    for _ in 0..4 {
+        p.next_item(&mut dec, &taps).unwrap().expect("an item");
+    }
+    assert_eq!(p.seek(&mut dec, 100, 1, 1), 100);
+    assert!(
+        p.next_item(&mut dec, &taps).unwrap().is_none(),
+        "no stale picture past the seek"
     );
 }
 

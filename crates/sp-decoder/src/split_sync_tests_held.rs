@@ -9,8 +9,8 @@
 //! delivers no frame, and the last frame its fast-forward decoded is the
 //! picture the audio plays on (`take_frame_before_end`).
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::stream::MediaStream;
@@ -324,4 +324,147 @@ fn a_rate_outside_10_to_120_fps_holds_at_30_fps() {
     assert_eq!(held_offset_ms(3, (121, 1)), 100, "121 fps: 30 fps");
     assert_eq!(held_offset_ms(3, (1_000, 1)), 100, "1000 fps: 30 fps");
     assert_eq!(held_offset_ms(3, (1, 2)), 100, "0.5 fps: 30 fps");
+}
+
+/// How a Media Foundation-like reader answers a seek past its last frame
+/// (#257 review): it may refuse the position, or land at end-of-stream.
+#[derive(Clone, Copy, Debug)]
+enum PastEnd {
+    Refuse,
+    Eof,
+}
+
+/// A video reader like Media Foundation's: frames every 100 ms from 0 to
+/// `last_ms` (10 fps), a keyframe every 300 ms, the container's duration
+/// `duration_ms`, and a seek past the last frame answered as `past`. It
+/// records every position it is asked to seek to.
+struct MfVideo {
+    last_ms: u64,
+    duration_ms: u64,
+    next: Option<u64>,
+    past: PastEnd,
+    seeks: Arc<Mutex<Vec<u64>>>,
+}
+
+impl MediaStream for MfVideo {
+    fn duration_ms(&self) -> u64 {
+        self.duration_ms
+    }
+    fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
+        self.seeks.lock().unwrap().push(position_ms);
+        if position_ms <= self.last_ms {
+            self.next = Some(position_ms / 300 * 300);
+            return Ok(());
+        }
+        match self.past {
+            PastEnd::Refuse => Err(DecoderError::Seek("past the end".into())),
+            PastEnd::Eof => {
+                self.next = None;
+                Ok(())
+            }
+        }
+    }
+}
+
+impl VideoStream for MfVideo {
+    fn next_frame(&mut self) -> Result<Option<DecodedVideoFrame>, DecoderError> {
+        let Some(ms) = self.next.filter(|&ms| ms <= self.last_ms) else {
+            return Ok(None);
+        };
+        self.next = Some(ms + 100);
+        Ok(Some(DecodedVideoFrame {
+            data: vec![0u8; 6],
+            width: 2,
+            height: 2,
+            stride: 2,
+            timestamp_ms: ms,
+            pixel_format: PixelFormat::Nv12,
+        }))
+    }
+    fn width(&self) -> u32 {
+        2
+    }
+    fn height(&self) -> u32 {
+        2
+    }
+    fn frame_rate(&self) -> (u32, u32) {
+        (10, 1)
+    }
+}
+
+/// A decoder over the Media Foundation-like video (frames 0 … 900, its
+/// duration `duration_ms`, a seek past 900 answered as `past`) and chunks
+/// every 50 ms to 2000, and the positions the video was asked to seek to.
+fn mf_decoder(duration_ms: u64, past: PastEnd) -> (SplitSyncedDecoder, Arc<Mutex<Vec<u64>>>) {
+    let seeks = Arc::new(Mutex::new(Vec::new()));
+    let dec = SplitSyncedDecoder::new(
+        Box::new(MfVideo {
+            last_ms: 900,
+            duration_ms,
+            next: Some(0),
+            past,
+            seeks: Arc::clone(&seeks),
+        }),
+        Box::new(Audio {
+            ms: every(0, 2_000, 50),
+            next: 0,
+        }),
+    )
+    .expect("valid mock readers");
+    (dec, seeks)
+}
+
+#[test]
+fn a_seek_past_the_videos_end_asks_the_video_for_one_frame_before_it() {
+    // Review: a Pause in the held tail stores a position past the last
+    // frame, and ▶ resumes there. Asked for 1250 itself, Media Foundation
+    // may refuse (the song would play on from where it was) or land at its
+    // end with no frame (no picture to hold: the tail would never play). The
+    // decoder asks the VIDEO for its duration less one frame (1000 − 100),
+    // and keeps the fast-forward and the audio on 1250: frame 900 is held
+    // from 1250 on, exactly as when the reader lands on a keyframe itself.
+    for past in [PastEnd::Refuse, PastEnd::Eof] {
+        let (mut dec, seeks) = mf_decoder(1_000, past);
+        dec.seek(1_250)
+            .expect("the video is asked a position it has");
+        assert_eq!(*seeks.lock().unwrap(), vec![900], "{past:?}");
+        assert!(dec.next_synced().unwrap().is_none(), "no frame past 1250");
+        let held = dec.take_frame_before_end().expect("the last frame decoded");
+        assert_eq!(held.timestamp_ms, 900, "{past:?}");
+        let steps = held_steps(&mut dec);
+        assert_eq!(steps.len(), 9, "1250 … 2050, {past:?}");
+        assert_eq!(steps.first(), Some(&(1_250, vec![1_250], false)));
+        assert_eq!(steps.last(), Some(&(2_050, vec![2_000], true)));
+    }
+}
+
+#[test]
+fn the_video_is_asked_at_most_its_duration_less_one_frame() {
+    // A position inside the video goes through as asked; from one frame
+    // before the duration on, the video is asked for that frame.
+    let cases = [
+        (0, 0),
+        (500, 500),
+        (899, 899),
+        (900, 900),
+        (901, 900),
+        (1_000, 900),
+        (5_000, 900),
+    ];
+    for (asked, video) in cases {
+        let (mut dec, seeks) = mf_decoder(1_000, PastEnd::Refuse);
+        dec.seek(asked)
+            .expect("the video is asked a position it has");
+        assert_eq!(*seeks.lock().unwrap(), vec![video], "asked {asked}");
+    }
+}
+
+#[test]
+fn a_video_of_unknown_duration_is_asked_the_position_itself() {
+    // A reader that reports no duration gives nothing to clamp to: the
+    // position goes through as asked, and the reader's refusal is the
+    // seek's.
+    let (mut dec, seeks) = mf_decoder(0, PastEnd::Refuse);
+    assert!(dec.seek(1_250).is_err(), "the video refused 1250");
+    assert_eq!(*seeks.lock().unwrap(), vec![1_250]);
 }
