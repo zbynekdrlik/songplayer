@@ -120,11 +120,7 @@ pub fn preset_name(xml: &str) -> Result<String, String> {
     let name = setup
         .attribute("presetFile")
         .ok_or("<ScreenSetup> has no presetFile")?;
-    if name.is_empty()
-        || name == "."
-        || name == ".."
-        || name.contains(|c| matches!(c, '/' | '\\' | ':'))
-    {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', ':']) {
         return Err(format!("presetFile {name:?} is no file name"));
     }
     Ok(name.to_string())
