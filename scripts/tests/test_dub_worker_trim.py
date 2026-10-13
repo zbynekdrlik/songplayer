@@ -168,3 +168,52 @@ def test_trim_tail_never_overwrites_an_earlier_prev(tmp_path, capsys):
     assert prev.read_bytes() == b"the original"
     assert dub.read_bytes() == data
     assert not (tmp_path / "a_dub.part.flac").exists()
+
+
+def test_a_failed_promote_leaves_the_dub_and_no_backup_or_partial(
+    tmp_path, capsys, monkeypatch
+):
+    # The rename that promotes the cut file fails (Windows refuses it): the
+    # dub stays bit for bit, no partial is left, and no .prev either: the
+    # copy this run made is dropped, so a re-run is not refused for it.
+    audio = tmp_path / "a.flac"
+    dub = tmp_path / "a_dub.flac"
+    _flac(audio, RATE, RATE)
+    _flac(dub, 72_000, 52_800)
+    data = dub.read_bytes()
+
+    def refuse(src, dst):
+        raise OSError("[WinError 5] Access is denied")
+
+    monkeypatch.setattr(dw.wr, "replace_file", refuse)
+    with pytest.raises(SystemExit) as exit_info:
+        dw.main(["trim-tail", "--dub", str(dub), "--audio", str(audio)])
+    assert exit_info.value.code == 1
+    assert "Access is denied" in json.loads(capsys.readouterr().err.strip())["error"]
+    assert dub.read_bytes() == data
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.flac", "a_dub.flac"]
+
+
+def test_a_backup_copy_that_fails_leaves_no_prev(tmp_path, capsys, monkeypatch):
+    # The copy of the original dub fails halfway (a full disk): a truncated
+    # .prev must never stay behind, or every re-run would be refused for it
+    # and it could later be restored as "the original".
+    import shutil
+
+    audio = tmp_path / "a.flac"
+    dub = tmp_path / "a_dub.flac"
+    _flac(audio, RATE, RATE)
+    _flac(dub, 72_000, 52_800)
+    data = dub.read_bytes()
+
+    def half_copy(src, dst, *args, **kwargs):
+        with open(dst, "wb") as out:
+            out.write(b"half")
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(shutil, "copy2", half_copy)
+    with pytest.raises(SystemExit) as exit_info:
+        dw.main(["trim-tail", "--dub", str(dub), "--audio", str(audio)])
+    assert exit_info.value.code == 1
+    assert dub.read_bytes() == data
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.flac", "a_dub.flac"]
