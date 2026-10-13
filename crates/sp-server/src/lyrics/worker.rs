@@ -406,6 +406,10 @@ impl LyricsWorker {
         for video_id in crate::peer::standin::supersede_next(self.peer.as_ref()).await {
             self.peer_lyrics_completed(video_id).await;
         }
+        // #264: then one song whose peer's lyrics this node does not hold.
+        for video_id in crate::peer::follow::follow_next(self.peer.as_ref()).await {
+            self.peer_lyrics_completed(video_id).await;
+        }
 
         // #184 G0.1: a dub owns the heavy slot — skip this heavy lyrics tick while
         // one is queued (isolation/mtl are not mid-run yielded; they defer here).

@@ -228,6 +228,55 @@ pub(crate) async fn place(
     Ok(())
 }
 
+/// Every row of `youtube_id` here, by id, with whether it records an audio:
+/// a peer's lyrics go into all of them (the file is the video's, #144 F1).
+pub(crate) async fn video_rows(
+    pool: &SqlitePool,
+    youtube_id: &str,
+) -> Result<Vec<(i64, bool)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, audio_file_path IS NOT NULL FROM videos WHERE youtube_id = ? ORDER BY id",
+    )
+    .bind(youtube_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// The row of `rows` ([`video_rows`]) a peer's copy is checked against
+/// (`Exchange::audio_verdict`): one that records an audio (the video's rows
+/// share it, review round 1), else the lowest; `None` when no row is left.
+pub(crate) fn audio_row(rows: &[(i64, bool)]) -> Option<i64> {
+    rows.iter()
+        .find(|(_, audio)| *audio)
+        .or(rows.first())
+        .map(|(id, _)| *id)
+}
+
+/// The plan's lyrics of `youtube_id` into `{yt}_lyrics.json` and EVERY row
+/// of `rows`: the peer's row checked ([`peer_row`]), the track fetched,
+/// parsed and renamed over the old one ([`place`]: the old track is served
+/// until then, and stays when anything before fails), then each row takes
+/// the peer's lyrics columns (`adopt_lyrics`). Answers the rows that took
+/// them; a row whose write failed is WARNed and left out, so the caller
+/// records the copy as taken only once every row has it.
+pub(crate) async fn take_into_rows(
+    ex: &Exchange,
+    youtube_id: &str,
+    plan: &FetchPlan,
+    rows: &[i64],
+) -> Result<Vec<i64>, PeerError> {
+    let (artifact, lyrics) = peer_row(ex, youtube_id, plan).await?;
+    place(ex, youtube_id, plan, artifact, &lyrics).await?;
+    let mut adopted = Vec::with_capacity(rows.len());
+    for &id in rows {
+        match models_peer::adopt_lyrics(&ex.pool, id, &lyrics).await {
+            Ok(()) => adopted.push(id),
+            Err(e) => warn!(video_id = id, %e, "exchange: a row did not take the peer's lyrics"),
+        }
+    }
+    Ok(adopted)
+}
+
 /// The row already serves this very track: the same source, the same version.
 async fn serves_the_same(
     pool: &SqlitePool,

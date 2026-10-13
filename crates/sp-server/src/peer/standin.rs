@@ -169,8 +169,9 @@ impl Exchange {
     }
 }
 
-/// `d` in whole milliseconds (saturating).
-fn duration_ms(d: Duration) -> i64 {
+/// `d` in whole milliseconds (saturating; also the lyrics follow's,
+/// `peer::follow`).
+pub(crate) fn duration_ms(d: Duration) -> i64 {
     i64::try_from(d.as_millis()).unwrap_or(i64::MAX)
 }
 
@@ -233,22 +234,14 @@ pub async fn supersede_next(ex: Option<&Arc<Exchange>>) -> Vec<i64> {
 
 /// The peer's copy in place of the stand-in of `youtube_id` (the module doc).
 async fn supersede(ex: &Exchange, youtube_id: &str) -> Superseded {
-    let rows: Vec<(i64, bool)> = match sqlx::query_as(
-        "SELECT id, audio_file_path IS NOT NULL FROM videos WHERE youtube_id = ? ORDER BY id",
-    )
-    .bind(youtube_id)
-    .fetch_all(&ex.pool)
-    .await
-    {
+    let rows = match super::lyrics::video_rows(&ex.pool, youtube_id).await {
         Ok(rows) => rows,
         Err(e) => {
             warn!(youtube_id, %e, "exchange: reading a stand-in's rows failed");
             return Superseded::NotYet;
         }
     };
-    // The audio check reads a row that records an audio (the video's rows
-    // share it, review round 1), else the lowest.
-    let Some(&(first, _)) = rows.iter().find(|(_, audio)| *audio).or(rows.first()) else {
+    let Some(first) = super::lyrics::audio_row(&rows) else {
         return Superseded::Never("no row of the video is left here");
     };
     match super::lyrics::kept_local(&ex.pool, youtube_id).await {
@@ -274,26 +267,15 @@ async fn supersede(ex: &Exchange, youtube_id: &str) -> Superseded {
             return Superseded::NotYet;
         }
     }
-    let (artifact, lyrics) = match super::lyrics::peer_row(ex, youtube_id, &plan).await {
-        Ok(row) => row,
+    let ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
+    let adopted = match super::lyrics::take_into_rows(ex, youtube_id, &plan, &ids).await {
+        Ok(adopted) => adopted,
         Err(e) => return not_taken(youtube_id, &plan, &e),
     };
-    let placed = super::lyrics::place(ex, youtube_id, &plan, artifact, &lyrics).await;
-    if let Err(e) = placed {
-        return not_taken(youtube_id, &plan, &e);
-    }
-    let all = rows.len();
-    let mut adopted = Vec::with_capacity(all);
-    for (id, _) in rows {
-        match models_peer::adopt_lyrics(&ex.pool, id, &lyrics).await {
-            Ok(()) => adopted.push(id),
-            Err(e) => warn!(video_id = id, %e, "exchange: a row did not take the peer's lyrics"),
-        }
-    }
     // Over once every row took the copy; else the stand-in stays (already
     // rescheduled) and its next look places the copy into every row again
     // (review round 2).
-    if adopted.len() == all {
+    if adopted.len() == ids.len() {
         ex.fetched(Job::Lyrics, youtube_id, &plan.peer.name, &plan.artifacts)
             .await;
     }
