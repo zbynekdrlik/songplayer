@@ -55,12 +55,17 @@ REC_S = 50.0
 
 
 class _Tones:
-    """Random tones (60-3400 Hz) under a slow per-tone envelope, evaluable at
-    any time (seconds)."""
+    """Random tones in the music band (60-1000 Hz) under a slow per-tone
+    envelope, evaluable at any time (seconds).
+
+    The band matters at 1000 ppm: a 0.25 s window smears by 0.25 ms. Music
+    carries most of its energy below 1 kHz, and the two #268 takes' 0.25 s
+    windows read corr 0.98-0.995 at that rate. A flat 60-3400 Hz band puts them
+    at 0.58-0.70, on the warp's 0.6 floor, which no recorded take does."""
 
     def __init__(self, seed: int = 7, n: int = 60):
         rng = np.random.default_rng(seed)
-        self.f = rng.uniform(60.0, 3400.0, n)
+        self.f = rng.uniform(60.0, 1000.0, n)
         self.ph = rng.uniform(0.0, 2 * np.pi, n)
         self.amp = rng.uniform(0.2, 1.0, n) / np.sqrt(n)
         self.am_f = rng.uniform(0.2, 3.0, n)
