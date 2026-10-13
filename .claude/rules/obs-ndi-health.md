@@ -17,6 +17,7 @@ paths:
   - "e2e/post-deploy-av-sync.spec.ts"
   - "e2e/av-sync-gate.ts"
   - "e2e/av-sync-probe*.ts"
+  - "e2e/av-sync-settle*.ts"
   - "e2e/av-sync-evidence.ts"
   - "e2e/obs-audio-wait*.ts"
   - "e2e/obs-driver.ts"
@@ -26,6 +27,7 @@ paths:
   - "scripts/tests/test_av_sync_check.py"
   - "scripts/tests/test_av_sync_warp.py"
   - "scripts/tests/test_av_sync_profile.py"
+  - "scripts/tests/test_av_sync_settle.py"
 ---
 
 # OBS ↔ NDI health, the `SP-program` receiver, the post-deploy A/V gate
@@ -430,12 +432,14 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       started ~1 s later, after its audio turned clean (0.461 s into it)
       but before LOCKED (37.214). A slower first lock (camera-box's
       withhold runs up to 10 s after the first packet) would reach the
-      take again. Waiting on the pairing's own state is the open design
-      question on #221. camera-box's documented channels:
+      take again. camera-box's documented channels for the lock:
       - the probe's `genlock-fifo audit` line in the OBS log
         (`audio_hold=pending`);
       - the `genlock-lock-json:` facet on `:8899/bundle-state.json`
-        (per-input `locked`; on change and a ~30 s heartbeat).
+        (per-input `locked`; a line every 30 s).
+
+      Since #268 the gate waits on the second, then records past the
+      settle (the cold-start bullet below).
 
       A vendor request `GetGenlockStats` was mentioned, but it is not in
       camera-box's tree (checked 6.10.2026).
@@ -444,6 +448,75 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       in DistroAV's own delivery shorter than ~300 ms is invisible too.
       Never "fix" a take that still opens with dropouts by loosening the
       dropout check.
+  - **The probe COLD-STARTS every run: the gate waits for its lock and
+    analyses only its settled part (#268).** The audio meter wait above
+    proves that audio flows, nothing more. After the re-point, camera-box's
+    shallow lock latches the receive depth (~3 s, `genlock-shallow-lock`).
+    The probe's audio hold then follows the realized video delay, SLEWED
+    through a resampler at 1000 ppm (camera-box 1367, never a step): one
+    frame of depth (33 ms) is 33 s of slewing. The evidence (finding
+    6148747323) re-analysed both kept takes offline against originals
+    rebuilt from YouTube (the same Opus stream; the rebuild reproduced the
+    box's numbers):
+    - **run 38402810942 attempt 2:**
+      - −999.67 ppm, max fit residual 0.084 ms over 79 of 79 0.25 s windows,
+        from the take's first second to its last.
+      - The receiver started 15:50:01.0, the depth went 4 → 3 at
+        15:50:04–06, and the take ran 15:50:04.8–24.8.
+      - Warped at that rate (an experiment, not the gate) the take reads
+        corr 0.991 and 0 dropouts. Its 2 "dropouts" were fixed-lag
+        artifacts of the slew.
+    - **run 38412602549:**
+      - +999.59 ppm, residual 0.091 ms.
+      - Its "av −998 ms" was no offset. The slew collapses the one-lag
+        correlation to ~0.09 at every lag, the global argmax landed on a
+        noise peak (3.07 s for the true 5.74 s), and the picture's ±1 s
+        search clamped at its edge.
+      - The recorded audio was the probe's: the same song as the picture,
+        0.87–0.96 per 0.25 s window.
+    - **attempt 1:** taken ~5 s after the probe reset like the other two,
+      it read −0.01 ppm and passed. Whether a take meets the slew depends on
+      whether the depth moves after its first latch.
+
+    So (ROZHODNUTÉ 6148359080; `e2e/av-sync-settle.ts`):
+    - **Lock precondition**, before the first take:
+      - **Where:** camera-box's `http://127.0.0.1:8899/bundle-state.json`
+        (the gate runs on that box; `CAMERA_BOX_STATE_URL` overrides it) →
+        `genlock_lock.inputs["A/V gate SP-program"]`. Its fields (camera-box
+        6148382512): `locked`, `connected`, `idle`, `latency_ms`,
+        `underruns`, `relocks`, `late_holds`, and `depth`, which is the
+        facet's own FIFO depth, not the shallow lock's.
+      - **Freshness:** the facet is parsed from the newest
+        `genlock-lock-json:` OBS log line. That line is written every 30 s
+        and carries no "since"; `idle: true` = off program. The probe is off
+        program until the gate's switch, so only a line with `idle: false`
+        was written after it.
+      - **Ready** = `idle === false` + `connected === true` +
+        `locked === true`, real booleans only (`probeLock`).
+      - **Polling:** every 2 s through Node's fetch, 5 s per read. The
+        document stays out of the PUBLIC trace, and each change of what the
+        poll reads is logged. Bounded at two lines (`PROBE_LOCK_TIMEOUT_MS`,
+        60 s).
+      - **On the bound** the gate fails naming the last read ("did not read
+        locked … Last read: …"), never as an unmeasurable recording. An
+        unreachable :8899 is such a read, never a skip.
+    - **Settle.** The analysed part starts `PROBE_SETTLE_MS` = 45 s after the
+      probe receiver attached (camera-box: the latch ~3 s plus one frame
+      slewed, 33 s; more if the depth moves twice). Each take:
+      1. reads the time BEFORE its `StartRecord` (the file's time 0 is no
+         earlier, so the analysed part never starts early);
+      2. records the settle head that is left (`analysisStartMs`; 0 for a
+         retake, which comes after the settle);
+      3. reads the playing video when the analysed part starts: a song
+         change inside the head costs no take, while one inside the analysed
+         20 s still discards it;
+      4. records `RECORD_MS` more and analyses with `--analysis-start-s`
+         (below).
+    - **Never a permanently pointed probe** (camera-box's option (a)): a
+      24/7 receiver on SP-program would hide every real consumer from the
+      dark gate.
+    - **Never a shorter settle to save time:** a settle too short shows as a
+      named slew in the reasons (below), never as a pass.
   - `afterAll` idles the probe FIRST (an idle probe shows nothing, so
     restoring the program to "OBS manuál" can never loop the picture through
     cg OBS), then restores the program scene through the facade (a manual
@@ -472,8 +545,9 @@ the output every consumer takes, through cg OBS's own probe scene (below).
   baseline playlist is PLAYING with `/api/v1/ndi/health`: `state=Playing`
   (= on program) AND `frames_submitted_last_5s > 0`.
   It sets the SONG faders to unity. Then, for every take, it waits for the
-  probe's audio (above), reads the playing video, and runs `StartRecord` →
-  20 s → `StopRecord`, which returns `outputPath`.
+  probe's audio (above) and runs `StartRecord` → the settle head that is
+  left (#268, the first take only) → reads the playing video → 20 s →
+  `StopRecord`, which returns `outputPath`.
   - `startRecord` refuses to touch a recording the operator already started.
   - **Takes (max 3).** A take is repeated only in two cases:
     - `/api/v1/mix` shows a different `video_id` after the take, so the song
@@ -485,15 +559,23 @@ the output every consumer takes, through cg OBS's own probe scene (below).
 
     A `fail` is never retaken. Neither is an audio-side `cannot_measure`,
     which can be a real audio fault. A retake starts only while less than
-    110 s of the 320 s budget is used. The spec derives it:
+    170 s of the 380 s budget is used. The spec derives it:
     `RETAKE_BEFORE_MS` = `TEST_TIMEOUT_MS` − `WORST_TAKE_MS` − 10 s.
-    - `WORST_TAKE_MS` is 200 s. It is summed from the take's own bounds,
+    - `WORST_TAKE_MS` is 200 s, a WARM take's (every retake: the probe has
+      settled, so its head is 0). It is summed from the take's own bounds,
       including the 20 s audio wait and copying the evidence.
     - The 10 s covers the calls the sum does not count: the audio wait's
       two `Reidentify` round trips, the StartRecord pre-check, the `/mix`
       and `/videos` reads, and spawning the analysis.
     - #221 dev.18 raised `TEST_TIMEOUT_MS` from 300 s to 320 s, by the
       audio wait's bound, so a run keeps the retake room it had before.
+    - #268 added `COLD_PROBE_MS` = max(`PROBE_LOCK_TIMEOUT_MS`,
+      `PROBE_SETTLE_MS`) = 60 s. The lock wait plus the recorded settle head
+      end within that of the attach, so the first take's analysed part
+      starts up to 60 s later than before. `TEST_TIMEOUT_MS` = 320 + 60 =
+      380 s keeps the retake room (`RETAKE_BEFORE_MS` 110 → 170 s). The E2E
+      job grows by ~45 s typically (the analysed part starts 45 s after the
+      attach instead of ~2 s), 60 s at worst.
     The run is classified by `classifyAvSyncRun`: the stdout JSON and the exit
     code must agree. Missing JSON (a numpy import failure, an argparse error)
     is `error`, not a verdict.
@@ -514,15 +596,16 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       Artifacts → `post-deploy-playwright-report` →
       `test-results/post-deploy-av-sync-…-chromium/av-sync-evidence/`
       (`take1-<date>.mkv`, `take1-<date>.mp4`, `take1-av_sync.json`,
-      `take1-av_sync.stderr.txt`). The size per file is not measured yet
-      (the design estimate is ~15 MB per failing run). Playwright wipes
+      `take1-av_sync.stderr.txt`). Measured on #268: a 20 s take is
+      ~15.4 MB (~6.1 Mbit/s); a first take also records the settle head,
+      up to ~65 s ≈ 50 MB. Playwright wipes
       `test-results/` at the start of the next run, so nothing piles up on
       the box.
     - It is uploaded only when the JOB fails. A take that failed to measure
       and was then followed by a passing retake leaves the job green, and
       its copy is not uploaded.
     - The repo is PUBLIC, so any GitHub user can download the artifact for
-      7 days. It holds 20 s of the OBS program picture + program audio,
+      7 days. It holds 20–65 s of the OBS program picture + program audio,
       which includes any other source live in the program mix at that
       moment.
     `removeRecording` waits for the remux and retries while OBS still holds
@@ -576,6 +659,20 @@ the output every consumer takes, through cg OBS's own probe scene (below).
   must be added to that step AND to the Eval Checks pip line. The box has
   no ffprobe, so stream start times and frame sizes come from ffmpeg's own
   `showinfo`/`ashowinfo` pts.
+  - **analysed part (#268):** `--analysis-start-s S` (≥ 0; 0 = the whole
+    recording, as before) cuts everything before S from every verdict
+    input:
+    - the audio alignment, the warp and the dropout scan;
+    - the picture: decoded from an input seek, then cut by pts, because
+      ffmpeg also returns the frame on screen at the seek point;
+    - the segment profile.
+
+    Less than 10 s left (`MIN_ANALYSED_S`) is a named analysis error. JSON:
+    `analysis_start_s`, `recording_s` (the whole recording), `analysed_s`;
+    the summary line carries `analysed_from_s=`. Measured locally: a 65 s
+    take analysed from 45 s took 8.2 s against 6.8 s for a 20 s take (the
+    head's video is never decoded). The box took ~10.5 s for a 20 s take,
+    so `ANALYSIS_TIMEOUT_MS` (60 s) is unchanged.
   - **audio:** 8 kHz mono FFT cross-correlation, normalized by local energy,
     searched over the whole song. corr must be ≥ 0.9.
   - **video:** 64-wide gray frames, cropped to the content box computed from
@@ -662,7 +759,7 @@ the output every consumer takes, through cg OBS's own probe scene (below).
   - `cannot_measure` (2): low corr, match or contrast, or an analysis error.
     It FAILS the job and is never a skip.
 - **Reading the output:** the CI log shows the full JSON and one line:
-  `AV-SYNC status=… av_ms=… audio_corr=… rate_ppm=… fit_residual_ms=…
+  `AV-SYNC status=… analysed_from_s=… av_ms=… audio_corr=… rate_ppm=… fit_residual_ms=…
   warped=… video_match=… video_contrast=…
   dropouts=… dropout_ms=… glitches=… drift_ms_per_10s=… max_step_ms=…
   step_at_s=… outlier_steps=… windows=<used>/<total> reasons=[…]`.
@@ -679,6 +776,30 @@ the output every consumer takes, through cg OBS's own probe scene (below).
     shows up as a low video match (`cannot_measure`), never as a false pass.
   - Baseline on 24.9.2026 (manual): A/V +13 ms, corr 0.997, match 0.999,
     0 dropouts.
+  - **`settle` (diagnostics, #268)** profiles the WHOLE recording, the
+    head included. Each 2 s row holds the warp's 0.25 s local lags, searched
+    ±100 ms around the analysed part's alignment:
+    - `windows`: how many of its 8 windows matched;
+    - `dev_ms`: their mean, i.e. how far the audio sat from the settled
+      alignment;
+    - `rate_ppm`: their slope (needs ≥ 3 windows).
+
+    A slewing head reads ~±1000 ppm, a settled part ~0. When a first take
+    fails, read it: rows inside the analysed part that still slew mean the
+    settle was too short.
+  - **A smooth slew is NAMED (#268).** It goes right after the audio reason:
+    `the audio slews smoothly at ±N ppm through the analysed part (median fit
+    residual …; the warp takes <= 200 ppm): the recorded audio had not
+    settled`.
+    - The rule (`audio_slew_note`): |rate| > 200 ppm AND the median
+      |residual| ≤ 0.5 ms, the warp's own bounds.
+    - A step leaves the median at ~step / 4, so it is never named.
+    - `fit_residual_median_ms` is in the JSON next to the max.
+    - Limit: at 1000 ppm the one-lag global search can land on a noise peak
+      (run 38412602549). The fit then finds no window, so nothing is named,
+      and the `settle` rows are empty too.
+    - Offline on both #268 takes the global lag was right and the slew was
+      named: −1000 ppm (median residual 0.019 ms) and +1000 ppm (0.015 ms).
 - **Clock-rate drift is COMPENSATED before the audio verdict (#147,
   `av_sync_warp.py`).** SongPlayer's genlocked output and the OBS audio clock
   that records the program run at slightly different rates. Push run
@@ -822,6 +943,19 @@ the output every consumer takes, through cg OBS's own probe scene (below).
       (`video_ok`).
   - The evidence copy (`av-sync-evidence.spec.ts`) runs on a temp dir in the
     mock suite.
+  - The settle (`test_av_sync_settle.py`, #268) covers:
+    - the analysed part and its frames;
+    - a take whose first 30 s slew at −1000 ppm passes from 30 s and reads
+      `cannot_measure` whole;
+    - the `settle` rows;
+    - the slew note: named at 1000 ppm, not for a step, a warpable rate or
+      no fit;
+    - `main`'s option.
+
+    Its analytic original is MUSIC-band (60–1000 Hz). At 1000 ppm a flat
+    60–3400 Hz band puts 0.25 s windows at corr 0.58–0.70, on the warp's 0.6
+    floor, which no recorded take does (0.98–0.995). The lock and settle
+    decisions (`av-sync-settle.spec.ts`) run in the mock suite.
   - `scripts/tests/conftest.py` puts `scripts/` on `sys.path`, as on the
     box, so a script's sibling import (`av_sync_check` → `av_sync_drift`)
     resolves when a test loads the script by file path.

@@ -450,7 +450,7 @@ def test_measure_reports_av_from_the_video_step(monkeypatch):
     audio, frames, pts = _original()
     rec_audio, _, _ = _recording(audio, frames, pts, start=20.0, av_ms=120.0)
 
-    def video(_ffmpeg, _rec, _orig, center_s):
+    def video(_ffmpeg, _rec, _orig, center_s, _analysis_start_s=0.0):
         # The picture shows orig 20.0 at rec 0: 120 ms behind the audio.
         return {
             "frames": 600,

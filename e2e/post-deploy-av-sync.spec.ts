@@ -43,6 +43,17 @@
  * 37423917199). The meter is tapped BEFORE the pairing's withhold, so the
  * wait proves DistroAV delivers audio and adds its 1 s; it does not observe
  * the lock (`obs-audio-wait.ts`). The dropout check is unchanged.
+ * #268: the probe's receiver COLD-STARTS every run, and its audio hold then
+ * slews at 1000 ppm until camera-box's shallow lock has settled (one frame of
+ * depth = 33 s of slewing; both failing takes were that slew from start to
+ * end). So before the first take the gate waits until camera-box's
+ * `:8899/bundle-state.json` `genlock_lock` facet reads the probe locked and
+ * connected on a line written after the switch (`av-sync-settle.ts`, bounded,
+ * a named failure), and every take records past the settle
+ * (`PROBE_SETTLE_MS` after the probe receiver attached): the analysis starts
+ * there (`av_sync_check.py --analysis-start-s`), the head before it is cut
+ * from every verdict input. A retake comes after the settle: it records its
+ * 20 s alone.
  * afterAll idles the probe first (an idle probe shows nothing, so restoring
  * the program to "OBS manuál" can never loop the picture), restores the
  * program scene, then cg OBS's own scene only when the program restore did
@@ -100,6 +111,17 @@ import {
   receiversSettled,
 } from "./av-sync-probe";
 import { EVIDENCE_COPY_MS, keepRecording, keepText, type Evidence } from "./av-sync-evidence";
+import {
+  CAMERA_BOX_STATE_URL,
+  COLD_PROBE_MS,
+  PROBE_LOCK_POLL_MS,
+  PROBE_LOCK_TIMEOUT_MS,
+  PROBE_SETTLE_MS,
+  analysisStartMs,
+  describeProbeLock,
+  probeLock,
+  type ProbeLock,
+} from "./av-sync-settle";
 import { AUDIO_WAIT_TIMEOUT_MS } from "./obs-audio-wait";
 import {
   classifyAvSyncRun,
@@ -122,15 +144,24 @@ const PYTHON =
   "C:\\ProgramData\\SongPlayer\\e2e\\avsync_venv\\Scripts\\python.exe";
 const FFMPEG = process.env.SP_FFMPEG || "C:\\ProgramData\\SongPlayer\\cache\\tools\\ffmpeg.exe";
 const SCRIPT = path.resolve(__dirname, "..", "scripts", "av_sync_check.py");
+// #268: camera-box's bundle-state (its genlock_lock facet), on this box.
+const BUNDLE_STATE_URL = process.env.CAMERA_BOX_STATE_URL || CAMERA_BOX_STATE_URL;
 
 const MAX_AV_MS = 40;
+// The ANALYSED part of a take. The first take records the probe's settle
+// head before it too (#268, `analysisStartMs`), which the analysis cuts.
 const RECORD_MS = 20_000;
 const ANALYSIS_TIMEOUT_MS = 60_000; // ~5-10 s on the box
 const MAX_TAKES = 3;
-// #221 dev.18: 300 → 320 s, by the probe audio wait's bound, so a take keeps
-// the retake room it had before the wait (RETAKE_BEFORE_MS stays 110 s).
-const TEST_TIMEOUT_MS = 320_000;
-// The worst case of one take: skip 15 + play 30 + the probe audio wait
+// #221 dev.18: 300 → 320 s, by the probe audio wait's bound. #268: + what
+// the cold probe adds to the FIRST take, COLD_PROBE_MS (60 s): its lock wait
+// (at most PROBE_LOCK_TIMEOUT_MS) and its recorded settle head end within
+// max(PROBE_LOCK_TIMEOUT_MS, PROBE_SETTLE_MS) of the probe's attach. The
+// first take's analysed part starts up to that much later than before, so a
+// run keeps the retake room it had (RETAKE_BEFORE_MS 110 → 170 s).
+const TEST_TIMEOUT_MS = 320_000 + COLD_PROBE_MS;
+// The worst case of one WARM take (every retake: the probe has settled, its
+// head is 0): skip 15 + play 30 + the probe audio wait
 // (AUDIO_WAIT_TIMEOUT_MS, 20) + record (RECORD_MS, 20) + stop 10 + analysis
 // (ANALYSIS_TIMEOUT_MS, 60) + cleanup 35 + evidence copy 2 x
 // EVIDENCE_COPY_MS (5) = 200 s.
@@ -251,6 +282,22 @@ async function settledReceivers(request: APIRequestContext): Promise<number> {
   return current;
 }
 
+/**
+ * #268: one read of camera-box's `genlock_lock` facet for the probe
+ * (`av-sync-settle.ts`). Node's own fetch, bounded at 5 s: a failed read is
+ * a state the wait names, never a throw. The document stays out of the
+ * Playwright trace (a PUBLIC artifact); the gate logs the probe's entry only.
+ */
+async function readProbeLock(): Promise<ProbeLock> {
+  try {
+    const resp = await fetch(BUNDLE_STATE_URL, { signal: AbortSignal.timeout(5_000) });
+    if (!resp.ok) return { kind: "unreadable", error: `HTTP ${resp.status}` };
+    return probeLock(await resp.json(), AV_PROBE_INPUT);
+  } catch (e) {
+    return { kind: "unreadable", error: String(e) };
+  }
+}
+
 /** Kill a child AND its children (python -> ffmpeg), which keep the recording open. */
 function killTree(child: ChildProcess): void {
   if (child.exitCode !== null || child.pid === undefined) return;
@@ -338,6 +385,36 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
   const assertNotTornDown = (what: string) => {
     if (tornDown) throw new Error(`A/V gate torn down (test timed out) — not starting ${what}`);
   };
+
+  /**
+   * #268: wait until camera-box's `genlock_lock` facet reads the probe
+   * locked and connected on a line written after cg OBS switched to the probe
+   * scene (`av-sync-settle.ts::probeLock`), at most PROBE_LOCK_TIMEOUT_MS
+   * (two facet lines). Every change of what it reads is logged; the bound
+   * fails naming the last read, never as an unmeasurable recording.
+   */
+  async function waitProbeLocked(): Promise<void> {
+    const started = Date.now();
+    let said = "";
+    for (;;) {
+      assertNotTornDown("the probe lock wait");
+      const lock = await readProbeLock();
+      const text = describeProbeLock(lock);
+      if (text !== said) {
+        console.log(`A/V gate: probe lock after ${Date.now() - started} ms: ${text}`);
+        said = text;
+      }
+      if (lock.kind === "locked") return;
+      if (Date.now() - started >= PROBE_LOCK_TIMEOUT_MS) {
+        throw new Error(
+          `A/V gate: the probe "${AV_PROBE_INPUT}" did not read locked on camera-box's genlock_lock ` +
+            `facet (${BUNDLE_STATE_URL}) within ${PROBE_LOCK_TIMEOUT_MS / 1000} s of its receiver ` +
+            `attaching: a take would record a receiver still locking (#268). Last read: ${text}`,
+        );
+      }
+      await sleep(PROBE_LOCK_POLL_MS);
+    }
+  }
 
   async function restoreFaders(request: APIRequestContext): Promise<void> {
     if (!fadersToRestore) return;
@@ -575,6 +652,11 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
       async () => (await getJson<ProgramView>(request, "/api/v1/program")).health.connections,
       (now) => probeReceiverAttached(receiversBefore, now),
     );
+    // #268: the probe's receiver has just cold-started; its settle counts
+    // from here (a little after the real start: conservative).
+    const probeAttachedAt = Date.now();
+    // #268: the lock precondition, a named failure on its bound (the file doc).
+    await waitProbeLocked();
     const active = status.active_playlist_ids;
     const first = await getJson<HealthRow[]>(request, "/api/v1/ndi/health");
     if (!active.some((id) => isPlayingWithFrames(first, id))) {
@@ -625,9 +707,8 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         // 3. The probe's AUDIO must flow first (#221 dev.18, the file doc): a
         // take started before the probe's audio reaches cg OBS's mix opens
         // with dropouts that are not SongPlayer's. The meter proves DistroAV
-        // delivers audio, not camera-box's pairing lock (the open question on
-        // #221). Waited before the video is read, so the song read is the one
-        // playing at StartRecord.
+        // delivers audio, not camera-box's pairing lock (#268: the lock is the
+        // facet precondition above, the settle the head below).
         assertNotTornDown("the probe audio wait");
         const audio = await rec.waitForInputAudio(AV_PROBE_INPUT);
         console.log(
@@ -636,7 +717,26 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
             `loudest ${audio.loudestDbfs.toFixed(1)} dBFS)`,
         );
 
-        // Which video is playing, and its ORIGINAL sidecars.
+        // 4. Record the PROGRAM: first the probe's settle head (#268; the
+        // first take only, `analysisStartMs`, read before StartRecord so the
+        // analysed part never starts before the settle), then RECORD_MS.
+        assertNotTornDown("a recording");
+        const startCalledAt = Date.now();
+        startInFlight = rec.startRecord();
+        await startInFlight;
+        startInFlight = null;
+        recordingOurs = true;
+        // afterAll may have begun while OBS was starting: leave the stop to it.
+        assertNotTornDown("the recording wait");
+        const headMs = analysisStartMs(probeAttachedAt, startCalledAt);
+        console.log(
+          `A/V gate take ${take}: recording; analysed from ${(headMs / 1000).toFixed(3)} s ` +
+            `(the probe's settle ends ${PROBE_SETTLE_MS / 1000} s after its receiver attached)`,
+        );
+        await sleep(headMs);
+
+        // Which video plays as the analysed part starts, and its ORIGINAL
+        // sidecars: a song change inside the settle head costs no take.
         const videoId = await currentVideo();
         expect(videoId, `/api/v1/mix now_playing must name playlist ${playlistId}'s video`).not.toBeNull();
         const videos = await getJson<Array<{ id: number; youtube_id: string; title: string }>>(
@@ -646,15 +746,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         const video = videos.find((v) => v.id === videoId);
         expect(video, `video ${videoId} must be listed in playlist ${playlistId}`).toBeTruthy();
         const pair = resolveSidecars(fs.readdirSync(cacheDir), video!.youtube_id);
-
-        // 4. Record the PROGRAM.
-        assertNotTornDown("a recording");
-        startInFlight = rec.startRecord();
-        await startInFlight;
-        startInFlight = null;
-        recordingOurs = true;
-        // afterAll may have begun while OBS was starting: leave the stop to it.
-        assertNotTornDown("the recording wait");
+        assertNotTornDown("the analysed part's wait");
         await sleep(RECORD_MS);
         const recording = await rec.stopRecord();
         madeRecordings.push(recording);
@@ -669,7 +761,7 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
         const texts: Array<[string, string]> = [];
         try {
           if (after !== videoId) {
-            lastTakeNote = `take ${take} was discarded: the song changed (${videoId} -> ${after}) during the recording`;
+            lastTakeNote = `take ${take} was discarded: the song changed (${videoId} -> ${after}) during the analysed part`;
             console.log(`A/V gate: ${lastTakeNote}`);
           } else {
             // 5. Analyse against the originals. Every number goes to the CI log.
@@ -683,6 +775,8 @@ test.describe("post-deploy A/V sync + dropout gate (#147)", () => {
                 "--orig-video", path.join(cacheDir, pair.video),
                 "--max-av-ms", String(MAX_AV_MS),
                 "--ffmpeg", FFMPEG,
+                // #268: the settle head before it is cut from every verdict input.
+                "--analysis-start-s", (headMs / 1000).toFixed(3),
               ]); // prettier-ignore
             } catch (e) {
               texts.push(["analysis-error.txt", String(e)]);
