@@ -69,6 +69,21 @@ fn held_offset_ms(k: u64, (num, den): (u32, u32)) -> u64 {
     k * 1000 * den / num
 }
 
+/// The position (ms) a seek to `position_ms` asks the VIDEO reader for
+/// (#257 review): at most one frame before the video's `duration_ms`, so a
+/// seek past the picture's end (a Pause in the held tail, then ▶) lands on a
+/// frame the video has. Media Foundation may refuse a position past its end
+/// or land at end-of-stream with no frame to hold. The fast-forward and the
+/// audio keep `position_ms`. A video of unknown duration (0) is asked the
+/// position itself.
+fn video_seek_ms(position_ms: u64, duration_ms: u64, frame_rate: (u32, u32)) -> u64 {
+    if duration_ms > 0 {
+        position_ms.min(duration_ms.saturating_sub(held_offset_ms(1, frame_rate)))
+    } else {
+        position_ms
+    }
+}
+
 /// The picture held past the video's end (#257): whether the video ended,
 /// where the held steps start and how many went out. A seek starts it anew.
 #[derive(Debug, Default)]
@@ -273,9 +288,17 @@ impl SplitSyncedDecoder {
     /// record `position_ms` as a fast-forward target: [`next_synced`](Self::next_synced)
     /// decodes-and-discards the pre-target video frames before pairing, so the
     /// first delivered frame is at `>= position_ms` and the cushion refills like a
-    /// fresh Play (#192 round 5).
+    /// fresh Play (#192 round 5). The video reader is asked at most one frame
+    /// before its end (#257 review, `video_seek_ms`): a seek past the
+    /// picture's end then fast-forwards to the video's last frame and holds
+    /// it from `position_ms` on.
     pub fn seek(&mut self, position_ms: u64) -> Result<(), DecoderError> {
-        self.video.seek(position_ms)?;
+        let video_ms = video_seek_ms(
+            position_ms,
+            self.video.duration_ms(),
+            self.video.frame_rate(),
+        );
+        self.video.seek(video_ms)?;
         self.audio.seek(position_ms)?;
         self.pending_audio.clear();
         self.pending_video_target_ms = Some(position_ms);

@@ -130,7 +130,10 @@ impl DecodeProducer {
     /// Seek the decoder and adopt where the song really plays on from (#217,
     /// `real_seek_ms`: the asked position, or where the producer was when the
     /// decoder refused the seek) as the new PTS origin, and the new epoch.
-    /// Returns that position, which the pipeline reports (`Seeked`).
+    /// A seek that moved the decoder drops the held picture (#257 review):
+    /// the frame it lands on, or the last one its fast-forward decoded,
+    /// replaces it; a refused seek keeps it (nothing moved). Returns that
+    /// position, which the pipeline reports (`Seeked`).
     pub fn seek(
         &mut self,
         decoder: &mut SplitSyncedDecoder,
@@ -138,13 +141,21 @@ impl DecodeProducer {
         epoch: u64,
         playlist_id: i64,
     ) -> u64 {
+        let mut moved = false;
         let real = real_seek_ms(
             position_ms,
             self.current_ms,
-            |ms| decoder.seek(ms),
+            |ms| {
+                let done = decoder.seek(ms);
+                moved = done.is_ok();
+                done
+            },
             playlist_id,
             "paced producer",
         );
+        if moved {
+            self.held = None;
+        }
         self.pts_offset_ms = real;
         self.current_ms = real;
         self.epoch = epoch;
