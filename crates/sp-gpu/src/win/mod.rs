@@ -37,7 +37,7 @@ pub use vblank::VblankTracker;
 pub use video_device::VideoDevice;
 
 use crate::adapter::AdapterInfo;
-use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition};
+use crate::composition::{CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Fit, MAX_FIT};
 use crate::error::GpuError;
 use crate::quad::QuadConstants;
 use crate::residency::{Resident, Upload, upload_for};
@@ -65,8 +65,9 @@ fn micros_since(start: Instant) -> u64 {
 /// The `SP-program-MAX` compositor: one Direct3D 11 device, the fixed
 /// 3840×2160 BGRA render target, and two texture slots (a fade's outgoing
 /// and incoming side). #239: the `SP-program` sender's compositor is the
-/// same with a 1920×1080 target ([`Compositor::with_size`]); the size is
-/// fixed for the compositor's life. Neither `Send` nor `Sync`: its
+/// same with a 1920×1080 target ([`Compositor::with_size`]); the size, and
+/// #267 the [`Fit`] that places each picture in it, are fixed for the
+/// compositor's life. Neither `Send` nor `Sync`: its
 /// immediate context is not thread-safe, and a [`SpoutSender`] made on it
 /// drives the same context
 /// (#223 S1b), so both stay on the thread that made them (S2's
@@ -77,6 +78,8 @@ pub struct Compositor {
     adapter: AdapterInfo,
     pipeline: Pipeline,
     target: RenderTarget,
+    /// #267: how each picture is placed in `target`.
+    fit: Fit,
     slots: [Option<PlaneTextures>; 2],
     staging: Option<ID3D11Texture2D>,
     /// Ties the compositor to its thread (a raw pointer is neither `Send`
@@ -85,34 +88,35 @@ pub struct Compositor {
 }
 
 impl Compositor {
-    /// MAX's compositor (3840×2160) on the hardware adapter
-    /// [`pick_adapter`](crate::pick_adapter) chooses (largest dedicated video
-    /// memory, not software). [`GpuError::NoAdapter`] when there is none: it
-    /// never falls back to WARP on its own.
+    /// MAX's compositor (3840×2160, #267 [`MAX_FIT`]) on the hardware
+    /// adapter [`pick_adapter`](crate::pick_adapter) chooses (largest
+    /// dedicated video memory, not software). [`GpuError::NoAdapter`] when
+    /// there is none: it never falls back to WARP on its own.
     pub fn new() -> Result<Self, GpuError> {
-        Self::with_size(CANVAS_WIDTH, CANVAS_HEIGHT)
+        Self::with_size(CANVAS_WIDTH, CANVAS_HEIGHT, MAX_FIT)
     }
 
-    /// #239: a compositor whose render target is `width`×`height` (the
-    /// `SP-program` sender's 1920×1080), on the adapter [`Compositor::new`]
-    /// takes.
-    pub fn with_size(width: u32, height: u32) -> Result<Self, GpuError> {
+    /// #239: a compositor whose render target is `width`×`height` and that
+    /// places each picture by `fit` (#267; the `SP-program` sender's is
+    /// 1920×1080 by [`FHD_FIT`](crate::FHD_FIT)), on the adapter
+    /// [`Compositor::new`] takes.
+    pub fn with_size(width: u32, height: u32, fit: Fit) -> Result<Self, GpuError> {
         let ((device, context), adapter) = device::create_on_picked(DeviceUse::Compose)?;
-        Self::build(device, context, adapter, "hardware", (width, height))
+        Self::build(device, context, adapter, "hardware", (width, height, fit))
     }
 
     /// MAX's compositor on WARP, Direct3D's CPU rasterizer: for tests and CI
     /// (`windows-latest` has no GPU).
     pub fn new_warp() -> Result<Self, GpuError> {
-        Self::new_warp_with_size(CANVAS_WIDTH, CANVAS_HEIGHT)
+        Self::new_warp_with_size(CANVAS_WIDTH, CANVAS_HEIGHT, MAX_FIT)
     }
 
-    /// #239: a `width`×`height` compositor on WARP, for tests and CI. Not
-    /// for production.
+    /// #239: a `width`×`height` compositor placing by `fit` on WARP, for
+    /// tests and CI. Not for production.
     #[doc(hidden)]
-    pub fn new_warp_with_size(width: u32, height: u32) -> Result<Self, GpuError> {
+    pub fn new_warp_with_size(width: u32, height: u32, fit: Fit) -> Result<Self, GpuError> {
         let ((device, context), adapter) = device::create_warp(DeviceUse::Compose)?;
-        Self::build(device, context, adapter, "warp", (width, height))
+        Self::build(device, context, adapter, "warp", (width, height, fit))
     }
 
     /// The compositor on DXGI's adapter `index` (the order of
@@ -128,7 +132,7 @@ impl Compositor {
             context,
             adapter,
             "listed",
-            (CANVAS_WIDTH, CANVAS_HEIGHT),
+            (CANVAS_WIDTH, CANVAS_HEIGHT, MAX_FIT),
         )
     }
 
@@ -137,7 +141,7 @@ impl Compositor {
         context: ID3D11DeviceContext,
         adapter: AdapterInfo,
         driver: &'static str,
-        (width, height): (u32, u32),
+        (width, height, fit): (u32, u32, Fit),
     ) -> Result<Self, GpuError> {
         let pipeline = Pipeline::new(&device)?;
         let target = RenderTarget::new(&device, width, height)?;
@@ -150,6 +154,7 @@ impl Compositor {
             feature_level = %feature_level,
             width,
             height,
+            fit = ?fit,
             "sp-gpu: compositor ready (render target B8G8R8A8, shared)"
         );
         Ok(Self {
@@ -158,6 +163,7 @@ impl Compositor {
             adapter,
             pipeline,
             target,
+            fit,
             slots: [None, None],
             staging: None,
             thread_bound: PhantomData,
@@ -209,7 +215,7 @@ impl Compositor {
     /// the compositor must be rebuilt.
     pub fn compose(&mut self, composition: &Composition<'_>) -> Result<ComposeStats, GpuError> {
         let (width, height) = self.size();
-        let layers = composition.layers_in(width, height);
+        let layers = composition.layers_in(width, height, self.fit);
         let planes = layers
             .iter()
             .map(|layer| layer.picture.planes())
@@ -244,7 +250,13 @@ impl Compositor {
         for layer in &layers {
             let textures = self.slots[layer.slot.index()].as_ref().ok_or(NO_TEXTURES)?;
             quads.push(Quad {
-                constants: QuadConstants::new(layer.place, layer.weight, width, height),
+                constants: QuadConstants::new(
+                    layer.place,
+                    layer.uv_rect,
+                    layer.weight,
+                    width,
+                    height,
+                ),
                 textures,
             });
         }

@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use std::time::Instant;
 
 use crate::adapter::AdapterInfo;
-use crate::composition::Composition;
+use crate::composition::{Composition, Fit};
 use crate::error::GpuError;
 use crate::spout::SharedTextureInfo;
 use crate::spout_lock::{LockHolder, SentinelEnd};
@@ -40,8 +40,9 @@ impl Compositor {
     }
 
     /// [`GpuError::Unsupported`]: no Direct3D 11 off Windows (#239: the
-    /// `SP-program` sender's 1920×1080 compositor neither).
-    pub fn with_size(_width: u32, _height: u32) -> Result<Self, GpuError> {
+    /// `SP-program` sender's 1920×1080 compositor neither, whatever its
+    /// #267 [`Fit`]).
+    pub fn with_size(_width: u32, _height: u32, _fit: Fit) -> Result<Self, GpuError> {
         Err(GpuError::Unsupported)
     }
 
@@ -213,7 +214,7 @@ mod tests {
         assert_eq!(Compositor::new().unwrap_err(), GpuError::Unsupported);
         assert_eq!(Compositor::new_warp().unwrap_err(), GpuError::Unsupported);
         assert_eq!(
-            Compositor::with_size(crate::FHD_WIDTH, crate::FHD_HEIGHT).unwrap_err(),
+            Compositor::with_size(crate::FHD_WIDTH, crate::FHD_HEIGHT, crate::FHD_FIT).unwrap_err(),
             GpuError::Unsupported,
             "#239: nor the SP-program sender's"
         );

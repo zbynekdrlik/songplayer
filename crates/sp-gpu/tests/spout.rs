@@ -31,9 +31,9 @@ use sp_gpu::spout_state::{
     ACCESS_HELD, MAX_ACCESS_HELD, MAX_UNREADABLE, NOT_LISTED, Registration, TAKEN, UNREADABLE,
 };
 use sp_gpu::{
-    Composition, Compositor, FHD_HEIGHT, FHD_WIDTH, GpuError, NAME_SLOT_LEN, SENDER_NAMES_MAP,
-    SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, SharedTextureInfo, SpoutSender, mapped_len,
-    read_shared_texture, spout_sender_info, spout_sender_names, unpad_rows,
+    Composition, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, GpuError, NAME_SLOT_LEN,
+    SENDER_NAMES_MAP, SPOUT_FHD_SENDER_NAME, SPOUT_SENDER_NAME, SharedTextureInfo, SpoutSender,
+    mapped_len, read_shared_texture, spout_sender_info, spout_sender_names, unpad_rows,
 };
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
@@ -379,7 +379,7 @@ fn a_1920_by_1080_compositor_sends_as_sp_program() {
     assert_same_frame(&received, &drawn, "SP-program through Spout");
     assert_matches_reference_in(
         &received,
-        &frame.layers_in(FHD_WIDTH, FHD_HEIGHT),
+        &frame.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT),
         (FHD_WIDTH, FHD_HEIGHT),
         "SP-program through Spout",
     );
@@ -401,9 +401,10 @@ fn the_shared_texture_opens_on_a_second_device_and_holds_each_frame() {
     let mut compositor = warp();
     let mut sender = SpoutSender::with_name(&compositor, name).expect("a test sender");
 
-    // A 4:3 picture: black bars left and right, the picture between.
-    let (stride, data) = pattern(1440, 1080, 51);
-    let first = Composition::Picture(picture(1, 1440, 1080, stride, &data));
+    // A 21:9 picture: black bars top and bottom, the picture between (#267:
+    // a 4:3 one fills MAX's width now, with no bar to read).
+    let (stride, data) = pattern(2560, 1080, 51);
+    let first = Composition::Picture(picture(1, 2560, 1080, stride, &data));
     compose(&mut compositor, &first);
     sender.send().expect("send the first frame");
     // The readback's Map waits for Spout's copy, queued on the same context.

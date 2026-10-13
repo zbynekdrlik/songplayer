@@ -9,7 +9,9 @@
 //! sender too (a 1920×1080 WARP compositor and a sender under its own test
 //! name): Spout lists it at 1920×1080 (the thread's own registry read,
 //! `max.fhd.listed_*`, says so too) and its texture holds the same pictures
-//! fitted into 1920×1080.
+//! fitted into 1920×1080. #267: a third, 4:3 boundary fills MAX's whole
+//! width (no black column at either side), while the FHD sender keeps the
+//! NDI `SP-program`'s bars.
 //!
 //! The readback takes no Spout mutex, so each picture is served TWICE and
 //! read after the second one went out: its draw waited for the GPU, which
@@ -23,8 +25,8 @@ use std::time::{Duration, Instant};
 
 use sp_core::genlock::{GENLOCK_GRID_FPS, floor_boundary_100ns, strict_next_boundary_100ns};
 use sp_gpu::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Compositor, FHD_HEIGHT, FHD_WIDTH, GpuError, Layer,
-    Nv12Picture, SpoutSender, read_shared_texture, reference, spout_sender_info,
+    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, GpuError,
+    Layer, Nv12Picture, SpoutSender, read_shared_texture, reference, spout_sender_info,
 };
 use sp_ndi::test_util::MockNdiBackend;
 use sp_ndi::{AudioFrame, NdiSender};
@@ -60,7 +62,7 @@ impl MaxGpu for WarpGpu {
     }
 
     fn fhd_compositor(&mut self) -> Result<Compositor, GpuError> {
-        Compositor::new_warp_with_size(FHD_WIDTH, FHD_HEIGHT)
+        Compositor::new_warp_with_size(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)
     }
 
     fn fhd_sender(&mut self, compositor: &Compositor) -> Result<SpoutSender, GpuError> {
@@ -294,7 +296,7 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
         "the thread's own registry read"
     );
     let frame = read_shared_texture(&fhd_info).expect("a second WARP device reads it");
-    let layers = plain.layers_in(FHD_WIDTH, FHD_HEIGHT);
+    let layers = plain.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT);
     assert_matches(
         &frame,
         &layers,
@@ -329,8 +331,50 @@ fn the_program_output_composes_on_warp_and_shares_it_over_spout() {
     };
     assert_matches(&frame, &fade.layers(), size, "the Mix boundary");
     let frame = read_shared_texture(&fhd_info).expect("a second WARP device reads it");
-    let layers = fade.layers_in(FHD_WIDTH, FHD_HEIGHT);
+    let layers = fade.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT);
     assert_matches(&frame, &layers, fhd_size, "the Mix boundary in 1920x1080");
+
+    // #267: a 4:3 source (PP's `MO3ucp2mBnM` is 4:3). MAX, the wall's feed,
+    // fills its whole width (rows cut off top and bottom): no black column
+    // at either side. The FHD sender keeps the NDI `SP-program`'s bars.
+    let four_three = source(960, 720, 21, at(4));
+    let narrow = |stamp: i64| {
+        ProgramJob::Source(SubmitJob {
+            video_tc_100ns: stamp,
+            ..four_three.clone()
+        })
+    };
+    serve_twice(&mut out, &max, narrow, 4);
+    assert_eq!(max.status().submitted, 6);
+    let narrow = Composition::Picture(nv12(&four_three));
+    let frame = read_shared_texture(&info).expect("a second WARP device reads Spout's texture");
+    let layers = narrow.layers();
+    assert_eq!((layers[0].place.off_x, layers[0].place.w), (0, 3840));
+    assert_matches(&frame, &layers, size, "the 4:3 boundary");
+    for y in 0..CANVAS_HEIGHT {
+        for x in [0, CANVAS_WIDTH - 1] {
+            let got = bgra(&frame, CANVAS_WIDTH, x, y);
+            assert_ne!(
+                got,
+                [0, 0, 0, 255],
+                "MAX's edge column {x} is black at row {y}"
+            );
+        }
+    }
+    let frame = read_shared_texture(&fhd_info).expect("a second WARP device reads it");
+    let layers = narrow.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT);
+    assert_eq!((layers[0].place.off_x, layers[0].place.w), (240, 1440));
+    assert_matches(&frame, &layers, fhd_size, "the 4:3 boundary in 1920x1080");
+    assert_eq!(
+        bgra(&frame, FHD_WIDTH, 239, 540),
+        [0, 0, 0, 255],
+        "the left bar"
+    );
+    assert_eq!(
+        bgra(&frame, FHD_WIDTH, 1680, 540),
+        [0, 0, 0, 255],
+        "the right bar"
+    );
 
     max.stop();
     wait_until("program-max exits on stop", || thread.is_finished());
