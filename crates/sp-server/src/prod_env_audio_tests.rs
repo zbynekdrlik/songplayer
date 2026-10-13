@@ -208,9 +208,9 @@ fn a_soundgrid_adapter_that_cannot_be_read_is_a_problem() {
         kmdf_library_version: Reading::Unread,
         ..sg_nic()
     };
-    assert_eq!(nic_problems(&no_model), [unread.clone()]);
+    assert_eq!(nic_problems(&no_model), std::slice::from_ref(&unread));
     let no_setting = with_setting(sg_nic(), NicSetting::GigaLite, Reading::Unread);
-    assert_eq!(nic_problems(&no_setting), [unread.clone()]);
+    assert_eq!(nic_problems(&no_setting), std::slice::from_ref(&unread));
     // An adapter whose instance was not found: nothing read, nothing named
     // twice.
     let nothing = NicFacts {

@@ -32,17 +32,12 @@ use sp_core::prod_env::{EnvProblem, Unreadable};
 
 /// A registry fact as read: not read (why: the read errors), absent, or its
 /// value.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Reading<T> {
+    #[default]
     Unread,
     Absent,
     Value(T),
-}
-
-impl<T> Default for Reading<T> {
-    fn default() -> Self {
-        Self::Unread
-    }
 }
 
 impl<T: Clone> Reading<T> {
