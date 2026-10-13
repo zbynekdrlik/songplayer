@@ -317,6 +317,114 @@ pub fn picker_option_text(name: &str, scene: &str, status: PlaylistStatus) -> St
     }
 }
 
+/// #266: the preview slot's line for a paused playlist.
+pub const PREVIEW_PAUSED: &str = "Náhľad sa zobrazí, keď playlist hrá — tento je pozastavený.";
+/// #266: the preview slot's line for a playlist that plays nothing.
+pub const PREVIEW_IDLE: &str = "Náhľad sa zobrazí, keď playlist hrá — tento nehrá.";
+
+/// #266: what the Player's live-preview slot may do for its playlist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewSlot {
+    /// Not known yet: no state was told (#225), or the pipeline decodes and
+    /// its song has not arrived. "Načítavam…".
+    Pending,
+    /// The pipeline DECODES a song (its own transport plays, #201 — on or off
+    /// program, the dub prepared off program included): "▶ Živý náhľad" is
+    /// offered.
+    Offered,
+    /// A song is loaded and the pipeline does not decode. No NEW preview: a
+    /// paused pipeline offers the encoder no picture (#221 A1), ffmpeg never
+    /// opens its inputs, no init segment comes, the `<video>` stays black
+    /// (the owner's ytslow at PP). A preview already running keeps its last
+    /// picture (`preview_view`).
+    Paused,
+    /// Nothing plays.
+    Idle,
+}
+
+impl PreviewSlot {
+    /// The slot's line while it shows no preview and offers none.
+    pub fn text(self) -> &'static str {
+        match self {
+            PreviewSlot::Pending => PENDING_TITLE,
+            PreviewSlot::Offered => "",
+            PreviewSlot::Paused => PREVIEW_PAUSED,
+            PreviewSlot::Idle => PREVIEW_IDLE,
+        }
+    }
+
+    /// The operator's preview ends with its playlist's song: nothing plays
+    /// any more, so a later song never starts an encoder by itself. Not
+    /// while the state is unknown (a reconnect: the preview comes back by
+    /// itself, #225) nor at a pause (it resumes with the song).
+    pub fn ends_preview(self) -> bool {
+        self == PreviewSlot::Idle
+    }
+}
+
+/// #266: the ONE rule of the preview slot — a preview is offered only while
+/// the pipeline decodes (`transport == Playing`) a song. It read the
+/// scene-aware WS `state` (`Playing | WaitingForScene` + a song), so a PAUSED
+/// playlist off program (`WaitingForScene`, transport `Paused`) offered a
+/// preview that could only stay black.
+pub fn preview_slot(
+    state_known: bool,
+    has_song: bool,
+    state: PlaybackState,
+    transport: TransportState,
+) -> PreviewSlot {
+    if !state_known {
+        return PreviewSlot::Pending;
+    }
+    if decodes(state, transport) {
+        return if has_song {
+            PreviewSlot::Offered
+        } else {
+            PreviewSlot::Pending
+        };
+    }
+    if has_song && state != PlaybackState::Idle {
+        PreviewSlot::Paused
+    } else {
+        PreviewSlot::Idle
+    }
+}
+
+/// #266 RED: still the old reading — the scene-aware state, so a paused
+/// pipeline off program "decodes".
+fn decodes(state: PlaybackState, _transport: TransportState) -> bool {
+    matches!(
+        state,
+        PlaybackState::Playing | PlaybackState::WaitingForScene
+    )
+}
+
+/// #266: what the preview slot shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewView {
+    /// The live preview (`PreviewVideo`).
+    Video,
+    /// The "▶ Živý náhľad" start button.
+    Start,
+    /// The slot's line ([`PreviewSlot::text`]).
+    Placeholder,
+}
+
+/// #266: the slot's view. `preview_on` = the operator started the preview
+/// (and has not stopped it); `showing` = the slot shows it now. A NEW preview
+/// mounts only where one is offered; a preview already showing stays through
+/// a pause, holding its last picture (#221 A1 — `post-deploy-preview.spec.ts`
+/// "pause freezes the preview" is the owner's path), and is never mounted
+/// anew on a paused playlist (a reconnect while paused waits for the resume).
+pub fn preview_view(slot: PreviewSlot, preview_on: bool, showing: bool) -> PreviewView {
+    match slot {
+        PreviewSlot::Offered if preview_on => PreviewView::Video,
+        PreviewSlot::Offered => PreviewView::Start,
+        PreviewSlot::Paused if preview_on && showing => PreviewView::Video,
+        _ => PreviewView::Placeholder,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

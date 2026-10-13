@@ -315,6 +315,9 @@ body {
     justify-content: center;
     color: var(--text-dim);
     font-size: 0.8rem;
+    /* #266: the slot's line says why it offers no preview (a sentence). */
+    text-align: center;
+    padding: 0 12px;
 }
 /* #178: unmute + fullscreen controls under the preview <video>. */
 .preview-controls {

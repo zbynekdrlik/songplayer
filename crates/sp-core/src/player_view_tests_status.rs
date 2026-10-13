@@ -171,3 +171,152 @@ fn a_paused_playlist_off_program_reads_paused_off_program() {
         "Čaká na ďalší pokus"
     );
 }
+
+/// #266: a preview is offered only while the pipeline DECODES a song (its
+/// own transport, #201), on program or off (the dub prepared off program);
+/// a paused pipeline (the owner's ytslow at PP: `WaitingForScene`, transport
+/// `Paused`) gives the encoder no picture, so it is never offered there.
+#[test]
+fn the_preview_is_offered_only_while_the_pipeline_decodes() {
+    use super::PreviewSlot::{Idle as SlotIdle, Offered, Paused, Pending};
+    let wfs = PlaybackState::WaitingForScene;
+    // (state, transport, a song loaded, the slot)
+    let table = [
+        (PlaybackState::Playing, PLAYING, true, Offered),
+        (wfs, PLAYING, true, Offered),
+        (wfs, PAUSED, true, Paused),
+        (wfs, IDLE, true, Paused),
+        (PlaybackState::Playing, PAUSED, true, Paused),
+        (PlaybackState::Idle, PLAYING, true, Offered),
+        (PlaybackState::Idle, PAUSED, true, SlotIdle),
+        (PlaybackState::Idle, IDLE, true, SlotIdle),
+        // Decoding, its song not here yet (a ▶ before `Started`).
+        (PlaybackState::Playing, PLAYING, false, Pending),
+        (wfs, PLAYING, false, Pending),
+        // Nothing loaded: nothing to preview.
+        (wfs, PAUSED, false, SlotIdle),
+        (PlaybackState::Idle, IDLE, false, SlotIdle),
+    ];
+    for (state, transport, song, slot) in table {
+        assert_eq!(
+            preview_slot(true, song, state, transport),
+            slot,
+            "{state:?} / {transport:?} / song {song}"
+        );
+        assert_eq!(
+            preview_slot(false, song, state, transport),
+            Pending,
+            "{state:?} / {transport:?} / song {song}: not told yet"
+        );
+    }
+}
+
+/// The slot says why it offers no preview; the owner's paused card reads
+/// the paused line, an idle one the idle line.
+#[test]
+fn the_preview_slot_says_why_it_offers_no_preview() {
+    let paused = preview_slot(true, true, PlaybackState::WaitingForScene, PAUSED);
+    assert_eq!(
+        paused.text(),
+        "Náhľad sa zobrazí, keď playlist hrá — tento je pozastavený."
+    );
+    assert_eq!(
+        PreviewSlot::Idle.text(),
+        "Náhľad sa zobrazí, keď playlist hrá — tento nehrá."
+    );
+    assert_eq!(PreviewSlot::Pending.text(), "Načítavam…");
+    assert_eq!(PreviewSlot::Offered.text(), "");
+}
+
+/// The operator's preview ends only when nothing plays: never while the
+/// state is unknown (a reconnect brings it back by itself, #225) nor at a
+/// pause.
+#[test]
+fn only_an_idle_playlist_ends_the_operators_preview() {
+    assert!(PreviewSlot::Idle.ends_preview());
+    assert!(!PreviewSlot::Paused.ends_preview());
+    assert!(!PreviewSlot::Pending.ends_preview());
+    assert!(!PreviewSlot::Offered.ends_preview());
+}
+
+/// What the slot shows, for every slot, started or not, showing or not.
+#[test]
+fn a_new_preview_mounts_only_where_one_is_offered() {
+    use super::PreviewSlot::{Idle as SlotIdle, Offered, Paused, Pending};
+    use super::PreviewView::{Placeholder, Start, Video};
+    // (slot, the operator started it, the slot shows it now, the view)
+    let table = [
+        (Offered, false, false, Start),
+        (Offered, false, true, Start),
+        (Offered, true, false, Video),
+        (Offered, true, true, Video),
+        // Paused: no new preview; a showing one holds its last picture.
+        (Paused, false, false, Placeholder),
+        (Paused, false, true, Placeholder),
+        (Paused, true, false, Placeholder),
+        (Paused, true, true, Video),
+        (Pending, false, false, Placeholder),
+        (Pending, false, true, Placeholder),
+        (Pending, true, false, Placeholder),
+        (Pending, true, true, Placeholder),
+        (SlotIdle, false, false, Placeholder),
+        (SlotIdle, false, true, Placeholder),
+        (SlotIdle, true, false, Placeholder),
+        (SlotIdle, true, true, Placeholder),
+    ];
+    for (slot, on, showing, view) in table {
+        assert_eq!(
+            preview_view(slot, on, showing),
+            view,
+            "{slot:?} / started {on} / showing {showing}"
+        );
+    }
+}
+
+/// The owner's path (#184, `post-deploy-preview.spec.ts`): a preview
+/// started while the song plays survives a pause — the same element holds
+/// the last picture — and plays on at the resume; a reconnect while paused
+/// mounts none until the song plays again (it would get no picture).
+#[test]
+fn a_running_preview_holds_through_a_pause_and_a_reconnect_waits_for_the_resume() {
+    use super::PreviewSlot::{Offered, Paused, Pending};
+    // Each step: (the slot, the operator's preview on).
+    let walk = |steps: &[(PreviewSlot, bool)]| -> Vec<PreviewView> {
+        let mut shown = PreviewView::Placeholder;
+        steps
+            .iter()
+            .map(|&(slot, on)| {
+                shown = preview_view(slot, on, shown == PreviewView::Video);
+                shown
+            })
+            .collect()
+    };
+    assert_eq!(
+        walk(&[
+            (Offered, false),
+            (Offered, true),
+            (Paused, true),
+            (Offered, true)
+        ]),
+        [
+            PreviewView::Start,
+            PreviewView::Video,
+            PreviewView::Video,
+            PreviewView::Video
+        ]
+    );
+    assert_eq!(
+        walk(&[
+            (Offered, true),
+            (Pending, true),
+            (Paused, true),
+            (Offered, true)
+        ]),
+        [
+            PreviewView::Video,
+            PreviewView::Placeholder,
+            PreviewView::Placeholder,
+            PreviewView::Video
+        ]
+    );
+}
