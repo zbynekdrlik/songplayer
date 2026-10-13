@@ -264,7 +264,8 @@ pub struct WindowsUpdateView {
     #[serde(default)]
     pub no_auto_update: Option<bool>,
     /// `ExcludeWUDriversInQualityUpdate` is 1: no driver comes through
-    /// Windows Update (report only until the setup script applies it).
+    /// Windows Update (a gate since #255 lane 2: `scripts/setup-prod-pc.ps1`
+    /// applies it at every deploy).
     #[serde(default)]
     pub drivers_excluded: Option<bool>,
 }
@@ -323,8 +324,9 @@ pub struct AudioProfile {
 
 /// The report-only facts that are not the production ones, in Slovak: the
 /// Dante adapter's driver model (its effect is still being measured), the
-/// Windows Update driver exclusion (lane 2's setup applies it), the active
-/// power scheme and core parking. None of them is a problem.
+/// active power scheme and core parking (the setup script applies it; it
+/// stays report-only here). None of them is a problem. The Windows Update
+/// driver exclusion was one until #255 lane 2 made it a gate.
 pub fn notes(p: &AudioProfile) -> Vec<String> {
     let mut notes = Vec::new();
     match (p.dante.installed, &p.dante.nic) {
@@ -352,15 +354,6 @@ pub fn notes(p: &AudioProfile) -> Vec<String> {
                 nic.label()
             )),
         },
-    }
-    match p.windows_update.drivers_excluded {
-        Some(true) => {}
-        Some(false) => notes.push(
-            "Windows Update nemá vylúčené ovládače (ExcludeWUDriversInQualityUpdate; nastaví ho \
-             príprava PC)"
-                .to_string(),
-        ),
-        None => notes.push("vylúčenie ovládačov z Windows Update sa nepodarilo zistiť".to_string()),
     }
     if p.power.scheme_guid.is_none() {
         notes.push("aktívny plán napájania sa nepodarilo zistiť".to_string());

@@ -175,22 +175,16 @@ fn a_dante_adapter_that_cannot_be_found_is_a_note() {
     );
 }
 
+/// #255 lane 2: the Windows Update driver exclusion is a gate now
+/// (`EnvProblem::DriversNotExcluded`, `unreadable:windows_update`), never a
+/// note.
 #[test]
-fn the_windows_update_driver_exclusion_is_a_note_until_it_is_set() {
-    let mut p = quiet();
-    p.windows_update.drivers_excluded = Some(false);
-    assert_eq!(
-        notes(&p),
-        [
-            "Windows Update nemá vylúčené ovládače (ExcludeWUDriversInQualityUpdate; nastaví ho \
-          príprava PC)"
-        ]
-    );
-    p.windows_update.drivers_excluded = None;
-    assert_eq!(
-        notes(&p),
-        ["vylúčenie ovládačov z Windows Update sa nepodarilo zistiť"]
-    );
+fn the_windows_update_driver_exclusion_is_no_note() {
+    for drivers_excluded in [Some(false), None] {
+        let mut p = quiet();
+        p.windows_update.drivers_excluded = drivers_excluded;
+        assert_eq!(notes(&p), Vec::<String>::new(), "{drivers_excluded:?}");
+    }
 }
 
 #[test]
@@ -223,7 +217,6 @@ fn every_note_is_listed_in_order() {
         notes(&p),
         [
             "inštaláciu Dante Virtual Soundcard sa nepodarilo zistiť",
-            "vylúčenie ovládačov z Windows Update sa nepodarilo zistiť",
             "aktívny plán napájania sa nepodarilo zistiť",
             "parkovanie jadier sa nepodarilo zistiť",
         ]

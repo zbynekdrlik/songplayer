@@ -16,8 +16,10 @@
  * #255 adds the production PC's audio profile (`status.environment.audio`):
  * with SoundGrid installed, the adapter its driver chose as its port
  * (`LocalLanPort`) found and on an NDIS driver with Waves' settings off;
- * Windows Update's automatic updates off; MMCSS set for Pro Audio. The Dante adapter, the Windows Update driver exclusion and the
- * power scheme are reported only (`audio.notes`), never a failure.
+ * Windows Update's automatic updates off and (lane 2: scripts/setup-prod-pc.ps1
+ * applies it at every deploy) its drivers excluded; MMCSS set for Pro Audio.
+ * The Dante adapter and the power scheme are reported only (`audio.notes`),
+ * never a failure.
  */
 
 /** One problem as the server names it (`sp_core::prod_env::ProblemView`). */
@@ -116,7 +118,8 @@ export const MMCSS_PRODUCTION = {
  * Defender's real-time protection and passive mode off, no other antivirus
  * on, every firewall profile off; #255: SoundGrid not installed, or its
  * chosen adapter found on NDIS with its settings off, automatic updates
- * off, MMCSS for Pro Audio. A fact
+ * off and drivers excluded from Windows Update (lane 2), MMCSS for Pro
+ * Audio. A fact
  * missing from the status (an older server) reads null and fails. */
 function factFailures(env: EnvironmentStatus): string[] {
   const f: string[] = [];
@@ -142,6 +145,9 @@ function factFailures(env: EnvironmentStatus): string[] {
     f.push(`audio.soundgrid is ${shown(soundgrid)}, not "found" or "not_installed"`);
   }
   want("audio.windows_update.no_auto_update", audio?.windows_update?.no_auto_update, true);
+  // #255 lane 2: a gate since scripts/setup-prod-pc.ps1 applies it at every
+  // deploy, before SongPlayer starts (a driver push would undo PP's NDIS swap).
+  want("audio.windows_update.drivers_excluded", audio?.windows_update?.drivers_excluded, true);
   for (const [key, expected] of Object.entries(MMCSS_PRODUCTION)) {
     const mmcss = (audio?.mmcss ?? {}) as Record<string, unknown>;
     want(`audio.mmcss.${key}`, mmcss[key], expected);

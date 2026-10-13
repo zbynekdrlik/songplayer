@@ -14,8 +14,9 @@
 //!
 //! #255 adds the production PC's audio profile ([`audio`]): the network
 //! adapter the SoundGrid driver uses (its chosen port) runs an NDIS driver
-//! with Waves' settings, automatic updates are off, MMCSS is set for Pro
-//! Audio; the rest is reported only ([`notes_label`]).
+//! with Waves' settings, automatic updates are off and Windows Update
+//! installs no driver, MMCSS is set for Pro Audio; the rest is reported only
+//! ([`notes_label`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -71,7 +72,8 @@ pub enum Unreadable {
     /// #255: SoundGrid (the service, its driver's chosen port, the
     /// interfaces).
     SoundGrid,
-    /// #255: Windows Update's automatic-update policy.
+    /// #255: Windows Update's policies (automatic updates, the driver
+    /// exclusion).
     WindowsUpdate,
     /// #255: MMCSS's system profile.
     Mmcss,
@@ -115,6 +117,11 @@ pub enum EnvProblem {
     /// #255: Windows Update's automatic updates are not off
     /// (`NoAutoUpdate` is not 1).
     AutoUpdateOn,
+    /// #255 lane 2: Windows Update may install drivers
+    /// (`ExcludeWUDriversInQualityUpdate` is not 1): a driver push would
+    /// undo PP's NDIS driver swap. `scripts/setup-prod-pc.ps1` sets it at
+    /// every deploy.
+    DriversNotExcluded,
     /// #255: an MMCSS value is not the production one: its value as read,
     /// or `None` when it is missing.
     Mmcss {
@@ -144,6 +151,7 @@ impl EnvProblem {
             }
             Self::SoundGridNicUnreadable { .. } => "unreadable:soundgrid_nic".to_string(),
             Self::AutoUpdateOn => "windows_auto_update_on".to_string(),
+            Self::DriversNotExcluded => "windows_update_drivers_on".to_string(),
             Self::Mmcss { setting, .. } => format!("mmcss:{}", setting.name()),
             Self::Unreadable(Unreadable::Edition) => "unreadable:edition".to_string(),
             Self::Unreadable(Unreadable::Build) => "unreadable:build".to_string(),
@@ -211,6 +219,11 @@ impl EnvProblem {
             Self::AutoUpdateOn => {
                 "automatické aktualizácie Windows nie sú vypnuté (NoAutoUpdate)".to_string()
             }
+            Self::DriversNotExcluded => {
+                "Windows Update nemá vylúčené ovládače (ExcludeWUDriversInQualityUpdate) — \
+                 aktualizácia môže vymeniť ovládač sieťovej karty"
+                    .to_string()
+            }
             Self::Mmcss {
                 setting,
                 value: Some(value),
@@ -247,7 +260,7 @@ impl EnvProblem {
                 "väzby protokolu SoundGrid na sieťové karty sa nepodarilo zistiť".to_string()
             }
             Self::Unreadable(Unreadable::WindowsUpdate) => {
-                "nastavenie automatických aktualizácií Windows sa nepodarilo zistiť".to_string()
+                "nastavenia Windows Update sa nepodarilo zistiť".to_string()
             }
             Self::Unreadable(Unreadable::Mmcss) => {
                 "nastavenia MMCSS sa nepodarilo zistiť".to_string()

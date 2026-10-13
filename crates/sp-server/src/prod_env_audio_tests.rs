@@ -373,16 +373,51 @@ fn an_mmcss_value_that_cannot_be_read_is_one_problem_first() {
 #[test]
 fn a_production_profile_holds() {
     assert_eq!(problems(&production_example()), Vec::<EnvProblem>::new());
-    // The report-only facts are never a problem: no SoundGrid, no DVS, the
-    // driver exclusion missing, core parking on.
+    // The report-only facts are never a problem: no SoundGrid, no DVS, no
+    // power scheme read, core parking on.
     let snv = AudioFacts {
         soundgrid: SoundGridFacts::NotInstalled,
         dante: DanteFacts::default(),
-        drivers_excluded: None,
-        power: PowerFacts::default(),
+        power: PowerFacts {
+            core_parking_min_cores: Some(10),
+            ..PowerFacts::default()
+        },
         ..production_example()
     };
     assert_eq!(problems(&snv), Vec::<EnvProblem>::new());
+}
+
+/// #255 lane 2: both Windows Update policies gate. Either one not read is
+/// ONE "cannot be read" first; then automatic updates on, then drivers not
+/// excluded.
+#[test]
+fn windows_update_s_two_policies_gate() {
+    let wu = |no_auto_update: Option<bool>, drivers_excluded: Option<bool>| {
+        problems(&AudioFacts {
+            no_auto_update,
+            drivers_excluded,
+            ..production_example()
+        })
+    };
+    let unread = EnvProblem::Unreadable(Unreadable::WindowsUpdate);
+    assert_eq!(wu(Some(true), Some(true)), Vec::<EnvProblem>::new());
+    assert_eq!(
+        wu(Some(true), Some(false)),
+        [EnvProblem::DriversNotExcluded]
+    );
+    assert_eq!(wu(Some(false), Some(true)), [EnvProblem::AutoUpdateOn]);
+    assert_eq!(
+        wu(Some(false), Some(false)),
+        [EnvProblem::AutoUpdateOn, EnvProblem::DriversNotExcluded]
+    );
+    assert_eq!(wu(Some(true), None), [unread.clone()]);
+    assert_eq!(wu(None, Some(true)), [unread.clone()]);
+    assert_eq!(wu(None, None), [unread.clone()]);
+    assert_eq!(
+        wu(None, Some(false)),
+        [unread.clone(), EnvProblem::DriversNotExcluded]
+    );
+    assert_eq!(wu(Some(false), None), [unread, EnvProblem::AutoUpdateOn]);
 }
 
 #[test]
@@ -405,6 +440,7 @@ fn the_profile_names_every_problem_in_order() {
         },
     };
     bad.no_auto_update = Some(false);
+    bad.drivers_excluded = Some(false);
     bad.mmcss.pro_audio_priority = Reading::Value(1);
     assert_eq!(
         problems(&bad),
@@ -414,6 +450,7 @@ fn the_profile_names_every_problem_in_order() {
             },
             sg_setting(NicSetting::Eee, Some("1")),
             EnvProblem::AutoUpdateOn,
+            EnvProblem::DriversNotExcluded,
             mmcss(MmcssSetting::ProAudioPriority, Some("1")),
         ]
     );
@@ -546,7 +583,7 @@ fn the_profile_is_shown_with_its_notes() {
     assert_eq!(dvs.name.as_deref(), Some("Ethernet 4"));
     assert_eq!(dvs.driver_model, Some(DriverModel::NetAdapterCx));
     assert_eq!(p.windows_update.no_auto_update, Some(true));
-    assert_eq!(p.windows_update.drivers_excluded, Some(false));
+    assert_eq!(p.windows_update.drivers_excluded, Some(true));
     assert_eq!(p.mmcss.system_responsiveness, Some(0));
     assert_eq!(p.mmcss.network_throttling_index, Some(u32::MAX));
     assert_eq!(p.mmcss.pro_audio_priority, Some(6));
@@ -564,17 +601,26 @@ fn the_profile_is_shown_with_its_notes() {
         p.notes,
         [
             "sieťová karta Dante (DVS) „Ethernet 4“ beží na ovládači NetAdapterCx (vplyv sa ešte \
-             meria)",
-            "Windows Update nemá vylúčené ovládače (ExcludeWUDriversInQualityUpdate; nastaví ho \
-             príprava PC)",
+          meria)"
         ]
     );
-    // Nothing read: every report-only fact is a note, SoundGrid unreadable.
+    // The driver exclusion missing is a problem now (#255 lane 2), no note.
+    let snv_before_setup = view(&AudioFacts {
+        drivers_excluded: Some(false),
+        ..production_example()
+    });
+    assert_eq!(snv_before_setup.notes, p.notes);
+    assert_eq!(
+        snv_before_setup.windows_update.drivers_excluded,
+        Some(false)
+    );
+    // Nothing read: every report-only fact is a note (DVS, the scheme, core
+    // parking), SoundGrid unreadable.
     let nothing = view(&AudioFacts::default());
     assert_eq!(nothing.soundgrid, Some(SoundGridState::Unreadable));
     assert_eq!(nothing.soundgrid_nic, None);
     assert_eq!(nothing.dante.nic, None);
-    assert_eq!(nothing.notes.len(), 4);
+    assert_eq!(nothing.notes.len(), 3);
 }
 
 /// #255: SoundGrid's state on the status, with the port's MAC when one was

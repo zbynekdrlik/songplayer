@@ -6,6 +6,7 @@
 #[cfg(windows)]
 use std::collections::HashMap;
 
+use sp_core::prod_env::EnvProblem;
 #[cfg(windows)]
 use sp_core::prod_env::audio::NicSetting;
 
@@ -455,10 +456,12 @@ fn pp_s_profile_reads_as_its_facts_and_holds() {
 }
 
 /// SNV: no SoundGrid (its preferences, if any, are never read for a port),
-/// DVS on its own USB adapter, the Windows Update driver exclusion missing
-/// (lane 2 applies it): no problem, two notes.
+/// DVS on its own USB adapter (a note). As lane 1 read it on 13.10.2026 the
+/// Windows Update driver exclusion was missing: since #255 lane 2 that is a
+/// problem, and the deploy's `scripts/setup-prod-pc.ps1` sets it before
+/// SongPlayer starts, after which SNV holds.
 #[test]
-fn snv_s_profile_holds_with_notes() {
+fn snv_s_profile_fails_only_on_the_driver_exclusion_until_the_setup_sets_it() {
     let mut reg = Fake::default();
     add_dante(&mut reg);
     add_policies(&mut reg);
@@ -468,18 +471,30 @@ fn snv_s_profile_holds_with_notes() {
         RegValue::Absent,
     );
     let manager = r#"{"PrimaryInterfaceName":"Dante","PrimaryInterfaceAddress":"00e04c02d461"}"#;
-    let facts = read_audio(
-        &reg,
-        &Ok(vec![row(DVS_GUID, "00e04c02d461", true, false)]),
-        &FileRead::Text(manager.to_string()),
-        &FileRead::Failed("%APPDATA% is not set".to_string()),
-        &power_read(),
+    let read = |reg: &Fake| {
+        read_audio(
+            reg,
+            &Ok(vec![row(DVS_GUID, "00e04c02d461", true, false)]),
+            &FileRead::Text(manager.to_string()),
+            &FileRead::Failed("%APPDATA% is not set".to_string()),
+            &power_read(),
+        )
+    };
+    let before = read(&reg);
+    assert!(before.errors.is_empty(), "{:?}", before.errors);
+    assert_eq!(before.soundgrid, SoundGridFacts::NotInstalled);
+    assert_eq!(before.drivers_excluded, Some(false));
+    assert_eq!(problems(&before), [EnvProblem::DriversNotExcluded]);
+    assert_eq!(view(&before).notes.len(), 1);
+    reg.set(
+        WINDOWS_UPDATE,
+        "ExcludeWUDriversInQualityUpdate",
+        RegValue::Dword(1),
     );
-    assert!(facts.errors.is_empty(), "{:?}", facts.errors);
-    assert_eq!(facts.soundgrid, SoundGridFacts::NotInstalled);
-    assert_eq!(facts.drivers_excluded, Some(false));
-    assert!(problems(&facts).is_empty());
-    assert_eq!(view(&facts).notes.len(), 2);
+    let after = read(&reg);
+    assert_eq!(after.drivers_excluded, Some(true));
+    assert!(problems(&after).is_empty());
+    assert_eq!(view(&after).notes.len(), 1);
 }
 
 #[test]

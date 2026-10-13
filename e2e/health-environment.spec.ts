@@ -157,8 +157,9 @@ const MMCSS = {
 };
 const DVS_NOTE =
   "sieťová karta Dante (DVS) „Ethernet 4“ beží na ovládači NetAdapterCx (vplyv sa ešte meria)";
-const WU_NOTE =
-  "Windows Update nemá vylúčené ovládače (ExcludeWUDriversInQualityUpdate; nastaví ho príprava PC)";
+// #255 lane 2: the Windows Update driver exclusion is a gate now, no note;
+// core parking stays report-only.
+const PARKING_NOTE = "parkovanie jadier je zapnuté (minimum 50 % jadier)";
 
 test("#255: an audio-profile problem is named on the red segment", async ({ page, request }) => {
   await request.post("/__mock/environment", {
@@ -212,11 +213,11 @@ test("#255: report-only notes are a grey segment and the box still holds", async
       problems: [],
       audio: {
         soundgrid: "not_installed",
-        notes: [DVS_NOTE, WU_NOTE],
+        notes: [DVS_NOTE, PARKING_NOTE],
         power: {
           scheme_guid: "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
           scheme_name: "High performance",
-          core_parking_min_cores_pct: 100,
+          core_parking_min_cores_pct: 50,
         },
       },
     },
@@ -231,7 +232,7 @@ test("#255: report-only notes are a grey segment and the box still holds", async
   await expect(notes).toHaveClass(/health-off/);
   await expect(notes).toHaveAttribute(
     "title",
-    `Len hlásené, nie je to chyba (#255): ${DVS_NOTE}; ${WU_NOTE}. Plán napájania: High performance ` +
+    `Len hlásené, nie je to chyba (#255): ${DVS_NOTE}; ${PARKING_NOTE}. Plán napájania: High performance ` +
       "(8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c).",
   );
   // One note left: the count follows at the next 10 s poll.

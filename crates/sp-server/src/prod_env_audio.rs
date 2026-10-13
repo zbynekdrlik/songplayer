@@ -15,8 +15,10 @@
 //!   +80 resyncs before, 0 after the NDIS driver) — with Waves' settings off
 //!   ([`setting_verdict`]). Never the protocol's bindings: on PP they list
 //!   14 adapters, virtual and long gone ones among them.
-//! - **Windows Update** (GATE): automatic updates off (`NoAutoUpdate` 1).
-//!   The driver exclusion is reported only until lane 2's setup applies it.
+//! - **Windows Update** (GATE): automatic updates off (`NoAutoUpdate` 1)
+//!   and no driver through it (`ExcludeWUDriversInQualityUpdate` 1; a gate
+//!   since lane 2's `scripts/setup-prod-pc.ps1` applies it at every
+//!   deploy).
 //! - **MMCSS** (GATE, #210 part 2): `SystemResponsiveness` 0,
 //!   `NetworkThrottlingIndex` 0xFFFFFFFF, the Pro Audio task at priority 6,
 //!   scheduling category High.
@@ -161,8 +163,8 @@ pub struct AudioFacts {
     pub dante: DanteFacts,
     /// `NoAutoUpdate` is 1.
     pub no_auto_update: Option<bool>,
-    /// `ExcludeWUDriversInQualityUpdate` is 1 (report only; lane 2's setup
-    /// applies it, then it becomes a gate).
+    /// `ExcludeWUDriversInQualityUpdate` is 1 (a gate since lane 2's setup
+    /// applies it).
     pub drivers_excluded: Option<bool>,
     pub mmcss: MmcssFacts,
     pub power: PowerFacts,
@@ -364,10 +366,16 @@ pub fn soundgrid_problems(soundgrid: &SoundGridFacts) -> Vec<EnvProblem> {
 /// MMCSS. The report-only facts are never one.
 pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
     let mut problems = soundgrid_problems(&audio.soundgrid);
-    match audio.no_auto_update {
-        None => problems.push(EnvProblem::Unreadable(Unreadable::WindowsUpdate)),
-        Some(false) => problems.push(EnvProblem::AutoUpdateOn),
-        Some(true) => {}
+    // Windows Update: one "cannot be read" for either policy, then each
+    // policy that is not set.
+    if audio.no_auto_update.is_none() || audio.drivers_excluded.is_none() {
+        problems.push(EnvProblem::Unreadable(Unreadable::WindowsUpdate));
+    }
+    if audio.no_auto_update == Some(false) {
+        problems.push(EnvProblem::AutoUpdateOn);
+    }
+    if audio.drivers_excluded == Some(false) {
+        problems.push(EnvProblem::DriversNotExcluded);
     }
     problems.extend(mmcss_problems(&audio.mmcss));
     problems
@@ -454,8 +462,9 @@ pub fn view(audio: &AudioFacts) -> AudioProfile {
 
 /// A production PC's audio facts (the tests' fixture): PP's SoundGrid
 /// adapter on its NDIS driver with every setting off, DVS on a NetAdapterCx
-/// adapter (report only), automatic updates off, the driver exclusion
-/// missing (report only), MMCSS set, no core parking.
+/// adapter (report only), automatic updates off and drivers excluded from
+/// Windows Update (both 1 on PP since 12.10.2026), MMCSS set, no core
+/// parking.
 #[cfg(test)]
 pub fn production_example() -> AudioFacts {
     let nic = |guid: &str, name: &str, service: &str, kmdf: Reading<String>| NicFacts {
@@ -500,7 +509,7 @@ pub fn production_example() -> AudioFacts {
             )),
         },
         no_auto_update: Some(true),
-        drivers_excluded: Some(false),
+        drivers_excluded: Some(true),
         mmcss: MmcssFacts {
             system_responsiveness: Reading::Value(SYSTEM_RESPONSIVENESS),
             network_throttling_index: Reading::Value(NETWORK_THROTTLING_OFF),

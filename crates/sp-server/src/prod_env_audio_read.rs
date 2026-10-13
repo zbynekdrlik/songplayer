@@ -671,8 +671,8 @@ pub fn read_audio(
         "Windows Update's NoAutoUpdate",
         &mut errors,
     );
-    // Reported only in lane 1: SNV lacks it today. #255 lane 2's
-    // `scripts/setup-prod-pc.ps1` applies it on every box; then it gates.
+    // A gate since #255 lane 2: `scripts/setup-prod-pc.ps1` applies it at
+    // every deploy, before SongPlayer starts.
     let drivers_excluded = policy_on(
         reg.value(WINDOWS_UPDATE, "ExcludeWUDriversInQualityUpdate"),
         "Windows Update's ExcludeWUDriversInQualityUpdate",

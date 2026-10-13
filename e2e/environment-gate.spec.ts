@@ -15,13 +15,11 @@ import {
 
 /** #255: PP's audio profile as it must be: the adapter the SoundGrid driver
  * chose (soundgrid-pcie) on its NDIS driver with every setting off,
- * automatic updates off, MMCSS for Pro
- * Audio; the Dante adapter on NetAdapterCx and the missing driver exclusion
- * are report-only notes. */
+ * automatic updates off and drivers excluded from Windows Update, MMCSS for
+ * Pro Audio; the Dante adapter on NetAdapterCx is a report-only note. */
 const DVS_NOTE =
   "sieťová karta Dante (DVS) „Ethernet 4“ beží na ovládači NetAdapterCx (vplyv sa ešte meria)";
-const WU_NOTE =
-  "Windows Update nemá vylúčené ovládače (ExcludeWUDriversInQualityUpdate; nastaví ho príprava PC)";
+const PARKING_NOTE = "parkovanie jadier je zapnuté (minimum 50 % jadier)";
 const audioHolds = (over: Partial<AudioProfile> = {}): AudioProfile => ({
   soundgrid: "found",
   soundgrid_port_mac: "6c2408e59c91",
@@ -40,7 +38,7 @@ const audioHolds = (over: Partial<AudioProfile> = {}): AudioProfile => ({
     interface_name: "Ethernet 4",
     nic: { guid: "{0B5E1C2D-3E4F-4A5B-9C6D-7E8F90A1B2C3}", name: "Ethernet 4", driver_model: "netadaptercx" },
   },
-  windows_update: { no_auto_update: true, drivers_excluded: false },
+  windows_update: { no_auto_update: true, drivers_excluded: true },
   mmcss: {
     system_responsiveness: 0,
     network_throttling_index: 4294967295,
@@ -52,7 +50,7 @@ const audioHolds = (over: Partial<AudioProfile> = {}): AudioProfile => ({
     scheme_name: "High performance",
     core_parking_min_cores_pct: 100,
   },
-  notes: [DVS_NOTE, WU_NOTE],
+  notes: [DVS_NOTE],
   ...over,
 });
 
@@ -229,7 +227,7 @@ test.describe("production environment gate (#233)", () => {
     const env = holds({
       audio: audioHolds({
         soundgrid_nic: { ...sg, driver_model: "netadaptercx", settings_ok: false },
-        windows_update: { no_auto_update: false, drivers_excluded: true },
+        windows_update: { no_auto_update: false, drivers_excluded: false },
         mmcss: {
           system_responsiveness: 20,
           network_throttling_index: 10,
@@ -242,6 +240,7 @@ test.describe("production environment gate (#233)", () => {
       'audio.soundgrid_nic.driver_model is "netadaptercx", not "ndis"',
       "audio.soundgrid_nic.settings_ok is false, not true",
       "audio.windows_update.no_auto_update is false, not true",
+      "audio.windows_update.drivers_excluded is false, not true",
       "audio.mmcss.system_responsiveness is 20, not 0",
       "audio.mmcss.network_throttling_index is 10, not 4294967295",
       "audio.mmcss.pro_audio_priority is 1, not 6",
@@ -282,6 +281,7 @@ test.describe("production environment gate (#233)", () => {
     expect(environmentFailures(old)).toEqual([
       'audio.soundgrid is null, not "found" or "not_installed"',
       "audio.windows_update.no_auto_update is null, not true",
+      "audio.windows_update.drivers_excluded is null, not true",
       "audio.mmcss.system_responsiveness is null, not 0",
       "audio.mmcss.network_throttling_index is null, not 4294967295",
       "audio.mmcss.pro_audio_priority is null, not 6",
@@ -293,16 +293,30 @@ test.describe("production environment gate (#233)", () => {
     ]);
   });
 
+  test("#255 lane 2: the Windows Update driver exclusion gates, missing or unread", () => {
+    // SNV before its first deploy with scripts/setup-prod-pc.ps1: the
+    // exclusion missing fails; the deploy applies it before the start.
+    for (const drivers_excluded of [false, null] as const) {
+      expect(
+        environmentFailures(
+          holds({ audio: audioHolds({ windows_update: { no_auto_update: true, drivers_excluded } }) }),
+        ),
+        String(drivers_excluded),
+      ).toEqual([`audio.windows_update.drivers_excluded is ${String(drivers_excluded)}, not true`]);
+    }
+  });
+
   test("#255: the report-only facts never fail and are listed as notes", () => {
     const env = holds({
       audio: audioHolds({
-        windows_update: { no_auto_update: true, drivers_excluded: null },
         power: { scheme_guid: null, scheme_name: null, core_parking_min_cores_pct: 50 },
         dante: { installed: null },
+        notes: [DVS_NOTE, PARKING_NOTE],
       }),
     });
     expect(environmentFailures(env)).toEqual([]);
-    expect(environmentNotes(holds())).toEqual([DVS_NOTE, WU_NOTE]);
+    expect(environmentNotes(holds())).toEqual([DVS_NOTE]);
+    expect(environmentNotes(env)).toEqual([DVS_NOTE, PARKING_NOTE]);
     expect(environmentNotes(undefined)).toEqual([]);
     expect(environmentNotes(holds({ audio: undefined }))).toEqual([]);
   });

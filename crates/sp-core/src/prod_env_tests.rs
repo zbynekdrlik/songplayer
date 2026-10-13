@@ -57,6 +57,7 @@ fn every_audio_problem() -> Vec<EnvProblem> {
     });
     all.push(EnvProblem::SoundGridNicUnreadable { nic: nic() });
     all.push(EnvProblem::AutoUpdateOn);
+    all.push(EnvProblem::DriversNotExcluded);
     for setting in MmcssSetting::ALL {
         all.push(EnvProblem::Mmcss {
             setting,
@@ -92,6 +93,7 @@ fn every_audio_problem_has_its_stable_code() {
             "soundgrid_nic_setting:flow_control",
             "unreadable:soundgrid_nic",
             "windows_auto_update_on",
+            "windows_update_drivers_on",
             "mmcss:system_responsiveness",
             "mmcss:network_throttling_index",
             "mmcss:pro_audio_priority",
@@ -137,13 +139,15 @@ fn every_audio_problem_reads_in_slovak() {
             "ovládač alebo nastavenia sieťovej karty SoundGrid „soundgrid-pcie“ sa nepodarilo \
              zistiť",
             "automatické aktualizácie Windows nie sú vypnuté (NoAutoUpdate)",
+            "Windows Update nemá vylúčené ovládače (ExcludeWUDriversInQualityUpdate) — \
+             aktualizácia môže vymeniť ovládač sieťovej karty",
             "MMCSS: SystemResponsiveness je 20 (má byť 0)",
             "MMCSS: NetworkThrottlingIndex je 20 (má byť 0xFFFFFFFF)",
             "MMCSS: Priority úlohy Pro Audio je 20 (má byť 6)",
             "MMCSS: Scheduling Category úlohy Pro Audio je 20 (má byť High)",
             "MMCSS: Priority úlohy Pro Audio chýba (má byť 6)",
             "väzby protokolu SoundGrid na sieťové karty sa nepodarilo zistiť",
-            "nastavenie automatických aktualizácií Windows sa nepodarilo zistiť",
+            "nastavenia Windows Update sa nepodarilo zistiť",
             "nastavenia MMCSS sa nepodarilo zistiť",
         ]
     );
