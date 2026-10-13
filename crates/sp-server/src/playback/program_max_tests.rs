@@ -346,6 +346,7 @@ fn the_max_block_has_its_api_names() {
             "sender_backoffs",
             "slot_repicks",
             "spout_name",
+            "spout_relists",
             "state",
             "submitted",
             "upload_us_p99",

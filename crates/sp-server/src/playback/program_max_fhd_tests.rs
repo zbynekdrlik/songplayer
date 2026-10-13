@@ -219,6 +219,7 @@ fn the_fhd_block_has_its_api_names() {
             "send_us_p99",
             "sender_backoffs",
             "spout_name",
+            "spout_relists",
             "state",
             "submitted",
             "upload_us_p99",
