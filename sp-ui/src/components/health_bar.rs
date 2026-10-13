@@ -20,7 +20,9 @@
 //! firewall profile on, or a fact that cannot be read), a red segment names
 //! it (`sp_core::prod_env::label`), polled every 10 s; the bar's
 //! `data-environment` says what the last poll said
-//! (`sp_core::prod_env::marker`).
+//! (`sp_core::prod_env::marker`). #255: the audio profile's report-only
+//! facts that are not the production ones are a grey `Profil PC: N
+//! poznámky` segment from the same poll (`sp_core::prod_env::notes_label`).
 //!
 //! #257: the whole audio chain is ONE segment right after WS (every
 //! service's first glance, #248): `Zvuk: bez chyby …`, amber / red on a
@@ -236,6 +238,17 @@ pub fn HealthBar() -> impl IntoView {
                 prod_env::label(&environment.get()).map(|(tone, text, tip)| {
                     let cls = format!("health-seg {}", tone.css_class());
                     view! { <span class=cls title=tip data-testid="health-environment">{text}</span> }
+                        .into_any()
+                })
+            }}
+            // #255: the audio profile's report-only notes (grey, never a
+            // problem: the Dante adapter's driver, the Windows Update driver
+            // exclusion, core parking), the notes and the power scheme as
+            // the tooltip.
+            {move || {
+                prod_env::notes_label(&environment.get()).map(|(tone, text, tip)| {
+                    let cls = format!("health-seg {}", tone.css_class());
+                    view! { <span class=cls title=tip data-testid="health-environment-notes">{text}</span> }
                         .into_any()
                 })
             }}

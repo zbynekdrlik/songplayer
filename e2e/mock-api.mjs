@@ -1476,6 +1476,23 @@ const ENV_HOLDS = {
   defender_antivirus_enabled: null,
   antivirus_on: null,
   firewall: { domain: null, private: null, public: null },
+  // #255: the production PC's audio profile: nothing read off Windows, so
+  // no note either (a spec sends `audio: {notes: […]}` for the grey
+  // "Profil PC" segment).
+  audio: {
+    soundgrid_installed: null,
+    soundgrid_nics: null,
+    dante: { installed: null, interface_address: null, interface_name: null, nic: null },
+    windows_update: { no_auto_update: null, drivers_excluded: null },
+    mmcss: {
+      system_responsiveness: null,
+      network_throttling_index: null,
+      pro_audio_priority: null,
+      pro_audio_scheduling_category: null,
+    },
+    power: { scheme_guid: null, scheme_name: null, core_parking_min_cores_pct: null },
+    notes: [],
+  },
   problems: [],
   read_errors: [],
   checked_at_ms: null,

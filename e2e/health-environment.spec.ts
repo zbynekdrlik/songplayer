@@ -124,3 +124,96 @@ test("the environment segment shows on every page's health bar", async ({
     );
   }
 });
+
+// #255: the production PC's audio profile. Its problems (the server's codes
+// and Slovak texts, `sp_core::prod_env::EnvProblem`) show on the same red
+// segment; its report-only facts are a grey "Profil PC" segment that never
+// makes the box fail.
+const SG_NETADAPTERCX = {
+  code: "soundgrid_nic_netadaptercx",
+  text_sk:
+    "sieťová karta SoundGrid „soundgrid-pcie“ beží na ovládači NetAdapterCx (musí bežať na ovládači NDIS)",
+};
+const SG_EEE = {
+  code: "soundgrid_nic_setting:eee",
+  text_sk:
+    "sieťová karta SoundGrid „soundgrid-pcie“: nastavenie „Energy Efficient Ethernet“ nie je vypnuté (hodnota 1)",
+};
+const AUTO_UPDATE = {
+  code: "windows_auto_update_on",
+  text_sk: "automatické aktualizácie Windows nie sú vypnuté (NoAutoUpdate)",
+};
+const MMCSS = {
+  code: "mmcss:system_responsiveness",
+  text_sk: "MMCSS: SystemResponsiveness je 20 (má byť 0)",
+};
+const DVS_NOTE =
+  "sieťová karta Dante (DVS) „Ethernet 4“ beží na ovládači NetAdapterCx (vplyv sa ešte meria)";
+const WU_NOTE =
+  "Windows Update nemá vylúčené ovládače (ExcludeWUDriversInQualityUpdate; nastaví ho príprava PC)";
+
+test("#255: an audio-profile problem is named on the red segment", async ({ page, request }) => {
+  await request.post("/__mock/environment", {
+    data: { note: null, ok: false, problems: [SG_NETADAPTERCX, SG_EEE, AUTO_UPDATE, MMCSS] },
+  });
+  await page.goto("/");
+  const bar = page.getByTestId("health-bar");
+  await expect(bar).toHaveAttribute("data-environment", "violated", { timeout: 10000 });
+  const segment = page.getByTestId("health-environment");
+  await expect(segment).toHaveText(`Prostredie: ${SG_NETADAPTERCX.text_sk} (+3)`, {
+    timeout: 10000,
+  });
+  await expect(segment).toHaveClass(/health-error/);
+  const tip = await segment.getAttribute("title");
+  expect(tip).toContain(
+    "Sieťové karty SoundGrid bežia na ovládači NDIS s vypnutým moderovaním prerušení, riadením toku a " +
+      "úsporou energie, automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené pre Pro Audio.",
+  );
+  expect(tip).toContain(
+    `Zistené: ${SG_NETADAPTERCX.text_sk}; ${SG_EEE.text_sk}; ${AUTO_UPDATE.text_sk}; ${MMCSS.text_sk}.`,
+  );
+});
+
+test("#255: report-only notes are a grey segment and the box still holds", async ({ page, request }) => {
+  test.setTimeout(60_000);
+  await request.post("/__mock/environment", {
+    data: {
+      note: null,
+      ok: true,
+      problems: [],
+      audio: {
+        soundgrid_installed: false,
+        soundgrid_nics: [],
+        notes: [DVS_NOTE, WU_NOTE],
+        power: {
+          scheme_guid: "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
+          scheme_name: "High performance",
+          core_parking_min_cores_pct: 100,
+        },
+      },
+    },
+  });
+  await page.goto("/");
+  const bar = page.getByTestId("health-bar");
+  // The marker proves the poll's answer rendered; the red segment stays away.
+  await expect(bar).toHaveAttribute("data-environment", "ok", { timeout: 10000 });
+  await expect(page.getByTestId("health-environment")).toHaveCount(0);
+  const notes = page.getByTestId("health-environment-notes");
+  await expect(notes).toHaveText("Profil PC: 2 poznámky", { timeout: 10000 });
+  await expect(notes).toHaveClass(/health-off/);
+  await expect(notes).toHaveAttribute(
+    "title",
+    `Len hlásené, nie je to chyba (#255): ${DVS_NOTE}; ${WU_NOTE}. Plán napájania: High performance ` +
+      "(8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c).",
+  );
+  // One note left: the count follows at the next 10 s poll.
+  await request.post("/__mock/environment", {
+    data: { note: null, ok: true, problems: [], audio: { notes: [DVS_NOTE] } },
+  });
+  await expect(notes).toHaveText("Profil PC: 1 poznámka", { timeout: 15000 });
+  await expect(notes).toHaveAttribute("title", `Len hlásené, nie je to chyba (#255): ${DVS_NOTE}.`);
+  // None: the segment goes.
+  await request.post("/__mock/environment-reset");
+  await expect(page.getByTestId("health-environment-notes")).toHaveCount(0, { timeout: 15000 });
+  await expect(bar).toHaveAttribute("data-environment", "ok");
+});
