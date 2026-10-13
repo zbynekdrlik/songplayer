@@ -132,9 +132,12 @@ pub fn arena(reader: &dyn WallReader) -> Result<Arena, String> {
     if pids.is_empty() {
         return Ok(Arena::default());
     }
+    // #259: only the visible windows (no decision reads a hidden one, and
+    // Arena owns ~30 hidden helpers).
+    let windows = reader.windows_of(&pids)?;
     Ok(Arena {
         running: true,
-        windows: reader.windows_of(&pids)?,
+        windows: windows.into_iter().filter(|w| w.visible).collect(),
     })
 }
 
