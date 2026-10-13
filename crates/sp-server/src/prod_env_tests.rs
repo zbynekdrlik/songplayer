@@ -457,7 +457,9 @@ fn the_status_carries_every_fact_and_problem() {
             .and_then(|n| n.service.as_deref()),
         Some("rt640x64")
     );
-    assert_eq!(held.audio.notes.len(), 2);
+    // One note: the DVS adapter on NetAdapterCx. The driver exclusion is
+    // a gate since lane 2, and production_example() holds it.
+    assert_eq!(held.audio.notes.len(), 1);
     // Off Windows nothing is read, so no note either.
     let (off, _) = status_of(&Check::NotWindows, 4_000);
     assert_eq!(off.audio, sp_core::prod_env::audio::AudioProfile::default());
