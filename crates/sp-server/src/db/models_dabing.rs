@@ -322,7 +322,7 @@ pub async fn get_next_dub_job(pool: &SqlitePool) -> Result<Option<DubJob>, sqlx:
            AND (dub_next_attempt_at IS NULL \
                 OR dub_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
            AND ",
-        crate::test_item::not_test_item!(), // #228
+        crate::db::queue_row!(), // #228, #260
         " ORDER BY dub_requested_at DESC, id DESC \
          LIMIT 1",
     ))

@@ -44,7 +44,8 @@ already runs finishes ("blokne ďalšie spracovanie").
   passes), stems + dub `process_next` after their kill switches (dub: before
   the one-shot subtitle backfill), the metadata repair's per-row loop
   (`break`), `lib.rs`'s sync consumer (drops the request; the 10 min periodic
-  sync re-enqueues) and the daily yt-dlp update (skips the tick), and the peer
+  sync re-enqueues), the daily yt-dlp update (skips the tick), the #260
+  retention (`Job::Retention`, its pass retried an hour later), and the peer
   exchange through `Exchange::transfers_paused` (= `peer_transfers_paused` OR
   the hold: no fetch, 503 on every peer route, no hashing). A NEW background
   job asks it too. Startup one-shots and the playback path never ask.

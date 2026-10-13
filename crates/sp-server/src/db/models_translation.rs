@@ -91,7 +91,7 @@ pub async fn fetch_next_stale_translation(
                 v.spotify_track_id, v.spotify_resolved_at \
          FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.has_lyrics = 1 AND v.lyrics_translation_version < ? \
-               AND p.is_active = 1 AND v.normalized = 1 \
+               AND p.is_active = 1 AND v.normalized = 1 AND v.removed_at IS NULL \
                AND (v.lyrics_source IS NULL OR v.lyrics_source != ?) \
          ORDER BY v.id ASC LIMIT 1",
     )
