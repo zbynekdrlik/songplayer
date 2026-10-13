@@ -1,0 +1,39 @@
+{
+  "_comment": "SNV (win-resolume) as #255 lane 1 read it live on 13.10.2026: SoundGrid not installed, MMCSS and power set, Defender and the firewall off as #233 recorded (11.10.2026), and ExcludeWUDriversInQualityUpdate MISSING: the one change its next deploy applies.",
+  "registry": [
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU", "name": "NoAutoUpdate", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate", "name": "ExcludeWUDriversInQualityUpdate", "kind": null, "value": null },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", "name": "SystemResponsiveness", "kind": "DWord", "value": 0 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile", "name": "NetworkThrottlingIndex", "kind": "DWord", "value": 4294967295 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Pro Audio", "name": "Priority", "kind": "DWord", "value": 6 },
+    { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Pro Audio", "name": "Scheduling Category", "kind": "String", "value": "High" },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableRealtimeMonitoring", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableBehaviorMonitoring", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableOnAccessProtection", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableScanOnRealtimeEnable", "kind": "DWord", "value": 1 },
+    { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection", "name": "DisableIOAVProtection", "kind": "DWord", "value": 1 }
+  ],
+  "soundgrid": {
+    "installed": false,
+    "preferences_user": null,
+    "preferences_path": null,
+    "preferences": null,
+    "preferences_error": null,
+    "adapters": []
+  },
+  "power": { "scheme_guid": "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", "scheme_name": "High performance", "cpmincores_ac": 100 },
+  "defender": {
+    "service": "Running",
+    "realtime_enabled": false,
+    "tamper_protected": false,
+    "preferences": {
+      "DisableRealtimeMonitoring": true,
+      "DisableBehaviorMonitoring": true,
+      "DisableIOAVProtection": true,
+      "DisableScriptScanning": true,
+      "MAPSReporting": 0,
+      "SubmitSamplesConsent": 2
+    }
+  },
+  "firewall": { "Domain": false, "Private": false, "Public": false }
+}
