@@ -104,9 +104,9 @@ pub use spout_lock::{LockHolder, SentinelEnd};
 pub use stats::{ComposeStats, SpoutSendStats};
 pub use vblank::{
     OutputInfo, Seen, VBLANK_BOOT_INTERVALS, VBLANK_IDLE_MAX, VBLANK_MAX_PERIOD, VBLANK_MIN_FIT,
-    VBLANK_MIN_PERIOD, VBLANK_MIN_WAIT, VBLANK_NOT_TICKING, VBLANK_RESTART, VBLANK_STALE,
-    VBLANK_WINDOW, VblankFit, VblankGrid, VblankState, grid_is_fresh, not_waiting_sleep,
-    pick_output, vblank_state, waited,
+    VBLANK_MIN_PERIOD, VBLANK_MIN_WAIT, VBLANK_NOT_TICKING, VBLANK_RECHECK, VBLANK_RESTART,
+    VBLANK_STALE, VBLANK_WINDOW, VblankFit, VblankGrid, VblankState, grid_is_fresh,
+    not_waiting_sleep, pick_output, recheck_due, repick, vblank_state, waited,
 };
 
 #[cfg(not(windows))]
