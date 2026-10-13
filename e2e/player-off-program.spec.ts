@@ -4,7 +4,8 @@ import { test, expect, Page } from "@playwright/test";
 // the playback authority, so a manual ▶ never claims program. A playlist
 // that is NOT on air plays OFF program: the server reports the scene-aware
 // state `WaitingForScene` with transport `Playing`, and the Player's state
-// label reads "Hrá mimo programu" (not "Čaká na scénu"). A playlist ON air
+// label reads "Hrá mimo programu" (not "Pozastavené (mimo programu)", #266).
+// A playlist ON air
 // plays on program and reads "Hrá". The mock models it: its `/play` broadcasts
 // the state from its program source (`POST /__mock/program-reset` → playlist
 // 1 on SP-program; ytlive 184 is off air). Zero console errors, per
@@ -92,21 +93,24 @@ test("▶ on the playlist on air plays it on program — 'Hrá'", async ({
   page,
   request,
 }) => {
-  // `?playlist=1` pins the work area to playlist 1 (Worship): without a pin
-  // the dashboard follows the playing playlist, and once 1 is paused below
-  // it would re-select the first by name (2, Background).
+  // `?playlist=1` opens the work area on playlist 1 (Worship), which is on
+  // program; #266: once it is paused below nothing is on program, and the
+  // work area keeps what it shows.
   await page.goto("/?playlist=1");
   await socketOpen(page);
   const toggle = page.getByTestId("player-playpause");
   // The on-connect replay: playlist 1 plays.
   await expect(toggle).toContainText("⏸ Pauza", { timeout: 15000 });
   // Playlist 1 (on SP-program) paused: the toggle offers ▶ and the label
-  // reads "Čaká na scénu" (paused, not playing anywhere).
+  // reads "Pozastavené (mimo programu)" (#266: paused, not playing anywhere —
+  // nothing waits for a scene).
   await request.post("/__mock/set-playing", {
     data: { playlist_id: 1, state: "WaitingForScene", transport: "Paused" },
   });
   await expect(toggle).toContainText("▶ Prehrať", { timeout: 10000 });
-  await expect(page.getByTestId("player-state")).toHaveText("Čaká na scénu");
+  await expect(page.getByTestId("player-state")).toHaveText(
+    "Pozastavené (mimo programu)",
+  );
 
   const posted = page.waitForRequest(
     (req) =>

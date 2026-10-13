@@ -147,3 +147,27 @@ fn the_mobile_option_names_the_playlist_and_its_state() {
         "ytworship (SP-worship)"
     );
 }
+
+/// #266: the Player says the truth about a paused playlist off program
+/// (the owner's ytfast at PP): "Pozastavené (mimo programu)", never "Čaká
+/// na scénu" — since #221 L4b nothing waits for a scene; the pipeline is
+/// paused. A retry of failed opens keeps its own label (#229).
+#[test]
+fn a_paused_playlist_off_program_reads_paused_off_program() {
+    for transport in [PAUSED, IDLE] {
+        assert_eq!(
+            state_label(true, PlaybackState::WaitingForScene, transport),
+            "Pozastavené (mimo programu)",
+            "{transport:?}"
+        );
+        assert_eq!(
+            player_state_label(true, PlaybackState::WaitingForScene, transport, false),
+            "Pozastavené (mimo programu)",
+            "{transport:?}"
+        );
+    }
+    assert_eq!(
+        player_state_label(true, PlaybackState::WaitingForScene, PAUSED, true),
+        "Čaká na ďalší pokus"
+    );
+}

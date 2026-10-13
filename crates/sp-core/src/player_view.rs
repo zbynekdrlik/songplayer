@@ -400,9 +400,11 @@ mod tests {
             state_label(true, PlaybackState::WaitingForScene, PLAYING),
             "Hrá mimo programu"
         );
+        // #266: a paused pipeline off program is said as such (nothing waits
+        // for a scene since #221 L4b).
         assert_eq!(
             state_label(true, PlaybackState::WaitingForScene, PAUSED),
-            "Čaká na scénu"
+            "Pozastavené (mimo programu)"
         );
     }
 
@@ -477,7 +479,7 @@ mod tests {
         );
         assert_eq!(
             player_state_label(true, PlaybackState::WaitingForScene, PAUSED, false),
-            "Čaká na scénu"
+            "Pozastavené (mimo programu)"
         );
         assert_eq!(
             player_state_label(false, PlaybackState::Idle, IDLE, false),
