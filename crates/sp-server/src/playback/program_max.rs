@@ -465,6 +465,7 @@ impl MaxOut {
                 failed: 0,
                 device_resets: 0,
                 sender_backoffs: 0,
+                relists: 0,
                 adapter: None,
                 upload: Window::default(),
                 draw: Window::default(),
