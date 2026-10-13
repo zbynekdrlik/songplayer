@@ -376,7 +376,9 @@ pub fn preview_slot(
     if !state_known {
         return PreviewSlot::Pending;
     }
-    if decodes(state, transport) {
+    // The pipeline's OWN transport says whether it decodes (#201), on program
+    // or off; the scene-aware `state` folds the program in.
+    if transport == TransportState::Playing {
         return if has_song {
             PreviewSlot::Offered
         } else {
@@ -388,15 +390,6 @@ pub fn preview_slot(
     } else {
         PreviewSlot::Idle
     }
-}
-
-/// #266 RED: still the old reading — the scene-aware state, so a paused
-/// pipeline off program "decodes".
-fn decodes(state: PlaybackState, _transport: TransportState) -> bool {
-    matches!(
-        state,
-        PlaybackState::Playing | PlaybackState::WaitingForScene
-    )
 }
 
 /// #266: what the preview slot shows.
