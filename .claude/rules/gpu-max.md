@@ -731,6 +731,17 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   30 s**: the default. The same 8-vs-14 contrast is the causal check that
   Arena shows MAX at all: after an Arena relaunch (its clips reconnected)
   16 + 39 vs 5 + 0, after a forced SongPlayer kill 25 + 41 vs 0 + 0.
+- **The vblank thread follows the primary** (#259, SNV 13.10.2026:
+  re-forming the wall's Surround detached the VDD for a minute; the thread
+  stayed on its DXGI output, `not_ticking`, and MAX sent at the constant
+  lead, `send_off_grid` +2768). Every `VBLANK_RECHECK` (2 s, `recheck_due`)
+  `win/vblank.rs` lists the outputs again (quietly; the full list is
+  logged only at the first open) and, when `pick_output` chooses an output
+  that differs in name, place or size (`repick`), moves to it with the fit
+  booted afresh and one INFO naming both; a recheck with no primary keeps
+  the last output (one WARN per streak). `VblankTracker::output` returns
+  the output measured NOW, and the worker records it with the state at
+  every boundary, so `max.vblank_output` names it.
 - **A dark output never spins the thread** (#243, PP 9.10.2026: the laptop
   panel DISPLAY1 stopped presenting while still attached, `WaitForVBlank`
   returned at once, the fit's boot never ended and the time-critical
