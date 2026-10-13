@@ -1511,6 +1511,40 @@ app.post("/__mock/environment-reset", (_req, res) => {
   res.json(environment);
 });
 
+// #259: the LED wall report the health bar polls every 5 s, as
+// `sp_core::wall::WallStatus`. The mock's Resolume uses its simple output,
+// so by default the bar shows no wall segment (as on a box whose Resolume
+// drives no physical display); `POST /__mock/wall {…}` sends those fields
+// over that, `POST /__mock/wall-reset` restores it.
+const WALL_DEFAULT = {
+  checked: true,
+  state: "simple_output",
+  problems: [],
+  read: {
+    arena_running: true,
+    arena_windows: [],
+    arena_output: { advanced: false, preset: null, displays: [] },
+    displays: [],
+    nvidia: false,
+    connected: null,
+    grids: null,
+  },
+  read_errors: [],
+  checked_at_ms: null,
+};
+let wall = { ...WALL_DEFAULT };
+app.get("/api/v1/wall", (_req, res) => {
+  res.json(wall);
+});
+app.post("/__mock/wall", (req, res) => {
+  wall = { ...WALL_DEFAULT, ...req.body };
+  res.json(wall);
+});
+app.post("/__mock/wall-reset", (_req, res) => {
+  wall = { ...WALL_DEFAULT };
+  res.json(wall);
+});
+
 // Status
 app.get("/api/v1/status", (_req, res) => {
   res.json({

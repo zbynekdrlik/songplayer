@@ -28,6 +28,14 @@
 //! service's first glance, #248): `Zvuk: bez chyby …`, amber / red on a
 //! loss naming the worst path; a click opens the per-path panel under the
 //! bar (`audio_faults.rs`), polled every 10 s.
+//!
+//! #259: the LED wall report — `Stena: …`, green while Resolume draws on
+//! every display it wants, grey while the screens are off or Resolume does
+//! not run, red while a display Resolume wants is missing or it does not
+//! draw on it (`sp_core::wall::label`), polled every 5 s; nothing while
+//! Resolume drives no physical display. The bar's `data-wall` says what the
+//! last poll said (`sp_core::wall::marker`). It only reports: the operator's
+//! own setup in Resolume is the reference, nothing is ever changed.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -35,6 +43,7 @@ use serde::Deserialize;
 use sp_core::background_hold::{self, BackgroundHold};
 use sp_core::health;
 use sp_core::prod_env::{self, EnvironmentStatus};
+use sp_core::wall::{self, WallStatus};
 
 use crate::api;
 use crate::components::audio_faults::{AudioFaults, AudioFaultsPanel, AudioSegment};
@@ -98,6 +107,12 @@ pub fn HealthBar() -> impl IntoView {
     let _env_poll = Effect::new(move |_| {
         poll_into("/api/v1/environment", 10_000, cancelled, environment);
     });
+    // #259: the LED wall report, polled every 5 s (the server reads the box
+    // every 5 s: a screen switched off shows up with no reload).
+    let wall_status = RwSignal::new(WallStatus::default());
+    let _wall_poll = Effect::new(move |_| {
+        poll_into("/api/v1/wall", 5_000, cancelled, wall_status);
+    });
     // #257: the audio fault history, one request at a time.
     let audio = AudioFaults::new();
     audio.start(cancelled);
@@ -130,6 +145,7 @@ pub fn HealthBar() -> impl IntoView {
             class="health-bar"
             data-testid="health-bar"
             data-environment=move || prod_env::marker(&environment.get())
+            data-wall=move || wall::marker(&wall_status.get())
         >
             // WS
             {move || {
@@ -166,6 +182,20 @@ pub fn HealthBar() -> impl IntoView {
                 let cls = format!("health-seg {}", tone.css_class());
                 let title = problems.join(" | ");
                 view! { <span class=cls title=title data-testid="health-resolume">{text}</span> }
+            }}
+            // #259: the LED wall against Resolume's own saved output.
+            {move || {
+                let status = wall_status.get();
+                let state = status.state.name();
+                wall::label(&status).map(|(tone, text, tip)| {
+                    let cls = format!("health-seg {}", tone.css_class());
+                    view! {
+                        <span class=cls title=tip data-testid="health-wall" data-state=state>
+                            {text}
+                        </span>
+                    }
+                    .into_any()
+                })
             }}
             // Tools (yt-dlp / ffmpeg / JS runtime)
             {move || {
