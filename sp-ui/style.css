@@ -183,14 +183,48 @@ body {
     border-color: var(--accent);
     background: var(--bg-input);
 }
-.playlist-selector-row .sel-glyph { width: 1.2em; flex-shrink: 0; text-align: center; }
-.playlist-selector-row .sel-name {
+/* #266: the name, and under it the playlist's state in WORDS (never a ▶ / ⏸
+   glyph: it reads as a button). The word's box is always there, so a row
+   keeps its height when the state becomes known. */
+.playlist-selector-row .sel-main {
     flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+.playlist-selector-row .sel-name {
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 .playlist-selector-row .sel-ndi { color: var(--text-dim); font-size: 0.75rem; flex-shrink: 0; }
+.playlist-selector-row .sel-status {
+    display: inline-block;
+    min-height: 1.3em;
+    padding: 0 6px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    line-height: 1.2em;
+    white-space: nowrap;
+}
+/* On program: the PROGRAM row's red tally (`.program-cut-on`). */
+.playlist-selector-row .sel-status.status-on_program {
+    background: var(--error);
+    border-color: var(--error);
+    color: #fff;
+    font-weight: 700;
+}
+.playlist-selector-row .sel-status.status-off_program {
+    border-color: var(--accent);
+    color: var(--text);
+}
+.playlist-selector-row .sel-status.status-paused { border-color: var(--warning); color: var(--warning); }
+.playlist-selector-row .sel-status.status-idle { color: var(--text-dim); padding-left: 0; }
+.playlist-selector-row .sel-status.status-unknown { visibility: hidden; }
 
 /* #165: "Práve hrá" strip above the work area — ALWAYS present with a reserved
    height so nothing below it jumps (#163 layout-stable pattern); only the text

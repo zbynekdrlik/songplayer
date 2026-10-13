@@ -1,26 +1,38 @@
 //! #165: selection-state helpers for the redesigned dashboard — which playlist
-//! the single work area shows, ordering + glyphs for the selector, and the
-//! URL-query + localStorage persistence.
+//! the single work area shows, ordering + the state word for the selector, and
+//! the URL-query + localStorage persistence.
 
 use std::collections::HashMap;
 
-use leptos::prelude::Set;
+use leptos::prelude::{Set, With};
 use sp_core::models::Playlist;
 use sp_core::playback::PlaybackState;
+use sp_core::player_view::{self, PlaylistStatus};
 use wasm_bindgen::JsValue;
 
 use crate::store::{DashboardStore, NowPlayingInfo};
 
 const STORAGE_KEY: &str = "sp_selected_playlist";
 
-/// Playback glyph for a selector row: ▶ Playing, ⏸ WaitingForScene
-/// ("Paused — waiting for scene"), – idle / unknown.
-pub fn playback_glyph(np: &HashMap<i64, NowPlayingInfo>, id: i64) -> &'static str {
-    match np.get(&id).map(|i| i.state) {
-        Some(PlaybackState::Playing) => "▶",
-        Some(PlaybackState::WaitingForScene) => "⏸",
-        _ => "–",
-    }
+/// #266: a selector row's state in words (`sp_core::player_view::
+/// playlist_status`: "NA PROGRAME" / "hrá mimo programu" / "pozastavené" /
+/// "nehrá"), from the playlist's WS state + transport and its health row's
+/// retry of SP-program's source — the Player badge's own facts, so a row and
+/// the Player never disagree. Replaces the ▶ / ⏸ / – glyph, which read as a
+/// button (the owner's ROZHODNUTÉ 13.10.2026). Reads the signals tracked:
+/// call it inside a `Memo`.
+pub fn playlist_status(store: DashboardStore, id: i64) -> PlaylistStatus {
+    let (known, state, transport) = store
+        .now_playing
+        .with(|np| np.get(&id).map(|i| (i.state_known, i.state, i.transport)))
+        .unwrap_or_default();
+    let retry_on_program = store.ndi_health.with(|rows| {
+        rows.iter()
+            .find(|o| o.playlist_id == id)
+            .and_then(|o| o.open_failures.as_ref())
+            .is_some_and(|f| f.retry_on_program())
+    });
+    player_view::playlist_status(known, state, transport, retry_on_program)
 }
 
 /// #225 review rounds 2-4: has the server told EVERY listed playlist's state

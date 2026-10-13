@@ -237,6 +237,83 @@ pub fn player_program_badge(
     }
 }
 
+/// #266: a playlist's state in words, for the playlist list (the desktop
+/// rows and the mobile `<select>`). The owner's rule (ROZHODNUTÉ
+/// 13.10.2026): no ▶ / ⏸ glyph as a STATE marker — a glyph reads as the
+/// button that does that action — so a state is said in words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaylistStatus {
+    /// The state is not known yet: no word (#225: claim nothing).
+    Unknown,
+    /// SP-program's playlist: the wall shows it.
+    OnProgram,
+    /// Its pipeline decodes off program (a ▶ off air, a dub prepared).
+    PlaysOffProgram,
+    /// Its pipeline does not decode, off program.
+    Paused,
+    /// Nothing is loaded.
+    Idle,
+}
+
+impl PlaylistStatus {
+    /// The words the list shows ("" while the state is not known).
+    pub fn label(self) -> &'static str {
+        match self {
+            PlaylistStatus::Unknown => "",
+            PlaylistStatus::OnProgram => "NA PROGRAME",
+            PlaylistStatus::PlaysOffProgram => "hrá mimo programu",
+            PlaylistStatus::Paused => "pozastavené",
+            PlaylistStatus::Idle => "nehrá",
+        }
+    }
+
+    /// The row's `data-status` and its CSS class (`status-<code>`).
+    pub fn code(self) -> &'static str {
+        match self {
+            PlaylistStatus::Unknown => "unknown",
+            PlaylistStatus::OnProgram => "on_program",
+            PlaylistStatus::PlaysOffProgram => "off_program",
+            PlaylistStatus::Paused => "paused",
+            PlaylistStatus::Idle => "idle",
+        }
+    }
+}
+
+/// #266: the playlist list's word for a playlist, from its WS state and
+/// transport. "On program" is the Player badge's own rule
+/// ([`player_program_badge`]: the WS `state == Playing`, and #229's retry
+/// of SP-program's source), so a row and the Player's badge never
+/// disagree. Off program the transport decides: decoding → "hrá mimo
+/// programu", else "pozastavené"; `Idle` → "nehrá"; nothing until the state
+/// is known.
+pub fn playlist_status(
+    state_known: bool,
+    state: PlaybackState,
+    transport: TransportState,
+    retry_on_program: bool,
+) -> PlaylistStatus {
+    if !state_known {
+        return PlaylistStatus::Unknown;
+    }
+    if player_program_badge(state_known, state, transport, retry_on_program).is_on_program() {
+        return PlaylistStatus::OnProgram;
+    }
+    match (state, transport) {
+        (PlaybackState::Idle, _) => PlaylistStatus::Idle,
+        (_, TransportState::Playing) => PlaylistStatus::PlaysOffProgram,
+        _ => PlaylistStatus::Paused,
+    }
+}
+
+/// #266: the mobile `<select>`'s option: the playlist, its scene label and
+/// its state in words (the name alone while the state is not known).
+pub fn picker_option_text(name: &str, scene: &str, status: PlaylistStatus) -> String {
+    match status {
+        PlaylistStatus::Unknown => format!("{name} ({scene})"),
+        _ => format!("{name} ({scene}) — {}", status.label()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,3 +603,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "player_view_tests_status.rs"]
+mod status_tests;

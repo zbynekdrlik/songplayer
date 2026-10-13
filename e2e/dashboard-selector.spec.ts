@@ -66,7 +66,7 @@ test("renders exactly one work area and a selector with 12 rows (#165)", async (
   await expect(page.locator(".playlist-card")).toHaveCount(1);
 });
 
-test("the playing playlist is preselected and marked ▶ (#165)", async ({
+test("the playlist on program is preselected and marked NA PROGRAME (#165, #266)", async ({
   page,
 }) => {
   await page.goto("/");
@@ -75,8 +75,12 @@ test("the playing playlist is preselected and marked ▶ (#165)", async ({
   const playingRow = page
     .getByTestId("playlist-picker-item")
     .filter({ hasText: PLAYING_NAME });
-  // The playing row is marked ▶ and selected once the WS Playing state lands.
-  await expect(playingRow).toContainText("▶", { timeout: 10000 });
+  // #266: the row on program says so in words (never a ▶ glyph, which reads
+  // as a button) and is selected once the WS Playing state lands.
+  await expect(playingRow.getByTestId("playlist-picker-status")).toHaveText(
+    "NA PROGRAME",
+    { timeout: 10000 },
+  );
   await expect(playingRow).toHaveClass(/selected/, { timeout: 10000 });
 
   // The work area shows the playing playlist.
@@ -86,8 +90,8 @@ test("the playing playlist is preselected and marked ▶ (#165)", async ({
 });
 
 // #170: the selector must NOT re-order when a playlist's playback state
-// changes. Rows are alphabetical and STABLE; the ▶ glyph marks the playing
-// one. Before the fix the selector sorted playing-first and full-re-rendered
+// changes. Rows are alphabetical and STABLE; the row's word ("NA PROGRAME",
+// #266) marks the playing one. Before the fix the selector sorted playing-first and full-re-rendered
 // on every now_playing tick, so a row that flipped to Playing jumped to the
 // top — the click race that failed post-deploy test 16.
 test("row order stays alphabetical when a non-first playlist starts playing (#170)", async ({
@@ -115,11 +119,14 @@ test("row order stays alphabetical when a non-first playlist starts playing (#17
   });
   expect(set.ok()).toBeTruthy();
 
-  // Its row gains the ▶ glyph in place...
+  // Its row gains the "NA PROGRAME" word in place (#266)...
   const playing07 = page
     .getByTestId("playlist-picker-item")
     .filter({ hasText: "Playlist 07" });
-  await expect(playing07).toContainText("▶", { timeout: 10000 });
+  await expect(playing07.getByTestId("playlist-picker-status")).toHaveText(
+    "NA PROGRAME",
+    { timeout: 10000 },
+  );
 
   // ...but the row ORDER is unchanged — Playlist 07 did NOT jump to the top.
   await expect
@@ -194,7 +201,8 @@ test("clicking another row switches the work area and the URL (#165)", async ({
 // "Prejsť") is REMOVED — the playing playlist is auto-selected on load and the
 // shared Player shows what plays, so there is no separate jump-to-playing strip.
 // The auto-select + playing-song surfacing is covered by "clicking another row"
-// (player-title) and "the playing playlist is preselected and marked ▶" above.
+// (player-title) and "the playlist on program is preselected and marked NA
+// PROGRAME" above.
 
 test("reload keeps the selected playlist (#165)", async ({ page }) => {
   await page.goto("/");
