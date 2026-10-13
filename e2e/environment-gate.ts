@@ -14,9 +14,9 @@
  * Every violation is fatal: there is no allowance.
  *
  * #255 adds the production PC's audio profile (`status.environment.audio`):
- * every adapter the SoundGrid Protocol is bound to on an NDIS driver with
- * Waves' settings off, Windows Update's automatic updates off, MMCSS set for
- * Pro Audio. The Dante adapter, the Windows Update driver exclusion and the
+ * with SoundGrid installed, the adapter its driver chose as its port
+ * (`LocalLanPort`) found and on an NDIS driver with Waves' settings off;
+ * Windows Update's automatic updates off; MMCSS set for Pro Audio. The Dante adapter, the Windows Update driver exclusion and the
  * power scheme are reported only (`audio.notes`), never a failure.
  */
 
@@ -49,8 +49,9 @@ export interface NicView {
 
 /** #255: the production PC's audio profile (`sp_core::prod_env::audio::AudioProfile`). */
 export interface AudioProfile {
-  soundgrid_installed?: boolean | null;
-  soundgrid_nics?: NicView[] | null;
+  soundgrid?: "not_installed" | "unreadable" | "port_unset" | "port_missing" | "found" | null;
+  soundgrid_port_mac?: string | null;
+  soundgrid_nic?: NicView | null;
   dante?: {
     installed?: boolean | null;
     interface_address?: string | null;
@@ -113,8 +114,9 @@ export const MMCSS_PRODUCTION = {
 /** The facts a production box shows, each by name, whatever `ok` says
  * (review finding 9: the gate never trusts `ok` alone): an allowed edition,
  * Defender's real-time protection and passive mode off, no other antivirus
- * on, every firewall profile off; #255: every SoundGrid adapter on NDIS
- * with its settings off, automatic updates off, MMCSS for Pro Audio. A fact
+ * on, every firewall profile off; #255: SoundGrid not installed, or its
+ * chosen adapter found on NDIS with its settings off, automatic updates
+ * off, MMCSS for Pro Audio. A fact
  * missing from the status (an older server) reads null and fails. */
 function factFailures(env: EnvironmentStatus): string[] {
   const f: string[] = [];
@@ -132,15 +134,12 @@ function factFailures(env: EnvironmentStatus): string[] {
     f.push(`antivirus_on is ${shown(env.antivirus_on)}, not []`);
   }
   const audio = env.audio;
-  const nics = audio?.soundgrid_nics;
-  if (!Array.isArray(nics)) {
-    f.push(`audio.soundgrid_nics is ${shown(nics)}, not a list`);
-  } else {
-    for (const nic of nics) {
-      const name = `audio.soundgrid_nics[${JSON.stringify(nic.name ?? nic.guid)}]`;
-      want(`${name}.driver_model`, nic.driver_model, "ndis");
-      want(`${name}.settings_ok`, nic.settings_ok, true);
-    }
+  const soundgrid = audio?.soundgrid;
+  if (soundgrid === "found") {
+    want("audio.soundgrid_nic.driver_model", audio?.soundgrid_nic?.driver_model, "ndis");
+    want("audio.soundgrid_nic.settings_ok", audio?.soundgrid_nic?.settings_ok, true);
+  } else if (soundgrid !== "not_installed") {
+    f.push(`audio.soundgrid is ${shown(soundgrid)}, not "found" or "not_installed"`);
   }
   want("audio.windows_update.no_auto_update", audio?.windows_update?.no_auto_update, true);
   for (const [key, expected] of Object.entries(MMCSS_PRODUCTION)) {

@@ -85,7 +85,9 @@ pub(super) fn wdf(service: &str) -> String {
 
 /// PP's SoundGrid adapter as read on 13.10.2026: Realtek's NDIS `rt640x64`
 /// (its `Parameters\Wdf` holds only the WDF versions), instance 0007,
-/// every setting off, `PnPCapabilities` 24; the protocol bound to it alone.
+/// every setting off, `PnPCapabilities` 24; the SoundGrid Protocol
+/// installed (its service key). Its MAC is `SG_MAC` (the driver's chosen
+/// port: [`SG_PREFERENCES`]).
 pub(super) fn add_soundgrid(reg: &mut Fake) {
     reg.add_instance("0007");
     let key = class_key("0007");
@@ -108,11 +110,6 @@ pub(super) fn add_soundgrid(reg: &mut Fake) {
     reg.set(&wdf("rt640x64"), "WdfMajorVersion", RegValue::Dword(1));
     reg.set(&wdf("rt640x64"), "WdfMinorVersion", RegValue::Dword(15));
     reg.subkeys_of(SOUNDGRID_SERVICE, Ok(vec!["Linkage".to_string()]));
-    reg.set(
-        SOUNDGRID_LINKAGE,
-        "Bind",
-        RegValue::Multi(vec![format!(r"\Device\{SG_GUID}")]),
-    );
 }
 
 /// PP's Dante adapter: Realtek's NetAdapterCx `rtucx21x64`
@@ -172,11 +169,30 @@ pub(super) fn row(guid: &str, mac: &str, hardware: bool, filter: bool) -> IfRow 
     }
 }
 
-/// PP's interfaces: the SoundGrid adapter, the Dante adapter and a filter
-/// module's interface that repeats the Dante adapter's MAC.
+/// PP's SoundGrid adapter's MAC (`soundgrid-pcie`, 6C-24-08-E5-9C-91).
+pub(super) const SG_MAC: &str = "6c2408e59c91";
+
+/// PP's `SoundGrid.Driver.preferences`, verbatim (13.10.2026).
+pub(super) const SG_PREFERENCES: &str = r#"<?xml version="1.0"?>
+<Preferences>
+    <FileFormatVersion>2</FileFormatVersion>
+    <Configuration>
+        <LocalLanPort>6c:24:08:e5:9c:91</LocalLanPort>
+        <IOMode>0</IOMode>
+        <NativeDevice></NativeDevice>
+        <WdmChannelCount>0</WdmChannelCount>
+        <BlockSize>256</BlockSize>
+        <ProToolsBufferSize>1024</ProToolsBufferSize>
+    </Configuration>
+</Preferences>
+"#;
+
+/// PP's interfaces: the SoundGrid adapter and its filter module's interface
+/// (the same MAC), the Dante adapter and its filter module's interface.
 pub(super) fn interfaces() -> Result<Vec<IfRow>, u32> {
     Ok(vec![
-        row(SG_GUID, "6c1ff7000001", true, false),
+        row("{FFFFFFFF-0000-4000-8000-000000000002}", SG_MAC, true, true),
+        row(SG_GUID, SG_MAC, true, false),
         row(
             "{FFFFFFFF-0000-4000-8000-000000000001}",
             DVS_MAC,

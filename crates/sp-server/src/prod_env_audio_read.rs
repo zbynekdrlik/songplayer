@@ -4,13 +4,14 @@
 //! The registry is walked through [`RegistryRead`] (two primitives: a value,
 //! a key's subkeys), which the Windows glue implements with `RegGetValueW` /
 //! `RegEnumKeyExW` and the tests with an in-memory registry. An audio
-//! adapter is FOUND by what binds it, never by its name:
+//! adapter is FOUND by the MAC its own software names, never by its name,
+//! matched against the network interfaces (`GetIfTable2`,
+//! [`adapter_for_mac`]):
 //!
-//! - the SoundGrid Protocol's `Linkage\Bind` lists `\Device\{GUID}` per
-//!   adapter it is bound to ([`bound_guids`]);
-//! - Dante Virtual Soundcard's `manager.json` names its adapter's MAC
-//!   (`PrimaryInterfaceAddress`), matched against the network interfaces
-//!   (`GetIfTable2`, [`adapter_for_mac`]).
+//! - the SoundGrid driver's chosen port, its preferences' `LocalLanPort`
+//!   ([`soundgrid`]: never the protocol's `Linkage\Bind`, which on PP lists
+//!   14 adapters, virtual and long gone ones among them);
+//! - Dante Virtual Soundcard's `manager.json` `PrimaryInterfaceAddress`.
 //!
 //! From the GUID ([`nic`]): the adapter's instance in the network class
 //! (`NetCfgInstanceId`) holds its settings; its device instance
@@ -92,10 +93,8 @@ pub fn reg_value_from(kind: u32, bytes: &[u8]) -> RegValue {
     }
 }
 
-/// The SoundGrid Protocol's service key.
+/// The SoundGrid Protocol's service key: SoundGrid is installed.
 pub const SOUNDGRID_SERVICE: &str = r"SYSTEM\CurrentControlSet\Services\SoundGridProtocol";
-/// Its bindings (`Bind`: `\Device\{GUID}` per adapter).
-pub const SOUNDGRID_LINKAGE: &str = r"SYSTEM\CurrentControlSet\Services\SoundGridProtocol\Linkage";
 /// The network adapters' class (`<nnnn>` per adapter instance).
 pub const NET_CLASS: &str =
     r"SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}";
@@ -118,8 +117,11 @@ pub const MMCSS_PRO_AUDIO: &str =
     r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio";
 /// Dante Virtual Soundcard's configuration, under `%ProgramData%`.
 pub const DVS_MANAGER_JSON: &str = r"Audinate\Dante Virtual Soundcard\manager.json";
-/// The most of `manager.json` that is read (it is a few KB).
-pub const MAX_DVS_BYTES: u64 = 262_144;
+/// The SoundGrid driver's preferences (its chosen port), under the user's
+/// `%APPDATA%`: SongPlayer runs as the user whose driver it hosts.
+pub const SOUNDGRID_PREFERENCES: &str = r"Waves Audio\Preferences\SoundGrid.Driver.preferences";
+/// The most of a configuration file that is read (each is a few KB).
+pub const MAX_FILE_BYTES: u64 = 262_144;
 
 /// The registry values a setting is found under, in the order tried (the
 /// standardized `*` keyword first where one exists; Realtek's own names).
@@ -133,42 +135,6 @@ pub fn keywords(setting: NicSetting) -> &'static [&'static str] {
         NicSetting::GigaLite => &["GigaLite"],
         NicSetting::PowerManagement => &["PnPCapabilities"],
     }
-}
-
-/// A braced GUID (`{8-4-4-4-12}`, hex digits).
-pub fn is_guid(s: &str) -> bool {
-    let b = s.as_bytes();
-    if b.len() != 38 || b[0] != b'{' || b[37] != b'}' {
-        return false;
-    }
-    b[1..37].iter().enumerate().all(|(i, &c)| {
-        if matches!(i, 8 | 13 | 18 | 23) {
-            c == b'-'
-        } else {
-            c.is_ascii_hexdigit()
-        }
-    })
-}
-
-/// The adapters' GUIDs in a binding list (`\Device\{GUID}`, case ignored),
-/// each once, in order; any other entry is skipped.
-pub fn bound_guids(bind: &[String]) -> Vec<String> {
-    const DEVICE: &str = r"\Device\";
-    let mut guids: Vec<String> = Vec::new();
-    for entry in bind {
-        let entry = entry.trim();
-        let Some(head) = entry.get(..DEVICE.len()) else {
-            continue;
-        };
-        let guid = &entry[DEVICE.len()..];
-        if head.eq_ignore_ascii_case(DEVICE)
-            && is_guid(guid)
-            && !guids.iter().any(|g| g.eq_ignore_ascii_case(guid))
-        {
-            guids.push(guid.to_string());
-        }
-    }
-    guids
 }
 
 /// An adapter instance's key name in the network class (`0007`); the class
@@ -204,44 +170,6 @@ fn reading_of(value: RegValue) -> Result<Reading<String>, u32> {
         RegValue::Multi(list) => Reading::Value(list.join(" ")),
         RegValue::Other(kind) => Reading::Value(format!("(registry type {kind})")),
     })
-}
-
-/// The SoundGrid Protocol: installed (its service key exists), and every
-/// adapter it is bound to (`None`: the binding could not be read).
-pub fn soundgrid(
-    reg: &dyn RegistryRead,
-    errors: &mut Vec<String>,
-) -> (Option<bool>, Option<Vec<NicFacts>>) {
-    match reg.subkeys(SOUNDGRID_SERVICE) {
-        Ok(_) => {}
-        Err(ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND) => return (Some(false), Some(Vec::new())),
-        Err(code) => {
-            errors.push(format!(
-                "the SoundGrid Protocol's service could not be read (error {code})"
-            ));
-            return (None, None);
-        }
-    }
-    let bind = match reg.value(SOUNDGRID_LINKAGE, "Bind") {
-        RegValue::Multi(list) => list,
-        RegValue::Text(entry) => vec![entry],
-        RegValue::Absent => Vec::new(),
-        RegValue::Failed(code) => {
-            errors.push(format!(
-                "the SoundGrid Protocol's bindings could not be read (error {code})"
-            ));
-            return (Some(true), None);
-        }
-        RegValue::Dword(_) | RegValue::Other(_) => {
-            errors.push("the SoundGrid Protocol's bindings are no list".to_string());
-            return (Some(true), None);
-        }
-    };
-    let nics = bound_guids(&bind)
-        .iter()
-        .map(|guid| nic(reg, guid, errors))
-        .collect();
-    (Some(true), Some(nics))
 }
 
 /// The adapter's instance key in the network class (its `NetCfgInstanceId`
@@ -370,30 +298,40 @@ pub fn nic(reg: &dyn RegistryRead, guid: &str, errors: &mut Vec<String>) -> NicF
     nic
 }
 
-/// `manager.json` as read.
+/// A configuration file as read (DVS's `manager.json`, the SoundGrid
+/// driver's preferences).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DvsFile {
-    /// No such file: DVS is not installed.
+pub enum FileRead {
+    /// No such file.
     Missing,
     Text(String),
     /// It could not be read (why).
     Failed(String),
 }
 
-/// Reads `manager.json` (at most [`MAX_DVS_BYTES`]).
-pub fn read_dvs_file(path: &Path) -> DvsFile {
+/// Reads a configuration file (at most [`MAX_FILE_BYTES`], UTF-8).
+pub fn read_file(path: &Path) -> FileRead {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return DvsFile::Missing,
-        Err(e) => return DvsFile::Failed(e.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return FileRead::Missing,
+        Err(e) => return FileRead::Failed(e.to_string()),
     };
     let mut text = String::new();
-    match file.take(MAX_DVS_BYTES + 1).read_to_string(&mut text) {
-        Err(e) => DvsFile::Failed(e.to_string()),
-        Ok(n) if (n as u64) > MAX_DVS_BYTES => {
-            DvsFile::Failed(format!("it is larger than {MAX_DVS_BYTES} bytes"))
+    match file.take(MAX_FILE_BYTES + 1).read_to_string(&mut text) {
+        Err(e) => FileRead::Failed(e.to_string()),
+        Ok(n) if (n as u64) > MAX_FILE_BYTES => {
+            FileRead::Failed(format!("it is larger than {MAX_FILE_BYTES} bytes"))
         }
-        Ok(_) => DvsFile::Text(text),
+        Ok(_) => FileRead::Text(text),
+    }
+}
+
+/// Reads `relative` under a folder an environment variable names
+/// (`%APPDATA%`); a variable that is not set (`None`) says so.
+pub fn read_under(folder: Option<&Path>, variable: &str, relative: &str) -> FileRead {
+    match folder {
+        Some(folder) => read_file(&folder.join(relative)),
+        None => FileRead::Failed(format!("%{variable}% is not set")),
     }
 }
 
@@ -491,10 +429,28 @@ pub fn guid_text(d1: u32, d2: u16, d3: u16, d4: [u8; 8]) -> String {
     )
 }
 
+/// Why no single adapter has a MAC.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MacMiss {
+    NoneHas,
+    /// So many adapters have it, none by its current address alone.
+    Several(usize),
+}
+
+impl MacMiss {
+    /// The reason in English (the read errors).
+    pub fn why(self, mac: &str) -> String {
+        match self {
+            Self::NoneHas => format!("no network adapter has the MAC {mac}"),
+            Self::Several(n) => format!("{n} network adapters have the MAC {mac}"),
+        }
+    }
+}
+
 /// The hardware adapter with this MAC: filter modules' and virtual
 /// interfaces' rows are skipped; the current address wins over the
 /// permanent one; none, or several, says why.
-pub fn adapter_for_mac<'a>(rows: &'a [IfRow], mac: &str) -> Result<&'a IfRow, String> {
+pub fn adapter_for_mac<'a>(rows: &'a [IfRow], mac: &str) -> Result<&'a IfRow, MacMiss> {
     let candidates: Vec<&IfRow> = rows
         .iter()
         .filter(|r| r.hardware && !r.filter && (r.mac == mac || r.permanent_mac == mac))
@@ -506,11 +462,8 @@ pub fn adapter_for_mac<'a>(rows: &'a [IfRow], mac: &str) -> Result<&'a IfRow, St
         .collect();
     match (candidates.as_slice(), current.as_slice()) {
         ([one], _) | (_, [one]) => Ok(*one),
-        ([], _) => Err(format!("no network adapter has the MAC {mac}")),
-        _ => Err(format!(
-            "{} network adapters have the MAC {mac}",
-            candidates.len()
-        )),
+        ([], _) => Err(MacMiss::NoneHas),
+        _ => Err(MacMiss::Several(candidates.len())),
     }
 }
 
@@ -518,24 +471,24 @@ pub fn adapter_for_mac<'a>(rows: &'a [IfRow], mac: &str) -> Result<&'a IfRow, St
 /// only): not installed when there is no file.
 pub fn dante(
     reg: &dyn RegistryRead,
-    dvs: &DvsFile,
+    dvs: &FileRead,
     adapters: &Result<Vec<IfRow>, u32>,
     errors: &mut Vec<String>,
 ) -> DanteFacts {
     let text = match dvs {
-        DvsFile::Missing => {
+        FileRead::Missing => {
             return DanteFacts {
                 installed: Some(false),
                 ..DanteFacts::default()
             };
         }
-        DvsFile::Failed(why) => {
+        FileRead::Failed(why) => {
             errors.push(format!(
                 "Dante Virtual Soundcard's manager.json could not be read: {why}"
             ));
             return DanteFacts::default();
         }
-        DvsFile::Text(text) => text,
+        FileRead::Text(text) => text,
     };
     let mut dante = DanteFacts {
         installed: Some(true),
@@ -576,7 +529,10 @@ pub fn dante(
     };
     match adapter_for_mac(rows, &mac) {
         Ok(row) => dante.nic = Some(nic(reg, &row.guid, errors)),
-        Err(why) => errors.push(format!("Dante Virtual Soundcard's adapter: {why}")),
+        Err(miss) => errors.push(format!(
+            "Dante Virtual Soundcard's adapter: {}",
+            miss.why(&mac)
+        )),
     }
     dante
 }
@@ -698,15 +654,17 @@ pub fn power_facts(read: &PowerRead, errors: &mut Vec<String>) -> PowerFacts {
 }
 
 /// Every audio-profile fact of one check: the registry through `reg`, the
-/// network interfaces, DVS's configuration and the power API as read.
+/// network interfaces, DVS's configuration, the SoundGrid driver's
+/// preferences and the power API as read.
 pub fn read_audio(
     reg: &dyn RegistryRead,
     adapters: &Result<Vec<IfRow>, u32>,
-    dvs: &DvsFile,
+    dvs: &FileRead,
+    soundgrid_preferences: &FileRead,
     power: &PowerRead,
 ) -> AudioFacts {
     let mut errors = Vec::new();
-    let (soundgrid_installed, soundgrid_nics) = soundgrid(reg, &mut errors);
+    let soundgrid = soundgrid::soundgrid(reg, soundgrid_preferences, adapters, &mut errors);
     let dante = dante(reg, dvs, adapters, &mut errors);
     let no_auto_update = policy_on(
         reg.value(WINDOWS_UPDATE_AU, "NoAutoUpdate"),
@@ -723,8 +681,7 @@ pub fn read_audio(
     let mmcss = mmcss(reg, &mut errors);
     let power = power_facts(power, &mut errors);
     AudioFacts {
-        soundgrid_installed,
-        soundgrid_nics,
+        soundgrid,
         dante,
         no_auto_update,
         drivers_excluded,
@@ -733,6 +690,9 @@ pub fn read_audio(
         errors,
     }
 }
+
+#[path = "prod_env_audio_soundgrid.rs"]
+pub mod soundgrid;
 
 #[cfg(test)]
 #[path = "prod_env_audio_read_fake.rs"]

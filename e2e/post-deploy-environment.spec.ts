@@ -19,9 +19,9 @@
  * last poll) and shows no "Prostredie" segment, and the console is clean
  * (the same benign filters as the other post-deploy specs).
  *
- * #255: the same gate covers the production PC's audio profile (every
- * SoundGrid adapter on NDIS with Waves' settings off, automatic updates off,
- * MMCSS for Pro Audio). Its report-only facts (the Dante adapter's driver,
+ * #255: the same gate covers the production PC's audio profile (with
+ * SoundGrid installed, the adapter its driver chose as its port on NDIS with
+ * Waves' settings off; automatic updates off; MMCSS for Pro Audio). Its report-only facts (the Dante adapter's driver,
  * the Windows Update driver exclusion, power) never fail: they are logged
  * and shown as the grey "Profil PC" segment.
  */
@@ -87,6 +87,12 @@ test.describe("production environment post-deploy verification (#233)", () => {
       .toBe(true);
     console.log(`[#233 environment] ${JSON.stringify(env)}`);
     const notes = environmentNotes(env);
+    const audio = (env as EnvironmentStatus | null)?.audio;
+    const nic = audio?.soundgrid_nic;
+    console.log(
+      `[#255 soundgrid] ${audio?.soundgrid ?? "?"} port ${audio?.soundgrid_port_mac ?? "-"}` +
+        (nic ? ` adapter ${nic.name ?? nic.guid} ${nic.service ?? "?"} ${nic.driver_model ?? "?"}` : ""),
+    );
     console.log(`[#255 report-only] ${notes.length === 0 ? "none" : notes.join("; ")}`);
     expect(environmentFailures(env), "the production environment").toEqual([]);
 

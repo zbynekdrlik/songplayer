@@ -1,7 +1,7 @@
 //! #255: the audio profile's walk over an in-memory registry — the raw
-//! values, the SoundGrid binding and one adapter, every way a read can fail
-//! (Dante, the policies, power and the Windows glue:
-//! `prod_env_audio_read_tests_dvs.rs`).
+//! values, the network class and one adapter, every way a read can fail
+//! (SoundGrid: `prod_env_audio_soundgrid_tests.rs`; Dante, the policies,
+//! power and the Windows glue: `prod_env_audio_read_tests_dvs.rs`).
 
 use sp_core::prod_env::audio::NicSetting;
 
@@ -81,43 +81,7 @@ fn each_setting_is_looked_for_under_its_names() {
     assert_eq!(table, expected);
 }
 
-// ---- the SoundGrid binding ----
-
-#[test]
-fn a_guid_is_braced_and_hex_in_its_groups() {
-    assert!(is_guid(SG_GUID));
-    assert!(is_guid(&SG_GUID.to_ascii_lowercase()));
-    for bad in [
-        "",
-        "{DBFC2CF4-1A2B-4C3D-8E9F-0123456789A}",
-        "{DBFC2CF4-1A2B-4C3D-8E9F-0123456789ABC}",
-        // One brace replaced, the rest a GUID.
-        "(DBFC2CF4-1A2B-4C3D-8E9F-0123456789AB}",
-        "{DBFC2CF4-1A2B-4C3D-8E9F-0123456789AB)",
-        "{DBFC2CF41-A2B-4C3D-8E9F-0123456789AB}",
-        "{DBFC2CF4-1A2B-4C3D-8E9F-01234567-9AB}",
-        "{DBFC2CF4-1A2B-4C3D-8E9F-0123456789AG}",
-        "{DBFC2CF4-1A2B+4C3D-8E9F-0123456789AB}",
-    ] {
-        assert!(!is_guid(bad), "{bad:?}");
-    }
-}
-
-#[test]
-fn the_binding_list_names_each_adapter_once() {
-    let other = "{11111111-2222-3333-4444-555555555555}";
-    let bind = [
-        format!(r"\Device\{SG_GUID}"),
-        format!(r" \device\{} ", SG_GUID.to_ascii_lowercase()),
-        r"\Device\NdisWanIp".to_string(),
-        // A GUID behind another prefix of the same length is skipped.
-        r"\Network{99999999-2222-3333-4444-555555555555}".to_string(),
-        r"\Dev".to_string(),
-        format!(r"\DEVICE\{other}"),
-    ];
-    assert_eq!(bound_guids(&bind), [SG_GUID, other]);
-    assert_eq!(bound_guids(&[]), Vec::<String>::new());
-}
+// ---- the network class ----
 
 #[test]
 fn an_instance_key_is_four_digits() {
@@ -127,72 +91,6 @@ fn an_instance_key_is_four_digits() {
     for no in ["Properties", "007", "00007", "00a7", ""] {
         assert!(!is_instance_key(no), "{no}");
     }
-}
-
-#[test]
-fn soundgrid_not_installed_has_no_adapter_and_no_error() {
-    for code in [ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND] {
-        let mut reg = Fake::default();
-        reg.subkeys_of(SOUNDGRID_SERVICE, Err(code));
-        let mut errors = Vec::new();
-        assert_eq!(
-            soundgrid(&reg, &mut errors),
-            (Some(false), Some(Vec::new()))
-        );
-        assert!(errors.is_empty(), "{errors:?}");
-    }
-}
-
-#[test]
-fn soundgrid_bound_to_nothing_lists_no_adapter() {
-    let mut reg = Fake::default();
-    reg.subkeys_of(SOUNDGRID_SERVICE, Ok(Vec::new()));
-    let mut errors = Vec::new();
-    assert_eq!(soundgrid(&reg, &mut errors), (Some(true), Some(Vec::new())));
-    assert!(errors.is_empty());
-}
-
-#[test]
-fn a_soundgrid_binding_that_cannot_be_read_says_why() {
-    let mut reg = Fake::default();
-    reg.subkeys_of(SOUNDGRID_SERVICE, Err(5));
-    let mut errors = Vec::new();
-    assert_eq!(soundgrid(&reg, &mut errors), (None, None));
-    assert_eq!(
-        errors,
-        ["the SoundGrid Protocol's service could not be read (error 5)"]
-    );
-    reg.subkeys_of(SOUNDGRID_SERVICE, Ok(Vec::new()));
-    reg.set(SOUNDGRID_LINKAGE, "Bind", RegValue::Failed(5));
-    let mut errors = Vec::new();
-    assert_eq!(soundgrid(&reg, &mut errors), (Some(true), None));
-    assert_eq!(
-        errors,
-        ["the SoundGrid Protocol's bindings could not be read (error 5)"]
-    );
-    for not_a_list in [RegValue::Dword(1), RegValue::Other(3)] {
-        reg.set(SOUNDGRID_LINKAGE, "Bind", not_a_list);
-        let mut errors = Vec::new();
-        assert_eq!(soundgrid(&reg, &mut errors), (Some(true), None));
-        assert_eq!(errors, ["the SoundGrid Protocol's bindings are no list"]);
-    }
-}
-
-#[test]
-fn pp_s_soundgrid_adapter_reads_as_its_facts() {
-    let mut errors = Vec::new();
-    assert_eq!(
-        soundgrid(&pp(), &mut errors),
-        (Some(true), Some(vec![soundgrid_facts()]))
-    );
-    assert!(errors.is_empty(), "{errors:?}");
-    // One binding written as a single string reads the same.
-    let mut reg = pp();
-    reg.set(SOUNDGRID_LINKAGE, "Bind", t(&format!(r"\Device\{SG_GUID}")));
-    assert_eq!(
-        soundgrid(&reg, &mut errors).1,
-        Some(vec![soundgrid_facts()])
-    );
 }
 
 // ---- one adapter ----
@@ -429,6 +327,10 @@ fn the_environment_reads_spawn_no_process() {
         (
             "prod_env_audio_read.rs",
             include_str!("prod_env_audio_read.rs"),
+        ),
+        (
+            "prod_env_audio_soundgrid.rs",
+            include_str!("prod_env_audio_soundgrid.rs"),
         ),
         (
             "prod_env_audio_win.rs",

@@ -8,10 +8,13 @@
 //! (`prod_env_audio_read.rs` walks the registry through a reader that
 //! `prod_env_audio_win.rs` implements on Windows):
 //!
-//! - **The SoundGrid adapters** (GATE): every adapter the SoundGrid Protocol
-//!   is bound to runs an NDIS driver — NetAdapterCx starved SoundGrid on PP
-//!   (#233: 4 loop events and +80 resyncs before, 0 after the NDIS driver)
-//!   — with Waves' settings off ([`setting_verdict`]).
+//! - **The SoundGrid adapter** (GATE): with the SoundGrid Protocol
+//!   installed, its driver has a port chosen (its preferences'
+//!   `LocalLanPort`), an adapter has that MAC, and that adapter runs an NDIS
+//!   driver — NetAdapterCx starved SoundGrid on PP (#233: 4 loop events and
+//!   +80 resyncs before, 0 after the NDIS driver) — with Waves' settings off
+//!   ([`setting_verdict`]). Never the protocol's bindings: on PP they list
+//!   14 adapters, virtual and long gone ones among them.
 //! - **Windows Update** (GATE): automatic updates off (`NoAutoUpdate` 1).
 //!   The driver exclusion is reported only until lane 2's setup applies it.
 //! - **MMCSS** (GATE, #210 part 2): `SystemResponsiveness` 0,
@@ -23,7 +26,7 @@
 
 use sp_core::prod_env::audio::{
     AudioProfile, DanteView, DriverModel, MmcssSetting, MmcssView, NicSetting, NicSettingView,
-    NicView, PowerView, WindowsUpdateView, nic_label, notes,
+    NicView, PowerView, SoundGridState, WindowsUpdateView, nic_label, notes,
 };
 use sp_core::prod_env::{EnvProblem, Unreadable};
 
@@ -135,13 +138,31 @@ pub struct PowerFacts {
     pub core_parking_min_cores: Option<u32>,
 }
 
+/// SoundGrid as read: the SoundGrid Protocol's service, its driver's chosen
+/// port (`LocalLanPort` in `SoundGrid.Driver.preferences`, the file the
+/// driver in SongPlayer's ASIO host reads: the same user) and the adapter
+/// with that MAC. The default is nothing read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SoundGridFacts {
+    /// No SoundGrid Protocol service: no SoundGrid facts at all.
+    NotInstalled,
+    /// The service, the driver's preferences or the interfaces could not be
+    /// read (why: the read errors).
+    #[default]
+    Unreadable,
+    /// Installed, and the driver has no port chosen (no preferences, no or
+    /// an empty `LocalLanPort`).
+    PortUnset,
+    /// The chosen port's MAC (12 hex digits) names no adapter.
+    PortMissing { mac: String },
+    /// The adapter the driver uses.
+    Adapter { mac: String, nic: NicFacts },
+}
+
 /// The audio profile's facts. The default is nothing read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AudioFacts {
-    /// The SoundGrid Protocol's service exists.
-    pub soundgrid_installed: Option<bool>,
-    /// Every adapter it is bound to (`None`: the binding could not be read).
-    pub soundgrid_nics: Option<Vec<NicFacts>>,
+    pub soundgrid: SoundGridFacts,
     pub dante: DanteFacts,
     /// `NoAutoUpdate` is 1.
     pub no_auto_update: Option<bool>,
@@ -330,18 +351,24 @@ pub fn mmcss_problems(m: &MmcssFacts) -> Vec<EnvProblem> {
     problems
 }
 
-/// The audio profile's problems, in order: the SoundGrid binding and each
-/// adapter, Windows Update, MMCSS. The report-only facts are never one.
-pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
-    let mut problems = Vec::new();
-    match &audio.soundgrid_nics {
-        None => problems.push(EnvProblem::Unreadable(Unreadable::SoundGrid)),
-        Some(nics) => {
-            for nic in nics {
-                problems.extend(nic_problems(nic));
-            }
+/// SoundGrid's problems: none when it is not installed; its port unset or
+/// missing; else its adapter's ([`nic_problems`]).
+pub fn soundgrid_problems(soundgrid: &SoundGridFacts) -> Vec<EnvProblem> {
+    match soundgrid {
+        SoundGridFacts::NotInstalled => Vec::new(),
+        SoundGridFacts::Unreadable => vec![EnvProblem::Unreadable(Unreadable::SoundGrid)],
+        SoundGridFacts::PortUnset => vec![EnvProblem::SoundGridPortUnset],
+        SoundGridFacts::PortMissing { mac } => {
+            vec![EnvProblem::SoundGridPortMissing { mac: mac.clone() }]
         }
+        SoundGridFacts::Adapter { nic, .. } => nic_problems(nic),
     }
+}
+
+/// The audio profile's problems, in order: SoundGrid, Windows Update,
+/// MMCSS. The report-only facts are never one.
+pub fn problems(audio: &AudioFacts) -> Vec<EnvProblem> {
+    let mut problems = soundgrid_problems(&audio.soundgrid);
     match audio.no_auto_update {
         None => problems.push(EnvProblem::Unreadable(Unreadable::WindowsUpdate)),
         Some(false) => problems.push(EnvProblem::AutoUpdateOn),
@@ -390,12 +417,19 @@ pub fn nic_view(nic: &NicFacts) -> NicView {
 
 /// The audio profile on the status, with its report-only notes.
 pub fn view(audio: &AudioFacts) -> AudioProfile {
+    let (state, port_mac, nic) = match &audio.soundgrid {
+        SoundGridFacts::NotInstalled => (SoundGridState::NotInstalled, None, None),
+        SoundGridFacts::Unreadable => (SoundGridState::Unreadable, None, None),
+        SoundGridFacts::PortUnset => (SoundGridState::PortUnset, None, None),
+        SoundGridFacts::PortMissing { mac } => (SoundGridState::PortMissing, Some(mac), None),
+        SoundGridFacts::Adapter { mac, nic } => {
+            (SoundGridState::Found, Some(mac), Some(nic_view(nic)))
+        }
+    };
     let mut profile = AudioProfile {
-        soundgrid_installed: audio.soundgrid_installed,
-        soundgrid_nics: audio
-            .soundgrid_nics
-            .as_ref()
-            .map(|nics| nics.iter().map(nic_view).collect()),
+        soundgrid: Some(state),
+        soundgrid_port_mac: port_mac.cloned(),
+        soundgrid_nic: nic,
         dante: DanteView {
             installed: audio.dante.installed,
             interface_address: audio.dante.interface_address.clone(),
@@ -450,13 +484,15 @@ pub fn production_example() -> AudioFacts {
             .collect(),
     };
     AudioFacts {
-        soundgrid_installed: Some(true),
-        soundgrid_nics: Some(vec![nic(
-            "{DBFC2CF4-0000-0000-0000-000000000001}",
-            "soundgrid-pcie",
-            "rt640x64",
-            Reading::Absent,
-        )]),
+        soundgrid: SoundGridFacts::Adapter {
+            mac: "6c2408e59c91".to_string(),
+            nic: nic(
+                "{DBFC2CF4-0000-0000-0000-000000000001}",
+                "soundgrid-pcie",
+                "rt640x64",
+                Reading::Absent,
+            ),
+        },
         dante: DanteFacts {
             installed: Some(true),
             interface_address: Some("6c1ff773c7d9".to_string()),

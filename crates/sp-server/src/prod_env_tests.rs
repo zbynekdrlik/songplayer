@@ -353,8 +353,8 @@ fn the_audio_profile_s_problems_follow_the_firewall_s() {
         ]
     );
     let mut cx = audio::production_example();
-    if let Some(nics) = cx.soundgrid_nics.as_mut() {
-        nics[0].kmdf_library_version = audio::Reading::Value("1.33".to_string());
+    if let audio::SoundGridFacts::Adapter { nic, .. } = &mut cx.soundgrid {
+        nic.kmdf_library_version = audio::Reading::Value("1.33".to_string());
     }
     let v = verdict(&EnvFacts {
         audio: cx,
@@ -446,7 +446,17 @@ fn the_status_carries_every_fact_and_problem() {
     assert_eq!(held.edition_allowed, Some(true));
     // #255: the audio profile and its report-only notes; they never make
     // the box fail.
-    assert_eq!(held.audio.soundgrid_nics.as_ref().map(Vec::len), Some(1));
+    assert_eq!(
+        held.audio.soundgrid_port_mac.as_deref(),
+        Some("6c2408e59c91")
+    );
+    assert_eq!(
+        held.audio
+            .soundgrid_nic
+            .as_ref()
+            .and_then(|n| n.service.as_deref()),
+        Some("rt640x64")
+    );
     assert_eq!(held.audio.notes.len(), 2);
     // Off Windows nothing is read, so no note either.
     let (off, _) = status_of(&Check::NotWindows, 4_000);

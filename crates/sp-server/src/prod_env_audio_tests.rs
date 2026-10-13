@@ -2,7 +2,7 @@
 //! and settings, Windows Update, MMCSS — and its view on the status (the
 //! walk itself: `prod_env_audio_read_tests.rs`).
 
-use sp_core::prod_env::audio::{DriverModel, MmcssSetting, NicSetting};
+use sp_core::prod_env::audio::{DriverModel, MmcssSetting, NicSetting, SoundGridState};
 use sp_core::prod_env::{EnvProblem, Unreadable};
 
 use super::*;
@@ -21,7 +21,10 @@ fn text(v: &str) -> Reading<String> {
 
 /// PP's SoundGrid adapter as it must be.
 fn sg_nic() -> NicFacts {
-    production_example().soundgrid_nics.unwrap().remove(0)
+    match production_example().soundgrid {
+        SoundGridFacts::Adapter { nic, .. } => nic,
+        other => panic!("the fixture's SoundGrid is {other:?}"),
+    }
 }
 
 fn with_setting(mut nic: NicFacts, setting: NicSetting, value: Reading<String>) -> NicFacts {
@@ -373,8 +376,7 @@ fn a_production_profile_holds() {
     // The report-only facts are never a problem: no SoundGrid, no DVS, the
     // driver exclusion missing, core parking on.
     let snv = AudioFacts {
-        soundgrid_installed: Some(false),
-        soundgrid_nics: Some(Vec::new()),
+        soundgrid: SoundGridFacts::NotInstalled,
         dante: DanteFacts::default(),
         drivers_excluded: None,
         power: PowerFacts::default(),
@@ -395,16 +397,13 @@ fn the_profile_names_every_problem_in_order() {
         ]
     );
     let mut bad = production_example();
-    bad.soundgrid_nics = Some(vec![
-        NicFacts {
+    bad.soundgrid = SoundGridFacts::Adapter {
+        mac: "6c2408e59c91".to_string(),
+        nic: NicFacts {
             kmdf_library_version: text("1.33"),
-            ..sg_nic()
-        },
-        NicFacts {
-            name: Some("second".to_string()),
             ..with_setting(sg_nic(), NicSetting::Eee, text("1"))
         },
-    ]);
+    };
     bad.no_auto_update = Some(false);
     bad.mmcss.pro_audio_priority = Reading::Value(1);
     assert_eq!(
@@ -413,15 +412,56 @@ fn the_profile_names_every_problem_in_order() {
             EnvProblem::SoundGridNicNetAdapterCx {
                 nic: "soundgrid-pcie".to_string()
             },
-            EnvProblem::SoundGridNicSetting {
-                nic: "second".to_string(),
-                setting: NicSetting::Eee,
-                value: Some("1".to_string()),
-            },
+            sg_setting(NicSetting::Eee, Some("1")),
             EnvProblem::AutoUpdateOn,
             mmcss(MmcssSetting::ProAudioPriority, Some("1")),
         ]
     );
+}
+
+/// A SoundGrid reading and the problems it makes.
+type SoundGridCase = (SoundGridFacts, Vec<EnvProblem>);
+
+/// #255: SoundGrid's own problems: none when it is not installed, its port
+/// unset or missing, or its read failed; else its adapter's.
+#[test]
+fn soundgrid_s_problems_follow_its_state() {
+    let cases: [SoundGridCase; 5] = [
+        (SoundGridFacts::NotInstalled, Vec::new()),
+        (
+            SoundGridFacts::Unreadable,
+            vec![EnvProblem::Unreadable(Unreadable::SoundGrid)],
+        ),
+        (
+            SoundGridFacts::PortUnset,
+            vec![EnvProblem::SoundGridPortUnset],
+        ),
+        (
+            SoundGridFacts::PortMissing {
+                mac: "6c2408e59c91".to_string(),
+            },
+            vec![EnvProblem::SoundGridPortMissing {
+                mac: "6c2408e59c91".to_string(),
+            }],
+        ),
+        (
+            SoundGridFacts::Adapter {
+                mac: "6c2408e59c91".to_string(),
+                nic: with_setting(sg_nic(), NicSetting::GigaLite, text("1")),
+            },
+            vec![sg_setting(NicSetting::GigaLite, Some("1"))],
+        ),
+    ];
+    for (soundgrid, expected) in cases {
+        assert_eq!(soundgrid_problems(&soundgrid), expected, "{soundgrid:?}");
+        // The whole profile lists them first.
+        let audio = AudioFacts {
+            soundgrid,
+            ..production_example()
+        };
+        assert_eq!(problems(&audio), expected);
+    }
+    assert_eq!(SoundGridFacts::default(), SoundGridFacts::Unreadable);
 }
 
 // ---- the view ----
@@ -496,10 +536,9 @@ fn an_adapter_shows_each_setting_and_whether_all_hold() {
 fn the_profile_is_shown_with_its_notes() {
     let audio = production_example();
     let p = view(&audio);
-    assert_eq!(p.soundgrid_installed, Some(true));
-    let nics = p.soundgrid_nics.clone().unwrap();
-    assert_eq!(nics.len(), 1);
-    assert_eq!(nics[0], nic_view(&sg_nic()));
+    assert_eq!(p.soundgrid, Some(SoundGridState::Found));
+    assert_eq!(p.soundgrid_port_mac.as_deref(), Some("6c2408e59c91"));
+    assert_eq!(p.soundgrid_nic, Some(nic_view(&sg_nic())));
     assert_eq!(p.dante.installed, Some(true));
     assert_eq!(p.dante.interface_address.as_deref(), Some("6c1ff773c7d9"));
     assert_eq!(p.dante.interface_name.as_deref(), Some("Ethernet 4"));
@@ -530,9 +569,53 @@ fn the_profile_is_shown_with_its_notes() {
              príprava PC)",
         ]
     );
-    // Nothing read: every report-only fact is a note, the binding unknown.
+    // Nothing read: every report-only fact is a note, SoundGrid unreadable.
     let nothing = view(&AudioFacts::default());
-    assert_eq!(nothing.soundgrid_nics, None);
+    assert_eq!(nothing.soundgrid, Some(SoundGridState::Unreadable));
+    assert_eq!(nothing.soundgrid_nic, None);
     assert_eq!(nothing.dante.nic, None);
     assert_eq!(nothing.notes.len(), 4);
+}
+
+/// #255: SoundGrid's state on the status, with the port's MAC when one was
+/// chosen and the adapter when it was found.
+#[test]
+fn soundgrid_is_shown_by_its_state_port_and_adapter() {
+    let shown = |soundgrid: SoundGridFacts| {
+        let p = view(&AudioFacts {
+            soundgrid,
+            ..production_example()
+        });
+        (p.soundgrid, p.soundgrid_port_mac, p.soundgrid_nic)
+    };
+    assert_eq!(
+        shown(SoundGridFacts::NotInstalled),
+        (Some(SoundGridState::NotInstalled), None, None)
+    );
+    assert_eq!(
+        shown(SoundGridFacts::Unreadable),
+        (Some(SoundGridState::Unreadable), None, None)
+    );
+    assert_eq!(
+        shown(SoundGridFacts::PortUnset),
+        (Some(SoundGridState::PortUnset), None, None)
+    );
+    assert_eq!(
+        shown(SoundGridFacts::PortMissing {
+            mac: "020000000001".to_string()
+        }),
+        (
+            Some(SoundGridState::PortMissing),
+            Some("020000000001".to_string()),
+            None
+        )
+    );
+    assert_eq!(
+        shown(production_example().soundgrid),
+        (
+            Some(SoundGridState::Found),
+            Some("6c2408e59c91".to_string()),
+            Some(nic_view(&sg_nic()))
+        )
+    );
 }

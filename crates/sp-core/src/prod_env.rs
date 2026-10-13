@@ -13,9 +13,9 @@
 //! (WASM-safe: the dashboard shows it).
 //!
 //! #255 adds the production PC's audio profile ([`audio`]): the network
-//! adapters the SoundGrid Protocol is bound to run an NDIS driver with
-//! Waves' settings, automatic updates are off, MMCSS is set for Pro Audio;
-//! the rest is reported only ([`notes_label`]).
+//! adapter the SoundGrid driver uses (its chosen port) runs an NDIS driver
+//! with Waves' settings, automatic updates are off, MMCSS is set for Pro
+//! Audio; the rest is reported only ([`notes_label`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -68,7 +68,8 @@ pub enum Unreadable {
     /// The antivirus products the Security Center lists.
     Antivirus,
     Firewall(FirewallProfile),
-    /// #255: the adapters the SoundGrid Protocol is bound to.
+    /// #255: SoundGrid (the service, its driver's chosen port, the
+    /// interfaces).
     SoundGrid,
     /// #255: Windows Update's automatic-update policy.
     WindowsUpdate,
@@ -93,8 +94,14 @@ pub enum EnvProblem {
     AntivirusOn(String),
     /// A firewall profile is on.
     FirewallOn(FirewallProfile),
-    /// #255: an adapter the SoundGrid Protocol is bound to runs a
-    /// NetAdapterCx driver (named by [`audio::nic_label`]).
+    /// #255: SoundGrid is installed and its driver has no port chosen (no
+    /// preferences, no or an empty `LocalLanPort`).
+    SoundGridPortUnset,
+    /// #255: no adapter has the MAC of the port the SoundGrid driver chose
+    /// (12 hex digits).
+    SoundGridPortMissing { mac: String },
+    /// #255: the adapter the SoundGrid driver uses runs a NetAdapterCx
+    /// driver (named by [`audio::nic_label`]).
     SoundGridNicNetAdapterCx { nic: String },
     /// #255: a SoundGrid adapter's setting is not off: its value as read,
     /// or `None` when a setting every adapter must have is missing.
@@ -129,6 +136,8 @@ impl EnvProblem {
             Self::DefenderPassive(_) => "defender_passive_mode".to_string(),
             Self::AntivirusOn(_) => "antivirus_on".to_string(),
             Self::FirewallOn(p) => format!("firewall_on:{}", p.name()),
+            Self::SoundGridPortUnset => "soundgrid_port_unset".to_string(),
+            Self::SoundGridPortMissing { .. } => "soundgrid_port_missing".to_string(),
             Self::SoundGridNicNetAdapterCx { .. } => "soundgrid_nic_netadaptercx".to_string(),
             Self::SoundGridNicSetting { setting, .. } => {
                 format!("soundgrid_nic_setting:{}", setting.name())
@@ -167,6 +176,15 @@ impl EnvProblem {
             }
             Self::AntivirusOn(name) => format!("antivírus „{name}“ je zapnutý"),
             Self::FirewallOn(p) => format!("brána firewall je zapnutá ({} profil)", p.name_sk()),
+            Self::SoundGridPortUnset => {
+                "SoundGrid nemá zvolený sieťový port — nastav ho v SoundGrid \
+                 Studio / ovládači"
+                    .to_string()
+            }
+            Self::SoundGridPortMissing { mac } => format!(
+                "sieťová karta s MAC {}, ktorú má ovládač SoundGrid zvolenú ako port, sa nenašla",
+                audio::mac_colons(mac)
+            ),
             Self::SoundGridNicNetAdapterCx { nic } => format!(
                 "sieťová karta SoundGrid „{nic}“ beží na ovládači NetAdapterCx (musí bežať na \
                  ovládači NDIS)"
@@ -349,8 +367,9 @@ pub fn marker(status: &EnvironmentStatus) -> &'static str {
 pub const RULE_SK: &str = "Produkčný počítač musí bežať na Windows LTSC alebo Windows 11 IoT \
      Enterprise, s vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), \
      bez iného antivírusu a s vypnutou bránou firewall — nič nesmie kontrolovať ani filtrovať programy, ktoré SongPlayer spúšťa. \
-     Sieťové karty SoundGrid bežia na ovládači NDIS s vypnutým moderovaním prerušení, riadením toku a úsporou energie, \
-     automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené pre Pro Audio.";
+     Sieťová karta, ktorú má ovládač SoundGrid zvolenú ako port, beží na ovládači NDIS s vypnutým moderovaním \
+     prerušení, riadením toku a úsporou energie, automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené \
+     pre Pro Audio.";
 
 /// The health bar's segment, shown only while a check names a problem:
 /// `Prostredie: <the first problem>` (and ` (+N)` for N more), red, with the

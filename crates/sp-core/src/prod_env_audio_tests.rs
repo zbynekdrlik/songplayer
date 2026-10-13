@@ -279,6 +279,44 @@ fn an_adapter_serializes_every_field_by_name() {
 fn a_missing_profile_reads_as_nothing_known() {
     let p: AudioProfile = serde_json::from_str("{}").unwrap();
     assert_eq!(p, AudioProfile::default());
-    assert_eq!(p.soundgrid_nics, None);
+    assert_eq!(p.soundgrid, None);
+    assert_eq!(p.soundgrid_nic, None);
     assert!(p.notes.is_empty());
+}
+
+/// #255: SoundGrid's states by name on the wire.
+#[test]
+fn the_soundgrid_states_are_named_on_the_wire() {
+    let names: Vec<serde_json::Value> = [
+        SoundGridState::NotInstalled,
+        SoundGridState::Unreadable,
+        SoundGridState::PortUnset,
+        SoundGridState::PortMissing,
+        SoundGridState::Found,
+    ]
+    .iter()
+    .map(|s| serde_json::to_value(s).unwrap())
+    .collect();
+    assert_eq!(
+        names,
+        [
+            "not_installed",
+            "unreadable",
+            "port_unset",
+            "port_missing",
+            "found"
+        ]
+    );
+    let back: SoundGridState = serde_json::from_str("\"port_missing\"").unwrap();
+    assert_eq!(back, SoundGridState::PortMissing);
+}
+
+/// #255: a MAC kept as 12 hex digits reads with colons; anything else as
+/// it is.
+#[test]
+fn a_mac_reads_with_colons() {
+    assert_eq!(mac_colons("6c2408e59c91"), "6c:24:08:e5:9c:91");
+    for as_is in ["", "6c2408e59c9", "6c2408e59c912", "6c2408e59cé"] {
+        assert_eq!(mac_colons(as_is), as_is, "{as_is:?}");
+    }
 }

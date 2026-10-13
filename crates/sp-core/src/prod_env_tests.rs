@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::health::HealthTone;
-use crate::prod_env::audio::{AudioProfile, MmcssSetting, NicSetting, PowerView};
+use crate::prod_env::audio::{AudioProfile, MmcssSetting, NicSetting, PowerView, SoundGridState};
 
 /// Every problem, one of each kind and profile.
 fn every_problem() -> Vec<EnvProblem> {
@@ -36,7 +36,13 @@ fn every_problem() -> Vec<EnvProblem> {
 /// #255: every audio-profile problem, one of each kind.
 fn every_audio_problem() -> Vec<EnvProblem> {
     let nic = || "soundgrid-pcie".to_string();
-    let mut all = vec![EnvProblem::SoundGridNicNetAdapterCx { nic: nic() }];
+    let mut all = vec![
+        EnvProblem::SoundGridPortUnset,
+        EnvProblem::SoundGridPortMissing {
+            mac: "6c2408e59c91".to_string(),
+        },
+        EnvProblem::SoundGridNicNetAdapterCx { nic: nic() },
+    ];
     for setting in NicSetting::ALL {
         all.push(EnvProblem::SoundGridNicSetting {
             nic: nic(),
@@ -73,6 +79,8 @@ fn every_audio_problem_has_its_stable_code() {
     assert_eq!(
         codes,
         [
+            "soundgrid_port_unset",
+            "soundgrid_port_missing",
             "soundgrid_nic_netadaptercx",
             "soundgrid_nic_setting:interrupt_moderation",
             "soundgrid_nic_setting:flow_control",
@@ -105,6 +113,9 @@ fn every_audio_problem_reads_in_slovak() {
     assert_eq!(
         texts,
         [
+            "SoundGrid nemá zvolený sieťový port — nastav ho v SoundGrid Studio / ovládači",
+            "sieťová karta s MAC 6c:24:08:e5:9c:91, ktorú má ovládač SoundGrid zvolenú ako port, \
+             sa nenašla",
             "sieťová karta SoundGrid „soundgrid-pcie“ beží na ovládači NetAdapterCx (musí bežať \
              na ovládači NDIS)",
             "sieťová karta SoundGrid „soundgrid-pcie“: nastavenie „Interrupt Moderation \
@@ -231,8 +242,7 @@ fn the_status_serializes_every_field_by_name() {
             public: Some(true),
         },
         audio: AudioProfile {
-            soundgrid_installed: Some(false),
-            soundgrid_nics: Some(Vec::new()),
+            soundgrid: Some(SoundGridState::NotInstalled),
             notes: vec!["parkovanie jadier je zapnuté (minimum 50 % jadier)".to_string()],
             ..AudioProfile::default()
         },
@@ -259,8 +269,9 @@ fn the_status_serializes_every_field_by_name() {
             "antivirus_on": ["ESET Security"],
             "firewall": {"domain": false, "private": null, "public": true},
             "audio": {
-                "soundgrid_installed": false,
-                "soundgrid_nics": [],
+                "soundgrid": "not_installed",
+                "soundgrid_port_mac": null,
+                "soundgrid_nic": null,
                 "dante": {
                     "installed": null,
                     "interface_address": null,
@@ -396,9 +407,10 @@ fn the_rule_names_the_audio_profile() {
          antivírusu a s vypnutou bránou firewall"
     ));
     assert!(RULE_SK.ends_with(
-        "programy, ktoré SongPlayer spúšťa. Sieťové karty SoundGrid bežia na ovládači NDIS s \
-         vypnutým moderovaním prerušení, riadením toku a úsporou energie, automatické \
-         aktualizácie Windows sú vypnuté a MMCSS je nastavené pre Pro Audio."
+        "programy, ktoré SongPlayer spúšťa. Sieťová karta, ktorú má ovládač SoundGrid zvolenú \
+         ako port, beží na ovládači NDIS s vypnutým moderovaním prerušení, riadením toku a \
+         úsporou energie, automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené pre \
+         Pro Audio."
     ));
 }
 

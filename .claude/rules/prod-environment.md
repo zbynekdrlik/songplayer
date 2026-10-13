@@ -151,14 +151,32 @@ power from the power API, DVS's file from `std::fs`. A source scan
 (`the_environment_reads_spawn_no_process`) refuses `std::process`,
 `Command::new`, `CreateProcess`, `ShellExecute` in every reader.
 
-**An audio adapter is found by what binds it, never by name** (a
-reinstalled PC with other adapter names is covered):
+**An audio adapter is found by the MAC its own software names, never by
+name** (a reinstalled PC with other adapter names is covered), matched by
+`adapter_for_mac` (below, shared by both):
 
-- **SoundGrid**: `HKLM\SYSTEM\CurrentControlSet\Services\SoundGridProtocol`
-  (no key = not installed, no adapter, no error), its `Linkage\Bind`
-  (`REG_MULTI_SZ`, also a single string) lists `\Device\{GUID}` per bound
-  adapter (`bound_guids`: case ignored, each once, anything else skipped).
-  EVERY bound adapter is a SoundGrid adapter and gated.
+- **SoundGrid** (`prod_env_audio_soundgrid.rs`): installed = the
+  `HKLM\SYSTEM\CurrentControlSet\Services\SoundGridProtocol` key exists (no
+  key = not installed: no SoundGrid facts, whatever its files say). Its
+  adapter = the one whose MAC is the SoundGrid ASIO driver's chosen port:
+  `<Configuration><LocalLanPort>` in
+  `%APPDATA%\Waves Audio\Preferences\SoundGrid.Driver.preferences` (this
+  process's own `APPDATA`: SongPlayer and its ASIO host run as the user
+  whose driver they host, so it is the file the hosted driver reads; PP:
+  user newlevel, `6c:24:08:e5:9c:91` = `soundgrid-pcie`). The file is read
+  strictly (`chosen_port` / `element_text`, no XML crate, no regex): one
+  `<Configuration>`, at most one `<LocalLanPort>` in it (`<x/>` = empty), a
+  BOM skipped; twice, unclosed, attributes, a longer name, a comment inside
+  `<Configuration>` or a value that is no MAC is a typed `PortError` →
+  `unreadable:soundgrid`. No file, no `LocalLanPort` or an empty one =
+  `soundgrid_port_unset`; a MAC on no adapter = `soundgrid_port_missing`;
+  several adapters = unreadable.
+  **Why not `Linkage\Bind`** (lane 1's first cut, measured on PP 13.10.2026,
+  #255 comment 6138104246): it lists 14 `\Device\{GUID}` — soundgrid-pcie,
+  two Wi-Fi Direct virtual adapters, the not-present kernel debugger
+  adapter and about ten adapters that no longer exist (the Dante adapter
+  and Wi-Fi have the binding disabled) — so gating it failed PP on
+  adapters SoundGrid never uses.
 - **Dante Virtual Soundcard**: `%ProgramData%\Audinate\Dante Virtual
   Soundcard\manager.json` (no file = not installed; at most 256 KiB, a BOM
   skipped) read into a typed struct (never `serde_json::Value`; other
@@ -182,7 +200,8 @@ reinstalled PC with other adapter names is covered):
 |---|---|---|---|---|
 | SoundGrid adapter's driver model | `Services\<svc>\Parameters\Wdf\KmdfLibraryVersion` | exists = NetAdapterCx, absent = NDIS (`driver_model`) | #233 A/B (4 loop events, +80 resyncs → 0 on NDIS); Microsoft's `executioncontext.cpp` (worker thread at priority 8); PP 13.10.2026: NDIS `rt640x64` has `Parameters\Wdf` with only `WdfMajor/MinorVersion`, NetAdapterCx `rtucx21x64` `KmdfLibraryVersion` 1.33 | **GATE** `soundgrid_nic_netadaptercx` |
 | SoundGrid adapter's settings | the class instance: `*InterruptModeration`, `*FlowControl` (required: missing = `soundgrid_nic_setting:<name>` "chýba"), `*EEE`, `EnableGreenEthernet` / `GreenEthernet`, `PowerSavingMode` / `*PowerSavingMode`, `GigaLite` (the first name that exists; missing = fine), `PnPCapabilities` | every keyword 0; `PnPCapabilities` with `NDIS_DEVICE_DISABLE_PM` 0x08 set (ndis.h; the Power Management tab writes 24 = 0x18, KB 2740020 also 280 = 0x118; missing = 0 = Windows may turn it off); a value that is no number is wrong | Waves' SoundGrid PC guide (5.11.2025); PP's values 12.10.2026 (all 0, 24) | **GATE** `soundgrid_nic_setting:<interrupt_moderation\|flow_control\|eee\|green_ethernet\|power_saving\|gigalite\|power_management>` |
-| SoundGrid adapter unreadable | any of the above failed / not found | — | — | **GATE** `unreadable:soundgrid_nic`; the binding itself `unreadable:soundgrid` |
+| SoundGrid adapter unreadable | any of the above failed / not found | — | — | **GATE** `unreadable:soundgrid_nic` |
+| SoundGrid's chosen port | `SoundGrid.Driver.preferences` `LocalLanPort` (service installed) | a port chosen and on one hardware adapter | PP's file 13.10.2026 (above) | **GATE** `soundgrid_port_unset` ("SoundGrid nemá zvolený sieťový port — nastav ho v SoundGrid Studio / ovládači"), `soundgrid_port_missing` (names the MAC), `unreadable:soundgrid` (the service, the file, the interfaces) |
 | `NoAutoUpdate` | `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU` | DWORD 1 (missing, another number or type = on) | a Windows Update driver push would undo PP's NDIS swap; both boxes 1 (12.10.2026) | **GATE** `windows_auto_update_on`, `unreadable:windows_update` |
 | `ExcludeWUDriversInQualityUpdate` | `…\WindowsUpdate` | DWORD 1 | PP 1 (set 12.10.2026); **SNV lacks it** | **report only** until lane 2's setup applies it on every box (TODO in `read_audio`), then a gate |
 | MMCSS | `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile` `SystemResponsiveness` 0, `NetworkThrottlingIndex` 0xFFFFFFFF; `…\Tasks\Pro Audio` `Priority` 6, `Scheduling Category` High (case and padding ignored) | each exact; missing = `mmcss:<name>` "chýba"; another type = unreadable | #210 part 2 (`vban-out.md`); both boxes hold | **GATE** `mmcss:<system_responsiveness\|network_throttling_index\|pro_audio_priority\|pro_audio_scheduling_category>`, `unreadable:mmcss` |
@@ -213,8 +232,9 @@ read errors only next to a failure).
   `sp_core::prod_env::EnvironmentStatus` = `{checked, ok, note, edition_id,
   product_name, build_number, ltsc, edition_allowed, defender_realtime,
   defender_passive, defender_mode, defender_antivirus_enabled,
-  antivirus_on, firewall: {domain, private, public}, audio: {soundgrid_installed,
-  soundgrid_nics: [NIC], dante: {installed, interface_address,
+  antivirus_on, firewall: {domain, private, public}, audio: {soundgrid:
+  "not_installed"|"unreadable"|"port_unset"|"port_missing"|"found",
+  soundgrid_port_mac (12 hex digits), soundgrid_nic: NIC, dante: {installed, interface_address,
   interface_name, nic: NIC}, windows_update: {no_auto_update,
   drivers_excluded}, mmcss: {system_responsiveness, network_throttling_index,
   pro_audio_priority, pro_audio_scheduling_category}, power: {scheme_guid,
@@ -231,8 +251,9 @@ read errors only next to a failure).
   `unreadable:edition`, `unreadable:build`, `defender_realtime_on`,
   `defender_passive_mode`, `unreadable:defender`, `antivirus_on`,
   `unreadable:antivirus`, `firewall_on:<domain|private|public>`,
-  `unreadable:firewall:<profile>`; then #255's: `unreadable:soundgrid`, per
-  SoundGrid adapter `unreadable:soundgrid_nic`, `soundgrid_nic_netadaptercx`,
+  `unreadable:firewall:<profile>`; then #255's: SoundGrid's one of
+  `unreadable:soundgrid` / `soundgrid_port_unset` / `soundgrid_port_missing`,
+  or its adapter's `unreadable:soundgrid_nic`, `soundgrid_nic_netadaptercx`,
   `soundgrid_nic_setting:<name>` (in `NicSetting::ALL`'s order), then
   `unreadable:windows_update` / `windows_auto_update_on`, then
   `unreadable:mmcss` (once, first) and `mmcss:<name>`; Slovak texts in
@@ -269,8 +290,9 @@ judges THAT status (no second read), then FAILS (`environment-gate.ts`) on
 every problem (`code: text`), on every fact that is not the production one
 whatever `ok` says (`edition_allowed` true; `defender_realtime`,
 `defender_passive` and every `firewall.*` false; `antivirus_on` `[]`; a fact
-missing from an older server reads null and fails; #255: `audio.soundgrid_nics`
-a list whose every adapter is `driver_model` "ndis" with `settings_ok` true,
+missing from an older server reads null and fails; #255: `audio.soundgrid`
+"not_installed", or "found" with `audio.soundgrid_nic` `driver_model` "ndis"
+and `settings_ok` true,
 `audio.windows_update.no_auto_update` true, `audio.mmcss` 0 / 4294967295 / 6 /
 "High"), with the read errors next to them, and on a missing, unchecked or
 "not Windows" status; then the dashboard's bar reads
@@ -318,9 +340,11 @@ and its rollback recipe are on #233 / PP `C:\ProgramData\SongPlayer\diag\nicswap
   `crates/sp-server/src/prod_env_audio_tests.rs` (the settings' rules,
   `PnPCapabilities`' bit, the driver model, one adapter's problems in
   order, MMCSS, the whole profile, the view);
-  `prod_env_audio_read_tests.rs` (the raw values, the binding, one adapter
-  over the in-memory registry, every way a read fails, the no-process
-  scan) and `prod_env_audio_read_tests_dvs.rs` (DVS's file and config,
+  `prod_env_audio_read_tests.rs` (the raw values, the network class, one
+  adapter over the in-memory registry, every way a read fails, the
+  no-process scan), `prod_env_audio_soundgrid_tests.rs` (PP's preferences
+  verbatim, every malformed shape, unset / missing / unreadable / found,
+  not installed whatever the file) and `prod_env_audio_read_tests_dvs.rs` (DVS's file and config,
   the MAC, the interfaces, the policies, MMCSS, power, PP's and SNV's
   whole profile) over `prod_env_audio_read_fake.rs`; and on the Windows
   job `the_audio_glue_reads_what_windows_itself_reports`: the same CI step
@@ -371,9 +395,11 @@ and its rollback recipe are on #233 / PP `C:\ProgramData\SongPlayer\diag\nicswap
   a KMDF service would read NetAdapterCx too (a false gate failure, never a
   false pass); `kmdf_library_version` and `netadaptercx_keywords` are on
   the status to confirm the model on SNV and PP.
-- #255: EVERY adapter the SoundGrid Protocol is bound to is gated: a box
-  that binds SoundGrid to its LAN or Dante adapter too fails on that
-  adapter's driver / settings (unbind it there).
+- #255: the SoundGrid preferences are read from SongPlayer's own
+  `%APPDATA%` (the env var): a SongPlayer started without the user's
+  environment reads "%APPDATA% is not set" → `unreadable:soundgrid` (a
+  visible failure, never a pass). A user who chooses another port in
+  SoundGrid Studio moves the gate with it at the next minute's check.
 - #255: only `PrimaryInterfaceAddress` / `PrimaryInterfaceName` of
   `manager.json` are read, as top-level strings (read on both boxes
   12.10.2026); another shape is a read error and a note, never a problem.

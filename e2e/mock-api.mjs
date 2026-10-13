@@ -1480,8 +1480,9 @@ const ENV_HOLDS = {
   // no note either (a spec sends `audio: {notes: […]}` for the grey
   // "Profil PC" segment).
   audio: {
-    soundgrid_installed: null,
-    soundgrid_nics: null,
+    soundgrid: null,
+    soundgrid_port_mac: null,
+    soundgrid_nic: null,
     dante: { installed: null, interface_address: null, interface_name: null, nic: null },
     windows_update: { no_auto_update: null, drivers_excluded: null },
     mmcss: {

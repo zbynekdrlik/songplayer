@@ -139,9 +139,40 @@ impl MmcssSetting {
 
 /// How a network adapter is named for the operator: its connection name
 /// (`Ethernet 4`), else its driver's description, else its GUID. The name is
-/// shown only; an adapter is always FOUND by what binds it, never by name.
+/// shown only; an adapter is always FOUND by the MAC its driver or its
+/// software names, never by name.
 pub fn nic_label(name: Option<&str>, description: Option<&str>, guid: &str) -> String {
     name.or(description).unwrap_or(guid).to_string()
+}
+
+/// A MAC kept as 12 hex digits (`6c2408e59c91`) as an operator reads it:
+/// `6c:24:08:e5:9c:91`. Anything else is shown as it is.
+pub fn mac_colons(mac: &str) -> String {
+    if mac.len() != 12 || !mac.is_ascii() {
+        return mac.to_string();
+    }
+    let pairs: Vec<&str> = (0..6).map(|i| &mac[2 * i..2 * i + 2]).collect();
+    pairs.join(":")
+}
+
+/// SoundGrid on this box: the adapter is the one whose MAC the SoundGrid
+/// driver's own preferences name (`LocalLanPort`), never the protocol's
+/// bindings (on PP those list 14 adapters, virtual and long gone ones
+/// among them).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SoundGridState {
+    /// The SoundGrid Protocol is not installed (no SoundGrid facts).
+    NotInstalled,
+    /// The service, the driver's preferences or the interfaces could not be
+    /// read.
+    Unreadable,
+    /// Installed, with no port chosen in the driver.
+    PortUnset,
+    /// The chosen port's MAC names no adapter.
+    PortMissing,
+    /// The adapter the driver uses was found.
+    Found,
 }
 
 /// One adapter setting as read.
@@ -266,13 +297,16 @@ pub struct PowerView {
 /// The production PC's audio profile on the environment status.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioProfile {
-    /// The SoundGrid Protocol is installed (`None`: could not be read).
+    /// SoundGrid on this box (`None`: an older server).
     #[serde(default)]
-    pub soundgrid_installed: Option<bool>,
-    /// Every adapter the SoundGrid Protocol is bound to (`[]`: none;
-    /// `None`: the binding could not be read).
+    pub soundgrid: Option<SoundGridState>,
+    /// The port the SoundGrid driver uses: its preferences' `LocalLanPort`,
+    /// 12 lowercase hex digits.
     #[serde(default)]
-    pub soundgrid_nics: Option<Vec<NicView>>,
+    pub soundgrid_port_mac: Option<String>,
+    /// The adapter with that MAC.
+    #[serde(default)]
+    pub soundgrid_nic: Option<NicView>,
     #[serde(default)]
     pub dante: DanteView,
     #[serde(default)]
