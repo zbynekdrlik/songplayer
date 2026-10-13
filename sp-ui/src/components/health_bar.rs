@@ -173,14 +173,19 @@ pub fn HealthBar() -> impl IntoView {
             </span>
             // Resolume push-chain
             {move || {
-                let hosts = store.resolume_health.get();
-                let problems: Vec<String> = hosts
+                // #262: only a host that does not answer is a problem; a
+                // token the composition lacks is the tooltip's note.
+                let hosts: Vec<(String, health::ResolumeHostView)> = store
+                    .resolume_health
+                    .get()
                     .iter()
-                    .filter_map(|h| h.problem().map(|p| format!("{}: {}", h.host, p)))
+                    .map(|h| (h.host.clone(), h.view()))
                     .collect();
-                let (tone, text) = health::resolume_label(hosts.len(), problems.len());
+                let unreachable = hosts.iter().filter(|(_, v)| v.problem.is_some()).count();
+                let clipless = hosts.iter().filter(|(_, v)| !v.has_clips).count();
+                let (tone, text) = health::resolume_label(hosts.len(), unreachable, clipless);
                 let cls = format!("health-seg {}", tone.css_class());
-                let title = problems.join(" | ");
+                let title = health::resolume_title(&hosts);
                 view! { <span class=cls title=title data-testid="health-resolume">{text}</span> }
             }}
             // #259: the LED wall against Resolume's own saved output.

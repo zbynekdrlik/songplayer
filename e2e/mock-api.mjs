@@ -1590,8 +1590,16 @@ app.delete("/api/v1/resolume/hosts/:id", (_req, res) => {
 // hidden. The endpoint must exist so the frontend's async completion
 // (snapshot.set) actually runs in the E2E instead of failing to
 // deserialize the SPA-fallback index.html.
+// #262: the Resolume push-chain health the health bar polls every 5 s. No
+// host by default; `POST /__mock/resolume-health {hosts: […]}` sets the
+// rows, `POST /__mock/resolume-health {}` clears them.
+let resolumeHealth = [];
 app.get("/api/v1/resolume/health", (_req, res) => {
-  res.json([]);
+  res.json(resolumeHealth);
+});
+app.post("/__mock/resolume-health", (req, res) => {
+  resolumeHealth = Array.isArray(req.body?.hosts) ? req.body.hosts : [];
+  res.json(resolumeHealth);
 });
 
 // #230: the background hold the health bar polls every 5 s. Not held by
