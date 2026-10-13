@@ -314,3 +314,31 @@ fn nvapis_structures_are_decoded() {
     assert_eq!(connected[0].connector, "HDMI");
     assert_eq!(grids[0].displays.len(), 3);
 }
+
+/// #259 (SNV 13.10.2026, first live read): Arena owns ~30 hidden helper
+/// windows (DirectSound, IME, an OpenGL dummy, some with titles that read
+/// as garbage); the report lists only the visible ones (no decision uses a
+/// hidden window).
+#[test]
+fn only_arenas_visible_windows_are_listed() {
+    let hidden = sp_core::wall::ArenaWindow {
+        title: "NVOGLDC invisible".to_string(),
+        visible: false,
+        ..output_window()
+    };
+    let reader = FakeReader {
+        windows: Ok(vec![
+            (ARENA_PID, arena_main()),
+            (ARENA_PID, hidden),
+            (ARENA_PID, output_window()),
+        ]),
+        ..FakeReader::snv()
+    };
+    assert_eq!(
+        arena(&reader),
+        Ok(Arena {
+            running: true,
+            windows: vec![arena_main(), output_window()],
+        })
+    );
+}
