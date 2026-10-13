@@ -84,7 +84,7 @@ pub async fn record_fetch(
     pool: &SqlitePool,
     playlist_id: i64,
     entries: &[PlaylistEntry],
-    _now_ms: i64,
+    now_ms: i64,
 ) -> Result<SyncReport, sqlx::Error> {
     if entries.is_empty() {
         warn!(
@@ -102,6 +102,9 @@ pub async fn record_fetch(
         if super::upsert_entry(pool, playlist_id, entry).await? {
             new += 1;
         }
+    }
+    for row in &changes.marked {
+        models_membership::mark_removed(pool, playlist_id, &row.youtube_id, now_ms).await?;
     }
     Ok(SyncReport {
         new,

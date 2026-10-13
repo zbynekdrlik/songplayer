@@ -106,7 +106,7 @@ pub async fn get_videos_for_playlist(
                 duration_ms, file_path, normalized, gemini_failed,
                 suppress_resolume_en, spotify_track_id,
                 download_attempts, last_download_error, dub_requested, dub_status
-         FROM videos WHERE playlist_id = ? ORDER BY id",
+         FROM videos WHERE playlist_id = ? AND removed_at IS NULL ORDER BY id",
     )
     .bind(playlist_id)
     .fetch_all(pool)
@@ -229,7 +229,7 @@ pub async fn get_unplayed_video_ids(
         "SELECT v.youtube_id
          FROM videos v
          LEFT JOIN play_history ph ON ph.video_id = v.id
-         WHERE v.playlist_id = ? AND ph.id IS NULL
+         WHERE v.playlist_id = ? AND v.removed_at IS NULL AND ph.id IS NULL
          ORDER BY v.id",
     )
     .bind(playlist_id)
@@ -244,11 +244,13 @@ pub async fn get_normalized_video_ids(
     pool: &SqlitePool,
     playlist_id: i64,
 ) -> Result<Vec<i64>, sqlx::Error> {
-    let rows =
-        sqlx::query("SELECT id FROM videos WHERE playlist_id = ? AND normalized = 1 ORDER BY id")
-            .bind(playlist_id)
-            .fetch_all(pool)
-            .await?;
+    let rows = sqlx::query(
+        "SELECT id FROM videos WHERE playlist_id = ? AND normalized = 1 AND removed_at IS NULL \
+         ORDER BY id",
+    )
+    .bind(playlist_id)
+    .fetch_all(pool)
+    .await?;
 
     Ok(rows.iter().map(|r| r.get("id")).collect())
 }
@@ -262,7 +264,7 @@ pub async fn get_unplayed_normalized_video_ids(
         "SELECT v.id
          FROM videos v
          LEFT JOIN play_history ph ON ph.video_id = v.id
-         WHERE v.playlist_id = ? AND v.normalized = 1 AND ph.id IS NULL
+         WHERE v.playlist_id = ? AND v.normalized = 1 AND v.removed_at IS NULL AND ph.id IS NULL
          ORDER BY v.id",
     )
     .bind(playlist_id)
@@ -578,7 +580,7 @@ pub async fn get_next_video_missing_translation(
         "SELECT v.id, v.youtube_id \
          FROM videos v \
          JOIN playlists p ON p.id = v.playlist_id \
-         WHERE v.has_lyrics = 1 AND p.is_active = 1 \
+         WHERE v.has_lyrics = 1 AND p.is_active = 1 AND v.removed_at IS NULL \
          ORDER BY v.id",
     )
     .fetch_all(pool)

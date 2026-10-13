@@ -41,7 +41,7 @@ pub async fn remembered(pool: &SqlitePool, playlist_id: i64) -> Result<Option<i6
     sqlx::query_scalar(
         "SELECT v.id FROM playlists p JOIN videos v ON v.id = p.loop_video_id \
          WHERE p.id = ? AND v.normalized = 1 \
-           AND (v.playlist_id = p.id OR EXISTS ( \
+           AND ((v.playlist_id = p.id AND v.removed_at IS NULL) OR EXISTS ( \
                 SELECT 1 FROM playlist_items i \
                 WHERE i.playlist_id = p.id AND i.video_id = v.id))",
     )

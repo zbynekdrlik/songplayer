@@ -24,7 +24,10 @@ use std::time::Duration;
 /// `videos`. A macro so a queue's `concat!` takes it.
 macro_rules! queue_row {
     () => {
-        crate::test_item::not_test_item!()
+        concat!(
+            crate::test_item::not_test_item!(),
+            " AND removed_at IS NULL"
+        )
     };
 }
 pub(crate) use queue_row;

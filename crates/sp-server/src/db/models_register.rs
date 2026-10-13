@@ -31,7 +31,7 @@ pub async fn stamp_register(
 /// subtitles (the second parameter).
 const STALE_REGISTER: &str = "SELECT v.id, v.youtube_id FROM videos v JOIN playlists p ON p.id = v.playlist_id \
      WHERE v.has_lyrics = 1 AND v.lyrics_register_version < ? \
-           AND p.is_active = 1 AND v.normalized = 1 \
+           AND p.is_active = 1 AND v.normalized = 1 AND v.removed_at IS NULL \
            AND (v.lyrics_source IS NULL OR v.lyrics_source != ?) \
      ORDER BY v.id ASC";
 

@@ -72,11 +72,13 @@ pub async fn video_playlist_membership(
     playlist_id: i64,
     video_id: i64,
 ) -> Result<Option<bool>, sqlx::Error> {
-    sqlx::query_scalar("SELECT normalized FROM videos WHERE id = ? AND playlist_id = ?")
-        .bind(video_id)
-        .bind(playlist_id)
-        .fetch_optional(pool)
-        .await
+    sqlx::query_scalar(
+        "SELECT normalized FROM videos WHERE id = ? AND playlist_id = ? AND removed_at IS NULL",
+    )
+    .bind(video_id)
+    .bind(playlist_id)
+    .fetch_optional(pool)
+    .await
 }
 
 #[cfg(test)]

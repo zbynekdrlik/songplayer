@@ -119,7 +119,8 @@ async fn upsert_entry(
     if existing.is_some() {
         // Update title and duration if provided.
         sqlx::query(
-            "UPDATE videos SET title = COALESCE(?, title), duration_ms = COALESCE(?, duration_ms)
+            "UPDATE videos SET title = COALESCE(?, title), duration_ms = COALESCE(?, duration_ms),
+                 removed_at = NULL
              WHERE playlist_id = ? AND youtube_id = ?",
         )
         .bind(&entry.title)
