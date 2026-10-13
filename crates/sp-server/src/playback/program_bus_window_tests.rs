@@ -276,6 +276,17 @@ fn the_restored_selection_owes_its_misses_once_the_delivery_grace_ran_out() {
     assert_eq!(fills_and_resyncs(&core), (301, 1, 0, 0), "past the grace");
 }
 
+/// Blank never delivers and never owes, past the delivery grace too: its
+/// fills are black and silence by design, so b(301) of a program restored
+/// to Blank is no loss.
+#[test]
+fn blank_owes_nothing_past_the_delivery_grace() {
+    let mut core = ProgramCore::new();
+    core.select_initial(PROGRAM_BLANK_ID);
+    release_through(&mut core, 1..=301);
+    assert_eq!(fills_and_resyncs(&core), (301, 0, 0, 0));
+}
+
 /// Review: a cut to a source that hangs (it never touches the bus): its
 /// misses are a wait for 300 boundaries from the cut boundary b(5), then
 /// owned — the program black and silent never reads "bez chyby" for long.
