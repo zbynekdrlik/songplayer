@@ -14,7 +14,7 @@
 //! per driver, its status under `asio` with a `note` when the driver's rate
 //! is not the network's or its buffer is over a third of a grid slot).
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -294,6 +294,8 @@ pub struct AudioOutputs {
     list: Mutex<Arc<Vec<RunningOutput>>>,
     network_rate: AtomicU32,
     problems: Mutex<Vec<String>>,
+    /// #257: frames the program's limiter engaged on outside a fade.
+    limiter_overs: AtomicU64,
 }
 
 impl Default for AudioOutputs {
@@ -309,7 +311,20 @@ impl AudioOutputs {
             list: Mutex::new(Arc::new(Vec::new())),
             network_rate: AtomicU32::new(DEFAULT_NETWORK_RATE),
             problems: Mutex::new(Vec::new()),
+            limiter_overs: AtomicU64::new(0),
         }
+    }
+
+    /// #257: the program's limiter engaged on `n` more frames outside a
+    /// fade (a source over its ceiling: the audio fault ledger's risk).
+    pub fn note_limiter_overs(&self, n: u64) {
+        self.limiter_overs.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// #257: the frames the program's limiter engaged on outside a fade,
+    /// since start.
+    pub fn limiter_overs(&self) -> u64 {
+        self.limiter_overs.load(Ordering::Relaxed)
     }
 
     /// Hand `block` to every running output (an `Arc` bump each; never waits).

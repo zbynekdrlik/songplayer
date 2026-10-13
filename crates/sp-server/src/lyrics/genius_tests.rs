@@ -553,3 +553,22 @@ fn find_matching_div_close_finds_close_when_initial_i_is_small() {
         .expect("must find </div> when i is smaller than close.len()");
     assert_eq!(close_pos, 5);
 }
+
+/// #232: Genius's placeholder for a song whose lyric is not transcribed yet
+/// (the rendered element, as on Planetshakers' "The Love of My Life (Live At
+/// Chapel)" page, 12.10.2026) is told apart from a lyric page and from a page
+/// whose style sheet merely names the class.
+#[test]
+fn an_untranscribed_page_is_told_apart_by_genius_s_placeholder_element() {
+    let placeholder = concat!(
+        "<div class=\"LyricsPlaceholder__Container-sc-b9eb355f-0 YFPVz\">",
+        "<div class=\"LyricsPlaceholder__Message-sc-b9eb355f-2 bBIsZz\">",
+        "Lyrics for this song have yet to be transcribed.</div></div>"
+    );
+    assert!(is_untranscribed_page(placeholder));
+    let lyric = "<div data-lyrics-container=\"true\">You were the Word</div>";
+    assert!(!is_untranscribed_page(lyric));
+    let style_only =
+        "<style>.LyricsPlaceholder__Message-sc-b9eb355f-2\"]{content:\"bBIsZz,\"}</style>";
+    assert!(!is_untranscribed_page(style_only));
+}

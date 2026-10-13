@@ -21,6 +21,12 @@ never argv/log. The child heartbeats into `--work-dir` so the Rust stall timeout
 never kills a healthy real-time stream. Superseded (round C-E2) per-chunk
 sessions, resume, re-synthesis and atempo placement are DELETED (#184 5798586079).
 
+`trim-tail --dub <dub.flac> --audio <original>` (#257, a one-off for a dub
+made before #257) cuts a dub's drain silence: at the original's length or its
+last sample above -60 dBFS + 50 ms, whichever is later, the untouched dub kept
+as `<dub>.flac.prev`, the cut file promoted with the same POSIX rename; one
+JSON line `{before_samples, after_samples, cut_ms}` on stdout.
+
 `google.genai` is imported lazily so this module imports under CI/ruff and the
 pytest helpers run without the SDK.
 """
@@ -68,6 +74,11 @@ LEGACY_PREFIXES = ("chunk_",)
 # The pre-H4 session event log: it now sits next to the dub (`events_path_for`),
 # and a stale copy left in the work dir would mislead a timing analysis.
 LEGACY_NAMES = ("events.jsonl",)
+# #257 trim-tail: a sample above this is audible; a dub keeps this much past
+# its last audible sample; the cut file is copied in blocks of this many frames.
+TRIM_SILENCE_DBFS = -60.0
+TRIM_KEEP_MS = 50
+TRIM_BLOCK_FRAMES = 1 << 16
 
 # ── pure helpers (unit-tested; no I/O, no heavy imports) ─────────────────────────
 
@@ -167,6 +178,46 @@ def place_output(
         starts.append(pos)
         cursors[c.conn] = pos + c.n_bytes // 2
     return starts
+
+
+def placed_length(chunks: list, starts: list[int | None], input_samples: int) -> int:
+    """Samples of the placed WAV: the input's length, or longer when VOICED
+    output (the translation of the last words) is placed past it (#257). The
+    session drains until `dls.QUIET_S` with no voiced output and streams
+    silence meanwhile; that silence after the content is not part of the
+    dub, so a chunk that is not voiced never lengthens it (it is cut at the
+    end, `render_placed_wav`). A dub ran 7.8 s past its video on SNV, all of
+    it drain silence, and the player cut every play of it at the video's end.
+    A dropped chunk (None start) places nothing."""
+    voiced_ends = [
+        s + c.n_bytes // 2 for s, c in zip(starts, chunks) if s is not None and c.voiced
+    ]
+    return max([input_samples] + voiced_ends)
+
+
+def audible_threshold_int32() -> int:
+    """`TRIM_SILENCE_DBFS` of full scale as an int32 sample (soundfile's int32
+    read): a sample whose magnitude is above it is audible (#257 trim-tail)."""
+    return int(10 ** (TRIM_SILENCE_DBFS / 20) * 2**31)
+
+
+def audible_end(block, offset: int, threshold: int) -> int | None:
+    """The end (exclusive, in frames from the file's start) of the last frame
+    of `block` (int32, frames x channels, starting at frame `offset`) with a
+    sample above `threshold` in ANY channel; None when every frame is quiet."""
+    import numpy as np
+
+    loud = np.flatnonzero(((block > threshold) | (block < -threshold)).any(axis=1))
+    return None if loud.size == 0 else offset + int(loud[-1]) + 1
+
+
+def trim_frames(total: int, original: int, audible: int | None, rate: int) -> int:
+    """Frames a dub of `total` frames keeps (#257 trim-tail): the ORIGINAL
+    audio's length (the player plays the audio to its end, so the dub never
+    ends before it), or the last audible frame + `TRIM_KEEP_MS` when the
+    speech runs past it, whichever is later; never more than the dub has."""
+    keep = (audible or 0) + TRIM_KEEP_MS * rate // 1000
+    return min(total, max(original, keep))
 
 
 def _by_connection(parts: list, conn_of) -> list:
@@ -588,9 +639,9 @@ def _translate(args: argparse.Namespace, raw_path: str, wav_path: str) -> dict:
         f"{en_latency} ms (measured {en_measured} ms), dropped silence "
         f"{summary['dropped_silence_s']}s, drain {summary['drain_end_reason']}"
     )
-    input_samples = int(round(input_s * OUTPUT_SR))
-    ends = [s + c.n_bytes // 2 for s, c in zip(starts, state.chunks) if s is not None]
-    total = max([input_samples] + ends)
+    # #257: up to the input's end or the last VOICED output, never the drain's
+    # silence after it.
+    total = placed_length(state.chunks, starts, int(round(input_s * OUTPUT_SR)))
     _heartbeat(args.work_dir)
     render_placed_wav(raw_path, state.chunks, starts, total, wav_path)
 
@@ -640,6 +691,106 @@ def cmd_live_translate(args: argparse.Namespace) -> None:
     sys.stdout.flush()
 
 
+def _write_trimmed(dub: str, frames: int, info) -> None:
+    """Keep `dub` as `<dub>.prev` (a copy, so SongPlayer, which may hold the
+    dub open, always finds a whole dub under its name), write its first
+    `frames` frames to the partial file, sample for sample in the dub's own
+    subtype, and promote it over `dub` with the POSIX rename (round F2). An
+    existing `.prev` may be the only copy of an original dub: it is never
+    overwritten. A failed run drops the partial and the backup it made (an
+    identical copy of the dub it left alone), so a re-run is never refused for
+    it; the backup is copied under a temporary name and renamed into place
+    only once whole, so a copy cut short (a full disk) never leaves a
+    truncated `.prev` that could be restored as the original."""
+    import shutil
+
+    import soundfile as sf
+
+    prev = dub + ".prev"
+    if os.path.exists(prev):
+        raise RuntimeError(
+            f"{prev} already exists (an earlier trim kept the original dub there); "
+            "it is never overwritten"
+        )
+    if not sf.check_format("FLAC", info.subtype):
+        raise RuntimeError(f"{dub}: a FLAC of subtype {info.subtype} cannot be written")
+    prev_part = prev + ".part"
+    try:
+        shutil.copy2(dub, prev_part)
+        os.replace(prev_part, prev)
+    except BaseException:
+        _remove_quietly(prev_part)
+        raise
+    part = dl.partial_out_path(dub)
+    try:
+        with sf.SoundFile(dub) as src, sf.SoundFile(
+            part,
+            "w",
+            samplerate=info.samplerate,
+            channels=info.channels,
+            subtype=info.subtype,
+            format="FLAC",
+        ) as dst:
+            for block in src.blocks(
+                blocksize=TRIM_BLOCK_FRAMES,
+                dtype="int32",
+                always_2d=True,
+                frames=frames,
+            ):
+                dst.write(block)
+        wr.replace_file(part, dub)
+    except BaseException:
+        _remove_quietly(part)
+        # The dub was not replaced: the backup is an identical copy of it.
+        _remove_quietly(prev)
+        raise
+
+
+def _remove_quietly(path: str) -> None:
+    """Remove a file this run made, logging (never raising) a failure, so
+    the run's own error is the one reported."""
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError as e:
+            _log(f"trim-tail: could not remove {path}: {e}")
+
+
+def cmd_trim_tail(args: argparse.Namespace) -> None:
+    """#257: cut a dub made before #257 (it ends with the Live session's drain
+    silence) at the ORIGINAL audio's length or its last sample above
+    `TRIM_SILENCE_DBFS` + `TRIM_KEEP_MS`, whichever is later (`trim_frames`).
+    The dub is read in blocks (a 36-min dub never sits in memory). Prints ONE
+    JSON line: `before_samples` / `after_samples` (frames per channel) and
+    `cut_ms`; nothing is written when nothing is cut."""
+    import soundfile as sf
+
+    info = sf.info(args.dub)
+    source = sf.info(args.audio)
+    original = source.frames * info.samplerate // source.samplerate
+    threshold = audible_threshold_int32()
+    audible = None
+    total = 0
+    with sf.SoundFile(args.dub) as f:
+        for block in f.blocks(
+            blocksize=TRIM_BLOCK_FRAMES, dtype="int32", always_2d=True
+        ):
+            end = audible_end(block, total, threshold)
+            if end is not None:
+                audible = end
+            total += len(block)
+    after = trim_frames(total, original, audible, info.samplerate)
+    if after < total:
+        _write_trimmed(args.dub, after, info)
+    cut_ms = round((total - after) * 1000 / info.samplerate)
+    _log(f"trim-tail: {args.dub}: {total} -> {after} frames (cut {cut_ms} ms)")
+    sys.stdout.write(
+        json.dumps({"before_samples": total, "after_samples": after, "cut_ms": cut_ms})
+        + "\n"
+    )
+    sys.stdout.flush()
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Slovak dub synthesis (Gemini Live Translate, one session)"
@@ -656,6 +807,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=dls.SPEAKER_VOICE,
         help="'speaker' (the speaker's own voice, no speech_config) or a prebuilt name",
     )
+    tt = sub.add_parser(
+        "trim-tail", help="cut a pre-#257 dub's drain silence (keeps <dub>.prev)"
+    )
+    tt.add_argument("--dub", required=True, help="the dub FLAC, trimmed in place")
+    tt.add_argument(
+        "--audio", required=True, help="the original audio the dub translates"
+    )
     return parser.parse_args(argv)
 
 
@@ -664,6 +822,8 @@ def main(argv: list[str] | None = None) -> None:
     try:
         if args.cmd == "live-translate":
             cmd_live_translate(args)
+        elif args.cmd == "trim-tail":
+            cmd_trim_tail(args)
         else:
             raise RuntimeError(f"unknown command: {args.cmd}")
     except Exception as e:  # loud failure: JSON error on stderr + non-zero exit.

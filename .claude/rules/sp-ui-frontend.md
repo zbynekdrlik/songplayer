@@ -72,7 +72,11 @@ rebuilds the whole subtree on every change. **Caveat for the key-on-content
 fix:** it is safe only while the list is never mutated DURING an active edit — a
 key change mid-typing recreates the `<tr>` and drops input focus. If you add
 live/WebSocket refresh to a list with an inline editor, key on identity and make
-cells reactive instead.
+cells reactive instead. A POLLED read-only list whose rows carry tooltips
+keys each row on its whole shown content (#257's audio panel: a pure
+`RowView`, `key=|r| format!("{r:?}")`), so a poll that changes nothing in
+a row keeps its element and a hovered `<title>` stays up; keep floats out
+of such a key (round them to the units drawn: `mark_x`).
 
 ## A wide `<table>` inside a fixed-width card paints over the NEXT card and steals its clicks
 
@@ -111,6 +115,10 @@ touched: `rustfmt --edition 2024 --check src/components/foo.rs
 src/components/bar.rs`. Same idea for clippy — scope to what you changed
 (`cargo clippy --target wasm32-unknown-unknown` and grep the output for your
 files) rather than treating pre-existing warnings elsewhere as yours to fix.
+Never pass `src/components/mod.rs` (or `lib.rs`) to `rustfmt` either, not
+even with `--check`: rustfmt follows every `mod` to its file, so the check
+reports (and a write rewrites) the whole crate's drift (#257 lane 2). Name
+the leaf files you touched; a one-line `mod` addition needs no format run.
 
 ## Layout-stable cards: reserve space, never conditionally render a container above other content
 
@@ -491,7 +499,7 @@ not re-create any of them beside the shared one.
 | one song row | `song_row.rs::SongRow` | `song-row`, `song-row-title`, `song-row-play` |
 | status vocabulary | `status_chips.rs::StatusChips` (pure `sp_core::status_chip`) | `status-chips`, `chip-file`/`chip-stems`/`chip-text`/`chip-dub` |
 | paste-URL import | `import_box.rs::ImportBox(ImportTarget)` | `import-box`, `import-input`, `import-btn`, `import-status` |
-| status strip (every page) | `health_bar.rs::HealthBar` (pure `sp_core::health`) | `health-ws`/`health-obs`/`health-genlock`/`health-resolume`/`health-tools`/`health-lan`/`health-node`/`health-paid-ai`/`health-environment`/`health-version` (nests `version`; #229 item C: the node and the paid-AI chip read `/api/v1/status` once per load; #233: the red `health-environment` polls `/api/v1/environment` every 10 s, `prod-environment.md`) |
+| status strip (every page) | `health_bar.rs::HealthBar` (pure `sp_core::health`) | `health-ws`/`health-obs`/`health-genlock`/`health-resolume`/`health-tools`/`health-lan`/`health-node`/`health-paid-ai`/`health-environment`/`health-version` (nests `version`; #229 item C: the node and the paid-AI chip read `/api/v1/status` once per load; #233: the red `health-environment` polls `/api/v1/environment` every 10 s, `prod-environment.md`; #257: `health-audio` right after WS, the whole audio chain, a button whose click opens `audio-faults-panel` under the bar, `audio-faults.md`) |
 | loading / empty / error | `state_block.rs::StateBlock{Loading,Empty,Error}` | `state-loading`/`state-empty`/`state-error` |
 | playlist chooser (every page) | `playlist_picker.rs::PlaylistPicker(kinds?)` | `playlist-picker`, `playlist-picker-item`, `playlist-picker-select`, `playlist-picker-list` |
 | lyrics surface | `lyrics_view.rs::LyricsView(playlist_id?, video_id?)` | `lyrics-view` |

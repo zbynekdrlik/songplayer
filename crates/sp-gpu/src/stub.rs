@@ -8,7 +8,9 @@
 //! `new_warp_with_size` / `with_name`, `adapters()` and the
 //! tests' second-device readback `read_shared_texture` (#223 S2) are
 //! Windows-only. The vblank tracker (#223 follow-up) has no output to wait
-//! on here: `VblankTracker::start` reports `Unsupported`.
+//! on here: `VblankTracker::start` reports `Unsupported`. Nor (#243
+//! follow-up) has Spout's sender list: `spout_list_holder` and
+//! `ListSentinel::start` report `Unsupported`.
 
 use std::convert::Infallible;
 use std::marker::PhantomData;
@@ -18,6 +20,7 @@ use crate::adapter::AdapterInfo;
 use crate::composition::Composition;
 use crate::error::GpuError;
 use crate::spout::SharedTextureInfo;
+use crate::spout_lock::{LockHolder, SentinelEnd};
 use crate::spout_state::Registration;
 use crate::stats::{ComposeStats, SpoutSendStats};
 use crate::vblank::{OutputInfo, VblankGrid, VblankState};
@@ -150,6 +153,37 @@ impl VblankTracker {
     }
 }
 
+/// #243 follow-up: off Windows there is no Spout list to wait on:
+/// [`ListSentinel::start`] reports [`GpuError::Unsupported`] and the type
+/// has no values.
+#[derive(Debug)]
+pub struct ListSentinel(Infallible);
+
+impl ListSentinel {
+    /// [`GpuError::Unsupported`]: no Spout off Windows.
+    pub fn start() -> Result<Self, GpuError> {
+        Err(GpuError::Unsupported)
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: an uninhabited
+    /// receiver, so no test can call it.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn ended(&self) -> Option<SentinelEnd> {
+        match self.0 {}
+    }
+
+    /// Never runs (no value exists). `mutants::skip`: as `ended`.
+    #[cfg_attr(test, mutants::skip)]
+    pub fn stop(&mut self) {
+        match self.0 {}
+    }
+}
+
+/// #243 follow-up: [`GpuError::Unsupported`]: no Spout off Windows.
+pub fn spout_list_holder() -> Result<Option<LockHolder>, GpuError> {
+    Err(GpuError::Unsupported)
+}
+
 /// [`GpuError::Unsupported`]: no Spout off Windows.
 pub fn spout_sender_names() -> Result<Vec<String>, GpuError> {
     Err(GpuError::Unsupported)
@@ -162,8 +196,17 @@ pub fn spout_sender_info(_name: &str) -> Result<Option<SharedTextureInfo>, GpuEr
 
 #[cfg(test)]
 mod tests {
-    use super::{Compositor, VblankTracker, spout_sender_info, spout_sender_names};
+    use super::{
+        Compositor, ListSentinel, VblankTracker, spout_list_holder, spout_sender_info,
+        spout_sender_names,
+    };
     use crate::error::GpuError;
+
+    #[test]
+    fn off_windows_spout_s_list_is_neither_read_nor_waited_on() {
+        assert_eq!(spout_list_holder(), Err(GpuError::Unsupported));
+        assert_eq!(ListSentinel::start().unwrap_err(), GpuError::Unsupported);
+    }
 
     #[test]
     fn off_windows_no_compositor_can_be_built() {

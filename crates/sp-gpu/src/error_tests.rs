@@ -107,8 +107,17 @@ fn a_spout_refusal_is_not_a_lost_device_and_names_the_sender() {
             GpuError::SpoutNotRegistered {
                 name: "SP-program-MAX".to_owned(),
                 why: "Spout's sender list is full",
+                holder: None,
             },
             "Spout did not register the sender as \"SP-program-MAX\": Spout's sender list is full; drop it",
+        ),
+        (
+            GpuError::SpoutNotRegistered {
+                name: "SP-program".to_owned(),
+                why: "Spout's list stayed unreadable",
+                holder: Some("Arena.exe (pid 1500)".to_owned()),
+            },
+            "Spout did not register the sender as \"SP-program\": Spout's list stayed unreadable (held by Arena.exe (pid 1500)); drop it",
         ),
         (
             GpuError::Spout {

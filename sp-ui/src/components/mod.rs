@@ -1,3 +1,4 @@
+pub mod audio_faults; // #257 the audio fault history (HealthBar segment + panel)
 pub mod audio_outputs; // #233 Nastavenia "Zvukové výstupy" (the output list)
 pub mod dabing_list;
 pub mod health_bar;

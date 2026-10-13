@@ -376,6 +376,7 @@ pub(crate) fn not_registered() -> GpuError {
     GpuError::SpoutNotRegistered {
         name: "SP-program-MAX".into(),
         why: "test",
+        holder: None,
     }
 }
 
@@ -857,7 +858,7 @@ pub(crate) fn spawn_loop(max: &Arc<MaxOut>, gpu: &FakeGpu) -> std::thread::JoinH
     let (max, gpu) = (max.clone(), gpu.clone());
     std::thread::Builder::new()
         .name("program-max-test".into())
-        .spawn(move || run_max_loop(&max, gpu, None))
+        .spawn(move || run_max_loop(&max, gpu, None, None))
         .expect("spawn the loop")
 }
 

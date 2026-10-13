@@ -78,8 +78,14 @@ pub enum GpuError {
     /// Drop: Spout takes the list's lock before it releases one), and it
     /// never sends again: drop it, and make a new sender after a backoff (a
     /// full list or a taken name refuses an immediate retry the same way).
-    #[error("Spout did not register the sender as {name:?}: {why}; drop it")]
-    SpoutNotRegistered { name: String, why: &'static str },
+    /// #243: `holder` names the program that kept the lock the refusal is
+    /// about (Spout's list, or the sender's texture lock), when one did.
+    #[error("Spout did not register the sender as {name:?}: {why}{}; drop it", held_by(.holder))]
+    SpoutNotRegistered {
+        name: String,
+        why: &'static str,
+        holder: Option<String>,
+    },
     /// A Spout call failed. `code` is the shim's status (3 = the SDK
     /// reported failure, 4 = a C++ exception, 5 = a bad argument) or, for a
     /// registry read, the mutex wait's result.
@@ -94,9 +100,19 @@ pub enum GpuError {
     /// sits at the desktop origin (#223 follow-up, `vblank::pick_output`).
     #[error("no primary display output attached")]
     NoOutput,
-    /// A thread of the crate could not start, or ended before it reported.
-    #[error("the vblank thread failed: {0}")]
+    /// A thread of the crate (the vblank tracker's, #243's list sentinel)
+    /// could not start, or ended before it reported; the text names it.
+    #[error("{0}")]
     Thread(String),
+}
+
+/// #243: " (held by <holder>)" for a refusal whose lock a program kept,
+/// nothing otherwise.
+fn held_by(holder: &Option<String>) -> String {
+    holder
+        .as_deref()
+        .map(|holder| format!(" (held by {holder})"))
+        .unwrap_or_default()
 }
 
 impl GpuError {

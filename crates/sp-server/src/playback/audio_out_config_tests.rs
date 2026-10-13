@@ -273,7 +273,8 @@ fn an_asio_entry_parses_and_a_bad_one_names_its_field() {
         e.asio.as_ref().unwrap(),
         &AsioDest {
             driver: "Dante Virtual Soundcard (x64)".into(),
-            channels: [2, 3]
+            channels: [2, 3],
+            loop_check: false,
         }
     );
     let cases = [
@@ -311,6 +312,53 @@ fn an_asio_entry_parses_and_a_bad_one_names_its_field() {
         assert!(!err.contains("secret-ish"), "no echo of the input: {err}");
         assert_eq!(err, want, "{input}");
     }
+}
+
+/// #233 (the SoundGrid loop check): `asio.loop_check` is a bool, off when
+/// absent, and stored normalized — written only when on, so a list stored
+/// before it reads and writes back unchanged.
+#[test]
+fn the_loop_check_parses_and_a_bad_one_names_its_field() {
+    let on = r#"[{"id":"out-2","name":"SG","type":"asio","asio":{"driver":"Waves SoundGrid","channels":[0,1],"loop_check":true}}]"#;
+    let e = &parse_list(on).unwrap()[0];
+    assert!(e.asio.as_ref().unwrap().loop_check);
+    let stored = checked("audio_outputs", on).unwrap();
+    assert!(stored.contains(r#""loop_check":true"#), "{stored}");
+    let absent = format!("[{}]", dvs("out-2", "Waves SoundGrid"));
+    assert!(
+        !parse_list(&absent).unwrap()[0]
+            .asio
+            .as_ref()
+            .unwrap()
+            .loop_check
+    );
+    let off = r#"[{"id":"out-2","name":"SG","type":"asio","asio":{"driver":"d","channels":[0,1],"loop_check":false}}]"#;
+    assert!(
+        !parse_list(off).unwrap()[0]
+            .asio
+            .as_ref()
+            .unwrap()
+            .loop_check
+    );
+    assert!(
+        !checked("audio_outputs", off)
+            .unwrap()
+            .contains("loop_check")
+    );
+    let bad = r#"[{"id":"out-2","name":"SG","type":"asio","asio":{"driver":"d","channels":[0,1],"loop_check":"yes-ish"}}]"#;
+    let err = parse_list(bad).unwrap_err();
+    assert_eq!(
+        err,
+        "entry 1 (id out-2): asio.loop_check has the wrong type"
+    );
+    // The stored read keeps it too (the outputs task runs what is stored).
+    assert!(
+        parse_stored(Some(on)).entries[0]
+            .asio
+            .as_ref()
+            .unwrap()
+            .loop_check
+    );
 }
 
 #[test]

@@ -553,6 +553,7 @@ fn dvs(id: &str, driver: &str) -> OutputEntry {
         sp_core::audio_outputs::AsioDest {
             driver: driver.into(),
             channels: [0, 1],
+            loop_check: false,
         },
     )
 }

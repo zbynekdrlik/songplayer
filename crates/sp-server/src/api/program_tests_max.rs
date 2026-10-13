@@ -50,6 +50,7 @@ async fn get_program_reports_the_max_block() {
             "sender_backoffs": 0,
             "spout_name": "SP-program-MAX",
             "adapter": null,
+            "list_holder": null,
         }),
         "nothing started MAX in a unit test: the setting is not applied"
     );
@@ -120,6 +121,39 @@ async fn get_program_reports_the_max_block() {
     );
     assert_eq!(m["device_resets"], 1);
     assert_eq!(m["adapter"], "NVIDIA GeForce RTX 3070 Ti");
+}
+
+/// #243 follow-up: `max.list_holder` names the program that kept Spout's
+/// sender list one sender backoff (3 s): its program, pid and how long.
+#[tokio::test]
+async fn get_program_names_the_program_that_keeps_spout_s_list() {
+    use std::time::{Duration, Instant};
+
+    use crate::playback::program_max_list::tests::FakeList;
+    use crate::playback::program_max_worker::MaxWorker;
+    use crate::playback::program_max_worker::tests::{FakeGpu, picture, plain};
+
+    let state = test_state().await;
+    let max = state.program_bus.max().clone();
+    max.set_enabled(true);
+    let list = FakeList::default();
+    let pid = std::process::id() ^ 1;
+    list.held_by(Some(sp_gpu::LockHolder {
+        pid,
+        image: Some("Arena.exe".to_string()),
+    }));
+    let mut worker = MaxWorker::new(&max, FakeGpu::default()).with_list(Box::new(list));
+    let t0 = Instant::now();
+    let a = picture(4, 2);
+    worker.serve(&plain(1, &a), t0);
+    worker.serve(&plain(2, &a), t0 + Duration::from_millis(3_500));
+    drop(worker);
+    let (status, json) = call(state, "GET", "/api/v1/program", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json["max"]["list_holder"],
+        serde_json::json!({"image": "Arena.exe", "pid": pid, "since_s": 3})
+    );
 }
 
 /// The setting saves through the settings API (`PATCH /api/v1/settings`,

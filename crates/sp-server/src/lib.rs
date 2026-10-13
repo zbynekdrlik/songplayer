@@ -3,6 +3,7 @@
 pub mod ai;
 mod ai_proxy_watchdog;
 pub mod api;
+pub mod audio_faults; // #257: every audio path's faults, persisted (the ledger)
 pub mod audio_host; // #233: every ASIO output runs in the sp-audio-host process (spawns nothing)
 pub mod background_hold; // #230: a sp-90s press holds the background jobs
 pub mod dabing;
@@ -706,6 +707,7 @@ pub async fn start(
     // #242: every playlist's own sound, before a pipeline opens a song.
     playback::playlist_fx::load_all(&pool, playback::playlist_fx::global()).await;
     engine.create_startup_pipelines(&active_playlists);
+    let program_max = program_bus.max().clone(); // #243: waited for at shutdown
     engine.start_program(program_bus, &shutdown_tx).await;
 
     // Engine subscribes to the download worker's broadcast so that
@@ -766,8 +768,11 @@ pub async fn start(
         })
         .await?;
 
-    // 12. Signal all workers to stop
+    // 12. Signal all workers to stop. #243: the program-max thread drops its
+    // Spout senders (Spout's list lock) before this returns: the tray's Exit
+    // awaits it, and the process must not end under a Spout lock.
     let _ = shutdown_tx.send(());
+    playback::program_max::stop_and_wait(program_max, playback::program_max::MAX_STOP_WAIT).await;
     info!("server stopped");
 
     Ok(())

@@ -676,6 +676,22 @@ and 5797708129 (freeze this state, the model is a setting).
   (`dropped_silence_s` in the summary). The WAV is at least the input's length;
   the body is a memmap and the raw file is read per chunk (a 36-min talk never
   sits in memory). A failed run removes `live_output.raw` / `dub_placed.wav`.
+- **The WAV ends at the input's end or the last VOICED output, whichever is
+  later (#257, `placed_length`).** The drain streams silence until 8 s with no
+  voiced output (`dls.QUIET_S`); every placed chunk used to lengthen the WAV,
+  that silence included, so a dub ran seconds past its video (SNV: a 35.9-min
+  sermon's dub 7.8 s longer, `split_sync: video/audio duration mismatch`).
+  The player plays a song's audio to its end (`genlock.md` "Audio past the
+  picture plays on the held last frame"), so that silence would hold the
+  wall's last frame for nothing. Now a silent chunk never lengthens it
+  (`render_placed_wav` cuts it at the end); real translated speech past the
+  original's end (the last sentence, by the placement latency) stays whole.
+  A dub made before #257 keeps its tail until it is trimmed with the
+  one-off `trim-tail` ("Trim an old dub's drain silence" below) or
+  re-dubbed; it plays whole meanwhile, on the held frame. Tests:
+  `test_dub_worker.py`
+  (`test_the_placed_dub_ends_with_its_last_voiced_output_not_the_drain_silence`,
+  `test_placed_length_takes_the_input_or_the_last_voiced_end`).
 - Transcriptions carry their arrival time and connection (`(arrival_s, text,
   conn)`, input AND output since round H3); EN, SK, `en_timed` and `sk_timed`
   are ordered BY CONNECTION (the old connection's trailing text arrives after
@@ -820,6 +836,50 @@ level. Local real-ffmpeg 6.1 smoke: source −14.75 → output −14.73 (linear)
 orig −14.7 / dub −14.7. The mono stream → `-ac 2` upmix keeps the loudness (swr's
 −3 dB centre gain). Tests: `scripts/tests/test_dub_worker_loudness.py` (pure helpers
 + the 3-call orchestration with `_run_stderr` faked; no ffmpeg in eval-checks).
+
+## Trim an old dub's drain silence (#257 review, a one-off)
+
+`dub_worker.py trim-tail --dub <dub.flac> --audio <original audio>` cuts a
+dub made before #257 in place: at the ORIGINAL audio's length or its last
+sample above −60 dBFS (any channel) + 50 ms, whichever is later
+(`trim_frames`), never longer than the dub. It reads the dub in 65 536-frame
+blocks (a 36-min dub never sits in memory); when it cuts anything it COPIES
+the untouched dub to `<dub>.flac.prev` (a whole dub always stays under the
+dub's name, SongPlayer may hold it open), writes the kept frames bit for bit
+in the dub's own subtype to `<base>_dub.part.flac` and promotes it with
+`win_replace` (the POSIX rename: a dub loaded in SP-dabing keeps playing the
+old data until its next open). It never overwrites an existing `.prev`
+(exit 1, a JSON error naming it) and never deletes a file. stdout: ONE JSON
+line `{before_samples, after_samples, cut_ms}` (frames per channel; nothing
+is written when nothing is cut). `.prev` is not in the song's file set
+(`song-files.md`): a later title rename leaves it under the old name, and
+nothing deletes it; remove it by hand once the trimmed dub is verified.
+Tests: `scripts/tests/test_dub_worker_trim.py`.
+
+**SNV, once after the deploy (MAIN SESSION OPS):** SNV has exactly ONE dub
+(video 344, 35.9 min, ~7.8 s of drain silence). The tools-dir copy of
+`dub_worker.py` is re-written only when a dub job runs (`ensure_script`),
+so put the deployed commit's `scripts/dub_worker.py`, `dub_live_session.py`,
+`dub_loudness.py` and `win_replace.py` into a fresh directory `$t` on the
+box first (the four import each other at module load), then, in the
+win-resolume MCP `Shell` (PowerShell):
+
+```powershell
+$dub = (Invoke-RestMethod http://127.0.0.1:8920/api/v1/dabing).videos |
+  Where-Object video_id -eq 344 | Select-Object -ExpandProperty dub_file_path
+$audio = $dub -replace '_dub\.flac$', '_audio.flac'
+$py = 'C:\ProgramData\SongPlayer\cache\tools\lyrics_venv\Scripts\python.exe'
+& $py (Join-Path $t 'dub_worker.py') trim-tail --dub $dub --audio $audio
+```
+
+`dub_file_path` is the dub's absolute path (`…_normalized_dub.flac`), the
+original audio is the same base with `_audio.flac` (`stems::dub_path`).
+Expect `before_samples` ≈ 103 650 768 (2159.4 s), `cut_ms` up to ~7 800
+(less when the last word ran past the original), and the JSON's
+`after_samples` / 48 000 ≥ the original's length. Then play 344 to its end
+on program (a fresh open): the held last frame lasts at most to the last
+word + 50 ms (or the original's end), and the song summary reads
+`underruns_end=0`.
 
 ## Re-dub a video (e.g. the video 344 acceptance after deploy)
 

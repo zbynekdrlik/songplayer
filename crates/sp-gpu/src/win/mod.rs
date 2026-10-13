@@ -12,6 +12,7 @@
 mod device;
 mod pipeline;
 mod receiver;
+mod spout_lock;
 mod spout_registry;
 mod spout_sender;
 mod textures;
@@ -29,6 +30,7 @@ use windows::core::Interface;
 
 pub use device::adapters;
 pub use receiver::read_shared_texture;
+pub use spout_lock::{ListSentinel, mutex_holder, spout_list_holder};
 pub use spout_registry::{spout_sender_info, spout_sender_names};
 pub use spout_sender::SpoutSender;
 pub use vblank::VblankTracker;

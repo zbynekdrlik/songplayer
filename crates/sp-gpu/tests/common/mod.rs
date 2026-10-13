@@ -6,6 +6,8 @@
 // Each test binary compiles its own copy and uses a different part of it.
 #![allow(dead_code)]
 
+pub mod locks;
+
 use sp_gpu::{
     CANVAS_HEIGHT, CANVAS_WIDTH, Compositor, FHD_HEIGHT, FHD_WIDTH, Layer, Nv12Picture, reference,
 };

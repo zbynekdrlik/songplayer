@@ -1,18 +1,28 @@
-//! #233: the production environment's facts on Windows (`prod_env`'s glue).
+//! #233: the production environment's raw reads on Windows (`prod_env`'s
+//! glue).
 //!
 //! Nothing here spawns a process (a launched process is exactly what
-//! Defender scanned on PP): the edition and the firewall come from the
-//! registry (`RegGetValueW`), Defender's real-time protection from WMI
-//! (`root\Microsoft\Windows\Defender`, `MSFT_MpComputerStatus`) over COM.
-//! Every decision on what was read (the firewall policy over the local
-//! value, a missing Defender namespace) is `prod_env`'s, tested on Linux;
+//! Defender scanned on PP):
+//!
+//! - [`read_direct`], at each check: the edition, the build and the
+//!   firewall's policy and local values from the registry (`RegGetValueW`),
+//!   the WinDefend service's state from the service manager;
+//! - [`read_wmi`], behind the bounded reader: Defender's status
+//!   (`root\Microsoft\Windows\Defender` `MSFT_MpComputerStatus`), the
+//!   firewall's effective state (`root\StandardCimv2`
+//!   `MSFT_NetFirewallProfile` in the active policy store) and the registered
+//!   antivirus products (`root\SecurityCenter2` `AntiVirusProduct`), over
+//!   COM on a thread of its own.
+//!
+//! Every decision on what was read is `prod_env_read.rs`'s, tested on Linux;
 //! this file only reads. Not compiled on the Linux runner, so every fn is
 //! `mutants::skip`.
 
-use super::{EnvFacts, RegDword, defender_realtime, firewall_on};
-use sp_core::prod_env::FirewallProfile;
+use super::read::{
+    AvProduct, DefenderRow, DirectRead, FirewallRow, RegDword, RegString, ServiceRead, WmiRead,
+};
 
-/// The Windows version key (`EditionID`, `ProductName`).
+/// The Windows version key (`EditionID`, `ProductName`, `CurrentBuildNumber`).
 const CURRENT_VERSION: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
 
 /// The group-policy firewall keys, by profile (domain, private, public).
@@ -22,6 +32,10 @@ const POLICY_FIREWALL: [&str; 3] = [
     r"SOFTWARE\Policies\Microsoft\WindowsFirewall\PublicProfile",
 ];
 
+/// The older Administrative-Templates firewall policy, for the private and
+/// public profiles.
+const LEGACY_POLICY_FIREWALL: &str = r"SOFTWARE\Policies\Microsoft\WindowsFirewall\StandardProfile";
+
 /// The local firewall keys, by profile (the private profile is `Standard`).
 const LOCAL_FIREWALL: [&str; 3] = [
     r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\DomainProfile",
@@ -29,56 +43,27 @@ const LOCAL_FIREWALL: [&str; 3] = [
     r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\PublicProfile",
 ];
 
-/// How long WMI may take to hand over Defender's status, ms.
+/// How long WMI may take to hand over the next row, ms.
 const WMI_NEXT_TIMEOUT_MS: i32 = 10_000;
 
-/// Reads every fact. Runs on the blocking pool (`prod_env::Reader`).
-#[cfg_attr(test, mutants::skip)] // Windows glue, not compiled on the Linux runner
-pub fn read_facts() -> EnvFacts {
-    let mut read_errors = Vec::new();
-    let edition_id = string_fact(&mut read_errors, "EditionID");
-    let product_name = string_fact(&mut read_errors, "ProductName");
-    let mut firewall = [None; 3];
-    for (i, profile) in FirewallProfile::ALL.into_iter().enumerate() {
-        let policy = reg_dword(POLICY_FIREWALL[i], "EnableFirewall");
-        let local = reg_dword(LOCAL_FIREWALL[i], "EnableFirewall");
-        firewall[i] = match firewall_on(profile, policy, local) {
-            Ok(on) => Some(on),
-            Err(why) => {
-                read_errors.push(why);
-                None
-            }
-        };
-    }
-    let defender = match defender_realtime(read_defender()) {
-        Ok(on) => Some(on),
-        Err(why) => {
-            read_errors.push(why);
-            None
-        }
-    };
-    EnvFacts {
-        edition_id,
-        product_name,
-        defender_realtime: defender,
-        firewall,
-        read_errors,
-    }
-}
+/// The most rows a query is read for (a box has 3 firewall profiles and a
+/// handful of antivirus products).
+const MAX_ROWS: usize = 64;
 
-/// A string of the Windows version key, or `None` with why.
-#[cfg_attr(test, mutants::skip)] // Windows glue
-fn string_fact(errors: &mut Vec<String>, value: &str) -> Option<String> {
-    match reg_string(CURRENT_VERSION, value) {
-        Ok(Some(s)) => Some(s),
-        Ok(None) => {
-            errors.push(format!("{value} is missing"));
-            None
-        }
-        Err(code) => {
-            errors.push(format!("{value} could not be read (error {code})"));
-            None
-        }
+/// E_FAIL: the WMI thread could not be started or ended in a panic.
+const E_FAIL: i32 = 0x8000_4005_u32 as i32;
+
+/// The registry and the service manager, read at each check.
+#[cfg_attr(test, mutants::skip)] // Windows glue, not compiled on the Linux runner
+pub fn read_direct() -> DirectRead {
+    DirectRead {
+        edition_id: reg_string(CURRENT_VERSION, "EditionID"),
+        product_name: reg_string(CURRENT_VERSION, "ProductName"),
+        build: reg_string(CURRENT_VERSION, "CurrentBuildNumber"),
+        firewall_policy: POLICY_FIREWALL.map(|key| reg_dword(key, "EnableFirewall")),
+        firewall_legacy_policy: reg_dword(LEGACY_POLICY_FIREWALL, "EnableFirewall"),
+        firewall_local: LOCAL_FIREWALL.map(|key| reg_dword(key, "EnableFirewall")),
+        defender_service: read_service("WinDefend"),
     }
 }
 
@@ -90,7 +75,7 @@ fn wide(s: &str) -> Vec<u16> {
 
 /// A `REG_SZ` value under HKLM: `Ok(None)` when the key or value is absent.
 #[cfg_attr(test, mutants::skip)] // Windows glue
-fn reg_string(subkey: &str, value: &str) -> Result<Option<String>, u32> {
+fn reg_string(subkey: &str, value: &str) -> RegString {
     use windows_sys::Win32::Foundation::{
         ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS,
     };
@@ -176,19 +161,62 @@ fn reg_dword(subkey: &str, value: &str) -> RegDword {
     }
 }
 
-/// Defender's real-time protection through WMI, on a thread of its own (its
-/// own COM apartment, never the blocking pool's): the property, `Ok(None)`
-/// with no instance or no value, or the failing HRESULT.
+/// A service's current state (`SERVICE_STOPPED` = 1, …) from the service
+/// manager, or the Win32 error of the first call that failed (a service that
+/// does not exist: `ERROR_SERVICE_DOES_NOT_EXIST`).
 #[cfg_attr(test, mutants::skip)] // Windows glue
-fn read_defender() -> Result<Option<bool>, i32> {
-    /// E_FAIL: the thread could not be started or ended in a panic.
-    const E_FAIL: i32 = 0x8000_4005_u32 as i32;
+fn read_service(name: &str) -> ServiceRead {
+    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::System::Services::{
+        CloseServiceHandle, OpenSCManagerW, OpenServiceW, QueryServiceStatusEx, SC_MANAGER_CONNECT,
+        SC_STATUS_PROCESS_INFO, SERVICE_QUERY_STATUS, SERVICE_STATUS_PROCESS,
+    };
+
+    let service_name = wide(name);
+    // SAFETY: every handle is checked before use and closed once; the name is
+    // a NUL-terminated UTF-16 buffer that outlives the calls; `status` is a
+    // zeroed POD of the size handed over, written by the query alone.
+    unsafe {
+        let manager = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT);
+        if manager.is_null() {
+            return ServiceRead::Failed(GetLastError());
+        }
+        let service = OpenServiceW(manager, service_name.as_ptr(), SERVICE_QUERY_STATUS);
+        if service.is_null() {
+            let code = GetLastError();
+            CloseServiceHandle(manager);
+            return ServiceRead::Failed(code);
+        }
+        let mut status: SERVICE_STATUS_PROCESS = std::mem::zeroed();
+        let mut needed: u32 = 0;
+        let ok = QueryServiceStatusEx(
+            service,
+            SC_STATUS_PROCESS_INFO,
+            (&mut status as *mut SERVICE_STATUS_PROCESS).cast(),
+            std::mem::size_of::<SERVICE_STATUS_PROCESS>() as u32,
+            &mut needed,
+        );
+        let read = if ok == 0 {
+            ServiceRead::Failed(GetLastError())
+        } else {
+            ServiceRead::State(status.dwCurrentState)
+        };
+        CloseServiceHandle(service);
+        CloseServiceHandle(manager);
+        read
+    }
+}
+
+/// Every WMI read, on a thread of its own (its own COM apartment, never the
+/// blocking pool's). Runs behind the bounded reader (`prod_env::Reader`).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+pub fn read_wmi() -> WmiRead {
     match std::thread::Builder::new()
-        .name("env-defender".to_string())
-        .spawn(defender_in_own_apartment)
+        .name("env-wmi".to_string())
+        .spawn(wmi_in_own_apartment)
     {
-        Ok(thread) => thread.join().unwrap_or(Err(E_FAIL)),
-        Err(_) => Err(E_FAIL),
+        Ok(thread) => thread.join().unwrap_or_else(|_| WmiRead::failed(E_FAIL)),
+        Err(_) => WmiRead::failed(E_FAIL),
     }
 }
 
@@ -203,55 +231,55 @@ impl Drop for ComApartment {
     }
 }
 
-/// COM in a multithreaded apartment on this thread, then the query.
+/// COM in a multithreaded apartment on this thread, then the three queries.
+/// The process's COM security is left alone (no `CoInitializeSecurity`: other
+/// COM users share the process); each proxy is set to impersonate, the
+/// documented way to query WMI without it.
 #[cfg_attr(test, mutants::skip)] // Windows glue
-fn defender_in_own_apartment() -> Result<Option<bool>, i32> {
-    use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
+fn wmi_in_own_apartment() -> WmiRead {
+    use windows::Win32::System::Com::{
+        CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+    };
+    use windows::Win32::System::Wmi::{IWbemLocator, WbemLocator};
 
     // SAFETY: a fresh thread, initialized once; `ComApartment` balances it.
     let init = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     if init.is_err() {
-        return Err(init.0);
+        return WmiRead::failed(init.0);
     }
     let _apartment = ComApartment;
-    // Every COM object of the query is dropped when it returns, before the
-    // apartment is.
-    query_defender().map_err(|e| e.code().0)
+    // SAFETY: COM is initialized on this thread.
+    let locator: IWbemLocator =
+        match unsafe { CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER) } {
+            Ok(locator) => locator,
+            Err(e) => return WmiRead::failed(e.code().0),
+        };
+    // Every COM object of a query is dropped when it returns, and the
+    // locator before the apartment (declared after it).
+    WmiRead {
+        defender: query_defender(&locator).map_err(|e| e.code().0),
+        firewall: query_firewall(&locator).map_err(|e| e.code().0),
+        antivirus: query_antivirus(&locator).map_err(|e| e.code().0),
+    }
 }
 
-/// `SELECT RealTimeProtectionEnabled FROM MSFT_MpComputerStatus` in
-/// `root\Microsoft\Windows\Defender`. The process's COM security is left
-/// alone (no `CoInitializeSecurity`: other COM users share the process);
-/// the services proxy is set to impersonate, the documented way to query
-/// WMI without it.
+/// Sets `proxy` to impersonate the caller.
 #[cfg_attr(test, mutants::skip)] // Windows glue
-fn query_defender() -> windows::core::Result<Option<bool>> {
+fn impersonate<P>(proxy: P) -> windows::core::Result<()>
+where
+    P: windows::core::Param<windows::core::IUnknown>,
+{
     use windows::Win32::System::Com::{
-        CLSCTX_INPROC_SERVER, CoCreateInstance, CoSetProxyBlanket, EOAC_NONE,
-        RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
+        CoSetProxyBlanket, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
     };
     use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
-    use windows::Win32::System::Wmi::{
-        IWbemClassObject, IWbemLocator, WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY,
-        WBEM_S_TIMEDOUT, WbemLocator,
-    };
-    use windows::core::{BSTR, HRESULT, PCWSTR, VARIANT, w};
+    use windows::core::PCWSTR;
 
-    // SAFETY: COM is initialized on this thread (`defender_in_own_apartment`);
-    // every pointer handed over is a live local or a null the API accepts.
+    // SAFETY: `proxy` is a live COM interface; the other arguments are
+    // constants or null.
     unsafe {
-        let locator: IWbemLocator = CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER)?;
-        let services = locator.ConnectServer(
-            &BSTR::from(r"ROOT\Microsoft\Windows\Defender"),
-            None,
-            None,
-            None,
-            0,
-            None,
-            None,
-        )?;
         CoSetProxyBlanket(
-            &services,
+            proxy,
             RPC_C_AUTHN_WINNT,
             RPC_C_AUTHZ_NONE,
             PCWSTR::null(),
@@ -259,38 +287,192 @@ fn query_defender() -> windows::core::Result<Option<bool>> {
             RPC_C_IMP_LEVEL_IMPERSONATE,
             None,
             EOAC_NONE,
-        )?;
-        let rows = services.ExecQuery(
-            &BSTR::from("WQL"),
-            &BSTR::from("SELECT RealTimeProtectionEnabled FROM MSFT_MpComputerStatus"),
-            WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+        )
+    }
+}
+
+/// A namespace's services, connected with the bounded wait
+/// (`WBEM_FLAG_CONNECT_USE_MAX_WAIT`: ConnectServer gives up after 2 min
+/// instead of waiting forever) and set to impersonate.
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn connect(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+    namespace: &str,
+) -> windows::core::Result<windows::Win32::System::Wmi::IWbemServices> {
+    use windows::Win32::System::Wmi::WBEM_FLAG_CONNECT_USE_MAX_WAIT;
+    use windows::core::BSTR;
+
+    // SAFETY: COM is initialized on this thread; every argument is a live
+    // BSTR or null.
+    let services = unsafe {
+        locator.ConnectServer(
+            &BSTR::from(namespace),
             None,
+            None,
+            None,
+            WBEM_FLAG_CONNECT_USE_MAX_WAIT.0,
+            None,
+            None,
+        )?
+    };
+    impersonate(&services)?;
+    Ok(services)
+}
+
+/// Every row of `query` (WQL) in `services`, with `context` (at most
+/// `MAX_ROWS`; a row WMI does not hand over within `WMI_NEXT_TIMEOUT_MS` is
+/// an error).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn rows(
+    services: &windows::Win32::System::Wmi::IWbemServices,
+    query: &str,
+    context: Option<&windows::Win32::System::Wmi::IWbemContext>,
+) -> windows::core::Result<Vec<windows::Win32::System::Wmi::IWbemClassObject>> {
+    use windows::Win32::System::Wmi::{
+        IWbemClassObject, WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_S_TIMEDOUT,
+    };
+    use windows::core::{BSTR, HRESULT};
+
+    // SAFETY: COM is initialized on this thread; every pointer handed over
+    // is a live local.
+    unsafe {
+        let found = services.ExecQuery(
+            &BSTR::from("WQL"),
+            &BSTR::from(query),
+            WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+            context,
         )?;
         // The enumerator is a proxy of its own: impersonate there too. Not
         // every enumerator is a proxy (E_NOINTERFACE then), so a refusal
         // here is no failure.
-        let _ = CoSetProxyBlanket(
-            &rows,
-            RPC_C_AUTHN_WINNT,
-            RPC_C_AUTHZ_NONE,
-            PCWSTR::null(),
-            RPC_C_AUTHN_LEVEL_CALL,
-            RPC_C_IMP_LEVEL_IMPERSONATE,
-            None,
-            EOAC_NONE,
-        );
-        let mut row: [Option<IWbemClassObject>; 1] = [None];
-        let mut returned: u32 = 0;
-        let next = rows.Next(WMI_NEXT_TIMEOUT_MS, &mut row, &mut returned);
-        next.ok()?;
-        if next == HRESULT(WBEM_S_TIMEDOUT.0) {
-            return Err(windows::core::Error::from(HRESULT(WBEM_S_TIMEDOUT.0)));
+        let _ = impersonate(&found);
+        let mut all = Vec::new();
+        for _ in 0..MAX_ROWS {
+            let mut row: [Option<IWbemClassObject>; 1] = [None];
+            let mut returned: u32 = 0;
+            let next = found.Next(WMI_NEXT_TIMEOUT_MS, &mut row, &mut returned);
+            next.ok()?;
+            if next == HRESULT(WBEM_S_TIMEDOUT.0) {
+                return Err(windows::core::Error::from(HRESULT(WBEM_S_TIMEDOUT.0)));
+            }
+            match row[0].take() {
+                Some(object) => all.push(object),
+                None => break,
+            }
         }
-        let Some(row) = &row[0] else {
-            return Ok(None);
-        };
-        let mut value = VARIANT::default();
-        row.Get(w!("RealTimeProtectionEnabled"), 0, &mut value, None, None)?;
-        Ok(bool::try_from(&value).ok())
+        Ok(all)
     }
+}
+
+/// One property of a row (`VT_NULL` when the instance has no value).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn property(
+    row: &windows::Win32::System::Wmi::IWbemClassObject,
+    name: &str,
+) -> windows::core::Result<windows::core::VARIANT> {
+    use windows::core::{HSTRING, VARIANT};
+
+    let mut value = VARIANT::default();
+    // SAFETY: `row` is a live object; the name and `value` outlive the call.
+    unsafe { row.Get(&HSTRING::from(name), 0, &mut value, None, None)? };
+    Ok(value)
+}
+
+/// A boolean property, `None` with no value.
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn bool_of(row: &windows::Win32::System::Wmi::IWbemClassObject, name: &str) -> Option<bool> {
+    property(row, name)
+        .ok()
+        .and_then(|v| bool::try_from(&v).ok())
+}
+
+/// An unsigned property, `None` with no value.
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn u32_of(row: &windows::Win32::System::Wmi::IWbemClassObject, name: &str) -> Option<u32> {
+    property(row, name)
+        .ok()
+        .and_then(|v| u32::try_from(&v).ok())
+}
+
+/// A string property, `None` with no value or an empty one.
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn string_of(row: &windows::Win32::System::Wmi::IWbemClassObject, name: &str) -> Option<String> {
+    property(row, name)
+        .ok()
+        .and_then(|v| windows::core::BSTR::try_from(&v).ok())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Defender's status: its first instance, `None` with none.
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_defender(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Option<DefenderRow>> {
+    let services = connect(locator, r"ROOT\Microsoft\Windows\Defender")?;
+    let found = rows(
+        &services,
+        "SELECT RealTimeProtectionEnabled, AMRunningMode, AntivirusEnabled \
+         FROM MSFT_MpComputerStatus",
+        None,
+    )?;
+    Ok(found.first().map(|row| DefenderRow {
+        realtime: bool_of(row, "RealTimeProtectionEnabled"),
+        mode: string_of(row, "AMRunningMode"),
+        antivirus_enabled: bool_of(row, "AntivirusEnabled"),
+    }))
+}
+
+/// The firewall profiles as they apply now: the active policy store (the
+/// local settings merged with every group policy), through the
+/// `PolicyStore` context value the NetSecurity provider reads.
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_firewall(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Vec<FirewallRow>> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+    use windows::Win32::System::Wmi::{IWbemContext, WbemContext};
+    use windows::core::{VARIANT, w};
+
+    let services = connect(locator, r"ROOT\StandardCimv2")?;
+    // SAFETY: COM is initialized on this thread; the value outlives the call.
+    let context: IWbemContext = unsafe {
+        let context: IWbemContext = CoCreateInstance(&WbemContext, None, CLSCTX_INPROC_SERVER)?;
+        context.SetValue(w!("PolicyStore"), 0, &VARIANT::from("ActiveStore"))?;
+        context
+    };
+    let found = rows(
+        &services,
+        "SELECT Name, Enabled FROM MSFT_NetFirewallProfile",
+        Some(&context),
+    )?;
+    Ok(found
+        .iter()
+        .map(|row| FirewallRow {
+            name: string_of(row, "Name").unwrap_or_default(),
+            enabled: u32_of(row, "Enabled"),
+        })
+        .collect())
+}
+
+/// The antivirus products registered with the Security Center (a client
+/// SKU's; a server has no such namespace).
+#[cfg_attr(test, mutants::skip)] // Windows glue
+fn query_antivirus(
+    locator: &windows::Win32::System::Wmi::IWbemLocator,
+) -> windows::core::Result<Vec<AvProduct>> {
+    let services = connect(locator, r"ROOT\SecurityCenter2")?;
+    let found = rows(
+        &services,
+        "SELECT displayName, instanceGuid, productState FROM AntiVirusProduct",
+        None,
+    )?;
+    Ok(found
+        .iter()
+        .map(|row| AvProduct {
+            name: string_of(row, "displayName").unwrap_or_default(),
+            guid: string_of(row, "instanceGuid").unwrap_or_default(),
+            state: u32_of(row, "productState"),
+        })
+        .collect())
 }

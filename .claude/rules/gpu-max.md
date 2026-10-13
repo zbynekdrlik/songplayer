@@ -322,6 +322,203 @@ error. A map that is not committed memory, or a sender's map shorter than a
   `LongToHandle((long)shareHandle)`: the 32 bits SIGN-EXTENDED
   (`share_handle_value`).
 
+### Spout locks handed over abandoned (#243)
+
+**The bug is upstream.** Spout 2.007.017 never releases a named mutex it got
+with `WAIT_ABANDONED`:
+
+- `SpoutSharedMemory::Lock` returns nullptr on anything but `WAIT_OBJECT_0`;
+- `spoutFrameCount::CheckAccess` returns false on it.
+
+The waiting thread then OWNS the mutex: Windows hands an abandoned mutex to
+its next waiter. Nothing ever unlocks it, so that thread keeps it until it
+exits. Only that one thread can keep using it (a mutex is recursive for its
+owning thread). Every other thread's wait times out at 67 ms, the other
+threads of the same process included.
+
+**Any Spout program that dies mid-lock poisons the box.** That includes
+SongPlayer at a deploy's `Stop-Process`, a crashed Arena, and an OBS with the
+`win-spout` plugin. What PP showed on 11-12.10.2026:
+
+- Arena held `SpoutSenderNames_mutex` for 8 hours.
+- Every SongPlayer sender was refused `UNREADABLE` (12 172 times), so MAX
+  never went out.
+- Arena crashed at 01:04:48 UTC.
+- The SongPlayer that was retrying then got the lock, and kept it across the
+  next deploy. Owner pid 8492 was read with `NtQueryMutant`.
+- A receiver keeping a sender's `<name>_SpoutAccessMutex` makes Spout skip
+  every copy. Arena then shows a frozen picture (#243's event freeze), and
+  each send waits 67 ms (PP's `send_us_p99` ~72 ms).
+
+**What SongPlayer does:**
+
+- **It gives back what it was handed.** Every shim call runs in
+  `sdk(sender, ..)`. After the call it releases each Spout lock the CALLING
+  thread owns: `SpoutSenderNames_mutex`, `ActiveSenderName_mutex`,
+  `<name>_mutex` and `<name>_SpoutAccessMutex`. The check is `NtQueryMutant`
+  `MutantBasicInformation` (`OwnedByCaller`); the thread releases as often
+  as it holds the mutex (`spout_lock::releases_owed`, at most 64).
+  - Spout's own locks are balanced within a call, so between calls the
+    thread owns one only when it was handed it abandoned.
+  - The open and the name claim run Spout's `CleanSenders`, which reads every
+    listed sender's info map under `<name>_mutex`. When it meets one of those
+    abandoned, it drops that sender off the list and keeps the lock.
+    `sdk_cleaning` therefore gives back the map locks of the senders listed
+    BEFORE or after the call. A list read after the call alone never sees
+    the dropped name (review round 1).
+  - Exceptions to "balanced within a call":
+    - A C++ exception the shim catches can leave a lock taken. The OS mutex
+      is then given back, but Spout's object still counts it as locked and
+      reads its map unlocked afterwards. That is no worse than keeping the
+      lock.
+    - A renamed sender (`<name>_1`, refused at once `TAKEN`) locks names
+      that are not on the list.
+  - Our registry reader `read_map` releases an abandoned wait itself.
+- **It refuses a sender whose texture lock is kept elsewhere.** After each
+  send that was not refused, the sender looks at its texture lock.
+  - A send COUNTS when another thread owns that lock AND the send took at
+    least `ACCESS_TIMEOUT_US` (60 ms). That means Spout's 67 ms
+    `CheckAccess` timed out, so the copy really was skipped.
+  - At `MAX_ACCESS_HELD` (30) counted sends in a row, the sender is refused
+    `ACCESS_HELD` (`spout_state::access_held`) and leaves the list.
+  - Why the 60 ms condition (review round 1): a receiver may take the lock
+    right after our send. Spout's own `ReceiveImage` maps a staging copy
+    under it, 7–12 ms at FHD. That receiver shows up as the owner at the
+    look, but it cost the send nothing, and counting it would refuse a
+    healthy sender every 30 sends.
+  - The `program-max` thread makes a new sender after its 3 s backoff. The
+    old mutex object, and with it the kept lock, goes away only once every
+    handle to it is closed, that is once every receiver has let go of the
+    sender. Until then each rebuild repeats the cycle: 3 s off, then ~2 s of
+    sends that each wait 67 ms.
+- **It names the holder.** A refusal about a kept lock (`UNREADABLE` for the
+  list, `ACCESS_HELD` for the texture) carries `holder` on
+  `GpuError::SpoutNotRegistered`. It comes from `MutantOwnerInformation`,
+  then the owner's image via `QueryFullProcessImageNameW`, formatted by
+  `spout_lock::holder_text`.
+  - `max.state` and the WARN then read "… (held by Arena.exe (pid 1500))".
+  - That is the program to restart. A lock another process keeps cannot be
+    released from outside.
+- **The glue is small.** `win/spout_lock.rs` only queries and releases; it
+  links ntdll with `raw-dylib`, since the windows crate has no
+  `NtQueryMutant`.
+
+**Reading it on a box:** `NtQueryMutant(OpenMutexW(SYNCHRONIZE |
+MUTANT_QUERY_STATE, "SpoutSenderNames_mutex"), 1, …)` gives the owner's
+pid/tid; a `WaitOne(300)` from another process times out while it is kept.
+The PowerShell `Add-Type` probe used on PP is in #243 (comment of 12.10.2026).
+
+**When SongPlayer itself dies mid-lock (#243 follow-up, FINDING of
+12.10.2026 ~12:58).** deploy-pp 38239301748 stopped SongPlayer with
+`taskkill /F` while one of its threads held `SpoutSenderNames_mutex`. The
+next waiter was Arena "Songs PP": handed the mutex abandoned, it kept it, and
+every new SongPlayer sender was refused `UNREADABLE` (holder named) until a
+manual rescue (`C:\ProgramData\SongPlayer\diag\spout_list_rescue.ps1`
+queued on the mutex, then Arena was killed: the helper was handed it
+abandoned 41 ms later and released it). A receiver cannot be fixed, so:
+
+1. **Quiesce before the kill.** `POST /api/v1/program/spout/quiesce`
+   (`api/program.rs`, `202 {state}`) → `MaxOut::quiesce`: nothing is
+   offered while it holds, and the `program-max` thread's next step is
+   `MaxNext::Quiesce` (after a stop, before everything else, whatever the
+   setting), once per quiesce. `MaxWorker::quiesce` drops both senders
+   (MAX, then `SP-program`, each before its compositor), stops the list
+   sentinel and reports `quiesced`; the thread then waits: no Spout call
+   runs when the kill lands. Every workflow step that kills SongPlayer
+   runs `scripts/spout-quiesce.ps1` first (`ci-workflows.md`). Not limited
+   to loopback callers: no route of this API checks its caller, and the
+   box's cloudflared tunnel connects from 127.0.0.1 anyway.
+   - **It expires** (review round 1 of the follow-up;
+     `program_max_quiesce.rs`, a child of `program_max.rs`). It holds
+     `QUIESCE_EXPIRY` = 60 s from its LAST ask (`Queue::quiesced_until`;
+     an ask while it holds renews it, the thread does not quiesce again).
+     A deploy kills the process within seconds; one that does not (a run
+     cancelled between the ask and the kill, a kill that failed) must not
+     leave MAX dark until a restart. At the deadline the thread's step is
+     `MaxNext::Resume`: `MaxWorker::resume` records `running` and one WARN
+     `the quiesce expired - the process was not stopped; the Spout senders
+     resume`; the next job builds both senders again. `MaxOut::next` waits
+     with a timeout up to the deadline, so it wakes by itself (nothing
+     notifies it then). A thread that sees the ask only after its deadline
+     still quiesces once, then resumes.
+   - `max.state` and `max.fhd.state` read `quiesced` (`MaxPhase::Quiesced`)
+     only while it holds: it wins over `off`; the resume, or the thread's
+     end, ends it. No phase is "settled" any more but `Unsupported`.
+   - Every decision takes its instant (`MaxOut::quiesce_at`,
+     `MaxOut::try_next_at`); `set_quiesce_expiry` (tests) shortens it for
+     the real-loop tests. Tests: `program_max_quiesce_tests.rs`.
+   - **A normal shutdown waits for the thread** (the tray's Exit awaits
+     `sp_server::start`'s join handle, 30 s): `start` ends with
+     `program_max::stop_and_wait(max, MAX_STOP_WAIT)` (3 s) after its
+     shutdown broadcast: stop, then `MaxOut::wait_ended` on the `ended`
+     condvar (notified by the `Consumer` guard's drop, after the loop's
+     final `release`) on the blocking pool. One INFO when it ended, one
+     WARN with `bound_ms` when it did not; the process ends either way. The
+     thread's stop path unregisters both senders, which takes Spout's list
+     lock: the process must not end under it.
+2. **Win the lock back: the sentinel.** After every boundary, after both
+   sends, the `program-max` thread reads who holds Spout's list
+   (`program_max_list.rs` `ListSide::boundary` → `SpoutList::holder` →
+   sp-gpu `spout_list_holder` / `mutex_holder`: another thread's holder,
+   pid + program file name). The same program (pid), never this process,
+   on every read for `LIST_HELD_AFTER` = `MAX_RETRY_BACKOFF` (3 s) is named
+   once per holding (`ListWatch`, pure): one WARN `another program keeps
+   Spout's sender list`, and a sentinel starts, one at a time
+   (`ListSentinel`, thread `spout-list-sentinel`, `win/spout_lock.rs`).
+   - **It stays queued for its whole life** (review round 1 of the
+     follow-up: bounded 500 ms waits left the lock's wait queue between
+     them, so a relaunched Arena's wait could queue first). ONE
+     `WaitForMultipleObjects([stop event, list lock], any, INFINITE)`; the
+     stop event is unnamed and manual-reset (`CreateEventW`, its handle
+     kept as a number, `StopEvent`, closed on drop after the join), and
+     `ListSentinel::stop` sets it and joins: it ends at once. It never
+     spins and never holds the lock past the release.
+   - `sentinel_step(wait)` (pure) reads the answer: `WAIT_OBJECT_0 + 0`
+     (0x0, the stop) → `Stopped`, the lock not taken; `+ 1` (0x1) → give it
+     back, `abandoned: false`; `WAIT_ABANDONED_0 + 1` (0x81, its holder
+     died) → give it back, `abandoned: true`; anything else (`WAIT_FAILED`,
+     a timeout it cannot have, 0x80 for the event) → `Failed`.
+   - The give-back (`give_back_taken`) tries `ReleaseMutex`
+     `SENTINEL_RELEASE_TRIES` (3) times (the release of a mutex the thread
+     was just handed is not expected to fail); still failing, one WARN
+     names the error and it ends `Failed` holding the lock, which its end
+     leaves abandoned again for the next waiter.
+   - When the holder exits, Windows hands the lock to its next waiter, the
+     sentinel, queued before a relaunched Arena (Windows does not promise a
+     FIFO wait queue: a kernel APC can move a waiter back): one INFO
+     (`abandoned`), and the next sender after its backoff reads the list
+     again. A free read, this process or another pid starts the count
+     again; a sentinel that ended (or did not start) lets the next naming
+     start one; MAX off forgets the holder (the sentinel keeps waiting); a
+     quiesce stops it (joined, at once).
+3. **Visible.** `GET /api/v1/program` → `max.list_holder`: `null`, or
+   `{image, pid, since_s}` once named (`since_s` from the first read that
+   saw it). That program is the one to restart.
+
+**WARP tests (`tests/spout.rs`, `tests/spout_list.rs`).** The named-mutex
+helpers live in `tests/common/locks.rs` (both binaries use them;
+`tests/spout.rs` was at the 1000-line cap).
+
+- A helper thread takes the mutex and ENDS: that is an abandoned lock.
+- Another thread's 300 ms wait then tells free (0x0), kept (0x102) and
+  "nothing took the abandoned lock" (0x80) apart.
+- A held lock is a helper thread blocking on a channel (`Hold`). Its holder
+  text is the test exe with ", this process".
+- `GiveBack` releases whatever the test thread still owns when dropped, so a
+  failing test never poisons the next one.
+- #243 follow-up (`tests/spout_list.rs`, their own mutexes): `Doomed` holds
+  a mutex until `die`, then ends without releasing it; the sentinel queued
+  on it is handed it abandoned, gives it back, and another thread then
+  takes it with 0x0 (an `_alive` handle keeps the mutex object, so a fresh
+  mutex can never pass the check). A stopped sentinel ends `Stopped` at
+  once and leaves the lock to its holder; a released lock is given back
+  `abandoned: false`. The stop runs on a helper thread under a 10 s
+  bound, so a sentinel that ignores it fails the test instead of hanging
+  it. `mutex_holder` names another thread's holder (pid +
+  the test exe), none for a free lock, the caller's own or no such mutex;
+  `spout_list_holder` reads Spout's own list lock (under the one-at-a-time
+  lock).
+
 ### WARP proof (`tests/spout.rs`, Windows only)
 
 - the first send lists `SP-program-MAX`, its map says 3840×2160, format 87
@@ -567,6 +764,9 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   (`POST /composition/layers/<n>/clips/<c>/connect`), the Spout clip showed
   MAX at once. Before a relaunch, read the connected clips
   (`ops\arena_layers.py`) so they can be restored.
+- **A forced kill can leave Spout's list to a receiver for good** (#243
+  follow-up, PP 12.10.2026): hence the deploy's quiesce, the list sentinel
+  and `max.list_holder` ("Spout locks handed over abandoned" above).
 
 ### The setting and the telemetry
 
@@ -585,7 +785,8 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   draw_us_p99, send_us_p99, send_at_us_p50/p99/max, send_late,
   vblank_output, vblank_state, vblank_tracking, vblank_period_ns, vblank_phase_us,
   send_off_grid, send_phase_us_p50/p99, slot_repicks, device_resets,
-  sender_backoffs, spout_name, adapter, fhd}` (`MaxStatus`; `fhd` = #239,
+  sender_backoffs, spout_name, adapter, list_holder, fhd}` (`MaxStatus`;
+  `list_holder` = #243 follow-up, above; `fhd` = #239,
   "The FHD Spout sender" below;
   `send_at_us_*` = send done − offer over the window, `send_late` = composes
   that ran past their due instant; `vblank_output` = the tracker's output
@@ -603,7 +804,10 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   RTX). R3-2 sketched `spout {frames, adapter}`; S2 ships the flat shape
   the S2 dispatch named, with `frames` = `submitted` and `adapter` at the
   top level. `state` (`state_label`): `unsupported` (off Windows: no
-  thread) wins, then `off` (the setting), then the thread: `running` (it
+  thread) wins, then `quiesced` (#243 follow-up: while the deploy's
+  quiesce holds, 60 s from its last ask), then `off` (the setting), then
+  the thread:
+  `running` (it
   takes jobs and its last boundary went out), `error: <why>` (its last
   boundary did not; `error: the program-max thread is not running` before
   it attached or after it ended). `submitted + failed` = the jobs it took
@@ -785,7 +989,9 @@ build step, and WARP and the RTX run the same source. A compile error is
   `adapter`, `picture`, `composition`, `quad`, `residency`, `color`,
   `reference`, `error`, `readback` (the mapped rows packed), `spout` (the
   sender name rule, the registry parsers, the shim's codes), `spout_state`
-  (the sender's registration: every refuse / confirm decision), `vblank`
+  (the sender's registration: every refuse / confirm decision), `spout_lock`
+  (#243: the lock names, the releases owed, the holder's text and program
+  name, the list sentinel's steps), `vblank`
   (the output pick, the refresh count and fit, the staleness bound). Keep
   it that way: logic added inside `win/` is untested by the gate.
   `win/vblank.rs` only calls DXGI / Win32 (`EnumOutputs`, `GetDesc`, which
@@ -829,4 +1035,9 @@ build step, and WARP and the RTX run the same source. A compile error is
   pins through the worker. #239: `SpoutGpu::fhd_sender` and the
   `listed_size` impl on `SpoutSender` are glue too (`mutants::skip`);
   `SpoutGpu::fhd_compositor` stays gated
-  (`off_windows_the_production_fhd_compositor_is_unsupported`).
+  (`off_windows_the_production_fhd_compositor_is_unsupported`). #243
+  follow-up: `SpoutListLock`'s `holder`, `sentinel_ended` and
+  `stop_sentinel` are glue too (`mutants::skip`); its `start_sentinel`
+  stays gated (`off_windows_the_production_list_is_neither_read_nor_waited_on`),
+  and `ListWatch` / `ListSide` carry every decision
+  (`program_max_list_tests.rs`, over `FakeList`).

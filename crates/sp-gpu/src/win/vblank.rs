@@ -73,7 +73,7 @@ impl VblankTracker {
         let thread = std::thread::Builder::new()
             .name("program-max-vblank".into())
             .spawn(move || run(&thread_shared, &ready_tx))
-            .map_err(|e| GpuError::Thread(e.to_string()))?;
+            .map_err(|e| GpuError::Thread(format!("the vblank thread failed: {e}")))?;
         match ready_rx.recv() {
             Ok(Ok(output)) => Ok(Self {
                 shared,
@@ -88,7 +88,7 @@ impl VblankTracker {
             Err(_) => {
                 let _ = thread.join();
                 Err(GpuError::Thread(
-                    "it ended before it opened an output".to_string(),
+                    "the vblank thread failed: it ended before it opened an output".to_string(),
                 ))
             }
         }

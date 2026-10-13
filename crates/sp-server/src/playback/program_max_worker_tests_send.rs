@@ -206,7 +206,7 @@ fn the_loop_sends_on_the_refresh_grid_it_is_given() {
     let (out, loop_gpu) = (max.clone(), gpu.clone());
     let thread = std::thread::Builder::new()
         .name("program-max-test".into())
-        .spawn(move || run_max_loop(&out, loop_gpu, Some(Box::new(source))))
+        .spawn(move || run_max_loop(&out, loop_gpu, Some(Box::new(source)), None))
         .expect("spawn the loop");
     wait_until("the loop takes jobs", || max.accepting());
     max.offer_with(|| job(1));

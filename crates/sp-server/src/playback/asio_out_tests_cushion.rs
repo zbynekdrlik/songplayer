@@ -18,6 +18,7 @@ fn out() -> AsioOut {
         AsioDest {
             driver: "Dante Virtual Soundcard (x64)".into(),
             channels: [0, 1],
+            loop_check: false,
         },
     );
     AsioOut::for_entry(&entry).unwrap()

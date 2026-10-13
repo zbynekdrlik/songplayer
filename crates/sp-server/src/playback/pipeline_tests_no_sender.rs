@@ -8,9 +8,10 @@
 //! Wired from `pipeline.rs` (`#[path]`), so `include_str!` resolves next to it.
 
 /// The pipeline side's sources, by file name.
-const PIPELINE_SIDE: [(&str, &str); 6] = [
+const PIPELINE_SIDE: [(&str, &str); 7] = [
     ("pipeline.rs", include_str!("pipeline.rs")),
     ("pipeline_paced.rs", include_str!("pipeline_paced.rs")),
+    ("paced_producer.rs", include_str!("paced_producer.rs")),
     (
         "pipeline_paced_idle.rs",
         include_str!("pipeline_paced_idle.rs"),

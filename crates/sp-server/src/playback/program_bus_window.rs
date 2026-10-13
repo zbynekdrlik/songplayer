@@ -24,10 +24,73 @@
 //! be the live pair that opens the cue); with neither side here and both
 //! missed, it is filled like any boundary (the core's fill + resync path).
 
+use std::collections::{HashMap, HashSet};
+
+use sp_core::config::PROGRAM_BLANK_ID;
 use tracing::{info, warn};
 
 use super::{ProgramCore, ProgramJob};
 use crate::playback::program_transition::{CUE_WAIT_MAX_SLOTS, Cue, MixJob, Window};
+
+/// #257: whether a boundary that shows `source` carries a real source's
+/// audio: a playlist, or the NDI input (-1). Blank (-2) and nothing
+/// selected are silence by design, so their fills are no fault.
+pub(super) fn real_source(source: Option<i64>) -> bool {
+    source.is_some_and(|s| s != PROGRAM_BLANK_ID)
+}
+
+/// #257 review: how long a source that became the owner may deliver
+/// nothing before its misses count: 300 boundaries, 10 s (exact on the
+/// grid: 300 slots of 10⁷/30 × 100 ns). Every paced source and the NDI
+/// input touch the bus on every boundary, playing or not, so a source cut
+/// to delivers within about one boundary, and the restored selection's
+/// pipeline within ~0.1 s of the start (SNV 12.10.2026: the restore at .768,
+/// its Play at .830). The grace only runs out for a source that does not
+/// reach the bus at all (a hung pipeline, a restore whose pipeline never
+/// comes): its silence is a loss again after 10 s, never "bez chyby" for as
+/// long as it hangs. Rejected: keeping a source cut to in the delivered set
+/// when its last touch is within `PROGRAM_LIVE_WINDOW_100NS` — a source
+/// that hung before the cut would wait forever.
+pub(super) const DELIVERY_GRACE_100NS: i64 = 100_000_000;
+
+/// #257: which sources deliver since they became the owner, and since when
+/// each owns.
+#[derive(Debug, Default)]
+pub(super) struct Delivery {
+    /// The sources that touched or offered a boundary since they became the
+    /// owner.
+    delivered: HashSet<i64>,
+    /// The boundary each source became the owner on (a cut to it).
+    since: HashMap<i64, i64>,
+    /// The first boundary the core counted (a fill, a resync, a mix): where
+    /// the selection restored at the start, which no cut made the owner,
+    /// owns from.
+    start: Option<i64>,
+}
+
+impl Delivery {
+    /// `pid` becomes the owner on boundary `stamp_100ns` (a cut to it): it
+    /// delivers anew from there (a touch from before the cut does not count).
+    pub(super) fn became_owner(&mut self, pid: i64, stamp_100ns: i64) {
+        self.delivered.remove(&pid);
+        self.since.insert(pid, stamp_100ns);
+    }
+
+    /// The core counts boundary `stamp_100ns` (a fill, a resync, a mix): the
+    /// first one is the start.
+    fn counted(&mut self, stamp_100ns: i64) {
+        self.start = self.start.or(Some(stamp_100ns));
+    }
+
+    /// Whether `pid` owes boundary `stamp_100ns`: it delivered since it
+    /// became the owner, or [`DELIVERY_GRACE_100NS`] passed since then (since
+    /// the start for a source no cut made the owner).
+    fn owes(&self, pid: i64, stamp_100ns: i64) -> bool {
+        let since = self.since.get(&pid).copied().or(self.start);
+        self.delivered.contains(&pid)
+            || stamp_100ns - since.unwrap_or(stamp_100ns) >= DELIVERY_GRACE_100NS
+    }
+}
 
 /// What a window boundary did (see [`ProgramCore::window_step`]).
 pub(super) enum WindowStep {
@@ -39,6 +102,58 @@ pub(super) enum WindowStep {
 }
 
 impl ProgramCore {
+    /// A source touched or offered boundary `stamp_100ns`: its progress (its
+    /// liveness for the fills), and #257: it delivers since it became the
+    /// owner ([`Self::delivering`]).
+    pub(super) fn note_progress(&mut self, pid: i64, stamp_100ns: i64) {
+        self.last_offer.insert(pid, stamp_100ns);
+        self.delivery.delivered.insert(pid);
+    }
+
+    /// #257: whether `source` is a real source that owes boundary
+    /// `stamp_100ns`: it touched or offered a boundary since it became the
+    /// owner (a cut to it, or the start), or [`DELIVERY_GRACE_100NS`] passed
+    /// since then. Only then is a boundary it misses its audio gone. A fill
+    /// of a source that has delivered nothing yet is a WAIT, never a loss:
+    /// the selection restored at a SongPlayer start before its pipeline
+    /// offers (SNV 12.10.2026: a `program` loss after every deploy), a cut to
+    /// a source that has not reached the bus yet — for 10 s at most.
+    fn delivering(&self, source: Option<i64>, stamp_100ns: i64) -> bool {
+        real_source(source) && source.is_some_and(|s| self.delivery.owes(s, stamp_100ns))
+    }
+
+    /// Boundary `stamp_100ns` filled with the program's standby pair,
+    /// showing `shows` (`fill_source`): `filled`, and #257's `filled_owned`
+    /// when a real source's audio went missing there ([`Self::owned`]).
+    pub(super) fn count_fill(&mut self, stamp_100ns: i64, shows: Option<i64>) {
+        self.health.filled += 1;
+        self.health.filled_owned += u64::from(self.owned(stamp_100ns, shows));
+    }
+
+    /// A resync: the missed boundaries from `stamp_100ns` on are skipped.
+    /// `resyncs`, and #257's `resyncs_owned` when a real source's audio went
+    /// missing there.
+    pub(super) fn count_resync(&mut self, stamp_100ns: i64) {
+        self.health.resyncs += 1;
+        let shows = self.fill_source(stamp_100ns);
+        self.health.resyncs_owned += u64::from(self.owned(stamp_100ns, shows));
+    }
+
+    /// #257: whether boundary `stamp_100ns`, showing `shows`, carries the
+    /// audio of a real source that delivers ([`Self::delivering`]). In a
+    /// running fade either side's: a fade INTO Blank shows Blank but still
+    /// mixes the outgoing playlist (review round 1). The first boundary
+    /// counted is the start the restored selection owns from.
+    fn owned(&mut self, stamp_100ns: i64, shows: Option<i64>) -> bool {
+        self.delivery.counted(stamp_100ns);
+        match self.window_at(stamp_100ns) {
+            Some(w) if w.cue == Cue::Open => {
+                self.delivering(Some(w.to), stamp_100ns) || self.delivering(w.from, stamp_100ns)
+            }
+            _ => self.delivering(shows, stamp_100ns),
+        }
+    }
+
     /// The window whose range covers boundary `stamp_100ns`, if any.
     pub(super) fn window_at(&self, stamp_100ns: i64) -> Option<Window> {
         self.windows.iter().find(|w| w.covers(stamp_100ns)).copied()
@@ -155,7 +270,7 @@ impl ProgramCore {
                 self.commit(ProgramJob::Source(job), from);
             }
             None => {
-                self.health.filled += 1;
+                self.count_fill(stamp, from);
                 self.commit(ProgramJob::Standby { stamp_100ns: stamp }, from);
             }
         }
@@ -167,8 +282,13 @@ impl ProgramCore {
         let to = self.pending.remove(&stamp);
         let from = self.from_pending.remove(&stamp);
         let side_missing = to.is_none() || (from.is_none() && w.from.is_some());
+        // #257: a delivering source's side missing is its audio gone at its weight.
+        self.delivery.counted(stamp);
+        let owned_missing = (to.is_none() && self.delivering(Some(w.to), stamp))
+            || (from.is_none() && self.delivering(w.from, stamp));
         self.counters.mixed_boundaries += 1;
         self.counters.side_fills += u64::from(side_missing);
+        self.health.filled_owned += u64::from(owned_missing);
         let mix = MixJob {
             stamp_100ns: stamp,
             from,
@@ -179,3 +299,7 @@ impl ProgramCore {
         self.commit(ProgramJob::Mix(mix), Some(w.to)); // #147: shows the incoming side
     }
 }
+
+#[cfg(test)]
+#[path = "program_bus_window_tests.rs"]
+mod tests;

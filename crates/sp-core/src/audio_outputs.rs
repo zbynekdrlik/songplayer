@@ -180,6 +180,17 @@ pub struct VbanDest {
 pub struct AsioDest {
     pub driver: String,
     pub channels: [u32; 2],
+    /// #233 (PP's SoundGrid errors): compare what the output sends with
+    /// what the driver's inputs return (a console looping the outputs back,
+    /// sp-server `asio_loop.rs`). Off when absent, and written only when on,
+    /// so a list stored before it reads and writes back unchanged.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub loop_check: bool,
+}
+
+/// `skip_serializing_if` for a flag written only when it is set.
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 /// One output of the list.
@@ -673,6 +684,7 @@ pub fn new_asio(entries: &[OutputEntry], driver: &str) -> OutputEntry {
         AsioDest {
             driver: driver.to_string(),
             channels: [0, 1],
+            loop_check: false,
         },
     )
 }

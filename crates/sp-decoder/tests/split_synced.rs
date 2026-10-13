@@ -12,6 +12,8 @@
 //! - The decoder reports the audio stream's duration (~3000 ms) as the
 //!   canonical duration
 //! - End-of-stream returns `Ok(None)`
+//! - A seek past the video's end holds its last frame while the rest of the
+//!   audio plays (#257, with `silent_4s.flac`)
 //!
 //! Windows-only: MediaFoundationVideoReader is `cfg(windows)`-only. The
 //! audio half (Symphonia) has its own cross-platform test in
@@ -118,4 +120,58 @@ fn end_of_stream_returns_none() {
     // without erroring.
     let post_eos = dec.next_synced().expect("post-eos step");
     assert!(post_eos.is_none(), "post-EOS must return Ok(None)");
+}
+
+/// The 3 s video with the 4 s audio (`silent_4s.flac`): audio that outlasts
+/// the picture by 1 s.
+fn open_decoder_audio_past_video() -> SplitSyncedDecoder {
+    let video =
+        MediaFoundationVideoReader::open(&fixtures_dir().join("black_3s.mp4")).expect("video open");
+    let audio =
+        SymphoniaAudioReader::open(&fixtures_dir().join("silent_4s.flac")).expect("audio open");
+    SplitSyncedDecoder::new(Box::new(video), Box::new(audio)).expect("decoder construct")
+}
+
+/// #257 review: a seek past the video's end. A Pause in the held tail stores
+/// a position past the last frame, and ▶ resumes there. Seeked to 3.5 s, the
+/// decoder asks Media Foundation for one frame before the video's end (never
+/// a position past it), its fast-forward keeps the video's last frame, and
+/// the last 0.5 s of audio goes out on held steps from 3.5 s, every sample
+/// once, until the audio ended.
+#[test]
+fn a_seek_past_the_videos_end_holds_its_last_frame_for_the_rest_of_the_audio() {
+    let mut whole = open_decoder_audio_past_video();
+    let mut last = None;
+    while let Some((video, _)) = whole.next_synced().expect("decode step") {
+        last = Some(video.timestamp_ms);
+    }
+    let last = last.expect("the video has frames");
+    assert!(last < 3_500, "3.5 s lies past the last frame ({last} ms)");
+
+    let mut dec = open_decoder_audio_past_video();
+    dec.seek(3_500).expect("a seek past the video's end");
+    assert!(
+        dec.next_synced().expect("decode step").is_none(),
+        "no frame past the video's end"
+    );
+    let held = dec
+        .take_frame_before_end()
+        .expect("the video's last frame is held");
+    assert_eq!(
+        held.timestamp_ms, last,
+        "the held picture is the last frame"
+    );
+    let (mut first, mut steps, mut frames) = (None, 0usize, 0usize);
+    while let Some((at, audio)) = dec.next_held().expect("held step") {
+        first.get_or_insert(at);
+        steps += 1;
+        frames += audio
+            .iter()
+            .map(|a| a.data.len() / a.channels as usize)
+            .sum::<usize>();
+        assert!(steps < 1_000, "the held steps end with the audio");
+    }
+    assert_eq!(first, Some(3_500), "the steps start on the seek's position");
+    assert!(dec.audio_ended(), "every sample of the audio went out");
+    assert_eq!(frames, 24_000, "3.5 s to 4.0 s at 48 kHz, each sample once");
 }

@@ -48,6 +48,7 @@ fn spec() -> AsioSpec {
         driver: "Waves SoundGrid".into(),
         channels: [0, 1],
         delay_ms: 0,
+        loop_check: false,
     }
 }
 
@@ -254,6 +255,7 @@ fn the_hosts_status_and_start_error_are_the_outputs_in_songplayer() {
             sp_core::audio_outputs::AsioDest {
                 driver: "Waves SoundGrid".into(),
                 channels: [0, 1],
+                loop_check: false,
             },
         ),
         built_rate: 0,
@@ -495,22 +497,34 @@ fn a_stalled_host_pipe_never_blocks_a_forwarder() {
         client.send_block(handle, ProgramBlock::silence(0))
     });
     let forwarder = spawn_forwarder(&client, handle, &out);
-    for k in 0..300 {
-        out.push(ProgramBlock::silence(k));
-    }
-    // The link holds at most DATA_QUEUE blocks (where exactly the writer
-    // stands in its frames is its own business, CI 38177263779 read 50
-    // dropped); every block it could not take is dropped and counted,
-    // whether the output's own queue or the link dropped it, and some were
-    // taken.
+    // The blocks go in bursts smaller than the output's own queue
+    // (`queue_bound(0)` at delay 0), each taken by the forwarder before the
+    // next, so the output's queue drops none: every drop is the link's
+    // (review finding 12; CI 38177263779 read 50 with both mixed). A
+    // forwarder that blocks on the stalled pipe stops taking: the wait
+    // times out.
+    const BURST: u64 = 5;
+    assert!(
+        (BURST as usize) < crate::playback::vban_out::queue_bound(0),
+        "a burst fits the output's own queue"
+    );
     let (all, cap) = (300, DATA_QUEUE as u64);
-    wait_until("the forwarder took every block", || out.queued() == 0);
+    for burst in 0..all / BURST {
+        for k in 0..BURST {
+            out.push(ProgramBlock::silence((burst * BURST + k) as i64));
+        }
+        wait_until("the forwarder took the burst", || out.queued() == 0);
+    }
     out.stop();
     forwarder.join().unwrap();
+    // The link's data queue held the probe, then took `cap - 1` more, unless
+    // the writer had already taken the probe out (and is stuck writing it
+    // into the full pipe): then it took `cap`. Every other block was
+    // dropped on the link and counted on the output.
     let dropped = out.snapshot().blocks_dropped;
     assert!(
-        dropped >= all - cap && dropped < all,
-        "{dropped} blocks dropped of {all}"
+        dropped == all - cap || dropped == all - cap + 1,
+        "{dropped} blocks dropped of {all} (the link holds {cap})"
     );
     drop(host);
 }

@@ -306,6 +306,7 @@ fn dvs_entry() -> OutputEntry {
         sp_core::audio_outputs::AsioDest {
             driver: "Dante Virtual Soundcard (x64)".into(),
             channels: [0, 1],
+            loop_check: false,
         },
     )
 }

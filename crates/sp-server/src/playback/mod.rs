@@ -6,6 +6,7 @@
 
 pub mod asio_format; // #233: an ASIO driver's sample types + the L/R channel fill (pure)
 pub mod asio_hold; // #233: one holder per ASIO driver in the process (a rebuilt entry's successor waits)
+pub mod asio_loop; // #233: the ASIO output's loop check (what it sends against what returns), its own thread
 pub mod asio_out; // #233: the ASIO output — its worker over a driver trait (open / run / close / backoff)
 pub mod asio_state; // #233: the ASIO output's decisions (backoff, reasons, replies, stall), pure
 #[cfg(windows)]
@@ -42,6 +43,7 @@ pub mod ndi_input; // #212: the NDI input "OBS manuál" on the genlock grid → 
 pub mod nv12_fit; // #215: aspect-kept NV12 placement (preview letterbox + program fit)
 pub mod paced_grid; // #147 the paced output's own boundary clock (pure, Linux-tested)
 pub mod paced_output; // #168/#147 a playlist's paced output: handoff + consumer → the program bus (cross-platform)
+pub mod paced_producer; // #147/#257 the decode producer's items: frames, then the held last frame to the audio's end
 pub mod pacer;
 pub mod pacer_queue; // #147 producer/consumer: pure bounded look-ahead frame queue
 pub mod pacer_sink; // #203 pacer scheduling + shared-frame standby submit helpers
@@ -68,6 +70,7 @@ pub mod program_bus; // #209: the program bus (SongPlayer = master switcher, NDI
 pub mod program_canvas; // #223: SP-program's ONE picture layout (FHD) + the fit into it
 pub mod program_item; // #228: the item on air (marks, the sender's track) + the burn switch
 pub mod program_max; // #223 S2: SP-program-MAX hand-off, setting + telemetry
+pub mod program_max_list; // #243 follow-up: Spout's list kept by another program, the sentinel
 pub mod program_max_send; // #223 follow-up: the Spout send at its due instant
 pub mod program_max_vblank; // #223 follow-up: the sends on the wall's refresh grid
 pub mod program_max_worker; // #223 S2: the program-max thread (GPU compose + Spout send)

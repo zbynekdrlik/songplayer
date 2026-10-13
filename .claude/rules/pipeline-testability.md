@@ -2,6 +2,7 @@
 paths:
   - "crates/sp-server/src/playback/pipeline.rs"
   - "crates/sp-server/src/playback/pipeline_paced.rs"
+  - "crates/sp-server/src/playback/paced_producer*.rs"
   - "crates/sp-server/src/playback/pipeline_stub.rs"
   - "crates/sp-server/src/playback/pipeline_heartbeat_tests.rs"
   - "crates/sp-server/src/playback/pipeline_inline_tests.rs"
@@ -25,6 +26,18 @@ tests: the `Pacer`, the paced output (`paced_output.rs`), the heartbeat's
 `#[cfg(windows)]` out of habit / proximity to the decode loop (#133 found
 three heartbeat helpers narrowed for no reason, which hid a Linux-testable
 bug).
+
+## The decode producer's items are cross-platform (#257 step 2)
+
+`pipeline_paced::run_decode_producer` (Windows: the MF reader, the STA
+thread) only opens the readers and pushes. Every item it pushes and every
+preview offer is built by `paced_producer::DecodeProducer` (`next_item`,
+`seek`; `to_paced_frame`, `QueuedFrame`), which takes the cross-platform
+`SplitSyncedDecoder` and is Linux-tested over mock readers
+(`paced_producer_tests.rs`, and with the real pacer in
+`pacer_tests_song_end.rs`) and mutation-gated: its file name keeps it out
+of the `pipeline_paced` exclusion. A new producer decision goes there, never
+into the Windows loop. It is on the no-sender and no-spawn source scans.
 
 ## A playlist pipeline has NO NDI sender (#221 lane 3)
 

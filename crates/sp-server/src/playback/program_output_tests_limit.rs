@@ -440,3 +440,34 @@ fn the_fade_line_counts_the_frames_the_limiter_scaled() {
     serve(&mut out, &vban, &backend, job);
     assert_eq!(out.mix_run, MixRun::default(), "the run ended");
 }
+
+/// #257: the limiter engaging OUTSIDE a fade (a source over the ceiling)
+/// is counted on the outputs for the audio fault ledger: every frame of a
+/// constant 1.2 block, twice; a fade's own sum over the ceiling and the
+/// release tail after it count nothing.
+#[test]
+fn the_limiter_engaging_outside_a_fade_is_counted_never_a_fade_or_its_tail() {
+    let (mut out, vban, backend) = output();
+    let overs = |out: &ProgramOutput<MockNdiBackend>| out.outputs.as_ref().unwrap().limiter_overs();
+    let hot = || vec![1.2_f32; FRAMES * 2];
+    serve(
+        &mut out,
+        &vban,
+        &backend,
+        ProgramJob::Source(pair(at(0), hot())),
+    );
+    assert_eq!(overs(&out), 1600, "every frame of the hot block");
+    serve(
+        &mut out,
+        &vban,
+        &backend,
+        ProgramJob::Source(pair(at(1), hot())),
+    );
+    assert_eq!(overs(&out), 3200, "and of the next one");
+    let full = || vec![CEILING; FRAMES * 2];
+    serve(&mut out, &vban, &backend, fade(2, 4, 9, full(), full()));
+    assert_eq!(overs(&out), 3200, "a fade's sum is by design");
+    let quiet = ProgramJob::Source(pair(at(3), vec![0.5; FRAMES * 2]));
+    serve(&mut out, &vban, &backend, quiet);
+    assert_eq!(overs(&out), 3200, "the release tail is no over");
+}

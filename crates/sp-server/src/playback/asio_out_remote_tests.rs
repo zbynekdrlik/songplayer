@@ -16,6 +16,7 @@ fn spec() -> AsioSpec {
         driver: "Waves SoundGrid".into(),
         channels: [3, 4],
         delay_ms: 250,
+        loop_check: true,
     }
 }
 

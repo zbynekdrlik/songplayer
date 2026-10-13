@@ -55,6 +55,10 @@
 //! (DWM's clock, which Arena renders in) on its own thread, `WaitForVBlank`
 //! on the output [`pick_output`] chooses, fitted by [`VblankFit`] into a
 //! [`VblankGrid`]; sp-server sends each MAX picture at a fixed point of it.
+//!
+//! #243 follow-up: [`spout_list_holder`] names the program that holds
+//! Spout's sender list ([`LockHolder`]), and a [`ListSentinel`] waits on
+//! that lock to give it back the moment the holder exits ([`SentinelEnd`]).
 
 mod adapter;
 mod color;
@@ -66,6 +70,7 @@ mod readback;
 pub mod reference;
 mod residency;
 mod spout;
+mod spout_lock;
 pub mod spout_state;
 mod stats;
 mod vblank;
@@ -95,6 +100,7 @@ pub use spout::{
     SPOUT_NAME_MAX_LEN, SPOUT_SENDER_NAME, SharedTextureInfo, check_sender_name,
     parse_sender_names,
 };
+pub use spout_lock::{LockHolder, SentinelEnd};
 pub use stats::{ComposeStats, SpoutSendStats};
 pub use vblank::{
     OutputInfo, Seen, VBLANK_BOOT_INTERVALS, VBLANK_IDLE_MAX, VBLANK_MAX_PERIOD, VBLANK_MIN_FIT,
@@ -104,9 +110,12 @@ pub use vblank::{
 };
 
 #[cfg(not(windows))]
-pub use stub::{Compositor, SpoutSender, VblankTracker, spout_sender_info, spout_sender_names};
+pub use stub::{
+    Compositor, ListSentinel, SpoutSender, VblankTracker, spout_list_holder, spout_sender_info,
+    spout_sender_names,
+};
 #[cfg(windows)]
 pub use win::{
-    Compositor, SpoutSender, VblankTracker, VideoDevice, adapters, read_shared_texture,
-    spout_sender_info, spout_sender_names,
+    Compositor, ListSentinel, SpoutSender, VblankTracker, VideoDevice, adapters, mutex_holder,
+    read_shared_texture, spout_list_holder, spout_sender_info, spout_sender_names,
 };

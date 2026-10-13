@@ -465,6 +465,65 @@ fn the_loop_releases_both_while_max_is_off() {
     thread.join().expect("the loop");
 }
 
+/// #243 follow-up: a quiesce drops both senders (each before its
+/// compositor), holds nothing more and reports `quiesced` for both.
+#[test]
+fn a_quiesce_drops_both_senders_and_reports_quiesced() {
+    let max = fhd_on();
+    let _consumer = max.attach();
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    worker.serve(&plain(1, &picture(4, 2)), Instant::now());
+    assert_eq!(max.status().fhd.submitted, 1, "both went out");
+    worker.quiesce();
+    assert!(!worker.holds_gpu());
+    assert_eq!(
+        gpu.log().drops,
+        ["sender", "compositor", "fhd sender", "fhd compositor"]
+    );
+    let status = max.status();
+    assert_eq!(
+        (status.state.as_str(), status.fhd.state.as_str()),
+        ("quiesced", "quiesced")
+    );
+    assert_eq!(status.fhd.listed_width, 0, "no listing kept");
+}
+
+/// #243 follow-up: the quiesce expired with the process alive: the resume
+/// reads `running` again for both senders before any boundary, and the
+/// next job builds both anew.
+#[test]
+fn a_resume_reads_running_and_the_next_job_builds_both_senders_anew() {
+    let max = fhd_on();
+    let _consumer = max.attach();
+    let gpu = FakeGpu::default();
+    let mut worker = MaxWorker::new(&max, gpu.clone());
+    let a = picture(4, 2);
+    worker.serve(&plain(1, &a), Instant::now());
+    worker.quiesce();
+    worker.resume();
+    let status = max.status();
+    assert_eq!(
+        (status.state.as_str(), status.fhd.state.as_str()),
+        ("running", "running"),
+        "resumed: no longer quiesced"
+    );
+    worker.serve(&plain(2, &a), Instant::now());
+    let status = max.status();
+    assert_eq!((status.submitted, status.fhd.submitted), (2, 2));
+    let log = gpu.log();
+    assert_eq!(
+        (
+            log.compositors_built,
+            log.senders_built,
+            log.fhd_compositors_built,
+            log.fhd_senders_built
+        ),
+        (2, 2, 2, 2),
+        "built anew"
+    );
+}
+
 /// Off Windows the production GPU's FHD compositor has no Direct3D either.
 #[cfg(not(windows))]
 #[test]

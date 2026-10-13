@@ -4,8 +4,39 @@
 
 use super::*;
 use crate::playback::asio_format::AsioSample;
+use crate::playback::asio_loop::{LoopEvent, LoopEventKind, LoopState, LoopStatus};
 use crate::playback::asio_out::{AsioSnapshot, AsioStatus, HardRecentre, LateCallback};
 use crate::playback::asio_state::Reason;
+
+/// A loop check with every field set (#233, the SoundGrid loop check).
+fn full_loop() -> LoopStatus {
+    let mismatch = LoopEvent {
+        kind: LoopEventKind::Mismatch,
+        utc_ms: 1_760_000_000_000,
+        ago_s: 61.5,
+        frames: 512,
+    };
+    let slip = LoopEvent {
+        kind: LoopEventKind::Slip,
+        utc_ms: 1_760_000_001_000,
+        ago_s: 60.5,
+        frames: -7,
+    };
+    LoopStatus {
+        state: LoopState::Locked,
+        inputs: [Some(2), Some(3)],
+        delay_frames: Some(1_234),
+        gain_db: [Some(-0.25), Some(-6.5)],
+        checked_s: 120.5,
+        blind_s: 3.25,
+        mismatches: 1,
+        dropouts: 2,
+        slips: 3,
+        overflows: 4,
+        last_event: Some(slip),
+        recent: vec![mismatch, slip],
+    }
+}
 
 fn full() -> AsioSnapshot {
     AsioSnapshot {
@@ -49,6 +80,7 @@ fn full() -> AsioSnapshot {
                 gap_ms: 21.5,
                 ago_s: 3.5,
             }),
+            loop_status: full_loop(),
         },
         blocks_sent: 10,
         blocks_dropped: 11,
@@ -164,4 +196,64 @@ fn a_non_finite_figure_goes_over_as_zero() {
             ago_s: 1.0
         })
     );
+}
+
+/// #233 (the SoundGrid loop check): every state and event kind crosses the
+/// pipe as itself, every figure finite, and a host that predates the loop
+/// check (no field) reads off.
+#[test]
+fn the_loop_check_crosses_the_pipe() {
+    for state in [
+        LoopState::Off,
+        LoopState::Searching,
+        LoopState::Locked,
+        LoopState::NoReturn,
+    ] {
+        let mut s = full();
+        s.status.loop_status.state = state;
+        assert_eq!(through_json(&s).status.loop_status.state, state);
+    }
+    for kind in [
+        LoopEventKind::Mismatch,
+        LoopEventKind::Dropout,
+        LoopEventKind::Slip,
+    ] {
+        let mut s = full();
+        s.status.loop_status.recent[0].kind = kind;
+        assert_eq!(through_json(&s).status.loop_status.recent[0].kind, kind);
+    }
+    let mut s = full();
+    s.status.loop_status.gain_db = [Some(f64::NAN), Some(f64::NEG_INFINITY)];
+    s.status.loop_status.checked_s = f64::INFINITY;
+    s.status.loop_status.blind_s = f64::NAN;
+    s.status.loop_status.recent[1].ago_s = f64::NAN;
+    s.status.loop_status.last_event.as_mut().unwrap().ago_s = f64::INFINITY;
+    let back = through_json(&s).status.loop_status;
+    assert_eq!(back.gain_db, [Some(0.0), Some(0.0)]);
+    assert_eq!((back.checked_s, back.blind_s), (0.0, 0.0));
+    assert_eq!(back.recent[1].ago_s, 0.0);
+    assert_eq!(back.recent[0], full_loop().recent[0], "a finite one stays");
+    assert_eq!(back.last_event.unwrap().ago_s, 0.0);
+    assert_eq!(
+        (back.delay_frames, back.inputs, back.slips),
+        (Some(1_234), [Some(2), Some(3)], 3),
+        "the rest crosses unchanged"
+    );
+    // The JSON names the status shows.
+    let json = serde_json::to_string(&full().status).unwrap();
+    assert!(
+        json.contains(r#""loop":{"state":"locked","inputs":[2,3],"delay_frames":1234"#),
+        "{json}"
+    );
+    assert!(json.contains(r#""kind":"slip""#), "{json}");
+    // A host that predates it sends no `loop_status`: off.
+    let mut old = WireSnapshot::of(&full(), None);
+    old.status.loop_status = LoopStatus::default();
+    let off = serde_json::to_string(&LoopStatus::default()).unwrap();
+    let text = serde_json::to_string(&old)
+        .unwrap()
+        .replace(&format!(",\"loop_status\":{off}"), "");
+    assert!(!text.contains("loop_status"), "{text}");
+    let back: WireSnapshot = serde_json::from_str(&text).unwrap();
+    assert_eq!(back.status.loop_status, LoopStatus::default());
 }

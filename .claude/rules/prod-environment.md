@@ -11,7 +11,7 @@ paths:
   - "e2e/post-deploy-pp.config.ts"
 ---
 
-# The production environment (#233): LTSC or IoT Enterprise, Defender and firewall OFF
+# The production environment (#233): LTSC or Windows 11 IoT Enterprise, Defender / antivirus / firewall OFF
 
 ## Why
 
@@ -35,41 +35,92 @@ Defender / antivirus / firewall OFF, and "nemôže nič len tak zasahovať do
 production-grade PC/SW": no startup check and no E2E test may let a box run
 otherwise. **Ruling of the same night:** Windows 11 IoT Enterprise
 (`EditionID` `IoTEnterprise`, not LTSC: SNV) is allowed too. No allowance
-(env var, skip) exists in the gate.
+(env var, skip) exists in the gate. The review of 12.10.2026 (5🟡 7🔵, all
+fixed) closed the gaps listed under "Review 12.10.2026" below.
 
-## The check (`crates/sp-server/src/prod_env.rs`, pure; `prod_env_win.rs`, glue)
+## The check (pure: `prod_env.rs` the verdict, `prod_env_read.rs` the facts; glue: `prod_env_win.rs`)
 
-- **Edition** (`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`
-  `EditionID`, `ProductName` shown only): allowed = `LTSC_EDITIONS`
-  (`EnterpriseS`, `EnterpriseSN`, `IoTEnterpriseS`, `IoTEnterpriseSK`) or
-  `IoTEnterprise`, ASCII case ignored, trimmed. NOT allowed: `Enterprise`,
-  `Professional`, `Core`, `IoTEnterpriseK`, and the evaluation
-  `EnterpriseSEval` (it expires; a production box never runs it).
-- **Firewall**, per profile (domain, private, public): the group-policy
-  value `HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\<Domain|Private|Public>Profile\EnableFirewall`
-  WINS when it exists, else the local
-  `HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\<Domain|Standard|Public>Profile\EnableFirewall`
-  (the private profile is `Standard` there). Any value but 0 is on; a local
-  value that is missing or a value that cannot be read is unreadable
-  (`firewall_on`).
-- **Defender real-time**: WMI `root\Microsoft\Windows\Defender`
-  `MSFT_MpComputerStatus.RealTimeProtectionEnabled`, over COM, on a thread
-  of its own (MTA, never the blocking pool's apartment), the services proxy
-  and its enumerator set to impersonate with `CoSetProxyBlanket` (never
-  `CoInitializeSecurity`: it is process-wide). `WBEM_E_INVALID_NAMESPACE` / `WBEM_E_INVALID_CLASS`
-  = Defender not installed = off; no instance, no value, a WMI timeout
-  (10 s, `WBEM_S_TIMEDOUT`) or any other error = unreadable
-  (`defender_realtime`).
-- **Nothing spawns a process** (a launched process is what Defender
-  scanned): registry through `RegGetValueW` (windows-sys
-  `Win32_System_Registry`), WMI through the `windows` 0.58 crate
-  (`Win32_System_{Com,Rpc,Wmi}`, the same version sp-decoder / sp-gpu use).
-  Never PowerShell, `wmic` or any other process for this.
+The glue only READS raw values; every decision is pure and Linux-tested.
+Nothing spawns a process (a launched process is what Defender scanned):
+registry through `RegGetValueW` and the service manager through
+`OpenSCManagerW` / `QueryServiceStatusEx` (windows-sys `Win32_System_Registry`,
+`Win32_System_Services`), WMI through the `windows` 0.58 crate
+(`Win32_System_{Com,Rpc,Wmi}`). Never PowerShell, `wmic` or any other
+process for this.
+
+- **Two reads per check** (`Platform`, `next_check`):
+  - `read_direct` (`DirectRead`), at each check, never bounded: the
+    edition, product name and build (`HKLM\SOFTWARE\Microsoft\Windows
+    NT\CurrentVersion` `EditionID`, `ProductName`, `CurrentBuildNumber`),
+    the firewall's registry values (below), the `WinDefend` service's state;
+  - `read_wmi` (`WmiRead`), behind the bounded `Reader<T>` (`READ_BOUND`
+    30 s), on a thread of its own (COM MTA, never the blocking pool's
+    apartment): Defender's status row, the firewall's active store, the
+    Security Center's antivirus products. Every `ConnectServer` passes
+    `WBEM_FLAG_CONNECT_USE_MAX_WAIT` (it gives up after 2 min instead of
+    never), each proxy and enumerator is set to impersonate with
+    `CoSetProxyBlanket` (never `CoInitializeSecurity`: it is
+    process-wide), `Next` waits 10 s per row (`WBEM_S_TIMEDOUT` = an
+    error), at most 64 rows.
+  - A WMI read past the bound is unreadable and the NEXT check waits for
+    that same read again (never a second thread); a read that FINISHED
+    only after its call gave up is stale (up to a period old) and is
+    dropped: the next call reads afresh. A WMI hang leaves every registry
+    fact (and the firewall's registry fallback) fresh.
+- **Edition** (`edition_allowed`): `LTSC_EDITIONS` (`EnterpriseS`,
+  `EnterpriseSN`, `IoTEnterpriseS`, `IoTEnterpriseSK`) at any build;
+  `IOT_ENTERPRISE_EDITIONS` (`IoTEnterprise`, `IoTEnterpriseK`, the
+  subscription edition) only from `WINDOWS_11_BUILD` 22000 (the owner
+  allowed "11 IoT Enterprise"); ASCII case ignored, trimmed. Anything else
+  (`Enterprise`, `Professional`, `Core`, the evaluation `EnterpriseSEval`)
+  is `edition_not_allowed`, naming the edition and the build. An IoT
+  Enterprise edition whose build was not read is `unreadable:build`.
+- **Firewall**, per profile (domain, private, public): its row in the
+  ACTIVE policy store (`root\StandardCimv2` `MSFT_NetFirewallProfile` read
+  with the `IWbemContext` value `PolicyStore = "ActiveStore"`: the local
+  settings merged with every group policy), `Enabled` 0 off / 1 on
+  (`active_firewall`); any other value (2 = not configured), no row or no
+  value is no answer. Only then does the registry decide
+  (`firewall_from_registry`), and `read_errors` says so ("…: the registry
+  decided"): the group-policy value
+  `HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\<Domain|Private|Public>Profile\EnableFirewall`
+  and, for the private and public profiles, the older
+  Administrative-Templates policy `…\WindowsFirewall\StandardProfile\EnableFirewall`
+  (with either set, ANY set policy saying on reads on: a fallback never
+  passes a box a policy turns on), else the local
+  `HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\<Domain|Standard|Public>Profile\EnableFirewall`.
+- **Defender**: `root\Microsoft\Windows\Defender` `MSFT_MpComputerStatus`
+  `RealTimeProtectionEnabled`, `AMRunningMode`, `AntivirusEnabled`
+  (`defender_realtime`, `PASSIVE_MODES`):
+  - real-time on = `defender_realtime_on`;
+  - a mode that still scans files while another product leads ("Passive
+    Mode", "Passive", "EDR Block Mode", "SxS Passive Mode", Microsoft's
+    `Get-MpComputerStatus` doc) = `defender_passive_mode`, even with
+    real-time off; `Normal` / `Not running` are fine;
+  - `AntivirusEnabled` and the mode are shown only;
+  - `WBEM_E_INVALID_NAMESPACE` / `WBEM_E_INVALID_CLASS` = not installed =
+    off;
+  - its status unreadable (no instance, no value, no mode, an error, the
+    WMI read timed out): the `WinDefend` service decides
+    (`defender_service_off`): stopped (a disabled service is stopped) or
+    `ERROR_SERVICE_DOES_NOT_EXIST` = off; running, starting or unreadable =
+    `unreadable:defender`, the read error naming both reasons.
+- **Other antivirus products** (`antivirus_on`): `root\SecurityCenter2`
+  `AntiVirusProduct` (`displayName`, `instanceGuid`, `productState`).
+  Defender's own entry (GUID `DEFENDER_AV_GUID`
+  `{D68DDC3A-831F-4fae-9E44-DA132C1ACF46}`, or the names "Windows Defender"
+  / "Microsoft Defender Antivirus") is skipped: Defender is checked through
+  its own status. Every other product whose `productState` has the
+  scanner's on bit (`AV_STATE_ON` 0x1000) is `antivirus_on` (one problem
+  per product, named). The word is undocumented but stable since Vista:
+  bits 16-23 the provider kind, bits 8-15 the scanner (0x10 on, 0x00 off,
+  0x01 snoozed / expired), bits 0-7 the definitions (0x00 up to date, 0x10
+  out of date); e.g. 0x061100 Defender on, 0x060100 Defender off, 0x041000
+  a product on. A product with no state, or a failed query, is
+  `unreadable:antivirus`; no Security Center (a server SKU, the CI runner)
+  lists none.
 - **Unreadable is a problem**, never fine (`unreadable:<what>`, "… sa
-  nepodarilo zistiť"); the why is in `read_errors`.
-- **Bounded**: one read may take `READ_BOUND` (30 s); a read past it reads
-  as unreadable and the NEXT check waits for that same read again
-  (`Reader`), so a hung WMI never piles up threads nor freezes a stale "ok".
+  nepodarilo zistiť"); the why is in `read_errors` (each reason once).
 
 ## Where it shows
 
@@ -78,22 +129,29 @@ otherwise. **Ruling of the same night:** Windows 11 IoT Enterprise
   `std::sync::RwLock` copied out: no lock across an await).
 - `GET /api/v1/status.environment` and `GET /api/v1/environment`:
   `sp_core::prod_env::EnvironmentStatus` = `{checked, ok, note, edition_id,
-  product_name, ltsc, edition_allowed, defender_realtime, firewall: {domain,
-  private, public}, problems: [{code, text_sk}], read_errors,
-  checked_at_ms}`. Before the first check: not checked, not ok. Off Windows:
-  checked, ok, `note` "not Windows: …" (Linux tests and the mock are stable).
-- Problem codes (stable): `edition_not_allowed`, `defender_realtime_on`,
-  `firewall_on:<domain|private|public>`, `unreadable:edition`,
-  `unreadable:defender`, `unreadable:firewall:<profile>`; Slovak texts in
-  `sp_core::prod_env::EnvProblem::text_sk`, in the verdict's fixed order.
-- Logs: ONE ERROR (`production environment: VIOLATED - …`, codes, edition,
-  read errors) when a problem appears or the set changes (another edition
-  counts), ONE INFO when it clears, one INFO at the first check that holds
-  (`Reporter::step` → `LogStep`).
+  product_name, build_number, ltsc, edition_allowed, defender_realtime,
+  defender_passive, defender_mode, defender_antivirus_enabled,
+  antivirus_on, firewall: {domain, private, public}, problems: [{code,
+  text_sk}], read_errors, checked_at_ms}`. Before the first check: not
+  checked, not ok. Off Windows: checked, ok, `note` "not Windows: …".
+- Problem codes (stable), in this order: `edition_not_allowed`,
+  `unreadable:edition`, `unreadable:build`, `defender_realtime_on`,
+  `defender_passive_mode`, `unreadable:defender`, `antivirus_on`,
+  `unreadable:antivirus`, `firewall_on:<domain|private|public>`,
+  `unreadable:firewall:<profile>`; Slovak texts in
+  `sp_core::prod_env::EnvProblem::text_sk`.
+- Logs (`Reporter::step` → `LogStep`): ONE ERROR when the problems appear
+  or change (another edition counts), ONE INFO when they clear, one INFO at
+  the first check that holds, ONE WARN when only the read errors change
+  (the same problems for another reason, a reason that comes or goes).
 - Dashboard: the HealthBar polls `/api/v1/environment` every 10 s and shows
   the red `health-environment` segment "Prostredie: <first problem>"
   (`(+N)` for more), the rule + every problem as its tooltip
-  (`sp_core::prod_env::label`, `HealthTone::Error` → `.health-error`).
+  (`sp_core::prod_env::label`, `HealthTone::Error` → `.health-error`). The
+  bar's `data-environment` is the last poll's answer
+  (`sp_core::prod_env::marker`: `unchecked` until the first answer, `ok`,
+  `violated`): a spec asserts it BEFORE it asserts the segment's absence
+  (an absent segment proves nothing before the WASM rendered the poll).
   Mock: `/__mock/environment {…}` over a holding default,
   `/__mock/environment-reset`; spec `e2e/health-environment.spec.ts`.
 
@@ -101,11 +159,15 @@ otherwise. **Ruling of the same night:** Windows 11 IoT Enterprise
 
 `e2e/post-deploy-environment.spec.ts`, in SNV's suite (`post-deploy.config.ts`
 takes every `post-deploy*.spec.ts`) and PP's subset (`post-deploy-pp.config.ts`
-lists it): polls `/api/v1/status` until `environment.checked` (60 s), then
-FAILS on every problem (`code: text`, read errors next to them), on a
-missing status, an unchecked one, or a "not Windows" note; then the dashboard
-shows no `health-environment` segment once its poll answered, console clean.
-Decision `e2e/environment-gate.ts`, unit-tested by `environment-gate.spec.ts`.
+lists it): polls `/api/v1/status` until `environment.checked` (60 s) and
+judges THAT status (no second read), then FAILS (`environment-gate.ts`) on
+every problem (`code: text`), on every fact that is not the production one
+whatever `ok` says (`edition_allowed` true; `defender_realtime`,
+`defender_passive` and every `firewall.*` false; `antivirus_on` `[]`; a fact
+missing from an older server reads null and fails), with the read errors
+next to them, and on a missing, unchecked or "not Windows" status; then the
+dashboard's bar reads `data-environment="ok"` and shows no segment, console
+clean. Unit-tested by `environment-gate.spec.ts` (mock suite).
 
 A red gate means the BOX is wrong: fix the box (Defender real-time off and
 its policy keys, firewall off, the edition), never the gate. Defender's
@@ -115,25 +177,98 @@ GUI); PP's and SNV's settings of 11.10.2026 are on the ticket.
 ## Tests
 
 - `crates/sp-core/src/prod_env_tests.rs`: every code and Slovak text, the
-  wire shape by name, a missing status, the label (none / one / +1 / +2).
-- `crates/sp-server/src/prod_env_tests.rs`: the edition table (IoTEnterprise,
-  IoTEnterpriseS, EnterpriseS ok; Enterprise, Professional, Core not), the
-  verdict per problem and in order, the firewall policy over the local value,
-  Defender's codes, the status of a check, the log steps, `apply` into a
-  private store, the bounded reader (a gated read: unreadable, waited for
-  again, never started twice; a panicking read), `next_check`, and both
-  routes through the real router (serialized on `GLOBAL`: they publish into
-  the process store). On the Windows CI job
-  `the_windows_glue_reads_every_fact` runs the real registry + WMI reads on
-  the runner (every fact present, the facts written to the job's log; the
-  values are the runner's, so not asserted).
+  wire shape by name, a missing status, the label (none / one / +1 / +2),
+  the marker.
+- `crates/sp-server/src/prod_env_tests.rs`: the edition table (LTSC at any
+  build; IoTEnterprise / IoTEnterpriseK at 22000 and up, not 21999 or
+  19045, undecided with no build; the rest never), the verdict per problem
+  and in order, the status of a check, the log steps (read errors
+  included), `apply` into a private store, both routes through the real
+  router (serialized on `GLOBAL`: they publish into the process store).
+- `crates/sp-server/src/prod_env_read_tests.rs`: the active store's rows,
+  the registry fallback (the policy over the local value, the older
+  StandardProfile policy for private + public only), Defender's read, mode
+  and service fallback, the productState decoder, Defender's own entry,
+  the antivirus list's failures, the build, and `facts_from` end to end.
+- `crates/sp-server/src/prod_env_reader_tests.rs`: the bounded reader (a
+  hung read waited for three times and never started twice; a read that
+  finished late dropped and read afresh; a panicking read), `next_check`,
+  and on the Windows CI job `the_windows_glue_reads_what_windows_itself_reports`:
+  Build (Windows) first reads the runner with Windows' own cmdlets
+  (`Get-MpComputerStatus` RealTimeProtectionEnabled + AMRunningMode,
+  `Get-NetFirewallProfile -PolicyStore ActiveStore`, `Win32_OperatingSystem`
+  BuildNumber) into `SP_ENV_EXPECT_*` (read only, the runner is never
+  changed), and the glue's facts must equal them, with no read error.
+
+## Review 12.10.2026 (all fixed)
+
+1. The older StandardProfile firewall policy was not read (policy on +
+   local off read off): the active store decides now, the registry
+   fallback counts that policy.
+2. Defender in passive / EDR block mode and third-party antivirus were not
+   checked: `defender_passive_mode`, `antivirus_on`.
+3. Defender stopped / uninstalled read `unreadable:defender`: the service
+   fallback.
+4. Nothing proved the Defender read can say anything but "off": the
+   Windows job compares the glue with Windows' own cmdlets.
+5. The specs' "no segment" passed before the WASM rendered: the
+   `data-environment` marker.
+6. One 30 s bound covered the registry and WMI, and `ConnectServer` had no
+   wait bound: the registry is read directly, only WMI is bounded,
+   `WBEM_FLAG_CONNECT_USE_MAX_WAIT`.
+7. A late read was published as fresh: a finished stale read is dropped.
+8. A changed unreadable reason logged nothing: one WARN.
+9. The gate trusted `ok` alone: every production fact by name.
+10. The post-deploy spec read the status twice: it judges the polled one.
+11. `IoTEnterpriseK` was refused and Windows 10 IoT Enterprise allowed:
+    both IoT Enterprise editions on Windows 11 only.
+12. The ASIO host's stalled-pipe test had lost its exact pin (bursts now).
 
 ## Known limits
 
-- Only Defender is checked as an antivirus; a third-party antivirus is not
-  (a candidate: `root\SecurityCenter2` `AntiVirusProduct` lists the
-  registered ones on client SKUs). The spawn gate
-  (`post-deploy-audio-asio.spec.ts`) still catches its effect on the ASIO
-  outputs.
-- The glue's VALUES are first checked on a real box by the post-deploy gate
-  (SNV / PP); the Windows CI job proves only that every read succeeds.
+- The productState word is undocumented (decoded as every tool does); a
+  product that registers no state reads `unreadable:antivirus`, never fine.
+- The registry fallback is conservative (any set policy on = on) and does
+  not see MDM / CSP firewall settings; it decides only while the active
+  store cannot be read, and says so.
+- The Windows job proves the glue agrees with Windows on the RUNNER's
+  values (whatever its Defender and firewall are); a box's own values are
+  first checked by the post-deploy gate (SNV / PP).
+
+## Diagnosing an audio disturbance on a box: the method that found this
+
+- **Measure on the driver, not by ear:** the ASIO output's `resyncs`,
+  `hard_recentres`, `callback_gap_max_ms`, `late_callbacks` and
+  `fast_callbacks` on `GET /api/v1/program` `outputs[i].asio`. Read them
+  before and after a single trigger (`POST /api/v1/youtube/probe` spawns one
+  yt-dlp), and repeat 3–4 times: one sample proves nothing (one probe in
+  four read 0).
+- **A/B/A, or it is a guess:** the Defender verdict held only once the
+  change (a Defender `ExclusionProcess`), its removal and the change again
+  all read as predicted. Two earlier "proofs" (the driver sharing
+  SongPlayer's process, handle inheritance) were single comparisons and
+  were wrong.
+- **The MCP shell is a confounded control:** `mcp__win-*__Shell` runs at
+  **BelowNormal** (its python parent is BelowNormal) and its children
+  inherit it. A shell-launched process is therefore not a like-for-like
+  stand-in for one SongPlayer launches (Normal). Raise the shell first
+  (`[Diagnostics.Process]::GetCurrentProcess().PriorityClass='Normal'`) and
+  still treat the result with care: Defender treated the two launches
+  differently anyway.
+- **The kernel trace that pinned it:** the Windows Performance Toolkit is on
+  PP (`C:\Program Files (x86)\Windows Kits\10\Windows Performance
+  Toolkit\xperf.exe`, installed 11.10.2026).
+  - Record: `xperf -on PROC_THREAD+LOADER+DPC+INTERRUPT+CSWITCH+DISPATCHER+PROFILE
+    -stackwalk CSwitch+Profile -BufferSize 1024 -MaxBuffers 1024 -f k.etl`,
+    trigger, then `xperf -stop -d trace.etl`.
+  - Close LatencyMon first: it holds the NT Kernel Logger.
+  - Starting or stopping a kernel trace itself causes SG resyncs, so do not
+    time a measurement across it.
+  - `-a tracestats` gives the absolute start, which lines the trace up with
+    the host log's WARN times.
+  - `-a process` gives the process starts. Never print the command lines:
+    `-a dumper` includes them.
+  - `-a dpcisr -range` gives per-module DPC/ISR time.
+  - `-a dumper -range` gives CSwitch/ReadyThread per thread: the SG audio
+    thread's wake-ups turned 13 / 7.5 / 4.2 / 3.4 / 16.5 ms instead of
+    10.7, ~60 ms after the process start.

@@ -9,14 +9,22 @@
  *    counter, 480 a second. The test adds a temporary entry `e2e-96k` and
  *    restores the stored list in `finally`; the FOH entries are unchanged by
  *    both PATCHes, so the outputs task keeps them running (Task 1.8).
+ * 3. #257: no audio path records a `loss` in the audio fault ledger from
+ *    one settle after FOH is listed to the file's end
+ *    (`audio-faults-read.ts`, the decision `audio-faults-gate.ts`); every
+ *    path and its `risk` rows are logged first, also when the window never
+ *    opened.
  *
- * Read-only otherwise. No sleeps: every wait is an expect.poll. The 96 kHz
- * test reads the settings (to restore them), so the file records no trace.
+ * Read-only otherwise. No sleeps but the ledger's two bounded settles
+ * (`LEDGER_SETTLE_MS`, 11 s: an absence cannot be polled for): every other
+ * wait is an expect.poll. The 96 kHz test reads the settings (to restore
+ * them), so the file records no trace.
  */
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import * as dgram from "node:dgram";
 import { FOH_TARGET, MIN_BLOCKS, fohPathFailures, receiverFailures, type OutputStatus } from "./audio-outputs-gate";
+import { expectNoLossSince, fileStartOrNull, openFaultWindow } from "./audio-faults-read";
 
 async function outputs(request: APIRequestContext): Promise<OutputStatus[]> {
   const resp = await request.get("/api/v1/program");
@@ -29,13 +37,26 @@ async function outputs(request: APIRequestContext): Promise<OutputStatus[]> {
 // (`post-deploy-program-state.md`; a trace option is per file, not per group).
 test.use({ trace: "off" });
 
+/** #257: where this file's audio window opened (the server's clock), one
+ * settle after FOH is listed; `null` until then. */
+let faultWindowStart: number | null = null;
+
+/** #257: the server's clock when this worker began the file: the window's
+ * fallback start when an earlier test failed before it opened. */
+let fileStart: number | null = null;
+
 function fohBlocks(list: OutputStatus[]): number {
   return list.find((o) => o.vban?.targets[0]?.target === FOH_TARGET)?.blocks_sent ?? -1;
 }
 
 test.describe("audio outputs (#233)", () => {
+  test.beforeAll(async ({ request }) => {
+    fileStart = await fileStartOrNull(request);
+  });
+
   test("FOH gets 96 kHz INT24 sp-program", async ({ request }) => {
-    test.setTimeout(45_000);
+    // The FOH poll (20 s), the ledger's settle (11 s), the blocks (10 s).
+    test.setTimeout(60_000);
     // Right after a restart FOH is listed once the outputs task's first pass
     // ran (the migration, every entry's DNS): poll for it. A read that throws
     // counts as "not yet" (expect.poll does not retry a throwing generator).
@@ -51,6 +72,9 @@ test.describe("audio outputs (#233)", () => {
         { message: `a VBAN output to ${FOH_TARGET}`, timeout: 20_000 },
       )
       .toBeGreaterThanOrEqual(0);
+    // #257: the audio window opens one settle after FOH is listed (a fault
+    // from before is stamped before it).
+    faultWindowStart = await openFaultWindow(request);
     const first = await outputs(request);
     console.log(`[#233 outputs] first: ${JSON.stringify(first)}`);
     const start = fohBlocks(first);
@@ -121,8 +145,30 @@ test.describe("audio outputs (#233)", () => {
       }
       const restore = JSON.stringify(current.filter((e) => !e.id.startsWith("e2e-")));
       const back = await request.patch("/api/v1/settings", { data: { audio_outputs: restore } });
-      socket.close();
+      try {
+        // #257: the probe output stops before its receiver closes: a send to
+        // a closed port is a send error, a loss on the audio fault ledger.
+        if (back.status() === 204) {
+          const probeRuns = async () => {
+            try {
+              return (await outputs(request)).some((o) => o.id.startsWith("e2e-"));
+            } catch {
+              return true;
+            }
+          };
+          await expect
+            .poll(probeRuns, { message: "the probe output is gone (the list is re-read every 5 s)", timeout: 20_000 })
+            .toBe(false);
+        }
+      } finally {
+        socket.close();
+      }
       expect(back.status(), "the stored list is restored").toBe(204);
     }
+  });
+
+  test("no audio path lost a sample in this file's window (#257)", async ({ request }) => {
+    test.setTimeout(60_000);
+    await expectNoLossSince(request, faultWindowStart, fileStart);
   });
 });

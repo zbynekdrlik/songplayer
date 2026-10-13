@@ -169,6 +169,24 @@ when a frame is DECODED, not when it is emitted.
 - **Box check.** On a paced output, `stem-mix level samples` per second still ≈
   `preview-tap level samples`; the cushion shifts the start, not the rate.
 
+**The audio's end (#257): `SplitSyncedDecoder::audio_ended`.** The read loop
+sets `audio_eos` when the reader returns end-of-stream (a `StemMixReader`
+does once every stem drained), and `audio_ended()` = that with nothing in
+`pending_audio`; a seek clears it. The paced producer puts it on every
+queued frame, and the pacer then treats a short block as the song's own
+end, never an underrun (`genlock.md` "A song's natural end"). When the
+VIDEO ends first, `next_synced` returns `None` (and reads the video no more
+until a seek) and the audio past the last frame goes out with `next_held`,
+the held last frame's steps on the source cadence, each through the SAME
+G5-gated take (`take_audio_until`: never a read ahead of a step's deadline
++ one chunk), until the audio ended or `AUDIO_PAST_VIDEO_MAX_MS` (15 s);
+only past that bound does a song count one `underrun_end` (`genlock.md`
+"Audio past the picture plays on the held last frame"). A seek asks the
+VIDEO reader for at most one frame before its end (`video_seek_ms`, review:
+Media Foundation may refuse a position past its end or land with no frame),
+the audio for the position itself. Tests: `split_sync_tests_end.rs`,
+`split_sync_tests_held.rs`.
+
 ## #184 round G2 — each reader FAMILY owns its memory; NO global "active kind" (SUPERSEDES round G1)
 
 The ONE console keeps **TWO** remembered fader triples (`sp_core::mixer_model::

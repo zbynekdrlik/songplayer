@@ -18,7 +18,14 @@
 //! #233: while the box violates the production environment (an edition that
 //! is neither LTSC nor IoT Enterprise, Defender's real-time protection on, a
 //! firewall profile on, or a fact that cannot be read), a red segment names
-//! it (`sp_core::prod_env::label`), polled every 10 s.
+//! it (`sp_core::prod_env::label`), polled every 10 s; the bar's
+//! `data-environment` says what the last poll said
+//! (`sp_core::prod_env::marker`).
+//!
+//! #257: the whole audio chain is ONE segment right after WS (every
+//! service's first glance, #248): `Zvuk: bez chyby …`, amber / red on a
+//! loss naming the worst path; a click opens the per-path panel under the
+//! bar (`audio_faults.rs`), polled every 10 s.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -28,6 +35,7 @@ use sp_core::health;
 use sp_core::prod_env::{self, EnvironmentStatus};
 
 use crate::api;
+use crate::components::audio_faults::{AudioFaults, AudioFaultsPanel, AudioSegment};
 use crate::components::ndi_health::GlobalLockBadge;
 use crate::store::{DashboardStore, poll_into};
 
@@ -88,6 +96,9 @@ pub fn HealthBar() -> impl IntoView {
     let _env_poll = Effect::new(move |_| {
         poll_into("/api/v1/environment", 10_000, cancelled, environment);
     });
+    // #257: the audio fault history, one request at a time.
+    let audio = AudioFaults::new();
+    audio.start(cancelled);
 
     // LAN address — one-shot fetch of `/api/v1/status` (no loop → never touches
     // a disposed signal after navigation, per sp-ui-frontend.md).
@@ -110,7 +121,14 @@ pub fn HealthBar() -> impl IntoView {
     });
 
     view! {
-        <div class="health-bar" data-testid="health-bar">
+        // #233 review finding 5: what the last environment poll said
+        // (`unchecked` / `ok` / `violated`), so a spec can tell "the box
+        // holds" from "the poll has not landed".
+        <div
+            class="health-bar"
+            data-testid="health-bar"
+            data-environment=move || prod_env::marker(&environment.get())
+        >
             // WS
             {move || {
                 let (tone, text) = health::ws_label(store.ws_connected.get());
@@ -122,6 +140,8 @@ pub fn HealthBar() -> impl IntoView {
                     </span>
                 }
             }}
+            // #257: the whole audio chain (a click opens the panel below).
+            <AudioSegment state=audio />
             // OBS + active scene
             {move || {
                 let scene = store.obs_scene.get();
@@ -234,6 +254,8 @@ pub fn HealthBar() -> impl IntoView {
                     {format!("v{}", sp_core::config::VERSION)}
                 </span>
             </span>
+            // #257: the audio panel, a full-width line under the segments.
+            <AudioFaultsPanel state=audio />
         </div>
     }
 }

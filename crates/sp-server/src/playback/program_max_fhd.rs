@@ -147,9 +147,10 @@ impl MaxOut {
         }
     }
 
-    /// No Direct3D / Spout here: the FHD sender does nothing either.
-    pub(super) fn set_fhd_unsupported(&self) {
-        self.lock_fhd().phase = MaxPhase::Unsupported;
+    /// The FHD sender's phase follows MAX's: no Direct3D / Spout here, or
+    /// (#243 follow-up) the thread quiesced, or the quiesce expired.
+    pub(super) fn set_fhd_phase(&self, phase: MaxPhase) {
+        self.lock_fhd().phase = phase;
     }
 
     /// An FHD boundary went out: its costs, and `running`.

@@ -4,7 +4,7 @@
 //! [`PACED_AUDIO_LEAD_MS`]) over mock readers whose audio sample VALUES encode
 //! their own media sample index (the `enc` technique of the parent
 //! `pacer_tests_av_align.rs`). Each decoded frame is converted exactly like
-//! `pipeline_paced::to_paced_frame` does it (0-based media time in
+//! `paced_producer::to_paced_frame` does it (0-based media time in
 //! `timecode_100ns`) and fed through the pure [`Pacer`]. A mid-song video stall
 //! (no pull for 5 boundaries ≈ 167 ms) must then play with **0 underruns**,
 //! bit-exact audio across the stall and **0 A/V corrections**. The deeper
@@ -128,7 +128,7 @@ fn readers() -> (Box<dyn VideoStream>, Box<dyn AudioStream>) {
     )
 }
 
-/// `pipeline_paced::to_paced_frame` with a 0 ms origin: the frame PTS and each
+/// `paced_producer::to_paced_frame` with a 0 ms origin: the frame PTS and each
 /// chunk's 0-based media time, in 100 ns.
 fn to_paced(video: DecodedVideoFrame, audio: Vec<DecodedAudioFrame>) -> PacedFrame {
     let chunks = audio

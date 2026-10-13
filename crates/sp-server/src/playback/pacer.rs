@@ -49,7 +49,7 @@ const LATE_THRESHOLD_100NS: i64 = 20_000;
 
 use crate::playback::audio_grid::AudioGridBuffer;
 use crate::playback::frame_buf::SharedFrame;
-use crate::playback::ndi_health::{AudioStats, PacingStats};
+use crate::playback::ndi_health::PacingStats;
 use crate::playback::wallclock::WallClock;
 
 /// A decoded frame handed to the pacer. `pts_ns` is the presentation time
@@ -913,34 +913,11 @@ impl Pacer {
         self.av.resnap();
     }
 
-    /// At EOS ship ONE final boundary of the buffered audio, zero-filled to
-    /// `samples_per_boundary` (#148 rework, item 4); anything past it (the v4
-    /// read-ahead may hold audio beyond the last frame) goes with the song.
-    /// Empty `Vec` when nothing is buffered; `hold_eos_tail_for_standby` keeps it.
-    pub fn take_eos_tail(&mut self) -> Vec<AudioFrame> {
-        if self.audio_buf.level_samples() == 0 {
-            return Vec::new();
-        }
-        self.take_boundary_audio()
-    }
-
     /// One-per-song overflow WARN signal (#148 rework, item 4): `true` exactly
     /// once after the audio buffer first overflows, re-armed on `anchor`. The
     /// pipeline emits the actual WARN (keeps the buffer pure).
     pub fn audio_overflow_warn_needed(&mut self) -> bool {
         self.audio_buf.take_overflow_warning()
-    }
-
-    /// Snapshot the paced-audio telemetry for the health document (the A/V
-    /// alignment itself is reported on `PacingStats`).
-    pub fn audio_stats(&self) -> AudioStats {
-        AudioStats {
-            enabled: self.enabled,
-            samples_per_boundary: self.samples_per_boundary as u64,
-            underruns: self.audio_buf.underruns(),
-            overflows: self.audio_buf.overflows(),
-            buffer_ms: self.audio_buf.buffer_ms(),
-        }
     }
 }
 
@@ -963,6 +940,11 @@ pub use pacer_av_align::{PACED_AUDIO_LEAD_MS, open_paced_decoder};
 #[path = "pacer_blend.rs"] // #251: a boundary between two frames shows both
 mod pacer_blend;
 pub use pacer_blend::FrameBlend;
+
+// A song's natural end plays out every sample it buffered; the underrun phases
+// and the audio telemetry (#257).
+#[path = "pacer_play_out.rs"]
+mod pacer_play_out;
 
 #[cfg(test)]
 #[path = "pacer_tests.rs"]

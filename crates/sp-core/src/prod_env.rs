@@ -51,18 +51,30 @@ impl FirewallProfile {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unreadable {
     Edition,
+    /// The build number, needed for an IoT Enterprise edition (Windows 11
+    /// only).
+    Build,
     Defender,
+    /// The antivirus products the Security Center lists.
+    Antivirus,
     Firewall(FirewallProfile),
 }
 
 /// One way a box is not a production environment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EnvProblem {
-    /// The Windows edition (its `EditionID`) is neither an LTSC edition nor
-    /// IoT Enterprise.
-    EditionNotAllowed(String),
+    /// The Windows edition (its `EditionID`, and the build when it was read)
+    /// is neither an LTSC edition nor Windows 11 IoT Enterprise.
+    EditionNotAllowed { edition: String, build: Option<u32> },
     /// Windows Defender's real-time protection is on.
     DefenderRealtimeOn,
+    /// Windows Defender runs in a mode that still scans files while another
+    /// product leads (`AMRunningMode`: passive, EDR block, side-by-side
+    /// passive).
+    DefenderPassive(String),
+    /// Another antivirus product is on (its name, as the Security Center
+    /// lists it).
+    AntivirusOn(String),
     /// A firewall profile is on.
     FirewallOn(FirewallProfile),
     /// A fact could not be read, so the box cannot be verified.
@@ -75,11 +87,15 @@ impl EnvProblem {
     /// `unreadable:defender`, `unreadable:firewall:<profile>`.
     pub fn code(&self) -> String {
         match self {
-            Self::EditionNotAllowed(_) => "edition_not_allowed".to_string(),
+            Self::EditionNotAllowed { .. } => "edition_not_allowed".to_string(),
             Self::DefenderRealtimeOn => "defender_realtime_on".to_string(),
+            Self::DefenderPassive(_) => "defender_passive_mode".to_string(),
+            Self::AntivirusOn(_) => "antivirus_on".to_string(),
             Self::FirewallOn(p) => format!("firewall_on:{}", p.name()),
             Self::Unreadable(Unreadable::Edition) => "unreadable:edition".to_string(),
+            Self::Unreadable(Unreadable::Build) => "unreadable:build".to_string(),
             Self::Unreadable(Unreadable::Defender) => "unreadable:defender".to_string(),
+            Self::Unreadable(Unreadable::Antivirus) => "unreadable:antivirus".to_string(),
             Self::Unreadable(Unreadable::Firewall(p)) => {
                 format!("unreadable:firewall:{}", p.name())
             }
@@ -89,19 +105,32 @@ impl EnvProblem {
     /// The problem in Slovak, for the dashboard.
     pub fn text_sk(&self) -> String {
         match self {
-            Self::EditionNotAllowed(edition) => format!(
-                "edícia Windows „{edition}“ nie je povolená (povolené sú len Windows LTSC \
-                 a Windows IoT Enterprise)"
-            ),
+            Self::EditionNotAllowed { edition, build } => {
+                let build = build.map(|b| format!(" (zostava {b})")).unwrap_or_default();
+                format!(
+                    "edícia Windows „{edition}“{build} nie je povolená (povolené sú len \
+                     Windows LTSC a Windows 11 IoT Enterprise)"
+                )
+            }
             Self::DefenderRealtimeOn => {
                 "ochrana Windows Defender v reálnom čase je zapnutá".to_string()
             }
+            Self::DefenderPassive(mode) => {
+                format!("Windows Defender beží v režime „{mode}“ a súbory stále kontroluje")
+            }
+            Self::AntivirusOn(name) => format!("antivírus „{name}“ je zapnutý"),
             Self::FirewallOn(p) => format!("brána firewall je zapnutá ({} profil)", p.name_sk()),
             Self::Unreadable(Unreadable::Edition) => {
                 "edíciu Windows sa nepodarilo zistiť".to_string()
             }
+            Self::Unreadable(Unreadable::Build) => {
+                "zostavu Windows sa nepodarilo zistiť".to_string()
+            }
             Self::Unreadable(Unreadable::Defender) => {
                 "stav ochrany Windows Defender v reálnom čase sa nepodarilo zistiť".to_string()
+            }
+            Self::Unreadable(Unreadable::Antivirus) => {
+                "zoznam antivírusových programov sa nepodarilo zistiť".to_string()
             }
             Self::Unreadable(Unreadable::Firewall(p)) => format!(
                 "stav brány firewall ({} profil) sa nepodarilo zistiť",
@@ -157,15 +186,33 @@ pub struct EnvironmentStatus {
     /// The Windows `ProductName`, for the operator.
     #[serde(default)]
     pub product_name: Option<String>,
+    /// The Windows build (`CurrentBuildNumber`, 22000 and up = Windows 11).
+    #[serde(default)]
+    pub build_number: Option<u32>,
     /// The edition is an LTSC edition.
     #[serde(default)]
     pub ltsc: Option<bool>,
-    /// The edition is allowed in production (LTSC or IoT Enterprise).
+    /// The edition is allowed in production (LTSC, or Windows 11 IoT
+    /// Enterprise).
     #[serde(default)]
     pub edition_allowed: Option<bool>,
     /// Windows Defender's real-time protection is on.
     #[serde(default)]
     pub defender_realtime: Option<bool>,
+    /// Windows Defender runs in a passive / EDR block mode (still scans).
+    #[serde(default)]
+    pub defender_passive: Option<bool>,
+    /// Windows Defender's running mode (`AMRunningMode`), for the operator.
+    #[serde(default)]
+    pub defender_mode: Option<String>,
+    /// Windows Defender's antivirus engine is on (`AntivirusEnabled`), for
+    /// the operator.
+    #[serde(default)]
+    pub defender_antivirus_enabled: Option<bool>,
+    /// The other antivirus products that are on (`[]`: none; `None`: not
+    /// read).
+    #[serde(default)]
+    pub antivirus_on: Option<Vec<String>>,
     /// Each firewall profile.
     #[serde(default)]
     pub firewall: FirewallState,
@@ -181,10 +228,25 @@ pub struct EnvironmentStatus {
     pub checked_at_ms: Option<i64>,
 }
 
+/// The health bar's `data-environment` marker of the last poll: `unchecked`
+/// (no check yet, or no answer yet: the default status), `ok` (checked,
+/// no problem), `violated` (anything else). A spec asserts it before it
+/// asserts the red segment's ABSENCE, so a page whose poll has not landed
+/// cannot pass for one that holds (review finding 5).
+pub fn marker(status: &EnvironmentStatus) -> &'static str {
+    if !status.checked {
+        "unchecked"
+    } else if status.ok && status.problems.is_empty() {
+        "ok"
+    } else {
+        "violated"
+    }
+}
+
 /// What the health bar's tooltip says before the problems.
-pub const RULE_SK: &str = "Produkčný počítač musí bežať na Windows LTSC alebo Windows IoT \
-     Enterprise, s vypnutou ochranou Windows Defender v reálnom čase a vypnutou bránou \
-     firewall — nič nesmie kontrolovať ani filtrovať programy, ktoré SongPlayer spúšťa.";
+pub const RULE_SK: &str = "Produkčný počítač musí bežať na Windows LTSC alebo Windows 11 IoT \
+     Enterprise, s vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), \
+     bez iného antivírusu a s vypnutou bránou firewall — nič nesmie kontrolovať ani filtrovať programy, ktoré SongPlayer spúšťa.";
 
 /// The health bar's segment, shown only while a check names a problem:
 /// `Prostredie: <the first problem>` (and ` (+N)` for N more), red, with the

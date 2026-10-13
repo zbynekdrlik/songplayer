@@ -14,6 +14,7 @@ paths:
   - "crates/sp-server/src/playback/loop_stats.rs"
   - "crates/sp-server/src/playback/frame_buf.rs"
   - "crates/sp-decoder/src/frame_pool.rs"
+  - "crates/sp-decoder/src/split_sync*.rs"
   - "crates/sp-server/src/process_residency*.rs"
   - "crates/sp-server/src/playback/lock_state*.rs"
   - "crates/sp-server/src/playback/pacing_stats.rs"
@@ -1177,24 +1178,31 @@ whatever the state:
 
   The video stamp comes from `resolve_emit_boundary`, exactly as for a playing
   repeat; a resync stamps `floor(now)`.
-- **The EOS tail rides a standby boundary, never an audio-only send.** At a
-  natural song end `decode_and_send_paced` calls
-  `Pacer::hold_eos_tail_for_standby`, which holds the last partial boundary
-  (`take_eos_tail`, #148 rework item 4). It then serves ONE more
-  `FrozenLast` boundary (`serve_one_standby_boundary`); that boundary's block
-  is the tail. The receiver therefore gets exactly one audio block per video
-  boundary into the idle fill.
+- **The EOS tail rides standby boundaries, never an audio-only send.** At a
+  natural song end `decode_and_send_paced` calls `Pacer::play_out_audio`
+  (#257, `pacer_play_out.rs`): per boundary `hold_eos_tail_for_standby` holds
+  the next buffered block (`take_eos_tail`, #148 rework item 4) and ONE
+  `FrozenLast` boundary carries it, until nothing is buffered (at least one
+  boundary, as before #257, when it was exactly one and the rest was
+  dropped). The receiver therefore gets exactly one audio block per video
+  boundary into the idle fill. See "A song's natural end" below.
   - Removed with this: the old audio-only tail (`SharedHandoff` `eos_tail` and
     `submit_audio_tail`). Kept with it, it gave n+1 blocks per n boundaries at
     every song end.
   - A new map (`anchor`, lag re-anchor → `AvAlign::realign`) drops a held
     tail. With a Play already queued, the tail boundary is still served first,
     so nothing is lost; a stale tail is never replayed at a later pause.
-  - A song that ends with no frame ever shown (`Starved`, e.g. a seek at EOS)
-    has no frozen frame to pair with. Its tail rides the first idle `Black`
-    boundary instead, or a new map drops it. It is still one block per boundary.
-  - The song summary is logged BEFORE the tail boundary, so its frozen repeat
-    is not counted as the song's.
+  - A song that ends with no frame ever shown (`Starved`: rare since #257
+    step 2, a seek to or past the last frame holds that frame) has no frozen
+    frame to pair with. Each play-out boundary is then the pacer's starve
+    fill (`fill_starved`: the pre-roll black, or a seek's held pre-seek
+    picture), which carries the held block: the tail rides the play-out's
+    own boundaries, still one block per boundary. (A pacer that never ran a
+    pre-roll — a bare unit test, never production — starves silently and
+    emits nothing.)
+  - The song summary's pacing counters are read BEFORE the play-out, so its
+    frozen repeats are not counted as the song's; the line itself is logged
+    after it, so it carries the song's end underrun (#257).
   - `SharedHandoff`'s stop API is now just `stop()`; the queue, snapshot and
     counters are unchanged.
 - **The idle fill uses the playing path's submit thread.**
@@ -1445,6 +1453,167 @@ stamp). Tests pin it: `pacer_tests.rs` (the mixed
 catch-up/resync run, with the never-future-dated check read from the
 settable wall at each emit), `pacer_tests_lane4.rs`, `pacer_tests_standby.rs`,
 `program_output_tests.rs`, `program_bus_tests.rs`, `ndi_input_tests*.rs`.
+
+## A song's natural end plays out every sample; underruns by phase (#257)
+
+**The finding (SNV 12.10.2026, the #257 ledger's first deploy):** the gate
+`post-deploy-audio-asio.spec.ts` failed on `pipeline:4 underrun ×1` at a
+natural song end. Two things were wrong, and one was a misreading:
+
+- **Every natural end counted an underrun, with nothing missing.** The
+  block the song's audio ends in (the last frame's aligned take, or the
+  EOS tail) was zero-filled after the song's last sample, and
+  `AudioGridBuffer::take_block` counted every short block as an underrun.
+  A picture that outlasts its audio added one per empty block. A scratch
+  model of the decoder pairing + pacer + grid over 160 natural ends
+  (23.976 / 25 / 30 / 60 fps, audio −50…+45 ms off the picture): 0–3 per
+  end (29 zero, 80 one, 43 two, 8 three), never a start underrun.
+- **A tail longer than one block was dropped.** Only ONE standby block
+  went out after the last frame; audio still buffered "went with the
+  song": 20 of the 160 ends (audio 30–45 ms longer than the picture) lost
+  38–880 samples (0.8–18 ms).
+- **The "~9 per song, up to 54" figure was a lifetime counter.** The song
+  summary's `audio_underruns` was the PIPELINE's cumulative count (the pacer
+  lives for the pipeline, `pipeline.rs`), while every other field of the
+  line was a per-song delta. So the 1 124 summaries' "9 per ended song"
+  read a running total (every underrun since the pipeline's start, a deploy
+  restarts it; 0–3 per natural end in the model), not 0.3 s lost per song.
+  That is read from the code (`pipeline.rs` builds one `Pacer` per
+  pipeline, `clear()` keeps the counters), not re-read from SNV's logs.
+
+**The fix:**
+
+- `SplitSyncedDecoder::audio_ended` (sp-decoder, set when the audio reader
+  returns end-of-stream with nothing pending, cleared by a seek) rides
+  every queued frame (`QueuedFrame = (PacedFrame, u64, bool)`); once a
+  popped frame says so the emit loop calls `Pacer::audio_source_ended` →
+  `AudioGridBuffer::end_source` (after `prepare`, before `service`, again
+  after a Resume's flush; a Seek resets the loop's flag).
+- After the source ended, a short block is the song's END: its real
+  samples play, the rest is padding, nothing is counted
+  (`AudioGridBuffer::note_shortfall`).
+- `Pacer::play_out_audio` (natural end, the producer-died end too) serves
+  frozen standby boundaries until the grid is empty (`PLAY_OUT_MAX_BOUNDARIES`
+  = 61 bounds the loop: the 2 s cap is 60 blocks). Audio is the master
+  clock: the song ends once its audio played.
+- `AudioGridBuffer::end_song` (the play-out's first step): a source that had
+  NOT ended counts one `end` underrun (a decode error, a dead producer, or
+  audio past the last frame's 250 ms read-ahead the decoder never reads),
+  then the source counts as ended so the play-out's own short block is not
+  counted twice.
+
+**Phases** (`AudioStats.underruns_start` / `_mid` / `_end`, `underruns` = the
+sum; `/api/v1/ndi/health` `audio`, the ledger's `underrun_start` /
+`underrun` / `underrun_end`, the song summary per song):
+
+- `start`: a block cut short before the map's first full block (after a
+  clear: play, seek, new song, Resume);
+- `mid`: cut short once the audio flowed, before the source ended (the
+  decode fell behind the 250 ms cushion);
+- `end`: a song that ended before its source did (above).
+
+### Audio past the picture plays on the held last frame (#257 step 2)
+
+**The finding** (an independent review of 26a5508d, confirmed on SNV): the
+decoder read audio only up to the last frame's pts + `PACED_AUDIO_LEAD_MS`
+(+ one packet), so a file whose audio outlasts its picture by more lost the
+rest and its natural end counted one `underrun_end`. In 4 days on SNV ONE
+file showed a > 100 ms `split_sync: video/audio duration mismatch` (`v_dur=
+2151600 a_dur=2159391`): the dub of a 35.9-min sermon, 7.8 s longer, all of
+it the Live session's drain silence (`dabing.md`, "Placement": the dub
+worker no longer renders it), opened 289×.
+
+**The rule** (the owner: no audio sample may be lost): a song ends when its
+AUDIO has played. When the picture ends first, the picture HOLDS the
+video's last frame while the audio plays on, up to
+`sp_decoder::split_sync::AUDIO_PAST_VIDEO_MAX_MS` = 15 s:
+
+- **The decoder** (`SplitSyncedDecoder`, sp-decoder, pure, `HeldTail`):
+  after `next_synced` returned `None` (the video reader is then not read
+  again until a seek), `next_held` hands out one step per source frame
+  period (`⌊k·1000·den/num⌋` ms from the last frame delivered, from the
+  base every time: no drift; 30 fps for a rate outside 10–120 fps, a zero
+  term included — review: 1000/1 would push 15 000 steps into the bound,
+  under 0.6 fps one step would carry over the grid's 2 s cap): the step's
+  time and the audio up to it + the lead, through the SAME G5-gated take
+  (`take_audio_until`) a frame uses. `None` once `audio_ended` (every
+  sample out), past the bound, or while the video plays. A seek resets it
+  (`HeldTail::from_origin`). A seek to or past the last frame delivers no
+  frame: its fast-forward keeps the last frame it decoded
+  (`take_frame_before_end`), and the steps start ON the seek's position.
+- **A seek asks the VIDEO for at most one frame before its end** (review:
+  a Pause in the held tail stores a position past the last frame, and ▶
+  resumes there through `real_start_ms`). `video_seek_ms` = min(position,
+  the video's duration − one frame) when the duration is known (> 0); the
+  fast-forward target, the audio seek and the tail's origin keep the
+  position. Asked a position past its end, Media Foundation may refuse it
+  (the song then played on from where it was, a resume from 0) or land at
+  end-of-stream with no frame (no picture: the tail never played). Now it
+  lands on a frame it has, the fast-forward runs out after the last frame
+  and keeps it, and the audio from the position plays on it.
+- **The producer** (`playback/paced_producer.rs`, cross-platform,
+  Linux-tested, in the mutation gate; `pipeline_paced.rs`'s producer is
+  glue over it): `DecodeProducer::next_item` hands the queue each frame,
+  then each held step as an ordinary `QueuedFrame` — the last frame's
+  `SharedFrame` again (an `Arc` bump, never a pixel copy), the step's pts on
+  the song's origin, its audio, `audio_ended`. The preview taps get the
+  held picture and its audio (`DecodeTaps::offer_picture`), so the preview
+  keeps its picture and sound (and its encoder never starves past 10 s).
+  No picture ever decoded = no tail (the end counts its `underrun_end`).
+  A seek that moved the decoder drops the held picture (review): the frame
+  it lands on, or the last one its fast-forward decoded, replaces it, so a
+  picture from before the seek never shows with the audio after it; a
+  refused seek keeps it (nothing moved).
+- **The emit loop is unchanged**: held steps are queue items, so they are
+  paced one per grid slot (24 / 25 fps tails repeat and blend like the
+  song), the 2 s grid cap never comes near (the 250 ms lead), and every
+  command is served between them exactly as mid-song: a skip or a stop ends
+  the song at once, a seek goes back into the picture (and the tail starts
+  anew from the new last frame), a pause freezes. The step carrying the
+  audio's end marks the source ended; after it the play-out plays what is
+  buffered (≤ the lead + a packet, well within `PLAY_OUT_MAX_BOUNDARIES`).
+- **Past the bound** (a broken pair, never a real tail): the steps stop at
+  15 s, the rest is never read, and the end counts ONE `underrun_end`, so
+  the ledger names the file.
+- `Position` events follow the held steps (the item's position), so the
+  dashboard's bar runs to the audio's end; `duration_ms` was the audio's
+  already.
+
+**Tests:** `pacer_tests_song_end.rs` (the real `open_paced_decoder` and
+`DecodeProducer` running up to the 12-item queue ahead, the emit loop's
+order with its commands; 23.976 / 25 / 60 fps equal lengths, audio +45 ms,
+picture +50 ms; audio +1 s and +8 s at 30 fps and +8 s at 23.976 fps: every
+sample once, 0 underruns, the last frame held — `Rec.shown` — from the
+video's end; audio +20 s: 15 s played, one `end` underrun; a skip 3.3 s into
+the tail ends the song at once with the producer a full queue ahead; a seek
+past the last frame plays the rest on that frame; a seek back during the
+tail plays the picture again; pins from a scratch model of the decoder,
+the producer, the pacer and the grid), `paced_producer_tests.rs` (a seek
+drops the held picture, a refused one after two frames plays on from the
+second), `split_sync_tests_held.rs` (the seek clamp over a Media
+Foundation-like reader that refuses a position past its end or lands at
+end-of-stream; the 10–120 fps cadence edges), `audio_grid_tests_phases.rs`,
+`split_sync_tests_end.rs`, and on Windows `tests/split_synced.rs` (the real
+Media Foundation + symphonia readers: the 3 s video with the 4 s
+`silent_4s.flac`, seeked to 3.5 s, holds the last frame and hands out
+exactly the 24 000 frames left).
+
+**Box check after the deploy:**
+
+- every `paced: song summary … reason="ended"` reads `audio_underruns=0
+  underruns_start=0 underruns_mid=0 underruns_end=0` (the fields are per
+  song); the ledger shows no `pipeline:<id>` loss at a natural end; the
+  post-deploy audio gates pass across song ends;
+- SP-dabing's sermon dub (the 7.8 s one; after a re-dub it ends at its last
+  voiced word): play it to its end on program — its song summary reads
+  `underruns_end=0`, the wall holds the video's last frame for the audio's
+  tail, and `duration_s` covers the audio (2159.4 s), not the video; after
+  the one-off `dub_worker.py trim-tail` (`dabing.md`) the audio ends at its
+  last word + 50 ms (or the video's own length);
+- pause that dub inside its held tail and press ▶: it resumes there on the
+  held last frame: the log's `paced producer: seeked position_ms=` is the
+  paused position (never `the decoder refused the seek`, never 0), and
+  the song summary of the resume reads `underruns_end=0`.
 
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path

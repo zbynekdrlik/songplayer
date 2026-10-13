@@ -53,9 +53,12 @@ test("the environment segment appears red while violated, names the problems, an
   // Three changes, each seen at the bar's next 10 s poll.
   test.setTimeout(90_000);
   await page.goto("/");
-  await expect(page.getByTestId("health-bar")).toBeVisible({ timeout: 10000 });
+  const bar = page.getByTestId("health-bar");
+  await expect(bar).toBeVisible({ timeout: 10000 });
   await expect(page.getByTestId("health-version")).toBeVisible();
-  // The box holds: no segment.
+  // The box holds: the poll landed and said so, and there is no segment
+  // (asserted only once the marker proves the poll's answer rendered).
+  await expect(bar).toHaveAttribute("data-environment", "ok", { timeout: 15000 });
   await expect(page.getByTestId("health-environment")).toHaveCount(0);
 
   await request.post("/__mock/environment", {
@@ -76,8 +79,12 @@ test("the environment segment appears red while violated, names the problems, an
     { timeout: 15000 },
   );
   await expect(segment).toHaveClass(/health-error/);
+  await expect(bar).toHaveAttribute("data-environment", "violated");
   const tip = await segment.getAttribute("title");
-  expect(tip).toContain("Produkčný počítač musí bežať na Windows LTSC alebo Windows IoT Enterprise");
+  expect(tip).toContain(
+    "Produkčný počítač musí bežať na Windows LTSC alebo Windows 11 IoT Enterprise, s vypnutou " +
+      "ochranou Windows Defender v reálnom čase (ani v pasívnom režime), bez iného antivírusu",
+  );
   expect(tip).toContain("Zistené: ochrana Windows Defender v reálnom čase je zapnutá.");
 
   // A second problem: the first is shown, the rest counted, all in the tooltip.
@@ -93,11 +100,10 @@ test("the environment segment appears red while violated, names the problems, an
     /Zistené: ochrana Windows Defender v reálnom čase je zapnutá; brána firewall je zapnutá \(verejný profil\)\.$/,
   );
 
-  // Fixed on the box: the next poll drops the segment.
+  // Fixed on the box: the next poll says so and drops the segment.
   await request.post("/__mock/environment-reset");
-  await expect(page.getByTestId("health-environment")).toHaveCount(0, {
-    timeout: 15000,
-  });
+  await expect(bar).toHaveAttribute("data-environment", "ok", { timeout: 15000 });
+  await expect(page.getByTestId("health-environment")).toHaveCount(0);
 });
 
 test("the environment segment shows on every page's health bar", async ({
@@ -109,6 +115,9 @@ test("the environment segment shows on every page's health bar", async ({
   });
   for (const path of ["/", "/settings", "/lyrics"]) {
     await page.goto(path);
+    await expect(page.getByTestId("health-bar")).toHaveAttribute("data-environment", "violated", {
+      timeout: 10000,
+    });
     await expect(page.getByTestId("health-environment")).toHaveText(
       "Prostredie: brána firewall je zapnutá (verejný profil)",
       { timeout: 10000 },

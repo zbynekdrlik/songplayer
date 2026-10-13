@@ -173,6 +173,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Continue"
           Write-Host "=== Stopping SongPlayer ==="
+          # Issue 243: first SongPlayer drops its Spout senders and makes no
+          # Spout call any more: a kill mid-call can leave a Spout lock
+          # abandoned, and Arena then keeps Spout's sender list for good (PP,
+          # 12.10.2026). Best effort (it is stopped anyway), at most ~8 s.
+          & "$env:GITHUB_WORKSPACE\scripts\spout-quiesce.ps1"
           Stop-ScheduledTask -TaskName "SongPlayer" -ErrorAction SilentlyContinue
           taskkill /F /IM "SongPlayer.exe" 2>&1 | Out-Null
           # #233: the ASIO host dies with SongPlayer (its kill-on-close Job

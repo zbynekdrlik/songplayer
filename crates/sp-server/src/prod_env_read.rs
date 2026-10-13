@@ -1,0 +1,442 @@
+//! #233: the raw reads of the production environment and the facts made of
+//! them (pure, Linux-tested; `prod_env_win.rs` only reads).
+//!
+//! The registry is read directly ([`DirectRead`]): it is fast and never
+//! hangs. WMI is read behind the bounded reader ([`WmiRead`],
+//! `super::Reader`): a WMI hang makes only the WMI facts unreadable, never
+//! the registry's. The firewall is decided by the active policy store (WMI,
+//! the policy as it applies), the registry only when that cannot be read.
+
+use sp_core::prod_env::FirewallProfile;
+
+use super::{EnvFacts, WBEM_E_INVALID_CLASS, WBEM_E_INVALID_NAMESPACE};
+
+/// A registry string as read: the value, `None` when the key or the value
+/// does not exist, or the Win32 error.
+pub type RegString = Result<Option<String>, u32>;
+
+/// A registry DWORD as read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegDword {
+    Value(u32),
+    /// The key or the value does not exist.
+    Absent,
+    /// The read failed with this Win32 error.
+    Failed(u32),
+}
+
+/// `SERVICE_STOPPED`: a service's current state when it does not run.
+pub const SERVICE_STOPPED: u32 = 1;
+
+/// `ERROR_SERVICE_DOES_NOT_EXIST`: the service is not installed.
+pub const ERROR_SERVICE_DOES_NOT_EXIST: u32 = 1060;
+
+/// A service's state as the service manager reports it: its current state
+/// (`SERVICE_STOPPED` = 1, …), or the Win32 error of the read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceRead {
+    State(u32),
+    Failed(u32),
+}
+
+/// What the registry and the service manager give, read directly at each
+/// check.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DirectRead {
+    /// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` `EditionID`.
+    pub edition_id: RegString,
+    /// The same key's `ProductName` (shown only).
+    pub product_name: RegString,
+    /// The same key's `CurrentBuildNumber` (`"22631"`).
+    pub build: RegString,
+    /// Each profile's group-policy `EnableFirewall` (domain, private, public).
+    pub firewall_policy: [RegDword; 3],
+    /// The older Administrative-Templates policy
+    /// (`…\WindowsFirewall\StandardProfile\EnableFirewall`): the private and
+    /// public profiles.
+    pub firewall_legacy_policy: RegDword,
+    /// Each profile's local `EnableFirewall` (domain, private, public).
+    pub firewall_local: [RegDword; 3],
+    /// The `WinDefend` service.
+    pub defender_service: ServiceRead,
+}
+
+/// Defender's status row (`MSFT_MpComputerStatus`), each property `None`
+/// without a value.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DefenderRow {
+    /// `RealTimeProtectionEnabled`.
+    pub realtime: Option<bool>,
+    /// `AMRunningMode`: `Normal`, `Passive Mode`, `EDR Block Mode`, …
+    pub mode: Option<String>,
+    /// `AntivirusEnabled`.
+    pub antivirus_enabled: Option<bool>,
+}
+
+/// One firewall profile in the active policy store (`MSFT_NetFirewallProfile`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FirewallRow {
+    /// `Domain`, `Private` or `Public`.
+    pub name: String,
+    /// `Enabled`: 0 off, 1 on, 2 not configured.
+    pub enabled: Option<u32>,
+}
+
+/// One antivirus product the Security Center lists (`AntiVirusProduct`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AvProduct {
+    /// `displayName`.
+    pub name: String,
+    /// `instanceGuid`.
+    pub guid: String,
+    /// `productState`.
+    pub state: Option<u32>,
+}
+
+/// What WMI gives, read behind the bound; each query's rows, or its HRESULT.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WmiRead {
+    /// Defender's status row (`None`: no instance).
+    pub defender: Result<Option<DefenderRow>, i32>,
+    /// The firewall profiles as they apply now.
+    pub firewall: Result<Vec<FirewallRow>, i32>,
+    /// The registered antivirus products.
+    pub antivirus: Result<Vec<AvProduct>, i32>,
+}
+
+impl WmiRead {
+    /// Every query failed with `code` (COM could not start, say).
+    pub fn failed(code: i32) -> Self {
+        Self {
+            defender: Err(code),
+            firewall: Err(code),
+            antivirus: Err(code),
+        }
+    }
+}
+
+/// Whether a firewall profile is on as it applies now: its row in the
+/// active policy store (`Enabled` 0 off, 1 on). A missing row, no value, or
+/// any other value (2: not configured) cannot be verified (`Err`, why).
+pub fn active_firewall(rows: &[FirewallRow], profile: FirewallProfile) -> Result<bool, String> {
+    let name = profile.name();
+    let row = rows
+        .iter()
+        .find(|row| row.name.trim().eq_ignore_ascii_case(name))
+        .ok_or_else(|| format!("the active firewall store has no {name} profile"))?;
+    match row.enabled {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        Some(other) => Err(format!(
+            "the {name} firewall profile reads {other} in the active store"
+        )),
+        None => Err(format!(
+            "the {name} firewall profile has no state in the active store"
+        )),
+    }
+}
+
+/// Whether a firewall profile is on by the registry (the fallback when the
+/// active store cannot be read): the group-policy value wins when it is set
+/// (`HKLM\SOFTWARE\Policies\Microsoft\WindowsFirewall\<profile>`), else the
+/// local one (`…\SharedAccess\Parameters\FirewallPolicy\<profile>`). The
+/// older Administrative-Templates policy (`…\WindowsFirewall\StandardProfile`,
+/// `legacy`) is a policy for the private and public profiles too: with
+/// either policy set, the profile is on when any set policy says on (a
+/// fallback never reads a box off that a policy turns on). Any value but 0
+/// is on. A policy that cannot be read, or (with no policy) a local value
+/// that is missing or cannot be read, cannot be verified (`Err`, why).
+pub fn firewall_from_registry(
+    profile: FirewallProfile,
+    policy: RegDword,
+    legacy: RegDword,
+    local: RegDword,
+) -> Result<bool, String> {
+    let name = profile.name();
+    let legacy = if profile == FirewallProfile::Domain {
+        RegDword::Absent
+    } else {
+        legacy
+    };
+    let mut set = false;
+    let mut on = false;
+    for (what, value) in [
+        ("policy", policy),
+        ("older policy (StandardProfile)", legacy),
+    ] {
+        match value {
+            RegDword::Value(v) => {
+                set = true;
+                on |= v != 0;
+            }
+            RegDword::Absent => {}
+            RegDword::Failed(code) => {
+                return Err(format!(
+                    "the {name} firewall {what} could not be read (error {code})"
+                ));
+            }
+        }
+    }
+    if set {
+        return Ok(on);
+    }
+    match local {
+        RegDword::Value(v) => Ok(v != 0),
+        RegDword::Absent => Err(format!("the {name} firewall setting is missing")),
+        RegDword::Failed(code) => Err(format!(
+            "the {name} firewall setting could not be read (error {code})"
+        )),
+    }
+}
+
+/// Defender's real-time protection from its WMI read: the property
+/// (`Ok(Some)`), no instance or no value (`Ok(None)`: cannot be verified), or
+/// the query's HRESULT. A missing namespace or class means Defender is not
+/// installed: off.
+pub fn defender_realtime(read: Result<Option<bool>, i32>) -> Result<bool, String> {
+    match read {
+        Ok(Some(on)) => Ok(on),
+        Ok(None) => Err("Defender's status names no real-time protection".to_string()),
+        Err(WBEM_E_INVALID_NAMESPACE | WBEM_E_INVALID_CLASS) => Ok(false),
+        Err(code) => Err(format!(
+            "Defender's status could not be read (0x{:08X})",
+            code as u32
+        )),
+    }
+}
+
+/// Whether the `WinDefend` service says Defender is off, when its status
+/// cannot be read: stopped (a disabled service is stopped), or not
+/// installed. Running, starting, stopping or unreadable: it cannot tell.
+pub fn defender_service_off(service: ServiceRead) -> Result<(), String> {
+    match service {
+        ServiceRead::State(SERVICE_STOPPED) | ServiceRead::Failed(ERROR_SERVICE_DOES_NOT_EXIST) => {
+            Ok(())
+        }
+        ServiceRead::State(state) => Err(format!(
+            "the WinDefend service is not stopped (state {state})"
+        )),
+        ServiceRead::Failed(code) => Err(format!(
+            "the WinDefend service could not be read (error {code})"
+        )),
+    }
+}
+
+/// Defender's running modes (`AMRunningMode`) in which it still scans files
+/// while another product leads: passive, EDR in block mode, side-by-side
+/// passive (Microsoft's `Get-MpComputerStatus` documentation). `Normal` and
+/// `Not running` are no such mode.
+pub const PASSIVE_MODES: [&str; 4] = [
+    "Passive Mode",
+    "Passive",
+    "EDR Block Mode",
+    "SxS Passive Mode",
+];
+
+/// A running mode in which Defender still scans files ([`PASSIVE_MODES`],
+/// ASCII case ignored).
+pub fn is_passive_mode(mode: &str) -> bool {
+    let m = mode.trim();
+    PASSIVE_MODES.iter().any(|p| p.eq_ignore_ascii_case(m))
+}
+
+/// Defender's own entry in the Security Center (`instanceGuid`): it is
+/// checked through its own status ([`defender_realtime`]), never as
+/// another product.
+pub const DEFENDER_AV_GUID: &str = "{D68DDC3A-831F-4fae-9E44-DA132C1ACF46}";
+
+/// Defender's own entry by name, should its GUID ever differ.
+pub const DEFENDER_AV_NAMES: [&str; 2] = ["Windows Defender", "Microsoft Defender Antivirus"];
+
+/// Defender's own entry in the Security Center (by GUID or name).
+pub fn is_defender_product(product: &AvProduct) -> bool {
+    product.guid.trim().eq_ignore_ascii_case(DEFENDER_AV_GUID)
+        || DEFENDER_AV_NAMES
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(product.name.trim()))
+}
+
+/// The "on" bit of an antivirus product's `productState`. Microsoft does
+/// not document the word, but it is stable since Windows Vista and every
+/// tool decodes it the same way: bits 16-23 the provider kind, bits 8-15 the
+/// scanner (0x10 on, i.e. 0x1000 in the word; 0x00 off; 0x01 snoozed or
+/// expired), bits 0-7 the definitions (0x00 up to date, 0x10 out of date).
+/// For example 0x061100 (397568) is Defender on, 0x060100 (393472) Defender
+/// off, 0x041000 (266240) a product on and up to date.
+pub const AV_STATE_ON: u32 = 0x1000;
+
+/// An antivirus product's `productState` says it is on ([`AV_STATE_ON`]).
+pub fn av_product_on(state: u32) -> bool {
+    state & AV_STATE_ON != 0
+}
+
+/// The antivirus products that are on, but Defender's own entry: their
+/// names. No Security Center (a server SKU has no `root\SecurityCenter2`)
+/// lists none. A product whose state cannot be read, or a query that
+/// failed, cannot be verified (`Err`, why).
+pub fn antivirus_on(wmi: &Result<WmiRead, String>) -> Result<Vec<String>, String> {
+    let products = match wmi {
+        Err(why) => return Err(why.clone()),
+        Ok(read) => match &read.antivirus {
+            Ok(products) => products,
+            Err(WBEM_E_INVALID_NAMESPACE | WBEM_E_INVALID_CLASS) => return Ok(Vec::new()),
+            Err(code) => {
+                return Err(format!(
+                    "the registered antivirus products could not be read (0x{:08X})",
+                    *code as u32
+                ));
+            }
+        },
+    };
+    let mut on = Vec::new();
+    for product in products.iter().filter(|p| !is_defender_product(p)) {
+        match product.state {
+            Some(state) if av_product_on(state) => on.push(product.name.clone()),
+            Some(_) => {}
+            None => {
+                return Err(format!(
+                    "the state of the antivirus product {:?} could not be read",
+                    product.name
+                ));
+            }
+        }
+    }
+    Ok(on)
+}
+
+/// Adds `why` to the read errors once (one WMI failure can explain several
+/// facts).
+fn note(errors: &mut Vec<String>, why: String) {
+    if !errors.contains(&why) {
+        errors.push(why);
+    }
+}
+
+/// A registry string fact: the value, or `None` and why.
+fn string_fact(read: &RegString, what: &str, errors: &mut Vec<String>) -> Option<String> {
+    match read {
+        Ok(Some(value)) => Some(value.clone()),
+        Ok(None) => {
+            note(errors, format!("{what} is missing"));
+            None
+        }
+        Err(code) => {
+            note(errors, format!("{what} could not be read (error {code})"));
+            None
+        }
+    }
+}
+
+/// The build number (`CurrentBuildNumber`), or `None` and why.
+fn build_fact(read: &RegString, errors: &mut Vec<String>) -> Option<u32> {
+    let text = string_fact(read, "CurrentBuildNumber", errors)?;
+    match text.trim().parse::<u32>() {
+        Ok(build) => Some(build),
+        Err(_) => {
+            note(errors, format!("CurrentBuildNumber reads {text:?}"));
+            None
+        }
+    }
+}
+
+/// The facts of one check: the registry as read now, WMI as read within
+/// the bound or why not (`wmi`'s `Err`).
+pub fn facts_from(direct: &DirectRead, wmi: &Result<WmiRead, String>) -> EnvFacts {
+    let mut errors = Vec::new();
+    let edition_id = string_fact(&direct.edition_id, "EditionID", &mut errors);
+    let product_name = string_fact(&direct.product_name, "ProductName", &mut errors);
+    let build_number = build_fact(&direct.build, &mut errors);
+    let mut firewall = [None; 3];
+    for (i, profile) in FirewallProfile::ALL.into_iter().enumerate() {
+        let active = match wmi {
+            Ok(read) => match &read.firewall {
+                Ok(rows) => active_firewall(rows, profile),
+                Err(code) => Err(format!(
+                    "the active firewall store could not be read (0x{:08X})",
+                    *code as u32
+                )),
+            },
+            Err(why) => Err(why.clone()),
+        };
+        let why = match active {
+            Ok(on) => {
+                firewall[i] = Some(on);
+                continue;
+            }
+            Err(why) => why,
+        };
+        let registry = firewall_from_registry(
+            profile,
+            direct.firewall_policy[i],
+            direct.firewall_legacy_policy,
+            direct.firewall_local[i],
+        );
+        firewall[i] = match registry {
+            Ok(on) => {
+                note(&mut errors, format!("{why}: the registry decided"));
+                Some(on)
+            }
+            Err(registry_why) => {
+                note(&mut errors, why);
+                note(&mut errors, registry_why);
+                None
+            }
+        };
+    }
+    let defender = match wmi {
+        Ok(read) => defender_realtime(match &read.defender {
+            Ok(row) => Ok(row.as_ref().and_then(|row| row.realtime)),
+            Err(code) => Err(*code),
+        }),
+        Err(why) => Err(why.clone()),
+    };
+    // The status row, when Defender's query gave one.
+    let row = match wmi {
+        Ok(read) => read.defender.as_ref().ok().and_then(Option::as_ref),
+        Err(_) => None,
+    };
+    // Real-time from the row, and whether its mode still scans; not
+    // installed (no row) is neither.
+    let defender = defender.and_then(|realtime| match row {
+        Some(row) => match row.mode.as_deref() {
+            Some(mode) => Ok((realtime, is_passive_mode(mode))),
+            None => Err("Defender's status names no running mode".to_string()),
+        },
+        None => Ok((realtime, false)),
+    });
+    // Its status cannot be read: the WinDefend service may still say off.
+    let defender = defender.or_else(|why| match defender_service_off(direct.defender_service) {
+        Ok(()) => Ok((false, false)),
+        Err(service) => Err(format!("{why}; {service}")),
+    });
+    let (defender_realtime, defender_passive) = match defender {
+        Ok((realtime, passive)) => (Some(realtime), Some(passive)),
+        Err(why) => {
+            note(&mut errors, why);
+            (None, None)
+        }
+    };
+    let antivirus_on = match antivirus_on(wmi) {
+        Ok(names) => Some(names),
+        Err(why) => {
+            note(&mut errors, why);
+            None
+        }
+    };
+    EnvFacts {
+        edition_id,
+        product_name,
+        build_number,
+        defender_realtime,
+        defender_passive,
+        defender_mode: row.and_then(|row| row.mode.clone()),
+        defender_antivirus_enabled: row.and_then(|row| row.antivirus_enabled),
+        antivirus_on,
+        firewall,
+        read_errors: errors,
+    }
+}
+
+#[cfg(test)]
+#[path = "prod_env_read_tests.rs"]
+mod tests;

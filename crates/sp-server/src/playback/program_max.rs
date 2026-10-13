@@ -41,6 +41,15 @@
 //! drawn into the FHD program's 1920×1080 on the same thread, queue and
 //! pacing; its setting, enable rule and telemetry (`max.fhd`) are the child
 //! module `program_max_fhd.rs`.
+//!
+//! #243 follow-up: a deploy QUIESCES the thread before it kills the process
+//! ([`MaxOut::quiesce`], `POST /api/v1/program/spout/quiesce`): it drops
+//! both senders and makes no Spout call while the quiesce holds (60 s from
+//! the last ask; a process that was not killed then serves again), and a
+//! shutdown waits for the thread's end ([`stop_and_wait`]). A kill mid-call
+//! can leave one of Spout's locks abandoned, and the receiver it is handed
+//! to (Arena) keeps Spout's sender list for good (PP, 12.10.2026). The
+//! child module `program_max_quiesce.rs`.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -61,6 +70,7 @@ use tracing::{info, warn};
 
 use crate::playback::frame_buf::SharedFrame;
 use crate::playback::loop_stats::percentile_ceil;
+use crate::playback::program_max_list::ListHolderStatus;
 use crate::playback::program_max_send::SendTiming;
 use crate::playback::program_max_vblank::{Aligned, VblankLog, vblank_log};
 use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
@@ -68,6 +78,9 @@ use crate::playback::submit_handoff::{HandoffOutcome, SubmitJob, SubmitQueue};
 #[path = "program_max_fhd.rs"]
 mod fhd;
 pub use fhd::{FHD_OFF_MAX, FHD_OFF_SETTING, FhdStatus, fhd_off_reason, load_fhd_enabled};
+#[path = "program_max_quiesce.rs"]
+mod quiesce;
+pub use quiesce::{MAX_STOP_WAIT, QUIESCE_EXPIRY, stop_and_wait};
 
 /// How many MAX jobs wait for the `program-max` thread: two, then the oldest
 /// is dropped (coalesced) — revision 2's D4 hand-off.
@@ -158,6 +171,13 @@ pub enum MaxNext {
     Job(MaxJob, Instant),
     /// MAX was switched off: drop the sender and the compositor.
     Release,
+    /// #243 follow-up: the process is about to be killed: drop both
+    /// senders, stop the list sentinel, report `quiesced`; no Spout call
+    /// while the quiesce holds.
+    Quiesce,
+    /// #243 follow-up: the quiesce expired and the process was not
+    /// stopped: serve again (one WARN; the next job builds the senders).
+    Resume,
     /// The process stops: exit.
     Stop,
 }
@@ -171,13 +191,18 @@ pub enum MaxPhase {
     Failed(String),
     /// No Direct3D / Spout here (off Windows): it does nothing.
     Unsupported,
+    /// #243 follow-up: it dropped both senders for a deploy's kill and
+    /// makes no Spout call while the quiesce holds.
+    Quiesced,
 }
 
 /// The `state` of [`MaxStatus`]: `unsupported` wins (the platform), then
+/// `quiesced` (#243 follow-up: while the deploy's quiesce holds), then
 /// `off` (the setting), then the thread's phase (`running`, or `error: …`).
 pub fn state_label(phase: &MaxPhase, enabled: bool) -> String {
     match phase {
         MaxPhase::Unsupported => "unsupported".to_string(),
+        MaxPhase::Quiesced => "quiesced".to_string(),
         _ if !enabled => "off".to_string(),
         MaxPhase::Running => "running".to_string(),
         MaxPhase::Failed(why) => format!("error: {why}"),
@@ -189,7 +214,8 @@ pub fn state_label(phase: &MaxPhase, enabled: bool) -> String {
 pub struct MaxStatus {
     /// The setting `program_max_enabled`, as last applied.
     pub enabled: bool,
-    /// `running`, `off`, `unsupported` or `error: <why>` ([`state_label`]).
+    /// `running`, `off`, `unsupported`, `quiesced` (#243 follow-up, while
+    /// a quiesce holds) or `error: <why>` ([`state_label`]).
     pub state: String,
     /// The fixed canvas: 3840×2160.
     pub width: u32,
@@ -260,6 +286,9 @@ pub struct MaxStatus {
     /// box must name its RTX, never a virtual adapter or the Basic Render
     /// Driver); `None` before the first build.
     pub adapter: Option<String>,
+    /// #243 follow-up: the program that keeps Spout's sender list, once it
+    /// kept it a sender backoff (`program_max_list.rs`); `None` otherwise.
+    pub list_holder: Option<ListHolderStatus>,
     /// #239: the `SP-program` Spout sender (1920×1080) the thread runs next
     /// to MAX.
     pub fhd: FhdStatus,
@@ -278,20 +307,30 @@ struct Queue {
     /// A `program-max` thread takes jobs.
     consumer: bool,
     stop: bool,
+    /// #243 follow-up: a deploy's quiesce holds until then
+    /// (`program_max_quiesce.rs`); the thread quiesced for it; how long an
+    /// ask holds.
+    quiesced_until: Option<Instant>,
+    quiesce_done: bool,
+    quiesce_expiry: Duration,
     coalesced: u64,
 }
 
 impl Queue {
     /// Whether an offered job would be taken.
     fn accepting(&self) -> bool {
-        self.enabled && self.consumer && !self.stop
+        self.enabled && self.consumer && !self.stop && self.quiesced_until.is_none()
     }
 
-    /// The thread's next step, if one is ready now: a stop wins; while off,
-    /// `Release` when it holds GPU objects; else the oldest job.
-    fn step(&mut self, holding: bool) -> Option<MaxNext> {
+    /// The thread's next step at `now`, if one is ready: a stop wins, then
+    /// a quiesce's (`Queue::quiesce_step`); while off, `Release` when it
+    /// holds GPU objects; else the oldest job.
+    fn step(&mut self, holding: bool, now: Instant) -> Option<MaxNext> {
         if self.stop {
             return Some(MaxNext::Stop);
+        }
+        if let Some(until) = self.quiesced_until {
+            return self.quiesce_step(until, now);
         }
         if !self.enabled {
             return holding.then_some(MaxNext::Release);
@@ -349,6 +388,7 @@ struct Stats {
     off_grid: u64,
     send_phase: Window,
     repicks: u64,
+    list_holder: Option<ListHolderStatus>,
 }
 
 /// The `SP-program-MAX` hand-off between the `SP-program` sender and the
@@ -357,6 +397,8 @@ struct Stats {
 pub struct MaxOut {
     queue: Mutex<Queue>,
     ready: Condvar,
+    /// #243 follow-up: notified when the thread ends (a shutdown waits).
+    ended: Condvar,
     stats: Mutex<Stats>,
     /// #239: the FHD sender's telemetry (`program_max_fhd.rs`).
     fhd: Mutex<fhd::FhdStats>,
@@ -383,6 +425,7 @@ impl Drop for Consumer<'_> {
             queue.consumer = false;
             while queue.jobs.take().is_some() {}
         }
+        self.0.ended.notify_all();
         {
             let mut stats = self.0.lock_stats();
             if stats.phase != MaxPhase::Unsupported {
@@ -405,9 +448,13 @@ impl MaxOut {
                 fhd_enabled: false,
                 consumer: false,
                 stop: false,
+                quiesced_until: None,
+                quiesce_done: false,
+                quiesce_expiry: QUIESCE_EXPIRY,
                 coalesced: 0,
             }),
             ready: Condvar::new(),
+            ended: Condvar::new(),
             stats: Mutex::new(Stats {
                 phase: MaxPhase::Failed(MAX_NOT_RUNNING.to_string()),
                 submitted: 0,
@@ -427,6 +474,7 @@ impl MaxOut {
                 off_grid: 0,
                 send_phase: Window::default(),
                 repicks: 0,
+                list_holder: None,
             }),
             fhd: Mutex::new(fhd::FhdStats::new()),
             #[cfg(test)]
@@ -524,21 +572,36 @@ impl MaxOut {
 
     /// The `program-max` thread: wait for its next step. `holding` = it
     /// holds a compositor or a sender, which an off setting makes it drop
-    /// ([`MaxNext::Release`]); a stop wins over everything.
+    /// ([`MaxNext::Release`]); a stop wins over everything. While a
+    /// quiesce holds it wakes by itself at its end.
     pub fn next(&self, holding: bool) -> MaxNext {
         let mut queue = self.lock_queue();
         loop {
-            if let Some(step) = queue.step(holding) {
+            let now = Instant::now();
+            if let Some(step) = queue.step(holding, now) {
                 return step;
             }
-            queue = self.ready.wait(queue).unwrap_or_else(|p| p.into_inner());
+            let quiesced_until = queue.quiesced_until;
+            queue = match quiesced_until {
+                Some(until) => {
+                    let left = until.saturating_duration_since(now);
+                    let waited = self.ready.wait_timeout(queue, left);
+                    waited.unwrap_or_else(|p| p.into_inner()).0
+                }
+                None => self.ready.wait(queue).unwrap_or_else(|p| p.into_inner()),
+            };
         }
     }
 
     /// The step [`next`](Self::next) would return now, without waiting
     /// (`None`: it would wait).
     pub fn try_next(&self, holding: bool) -> Option<MaxNext> {
-        self.lock_queue().step(holding)
+        self.try_next_at(holding, Instant::now())
+    }
+
+    /// The step at `now`, without waiting (the tests' clock).
+    pub fn try_next_at(&self, holding: bool, now: Instant) -> Option<MaxNext> {
+        self.lock_queue().step(holding, now)
     }
 
     /// The `program-max` thread starts taking jobs (until the returned
@@ -596,7 +659,7 @@ impl MaxOut {
     /// No Direct3D / Spout here: MAX (and the FHD sender) do nothing.
     pub fn record_unsupported(&self) {
         self.lock_stats().phase = MaxPhase::Unsupported;
-        self.set_fhd_unsupported();
+        self.set_fhd_phase(MaxPhase::Unsupported);
     }
 
     /// A lost device: the compositor and the sender are rebuilt.
@@ -612,6 +675,11 @@ impl MaxOut {
     /// A compositor was built on `adapter`.
     pub fn record_adapter(&self, adapter: String) {
         self.lock_stats().adapter = Some(adapter);
+    }
+
+    /// #243 follow-up: who keeps Spout's sender list (`max.list_holder`).
+    pub fn record_list_holder(&self, holder: Option<ListHolderStatus>) {
+        self.lock_stats().list_holder = holder;
     }
 
     /// The sends are paced on the refresh of `output`.
@@ -659,7 +727,7 @@ impl MaxOut {
         let (phase, names, tracking, counts, upload, draw, send, send_at, send_phase) = {
             let stats = self.lock_stats();
             (
-                stats.phase.clone(),
+                (stats.phase.clone(), stats.list_holder.clone()),
                 [stats.adapter.clone(), stats.vblank_output.clone()],
                 (stats.vblank_tracking, stats.vblank_state),
                 [
@@ -679,7 +747,7 @@ impl MaxOut {
                 stats.send_phase.clone(),
             )
         };
-        let [adapter, vblank_output] = names;
+        let ((phase, list_holder), [adapter, vblank_output]) = (phase, names);
         let (tracking, vblank_state) = tracking;
         let [
             submitted,
@@ -719,6 +787,7 @@ impl MaxOut {
             sender_backoffs,
             spout_name: SPOUT_SENDER_NAME,
             adapter,
+            list_holder,
             fhd: self.fhd_status(fhd_enabled, enabled),
         }
     }
@@ -758,7 +827,8 @@ async fn apply_max_setting(pool: &SqlitePool, max: &MaxOut) {
 }
 
 /// Re-read the setting every `poll` and apply a change; on shutdown, stop
-/// the `program-max` thread.
+/// the `program-max` thread (`sp_server::start` then waits for its end,
+/// [`stop_and_wait`]).
 pub async fn run_max_settings_task(
     pool: SqlitePool,
     max: Arc<MaxOut>,
@@ -801,6 +871,7 @@ pub async fn start_max(pool: SqlitePool, max: Arc<MaxOut>, shutdown: &broadcast:
 #[cfg(windows)]
 #[cfg_attr(test, mutants::skip)]
 fn spawn_max_thread(max: Arc<MaxOut>) {
+    use crate::playback::program_max_list::{SpoutList, SpoutListLock};
     use crate::playback::program_max_vblank::VblankSource;
     use crate::playback::program_max_worker::{SpoutGpu, run_max_loop};
     let spawned = std::thread::Builder::new()
@@ -822,7 +893,9 @@ fn spawn_max_thread(max: Arc<MaxOut>) {
                     None
                 }
             };
-            run_max_loop(&max, SpoutGpu, vblank);
+            // #243 follow-up: the list's holder and its sentinel.
+            let list: Box<dyn SpoutList> = Box::new(SpoutListLock::default());
+            run_max_loop(&max, SpoutGpu, vblank, Some(list));
         });
     if let Err(e) = spawned {
         tracing::error!(%e, "program max: spawning the thread failed — no SP-program-MAX");
