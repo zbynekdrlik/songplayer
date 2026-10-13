@@ -140,6 +140,26 @@ test.describe("SP-program-MAX post-deploy gate (#223 S2)", () => {
     ]);
   });
 
+  test("a phase of a refresh or more is read modulo the refresh (#243)", () => {
+    // SNV 13.10.2026: the setting 19 ms on a 16 666.728 us refresh puts each
+    // send 2333 us after a vblank (the pacer's slot is vblank + phase): the
+    // gate read the median against 19 000 and failed a box on the grid.
+    const at = (send_phase_us_p50: number) => ({
+      ...running(160),
+      vblank_period_ns: 16_666_728,
+      vblank_phase_us: 19_000,
+      send_phase_us_p50,
+    });
+    expect(maxGateFailures(running(100), at(2_333))).toEqual([]);
+    expect(maxGateFailures(running(100), at(3_833))).toEqual([]);
+    expect(maxGateFailures(running(100), at(2_332))).toEqual([
+      "the Spout sends start 2332 us after the vblank (median), not at the 19000 us phase (2333 us into the refresh)",
+    ]);
+    expect(maxGateFailures(running(100), at(3_834))).toEqual([
+      "the Spout sends start 3834 us after the vblank (median), not at the 19000 us phase (2333 us into the refresh)",
+    ]);
+  });
+
   test("every boundary between the reads must go on the display's refresh grid", () => {
     const off = { ...running(160), send_off_grid: 43 };
     expect(maxGateFailures(running(100), off)).toEqual([
