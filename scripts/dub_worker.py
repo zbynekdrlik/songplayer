@@ -697,7 +697,11 @@ def _write_trimmed(dub: str, frames: int, info) -> None:
     `frames` frames to the partial file, sample for sample in the dub's own
     subtype, and promote it over `dub` with the POSIX rename (round F2). An
     existing `.prev` may be the only copy of an original dub: it is never
-    overwritten. A failed write drops the partial and leaves the dub alone."""
+    overwritten. A failed run drops the partial and the backup it made (an
+    identical copy of the dub it left alone), so a re-run is never refused for
+    it; the backup is copied under a temporary name and renamed into place
+    only once whole, so a copy cut short (a full disk) never leaves a
+    truncated `.prev` that could be restored as the original."""
     import shutil
 
     import soundfile as sf
@@ -710,7 +714,13 @@ def _write_trimmed(dub: str, frames: int, info) -> None:
         )
     if not sf.check_format("FLAC", info.subtype):
         raise RuntimeError(f"{dub}: a FLAC of subtype {info.subtype} cannot be written")
-    shutil.copy2(dub, prev)
+    prev_part = prev + ".part"
+    try:
+        shutil.copy2(dub, prev_part)
+        os.replace(prev_part, prev)
+    except BaseException:
+        _remove_quietly(prev_part)
+        raise
     part = dl.partial_out_path(dub)
     try:
         with sf.SoundFile(dub) as src, sf.SoundFile(
@@ -730,12 +740,20 @@ def _write_trimmed(dub: str, frames: int, info) -> None:
                 dst.write(block)
         wr.replace_file(part, dub)
     except BaseException:
-        if os.path.exists(part):
-            try:
-                os.remove(part)
-            except OSError as e:
-                _log(f"trim-tail: could not remove partial {part}: {e}")
+        _remove_quietly(part)
+        # The dub was not replaced: the backup is an identical copy of it.
+        _remove_quietly(prev)
         raise
+
+
+def _remove_quietly(path: str) -> None:
+    """Remove a file this run made, logging (never raising) a failure, so
+    the run's own error is the one reported."""
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError as e:
+            _log(f"trim-tail: could not remove {path}: {e}")
 
 
 def cmd_trim_tail(args: argparse.Namespace) -> None:
