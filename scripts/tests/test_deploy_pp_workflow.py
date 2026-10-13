@@ -290,8 +290,9 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
     specs = re.findall(r'"([^"]+)"', match.group(1))
     # PP runs its own subset, MAX, the masked-settings check (release 0.72.0
     # review), the ASIO gate (#233 lane 3: DVS is installed at PP too), the
-    # environment gate and the audio-fault dashboard check (#257), and never
-    # the SNV suite.
+    # environment gate, the audio-fault dashboard check (#257) and the LED
+    # wall report (#259: fails only when SongPlayer cannot read PP's box),
+    # and never the SNV suite.
     assert specs == [
         "**/post-deploy-pp.spec.ts",
         "**/post-deploy-max.spec.ts",
@@ -299,6 +300,7 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
         "**/post-deploy-audio-asio.spec.ts",
         "**/post-deploy-environment.spec.ts",
         "**/post-deploy-audio-faults-ui.spec.ts",
+        "**/post-deploy-wall.spec.ts",
     ]
 
 

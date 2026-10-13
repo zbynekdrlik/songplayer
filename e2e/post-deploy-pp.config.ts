@@ -13,7 +13,9 @@ import { defineConfig } from "@playwright/test";
  * `post-deploy-environment.spec.ts` (#233: Windows LTSC or IoT Enterprise,
  * Defender real-time and every firewall profile off) +
  * `post-deploy-audio-faults-ui.spec.ts` (#257: the dashboard's audio
- * segment reads PP's own fault ledger, its panel lists every path).
+ * segment reads PP's own fault ledger, its panel lists every path) +
+ * `post-deploy-wall.spec.ts` (#259: the LED wall report reads PP's box; it
+ * fails only when SongPlayer cannot read, never on PP's own setup).
  * The SNV suite is post-deploy.config.ts; it ignores post-deploy-pp*.
  */
 export default defineConfig({
@@ -25,6 +27,7 @@ export default defineConfig({
     "**/post-deploy-audio-asio.spec.ts",
     "**/post-deploy-environment.spec.ts",
     "**/post-deploy-audio-faults-ui.spec.ts",
+    "**/post-deploy-wall.spec.ts",
   ],
   timeout: 90_000,
   retries: 0,
