@@ -318,11 +318,15 @@ impl MaxSender for FakeSender {
             log.order.push("fhd send");
             Ok(SpoutSendStats {
                 send_us: FHD_SEND_US,
+                relisted: false,
             })
         } else {
             log.sent += 1;
             log.order.push("max send");
-            Ok(SpoutSendStats { send_us: SEND_US })
+            Ok(SpoutSendStats {
+                send_us: SEND_US,
+                relisted: false,
+            })
         }
     }
 

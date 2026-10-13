@@ -242,7 +242,13 @@ fn compose(upload_us: u64, draw_us: u64) -> ComposeStats {
 fn the_records_count_and_name_the_state() {
     let max = MaxOut::new();
     let _consumer = taking(&max);
-    max.record_sent(compose(10, 20), SpoutSendStats { send_us: 30 });
+    max.record_sent(
+        compose(10, 20),
+        SpoutSendStats {
+            send_us: 30,
+            relisted: false,
+        },
+    );
     let status = max.status();
     assert_eq!(status.submitted, 1);
     assert_eq!(
@@ -275,7 +281,13 @@ fn the_records_count_and_name_the_state() {
         Some("NVIDIA GeForce RTX 3070 Ti")
     );
 
-    max.record_sent(compose(1, 2), SpoutSendStats { send_us: 3 });
+    max.record_sent(
+        compose(1, 2),
+        SpoutSendStats {
+            send_us: 3,
+            relisted: false,
+        },
+    );
     let status = max.status();
     assert_eq!((status.state.as_str(), status.submitted), ("running", 2));
 }
@@ -284,7 +296,13 @@ fn the_records_count_and_name_the_state() {
 fn the_p99s_cover_the_last_900_frames() {
     let max = MaxOut::new();
     for us in 1..=1000 {
-        max.record_sent(compose(us, 2 * us), SpoutSendStats { send_us: 3 * us });
+        max.record_sent(
+            compose(us, 2 * us),
+            SpoutSendStats {
+                send_us: 3 * us,
+                relisted: false,
+            },
+        );
     }
     // The window keeps 101..=1000; its p99 is the 891st of 900: 991.
     let status = max.status();
@@ -761,4 +779,30 @@ fn quiesced_wins_over_the_setting_while_it_holds() {
         (not_running.clone(), not_running),
         "the thread's end ends it"
     );
+}
+
+/// #243 (SNV 13.10.2026): a send that put the sender's name back in
+/// Spout's list (another program's clean-up had dropped it) is counted, so
+/// the API shows it; an ordinary send is not.
+#[test]
+fn a_relisted_send_is_counted() {
+    let max = MaxOut::new();
+    let _consumer = taking(&max);
+    let relisted = SpoutSendStats {
+        send_us: 30,
+        relisted: true,
+    };
+    max.record_sent(
+        compose(1, 2),
+        SpoutSendStats {
+            send_us: 3,
+            relisted: false,
+        },
+    );
+    assert_eq!(max.status().spout_relists, 0);
+    max.record_sent(compose(1, 2), relisted);
+    max.record_sent(compose(1, 2), relisted);
+    let status = max.status();
+    assert_eq!((status.submitted, status.spout_relists), (3, 2));
+    assert_eq!(status.fhd.spout_relists, 0, "MAX's count is its own");
 }

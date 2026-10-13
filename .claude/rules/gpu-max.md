@@ -731,6 +731,22 @@ thread), comment 5979609879; revision 2's D4 hand-off (5872871751). Anchors:
   30 s**: the default. The same 8-vs-14 contrast is the causal check that
   Arena shows MAX at all: after an Arena relaunch (its clips reconnected)
   16 + 39 vs 5 + 0, after a forced SongPlayer kill 25 + 41 vs 0 + 0.
+- **A dropped Spout name is put back** (#243, SNV 13.10.2026 ~12:52):
+  ANY Spout program that lists or checks senders (vendored
+  `SpoutSenderNames.cpp`: `GetSenderNames` + `getSharedInfo` in the
+  receiver paths, `CheckSender`, `CleanSenders`) RELEASES a name whose info
+  map it cannot read at that instant. `SP-program-MAX` vanished from the
+  list while SongPlayer kept sending (no error, no log); Arena lost the
+  source and the wall's video went black for 3 min (here my probe receiving
+  `SP-program-MAX` at ~1 kHz raised the odds; Arena's own per-frame checks
+  can trigger it too). Now a confirmed sender looks at the list every
+  `RELIST_EVERY` (30th) send after the send (`spout_state::list_check`, the
+  list's lock never taken per frame) and, when the name is gone, puts it
+  back with `RegisterSenderName(name, false)` (shim `spout_sender_relist`:
+  the same sender and shared texture, no `_1`), one WARN, counted as
+  `max.spout_relists` / `max.fhd.spout_relists`. Never run a probe that
+  RECEIVES `SP-program-MAX` on a production box; the access-mutex reads
+  (`NtQueryMutant`, read-only) do not touch the list.
 - **The vblank thread follows the primary** (#259, SNV 13.10.2026:
   re-forming the wall's Surround detached the VDD for a minute; the thread
   stayed on its DXGI output, `not_ticking`, and MAX sent at the constant

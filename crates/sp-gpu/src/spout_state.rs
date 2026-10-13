@@ -250,7 +250,7 @@ pub fn access_held(streak: u32, held_elsewhere: bool, send_us: u64) -> AccessHel
 /// instant; the sender keeps sending, unseen by every receiver (Arena's
 /// layer went black for 3 min). Every 30th send (1 s at 30 fps) the sender
 /// checks its name and puts it back ([`list_check`]).
-pub const RELIST_EVERY: u64 = 31;
+pub const RELIST_EVERY: u64 = 30;
 
 /// What a confirmed sender's look at Spout's list leads to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,7 +273,7 @@ pub fn list_check(sends: u64, listed: impl FnOnce() -> Listed) -> ListCheck {
         return ListCheck::Skip;
     }
     match listed() {
-        Listed::No => ListCheck::Fine,
+        Listed::No => ListCheck::Relist,
         Listed::Yes | Listed::Unknown => ListCheck::Fine,
     }
 }

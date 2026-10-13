@@ -94,7 +94,10 @@ async fn get_program_reports_the_max_block() {
             draw_us: 300,
             uploads: 1,
         },
-        SpoutSendStats { send_us: 900 },
+        SpoutSendStats {
+            send_us: 900,
+            relisted: false,
+        },
     );
     max.record_device_reset();
     max.record_adapter("NVIDIA GeForce RTX 3070 Ti".into());
@@ -198,7 +201,10 @@ async fn get_program_reports_the_fhd_spout_sender() {
             draw_us: 400,
             uploads: 1,
         },
-        SpoutSendStats { send_us: 500 },
+        SpoutSendStats {
+            send_us: 500,
+            relisted: false,
+        },
     );
     max.record_fhd_listed(Some((1920, 1080)));
     let pid = add_playlist(&state.pool, "slow").await;

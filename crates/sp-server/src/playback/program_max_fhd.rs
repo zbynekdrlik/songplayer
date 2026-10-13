@@ -75,6 +75,9 @@ pub struct FhdStatus {
     /// `SP-program` senders refused (the name taken, not listed, not
     /// registered): each waits a backoff before a new one.
     pub sender_backoffs: u64,
+    /// #243: how often Spout's list had lost `SP-program` (another program's
+    /// clean-up) and a send put it back.
+    pub spout_relists: u64,
     /// The p99 over the last `MAX_STAT_WINDOW` sent frames, µs: the plane
     /// uploads (onto the FHD compositor's own device: its extra cost next to
     /// MAX), the draw until the GPU finished it, Spout's `SendTexture`.
@@ -90,6 +93,7 @@ pub(super) struct FhdStats {
     submitted: u64,
     failed: u64,
     sender_backoffs: u64,
+    relists: u64,
     upload: Window,
     draw: Window,
     send: Window,
@@ -104,6 +108,7 @@ impl FhdStats {
             submitted: 0,
             failed: 0,
             sender_backoffs: 0,
+            relists: 0,
             upload: Window::default(),
             draw: Window::default(),
             send: Window::default(),
@@ -160,6 +165,7 @@ impl MaxOut {
         fhd.upload.push(compose.upload_us);
         fhd.draw.push(compose.draw_us);
         fhd.send.push(send.send_us);
+        fhd.relists += u64::from(send.relisted);
         fhd.phase = MaxPhase::Running;
     }
 
@@ -200,13 +206,13 @@ impl MaxOut {
             let fhd = self.lock_fhd();
             (
                 fhd.phase.clone(),
-                [fhd.submitted, fhd.failed, fhd.sender_backoffs],
+                [fhd.submitted, fhd.failed, fhd.sender_backoffs, fhd.relists],
                 fhd.listed,
                 [fhd.upload.clone(), fhd.draw.clone(), fhd.send.clone()],
             )
         };
         let [upload, draw, send] = windows;
-        let [submitted, failed, sender_backoffs] = counts;
+        let [submitted, failed, sender_backoffs, spout_relists] = counts;
         let reason = fhd_off_reason(fhd_setting, max_enabled);
         let (listed_width, listed_height) = listed.unwrap_or_default();
         FhdStatus {
@@ -219,6 +225,7 @@ impl MaxOut {
             submitted,
             failed,
             sender_backoffs,
+            spout_relists,
             upload_us_p99: upload.p99(),
             draw_us_p99: draw.p99(),
             send_us_p99: send.p99(),

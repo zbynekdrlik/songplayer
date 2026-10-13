@@ -280,6 +280,9 @@ pub struct MaxStatus {
     /// Spout senders refused (the name taken, not listed, not registered):
     /// each waits a backoff before a new one.
     pub sender_backoffs: u64,
+    /// #243: how often Spout's list had lost the sender's name (another
+    /// program's clean-up) and a send put it back.
+    pub spout_relists: u64,
     /// The Spout sender name (Arena: `SPOUT_<name>`).
     pub spout_name: &'static str,
     /// The adapter the last compositor was built on (revision 3 R3-2: the
@@ -375,6 +378,7 @@ struct Stats {
     failed: u64,
     device_resets: u64,
     sender_backoffs: u64,
+    relists: u64,
     adapter: Option<String>,
     upload: Window,
     draw: Window,
@@ -631,6 +635,7 @@ impl MaxOut {
         stats.upload.push(compose.upload_us);
         stats.draw.push(compose.draw_us);
         stats.send.push(send.send_us);
+        stats.relists += u64::from(send.relisted);
         stats.phase = MaxPhase::Running;
     }
 
@@ -739,6 +744,7 @@ impl MaxOut {
                     stats.vblank_period_ns,
                     stats.off_grid,
                     stats.repicks,
+                    stats.relists,
                 ],
                 stats.upload.clone(),
                 stats.draw.clone(),
@@ -758,6 +764,7 @@ impl MaxOut {
             vblank_period_ns,
             send_off_grid,
             slot_repicks,
+            spout_relists,
         ] = counts;
         MaxStatus {
             enabled,
@@ -785,6 +792,7 @@ impl MaxOut {
             slot_repicks,
             device_resets,
             sender_backoffs,
+            spout_relists,
             spout_name: SPOUT_SENDER_NAME,
             adapter,
             list_holder,

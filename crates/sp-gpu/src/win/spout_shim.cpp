@@ -108,6 +108,22 @@ int spout_sender_claim_name(void* handle) {
     }
 }
 
+// #243: put the sender's own name back in Spout's names list
+// (RegisterSenderName without a new name: no `_1`, the same info map and
+// shared texture), after another program's clean-up dropped it. 0 listed,
+// 3 not (the list's lock or the list full), 4 exception.
+int spout_sender_relist(void* handle) {
+    Sender* sender = static_cast<Sender*>(handle);
+    if (sender == nullptr) {
+        return kBadArgument;
+    }
+    try {
+        return sender->dx.sendernames.RegisterSenderName(sender->name, false) ? kOk : kFailed;
+    } catch (...) {
+        return kException;
+    }
+}
+
 // spoutDX::SendTexture: copy `texture` (on the sender's device) into Spout's
 // own shared texture under the sender's named mutex; the first call
 // registers the sender. 0 sent, 3 SendTexture failed, 4 exception.

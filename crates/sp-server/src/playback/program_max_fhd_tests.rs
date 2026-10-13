@@ -103,7 +103,13 @@ fn max_off_turns_the_fhd_sender_off_whatever_its_setting() {
 fn the_fhd_records_count_and_name_its_own_state() {
     let max = both_on();
     let _consumer = max.attach();
-    max.record_fhd_sent(compose(11, 22), SpoutSendStats { send_us: 33 });
+    max.record_fhd_sent(
+        compose(11, 22),
+        SpoutSendStats {
+            send_us: 33,
+            relisted: false,
+        },
+    );
     let fhd = max.status().fhd;
     assert_eq!((fhd.state.as_str(), fhd.submitted), ("running", 1));
     assert_eq!(
@@ -125,7 +131,13 @@ fn the_fhd_records_count_and_name_its_own_state() {
         "MAX's own counts are untouched"
     );
 
-    max.record_fhd_sent(compose(1, 2), SpoutSendStats { send_us: 3 });
+    max.record_fhd_sent(
+        compose(1, 2),
+        SpoutSendStats {
+            send_us: 3,
+            relisted: false,
+        },
+    );
     let fhd = max.status().fhd;
     assert_eq!((fhd.state.as_str(), fhd.submitted), ("running", 2));
 }
@@ -134,7 +146,13 @@ fn the_fhd_records_count_and_name_its_own_state() {
 fn the_fhd_p99s_cover_the_last_900_frames() {
     let max = MaxOut::new();
     for us in 1..=1000 {
-        max.record_fhd_sent(compose(5 * us, 2 * us), SpoutSendStats { send_us: 3 * us });
+        max.record_fhd_sent(
+            compose(5 * us, 2 * us),
+            SpoutSendStats {
+                send_us: 3 * us,
+                relisted: false,
+            },
+        );
     }
     let fhd = max.status().fhd;
     assert_eq!(
@@ -298,4 +316,28 @@ async fn off_windows_start_max_applies_the_fhd_setting_and_reads_unsupported() {
     );
     assert_eq!(max.status().fhd.state, "unsupported");
     shutdown.send(()).unwrap();
+}
+
+/// #243: the FHD sender `SP-program` counts its own relists.
+#[test]
+fn an_fhd_relisted_send_is_counted() {
+    let max = both_on();
+    let _consumer = max.attach();
+    let relisted = SpoutSendStats {
+        send_us: 3,
+        relisted: true,
+    };
+    max.record_fhd_sent(
+        compose(1, 2),
+        SpoutSendStats {
+            send_us: 3,
+            relisted: false,
+        },
+    );
+    assert_eq!(max.status().fhd.spout_relists, 0);
+    max.record_fhd_sent(compose(1, 2), relisted);
+    max.record_fhd_sent(compose(1, 2), relisted);
+    let status = max.status();
+    assert_eq!((status.fhd.submitted, status.fhd.spout_relists), (3, 2));
+    assert_eq!(status.spout_relists, 0, "FHD's count is its own");
 }
