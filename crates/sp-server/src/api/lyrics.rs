@@ -49,7 +49,7 @@ pub(crate) async fn fetch_queue_counts(
                     OR v.lyrics_source NOT IN ('failed', 'empty', 'no_source', 'asr_gap') \
                     OR v.lyrics_pipeline_version < ?) \
                AND p.is_active = 1 AND v.normalized = 1 AND ",
-        crate::test_item::not_test_item!(), // #228
+        crate::db::queue_row!(), // #228, #260
     ))
     .bind(current_version as i64)
     .fetch_one(pool)
@@ -62,16 +62,17 @@ pub(crate) async fn fetch_queue_counts(
                     OR v.lyrics_pipeline_version < ?) \
                AND v.lyrics_manual_priority = 0 \
                AND p.is_active = 1 AND v.normalized = 1 AND ",
-        crate::test_item::not_test_item!(), // #228: the test item never waits for lyrics
+        crate::db::queue_row!(), // #228 the test item, #260 a removed song: never waits
     ))
     .bind(current_version as i64)
     .fetch_one(pool)
     .await?;
-    let b2: i64 = sqlx::query_scalar(
+    let b2: i64 = sqlx::query_scalar(concat!(
         "SELECT COUNT(*) FROM videos v JOIN playlists p ON p.id = v.playlist_id \
          WHERE v.has_lyrics = 1 AND v.lyrics_pipeline_version < ? \
-         AND v.lyrics_manual_priority = 0 AND p.is_active = 1 AND v.normalized = 1",
-    )
+         AND v.lyrics_manual_priority = 0 AND p.is_active = 1 AND v.normalized = 1 AND ",
+        crate::db::queue_row!(), // #260: as the stale bucket (`LYRICS_DUE`)
+    ))
     .bind(current_version as i64)
     .fetch_one(pool)
     .await?;

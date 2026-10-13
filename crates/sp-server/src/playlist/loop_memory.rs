@@ -33,8 +33,10 @@ pub async fn remember_logged(pool: &SqlitePool, playlist_id: i64, video_id: i64)
 }
 
 /// `playlist_id`'s remembered song while it can still play there: a
-/// downloaded video of that playlist, or of its items for a custom one.
-/// `None` when nothing is remembered or the song left the playlist.
+/// downloaded video of that playlist that is still in its YouTube playlist
+/// (#260: not marked removed), or one of a custom playlist's items (an
+/// operator's set list, kept whatever the mark). `None` when nothing is
+/// remembered or the song left the playlist.
 pub async fn remembered(pool: &SqlitePool, playlist_id: i64) -> Result<Option<i64>, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT v.id FROM playlists p JOIN videos v ON v.id = p.loop_video_id \

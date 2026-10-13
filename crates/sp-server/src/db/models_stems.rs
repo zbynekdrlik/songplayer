@@ -287,7 +287,7 @@ pub async fn get_next_video_for_stems(pool: &SqlitePool) -> Result<Option<StemJo
            AND (stem_next_attempt_at IS NULL \
                 OR stem_next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
            AND ",
-        crate::test_item::not_test_item!(), // #228
+        crate::db::queue_row!(), // #228, #260
         " ORDER BY stem_manual_priority DESC, id ASC \
          LIMIT 1",
     ))
@@ -377,7 +377,7 @@ pub async fn count_stems_progress(pool: &SqlitePool) -> Result<(i64, i64), sqlx:
         "SELECT COUNT(*) FROM videos \
          WHERE normalized = 1 AND audio_file_path IS NOT NULL \
            AND (stem_status IS NULL OR stem_status = 'failed') AND ",
-        crate::test_item::not_test_item!(), // #228: never queued, never pending
+        crate::db::queue_row!(), // #228, #260: never queued, never pending
     ))
     .fetch_one(pool)
     .await?;

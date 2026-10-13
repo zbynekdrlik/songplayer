@@ -636,10 +636,16 @@ pub async fn start(
             match playlist::sync_playlist(&sync_pool, req.playlist_id, &req.youtube_url, &ytdlp)
                 .await
             {
-                Ok(new_count) => {
+                Ok(report) => {
+                    // #260: the songs that left the YouTube playlist / came back.
                     info!(
                         playlist_id = req.playlist_id,
-                        new_count, "playlist sync complete"
+                        new_count = report.new,
+                        marked = report.marked.len(),
+                        back = report.back.len(),
+                        removed = %playlist::membership::names(&report.marked),
+                        returned = %playlist::membership::names(&report.back),
+                        "playlist sync complete"
                     );
                 }
                 Err(e) => {
