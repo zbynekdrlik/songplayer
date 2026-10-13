@@ -16,14 +16,16 @@ pub fn DashboardPage() -> impl IntoView {
     // page — not only the Dashboard — has `store.playlists`. The Dashboard no
     // longer fetches them itself.
 
-    // #165: auto-follow the playing playlist for the INITIAL selection. Runs
-    // until the selection is pinned (a user click / `<select>` / "Prejsť", or a
-    // value restored from the URL/localStorage in `App`) AND still valid.
-    // `App` seeds a persisted selection with `selection_pinned = true`, so a
-    // reload keeps the operator's choice; a fresh load (no persisted value) has
-    // `pinned = false`, so it defaults to the currently-playing playlist, then
-    // the first by name. Reads of `selected_playlist` are UNTRACKED so the
-    // Effect never re-triggers on its own write.
+    // #165: auto-follow the playlist on program. Runs until the selection is
+    // pinned (a user click / `<select>`) AND still valid. #266: a page load
+    // (a reload too) is never pinned — `App` seeds the persisted pick
+    // unpinned — so the work area opens on the playlist ON PROGRAM, not on
+    // the last clicked card (the owner at PP found ytfast paused in the work
+    // area while ytslow was on the wall); with nothing on program it keeps
+    // what it shows (that persisted pick, or the last playlist it followed),
+    // else the first by name (`selection::choose_default`). Reads of
+    // `selected_playlist` are UNTRACKED so the Effect never re-triggers on
+    // its own write.
     let _auto = Effect::new(move |_| {
         let pls = store.playlists.get();
         let np = store.now_playing.get();
@@ -42,7 +44,7 @@ pub fn DashboardPage() -> impl IntoView {
         if valid && !selection::states_known(&pls, &np) {
             return;
         }
-        if let Some(target) = selection::choose_default(&pls, &np)
+        if let Some(target) = selection::choose_default(&pls, &np, sel.filter(|_| valid))
             && sel != Some(target)
         {
             store.selected_playlist.set(Some(target));

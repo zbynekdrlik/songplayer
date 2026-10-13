@@ -16,8 +16,13 @@ paths:
   - "crates/sp-server/src/api/preview.rs"
   - "sp-ui/src/components/playlist_card.rs"
   - "sp-ui/src/components/preview_video.rs"
+  - "sp-ui/src/components/player.rs"
   - "sp-ui/preview_player.js"
+  - "e2e/player-paused.spec.ts"
   - "e2e/post-deploy-preview.spec.ts"
+  - "e2e/post-deploy-pp-preview.spec.ts"
+  - "e2e/pp-preview-gate*.ts"
+  - "e2e/post-deploy-pp.config.ts"
   - "e2e/post-deploy-dabing.spec.ts"
   - "e2e/audio-helpers.mjs"
   - "e2e/post-deploy-owner-path.spec.ts"
@@ -487,15 +492,70 @@ path, startMuted)`. Wrapped by `components/preview_video.rs`.
 **Round 3 — CLICK-to-start (zero cost with nobody watching).** The app's own
 hidden Tauri webview is a PERMANENT viewer, so an auto-mounted preview ran an
 encoder child 24/7 whenever anything played. So `playlist_card.rs` no longer
-auto-mounts the `<video>` while Playing: a Playing card shows a `preview-start`
-control ("▶ Živý náhľad"); clicking it (a real user gesture) mounts the
-`<video data-testid="preview-video">` + player and starts it UNMUTED
+auto-mounts the `<video>` while Playing: a card whose pipeline decodes shows a
+`preview-start` control ("▶ Živý náhľad"); clicking it (a real user gesture)
+mounts the `<video data-testid="preview-video">` + player and starts it UNMUTED
 (`startMuted=false`; the shim falls back to muted and keeps the `preview-unmute`
 button if the browser still rejects the unmuted `play()`). A `preview-stop`
-control unmounts it, and leaving the Playing state resets the card's `preview_on`
-signal — both fire `on_cleanup` → `destroy()` → WS close → the encoder child
-dies. Fullscreen button kept. The JPEG `<img>` path stays REMOVED from the card
-(no dual path).
+control unmounts it, and a playlist that plays nothing any more resets the
+Player's `preview_on` signal (#266: `PreviewSlot::ends_preview`) — both fire
+`on_cleanup` → `destroy()` → WS close → the encoder child dies. Fullscreen
+button kept. The JPEG `<img>` path stays REMOVED from the card (no dual path).
+
+## #266: the preview is offered only while the pipeline decodes
+
+The owner at PP (13.10.2026) started "▶ Živý náhľad" on ytslow, PAUSED off
+program, and the window stayed black. The Player offered it because its
+`is_decoding` read the scene-aware WS `state` (`Playing | WaitingForScene` +
+a song), and a paused off-program pipeline is `WaitingForScene` with
+transport `Paused`. A paused pipeline offers the decode seam no picture, so
+the feeder writes nothing (#221 A1), ffmpeg's probe of its video input never
+ends, it never opens its audio input, no child of that viewer produces an
+init (PP's log: `child did not connect its audio input` → `respawning` →
+`encoder produced no init segment`, every 5 s), and the `<video>` stays
+black. Design record: the `## Design (before code) — #266` comment.
+
+- **ONE pure rule, `sp_core::player_view::preview_slot(state_known,
+  has_song, state, transport)`** → `Pending` (not told yet, or decoding and
+  its song not here) | `Offered` (transport `Playing` + a song: on program
+  or off, the dub prepared off program included) | `Paused` (a song, not
+  decoding) | `Idle` (nothing loaded). `PreviewSlot::text()` is the slot's
+  line: "Načítavam…" / "Náhľad sa zobrazí, keď playlist hrá — tento je
+  pozastavený." / "… — tento nehrá.".
+- **`preview_view(slot, preview_on, showing)`** → `Video` | `Start` |
+  `Placeholder`: a NEW preview mounts only on `Offered`; a preview ALREADY
+  showing stays mounted through `Paused` — the same element holds its last
+  picture (the starved encoder, #221 A1) and plays on at the resume; that
+  is the #184 owner path `post-deploy-preview.spec.ts` "pause freezes the
+  preview" pins on SNV (a teardown at the pause would break it and force a
+  re-click after every resume). A preview never mounts anew on a paused
+  playlist (a reconnect while paused shows the line and comes back at the
+  resume). The Player reads both through Memos (Rule 1; `preview_view` is a
+  Memo over its own last value: `Memo::new(|shown: Option<&PreviewView>| …)`).
+- **`preview_on` ends only on `Idle`** (`ends_preview`), never while the
+  state is unknown (a reconnect, #225) nor at a pause.
+- **Not decided here (left as the design record says):** feeding the
+  encoder the held frame so a preview STARTED on a paused playlist would
+  show the frozen picture. The slot explains instead.
+- **Tests:** sp-core `player_view_tests_status.rs` (the slot table, the
+  lines, `ends_preview`, the 16-row view table, a pause and a reconnect
+  walked step by step); mock E2E `e2e/player-paused.spec.ts` (chromium:
+  the start control is codec-independent; the line on a paused and an idle
+  card, the offer once ▶ plays it off program, a running preview's element
+  kept through a pause and the resume).
+- **PP's gate** (`e2e/post-deploy-pp-preview.spec.ts`, PP's subset, the
+  `edge` project of `post-deploy-pp.config.ts`): the card of the playlist
+  ON PROGRAM (its row "NA PROGRAME"), its preview to `readyState >= 3`,
+  `currentTime` advancing, `webkitAudioDecodedByteCount` growing, then
+  stopped. The target is the pure `pp-preview-gate.ts::previewTarget`
+  (mock-suite unit spec `pp-preview-gate.spec.ts`): nothing on program, no
+  health row, or a playlist on program whose health `transport` is not
+  `Playing` FAILS naming it — the gate never switches a scene and never
+  presses ▶ on PP's wall. `deploy-pp.yml` uses the Edge PP has (the paths
+  Playwright's msedge channel looks in) and runs `playwright install
+  msedge` only when it is missing (with `CI=true` that command re-installs
+  Edge every run), a failed install failing the step by name. Not covered:
+  the public `sppp.newlevel.media` path (Cloudflare) the owner uses.
 
 ## chrome-channel E2E note (#178 Round 2)
 
@@ -512,7 +572,8 @@ under a SEPARATE browser-channel project (bundled Chromium runs everything else)
   the card `<video>` reaches `readyState ≥ 3`, `currentTime` advances, it ends up
   UNMUTED (directly or via the unmute button), the stop control removes the
   `<video>`, a Playing card mounts NO `<video>` before the click, an idle card has
-  no start control, and zero console errors.
+  no start control, and zero console errors. (#266: a PAUSED card has no start
+  control either: `player-paused.spec.ts`, chromium.)
   **A project-level `testMatch`/`testIgnore` REPLACES the global one** — the
   `chromium` project must repeat the `post-deploy*` ignore alongside `preview`.
 - **Post-deploy (`e2e/post-deploy-preview.spec.ts`, `post-deploy.config.ts` `edge`

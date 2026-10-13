@@ -180,10 +180,12 @@ Two consequences, both review round 3:
     (`selection::states_known`, the one predicate for such a reader, review
     round 4), else a song-but-no-state entry reads "nothing plays" and the
     work area flips to the first playlist by name;
-  - the Player's preview Effect turns the preview off only once the state is
-    known (`state_known && !is_decoding`). The `<video>` is unmounted while
+  - the Player's preview Effect turns the preview off only once the
+    playlist is told to play nothing (#266: `PreviewSlot::ends_preview`;
+    it was `state_known && !is_decoding`). The `<video>` is unmounted while
     the state is unknown (its socket closes), but `preview_on` survives, so
-    the preview is re-created by itself after the replay — no second click;
+    the preview is re-created by itself after the replay — no second click
+    (once the playlist decodes: a paused one mounts none, `preview.md`);
   - the Player's toggle and mode select claim nothing until the state is
     known (review round 4): a disabled "⏯" and a disabled "—" (value `""`,
     `sp_core::player_view::{play_pause, mode_value}`).

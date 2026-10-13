@@ -147,7 +147,7 @@ test("the Live page's Player shows the same line, and a due retry reads 0 s (#22
     /^Videá sa nedajú otvoriť \(3×\): No video: SetCurrentMediaType failed: No suitable transform — ďalší pokus o [0-3] s$/,
     { timeout: 5000 },
   );
-  // While the retry waits the state label says so (not "Čaká na scénu").
+  // While the retry waits the state label says so (not "Pozastavené (mimo programu)").
   // Playlist 184 is not the program's source: its row names no retry of
   // SP-program's source (`on_program` absent = false), so its badge stays
   // off program (ROZHODNUTÉ 6029773698). One Player component, so the Live page
@@ -184,7 +184,7 @@ test("on program and waiting out the retry, the badge says so (#229)", async ({
 
   // The pause after failed opens: nothing decodes, WaitingForScene.
   await setState(request, 1, "WaitingForScene", "Paused");
-  await expect(label).toHaveText("Čaká na scénu");
+  await expect(label).toHaveText("Pozastavené (mimo programu)");
   await expect(badge).toHaveText("○ Mimo programu");
 
   await setOpenFailures(request, 1, {
@@ -216,7 +216,7 @@ test("on program and waiting out the retry, the badge says so (#229)", async ({
   });
   await expect(badge).toHaveText("○ Mimo programu", { timeout: 5000 });
   await expect(badge).not.toHaveClass(/\bon\b/);
-  await expect(label).toHaveText("Čaká na scénu");
+  await expect(label).toHaveText("Pozastavené (mimo programu)");
 });
 
 test("off program and waiting out the retry, the badge stays off program (#229)", async ({

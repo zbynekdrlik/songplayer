@@ -558,7 +558,8 @@ itself: the OBS client no longer reads cg OBS's program at all
   `Start`). Off air the playlist plays OFF program: `scene_active` stays
   false, no title goes to the wall, the WS state is `WaitingForScene` with
   transport `Playing`, which the Player labels "Hrá mimo programu"
-  (`sp-ui` `player.rs`; "Čaká na scénu" otherwise). The mock's `/play`
+  (`sp-ui` `player.rs`; "Pozastavené (mimo programu)" otherwise, #266 —
+  it read "Čaká na scénu"). The mock's `/play`
   models it from its program source (`e2e/player-off-program.spec.ts`).
   An off-air ▶ on a playlist with no normalized video yet parks it in
   WaitingForScene, and `on_video_processed` wakes only on-program

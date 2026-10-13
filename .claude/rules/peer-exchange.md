@@ -555,6 +555,11 @@ wait for a peer that has the song", below).
     SongPlayer at that moment (main's E2E, then the post-merge dev push on
     SNV's single runner): a red probe right after a release is checked
     against SNV's deploy timeline before anything at PP.
+  - #266: the live preview of the playlist ON PROGRAM decodes video and
+    audio (`post-deploy-pp-preview.spec.ts`, the `edge` project, Edge as
+    PP has it; `preview.md` "#266"). Nothing on program at PP ("OBS
+    manuál", Blank) or the playlist on program paused FAILS it, naming
+    why: the gate never presses a scene or ▶ itself.
 - "produkcia beží" at PP:
   - `gh workflow disable deploy-pp.yml` first: no new run starts; also
     cancel any deploy-pp run already pending or queued (`gh run list
