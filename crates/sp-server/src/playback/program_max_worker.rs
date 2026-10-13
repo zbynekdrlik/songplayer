@@ -793,6 +793,8 @@ impl<'a, G: MaxGpu> MaxWorker<'a, G> {
     fn pace(&mut self, offered: Instant) -> (Due, Option<VblankGrid>) {
         let now = self.clock.as_mut().now();
         let grid = self.vblank.as_ref().and_then(|v| {
+            // #259: the source moves to a new primary when Windows re-lays.
+            self.out.record_vblank_output(v.output());
             log_vblank(self.out.record_vblank_state(v.state(now)), &**v);
             v.grid(now)
         });
