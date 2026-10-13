@@ -422,6 +422,10 @@ jobs:
           }
           $scheme = $Matches[1].ToLowerInvariant()
           $parking = (powercfg /qh SCHEME_CURRENT SUB_PROCESSOR CPMINCORES 2>&1) -join ' '
+          # A scheme with no such setting makes powercfg exit non-zero: that
+          # is the reading "none" (the glue must read None then), so the
+          # step's own exit is not taken from it.
+          $global:LASTEXITCODE = 0
           $minCores = ''
           if ($parking -match 'Current AC Power Setting Index:\s*0x([0-9a-fA-F]+)') {
             $minCores = [string][Convert]::ToUInt32($Matches[1], 16)

@@ -205,6 +205,9 @@ pub fn verdict(facts: &EnvFacts) -> EnvVerdict {
 }
 
 /// One check's input.
+// #255: `EnvFacts` carries the audio profile (~500 bytes); one value a
+// minute, never on a hot path, so boxing it would only add an allocation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Check {
     /// Off Windows: nothing to check.
