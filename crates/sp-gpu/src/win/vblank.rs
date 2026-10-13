@@ -22,7 +22,7 @@ use crate::adapter::adapter_name;
 use crate::error::GpuError;
 use crate::vblank::{
     OutputInfo, Seen, VblankFit, VblankGrid, VblankState, grid_is_fresh, not_waiting_sleep,
-    pick_output, vblank_state, waited,
+    pick_output, recheck_due, repick, vblank_state, waited,
 };
 
 /// The wait after a failed `WaitForVBlank` before the next one.
@@ -47,6 +47,8 @@ struct Published {
 struct Shared {
     stop: AtomicBool,
     published: Mutex<Published>,
+    /// The output it measures now (#259: it moves when the primary does).
+    output: Mutex<Option<OutputInfo>>,
 }
 
 /// The primary display's refresh (DWM's clock), measured on its own thread
@@ -66,6 +68,7 @@ impl VblankTracker {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             published: Mutex::new(Published::default()),
+            output: Mutex::new(None),
         });
         let started = Instant::now();
         let (ready_tx, ready_rx) = mpsc::channel();
@@ -94,9 +97,11 @@ impl VblankTracker {
         }
     }
 
-    /// The output it measures.
-    pub fn output(&self) -> &OutputInfo {
-        &self.output
+    /// The output it measures now: the one it started on until the primary
+    /// moves (#259).
+    pub fn output(&self) -> OutputInfo {
+        let now = self.shared.output.lock().unwrap_or_else(|p| p.into_inner());
+        now.clone().unwrap_or_else(|| self.output.clone())
     }
 
     /// The refresh grid at `now`: `None` before the fit has enough
@@ -140,27 +145,73 @@ impl Drop for VblankTracker {
 }
 
 /// The thread: open the output, report it on `ready`, then wait for each
-/// refresh and publish the fitted grid until stopped.
+/// refresh and publish the fitted grid until stopped. Every
+/// `VBLANK_RECHECK` it looks again for the primary and moves to it when it
+/// is another output (#259), with the fit booted afresh.
 fn run(shared: &Shared, ready: &mpsc::Sender<Result<OutputInfo, GpuError>>) {
     if let Err(e) = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL) }
     {
         warn!(error = %e, "program max: the vblank thread runs at normal priority");
     }
-    let (output, info) = match open_output() {
+    let (mut output, mut info) = match open_output(true) {
         Ok(opened) => opened,
         Err(e) => {
             let _ = ready.send(Err(e));
             return;
         }
     };
+    *shared.output.lock().unwrap_or_else(|p| p.into_inner()) = Some(info.clone());
     let _ = ready.send(Ok(info.clone()));
-    let label = info.label();
+    let mut label = info.label();
     let mut fit = VblankFit::default();
     let mut failing = false;
     let mut measured = false;
     let mut not_waiting = 0u32;
+    let mut checked = Instant::now();
+    let mut recheck_failing = false;
     while !shared.stop.load(Ordering::Relaxed) {
         let before = Instant::now();
+        if recheck_due(checked, before) {
+            checked = before;
+            match open_output(false) {
+                Ok((picked, picked_info)) => {
+                    if recheck_failing {
+                        info!(output = %label, "program max: the outputs are listed again");
+                    }
+                    recheck_failing = false;
+                    if repick(&info, &picked_info) {
+                        info!(
+                            from = %label,
+                            to = %picked_info.label(),
+                            left = picked_info.left,
+                            top = picked_info.top,
+                            "program max: the primary display changed; its refresh is measured afresh"
+                        );
+                        output = picked;
+                        info = picked_info;
+                        label = info.label();
+                        fit = VblankFit::default();
+                        failing = false;
+                        measured = false;
+                        not_waiting = 0;
+                        let mut published =
+                            shared.published.lock().unwrap_or_else(|p| p.into_inner());
+                        published.grid = None;
+                        published.seen = None;
+                        drop(published);
+                        *shared.output.lock().unwrap_or_else(|p| p.into_inner()) =
+                            Some(info.clone());
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    if !recheck_failing {
+                        warn!(output = %label, error = %e, "program max: no primary display to pace on; staying on the last one");
+                    }
+                    recheck_failing = true;
+                }
+            }
+        }
         if let Err(e) = unsafe { output.WaitForVBlank() } {
             if !failing {
                 warn!(output = %label, error = %e, "program max: WaitForVBlank failed");
@@ -215,12 +266,13 @@ fn run(shared: &Shared, ready: &mpsc::Sender<Result<OutputInfo, GpuError>>) {
 
 /// The output `pick_output` chooses among every adapter's outputs (the
 /// primary may hang on any adapter), with what it read; every output is
-/// logged.
-fn open_output() -> Result<(IDXGIOutput, OutputInfo), GpuError> {
+/// logged when `log` (the first open: a recheck every 2 s stays quiet and
+/// logs only a change of the primary).
+fn open_output(log: bool) -> Result<(IDXGIOutput, OutputInfo), GpuError> {
     let mut outputs = Vec::new();
     for (adapter, adapter_info) in list()? {
         // An adapter whose outputs cannot be listed costs only its own.
-        if let Err(e) = enum_outputs(&adapter, &adapter_info.name, &mut outputs) {
+        if let Err(e) = enum_outputs(&adapter, &adapter_info.name, log, &mut outputs) {
             warn!(adapter = %adapter_info.name, error = %e, "program max: its outputs were not listed");
         }
     }
@@ -229,10 +281,12 @@ fn open_output() -> Result<(IDXGIOutput, OutputInfo), GpuError> {
     Ok(outputs.swap_remove(picked))
 }
 
-/// Append `adapter`'s outputs (DXGI's order) with what each reads.
+/// Append `adapter`'s outputs (DXGI's order) with what each reads; each is
+/// logged when `log`.
 fn enum_outputs(
     adapter: &IDXGIAdapter1,
     adapter_label: &str,
+    log: bool,
     outputs: &mut Vec<(IDXGIOutput, OutputInfo)>,
 ) -> Result<(), GpuError> {
     for index in 0u32.. {
@@ -251,15 +305,17 @@ fn enum_outputs(
             height: u32::try_from(rect.bottom - rect.top).unwrap_or(0),
             attached: desc.AttachedToDesktop.as_bool(),
         };
-        info!(
-            index,
-            output = %info.label(),
-            left = info.left,
-            top = info.top,
-            attached = info.attached,
-            adapter = %adapter_label,
-            "program max: display output"
-        );
+        if log {
+            info!(
+                index,
+                output = %info.label(),
+                left = info.left,
+                top = info.top,
+                attached = info.attached,
+                adapter = %adapter_label,
+                "program max: display output"
+            );
+        }
         outputs.push((output, info));
     }
     Ok(())

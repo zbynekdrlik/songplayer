@@ -136,7 +136,7 @@ impl VblankTracker {
     /// Never runs (no value exists). `mutants::skip`: an uninhabited
     /// receiver, so no test can call it.
     #[cfg_attr(test, mutants::skip)]
-    pub fn output(&self) -> &OutputInfo {
+    pub fn output(&self) -> OutputInfo {
         match self.0 {}
     }
 
