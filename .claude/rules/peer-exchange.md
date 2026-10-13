@@ -455,17 +455,22 @@ wait for a peer that has the song", below).
   leaves PP running. The always() Start step and the `e2e-pp` job check
   the box too, so a wrong box is never touched at all. Then: stop (the task instance first, then the process,
   CLIProxyAPI, port 8920 free; its own 5 min step bound), install `/S` (exit
-  code read; a 10 min step bound), copy `dist`, start the task, check the
-  version. The step bounds turn a hung stop or installer into a plain step
-  failure within minutes, so the Start step below runs.
+  code read; a 10 min step bound), copy `dist`, apply the production PC
+  profile (#255 lane 2: `scripts/setup-prod-pc.ps1` in a child process, a
+  5 min step bound; `prod-environment.md` "The setup script"; PP holds the
+  whole profile, so it plans nothing there), start the task, check the
+  version. The step bounds turn a hung stop, installer or profile run into
+  a plain step failure within minutes, so the Start step below runs.
 - "Start SongPlayer" is `if: always()` (the one step that may be): after a
-  failed install or a cancel it starts the task again (a no-op when nothing
+  failed install or profile step, or a cancel, it starts the task again (a no-op when nothing
   was stopped) and waits up to 90 s for the process and
   `/api/v1/status`, else it fails on its own ("did not come back - the wall
   may be dark"): "Health checks" is skipped once a step failed. Whether a
   job TIMEOUT runs `always()` steps is not verified on this runner. No
-  deploy step writes PP's DB or settings, nor the task, the ACL or the
-  firewall (phase 0 owns them). The server itself does: the new build's
+  deploy step writes PP's DB or settings, nor the task, the ACL or a
+  firewall rule (phase 0 owns them); the profile step sets only system
+  settings (firewall PROFILES off among them, as the environment gate
+  already requires). The server itself does: the new build's
   first start runs its migrations, the gate's presses and restore cut save
   the program source, and a song the pressed playlist starts is recorded in
   `play_history` (it weighs the next pick), as on any press.

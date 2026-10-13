@@ -9,6 +9,10 @@ paths:
   - "e2e/post-deploy-environment.spec.ts"
   - "e2e/health-environment.spec.ts"
   - "e2e/post-deploy-pp.config.ts"
+  - "scripts/setup-prod-pc.ps1"
+  - "scripts/tests/setup-prod-pc.Tests.ps1"
+  - "scripts/tests/test_setup_prod_pc_workflows.py"
+  - "scripts/tests/fixtures/prod-pc/**"
 ---
 
 # The production environment (#233): LTSC or Windows 11 IoT Enterprise, Defender / antivirus / firewall OFF; the audio profile (#255)
@@ -127,9 +131,9 @@ process for this.
 The owner (12.10.2026): what was found and set by hand on PP and SNV is
 built into SongPlayer, so a reinstalled or new PC is checked by SongPlayer
 itself and the deploy gate, never set up from memory. Lane 1 checks; lane 2
-adds `scripts/setup-prod-pc.ps1` (applies the profile before every deploy's
-start and on a new PC) and its deploy wiring. SongPlayer itself never
-changes a system setting.
+APPLIES: `scripts/setup-prod-pc.ps1` (below, "The setup script") runs
+between SongPlayer's stop and its start in every deploy, and alone on a new
+PC. SongPlayer itself never changes a system setting.
 
 **Files.** Pure: `sp_core::prod_env::audio` (`prod_env_audio.rs`: the
 vocabulary, the wire shape, `notes`), sp-server `prod_env::audio`
@@ -203,10 +207,10 @@ name** (a reinstalled PC with other adapter names is covered), matched by
 | SoundGrid adapter unreadable | any of the above failed / not found | — | — | **GATE** `unreadable:soundgrid_nic` |
 | SoundGrid's chosen port | `SoundGrid.Driver.preferences` `LocalLanPort` (service installed) | a port chosen and on one hardware adapter | PP's file 13.10.2026 (above) | **GATE** `soundgrid_port_unset` ("SoundGrid nemá zvolený sieťový port — nastav ho v SoundGrid Studio / ovládači"), `soundgrid_port_missing` (names the MAC), `unreadable:soundgrid` (the service, the file, the interfaces) |
 | `NoAutoUpdate` | `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU` | DWORD 1 (missing, another number or type = on) | a Windows Update driver push would undo PP's NDIS swap; both boxes 1 (12.10.2026) | **GATE** `windows_auto_update_on`, `unreadable:windows_update` |
-| `ExcludeWUDriversInQualityUpdate` | `…\WindowsUpdate` | DWORD 1 | PP 1 (set 12.10.2026); **SNV lacks it** | **report only** until lane 2's setup applies it on every box (TODO in `read_audio`), then a gate |
+| `ExcludeWUDriversInQualityUpdate` | `…\WindowsUpdate` | DWORD 1 (missing, another number or type = not excluded) | a driver push would undo PP's NDIS swap; PP 1 (set 12.10.2026), SNV lacked it until lane 2's setup set it at its first deploy | **GATE** since lane 2 (the setup applies it before every start) `windows_update_drivers_on`, `unreadable:windows_update` (ONE for either policy) |
 | MMCSS | `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile` `SystemResponsiveness` 0, `NetworkThrottlingIndex` 0xFFFFFFFF; `…\Tasks\Pro Audio` `Priority` 6, `Scheduling Category` High (case and padding ignored) | each exact; missing = `mmcss:<name>` "chýba"; another type = unreadable | #210 part 2 (`vban-out.md`); both boxes hold | **GATE** `mmcss:<system_responsiveness\|network_throttling_index\|pro_audio_priority\|pro_audio_scheduling_category>`, `unreadable:mmcss` |
 | Dante adapter's model + settings | as for SoundGrid | NetAdapterCx = a note | the 12.10.2026 finding: BOTH boxes' DVS adapters are Realtek USB NetAdapterCx (PP `rtucx21x64`, SNV `rtucx22x64`); the effect on Dante is still being measured | **report only** |
-| power | `PowerGetActiveScheme`, `PowerReadFriendlyName`, `PowerReadACValueIndex(SUB_PROCESSOR, CPMINCORES)` | `CPMINCORES` < 100 = a note | Waves' guide; PP Bitsum Highest Performance 100 %, SNV High performance 100 % | **report only** |
+| power | `PowerGetActiveScheme`, `PowerReadFriendlyName`, `PowerReadACValueIndex(SUB_PROCESSOR, CPMINCORES)` | `CPMINCORES` < 100 = a note | Waves' guide; PP Bitsum Highest Performance 100 %, SNV High performance 100 % | **report only** (the setup applies 100 on the active scheme; it stays a note here) |
 
 Why the power API and not the registry: the registry holds only a scheme's
 OWN values (`User\PowerSchemes\<scheme>\<sub>\<setting>`); a value left at
@@ -218,10 +222,10 @@ zistiť".
 
 **Report-only facts are notes, never problems** (`sp_core::prod_env::audio::notes`,
 put on the status as `audio.notes` by the server): the Dante adapter on
-NetAdapterCx or unreadable, DVS not determinable, the driver exclusion
-missing or unreadable, no power scheme, core parking under 100 % or
-unreadable. Their read errors still go to `read_errors` (the gate prints
-read errors only next to a failure).
+NetAdapterCx or unreadable, DVS not determinable, no power scheme, core
+parking under 100 % or unreadable. (The driver exclusion was a note in
+lane 1; lane 2 made it a gate.) Their read errors still go to
+`read_errors` (the gate prints read errors only next to a failure).
 
 ## Where it shows
 
@@ -255,7 +259,8 @@ read errors only next to a failure).
   `unreadable:soundgrid` / `soundgrid_port_unset` / `soundgrid_port_missing`,
   or its adapter's `unreadable:soundgrid_nic`, `soundgrid_nic_netadaptercx`,
   `soundgrid_nic_setting:<name>` (in `NicSetting::ALL`'s order), then
-  `unreadable:windows_update` / `windows_auto_update_on`, then
+  `unreadable:windows_update` (once, for either policy),
+  `windows_auto_update_on`, `windows_update_drivers_on` (lane 2), then
   `unreadable:mmcss` (once, first) and `mmcss:<name>`; Slovak texts in
   `sp_core::prod_env::EnvProblem::text_sk` (an adapter named by its
   connection name, else its driver's description, else its GUID).
@@ -278,8 +283,8 @@ read errors only next to a failure).
   `HealthTone::Off`), the notes and the power scheme as its tooltip, shown
   only while `audio.notes` is not empty; it never changes
   `data-environment` (the box still holds). Both boxes show it today (their
-  DVS adapters are NetAdapterCx; SNV lacks the driver exclusion). The mock
-  default sends no note; a spec sends `audio: {notes: […]}`.
+  DVS adapters are NetAdapterCx). The mock default sends no note; a spec
+  sends `audio: {notes: […]}`.
 
 ## The gate
 
@@ -293,8 +298,9 @@ whatever `ok` says (`edition_allowed` true; `defender_realtime`,
 missing from an older server reads null and fails; #255: `audio.soundgrid`
 "not_installed", or "found" with `audio.soundgrid_nic` `driver_model` "ndis"
 and `settings_ok` true,
-`audio.windows_update.no_auto_update` true, `audio.mmcss` 0 / 4294967295 / 6 /
-"High"), with the read errors next to them, and on a missing, unchecked or
+`audio.windows_update.no_auto_update` true, `audio.windows_update.drivers_excluded`
+true (lane 2), `audio.mmcss` 0 / 4294967295 / 6 / "High"), with the read
+errors next to them, and on a missing, unchecked or
 "not Windows" status; then the dashboard's bar reads
 `data-environment="ok"` and shows no segment, the notes segment shows the
 count of `audio.notes` (or nothing), console clean. The report-only facts
@@ -303,10 +309,138 @@ are logged (`[#255 report-only] …`) and never fail. Unit-tested by
 
 A red gate means the BOX is wrong: fix the box (Defender real-time off and
 its policy keys, firewall off, the edition; #255: the SoundGrid adapter's
-NDIS driver and settings, `NoAutoUpdate`, MMCSS), never the gate. Defender's
+NDIS driver and settings, `NoAutoUpdate`, the driver exclusion, MMCSS),
+never the gate. Everything but the edition and the NIC driver is what
+`scripts/setup-prod-pc.ps1` applies: the deploy ran it before the start, so
+read its log lines in the deploy job first ("Apply the production PC
+profile": a BLOCKED line names what it cannot do for the operator). Defender's
 real-time switch may need Tamper Protection off first (Windows Security
 GUI); PP's and SNV's settings of 11.10.2026 are on the ticket; the NIC swap
 and its rollback recipe are on #233 / PP `C:\ProgramData\SongPlayer\diag\nicswap\README.txt`.
+
+## The setup script (#255 lane 2: `scripts/setup-prod-pc.ps1`)
+
+Lane 1 CHECKS, the script APPLIES. Windows PowerShell 5.1 (the boxes'
+shell; ASCII only, it is read as cp1252) and pwsh 7 (the Linux tests).
+`$ErrorActionPreference = 'Stop'`, `Set-StrictMode -Version Latest`.
+
+- **What it applies, in this order** (the plan's order):
+  1. Windows Update: `…\WindowsUpdate\AU` `NoAutoUpdate` and
+     `…\WindowsUpdate` `ExcludeWUDriversInQualityUpdate`, DWORD 1;
+  2. MMCSS: `SystemResponsiveness` 0, `NetworkThrottlingIndex` 0xFFFFFFFF
+     (written as the Int32 -1), Pro Audio `Priority` 6, `Scheduling Category`
+     REG_SZ `High` (a string that reads `High` with case and padding ignored
+     holds, as in lane 1);
+  3. the SoundGrid adapter, only with the `SoundGridProtocol` service key:
+     found like lane 1 (the `<Configuration><LocalLanPort>` MAC; the current
+     address before the permanent one; `Get-NetAdapter -Physical`; its
+     instance key in the network class by `NetCfgInstanceId`, only the
+     4-digit subkeys are opened: an administrator cannot read `Properties`),
+     then `*InterruptModeration` / `*FlowControl` (required) and
+     `*EEE` / `EnableGreenEthernet`|`GreenEthernet` /
+     `PowerSavingMode`|`*PowerSavingMode` / `GigaLite` (first name that
+     exists) to 0 with `Set-NetAdapterAdvancedProperty -RegistryKeyword …
+     -RegistryValue 0 -NoRestart`, `PnPCapabilities` with 0x08 set (missing,
+     0 or no number → 24, else the value | 8, DWORD in the instance key),
+     then ONE `Restart-NetAdapter` per adapter that changed;
+  4. power: `powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR
+     CPMINCORES 100` + `/setactive SCHEME_CURRENT` (never another scheme);
+     read with `powercfg /qh` (the English label, else the second-to-last
+     hex value: AC then DC end every language's output);
+  5. Defender, as #233 recorded PP and SNV (11.10.2026): `Set-MpPreference`
+     `DisableRealtimeMonitoring` / `DisableBehaviorMonitoring` /
+     `DisableIOAVProtection` / `DisableScriptScanning` true,
+     `MAPSReporting` 0, `SubmitSamplesConsent` 2 (only while the `WinDefend`
+     service runs: stopped or missing = Defender off, nothing to set; another
+     state = a blocker); the policy keys `…\Windows Defender\Real-Time
+     Protection` `Disable{RealtimeMonitoring,BehaviorMonitoring,
+     OnAccessProtection,ScanOnRealtimeEnable,IOAVProtection}` = 1; the
+     firewall: each profile ON in the ACTIVE store → `Set-NetFirewallProfile
+     -Profile <it> -Enabled False` (a group policy that keeps it on fails the
+     verify).
+  Not here: the NIC driver swap (lane 3), the Dante adapter, CPU
+  reservation, the edition.
+- **Shape:** READ every fact into one object (`Read-ProdPcFacts`, then a
+  JSON round trip, so a live read has exactly a fixture's shape; the round
+  trip is checked: a list that came back as no list throws, and Windows
+  PowerShell 5.1's `System.Array` type data is removed first: it writes a
+  wrapped array as `{"value": …, "Count": n}`), PLAN with the pure
+  `Get-ProdPcPlan` (facts → ordered `{Area, Name, Current, Wanted, Reason}`
+  + how to apply, ONLY what differs) and `Get-ProdPcBlockers` (what it
+  cannot do for the operator, with lane 1's code: `soundgrid_port_unset`,
+  `soundgrid_port_missing`, `unreadable:soundgrid`, `unreadable:soundgrid_nic`,
+  `soundgrid_nic_setting:<required>` the driver lacks, `unreadable:defender`,
+  `defender_realtime_on` with every setting off — Tamper Protection named
+  when it is on), APPLY each action (`SET` before → after, one line each; an
+  error is recorded and the rest goes on), RE-READ and verify (`OK` / `FAIL`
+  per action; at most 3 reads 5 s apart while something applied reads
+  otherwise or a new blocker shows: Defender's status lags
+  `Set-MpPreference`). Any error, mismatch or blocker = exit 1 naming it; a
+  second run plans nothing.
+- **Modes:** default apply (elevated, else exit 3; not Windows = exit 3);
+  `-Plan` reads and prints, changes nothing, exit 0 (blockers printed, still
+  0); `-Plan -FactsJson <file>` plans from a fixture (never applies: without
+  `-Plan` exit 2); `-SaveFacts <file>` writes the facts read (to capture a
+  box as a fixture). Under iex / a scriptblock it never `exit`s (that would
+  close the operator's window): the code goes to `$LASTEXITCODE`.
+- **A new PC** (elevated Windows PowerShell, a fresh window: it sets strict
+  mode in that session):
+  `irm https://raw.githubusercontent.com/zbynekdrlik/songplayer/main/scripts/setup-prod-pc.ps1 | iex`;
+  the plan only: `& ([scriptblock]::Create((irm <same url>))) -Plan`.
+- **Whose `%APPDATA%`:** lane 1 reads SongPlayer's own (the driver hosted
+  in SongPlayer's ASIO host reads that file). The deploy runs as the
+  runner's account: `scripts/setup-runner.ps1` registers the runner task as
+  the console user (Interactive, Highest), SongPlayer's task runs as
+  `Resolume` on SNV (ci.yml registers it) and `newlevel` at PP (phase 0) —
+  which user the runner is on each box was not read (no box is touched by
+  this lane). So the script never assumes: it takes the `SongPlayer`
+  scheduled task's principal (`UserId`, a SID or an account translated to
+  one), and that user's AppData: this process's own when it is that user,
+  else the loaded hive's `User Shell Folders\AppData` with `%USERPROFILE%`
+  = `ProfileList\<SID>\ProfileImagePath`, else `<profile>\AppData\Roaming`.
+  No task yet (a new PC): the user running the script. Two tasks named
+  SongPlayer: unreadable.
+- **Where it runs** (between the stop and the start, never while SongPlayer
+  runs; `scripts/tests/test_setup_prod_pc_workflows.py` walks every
+  PowerShell step of both workflows in order and fails on a start after a
+  stop with no run in between, plus the shapes below):
+  - ci.yml "Deploy to win-resolume": the step "Apply the production PC
+    profile (scripts/setup-prod-pc.ps1)" after "Deploy SongPlayer" (stop +
+    install, `id: deploy`), a child `powershell.exe -File` with
+    `timeout-minutes: 5`; "Configure auto-start and launch" is
+    `if: ${{ !cancelled() && steps.deploy.outcome == 'success' }}`, so a
+    failed or hung profile step still starts SongPlayer and the job fails;
+  - ci.yml "Restart SongPlayer" (E2E): after the stop, a child process
+    started from a `ProcessStartInfo` (`UseShellExecute = $false`: no window
+    on the live box) waited for 5 min at most (the step has no bound of its
+    own), killed past it; the relaunch always runs, then the step fails on a
+    non-zero `$prodPcExit`; the fallback's second stop runs it again;
+  - deploy-pp.yml: its own step after "Install SongPlayer…", before the
+    `always()` "Start SongPlayer", `timeout-minutes: 5`. PP's dispatch runs
+    main's workflow: PP gets the step with the next release.
+- **Tests:** `scripts/tests/setup-prod-pc.Tests.ps1` (Pester 5, pwsh 7 on
+  ubuntu; the functions are loaded from the script's syntax tree, nothing
+  runs at load): the MAC rule, PP's preferences verbatim and every
+  malformed shape, the PnPCapabilities bit math, the DWORD conversions,
+  `powercfg`'s AC index, the plan on PP (empty), SNV (exactly
+  `ExcludeWUDriversInQualityUpdate`), a fresh PC (all 28 actions, in order),
+  a second run after its own changes (empty, through a JSON round trip),
+  each blocker, Defender's service states, and the script itself in
+  `-Plan -FactsJson` mode (exit codes 0 / 2 / 3, `-SaveFacts`); fixtures
+  `scripts/tests/fixtures/prod-pc/{pp,snv,fresh}.json` (PP and SNV from
+  lane 1's live values of 13.10.2026; capture a box with `-Plan -SaveFacts`
+  to refresh one). CI: the job "Production PC setup (Pester +
+  PSScriptAnalyzer)" (in the Gate's needs; fails when no test ran, any
+  skipped, or PSScriptAnalyzer reports an error or syntax Windows
+  PowerShell 5.1 cannot run, `PSUseCompatibleSyntax`), and Build (Windows)
+  runs `-Plan` on the runner under 5.1 (the read glue, read only) and the
+  adapter read + the other-user AppData branch directly.
+- **Known limits:** the Defender MAPS / sample-submission values and the
+  Defender policy keys were not read back by lane 1 on the boxes; PP and
+  SNV were set that way on 11.10.2026 (#233), so their first run is
+  expected to plan nothing there — if one does, it is applied (and logged).
+  A keyword with no advanced property (no `ndi\params` entry) fails
+  `Set-NetAdapterAdvancedProperty` and is reported, never written around.
 
 ## Tests
 
@@ -339,7 +473,8 @@ and its rollback recipe are on #233 / PP `C:\ProgramData\SongPlayer\diag\nicswap
   the rule, the notes segment and its Slovak count);
   `crates/sp-server/src/prod_env_audio_tests.rs` (the settings' rules,
   `PnPCapabilities`' bit, the driver model, one adapter's problems in
-  order, MMCSS, the whole profile, the view);
+  order, MMCSS, Windows Update's two policies (lane 2: every pair of
+  read / not set / unread), the whole profile, the view);
   `prod_env_audio_read_tests.rs` (the raw values, the network class, one
   adapter over the in-memory registry, every way a read fails, the
   no-process scan), `prod_env_audio_soundgrid_tests.rs` (PP's preferences
