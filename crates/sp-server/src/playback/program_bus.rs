@@ -63,7 +63,7 @@
 //! `SP-program` sender lives in `program_output.rs`, the offer hook in each pipeline's paced
 //! consumer (`paced_output.rs`).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
@@ -127,7 +127,7 @@ const MAX_RELEASE_STEPS: usize = 64;
 // #257: what a fill owes — an `impl ProgramCore` child for the 1000-line cap.
 #[path = "program_bus_window.rs"]
 mod window;
-use window::WindowStep;
+use window::{Delivery, WindowStep};
 
 /// One program boundary for the `SP-program` sender.
 pub enum ProgramJob {
@@ -266,8 +266,8 @@ pub struct ProgramCore {
     counters: TransitionCounters,
     /// The last stamp each source touched or offered (its liveness + progress).
     last_offer: HashMap<i64, i64>,
-    /// #257: the sources that touched or offered since they became the owner.
-    delivered: HashSet<i64>,
+    /// #257: who delivers since it became the owner, and since when (`Delivery`).
+    delivery: Delivery,
     /// Each queued job with the source it shows (#147: the trace's `source`).
     queue: SubmitQueue<(ProgramJob, Option<i64>)>,
     health: ProgramHealth,
@@ -297,7 +297,7 @@ impl ProgramCore {
             spec: TransitionSpec::cut(SpecSource::Fallback),
             counters: TransitionCounters::default(),
             last_offer: HashMap::new(),
-            delivered: HashSet::new(),
+            delivery: Delivery::default(),
             queue: SubmitQueue::new(PROGRAM_QUEUE_BOUND),
             health: ProgramHealth::default(),
             receivers_dark: false,
@@ -416,7 +416,7 @@ impl ProgramCore {
         // waiting cue kept on air takes the boundaries over with no window.
         if outgoing != Some(pid) {
             self.segments.push((boundary, pid));
-            self.delivered.remove(&pid); // #257: a new owner delivers anew
+            self.delivery.became_owner(pid, boundary); // #257: a new owner delivers anew
             let window = Window::cued(outgoing, pid, boundary, &self.spec);
             self.windows.push(window);
         } else if self.selected() != Some(pid) {
