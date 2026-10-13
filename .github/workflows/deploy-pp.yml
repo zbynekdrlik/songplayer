@@ -351,7 +351,9 @@ jobs:
       # OBS manual, the live read of SNV's catalog, a real transfer of SNV's
       # smallest file artifact with its sha and size checked) +
       # post-deploy-max.spec.ts + post-deploy-audio-asio.spec.ts (#233: DVS
-      # registered, the ASIO outputs SP_ASIO_OUTPUTS_EXPECTED names run).
+      # registered, the ASIO outputs SP_ASIO_OUTPUTS_EXPECTED names run) +
+      # post-deploy-pp-preview.spec.ts (#266: the on-program card's live
+      # preview decodes video and audio, in Edge).
       - name: Post-deploy Playwright (PP subset)
         shell: powershell
         env:
@@ -379,6 +381,27 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             Write-Error "FAIL: npx playwright install chromium failed"
             exit 1
+          }
+          # Issue 266: the live preview gate (post-deploy-pp-preview.spec.ts)
+          # decodes H.264/AAC in Microsoft Edge (bundled Chromium lacks them).
+          # Use PP's installed Edge; install it only when it is missing: with
+          # CI=true, "playwright install msedge" re-installs Edge every run.
+          # The places Playwright's msedge channel looks for msedge.exe.
+          $edgeCandidates = @(
+            "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+            "${env:ProgramFiles}\Microsoft\Edge\Application\msedge.exe",
+            "${env:LOCALAPPDATA}\Microsoft\Edge\Application\msedge.exe"
+          )
+          $edge = @($edgeCandidates | Where-Object { Test-Path -LiteralPath $_ }) | Select-Object -First 1
+          if ($edge) {
+            Write-Host "Microsoft Edge for the preview gate: $edge"
+          } else {
+            Write-Host "Microsoft Edge is missing at PP - installing it for the preview gate"
+            npx playwright install msedge 2>&1 | Select-Object -Last 3
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "FAIL: Microsoft Edge is missing at PP and npx playwright install msedge failed - the preview gate needs it"
+              exit 1
+            }
           }
           npx playwright test --config=post-deploy-pp.config.ts --reporter=list 2>&1
           if ($LASTEXITCODE -ne 0) {

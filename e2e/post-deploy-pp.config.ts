@@ -15,7 +15,10 @@ import { defineConfig } from "@playwright/test";
  * `post-deploy-audio-faults-ui.spec.ts` (#257: the dashboard's audio
  * segment reads PP's own fault ledger, its panel lists every path) +
  * `post-deploy-wall.spec.ts` (#259: the LED wall report reads PP's box; it
- * fails only when SongPlayer cannot read, never on PP's own setup).
+ * fails only when SongPlayer cannot read, never on PP's own setup) +
+ * `post-deploy-pp-preview.spec.ts` (#266: the on-program card's live preview
+ * decodes video and audio at PP; it needs real H.264/AAC, so it runs in the
+ * `edge` project below, on the Edge deploy-pp.yml makes sure of).
  * The SNV suite is post-deploy.config.ts; it ignores post-deploy-pp*.
  */
 export default defineConfig({
@@ -28,6 +31,7 @@ export default defineConfig({
     "**/post-deploy-environment.spec.ts",
     "**/post-deploy-audio-faults-ui.spec.ts",
     "**/post-deploy-wall.spec.ts",
+    "**/post-deploy-pp-preview.spec.ts",
   ],
   timeout: 90_000,
   retries: 0,
@@ -45,5 +49,21 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  projects: [{ name: "chromium", use: { browserName: "chromium" } }],
+  projects: [
+    // Bundled Chromium runs the subset EXCEPT the preview spec: it lacks
+    // H.264/AAC. A project-level testIgnore/testMatch replaces the global one
+    // for its project.
+    {
+      name: "chromium",
+      use: { browserName: "chromium" },
+      testIgnore: ["**/post-deploy-pp-preview.spec.ts"],
+    },
+    // #266: the live preview <video> decodes the box's real H.264/AAC in Edge
+    // (msedge), as SNV's preview specs do (post-deploy.config.ts).
+    {
+      name: "edge",
+      use: { browserName: "chromium", channel: "msedge" },
+      testMatch: ["**/post-deploy-pp-preview.spec.ts"],
+    },
+  ],
 });

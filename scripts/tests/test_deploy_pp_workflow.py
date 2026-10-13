@@ -290,9 +290,9 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
     specs = re.findall(r'"([^"]+)"', match.group(1))
     # PP runs its own subset, MAX, the masked-settings check (release 0.72.0
     # review), the ASIO gate (#233 lane 3: DVS is installed at PP too), the
-    # environment gate, the audio-fault dashboard check (#257) and the LED
-    # wall report (#259: fails only when SongPlayer cannot read PP's box),
-    # and never the SNV suite.
+    # environment gate, the audio-fault dashboard check (#257), the LED
+    # wall report (#259: fails only when SongPlayer cannot read PP's box)
+    # and the live preview gate (#266), and never the SNV suite.
     assert specs == [
         "**/post-deploy-pp.spec.ts",
         "**/post-deploy-max.spec.ts",
@@ -301,7 +301,37 @@ def test_snv_never_runs_the_pp_subset_and_pp_runs_it_with_max():
         "**/post-deploy-environment.spec.ts",
         "**/post-deploy-audio-faults-ui.spec.ts",
         "**/post-deploy-wall.spec.ts",
+        "**/post-deploy-pp-preview.spec.ts",
     ]
+
+
+def test_pp_runs_its_preview_gate_in_edge_and_never_reinstalls_edge():
+    # #266: the preview <video> decodes H.264/AAC, which bundled Chromium
+    # lacks: the gate runs in an msedge project (as SNV's preview specs do),
+    # and bundled Chromium never runs it.
+    pp = (_REPO / "e2e" / "post-deploy-pp.config.ts").read_text(encoding="utf-8")
+    projects = pp[pp.index("projects:") :]
+    chromium = projects[
+        projects.index('name: "chromium"') : projects.index('name: "edge"')
+    ]
+    edge = projects[projects.index('name: "edge"') :]
+    assert 'testIgnore: ["**/post-deploy-pp-preview.spec.ts"]' in chromium, chromium
+    assert 'channel: "msedge"' in edge, edge
+    assert 'testMatch: ["**/post-deploy-pp-preview.spec.ts"]' in edge, edge
+    # SNV's suite never runs it: its chromium project ignores post-deploy-pp*
+    # and its edge project names only SNV's two preview specs.
+    snv = (_REPO / "e2e" / "post-deploy.config.ts").read_text(encoding="utf-8")
+    assert "post-deploy-pp-preview" not in snv
+    # PP's step uses the Edge PP has and installs it only when it is
+    # missing (with CI=true an unconditional `playwright install msedge`
+    # re-installs Edge every run), a failed install failing the step by
+    # name before the suite runs.
+    step = _step(_deploy_pp(), "Post-deploy Playwright (PP subset)")
+    install = step.index("npx playwright install msedge")
+    assert step.index("Test-Path -LiteralPath") < install, step
+    assert "} else {" in step[step.index("Test-Path -LiteralPath") : install], step
+    failed = step.index("msedge failed - the preview gate needs it")
+    assert install < failed < step.index("npx playwright test"), step
 
 
 def test_pp_expects_its_two_running_asio_outputs():
