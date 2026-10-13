@@ -831,6 +831,9 @@ mod tests_v39;
 #[path = "mod_tests_v40.rs"]
 #[cfg(test)]
 mod tests_v40;
+#[path = "mod_tests_v41.rs"]
+#[cfg(test)]
+mod tests_v41;
 
 #[path = "mod_tests_pool.rs"]
 #[cfg(test)]
