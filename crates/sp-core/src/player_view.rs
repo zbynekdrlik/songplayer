@@ -77,7 +77,10 @@ pub fn player_title(view: NowPlayingView, song: &str, artist: &str) -> String {
 
 /// The Player's state label. #221 L4b: a ▶ claims no program, so a playlist
 /// that is not on air plays OFF program — the scene-aware `state` is
-/// `WaitingForScene` while the transport is `Playing`.
+/// `WaitingForScene` while the transport is `Playing`. #266: one that is not
+/// on air and does not decode is PAUSED ("Pozastavené (mimo programu)"; it
+/// read "Čaká na scénu", but since #221 L4b nothing waits for a scene — the
+/// owner at PP had no idea why his paused ytfast would not start).
 pub fn state_label(
     state_known: bool,
     state: PlaybackState,
@@ -90,7 +93,7 @@ pub fn state_label(
         (PlaybackState::Playing, _) => "Hrá",
         (PlaybackState::Idle, _) => "Nehrá",
         (PlaybackState::WaitingForScene, TransportState::Playing) => "Hrá mimo programu",
-        (PlaybackState::WaitingForScene, _) => "Čaká na scénu",
+        (PlaybackState::WaitingForScene, _) => "Pozastavené (mimo programu)",
     }
 }
 
@@ -197,9 +200,9 @@ fn waits_for_retry(state_known: bool, transport: TransportState, retry: bool) ->
 
 /// The Player's state label ([`state_label`]), except while the playlist
 /// waits for the retry of its failed opens ([`waits_for_retry`]): "Čaká na
-/// ďalší pokus", not "Čaká na scénu" (it may well be on program, black). A
-/// pipeline told it decodes keeps its label ("Hrá", or "Hrá mimo programu"
-/// off program). Until the state is known the label claims nothing ("—",
+/// ďalší pokus", not "Pozastavené (mimo programu)" (it may well be on
+/// program, black). A pipeline told it decodes keeps its label ("Hrá", or
+/// "Hrá mimo programu" off program). Until the state is known the label claims nothing ("—",
 /// #225), the retry included.
 pub fn player_state_label(
     state_known: bool,
