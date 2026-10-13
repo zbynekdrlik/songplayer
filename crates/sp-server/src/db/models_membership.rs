@@ -8,6 +8,8 @@
 //! song put back plays again at once. A year after its mark the retention
 //! deletes it with its own data and files (`playlist::retention`).
 
+use std::path::{Path, PathBuf};
+
 use sqlx::{Row, SqlitePool};
 
 /// A row of a playlist as the sync compares it with the fetched list.
@@ -79,6 +81,125 @@ pub async fn video_playlist_membership(
     .bind(playlist_id)
     .fetch_optional(pool)
     .await
+}
+
+/// A row the retention deletes: marked at or before the cutoff (the one
+/// `?`), and in no custom playlist's set list (an operator put it there).
+const DUE_WHERE: &str = "removed_at <= ? \
+     AND NOT EXISTS (SELECT 1 FROM playlist_items i WHERE i.video_id = videos.id)";
+
+/// A row the retention deletes, with the files it records.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DueRow {
+    pub id: i64,
+    pub youtube_id: String,
+    pub title: Option<String>,
+    /// `file_path` as the row stores it (`""` when none).
+    pub video: String,
+    pub audio: Option<String>,
+}
+
+/// At most `limit` rows due at `cutoff_ms` (`DUE_WHERE`), the longest
+/// marked first.
+pub async fn due_ids(
+    pool: &SqlitePool,
+    cutoff_ms: i64,
+    limit: i64,
+) -> Result<Vec<i64>, sqlx::Error> {
+    sqlx::query_scalar(&format!(
+        "SELECT id FROM videos WHERE {DUE_WHERE} ORDER BY removed_at, id LIMIT ?"
+    ))
+    .bind(cutoff_ms)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
+/// Row `id` while it is still due at `cutoff_ms`, read right before its
+/// deletion (a sync may have brought it back since the batch was read).
+pub async fn due_row(
+    pool: &SqlitePool,
+    id: i64,
+    cutoff_ms: i64,
+) -> Result<Option<DueRow>, sqlx::Error> {
+    let row = sqlx::query(&format!(
+        "SELECT id, youtube_id, title, COALESCE(file_path, '') AS video, audio_file_path \
+         FROM videos WHERE id = ? AND {DUE_WHERE}"
+    ))
+    .bind(id)
+    .bind(cutoff_ms)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| DueRow {
+        id: r.get("id"),
+        youtube_id: r.get("youtube_id"),
+        title: r.get("title"),
+        video: r.get("video"),
+        audio: r.get("audio_file_path"),
+    }))
+}
+
+/// Another row than `id` records `path` as one of its files (its video, its
+/// audio, a stem or its dub): the same video in another playlist shares the
+/// files by name (#136), so such a file is never deleted with `id`.
+pub async fn recorded_elsewhere(
+    pool: &SqlitePool,
+    id: i64,
+    path: &Path,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM videos WHERE id != ?1 \
+         AND (file_path = ?2 OR audio_file_path = ?2 OR vocals_file_path = ?2 \
+              OR instrumental_file_path = ?2 OR dub_file_path = ?2))",
+    )
+    .bind(id)
+    .bind(path.to_string_lossy().into_owned())
+    .fetch_one(pool)
+    .await
+}
+
+/// The peer exchange's records of a video (`youtube_id` keyed) that go with
+/// its last row.
+const PEER_TABLES: [&str; 3] = ["peer_waits", "peer_fetches", "peer_standins"];
+
+/// Delete `row` while it is still due at `cutoff_ms`, in one transaction
+/// with its own data: its play history (the foreign key's
+/// cascade), the exchange's records of its video once no row of the video
+/// is left, and the sha256 cache entries of the files `removed`. `false`
+/// (nothing written) when the row is not due any more.
+pub async fn delete_row(
+    pool: &SqlitePool,
+    row: &DueRow,
+    cutoff_ms: i64,
+    removed: &[PathBuf],
+) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let deleted = sqlx::query(&format!("DELETE FROM videos WHERE id = ? AND {DUE_WHERE}"))
+        .bind(row.id)
+        .bind(cutoff_ms)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if deleted == 0 {
+        return Ok(false);
+    }
+    for table in PEER_TABLES {
+        sqlx::query(&format!(
+            "DELETE FROM {table} WHERE youtube_id = ?1 \
+             AND NOT EXISTS (SELECT 1 FROM videos WHERE youtube_id = ?1)"
+        ))
+        .bind(&row.youtube_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    for path in removed {
+        sqlx::query("DELETE FROM peer_hashes WHERE path = ?")
+            .bind(path.to_string_lossy().into_owned())
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(true)
 }
 
 #[cfg(test)]

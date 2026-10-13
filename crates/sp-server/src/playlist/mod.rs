@@ -3,6 +3,7 @@
 
 pub mod loop_memory; // #229 follow-up: Loop's song across a restart
 pub mod membership; // #260: a fetch marks the songs that left the playlist
+pub mod retention; // #260: a year later the marked row goes, with its files
 pub mod selector;
 
 use sqlx::SqlitePool;

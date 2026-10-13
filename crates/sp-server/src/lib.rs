@@ -442,6 +442,11 @@ pub async fn start(
     )); // #207: per-minute host commit/pagefile logger (Windows only)
     tokio::spawn(crate::prod_env::run(shutdown_tx.subscribe())); // #233: checked now + every minute
     tokio::spawn(crate::wall::run(shutdown_tx.subscribe())); // #259: the wall, now + every 5 s
+    // #260: a song that left its YouTube playlist goes a year later, files and all.
+    tokio::spawn(playlist::retention::run(
+        pool.clone(),
+        shutdown_tx.subscribe(),
+    ));
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {

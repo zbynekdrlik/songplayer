@@ -146,6 +146,7 @@ fn job_sk(job: &str) -> &str {
         "peer" => "výmena so susedným uzlom",
         "ytdlp_update" => "aktualizácia yt-dlp",
         "video_upgrade" => "vylepšenie videí na 4K",
+        "retention" => "mazanie odobratých skladieb",
         other => other,
     }
 }

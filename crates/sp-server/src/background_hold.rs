@@ -50,6 +50,8 @@ pub enum Job {
     YtdlpUpdate,
     /// #223 S12: the in-place video upgrade.
     VideoUpgrade,
+    /// #260: a year after a song left its YouTube playlist, its row and files go.
+    Retention,
 }
 
 impl Job {
@@ -66,6 +68,7 @@ impl Job {
             Self::Peer => "peer",
             Self::YtdlpUpdate => "ytdlp_update",
             Self::VideoUpgrade => "video_upgrade",
+            Self::Retention => "retention",
         }
     }
 }
