@@ -141,6 +141,60 @@ jobs:
       - name: Run dubbing eval pytest (#175 fit policy)
         run: pytest eval/dubbing/tests -v
 
+  # #255 lane 2: scripts/setup-prod-pc.ps1 (the production PC profile the
+  # deploys apply). Its pure plan, the preferences / MAC / PnPCapabilities
+  # parsing and its -Plan -FactsJson mode, from fixtures, under pwsh 7 +
+  # Pester 5 (both on the ubuntu image: actions/runner-images Ubuntu 24.04
+  # lists PowerShell 7 and the modules Pester 5 and PSScriptAnalyzer). The
+  # Windows read glue is planned on the Build (Windows) runner.
+  setup-prod-pc:
+    name: Production PC setup (Pester + PSScriptAnalyzer)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pester tests of scripts/setup-prod-pc.ps1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pester = Get-Module -ListAvailable -Name Pester | Sort-Object Version -Descending | Select-Object -First 1
+          if ($null -eq $pester -or $pester.Version.Major -lt 5) {
+            Install-Module -Name Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          }
+          Import-Module -Name Pester -MinimumVersion 5.0.0
+          Write-Host "Pester $((Get-Module -Name Pester).Version)"
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'scripts/tests/setup-prod-pc.Tests.ps1'
+          $config.Run.PassThru = $true
+          $config.Output.Verbosity = 'Detailed'
+          $result = Invoke-Pester -Configuration $config
+          Write-Host "Pester: $($result.PassedCount) passed, $($result.FailedCount) failed, $($result.SkippedCount) skipped, $($result.NotRunCount) not run"
+          if ($result.Result -ne 'Passed') { throw "Pester: $($result.Result)" }
+          if ($result.FailedCount -gt 0 -or $result.FailedBlocksCount -gt 0 -or $result.FailedContainersCount -gt 0) { throw 'Pester: a test, a block or a file failed' }
+          if ($result.SkippedCount -gt 0 -or $result.NotRunCount -gt 0) { throw 'Pester: every test must run' }
+          if ($result.PassedCount -lt 1) { throw 'Pester: no test ran' }
+      - name: PSScriptAnalyzer (errors, and syntax Windows PowerShell 5.1 cannot run)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($null -eq (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+            Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+          }
+          Import-Module -Name PSScriptAnalyzer
+          $path = 'scripts/setup-prod-pc.ps1'
+          $errors = @(Invoke-ScriptAnalyzer -Path $path -Severity Error)
+          $compatibility = @(Invoke-ScriptAnalyzer -Path $path -Settings @{
+            IncludeRules = @('PSUseCompatibleSyntax')
+            Rules = @{ PSUseCompatibleSyntax = @{ Enable = $true; TargetVersions = @('5.1', '7.0') } }
+          })
+          $found = @($errors) + @($compatibility)
+          foreach ($record in $found) {
+            Write-Host "$($record.ScriptName):$($record.Line): $($record.RuleName): $($record.Message)"
+          }
+          if ($found.Count -gt 0) { throw "PSScriptAnalyzer: $($found.Count) finding(s) in $path" }
+          Write-Host "PSScriptAnalyzer: $path is clean"
+
   build-wasm:
     name: Build WASM (trunk)
     if: github.event_name == 'push'
@@ -374,6 +428,42 @@ jobs:
     needs: [lint, test]
     steps:
       - uses: actions/checkout@v4
+      # #255 lane 2: scripts/setup-prod-pc.ps1's Windows glue under Windows
+      # PowerShell 5.1 (the boxes' shell), READ ONLY: -Plan reads this
+      # runner and changes nothing (its facts must survive the JSON round
+      # trip in shape, the script checks it). The runner has no SoundGrid,
+      # so the adapter read and the other user's AppData are run here
+      # directly: every physical adapter with an instance in the network
+      # class has its settings read, and the current user's AppData read
+      # through the profile list (the branch for another user) equals
+      # Windows' own. The plan itself is Pester-tested on Linux.
+      - name: Plan the production PC profile on the runner (read only)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts\setup-prod-pc.ps1 -Plan
+          if ($LASTEXITCODE -ne 0) { throw "setup-prod-pc.ps1 -Plan exited $LASTEXITCODE on the runner" }
+          $tokens = $null
+          $parseErrors = $null
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile("$PWD\scripts\setup-prod-pc.ps1", [ref]$tokens, [ref]$parseErrors)
+          if (@($parseErrors).Count -gt 0) { throw "setup-prod-pc.ps1 does not parse: $($parseErrors[0])" }
+          foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
+            . ([scriptblock]::Create($definition.Extent.Text))
+          }
+          $adapters = @(Read-ProdPcAdapters)
+          $physical = @(Get-NetAdapter -Physical)
+          if ($adapters.Count -ne $physical.Count) { throw "Read-ProdPcAdapters read $($adapters.Count) adapters, Get-NetAdapter -Physical lists $($physical.Count)" }
+          foreach ($adapter in $adapters) {
+            Write-Host "adapter '$($adapter.name)' $($adapter.guid) mac $($adapter.mac) class key $($adapter.class_key) settings $(ConvertTo-Json -InputObject $adapter.settings -Compress)"
+            if ($null -eq (ConvertTo-MacKey $adapter.mac)) { throw "adapter '$($adapter.name)': no MAC read ('$($adapter.mac)')" }
+            if ($null -ne $adapter.class_key -and $null -eq $adapter.settings) { throw "adapter '$($adapter.name)': its settings were not read" }
+          }
+          $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $viaProfile = Get-ProdPcUserAppData -Sid $me
+          $own = [Environment]::GetFolderPath('ApplicationData')
+          if ($viaProfile -ne $own) { throw "Get-ProdPcUserAppData read '$viaProfile' for this user, Windows says '$own'" }
+          $where = Resolve-SoundGridPreferencesPath
+          Write-Host "SoundGrid's preferences would be read from $($where.Path) ($($where.User)); this user's AppData $own"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build workspace
@@ -892,6 +982,7 @@ jobs:
       - test-wasm
       - security
       - eval-checks
+      - setup-prod-pc
       - build-windows
       - build-wasm
       - build-tauri
