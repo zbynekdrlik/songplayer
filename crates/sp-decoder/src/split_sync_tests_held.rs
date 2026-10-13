@@ -307,3 +307,21 @@ fn held_offsets_follow_the_frame_cadence_exactly() {
     assert_eq!(held_offset_ms(3, (0, 1)), 100);
     assert_eq!(held_offset_ms(3, (30, 0)), 100);
 }
+
+#[test]
+fn a_rate_outside_10_to_120_fps_holds_at_30_fps() {
+    // #257 review: Media Foundation can report a broken rate. 1000/1 would
+    // push 15 000 steps into the 15 s bound; under 0.6 fps one step would
+    // carry over 2 s of audio, past the grid's 2 s cap. The edges hold their
+    // own cadence, whatever the terms.
+    assert_eq!(held_offset_ms(3, (10, 1)), 300, "10 fps itself");
+    assert_eq!(held_offset_ms(3, (100, 10)), 300, "10 fps as 100/10");
+    assert_eq!(held_offset_ms(3, (9, 1)), 100, "9 fps: 30 fps");
+    assert_eq!(held_offset_ms(3, (99, 10)), 100, "9.9 fps: 30 fps");
+    assert_eq!(held_offset_ms(3, (120, 1)), 25, "120 fps itself");
+    assert_eq!(held_offset_ms(3, (1_200, 10)), 25, "120 fps as 1200/10");
+    assert_eq!(held_offset_ms(3, (1_201, 10)), 100, "120.1 fps: 30 fps");
+    assert_eq!(held_offset_ms(3, (121, 1)), 100, "121 fps: 30 fps");
+    assert_eq!(held_offset_ms(3, (1_000, 1)), 100, "1000 fps: 30 fps");
+    assert_eq!(held_offset_ms(3, (1, 2)), 100, "0.5 fps: 30 fps");
+}
