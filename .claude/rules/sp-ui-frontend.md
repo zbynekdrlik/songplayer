@@ -7,6 +7,10 @@ paths:
   - "crates/sp-core/src/lyrics_follow.rs"
   - "e2e/player-known-state.spec.ts"
   - "crates/sp-core/src/player_view.rs"
+  - "crates/sp-core/src/player_view_tests_status.rs"
+  - "e2e/playlist-status.spec.ts"
+  - "e2e/player-paused.spec.ts"
+  - "e2e/dashboard-selector.spec.ts"
 ---
 
 # sp-ui / e2e mock gotchas
@@ -153,9 +157,13 @@ toggles) + a `PlaylistWorkspace` that reuses ONE `PlaylistCard`
 (`show_badge=false`) for the selected playlist. Selection state lives in
 `store.selected_playlist: RwSignal<Option<i64>>` (+ `selection_pinned`), mirrored
 to the URL `?playlist=<id>` and `localStorage` via `components/selection.rs`.
-Seeded once in `App()` (persisted → pinned); the dashboard's auto-follow `Effect`
-defaults an UNPINNED selection to the playing playlist (first by name), so a
-fresh load preselects what's playing while a reload keeps the operator's pick.
+Seeded once in `App()` from the persisted pick, UNPINNED (#266, superseding
+#165's "a reload keeps the operator's pick"); the dashboard's auto-follow
+`Effect` shows the playlist ON PROGRAM (first by name), else what it shows
+(the persisted pick, or the playlist followed last), else the first by name
+(`selection::choose_default`), so a page load — a reload too — opens on the
+program; only a click (`selection::select`) pins, for the session. See "#266:
+the dashboard says in words what plays" below.
 The #164 genlock badge belongs ONLY in the selector rows + the header
 `GlobalLockBadge` summary — never the work area (`show_badge=false`). The
 "Práve hrá" strip (`.now-playing-strip`) is always rendered with a reserved
@@ -424,7 +432,9 @@ signal fires on EVERY `.set()`, even to an unchanged value. So:
 - The **preview** slot is keyed on the constant `playlist_id`, NOT the video id:
   the preview WS/encoder child is per-PLAYLIST and continuous (preview.md), so it
   must survive both position ticks AND song changes; it re-creates only when
-  `is_decoding`/`preview_on` flip (both `Memo`/intentional signals).
+  its `preview_view` Memo changes (#266: `Video` / `Start` / `Placeholder`,
+  over the `preview_slot` Memo and the intentional `preview_on` signal; a
+  pause keeps `Video`, so the running preview is never re-created there).
 - A parent that MOUNTS a shared child from a signal (`pages/dabing.rs` mounts
   `<Player playlist_id=id>` from `dabing_pid`) must (a) only `.set()` that signal
   when the value CHANGES (`if sig.get_untracked() != new { sig.set(new) }` — a
@@ -517,7 +527,10 @@ lookup). The CSS class names stay `playlist-selector-*` (so the historical
 `.playlist-selector-row .lock-badge` style + a couple of class-based post-deploy
 locators keep resolving) while the testids are `playlist-picker*`. Both `<For>`
 (desktop list + mobile `<select>`) read ONLY `store.playlists` (#170: a
-position tick never re-orders the rows).
+position tick never re-orders the rows). #266: each row (and `<option>`)
+says its playlist's state in WORDS through a per-row `Memo`
+(`selection::playlist_status`, testid `playlist-picker-status` +
+`data-status`) — never a ▶ / ⏸ glyph; see the #266 section below.
 
 ### `LyricsView` — ONE tappable lyrics surface everywhere (#194 r3c)
 
@@ -680,8 +693,10 @@ Two orthogonal facts, two sources — never conflate them:
   (`transport == Playing` → `⏸ Pauza`, else `▶ Prehrať`). `transport` is the
   pipeline's OWN decoding state, INDEPENDENT of program. So a dub prepared OFF
   program on the Dabing page (scene-aware `state` = `WaitingForScene`) reads
-  `⏸ Pauza` while it decodes, and a click posts `/pause`. `is_decoding`
-  (preview/mixer enablement) still reads `state` — unchanged.
+  `⏸ Pauza` while it decodes, and a click posts `/pause`. #266: the preview
+  follows the transport too (`player_view::preview_slot`: offered only while
+  `transport == Playing` with a song; it read `state` until a paused playlist
+  off program offered a preview that stayed black).
 - **The on/off-program badge (`player-program-badge`) reads the WS `state`**
   (#225; `Playing` = the wall shows this output) → `● Na programe` /
   `○ Mimo programu`, and `◌ —` until the state is known. NEVER derive the
@@ -782,8 +797,9 @@ Right after a page load the Player showed "Nič nehrá" / "Mixér — nič nehr�
   may decide on a half-told store (review round 3): the Dashboard's
   auto-select (`pages/dashboard.rs`) keeps a valid selection until every
   listed playlist's state is known (`selection::states_known`), and the
-  Player's preview Effect turns the preview off only once the state is known
-  (`state_known && !is_decoding`), so a running preview is re-created by
+  Player's preview Effect turns the preview off only once the playlist is
+  told to play nothing (#266: `PreviewSlot::ends_preview`, `Idle` only; it
+  was `state_known && !is_decoding`), so a running preview is re-created by
   itself after a reconnect. Review round 4: the toggle and the mode select
   claim nothing until known either — a disabled "⏯" and a disabled "—"
   (`sp_core::player_view::{play_pause, mode_value}`; Playwright's click and
@@ -1033,3 +1049,66 @@ read that as "neodpovedá" until #262. Every host answering with no
 SongPlayer clip at all is grey "Resolume: bez klipov SongPlayera"; an empty
 token map (not read yet) is neither. Mock: `POST /__mock/resolume-health
 {hosts}` (`{}` clears); spec `e2e/health-resolume.spec.ts` drives PP's row.
+
+## #266: the dashboard says in words what plays
+
+The owner at PP (13.10.2026): "to ktory playlist hraje je uplne
+nezrozumitelne a to ze sa nespusti lebo nie je v programe je uplne bez
+vysvetlenia!!!" — the work area showed ytfast (the persisted pick) paused
+while ytslow was on the wall, its line read "Čaká na scénu", its slot
+offered a "▶ Živý náhľad" that stayed black, and the list said ▶ / ⏸ / –.
+Then (ROZHODNUTÉ, same day): those glyphs read as BUTTONS (▶ = click to
+play), the opposite of what they meant. Targeted wording / state fixes on
+the existing components (#256: no redesign); design record on #266.
+
+- **No play / pause glyph as a STATE marker, anywhere.** A state is said
+  in words; ▶ / ⏸ appear only on a button that does that action
+  ("▶ Prehrať", "⏸ Pauza", "▶ Živý náhľad", a song row's play).
+- **The list's word** is ONE pure rule, `sp_core::player_view::
+  playlist_status(state_known, state, transport, retry_on_program)` →
+  `PlaylistStatus` (`label()`, `code()`): "NA PROGRAME" (on program: the
+  Player badge's OWN rule, `player_program_badge(..).is_on_program()`, so
+  #229's retry of SP-program's source counts and a row never disagrees
+  with the badge), off program "hrá mimo programu" (transport `Playing`) /
+  "pozastavené", `Idle` → "nehrá", nothing until the state is known
+  (#225). The `<option>` text is `picker_option_text` ("ytslow (SP-slow) —
+  NA PROGRAME"; the name alone until known). sp-ui reads the facts in
+  `selection::playlist_status(store, id)` (the WS entry + the health row's
+  `OpenFailures::retry_on_program`) inside a per-row `Memo`, so a position
+  tick touches no row. Row: `.sel-main` (the name, the word under it) +
+  `.sel-ndi` + the genlock badge; `playlist-picker-status` with
+  `data-status` (`on_program` / `off_program` / `paused` / `idle` /
+  `unknown`); `status-on_program` is the PROGRAM row's red (`--error`, as
+  `.program-cut-on`), its box always there (`visibility: hidden` until
+  known) so a row keeps its height.
+- **A page load opens on the program.** The persisted pick seeds the
+  selection unpinned (it shows only until the replay told every state —
+  `states_known`, unchanged); `choose_default(playlists, np, shown)`: the
+  playlist on program, else `shown` (with nothing on program the work area
+  stays put: the persisted pick, or the playlist followed last — it no
+  longer jumps to the first by name), else the first by name. A click pins
+  for the session; the URL / localStorage still record it, for nothing on
+  program.
+- **The paused label** (`state_label`): `(WaitingForScene, not Playing)` =
+  "Pozastavené (mimo programu)" (it read "Čaká na scénu"; nothing waits for
+  a scene since #221 L4b). A pending retry keeps "Čaká na ďalší pokus".
+- **The preview slot** (`preview.md` "#266: the preview is offered only
+  while the pipeline decodes"): `player_view::preview_slot` (transport, not
+  `state`) + `preview_view` (a new preview mounts only where offered; a
+  running one stays through a pause), the slot's line `PreviewSlot::text`
+  ("Náhľad sa zobrazí, keď playlist hrá — tento je pozastavený." /
+  "… — tento nehrá." / "Načítavam…").
+- **Mock:** a paused playlist off program = a `/__mock/tick` item
+  `{state: "WaitingForScene", transport: "Paused", step_ms: 0}` (replayed
+  to a new socket, so enable it BEFORE `page.goto`); decoding off program =
+  transport `Playing`; nothing on program = `/__mock/ws-replay {no_song:
+  [{playlist_id: 1, state: "WaitingForScene", transport: "Paused"}]}`.
+  `?playlist=<id>` no longer pins a spec's work area: it opens there only
+  until the replay lands (or while nothing is on program); a spec that must
+  stay on a playlist that is not on program CLICKS its row.
+- **Specs:** `e2e/playlist-status.spec.ts` (the words on the desktop rows
+  and the mobile options, the red tally, no glyph, a live re-word in place;
+  the load / reload / session-click / nothing-on-program selection) and
+  `e2e/player-paused.spec.ts` (the label, the preview offered only while
+  decoding, the idle line, a running preview kept through a pause and the
+  resume, same element); sp-core pins in `player_view_tests_status.rs`.
