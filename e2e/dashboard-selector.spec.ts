@@ -204,7 +204,9 @@ test("clicking another row switches the work area and the URL (#165)", async ({
 // (player-title) and "the playlist on program is preselected and marked NA
 // PROGRAME" above.
 
-test("reload keeps the selected playlist (#165)", async ({ page }) => {
+test("a reload opens on the playlist on program; a click holds for the session only (#165, #266)", async ({
+  page,
+}) => {
   await page.goto("/");
   await waitForSelector12(page);
 
@@ -215,13 +217,17 @@ test("reload keeps the selected playlist (#165)", async ({ page }) => {
   await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 09");
   await expect(page).toHaveURL(/[?&]playlist=9\b/);
 
-  // Reload — the selection survives (URL query + localStorage), NOT reset to
-  // the playing playlist.
+  // #266 (the owner's ROZHODNUTÉ 13.10.2026, superseding #165's "a reload
+  // keeps the operator's pick"): a reload is a page load like any other — it
+  // opens on the playlist ON PROGRAM, not on the persisted pick (URL query +
+  // localStorage), which never opens a paused card on load any more.
   await page.reload();
   await waitForSelector12(page);
-  await expect(page.getByTestId("workspace-title")).toHaveText("Playlist 09");
+  await expect(page.getByTestId("workspace-title")).toHaveText(PLAYING_NAME, {
+    timeout: 10000,
+  });
   await expect(
-    page.getByTestId("playlist-picker-item").filter({ hasText: "Playlist 09" }),
+    page.getByTestId("playlist-picker-item").filter({ hasText: PLAYING_NAME }),
   ).toHaveClass(/selected/);
 });
 

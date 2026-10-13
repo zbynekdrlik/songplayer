@@ -65,13 +65,22 @@ pub fn ordered(playlists: &[Playlist]) -> Vec<Playlist> {
     v
 }
 
-/// The INITIAL default selection: the currently-playing playlist (first by
-/// name if several), else the first playlist alphabetically. #170: the
-/// selector order is no longer playing-first, so this preserves "preselect
-/// what's playing on a fresh load" explicitly via `first_playing`. `None`
-/// only for an empty list.
-pub fn choose_default(playlists: &[Playlist], np: &HashMap<i64, NowPlayingInfo>) -> Option<i64> {
-    first_playing(playlists, np).or_else(|| ordered(playlists).first().map(|p| p.id))
+/// The auto-follow's selection (the Dashboard, while the operator has not
+/// clicked a playlist this session): the playlist on program (first by name
+/// if several), else `shown` — what the work area shows now (#266: the
+/// persisted pick a load seeds, or the playlist followed last; with nothing
+/// on program the work area stays put) — else the first playlist
+/// alphabetically. #170: the selector order is no longer playing-first, so
+/// this preselects what plays explicitly via `first_playing`. `None` only for
+/// an empty list.
+pub fn choose_default(
+    playlists: &[Playlist],
+    np: &HashMap<i64, NowPlayingInfo>,
+    shown: Option<i64>,
+) -> Option<i64> {
+    first_playing(playlists, np)
+        .or(shown)
+        .or_else(|| ordered(playlists).first().map(|p| p.id))
 }
 
 /// The first currently-playing playlist id (first by name if several).
