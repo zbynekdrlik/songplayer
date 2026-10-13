@@ -40,9 +40,10 @@ already runs finishes ("blokne ďalšie spracovanie").
   `hold_for` so a test sees the end pass.
 - **Every job start asks, BEFORE anything else of the job:** download
   `process_next` (before the pick and the peer ask), lyrics `process_next`
-  after its kill switch (before the stand-in supersede and both translation
-  passes), stems + dub `process_next` after their kill switches (dub: before
-  the one-shot subtitle backfill), the metadata repair's per-row loop
+  after its kill switch (before the stand-in supersede, #264's lyrics
+  follow, which also asks `Exchange::transfers_paused` itself, and both
+  translation passes), stems + dub `process_next` after their kill
+  switches (dub: before the one-shot subtitle backfill), the metadata repair's per-row loop
   (`break`), `lib.rs`'s sync consumer (drops the request; the 10 min periodic
   sync re-enqueues), the daily yt-dlp update (skips the tick), the #260
   retention (`Job::Retention`, its pass retried an hour later), and the peer
