@@ -17,7 +17,7 @@
 //! - The jobs that ask, each before it starts one: the playlist sync
 //!   (`lib.rs`'s sync consumer drops the request; the periodic sync
 //!   re-enqueues), the download, lyrics, stems and dub workers, the metadata
-//!   repair, the daily yt-dlp update, and the peer exchange
+//!   repair, the daily yt-dlp update, the #260 retention, and the peer exchange
 //!   (`Exchange::transfers_paused`: no fetch, no serving, no hashing).
 //!   Startup one-shots and the playback path never ask.
 //! - `GET /api/v1/background-hold` ([`status`]) feeds the health bar.

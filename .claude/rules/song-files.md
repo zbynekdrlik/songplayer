@@ -14,6 +14,7 @@ paths:
   - "crates/sp-server/src/lyrics/g35t_probe*.rs"
   - "crates/sp-server/src/db/models_stems*.rs"
   - "crates/sp-server/src/metadata/manual*.rs"
+  - "crates/sp-server/src/playlist/retention*.rs"
   - "crates/sp-server/tests/startup_migration.rs"
   - "e2e/cache-layout*.ts"
   - "e2e/post-deploy-flac.spec.ts"
@@ -188,6 +189,13 @@ Design record: #136 comment 5894034820.
     and renaming needs a rename onto a file a player holds open on Windows
     (the POSIX rename `win_replace` gives the Python children; nothing in
     Rust does it yet): a follow-up candidate, #229 follow-up lane review.
+- **The #260 retention deletes a song's whole set, never a file another
+  row records** (`playlist::retention`, `playlist-membership.md`): a row
+  marked 365 days ago goes with its video, audio and `derived_files`,
+  except every file another row records in any path column
+  (`models_membership::recorded_elsewhere`) and every file named after an
+  audio another row records; video first, under `cache::SONG_FILES`, a
+  failed delete keeps the row for the next pass.
 - **`startup::self_heal_cache` never deletes an orphan half-sidecar a row
   records.** That half belongs to a song split across two names (a move-back
   that failed); it is kept and WARNed. The post-deploy FLAC check accepts
