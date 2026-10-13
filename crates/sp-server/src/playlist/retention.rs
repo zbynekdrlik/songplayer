@@ -35,7 +35,7 @@ use crate::downloader::cache::{self, SongFiles};
 pub const REMOVED_RETENTION_DAYS: i64 = 365;
 
 /// At most this many rows are deleted per pass.
-pub const RETENTION_BATCH: i64 = 0;
+pub const RETENTION_BATCH: i64 = 50;
 
 const DAY_MS: i64 = 86_400_000;
 
