@@ -121,38 +121,62 @@ receiver closes after the probe; `PROBE_OUTPUT_PREFIX`).
 ONE predicate, `ProgramCore::owned(stamp, shows)`: inside an OPEN window
 either side's source DELIVERS, so a fade INTO Blank whose playlist missed a
 boundary is an owned fill (review round 1, 🟡 2: the fill shows Blank);
-anywhere else the source the boundary shows. `delivering(source)` = a REAL
-source (`real_source`: a playlist or the NDI input -1; never Blank -2 or
-none) that touched or offered a boundary since it became the owner (a cut
-to it) or since the bus started (`ProgramCore.delivered`, filled by
-`note_progress` — `touch` and `offer` both go through it — and a cut's new
-owner taken out of it, so a touch from BEFORE the cut does not count).
+anywhere else the source the boundary shows. `delivering(source, stamp)` =
+a REAL source (`real_source`: a playlist or the NDI input -1; never Blank
+-2 or none) that owes the boundary (`program_bus_window::Delivery::owes`):
+
+- it touched or offered a boundary since it became the owner (`Delivery`'s
+  set, filled by `note_progress` — `touch` and `offer` both go through it;
+  a cut's new owner is taken out of it by `became_owner`, so a touch from
+  BEFORE the cut does not count), OR
+- `DELIVERY_GRACE_100NS` (300 boundaries, 10 s, exact on the grid) passed
+  since it became the owner: the cut boundary (`became_owner`), else the
+  first boundary the core counted (a fill, a resync, a mix: the start the
+  restored selection owns from).
+
+Rules:
 
 - **A fill of a source that has delivered nothing yet is a WAIT, never a
-  loss** (#257, SNV 12.10.2026, the deploy of 26a5508d: the restore of
-  source 4 at 23:17:00.768, the ledger's baseline at .770, its Play at .830,
-  and the next tick wrote a `program` `filled` loss — the bus filled the
-  restored owner's boundaries before its pipeline offered anything; the
-  HealthBar would read "Zvuk: 1 chyba za 24 h … Program" for a day after
-  every deploy). The startup restore, and a cut to a source that has not
-  reached the bus yet, count in the plain `filled` / `resyncs` only.
+  loss — for 10 s at most** (#257, SNV 12.10.2026, the deploy of 26a5508d:
+  the restore of source 4 at 23:17:00.768, the ledger's baseline at .770,
+  its Play at .830, and the next tick wrote a `program` `filled` loss — the
+  bus filled the restored owner's boundaries before its pipeline offered
+  anything; the HealthBar would read "Zvuk: 1 chyba za 24 h … Program" for
+  a day after every deploy). The startup restore, and a cut to a source
+  that has not reached the bus yet, count in the plain `filled` / `resyncs`
+  only, until the grace runs out.
+- **The grace bounds the wait** (review: a source cut to while its
+  pipeline hangs never touches the bus; without a bound its fills were a
+  wait forever, the program black and silent, the HealthBar "bez chyby").
+  Rejected: keeping a source cut to in the set when its last touch is
+  within `PROGRAM_LIVE_WINDOW_100NS` — a source that hung BEFORE the cut
+  would still wait forever. A running fade's stalled outgoing source cut
+  back to waits the same 10 s from the cut back.
 - A source that delivered and then missed a boundary (its pipeline fell
-  behind, a coalesce gap) still counts: `filled_owned`, `resyncs_owned`, a
-  fade's missing side.
+  behind, a coalesce gap) still counts at once: `filled_owned`,
+  `resyncs_owned`, a fade's missing side.
 - In practice every paced source (and the NDI input) touches on every
   boundary, playing or not, so a source cut to is delivering again within
   about one boundary; only one that stopped reaching the bus reads as a
-  wait. `count_fill(stamp, shows)`
-(the sender's wall fill and a held window boundary) → `filled_owned`;
-`count_resync(stamp)` (the release path's > 8-slot skip, from its first
-skipped boundary) → `resyncs_owned`; a fade's missing real side
-(`commit_mix`, at its weight) → `filled_owned`. `filled` / `resyncs` keep
-their meaning (every fill, every resync). `program_bus.rs` is at the
-1000-line cap: the counting lives in the window child; each call site is
-one line. Tests: `program_bus_window_tests.rs`
+  wait, and only for 10 s.
+- Known edge: a fade's boundaries BEFORE a cut back to its stalled
+  outgoing source are released after that cut (the 3-slot grace), so that
+  source's missing side there is judged under its new ownership: a wait.
+
+`count_fill(stamp, shows)` (the sender's wall fill and a held window
+boundary) → `filled_owned`; `count_resync(stamp)` (the release path's skip
+of more than 8 slots, from its first skipped boundary) → `resyncs_owned`; a
+fade's missing real side (`commit_mix`, at its weight) → `filled_owned`. `filled` /
+`resyncs` keep their meaning (every fill, every resync). `program_bus.rs` is
+at the 1000-line cap: the counting and `Delivery` live in the window child;
+each call site is one line. Tests: `program_bus_window_tests.rs`
 (`the_restored_selection_owes_nothing_before_it_delivered`,
-`a_source_cut_to_owes_its_misses_only_once_it_delivered_since_the_cut`; the
-older cases deliver b(1) first).
+`a_source_cut_to_owes_its_misses_only_once_it_delivered_since_the_cut`,
+`the_restored_selection_owes_its_misses_once_the_delivery_grace_ran_out`,
+`a_hung_source_cut_to_owes_its_misses_once_the_delivery_grace_ran_out`,
+`a_stalled_fade_source_cut_back_to_owes_its_misses_once_the_grace_ran_out`,
+`blank_owes_nothing_past_the_delivery_grace`; the older cases deliver b(1)
+first).
 
 ### Limiter overs (`sp_decoder::PeakLimiter::over_frames`)
 

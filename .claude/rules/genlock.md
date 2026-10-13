@@ -1532,13 +1532,25 @@ video's last frame while the audio plays on, up to
   after `next_synced` returned `None` (the video reader is then not read
   again until a seek), `next_held` hands out one step per source frame
   period (`⌊k·1000·den/num⌋` ms from the last frame delivered, from the
-  base every time: no drift; 30 fps when the rate reads 0): the step's time
-  and the audio up to it + the lead, through the SAME G5-gated take
+  base every time: no drift; 30 fps for a rate outside 10–120 fps, a zero
+  term included — review: 1000/1 would push 15 000 steps into the bound,
+  under 0.6 fps one step would carry over the grid's 2 s cap): the step's
+  time and the audio up to it + the lead, through the SAME G5-gated take
   (`take_audio_until`) a frame uses. `None` once `audio_ended` (every
   sample out), past the bound, or while the video plays. A seek resets it
   (`HeldTail::from_origin`). A seek to or past the last frame delivers no
   frame: its fast-forward keeps the last frame it decoded
   (`take_frame_before_end`), and the steps start ON the seek's position.
+- **A seek asks the VIDEO for at most one frame before its end** (review:
+  a Pause in the held tail stores a position past the last frame, and ▶
+  resumes there through `real_start_ms`). `video_seek_ms` = min(position,
+  the video's duration − one frame) when the duration is known (> 0); the
+  fast-forward target, the audio seek and the tail's origin keep the
+  position. Asked a position past its end, Media Foundation may refuse it
+  (the song then played on from where it was, a resume from 0) or land at
+  end-of-stream with no frame (no picture: the tail never played). Now it
+  lands on a frame it has, the fast-forward runs out after the last frame
+  and keeps it, and the audio from the position plays on it.
 - **The producer** (`playback/paced_producer.rs`, cross-platform,
   Linux-tested, in the mutation gate; `pipeline_paced.rs`'s producer is
   glue over it): `DecodeProducer::next_item` hands the queue each frame,
@@ -1548,6 +1560,10 @@ video's last frame while the audio plays on, up to
   held picture and its audio (`DecodeTaps::offer_picture`), so the preview
   keeps its picture and sound (and its encoder never starves past 10 s).
   No picture ever decoded = no tail (the end counts its `underrun_end`).
+  A seek that moved the decoder drops the held picture (review): the frame
+  it lands on, or the last one its fast-forward decoded, replaces it, so a
+  picture from before the seek never shows with the audio after it; a
+  refused seek keeps it (nothing moved).
 - **The emit loop is unchanged**: held steps are queue items, so they are
   paced one per grid slot (24 / 25 fps tails repeat and blend like the
   song), the 2 s grid cap never comes near (the 250 ms lead), and every
@@ -1572,9 +1588,15 @@ video's end; audio +20 s: 15 s played, one `end` underrun; a skip 3.3 s into
 the tail ends the song at once with the producer a full queue ahead; a seek
 past the last frame plays the rest on that frame; a seek back during the
 tail plays the picture again; pins from a scratch model of the decoder,
-the producer, the pacer and the grid), `paced_producer_tests.rs`,
-`split_sync_tests_held.rs`, `audio_grid_tests_phases.rs`,
-`split_sync_tests_end.rs`.
+the producer, the pacer and the grid), `paced_producer_tests.rs` (a seek
+drops the held picture, a refused one after two frames plays on from the
+second), `split_sync_tests_held.rs` (the seek clamp over a Media
+Foundation-like reader that refuses a position past its end or lands at
+end-of-stream; the 10–120 fps cadence edges), `audio_grid_tests_phases.rs`,
+`split_sync_tests_end.rs`, and on Windows `tests/split_synced.rs` (the real
+Media Foundation + symphonia readers: the 3 s video with the 4 s
+`silent_4s.flac`, seeked to 3.5 s, holds the last frame and hands out
+exactly the 24 000 frames left).
 
 **Box check after the deploy:**
 
@@ -1585,7 +1607,13 @@ the producer, the pacer and the grid), `paced_producer_tests.rs`,
 - SP-dabing's sermon dub (the 7.8 s one; after a re-dub it ends at its last
   voiced word): play it to its end on program — its song summary reads
   `underruns_end=0`, the wall holds the video's last frame for the audio's
-  tail, and `duration_s` covers the audio (2159.4 s), not the video.
+  tail, and `duration_s` covers the audio (2159.4 s), not the video; after
+  the one-off `dub_worker.py trim-tail` (`dabing.md`) the audio ends at its
+  last word + 50 ms (or the video's own length);
+- pause that dub inside its held tail and press ▶: it resumes there on the
+  held last frame: the log's `paced producer: seeked position_ms=` is the
+  paused position (never `the decoder refused the seek`, never 0), and
+  the song summary of the resume reads `underruns_end=0`.
 
 ## Merge gate for pacing/decode/NDI/audio changes: the post-deploy A/V gate (#147)
 A change to pacing, the submitter, decode, the mixer, NDI or the audio path

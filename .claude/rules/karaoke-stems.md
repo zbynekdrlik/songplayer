@@ -181,8 +181,11 @@ the held last frame's steps on the source cadence, each through the SAME
 G5-gated take (`take_audio_until`: never a read ahead of a step's deadline
 + one chunk), until the audio ended or `AUDIO_PAST_VIDEO_MAX_MS` (15 s);
 only past that bound does a song count one `underrun_end` (`genlock.md`
-"Audio past the picture plays on the held last frame"). Tests:
-`split_sync_tests_end.rs`, `split_sync_tests_held.rs`.
+"Audio past the picture plays on the held last frame"). A seek asks the
+VIDEO reader for at most one frame before its end (`video_seek_ms`, review:
+Media Foundation may refuse a position past its end or land with no frame),
+the audio for the position itself. Tests: `split_sync_tests_end.rs`,
+`split_sync_tests_held.rs`.
 
 ## #184 round G2 — each reader FAMILY owns its memory; NO global "active kind" (SUPERSEDES round G1)
 
