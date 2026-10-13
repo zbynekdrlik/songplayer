@@ -75,6 +75,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (38, MIGRATION_V38),
     (39, MIGRATION_V39),
     (40, MIGRATION_V40),
+    (41, MIGRATION_V41),
 ];
 
 const MIGRATION_V1: &str = "
@@ -636,6 +637,19 @@ const MIGRATION_V40: &str = "
 ALTER TABLE videos ADD COLUMN removed_at INTEGER;
 CREATE INDEX IF NOT EXISTS idx_videos_removed_at ON videos (removed_at)
     WHERE removed_at IS NOT NULL;
+";
+
+/// #263: an error on a row that serves no lyrics is a deferral now
+/// (`lyrics::worker_outcome::fail_song`); it used to park the row
+/// `no_source` at the current pipeline version, which no lyrics queue takes
+/// until a bump (SNV: Joy since 15.9.2026, I Gotta Praise since 25.9.2026).
+/// Every such row gets one more pass, on every node: its sentinel, attempts
+/// and backoff cleared, nothing else. Never `unsupported_source` (the 30-min
+/// policy), `asr_gap` (an empty transcript), the older `failed` / `empty`,
+/// or a row that serves lyrics.
+const MIGRATION_V41: &str = "
+UPDATE videos SET lyrics_source = NULL, lyrics_attempts = 0, lyrics_next_attempt_at = NULL
+WHERE lyrics_source = 'no_source' AND COALESCE(has_lyrics, 0) = 0
 ";
 
 /// Connection-pool tuning for the FILE-backed pool (#184 round A).

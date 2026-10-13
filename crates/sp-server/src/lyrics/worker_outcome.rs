@@ -10,7 +10,7 @@
 //! row with an exponential backoff (mirroring the downloader, #140) so the
 //! selector skips it until due.
 
-use tracing::{debug, warn};
+use tracing::warn;
 
 use super::worker::LyricsWorker;
 
@@ -32,9 +32,9 @@ pub(crate) const STEMS_WAIT_RECHECK: std::time::Duration = std::time::Duration::
 /// The result of `LyricsWorker::process_song` for a single row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SongOutcome {
-    /// Terminal this pass — persisted, quarantined, or marked no_source (or,
-    /// for a song the wall serves, its failed attempt recorded, #144).
-    /// Nothing more to do for this row now.
+    /// Terminal this pass — persisted or quarantined (or, for a song the
+    /// wall serves, its failed attempt recorded, #144). Nothing more to do
+    /// for this row now.
     Done,
     /// Could not be processed now; retry after a durable backoff. The `&str`
     /// is a short machine reason surfaced in the WARN log.
@@ -66,9 +66,11 @@ impl LyricsWorker {
     /// `downloader::retry_backoff` — the math is not duplicated), records the
     /// deferral, WARNs with the reason + backoff, and clears the in-flight
     /// processing marker — so the selector skips this row until due instead of
-    /// re-picking this unprocessable row every 5 s tick.
+    /// re-picking this unprocessable row every 5 s tick. #263: also the error
+    /// exit of a row the wall does not serve ([`Self::fail_song`]), its reason
+    /// naming the error.
     #[cfg_attr(test, mutants::skip)]
-    pub(crate) async fn defer_song(&self, video_id: i64, youtube_id: &str, reason: &'static str) {
+    pub(crate) async fn defer_song(&self, video_id: i64, youtube_id: &str, reason: &str) {
         let backoff = self.next_backoff(video_id).await;
         let attempts = crate::db::models::record_lyrics_deferral(&self.pool, video_id, backoff)
             .await
@@ -155,24 +157,23 @@ impl LyricsWorker {
     }
 
     /// The `Err` exit of `process_next`: `process_song` failed for this row
-    /// (e.g. a failed Claude cleanup in `gather.rs`). A row the wall serves
-    /// keeps its lyrics and records the attempt ([`Self::keep_served_lyrics`]);
-    /// any other row is marked `no_source` at the current pipeline version.
+    /// (e.g. a failed Claude cleanup in `gather.rs`, a CLIProxy or Gemini
+    /// outage). A row the wall serves keeps its lyrics and records the
+    /// attempt ([`Self::keep_served_lyrics`]). Any other row is DEFERRED
+    /// (#263, [`Self::defer_song`]): the attempt with its backoff on every
+    /// row of the video, one WARN naming the error, and `lyrics_source`,
+    /// `has_lyrics`, the version and the file left as they are, so its queue
+    /// picks it again once due. An error is never a terminal state: it used
+    /// to park the song `no_source` at the current pipeline version, which no
+    /// queue takes until a pipeline bump (SNV's Joy, 15.9.–13.10.2026).
     /// Clears the in-flight marker either way.
     pub(crate) async fn fail_song(&self, video_id: i64, youtube_id: &str, error: &anyhow::Error) {
-        debug!("worker: processing failed for {youtube_id}: {error}");
         let reason = format!("process_error: {error}");
-        if !self.keep_served_lyrics(video_id, youtube_id, &reason).await {
-            let _ = crate::db::models::mark_video_lyrics(
-                &self.pool,
-                video_id,
-                false,
-                Some("no_source"),
-                crate::lyrics::LYRICS_PIPELINE_VERSION,
-            )
-            .await;
+        if self.keep_served_lyrics(video_id, youtube_id, &reason).await {
+            self.clear_processing().await;
+        } else {
+            self.defer_song(video_id, youtube_id, &reason).await;
         }
-        self.clear_processing().await;
     }
 
     /// The g35t base tier's empty-transcript exit. A row the wall serves keeps
