@@ -23,7 +23,7 @@
 
 import { test, expect } from "@playwright/test";
 import { healthRows } from "./box-api";
-import { previewTarget } from "./pp-preview-gate";
+import { PREVIEW_NOT_DECODING, previewTarget } from "./pp-preview-gate";
 import { describeProgram, readProgramState } from "./program-state";
 
 const ALLOWED_CONSOLE = [
@@ -65,6 +65,36 @@ test.describe("#266 PP live preview post-deploy", () => {
     console.log(`[#266 pp] ${describeProgram(program)}`);
     const pick = previewTarget(program, await healthRows(request));
     if ("error" in pick) throw new Error(`PP's preview gate: ${pick.error}`);
+    if ("none" in pick) {
+      // The operator's state: nothing of SongPlayer on program. The
+      // dashboard still loads; the live preview is not checked this deploy.
+      console.log(`[#266 pp] live preview NOT checked: ${pick.none}`);
+      await page.goto("/");
+      await expect(page.getByTestId("playlist-workspace")).toBeVisible({ timeout: 30_000 });
+      return;
+    }
+    if ("explained" in pick) {
+      // The operator's state: the on-program playlist does not decode. Its
+      // card must say why instead of offering a preview that stays black
+      // (the owner's report on #266).
+      console.log(`[#266 pp] live preview NOT checked: ${pick.why}`);
+      const paused = pick.explained;
+      await page.goto("/");
+      await expect(page.getByTestId("playlist-workspace")).toBeVisible({ timeout: 30_000 });
+      const pausedRow = page.locator(
+        `[data-testid="playlist-picker-item"][data-playlist-id="${paused.id}"]`,
+      );
+      await expect(pausedRow).toBeVisible({ timeout: 15_000 });
+      await pausedRow.click();
+      const pausedCard = page.locator(".playlist-card");
+      await expect(pausedCard.locator(".playlist-id")).toHaveText(paused.ndi_output_name, {
+        timeout: 15_000,
+      });
+      await expect(pausedCard.getByTestId("preview-start")).toHaveCount(0);
+      const line = (await pausedCard.getByTestId("preview-placeholder").innerText()).trim();
+      expect(PREVIEW_NOT_DECODING, `the card explains why: "${line}"`).toContain(line);
+      return;
+    }
     const target = pick.target;
     console.log(
       `[#266 pp] the preview of ${target.id} (${target.name}, ${target.ndi_output_name})`,

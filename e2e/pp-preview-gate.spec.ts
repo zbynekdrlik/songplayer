@@ -44,19 +44,21 @@ test.describe("PP's preview gate opens the card on program (#266)", () => {
     });
   });
 
-  test("nothing on program fails naming it — the gate never switches a scene", () => {
+  test("nothing on program is the operator's branch, never a failure — no scene is switched", () => {
     const program = classifyProgram("OBS manuál", [], ROWS);
     const got = previewTarget(program, [health(7, "Paused", "Playing")]);
-    expect("error" in got && got.error).toContain(
+    expect("none" in got && got.none).toContain(
       "nothing is on SongPlayer's program (scene OBS manuál)",
     );
+    expect("error" in got).toBe(false);
   });
 
-  test("the playlist on program that does not decode fails naming its transport", () => {
+  test("the playlist on program that does not decode is opened to check its explanation", () => {
     const program = classifyProgram("sp-slow", [4], ROWS);
     for (const transport of ["Paused", "Idle", undefined]) {
       const got = previewTarget(program, [health(4, "Paused", transport)]);
-      expect("error" in got && got.error, `transport ${transport}`).toContain(
+      expect("explained" in got && got.explained, `transport ${transport}`).toEqual(ROWS[0]);
+      expect("why" in got && got.why, `transport ${transport}`).toContain(
         `the playlist on program, 4 (ytslow), does not decode (transport ${transport ?? "none"}, state Paused)`,
       );
     }
