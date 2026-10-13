@@ -30,6 +30,12 @@ ROZHODNUTÉ 13.10.2026 (#259 comment 6142937258), binding for every lane:
   ruling); never a loop, never a takeover of Arena's output.
 - **A deliberate change is never an error.** The report says what it sees;
   the post-deploy gate fails only when SongPlayer cannot read the box.
+- **`unknown` = only SongPlayer's OWN read failing** (review round 1): an
+  I/O error on a file that exists, a file that is no XML Arena writes, a
+  Win32 / NVAPI call that fails, a read past its bound. Anything the
+  operator's Arena setup can be — no `AdvancedOutput.xml`, no preset named,
+  a preset file that does not exist — is a calm state (`no_preset`), never
+  `unknown` and never a gate failure.
 
 ## The reference: Resolume Arena's OWN saved output setup (`wall/resolume.rs`)
 
@@ -43,9 +49,16 @@ elsewhere (OneDrive) is not followed (known limit).
   advancedModeEnabled="1">` = the advanced output is on; `0` = off; no file =
   Arena's default, the simple output; another value = unreadable.
 - `Resolume Arena\Preferences\AdvancedOutput.xml`: `<ScreenSetup
-  presetFile="NAME">`, the preset the advanced output was saved as; NAME
-  must be a plain file name (no `/`, `\`, `:`, not `.` / `..`).
-- `Resolume Arena\Presets\Advanced Output\NAME.xml`: every
+  presetFile="NAME">`, the preset the advanced output was saved as
+  (measured on SNV 13.10.2026: 231 bytes, only `<ScreenSetup
+  name="ScreenSetup" presetFile="snv surround 7680">` and its version). No
+  file, no `<ScreenSetup>`, no or an empty `presetFile`, a NAME that is no
+  plain file name (`/`, `\`, `:`, `.`, `..`: never a path out of the
+  folder), or no such preset file = no preset saved: `preset_found` false,
+  the state `no_preset`.
+- `Resolume Arena\Presets\Advanced Output\NAME.xml` (Arena's Advanced
+  Output "Save & Close" writes the current setup into the active preset
+  file, so it IS Arena's saved setup): every
   `<OutputDeviceDisplay name="Display 1" deviceId="\Registry\Machine\System\CurrentControlSet\Control\Video\{GUID}\0000"
   idHash="…" fullscreen="1" width="7680" height="1080">` (anywhere in the
   tree) is a physical display Arena drives; `name`, `deviceId`, `width`,
@@ -56,11 +69,8 @@ elsewhere (OneDrive) is not followed (known limit).
   expansion; its MIT notice in `THIRD-PARTY-NOTICES.txt`, pinned by
   `the_installer_notice_carries_the_pinned_roxmltrees_license`). Every file
   is read bounded (`read_bounded`: 1 MiB, UTF-8, a missing file = `None`).
-  A parse error names its file.
-- Assumption to confirm on the box (the coordinator read SNV's files,
-  lane 1 never touched the box): the live advanced setup is the preset
-  `AdvancedOutput.xml` names. If Arena turns out to keep unsaved changes
-  only in `AdvancedOutput.xml` itself, read the displays from there.
+  A parse error or an I/O error on an existing file names its file and is
+  `unknown`.
 
 ## What else is read (`wall/win.rs`, Windows only, every fn `mutants::skip`)
 
@@ -72,19 +82,37 @@ Nothing spawns a process, nothing on the box changes.
 - **Windows' displays:** `EnumDisplayDevicesW(NULL, i)` attached to the
   desktop → name, `DeviceKey` (= Arena's `deviceId`), primary flag;
   `EnumDisplaySettingsW(ENUM_CURRENT_SETTINGS)` → position, size, refresh.
-  Physical pixels: SongPlayer's process is per-monitor DPI aware (the Tauri
-  shell), so window and display rectangles compare as read.
-- **NVAPI** (`nvapi64.dll` loaded at run time with `libloading`, as sp-ndi
-  loads NDI; entry points through `nvapi_QueryInterface(id)`, `extern "C"`,
-  status 0 = OK): `NvAPI_Initialize` 0x0150E828, `NvAPI_EnumPhysicalGPUs`
-  0xE5AC921F, `NvAPI_GPU_GetConnectedDisplayIds` 0x0078DBA2 (flags 0, a
-  NULL first call for the count), `NvAPI_Mosaic_EnumDisplayGrids`
-  0xDF2887AF (NULL first call, then an array with each version set).
-  Defined, never called here: `NvAPI_Mosaic_SetDisplayGrids` 0x4D959A89,
-  `NvAPI_DISP_GetDisplayIdByDisplayName` 0xAE457190. No
-  `System32\nvapi64.dll` = no NVIDIA driver (`None`, not an error). The
-  loaded DLL is kept for the process; a failed load or Initialize is tried
-  again at the next read.
+  A display whose settings cannot be read (it detached meanwhile) is left
+  out with a DEBUG line, never the whole list failed.
+- **Physical pixels:** the display and window reads each hold `DpiAware`
+  (`SetThreadDpiAwarenessContext(PER_MONITOR_AWARE_V2)`, the thread's
+  previous context restored on drop: the read runs on a pooled blocking
+  thread; windows-sys feature `Win32_UI_HiDpi`), so window and display
+  rectangles compare as read whatever the process's own awareness or a
+  display's scaling. `win_tests.rs` pins the switch and the restore.
+- **NVAPI** (`%SystemRoot%\System32\nvapi64.dll`, loaded by that FULL path
+  at run time with `libloading`, as sp-ndi loads NDI; never a bare name a
+  search order could resolve elsewhere; entry points through
+  `nvapi_QueryInterface(id)`, `extern "C"`, status 0 = OK):
+  `NvAPI_Initialize` 0x0150E828, `NvAPI_EnumPhysicalGPUs` 0xE5AC921F,
+  `NvAPI_GPU_GetConnectedDisplayIds` 0x0078DBA2 (flags 0, a NULL first call
+  for the count), `NvAPI_Mosaic_EnumDisplayGrids` 0xDF2887AF (NULL first
+  call, then an array with each version set). No display-changing NVAPI id
+  is kept (`mod_tests.rs` bans `Mosaic_Set` / `SetCurrentTopo` in every wall
+  file). No such file = no NVIDIA driver (`no_driver`, not an error).
+  - **Read only when the decision needs it** (`decide::needs_nvidia`: Arena
+    runs an advanced output whose preset wants a display Windows does not
+    show with its size). A healthy wall never calls the driver; the status
+    says `nvidia: "not_read"`.
+  - **Two reads, two results** (`read::NvidiaFacts::Read {connected,
+    grids}`): a failed `EnumDisplayGrids` never discards the connected
+    displays; `not_joined` is told only when BOTH answered.
+  - **The session** (`nvapi::Session`, pure and Linux-tested; `win.rs`
+    holds one in a static `Mutex`): the DLL is loaded once and kept;
+    `NvAPI_Initialize` runs before the first read and again after any read
+    that answered a non-OK status (`reset`, the DLL stays loaded); a failed
+    load or Initialize is answered from memory, with its reason, for
+    `SET_UP_RETRY` = 60 s (never a DLL loaded and freed every 5 s).
 - **Layouts** (`wall/nvapi.rs`, pure, Linux-tested against the C header's
   offsets): `NV_MOSAIC_GRID_TOPO_V2` 1832 B, version 0x00020728
   (`MAKE_NVAPI_VERSION` = size + (v << 16), written as a sum: a `|` of
@@ -108,6 +136,7 @@ Each step reads only the facts it needs; a needed fact that failed =
 | `unknown` | a read the decision needs failed | grey "Stena: nedá sa overiť" |
 | `arena_off` | no `Arena.exe` | grey "Stena: Resolume nebeží" |
 | `simple_output` | the advanced output off (or no `SimpleOutput.xml`) | none |
+| `no_preset` | the advanced output on, no preset saved (no `AdvancedOutput.xml`, no `presetFile`, no such preset file) | grey "Stena: Resolume nemá uložený výstup" |
 | `no_display_output` | the preset drives no physical display | none |
 | `screens_off` | a wanted display has no Windows display with its key, and NVAPI is absent or reports no connected screen | grey "Stena: obrazovky vypnuté" |
 | `display_missing` | a wanted display is absent while NVIDIA screens are connected, or present with another size | red, the first problem: "Stena: Resolume chce obrazovku 7680×1080 (Display 1), Windows ju nemá" / "…, Windows ju má 2560×1080" |
@@ -117,13 +146,22 @@ Each step reads only the facts it needs; a needed fact that failed =
 - The missing problems come first, then the switched-off ones; with any
   missing the state is `display_missing`.
 - `not_joined` detail ("obrazovky sú pripojené, ale nie spojené
-  (Surround)"): NVAPI reports screens connected and no grid holds more than
-  one screen. A size mismatch with NVAPI unread or absent gets no detail and
-  is never `unknown` (the size alone tells it).
+  (Surround)"): NVAPI's connected read reports screens and its grid read
+  (it answered) has no grid of more than one screen. A size mismatch with
+  NVAPI unread, absent or its grids unread gets no detail and is never
+  `unknown` (the size alone tells it). A display gone with NVAPI's
+  connected read failing is `unknown`.
 - Known limit of the simple `screens_off` rule: a box whose NVIDIA card
   also drives a screen that stays on (an operator monitor on the card)
   reads `display_missing` while its wall is off. SNV's card drives only the
   wall (its primary, the VDD, is virtual).
+- **Known limit, unmeasured: the screens-off rule rests on NVAPI's
+  connected bit.** Two of SNV's three screens hang on DisplayPort→HDMI
+  adapters; whether an adapter whose screen is powered off still reports
+  the screen connected was not measured with the wall off. If it does, a
+  night with the wall off reads `display_missing` (red) instead of
+  `screens_off`. Measure it on the box (wall off, read `GET /api/v1/wall`'s
+  `connected`) before a lane builds on the rule.
 - Observed on SNV 13.10.2026 (never a target): preset `snv surround 7680`,
   `Display 1` 7680×1080 on `\\.\DISPLAY1` at x 3840 next to the VDD primary
   3840×2160 at 0,0; NVAPI 1×3 2560×1080 @ 60 Hz of `0x80061086`,
@@ -142,11 +180,13 @@ Each step reads only the facts it needs; a needed fact that failed =
 - `GET /api/v1/wall` (`api/routes_status.rs::wall`):
   `sp_core::wall::WallStatus` = `{checked, state, problems: [{code,
   short_sk, text_sk}], read: {arena_running, arena_windows, arena_output:
-  {advanced, preset, displays: [{name, device_id, width, height,
-  fullscreen}]}, displays: [{name, device_key, primary, x, y, width,
-  height, hz}], nvidia, connected: [{id: "0x80061083", connector, flags}],
-  grids: [{rows, columns, displays, width, height, hz}]}, read_errors,
-  checked_at_ms}`. Problem codes: `unreadable:<arena|arena_output|displays|nvapi>`,
+  {advanced, preset, preset_found, displays: [{name, device_id, width,
+  height, fullscreen}]}, displays: [{name, device_key, primary, x, y,
+  width, height, hz}], nvidia: "not_read" | "no_driver" | "read",
+  connected: [{id: "0x80061083", connector, flags}] | null, grids: [{rows,
+  columns, displays, width, height, hz}] | null}, read_errors,
+  checked_at_ms}` (`connected` / `grids` null when not read or that read
+  failed; its reason in `read_errors`). Problem codes: `unreadable:<arena|arena_output|displays|nvapi>`,
   `screens_off`, `display_absent`, `display_size`, `arena_not_drawing`.
 - Dashboard: the HealthBar polls it every 5 s; the `health-wall` segment
   (`data-state` = the state; `sp_core::wall::label`: the first problem's
@@ -156,14 +196,16 @@ Each step reads only the facts it needs; a needed fact that failed =
   asserts it before a segment's absence. Mock: `/__mock/wall {…}` over the
   default `simple_output` (no segment, so no other spec sees the wall),
   `/__mock/wall-reset`; spec `e2e/health-wall.spec.ts`.
-- Gate: `e2e/post-deploy-wall.spec.ts` (SNV's suite and PP's subset): polls
-  until checked (30 s), LOGS the state (`[#259 wall] …`, `wall-gate.ts`
-  `wallSummary`) and fails only on no answer / never checked / `unknown`
-  (`wallFailures`, unit-tested by `wall-gate.spec.ts`); then the bar's
-  marker and the segment agree, console clean. A first deploy whose
-  readers cannot find Arena's files on a box where Arena runs reads
-  `unknown` and fails: that is the reader's assumption being wrong (above),
-  never the operator's setup.
+- Gate: `e2e/post-deploy-wall.spec.ts` (SNV's suite and PP's subset):
+  `pollWall` reads the report every 2 s until a check reads the box (any
+  state but `unknown`) or 30 s passed, LOGS the read it ended on
+  (`[#259 wall] …`, `wallSummary`) and fails only on no answer / never
+  checked / `unknown` for the whole window (`wallFailures`); then ONE
+  `expect.poll` reads the bar's `data-wall` and the segment's `data-state`
+  together and requires them to agree (`wallDashboardMismatch`: no segment
+  for `simple_output` / `no_display_output`, else the same state), console
+  clean. All pure, unit-tested by `wall-gate.spec.ts` (a scripted read and
+  a fake clock).
 
 ## Tests
 
@@ -171,11 +213,15 @@ Each step reads only the facts it needs; a needed fact that failed =
   words, tone, segment and hold rule, every problem's code and texts, the
   marker, the segment and its tooltip, the wire shape.
 - `crates/sp-server/src/wall/`: `nvapi_tests.rs` (layouts by the header's
-  byte offsets, versions, SNV's grid decoded from its bytes),
+  byte offsets, versions, SNV's grid decoded from its bytes, the session's
+  load once / initialise again / 60 s memory of a failed set-up),
   `resolume_tests.rs` (paths, the bounded read over real temp files, every
   attribute rule, a DTD refused), `read_tests.rs` (the walk over
-  `read_fake.rs`'s scripted box), `decide_tests.rs` (every state, every
-  boundary of the window cover, the device key in any case),
+  `read_fake.rs`'s scripted box: NVAPI never asked on SNV, asked once when
+  the span is gone; every no-preset case; one NVAPI read failing keeps the
+  other), `decide_tests.rs` (every state, every boundary of the window
+  cover, the device key in any case, when NVAPI is needed),
   `mod_tests.rs` (status, log steps, the bounded read, the route),
   `win_tests.rs` (Windows job: the process list holds the test process,
-  `EnumWindows` reads, no Arena on the runner).
+  `EnumWindows` reads, the DPI context switched and given back, no Arena on
+  the runner).
