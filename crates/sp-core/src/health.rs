@@ -77,8 +77,6 @@ pub fn resolume_host_view(
         Some("okruh otvorený — Resolume nedostupné".to_string())
     } else if consecutive_failures > 0 {
         Some(format!("obnova zlyháva ({consecutive_failures} po sebe)"))
-    } else if clips_by_token.values().any(|n| *n == 0) {
-        Some("chýbajúce klipy".to_string())
     } else {
         None
     };

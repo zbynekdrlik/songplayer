@@ -1019,3 +1019,17 @@ built-in default — `settings-gemini-model` = `gemini-2.5-flash` (default
 `DEFAULT_GEMINI_MODEL`). Fields whose default equals the fixture prove nothing.
 A spec that saves settings resets them with `POST /__mock/settings-reset` in
 `beforeEach`/`afterEach` (the mock's settings are global in-memory state).
+
+## The Resolume segment: only a host that does not answer is a problem (#262)
+
+`health-resolume` reads `GET /api/v1/resolume/health` every 5 s through the
+pure `sp_core::health` (`resolume_host_view` → `{problem, note, has_clips}`,
+`resolume_label(hosts, unreachable, clipless)`, `resolume_title`). A host
+is a PROBLEM ("Resolume: neodpovedá", amber) only with its breaker open or
+failed refreshes in a row. A SongPlayer token the composition has no clip
+for is a NOTE in the tooltip ("v kompozícii nie sú klipy #sp-subs, …
+(nastavenie Resolume, nie chyba)"): PP shows no English line, and the bar
+read that as "neodpovedá" until #262. Every host answering with no
+SongPlayer clip at all is grey "Resolume: bez klipov SongPlayera"; an empty
+token map (not read yet) is neither. Mock: `POST /__mock/resolume-health
+{hosts}` (`{}` clears); spec `e2e/health-resolume.spec.ts` drives PP's row.
