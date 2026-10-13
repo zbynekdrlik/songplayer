@@ -1,12 +1,13 @@
 // SP-program-MAX compositor (#223 S1a): one textured quad per picture,
 // drawn over the black 3840x2160 render target with additive blending.
 //
-// The constants are sp-gpu's QuadConstants (quad.rs): five float4
+// The constants are sp-gpu's QuadConstants (quad.rs): six float4
 // registers in this order. Change both together.
 
 cbuffer Quad : register(b0)
 {
     float4 rect;    // the quad in NDC: left, top, right, bottom
+    float4 uv_rect; // #267: the picture's part it shows, in texture coordinates: left, top, right, bottom
     float4 to_r;    // R = dot(to_r, float4(y, u, v, 1))
     float4 to_g;    // G
     float4 to_b;    // B
@@ -24,13 +25,16 @@ struct Corner
 };
 
 // A 4-vertex triangle strip, no vertex buffer: vertex i is corner
-// (i & 1, i >> 1) of the unit square, placed on the quad's edges exactly.
+// (i & 1, i >> 1) of the unit square, placed on the quad's edges exactly,
+// and its texture coordinate is uv_rect's edge on the same side (#267: a
+// picture cropped to its target shows only that part; the whole picture is
+// uv_rect = 0, 0, 1, 1).
 Corner vs_main(uint id : SV_VertexID)
 {
     float2 t = float2((float)(id & 1u), (float)(id >> 1u));
     Corner corner;
     corner.position = float4(t.x > 0.5 ? rect.z : rect.x, t.y > 0.5 ? rect.w : rect.y, 0.0, 1.0);
-    corner.uv = t;
+    corner.uv = float2(t.x > 0.5 ? uv_rect.z : uv_rect.x, t.y > 0.5 ? uv_rect.w : uv_rect.y);
     return corner;
 }
 

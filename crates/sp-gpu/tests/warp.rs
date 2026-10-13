@@ -10,6 +10,12 @@
 //! chroma codes per chroma texel. Every row carries 64 padding bytes of 0xFF
 //! past its pixels: a stride bug would show them.
 //!
+//! #267: MAX is the LED wall's feed, so a picture narrower than 16:9 fills
+//! its whole width (`MAX_FIT`), cropped top and bottom through the quad's
+//! texture coordinates: no black column at either side, and the cropped
+//! rows match the reference. A 16:9 or wider picture is placed as before;
+//! the 1920×1080 `SP-program` target keeps the 4:3 bars (`FHD_FIT`).
+//!
 //! Windows only. A WARP capability the compositor needs (the shared render
 //! target included) that is missing FAILS here; nothing is skipped.
 
@@ -22,7 +28,8 @@ use common::{
     picture, warp, warp_fhd,
 };
 use sp_gpu::{
-    Composition, Compositor, FHD_HEIGHT, FHD_WIDTH, GpuError, Layer, PictureError, pick_adapter,
+    Composition, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, GpuError, Layer, PictureError,
+    pick_adapter, reference,
 };
 use windows::Win32::Graphics::Direct3D11::{D3D11_RESOURCE_MISC_SHARED, D3D11_TEXTURE2D_DESC};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -37,6 +44,26 @@ fn assert_bars_black(frame: &[u8], layer: &Layer<'_>, what: &str) {
             if !inside {
                 assert_eq!(at(frame, x, y), BLACK, "{what}: bar pixel ({x}, {y})");
             }
+        }
+    }
+}
+
+/// #267: no bar at MAX's sides: every pixel of the first and the last
+/// column is lit and within the reference's tolerance (the reference is
+/// at least 3 codes from black there for every picture this is used on, by
+/// the scratch model of `pattern`).
+fn assert_edge_columns_lit(frame: &[u8], layers: &[Layer<'_>], what: &str) {
+    for y in 0..H {
+        for x in [0, W - 1] {
+            let got = at(frame, x, y);
+            assert_ne!(got, BLACK, "{what}: edge pixel ({x}, {y}) is black");
+            let want = reference::pixel(layers, x, y);
+            let tolerance = reference::tolerance(layers, x, y);
+            let diff = (0..3).map(|c| got[c].abs_diff(want[c])).max().unwrap_or(0);
+            assert!(
+                diff <= tolerance && got[3] == want[3],
+                "{what}: edge pixel ({x}, {y}): got {got:?}, want {want:?} within {tolerance}"
+            );
         }
     }
 }
@@ -205,15 +232,38 @@ fn a_21_by_9_picture_has_black_bars_top_and_bottom() {
     assert_matches_reference(&frame, &layers, "2560x1080");
 }
 
+/// #267: a 4:3 picture (PP's `MO3ucp2mBnM` is 4:3) fills MAX's whole width:
+/// scaled to 2880 rows, rows 360..2520 shown (texture rows 0.125..0.875).
+/// Before, it had black bars at columns 0..480 and 3360..3840, which
+/// Arena's Fill carried onto the LED wall.
 #[test]
-fn a_4_by_3_picture_has_black_bars_left_and_right() {
+fn a_4_by_3_picture_fills_the_width_cropped_top_and_bottom() {
     let (stride, data) = pattern(1440, 1080, 51);
     let composition = Composition::Picture(picture(1, 1440, 1080, stride, &data));
     let layers = composition.layers();
-    assert_eq!((layers[0].place.off_x, layers[0].place.w), (480, 2880));
+    let p = layers[0].place;
+    assert_eq!((p.off_x, p.off_y, p.w, p.h), (0, 0, W, H));
+    assert_eq!(layers[0].uv_rect, [0.0, 0.125, 1.0, 0.875]);
     let frame = draw(&composition);
-    assert_bars_black(&frame, &layers[0], "1440x1080");
+    assert_edge_columns_lit(&frame, &layers, "1440x1080");
     assert_matches_reference(&frame, &layers, "1440x1080");
+    assert_opaque(&frame, "1440x1080");
+}
+
+/// #267: a portrait picture fills MAX's width too: 6826 scaled rows, its
+/// middle 2160 shown; texture rows that are no exact f32 still match the
+/// reference within its tolerance.
+#[test]
+fn a_9_by_16_picture_fills_the_width_showing_its_middle() {
+    let (stride, data) = pattern(1080, 1920, 64);
+    let composition = Composition::Picture(picture(1, 1080, 1920, stride, &data));
+    let layers = composition.layers();
+    let p = layers[0].place;
+    assert_eq!((p.off_x, p.off_y, p.w, p.h), (0, 0, W, H));
+    assert_eq!(layers[0].uv_rect, [0.0, 0.341_634_93, 1.0, 0.658_072_05]);
+    let frame = draw(&composition);
+    assert_edge_columns_lit(&frame, &layers, "1080x1920");
+    assert_matches_reference(&frame, &layers, "1080x1920");
 }
 
 #[test]
@@ -225,9 +275,14 @@ fn a_half_way_fade_of_two_sizes_blends_both() {
         to: Some(picture(2, 1440, 1080, to_stride, &to)),
         weight_q8: 128,
     };
+    // #267: each side placed by MAX's rule: both fill the canvas, the
+    // incoming 4:3 one cropped top and bottom.
+    let layers = composition.layers();
+    assert_eq!(layers[1].place, layers[0].place, "both cover the canvas");
+    assert_eq!(layers[1].uv_rect, [0.0, 0.125, 1.0, 0.875]);
     let frame = draw(&composition);
-    // The incoming 4:3 picture's bars show the outgoing one at half weight.
-    assert_matches_reference(&frame, &composition.layers(), "fade 50 %");
+    assert_edge_columns_lit(&frame, &layers, "fade 50 %");
+    assert_matches_reference(&frame, &layers, "fade 50 %");
     assert_opaque(&frame, "fade 50 %");
 }
 
@@ -293,8 +348,9 @@ fn an_invalid_picture_is_refused_before_anything_is_drawn() {
 
 /// #239: the `SP-program` sender's compositor has a shared 1920×1080 BGRA
 /// target, and fits each picture into IT: a 1440p picture scaled down, a
-/// 4:3 one with its bars, then a fade of the two, each against the
-/// reference in its own target.
+/// 4:3 one with its bars (#267: `FHD_FIT` keeps the bars MAX no longer
+/// has), then a fade of the two, each against the reference in its own
+/// target.
 #[test]
 fn a_1920_by_1080_compositor_draws_into_its_own_target() {
     let mut compositor = warp_fhd();
@@ -318,12 +374,12 @@ fn a_1920_by_1080_compositor_draws_into_its_own_target() {
         .expect("compose 1440p into 1080p");
     let frame = compositor.read_back().expect("read back");
     assert_eq!(frame.len(), 1920 * 1080 * 4, "a 1080p frame");
-    let layers = scaled.layers_in(FHD_WIDTH, FHD_HEIGHT);
+    let layers = scaled.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT);
     assert_matches_reference_in(&frame, &layers, size, "2560x1440 in 1920x1080");
     assert_opaque(&frame, "2560x1440 in 1920x1080");
 
     let pillarbox = Composition::Picture(picture(2, 1440, 1080, narrow_stride, &narrow));
-    let layers = pillarbox.layers_in(FHD_WIDTH, FHD_HEIGHT);
+    let layers = pillarbox.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT);
     assert_eq!((layers[0].place.off_x, layers[0].place.w), (240, 1440));
     compositor.compose(&pillarbox).expect("compose 4:3");
     let frame = compositor.read_back().expect("read back");
@@ -338,7 +394,7 @@ fn a_1920_by_1080_compositor_draws_into_its_own_target() {
     };
     compositor.compose(&fade).expect("compose the fade");
     let frame = compositor.read_back().expect("read back");
-    let layers = fade.layers_in(FHD_WIDTH, FHD_HEIGHT);
+    let layers = fade.layers_in(FHD_WIDTH, FHD_HEIGHT, FHD_FIT);
     assert_matches_reference_in(&frame, &layers, size, "fade 50 % in 1920x1080");
     assert_opaque(&frame, "fade 50 % in 1920x1080");
 }

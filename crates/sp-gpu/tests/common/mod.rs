@@ -9,7 +9,8 @@
 pub mod locks;
 
 use sp_gpu::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, Compositor, FHD_HEIGHT, FHD_WIDTH, Layer, Nv12Picture, reference,
+    CANVAS_HEIGHT, CANVAS_WIDTH, Compositor, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, Layer, Nv12Picture,
+    reference,
 };
 
 pub const W: u32 = CANVAS_WIDTH;
@@ -22,9 +23,10 @@ pub fn warp() -> Compositor {
     })
 }
 
-/// #239: the `SP-program` sender's 1920×1080 compositor, on WARP.
+/// #239: the `SP-program` sender's 1920×1080 compositor (#267: placing by
+/// `FHD_FIT`, as production builds it), on WARP.
 pub fn warp_fhd() -> Compositor {
-    Compositor::new_warp_with_size(FHD_WIDTH, FHD_HEIGHT)
+    Compositor::new_warp_with_size(FHD_WIDTH, FHD_HEIGHT, FHD_FIT)
         .unwrap_or_else(|e| panic!("WARP must build the 1920x1080 compositor: {e}"))
 }
 

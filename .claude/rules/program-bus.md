@@ -199,7 +199,8 @@ included, is comment 5872871751).
   1920×1080 song decoded on a 1920 stride are all canvas pictures.
 - **The fit.** Any other picture is fitted into the canvas: placed by
   `nv12_fit::aspect_fit` (aspect kept, centred on even offsets, bars Y 16 /
-  UV 128), scaled bilinear by the #215 fused kernel as a plain fit
+  UV 128; #267: `SP-program-MAX`, the wall's feed, fills its width instead,
+  `gpu-max.md` — this canvas keeps the bars), scaled bilinear by the #215 fused kernel as a plain fit
   (`mix_nv12_into` with `Paint::Fit(Side::Fitted)`: ONE side, every byte the
   fitted picture's, nothing else read — #223 follow-up; before, it also
   read the 3.1 MB canvas black as an unused second side) — in the sender's

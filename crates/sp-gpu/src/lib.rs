@@ -1,10 +1,13 @@
 //! The GPU compositor of `SP-program-MAX` (#223, revision 3 R3-2, slice S1a).
 //!
-//! `SP-program-MAX` is a fixed 3840×2160 canvas. Every picture is
-//! aspect-fitted into it with black bars (`sp_core::fit::aspect_fit`, the rule
-//! `SP-program`'s 1920×1080 canvas and the preview use), and a fade blends
-//! two pictures of any sizes. On the CPU a 4K fade costs ~40–45 ms per
-//! boundary, over the 33.3 ms slot (revision 3), so it is drawn on the GPU:
+//! `SP-program-MAX` is a fixed 3840×2160 canvas, the LED wall's feed. #267:
+//! every picture fills its whole width ([`MAX_FIT`],
+//! `sp_core::fit::fill_width`: a picture narrower than 16:9 is cropped top
+//! and bottom, never pillarboxed; a wider one is letterboxed as by
+//! `sp_core::fit::aspect_fit`, the rule `SP-program`'s 1920×1080 canvas and
+//! the preview use), and a fade blends two pictures of any sizes. On the CPU
+//! a 4K fade costs ~40–45 ms per boundary, over the 33.3 ms slot (revision
+//! 3), so it is drawn on the GPU:
 //!
 //! - one Direct3D 11 device on the largest non-software adapter
 //!   ([`pick_adapter`]: the RTX 3070 Ti, never the box's virtual display
@@ -13,11 +16,12 @@
 //!   interleaved UV plane as R8G8, honouring the stride; a picture whose id
 //!   is already resident on its side is not uploaded again ([`upload_for`]);
 //! - the render target is cleared to black, then one textured quad per
-//!   picture is drawn into its [`aspect_fit`](sp_core::fit::aspect_fit)
-//!   rectangle: a bilinear sampler (the scale), a pixel shader for BT.709
-//!   limited range → full-range RGB ([`BT709_LIMITED_TO_FULL`]), and additive
-//!   blending at the picture's weight — the outgoing side at 1 − w first, then
-//!   the incoming one at w ([`Composition::layers`]);
+//!   picture is drawn into its place in the target, showing the part of the
+//!   picture its [`Fit`] keeps ([`uv_rect`]): a bilinear sampler (the
+//!   scale), a pixel shader for BT.709 limited range → full-range RGB
+//!   ([`BT709_LIMITED_TO_FULL`]), and additive blending at the picture's
+//!   weight — the outgoing side at 1 − w first, then the incoming one at w
+//!   ([`Composition::layers`]);
 //! - the render target is `B8G8R8A8_UNORM`, created `D3D11_RESOURCE_MISC_SHARED`
 //!   (not keyed: the desc Spout2's own sender texture has).
 //!
@@ -49,7 +53,9 @@
 //! ([`SPOUT_FHD_SENDER_NAME`], `SpoutSender::new_fhd`): a second compositor
 //! whose render target is [`FHD_WIDTH`] × [`FHD_HEIGHT`]
 //! (`Compositor::with_size`; the layers, the quads and the CPU reference
-//! take the target's size, [`Composition::layers_in`]).
+//! take the target's size, [`Composition::layers_in`]). It carries the
+//! program the NDI `SP-program` carries, so it keeps `aspect_fit`
+//! ([`FHD_FIT`], #267).
 //!
 //! #223 follow-up: [`VblankTracker`] measures the primary display's refresh
 //! (DWM's clock, which Arena renders in) on its own thread, `WaitForVBlank`
@@ -85,14 +91,15 @@ pub use adapter::{
 };
 pub use color::{BT709_LIMITED_TO_FULL, KB, KR, matrix_f32};
 pub use composition::{
-    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_HEIGHT, FHD_WIDTH, Layer, Q8_ONE, Slot,
+    CANVAS_HEIGHT, CANVAS_WIDTH, Composition, FHD_FIT, FHD_HEIGHT, FHD_WIDTH, Fit, Layer, MAX_FIT,
+    Q8_ONE, Slot,
 };
 pub use error::{
     DXGI_ERROR_DEVICE_HUNG, DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_RESET,
     DXGI_ERROR_DRIVER_INTERNAL_ERROR, GpuError, is_device_lost,
 };
 pub use picture::{MAX_PICTURE_SIDE, Nv12Picture, PictureError, Plane, Planes};
-pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect};
+pub use quad::{QUAD_CONSTANTS_BYTES, QuadConstants, ndc_rect, uv_rect};
 pub use readback::{mapped_len, unpad_rows, unpad_rows_into};
 pub use residency::{Resident, Upload, upload_for};
 pub use spout::{
