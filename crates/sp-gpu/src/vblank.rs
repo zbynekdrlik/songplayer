@@ -164,6 +164,24 @@ pub fn pick_output(outputs: &[OutputInfo]) -> Option<usize> {
         .position(|output| output.attached && output.is_primary())
 }
 
+/// How often the vblank thread looks again for the output to pace on
+/// (#259): Windows moves the primary when a display comes or goes (SNV,
+/// 13.10.2026: re-forming the wall's Surround detached the VDD for a
+/// minute, and the thread stayed on it, not ticking).
+pub const VBLANK_RECHECK: Duration = Duration::from_secs(7);
+
+/// Whether the recheck after the one at `last` is due at `now`.
+pub fn recheck_due(last: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(last) >= VBLANK_RECHECK
+}
+
+/// Whether the thread moves from `current` to `picked`, the output
+/// [`pick_output`] chooses now: another output, or the same one moved or
+/// resized (its old grid is no longer the primary's refresh).
+pub fn repick(current: &OutputInfo, picked: &OutputInfo) -> bool {
+    picked.name != current.name
+}
+
 /// A display's refresh: `at` is a vertical blank, and every `at + k·period`
 /// (any integer k) is one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

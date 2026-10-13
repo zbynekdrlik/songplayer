@@ -7,8 +7,9 @@
 use std::time::{Duration, Instant};
 
 use super::{
-    OutputInfo, Seen, VBLANK_NOT_TICKING, VBLANK_RESTART, VBLANK_STALE, VblankFit, VblankGrid,
-    VblankState, grid_is_fresh, not_waiting_sleep, pick_output, vblank_state, waited,
+    OutputInfo, Seen, VBLANK_NOT_TICKING, VBLANK_RECHECK, VBLANK_RESTART, VBLANK_STALE, VblankFit,
+    VblankGrid, VblankState, grid_is_fresh, not_waiting_sleep, pick_output, recheck_due, repick,
+    vblank_state, waited,
 };
 
 /// The SNV wall's measured period, ns (59.99988 Hz).
@@ -339,4 +340,59 @@ fn a_restart_keeps_the_counters() {
     }
     assert_eq!(fit.grid(), grid(base, back + 75 * P, P));
     assert_eq!((fit.missed(), fit.early()), (1, 1));
+}
+
+/// #259: SNV 13.10.2026 — re-forming the wall's Surround detached the VDD
+/// (the primary) for a minute; the vblank thread stayed on it, not ticking,
+/// and MAX sent at the constant lead. The thread looks again every 2 s.
+#[test]
+fn the_output_is_looked_for_again_every_two_seconds() {
+    let t0 = Instant::now();
+    assert_eq!(VBLANK_RECHECK, Duration::from_secs(2));
+    assert!(!recheck_due(t0, t0 + Duration::from_millis(1_999)));
+    assert!(recheck_due(t0, t0 + Duration::from_secs(2)));
+    assert!(recheck_due(t0, t0 + Duration::from_secs(9)));
+    // A clock read before `last` is never due (no wrap-around).
+    assert!(!recheck_due(t0 + Duration::from_secs(5), t0));
+}
+
+/// The primary it paces on is left alone while it stays the same output.
+#[test]
+fn the_same_primary_is_kept() {
+    let vdd = output(r"\\.\DISPLAY5", 0, 0, 3840, 2160);
+    assert!(!repick(&vdd, &vdd));
+}
+
+/// #259: with the VDD detached the wall's span became the primary; the
+/// thread moves to it, and back to the VDD when Windows restores it.
+#[test]
+fn another_primary_is_picked_again() {
+    let vdd = output(r"\\.\DISPLAY5", 0, 0, 3840, 2160);
+    let span = output(r"\\.\DISPLAY1", 0, 0, 7680, 1080);
+    assert!(repick(&vdd, &span));
+    assert!(repick(&span, &vdd));
+}
+
+/// The same device name at another place or size is another refresh
+/// (Windows renumbers and re-lays displays when one comes or goes).
+#[test]
+fn the_same_name_moved_or_resized_is_picked_again() {
+    let span = output(r"\\.\DISPLAY1", 0, 0, 7680, 1080);
+    let moved = output(r"\\.\DISPLAY1", 0, 0, 2560, 1080);
+    assert!(repick(&span, &moved));
+    let taller = OutputInfo {
+        height: 2160,
+        ..span.clone()
+    };
+    assert!(repick(&span, &taller));
+    let elsewhere = OutputInfo {
+        left: 3840,
+        ..span.clone()
+    };
+    assert!(repick(&span, &elsewhere));
+    let lower = OutputInfo {
+        top: 1,
+        ..span.clone()
+    };
+    assert!(repick(&span, &lower));
 }
