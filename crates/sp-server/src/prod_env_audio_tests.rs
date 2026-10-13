@@ -410,9 +410,9 @@ fn windows_update_s_two_policies_gate() {
         wu(Some(false), Some(false)),
         [EnvProblem::AutoUpdateOn, EnvProblem::DriversNotExcluded]
     );
-    assert_eq!(wu(Some(true), None), [unread.clone()]);
-    assert_eq!(wu(None, Some(true)), [unread.clone()]);
-    assert_eq!(wu(None, None), [unread.clone()]);
+    assert_eq!(wu(Some(true), None), std::slice::from_ref(&unread));
+    assert_eq!(wu(None, Some(true)), std::slice::from_ref(&unread));
+    assert_eq!(wu(None, None), std::slice::from_ref(&unread));
     assert_eq!(
         wu(None, Some(false)),
         [unread.clone(), EnvProblem::DriversNotExcluded]
