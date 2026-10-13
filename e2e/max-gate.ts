@@ -122,10 +122,16 @@ export function maxGateFailures(first: MaxStatus, second: MaxStatus): string[] {
     );
   }
   const phase = second.send_phase_us_p50;
-  const want = second.vblank_phase_us;
+  const setting = second.vblank_phase_us;
+  // #243: a setting of a refresh or more lands that far into a later
+  // refresh (the pacer's slot is vblank + phase), so the median start is the
+  // setting modulo the refresh: SNV's 19 ms = 2333 us at 16 666.7 us.
+  const periodUs = second.vblank_period_ns / 1_000;
+  const want = periodUs > 0 ? Math.floor(setting % periodUs) : setting;
   if (phase < want || phase > want + SEND_PHASE_SLACK_US) {
+    const into = want === setting ? "" : ` (${want} us into the refresh)`;
     failures.push(
-      `the Spout sends start ${phase} us after the vblank (median), not at the ${want} us phase`,
+      `the Spout sends start ${phase} us after the vblank (median), not at the ${setting} us phase${into}`,
     );
   }
   const repicks = second.slot_repicks - first.slot_repicks;
