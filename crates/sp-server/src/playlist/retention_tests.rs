@@ -268,11 +268,14 @@ async fn a_file_another_row_records_is_never_deleted() {
     .await
     .unwrap();
     for id in [marked.id, other] {
-        sqlx::query("INSERT INTO play_history (playlist_id, video_id) SELECT playlist_id, id FROM videos WHERE id = ?")
-            .bind(id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO play_history (playlist_id, video_id) \
+             SELECT playlist_id, id FROM videos WHERE id = ?",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
     sqlx::query(
         "INSERT INTO peer_waits (youtube_id, job, since_ms) VALUES ('shared-v001', 'lyrics', 1)",

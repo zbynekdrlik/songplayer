@@ -76,7 +76,10 @@ pub struct FilePlan {
 /// Every file of `files`' set, in [`FilePlan::remove`]'s order: the
 /// video, the audio, then the stems, the dub and its transcripts.
 pub fn candidates(files: &SongFiles) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = files.video.iter().cloned().collect();
+    let mut out = Vec::new();
+    if let Some(video) = &files.video {
+        out.push(video.clone());
+    }
     if let Some(audio) = &files.audio {
         out.push(audio.clone());
         out.extend(cache::derived_files(audio));
@@ -200,7 +203,7 @@ async fn remove_files(row: &DueRow, paths: &[PathBuf]) -> Option<Vec<PathBuf>> {
                     youtube_id = %row.youtube_id,
                     path = %path.display(),
                     %e,
-                    "playlist retention: a file could not be deleted - the song stays for the next pass"
+                    "playlist retention: a file was not deleted - the song waits for the next pass"
                 );
                 return None;
             }
