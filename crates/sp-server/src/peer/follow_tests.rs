@@ -332,6 +332,32 @@ async fn a_copy_not_every_row_took_is_not_recorded() {
     assert_eq!(took_sha(&pp, YT).await, Some(snv_sha));
 }
 
+/// The copy went into every row but its origin could not be recorded (a
+/// test trigger on `peer_fetches`): the song is not fetched again on every
+/// tick; it waits `FOLLOW_RETRY` like a failed take.
+#[tokio::test]
+async fn a_copy_whose_record_failed_is_not_fetched_every_tick() {
+    let (_snv, pp) = snv_and_pp(&[YT]).await;
+    let old = pp_took(&pp, YT, OLD_SOURCE).await;
+    sqlx::query(
+        "CREATE TRIGGER refuse BEFORE INSERT ON peer_fetches \
+         BEGIN SELECT RAISE(ABORT, 'refused'); END",
+    )
+    .execute(pp.pool())
+    .await
+    .unwrap();
+    let before = now_ms();
+    assert_eq!(follow_next(Some(&pp.ex)).await.len(), 1);
+    let after = now_ms();
+    every_row_serves(&pp, YT, NEW_SOURCE).await;
+    assert_eq!(took_sha(&pp, YT).await, Some(sha256_hex(&old)), "no record");
+    assert!(
+        follow_next(Some(&pp.ex)).await.is_empty(),
+        "not again at once"
+    );
+    assert!(passed_for(&pp, YT, FOLLOW_RETRY, before, after));
+}
+
 /// One song per look; a look that finds nothing makes the next one wait
 /// `FOLLOW_IDLE`, after which a copy SNV made again is followed once more.
 #[tokio::test]
