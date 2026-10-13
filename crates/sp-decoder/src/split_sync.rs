@@ -45,18 +45,26 @@ pub(crate) fn is_duration_mismatch(v_dur: u64, a_dur: u64) -> bool {
 /// that song's end as ONE `underrun_end`, so the ledger names the file.
 pub const AUDIO_PAST_VIDEO_MAX_MS: u64 = 15_000;
 
-/// The cadence of the held steps when the video reports no frame rate (#257).
+/// The cadence of the held steps when the video reports no usable frame rate
+/// (#257).
 const HELD_FALLBACK_FPS: u64 = 30;
+
+/// The video frame rates the held steps trust (#257 review), inclusive:
+/// 1000/1 would push 15 000 steps into the 15 s bound, and under 0.6 fps one
+/// step would carry more than the grid's 2 s cap of audio.
+const HELD_MIN_FPS: u64 = 10;
+const HELD_MAX_FPS: u64 = 120;
 
 /// The offset (ms) of held step `k` past its base on the video's own frame
 /// cadence `num/den`: `⌊k·1000·den/num⌋`, from the base every time, so a
-/// long tail never drifts. A rate with a zero term holds at
-/// [`HELD_FALLBACK_FPS`].
+/// long tail never drifts. A rate outside [`HELD_MIN_FPS`]..=[`HELD_MAX_FPS`]
+/// (a zero term included) holds at [`HELD_FALLBACK_FPS`].
 fn held_offset_ms(k: u64, (num, den): (u32, u32)) -> u64 {
-    let (num, den) = if num == 0 || den == 0 {
+    let (num, den) = (u64::from(num), u64::from(den));
+    let (num, den) = if den == 0 || num < HELD_MIN_FPS * den || num > HELD_MAX_FPS * den {
         (HELD_FALLBACK_FPS, 1)
     } else {
-        (u64::from(num), u64::from(den))
+        (num, den)
     };
     k * 1000 * den / num
 }
