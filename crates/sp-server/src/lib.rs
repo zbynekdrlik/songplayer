@@ -42,6 +42,7 @@ pub mod test_item; // #228: camera-box's measurement clip as a one-item test pla
 mod test_log; // a scoped log capture shared by the tests
 mod tools_ready; // #144: publish the ready tools, then the slow follow-ups
 pub mod video_upgrade; // #223 S11: a cached song's video upgraded in place
+pub mod wall; // #259: the LED wall report (Arena's own output setup vs the box; acts on nothing)
 
 pub use panic_hook::install_panic_hook;
 
@@ -440,6 +441,7 @@ pub async fn start(
         shutdown_tx.subscribe(),
     )); // #207: per-minute host commit/pagefile logger (Windows only)
     tokio::spawn(crate::prod_env::run(shutdown_tx.subscribe())); // #233: checked now + every minute
+    tokio::spawn(crate::wall::run(shutdown_tx.subscribe())); // #259: the wall, now + every 5 s
     tokio::spawn(async move {
         match tools_mgr.ensure_tools().await {
             Ok(paths) => {

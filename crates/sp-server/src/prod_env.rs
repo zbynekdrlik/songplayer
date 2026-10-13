@@ -382,17 +382,27 @@ fn log_step(step: LogStep, status: &EnvironmentStatus, problems: &[EnvProblem]) 
 /// instead of starting another (a hung read never piles up threads). A read
 /// that finished only after its call gave up is stale by then (up to a whole
 /// check period old): the next call drops it and reads afresh, so a late
-/// read is never published as a fresh one.
+/// read is never published as a fresh one. #259: the wall check reads the
+/// box through one too (`wall::run`).
 pub struct Reader<T> {
     read: fn() -> T,
+    /// What is read, in the errors ("WMI check", "wall read").
+    what: &'static str,
     pending: Option<tokio::task::JoinHandle<T>>,
 }
 
 impl<T: Send + 'static> Reader<T> {
-    /// A reader of `read`, run on the blocking pool.
+    /// A reader of the WMI facts `read`, run on the blocking pool.
     pub fn new(read: fn() -> T) -> Self {
+        Self::named(read, "WMI check")
+    }
+
+    /// #259: a reader of `read`, run on the blocking pool, whose errors name
+    /// `what`.
+    pub fn named(read: fn() -> T, what: &'static str) -> Self {
         Self {
             read,
+            what,
             pending: None,
         }
     }
@@ -406,10 +416,10 @@ impl<T: Send + 'static> Reader<T> {
         };
         match tokio::time::timeout(bound, &mut handle).await {
             Ok(Ok(value)) => Ok(value),
-            Ok(Err(e)) => Err(format!("the WMI check failed: {e}")),
+            Ok(Err(e)) => Err(format!("the {} failed: {e}", self.what)),
             Err(_) => {
                 self.pending = Some(handle);
-                Err(format!("the WMI check did not finish within {bound:?}"))
+                Err(format!("the {} did not finish within {bound:?}", self.what))
             }
         }
     }

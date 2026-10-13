@@ -82,6 +82,12 @@ rtrb = "=0.4.0"
 # renderers (the module matrix needs none). MIT OR Apache-2.0 (its MIT notice
 # ships in THIRD-PARTY-NOTICES.txt), pinned exactly.
 qrcode = { version = "=0.14.1", default-features = false }
+# #259: Resolume Arena's saved output setup (its preferences and preset
+# XML files, `wall/resolume.rs`). A read-only XML tree that refuses a DTD
+# (no entity expansion); its only dependency, memchr, is already locked.
+# MIT OR Apache-2.0 (its MIT notice ships in THIRD-PARTY-NOTICES.txt),
+# pinned exactly.
+roxmltree = "=0.21.1"
 
 # #162: the box-overload guard's Windows OS calls — GlobalMemoryStatusEx for the
 # pre-spawn memory-headroom read + a per-child Job Object (JOB_OBJECT_LIMIT_
@@ -124,7 +130,17 @@ windows-sys = { version = "0.59", features = [
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
     "Win32_System_Power",
+    # #259: the wall report reads Windows' displays (EnumDisplayDevicesW,
+    # EnumDisplaySettingsW) and the process list (a Toolhelp snapshot) to
+    # find Resolume Arena, with no process spawned (`wall/win.rs`; its
+    # windows through Win32_UI_WindowsAndMessaging above).
+    "Win32_Graphics_Gdi",
+    "Win32_System_Diagnostics_ToolHelp",
 ] }
+# #259: the wall report loads NVIDIA's nvapi64.dll at run time (no NVIDIA
+# SDK at build time; a box without the driver reads "no NVIDIA"), as sp-ndi
+# loads NDI (`wall/win.rs`).
+libloading = { workspace = true }
 # #233: the production-environment guard reads Defender's real-time protection
 # through WMI over COM (`prod_env_win.rs`: IWbemLocator, CoSetProxyBlanket),
 # with no process spawned. The same `windows` 0.58 sp-decoder and sp-gpu use
