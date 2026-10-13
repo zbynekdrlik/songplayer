@@ -75,7 +75,7 @@ impl Fit {
 /// #267: `SP-program-MAX`'s rule. MAX is the LED wall's feed (Arena scales
 /// it to the composition's width), so a picture fills the canvas's whole
 /// width and never carries bars at its sides.
-pub const MAX_FIT: Fit = Fit::Aspect;
+pub const MAX_FIT: Fit = Fit::FillWidth;
 
 /// #267: the `SP-program` Spout sender's rule (#239): `SP-program`'s own,
 /// the whole picture with its bars, as the NDI `SP-program` carries it.
