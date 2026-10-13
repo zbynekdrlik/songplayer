@@ -889,7 +889,8 @@ it - processing here … why=NobodyHasIt`. SNV listed no lyrics job (its
 lyrics waited on its stems), PP's AI calls failed (no AI proxy reachable
 from PP), and the degraded track at the current pipeline version was never
 replaced: a local result leaves the lyrics queue for good (served, or
-parked `no_source` by `fail_song`). Three rules:
+parked `no_source` by `fail_song`, until #263 made an error a deferral).
+Three rules:
 
 - **SNV announces lyrics that wait on its own queued stems** ("Queued jobs"
   above).
