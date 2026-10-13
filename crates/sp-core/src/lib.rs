@@ -30,6 +30,7 @@ pub mod program_refusal;
 pub mod seek_model;
 pub mod status_chip;
 pub mod video_upgrade_view; // #223 S13: Nastavenia's view of the 4K upgrade
+pub mod wall; // #259: the LED wall's state, problems, status and health segment
 pub mod ws;
 
 #[cfg(test)]
