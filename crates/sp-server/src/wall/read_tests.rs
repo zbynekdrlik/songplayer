@@ -1,35 +1,92 @@
-//! #259: the walk over a scripted box — NVAPI decoded, Arena's process and
-//! windows found, Arena's saved output setup read file by file.
+//! #259: the walk over a scripted box — Arena's process and windows found,
+//! Arena's saved output setup read file by file, NVAPI asked only when the
+//! decision needs it and decoded read by read.
 
 use sp_core::wall::ArenaOutput;
 
 use super::*;
 use crate::wall::fake::{
     ADVANCED, ARENA_PID, FakeReader, arena_main, arena_output as output_window, documents,
-    snv_facts, snv_output,
+    snv_facts, snv_nvidia, snv_nvidia_raw, snv_output, span, vdd,
 };
 use crate::wall::resolume;
 
 #[test]
-fn snvs_box_reads_as_observed() {
-    assert_eq!(read_facts(&FakeReader::snv()), snv_facts());
+fn snvs_box_reads_as_observed_without_asking_nvapi() {
+    let reader = FakeReader::snv();
+    assert_eq!(read_facts(&reader), snv_facts());
+    assert_eq!(reader.nvidia_asked.get(), 0);
+}
+
+/// SNV's box with the span gone from Windows' displays.
+fn span_gone() -> FakeReader {
+    FakeReader {
+        displays: Ok(vec![vdd()]),
+        ..FakeReader::snv()
+    }
+}
+
+#[test]
+fn nvapi_is_asked_once_when_a_wanted_display_is_gone_or_resized() {
+    let gone = span_gone();
+    let facts = read_facts(&gone);
+    assert_eq!(facts.nvidia, snv_nvidia());
+    assert_eq!(gone.nvidia_asked.get(), 1);
+    let resized = FakeReader {
+        displays: Ok(vec![
+            vdd(),
+            sp_core::wall::Display {
+                width: 2560,
+                ..span()
+            },
+        ]),
+        ..FakeReader::snv()
+    };
+    assert_eq!(read_facts(&resized).nvidia, snv_nvidia());
+    assert_eq!(resized.nvidia_asked.get(), 1);
 }
 
 #[test]
 fn no_nvidia_driver_is_no_nvapi_not_an_error() {
     let reader = FakeReader {
-        nvidia: Ok(None),
-        ..FakeReader::snv()
+        nvidia: None,
+        ..span_gone()
     };
-    assert_eq!(read_facts(&reader).nvidia, Ok(None));
-    let failing = FakeReader {
-        nvidia: Err("NvAPI_Initialize answered NVAPI status -1".to_string()),
-        ..FakeReader::snv()
+    assert_eq!(read_facts(&reader).nvidia, NvidiaFacts::NoDriver);
+}
+
+#[test]
+fn a_failed_nvapi_read_keeps_the_other() {
+    let grids_failed = FakeReader {
+        nvidia: Some(NvidiaRaw {
+            grids: Err("NvAPI_Mosaic_EnumDisplayGrids answered NVAPI status -3".to_string()),
+            ..snv_nvidia_raw()
+        }),
+        ..span_gone()
+    };
+    let NvidiaFacts::Read { connected, grids } = read_facts(&grids_failed).nvidia else {
+        panic!("NVAPI was read");
+    };
+    assert_eq!(connected.map(|c| c.len()), Ok(3));
+    assert_eq!(
+        grids,
+        Err("NvAPI_Mosaic_EnumDisplayGrids answered NVAPI status -3".to_string())
+    );
+    let connected_failed = FakeReader {
+        nvidia: Some(NvidiaRaw {
+            connected: Err("NvAPI_Initialize answered NVAPI status -1".to_string()),
+            ..snv_nvidia_raw()
+        }),
+        ..span_gone()
+    };
+    let NvidiaFacts::Read { connected, grids } = read_facts(&connected_failed).nvidia else {
+        panic!("NVAPI was read");
     };
     assert_eq!(
-        read_facts(&failing).nvidia,
+        connected,
         Err("NvAPI_Initialize answered NVAPI status -1".to_string())
     );
+    assert_eq!(grids.map(|g| g.len()), Ok(1));
 }
 
 #[test]
@@ -116,23 +173,64 @@ fn no_simple_output_file_or_the_advanced_output_off_is_the_simple_output() {
 }
 
 #[test]
-fn a_file_the_advanced_output_needs_that_is_missing_or_bad_is_named() {
+fn an_advanced_output_with_no_preset_saved_is_no_preset_never_an_error() {
+    let docs = documents();
+    let setup = resolume::advanced_output_file(&docs);
+    let preset = resolume::preset_file(&docs, "snv surround 7680");
+    let none = |preset: Option<&str>| {
+        Ok(ArenaOutput {
+            advanced: true,
+            preset: preset.map(str::to_string),
+            preset_found: false,
+            displays: Vec::new(),
+        })
+    };
+    let named = ADVANCED.replace("snv surround 7680", "../escape");
+    let cases = [
+        (FakeReader::snv().with_file(setup.clone(), None), none(None)),
+        (
+            FakeReader::snv().with_file(setup.clone(), Some(Ok("<XmlState/>".to_string()))),
+            none(None),
+        ),
+        (
+            FakeReader::snv().with_file(
+                setup.clone(),
+                Some(Ok(ADVANCED.replace("snv surround 7680", ""))),
+            ),
+            none(None),
+        ),
+        (
+            FakeReader::snv().with_file(setup, Some(Ok(named))),
+            none(Some("../escape")),
+        ),
+        (
+            FakeReader::snv().with_file(preset, None),
+            none(Some("snv surround 7680")),
+        ),
+    ];
+    for (reader, output) in cases {
+        assert_eq!(arena_output(&reader), output);
+    }
+}
+
+#[test]
+fn a_file_the_advanced_output_reads_that_is_bad_is_named() {
     let docs = documents();
     let setup = resolume::advanced_output_file(&docs);
     let preset = resolume::preset_file(&docs, "snv surround 7680");
     let simple = resolume::simple_output_file(&docs);
     let cases = [
         (
-            FakeReader::snv().with_file(setup.clone(), None),
-            format!("{} does not exist", setup.display()),
+            FakeReader::snv().with_file(setup.clone(), Some(Ok("<ScreenSetup".to_string()))),
+            format!("{}: ", setup.display()),
         ),
         (
-            FakeReader::snv().with_file(preset.clone(), None),
-            format!("{} does not exist", preset.display()),
+            FakeReader::snv().with_file(setup.clone(), Some(Err("access denied".to_string()))),
+            "access denied".to_string(),
         ),
         (
-            FakeReader::snv().with_file(setup.clone(), Some(Ok("<XmlState/>".to_string()))),
-            format!("{}: no <ScreenSetup>", setup.display()),
+            FakeReader::snv().with_file(preset.clone(), Some(Err("sharing violation".to_string()))),
+            "sharing violation".to_string(),
         ),
         (
             FakeReader::snv().with_file(
@@ -161,7 +259,11 @@ fn a_file_the_advanced_output_needs_that_is_missing_or_bad_is_named() {
         ),
     ];
     for (reader, why) in cases {
-        assert_eq!(arena_output(&reader), Err(why));
+        let read = arena_output(&reader);
+        assert!(
+            read.as_ref().is_err_and(|err| err.starts_with(&why)),
+            "{read:?} should fail with {why:?}"
+        );
     }
 }
 
@@ -183,6 +285,7 @@ fn the_preset_named_is_the_one_read() {
         Ok(ArenaOutput {
             advanced: true,
             preset: Some("pp wall".to_string()),
+            preset_found: true,
             displays: Vec::new(),
         })
     );
@@ -194,14 +297,20 @@ fn nothing_read_is_every_fact_unread_for_one_reason() {
     assert_eq!(unread.arena, Err("not Windows".to_string()));
     assert_eq!(unread.arena_output, Err("not Windows".to_string()));
     assert_eq!(unread.displays, Err("not Windows".to_string()));
-    assert_eq!(unread.nvidia, Err("not Windows".to_string()));
+    assert_eq!(unread.nvidia, NvidiaFacts::NotRead);
 }
 
 #[test]
 fn nvapis_structures_are_decoded() {
-    let raw = FakeReader::snv().nvidia.unwrap().unwrap();
-    let decoded = nvidia(&raw);
-    assert_eq!(decoded, snv_facts().nvidia.unwrap().unwrap());
-    assert_eq!(decoded.connected[0].connector, "HDMI");
-    assert_eq!(decoded.grids[0].displays.len(), 3);
+    let decoded = nvidia(&FakeReader::snv());
+    assert_eq!(decoded, snv_nvidia());
+    let NvidiaFacts::Read {
+        connected: Ok(connected),
+        grids: Ok(grids),
+    } = decoded
+    else {
+        panic!("both reads answered");
+    };
+    assert_eq!(connected[0].connector, "HDMI");
+    assert_eq!(grids[0].displays.len(), 3);
 }

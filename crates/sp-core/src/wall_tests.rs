@@ -57,10 +57,11 @@ fn a_display_id_travels_as_its_hex_text() {
     assert!(serde_json::from_value::<DisplayId>(json!(2_147_880_070_u64)).is_err());
 }
 
-const EVERY_STATE: [WallState; 8] = [
+const EVERY_STATE: [WallState; 9] = [
     WallState::Unknown,
     WallState::ArenaOff,
     WallState::SimpleOutput,
+    WallState::NoPreset,
     WallState::NoDisplayOutput,
     WallState::ScreensOff,
     WallState::DisplayMissing,
@@ -81,7 +82,7 @@ type StateRow = (
 
 #[test]
 fn every_state_has_its_name_words_tone_and_rules() {
-    let table: [StateRow; 8] = [
+    let table: [StateRow; 9] = [
         (
             WallState::Unknown,
             "unknown",
@@ -104,6 +105,14 @@ fn every_state_has_its_name_words_tone_and_rules() {
             "Resolume má jednoduchý výstup",
             HealthTone::Off,
             false,
+            true,
+        ),
+        (
+            WallState::NoPreset,
+            "no_preset",
+            "Resolume nemá uložený výstup",
+            HealthTone::Off,
+            true,
             true,
         ),
         (
@@ -277,6 +286,7 @@ fn snv_output() -> ArenaOutput {
     ArenaOutput {
         advanced: true,
         preset: Some("snv surround 7680".to_string()),
+        preset_found: true,
         displays: vec![WantedDisplay {
             name: "Display 1".to_string(),
             device_id: r"\Registry\Machine\System\CurrentControlSet\Control\Video\{49D71F75-AF5A-11EE-BACA-806E6F6E6963}\0000".to_string(),
@@ -351,6 +361,11 @@ fn a_segment_says_the_first_problem_or_else_the_state() {
             checked(WallState::ArenaOff, &[], None),
             HealthTone::Off,
             "Stena: Resolume nebeží",
+        ),
+        (
+            checked(WallState::NoPreset, &[], None),
+            HealthTone::Off,
+            "Stena: Resolume nemá uložený výstup",
         ),
         (
             checked(WallState::ScreensOff, std::slice::from_ref(&off), None),
@@ -453,7 +468,7 @@ fn the_status_travels_with_every_field_named() {
                 height: 1080,
                 hz: 60,
             }]),
-            nvidia: Some(true),
+            nvidia: NvidiaRead::Read,
             connected: Some(vec![Connected {
                 id: DisplayId(0x8006_1083),
                 connector: "HDMI".to_string(),
@@ -479,6 +494,7 @@ fn the_status_travels_with_every_field_named() {
         json!({
             "advanced": true,
             "preset": "snv surround 7680",
+            "preset_found": true,
             "displays": [{
                 "name": "Display 1",
                 "device_id": r"\Registry\Machine\System\CurrentControlSet\Control\Video\{49D71F75-AF5A-11EE-BACA-806E6F6E6963}\0000",
@@ -496,7 +512,13 @@ fn the_status_travels_with_every_field_named() {
         json!([{"id": "0x80061083", "connector": "HDMI", "flags": 131157}])
     );
     assert_eq!(wire["read"]["grids"][0]["displays"], json!(["0x80061086"]));
-    assert_eq!(wire["read"]["nvidia"], true);
+    assert_eq!(wire["read"]["nvidia"], "read");
+    assert_eq!(
+        serde_json::to_value([NvidiaRead::NotRead, NvidiaRead::NoDriver, NvidiaRead::Read])
+            .unwrap(),
+        json!(["not_read", "no_driver", "read"])
+    );
+    assert_eq!(WallRead::default().nvidia, NvidiaRead::NotRead);
     assert_eq!(
         wire["read"]["arena_windows"][0],
         json!({"title": "Display", "visible": true, "left": 3840, "top": 0,

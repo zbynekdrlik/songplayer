@@ -10,8 +10,8 @@ use tower::ServiceExt;
 
 use super::*;
 use crate::prod_env::Reader;
-use crate::wall::fake::{FakeReader, snv_facts};
-use crate::wall::read::read_facts;
+use crate::wall::fake::{FakeReader, nvidia_read, snv_facts, snv_nvidia, vdd};
+use crate::wall::read::{NvidiaFacts, read_facts};
 
 const NOW: i64 = 1_791_608_681_366;
 
@@ -28,14 +28,24 @@ fn a_checks_status_names_its_state_problems_facts_and_reasons() {
     assert_eq!(wire["read"]["arena_running"], true);
     assert_eq!(wire["read"]["arena_output"]["preset"], "snv surround 7680");
     assert_eq!(wire["read"]["displays"][1]["width"], 7680);
-    assert_eq!(wire["read"]["nvidia"], true);
+    // A healthy wall never asks NVAPI.
+    assert_eq!(wire["read"]["nvidia"], "not_read");
+    assert_eq!(wire["read"]["connected"], serde_json::Value::Null);
+    assert_eq!(wire["read"]["grids"], serde_json::Value::Null);
+    let span_gone = WallFacts {
+        displays: Ok(vec![vdd()]),
+        nvidia: snv_nvidia(),
+        ..snv_facts()
+    };
+    let wire = serde_json::to_value(status_of(&span_gone, NOW).0).unwrap();
+    assert_eq!(wire["read"]["nvidia"], "read");
     assert_eq!(
         wire["read"]["grids"][0]["displays"],
         serde_json::json!(["0x80061086", "0x80061087", "0x80061083"])
     );
     let night = WallFacts {
-        displays: Ok(vec![crate::wall::fake::vdd()]),
-        nvidia: Ok(Some(crate::wall::read::Nvidia::default())),
+        displays: Ok(vec![vdd()]),
+        nvidia: nvidia_read(Ok(Vec::new()), Ok(Vec::new())),
         ..snv_facts()
     };
     let (status, problems) = status_of(&night, NOW);
@@ -111,8 +121,8 @@ fn a_check_publishes_into_its_store() {
     assert_eq!(store.current(), WallStatus::default());
     let mut r = Reporter::default();
     let night = WallFacts {
-        displays: Ok(vec![crate::wall::fake::vdd()]),
-        nvidia: Ok(None),
+        displays: Ok(vec![vdd()]),
+        nvidia: NvidiaFacts::NoDriver,
         ..snv_facts()
     };
     assert_eq!(apply(&store, &mut r, &night, 10), LogStep::Holds);
@@ -157,6 +167,7 @@ fn the_wall_reads_spawn_no_process_and_set_nothing() {
         ("read.rs", include_str!("read.rs")),
         ("resolume.rs", include_str!("resolume.rs")),
         ("decide.rs", include_str!("decide.rs")),
+        ("nvapi.rs", include_str!("nvapi.rs")),
         ("win.rs", include_str!("win.rs")),
     ];
     let banned = [
@@ -170,14 +181,17 @@ fn the_wall_reads_spawn_no_process_and_set_nothing() {
         "PostMessage",
         "SendMessage",
         "std::fs::write",
+        // NVAPI's display-changing calls (Surround grids, topology): no id
+        // of one is even kept.
+        "Mosaic_Set",
+        "MOSAIC_SET",
+        "SetCurrentTopo",
     ];
     for (file, text) in sources {
         for word in banned {
             assert!(!text.contains(word), "{file} uses {word}");
         }
     }
-    // NVAPI's display-changing call is named, never called.
-    assert!(!include_str!("win.rs").contains("NVAPI_MOSAIC_SET_DISPLAY_GRIDS"));
 }
 
 #[tokio::test]

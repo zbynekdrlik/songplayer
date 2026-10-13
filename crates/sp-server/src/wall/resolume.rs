@@ -14,8 +14,12 @@
 //!   advancedModeEnabled="1">` = the advanced output is on; no file =
 //!   Arena's default, the simple output;
 //! - `Resolume Arena\Preferences\AdvancedOutput.xml`: `<ScreenSetup
-//!   presetFile="NAME">`, the preset the advanced output was saved as;
-//! - `Resolume Arena\Presets\Advanced Output\NAME.xml`: every
+//!   presetFile="NAME">`, the preset the advanced output was saved as; no
+//!   file, no name or no such preset = no preset saved (a calm state,
+//!   never a failed read);
+//! - `Resolume Arena\Presets\Advanced Output\NAME.xml` (Arena's Save &
+//!   Close writes the current setup into it: observed on SNV 13.10.2026,
+//!   it grew by a screen added and went back byte for byte): every
 //!   `<OutputDeviceDisplay name="Display 1"
 //!   deviceId="\Registry\Machine\System\CurrentControlSet\Control\Video\{GUID}\0000"
 //!   fullscreen="1" width="7680" height="1080">` is a physical display it
@@ -112,18 +116,24 @@ pub fn advanced_mode(xml: &str) -> Result<bool, String> {
     }
 }
 
-/// `AdvancedOutput.xml`: the preset the advanced output was saved as — a
-/// plain file name (never a path out of the presets folder).
-pub fn preset_name(xml: &str) -> Result<String, String> {
+/// `AdvancedOutput.xml`: the preset the advanced output was saved as
+/// (`<ScreenSetup presetFile>`), `None` when none is named (no
+/// `<ScreenSetup>`, no or an empty `presetFile`: the operator saved no
+/// preset). Only text that is no XML is an error. Measured on SNV
+/// (13.10.2026): the file holds only `<ScreenSetup name="ScreenSetup"
+/// presetFile="snv surround 7680">` and its version.
+pub fn preset_name(xml: &str) -> Result<Option<String>, String> {
     let doc = parse(xml)?;
-    let setup = element(&doc, "ScreenSetup").ok_or("no <ScreenSetup>")?;
-    let name = setup
-        .attribute("presetFile")
-        .ok_or("<ScreenSetup> has no presetFile")?;
-    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', ':']) {
-        return Err(format!("presetFile {name:?} is no file name"));
-    }
-    Ok(name.to_string())
+    let name = element(&doc, "ScreenSetup")
+        .and_then(|setup| setup.attribute("presetFile"))
+        .filter(|name| !name.is_empty());
+    Ok(name.map(str::to_string))
+}
+
+/// A preset name that is a plain file name in the presets folder: not
+/// empty, not `.` or `..`, no `/`, `\` or `:` (never a path out of it).
+pub fn is_file_name(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', ':'])
 }
 
 /// One `<OutputDeviceDisplay>`: `name`, `deviceId`, `width` and `height`

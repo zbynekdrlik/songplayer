@@ -136,10 +136,13 @@ windows-sys = { version = "0.59", features = [
     # windows through Win32_UI_WindowsAndMessaging above).
     "Win32_Graphics_Gdi",
     "Win32_System_Diagnostics_ToolHelp",
+    # #259 review: those reads run with the thread per-monitor DPI aware
+    # (SetThreadDpiAwarenessContext), its previous awareness restored after.
+    "Win32_UI_HiDpi",
 ] }
-# #259: the wall report loads NVIDIA's nvapi64.dll at run time (no NVIDIA
-# SDK at build time; a box without the driver reads "no NVIDIA"), as sp-ndi
-# loads NDI (`wall/win.rs`).
+# #259: the wall report loads NVIDIA's System32\nvapi64.dll by its full path
+# at run time (no NVIDIA SDK at build time; a box without the driver reads
+# "no NVIDIA"), as sp-ndi loads NDI (`wall/win.rs`).
 libloading = { workspace = true }
 # #233: the production-environment guard reads Defender's real-time protection
 # through WMI over COM (`prod_env_win.rs`: IWbemLocator, CoSetProxyBlanket),

@@ -7,17 +7,19 @@
 //!   Spout screen;
 //! - Windows: the VDD primary 3840×2160 at 0,0, the span `\\.\DISPLAY1`
 //!   7680×1080 at x 3840;
-//! - NVAPI: three screens connected (`0x80061083` HDMI, `0x80061086` and
-//!   `0x80061087` DisplayPort) joined into one 1×3 grid of 2560×1080;
+//! - NVAPI (read only when a display Arena wants is gone or has another
+//!   size, so never on this healthy box): three screens connected
+//!   (`0x80061083` HDMI, `0x80061086` and `0x80061087` DisplayPort) joined
+//!   into one 1×3 grid of 2560×1080;
 //! - Arena's output window `Display` at 3840,0 – 11520,1080.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 
 use sp_core::wall::{ArenaOutput, ArenaWindow, Connected, Display, DisplayId, Grid, WantedDisplay};
 
 use super::nvapi::{NvGpuDisplayIds, NvMosaicGridTopoV2};
-use super::read::{Arena, Nvidia, NvidiaRaw, WallFacts, WallReader};
+use super::read::{Arena, NvidiaFacts, NvidiaRaw, WallFacts, WallReader};
 use super::resolume;
 
 /// The span's device key (Arena's `deviceId` of Display 1).
@@ -55,6 +57,7 @@ pub fn snv_output() -> ArenaOutput {
     ArenaOutput {
         advanced: true,
         preset: Some("snv surround 7680".to_string()),
+        preset_found: true,
         displays: vec![wanted()],
     }
 }
@@ -180,7 +183,33 @@ pub fn arena_output() -> ArenaWindow {
     }
 }
 
-/// SNV's facts, as the walk reads them from [`FakeReader::snv`].
+/// NVAPI read, each read answering `connected` and `grids`.
+pub fn nvidia_read(
+    connected: Result<Vec<Connected>, String>,
+    grids: Result<Vec<Grid>, String>,
+) -> NvidiaFacts {
+    NvidiaFacts::Read { connected, grids }
+}
+
+/// SNV's NVAPI, read: the three screens joined into the span's grid.
+pub fn snv_nvidia() -> NvidiaFacts {
+    nvidia_read(Ok(screens()), Ok(vec![span_grid()]))
+}
+
+/// SNV's NVAPI structures, as the driver fills them.
+pub fn snv_nvidia_raw() -> NvidiaRaw {
+    NvidiaRaw {
+        connected: Ok(vec![
+            display_ids(RIGHT, 4),
+            display_ids(LEFT, 7),
+            display_ids(MIDDLE, 7),
+        ]),
+        grids: Ok(vec![topo(&span_grid())]),
+    }
+}
+
+/// SNV's facts, as the walk reads them from [`FakeReader::snv`] (NVAPI not
+/// read: every display Arena wants is there).
 pub fn snv_facts() -> WallFacts {
     WallFacts {
         arena: Ok(Arena {
@@ -189,10 +218,7 @@ pub fn snv_facts() -> WallFacts {
         }),
         arena_output: Ok(snv_output()),
         displays: Ok(vec![vdd(), span()]),
-        nvidia: Ok(Some(Nvidia {
-            connected: screens(),
-            grids: vec![span_grid()],
-        })),
+        nvidia: NvidiaFacts::NotRead,
     }
 }
 
@@ -216,7 +242,10 @@ pub fn preset_xml() -> String {
 
 /// A box whose every read is scripted.
 pub struct FakeReader {
-    pub nvidia: Result<Option<NvidiaRaw>, String>,
+    /// NVAPI's answer; `None` = no NVIDIA driver.
+    pub nvidia: Option<NvidiaRaw>,
+    /// How many times NVAPI was asked.
+    pub nvidia_asked: Cell<u32>,
     pub displays: Result<Vec<Display>, String>,
     pub processes: Result<Vec<(u32, String)>, String>,
     /// Every top-level window, with its process id.
@@ -234,14 +263,8 @@ impl FakeReader {
     pub fn snv() -> Self {
         let docs = documents();
         Self {
-            nvidia: Ok(Some(NvidiaRaw {
-                connected: vec![
-                    display_ids(RIGHT, 4),
-                    display_ids(LEFT, 7),
-                    display_ids(MIDDLE, 7),
-                ],
-                grids: vec![topo(&span_grid())],
-            })),
+            nvidia: Some(snv_nvidia_raw()),
+            nvidia_asked: Cell::new(0),
             displays: Ok(vec![vdd(), span()]),
             processes: Ok(vec![
                 (4, "System".to_string()),
@@ -293,7 +316,8 @@ impl FakeReader {
 }
 
 impl WallReader for FakeReader {
-    fn nvidia(&self) -> Result<Option<NvidiaRaw>, String> {
+    fn nvidia(&self) -> Option<NvidiaRaw> {
+        self.nvidia_asked.set(self.nvidia_asked.get() + 1);
         self.nvidia.clone()
     }
 

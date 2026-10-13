@@ -178,30 +178,39 @@ fn the_advanced_output_switch_is_read() {
 }
 
 #[test]
-fn the_preset_name_is_a_plain_file_name() {
+fn the_preset_name_is_presetfile_or_none_saved() {
     let setup = |name: &str| {
         format!(r#"<XmlState><ScreenSetup name="ScreenSetup" presetFile="{name}"/></XmlState>"#)
     };
     assert_eq!(
         preset_name(&setup("snv surround 7680")),
-        Ok("snv surround 7680".to_string())
+        Ok(Some("snv surround 7680".to_string()))
     );
-    assert_eq!(preset_name(&setup("a.b")), Ok("a.b".to_string()));
-    for bad in ["", ".", "..", "../x", r"..\x", "C:x"] {
-        assert_eq!(
-            preset_name(&setup(bad)),
-            Err(format!("presetFile {bad:?} is no file name")),
-            "{bad}"
-        );
+    assert_eq!(preset_name(&setup("../x")), Ok(Some("../x".to_string())));
+    // No preset saved: never an error.
+    for none in [
+        setup("").as_str(),
+        "<XmlState><ScreenSetup/></XmlState>",
+        "<XmlState/>",
+    ] {
+        assert_eq!(preset_name(none), Ok(None), "{none}");
     }
-    assert_eq!(
-        preset_name("<XmlState><ScreenSetup/></XmlState>"),
-        Err("<ScreenSetup> has no presetFile".to_string())
+    // Only text that is no XML fails the read.
+    assert!(
+        preset_name("<ScreenSetup")
+            .unwrap_err()
+            .starts_with("not XML: ")
     );
-    assert_eq!(
-        preset_name("<XmlState/>"),
-        Err("no <ScreenSetup>".to_string())
-    );
+}
+
+#[test]
+fn a_preset_name_is_used_only_as_a_plain_file_name() {
+    for good in ["snv surround 7680", "a.b", "..a", "x."] {
+        assert!(is_file_name(good), "{good}");
+    }
+    for bad in ["", ".", "..", "../x", r"..\x", "C:x", "a/b"] {
+        assert!(!is_file_name(bad), "{bad}");
+    }
 }
 
 #[test]

@@ -7,18 +7,21 @@
 //! grid or port order of its own, and nothing here acts on the box.
 //!
 //! The order, each step reading only the facts it needs (a fact a step
-//! needs that could not be read is `unknown`):
+//! needs that could not be read is `unknown`; only SongPlayer's own reads
+//! failing are, never the operator's setup):
 //!
 //! 1. no process `Arena.exe` → `arena_off`;
-//! 2. Arena's simple output → `simple_output`; an advanced output that
-//!    drives no physical display → `no_display_output`;
+//! 2. Arena's simple output → `simple_output`; an advanced output with no
+//!    preset saved (no `AdvancedOutput.xml`, no `presetFile`, no such
+//!    preset file) → `no_preset`; a preset that drives no physical display
+//!    → `no_display_output`;
 //! 3. each display Arena wants, matched to a Windows display by its device
-//!    key (Arena's `deviceId`, ASCII case ignored):
+//!    key (Arena's `deviceId`, ASCII case ignored). NVAPI is read only now,
+//!    and only when one is gone or has another size ([`needs_nvidia`]):
 //!    - none: no NVIDIA driver, or NVAPI reports no screen connected →
 //!      screens off; NVIDIA screens connected → missing (`not_joined`
-//!      when no NVAPI grid holds more than one screen);
-//!    - another size → missing (`not_joined` likewise, when NVAPI can be
-//!      read);
+//!      when NVAPI's grids were read and none holds more than one screen);
+//!    - another size → missing (`not_joined` likewise);
 //!
 //!    any missing → `display_missing` (the missing displays listed first),
 //!    else any off → `screens_off`;
@@ -27,10 +30,10 @@
 //! 5. else `ok`.
 
 use sp_core::wall::{
-    ArenaWindow, Display, WallFact, WallProblem, WallRead, WallState, WantedDisplay,
+    ArenaWindow, Display, NvidiaRead, WallFact, WallProblem, WallRead, WallState, WantedDisplay,
 };
 
-use super::read::{Nvidia, WallFacts};
+use super::read::{NvidiaFacts, WallFacts};
 
 /// The title of Arena's output window (an Advanced Output screen's window;
 /// observed on SNV: `Display`, over the span).
@@ -75,10 +78,33 @@ pub fn find<'a>(wanted: &WantedDisplay, displays: &'a [Display]) -> Option<&'a D
         .find(|d| d.device_key.eq_ignore_ascii_case(&wanted.device_id))
 }
 
+/// `wanted` is there with its size.
+pub fn fits(wanted: &WantedDisplay, displays: &[Display]) -> bool {
+    find(wanted, displays).is_some_and(|d| d.width == wanted.width && d.height == wanted.height)
+}
+
+/// The decision needs NVAPI: Arena runs an advanced output whose preset
+/// wants a display that Windows' displays (read) do not show with its size.
+/// Otherwise the driver is not asked at all.
+pub fn needs_nvidia(facts: &WallFacts) -> bool {
+    let (Ok(arena), Ok(output), Ok(displays)) =
+        (&facts.arena, &facts.arena_output, &facts.displays)
+    else {
+        return false;
+    };
+    arena.running && output.advanced && output.displays.iter().any(|wanted| !fits(wanted, displays))
+}
+
 /// NVAPI shows screens connected but in no grid of more than one screen
-/// (the Surround span is dissolved).
-pub fn not_joined(nvidia: &Nvidia) -> bool {
-    !nvidia.connected.is_empty() && !nvidia.grids.iter().any(|g| g.displays.len() > 1)
+/// (the Surround span is dissolved). Told only when both reads answered.
+pub fn not_joined(nvidia: &NvidiaFacts) -> bool {
+    match nvidia {
+        NvidiaFacts::Read {
+            connected: Ok(connected),
+            grids: Ok(grids),
+        } => !connected.is_empty() && !grids.iter().any(|g| g.displays.len() > 1),
+        _ => false,
+    }
 }
 
 /// The verdict on `facts`.
@@ -95,6 +121,9 @@ pub fn decide(facts: &WallFacts) -> Verdict {
     if !output.advanced {
         return calm(WallState::SimpleOutput);
     }
+    if !output.preset_found {
+        return calm(WallState::NoPreset);
+    }
     if output.displays.is_empty() {
         return calm(WallState::NoDisplayOutput);
     }
@@ -107,23 +136,32 @@ pub fn decide(facts: &WallFacts) -> Verdict {
         let (width, height) = (wanted.width, wanted.height);
         match find(wanted, displays) {
             None => {
-                let Ok(nvidia) = &facts.nvidia else {
-                    return unknown(WallFact::Nvapi);
-                };
-                match nvidia {
-                    Some(nv) if !nv.connected.is_empty() => {
-                        missing.push(WallProblem::DisplayAbsent {
-                            name: wanted.name.clone(),
-                            width,
-                            height,
-                            not_joined: not_joined(nv),
-                        });
+                let connected = match &facts.nvidia {
+                    NvidiaFacts::NoDriver => false,
+                    NvidiaFacts::Read {
+                        connected: Ok(connected),
+                        ..
+                    } => !connected.is_empty(),
+                    NvidiaFacts::NotRead
+                    | NvidiaFacts::Read {
+                        connected: Err(_), ..
+                    } => {
+                        return unknown(WallFact::Nvapi);
                     }
-                    _ => off.push(WallProblem::ScreensOff {
+                };
+                if connected {
+                    missing.push(WallProblem::DisplayAbsent {
                         name: wanted.name.clone(),
                         width,
                         height,
-                    }),
+                        not_joined: not_joined(&facts.nvidia),
+                    });
+                } else {
+                    off.push(WallProblem::ScreensOff {
+                        name: wanted.name.clone(),
+                        width,
+                        height,
+                    });
                 }
             }
             Some(display) if display.width != width || display.height != height => {
@@ -133,7 +171,7 @@ pub fn decide(facts: &WallFacts) -> Verdict {
                     height,
                     actual_width: display.width,
                     actual_height: display.height,
-                    not_joined: matches!(&facts.nvidia, Ok(Some(nv)) if not_joined(nv)),
+                    not_joined: not_joined(&facts.nvidia),
                 });
             }
             Some(_) => {}
@@ -197,29 +235,43 @@ pub fn draws_on(window: &ArenaWindow, area: Rect) -> bool {
 }
 
 /// What the status shows of the facts: each one read, `None` for one that
-/// could not be (its reason in [`read_errors`]).
+/// could not be (its reason in [`read_errors`]); NVAPI `not_read` when the
+/// decision did not need it.
 pub fn read_view(facts: &WallFacts) -> WallRead {
     let arena = facts.arena.as_ref().ok();
-    let nvidia = facts.nvidia.as_ref().ok();
-    let found = nvidia.and_then(Option::as_ref);
+    let (nvidia, connected, grids) = match &facts.nvidia {
+        NvidiaFacts::NotRead => (NvidiaRead::NotRead, None, None),
+        NvidiaFacts::NoDriver => (NvidiaRead::NoDriver, None, None),
+        NvidiaFacts::Read { connected, grids } => (
+            NvidiaRead::Read,
+            connected.as_ref().ok().cloned(),
+            grids.as_ref().ok().cloned(),
+        ),
+    };
     WallRead {
         arena_running: arena.map(|a| a.running),
         arena_windows: arena.map(|a| a.windows.clone()),
         arena_output: facts.arena_output.as_ref().ok().cloned(),
         displays: facts.displays.as_ref().ok().cloned(),
-        nvidia: nvidia.map(Option::is_some),
-        connected: found.map(|nv| nv.connected.clone()),
-        grids: found.map(|nv| nv.grids.clone()),
+        nvidia,
+        connected,
+        grids,
     }
 }
 
-/// Why facts could not be read, each reason once, in the facts' order.
+/// Why facts could not be read, each reason once, in the facts' order
+/// (NVAPI's connected displays, then its grids).
 pub fn read_errors(facts: &WallFacts) -> Vec<String> {
+    let (connected, grids) = match &facts.nvidia {
+        NvidiaFacts::Read { connected, grids } => (connected.as_ref().err(), grids.as_ref().err()),
+        NvidiaFacts::NotRead | NvidiaFacts::NoDriver => (None, None),
+    };
     let reasons = [
         facts.arena.as_ref().err(),
         facts.arena_output.as_ref().err(),
         facts.displays.as_ref().err(),
-        facts.nvidia.as_ref().err(),
+        connected,
+        grids,
     ];
     let mut errors: Vec<String> = Vec::new();
     for why in reasons.into_iter().flatten() {

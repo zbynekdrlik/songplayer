@@ -21,9 +21,10 @@
 //!
 //! - the facts, read through a [`read::WallReader`] — Arena's process and
 //!   windows, its saved output setup (`resolume.rs`), Windows' displays,
-//!   NVAPI from `nvapi64.dll` loaded at run time (`win.rs`, Windows only) —
-//!   behind the bounded reader (`prod_env::Reader`, [`READ_BOUND`]): a hung
-//!   driver never freezes the report;
+//!   and NVAPI from `System32\nvapi64.dll` loaded at run time (`win.rs`,
+//!   Windows only) only when a display Arena wants is gone or has another
+//!   size — behind the bounded reader (`prod_env::Reader`, [`READ_BOUND`]):
+//!   a hung driver never freezes the report;
 //! - the pure decision ([`decide`]).
 //!
 //! One WARN when the state turns into a problem, one INFO when it holds

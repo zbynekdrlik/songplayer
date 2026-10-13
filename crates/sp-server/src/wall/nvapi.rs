@@ -11,6 +11,8 @@
 //! `GetConnectedDisplayIds` names `0x80061083` HDMI (connector 4) and the
 //! other two DisplayPort (connector 7).
 
+use std::time::{Duration, Instant};
+
 use sp_core::wall::{Connected, DisplayId, Grid};
 
 /// `NvAPI_Initialize`.
@@ -21,12 +23,6 @@ pub const NVAPI_ENUM_PHYSICAL_GPUS: u32 = 0xE5AC_921F;
 pub const NVAPI_GPU_GET_CONNECTED_DISPLAY_IDS: u32 = 0x0078_DBA2;
 /// `NvAPI_Mosaic_EnumDisplayGrids`.
 pub const NVAPI_MOSAIC_ENUM_DISPLAY_GRIDS: u32 = 0xDF28_87AF;
-/// `NvAPI_Mosaic_SetDisplayGrids`: what re-forms the span (the guard's
-/// action, a later lane); never called by the read.
-pub const NVAPI_MOSAIC_SET_DISPLAY_GRIDS: u32 = 0x4D95_9A89;
-/// `NvAPI_DISP_GetDisplayIdByDisplayName` (`\\.\DISPLAY1` → its display
-/// id): for a later lane; never called by the read.
-pub const NVAPI_DISP_GET_DISPLAY_ID_BY_DISPLAY_NAME: u32 = 0xAE45_7190;
 
 /// `NVAPI_OK`: every entry point answers an `NvAPI_Status`, 0 = done.
 pub const NVAPI_OK: i32 = 0;
@@ -174,6 +170,84 @@ pub fn status(code: i32, call: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("{call} answered NVAPI status {code}"))
+    }
+}
+
+/// How long a failed load of `nvapi64.dll` or a failed `NvAPI_Initialize`
+/// is answered from memory before NVAPI is set up again.
+pub const SET_UP_RETRY: Duration = Duration::from_secs(60);
+
+/// The process's NVAPI session, the decisions only (`win.rs` holds one with
+/// the loaded DLL as `L`):
+///
+/// - loaded once and kept (never a DLL loaded and freed at every check);
+/// - initialised before a read, and again after a read that answered any
+///   non-OK status ([`Session::reset`]);
+/// - a failed load or initialise is answered from memory, with its reason,
+///   for [`SET_UP_RETRY`].
+#[derive(Debug)]
+pub struct Session<L> {
+    loaded: Option<L>,
+    initialised: bool,
+    failed: Option<(Instant, String)>,
+}
+
+impl<L> Session<L> {
+    /// Nothing loaded yet.
+    pub const fn unloaded() -> Self {
+        Self {
+            loaded: None,
+            initialised: false,
+            failed: None,
+        }
+    }
+
+    /// The loaded, initialised NVAPI at `now`: `load` when nothing is
+    /// loaded, then `initialise` when not yet (or reset); or the last
+    /// set-up failure's reason while it is younger than [`SET_UP_RETRY`].
+    pub fn ready(
+        &mut self,
+        now: Instant,
+        load: impl FnOnce() -> Result<L, String>,
+        initialise: impl FnOnce(&L) -> Result<(), String>,
+    ) -> Result<&L, String> {
+        if !self.initialised {
+            let recent = self
+                .failed
+                .as_ref()
+                .filter(|(at, _)| now.saturating_duration_since(*at) < SET_UP_RETRY);
+            if let Some((_, why)) = recent {
+                return Err(why.clone());
+            }
+            if let Err(why) = self.set_up(load, initialise) {
+                self.failed = Some((now, why.clone()));
+                return Err(why);
+            }
+            self.initialised = true;
+        }
+        self.loaded
+            .as_ref()
+            .ok_or_else(|| "NVAPI is not loaded".to_string())
+    }
+
+    /// Loads when nothing is loaded (a failed load keeps nothing), then
+    /// initialises (a failed initialise keeps the DLL loaded).
+    fn set_up(
+        &mut self,
+        load: impl FnOnce() -> Result<L, String>,
+        initialise: impl FnOnce(&L) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let loaded = match self.loaded.take() {
+            Some(loaded) => loaded,
+            None => load()?,
+        };
+        initialise(self.loaded.insert(loaded))
+    }
+
+    /// A read answered a non-OK status: initialise again before the next
+    /// read (the DLL stays loaded).
+    pub fn reset(&mut self) {
+        self.initialised = false;
     }
 }
 

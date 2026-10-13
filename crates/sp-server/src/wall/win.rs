@@ -1,11 +1,18 @@
 //! #259: the wall's raw reads on Windows (`wall`'s glue):
 //!
-//! - NVAPI from `nvapi64.dll`, loaded at run time with `libloading` (as
-//!   sp-ndi loads NDI: no NVIDIA SDK at build time), every entry point
-//!   reached through its one export `nvapi_QueryInterface`; a box without
-//!   the NVIDIA driver (no `System32\nvapi64.dll`) reads "no NVIDIA";
+//! - NVAPI from `%SystemRoot%\System32\nvapi64.dll`, loaded by that full
+//!   path at run time with `libloading` (as sp-ndi loads NDI: no NVIDIA SDK
+//!   at build time), every entry point reached through its one export
+//!   `nvapi_QueryInterface`; a box without that file reads "no NVIDIA". It
+//!   is read only when the decision needs it (`read.rs`), loaded once and
+//!   kept, initialised again after a read that answered a non-OK status, a
+//!   failed load or initialise answered from memory for 60 s
+//!   (`nvapi::Session`); its connected displays and its grids are two
+//!   reads, one failing never discards the other;
 //! - Windows' displays (`EnumDisplayDevicesW` + `EnumDisplaySettingsW`),
-//!   each with its device key (the id Arena saves for it);
+//!   each with its device key (the id Arena saves for it); a display whose
+//!   settings cannot be read is left out (it detached meanwhile), never the
+//!   whole list failed;
 //! - Arena's saved setup files in `%USERPROFILE%\Documents`
 //!   (`resolume.rs`, bounded reads);
 //! - the processes (a Toolhelp snapshot: their image file names, no handle
@@ -17,21 +24,23 @@
 //! Linux; this file only reads. Not compiled on the Linux runner, so every
 //! fn is `mutants::skip`.
 //!
-//! Coordinates: SongPlayer's process is per-monitor DPI aware (the Tauri
-//! shell's window library makes it so at its start), so `GetWindowRect` and
-//! each display's `dmPosition` / `dmPelsWidth` / `dmPelsHeight` are
-//! physical pixels on one virtual desktop, and Arena's window and the span
-//! are compared as read. A DPI-unaware process would read scaled rectangles
-//! on a scaled display (not the case on SNV: the span runs at 100 %).
+//! Coordinates: the display and window reads run with the reading thread
+//! per-monitor DPI aware (v2, `SetThreadDpiAwarenessContext`, the thread's
+//! previous context restored after: the read runs on a pooled blocking
+//! thread), so `GetWindowRect` and each display's `dmPosition` /
+//! `dmPelsWidth` / `dmPelsHeight` are physical pixels on one virtual
+//! desktop, and Arena's window and the span are compared as read, whatever
+//! the process's own awareness or a display's scaling.
 
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use sp_core::wall::{ArenaWindow, Display};
 use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
 
-use super::nvapi::{self, NvGpuDisplayIds, NvMosaicGridTopoV2};
+use super::nvapi::{self, NvGpuDisplayIds, NvMosaicGridTopoV2, Session};
 use super::read::{NvidiaRaw, WallReader};
 use super::resolume;
 
@@ -54,28 +63,30 @@ const MAX_PROCESSES: usize = 16_384;
 /// The longest window title read, in UTF-16 units.
 const TITLE_UNITS: usize = 512;
 
-/// The NVAPI entry points the check calls, from one loaded and initialised
-/// `nvapi64.dll`.
+/// The NVAPI entry points the check calls, from one loaded `nvapi64.dll`.
 struct Nvapi {
     /// Keeps the DLL, and so every entry point below, loaded.
     #[allow(dead_code)] // held for its Drop only
     library: libloading::Library,
+    initialize: Initialize,
     enum_gpus: EnumPhysicalGpus,
     connected_ids: GetConnectedDisplayIds,
     enum_grids: EnumDisplayGrids,
 }
 
-/// The process's NVAPI, loaded by the first read that finds it; a load or
-/// `NvAPI_Initialize` that fails is tried again at the next read.
-static NVAPI: Mutex<Option<Nvapi>> = Mutex::new(None);
+/// The process's NVAPI session (`nvapi::Session`: loaded once, initialised
+/// again after a failed read, a failed set-up remembered for 60 s).
+static NVAPI: Mutex<Session<Nvapi>> = Mutex::new(Session::unloaded());
 
-/// Loads `nvapi64.dll`, resolves the entry points and initialises NVAPI.
+/// Loads the driver's `nvapi64.dll` from `path` (its full System32 path,
+/// never a bare name a search order could resolve elsewhere) and resolves
+/// the entry points.
 #[cfg_attr(test, mutants::skip)] // Windows glue
-fn load() -> Result<Nvapi, String> {
-    // SAFETY: nvapi64.dll is the NVIDIA driver's own library; loading it
-    // runs only its initialisation.
-    let library = unsafe { libloading::Library::new("nvapi64.dll") }
-        .map_err(|e| format!("nvapi64.dll could not be loaded (no NVIDIA driver?): {e}"))?;
+fn load(path: &Path) -> Result<Nvapi, String> {
+    // SAFETY: the file is the NVIDIA driver's own library in System32;
+    // loading it runs only its initialisation.
+    let library = unsafe { libloading::Library::new(path) }
+        .map_err(|e| format!("{} could not be loaded: {e}", path.display()))?;
     // SAFETY: `nvapi_QueryInterface` is NVAPI's one export, `unsigned int`
     // in, the entry point (or null) out.
     let query: QueryInterface = unsafe {
@@ -118,27 +129,20 @@ fn load() -> Result<Nvapi, String> {
             "NvAPI_Mosaic_EnumDisplayGrids",
         )?)
     };
-    // SAFETY: NvAPI_Initialize takes nothing; it may be called again.
-    nvapi::status(unsafe { initialize() }, "NvAPI_Initialize")?;
     Ok(Nvapi {
         library,
+        initialize,
         enum_gpus,
         connected_ids,
         enum_grids,
     })
 }
 
-/// `read` with the process's NVAPI, loading it first when it is not yet.
+/// `NvAPI_Initialize`.
 #[cfg_attr(test, mutants::skip)] // Windows glue
-fn with_nvapi<T>(read: impl FnOnce(&Nvapi) -> Result<T, String>) -> Result<T, String> {
-    let mut held = NVAPI.lock().unwrap_or_else(|e| e.into_inner());
-    if held.is_none() {
-        *held = Some(load()?);
-    }
-    match held.as_ref() {
-        Some(nvapi) => read(nvapi),
-        None => Err("NVAPI is not loaded".to_string()),
-    }
+fn initialise(nvapi: &Nvapi) -> Result<(), String> {
+    // SAFETY: NvAPI_Initialize takes nothing; it may be called again.
+    nvapi::status(unsafe { (nvapi.initialize)() }, "NvAPI_Initialize")
 }
 
 /// Every NVIDIA GPU's handle.
@@ -172,16 +176,40 @@ unsafe extern "system" fn collect_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
     1
 }
 
-/// The NVIDIA driver is installed: its `nvapi64.dll` is in System32 (a box
-/// without it has no NVIDIA screen to ask about: no error).
+/// The NVIDIA driver's `nvapi64.dll`, by its full path in System32, when
+/// it is there (a box without it has no NVIDIA screen to ask about: no
+/// error).
 #[cfg_attr(test, mutants::skip)] // Windows glue
-fn nvapi_installed() -> bool {
-    std::env::var_os("SystemRoot").is_some_and(|root| {
-        std::path::Path::new(&root)
-            .join("System32")
-            .join("nvapi64.dll")
-            .is_file()
-    })
+fn nvapi_path() -> Option<PathBuf> {
+    let root = std::env::var_os("SystemRoot")?;
+    let path = Path::new(&root).join("System32").join("nvapi64.dll");
+    path.is_file().then_some(path)
+}
+
+/// The reading thread per-monitor DPI aware (v2) while this lives, its
+/// previous awareness restored after (the read runs on a pooled thread).
+struct DpiAware(windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT);
+
+impl DpiAware {
+    #[cfg_attr(test, mutants::skip)] // Windows glue
+    fn per_monitor() -> Self {
+        use windows_sys::Win32::UI::HiDpi::{
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext,
+        };
+        // SAFETY: sets this thread's awareness to a predefined context and
+        // answers the previous one (null when refused: nothing changed).
+        Self(unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) })
+    }
+}
+
+impl Drop for DpiAware {
+    #[cfg_attr(test, mutants::skip)] // Windows glue
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            // SAFETY: restores the context this thread had before.
+            unsafe { windows_sys::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(self.0) };
+        }
+    }
 }
 
 /// Every display each NVIDIA GPU reports connected.
@@ -235,16 +263,26 @@ pub struct WinReader;
 
 impl WallReader for WinReader {
     #[cfg_attr(test, mutants::skip)] // Windows glue
-    fn nvidia(&self) -> Result<Option<NvidiaRaw>, String> {
-        if !nvapi_installed() {
-            return Ok(None);
+    fn nvidia(&self) -> Option<NvidiaRaw> {
+        let path = nvapi_path()?;
+        let mut session = NVAPI.lock().unwrap_or_else(|e| e.into_inner());
+        let nvapi = match session.ready(Instant::now(), || load(&path), initialise) {
+            Ok(nvapi) => nvapi,
+            Err(why) => {
+                return Some(NvidiaRaw {
+                    connected: Err(why.clone()),
+                    grids: Err(why),
+                });
+            }
+        };
+        let raw = NvidiaRaw {
+            connected: connected_ids(nvapi),
+            grids: grids(nvapi),
+        };
+        if raw.connected.is_err() || raw.grids.is_err() {
+            session.reset();
         }
-        with_nvapi(|nvapi| {
-            Ok(Some(NvidiaRaw {
-                connected: connected_ids(nvapi)?,
-                grids: grids(nvapi)?,
-            }))
-        })
+        Some(raw)
     }
 
     #[cfg_attr(test, mutants::skip)] // Windows glue
@@ -263,6 +301,7 @@ impl WallReader for WinReader {
             DEVMODEW, DISPLAY_DEVICE_ATTACHED_TO_DESKTOP, DISPLAY_DEVICE_PRIMARY_DEVICE,
             DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS, EnumDisplayDevicesW, EnumDisplaySettingsW,
         };
+        let _dpi = DpiAware::per_monitor();
         let mut displays = Vec::new();
         for index in 0..MAX_DEVICES {
             // SAFETY: DISPLAY_DEVICEW is plain data; all zeroes is a value.
@@ -286,7 +325,9 @@ impl WallReader for WinReader {
                 EnumDisplaySettingsW(device.DeviceName.as_ptr(), ENUM_CURRENT_SETTINGS, &mut mode)
             };
             if read == 0 {
-                return Err(format!("EnumDisplaySettingsW failed for {name}"));
+                // Detached since it was listed: left out, the rest kept.
+                tracing::debug!(display = %name, "wall: EnumDisplaySettingsW failed, display left out");
+                continue;
             }
             // SAFETY: for a display device the union holds the display's
             // fields (its position).
@@ -344,6 +385,7 @@ impl WallReader for WinReader {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             EnumWindows, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
         };
+        let _dpi = DpiAware::per_monitor();
         let mut handles: Vec<HWND> = Vec::new();
         // SAFETY: `collect_window` only pushes onto `handles`, which outlives
         // the call.

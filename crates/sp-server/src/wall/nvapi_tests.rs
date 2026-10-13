@@ -1,7 +1,9 @@
 //! #259: NVAPI's layouts against the C header, their versions, and the
 //! decoding of a grid and a connected display (SNV's, 13.10.2026).
 
+use std::cell::Cell;
 use std::mem::offset_of;
+use std::time::{Duration, Instant};
 
 use sp_core::wall::{Connected, DisplayId, Grid};
 
@@ -148,4 +150,94 @@ fn a_status_other_than_ok_names_the_call() {
         status(-6, "NvAPI_EnumPhysicalGPUs"),
         Err("NvAPI_EnumPhysicalGPUs answered NVAPI status -6".to_string())
     );
+}
+
+/// A session's set-up calls, counted.
+#[derive(Default)]
+struct Calls {
+    loads: Cell<u32>,
+    inits: Cell<u32>,
+}
+
+impl Calls {
+    /// `session.ready` at `now`, the load answering `load` and the
+    /// initialise `init`; the loaded value is the load's number.
+    fn ready(
+        &self,
+        session: &mut Session<u32>,
+        now: Instant,
+        load: Result<(), &str>,
+        init: Result<(), &str>,
+    ) -> Result<u32, String> {
+        session
+            .ready(
+                now,
+                || {
+                    self.loads.set(self.loads.get() + 1);
+                    load.map(|()| self.loads.get()).map_err(str::to_string)
+                },
+                |_| {
+                    self.inits.set(self.inits.get() + 1);
+                    init.map_err(str::to_string)
+                },
+            )
+            .copied()
+    }
+
+    fn counts(&self) -> (u32, u32) {
+        (self.loads.get(), self.inits.get())
+    }
+}
+
+#[test]
+fn nvapi_is_loaded_once_and_initialised_until_a_read_fails() {
+    let calls = Calls::default();
+    let mut session = Session::unloaded();
+    let t0 = Instant::now();
+    assert_eq!(calls.ready(&mut session, t0, Ok(()), Ok(())), Ok(1));
+    assert_eq!(calls.ready(&mut session, t0, Ok(()), Ok(())), Ok(1));
+    assert_eq!(calls.counts(), (1, 1));
+    // A read answered a non-OK status: initialised again, the DLL kept.
+    session.reset();
+    assert_eq!(calls.ready(&mut session, t0, Ok(()), Ok(())), Ok(1));
+    assert_eq!(calls.counts(), (1, 2));
+}
+
+#[test]
+fn a_failed_load_is_answered_from_memory_for_a_minute() {
+    let calls = Calls::default();
+    let mut session = Session::unloaded();
+    let t0 = Instant::now();
+    let why = Err("nvapi64.dll could not be loaded".to_string());
+    let failing = Err("nvapi64.dll could not be loaded");
+    assert_eq!(calls.ready(&mut session, t0, failing, Ok(())), why);
+    let almost = t0 + SET_UP_RETRY - Duration::from_millis(1);
+    assert_eq!(calls.ready(&mut session, almost, Ok(()), Ok(())), why);
+    assert_eq!(calls.counts(), (1, 0));
+    // A minute on, tried again (a load that failed kept nothing).
+    let later = t0 + SET_UP_RETRY;
+    assert_eq!(calls.ready(&mut session, later, Ok(()), Ok(())), Ok(2));
+    assert_eq!(calls.counts(), (2, 1));
+    assert_eq!(SET_UP_RETRY, Duration::from_secs(60));
+}
+
+#[test]
+fn a_failed_initialise_keeps_the_dll_and_waits_a_minute() {
+    let calls = Calls::default();
+    let mut session = Session::unloaded();
+    let t0 = Instant::now();
+    let why = Err("NvAPI_Initialize answered NVAPI status -6".to_string());
+    let failing = Err("NvAPI_Initialize answered NVAPI status -6");
+    assert_eq!(calls.ready(&mut session, t0, Ok(()), failing), why);
+    let soon = t0 + Duration::from_secs(5);
+    assert_eq!(calls.ready(&mut session, soon, Ok(()), Ok(())), why);
+    assert_eq!(calls.counts(), (1, 1));
+    let later = t0 + SET_UP_RETRY;
+    assert_eq!(calls.ready(&mut session, later, Ok(()), Ok(())), Ok(1));
+    assert_eq!(calls.counts(), (1, 2));
+    // A read failing after a minute's success initialises at once.
+    session.reset();
+    let next = later + Duration::from_secs(5);
+    assert_eq!(calls.ready(&mut session, next, Ok(()), Ok(())), Ok(1));
+    assert_eq!(calls.counts(), (1, 3));
 }

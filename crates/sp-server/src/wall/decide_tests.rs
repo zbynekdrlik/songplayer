@@ -3,15 +3,16 @@
 //! cycle, never compared with a layout of SongPlayer's own).
 
 use sp_core::wall::{
-    ArenaOutput, ArenaWindow, Display, WallFact, WallProblem, WallRead, WallState, WantedDisplay,
+    ArenaOutput, ArenaWindow, Display, NvidiaRead, WallFact, WallProblem, WallRead, WallState,
+    WantedDisplay,
 };
 
 use super::*;
 use crate::wall::fake::{
-    LEFT, MIDDLE, RIGHT, arena_main, arena_output, screens, single_grid, snv_facts, snv_output,
-    span, span_grid, vdd, wanted,
+    LEFT, MIDDLE, RIGHT, arena_main, arena_output, nvidia_read, screens, single_grid, snv_facts,
+    snv_nvidia, snv_output, span, span_grid, vdd, wanted,
 };
-use crate::wall::read::{Arena, Nvidia, WallFacts};
+use crate::wall::read::{Arena, NvidiaFacts, WallFacts};
 
 /// SNV's box with Windows' displays `displays`.
 fn with_displays(displays: Vec<Display>) -> WallFacts {
@@ -22,7 +23,7 @@ fn with_displays(displays: Vec<Display>) -> WallFacts {
 }
 
 /// SNV's box with NVAPI saying `nvidia`.
-fn with_nvidia(facts: WallFacts, nvidia: Result<Option<Nvidia>, String>) -> WallFacts {
+fn with_nvidia(facts: WallFacts, nvidia: NvidiaFacts) -> WallFacts {
     WallFacts { nvidia, ..facts }
 }
 
@@ -47,11 +48,28 @@ fn span_of(width: u32, height: u32) -> Display {
 }
 
 /// The three screens connected, each alone.
-fn dissolved() -> Nvidia {
-    Nvidia {
-        connected: screens(),
-        grids: vec![single_grid(LEFT), single_grid(MIDDLE), single_grid(RIGHT)],
-    }
+fn dissolved() -> NvidiaFacts {
+    nvidia_read(
+        Ok(screens()),
+        Ok(vec![
+            single_grid(LEFT),
+            single_grid(MIDDLE),
+            single_grid(RIGHT),
+        ]),
+    )
+}
+
+/// NVAPI read, nothing connected (the screens powered off).
+fn nothing_connected() -> NvidiaFacts {
+    nvidia_read(Ok(Vec::new()), Ok(Vec::new()))
+}
+
+/// NVAPI read, both reads failed.
+fn nvapi_failed() -> NvidiaFacts {
+    nvidia_read(
+        Err("NvAPI_GPU_GetConnectedDisplayIds answered NVAPI status -1".to_string()),
+        Err("NvAPI_Mosaic_EnumDisplayGrids answered NVAPI status -1".to_string()),
+    )
 }
 
 fn absent(not_joined: bool) -> WallProblem {
@@ -137,6 +155,34 @@ fn an_arena_that_drives_no_physical_display_has_nothing_to_check() {
 }
 
 #[test]
+fn an_advanced_output_with_no_preset_saved_is_calm() {
+    // No `AdvancedOutput.xml`, no preset named, or a preset file that does
+    // not exist: the operator's own setup, never `unknown`.
+    for preset in [None, Some("deleted preset".to_string())] {
+        let facts = WallFacts {
+            arena_output: Ok(ArenaOutput {
+                advanced: true,
+                preset,
+                preset_found: false,
+                displays: Vec::new(),
+            }),
+            displays: Err("not read".to_string()),
+            ..snv_facts()
+        };
+        assert_eq!(decide(&facts), verdict(WallState::NoPreset, Vec::new()));
+    }
+    // Displays count only from a preset that was found.
+    let not_found = WallFacts {
+        arena_output: Ok(ArenaOutput {
+            preset_found: false,
+            ..snv_output()
+        }),
+        ..snv_facts()
+    };
+    assert_eq!(decide(&not_found), verdict(WallState::NoPreset, Vec::new()));
+}
+
+#[test]
 fn windows_displays_unread_cannot_tell() {
     let unread = WallFacts {
         displays: Err("EnumDisplaySettingsW failed".to_string()),
@@ -153,22 +199,31 @@ fn windows_displays_unread_cannot_tell() {
 
 #[test]
 fn the_span_gone_with_no_screen_connected_is_screens_off() {
-    let night = with_nvidia(with_displays(vec![vdd()]), Ok(Some(Nvidia::default())));
+    let night = with_nvidia(with_displays(vec![vdd()]), nothing_connected());
     assert_eq!(
         decide(&night),
         verdict(WallState::ScreensOff, vec![screens_off()])
     );
     // A box with no NVIDIA driver cannot tell more: calm too.
-    let no_driver = with_nvidia(with_displays(vec![vdd()]), Ok(None));
+    let no_driver = with_nvidia(with_displays(vec![vdd()]), NvidiaFacts::NoDriver);
     assert_eq!(
         decide(&no_driver),
+        verdict(WallState::ScreensOff, vec![screens_off()])
+    );
+    // The grids unread: nothing connected still says it.
+    let grids_unread = with_nvidia(
+        with_displays(vec![vdd()]),
+        nvidia_read(Ok(Vec::new()), Err("no grids".to_string())),
+    );
+    assert_eq!(
+        decide(&grids_unread),
         verdict(WallState::ScreensOff, vec![screens_off()])
     );
 }
 
 #[test]
 fn the_span_gone_while_screens_are_connected_is_missing() {
-    let dissolved_box = with_nvidia(with_displays(vec![vdd()]), Ok(Some(dissolved())));
+    let dissolved_box = with_nvidia(with_displays(vec![vdd()]), dissolved());
     assert_eq!(
         decide(&dissolved_box),
         verdict(WallState::DisplayMissing, vec![absent(true)])
@@ -179,43 +234,91 @@ fn the_span_gone_while_screens_are_connected_is_missing() {
         device_key: "another key".to_string(),
         ..span()
     };
-    let joined_elsewhere = with_nvidia(
-        with_displays(vec![vdd(), other_key]),
-        Ok(Some(Nvidia {
-            connected: screens(),
-            grids: vec![span_grid()],
-        })),
-    );
+    let joined_elsewhere = with_nvidia(with_displays(vec![vdd(), other_key]), snv_nvidia());
     assert_eq!(
         decide(&joined_elsewhere),
+        verdict(WallState::DisplayMissing, vec![absent(false)])
+    );
+    // A failed grid read keeps the connected screens: missing, with no
+    // "not joined" detail (the grids were not read).
+    let grids_unread = with_nvidia(
+        with_displays(vec![vdd()]),
+        nvidia_read(Ok(screens()), Err("no grids".to_string())),
+    );
+    assert_eq!(
+        decide(&grids_unread),
         verdict(WallState::DisplayMissing, vec![absent(false)])
     );
 }
 
 #[test]
 fn the_span_gone_with_nvapi_unread_cannot_tell() {
-    let unread = with_nvidia(
-        with_displays(vec![vdd()]),
-        Err("NvAPI_EnumPhysicalGPUs answered NVAPI status -1".to_string()),
-    );
-    assert_eq!(
-        decide(&unread),
-        verdict(
-            WallState::Unknown,
-            vec![WallProblem::Unreadable(WallFact::Nvapi)]
-        )
-    );
+    let connected_unread = nvidia_read(Err("no connected".to_string()), Ok(vec![span_grid()]));
+    for nvidia in [nvapi_failed(), connected_unread, NvidiaFacts::NotRead] {
+        let unread = with_nvidia(with_displays(vec![vdd()]), nvidia);
+        assert_eq!(
+            decide(&unread),
+            verdict(
+                WallState::Unknown,
+                vec![WallProblem::Unreadable(WallFact::Nvapi)]
+            )
+        );
+    }
     // NVAPI is never needed while every display is there.
-    let fine = with_nvidia(snv_facts(), Err("unread".to_string()));
+    let fine = with_nvidia(snv_facts(), nvapi_failed());
     assert_eq!(decide(&fine), verdict(WallState::Ok, Vec::new()));
 }
 
 #[test]
+fn nvapi_is_needed_only_for_a_display_gone_or_resized() {
+    let needs = |facts: WallFacts| needs_nvidia(&facts);
+    assert!(!needs(snv_facts()));
+    assert!(needs(with_displays(vec![vdd()])));
+    assert!(needs(with_displays(vec![vdd(), span_of(2560, 1080)])));
+    assert!(needs(with_displays(vec![vdd(), span_of(7680, 2160)])));
+    // Arena not running, or no advanced output: the decision stops before.
+    assert!(!needs(WallFacts {
+        arena: Ok(Arena::default()),
+        ..with_displays(vec![vdd()])
+    }));
+    assert!(!needs(WallFacts {
+        arena_output: Ok(ArenaOutput {
+            advanced: false,
+            ..snv_output()
+        }),
+        ..with_displays(vec![vdd()])
+    }));
+    // A fact before it unread: `unknown` already, NVAPI not asked.
+    for unread in [
+        WallFacts {
+            arena: Err("no snapshot".to_string()),
+            ..with_displays(vec![vdd()])
+        },
+        WallFacts {
+            arena_output: Err("bad preset".to_string()),
+            ..with_displays(vec![vdd()])
+        },
+        WallFacts {
+            displays: Err("no displays".to_string()),
+            ..snv_facts()
+        },
+    ] {
+        assert!(!needs(unread));
+    }
+}
+
+#[test]
+fn a_wanted_display_fits_only_with_its_key_and_size() {
+    let all = [vdd(), span()];
+    assert!(fits(&wanted(), &all));
+    assert!(!fits(&wanted(), &[vdd()]));
+    assert!(!fits(&wanted(), &[vdd(), span_of(2560, 1080)]));
+    assert!(!fits(&wanted(), &[vdd(), span_of(7680, 2160)]));
+}
+
+#[test]
 fn the_display_with_another_size_is_missing() {
-    let one_screen = with_nvidia(
-        with_displays(vec![vdd(), span_of(2560, 1080)]),
-        Ok(Some(dissolved())),
-    );
+    let one_screen = with_nvidia(with_displays(vec![vdd(), span_of(2560, 1080)]), dissolved());
     let size = |actual_width, actual_height, not_joined| WallProblem::DisplaySize {
         name: "Display 1".to_string(),
         width: 7680,
@@ -234,9 +337,15 @@ fn the_display_with_another_size_is_missing() {
         decide(&taller),
         verdict(WallState::DisplayMissing, vec![size(7680, 2160, false)])
     );
-    // NVAPI unread or absent: no detail, never "unknown" (the size alone
-    // tells it).
-    for nvidia in [Err("unread".to_string()), Ok(None)] {
+    // NVAPI unread, absent, or its grids unread: no detail, never
+    // "unknown" (the size alone tells it).
+    let grids_unread = nvidia_read(Ok(screens()), Err("no grids".to_string()));
+    for nvidia in [
+        nvapi_failed(),
+        NvidiaFacts::NoDriver,
+        NvidiaFacts::NotRead,
+        grids_unread,
+    ] {
         let facts = with_nvidia(with_displays(vec![vdd(), span_of(2560, 1080)]), nvidia);
         assert_eq!(
             decide(&facts),
@@ -279,10 +388,7 @@ fn a_missing_display_is_named_before_one_switched_off() {
     let facts = WallFacts {
         arena_output: Ok(two_wanted()),
         displays: Ok(vec![vdd(), span_of(2560, 1080)]),
-        nvidia: Ok(Some(Nvidia {
-            connected: Vec::new(),
-            grids: Vec::new(),
-        })),
+        nvidia: nothing_connected(),
         ..snv_facts()
     };
     let second_off = WallProblem::ScreensOff {
@@ -415,15 +521,18 @@ fn a_windowed_output_is_never_checked_for_drawing() {
 #[test]
 fn screens_are_not_joined_when_connected_in_no_multi_screen_grid() {
     assert!(not_joined(&dissolved()));
-    assert!(!not_joined(&Nvidia {
-        connected: screens(),
-        grids: vec![span_grid()],
-    }));
-    assert!(not_joined(&Nvidia {
-        connected: screens(),
-        grids: Vec::new(),
-    }));
-    assert!(!not_joined(&Nvidia::default()));
+    assert!(!not_joined(&snv_nvidia()));
+    assert!(not_joined(&nvidia_read(Ok(screens()), Ok(Vec::new()))));
+    assert!(!not_joined(&nothing_connected()));
+    // Told only from both reads.
+    for unread in [
+        nvidia_read(Ok(screens()), Err("no grids".to_string())),
+        nvidia_read(Err("no connected".to_string()), Ok(Vec::new())),
+        NvidiaFacts::NotRead,
+        NvidiaFacts::NoDriver,
+    ] {
+        assert!(!not_joined(&unread), "{unread:?}");
+    }
 }
 
 #[test]
@@ -464,17 +573,35 @@ fn the_status_shows_every_fact_read_and_each_reason_once() {
             arena_windows: Some(vec![arena_main(), arena_output()]),
             arena_output: Some(snv_output()),
             displays: Some(vec![vdd(), span()]),
-            nvidia: Some(true),
-            connected: Some(screens()),
-            grids: Some(vec![span_grid()]),
+            nvidia: NvidiaRead::NotRead,
+            connected: None,
+            grids: None,
         }
     );
     assert_eq!(read_errors(&snv_facts()), Vec::<String>::new());
-    let no_driver = with_nvidia(snv_facts(), Ok(None));
-    let view = read_view(&no_driver);
+    let nvidia_view = |nvidia: NvidiaFacts| {
+        let view = read_view(&with_nvidia(snv_facts(), nvidia));
+        (view.nvidia, view.connected, view.grids)
+    };
     assert_eq!(
-        (view.nvidia, view.connected, view.grids),
-        (Some(false), None, None)
+        nvidia_view(snv_nvidia()),
+        (NvidiaRead::Read, Some(screens()), Some(vec![span_grid()]))
+    );
+    assert_eq!(
+        nvidia_view(NvidiaFacts::NoDriver),
+        (NvidiaRead::NoDriver, None, None)
+    );
+    // One read failing never hides the other.
+    assert_eq!(
+        nvidia_view(nvidia_read(Ok(screens()), Err("no grids".to_string()))),
+        (NvidiaRead::Read, Some(screens()), None)
+    );
+    assert_eq!(
+        nvidia_view(nvidia_read(
+            Err("no connected".to_string()),
+            Ok(vec![span_grid()])
+        )),
+        (NvidiaRead::Read, None, Some(vec![span_grid()]))
     );
     let unread = WallFacts::unread("the wall read did not finish within 10s");
     assert_eq!(read_view(&unread), WallRead::default());
@@ -482,10 +609,15 @@ fn the_status_shows_every_fact_read_and_each_reason_once() {
         read_errors(&unread),
         ["the wall read did not finish within 10s"]
     );
-    let two = WallFacts {
+    let three = WallFacts {
         displays: Err("no displays".to_string()),
-        nvidia: Err("no NVAPI".to_string()),
+        nvidia: nvidia_read(Err("no connected".to_string()), Err("no grids".to_string())),
         ..snv_facts()
     };
-    assert_eq!(read_errors(&two), ["no displays", "no NVAPI"]);
+    assert_eq!(
+        read_errors(&three),
+        ["no displays", "no connected", "no grids"]
+    );
+    let no_driver = with_nvidia(snv_facts(), NvidiaFacts::NoDriver);
+    assert_eq!(read_errors(&no_driver), Vec::<String>::new());
 }

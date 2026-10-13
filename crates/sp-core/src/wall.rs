@@ -157,15 +157,36 @@ pub struct WantedDisplay {
 }
 
 /// Arena's saved output setup: its advanced output on or off, the preset
-/// its advanced output was saved as, and the physical displays it wants.
+/// its advanced output was saved as (`AdvancedOutput.xml`'s `presetFile`;
+/// Arena's Save & Close writes the setup into that preset file), whether
+/// that file was found, and the physical displays it wants.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArenaOutput {
     #[serde(default)]
     pub advanced: bool,
     #[serde(default)]
     pub preset: Option<String>,
+    /// The preset file exists and was read (false: no `AdvancedOutput.xml`,
+    /// no preset named, a name that is no plain file name, or no such file).
+    #[serde(default)]
+    pub preset_found: bool,
     #[serde(default)]
     pub displays: Vec<WantedDisplay>,
+}
+
+/// How far NVAPI was read. It is read only when the decision needs it (a
+/// display Arena wants is gone or has another size), so a healthy wall never
+/// asks the driver.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NvidiaRead {
+    /// Not needed (or not reached).
+    #[default]
+    NotRead,
+    /// No NVIDIA driver on the box (no `System32\nvapi64.dll`).
+    NoDriver,
+    /// Asked: `connected` and `grids` hold what each read gave.
+    Read,
 }
 
 /// What the check read: `None` = could not be read (why: `read_errors`).
@@ -179,11 +200,12 @@ pub struct WallRead {
     pub arena_output: Option<ArenaOutput>,
     #[serde(default)]
     pub displays: Option<Vec<Display>>,
-    /// The NVIDIA driver is installed (NVAPI is there to read).
     #[serde(default)]
-    pub nvidia: Option<bool>,
+    pub nvidia: NvidiaRead,
+    /// NVAPI's connected displays (`None`: not read, or that read failed).
     #[serde(default)]
     pub connected: Option<Vec<Connected>>,
+    /// NVAPI's grids (`None`: not read, or that read failed).
     #[serde(default)]
     pub grids: Option<Vec<Grid>>,
 }
@@ -200,6 +222,10 @@ pub enum WallState {
     ArenaOff,
     /// Arena uses its simple output (no advanced output to compare).
     SimpleOutput,
+    /// Arena's advanced output is on but no preset of it is saved (no
+    /// `AdvancedOutput.xml`, no preset named, or no such preset file): the
+    /// operator's own setup, nothing to compare, never a fault.
+    NoPreset,
     /// Arena's advanced output drives no physical display (Spout, NDI,
     /// virtual outputs only).
     NoDisplayOutput,
@@ -223,6 +249,7 @@ impl WallState {
             Self::Unknown => "unknown",
             Self::ArenaOff => "arena_off",
             Self::SimpleOutput => "simple_output",
+            Self::NoPreset => "no_preset",
             Self::NoDisplayOutput => "no_display_output",
             Self::ScreensOff => "screens_off",
             Self::DisplayMissing => "display_missing",
@@ -237,6 +264,7 @@ impl WallState {
             Self::Unknown => "nedá sa overiť",
             Self::ArenaOff => "Resolume nebeží",
             Self::SimpleOutput => "Resolume má jednoduchý výstup",
+            Self::NoPreset => "Resolume nemá uložený výstup",
             Self::NoDisplayOutput => "Resolume nekreslí na žiadnu obrazovku",
             Self::ScreensOff => "obrazovky vypnuté",
             Self::DisplayMissing => "Resolume nemá svoju obrazovku",
@@ -254,6 +282,7 @@ impl WallState {
             Self::Unknown
             | Self::ArenaOff
             | Self::SimpleOutput
+            | Self::NoPreset
             | Self::NoDisplayOutput
             | Self::ScreensOff => HealthTone::Off,
         }
