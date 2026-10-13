@@ -45,12 +45,12 @@ fn sg_setting(setting: NicSetting, value: Option<&str>) -> EnvProblem {
 
 #[test]
 fn only_interrupt_moderation_and_flow_control_are_required() {
-    let required: Vec<NicSetting> = NicSetting::ALL
+    let must_have: Vec<NicSetting> = NicSetting::ALL
         .into_iter()
         .filter(|&s| required(s))
         .collect();
     assert_eq!(
-        required,
+        must_have,
         [NicSetting::InterruptModeration, NicSetting::FlowControl]
     );
 }

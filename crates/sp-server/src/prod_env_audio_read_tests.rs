@@ -23,7 +23,7 @@ fn a_value_reads_by_its_registry_type() {
     odd.push(0x41);
     assert_eq!(reg_value_from(REG_SZ, &odd), t("ab"));
     assert_eq!(
-        reg_value_from(REG_EXPAND_SZ, &utf16le(r"%SystemRoot%\x\0")),
+        reg_value_from(REG_EXPAND_SZ, &utf16le("%SystemRoot%\\x\0")),
         t(r"%SystemRoot%\x")
     );
     assert_eq!(
