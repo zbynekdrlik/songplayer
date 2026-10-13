@@ -102,7 +102,9 @@ wait for a peer that has the song", below).
   artifacts, jobs, latency_ms, error), `null` before one; `catalog` =
   `catalog::counts` (the files the rows name, how many are hashed so
   listed, the queued job entries listed), `null` when the rows cannot be
-  read (WARNed); `jobs` = the board's running jobs.
+  read (WARNed); `jobs` = the board's running jobs; `follow` = the
+  lyrics this node followed from its peers (#264, "The lyrics follow
+  the peer's copy" below).
 - A config that does not hold reads as the exchange OFF (no node, not
   serving, no peer) plus `config_error` = the reason.
 - `POST /api/v1/exchange/probe` (LAN, no key) reads every peer's catalog
@@ -145,8 +147,9 @@ wait for a peer that has the song", below).
 
 ## Wiring
 
-- `peer::Exchange { pool, cache_dir, board, client, transfer_probe }`
-  (`client` and `transfer_probe` are `pub(crate)`; `cache_dir` holds the `{yt}_lyrics.json` the catalog names
+- `peer::Exchange { pool, cache_dir, board, client, transfer_probe,
+  follow }` (`client`, `transfer_probe` and `follow`, the lyrics
+  follow's memory, are `pub(crate)`; `cache_dir` holds the `{yt}_lyrics.json` the catalog names
   and the fetch parts dir `<cache>/peer/`; `board` = the jobs announced as
   running, below), built once by `lib.rs` right after `AppState`:
   `Exchange::new(pool, cache_dir) -> Arc<Exchange>` (it builds the board and
@@ -1001,7 +1004,9 @@ Three rules:
   the lyrics (`peers_lyrics`), not the stand-in's recorded peer first, so
   another peer's copy of another audio drops the stand-in for good even
   when the source's copy would fit (one peer in phase 1: no effect).
-- **The same gap elsewhere, checked (design record 6056986290):** the
+- **The same gap elsewhere, checked (design record 6056986290):** a
+  copy taken once was never asked for again: #264 closed that ("The
+  lyrics follow the peer's copy" below). The
   metadata repair has none (a failed provider call keeps the row in the
   repair queue, and `peer_title` is asked first on every pass; a provider
   title made here has the peer's rank, 1); the translation is part of the
@@ -1035,6 +1040,105 @@ Three rules:
   `db/mod_tests_v31.rs` (the back-fill's cases),
   `lyrics/worker_tests_peer.rs::the_worker_replaces_a_stand_in_with_the_peers_copy`.
 
+## The lyrics follow the peer's copy (`peer::follow`, #264)
+
+The owner at PP, 13.10.2026: "ak sa v snv nejaky preklad vylepsi prerobi tak
+by si pp mal zobrat novsiu verziu aby sa nestavalo ze v snv budeme pracne
+zlepsovat prepisy a preklady no nic z toho sa do pp nedostane!" Design
+record: #264 comment 6146849106.
+
+- **The gap:** the lyrics hook asks a peer only for a row the lyrics queue
+  picks. An adopted copy leaves buckets 1–3 for good (served at the current
+  version), bucket 4's hook path says `NothingNewer` for the same source and
+  version, PP's phase-0 copies carry no `peer_fetches` lyrics record, and a
+  parked row (`asr_gap`, `unsupported_source`, `failed`, `empty`, a
+  `no_source` V41 did not re-queue) is in no bucket (#263 point 3). So a
+  reprocess, a register fix (#250), a retranslation or a ★ at SNV never
+  reached PP.
+- **Where:** `follow_next`, in the lyrics worker's tick right after the
+  stand-in's look (`supersede_next`), then `LyricsCompleted` for each row it
+  adopted. One tick: never beside the hook or a local run. It inherits
+  `lyrics_worker_enabled` and the #230 hold (checked before it) and asks
+  `Exchange::transfers_paused` itself (the operator's pause or the hold:
+  nothing read, looked at again on the next tick). A node that asks no peer
+  (SNV) reads nothing (`NodeConfig::asking`); settings that do not hold
+  WARN once per look.
+- **Cadence:** ONE song per look (the bound). A look reads the listed
+  peers' catalogs through the 60 s cache; while it finds work the next look
+  is the next tick, else `FOLLOW_IDLE` (15 min) later.
+- **Candidates** (pure, `follow::candidates` / `follow::wants`): every
+  video this node's lyrics worker serves (`queue_sql::LYRICS_ELIGIBLE`),
+  with no row in the lyrics queue (`queued_later_where` through
+  `queued::lyrics_rows`: the hook's), no stand-in (the stand-in's look's),
+  and the first listed peer holding its lyrics at this node's version
+  (`decide::holds`) listing a copy this node does not hold, in this order
+  (`FollowWhy`), then by YouTube id:
+  - `no_lyrics`: no row of the video serves lyrics here;
+  - `changed`: the `peer_fetches` lyrics record names another peer or
+    sha256. The RECORD decides, never a hash of the file here: a copy this
+    node retranslates for another gender would otherwise be fetched again
+    on every look;
+  - `untracked`: a track no record names (a phase-0 copy, an old attempt
+    here), only while this node's paid AI is off (`may_run_here(Lyrics)`
+    false: it makes no lyrics itself). With paid AI on such a track is the
+    node's own (an operator's reprocess result, bucket 4's ★ retry) and is
+    never undone by a peer's copy.
+- **The take** (`follow::follow`): `lyrics::kept_local` (an operator's text
+  or ask the queue acts on, a dub, Live-Translate) → passed over
+  `FOLLOW_KEPT` (6 h); the audio guard (`Exchange::audio_verdict`, the row
+  `lyrics::audio_row` picks) → another audio passed over `FOLLOW_KEPT`, "not
+  now" `FOLLOW_RETRY` (30 min); then `lyrics::take_into_rows` (shared with
+  the stand-in's look: `peer_row` + `place` + `adopt_lyrics` into EVERY row
+  of the video). The old `{yt}_lyrics.json` is served until the verified
+  part is renamed over it, and stays when anything before the rename
+  fails (the peer's row, the fetch, the parse, the source check). Only
+  once every row took it does `Exchange::took` record the origin (the new
+  sha), end a lyrics wait and drop a stand-in; a row that refused its
+  columns AFTER the rename leaves no record and serves the new file under
+  its old columns (source, ★, translation version) until the next look
+  after `FOLLOW_RETRY` takes it again (the stand-in's look behaves the
+  same). A failed take WARNs (`exchange: a peer's newer lyrics were not
+  taken - asking again later`) and waits `FOLLOW_RETRY`; so does a song
+  just taken (review round 1: `took` only WARNs a failed record, and the
+  copy would otherwise be fetched again on every tick).
+- **Passed over** songs are kept in memory against the peer's sha256: a
+  new copy at the peer is looked at at once; a restart forgets them.
+- **No paid AI:** it only fetches. `adopt_lyrics` gives a row that asks
+  another translation gender version 0, as the hook does; its retranslation
+  is held while paid AI is off, and the record keeps the follow from
+  fetching the copy again.
+- **Visible:** one INFO per followed song, `exchange: followed the peer's
+  lyrics` (`youtube_id`, `peer`, `why`, `rows`, the sha's first 12
+  digits); `GET /api/v1/exchange/status` → `follow: {followed, last:
+  {youtube_id, peer, why, at}, last_look, wanted, passed_over, last_error:
+  {youtube_id, peer, error, at}}` since this process started.
+- **Not followed:** the stems (they change only with `STEMS_VERSION`,
+  which re-queues them here and the hook takes the peer's); the metadata
+  (an operator's title at SNV would rename PP's file set, `apply_title`
+  outside the repair queue: a follow-up candidate); a ★ toggled at SNV
+  without a new track (the admin toggle; „Nesedí" queues a reprocess, whose
+  new track is followed): it reaches PP with the next track.
+- Known limit (the hooks' and the stand-in's too): an operator's Reprocess
+  clicked at this node during a take is cleared by the adoption
+  (`mark_video_lyrics_complete` sets the manual flag to 0); the window is
+  the transfer. Each look also scans the peer's catalog once per video
+  (`decide::holds`): ~6 000 entries × the catalog's videos, milliseconds
+  per tick while a node catches up, every 15 min after.
+- OPEN for phase 2 (SNV listing PP): SNV would follow PP's copies of the
+  same audio too; which node's lyrics may replace which is the phase-2
+  tie-break ("Kinds, versions, jobs").
+- Tests: `peer/follow_tests.rs` (two real nodes: a changed copy into every
+  row with the record and the status through the router, the copy taken
+  not fetched again, another audio never, the operator's pause and the
+  hold, parked rows filled, a failed take keeps the old track, a row that
+  refused leaves no record, a record that failed is not fetched every
+  tick, one song per look and the idle wait, untracked
+  only with paid AI off, a node with no peer, the queue and a stand-in left
+  alone, an operator's lyrics or a dub kept; the pure `wants`,
+  `candidates`, `FollowState`), `lyrics/worker_tests_peer.rs::
+  {the_worker_follows_the_peers_newer_lyrics,
+  the_worker_fills_a_parked_row_from_the_peer}`.
+
 ## PP's workers on (MAIN SESSION OPS, after the release with lanes 7–9 reaches PP)
 
 1. Check PP runs it (`/api/v1/status` version) and its exchange holds:
@@ -1067,6 +1171,13 @@ Three rules:
    video's lyrics at PP's pipeline version and PP's audio check says it is
    SNV's audio; until then the DEBUG `exchange: a stand-in waits - …` names
    why, and it is looked at again 10 min to 6 h later.
+6. The lyrics follow (#264, after the release that carries it reaches
+   PP): `GET /api/v1/exchange/status` → `follow.last_look` set within
+   15 min of the start, `follow.wanted` falling one song per lyrics
+   tick while PP catches up (its phase-0 copies are `untracked` while
+   paid AI is off), `follow.last_error` null or naming a song; PP's log
+   `exchange: followed the peer's lyrics` per song. Then a song SNV
+   re-runs reaches PP within ~15 min of SNV's hash pass.
 
 ## Tests
 

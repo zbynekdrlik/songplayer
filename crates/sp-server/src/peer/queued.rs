@@ -87,8 +87,9 @@ async fn lyrics_queued(pool: &SqlitePool, stems_on: bool) -> Result<Vec<String>,
 
 /// The YouTube ids of the rows `body` takes (a `lyrics::queue_sql` body that
 /// binds the current version three times), never a video the catalog will
-/// not serve lyrics of.
-async fn lyrics_rows(pool: &SqlitePool, body: &str) -> Result<Vec<String>, sqlx::Error> {
+/// not serve lyrics of. Also the lyrics follow's "in the queue" set
+/// (`peer::follow`): those rows are the lyrics hook's.
+pub(crate) async fn lyrics_rows(pool: &SqlitePool, body: &str) -> Result<Vec<String>, sqlx::Error> {
     let version = i64::from(crate::lyrics::LYRICS_PIPELINE_VERSION);
     sqlx::query_scalar(&format!(
         "SELECT DISTINCT v.youtube_id FROM videos v JOIN playlists p ON p.id = v.playlist_id \

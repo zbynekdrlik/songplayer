@@ -11,6 +11,7 @@ paths:
   - "crates/sp-server/src/peer/lyrics.rs"
   - "crates/sp-server/src/peer/audio.rs"
   - "crates/sp-server/src/peer/standin.rs"
+  - "crates/sp-server/src/peer/follow*.rs"
   - "crates/sp-server/src/peer/download.rs"
   - "crates/sp-server/src/peer/stems.rs"
   - "crates/sp-server/src/peer/repair.rs"
@@ -92,6 +93,10 @@ Every path:
     for; everything else is held (`Exchange::hold`): `paid_ai::hold`, plus
     a `HELD_RECHECK` (30 min) defer with no attempt counted.
   - The catalog announces no lyrics queued while OFF (`peer::queued`).
+  - #264's lyrics follow (`peer::follow`) only fetches. While OFF it
+    also replaces a track no peer record names (`untracked`: this
+    node makes no lyrics itself); while ON such a track is the node's
+    own and is kept.
   - The gate lives in the exchange, so it needs one: production wires it
     into the lyrics worker on every node (`lib.rs`, `with_peer`, even with
     no peer listed). A worker built without one (a unit test's harness,
