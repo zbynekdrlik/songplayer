@@ -388,8 +388,11 @@ the queue. The bulk sweeps (`reprocess-all-stale`,
 blank served lyrics: the per-video `POST /api/v1/videos/{id}/lyrics/reprocess`
 set `has_lyrics = 0` and blanked 211 songs on the wall for ~6 h on 30.9.2026,
 so it is deleted. A re-run that fails (an error, or an empty transcript) on a
-song the wall serves records only the attempt and keeps its lyrics; only an
-unserved row goes `no_source` / `asr_gap` (release 0.69.0 blockers). The #144
+song the wall serves records only the attempt and keeps its lyrics (release
+0.69.0 blockers). On an unserved row an error is a DEFERRAL (#263: the attempt
+with its backoff, the row as it was, picked again once due, never parked
+`no_source`; V41 re-queued every row an older build parked), and only an
+empty transcript goes `asr_gap`. The #144
 rollout used this targeted path, with no pipeline bump. Detail:
 `.claude/rules/lyrics-reference-text.md` ("Reprocess: ONE per-song path", "A
 failed or empty re-run never darkens a served song").
