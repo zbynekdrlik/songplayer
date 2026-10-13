@@ -6,7 +6,8 @@
 //!
 //! - [`read_direct`], at each check: the edition, the build and the
 //!   firewall's policy and local values from the registry (`RegGetValueW`),
-//!   the WinDefend service's state from the service manager;
+//!   the WinDefend service's state from the service manager, and the #255
+//!   audio profile (`prod_env_audio_win.rs`);
 //! - [`read_wmi`], behind the bounded reader: Defender's status
 //!   (`root\Microsoft\Windows\Defender` `MSFT_MpComputerStatus`), the
 //!   firewall's effective state (`root\StandardCimv2`
@@ -64,6 +65,7 @@ pub fn read_direct() -> DirectRead {
         firewall_legacy_policy: reg_dword(LEGACY_POLICY_FIREWALL, "EnableFirewall"),
         firewall_local: LOCAL_FIREWALL.map(|key| reg_dword(key, "EnableFirewall")),
         defender_service: read_service("WinDefend"),
+        audio: super::audio::win::read_audio(),
     }
 }
 

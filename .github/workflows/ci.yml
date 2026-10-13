@@ -383,10 +383,16 @@ jobs:
       # registry / WMI reads with an independent reading of this runner by
       # Windows' own cmdlets, taken here before the tests. Read only:
       # nothing on the runner is changed (Defender is never toggled).
-      - name: Read the runner's Defender, firewall and build for the glue test
+      # #255: the audio profile's glue test (prod_env_audio_read_tests_dvs.rs)
+      # likewise: MMCSS and Windows Update by Get-ItemProperty, the active
+      # power scheme and its core-parking minimum by powercfg, one adapter by
+      # Win32_NetworkAdapter (GUID, service, MAC, connection name) and its
+      # service's Parameters\Wdf. Read only too.
+      - name: Read the runner's Defender, firewall, build and audio profile for the glue tests
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
           $mp = Get-MpComputerStatus
           $profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore)
           $firewall = ($profiles | ForEach-Object { "$($_.Name)=$($_.Enabled)" }) -join ';'
@@ -396,6 +402,41 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_FIREWALL=$firewall"
           Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_BUILD=$build"
           Write-Host "Defender real-time $($mp.RealTimeProtectionEnabled), mode $($mp.AMRunningMode); firewall $firewall; build $build"
+          # A registry value as text ('' when the key or the value is absent;
+          # a DWORD reads as a signed Int32: 0xFFFFFFFF is -1).
+          function Get-RegText([string]$Path, [string]$Name) {
+            $item = Get-ItemProperty -Path $Path -ErrorAction SilentlyContinue
+            if ($null -eq $item) { return '' }
+            $prop = $item.PSObject.Properties[$Name]
+            if ($null -eq $prop) { return '' }
+            return [string]$prop.Value
+          }
+          $mm = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile'
+          $pa = "$mm\Tasks\Pro Audio"
+          $mmcss = "SystemResponsiveness=$(Get-RegText $mm 'SystemResponsiveness');NetworkThrottlingIndex=$(Get-RegText $mm 'NetworkThrottlingIndex');Priority=$(Get-RegText $pa 'Priority');SchedulingCategory=$(Get-RegText $pa 'Scheduling Category')"
+          $wu = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+          $wuLine = "NoAutoUpdate=$(Get-RegText "$wu\AU" 'NoAutoUpdate');ExcludeWUDriversInQualityUpdate=$(Get-RegText $wu 'ExcludeWUDriversInQualityUpdate')"
+          $active = (powercfg /getactivescheme) -join ' '
+          if ($active -notmatch '([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})') {
+            throw "powercfg /getactivescheme names no scheme: $active"
+          }
+          $scheme = $Matches[1].ToLowerInvariant()
+          $parking = (powercfg /qh SCHEME_CURRENT SUB_PROCESSOR CPMINCORES 2>&1) -join ' '
+          $minCores = ''
+          if ($parking -match 'Current AC Power Setting Index:\s*0x([0-9a-fA-F]+)') {
+            $minCores = [string][Convert]::ToUInt32($Matches[1], 16)
+          }
+          $nic = @(Get-CimInstance -ClassName Win32_NetworkAdapter -Filter 'PhysicalAdapter = TRUE AND NetEnabled = TRUE' |
+            Where-Object { $_.GUID -and $_.MACAddress -and $_.ServiceName } |
+            Sort-Object -Property InterfaceIndex)[0]
+          if ($null -eq $nic) { throw 'the runner has no enabled physical network adapter' }
+          $kmdf = [string]((Get-RegText "HKLM:\SYSTEM\CurrentControlSet\Services\$($nic.ServiceName)\Parameters\Wdf" 'KmdfLibraryVersion') -ne '')
+          $nicLine = "$($nic.GUID);$($nic.ServiceName);$($nic.MACAddress);$kmdf;$($nic.NetConnectionID)"
+          Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_MMCSS=$mmcss"
+          Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_WU=$wuLine"
+          Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_POWER=$scheme;$minCores"
+          Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_NIC=$nicLine"
+          Write-Host "MMCSS $mmcss; Windows Update $wuLine; power $scheme (CPMINCORES '$minCores'); adapter $nicLine"
       # --no-fail-fast: run every test binary even after one fails, so one
       # CI run reports every failure (#223 S3b: sp-decoder's failing
       # mf_hw_decode binary stopped the run before sp-gpu's and sp-server's

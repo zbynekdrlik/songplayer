@@ -145,6 +145,7 @@ fn fake_direct() -> DirectRead {
         firewall_legacy_policy: RegDword::Absent,
         firewall_local: [RegDword::Value(0); 3],
         defender_service: ServiceRead::State(4),
+        audio: crate::prod_env::audio::production_example(),
     }
 }
 
@@ -196,8 +197,8 @@ async fn a_check_reads_the_platform_or_says_not_windows() {
 
 // ---- the Windows glue, on the Windows CI job ----
 
-/// One reading the CI step "Read the runner's Defender, firewall and build
-/// for the glue test" (`ci.yml`, Build (Windows)) wrote: Windows' own
+/// One reading the CI step "Read the runner's Defender, firewall, build and
+/// audio profile for the glue tests" (`ci.yml`, Build (Windows)) wrote: Windows' own
 /// cmdlets' answer, independent of the glue.
 #[cfg(windows)]
 fn expected(name: &str) -> String {

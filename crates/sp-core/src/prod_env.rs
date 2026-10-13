@@ -11,10 +11,20 @@
 //! the Waves SoundGrid driver resync (A/B/A, kernel trace). sp-server's
 //! `prod_env` reads the facts and decides; this module only names the outcome
 //! (WASM-safe: the dashboard shows it).
+//!
+//! #255 adds the production PC's audio profile ([`audio`]): the network
+//! adapters the SoundGrid Protocol is bound to run an NDIS driver with
+//! Waves' settings, automatic updates are off, MMCSS is set for Pro Audio;
+//! the rest is reported only ([`notes_label`]).
 
 use serde::{Deserialize, Serialize};
 
 use crate::health::HealthTone;
+
+#[path = "prod_env_audio.rs"]
+pub mod audio;
+
+use audio::{AudioProfile, MmcssSetting, NicSetting};
 
 /// A Windows Firewall profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +68,12 @@ pub enum Unreadable {
     /// The antivirus products the Security Center lists.
     Antivirus,
     Firewall(FirewallProfile),
+    /// #255: the adapters the SoundGrid Protocol is bound to.
+    SoundGrid,
+    /// #255: Windows Update's automatic-update policy.
+    WindowsUpdate,
+    /// #255: MMCSS's system profile.
+    Mmcss,
 }
 
 /// One way a box is not a production environment.
@@ -77,6 +93,27 @@ pub enum EnvProblem {
     AntivirusOn(String),
     /// A firewall profile is on.
     FirewallOn(FirewallProfile),
+    /// #255: an adapter the SoundGrid Protocol is bound to runs a
+    /// NetAdapterCx driver (named by [`audio::nic_label`]).
+    SoundGridNicNetAdapterCx { nic: String },
+    /// #255: a SoundGrid adapter's setting is not off: its value as read,
+    /// or `None` when a setting every adapter must have is missing.
+    SoundGridNicSetting {
+        nic: String,
+        setting: NicSetting,
+        value: Option<String>,
+    },
+    /// #255: a SoundGrid adapter's driver or a setting could not be read.
+    SoundGridNicUnreadable { nic: String },
+    /// #255: Windows Update's automatic updates are not off
+    /// (`NoAutoUpdate` is not 1).
+    AutoUpdateOn,
+    /// #255: an MMCSS value is not the production one: its value as read,
+    /// or `None` when it is missing.
+    Mmcss {
+        setting: MmcssSetting,
+        value: Option<String>,
+    },
     /// A fact could not be read, so the box cannot be verified.
     Unreadable(Unreadable),
 }
@@ -92,6 +129,13 @@ impl EnvProblem {
             Self::DefenderPassive(_) => "defender_passive_mode".to_string(),
             Self::AntivirusOn(_) => "antivirus_on".to_string(),
             Self::FirewallOn(p) => format!("firewall_on:{}", p.name()),
+            Self::SoundGridNicNetAdapterCx { .. } => "soundgrid_nic_netadaptercx".to_string(),
+            Self::SoundGridNicSetting { setting, .. } => {
+                format!("soundgrid_nic_setting:{}", setting.name())
+            }
+            Self::SoundGridNicUnreadable { .. } => "unreadable:soundgrid_nic".to_string(),
+            Self::AutoUpdateOn => "windows_auto_update_on".to_string(),
+            Self::Mmcss { setting, .. } => format!("mmcss:{}", setting.name()),
             Self::Unreadable(Unreadable::Edition) => "unreadable:edition".to_string(),
             Self::Unreadable(Unreadable::Build) => "unreadable:build".to_string(),
             Self::Unreadable(Unreadable::Defender) => "unreadable:defender".to_string(),
@@ -99,6 +143,9 @@ impl EnvProblem {
             Self::Unreadable(Unreadable::Firewall(p)) => {
                 format!("unreadable:firewall:{}", p.name())
             }
+            Self::Unreadable(Unreadable::SoundGrid) => "unreadable:soundgrid".to_string(),
+            Self::Unreadable(Unreadable::WindowsUpdate) => "unreadable:windows_update".to_string(),
+            Self::Unreadable(Unreadable::Mmcss) => "unreadable:mmcss".to_string(),
         }
     }
 
@@ -120,6 +167,48 @@ impl EnvProblem {
             }
             Self::AntivirusOn(name) => format!("antivírus „{name}“ je zapnutý"),
             Self::FirewallOn(p) => format!("brána firewall je zapnutá ({} profil)", p.name_sk()),
+            Self::SoundGridNicNetAdapterCx { nic } => format!(
+                "sieťová karta SoundGrid „{nic}“ beží na ovládači NetAdapterCx (musí bežať na \
+                 ovládači NDIS)"
+            ),
+            Self::SoundGridNicSetting {
+                nic,
+                setting,
+                value: Some(value),
+            } => format!(
+                "sieťová karta SoundGrid „{nic}“: nastavenie „{}“ nie je vypnuté (hodnota {value})",
+                setting.name_sk()
+            ),
+            Self::SoundGridNicSetting {
+                nic,
+                setting,
+                value: None,
+            } => format!(
+                "sieťová karta SoundGrid „{nic}“: nastavenie „{}“ chýba",
+                setting.name_sk()
+            ),
+            Self::SoundGridNicUnreadable { nic } => format!(
+                "ovládač alebo nastavenia sieťovej karty SoundGrid „{nic}“ sa nepodarilo zistiť"
+            ),
+            Self::AutoUpdateOn => {
+                "automatické aktualizácie Windows nie sú vypnuté (NoAutoUpdate)".to_string()
+            }
+            Self::Mmcss {
+                setting,
+                value: Some(value),
+            } => format!(
+                "MMCSS: {} je {value} (má byť {})",
+                setting.label(),
+                setting.wanted()
+            ),
+            Self::Mmcss {
+                setting,
+                value: None,
+            } => format!(
+                "MMCSS: {} chýba (má byť {})",
+                setting.label(),
+                setting.wanted()
+            ),
             Self::Unreadable(Unreadable::Edition) => {
                 "edíciu Windows sa nepodarilo zistiť".to_string()
             }
@@ -136,6 +225,15 @@ impl EnvProblem {
                 "stav brány firewall ({} profil) sa nepodarilo zistiť",
                 p.name_sk()
             ),
+            Self::Unreadable(Unreadable::SoundGrid) => {
+                "väzby protokolu SoundGrid na sieťové karty sa nepodarilo zistiť".to_string()
+            }
+            Self::Unreadable(Unreadable::WindowsUpdate) => {
+                "nastavenie automatických aktualizácií Windows sa nepodarilo zistiť".to_string()
+            }
+            Self::Unreadable(Unreadable::Mmcss) => {
+                "nastavenia MMCSS sa nepodarilo zistiť".to_string()
+            }
         }
     }
 
@@ -216,8 +314,12 @@ pub struct EnvironmentStatus {
     /// Each firewall profile.
     #[serde(default)]
     pub firewall: FirewallState,
+    /// #255: the production PC's audio profile (the SoundGrid and Dante
+    /// adapters, Windows Update, MMCSS, power) and its report-only notes.
+    #[serde(default)]
+    pub audio: AudioProfile,
     /// Every problem, in a fixed order: the edition, Defender, the firewall's
-    /// domain, private and public profile.
+    /// domain, private and public profile, then the audio profile's.
     #[serde(default)]
     pub problems: Vec<ProblemView>,
     /// Why a fact could not be read (English, for the log and the box).
@@ -246,7 +348,9 @@ pub fn marker(status: &EnvironmentStatus) -> &'static str {
 /// What the health bar's tooltip says before the problems.
 pub const RULE_SK: &str = "Produkčný počítač musí bežať na Windows LTSC alebo Windows 11 IoT \
      Enterprise, s vypnutou ochranou Windows Defender v reálnom čase (ani v pasívnom režime), \
-     bez iného antivírusu a s vypnutou bránou firewall — nič nesmie kontrolovať ani filtrovať programy, ktoré SongPlayer spúšťa.";
+     bez iného antivírusu a s vypnutou bránou firewall — nič nesmie kontrolovať ani filtrovať programy, ktoré SongPlayer spúšťa. \
+     Sieťové karty SoundGrid bežia na ovládači NDIS s vypnutým moderovaním prerušení, riadením toku a úsporou energie, \
+     automatické aktualizácie Windows sú vypnuté a MMCSS je nastavené pre Pro Audio.";
 
 /// The health bar's segment, shown only while a check names a problem:
 /// `Prostredie: <the first problem>` (and ` (+N)` for N more), red, with the
@@ -268,6 +372,38 @@ pub fn label(status: &EnvironmentStatus) -> Option<(HealthTone, String, String)>
         .join("; ");
     let tip = format!("{RULE_SK} Zistené: {found}.");
     Some((HealthTone::Error, text, tip))
+}
+
+/// What the notes segment's tooltip says before the notes.
+pub const NOTES_SK: &str = "Len hlásené, nie je to chyba (#255):";
+
+/// #255: the health bar's grey segment for the audio profile's report-only
+/// facts that are not the production ones (`status.audio.notes`):
+/// `Profil PC: <N> poznámky`, the notes and the power scheme as its tooltip.
+/// Nothing while there is none. Never a problem: the box still holds.
+pub fn notes_label(status: &EnvironmentStatus) -> Option<(HealthTone, String, String)> {
+    let notes = &status.audio.notes;
+    if notes.is_empty() {
+        return None;
+    }
+    let n = notes.len();
+    let text = format!("Profil PC: {n} {}", notes_word(n));
+    let mut tip = format!("{NOTES_SK} {}.", notes.join("; "));
+    let power = &status.audio.power;
+    if let Some(guid) = &power.scheme_guid {
+        let name = power.scheme_name.as_deref().unwrap_or("bez názvu");
+        tip.push_str(&format!(" Plán napájania: {name} ({guid})."));
+    }
+    Some((HealthTone::Off, text, tip))
+}
+
+/// "poznámka" in Slovak after a count: 1, 2–4, else.
+pub fn notes_word(n: usize) -> &'static str {
+    match n {
+        1 => "poznámka",
+        2..=4 => "poznámky",
+        _ => "poznámok",
+    }
 }
 
 #[cfg(test)]
