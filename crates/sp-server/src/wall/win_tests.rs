@@ -72,7 +72,17 @@ impl Waiting {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join(image);
-        std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
+        let me = std::env::current_exe().unwrap();
+        std::fs::copy(&me, &exe).unwrap();
+        // The test binary starts only with its side-by-side manifest
+        // (Common-Controls 6.0 for Spout's TaskDialogIndirect, gpu-max.md):
+        // a copy without `<exe>.manifest` is refused at load and ends at once.
+        let manifest = me.with_file_name(format!(
+            "{}.manifest",
+            me.file_name().unwrap().to_string_lossy()
+        ));
+        assert!(manifest.exists(), "{} has no manifest", me.display());
+        std::fs::copy(&manifest, dir.join(format!("{image}.manifest"))).unwrap();
         let mut child = Command::new(&exe)
             .args(["--exact", WAITER, "--test-threads=1"])
             .env(CHILD_ENV, "1")
@@ -80,9 +90,9 @@ impl Waiting {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        // CI 38626241313: a child read the instant it was spawned had no
-        // image name yet (QueryFullProcessImageNameW error 31). Its harness
-        // prints "running 1 test" once the process runs, so wait for it.
+        // CI 38626241313 / 38628473272: a child without its manifest died
+        // while loading (QueryFullProcessImageNameW error 31 on it). Its
+        // harness prints "running 1 test" once it runs: wait for that.
         let out = BufReader::new(child.stdout.take().unwrap());
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {

@@ -111,7 +111,10 @@ wall report read `ok`. Design: comment 6169337303.
   (Windows job: a copy of the test binary run as `Arena.exe` /
   `Arena-Bridge.exe` / `BugSplatMonitor.exe` — its parent, times, no hung
   window, ended only when the image and start time match, the reporter
-  first, exit code 1), `sp-core wall_tests.rs`
+  first, exit code 1; the copy needs the test binary's side-by-side
+  `<exe>.manifest` next to it, or Windows refuses it at load, Common-Controls
+  6.0, `gpu-max.md`; each child is read only after its harness printed
+  `running 1 test`), `sp-core wall_tests.rs`
   (texts, label, wire), `e2e/health-wall.spec.ts` (red until it runs
   again, console clean), `e2e/wall-gate.spec.ts` (the summary).
 
