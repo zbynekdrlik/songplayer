@@ -119,14 +119,16 @@ MEASURED with frame ids, never judged by eye. Design record: #272 comment
   playlist with ANY clip imported. `/import {"file"}` as #228 (any listed
   clip; the 422 adds `expected_any`); `/import` with no body / `{}` = the
   list import: `200 {clips: [{name, file, outcome, found?, error?}]}`,
-  `500` when one failed, `503` before ffmpeg. `GET` keeps every #228 field
+  `422` when a bench file is not its clip, `500` when one failed, `503`
+  before ffmpeg. `GET` keeps every #228 field
   (camera-box's) and adds `clips: [{name, file, fps, sha256, imported}]`.
   Bodies are bytes → typed structs (`body_or_default`), never
   `serde_json::Value`.
 - **Loop's memory keeps the clip started LAST**: a press of `sp-test` with
-  no start plays it. camera-box's protocol starts its clip first (`/start`
-  with no body); after a wall run, `/start` + `/stop` with no body leaves
-  camera-box's clip in the memory.
+  no start plays THAT clip (before #272 it could only be camera-box's;
+  whether camera-box's own protocol starts its clip first is not
+  verified). So every wall run ends with `/start` + `/stop` with no body,
+  which leaves camera-box's clip as the one a bare press plays.
 
 ### `scripts/wall_clip.py` (the generator, deterministic)
 
@@ -149,35 +151,60 @@ MEASURED with frame ids, never judged by eye. Design record: #272 comment
 
 ### `scripts/wall_frames.py` (the reader)
 
-- Per picture: the 20 cells' sampled columns (the central half, at the
-  cells' fractions of `--x-range`), the rows whose references read black /
+- Per picture: 8 sampled columns per cell (`CELL_SAMPLES`, over the
+  central half, at the cells' fractions of `--x-range`;
+  `sample_columns` → `read_columns`), the rows whose references read black /
   white with contrast > 25 % of full scale and every bit between them, a
   run of ≥ 3 such rows = one strip; its core rows normalised by its own
   references. One grey cell (level 0.04–0.96) → `(i, i + 1, w)`, `w` the
   LATER frame's weight in Q8, rounded (the program's `FrameBlend` unit).
   Never guessed: `no_strip`, `multi` (≥ 2 grey cells), `non_adjacent`,
   `disagree` (the bands read positions > 8 Q8 apart: a torn picture).
-- `analyse`: readings within 8 Q8 of the one before = one boundary
-  (refreshes per boundary); each step vs `fps / 30`: ≥ 2 grid steps =
-  lost boundaries, off the grid = cadence error, back = jump back; frames
-  no boundary showed = lost frames. The clip LOOPS: a wrap is only the last
+- `analyse`: readings within 8 Q8 of the one before = one boundary;
+  each step vs `fps / 30`, with a slack of 8 Q8 + the larger of the
+  pacer's dead band (2 ms × fps: a boundary inside it shows the plain
+  frame) and the reader's level edge (a weight within 0.04 of 256 reads as
+  the next frame) — review round 1 found every phase 0.03–0.05 of a frame
+  read as cadence errors without it, `test_every_grid_phase_…` sweeps 100
+  phases at 24 / 25 / 30 fps: ≥ 2 grid steps = lost boundaries, off the
+  grid = cadence error, back = jump back; frames no boundary showed = lost
+  frames. A step across an unreadable picture or a capture gap (an
+  interval over 1.5 × the median) is `unverified` (steps, frames), never
+  lost: the capture did not see it. Every boundary must be shown for the
+  refreshes the capture rate gives on the grid (`refreshes`: 60 Hz on 30 =
+  2; a rate the grid does not divide allows the two around it; from
+  `--refresh-hz` or the capture times) — another count is `uneven`
+  (judder), in the verdict; the capture's first and last boundary, one
+  with an unreadable picture in or beside it and the loop seam are not
+  judged. The clip LOOPS: a wrap is only the last
   3 frames → the first 3; the wrap step ± 1 are the loop seam, reported in
   `loop_seams` and kept out of the verdict (a jump to 0 from mid-clip is a
   jump back). Weights vs the pacer's rule (`genlock.md`, "BLENDED") at the
-  grid phase fitted per pass (median, + half a Q8 step for the floor):
-  25 on 30 from 0 = 0, 213, 170, 128, 85, 42; 24 = 0, 204, 153, 102, 51;
-  30 / 15 / 50 = none.
-- Capture glue (untested, tiny): `--video FILE [--width W]` (ffmpeg, grey)
-  or `--dxcam OUTPUT [--region L,T,R,B] --seconds S` (Windows, the box's
-  `ops\probe-venv`), polled with no sleep; `capture` reports its own
-  intervals and gaps. JSON on stdout; exit 0 clean / 1 defects / 2 nothing
-  decoded.
+  grid phase fitted per pass (median, + half a Q8 step for the floor),
+  compared with where the READER reads the pacer's weight
+  (`shown_position`: one within the edge reads plain): 25 on 30 from 0 =
+  0, 213, 170, 128, 85, 42; 24 = 0, 204, 153, 102, 51; 30 / 15 / 50 =
+  none. The dead band is the pacer's `BLEND_DEAD_BAND_100NS`, read from
+  `pacer_blend.rs` by `test_the_reader_s_dead_band_is_the_pacer_s`.
+- Capture glue (untested, tiny): `--video FILE [--width W] [--refresh-hz
+  R]` (ffmpeg, grey, `-fps_mode passthrough` so every stored frame is read
+  as stored, the size read by `av_sync_check.probe_video_size`: the box has
+  no ffprobe; `video_read_args` is tested) or `--dxcam OUTPUT [--region
+  L,T,R,B] --seconds S` (Windows, the box's `ops\probe-venv`): only each
+  picture's sampled columns are kept (~170 KB at 1080 rows) and decoded
+  after the capture, a poll with no new picture sleeps 1 ms (Python 3.11+
+  sleeps on a high-resolution timer there); `capture` reports its own
+  intervals and gaps. JSON on stdout; exit 0 clean / 1 defects / 2
+  nothing decoded.
 - Measured on dev1 (#272 comment 6164962209): every frame of the three
   clips reads back; real decoded frames blended 25 on 30, cut to an SNV
   quarter band, ×4 and noised read 0, 214, 170, 127, 85, 41 (±1 Q8).
-- Check on the first wall run: the clip's song / artist go to the wall's
-  title clip like any song's; a strip the title covers reads `multi` /
-  `disagree` there, the consensus takes the clean bands.
+- The clip's song / artist go to the wall's title clip like any song's
+  (nothing treats the test playlist apart there): a strip the title covers
+  fails its reference check and the consensus takes the other bands; a
+  picture with every visible strip covered is `no_strip`, its steps
+  `unverified`, never lost. Whether a test item should write the wall
+  title at all is open (a follow-up candidate on #272).
 
 ## Box procedure (main session, once per box)
 
@@ -219,8 +246,11 @@ outcomes; `api/test_item_tests.rs` the GET's `clips`, a start by name / by
 default / refused / 404, a stop with any clip, the list import (absent,
 `wrong_file`, `503`, unreadable bodies), its status and pipeline rules; the
 post-deploy spec reads the list. The scripts: `scripts/tests/test_wall_clip.py`
-(Gray code, layout, any quarter band, frames, the pinned encode) and
+(Gray code, layout, any quarter band, frames, the pinned encode, a failed
+encode leaving no ffmpeg and no partial file) and
 `scripts/tests/test_wall_frames.py` (blends, bands, ×4 + noise, the named
-failures, the pacer's rule, `analyse` with loops / losses / jumps / weights,
-end to end, `main`'s exit codes), both numpy-only for CI's Eval Checks job,
+failures, the pacer's rule and its dead band tied to `pacer_blend.rs`,
+`analyse` with loops / losses / jumps / weights / unverified steps / judder,
+every grid phase at 24 / 25 / 30 fps, end to end, the video read's args,
+`main`'s exit codes), both numpy-only for CI's Eval Checks job,
 whose ruff lists name both scripts.
