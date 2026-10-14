@@ -1975,9 +1975,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "once_cell",
  "ring",
@@ -2239,14 +2239,14 @@ dependencies = [
 
 [[package]]
 name = "sp-asrc"
-version = "0.82.0"
+version = "0.83.0"
 dependencies = [
  "rubato",
 ]
 
 [[package]]
 name = "sp-core"
-version = "0.82.0"
+version = "0.83.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2255,7 +2255,7 @@ dependencies = [
 
 [[package]]
 name = "sp-decoder"
-version = "0.82.0"
+version = "0.83.0"
 dependencies = [
  "mutants",
  "sp-core",
@@ -2268,7 +2268,7 @@ dependencies = [
 
 [[package]]
 name = "sp-gpu"
-version = "0.82.0"
+version = "0.83.0"
 dependencies = [
  "cc",
  "mutants",
@@ -2280,7 +2280,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.82.0"
+version = "0.83.0"
 dependencies = [
  "libloading",
  "mutants",
@@ -2291,7 +2291,7 @@ dependencies = [
 
 [[package]]
 name = "sp-server"
-version = "0.82.0"
+version = "0.83.0"
 dependencies = [
  "anyhow",
  "async-trait",

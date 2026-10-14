@@ -9,9 +9,10 @@ use sp_core::wall::{
 
 use super::*;
 use crate::wall::fake::{
-    LEFT, MIDDLE, RIGHT, arena_main, arena_output, nvidia_read, screens, single_grid, snv_facts,
-    snv_nvidia, snv_output, span, span_grid, vdd, wanted,
+    LEFT, MIDDLE, RIGHT, arena_main, arena_output, nvidia_read, screens, single_grid,
+    snv_arena_process, snv_facts, snv_nvidia, snv_output, span, span_grid, vdd, wanted,
 };
+use crate::wall::guard::ArenaProcess;
 use crate::wall::read::{Arena, NvidiaFacts, WallFacts};
 
 /// SNV's box with Windows' displays `displays`.
@@ -620,4 +621,42 @@ fn the_status_shows_every_fact_read_and_each_reason_once() {
     );
     let no_driver = with_nvidia(snv_facts(), NvidiaFacts::NoDriver);
     assert_eq!(read_errors(&no_driver), Vec::<String>::new());
+}
+
+#[test]
+fn the_guards_read_errors_follow_the_others_each_once() {
+    let list_failed = WallFacts {
+        guard: Err("no process list".to_string()),
+        ..snv_facts()
+    };
+    assert_eq!(read_errors(&list_failed), ["no process list"]);
+    let each = WallFacts {
+        displays: Err("no displays".to_string()),
+        guard: Ok(vec![
+            ArenaProcess {
+                times: Err("no times".to_string()),
+                hung: Err("no windows".to_string()),
+                crash_report: Err("no windows".to_string()),
+                ..snv_arena_process()
+            },
+            ArenaProcess {
+                pid: 6000,
+                crash_report: Err("no report".to_string()),
+                ..snv_arena_process()
+            },
+        ]),
+        ..snv_facts()
+    };
+    assert_eq!(
+        read_errors(&each),
+        ["no displays", "no times", "no windows", "no report"]
+    );
+    // A guard read that fails changes nothing the decision reads.
+    assert_eq!(
+        decide(&each),
+        decide(&WallFacts {
+            guard: Ok(Vec::new()),
+            ..each.clone()
+        })
+    );
 }

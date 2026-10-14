@@ -12,6 +12,11 @@
 //! setup (the displays its advanced output wants) and says what it sees;
 //! nothing acts on the box, and a deliberate change is never an error.
 //!
+//! #254 (ROZHODNUTÉ 14.10.2026, #254 comment 6169316862): the one exception
+//! is the guard ([`WallGuard`]), which ends a crashed or hung Arena so the
+//! operator's relaunch script brings it back; it never touches Arena's
+//! setup or its clips.
+//!
 //! sp-server's `wall` reads the facts and decides; this module only names
 //! the outcome (WASM-safe: the dashboard shows it).
 
@@ -478,6 +483,149 @@ pub struct WallProblemView {
     pub text_sk: String,
 }
 
+/// #254: why the guard ended Resolume Arena.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuardWhy {
+    /// Arena's crash reporter (BugSplat's `BugSplatMonitor.exe`, Arena's
+    /// child) shows its window "Crash Report": Arena crashed and waits on
+    /// a click nobody gives on a headless PC.
+    #[default]
+    CrashReport,
+    /// A visible window of Arena did not answer and its CPU time stood still
+    /// for 30 s.
+    Hung,
+}
+
+impl GuardWhy {
+    /// The reason's name on the wire and in the log.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::CrashReport => "crash_report",
+            Self::Hung => "hung",
+        }
+    }
+
+    /// The reason in a few words, for the health bar.
+    pub fn short_sk(self) -> &'static str {
+        match self {
+            Self::CrashReport => "Resolume spadol",
+            Self::Hung => "Resolume zamrzol",
+        }
+    }
+
+    /// The reason in full, for the tooltip.
+    pub fn text_sk(self) -> &'static str {
+        match self {
+            Self::CrashReport => {
+                "Resolume Arena spadol a jeho hlásenie chýb (BugSplat) čakalo na klik v okne \
+                 „Crash Report“"
+            }
+            Self::Hung => "Resolume Arena neodpovedal a jeho procesor stál 30 s",
+        }
+    }
+}
+
+/// #254: where the guard stands after its last end of Arena.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuardPhase {
+    /// No end yet, or Arena runs again since the last one.
+    #[default]
+    Idle,
+    /// Arena was ended less than 60 s ago and no new Arena runs yet: the
+    /// operator's relaunch script brings it back.
+    Relaunching,
+    /// Arena was ended 60 s ago or more and no new Arena runs.
+    NotBack,
+}
+
+impl GuardPhase {
+    /// The phase's name on the wire (`data-guard`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Relaunching => "relaunching",
+            Self::NotBack => "not_back",
+        }
+    }
+}
+
+/// #254: one end of Arena by the guard.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuardEnd {
+    /// When (UTC unix ms).
+    #[serde(default)]
+    pub at_ms: i64,
+    #[serde(default)]
+    pub why: GuardWhy,
+    /// Arena's process id.
+    #[serde(default)]
+    pub pid: u32,
+    /// The crash reporter's processes, ended before Arena.
+    #[serde(default)]
+    pub monitors: Vec<u32>,
+    /// Why ending a process failed (`None`: every one was ended).
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// #254: the guard on the status: how many times it ended Arena since
+/// SongPlayer started, the last end, and whether Arena runs again since.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WallGuard {
+    #[serde(default)]
+    pub ends: u32,
+    #[serde(default)]
+    pub last: Option<GuardEnd>,
+    #[serde(default)]
+    pub phase: GuardPhase,
+}
+
+impl WallGuard {
+    /// The end the health bar names: the last one, until Arena runs again.
+    pub fn pending(&self) -> Option<&GuardEnd> {
+        if self.phase == GuardPhase::Idle {
+            return None;
+        }
+        self.last.as_ref()
+    }
+
+    /// The pending end in a few words, for the health bar after `Stena: `.
+    pub fn short_sk(&self) -> Option<String> {
+        let end = self.pending()?;
+        let what = if end.error.is_some() {
+            "nepodarilo sa ho ukončiť"
+        } else if self.phase == GuardPhase::NotBack {
+            "ukončený, ale znova sa nespustil"
+        } else {
+            "ukončený, čaká na nové spustenie"
+        };
+        Some(format!("{} — {what}", end.why.short_sk()))
+    }
+
+    /// The pending end in full, for the tooltip.
+    pub fn text_sk(&self) -> Option<String> {
+        let end = self.pending()?;
+        let why = end.why.text_sk();
+        let pid = end.pid;
+        let mut text = match &end.error {
+            Some(error) => format!(
+                "SongPlayer chcel ukončiť Resolume Arena (proces {pid}), lebo {why}, ale \
+                 nepodarilo sa: {error}."
+            ),
+            None => format!(
+                "SongPlayer ukončil Resolume Arena (proces {pid}), lebo {why}. Znova ho spúšťa \
+                 skript operátora; klipy spúšťa len Stream Deck."
+            ),
+        };
+        if self.phase == GuardPhase::NotBack {
+            text.push_str(" Do 60 s sa znova nespustil.");
+        }
+        Some(text)
+    }
+}
+
 /// The wall as `GET /api/v1/wall` shows it. The default is the state before
 /// the first check: not checked.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -498,6 +646,9 @@ pub struct WallStatus {
     /// When the last check ran (UTC unix ms).
     #[serde(default)]
     pub checked_at_ms: Option<i64>,
+    /// #254: the guard that ends a crashed or hung Arena.
+    #[serde(default)]
+    pub guard: WallGuard,
 }
 
 /// The health bar's `data-wall` marker of the last poll: `unchecked` (no
@@ -512,9 +663,12 @@ pub fn marker(status: &WallStatus) -> &'static str {
     }
 }
 
-/// What the health bar's tooltip says first.
+/// What the health bar's tooltip says first. #254: the one act is the
+/// owner's exception (ROZHODNUTÉ 14.10.2026, #254 comment 6169316862): a
+/// crashed or hung Arena is ended so its relaunch script brings it back.
 pub const RULE_SK: &str = "SongPlayer porovnáva obrazovky Windows s výstupom, ktorý má Resolume \
-     Arena uložený, a len hlási — nič nenastavuje ani nemení.";
+     Arena uložený, a len hlási — nič nenastavuje ani nemení. Jediná výnimka: spadnutý alebo \
+     zamrznutý Resolume ukončí, aby sa mohol znova spustiť.";
 
 /// `Display 1 7680×1080 · Display 2 1920×1080`.
 pub fn wanted_sk(displays: &[WantedDisplay]) -> String {
@@ -528,16 +682,22 @@ pub fn wanted_sk(displays: &[WantedDisplay]) -> String {
 /// The health bar's segment: `Stena: ` and the first problem in a few words
 /// (the state's own words when there is none: a grey state's problems say
 /// the same), with the rule, what Arena wants and every problem as its
-/// tooltip. Nothing before the first check, nor for an Arena that drives no
-/// physical display.
+/// tooltip. #254: while the guard's last end is pending (Arena has not run
+/// again since), the segment names that end instead, red, and the tooltip
+/// ends with it. Nothing before the first check, nor for an Arena that
+/// drives no physical display.
 pub fn label(status: &WallStatus) -> Option<(HealthTone, String, String)> {
     if !status.checked || !status.state.shown() {
         return None;
     }
-    let text = status
-        .problems
-        .first()
-        .map(|first| first.short_sk.clone())
+    let guard = status.guard.short_sk();
+    let tone = if guard.is_some() {
+        HealthTone::Error
+    } else {
+        status.state.tone()
+    };
+    let text = guard
+        .or_else(|| status.problems.first().map(|first| first.short_sk.clone()))
         .unwrap_or_else(|| status.state.text_sk().to_string());
     let mut tip = RULE_SK.to_string();
     if let Some(output) = status
@@ -556,7 +716,10 @@ pub fn label(status: &WallStatus) -> Option<(HealthTone, String, String)> {
         let found: Vec<&str> = status.problems.iter().map(|p| p.text_sk.as_str()).collect();
         tip.push_str(&format!(" Zistené: {}.", found.join("; ")));
     }
-    Some((status.state.tone(), format!("Stena: {text}"), tip))
+    if let Some(end) = status.guard.text_sk() {
+        tip.push_str(&format!(" {end}"));
+    }
+    Some((tone, format!("Stena: {text}"), tip))
 }
 
 #[cfg(test)]

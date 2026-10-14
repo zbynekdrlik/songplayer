@@ -7,6 +7,10 @@ paths:
   - "scripts/spout-quiesce.ps1"
   - "scripts/tests/test_spout_quiesce_workflows.py"
   - "scripts/tests/test_setup_prod_pc_workflows.py"
+  - "scripts/runner-autostart.ps1"
+  - "scripts/setup-runner.ps1"
+  - "scripts/tests/test_runner_autostart.py"
+  - "scripts/tests/runner-autostart.Tests.ps1"
 ---
 
 # CI workflows — self-hosted runner shell traps, mutation gate, event de-dup
@@ -128,6 +132,41 @@ step's plain `$Name = "literal"` variables put in, so `schtasks /run /tn
 $TaskName` reads as a start; a stop of what is already stopped resets
 nothing) and fails on a start after a stop with no run of the script in
 between; it also proves the walk flags the workflows without the script.
+
+## Every deploy delivers the runner's auto-start (#274)
+
+A fix to a box's own setup needs a delivery path. `setup-runner.ps1`
+returns at once on a box whose runner is configured, so the guarded
+`start-runner.vbs` of 9.10.2026 (#223 follow-up) reached SNV only by hand:
+PP kept the old vbs, its 5-minute task `GitHubActionsRunner` started a
+listener each time (4 alive on 14.10.2026), and a duplicate took the 0.82.0
+PP E2E, its job renewals were refused (`VssUnauthorizedException`, the
+session was the first listener's) and it cancelled the job itself. GitHub
+shows that as "cancelled", with nobody having clicked anything: read the
+box's `C:\actions-runner\_diag\Runner_*.log` for `Send job cancellation
+message to worker` before blaming a person.
+
+- `scripts/runner-autostart.ps1` (ASCII, the `setup-prod-pc.ps1` layout:
+  functions + a main guard, `exit` only as a file) is the ONE source of
+  `start-runner.bat` and `start-runner.vbs`. It writes them when they differ
+  (line ends do not count; a `::warning::` when the vbs changed), then ends
+  every `Runner.Listener.exe` of the directory except the one running this
+  job (an ancestor of its process; outside a job, the oldest), each through
+  the `cmd.exe` that started it (`taskkill /T /F`), and fails when more
+  than one is left.
+- Both deploy jobs run it as a child process before anything stops
+  SongPlayer: ci.yml's "Deliver the runner's auto-start" before "Deploy
+  SongPlayer", deploy-pp.yml's after its box check, before "Stop
+  SongPlayer". A non-zero exit fails the step with SongPlayer untouched.
+- `setup-runner.ps1` runs it through `Install-RunnerAutostart` (the file
+  next to it, or fetched from `dev` under `irm | iex`) on a new install and
+  on a configured box; it holds no copy of the files.
+- Guards: `scripts/tests/test_runner_autostart.py` (the wiring, the vbs
+  guard, ASCII) and `scripts/tests/runner-autostart.Tests.ps1` (Pester, in
+  the "Production PC setup" job with PSScriptAnalyzer).
+- Format `scripts/tests/*.py` with CI's pinned **ruff 0.5.7** (a venv:
+  `pip install ruff==0.5.7`), never a newer local ruff: 0.16 joins wrapped
+  asserts that 0.5.7 splits, and "Eval Checks" fails on the format check.
 
 ## Mutation gate (`.cargo/mutants.toml` + ci.yml `mutation-testing`)
 

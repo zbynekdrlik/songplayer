@@ -8,6 +8,12 @@ paths:
   - "crates/sp-server/src/api/test_item*.rs"
   - "crates/sp-server/src/api/program_tests_burn.rs"
   - "e2e/post-deploy-test-item.spec.ts"
+  - "scripts/wall_clip.py"
+  - "scripts/wall_frames.py"
+  - "scripts/wall_analysis.py"
+  - "scripts/tests/test_wall_clip.py"
+  - "scripts/tests/test_wall_*.py"
+  - "scripts/tests/wall_fakes.py"
 ---
 
 # The SP-program burn 911014, the on-air item, the local test item (#228)
@@ -90,6 +96,269 @@ audio" and "SongPlayer holds the rig lease" stay parked on camera-box.
 - `POST /api/v1/test-item/start` = `PlayVideo {position_ms: 0}`, `/stop` =
   Pause; `GET /api/v1/test-item` = ids, scene, clip name, sha256.
 
+## The clip list and the wall clips (#272 lane 1)
+
+The owner (14.10.2026): whether the wall gets every frame, in order, is
+MEASURED with frame ids, never judged by eye. Design record: #272 comment
+6164497836.
+
+- **`test_item_clips.rs`: a pinned LIST** — `CLIPS` = camera-box's clip
+  (`CAMERA_BOX`, the default; #228's row `measure-v01` unchanged), then
+  `wall-24` / `wall-25` / `wall-30` (rows `wallclip-24/25/30`, files
+  `wall-clip-v1-{fps}fps-60s.mp4`, artist `SongPlayer`, 60 s). Each is a
+  ROW of the one test playlist, never a playlist of its own (a scene in the
+  catalog and an idle pipeline per clip on the boxes); `not_test_item!`
+  goes by the playlist's kind, so every row stays out of every queue.
+  sha256s are byte arrays, like camera-box's.
+- `import(file, clips)` imports a file as the listed clip whose sha256 it
+  has, under that clip's names; `import_listed` takes each clip from the
+  bench under its OWN file name (`absent` is no error; `wrong_file` names
+  the sha256 found; `failed` the error).
+- Routes: `POST /start` with no body / `{}` = camera-box's clip,
+  `{"clip": "<name>"}` = that clip, `400` with a fixed text for an unknown
+  name (`UNKNOWN_CLIP`) or a body that does not read (`START_BODY_REFUSED`,
+  unknown fields refused), `404` before its import. `/stop` pauses the test
+  playlist with ANY clip imported. `/import {"file"}` as #228 (any listed
+  clip; the 422 adds `expected_any`); `/import` with no body / `{}` = the
+  list import: `200 {clips: [{name, file, outcome, found?, error?}]}`,
+  `422` when a bench file is not its clip, `500` when one failed, `503`
+  before ffmpeg. `GET` keeps every #228 field
+  (camera-box's) and adds `clips: [{name, file, fps, sha256, imported}]`.
+  Bodies are bytes → typed structs (`body_or_default`), never
+  `serde_json::Value`.
+- **Loop's memory keeps the clip started LAST**: a press of `sp-test` with
+  no start plays THAT clip (before #272 it could only be camera-box's;
+  whether camera-box's own protocol starts its clip first is not
+  verified). So every wall run ends with `/start` + `/stop` with no body,
+  which leaves camera-box's clip as the one a bare press plays.
+
+### `scripts/wall_clip.py` (the generator, deterministic)
+
+- 20 equal cells across the frame: margin `W // 48`, cell
+  `(W − 2·margin) // 20` (184 px at 3840; any width that is a multiple of
+  960 keeps the same fractions, which the reader samples by); cells 0 / 19
+  black, 1 / 18 white (the references), 2–17 the index in reflected Gray
+  code, MSB first, white = 1. Two consecutive indices differ in ONE cell:
+  a 2-frame blend shows one grey cell whose level is the weight.
+- 8 bands; per band the strip at 10–40 % of its height, the digits
+  (`0037  25 FPS`, a 5×7 numpy font, inside the strip's inner cells) at
+  52–88 %. Any quarter of the height holds a whole strip row (pinned at
+  4K). No QR: `qrcode` is not in CI's eval env.
+- Raw yuv420p (luma 16 / 235 / background 40, chroma 128) into libx264 on
+  ONE thread, `veryfast` crf 16, GOP = fps, no B-frames, BT.709 tv tags,
+  plus a silent 48 kHz stereo AAC track (the import splits it as
+  camera-box's), `+bitexact`, no metadata: the same ffmpeg gives the same
+  bytes (dev1 regenerated the 25 fps clip byte-identical). A changed
+  picture = bump `CLIP_VERSION` (new file names) and re-pin the sha256s.
+
+### `scripts/wall_frames.py` (the reader) + `scripts/wall_analysis.py`
+
+`wall_frames.py` reads each picture (`read_frame`) and holds the capture
+glue and the CLI; `wall_analysis.py` is the pure analysis of a run of
+readings (`analyse`, the pacer's rule, the capture's timing). Run it from
+the repo checkout's `scripts/` (on the box: the runner's checkout): it
+imports `wall_clip`, `wall_analysis` and `av_sync_check` (with its
+`av_sync_drift` / `av_sync_warp`).
+
+
+- Per picture: 8 sampled columns per cell (`CELL_SAMPLES`, over the
+  central half, at the cells' fractions of `--x-range`;
+  `sample_columns` → `read_columns`), the rows whose references read black /
+  white with contrast > 25 % of full scale and every bit between them, a
+  run of ≥ 3 such rows = one strip; its core rows normalised by its own
+  references. One grey cell (level 0.04–0.96) → `(i, i + 1, w)`, `w` the
+  LATER frame's weight in Q8, rounded (the program's `FrameBlend` unit).
+  Never guessed: `no_strip`, `multi` (≥ 2 grey cells), `non_adjacent`,
+  `disagree` (the bands read positions more than `SAME_PICTURE` apart: a
+  torn picture).
+- **One picture = within `SAME_PICTURE`** (8 Q8 + the 0.04 level edge):
+  the program's own 8-bit blend (`nv12_mix.rs`, `(f(256 − w) + tw + 128)
+  >> 8` on 16 / 235) rounds a weight near 0 or 256 to either side of the
+  edge, so one picture can read grey or plain. Two boundaries are ≥ 0.8
+  frames apart.
+- `analyse`, per step vs `fps / 30`: slack = 8 Q8 + the larger of the
+  pacer's dead band (2 ms × fps: a boundary inside it shows the plain
+  frame) and the level edge; ≥ 2 grid steps = lost boundaries, off the grid
+  = cadence error, back = jump back; frames no boundary showed = lost
+  frames. Weights vs the pacer's rule (`genlock.md`, "BLENDED") at the grid
+  phase fitted per play (a loop or a jump back starts one; median, + half
+  a Q8 step for the floor), against every place the reader may read the
+  weight (`readable_positions`): 25 on 30 from 0 = 0, 213, 170, 128, 85,
+  42 (read 0, 213, 169, 127, 85, 42 through the program's byte blend);
+  24 = 0, 204, 153, 102, 51; 30 / 15 / 50 = none. The dead band is the
+  pacer's `BLEND_DEAD_BAND_100NS`, read from `pacer_blend.rs` by a test.
+  Review rounds 1–2: `test_every_grid_phase_…` sweeps 512 phases per frame
+  through the program's byte blend at 24 / 25 fps (and 30): clean.
+- **What a clean verdict means (the owner's ruling, #272 comment
+  6170760353):** the wall's judder is intermittent, so a clean verdict
+  covers only the span captured. A short take (a post-deploy gate of N
+  seconds) is a regression check, never proof that the path is
+  frame-exact; frame-ID takes meant to characterise the wall run LONG.
+  `MIN_BOUNDARIES` is the floor under which a verdict cannot even be
+  clean, not a length that proves anything.
+- **The capture's timing is read as BRACKETS (review round 5, which
+  replaced rounds 2–4's blind-span rules; round 6 gave them an error
+  term):** each picture has a time and the span right before it the
+  capture could not see (`blind`: dxcam, since the poll before it —
+  `poll_blind`; an empty poll proves nothing new was presented; a
+  recording, since the picture before it — `capture_blind`). A boundary
+  was surely on screen at each of its pictures; it began after the last
+  look that still showed the boundary before it and at or before its
+  first picture, and ended after its own last look and at or before the
+  next boundary's first picture (`held_range` → the refresh counts it can
+  have had, `lo..hi`, `hi` open at a capture edge; the capture's last
+  boundary is held to the capture's end only when no unreadable picture
+  follows it, else to the look before them — locked, its own last picture,
+  round 7). dxcam stamps a poll BEFORE its grab: a picture's content was on
+  screen between that stamp and the end of its acquire (`Timing.late`,
+  stamped right after dxcam's `AcquireNextFrame` through its duplicator's
+  `update_frame`, else after the whole grab), so a bound "at or before the
+  picture" takes the window's end (`Timing.by`) and a hidden refresh the
+  span to it (round 7: a grab preempted 5–60 ms between stamp and acquire
+  read a clean wall as judder). Every span between two instants is taken as short and as
+  long as the instants' error and the rate's tolerance allow
+  (`Timing.fewest` / `most`): each instant may be off by `error` — dxcam
+  `POLL_TIME_ERROR` 0.5 ms, a recording its pts' own quantization
+  (`pts_jitter`: how far its regular intervals stray from their mean — a
+  1/10000 s timebase moves a 30 fps frame between 33.3 and 33.4 ms; at
+  least `PTS_TIME_ERROR`) — and the wall's period is known to
+  `RATE_TOLERANCE` (0.15 %: a nominal 60 for a 60/1.001 wall). Round 6
+  measured why: with exact arithmetic, quantized pts and a 0.1 % rate
+  mismatch read clean walls as judder. A `--locked` recording (each
+  picture one wall refresh: the wall's own signal at its rate) changes
+  content ON a refresh: whole periods, closed bounds. It is checked
+  (`check_locked`, else exit 5): every interval a whole number of periods
+  within a quarter, the rate to `RATE_TOLERANCE` (round 7: a 120 fps camera
+  given `--locked` read 1699 uneven boundaries). A recorder clocked apart
+  from the signal at the same nominal rate passes that check and drifts
+  against the wall, read as judder: `--locked` needs a recorder clocked by
+  the signal itself (a capture card on the wall's output), never an OBS or
+  software recording at the nominal rate.
+- **What the capture did not see excuses at most one boundary per
+  refresh a boundary takes, no more.** Unseen between two boundaries
+  (`unseen_refreshes`) = the unreadable pictures between them plus the
+  refreshes a blind span before each picture can have hidden whole
+  (`hidden_refreshes`: `ceil(longest / period) − 1`, the span as long and
+  the period as short as error and tolerance allow, so an excuse errs to
+  `unverified`, never to lost — round 5: a 2.02-period dxcam gap holds 3
+  presents; round 6: subtracting the pts' jitter turned a slow camera's own
+  skips into losses; locked: the frames missing from the gap). A step's
+  excused boundaries = unseen ÷ the fewest refreshes a boundary is shown
+  (60 Hz on 30: 2; 50 Hz: 1 — a boundary shown fewer is judder anyway, and
+  reads lost when a gap hid it); they and the frames they could show (up
+  to the last one's position, counted from the blend it follows, in the
+  clip's own step) are `unverified`; the rest is lost; a cadence error is
+  never excused.
+- **Judder**: every boundary must be on screen for the refreshes the
+  WALL's rate gives on the grid (`refreshes`: 60 Hz on 30 = 2; a rate the
+  grid does not divide allows the two around it). `--refresh-hz` = the
+  wall's own rate is REQUIRED (round 5: a rate read from a 30 fps camera
+  called a juddering 60 Hz wall clean; dxcam's 1 ms polls read 58.8 Hz for
+  60); a rate below the grid is refused, exit 5. A boundary is judged when
+  its bracket proves it: every possible count expected (ok), or none
+  (`uneven`, in the verdict — a count already too high is judder whatever
+  the rest, so a stall is judder wherever it lies: inside a partly read
+  boundary, at the capture's first boundary, or its last one held to the
+  capture's end). An inner boundary whose bracket stays open between an
+  expected and an unexpected count — the capture too coarse for the wall,
+  an unreadable picture or a blind span beside it — is `unresolved`, and a
+  clean verdict needs none: what the capture did not resolve could hide
+  judder (round 5: a 60 fps camera on a 75 Hz wall left a 4-refresh
+  boundary open; round 6: a stall of the box hid each judder from dxcam
+  too). A bracket no count fits (`lo > hi`) is the capture's fault, not
+  the wall's: `inconsistent`, incomplete, never judder (round 7). A
+  camera's exposure lasts: one taken across a boundary change reads a
+  position between the two, so in a recording (not dxcam, not `--locked`)
+  a lone decoded picture between its neighbours and off the grid is
+  `mixed`, unreadable (`mixed_exposures`; round 7: a 120 fps camera read
+  hundreds of cadence errors on a clean wall). In practice: dxcam polling
+  on time or a signal-clocked `--locked` recording prove every count; a
+  camera at ≥ 2× the wall's rate with a short shutter mostly does; a camera
+  at the wall's rate unlocked, or slower, mostly cannot (incomplete, never
+  judder). **What dxcam sees is DWM's composition, not the wall's
+  scanout**: on SNV DWM composes at 60.0000 Hz while the wall's own vblank
+  is 59.979 Hz (`gpu-max.md`), so dxcam on SNV takes `--refresh-hz 60` and
+  cannot see that wall's beat against the grid; a camera on the wall can
+  (one boundary a refresh short or long every 1 / |refresh − 2 × 30| s, the
+  reader reports it as judder because the eye sees it). Known limit: at a
+  rate the grid does not divide (50 / 75 / 144 Hz) the counts accept both
+  neighbours, so a one-refresh slip that keeps them in {2, 3} is not seen
+  (SNV and PP run 60 Hz, where the count is exact; checking each
+  boundary's start against the fitted grid would close it). Fewer new
+  pictures than half the grid's slots over the capture's span = `frozen` —
+  for dxcam only, whose pictures are the wall's presents (a recording keeps
+  its frames whatever the wall does; a slow one is merely coarse).
+- The clip LOOPS (`step_count`, `seam_steps`): the song's last boundary
+  shows the clip's last frame PLAIN wherever it lies in it (no next frame
+  to blend: the pacer clamps), so a step into it may be any whole number of
+  grid steps that lands in that frame, and the loop's step counts the
+  song's boundaries left after the one before it (from that boundary's
+  LAST reading: a weight near 256 and the clamped frame read as one
+  picture) plus the new play's from frame 0. A wrap is a step back to the start no further from the end than
+  `WRAP_FRAMES` plus what the capture could have missed. Losses and cadence
+  at the seam are judged like any step's (round 6: the old seam rules
+  excused one lost boundary, and read a capture blind at the 24 / 25 fps
+  clamp as a cadence error). The seam is spared only its timing — the
+  song's last boundary and the new play's first may be held up to
+  `SEAM_HOLD_S` longer (1 s: the new play's open; round 5: a 5 s freeze
+  there read clean), never shown shorter (round 6: a 1 + 3 pair there read
+  clean; the new play's second boundary is the cadence again). Known
+  limit (round 7, not closed): at 24 / 25 fps, where two boundaries fall
+  in the clamped last frame, the song's last run is judged against ONE
+  boundary's refreshes, so a wall skipping one of the two (the new play one
+  boundary early) is not seen. `loop_seams.hold_s` is the longest hold, the box's own measure
+  of the loop's restart — and its weights (`loop_seams.weight_mismatches`:
+  the clamped frame has none). A jump to 0 from mid-clip is a jump back.
+- **Verdict**: `defects` (any loss, jump back, cadence error, weight
+  mismatch, judder, a frozen wall, or no boundary) → exit 1; else
+  `incomplete` — `clean` needs positive evidence: unverified steps, under
+  95 % of the pictures decoded (`MIN_COVERAGE`), no refresh rate, any
+  `unresolved` or `inconsistent` boundary, or fewer boundaries judged for judder than
+  `--min-boundaries` (default `MIN_BOUNDARIES` 300 = 10 s on the grid:
+  round 4, a 0.3 s capture of a wall losing a boundary every second read
+  clean; every inner boundary is judged or unresolved, so only the
+  capture's first and last boundary — judged only when held too long — and
+  the seam's stay out) → exit 3, never clean;
+  else `clean` → exit 0; nothing decoded → exit 4; the capture or its
+  reading failed (ffmpeg, dxcam, a rate below the grid, a dxcam present
+  rate that is no whole number of `--refresh-hz` refreshes, or off it by
+  more than `RATE_TOLERANCE` over the whole capture — `check_present_rate`,
+  on the intervals between successive pictures timed within a tenth of a
+  refresh, `TIMED_SHARE`, poll gap plus acquire window — or fewer than 10
+  such intervals, so the rate cannot be checked (an unchecked wrong rate
+  reads as judder or losses, round 7: grabs over ~15 ms at 60 Hz, or any
+  wall over 100 Hz with 1 ms polls), a `--locked` recording that is no
+  recording of the wall's own signal) → exit 5 with the error on stderr; a usage error → 2
+  (argparse). A broken capture never reads as a broken wall.
+- Capture glue: `--video FILE --refresh-hz R [--locked] [--width W]`
+  (`read_video`: `av_sync_check.gray_video_args` — the A/V gate's own
+  `decode_video` command line, `-fps_mode passthrough` so every stored
+  frame is read as stored, each frame's pts from `showinfo`
+  (`av_sync_check.showinfo_pts`) — and the size through
+  `av_sync_check.probe_video_size`: the box has no ffprobe; streamed a
+  picture at a time, never the whole 4K recording; ffmpeg killed and
+  reaped when a read fails) or `--dxcam OUTPUT --refresh-hz R
+  [--region L,T,R,B] --seconds S` (`capture_dxcam`, Windows, the box's
+  `ops\probe-venv`; a picture's time is its poll's start, when dxcam
+  acquires the newest frame; `output_color="BGRA"`: no colour conversion,
+  so dxcam 0.3+ never loads OpenCV — dxcam 0.0.5 imports it at module load
+  whatever the colour, so the venv needs dxcam ≥ 0.3 or `opencv-python`:
+  the main session checks the box): every poll timed, only each picture's
+  sampled columns kept as luma (~170 KB at 1080 rows, ~345 KB at 2160) and
+  decoded after the capture, an empty poll sleeps 1 ms (Python 3.11+ sleeps
+  on a high-resolution timer there). `--fps` takes 24 / 25 / 30.
+- Measured on dev1 (#272 comment 6164962209): every frame of the three
+  clips reads back (also through `read_video`'s pts path: 1440 / 1500 /
+  1800, clean); real decoded frames blended 25 on 30, cut to an SNV
+  quarter band, ×4 and noised read 0, 214, 170, 127, 85, 41 (±1 Q8).
+- The clip's song / artist go to the wall's title clip like any song's
+  (nothing treats the test playlist apart there): a strip the title covers
+  fails its reference check and the consensus takes the other bands; a
+  picture with every visible strip covered is `no_strip`, its steps
+  `unverified` (one boundary per picture), never clean. Whether a test
+  item should write the wall title at all is open (a follow-up candidate
+  on #272).
+
 ## Box procedure (main session, once per box)
 
 1. Put camera-box's clip on the box as
@@ -103,6 +372,12 @@ audio" and "SongPlayer holds the rig lease" stay parked on camera-box.
    item`.
 3. `GET /api/v1/test-item` → `imported: true`; `/api/v1/ndi/health` has an
    `SP-test` row.
+4. #272, the wall clips: copy `wall-clip-v1-{24,25,30}fps-60s.mp4` (dev1
+   `~/.claude/work-products/issue-272/`, sizes and sha256s in
+   `test_item_clips.rs`) into the same bench dir, then `POST
+   /api/v1/test-item/import` with NO body → 200, each listed clip
+   `imported` / `already` (`absent` for a file not copied, never an
+   error); `GET /api/v1/test-item` → `clips[*].imported`.
 
 ## Tests
 
@@ -115,3 +390,34 @@ a fade, the published item), `handle_pipeline_event_tests_item.rs`,
 with a fake transcoder), `test_item_tests_queues.rs`, `api/test_item_tests.rs`
 and the read-only `e2e/post-deploy-test-item.spec.ts` (never turns the burn
 on, never starts the item, never cuts).
+
+#272: `test_item_tests.rs` also pins the clip list (camera-box's clip
+unchanged, the wall clips' generated sha256s, unique ids / files / hashes),
+`clip_named`, each clip's cache names, an import as the matching clip, one
+playlist for every clip, `find_any`'s order and `import_listed`'s five
+outcomes; `api/test_item_tests.rs` the GET's `clips`, a start by name / by
+default / refused / 404, a stop with any clip, the list import (absent,
+`wrong_file`, `503`, unreadable bodies), its status and pipeline rules; the
+post-deploy spec reads the list. The scripts: `scripts/tests/test_wall_clip.py`
+(Gray code, layout, any quarter band, frames, the pinned encode, a failed
+encode leaving no ffmpeg and no partial file) and
+`scripts/tests/test_wall_frames.py` (reading a picture: blends, bands, ×4 +
+noise, the band median, the named failures, the pacer's rule and its dead
+band tied to `pacer_blend.rs`), `test_wall_frames_analyse.py` (one sample
+per refresh: every grid phase through the program's byte blend at 24 / 25
+/ 30 fps, loops / losses / jumps / weights / unverified steps at 60 and
+50 Hz / judder / the song-end clamp at every phase, a loss at the seam, a hold over 1 s there / the
+300-boundary minimum / coverage), `test_wall_timing.py` (the brackets: a locked recording and dxcam on time exact, 120 / 240 fps cameras proving counts and finding judder, cameras too coarse — 60 / 59.94 / 50 / 30 fps on 60 Hz, 60 fps on 50 Hz, 120 fps on 144 Hz, 60 fps on 75 Hz — never calling judder and never calling it clean, `unresolved`, a stall at the start, middle and end, blind refreshes hiding one boundary per refresh at 60 and 50 Hz, `hidden_refreshes`, `unseen_refreshes`, `held_range`, a frozen wall (dxcam only), the judged share, the required rate; round 6: unreadable pictures after the last boundary, cameras' pts on 1/90000, 1/10000, 1/1000 and 1/600 timebases, a rate within its tolerance either way, judder a box stall hid from dxcam; round 7: a grab preempted 2–40 ms before its acquire, an impossible bracket, a locked capture ending on unreadable pictures, a camera exposure mixing two boundaries) and `test_wall_capture.py` (round 7: `--locked` checked, a rate that cannot be checked)
+(`av_sync_check.gray_video_args`, `showinfo_pts`, `read_video` against a
+stand-in ffmpeg — pts, a half frame, a failed exit, the kill when a read
+fails —, `poll_blind`, `check_present_rate`, `main`'s exit codes for a
+video and for a simulated dxcam capture — a late poll, 20 and 10 ms grabs,
+a 12 ms lag, a wall that stopped, a wrong or missing `--refresh-hz`, a bad
+`--region`, `--locked` with dxcam), their shared fakes in
+`scripts/tests/wall_fakes.py` (the clip's frames, the program's byte blend,
+the pacer's readings, the wall's refreshes as a camera samples them, a
+simulated dxcam capture), all numpy-only for CI's Eval Checks job, whose
+ruff lists name the three scripts. Hand mutants of `wall_frames.py` / `wall_analysis.py` (every
+threshold, guard, bound and exit code; a scratch harness on dev1, not CI)
+were run after each review round and the tests extended until none
+survived; an equivalent one is removed from the code instead.

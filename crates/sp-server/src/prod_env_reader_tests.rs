@@ -217,6 +217,30 @@ fn expected_bool(text: &str, what: &str) -> bool {
     }
 }
 
+/// Windows' own Defender answer NOW: `Get-MpComputerStatus`'s real-time
+/// switch and running mode, read through PowerShell (a test may spawn one;
+/// the glue never does).
+#[cfg(windows)]
+fn defender_now() -> (bool, String) {
+    let out = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$m = Get-MpComputerStatus; '{0}|{1}' -f $m.RealTimeProtectionEnabled, $m.AMRunningMode",
+        ])
+        .output()
+        .expect("powershell runs on the Windows runner");
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let (realtime, mode) = text
+        .split_once('|')
+        .unwrap_or_else(|| panic!("Get-MpComputerStatus answered {text:?}"));
+    (
+        expected_bool(realtime, "Get-MpComputerStatus RealTimeProtectionEnabled"),
+        mode.trim().to_string(),
+    )
+}
+
 /// Review finding 4: the registry and WMI reads run on a real Windows (the
 /// CI runner), and each fact equals what Windows' own cmdlets report there:
 /// `Get-MpComputerStatus` (real-time, mode), `Get-NetFirewallProfile
@@ -230,7 +254,18 @@ fn the_windows_glue_reads_what_windows_itself_reports() {
     use std::io::Write;
 
     let direct = super::win::read_direct();
-    let wmi = super::win::read_wmi();
+    // Defender's state can change while the job runs (14.10.2026: the step
+    // read "Normal", the glue "Not running" minutes later), so the glue's WMI
+    // read is compared with Windows' own answer taken around it, and taken
+    // again while that answer moved during the read.
+    let (wmi, defender) = (0..5)
+        .find_map(|_| {
+            let before = defender_now();
+            let wmi = super::win::read_wmi();
+            let after = defender_now();
+            (before == after).then_some((wmi, before))
+        })
+        .expect("Defender's state held still across one WMI read within 5 tries");
     let _ = writeln!(
         std::io::stderr(),
         "[#233 prod_env on the runner] {direct:?} {wmi:?}"
@@ -238,16 +273,14 @@ fn the_windows_glue_reads_what_windows_itself_reports() {
     let facts = facts_from(&direct, &Ok(wmi));
     assert!(facts.read_errors.is_empty(), "{:?}", facts.read_errors);
     assert!(facts.edition_id.is_some(), "{facts:?}");
-    let realtime = expected("SP_ENV_EXPECT_DEFENDER_REALTIME");
     assert_eq!(
         facts.defender_realtime,
-        Some(expected_bool(&realtime, "SP_ENV_EXPECT_DEFENDER_REALTIME")),
+        Some(defender.0),
         "Get-MpComputerStatus RealTimeProtectionEnabled"
     );
-    let mode = expected("SP_ENV_EXPECT_DEFENDER_MODE");
     assert_eq!(
         facts.defender_mode.as_deref(),
-        Some(mode.trim()),
+        Some(defender.1.as_str()),
         "Get-MpComputerStatus AMRunningMode"
     );
     let firewall = expected("SP_ENV_EXPECT_FIREWALL");

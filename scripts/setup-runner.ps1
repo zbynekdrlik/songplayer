@@ -40,10 +40,31 @@ if ($env:COMPUTERNAME -ieq "RESOLUME-PP" -and ($labelList -contains "resolume"))
     throw "RESOLUME-PP must not carry the label 'resolume' (SNV's deploy and E2E jobs would run at PP). Set RUNNER_LABELS=self-hosted,windows,resolume-pp and run this again."
 }
 
+# --- The runner's auto-start (issue 274) ---
+# scripts/runner-autostart.ps1 is the ONE source of start-runner.bat and
+# start-runner.vbs (the vbs starts a listener only when this directory has
+# none). Both deploy jobs run it on every deploy, so a change to it reaches
+# every box; this installer runs it too, on a new runner and on a box that
+# already has one. Run from a checkout it is the file next to this one,
+# through `irm | iex` it is fetched from the same branch as this script.
+function Install-RunnerAutostart {
+    param([string]$RunnerDir)
+    $script = $null
+    if ($PSScriptRoot) { $script = Join-Path $PSScriptRoot 'runner-autostart.ps1' }
+    if (-not $script -or -not (Test-Path -LiteralPath $script)) {
+        $script = Join-Path $RunnerDir 'runner-autostart.ps1'
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/zbynekdrlik/songplayer/dev/scripts/runner-autostart.ps1' -OutFile $script
+    }
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -RunnerDir $RunnerDir
+    if ($LASTEXITCODE -ne 0) { throw "runner-autostart.ps1 exited $LASTEXITCODE - the runner's auto-start is not in place (see its lines above)" }
+}
+
 # --- Check if already installed ---
 if (Test-Path "$RunnerDir\.runner") {
     Write-Host "  Runner already configured at $RunnerDir" -ForegroundColor Yellow
     Write-Host "  To reconfigure, delete $RunnerDir and re-run this script" -ForegroundColor Yellow
+    Write-Host "  Writing the runner's auto-start from the repo (issue 274)..." -ForegroundColor White
+    Install-RunnerAutostart -RunnerDir $RunnerDir
     return
 }
 
@@ -83,29 +104,7 @@ Write-Host "        Runner configured: $RunnerName [$Labels]" -ForegroundColor G
 # --- Scheduled task ---
 Write-Host "  [4/5] Setting up auto-start..." -ForegroundColor White
 
-@"
-@echo off
-title GitHub Actions Runner (songplayer)
-cd /d $RunnerDir
-.\run.cmd
-"@ | Set-Content "$RunnerDir\start-runner.bat"
-
-# The task below runs this every 5 minutes (and at logon): start the runner
-# only when this runner directory has none running. Every run used to start
-# another run.cmd, and two listeners of one directory collide on
-# _diag\pages ("The file ... already exists": a job fails in seconds).
-@"
-Set wmi = GetObject("winmgmts:\\.\root\cimv2")
-For Each p In wmi.ExecQuery("SELECT Name, ExecutablePath, CommandLine FROM Win32_Process WHERE Name='Runner.Listener.exe' OR Name='cmd.exe'")
-  If LCase(p.Name) = "runner.listener.exe" Then
-    If LCase(p.ExecutablePath & "") = LCase("$RunnerDir\bin\Runner.Listener.exe") Then WScript.Quit 0
-  ElseIf InStr(1, p.CommandLine & "", "$RunnerDir\start-runner.bat", vbTextCompare) > 0 Then
-    WScript.Quit 0
-  End If
-Next
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run """$RunnerDir\start-runner.bat""", 0, False
-"@ | Set-Content "$RunnerDir\start-runner.vbs"
+Install-RunnerAutostart -RunnerDir $RunnerDir
 
 try {
     $taskAction = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$RunnerDir\start-runner.vbs`""

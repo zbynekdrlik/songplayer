@@ -13,7 +13,8 @@
  * - `GET /api/v1/test-item`: the clip camera-box delivers and its pinned
  *   sha256; once the clip is imported (a manual step on the box, the rule
  *   `.claude/rules/test-item-burn.md`), the item's ids and its scene
- *   `sp-test`, else no item.
+ *   `sp-test`, else no item; #272: the pinned clip list (camera-box's clip
+ *   first, then the 24 / 25 / 30 fps wall clips) with their sha256s.
  * - `GET /api/v1/playlists` lists no playlist of kind `test` (it is not an
  *   operator playlist).
  *
@@ -68,6 +69,17 @@ test.describe("SP-program burn + the test item (#228)", () => {
     } else {
       expect(answer.item).toBeNull();
     }
+    // #272: the pinned clip list, camera-box's clip first (the default).
+    const clips: { name: string; fps: number; sha256: string; imported: boolean }[] =
+      answer.clips;
+    expect(clips.map((c) => c.name)).toEqual(["camera-box", "wall-24", "wall-25", "wall-30"]);
+    expect(clips.map((c) => c.fps)).toEqual([30, 24, 25, 30]);
+    for (const c of clips) {
+      expect(c.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(typeof c.imported).toBe("boolean");
+    }
+    expect(clips[0].sha256).toBe(answer.sha256);
+    expect(clips[0].imported).toBe(answer.imported);
   });
 
   test("the playlist list leaves the test playlist out", async ({ request }) => {

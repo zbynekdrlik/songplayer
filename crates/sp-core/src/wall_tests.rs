@@ -1,5 +1,7 @@
 //! #259: the wall report's vocabulary — display ids, every state, problem
 //! code and Slovak text, the marker, the health segment and the wire shape.
+//! #254: the guard's reasons, phases and texts, and the segment while its
+//! last end is pending.
 
 use serde_json::json;
 
@@ -545,4 +547,209 @@ fn the_status_travels_with_every_field_named() {
     // A status with nothing in it (an older server, a mock) is the default.
     let empty: WallStatus = serde_json::from_value(json!({})).unwrap();
     assert_eq!(empty, WallStatus::default());
+}
+
+#[test]
+fn the_guards_reasons_and_phases_have_names_and_slovak_words() {
+    assert_eq!(GuardWhy::CrashReport.name(), "crash_report");
+    assert_eq!(GuardWhy::Hung.name(), "hung");
+    assert_eq!(GuardWhy::CrashReport.short_sk(), "Resolume spadol");
+    assert_eq!(GuardWhy::Hung.short_sk(), "Resolume zamrzol");
+    assert_eq!(
+        GuardWhy::CrashReport.text_sk(),
+        "Resolume Arena spadol a jeho hlásenie chýb (BugSplat) čakalo na klik v okne \
+         „Crash Report“"
+    );
+    assert_eq!(
+        GuardWhy::Hung.text_sk(),
+        "Resolume Arena neodpovedal a jeho procesor stál 30 s"
+    );
+    assert_eq!(GuardPhase::Idle.name(), "idle");
+    assert_eq!(GuardPhase::Relaunching.name(), "relaunching");
+    assert_eq!(GuardPhase::NotBack.name(), "not_back");
+    assert_eq!(
+        serde_json::to_value([
+            GuardPhase::Idle,
+            GuardPhase::Relaunching,
+            GuardPhase::NotBack
+        ])
+        .unwrap(),
+        json!(["idle", "relaunching", "not_back"])
+    );
+    assert_eq!(
+        serde_json::to_value([GuardWhy::CrashReport, GuardWhy::Hung]).unwrap(),
+        json!(["crash_report", "hung"])
+    );
+}
+
+/// The guard's record of an end of Arena 15176 for `why`, in `phase`.
+fn ended(why: GuardWhy, phase: GuardPhase, error: Option<&str>) -> WallGuard {
+    WallGuard {
+        ends: 1,
+        last: Some(GuardEnd {
+            at_ms: 1_791_608_681_366,
+            why,
+            pid: 15176,
+            monitors: vec![9188],
+            error: error.map(str::to_string),
+        }),
+        phase,
+    }
+}
+
+#[test]
+fn the_guard_names_its_last_end_only_until_arena_runs_again() {
+    assert_eq!(WallGuard::default().pending(), None);
+    assert_eq!(WallGuard::default().short_sk(), None);
+    assert_eq!(WallGuard::default().text_sk(), None);
+    let idle = ended(GuardWhy::CrashReport, GuardPhase::Idle, None);
+    assert_eq!(idle.pending(), None);
+    assert_eq!(idle.short_sk(), None);
+    assert_eq!(idle.text_sk(), None);
+    let relaunching = ended(GuardWhy::CrashReport, GuardPhase::Relaunching, None);
+    assert_eq!(relaunching.pending(), relaunching.last.as_ref());
+    assert_eq!(
+        relaunching.short_sk().as_deref(),
+        Some("Resolume spadol — ukončený, čaká na nové spustenie")
+    );
+    assert_eq!(
+        relaunching.text_sk().as_deref(),
+        Some(
+            "SongPlayer ukončil Resolume Arena (proces 15176), lebo Resolume Arena spadol a \
+             jeho hlásenie chýb (BugSplat) čakalo na klik v okne „Crash Report“. Znova ho \
+             spúšťa skript operátora; klipy spúšťa len Stream Deck."
+        )
+    );
+    let not_back = ended(GuardWhy::Hung, GuardPhase::NotBack, None);
+    assert_eq!(
+        not_back.short_sk().as_deref(),
+        Some("Resolume zamrzol — ukončený, ale znova sa nespustil")
+    );
+    assert_eq!(
+        not_back.text_sk().as_deref(),
+        Some(
+            "SongPlayer ukončil Resolume Arena (proces 15176), lebo Resolume Arena \
+             neodpovedal a jeho procesor stál 30 s. Znova ho spúšťa skript operátora; klipy \
+             spúšťa len Stream Deck. Do 60 s sa znova nespustil."
+        )
+    );
+    let refused = ended(
+        GuardWhy::Hung,
+        GuardPhase::Relaunching,
+        Some("TerminateProcess(15176, Arena.exe) failed (error 5)"),
+    );
+    assert_eq!(
+        refused.short_sk().as_deref(),
+        Some("Resolume zamrzol — nepodarilo sa ho ukončiť")
+    );
+    assert_eq!(
+        refused.text_sk().as_deref(),
+        Some(
+            "SongPlayer chcel ukončiť Resolume Arena (proces 15176), lebo Resolume Arena \
+             neodpovedal a jeho procesor stál 30 s, ale nepodarilo sa: \
+             TerminateProcess(15176, Arena.exe) failed (error 5)."
+        )
+    );
+    let refused_long_ago = ended(
+        GuardWhy::Hung,
+        GuardPhase::NotBack,
+        Some("OpenProcess(15176) failed (error 5)"),
+    );
+    assert_eq!(
+        refused_long_ago.short_sk().as_deref(),
+        Some("Resolume zamrzol — nepodarilo sa ho ukončiť")
+    );
+    assert!(refused_long_ago.text_sk().unwrap().ends_with(
+        "ale nepodarilo sa: OpenProcess(15176) failed (error 5). Do 60 s sa znova nespustil."
+    ));
+}
+
+#[test]
+fn a_pending_end_reads_red_on_the_segment_until_arena_runs_again() {
+    let off = WallStatus {
+        guard: ended(GuardWhy::CrashReport, GuardPhase::Relaunching, None),
+        ..checked(WallState::ArenaOff, &[], None)
+    };
+    let (tone, text, tip) = label(&off).unwrap();
+    assert_eq!(tone, HealthTone::Error);
+    assert_eq!(
+        text,
+        "Stena: Resolume spadol — ukončený, čaká na nové spustenie"
+    );
+    assert_eq!(tip, format!("{RULE_SK} {}", off.guard.text_sk().unwrap()));
+    // The old process still drawing (its end failed): the end, not "OK".
+    let still_drawing = WallStatus {
+        guard: ended(
+            GuardWhy::Hung,
+            GuardPhase::Relaunching,
+            Some("access denied"),
+        ),
+        ..checked(WallState::Ok, &[], Some(snv_output()))
+    };
+    let (tone, text, tip) = label(&still_drawing).unwrap();
+    assert_eq!(
+        (tone, text.as_str()),
+        (
+            HealthTone::Error,
+            "Stena: Resolume zamrzol — nepodarilo sa ho ukončiť"
+        )
+    );
+    assert!(
+        tip.starts_with(&format!(
+            "{RULE_SK} Resolume (preset „snv surround 7680“) chce: Display 1 7680×1080. \
+             SongPlayer chcel ukončiť"
+        )),
+        "{tip}"
+    );
+    // Arena runs again: the segment is the wall's own again.
+    let back = WallStatus {
+        guard: ended(GuardWhy::CrashReport, GuardPhase::Idle, None),
+        ..checked(WallState::Ok, &[], Some(snv_output()))
+    };
+    assert_eq!(
+        label(&back),
+        label(&checked(WallState::Ok, &[], Some(snv_output())))
+    );
+    // Nothing to show for an Arena that drives no physical display.
+    let simple = WallStatus {
+        guard: ended(GuardWhy::CrashReport, GuardPhase::Relaunching, None),
+        ..checked(WallState::SimpleOutput, &[], None)
+    };
+    assert_eq!(label(&simple), None);
+}
+
+#[test]
+fn the_rule_names_the_guards_one_exception() {
+    assert!(RULE_SK.starts_with(
+        "SongPlayer porovnáva obrazovky Windows s výstupom, ktorý má Resolume Arena uložený, a \
+         len hlási — nič nenastavuje ani nemení."
+    ));
+    assert!(RULE_SK.ends_with(
+        "Jediná výnimka: spadnutý alebo zamrznutý Resolume ukončí, aby sa mohol znova spustiť."
+    ));
+}
+
+#[test]
+fn the_guard_travels_with_every_field_named() {
+    let status = WallStatus {
+        guard: ended(GuardWhy::Hung, GuardPhase::NotBack, Some("why")),
+        ..checked(WallState::ArenaOff, &[], None)
+    };
+    let wire = serde_json::to_value(&status).unwrap();
+    assert_eq!(
+        wire["guard"],
+        json!({
+            "ends": 1,
+            "last": {"at_ms": 1_791_608_681_366_i64, "why": "hung", "pid": 15176,
+                     "monitors": [9188], "error": "why"},
+            "phase": "not_back",
+        })
+    );
+    let back: WallStatus = serde_json::from_value(wire).unwrap();
+    assert_eq!(back, status);
+    // An older server sends no guard: nothing ended.
+    let old: WallStatus = serde_json::from_value(json!({"checked": true, "state": "ok"})).unwrap();
+    assert_eq!(old.guard, WallGuard::default());
+    let bare: GuardEnd = serde_json::from_value(json!({})).unwrap();
+    assert_eq!(bare, GuardEnd::default());
 }
