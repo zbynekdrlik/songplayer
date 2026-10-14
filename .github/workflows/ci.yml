@@ -489,8 +489,6 @@ jobs:
           $profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore)
           $firewall = ($profiles | ForEach-Object { "$($_.Name)=$($_.Enabled)" }) -join ';'
           $build = (Get-CimInstance -ClassName Win32_OperatingSystem).BuildNumber
-          Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_DEFENDER_REALTIME=$($mp.RealTimeProtectionEnabled)"
-          Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_DEFENDER_MODE=$($mp.AMRunningMode)"
           Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_FIREWALL=$firewall"
           Add-Content -Path $env:GITHUB_ENV -Value "SP_ENV_EXPECT_BUILD=$build"
           Write-Host "Defender real-time $($mp.RealTimeProtectionEnabled), mode $($mp.AMRunningMode); firewall $firewall; build $build"
