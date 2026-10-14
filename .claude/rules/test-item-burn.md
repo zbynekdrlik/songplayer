@@ -11,7 +11,8 @@ paths:
   - "scripts/wall_clip.py"
   - "scripts/wall_frames.py"
   - "scripts/tests/test_wall_clip.py"
-  - "scripts/tests/test_wall_frames.py"
+  - "scripts/tests/test_wall_frames*.py"
+  - "scripts/tests/wall_fakes.py"
 ---
 
 # The SP-program burn 911014, the on-air item, the local test item (#228)
@@ -287,15 +288,17 @@ default / refused / 404, a stop with any clip, the list import (absent,
 post-deploy spec reads the list. The scripts: `scripts/tests/test_wall_clip.py`
 (Gray code, layout, any quarter band, frames, the pinned encode, a failed
 encode leaving no ffmpeg and no partial file) and
-`scripts/tests/test_wall_frames.py` (blends, bands, ×4 + noise, the named
-failures, the pacer's rule and its dead band tied to `pacer_blend.rs`,
-`analyse` with loops / losses / jumps / weights / unverified steps (a
+`scripts/tests/test_wall_frames.py` (reading a picture: blends, bands, ×4 +
+noise, the band median, the named failures, the pacer's rule and its dead
+band tied to `pacer_blend.rs`) and `test_wall_frames_analyse.py`
+(`analyse` with loops / losses / jumps / weights / unverified steps (a
 boundary per refresh a boundary takes, at 60 and 50 Hz) / judder / a
 stall, also at the capture's edges / a frozen wall / coverage and judged
 shares, every grid phase through the program's byte blend at 24 / 25 / 30
 fps, `unseen_refreshes`, `late_polls`, `pts_gaps` (each at its exact
 threshold), end to end, the video read's args, `main`'s exit codes for a
 video and for a simulated dxcam capture (a late poll, a wall that stopped)),
-both numpy-only for CI's Eval Checks job, whose ruff lists name both
-scripts. Review round 3's hand mutants of `wall_frames.py` (~85, every
+their shared fakes in `scripts/tests/wall_fakes.py` (the clip's frames, the
+program's byte blend, the pacer's readings, a simulated dxcam capture), all
+numpy-only for CI's Eval Checks job, whose ruff lists name both scripts. Review round 3's hand mutants of `wall_frames.py` (~85, every
 threshold, guard and count) are all killed by these tests.
